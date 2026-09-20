@@ -198,11 +198,13 @@ export type ChatSkillItem = {
   defaultConfig?: Record<string, unknown>;
   defaultEnabled?: boolean;
   /**
-   * Registry skills only: `executable` means the bundle ships runnable scripts,
-   * which is why such a skill is installed switched OFF. The row shows it so an
-   * intentionally-held-back skill does not read as a broken install.
+   * Registry skills only: `executable` means the bundle ships runnable scripts.
+   * The row shows it so a person can tell which installed skills bring code
+   * that runs in the sandbox, not just instructions.
    */
   registryCapability?: "prompt-only" | "executable";
+  /** Set when the chat agent installed this skill on its own initiative. */
+  installedVia?: "agent";
 };
 
 export type CitationRecord = {

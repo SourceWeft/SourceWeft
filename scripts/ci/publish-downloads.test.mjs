@@ -76,6 +76,55 @@ test("configuration requires explicit credentials and validates S3/public URLs",
   );
 });
 
+test("signed publication includes Linux AppImage and both Mac architectures", async (t) => {
+  const { root } = await fixture(t);
+  for (const [platform, arch, filename] of [
+    ["linux", "x64", "SourceWeft_linux-x64.AppImage"],
+    ["darwin", "x64", "SourceWeft_macos-x64.dmg"],
+  ]) {
+    const dir = join(root, `${platform}-${arch}`);
+    await mkdir(dir);
+    await writeFile(join(dir, filename), `fixture-${platform}-${arch}`);
+    const entry = await describeInstaller(dir, platform, arch, "1.2.3-rc.1");
+    await writeFile(
+      join(dir, `desktop-manifest-${platform}-${arch}.json`),
+      JSON.stringify(entry),
+    );
+  }
+  const { filesUnder } = await import("./desktop-release-artifacts.mjs");
+  const descriptions = (await filesUnder(root)).filter((p) =>
+    /desktop-manifest-.*\.json$/.test(p),
+  );
+  for (const path of descriptions) {
+    const entry = JSON.parse(await readFile(path, "utf8"));
+    entry.distributionSigned = entry.platform !== "linux";
+    entry.notarized = entry.platform === "macos";
+    await writeFile(path, JSON.stringify(entry));
+  }
+  const { manifest } = await prepareManifest(
+    config,
+    root,
+    "v1.2.3-rc.1",
+    "SourceWeft/SourceWeft",
+    "signed",
+  );
+  const linux = manifest.artifacts.find((a) => a.platform === "linux");
+  assert(linux.url.endsWith(".AppImage"));
+  assert.equal(linux.distributionSigned, false);
+  assert.equal(linux.localExecutionSupported, false);
+  await rm(join(root, "linux-x64"), { recursive: true });
+  await assert.rejects(
+    prepareManifest(
+      config,
+      root,
+      "v1.2.3-rc.1",
+      "SourceWeft/SourceWeft",
+      "signed",
+    ),
+    /every configured/,
+  );
+});
+
 test("manifest preserves actual architectures and separates preview/stable", async (t) => {
   const { root, prepared } = await fixture(t);
   assert.equal(prepared.manifest.channel, "preview");

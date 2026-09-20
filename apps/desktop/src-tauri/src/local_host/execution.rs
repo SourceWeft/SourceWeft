@@ -69,6 +69,15 @@ impl LocalHost {
         action: &str,
         payload: Value,
     ) -> Result<Value> {
+        let lease = self.admission.enter().map_err(|code| HostError::new(code, "Local host is preparing an update"))?;
+        self.dispatch_admitted(&lease, calls, id, owner, thread, action, payload)
+    }
+
+    /// The transport holds the admission lease until the result has been sent.
+    pub fn dispatch_admitted(
+        &self, _lease: &super::maintenance::Lease, calls: &Executions, id: &str,
+        owner: &str, thread: &str, action: &str, payload: Value,
+    ) -> Result<Value> {
         if calls.is_cancelled(id) {
             return Err(HostError::new(
                 "CALL_CANCELLED",
@@ -112,7 +121,12 @@ impl LocalHost {
         }
         let outcome = self.perform(calls, id, owner, thread, action, &payload);
         if let Ok(value) = &outcome {
-            let serialized = serde_json::to_string(value)
+            let journal_value = if action == "folder.read" {
+                serde_json::json!({"expired":true})
+            } else {
+                value.clone()
+            };
+            let serialized = serde_json::to_string(&journal_value)
                 .map_err(|e| HostError::new("INVALID_RESULT", e.to_string()))?;
             self.db
                 .lock()
@@ -151,6 +165,61 @@ impl LocalHost {
         action: &str,
         payload: &Value,
     ) -> Result<Value> {
+        if action == "folder.list" || action == "folder.read" {
+            if !thread.is_empty() {
+                return Err(HostError::new(
+                    "INVALID_CALL",
+                    "Draft folder reads cannot use a conversation.",
+                ));
+            }
+            let grant = text(payload, "folderId")?;
+            let root = self.granted_directory(owner, grant)?;
+            let requested = text(payload, "path")?;
+            let relative = if requested.starts_with('/') {
+                Path::new(requested)
+                    .strip_prefix(&root)
+                    .map_err(|_| HostError::new("PATH_DENIED", "Outside the selected folder"))?
+                    .to_str()
+                    .ok_or_else(|| HostError::new("INVALID_PATH", "Invalid path"))?
+            } else {
+                requested
+            };
+            let path = checked_path(&root, relative, true)?;
+            use std::os::unix::fs::MetadataExt;
+            if action == "folder.read" {
+                use base64::Engine;
+                let parts = Path::new(relative)
+                    .components()
+                    .filter_map(|p| match p {
+                        std::path::Component::Normal(v) => Some(v),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                let mut file = super::files::open_file_beneath(&root, &parts, libc::O_RDONLY)?;
+                let meta = file.metadata()?;
+                if !meta.is_file() || meta.nlink() != 1 {
+                    return Err(HostError::new(
+                        "FILE_ACCESS_DENIED",
+                        "Only regular, non-hardlinked files can be previewed.",
+                    ));
+                }
+                let mut bytes = Vec::new();
+                (&mut file).take(1024 * 1024 + 1).read_to_end(&mut bytes)?;
+                if bytes.len() > 1024 * 1024 {
+                    return Err(HostError::new(
+                        "FILE_TOO_LARGE",
+                        "Draft previews are limited to 1 MiB.",
+                    ));
+                }
+                self.granted_directory(owner, grant)?;
+                return Ok(
+                    json!({"content":base64::engine::general_purpose::STANDARD.encode(bytes)}),
+                );
+            }
+            let files = super::files::list_granted_directory(&root, Path::new(relative))?;
+            self.granted_directory(owner, grant)?;
+            return Ok(json!({"root":root,"path":path,"files":files}));
+        }
         if action == "workspace.check" {
             self.check_workspace(
                 owner,
@@ -232,29 +301,69 @@ impl LocalHost {
         match action {
             "file.grep" => {
                 let pattern = text(payload, "pattern")?;
-                let paths: Vec<String> = serde_json::from_value(payload.get("paths").cloned().unwrap_or_default())
-                    .map_err(|_| HostError::new("INVALID_PATHS", "An explicit file list is required"))?;
+                let paths: Vec<String> =
+                    serde_json::from_value(payload.get("paths").cloned().unwrap_or_default())
+                        .map_err(|_| {
+                            HostError::new("INVALID_PATHS", "An explicit file list is required")
+                        })?;
                 let cancel = Arc::new(AtomicBool::new(false));
                 {
-                    let mut active = calls.active.lock().map_err(|_| HostError::new("HOST_UNAVAILABLE", "Execution lock failed"))?;
-                    if active.len() >= 4 { return Err(HostError::new("HOST_BUSY", "Too many active file operations")); }
+                    let mut active = calls
+                        .active
+                        .lock()
+                        .map_err(|_| HostError::new("HOST_UNAVAILABLE", "Execution lock failed"))?;
+                    if active.len() >= 4 {
+                        return Err(HostError::new(
+                            "HOST_BUSY",
+                            "Too many active file operations",
+                        ));
+                    }
                     active.insert(id.into(), cancel.clone());
                 }
-                let result = self.grep_files(owner, thread, &workspace.id, &paths, pattern,
-                    payload.get("ignoreCase").and_then(Value::as_bool).unwrap_or(false),
-                    payload.get("firstPerFile").and_then(Value::as_bool).unwrap_or(false),
-                    payload.get("literal").and_then(Value::as_bool).unwrap_or(false), Some(&cancel));
-                if let Ok(mut active) = calls.active.lock() { active.remove(id); }
+                let result = self.grep_files(
+                    owner,
+                    thread,
+                    &workspace.id,
+                    &paths,
+                    pattern,
+                    payload
+                        .get("ignoreCase")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
+                    payload
+                        .get("firstPerFile")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
+                    payload
+                        .get("literal")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
+                    Some(&cancel),
+                );
+                if let Ok(mut active) = calls.active.lock() {
+                    active.remove(id);
+                }
                 result
             }
             "file.binary.begin" => self.begin_binary_read(owner, thread, &workspace.id, relative),
             "file.binary.chunk" => {
-                let offset = payload.get("offset").and_then(Value::as_u64)
+                let offset = payload
+                    .get("offset")
+                    .and_then(Value::as_u64)
                     .and_then(|value| usize::try_from(value).ok())
                     .ok_or_else(|| HostError::new("INVALID_RANGE", "A valid offset is required"))?;
-                self.read_binary_chunk(owner, thread, &workspace.id, relative, text(payload, "transferId")?, offset)
+                self.read_binary_chunk(
+                    owner,
+                    thread,
+                    &workspace.id,
+                    relative,
+                    text(payload, "transferId")?,
+                    offset,
+                )
             }
-            "file.binary.close" => self.close_binary_read(owner, thread, &workspace.id, text(payload, "transferId")?),
+            "file.binary.close" => {
+                self.close_binary_read(owner, thread, &workspace.id, text(payload, "transferId")?)
+            }
             "file.read" => {
                 // Text reads retain the smaller bound; binary reads use explicit sessions.
                 let content =

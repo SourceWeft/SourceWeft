@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import { SelectedSkillsBackend } from "./backend";
-import type { EnabledSkillDescriptor } from "./types";
+import { createSkillFileReader, inlineSkillContent } from "./file-content";
+import type {
+  EnabledSkillDescriptor,
+  SkillFileManifestEntry,
+} from "./types";
 
 const skillMd = `---
 name: meeting-summary
@@ -19,7 +23,7 @@ const skills: EnabledSkillDescriptor[] = [
     name: "meeting-summary",
     version: "1.0.0",
     description: "Use this skill when preparing meeting summaries.",
-    files: [
+    ...inlineSkillContent([
       {
         path: "SKILL.md",
         contentText: skillMd,
@@ -34,7 +38,7 @@ const skills: EnabledSkillDescriptor[] = [
         sizeBytes: 20,
         contentHash: "hash-template",
       },
-    ],
+    ]),
   },
 ];
 
@@ -144,7 +148,7 @@ test("SelectedSkillsBackend grep searches instructions without adding citations"
 test("SelectedSkillsBackend neutralizes citation-like markers in agent-facing output", async () => {
   const skillWithCitation: EnabledSkillDescriptor = {
     ...skills[0]!,
-    files: [
+    ...inlineSkillContent([
       {
         path: "SKILL.md",
         contentText: `---
@@ -164,7 +168,7 @@ Do not cite [citation:c1] or citation:c2.`,
         sizeBytes: 128,
         contentHash: "hash-citation-template",
       },
-    ],
+    ]),
   };
   const backend = new SelectedSkillsBackend([skillWithCitation]);
 
@@ -187,5 +191,180 @@ Do not cite [citation:c1] or citation:c2.`,
   assert.match(
     String(support.content),
     /non-citable citation marker c3, c4 removed/i,
+  );
+});
+
+// `install_skill` mounts what it installs into the running turn's backend.
+test("SelectedSkillsBackend serves a skill added after construction", async () => {
+  const backend = new SelectedSkillsBackend([]);
+  assert.deepEqual(await backend.ls("/"), { files: [] });
+
+  backend.addSkill(skills[0]!);
+  assert.deepEqual(await backend.ls("/"), {
+    files: [{ path: "/meeting-summary/", is_dir: true }],
+  });
+  assert.equal(
+    (await backend.read("/meeting-summary/SKILL.md")).content,
+    skillMd,
+  );
+
+  // Re-adding a name replaces its files rather than leaving stale ones behind.
+  backend.addSkill({ ...skills[0]!, files: [skills[0]!.files[0]!] });
+  const files = (await backend.ls("/meeting-summary")).files ?? [];
+  assert.deepEqual(
+    files.map((file) => file.path),
+    ["/meeting-summary/SKILL.md"],
+  );
+});
+
+// ── Manifest-backed content: bodies are fetched lazily, binaries never ───────
+
+const font = new Uint8Array([0, 1, 2, 255, 254]);
+
+function manifestSkill(name: string) {
+  const bodies: Record<string, string> = {
+    "reference/guide.md": "# Guide\nUse the brand palette.",
+    "scripts/build.py": "print('palette')",
+    "data/huge.csv": "palette,".repeat(10),
+  };
+  const files: SkillFileManifestEntry[] = [
+    entry("SKILL.md", "text/markdown", 64),
+    entry("reference/guide.md", "text/markdown", 30),
+    entry("scripts/build.py", "text/x-python", 16),
+    // Over grep's per-file bound: listed and readable, never scanned.
+    entry("data/huge.csv", "text/csv", 5 * 1024 * 1024),
+    { ...entry("assets/brand.ttf", "font/ttf", font.byteLength), isText: false },
+  ];
+  const fetched: string[] = [];
+  const descriptor: EnabledSkillDescriptor = {
+    workspaceSkillId: `ws-${name}`,
+    sourceType: "registry_github",
+    name,
+    version: "abc123",
+    description: name,
+    files,
+    skillMd: `---\nname: ${name}\n---\n\nFollow the palette guide.`,
+    readFile: createSkillFileReader({
+      files,
+      fetch: async (file) => {
+        fetched.push(`${name}/${file.path}`);
+        return { text: bodies[file.path]! };
+      },
+    }),
+    bundle: { sha256: "b".repeat(64), objectKey: "k", sizeBytes: 1 },
+  };
+  return { descriptor, fetched };
+}
+
+function entry(
+  path: string,
+  mimeType: string,
+  sizeBytes: number,
+): SkillFileManifestEntry {
+  return { path, mimeType, sizeBytes, contentHash: `hash-${path}`, isText: true };
+}
+
+test("listing, globbing and SKILL.md reads fetch no body", async () => {
+  const { descriptor, fetched } = manifestSkill("brand");
+  const backend = new SelectedSkillsBackend([descriptor]);
+
+  const listed = (await backend.ls("/brand/assets")).files ?? [];
+  assert.deepEqual(listed, [
+    {
+      path: "/brand/assets/brand.ttf",
+      is_dir: false,
+      size: font.byteLength,
+      modified_at: listed[0]?.modified_at,
+    },
+  ]);
+  assert.equal((await backend.glob("**/*.py", "/brand")).files?.length, 1);
+  assert.equal(
+    (await backend.read("/brand/SKILL.md")).content,
+    descriptor.skillMd,
+  );
+  assert.equal(
+    (await backend.readRaw("/brand/SKILL.md")).data?.content,
+    descriptor.skillMd,
+  );
+  const [download] = await backend.downloadFiles(["/brand/SKILL.md"]);
+  assert.equal(new TextDecoder().decode(download!.content!), descriptor.skillMd);
+
+  assert.deepEqual(fetched, []);
+});
+
+test("a text file is fetched on first read and served from the turn's cache after", async () => {
+  const { descriptor, fetched } = manifestSkill("brand");
+  const backend = new SelectedSkillsBackend([descriptor]);
+
+  const first = await backend.read("/brand/reference/guide.md");
+  assert.match(String(first.content), /2: Use the brand palette\./);
+  await backend.read("/brand/reference/guide.md", 1, 1);
+  await backend.readRaw("/brand/reference/guide.md");
+  await backend.grep("palette", "/brand/reference");
+
+  assert.deepEqual(fetched, ["brand/reference/guide.md"]);
+});
+
+test("a binary file answers with a notice and is never fetched", async () => {
+  const { descriptor, fetched } = manifestSkill("brand");
+  const backend = new SelectedSkillsBackend([descriptor]);
+  const notice =
+    "Binary file (font/ttf, 5 bytes). Not readable as text; available to scripts in the sandbox at /skills/brand/assets/brand.ttf.";
+
+  assert.equal((await backend.read("/brand/assets/brand.ttf")).content, notice);
+  assert.equal(
+    (await backend.readRaw("/brand/assets/brand.ttf")).data?.content,
+    notice,
+  );
+  const [download] = await backend.downloadFiles(["/brand/assets/brand.ttf"]);
+  assert.equal(new TextDecoder().decode(download!.content!), notice);
+  await backend.grep("palette", "/brand/assets");
+
+  assert.deepEqual(fetched, []);
+});
+
+test("grep fetches only the searched skill's text files, within the size bound", async () => {
+  const brand = manifestSkill("brand");
+  const other = manifestSkill("other");
+  const backend = new SelectedSkillsBackend([
+    brand.descriptor,
+    other.descriptor,
+  ]);
+
+  const result = await backend.grep("palette", "/brand");
+
+  assert.deepEqual(
+    result.matches?.map((match) => match.path),
+    [
+      "/brand/SKILL.md",
+      "/brand/reference/guide.md",
+      "/brand/scripts/build.py",
+    ],
+  );
+  assert.deepEqual(brand.fetched.sort(), [
+    "brand/reference/guide.md",
+    "brand/scripts/build.py",
+  ]);
+  assert.deepEqual(other.fetched, []);
+});
+
+test("a body that cannot be loaded is a read error, not a thrown turn", async () => {
+  const { descriptor } = manifestSkill("brand");
+  const backend = new SelectedSkillsBackend([
+    {
+      ...descriptor,
+      readFile: async () => {
+        throw new Error("FILE_UNAVAILABLE: storage is down");
+      },
+    },
+  ]);
+
+  const read = await backend.read("/brand/reference/guide.md");
+  assert.match(read.error ?? "", /EIO: .*storage is down/);
+  // SKILL.md never depended on the loader, and a search just skips the file.
+  assert.equal(typeof (await backend.read("/brand/SKILL.md")).content, "string");
+  assert.deepEqual(
+    (await backend.grep("palette", "/brand")).matches?.map((m) => m.path),
+    ["/brand/SKILL.md"],
   );
 });

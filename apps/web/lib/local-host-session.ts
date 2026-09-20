@@ -85,6 +85,9 @@ export async function cachedLocalHostHeaders(
 ): Promise<Record<string, string>> {
   if (
     path &&
+    !/^\/v1\/local-devices\/[^/]+\/folders(?:\/[^/]+\/files)?(?:\?.*)?$/.test(
+      path,
+    ) &&
     !/^\/v1\/workspaces\/[^/]+\/(?:threads(?:\/start-turn|\/[^/]+\/(?:local-files|local-execution))?|agent-confirmations\/[^/]+\/respond)(?:\?.*)?$/.test(
       path,
     )

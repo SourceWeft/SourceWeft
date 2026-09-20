@@ -65,6 +65,17 @@ const nextConfig: NextConfig = {
       // (opaque id, no slug). A routing-layer 308 keeps old links and any
       // already-indexed pages working without a client-side meta refresh.
       { source: "/s/:token", destination: "/artifact/:token", permanent: true },
+      // The auth UI moved from `/account/*` to `/settings/*`, and renamed two
+      // organization segments. Keep bookmarks and emailed links working.
+      { source: "/account", destination: "/settings/account", permanent: true },
+      { source: "/account/profile", destination: "/settings/account", permanent: true },
+      { source: "/account/security", destination: "/settings/security", permanent: true },
+      // API keys are a card inside the security view now, not a view of their own.
+      { source: "/account/keys", destination: "/settings/security", permanent: true },
+      { source: "/account/organizations", destination: "/settings/organizations", permanent: true },
+      { source: "/account/teams", destination: "/settings/organizations", permanent: true },
+      { source: "/organization/members", destination: "/organization/people", permanent: true },
+      { source: "/organization/keys", destination: "/organization/settings", permanent: true },
     ];
   },
   turbopack: {

@@ -1,3 +1,4 @@
+import { McpIcon as McpBrandIcon } from "../../../_components/site-icons";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -11,7 +12,6 @@ import {
   History,
   KeyRound,
   LockKeyhole,
-  Server,
 } from "lucide-react";
 import type { MarketItemSummary } from "@sourceweft/market-sdk";
 
@@ -99,7 +99,7 @@ function SectionHeading({
 }: {
   children: React.ReactNode;
   count?: number;
-  icon: typeof Code2;
+  icon: React.ComponentType<{ className?: string }>;
 }) {
   return (
     <div className="mb-4 flex items-center gap-2">
@@ -394,7 +394,7 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
         <div className="min-w-0 space-y-12">
           {hasOverview ? (
             <section className="scroll-mt-32" id="overview">
-              <SectionHeading icon={Server}>{t("overviewHeading")}</SectionHeading>
+              <SectionHeading icon={McpBrandIcon}>{t("overviewHeading")}</SectionHeading>
               <div className={`${panelClassName} space-y-4 divide-y divide-zinc-200 dark:divide-white/10 [&>*:not(:first-child)]:pt-4`}>
                 {overviewText ? (
                   <p className="whitespace-pre-line text-sm leading-7 text-zinc-600 dark:text-zinc-300">

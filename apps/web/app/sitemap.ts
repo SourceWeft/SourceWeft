@@ -98,6 +98,11 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     {
       alternates: sitemapLocaleAlternates("/changelog"),
       changeFrequency: "weekly",
+      priority: 0.7,
+      url: `${SITE_URL}/download`,
+    },
+    {
+      changeFrequency: "weekly",
       priority: 0.4,
       url: `${SITE_URL}/changelog`,
     },

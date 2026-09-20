@@ -217,3 +217,50 @@ it("cleans up interrupted requests without silently retrying against another sou
   await vi.runAllTimersAsync();
   expect(send).toHaveBeenCalledTimes(1);
 });
+
+it("draft file relay is scoped to the selected computer and authorized folder", () => {
+  const draft = {
+    ...snapshot,
+    data: {
+      workspaceId: "workspace",
+      threadId: null,
+      mode: "new",
+      draftWorkContext: {
+        target: { kind: "local", deviceId: "pc", folderId: "grant" },
+      },
+    },
+  } as HubSnapshot;
+  const catalog = "/v1/local-devices/pc/folders";
+  const files = catalog + "/grant/files";
+  for (const path of [catalog, files, files + "?path=%2Fproject%2Fsub"])
+    expect(validateHubFileRequest({ ...request, path }, draft)).toBe(draft);
+  for (const path of [
+    "/v1/local-devices/other/folders",
+    catalog + "/other/files",
+    catalog + "?download=true",
+    files + "/../revoke",
+    "/v1/workspaces/workspace/threads/thread/local-files",
+  ])
+    expect(() => validateHubFileRequest({ ...request, path }, draft)).toThrow();
+  expect(
+    validateHubFileRequest(
+      { ...request, path: files + "?download=true&path=file", preview: true },
+      draft,
+    ),
+  ).toBe(draft);
+  expect(() =>
+    validateHubFileRequest(
+      { ...request, path: files },
+      {
+        ...draft,
+        data: {
+          ...draft.data,
+          draftWorkContext: {
+            ...draft.data.draftWorkContext!,
+            target: { kind: "cloud" },
+          },
+        },
+      },
+    ),
+  ).toThrow();
+});

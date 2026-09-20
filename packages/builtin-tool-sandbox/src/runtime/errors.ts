@@ -34,6 +34,21 @@ export function isSandboxInstanceMissingError(error: unknown): boolean {
   );
 }
 
+/**
+ * The provider could not be reached or is momentarily overloaded — adapters
+ * map connection resets, `fetch failed`, 429 and 5xx to this code. It says
+ * nothing about the request itself, which is what makes it safe to retry an
+ * operation that has no side effect yet (creating a sandbox).
+ */
+export function isSandboxProviderUnavailableError(error: unknown): boolean {
+  return Boolean(
+    error &&
+    typeof error === "object" &&
+    "code" in error &&
+    error.code === SANDBOX_PROVIDER_ERROR_CODES.unavailable,
+  );
+}
+
 export class SandboxInstanceChangedError extends Error {
   readonly code = "SANDBOX_INSTANCE_CHANGED";
   constructor() {

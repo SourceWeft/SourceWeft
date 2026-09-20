@@ -25,7 +25,7 @@ type SkillDefinitionSourceType =
   | "registry_github";
 type SkillDefinitionStatus = "active" | "archived";
 type SkillVersionStatus = "draft" | "published" | "deprecated" | "disabled";
-type SkillVersionStorageType = "repo_builtin" | "db_text";
+type SkillVersionStorageType = "repo_builtin" | "db_text" | "object";
 export type SkillManifestVisibility =
   "public" | "restricted" | "workspace" | "team";
 export type SkillManifestJson = {
@@ -98,6 +98,19 @@ export type SkillManifestJson = {
   };
   defaultConfig?: Record<string, unknown>;
   /**
+   * Safety scan of a workspace-authored (custom) skill, taken at publish with
+   * the same rules community skills are scanned with. Recorded, never a gate:
+   * the author is a member, so flags do not block or queue their own skill.
+   * Absent on versions published before the scan existed.
+   */
+  customScan?: {
+    capability: "prompt-only" | "executable";
+    flags: string[];
+    findings: Array<{ ruleId: string; file?: string; line?: number }>;
+    scanRuleVersion: string;
+    scannedAt: string;
+  };
+  /**
    * Registry-sourced skill fields (sourceType='registry_github' only;
    * docs/architecture/skill-registry-index.md §2). All metadata — never
    * content bodies. `fileManifest` is what lets the runtime fetch individual
@@ -109,6 +122,13 @@ export type SkillManifestJson = {
     sourceUrl: string;
     repoUrl: string;
     submittedBy: string;
+    /**
+     * Committer date (ISO 8601) of the pinned commit. Decides which published
+     * version is current — by commit age, not by which write landed last.
+     * Absent on versions indexed before this was captured, and when GitHub's
+     * commit metadata could not be read; such a version ranks as oldest.
+     */
+    committedAt?: string;
     /** Decides sandbox material sync, not permission (§6b). */
     capability: "prompt-only" | "executable";
     scan: { reviewRequired: boolean; flags: string[] };
@@ -117,7 +137,14 @@ export type SkillManifestJson = {
       diagnostics: Array<{ code: string; severity: "error" | "warning"; message: string; file?: string; field?: string; line?: number; column?: number }>;
       findings: Array<{ ruleId: string; file?: string; line?: number }>;
     };
-    moderation?: { action: "publish" | "reject" | "revoke"; actorUserId: string; at: string; reason?: string };
+    moderation?: {
+      action: "publish" | "reject" | "revoke";
+      actorUserId: string;
+      at: string;
+      reason?: string;
+      /** Revoking the current version: the published version that took over. */
+      promotedSkillVersionId?: string;
+    };
     visibilityChange?: { actorUserId: string; at: string; visibility: "public" | "restricted" };
     /** Declared license name (e.g. "MIT") — display-only. */
     license?: string;
@@ -125,7 +152,9 @@ export type SkillManifestJson = {
       path: string;
       sha256: string;
       sizeBytes: number;
-      role: "model-readable" | "script";
+      // `asset`: a non-text resource (font, image, template) — carried for
+      // scripts to use in the sandbox, never read by the model as text.
+      role: "model-readable" | "script" | "asset";
     }[];
   };
 };
@@ -207,6 +236,14 @@ export const skillVersions = pgTable(
     isCurrent: boolean("is_current").notNull().default(false),
     contentHash: text("content_hash").notNull(),
     manifestJson: jsonb("manifest_json").$type<SkillManifestJson>().notNull(),
+    // `object` versions keep only SKILL.md in the database — it is what the
+    // catalog shows and what a turn loads up front. Every file, SKILL.md
+    // included, lives in object storage as a content-addressed blob, and the
+    // whole skill as one deterministic zip the sandbox downloads.
+    skillMd: text("skill_md"),
+    bundleSha256: text("bundle_sha256"),
+    bundleObjectKey: text("bundle_object_key"),
+    bundleSizeBytes: integer("bundle_size_bytes"),
     createdBy: text("created_by"),
     publishedAt: timestamp("published_at", {
       withTimezone: true,
@@ -226,7 +263,11 @@ export const skillVersions = pgTable(
     ),
     check(
       "skill_versions_storage_type_check",
-      sql`${table.storageType} in ('repo_builtin', 'db_text')`,
+      sql`${table.storageType} in ('repo_builtin', 'db_text', 'object')`,
+    ),
+    check(
+      "skill_versions_object_bundle_check",
+      sql`${table.storageType} <> 'object' or (${table.skillMd} is not null and ${table.bundleSha256} is not null and ${table.bundleObjectKey} is not null and ${table.bundleSizeBytes} is not null)`,
     ),
     uniqueIndex("skill_versions_skill_version_uq").on(
       table.skillId,
@@ -248,7 +289,12 @@ export const skillVersionFiles = pgTable(
       .notNull()
       .references(() => skillVersions.id, { onDelete: "cascade" }),
     path: text("path").notNull(),
-    contentText: text("content_text").notNull(),
+    // Inline text (`db_text` versions: workspace-authored skills) OR a blob in
+    // object storage (`object` versions) — never neither. A row is the file's
+    // manifest entry either way: path, type, size and sha256 stay queryable
+    // without touching the bytes.
+    contentText: text("content_text"),
+    objectKey: text("object_key"),
     mimeType: text("mime_type").notNull(),
     sizeBytes: integer("size_bytes").notNull(),
     contentHash: text("content_hash").notNull(),
@@ -262,6 +308,10 @@ export const skillVersionFiles = pgTable(
       table.path,
     ),
     check("skill_version_files_size_check", sql`${table.sizeBytes} >= 0`),
+    check(
+      "skill_version_files_content_location_check",
+      sql`(${table.contentText} is not null) <> (${table.objectKey} is not null)`,
+    ),
     check(
       "skill_version_files_relative_path_check",
       sql`${table.path} <> '' and ${table.path} not like '/%' and ${table.path} not like '../%' and ${table.path} not like '%/../%'`,
@@ -290,6 +340,14 @@ export const workspaceSkills = pgTable(
       .default(emptyJsonObject),
     enabledBy: text("enabled_by"),
     enabledAt: timestamp("enabled_at", { withTimezone: true, mode: "date" }),
+    // Who performed the install: a person in the catalog UI, or the chat agent
+    // on its own initiative (`install_skill`). The agent acts AS the user, so
+    // `enabledBy` cannot tell them apart — and "what did the agent add here?"
+    // is the question someone reviewing a workspace's skills needs answered.
+    installedVia: text("installed_via")
+      .$type<"user" | "agent">()
+      .notNull()
+      .default("user"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .defaultNow(),
@@ -298,6 +356,10 @@ export const workspaceSkills = pgTable(
       .defaultNow(),
   },
   (table) => [
+    check(
+      "workspace_skills_installed_via_check",
+      sql`${table.installedVia} in ('user', 'agent')`,
+    ),
     foreignKey({
       name: "workspace_skills_workspace_team_fk",
       columns: [table.workspaceId, table.teamId],
@@ -352,6 +414,139 @@ export const skillEntitlements = pgTable(
       table.teamId,
       table.workspaceId,
     ),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// Skill registry submissions — one row per asynchronous ingest of a community
+// skill source. The catalog rows themselves (`skill_definitions` /
+// `skill_versions`) are only written by the pipeline's last stage; this row is
+// the progress + outcome record a client polls while the worker runs.
+// ---------------------------------------------------------------------------
+
+export type SkillSubmissionSourceKind = "github" | "upload";
+export type SkillSubmissionTarget = "workspace" | "team";
+export type SkillSubmissionStatus =
+  "queued" | "running" | "succeeded" | "failed";
+export type SkillSubmissionStageState = {
+  status: "running" | "succeeded" | "failed";
+  startedAt: string;
+  finishedAt?: string;
+  error?: { code: string; message: string };
+};
+/**
+ * Keyed by stage name. jsonb does not keep key order, so execution order is
+ * read from `startedAt` (the API returns the stages sorted that way).
+ */
+export type SkillSubmissionStages = Record<string, SkillSubmissionStageState>;
+export type SkillSubmissionSkillResult = {
+  sourcePath: string;
+  name?: string;
+  slug?: string;
+  skillVersionId?: string;
+  version?: string;
+  status: "indexed" | "queued" | "failed";
+  flags: string[];
+  diagnostics: Array<{
+    code: string;
+    severity: "error" | "warning";
+    message: string;
+    file?: string;
+    field?: string;
+    line?: number;
+    column?: number;
+  }>;
+  /** Outcome of the `on_complete.install` action for this skill, if any. */
+  install?: {
+    // `skipped`: held for review, so there is no published version to install.
+    status: "installed" | "already_installed" | "skipped" | "failed";
+    error?: { code: string; message: string };
+  };
+};
+export type SkillSubmissionOnComplete = {
+  install?: { skill?: string; installedVia?: "user" | "agent" };
+};
+
+export const skillRegistrySubmissions = pgTable(
+  "skill_registry_submissions",
+  {
+    id: text("id").primaryKey(),
+    teamId: text("team_id").notNull(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    submittedBy: text("submitted_by").notNull(),
+    sourceKind: text("source_kind")
+      .$type<SkillSubmissionSourceKind>()
+      .notNull(),
+    // What the submitter typed, trimmed. The parsed parts below are what the
+    // pipeline reads; this is what dedupe and the UI key off.
+    sourceInput: text("source_input").notNull(),
+    repoOwner: text("repo_owner"),
+    repoName: text("repo_name"),
+    ref: text("ref"),
+    subpath: text("subpath"),
+    // Filled by the `resolve` stage: the immutable commit everything is pinned to.
+    commitSha: text("commit_sha"),
+    commitCommittedAt: timestamp("commit_committed_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    target: text("target")
+      .$type<SkillSubmissionTarget>()
+      .notNull()
+      .default("workspace"),
+    status: text("status")
+      .$type<SkillSubmissionStatus>()
+      .notNull()
+      .default("queued"),
+    stage: text("stage"),
+    stages: jsonb("stages")
+      .$type<SkillSubmissionStages>()
+      .notNull()
+      .default(emptyJsonObject),
+    results: jsonb("results")
+      .$type<SkillSubmissionSkillResult[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    onComplete: jsonb("on_complete").$type<SkillSubmissionOnComplete>(),
+    error: jsonb("error").$type<{ code: string; message: string }>(),
+    attempts: integer("attempts").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    startedAt: timestamp("started_at", { withTimezone: true, mode: "date" }),
+    finishedAt: timestamp("finished_at", { withTimezone: true, mode: "date" }),
+  },
+  (table) => [
+    check(
+      "skill_registry_submissions_source_kind_check",
+      sql`${table.sourceKind} in ('github', 'upload')`,
+    ),
+    check(
+      "skill_registry_submissions_target_check",
+      sql`${table.target} in ('workspace', 'team')`,
+    ),
+    check(
+      "skill_registry_submissions_status_check",
+      sql`${table.status} in ('queued', 'running', 'succeeded', 'failed')`,
+    ),
+    index("skill_registry_submissions_workspace_created_idx").on(
+      table.workspaceId,
+      desc(table.createdAt),
+    ),
+    // Dedupe: one in-flight ingest per person per source. Re-submitting while
+    // it runs returns that record; once it finishes the slot is free again.
+    uniqueIndex("skill_registry_submissions_inflight_uq")
+      .on(
+        table.submittedBy,
+        table.sourceKind,
+        sql`lower(${table.sourceInput})`,
+      )
+      .where(sql`${table.status} in ('queued', 'running')`),
   ],
 );
 

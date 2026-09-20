@@ -27,7 +27,10 @@ export async function localRequest<T>(
 ): Promise<T> {
   if (
     isHubFileWindow() &&
-    /\/(?:local-files|local-execution)(?:\?|$)/.test(path)
+    (/\/(?:local-files|local-execution)(?:\?|$)/.test(path) ||
+      /^\/v1\/local-devices\/[^/]+\/folders(?:\/[^/]+\/files)?(?:\?|$)/.test(
+        path,
+      ))
   ) {
     if (body !== undefined)
       throw new Error("Hub file relay supports reads and downloads only.");

@@ -64,9 +64,8 @@ function registrySkill(
   };
 }
 
-// A skill that ships scripts is installed switched OFF on purpose. Without a
-// reason on the row, the user sees a skill they just asked for sitting inert
-// and reads it as a failed install.
+// A switched-off skill that ships scripts says so on its row, so whoever turns
+// it back on knows that doing so makes code runnable, not just instructions.
 test("an off executable registry skill says why it is off", () => {
   const text = render(
     registrySkill({ registryCapability: "executable" }),
@@ -86,4 +85,12 @@ test("a prompt-only skill never shows it, on or off", () => {
   ).not.toContain("Ships scripts");
   // Builtins and custom skills carry no registry capability at all.
   expect(render(registrySkill(), false)).not.toContain("Ships scripts");
+});
+
+// The agent installs as the user, so the row is the only place this shows.
+test("a skill the agent installed says so; one a person installed does not", () => {
+  expect(render(registrySkill({ installedVia: "agent" }), true)).toContain(
+    "Added by agent",
+  );
+  expect(render(registrySkill(), true)).not.toContain("Added by agent");
 });

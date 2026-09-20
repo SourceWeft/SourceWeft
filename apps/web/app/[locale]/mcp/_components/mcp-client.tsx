@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Copy, Server } from "lucide-react";
+import { Check, Copy } from "lucide-react";
 
+import { McpIcon as McpBrandIcon } from "../../../_components/site-icons";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 
 const iconSizeClassName = {
@@ -47,7 +48,7 @@ export function McpIcon({
           src={iconUrl!}
         />
       ) : (
-        <Server className={size === "lg" ? "size-7" : "size-5"} />
+        <McpBrandIcon className={size === "lg" ? "size-7" : "size-5"} />
       )}
     </span>
   );

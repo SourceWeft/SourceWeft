@@ -79,6 +79,19 @@ if [ -f "$BRIDGE_DIR/.dockerignore" ]; then
   printf '\n!html-runtime/\n!html-runtime/**\n' >> "$BRIDGE_DIR/.dockerignore"
 fi
 
+# ── Capacity ────────────────────────────────────────────────────────────────
+# The stock template ships max_instances: 3. Each chat thread that uses the
+# sandbox holds one container for up to an hour, so 3 means the fourth such
+# conversation is told the sandbox is unavailable. The account ceiling is far
+# higher (1,500+ standard-1 instances) and billing is for running time, not for
+# this number. The warm pool is told the same ceiling so it plans against it
+# instead of learning it from capacity errors.
+MAX_INSTANCES=50
+echo "==> Setting container capacity (max_instances=$MAX_INSTANCES)"
+perl -0pi -e 's/("max_instances"\s*:\s*)\d+/${1}'"$MAX_INSTANCES"'/; s/("WARM_POOL_MAX_INSTANCES"\s*:\s*")\d+(")/${1}'"$MAX_INSTANCES"'${2}/' wrangler.jsonc
+grep -q "\"max_instances\"[[:space:]]*:[[:space:]]*$MAX_INSTANCES" wrangler.jsonc \
+  || { echo "ERROR: could not set max_instances in wrangler.jsonc" >&2; exit 1; }
+
 echo "==> Deploying"
 npx wrangler deploy
 

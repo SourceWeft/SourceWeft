@@ -71,10 +71,9 @@ import type {
   ListSourcesRequest,
   ListSourceStatusesRequest,
   ListSourceStatusesResponse,
+  ListSkillsCatalogParams,
   ListSkillsCatalogResponse,
   SearchRegistrySkillsResponse,
-  SubmitRegistrySkillRequest,
-  SubmitRegistrySkillResponse,
   ListThreadsRequest,
   ListSourcesResponse,
   ListWorkspaceSkillsResponse,
@@ -91,6 +90,12 @@ import type {
   RetrySourceResponse,
   SourceStatusResponse,
   ListThreadsResponse,
+  ListPersonasResponse,
+  CreatePersonaRequest,
+  UpdatePersonaRequest,
+  PersonaResponse,
+  DeletePersonaResponse,
+  ListChildThreadsResponse,
   StartThreadTurnRequest,
   StartThreadTurnResponse,
   StreamThreadRequest,
@@ -623,6 +628,42 @@ export class ContentClient {
     );
   }
 
+  listPersonas(workspaceId: string) {
+    return this.http.get<ListPersonasResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/personas`,
+    );
+  }
+
+  createPersona(workspaceId: string, input: CreatePersonaRequest) {
+    return this.http.post<PersonaResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/personas`,
+      input,
+    );
+  }
+
+  updatePersona(
+    workspaceId: string,
+    personaId: string,
+    input: UpdatePersonaRequest,
+  ) {
+    return this.http.patch<PersonaResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/personas/${encode(personaId)}`,
+      input,
+    );
+  }
+
+  deletePersona(workspaceId: string, personaId: string) {
+    return this.http.delete<DeletePersonaResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/personas/${encode(personaId)}`,
+    );
+  }
+
+  listChildThreads(workspaceId: string, threadId: string) {
+    return this.http.get<ListChildThreadsResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/children`,
+    );
+  }
+
   getThread(workspaceId: string, threadId: string) {
     return this.http.get<GetThreadResponse>(
       `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}`,
@@ -698,9 +739,20 @@ export class ContentClient {
     );
   }
 
-  listSkillsCatalog(workspaceId: string) {
+  /**
+   * One page of the skills catalog. The first page (no `cursor`) carries every
+   * builtin and workspace/team skill plus the first `limit` community skills;
+   * pass the returned `nextCursor` back to get the next page of community
+   * skills, until it is null.
+   */
+  listSkillsCatalog(workspaceId: string, params: ListSkillsCatalogParams = {}) {
+    const search = new URLSearchParams();
+    if (params.limit !== undefined) search.set("limit", String(params.limit));
+    if (params.cursor) search.set("cursor", params.cursor);
+    if (params.q) search.set("q", params.q);
+    const suffix = search.size > 0 ? `?${search.toString()}` : "";
     return this.http.get<ListSkillsCatalogResponse>(
-      `/v1/workspaces/${encode(workspaceId)}/skills/catalog`,
+      `/v1/workspaces/${encode(workspaceId)}/skills/catalog${suffix}`,
     );
   }
 
@@ -716,10 +768,51 @@ export class ContentClient {
     );
   }
 
-  submitRegistrySkill(workspaceId: string, input: SubmitRegistrySkillRequest) {
-    return this.http.post<SubmitRegistrySkillResponse>(
-      `/v1/workspaces/${encode(workspaceId)}/skills/registry/submit`,
-      input,
+  /**
+   * Start an asynchronous import of a GitHub skill source. Resolves as soon as
+   * the import is queued — poll `getSkillSubmission` for progress and results.
+   * Re-submitting a source that is still importing returns that same record.
+   */
+  createSkillSubmission(
+    workspaceId: string,
+    input: import("@sourceweft/contracts").CreateSkillSubmissionRequest,
+  ) {
+    return this.http.post<
+      import("@sourceweft/contracts").SkillSubmissionResponse
+    >(`/v1/workspaces/${encode(workspaceId)}/skills/registry/submissions`, input);
+  }
+
+  /** The caller's own imports in this workspace, newest first. */
+  listSkillSubmissions(
+    workspaceId: string,
+    params: { limit?: number; cursor?: string } = {},
+  ) {
+    const search = new URLSearchParams();
+    if (params.limit !== undefined) search.set("limit", String(params.limit));
+    if (params.cursor) search.set("cursor", params.cursor);
+    const suffix = search.size > 0 ? `?${search.toString()}` : "";
+    return this.http.get<
+      import("@sourceweft/contracts").ListSkillSubmissionsResponse
+    >(
+      `/v1/workspaces/${encode(workspaceId)}/skills/registry/submissions${suffix}`,
+    );
+  }
+
+  getSkillSubmission(workspaceId: string, submissionId: string) {
+    return this.http.get<
+      import("@sourceweft/contracts").SkillSubmissionResponse
+    >(
+      `/v1/workspaces/${encode(workspaceId)}/skills/registry/submissions/${encode(submissionId)}`,
+    );
+  }
+
+  /** Re-queue a `failed` import; anything else answers 409. */
+  retrySkillSubmission(workspaceId: string, submissionId: string) {
+    return this.http.post<
+      import("@sourceweft/contracts").SkillSubmissionResponse
+    >(
+      `/v1/workspaces/${encode(workspaceId)}/skills/registry/submissions/${encode(submissionId)}/retry`,
+      {},
     );
   }
 
@@ -729,8 +822,15 @@ export class ContentClient {
   getRegistryVersion(workspaceId: string, catalogId: string, versionId: string) {
     return this.http.get<RegistryVersionDetail>(`/v1/workspaces/${encode(workspaceId)}/skills/catalog/${encode(catalogId)}/versions/${encode(versionId)}`);
   }
-  switchRegistryVersion(workspaceId: string, workspaceSkillId: string, skillVersionId: string) {
-    return this.http.put<{workspaceSkill: import("@sourceweft/contracts").WorkspaceSkill}>(`/v1/workspaces/${encode(workspaceId)}/skills/${encode(workspaceSkillId)}/version`, { skillVersionId });
+  switchRegistryVersion(workspaceId: string, workspaceSkillId: string, skillVersionId: string, options?: { acknowledgeEscalation?: boolean }) {
+    return this.http.put<{workspaceSkill: import("@sourceweft/contracts").WorkspaceSkill}>(`/v1/workspaces/${encode(workspaceId)}/skills/${encode(workspaceSkillId)}/version`, { skillVersionId, ...(options?.acknowledgeEscalation ? { acknowledgeEscalation: true } : {}) });
+  }
+
+  /** Same shape as `getSkillCatalogDetail`, addressed by the skill's slug. */
+  getSkillCatalogDetailBySlug(workspaceId: string, slug: string) {
+    return this.http.get<GetSkillCatalogDetailResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/skills/catalog/by-slug/${encode(slug)}`,
+    );
   }
 
   getSkillCatalogDetail(workspaceId: string, catalogId: string) {

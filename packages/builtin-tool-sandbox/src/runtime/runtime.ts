@@ -61,9 +61,10 @@ export function createSandboxRuntimeForTurn(input: {
    * Skill-bundle staging plans (docs/architecture/sandbox-skill-staging.md).
    * When present, the manager stages the bundles into /skills at sandbox
    * acquisition and the execute path admits /skills-referencing commands
-   * once staging resolved. Absent → exactly today's behavior.
+   * once staging resolved. The plan set may grow during the turn (see
+   * SandboxSkillStaging). Absent → exactly today's behavior.
    */
-  skillAssets?: Pick<SandboxSkillStaging, "plans" | "logger">;
+  skillAssets?: Pick<SandboxSkillStaging, "plans" | "hasPlans" | "unstageable" | "logger">;
   /** Required capability binaries; failure aborts sandbox acquisition. */
   runtimeAssets?: Pick<SandboxRuntimeAssetStaging, "plans" | "logger">;
 }): SandboxRuntimeForTurn {

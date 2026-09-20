@@ -1,7 +1,7 @@
 import sharp from "sharp";
 import { expect, test } from "vitest";
 import { extractRegistryLogo, MAX_LOGO_BYTES } from "./logo";
-import type { DiscoveredSkill } from "./read";
+import { discoveredSkillFile, type DiscoveredSkill } from "./read";
 import { getSkillLogo } from "../logo";
 import type { SkillManifestJson } from "@sourceweft/db";
 
@@ -15,13 +15,9 @@ function bundle(
     files: Object.entries({
       "SKILL.md": `---\nname: writer\ndescription: Writes reports\n${extra}---\nInstructions`,
       ...files,
-    }).map(([bundlePath, contentText]) => ({
-      bundlePath,
-      contentText,
-      mimeType: "text/plain",
-      sizeBytes: Buffer.byteLength(contentText),
-      sha256: "fixture",
-    })),
+    }).map(([bundlePath, contentText]) =>
+      discoveredSkillFile(bundlePath, Buffer.from(contentText)),
+    ),
   };
 }
 const svg =
@@ -29,16 +25,16 @@ const svg =
 
 test("imports declared binary icons as small persisted PNGs without changing runtime files", async () => {
   const skill = bundle("icon: ./assets/writer.png\n");
-  skill.images = [
-    {
-      path: "assets/writer.png",
-      bytes: await sharp({
+  skill.files.push(
+    discoveredSkillFile(
+      "assets/writer.png",
+      await sharp({
         create: { width: 300, height: 180, channels: 4, background: "red" },
       })
         .png()
         .toBuffer(),
-    },
-  ];
+    ),
+  );
   const before = JSON.stringify(skill.files);
   const result = await extractRegistryLogo(skill);
   expect(result.diagnostics).toEqual([]);
@@ -114,7 +110,7 @@ test("external SVG resources, disguised SVGs, corrupt and oversized images are d
     Buffer.alloc(MAX_LOGO_BYTES + 1),
   ]) {
     const skill = bundle("logo: logo.png\n");
-    skill.images = [{ path: "logo.png", bytes }];
+    skill.files.push(discoveredSkillFile("logo.png", bytes));
     const result = await extractRegistryLogo(skill);
     expect(result.logo).toBeUndefined();
     expect(result.diagnostics[0]?.severity).toBe("warning");

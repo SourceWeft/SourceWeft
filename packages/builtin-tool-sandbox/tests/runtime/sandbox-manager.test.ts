@@ -1139,3 +1139,88 @@ test("cancelExecution is idempotent for one provider execution", async () => {
   assert.deepEqual(second, first);
   assert.equal(cancellationCalls, 1);
 });
+
+// A momentary provider outage (connection reset, 5xx) must not fail the
+// acquisition — it used to surface to the user as "command failed".
+function retryFixture(
+  createSandbox: (attempt: number) => Promise<{ id: string }>,
+) {
+  let attempts = 0;
+  const warnings: Array<{ event: string; meta: Record<string, unknown> }> = [];
+  const manager = new SandboxManager({
+    provider: {
+      ...createTestProvider(),
+      async createSandbox() {
+        attempts += 1;
+        return createSandbox(attempts);
+      },
+    },
+    sandboxStore: createTestSandboxStore(),
+    operationStore: createMessageScopedOperationStore(),
+    ttlSeconds: 3600,
+    maxCommandTimeoutMs: 1,
+    logWarn: (event, meta) =>
+      warnings.push({ event, meta: meta as Record<string, unknown> }),
+  });
+  const acquire = (runId: string) =>
+    manager.getOrCreateThreadSandbox({
+      teamId: "team-1",
+      workspaceId: "workspace-1",
+      threadId: `thread-${runId}`,
+      userId: "user-1",
+      messageId: "message-1",
+      runId,
+    });
+  return { acquire, warnings, attempts: () => attempts };
+}
+const unavailable = () =>
+  new SandboxProviderError(
+    SANDBOX_PROVIDER_ERROR_CODES.unavailable,
+    "SANDBOX_NOT_READY_OR_UNHEALTHY: provider unavailable",
+    "create",
+    new TypeError("fetch failed"),
+  );
+
+test("sandbox creation rides out a momentary provider outage", async () => {
+  const fixture = retryFixture(async (attempt) => {
+    if (attempt === 1) throw unavailable();
+    return { id: "sandbox-after-retry" };
+  });
+  const sandbox = await fixture.acquire("retry-once");
+  assert.equal(sandbox.providerSandboxId, "sandbox-after-retry");
+  assert.equal(fixture.attempts(), 2);
+  const retries = fixture.warnings.filter(
+    (warning) => warning.event === "sandbox.create.retry",
+  );
+  assert.equal(retries.length, 1);
+  assert.equal(retries[0]?.meta.attempt, 1);
+});
+
+test("sandbox creation gives up after its retries and reports the provider error", async () => {
+  const fixture = retryFixture(async () => {
+    throw unavailable();
+  });
+  await assert.rejects(fixture.acquire("retry-exhausted"), {
+    code: SANDBOX_PROVIDER_ERROR_CODES.unavailable,
+  });
+  // The first try plus two retries — bounded, so a real outage fails fast.
+  assert.equal(fixture.attempts(), 3);
+});
+
+for (const code of [
+  SANDBOX_PROVIDER_ERROR_CODES.authentication,
+  SANDBOX_PROVIDER_ERROR_CODES.unknown,
+  SANDBOX_PROVIDER_ERROR_CODES.timeout,
+] as const) {
+  test(`sandbox creation does not retry what a retry cannot fix: ${code}`, async () => {
+    const fixture = retryFixture(async () => {
+      throw new SandboxProviderError(code, `${code}: nope`, "create");
+    });
+    await assert.rejects(fixture.acquire(`no-retry-${code}`), { code });
+    assert.equal(fixture.attempts(), 1);
+    assert.equal(
+      fixture.warnings.some((w) => w.event === "sandbox.create.retry"),
+      false,
+    );
+  });
+}

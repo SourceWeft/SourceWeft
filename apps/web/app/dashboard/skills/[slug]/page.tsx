@@ -2,6 +2,7 @@
 
 import { SkillAvatar } from "../_components/skill-avatar";
 
+import { SkillContentRestricted } from "../_components/skill-content-restricted";
 import { SkillIntroduction } from "../_components/skill-introduction";
 
 import * as React from "react";
@@ -14,6 +15,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
+import { HttpClientError } from "@sourceweft/sdk";
 import { MessageResponse } from "@sourceweft/ui-web/components/ai-elements/message";
 import { Badge } from "@sourceweft/ui-web/components/ui/badge";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
@@ -21,7 +23,7 @@ import { ScrollArea } from "@sourceweft/ui-web/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@sourceweft/ui-web/components/ui/tabs";
 import { contentClient, workspaceClient } from "../../../../lib/sdk";
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
-import { SkillIcon } from "../../_components/dashboard-icons";
+import { SkillIcon } from "../../../_components/site-icons";
 
 type SkillCatalogItem = Awaited<
   ReturnType<typeof contentClient.listSkillsCatalog>
@@ -43,6 +45,14 @@ function safeDecode(value: string) {
     return value;
   }
 }
+
+function isSkillNotFound(error: unknown) {
+  return error instanceof HttpClientError && error.code === "SKILL_NOT_FOUND";
+}
+
+// publisherLabel/visibilityLabel are defined per-component below (translated
+// via `t()`), superseding these module-scope versions main added.
+
 
 export default function SkillDetailPage() {
   const t = useTranslations("dashboardSkills");
@@ -109,18 +119,9 @@ export default function SkillDetailPage() {
       }
 
       setIsLoading(true);
-      const catalog = await contentClient.listSkillsCatalog(resolved.id);
-      if (detailGenerationRef.current !== generation) {
-        return;
-      }
-      const skill = catalog.items.find((item) => item.slug === slug);
-      if (!skill) {
-        setDetail(null);
-        setError(t("detail.errors.notFound"));
-        return;
-      }
-
-      const result = await contentClient.getSkillCatalogDetail(resolved.id, skill.catalogId);
+      // Resolved by slug on the server. Listing the catalog to find it here
+      // only ever saw one page, so any skill past it read as missing.
+      const result = await contentClient.getSkillCatalogDetailBySlug(resolved.id, slug);
       if (detailGenerationRef.current !== generation) {
         return;
       }
@@ -131,9 +132,11 @@ export default function SkillDetailPage() {
       }
       setDetail(null);
       setError(
-        loadError instanceof Error
-          ? loadError.message
-          : t("detail.errors.loadFailed"),
+        isSkillNotFound(loadError)
+          ? t("detail.errors.notFound")
+          : loadError instanceof Error
+            ? loadError.message
+            : t("detail.errors.loadFailed"),
       );
     } finally {
       if (detailGenerationRef.current === generation) {
@@ -171,6 +174,18 @@ export default function SkillDetailPage() {
           : currentDetail,
       );
       toast.success(t("toasts.installed"));
+      if (detail.contentRestricted) {
+        // Installing is what unlocks a community skill's full text. Fetched in
+        // place: the install already succeeded, so a failure here only leaves
+        // the notice up until the next load.
+        const generation = detailGenerationRef.current;
+        void contentClient
+          .getSkillCatalogDetailBySlug(workspace.id, item.slug)
+          .then((result) => {
+            if (detailGenerationRef.current === generation) setDetail(result);
+          })
+          .catch(() => undefined);
+      }
     } catch (installError) {
       toast.error(
         installError instanceof Error
@@ -311,10 +326,16 @@ export default function SkillDetailPage() {
                     </TabsList>
                   </div>
                   <TabsContent className="m-0 px-5 py-5" value="overview">
-                    {detail ? <SkillIntroduction {...detail} displayName={detail.skill.displayName} description={detail.skill.description} /> : null}
+                    {detail?.contentRestricted ? (
+                      <SkillContentRestricted description={detail.skill.description} sourceUrl={detail.skill.sourceUrl} />
+                    ) : detail ? (
+                      <SkillIntroduction {...detail} displayName={detail.skill.displayName} description={detail.skill.description} />
+                    ) : null}
                   </TabsContent>
                   <TabsContent className="m-0 px-5 py-5" value="skill">
-                    {skillContent ? (
+                    {detail?.contentRestricted ? (
+                      <SkillContentRestricted sourceUrl={detail.skill.sourceUrl} />
+                    ) : skillContent ? (
                       <MessageResponse className="text-sm leading-7 text-foreground [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:bg-muted/40 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left">
                         {skillContent}
                       </MessageResponse>

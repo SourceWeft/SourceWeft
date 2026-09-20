@@ -438,6 +438,9 @@ export const config = {
   redisUrl: requireEnvInProduction("REDIS_URL", "redis://127.0.0.1:6379"),
   queueName,
   deliverablesQueueName: `${queueName}-deliverables`,
+  // Community-skill ingest runs on its own queue so a large repository import
+  // never competes with chat turns or deliverable renders for a worker slot.
+  skillIngestQueueName: `${queueName}-skill-ingest`,
   deliverablesWorkerConcurrency: parsePositiveInteger(
     process.env.DELIVERABLE_WORKER_CONCURRENCY,
     1,

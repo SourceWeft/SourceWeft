@@ -41,7 +41,7 @@ export const planResponseSchema = z.object({
     .describe("What the caller must decide or clarify before executing."),
 });
 
-const PLAN_DESCRIPTION =
+export const PLAN_DESCRIPTION =
   "Read-only planning delegate. Launch it to turn a complex, open-ended request " +
   "into a concrete, step-by-step plan grounded in the thread's sources and " +
   "working files. It investigates read-only (search sources, read files) but " +
@@ -49,7 +49,7 @@ const PLAN_DESCRIPTION =
   "full objective; it replies with one structured plan and its messages are not " +
   "shown to the user.";
 
-const PLAN_SYSTEM_PROMPT = [
+export const PLAN_SYSTEM_PROMPT = [
   "You are a planning delegate operating in an isolated context window.",
   "",
   "Your job is to investigate the objective read-only, then return a single,",

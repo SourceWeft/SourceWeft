@@ -82,6 +82,8 @@ export const workspaceSkillSchema = z.object({
   enabled: z.boolean(),
   configJson: z.record(z.string(), z.unknown()),
   enabledBy: z.string().nullable(),
+  // `agent`: the chat agent installed it on its own initiative.
+  installedVia: z.enum(["user", "agent"]).default("user"),
   enabledAt: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -105,6 +107,8 @@ export const workspaceInstalledSkillSchema = z.object({
   enabled: z.boolean(),
   configJson: z.record(z.string(), z.unknown()),
   enabledBy: z.string().nullable(),
+  // `agent`: the chat agent installed it on its own initiative.
+  installedVia: z.enum(["user", "agent"]).default("user"),
   enabledAt: z.string().nullable(),
   // Registry entries only: whether the bundle ships runnable scripts. Surfaced
   // because an `executable` skill installs DISABLED — the UI has to be able to
@@ -214,8 +218,29 @@ export const skillManifestJsonSchema = z.object({
   defaultConfig: z.record(z.string(), z.unknown()).optional(),
 });
 
+export const SKILLS_CATALOG_DEFAULT_PAGE_SIZE = 50;
+export const SKILLS_CATALOG_MAX_PAGE_SIZE = 100;
+
+// GET /skills/catalog?limit=&cursor=&q= — query params arrive as strings, hence
+// the coercion. `limit` sizes the page of community (registry) skills only: the
+// rest of the catalog (builtins, the workspace's and team's own skills) is a
+// small bounded set returned whole on the first page. `cursor` is the opaque
+// `nextCursor` of the previous page.
+export const listSkillsCatalogQuerySchema = z.object({
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(SKILLS_CATALOG_MAX_PAGE_SIZE)
+    .default(SKILLS_CATALOG_DEFAULT_PAGE_SIZE),
+  cursor: z.string().min(1).max(1024).optional(),
+  q: z.string().trim().max(200).optional(),
+});
+
 export const listSkillsCatalogResponseSchema = z.object({
   items: z.array(skillCatalogItemSchema),
+  // null once the last page has been served.
+  nextCursor: z.string().nullable(),
 });
 
 // GET /skills/registry/search?q= — relevance-ranked registry entries sharing the
@@ -225,15 +250,6 @@ export const searchRegistrySkillsResponseSchema = z.object({
   items: z.array(skillCatalogItemSchema),
   query: z.string(),
 });
-
-// POST /skills/registry/submit — one GitHub-URL intake. The authoritative URL
-// parse (github.com allowlist + traversal stripping) is server-side, so the wire
-// shape is deliberately just a non-empty string (skill-registry-index.md §3).
-export const submitRegistrySkillRequestSchema = z
-  .object({
-    repoUrl: z.string().trim().min(1),
-  })
-  .strict();
 
 // `indexed` = clean scan → auto-published catalog entry; `queued` = flagged or
 // sticky (§4 triage) → held for review. `slug` is the derived collision-safe key.
@@ -258,6 +274,8 @@ export const registrySkillResultSchema = z.object({
   diagnostics: z.array(skillDiagnosticSchema),
 });
 export type RegistrySkillResult = z.infer<typeof registrySkillResultSchema>;
+// The ingest core's summary of one source (backend `registry/submit.ts`). No
+// endpoint returns it any more — submissions carry the per-skill results.
 export const submitRegistrySkillResponseSchema = z.object({
   status: z.enum(["indexed", "queued"]),
   slug: z.string().optional(),
@@ -273,6 +291,11 @@ export const getSkillCatalogDetailResponseSchema = z.object({
   readmeContent: z.string().nullable(),
   readmePath: z.string().nullable(),
   skillContent: z.string().nullable(),
+  // true when `readmeContent`/`skillContent` are null because this viewer does
+  // not get a community skill's full text — it goes to a workspace that
+  // installed the skill, to its submitter and to market admins. The listing
+  // (`skill`, with its `sourceUrl`) is complete either way.
+  contentRestricted: z.boolean().optional(),
 });
 
 export const enableWorkspaceSkillRequestSchema = z
@@ -407,14 +430,18 @@ export type WorkspaceInstalledSkill = z.infer<
   typeof workspaceInstalledSkillSchema
 >;
 export type SkillCatalogItem = z.infer<typeof skillCatalogItemSchema>;
+// What a client passes; the schema above is the server's parse of the same
+// fields off the query string.
+export type ListSkillsCatalogParams = {
+  limit?: number;
+  cursor?: string;
+  q?: string;
+};
 export type ListSkillsCatalogResponse = z.infer<
   typeof listSkillsCatalogResponseSchema
 >;
 export type SearchRegistrySkillsResponse = z.infer<
   typeof searchRegistrySkillsResponseSchema
->;
-export type SubmitRegistrySkillRequest = z.infer<
-  typeof submitRegistrySkillRequestSchema
 >;
 export type SubmitRegistrySkillResponse = z.infer<
   typeof submitRegistrySkillResponseSchema
@@ -517,6 +544,8 @@ export const registryVersionDetailSchema = z.object({
   readmeContent: z.string().nullable(),
   readmePath: z.string().nullable(),
   skillContent: z.string().nullable(),
+  // Same rule as `getSkillCatalogDetailResponseSchema.contentRestricted`.
+  contentRestricted: z.boolean().optional(),
   files: z.array(
     z.object({
       path: z.string(),
@@ -532,5 +561,116 @@ export const registryVersionDetailSchema = z.object({
 });
 export type RegistryVersionDetail = z.infer<typeof registryVersionDetailSchema>;
 export const switchSkillVersionSchema = z
-  .object({ skillVersionId: z.string().min(1) })
+  .object({
+    skillVersionId: z.string().min(1),
+    // Required to move an install to a version that adds executable scripts or
+    // new scan flags; without it the API answers 409 SKILL_VERSION_ESCALATION
+    // with what escalates, so the client can ask and retry.
+    acknowledgeEscalation: z.boolean().optional(),
+  })
   .strict();
+
+// --- Asynchronous registry submissions ---------------------------------------
+// A submission is the progress + outcome record of one background ingest. The
+// client creates it, then polls it: `stage`/`stages` say where the worker is,
+// `results` say what happened to each skill once it is done.
+export const skillSubmissionStatusSchema = z.enum([
+  "queued",
+  "running",
+  "succeeded",
+  "failed",
+]);
+export type SkillSubmissionStatus = z.infer<typeof skillSubmissionStatusSchema>;
+export const skillSubmissionErrorSchema = z.object({
+  code: z.string(),
+  message: z.string(),
+});
+export const skillSubmissionStageSchema = z.object({
+  status: z.enum(["running", "succeeded", "failed"]),
+  startedAt: z.string(),
+  finishedAt: z.string().optional(),
+  error: skillSubmissionErrorSchema.optional(),
+});
+export const skillSubmissionSkillResultSchema = registrySkillResultSchema.extend(
+  {
+    // Present only when the submission asked for an install on completion.
+    install: z
+      .object({
+        // `skipped`: held for review, so nothing published to install yet.
+        status: z.enum(["installed", "already_installed", "skipped", "failed"]),
+        error: skillSubmissionErrorSchema.optional(),
+      })
+      .optional(),
+  },
+);
+export type SkillSubmissionSkillResult = z.infer<
+  typeof skillSubmissionSkillResultSchema
+>;
+export const skillSubmissionSchema = z.object({
+  id: z.string(),
+  workspaceId: z.string(),
+  submittedBy: z.string(),
+  sourceKind: z.enum(["github", "upload"]),
+  sourceInput: z.string(),
+  repoOwner: z.string().nullable(),
+  repoName: z.string().nullable(),
+  ref: z.string().nullable(),
+  subpath: z.string().nullable(),
+  commitSha: z.string().nullable(),
+  commitCommittedAt: z.string().nullable(),
+  target: z.enum(["workspace", "team"]),
+  status: skillSubmissionStatusSchema,
+  stage: z.string().nullable(),
+  // Keyed by stage name; the server emits the keys in execution order.
+  stages: z.record(z.string(), skillSubmissionStageSchema),
+  results: z.array(skillSubmissionSkillResultSchema),
+  onComplete: z
+    .object({
+      install: z
+        .object({
+          skill: z.string().optional(),
+          installedVia: z.enum(["user", "agent"]).optional(),
+        })
+        .optional(),
+    })
+    .nullable(),
+  error: skillSubmissionErrorSchema.nullable(),
+  attempts: z.number().int(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  startedAt: z.string().nullable(),
+  finishedAt: z.string().nullable(),
+});
+export type SkillSubmission = z.infer<typeof skillSubmissionSchema>;
+/**
+ * `source` is deliberately just a non-empty string, not a URL schema: the
+ * server's GitHub source parser is the authority (github.com allowlist,
+ * traversal stripping) and also accepts the `owner/repo` shorthand.
+ */
+export const createSkillSubmissionRequestSchema = z
+  .object({
+    source: z.string().trim().min(1).max(2048),
+    // Install what gets indexed into this workspace once the ingest finishes;
+    // `skill` narrows a multi-skill repository to one, by name or slug.
+    install: z
+      .object({ skill: z.string().trim().min(1).max(256).optional() })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type CreateSkillSubmissionRequest = z.infer<
+  typeof createSkillSubmissionRequestSchema
+>;
+export const skillSubmissionResponseSchema = z.object({
+  submission: skillSubmissionSchema,
+});
+export type SkillSubmissionResponse = z.infer<
+  typeof skillSubmissionResponseSchema
+>;
+export const listSkillSubmissionsResponseSchema = z.object({
+  items: z.array(skillSubmissionSchema),
+  nextCursor: z.string().nullable(),
+});
+export type ListSkillSubmissionsResponse = z.infer<
+  typeof listSkillSubmissionsResponseSchema
+>;

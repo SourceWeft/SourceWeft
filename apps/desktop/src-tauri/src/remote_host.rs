@@ -355,7 +355,7 @@ async fn connection(
         .await
         .map_err(|e| e.to_string())?;
     let (mut sender, mut receiver) = socket.split();
-    let (events, mut results) = tokio::sync::mpsc::channel::<Value>(32);
+    let (events, mut results) = tokio::sync::mpsc::channel::<(Value, Arc<sourceweft_desktop::local_host::maintenance::Lease>)>(32);
     let serial = Arc::new(tokio::sync::Semaphore::new(1));
     let mut heartbeat = tokio::time::interval(Duration::from_secs(5));
     let mut last_received = tokio::time::Instant::now();
@@ -367,7 +367,7 @@ async fn connection(
                 if last_received.elapsed()>Duration::from_secs(30){return Err("Device connection lease expired".into());}
                 sender.send(Message::Text(json!({"type":"heartbeat"}).to_string().into())).await.map_err(|e|e.to_string())?;
             },
-            Some(result)=results.recv()=>{sender.send(Message::Text(result.to_string().into())).await.map_err(|e|e.to_string())?;},
+            Some((result, _lease))=results.recv()=>{sender.send(Message::Text(result.to_string().into())).await.map_err(|e|e.to_string())?;},
             incoming=receiver.next()=>{
                 let message=incoming.ok_or("Device connection closed")?.map_err(|e|e.to_string())?;
                 last_received=tokio::time::Instant::now();
@@ -384,16 +384,18 @@ async fn connection(
                             let action=value["action"].as_str().ok_or("Missing action")?.to_owned();
                             let deadline=value["deadline"].as_u64().ok_or("Missing deadline")?;
                             let payload=value["payload"].clone();
+                            let lease=match host.admission.enter(){Ok(lease)=>Arc::new(lease),Err(code)=>{sender.send(Message::Text(json!({"type":"result","id":id,"ok":false,"error":code}).to_string().into())).await.map_err(|e|e.to_string())?;continue;}};
                             let owner=credential.user_id.clone();let host=host.clone();let calls=executions.clone();let events=events.clone();let serial=serial.clone();let stop=stop.clone();let generation=generation.clone();
                             sender.send(Message::Text(json!({"type":"accepted","id":id}).to_string().into())).await.map_err(|e|e.to_string())?;
                             tokio::spawn(async move{
                                 let _permit=if action == "workspace.check" { None } else { Some(serial.acquire_owned().await) };
                                 let now=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d|d.as_millis() as u64).unwrap_or(u64::MAX);
-                                if now>=deadline||stop.load(Ordering::SeqCst)||generation.load(Ordering::SeqCst)!=current||calls.is_cancelled(&id){let _=events.send(json!({"type":"result","id":id,"ok":false,"error":"CALL_EXPIRED"})).await;return;}
+                                if now>=deadline||stop.load(Ordering::SeqCst)||generation.load(Ordering::SeqCst)!=current||calls.is_cancelled(&id){let _=events.send((json!({"type":"result","id":id,"ok":false,"error":"CALL_EXPIRED"}),lease)).await;return;}
                                 let result_id=id.clone();
-                                let result=tauri::async_runtime::spawn_blocking(move||host.dispatch(&calls,&id,&owner,&thread,&action,payload)).await;
+                                let work_lease=lease.clone();
+                                let result=tauri::async_runtime::spawn_blocking(move||host.dispatch_admitted(&work_lease,&calls,&id,&owner,&thread,&action,payload)).await;
                                 let reply=match result{Ok(Ok(result))=>json!({"type":"result","id":result_id,"ok":true,"result":result}),Ok(Err(error))=>json!({"type":"result","id":result_id,"ok":false,"error":error.to_string()}),Err(_)=>json!({"type":"result","id":result_id,"ok":false,"error":"LOCAL_EXECUTION_JOIN_FAILED"})};
-                                let _=events.send(reply).await;
+                                let _=events.send((reply,lease)).await;
                             });
                         },
                         _=>return Err("Unsupported server message".into()),

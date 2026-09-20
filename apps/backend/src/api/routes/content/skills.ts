@@ -1,7 +1,6 @@
 import type { Hono } from "hono";
 import {
   listRegistryVersions,
-  getRegistryVersionDetail,
   switchRegistryVersion,
 } from "../../../modules/skills/registry/versions";
 import {
@@ -10,14 +9,14 @@ import {
   createCustomSkillVersionRequestSchema,
   putCustomSkillVersionFileRequestSchema,
   enableWorkspaceSkillRequestSchema,
+  listSkillsCatalogQuerySchema,
   updateCustomSkillVersionRequestSchema,
   updateWorkspaceSkillRequestSchema,
 } from "@sourceweft/contracts";
 import { contentSkillsService } from "../../../modules/skills";
-import { submitRegistrySkillRequestSchema } from "../../../modules/skills/registry/contracts";
-import { RegistrySubmissionError } from "../../../modules/skills/registry/errors";
+import { decodeSkillCatalogCursor } from "../../../modules/skills/service";
+import { isContentError } from "../../../modules/content/errors";
 import { requireSkillWorkspace } from "../../../modules/skills/registry/permissions";
-import { submitRegistrySkillFromGitHub } from "../../../modules/skills/registry/submit";
 import { requireContentWorkspace } from "../../../modules/workspace";
 import {
   getSessionUserId,
@@ -64,8 +63,11 @@ export function registerSkillRoutes(app: Hono) {
     const context = await resolveSkillContext(c);
     return ApiResponse.success(
       c,
-      await getRegistryVersionDetail({
-        ...context,
+      // Through the service, which withholds a community skill's full text
+      // from a viewer the catalog detail would withhold it from.
+      await contentSkillsService.getRegistryVersionDetail({
+        teamId: context.teamId,
+        workspaceId: context.workspaceId,
         userId: getSessionUserId(context.session),
         catalogId: requireRouteParam(c, "catalogId"),
         versionId: requireRouteParam(c, "versionId"),
@@ -82,22 +84,68 @@ export function registerSkillRoutes(app: Hono) {
     });
     const body = switchSkillVersionSchema.safeParse(await c.req.json());
     if (!body.success) throw ApiError.validation();
-    return ApiResponse.success(
-      c,
-      await switchRegistryVersion({
-        ...context,
-        userId,
-        workspaceSkillId: requireRouteParam(c, "workspaceSkillId"),
-        skillVersionId: body.data.skillVersionId,
-      }),
-    );
+    try {
+      return ApiResponse.success(
+        c,
+        await switchRegistryVersion({
+          ...context,
+          userId,
+          workspaceSkillId: requireRouteParam(c, "workspaceSkillId"),
+          skillVersionId: body.data.skillVersionId,
+          acknowledgeEscalation: body.data.acknowledgeEscalation,
+        }),
+      );
+    } catch (error) {
+      // `toApiError` drops a ContentError's details on purpose (they can carry
+      // internals). This one IS the payload: the client shows what escalates
+      // and retries with `acknowledgeEscalation`.
+      if (isContentError(error) && error.code === "SKILL_VERSION_ESCALATION") {
+        throw new ApiError(
+          error.statusCode,
+          error.code,
+          error.message,
+          error.details as Record<string, unknown>,
+        );
+      }
+      throw error;
+    }
   });
   app.get("/skills/catalog", async (c) => {
     const { teamId, workspaceId, session } = await resolveSkillContext(c);
+    const parsed = listSkillsCatalogQuerySchema.safeParse(c.req.query());
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+    if (parsed.data.cursor && !decodeSkillCatalogCursor(parsed.data.cursor)) {
+      throw ApiError.validation({ cursor: "Not a catalog cursor" });
+    }
     const result = await contentSkillsService.listCatalog({
       teamId,
       workspaceId,
       userId: getSessionUserId(session),
+      limit: parsed.data.limit,
+      cursor: parsed.data.cursor,
+      query: parsed.data.q,
+    });
+    return ApiResponse.success(c, result);
+  });
+
+  // Registered before `/skills/catalog/:catalogId`: Hono matches in
+  // registration order, and that route would otherwise take `by-slug` for a
+  // catalogId.
+  app.get("/skills/catalog/by-slug/:slug", async (c) => {
+    const { teamId, workspaceId, session } = await resolveSkillContext(c);
+    const slug = requireRouteParam(c, "slug").trim();
+    if (!slug || slug.length > 200) {
+      throw ApiError.validation({ slug: "Expected 1 to 200 characters" });
+    }
+    const result = await contentSkillsService.getCatalogSkillDetailBySlug({
+      teamId,
+      workspaceId,
+      userId: getSessionUserId(session),
+      slug,
     });
     return ApiResponse.success(c, result);
   });
@@ -111,43 +159,6 @@ export function registerSkillRoutes(app: Hono) {
       query: c.req.query("q") ?? "",
     });
     return ApiResponse.success(c, result);
-  });
-
-  // Stage 1 — Submit (docs/architecture/skill-registry-index.md §3 Stage 1).
-  // Any content contributor (skills.submit) can index a GitHub skill; the scan +
-  // triage gate (Stages 3-4) decides indexed-vs-queued, not this endpoint.
-  app.post("/skills/registry/submit", async (c) => {
-    const session = await requireSession(c);
-    if (!session) {
-      throw ApiError.unauthorized();
-    }
-    const userId = getSessionUserId(session);
-    await requireSkillWorkspace({
-      workspaceId: requireRouteParam(c, "workspaceId"),
-      userId,
-      permission: "skills.submit",
-    });
-
-    const body = ensureObjectBody(await c.req.json().catch(() => ({})));
-    const parsed = submitRegistrySkillRequestSchema.safeParse(body);
-    if (!parsed.success) {
-      throw ApiError.validation(
-        parsed.error.flatten() as Record<string, unknown>,
-      );
-    }
-
-    try {
-      const result = await submitRegistrySkillFromGitHub({
-        repoUrl: parsed.data.repoUrl,
-        userId,
-      });
-      return ApiResponse.success(c, result, 201);
-    } catch (error) {
-      if (error instanceof RegistrySubmissionError) {
-        throw new ApiError(422, error.code, error.message, error.details);
-      }
-      throw error;
-    }
   });
 
   app.get("/skills", async (c) => {
@@ -180,15 +191,22 @@ export function registerSkillRoutes(app: Hono) {
       );
     }
 
-    const result = await contentSkillsService.enableSkill({
+    const { skills } = await contentSkillsService.installSkill({
       teamId,
       workspaceId,
       userId: getSessionUserId(session),
-      skillId: parsed.data.skillId,
-      skillVersionId: parsed.data.skillVersionId,
+      ref: {
+        kind: "version",
+        skillId: parsed.data.skillId,
+        skillVersionId: parsed.data.skillVersionId,
+      },
       configJson: parsed.data.configJson,
     });
-    return ApiResponse.success(c, result, 201);
+    return ApiResponse.success(
+      c,
+      { workspaceSkill: skills[0]!.workspaceSkill },
+      201,
+    );
   });
 
   app.post("/skills/custom", async (c) => {

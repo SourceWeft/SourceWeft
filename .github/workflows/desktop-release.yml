@@ -1,0 +1,118 @@
+name: Signed desktop release
+on:
+  workflow_call:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  build:
+    environment: desktop-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            target: aarch64-apple-darwin
+            bundles: app,dmg
+          - os: macos-15
+            target: x86_64-apple-darwin
+            bundles: app,dmg
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+            bundles: nsis
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            bundles: appimage
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      APPIMAGE_EXTRACT_AND_RUN: "1"
+      DESKTOP_RELEASE_TARGET: ${{ matrix.target }}
+      SOURCEWEFT_SIGNED_RELEASE: "true"
+      TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      WINDOWS_TIMESTAMP_URL: ${{ vars.WINDOWS_TIMESTAMP_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.19.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - name: Reuse completed signed artifacts on reruns
+        id: existing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/ci/reuse-desktop-release.mjs
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux' && steps.existing.outputs.exists != 'true'
+        run: sudo bash scripts/ci/install-desktop-linux-deps.sh
+      - uses: dtolnay/rust-toolchain@1.94.1
+        if: steps.existing.outputs.exists != 'true'
+        with:
+          targets: ${{ matrix.target }}
+      - run: pnpm install --frozen-lockfile
+        if: steps.existing.outputs.exists != 'true'
+      - run: node scripts/ci/verify-desktop-tag.mjs
+      - name: Import Windows signing certificate
+        if: runner.os == 'Windows' && steps.existing.outputs.exists != 'true'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if (!$env:WINDOWS_CERTIFICATE -or !$env:WINDOWS_CERTIFICATE_PASSWORD) { throw "Windows signing credentials are required" }
+          $path = Join-Path $env:RUNNER_TEMP 'desktop-signing.pfx'
+          try {
+            [IO.File]::WriteAllBytes($path, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+            $cert = Import-PfxCertificate -FilePath $path -CertStoreLocation Cert:\CurrentUser\My -Password (ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force)
+            $signer = @($cert | Where-Object HasPrivateKey)
+            if ($signer.Count -ne 1) { throw "Expected one signing certificate" }
+            "WINDOWS_CERTIFICATE_THUMBPRINT=$($signer[0].Thumbprint)" >> $env:GITHUB_ENV
+          } finally { Remove-Item $path -ErrorAction SilentlyContinue }
+      - name: Validate release signing configuration
+        if: steps.existing.outputs.exists != 'true'
+        run: node scripts/ci/desktop-release-config.mjs
+      - name: Build signed and notarized installers
+        if: steps.existing.outputs.exists != 'true'
+        run: pnpm --filter @sourceweft/desktop exec tauri build --ci --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --config src-tauri/tauri.release.generated.json -- --locked
+      - name: Build signature verifier
+        if: steps.existing.outputs.exists != 'true'
+        run: cargo build --locked --release --manifest-path scripts/ci/update-verifier/Cargo.toml
+      - name: Verify and describe macOS artifacts
+        if: runner.os == 'macOS' && steps.existing.outputs.exists != 'true'
+        env:
+          DESKTOP_UPDATE_VERIFIER: scripts/ci/update-verifier/target/release/sourceweft-update-verifier
+        run: node scripts/ci/prepare-desktop-release.mjs
+      - name: Verify and describe Windows artifacts
+        if: runner.os == 'Windows' && steps.existing.outputs.exists != 'true'
+        shell: pwsh
+        env:
+          DESKTOP_UPDATE_VERIFIER: scripts/ci/update-verifier/target/release/sourceweft-update-verifier.exe
+        run: |
+          $files = @(Get-ChildItem "apps/desktop/src-tauri/target/$env:DESKTOP_RELEASE_TARGET/release/bundle/nsis/*.exe")
+          if ($files.Count -ne 1) { throw "Expected one NSIS installer" }
+          $env:UPDATE_VERIFY_INSTALLER = $files[0].FullName
+          node scripts/ci/prepare-desktop-release.mjs
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Verify and describe Linux artifacts
+        if: runner.os == 'Linux' && steps.existing.outputs.exists != 'true'
+        env:
+          DESKTOP_UPDATE_VERIFIER: scripts/ci/update-verifier/target/release/sourceweft-update-verifier
+        run: node scripts/ci/prepare-desktop-release.mjs
+      - uses: actions/upload-artifact@v4
+        if: steps.existing.outputs.exists != 'true'
+        with:
+          name: desktop-release-${{ matrix.target }}-${{ github.sha }}
+          path: desktop-release/*
+          if-no-files-found: error
+          retention-days: 30

@@ -37,8 +37,9 @@ import {
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { contentClient, workspaceClient } from "../../../../lib/sdk";
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
-import { SkillIcon } from "../../_components/dashboard-icons";
+import { SkillIcon } from "../../../_components/site-icons";
 import { SkillDetailDialog } from "./skill-detail-dialog";
+import { MySubmissions, useSkillSubmissions } from "./skill-submissions";
 import { SubmitSkillDialog } from "./submit-skill-dialog";
 
 type SkillsCatalogResponse = Awaited<
@@ -56,14 +57,38 @@ type ResolvedWorkspace = {
   name: string;
 };
 
+// The gallery filters, counts and sorts on the client, so it needs the whole
+// catalog rather than a window of it: follow `nextCursor` to the end. Pages
+// after the first carry community skills only.
+const CATALOG_PAGE_SIZE = 100;
+
+async function fetchAllCatalogPages(
+  targetWorkspaceId: string,
+): Promise<SkillsCatalogResponse> {
+  const items: SkillCatalogItem[] = [];
+  const seenCursors = new Set<string>();
+  let cursor: string | undefined;
+  do {
+    const page = await contentClient.listSkillsCatalog(targetWorkspaceId, {
+      limit: CATALOG_PAGE_SIZE,
+      cursor,
+    });
+    items.push(...page.items);
+    cursor = page.nextCursor ?? undefined;
+    // A cursor handed out twice would loop forever; stop with what we have.
+    if (cursor && seenCursors.has(cursor)) break;
+    if (cursor) seenCursors.add(cursor);
+  } while (cursor);
+  return { items, nextCursor: null };
+}
+
 function fetchSkillsCatalog(targetWorkspaceId: string) {
   const pending = catalogRequestsByWorkspace.get(targetWorkspaceId);
   if (pending) {
     return pending;
   }
 
-  const promise = contentClient
-    .listSkillsCatalog(targetWorkspaceId)
+  const promise = fetchAllCatalogPages(targetWorkspaceId)
     .finally(() => {
       if (catalogRequestsByWorkspace.get(targetWorkspaceId) === promise) {
         catalogRequestsByWorkspace.delete(targetWorkspaceId);
@@ -1137,6 +1162,13 @@ export function SkillsGallery({
     }
   }, [onCatalogChange]);
 
+  // An import finishes in the background, whenever it finishes; that is when
+  // the catalog may have gained skills (even a failed one can have indexed some).
+  const submissions = useSkillSubmissions({
+    workspaceId: workspace?.id ?? dashboardState.workspaceId,
+    onFinished: () => void refreshCatalog(),
+  });
+
   const pageLoading =
     catalogStatus === "resolving_workspace" ||
     catalogStatus === "loading_catalog";
@@ -1228,7 +1260,7 @@ export function SkillsGallery({
                 </div>
                 <div className="flex items-center gap-2">
                   <SubmitSkillDialog
-                    onSubmitted={refreshCatalog}
+                    submissions={submissions}
                     workspaceId={workspace?.id ?? dashboardState.workspaceId}
                   />
                   <SortMenu
@@ -1246,6 +1278,7 @@ export function SkillsGallery({
                   {error}
                 </p>
               ) : null}
+              <MySubmissions submissions={submissions} />
 
               {pageLoading ? (
                 <SkillsCatalogSkeletonGrid variant={variant} />

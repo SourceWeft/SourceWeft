@@ -1,4 +1,4 @@
-import { OrganizationView } from "@daveyplate/better-auth-ui";
+import { Organization } from "../../_components/auth/organization/organization";
 import type { Metadata } from "next";
 import { organizationStaticPaths } from "../../../lib/auth-ui-config";
 import { NO_INDEX_METADATA } from "../../seo";
@@ -19,7 +19,7 @@ export default async function OrganizationPage({
 
   return (
     <main className="container p-4 md:p-6">
-      <OrganizationView path={path} />
+      <Organization path={path} />
     </main>
   );
 }

@@ -112,7 +112,7 @@ export function DashboardWorkspaceLayout({
         ref={ref}
         data-workspace-layout={layout.mode}
         data-short-window={height > 0 && height <= 720 ? "true" : undefined}
-        className="flex h-svh min-h-0 w-full overflow-hidden overscroll-none bg-background text-foreground"
+        className="relative flex h-dvh min-h-0 w-full overflow-hidden overscroll-none bg-background text-foreground"
       >
         {children}
       </div>

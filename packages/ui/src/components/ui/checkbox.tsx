@@ -1,3 +1,4 @@
+import { Check } from "lucide-react";
 import { Checkbox as CheckboxPrimitive } from "radix-ui";
 import type { ComponentProps } from "react";
 import { cn } from "../../lib/utils";
@@ -22,15 +23,7 @@ export function Checkbox({ className, ...props }: CheckboxProps) {
         {props.checked === "indeterminate" ? (
           <span className="h-px w-2 bg-primary-foreground" />
         ) : (
-          <svg
-            className="size-2.5"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={3}
-            viewBox="0 0 12 12"
-          >
-            <polyline points="1.5,6 4.5,9 10.5,3" />
-          </svg>
+          <Check aria-hidden="true" className="size-2.5" strokeWidth={3} />
         )}
       </CheckboxPrimitive.Indicator>
     </CheckboxPrimitive.Root>

@@ -166,6 +166,13 @@ export function DashboardChatThreadPageView({
   threadCitations,
   threadId,
   threadTitle,
+  parentThread,
+  openParentThread,
+  openThreadInNewWindow,
+  embedMode,
+  subagentPanel,
+  subagentChildren,
+  openSubagent,
   thinkingSettings,
   toolConfirmationInterventionSignal,
   toggleSourcesVisible,
@@ -207,6 +214,7 @@ export function DashboardChatThreadPageView({
       onSourceLoad: handleLibrarySourcesLoad,
       onSourceMerge: handleLibrarySourcesMerge,
       previewArtifact,
+      subagentPanel,
       threadCitations,
       threadId,
       threadTitle,
@@ -240,6 +248,7 @@ export function DashboardChatThreadPageView({
       scrollToMessage,
       handleSkillSelectionChange,
       setPreviewArtifact,
+      subagentPanel,
       threadCitations,
       threadId,
       threadTitle,
@@ -259,6 +268,13 @@ export function DashboardChatThreadPageView({
           <ThreadHeader
             workspaceId={workspaceId}
             threadId={threadId}
+            activeSubagentId={subagentPanel?.threadId ?? null}
+            embedMode={embedMode}
+            onOpenInNewWindow={openThreadInNewWindow}
+            onOpenParentThread={openParentThread}
+            onOpenSubagent={openSubagent}
+            parentThread={parentThread}
+            subagentChildren={subagentChildren}
             availableModels={availableModels}
             byokCredentials={byokCredentials}
             byokModels={byokModels}
@@ -408,6 +424,8 @@ export function DashboardChatThreadPageView({
 
         <ThreadSidePanels
           isDesktopPanel={isDesktopPanel}
+          isPersistentLayout={isPersistentLayout}
+          subagentPanel={subagentPanel}
           onArtifactPreviewClose={() => setPreviewArtifact(null)}
           previewArtifact={previewArtifact}
           sourcesVisible={sourcesVisible}

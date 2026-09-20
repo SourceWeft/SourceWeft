@@ -116,11 +116,20 @@ async function serveDevice(ws: WebSocket, deviceId: string, userId: string) {
             ),
           );
       } else {
-        const invocation = await db.query.localToolInvocations.findFirst({ where: target });
+        const invocation = await db.query.localToolInvocations.findFirst({
+          where: target,
+        });
         if (!invocation) throw new Error("Unknown device invocation reply");
-        const result = message.ok && (invocation.action === "file.read" || invocation.action === "file.binary.chunk")
-          ? await storeLocalFileReply({ userId, deviceId, invocationId: message.id }, message.result ?? {})
-          : message.result ?? null;
+        const result =
+          message.ok &&
+          (invocation.action === "folder.read" ||
+            invocation.action === "file.read" ||
+            invocation.action === "file.binary.chunk")
+            ? await storeLocalFileReply(
+                { userId, deviceId, invocationId: message.id },
+                message.result ?? {},
+              )
+            : (message.result ?? null);
         await db
           .update(localToolInvocations)
           .set({
@@ -224,7 +233,7 @@ async function serveDevice(ws: WebSocket, deviceId: string, userId: string) {
             type: "call",
             id: call.id,
             userId,
-            threadId: call.threadId,
+            threadId: call.threadId ?? "",
             action: call.action,
             payload: call.payload,
             deadline: call.deadline.getTime(),

@@ -2,25 +2,31 @@
 
 import { DeploymentCapabilitiesProvider } from "../lib/billing-edition/capabilities";
 import type { DeploymentCapabilities } from "@sourceweft/contracts/deployment-capabilities";
-import { AuthUIProvider, type AuthLocalization } from "@daveyplate/better-auth-ui";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@sourceweft/ui-web/components/ui/tooltip";
-import type { SocialProvider } from "better-auth/social-providers";
 import Link from "next/link";
 import { ThemeProvider, useTheme } from "next-themes";
-import { useLocale, useMessages } from "next-intl";
+import { useLocale } from "next-intl";
 import { usePathname, useRouter } from "next/navigation";
-import { useCallback, useEffect } from "react";
-import { Toaster, toast as sonnerToast } from "sonner";
+import { useEffect, useRef } from "react";
+import { Toaster } from "sonner";
 import { DEFAULT_USER_THEME } from "@sourceweft/contracts";
+import { AuthProvider } from "./_components/auth/auth-provider";
 import { GoogleOneTap } from "./google-one-tap";
 import { MobileRouteSheetProvider } from "./mobile-route-sheet-provider";
 import { authClient } from "../lib/auth-client";
 import {
   additionalFields,
-  customAccountViewPaths,
-  customAuthViewPaths,
-  customOrganizationViewPaths,
+  organizationPluginOptions,
 } from "../lib/auth-ui-config";
+import { apiKeyPlugin } from "../lib/auth/api-key-plugin";
+import { emailOtpPlugin } from "../lib/auth/email-otp-plugin";
+import { magicLinkPlugin } from "../lib/auth/magic-link-plugin";
+import { multiSessionPlugin } from "../lib/auth/multi-session-plugin";
+import { organizationPlugin } from "../lib/auth/organization-plugin";
+import { passkeyPlugin } from "../lib/auth/passkey-plugin";
+import { twoFactorPlugin } from "../lib/auth/two-factor-plugin";
+import { getQueryClient } from "../lib/query-client";
 import { userSettingsClient } from "../lib/sdk";
 import {
   clearLocaleCookie,
@@ -139,24 +145,29 @@ function DesktopTraySync() {
   return null;
 }
 
-export function Providers({
-  children,
-  initialCapabilities = null,
-}: {
-  children: React.ReactNode;
-  initialCapabilities?: DeploymentCapabilities | null;
-}) {
+/**
+ * Re-renders server components when the signed-in user changes.
+ *
+ * The old auth UI package offered an `onSessionChange` callback for this; the
+ * successor has no equivalent, so watch the session directly. `/dashboard` is
+ * excluded because it holds client state a refresh would discard.
+ */
+function SessionRefreshSync() {
+  const { data: session } = authClient.useSession();
   const router = useRouter();
   const pathname = usePathname();
-  const webBaseUrl = resolveWebBaseUrl();
-  // Resolve the current locale's Better Auth UI labels from the next-intl catalog.
-  // The provider deep-merges this partial over its English defaults, so any key we
-  // don't ship (or the `en` locale) falls back to English automatically. Error
-  // messages stay on the backend path — see `localizeErrors={false}` below.
-  const messages = useMessages();
-  const authUiLocalization = messages.authUi as unknown as AuthLocalization;
+  const userId = session?.user?.id ?? null;
+  const previousUserId = useRef<string | null | undefined>(undefined);
 
-  const handleSessionChange = useCallback(() => {
+  useEffect(() => {
+    const previous = previousUserId.current;
+    previousUserId.current = userId;
+
+    // Skip the first observed value: nothing changed, we just learned it.
+    if (previous === undefined || previous === userId) {
+      return;
+    }
+
     const normalizedPathname = pathname?.replace(/\/+$/, "") || "/";
     if (
       normalizedPathname === "/dashboard" ||
@@ -166,7 +177,21 @@ export function Providers({
     }
 
     router.refresh();
-  }, [pathname, router]);
+  }, [pathname, router, userId]);
+
+  return null;
+}
+
+export function Providers({
+  children,
+  initialCapabilities = null,
+}: {
+  children: React.ReactNode;
+  initialCapabilities?: DeploymentCapabilities | null;
+}) {
+  const router = useRouter();
+  const webBaseUrl = resolveWebBaseUrl();
+  const queryClient = getQueryClient();
 
   useEffect(() => {
     const handler = (event: PromiseRejectionEvent) => {
@@ -188,80 +213,55 @@ export function Providers({
       enableSystem
       disableTransitionOnChange
     >
-      <AuthUIProvider
-        Link={Link}
-        baseURL={webBaseUrl}
-        account={{
-          basePath: "/account",
-          fields: ["image", "name", "company", "role", "timezone", "bio"],
-          viewPaths: customAccountViewPaths,
-        }}
-        additionalFields={additionalFields}
-        apiKey={{
-          prefix: "vm_",
-        }}
-        authClient={authClient}
-        credentials={{
-          forgotPassword: true,
-        }}
-        localization={authUiLocalization}
-        localizeErrors={false}
-        magicLink
-        multiSession
-        navigate={router.push}
-        onSessionChange={handleSessionChange}
-        organization={{
-          apiKey: true,
-          basePath: "/organization",
-          viewPaths: customOrganizationViewPaths,
-        }}
-        passkey
-        replace={router.replace}
-        redirectTo="/dashboard"
-        signUp={{
-          fields: ["name"],
-        }}
-        social={{
-          providers: ["google", "github"] satisfies SocialProvider[],
-        }}
-        toast={({ message, variant }) => {
-          if (variant === "error" && shouldIgnoreCancelledPasskey(message)) {
-            return;
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider
+          additionalFields={additionalFields}
+          authClient={authClient}
+          baseURL={webBaseUrl}
+          emailAndPassword={{
+            forgotPassword: true,
+            // Mirrors apps/backend's auth config: the views read this to send
+            // someone to verify-email after sign-up instead of the dashboard.
+            requireEmailVerification: true,
+          }}
+          Link={Link}
+          navigate={({ to, replace }) =>
+            replace ? router.replace(to) : router.push(to)
           }
-
-          const text = message || "Operation completed";
-          if (variant === "error") {
-            sonnerToast.error(text);
-            return;
-          }
-
-          if (variant === "warning") {
-            sonnerToast.warning(text);
-            return;
-          }
-
-          if (variant === "success") {
-            sonnerToast.success(text);
-            return;
-          }
-
-          sonnerToast(text);
-        }}
-        twoFactor={["otp", "totp"]}
-        viewPaths={customAuthViewPaths}
-      >
-        <UserSettingsSync />
-        <DesktopTraySync />
-        <GoogleOneTap />
-        <TooltipProvider>
-          <DeploymentCapabilitiesProvider
-            initialCapabilities={initialCapabilities}
-          >
-            <MobileRouteSheetProvider>{children}</MobileRouteSheetProvider>
-          </DeploymentCapabilitiesProvider>
-        </TooltipProvider>
-        <Toaster closeButton position="top-right" richColors />
-      </AuthUIProvider>
+          plugins={[
+            magicLinkPlugin(),
+            emailOtpPlugin({ signIn: true }),
+            passkeyPlugin(),
+            twoFactorPlugin({ enrollmentMethods: ["otp", "totp"] }),
+            multiSessionPlugin(),
+            apiKeyPlugin({ organization: true }),
+            organizationPlugin(organizationPluginOptions),
+          ]}
+          redirectTo="/dashboard"
+          socialProviders={["google", "github"]}
+        >
+          {/* Supersedes the theme-only ThemeSettingsSync: also mirrors
+              appearance.language into the locale cookie (cross-device
+              follow, §5) and self-corrects a fresh device's first render.
+              TODO(i18n): @better-auth-ui/locales ships no zh-CN/zh-TW
+              bundle; the existing translated `authUi` catalog entries need
+              re-keying onto this provider's `localization`/`defineAuthLocale`
+              shape in a follow-up, once the package is installed and its
+              real types can be checked instead of guessed. */}
+          <UserSettingsSync />
+          <DesktopTraySync />
+          <SessionRefreshSync />
+          <GoogleOneTap />
+          <TooltipProvider>
+            <DeploymentCapabilitiesProvider
+              initialCapabilities={initialCapabilities}
+            >
+              <MobileRouteSheetProvider>{children}</MobileRouteSheetProvider>
+            </DeploymentCapabilitiesProvider>
+          </TooltipProvider>
+          <Toaster closeButton position="top-right" richColors />
+        </AuthProvider>
+      </QueryClientProvider>
     </ThemeProvider>
   );
 }

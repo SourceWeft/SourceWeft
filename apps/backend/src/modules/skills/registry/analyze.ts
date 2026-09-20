@@ -5,23 +5,32 @@ import { parseSkillFrontmatter } from "../frontmatter";
 import { deriveRegistrySlug } from "./contracts";
 import type { DiscoveredSkill } from "./read";
 import { RegistrySubmissionError } from "./errors";
-import { scanRegistrySkill } from "./scan";
+import {
+  detectExecutableBinary,
+  scanFlagsRequireReview,
+  scanRegistrySkill,
+} from "./scan";
 
 /**
  * Stage 3 — Analyze (parse + safety), STATIC ONLY — never executes the skill.
  * docs/architecture/skill-registry-index.md §3 Stage 3 / build phase R2.
  *
- * Produces the frozen metadata that Stage 5 persists behind a pointer: validated
- * frontmatter, the injection/safety scan verdict, the `capability`
- * classification (with the "don't trust the manifest" mismatch check), the
- * `contentSha256` digest, and the bundle-relative `fileManifest` the runtime
- * uses to fetch individual files. No file body ever leaves this stage.
+ * Produces the frozen metadata that Stage 5 persists next to the stored bundle:
+ * validated frontmatter, the injection/safety scan verdict, the `capability`
+ * classification (with the "don't trust the manifest" mismatch check), and the
+ * bundle-relative `fileManifest`. The bytes themselves are not this stage's
+ * business — Stage 5 stores them.
  */
 
 type RegistryFileManifest = NonNullable<
   SkillManifestJson["registry"]
 >["fileManifest"];
-type RegistryFileRole = RegistryFileManifest[number]["role"];
+/**
+ * `asset` is a non-text resource — a font, an image, a template: carried and
+ * staged with the bundle, never mounted as model-readable text and never
+ * treated as a script.
+ */
+type RegistryFileRole = "model-readable" | "script" | "asset";
 
 export type AnalyzedRegistrySkill = {
   slug: string;
@@ -33,8 +42,6 @@ export type AnalyzedRegistrySkill = {
   capability: "prompt-only" | "executable";
   /** Declared license name (e.g. "MIT") — display-only, never a gate. */
   license: string | null;
-  /** sha256 of the analyzed SKILL.md bytes (§3 Stage 3). */
-  contentSha256: string;
   scan: { reviewRequired: boolean; flags: string[] };
   fileManifest: RegistryFileManifest;
   allowedTools: string[];
@@ -127,10 +134,20 @@ export function readAllowedTools(
   return first;
 }
 
-function fileRole(bundlePath: string): RegistryFileRole {
+function fileRole(file: {
+  bundlePath: string;
+  isText: boolean;
+}): RegistryFileRole {
+  const { bundlePath } = file;
   const ext = path.posix.extname(bundlePath).toLowerCase();
   if (bundlePath === "SKILL.md") {
     return "model-readable";
+  }
+  // Decided before the script rule: bytes that are not text cannot be read by
+  // the model or text-scanned as a script, wherever they sit. Whether such a
+  // file is itself code is the scan's question (`binary:executable`).
+  if (!file.isText) {
+    return "asset";
   }
   if (bundlePath.startsWith("scripts/") || SCRIPT_EXTENSIONS.has(ext)) {
     return "script";
@@ -176,8 +193,8 @@ function referencesOutOfBundlePath(
  * stage into the sandbox?** That is what the install gate acts on — an
  * `executable` skill installs switched off, because running third-party code is
  * the user's decision. So it is decided by what the bundle CONTAINS: files with
- * `role: "script"`, or a frontmatter `allowed-tools` that asks for a shell,
- * which is an explicit declaration of executable intent.
+ * `role: "script"`, a compiled binary, or a frontmatter `allowed-tools` that
+ * asks for a shell, which is an explicit declaration of executable intent.
  *
  * A fenced shell block in SKILL.md is deliberately NOT part of that answer.
  * Prose is not capability: measured across a 90-skill repository, 64 of the 78
@@ -201,13 +218,16 @@ function referencesOutOfBundlePath(
  * mismatch a reviewer should see.
  */
 function classifyCapability(input: {
-  files: AnalyzedRegistrySkill["fileManifest"];
+  roles: RegistryFileRole[];
+  shipsExecutableBinary: boolean;
   hasShellFence: boolean;
   hasSensitiveTool: boolean;
 }): { capability: "prompt-only" | "executable"; undeclaredScripts: boolean } {
-  const shipsScripts = input.files.some((file) => file.role === "script");
+  const shipsScripts = input.roles.includes("script");
   const capability =
-    shipsScripts || input.hasSensitiveTool ? "executable" : "prompt-only";
+    shipsScripts || input.shipsExecutableBinary || input.hasSensitiveTool
+      ? "executable"
+      : "prompt-only";
   // Ships executable material but nothing in the instructions/tools declares it
   // — the "don't trust the manifest" gate.
   const undeclaredScripts =
@@ -234,6 +254,13 @@ export function analyzeRegistrySkill(input: {
     throw new RegistrySubmissionError(
       "REGISTRY_SUBMISSION_INVALID_SKILL",
       "Skill directory is missing SKILL.md",
+    );
+  }
+
+  if (!skillMd.isText) {
+    throw new RegistrySubmissionError(
+      "REGISTRY_SUBMISSION_INVALID_SKILL",
+      "SKILL.md must be UTF-8 text",
     );
   }
 
@@ -275,28 +302,42 @@ export function analyzeRegistrySkill(input: {
     .slice(0, MAX_DESCRIPTION_LENGTH);
 
   const allowedTools = readAllowedTools(frontmatter);
-  const fileManifest: RegistryFileManifest = discovered.files.map((file) => ({
+  const roles = discovered.files.map((file) => fileRole(file));
+  const fileManifest = discovered.files.map((file, index) => ({
     path: file.bundlePath,
     sha256: file.sha256,
     sizeBytes: file.sizeBytes,
-    role: fileRole(file.bundlePath),
+    role: roles[index]!,
   }));
 
-  const scanFiles = discovered.files.map((file) => ({
-    path: file.bundlePath,
-    contentText: file.contentText,
-    role: fileRole(file.bundlePath),
-  }));
-  const baseScan = scanRegistrySkill({ files: scanFiles, allowedTools });
+  const scanFiles = discovered.files.flatMap((file, index) => {
+    const role = roles[index]!;
+    return file.isText && role !== "asset"
+      ? [{ path: file.bundlePath, contentText: file.contentText, role }]
+      : [];
+  });
+  const binaryFiles = discovered.files
+    .filter((file) => !file.isText)
+    .map((file) => ({ path: file.bundlePath, bytes: file.bytes }));
+  const baseScan = scanRegistrySkill({
+    files: scanFiles,
+    binaryFiles,
+    allowedTools,
+  });
   const flags = new Set(baseScan.flags);
+  const executableBinaries = binaryFiles.flatMap((file) => {
+    const format = detectExecutableBinary(file);
+    return format ? [{ path: file.path, format }] : [];
+  });
 
-  const hasShellFence = discovered.files.some(
+  const hasShellFence = scanFiles.some(
     (file) =>
-      fileRole(file.bundlePath) === "model-readable" &&
+      file.role === "model-readable" &&
       SHELL_FENCE_PATTERN.test(file.contentText),
   );
   const { capability, undeclaredScripts } = classifyCapability({
-    files: fileManifest,
+    roles,
+    shipsExecutableBinary: executableBinaries.length > 0,
     hasShellFence,
     hasSensitiveTool: flags.has("tool:sensitive"),
   });
@@ -329,8 +370,10 @@ export function analyzeRegistrySkill(input: {
     repoSubpath: discovered.repoSubpath,
     capability,
     license,
-    contentSha256: skillMd.sha256,
-    scan: { reviewRequired: finalFlags.length > 0, flags: finalFlags },
+    scan: {
+      reviewRequired: scanFlagsRequireReview(finalFlags),
+      flags: finalFlags,
+    },
     fileManifest,
     allowedTools,
     findings: baseScan.findings,
@@ -347,10 +390,12 @@ export function analyzeRegistrySkill(input: {
             },
           ]
         : []),
-      ...(discovered.excludedFiles ?? []).map((file) => ({
-        code: "FILE_EXCLUDED",
+      // The finding names the file; this says what it was taken for, which a
+      // finding has no field to carry.
+      ...executableBinaries.map((file) => ({
+        code: "BINARY_EXECUTABLE",
         severity: "warning" as const,
-        message: file.reason,
+        message: `Ships executable code (${file.format}) that cannot be scanned as text. It runs only inside the sandbox; an administrator reviews it before the skill can be made public.`,
         file: file.path,
       })),
     ],

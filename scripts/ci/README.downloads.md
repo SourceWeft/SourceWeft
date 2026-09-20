@@ -40,16 +40,18 @@ download links do not require browser CORS configuration.
 ```text
 releases/v0.2.0-rc.1/<installer>.dmg
 releases/v0.2.0-rc.1/<installer>.exe
+releases/v0.2.0-rc.1/<installer>.AppImage
 releases/v0.2.0-rc.1/manifest.json
 channels/preview.json
 channels/stable.json
 ```
 
-The build job generates an artifact description using the actual host architecture
-and installer SHA-256. Release checks that both macOS and Windows are present,
-versions match the tag, filenames are unique, and all checksums match. Current
-builds are unsigned/not notarized; Windows local execution is unsupported. These
-facts are explicit in the manifest and must be updated when the build policy changes.
+The signed build job generates artifact descriptions using explicit Rust targets
+and installer SHA-256. Release checks that versions match the tag, filenames are
+unique, and all checksums match. Signed publication requires all four targets, macOS/Windows code signatures,
+macOS notarization and a signed Linux updater AppImage; verification-only builds remain unsigned. Windows local
+execution is unsupported. See [desktop updates](README.desktop-updates.md) for
+the signing prerequisites, four-target matrix and application update protocol.
 
 The workflow then:
 
@@ -85,7 +87,9 @@ not silently label the preview channel as stable.
 
 This manifest describes website downloads. It is not a Tauri updater manifest;
 in-app updates require the separate updater artifacts and cryptographic signatures.
-This change does not implement the website download page or in-app updates.
+Application updates are published separately under `updates/`; see
+[desktop updates](README.desktop-updates.md). Do not pass a website manifest to
+the application updater.
 
 ## Verification
 

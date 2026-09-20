@@ -2,6 +2,21 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { afterEach, test, vi } from "vitest";
 import { ContentError } from "../content/errors";
+
+// Object storage as an in-memory map, counting every blob read: the point of
+// the manifest model is how FEW of these a turn makes.
+const store = vi.hoisted(() => ({
+  blobs: new Map<string, Buffer>(),
+  blobReads: [] as string[],
+}));
+vi.mock("./storage", async (original) => ({
+  ...(await original<typeof import("./storage")>()),
+  readSkillBlob: async ({ objectKey }: { objectKey: string }) => {
+    store.blobReads.push(objectKey);
+    return store.blobs.get(objectKey)!;
+  },
+}));
+
 import {
   builtinSkillSelectionId,
   resolveSelectedSkills,
@@ -27,6 +42,7 @@ function workspaceSkill(
     configJson: {},
     enabledBy: null,
     enabledAt: null,
+    installedVia: "user",
     createdAt: new Date(0).toISOString(),
     updatedAt: new Date(0).toISOString(),
     ...overrides,
@@ -51,6 +67,7 @@ test("resolveSkillIdsWithSlashCommand resolves a managed builtin via the workspa
       configJson: {},
       enabledBy: null,
       enabledAt: null,
+      installedVia: "user",
       createdAt: new Date(0).toISOString(),
       updatedAt: new Date(0).toISOString(),
     }),
@@ -91,6 +108,7 @@ test("resolveSkillIdsWithSlashCommand ignores slash subcommands", async () => {
       configJson: {},
       enabledBy: null,
       enabledAt: null,
+      installedVia: "user",
       createdAt: new Date(0).toISOString(),
       updatedAt: new Date(0).toISOString(),
     }),
@@ -156,6 +174,7 @@ test("resolveSelectedSkills allows public builtin runtime ids from chat options"
 
 test("resolveSelectedSkills includes Hub-enabled workspace skills without request skill ids", async () => {
   const record = workspaceSkill();
+  const fileReads: string[] = [];
   const skills = await resolveSelectedSkills({
     teamId: "team-1",
     workspaceId: "workspace-1",
@@ -186,6 +205,10 @@ test("resolveSelectedSkills includes Hub-enabled workspace skills without reques
         storagePointer: "db://version-1",
         isCurrent: true,
         contentHash: "hash",
+        skillMd: null,
+        bundleSha256: null,
+        bundleObjectKey: null,
+        bundleSizeBytes: null,
         manifestJson: {
           slug: "custom-review",
           displayName: "Custom Review",
@@ -200,16 +223,31 @@ test("resolveSelectedSkills includes Hub-enabled workspace skills without reques
         createdAt: new Date(0),
         updatedAt: new Date(0),
       },
+      // The manifest of a `db_text` version: SKILL.md's text rides inline,
+      // every other body stays in the database until it is read.
       files: [
         {
           path: "SKILL.md",
           contentText: "# Custom Review",
+          objectKey: null,
           mimeType: "text/markdown",
           sizeBytes: 15,
           contentHash: "hash-file",
         },
+        {
+          path: "reference/checklist.md",
+          contentText: null,
+          objectKey: null,
+          mimeType: "text/markdown",
+          sizeBytes: 9,
+          contentHash: "hash-checklist",
+        },
       ],
     }),
+    readWorkspaceSkillFile: async (input) => {
+      fileReads.push(`${input.skillVersionId}:${input.path}`);
+      return { text: "- item 1" };
+    },
   });
 
   assert.equal(skills.length, 1);
@@ -217,6 +255,19 @@ test("resolveSelectedSkills includes Hub-enabled workspace skills without reques
   assert.equal(skills[0]?.sourceType, "workspace_custom");
   assert.equal(skills[0]?.name, "custom-review");
   assert.equal(skills[0]?.defaultEnabled, true);
+
+  // Resolved without a body read; SKILL.md is there up front, no stored bundle.
+  assert.equal(skills[0]?.skillMd, "# Custom Review");
+  assert.equal(skills[0]?.bundle, undefined);
+  assert.deepEqual(fileReads, []);
+  // A body comes from its row, once, however often the turn reads it.
+  const readFile = skills[0]!.readFile!;
+  assert.deepEqual(await readFile("reference/checklist.md"), {
+    text: "- item 1",
+  });
+  await readFile("reference/checklist.md");
+  assert.deepEqual(fileReads, ["version-1:reference/checklist.md"]);
+  await assert.rejects(readFile("not/in/manifest.md"), /ENOENT/);
 });
 
 test("resolveSelectedSkills ignores disabled workspace skills unless explicitly selected", async () => {
@@ -235,6 +286,7 @@ function registryBundle(input: {
   record: WorkspaceSkillRecord;
   contentHash: string;
   skillMdSha: string;
+  skillMd: string;
 }) {
   return {
     definition: {
@@ -256,10 +308,14 @@ function registryBundle(input: {
       skillId: input.record.skillId,
       version: "1.0.0",
       status: "published" as const,
-      storageType: "db_text" as const,
+      storageType: "object" as const,
       storagePointer: `github:acme/skill@${"a".repeat(40)}`,
       isCurrent: true,
       contentHash: input.contentHash,
+      skillMd: input.skillMd,
+      bundleSha256: "b".repeat(64),
+      bundleObjectKey: `skills/bundles/${"b".repeat(64)}.zip`,
+      bundleSizeBytes: 2048,
       manifestJson: {
         slug: "gh-acme-skill",
         displayName: "Community Skill",
@@ -295,14 +351,109 @@ function registryBundle(input: {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  store.blobs.clear();
+  store.blobReads = [];
 });
 
-test("resolveSelectedSkills resolves a registry skill from its stored bundle", async () => {
+function objectFileRow(path: string, mimeType: string, body: Uint8Array) {
+  const sha = createHash("sha256").update(body).digest("hex");
+  const objectKey = `skills/blobs/${sha.slice(0, 2)}/${sha}`;
+  store.blobs.set(objectKey, Buffer.from(body));
+  return {
+    path,
+    contentText: null,
+    objectKey,
+    mimeType,
+    sizeBytes: body.byteLength,
+    contentHash: sha,
+  };
+}
+
+test("resolveSelectedSkills resolves N object skills from their manifests with zero blob reads", async () => {
   const skillMd = "# Community Skill\ninstructions";
   const skillMdSha = createHash("sha256")
     .update(Buffer.from(skillMd, "utf8"))
     .digest("hex");
+  const records = ["a", "b", "c"].map((suffix) =>
+    workspaceSkill({
+      id: `workspace-skill-${suffix}`,
+      skillId: `skill-${suffix}`,
+      skillVersionId: `version-${suffix}`,
+    }),
+  );
+  const guide = new TextEncoder().encode("# Guide\nfollow it");
+  const font = new Uint8Array([0, 1, 2, 255, 254]);
 
+  const skills = await resolveSelectedSkills({
+    teamId: "team-1",
+    workspaceId: "workspace-1",
+    skillIds: [],
+    listEnabledWorkspaceSkills: async () => records,
+    listWorkspaceSkillsByIds: async () => [],
+    loadWorkspaceSkillVersion: async (input) => {
+      const record = records.find(
+        (candidate) => candidate.skillVersionId === input.skillVersionId,
+      )!;
+      const bundle = registryBundle({
+        record,
+        contentHash: skillMdSha,
+        skillMdSha,
+        skillMd,
+      });
+      return {
+        ...bundle,
+        definition: { ...bundle.definition, slug: `gh-acme-${record.skillId}` },
+        files: [
+          objectFileRow("SKILL.md", "text/markdown", Buffer.from(skillMd)),
+          objectFileRow("reference/guide.md", "text/markdown", guide),
+          objectFileRow("assets/brand.ttf", "font/ttf", font),
+        ],
+      };
+    },
+    readWorkspaceSkillFile: async () => {
+      throw new Error("an object version's bodies are blobs, not rows");
+    },
+  });
+
+  // Turn start: three skills, nine files, not one byte fetched.
+  assert.equal(skills.length, 3);
+  assert.deepEqual(store.blobReads, []);
+
+  const skill = skills[0]!;
+  assert.equal(skill.sourceType, "registry_github");
+  assert.equal(skill.skillMd, skillMd);
+  assert.deepEqual(skill.bundle, {
+    sha256: "b".repeat(64),
+    objectKey: `skills/bundles/${"b".repeat(64)}.zip`,
+    sizeBytes: 2048,
+  });
+  assert.deepEqual(
+    skill.files.map((file) => [file.path, file.isText, file.sizeBytes]),
+    [
+      ["SKILL.md", true, Buffer.byteLength(skillMd)],
+      ["reference/guide.md", true, guide.byteLength],
+      ["assets/brand.ttf", false, font.byteLength],
+    ],
+  );
+  assert.equal("contentText" in skill.files[0]!, false);
+  assert.equal("objectKey" in skill.files[0]!, false);
+
+  // A text file: one blob read, decoded as UTF-8, cached for the turn.
+  assert.deepEqual(await skill.readFile!("reference/guide.md"), {
+    text: "# Guide\nfollow it",
+  });
+  await skill.readFile!("reference/guide.md");
+  assert.equal(store.blobReads.length, 1);
+
+  // A binary: answered from the manifest, never fetched.
+  assert.deepEqual(await skill.readFile!("assets/brand.ttf"), {
+    binary: true,
+    sizeBytes: font.byteLength,
+  });
+  assert.equal(store.blobReads.length, 1);
+});
+
+test("a blob labelled text that is not valid UTF-8 is reported as binary, not decoded into mojibake", async () => {
   const record = workspaceSkill();
   const skills = await resolveSelectedSkills({
     teamId: "team-1",
@@ -310,26 +461,24 @@ test("resolveSelectedSkills resolves a registry skill from its stored bundle", a
     skillIds: [record.id],
     listEnabledWorkspaceSkills: async () => [],
     listWorkspaceSkillsByIds: async () => [record],
-    // A registry skill stores its bundle like any custom skill, so it resolves
-    // through the ordinary db_text path with no branch of its own.
     loadWorkspaceSkillVersion: async () => ({
-      ...registryBundle({ record, contentHash: skillMdSha, skillMdSha }),
+      ...registryBundle({
+        record,
+        contentHash: "hash",
+        skillMdSha: "hash",
+        skillMd: "# s",
+      }),
       files: [
-        {
-          path: "SKILL.md",
-          contentText: skillMd,
-          mimeType: "text/markdown",
-          sizeBytes: Buffer.byteLength(skillMd),
-          contentHash: skillMdSha,
-        },
+        objectFileRow("SKILL.md", "text/markdown", Buffer.from("# s")),
+        objectFileRow("data.txt", "text/plain", new Uint8Array([0xff, 0xfe, 0])),
       ],
     }),
   });
 
-  assert.equal(skills.length, 1);
-  assert.equal(skills[0]?.sourceType, "registry_github");
-  assert.equal(skills[0]?.files[0]?.path, "SKILL.md");
-  assert.equal(skills[0]?.files[0]?.contentText, skillMd);
+  assert.deepEqual(await skills[0]!.readFile!("data.txt"), {
+    binary: true,
+    sizeBytes: 3,
+  });
 });
 
 test("resolveSelectedSkills rejects explicitly selected disabled workspace skills", async () => {

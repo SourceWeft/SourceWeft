@@ -11,7 +11,8 @@
       "howItWorks": "運作方式",
       "pricing": "定價",
       "mcpServers": "MCP 服務",
-      "blog": "部落格"
+      "blog": "部落格",
+      "download": "下載"
     },
     "signIn": "登入",
     "getStarted": "開始使用",
@@ -33,7 +34,8 @@
       "about": "關於",
       "changelog": "更新日誌",
       "privacy": "隱私政策",
-      "terms": "服務條款"
+      "terms": "服務條款",
+      "download": "下載"
     },
     "copyright": "© {year} SourceWeft. 保留所有權利。",
     "builtBy": "由 SourceWeft 打造"
@@ -675,7 +677,8 @@
       "showSidebar": "顯示側邊欄",
       "sheetTitle": "導航與對話",
       "inviteManageMembers": "邀請並管理成員",
-      "conversationLoadError": "無法載入對話詳情"
+      "conversationLoadError": "無法載入對話詳情",
+      "newAgentChat": "新建智慧體對話"
     },
     "workspace": {
       "workspaces": "工作區",
@@ -1172,7 +1175,7 @@
     "submit": {
       "button": "提交技能",
       "title": "提交技能",
-      "description": "從公開的 GitHub 倉庫按固定版本匯入技能。我們會儲存技能檔案並在使用前進行檢查。被標記的技能需等待稽核。",
+      "description": "從公開的 GitHub 倉庫匯入固定版本的技能。我們會儲存技能檔案並在使用前進行檢查。被標記的技能需等待稽核。匯入在後臺執行——你可以關閉此對話方塊，之後在「我的提交」中找到它。",
       "repoAriaLabel": "GitHub 技能倉庫",
       "enterUrl": "請輸入公開的 GitHub 倉庫 URL。",
       "selectWorkspace": "提交技能前請先選擇工作區。",
@@ -1188,7 +1191,9 @@
         "indexed": "已索引",
         "queued": "待稽核",
         "failed": "失敗"
-      }
+      },
+      "notStarted": "匯入未能開始。",
+      "importSection": "匯入"
     },
     "introduction": {
       "from": "來自 {source}",
@@ -1301,7 +1306,10 @@
     "folderPicker": {
       "folderUnavailable": "資料夾不可用",
       "defaultTaskFolder": "預設任務資料夾",
-      "selectFolder": "選擇資料夾…"
+      "selectFolder": "選擇資料夾…",
+      "selectedFolderFallback": "已選擇的資料夾",
+      "chooseExistingFolder": "選擇已有資料夾…",
+      "useConversationFolder": "使用對話所在資料夾"
     },
     "local": {
       "historyPreserved": "歷史記錄仍可檢視，草稿會被保留。",
@@ -1345,6 +1353,11 @@
       "computerUnavailableSaved": "電腦不可用。你的第一條訊息已儲存。",
       "saveSourcesFailed": "開始此對話前無法儲存來源。",
       "firstMessageSavedCheck": "你的第一條訊息已儲存。重試相同請求前請先檢視對話。"
+    },
+    "subagent": {
+      "srConversation": "子智慧體對話",
+      "fallbackTitle": "子智慧體",
+      "parentChatFallback": "父對話"
     }
   },
   "dashboardChatCanvas": {
@@ -1522,7 +1535,9 @@
         "error": "失敗"
       },
       "delegatedTo": "已委派給 {agent}",
-      "delegatedToStatus": "已委派給 {agent} · {status}"
+      "delegatedToStatus": "已委派給 {agent} · {status}",
+      "openThread": "開啟子智慧體會話",
+      "newWindow": "新建視窗"
     },
     "userQuestion": {
       "waitingForAnswer": "正在等待你的回答",
@@ -2365,7 +2380,8 @@
       "readmeLoadFailed": "載入技能詳情失敗。",
       "galleryDialogTitle": "技能庫",
       "galleryDialogDescription": "為 {workspace} 安裝可複用的技能。",
-      "currentWorkspaceFallback": "當前工作區"
+      "currentWorkspaceFallback": "當前工作區",
+      "addedByAgent": "由智慧體新增"
     },
     "mcp": {
       "refresh": "重新整理 MCP 工具",

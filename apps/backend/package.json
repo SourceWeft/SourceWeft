@@ -46,7 +46,6 @@
     "@better-auth/oauth-provider": "1.7.2",
     "@better-auth/passkey": "1.7.2",
     "@better-auth/utils": "0.4.2",
-    "@daveyplate/better-auth-ui": "^3.4.0",
     "@firecrawl/anydoc": "0.2.4",
     "@hono/node-server": "^1.19.17",
     "@langchain/core": "^1.2.9",

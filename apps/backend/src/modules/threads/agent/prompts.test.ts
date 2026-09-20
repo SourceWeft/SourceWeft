@@ -5,7 +5,11 @@ import {
   createDefaultFilesystemMounts,
   createSandboxFilesystemMount,
 } from "./filesystem-capabilities";
-import { CHAT_SYSTEM_PROMPT, buildBaseSystemPrompt } from "./prompts";
+import {
+  CHAT_SYSTEM_PROMPT,
+  buildBaseSystemPrompt,
+  buildRuntimeSystemPrompt,
+} from "./prompts";
 
 test("base chat system prompt does not mention optional web tools", () => {
   assert.equal(CHAT_SYSTEM_PROMPT.includes("web_search"), false);
@@ -100,8 +104,14 @@ test("filesystem tool descriptions are generated from enabled mounts", () => {
   assert.match(withoutSkills.read_file, /\/files is non-citable/);
   assert.match(withoutSkills.read_file, /default limit is 100 source lines/);
   assert.match(withoutSkills.read_file, /explicit limits are capped at 1000/);
-  assert.match(withoutSkills.read_file, /Do not use read_file for binary files/);
-  assert.match(withoutSkills.read_file, /images, slide screenshots, PDFs, PPTX decks/);
+  assert.match(
+    withoutSkills.read_file,
+    /Do not use read_file for binary files/,
+  );
+  assert.match(
+    withoutSkills.read_file,
+    /images, slide screenshots, PDFs, PPTX decks/,
+  );
   assert.match(
     withoutSkills.read_file,
     /Only \/kb read_file output may include valid/,
@@ -138,4 +148,35 @@ test("filesystem tool descriptions are generated from enabled mounts", () => {
   );
   assert.match(withSandbox.read_file, /slide screenshots/u);
   assert.match(withSandbox.read_file, /publish_artifact/u);
+});
+
+test("persona prompt replaces the assistant identity but keeps mounts and citation rules", () => {
+  const prompt = buildBaseSystemPrompt({
+    personaPrompt: "You are the Explore delegate.",
+  });
+  assert.match(
+    prompt,
+    /<persona>\nYou are the Explore delegate\.\n<\/persona>/,
+  );
+  assert.equal(
+    prompt.includes("You are SourceWeft, a grounded assistant"),
+    false,
+  );
+  assert.match(prompt, /talking directly with the user/);
+  assert.match(prompt, /<evidence_workflow>/);
+  assert.match(prompt, /\/kb: Source Library knowledge/);
+  assert.match(prompt, /<citation_instructions>/);
+  assert.equal(prompt.split("<system_instruction>").length, 2);
+});
+
+test("persona prompt is ignored when blank and composes with runtime context", () => {
+  assert.equal(
+    buildBaseSystemPrompt({ personaPrompt: "   " }),
+    buildBaseSystemPrompt(),
+  );
+  const prompt = buildRuntimeSystemPrompt("Timezone: UTC", {
+    personaPrompt: "You plan.",
+  });
+  assert.match(prompt, /<persona>\nYou plan\.\n<\/persona>/);
+  assert.match(prompt, /<runtime_context>\nTimezone: UTC\n<\/runtime_context>/);
 });

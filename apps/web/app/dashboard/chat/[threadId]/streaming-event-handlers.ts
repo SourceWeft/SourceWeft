@@ -1,4 +1,9 @@
 import { sanitizeClientErrorMessage } from "../_components/chat-canvas/client-error-message";
+import {
+  isDelegateToolName,
+  readDelegateChildThreadId,
+} from "../_components/chat-canvas/delegate-tool-card-state";
+import { dispatchDashboardChatChildRefresh } from "../../_components/dashboard-chat-children-refresh";
 import type {
   CitationRecord,
   ModelReasoningSegmentRecord,
@@ -303,6 +308,17 @@ export function handleStreamingToolCallEvent({
   }
 
   context.streamToolCallsById.set(nextToolCall.id, nextToolCall);
+  // A finished `task` delegate the server projected into a child thread: tell
+  // the sidebar so the child shows up under its parent without a reload.
+  if (
+    isDelegateToolName(nextToolCall.tool) &&
+    nextToolCall.status !== "running"
+  ) {
+    const childThreadId = readDelegateChildThreadId(nextToolCall.output);
+    if (childThreadId) {
+      dispatchDashboardChatChildRefresh({ childThreadId });
+    }
+  }
   if (event.type === "tool-call-start" || event.type === "tool-input-delta") {
     // Tool blocks are progress only. Artifact outputs arrive as explicit
     // committed result blocks after publishing succeeds. `tool-input-delta`

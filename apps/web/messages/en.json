@@ -11,7 +11,8 @@
       "howItWorks": "How it works",
       "pricing": "Pricing",
       "mcpServers": "MCP Servers",
-      "blog": "Blog"
+      "blog": "Blog",
+      "download": "Download"
     },
     "signIn": "Sign in",
     "getStarted": "Get Started",
@@ -33,7 +34,8 @@
       "about": "About",
       "changelog": "Changelog",
       "privacy": "Privacy",
-      "terms": "Terms"
+      "terms": "Terms",
+      "download": "Download"
     },
     "copyright": "© {year} SourceWeft. All rights reserved.",
     "builtBy": "Built by SourceWeft"
@@ -675,7 +677,8 @@
       "showSidebar": "Show sidebar",
       "sheetTitle": "Navigation and conversations",
       "inviteManageMembers": "Invite & manage members",
-      "conversationLoadError": "Could not load the conversation details"
+      "conversationLoadError": "Could not load the conversation details",
+      "newAgentChat": "New agent chat"
     },
     "workspace": {
       "workspaces": "Workspaces",
@@ -1172,7 +1175,7 @@
     "submit": {
       "button": "Submit skill",
       "title": "Submit a skill",
-      "description": "Import skills from a public GitHub repository at a fixed version. We store the skill files and check them before use. Flagged skills wait for review.",
+      "description": "Import skills from a public GitHub repository at a fixed version. We store the skill files and check them before use. Flagged skills wait for review. The import runs in the background — you can close this and find it under My submissions.",
       "repoAriaLabel": "GitHub skill repository",
       "enterUrl": "Enter a public GitHub repository URL.",
       "selectWorkspace": "Select a workspace before submitting a skill.",
@@ -1188,7 +1191,9 @@
         "indexed": "indexed",
         "queued": "queued",
         "failed": "failed"
-      }
+      },
+      "notStarted": "The import was not started.",
+      "importSection": "Import"
     },
     "introduction": {
       "from": "From {source}",
@@ -1301,7 +1306,10 @@
     "folderPicker": {
       "folderUnavailable": "Folder unavailable",
       "defaultTaskFolder": "Default task folder",
-      "selectFolder": "Select folder…"
+      "selectFolder": "Select folder…",
+      "selectedFolderFallback": "Selected folder",
+      "chooseExistingFolder": "Choose existing folder…",
+      "useConversationFolder": "Use conversation folder"
     },
     "local": {
       "historyPreserved": "History remains readable and drafts are preserved.",
@@ -1345,6 +1353,11 @@
       "computerUnavailableSaved": "The computer is unavailable. Your first message is saved.",
       "saveSourcesFailed": "Could not save Sources before starting this conversation.",
       "firstMessageSavedCheck": "Your first message is saved. Check the conversation before retrying the same request."
+    },
+    "subagent": {
+      "srConversation": "Sub-agent conversation",
+      "fallbackTitle": "Sub-agent",
+      "parentChatFallback": "Parent chat"
     }
   },
   "dashboardChatCanvas": {
@@ -1522,7 +1535,9 @@
         "error": "Failed"
       },
       "delegatedTo": "Delegated to {agent}",
-      "delegatedToStatus": "Delegated to {agent} · {status}"
+      "delegatedToStatus": "Delegated to {agent} · {status}",
+      "openThread": "Open sub-agent thread",
+      "newWindow": "New window"
     },
     "userQuestion": {
       "waitingForAnswer": "Waiting for your answer",
@@ -2350,7 +2365,7 @@
       "toolOff": "Tool off",
       "hubOn": "Hub on",
       "hubOff": "Hub off",
-      "shipsScripts": "Ships scripts — off until you enable it",
+      "shipsScripts": "Ships scripts — runnable once switched on",
       "source": {
         "builtin": "Official",
         "team": "Team",
@@ -2365,7 +2380,8 @@
       "readmeLoadFailed": "Failed to load skill details.",
       "galleryDialogTitle": "Skills gallery",
       "galleryDialogDescription": "Install reusable skills for {workspace}.",
-      "currentWorkspaceFallback": "the current workspace"
+      "currentWorkspaceFallback": "the current workspace",
+      "addedByAgent": "Added by agent"
     },
     "mcp": {
       "refresh": "Refresh MCP tools",

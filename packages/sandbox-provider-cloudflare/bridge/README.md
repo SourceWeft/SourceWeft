@@ -41,6 +41,21 @@ update `CF_SANDBOX_API_KEY` in the backend environment and restart.
 
 Verify a deployment with `curl "$CF_SANDBOX_BRIDGE_URL/health"`.
 
+## Capacity
+
+The stock template ships `max_instances: 3`. Each chat thread that uses the
+sandbox holds one container for up to an hour, so that is three such
+conversations at once; the next is told the sandbox is unavailable (the bridge
+answers `503 … instance limit reached (3/3)`).
+
+`deploy.sh` sets `max_instances` — and the warm pool's
+`WARM_POOL_MAX_INSTANCES`, which must match — from the `MAX_INSTANCES` constant
+near its end (currently 50) on every run, so a fresh scaffold cannot fall back
+to 3. To change capacity, edit that constant and run `bridge:deploy`. The
+Cloudflare account ceiling is far above this (6 TiB memory / 1,500 vCPU
+concurrently, i.e. 1,500+ `standard-1` instances), and billing is for container
+running time, not for the configured maximum.
+
 ## Rollback to Daytona
 
 Set `SOURCEWEFT_SANDBOX_PROVIDER=daytona` and restart the backend. Sandbox DB

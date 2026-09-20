@@ -1,15 +1,29 @@
 # Skill registry E2E
 
-Real local Web/API, authentication, PostgreSQL and pinned GitHub downloads. Core APIs are not mocked and skill scripts are not executed.
+Real local Web/API/worker, authentication, PostgreSQL, object storage and pinned GitHub downloads. Core APIs are not mocked and skill scripts are not executed.
 
 ## Prepare an isolated environment
 
 1. Install the frozen lockfile; run the existing builds for `@sourceweft/market-contracts` and `@sourceweft/ui-web`.
 2. In `apps/backend`, run `SKILL_TEST_ENV_SOURCE=/absolute/path/to/admin.env pnpm exec tsx scripts/prepare-skill-tests.ts`. It creates a new isolated database using the existing migration helper and writes `.env.skills-test` with random test secrets. The source database is not modified.
 3. Set `NEXT_PUBLIC_API_BASE_URL=http://localhost:3311` and `NEXT_PUBLIC_WEB_BASE_URL=http://localhost:3310` in that test env. Set the same URLs and isolated DATABASE_URL in web `.env.local`.
-4. Start API from backend: `DOTENV_CONFIG_PATH=.env.skills-test pnpm exec tsx src/api/main.ts`. Start Web from web: `pnpm exec next dev --port 3310`.
+4. Start API **and the worker** from backend: `DOTENV_CONFIG_PATH=.env.skills-test pnpm exec tsx src/api/main.ts` and `DOTENV_CONFIG_PATH=.env.skills-test pnpm exec tsx src/worker/main.ts`. Skill imports are asynchronous — without the worker every submission stays `queued`. The test env carries its own `JOB_QUEUE_NAME`, so this worker never consumes another deployment's jobs. Start Web from web: `pnpm exec next dev --port 3310`.
+   If this machine's DNS hands out placeholder addresses (a proxy in fake-IP/TUN mode resolves every host into `198.18.0.0/15`), the model gateway's endpoint policy refuses the model provider and E9–E15 fail with "Endpoint resolved to an address not allowed by deployment policy". Start the test API and worker with `NODE_ENV=development`, which is the existing switch for local networking; leave it unset anywhere else.
+   Run one Playwright invocation at a time against this environment: every case resets the registry tables, and the Cloudflare account has a fixed number of container slots, so an overlapping run fails cases that are fine. `pgrep -f skills-registry.spec` shows whether one is still going.
 5. In backend run `pnpm exec tsx scripts/seed-skills-e2e.ts`, then restart the test API. This uses normal registration and configures only this test deployment's administrator allowlist. Credentials are in an ignored local file.
 6. In web run `pnpm test:e2e:skills`. The suite performs normal browser login once for each user, then reuses genuine session cookies in isolated contexts; authentication and rate limiting stay enabled. Each case clears registry records in the explicitly named disposable database. Do not run other database tests against that database concurrently.
+
+### Chat cases (E9–E11)
+
+E9–E11 drive the chat agent with a REAL model: install a catalog skill and use it in the same turn, find a fitting skill without being told about one, and import a GitHub link in the background. `prepare-skill-tests.ts` enables them when the source env has `DEEPSEEK_API_KEY` and `MODEL_GATEWAY_GLOBAL_CONFIG_PATH`: it derives a minimal gateway config (`.env.skills-test.gateway.json`, git-ignored) containing only the DeepSeek gateway, the chat profiles it serves, and the embedding profiles the backend requires at boot. Without a key they report **BLOCKED**. They cost a few model calls per run.
+
+### Real-world repositories (E12–E13)
+
+Pinned commits of real repositories, for what the inert fixtures cannot show: `anthropics/skills` `canvas-design` (83 files, 54 of them `.ttf` — binaries must survive ingest whole) and `obra/superpowers` (15 skills in one repository; chat then installs only the one that was named).
+
+### Sandbox cases (E14–E15)
+
+A skill's own script really executed in the cloud sandbox: the agent is asked for `sha256sum` of the staged script, and the digest must equal the hash recorded at ingest — the model cannot guess a digest, so a match proves the bundle reached the sandbox byte-for-byte from object storage and the command ran there. E15 installs the skill mid-turn and runs it in that same turn. `prepare-skill-tests.ts` passes the source env's sandbox provider settings (`SOURCEWEFT_SANDBOX_*`, `CF_SANDBOX_*` / `DAYTONA_*`) through; without `SOURCEWEFT_SANDBOX_ENABLED=true` they report **BLOCKED**. They create real sandboxes and take about a minute each.
 
 The default source is a real script-bearing Cisco fixture; it is queued by the current local rules. The authenticated test administrator publishes it for installation tests. This does not substitute for malformed or changed-content fixtures.
 

@@ -1,5 +1,6 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
 import {
@@ -13,6 +14,8 @@ import { toast } from "sonner";
 import { useChatHubContext } from "./chat-hub-context";
 import { SourcesHub } from "./sources-hub";
 import { ArtifactPreviewPanel } from "./sources-hub";
+import { isEmbedMode } from "../../../../lib/thread-embed-params";
+import { SubagentPanel } from "../[threadId]/_thread/subagent-panel";
 import { useWorkspaceLayout } from "../../_components/dashboard-workspace-layout";
 
 export function HubSlot() {
@@ -44,6 +47,15 @@ export function HubSlot() {
 
   if (!registration) {
     return null;
+  }
+
+  if (registration.subagentPanel) {
+    return (
+      <SubagentPanel
+        className="w-[min(640px,45vw)] min-w-[480px] max-w-[720px] shrink-0 border-l border-border/70 animate-in slide-in-from-right-4 duration-200"
+        panel={registration.subagentPanel}
+      />
+    );
   }
 
   if (registration.previewArtifact) {
@@ -83,6 +95,9 @@ export function HubSlot() {
       hubSkills={registration.hubSkills}
       capabilityCatalog={registration.capabilityCatalog}
       mode={registration.mode}
+      draftWorkContext={registration.draftWorkContext}
+      onWorkFolderChange={registration.onWorkFolderChange}
+      onChooseWorkFolder={registration.onChooseWorkFolder}
       onArtifactOpen={(artifact) => {
         context?.desktop.saveView({
           ...context.desktop.getView(),
@@ -159,6 +174,9 @@ function MobileHubDrawer() {
           hubSkills={registration.hubSkills}
           capabilityCatalog={registration.capabilityCatalog}
           mode={registration.mode}
+          draftWorkContext={registration.draftWorkContext}
+          onWorkFolderChange={registration.onWorkFolderChange}
+          onChooseWorkFolder={registration.onChooseWorkFolder}
           onArtifactOpen={(artifact) => {
             registration.onArtifactOpen(artifact);
             context.setMobileHubOpen(false);
@@ -196,21 +214,40 @@ function MobileHubDrawer() {
   );
 }
 
-function ChatHubScaffold({ children }: { children: ReactNode }) {
+function ChatHubScaffold({
+  children,
+  embed,
+}: {
+  children: ReactNode;
+  embed: boolean;
+}) {
   const { sourcesVisible } = useDashboardChatState();
   const { canDockHub } = useWorkspaceLayout();
   const context = useChatHubContext();
+
+  // An embedded thread (the document inside a sub-agent panel) is just the
+  // conversation: no hub beside it, no drawer over it.
+  if (embed) {
+    return (
+      <div className="flex h-full min-h-0 w-full overflow-hidden">
+        <div className="min-h-0 min-w-0 flex-1 overflow-hidden">{children}</div>
+      </div>
+    );
+  }
+
+  // A sub-agent panel takes the right-hand slot even while the hub is hidden;
+  // otherwise the slot follows the hub toggle and the desktop hub host.
+  const slotVisible =
+    canDockHub &&
+    context?.desktop.mode !== "detached" &&
+    context?.desktop.inlineVisible !== false &&
+    (sourcesVisible || Boolean(context?.registration.subagentPanel));
 
   return (
     <>
       <div className="flex h-full min-h-0 w-full overflow-hidden">
         <div className="min-h-0 min-w-0 flex-1 overflow-hidden">{children}</div>
-        {sourcesVisible &&
-        canDockHub &&
-        context?.desktop.mode !== "detached" &&
-        context?.desktop.inlineVisible !== false ? (
-          <HubSlot />
-        ) : null}
+        {slotVisible ? <HubSlot /> : null}
       </div>
       {!canDockHub ? <MobileHubDrawer /> : null}
     </>
@@ -222,5 +259,8 @@ export default function ChatWorkspaceShell({
 }: {
   children: ReactNode;
 }) {
-  return <ChatHubScaffold>{children}</ChatHubScaffold>;
+  const searchParams = useSearchParams();
+  const embed = isEmbedMode(searchParams);
+
+  return <ChatHubScaffold embed={embed}>{children}</ChatHubScaffold>;
 }

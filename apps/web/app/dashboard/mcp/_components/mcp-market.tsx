@@ -8,7 +8,6 @@ import {
   ChevronDown,
   ChevronRight,
   ExternalLink,
-  Github,
   Laptop,
   ListFilter,
   Loader2,
@@ -52,7 +51,8 @@ import { contentClient, workspaceClient } from "../../../../lib/sdk";
 import { desktopBridge } from "../../../../lib/desktop-bridge";
 import { formatShortRelativeTime } from "../../../../lib/relative-time";
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
-import { McpIcon } from "../../_components/dashboard-icons";
+import { GitHubIcon } from "../../../_components/brand-icons";
+import { McpIcon } from "../../../_components/site-icons";
 import { invalidateWorkspaceMcpCache } from "../../chat/_components/sources-hub/mcp/use-mcp";
 import { CredentialsDialog } from "./mcp-credentials-dialog";
 import { McpDetailDialog } from "./mcp-detail-dialog";
@@ -798,7 +798,7 @@ function McpCard({
                   target="_blank"
                 >
                   {sourceIsGithub ? (
-                    <Github className="size-4" />
+                    <GitHubIcon className="size-4" />
                   ) : (
                     <ExternalLink className="size-4" />
                   )}

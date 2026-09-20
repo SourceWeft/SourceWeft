@@ -1,7 +1,8 @@
+import { McpIcon as McpBrandIcon } from "../../../../_components/site-icons";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Server } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { hasLocale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { routing } from "../../../../../i18n/routing";
@@ -194,7 +195,7 @@ export default async function PublicMcpCategoryPage({
           </Link>
           <div className="max-w-4xl">
             <span className="mb-5 inline-flex items-center gap-2 rounded-full border border-zinc-300 bg-white/48 px-3 py-1 text-xs font-medium text-zinc-600 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-400">
-              <Server className="size-3.5" />
+              <McpBrandIcon className="size-3.5" />
               {category.name}
             </span>
             <h1 className="text-4xl font-semibold leading-tight tracking-tight sm:text-5xl">

@@ -152,6 +152,15 @@ export async function handleUnhandledWorkerRuntimeError(input: {
 
 export function installWorkerProcessErrorGuards(input: {
   persistThreadRunFailure?: PersistThreadRunFailure;
+  /**
+   * Called once an `uncaughtException` has been recorded (and the chat run it
+   * belonged to persisted as failed). A synchronous throw that escaped every
+   * handler leaves the process in an undefined state, so — unlike an unhandled
+   * rejection, which stays scoped to its job — the worker should stop taking
+   * jobs and exit for its supervisor to restart it. A second exception while
+   * that is under way calls this again; the callee must then exit at once.
+   */
+  restartAfterException?: () => void;
 }) {
   const handleRejection = (reason: unknown) => {
     void handleUnhandledWorkerRuntimeError({
@@ -165,7 +174,9 @@ export function installWorkerProcessErrorGuards(input: {
       error,
       event: "uncaughtException",
       persistThreadRunFailure: input.persistThreadRunFailure,
-    });
+    })
+      .catch(() => undefined)
+      .finally(() => input.restartAfterException?.());
   };
 
   process.on("unhandledRejection", handleRejection);

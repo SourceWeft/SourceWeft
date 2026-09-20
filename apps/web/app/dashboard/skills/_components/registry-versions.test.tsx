@@ -144,3 +144,67 @@ test("changing the viewed version clears old documents; a failed load stays empt
   expect(container.querySelector('[role="alert"]')).toBeNull();
   expect(api.switchRegistryVersion).not.toHaveBeenCalled();
 });
+
+test("a version that can do more asks in the app's own dialog, names what changed, and switches only on yes", async () => {
+  const { HttpClientError } = await import("@sourceweft/sdk");
+  const installed = { ...fixture().version, id: "v1", status: "published" };
+  const target = { ...fixture(), version: { ...installed, id: "v2" } };
+  api.listRegistryVersions.mockResolvedValue({
+    items: [target.version, installed],
+    nextCursor: null,
+    installed: { id: "ws-skill", skillVersionId: "v1" },
+  });
+  api.getRegistryVersion.mockResolvedValue(target);
+  api.switchRegistryVersion.mockImplementation(
+    async (_ws: string, _id: string, _version: string, options?: unknown) => {
+      if (options) return { workspaceSkill: {} };
+      throw new HttpClientError({
+        status: 409,
+        statusText: "Conflict",
+        code: "SKILL_VERSION_ESCALATION",
+        message: "This version adds executable scripts.",
+        details: { addsScripts: true, newFlags: ["binary:executable"] },
+      });
+    },
+  );
+  const confirm = vi.spyOn(window, "confirm");
+  const onChanged = vi.fn();
+  container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  await act(async () =>
+    root.render(
+      withIntl(
+        <RegistryVersions
+          workspaceId="workspace"
+          catalogId="skill:v2"
+          initialVersionId="v2"
+          onView={() => {}}
+          onChanged={onChanged}
+        />,
+      ),
+    ),
+  );
+  const button = (label: string) =>
+    [...document.body.querySelectorAll("button")].find(
+      (node) => node.textContent?.trim() === label,
+    )!;
+
+  await act(async () => button("Use this version").click());
+  const dialog = document.body.querySelector('[role="alertdialog"]')!;
+  expect(dialog.textContent).toContain("Adds scripts that run in the sandbox");
+  expect(dialog.textContent).toContain("Ships a compiled binary");
+  expect(confirm).not.toHaveBeenCalled();
+  expect(api.switchRegistryVersion).toHaveBeenCalledTimes(1);
+  expect(onChanged).not.toHaveBeenCalled();
+
+  await act(async () => button("Switch to it").click());
+  expect(api.switchRegistryVersion).toHaveBeenLastCalledWith(
+    "workspace",
+    "ws-skill",
+    "v2",
+    { acknowledgeEscalation: true },
+  );
+  expect(onChanged).toHaveBeenCalledTimes(1);
+  expect(document.body.querySelector('[role="alertdialog"]')).toBeNull();
+});

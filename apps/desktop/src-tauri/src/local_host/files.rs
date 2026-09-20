@@ -340,7 +340,11 @@ fn safe_components(relative: &str) -> Result<Vec<&std::ffi::OsStr>> {
 }
 
 #[cfg(unix)]
-fn open_file_beneath(root: &Path, parts: &[&std::ffi::OsStr], final_flags: i32) -> Result<File> {
+pub(crate) fn open_file_beneath(
+    root: &Path,
+    parts: &[&std::ffi::OsStr],
+    final_flags: i32,
+) -> Result<File> {
     use std::{
         ffi::CString,
         os::{
@@ -556,4 +560,94 @@ impl LocalHost {
             "Local file writes require macOS",
         ))
     }
+}
+
+/// Enumerate through a held descriptor: a renamed parent or swapped symlink must
+/// not redirect a draft listing outside the picker-authorized directory.
+#[cfg(target_os = "macos")]
+pub(crate) fn list_granted_directory(
+    root: &Path,
+    relative: &Path,
+) -> Result<Vec<serde_json::Value>> {
+    use std::{
+        ffi::{CStr, OsStr},
+        os::{fd::IntoRawFd, unix::ffi::OsStrExt},
+    };
+    let mut parts = Vec::new();
+    for component in relative.components() {
+        match component {
+            Component::Normal(part) => parts.push(part),
+            Component::CurDir => (),
+            _ => {
+                return Err(HostError::new(
+                    "PATH_DENIED",
+                    "Outside the selected directory",
+                ))
+            }
+        }
+    }
+    if parts.is_empty() {
+        parts.push(OsStr::new("."));
+    }
+    let descriptor =
+        open_file_beneath(root, &parts, libc::O_RDONLY | libc::O_DIRECTORY)?.into_raw_fd();
+    let raw = unsafe { libc::fdopendir(descriptor) };
+    if raw.is_null() {
+        unsafe {
+            libc::close(descriptor);
+        }
+        return Err(std::io::Error::last_os_error().into());
+    }
+    struct Directory(*mut libc::DIR);
+    impl Drop for Directory {
+        fn drop(&mut self) {
+            unsafe {
+                libc::closedir(self.0);
+            }
+        }
+    }
+    let directory = Directory(raw);
+    let mut files = Vec::new();
+    loop {
+        unsafe {
+            *libc::__error() = 0;
+        }
+        let entry = unsafe { libc::readdir(directory.0) };
+        if entry.is_null() {
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() != Some(0) {
+                return Err(error.into());
+            }
+            break;
+        }
+        let name = unsafe { CStr::from_ptr((*entry).d_name.as_ptr()) };
+        if name.to_bytes() == b"." || name.to_bytes() == b".." {
+            continue;
+        }
+        let mut meta: libc::stat = unsafe { std::mem::zeroed() };
+        if unsafe {
+            libc::fstatat(
+                descriptor,
+                name.as_ptr(),
+                &mut meta,
+                libc::AT_SYMLINK_NOFOLLOW,
+            )
+        } != 0
+        {
+            return Err(std::io::Error::last_os_error().into());
+        }
+        let kind = meta.st_mode & libc::S_IFMT;
+        let is_dir = kind == libc::S_IFDIR;
+        if !is_dir && (kind != libc::S_IFREG || meta.st_nlink > 1) {
+            continue;
+        }
+        if files.len() >= 500 {
+            return Err(HostError::new(
+                "DIRECTORY_TOO_LARGE",
+                "More than 500 entries. Choose a narrower directory.",
+            ));
+        }
+        files.push(serde_json::json!({"path":root.join(relative).join(OsStr::from_bytes(name.to_bytes())),"is_dir":is_dir,"size":meta.st_size}));
+    }
+    Ok(files)
 }

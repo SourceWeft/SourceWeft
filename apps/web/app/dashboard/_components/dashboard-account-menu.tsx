@@ -4,7 +4,7 @@ import { useBillingAvailable } from "../../../lib/billing-edition/capabilities";
 
 import * as React from "react";
 import { useTranslations } from "next-intl";
-import { useAuthenticate } from "@daveyplate/better-auth-ui";
+import { useAuthenticate } from "@better-auth-ui/react";
 import {
   CreditCard,
   ChevronsUpDown,
@@ -73,7 +73,7 @@ export function DashboardAccountMenu({
   const t = useTranslations("dashboardNav");
   const { isMobile } = useSidebar();
   const billingAvailable = useBillingAvailable();
-  const authState = useAuthenticate();
+  const authState = useAuthenticate(authClient);
   const sessionState = authState.data as
     | {
         user?: { email?: string; image?: string | null; name?: string };

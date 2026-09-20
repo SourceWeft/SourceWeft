@@ -599,9 +599,14 @@ export function ChatWorkContext({
 
 export function WorkingFolderPicker({
   creation,
+  onChooseFolder,
   disabled = false,
 }: {
-  creation: ChatCreationContext;
+  creation: Pick<
+    ChatCreationContext,
+    "target" | "nativeId" | "selectedDevice" | "setFolder"
+  >;
+  onChooseFolder?: () => Promise<void>;
   disabled?: boolean;
 }) {
   const t = useTranslations("dashboardChat");
@@ -610,6 +615,7 @@ export function WorkingFolderPicker({
   const [open, setOpen] = useState(false);
   const target = creation.target;
   const id = target?.kind === "local" ? target.deviceId : null;
+  const selectedFolderId = target?.kind === "local" ? target.folderId : null;
   useEffect(() => {
     let live = true;
     setFolders([]);
@@ -630,7 +636,7 @@ export function WorkingFolderPicker({
     return () => {
       live = false;
     };
-  }, [id, creation.selectedDevice?.connected]);
+  }, [id, creation.selectedDevice?.connected, selectedFolderId]);
   if (target?.kind !== "local") return null;
   const folder = folders.find((f) => f.id === target.folderId);
   return (
@@ -644,8 +650,8 @@ export function WorkingFolderPicker({
           <span className="truncate">
             {folder?.name ??
               (target.folderId
-                ? t("folderPicker.folderUnavailable")
-                : t("work.workingDirectory"))}
+                ? t("folderPicker.selectedFolderFallback")
+                : t("folderPicker.chooseExistingFolder"))}
           </span>
           <ChevronDown className="size-3 shrink-0" />
         </button>
@@ -662,7 +668,7 @@ export function WorkingFolderPicker({
             setOpen(false);
           }}
         >
-          {t("folderPicker.defaultTaskFolder")}
+          {t("folderPicker.useConversationFolder")}
         </Button>
         {folders.map((f) => (
           <Button
@@ -684,6 +690,11 @@ export function WorkingFolderPicker({
             onClick={async () => {
               setError(null);
               try {
+                if (onChooseFolder) {
+                  await onChooseFolder();
+                  setOpen(false);
+                  return;
+                }
                 const challenge = await localRequest<{
                   ticket: string;
                   userId: string;

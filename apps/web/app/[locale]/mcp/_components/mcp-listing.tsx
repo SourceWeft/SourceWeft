@@ -1,5 +1,6 @@
+import { McpIcon as McpBrandIcon } from "../../../_components/site-icons";
 import Link from "next/link";
-import { ArrowLeft, ArrowRight, Search, Server } from "lucide-react";
+import { ArrowLeft, ArrowRight, Search } from "lucide-react";
 import type {
   ListMarketMcpResponse,
   MarketCategory,
@@ -262,7 +263,7 @@ export async function McpListingView({
           />
         ) : (
           <div className="mt-6 rounded-xl border border-zinc-300 bg-white/54 p-10 text-center dark:border-white/10 dark:bg-white/[0.03]">
-            <Server className="mx-auto mb-4 size-8 text-zinc-400" />
+            <McpBrandIcon className="mx-auto mb-4 size-8 text-zinc-400" />
             <h2 className="text-xl font-semibold tracking-tight">
               {hasFilters ? t("noMatchTitle") : t("syncingTitle")}
             </h2>

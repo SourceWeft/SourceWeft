@@ -1,7 +1,14 @@
 "use client";
 
-import { RedirectToSignUp } from "@daveyplate/better-auth-ui";
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 
 export function JoinClient() {
-  return <RedirectToSignUp />;
+  const router = useRouter();
+
+  useEffect(() => {
+    router.replace("/auth/sign-up");
+  }, [router]);
+
+  return null;
 }

@@ -11,6 +11,16 @@ import {
   GitCommitHorizontal,
   Loader2,
 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@sourceweft/ui-web/components/ui/alert-dialog";
 import { Badge } from "@sourceweft/ui-web/components/ui/badge";
 import {
   Select,
@@ -20,7 +30,36 @@ import {
   SelectValue,
 } from "@sourceweft/ui-web/components/ui/select";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
+import { HttpClientError } from "@sourceweft/sdk";
 import { contentClient } from "../../../../lib/sdk";
+
+/** What the API reports when a version can do more than the installed one. */
+type VersionEscalation = { addsScripts: boolean; newFlags: string[] };
+
+function readEscalation(details: unknown): VersionEscalation {
+  const value = (details ?? {}) as Partial<VersionEscalation>;
+  return {
+    addsScripts: value.addsScripts === true,
+    newFlags: Array.isArray(value.newFlags)
+      ? value.newFlags.filter(
+          (flag): flag is string => typeof flag === "string",
+        )
+      : [],
+  };
+}
+
+/** A scan flag in words; an unknown one is shown as it is rather than hidden. */
+function describeScanFlag(flag: string) {
+  if (flag === "binary:executable") return "Ships a compiled binary";
+  if (flag === "tool:sensitive") return "Asks for sensitive tools";
+  if (flag.startsWith("egress:"))
+    return `Sends data out or runs remote code (${flag})`;
+  if (flag.startsWith("injection:"))
+    return `Contains instructions aimed at the model (${flag})`;
+  if (flag.startsWith("secret:"))
+    return `Contains something that looks like a credential (${flag})`;
+  return flag;
+}
 
 export function RegistryVersions({
   workspaceId,
@@ -43,6 +82,9 @@ export function RegistryVersions({
   );
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
+  const [escalation, setEscalation] = React.useState<VersionEscalation | null>(
+    null,
+  );
   const [reload, setReload] = React.useState(0);
   React.useEffect(() => {
     let active = true;
@@ -82,7 +124,7 @@ export function RegistryVersions({
       active = false;
     };
   }, [workspaceId, catalogId, selected, onView, reload]);
-  async function switchVersion() {
+  async function switchVersion(acknowledgeEscalation = false) {
     if (!list?.installed) return;
     setBusy(true);
     setError(null);
@@ -91,10 +133,23 @@ export function RegistryVersions({
         workspaceId,
         list.installed.id,
         selected,
+        acknowledgeEscalation ? { acknowledgeEscalation: true } : undefined,
       );
+      setEscalation(null);
       setReload((v) => v + 1);
       onChanged();
     } catch (e) {
+      // A version that adds scripts or new scan flags is not switched to
+      // silently: the API names what escalates, and the dialog asks.
+      if (
+        !acknowledgeEscalation &&
+        e instanceof HttpClientError &&
+        e.code === "SKILL_VERSION_ESCALATION"
+      ) {
+        setEscalation(readEscalation(e.details));
+        return;
+      }
+      setEscalation(null);
       setError(e instanceof Error ? e.message : t("versions.switchFailed"));
     } finally {
       setBusy(false);
@@ -212,7 +267,7 @@ export function RegistryVersions({
                 size="sm"
                 className="h-7 text-xs"
                 disabled={busy || current?.status !== "published"}
-                onClick={switchVersion}
+                onClick={() => void switchVersion()}
               >
                 {t("versions.useThisVersion")}
               </Button>
@@ -326,6 +381,45 @@ export function RegistryVersions({
           </div>
         </details>
       ) : null}
+      <AlertDialog
+        open={escalation !== null}
+        onOpenChange={(open) => {
+          if (!open && !busy) setEscalation(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>This version can do more</AlertDialogTitle>
+            <AlertDialogDescription>
+              Compared with the version installed now, it:
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <ul className="list-disc space-y-1 pl-5 text-sm">
+            {escalation?.addsScripts ? (
+              <li>Adds scripts that run in the sandbox</li>
+            ) : null}
+            {escalation?.newFlags.map((flag) => (
+              <li key={flag}>{describeScanFlag(flag)}</li>
+            ))}
+          </ul>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy}>
+              Keep the installed version
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={busy}
+              onClick={(event) => {
+                // Stay open until the switch has actually happened.
+                event.preventDefault();
+                void switchVersion(true);
+              }}
+            >
+              {busy ? <Loader2 className="size-3.5 animate-spin" /> : null}
+              Switch to it
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   );
 }

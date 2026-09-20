@@ -42,6 +42,9 @@ export function SourceWeftHeader({
     },
     { href: `${landingBase}#pricing`, label: t("nav.pricing"), gated: true },
     { href: addLocalePrefix("/mcp", localePrefix), label: t("nav.mcpServers"), gated: false },
+    // Not migrated into the locale-prefixed marketing tree yet — new since
+    // this i18n work started; stays a plain path like an un-migrated route.
+    { href: "/download", label: t("nav.download"), gated: false },
     { href: addLocalePrefix("/blog", localePrefix), label: t("nav.blog"), gated: false },
   ];
 

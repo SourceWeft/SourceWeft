@@ -1,4 +1,5 @@
 import {
+  check,
   pgTable,
   text,
   timestamp,
@@ -8,6 +9,7 @@ import {
   boolean,
   integer,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { threads } from "./threads";
 
 export const localDeviceEnrollments = pgTable("local_device_enrollments", {
@@ -66,9 +68,9 @@ export const localToolInvocations = pgTable(
     deviceId: text("device_id")
       .notNull()
       .references(() => localDevices.id),
-    threadId: text("thread_id")
-      .notNull()
-      .references(() => threads.id, { onDelete: "cascade" }),
+    threadId: text("thread_id").references(() => threads.id, {
+      onDelete: "cascade",
+    }),
     userId: text("user_id").notNull(),
     runId: text("run_id"),
     accessId: text("access_id"),
@@ -86,6 +88,10 @@ export const localToolInvocations = pgTable(
       .notNull(),
   },
   (table) => [
+    check(
+      "local_invocation_scope",
+      sql`(${table.threadId} IS NOT NULL AND ${table.action} NOT IN ('folder.list', 'folder.read')) OR (${table.threadId} IS NULL AND ${table.action} IN ('folder.list', 'folder.read') AND ${table.payload} ? 'folderId' AND jsonb_typeof(${table.payload}->'folderId') = 'string' AND length(${table.payload}->>'folderId') > 0)`,
+    ),
     index("local_invocations_device_status_idx").on(
       table.deviceId,
       table.status,

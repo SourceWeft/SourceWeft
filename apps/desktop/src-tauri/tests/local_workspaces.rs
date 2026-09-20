@@ -29,9 +29,12 @@ fn availability_probe_never_allocates_or_repairs_a_directory() {
     host.check_workspace("owner", "thread", None, None).unwrap();
     assert_eq!(fs::read_dir(host.workspace_base()).unwrap().count(), 0);
     let workspace = host.ensure_workspace("owner", "thread").unwrap();
-    host.check_workspace("owner", "thread", Some(&workspace.id), None).unwrap();
+    host.check_workspace("owner", "thread", Some(&workspace.id), None)
+        .unwrap();
     fs::rename(&workspace.path, workspace.path.with_extension("moved")).unwrap();
-    assert!(host.check_workspace("owner", "thread", Some(&workspace.id), None).is_err());
+    assert!(host
+        .check_workspace("owner", "thread", Some(&workspace.id), None)
+        .is_err());
     assert!(!workspace.path.exists());
 }
 
@@ -42,14 +45,22 @@ fn availability_probe_checks_selected_grant_ownership_and_root_identity() {
     let selected = temp.path().join("selected");
     fs::create_dir(&selected).unwrap();
     let (grant, _) = host.grant_directory("owner", &selected).unwrap();
-    host.check_workspace("owner", "thread", None, Some(&grant)).unwrap();
+    host.check_workspace("owner", "thread", None, Some(&grant))
+        .unwrap();
     assert_eq!(fs::read_dir(host.workspace_base()).unwrap().count(), 0);
-    assert!(host.check_workspace("other", "thread", None, Some(&grant)).is_err());
-    let workspace = host.ensure_workspace_with_grant("owner", "thread", Some(&grant)).unwrap();
-    host.check_workspace("owner", "thread", Some(&workspace.id), Some(&grant)).unwrap();
+    assert!(host
+        .check_workspace("other", "thread", None, Some(&grant))
+        .is_err());
+    let workspace = host
+        .ensure_workspace_with_grant("owner", "thread", Some(&grant))
+        .unwrap();
+    host.check_workspace("owner", "thread", Some(&workspace.id), Some(&grant))
+        .unwrap();
     fs::rename(&selected, temp.path().join("moved")).unwrap();
     fs::create_dir(&selected).unwrap();
-    assert!(host.check_workspace("owner", "thread", Some(&workspace.id), Some(&grant)).is_err());
+    assert!(host
+        .check_workspace("owner", "thread", Some(&workspace.id), Some(&grant))
+        .is_err());
 }
 
 #[test]
@@ -529,4 +540,61 @@ fn both_v3_directory_schemas_upgrade_without_adopting_new_roots() {
         let host = LocalHost::open(app.path()).unwrap();
         assert!(host.get_workspace("owner", "thread", &id).is_err());
     }
+}
+
+#[test]
+fn draft_folder_reads_are_authorized_bounded_and_do_not_allocate_a_workspace() {
+    use serde_json::json;
+    use sourceweft_desktop::local_host::execution::Executions;
+    let data = tempfile::tempdir().unwrap();
+    let selected = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let host = LocalHost::open(data.path()).unwrap();
+    host.initialize_invocation_journal().unwrap();
+    fs::write(selected.path().join("hello.txt"), "hello").unwrap();
+    fs::create_dir(selected.path().join("sub")).unwrap();
+    symlink(outside.path(), selected.path().join("escape")).unwrap();
+    let (grant, granted_path) = host.grant_directory("owner", selected.path()).unwrap();
+    let calls = Executions::default();
+    let read = |owner: &str, action: &str, path: &str| {
+        host.dispatch(
+            &calls,
+            &uuid::Uuid::new_v4().to_string(),
+            owner,
+            "",
+            action,
+            json!({"folderId":grant,"path":path}),
+        )
+    };
+    let list = read("owner", "folder.list", "").unwrap();
+    assert_eq!(list["root"], granted_path.to_str().unwrap());
+    assert_eq!(list["files"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        read("owner", "folder.read", "hello.txt").unwrap()["content"],
+        "aGVsbG8="
+    );
+    assert_eq!(
+        read("owner", "folder.list", "sub").unwrap()["files"],
+        json!([])
+    );
+    assert!(read("other", "folder.list", "").is_err());
+    assert!(read("owner", "folder.list", "../").is_err());
+    assert!(read("owner", "folder.list", "escape").is_err());
+    assert!(read("owner", "folder.read", outside.path().to_str().unwrap()).is_err());
+    fs::write(selected.path().join("large"), vec![0u8; 1024 * 1024 + 1]).unwrap();
+    assert_eq!(
+        read("owner", "folder.read", "large").unwrap_err().code,
+        "FILE_TOO_LARGE"
+    );
+    assert_eq!(fs::read_dir(host.workspace_base()).unwrap().count(), 0);
+    let moved = selected
+        .path()
+        .with_file_name(format!("moved-draft-{}", uuid::Uuid::new_v4()));
+    fs::rename(selected.path(), &moved).unwrap();
+    fs::create_dir(selected.path()).unwrap();
+    assert_eq!(
+        read("owner", "folder.list", "").unwrap_err().code,
+        "WORKSPACE_REPLACED"
+    );
+    fs::remove_dir_all(moved).unwrap();
 }

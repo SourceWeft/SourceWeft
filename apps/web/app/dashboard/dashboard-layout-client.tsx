@@ -19,6 +19,7 @@ import { DashboardPageNavigation } from "./_components/dashboard-page-navigation
 import { DashboardSidebar } from "./_components/dashboard-sidebar";
 import { DashboardWorkspaceLayout } from "./_components/dashboard-workspace-layout";
 import { authClient } from "../../lib/auth-client";
+import { isEmbedMode } from "../../lib/thread-embed-params";
 
 // Only chat surfaces read the registry, so marketing pages no longer pay for
 // the connector tool definitions at boot.
@@ -65,9 +66,14 @@ export function DashboardLayoutClient({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
-  const isAuxiliaryWindow = pathname === "/dashboard/hub-window" || pathname === "/dashboard/preview-window";
+  const isAuxiliaryWindow =
+    pathname === "/dashboard/hub-window" ||
+    pathname === "/dashboard/preview-window";
   const router = useRouter();
   const searchParams = useSearchParams();
+  // An embedded thread (framed inside a sub-agent panel) shows only the
+  // conversation: the sidebar and mobile nav belong to the framing page.
+  const embedMode = isEmbedMode(searchParams);
   const mountedRef = useRef(false);
   const redirectToRef = useRef("/dashboard");
   const sessionConfirmingRef = useRef(false);
@@ -217,24 +223,36 @@ export function DashboardLayoutClient({
 
   if (isAuxiliaryWindow) {
     return (
-      <main className="h-svh min-h-0 overflow-hidden bg-background text-foreground">
+      <main className="h-dvh min-h-0 overflow-hidden bg-background text-foreground">
         {children}
       </main>
     );
   }
 
   return (
-    <SidebarProvider className="!h-svh !min-h-0 overflow-hidden overscroll-none">
+    <SidebarProvider className="!h-dvh !min-h-0 overflow-hidden overscroll-none">
       <DashboardChatStateProvider>
         <DashboardMobileNavProvider>
           <DashboardWorkspaceLayout>
             <ChatHubProvider key={data?.user?.id}>
-              <DashboardSidebar />
-              <main className="min-h-0 min-w-0 flex flex-1 flex-col overflow-hidden pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0">
-                <DashboardPageNavigation />
-                <DashboardMobileContent>{children}</DashboardMobileContent>
+              {embedMode ? null : <DashboardSidebar />}
+              <main
+                className={
+                  embedMode
+                    ? "min-h-0 min-w-0 flex flex-1 flex-col overflow-hidden"
+                    : "min-h-0 min-w-0 flex flex-1 flex-col overflow-hidden pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0"
+                }
+              >
+                {embedMode ? (
+                  children
+                ) : (
+                  <>
+                    <DashboardPageNavigation />
+                    <DashboardMobileContent>{children}</DashboardMobileContent>
+                  </>
+                )}
               </main>
-              <DashboardMobileBottomNav />
+              {embedMode ? null : <DashboardMobileBottomNav />}
             </ChatHubProvider>
           </DashboardWorkspaceLayout>
         </DashboardMobileNavProvider>

@@ -20,7 +20,9 @@ export async function extractRegistryLogo(
     const skill = discovered.files.find(
       (file) => file.bundlePath === "SKILL.md",
     );
-    const metadata = skill ? parseSkillFrontmatter(skill.contentText) : null;
+    const metadata = skill?.isText
+      ? parseSkillFrontmatter(skill.contentText)
+      : null;
     const nested = metadata?.metadata as Record<string, unknown> | undefined;
     const declaration =
       metadata?.logo ??
@@ -34,7 +36,7 @@ export async function extractRegistryLogo(
     const agentFile = discovered.files.find(
       (file) => file.bundlePath === "agents/openai.yaml",
     );
-    if (!selected && agentFile) {
+    if (!selected && agentFile?.isText) {
       const document = parseDocument(agentFile.contentText, {
         uniqueKeys: true,
       });
@@ -44,12 +46,11 @@ export async function extractRegistryLogo(
       const value = data?.interface?.icon_large ?? data?.interface?.icon_small;
       if (typeof value === "string" && value.trim()) selected = value.trim();
     }
-    const images = new Map(
-      (discovered.images ?? []).map((image) => [image.path, image.bytes]),
-    );
+    // Raster logos and SVGs alike: every bundle file carries its raw bytes.
+    const images = new Map<string, Uint8Array>();
     for (const file of discovered.files) {
       if (LOGO_FILE_PATTERN.test(file.bundlePath))
-        images.set(file.bundlePath, Buffer.from(file.contentText));
+        images.set(file.bundlePath, file.bytes);
     }
     if (!selected) {
       selected = [...images.keys()]
@@ -75,9 +76,10 @@ export async function extractRegistryLogo(
       !LOGO_FILE_PATTERN.test(normalized)
     )
       throw new Error("Invalid logo path");
-    const bytes = images.get(normalized);
-    if (!bytes || bytes.length > MAX_LOGO_BYTES)
+    const raw = images.get(normalized);
+    if (!raw || raw.byteLength > MAX_LOGO_BYTES)
       throw new Error("Logo unavailable or too large");
+    const bytes = Buffer.from(raw.buffer, raw.byteOffset, raw.byteLength);
     const svg = bytes.toString("utf8");
     if (/<svg[\s>]|<!DOCTYPE|<!ENTITY/i.test(svg)) {
       // Only self-contained SVGs enter the rasterizer; no scripts or external resources.

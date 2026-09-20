@@ -1,9 +1,19 @@
+import { fileURLToPath } from "node:url";
 import { configDefaults, defineConfig } from "vitest/config";
 
 export default defineConfig({
   oxc: {
     jsx: {
       runtime: "automatic",
+    },
+  },
+  resolve: {
+    // Mirrors tsconfig.json's "@/*" -> "./*" so tests can import files (or,
+    // transitively, files that import files) that use the alias the way
+    // Next's own bundler already does — without this, vitest simply can't
+    // resolve them.
+    alias: {
+      "@": fileURLToPath(new URL(".", import.meta.url)),
     },
   },
   test: {

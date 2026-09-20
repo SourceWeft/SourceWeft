@@ -1499,6 +1499,234 @@ test("skill staging leaves non-/skills commands and unconfigured runtimes untouc
   assert.match(workfiles.output, /SANDBOX_EXECUTE_VFS_PATH_DENIED/u);
 });
 
+// ── Plans added after the turn started (install_skill mid-turn) ──────────
+
+function skillPlan(
+  name: string,
+  loadContent: () => Promise<Uint8Array | null> = async () =>
+    new Uint8Array([1, 2, 3]),
+): RuntimeAssetPlan {
+  return {
+    name,
+    version: "sv-1",
+    platform: "any",
+    sha256: "a".repeat(64),
+    archive: "zip",
+    entrypoint: "SKILL.md",
+    installDir: `/skills/${name}`,
+    loadContent,
+  };
+}
+
+/** A runtime whose plan set is a live registry, as turn assembly wires it. */
+function createGrowingSkillStagingBackend(initial: RuntimeAssetPlan[]) {
+  const { files, provider } = createProvider();
+  const plans = [...initial];
+  const manager = new SandboxManager({
+    provider,
+    sandboxStore: createSandboxStore(),
+    operationStore: createNullOperationStore(),
+    ttlSeconds: limits.ttlSeconds,
+    maxCommandTimeoutMs: maxSandboxCommandTimeoutMs(limits),
+    skillStaging: {
+      plans: async () => [...plans],
+      hasPlans: () => plans.length > 0,
+      commandTimeoutMs: resolveSandboxCommandTimeoutMs({ limits }),
+      maxOutputChars: limits.maxOutputChars,
+    },
+  });
+  const backend = new SourceWeftSandboxBackend({
+    manager,
+    context,
+    limits,
+    commandTimeoutMs: resolveSandboxCommandTimeoutMs({ limits }),
+    toolApprovalEnabled: true,
+  });
+  const uploadsFor = (name: string) =>
+    provider.uploadedFiles.filter((path) => path.includes(`${name}-`)).length;
+  return { backend, files, manager, plans, provider, uploadsFor };
+}
+
+test("a plan added after the first staging is staged on the next /skills execute, and staged bundles are not re-uploaded", async () => {
+  const { backend, plans, provider, uploadsFor } =
+    createGrowingSkillStagingBackend([skillPlan("ppt-deck")]);
+
+  await backend.execute("python3 /skills/ppt-deck/scripts/a.py", {
+    toolCallId: "tool-call-grow-1",
+  });
+  assert.equal(uploadsFor("ppt-deck"), 1);
+  assert.equal(uploadsFor("notes"), 0);
+
+  plans.push(skillPlan("notes"));
+  // Registering a plan stages nothing by itself, and a command that does not
+  // touch /skills does not pay for it either.
+  await backend.execute("echo unrelated", { toolCallId: "tool-call-grow-2" });
+  assert.equal(uploadsFor("notes"), 0);
+
+  const result = await backend.execute("python3 /skills/notes/scripts/b.py", {
+    toolCallId: "tool-call-grow-3",
+  });
+  assert.equal(result.output, "user execute");
+  assert.equal(uploadsFor("notes"), 1);
+  assert.equal(uploadsFor("ppt-deck"), 1);
+  assert.ok(
+    provider.systemExecuted.some((command) =>
+      command.includes("/skills/notes/.sourceweft-asset.json"),
+    ),
+  );
+
+  // Nothing new → a further /skills command moves no bytes at all.
+  const uploadsBefore = provider.uploadedFiles.length;
+  const systemBefore = provider.systemExecuted.length;
+  await backend.execute("python3 /skills/notes/scripts/b.py --again", {
+    toolCallId: "tool-call-grow-4",
+  });
+  assert.equal(provider.uploadedFiles.length, uploadsBefore);
+  assert.equal(provider.systemExecuted.length, systemBefore);
+});
+
+test("a bundle already stamped in the sandbox by an earlier turn is not uploaded again", async () => {
+  const { backend, files, plans, manager, uploadsFor } =
+    createGrowingSkillStagingBackend([]);
+  files.set(
+    "/skills/notes/.sourceweft-asset.json",
+    new TextEncoder().encode(
+      JSON.stringify({ version: "sv-1", sha256: "a".repeat(64) }),
+    ),
+  );
+  plans.push(skillPlan("notes"));
+
+  const result = await backend.execute("python3 /skills/notes/scripts/b.py", {
+    toolCallId: "tool-call-grow-stamp",
+  });
+
+  assert.equal(result.output, "user execute");
+  assert.equal(uploadsFor("notes"), 0);
+  assert.deepEqual(
+    manager.skillAssetResolutions()?.map((resolution) => resolution.rung),
+    ["stamp"],
+  );
+});
+
+test("a turn that started with no stageable skill stages a mid-turn install; without the staging contract it stays denied", async () => {
+  const { backend, plans, provider, uploadsFor } =
+    createGrowingSkillStagingBackend([]);
+
+  // Empty registry: exactly the fast denial of a runtime without staging.
+  const before = await backend.execute("python3 /skills/notes/scripts/b.py", {
+    toolCallId: "tool-call-grow-5",
+  });
+  assert.equal(before.exitCode, 1);
+  assert.match(before.output, /SANDBOX_EXECUTE_VFS_PATH_DENIED/u);
+  assert.deepEqual(provider.executed, []);
+
+  // The sandbox is acquired (and its empty staging run memoized) before the
+  // install, which is the ordering a one-shot memo could not recover from.
+  await backend.execute("echo warm", { toolCallId: "tool-call-grow-6" });
+  plans.push(skillPlan("notes"));
+
+  const after = await backend.execute("python3 /skills/notes/scripts/b.py", {
+    toolCallId: "tool-call-grow-7",
+  });
+  assert.equal(after.output, "user execute");
+  assert.equal(uploadsFor("notes"), 1);
+
+  // No skillStaging at all (the contract is off): nothing to register with,
+  // so /skills is denied before and after — today's behavior.
+  const { backend: plainBackend, provider: plainProvider } = createBackend();
+  const denied = await plainBackend.execute(
+    "python3 /skills/notes/scripts/b.py",
+    { toolCallId: "tool-call-grow-8" },
+  );
+  assert.match(denied.output, /SANDBOX_EXECUTE_VFS_PATH_DENIED/u);
+  assert.deepEqual(plainProvider.executed, []);
+});
+
+test("a mid-turn bundle that fails to stage degrades alone with the recoverable error", async () => {
+  const { backend, manager, plans, provider } =
+    createGrowingSkillStagingBackend([skillPlan("ppt-deck")]);
+  await backend.execute("python3 /skills/ppt-deck/scripts/a.py", {
+    toolCallId: "tool-call-grow-9",
+  });
+
+  // No content and no fetch URL → every staging rung is unavailable.
+  plans.push(skillPlan("notes", async () => null));
+  const failed = await backend.execute("python3 /skills/notes/scripts/b.py", {
+    toolCallId: "tool-call-grow-10",
+  });
+  assert.equal(failed.exitCode, 1);
+  assert.match(failed.output, /SANDBOX_SKILL_STAGING_UNAVAILABLE/u);
+  assert.ok(
+    !provider.executed.some((command) => command.includes("/skills/notes")),
+  );
+
+  // The bundle that did stage keeps working, and the failure is not retried
+  // on every later command.
+  const systemBefore = provider.systemExecuted.length;
+  const ok = await backend.execute("python3 /skills/ppt-deck/scripts/a.py -v", {
+    toolCallId: "tool-call-grow-11",
+  });
+  assert.equal(ok.output, "user execute");
+  assert.equal(provider.systemExecuted.length, systemBefore);
+  assert.equal(manager.skillScriptsStaged(), true);
+  assert.equal(
+    manager.skillScriptsStagedForCommand("ls /skills/notes-extra"),
+    true,
+  );
+});
+
+test("a skill the host could not plan fails alone, without any sandbox traffic for it", async () => {
+  const { provider } = createProvider();
+  const manager = new SandboxManager({
+    provider,
+    sandboxStore: createSandboxStore(),
+    operationStore: createNullOperationStore(),
+    ttlSeconds: limits.ttlSeconds,
+    maxCommandTimeoutMs: maxSandboxCommandTimeoutMs(limits),
+    skillStaging: {
+      plans: async () => [skillPlan("ppt-deck")],
+      hasPlans: () => true,
+      unstageable: () => [
+        { name: "huge", version: "1.0.0", error: "not stageable: bundle_too_large" },
+      ],
+      commandTimeoutMs: resolveSandboxCommandTimeoutMs({ limits }),
+      maxOutputChars: limits.maxOutputChars,
+    },
+  });
+  const backend = new SourceWeftSandboxBackend({
+    manager,
+    context,
+    limits,
+    commandTimeoutMs: resolveSandboxCommandTimeoutMs({ limits }),
+    toolApprovalEnabled: true,
+  });
+
+  const failed = await backend.execute("python3 /skills/huge/scripts/run.py", {
+    toolCallId: "tool-call-unstageable-1",
+  });
+  assert.equal(failed.exitCode, 1);
+  assert.match(failed.output, /SANDBOX_SKILL_STAGING_UNAVAILABLE/u);
+  assert.ok(
+    ![...provider.executed, ...provider.systemExecuted].some((command) =>
+      command.includes("/skills/huge"),
+    ),
+  );
+
+  const ok = await backend.execute("python3 /skills/ppt-deck/scripts/a.py", {
+    toolCallId: "tool-call-unstageable-2",
+  });
+  assert.equal(ok.output, "user execute");
+  assert.deepEqual(
+    manager
+      .skillAssetResolutions()
+      ?.map((resolution) => [resolution.name, resolution.ok]),
+    [
+      ["ppt-deck", true],
+      ["huge", false],
+    ],
+  );
+});
+
 test("a missing required runtime asset fails acquisition instead of degrading", async () => {
   const { provider } = createProvider();
   const manager = new SandboxManager({
@@ -1693,4 +1921,55 @@ test("PC runtime removes prepare/collect while cloud runtime retains the bridge"
   assert.ok(
     cloud.tools.some((tool) => tool.name === "collect_sandbox_outputs"),
   );
+});
+
+test("the runtime prompt of a turn without stageable skills is byte-identical, before and after a mid-turn install", async () => {
+  const { AgentSandboxService } = await import("../../src/sandbox-service");
+  const { provider } = createProvider();
+  const service = new AgentSandboxService({
+    getConfig: () => ({
+      enabled: true,
+      provider: "fake",
+      toolApprovalEnabled: true,
+      limits,
+    }),
+    getProviderFactory: () => ({
+      id: "fake",
+      createProvider: () => provider,
+      getConfigurationStatus: () => ({ configured: true, missing: [] }),
+    }),
+    logWarn: () => {},
+  });
+  const input = {
+    context,
+    filesystem: {} as import("deepagents").BackendProtocolV2,
+  };
+  const withoutStaging = service
+    .createRuntimeForTurn(input, createSandboxStore(), createOperationStore())!
+    .buildRuntimePrompt();
+
+  const plans: RuntimeAssetPlan[] = [];
+  const skillAssets = {
+    plans: async () => [...plans],
+    hasPlans: () => plans.length > 0,
+  };
+  const emptyAtStart = service.createRuntimeForTurn(
+    { ...input, skillAssets },
+    createSandboxStore(),
+    createOperationStore(),
+  )!;
+  assert.equal(emptyAtStart.buildRuntimePrompt(), withoutStaging);
+  // The install tool's result announces the scripts; the prompt must not move
+  // under the model (and its cache) when the registry grows.
+  plans.push(skillPlan("notes"));
+  assert.equal(emptyAtStart.buildRuntimePrompt(), withoutStaging);
+
+  // A turn that starts WITH a stageable skill still gets the staged prompt.
+  const stagedAtStart = service.createRuntimeForTurn(
+    { ...input, skillAssets },
+    createSandboxStore(),
+    createOperationStore(),
+  )!;
+  assert.notEqual(stagedAtStart.buildRuntimePrompt(), withoutStaging);
+  assert.match(stagedAtStart.buildRuntimePrompt(), /materialized read-only/u);
 });

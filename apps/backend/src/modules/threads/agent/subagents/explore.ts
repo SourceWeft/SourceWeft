@@ -37,7 +37,7 @@ export const exploreResponseSchema = z.object({
   limitations: z.array(z.string()),
 });
 
-const EXPLORE_DESCRIPTION =
+export const EXPLORE_DESCRIPTION =
   "Read-only investigation delegate for complex, multi-step lookups across the " +
   "thread's sources and working files. Launch it when gathering evidence would " +
   "otherwise fill the main context with search and file-reading noise. It can " +
@@ -45,7 +45,7 @@ const EXPLORE_DESCRIPTION =
   "the full question and state exactly what to return; it replies with one " +
   "distilled report and its messages are not shown to the user.";
 
-const EXPLORE_SYSTEM_PROMPT = [
+export const EXPLORE_SYSTEM_PROMPT = [
   "You are a focused investigation delegate operating in an isolated context window.",
   "",
   "Your job is to gather and synthesize evidence for the task you are given, then",

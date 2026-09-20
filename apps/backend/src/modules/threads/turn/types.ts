@@ -234,6 +234,12 @@ export type PreparedThreadTurn = {
     deny: string[];
   };
   toolPermissions: Record<string, ToolPermission>;
+  /**
+   * The persona driving this thread, resolved once by the preparer so the
+   * turn's tool narrowing and agent assembly read the same answer. Absent or
+   * null for a plain chat (optional so hand-built turns need not name it).
+   */
+  persona?: import("../agent").PersonaSpec | null;
   effectiveTools: ThreadToolsSelection;
   runtimeTools: Record<string, PreparedRuntimeTool>;
   /**

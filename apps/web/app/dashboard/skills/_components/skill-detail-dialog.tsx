@@ -5,6 +5,7 @@ import { SkillAvatar } from "./skill-avatar";
 import * as React from "react";
 import type { RegistryVersionDetail } from "@sourceweft/contracts";
 import { RegistryVersions } from "./registry-versions";
+import { SkillContentRestricted } from "./skill-content-restricted";
 import { SkillIntroduction } from "./skill-introduction";
 import {
   AlertTriangle,
@@ -33,7 +34,7 @@ import {
   TabsTrigger,
 } from "@sourceweft/ui-web/components/ui/tabs";
 import { contentClient } from "../../../../lib/sdk";
-import { SkillIcon } from "../../_components/dashboard-icons";
+import { SkillIcon } from "../../../_components/site-icons";
 
 type SkillCatalogItem = Awaited<
   ReturnType<typeof contentClient.listSkillsCatalog>
@@ -128,7 +129,11 @@ export function SkillDetailDialog({
           displayName: registryDetail.version.displayName,
           installable: registryDetail.version.status === "published",
           sourceUrl: registryDetail.version.sourceUrl,
-          hasReadme: Boolean(registryDetail.readmeContent?.trim()),
+          // Withheld text still has a path: the README exists, it is just
+          // not ours to show this viewer.
+          hasReadme: registryDetail.contentRestricted
+            ? registryDetail.readmePath !== null
+            : Boolean(registryDetail.readmeContent?.trim()),
           logo: registryDetail.version.logo,
           flagged: registryDetail.version.flags.length > 0,
         }
@@ -143,6 +148,7 @@ export function SkillDetailDialog({
   const documents =
     item?.sourceType === "registry_github" ? registryDetail : detail;
   const skillContent = documents?.skillContent;
+  const contentRestricted = documents?.contentRestricted === true;
 
   return (
     <Dialog
@@ -265,15 +271,26 @@ export function SkillDetailDialog({
                       </div>
                       {/* Immutable version documents must not share streaming block state. */}
                       <TabsContent className="m-0 px-5 py-5" value="overview">
-                        <SkillIntroduction
-                          key={`${activeItem.skillVersionId}:overview`}
-                          {...documents}
-                          displayName={activeItem.displayName}
-                          description={activeItem.description}
-                        />
+                        {contentRestricted ? (
+                          <SkillContentRestricted
+                            description={activeItem.description}
+                            sourceUrl={activeItem.sourceUrl}
+                          />
+                        ) : (
+                          <SkillIntroduction
+                            key={`${activeItem.skillVersionId}:overview`}
+                            {...documents}
+                            displayName={activeItem.displayName}
+                            description={activeItem.description}
+                          />
+                        )}
                       </TabsContent>
                       <TabsContent className="m-0 px-5 py-5" value="skill">
-                        {skillContent ? (
+                        {contentRestricted ? (
+                          <SkillContentRestricted
+                            sourceUrl={activeItem.sourceUrl}
+                          />
+                        ) : skillContent ? (
                           <MessageResponse
                             key={`${activeItem.skillVersionId}:skill`}
                             mode="static"

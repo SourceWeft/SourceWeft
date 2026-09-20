@@ -30,6 +30,7 @@ import {
   findThreadRecord,
   updateThreadModelSettingsRecord,
 } from "../thread/repository";
+import { applyPersonaToolAllowlist, resolvePersona } from "../agent";
 import {
   createMessageRecord,
   findMessageRecord,
@@ -1549,11 +1550,22 @@ export async function prepareThreadTurn(
     webAccessEnabled,
     ...(Object.keys(toolOverrides).length > 0 ? { toolOverrides } : {}),
   });
-  const toolPermissions = resolveToolPermissions({
-    command: resolvedCommand,
-    selectedSkillRuntime,
-    tools: effectiveTools,
+  // A persona-owned thread narrows the permissions to the persona's allowlist
+  // before anything downstream reads them. Resolved once here (built-in slug or
+  // workspace row) and handed to the agent assembly on the prepared turn.
+  const persona = await resolvePersona({
+    teamId: workspace.organizationId,
+    workspaceId: workspace.id,
+    personaId: thread.personaId,
   });
+  const toolPermissions = applyPersonaToolAllowlist(
+    resolveToolPermissions({
+      command: resolvedCommand,
+      selectedSkillRuntime,
+      tools: effectiveTools,
+    }),
+    persona,
+  );
   const runtimeTools = buildRuntimeTools({
     toolPermissions,
     tools: effectiveTools,
@@ -1858,6 +1870,7 @@ export async function prepareThreadTurn(
       ? { activeToolPolicy: selectedSkillRuntime.toolPolicy }
       : {}),
     toolPermissions,
+    persona,
     effectiveTools,
     runtimeTools,
     turnState: preflight.turnState,

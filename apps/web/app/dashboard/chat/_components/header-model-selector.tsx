@@ -9,6 +9,7 @@ import {
   type SetStateAction,
 } from "react";
 import { useTranslations } from "next-intl";
+import { cn } from "@sourceweft/ui-web/lib/utils";
 import {
   ChevronDown,
   Eye,
@@ -1300,22 +1301,24 @@ export function HeaderModelSelector({
               aria-busy={isLoading && !primaryModel}
               disabled={isLoading && !primaryModel}
               onClick={() => setActiveTab("llm")}
-              className={
-                iconOnly
-                  ? "flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted focus-visible:outline-2"
-                  : "flex h-8 min-w-0 max-w-40 shrink-0 items-center gap-1.5 rounded-md border border-border/60 bg-background px-2 text-xs text-foreground shadow-xs"
-              }
+              className={cn(
+                "flex h-8 min-w-0 shrink-0 items-center rounded-md border border-border/60 bg-background px-2 text-xs text-foreground shadow-xs",
+                iconOnly ? "max-w-28 gap-1" : "max-w-40 gap-1.5",
+              )}
             >
-              <ModelTypeIcon type="llm" />
-              <span className={iconOnly ? "sr-only" : "min-w-0 truncate"}>
+              {/* Phone widths name the model instead of showing the type glyph: the
+                  trigger is the only model affordance on screen there, and a lone icon
+                  reads as decoration. Wider layouts keep the icon. */}
+              {!iconOnly && <ModelTypeIcon type="llm" />}
+              <span className="min-w-0 truncate">
                 {isLoading && !primaryModel
                   ? t("modelSelector.loadingModels")
                   : (primaryModel?.name ?? t("modelSelector.auto"))}
               </span>
-              {!iconOnly && byokSelections.llm?.mode === "byok" ? (
+              {byokSelections.llm?.mode === "byok" ? (
                 <KeyRound className="size-3 shrink-0" />
               ) : null}
-              {!iconOnly && <ChevronDown className="size-3 shrink-0" />}
+              <ChevronDown className="size-3 shrink-0" />
             </button>
           </ModelSelectorTrigger>
         ) : (

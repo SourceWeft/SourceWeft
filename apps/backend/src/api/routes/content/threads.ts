@@ -4,6 +4,7 @@ import {
 } from "../../../modules/devices/access";
 import type { Hono } from "hono";
 import {
+  createPersonaRequestSchema,
   createThreadRequestSchema,
   listThreadMessagesRequestSchema,
   listThreadsRequestSchema,
@@ -12,6 +13,7 @@ import {
   threadRunStatusSchema,
   type StreamThreadRequest,
   type ThreadRunSummary,
+  updatePersonaRequestSchema,
   updateThreadChatPreferencesRequestSchema,
   updateThreadModelSettingsRequestSchema,
   updateThreadVisibilityRequestSchema,
@@ -220,9 +222,104 @@ export function registerThreadRoutes(app: Hono) {
       executionTarget,
       modelSettings: parsed.data.modelSettings,
       chatPreferences: parsed.data.chatPreferences,
+      parentThreadId: parsed.data.parentThreadId,
+      personaId: parsed.data.personaId,
     });
 
     return ApiResponse.success(c, result, 201);
+  });
+
+  app.get("/personas", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const result = await contentThreadService.listPersonas({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      userId: getSessionUserId(session),
+    });
+
+    return ApiResponse.success(c, result);
+  });
+
+  app.post("/personas", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const body = ensureObjectBody(await c.req.json().catch(() => ({})));
+    const parsed = createPersonaRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+
+    const { sourceId, ...overrides } = parsed.data;
+    const result = await contentThreadService.createPersona({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      userId: getSessionUserId(session),
+      sourceId,
+      overrides,
+    });
+
+    return ApiResponse.success(c, result, 201);
+  });
+
+  app.patch("/personas/:id", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const body = ensureObjectBody(await c.req.json().catch(() => ({})));
+    const parsed = updatePersonaRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+
+    const result = await contentThreadService.updatePersona({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      userId: getSessionUserId(session),
+      personaId: requireRouteParam(c, "id"),
+      patch: parsed.data,
+    });
+
+    return ApiResponse.success(c, result);
+  });
+
+  app.delete("/personas/:id", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const result = await contentThreadService.deletePersona({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      userId: getSessionUserId(session),
+      personaId: requireRouteParam(c, "id"),
+    });
+
+    return ApiResponse.success(c, result);
+  });
+
+  app.get("/threads/:id/children", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+
+    const result = await contentThreadService.listChildThreads({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      threadId: requireRouteParam(c, "id"),
+      userId: getSessionUserId(session),
+    });
+
+    return ApiResponse.success(c, result);
   });
 
   app.post("/threads/start-turn", async (c) => {

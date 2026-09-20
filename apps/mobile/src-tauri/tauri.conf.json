@@ -21,6 +21,10 @@
     ],
     "iOS": {
       "developmentTeam": ""
+    },
+    "android": {
+      "minSdkVersion": 24,
+      "versionCode": 1000
     }
   },
   "app": {
@@ -37,7 +41,7 @@
         "resizable": true,
         "fullscreen": false,
         "visible": true,
-        "create": true
+        "create": false
       }
     ]
   },

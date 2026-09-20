@@ -1,6 +1,7 @@
 //! Native services. These methods are deliberately not exposed as generic IPC commands.
 //! A future authenticated device dispatcher must supply the account and thread identities.
 pub mod execution;
+pub mod maintenance;
 mod files;
 mod proxy;
 pub mod sandbox;

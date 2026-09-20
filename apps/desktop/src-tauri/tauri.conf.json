@@ -20,6 +20,9 @@
     ],
     "macOS": {
       "infoPlist": "Info.plist"
+    },
+    "linux": {
+      "appimage": { "bundleMediaFramework": true }
     }
   },
   "app": {
@@ -42,11 +45,13 @@
     ]
   },
   "plugins": {
+    "updater": {
+      "pubkey": "",
+      "windows": { "installMode": "passive" }
+    },
     "deep-link": {
       "desktop": {
-        "schemes": [
-          "sourceweft"
-        ]
+        "schemes": ["sourceweft"]
       }
     }
   }

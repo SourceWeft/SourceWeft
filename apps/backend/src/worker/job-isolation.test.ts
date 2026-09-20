@@ -5,6 +5,7 @@ import { ContentError } from "../modules/content/errors";
 import { logger } from "../shared/logger";
 import {
   handleUnhandledWorkerRuntimeError,
+  installWorkerProcessErrorGuards,
   isRecoverableWorkerRuntimeError,
   runWorkerJobWithIsolation,
   type PersistThreadRunFailure,
@@ -76,4 +77,60 @@ test("handleUnhandledWorkerRuntimeError persists active thread run failures", as
   assert.equal(persisted.length, 1);
   const failureInput = persisted[0]!;
   assert.equal(failureInput.payload.runId, "run-1");
+});
+
+// vitest installs its own process listeners that fail the run; they are taken
+// off while a guard is exercised so the events reach only the guard.
+async function withWorkerGuards(
+  restartAfterException: () => void,
+  emit: () => void,
+) {
+  const parked = {
+    unhandledRejection: process.listeners("unhandledRejection"),
+    uncaughtException: process.listeners("uncaughtException"),
+  };
+  process.removeAllListeners("unhandledRejection");
+  process.removeAllListeners("uncaughtException");
+  const uninstall = installWorkerProcessErrorGuards({ restartAfterException });
+  try {
+    emit();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  } finally {
+    if (typeof uninstall === "function") uninstall();
+    process.removeAllListeners("unhandledRejection");
+    process.removeAllListeners("uncaughtException");
+    for (const listener of parked.unhandledRejection) {
+      process.on("unhandledRejection", listener);
+    }
+    for (const listener of parked.uncaughtException) {
+      process.on("uncaughtException", listener);
+    }
+  }
+}
+
+test("an uncaught exception asks the worker to restart, once it has been recorded", async () => {
+  let restarts = 0;
+  await withWorkerGuards(
+    () => {
+      restarts += 1;
+    },
+    () => process.emit("uncaughtException", new Error("sync throw escaped")),
+  );
+  assert.equal(restarts, 1);
+});
+
+test("an unhandled rejection stays scoped to its job: no restart", async () => {
+  let restarts = 0;
+  await withWorkerGuards(
+    () => {
+      restarts += 1;
+    },
+    () =>
+      process.emit(
+        "unhandledRejection",
+        new Error("nobody awaited this"),
+        Promise.resolve(),
+      ),
+  );
+  assert.equal(restarts, 0);
 });

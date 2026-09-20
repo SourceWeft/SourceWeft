@@ -64,11 +64,32 @@ export function validateHubFileRequest(
     );
   }
   const { workspaceId, threadId } = snapshot.data;
-  const base = `/v1/workspaces/${encodeURIComponent(workspaceId ?? "")}/threads/${encodeURIComponent(threadId ?? "")}/local-files`;
+  let base = `/v1/workspaces/${encodeURIComponent(workspaceId ?? "")}/threads/${encodeURIComponent(threadId ?? "")}/local-files`;
+  const draft =
+    snapshot.data.mode === "new"
+      ? snapshot.data.draftWorkContext?.target
+      : null;
+  const draftBase =
+    draft?.kind === "local"
+      ? `/v1/local-devices/${encodeURIComponent(draft.deviceId)}/folders`
+      : null;
   const url = new URL(request.path, "http://hub.invalid");
+  const folderCatalog = draftBase !== null && url.pathname === draftBase;
+  if (draftBase && draft?.kind === "local" && draft.folderId)
+    base = `${draftBase}/${encodeURIComponent(draft.folderId)}/files`;
+  if (folderCatalog) {
+    if (
+      request.path !== draftBase ||
+      request.preview !== undefined ||
+      request.downloadName !== undefined
+    )
+      throw new Error("Invalid folder catalog request.");
+    return snapshot;
+  }
   if (
-    !workspaceId ||
-    !threadId ||
+    (draftBase
+      ? draft?.kind !== "local" || !draft.folderId
+      : !workspaceId || !threadId) ||
     !request.path.startsWith("/") ||
     url.origin !== "http://hub.invalid" ||
     (url.pathname !== base &&

@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
 
-import { SkillIcon } from "../../../../_components/dashboard-icons";
+import { SkillIcon } from "../../../../../_components/site-icons";
 import {
   MAX_SELECTED_SKILL_IDS_PER_TURN,
   toggleSkillSelection,

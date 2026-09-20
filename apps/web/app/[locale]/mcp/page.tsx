@@ -1,6 +1,7 @@
+import { McpIcon as McpBrandIcon } from "../../_components/site-icons";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowRight, Server, Upload, Wrench } from "lucide-react";
+import { ArrowRight, Upload, Wrench } from "lucide-react";
 import type { MarketCategory, MarketItemSummary } from "@sourceweft/market-sdk";
 import { hasLocale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
@@ -282,7 +283,7 @@ export default async function PublicMcpMarketPage({
         >
           <div className="max-w-4xl">
             <span className="mb-5 inline-flex items-center gap-2 rounded-full border border-zinc-300 bg-white/48 px-3 py-1 text-xs font-medium text-zinc-600 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-400">
-              <Server className="size-3.5" />
+              <McpBrandIcon className="size-3.5" />
               {t("hero.badge")}
             </span>
             {listView ? (
@@ -358,7 +359,7 @@ export default async function PublicMcpMarketPage({
           ))}
           {home.featured.length === 0 && home.recent.length === 0 ? (
             <div className="rounded-xl border border-zinc-300 bg-white/54 p-10 text-center dark:border-white/10 dark:bg-white/[0.03]">
-              <Server className="mx-auto mb-4 size-8 text-zinc-400" />
+              <McpBrandIcon className="mx-auto mb-4 size-8 text-zinc-400" />
               <h2 className="text-2xl font-semibold tracking-tight">
                 {t("listing.syncingTitle")}
               </h2>

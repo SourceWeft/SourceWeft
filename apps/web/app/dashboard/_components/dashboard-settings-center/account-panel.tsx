@@ -207,7 +207,12 @@ export function AccountPanel({
   }
 
   return (
-    <div className="w-full max-w-2xl divide-y divide-border/60">
+    <div
+      className="w-full max-w-2xl divide-y divide-border/60"
+      data-update-unsaved={
+        isDirty || isSaving || isDeleting || isSigningOut || isThemeSaving
+      }
+    >
       {/* ── Profile ── */}
       <div className="pb-7 pt-1">
         <p className="mb-5 text-base font-semibold text-foreground">

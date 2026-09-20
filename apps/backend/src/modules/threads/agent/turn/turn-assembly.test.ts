@@ -8,8 +8,12 @@ import {
 import { afterEach, beforeAll, beforeEach, describe, test, vi } from "vitest";
 import { config } from "../../../../shared/config";
 import type { PreparedThreadTurn } from "../..";
+import type { EnabledSkillDescriptor } from "../../../skills/types";
 import { AGENT_TOOL_NAMES } from "@sourceweft/agent-tool-registry";
 import { SelectedSkillsBackend } from "../../../skills/backend";
+import { inlineSkillContent } from "../../../skills/file-content";
+import { SKILL_STORAGE_LIMITS } from "../../../skills/storage";
+import { TurnSkillSandboxAssets } from "../../../skills/sandbox-assets";
 import type { FilesystemBackend, ToolCollection } from "./turn-assembly";
 import { initializeSandboxProviderRegistry } from "../sandbox-service/provider-registry";
 import {
@@ -22,6 +26,7 @@ import {
   buildRuntimePromptContext,
   buildSandboxRuntimeForPreparedTurn,
   filesystemMountsForPrompt,
+  mountInstalledSkillForTurn,
 } from "./turn-assembly";
 import {
   createSourceWeftToolCallContextMiddleware,
@@ -96,10 +101,12 @@ const filesystemBackend = {
   knowledgeBackend: stubBackend("kb") as never,
   workingFilesBackend: stubBackend("work") as never,
   filesystemMounts: [],
-  skillsBackend: null,
+  skillsBackend: new SelectedSkillsBackend([]),
+  skillSandboxAssets: new TurnSkillSandboxAssets(),
 } as unknown as FilesystemBackend;
 
 const emptyToolCollection = {
+  skillTools: [],
   webTools: [],
   artifactTools: [],
   presentationTools: [],
@@ -319,6 +326,7 @@ function createPreparedTurn(
     initialTitle: "Test",
     failurePersistence: "persist-error-turn",
     mcpInstallIds: [],
+    persona: null,
   } as unknown as PreparedThreadTurn;
 }
 
@@ -360,7 +368,8 @@ test("agent backend preserves Deep Agents context paths without a sandbox", asyn
       workingFilesBackend: workingBackend as never,
       localFiles: false,
       filesystemMounts: [],
-      skillsBackend: null,
+      skillsBackend: new SelectedSkillsBackend([]),
+      skillSandboxAssets: new TurnSkillSandboxAssets(),
     },
     internalContextBackend: new StateBackend({ state: { files: {} } } as never),
     sandboxRuntime: null,
@@ -395,6 +404,7 @@ test("agent backend routes VFS paths while execute stays on sandbox default", as
       localFiles: false,
       filesystemMounts: [],
       skillsBackend: stubBackend("skills") as never,
+      skillSandboxAssets: new TurnSkillSandboxAssets(),
     },
     sandboxRuntime: {
       backend: stubSandboxBackend() as never,
@@ -448,7 +458,8 @@ test("preconstructed agent backend receives concurrent-safe tool call context", 
       workingFilesBackend: stubBackend("work") as never,
       localFiles: false,
       filesystemMounts: [],
-      skillsBackend: null,
+      skillsBackend: new SelectedSkillsBackend([]),
+      skillSandboxAssets: new TurnSkillSandboxAssets(),
     },
     sandboxRuntime: {
       backend: stubSandboxBackend({ executeCalls }) as never,
@@ -510,7 +521,8 @@ test("preconstructed agent backend receives the host invocation signal", async (
       workingFilesBackend: stubBackend("work") as never,
       localFiles: false,
       filesystemMounts: [],
-      skillsBackend: null,
+      skillsBackend: new SelectedSkillsBackend([]),
+      skillSandboxAssets: new TurnSkillSandboxAssets(),
     },
     sandboxRuntime: {
       backend: stubSandboxBackend({ executeCalls }) as never,
@@ -552,7 +564,8 @@ test("turn-scoped sandbox backend forwards one ALS signal to every sandbox file 
       workingFilesBackend: workingBackend as never,
       localFiles: false,
       filesystemMounts: [],
-      skillsBackend: null,
+      skillsBackend: new SelectedSkillsBackend([]),
+      skillSandboxAssets: new TurnSkillSandboxAssets(),
     },
     sandboxRuntime: {
       backend: stubSandboxBackend({ fileCalls }) as never,
@@ -625,7 +638,7 @@ Read this before creating slides.`;
           name: "ppt-deck",
           version: "1.0.0",
           description: "Create a PowerPoint deck in the sandbox.",
-          files: [
+          ...inlineSkillContent([
             {
               path: "SKILL.md",
               contentText: skillMarkdown,
@@ -633,9 +646,10 @@ Read this before creating slides.`;
               sizeBytes: Buffer.byteLength(skillMarkdown, "utf8"),
               contentHash: "hash-ppt-deck-skill",
             },
-          ],
+          ]),
         },
       ]),
+      skillSandboxAssets: new TurnSkillSandboxAssets(),
     },
     sandboxRuntime: {
       backend: stubSandboxBackend() as never,
@@ -832,6 +846,222 @@ describe("sandbox runtime assembly tool permissions", () => {
       prompt.includes("persists explicitly selected sandbox text outputs"),
       false,
     );
+  });
+});
+
+describe("skill installed mid-turn", () => {
+  beforeEach(() => {
+    Object.assign(config.sandbox, structuredClone(originalSandboxConfig));
+    config.sandbox.enabled = true;
+    config.sandbox.provider = SYNTHETIC_SANDBOX_PROVIDER_ID;
+  });
+
+  afterEach(() => {
+    Object.assign(config.sandbox, structuredClone(originalSandboxConfig));
+  });
+
+  function installedSkill(
+    overrides: Partial<EnabledSkillDescriptor> = {},
+  ): EnabledSkillDescriptor {
+    const markdown = "---\nname: notes\ndescription: Notes\n---\n# notes";
+    return {
+      workspaceSkillId: "workspace-skill-notes",
+      sourceType: "registry_github",
+      name: "notes",
+      version: "1.0.0",
+      description: "Notes",
+      ...inlineSkillContent([
+        {
+          path: "SKILL.md",
+          contentText: markdown,
+          mimeType: "text/markdown",
+          sizeBytes: Buffer.byteLength(markdown, "utf8"),
+          contentHash: "hash-notes",
+        },
+      ]),
+      ...overrides,
+    };
+  }
+
+  function freshFilesystemBackend(): FilesystemBackend {
+    return {
+      ...filesystemBackend,
+      skillsBackend: new SelectedSkillsBackend([]),
+      skillSandboxAssets: new TurnSkillSandboxAssets(),
+    };
+  }
+
+  test("a turn that started without skills can stage one, and its prompt does not move", async () => {
+    const prepared = createPreparedTurn();
+    const turnFilesystem = freshFilesystemBackend();
+    const createRuntime = vi.spyOn(agentSandboxService, "createRuntimeForTurn");
+    try {
+      const sandboxRuntime = await buildSandboxRuntimeForPreparedTurn({
+        prepared,
+        filesystemBackend: turnFilesystem,
+      });
+      assert.ok(sandboxRuntime);
+      const skillAssets = createRuntime.mock.calls.at(-1)?.[0].skillAssets;
+      assert.ok(skillAssets);
+      // Nothing to stage yet: /skills stays denied and unannounced.
+      assert.equal(skillAssets.hasPlans?.(), false);
+      const promptAtStart = sandboxRuntime.buildRuntimePrompt();
+      assert.match(
+        promptAtStart,
+        /Never include \/files, \/kb, or \/skills in an execute command/u,
+      );
+
+      const mounted = mountInstalledSkillForTurn({
+        prepared,
+        filesystemBackend: turnFilesystem,
+        sandboxRuntime,
+        skill: installedSkill(),
+      });
+
+      assert.deepEqual(mounted, { scriptsStageable: true });
+      // The SAME callbacks the sandbox manager holds now see the new bundle.
+      assert.equal(skillAssets.hasPlans?.(), true);
+      assert.deepEqual(
+        (await skillAssets.plans()).map((plan) => plan.installDir),
+        ["/skills/notes"],
+      );
+      assert.equal(sandboxRuntime.buildRuntimePrompt(), promptAtStart);
+    } finally {
+      createRuntime.mockRestore();
+    }
+  });
+
+  // One bad enabled skill used to throw SKILL_SANDBOX_ASSET_INVALID here and
+  // take down every sandbox turn of the workspace.
+  test("an enabled skill that cannot be staged degrades alone at turn start", async () => {
+    const prepared = createPreparedTurn();
+    prepared.enabledSkills = [
+      installedSkill(),
+      installedSkill({
+        name: "oversized",
+        workspaceSkillId: "workspace-skill-oversized",
+        files: [
+          ...installedSkill().files,
+          {
+            path: "blob.bin",
+            mimeType: "application/octet-stream",
+            sizeBytes: SKILL_STORAGE_LIMITS.maxFileBytes + 1,
+            contentHash: "hash-blob",
+            isText: false,
+          },
+        ],
+      }),
+      installedSkill({
+        name: "no-entry",
+        workspaceSkillId: "workspace-skill-no-entry",
+        ...inlineSkillContent([
+          {
+            path: "README.md",
+            contentText: "no SKILL.md here",
+            mimeType: "text/markdown",
+            sizeBytes: 16,
+            contentHash: "hash-readme",
+          },
+        ]),
+      }),
+    ];
+    const turnFilesystem: FilesystemBackend = {
+      ...freshFilesystemBackend(),
+      skillsBackend: new SelectedSkillsBackend(prepared.enabledSkills),
+    };
+    const createRuntime = vi.spyOn(agentSandboxService, "createRuntimeForTurn");
+    try {
+      const sandboxRuntime = await buildSandboxRuntimeForPreparedTurn({
+        prepared,
+        filesystemBackend: turnFilesystem,
+      });
+      assert.ok(sandboxRuntime);
+      const skillAssets = createRuntime.mock.calls.at(-1)?.[0].skillAssets;
+      assert.ok(skillAssets);
+
+      // The healthy skill still stages; the other two are handed to the
+      // sandbox manager as failed, which is what turns a command naming them
+      // into the recoverable SANDBOX_SKILL_STAGING_UNAVAILABLE.
+      assert.deepEqual(
+        (await skillAssets.plans()).map((plan) => plan.installDir),
+        ["/skills/notes"],
+      );
+      assert.deepEqual(
+        skillAssets.unstageable?.().map((skill) => [skill.name, skill.error]),
+        [
+          ["oversized", "not stageable: file_too_large"],
+          ["no-entry", "not stageable: missing_skill_md"],
+        ],
+      );
+      // Its instructions stay readable through the /skills mount.
+      const read = await turnFilesystem.skillsBackend.read("/oversized/SKILL.md");
+      assert.match(String(read.content), /# notes/u);
+    } finally {
+      createRuntime.mockRestore();
+    }
+  });
+
+  test("scripts wait for the next turn without a sandbox, without execute, on a PC, or over the staging caps — the mount stands", async () => {
+    const prepared = createPreparedTurn();
+    const sandboxRuntime = await buildSandboxRuntimeForPreparedTurn({
+      prepared,
+      filesystemBackend: freshFilesystemBackend(),
+    });
+    assert.ok(sandboxRuntime);
+    const localPrepared = createPreparedTurn();
+    localPrepared.thread = {
+      ...localPrepared.thread,
+      executionTarget: { kind: "local", deviceId: "pc" },
+    } as PreparedThreadTurn["thread"];
+
+    for (const [label, input] of [
+      ["no sandbox", { prepared, sandboxRuntime: null }],
+      [
+        "execute denied",
+        {
+          prepared: createPreparedTurn({ [AGENT_TOOL_NAMES.execute]: "deny" }),
+          sandboxRuntime,
+        },
+      ],
+      ["bound PC", { prepared: localPrepared, sandboxRuntime }],
+      [
+        "bundle too large",
+        {
+          prepared,
+          sandboxRuntime,
+          skill: installedSkill({
+            files: [
+              ...installedSkill().files,
+              {
+                path: "blob.bin",
+                mimeType: "application/octet-stream",
+                sizeBytes: SKILL_STORAGE_LIMITS.maxFileBytes + 1,
+                contentHash: "hash-blob",
+                isText: false,
+              },
+            ],
+          }),
+        },
+      ],
+    ] as const) {
+      const turnFilesystem = freshFilesystemBackend();
+      const mounted = mountInstalledSkillForTurn({
+        filesystemBackend: turnFilesystem,
+        skill: installedSkill(),
+        ...input,
+      });
+      assert.deepEqual(mounted, { scriptsStageable: false }, label);
+      assert.deepEqual(await turnFilesystem.skillSandboxAssets.plans(), [], label);
+      // Only a bundle that was REJECTED is remembered: commands naming it get
+      // the recoverable staging error instead of a bare "No such file".
+      assert.deepEqual(
+        turnFilesystem.skillSandboxAssets.unstageable().map((s) => s.name),
+        label === "bundle too large" ? ["notes"] : [],
+        label,
+      );
+      const read = await turnFilesystem.skillsBackend.read("/notes/SKILL.md");
+      assert.equal(read.error, undefined, label);
+    }
   });
 });
 

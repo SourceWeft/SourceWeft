@@ -5,7 +5,7 @@ import * as React from "react";
 import { useTranslations } from "next-intl";
 import { useBillingAvailable } from "../../../lib/billing-edition/capabilities";
 import { isSettingsTabAvailable } from "../../../lib/billing-edition/visibility";
-import { useAuthenticate } from "@daveyplate/better-auth-ui";
+import { useAuthenticate } from "@better-auth-ui/react";
 import {
   Activity,
   ArrowLeft,
@@ -66,7 +66,7 @@ function getInitials(name?: string, email?: string) {
 export function DashboardMobileMe() {
   const t = useTranslations("dashboardNav");
   const billingAvailable = useBillingAvailable();
-  const authState = useAuthenticate();
+  const authState = useAuthenticate(authClient);
   const sessionState = authState.data as
     | {
         user?: { email?: string; image?: string | null; name?: string };

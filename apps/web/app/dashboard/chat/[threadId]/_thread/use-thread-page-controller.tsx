@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 import type { AppRouterInstance } from "next/dist/shared/lib/app-router-context.shared-runtime";
+import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
 import { authClient } from "../../../../../lib/auth-client";
@@ -90,6 +91,14 @@ import {
 } from "./message-groups";
 import { mergeSourceIds, shouldResetThreadLocalState } from "./thread-utils";
 import { resolveChatUiState } from "../../_components/chat-ui-state";
+import { findChatItem } from "../../../_components/dashboard-chat-items";
+import {
+  isEmbedMode,
+  joinPathAndQuery,
+  readAgentParam,
+  withAgentParam,
+} from "../../../../../lib/thread-embed-params";
+import type { ChatHubSubagentPanel } from "../../_components/chat-hub-context";
 import { useWorkspaceLayout } from "../../../_components/dashboard-workspace-layout";
 
 type DashboardChatState = ReturnType<typeof useDashboardChatState>;
@@ -109,6 +118,7 @@ export function useThreadPageController({
   threadId: string;
 }) {
   const {
+    archivedChats,
     privateChats,
     hasMorePrivateChats,
     hasWorkspaceHydrated,
@@ -128,10 +138,110 @@ export function useThreadPageController({
   } = dashboardState;
   const t = useTranslations("dashboardChat");
 
-  const chatItem = [...privateChats, ...sharedChats].find(
-    (chat) => chat.id === threadId,
-  );
+  // The thread may be a sub-agent conversation nested under another chat, so
+  // look one level down as well as at the top level.
+  const chatItem = findChatItem([...privateChats, ...sharedChats], threadId);
   const threadTitle = chatItem?.title ?? t("thread.fallbackTitle");
+  const parentThreadId = chatItem?.parentThreadId ?? null;
+  // A sub-agent conversation shows where it came from. The parent's title is
+  // whatever the sidebar currently knows, with a neutral fallback until then.
+  const parentThread = useMemo(() => {
+    if (!parentThreadId) {
+      return null;
+    }
+    const parent = findChatItem(
+      [...privateChats, ...sharedChats, ...archivedChats],
+      parentThreadId,
+    );
+    return {
+      id: parentThreadId,
+      title: parent?.title ?? t("subagent.parentChatFallback"),
+    };
+  }, [archivedChats, parentThreadId, privateChats, sharedChats, t]);
+  const openParentThread = useCallback(() => {
+    if (parentThreadId) {
+      router.push(`/dashboard/chat/${parentThreadId}`);
+    }
+  }, [parentThreadId, router]);
+  // A thread is its own route, so a separate window is just that route.
+  const openThreadInNewWindow = useCallback(() => {
+    window.open(`/dashboard/chat/${threadId}`, "_blank", "noopener,noreferrer");
+  }, [threadId]);
+
+  const searchParams = useSearchParams();
+  // Framed inside a sub-agent panel: show the conversation alone and never
+  // open panels of our own (a panel inside a panel would recurse).
+  const embedMode = isEmbedMode(searchParams);
+  // The URL names which sub-agent conversation is open beside this thread, so
+  // the panel survives a reload and can be linked to; local state only mirrors
+  // it so switching feels immediate.
+  const agentParam = readAgentParam(searchParams);
+  const [openSubagentId, setOpenSubagentId] = useState<string | null>(
+    () => agentParam,
+  );
+  useEffect(() => {
+    setOpenSubagentId(agentParam);
+  }, [agentParam]);
+  const subagentChildren = useMemo(
+    () =>
+      (chatItem?.children ?? []).map((child) => ({
+        id: child.id,
+        title: child.title,
+      })),
+    [chatItem?.children],
+  );
+  const syncAgentParam = useCallback(
+    (agentId: string | null) => {
+      router.replace(
+        joinPathAndQuery(
+          `/dashboard/chat/${threadId}`,
+          withAgentParam(searchParams, agentId),
+        ),
+        { scroll: false },
+      );
+    },
+    [router, searchParams, threadId],
+  );
+  const openSubagent = useCallback(
+    (agentId: string) => {
+      if (embedMode) {
+        return;
+      }
+      setOpenSubagentId(agentId);
+      syncAgentParam(agentId);
+    },
+    [embedMode, syncAgentParam],
+  );
+  const closeSubagent = useCallback(() => {
+    setOpenSubagentId(null);
+    syncAgentParam(null);
+  }, [syncAgentParam]);
+  const openSubagentInNewWindow = useCallback((agentId: string) => {
+    window.open(`/dashboard/chat/${agentId}`, "_blank", "noopener,noreferrer");
+  }, []);
+  const subagentPanel = useMemo<ChatHubSubagentPanel | null>(() => {
+    if (embedMode || !openSubagentId) {
+      return null;
+    }
+    return {
+      threadId: openSubagentId,
+      title:
+        subagentChildren.find((child) => child.id === openSubagentId)?.title ??
+        t("subagent.fallbackTitle"),
+      siblings: subagentChildren,
+      onSelect: openSubagent,
+      onClose: closeSubagent,
+      onOpenInNewWindow: openSubagentInNewWindow,
+    };
+  }, [
+    closeSubagent,
+    embedMode,
+    openSubagent,
+    openSubagentId,
+    openSubagentInNewWindow,
+    subagentChildren,
+    t,
+  ]);
 
   const {
     canDockHub: isPersistentLayout,
@@ -1374,6 +1484,13 @@ export function useThreadPageController({
     threadCitations,
     threadId,
     threadTitle,
+    parentThread,
+    openParentThread,
+    openThreadInNewWindow,
+    embedMode,
+    subagentPanel,
+    subagentChildren,
+    openSubagent,
     thinkingSettings,
     toolConfirmationInterventionSignal,
     toggleSourcesVisible,

@@ -7,7 +7,11 @@ import {
   skillVersionFiles,
   skillVersions,
 } from "@sourceweft/db";
-import { assertRegistryStorageInvariant } from "../repository";
+import {
+  putSkillBlob,
+  putSkillBundle,
+  type StoredSkillBundle,
+} from "../storage";
 import { triageRegistrySubmission, type RegistryExistingEntry } from "./guard";
 import { RegistrySubmissionError } from "./errors";
 
@@ -15,11 +19,17 @@ import { RegistrySubmissionError } from "./errors";
  * Stage 5 — Index (persist the definition, version and bundle).
  * docs/architecture/skill-registry-index.md §3 Stage 5 / build phase R2.
  *
- * Writes a `sourceType='registry_github'` definition, a `storageType='db_text'`
- * version carrying the frozen metadata (frontmatter + capability/scan +
- * `fileManifest`), and the bundle files themselves — the same storage every
- * custom skill uses, so registry skills resolve through the ordinary
- * `loadSkillVersionBundle` path with no branch of their own.
+ * A registry skill is written in two steps, in this order:
+ *   1. OBJECT STORAGE — every file as a content-addressed blob, and the whole
+ *      skill as one deterministic zip bundle (`../storage`);
+ *   2. THE DATABASE — a `sourceType='registry_github'` definition, a
+ *      `storageType='object'` version carrying SKILL.md's text, the bundle's
+ *      key/digest/size and the frozen metadata, and one manifest row per file
+ *      (path, type, size, sha256, blob key — no content).
+ * A row therefore never points at an object that was not stored. The reverse —
+ * objects whose transaction then failed — is harmless: they are addressed by
+ * their content, so the retry finds them already there, and nothing references
+ * them until it commits.
  *
  * Storing the bundle is what makes an indexed skill survive the upstream repo
  * being deleted, rewritten or unreachable, and it is how every comparable
@@ -34,6 +44,9 @@ import { RegistrySubmissionError } from "./errors";
 // is its own version. A repeated source returns the immutable existing version.
 const VERSION_SHA_PREFIX_LENGTH = 12;
 
+/** Blob writes in flight at once: each is an existence check plus an upload. */
+const BLOB_WRITE_CONCURRENCY = 8;
+
 export type UpsertRegistrySkillInput = {
   slug: string;
   displayName: string;
@@ -42,20 +55,32 @@ export type UpsertRegistrySkillInput = {
   /** github:<owner>/<repo>@<40hex-sha>#<subpath> */
   storagePointer: string;
   commitSha: string;
-  contentHash: string;
   manifestJson: SkillManifestJson;
   versionStatus: "published" | "draft";
   outcome: "indexed" | "queued";
-  /** The bundle bodies to persist, bundle-relative. */
+  /** The whole bundle, SKILL.md included, as raw bytes; paths bundle-relative. */
   files: RegistrySkillFile[];
 };
 
 export type RegistrySkillFile = {
   path: string;
-  contentText: string;
+  bytes: Uint8Array;
   mimeType: string;
-  sizeBytes: number;
-  contentHash: string;
+};
+
+/** What `storeRegistrySkillObjects` left in object storage. */
+export type StoredRegistrySkill = {
+  /** SKILL.md's text — the one file body the database keeps. */
+  skillMd: string;
+  bundle: StoredSkillBundle;
+  files: Array<{
+    path: string;
+    mimeType: string;
+    sizeBytes: number;
+    /** sha256 of the file's bytes. */
+    contentHash: string;
+    objectKey: string;
+  }>;
 };
 
 export type UpsertRegistrySkillResult = {
@@ -70,23 +95,58 @@ export type UpsertRegistrySkillResult = {
   >["diagnostics"];
 };
 
+type SkillSourceType = (typeof skillDefinitions.$inferSelect)["sourceType"];
+type SkillStorageType = (typeof skillVersions.$inferSelect)["storageType"];
+
+/**
+ * Where a skill's content lives follows from where the skill came from, one to
+ * one: a builtin's body ships in this repo, a community skill's bytes are in
+ * object storage, and a workspace-authored skill is inline text.
+ */
+const STORAGE_TYPE_BY_SOURCE = {
+  builtin: "repo_builtin",
+  registry_github: "object",
+} as const satisfies Partial<Record<SkillSourceType, SkillStorageType>>;
+
+/**
+ * Guard at every version write site: `builtin ⇔ repo_builtin`,
+ * `registry_github ⇔ object`, and everything else (custom skills) ⇔ `db_text`.
+ * A mismatch means a reader would look for the content in the wrong place.
+ */
+export function assertSkillStorageInvariant(
+  sourceType: SkillSourceType,
+  storageType: SkillStorageType,
+): void {
+  const expected: SkillStorageType =
+    (
+      STORAGE_TYPE_BY_SOURCE as Partial<
+        Record<SkillSourceType, SkillStorageType>
+      >
+    )[sourceType] ?? "db_text";
+  if (storageType !== expected) {
+    throw new Error(
+      `Skill storage invariant violated: storageType='${storageType}' with sourceType='${sourceType}' (expected '${expected}')`,
+    );
+  }
+}
+
 /**
  * Build the definition + version insert values for a registry skill. Pure; the
- * bundle bodies are written separately by `upsertRegistrySkillIndex`.
+ * per-file manifest rows are written separately by `upsertRegistrySkillIndex`.
  */
 export function buildRegistryUpsertValues(input: {
   displayName: string;
   description: string;
   storagePointer: string;
-  contentHash: string;
+  skillMd: string;
+  bundle: StoredSkillBundle;
   manifestJson: SkillManifestJson;
   version: string;
   versionStatus: "published" | "draft";
 }) {
   const sourceType = "registry_github" as const;
-  const storageType = "db_text" as const;
-  // `repo_builtin` is reserved for skills whose bodies ship in this repo.
-  assertRegistryStorageInvariant(sourceType, storageType);
+  const storageType = "object" as const;
+  assertSkillStorageInvariant(sourceType, storageType);
 
   return {
     sourceType,
@@ -108,13 +168,114 @@ export function buildRegistryUpsertValues(input: {
       status: input.versionStatus,
       storageType,
       storagePointer: input.storagePointer,
-      contentHash: input.contentHash,
+      // The bundle digest IS the version's content identity: it covers every
+      // file's path and bytes, and it is the same value the storage key and
+      // the sandbox's staging stamp are derived from.
+      contentHash: input.bundle.sha256,
+      skillMd: input.skillMd,
+      bundleSha256: input.bundle.sha256,
+      bundleObjectKey: input.bundle.objectKey,
+      bundleSizeBytes: input.bundle.sizeBytes,
       manifestJson: input.manifestJson,
-      // Clean submissions become the current, published version; queued drafts
-      // stay non-current so they never surface until an admin approves them.
+      // Only a published version is ELIGIBLE to be current; queued drafts stay
+      // non-current so they never surface until an admin approves them. Whether
+      // an eligible version actually takes over is decided against the stored
+      // current version — see `registryVersionTakesCurrent`.
       isCurrent: input.versionStatus === "published",
     },
   };
+}
+
+/**
+ * Step 1 of the write: put every file and the bundle into object storage.
+ *
+ * Every key is derived from the content, and a put is put-if-absent, so running
+ * this again — a retried job, the same commit re-submitted — uploads nothing
+ * and returns the same keys. Any failure rejects before the caller has opened
+ * its transaction.
+ */
+export async function storeRegistrySkillObjects(
+  files: readonly RegistrySkillFile[],
+): Promise<StoredRegistrySkill> {
+  const skillMdFile = files.find((file) => file.path === "SKILL.md");
+  if (!skillMdFile) {
+    throw new Error("A registry skill bundle must contain SKILL.md");
+  }
+  const stored: StoredRegistrySkill["files"] = new Array(files.length);
+  let next = 0;
+  let failed = false;
+  const worker = async () => {
+    // `failed` stops the other workers from starting uploads for a write that
+    // is already lost.
+    while (next < files.length && !failed) {
+      const index = next++;
+      const file = files[index]!;
+      const blob = await putSkillBlob({
+        bytes: file.bytes,
+        mimeType: file.mimeType,
+      }).catch((error: unknown) => {
+        failed = true;
+        throw error;
+      });
+      stored[index] = {
+        path: file.path,
+        mimeType: file.mimeType,
+        sizeBytes: blob.sizeBytes,
+        contentHash: blob.sha256,
+        objectKey: blob.objectKey,
+      };
+    }
+  };
+  await Promise.all(
+    Array.from(
+      { length: Math.min(BLOB_WRITE_CONCURRENCY, files.length) },
+      worker,
+    ),
+  );
+  const bundle = await putSkillBundle(
+    files.map((file) => ({ path: file.path, bytes: file.bytes })),
+  );
+  return {
+    skillMd: Buffer.from(skillMdFile.bytes).toString("utf8"),
+    bundle,
+    files: stored,
+  };
+}
+
+function committedAtMs(committedAt: string | undefined): number | null {
+  const ms = committedAt ? Date.parse(committedAt) : Number.NaN;
+  return Number.isNaN(ms) ? null : ms;
+}
+
+/**
+ * Whether a newly PUBLISHED version replaces the current one. Shared by the
+ * index write and admin publish so both agree.
+ *
+ * Currency follows the commit's age, not the order writes happen to land in:
+ * two submissions of one skill can finish in either order, and an admin can
+ * approve an old queued draft after a newer version is already live — neither
+ * may roll the catalog back. So a version takes over only if its commit is not
+ * older than the current version's; equal dates fall to the newer write.
+ *
+ * Every registry version is dated — ingest refuses a commit whose date it
+ * cannot read — so the `undefined` in the types is the manifest's optional
+ * field, not a case that occurs. Should one turn up anyway it ranks as oldest:
+ * an undated candidate never takes over, an undated current always yields.
+ */
+export function registryVersionTakesCurrent(input: {
+  candidateCommittedAt: string | undefined;
+  /** The stored `isCurrent` version, or null when the skill has none. */
+  current: { committedAt: string | undefined } | null;
+}): boolean {
+  if (!input.current) {
+    return true;
+  }
+  const candidate = committedAtMs(input.candidateCommittedAt);
+  const current = committedAtMs(input.current.committedAt);
+  if (candidate === null) {
+    return false;
+  }
+  return current === null || candidate >= current;
 }
 
 /**
@@ -189,6 +350,15 @@ export async function upsertRegistrySkillIndex(
   input: UpsertRegistrySkillInput,
 ): Promise<UpsertRegistrySkillResult> {
   const version = input.commitSha.slice(0, VERSION_SHA_PREFIX_LENGTH);
+  if (committedAtMs(input.manifestJson.registry?.committedAt) === null) {
+    throw new RegistrySubmissionError(
+      "REGISTRY_SUBMISSION_UNDATED",
+      "A registry version cannot be stored without its commit date",
+    );
+  }
+  // Objects first, rows second — see the file header. Nothing below this line
+  // runs unless every blob and the bundle are in object storage.
+  const stored = await storeRegistrySkillObjects(input.files);
   const now = new Date();
   return db.transaction(async (tx) => {
     // Also serializes first insertion, where no definition row exists to lock.
@@ -228,8 +398,14 @@ export async function upsertRegistrySkillIndex(
           "Version label refers to a different full source commit or path",
         );
       }
-      const stored = await tx
-        .select()
+      // A version label is immutable: the same commit and path must be the same
+      // bytes. The bundle digest already covers every path and body; the
+      // per-file comparison keeps the manifest rows under the same guarantee.
+      const storedRows = await tx
+        .select({
+          path: skillVersionFiles.path,
+          contentHash: skillVersionFiles.contentHash,
+        })
         .from(skillVersionFiles)
         .where(eq(skillVersionFiles.skillVersionId, existingVersion.id));
       const hashes = (files: Array<{ path: string; contentHash: string }>) =>
@@ -238,7 +414,10 @@ export async function upsertRegistrySkillIndex(
             .map((f) => [f.path, f.contentHash])
             .sort((a, b) => a[0]!.localeCompare(b[0]!)),
         );
-      if (hashes(stored) !== hashes(input.files)) {
+      if (
+        existingVersion.bundleSha256 !== stored.bundle.sha256 ||
+        hashes(storedRows) !== hashes(stored.files)
+      ) {
         throw new RegistrySubmissionError(
           "REGISTRY_VERSION_CONFLICT",
           "This source has different files from the stored immutable version",
@@ -289,21 +468,45 @@ export async function upsertRegistrySkillIndex(
     });
     const values = buildRegistryUpsertValues({
       ...input,
+      skillMd: stored.skillMd,
+      bundle: stored.bundle,
       version,
       versionStatus: decision.versionStatus,
     });
+    // Read under the advisory lock, so a concurrent submission of another
+    // commit has either fully landed or not started: the comparison below sees
+    // a settled current version whichever transaction runs second.
+    const [current] = await tx
+      .select({ manifestJson: skillVersions.manifestJson })
+      .from(skillVersions)
+      .where(
+        and(
+          eq(skillVersions.skillId, skillId),
+          eq(skillVersions.isCurrent, true),
+        ),
+      )
+      .limit(1);
+    const isPublished = values.version.status === "published";
+    const takesCurrent =
+      isPublished &&
+      registryVersionTakesCurrent({
+        candidateCommittedAt: input.manifestJson.registry?.committedAt,
+        current: current
+          ? { committedAt: current.manifestJson.registry?.committedAt }
+          : null,
+      });
     if (!existing) {
-      await tx
-        .insert(skillDefinitions)
-        .values({
-          id: skillId,
-          ...values.definition,
-          slug: input.slug,
-          ownerUserId: input.submitterId,
-          createdAt: now,
-          updatedAt: now,
-        });
-    } else if (values.version.isCurrent) {
+      await tx.insert(skillDefinitions).values({
+        id: skillId,
+        ...values.definition,
+        slug: input.slug,
+        ownerUserId: input.submitterId,
+        createdAt: now,
+        updatedAt: now,
+      });
+    } else if (takesCurrent) {
+      // An older commit that lands late is kept as a historical version only;
+      // the definition keeps describing the version users actually get.
       await tx
         .update(skillDefinitions)
         .set({
@@ -313,35 +516,36 @@ export async function upsertRegistrySkillIndex(
         })
         .where(eq(skillDefinitions.id, skillId));
     }
-    if (values.version.isCurrent) {
+    if (takesCurrent) {
       await tx
         .update(skillVersions)
         .set({ isCurrent: false, updatedAt: now })
         .where(eq(skillVersions.skillId, skillId));
     }
     const skillVersionId = randomUUID();
-    await tx
-      .insert(skillVersions)
-      .values({
-        id: skillVersionId,
-        skillId,
-        ...values.version,
-        createdBy: input.submitterId,
-        publishedAt: values.version.isCurrent ? now : null,
+    await tx.insert(skillVersions).values({
+      id: skillVersionId,
+      skillId,
+      ...values.version,
+      isCurrent: takesCurrent,
+      createdBy: input.submitterId,
+      // Published is not the same as current: a late-arriving older commit is
+      // published as history without taking over.
+      publishedAt: isPublished ? now : null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    // One manifest row per file. The bytes are the blob at `objectKey`;
+    // `contentText` stays null for an `object` version.
+    await tx.insert(skillVersionFiles).values(
+      stored.files.map((file) => ({
+        ...file,
+        contentText: null,
+        id: randomUUID(),
+        skillVersionId,
         createdAt: now,
-        updatedAt: now,
-      });
-    if (input.files.length)
-      await tx
-        .insert(skillVersionFiles)
-        .values(
-          input.files.map((file) => ({
-            ...file,
-            id: randomUUID(),
-            skillVersionId,
-            createdAt: now,
-          })),
-        );
+      })),
+    );
     return {
       slug: input.slug,
       skillId,

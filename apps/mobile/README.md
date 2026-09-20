@@ -24,6 +24,42 @@ When using a physical iPhone, keep the phone and development machine on the same
 network and allow the iOS local-network prompt. The generated iOS project
 includes `NSAllowsLocalNetworking` for the local HTTP dev server.
 
+On the iOS Simulator, use `ios:sim` instead:
+
+```sh
+pnpm --filter @sourceweft/mobile ios:sim
+```
+
+It points devUrl at `http://sw.localhost:3000`, which looks odd but is load
+bearing on two counts.
+
+`0.0.0.0` does not work. Tauri rewrites that devUrl host to the machine's LAN
+address, which the simulator cannot reach: iOS asks for Local Network
+permission, `xcrun simctl privacy` has no service to grant it, and the WebView
+only ever shows `Failed to request http://<lan-ip>:3000/`. An mDNS `.local` name
+resolves to the same LAN address and hits the same wall.
+
+Plain `localhost` does not work either, and the failure is silent. Tauri proxies
+the dev server through its own protocol on mobile only —
+`PROXY_DEV_SERVER = cfg!(all(dev, mobile))` — whenever the devUrl host is
+`localhost` or any IP literal. The WebView then runs on `tauri://localhost`
+instead of an http origin, and Next's client never hydrates there: the document
+and every chunk load with 200, no JavaScript error is raised, and the app renders
+its server HTML and nothing else. Pages that are mostly static (the marketing
+home page, dashboard skeletons) look fine, so the breakage only becomes visible
+on a page that needs client rendering, such as sign-in. That rewrite also drops
+the path, so the start route is lost. `apps/desktop` never hits any of this: the
+proxy is off on desktop, so its window loads the real http origin directly.
+
+A host that is neither the literal string `localhost` nor an IP literal skips the
+proxy, and macOS resolves `*.localhost` to the loopback address — so
+`sw.localhost` keeps the simulator on loopback while loading the web app over
+http, exactly like the desktop app does.
+
+The WebView origin is then `http://sw.localhost:3000` rather than
+`http://localhost:3000`. Add it to `BETTER_AUTH_TRUSTED_ORIGINS` before testing
+sign-in, or auth requests are rejected as untrusted.
+
 For authenticated local testing on a physical device, also expose the backend on
 `0.0.0.0:3001` and add the web dev origin to `BETTER_AUTH_TRUSTED_ORIGINS`, for
 example `http://192.168.1.20:3000`. The web client falls back to the same host
@@ -51,6 +87,13 @@ APPLE_DEVELOPMENT_TEAM=YOUR_TEAM_ID pnpm run ios
 
 If `project.yml` or the generated Xcode project captures your local Team ID,
 review that diff before committing a public branch.
+
+## Android packaging
+
+Android APK/AAB builds, pinned toolchains, signing inputs and CI verification are
+documented in [Android packaging](../../scripts/ci/README.android.md). The Android
+native project is now tracked; review any reinitialization diff before replacing
+its signing or manifest configuration.
 
 ## Google Sign-In
 

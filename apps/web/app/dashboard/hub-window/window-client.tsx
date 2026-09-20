@@ -345,6 +345,12 @@ export function DesktopHubWindow() {
         }),
       locate: (messageId: string) => fire({ type: "locate", messageId }),
       refreshSkills: () => command({ type: "refresh-skills" }),
+      workFolder: (folderId: string) => {
+        void command({ type: "work-folder", folderId });
+      },
+      chooseWorkFolder: async () => {
+        await command({ type: "choose-work-folder" });
+      },
       connectors: (connectors: import("@sourceweft/sdk").SourceConnector[]) =>
         fire({ type: "connectors", connectors }),
       sourcesLoaded: (
@@ -612,6 +618,9 @@ export function DesktopHubWindow() {
                 variant="window"
                 viewKey={snapshot.contextKey}
                 mode={r.mode}
+                draftWorkContext={r.draftWorkContext}
+                onWorkFolderChange={actions.workFolder}
+                onChooseWorkFolder={actions.chooseWorkFolder}
                 workspaceId={r.workspaceId}
                 workspaceName={r.workspaceName}
                 threadId={r.threadId}

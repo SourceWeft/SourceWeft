@@ -15,6 +15,23 @@ an existing directory before creating the conversation instead. The native picke
 issues an opaque, account-scoped directory grant. Neither browser requests nor
 model tool arguments can grant access by supplying a path.
 
+Before sending the first message, Files shows “Conversation folder” for the
+automatic choice and offers “Choose existing folder”. Opening an empty draft
+never allocates storage. Selecting an authorized directory immediately shows its
+path, subdirectories and file previews, without creating a conversation. Cloud
+drafts instead show “Conversation cloud files”. The composer and all Hub surfaces
+share the same selection, including the detached Hub window.
+
+Draft reads use `/v1/local-devices/:deviceId/folders/:folderId/files` and the
+read-only `folder.list` / `folder.read` device actions. The backend checks device
+access and the owner-scoped live directory grant both before dispatch and before
+returning results. The native host verifies the grant and directory identity,
+rejects path escape, symlinks and hard-linked files, and allocates no workspace.
+Preview/download is limited to 1 MiB and listing to 500 entries. File bytes use
+the short-lived transfer channel; they are not saved in the invocation journal.
+Offline computers, revoked grants and missing/replaced directories retain the
+selection and show an explicit error. They never trigger automatic replacement.
+
 The conversation's PC and directory selection cannot change after creation. A
 selected directory can be reused by multiple conversations. Deleting a conversation
 never deletes the physical directory. Missing/replaced directories, invalid grants,
@@ -93,9 +110,9 @@ second editable Workfiles copy. Artifact publication remains explicit.
 
 ## Rollout
 
-Apply database migrations through `0034_local_work_contexts.sql` using the usual
+Apply database migrations through `0039_draft_folder_reads.sql` using the usual
 backend migration command, then rebuild/restart the desktop client and backend/Web services.
-The desktop automatically upgrades its local SQLite schema to version 3. Selected
+The desktop automatically upgrades its local SQLite schema. Draft directory previews require the updated native host; old hosts report an unsupported action until upgraded. Selected
 directory requests require both this migration and the updated native host. There
 is no automatic migration of old DB Workfiles into user directories.
 

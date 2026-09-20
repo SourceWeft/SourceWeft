@@ -1,5 +1,5 @@
 import { sha256 } from "./hash";
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { discoverCapabilities } from "@sourceweft/capability-runtime";
 import type {
@@ -9,15 +9,29 @@ import type {
 import type { SkillManifestJson } from "@sourceweft/db";
 import { resolveBackendRuntimePath } from "../../shared/runtime-paths";
 import { config } from "../../shared/config";
+import { classifySkillFile } from "./file-kind";
+import { SKILL_STORAGE_LIMITS } from "./storage/limits";
 import { getSourceWeftFrontmatter, parseSkillFrontmatter } from "./frontmatter";
 
 export type SkillBundleFile = {
   path: string;
-  contentText: string;
   mimeType: string;
   sizeBytes: number;
+  /** sha256 over the file's bytes. */
   contentHash: string;
-};
+} & (
+  | { isText: true; contentText: string }
+  | {
+      /**
+       * A font, an image, a template: what a skill's scripts work with and the
+       * model never reads. The bytes stay on disk until the sandbox bundle is
+       * built, rather than riding along with every turn that lists the skill.
+       */
+      isText: false;
+      contentText: null;
+      readBytes: () => Promise<Uint8Array>;
+    }
+);
 
 export type BuiltinSkillManifest = {
   slug: string;
@@ -59,14 +73,6 @@ function capabilityStoragePointerPrefix() {
 function builtinCapabilityNamespace() {
   return config.capability?.builtinNamespace ?? "sourceweft";
 }
-
-const TEXT_MIME_BY_EXTENSION: Record<string, string> = {
-  ".md": "text/markdown",
-  ".txt": "text/plain",
-  ".json": "application/json",
-  ".yaml": "application/yaml",
-  ".yml": "application/yaml",
-};
 
 let builtinSkillsCache: BuiltinSkillManifest[] | null = null;
 
@@ -307,22 +313,93 @@ async function collectFiles(
   return files;
 }
 
-async function collectSkillFiles(skillDir: string) {
+/**
+ * What is known about a binary file without reading it again. Builtin packages
+ * are re-read from disk on every load, which is nothing for text and would be
+ * tens of megabytes per turn for a font set; a file whose size and mtime have
+ * not moved is the same file.
+ */
+const binaryFileFacts = new Map<
+  string,
+  { sizeBytes: number; mtimeMs: number; mimeType: string; contentHash: string }
+>();
+
+async function collectSkillFile(
+  skillDir: string,
+  filePath: string,
+): Promise<SkillBundleFile> {
+  const relativePath = normalizeRelativePath(skillDir, filePath);
+  const readBytes = () => readFile(filePath);
+  const stats = await stat(filePath);
+  const known = binaryFileFacts.get(filePath);
+  if (
+    known &&
+    known.sizeBytes === stats.size &&
+    known.mtimeMs === stats.mtimeMs
+  ) {
+    return {
+      path: relativePath,
+      mimeType: known.mimeType,
+      sizeBytes: known.sizeBytes,
+      contentHash: known.contentHash,
+      isText: false,
+      contentText: null,
+      readBytes,
+    };
+  }
+  const bytes = await readBytes();
+  const kind = classifySkillFile(relativePath, bytes);
+  const base = {
+    path: relativePath,
+    mimeType: kind.mimeType,
+    sizeBytes: bytes.byteLength,
+    contentHash: sha256(bytes),
+  };
+  if (kind.isText) {
+    binaryFileFacts.delete(filePath);
+    return { ...base, isText: true, contentText: kind.contentText };
+  }
+  binaryFileFacts.set(filePath, {
+    sizeBytes: stats.size,
+    mtimeMs: stats.mtimeMs,
+    mimeType: base.mimeType,
+    contentHash: base.contentHash,
+  });
+  return { ...base, isText: false, contentText: null, readBytes };
+}
+
+/** Every file of one skill directory. Exported for its tests. */
+export async function collectSkillFiles(skillDir: string) {
   const normalizedSkillDir = path.resolve(skillDir);
   return Promise.all(
-    (await collectFiles(normalizedSkillDir)).map(async (filePath) => {
-      const contentText = await readFile(filePath, "utf8");
-      const relativePath = normalizeRelativePath(normalizedSkillDir, filePath);
-      const ext = path.extname(relativePath).toLowerCase();
-      return {
-        path: relativePath,
-        contentText,
-        mimeType: TEXT_MIME_BY_EXTENSION[ext] ?? "text/plain",
-        sizeBytes: Buffer.byteLength(contentText, "utf8"),
-        contentHash: sha256(contentText),
-      };
-    }),
+    (await collectFiles(normalizedSkillDir)).map((filePath) =>
+      collectSkillFile(normalizedSkillDir, filePath),
+    ),
   );
+}
+
+/**
+ * A builtin is staged into the sandbox under the same limits as every other
+ * skill, so one that breaks them could be listed and never run.
+ */
+function builtinBundleLimitViolation(
+  files: ReadonlyArray<Pick<SkillBundleFile, "path" | "sizeBytes">>,
+): string | null {
+  const MiB = 1024 * 1024;
+  if (files.length > SKILL_STORAGE_LIMITS.maxFiles) {
+    return `has ${files.length} files, more than the ${SKILL_STORAGE_LIMITS.maxFiles}-file limit for one skill`;
+  }
+  const oversize = files.find(
+    (file) => file.sizeBytes > SKILL_STORAGE_LIMITS.maxFileBytes,
+  );
+  if (oversize) {
+    return `ships '${oversize.path}' (${Math.ceil(oversize.sizeBytes / MiB)} MiB), more than the ${SKILL_STORAGE_LIMITS.maxFileBytes / MiB} MiB limit for one file`;
+  }
+  const total = files.reduce((sum, file) => sum + file.sizeBytes, 0);
+  if (total > SKILL_STORAGE_LIMITS.maxBundleBytes) {
+    return `is ${Math.ceil(total / MiB)} MiB in total, more than the ${SKILL_STORAGE_LIMITS.maxBundleBytes / MiB} MiB limit for one skill`;
+  }
+  return null;
 }
 
 function hashFiles(
@@ -364,8 +441,13 @@ async function loadBuiltinSkillsFromDisk(): Promise<BuiltinSkillManifest[]> {
         const skillDir = record.rootDir;
         const files = await collectSkillFiles(skillDir);
         const skillMd = files.find((file) => file.path === "SKILL.md");
-        if (!skillMd) {
+        if (!skillMd?.isText) {
           throw new Error(`Builtin skill '${skill.id}' missing SKILL.md`);
+        }
+        const overLimit = builtinBundleLimitViolation(files);
+        if (overLimit) {
+          // Found at boot, not by the first user whose turn cannot stage it.
+          throw new Error(`Builtin skill '${skill.id}' ${overLimit}`);
         }
         const parsed = parseBuiltinManifestFromFrontmatter(
           parseSkillFrontmatter(skillMd.contentText) ?? {},

@@ -22,6 +22,12 @@ import {
 import { processSyncModelPricingJob } from "./processors/sync-model-pricing";
 import { processProviderCostReconciliationJob } from "../shared/model-gateway/provider-cost-reconciliation";
 import { processThreadTitleGenerateJob } from "./processors/thread-title";
+import {
+  handleSkillIngestJobFailure,
+  processSkillRegistryIngestJob,
+  SKILL_INGEST_WORKER_CONCURRENCY,
+} from "./processors/skill-registry-ingest";
+import { SKILL_REGISTRY_INGEST_JOB } from "../modules/skills/registry/ingest/queue";
 import { handleDeliverableJobFailure } from "./deliverable-host/job-failure-boundary";
 import { buildDeliverableProcessorMap } from "./deliverable-host/registry";
 import {
@@ -52,6 +58,10 @@ const primaryProcessors: Record<string, JobProcessor> = {
   "thread-title-generate": processThreadTitleGenerateJob,
 };
 
+const skillIngestProcessors: Record<string, JobProcessor> = {
+  [SKILL_REGISTRY_INGEST_JOB]: processSkillRegistryIngestJob,
+};
+
 // Deliverable pipelines are capability-owned: the registry discovers them
 // from capability manifests (falling back to the builtin module map inside
 // the registry). main.ts stays capability-agnostic.
@@ -75,9 +85,32 @@ async function runIsolatedJob(
   return runWorkerJobWithIsolation(job, processor);
 }
 
+// After an uncaught exception: stop taking jobs, give the ones in flight a
+// bounded time to finish, then exit non-zero for the supervisor to restart the
+// worker. Jobs still running at the deadline are redelivered by BullMQ's stall
+// handling, which chat runs already fence against.
+const WORKER_RESTART_DRAIN_TIMEOUT_MS = 30_000;
+let restarting = false;
+function restartAfterException() {
+  if (restarting) {
+    process.exit(1);
+  }
+  restarting = true;
+  logger.error("Worker draining after an uncaught exception, then exiting");
+  const deadline = setTimeout(
+    () => process.exit(1),
+    WORKER_RESTART_DRAIN_TIMEOUT_MS,
+  );
+  void closeWorkers().finally(() => {
+    clearTimeout(deadline);
+    process.exit(1);
+  });
+}
+
 installWorkerProcessErrorGuards({
   persistThreadRunFailure: ({ payload, error }) =>
     failThreadRunAtProcessorBoundary({ payload, error }),
+  restartAfterException,
 });
 
 // How long a job's Redis lock stays valid without renewal before BullMQ
@@ -105,6 +138,18 @@ const deliverablesWorker = new Worker<JobPayload>(
   {
     connection: connectionOptions,
     concurrency: config.deliverablesWorkerConcurrency,
+    lockDuration: WORKER_LOCK_DURATION_MS,
+  },
+);
+
+// Community-skill ingest has its own queue and a small fixed concurrency: a
+// burst of repository imports must not take worker slots from chat turns.
+const skillIngestWorker = new Worker<JobPayload>(
+  config.skillIngestQueueName,
+  async (job: Job<JobPayload>) => runIsolatedJob(job, skillIngestProcessors),
+  {
+    connection: connectionOptions,
+    concurrency: SKILL_INGEST_WORKER_CONCURRENCY,
     lockDuration: WORKER_LOCK_DURATION_MS,
   },
 );
@@ -178,6 +223,7 @@ function registerWorkerListeners(
 
 registerWorkerListeners(primaryWorker, config.queueName);
 registerWorkerListeners(deliverablesWorker, config.deliverablesQueueName);
+registerWorkerListeners(skillIngestWorker, config.skillIngestQueueName);
 
 // Deliverable jobs that die outside the processor (stalled on worker
 // restart/crash, BullMQ-level failures) never reach the host's catch block —
@@ -223,6 +269,22 @@ deliverablesWorker.on(
   },
 );
 
+// Same boundary for skill ingests: a job that ends without the processor's own
+// failure handling must not leave its submission `running`.
+skillIngestWorker.on(
+  "failed",
+  (job: Job<JobPayload> | undefined, error: Error) => {
+    if (!job) {
+      return;
+    }
+    void handleSkillIngestJobFailure({
+      data: job.data,
+      error,
+      getState: () => job.getState(),
+    });
+  },
+);
+
 logger.info("Primary worker started", {
   queueName: config.queueName,
   concurrency: config.workerConcurrency,
@@ -231,11 +293,25 @@ logger.info("Deliverables worker started", {
   queueName: config.deliverablesQueueName,
   concurrency: config.deliverablesWorkerConcurrency,
 });
+logger.info("Skill ingest worker started", {
+  queueName: config.skillIngestQueueName,
+  concurrency: SKILL_INGEST_WORKER_CONCURRENCY,
+});
 void agentSandboxService.logStartupWarning("worker");
+
+// A function declaration on purpose: `restartAfterException` above refers to
+// it before the workers exist, and only ever calls it after they do.
+function closeWorkers() {
+  return Promise.all([
+    primaryWorker.close(),
+    deliverablesWorker.close(),
+    skillIngestWorker.close(),
+  ]);
+}
 
 async function shutdown() {
   logger.info("Worker shutting down");
-  await Promise.all([primaryWorker.close(), deliverablesWorker.close()]);
+  await closeWorkers();
   process.exit(0);
 }
 

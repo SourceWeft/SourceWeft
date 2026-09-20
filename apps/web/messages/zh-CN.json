@@ -11,7 +11,8 @@
       "howItWorks": "工作原理",
       "pricing": "定价",
       "mcpServers": "MCP 服务",
-      "blog": "博客"
+      "blog": "博客",
+      "download": "下载"
     },
     "signIn": "登录",
     "getStarted": "开始使用",
@@ -33,7 +34,8 @@
       "about": "关于",
       "changelog": "更新日志",
       "privacy": "隐私政策",
-      "terms": "服务条款"
+      "terms": "服务条款",
+      "download": "下载"
     },
     "copyright": "© {year} SourceWeft. 保留所有权利。",
     "builtBy": "由 SourceWeft 打造"
@@ -675,7 +677,8 @@
       "showSidebar": "显示侧边栏",
       "sheetTitle": "导航与对话",
       "inviteManageMembers": "邀请并管理成员",
-      "conversationLoadError": "无法加载对话详情"
+      "conversationLoadError": "无法加载对话详情",
+      "newAgentChat": "新建智能体对话"
     },
     "workspace": {
       "workspaces": "工作区",
@@ -1172,7 +1175,7 @@
     "submit": {
       "button": "提交技能",
       "title": "提交技能",
-      "description": "从公开的 GitHub 仓库按固定版本导入技能。我们会存储技能文件并在使用前进行检查。被标记的技能需等待审核。",
+      "description": "从公开的 GitHub 仓库导入固定版本的技能。我们会保存技能文件并在使用前进行检查。被标记的技能需等待审核。导入在后台运行——你可以关闭此对话框，之后在「我的提交」中找到它。",
       "repoAriaLabel": "GitHub 技能仓库",
       "enterUrl": "请输入公开的 GitHub 仓库 URL。",
       "selectWorkspace": "提交技能前请先选择工作区。",
@@ -1188,7 +1191,9 @@
         "indexed": "已索引",
         "queued": "待审核",
         "failed": "失败"
-      }
+      },
+      "notStarted": "导入未能开始。",
+      "importSection": "导入"
     },
     "introduction": {
       "from": "来自 {source}",
@@ -1301,7 +1306,10 @@
     "folderPicker": {
       "folderUnavailable": "文件夹不可用",
       "defaultTaskFolder": "默认任务文件夹",
-      "selectFolder": "选择文件夹…"
+      "selectFolder": "选择文件夹…",
+      "selectedFolderFallback": "已选择的文件夹",
+      "chooseExistingFolder": "选择已有文件夹…",
+      "useConversationFolder": "使用对话所在文件夹"
     },
     "local": {
       "historyPreserved": "历史记录仍可查看，草稿会被保留。",
@@ -1345,6 +1353,11 @@
       "computerUnavailableSaved": "电脑不可用。你的第一条消息已保存。",
       "saveSourcesFailed": "开始此对话前无法保存来源。",
       "firstMessageSavedCheck": "你的第一条消息已保存。重试相同请求前请先查看对话。"
+    },
+    "subagent": {
+      "srConversation": "子智能体对话",
+      "fallbackTitle": "子智能体",
+      "parentChatFallback": "父对话"
     }
   },
   "dashboardChatCanvas": {
@@ -1522,7 +1535,9 @@
         "error": "失败"
       },
       "delegatedTo": "已委派给 {agent}",
-      "delegatedToStatus": "已委派给 {agent} · {status}"
+      "delegatedToStatus": "已委派给 {agent} · {status}",
+      "openThread": "打开子智能体会话",
+      "newWindow": "新建窗口"
     },
     "userQuestion": {
       "waitingForAnswer": "正在等待你的回答",
@@ -2365,7 +2380,8 @@
       "readmeLoadFailed": "加载技能详情失败。",
       "galleryDialogTitle": "技能库",
       "galleryDialogDescription": "为 {workspace} 安装可复用的技能。",
-      "currentWorkspaceFallback": "当前工作区"
+      "currentWorkspaceFallback": "当前工作区",
+      "addedByAgent": "由智能体添加"
     },
     "mcp": {
       "refresh": "刷新 MCP 工具",

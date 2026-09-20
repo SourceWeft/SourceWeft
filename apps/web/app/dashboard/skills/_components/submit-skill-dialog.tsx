@@ -1,10 +1,6 @@
 "use client";
 
 import * as React from "react";
-import {
-  registrySkillResultSchema,
-  type RegistrySkillResult,
-} from "@sourceweft/contracts";
 import { Loader2, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
@@ -21,29 +17,42 @@ import {
 import { Input } from "@sourceweft/ui-web/components/ui/input";
 
 import { contentClient } from "../../../../lib/sdk";
+import {
+  isSubmissionInFlight,
+  SubmissionDetail,
+  SubmissionStatusBadge,
+  type SkillSubmissionsController,
+} from "./skill-submissions";
 
 /**
  * Lets a user contribute a skill by GitHub URL to the community registry. The
- * backend fetches, statically analyzes, and safety-scans it (never storing the
- * body — index-only), then either indexes it immediately or routes it to review.
- * See docs/architecture/skill-registry-index.md §3.
+ * import runs as a background job — fetch, static analysis, safety scan, then
+ * either indexed or routed to review (docs/architecture/skill-registry-index.md
+ * §3) — so this dialog only STARTS it and then shows the submission the skills
+ * page is already watching. Closing it cancels nothing; the import stays listed
+ * under "My submissions".
  */
 export function SubmitSkillDialog({
   workspaceId,
-  onSubmitted,
+  submissions,
 }: {
   workspaceId: string | null;
-  onSubmitted?: () => void | Promise<void>;
+  submissions: SkillSubmissionsController;
 }) {
   const t = useTranslations("dashboardSkills");
   const [open, setOpen] = React.useState(false);
-  const [repoUrl, setRepoUrl] = React.useState("");
+  const [source, setSource] = React.useState("");
   const [submitting, setSubmitting] = React.useState(false);
-  const [results, setResults] = React.useState<RegistrySkillResult[]>([]);
+  const [activeId, setActiveId] = React.useState<string | null>(null);
   const [failure, setFailure] = React.useState<string | null>(null);
 
+  const active = activeId
+    ? (submissions.items.find((item) => item.id === activeId) ?? null)
+    : null;
+  const busy = submitting || (active ? isSubmissionInFlight(active) : false);
+
   async function handleSubmit() {
-    const trimmed = repoUrl.trim();
+    const trimmed = source.trim();
     if (!trimmed) {
       toast.error(t("submit.enterUrl"));
       return;
@@ -53,31 +62,21 @@ export function SubmitSkillDialog({
       return;
     }
     setSubmitting(true);
-    setResults([]);
     setFailure(null);
     try {
-      const result = await contentClient.submitRegistrySkill(workspaceId, {
-        repoUrl: trimmed,
-      });
-      setResults(result.skills);
-      await onSubmitted?.();
+      // Also what a second submit of a source still importing answers with:
+      // that same submission, so the dialog simply picks its progress up.
+      const { submission } = await contentClient.createSkillSubmission(
+        workspaceId,
+        { source: trimmed },
+      );
+      submissions.track(submission);
+      setActiveId(submission.id);
     } catch (error) {
-      const details =
-        error && typeof error === "object" && "details" in error
-          ? error.details
-          : null;
-      const parsed = registrySkillResultSchema
-        .array()
-        .safeParse(
-          details && typeof details === "object" && "skills" in details
-            ? details.skills
-            : undefined,
-        );
-      if (parsed.success) setResults(parsed.data);
-      else
-        setFailure(
-          `${error instanceof Error ? error.message : t("submit.interrupted")} ${t("submit.partialWarning")}`,
-        );
+      setActiveId(null);
+      setFailure(
+        error instanceof Error ? error.message : t("submit.notStarted"),
+      );
     } finally {
       setSubmitting(false);
     }
@@ -101,83 +100,40 @@ export function SubmitSkillDialog({
           <DialogDescription>{t("submit.description")}</DialogDescription>
         </DialogHeader>
         <Input
-          onChange={(event) => setRepoUrl(event.target.value)}
+          onChange={(event) => setSource(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && !submitting) {
+            if (event.key === "Enter" && !busy) {
               void handleSubmit();
             }
           }}
           aria-label={t("submit.repoAriaLabel")}
           placeholder="https://github.com/owner/repo"
-          value={repoUrl}
+          value={source}
         />
         {failure ? (
           <p role="alert" className="text-sm text-destructive">
             {failure}
           </p>
         ) : null}
-        {results.length ? (
-          <section
-            aria-label={t("submit.resultsAriaLabel")}
-            className="space-y-3 text-sm"
-          >
-            <p role="status">
-              {t("submit.resultsSummary", {
-                indexed: results.filter((r) => r.status === "indexed").length,
-                queued: results.filter((r) => r.status === "queued").length,
-                failed: results.filter((r) => r.status === "failed").length,
-              })}
+        {active ? (
+          <section aria-label={t("submit.importSection")} className="space-y-3">
+            <p className="flex items-center gap-2 text-sm">
+              <SubmissionStatusBadge submission={active} />
+              <span className="min-w-0 truncate">{active.sourceInput}</span>
             </p>
-            {results.map((result, index) => (
-              <div
-                key={`${result.sourcePath}-${index}`}
-                className="rounded-md border p-3"
-              >
-                <p className="font-medium">
-                  {result.name ?? result.sourcePath ?? t("submit.skillFallback")}{" "}
-                  —{" "}
-                  {t.has(`submit.status.${result.status}`)
-                    ? t(`submit.status.${result.status}`)
-                    : result.status}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {result.sourcePath || t("submit.repositoryRoot")}
-                  {result.version ? ` · ${result.version}` : ""}
-                </p>
-                {result.diagnostics.map((d, i) => (
-                  <p
-                    key={i}
-                    className={
-                      d.severity === "error"
-                        ? "text-destructive"
-                        : "text-muted-foreground"
-                    }
-                  >
-                    {d.file}
-                    {d.line
-                      ? `:${d.line}${d.column ? `:${d.column}` : ""}`
-                      : ""}{" "}
-                    {d.message}
-                  </p>
-                ))}
-                {result.flags.length ? (
-                  <p>
-                    {t("submit.reviewFlags", {
-                      flags: result.flags.join(", "),
-                    })}
-                  </p>
-                ) : null}
-              </div>
-            ))}
+            <SubmissionDetail
+              onRetry={submissions.retry}
+              submission={active}
+            />
           </section>
         ) : null}
         <DialogFooter>
           <Button
-            disabled={submitting || !workspaceId}
+            disabled={busy || !workspaceId}
             onClick={() => void handleSubmit()}
             type="button"
           >
-            {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
             {t("submit.submit")}
           </Button>
         </DialogFooter>

@@ -11,50 +11,28 @@ import {
   skillVersions,
   workspaceSkills,
 } from "@sourceweft/db";
-import type { SkillBundleFile } from "./builtin";
+import { readSkillObjectFile } from "./file-content";
 import type {
+  SkillFileContent,
   WorkspaceInstalledSkillItem,
   WorkspaceSkillRecord,
 } from "./types";
 import type { ValidatedCustomSkillFile } from "./custom-validation";
+// One source → storage rule for every version write site; it lives with the
+// registry writer, which is where the third storage type (`object`) comes from.
+import { assertSkillStorageInvariant } from "./registry/repository";
+
+// Enough to show a person every collision on a short name without letting a
+// common suffix pull an unbounded set.
+const INSTALLABLE_NAME_MATCH_LIMIT = 20;
 
 type WorkspaceSkillRow = typeof workspaceSkills.$inferSelect;
 type SkillDefinitionRow = typeof skillDefinitions.$inferSelect;
 type SkillVersionRow = typeof skillVersions.$inferSelect;
 type SkillVersionFileRow = typeof skillVersionFiles.$inferSelect;
 
-/**
- * Hard invariant (docs/architecture/skill-registry-index.md §0): `repo_builtin`
- * storage and the `builtin` source are strictly co-extensive — each is used by
- * the other and by nothing else. A builtin's bodies live on disk in the repo, so
- * letting any other source claim `repo_builtin` would point it at files we ship,
- * and letting a builtin claim `db_text` would shadow those files with rows.
- * The DB CHECK constraints can only see one column at a time, so this
- * cross-column biconditional lives in code, called at every skill_versions
- * write entry.
- *
- * Registry (`registry_github`) skills are deliberately NOT special-cased: they
- * store their bundle in `skill_version_files` exactly like custom skills do.
- * What keeps us an indexer rather than a redistributor is not withholding the
- * bytes — the model is served them either way — but refusing to expose any
- * endpoint that hands a skill's content back out as a retrievable artifact.
- * Attribution rides along in `manifestJson.registry` (`sourceUrl`, `repoUrl`,
- * `license`) and the pinned commit in `storagePointer`.
- */
-export function assertRegistryStorageInvariant(
-  sourceType: SkillDefinitionRow["sourceType"],
-  storageType: SkillVersionRow["storageType"],
-): void {
-  const isRepoBuiltin = storageType === "repo_builtin";
-  const isBuiltin = sourceType === "builtin";
-  if (isRepoBuiltin !== isBuiltin) {
-    throw new Error(
-      `Skill storage invariant violated: storageType='${storageType}' with sourceType='${sourceType}' (repo_builtin ⇔ builtin)`,
-    );
-  }
-}
 
-function mapWorkspaceSkill(row: WorkspaceSkillRow): WorkspaceSkillRecord {
+export function mapWorkspaceSkill(row: WorkspaceSkillRow): WorkspaceSkillRecord {
   return {
     id: row.id,
     teamId: row.teamId,
@@ -65,6 +43,7 @@ function mapWorkspaceSkill(row: WorkspaceSkillRow): WorkspaceSkillRecord {
     configJson: row.configJson ?? {},
     enabledBy: row.enabledBy,
     enabledAt: row.enabledAt?.toISOString() ?? null,
+    installedVia: row.installedVia,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -144,6 +123,7 @@ function mapWorkspaceInstalledSkill(row: {
     configJson: workspaceSkill.configJson,
     enabledBy: workspaceSkill.enabledBy,
     enabledAt: workspaceSkill.enabledAt,
+    installedVia: workspaceSkill.installedVia,
     ...(manifest.registry?.capability
       ? { registryCapability: manifest.registry.capability }
       : {}),
@@ -177,13 +157,43 @@ function skillManifestJson(input: {
   } satisfies SkillManifestJson;
 }
 
+/**
+ * Which `skill_entitlements` rows reach this workspace — shared by every
+ * predicate that reads grants (`visibleSkillCondition` here, `registryAccess`
+ * in the registry) so the two can never drift apart again.
+ *
+ * A row that names a workspace grants THAT workspace only; its `team_id` is
+ * just the owning team, not a second scope. Only a row with no workspace is a
+ * team-wide grant. Installing writes both columns, so matching on
+ * `team_id OR workspace_id` let one workspace's install expose — and make
+ * installable — a restricted skill in every workspace of the team.
+ *
+ * An empty id never matches: the registry admin route reads with blank ids,
+ * and `team_id` has no foreign key that would rule out a blank row.
+ */
+export function skillEntitlementScopeCondition(input: {
+  teamId: string;
+  workspaceId: string;
+}) {
+  const scopes = [];
+  if (input.workspaceId) {
+    scopes.push(sql`${skillEntitlements.workspaceId} = ${input.workspaceId}`);
+  }
+  if (input.teamId) {
+    scopes.push(
+      sql`(${skillEntitlements.workspaceId} is null and ${skillEntitlements.teamId} = ${input.teamId})`,
+    );
+  }
+  return scopes.length > 0 ? sql`(${sql.join(scopes, sql` or `)})` : sql`false`;
+}
+
 function visibleSkillCondition(input: { teamId: string; workspaceId: string }) {
   return or(
     eq(skillDefinitions.visibility, "public"),
     sql`${skillDefinitions.visibility} = 'restricted' and exists (
       select 1 from ${skillEntitlements}
       where ${skillEntitlements.skillId} = ${skillDefinitions.id}
-        and (${skillEntitlements.teamId} = ${input.teamId} or ${skillEntitlements.workspaceId} = ${input.workspaceId})
+        and ${skillEntitlementScopeCondition(input)}
         and (${skillEntitlements.expiresAt} is null or ${skillEntitlements.expiresAt} > now())
     )`,
     and(
@@ -335,6 +345,121 @@ export async function listCatalogSkillVersionsForWorkspace(input: {
     );
 }
 
+/**
+ * What a workspace is allowed to install — the ONE predicate every install
+ * path goes through, whether it names the skill by id (the catalog UI) or by
+ * slug (the agent's `install_skill`).
+ *
+ * The chat path used to resolve slugs with its own registry-only lookup that
+ * skipped this check, and `upsertWorkspaceSkill` grants an entitlement as part
+ * of installing — so naming someone else's `restricted` skill by its
+ * (guessable) slug both installed it and granted access to it.
+ */
+function installableSkillCondition(input: {
+  teamId: string;
+  workspaceId: string;
+  userId?: string;
+}) {
+  return and(
+    // Builtins are installable only when explicitly `managed` (e.g. feynman);
+    // always-on builtins (generators) stay non-installable.
+    sql`(${skillDefinitions.sourceType} <> 'builtin' or ${skillVersions.manifestJson}->>'managed' = 'true')`,
+    eq(skillDefinitions.status, "active"),
+    eq(skillVersions.status, "published"),
+    or(
+      visibleSkillCondition(input),
+      input.userId
+        ? and(
+            eq(skillDefinitions.sourceType, "registry_github"),
+            eq(skillDefinitions.ownerUserId, input.userId),
+          )
+        : undefined,
+    ),
+  );
+}
+
+/**
+ * Installable skills a person could mean by `name`: the exact slug, or — for
+ * registry skills, whose slug is `gh-<owner>-<repo>-<name>` — the author's own
+ * short name. An exact slug wins outright; short names can collide across
+ * repositories, and the caller must surface that rather than pick one.
+ */
+export async function findInstallableSkillsByName(input: {
+  teamId: string;
+  workspaceId: string;
+  userId: string;
+  name: string;
+}) {
+  const name = input.name.trim().toLowerCase();
+  if (!name) {
+    return [];
+  }
+  const suffix = `%-${name.replace(/[\\%_]/g, (char) => `\\${char}`)}`;
+  const rows = await db
+    .select({
+      definition: skillDefinitions,
+      version: skillVersions,
+      enabled: workspaceSkills,
+    })
+    .from(skillDefinitions)
+    .innerJoin(skillVersions, eq(skillVersions.skillId, skillDefinitions.id))
+    .leftJoin(
+      workspaceSkills,
+      and(
+        eq(workspaceSkills.teamId, input.teamId),
+        eq(workspaceSkills.workspaceId, input.workspaceId),
+        eq(workspaceSkills.skillId, skillDefinitions.id),
+      ),
+    )
+    .where(
+      and(
+        eq(skillVersions.isCurrent, true),
+        installableSkillCondition(input),
+        or(
+          eq(skillDefinitions.slug, name),
+          and(
+            eq(skillDefinitions.sourceType, "registry_github"),
+            sql`${skillDefinitions.slug} like ${suffix}`,
+          ),
+        ),
+      ),
+    )
+    .orderBy(skillDefinitions.slug)
+    .limit(INSTALLABLE_NAME_MATCH_LIMIT);
+  const exact = rows.filter((row) => row.definition.slug === name);
+  return exact.length > 0 ? exact : rows;
+}
+
+/**
+ * How many workspaces have each skill installed and switched on — the one
+ * quality signal we can compute ourselves. LobeHub and skills.sh both lead
+ * search results with an install count for the same reason: a description says
+ * what a skill claims, adoption says whether anyone kept it.
+ */
+export async function countSkillInstalls(skillIds: string[]) {
+  const counts = new Map<string, number>();
+  if (skillIds.length === 0) {
+    return counts;
+  }
+  const rows = await db
+    .select({
+      skillId: workspaceSkills.skillId,
+      installs: sql<number>`count(distinct ${workspaceSkills.workspaceId})::int`,
+    })
+    .from(workspaceSkills)
+    .where(
+      and(
+        inArray(workspaceSkills.skillId, skillIds),
+        eq(workspaceSkills.enabled, true),
+      ),
+    )
+    .groupBy(workspaceSkills.skillId);
+  for (const row of rows) {
+    counts.set(row.skillId, row.installs);
+  }
+  return counts;
+}
+
 export async function findCatalogSkillVersionForWorkspace(input: {
   teamId: string;
   workspaceId: string;
@@ -363,12 +488,7 @@ export async function findCatalogSkillVersionForWorkspace(input: {
         eq(skillDefinitions.id, input.skillId),
         eq(skillVersions.id, input.skillVersionId),
         eq(skillVersions.skillId, input.skillId),
-        // Builtins are installable only when explicitly `managed` (e.g. feynman);
-        // always-on builtins (generators) stay non-installable.
-        sql`(${skillDefinitions.sourceType} <> 'builtin' or ${skillVersions.manifestJson}->>'managed' = 'true')`,
-        eq(skillDefinitions.status, "active"),
-        eq(skillVersions.status, "published"),
-        or(visibleSkillCondition(input), input.userId ? and(eq(skillDefinitions.sourceType, "registry_github"), eq(skillDefinitions.ownerUserId, input.userId)) : undefined),
+        installableSkillCondition(input),
       ),
     )
     .limit(1);
@@ -431,6 +551,12 @@ export async function upsertWorkspaceSkill(input: {
    * ends up running third-party code they never chose to turn on.
    */
   enabled?: boolean;
+  /**
+   * Set only by an INSTALL (catalog UI → `user`, `install_skill` → `agent`).
+   * Left undefined by paths that merely switch a skill back on, so re-enabling
+   * never rewrites who installed it.
+   */
+  installedVia?: "user" | "agent";
 }) {
   const enabled = input.enabled ?? true;
   const now = new Date();
@@ -463,6 +589,7 @@ export async function upsertWorkspaceSkill(input: {
           configJson: input.configJson ?? {},
           enabledBy: input.enabledBy,
           enabledAt: now,
+          ...(input.installedVia ? { installedVia: input.installedVia } : {}),
           updatedAt: now,
         })
         .where(eq(workspaceSkills.id, existing.id))
@@ -485,6 +612,7 @@ export async function upsertWorkspaceSkill(input: {
         configJson: input.configJson ?? {},
         enabledBy: input.enabledBy,
         enabledAt: now,
+        installedVia: input.installedVia ?? "user",
         createdAt: now,
         updatedAt: now,
       })
@@ -538,19 +666,124 @@ export async function deleteWorkspaceSkillRecord(input: {
   workspaceId: string;
   workspaceSkillId: string;
 }) {
-  const rows = await db
-    .delete(workspaceSkills)
-    .where(
-      and(
-        eq(workspaceSkills.id, input.workspaceSkillId),
-        eq(workspaceSkills.teamId, input.teamId),
-        eq(workspaceSkills.workspaceId, input.workspaceId),
-      ),
-    )
-    .returning({ id: workspaceSkills.id });
-  return rows.length > 0;
+  return db.transaction(async (tx) => {
+    const [removed] = await tx
+      .delete(workspaceSkills)
+      .where(
+        and(
+          eq(workspaceSkills.id, input.workspaceSkillId),
+          eq(workspaceSkills.teamId, input.teamId),
+          eq(workspaceSkills.workspaceId, input.workspaceId),
+        ),
+      )
+      .returning({ skillId: workspaceSkills.skillId });
+    if (!removed) {
+      return false;
+    }
+    // Installing is what granted this workspace access (`grantSkillEntitlement`),
+    // so uninstalling takes it back. Left behind, the grant kept a `restricted`
+    // skill visible — and re-installable — to a workspace that had removed it.
+    await tx
+      .delete(skillEntitlements)
+      .where(
+        and(
+          eq(skillEntitlements.skillId, removed.skillId),
+          eq(skillEntitlements.teamId, input.teamId),
+          eq(skillEntitlements.workspaceId, input.workspaceId),
+        ),
+      );
+    return true;
+  });
 }
 
+/**
+ * A file's manifest row: everything but its bytes. `contentText` is filled only
+ * for the version's documents (SKILL.md, README*) and only when the row stores
+ * them inline (`db_text`), so the catalog and a turn get what they show up
+ * front without any other body leaving the database.
+ */
+export type SkillVersionFileManifestRow = {
+  path: string;
+  mimeType: string;
+  sizeBytes: number;
+  contentHash: string;
+  objectKey: string | null;
+  contentText: string | null;
+};
+
+/** `readSkillDocuments`' README pattern, in Postgres syntax (matched with `~*`). */
+const README_PATH_PATTERN = "^readme(\\.[a-z0-9-]+)?\\.md$";
+
+export async function listSkillVersionFileManifest(
+  skillVersionId: string,
+): Promise<SkillVersionFileManifestRow[]> {
+  return db
+    .select({
+      path: skillVersionFiles.path,
+      mimeType: skillVersionFiles.mimeType,
+      sizeBytes: skillVersionFiles.sizeBytes,
+      contentHash: skillVersionFiles.contentHash,
+      objectKey: skillVersionFiles.objectKey,
+      contentText: sql<
+        string | null
+      >`case when ${skillVersionFiles.path} = 'SKILL.md' or ${skillVersionFiles.path} ~* ${README_PATH_PATTERN} then ${skillVersionFiles.contentText} end`,
+    })
+    .from(skillVersionFiles)
+    .where(eq(skillVersionFiles.skillVersionId, skillVersionId))
+    .orderBy(skillVersionFiles.path);
+}
+
+/**
+ * One file's content, bounded, from wherever its row keeps it: inline text
+ * (`db_text`) or a blob (`object`). A binary blob is reported, never fetched.
+ * Null when the version has no such path.
+ */
+export async function readSkillVersionFile(input: {
+  skillVersionId: string;
+  path: string;
+  maxBytes?: number;
+  signal?: AbortSignal;
+}): Promise<SkillFileContent | null> {
+  const [row] = await db
+    .select({
+      contentText: skillVersionFiles.contentText,
+      objectKey: skillVersionFiles.objectKey,
+      mimeType: skillVersionFiles.mimeType,
+      sizeBytes: skillVersionFiles.sizeBytes,
+    })
+    .from(skillVersionFiles)
+    .where(
+      and(
+        eq(skillVersionFiles.skillVersionId, input.skillVersionId),
+        eq(skillVersionFiles.path, input.path),
+      ),
+    )
+    .limit(1);
+  if (!row) {
+    return null;
+  }
+  if (row.contentText !== null) {
+    return { text: row.contentText };
+  }
+  if (!row.objectKey) {
+    // Unreachable under skill_version_files_content_location_check.
+    throw new Error(`Skill file '${input.path}' has no stored content`);
+  }
+  return readSkillObjectFile({
+    objectKey: row.objectKey,
+    mimeType: row.mimeType,
+    sizeBytes: row.sizeBytes,
+    ...(input.maxBytes !== undefined ? { maxBytes: input.maxBytes } : {}),
+    ...(input.signal ? { signal: input.signal } : {}),
+  });
+}
+
+/**
+ * A version and its file MANIFEST — no bodies beyond the documents (see
+ * `SkillVersionFileManifestRow`). Content is read one file at a time through
+ * `readSkillVersionFile`. `repo_builtin` versions have no rows: their files are
+ * on disk.
+ */
 export async function loadSkillVersionBundle(input: {
   teamId: string;
   workspaceId: string;
@@ -578,27 +811,35 @@ export async function loadSkillVersionBundle(input: {
     return null;
   }
 
-  const fileRows =
-    versionRow.version.storageType === "db_text"
-      ? await db
-          .select()
-          .from(skillVersionFiles)
-          .where(eq(skillVersionFiles.skillVersionId, input.skillVersionId))
-      : [];
-
-  const files: SkillBundleFile[] = fileRows.map((file) => ({
-    path: file.path,
-    contentText: file.contentText,
-    mimeType: file.mimeType,
-    sizeBytes: file.sizeBytes,
-    contentHash: file.contentHash,
-  }));
+  const files =
+    versionRow.version.storageType === "repo_builtin"
+      ? []
+      : await listSkillVersionFileManifest(input.skillVersionId);
 
   return {
     definition: versionRow.definition,
     version: versionRow.version,
     files,
   };
+}
+
+/**
+ * A builtin's slug is already held by a non-builtin skill. Typed so startup
+ * can skip that one builtin instead of refusing to boot: slugs are global and
+ * workspace-authored skills pick their own, so without this a single custom
+ * skill named like a builtin we ship later would take the whole API down.
+ */
+export class BuiltinSkillSlugConflictError extends Error {
+  readonly slug: string;
+  readonly conflictingSourceType: string;
+  constructor(slug: string, conflictingSourceType: string) {
+    super(
+      `Builtin skill slug '${slug}' conflicts with ${conflictingSourceType} skill`,
+    );
+    this.name = "BuiltinSkillSlugConflictError";
+    this.slug = slug;
+    this.conflictingSourceType = conflictingSourceType;
+  }
 }
 
 export async function syncBuiltinSkillMetadata(input: {
@@ -611,9 +852,15 @@ export async function syncBuiltinSkillMetadata(input: {
   contentHash: string;
   manifestJson: SkillManifestJson;
 }) {
-  assertRegistryStorageInvariant("builtin", "repo_builtin");
+  assertSkillStorageInvariant("builtin", "repo_builtin");
   const now = new Date();
   return db.transaction(async (tx) => {
+    // Every API instance runs this at boot. Without the lock, two instances
+    // starting together on a release that adds a builtin both see "no row" and
+    // both insert; the loser dies on the slug unique constraint.
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${"builtin:" + input.slug}))`,
+    );
     const [conflict] = await tx
       .select({
         id: skillDefinitions.id,
@@ -628,9 +875,7 @@ export async function syncBuiltinSkillMetadata(input: {
       )
       .limit(1);
     if (conflict) {
-      throw new Error(
-        `Builtin skill slug '${input.slug}' conflicts with ${conflict.sourceType} skill`,
-      );
+      throw new BuiltinSkillSlugConflictError(input.slug, conflict.sourceType);
     }
 
     const [existing] = await tx
@@ -741,7 +986,7 @@ export async function createWorkspaceCustomSkillDraft(input: {
   description: string;
   version?: string;
 }) {
-  assertRegistryStorageInvariant("workspace_custom", "db_text");
+  assertSkillStorageInvariant("workspace_custom", "db_text");
   const now = new Date();
   return db.transaction(async (tx) => {
     const skillId = randomUUID();
@@ -829,7 +1074,7 @@ export async function createNextCustomSkillVersionDraft(input: {
   // `definition.sourceType` is read from the DB (not a constant), so this is a
   // real biconditional check: a registry_github definition must never mint a
   // db_text version.
-  assertRegistryStorageInvariant(definition.sourceType, "db_text");
+  assertSkillStorageInvariant(definition.sourceType, "db_text");
 
   const versionId = randomUUID();
   const [version] = await db
@@ -1027,7 +1272,7 @@ export async function publishWorkspaceCustomSkillVersion(input: {
   contentHash: string;
   manifestJson: SkillManifestJson;
 }) {
-  assertRegistryStorageInvariant("workspace_custom", "db_text");
+  assertSkillStorageInvariant("workspace_custom", "db_text");
   const now = new Date();
   return db.transaction(async (tx) => {
     const [draftVersion] = await tx

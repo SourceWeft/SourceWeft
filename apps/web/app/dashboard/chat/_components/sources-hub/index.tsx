@@ -44,7 +44,7 @@ import {
 import { Input } from "@sourceweft/ui-web/components/ui/input";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { contentClient } from "../../../../../lib/sdk";
-import { McpIcon, SkillIcon } from "../../../_components/dashboard-icons";
+import { McpIcon, SkillIcon } from "../../../../_components/site-icons";
 import { SkillsGallery } from "../../../skills/_components/skills-gallery";
 import type { CitationRecord } from "../chat-canvas";
 import { SourcePreviewPanel } from "../source-preview-panel";
@@ -94,6 +94,7 @@ import {
   DeleteWorkfileDialog,
   WorkfilePreviewDialog,
 } from "./workfiles/dialogs";
+import { DraftFilesPanel, type DraftWorkContext } from "../draft-files-panel";
 import { LocalFilesPanel } from "../local-files-panel";
 import { useLocalConversationStatus } from "../local-conversation-status";
 import { WorkfilesTab } from "./workfiles/tab";
@@ -152,6 +153,9 @@ export function SourcesHub({
   citations = [],
   currentCitationMessageId = null,
   mode,
+  draftWorkContext,
+  onWorkFolderChange,
+  onChooseWorkFolder,
   onCitationOpen,
   onCitationLocate,
   selectedIds,
@@ -192,6 +196,9 @@ export function SourcesHub({
   citations?: CitationRecord[];
   currentCitationMessageId?: string | null;
   mode: "thread" | "new";
+  draftWorkContext?: DraftWorkContext;
+  onWorkFolderChange?: (folderId: string) => void;
+  onChooseWorkFolder?: () => Promise<void>;
   onCitationOpen?: (
     citation: CitationRecord,
     context?: CitationOpenContext,
@@ -1145,9 +1152,13 @@ export function SourcesHub({
           {activeTab === "Files" &&
             !cloudWorkfiles &&
             (mode === "new" ? (
-              <p className="p-4 text-sm text-muted-foreground">
-                {t("files.willAppearNew")}
-              </p>
+              <DraftFilesPanel
+                key={workspaceId}
+                context={draftWorkContext}
+                onFolderChange={onWorkFolderChange}
+                onChooseFolder={onChooseWorkFolder}
+                searchQuery={deferredSearchQueries.Files}
+              />
             ) : execution?.threadId === threadId &&
               execution.kind === "local" &&
               workspaceId &&
