@@ -2,13 +2,15 @@ import "server-only";
 
 import { unstable_cache } from "next/cache";
 
-import { apiBaseUrl } from "../api-base-url";
+import { internalApiBaseUrl } from "../internal-api-base-url";
 
 const AUTH_CONFIG_REVALIDATE_SECONDS = 300;
 
 const cachedRequireEmailVerification = unstable_cache(
   async () => {
-    const response = await fetch(`${apiBaseUrl}/v1/auth/config`);
+    // Server to server: inside a container the browser-facing API origin does
+    // not resolve, so this must be the internal one.
+    const response = await fetch(`${internalApiBaseUrl()}/v1/auth/config`);
     if (!response.ok) {
       throw new Error(`Auth config request failed: ${response.status}`);
     }
