@@ -293,7 +293,7 @@ test("fonts and images are kept as assets: listed, unscanned, and no reason for 
   assert.deepEqual(analyzed.diagnostics, []);
 });
 
-test("a compiled binary is held for review and named, whatever it is called", () => {
+test("a compiled binary is flagged and named, whatever it is called, without holding the skill back", () => {
   for (const [bundlePath, bytes] of [
     ["bin/tool", ELF],
     ["bin/tool-macos", MACH_O],
@@ -314,7 +314,7 @@ test("a compiled binary is held for review and named, whatever it is called", ()
       }),
     });
     assert.deepEqual(analyzed.scan, {
-      reviewRequired: true,
+      reviewRequired: false,
       flags: ["binary:executable"],
     });
     assert.deepEqual(analyzed.findings, [

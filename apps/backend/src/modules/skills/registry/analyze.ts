@@ -5,7 +5,11 @@ import { parseSkillFrontmatter } from "../frontmatter";
 import { deriveRegistrySlug } from "./contracts";
 import type { DiscoveredSkill } from "./read";
 import { RegistrySubmissionError } from "./errors";
-import { detectExecutableBinary, scanRegistrySkill } from "./scan";
+import {
+  detectExecutableBinary,
+  scanFlagsRequireReview,
+  scanRegistrySkill,
+} from "./scan";
 
 /**
  * Stage 3 — Analyze (parse + safety), STATIC ONLY — never executes the skill.
@@ -366,7 +370,10 @@ export function analyzeRegistrySkill(input: {
     repoSubpath: discovered.repoSubpath,
     capability,
     license,
-    scan: { reviewRequired: finalFlags.length > 0, flags: finalFlags },
+    scan: {
+      reviewRequired: scanFlagsRequireReview(finalFlags),
+      flags: finalFlags,
+    },
     fileManifest,
     allowedTools,
     findings: baseScan.findings,
@@ -388,7 +395,7 @@ export function analyzeRegistrySkill(input: {
       ...executableBinaries.map((file) => ({
         code: "BINARY_EXECUTABLE",
         severity: "warning" as const,
-        message: `Ships executable code (${file.format}) that cannot be scanned as text; the skill is held for review.`,
+        message: `Ships executable code (${file.format}) that cannot be scanned as text. It runs only inside the sandbox; an administrator reviews it before the skill can be made public.`,
         file: file.path,
       })),
     ],

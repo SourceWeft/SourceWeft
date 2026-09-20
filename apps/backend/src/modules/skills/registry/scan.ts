@@ -43,13 +43,43 @@ export type RegistrySkillScanInput = {
 export const EXECUTABLE_BINARY_FLAG = "binary:executable";
 
 /**
+ * Flags that are recorded and shown, but do not by themselves hold a version
+ * back for review.
+ *
+ * A skill's code only ever runs inside the isolated cloud sandbox — never on
+ * the user's machine or ours — so a bundled binary is no more dangerous to the
+ * person who imported it than the scripts next to it, which were never gated.
+ * Queueing it meant someone could not install their own skill until an admin
+ * looked. What the flag is for is the decision to show a skill to OTHER people:
+ * making a skill public is an explicit admin action, and the flag is in front
+ * of them when they take it. It also still counts as an escalation when a
+ * workspace switches to a version that newly carries it.
+ */
+const ADVISORY_SCAN_FLAGS: ReadonlySet<string> = new Set([
+  EXECUTABLE_BINARY_FLAG,
+]);
+
+/** Whether these flags hold a version back for an admin. */
+export function scanFlagsRequireReview(flags: Iterable<string>): boolean {
+  for (const flag of flags) {
+    if (!ADVISORY_SCAN_FLAGS.has(flag)) return true;
+  }
+  return false;
+}
+
+/**
  * Extensions that mean "loadable code" whatever the bytes look like: native
- * libraries and executables, JVM and WebAssembly modules, and the compiled
- * forms script runtimes import directly (`.pyc`, `.pyd`, `.node`). A `.jar` is
- * a zip by magic, so only its name gives it away.
+ * libraries and executables, JVM and WebAssembly modules, and the native
+ * modules script runtimes import directly (`.pyd`, `.node`). A `.jar` is a zip
+ * by magic, so only its name gives it away.
+ *
+ * Deliberately absent: `.pyc`/`.pyo` (interpreter caches that real repositories
+ * commit by accident, and that Python regenerates from the `.py` beside them)
+ * and `.o`/`.a` (link inputs, not runnable). They produced flags nobody could
+ * act on.
  */
 const EXECUTABLE_BINARY_EXTENSION =
-  /\.(?:exe|dll|msi|so|dylib|jar|class|wasm|pyc|pyo|pyd|node|o|a)$|\.so\.[0-9.]+$/i;
+  /\.(?:exe|dll|msi|so|dylib|jar|class|wasm|pyd|node)$|\.so\.[0-9.]+$/i;
 
 /** Leading bytes of the executable container formats. */
 const EXECUTABLE_MAGICS: Array<{ format: string; bytes: number[] }> = [
@@ -191,8 +221,9 @@ export function scanRegistrySkill(
     scanText(file.contentText, SECRET_PATTERNS, flags, file.path, findings);
   }
 
-  // Opaque code cannot be reviewed by a regex, so a human looks before it
-  // surfaces catalog-wide. One finding per file: the reviewer needs the list.
+  // Opaque code cannot be reviewed by a regex. It is flagged — advisory, see
+  // ADVISORY_SCAN_FLAGS — so the admin who decides whether the skill surfaces
+  // catalog-wide sees it. One finding per file: the reviewer needs the list.
   for (const file of input.binaryFiles ?? []) {
     if (detectExecutableBinary(file)) {
       findings.push({ ruleId: EXECUTABLE_BINARY_FLAG, file: file.path });
@@ -209,5 +240,9 @@ export function scanRegistrySkill(
   }
 
   const list = [...flags].sort();
-  return { reviewRequired: list.length > 0, flags: list, findings };
+  return {
+    reviewRequired: scanFlagsRequireReview(list),
+    flags: list,
+    findings,
+  };
 }

