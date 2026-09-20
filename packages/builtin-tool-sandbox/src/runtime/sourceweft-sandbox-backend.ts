@@ -1255,7 +1255,15 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
         this.input.context,
       );
       sandboxId = sandbox.id;
-      if (skillsDeferred && !this.input.manager.skillScriptsStaged()) {
+      if (skillsDeferred) {
+        // Acquisition staged what was registered at the time; a bundle added
+        // since (a skill installed mid-turn) is staged here, on first use.
+        await this.input.manager.ensureSkillAssetsStaged(sandbox);
+      }
+      if (
+        skillsDeferred &&
+        !this.input.manager.skillScriptsStagedForCommand(command)
+      ) {
         return await this.completeRecoverableExecuteFailure({
           command,
           error: new Error(

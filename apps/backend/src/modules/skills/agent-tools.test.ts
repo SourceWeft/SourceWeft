@@ -50,7 +50,12 @@ function descriptor(slug: string): EnabledSkillDescriptor {
   };
 }
 
-async function install(mountSkill?: (skill: EnabledSkillDescriptor) => void) {
+type MountSkill = (skill: EnabledSkillDescriptor) => {
+  scriptsStageable: boolean;
+};
+const mountOnly: MountSkill = () => ({ scriptsStageable: false });
+
+async function install(mountSkill?: MountSkill) {
   const tools = buildSkillAgentTools({
     teamId: "team",
     workspaceId: "workspace",
@@ -72,7 +77,10 @@ beforeEach(() => {
 
 test("an installed skill is mounted into the running turn and the result says where to read it", async () => {
   const mounted: string[] = [];
-  const result = await install((skill) => mounted.push(skill.name));
+  const result = await install((skill) => {
+    mounted.push(skill.name);
+    return { scriptsStageable: false };
+  });
   // Only what was just installed — not every skill the workspace has enabled.
   assert.deepEqual(mounted, ["gh-o-r-notes"]);
   assert.match(result, /read now: \/skills\/gh-o-r-notes\/SKILL\.md/);
@@ -83,20 +91,45 @@ test("without a mount, or when mounting fails, the install still succeeds for th
   assert.match(await install(), /NEXT turn/);
 
   state.resolveFails = true;
-  const result = await install(() => undefined);
+  const result = await install(mountOnly);
   assert.match(result, /Installed and switched on 1 skill/);
   assert.match(result, /NEXT turn/);
   assert.doesNotMatch(result, /read now/);
 });
 
-test("scripts are reported as next-turn even when the instructions are usable now", async () => {
+test("scripts are reported as next-turn when the turn cannot stage them, even though the instructions are usable now", async () => {
   state.installed = [installedSkill("gh-o-r-notes", "executable")];
-  const result = await install(() => undefined);
+  const result = await install(mountOnly);
   assert.match(result, /usable in THIS turn/);
   assert.match(
     result,
     /scripts are staged into the sandbox when a turn starts/,
   );
+  assert.doesNotMatch(result, /staged on first use/);
+});
+
+test("scripts the turn can stage are announced as runnable now, with the path and the fallback", async () => {
+  state.installed = [installedSkill("gh-o-r-notes", "executable")];
+  const result = await install(() => ({ scriptsStageable: true }));
+  assert.match(result, /usable in THIS turn/);
+  assert.match(result, /scripts are staged on first use this turn/);
+  assert.match(result, /gh-o-r-notes \(\/skills\/gh-o-r-notes\/…\)/);
+  // The turn-start sandbox rules may still forbid /skills in execute.
+  assert.match(result, /replaces any earlier rule against \/skills/);
+  assert.match(result, /SANDBOX_SKILL_STAGING_UNAVAILABLE/);
+  assert.doesNotMatch(result, /when a turn starts/);
+});
+
+test("a prompt-only skill says nothing about scripts, and a failed mount keeps scripts next-turn", async () => {
+  const promptOnly = await install(() => ({ scriptsStageable: true }));
+  assert.doesNotMatch(promptOnly, /scripts/);
+
+  state.installed = [installedSkill("gh-o-r-notes", "executable")];
+  state.resolveFails = true;
+  const unmounted = await install(() => ({ scriptsStageable: true }));
+  assert.match(unmounted, /NEXT turn/);
+  assert.match(unmounted, /when a turn starts/);
+  assert.doesNotMatch(unmounted, /staged on first use/);
 });
 
 async function search() {
@@ -154,6 +187,6 @@ test("re-installing something already on reports that nothing changed", async ()
   state.installed = [
     { ...installedSkill("gh-o-r-notes"), status: "already_installed" },
   ];
-  const result = await install(() => undefined);
+  const result = await install(mountOnly);
   assert.match(result, /Already installed and on — nothing changed/);
 });

@@ -41,13 +41,18 @@ export type SandboxRuntimeRequest = {
   artifacts?: import("./runtime/sandbox-tools").SandboxArtifactReader;
   /**
    * Skill-bundle staging plans (docs/architecture/sandbox-skill-staging.md).
-   * Presence turns on the /skills execute contract for this turn: the runtime
-   * prompt announces staged skill scripts and the manager stages the bundles
-   * at sandbox acquisition. Absent → exactly the pre-staging behavior.
+   * Presence turns on the /skills execute contract for this turn: the manager
+   * stages the bundles at sandbox acquisition, and tops up with any bundle
+   * registered later the next time a command references /skills. The runtime
+   * prompt announces staged skill scripts only when there was something to
+   * stage when the runtime was created (`hasPlans`, default true) — a skill
+   * installed mid-turn is announced by the install tool's result instead, so
+   * a turn that started without skills keeps its prompt byte-identical.
+   * Absent → exactly the pre-staging behavior.
    */
   skillAssets?: Pick<
     import("./runtime/sandbox-manager").SandboxSkillStaging,
-    "plans" | "logger"
+    "plans" | "hasPlans" | "logger"
   >;
   /** Host-catalog assets required by the tools bound for this turn. */
   runtimeAssets?: Pick<
@@ -108,6 +113,11 @@ export class AgentSandboxService {
     }
 
     const provider = factory.createProvider();
+    // Frozen here, not read live: the prompt is the turn-start contract and
+    // must not change under the model when the plan set grows mid-turn.
+    const skillScriptsAnnounced = input.skillAssets
+      ? (input.skillAssets.hasPlans?.() ?? true)
+      : false;
     const sandboxRuntime = createToolSandboxRuntimeForTurn({
       filesystem: input.filesystem,
       context: input.context,
@@ -158,7 +168,7 @@ export class AgentSandboxService {
             providerStatus.metadata?.defaultSandboxEnvironmentAvailable ===
             true,
           pathPolicy: provider.pathPolicy,
-          skillScriptsStaged: Boolean(input.skillAssets),
+          skillScriptsStaged: skillScriptsAnnounced,
         });
       },
     };

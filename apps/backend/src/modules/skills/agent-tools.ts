@@ -23,19 +23,30 @@ import { logger } from "../../shared/logger";
  * skill to it, so the tool result can hand the model the path to read and the
  * skill is usable in the same breath — the alternative (OpenHands' banner
  * telling the user to start over; our earlier "takes effect next turn") reads
- * as a bug to the person who just asked for the thing. Scripts are the
- * exception: the sandbox stages skill bundles when it is acquired, so an
- * executable skill's scripts only become runnable from the next turn, and the
- * result says so.
+ * as a bug to the person who just asked for the thing. Scripts follow when the
+ * turn can stage them: `mountSkill` also registers the bundle with the turn's
+ * sandbox, which stages it the first time a command references /skills, and
+ * reports back whether that is possible. The sandbox prompt of a turn that
+ * started without skills still forbids /skills in execute (it is kept
+ * byte-identical on purpose), so the result is what tells the model the paths
+ * are runnable. Where staging is not possible — no sandbox this turn, a bundle
+ * over the staging caps — the scripts wait for the next turn, and the result
+ * says so.
  */
 
 export type SkillAgentToolContext = {
   teamId: string;
   workspaceId: string;
   userId: string;
-  /** Adds a skill to this turn's /skills mount. Absent → next-turn only. */
-  mountSkill?: (skill: EnabledSkillDescriptor) => void;
+  /**
+   * Adds a skill to this turn's /skills mount. Absent → next-turn only.
+   * `scriptsStageable` says whether the turn's sandbox can still stage the
+   * skill's bundle, i.e. whether its scripts are runnable before the next turn.
+   */
+  mountSkill?: (skill: EnabledSkillDescriptor) => { scriptsStageable: boolean };
 };
+
+type MountedSkill = { path: string; scriptsStageable: boolean };
 
 /**
  * Mount what was just installed into the running turn; returns the slugs that
@@ -45,8 +56,8 @@ export type SkillAgentToolContext = {
 async function mountInstalledSkills(
   context: SkillAgentToolContext,
   workspaceSkillIds: string[],
-): Promise<Map<string, string>> {
-  const mounted = new Map<string, string>();
+): Promise<Map<string, MountedSkill>> {
+  const mounted = new Map<string, MountedSkill>();
   if (!context.mountSkill || workspaceSkillIds.length === 0) {
     return mounted;
   }
@@ -60,8 +71,11 @@ async function mountInstalledSkills(
     });
     for (const skill of skills) {
       if (wanted.has(skill.workspaceSkillId)) {
-        context.mountSkill(skill);
-        mounted.set(skill.workspaceSkillId, `/skills/${skill.name}/SKILL.md`);
+        const { scriptsStageable } = context.mountSkill(skill);
+        mounted.set(skill.workspaceSkillId, {
+          path: `/skills/${skill.name}/SKILL.md`,
+          scriptsStageable,
+        });
       }
     }
   } catch (error) {
@@ -220,7 +234,7 @@ export function buildSkillAgentTools(
               : `Installed and switched on ${installed.length - already.length} skill(s)${already.length > 0 ? ` (${already.length} more were already on)` : ""}:`,
             ...installed.map((item) => {
               const path = item.workspaceSkill
-                ? mounted.get(item.workspaceSkill.id)
+                ? mounted.get(item.workspaceSkill.id)?.path
                 : undefined;
               return `${describe(item)}${path ? `\n  [read now: ${path}]` : ""}`;
             }),
@@ -230,10 +244,35 @@ export function buildSkillAgentTools(
               : "They take effect on your NEXT turn; this turn's skill set was fixed before you started. Tell the user what you installed and where it came from.",
           );
         }
-        if (withScripts.length > 0) {
+        const runnableNow = withScripts.filter(
+          (item) =>
+            item.workspaceSkill &&
+            mounted.get(item.workspaceSkill.id)?.scriptsStageable === true,
+        );
+        const runnableNextTurn = withScripts.filter(
+          (item) => !runnableNow.includes(item),
+        );
+        if (runnableNow.length > 0) {
+          // Spelled out because a turn that started without skills was told,
+          // in its sandbox rules, never to put /skills in an execute command.
           lines.push(
             "",
-            `Of those, ${withScripts.length} ship executable scripts: ${withScripts
+            `${runnableNow.length} ship executable scripts that are runnable in THIS turn: ${runnableNow
+              .map(
+                (item) =>
+                  `${item.slug} (${mounted
+                    .get(item.workspaceSkill!.id)!
+                    .path.replace(/SKILL\.md$/u, "")}…)`,
+              )
+              .join(
+                ", ",
+              )}. Their scripts are staged on first use this turn; run them with execute from those /skills paths exactly as the SKILL.md says (for example python3 /skills/<name>/scripts/tool.py) — for these paths this replaces any earlier rule against /skills in execute commands. Never write to /skills. If such a command fails with SANDBOX_SKILL_STAGING_UNAVAILABLE, the scripts could not be staged: keep following the instructions and say the scripts will be runnable from the NEXT turn.`,
+          );
+        }
+        if (runnableNextTurn.length > 0) {
+          lines.push(
+            "",
+            `Of those, ${runnableNextTurn.length} ship executable scripts: ${runnableNextTurn
               .map((item) => item.slug)
               .join(", ")}. Their instructions apply now, but the scripts are staged into the sandbox when a turn starts, so they become runnable from the NEXT turn. Say so.`,
           );

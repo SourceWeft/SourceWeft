@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { buildSkillSandboxAssetPlans } from "./sandbox-assets";
+import {
+  buildSkillSandboxAssetPlans,
+  TurnSkillSandboxAssets,
+} from "./sandbox-assets";
 import { ContentError } from "../content/errors";
 import type { EnabledSkillDescriptor } from "./types";
 import type { SkillBundleFile } from "./builtin";
@@ -125,4 +128,51 @@ test("fails fast when a selected skill cannot be staged", () => {
         (error.details as { reason?: string }).reason === expectedReason,
     );
   }
+});
+
+test("the turn registry grows, returns the current set, and keeps a rejected bundle out", () => {
+  const registry = new TurnSkillSandboxAssets();
+  assert.equal(registry.hasPlans(), false);
+  assert.deepEqual(registry.plans(), []);
+
+  registry.add([skill()]);
+  assert.deepEqual(
+    registry.plans().map((plan) => plan.name),
+    ["ppt-deck"],
+  );
+
+  // A skill installed mid-turn joins the set the sandbox manager reads next.
+  registry.add([skill({ name: "notes", workspaceSkillId: "ws-skill-2" })]);
+  assert.equal(registry.hasPlans(), true);
+  assert.deepEqual(
+    registry.plans().map((plan) => plan.name),
+    ["ppt-deck", "notes"],
+  );
+
+  // Re-registering a name replaces its plan: /skills/<name>/ is one path.
+  registry.add([
+    skill({ files: [bundleFile("SKILL.md", "# ppt-deck, edited")] }),
+  ]);
+  assert.equal(registry.plans().length, 2);
+
+  // Over the staging caps: the caller degrades that skill alone.
+  assert.throws(
+    () =>
+      registry.add([
+        skill({
+          name: "too-big",
+          files: [
+            bundleFile("SKILL.md", "# x"),
+            bundleFile("blob.txt", "x", { sizeBytes: 5 * 1024 * 1024 }),
+          ],
+        }),
+      ]),
+    (error) =>
+      error instanceof ContentError &&
+      error.code === "SKILL_SANDBOX_ASSET_INVALID",
+  );
+  assert.deepEqual(
+    registry.plans().map((plan) => plan.name),
+    ["ppt-deck", "notes"],
+  );
 });

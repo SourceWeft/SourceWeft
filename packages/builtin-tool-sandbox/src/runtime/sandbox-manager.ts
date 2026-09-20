@@ -48,7 +48,38 @@ export type SandboxRuntimeAssetStaging = {
   };
 };
 
-export type SandboxSkillStaging = SandboxRuntimeAssetStaging;
+/**
+ * Skill staging differs from required assets in one way: its plan set may
+ * GROW during the turn (`install_skill` registers the bundle it just
+ * installed). `plans` therefore returns the current set every time it is
+ * asked, and `hasPlans` is the cheap live answer to "is there anything to
+ * stage right now" — it decides whether a /skills-referencing command is
+ * deferred to staging or denied outright, so a turn that started without any
+ * skill keeps today's fast denial until something is actually installed.
+ * Absent → the set is treated as non-empty (the pre-registry contract).
+ */
+export type SandboxSkillStaging = SandboxRuntimeAssetStaging & {
+  hasPlans?: () => boolean;
+};
+
+/** What was attempted for one skill name in one provider sandbox. */
+type SkillStagingAttempt = {
+  /** Content identity of the attempted plan; a changed plan is restaged. */
+  planKey: string;
+  resolution: RuntimeAssetResolution;
+};
+
+type SkillStagingState = {
+  attempts: Map<string, SkillStagingAttempt>;
+  /** Serializes staging runs for this sandbox; never rejects. */
+  tail: Promise<void>;
+};
+
+function skillPlanKey(plan: RuntimeAssetPlan) {
+  return `${plan.version}:${plan.sha256}`;
+}
+
+const SKILL_NAME_IN_COMMAND = /\/skills\/([a-zA-Z0-9][a-zA-Z0-9._-]*)/gu;
 
 const SANDBOX_CREATING_STALE_MS = 2 * 60 * 1000;
 // How long a sibling execute waits for another call's in-flight cold start
@@ -234,11 +265,12 @@ export class SandboxManager {
    * Per-provider-sandbox staging memo. The manager lives for one turn, so
    * this holds at most one entry in practice; the map keeps correctness if a
    * sandbox is replaced mid-turn (expiry → recreate gets a fresh staging run).
+   *
+   * The memo is per BUNDLE, not per sandbox: a plan registered after the
+   * first staging run (a skill installed mid-turn) is staged by the next run,
+   * while bundles already attempted here are never re-uploaded or retried.
    */
-  private readonly skillStagingRuns = new Map<
-    string,
-    Promise<RuntimeAssetResolution[]>
-  >();
+  private readonly skillStagingStates = new Map<string, SkillStagingState>();
   private readonly requiredAssetStagingRuns = new Map<
     string,
     Promise<RuntimeAssetResolution[]>
@@ -295,7 +327,7 @@ export class SandboxManager {
           context,
           async () => {
             await this.ensureRequiredAssetsOnce(sandbox);
-            await this.ensureSkillAssetsOnce(sandbox);
+            await this.ensureSkillAssetsStaged(sandbox);
           },
           sandbox.id,
         );
@@ -489,9 +521,17 @@ export class SandboxManager {
     }
   }
 
-  /** True when this runtime was constructed with skill-bundle plans to stage. */
+  /**
+   * True when this runtime has skill-bundle plans to stage RIGHT NOW. Live on
+   * purpose: the plan set can grow mid-turn, and the execute path's /skills
+   * deny-or-defer decision must follow it rather than the turn-start snapshot.
+   */
   skillStagingConfigured() {
-    return Boolean(this.input.skillStaging);
+    const staging = this.input.skillStaging;
+    if (!staging) {
+      return false;
+    }
+    return staging.hasPlans ? staging.hasPlans() : true;
   }
 
   /**
@@ -505,6 +545,33 @@ export class SandboxManager {
     return Boolean(
       this.latestSkillResolutions?.some((resolution) => resolution.ok),
     );
+  }
+
+  /**
+   * The per-command form of `skillScriptsStaged`: a command naming
+   * `/skills/<name>` whose bundle failed to stage is unavailable even when
+   * other bundles resolved — a failed bundle degrades alone, and the model
+   * gets the recoverable staging error instead of a bare "No such file".
+   * Names the registry never planned are left to the shell, as before.
+   */
+  skillScriptsStagedForCommand(command: string) {
+    if (!this.skillScriptsStaged()) {
+      return false;
+    }
+    const failed = new Set(
+      (this.latestSkillResolutions ?? [])
+        .filter((resolution) => !resolution.ok)
+        .map((resolution) => resolution.name),
+    );
+    if (failed.size === 0) {
+      return true;
+    }
+    for (const match of command.matchAll(SKILL_NAME_IN_COMMAND)) {
+      if (match[1] && failed.has(match[1])) {
+        return false;
+      }
+    }
+    return true;
   }
 
   /** Per-bundle staging outcomes for observability; null before staging ran. */
@@ -571,41 +638,69 @@ export class SandboxManager {
   }
 
   /**
-   * Stage skill bundles into the sandbox, once per provider sandbox per
-   * manager lifetime. Never throws: staging failure leaves the sandbox usable
-   * with /skills denied (today's behavior), which the resolutions record.
+   * Stage skill bundles into the sandbox: each bundle once per provider
+   * sandbox per manager lifetime. Runs at sandbox acquisition, and again from
+   * the execute path whenever a command references /skills, so a bundle
+   * registered after acquisition is staged on its first use. A call with
+   * nothing new costs one `plans()` read and no sandbox traffic. Never throws:
+   * staging failure leaves the sandbox usable with /skills denied (today's
+   * behavior), which the resolutions record.
    */
-  private async ensureSkillAssetsOnce(sandbox: SandboxRef) {
+  async ensureSkillAssetsStaged(sandbox: SandboxRef) {
     const staging = this.input.skillStaging;
     if (!staging) {
       return;
     }
-    let run = this.skillStagingRuns.get(sandbox.providerSandboxId);
-    if (!run) {
-      run = this.runSkillStaging(sandbox, staging);
-      this.skillStagingRuns.set(sandbox.providerSandboxId, run);
+    let state = this.skillStagingStates.get(sandbox.providerSandboxId);
+    if (!state) {
+      state = { attempts: new Map(), tail: Promise.resolve() };
+      this.skillStagingStates.set(sandbox.providerSandboxId, state);
     }
-    this.latestSkillResolutions = await run;
+    const current = state;
+    // Serialized per sandbox: parallel executes share one staging directory
+    // per bundle, so two concurrent runs of the same plan would race on it.
+    const run = current.tail.then(() =>
+      this.stagePendingSkillPlans(sandbox, staging, current),
+    );
+    current.tail = run;
+    await run;
+    this.latestSkillResolutions = [...current.attempts.values()].map(
+      (attempt) => attempt.resolution,
+    );
   }
 
-  private async runSkillStaging(
+  private async stagePendingSkillPlans(
     sandbox: SandboxRef,
     staging: SandboxSkillStaging,
-  ): Promise<RuntimeAssetResolution[]> {
+    state: SkillStagingState,
+  ): Promise<void> {
     try {
       const plans = await staging.plans();
-      if (plans.length === 0) {
-        return [];
+      // A failed bundle is not retried within the turn (each attempt costs
+      // several sandbox round trips); an identical bundle staged by an earlier
+      // turn is caught by the engine's in-sandbox stamp, not by this memo.
+      const pending = plans.filter(
+        (plan) => state.attempts.get(plan.name)?.planKey !== skillPlanKey(plan),
+      );
+      if (pending.length === 0) {
+        return;
       }
       const resolutions = await ensureRuntimeAssets({
         session: this.runtimeAssetStagingSession(
           sandbox.providerSandboxId,
           staging,
         ),
-        assets: plans,
+        assets: pending,
         ...(staging.logger ? { logger: staging.logger } : {}),
       });
-      for (const resolution of resolutions) {
+      resolutions.forEach((resolution, index) => {
+        const plan = pending[index];
+        if (plan) {
+          state.attempts.set(plan.name, {
+            planKey: skillPlanKey(plan),
+            resolution,
+          });
+        }
         if (!resolution.ok) {
           staging.logger?.warn?.("sandbox_skill_staging_failed", {
             skill: resolution.name,
@@ -626,13 +721,11 @@ export class SandboxManager {
               : {}),
           });
         }
-      }
-      return resolutions;
+      });
     } catch (error) {
       staging.logger?.warn?.("sandbox_skill_staging_failed", {
         error: error instanceof Error ? error.message : String(error),
       });
-      return [];
     }
   }
 

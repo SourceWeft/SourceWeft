@@ -45,6 +45,9 @@ function createHarness(
   options: {
     workspaceRoot?: string;
     executeSystem?: NonNullable<SandboxProvider["executeSystem"]>;
+    skillAssets?: Parameters<
+      typeof createSandboxRuntimeForTurn
+    >[0]["skillAssets"];
   } = {},
 ) {
   const workspaceRoot = options.workspaceRoot ?? "/workspace";
@@ -249,6 +252,7 @@ function createHarness(
     sandboxStore,
     operationStore,
     toolApprovalEnabled: false,
+    ...(options.skillAssets ? { skillAssets: options.skillAssets } : {}),
   });
 
   return {
@@ -967,6 +971,58 @@ describe("trusted sandbox host adapter", () => {
     assert.deepEqual(harness.deletedSandboxIds, ["provider-sandbox-1"]);
     assert.deepEqual(harness.expiredSandboxIds, ["sandbox-generation-1"]);
   });
+});
+
+test("trusted execute stages a skill bundle registered after the sandbox was acquired", async () => {
+  const plans: Array<
+    Awaited<
+      ReturnType<
+        NonNullable<
+          Parameters<typeof createSandboxRuntimeForTurn>[0]["skillAssets"]
+        >["plans"]
+      >
+    >[number]
+  > = [];
+  const { runtime, uploads } = createHarness({
+    skillAssets: {
+      plans: async () => [...plans],
+      hasPlans: () => plans.length > 0,
+    },
+  });
+
+  // Nothing registered yet: denied by path policy, as without staging.
+  await assert.rejects(
+    runtime.trustedHost.executeCurrent({
+      command: "python3 /skills/notes/scripts/run.py",
+      timeoutMs: 1_000,
+    }),
+    /SANDBOX_EXECUTE_VFS_PATH_DENIED/u,
+  );
+  await runtime.trustedHost.executeCurrent({
+    command: "echo warm",
+    timeoutMs: 1_000,
+  });
+
+  plans.push({
+    name: "notes",
+    version: "sv-1",
+    platform: "any",
+    sha256: "a".repeat(64),
+    archive: "zip",
+    entrypoint: "SKILL.md",
+    installDir: "/skills/notes",
+    loadContent: async () => new Uint8Array([1, 2, 3]),
+  });
+  const result = await runtime.trustedHost.executeCurrent({
+    command: "python3 /skills/notes/scripts/run.py",
+    timeoutMs: 1_000,
+  });
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(
+    uploads.filter((upload) => upload.path.includes("notes-sv-1.zip")).length,
+    1,
+  );
 });
 
 test("native downloads use rooted snapshots without GNU shell path probes", async () => {
