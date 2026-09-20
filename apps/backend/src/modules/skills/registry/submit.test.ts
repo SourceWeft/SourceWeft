@@ -25,7 +25,32 @@ vi.mock("../../../shared/logger", () => ({
 }));
 
 import { RegistrySubmissionError } from "./errors";
-import { submitRegistrySkillFromGitHub } from "./submit";
+import {
+  analyzeSubmittedSkills,
+  summarizeSubmission,
+  writeSubmittedSkill,
+} from "./submit";
+
+// The ingest pipeline runs these three as separate stages (ingest/stages.ts);
+// composed here so their contract with each other is tested in one place.
+async function submitRegistrySkillFromGitHub(input: {
+  repoUrl: string;
+  userId: string;
+}) {
+  const read = await mocks.read(input.repoUrl);
+  const analyzedSkills = await analyzeSubmittedSkills({
+    owner: read.source.owner,
+    repo: read.source.repo,
+    skills: read.skills,
+  });
+  const results = [];
+  for (const skill of analyzedSkills) {
+    results.push(
+      await writeSubmittedSkill({ read, userId: input.userId, skill }),
+    );
+  }
+  return summarizeSubmission(results, input.repoUrl);
+}
 
 function readResult(skillCount = 1) {
   return {

@@ -1,7 +1,6 @@
 import type { SkillManifestJson } from "@sourceweft/db";
 import { SkillParseError } from "../frontmatter";
 import { SCAN_RULE_VERSION } from "./scan";
-import { logger } from "../../../shared/logger";
 import { analyzeRegistrySkill, type AnalyzedRegistrySkill } from "./analyze";
 import { extractRegistryLogo } from "./logo";
 import { RegistrySubmissionError } from "./errors";
@@ -10,21 +9,16 @@ import {
   getRegistrySkillForSubmission,
   upsertRegistrySkillIndex,
 } from "./repository";
-import {
-  readRegistrySkillsFromGitHub,
-  type DiscoveredSkill,
-  type ReadRegistryResult,
-} from "./read";
+import type { DiscoveredSkill, ReadRegistryResult } from "./read";
 
 /**
- * Stage 1 (entry) + orchestration of the submit → read → analyze → guard →
- * index pipeline (docs/architecture/skill-registry-index.md §3 / build phase
- * R2). Counterpart to `market/submission.ts`'s `submitMcpFromGitHub`.
+ * The per-skill work of a registry submission: analyze → guard → index
+ * (docs/architecture/skill-registry-index.md §3 / build phase R2).
  *
- * The per-skill work lives in `analyzeSubmittedSkills` / `writeSubmittedSkill`
- * / `summarizeSubmission`. This file's synchronous entry point and the
- * asynchronous ingest pipeline (`./ingest`) both run exactly those, so a skill
- * is analyzed, triaged and stored the same way whichever door it came through.
+ * `analyzeSubmittedSkills` / `writeSubmittedSkill` / `summarizeSubmission` are
+ * run as separate stages by the asynchronous ingest pipeline (`./ingest`) —
+ * the only way a submission is processed — so every skill is analyzed, triaged
+ * and stored the same way whether it arrived as a GitHub link or a zip.
  */
 
 const VERSION_SHA_PREFIX_LENGTH = 12;
@@ -249,33 +243,4 @@ export function summarizeSubmission(
     ? "indexed"
     : "queued";
   return { status, slug: accepted[0]?.slug, skills: results };
-}
-
-export async function submitRegistrySkillFromGitHub(input: {
-  repoUrl: string;
-  userId: string;
-}): Promise<SubmitRegistryResult> {
-  const read = await readRegistrySkillsFromGitHub(input.repoUrl);
-  const { owner, repo } = read.source;
-
-  // Every skill is analyzed before any is written, so an unexpected failure
-  // while analyzing leaves the catalog untouched.
-  const analyzed = await analyzeSubmittedSkills({
-    owner,
-    repo,
-    skills: read.skills,
-  });
-  const results: RegistrySkillSubmissionResult[] = [];
-  for (const skill of analyzed) {
-    results.push(await writeSubmittedSkill({ read, userId: input.userId, skill }));
-  }
-
-  const summary = summarizeSubmission(results, input.repoUrl);
-  logger.info("Registry skill submission processed", {
-    repoUrl: input.repoUrl,
-    submittedBy: input.userId,
-    status: summary.status,
-    skills: results.length,
-  });
-  return summary;
 }
