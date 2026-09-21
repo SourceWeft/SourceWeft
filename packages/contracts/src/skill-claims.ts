@@ -69,6 +69,10 @@ export const skillRepoClaimSchema = z.object({
   status: z.enum(["verified", "revoked"]),
   createdAt: z.string(),
   verifiedAt: z.string().nullable(),
+  // The author removed the repository from SourceWeft; null while it is on
+  // it. Absent from an older API. A removed claim can be restored
+  // (`restore-to-market`).
+  removedAt: z.string().nullable().optional(),
 });
 export type SkillRepoClaim = z.infer<typeof skillRepoClaimSchema>;
 

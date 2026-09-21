@@ -348,11 +348,13 @@ export const skillMarketStandingSchema = z.object({
   // Who chose the categories: inferred from the skill's text (`auto`, or null
   // for a skill filed before this was recorded), or picked by an admin — which
   // a bulk re-inference leaves alone.
-  categoriesSetBy: z.enum(["auto", "admin"]).nullable().default(null),
+  // Optional in the type so standings built before these existed still fit;
+  // the API always sends them.
+  categoriesSetBy: z.enum(["auto", "admin"]).nullable().optional(),
   // Visible reviews, as the upkeep last counted them; `ratingAvg` is null
   // while there are none.
-  ratingCount: z.number().int().nonnegative().default(0),
-  ratingAvg: z.number().nullable().default(null),
+  ratingCount: z.number().int().nonnegative().optional(),
+  ratingAvg: z.number().nullable().optional(),
   installCount: z.number().int().nonnegative(),
   listedAt: z.string().nullable(),
 });
