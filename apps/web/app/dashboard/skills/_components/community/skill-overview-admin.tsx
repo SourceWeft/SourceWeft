@@ -1,9 +1,198 @@
 "use client";
 
+import * as React from "react";
+import { Eye, EyeOff, Loader2, RefreshCw, Sparkles } from "lucide-react";
+import { Badge } from "@sourceweft/ui-web/components/ui/badge";
+import { Button } from "@sourceweft/ui-web/components/ui/button";
+import {
+  getSkillMarketAdminMe,
+  getSkillOverviewAdmin,
+  regenerateSkillOverview,
+  setSkillOverviewHidden,
+  type GetSkillOverviewAdminResponse,
+} from "../../../../../lib/skill-overviews";
 import type { DashboardSkillSlotProps } from "./slot-props";
+import { skillOverviewCopy } from "./skill-overview-copy";
 
-/** Market admin controls for the AI overview (§17.4); renders nothing for anyone else. */
-export function SkillOverviewAdmin(props: DashboardSkillSlotProps) {
-  void props;
-  return null;
+const copy = skillOverviewCopy.admin;
+const LOCALES = ["en", "zh-CN", "zh-TW"] as const;
+
+function formatDate(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+/**
+ * A market admin's view of one skill's AI overview (§17.4): each language's
+ * state, the model and when it was written, and Regenerate / Hide / Show.
+ * Renders nothing for anyone who is not a market admin.
+ */
+export function SkillOverviewAdmin({ skillId }: DashboardSkillSlotProps) {
+  const [isAdmin, setIsAdmin] = React.useState(false);
+  const [state, setState] =
+    React.useState<GetSkillOverviewAdminResponse | null>(null);
+  const [loading, setLoading] = React.useState(true);
+  const [busy, setBusy] = React.useState(false);
+  const [message, setMessage] = React.useState<string | null>(null);
+
+  const load = React.useCallback(async () => {
+    try {
+      setState(await getSkillOverviewAdmin(skillId));
+    } catch {
+      setMessage(copy.failed);
+    } finally {
+      setLoading(false);
+    }
+  }, [skillId]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    void getSkillMarketAdminMe().then((admin) => {
+      if (cancelled) return;
+      setIsAdmin(admin);
+      if (admin) void load();
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [load]);
+
+  if (!isAdmin) return null;
+
+  async function run(action: () => Promise<string>) {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const done = await action();
+      await load();
+      setMessage(done);
+    } catch {
+      setMessage(copy.failed);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const rows = new Map(
+    (state?.overviews ?? []).map((entry) => [entry.locale, entry]),
+  );
+  const first = state?.overviews[0];
+  const allHidden =
+    (state?.overviews.length ?? 0) > 0 &&
+    state!.overviews.every((entry) => entry.hidden);
+
+  return (
+    <section
+      aria-label={copy.title}
+      className="rounded-2xl border border-border bg-background p-4 shadow-xs"
+    >
+      <div className="flex items-center gap-2">
+        <Sparkles className="size-4 text-muted-foreground" aria-hidden />
+        <h2 className="text-sm font-semibold text-foreground">{copy.title}</h2>
+        {busy || loading ? (
+          <Loader2 className="ml-auto size-3.5 animate-spin text-muted-foreground" />
+        ) : null}
+      </div>
+
+      {loading && !state ? (
+        <p className="mt-3 text-xs text-muted-foreground">{copy.loading}</p>
+      ) : state ? (
+        <div className="mt-3 space-y-3 text-xs">
+          {!state.skillVersionId ? (
+            <p className="text-muted-foreground">{copy.noVersion}</p>
+          ) : !state.eligible ? (
+            <p className="text-muted-foreground">{copy.notEligible}</p>
+          ) : state.overviews.length === 0 ? (
+            <p className="text-muted-foreground">{copy.none}</p>
+          ) : null}
+
+          {state.overviews.length > 0 ? (
+            <>
+              <ul className="space-y-1" aria-label={copy.title}>
+                {LOCALES.map((locale) => {
+                  const row = rows.get(locale);
+                  return (
+                    <li
+                      key={locale}
+                      className="flex items-center justify-between gap-2"
+                    >
+                      <span className="font-mono">{locale}</span>
+                      <Badge
+                        variant={row && !row.hidden ? "secondary" : "outline"}
+                      >
+                        {!row
+                          ? copy.missing
+                          : row.hidden
+                            ? copy.hidden
+                            : copy.visible}
+                      </Badge>
+                    </li>
+                  );
+                })}
+              </ul>
+              {first ? (
+                <dl className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-muted-foreground">
+                  <dt>{copy.model}</dt>
+                  <dd className="truncate text-foreground" title={first.model}>
+                    {first.model}
+                  </dd>
+                  <dt>{copy.generatedAt}</dt>
+                  <dd className="text-foreground">
+                    {formatDate(first.generatedAt)}
+                  </dd>
+                </dl>
+              ) : null}
+            </>
+          ) : null}
+
+          {state.skillVersionId ? (
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() =>
+                  void run(async () => {
+                    const result = await regenerateSkillOverview(skillId);
+                    return result.queued
+                      ? copy.regenerateQueued
+                      : copy.regenerateNotQueued;
+                  })
+                }
+              >
+                <RefreshCw className="size-3.5" aria-hidden />
+                {copy.regenerate}
+              </Button>
+              {state.overviews.length > 0 ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() =>
+                    void run(async () => {
+                      await setSkillOverviewHidden(skillId, !allHidden);
+                      return allHidden ? copy.shownDone : copy.hiddenDone;
+                    })
+                  }
+                >
+                  {allHidden ? (
+                    <Eye className="size-3.5" aria-hidden />
+                  ) : (
+                    <EyeOff className="size-3.5" aria-hidden />
+                  )}
+                  {allHidden ? copy.show : copy.hide}
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {message ? (
+        <p role="status" className="mt-2 text-xs text-muted-foreground">
+          {message}
+        </p>
+      ) : null}
+    </section>
+  );
 }

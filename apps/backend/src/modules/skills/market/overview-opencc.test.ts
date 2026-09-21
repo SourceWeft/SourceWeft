@@ -27,3 +27,12 @@ test("every text field of an overview is converted; category slugs are not", () 
     suggestedCategories: ["data-analysis"],
   });
 });
+
+test("OpenCC's word-splitting slips and the site's own terms are corrected", () => {
+  assert.equal(
+    toTaiwanTraditional(
+      "无需脚本或资源文件，基于开源文件；需要 API 令牌和凭据。",
+    ),
+    "無需指令碼或資源檔案，基於開源檔案；需要 API 權杖和憑證。",
+  );
+});

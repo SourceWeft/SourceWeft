@@ -307,6 +307,7 @@ function toClaim(row: DecidedClaimRow): SkillRepoClaim {
     status: row.status,
     createdAt: row.createdAt.toISOString(),
     verifiedAt: row.verifiedAt?.toISOString() ?? null,
+    removedAt: row.removedAt?.toISOString() ?? null,
   };
 }
 
