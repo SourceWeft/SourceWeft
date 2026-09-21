@@ -129,6 +129,14 @@ export type SkillManifestJson = {
      * commit metadata could not be read; such a version ranks as oldest.
      */
     committedAt?: string;
+    /**
+     * Where the pinned commit was confirmed to come from: the repository's
+     * default branch, whose history held it when it was checked. A commit that
+     * exists only in a fork is served under the upstream's URLs too, so this
+     * is what makes the upstream's name on the entry true. Absent on versions
+     * indexed before the check existed; the market checks those itself.
+     */
+    provenance?: { defaultBranch: string; checkedAt: string };
     /** Decides sandbox material sync, not permission (§6b). */
     capability: "prompt-only" | "executable";
     scan: { reviewRequired: boolean; flags: string[] };

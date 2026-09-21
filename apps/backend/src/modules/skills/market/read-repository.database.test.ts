@@ -117,6 +117,11 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
                 repoUrl,
                 submittedBy: "public-owner",
                 committedAt: "2026-04-30T12:00:00.000Z",
+                // What ingest stamps: the commit is the repository's own.
+                provenance: {
+                  defaultBranch: "main",
+                  checkedAt: "2026-04-30T12:00:00.000Z",
+                },
                 capability: entry.capability,
                 scan: { reviewRequired: false, flags: entry.flags },
                 ...(entry.license ? { license: entry.license } : {}),

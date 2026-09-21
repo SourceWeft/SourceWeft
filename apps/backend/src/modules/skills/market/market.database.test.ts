@@ -75,6 +75,8 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       flagged?: boolean;
       /** Published, but carrying a flag that does not hold it for review. */
       advisoryFlag?: string;
+      /** Indexed before ingest checked where commits come from. */
+      unstamped?: boolean;
       name?: string;
       description?: string;
     }) {
@@ -114,6 +116,15 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
             repoUrl: "https://github.com/fixture/skills",
             submittedBy: "skill-owner",
             committedAt: "2026-01-01T00:00:00.000Z",
+            // What ingest stamps: the commit is the repository's own.
+            ...(options.unstamped
+              ? {}
+              : {
+                  provenance: {
+                    defaultBranch: "main",
+                    checkedAt: "2026-01-01T00:00:00.000Z",
+                  },
+                }),
             capability: "prompt-only",
             scan: {
               reviewRequired: flagged,
@@ -300,6 +311,83 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       const row = await definition(skill.skillId);
       expect(row.listingHold).toBe(false);
       expect(row.listingHoldBy).toBeNull();
+    });
+
+    test("a version indexed before provenance checks is checked before it is ever listed", async () => {
+      const provenance = await import("./provenance");
+      const { GitHubArchiveError } = await import("../../market/parser/github");
+      const onBranch: import("./provenance").ProvenanceDeps = {
+        resolveDefaultBranch: async () => "main",
+        assertCommitOnDefaultBranch: async () => {},
+      };
+      const fromAFork: import("./provenance").ProvenanceDeps = {
+        resolveDefaultBranch: async () => "main",
+        assertCommitOnDefaultBranch: async () => {
+          throw new GitHubArchiveError(
+            "ARCHIVE_NOT_IN_REPOSITORY",
+            "not on main",
+          );
+        },
+      };
+      const unreachable: import("./provenance").ProvenanceDeps = {
+        resolveDefaultBranch: async () => {
+          throw new Error("GitHub request failed 503");
+        },
+        assertCommitOnDefaultBranch: async () => {},
+      };
+
+      // Unstamped: the pass will not list it on its own.
+      const legit = await registrySkill({ unstamped: true });
+      expect(
+        await autoList.listAutoListCandidateIds({
+          onlySkillIds: [legit.skillId],
+          skipGrace: true,
+        }),
+      ).toEqual([]);
+      // GitHub down: nothing decided, asked again next time.
+      expect(
+        await provenance.runProvenanceSweep({
+          onlySkillIds: [legit.skillId],
+          deps: unreachable,
+        }),
+      ).toEqual({ confirmed: 0, foreign: 0, unknown: 1 });
+      // Its commit is on the default branch: stamped, and then listable.
+      expect(
+        await provenance.runProvenanceSweep({
+          onlySkillIds: [legit.skillId],
+          deps: onBranch,
+        }),
+      ).toEqual({ confirmed: 1, foreign: 0, unknown: 0 });
+      expect(
+        await autoList.listAutoListCandidateIds({
+          onlySkillIds: [legit.skillId],
+          skipGrace: true,
+        }),
+      ).toEqual([legit.skillId]);
+
+      // Already public (listed before the check existed), commit from a fork:
+      // taken off the market and held there.
+      const forged = await registrySkill({ unstamped: true });
+      await data.db
+        .update(data.skillDefinitions)
+        .set({ visibility: "public", listedAt: new Date() })
+        .where(eq(data.skillDefinitions.id, forged.skillId));
+      expect(
+        await provenance.runProvenanceSweep({
+          onlySkillIds: [forged.skillId],
+          deps: fromAFork,
+        }),
+      ).toEqual({ confirmed: 0, foreign: 1, unknown: 0 });
+      const row = await definition(forged.skillId);
+      expect(row.visibility).toBe("restricted");
+      expect(row.listingHold).toBe(true);
+      expect(row.listingHoldBy).toBe("admin");
+
+      // And an admin cannot list it by hand either.
+      await listing.releaseSkillListingHold({ skillId: forged.skillId });
+      await expect(
+        provenance.ensureListingProvenance(forged.skillId, fromAFork),
+      ).rejects.toMatchObject({ code: "SKILL_COMMIT_NOT_IN_REPOSITORY" });
     });
 
     test("a withdrawn skill is held and does not come back", async () => {

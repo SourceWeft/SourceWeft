@@ -7,6 +7,7 @@ import {
 } from "@sourceweft/db";
 import { ContentError } from "../../content/errors";
 import { setRegistryVisibility } from "../registry/review";
+import { ensureListingProvenance } from "./provenance";
 import {
   classifySkillCategories,
   getSkillCategoryDefinition,
@@ -116,6 +117,8 @@ export async function listSkillPublicly(input: {
   skillId: string;
   actorUserId: string;
 }) {
+  // Its commit must be its repository's, not a fork's served under its name.
+  await ensureListingProvenance(input.skillId);
   await prepareSkillListing(input.skillId);
   return setRegistryVisibility({
     skillId: input.skillId,

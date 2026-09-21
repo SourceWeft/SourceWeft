@@ -157,6 +157,11 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
                       sourceUrl: `https://github.com/fixture/skills/tree/${"a".repeat(40)}/${entry.slug}`,
                       repoUrl: "https://github.com/fixture/skills",
                       submittedBy: owner.userId,
+                      // What ingest stamps: the commit is the repository's own.
+                      provenance: {
+                        defaultBranch: "main",
+                        checkedAt: "2026-01-01T00:00:00.000Z",
+                      },
                       capability: entry.capability,
                       scan: { reviewRequired: false, flags: [] },
                       fileManifest: [],

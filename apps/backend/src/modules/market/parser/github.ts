@@ -32,7 +32,10 @@ export type GitHubArchiveErrorCode =
   | "ARCHIVE_UNAVAILABLE"
   | "ARCHIVE_TOO_LARGE"
   | "ARCHIVE_UNPINNED"
-  | "ARCHIVE_TIMEOUT";
+  | "ARCHIVE_TIMEOUT"
+  // The commit exists in the repository's fork network but is not on its
+  // default branch — see `assertCommitOnDefaultBranch`.
+  | "ARCHIVE_NOT_IN_REPOSITORY";
 
 export class GitHubArchiveError extends Error {
   constructor(
@@ -368,14 +371,79 @@ export async function resolveCommit(
         : { committedAt: new Date(parsed).toISOString() }),
     };
   } catch (error) {
-    if (shaRefPattern.test(ref)) {
-      return { sha: ref };
-    }
-    // Without a sha to fall back on, a stalled GitHub must read as a timeout,
-    // not as "this ref cannot be pinned".
+    // A sha-shaped ref used to be trusted as-is when this read failed. It must
+    // not be: an unread sha is an unverified one, and the commit's place in the
+    // repository is exactly what has to be checked (`assertCommitOnDefaultBranch`).
+    // A stalled GitHub reads as a timeout, a 429/5xx as a failure worth
+    // retrying, and only a plain "no such commit" as unpinnable.
     if (error instanceof GitHubArchiveError) {
       throw error;
     }
-    return undefined;
+    if (error instanceof Error && /\bfailed (404|422)\b/.test(error.message)) {
+      return undefined;
+    }
+    throw error;
   }
+}
+
+/**
+ * Where `head` stands relative to `base` in this repository, as GitHub's
+ * compare API says: `ahead` (head descends from base), `behind`, `identical`
+ * or `diverged`. Null when GitHub knows no such commit pair here.
+ */
+export async function compareCommits(
+  source: Pick<NormalizedGitHubSource, "owner" | "repo">,
+  base: string,
+  head: string,
+  options?: GitHubRequestOptions,
+): Promise<"ahead" | "behind" | "identical" | "diverged" | null> {
+  // `per_page=1`: only the status is wanted, not the commit list in between.
+  const url = `https://api.github.com/repos/${source.owner}/${source.repo}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}?per_page=1`;
+  const response = await githubFetch(url, githubHeaders(), options);
+  if (response.status === 404 || response.status === 422) {
+    return null;
+  }
+  if (!response.ok) {
+    throw new Error(`GitHub request failed ${response.status}: ${url}`);
+  }
+  const data = (await response.json()) as { status?: string };
+  return data.status === "ahead" ||
+    data.status === "behind" ||
+    data.status === "identical" ||
+    data.status === "diverged"
+    ? data.status
+    : null;
+}
+
+/**
+ * Refuses a commit that is not on the repository's default branch.
+ *
+ * GitHub shares git objects across a fork network, so a commit that exists
+ * only in SOMEONE ELSE'S FORK is served under the upstream's own URLs — both
+ * `repos/<owner>/<repo>/commits/<sha>` and `codeload.github.com/<owner>/<repo>/zip/<sha>`
+ * answer for it. Pinned by sha, a fork's content would be indexed under the
+ * upstream's name, author and avatar. Requiring the commit to be in the default
+ * branch's history means only the repository's own writers could have put it
+ * there. (Verified 2026-09-21 against a real fork of obra/superpowers.)
+ */
+export async function assertCommitOnDefaultBranch(
+  source: Pick<NormalizedGitHubSource, "owner" | "repo" | "repoUrl">,
+  commitSha: string,
+  defaultBranch: string,
+  options?: GitHubRequestOptions,
+): Promise<void> {
+  const status = await compareCommits(
+    source,
+    commitSha,
+    defaultBranch,
+    options,
+  );
+  // base=commit, head=branch: `ahead` / `identical` mean the branch contains it.
+  if (status === "ahead" || status === "identical") {
+    return;
+  }
+  throw new GitHubArchiveError(
+    "ARCHIVE_NOT_IN_REPOSITORY",
+    `Commit ${commitSha.slice(0, 12)} is not on ${source.repoUrl}'s default branch (${defaultBranch}). It may come from a fork; import from the default branch or a commit on it.`,
+  );
 }

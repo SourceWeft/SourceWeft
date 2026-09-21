@@ -50,6 +50,7 @@ function publishedCurrentVersion(
       and ${skillVersions.isCurrent} = true
       and ${skillVersions.status} = 'published'
       and ${skillVersions.manifestJson}->>'listing' is distinct from 'hidden'
+      and ${skillVersions.manifestJson}->'registry'->'provenance' is not null
       and jsonb_array_length(${currentVersionFlags}) ${flags === "none" ? sql`= 0` : sql`> 0`}
       ${settled}
   )`;
