@@ -7,6 +7,7 @@ import { requireSkillWorkspace } from "../../../modules/skills/registry/permissi
 import {
   getSkillClaimsOverview,
   removeClaimedRepoFromMarket,
+  restoreClaimedRepoToMarket,
   startSkillClaim,
 } from "../../../modules/skills/market/claims";
 import { logger } from "../../../shared/logger";
@@ -82,6 +83,20 @@ export function registerSkillClaimRoutes(app: Hono) {
     const claimId = requireRouteParam(c, "claimId");
     const result = await removeClaimedRepoFromMarket({ userId, claimId });
     logger.info("Claimed repository removed from the market by its author", {
+      userId,
+      claimId,
+      ...result,
+    });
+    return ApiResponse.success(c, result);
+  });
+
+  // Undoes the removal above. The skills are released, not listed: the
+  // platform's rules list them again on the next upkeep pass.
+  app.post("/skills/claims/:claimId/restore-to-market", async (c) => {
+    const userId = await resolveClaimant(c);
+    const claimId = requireRouteParam(c, "claimId");
+    const result = await restoreClaimedRepoToMarket({ userId, claimId });
+    logger.info("Claimed repository restored to the market by its author", {
       userId,
       claimId,
       ...result,

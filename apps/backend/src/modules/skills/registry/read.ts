@@ -10,7 +10,10 @@ import {
   resolvePinnedGitHubSource,
   type PinnedGitHubSource,
 } from "../../market/parser/github-zip";
-import type { GitHubRequestOptions } from "../../market/parser/github";
+import {
+  GitHubRateLimitedError,
+  type GitHubRequestOptions,
+} from "../../market/parser/github";
 import { classifySkillFile } from "../file-kind";
 
 /**
@@ -274,6 +277,11 @@ function isBundleFile(skillDir: string, entryPath: string): boolean {
 export function mapRegistryArchiveError(error: unknown): unknown {
   if (!(error instanceof GitHubArchiveError)) {
     return error;
+  }
+  if (error instanceof GitHubRateLimitedError) {
+    return new RegistrySubmissionError("GITHUB_RATE_LIMITED", error.message, {
+      resumeAt: error.resetAt.toISOString(),
+    });
   }
   return new RegistrySubmissionError(
     error.code === "ARCHIVE_TOO_LARGE"

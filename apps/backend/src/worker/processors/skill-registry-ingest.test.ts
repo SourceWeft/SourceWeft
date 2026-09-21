@@ -10,6 +10,7 @@ import { beforeEach, test, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   runPipeline: vi.fn(),
   failIfInFlight: vi.fn(),
+  enqueue: vi.fn(),
 }));
 
 vi.mock("../../modules/skills/registry/ingest/pipeline", () => ({
@@ -17,6 +18,9 @@ vi.mock("../../modules/skills/registry/ingest/pipeline", () => ({
 }));
 vi.mock("../../modules/skills/registry/ingest/repository", () => ({
   failSubmissionIfInFlight: mocks.failIfInFlight,
+}));
+vi.mock("../../modules/skills/registry/ingest/queue", () => ({
+  enqueueSkillIngestJob: mocks.enqueue,
 }));
 vi.mock("../../shared/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -171,5 +175,37 @@ test("the boundary never overwrites what the processor recorded, and never throw
       getState: async () => "failed",
     }),
     "skipped",
+  );
+});
+
+test("a run deferred by GitHub's rate limit is queued again for when it lifts", async () => {
+  const resumeAt = new Date(Date.now() + 45 * 60_000);
+  const submission = {
+    id: "sub_1",
+    teamId: "team_1",
+    workspaceId: "ws_1",
+    attempts: 1,
+  };
+  mocks.runPipeline.mockResolvedValue({
+    status: "deferred",
+    submissionId: "sub_1",
+    resumeAt,
+    submission,
+  });
+  mocks.enqueue.mockResolvedValue({});
+  // The job itself completes: no BullMQ retry spent on a limit with hours
+  // to run.
+  const outcome = await processSkillRegistryIngestJob(job(0));
+  assert.equal(outcome.status, "deferred");
+  assert.deepEqual(mocks.enqueue.mock.calls, [
+    [submission, { notBefore: resumeAt }],
+  ]);
+
+  // Could not reach the queue: the job fails as transient, so BullMQ tries
+  // again (and the row is still `queued`).
+  mocks.enqueue.mockRejectedValueOnce(new Error("redis down"));
+  await assert.rejects(
+    processSkillRegistryIngestJob(job(0)),
+    (thrown) => !(thrown instanceof UnrecoverableError),
   );
 });

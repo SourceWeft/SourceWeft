@@ -6,10 +6,12 @@ import { ContentError } from "../../content/errors";
 import {
   assertCommitOnDefaultBranch,
   GitHubArchiveError,
+  GitHubRateLimitedError,
   resolveDefaultBranch,
 } from "../../market/parser/github";
 import { setRegistryVisibility } from "../registry/review";
 import { parseGithubStoragePointer } from "../storage/source-pointer";
+import { recordSkillMarketEvent } from "./events";
 
 /**
  * Where a community skill's commit came from, before the market shows it to
@@ -42,7 +44,11 @@ const defaultDeps: ProvenanceDeps = {
   assertCommitOnDefaultBranch,
 };
 
-/** Checks one version, stamping it when its commit is on the default branch. */
+/**
+ * Checks one version, stamping it when its commit is on the default branch.
+ * Throws `GitHubRateLimitedError` rather than answering "unknown": a caller
+ * checking many should stop asking, not spend the rest of its batch on it.
+ */
 export async function checkVersionProvenance(
   version: {
     id: string;
@@ -97,7 +103,10 @@ export async function checkVersionProvenance(
     ) {
       return "foreign";
     }
-    // GitHub unreachable, rate limited, repository gone: ask again next pass.
+    if (error instanceof GitHubRateLimitedError) {
+      throw error;
+    }
+    // GitHub unreachable, repository gone: ask again next pass.
     return "unknown";
   }
 }
@@ -107,10 +116,15 @@ export async function checkVersionProvenance(
  * and holds it there. Installed workspaces keep it: removing someone's tool is
  * an admin's revoke, not this.
  */
-async function withholdForeignSkill(skillId: string, visibility: string) {
-  if (visibility === "public") {
+async function withholdForeignSkill(input: {
+  skillId: string;
+  visibility: string;
+  skillVersionId: string;
+  storagePointer: string;
+}) {
+  if (input.visibility === "public") {
     await setRegistryVisibility({
-      skillId,
+      skillId: input.skillId,
       visibility: "restricted",
       actorUserId: PROVENANCE_ACTOR,
     });
@@ -118,7 +132,18 @@ async function withholdForeignSkill(skillId: string, visibility: string) {
   await db
     .update(skillDefinitions)
     .set({ listingHold: true, listingHoldBy: "admin", updatedAt: new Date() })
-    .where(eq(skillDefinitions.id, skillId));
+    .where(eq(skillDefinitions.id, input.skillId));
+  await recordSkillMarketEvent({
+    skillId: input.skillId,
+    actorKind: "system",
+    action: "provenance.withheld",
+    detail: {
+      skillVersionId: input.skillVersionId,
+      storagePointer: input.storagePointer,
+      visibility: { from: input.visibility, to: "restricted" },
+      listingHoldBy: "admin",
+    },
+  });
 }
 
 /**
@@ -127,7 +152,16 @@ async function withholdForeignSkill(skillId: string, visibility: string) {
  */
 export async function runProvenanceSweep(
   options: { onlySkillIds?: string[]; deps?: ProvenanceDeps } = {},
-): Promise<{ confirmed: number; foreign: number; unknown: number }> {
+): Promise<{
+  confirmed: number;
+  foreign: number;
+  unknown: number;
+  /**
+   * Set when GitHub's rate limit stopped the sweep: when it lifts. The
+   * versions not reached keep their place for a later pass.
+   */
+  rateLimitedUntil?: string;
+}> {
   const rows = await db
     .select({
       skillId: skillDefinitions.id,
@@ -159,12 +193,33 @@ export async function runProvenanceSweep(
     )
     .limit(PROVENANCE_SWEEP_BATCH);
 
-  const tally = { confirmed: 0, foreign: 0, unknown: 0 };
+  const tally: Awaited<ReturnType<typeof runProvenanceSweep>> = {
+    confirmed: 0,
+    foreign: 0,
+    unknown: 0,
+  };
   for (const row of rows) {
-    const verdict = await checkVersionProvenance(row.version, options.deps);
+    let verdict: ProvenanceVerdict;
+    try {
+      verdict = await checkVersionProvenance(row.version, options.deps);
+    } catch (error) {
+      if (!(error instanceof GitHubRateLimitedError)) throw error;
+      // Every later check would meet the same limit. Stop here, once.
+      tally.rateLimitedUntil = error.resetAt.toISOString();
+      logger.warn("Skill provenance sweep stopped: GitHub rate limit reached", {
+        resetAt: tally.rateLimitedUntil,
+        checked: tally.confirmed + tally.foreign + tally.unknown,
+      });
+      break;
+    }
     tally[verdict] += 1;
     if (verdict === "foreign") {
-      await withholdForeignSkill(row.skillId, row.visibility);
+      await withholdForeignSkill({
+        skillId: row.skillId,
+        visibility: row.visibility,
+        skillVersionId: row.version.id,
+        storagePointer: row.version.storagePointer,
+      });
       logger.warn(
         "Community skill withheld: its commit is not on its repository's default branch",
         { skillId: row.skillId, storagePointer: row.version.storagePointer },
@@ -199,7 +254,15 @@ export async function ensureListingProvenance(
     .limit(1);
   // No current version: `setRegistryVisibility` refuses with its own error.
   if (!version) return;
-  const verdict = await checkVersionProvenance(version, deps);
+  let verdict: ProvenanceVerdict;
+  try {
+    verdict = await checkVersionProvenance(version, deps);
+  } catch (error) {
+    // Rate limited is "GitHub cannot say right now", as far as an admin is
+    // concerned.
+    if (!(error instanceof GitHubRateLimitedError)) throw error;
+    verdict = "unknown";
+  }
   if (verdict === "foreign") {
     throw new ContentError(
       409,

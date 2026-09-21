@@ -35,7 +35,9 @@ export type GitHubArchiveErrorCode =
   | "ARCHIVE_TIMEOUT"
   // The commit exists in the repository's fork network but is not on its
   // default branch — see `assertCommitOnDefaultBranch`.
-  | "ARCHIVE_NOT_IN_REPOSITORY";
+  | "ARCHIVE_NOT_IN_REPOSITORY"
+  // GitHub's rate limit is spent — see `GitHubRateLimitedError`.
+  | "ARCHIVE_RATE_LIMITED";
 
 export class GitHubArchiveError extends Error {
   constructor(
@@ -44,6 +46,30 @@ export class GitHubArchiveError extends Error {
   ) {
     super(message);
     this.name = "GitHubArchiveError";
+  }
+}
+
+/**
+ * GitHub refused a request because the token's (or the IP's) rate limit is
+ * spent, and it will not be lifted within the few seconds `githubFetch` waits
+ * on its own. `resetAt` is when GitHub says requests are accepted again: the
+ * primary limit's `x-ratelimit-reset`, or a secondary limit's `retry-after`.
+ *
+ * A `GitHubArchiveError` so that every layer which already passes those through
+ * untouched (the source resolver, the commit lookup) carries it up as it is —
+ * a caller that can wait (the ingest queue) reschedules, one that runs again
+ * anyway (the market upkeep) stops asking for this round.
+ */
+export class GitHubRateLimitedError extends GitHubArchiveError {
+  constructor(
+    readonly resetAt: Date,
+    url: string,
+  ) {
+    super(
+      "ARCHIVE_RATE_LIMITED",
+      `GitHub's rate limit is spent until ${resetAt.toISOString()}: ${url}`,
+    );
+    this.name = "GitHubRateLimitedError";
   }
 }
 
@@ -182,42 +208,66 @@ const githubMaxRetries = 4;
 const githubBaseBackoffMs = 500;
 const githubMaxTotalWaitMs = 60_000;
 
+/**
+ * GitHub's rate limit answer: a 403 or 429 that says the primary limit is
+ * spent (`x-ratelimit-remaining: 0`) or asks for a pause (`retry-after`, a
+ * secondary limit). A plain 403 is a real "forbidden" and a bare 429 is
+ * treated like a 5xx.
+ */
+export function isGitHubRateLimitResponse(response: Response): boolean {
+  if (response.status !== 403 && response.status !== 429) {
+    return false;
+  }
+  return (
+    response.headers.get("x-ratelimit-remaining") === "0" ||
+    response.headers.has("retry-after")
+  );
+}
+
+/** Fallback when a rate limit answer names no time: GitHub's own advice is a minute. */
+const githubRateLimitDefaultWaitMs = 60_000;
+
+/** When a rate-limited response says requests are accepted again. */
+export function githubRateLimitResetAt(
+  response: Response,
+  now = Date.now(),
+): Date {
+  const retryAfter = retryAfterMs(response, now);
+  if (retryAfter !== null) {
+    return new Date(now + retryAfter);
+  }
+  const reset = Number(response.headers.get("x-ratelimit-reset"));
+  if (response.headers.has("x-ratelimit-reset") && Number.isFinite(reset)) {
+    return new Date(Math.max(now, reset * 1000));
+  }
+  return new Date(now + githubRateLimitDefaultWaitMs);
+}
+
+function retryAfterMs(response: Response, now: number): number | null {
+  const retryAfter = response.headers.get("retry-after");
+  if (!retryAfter) {
+    return null;
+  }
+  const seconds = Number(retryAfter);
+  if (Number.isFinite(seconds)) {
+    return Math.max(0, seconds * 1000);
+  }
+  const parsedDate = Date.parse(retryAfter);
+  return Number.isNaN(parsedDate) ? null : Math.max(0, parsedDate - now);
+}
+
 function isRetryableGitHubResponse(response: Response) {
   const { status } = response;
-  if (status === 429 || status >= 500) {
-    return true;
-  }
-  // GitHub signals rate limiting with 403; only retry those, not genuine
-  // permission-denied 403s.
-  if (status === 403) {
-    return (
-      response.headers.get("x-ratelimit-remaining") === "0" ||
-      response.headers.has("retry-after")
-    );
-  }
-  return false;
+  return status === 429 || status >= 500 || isGitHubRateLimitResponse(response);
 }
 
 function githubRetryDelayMs(response: Response, attempt: number) {
-  const retryAfter = response.headers.get("retry-after");
-  if (retryAfter) {
-    const seconds = Number(retryAfter);
-    if (Number.isFinite(seconds)) {
-      return Math.max(0, seconds * 1000);
-    }
-    const parsedDate = Date.parse(retryAfter);
-    if (!Number.isNaN(parsedDate)) {
-      return Math.max(0, parsedDate - Date.now());
-    }
+  if (isGitHubRateLimitResponse(response)) {
+    return Math.max(0, githubRateLimitResetAt(response).getTime() - Date.now());
   }
-  if (
-    response.headers.get("x-ratelimit-remaining") === "0" &&
-    response.headers.get("x-ratelimit-reset")
-  ) {
-    const resetMs = Number(response.headers.get("x-ratelimit-reset")) * 1000;
-    if (Number.isFinite(resetMs)) {
-      return Math.max(0, resetMs - Date.now());
-    }
+  const retryAfter = retryAfterMs(response, Date.now());
+  if (retryAfter !== null) {
+    return retryAfter;
   }
   // Exponential backoff with full jitter.
   const backoff = githubBaseBackoffMs * 2 ** attempt;
@@ -243,6 +293,9 @@ export function githubTimeoutError(url: string, timeoutMs: number) {
  * Retry/backoff-aware GitHub fetch. Exported alongside `githubDownloadHeaders`
  * so `github-zip.ts` reuses the same rate-limit handling and token plumbing
  * instead of re-implementing them.
+ *
+ * A rate limit that outlasts the retry budget throws `GitHubRateLimitedError`
+ * instead of answering with the 403/429.
  *
  * Every attempt runs under its own deadline. The deadline signal is handed to
  * `fetch`, so it also bounds a caller streaming the returned body; a caller
@@ -275,18 +328,27 @@ export async function githubFetch(
       }
       throw error;
     }
-    if (
-      response.ok ||
-      attempt >= githubMaxRetries ||
-      !isRetryableGitHubResponse(response)
-    ) {
+    if (response.ok || !isRetryableGitHubResponse(response)) {
       return response;
     }
-    const delay = Math.min(
-      githubRetryDelayMs(response, attempt),
-      githubMaxTotalWaitMs - totalWaited,
-    );
+    const wanted = githubRetryDelayMs(response, attempt);
+    const budget = githubMaxTotalWaitMs - totalWaited;
+    if (isGitHubRateLimitResponse(response)) {
+      // A limit that lifts within what is left of the budget is waited out
+      // here; one that does not (the primary limit resets hourly) is the
+      // caller's to schedule around, so it is raised rather than returned as
+      // one more 403 to misread as "forbidden".
+      if (attempt >= githubMaxRetries || wanted > budget) {
+        void response.body?.cancel().catch(() => undefined);
+        throw new GitHubRateLimitedError(githubRateLimitResetAt(response), url);
+      }
+    } else if (attempt >= githubMaxRetries) {
+      return response;
+    }
+    const delay = Math.min(wanted, budget);
     if (delay <= 0) {
+      // A reset already past: ask again straight away (bounded by the retries).
+      if (isGitHubRateLimitResponse(response)) continue;
       return response;
     }
     totalWaited += delay;

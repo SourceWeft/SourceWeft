@@ -16,6 +16,7 @@ import {
 } from "../storage";
 import { triageRegistrySubmission, type RegistryExistingEntry } from "./guard";
 import { RegistrySubmissionError } from "./errors";
+import { recordSkillMarketEvent } from "../market/events";
 
 /**
  * Stage 5 — Index (persist the definition, version and bundle).
@@ -671,6 +672,22 @@ export async function upsertRegistrySkillIndex(
         createdAt: now,
       })),
     );
+    // Recorded because nobody chose it: an admin wondering where the badge
+    // went finds the version that took it.
+    if (existing?.verified && takesCurrent) {
+      await recordSkillMarketEvent(
+        {
+          skillId,
+          actorKind: "system",
+          action: "verified.cleared",
+          detail: {
+            fromVersionId: current?.id ?? null,
+            toVersionId: skillVersionId,
+          },
+        },
+        tx,
+      );
+    }
     return {
       slug: input.slug,
       skillId,

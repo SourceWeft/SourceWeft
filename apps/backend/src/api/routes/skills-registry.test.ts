@@ -17,6 +17,9 @@ const mocks = vi.hoisted(() => ({
   setSkillFeatured: vi.fn(),
   revokeSkillClaim: vi.fn(),
   grantSkillClaim: vi.fn(),
+  setVersionStatus: vi.fn(),
+  getVersionForAudit: vi.fn(),
+  recordVersionModeration: vi.fn(),
 }));
 
 vi.mock("../middleware/auth-session", () => ({
@@ -28,7 +31,11 @@ vi.mock("../../modules/market/admin", () => ({
 }));
 vi.mock("../../modules/skills/registry/review", () => ({
   listRegistryReviewQueue: vi.fn(),
-  setRegistrySkillVersionStatus: vi.fn(),
+  setRegistrySkillVersionStatus: mocks.setVersionStatus,
+}));
+vi.mock("../../modules/skills/market/events", () => ({
+  getVersionForAudit: mocks.getVersionForAudit,
+  recordVersionModeration: mocks.recordVersionModeration,
 }));
 vi.mock("../../modules/skills/registry/versions", () => ({
   getRegistryVersionDetail: vi.fn(),
@@ -141,17 +148,16 @@ test("the standing is read as stored, and 404s for what is not a registry skill"
   assert.deepEqual(mocks.calls, []);
 });
 
-test("listing lifts the hold first, then lists through the one listing function", async () => {
+test("listing lifts the hold, through the one listing function", async () => {
   const response = await createTestApp().request(`${base}/list`, {
     method: "POST",
   });
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), standing);
-  assert.deepEqual(mocks.calls, ["releaseSkillListingHold", "listSkillPublicly"]);
-  assert.deepEqual(mocks.releaseSkillListingHold.mock.calls, [
-    [{ skillId: "skill_1" }],
+  assert.deepEqual(mocks.calls, ["listSkillPublicly"]);
+  assert.deepEqual(mocks.listSkillPublicly.mock.calls, [
+    [{ ...actor, releaseHold: true }],
   ]);
-  assert.deepEqual(mocks.listSkillPublicly.mock.calls, [[actor]]);
 });
 
 test("delisting goes through delistSkill, which is what sets the hold", async () => {
@@ -172,7 +178,10 @@ test("the visibility route is list and delist under another name", async () => {
   );
   assert.equal(made.status, 200);
   assert.deepEqual(await made.json(), standing);
-  assert.deepEqual(mocks.calls, ["releaseSkillListingHold", "listSkillPublicly"]);
+  assert.deepEqual(mocks.calls, ["listSkillPublicly"]);
+  assert.deepEqual(mocks.listSkillPublicly.mock.calls, [
+    [{ ...actor, releaseHold: true }],
+  ]);
 
   mocks.calls.length = 0;
   await app.request(`${base}/visibility`, json("PUT", { visibility: "restricted" }));
@@ -194,7 +203,7 @@ test("verified and categories validate their body and answer the standing", asyn
   assert.equal(verified.status, 200);
   assert.deepEqual(await verified.json(), standing);
   assert.deepEqual(mocks.setSkillVerified.mock.calls, [
-    [{ skillId: "skill_1", verified: true }],
+    [{ skillId: "skill_1", verified: true, actorUserId: "admin_1" }],
   ]);
 
   const categories = await app.request(
@@ -203,7 +212,13 @@ test("verified and categories validate their body and answer the standing", asyn
   );
   assert.equal(categories.status, 200);
   assert.deepEqual(mocks.setSkillCategories.mock.calls, [
-    [{ skillId: "skill_1", categorySlugs: ["design-creative", "other"] }],
+    [
+      {
+        skillId: "skill_1",
+        categorySlugs: ["design-creative", "other"],
+        actorUserId: "admin_1",
+      },
+    ],
   ]);
 
   for (const [path, body] of [
@@ -264,7 +279,7 @@ test("featured is an admin's choice, answered with the stored standing", async (
   );
   assert.equal(featured.status, 200);
   assert.deepEqual(mocks.setSkillFeatured.mock.calls, [
-    [{ skillId: "skill_1", featured: true }],
+    [{ skillId: "skill_1", featured: true, actorUserId: "admin_1" }],
   ]);
   assert.deepEqual(await featured.json(), {
     ...standing,
@@ -308,7 +323,9 @@ test("granting a claim is a market admin's act, by repository and email", async 
   );
   assert.equal(granted.status, 201);
   assert.deepEqual(await granted.json(), { claim, userId: "user_7" });
-  assert.deepEqual(mocks.grantSkillClaim.mock.calls[0], [body]);
+  assert.deepEqual(mocks.grantSkillClaim.mock.calls[0], [
+    { ...body, actorUserId: "admin_1" },
+  ]);
 
   for (const invalid of [
     { repo: "acme/skills" },
@@ -333,4 +350,60 @@ test("granting a claim is a market admin's act, by repository and email", async 
     assert.equal(response.status, status);
     assert.match(await response.text(), new RegExp(code));
   }
+});
+
+test("review-queue decisions are audited as what they were: publish, reject, revoke", async () => {
+  const app = createTestApp();
+  const publish = "/v1/skills/registry/admin/submissions/v_1/publish";
+  const reject = "/v1/skills/registry/admin/submissions/v_1/reject";
+
+  mocks.getVersionForAudit.mockResolvedValue({ skillId: "skill_1", status: "draft" });
+  mocks.setVersionStatus.mockResolvedValue({
+    skillVersionId: "v_1",
+    status: "published",
+  });
+  assert.equal(
+    (await app.request(publish, json("POST", { visibility: "public" }))).status,
+    200,
+  );
+  assert.deepEqual(mocks.recordVersionModeration.mock.calls.at(-1), [
+    {
+      skillVersionId: "v_1",
+      before: { skillId: "skill_1", status: "draft" },
+      target: "published",
+      actorUserId: "admin_1",
+      visibility: "public",
+    },
+  ]);
+
+  mocks.getVersionForAudit.mockResolvedValue({
+    skillId: "skill_1",
+    status: "published",
+  });
+  mocks.setVersionStatus.mockResolvedValue({
+    skillVersionId: "v_1",
+    status: "deprecated",
+  });
+  assert.equal(
+    (await app.request(reject, json("POST", { reason: "malware" }))).status,
+    200,
+  );
+  assert.deepEqual(mocks.recordVersionModeration.mock.calls.at(-1), [
+    {
+      skillVersionId: "v_1",
+      before: { skillId: "skill_1", status: "published" },
+      target: "deprecated",
+      actorUserId: "admin_1",
+      reason: "malware",
+    },
+  ]);
+
+  // Nothing decided, nothing recorded.
+  mocks.recordVersionModeration.mockClear();
+  mocks.setVersionStatus.mockResolvedValue(null);
+  assert.equal(
+    (await app.request(reject, json("POST", { reason: "x" }))).status,
+    404,
+  );
+  assert.equal(mocks.recordVersionModeration.mock.calls.length, 0);
 });

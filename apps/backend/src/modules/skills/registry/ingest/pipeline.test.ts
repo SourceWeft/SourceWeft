@@ -61,6 +61,7 @@ vi.mock("../../../../shared/logger", () => ({
 }));
 
 import { GitHubArchiveError } from "../../../market/parser/github-zip";
+import { GitHubRateLimitedError } from "../../../market/parser/github";
 import { RegistrySubmissionError } from "../errors";
 import { IngestSupersededError } from "./errors";
 import { runIngestPipeline } from "./pipeline";
@@ -287,6 +288,58 @@ test("a transient failure goes back to queued while the queue will retry, and to
     code: "REGISTRY_SUBMISSION_FAILED",
     message: "fetch failed",
   });
+});
+
+test("GitHub's rate limit puts the submission back in the queue, saying when it resumes", async () => {
+  state.row!.createdAt = new Date();
+  const resetAt = new Date(Date.now() + 30 * 60_000);
+  const limited = deps({
+    resolveSource: vi.fn(async () => {
+      throw new GitHubRateLimitedError(resetAt, "https://api.github.com/x");
+    }),
+  });
+
+  // Not a failure, and not the queue's few-seconds retry: a deferral.
+  const outcome = await run({ deps: limited, willRetryTransient: false });
+  assert.equal(outcome.status, "deferred");
+  assert.ok(outcome.status === "deferred");
+  // A little after GitHub's reset, never before it.
+  assert.ok(outcome.resumeAt.getTime() > resetAt.getTime());
+  assert.ok(outcome.resumeAt.getTime() - resetAt.getTime() <= 60_000);
+  assert.deepEqual(outcome.submission, {
+    id: "sub_1",
+    teamId: "team_1",
+    workspaceId: "ws_1",
+    attempts: 1,
+  });
+  assert.equal(state.row!.status, "queued");
+  assert.deepEqual(state.row!.error, {
+    code: "GITHUB_RATE_LIMITED",
+    message: `GitHub's rate limit was reached; the import resumes at about ${outcome.resumeAt.toISOString().slice(11, 16)} UTC`,
+    resumeAt: outcome.resumeAt.toISOString(),
+  });
+  assert.equal(state.row!.finishedAt, undefined);
+});
+
+test("a submission that has waited out its day of rate limits fails with the same code", async () => {
+  state.row!.createdAt = new Date(Date.now() - 24 * 60 * 60_000);
+  const limited = deps({
+    resolveSource: vi.fn(async () => {
+      throw new GitHubRateLimitedError(
+        new Date(Date.now() + 60 * 60_000),
+        "https://api.github.com/x",
+      );
+    }),
+  });
+  await assert.rejects(
+    run({ deps: limited, willRetryTransient: true }),
+    GitHubRateLimitedError,
+  );
+  assert.equal(state.row!.status, "failed");
+  assert.equal(
+    (state.row!.error as { code: string }).code,
+    "GITHUB_RATE_LIMITED",
+  );
 });
 
 test("a commit whose date GitHub would not give is refused at resolve: retried while it can be, failed by name once it cannot", async () => {

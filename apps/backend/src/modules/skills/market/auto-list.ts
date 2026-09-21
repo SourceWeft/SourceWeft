@@ -9,6 +9,7 @@ import {
   diffSkillVersions,
   type SkillVersionChangelog,
 } from "./changelog";
+import { recordSkillMarketEvent } from "./events";
 import {
   listSkillPublicly,
   prepareSkillListing,
@@ -310,9 +311,15 @@ export async function acknowledgeSkillVersion(input: {
       ),
     )
     .returning({ skillId: skillVersions.skillId, id: skillVersions.id });
-  return row
-    ? { skillId: row.skillId, skillVersionId: row.id, acknowledgedAt }
-    : null;
+  if (!row) return null;
+  await recordSkillMarketEvent({
+    skillId: row.skillId,
+    actorKind: "admin",
+    actorUserId: input.actorUserId,
+    action: "listing.kept",
+    detail: { skillVersionId: row.id },
+  });
+  return { skillId: row.skillId, skillVersionId: row.id, acknowledgedAt };
 }
 
 /**

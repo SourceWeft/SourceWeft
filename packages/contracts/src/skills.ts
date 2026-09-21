@@ -345,6 +345,14 @@ export const skillMarketStandingSchema = z.object({
   featured: z.boolean().default(false),
   featuredSetBy: z.enum(["sync", "admin"]).nullable().default(null),
   categorySlugs: z.array(z.string()),
+  // Who chose the categories: inferred from the skill's text (`auto`, or null
+  // for a skill filed before this was recorded), or picked by an admin — which
+  // a bulk re-inference leaves alone.
+  categoriesSetBy: z.enum(["auto", "admin"]).nullable().default(null),
+  // Visible reviews, as the upkeep last counted them; `ratingAvg` is null
+  // while there are none.
+  ratingCount: z.number().int().nonnegative().default(0),
+  ratingAvg: z.number().nullable().default(null),
   installCount: z.number().int().nonnegative(),
   listedAt: z.string().nullable(),
 });
@@ -822,7 +830,13 @@ export type SkillSubmissionStatus = z.infer<typeof skillSubmissionStatusSchema>;
 export const skillSubmissionErrorSchema = z.object({
   code: z.string(),
   message: z.string(),
+  // `GITHUB_RATE_LIMITED`: GitHub's rate limit is spent. On a `queued`
+  // submission it is waiting and runs again at `resumeAt` (ISO 8601); on a
+  // `failed` one it waited as long as it may.
+  resumeAt: z.string().optional(),
 });
+/** The submission is waiting for GitHub's rate limit to lift (see `resumeAt`). */
+export const SKILL_SUBMISSION_RATE_LIMITED_CODE = "GITHUB_RATE_LIMITED";
 export const skillSubmissionStageSchema = z.object({
   status: z.enum(["running", "succeeded", "failed"]),
   startedAt: z.string(),

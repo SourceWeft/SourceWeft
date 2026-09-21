@@ -468,6 +468,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       await listing.setSkillCategories({
         skillId: skill.skillId,
         categorySlugs: ["design-creative"],
+        actorUserId: "skill-test-admin",
       });
       await listing.delistSkill({
         skillId: skill.skillId,
@@ -487,6 +488,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
         listing.setSkillCategories({
           skillId: skill.skillId,
           categorySlugs: ["no-such-category"],
+          actorUserId: "skill-test-admin",
         }),
       ).rejects.toMatchObject({ code: "SKILL_CATEGORY_INVALID" });
     });
