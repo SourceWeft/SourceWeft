@@ -24,7 +24,10 @@ import {
   getPublicSkill,
   isMarketNotFound,
   listPublicSkillCategories,
+  marketSkillLocale,
 } from "../../../../lib/market-skills";
+import { getPublicSkillReviews } from "../../../../lib/public-skill-reviews";
+import { skillAggregateRatingJsonLd } from "../_components/community/public-reviews-format";
 import { PublicSkillOverview } from "../_components/community/public-skill-overview";
 import { PublicSkillReport } from "../_components/community/public-skill-report";
 import { PublicSkillReviews } from "../_components/community/public-skill-reviews";
@@ -79,9 +82,14 @@ type PageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
 
-async function loadSkill(slug: string) {
+// `locale` is for the page body (AI summaries in the related lists); the
+// metadata reads the author's own description and needs none.
+async function loadSkill(slug: string, locale?: string) {
   try {
-    return await getPublicSkill(slug);
+    return await getPublicSkill(
+      slug,
+      locale ? marketSkillLocale(locale) : undefined,
+    );
   } catch (error) {
     // Not public, withdrawn, or never existed: all one 404. A market outage
     // must surface as 5xx instead — a 404 would deindex every skill page.
@@ -391,10 +399,12 @@ export default async function PublicSkillDetailPage({
   const tab = parseSkillDetailTab(rawSearchParams.tab);
   const [authState, result, categoriesResponse] = await Promise.all([
     resolveInitialLandingAuthState(),
-    loadSkill(decodedSlug),
+    loadSkill(decodedSlug, uiLocale),
     listPublicSkillCategories(),
   ]);
   const { files, scanFlags, skill, source, versions } = result;
+  // Cached with the reviews section's own read, so this costs nothing extra.
+  const reviews = await getPublicSkillReviews(skill.slug);
   const related = result.related ?? { sameRepository: [], sameCategory: [] };
   const categoryNames = skillCategoryNames(categoriesResponse.items);
   const skillMd = stripSkillFrontmatter(result.skillMd);
@@ -491,6 +501,8 @@ export default async function PublicSkillDetailPage({
     datePublished: skill.listedAt,
     description: skill.description,
     ...(skill.license ? { license: skill.license } : {}),
+    // Only once someone has rated it.
+    ...skillAggregateRatingJsonLd(reviews?.summary),
     name: skill.displayName,
     url: pageUrl,
     version: skill.version,
