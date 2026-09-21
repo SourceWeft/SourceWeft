@@ -2,11 +2,22 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { describe, it } from "node:test";
+import type { GetMarketSkillResponse } from "@sourceweft/market-contracts";
 import { toFailure } from "../src/errors";
 import {
   createRegistryClient,
   RegistryResponseError,
 } from "../src/registry/client";
+import type { SkillResponse } from "../src/registry/schema";
+
+/**
+ * Compile-time: whatever the server's published contract promises is enough
+ * for the CLI. If the contract ever stops carrying a field the CLI reads,
+ * `tsc` fails here.
+ */
+export const contractSatisfiesTheCli = (
+  response: GetMarketSkillResponse,
+): SkillResponse => response;
 
 const HASH = "a".repeat(64);
 const valid = {

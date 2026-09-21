@@ -39,6 +39,7 @@
   },
   "devDependencies": {
     "@sourceweft/eslint-config": "workspace:*",
+    "@sourceweft/market-contracts": "workspace:*",
     "@sourceweft/skill-format": "workspace:*",
     "@types/node": "^22.20.1",
     "eslint": "^9.39.5",

@@ -34,8 +34,9 @@ jobs:
           package-manager-cache: false
           registry-url: https://registry.npmjs.org
 
-      # The CLI bundles its workspace packages, so it needs them installed but
-      # ships none of them as dependencies.
+      # The CLI bundles its workspace packages, so it needs them installed and
+      # market-contracts built (it is consumed from `dist`), but ships none of
+      # them as dependencies.
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile --filter "@sourceweft/cli..."
 
@@ -49,6 +50,9 @@ jobs:
             echo "Expected ${expected}."
             exit 1
           fi
+
+      - name: Build market-contracts
+        run: pnpm --filter @sourceweft/market-contracts build
 
       - name: Check types
         run: pnpm --filter @sourceweft/cli check-types

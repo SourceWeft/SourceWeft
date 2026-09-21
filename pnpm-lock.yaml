@@ -656,6 +656,9 @@ importers:
       '@sourceweft/eslint-config':
         specifier: workspace:*
         version: link:../packages/eslint-config
+      '@sourceweft/market-contracts':
+        specifier: workspace:*
+        version: link:../packages/market-contracts
       '@sourceweft/skill-format':
         specifier: workspace:*
         version: link:../packages/skill-format
