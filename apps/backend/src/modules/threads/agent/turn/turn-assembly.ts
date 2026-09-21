@@ -62,6 +62,10 @@ import { listArtifactSummaryRecords } from "../../../artifacts/repository";
 import type { AgentSandboxRuntimeForTurn } from "@sourceweft/builtin-tool-sandbox";
 import { TurnSkillSandboxAssets } from "../../../skills/sandbox-assets";
 import type { EnabledSkillDescriptor } from "../../../skills/types";
+import {
+  createSkillRunObserver,
+  type SkillRunObserver,
+} from "../../../skills/market/run-stats";
 import { buildRequiredSandboxRuntimeAssetPlans } from "../../../../shared/sandbox-assets/plans";
 import { config } from "../../../../shared/config";
 import { createSourceWeftSubagentMiddlewareStack } from "../middleware";
@@ -227,15 +231,22 @@ export function buildAgentBackend(input: {
   internalContextBackend?: BackendProtocolV2;
   executeToolCallId?: string | null;
   sandboxRuntime: AgentSandboxRuntimeForTurn | null;
+  /** Sandbox run statistics of the skills a command runs (§17.5). */
+  skillRuns?: SkillRunObserver | null;
 }): BackendProtocolV2 {
   const {
     executeToolCallId,
     filesystemBackend,
     internalContextBackend = new StateBackend(),
     sandboxRuntime,
+    skillRuns,
   } = input;
   const defaultBackend = sandboxRuntime
-    ? new TurnScopedSandboxBackend(sandboxRuntime.backend, executeToolCallId)
+    ? new TurnScopedSandboxBackend(
+        sandboxRuntime.backend,
+        executeToolCallId,
+        skillRuns,
+      )
     : filesystemBackend.backend;
   const sandboxRoot = sandboxRuntime
     ? sandboxRuntime.pathPolicy.workspaceRoot ||
@@ -289,6 +300,7 @@ class TurnScopedSandboxBackend implements SandboxBackendProtocolV2 {
   constructor(
     private readonly backend: AgentSandboxRuntimeForTurn["backend"],
     private readonly fallbackToolCallId: string | null = null,
+    private readonly skillRuns: SkillRunObserver | null = null,
   ) {
     this.id = backend.id;
   }
@@ -363,11 +375,33 @@ class TurnScopedSandboxBackend implements SandboxBackendProtocolV2 {
     });
   }
 
-  execute(command: string) {
-    return this.backend.execute(command, {
+  async execute(command: string) {
+    const startedAt = Date.now();
+    const execution = this.backend.execute(command, {
       toolCallId: currentSourceWeftToolCallId() ?? this.fallbackToolCallId,
       signal: currentSourceWeftToolInvocationSignal(),
     });
+    if (!this.skillRuns) {
+      return execution;
+    }
+    // Observed after the fact and never awaited: the statistics cost the
+    // command nothing and cannot change its result.
+    try {
+      const result = await execution;
+      this.skillRuns.commandFinished({
+        command,
+        durationMs: Date.now() - startedAt,
+        finished: { result },
+      });
+      return result;
+    } catch (error) {
+      this.skillRuns.commandFinished({
+        command,
+        durationMs: Date.now() - startedAt,
+        finished: { error },
+      });
+      throw error;
+    }
   }
 }
 
@@ -758,6 +792,16 @@ export async function buildThreadAgentAssembly(
     executeToolCallId: sandboxExecuteToolCallIdFromResume(
       prepared.toolApprovalResume,
     ),
+    // Cloud sandboxes only: a bound PC stages skills under its own root,
+    // which commands never address as /skills.
+    skillRuns:
+      sandboxRuntime && !filesystemBackend.localFiles
+        ? createSkillRunObserver({
+            workspaceId: prepared.workspace.id,
+            stagedSkills: () =>
+              filesystemBackend.skillSandboxAssets.stagedSkills(),
+          })
+        : null,
   });
   const filesystemPermissions = filesystemPermissionsForMounts(
     promptFilesystemMounts,
