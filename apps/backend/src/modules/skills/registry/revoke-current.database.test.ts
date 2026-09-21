@@ -208,6 +208,38 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       }
     });
 
+    test("revoking the current version clears verified and says so in the audit trail", async () => {
+      const slug = newSlug();
+      const older = await upsert(input(slug, "a", { committedAt: OLDER }));
+      const newer = await upsert(input(slug, "b", { committedAt: NEWER }));
+      await data.db
+        .update(data.skillDefinitions)
+        .set({ verified: true })
+        .where(eq(data.skillDefinitions.id, newer.skillId));
+
+      await review.setRegistrySkillVersionStatus(
+        newer.skillVersionId,
+        "deprecated",
+        revoke,
+      );
+
+      expect((await state(newer.skillId)).definition.verified).toBe(false);
+      const events = await data.db
+        .select()
+        .from(data.skillMarketEvents)
+        .where(eq(data.skillMarketEvents.skillId, newer.skillId));
+      expect(events).toEqual([
+        expect.objectContaining({
+          actorKind: "system",
+          action: "verified.cleared",
+          detail: {
+            fromVersionId: newer.skillVersionId,
+            toVersionId: older.skillVersionId,
+          },
+        }),
+      ]);
+    });
+
     test("versions of equal commit date rank among themselves by created_at, newest first", async () => {
       const slug = newSlug();
       const first = await upsert(input(slug, "a", { committedAt: OLDER }));

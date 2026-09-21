@@ -1,6 +1,7 @@
 import { and, desc, eq, ne, sql } from "drizzle-orm";
 import { db, skillDefinitions, skillVersions } from "@sourceweft/db";
 import { ContentError } from "../../content/errors";
+import { recordSkillMarketEvent } from "../market/events";
 import { registryVersionTakesCurrent } from "./repository";
 
 /**
@@ -245,7 +246,10 @@ export async function setRegistrySkillVersionStatus(
       // Review order is not commit order: a draft can sit in the queue while a
       // newer commit of the same skill is indexed and goes live.
       const [current] = await tx
-        .select({ manifestJson: skillVersions.manifestJson })
+        .select({
+          id: skillVersions.id,
+          manifestJson: skillVersions.manifestJson,
+        })
         .from(skillVersions)
         .where(
           and(
@@ -288,6 +292,20 @@ export async function setRegistrySkillVersionStatus(
             updatedAt: now,
           })
           .where(eq(skillDefinitions.id, identity.skillId));
+        if (takesCurrent && definition.verified) {
+          await recordSkillMarketEvent(
+            {
+              skillId: identity.skillId,
+              actorKind: "system",
+              action: "verified.cleared",
+              detail: {
+                fromVersionId: current?.id ?? null,
+                toVersionId: skillVersionId,
+              },
+            },
+            tx,
+          );
+        }
       }
     }
     await tx
@@ -317,6 +335,20 @@ export async function setRegistrySkillVersionStatus(
           updatedAt: now,
         })
         .where(eq(skillDefinitions.id, identity.skillId));
+      if (definition.verified) {
+        await recordSkillMarketEvent(
+          {
+            skillId: identity.skillId,
+            actorKind: "system",
+            action: "verified.cleared",
+            detail: {
+              fromVersionId: skillVersionId,
+              toVersionId: successor.id,
+            },
+          },
+          tx,
+        );
+      }
     }
     return { skillVersionId, status: target };
   });
