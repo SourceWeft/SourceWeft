@@ -206,6 +206,9 @@ importers:
       '@sourceweft/model-gateway':
         specifier: workspace:*
         version: link:../../packages/model-gateway
+      '@sourceweft/skill-format':
+        specifier: workspace:*
+        version: link:../../packages/skill-format
       ai:
         specifier: ^6.0.253
         version: 6.0.253(zod@4.4.3)
@@ -662,6 +665,39 @@ importers:
       vitest:
         specifier: 4.1.11
         version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@22.20.1)(@vitest/coverage-v8@4.1.11)(jsdom@26.1.0)(msw@2.15.0(@types/node@22.20.1)(typescript@5.9.2))(vite@8.2.1(@types/node@22.20.1)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.48.0)(tsx@4.23.12)(yaml@2.9.0))
+
+  cli:
+    devDependencies:
+      '@sourceweft/eslint-config':
+        specifier: workspace:*
+        version: link:../packages/eslint-config
+      '@sourceweft/market-contracts':
+        specifier: workspace:*
+        version: link:../packages/market-contracts
+      '@sourceweft/skill-format':
+        specifier: workspace:*
+        version: link:../packages/skill-format
+      '@types/node':
+        specifier: ^22.20.1
+        version: 22.20.1
+      eslint:
+        specifier: ^9.39.5
+        version: 9.39.5(jiti@2.7.0)
+      fflate:
+        specifier: ^0.8.3
+        version: 0.8.3
+      tsup:
+        specifier: ^8.5.1
+        version: 8.5.1(@swc/core@1.16.2(@swc/helpers@0.5.23))(jiti@2.7.0)(postcss@8.5.26)(tsx@4.23.12)(typescript@5.9.2)(yaml@2.9.0)
+      tsx:
+        specifier: ^4.23.12
+        version: 4.23.12
+      typescript:
+        specifier: 5.9.2
+        version: 5.9.2
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
 
   enterprise/billing:
     dependencies:
@@ -1594,6 +1630,22 @@ importers:
       '@sourceweft/market-contracts':
         specifier: workspace:*
         version: link:../market-contracts
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.1
+        version: 22.20.1
+      tsx:
+        specifier: ^4.23.12
+        version: 4.23.12
+      typescript:
+        specifier: 5.9.2
+        version: 5.9.2
+
+  packages/skill-format:
+    dependencies:
+      fflate:
+        specifier: ^0.8.3
+        version: 0.8.3
     devDependencies:
       '@types/node':
         specifier: ^22.20.1

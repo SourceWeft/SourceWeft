@@ -480,7 +480,9 @@ function SourcesHubSkeletonContent({
         className ??
           (variant === "drawer"
             ? "flex w-full min-w-0"
-            : "hidden w-[410px] border-l md:flex"),
+            : // Mirrors resolveWorkspaceLayout: the hub docks only in the wide
+              // layout; narrower windows open it as a drawer instead.
+              "hidden w-[360px] border-l min-[1440px]:flex"),
       )}
     >
       <div className="min-w-0 shrink-0 border-b px-3 py-3">

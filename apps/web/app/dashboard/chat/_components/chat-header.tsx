@@ -242,7 +242,7 @@ export function ChatHeader({
         ) : null}
         <HeaderModelSelector
           {...models}
-          compact
+          compact={width < 1000}
           iconOnly={width < 640}
           isLoading={isModelCatalogLoading}
         />

@@ -3,11 +3,14 @@
 import { SkillAvatar } from "./skill-avatar";
 
 import * as React from "react";
+import { usePathname, useSearchParams } from "next/navigation";
 import {
   AlertTriangle,
+  BadgeCheck,
   Check,
   ChevronDown,
   ChevronRight,
+  Download,
   ExternalLink,
   FileText,
   ListFilter,
@@ -15,10 +18,13 @@ import {
   PanelsTopLeft,
   Scale,
   Search,
+  Sparkles,
+  SquareTerminal,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
+import type { SkillCatalogCategory } from "@sourceweft/contracts";
 import { Badge } from "@sourceweft/ui-web/components/ui/badge";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import {
@@ -40,6 +46,27 @@ import { useDashboardChatState } from "../../_components/dashboard-chat-state";
 import { SkillIcon } from "../../../_components/site-icons";
 import { SkillDetailDialog } from "./skill-detail-dialog";
 import { MySubmissions, useSkillSubmissions } from "./skill-submissions";
+import {
+  defaultSkillsBrowseState,
+  excludesBoundedSkills,
+  firstSkillCategoryName,
+  formatInstallCount,
+  hasActiveSkillFilters,
+  isInvalidCursorError,
+  mergeSkillPages,
+  parseSkillsBrowseState,
+  partitionSkills,
+  skillCapabilityValues,
+  skillInstalledValues,
+  skillsBrowseSearch,
+  skillsCatalogRequest,
+  skillSortValues,
+  skillTrustValues,
+  SKILLS_QUERY_MAX_LENGTH,
+  visibleSkillCategories,
+  type SkillsBrowseState,
+} from "./skills-market-browse";
+import { skillsMarketCopy } from "./skills-market-copy";
 import { SubmitSkillDialog } from "./submit-skill-dialog";
 
 type SkillsCatalogResponse = Awaited<
@@ -47,130 +74,50 @@ type SkillsCatalogResponse = Awaited<
 >;
 type SkillCatalogItem = SkillsCatalogResponse["items"][number];
 
-const catalogRequestsByWorkspace = new Map<
-  string,
-  Promise<SkillsCatalogResponse>
->();
-
 type ResolvedWorkspace = {
   id: string;
   name: string;
 };
 
-// The gallery filters, counts and sorts on the client, so it needs the whole
-// catalog rather than a window of it: follow `nextCursor` to the end. Pages
-// after the first carry community skills only.
-const CATALOG_PAGE_SIZE = 100;
-
-async function fetchAllCatalogPages(
-  targetWorkspaceId: string,
-): Promise<SkillsCatalogResponse> {
-  const items: SkillCatalogItem[] = [];
-  const seenCursors = new Set<string>();
-  let cursor: string | undefined;
-  do {
-    const page = await contentClient.listSkillsCatalog(targetWorkspaceId, {
-      limit: CATALOG_PAGE_SIZE,
-      cursor,
-    });
-    items.push(...page.items);
-    cursor = page.nextCursor ?? undefined;
-    // A cursor handed out twice would loop forever; stop with what we have.
-    if (cursor && seenCursors.has(cursor)) break;
-    if (cursor) seenCursors.add(cursor);
-  } while (cursor);
-  return { items, nextCursor: null };
-}
-
-function fetchSkillsCatalog(targetWorkspaceId: string) {
-  const pending = catalogRequestsByWorkspace.get(targetWorkspaceId);
-  if (pending) {
-    return pending;
-  }
-
-  const promise = fetchAllCatalogPages(targetWorkspaceId)
-    .finally(() => {
-      if (catalogRequestsByWorkspace.get(targetWorkspaceId) === promise) {
-        catalogRequestsByWorkspace.delete(targetWorkspaceId);
-      }
-    });
-
-  catalogRequestsByWorkspace.set(targetWorkspaceId, promise);
-  return promise;
-}
-
-type CategoryKey =
-  "all" | "learn" | "research" | "write" | "review" | "operate";
-type StatusFilter = "all" | "installed" | "not_installed";
-type PublisherFilter = "all" | "official" | "community" | "not_official";
-type SortKey =
-  "recommended" | "name_asc" | "installed_first" | "official_first";
 type CatalogStatus =
   "resolving_workspace" | "loading_catalog" | "ready" | "error";
 
-// Labels for these taxonomies come from the `dashboardSkills.gallery.*`
-// catalog, keyed by the stable enum value below.
-const categories: Array<{ key: CategoryKey }> = [
-  { key: "all" },
-  { key: "learn" },
-  { key: "research" },
-  { key: "write" },
-  { key: "review" },
-  { key: "operate" },
-];
+const copy = skillsMarketCopy;
+const QUERY_DEBOUNCE_MS = 300;
 
-const publisherOptions: Array<{ key: PublisherFilter }> = [
-  { key: "all" },
-  { key: "official" },
-  { key: "community" },
-  { key: "not_official" },
-];
+const trustOptions = skillTrustValues.map((key) => ({
+  key,
+  label: copy.trustOptions[key],
+}));
+const capabilityOptions = skillCapabilityValues.map((key) => ({
+  key,
+  label: copy.capabilityOptions[key],
+}));
+const installedOptions = skillInstalledValues.map((key) => ({
+  key,
+  label: copy.installedOptions[key],
+}));
+const sortOptions = skillSortValues.map((key) => ({
+  key,
+  label: copy.sortOptions[key],
+}));
 
-const statusOptions: Array<{ key: StatusFilter }> = [
-  { key: "all" },
-  { key: "installed" },
-  { key: "not_installed" },
-];
-
-const sortOptions: Array<{ key: SortKey }> = [
-  { key: "recommended" },
-  { key: "name_asc" },
-  { key: "installed_first" },
-  { key: "official_first" },
-];
-
-function isUnverifiedRegistrySkill(item: SkillCatalogItem) {
-  return item.sourceType === "registry_github" && !item.verified;
+function publisherLabel(
+  sourceType: SkillCatalogItem["sourceType"],
+  t: ReturnType<typeof useTranslations>,
+) {
+  if (sourceType === "builtin") return t("publisher.official");
+  if (sourceType === "team_custom") return t("publisher.team");
+  if (sourceType === "registry_github") return t("publisher.community");
+  return t("publisher.workspace");
 }
 
-function categoryForSkill(item: SkillCatalogItem): CategoryKey {
-  const category = item.categories.find((entry): entry is CategoryKey =>
-    categories.some((candidate) => candidate.key === entry),
+// A featured publisher's skill is not flagged as unverified: who publishes it
+// already ranks it above verified ones, and the caution would contradict that.
+function isUnverifiedRegistrySkill(item: SkillCatalogItem) {
+  return (
+    item.sourceType === "registry_github" && !item.verified && !item.featured
   );
-  if (category) return category;
-
-  const text =
-    `${item.name} ${item.displayName} ${item.description}`.toLowerCase();
-  if (
-    text.includes("review") ||
-    text.includes("legal") ||
-    text.includes("proposal")
-  )
-    return "review";
-  if (
-    text.includes("summary") ||
-    text.includes("meeting") ||
-    text.includes("action")
-  )
-    return "operate";
-  if (
-    text.includes("research") ||
-    text.includes("source") ||
-    text.includes("evidence")
-  )
-    return "research";
-  if (text.includes("write") || text.includes("draft")) return "write";
-  return "learn";
 }
 
 function SortMenu<T extends string>({
@@ -431,39 +378,28 @@ function FacetChoice({
 }
 
 function SkillsFilterPanel({
-  category,
-  categoryCounts,
-  installedCount,
-  onCategoryChange,
+  categories,
+  onChange,
   onClear,
-  onQueryChange,
-  onPublisherFilterChange,
-  onStatusFilterChange,
-  query,
-  publisherFilter,
-  statusFilter,
-  totalCount,
+  onQueryInputChange,
+  queryInput,
+  state,
   placement = "desktop",
 }: {
-  category: CategoryKey;
-  categoryCounts: Record<CategoryKey, number>;
-  installedCount: number;
-  onCategoryChange: (value: CategoryKey) => void;
+  categories: SkillCatalogCategory[];
+  onChange: (patch: Partial<SkillsBrowseState>) => void;
   onClear: () => void;
-  onQueryChange: (value: string) => void;
-  onPublisherFilterChange: (value: PublisherFilter) => void;
-  onStatusFilterChange: (value: StatusFilter) => void;
-  query: string;
-  publisherFilter: PublisherFilter;
-  statusFilter: StatusFilter;
-  totalCount: number;
+  onQueryInputChange: (value: string) => void;
+  queryInput: string;
+  state: SkillsBrowseState;
   placement?: "desktop" | "drawer";
 }) {
-  const t = useTranslations("dashboardSkills");
-  const notInstalledCount = Math.max(totalCount - installedCount, 0);
-  const categorySummary = t(`gallery.categories.${category}`);
-  const publisherSummary = t(`gallery.publishers.${publisherFilter}`);
-  const statusSummary = t(`gallery.statuses.${statusFilter}`);
+  const offeredCategories = visibleSkillCategories(categories, state.category);
+  const categorySummary =
+    state.category === "all"
+      ? copy.gallery.categoryAll
+      : (categories.find((item) => item.slug === state.category)?.name ??
+        state.category);
 
   return (
     <aside
@@ -477,83 +413,105 @@ function SkillsFilterPanel({
       <div className="border-b border-border px-3 py-2">
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-sm font-semibold text-foreground">
-            {t("gallery.filters")}
+            {copy.gallery.filtersTitle}
           </h2>
           <button
             className="text-[11px] text-muted-foreground hover:text-foreground"
             onClick={onClear}
             type="button"
           >
-            {t("gallery.clearAll")}
+            {copy.gallery.clearAll}
           </button>
         </div>
       </div>
       <ScrollArea className="min-h-0 flex-1">
         <FilterFacet
           defaultOpen
-          label={t("gallery.facets.search")}
-          summary={query.trim() ? query.trim() : t("gallery.summaryAll")}
+          label={copy.gallery.searchLabel}
+          summary={queryInput.trim() || copy.gallery.searchSummaryAll}
         >
           <div className="relative">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               className="h-7 pl-8 text-xs"
-              onChange={(event) => onQueryChange(event.target.value)}
-              placeholder={t("gallery.searchPlaceholder")}
-              value={query}
+              maxLength={SKILLS_QUERY_MAX_LENGTH}
+              onChange={(event) => onQueryInputChange(event.target.value)}
+              placeholder={copy.gallery.searchPlaceholder}
+              value={queryInput}
             />
           </div>
         </FilterFacet>
 
         <FilterFacet
           defaultOpen
-          label={t("gallery.facets.category")}
+          label={copy.gallery.categoryLabel}
           summary={categorySummary}
         >
           <div className="space-y-1">
-            {categories.map((item) => (
+            <FacetChoice
+              active={state.category === "all"}
+              label={copy.gallery.categoryAll}
+              onClick={() => onChange({ category: "all" })}
+            />
+            {offeredCategories.map((item) => (
               <FacetChoice
-                active={category === item.key}
-                count={categoryCounts[item.key] ?? 0}
-                key={item.key}
-                label={t(`gallery.categories.${item.key}`)}
-                onClick={() => onCategoryChange(item.key)}
+                active={state.category === item.slug}
+                count={item.count}
+                key={item.slug}
+                label={item.name}
+                onClick={() =>
+                  onChange({
+                    category: state.category === item.slug ? "all" : item.slug,
+                  })
+                }
               />
             ))}
           </div>
         </FilterFacet>
 
         <FilterFacet
-          label={t("gallery.facets.publisher")}
-          summary={publisherSummary}
+          label={copy.gallery.trustLabel}
+          summary={copy.trustOptions[state.trust]}
         >
           <div className="space-y-1">
-            {publisherOptions.map((item) => (
+            {trustOptions.map((item) => (
               <FacetChoice
-                active={publisherFilter === item.key}
+                active={state.trust === item.key}
                 key={item.key}
-                label={t(`gallery.publishers.${item.key}`)}
-                onClick={() => onPublisherFilterChange(item.key)}
+                label={item.label}
+                onClick={() => onChange({ trust: item.key })}
               />
             ))}
           </div>
         </FilterFacet>
 
-        <FilterFacet label={t("gallery.facets.status")} summary={statusSummary}>
+        <FilterFacet
+          label={copy.gallery.capabilityLabel}
+          summary={copy.capabilityOptions[state.capability]}
+        >
           <div className="space-y-1">
-            {statusOptions.map((item) => (
+            {capabilityOptions.map((item) => (
               <FacetChoice
-                active={statusFilter === item.key}
-                count={
-                  item.key === "installed"
-                    ? installedCount
-                    : item.key === "not_installed"
-                      ? notInstalledCount
-                      : totalCount
-                }
+                active={state.capability === item.key}
                 key={item.key}
-                label={t(`gallery.statuses.${item.key}`)}
-                onClick={() => onStatusFilterChange(item.key)}
+                label={item.label}
+                onClick={() => onChange({ capability: item.key })}
+              />
+            ))}
+          </div>
+        </FilterFacet>
+
+        <FilterFacet
+          label={copy.gallery.installedLabel}
+          summary={copy.installedOptions[state.installed]}
+        >
+          <div className="space-y-1">
+            {installedOptions.map((item) => (
+              <FacetChoice
+                active={state.installed === item.key}
+                key={item.key}
+                label={item.label}
+                onClick={() => onChange({ installed: item.key })}
               />
             ))}
           </div>
@@ -564,6 +522,7 @@ function SkillsFilterPanel({
 }
 
 function SkillCard({
+  categories,
   item,
   onOpenDetails,
   pending,
@@ -571,6 +530,7 @@ function SkillCard({
   onUninstall,
   variant = "page",
 }: {
+  categories: SkillCatalogCategory[];
   item: SkillCatalogItem;
   onOpenDetails: (item: SkillCatalogItem) => void;
   pending: boolean;
@@ -579,12 +539,6 @@ function SkillCard({
   variant?: "page" | "modal";
 }) {
   const t = useTranslations("dashboardSkills");
-  const publisherLabelFor = (sourceType: SkillCatalogItem["sourceType"]) => {
-    if (sourceType === "builtin") return t("publisher.official");
-    if (sourceType === "team_custom") return t("publisher.team");
-    if (sourceType === "registry_github") return t("publisher.community");
-    return t("publisher.workspace");
-  };
   const compact = variant === "modal";
   const installed =
     item.sourceType === "registry_github"
@@ -595,6 +549,14 @@ function SkillCard({
     (item.sourceType === "registry_github" && installed);
   const isRegistry = item.sourceType === "registry_github";
   const unverified = isUnverifiedRegistrySkill(item);
+  const categoryName = firstSkillCategoryName(item, categories);
+  const installCount = formatInstallCount(item.installCount);
+  const installCountLabel =
+    item.installCount === 1
+      ? copy.card.installsOne
+      : installCount
+        ? copy.card.installs(installCount)
+        : null;
 
   return (
     <article
@@ -631,16 +593,31 @@ function SkillCard({
           {item.description}
         </p>
 
-        <div className="mt-3 flex flex-wrap gap-1.5">
+        <div className="mt-3 flex flex-wrap items-center gap-1.5">
           <Badge className="h-5 px-1.5 text-[10px]" variant="outline">
-            {publisherLabelFor(item.sourceType)}
+            {publisherLabel(item.sourceType, t)}
           </Badge>
-          <Badge
-            className="h-5 px-1.5 text-[10px] capitalize"
-            variant="outline"
-          >
-            {t(`gallery.categories.${categoryForSkill(item)}`)}
-          </Badge>
+          {isRegistry && item.featured ? (
+            <Badge
+              className="h-5 gap-1 px-1.5 text-[10px]"
+              title={copy.card.featuredTitle}
+              variant="outline"
+            >
+              <Sparkles className="h-2.5 w-2.5 text-amber-500 dark:text-amber-300" />
+              {copy.card.featured}
+            </Badge>
+          ) : null}
+          {isRegistry && item.verified ? (
+            <Badge className="h-5 gap-1 px-1.5 text-[10px]" variant="secondary">
+              <BadgeCheck className="h-2.5 w-2.5" />
+              {copy.card.verified}
+            </Badge>
+          ) : null}
+          {categoryName ? (
+            <Badge className="h-5 px-1.5 text-[10px]" variant="outline">
+              {categoryName}
+            </Badge>
+          ) : null}
           {item.flagged ? (
             <Badge
               className="h-5 gap-1 border-amber-500/30 px-1.5 text-[10px] text-amber-700 dark:text-amber-300"
@@ -658,6 +635,15 @@ function SkillCard({
               {t("status.unverified")}
             </Badge>
           ) : null}
+          {item.capability === "executable" ? (
+            <Badge
+              className="h-5 gap-1 px-1.5 text-[10px] text-muted-foreground"
+              variant="outline"
+            >
+              <SquareTerminal className="h-2.5 w-2.5" />
+              {copy.card.includesScripts}
+            </Badge>
+          ) : null}
           {item.license ? (
             <Badge
               className="h-5 gap-1 px-1.5 text-[10px] text-muted-foreground"
@@ -666,6 +652,16 @@ function SkillCard({
               <Scale className="h-2.5 w-2.5" />
               {item.license}
             </Badge>
+          ) : null}
+          {installCount && installCountLabel ? (
+            <span
+              aria-label={installCountLabel}
+              className="inline-flex h-5 items-center gap-1 px-0.5 text-[10px] text-muted-foreground"
+              title={installCountLabel}
+            >
+              <Download className="h-2.5 w-2.5" />
+              {installCount}
+            </span>
           ) : null}
         </div>
       </button>
@@ -733,20 +729,132 @@ function SkillCard({
   );
 }
 
-export function SkillsGallery({
-  className,
-  lockWorkspace = false,
-  onCatalogChange,
-  variant = "page",
-  workspaceId,
-  workspaceName,
+/**
+ * Asks for the next page as the reader nears the end of the grid. The probe is
+ * a tall invisible strip ending at the grid's bottom edge, so it intersects
+ * well before the end is on screen — a `rootMargin` would not help here, since
+ * the gallery scrolls inside its own scroll area, not the viewport. `watchKey`
+ * re-arms the observer after each page: if the strip is still in view once a
+ * page lands, no new intersection event would fire on its own.
+ */
+function LoadMoreSentinel({
+  onVisible,
+  watchKey,
 }: {
+  onVisible: () => void;
+  watchKey: string;
+}) {
+  const probeRef = React.useRef<HTMLDivElement | null>(null);
+  const onVisibleRef = React.useRef(onVisible);
+  React.useEffect(() => {
+    onVisibleRef.current = onVisible;
+  }, [onVisible]);
+
+  React.useEffect(() => {
+    const probe = probeRef.current;
+    if (!probe || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        onVisibleRef.current();
+      }
+    });
+    observer.observe(probe);
+    return () => observer.disconnect();
+  }, [watchKey]);
+
+  return (
+    <div className="relative h-px w-full">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute bottom-0 left-0 h-[800px] w-px"
+        ref={probeRef}
+      />
+    </div>
+  );
+}
+
+type SkillsGalleryProps = {
   className?: string;
   lockWorkspace?: boolean;
   onCatalogChange?: () => void | Promise<void>;
   variant?: "page" | "modal";
   workspaceId?: string | null;
   workspaceName?: string | null;
+};
+
+/**
+ * On its own page the gallery keeps its filters, sort and search in the URL,
+ * so a view can be linked and survives a reload. Inside the chat's modal it
+ * must not write to the chat's URL, so the same state lives in memory.
+ */
+export function SkillsGallery(props: SkillsGalleryProps) {
+  return props.variant === "modal" ? (
+    <MemoryStateSkillsGallery {...props} />
+  ) : (
+    <UrlStateSkillsGallery {...props} />
+  );
+}
+
+function MemoryStateSkillsGallery(props: SkillsGalleryProps) {
+  const [browseState, setBrowseState] = React.useState<SkillsBrowseState>(
+    defaultSkillsBrowseState,
+  );
+  return (
+    <SkillsGalleryView
+      {...props}
+      browseState={browseState}
+      onBrowseStateChange={setBrowseState}
+    />
+  );
+}
+
+function UrlStateSkillsGallery(props: SkillsGalleryProps) {
+  const pathname = usePathname();
+  const search = useSearchParams().toString();
+  const browseState = React.useMemo(
+    () => parseSkillsBrowseState(new URLSearchParams(search)),
+    [search],
+  );
+  const setBrowseState = React.useCallback(
+    (next: SkillsBrowseState) => {
+      // Read the live URL, not the render's: two changes can land between
+      // renders, and params this gallery does not own must survive.
+      const nextSearch = skillsBrowseSearch(
+        next,
+        new URLSearchParams(window.location.search),
+      );
+      // Filters replace the entry instead of pushing one — Back should leave
+      // the gallery, not replay every keystroke. Next keeps `useSearchParams`
+      // in sync with native history calls.
+      window.history.replaceState(
+        null,
+        "",
+        nextSearch ? `${pathname}?${nextSearch}` : pathname,
+      );
+    },
+    [pathname],
+  );
+  return (
+    <SkillsGalleryView
+      {...props}
+      browseState={browseState}
+      onBrowseStateChange={setBrowseState}
+    />
+  );
+}
+
+function SkillsGalleryView({
+  browseState,
+  className,
+  lockWorkspace = false,
+  onBrowseStateChange,
+  onCatalogChange,
+  variant = "page",
+  workspaceId,
+  workspaceName,
+}: SkillsGalleryProps & {
+  browseState: SkillsBrowseState;
+  onBrowseStateChange: (next: SkillsBrowseState) => void;
 }) {
   const t = useTranslations("dashboardSkills");
   const dashboardState = useDashboardChatState();
@@ -754,18 +862,22 @@ export function SkillsGallery({
     null,
   );
   const [items, setItems] = React.useState<SkillCatalogItem[]>([]);
-  const [registryResults, setRegistryResults] = React.useState<
-    SkillCatalogItem[]
-  >([]);
+  const [nextCursor, setNextCursor] = React.useState<string | null>(null);
+  // How many community skills the filters match in all, from the first page.
+  const [registryTotal, setRegistryTotal] = React.useState<number | null>(
+    null,
+  );
+  const [isLoadingMore, setIsLoadingMore] = React.useState(false);
+  // Set by a failed page load so the sentinel does not hammer a failing
+  // endpoint; the "Load more" button stays as the retry.
+  const [loadMoreFailed, setLoadMoreFailed] = React.useState(false);
+  const [categories, setCategories] = React.useState<SkillCatalogCategory[]>(
+    [],
+  );
   const [pendingCatalogId, setPendingCatalogId] = React.useState<string | null>(
     null,
   );
-  const [query, setQuery] = React.useState("");
-  const [category, setCategory] = React.useState<CategoryKey>("all");
-  const [statusFilter, setStatusFilter] = React.useState<StatusFilter>("all");
-  const [publisherFilter, setPublisherFilter] =
-    React.useState<PublisherFilter>("all");
-  const [sort, setSort] = React.useState<SortKey>("recommended");
+  const [queryInput, setQueryInput] = React.useState(browseState.query);
   const [catalogStatus, setCatalogStatus] = React.useState<CatalogStatus>(
     "resolving_workspace",
   );
@@ -775,12 +887,45 @@ export function SkillsGallery({
     string | null
   >(null);
   const workspaceIdRef = React.useRef<string | null>(null);
-  const loadedCatalogWorkspaceIdRef = React.useRef<string | null>(null);
+  // Bumped whenever the result set changes identity (workspace, filters, sort,
+  // query, reload). A response is applied only if its generation is still the
+  // current one, so a slow answer to an old question can never overwrite the
+  // answer to the new one.
   const catalogGenerationRef = React.useRef(0);
+  const loadingMoreGenerationRef = React.useRef<number | null>(null);
+  const committedQueryRef = React.useRef(browseState.query);
 
   React.useEffect(() => {
     workspaceIdRef.current = workspace?.id ?? null;
   }, [workspace?.id]);
+
+  const changeBrowseState = React.useCallback(
+    (patch: Partial<SkillsBrowseState>) => {
+      onBrowseStateChange({ ...browseState, ...patch });
+    },
+    [browseState, onBrowseStateChange],
+  );
+
+  // Search: the input is local and immediate; the query that drives requests
+  // (and the URL) follows it after a pause in typing.
+  React.useEffect(() => {
+    const nextQuery = queryInput.trim().slice(0, SKILLS_QUERY_MAX_LENGTH);
+    if (nextQuery === browseState.query) return;
+    const handle = window.setTimeout(() => {
+      committedQueryRef.current = nextQuery;
+      changeBrowseState({ query: nextQuery });
+    }, QUERY_DEBOUNCE_MS);
+    return () => window.clearTimeout(handle);
+  }, [browseState.query, changeBrowseState, queryInput]);
+
+  // A query that arrived from outside the input (a pasted link, "Clear all")
+  // is shown in it. One this input committed is not written back, or it would
+  // clobber whatever was typed since.
+  React.useEffect(() => {
+    if (committedQueryRef.current === browseState.query) return;
+    committedQueryRef.current = browseState.query;
+    setQueryInput(browseState.query);
+  }, [browseState.query]);
 
   const resolveWorkspace = React.useCallback(async () => {
     if (
@@ -833,191 +978,176 @@ export function SkillsGallery({
     workspaceName,
   ]);
 
-  const loadCatalog = React.useCallback(async () => {
-    const generation = ++catalogGenerationRef.current;
-    const currentCatalogWorkspaceId = workspaceIdRef.current;
-    const hasCurrentCatalog =
-      Boolean(currentCatalogWorkspaceId) &&
-      loadedCatalogWorkspaceIdRef.current === currentCatalogWorkspaceId;
-
-    setError(null);
-    if (!hasCurrentCatalog) {
-      setCatalogStatus("resolving_workspace");
-    }
-
-    try {
-      const resolved = await resolveWorkspace();
-      if (catalogGenerationRef.current !== generation) {
-        return;
-      }
-
-      if (resolved === undefined) {
-        setCatalogStatus("resolving_workspace");
-        return;
-      }
-
-      setWorkspace(resolved);
-      if (!resolved) {
-        setItems([]);
-        loadedCatalogWorkspaceIdRef.current = null;
-        setCatalogStatus("ready");
-        return;
-      }
-
-      const hasResolvedCatalog =
-        loadedCatalogWorkspaceIdRef.current === resolved.id;
-      if (hasResolvedCatalog) {
-        setCatalogStatus("ready");
-        return;
-      }
-
-      setItems([]);
-
-      setCatalogStatus("loading_catalog");
-      const result = await fetchSkillsCatalog(resolved.id);
-      if (catalogGenerationRef.current !== generation) {
-        return;
-      }
-      loadedCatalogWorkspaceIdRef.current = resolved.id;
-      setItems(result.items);
-      setCatalogStatus("ready");
-    } catch (loadError) {
-      if (catalogGenerationRef.current !== generation) {
-        return;
-      }
-      setItems([]);
-      loadedCatalogWorkspaceIdRef.current = null;
-      setCatalogStatus("error");
-      setError(
-        loadError instanceof Error
-          ? loadError.message
-          : t("gallery.error.loadFailed"),
-      );
-    }
-  }, [resolveWorkspace, t]);
-
   React.useEffect(() => {
-    void loadCatalog();
-  }, [loadCatalog]);
-
-  // Registry relevance search (skill-registry-index.md §4). The base catalog
-  // already lists registry entries the caller can see, so this is purely
-  // additive: a query surfaces the backend's relevance-ranked matches (and any
-  // it ranks in that a plain substring filter would miss). Debounced; failures
-  // are non-fatal and fall back to local filtering. `q` < 2 chars is a no-op.
-  const activeWorkspaceId = workspace?.id ?? null;
-  React.useEffect(() => {
-    const q = query.trim();
-    if (!activeWorkspaceId || q.length < 2) {
-      setRegistryResults([]);
-      return;
-    }
     let cancelled = false;
-    const handle = setTimeout(() => {
-      void contentClient
-        .searchSkillRegistry(activeWorkspaceId, q)
-        .then((result) => {
-          if (!cancelled) setRegistryResults(result.items);
-        })
-        .catch(() => {
-          if (!cancelled) setRegistryResults([]);
-        });
-    }, 250);
+    void (async () => {
+      try {
+        const resolved = await resolveWorkspace();
+        if (cancelled) return;
+        if (resolved === undefined) {
+          setCatalogStatus("resolving_workspace");
+          return;
+        }
+        setWorkspace((current) =>
+          current?.id === resolved?.id && current?.name === resolved?.name
+            ? current
+            : resolved,
+        );
+        if (!resolved) {
+          catalogGenerationRef.current += 1;
+          setItems([]);
+          setNextCursor(null);
+          setError(null);
+          setCatalogStatus("ready");
+        }
+      } catch (resolveError) {
+        if (cancelled) return;
+        setItems([]);
+        setNextCursor(null);
+        setCatalogStatus("error");
+        setError(
+          resolveError instanceof Error
+            ? resolveError.message
+            : copy.gallery.loadFailed,
+        );
+      }
+    })();
     return () => {
       cancelled = true;
-      clearTimeout(handle);
     };
-  }, [activeWorkspaceId, query]);
+  }, [resolveWorkspace]);
 
-  // Show every catalog item, including always-on built-ins (installable === false).
-  // The server already omits hidden built-ins, so no client-side listing filter is
-  // needed; non-installable items render as "Built-in" cards below. Registry
-  // search hits not already in the catalog are merged in (deduped by catalogId).
-  const galleryItems = React.useMemo(() => {
-    if (registryResults.length === 0) return items;
-    const seen = new Set(items.map((item) => item.catalogId));
-    const extras = registryResults.filter((item) => !seen.has(item.catalogId));
-    return extras.length === 0 ? items : [...items, ...extras];
-  }, [items, registryResults]);
-
-  const registryHitIds = React.useMemo(
-    () => new Set(registryResults.map((item) => item.catalogId)),
-    [registryResults],
-  );
-
-  const installedCount = React.useMemo(
-    () => galleryItems.filter((item) => item.enabled).length,
-    [galleryItems],
-  );
-
-  const categoryCounts = React.useMemo(() => {
-    const counts = categories.reduce(
-      (record, item) => ({ ...record, [item.key]: 0 }),
-      {} as Record<CategoryKey, number>,
-    );
-    counts.all = galleryItems.length;
-    for (const item of galleryItems) {
-      counts[categoryForSkill(item)] += 1;
-    }
-    return counts;
-  }, [galleryItems]);
-
-  const filteredItems = React.useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const filtered = galleryItems.filter((item) => {
-      if (category !== "all" && categoryForSkill(item) !== category)
-        return false;
-      if (statusFilter === "installed" && !item.enabled) return false;
-      if (statusFilter === "not_installed" && item.enabled) return false;
-      if (publisherFilter === "official" && item.sourceType !== "builtin")
-        return false;
-      if (
-        publisherFilter === "community" &&
-        item.sourceType !== "registry_github"
-      )
-        return false;
-      if (publisherFilter === "not_official" && item.sourceType === "builtin")
-        return false;
-      if (!q) return true;
-      // Registry search hits are already relevance-matched server-side (BM25 over
-      // name/description/tags), so honor them even if the query isn't a literal
-      // substring of the displayed text.
-      if (registryHitIds.has(item.catalogId)) return true;
-      return (
-        item.displayName.toLowerCase().includes(q) ||
-        item.name.toLowerCase().includes(q) ||
-        item.description.toLowerCase().includes(q)
-      );
-    });
-
-    return filtered.sort((a, b) => {
-      if (sort === "name_asc")
-        return a.displayName.localeCompare(b.displayName);
-      if (sort === "installed_first")
-        return Number(b.enabled) - Number(a.enabled);
-      if (sort === "official_first")
-        return (
-          Number(b.sourceType === "builtin") -
-          Number(a.sourceType === "builtin")
+  // Page one of a result set. `soft` keeps what is on screen until the answer
+  // lands (a refresh of the same view); otherwise the grid resets to skeletons.
+  const loadFirstPage = React.useCallback(
+    async (
+      targetWorkspaceId: string,
+      state: SkillsBrowseState,
+      soft: boolean,
+    ) => {
+      const generation = ++catalogGenerationRef.current;
+      loadingMoreGenerationRef.current = null;
+      setIsLoadingMore(false);
+      setLoadMoreFailed(false);
+      if (!soft) {
+        setItems([]);
+        setNextCursor(null);
+        setRegistryTotal(null);
+        setError(null);
+        setCatalogStatus("loading_catalog");
+      }
+      try {
+        const page = await contentClient.listSkillsCatalog(
+          targetWorkspaceId,
+          skillsCatalogRequest(state),
         );
-      return 0;
-    });
-  }, [
-    category,
-    galleryItems,
-    publisherFilter,
-    query,
-    registryHitIds,
-    sort,
-    statusFilter,
-  ]);
+        if (catalogGenerationRef.current !== generation) return;
+        setItems(page.items);
+        setNextCursor(page.nextCursor ?? null);
+        setRegistryTotal(page.registryTotal ?? null);
+        setError(null);
+        setCatalogStatus("ready");
+      } catch (loadError) {
+        if (catalogGenerationRef.current !== generation) return;
+        // A failed refresh leaves the loaded view in place.
+        if (soft) return;
+        setItems([]);
+        setNextCursor(null);
+        setCatalogStatus("error");
+        setError(
+          loadError instanceof Error
+            ? loadError.message
+            : copy.gallery.loadFailed,
+        );
+      }
+    },
+    [],
+  );
+
+  const activeWorkspaceId = workspace?.id ?? null;
+
+  // Any change to workspace, filters, sort or query starts over from page one:
+  // a cursor is only good for the exact request that produced it.
+  React.useEffect(() => {
+    if (!activeWorkspaceId) return;
+    void loadFirstPage(activeWorkspaceId, browseState, false);
+    return () => {
+      catalogGenerationRef.current += 1;
+    };
+  }, [activeWorkspaceId, browseState, loadFirstPage]);
+
+  const loadCategories = React.useCallback(
+    async (targetWorkspaceId: string) => {
+      try {
+        const result =
+          await contentClient.listSkillCatalogCategories(targetWorkspaceId);
+        if (workspaceIdRef.current === targetWorkspaceId) {
+          setCategories(result.items);
+        }
+      } catch {
+        // The category facet is an aid, not a gate: without it the gallery
+        // still lists, searches and sorts.
+        if (workspaceIdRef.current === targetWorkspaceId) setCategories([]);
+      }
+    },
+    [],
+  );
+
+  React.useEffect(() => {
+    if (!activeWorkspaceId) {
+      setCategories([]);
+      return;
+    }
+    void loadCategories(activeWorkspaceId);
+  }, [activeWorkspaceId, loadCategories]);
+
+  const loadMore = React.useCallback(async () => {
+    if (!activeWorkspaceId || !nextCursor) return;
+    const generation = catalogGenerationRef.current;
+    if (loadingMoreGenerationRef.current === generation) return;
+    loadingMoreGenerationRef.current = generation;
+    setIsLoadingMore(true);
+    try {
+      const page = await contentClient.listSkillsCatalog(
+        activeWorkspaceId,
+        skillsCatalogRequest(browseState, nextCursor),
+      );
+      if (catalogGenerationRef.current !== generation) return;
+      setItems((current) => mergeSkillPages(current, page.items));
+      // A cursor handed out twice would loop forever; stop with what we have.
+      setNextCursor(
+        page.nextCursor && page.nextCursor !== nextCursor
+          ? page.nextCursor
+          : null,
+      );
+    } catch (loadError) {
+      if (catalogGenerationRef.current !== generation) return;
+      if (isInvalidCursorError(loadError)) {
+        // The server no longer honours this cursor: start the view over.
+        void loadFirstPage(activeWorkspaceId, browseState, false);
+        return;
+      }
+      // Stop auto-paging on a failure — the button below remains as a retry.
+      setLoadMoreFailed(true);
+      toast.error(copy.gallery.loadMoreFailed);
+    } finally {
+      if (loadingMoreGenerationRef.current === generation) {
+        loadingMoreGenerationRef.current = null;
+      }
+      if (catalogGenerationRef.current === generation) {
+        setIsLoadingMore(false);
+      }
+    }
+  }, [activeWorkspaceId, browseState, loadFirstPage, nextCursor]);
 
   const clearFilters = React.useCallback(() => {
-    setQuery("");
-    setCategory("all");
-    setStatusFilter("all");
-    setPublisherFilter("all");
-  }, []);
+    committedQueryRef.current = "";
+    setQueryInput("");
+    onBrowseStateChange({
+      ...defaultSkillsBrowseState,
+      sort: browseState.sort,
+    });
+  }, [browseState.sort, onBrowseStateChange]);
 
   const handleWorkspaceChange = React.useCallback(
     async (nextWorkspaceId: string, nextWorkspaceName: string) => {
@@ -1026,42 +1156,30 @@ export function SkillsGallery({
       }
 
       workspaceIdRef.current = nextWorkspaceId;
-      loadedCatalogWorkspaceIdRef.current = null;
       setSelectedCatalogId(null);
-      setWorkspace({ id: nextWorkspaceId, name: nextWorkspaceName });
+      setCategories([]);
       setItems([]);
+      setNextCursor(null);
       setError(null);
       setCatalogStatus("loading_catalog");
+      // The catalog effect loads page one for the new workspace.
+      setWorkspace({ id: nextWorkspaceId, name: nextWorkspaceName });
       try {
         await dashboardState.switchWorkspace(
           nextWorkspaceId,
           nextWorkspaceName,
         );
-        if (workspaceIdRef.current !== nextWorkspaceId) {
-          return;
-        }
-        const result = await fetchSkillsCatalog(nextWorkspaceId);
-        if (workspaceIdRef.current !== nextWorkspaceId) {
-          return;
-        }
-        loadedCatalogWorkspaceIdRef.current = nextWorkspaceId;
-        setItems(result.items);
-        setCatalogStatus("ready");
       } catch (changeError) {
+        if (workspaceIdRef.current !== nextWorkspaceId) return;
+        catalogGenerationRef.current += 1;
         setItems([]);
-        loadedCatalogWorkspaceIdRef.current = null;
+        setNextCursor(null);
         setCatalogStatus("error");
         setError(
           changeError instanceof Error
             ? changeError.message
             : t("gallery.error.switchFailed"),
         );
-      } finally {
-        if (workspaceIdRef.current === nextWorkspaceId) {
-          setCatalogStatus((currentStatus) =>
-            currentStatus === "loading_catalog" ? "ready" : currentStatus,
-          );
-        }
       }
     },
     [dashboardState, lockWorkspace, workspace?.id, t],
@@ -1147,20 +1265,17 @@ export function SkillsGallery({
     }
   }
 
+  // Best-effort refresh of the current view (after an import finishes, after a
+  // version switch): page one again, in place, plus the category counts.
   const refreshCatalog = React.useCallback(async () => {
     const currentWorkspaceId = workspaceIdRef.current;
     if (!currentWorkspaceId) return;
-    try {
-      const result = await fetchSkillsCatalog(currentWorkspaceId);
-      if (workspaceIdRef.current === currentWorkspaceId) {
-        loadedCatalogWorkspaceIdRef.current = currentWorkspaceId;
-        setItems(result.items);
-      }
-      await onCatalogChange?.();
-    } catch {
-      // Best-effort refresh after a submission — leave existing items in place.
-    }
-  }, [onCatalogChange]);
+    await Promise.all([
+      loadFirstPage(currentWorkspaceId, browseState, true),
+      loadCategories(currentWorkspaceId),
+    ]);
+    await onCatalogChange?.();
+  }, [browseState, loadCategories, loadFirstPage, onCatalogChange]);
 
   // An import finishes in the background, whenever it finishes; that is when
   // the catalog may have gained skills (even a failed one can have indexed some).
@@ -1174,45 +1289,50 @@ export function SkillsGallery({
     catalogStatus === "loading_catalog";
   const currentWorkspaceName =
     workspace?.name ?? workspaceName ?? dashboardState.workspaceName;
-  const catalogReadyForWorkspace = workspace
-    ? loadedCatalogWorkspaceIdRef.current === workspace.id
-    : false;
   const selectedItem = selectedCatalogId
     ? (items.find((item) => item.catalogId === selectedCatalogId) ?? null)
     : null;
-  const filtersPanel = (
-    <SkillsFilterPanel
-      category={category}
-      categoryCounts={categoryCounts}
-      installedCount={installedCount}
-      onCategoryChange={setCategory}
-      onClear={clearFilters}
-      onQueryChange={setQuery}
-      onPublisherFilterChange={setPublisherFilter}
-      onStatusFilterChange={setStatusFilter}
-      query={query}
-      publisherFilter={publisherFilter}
-      statusFilter={statusFilter}
-      totalCount={galleryItems.length}
+  const filtersActive = hasActiveSkillFilters(browseState);
+  // Built-ins and the workspace's own skills arrive whole on page one (unless a
+  // filter rules them out); community skills follow, page by page.
+  const sections = partitionSkills(items);
+  const sectionList = [
+    { key: "builtin", label: copy.gallery.sectionBuiltin, items: sections.builtin },
+    { key: "yours", label: copy.gallery.sectionYours, items: sections.yours },
+    {
+      key: "community",
+      label: copy.gallery.sectionCommunity,
+      items: sections.community,
+    },
+  ].filter((section) => section.items.length > 0);
+  const showSectionHeadings =
+    !excludesBoundedSkills(browseState) && sectionList.length > 1;
+  const gridClassName = cn(
+    "grid gap-4",
+    variant === "modal"
+      ? "grid-cols-[repeat(auto-fill,minmax(min(100%,280px),1fr))]"
+      : "grid-cols-[repeat(auto-fill,minmax(260px,1fr))] 2xl:grid-cols-4",
+  );
+  const renderCard = (item: SkillCatalogItem) => (
+    <SkillCard
+      categories={categories}
+      item={item}
+      key={item.catalogId}
+      onInstall={(next) => void installSkill(next)}
+      onOpenDetails={(next) => setSelectedCatalogId(next.catalogId)}
+      onUninstall={(next) => void uninstallSkill(next)}
+      pending={pendingCatalogId === item.catalogId}
+      variant={variant}
     />
   );
-  const drawerFiltersPanel = (
-    <SkillsFilterPanel
-      category={category}
-      categoryCounts={categoryCounts}
-      installedCount={installedCount}
-      onCategoryChange={setCategory}
-      onClear={clearFilters}
-      onQueryChange={setQuery}
-      onPublisherFilterChange={setPublisherFilter}
-      onStatusFilterChange={setStatusFilter}
-      placement="drawer"
-      query={query}
-      publisherFilter={publisherFilter}
-      statusFilter={statusFilter}
-      totalCount={galleryItems.length}
-    />
-  );
+  const filterPanelProps = {
+    categories,
+    onChange: changeBrowseState,
+    onClear: clearFilters,
+    onQueryInputChange: setQueryInput,
+    queryInput,
+    state: browseState,
+  };
 
   return (
     <div
@@ -1222,7 +1342,7 @@ export function SkillsGallery({
       )}
     >
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        {filtersPanel}
+        <SkillsFilterPanel {...filterPanelProps} />
 
         <section className="flex min-h-0 flex-1 flex-col overflow-hidden bg-card">
           <ScrollArea className="min-h-0 flex-1">
@@ -1264,12 +1384,9 @@ export function SkillsGallery({
                     workspaceId={workspace?.id ?? dashboardState.workspaceId}
                   />
                   <SortMenu
-                    onChange={setSort}
-                    options={sortOptions.map((option) => ({
-                      key: option.key,
-                      label: t(`gallery.sort.${option.key}`),
-                    }))}
-                    value={sort}
+                    onChange={(sort) => changeBrowseState({ sort })}
+                    options={sortOptions}
+                    value={browseState.sort}
                   />
                 </div>
               </div>
@@ -1279,46 +1396,70 @@ export function SkillsGallery({
                 </p>
               ) : null}
               <MySubmissions submissions={submissions} />
+              {catalogStatus === "ready" && !error && registryTotal ? (
+                <p className="mb-3 text-xs text-muted-foreground">
+                  {copy.gallery.communityTotal(registryTotal)}
+                </p>
+              ) : null}
 
               {pageLoading ? (
                 <SkillsCatalogSkeletonGrid variant={variant} />
               ) : error ? (
                 <div className="rounded-2xl border border-destructive/30 bg-destructive/10 px-4 py-5 text-sm text-destructive">
-                  <p className="font-medium">{t("gallery.error.title")}</p>
+                  <p className="font-medium">{copy.gallery.loadFailedTitle}</p>
                   <p className="mt-1 text-destructive/85">{error}</p>
                 </div>
-              ) : catalogStatus === "ready" &&
-                catalogReadyForWorkspace &&
-                filteredItems.length === 0 ? (
+              ) : items.length === 0 ? (
                 <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">
-                  {galleryItems.length === 0
-                    ? t("gallery.empty.none")
-                    : t("gallery.empty.noMatch")}
+                  {filtersActive
+                    ? copy.gallery.emptyFiltered
+                    : copy.gallery.emptyCatalog}
                 </div>
-              ) : (
-                <div
-                  className={cn(
-                    "grid gap-4",
-                    variant === "modal"
-                      ? "grid-cols-[repeat(auto-fill,minmax(min(100%,280px),1fr))]"
-                      : "grid-cols-[repeat(auto-fill,minmax(260px,1fr))] 2xl:grid-cols-4",
-                  )}
-                >
-                  {filteredItems.map((item) => (
-                    <SkillCard
-                      item={item}
-                      key={item.catalogId}
-                      onInstall={(next) => void installSkill(next)}
-                      onOpenDetails={(next) =>
-                        setSelectedCatalogId(next.catalogId)
-                      }
-                      onUninstall={(next) => void uninstallSkill(next)}
-                      pending={pendingCatalogId === item.catalogId}
-                      variant={variant}
-                    />
+              ) : showSectionHeadings ? (
+                <div className="space-y-6">
+                  {sectionList.map((section) => (
+                    <section aria-label={section.label} key={section.key}>
+                      <h2 className="mb-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                        {section.label}
+                      </h2>
+                      <div className={gridClassName}>
+                        {section.items.map(renderCard)}
+                      </div>
+                    </section>
                   ))}
                 </div>
+              ) : (
+                <div className={gridClassName}>{items.map(renderCard)}</div>
               )}
+              {catalogStatus === "ready" && nextCursor ? (
+                <>
+                  {loadMoreFailed ? null : (
+                    <LoadMoreSentinel
+                      onVisible={() => void loadMore()}
+                      watchKey={nextCursor}
+                    />
+                  )}
+                  <div className="flex justify-center py-4">
+                    <Button
+                      disabled={isLoadingMore}
+                      onClick={() => {
+                        setLoadMoreFailed(false);
+                        void loadMore();
+                      }}
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                    >
+                      {isLoadingMore ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : null}
+                      {isLoadingMore
+                        ? copy.gallery.loadingMore
+                        : copy.gallery.loadMore}
+                    </Button>
+                  </div>
+                </>
+              ) : null}
             </div>
           </ScrollArea>
         </section>
@@ -1331,10 +1472,11 @@ export function SkillsGallery({
           <SheetTitle className="sr-only">
             {t("gallery.filtersDrawerTitle")}
           </SheetTitle>
-          {drawerFiltersPanel}
+          <SkillsFilterPanel {...filterPanelProps} placement="drawer" />
         </SheetContent>
       </Sheet>
       <SkillDetailDialog
+        categories={categories}
         item={selectedItem}
         onVersionChanged={() => void refreshCatalog()}
         onInstall={(next) => void installSkill(next)}

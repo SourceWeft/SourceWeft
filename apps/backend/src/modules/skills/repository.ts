@@ -1,7 +1,8 @@
 import { getSkillLogo } from "./logo";
 import { randomUUID } from "node:crypto";
 import { sha256 } from "./hash";
-import { and, eq, inArray, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import {
   db,
   skillDefinitions,
@@ -97,10 +98,29 @@ function mapSkillVersionFile(row: SkillVersionFileRow) {
   };
 }
 
+/**
+ * An install pins one version; the skill moves on without it. "Update
+ * available" means there is a published current version and it is not the
+ * pinned one. A current version still under review (`draft`) is not an update
+ * anyone can take, so it arrives here as `null` and reads as up to date.
+ */
+export function skillUpdateSignal(input: {
+  installedVersionId: string;
+  currentVersionId: string | null;
+}) {
+  return {
+    currentVersionId: input.currentVersionId,
+    updateAvailable:
+      input.currentVersionId !== null &&
+      input.currentVersionId !== input.installedVersionId,
+  };
+}
+
 function mapWorkspaceInstalledSkill(row: {
   definition: SkillDefinitionRow;
   version: SkillVersionRow;
   workspaceSkill: WorkspaceSkillRow;
+  currentVersionId: string | null;
 }): WorkspaceInstalledSkillItem {
   const manifest = row.version.manifestJson;
   const workspaceSkill = mapWorkspaceSkill(row.workspaceSkill);
@@ -124,6 +144,10 @@ function mapWorkspaceInstalledSkill(row: {
     enabledBy: workspaceSkill.enabledBy,
     enabledAt: workspaceSkill.enabledAt,
     installedVia: workspaceSkill.installedVia,
+    ...skillUpdateSignal({
+      installedVersionId: row.version.id,
+      currentVersionId: row.currentVersionId,
+    }),
     ...(manifest.registry?.capability
       ? { registryCapability: manifest.registry.capability }
       : {}),
@@ -212,11 +236,16 @@ export async function listWorkspaceInstalledSkills(input: {
   teamId: string;
   workspaceId: string;
 }) {
+  // The skill's published current version, next to the pinned one, in the same
+  // query. `skill_versions_skill_current_uq` allows one current row per skill,
+  // so this join can never multiply an install.
+  const currentVersions = alias(skillVersions, "current_versions");
   const rows = await db
     .select({
       definition: skillDefinitions,
       version: skillVersions,
       workspaceSkill: workspaceSkills,
+      currentVersionId: currentVersions.id,
     })
     .from(workspaceSkills)
     .innerJoin(
@@ -228,6 +257,14 @@ export async function listWorkspaceInstalledSkills(input: {
       and(
         eq(skillVersions.id, workspaceSkills.skillVersionId),
         eq(skillVersions.skillId, workspaceSkills.skillId),
+      ),
+    )
+    .leftJoin(
+      currentVersions,
+      and(
+        eq(currentVersions.skillId, workspaceSkills.skillId),
+        eq(currentVersions.isCurrent, true),
+        eq(currentVersions.status, "published"),
       ),
     )
     .where(
@@ -535,6 +572,44 @@ async function grantSkillEntitlement(
     teamId: input.teamId,
     workspaceId: input.workspaceId,
     grantedBy: input.grantedBy,
+  });
+}
+
+/**
+ * Gives a workspace — or, with no workspace, the whole team — the right to use
+ * a skill it cannot otherwise see: a `restricted` community skill. Issued when
+ * someone in that scope imports the same public repository an earlier
+ * submitter already indexed: proving they can read the source is what the
+ * entitlement stands for. Idempotent.
+ */
+export async function grantSkillAccess(input: {
+  skillId: string;
+  teamId: string;
+  workspaceId: string | null;
+  grantedBy: string;
+}) {
+  await db.transaction(async (tx) => {
+    const [existing] = await tx
+      .select({ id: skillEntitlements.id })
+      .from(skillEntitlements)
+      .where(
+        and(
+          eq(skillEntitlements.skillId, input.skillId),
+          eq(skillEntitlements.teamId, input.teamId),
+          input.workspaceId
+            ? eq(skillEntitlements.workspaceId, input.workspaceId)
+            : isNull(skillEntitlements.workspaceId),
+        ),
+      )
+      .limit(1);
+    if (existing) return;
+    await tx.insert(skillEntitlements).values({
+      id: randomUUID(),
+      skillId: input.skillId,
+      teamId: input.teamId,
+      workspaceId: input.workspaceId,
+      grantedBy: input.grantedBy,
+    });
   });
 }
 

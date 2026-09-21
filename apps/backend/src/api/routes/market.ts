@@ -1,5 +1,4 @@
-import { createHash } from "node:crypto";
-import type { Context, Hono } from "hono";
+import type { Hono } from "hono";
 import {
   listMarketMcpRequestSchema,
   marketMcpManifestSchema,
@@ -25,6 +24,7 @@ import {
   requireSession,
 } from "../middleware/auth-session";
 import { ApiError, ApiResponse } from "../response/api-response";
+import { cachedJson } from "../response/cached-json";
 
 function booleanQuery(value: string | undefined) {
   if (value === undefined) {
@@ -39,33 +39,6 @@ function numberQuery(value: string | undefined) {
   }
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
-}
-
-/**
- * JSON response with a content-hash ETag + Cache-Control that honors
- * If-None-Match (304). Catalog reads are safe to revalidate cheaply; a manifest
- * is immutable per identifier@version so it can be cached hard.
- */
-function cachedJson(
-  c: Context,
-  body: unknown,
-  options: { maxAge?: number; immutable?: boolean } = {},
-) {
-  const payload = JSON.stringify(body);
-  const etag = `"${createHash("sha256").update(payload).digest("hex").slice(0, 32)}"`;
-  const maxAge = options.maxAge ?? 60;
-  c.header("etag", etag);
-  c.header(
-    "cache-control",
-    options.immutable
-      ? `public, max-age=${maxAge}, immutable`
-      : `public, max-age=${maxAge}`,
-  );
-  if (c.req.header("if-none-match") === etag) {
-    return c.body(null, 304);
-  }
-  c.header("content-type", "application/json; charset=UTF-8");
-  return c.body(payload, 200);
 }
 
 export function registerMarketRoutes(app: Hono) {

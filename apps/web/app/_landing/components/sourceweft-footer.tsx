@@ -57,10 +57,11 @@ export function SourceWeftFooter({
       [`${landingBase}#features`, t("links.features"), false],
       [`${landingBase}#how-it-works`, t("links.howItWorks"), false],
       [`${landingBase}#pricing`, t("links.pricing"), true],
-      [addLocalePrefix("/mcp", localePrefix), t("links.mcpServers"), false],
       // Not migrated into the locale-prefixed marketing tree yet — new since
-      // this i18n work started; stays a plain path like an un-migrated route.
+      // this i18n work started; stay plain paths like an un-migrated route.
       ["/download", t("links.download"), false],
+      [addLocalePrefix("/mcp", localePrefix), t("links.mcpServers"), false],
+      ["/skills", t("links.skills"), false],
       [addLocalePrefix("/blog", localePrefix), t("links.blog"), false],
       [
         authState?.isSignedIn ? "/dashboard" : "/auth/sign-in",

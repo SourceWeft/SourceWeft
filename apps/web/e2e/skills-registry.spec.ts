@@ -108,6 +108,9 @@ test.beforeAll(async ({ browser }) => {
     data: accounts.admin,
   });
   expect(r.status(), "Normal administrator login").toBe(200);
+  // The admin's browser cases reuse this session rather than signing in a
+  // second time: sign-in is rate limited here, as in production.
+  sessions.admin = await admin.storageState();
 });
 test.afterAll(async () => {
   await admin?.dispose();
@@ -377,11 +380,11 @@ test("E4 builtin contracts and public capability spoof remain distinct", async (
   });
   expect(external.tools ?? []).not.toContain("generate_image");
 });
-test("E5 repeat import is immutable and other user cannot claim it", async ({
+test("E5 repeat import is immutable; another user importing it gets to use it, not to control it", async ({
   page,
   browser,
 }) => {
-  await login(page);
+  const ownerWs = await login(page);
   const first = await submit(page);
   await publish(first.skills[0]!);
   await closeResult(page);
@@ -390,15 +393,73 @@ test("E5 repeat import is immutable and other user cannot claim it", async ({
     skillVersionId: first.skills[0]!.skillVersionId,
     status: "indexed",
   });
+  const slug = first.skills[0]!.slug!;
   const context = await browser.newContext({ baseURL: web });
-  const other = await context.newPage();
-  await login(other, "other");
-  const rejected = await submit(other);
-  expect(rejected.submission.status).toBe("failed");
-  await expect(
-    other.getByRole("region", { name: "Import results" }),
-  ).toContainText("failed");
-  await context.close();
+  try {
+    const other = await context.newPage();
+    const otherWs = await login(other, "other");
+    // The same public repository: no longer refused. Same version, no copy.
+    const theirs = await submit(other);
+    expect(theirs.submission.status).toBe("succeeded");
+    expect(theirs.skills[0]).toMatchObject({
+      skillVersionId: first.skills[0]!.skillVersionId,
+    });
+    // It is in their catalog to use...
+    const found = await other.request.get(
+      `${api}/v1/workspaces/${otherWs}/skills/catalog/by-slug/${slug}`,
+    );
+    expect(found.status(), await found.text()).toBe(200);
+    const { skill } = (await found.json()) as {
+      skill: { catalogId: string };
+    };
+    // ...but the listing is not theirs to decide. It still is the owner's.
+    expect(
+      (
+        await other.request.get(
+          `${api}/v1/workspaces/${otherWs}/skills/catalog/${skill.catalogId}/listing`,
+        )
+      ).status(),
+    ).toBe(404);
+    expect(
+      (
+        await page.request.get(
+          `${api}/v1/workspaces/${ownerWs}/skills/catalog/${skill.catalogId}/listing`,
+        )
+      ).status(),
+    ).toBe(200);
+  } finally {
+    await context.close();
+  }
+});
+
+// A commit that exists only in a fork is served under the upstream's own URLs
+// by GitHub. Imported by sha, it would be indexed under the upstream's name and
+// avatar. This one lives in a fork of obra/superpowers (found 2026-09-21).
+const FORK_ONLY_COMMIT = "adf6afdb91052e95d53fa835b5536c0fde5cd071";
+test("E19 a fork's commit named under the upstream repository is refused", async ({
+  page,
+}) => {
+  const probe = await request.newContext();
+  const served = await probe.get(
+    `https://api.github.com/repos/obra/superpowers/commits/${FORK_ONLY_COMMIT}`,
+  );
+  await probe.dispose();
+  test.skip(
+    served.status() !== 200,
+    `GitHub no longer serves the fork commit under the upstream (HTTP ${served.status()})`,
+  );
+
+  await login(page);
+  const refused = await submit(
+    page,
+    `https://github.com/obra/superpowers/tree/${FORK_ONLY_COMMIT}/skills/brainstorming`,
+  );
+  expect(refused.submission.status).toBe("failed");
+  expect(refused.submission.error).toMatchObject({
+    code: "REGISTRY_SUBMISSION_NOT_IN_REPOSITORY",
+  });
+  // Nothing was indexed under obra's name.
+  expect(refused.skills ?? []).toEqual([]);
 });
 test("E6 published B leaves A installed until explicit switch and rollback", async ({
   page,
@@ -635,6 +696,365 @@ test("E8 published is not public; explicit admin visibility controls history acc
     other.getByRole("heading", { name: skillTitle, exact: true }),
   ).toBeVisible();
   await context.close();
+});
+
+// The market: what is listed is public for anyone, what is not is not, and the
+// person who imported a skill has the last word on their own. This environment
+// runs no scheduler, so an admin lists the skill here — the same function the
+// auto-listing pass calls (its rules are covered by the database suites).
+async function skillIdOf(page: Page, ws: string, slug: string) {
+  const r = await page.request.get(
+    `${api}/v1/workspaces/${ws}/skills/catalog/by-slug/${slug}`,
+  );
+  expect(r.status(), await r.text()).toBe(200);
+  return ((await r.json()) as { skill: { skillId: string; catalogId: string } })
+    .skill;
+}
+
+test("E16 a listed skill is public for anyone; only its claimed author controls it, and an admin's hold outranks them", async ({
+  page,
+  browser,
+}) => {
+  const ws = await login(page);
+  const item = (await submit(page)).skills[0]!;
+  await publish(item);
+  const slug = item.slug!;
+  const { skillId, catalogId } = await skillIdOf(page, ws, slug);
+  const anonymous = await request.newContext({ baseURL: api });
+  const listingUrl = `${api}/v1/workspaces/${ws}/skills/catalog/${catalogId}/listing`;
+
+  // Published is not public: nobody without an account can see it yet.
+  expect((await anonymous.get(`/v1/skills/${slug}`)).status()).toBe(404);
+
+  const listed = await admin.post(
+    `/v1/skills/registry/admin/skills/${skillId}/list`,
+    { data: {} },
+  );
+  expect(listed.status(), await listed.text()).toBe(200);
+  const standing = await listed.json();
+  expect(standing).toMatchObject({ visibility: "public", listingHold: false });
+  expect(standing.listedAt).toBeTruthy();
+  expect(standing.categorySlugs.length).toBeGreaterThan(0);
+
+  // The public API, with no session at all.
+  const list = await anonymous.get(`/v1/skills?query=${skillName}`);
+  expect(list.status()).toBe(200);
+  expect(
+    ((await list.json()) as { items: Array<{ slug: string }> }).items.map(
+      (entry) => entry.slug,
+    ),
+  ).toContain(slug);
+  const detail = await anonymous.get(`/v1/skills/${slug}`);
+  expect(detail.status()).toBe(200);
+  const body = (await detail.json()) as {
+    skillMd: string | null;
+    files: Array<{ path: string; contentHash: string }>;
+    source: {
+      commitSha: string | null;
+      repoSubpath: string | null;
+      repoUrl: string | null;
+    };
+  };
+  expect(body.skillMd).toContain(skillName);
+  expect(body.files.map((file) => file.path)).toContain("SKILL.md");
+  for (const file of body.files)
+    expect(file.contentHash).toMatch(/^[0-9a-f]{64}$/);
+  expect(body.source.commitSha).toMatch(/^[0-9a-f]{40}$/);
+  expect(body.source.repoSubpath).not.toBeNull();
+
+  // The public page, in a browser that has never signed in.
+  const visitor = await browser.newContext({ baseURL: web });
+  try {
+    const publicPage = await visitor.newPage();
+    await publicPage.goto(`/skills/${slug}`);
+    await expect(
+      publicPage.getByRole("heading", {
+        level: 1,
+        name: skillTitle,
+        exact: true,
+      }),
+    ).toBeVisible({ timeout: 45000 });
+    // The embedded SKILL.md brings its own title; the page still has one <h1>.
+    await expect(publicPage.getByRole("heading", { level: 1 })).toHaveCount(1);
+    await expect(
+      publicPage.getByText("Content belongs to its original authors"),
+    ).toBeVisible();
+    await expect(
+      publicPage.getByRole("link", { name: "Report or request removal" }),
+    ).toHaveAttribute("href", new RegExp(`^mailto:.*${slug}`));
+    await publicPage.goto(`/skills/${slug}?tab=install`);
+    await expect(
+      publicPage.getByText(
+        new RegExp(
+          `npx skills add https://github\\.com/.+/tree/${body.source.commitSha}`,
+        ),
+      ),
+    ).toBeVisible();
+  } finally {
+    await visitor.close();
+  }
+
+  // Someone else has no say, and cannot even tell whose skill it is: from
+  // their own workspace the route answers as if the skill did not exist.
+  const otherContext = await browser.newContext({ baseURL: web });
+  try {
+    const otherPage = await otherContext.newPage();
+    const otherWs = await login(otherPage, "other");
+    const theirs = `${api}/v1/workspaces/${otherWs}/skills/catalog/${catalogId}/listing`;
+    expect((await otherPage.request.get(theirs)).status()).toBe(404);
+    expect(
+      (
+        await otherPage.request.put(theirs, { data: { listed: false } })
+      ).status(),
+    ).toBe(404);
+    await otherPage.goto(`/dashboard/skills/${slug}`);
+    await expect(
+      otherPage.getByRole("heading", { name: skillTitle }).first(),
+    ).toBeVisible({ timeout: 45000 });
+    await expect(otherPage.getByTestId("skill-owner-listing")).toHaveCount(0);
+  } finally {
+    await otherContext.close();
+  }
+  // Still public: the stranger's attempt changed nothing.
+  expect((await anonymous.get(`/v1/skills/${slug}`)).status()).toBe(200);
+
+  // Importing it first gives no say either: whether an unclaimed skill is
+  // public is the platform's and its admins' call, not the first importer's.
+  expect((await page.request.get(listingUrl)).status()).toBe(404);
+
+  // Its repository's author claims it — an organisation's repository is
+  // claimed through an admin, which is what this fixture's is.
+  const repo = body.source.repoUrl!.replace("https://github.com/", "");
+  const granted = await admin.post("/v1/skills/registry/admin/claims", {
+    data: { repo, email: accounts.owner!.email },
+  });
+  expect(granted.status(), await granted.text()).toBe(201);
+  const claimed = await anonymous.get(`/v1/skills/${slug}`);
+  expect(
+    ((await claimed.json()) as { skill: { claimed: boolean } }).skill.claimed,
+  ).toBe(true);
+
+  // The author takes it down: gone for everyone at once, and held.
+  const down = await page.request.put(listingUrl, {
+    data: { listed: false },
+  });
+  expect(down.status(), await down.text()).toBe(200);
+  expect(await down.json()).toMatchObject({ listed: false, heldBy: "owner" });
+  expect((await anonymous.get(`/v1/skills/${slug}`)).status()).toBe(404);
+
+  // Lifting their own hold does not list it by itself.
+  const lifted = await page.request.put(listingUrl, { data: { listed: true } });
+  expect(await lifted.json()).toMatchObject({ listed: false, heldBy: null });
+
+  // An admin's withdrawal is not the owner's to undo.
+  await admin.post(`/v1/skills/registry/admin/skills/${skillId}/list`, {
+    data: {},
+  });
+  const withdrawn = await admin.post(
+    `/v1/skills/registry/admin/skills/${skillId}/delist`,
+    { data: {} },
+  );
+  expect(await withdrawn.json()).toMatchObject({
+    visibility: "restricted",
+    listingHold: true,
+    listingHoldBy: "admin",
+  });
+  const refused = await page.request.put(listingUrl, {
+    data: { listed: true },
+  });
+  expect(refused.status()).toBe(409);
+  expect(JSON.stringify(await refused.json())).toContain(
+    "SKILL_LISTING_HELD_BY_ADMIN",
+  );
+
+  // And the author sees it on the skill's page: the switch, locked.
+  await page.goto(`/dashboard/skills/${slug}`);
+  const ownerSwitch = page
+    .getByTestId("skill-owner-listing")
+    .getByRole("switch");
+  await expect(ownerSwitch).toBeVisible({ timeout: 45000 });
+  await expect(ownerSwitch).toBeDisabled();
+
+  await anonymous.dispose();
+});
+
+test("E17 the gallery searches and sorts on the server, from the URL", async ({
+  page,
+}) => {
+  await login(page);
+  await publish((await submit(page)).skills[0]!);
+
+  const filtered = page.waitForResponse(
+    (r) => {
+      const url = new URL(r.url());
+      return (
+        /\/skills\/catalog$/.test(url.pathname) &&
+        url.searchParams.get("q") === skillName &&
+        url.searchParams.get("sort") === "new"
+      );
+    },
+    { timeout: 60000 },
+  );
+  await Promise.all([
+    filtered,
+    page.goto(`/dashboard/skills?q=${skillName}&sort=new`),
+  ]);
+  await expect(
+    page.getByRole("heading", { name: skillTitle, exact: true }),
+  ).toBeVisible({ timeout: 45000 });
+
+  // A query nothing matches: the server answers with nothing, so nothing shows.
+  const empty = page.waitForResponse(
+    (r) => new URL(r.url()).searchParams.get("q") === "zz-no-such-skill-zz",
+    { timeout: 60000 },
+  );
+  await Promise.all([
+    empty,
+    page.goto("/dashboard/skills?q=zz-no-such-skill-zz"),
+  ]);
+  await expect(
+    page.getByRole("heading", { name: skillTitle, exact: true }),
+  ).toHaveCount(0);
+});
+
+test("E18 a market admin reviews a flagged skill from the Skills tab", async ({
+  page,
+}) => {
+  test.skip(!fixtures.versionC, "needs the review fixture");
+  await login(page);
+  const pending = (await submit(page, fixtures.versionC!)).skills[0]!;
+  expect(pending.status).toBe("queued");
+
+  await page.context().clearCookies();
+  await page.context().addCookies(sessions.admin!.cookies);
+  await page.goto("/dashboard/admin/market?tab=skills");
+  const row = page.locator("li, article, tr, div").filter({
+    has: page.getByText(pending.slug!, { exact: true }),
+  });
+  await expect(page.getByText(pending.slug!, { exact: true })).toBeVisible({
+    timeout: 45000,
+  });
+  const decided = page.waitForResponse(
+    (r) =>
+      r.url().endsWith(`/submissions/${pending.skillVersionId}/publish`) &&
+      r.request().method() === "POST",
+    { timeout: 30000 },
+  );
+  const [response] = await Promise.all([
+    decided,
+    row.getByRole("button", { name: "Approve and publish" }).last().click(),
+  ]);
+  expect(response.status()).toBe(200);
+  // Decided, so it leaves the queue.
+  await expect(page.getByText(pending.slug!, { exact: true })).toHaveCount(0);
+});
+
+test("E20 an agent can find the market: SKILL.md, llms.txt and the verified CLI install", async ({
+  page,
+}) => {
+  const visitor = await request.newContext({ baseURL: web });
+  const skillMd = await visitor.get("/skills/SKILL.md");
+  expect(skillMd.status()).toBe(200);
+  expect(skillMd.headers()["content-type"]).toContain("text/markdown");
+  const text = await skillMd.text();
+  expect(text).toMatch(/^---\nname: sourceweft-skills\n/);
+  expect(text).toContain("npx @sourceweft/cli skills install");
+  const llms = await visitor.get("/llms.txt");
+  expect(llms.status()).toBe(200);
+  expect(await llms.text()).toContain("/skills/SKILL.md");
+  await visitor.dispose();
+
+  // A listed skill's Install tab leads with the verified CLI command.
+  const ws = await login(page);
+  const item = (await submit(page)).skills[0]!;
+  await publish(item);
+  const skill = await skillIdOf(page, ws, item.slug!);
+  const listed = await admin.post(
+    `/v1/skills/registry/admin/skills/${skill.skillId}/list`,
+    { data: {} },
+  );
+  expect(listed.status(), await listed.text()).toBe(200);
+  await page.goto(`/skills/${item.slug}?tab=install`);
+  await expect(
+    page.getByText(`npx @sourceweft/cli skills install ${item.slug}`).first(),
+  ).toBeVisible({ timeout: 45000 });
+});
+
+test("E21 an admin features a skill and puts it in a collection; the public market shows both", async ({
+  page,
+}) => {
+  const ws = await login(page);
+  const item = (await submit(page)).skills[0]!;
+  await publish(item);
+  const skill = await skillIdOf(page, ws, item.slug!);
+  expect(
+    (
+      await admin.post(
+        `/v1/skills/registry/admin/skills/${skill.skillId}/list`,
+        {
+          data: {},
+        },
+      )
+    ).status(),
+  ).toBe(200);
+
+  // Featured, by an admin: sticks, and shows.
+  const featured = await admin.put(
+    `/v1/skills/registry/admin/skills/${skill.skillId}/featured`,
+    { data: { featured: true } },
+  );
+  expect(featured.status(), await featured.text()).toBe(200);
+  expect(await featured.json()).toMatchObject({
+    featured: true,
+    featuredSetBy: "admin",
+  });
+  const anonymous = await request.newContext({ baseURL: api });
+  const summary = await anonymous.get(`/v1/skills?featured=true&limit=100`);
+  expect(
+    ((await summary.json()) as { items: Array<{ slug: string }> }).items.map(
+      (entry) => entry.slug,
+    ),
+  ).toContain(item.slug);
+
+  // A collection: unpublished is invisible, published lists the skill.
+  const slug = `e2e-${Date.now()}`;
+  const created = await admin.post("/v1/skills/registry/admin/collections", {
+    data: { slug, title: "E2E picks", summary: "For the test" },
+  });
+  expect(created.status(), await created.text()).toBe(201);
+  const { id } = (await created.json()) as { id: string };
+  expect(
+    (
+      await admin.put(`/v1/skills/registry/admin/collections/${id}/items`, {
+        data: { slugs: [item.slug] },
+      })
+    ).status(),
+  ).toBe(200);
+  expect((await anonymous.get(`/v1/skills/collections/${slug}`)).status()).toBe(
+    404,
+  );
+  expect(
+    (
+      await admin.patch(`/v1/skills/registry/admin/collections/${id}`, {
+        data: { published: true },
+      })
+    ).status(),
+  ).toBe(200);
+  const collection = await anonymous.get(`/v1/skills/collections/${slug}`);
+  expect(collection.status(), await collection.text()).toBe(200);
+  expect(JSON.stringify(await collection.json())).toContain(item.slug!);
+  await anonymous.dispose();
+
+  await page.goto(`/skills/collections/${slug}`);
+  await expect(
+    page.getByRole("heading", { name: "E2E picks" }).first(),
+  ).toBeVisible({ timeout: 45000 });
+  await page.goto(`/skills/${item.slug}`);
+  await expect(page.getByText("Featured").first()).toBeVisible({
+    timeout: 45000,
+  });
+
+  await admin.delete(`/v1/skills/registry/admin/collections/${id}`);
 });
 
 // The chat agent and skills, end to end: browser → API → worker → real model.

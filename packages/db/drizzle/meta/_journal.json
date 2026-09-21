@@ -309,6 +309,41 @@
       "when": 1789869974703,
       "tag": "0043_skill_object_storage",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1789915884417,
+      "tag": "0044_skill_marketplace",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1789951207499,
+      "tag": "0045_skill_listing_hold_by",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1790001404485,
+      "tag": "0046_skill_market_phase3",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1790003214098,
+      "tag": "0047_skill_repo_removal",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1790004944146,
+      "tag": "0048_skill_featured_dedupe_claims",
+      "breakpoints": true
     }
   ]
 }

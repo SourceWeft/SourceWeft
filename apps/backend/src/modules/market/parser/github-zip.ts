@@ -2,6 +2,7 @@ import { unzip } from "fflate";
 import {
   GITHUB_ARCHIVE_LIMITS,
   GITHUB_REQUEST_TIMEOUTS,
+  assertCommitOnDefaultBranch,
   GitHubArchiveError,
   githubDownloadHeaders,
   githubFetch,
@@ -65,6 +66,12 @@ export type PinnedGitHubSource = NormalizedGitHubSource & {
    * full sha and GitHub's commit metadata could not be read.
    */
   committedAt?: string;
+  /**
+   * The repository's default branch, whose history `commitSha` was checked to
+   * be in (or whose head it is). Absent only where a caller built the source
+   * by hand rather than through `resolvePinnedGitHubSource`.
+   */
+  defaultBranch?: string;
 };
 
 /**
@@ -86,9 +93,10 @@ export async function resolvePinnedGitHubSource(
   }
 
   let ref = source.ref;
+  let defaultBranch: string | undefined;
   if (!ref) {
     try {
-      ref = await resolveDefaultBranch(source, options);
+      ref = defaultBranch = await resolveDefaultBranch(source, options);
     } catch (error) {
       // A missing or private repository fails here first, with a plain Error
       // that no caller maps — it used to surface as an HTTP 500 instead of
@@ -111,10 +119,23 @@ export async function resolvePinnedGitHubSource(
       "Could not resolve an immutable commit SHA to pin this source",
     );
   }
+  // A named ref or sha must be on the default branch: a fork's commit is
+  // reachable under the upstream's URLs too. The default branch's own head
+  // needs no check.
+  if (source.ref) {
+    defaultBranch = await resolveDefaultBranch(source, options);
+    await assertCommitOnDefaultBranch(
+      source,
+      commitSha,
+      defaultBranch,
+      options,
+    );
+  }
 
   return {
     ...source,
     commitSha,
+    ...(defaultBranch ? { defaultBranch } : {}),
     ...(commit?.committedAt ? { committedAt: commit.committedAt } : {}),
   };
 }

@@ -2,12 +2,14 @@ import type {
   SkillSubmissionOnComplete,
   SkillSubmissionSkillResult,
 } from "@sourceweft/db";
+import type { compareCommits } from "../../../market/parser/github";
 import {
   downloadRepoZip,
   resolvePinnedGitHubSource,
   type PinnedGitHubSource,
 } from "../../../market/parser/github-zip";
 import { RegistrySubmissionError } from "../errors";
+import { isSkillRepositoryRemoved } from "../repository";
 import {
   readRegistrySkillsFromArchive,
   requireCommittedAt,
@@ -20,10 +22,7 @@ import {
   type AnalyzedSubmissionSkill,
 } from "../submit";
 import { describeIngestError } from "./errors";
-import type {
-  SkillSubmissionRow,
-  SubmissionProgressPatch,
-} from "./repository";
+import type { SkillSubmissionRow, SubmissionProgressPatch } from "./repository";
 
 /**
  * The ingest pipeline as an ordered list of named stages. Each stage reads what
@@ -49,6 +48,8 @@ export type IngestDeps = {
   resolveSource: typeof resolvePinnedGitHubSource;
   downloadArchive: typeof downloadRepoZip;
   installSkill: InstallSkillFn;
+  /** GitHub's ancestry answer between two commits; defaults to the real API. */
+  compareCommits?: typeof compareCommits;
 };
 
 export const defaultIngestDeps: IngestDeps = {
@@ -63,7 +64,13 @@ export const defaultIngestDeps: IngestDeps = {
 export type IngestContext = {
   submission: Pick<
     SkillSubmissionRow,
-    "id" | "teamId" | "workspaceId" | "submittedBy" | "sourceInput"
+    | "id"
+    | "teamId"
+    | "workspaceId"
+    | "submittedBy"
+    | "sourceInput"
+    | "target"
+    | "options"
   > & { onComplete: SkillSubmissionOnComplete | null };
   /** The job's overall deadline. Checked between stages and handed to GitHub. */
   signal: AbortSignal;
@@ -153,6 +160,19 @@ const triageWriteStage: IngestStage = {
   name: "triage-write",
   async run(ctx) {
     const read = need(ctx.read, "read");
+    // Its author took it off SourceWeft: nothing from it is indexed again,
+    // whoever submits it. Refused before anything is stored.
+    if (
+      await isSkillRepositoryRemoved({
+        owner: read.source.owner,
+        name: read.source.repo,
+      })
+    ) {
+      throw new RegistrySubmissionError(
+        "REGISTRY_SUBMISSION_REPO_REMOVED",
+        `${read.source.owner}/${read.source.repo} was removed from SourceWeft by its author`,
+      );
+    }
     const results: SkillSubmissionSkillResult[] = [];
     ctx.results = results;
     for (const skill of need(ctx.analyzed, "analyzed")) {
@@ -164,6 +184,20 @@ const triageWriteStage: IngestStage = {
           read,
           userId: ctx.submission.submittedBy,
           skill,
+          ...(ctx.submission.options?.featured !== undefined
+            ? { featured: ctx.submission.options.featured }
+            : {}),
+          ...(ctx.deps.compareCommits
+            ? { compare: ctx.deps.compareCommits }
+            : {}),
+          grantTo: {
+            teamId: ctx.submission.teamId,
+            // A team-scoped import grants the whole team.
+            workspaceId:
+              ctx.submission.target === "team"
+                ? null
+                : ctx.submission.workspaceId,
+          },
         }),
       );
     }

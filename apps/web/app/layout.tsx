@@ -16,6 +16,7 @@ import {
 } from "@sourceweft/i18n/locales";
 
 import { resolveDeploymentCapabilities } from "../lib/billing-edition/capabilities-server";
+import { resolveRequireEmailVerification } from "../lib/auth/auth-config-server";
 import { SeoJsonLd } from "./_components/seo/json-ld";
 import { Providers } from "./providers";
 import { DesktopWindowChrome } from "./_components/desktop-window-chrome";
@@ -71,7 +72,10 @@ export default async function RootLayout({
   await connection();
   const runtimeConfig = serverPublicRuntimeConfig();
   const gtmId = runtimeConfig.gtmId;
-  const capabilities = await resolveDeploymentCapabilities();
+  const [capabilities, requireEmailVerification] = await Promise.all([
+    resolveDeploymentCapabilities(),
+    resolveRequireEmailVerification(),
+  ]);
 
   // The proxy resolves the locale per request and next-intl surfaces it here, so
   // `<html lang/dir>` is correct even for crawlers (D6). `getMessages()` returns
@@ -101,7 +105,10 @@ export default async function RootLayout({
       {gtmId ? <GoogleTagManager gtmId={gtmId} /> : null}
       <body className="flex min-h-svh flex-col antialiased">
         <NextIntlClientProvider locale={resolvedLocale} messages={messages}>
-          <Providers initialCapabilities={capabilities}>
+          <Providers
+            initialCapabilities={capabilities}
+            requireEmailVerification={requireEmailVerification}
+          >
             <DesktopWindowChrome />
             {children}
           </Providers>

@@ -217,8 +217,16 @@ export async function buildSkillSandboxAssetPlan(
       sha256: stored.sha256,
       // The sandbox downloads and verifies the digest itself; the upload rung
       // is the fallback for sandboxes without egress.
-      fetchUrl: () => presignSkillBundleUrl(stored.objectKey),
-      loadContent: () => readSkillBundle(stored.objectKey),
+      // A presigned URL to an object that is gone would only fail inside the
+      // sandbox, so the check happens here, before either rung is used.
+      fetchUrl: async () => {
+        await stored.ensureStored?.();
+        return presignSkillBundleUrl(stored.objectKey);
+      },
+      loadContent: async () => {
+        await stored.ensureStored?.();
+        return readSkillBundle(stored.objectKey);
+      },
     };
   }
   const { sha256, content } = await buildSkillZip(skill);

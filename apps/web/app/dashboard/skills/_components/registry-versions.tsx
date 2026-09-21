@@ -3,6 +3,7 @@ import * as React from "react";
 import type {
   RegistryVersionDetail,
   RegistryVersionsResponse,
+  SkillVersionChangelog,
 } from "@sourceweft/contracts";
 import { useTranslations } from "next-intl";
 import {
@@ -32,6 +33,11 @@ import {
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { HttpClientError } from "@sourceweft/sdk";
 import { contentClient } from "../../../../lib/sdk";
+import {
+  resolveUpdateTarget,
+  summarizeVersionChangelog,
+} from "./skill-version-update";
+import { skillsMarketCopy } from "./skills-market-copy";
 
 /** What the API reports when a version can do more than the installed one. */
 type VersionEscalation = { addsScripts: boolean; newFlags: string[] };
@@ -65,12 +71,24 @@ export function RegistryVersions({
   workspaceId,
   catalogId,
   initialVersionId,
+  currentVersionId,
+  refreshKey,
   onView,
   onChanged,
 }: {
   workspaceId: string;
   catalogId: string;
   initialVersionId: string;
+  /**
+   * The skill's published current version, when the caller knows it. The list
+   * below is paged by age, so the current version is not always in it.
+   */
+  currentVersionId?: string | null;
+  /**
+   * Changes when the caller installed or removed the skill itself, so
+   * "Installed" and the update notice are re-read instead of going stale.
+   */
+  refreshKey?: string;
   onView: (detail: RegistryVersionDetail | null) => void;
   onChanged: () => void;
 }) {
@@ -82,9 +100,11 @@ export function RegistryVersions({
   );
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
-  const [escalation, setEscalation] = React.useState<VersionEscalation | null>(
-    null,
-  );
+  // What is being switched to travels with the escalation, so confirming it
+  // retries the same version even if the selection moved meanwhile.
+  const [escalation, setEscalation] = React.useState<
+    (VersionEscalation & { versionId: string }) | null
+  >(null);
   const [reload, setReload] = React.useState(0);
   React.useEffect(() => {
     let active = true;
@@ -99,7 +119,7 @@ export function RegistryVersions({
     return () => {
       active = false;
     };
-  }, [workspaceId, catalogId, reload]);
+  }, [workspaceId, catalogId, reload, refreshKey]);
   React.useEffect(() => {
     let active = true;
     setError(null);
@@ -123,8 +143,13 @@ export function RegistryVersions({
     return () => {
       active = false;
     };
-  }, [workspaceId, catalogId, selected, onView, reload]);
-  async function switchVersion(acknowledgeEscalation = false) {
+    // `refreshKey` too: installing is what gives a workspace a claim to a
+    // restricted skill's text, so the documents can change with it.
+  }, [workspaceId, catalogId, selected, onView, reload, refreshKey]);
+  async function switchVersion(
+    versionId: string,
+    acknowledgeEscalation = false,
+  ) {
     if (!list?.installed) return;
     setBusy(true);
     setError(null);
@@ -132,10 +157,13 @@ export function RegistryVersions({
       await contentClient.switchRegistryVersion(
         workspaceId,
         list.installed.id,
-        selected,
+        versionId,
         acknowledgeEscalation ? { acknowledgeEscalation: true } : undefined,
       );
       setEscalation(null);
+      // After an update, show what is installed now rather than the version
+      // that happened to be selected.
+      setSelected(versionId);
       setReload((v) => v + 1);
       onChanged();
     } catch (e) {
@@ -146,7 +174,7 @@ export function RegistryVersions({
         e instanceof HttpClientError &&
         e.code === "SKILL_VERSION_ESCALATION"
       ) {
-        setEscalation(readEscalation(e.details));
+        setEscalation({ ...readEscalation(e.details), versionId });
         return;
       }
       setEscalation(null);
@@ -165,6 +193,52 @@ export function RegistryVersions({
   const shortVersion = (version: string) =>
     /^[a-f0-9]{12,40}$/i.test(version) ? version.slice(0, 8) : version;
   const installedHere = list?.installed?.skillVersionId === selected;
+  // An install pins one version; this is the newer one it could move to.
+  const updateTargetId = resolveUpdateTarget({
+    installedVersionId: list?.installed?.skillVersionId,
+    currentVersionId,
+    versions: list?.items,
+  });
+  const updateTargetVersion = list?.items.find(
+    (v) => v.id === updateTargetId,
+  )?.version;
+  // What the update brings, from the target's own changelog. Read from the
+  // detail already on screen when that is the target; otherwise fetched.
+  const [targetChangelog, setTargetChangelog] = React.useState<{
+    versionId: string;
+    changelog: SkillVersionChangelog | null;
+  } | null>(null);
+  const viewedIsTarget = detail?.version.id === updateTargetId;
+  React.useEffect(() => {
+    if (!updateTargetId || viewedIsTarget) return;
+    let active = true;
+    contentClient
+      .getRegistryVersion(workspaceId, catalogId, updateTargetId)
+      .then((result) => {
+        if (active)
+          setTargetChangelog({
+            versionId: updateTargetId,
+            changelog: result?.changelog ?? null,
+          });
+      })
+      // The notice still offers the update without it.
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [workspaceId, catalogId, updateTargetId, viewedIsTarget]);
+  const updateChangelog = viewedIsTarget
+    ? (detail?.changelog ?? null)
+    : targetChangelog?.versionId === updateTargetId
+      ? targetChangelog.changelog
+      : null;
+  const updateSummary = updateChangelog
+    ? summarizeVersionChangelog(updateChangelog, skillsMarketCopy.updates)
+    : null;
+  // Offered whenever the viewed version is not the installed one — also when it
+  // is the update target. The notice above is a shortcut to the same switch,
+  // not a replacement for the control people already know.
+  const offerSelected = !!list?.installed && !installedHere;
   const issueCount =
     (current?.diagnostics.length ?? 0) + (current?.findings.length ?? 0);
 
@@ -256,9 +330,57 @@ export function RegistryVersions({
           </a>
         ) : null}
       </div>
-      {list?.nextCursor || (list?.installed && !installedHere) ? (
+      {updateTargetId ? (
+        <div
+          className="flex flex-wrap items-center gap-2 border-t border-border/60 bg-primary/5 px-3 py-2"
+          data-testid="skill-update-notice"
+        >
+          <span className="text-foreground">
+            {updateTargetVersion
+              ? skillsMarketCopy.updates.noticeWithVersion(
+                  shortVersion(updateTargetVersion),
+                )
+              : skillsMarketCopy.updates.notice}
+          </span>
+          <Button
+            size="sm"
+            className="h-7 text-xs"
+            disabled={busy}
+            onClick={() => void switchVersion(updateTargetId)}
+          >
+            {skillsMarketCopy.updates.action}
+          </Button>
+          {updateSummary ? (
+            <span
+              className={
+                updateSummary.escalates
+                  ? "w-full text-amber-700 dark:text-amber-300"
+                  : "w-full text-muted-foreground"
+              }
+              data-testid="skill-update-changes"
+            >
+              {skillsMarketCopy.updates.changesLead} {updateSummary.summary}
+              {updateSummary.compareUrl ? (
+                <>
+                  {" · "}
+                  <a
+                    className="inline-flex items-center gap-1 underline-offset-2 hover:text-foreground hover:underline"
+                    href={updateSummary.compareUrl}
+                    rel="noreferrer noopener"
+                    target="_blank"
+                  >
+                    {skillsMarketCopy.updates.compare}
+                    <ExternalLink className="size-3" />
+                  </a>
+                </>
+              ) : null}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+      {list?.nextCursor || offerSelected ? (
         <div className="flex flex-wrap items-center gap-2 border-t border-border/60 px-3 py-2">
-          {list?.installed && !installedHere ? (
+          {offerSelected ? (
             <>
               <span className="text-muted-foreground">
                 {t("versions.viewingDifferent")}
@@ -267,7 +389,7 @@ export function RegistryVersions({
                 size="sm"
                 className="h-7 text-xs"
                 disabled={busy || current?.status !== "published"}
-                onClick={() => void switchVersion()}
+                onClick={() => void switchVersion(selected)}
               >
                 {t("versions.useThisVersion")}
               </Button>
@@ -411,7 +533,7 @@ export function RegistryVersions({
               onClick={(event) => {
                 // Stay open until the switch has actually happened.
                 event.preventDefault();
-                void switchVersion(true);
+                if (escalation) void switchVersion(escalation.versionId, true);
               }}
             >
               {busy ? <Loader2 className="size-3.5 animate-spin" /> : null}

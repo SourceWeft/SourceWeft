@@ -2,9 +2,29 @@
 import hashlib
 import json
 import sys
+import time
+from http.client import HTTPException
 from pathlib import Path
 from urllib.request import Request, urlopen
 from urllib.parse import urlparse
+
+# One dropped connection must not cost the whole image layer this runs in (a
+# quarter of an hour under emulation). Only the transfer is retried: what was
+# fetched is still checked against the pinned size and digest below.
+FETCH_ATTEMPTS = 4
+
+
+def fetch(url, limit):
+    for attempt in range(1, FETCH_ATTEMPTS + 1):
+        try:
+            with urlopen(Request(url, headers={'User-Agent': 'SourceWeft-sandbox-fonts'}), timeout=60) as response:
+                return response.read(limit)
+        except (OSError, HTTPException) as error:  # URLError, TLS and socket errors are OSError
+            if attempt == FETCH_ATTEMPTS:
+                raise
+            print('Font download failed (%s); retry %d of %d: %s' % (error, attempt, FETCH_ATTEMPTS - 1, url))
+            time.sleep(2 ** attempt)
+
 
 manifest = Path(sys.argv[1])
 target = Path(sys.argv[2]).resolve()
@@ -23,8 +43,7 @@ for item in catalog['files']:
         if len(cached) == item['bytes'] and hashlib.sha256(cached).hexdigest() == item['sha256']:
             continue
         print('Cached font failed integrity; fetching the pinned source: ' + item['path'])
-    with urlopen(Request(item['url'], headers={'User-Agent': 'SourceWeft-sandbox-fonts'}), timeout=60) as response:
-        content = response.read(item['bytes'] + 1)
+    content = fetch(item['url'], item['bytes'] + 1)
     if len(content) != item['bytes'] or hashlib.sha256(content).hexdigest() != item['sha256']:
         raise ValueError('Font size/digest mismatch: ' + item['path'])
     destination.parent.mkdir(parents=True, exist_ok=True)

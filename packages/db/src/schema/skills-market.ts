@@ -129,6 +129,20 @@ export type SkillManifestJson = {
      * commit metadata could not be read; such a version ranks as oldest.
      */
     committedAt?: string;
+    /**
+     * Where the pinned commit was confirmed to come from: the repository's
+     * default branch, whose history held it when it was checked. A commit that
+     * exists only in a fork is served under the upstream's URLs too, so this
+     * is what makes the upstream's name on the entry true. Absent on versions
+     * indexed before the check existed; the market checks those itself.
+     */
+    provenance?: { defaultBranch: string; checkedAt: string };
+    /**
+     * The newest commit this exact content was seen at. A later commit whose
+     * skill is byte-for-byte the same does not become a version of its own —
+     * it would be a duplicate with a different label — so it is noted here.
+     */
+    seenAt?: { commitSha: string; committedAt?: string };
     /** Decides sandbox material sync, not permission (§6b). */
     capability: "prompt-only" | "executable";
     scan: { reviewRequired: boolean; flags: string[] };
@@ -179,6 +193,46 @@ export const skillDefinitions = pgTable(
       .notNull()
       .default("active"),
     ownerUserId: text("owner_user_id"),
+    // Marketplace columns, owned by `modules/skills/market` — nothing in the
+    // ingest path writes them.
+    //
+    // When the skill first became public. Set once and never moved, so it is a
+    // stable keyset key for "newest": re-listing or a new version must not
+    // reshuffle pages someone is scrolling through.
+    listedAt: timestamp("listed_at", { withTimezone: true, mode: "date" }),
+    // Granted by a market admin only; never read from a manifest.
+    verified: boolean("verified").notNull().default(false),
+    // Refreshed by the scheduler from `workspace_skills`, so sorting by
+    // popularity does not put a write on the install path.
+    installCount: integer("install_count").notNull().default(0),
+    // An admin took this off the public market. The auto-listing pass skips it,
+    // so a withdrawn skill does not come back on the next tick.
+    listingHold: boolean("listing_hold").notNull().default(false),
+    // Who holds it. The person who imported a skill can keep it off the public
+    // market themselves; an admin's hold outranks theirs, so an owner can never
+    // put back what an admin withdrew.
+    listingHoldBy: text("listing_hold_by").$type<"admin" | "owner">(),
+    // The GitHub repository a community skill comes from, lowercased. Kept on
+    // the definition so a repository's skills can be found together — for a
+    // claim, for "more from this repository", for its GitHub metadata.
+    repoOwner: text("repo_owner"),
+    repoName: text("repo_name"),
+    // When the repository's author claimed it (`skill_repo_claims`); null for
+    // a skill nobody has claimed.
+    claimedAt: timestamp("claimed_at", { withTimezone: true, mode: "date" }),
+    // Copied from `skill_repositories` by the scheduler so sorting needs no join.
+    repoStars: integer("repo_stars").notNull().default(0),
+    // What "recommended" sorts by after `verified`: installs and GitHub stars
+    // folded into one number by the scheduler (`market/rank.ts`), so the order
+    // is keyset-pageable on a real column.
+    rankScore: integer("rank_score").notNull().default(0),
+    // Featured: a skill from a publisher the platform highlights (a short list
+    // of major vendors). About who publishes it, not about its content — so,
+    // unlike `verified`, a new version does not clear it. Set by the platform's
+    // own import (skills-sync) or by a market admin; an admin's choice is never
+    // overwritten by a later import.
+    featured: boolean("featured").notNull().default(false),
+    featuredSetBy: text("featured_set_by").$type<"sync" | "admin">(),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .defaultNow(),
@@ -214,6 +268,188 @@ export const skillDefinitions = pgTable(
       table.workspaceId,
       table.status,
     ),
+    index("skill_definitions_market_new_idx").on(
+      table.visibility,
+      table.status,
+      desc(table.listedAt),
+      desc(table.id),
+    ),
+    index("skill_definitions_market_popular_idx").on(
+      table.visibility,
+      table.status,
+      desc(table.installCount),
+      desc(table.id),
+    ),
+    index("skill_definitions_market_rank_idx").on(
+      table.visibility,
+      table.status,
+      desc(table.featured),
+      desc(table.verified),
+      desc(table.rankScore),
+      desc(table.id),
+    ),
+    index("skill_definitions_repo_idx").on(table.repoOwner, table.repoName),
+    check(
+      "skill_definitions_listing_hold_by_check",
+      sql`(${table.listingHold} = false and ${table.listingHoldBy} is null) or (${table.listingHold} = true and ${table.listingHoldBy} in ('admin', 'owner'))`,
+    ),
+    check(
+      "skill_definitions_install_count_check",
+      sql`${table.installCount} >= 0`,
+    ),
+  ],
+);
+
+// The skill market's own taxonomy. Deliberately not `market_categories`: that
+// table is the MCP catalog's, and sharing it would put a `kind` filter on every
+// MCP category query for no gain.
+export const skillCategories = pgTable(
+  "skill_categories",
+  {
+    id: text("id").primaryKey(),
+    slug: text("slug").notNull(),
+    name: text("name").notNull(),
+    description: text("description"),
+    sortOrder: integer("sort_order").notNull().default(0),
+  },
+  (table) => [uniqueIndex("skill_categories_slug_uq").on(table.slug)],
+);
+
+// GitHub's facts about a repository community skills come from, refreshed by
+// the scheduler with conditional requests. One row per repository, however many
+// skills it ships.
+export const skillRepositories = pgTable(
+  "skill_repositories",
+  {
+    repoOwner: text("repo_owner").notNull(),
+    repoName: text("repo_name").notNull(),
+    githubId: text("github_id"),
+    ownerGithubId: text("owner_github_id"),
+    ownerType: text("owner_type").$type<"User" | "Organization">(),
+    defaultBranch: text("default_branch"),
+    stars: integer("stars").notNull().default(0),
+    forks: integer("forks").notNull().default(0),
+    pushedAt: timestamp("pushed_at", { withTimezone: true, mode: "date" }),
+    archived: boolean("archived").notNull().default(false),
+    etag: text("etag"),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true, mode: "date" }),
+  },
+  (table) => [
+    primaryKey({
+      name: "skill_repositories_pk",
+      columns: [table.repoOwner, table.repoName],
+    }),
+    index("skill_repositories_fetched_idx").on(table.fetchedAt),
+  ],
+);
+
+// A repository's author claiming its skills: started by them, proven by their
+// linked GitHub account or a token file they commit, never assigned for them.
+export const skillRepoClaims = pgTable(
+  "skill_repo_claims",
+  {
+    id: text("id").primaryKey(),
+    repoOwner: text("repo_owner").notNull(),
+    repoName: text("repo_name").notNull(),
+    userId: text("user_id").notNull(),
+    method: text("method")
+      .$type<"github_account" | "verification_file" | "admin_grant">()
+      .notNull(),
+    // sha256 of the token a verification file must contain; null for the
+    // account method.
+    tokenHash: text("token_hash"),
+    status: text("status")
+      .$type<"pending" | "verified" | "revoked">()
+      .notNull()
+      .default("pending"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    verifiedAt: timestamp("verified_at", { withTimezone: true, mode: "date" }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "date" }),
+    revokedBy: text("revoked_by"),
+    // The author took the repository off SourceWeft. While this verified claim
+    // stands, nothing from the repository is imported again; what workspaces
+    // already installed keeps working.
+    removedAt: timestamp("removed_at", { withTimezone: true, mode: "date" }),
+    removedBy: text("removed_by"),
+  },
+  (table) => [
+    check(
+      "skill_repo_claims_method_check",
+      // `admin_grant`: an organisation's repository, which no one can claim
+      // for themselves — only its owner may, and the owner is the
+      // organisation — so a market admin grants it. `verification_file` is no
+      // longer offered; kept so a row recorded under it stays valid.
+      sql`${table.method} in ('github_account', 'verification_file', 'admin_grant')`,
+    ),
+    check(
+      "skill_repo_claims_status_check",
+      sql`${table.status} in ('pending', 'verified', 'revoked')`,
+    ),
+    // One author per repository at a time.
+    uniqueIndex("skill_repo_claims_verified_uq")
+      .on(table.repoOwner, table.repoName)
+      .where(sql`${table.status} = 'verified'`),
+    index("skill_repo_claims_user_idx").on(table.userId),
+  ],
+);
+
+// Editorial collections on the public market: a titled, ordered set of skills.
+export const skillCollections = pgTable(
+  "skill_collections",
+  {
+    id: text("id").primaryKey(),
+    slug: text("slug").notNull(),
+    title: text("title").notNull(),
+    summary: text("summary").notNull().default(""),
+    position: integer("position").notNull().default(0),
+    published: boolean("published").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [uniqueIndex("skill_collections_slug_uq").on(table.slug)],
+);
+
+export const skillCollectionItems = pgTable(
+  "skill_collection_items",
+  {
+    collectionId: text("collection_id")
+      .notNull()
+      .references(() => skillCollections.id, { onDelete: "cascade" }),
+    skillId: text("skill_id")
+      .notNull()
+      .references(() => skillDefinitions.id, { onDelete: "cascade" }),
+    position: integer("position").notNull().default(0),
+  },
+  (table) => [
+    primaryKey({
+      name: "skill_collection_items_pk",
+      columns: [table.collectionId, table.skillId],
+    }),
+  ],
+);
+
+export const skillDefinitionCategories = pgTable(
+  "skill_definition_categories",
+  {
+    skillId: text("skill_id")
+      .notNull()
+      .references(() => skillDefinitions.id, { onDelete: "cascade" }),
+    categoryId: text("category_id")
+      .notNull()
+      .references(() => skillCategories.id, { onDelete: "cascade" }),
+  },
+  (table) => [
+    primaryKey({
+      name: "skill_definition_categories_pk",
+      columns: [table.skillId, table.categoryId],
+    }),
+    index("skill_definition_categories_category_idx").on(table.categoryId),
   ],
 );
 
@@ -467,6 +703,15 @@ export type SkillSubmissionOnComplete = {
   install?: { skill?: string; installedVia?: "user" | "agent" };
 };
 
+/**
+ * How the platform's own import (skills-sync) marks what it submits. Never
+ * accepted from a person's import: the public submission request is strict.
+ */
+export type SkillSubmissionOptions = {
+  /** Mark the source's skills featured (or not). Absent = leave as is. */
+  featured?: boolean;
+};
+
 export const skillRegistrySubmissions = pgTable(
   "skill_registry_submissions",
   {
@@ -510,6 +755,10 @@ export const skillRegistrySubmissions = pgTable(
       .notNull()
       .default(sql`'[]'::jsonb`),
     onComplete: jsonb("on_complete").$type<SkillSubmissionOnComplete>(),
+    options: jsonb("options")
+      .$type<SkillSubmissionOptions>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
     error: jsonb("error").$type<{ code: string; message: string }>(),
     attempts: integer("attempts").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })

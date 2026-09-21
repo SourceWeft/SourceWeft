@@ -185,9 +185,12 @@ function SessionRefreshSync() {
 export function Providers({
   children,
   initialCapabilities = null,
+  requireEmailVerification = true,
 }: {
   children: React.ReactNode;
   initialCapabilities?: DeploymentCapabilities | null;
+  /** The API's answer (see `resolveRequireEmailVerification`). */
+  requireEmailVerification?: boolean;
 }) {
   const router = useRouter();
   const webBaseUrl = resolveWebBaseUrl();
@@ -220,9 +223,10 @@ export function Providers({
           baseURL={webBaseUrl}
           emailAndPassword={{
             forgotPassword: true,
-            // Mirrors apps/backend's auth config: the views read this to send
-            // someone to verify-email after sign-up instead of the dashboard.
-            requireEmailVerification: true,
+            // Mirrors apps/backend's auth config, which requires it only
+            // where mail can be delivered: the views read this to send someone
+            // to verify-email after sign-up instead of the dashboard.
+            requireEmailVerification,
           }}
           Link={Link}
           navigate={({ to, replace }) =>

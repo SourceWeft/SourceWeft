@@ -60,6 +60,13 @@ export type SkillStoredBundle = {
   sha256: string;
   objectKey: string;
   sizeBytes: number;
+  /**
+   * Makes sure the object is there before it is handed to a sandbox: object
+   * storage is a cache of a community skill, and a missing bundle is restored
+   * from the pinned source (`storage/restore.ts`). Absent where there is no
+   * source to go back to.
+   */
+  ensureStored?: () => Promise<void>;
 };
 
 export type EnabledSkillDescriptor = {
@@ -153,6 +160,10 @@ export type WorkspaceInstalledSkillItem = {
   enabledAt: string | null;
   /** `agent`: installed by the chat agent on its own initiative. */
   installedVia: "user" | "agent";
+  /** The skill's published current version; null while there is none. */
+  currentVersionId: string | null;
+  /** True when `currentVersionId` exists and is not the installed version. */
+  updateAvailable: boolean;
   /** Registry entries only — see the contracts schema for why it is surfaced. */
   registryCapability?: "prompt-only" | "executable";
   capabilities?: {
@@ -214,13 +225,21 @@ export type SkillCatalogItem = {
   defaultConfig?: Record<string, unknown>;
   // Registry (`sourceType='registry_github'`) attribution + trust surface for the
   // gallery, populated only for registry entries (undefined otherwise).
-  // `publisher` is "Community"; `verified` is always false (trust firewall — never
-  // self-asserted); `flagged` reflects the ingest scan's reviewRequired;
-  // `sourceUrl`/`license` satisfy index-level attribution.
+  // `publisher` is "Community"; `verified` is the market admin's grant (trust
+  // firewall — never self-asserted); `flagged` reflects the ingest scan's
+  // reviewRequired; `sourceUrl`/`license` satisfy index-level attribution.
   // skill-registry-index.md §0/§5.5.
   publisher?: string | null;
   verified?: boolean;
+  // From a publisher the platform highlights — set by its own import or an
+  // admin, never by the skill.
+  featured?: boolean;
   sourceUrl?: string | null;
   license?: string | null;
   flagged?: boolean;
+  // Market surface of a registry entry, whose `categories` are then the
+  // market's category slugs. `listedAt` is null while it is not listed.
+  installCount?: number;
+  listedAt?: string | null;
+  capability?: "prompt-only" | "executable" | null;
 };

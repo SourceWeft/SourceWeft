@@ -27,6 +27,7 @@ import {
   updateWorkspaceSkillRecord,
   upsertCustomSkillVersionFile,
   upsertWorkspaceSkill,
+  skillEntitlementScopeCondition,
 } from "./repository";
 import {
   scanCustomSkillBundle,
@@ -36,6 +37,7 @@ import {
 import { and, asc, eq, ilike, ne, or, sql } from "drizzle-orm";
 import {
   SKILLS_CATALOG_DEFAULT_PAGE_SIZE,
+  type SkillCatalogSort,
   type SkillSubmission,
 } from "@sourceweft/contracts";
 import {
@@ -44,6 +46,7 @@ import {
   type SkillManifestJson,
   skillVersions,
   workspaceSkills,
+  skillEntitlements,
 } from "@sourceweft/db";
 import type {
   SkillCatalogItem,
@@ -56,6 +59,26 @@ import { createSkillSubmission } from "./registry/ingest/service";
 import { getRegistryVersionDetail, registryAccess } from "./registry/versions";
 import { readSkillDocuments } from "./documents";
 import { getRegistrySkillBySlug } from "./registry/repository";
+import {
+  NO_SKILL_CATALOG_FILTERS,
+  type SkillCatalogCursor,
+  type SkillCatalogFilters,
+  boundedCatalogItemMatchesFilters,
+  decodeSkillCatalogCursor,
+  encodeSkillCatalogCursor,
+  escapeLikePattern,
+  listSkillCatalogCategoryCounts,
+  skillCatalogCursorForRow,
+  skillCatalogFilterConditions,
+  skillCatalogFiltersExcludeRegistry,
+  skillCatalogKeysetCondition,
+  skillCatalogOrderBy,
+  skillCatalogQueryWords,
+  skillCatalogSearchConditions,
+  skillCatalogSortKeyColumns,
+} from "./market/catalog-query";
+import { listSkillCategorySlugs } from "./market/listing";
+import { compareRecommendedSkills, skillTrustTier } from "./market/rank";
 import { isMarketAdmin } from "../market/admin";
 import { normalizeGitHubSource } from "../market/parser/github";
 import { config } from "../../shared/config";
@@ -69,39 +92,9 @@ const REGISTRY_SEARCH_RESULT_LIMIT = 25;
 // match set can't balloon memory; ranking happens over this window.
 const REGISTRY_CATALOG_QUERY_LIMIT = 100;
 
-// Where a page of the registry catalog left off: the (displayName, id) of its
-// last row. A keyset rather than an offset, so a skill indexed or withdrawn
-// while someone pages neither repeats nor skips an entry.
-type RegistryCatalogCursor = { name: string; id: string };
-
-function encodeSkillCatalogCursor(cursor: RegistryCatalogCursor) {
-  return Buffer.from(JSON.stringify([cursor.name, cursor.id])).toString(
-    "base64url",
-  );
-}
-
-/** null for anything that is not a cursor `listCatalog` handed out. */
-export function decodeSkillCatalogCursor(
-  cursor: string,
-): RegistryCatalogCursor | null {
-  try {
-    const parsed: unknown = JSON.parse(
-      Buffer.from(cursor, "base64url").toString("utf8"),
-    );
-    if (
-      Array.isArray(parsed) &&
-      parsed.length === 2 &&
-      typeof parsed[0] === "string" &&
-      typeof parsed[1] === "string" &&
-      parsed[1].length > 0
-    ) {
-      return { name: parsed[0], id: parsed[1] };
-    }
-  } catch {
-    // Not base64url JSON — falls through to null.
-  }
-  return null;
-}
+// The cursor codec lives with the rest of the catalog's paging in
+// `market/catalog-query.ts`; the catalog route validates cursors through here.
+export { decodeSkillCatalogCursor };
 
 // A catalog row as produced by `listCatalogSkillVersionsForWorkspace` and by
 // the inline registry query below (identical select shape) so both feed the
@@ -127,30 +120,67 @@ function isRegistryRowVisibleToViewer(input: {
   visibility: string;
   ownerUserId: string | null;
   viewerUserId: string;
+  /** This workspace (or its team) holds an entitlement to the skill. */
+  entitled?: boolean;
 }) {
   if (input.visibility === "public") {
     return true;
   }
   if (input.visibility === "restricted") {
     return (
-      input.ownerUserId !== null && input.ownerUserId === input.viewerUserId
+      (input.ownerUserId !== null &&
+        input.ownerUserId === input.viewerUserId) ||
+      input.entitled === true
     );
   }
   return false;
 }
 
-// UI-facing attribution + trust surface for a registry entry, derived purely
-// from its manifest. `publisher` is always "Community" and `verified` always
-// false — trust is admin-granted, never self-asserted (the trust firewall,
-// skill-registry-index.md §0/§3). `flagged` mirrors the ingest scan verdict.
-function registryCatalogFields(manifest: SkillManifestJson) {
+// Who reads a community skill's full text: everyone once it is `public`;
+// while `restricted`, the workspace that installed it, its submitter and the
+// market admins. Anything else — an unknown skill included — reads nothing.
+function registrySkillTextReadable(input: {
+  visibility: string | null;
+  installed: boolean;
+  isOwner: boolean;
+  isMarketAdmin: boolean;
+}) {
+  return (
+    input.visibility === "public" ||
+    input.installed ||
+    input.isOwner ||
+    input.isMarketAdmin
+  );
+}
+
+// UI-facing attribution + trust + market surface for a registry entry.
+// `publisher` is always "Community". `verified` is the market admin's grant on
+// the definition — never anything the skill says about itself (the trust
+// firewall, skill-registry-index.md §0/§3) — and `featured` likewise comes from
+// the definition (set by the platform's own import or an admin). `flagged` mirrors the ingest scan
+// verdict; `capability` is the shown version's, null when it records none.
+function registryCatalogFields(
+  manifest: SkillManifestJson,
+  definition: Pick<
+    typeof skillDefinitions.$inferSelect,
+    "verified" | "installCount" | "listedAt"
+  > &
+    Partial<
+      Pick<typeof skillDefinitions.$inferSelect, "repoStars" | "featured">
+    >,
+) {
   const registry = manifest.registry;
   return {
     publisher: "Community",
-    verified: false,
+    verified: definition.verified,
+    featured: definition.featured ?? false,
     sourceUrl: registry?.sourceUrl ?? null,
     license: registry?.license ?? null,
     flagged: registry?.scan?.reviewRequired ?? false,
+    installCount: definition.installCount,
+    repoStars: definition.repoStars ?? 0,
+    listedAt: definition.listedAt?.toISOString() ?? null,
+    capability: registry?.capability ?? null,
   };
 }
 
@@ -204,8 +234,14 @@ function compareSkillSearchRelevance(query: string) {
 
 // Maps a DB catalog row (custom / managed builtin / registry) to a catalog item.
 // Registry rows additionally carry the Community publisher + attribution/trust
-// fields. Non-registry rows are unchanged from the prior inline mapping.
-function mapCatalogRow(row: CatalogRow): SkillCatalogItem {
+// fields, and their `categories` are the MARKET's — where the skill is filed,
+// which lives in its own table and is handed in by the caller (one query per
+// page, see `mapRegistryCatalogRows`) — not the manifest's free-form list.
+// Non-registry rows are unchanged from the prior inline mapping.
+function mapCatalogRow(
+  row: CatalogRow,
+  market?: { categorySlugs: string[] },
+): SkillCatalogItem {
   const manifest = row.version.manifestJson;
   const base: SkillCatalogItem = {
     catalogId: `${row.definition.id}:${row.version.id}`,
@@ -236,9 +272,23 @@ function mapCatalogRow(row: CatalogRow): SkillCatalogItem {
     defaultConfig: manifest.defaultConfig,
   };
   if (row.definition.sourceType === "registry_github") {
-    return { ...base, displayName: manifest.displayName, description: manifest.description, installable: row.version.status === "published", ...registryCatalogFields(manifest) };
+    return { ...base, displayName: manifest.displayName, description: manifest.description, categories: market?.categorySlugs ?? [], installable: row.version.status === "published", ...registryCatalogFields(manifest, row.definition) };
   }
   return base;
+}
+
+/** Registry rows to catalog items, with one category query for all of them. */
+async function mapRegistryCatalogRows(
+  rows: CatalogRow[],
+): Promise<SkillCatalogItem[]> {
+  const categories = await listSkillCategorySlugs(
+    rows.map((row) => row.definition.id),
+  );
+  return rows.map((row) =>
+    mapCatalogRow(row, {
+      categorySlugs: categories.get(row.definition.id) ?? [],
+    }),
+  );
 }
 
 // An always-on builtin (generators like ppt/video/image, `managed: false`) has
@@ -276,10 +326,9 @@ function mapBuiltinSkillToCatalogItem(
 }
 
 function catalogItemMatchesQuery(item: SkillCatalogItem, query: string) {
-  const needle = query.toLowerCase();
-  return `${item.slug} ${item.displayName} ${item.description}`
-    .toLowerCase()
-    .includes(needle);
+  const haystack =
+    `${item.slug} ${item.displayName} ${item.description}`.toLowerCase();
+  return skillCatalogQueryWords(query).every((word) => haystack.includes(word));
 }
 
 const REGISTRY_SLUG_PREFIX = "gh-";
@@ -293,13 +342,6 @@ function isSkillSlugUniqueViolation(error: unknown): boolean {
     }
   }
   return false;
-}
-
-function skillSourceTrustRank(sourceType: string) {
-  if (sourceType === "builtin") {
-    return 0;
-  }
-  return sourceType === "registry_github" ? 2 : 1;
 }
 
 const SKILL_SEARCH_MAX_TERMS = 8;
@@ -351,7 +393,10 @@ function describeInstallableRow(
 
 const SKILL_NAME_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
 const COMMIT_SHA_PATTERN = /^[0-9a-f]{40}$/i;
-const OWN_SKILL_PAGE_PATTERN = /^\/dashboard\/skills\/([^/]+)\/?$/;
+// A skill's own page, in the dashboard or on the public market — whichever one
+// somebody copied the address of. `/skills/category/<slug>` is a listing, not a
+// skill: it has a second segment and so does not match.
+const OWN_SKILL_PAGE_PATTERN = /^\/(?:dashboard\/)?skills\/([^/]+)\/?$/;
 
 /**
  * What an `install_skill` source string refers to. A bare name is looked up in
@@ -484,6 +529,11 @@ export class ContentSkillsService {
    * small bounded set and rides whole on the FIRST page; `limit` and `cursor`
    * page through the registry, which is the part that grows without bound.
    * Registry rows come last so a following page simply appends.
+   *
+   * The market filters mean the same thing to both parts: SQL conditions for
+   * the registry, the same predicate in process for the bounded set. `sort`
+   * orders the registry rows only, and a cursor is good for the sort that
+   * produced it and no other.
    */
   async listCatalog(input: {
     teamId: string;
@@ -492,7 +542,11 @@ export class ContentSkillsService {
     limit?: number;
     cursor?: string;
     query?: string;
+    sort?: SkillCatalogSort;
+    filters?: Partial<SkillCatalogFilters>;
   }) {
+    const sort = input.sort ?? "recommended";
+    const filters = { ...NO_SKILL_CATALOG_FILTERS, ...input.filters };
     const after = input.cursor
       ? decodeSkillCatalogCursor(input.cursor)
       : undefined;
@@ -503,29 +557,53 @@ export class ContentSkillsService {
         "Catalog cursor is not valid",
       );
     }
+    // Resuming one order from a position in another would skip and repeat
+    // skills without any sign of it, so it is refused rather than guessed at.
+    if (after && after.sort !== sort) {
+      throw new ContentError(
+        400,
+        "INVALID_CURSOR",
+        `Catalog cursor belongs to the '${after.sort}' sort, not '${sort}'`,
+      );
+    }
     const query = input.query?.trim() || undefined;
     const limit = input.limit ?? SKILLS_CATALOG_DEFAULT_PAGE_SIZE;
 
     const items: SkillCatalogItem[] = after
       ? []
       : (await this.listBoundedCatalogItems(input)).filter(
-          (item) => !query || catalogItemMatchesQuery(item, query),
+          (item) =>
+            boundedCatalogItemMatchesFilters(item, filters) &&
+            (!query || catalogItemMatchesQuery(item, query)),
         );
+    if (skillCatalogFiltersExcludeRegistry(filters)) {
+      return { items, nextCursor: null };
+    }
 
-    // Registry catalog entries: Community publisher, unverified, with
-    // public / submitter-owned-restricted visibility (skill-registry-index.md
-    // §0/§5.5). Same DB-row → `SkillCatalogItem` convergence as the rest. One
-    // row past the page tells us whether another page exists without a count.
-    const registryRows = await this.listRegistryCatalogRows({
+    // Registry catalog entries: Community publisher, with public /
+    // submitter-owned-restricted visibility (skill-registry-index.md §0/§5.5).
+    // Same DB-row → `SkillCatalogItem` convergence as the rest. One row past
+    // the page tells us whether another page exists without a count.
+    const registryScope = {
       teamId: input.teamId,
       workspaceId: input.workspaceId,
       userId: input.userId,
-      query,
-      after,
-      limit: limit + 1,
-    });
+      everyTerm: query ? skillCatalogQueryWords(query) : undefined,
+      filters,
+    };
+    const [registryRows, registryTotal] = await Promise.all([
+      this.listRegistryCatalogRows({
+        ...registryScope,
+        sort,
+        after,
+        limit: limit + 1,
+      }),
+      // The same query without the cursor, counted: how many community skills
+      // the whole walk will show.
+      this.countRegistryCatalogRows(registryScope),
+    ]);
     const pageRows = registryRows.slice(0, limit);
-    items.push(...pageRows.map(mapCatalogRow));
+    items.push(...(await mapRegistryCatalogRows(pageRows)));
     const last = pageRows.at(-1);
     // `hasReadme` is deliberately left false here. Resolving it per item meant
     // loading every skill's *entire* bundle — for builtins that is a fresh
@@ -537,12 +615,18 @@ export class ContentSkillsService {
       items,
       nextCursor:
         registryRows.length > limit && last
-          ? encodeSkillCatalogCursor({
-              name: last.definition.displayName,
-              id: last.definition.id,
-            })
+          ? encodeSkillCatalogCursor(skillCatalogCursorForRow(sort, last))
           : null,
+      registryTotal,
     };
+  }
+
+  /**
+   * The market's categories, each with how many community skills this viewer
+   * would find under it — the same visibility the catalog lists by.
+   */
+  async listCatalogCategories(input: { userId: string }) {
+    return { items: await listSkillCatalogCategoryCounts(input) };
   }
 
   /** The non-registry part of the catalog: a handful of rows, never paged. */
@@ -569,7 +653,9 @@ export class ContentSkillsService {
         row.version.manifestJson.listing !== "hidden",
     );
 
-    const items: SkillCatalogItem[] = installableRows.map(mapCatalogRow);
+    const items: SkillCatalogItem[] = installableRows.map((row) =>
+      mapCatalogRow(row),
+    );
 
     // Builtins already surfaced via the DB-row path above (managed ones) must not
     // be emitted a second time from disk.
@@ -587,7 +673,15 @@ export class ContentSkillsService {
       }
       items.push(mapBuiltinSkillToCatalogItem(skill));
     }
-    return items;
+    // Ours first, then what the workspace or its team wrote — the top of the
+    // same trust ladder the registry rows continue below them — and by name
+    // within each, since the rows above come back in no particular order.
+    return items.sort(
+      (a, b) =>
+        skillTrustTier(a) - skillTrustTier(b) ||
+        a.displayName.localeCompare(b.displayName) ||
+        (a.skillId < b.skillId ? -1 : a.skillId > b.skillId ? 1 : 0),
+    );
   }
 
   /**
@@ -600,9 +694,10 @@ export class ContentSkillsService {
    * process (defense-in-depth) so a restricted entry never reaches a
    * non-submitter. Pass `query` to additionally ILIKE-filter name/description.
    *
-   * Rows come back in (displayName, id) order — the id breaks ties, so the
-   * order is total and `after` can resume it exactly. Without an order the
-   * LIMIT below used to pick an arbitrary window once the registry outgrew it.
+   * Rows come back in `sort` order (by name unless asked otherwise). Every
+   * sort ends in the id, so the order is total and `after` can resume it
+   * exactly. Without an order the LIMIT below used to pick an arbitrary window
+   * once the registry outgrew it.
    */
   private async listRegistryCatalogRows(input: {
     teamId: string;
@@ -611,12 +706,102 @@ export class ContentSkillsService {
     query?: string;
     /** Match ANY of these instead of `query` as one phrase. */
     terms?: string[];
+    /** Match EVERY one of these — the catalog search box. */
+    everyTerm?: string[];
     /** Only this slug — the direct lookup behind a skill's own page. */
     slug?: string;
-    /** Resume strictly after this row. */
-    after?: RegistryCatalogCursor;
+    sort?: SkillCatalogSort;
+    filters?: SkillCatalogFilters;
+    /** Resume strictly after this row. Must be a cursor of `sort`. */
+    after?: SkillCatalogCursor;
     limit?: number;
-  }): Promise<CatalogRow[]> {
+  }): Promise<Array<CatalogRow & { listedAtMicros: string }>> {
+    const { conditions, entitledHere } = this.registryCatalogConditions(input);
+    if (input.after) {
+      conditions.push(skillCatalogKeysetCondition(input.after));
+    }
+
+    const rows = await db
+      .select({
+        definition: skillDefinitions,
+        version: skillVersions,
+        enabled: workspaceSkills,
+        entitled: sql<boolean>`${entitledHere}`,
+        ...skillCatalogSortKeyColumns,
+      })
+      .from(skillDefinitions)
+      .innerJoin(skillVersions, eq(skillVersions.skillId, skillDefinitions.id))
+      .leftJoin(
+        workspaceSkills,
+        and(
+          eq(workspaceSkills.teamId, input.teamId),
+          eq(workspaceSkills.workspaceId, input.workspaceId),
+          eq(workspaceSkills.skillId, skillDefinitions.id),
+        ),
+      )
+      .where(and(...conditions))
+      .orderBy(...skillCatalogOrderBy(input.sort ?? "name"))
+      .limit(input.limit ?? REGISTRY_CATALOG_QUERY_LIMIT);
+
+    // Defense-in-depth: re-apply the visibility predicate in process so a
+    // restricted entry can never leak even if the SQL guard ever regresses.
+    return rows.filter((row) =>
+      isRegistryRowVisibleToViewer({
+        visibility: row.definition.visibility,
+        ownerUserId: row.definition.ownerUserId,
+        viewerUserId: input.userId,
+        entitled: row.entitled,
+      }),
+    );
+  }
+
+  /**
+   * How many rows `listRegistryCatalogRows` would walk through in all for
+   * these filters, cursor aside — the catalog's `registryTotal`.
+   */
+  private async countRegistryCatalogRows(
+    input: Parameters<ContentSkillsService["registryCatalogConditions"]>[0],
+  ): Promise<number> {
+    const { conditions } = this.registryCatalogConditions(input);
+    const [row] = await db
+      .select({
+        total: sql<number>`count(distinct ${skillDefinitions.id})::int`,
+      })
+      .from(skillDefinitions)
+      .innerJoin(skillVersions, eq(skillVersions.skillId, skillDefinitions.id))
+      .leftJoin(
+        workspaceSkills,
+        and(
+          eq(workspaceSkills.teamId, input.teamId),
+          eq(workspaceSkills.workspaceId, input.workspaceId),
+          eq(workspaceSkills.skillId, skillDefinitions.id),
+        ),
+      )
+      .where(and(...conditions));
+    return Number(row?.total ?? 0);
+  }
+
+  /**
+   * The WHERE of the registry catalog for a viewer: its visibility rule, and
+   * whatever slug, filters and search terms narrow it. The cursor is the
+   * caller's to add, so the same conditions can be counted.
+   */
+  private registryCatalogConditions(input: {
+    teamId: string;
+    workspaceId: string;
+    userId: string;
+    query?: string;
+    terms?: string[];
+    everyTerm?: string[];
+    slug?: string;
+    filters?: SkillCatalogFilters;
+  }) {
+    const entitledHere = sql`exists (
+      select 1 from ${skillEntitlements}
+      where ${skillEntitlements.skillId} = ${skillDefinitions.id}
+        and ${skillEntitlementScopeCondition(input)}
+        and (${skillEntitlements.expiresAt} is null or ${skillEntitlements.expiresAt} > now())
+    )`;
     const conditions = [
       eq(skillDefinitions.sourceType, "registry_github"),
       eq(skillDefinitions.status, "active"),
@@ -633,24 +818,30 @@ export class ContentSkillsService {
         eq(skillDefinitions.visibility, "public"),
         and(
           eq(skillDefinitions.visibility, "restricted"),
-          eq(skillDefinitions.ownerUserId, input.userId),
+          or(
+            eq(skillDefinitions.ownerUserId, input.userId),
+            // Imported by someone else first, and granted to this scope when
+            // someone here imported the same repository.
+            entitledHere,
+          ),
         ),
       ),
     ];
     if (input.slug) {
       conditions.push(eq(skillDefinitions.slug, input.slug));
     }
-    if (input.after) {
-      conditions.push(
-        sql`(${skillDefinitions.displayName}, ${skillDefinitions.id}) > (${input.after.name}, ${input.after.id})`,
-      );
+    if (input.filters) {
+      conditions.push(...skillCatalogFilterConditions(input.filters));
     }
+    conditions.push(...skillCatalogSearchConditions(input.everyTerm ?? []));
     const terms = input.terms ?? (input.query ? [input.query] : []);
     if (terms.length > 0) {
       conditions.push(
         or(
           ...terms.flatMap((term) => {
-            const like = `%${term}%`;
+            // The term is text to find, not a pattern: what it contains of
+            // LIKE's own syntax is escaped.
+            const like = `%${escapeLikePattern(term)}%`;
             return [
               ilike(skillDefinitions.displayName, like),
               ilike(skillDefinitions.description, like),
@@ -665,36 +856,7 @@ export class ContentSkillsService {
         ),
       );
     }
-
-    const rows = await db
-      .select({
-        definition: skillDefinitions,
-        version: skillVersions,
-        enabled: workspaceSkills,
-      })
-      .from(skillDefinitions)
-      .innerJoin(skillVersions, eq(skillVersions.skillId, skillDefinitions.id))
-      .leftJoin(
-        workspaceSkills,
-        and(
-          eq(workspaceSkills.teamId, input.teamId),
-          eq(workspaceSkills.workspaceId, input.workspaceId),
-          eq(workspaceSkills.skillId, skillDefinitions.id),
-        ),
-      )
-      .where(and(...conditions))
-      .orderBy(asc(skillDefinitions.displayName), asc(skillDefinitions.id))
-      .limit(input.limit ?? REGISTRY_CATALOG_QUERY_LIMIT);
-
-    // Defense-in-depth: re-apply the visibility predicate in process so a
-    // restricted entry can never leak even if the SQL guard ever regresses.
-    return rows.filter((row) =>
-      isRegistryRowVisibleToViewer({
-        visibility: row.definition.visibility,
-        ownerUserId: row.definition.ownerUserId,
-        viewerUserId: input.userId,
-      }),
-    );
+    return { conditions, entitledHere };
   }
 
   /**
@@ -718,9 +880,11 @@ export class ContentSkillsService {
       userId: input.userId,
       query,
     });
-    const items = rows
-      .filter((row) => row.version.manifestJson.listing !== "hidden")
-      .map(mapCatalogRow)
+    const items = (
+      await mapRegistryCatalogRows(
+        rows.filter((row) => row.version.manifestJson.listing !== "hidden"),
+      )
+    )
       .sort(compareSkillSearchRelevance(query))
       .slice(0, REGISTRY_SEARCH_RESULT_LIMIT);
     return { items, query };
@@ -760,11 +924,14 @@ export class ContentSkillsService {
         `${item.slug} ${item.displayName} ${item.description}`.toLowerCase();
       return terms.filter((term) => haystack.includes(term)).length;
     };
-    const registryItems = (
+    const registryRows = (
       await this.listRegistryCatalogRows({ ...input, terms })
-    )
-      .filter((row) => row.version.manifestJson.listing !== "hidden")
-      .map(mapCatalogRow);
+    ).filter((row) => row.version.manifestJson.listing !== "hidden");
+    const registryItems = await mapRegistryCatalogRows(registryRows);
+    // Stars are a rank signal; only community skills have a repository.
+    const repoStars = new Map(
+      registryRows.map((row) => [row.definition.id, row.definition.repoStars]),
+    );
     const ownItems = (await listCatalogSkillVersionsForWorkspace(input))
       .filter(
         (row) =>
@@ -773,27 +940,34 @@ export class ContentSkillsService {
             row.version.manifestJson.managed === true) &&
           row.version.manifestJson.listing !== "hidden",
       )
-      .map(mapCatalogRow);
+      .map((row) => mapCatalogRow(row));
     const matched = [...ownItems, ...registryItems]
       .map((item) => ({ item, matches: matchCount(item) }))
       .filter((entry) => entry.matches > 0);
     const installs = await countSkillInstalls(
       matched.map((entry) => entry.item.skillId),
     );
-    const byRelevance = compareSkillSearchRelevance(query);
+    const rankSignals = (item: SkillCatalogItem) => ({
+      skillId: item.skillId,
+      sourceType: item.sourceType,
+      verified: item.verified ?? false,
+      featured: item.featured ?? false,
+      installCount: installs.get(item.skillId) ?? 0,
+      repoStars: repoStars.get(item.skillId) ?? 0,
+      listedAt: item.listedAt,
+    });
     const items = matched
       .sort(
         (a, b) =>
           b.matches - a.matches ||
           skillSearchRelevanceRank({ ...a.item, query }) -
             skillSearchRelevanceRank({ ...b.item, query }) ||
-          // Same textual fit: first-party before the workspace's own before
-          // third-party, then whatever more workspaces actually keep on.
-          skillSourceTrustRank(a.item.sourceType) -
-            skillSourceTrustRank(b.item.sourceType) ||
-          (installs.get(b.item.skillId) ?? 0) -
-            (installs.get(a.item.skillId) ?? 0) ||
-          byRelevance(a.item, b.item),
+          // Same textual fit: whatever the market would recommend first —
+          // ours, the workspace's own, featured publishers, verified
+          // community skills, the rest;
+          // then the rank score of installs and stars (`market/rank.ts`).
+          // The install count is the live one, which is also what is reported.
+          compareRecommendedSkills(rankSignals(a.item), rankSignals(b.item)),
       )
       .slice(0, REGISTRY_SEARCH_RESULT_LIMIT)
       .map((entry) => ({
@@ -1293,30 +1467,57 @@ export class ContentSkillsService {
   /**
    * Whether a viewer gets a community skill's full text (SKILL.md, README).
    *
-   * The catalog is an INDEX of other people's repositories: what it shows
-   * everyone is the listing — name, description, provenance, license, scan
-   * state, file manifest — plus a link to the source. The text itself goes to
-   * those with a reason to hold it: a workspace that installed the skill (it is
-   * in its prompts anyway), the person who submitted it, and the market admins
-   * who review it. Builtin and workspace/team skills never come through here.
+   * A `public` skill is on the market, and the market shows what it lists:
+   * everyone reads its text (skill-marketplace-plan.md §3). A `restricted` one
+   * — still under review, or withdrawn — shows others only its listing, and
+   * its text goes to those with a reason to hold it: a workspace that
+   * installed it (it is in its prompts anyway), the person who submitted it,
+   * and the market admins who review it. This is about SKILL.md and the
+   * README only; a skill's scripts and binaries are served by the file routes,
+   * to workspaces that installed it. Builtin and workspace/team skills never
+   * come through here.
    */
   private async canReadRegistrySkillText(
     viewer: { userId: string },
-    item: Pick<SkillCatalogItem, "skillId" | "enabledWorkspaceSkillId">,
+    item: Pick<SkillCatalogItem, "skillId" | "enabledWorkspaceSkillId"> & {
+      /** The definition's, when the caller already holds it. */
+      visibility?: string;
+    },
   ): Promise<boolean> {
-    if (item.enabledWorkspaceSkillId !== null || isMarketAdmin(viewer.userId)) {
+    const known = {
+      installed: item.enabledWorkspaceSkillId !== null,
+      isMarketAdmin: isMarketAdmin(viewer.userId),
+    };
+    if (
+      registrySkillTextReadable({
+        ...known,
+        visibility: item.visibility ?? null,
+        isOwner: false,
+      })
+    ) {
       return true;
     }
-    return (await this.findSkillOwnerUserId(item.skillId)) === viewer.userId;
+    const access = await this.findSkillTextAccess(item.skillId);
+    return registrySkillTextReadable({
+      ...known,
+      visibility: access?.visibility ?? null,
+      isOwner: access !== null && access.ownerUserId === viewer.userId,
+    });
   }
 
-  private async findSkillOwnerUserId(skillId: string): Promise<string | null> {
+  /** The two stored facts the text rule turns on. */
+  private async findSkillTextAccess(
+    skillId: string,
+  ): Promise<{ visibility: string; ownerUserId: string | null } | null> {
     const [row] = await db
-      .select({ ownerUserId: skillDefinitions.ownerUserId })
+      .select({
+        visibility: skillDefinitions.visibility,
+        ownerUserId: skillDefinitions.ownerUserId,
+      })
       .from(skillDefinitions)
       .where(eq(skillDefinitions.id, skillId))
       .limit(1);
-    return row?.ownerUserId ?? null;
+    return row ?? null;
   }
 
   /**
@@ -1398,7 +1599,7 @@ export class ContentSkillsService {
       .leftJoin(workspaceSkills, and(eq(workspaceSkills.skillId, skillDefinitions.id), eq(workspaceSkills.workspaceId, viewer.workspaceId), eq(workspaceSkills.teamId, viewer.teamId)))
       .where(and(eq(skillDefinitions.id, ids.skillId), eq(skillVersions.id, ids.versionId), eq(skillDefinitions.sourceType, "registry_github"), eq(skillDefinitions.status, "active"), registryAccess(viewer),
         or(eq(skillVersions.status, "published"), eq(skillDefinitions.ownerUserId, viewer.userId)))).limit(1);
-    return row ? mapCatalogRow(row) : null;
+    return row ? ((await mapRegistryCatalogRows([row]))[0] ?? null) : null;
   }
 
   /** A workspace/team skill or a managed builtin, as the catalog lists it. */
@@ -1436,7 +1637,7 @@ export class ContentSkillsService {
       limit: 1,
     });
     if (registryRow) {
-      return mapCatalogRow(registryRow);
+      return (await mapRegistryCatalogRows([registryRow]))[0] ?? null;
     }
     // Inline for the same reason as the registry query. It only turns the slug
     // into ids; whether this workspace may see the skill is still decided by
@@ -1764,6 +1965,7 @@ export const contentSkillsService = new ContentSkillsService();
 
 export const testExports = {
   isRegistryRowVisibleToViewer,
+  registrySkillTextReadable,
   registryCatalogFields,
   skillSearchRelevanceRank,
   compareSkillSearchRelevance,

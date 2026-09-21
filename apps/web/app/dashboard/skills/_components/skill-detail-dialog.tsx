@@ -3,10 +3,14 @@
 import { SkillAvatar } from "./skill-avatar";
 
 import * as React from "react";
-import type { RegistryVersionDetail } from "@sourceweft/contracts";
+import type {
+  RegistryVersionDetail,
+  SkillCatalogCategory,
+} from "@sourceweft/contracts";
 import { RegistryVersions } from "./registry-versions";
 import { SkillContentRestricted } from "./skill-content-restricted";
 import { SkillIntroduction } from "./skill-introduction";
+import { SkillMarketFacts } from "./skill-market-facts";
 import {
   AlertTriangle,
   ExternalLink,
@@ -45,6 +49,7 @@ type SkillCatalogDetail = Awaited<
 >;
 
 export function SkillDetailDialog({
+  categories,
   item,
   onInstall,
   onOpenChange,
@@ -53,6 +58,8 @@ export function SkillDetailDialog({
   pending,
   workspaceId,
 }: {
+  /** The market's categories, to name the slugs a community skill carries. */
+  categories?: SkillCatalogCategory[];
   item: SkillCatalogItem | null;
   onInstall: (item: SkillCatalogItem) => void;
   onOpenChange: (open: boolean) => void;
@@ -176,6 +183,13 @@ export function SkillDetailDialog({
                 <DialogDescription className="mt-1 line-clamp-2 text-xs">
                   {activeItem?.description ?? t("dialog.descriptionLoading")}
                 </DialogDescription>
+                {activeItem ? (
+                  <SkillMarketFacts
+                    categories={categories ?? []}
+                    className="mt-1.5"
+                    item={activeItem}
+                  />
+                ) : null}
               </div>
             </div>
             {activeItem && canManageInstall ? (
@@ -234,6 +248,11 @@ export function SkillDetailDialog({
                     workspaceId={workspaceId}
                     catalogId={item.catalogId}
                     initialVersionId={item.skillVersionId}
+                    // The catalog lists a skill under its published current
+                    // version; an owner's unpublished draft is not an update.
+                    currentVersionId={
+                      item.installable === false ? null : item.skillVersionId
+                    }
                     onView={handleVersionView}
                     onChanged={() => {
                       versionChangedRef.current = true;

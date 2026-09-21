@@ -132,6 +132,11 @@ export async function putSkillBundle(
   return { sha256, objectKey, sizeBytes: content.byteLength };
 }
 
+/** Whether an object this module wrote is still there. */
+export function skillObjectExists(objectKey: string): Promise<boolean> {
+  return sandboxAssetObjectExists({ key: objectKey });
+}
+
 /** Short-lived URL for the sandbox's fetch rung. */
 export function presignSkillBundleUrl(objectKey: string): Promise<string> {
   return getSandboxAssetDownloadUrl({ key: objectKey });

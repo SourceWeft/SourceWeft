@@ -11,6 +11,7 @@ export * from "./source-selection";
 export * from "./files";
 export * from "./stream";
 export * from "./skills";
+export * from "./skill-claims";
 export * from "./working-files";
 export * from "./model-catalog";
 export * from "./byok";

@@ -71,7 +71,9 @@ import type {
   ListSourcesRequest,
   ListSourceStatusesRequest,
   ListSourceStatusesResponse,
+  ListSkillCatalogCategoriesResponse,
   ListSkillsCatalogParams,
+  OwnerSkillListing,
   ListSkillsCatalogResponse,
   SearchRegistrySkillsResponse,
   ListThreadsRequest,
@@ -750,9 +752,38 @@ export class ContentClient {
     if (params.limit !== undefined) search.set("limit", String(params.limit));
     if (params.cursor) search.set("cursor", params.cursor);
     if (params.q) search.set("q", params.q);
+    if (params.category) search.set("category", params.category);
+    if (params.trust) search.set("trust", params.trust);
+    if (params.capability) search.set("capability", params.capability);
+    if (params.installed) search.set("installed", params.installed);
+    if (params.sort) search.set("sort", params.sort);
     const suffix = search.size > 0 ? `?${search.toString()}` : "";
     return this.http.get<ListSkillsCatalogResponse>(
       `/v1/workspaces/${encode(workspaceId)}/skills/catalog${suffix}`,
+    );
+  }
+
+  /**
+   * Whether a community skill the caller imported may be on the public market.
+   * Rejects with 404 for a skill that is not theirs.
+   */
+  getOwnerSkillListing(workspaceId: string, catalogId: string) {
+    return this.http.get<OwnerSkillListing>(
+      `/v1/workspaces/${encode(workspaceId)}/skills/catalog/${encode(catalogId)}/listing`,
+    );
+  }
+
+  setOwnerSkillListing(workspaceId: string, catalogId: string, listed: boolean) {
+    return this.http.put<OwnerSkillListing>(
+      `/v1/workspaces/${encode(workspaceId)}/skills/catalog/${encode(catalogId)}/listing`,
+      { listed },
+    );
+  }
+
+  /** The market's categories, each with how many community skills it holds. */
+  listSkillCatalogCategories(workspaceId: string) {
+    return this.http.get<ListSkillCatalogCategoriesResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/skills/catalog/categories`,
     );
   }
 

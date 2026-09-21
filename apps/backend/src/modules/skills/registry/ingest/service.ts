@@ -1,3 +1,4 @@
+import type { SkillSubmissionOptions } from "@sourceweft/db";
 import type { SkillSubmission } from "@sourceweft/contracts";
 import { logger } from "../../../../shared/logger";
 import { ContentError } from "../../../content/errors";
@@ -123,6 +124,8 @@ export async function createSkillSubmission(
   input: Viewer & {
     source: string;
     install?: { skill?: string; installedVia?: "user" | "agent" };
+    /** Only the platform's own import passes these (`system-submit.ts`). */
+    options?: SkillSubmissionOptions;
   },
 ): Promise<{ submission: SkillSubmission; created: boolean }> {
   const sourceInput = input.source.trim();
@@ -158,6 +161,7 @@ export async function createSkillSubmission(
           },
         }
       : null,
+    ...(input.options ? { options: input.options } : {}),
   });
   if (created) {
     await enqueueOrFail(submission);

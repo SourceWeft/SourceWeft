@@ -10,10 +10,15 @@ import {
   putCustomSkillVersionFileRequestSchema,
   enableWorkspaceSkillRequestSchema,
   listSkillsCatalogQuerySchema,
+  setOwnerSkillListingRequestSchema,
   updateCustomSkillVersionRequestSchema,
   updateWorkspaceSkillRequestSchema,
 } from "@sourceweft/contracts";
 import { contentSkillsService } from "../../../modules/skills";
+import {
+  getOwnerSkillListing,
+  setOwnerSkillListing,
+} from "../../../modules/skills/market/listing";
 import { decodeSkillCatalogCursor } from "../../../modules/skills/service";
 import { isContentError } from "../../../modules/content/errors";
 import { requireSkillWorkspace } from "../../../modules/skills/registry/permissions";
@@ -23,6 +28,7 @@ import {
   requireSession,
 } from "../../middleware/auth-session";
 import { ApiError, ApiResponse } from "../../response/api-response";
+import { logger } from "../../../shared/logger";
 import { ensureObjectBody, requireRouteParam } from "./helpers";
 
 async function resolveSkillContext(c: import("hono").Context) {
@@ -42,6 +48,42 @@ async function resolveSkillContext(c: import("hono").Context) {
 }
 
 export function registerSkillRoutes(app: Hono) {
+  // A claimed community skill's author's say: may it be on the public market?
+  // Anyone else — the importer of an unclaimed skill included — gets the same
+  // 404 as for a skill that does not exist (`market/listing.ts`).
+  app.get("/skills/catalog/:catalogId/listing", async (c) => {
+    const context = await resolveSkillContext(c);
+    const [skillId = ""] = requireRouteParam(c, "catalogId").split(":");
+    const listing = await getOwnerSkillListing({
+      skillId,
+      userId: getSessionUserId(context.session),
+    });
+    if (!listing) throw ApiError.notFound("Skill not found");
+    return ApiResponse.success(c, listing);
+  });
+  app.put("/skills/catalog/:catalogId/listing", async (c) => {
+    const context = await resolveSkillContext(c);
+    const parsed = setOwnerSkillListingRequestSchema.safeParse(
+      await c.req.json().catch(() => {
+        throw ApiError.invalidJson();
+      }),
+    );
+    if (!parsed.success) throw ApiError.validation();
+    const [skillId = ""] = requireRouteParam(c, "catalogId").split(":");
+    const userId = getSessionUserId(context.session);
+    const listing = await setOwnerSkillListing({
+      skillId,
+      userId,
+      listed: parsed.data.listed,
+    });
+    if (!listing) throw ApiError.notFound("Skill not found");
+    logger.info("Skill owner changed its public listing", {
+      skillId,
+      userId,
+      listed: parsed.data.listed,
+    });
+    return ApiResponse.success(c, listing);
+  });
   app.get("/skills/catalog/:catalogId/versions", async (c) => {
     const context = await resolveSkillContext(c);
     const rawLimit = c.req.query("limit") ?? "20";
@@ -128,8 +170,28 @@ export function registerSkillRoutes(app: Hono) {
       limit: parsed.data.limit,
       cursor: parsed.data.cursor,
       query: parsed.data.q,
+      sort: parsed.data.sort,
+      filters: {
+        category: parsed.data.category,
+        trust: parsed.data.trust,
+        capability: parsed.data.capability,
+        installed: parsed.data.installed,
+      },
     });
     return ApiResponse.success(c, result);
+  });
+
+  // Registered before `/skills/catalog/:catalogId`, like `by-slug` below: Hono
+  // matches in registration order, and that route would otherwise take
+  // `categories` for a catalogId.
+  app.get("/skills/catalog/categories", async (c) => {
+    const { session } = await resolveSkillContext(c);
+    return ApiResponse.success(
+      c,
+      await contentSkillsService.listCatalogCategories({
+        userId: getSessionUserId(session),
+      }),
+    );
   });
 
   // Registered before `/skills/catalog/:catalogId`: Hono matches in

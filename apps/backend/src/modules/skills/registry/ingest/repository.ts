@@ -4,6 +4,7 @@ import {
   db,
   skillRegistrySubmissions,
   type SkillSubmissionOnComplete,
+  SkillSubmissionOptions,
   type SkillSubmissionSkillResult,
   type SkillSubmissionStages,
 } from "@sourceweft/db";
@@ -39,6 +40,7 @@ export async function createOrReuseSubmission(input: {
   ref: string | null;
   subpath: string | null;
   onComplete: SkillSubmissionOnComplete | null;
+  options?: SkillSubmissionOptions;
 }): Promise<{ submission: SkillSubmissionRow; created: boolean }> {
   // The in-flight row can finish between the conflicting insert and the lookup;
   // the slot is then free, so inserting again succeeds.
@@ -63,6 +65,7 @@ export async function createOrReuseSubmission(input: {
         ref: input.ref,
         subpath: input.subpath,
         onComplete: input.onComplete,
+        options: input.options ?? {},
       })
       .onConflictDoNothing()
       .returning();

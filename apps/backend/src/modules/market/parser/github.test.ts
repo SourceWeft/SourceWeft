@@ -5,6 +5,7 @@ import {
   GitHubArchiveError,
   githubFetch,
   normalizeGitHubSource,
+  assertCommitOnDefaultBranch,
   resolveCommit,
 } from "./github";
 
@@ -111,14 +112,14 @@ describe("resolveCommit", () => {
     });
   });
 
-  test("a full sha survives a failed lookup, with the date simply unknown", async () => {
+  test("a sha GitHub cannot find is unpinnable, never trusted as-is", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => jsonResponse({ message: "Not Found" }, 404)),
     );
-    assert.deepEqual(await resolveCommit(source, "b".repeat(40)), {
-      sha: "b".repeat(40),
-    });
+    // An unread sha is an unverified one: it could be anything, including a
+    // commit that only exists in a fork.
+    assert.equal(await resolveCommit(source, "b".repeat(40)), undefined);
     assert.equal(await resolveCommit(source, "main"), undefined);
   });
 
@@ -129,10 +130,53 @@ describe("resolveCommit", () => {
       (error: unknown) =>
         error instanceof GitHubArchiveError && error.code === "ARCHIVE_TIMEOUT",
     );
-    // A full sha still needs no metadata to be pinned.
-    assert.deepEqual(
-      await resolveCommit(source, "c".repeat(40), { timeoutMs: 20 }),
-      { sha: "c".repeat(40) },
+    // A full sha is no exception: without GitHub's word on it, it is not pinned.
+    await assert.rejects(
+      resolveCommit(source, "c".repeat(40), { timeoutMs: 20 }),
+      (error: unknown) =>
+        error instanceof GitHubArchiveError && error.code === "ARCHIVE_TIMEOUT",
     );
+  });
+
+  test("a 5xx while resolving is a failure to retry, not an unpinnable ref", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse({ message: "boom" }, 502)),
+    );
+    await assert.rejects(resolveCommit(source, "d".repeat(40)), /failed 502/);
+  });
+});
+
+describe("assertCommitOnDefaultBranch", () => {
+  const compare = (status: string | null, httpStatus = 200) =>
+    vi.fn(async (url: string) => {
+      assert.match(url, /\/compare\/[0-9a-f]{40}\.\.\.main\?per_page=1$/);
+      return httpStatus === 200
+        ? jsonResponse({ status })
+        : jsonResponse({ message: "x" }, httpStatus);
+    });
+  const sha = "e".repeat(40);
+
+  test("a commit in the default branch's history is accepted", async () => {
+    for (const status of ["ahead", "identical"]) {
+      vi.stubGlobal("fetch", compare(status));
+      await assertCommitOnDefaultBranch(source, sha, "main");
+    }
+  });
+
+  test("a fork's commit — or any not on the default branch — is refused", async () => {
+    for (const [status, httpStatus] of [
+      ["behind", 200],
+      ["diverged", 200],
+      [null, 404],
+    ] as const) {
+      vi.stubGlobal("fetch", compare(status, httpStatus));
+      await assert.rejects(
+        assertCommitOnDefaultBranch(source, sha, "main"),
+        (error: unknown) =>
+          error instanceof GitHubArchiveError &&
+          error.code === "ARCHIVE_NOT_IN_REPOSITORY",
+      );
+    }
   });
 });

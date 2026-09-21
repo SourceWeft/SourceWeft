@@ -3,6 +3,9 @@ import { SkillParseError } from "../frontmatter";
 import { SCAN_RULE_VERSION } from "./scan";
 import { analyzeRegistrySkill, type AnalyzedRegistrySkill } from "./analyze";
 import { extractRegistryLogo } from "./logo";
+import { compareCommits } from "../../market/parser/github";
+import { grantSkillAccess } from "../repository";
+import { parseGithubStoragePointer } from "../storage/source-pointer";
 import { RegistrySubmissionError } from "./errors";
 import { triageRegistrySubmission } from "./guard";
 import {
@@ -132,6 +135,17 @@ export async function writeSubmittedSkill(input: {
   read: Pick<ReadRegistryResult, "source" | "commitSha" | "committedAt">;
   userId: string;
   skill: AnalyzedSubmissionSkill;
+  /**
+   * The submitter's scope. When the skill was already indexed by someone
+   * else, this scope is given the right to use it (`grantSkillAccess`): a
+   * restricted entry would otherwise be invisible to the person who just
+   * imported it. A null workspace = team-wide.
+   */
+  grantTo?: { teamId: string; workspaceId: string | null };
+  /** Tests replace GitHub's ancestry answer; production asks it. */
+  compare?: typeof compareCommits;
+  /** From the platform's own import only: mark the skill featured (or not). */
+  featured?: boolean;
 }): Promise<RegistrySkillSubmissionResult> {
   if ("failure" in input.skill) {
     return input.skill.failure;
@@ -141,7 +155,6 @@ export async function writeSubmittedSkill(input: {
   const { owner, repo, repoUrl } = input.read.source;
   try {
     const existing = await getRegistrySkillForSubmission(analyzed.slug);
-    // triage throws REGISTRY_SUBMISSION_CONFLICT on an ownership violation.
     const decision = triageRegistrySubmission({
       existing,
       submitterId: input.userId,
@@ -171,8 +184,16 @@ export async function writeSubmittedSkill(input: {
         repoUrl,
         submittedBy: input.userId,
         // Orders this commit against the skill's other versions when the
-        // index decides which one is current.
+        // index decides which one is current and GitHub cannot say by ancestry.
         committedAt,
+        ...(input.read.source.defaultBranch
+          ? {
+              provenance: {
+                defaultBranch: input.read.source.defaultBranch,
+                checkedAt: new Date().toISOString(),
+              },
+            }
+          : {}),
         capability: analyzed.capability,
         scan: analyzed.scan,
         ingestion: {
@@ -188,7 +209,16 @@ export async function writeSubmittedSkill(input: {
       },
     };
 
+    const currency = await currencyAgainstCurrent({
+      owner,
+      repo,
+      commitSha,
+      current: existing?.currentVersion ?? null,
+      compare: input.compare ?? compareCommits,
+    });
     const saved = await upsertRegistrySkillIndex({
+      ...(currency ? { currency } : {}),
+      ...(input.featured !== undefined ? { featured: input.featured } : {}),
       slug: analyzed.slug,
       displayName: analyzed.displayName,
       description: analyzed.description,
@@ -206,6 +236,20 @@ export async function writeSubmittedSkill(input: {
       versionStatus: decision.versionStatus,
       outcome: decision.outcome,
     });
+    // Someone else indexed this skill first: it stays theirs to list or hold,
+    // and this submitter's scope gets to use it.
+    if (
+      input.grantTo &&
+      existing?.ownerUserId &&
+      existing.ownerUserId !== input.userId
+    ) {
+      await grantSkillAccess({
+        skillId: saved.skillId,
+        teamId: input.grantTo.teamId,
+        workspaceId: input.grantTo.workspaceId,
+        grantedBy: input.userId,
+      });
+    }
 
     return {
       slug: analyzed.slug,
@@ -220,6 +264,46 @@ export async function writeSubmittedSkill(input: {
   } catch (error) {
     return failedSkillResult(discovered, error);
   }
+}
+
+/**
+ * Whether this commit descends from the skill's current one, by GitHub's
+ * compare API. Undefined when there is nothing to compare with, when it is the
+ * same commit, or when GitHub cannot say (diverged history, an error) — the
+ * index then falls back to commit dates. Both commits were checked to be on
+ * the default branch when they were resolved, so this only settles their order.
+ */
+async function currencyAgainstCurrent(input: {
+  owner: string;
+  repo: string;
+  commitSha: string;
+  current: { id: string; storagePointer: string } | null;
+  compare: typeof compareCommits;
+}): Promise<
+  { againstVersionId: string; candidateIsNewer: boolean } | undefined
+> {
+  const currentSha = parseGithubStoragePointer(
+    input.current?.storagePointer,
+  )?.commitSha;
+  if (!input.current || !currentSha || currentSha === input.commitSha) {
+    return undefined;
+  }
+  try {
+    const status = await input.compare(
+      { owner: input.owner, repo: input.repo },
+      currentSha,
+      input.commitSha,
+    );
+    if (status === "ahead") {
+      return { againstVersionId: input.current.id, candidateIsNewer: true };
+    }
+    if (status === "behind") {
+      return { againstVersionId: input.current.id, candidateIsNewer: false };
+    }
+  } catch {
+    // Ancestry is the better answer, not the only one: commit dates decide.
+  }
+  return undefined;
 }
 
 /**

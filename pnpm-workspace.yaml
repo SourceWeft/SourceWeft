@@ -2,6 +2,7 @@ packages:
   - apps/*
   - packages/*
   - enterprise/*
+  - cli
 
 onlyBuiltDependencies:
   - "@parcel/watcher"

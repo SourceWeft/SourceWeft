@@ -27,22 +27,35 @@ test("a flagged scan queues for review", () => {
   assert.ok(decision.reasons.includes("egress:pipe-to-shell"));
 });
 
-test("ownership: a different submitter cannot overwrite an existing entry", () => {
+test("another submitter's clean commit of the same repository indexes", () => {
+  // No ownership veto: the content is the upstream's, from its default
+  // branch, whoever submits it. Control of the listing is not decided here.
   const existing: RegistryExistingEntry = {
-    ownerUserId: "victim",
+    ownerUserId: "first-importer",
     definitionStatus: "active",
     currentVersionStatus: "published",
   };
-  assert.throws(
-    () =>
-      triageRegistrySubmission({
-        existing,
-        submitterId: "attacker",
-        scan: CLEAN,
-      }),
-    (error) =>
-      error instanceof RegistrySubmissionError &&
-      error.code === "REGISTRY_SUBMISSION_CONFLICT",
+  assert.deepEqual(
+    triageRegistrySubmission({
+      existing,
+      submitterId: "someone-else",
+      scan: CLEAN,
+    }),
+    {
+      outcome: "indexed",
+      versionStatus: "published",
+      definitionStatus: "active",
+      reasons: [],
+    },
+  );
+  // Sticky review holds for them exactly as for the owner.
+  assert.equal(
+    triageRegistrySubmission({
+      existing: { ...existing, currentVersionStatus: "draft" },
+      submitterId: "someone-else",
+      scan: CLEAN,
+    }).outcome,
+    "queued",
   );
 });
 

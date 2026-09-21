@@ -280,6 +280,8 @@ export async function setRegistrySkillVersionStatus(
               ? {
                   displayName: version.manifestJson.displayName,
                   description: version.manifestJson.description,
+                  // New content is not vouched for until an admin looks again.
+                  verified: false,
                 }
               : {}),
             ...(decision.visibility ? { visibility: decision.visibility } : {}),
@@ -310,6 +312,8 @@ export async function setRegistrySkillVersionStatus(
         .set({
           displayName: successor.manifestJson.displayName,
           description: successor.manifestJson.description,
+          // A different version is what users get now; vouch for it again.
+          verified: false,
           updatedAt: now,
         })
         .where(eq(skillDefinitions.id, identity.skillId));

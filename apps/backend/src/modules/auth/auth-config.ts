@@ -30,6 +30,7 @@ import {
   resolveAuthErrorLocale,
 } from "./auth-error-i18n";
 import { resolveMailLocale } from "./mail-locale";
+import { mailDeliveryConfigured } from "../mail/delivery";
 import {
   isPersonalOrganizationMetadata,
   parseSourceweftOrganizationKind,
@@ -247,7 +248,12 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}): any {
       // is what lets someone sign up under another person's address. Requiring
       // the proof also stops better-auth from revoking a password later, when
       // a magic link or email code finally proves who owns the address.
-      requireEmailVerification: true,
+      //
+      // Only where mail can be delivered. Without it the link never arrives —
+      // a fresh self-hosted install would lock its own operator out — and the
+      // later proof this guards against cannot happen either, since magic
+      // links and email codes are not delivered.
+      requireEmailVerification: mailDeliveryConfigured(),
       ...(isRuntimeMode
         ? {
             async sendResetPassword(data, request) {

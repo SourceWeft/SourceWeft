@@ -13,6 +13,11 @@ import {
   loadSkillVersionBundle,
   readSkillVersionFile,
 } from "./repository";
+import {
+  restoreSkillVersionFromSource,
+  withSkillSourceRestore,
+} from "./storage/restore";
+import { skillObjectExists } from "./storage";
 import { MAX_SELECTED_SKILLS_PER_TURN } from "@sourceweft/contracts/stream";
 import type {
   EnabledSkillDescriptor,
@@ -324,13 +329,18 @@ async function resolveWorkspaceSkillContent(input: {
   if (version.storageType === "object") {
     const readFile: SkillFileReader = createSkillFileReader({
       files,
+      // Object storage is a cache of a community skill: a missing object is
+      // fetched again from the pinned commit and must hash to what was indexed.
       fetch: (file) =>
-        readSkillObjectFile({
-          objectKey: rows.get(file.path)!.objectKey!,
-          mimeType: file.mimeType,
-          sizeBytes: file.sizeBytes,
-        }),
+        withSkillSourceRestore(version.id, () =>
+          readSkillObjectFile({
+            objectKey: rows.get(file.path)!.objectKey!,
+            mimeType: file.mimeType,
+            sizeBytes: file.sizeBytes,
+          }),
+        ),
     });
+    const bundleObjectKey = version.bundleObjectKey!;
     return {
       files,
       // skill_versions_object_bundle_check guarantees all four columns.
@@ -340,6 +350,10 @@ async function resolveWorkspaceSkillContent(input: {
         sha256: version.bundleSha256!,
         objectKey: version.bundleObjectKey!,
         sizeBytes: version.bundleSizeBytes!,
+        ensureStored: async () => {
+          if (await skillObjectExists(bundleObjectKey)) return;
+          await restoreSkillVersionFromSource(version.id);
+        },
       },
     };
   }

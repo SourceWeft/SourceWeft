@@ -281,7 +281,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
         ).version.moderation?.reason,
       ).toBe("Fix unsafe text");
     });
-    test("concurrent initial writes serialize and cannot change owner", async () => {
+    test("concurrent initial writes serialize, and another submitter cannot change the owner", async () => {
       const source = input(`gh-race-${randomUUID()}`, "a");
       const results = await Promise.all([
         repo.upsertRegistrySkillIndex(source),
@@ -289,9 +289,18 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       ]);
       ids.push(results[0]!.skillId);
       expect(results[0]!.skillVersionId).toBe(results[1]!.skillVersionId);
-      await expect(
-        repo.upsertRegistrySkillIndex({ ...source, submitterId: "attacker" }),
-      ).rejects.toMatchObject({ code: "REGISTRY_SUBMISSION_CONFLICT" });
+      // Someone else submitting the same repository adds (here: finds) a
+      // version; it does not take the skill over.
+      const again = await repo.upsertRegistrySkillIndex({
+        ...source,
+        submitterId: "someone-else",
+      });
+      expect(again.skillVersionId).toBe(results[0]!.skillVersionId);
+      const [definition] = await data.db
+        .select({ ownerUserId: data.skillDefinitions.ownerUserId })
+        .from(data.skillDefinitions)
+        .where(eq(data.skillDefinitions.id, results[0]!.skillId));
+      expect(definition!.ownerUserId).toBe(source.submitterId);
     });
     test("revoked installed version is refused instead of replaced", async () => {
       const { saved: a } = await create();

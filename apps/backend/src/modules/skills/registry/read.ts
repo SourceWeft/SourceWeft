@@ -282,7 +282,9 @@ export function mapRegistryArchiveError(error: unknown): unknown {
         ? "REGISTRY_SUBMISSION_UNPINNED"
         : error.code === "ARCHIVE_TIMEOUT"
           ? "REGISTRY_SUBMISSION_TIMEOUT"
-          : "REGISTRY_SUBMISSION_NOT_SKILL",
+          : error.code === "ARCHIVE_NOT_IN_REPOSITORY"
+            ? "REGISTRY_SUBMISSION_NOT_IN_REPOSITORY"
+            : "REGISTRY_SUBMISSION_NOT_SKILL",
     error.message,
   );
 }

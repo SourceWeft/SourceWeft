@@ -1,11 +1,9 @@
-import { RegistrySubmissionError } from "./errors";
-
 /**
- * Stage 4 — Guard (ownership + triage). Pure decision, no IO.
+ * Stage 4 — Guard (triage). Pure decision, no IO.
  * docs/architecture/skill-registry-index.md §3 Stage 4 / build phase R2.
  *
- * Mirrors `market/submission.ts`:
- *   - Ownership: a submission cannot overwrite another submitter's entry.
+ *   - No ownership veto: anyone may submit a newer commit of the same public
+ *     repository (see below). Control of the listing is not decided here.
  *   - Sticky: once a definition/version is in review (draft) or tombstoned
  *     (deprecated / archived), a re-submit that merely drops the risky lines
  *     can't auto-index — only an admin moves it.
@@ -44,17 +42,16 @@ function isSticky(existing: NonNullable<RegistryExistingEntry>): boolean {
 }
 
 export function triageRegistrySubmission(input: TriageInput): TriageDecision {
-  const { existing, submitterId, scan } = input;
+  const { existing, scan } = input;
 
-  // Ownership guard: any existing entry owned by a different submitter — in any
-  // state — is off-limits, so an attacker can't overwrite a victim's listing or
-  // poison their in-review submission (mirrors market's conflict guard).
-  if (existing?.ownerUserId && existing.ownerUserId !== submitterId) {
-    throw new RegistrySubmissionError(
-      "REGISTRY_SUBMISSION_CONFLICT",
-      "This skill was already submitted by another user and cannot be overwritten.",
-    );
-  }
+  // No ownership veto. A registry entry is a public repository's skill, and
+  // its content is whatever that repository holds at a commit on its default
+  // branch (checked when the source is resolved): anyone submitting the same
+  // repository can only bring a commit its own writers made. So a second
+  // submitter adds a version and gets to use the skill, but not control of it —
+  // the listing stays with its owner, and nothing here reads the submitter.
+  // (It used to be refused outright, which let whoever imported a public
+  // repository first keep everyone else from it, and froze it at their commit.)
 
   const reasons: string[] = [];
   const sticky = existing ? isSticky(existing) : false;

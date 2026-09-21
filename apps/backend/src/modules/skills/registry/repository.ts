@@ -1,11 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { parseGithubStoragePointer } from "../storage/source-pointer";
+import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import {
   db,
   skillDefinitions,
   type SkillManifestJson,
   skillVersionFiles,
   skillVersions,
+  skillRepoClaims,
 } from "@sourceweft/db";
 import {
   putSkillBlob,
@@ -60,6 +62,19 @@ export type UpsertRegistrySkillInput = {
   outcome: "indexed" | "queued";
   /** The whole bundle, SKILL.md included, as raw bytes; paths bundle-relative. */
   files: RegistrySkillFile[];
+  /**
+   * How this commit relates to the skill's current version, when the caller
+   * asked GitHub (`compareCommits`): newer = it descends from the current
+   * commit. Decides currency ahead of commit dates, which whoever writes the
+   * commit sets. Applied only if the current version is still the one compared.
+   */
+  currency?: { againstVersionId: string; candidateIsNewer: boolean };
+  /**
+   * From the platform's own import only: mark the skill featured (or not).
+   * Written when the skill is created, and afterwards unless a market admin
+   * set it — an admin's choice is never overwritten by an import.
+   */
+  featured?: boolean;
 };
 
 export type RegistrySkillFile = {
@@ -282,15 +297,21 @@ export function registryVersionTakesCurrent(input: {
  * Existing registry entry for a slug (or null) — the ownership/sticky inputs
  * Stage 4 needs. `currentVersionStatus` is the status of the `isCurrent` version.
  */
-export async function getRegistrySkillForSubmission(
-  slug: string,
-): Promise<(RegistryExistingEntry & { skillId: string }) | null> {
+export async function getRegistrySkillForSubmission(slug: string): Promise<
+  | (NonNullable<RegistryExistingEntry> & {
+      skillId: string;
+      currentVersion: { id: string; storagePointer: string } | null;
+    })
+  | null
+> {
   const [row] = await db
     .select({
       skillId: skillDefinitions.id,
       ownerUserId: skillDefinitions.ownerUserId,
       definitionStatus: skillDefinitions.status,
       currentVersionStatus: skillVersions.status,
+      currentVersionId: skillVersions.id,
+      currentStoragePointer: skillVersions.storagePointer,
     })
     .from(skillDefinitions)
     .leftJoin(
@@ -315,6 +336,13 @@ export async function getRegistrySkillForSubmission(
     ownerUserId: row.ownerUserId,
     definitionStatus: row.definitionStatus,
     currentVersionStatus: row.currentVersionStatus ?? null,
+    currentVersion:
+      row.currentVersionId && row.currentStoragePointer
+        ? {
+            id: row.currentVersionId,
+            storagePointer: row.currentStoragePointer,
+          }
+        : null,
   };
 }
 
@@ -370,14 +398,12 @@ export async function upsertRegistrySkillIndex(
       .from(skillDefinitions)
       .where(eq(skillDefinitions.slug, input.slug))
       .limit(1);
-    if (
-      existing &&
-      (existing.sourceType !== "registry_github" ||
-        (existing.ownerUserId && existing.ownerUserId !== input.submitterId))
-    ) {
+    // Another kind of skill holding this slug is a real conflict. Another
+    // submitter of the same repository is not: see `triageRegistrySubmission`.
+    if (existing && existing.sourceType !== "registry_github") {
       throw new RegistrySubmissionError(
         "REGISTRY_SUBMISSION_CONFLICT",
-        "This skill belongs to another submitter or source",
+        "This skill belongs to another source",
       );
     }
     const skillId = existing?.id ?? randomUUID();
@@ -449,6 +475,22 @@ export async function upsertRegistrySkillIndex(
         "REGISTRY_VERSION_UNAVAILABLE",
         "This skill is archived",
       );
+    if (
+      existing &&
+      input.featured !== undefined &&
+      existing.featuredSetBy !== "admin" &&
+      (existing.featured !== input.featured ||
+        existing.featuredSetBy !== "sync")
+    ) {
+      await tx
+        .update(skillDefinitions)
+        .set({
+          featured: input.featured,
+          featuredSetBy: "sync",
+          updatedAt: now,
+        })
+        .where(eq(skillDefinitions.id, existing.id));
+    }
     const [latest] = await tx
       .select()
       .from(skillVersions)
@@ -477,7 +519,13 @@ export async function upsertRegistrySkillIndex(
     // commit has either fully landed or not started: the comparison below sees
     // a settled current version whichever transaction runs second.
     const [current] = await tx
-      .select({ manifestJson: skillVersions.manifestJson })
+      .select({
+        id: skillVersions.id,
+        version: skillVersions.version,
+        status: skillVersions.status,
+        bundleSha256: skillVersions.bundleSha256,
+        manifestJson: skillVersions.manifestJson,
+      })
       .from(skillVersions)
       .where(
         and(
@@ -486,21 +534,93 @@ export async function upsertRegistrySkillIndex(
         ),
       )
       .limit(1);
+    // Byte-for-byte the skill that is current already, just at another
+    // commit: not a version of its own. It would only be a duplicate with a
+    // new label — listed in the versions, and announced as an update to every
+    // workspace that has the old one. The newer commit is noted instead.
+    if (current && current.bundleSha256 === stored.bundle.sha256) {
+      const registry = current.manifestJson.registry;
+      const candidateAt = input.manifestJson.registry?.committedAt;
+      const seenAt = registry?.seenAt?.committedAt ?? registry?.committedAt;
+      if (
+        registry &&
+        candidateAt &&
+        (!seenAt || Date.parse(candidateAt) > Date.parse(seenAt))
+      ) {
+        await tx
+          .update(skillVersions)
+          .set({
+            manifestJson: {
+              ...current.manifestJson,
+              registry: {
+                ...registry,
+                seenAt: {
+                  commitSha: input.commitSha,
+                  committedAt: candidateAt,
+                },
+              },
+            },
+            updatedAt: now,
+          })
+          .where(eq(skillVersions.id, current.id));
+      }
+      return {
+        slug: input.slug,
+        skillId,
+        skillVersionId: current.id,
+        version: current.version,
+        status: current.status === "published" ? "indexed" : "queued",
+        flags: registry?.scan.flags ?? [],
+        diagnostics: registry?.ingestion?.diagnostics ?? [],
+      };
+    }
     const isPublished = values.version.status === "published";
+    // Ancestry first — GitHub's answer to "does this commit descend from the
+    // current one" — and commit dates only when that answer is not for the
+    // version that is current now (another write got in between).
     const takesCurrent =
       isPublished &&
-      registryVersionTakesCurrent({
-        candidateCommittedAt: input.manifestJson.registry?.committedAt,
-        current: current
-          ? { committedAt: current.manifestJson.registry?.committedAt }
-          : null,
-      });
+      (current && input.currency?.againstVersionId === current.id
+        ? input.currency.candidateIsNewer
+        : registryVersionTakesCurrent({
+            candidateCommittedAt: input.manifestJson.registry?.committedAt,
+            current: current
+              ? { committedAt: current.manifestJson.registry?.committedAt }
+              : null,
+          }));
+    const pointer = parseGithubStoragePointer(input.storagePointer);
+    const repoOwner = pointer?.owner.toLowerCase() ?? null;
+    const repoName = pointer?.repo.toLowerCase() ?? null;
     if (!existing) {
+      // A repository its author has claimed: a skill it ships later is theirs
+      // from the start, whoever happened to import it.
+      const [claim] =
+        repoOwner && repoName
+          ? await tx
+              .select({
+                userId: skillRepoClaims.userId,
+                verifiedAt: skillRepoClaims.verifiedAt,
+              })
+              .from(skillRepoClaims)
+              .where(
+                and(
+                  eq(skillRepoClaims.repoOwner, repoOwner),
+                  eq(skillRepoClaims.repoName, repoName),
+                  eq(skillRepoClaims.status, "verified"),
+                ),
+              )
+              .limit(1)
+          : [];
       await tx.insert(skillDefinitions).values({
         id: skillId,
         ...values.definition,
         slug: input.slug,
-        ownerUserId: input.submitterId,
+        ownerUserId: claim?.userId ?? input.submitterId,
+        repoOwner,
+        repoName,
+        featured: input.featured ?? false,
+        featuredSetBy: input.featured === undefined ? null : "sync",
+        claimedAt: claim ? (claim.verifiedAt ?? now) : null,
         createdAt: now,
         updatedAt: now,
       });
@@ -512,6 +632,11 @@ export async function upsertRegistrySkillIndex(
         .set({
           displayName: input.displayName,
           description: input.description,
+          // `verified` vouches for content: new content is not vouched for
+          // until an admin looks again.
+          verified: false,
+          repoOwner: existing.repoOwner ?? repoOwner,
+          repoName: existing.repoName ?? repoName,
           updatedAt: now,
         })
         .where(eq(skillDefinitions.id, skillId));
@@ -556,4 +681,29 @@ export async function upsertRegistrySkillIndex(
       diagnostics: input.manifestJson.registry?.ingestion?.diagnostics ?? [],
     };
   });
+}
+
+/**
+ * Whether the author of this GitHub repository removed it from SourceWeft: a
+ * verified claim on it carries `removed_at`. Such a repository is not
+ * imported again — a new skill in it would otherwise be indexed and, once
+ * clean, listed as if the author had never asked.
+ */
+export async function isSkillRepositoryRemoved(repo: {
+  owner: string;
+  name: string;
+}): Promise<boolean> {
+  const [row] = await db
+    .select({ id: skillRepoClaims.id })
+    .from(skillRepoClaims)
+    .where(
+      and(
+        eq(skillRepoClaims.repoOwner, repo.owner.toLowerCase()),
+        eq(skillRepoClaims.repoName, repo.name.toLowerCase()),
+        eq(skillRepoClaims.status, "verified"),
+        isNotNull(skillRepoClaims.removedAt),
+      ),
+    )
+    .limit(1);
+  return row !== undefined;
 }

@@ -229,3 +229,223 @@ export type MarketSigningKey = z.infer<typeof marketSigningKeySchema>;
 export type ListMarketKeysResponse = z.infer<
   typeof listMarketKeysResponseSchema
 >;
+
+// ---------------------------------------------------------------------------
+// Public skill market — GET /v1/skills*
+//
+// Everything public and not built in: `visibility = public`, not a builtin,
+// active, with a published current version that is not `listing: hidden`. The
+// rule is about visibility, never about where a skill came from, so a new kind
+// of public skill shows up here without this contract changing.
+// ---------------------------------------------------------------------------
+
+// `recommended` = featured publishers first, then verified, then the rank score
+// (workspaces that added it and the repository's GitHub stars), then newest. `stars` = GitHub stars of
+// the source repository.
+export const marketSkillSortSchema = z.enum([
+  "recommended",
+  "popular",
+  "new",
+  "name",
+  "stars",
+]);
+export const marketSkillCapabilitySchema = z.enum([
+  "prompt-only",
+  "executable",
+]);
+
+export const marketSkillSummarySchema = z.object({
+  slug: z.string(),
+  // The author's own short name for the skill (SKILL.md frontmatter `name`).
+  name: z.string(),
+  displayName: z.string(),
+  description: z.string(),
+  // The skill's own logo (a small PNG thumbnail made at ingest, as a data: URL)
+  // or, failing that, its publisher's avatar. Null when neither is known.
+  logo: z
+    .object({
+      url: z.string().max(100_000),
+      source: z.enum(["skill", "publisher"]),
+    })
+    .nullable(),
+  // Market category slugs, in taxonomy order.
+  categories: z.array(z.string()),
+  // A market admin vouched for it. Never self-asserted.
+  verified: z.boolean(),
+  // From a publisher the platform highlights (a short list of major vendors).
+  // About who publishes it, not its content. Defaulted for older servers.
+  featured: z.boolean().default(false),
+  capability: marketSkillCapabilitySchema.nullable(),
+  license: z.string().nullable(),
+  // Repository owner, e.g. "anthropics". Null when it cannot be told.
+  author: z.string().nullable(),
+  repoUrl: z.string().nullable(),
+  // Deep link to the skill's directory at the pinned commit.
+  sourceUrl: z.string().nullable(),
+  // How many SourceWeft workspaces added it. Local installs with the CLI send
+  // nothing back, so they are not in this number.
+  installCount: z.number().int().nonnegative(),
+  listedAt: z.string(),
+  version: z.string(),
+  // When the current version was published here.
+  updatedAt: z.string().nullable(),
+  // The name is one `@sourceweft/cli` can install as a directory. The CLI
+  // refuses anything else, so no command is offered for it. Always set by the
+  // server; optional for answers from before it existed.
+  cliInstallable: z.boolean().optional(),
+  // GitHub facts about the source repository, refreshed periodically. 0, null
+  // and false until the first refresh.
+  stars: z.number().int().nonnegative().default(0),
+  repoPushedAt: z.string().nullable().default(null),
+  repoArchived: z.boolean().default(false),
+  // The repository's author claimed it on SourceWeft.
+  claimed: z.boolean().default(false),
+});
+
+export const listMarketSkillsRequestSchema = z.object({
+  query: z.string().trim().max(200).optional(),
+  category: z.string().trim().min(1).max(64).optional(),
+  verified: z.boolean().optional(),
+  featured: z.boolean().optional(),
+  capability: marketSkillCapabilitySchema.optional(),
+  sort: marketSkillSortSchema.optional(),
+  limit: z.number().int().min(1).max(100).optional(),
+  // Only good for the sort that produced it.
+  cursor: z.string().min(1).max(1024).optional(),
+});
+
+export const listMarketSkillsResponseSchema = z.object({
+  items: z.array(marketSkillSummarySchema),
+  nextCursor: z.string().nullable(),
+  // Every skill matching the query and filters, whatever page this is.
+  // Optional for answers from before it existed.
+  totalCount: z.number().int().nonnegative().optional(),
+});
+
+// Every category, with how many public skills it holds (possibly 0).
+export const marketSkillCategorySchema = z.object({
+  slug: z.string(),
+  name: z.string(),
+  description: z.string().nullable(),
+  count: z.number().int().nonnegative(),
+});
+
+export const listMarketSkillCategoriesResponseSchema = z.object({
+  items: z.array(marketSkillCategorySchema),
+  // Public skills in all; a skill in two categories counts once here.
+  total: z.number().int().nonnegative(),
+});
+
+// The manifest only — file contents are not served here. It is the COMPLETE
+// manifest of the version (scripts and binaries included): a client that
+// fetches the pinned commit from GitHub itself checks every file against
+// `contentHash` and installs nothing the manifest does not name.
+export const marketSkillFileSchema = z.object({
+  path: z.string(),
+  sizeBytes: z.number().int().nonnegative(),
+  mimeType: z.string().nullable(),
+  // sha256 of the file's bytes, lowercase hex — the hash recorded at ingest,
+  // which is the content the scan verdict is about.
+  contentHash: z.string().regex(/^[0-9a-f]{64}$/),
+});
+
+// What changed from the previous published version: files by path and
+// content hash, scripts and scan flags this version adds, and GitHub's own
+// comparison of the two commits.
+export const marketSkillVersionChangesSchema = z.object({
+  added: z.array(z.string()),
+  removed: z.array(z.string()),
+  modified: z.array(z.string()),
+  newScripts: z.array(z.string()),
+  newFlags: z.array(z.string()),
+  compareUrl: z.string().nullable(),
+});
+
+export const marketSkillVersionSchema = z.object({
+  version: z.string(),
+  isCurrent: z.boolean(),
+  publishedAt: z.string().nullable(),
+  commitSha: z.string().nullable(),
+  committedAt: z.string().nullable(),
+  // Given for the most recent versions only; absent on the oldest one, which
+  // has nothing before it.
+  changes: marketSkillVersionChangesSchema.optional(),
+});
+
+export const getMarketSkillResponseSchema = z.object({
+  skill: marketSkillSummarySchema,
+  // The current version's SKILL.md, in full. Third-party text: render it as
+  // untrusted markdown.
+  skillMd: z.string().nullable(),
+  files: z.array(marketSkillFileSchema),
+  // Published versions, newest first.
+  versions: z.array(marketSkillVersionSchema),
+  // Attribution for the text above: where it came from, pinned.
+  source: z.object({
+    repoUrl: z.string().nullable(),
+    sourceUrl: z.string().nullable(),
+    commitSha: z.string().nullable(),
+    committedAt: z.string().nullable(),
+    // The skill's directory relative to the repository root; "" for a skill at
+    // the root. Given outright so no client has to take `sourceUrl` apart.
+    repoSubpath: z.string().nullable(),
+  }),
+  // Advisory scan flags the current version carries (e.g. `binary:executable`).
+  scanFlags: z.array(z.string()),
+  // Other public skills from the same repository and in the same category,
+  // this one excluded. Optional for answers from before it existed.
+  related: z
+    .object({
+      sameRepository: z.array(marketSkillSummarySchema),
+      sameCategory: z.array(marketSkillSummarySchema),
+    })
+    .optional(),
+});
+
+// Editorial collections: a titled, ordered set of public skills.
+export const marketSkillCollectionSchema = z.object({
+  slug: z.string(),
+  title: z.string(),
+  summary: z.string(),
+  // Public skills in it — the ones its page shows.
+  itemCount: z.number().int().nonnegative(),
+  updatedAt: z.string(),
+});
+
+export const listMarketSkillCollectionsResponseSchema = z.object({
+  items: z.array(marketSkillCollectionSchema),
+});
+
+export const getMarketSkillCollectionResponseSchema = z.object({
+  collection: marketSkillCollectionSchema,
+  items: z.array(marketSkillSummarySchema),
+});
+
+export type MarketSkillSort = z.infer<typeof marketSkillSortSchema>;
+export type MarketSkillCapability = z.infer<typeof marketSkillCapabilitySchema>;
+export type MarketSkillSummary = z.infer<typeof marketSkillSummarySchema>;
+export type ListMarketSkillsRequest = z.infer<
+  typeof listMarketSkillsRequestSchema
+>;
+export type ListMarketSkillsResponse = z.infer<
+  typeof listMarketSkillsResponseSchema
+>;
+export type MarketSkillCategory = z.infer<typeof marketSkillCategorySchema>;
+export type ListMarketSkillCategoriesResponse = z.infer<
+  typeof listMarketSkillCategoriesResponseSchema
+>;
+export type MarketSkillFile = z.infer<typeof marketSkillFileSchema>;
+export type MarketSkillVersion = z.infer<typeof marketSkillVersionSchema>;
+export type MarketSkillVersionChanges = z.infer<
+  typeof marketSkillVersionChangesSchema
+>;
+export type MarketSkillCollection = z.infer<typeof marketSkillCollectionSchema>;
+export type ListMarketSkillCollectionsResponse = z.infer<
+  typeof listMarketSkillCollectionsResponseSchema
+>;
+export type GetMarketSkillCollectionResponse = z.infer<
+  typeof getMarketSkillCollectionResponseSchema
+>;
+export type GetMarketSkillResponse = z.infer<
+  typeof getMarketSkillResponseSchema
+>;

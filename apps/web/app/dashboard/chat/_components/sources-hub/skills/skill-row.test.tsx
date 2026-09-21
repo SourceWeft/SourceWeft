@@ -94,3 +94,45 @@ test("a skill the agent installed says so; one a person installed does not", () 
   );
   expect(render(registrySkill(), true)).not.toContain("Added by agent");
 });
+
+// An install stays on the version it was made with; the row only points at the
+// skill's page, where updating asks first. Nothing updates from the hub.
+test("a community skill behind its current version links to its versions; clicking the link does not toggle the row", () => {
+  let toggled = 0;
+  container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  act(() => {
+    root?.render(
+      <NextIntlClientProvider locale="en" messages={intlMessages}>
+        {createElement(SkillRow, {
+          onOpenSkill: () => {},
+          onToggle: () => {
+            toggled += 1;
+          },
+          selected: true,
+          skill: registrySkill({ updateAvailable: true }),
+        })}
+      </NextIntlClientProvider>,
+    );
+  });
+  const link = container.querySelector("a")!;
+  expect(link.textContent).toContain("Update available");
+  expect(link.getAttribute("href")).toBe(
+    "/dashboard/skills/gh-acme-skills-deck-builder#versions",
+  );
+  // jsdom does not navigate, but it still bubbles the click to the row.
+  link.addEventListener("click", (event) => event.preventDefault());
+  act(() => link.click());
+  expect(toggled).toBe(0);
+});
+
+test("an up-to-date skill, and a skill with no version switch, show no update badge", () => {
+  expect(render(registrySkill(), true)).not.toContain("Update available");
+  expect(
+    render(
+      registrySkill({ sourceType: "workspace_custom", updateAvailable: true }),
+      true,
+    ),
+  ).not.toContain("Update available");
+});

@@ -208,3 +208,191 @@ test("a version that can do more asks in the app's own dialog, names what change
   expect(onChanged).toHaveBeenCalledTimes(1);
   expect(document.body.querySelector('[role="alertdialog"]')).toBeNull();
 });
+
+test("an install behind the current version is offered the update, through the same escalation question, and then shows what is installed", async () => {
+  const { HttpClientError } = await import("@sourceweft/sdk");
+  const base = fixture().version;
+  const installed = { ...base, id: "v1", status: "published" as const };
+  const current = {
+    ...base,
+    id: "v2",
+    version: "cccccccccccc",
+    status: "published" as const,
+    isCurrent: true,
+  };
+  let installedVersionId = "v1";
+  api.listRegistryVersions.mockImplementation(async () => ({
+    items: [current, installed],
+    nextCursor: null,
+    installed: { id: "ws-skill", skillVersionId: installedVersionId, enabled: true },
+  }));
+  api.getRegistryVersion.mockImplementation(
+    async (_ws: string, _catalog: string, id: string) => ({
+      ...fixture(),
+      version: id === "v2" ? current : installed,
+    }),
+  );
+  api.switchRegistryVersion.mockImplementation(
+    async (_ws: string, _id: string, version: string, options?: unknown) => {
+      if (!options)
+        throw new HttpClientError({
+          status: 409,
+          statusText: "Conflict",
+          code: "SKILL_VERSION_ESCALATION",
+          message: "This version adds executable scripts.",
+          details: { addsScripts: true, newFlags: [] },
+        });
+      installedVersionId = version;
+      return { workspaceSkill: {} };
+    },
+  );
+  const onChanged = vi.fn();
+  container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  // Viewing the INSTALLED version: the update is offered all the same.
+  await act(async () =>
+    root.render(withIntl(
+      <RegistryVersions
+        workspaceId="workspace"
+        catalogId="skill:v1"
+        initialVersionId="v1"
+        currentVersionId="v2"
+        onView={() => {}}
+        onChanged={onChanged}
+      />),
+    ),
+  );
+  const button = (label: string) =>
+    [...document.body.querySelectorAll("button")].find(
+      (node) => node.textContent?.trim() === label,
+    )!;
+  const notice = () =>
+    container.querySelector('[data-testid="skill-update-notice"]');
+  expect(notice()?.textContent).toContain("A newer version is available: cccccccc.");
+  // Nothing moved on its own.
+  expect(api.switchRegistryVersion).not.toHaveBeenCalled();
+
+  await act(async () => button("Update to the newest version").click());
+  expect(api.switchRegistryVersion).toHaveBeenLastCalledWith(
+    "workspace",
+    "ws-skill",
+    "v2",
+    undefined,
+  );
+  expect(
+    document.body.querySelector('[role="alertdialog"]')?.textContent,
+  ).toContain("Adds scripts that run in the sandbox");
+  expect(onChanged).not.toHaveBeenCalled();
+
+  await act(async () => button("Switch to it").click());
+  expect(api.switchRegistryVersion).toHaveBeenLastCalledWith(
+    "workspace",
+    "ws-skill",
+    "v2",
+    { acknowledgeEscalation: true },
+  );
+  expect(onChanged).toHaveBeenCalledTimes(1);
+  expect(notice()).toBeNull();
+  // The view followed the install to the new version.
+  expect(api.getRegistryVersion).toHaveBeenLastCalledWith(
+    "workspace",
+    "skill:v1",
+    "v2",
+  );
+  expect(container.textContent).toContain("Installed");
+});
+
+test("viewing the current version while an older one is installed offers the update and keeps the usual control", async () => {
+  const base = fixture().version;
+  const installed = { ...base, id: "v1", status: "published" as const };
+  const current = { ...base, id: "v2", status: "published" as const, isCurrent: true };
+  api.listRegistryVersions.mockResolvedValue({
+    items: [current, installed],
+    nextCursor: null,
+    installed: { id: "ws-skill", skillVersionId: "v1", enabled: true },
+  });
+  api.getRegistryVersion.mockResolvedValue({ ...fixture(), version: current });
+  container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  // No `currentVersionId` from the caller: the list's own current version serves.
+  await act(async () =>
+    root.render(withIntl(
+      <RegistryVersions
+        workspaceId="workspace"
+        catalogId="skill:v2"
+        initialVersionId="v2"
+        onView={() => {}}
+        onChanged={() => {}}
+      />),
+    ),
+  );
+  expect(
+    container.querySelector('[data-testid="skill-update-notice"]'),
+  ).not.toBeNull();
+  // The notice is a shortcut. "Use this version" is the control people (and the
+  // e2e suite) already know, so it stays wherever the viewed version is not the
+  // installed one.
+  expect(container.textContent).toContain("Use this version");
+});
+
+test("the update notice says what the newer version changed", async () => {
+  const base = fixture().version;
+  const installed = { ...base, id: "v1", status: "published" as const };
+  const current = {
+    ...base,
+    id: "v2",
+    version: "cccccccccccc",
+    status: "published" as const,
+    isCurrent: true,
+  };
+  api.listRegistryVersions.mockResolvedValue({
+    items: [current, installed],
+    nextCursor: null,
+    installed: { id: "ws-skill", skillVersionId: "v1", enabled: true },
+  });
+  api.getRegistryVersion.mockImplementation(
+    async (_ws: string, _catalog: string, id: string) => ({
+      ...fixture(),
+      version: id === "v2" ? current : installed,
+      changelog:
+        id === "v2"
+          ? {
+              added: ["a.md", "scripts/run.sh"],
+              removed: [],
+              modified: ["SKILL.md"],
+              newScripts: ["scripts/run.sh"],
+              newFlags: [],
+              compareUrl: "https://github.com/acme/skills/compare/aaa...ccc",
+            }
+          : null,
+    }),
+  );
+  container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  // Viewing the installed version: the target's changelog is fetched for it.
+  await act(async () =>
+    root.render(withIntl(
+      <RegistryVersions
+        workspaceId="workspace"
+        catalogId="skill:v1"
+        initialVersionId="v1"
+        currentVersionId="v2"
+        onView={() => {}}
+        onChanged={() => {}}
+      />),
+    ),
+  );
+  const changes = container.querySelector(
+    '[data-testid="skill-update-changes"]',
+  );
+  expect(changes?.textContent).toContain(
+    "What changed: 3 files, 1 new script",
+  );
+  expect(changes?.querySelector("a")?.href).toBe(
+    "https://github.com/acme/skills/compare/aaa...ccc",
+  );
+  expect(api.switchRegistryVersion).not.toHaveBeenCalled();
+});

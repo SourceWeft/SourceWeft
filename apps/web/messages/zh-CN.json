@@ -11,6 +11,7 @@
       "howItWorks": "工作原理",
       "pricing": "定价",
       "mcpServers": "MCP 服务",
+      "skills": "技能",
       "blog": "博客",
       "download": "下载"
     },
@@ -28,6 +29,7 @@
       "howItWorks": "运作方式",
       "pricing": "定价",
       "mcpServers": "MCP 服务",
+      "skills": "技能",
       "blog": "博客",
       "dashboard": "仪表板",
       "getStarted": "开始使用",

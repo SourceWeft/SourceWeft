@@ -1,4 +1,5 @@
 import { sha256 } from "./hash";
+import { isAgentSkillName } from "@sourceweft/skill-format";
 import path from "node:path";
 import type { SkillManifestJson } from "@sourceweft/db";
 import {
@@ -53,9 +54,7 @@ export type ValidatedCustomSkillBundle = {
 };
 
 function validateSkillName(name: string) {
-  return (
-    /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/.test(name) && !name.includes("--")
-  );
+  return isAgentSkillName(name);
 }
 
 function validateDisplayName(name: string) {
@@ -509,12 +508,15 @@ export function validateCustomSkillBundle(input: {
   }
   const skillJson = firstJsonObject(files);
   const rawSlug = frontmatter.name ?? skillJson?.slug ?? "";
-  if (typeof rawSlug !== "string") throw new Error("Custom skill name must be a string");
+  if (typeof rawSlug !== "string")
+    throw new Error("Custom skill name must be a string");
   const slug = rawSlug.trim();
   const displayName = String(skillJson?.displayName ?? slug).trim();
   const version = String(skillJson?.version ?? "0.1.0").trim();
-  const rawDescription = frontmatter.description ?? skillJson?.description ?? "";
-  if (typeof rawDescription !== "string") throw new Error("Custom skill description must be a string");
+  const rawDescription =
+    frontmatter.description ?? skillJson?.description ?? "";
+  if (typeof rawDescription !== "string")
+    throw new Error("Custom skill description must be a string");
   const description = rawDescription.trim();
   const visibility = String(skillJson?.visibility ?? "workspace").trim();
   const categoriesValue = skillJson?.categories;

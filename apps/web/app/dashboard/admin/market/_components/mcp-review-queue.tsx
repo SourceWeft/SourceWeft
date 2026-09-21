@@ -1,0 +1,207 @@
+"use client";
+
+import * as React from "react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ExternalLink,
+  Loader2,
+  XCircle,
+} from "lucide-react";
+import { useTranslations } from "next-intl";
+import { Badge } from "@sourceweft/ui-web/components/ui/badge";
+import { Button } from "@sourceweft/ui-web/components/ui/button";
+import {
+  listMarketReviewQueue,
+  publishMarketSubmission,
+  rejectMarketSubmission,
+  type ReviewSubmission,
+} from "../../../../../lib/market-admin";
+
+const CRITICAL_FLAG = /pipe-to-shell|sudo|base64-exec|internal-address/;
+
+function flagLabel(flag: string, t: ReturnType<typeof useTranslations>) {
+  const map: Record<string, string> = {
+    "command:pipe-to-shell": t("flags.pipeToShell"),
+    "command:sudo": t("flags.sudo"),
+    "command:eval": t("flags.eval"),
+    "command:base64-exec": t("flags.base64Exec"),
+    "command:chmod-exec": t("flags.chmodExec"),
+    "endpoint:internal-address": t("flags.internalAddress"),
+  };
+  return map[flag] ?? flag;
+}
+
+function relativeTime(iso: string, t: ReturnType<typeof useTranslations>) {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const mins = Math.round(diffMs / 60000);
+  if (mins < 1) return t("relativeTime.justNow");
+  if (mins < 60) return t("relativeTime.minutes", { count: mins });
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return t("relativeTime.hours", { count: hours });
+  return t("relativeTime.days", { count: Math.round(hours / 24) });
+}
+
+/** The MCP market's flagged-submission queue — one tab of the review page. */
+export function McpReviewQueue() {
+  const t = useTranslations("dashboardAdmin");
+  const [items, setItems] = React.useState<ReviewSubmission[] | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+  const [busy, setBusy] = React.useState<Set<string>>(new Set());
+
+  const load = React.useCallback(async () => {
+    setError(null);
+    try {
+      const result = await listMarketReviewQueue();
+      setItems(result.items);
+    } catch (caught) {
+      const status = (caught as { status?: number } | null)?.status;
+      setError(
+        status === 403 ? t("errors.forbidden") : t("errors.loadFailed"),
+      );
+      setItems([]);
+    }
+  }, [t]);
+
+  React.useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function act(
+    identifier: string,
+    action: "publish" | "reject",
+  ) {
+    setBusy((prev) => new Set(prev).add(identifier));
+    try {
+      if (action === "publish") {
+        await publishMarketSubmission(identifier);
+      } else {
+        await rejectMarketSubmission(identifier);
+      }
+      setItems((prev) =>
+        prev ? prev.filter((item) => item.identifier !== identifier) : prev,
+      );
+    } catch {
+      setError(t("errors.actionFailed", { identifier }));
+    } finally {
+      setBusy((prev) => {
+        const next = new Set(prev);
+        next.delete(identifier);
+        return next;
+      });
+    }
+  }
+
+  return (
+    <div>
+      <h1 className="text-2xl font-semibold tracking-tight">
+        {t("heading")}
+      </h1>
+      <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+        {t("description")}
+      </p>
+
+      {error ? (
+        <div className="mt-6 flex items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          <AlertTriangle className="size-4 shrink-0" />
+          {error}
+        </div>
+      ) : null}
+
+      {items === null ? (
+        <div className="mt-10 flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="size-4 animate-spin" />
+          {t("loading")}
+        </div>
+      ) : items.length === 0 && !error ? (
+        <div className="mt-10 flex flex-col items-center gap-2 rounded-xl border border-dashed py-16 text-center text-muted-foreground">
+          <CheckCircle2 className="size-6 text-emerald-500" />
+          <p className="text-sm">{t("empty")}</p>
+        </div>
+      ) : (
+        <div className="mt-6 divide-y overflow-hidden rounded-xl border">
+          {items?.map((item) => {
+            const critical = item.flags.some((flag) => CRITICAL_FLAG.test(flag));
+            const isBusy = busy.has(item.identifier);
+            return (
+              <div
+                key={item.identifier}
+                className={`flex flex-col gap-3 border-l-[3px] p-5 sm:flex-row sm:items-start sm:justify-between ${
+                  critical ? "border-l-destructive" : "border-l-amber-500"
+                }`}
+              >
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <span className="font-medium">{item.name}</span>
+                    <code className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
+                      {item.identifier}
+                    </code>
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                    {item.repoUrl ? (
+                      <a
+                        className="inline-flex items-center gap-1 underline-offset-2 hover:text-foreground hover:underline"
+                        href={item.repoUrl}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        {item.repoUrl.replace(/^https?:\/\//, "")}
+                        <ExternalLink className="size-3" />
+                      </a>
+                    ) : null}
+                    {item.transport ? <span>{item.transport}</span> : null}
+                    {item.submittedBy ? (
+                      <span>{t("submittedBy", { name: item.submittedBy })}</span>
+                    ) : null}
+                    <span>{relativeTime(item.createdAt, t)}</span>
+                  </div>
+                  <div className="mt-2.5 flex flex-wrap gap-1.5">
+                    {item.flags.map((flag) => (
+                      <Badge
+                        key={flag}
+                        variant={CRITICAL_FLAG.test(flag) ? "destructive" : "secondary"}
+                      >
+                        ⚠ {flagLabel(flag, t)}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  <Button
+                    disabled={isBusy}
+                    onClick={() => void act(item.identifier, "publish")}
+                    size="sm"
+                  >
+                    {isBusy ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="size-4" />
+                    )}
+                    {t("approve")}
+                  </Button>
+                  <Button
+                    disabled={isBusy}
+                    onClick={() => void act(item.identifier, "reject")}
+                    size="sm"
+                    variant="outline"
+                  >
+                    <XCircle className="size-4" />
+                    {t("reject")}
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <p className="mt-6 text-xs text-muted-foreground">
+        {t.rich("footer", {
+          code: (chunks) => (
+            <code className="rounded bg-muted px-1 py-0.5">{chunks}</code>
+          ),
+        })}
+      </p>
+    </div>
+  );
+}
