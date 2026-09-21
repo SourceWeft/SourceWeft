@@ -2,11 +2,11 @@
 
 import * as React from "react";
 import { Loader2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { SKILL_REVIEW_BODY_MAX_LENGTH } from "@sourceweft/contracts";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { Textarea } from "@sourceweft/ui-web/components/ui/textarea";
 import { SkillReviewStarPicker } from "./skill-review-stars";
-import { skillReviewsCopy, type SkillReviewsCopy } from "./skill-reviews-copy";
 
 /**
  * Text with a live count against the API's limit. The limit counts the text
@@ -19,7 +19,6 @@ function CountedTextarea({
   onChange,
   disabled,
   placeholder,
-  copy,
 }: {
   id: string;
   label: string;
@@ -27,8 +26,8 @@ function CountedTextarea({
   onChange: (value: string) => void;
   disabled?: boolean;
   placeholder?: string;
-  copy: SkillReviewsCopy;
 }) {
+  const t = useTranslations("dashboardSkillReviews");
   return (
     <div className="flex flex-col gap-1">
       <label htmlFor={id} className="sr-only">
@@ -47,7 +46,10 @@ function CountedTextarea({
         data-testid="skill-review-char-count"
         className="self-end text-xs tabular-nums text-muted-foreground"
       >
-        {copy.charCount(value.length, SKILL_REVIEW_BODY_MAX_LENGTH)}
+        {t("charCount", {
+          count: value.length,
+          max: SKILL_REVIEW_BODY_MAX_LENGTH,
+        })}
       </span>
     </div>
   );
@@ -64,15 +66,14 @@ export function SkillReviewEditor({
   busy,
   onSave,
   onCancel,
-  copy = skillReviewsCopy,
 }: {
   initialRating?: number;
   initialBody?: string;
   busy?: boolean;
   onSave: (input: { rating: number; body: string }) => void;
   onCancel?: () => void;
-  copy?: SkillReviewsCopy;
 }) {
+  const t = useTranslations("dashboardSkillReviews");
   const id = React.useId();
   const [rating, setRating] = React.useState(initialRating);
   const [body, setBody] = React.useState(initialBody);
@@ -90,21 +91,19 @@ export function SkillReviewEditor({
         value={rating}
         onChange={setRating}
         disabled={busy}
-        copy={copy}
       />
       <CountedTextarea
         id={`${id}-body`}
-        label={copy.bodyLabel}
+        label={t("bodyLabel")}
         value={body}
         onChange={setBody}
         disabled={busy}
-        placeholder={copy.bodyPlaceholder}
-        copy={copy}
+        placeholder={t("bodyPlaceholder")}
       />
       <div className="flex items-center justify-end gap-2">
         {rating < 1 ? (
           <span className="mr-auto text-xs text-muted-foreground">
-            {copy.chooseRating}
+            {t("chooseRating")}
           </span>
         ) : null}
         {onCancel ? (
@@ -115,12 +114,12 @@ export function SkillReviewEditor({
             disabled={busy}
             onClick={onCancel}
           >
-            {copy.cancel}
+            {t("cancel")}
           </Button>
         ) : null}
         <Button type="submit" size="sm" disabled={busy || rating < 1}>
           {busy ? <Loader2 className="animate-spin" /> : null}
-          {copy.save}
+          {t("save")}
         </Button>
       </div>
     </form>
@@ -133,14 +132,13 @@ export function SkillReviewReplyEditor({
   busy,
   onSave,
   onCancel,
-  copy = skillReviewsCopy,
 }: {
   initialBody?: string;
   busy?: boolean;
   onSave: (body: string) => void;
   onCancel: () => void;
-  copy?: SkillReviewsCopy;
 }) {
+  const t = useTranslations("dashboardSkillReviews");
   const id = React.useId();
   const [body, setBody] = React.useState(initialBody);
   const empty = body.trim().length === 0;
@@ -156,11 +154,10 @@ export function SkillReviewReplyEditor({
     >
       <CountedTextarea
         id={`${id}-reply`}
-        label={copy.replyLabel}
+        label={t("replyLabel")}
         value={body}
         onChange={setBody}
         disabled={busy}
-        copy={copy}
       />
       <div className="flex items-center justify-end gap-2">
         <Button
@@ -170,11 +167,11 @@ export function SkillReviewReplyEditor({
           disabled={busy}
           onClick={onCancel}
         >
-          {copy.cancel}
+          {t("cancel")}
         </Button>
         <Button type="submit" size="sm" disabled={busy || empty}>
           {busy ? <Loader2 className="animate-spin" /> : null}
-          {copy.saveReply}
+          {t("saveReply")}
         </Button>
       </div>
     </form>

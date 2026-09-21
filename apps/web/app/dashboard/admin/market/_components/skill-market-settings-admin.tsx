@@ -14,9 +14,7 @@ import {
   type GetSkillOverviewBillingResponse,
   type SkillOverviewStatusResponse,
 } from "../../../../../lib/skill-overviews";
-import { skillOverviewCopy } from "../../../skills/_components/community/skill-overview-copy";
-
-const copy = skillOverviewCopy.settings;
+import { useLocale, useTranslations } from "next-intl";
 
 const selectClass =
   "h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground";
@@ -62,6 +60,8 @@ export function OverviewBillingSettings({
   teams: SettingsTeam[];
   loadWorkspaces?: (teamId: string) => Promise<WorkspaceOption[]>;
 }) {
+  const t = useTranslations("dashboardSkillOverview.settings");
+  const locale = useLocale();
   const [current, setCurrent] =
     React.useState<GetSkillOverviewBillingResponse | null>(null);
   const [status, setStatus] =
@@ -86,12 +86,12 @@ export function OverviewBillingSettings({
         }
       })
       .catch(() => {
-        if (!cancelled) setMessage(copy.loadFailed);
+        if (!cancelled) setMessage(t("loadFailed"));
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [t]);
 
   React.useEffect(() => {
     if (!teamId) {
@@ -122,10 +122,10 @@ export function OverviewBillingSettings({
       );
       setCurrent(next);
       setUserId("");
-      setMessage(copy.saved);
+      setMessage(t("saved"));
       setStatus(await getSkillOverviewStatus().catch(() => status));
     } catch (error) {
-      setMessage(errorMessage(error, copy.failed));
+      setMessage(errorMessage(error, t("failed")));
     } finally {
       setSaving(false);
     }
@@ -151,31 +151,31 @@ export function OverviewBillingSettings({
 
   const counts: Array<[string, React.ReactNode]> = status
     ? [
-        [copy.eligible, status.eligible],
-        [copy.withOverview, status.withOverview],
-        [copy.missingCount, status.missing],
-        [copy.hiddenCount, status.hidden],
-        [copy.billingSet, status.billingConfigured ? copy.yes : copy.no],
+        [t("eligible"), status.eligible],
+        [t("withOverview"), status.withOverview],
+        [t("missingCount"), status.missing],
+        [t("hiddenCount"), status.hidden],
+        [t("billingSet"), status.billingConfigured ? t("yes") : t("no")],
       ]
     : [];
 
   return (
     <section
-      aria-label={copy.title}
+      aria-label={t("title")}
       className="space-y-4 rounded-2xl border border-border bg-background p-4 shadow-xs"
     >
       <div>
         <div className="flex items-center gap-2">
           <Sparkles className="size-4 text-muted-foreground" aria-hidden />
           <h2 className="text-sm font-semibold text-foreground">
-            {copy.title}
+            {t("title")}
           </h2>
         </div>
-        <p className="mt-1 text-xs text-muted-foreground">{copy.description}</p>
+        <p className="mt-1 text-xs text-muted-foreground">{t("description")}</p>
       </div>
 
       <div className="text-xs" data-testid="overview-billing-current">
-        <span className="text-muted-foreground">{copy.current}: </span>
+        <span className="text-muted-foreground">{t("current")}: </span>
         {billing ? (
           <span className="text-foreground">
             {teamName(billing.teamId)} / {workspaceName(billing.workspaceId)} /{" "}
@@ -183,17 +183,17 @@ export function OverviewBillingSettings({
             {current?.updatedBy ? (
               <span className="text-muted-foreground">
                 {" "}
-                ({copy.updatedBy}{" "}
+                ({t("updatedBy")}{" "}
                 <span className="font-mono">{current.updatedBy}</span>
                 {current.updatedAt
-                  ? `, ${new Date(current.updatedAt).toLocaleString()}`
+                  ? `, ${new Date(current.updatedAt).toLocaleString(locale)}`
                   : ""}
                 )
               </span>
             ) : null}
           </span>
         ) : (
-          <span className="text-muted-foreground">{copy.notSet}</span>
+          <span className="text-muted-foreground">{t("notSet")}</span>
         )}
       </div>
 
@@ -202,9 +202,9 @@ export function OverviewBillingSettings({
         onSubmit={(e) => void save(e)}
       >
         <label className="grid gap-1">
-          <span className="text-muted-foreground">{copy.team}</span>
+          <span className="text-muted-foreground">{t("team")}</span>
           <select
-            aria-label={copy.team}
+            aria-label={t("team")}
             className={selectClass}
             value={teamId}
             onChange={(event) => {
@@ -212,7 +212,7 @@ export function OverviewBillingSettings({
               setWorkspaceId("");
             }}
           >
-            <option value="">{copy.choose}</option>
+            <option value="">{t("choose")}</option>
             {teamOptions.map((team) => (
               <option key={team.id} value={team.id}>
                 {team.name}
@@ -221,15 +221,15 @@ export function OverviewBillingSettings({
           </select>
         </label>
         <label className="grid gap-1">
-          <span className="text-muted-foreground">{copy.workspace}</span>
+          <span className="text-muted-foreground">{t("workspace")}</span>
           <select
-            aria-label={copy.workspace}
+            aria-label={t("workspace")}
             className={selectClass}
             disabled={!teamId}
             value={workspaceId}
             onChange={(event) => setWorkspaceId(event.target.value)}
           >
-            <option value="">{copy.choose}</option>
+            <option value="">{t("choose")}</option>
             {workspaceOptions.map((workspace) => (
               <option key={workspace.id} value={workspace.id}>
                 {workspace.name}
@@ -238,15 +238,15 @@ export function OverviewBillingSettings({
           </select>
         </label>
         <label className="grid gap-1">
-          <span className="text-muted-foreground">{copy.member}</span>
+          <span className="text-muted-foreground">{t("member")}</span>
           <Input
-            aria-label={copy.member}
+            aria-label={t("member")}
             className="h-8 text-xs"
             placeholder={billing?.userId ?? ""}
             value={userId}
             onChange={(event) => setUserId(event.target.value)}
           />
-          <span className="text-muted-foreground">{copy.memberHint}</span>
+          <span className="text-muted-foreground">{t("memberHint")}</span>
         </label>
         <div>
           <Button
@@ -259,7 +259,7 @@ export function OverviewBillingSettings({
             ) : (
               <Save className="size-3.5" aria-hidden />
             )}
-            {saving ? copy.saving : copy.save}
+            {saving ? t("saving") : t("save")}
           </Button>
         </div>
       </form>
@@ -272,7 +272,7 @@ export function OverviewBillingSettings({
 
       {counts.length > 0 ? (
         <div>
-          <h3 className="text-xs font-medium text-foreground">{copy.status}</h3>
+          <h3 className="text-xs font-medium text-foreground">{t("status")}</h3>
           <dl
             className="mt-2 grid grid-cols-2 gap-2 text-xs sm:grid-cols-5"
             data-testid="overview-status"

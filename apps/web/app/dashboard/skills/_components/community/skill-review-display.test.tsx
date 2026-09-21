@@ -1,14 +1,24 @@
 // @vitest-environment jsdom
-import { act } from "react";
+import { act, type ComponentProps, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { SkillReview } from "../../../../../lib/skill-reviews";
 import { SkillReviewItem } from "./skill-review-item";
 import { SkillReviewStarPicker, SkillReviewStars } from "./skill-review-stars";
 import { SkillReviewSummary } from "./skill-review-summary";
+import { NextIntlClientProvider } from "next-intl";
+import messages from "../../../../../messages/en.json";
 
-// The presentational parts the public page will reuse: they render from data
-// alone, with no provider and no fetch.
+const intlMessages = messages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
+const withIntl = (node: ReactNode) => (
+  <NextIntlClientProvider locale="en" messages={intlMessages}>
+    {node}
+  </NextIntlClientProvider>
+);
+
+// The presentational parts: they render from data alone, with no fetch.
 
 (
   globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -27,7 +37,7 @@ afterEach(() => {
   container.remove();
 });
 
-const render = (node: React.ReactNode) => act(() => root.render(node));
+const render = (node: ReactNode) => act(() => root.render(withIntl(node)));
 
 const now = Date.parse("2026-09-22T12:00:00.000Z");
 const review: SkillReview = {

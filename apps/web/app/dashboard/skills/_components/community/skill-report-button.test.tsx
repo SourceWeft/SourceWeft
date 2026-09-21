@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from "react";
+import { act, type ComponentProps, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, test, vi } from "vitest";
 import { HttpClientError } from "@sourceweft/sdk";
@@ -18,8 +18,18 @@ vi.mock("@sourceweft/sdk", async (importOriginal) => {
 
 import { skillReportBody } from "../../../../../lib/skill-reports";
 import { SkillReportButton } from "./skill-report-button";
-import { formatRetryWait } from "./skill-report-copy";
-import { SkillReportForm } from "./skill-report-form";
+import { formatRetryWait, SkillReportForm } from "./skill-report-form";
+import { createTranslator, NextIntlClientProvider } from "next-intl";
+import messages from "../../../../../messages/en.json";
+
+const intlMessages = messages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
+const withIntl = (node: ReactNode) => (
+  <NextIntlClientProvider locale="en" messages={intlMessages}>
+    {node}
+  </NextIntlClientProvider>
+);
 
 // React needs to know it is under test to flush effects inside act().
 (
@@ -39,7 +49,7 @@ async function render(node: React.ReactNode) {
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
-  await act(async () => root.render(node));
+  await act(async () => root.render(withIntl(node)));
 }
 
 const button = (label: string) =>
@@ -207,8 +217,14 @@ test("helpers: the body drops blanks and the wait reads naturally", () => {
     reason: "spam",
     reviewId: "rev_1",
   });
-  expect(formatRetryWait(null)).toBeNull();
-  expect(formatRetryWait(45)).toBe("45 seconds");
-  expect(formatRetryWait(1800)).toBe("30 minutes");
-  expect(formatRetryWait(3 * 3600)).toBe("3 hours");
+  const t = createTranslator({
+    locale: "en",
+    messages,
+    namespace: "dashboardSkillReports",
+  }) as unknown as Parameters<typeof formatRetryWait>[1];
+  expect(formatRetryWait(null, t)).toBeNull();
+  expect(formatRetryWait(1, t)).toBe("1 second");
+  expect(formatRetryWait(45, t)).toBe("45 seconds");
+  expect(formatRetryWait(1800, t)).toBe("30 minutes");
+  expect(formatRetryWait(3 * 3600, t)).toBe("3 hours");
 });

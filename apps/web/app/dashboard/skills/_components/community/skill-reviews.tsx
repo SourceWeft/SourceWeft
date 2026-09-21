@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { cn } from "@sourceweft/ui-web/lib/utils";
@@ -24,7 +25,6 @@ import { SkillReviewReplyEditor } from "./skill-review-editor";
 import { SkillReviewAuthorReply, SkillReviewItem } from "./skill-review-item";
 import { SkillReviewOwn } from "./skill-review-own";
 import { SkillReviewSummary } from "./skill-review-summary";
-import { skillReviewsCopy as copy } from "./skill-reviews-copy";
 import type { DashboardSkillSlotProps } from "./slot-props";
 
 type LoadState =
@@ -35,12 +35,16 @@ type LoadState =
   | { status: "ready"; page: ListSkillReviewsResponse };
 
 /** What a failed write says, by why it failed. */
-function writeErrorMessage(error: unknown, fallback: string) {
+function writeErrorMessage(
+  error: unknown,
+  fallback: string,
+  t: ReturnType<typeof useTranslations>,
+) {
   switch (skillReviewErrorKind(error)) {
     case "rate_limited":
-      return copy.rateLimited;
+      return t("rateLimited");
     case "not_installed":
-      return copy.notInstalled;
+      return t("notInstalled");
     default:
       return fallback;
   }
@@ -54,6 +58,7 @@ function writeErrorMessage(error: unknown, fallback: string) {
  * page; everything that calls the API is here.
  */
 export function SkillReviews({ slug }: DashboardSkillSlotProps) {
+  const t = useTranslations("dashboardSkillReviews");
   const [sort, setSort] = React.useState<SkillReviewSort>("newest");
   const [state, setState] = React.useState<LoadState>({ status: "loading" });
   const [loadingMore, setLoadingMore] = React.useState(false);
@@ -146,11 +151,11 @@ export function SkillReviews({ slug }: DashboardSkillSlotProps) {
     setBusy("own");
     try {
       await saveMySkillReview(slug, input);
-      toast.success(copy.saved);
+      toast.success(t("saved"));
       await load(sort);
       return true;
     } catch (error) {
-      toast.error(writeErrorMessage(error, copy.saveFailed));
+      toast.error(writeErrorMessage(error, t("saveFailed"), t));
       return false;
     } finally {
       setBusy(null);
@@ -161,11 +166,11 @@ export function SkillReviews({ slug }: DashboardSkillSlotProps) {
     setBusy("own");
     try {
       await deleteMySkillReview(slug);
-      toast.success(copy.deleted);
+      toast.success(t("deleted"));
       await load(sort);
       return true;
     } catch (error) {
-      toast.error(writeErrorMessage(error, copy.deleteFailed));
+      toast.error(writeErrorMessage(error, t("deleteFailed"), t));
       return false;
     } finally {
       setBusy(null);
@@ -181,9 +186,9 @@ export function SkillReviews({ slug }: DashboardSkillSlotProps) {
           : await saveSkillReviewReply(slug, reviewId, body);
       replaceReview(review);
       setReplyingTo(null);
-      toast.success(body === null ? copy.replyDeleted : copy.replySaved);
+      toast.success(body === null ? t("replyDeleted") : t("replySaved"));
     } catch (error) {
-      toast.error(writeErrorMessage(error, copy.replyFailed));
+      toast.error(writeErrorMessage(error, t("replyFailed"), t));
     } finally {
       setBusy(null);
     }
@@ -195,10 +200,10 @@ export function SkillReviews({ slug }: DashboardSkillSlotProps) {
     try {
       await setSkillReviewStatus(review.id, status);
       replaceReview({ ...review, status });
-      toast.success(status === "hidden" ? copy.hiddenToast : copy.shownToast);
+      toast.success(status === "hidden" ? t("hiddenToast") : t("shownToast"));
       await refreshSummary();
     } catch {
-      toast.error(copy.moderateFailed);
+      toast.error(t("moderateFailed"));
     } finally {
       setBusy(null);
     }
@@ -227,7 +232,7 @@ export function SkillReviews({ slug }: DashboardSkillSlotProps) {
           : current,
       );
     } catch {
-      toast.error(copy.loadFailed);
+      toast.error(t("loadFailed"));
     } finally {
       setLoadingMore(false);
     }
@@ -245,17 +250,17 @@ export function SkillReviews({ slug }: DashboardSkillSlotProps) {
         id="skill-reviews-heading"
         className="text-sm font-semibold text-foreground"
       >
-        {copy.heading}
+        {t("heading")}
       </h2>
 
       {state.status === "loading" ? (
         <div className="flex items-center py-8 text-sm text-muted-foreground">
           <Loader2 className="mr-2 size-4 animate-spin" />
-          {copy.loading}
+          {t("loading")}
         </div>
       ) : state.status === "error" ? (
         <div className="flex items-center gap-3 py-8 text-sm text-muted-foreground">
-          {copy.loadFailed}
+          {t("loadFailed")}
           <Button
             type="button"
             variant="outline"
@@ -265,7 +270,7 @@ export function SkillReviews({ slug }: DashboardSkillSlotProps) {
               void load(sort);
             }}
           >
-            {copy.retry}
+            {t("retry")}
           </Button>
         </div>
       ) : (
@@ -279,7 +284,7 @@ export function SkillReviews({ slug }: DashboardSkillSlotProps) {
           />
           <div
             role="group"
-            aria-label={copy.sortLabel}
+            aria-label={t("sortLabel")}
             className="flex flex-wrap gap-1"
           >
             {SKILL_REVIEW_SORTS.map((option) => (
@@ -291,13 +296,13 @@ export function SkillReviews({ slug }: DashboardSkillSlotProps) {
                 aria-pressed={option === sort}
                 onClick={() => setSort(option)}
               >
-                {copy.sorts[option]}
+                {t(`sorts.${option}`)}
               </Button>
             ))}
           </div>
           {state.page.items.length === 0 ? (
             <p className="py-4 text-sm text-muted-foreground">
-              {copy.noReviews}
+              {t("noReviews")}
             </p>
           ) : (
             <div className="divide-y divide-border">
@@ -320,7 +325,7 @@ export function SkillReviews({ slug }: DashboardSkillSlotProps) {
                               disabled={acting}
                               onClick={() => setReplyingTo(review.id)}
                             >
-                              {review.authorReply ? copy.editReply : copy.reply}
+                              {review.authorReply ? t("editReply") : t("reply")}
                             </Button>
                             {review.authorReply ? (
                               <Button
@@ -330,7 +335,7 @@ export function SkillReviews({ slug }: DashboardSkillSlotProps) {
                                 disabled={acting}
                                 onClick={() => void saveReply(review.id, null)}
                               >
-                                {copy.deleteReply}
+                                {t("deleteReply")}
                               </Button>
                             ) : null}
                           </>
@@ -351,7 +356,7 @@ export function SkillReviews({ slug }: DashboardSkillSlotProps) {
                             ) : (
                               <EyeOff aria-hidden />
                             )}
-                            {review.status === "hidden" ? copy.show : copy.hide}
+                            {review.status === "hidden" ? t("show") : t("hide")}
                           </Button>
                         ) : null}
                       </>
@@ -383,7 +388,7 @@ export function SkillReviews({ slug }: DashboardSkillSlotProps) {
               onClick={() => void loadMore()}
             >
               {loadingMore ? <Loader2 className="animate-spin" /> : null}
-              {copy.loadMore}
+              {t("loadMore")}
             </Button>
           ) : null}
         </div>

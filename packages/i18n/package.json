@@ -9,11 +9,18 @@
     "./locales": "./src/locales.ts",
     "./resolve": "./src/resolve.ts",
     "./format": "./src/format.ts",
-    "./catalog": "./src/catalog.ts"
+    "./catalog": "./src/catalog.ts",
+    "./hant": {
+      "types": "./src/hant.d.ts",
+      "default": "./src/hant.js"
+    }
   },
   "scripts": {
     "check-types": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts"
+  },
+  "dependencies": {
+    "opencc-js": "^1.4.2"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",

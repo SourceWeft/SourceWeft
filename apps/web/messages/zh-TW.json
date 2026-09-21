@@ -3743,5 +3743,395 @@
       "failed": "匯入失敗。",
       "retryFailed": "未能重試匯入。"
     }
+  },
+  "dashboardSkillOverview": {
+    "block": {
+      "title": "AI 生成的概覽",
+      "explainer": "由 AI 模型根據該技能的 SKILL.md 和檔案列表撰寫，可能有誤或不完整。使用前請以技能自身的文件為準。",
+      "explainerLabel": "關於此概覽",
+      "whatItDoes": "功能",
+      "whenToUse": "適用場景",
+      "requirements": "執行要求",
+      "englishFallback": "以英文顯示：暫無你所用語言的概覽。"
+    },
+    "admin": {
+      "title": "AI 概覽",
+      "loading": "正在載入概覽…",
+      "none": "目前版本暫無概覽。",
+      "notEligible": "未為此技能生成：只有從 GitHub 匯入的公開技能才會生成概覽。",
+      "noVersion": "此技能沒有目前發布的版本。",
+      "hidden": "已隱藏",
+      "visible": "已顯示",
+      "missing": "缺失",
+      "model": "模型",
+      "generatedAt": "生成時間",
+      "regenerate": "重新生成",
+      "regenerateQueued": "已加入佇列，新概覽將在幾分鐘內出現。",
+      "regenerateNotQueued": "已移除。此技能不在生成概覽的範圍內，因此未加入佇列。",
+      "hide": "隱藏",
+      "show": "顯示",
+      "hiddenDone": "概覽已隱藏。",
+      "shownDone": "概覽已顯示。",
+      "failed": "出了點問題，請重試。"
+    },
+    "settings": {
+      "title": "AI 概覽",
+      "description": "概覽由預設對話模型撰寫，費用計入此處選擇的團隊、工作區和成員。設定完成前不會生成任何概覽。",
+      "current": "計費對象",
+      "notSet": "未設定：目前不會生成任何概覽。",
+      "team": "團隊",
+      "workspace": "工作區",
+      "member": "計費成員（使用者 ID）",
+      "memberHint": "留空則計入你自己。必須是該工作區的成員。",
+      "choose": "請選擇…",
+      "save": "儲存",
+      "saving": "正在儲存…",
+      "saved": "已儲存。",
+      "failed": "無法儲存。",
+      "loadFailed": "無法載入概覽設定。",
+      "updatedBy": "最後修改人",
+      "status": "覆蓋情況",
+      "eligible": "符合條件的技能",
+      "withOverview": "已有概覽",
+      "missingCount": "缺失",
+      "hiddenCount": "已隱藏",
+      "billingSet": "已設定計費",
+      "yes": "是",
+      "no": "否"
+    }
+  },
+  "dashboardSkillReviews": {
+    "heading": "評分與評價",
+    "loading": "正在載入評價…",
+    "loadFailed": "無法載入評價。",
+    "retry": "重試",
+    "noReviews": "暫無評價。",
+    "averageLabel": "平均評分 {average}，滿分 5",
+    "starsLabel": "{rating, plural, other {# 星}}",
+    "reviewCount": "{count, plural, other {# 條評價}}",
+    "distributionLabel": "{stars, plural, other {# 星}}：{count, number}",
+    "sortLabel": "評價排序",
+    "sorts": {
+      "newest": "最新",
+      "highest": "評分最高",
+      "lowest": "評分最低"
+    },
+    "loadMore": "載入更多",
+    "anonymousReviewer": "已刪除帳號的使用者",
+    "version": "版本 {version}",
+    "edited": "已編輯",
+    "authorReplyHeading": "作者回覆",
+    "yourReview": "你的評價",
+    "writeReview": "撰寫評價",
+    "notInstalled": "安裝該技能後才能評價。",
+    "hiddenNotice": "該評價已被管理員隱藏。只有你能看到，且不計入評分。",
+    "ratingPickerLabel": "你的評分",
+    "bodyLabel": "評價",
+    "bodyPlaceholder": "哪些好用、哪些不好用、你用它做了什麼…",
+    "charCount": "{count}/{max}",
+    "save": "儲存評價",
+    "edit": "編輯",
+    "cancel": "取消",
+    "delete": "刪除",
+    "saved": "評價已儲存",
+    "deleted": "評價已刪除",
+    "saveFailed": "無法儲存評價。",
+    "deleteFailed": "無法刪除評價。",
+    "chooseRating": "請先選擇評分。",
+    "rateLimited": "你修改評價過於頻繁，請稍後再試。",
+    "reply": "回覆",
+    "editReply": "編輯回覆",
+    "deleteReply": "刪除回覆",
+    "replyLabel": "你的回覆",
+    "saveReply": "儲存回覆",
+    "replySaved": "回覆已儲存",
+    "replyDeleted": "回覆已刪除",
+    "replyFailed": "無法儲存回覆。",
+    "hide": "隱藏",
+    "show": "顯示",
+    "hiddenBadge": "已隱藏",
+    "hiddenToast": "評價已隱藏",
+    "shownToast": "評價已顯示",
+    "moderateFailed": "無法更新該評價。"
+  },
+  "dashboardSkillRunStats": {
+    "heading": "沙箱執行",
+    "ran": "過去 {days} 天在 SourceWeft 沙箱中執行了 {runs, plural, other {# 次}}",
+    "succeeded": "成功率 {percent}",
+    "commonIssue": "常見問題：{label}",
+    "errors": {
+      "missing_dependency": "缺少相依套件",
+      "missing_dependency_named": "缺少 {subject}",
+      "timeout": "逾時",
+      "permission": "權限被拒絕",
+      "other": "其他錯誤"
+    },
+    "full": {
+      "privateNote": "僅你和市場管理員可見。",
+      "none": "過去 {days} 天沒有沙箱執行。",
+      "succeeded": "成功",
+      "succeededValue": "{runs, number} 次中成功 {successes, number} 次（{percent}）",
+      "workspaces": "工作區",
+      "issues": "常見問題",
+      "issueCount": "× {count, number}",
+      "publicLine": "公開頁面",
+      "shownPublicly": "已顯示",
+      "hiddenPublicly": "達到 {minWorkspaces} 個工作區共 {minRuns} 次執行前不顯示",
+      "updated": "更新於 {when}"
+    }
+  },
+  "dashboardSkillReports": {
+    "reasons": {
+      "copyright": "侵犯版權或違反授權條款",
+      "malicious": "惡意或不安全",
+      "impersonation": "冒充他人",
+      "spam": "垃圾內容或誤導",
+      "broken": "已損壞或無法使用",
+      "other": "其他問題"
+    },
+    "form": {
+      "reasonLabel": "出了什麼問題？",
+      "reasonPlaceholder": "選擇一個原因",
+      "detailsLabel": "詳細說明",
+      "detailsPlaceholder": "市場管理員應該關注什麼？附上連結和具體細節會更有幫助。",
+      "contactLabel": "聯絡電子郵件",
+      "contactOptionalHint": "選填。僅市場管理員可見。",
+      "contactRequiredHint": "必填，以便管理員回覆你。僅管理員可見。",
+      "submit": "提交檢舉",
+      "submitting": "正在提交…",
+      "cancel": "取消",
+      "note": "檢舉本身不會下架該技能，市場管理員會進行審核。",
+      "successTitle": "檢舉已提交",
+      "successBody": "感謝你的回報。市場管理員會進行審核，在此之前不會有任何變化。",
+      "close": "關閉",
+      "errors": {
+        "rateLimited": "你提交的檢舉過多，請在 {wait}後重試。",
+        "rateLimitedLater": "你提交的檢舉過多，請稍後重試。",
+        "contactRequired": "請留下電子郵件地址，以便管理員回覆你。",
+        "invalid": "請檢查表單：必須選擇原因，且電子郵件格式必須有效。",
+        "notFound": "該技能（或評價）已無法檢舉。",
+        "unknown": "檢舉未能提交，請重試。",
+        "detailsTooLong": "詳細說明請控制在 {max} 個字元以內。"
+      },
+      "retryWait": {
+        "seconds": "{count} 秒",
+        "minutes": "{count} 分鐘",
+        "hours": "{count} 小時"
+      }
+    },
+    "button": {
+      "label": "檢舉",
+      "title": "檢舉此技能",
+      "description": "向市場管理員回報此技能的問題：抄襲他人作品、存在不安全行為、垃圾內容或無法正常使用。"
+    },
+    "admin": {
+      "title": "檢舉",
+      "description": "使用者和訪客對社群技能及其評價的檢舉。處理檢舉會記入市場審計記錄。",
+      "statuses": {
+        "open": "待處理",
+        "actioned": "已處置",
+        "dismissed": "已駁回"
+      },
+      "statusFilterLabel": "狀態",
+      "empty": {
+        "open": "沒有待處理的檢舉。",
+        "actioned": "沒有已處置的檢舉。",
+        "dismissed": "沒有已駁回的檢舉。"
+      },
+      "loadError": "無法載入檢舉。",
+      "retry": "重試",
+      "loadMore": "載入更多",
+      "loading": "正在載入…",
+      "anonymous": "匿名",
+      "reportedBy": "檢舉人",
+      "contact": "聯絡電子郵件",
+      "account": "帳號",
+      "aboutReview": "針對一條評價",
+      "reviewHidden": "已隱藏",
+      "noDetails": "未提供詳細說明。",
+      "otherOpen": "該技能還有 {count} 條待處理的檢舉",
+      "visibility": {
+        "public": "公開",
+        "restricted": "未公開"
+      },
+      "held": "已暫停上架",
+      "resolution": "處理結果",
+      "resolvedBy": "處理人",
+      "resolutionLabel": "處理說明（選填）",
+      "resolutionPlaceholder": "做了什麼決定，以及原因",
+      "alsoResolve": "同時處理針對同一對象的其他待處理檢舉",
+      "actions": {
+        "dismiss": "駁回",
+        "withdraw_skill": "下架技能",
+        "revoke_version": "撤銷目前版本",
+        "hide_review": "隱藏評價",
+        "none": "標記為已處理"
+      },
+      "confirm": {
+        "withdraw_skill": "要將此技能從公開市場下架嗎？已安裝的工作區仍會保留它。",
+        "revoke_version": "要撤銷該技能的目前版本嗎？如有較早的最佳版本，它將成為目前版本。",
+        "hide_review": "要在技能頁面上隱藏這條評價嗎？"
+      },
+      "confirmAction": "確認",
+      "cancel": "取消",
+      "resolveError": "無法處理該檢舉。",
+      "resolved": "{count, plural, =0 {檢舉已處理。} =1 {檢舉已處理。} other {已處理 # 條檢舉。}}"
+    }
+  },
+  "dashboardSkillsMarketAdmin": {
+    "all": {
+      "title": "全部社群技能",
+      "description": "所有社群技能，無論其上架狀態。最近變更的排在最前。",
+      "searchLabel": "搜尋技能",
+      "searchPlaceholder": "名稱、slug 或 owner/repo",
+      "search": "搜尋",
+      "standingLabel": "上架狀態",
+      "standing": {
+        "any": "任意狀態",
+        "public": "公開",
+        "restricted": "未上架",
+        "held": "被管理員下架",
+        "owner_held": "作者設為私有"
+      },
+      "flags": {
+        "featured": "精選",
+        "verified": "已驗證",
+        "claimed": "已認領",
+        "flagged": "有掃描標記",
+        "reported": "有待處理檢舉"
+      },
+      "tri": {
+        "any": "不限",
+        "yes": "是",
+        "no": "否"
+      },
+      "columns": {
+        "skill": "技能",
+        "standing": "上架狀態",
+        "marks": "標記",
+        "installs": "安裝數",
+        "rating": "評分",
+        "updated": "更新時間"
+      },
+      "public": "公開",
+      "notListed": "未上架",
+      "heldByAdmin": "已下架",
+      "heldByOwner": "作者設為私有",
+      "flagCount": "{count} 個標記",
+      "reportCount": "{count} 條待處理檢舉",
+      "noRating": "—",
+      "rating": "{avg}（{count}）",
+      "empty": "沒有符合篩選條件的技能。",
+      "loadMore": "載入更多",
+      "loading": "正在載入…",
+      "failed": "無法載入技能。",
+      "reinfer": "重新推斷分類（僅自動分類）",
+      "reinferConfirm": "要為所有分類由系統推斷的技能重新推斷分類嗎？管理員手動選擇的分類不受影響。",
+      "reinferDone": "已重新推斷 {considered} 個技能，其中 {changed} 個有變化。",
+      "reinferFailed": "無法重新推斷分類。"
+    },
+    "events": {
+      "feedTitle": "最近的市場事件",
+      "show": "顯示",
+      "hide": "隱藏",
+      "skillTitle": "市場事件記錄",
+      "empty": "暫無記錄。",
+      "loadMore": "載入更多",
+      "failed": "無法載入市場事件。",
+      "reinfer": "重新推斷分類",
+      "reinferDone": "目前分類：{slugs}。",
+      "reinferFailed": "無法重新推斷分類。",
+      "platform": "SourceWeft",
+      "actorKind": {
+        "admin": "管理員",
+        "owner": "作者",
+        "user": "使用者",
+        "system": "平臺"
+      },
+      "actor": "{name}（{kind}）",
+      "actions": {
+        "listing": {
+          "listed": "已公開上架",
+          "withdrawn": "已從市場下架",
+          "auto_listed": "已自動上架",
+          "owner_allowed": "作者允許上架",
+          "owner_private": "作者設為私有",
+          "kept": "新版本發布後保持公開"
+        },
+        "verified": {
+          "set": "已驗證徽章變更",
+          "cleared": "新版本清除了已驗證徽章"
+        },
+        "featured": {
+          "set": "精選狀態變更"
+        },
+        "categories": {
+          "set": "已設定分類",
+          "reinferred": "已重新推斷分類"
+        },
+        "provenance": {
+          "withheld": "已暫緩：提交不在預設分支上"
+        },
+        "claim": {
+          "granted": "儲存庫已被認領",
+          "revoked": "認領已撤銷",
+          "removed": "作者移除了儲存庫",
+          "restored": "作者恢復了儲存庫"
+        },
+        "version": {
+          "published": "版本已發布",
+          "rejected": "版本已拒絕",
+          "revoked": "版本已撤銷"
+        },
+        "review": {
+          "written": "發表了評價",
+          "deleted": "評價已刪除",
+          "replied": "作者回覆了評價",
+          "reply_removed": "作者回覆已移除",
+          "hidden": "評價已隱藏",
+          "shown": "評價已重新顯示"
+        },
+        "report": {
+          "actioned": "檢舉已處置",
+          "dismissed": "檢舉已駁回"
+        },
+        "overview": {
+          "regenerated": "AI 概覽已重新生成",
+          "hidden": "AI 概覽已隱藏",
+          "shown": "AI 概覽已重新顯示"
+        },
+        "settings": {
+          "updated": "市場設定已更新"
+        }
+      },
+      "verifiedCleared": "版本 {from} → {to}",
+      "summary": {
+        "fields": {
+          "visibility": "可見性",
+          "listingHoldBy": "暫停上架方",
+          "verified": "已驗證",
+          "featured": "精選",
+          "categorySlugs": "分類",
+          "status": "狀態"
+        },
+        "change": "{field}：{from} → {to}",
+        "none": "無",
+        "skillCount": "{count} 個技能",
+        "bulk": "所有推斷分類的技能：檢查 {considered} 個，變更 {changed} 個"
+      }
+    },
+    "nav": {
+      "marketAdmin": "市場管理"
+    },
+    "restore": {
+      "button": "恢復上架到 SourceWeft",
+      "restored": "已恢復。平臺規則稍後會重新上架 {count} 個技能。",
+      "nothing": "沒有需要恢復的內容。",
+      "failed": "無法恢復該儲存庫。"
+    },
+    "rateLimit": {
+      "notice": "已達到 GitHub 速率限制，預計 {time} 左右恢復",
+      "noticeUnknown": "已達到 GitHub 速率限制，匯入將很快恢復"
+    }
   }
 }

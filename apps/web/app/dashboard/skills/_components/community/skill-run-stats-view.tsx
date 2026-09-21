@@ -7,12 +7,14 @@ import {
   SKILL_RUN_STATS_MIN_RUNS,
   SKILL_RUN_STATS_MIN_WORKSPACES,
 } from "@sourceweft/contracts";
-import { skillRunStatsCopy as copy } from "./skill-run-stats-copy";
+import { useLocale, useTranslations } from "next-intl";
 
 /**
  * Pure presentation of a skill's sandbox run stats: no fetching, no session,
- * no router — so the public skill page can render it from its own data.
+ * no router. Helpers take the `dashboardSkillRunStats` translator.
  */
+
+type Translate = ReturnType<typeof useTranslations>;
 
 export type AvailableSkillRunStats = Extract<
   SkillRunStatsPublic,
@@ -36,10 +38,6 @@ export function formatSuccessRate(rate: number, locale?: string) {
   }).format(percent / 100);
 }
 
-function formatCount(value: number, locale?: string) {
-  return new Intl.NumberFormat(locale).format(value);
-}
-
 function formatDate(iso: string, locale?: string) {
   const date = new Date(iso);
   return Number.isNaN(date.getTime())
@@ -52,20 +50,28 @@ function formatDate(iso: string, locale?: string) {
       });
 }
 
-export function skillRunErrorLabel(error: SkillRunTopError) {
-  return copy.errorLabel(error.errorClass, error.subject);
+/** An error class in words; an unknown class reads as "other errors". */
+export function skillRunErrorLabel(error: SkillRunTopError, t: Translate) {
+  if (error.errorClass === "missing_dependency" && error.subject) {
+    return t("errors.missing_dependency_named", { subject: error.subject });
+  }
+  const key = `errors.${error.errorClass}`;
+  return t.has(key) ? t(key) : t("errors.other");
 }
 
 /** "Ran 124 times … · 92% succeeded · Common issue: missing pptxgenjs". */
 export function skillRunStatsSentence(
   stats: AvailableSkillRunStats,
+  t: Translate,
   locale?: string,
 ) {
   const top = stats.topErrors[0];
   return [
-    copy.ran(formatCount(stats.runs, locale), stats.windowDays),
-    copy.succeeded(formatSuccessRate(stats.successRate, locale)),
-    ...(top ? [copy.commonIssue(skillRunErrorLabel(top))] : []),
+    t("ran", { runs: stats.runs, days: stats.windowDays }),
+    t("succeeded", { percent: formatSuccessRate(stats.successRate, locale) }),
+    ...(top
+      ? [t("commonIssue", { label: skillRunErrorLabel(top, t) })]
+      : []),
   ].join(" · ");
 }
 
@@ -75,16 +81,16 @@ const boxClass =
 /** The public line, for anyone. */
 export function SkillRunStatsSummary({
   stats,
-  locale,
 }: {
   stats: AvailableSkillRunStats;
-  locale?: string;
 }) {
+  const t = useTranslations("dashboardSkillRunStats");
+  const locale = useLocale();
   return (
-    <section aria-label={copy.heading} className={boxClass}>
-      <h2 className="text-sm font-semibold text-foreground">{copy.heading}</h2>
+    <section aria-label={t("heading")} className={boxClass}>
+      <h2 className="text-sm font-semibold text-foreground">{t("heading")}</h2>
       <p className="mt-2 text-sm text-muted-foreground">
-        {skillRunStatsSentence(stats, locale)}
+        {skillRunStatsSentence(stats, t, locale)}
       </p>
     </section>
   );
@@ -93,51 +99,50 @@ export function SkillRunStatsSummary({
 /** Every number, for the skill's verified author and market admins. */
 export function SkillRunStatsDetails({
   stats,
-  locale,
 }: {
   stats: SkillRunStatsFull;
-  locale?: string;
 }) {
-  const runs = formatCount(stats.runs, locale);
+  const t = useTranslations("dashboardSkillRunStats");
+  const locale = useLocale();
   return (
-    <section aria-label={copy.heading} className={boxClass}>
-      <h2 className="text-sm font-semibold text-foreground">{copy.heading}</h2>
+    <section aria-label={t("heading")} className={boxClass}>
+      <h2 className="text-sm font-semibold text-foreground">{t("heading")}</h2>
       {stats.runs === 0 ? (
         <p className="mt-2 text-sm text-muted-foreground">
-          {copy.full.none(stats.windowDays)}
+          {t("full.none", { days: stats.windowDays })}
         </p>
       ) : (
         <>
           <p className="mt-2 text-sm text-muted-foreground">
-            {copy.ran(runs, stats.windowDays)}
+            {t("ran", { runs: stats.runs, days: stats.windowDays })}
           </p>
           <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-sm">
-            <dt className="text-muted-foreground">{copy.full.succeeded}</dt>
+            <dt className="text-muted-foreground">{t("full.succeeded")}</dt>
             <dd className="text-foreground">
-              {copy.full.succeededValue(
-                formatCount(stats.successes, locale),
-                runs,
-                formatSuccessRate(stats.successRate ?? 0, locale),
-              )}
+              {t("full.succeededValue", {
+                successes: stats.successes,
+                runs: stats.runs,
+                percent: formatSuccessRate(stats.successRate ?? 0, locale),
+              })}
             </dd>
-            <dt className="text-muted-foreground">{copy.full.workspaces}</dt>
+            <dt className="text-muted-foreground">{t("full.workspaces")}</dt>
             <dd className="text-foreground">
-              {formatCount(stats.workspaces, locale)}
+              {new Intl.NumberFormat(locale).format(stats.workspaces)}
             </dd>
-            <dt className="text-muted-foreground">{copy.full.publicLine}</dt>
+            <dt className="text-muted-foreground">{t("full.publicLine")}</dt>
             <dd className="text-foreground">
               {stats.publiclyVisible
-                ? copy.full.shownPublicly
-                : copy.full.hiddenPublicly(
-                    SKILL_RUN_STATS_MIN_RUNS,
-                    SKILL_RUN_STATS_MIN_WORKSPACES,
-                  )}
+                ? t("full.shownPublicly")
+                : t("full.hiddenPublicly", {
+                    minRuns: SKILL_RUN_STATS_MIN_RUNS,
+                    minWorkspaces: SKILL_RUN_STATS_MIN_WORKSPACES,
+                  })}
             </dd>
           </dl>
           {stats.topErrors.length > 0 ? (
             <div className="mt-3">
               <h3 className="text-xs font-medium text-muted-foreground">
-                {copy.full.issues}
+                {t("full.issues")}
               </h3>
               <ul className="mt-1 space-y-1 text-sm">
                 {stats.topErrors.map((error) => (
@@ -146,10 +151,10 @@ export function SkillRunStatsDetails({
                     key={`${error.errorClass}:${error.subject ?? ""}`}
                   >
                     <span className="min-w-0 truncate text-foreground">
-                      {skillRunErrorLabel(error)}
+                      {skillRunErrorLabel(error, t)}
                     </span>
                     <span className="shrink-0 text-muted-foreground tabular-nums">
-                      {copy.full.issueCount(formatCount(error.count, locale))}
+                      {t("full.issueCount", { count: error.count })}
                     </span>
                   </li>
                 ))}
@@ -159,9 +164,9 @@ export function SkillRunStatsDetails({
         </>
       )}
       <p className="mt-3 text-xs text-muted-foreground">
-        {copy.full.privateNote}
+        {t("full.privateNote")}
         {stats.computedAt
-          ? ` ${copy.full.updated(formatDate(stats.computedAt, locale))}`
+          ? ` ${t("full.updated", { when: formatDate(stats.computedAt, locale) })}`
           : null}
       </p>
     </section>

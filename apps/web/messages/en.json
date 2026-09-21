@@ -3743,5 +3743,395 @@
       "failed": "The import failed.",
       "retryFailed": "The import was not retried."
     }
+  },
+  "dashboardSkillOverview": {
+    "block": {
+      "title": "AI-generated overview",
+      "explainer": "Written by an AI model from this skill's SKILL.md and file list. It can be wrong or incomplete — check the skill's own documentation before relying on it.",
+      "explainerLabel": "About this overview",
+      "whatItDoes": "What it does",
+      "whenToUse": "When to use it",
+      "requirements": "Requirements",
+      "englishFallback": "Shown in English: no overview in your language yet."
+    },
+    "admin": {
+      "title": "AI overview",
+      "loading": "Loading overview…",
+      "none": "No overview for the current version yet.",
+      "notEligible": "Not generated for this skill: only public skills imported from GitHub get one.",
+      "noVersion": "This skill has no current published version.",
+      "hidden": "Hidden",
+      "visible": "Shown",
+      "missing": "Missing",
+      "model": "Model",
+      "generatedAt": "Generated",
+      "regenerate": "Regenerate",
+      "regenerateQueued": "Queued. The new overview appears within a few minutes.",
+      "regenerateNotQueued": "Removed. This skill is not one overviews are written for, so none was queued.",
+      "hide": "Hide",
+      "show": "Show",
+      "hiddenDone": "Overview hidden.",
+      "shownDone": "Overview shown.",
+      "failed": "Something went wrong. Try again."
+    },
+    "settings": {
+      "title": "AI overviews",
+      "description": "Overviews are written by the default chat model and billed to the team, workspace and member chosen here. Nothing is generated until this is set.",
+      "current": "Billed to",
+      "notSet": "Not set — no overviews are being generated.",
+      "team": "Team",
+      "workspace": "Workspace",
+      "member": "Billed member (user id)",
+      "memberHint": "Leave empty to bill yourself. Must be a member of the workspace.",
+      "choose": "Choose…",
+      "save": "Save",
+      "saving": "Saving…",
+      "saved": "Saved.",
+      "failed": "Could not save.",
+      "loadFailed": "Could not load the overview settings.",
+      "updatedBy": "Last changed by",
+      "status": "Coverage",
+      "eligible": "Eligible skills",
+      "withOverview": "With an overview",
+      "missingCount": "Missing",
+      "hiddenCount": "Hidden",
+      "billingSet": "Billing set",
+      "yes": "Yes",
+      "no": "No"
+    }
+  },
+  "dashboardSkillReviews": {
+    "heading": "Ratings and reviews",
+    "loading": "Loading reviews…",
+    "loadFailed": "Reviews could not be loaded.",
+    "retry": "Try again",
+    "noReviews": "No reviews yet.",
+    "averageLabel": "Average rating {average} out of 5",
+    "starsLabel": "{rating, plural, one {# star} other {# stars}}",
+    "reviewCount": "{count, plural, one {# review} other {# reviews}}",
+    "distributionLabel": "{stars, plural, one {# star} other {# stars}}: {count, number}",
+    "sortLabel": "Sort reviews",
+    "sorts": {
+      "newest": "Newest",
+      "highest": "Highest rated",
+      "lowest": "Lowest rated"
+    },
+    "loadMore": "Load more",
+    "anonymousReviewer": "Former user",
+    "version": "Version {version}",
+    "edited": "edited",
+    "authorReplyHeading": "Reply from the author",
+    "yourReview": "Your review",
+    "writeReview": "Write a review",
+    "notInstalled": "Install the skill to review it.",
+    "hiddenNotice": "A moderator hid this review. Only you can see it, and it does not count toward the rating.",
+    "ratingPickerLabel": "Your rating",
+    "bodyLabel": "Review",
+    "bodyPlaceholder": "What worked, what didn’t, what you used it for…",
+    "charCount": "{count}/{max}",
+    "save": "Save review",
+    "edit": "Edit",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "saved": "Review saved",
+    "deleted": "Review deleted",
+    "saveFailed": "The review could not be saved.",
+    "deleteFailed": "The review could not be deleted.",
+    "chooseRating": "Choose a rating first.",
+    "rateLimited": "You have changed reviews too often. Try again in a little while.",
+    "reply": "Reply",
+    "editReply": "Edit reply",
+    "deleteReply": "Delete reply",
+    "replyLabel": "Your reply",
+    "saveReply": "Save reply",
+    "replySaved": "Reply saved",
+    "replyDeleted": "Reply deleted",
+    "replyFailed": "The reply could not be saved.",
+    "hide": "Hide",
+    "show": "Show",
+    "hiddenBadge": "Hidden",
+    "hiddenToast": "Review hidden",
+    "shownToast": "Review shown",
+    "moderateFailed": "The review could not be updated."
+  },
+  "dashboardSkillRunStats": {
+    "heading": "Sandbox runs",
+    "ran": "Ran {runs, plural, one {# time} other {# times}} in SourceWeft sandboxes in the last {days} days",
+    "succeeded": "{percent} succeeded",
+    "commonIssue": "Common issue: {label}",
+    "errors": {
+      "missing_dependency": "a missing dependency",
+      "missing_dependency_named": "missing {subject}",
+      "timeout": "timed out",
+      "permission": "permission denied",
+      "other": "other errors"
+    },
+    "full": {
+      "privateNote": "Only you and market admins see this.",
+      "none": "No sandbox runs in the last {days} days.",
+      "succeeded": "Succeeded",
+      "succeededValue": "{successes, number} of {runs, number} ({percent})",
+      "workspaces": "Workspaces",
+      "issues": "Common issues",
+      "issueCount": "× {count, number}",
+      "publicLine": "Public page",
+      "shownPublicly": "Shown",
+      "hiddenPublicly": "Hidden until {minRuns} runs from {minWorkspaces} workspaces",
+      "updated": "Updated {when}"
+    }
+  },
+  "dashboardSkillReports": {
+    "reasons": {
+      "copyright": "Copyright or license violation",
+      "malicious": "Malicious or unsafe",
+      "impersonation": "Impersonates someone else",
+      "spam": "Spam or misleading",
+      "broken": "Broken or does not work",
+      "other": "Something else"
+    },
+    "form": {
+      "reasonLabel": "What is wrong?",
+      "reasonPlaceholder": "Choose a reason",
+      "detailsLabel": "Details",
+      "detailsPlaceholder": "What should the market admins look at? Links and specifics help.",
+      "contactLabel": "Contact email",
+      "contactOptionalHint": "Optional. Only market admins see it.",
+      "contactRequiredHint": "Required, so an admin can reply. Only admins see it.",
+      "submit": "Send report",
+      "submitting": "Sending…",
+      "cancel": "Cancel",
+      "note": "A report does not take the skill down by itself. A market admin reviews it.",
+      "successTitle": "Report sent",
+      "successBody": "Thank you. A market admin will review it. Nothing changes until they do.",
+      "close": "Close",
+      "errors": {
+        "rateLimited": "You have sent too many reports. Try again in {wait}.",
+        "rateLimitedLater": "You have sent too many reports. Try again later.",
+        "contactRequired": "Please leave an email address so an admin can reply.",
+        "invalid": "Check the form: a reason is required, and the email must be valid.",
+        "notFound": "This skill (or review) can no longer be reported.",
+        "unknown": "The report could not be sent. Try again.",
+        "detailsTooLong": "Keep the details under {max} characters."
+      },
+      "retryWait": {
+        "seconds": "{count, plural, one {# second} other {# seconds}}",
+        "minutes": "{count, plural, one {# minute} other {# minutes}}",
+        "hours": "{count, plural, one {# hour} other {# hours}}"
+      }
+    },
+    "button": {
+      "label": "Report",
+      "title": "Report this skill",
+      "description": "Tell the market admins about a problem with this skill: a copied work, unsafe behavior, spam, or something broken."
+    },
+    "admin": {
+      "title": "Reports",
+      "description": "Reports from users and visitors about community skills and their reviews. Resolving one is recorded in the market audit log.",
+      "statuses": {
+        "open": "Open",
+        "actioned": "Actioned",
+        "dismissed": "Dismissed"
+      },
+      "statusFilterLabel": "Status",
+      "empty": {
+        "open": "No open reports.",
+        "actioned": "No actioned reports.",
+        "dismissed": "No dismissed reports."
+      },
+      "loadError": "Reports could not be loaded.",
+      "retry": "Retry",
+      "loadMore": "Load more",
+      "loading": "Loading…",
+      "anonymous": "anonymous",
+      "reportedBy": "Reported by",
+      "contact": "Contact",
+      "account": "Account",
+      "aboutReview": "About a review",
+      "reviewHidden": "hidden",
+      "noDetails": "No details given.",
+      "otherOpen": "{count, plural, one {# other open report on this skill} other {# other open reports on this skill}}",
+      "visibility": {
+        "public": "Public",
+        "restricted": "Not public"
+      },
+      "held": "Held",
+      "resolution": "Resolution",
+      "resolvedBy": "Resolved by",
+      "resolutionLabel": "Resolution note (optional)",
+      "resolutionPlaceholder": "What was decided and why",
+      "alsoResolve": "Also resolve other open reports on the same target",
+      "actions": {
+        "dismiss": "Dismiss",
+        "withdraw_skill": "Withdraw skill",
+        "revoke_version": "Revoke current version",
+        "hide_review": "Hide review",
+        "none": "Mark handled"
+      },
+      "confirm": {
+        "withdraw_skill": "Withdraw this skill from the public market? Installed workspaces keep it.",
+        "revoke_version": "Revoke the skill's current version? The best older version, if any, becomes current.",
+        "hide_review": "Hide this review from the skill's page?"
+      },
+      "confirmAction": "Confirm",
+      "cancel": "Cancel",
+      "resolveError": "The report could not be resolved.",
+      "resolved": "{count, plural, =0 {Report resolved.} one {Report resolved.} other {Resolved # reports.}}"
+    }
+  },
+  "dashboardSkillsMarketAdmin": {
+    "all": {
+      "title": "All community skills",
+      "description": "Every community skill, whatever its standing. Newest change first.",
+      "searchLabel": "Search skills",
+      "searchPlaceholder": "Name, slug or owner/repo",
+      "search": "Search",
+      "standingLabel": "Standing",
+      "standing": {
+        "any": "Any standing",
+        "public": "Public",
+        "restricted": "Not listed",
+        "held": "Withdrawn by an admin",
+        "owner_held": "Kept private by its author"
+      },
+      "flags": {
+        "featured": "Featured",
+        "verified": "Verified",
+        "claimed": "Claimed",
+        "flagged": "Has scan flags",
+        "reported": "Has open reports"
+      },
+      "tri": {
+        "any": "Any",
+        "yes": "Yes",
+        "no": "No"
+      },
+      "columns": {
+        "skill": "Skill",
+        "standing": "Standing",
+        "marks": "Marks",
+        "installs": "Installs",
+        "rating": "Rating",
+        "updated": "Updated"
+      },
+      "public": "Public",
+      "notListed": "Not listed",
+      "heldByAdmin": "Withdrawn",
+      "heldByOwner": "Author keeps private",
+      "flagCount": "{count, plural, one {# flag} other {# flags}}",
+      "reportCount": "{count, plural, one {# open report} other {# open reports}}",
+      "noRating": "—",
+      "rating": "{avg} ({count})",
+      "empty": "No skills match these filters.",
+      "loadMore": "Load more",
+      "loading": "Loading…",
+      "failed": "Could not load the skills.",
+      "reinfer": "Re-infer categories (auto only)",
+      "reinferConfirm": "Re-infer the categories of every skill whose categories were inferred? Categories an admin picked are left alone.",
+      "reinferDone": "Re-inferred {considered, plural, one {# skill} other {# skills}}; {changed} changed.",
+      "reinferFailed": "Could not re-infer categories."
+    },
+    "events": {
+      "feedTitle": "Recent market events",
+      "show": "Show",
+      "hide": "Hide",
+      "skillTitle": "Market history",
+      "empty": "Nothing recorded yet.",
+      "loadMore": "Load more",
+      "failed": "Could not load the market events.",
+      "reinfer": "Re-infer categories",
+      "reinferDone": "Categories now: {slugs}.",
+      "reinferFailed": "Could not re-infer categories.",
+      "platform": "SourceWeft",
+      "actorKind": {
+        "admin": "admin",
+        "owner": "author",
+        "user": "user",
+        "system": "platform"
+      },
+      "actor": "{name} ({kind})",
+      "actions": {
+        "listing": {
+          "listed": "Listed publicly",
+          "withdrawn": "Withdrawn from the market",
+          "auto_listed": "Listed automatically",
+          "owner_allowed": "Author allowed listing",
+          "owner_private": "Author made it private",
+          "kept": "Kept public after a new version"
+        },
+        "verified": {
+          "set": "Verified badge changed",
+          "cleared": "Verified badge cleared by a new version"
+        },
+        "featured": {
+          "set": "Featured changed"
+        },
+        "categories": {
+          "set": "Categories set",
+          "reinferred": "Categories re-inferred"
+        },
+        "provenance": {
+          "withheld": "Withheld: commit not on the default branch"
+        },
+        "claim": {
+          "granted": "Repository claimed",
+          "revoked": "Claim revoked",
+          "removed": "Author removed the repository",
+          "restored": "Author restored the repository"
+        },
+        "version": {
+          "published": "Version published",
+          "rejected": "Version rejected",
+          "revoked": "Version revoked"
+        },
+        "review": {
+          "written": "Review written",
+          "deleted": "Review deleted",
+          "replied": "Author replied to a review",
+          "reply_removed": "Author reply removed",
+          "hidden": "Review hidden",
+          "shown": "Review shown again"
+        },
+        "report": {
+          "actioned": "Report acted on",
+          "dismissed": "Report dismissed"
+        },
+        "overview": {
+          "regenerated": "AI overview regenerated",
+          "hidden": "AI overview hidden",
+          "shown": "AI overview shown again"
+        },
+        "settings": {
+          "updated": "Market settings updated"
+        }
+      },
+      "verifiedCleared": "Version {from} → {to}",
+      "summary": {
+        "fields": {
+          "visibility": "visibility",
+          "listingHoldBy": "listingHoldBy",
+          "verified": "verified",
+          "featured": "featured",
+          "categorySlugs": "categorySlugs",
+          "status": "status"
+        },
+        "change": "{field}: {from} → {to}",
+        "none": "none",
+        "skillCount": "{count, plural, one {# skill} other {# skills}}",
+        "bulk": "all inferred skills: {considered} considered, {changed} changed"
+      }
+    },
+    "nav": {
+      "marketAdmin": "Market admin"
+    },
+    "restore": {
+      "button": "Restore to SourceWeft",
+      "restored": "Restored. {count, plural, one {# skill} other {# skills}} will be listed again by the platform's rules shortly.",
+      "nothing": "Nothing to restore.",
+      "failed": "Could not restore the repository."
+    },
+    "rateLimit": {
+      "notice": "GitHub rate limit reached — resumes around {time}",
+      "noticeUnknown": "GitHub rate limit reached — the import resumes shortly"
+    }
   }
 }

@@ -4,11 +4,11 @@ import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ShieldCheck } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { DropdownMenuItem } from "@sourceweft/ui-web/components/ui/dropdown-menu";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 
 import { getSkillMarketAdminMe } from "../../../lib/skill-market-audit";
-import { skillMarketAdminCopy } from "../admin/market/_components/skill-market-admin-copy";
 
 export const MARKET_ADMIN_HREF = "/dashboard/admin/market";
 
@@ -57,11 +57,12 @@ export function MarketAdminNavLink({
   variant?: "link" | "menu-item";
   onNavigate?: () => void;
 }) {
+  const t = useTranslations("dashboardSkillsMarketAdmin");
   const admin = useIsMarketAdmin();
   const pathname = usePathname() ?? "";
   if (!admin) return null;
   const active = pathname.startsWith(MARKET_ADMIN_HREF);
-  const label = skillMarketAdminCopy.nav.marketAdmin;
+  const label = t("nav.marketAdmin");
 
   if (variant === "menu-item") {
     return (

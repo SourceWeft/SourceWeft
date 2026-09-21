@@ -1,43 +1,22 @@
 // Generate the Traditional Chinese (zh-TW) catalog from the Simplified (zh-CN)
-// source with OpenCC (Taiwan standard + idioms), then apply a small glossary of
-// product-term overrides OpenCC does not cover. zh-TW.json is a build artifact:
-// edit zh-CN.json (and the glossary), never zh-TW.json by hand. `--check`
+// source with `toTaiwanTraditional` from @sourceweft/i18n/hant: OpenCC (Taiwan
+// standard + idioms) plus the shared glossary in packages/i18n/glossary, which
+// generated content (skill overviews) goes through too. zh-TW.json is a build
+// artifact: edit zh-CN.json (and the glossary), never zh-TW.json by hand. `--check`
 // re-generates and fails if the committed file drifted, so CI catches a zh-CN
 // change that forgot to regenerate (design §8, D7).
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import * as OpenCC from "opencc-js";
+import { toTaiwanTraditional } from "@sourceweft/i18n/hant";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const messagesDir = join(here, "..", "messages");
-const convert = OpenCC.Converter({ from: "cn", to: "twp" });
-
-let glossary = {};
-try {
-  glossary = JSON.parse(
-    readFileSync(join(messagesDir, "glossary", "zh-TW.json"), "utf8"),
-  );
-} catch {
-  // No glossary yet: OpenCC output stands on its own.
-}
-// Longer source terms first so a specific phrase wins over a substring of it.
-const glossaryEntries = Object.entries(glossary).sort(
-  (a, b) => b[0].length - a[0].length,
-);
-
-function applyGlossary(text) {
-  let out = text;
-  for (const [from, to] of glossaryEntries) {
-    out = out.split(from).join(to);
-  }
-  return out;
-}
 
 function translate(value) {
   if (typeof value === "string") {
-    return applyGlossary(convert(value));
+    return toTaiwanTraditional(value);
   }
   if (Array.isArray(value)) {
     return value.map(translate);

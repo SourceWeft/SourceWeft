@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useLocale, useTranslations } from "next-intl";
 import {
   Avatar,
   AvatarFallback,
@@ -9,7 +10,6 @@ import { cn } from "@sourceweft/ui-web/lib/utils";
 import type { SkillReview } from "../../../../../lib/skill-reviews";
 import { formatReviewDate, reviewWasEdited } from "./skill-review-format";
 import { SkillReviewStars } from "./skill-review-stars";
-import { skillReviewsCopy, type SkillReviewsCopy } from "./skill-reviews-copy";
 
 function initials(name: string | null): string {
   const letters = (name ?? "")
@@ -34,7 +34,6 @@ export function SkillReviewItem({
   actions,
   reply,
   className,
-  copy = skillReviewsCopy,
 }: {
   review: SkillReview;
   /** What "now" is for the relative date; the render time by default. */
@@ -42,9 +41,10 @@ export function SkillReviewItem({
   actions?: ReactNode;
   reply?: ReactNode;
   className?: string;
-  copy?: SkillReviewsCopy;
 }) {
-  const name = review.reviewer.name ?? copy.anonymousReviewer;
+  const t = useTranslations("dashboardSkillReviews");
+  const locale = useLocale();
+  const name = review.reviewer.name ?? t("anonymousReviewer");
   const hidden = review.status === "hidden";
   return (
     <article
@@ -63,20 +63,20 @@ export function SkillReviewItem({
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         <header className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <span className="text-sm font-medium text-foreground">{name}</span>
-          <SkillReviewStars rating={review.rating} copy={copy} />
+          <SkillReviewStars rating={review.rating} />
           <span className="text-xs text-muted-foreground">
             <time dateTime={review.createdAt}>
-              {formatReviewDate(review.createdAt, now)}
+              {formatReviewDate(review.createdAt, now, locale)}
             </time>
-            {reviewWasEdited(review) ? ` · ${copy.edited}` : null}
+            {reviewWasEdited(review) ? ` · ${t("edited")}` : null}
           </span>
           {review.version ? (
             <span className="text-xs text-muted-foreground">
-              {copy.version(review.version)}
+              {t("version", { version: review.version })}
             </span>
           ) : null}
           {hidden ? (
-            <Badge variant="secondary">{copy.hiddenBadge}</Badge>
+            <Badge variant="secondary">{t("hiddenBadge")}</Badge>
           ) : null}
           {actions ? (
             <span className="ml-auto flex items-center gap-1">{actions}</span>
@@ -93,7 +93,6 @@ export function SkillReviewItem({
           <SkillReviewAuthorReply
             reply={review.authorReply}
             now={now}
-            copy={copy}
           />
         ) : null}
       </div>
@@ -105,12 +104,12 @@ export function SkillReviewItem({
 export function SkillReviewAuthorReply({
   reply,
   now,
-  copy = skillReviewsCopy,
 }: {
   reply: NonNullable<SkillReview["authorReply"]>;
   now?: number;
-  copy?: SkillReviewsCopy;
 }) {
+  const t = useTranslations("dashboardSkillReviews");
+  const locale = useLocale();
   return (
     <div
       data-testid="skill-review-author-reply"
@@ -118,10 +117,10 @@ export function SkillReviewAuthorReply({
     >
       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
         <span className="font-medium text-foreground">
-          {copy.authorReplyHeading}
+          {t("authorReplyHeading")}
         </span>
         <time dateTime={reply.createdAt}>
-          {formatReviewDate(reply.createdAt, now)}
+          {formatReviewDate(reply.createdAt, now, locale)}
         </time>
       </div>
       <p className="mt-1 whitespace-pre-line break-words text-sm leading-6 text-foreground">

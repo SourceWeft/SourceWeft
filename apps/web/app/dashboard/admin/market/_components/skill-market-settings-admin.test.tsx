@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from "react";
+import { act, type ComponentProps, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, test, vi } from "vitest";
 
@@ -23,6 +23,17 @@ import {
   SkillMarketSettingsAdmin,
   overviewBillingRequest,
 } from "./skill-market-settings-admin";
+import { NextIntlClientProvider } from "next-intl";
+import messages from "../../../../../messages/en.json";
+
+const intlMessages = messages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
+const withIntl = (node: ReactNode) => (
+  <NextIntlClientProvider locale="en" messages={intlMessages}>
+    {node}
+  </NextIntlClientProvider>
+);
 
 let root: Root;
 let container: HTMLDivElement;
@@ -44,7 +55,7 @@ async function render() {
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
-  await act(async () => root.render(<SkillMarketSettingsAdmin />));
+  await act(async () => root.render(withIntl(<SkillMarketSettingsAdmin />)));
 }
 
 function select(label: string) {

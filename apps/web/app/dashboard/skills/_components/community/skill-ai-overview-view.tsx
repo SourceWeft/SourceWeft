@@ -8,21 +8,11 @@ import {
   TooltipTrigger,
 } from "@sourceweft/ui-web/components/ui/tooltip";
 import type { MarketSkillAiOverview } from "../../../../../lib/skill-overviews";
-import { skillOverviewCopy } from "./skill-overview-copy";
-
-export type SkillAiOverviewLabels = {
-  title: string;
-  explainer: string;
-  explainerLabel: string;
-  whatItDoes: string;
-  whenToUse: string;
-  requirements: string;
-  englishFallback: string;
-};
+import { useTranslations } from "next-intl";
 
 /**
- * An AI overview as a compact, labelled block. Pure: it only renders what it
- * is given, so the public skill page can use it too.
+ * An AI overview as a compact, labelled block. It only renders what it is
+ * given; the labels are UI chrome, the overview text is shown as written.
  *
  * The text is model output from third-party content. It goes out as React
  * text children only — never markdown, never HTML — so nothing in it can
@@ -31,43 +21,42 @@ export type SkillAiOverviewLabels = {
 export function SkillAiOverviewView({
   overview,
   requestedLocale,
-  labels = skillOverviewCopy.block,
 }: {
   overview: MarketSkillAiOverview;
   // The language asked for; a note shows when the overview fell back.
   requestedLocale?: string;
-  labels?: SkillAiOverviewLabels;
 }) {
+  const t = useTranslations("dashboardSkillOverview.block");
   const sections = [
-    { label: labels.whatItDoes, text: overview.whatItDoes },
-    { label: labels.whenToUse, text: overview.whenToUse },
-    { label: labels.requirements, text: overview.requirements },
+    { label: t("whatItDoes"), text: overview.whatItDoes },
+    { label: t("whenToUse"), text: overview.whenToUse },
+    { label: t("requirements"), text: overview.requirements },
   ].filter((section) => section.text.trim());
   const fellBack =
     requestedLocale !== undefined && requestedLocale !== overview.locale;
 
   return (
     <section
-      aria-label={labels.title}
+      aria-label={t("title")}
       data-testid="skill-ai-overview"
       className="mb-4 rounded-lg border border-dashed bg-muted/30 p-4 text-sm"
     >
       <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
         <Sparkles className="size-3.5" aria-hidden />
-        <span>{labels.title}</span>
+        <span>{t("title")}</span>
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>
               <button
                 type="button"
-                aria-label={labels.explainerLabel}
+                aria-label={t("explainerLabel")}
                 className="inline-flex text-muted-foreground hover:text-foreground"
               >
                 <Info className="size-3.5" aria-hidden />
               </button>
             </TooltipTrigger>
             <TooltipContent className="max-w-xs">
-              {labels.explainer}
+              {t("explainer")}
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
@@ -89,7 +78,7 @@ export function SkillAiOverviewView({
       ) : null}
       {fellBack ? (
         <p className="mt-3 text-xs text-muted-foreground">
-          {labels.englishFallback}
+          {t("englishFallback")}
         </p>
       ) : null}
     </section>

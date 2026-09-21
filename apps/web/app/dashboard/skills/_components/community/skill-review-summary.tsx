@@ -1,3 +1,4 @@
+import { useFormatter, useTranslations } from "next-intl";
 import type { SkillReviewSummary as Summary } from "../../../../../lib/skill-reviews";
 import {
   formatReviewAverage,
@@ -5,19 +6,18 @@ import {
   SKILL_REVIEW_STARS,
 } from "./skill-review-format";
 import { SkillReviewStars } from "./skill-review-stars";
-import { skillReviewsCopy, type SkillReviewsCopy } from "./skill-reviews-copy";
 
 /**
  * The average, its stars, the count and one bar per star. Presentational:
- * the public page can render it from the same `summary`.
+ * it renders from `summary` alone.
  */
 export function SkillReviewSummary({
   summary,
-  copy = skillReviewsCopy,
 }: {
   summary: Summary;
-  copy?: SkillReviewsCopy;
 }) {
+  const t = useTranslations("dashboardSkillReviews");
+  const format = useFormatter();
   const average = formatReviewAverage(summary.average);
   return (
     <div
@@ -27,13 +27,13 @@ export function SkillReviewSummary({
       <div className="flex shrink-0 flex-col items-start gap-1">
         <span
           className="text-4xl font-semibold tabular-nums text-foreground"
-          aria-label={copy.averageLabel(average)}
+          aria-label={t("averageLabel", { average })}
         >
           {average}
         </span>
-        <SkillReviewStars rating={summary.average ?? 0} size="md" copy={copy} />
+        <SkillReviewStars rating={summary.average ?? 0} size="md" />
         <span className="text-xs text-muted-foreground">
-          {copy.reviewCount(summary.count)}
+          {t("reviewCount", { count: summary.count })}
         </span>
       </div>
       <ul className="flex min-w-0 flex-1 flex-col gap-1.5">
@@ -42,7 +42,7 @@ export function SkillReviewSummary({
           return (
             <li
               key={stars}
-              aria-label={copy.distributionLabel(stars, count)}
+              aria-label={t("distributionLabel", { stars, count })}
               className="flex items-center gap-2 text-xs text-muted-foreground"
             >
               <span className="w-3 text-right tabular-nums">{stars}</span>
@@ -56,7 +56,7 @@ export function SkillReviewSummary({
                 />
               </span>
               <span className="w-8 text-right tabular-nums">
-                {count.toLocaleString("en")}
+                {format.number(count)}
               </span>
             </li>
           );

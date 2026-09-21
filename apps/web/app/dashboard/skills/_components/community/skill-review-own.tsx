@@ -2,11 +2,11 @@
 
 import * as React from "react";
 import { EyeOff, Loader2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import type { SkillReviewViewer } from "../../../../../lib/skill-reviews";
 import { SkillReviewEditor } from "./skill-review-editor";
 import { SkillReviewItem } from "./skill-review-item";
-import { skillReviewsCopy, type SkillReviewsCopy } from "./skill-reviews-copy";
 
 /**
  * The viewer's own review: what they wrote (marked when a moderator hid it),
@@ -18,14 +18,13 @@ export function SkillReviewOwn({
   busy,
   onSave,
   onDelete,
-  copy = skillReviewsCopy,
 }: {
   viewer: SkillReviewViewer;
   busy: boolean;
   onSave: (input: { rating: number; body: string }) => Promise<boolean>;
   onDelete: () => Promise<boolean>;
-  copy?: SkillReviewsCopy;
 }) {
+  const t = useTranslations("dashboardSkillReviews");
   const own = viewer.ownReview;
   const [editing, setEditing] = React.useState(false);
 
@@ -41,18 +40,18 @@ export function SkillReviewOwn({
       onClick={() => void onDelete()}
     >
       {busy ? <Loader2 className="animate-spin" /> : null}
-      {copy.delete}
+      {t("delete")}
     </Button>
   ) : null;
 
   return (
     <section
       data-testid="skill-review-own"
-      aria-label={copy.yourReview}
+      aria-label={t("yourReview")}
       className="rounded-xl border border-border bg-muted/20 p-3"
     >
       <h3 className="text-sm font-medium text-foreground">
-        {own ? copy.yourReview : copy.writeReview}
+        {own ? t("yourReview") : t("writeReview")}
       </h3>
       {own?.status === "hidden" ? (
         <p
@@ -60,22 +59,21 @@ export function SkillReviewOwn({
           className="mt-2 flex items-start gap-2 text-xs text-muted-foreground"
         >
           <EyeOff aria-hidden className="mt-0.5 size-3.5 shrink-0" />
-          {copy.hiddenNotice}
+          {t("hiddenNotice")}
         </p>
       ) : null}
       {!viewer.canReview ? (
         <>
           <p className="mt-2 text-sm text-muted-foreground">
-            {copy.notInstalled}
+            {t("notInstalled")}
           </p>
           {own ? (
-            <SkillReviewItem review={own} actions={deleteButton} copy={copy} />
+            <SkillReviewItem review={own} actions={deleteButton} />
           ) : null}
         </>
       ) : own && !editing ? (
         <SkillReviewItem
           review={own}
-          copy={copy}
           actions={
             <>
               <Button
@@ -85,7 +83,7 @@ export function SkillReviewOwn({
                 disabled={busy}
                 onClick={() => setEditing(true)}
               >
-                {copy.edit}
+                {t("edit")}
               </Button>
               {deleteButton}
             </>
@@ -98,7 +96,6 @@ export function SkillReviewOwn({
             initialRating={own?.rating ?? 0}
             initialBody={own?.body ?? ""}
             busy={busy}
-            copy={copy}
             onCancel={own ? () => setEditing(false) : undefined}
             onSave={(input) => {
               void onSave(input).then((done) => {

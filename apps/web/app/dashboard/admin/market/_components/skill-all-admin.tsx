@@ -9,6 +9,7 @@ import {
   RefreshCw,
   Search,
 } from "lucide-react";
+import { useLocale, useTranslations } from "next-intl";
 import type {
   SkillMarketAdminSkill,
   SkillMarketAdminStandingFilter,
@@ -27,11 +28,8 @@ import {
 } from "../../../../../lib/skill-market-audit";
 import {
   formatEventTime,
-  skillMarketAdminCopy,
-} from "./skill-market-admin-copy";
-import { SkillMarketEventList } from "./skill-market-event-list";
-
-const copy = skillMarketAdminCopy.all;
+  SkillMarketEventList,
+} from "./skill-market-event-list";
 
 const PAGE_SIZE = 50;
 const EVENTS_PAGE_SIZE = 25;
@@ -74,24 +72,27 @@ export function toSkillFilters(form: {
 }
 
 function StandingBadge({ skill }: { skill: SkillMarketAdminSkill }) {
+  const t = useTranslations("dashboardSkillsMarketAdmin");
   if (skill.listingHoldBy === "admin") {
-    return <Badge variant="destructive">{copy.heldByAdmin}</Badge>;
+    return <Badge variant="destructive">{t("all.heldByAdmin")}</Badge>;
   }
   if (skill.listingHoldBy === "owner") {
-    return <Badge variant="outline">{copy.heldByOwner}</Badge>;
+    return <Badge variant="outline">{t("all.heldByOwner")}</Badge>;
   }
   return skill.visibility === "public" ? (
-    <Badge variant="secondary">{copy.public}</Badge>
+    <Badge variant="secondary">{t("all.public")}</Badge>
   ) : (
-    <Badge variant="outline">{copy.notListed}</Badge>
+    <Badge variant="outline">{t("all.notListed")}</Badge>
   );
 }
 
 function SkillRow({ skill }: { skill: SkillMarketAdminSkill }) {
+  const t = useTranslations("dashboardSkillsMarketAdmin");
+  const locale = useLocale();
   const marks = [
-    skill.featured ? copy.flags.featured : null,
-    skill.verified ? copy.flags.verified : null,
-    skill.claimed ? copy.flags.claimed : null,
+    skill.featured ? t("all.flags.featured") : null,
+    skill.verified ? t("all.flags.verified") : null,
+    skill.claimed ? t("all.flags.claimed") : null,
   ].filter((mark): mark is string => mark !== null);
   return (
     <tr
@@ -126,12 +127,12 @@ function SkillRow({ skill }: { skill: SkillMarketAdminSkill }) {
           ))}
           {skill.flagCount > 0 ? (
             <Badge className="h-5 px-1.5 text-[10px]" variant="outline">
-              {copy.flagCount(skill.flagCount)}
+              {t("all.flagCount", { count: skill.flagCount })}
             </Badge>
           ) : null}
           {skill.openReportCount > 0 ? (
             <Badge className="h-5 px-1.5 text-[10px]" variant="destructive">
-              {copy.reportCount(skill.openReportCount)}
+              {t("all.reportCount", { count: skill.openReportCount })}
             </Badge>
           ) : null}
         </div>
@@ -141,11 +142,14 @@ function SkillRow({ skill }: { skill: SkillMarketAdminSkill }) {
       </td>
       <td className="px-3 py-2 text-right tabular-nums">
         {skill.ratingAvg === null
-          ? copy.noRating
-          : copy.rating(skill.ratingAvg, skill.ratingCount)}
+          ? t("all.noRating")
+          : t("all.rating", {
+              avg: skill.ratingAvg.toFixed(1),
+              count: skill.ratingCount,
+            })}
       </td>
       <td className="px-3 py-2 text-muted-foreground">
-        {formatEventTime(skill.updatedAt)}
+        {formatEventTime(skill.updatedAt, locale)}
       </td>
     </tr>
   );
@@ -153,7 +157,7 @@ function SkillRow({ skill }: { skill: SkillMarketAdminSkill }) {
 
 /** The collapsible feed of every market event, a page at a time. */
 function RecentMarketEvents() {
-  const eventsCopy = skillMarketAdminCopy.events;
+  const t = useTranslations("dashboardSkillsMarketAdmin");
   const [open, setOpen] = React.useState(false);
   const [events, setEvents] = React.useState<SkillMarketEvent[]>([]);
   const [cursor, setCursor] = React.useState<string | null>(null);
@@ -176,12 +180,12 @@ function RecentMarketEvents() {
         setCursor(page.nextCursor);
         setLoaded(true);
       } catch (caught) {
-        setError(errorMessage(caught, eventsCopy.failed));
+        setError(errorMessage(caught, t("events.failed")));
       } finally {
         setLoading(false);
       }
     },
-    [eventsCopy.failed],
+    [t],
   );
 
   return (
@@ -201,13 +205,13 @@ function RecentMarketEvents() {
         ) : (
           <ChevronRight className="size-4" />
         )}
-        {eventsCopy.feedTitle}
+        {t("events.feedTitle")}
       </button>
       {open ? (
         <div className="mt-3 space-y-2">
           {error ? <p className="text-xs text-destructive">{error}</p> : null}
           {loaded && events.length === 0 ? (
-            <p className="text-xs text-muted-foreground">{eventsCopy.empty}</p>
+            <p className="text-xs text-muted-foreground">{t("events.empty")}</p>
           ) : (
             <SkillMarketEventList events={events} showSkill />
           )}
@@ -220,7 +224,7 @@ function RecentMarketEvents() {
               variant="outline"
             >
               {loading ? <Loader2 className="size-3.5 animate-spin" /> : null}
-              {eventsCopy.loadMore}
+              {t("events.loadMore")}
             </Button>
           ) : null}
         </div>
@@ -231,6 +235,7 @@ function RecentMarketEvents() {
 
 /** Every community skill, filterable, with recent market events (§17.1). */
 export function SkillAllAdmin() {
+  const t = useTranslations("dashboardSkillsMarketAdmin");
   const [q, setQ] = React.useState("");
   const [standing, setStanding] = React.useState<
     SkillMarketAdminStandingFilter | "any"
@@ -272,12 +277,13 @@ export function SkillAllAdmin() {
         );
         setCursor(page.nextCursor);
       } catch (caught) {
-        if (id === request.current) setError(errorMessage(caught, copy.failed));
+        if (id === request.current)
+          setError(errorMessage(caught, t("all.failed")));
       } finally {
         if (id === request.current) setLoading(false);
       }
     },
-    [],
+    [t],
   );
 
   React.useEffect(() => {
@@ -299,14 +305,19 @@ export function SkillAllAdmin() {
   }
 
   async function reinferAll() {
-    if (!window.confirm(copy.reinferConfirm)) return;
+    if (!window.confirm(t("all.reinferConfirm"))) return;
     setReinferring(true);
     setNotice(null);
     try {
       const result = await reinferAllSkillCategories();
-      setNotice(copy.reinferDone(result.considered, result.changed));
+      setNotice(
+        t("all.reinferDone", {
+          considered: result.considered,
+          changed: result.changed,
+        }),
+      );
     } catch (caught) {
-      setNotice(errorMessage(caught, copy.reinferFailed));
+      setNotice(errorMessage(caught, t("all.reinferFailed")));
     } finally {
       setReinferring(false);
     }
@@ -318,9 +329,11 @@ export function SkillAllAdmin() {
         <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border p-4">
           <div>
             <h2 className="text-sm font-semibold text-foreground">
-              {copy.title}
+              {t("all.title")}
             </h2>
-            <p className="text-xs text-muted-foreground">{copy.description}</p>
+            <p className="text-xs text-muted-foreground">
+              {t("all.description")}
+            </p>
           </div>
           <Button
             disabled={reinferring}
@@ -334,7 +347,7 @@ export function SkillAllAdmin() {
             ) : (
               <RefreshCw className="size-3.5" />
             )}
-            {copy.reinfer}
+            {t("all.reinfer")}
           </Button>
         </div>
         {notice ? (
@@ -351,18 +364,18 @@ export function SkillAllAdmin() {
           }}
         >
           <Input
-            aria-label={copy.searchLabel}
+            aria-label={t("all.searchLabel")}
             className="h-8 w-60 text-xs"
             onChange={(event) => setQ(event.target.value)}
-            placeholder={copy.searchPlaceholder}
+            placeholder={t("all.searchPlaceholder")}
             value={q}
           />
           <Button size="sm" type="submit" variant="outline">
             <Search className="size-3.5" />
-            {copy.search}
+            {t("all.search")}
           </Button>
           <select
-            aria-label={copy.standingLabel}
+            aria-label={t("all.standingLabel")}
             className={selectClass}
             onChange={(event) => {
               const next = event.target.value as
@@ -374,7 +387,7 @@ export function SkillAllAdmin() {
           >
             {STANDINGS.map((value) => (
               <option key={value} value={value}>
-                {copy.standing[value]}
+                {t(`all.standing.${value}`)}
               </option>
             ))}
           </select>
@@ -383,9 +396,9 @@ export function SkillAllAdmin() {
               className="flex items-center gap-1 text-xs text-muted-foreground"
               key={key}
             >
-              {copy.flags[key]}
+              {t(`all.flags.${key}`)}
               <select
-                aria-label={copy.flags[key]}
+                aria-label={t(`all.flags.${key}`)}
                 className={selectClass}
                 onChange={(event) => {
                   const next = { ...flags, [key]: event.target.value as Tri };
@@ -394,9 +407,9 @@ export function SkillAllAdmin() {
                 }}
                 value={flags[key]}
               >
-                <option value="any">{copy.tri.any}</option>
-                <option value="yes">{copy.tri.yes}</option>
-                <option value="no">{copy.tri.no}</option>
+                <option value="any">{t("all.tri.any")}</option>
+                <option value="yes">{t("all.tri.yes")}</option>
+                <option value="no">{t("all.tri.no")}</option>
               </select>
             </label>
           ))}
@@ -404,7 +417,7 @@ export function SkillAllAdmin() {
 
         {error ? <p className="p-4 text-xs text-destructive">{error}</p> : null}
         {!loading && !error && items.length === 0 ? (
-          <p className="p-4 text-xs text-muted-foreground">{copy.empty}</p>
+          <p className="p-4 text-xs text-muted-foreground">{t("all.empty")}</p>
         ) : null}
         {items.length > 0 ? (
           <div className="overflow-x-auto">
@@ -412,22 +425,22 @@ export function SkillAllAdmin() {
               <thead className="text-left text-muted-foreground">
                 <tr>
                   <th className="px-3 py-2 font-medium">
-                    {copy.columns.skill}
+                    {t("all.columns.skill")}
                   </th>
                   <th className="px-3 py-2 font-medium">
-                    {copy.columns.standing}
+                    {t("all.columns.standing")}
                   </th>
                   <th className="px-3 py-2 font-medium">
-                    {copy.columns.marks}
+                    {t("all.columns.marks")}
                   </th>
                   <th className="px-3 py-2 text-right font-medium">
-                    {copy.columns.installs}
+                    {t("all.columns.installs")}
                   </th>
                   <th className="px-3 py-2 text-right font-medium">
-                    {copy.columns.rating}
+                    {t("all.columns.rating")}
                   </th>
                   <th className="px-3 py-2 font-medium">
-                    {copy.columns.updated}
+                    {t("all.columns.updated")}
                   </th>
                 </tr>
               </thead>
@@ -443,7 +456,7 @@ export function SkillAllAdmin() {
           {loading ? (
             <span className="flex items-center gap-2 text-xs text-muted-foreground">
               <Loader2 className="size-3.5 animate-spin" />
-              {copy.loading}
+              {t("all.loading")}
             </span>
           ) : cursor ? (
             <Button
@@ -452,7 +465,7 @@ export function SkillAllAdmin() {
               type="button"
               variant="outline"
             >
-              {copy.loadMore}
+              {t("all.loadMore")}
             </Button>
           ) : null}
         </div>

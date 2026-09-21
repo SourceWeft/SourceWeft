@@ -2,6 +2,8 @@
 
 import * as React from "react";
 import { CheckCircle2, Loader2 } from "lucide-react";
+import { useTranslations } from "next-intl";
+import { skillReportReasonSchema } from "@sourceweft/contracts";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { Input } from "@sourceweft/ui-web/components/ui/input";
 import { Label } from "@sourceweft/ui-web/components/ui/label";
@@ -12,27 +14,46 @@ import {
   type SkillReportFailure,
   type SkillReportReason,
 } from "../../../../../lib/skill-reports";
-import { formatRetryWait, skillReportCopy } from "./skill-report-copy";
 
-const copy = skillReportCopy.form;
 const DETAILS_MAX_LENGTH = 4000;
 
-const REASONS = Object.keys(skillReportCopy.reasons) as SkillReportReason[];
+const REASONS: readonly SkillReportReason[] = skillReportReasonSchema.options;
 
-export function skillReportFailureMessage(failure: SkillReportFailure): string {
+/**
+ * "45 minutes", "2 hours": how long until the reporter may try again. `t` is
+ * the `dashboardSkillReports` translator.
+ */
+export function formatRetryWait(
+  seconds: number | null,
+  t: ReturnType<typeof useTranslations>,
+): string | null {
+  if (!seconds || seconds <= 0) return null;
+  if (seconds < 90) return t("form.retryWait.seconds", { count: seconds });
+  const minutes = Math.ceil(seconds / 60);
+  if (minutes < 90) return t("form.retryWait.minutes", { count: minutes });
+  return t("form.retryWait.hours", { count: Math.ceil(minutes / 60) });
+}
+
+/** `t` is the `dashboardSkillReports` translator. */
+export function skillReportFailureMessage(
+  failure: SkillReportFailure,
+  t: ReturnType<typeof useTranslations>,
+): string {
   switch (failure.kind) {
-    case "rate_limited":
-      return copy.errors.rateLimited(
-        formatRetryWait(failure.retryAfterSeconds),
-      );
+    case "rate_limited": {
+      const wait = formatRetryWait(failure.retryAfterSeconds, t);
+      return wait
+        ? t("form.errors.rateLimited", { wait })
+        : t("form.errors.rateLimitedLater");
+    }
     case "contact_required":
-      return copy.errors.contactRequired;
+      return t("form.errors.contactRequired");
     case "invalid":
-      return copy.errors.invalid;
+      return t("form.errors.invalid");
     case "not_found":
-      return copy.errors.notFound;
+      return t("form.errors.notFound");
     default:
-      return copy.errors.unknown;
+      return t("form.errors.unknown");
   }
 }
 
@@ -58,6 +79,7 @@ export function SkillReportForm({
   reviewId,
   onDone,
 }: SkillReportFormProps) {
+  const t = useTranslations("dashboardSkillReports");
   const id = React.useId();
   const [reason, setReason] = React.useState<SkillReportReason | "">("");
   const [details, setDetails] = React.useState("");
@@ -84,7 +106,7 @@ export function SkillReportForm({
       });
       setSent(true);
     } catch (failure) {
-      setError(skillReportFailureMessage(describeSkillReportError(failure)));
+      setError(skillReportFailureMessage(describeSkillReportError(failure), t));
     } finally {
       setSubmitting(false);
     }
@@ -95,13 +117,13 @@ export function SkillReportForm({
       <div className="space-y-3" data-testid="skill-report-sent" role="status">
         <p className="flex items-center gap-2 font-medium">
           <CheckCircle2 className="size-4 text-emerald-600" aria-hidden />
-          {copy.successTitle}
+          {t("form.successTitle")}
         </p>
-        <p className="text-sm text-muted-foreground">{copy.successBody}</p>
+        <p className="text-sm text-muted-foreground">{t("form.successBody")}</p>
         {onDone ? (
           <div className="flex justify-end">
             <Button type="button" variant="outline" onClick={onDone}>
-              {copy.close}
+              {t("form.close")}
             </Button>
           </div>
         ) : null}
@@ -112,7 +134,7 @@ export function SkillReportForm({
   return (
     <form className="space-y-4" onSubmit={onSubmit} noValidate>
       <div className="space-y-1.5">
-        <Label htmlFor={`${id}-reason`}>{copy.reasonLabel}</Label>
+        <Label htmlFor={`${id}-reason`}>{t("form.reasonLabel")}</Label>
         <select
           id={`${id}-reason`}
           name="reason"
@@ -124,34 +146,34 @@ export function SkillReportForm({
           required
         >
           <option value="" disabled>
-            {copy.reasonPlaceholder}
+            {t("form.reasonPlaceholder")}
           </option>
           {REASONS.map((value) => (
             <option key={value} value={value}>
-              {skillReportCopy.reasons[value]}
+              {t(`reasons.${value}`)}
             </option>
           ))}
         </select>
       </div>
       <div className="space-y-1.5">
-        <Label htmlFor={`${id}-details`}>{copy.detailsLabel}</Label>
+        <Label htmlFor={`${id}-details`}>{t("form.detailsLabel")}</Label>
         <Textarea
           id={`${id}-details`}
           name="details"
           value={details}
           onChange={(event) => setDetails(event.target.value)}
-          placeholder={copy.detailsPlaceholder}
+          placeholder={t("form.detailsPlaceholder")}
           rows={5}
           aria-invalid={tooLong || undefined}
         />
         {tooLong ? (
           <p className="text-xs text-destructive">
-            {copy.errors.detailsTooLong(DETAILS_MAX_LENGTH)}
+            {t("form.errors.detailsTooLong", { max: DETAILS_MAX_LENGTH })}
           </p>
         ) : null}
       </div>
       <div className="space-y-1.5">
-        <Label htmlFor={`${id}-email`}>{copy.contactLabel}</Label>
+        <Label htmlFor={`${id}-email`}>{t("form.contactLabel")}</Label>
         <Input
           id={`${id}-email`}
           name="contactEmail"
@@ -162,10 +184,12 @@ export function SkillReportForm({
           required={!signedIn}
         />
         <p className="text-xs text-muted-foreground">
-          {signedIn ? copy.contactOptionalHint : copy.contactRequiredHint}
+          {signedIn
+            ? t("form.contactOptionalHint")
+            : t("form.contactRequiredHint")}
         </p>
       </div>
-      <p className="text-xs text-muted-foreground">{copy.note}</p>
+      <p className="text-xs text-muted-foreground">{t("form.note")}</p>
       {error ? (
         <p className="text-sm text-destructive" role="alert">
           {error}
@@ -174,17 +198,17 @@ export function SkillReportForm({
       <div className="flex justify-end gap-2">
         {onDone ? (
           <Button type="button" variant="ghost" onClick={onDone}>
-            {copy.cancel}
+            {t("form.cancel")}
           </Button>
         ) : null}
         <Button type="submit" disabled={!canSubmit}>
           {submitting ? (
             <>
               <Loader2 className="size-4 animate-spin" aria-hidden />
-              {copy.submitting}
+              {t("form.submitting")}
             </>
           ) : (
-            copy.submit
+            t("form.submit")
           )}
         </Button>
       </div>

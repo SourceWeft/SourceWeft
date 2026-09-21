@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, type ReactNode } from "react";
+import { act, type ComponentProps, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, test, vi } from "vitest";
 import { NextIntlClientProvider } from "next-intl";
@@ -15,6 +15,11 @@ vi.mock("../../../../../lib/skill-overviews", async (importOriginal) => ({
 import { SkillAiOverview } from "./skill-ai-overview";
 import { SkillAiOverviewView } from "./skill-ai-overview-view";
 import { overviewLocale } from "../../../../../lib/skill-overviews";
+import messages from "../../../../../messages/en.json";
+
+const intlMessages = messages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
 
 let root: Root;
 let container: HTMLDivElement;
@@ -45,7 +50,7 @@ async function render(node: ReactNode, locale = "en") {
   root = createRoot(container);
   await act(async () =>
     root.render(
-      <NextIntlClientProvider locale={locale} messages={{}}>
+      <NextIntlClientProvider locale={locale} messages={intlMessages}>
         {node}
       </NextIntlClientProvider>,
     ),

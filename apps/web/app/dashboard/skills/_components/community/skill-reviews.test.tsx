@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from "react";
+import { act, type ComponentProps, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type {
@@ -28,6 +28,17 @@ vi.mock("../../../../../lib/skill-reviews", async (importActual) => ({
 vi.mock("sonner", () => ({ toast }));
 
 import { SkillReviews } from "./skill-reviews";
+import { NextIntlClientProvider } from "next-intl";
+import messages from "../../../../../messages/en.json";
+
+const intlMessages = messages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
+const withIntl = (node: ReactNode) => (
+  <NextIntlClientProvider locale="en" messages={intlMessages}>
+    {node}
+  </NextIntlClientProvider>
+);
 
 (
   globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -75,12 +86,14 @@ async function renderReviews() {
   root = createRoot(container);
   await act(async () =>
     root.render(
-      <SkillReviews
-        skillId="skill-1"
-        catalogId="skill-1:v1"
-        slug="pdf-tools"
-        workspaceId="ws-1"
-      />,
+      withIntl(
+        <SkillReviews
+          skillId="skill-1"
+          catalogId="skill-1:v1"
+          slug="pdf-tools"
+          workspaceId="ws-1"
+        />,
+      ),
     ),
   );
   await flush();

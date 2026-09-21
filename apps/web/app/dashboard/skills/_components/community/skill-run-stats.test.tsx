@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { act } from "react";
+import { act, type ComponentProps, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { SkillRunStatsFull } from "@sourceweft/contracts";
+import { createTranslator, type useTranslations } from "next-intl";
 import {
   formatSuccessRate,
   skillRunStatsSentence,
@@ -10,6 +11,23 @@ import {
   SkillRunStatsSummary,
   type AvailableSkillRunStats,
 } from "./skill-run-stats-view";
+import { NextIntlClientProvider } from "next-intl";
+import messages from "../../../../../messages/en.json";
+
+const intlMessages = messages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
+const withIntl = (node: ReactNode) => (
+  <NextIntlClientProvider locale="en" messages={intlMessages}>
+    {node}
+  </NextIntlClientProvider>
+);
+
+const t = createTranslator({
+  locale: "en",
+  messages,
+  namespace: "dashboardSkillRunStats",
+}) as unknown as ReturnType<typeof useTranslations>;
 
 const api = vi.hoisted(() => ({ loadSkillRunStatsView: vi.fn() }));
 vi.mock("../../../../../lib/skill-run-stats", () => api);
@@ -60,15 +78,15 @@ afterEach(() => {
   container.remove();
 });
 
-async function render(node: React.ReactNode) {
+async function render(node: ReactNode) {
   await act(async () => {
-    root.render(node);
+    root.render(withIntl(node));
   });
 }
 
 describe("formatting", () => {
   test("the sentence", () => {
-    expect(skillRunStatsSentence(available, "en")).toBe(
+    expect(skillRunStatsSentence(available, t, "en")).toBe(
       "Ran 124 times in SourceWeft sandboxes in the last 30 days · 92% succeeded · Common issue: missing pptxgenjs",
     );
   });
@@ -77,6 +95,7 @@ describe("formatting", () => {
     expect(
       skillRunStatsSentence(
         { ...available, runs: 1, successRate: 1, topErrors: [] },
+        t,
         "en",
       ),
     ).toBe(
@@ -97,14 +116,14 @@ describe("formatting", () => {
 
 describe("presentation", () => {
   test("the public line", async () => {
-    await render(<SkillRunStatsSummary locale="en" stats={available} />);
+    await render(<SkillRunStatsSummary stats={available} />);
     expect(container.textContent).toContain("Sandbox runs");
     expect(container.textContent).toContain("Common issue: missing pptxgenjs");
     expect(container.textContent).not.toContain("market admins");
   });
 
   test("the full numbers, marked private", async () => {
-    await render(<SkillRunStatsDetails locale="en" stats={full} />);
+    await render(<SkillRunStatsDetails stats={full} />);
     const text = container.textContent ?? "";
     expect(text).toContain("2 of 3 (67%)");
     expect(text).toContain("Workspaces1");
@@ -117,7 +136,6 @@ describe("presentation", () => {
   test("full with no runs", async () => {
     await render(
       <SkillRunStatsDetails
-        locale="en"
         stats={{
           ...full,
           runs: 0,

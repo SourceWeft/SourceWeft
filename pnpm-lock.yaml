@@ -650,9 +650,6 @@ importers:
       eslint:
         specifier: ^9.39.5
         version: 9.39.5(jiti@2.7.0)
-      opencc-js:
-        specifier: ^1.4.2
-        version: 1.4.2
       postcss:
         specifier: ^8.5.26
         version: 8.5.26
@@ -1458,6 +1455,10 @@ importers:
         version: 8.67.0(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3)
 
   packages/i18n:
+    dependencies:
+      opencc-js:
+        specifier: ^1.4.2
+        version: 1.4.2
     devDependencies:
       '@types/node':
         specifier: ^22.20.1

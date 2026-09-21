@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from "react";
+import { act, type ComponentProps, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, test, vi } from "vitest";
 
@@ -12,6 +12,17 @@ vi.mock("../../../../../lib/skill-market-audit", async (original) => ({
 vi.mock("sonner", () => ({ toast }));
 
 import { RestoreToMarketButton } from "./restore-to-market-button";
+import { NextIntlClientProvider } from "next-intl";
+import messages from "../../../../../messages/en.json";
+
+const intlMessages = messages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
+const withIntl = (node: ReactNode) => (
+  <NextIntlClientProvider locale="en" messages={intlMessages}>
+    {node}
+  </NextIntlClientProvider>
+);
 
 let root: Root;
 let container: HTMLDivElement;
@@ -27,11 +38,13 @@ async function render(onRestored = vi.fn()) {
   root = createRoot(container);
   await act(async () =>
     root.render(
-      <RestoreToMarketButton
-        claimId="claim_1"
-        onRestored={onRestored}
-        workspaceId="ws_1"
-      />,
+      withIntl(
+        <RestoreToMarketButton
+          claimId="claim_1"
+          onRestored={onRestored}
+          workspaceId="ws_1"
+        />,
+      ),
     ),
   );
   return onRestored;

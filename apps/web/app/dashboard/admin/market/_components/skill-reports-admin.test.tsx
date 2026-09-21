@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from "react";
+import { act, type ComponentProps, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, test, vi } from "vitest";
 
@@ -10,6 +10,17 @@ const api = vi.hoisted(() => ({
 vi.mock("../../../../../lib/skill-reports", () => api);
 
 import { reportActions, SkillReportsAdmin } from "./skill-reports-admin";
+import { NextIntlClientProvider } from "next-intl";
+import messages from "../../../../../messages/en.json";
+
+const intlMessages = messages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
+const withIntl = (node: ReactNode) => (
+  <NextIntlClientProvider locale="en" messages={intlMessages}>
+    {node}
+  </NextIntlClientProvider>
+);
 
 (
   globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -54,7 +65,7 @@ async function render() {
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
-  await act(async () => root.render(<SkillReportsAdmin />));
+  await act(async () => root.render(withIntl(<SkillReportsAdmin />)));
 }
 
 const button = (label: string) =>

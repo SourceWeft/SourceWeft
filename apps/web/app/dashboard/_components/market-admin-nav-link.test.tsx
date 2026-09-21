@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from "react";
+import { act, type ComponentProps, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
@@ -12,6 +12,17 @@ import {
   MarketAdminNavLink,
   resetMarketAdminCheck,
 } from "./market-admin-nav-link";
+import { NextIntlClientProvider } from "next-intl";
+import messages from "../../../messages/en.json";
+
+const intlMessages = messages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
+const withIntl = (node: ReactNode) => (
+  <NextIntlClientProvider locale="en" messages={intlMessages}>
+    {node}
+  </NextIntlClientProvider>
+);
 
 let root: Root;
 let container: HTMLDivElement;
@@ -29,7 +40,7 @@ async function render() {
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
-  await act(async () => root.render(<MarketAdminNavLink />));
+  await act(async () => root.render(withIntl(<MarketAdminNavLink />)));
 }
 
 test("a market admin gets the link, marked current on the admin page", async () => {

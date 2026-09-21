@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from "react";
+import { act, type ComponentProps, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, test } from "vitest";
 
@@ -7,6 +7,17 @@ import {
   formatResumeTime,
   SubmissionRateLimitNotice,
 } from "./submission-rate-limit-notice";
+import { NextIntlClientProvider } from "next-intl";
+import messages from "../../../../../messages/en.json";
+
+const intlMessages = messages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
+const withIntl = (node: ReactNode) => (
+  <NextIntlClientProvider locale="en" messages={intlMessages}>
+    {node}
+  </NextIntlClientProvider>
+);
 
 let root: Root;
 let container: HTMLDivElement;
@@ -19,7 +30,7 @@ function render(props: Parameters<typeof SubmissionRateLimitNotice>[0]) {
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
-  act(() => root.render(<SubmissionRateLimitNotice {...props} />));
+  act(() => root.render(withIntl(<SubmissionRateLimitNotice {...props} />)));
   return container.textContent ?? "";
 }
 
@@ -31,7 +42,7 @@ const limited = {
 };
 
 test("a queued, rate-limited import says when it resumes", () => {
-  const time = formatResumeTime(resumeAt)!;
+  const time = formatResumeTime(resumeAt, "en")!;
   expect(time).toMatch(/\d{1,2}:\d{2}/);
   expect(render({ submission: { status: "queued", error: limited } })).toBe(
     `GitHub rate limit reached — resumes around ${time}`,

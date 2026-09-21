@@ -1,12 +1,9 @@
 "use client";
 
 import { Clock } from "lucide-react";
+import { useLocale, useTranslations } from "next-intl";
 import type { SkillSubmission } from "@sourceweft/contracts";
 import { SKILL_SUBMISSION_RATE_LIMITED_CODE } from "@sourceweft/contracts";
-
-import { skillMarketAdminCopy } from "../../../admin/market/_components/skill-market-admin-copy";
-
-const copy = skillMarketAdminCopy.rateLimit;
 
 /** "HH:MM" in the viewer's time zone; null for a missing or bad time. */
 export function formatResumeTime(
@@ -32,8 +29,11 @@ export function SubmissionRateLimitNotice({
   locale,
 }: {
   submission: Pick<SkillSubmission, "status" | "error">;
+  /** Defaults to the active locale. */
   locale?: string;
 }) {
+  const t = useTranslations("dashboardSkillsMarketAdmin");
+  const activeLocale = useLocale();
   const error = submission.error;
   // A failed one (it waited as long as it may) already shows its error and
   // Retry; only the waiting one needs saying.
@@ -44,7 +44,7 @@ export function SubmissionRateLimitNotice({
   ) {
     return null;
   }
-  const time = formatResumeTime(error.resumeAt, locale);
+  const time = formatResumeTime(error.resumeAt, locale ?? activeLocale);
   return (
     <p
       className="flex items-center gap-1.5 text-xs text-muted-foreground"
@@ -52,7 +52,7 @@ export function SubmissionRateLimitNotice({
       role="status"
     >
       <Clock className="size-3.5 shrink-0" />
-      {time ? copy.notice(time) : copy.noticeUnknown}
+      {time ? t("rateLimit.notice", { time }) : t("rateLimit.noticeUnknown")}
     </p>
   );
 }

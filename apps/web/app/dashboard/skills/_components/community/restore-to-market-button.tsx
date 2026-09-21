@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { Loader2, Undo2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import type { RestoreSkillRepoToMarketResponse } from "@sourceweft/contracts";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
@@ -10,9 +11,6 @@ import {
   errorMessage,
   restoreClaimedRepoToMarket,
 } from "../../../../../lib/skill-market-audit";
-import { skillMarketAdminCopy } from "../../../admin/market/_components/skill-market-admin-copy";
-
-const copy = skillMarketAdminCopy.restore;
 
 /**
  * "Restore to SourceWeft" for a repository its author removed: it may be
@@ -31,6 +29,7 @@ export function RestoreToMarketButton({
   onRestored?: (result: RestoreSkillRepoToMarketResponse) => void;
   className?: string;
 }) {
+  const t = useTranslations("dashboardSkillsMarketAdmin");
   const [busy, setBusy] = React.useState(false);
   return (
     <Button
@@ -42,13 +41,13 @@ export function RestoreToMarketButton({
           .then((result) => {
             toast.success(
               result.skillCount > 0
-                ? copy.restored(result.skillCount)
-                : copy.nothing,
+                ? t("restore.restored", { count: result.skillCount })
+                : t("restore.nothing"),
             );
             onRestored?.(result);
           })
           .catch((error: unknown) => {
-            toast.error(errorMessage(error, copy.failed));
+            toast.error(errorMessage(error, t("restore.failed")));
           })
           .finally(() => setBusy(false));
       }}
@@ -61,7 +60,7 @@ export function RestoreToMarketButton({
       ) : (
         <Undo2 className="size-3.5" />
       )}
-      {copy.button}
+      {t("restore.button")}
     </Button>
   );
 }
