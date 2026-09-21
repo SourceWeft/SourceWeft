@@ -23,6 +23,7 @@ import { messageSchema } from "./messages";
 import { skillRuntimeConfigSelectionSchema } from "./skills";
 import { retrievalResponseSchema } from "./sources";
 import {
+  MAX_SELECTED_SKILLS_PER_TURN,
   createThreadRequestSchema,
   threadCommandRequestSchema,
   threadModelSettingsInputSchema,
@@ -275,14 +276,11 @@ export const listCapabilityCatalogResponseSchema = z.object({
 });
 
 /**
- * How many skills may be active in one turn.
- *
- * Single source of truth for all three enforcement points: this schema (a 400
- * at the API boundary), the backend's `resolveSelectedSkills` (a typed
- * ContentError), and the web composer (silent truncation plus a toast). They
- * were three independent literals; changing one desynced the others silently.
+ * How many skills may be active in one turn. Defined in `threads.ts` (a
+ * thread's saved skill selection is bounded by it too) and re-exported here,
+ * where the per-turn request schema enforces it.
  */
-export const MAX_SELECTED_SKILLS_PER_TURN = 5;
+export { MAX_SELECTED_SKILLS_PER_TURN };
 
 /**
  * Unknown keys are passed through on purpose: `buildRuntimeTools` treats every

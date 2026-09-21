@@ -96,3 +96,39 @@ test("updateThreadChatPreferencesRequestSchema rejects empty patches", () => {
     true,
   );
 });
+
+test("a thread's skill selection is kept only once chosen, deduplicated and capped", () => {
+  assert.equal(
+    "skillIds" in normalizeThreadChatPreferences({}),
+    false,
+    "an unchosen selection stays absent so the thread follows the defaults",
+  );
+  assert.deepEqual(
+    normalizeThreadChatPreferences({ skillIds: [] }).skillIds,
+    [],
+    "an explicitly empty selection is a choice",
+  );
+  assert.deepEqual(
+    normalizeThreadChatPreferences({
+      skillIds: ["a", "a", " b ", 3, "", "c", "d", "e", "f"],
+    }).skillIds,
+    ["a", "b", "c", "d", "e"],
+  );
+});
+
+test("merging preferences replaces the skill selection only when the patch has one", () => {
+  const current = normalizeThreadChatPreferences({ skillIds: ["html"] });
+  assert.deepEqual(
+    mergeThreadChatPreferences(current, { webAccess: false }).skillIds,
+    ["html"],
+  );
+  assert.deepEqual(
+    mergeThreadChatPreferences(current, { skillIds: ["video"] }).skillIds,
+    ["video"],
+  );
+  assert.equal(
+    updateThreadChatPreferencesRequestSchema.safeParse({ skillIds: ["html"] })
+      .success,
+    true,
+  );
+});

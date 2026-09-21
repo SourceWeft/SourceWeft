@@ -7,8 +7,23 @@ import { hubSkillMemory } from "../../../../../lib/hub-skill-memory";
 vi.mock("../../../../../lib/auth-client", () => ({
   authClient: { useSession: () => ({ data: { user: { id: "user" } } }) },
 }));
+// Stands in for the server's per-thread chat preferences.
+const savedSkillIds = vi.hoisted(() => new Map<string, string[]>());
 vi.mock("../../../../../lib/sdk", () => ({
   contentClient: {
+    getThread: async (_workspaceId: string, threadId: string) => ({
+      thread: {
+        chatPreferences: { skillIds: savedSkillIds.get(threadId) },
+      },
+    }),
+    updateThreadChatPreferences: async (
+      _workspaceId: string,
+      threadId: string,
+      input: { skillIds?: string[] },
+    ) => {
+      if (input.skillIds) savedSkillIds.set(threadId, input.skillIds);
+      return { thread: { chatPreferences: { skillIds: input.skillIds } } };
+    },
     getThreadSourceSelection: async () => ({
       selection: { selectedSourceIds: [], revision: 0 },
     }),
@@ -31,6 +46,14 @@ vi.mock("../../../../../lib/sdk", () => ({
           installable: false,
           defaultEnabled: true,
         },
+        {
+          selectionId: "builtin:video-presentation",
+          catalogId: "video",
+          name: "Video",
+          sourceType: "builtin",
+          installable: false,
+          defaultEnabled: false,
+        },
       ],
     }),
     listCapabilityCatalog: async () => ({ commands: [], tools: [] }),
@@ -50,6 +73,7 @@ async function render(threadId: string) {
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   hubSkillMemory.clear();
+  savedSkillIds.clear();
   window.localStorage.clear();
   root = createRoot(document.createElement("div"));
 });
@@ -86,4 +110,43 @@ it("distinguishes an explicitly empty selection from a new conversation's defaul
   expect(controller.activeSkillIds).toHaveLength(2);
   await render("A");
   expect(controller.activeSkillIds).toEqual([]);
+});
+
+it("restores a thread's checked skills after a reload", async () => {
+  await render("A");
+  await act(async () =>
+    controller.handleSkillSelectionChange([
+      "builtin:html",
+      "builtin:ppt-deck",
+      "builtin:video-presentation",
+    ]),
+  );
+  // A reload drops the in-page memory; only the saved choice remains.
+  await act(async () => root.unmount());
+  hubSkillMemory.clear();
+  root = createRoot(document.createElement("div"));
+  await render("A");
+  expect(controller.activeSkillIds).toEqual([
+    "builtin:html",
+    "builtin:ppt-deck",
+    "builtin:video-presentation",
+  ]);
+});
+
+it("a thread with no saved choice follows the defaults", async () => {
+  await render("fresh");
+  expect(controller.activeSkillIds).toEqual([
+    "builtin:html",
+    "builtin:ppt-deck",
+  ]);
+  expect(savedSkillIds.has("fresh")).toBe(false);
+});
+
+it("the new-chat draft never reads or saves a thread's skills", async () => {
+  await render("current");
+  await act(async () =>
+    controller.handleSkillSelectionChange(["builtin:video-presentation"]),
+  );
+  expect(controller.activeSkillIds).toEqual(["builtin:video-presentation"]);
+  expect(savedSkillIds.has("current")).toBe(false);
 });

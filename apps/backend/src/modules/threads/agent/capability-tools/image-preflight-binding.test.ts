@@ -16,7 +16,7 @@ import {
 } from "../../turn/thread-command-tools";
 import type { CapabilityAgentToolsForTurnInput } from "./types";
 import { resolveSelectedSkillRuntimeContract } from "../../turn/active-skill-runtime";
-import { resolveActiveSkillPromptIds } from "../../turn/invoked-skills";
+import { normalizeInvokedSkillIds } from "../../turn/invoked-skills";
 import { resolveCapabilitySkillRuntimeWorkflow } from "../../turn/capability-command-workflows";
 import type { EnabledSkillDescriptor } from "../../../skills/types";
 import { AgentCitationRegistry } from "../citation-registry";
@@ -63,6 +63,12 @@ vi.mock("./host-services", async (importOriginal) => {
 
 const { createCapabilityAgentToolsForTurn } = await import("./index");
 
+const videoToolNames = new Set([
+  "generate_video_assets",
+  "generate_video_narration",
+  "validate_video_presentation",
+]);
+
 const imageProfile: AgentToolModelProfileView = {
   gatewayConfigId: "image-gateway",
   profileAlias: "image-default",
@@ -79,17 +85,16 @@ async function prepareImageBinding(
     invokedSkillIds?: string[];
     sandboxAvailable?: boolean;
     webAccessEnabled?: boolean;
+    skillNames?: string[];
   } = {},
 ) {
   const preflight = agentToolTurnPreflights().find(
     (entry) => entry.name === "generate_image",
   );
   assert.ok(preflight);
-  const skillIds = ["builtin:image-generate", "builtin:ppt-deck"];
-  const enabledSkills: EnabledSkillDescriptor[] = [
-    "image-generate",
-    "ppt-deck",
-  ].map((name) => ({
+  const skillNames = input.skillNames ?? ["image-generate", "ppt-deck"];
+  const skillIds = skillNames.map((name) => `builtin:${name}`);
+  const enabledSkills: EnabledSkillDescriptor[] = skillNames.map((name) => ({
     name,
     workspaceSkillId: `builtin:${name}`,
     selectionId: `builtin:${name}`,
@@ -97,12 +102,13 @@ async function prepareImageBinding(
     version: "1.0.0",
     description: name,
     files: [],
-    defaultEnabled: true,
+    // As in the real catalog: every builtin here is on by default except the
+    // video studio, which a user has to check.
+    defaultEnabled: name !== "video-presentation",
   }));
-  const invokedSkillIds = resolveActiveSkillPromptIds({
+  const invokedSkillIds = normalizeInvokedSkillIds({
     enabledSkills,
-    invokedSkillIds: input.invokedSkillIds,
-    selectedSkillIds: skillIds,
+    requestedSkillIds: input.invokedSkillIds,
   });
   const workflows = await Promise.all(
     enabledSkills.map(async (skill) => {
@@ -159,6 +165,29 @@ async function prepareImageBinding(
     services,
   });
   assert.ok(result);
+  // The real video preflights, as the preparer runs them for every turn; with
+  // no profile configured each records a null profile, which is still state.
+  const videoTurnState: Record<string, unknown> = {};
+  for (const entry of agentToolTurnPreflights()) {
+    if (!videoToolNames.has(entry.name)) continue;
+    const videoResult = await entry.turnPreflight.run({
+      toolName: entry.name,
+      modelKind: entry.modelKind,
+      defaultEnabled: entry.defaultEnabled,
+      selection: undefined,
+      command: null,
+      enabledSkills: [],
+      execution: undefined,
+      threadProfileAlias: null,
+      services: {
+        resolveProfile: async () => null,
+        synthesizeByokProfile: () => {
+          throw new Error("No BYOK video profile in these tests");
+        },
+      },
+    });
+    videoTurnState[entry.name] = videoResult?.state;
+  }
   const effectiveTools = buildEffectiveToolsSelection({
     baseTools,
     skillIds,
@@ -189,7 +218,10 @@ async function prepareImageBinding(
     },
     toolPermissions,
     runtimeTools: buildRuntimeTools({ tools: effectiveTools, toolPermissions }),
-    turnState: { generate_image: result.state },
+    turnState: { generate_image: result.state, ...videoTurnState },
+    // Every durable production turn carries its run id; protected run services
+    // (operation cache, receipts, work blobs) exist only with one.
+    threadRunId: "run-1",
     webAccessEnabled: input.webAccessEnabled ?? false,
   } as unknown as CapabilityAgentToolsForTurnInput["prepared"];
   return {
@@ -395,4 +427,47 @@ test("strict host validation still rejects a missing binding for an available im
       "code" in error &&
       error.code === "CAPABILITY_TOOL_BINDING_MISSING",
   );
+});
+
+test("a selected video skill without a sandbox leaves ordinary chat bindable", async () => {
+  const { prepared, bind } = await prepareImageBinding({
+    skillNames: ["image-generate", "video-presentation"],
+  });
+  assert.equal(
+    prepared.runtimeTools.validate_video_presentation?.shouldBind,
+    true,
+  );
+  const names = (await bind()).tools.map((tool) => tool.name);
+  assert.ok(names.includes("publish_artifact"));
+  assert.ok(!names.some((name) => name.includes("video")));
+});
+
+test("the real video invocation chip fails explicitly when sandbox is unavailable", async () => {
+  const { bind } = await prepareImageBinding({
+    skillNames: ["image-generate", "video-presentation"],
+    invokedSkillIds: ["builtin:video-presentation"],
+  });
+  await assert.rejects(
+    bind(),
+    (error) =>
+      error instanceof Error &&
+      "code" in error &&
+      error.code === "SANDBOX_RUNTIME_UNAVAILABLE",
+  );
+});
+
+test("a checked video skill does not take over an ordinary turn", async () => {
+  // The production request behind CAPABILITY_TOOL_BINDING_MISSING: video was
+  // checked in the Hub, never invoked, and the user asked for HTML slides.
+  const { prepared, bind } = await prepareImageBinding({
+    profile: imageProfile,
+    skillNames: ["image-generate", "ppt-deck", "video-presentation"],
+    sandboxAvailable: true,
+  });
+  assert.deepEqual(prepared.invokedSkillIds, []);
+  // The video skill's tool policy denies these; it must not apply unless invoked.
+  assert.equal(prepared.runtimeTools.generate_image?.shouldBind, true);
+  assert.notEqual(prepared.toolPermissions.execute, "deny");
+  const names = (await bind()).tools.map((tool) => tool.name);
+  assert.ok(names.includes("generate_image"));
 });

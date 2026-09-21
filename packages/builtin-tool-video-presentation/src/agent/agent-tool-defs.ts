@@ -16,6 +16,9 @@ export {
   VALIDATE_VIDEO_PRESENTATION_TOOL_NAME,
 } from "./tool-names";
 
+// Every video tool is built on the trusted sandbox session, so none can bind on
+// a turn without one. Declaring it lets the host drop them from ordinary chat
+// and fail an explicit video invocation with SANDBOX_RUNTIME_UNAVAILABLE.
 const activation = {
   default: "off" as const,
   userControl: "none" as const,
@@ -27,6 +30,7 @@ export const loadVideoPresentationAgentTool = defineAgentTool({
   name: LOAD_VIDEO_PRESENTATION_TOOL_NAME,
   domain: "artifact",
   capabilities: ["artifact", "filesystem", "sandbox_file_transfer"],
+  requirements: { sandbox: true },
   activation,
   defaultPermission: "allow",
   executionScope: "root_only",
@@ -38,7 +42,7 @@ export const generateVideoAssetsAgentTool = defineAgentTool({
   name: GENERATE_VIDEO_ASSETS_TOOL_NAME,
   domain: "artifact",
   capabilities: ["filesystem", "sandbox_file_transfer"],
-  requirements: { modelKind: "image" },
+  requirements: { modelKind: "image", sandbox: true },
   activation,
   defaultPermission: "allow",
   executionTimeoutMs: 5 * 60_000,
@@ -52,7 +56,7 @@ export const generateVideoNarrationAgentTool = defineAgentTool({
   name: GENERATE_VIDEO_NARRATION_TOOL_NAME,
   domain: "artifact",
   capabilities: ["filesystem", "sandbox_file_transfer"],
-  requirements: { modelKind: "tts" },
+  requirements: { modelKind: "tts", sandbox: true },
   activation,
   defaultPermission: "allow",
   executionTimeoutMs: 5 * 60_000,
@@ -66,7 +70,7 @@ export const validateVideoPresentationAgentTool = defineAgentTool({
   name: VALIDATE_VIDEO_PRESENTATION_TOOL_NAME,
   domain: "artifact",
   capabilities: ["filesystem", "sandbox_execute", "sandbox_file_transfer"],
-  requirements: { modelKind: "vision" },
+  requirements: { modelKind: "vision", sandbox: true },
   activation,
   defaultPermission: "allow",
   executionTimeoutMs: 10 * 60_000,
@@ -81,6 +85,7 @@ export const publishVideoPresentationAgentTool = defineAgentTool({
   name: PUBLISH_VIDEO_PRESENTATION_TOOL_NAME,
   domain: "artifact",
   capabilities: ["artifact", "filesystem", "video_presentation_artifact"],
+  requirements: { sandbox: true },
   activation,
   defaultPermission: "allow",
   executionScope: "root_only",

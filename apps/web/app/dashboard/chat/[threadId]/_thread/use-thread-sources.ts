@@ -172,16 +172,36 @@ export function useThreadSources({
     }
     skillScope.current = JSON.stringify([accountId, workspaceId, threadId]);
   }, [accountId, workspaceId, threadId, activeSkillIds]);
-  const handleSkillSelectionChange = useCallback((skillIds: string[]) => {
-    preserveSkillChoice.current = true;
-    skillChoiceReady.current = true;
-    const { skillIds: nextSkillIds, wasLimited } =
-      coerceSkillIdsSelection(skillIds);
-    if (wasLimited) {
-      toast.info(SKILL_SELECTION_LIMIT_MESSAGE);
-    }
-    setActiveSkillIds(nextSkillIds);
-  }, []);
+  // The checked skills are saved on the thread, so they survive a reload and
+  // follow the conversation to another device. Only an explicit choice is
+  // saved: a thread nobody has chosen for keeps following the defaults.
+  const saveSkillSelection = useCallback(
+    (skillIds: string[]) => {
+      // "current" is the new-chat draft: its choice travels into the thread
+      // it creates and is saved there.
+      if (!workspaceId || threadId === "current") return;
+      void contentClient
+        .updateThreadChatPreferences(workspaceId, threadId, { skillIds })
+        .catch(() => {
+          toast.error("Could not save the skill selection for this chat.");
+        });
+    },
+    [threadId, workspaceId],
+  );
+  const handleSkillSelectionChange = useCallback(
+    (skillIds: string[]) => {
+      preserveSkillChoice.current = true;
+      skillChoiceReady.current = true;
+      const { skillIds: nextSkillIds, wasLimited } =
+        coerceSkillIdsSelection(skillIds);
+      if (wasLimited) {
+        toast.info(SKILL_SELECTION_LIMIT_MESSAGE);
+      }
+      setActiveSkillIds(nextSkillIds);
+      saveSkillSelection(nextSkillIds);
+    },
+    [saveSkillSelection],
+  );
   const [activeMcpInstallIds, setActiveMcpInstallIds] = useState<string[]>([]);
   const [activeMcpToolIds, setActiveMcpToolIds] = useState<string[]>([]);
   const [disabledToolNames, setDisabledToolNames] = useState<ChatToolName[]>(
@@ -301,9 +321,16 @@ export function useThreadSources({
 
     const activeWorkspaceId = workspaceId;
     try {
-      const [installedResult, catalogResult] = await Promise.all([
+      const [installedResult, catalogResult, savedSkillIds] = await Promise.all([
         contentClient.listWorkspaceSkills(activeWorkspaceId),
         contentClient.listSkillsCatalog(activeWorkspaceId),
+        // A failed read only loses the saved choice; the defaults still load.
+        threadId === "current"
+          ? null
+          : contentClient
+              .getThread(activeWorkspaceId, threadId)
+              .then((result) => result.thread.chatPreferences.skillIds ?? null)
+              .catch(() => null),
       ]);
       if (
         skillsLoadGenerationRef.current !== loadGeneration ||
@@ -327,6 +354,17 @@ export function useThreadSources({
 
       const availableIds = new Set(enabledSkills.map((skill) => skill.id));
       skillChoiceReady.current = true;
+      // A choice made in this session wins, then the one saved on the
+      // thread, then the defaults.
+      if (!preserveSkillChoice.current && savedSkillIds) {
+        preserveSkillChoice.current = true;
+        setActiveSkillIds(
+          coerceSkillIdsSelection(
+            savedSkillIds.filter((id) => availableIds.has(id)),
+          ).skillIds,
+        );
+        return;
+      }
       setActiveSkillIds((current) =>
         preserveSkillChoice.current
           ? coerceSkillIdsSelection(
