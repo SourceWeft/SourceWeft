@@ -20,6 +20,10 @@ import {
   isMarketNotFound,
   listPublicSkillCategories,
 } from "../../../lib/market-skills";
+import { PublicSkillOverview } from "../_components/community/public-skill-overview";
+import { PublicSkillReport } from "../_components/community/public-skill-report";
+import { PublicSkillReviews } from "../_components/community/public-skill-reviews";
+import { PublicSkillRunStats } from "../_components/community/public-skill-run-stats";
 import { SkillMarkdown } from "../_components/skill-markdown";
 import {
   SkillArchivedBadge,
@@ -648,6 +652,12 @@ export default async function PublicSkillDetailPage({
       >
         <div className="min-w-0">
           {tab === "skill" ? (
+            <PublicSkillOverview
+              signedIn={authState.isSignedIn}
+              slug={skill.slug}
+            />
+          ) : null}
+          {tab === "skill" ? (
             skillMd ? (
               <article className={`${panelClassName} min-w-0 sm:p-7`}>
                 <SkillMarkdown>{skillMd}</SkillMarkdown>
@@ -758,8 +768,15 @@ export default async function PublicSkillDetailPage({
               </ul>
             </section>
           ) : null}
+
+          <PublicSkillRunStats
+            signedIn={authState.isSignedIn}
+            slug={skill.slug}
+          />
         </aside>
       </div>
+
+      <PublicSkillReviews signedIn={authState.isSignedIn} slug={skill.slug} />
 
       <section className={`mx-auto pb-12 ${skillsContainerClassName}`}>
         <div className="border-t border-zinc-300 pt-8 text-sm leading-6 text-zinc-600 dark:border-white/10 dark:text-zinc-400">
@@ -814,6 +831,10 @@ export default async function PublicSkillDetailPage({
               {copy.attribution.report}
             </a>
           </p>
+          <PublicSkillReport
+            signedIn={authState.isSignedIn}
+            slug={skill.slug}
+          />
         </div>
       </section>
 

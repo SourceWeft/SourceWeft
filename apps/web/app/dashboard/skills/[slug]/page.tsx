@@ -2,6 +2,11 @@
 
 import { RegistryVersions } from "../_components/registry-versions";
 import { SkillAvatar } from "../_components/skill-avatar";
+import { SkillAiOverview } from "../_components/community/skill-ai-overview";
+import { SkillOverviewAdmin } from "../_components/community/skill-overview-admin";
+import { SkillReportButton } from "../_components/community/skill-report-button";
+import { SkillReviews } from "../_components/community/skill-reviews";
+import { SkillRunStats } from "../_components/community/skill-run-stats";
 import { SkillClaimPanel } from "../_components/skill-claim-panel";
 
 import { SkillContentRestricted } from "../_components/skill-content-restricted";
@@ -391,6 +396,17 @@ export default function SkillDetailPage() {
     }
   }, [detailLoaded]);
 
+  // Reviews, AI overview, run stats and reports exist for community skills.
+  const communitySlot =
+    detail?.skill.sourceType === "registry_github" && workspace
+      ? {
+          skillId: detail.skill.skillId,
+          catalogId: detail.skill.catalogId,
+          slug: detail.skill.slug,
+          workspaceId: workspace.id,
+        }
+      : null;
+
   return (
     <main className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
       <section className="flex min-h-0 flex-1 flex-col overflow-hidden bg-card">
@@ -580,6 +596,9 @@ export default function SkillDetailPage() {
                       </TabsList>
                     </div>
                     <TabsContent className="m-0 px-5 py-5" value="overview">
+                      {communitySlot ? (
+                        <SkillAiOverview {...communitySlot} />
+                      ) : null}
                       {contentRestricted && detail ? (
                         <SkillContentRestricted
                           description={detail.skill.description}
@@ -621,6 +640,7 @@ export default function SkillDetailPage() {
                   </Tabs>
                 )}
               </article>
+              {communitySlot ? <SkillReviews {...communitySlot} /> : null}
             </div>
 
             <div className="flex h-fit min-w-0 flex-col gap-4">
@@ -726,6 +746,13 @@ export default function SkillDetailPage() {
                   repo={claimRepoOfSourceUrl(detail.skill.sourceUrl)}
                   skillId={detail.skill.skillId}
                 />
+              ) : null}
+              {communitySlot ? (
+                <>
+                  <SkillRunStats {...communitySlot} />
+                  <SkillOverviewAdmin {...communitySlot} />
+                  <SkillReportButton {...communitySlot} />
+                </>
               ) : null}
             </div>
           </div>

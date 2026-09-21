@@ -2,6 +2,7 @@ import { desc, sql } from "drizzle-orm";
 import {
   boolean,
   check,
+  doublePrecision,
   foreignKey,
   index,
   integer,
@@ -233,6 +234,14 @@ export const skillDefinitions = pgTable(
     // overwritten by a later import.
     featured: boolean("featured").notNull().default(false),
     featuredSetBy: text("featured_set_by").$type<"sync" | "admin">(),
+    // Who chose the categories: null or 'auto' = inferred from the skill's
+    // text, which a bulk re-inference may replace; 'admin' = picked by a market
+    // admin, which nothing automatic touches again.
+    categoriesSetBy: text("categories_set_by").$type<"auto" | "admin">(),
+    // Visible reviews, refreshed by the scheduler from `skill_reviews` so the
+    // catalog needs no join. `ratingAvg` is null while there are none.
+    ratingCount: integer("rating_count").notNull().default(0),
+    ratingAvg: doublePrecision("rating_avg"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .defaultNow(),
@@ -798,6 +807,304 @@ export const skillRegistrySubmissions = pgTable(
       .where(sql`${table.status} in ('queued', 'running')`),
   ],
 );
+
+// ---------------------------------------------------------------------------
+// Skill market: audit, reports, reviews, AI overviews, sandbox run stats,
+// settings. Owned by `modules/skills/market`.
+// ---------------------------------------------------------------------------
+
+export type SkillMarketEventActorKind = "admin" | "owner" | "user" | "system";
+
+// What happened to a skill on the market and who did it: every admin or
+// author decision, and every change the platform makes by itself (a new
+// version clearing `verified`, a foreign commit being withdrawn). Append-only.
+export const skillMarketEvents = pgTable(
+  "skill_market_events",
+  {
+    id: text("id").primaryKey(),
+    // Null for an event about a repository rather than one skill (a claim).
+    skillId: text("skill_id").references(() => skillDefinitions.id, {
+      onDelete: "cascade",
+    }),
+    repoOwner: text("repo_owner"),
+    repoName: text("repo_name"),
+    actorKind: text("actor_kind").$type<SkillMarketEventActorKind>().notNull(),
+    // Null when the platform did it.
+    actorUserId: text("actor_user_id"),
+    // Dotted verb, e.g. `listing.list`, `verified.cleared`, `claim.granted`.
+    action: text("action").notNull(),
+    // Small, structured: before/after values, a reason, a version id. Never a
+    // skill's content.
+    detail: jsonb("detail")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(emptyJsonObject),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    check(
+      "skill_market_events_actor_kind_check",
+      sql`${table.actorKind} in ('admin', 'owner', 'user', 'system')`,
+    ),
+    index("skill_market_events_skill_created_idx").on(
+      table.skillId,
+      desc(table.createdAt),
+    ),
+    index("skill_market_events_created_idx").on(desc(table.createdAt)),
+  ],
+);
+
+export type SkillReviewStatus = "visible" | "hidden";
+
+// One rating per person per skill, editable. Only someone whose workspace
+// installed the skill may write one.
+export const skillReviews = pgTable(
+  "skill_reviews",
+  {
+    id: text("id").primaryKey(),
+    skillId: text("skill_id")
+      .notNull()
+      .references(() => skillDefinitions.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull(),
+    // The version current when the review was last written.
+    skillVersionId: text("skill_version_id").references(
+      () => skillVersions.id,
+      { onDelete: "set null" },
+    ),
+    rating: integer("rating").notNull(),
+    body: text("body").notNull().default(""),
+    status: text("status")
+      .$type<SkillReviewStatus>()
+      .notNull()
+      .default("visible"),
+    hiddenBy: text("hidden_by"),
+    hiddenAt: timestamp("hidden_at", { withTimezone: true, mode: "date" }),
+    // The repository's claimed author may answer each review once.
+    authorReply: text("author_reply"),
+    authorReplyBy: text("author_reply_by"),
+    authorReplyAt: timestamp("author_reply_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    check(
+      "skill_reviews_rating_check",
+      sql`${table.rating} between 1 and 5`,
+    ),
+    check(
+      "skill_reviews_status_check",
+      sql`${table.status} in ('visible', 'hidden')`,
+    ),
+    uniqueIndex("skill_reviews_skill_user_uq").on(table.skillId, table.userId),
+    index("skill_reviews_skill_created_idx").on(
+      table.skillId,
+      table.status,
+      desc(table.createdAt),
+    ),
+  ],
+);
+
+export type SkillReportReason =
+  | "copyright"
+  | "malicious"
+  | "impersonation"
+  | "spam"
+  | "broken"
+  | "other";
+export type SkillReportStatus = "open" | "actioned" | "dismissed";
+
+// Someone telling the market admins a skill (or a review of it) is wrong.
+// Never acts by itself: an admin decides.
+export const skillReports = pgTable(
+  "skill_reports",
+  {
+    id: text("id").primaryKey(),
+    skillId: text("skill_id")
+      .notNull()
+      .references(() => skillDefinitions.id, { onDelete: "cascade" }),
+    // Set when the report is about one review rather than the skill.
+    reviewId: text("review_id").references(() => skillReviews.id, {
+      onDelete: "cascade",
+    }),
+    reason: text("reason").$type<SkillReportReason>().notNull(),
+    details: text("details").notNull().default(""),
+    // Required from a visitor without an account; optional otherwise.
+    contactEmail: text("contact_email"),
+    reporterUserId: text("reporter_user_id"),
+    // sha256 of the reporter's IP with a server-side salt: rate limiting only.
+    ipHash: text("ip_hash"),
+    status: text("status")
+      .$type<SkillReportStatus>()
+      .notNull()
+      .default("open"),
+    resolution: text("resolution"),
+    resolvedBy: text("resolved_by"),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true, mode: "date" }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    check(
+      "skill_reports_reason_check",
+      sql`${table.reason} in ('copyright', 'malicious', 'impersonation', 'spam', 'broken', 'other')`,
+    ),
+    check(
+      "skill_reports_status_check",
+      sql`${table.status} in ('open', 'actioned', 'dismissed')`,
+    ),
+    check(
+      "skill_reports_reporter_check",
+      sql`${table.reporterUserId} is not null or ${table.contactEmail} is not null`,
+    ),
+    index("skill_reports_status_created_idx").on(
+      table.status,
+      desc(table.createdAt),
+    ),
+    index("skill_reports_skill_idx").on(table.skillId),
+    index("skill_reports_ip_created_idx").on(table.ipHash, table.createdAt),
+  ],
+);
+
+export type SkillOverviewLocale = "en" | "zh-CN" | "zh-TW";
+export type SkillOverviewJson = {
+  // One sentence, for cards.
+  summary: string;
+  whatItDoes: string;
+  whenToUse: string;
+  // Dependencies, scripts, credentials it needs; empty when none.
+  requirements: string;
+  suggestedCategories: string[];
+};
+
+// An AI-written overview of one skill version in one language. Generated only
+// for a public skill's current version; keyed by the bundle so identical
+// content is never summarized twice.
+export const skillVersionOverviews = pgTable(
+  "skill_version_overviews",
+  {
+    skillVersionId: text("skill_version_id")
+      .notNull()
+      .references(() => skillVersions.id, { onDelete: "cascade" }),
+    locale: text("locale").$type<SkillOverviewLocale>().notNull(),
+    bundleSha256: text("bundle_sha256").notNull(),
+    overview: jsonb("overview").$type<SkillOverviewJson>().notNull(),
+    model: text("model").notNull(),
+    // An admin hid it; the page falls back to the author's description.
+    hidden: boolean("hidden").notNull().default(false),
+    generatedAt: timestamp("generated_at", {
+      withTimezone: true,
+      mode: "date",
+    })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    primaryKey({
+      name: "skill_version_overviews_pk",
+      columns: [table.skillVersionId, table.locale],
+    }),
+    check(
+      "skill_version_overviews_locale_check",
+      sql`${table.locale} in ('en', 'zh-CN', 'zh-TW')`,
+    ),
+    index("skill_version_overviews_bundle_idx").on(
+      table.bundleSha256,
+      table.locale,
+    ),
+  ],
+);
+
+export type SkillRunErrorClass =
+  | "missing_dependency"
+  | "timeout"
+  | "permission"
+  | "other";
+
+// One sandbox command that touched a mounted skill's files. Deliberately
+// nothing about what ran: no command, no output, and the workspace only as a
+// salted hash, counted to keep a skill's stats from describing one workspace.
+export const skillRunEvents = pgTable(
+  "skill_run_events",
+  {
+    id: text("id").primaryKey(),
+    skillId: text("skill_id")
+      .notNull()
+      .references(() => skillDefinitions.id, { onDelete: "cascade" }),
+    skillVersionId: text("skill_version_id").references(
+      () => skillVersions.id,
+      { onDelete: "set null" },
+    ),
+    workspaceHash: text("workspace_hash").notNull(),
+    exitCode: integer("exit_code"),
+    durationMs: integer("duration_ms"),
+    // Null on success.
+    errorClass: text("error_class").$type<SkillRunErrorClass>(),
+    // The missing module or command when `missing_dependency` named one —
+    // a package name, never a path or an argument.
+    errorSubject: text("error_subject"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    check(
+      "skill_run_events_error_class_check",
+      sql`${table.errorClass} is null or ${table.errorClass} in ('missing_dependency', 'timeout', 'permission', 'other')`,
+    ),
+    index("skill_run_events_skill_created_idx").on(
+      table.skillId,
+      table.createdAt,
+    ),
+    index("skill_run_events_created_idx").on(table.createdAt),
+  ],
+);
+
+// A skill's 30-day sandbox numbers, recomputed by the scheduler.
+export const skillRunStats = pgTable("skill_run_stats", {
+  skillId: text("skill_id")
+    .primaryKey()
+    .references(() => skillDefinitions.id, { onDelete: "cascade" }),
+  runs: integer("runs").notNull().default(0),
+  successes: integer("successes").notNull().default(0),
+  workspaces: integer("workspaces").notNull().default(0),
+  // [{ errorClass, subject, count }], most common first, at most five.
+  topErrors: jsonb("top_errors")
+    .$type<
+      Array<{
+        errorClass: SkillRunErrorClass;
+        subject: string | null;
+        count: number;
+      }>
+    >()
+    .notNull()
+    .default(sql`'[]'::jsonb`),
+  computedAt: timestamp("computed_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+});
+
+// Market-wide settings a market admin changes at runtime, kept in the database
+// rather than the environment. Known keys:
+// - `overview.billing`: { teamId, workspaceId } the AI overview's model calls
+//   are billed to; overviews are not generated while it is unset.
+export const skillMarketSettings = pgTable("skill_market_settings", {
+  key: text("key").primaryKey(),
+  value: jsonb("value").$type<Record<string, unknown>>().notNull(),
+  updatedBy: text("updated_by"),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+});
 
 // ---------------------------------------------------------------------------
 // Market (publisher side) — the MCP/skill catalog. Migrated from the retired

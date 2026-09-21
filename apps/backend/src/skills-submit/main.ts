@@ -84,12 +84,25 @@ async function run() {
       };
 }
 
+/**
+ * Resolves once the text has been handed to the OS. Writes to a pipe are
+ * asynchronous, and `process.exit` does not wait for them: an answer past the
+ * pipe's buffer (64 KiB — a hundred imports) was cut off mid-JSON.
+ */
+function writeFully(stream: NodeJS.WriteStream, text: string) {
+  return new Promise<void>((resolve) => stream.write(text, () => resolve()));
+}
+
 let exitCode = 0;
 try {
-  process.stdout.write(`${RESULT_PREFIX}${JSON.stringify(await run())}\n`);
+  await writeFully(
+    process.stdout,
+    `${RESULT_PREFIX}${JSON.stringify(await run())}\n`,
+  );
 } catch (error) {
   exitCode = 1;
-  process.stderr.write(
+  await writeFully(
+    process.stderr,
     `skills-submit: ${error instanceof Error ? error.message : String(error)}\n`,
   );
 } finally {

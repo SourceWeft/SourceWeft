@@ -69,6 +69,9 @@ const standing = {
   verified: false,
   featured: false,
   featuredSetBy: null,
+  categoriesSetBy: null,
+  ratingCount: 0,
+  ratingAvg: null,
   categorySlugs: ["documents-office"],
   installCount: 0,
   listedAt: null,
@@ -267,6 +270,9 @@ test("featured is an admin's choice, answered with the stored standing", async (
     ...standing,
     featured: true,
     featuredSetBy: "admin",
+    categoriesSetBy: null,
+    ratingCount: 0,
+    ratingAvg: null,
   });
 
   for (const body of [{ featured: "yes" }, { featured: true, setBy: "sync" }, {}]) {

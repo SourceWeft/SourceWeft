@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { LibraryBig, ShieldAlert } from "lucide-react";
+import { Flag, LibraryBig, List, Settings, ShieldAlert } from "lucide-react";
 import {
   Tabs,
   TabsContent,
@@ -11,15 +11,28 @@ import {
 import { McpIcon, SkillIcon } from "../../../_components/site-icons";
 import { skillsMarketCopy } from "../../skills/_components/skills-market-copy";
 import { McpReviewQueue } from "./_components/mcp-review-queue";
+import { SkillAllAdmin } from "./_components/skill-all-admin";
 import { SkillCollectionsAdmin } from "./_components/skill-collections-admin";
+import { SkillMarketSettingsAdmin } from "./_components/skill-market-settings-admin";
+import { SkillReportsAdmin } from "./_components/skill-reports-admin";
 import { SkillReviewQueue } from "./_components/skill-review-queue";
 
 const copy = skillsMarketCopy.review;
 
-type ReviewTab = "mcp" | "skills" | "collections";
+type ReviewTab =
+  "mcp" | "skills" | "all" | "reports" | "collections" | "settings";
+
+const TABS: readonly ReviewTab[] = [
+  "mcp",
+  "skills",
+  "all",
+  "reports",
+  "collections",
+  "settings",
+];
 
 function asTab(value: string | null): ReviewTab {
-  return value === "skills" || value === "collections" ? value : "mcp";
+  return TABS.find((tab) => tab === value) ?? "mcp";
 }
 
 function tabFromLocation(): ReviewTab {
@@ -72,6 +85,18 @@ export default function MarketReviewPage() {
             <LibraryBig />
             {skillsMarketCopy.collections.tab}
           </TabsTrigger>
+          <TabsTrigger className="px-3" value="all">
+            <List />
+            {skillsMarketCopy.review.tabAll}
+          </TabsTrigger>
+          <TabsTrigger className="px-3" value="reports">
+            <Flag />
+            {skillsMarketCopy.review.tabReports}
+          </TabsTrigger>
+          <TabsTrigger className="px-3" value="settings">
+            <Settings />
+            {skillsMarketCopy.review.tabSettings}
+          </TabsTrigger>
         </TabsList>
         {/* Each queue loads when its tab is first opened, not before. */}
         <TabsContent value="mcp">
@@ -83,6 +108,15 @@ export default function MarketReviewPage() {
         </TabsContent>
         <TabsContent value="collections">
           <SkillCollectionsAdmin />
+        </TabsContent>
+        <TabsContent value="all">
+          <SkillAllAdmin />
+        </TabsContent>
+        <TabsContent value="reports">
+          <SkillReportsAdmin />
+        </TabsContent>
+        <TabsContent value="settings">
+          <SkillMarketSettingsAdmin />
         </TabsContent>
       </Tabs>
     </div>

@@ -1,7 +1,10 @@
 import { runSkillAutoListing } from "../../modules/skills/market/auto-list";
 import { refreshSkillInstallCounts } from "../../modules/skills/market/install-counts";
+import { enqueueSkillOverviews } from "../../modules/skills/market/overviews";
 import { runProvenanceSweep } from "../../modules/skills/market/provenance";
 import { refreshSkillRepositoryMetadata } from "../../modules/skills/market/repo-metadata";
+import { refreshSkillRatings } from "../../modules/skills/market/reviews";
+import { refreshSkillRunStats } from "../../modules/skills/market/run-stats";
 import { logger } from "../../shared/logger";
 
 /** How often the skill market's upkeep runs. */
@@ -34,7 +37,22 @@ export async function scheduleSkillMarketUpkeep(): Promise<void> {
       message: error instanceof Error ? error.message : String(error),
     });
   }
+  // Ratings feed the rank score too.
+  await refreshSkillRatings();
   await refreshSkillInstallCounts();
+  // Each independent of the others: one failing costs only its own numbers.
+  for (const [name, step] of [
+    ["run stats", refreshSkillRunStats],
+    ["overview queue", enqueueSkillOverviews],
+  ] as const) {
+    try {
+      await step();
+    } catch (error) {
+      logger.warn(`Skill market ${name} step failed`, {
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
   if (listing.listed > 0 || listing.failed > 0 || listing.backfilled > 0) {
     logger.info("Skill market upkeep complete", listing);
   }
