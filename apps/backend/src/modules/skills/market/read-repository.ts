@@ -367,15 +367,20 @@ async function readMarketSkillAiSummaries(
   );
 }
 
-/** Public skills by id, as summaries, in the order the ids are given. */
+/**
+ * Public skills by id, as summaries, in the order the ids are given. With a
+ * `locale`, each carries its `aiSummary` in that language.
+ */
 export async function findMarketSkillSummariesByIds(
   ids: readonly string[],
+  options: { locale?: MarketSkillLocale } = {},
 ): Promise<Array<MarketSkillSummary & { id: string }>> {
   if (ids.length === 0) return [];
   const found = await selectMarketSkillSummaries({
     where: inArray(skillDefinitions.id, [...ids]),
     orderBy: [desc(skillDefinitions.id)],
     limit: ids.length,
+    ...(options.locale ? { locale: options.locale } : {}),
   });
   const byId = new Map(found.map((summary) => [summary.id, summary]));
   return ids.flatMap((id) => {

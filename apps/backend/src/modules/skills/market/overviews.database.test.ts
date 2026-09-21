@@ -381,6 +381,43 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       assert.equal("aiOverview" in (bySlug.get(source.slug) as object), false);
     });
 
+    test("a collection's items carry the AI summary in the asked language", async () => {
+      const collections = await import("./collections");
+      const collectionId = randomUUID();
+      const slug = `ovw-${tag}`;
+      await data.db.insert(data.skillCollections).values({
+        id: collectionId,
+        slug,
+        title: `Overview ${tag}`,
+        published: true,
+      });
+      try {
+        await data.db.insert(data.skillCollectionItems).values([
+          { collectionId, skillId: source.id, position: 0 },
+          { collectionId, skillId: fresh.id, position: 1 },
+          { collectionId, skillId: restricted.id, position: 2 },
+        ]);
+        const zh = await collections.findPublicSkillCollection(slug, {
+          locale: "zh-TW",
+        });
+        assert.deepEqual(
+          zh?.items.map((item) => [item.slug, item.aiSummary]),
+          [
+            [source.slug, "繁體摘要"],
+            // No zh-TW row: English.
+            [fresh.slug, "Only English"],
+          ],
+        );
+        // No locale: English.
+        const en = await collections.findPublicSkillCollection(slug);
+        assert.equal(en?.items[0]?.aiSummary, "English summary");
+      } finally {
+        await data.db
+          .delete(data.skillCollections)
+          .where(inArray(data.skillCollections.id, [collectionId]));
+      }
+    });
+
     test("deleting a version's overviews puts it back on the list", async () => {
       assert.equal(await repo.deleteSkillOverviews(fresh.versionId), 1);
       const left = await repo.findSkillOverviewCandidates({
