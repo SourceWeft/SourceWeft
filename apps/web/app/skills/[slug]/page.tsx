@@ -19,13 +19,14 @@ import {
   getPublicSkill,
   isMarketNotFound,
   listPublicSkillCategories,
-  listPublicSkills,
 } from "../../../lib/market-skills";
 import { SkillMarkdown } from "../_components/skill-markdown";
 import {
+  SkillArchivedBadge,
   SkillCapabilityBadge,
   SkillCardGrid,
   skillCategoryNames,
+  SkillClaimedBadge,
   SkillExternalLink,
   SkillVerifiedBadge,
 } from "../_components/skills-display";
@@ -34,6 +35,8 @@ import {
   commitUrl,
   formatCompactCount,
   formatFileSize,
+  formatRelativeTime,
+  githubRepository,
   formatSkillDate,
   formatSkillVersion,
   parseSkillDetailTab,
@@ -44,6 +47,8 @@ import {
   shortSeoText,
   skillCategoryLabel,
   skillCategoryPath,
+  skillClaimHref,
+  skillCliInstallCommand,
   skillInstallHref,
   skillPath,
   skillsContainerClassName,
@@ -57,10 +62,8 @@ import { skillsCopy } from "../_components/skills-public-copy";
 
 // Not build-time prerendered: canonical/JSON-LD embed the public site URL, which
 // is injected at container start, so a build-time render would bake in the
-// wrong origin. Freshness comes from the cached market reads (300s).
+// wrong origin. Freshness comes from the cached market reads (60s).
 export const dynamic = "force-dynamic";
-
-const RELATED_SIZE = 3;
 
 type PageProps = {
   params: Promise<{ slug: string }>;
@@ -125,17 +128,69 @@ export async function generateMetadata({
   }
 }
 
-async function loadRelatedSkills(skill: MarketSkillSummary) {
-  const category = skill.categories[0];
-  if (!category) return [];
-  const { items } = await listPublicSkills({
-    category,
-    limit: RELATED_SIZE + 1,
-    sort: "recommended",
-  });
-  return items
-    .filter((item) => item.slug !== skill.slug)
-    .slice(0, RELATED_SIZE);
+/** A copyable shell command, as the install tab shows each one. */
+function CommandLine({ command }: { command: string }) {
+  return (
+    <div className="mt-3 flex items-start gap-2">
+      <code className="min-w-0 flex-1 break-all rounded-lg bg-zinc-100 px-3 py-2 font-mono text-xs leading-5 text-zinc-800 dark:bg-white/10 dark:text-zinc-200">
+        {command}
+      </code>
+      <CopyButton
+        className="h-8 shrink-0 px-2"
+        label={copy.install.copy}
+        value={command}
+      />
+    </div>
+  );
+}
+
+/** "3 files changed · 1 new script" and the compare link, for one version. */
+function VersionChanges({
+  changes,
+}: {
+  changes: NonNullable<GetMarketSkillResponse["versions"][number]["changes"]>;
+}) {
+  const files =
+    changes.added.length + changes.removed.length + changes.modified.length;
+  const compareUrl = safeExternalUrl(changes.compareUrl);
+  return (
+    <div className="mt-1.5 w-full space-y-1 text-xs text-zinc-500">
+      <p className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span>
+          {files > 0
+            ? [
+                changes.added.length ? `${changes.added.length} added` : null,
+                changes.modified.length
+                  ? `${changes.modified.length} modified`
+                  : null,
+                changes.removed.length
+                  ? `${changes.removed.length} removed`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")
+            : copy.versions.noChanges}
+        </span>
+        {compareUrl ? (
+          <SkillExternalLink className="text-xs" href={compareUrl}>
+            {copy.versions.compare}
+          </SkillExternalLink>
+        ) : null}
+      </p>
+      {changes.newScripts.length > 0 ? (
+        <p className="text-amber-700 dark:text-amber-400">
+          {copy.versions.newScripts(changes.newScripts.join(", "))}
+        </p>
+      ) : null}
+      {changes.newFlags.length > 0 ? (
+        <p className="text-amber-700 dark:text-amber-400">
+          {copy.versions.newFlags(
+            changes.newFlags.map((flag) => scanFlagLabel(flag)).join(", "),
+          )}
+        </p>
+      ) : null}
+    </div>
+  );
 }
 
 function InstallCta({
@@ -276,6 +331,7 @@ function VersionsTab({
                   : copy.versions.unpublishedDate}
               </span>
             </span>
+            {entry.changes ? <VersionChanges changes={entry.changes} /> : null}
           </li>
         );
       })}
@@ -296,7 +352,7 @@ export default async function PublicSkillDetailPage({
     listPublicSkillCategories(),
   ]);
   const { files, scanFlags, skill, source, versions } = result;
-  const relatedSkills = await loadRelatedSkills(skill);
+  const related = result.related ?? { sameRepository: [], sameCategory: [] };
   const categoryNames = skillCategoryNames(categoriesResponse.items);
   const skillMd = stripSkillFrontmatter(result.skillMd);
   const installHref = skillInstallHref(skill.slug, authState.isSignedIn);
@@ -306,6 +362,15 @@ export default async function PublicSkillDetailPage({
   const commitSha = shortCommitSha(source.commitSha);
   const commitHref = commitUrl(repoUrl, source.commitSha) ?? sourceUrl;
   const localInstallCommand = skillLocalInstallCommand(source);
+  // Only when the CLI would install it: it refuses a name it cannot use as a
+  // directory.
+  const cliInstallCommand =
+    skill.cliInstallable === false ? null : skillCliInstallCommand(skill.slug);
+  const repository = githubRepository(repoUrl);
+  // The author's way in, for a repository nobody has claimed yet.
+  const claimHref = skill.claimed ? null : skillClaimHref(repoUrl);
+  const stars = skill.stars ?? 0;
+  const pushed = formatRelativeTime(skill.repoPushedAt);
   const license = skill.license ?? copy.noLicense;
   const listed = formatSkillDate(skill.listedAt);
   const updated = formatSkillDate(skill.updatedAt);
@@ -322,10 +387,13 @@ export default async function PublicSkillDetailPage({
     [copy.facts.version, formatSkillVersion(skill.version)],
     [copy.facts.license, license],
     ...(skill.installCount > 0
-      ? ([[copy.facts.installs, formatCompactCount(skill.installCount)]] as [
+      ? ([[copy.facts.workspaces, formatCompactCount(skill.installCount)]] as [
           string,
           string,
         ][])
+      : []),
+    ...(stars > 0
+      ? ([[copy.facts.stars, formatCompactCount(stars)]] as [string, string][])
       : []),
     [copy.facts.files, files.length.toLocaleString("en")],
   ];
@@ -464,11 +532,17 @@ export default async function PublicSkillDetailPage({
                     <span>{license}</span>
                     {skill.installCount > 0 ? (
                       <span>
-                        {copy.installs(formatCompactCount(skill.installCount))}
+                        {copy.workspaces(
+                          formatCompactCount(skill.installCount),
+                        )}
                       </span>
+                    ) : null}
+                    {stars > 0 ? (
+                      <span>{copy.stars(formatCompactCount(stars))}</span>
                     ) : null}
                     {listed ? <span>{copy.listed(listed)}</span> : null}
                     {updated ? <span>{copy.updated(updated)}</span> : null}
+                    {pushed ? <span>{copy.repoPushed(pushed)}</span> : null}
                   </p>
                 </div>
               </div>
@@ -477,6 +551,8 @@ export default async function PublicSkillDetailPage({
               </p>
               <div className="mt-6 flex flex-wrap gap-2">
                 {skill.verified ? <SkillVerifiedBadge /> : null}
+                {skill.claimed ? <SkillClaimedBadge /> : null}
+                {skill.repoArchived ? <SkillArchivedBadge /> : null}
                 <SkillCapabilityBadge capability={skill.capability} />
                 {skill.categories.map((category) => (
                   <Link
@@ -516,6 +592,18 @@ export default async function PublicSkillDetailPage({
                   </SkillExternalLink>
                 ) : null}
               </div>
+              {claimHref ? (
+                <p className="mt-4 border-t border-zinc-200 pt-3 text-xs dark:border-white/10">
+                  <Link
+                    className="text-zinc-500 underline decoration-zinc-300 underline-offset-4 hover:text-zinc-950 hover:decoration-zinc-950 dark:decoration-white/20 dark:hover:text-white"
+                    href={claimHref}
+                    prefetch={false}
+                    rel="nofollow"
+                  >
+                    {copy.claimLink}
+                  </Link>
+                </p>
+              ) : null}
             </aside>
           </div>
         </div>
@@ -594,29 +682,34 @@ export default async function PublicSkillDetailPage({
                   {copy.install.signedOutNote}
                 </p>
               )}
+              {cliInstallCommand ? (
+                <div className="mt-8 border-t border-zinc-200 pt-6 dark:border-white/10">
+                  <h3 className="text-base font-semibold">
+                    {copy.install.cli.heading}
+                  </h3>
+                  <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+                    {copy.install.cli.lead}
+                  </p>
+                  <CommandLine command={cliInstallCommand} />
+                  <p className="mt-2 text-xs leading-5 text-zinc-500">
+                    {copy.install.cli.agentHint}
+                  </p>
+                  {skill.capability === "executable" ? (
+                    <p className="mt-3 text-xs leading-5 text-amber-700 dark:text-amber-400">
+                      {copy.install.cli.executableNote}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
               {localInstallCommand ? (
                 <div className="mt-8 border-t border-zinc-200 pt-6 dark:border-white/10">
                   <h3 className="text-base font-semibold">
-                    {copy.install.local.heading}
+                    {copy.install.upstream.heading}
                   </h3>
                   <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-                    {copy.install.local.lead}
+                    {copy.install.upstream.lead}
                   </p>
-                  <div className="mt-3 flex items-start gap-2">
-                    <code className="min-w-0 flex-1 break-all rounded-lg bg-zinc-100 px-3 py-2 font-mono text-xs leading-5 text-zinc-800 dark:bg-white/10 dark:text-zinc-200">
-                      {localInstallCommand}
-                    </code>
-                    <CopyButton
-                      className="h-8 shrink-0 px-2"
-                      label={copy.install.copy}
-                      value={localInstallCommand}
-                    />
-                  </div>
-                  {skill.capability === "executable" ? (
-                    <p className="mt-3 text-xs leading-5 text-amber-700 dark:text-amber-400">
-                      {copy.install.local.executableNote}
-                    </p>
-                  ) : null}
+                  <CommandLine command={localInstallCommand} />
                 </div>
               ) : null}
             </div>
@@ -716,15 +809,34 @@ export default async function PublicSkillDetailPage({
         </div>
       </section>
 
-      {relatedSkills.length > 0 ? (
+      {related.sameRepository.length > 0 ? (
         <section className={`mx-auto pb-16 ${skillsContainerClassName}`}>
           <div className="border-t border-zinc-300 pt-10 dark:border-white/10">
             <h2 className="mb-6 text-2xl font-semibold tracking-tight">
-              {copy.related(skill.displayName)}
+              {copy.related.sameRepository(
+                repository ?? skill.author ?? skill.displayName,
+              )}
             </h2>
             <SkillCardGrid
               categoryNames={categoryNames}
-              skills={relatedSkills}
+              skills={related.sameRepository}
+            />
+          </div>
+        </section>
+      ) : null}
+
+      {related.sameCategory.length > 0 && primaryCategory ? (
+        <section className={`mx-auto pb-16 ${skillsContainerClassName}`}>
+          <div className="border-t border-zinc-300 pt-10 dark:border-white/10">
+            <h2 className="mb-6 text-2xl font-semibold tracking-tight">
+              {copy.related.sameCategory(
+                skillCategoryLabel(primaryCategory, categoryNames),
+              )}
+            </h2>
+            <SkillCardGrid
+              categoryNames={categoryNames}
+              highlightCategory={primaryCategory}
+              skills={related.sameCategory}
             />
           </div>
         </section>

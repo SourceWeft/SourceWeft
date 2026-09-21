@@ -7,6 +7,7 @@ import {
 import { listPublicMcp, listPublicMcpCategories } from "../lib/market-mcp";
 import {
   listPublicSkillCategories,
+  listPublicSkillCollections,
   listPublicSkills,
 } from "../lib/market-skills";
 import { blogTagPath } from "./blog/_components/blog-list";
@@ -14,6 +15,7 @@ import { mcpCategoryPath } from "./mcp/_components/mcp-display";
 import { isIndexableListing, SITE_URL } from "./seo";
 import {
   skillCategoryPath,
+  skillCollectionPath,
   skillPath,
 } from "./skills/_components/skills-format";
 
@@ -83,6 +85,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     mcpCategories,
     skills,
     skillCategories,
+    skillCollections,
   ] = await Promise.all([
     listPublishedBlogSitemapEntries(),
     listPublishedBlogPosts(),
@@ -90,6 +93,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     listPublicMcpCategories(),
     listAllPublicSkills(),
     listPublicSkillCategories(),
+    listPublicSkillCollections(),
   ]);
 
   // Listing pages below the threshold render with noindex, so submitting them
@@ -116,6 +120,11 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   // category page reads the same number for its noindex decision.
   const indexableSkillCategories = skillCategories.items.filter((category) =>
     isIndexableListing(category.count),
+  );
+  // Published collections only come back from the API; thin ones render
+  // noindex, like a thin category, so they are left out here too.
+  const indexableSkillCollections = skillCollections.items.filter(
+    (collection) => isIndexableListing(collection.itemCount),
   );
   const indexableTags = [...countByTag.entries()].filter(([, count]) =>
     isIndexableListing(count),
@@ -194,6 +203,15 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       priority: 0.5,
       url: `${SITE_URL}${skillCategoryPath(category.slug)}`,
     })),
+    ...indexableSkillCollections.map((collection) => {
+      const modified = new Date(collection.updatedAt);
+      return {
+        changeFrequency: "weekly" as const,
+        lastModified: Number.isNaN(modified.getTime()) ? undefined : modified,
+        priority: 0.5,
+        url: `${SITE_URL}${skillCollectionPath(collection.slug)}`,
+      };
+    }),
     ...skills.map((skill) => {
       const modified = new Date(skill.updatedAt ?? skill.listedAt);
       return {

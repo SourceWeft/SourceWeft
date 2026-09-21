@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { ShieldAlert } from "lucide-react";
+import { LibraryBig, ShieldAlert } from "lucide-react";
 import {
   Tabs,
   TabsContent,
@@ -11,34 +11,37 @@ import {
 import { McpIcon, SkillIcon } from "../../../_components/site-icons";
 import { skillsMarketCopy } from "../../skills/_components/skills-market-copy";
 import { McpReviewQueue } from "./_components/mcp-review-queue";
+import { SkillCollectionsAdmin } from "./_components/skill-collections-admin";
 import { SkillReviewQueue } from "./_components/skill-review-queue";
 
 const copy = skillsMarketCopy.review;
 
-type ReviewTab = "mcp" | "skills";
+type ReviewTab = "mcp" | "skills" | "collections";
+
+function asTab(value: string | null): ReviewTab {
+  return value === "skills" || value === "collections" ? value : "mcp";
+}
 
 function tabFromLocation(): ReviewTab {
   if (typeof window === "undefined") return "mcp";
-  return new URLSearchParams(window.location.search).get("tab") === "skills"
-    ? "skills"
-    : "mcp";
+  return asTab(new URLSearchParams(window.location.search).get("tab"));
 }
 
 export default function MarketReviewPage() {
   const [tab, setTab] = React.useState<ReviewTab>("mcp");
 
-  // `?tab=skills` makes the skills queue linkable. Read after mount so the
-  // first client render matches the server's.
+  // `?tab=skills` / `?tab=collections` make those tabs linkable. Read after
+  // mount so the first client render matches the server's.
   React.useEffect(() => {
     setTab(tabFromLocation());
   }, []);
 
   function changeTab(value: string) {
-    const next: ReviewTab = value === "skills" ? "skills" : "mcp";
+    const next = asTab(value);
     setTab(next);
     const params = new URLSearchParams(window.location.search);
-    if (next === "skills") params.set("tab", "skills");
-    else params.delete("tab");
+    if (next === "mcp") params.delete("tab");
+    else params.set("tab", next);
     const search = params.toString();
     window.history.replaceState(
       null,
@@ -65,6 +68,10 @@ export default function MarketReviewPage() {
             <SkillIcon />
             {copy.tabSkills}
           </TabsTrigger>
+          <TabsTrigger className="px-3" value="collections">
+            <LibraryBig />
+            {skillsMarketCopy.collections.tab}
+          </TabsTrigger>
         </TabsList>
         {/* Each queue loads when its tab is first opened, not before. */}
         <TabsContent value="mcp">
@@ -73,6 +80,9 @@ export default function MarketReviewPage() {
         <TabsContent value="skills">
           <SkillReviewQueue />
           <SkillReviewQueue queue="listing" />
+        </TabsContent>
+        <TabsContent value="collections">
+          <SkillCollectionsAdmin />
         </TabsContent>
       </Tabs>
     </div>

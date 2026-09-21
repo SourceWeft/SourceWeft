@@ -198,6 +198,8 @@ export const skillCatalogItemSchema = z.object({
   // workspace's own skills). For these entries `categories` holds the market's
   // category slugs and `verified` is the market admin's grant.
   installCount: z.number().int().nonnegative().optional(),
+  // GitHub stars of the repository the skill comes from; 0 when not known yet.
+  repoStars: z.number().int().nonnegative().optional(),
   // When the skill first went public; null while it is not listed.
   listedAt: z.string().nullable().optional(),
   capability: z.enum(["prompt-only", "executable"]).nullable().optional(),
@@ -240,12 +242,15 @@ export const SKILLS_CATALOG_MAX_PAGE_SIZE = 100;
 // rest of the catalog (builtins, the workspace's and team's own skills) is a
 // small bounded set returned whole on the first page. `cursor` is the opaque
 // `nextCursor` of the previous page.
-// `recommended` = verified first, then most installed, then newest.
+// `recommended` = verified first, then the rank score (installs and GitHub
+// stars, `market/rank.ts`), then newest. `stars` = the source repository's
+// GitHub stars.
 export const skillCatalogSortSchema = z.enum([
   "recommended",
   "popular",
   "new",
   "name",
+  "stars",
 ]);
 export type SkillCatalogSort = z.infer<typeof skillCatalogSortSchema>;
 // `builtin` = ours; `verified` = a market admin vouched for it; `community` =
@@ -296,6 +301,10 @@ export const listSkillsCatalogResponseSchema = z.object({
   items: z.array(skillCatalogItemSchema),
   // null once the last page has been served.
   nextCursor: z.string().nullable(),
+  // How many community skills match the query and filters in all, whatever
+  // page this is. Absent when the filters rule community skills out, and from
+  // servers that predate it.
+  registryTotal: z.number().int().nonnegative().optional(),
 });
 
 // GET /skills/catalog/categories — the market's categories with how many
@@ -332,6 +341,90 @@ export const skillMarketStandingSchema = z.object({
   listedAt: z.string().nullable(),
 });
 export type SkillMarketStanding = z.infer<typeof skillMarketStandingSchema>;
+
+// Why a skill is in the admin's listing queue:
+// - `flagged`: published with an advisory scan flag and not public yet.
+// - `new-version-flags` / `new-version-scripts`: already public, and its
+//   current version brought scan flags or scripts the version before it did
+//   not have. It stays public; the admin keeps it (acknowledges the version)
+//   or withdraws it.
+export const skillListingQueueReasonSchema = z.enum([
+  "flagged",
+  "new-version-flags",
+  "new-version-scripts",
+]);
+export type SkillListingQueueReason = z.infer<
+  typeof skillListingQueueReasonSchema
+>;
+// POST /v1/skills/registry/admin/listing-queue/:versionId/acknowledge — the
+// admin keeps a public skill whose new version entered the queue.
+export const acknowledgeSkillVersionResponseSchema = z.object({
+  skillId: z.string(),
+  skillVersionId: z.string(),
+  acknowledgedAt: z.string(),
+});
+export type AcknowledgeSkillVersionResponse = z.infer<
+  typeof acknowledgeSkillVersionResponseSchema
+>;
+
+// Editorial collections on the public market, as the market admin manages
+// them under /v1/skills/registry/admin/collections.
+export const skillCollectionSlugSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(64)
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "Lowercase letters, digits and dashes");
+export const skillCollectionAdminItemSchema = z.object({
+  skillId: z.string(),
+  slug: z.string(),
+  displayName: z.string(),
+  position: z.number().int(),
+  // On the public market right now. Only these show on the public page.
+  public: z.boolean(),
+});
+export const skillCollectionAdminSchema = z.object({
+  id: z.string(),
+  slug: z.string(),
+  title: z.string(),
+  summary: z.string(),
+  position: z.number().int(),
+  published: z.boolean(),
+  items: z.array(skillCollectionAdminItemSchema),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type SkillCollectionAdmin = z.infer<typeof skillCollectionAdminSchema>;
+export const listSkillCollectionsAdminResponseSchema = z.object({
+  items: z.array(skillCollectionAdminSchema),
+});
+export const createSkillCollectionRequestSchema = z
+  .object({
+    slug: skillCollectionSlugSchema,
+    title: z.string().trim().min(1).max(120),
+    summary: z.string().trim().max(500).optional(),
+    position: z.number().int().min(0).max(10_000).optional(),
+    published: z.boolean().optional(),
+  })
+  .strict();
+export type CreateSkillCollectionRequest = z.infer<
+  typeof createSkillCollectionRequestSchema
+>;
+export const updateSkillCollectionRequestSchema = z
+  .object({
+    title: z.string().trim().min(1).max(120).optional(),
+    summary: z.string().trim().max(500).optional(),
+    position: z.number().int().min(0).max(10_000).optional(),
+    published: z.boolean().optional(),
+  })
+  .strict();
+export type UpdateSkillCollectionRequest = z.infer<
+  typeof updateSkillCollectionRequestSchema
+>;
+// The collection's skills, in order, by slug. Replaces what was there.
+export const setSkillCollectionItemsRequestSchema = z
+  .object({ slugs: z.array(z.string().trim().min(1).max(256)).max(100) })
+  .strict();
 // GET|PUT /skills/catalog/:catalogId/listing — the OWNER's say over whether a
 // community skill they imported may be on the public market. 404 for anyone
 // else. `listed: true` only lifts the owner's own hold; whether the skill then
@@ -609,6 +702,19 @@ export type DeleteCustomSkillVersionFileResponse = z.infer<
   typeof deleteCustomSkillVersionFileResponseSchema
 >;
 
+// What changed from one published version of a community skill to the next
+// (`market/changelog.ts`): files by path and content hash, scripts and scan
+// flags the newer one adds, and GitHub's own comparison of the two commits.
+export const skillVersionChangelogSchema = z.object({
+  added: z.array(z.string()),
+  removed: z.array(z.string()),
+  modified: z.array(z.string()),
+  newScripts: z.array(z.string()),
+  newFlags: z.array(z.string()),
+  compareUrl: z.string().nullable(),
+});
+export type SkillVersionChangelog = z.infer<typeof skillVersionChangelogSchema>;
+
 export const registryVersionSchema = z.object({
   logo: skillLogoSchema.optional(),
   id: z.string(),
@@ -674,6 +780,10 @@ export const registryVersionDetailSchema = z.object({
     removed: z.array(z.string()),
     changed: z.array(z.string()),
   }),
+  // The same comparison with the previous published version, plus what it
+  // means for trust — scripts and scan flags this version adds — and a GitHub
+  // compare link. Null for the first version.
+  changelog: skillVersionChangelogSchema.nullable().optional(),
 });
 export type RegistryVersionDetail = z.infer<typeof registryVersionDetailSchema>;
 export const switchSkillVersionSchema = z

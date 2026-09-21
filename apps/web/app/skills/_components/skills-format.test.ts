@@ -25,6 +25,10 @@ import {
   isolateSkillMarkerTags,
   skillLocalInstallCommand,
   safeSkillLogoUrl,
+  formatRelativeTime,
+  githubRepository,
+  skillClaimHref,
+  skillCliInstallCommand,
 } from "./skills-format";
 
 describe("paths", () => {
@@ -368,5 +372,51 @@ describe("safeSkillLogoUrl", () => {
     ]) {
       expect(safeSkillLogoUrl(bad)).toBeNull();
     }
+  });
+});
+
+describe("skillCliInstallCommand", () => {
+  it("installs by slug with the SourceWeft CLI", () => {
+    expect(skillCliInstallCommand("gh-anthropics-skills-pdf")).toBe(
+      "npx @sourceweft/cli skills install gh-anthropics-skills-pdf",
+    );
+  });
+
+  it("gives no command for a slug a shell would read as more than a word", () => {
+    for (const slug of ["a b", "a;rm -rf ~", "$(x)", "-flag", ""]) {
+      expect(skillCliInstallCommand(slug)).toBeNull();
+    }
+  });
+});
+
+describe("formatRelativeTime", () => {
+  const now = Date.parse("2026-09-21T12:00:00.000Z");
+  const at = (days: number) =>
+    new Date(now - days * 24 * 60 * 60 * 1000).toISOString();
+
+  it("is coarse, and says nothing for no date", () => {
+    expect(formatRelativeTime(at(0.2), now)).toBe("today");
+    expect(formatRelativeTime(at(1.5), now)).toBe("yesterday");
+    expect(formatRelativeTime(at(3), now)).toBe("3 days ago");
+    expect(formatRelativeTime(at(20), now)).toBe("2 weeks ago");
+    expect(formatRelativeTime(at(95), now)).toBe("3 months ago");
+    expect(formatRelativeTime(at(800), now)).toBe("2 years ago");
+    expect(formatRelativeTime(at(-5), now)).toBe("today");
+    expect(formatRelativeTime(null, now)).toBeNull();
+    expect(formatRelativeTime("not a date", now)).toBeNull();
+  });
+});
+
+describe("claiming a repository", () => {
+  it("links to the claim page for a GitHub repository only", () => {
+    expect(githubRepository("https://github.com/anthropics/skills.git")).toBe(
+      "anthropics/skills",
+    );
+    expect(skillClaimHref("https://github.com/anthropics/skills")).toBe(
+      "/dashboard/skills/claim?repo=anthropics/skills",
+    );
+    expect(skillClaimHref("https://gitlab.com/a/b")).toBeNull();
+    expect(skillClaimHref("https://github.com/a/b/tree/main")).toBeNull();
+    expect(skillClaimHref(null)).toBeNull();
   });
 });

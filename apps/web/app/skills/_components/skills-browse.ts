@@ -12,6 +12,7 @@ export const SKILLS_PAGE_SIZE = 24;
 export const skillSortOptions = [
   { label: skillsCopy.sortOptions.recommended, value: "recommended" },
   { label: skillsCopy.sortOptions.popular, value: "popular" },
+  { label: skillsCopy.sortOptions.stars, value: "stars" },
   { label: skillsCopy.sortOptions.new, value: "new" },
   { label: skillsCopy.sortOptions.name, value: "name" },
 ] as const satisfies readonly { label: string; value: MarketSkillSort }[];

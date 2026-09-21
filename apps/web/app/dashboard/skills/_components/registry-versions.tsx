@@ -3,6 +3,7 @@ import * as React from "react";
 import type {
   RegistryVersionDetail,
   RegistryVersionsResponse,
+  SkillVersionChangelog,
 } from "@sourceweft/contracts";
 import {
   ChevronRight,
@@ -31,7 +32,10 @@ import {
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { HttpClientError } from "@sourceweft/sdk";
 import { contentClient } from "../../../../lib/sdk";
-import { resolveUpdateTarget } from "./skill-version-update";
+import {
+  resolveUpdateTarget,
+  summarizeVersionChangelog,
+} from "./skill-version-update";
 import { skillsMarketCopy } from "./skills-market-copy";
 
 /** What the API reports when a version can do more than the installed one. */
@@ -196,6 +200,39 @@ export function RegistryVersions({
   const updateTargetVersion = list?.items.find(
     (v) => v.id === updateTargetId,
   )?.version;
+  // What the update brings, from the target's own changelog. Read from the
+  // detail already on screen when that is the target; otherwise fetched.
+  const [targetChangelog, setTargetChangelog] = React.useState<{
+    versionId: string;
+    changelog: SkillVersionChangelog | null;
+  } | null>(null);
+  const viewedIsTarget = detail?.version.id === updateTargetId;
+  React.useEffect(() => {
+    if (!updateTargetId || viewedIsTarget) return;
+    let active = true;
+    contentClient
+      .getRegistryVersion(workspaceId, catalogId, updateTargetId)
+      .then((result) => {
+        if (active)
+          setTargetChangelog({
+            versionId: updateTargetId,
+            changelog: result?.changelog ?? null,
+          });
+      })
+      // The notice still offers the update without it.
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [workspaceId, catalogId, updateTargetId, viewedIsTarget]);
+  const updateChangelog = viewedIsTarget
+    ? (detail?.changelog ?? null)
+    : targetChangelog?.versionId === updateTargetId
+      ? targetChangelog.changelog
+      : null;
+  const updateSummary = updateChangelog
+    ? summarizeVersionChangelog(updateChangelog, skillsMarketCopy.updates)
+    : null;
   // Offered whenever the viewed version is not the installed one — also when it
   // is the update target. The notice above is a shortcut to the same switch,
   // not a replacement for the control people already know.
@@ -308,6 +345,32 @@ export function RegistryVersions({
           >
             {skillsMarketCopy.updates.action}
           </Button>
+          {updateSummary ? (
+            <span
+              className={
+                updateSummary.escalates
+                  ? "w-full text-amber-700 dark:text-amber-300"
+                  : "w-full text-muted-foreground"
+              }
+              data-testid="skill-update-changes"
+            >
+              {skillsMarketCopy.updates.changesLead} {updateSummary.summary}
+              {updateSummary.compareUrl ? (
+                <>
+                  {" · "}
+                  <a
+                    className="inline-flex items-center gap-1 underline-offset-2 hover:text-foreground hover:underline"
+                    href={updateSummary.compareUrl}
+                    rel="noreferrer noopener"
+                    target="_blank"
+                  >
+                    {skillsMarketCopy.updates.compare}
+                    <ExternalLink className="size-3" />
+                  </a>
+                </>
+              ) : null}
+            </span>
+          ) : null}
         </div>
       ) : null}
       {list?.nextCursor || offerSelected ? (

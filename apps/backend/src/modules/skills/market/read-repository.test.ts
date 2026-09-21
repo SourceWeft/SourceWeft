@@ -385,8 +385,59 @@ test("a summary carries the market's facts, not the author's own claims", () => 
     listedAt: "2026-09-01T00:00:00.000Z",
     version: "0123456789ab",
     updatedAt: "2026-09-02T00:00:00.000Z",
+    cliInstallable: true,
+    // Nothing read from GitHub yet, and nobody claimed it.
+    stars: 0,
+    repoPushedAt: null,
+    repoArchived: false,
+    claimed: false,
   });
   assert.ok(marketSkillSummarySchema.safeParse(summary).success);
+});
+
+test("a summary carries the repository's GitHub facts and whether it was claimed", () => {
+  const summary = mapMarketSkillSummary(
+    {
+      definition: {
+        ...definition,
+        repoStars: 4200,
+        claimedAt: new Date("2026-09-20T00:00:00.000Z"),
+      },
+      version: {
+        version: "0123456789ab",
+        publishedAt: null,
+        manifestJson: manifest(),
+      },
+      repository: {
+        pushedAt: new Date("2026-09-19T08:00:00.000Z"),
+        archived: true,
+      },
+    },
+    [],
+  );
+  assert.equal(summary.stars, 4200);
+  assert.equal(summary.repoPushedAt, "2026-09-19T08:00:00.000Z");
+  assert.equal(summary.repoArchived, true);
+  assert.equal(summary.claimed, true);
+});
+
+test("the CLI command is offered only for a name the CLI will install", () => {
+  const of = (slug: string, name?: string) =>
+    mapMarketSkillSummary(
+      {
+        definition: { ...definition, slug },
+        version: {
+          version: "1",
+          publishedAt: null,
+          manifestJson: manifest({}, name ? { name } : {}),
+        },
+      },
+      [],
+    ).cliInstallable;
+  assert.equal(of("gh-anthropics-skills-pdf"), true);
+  assert.equal(of("gh-anthropics-skills-x", "My Skill"), false);
+  assert.equal(of("gh-anthropics-skills-x", "../escape"), false);
+  assert.equal(of("gh-anthropics-skills-x", "docx-tools"), true);
 });
 
 test("a public skill with no registry block and no listing date still fits the contract", () => {

@@ -20,6 +20,9 @@ export const skillsMarketCopy = {
     sectionBuiltin: "Built-in",
     sectionYours: "Your skills",
     sectionCommunity: "Community",
+    // Community skills matching the filters in all, not just the loaded pages.
+    communityTotal: (count: number) =>
+      `${count.toLocaleString("en")} community skill${count === 1 ? "" : "s"}`,
     loadMore: "Load more",
     loadingMore: "Loading more skills…",
     loadMoreFailed: "Failed to load more skills.",
@@ -46,19 +49,22 @@ export const skillsMarketCopy = {
   },
   sortOptions: {
     recommended: "Recommended",
-    popular: "Most installed",
+    popular: "Most added",
+    stars: "Most starred",
     new: "Newest",
     name: "Name A-Z",
   },
+  // "Installs" are workspaces that added the skill. Local installs with the
+  // CLI send nothing back, so the number never includes them.
   card: {
     verified: "Verified",
     includesScripts: "Includes scripts",
-    installs: (formatted: string) => `${formatted} installs`,
-    installsOne: "1 install",
+    installs: (formatted: string) => `Added to ${formatted} workspaces`,
+    installsOne: "Added to 1 workspace",
   },
   detail: {
     categories: "Categories",
-    installs: "Installs",
+    installs: "Workspaces",
     restrictedNotice:
       "This skill is not publicly listed, so its full instructions are only shown to workspaces that installed it. Install to read them",
     restrictedSourceJoin: " — or ",
@@ -73,6 +79,16 @@ export const skillsMarketCopy = {
     noticeWithVersion: (version: string) =>
       `A newer version is available: ${version}.`,
     action: "Update to the newest version",
+    // What the newer version changed from the one before it.
+    changesLead: "What changed:",
+    changedFiles: (count: number) =>
+      `${count} file${count === 1 ? "" : "s"}`,
+    noFileChanges: "no file changes",
+    newScripts: (count: number) =>
+      `${count} new script${count === 1 ? "" : "s"}`,
+    newFlags: (count: number) =>
+      `${count} new scan flag${count === 1 ? "" : "s"}`,
+    compare: "Compare on GitHub",
     installPrompt: (name: string) => `Install ${name} to this workspace?`,
     installPromptLabel: "Confirm install",
     installConfirm: "Install",
@@ -87,7 +103,7 @@ export const skillsMarketCopy = {
     standingOwnerPrivate: "Kept private by its owner",
     listed: "Listed",
     notListed: "Not listed",
-    installs: "Installs",
+    installs: "Workspaces",
     verified: "Verified",
     verifiedHint: "Vouch for this skill on the market.",
     categories: "Categories",
@@ -157,7 +173,7 @@ export const skillsMarketCopy = {
   listingQueue: {
     title: "Decide what goes public",
     intro:
-      "A skill with a clean scan lists itself. These are published and usable by whoever imported them, but carry an advisory flag — so showing them to everyone is your call.",
+      "A skill with a clean scan lists itself. These are published and usable by whoever imported them, but carry an advisory flag — so showing them to everyone is your call. Public skills whose new version adds scan flags or scripts are here too: they stay public until you keep or withdraw them.",
     forbidden: "You do not have permission to manage skill listings.",
     loadFailed: "Failed to load the listing queue. Please try again.",
     loading: "Loading listing queue…",
@@ -166,6 +182,53 @@ export const skillsMarketCopy = {
     reject: "Keep private",
     footnote:
       "Keeping a skill private holds it: it will not list itself later. You can list it from its own page at any time.",
+    // A public skill whose new version brought flags or scripts. It stays
+    // public until the admin decides.
+    reasons: {
+      flagged: "Flagged, not public yet",
+      "new-version-flags": "Public · new version adds scan flags",
+      "new-version-scripts": "Public · new version adds scripts",
+    } as Record<string, string>,
+    keepPublic: "Keep public",
+    withdraw: "Withdraw",
+    changesTitle: "Changes from the previous version",
+    changesAdded: (paths: string) => `Added: ${paths}`,
+    changesRemoved: (paths: string) => `Removed: ${paths}`,
+    changesModified: (paths: string) => `Modified: ${paths}`,
+    changesNewScripts: (paths: string) => `New scripts: ${paths}`,
+    changesNewFlags: (flags: string) => `New scan flags: ${flags}`,
+    compare: "Compare on GitHub",
+  },
+  // Editorial collections on the public directory, managed by market admins.
+  collections: {
+    tab: "Collections",
+    title: "Collections",
+    intro:
+      "Hand-picked sets of public skills, shown on the public skills directory. Only published collections appear there, and inside one only the skills that are public.",
+    loading: "Loading collections…",
+    loadFailed: "Failed to load collections. Please try again.",
+    forbidden: "You do not have permission to manage collections.",
+    empty: "No collections yet.",
+    newTitle: "New collection",
+    slugLabel: "Slug",
+    slugPlaceholder: "office-work",
+    slugHint: "Lowercase letters, digits and dashes. It is the page address and cannot change.",
+    titleLabel: "Title",
+    summaryLabel: "Summary",
+    positionLabel: "Position",
+    publishedLabel: "Published",
+    create: "Create",
+    save: "Save",
+    delete: "Delete",
+    confirmDelete: (title: string) => `Delete the collection “${title}”?`,
+    skillsLabel: "Skills, one slug per line, in order",
+    saveSkills: "Save skills",
+    notPublic: "not public",
+    view: "View",
+    saved: "Saved",
+    failed: "The change was not saved.",
+    skillCount: (count: number) =>
+      `${count} skill${count === 1 ? "" : "s"}`,
   },
   flagLabels: {
     "egress:pipe-to-shell": "Fetch and run: curl | sh",

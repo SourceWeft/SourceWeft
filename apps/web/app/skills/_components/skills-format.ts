@@ -10,6 +10,10 @@ export function skillCategoryPath(slug: string) {
   return `/skills/category/${encodeURIComponent(slug)}`;
 }
 
+export function skillCollectionPath(slug: string) {
+  return `/skills/collections/${encodeURIComponent(slug)}`;
+}
+
 export function skillCategoryLabel(
   slug: string,
   names?: ReadonlyMap<string, string>,
@@ -102,6 +106,29 @@ export function formatSkillVersion(version: string) {
   return /^\d+(?:\.\d+)+(?:[-+][0-9A-Za-z.-]+)?$/.test(version)
     ? `v${version}`
     : version;
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * "today", "yesterday", "3 days ago", "2 weeks ago", "5 months ago", "2 years
+ * ago" — coarse on purpose: a card says whether a repository is alive, not
+ * when exactly it was pushed. Null for a missing or unparseable date, and a
+ * date in the future reads as today rather than as nonsense.
+ */
+export function formatRelativeTime(value?: string | null, now = Date.now()) {
+  if (!value) return null;
+  const time = new Date(value).getTime();
+  if (Number.isNaN(time)) return null;
+  const days = Math.floor(Math.max(0, now - time) / DAY_MS);
+  const ago = (count: number, unit: string) =>
+    `${count} ${unit}${count === 1 ? "" : "s"} ago`;
+  if (days < 1) return "today";
+  if (days < 2) return "yesterday";
+  if (days < 14) return ago(days, "day");
+  if (days < 60) return ago(Math.floor(days / 7), "week");
+  if (days < 730) return ago(Math.floor(days / 30), "month");
+  return ago(Math.floor(days / 365), "year");
 }
 
 export function formatFileSize(bytes: number) {
@@ -207,6 +234,34 @@ export function skillLocalInstallCommand(source: {
   if (subpath.split("/").includes("..")) return null;
   const tree = `https://github.com/${repo[1]}/${repo[2]}/tree/${sha.toLowerCase()}`;
   return `npx skills add ${subpath ? `${tree}/${subpath}` : tree}`;
+}
+
+/**
+ * The command that installs this skill with the SourceWeft CLI, which checks
+ * every file against the hashes recorded here before writing anything. Null
+ * for a slug that is not plain path characters: it goes into a shell command
+ * someone pastes, and quoting it would be a guess about their shell.
+ */
+export function skillCliInstallCommand(slug: string) {
+  return /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(slug)
+    ? `npx @sourceweft/cli skills install ${slug}`
+    : null;
+}
+
+/** `owner/repo` of a GitHub repository URL; null for anything else. */
+export function githubRepository(repoUrl?: string | null) {
+  const match =
+    /^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/.exec(
+      repoUrl ?? "",
+    );
+  return match ? `${match[1]}/${match[2]}` : null;
+}
+
+/** Where a repository's author starts claiming it (the dashboard asks them to sign in). */
+export function skillClaimHref(repoUrl?: string | null) {
+  const repository = githubRepository(repoUrl);
+  // Only name characters and one slash, so it goes in the query as it is.
+  return repository ? `/dashboard/skills/claim?repo=${repository}` : null;
 }
 
 export function skillTakedownMailto(slug: string) {

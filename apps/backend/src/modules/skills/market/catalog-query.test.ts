@@ -17,10 +17,11 @@ const cursors: SkillCatalogCursor[] = [
   { sort: "name", name: "Pdf tools", id: "skill-1" },
   { sort: "popular", installCount: 12, id: "skill-1" },
   { sort: "new", listedAtMicros: "1789300800123456", id: "skill-1" },
+  { sort: "stars", repoStars: 4200, id: "skill-1" },
   {
     sort: "recommended",
     verified: true,
-    installCount: 0,
+    rankScore: 0,
     listedAtMicros: "0",
     id: "skill-1",
   },
@@ -51,6 +52,8 @@ test("the cursor carries listed_at to the microsecond", () => {
       displayName: "Pdf",
       verified: false,
       installCount: 3,
+      rankScore: 300,
+      repoStars: 0,
     },
     // As the driver hands a bigint back.
     listedAtMicros: "1789300800123456",
@@ -67,17 +70,43 @@ test("the cursor carries listed_at to the microsecond", () => {
         displayName: "Pdf",
         verified: true,
         installCount: 3,
+        rankScore: 540,
+        repoStars: 10,
       },
       listedAtMicros: 0n,
     }),
     {
       sort: "recommended",
       verified: true,
-      installCount: 3,
+      rankScore: 540,
       listedAtMicros: "0",
       id: "skill-1",
     },
   );
+  assert.deepEqual(
+    skillCatalogCursorForRow("stars", {
+      definition: {
+        id: "skill-1",
+        displayName: "Pdf",
+        verified: true,
+        installCount: 3,
+        rankScore: 540,
+        repoStars: 10,
+      },
+      listedAtMicros: 0n,
+    }),
+    { sort: "stars", repoStars: 10, id: "skill-1" },
+  );
+});
+
+// The recommended cursor used to carry the install count in the place the rank
+// score now goes. Read as a rank cursor it would resume somewhere arbitrary, so
+// it is refused and the client starts over.
+test("a recommended cursor from before the rank score is refused", () => {
+  const old = Buffer.from(
+    JSON.stringify(["recommended", true, 3, "0", "skill-1"]),
+  ).toString("base64url");
+  assert.equal(decodeSkillCatalogCursor(old), null);
 });
 
 test("the cursor from before sorts existed still reads, as a name cursor", () => {
@@ -111,8 +140,12 @@ test("anything that is not a catalog cursor decodes to null", () => {
     encode(["new", "yesterday", "skill-1"]),
     encode(["new", "1; drop table skills", "skill-1"]),
     encode(["new", 1789300800123456, "skill-1"]),
-    encode(["recommended", "true", 1, "0", "skill-1"]),
-    encode(["recommended", true, 1, "0"]),
+    encode(["recommended", "rank", "true", 1, "0", "skill-1"]),
+    encode(["recommended", "rank", true, 1, "0"]),
+    encode(["recommended", "installs", true, 1, "0", "skill-1"]),
+    encode(["recommended", "rank", true, -1, "0", "skill-1"]),
+    encode(["stars", "12", "skill-1"]),
+    encode(["stars", -1, "skill-1"]),
   ]) {
     assert.equal(decodeSkillCatalogCursor(bad), null, bad);
   }

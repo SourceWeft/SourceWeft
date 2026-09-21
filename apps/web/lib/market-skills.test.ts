@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const client = vi.hoisted(() => ({
   getSkill: vi.fn(),
+  getSkillCollection: vi.fn(),
   listSkillCategories: vi.fn(),
+  listSkillCollections: vi.fn(),
   listSkills: vi.fn(),
 }));
 const cacheCalls = vi.hoisted(
@@ -33,7 +35,9 @@ vi.mock("@sourceweft/market-sdk", () => {
   class MarketClient {
     constructor(readonly options: { baseUrl: string }) {}
     getSkill = client.getSkill;
+    getSkillCollection = client.getSkillCollection;
     listSkillCategories = client.listSkillCategories;
+    listSkillCollections = client.listSkillCollections;
     listSkills = client.listSkills;
   }
   return { MarketClient, MarketClientError };
@@ -43,6 +47,8 @@ import { MarketClientError } from "@sourceweft/market-sdk";
 
 import {
   getPublicSkill,
+  getPublicSkillCollection,
+  listPublicSkillCollections,
   isMarketNotFound,
   listPublicSkillCategories,
   listPublicSkills,
@@ -60,14 +66,18 @@ beforeEach(() => {
 });
 
 describe("caching", () => {
-  it("caches every read for five minutes under its own key", () => {
+  // A minute here plus the API's own minute: a new version or a withdrawal
+  // is visible within about two.
+  it("caches every read for a minute under its own key", () => {
     expect(cacheCalls.map((call) => call.keys[0]).sort()).toEqual([
       "public-skill",
+      "public-skill-collection",
       "public-skills-categories",
+      "public-skills-collections",
       "public-skills-list",
     ]);
     for (const call of cacheCalls) {
-      expect(call.options.revalidate).toBe(300);
+      expect(call.options.revalidate).toBe(60);
     }
   });
 });
@@ -145,5 +155,19 @@ describe("isMarketNotFound", () => {
     expect(isMarketNotFound(marketError(500))).toBe(false);
     expect(isMarketNotFound(new Error("404"))).toBe(false);
     expect(isMarketNotFound(null)).toBe(false);
+  });
+});
+
+describe("collections", () => {
+  it("turns an outage into no collections, so the directory still renders", async () => {
+    client.listSkillCollections.mockRejectedValue(marketError(503));
+    await expect(listPublicSkillCollections()).resolves.toEqual({ items: [] });
+  });
+
+  it("lets a collection's 404 through, apart from an outage", async () => {
+    client.getSkillCollection.mockRejectedValue(marketError(404));
+    await expect(getPublicSkillCollection("drafts")).rejects.toMatchObject({
+      status: 404,
+    });
   });
 });

@@ -13,6 +13,7 @@ import { SourceWeftHeader } from "../_landing/components/sourceweft-header";
 import { NO_INDEX_METADATA, OG_IMAGE, SITE_NAME, SITE_URL } from "../seo";
 import {
   listPublicSkillCategories,
+  listPublicSkillCollections,
   listPublicSkills,
 } from "../../lib/market-skills";
 import {
@@ -25,6 +26,7 @@ import {
 } from "./_components/skills-browse";
 import {
   skillCategoryNames,
+  SkillCollectionsSection,
   SkillDirectorySection,
   SkillsFaqSection,
 } from "./_components/skills-display";
@@ -39,7 +41,7 @@ import {
 } from "./_components/skills-listing";
 import { skillsCopy } from "./_components/skills-public-copy";
 
-export const revalidate = 300;
+export const revalidate = 60;
 
 const HOME_SECTION_SIZE = 6;
 
@@ -56,6 +58,9 @@ export async function generateMetadata({
   return {
     alternates: {
       canonical: `${SITE_URL}/skills`,
+      // For agents: how to search and install from this directory with the
+      // CLI, as a SKILL.md. The same address for everyone — no UA sniffing.
+      types: { "text/markdown": "/skills/SKILL.md" },
     },
     description,
     openGraph: {
@@ -89,12 +94,14 @@ function uniqueSkills(skills: MarketSkillSummary[]) {
 }
 
 async function loadHomeSections() {
-  const [recommended, newest, popular] = await Promise.all([
+  const [recommended, newest, popular, collections] = await Promise.all([
     listPublicSkills({ limit: HOME_SECTION_SIZE, sort: "recommended" }),
     listPublicSkills({ limit: HOME_SECTION_SIZE, sort: "new" }),
     listPublicSkills({ limit: HOME_SECTION_SIZE, sort: "popular" }),
+    listPublicSkillCollections(),
   ]);
   return {
+    collections: collections.items,
     newest: newest.items,
     // With no installs anywhere yet, "most installed" is just an arbitrary
     // order, so the section waits for real numbers.
@@ -306,6 +313,8 @@ export default async function PublicSkillsMarketPage({
               </div>
             </section>
           ) : null}
+
+          <SkillCollectionsSection collections={home.collections} />
 
           <SkillDirectorySection
             categoryNames={categoryNames}

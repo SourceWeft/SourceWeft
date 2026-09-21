@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => ({
   findMarketSkill: vi.fn(),
   listMarketSkillCategories: vi.fn(),
   listMarketSkills: vi.fn(),
+  listPublicSkillCollections: vi.fn(),
+  findPublicSkillCollection: vi.fn(),
   requireSession: vi.fn(),
 }));
 
@@ -14,6 +16,10 @@ vi.mock("../../modules/skills/market/read-repository", () => ({
   findMarketSkill: mocks.findMarketSkill,
   listMarketSkillCategories: mocks.listMarketSkillCategories,
   listMarketSkills: mocks.listMarketSkills,
+}));
+vi.mock("../../modules/skills/market/collections", () => ({
+  listPublicSkillCollections: mocks.listPublicSkillCollections,
+  findPublicSkillCollection: mocks.findPublicSkillCollection,
 }));
 // Nothing here may ask who is calling. If a route ever does, this shows it.
 vi.mock("../middleware/auth-session", () => ({
@@ -61,6 +67,19 @@ const summary = {
   listedAt: "2026-09-01T00:00:00.000Z",
   version: "aaaaaaaaaaaa",
   updatedAt: "2026-09-02T00:00:00.000Z",
+  cliInstallable: true,
+  stars: 1200,
+  repoPushedAt: "2026-09-10T00:00:00.000Z",
+  repoArchived: false,
+  claimed: false,
+};
+
+const collection = {
+  slug: "office-work",
+  title: "Office work",
+  summary: "Documents, sheets and slides",
+  itemCount: 1,
+  updatedAt: "2026-09-15T00:00:00.000Z",
 };
 
 const detail = {
@@ -111,6 +130,11 @@ beforeEach(() => {
     total: 1,
   });
   mocks.findMarketSkill.mockResolvedValue(detail);
+  mocks.listPublicSkillCollections.mockResolvedValue({ items: [collection] });
+  mocks.findPublicSkillCollection.mockResolvedValue({
+    collection,
+    items: [summary],
+  });
 });
 
 // --- request parsing ---
@@ -247,6 +271,7 @@ test("reserved path segments are a 404 without a lookup", async () => {
   assert.deepEqual([...RESERVED_MARKET_SKILL_SLUGS].sort(), [
     "categories",
     "category-counts",
+    "collections",
     "registry",
   ]);
   const app = createTestApp();
@@ -381,4 +406,55 @@ test("what the contract does not name does not go out", async () => {
   );
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), detail);
+});
+
+// --- collections ---
+
+test("collections are routes of their own, not a skill called 'collections'", async () => {
+  const app = createTestApp();
+  const list = await app.request("/v1/skills/collections");
+  assert.equal(list.status, 200);
+  assert.equal(list.headers.get("cache-control"), "public, max-age=60");
+  assert.deepEqual(await list.json(), { items: [collection] });
+
+  const one = await app.request("/v1/skills/collections/office-work");
+  assert.equal(one.status, 200);
+  assert.deepEqual(await one.json(), { collection, items: [summary] });
+  assert.equal(
+    mocks.findPublicSkillCollection.mock.calls[0]?.[0],
+    "office-work",
+  );
+  assert.equal(mocks.findMarketSkill.mock.calls.length, 0);
+});
+
+test("a collection that is not published is a plain 404", async () => {
+  mocks.findPublicSkillCollection.mockResolvedValue(null);
+  const response = await createTestApp().request(
+    "/v1/skills/collections/drafts",
+  );
+  assert.equal(response.status, 404);
+  assert.deepEqual(await response.json(), {
+    code: "NOT_FOUND",
+    message: "Collection not found",
+  });
+});
+
+test("a summary from an older server still parses, with the new facts at their defaults", async () => {
+  const { marketSkillSummarySchema } = await import(
+    "@sourceweft/market-contracts"
+  );
+  const {
+    cliInstallable: _cli,
+    stars: _stars,
+    repoPushedAt: _pushed,
+    repoArchived: _archived,
+    claimed: _claimed,
+    ...older
+  } = summary;
+  const parsed = marketSkillSummarySchema.parse(older);
+  assert.equal(parsed.stars, 0);
+  assert.equal(parsed.repoPushedAt, null);
+  assert.equal(parsed.repoArchived, false);
+  assert.equal(parsed.claimed, false);
+  assert.equal(parsed.cliInstallable, undefined);
 });

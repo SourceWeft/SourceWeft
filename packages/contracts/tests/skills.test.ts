@@ -242,3 +242,99 @@ test("the synchronous submit request is gone; submissions are the only intake", 
   assert.equal("submitRegistrySkillRequestSchema" in skillContracts, false);
   assert.equal("createSkillSubmissionRequestSchema" in skillContracts, true);
 });
+
+test("the catalog sorts by GitHub stars too, and a page may say how many there are in all", () => {
+  assert.equal(
+    listSkillsCatalogQuerySchema.parse({ sort: "stars" }).sort,
+    "stars",
+  );
+  const page = { items: [], nextCursor: null };
+  assert.equal(
+    skillContracts.listSkillsCatalogResponseSchema.parse(page).registryTotal,
+    undefined,
+  );
+  assert.equal(
+    skillContracts.listSkillsCatalogResponseSchema.parse({
+      ...page,
+      registryTotal: 12,
+    }).registryTotal,
+    12,
+  );
+  assert.equal(
+    skillContracts.listSkillsCatalogResponseSchema.safeParse({
+      ...page,
+      registryTotal: -1,
+    }).success,
+    false,
+  );
+});
+
+test("a version detail may carry a changelog, and older answers without one still parse", () => {
+  const changelog = {
+    added: ["scripts/run.sh"],
+    removed: [],
+    modified: ["SKILL.md"],
+    newScripts: ["scripts/run.sh"],
+    newFlags: ["egress:fetch"],
+    compareUrl: `https://github.com/acme/skills/compare/${"a".repeat(40)}...${"b".repeat(40)}`,
+  };
+  assert.deepEqual(
+    skillContracts.skillVersionChangelogSchema.parse(changelog),
+    changelog,
+  );
+  assert.equal(
+    skillContracts.skillVersionChangelogSchema.safeParse({
+      ...changelog,
+      newScripts: undefined,
+    }).success,
+    false,
+  );
+  const shape = skillContracts.registryVersionDetailSchema.shape;
+  assert.equal(shape.changelog.safeParse(undefined).success, true);
+  assert.equal(shape.changelog.safeParse(null).success, true);
+  assert.equal(shape.changelog.safeParse(changelog).success, true);
+});
+
+test("a listing queue entry says why it is there", () => {
+  assert.deepEqual(skillContracts.skillListingQueueReasonSchema.options, [
+    "flagged",
+    "new-version-flags",
+    "new-version-scripts",
+  ]);
+});
+
+test("a collection is made with a URL-safe slug and a title, and nothing else", () => {
+  const { createSkillCollectionRequestSchema, updateSkillCollectionRequestSchema, setSkillCollectionItemsRequestSchema } =
+    skillContracts;
+  assert.deepEqual(
+    createSkillCollectionRequestSchema.parse({
+      slug: "office-work",
+      title: " Office work ",
+    }),
+    { slug: "office-work", title: "Office work" },
+  );
+  for (const bad of [
+    { slug: "Office Work", title: "x" },
+    { slug: "-office", title: "x" },
+    { slug: "office--work", title: "x" },
+    { slug: "office", title: "" },
+    { slug: "office", title: "x", items: [] },
+  ]) {
+    assert.equal(
+      createSkillCollectionRequestSchema.safeParse(bad).success,
+      false,
+      JSON.stringify(bad),
+    );
+  }
+  // The slug is the public URL: it is set once.
+  assert.equal(
+    updateSkillCollectionRequestSchema.safeParse({ slug: "renamed" }).success,
+    false,
+  );
+  assert.equal(
+    setSkillCollectionItemsRequestSchema.safeParse({
+      slugs: Array.from({ length: 101 }, (_, i) => `s${i}`),
+    }).success,
+    false,
+  );
+});

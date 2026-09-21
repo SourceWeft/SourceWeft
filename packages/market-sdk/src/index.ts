@@ -1,7 +1,9 @@
 import {
   getMarketMcpManifestResponseSchema,
   getMarketMcpResponseSchema,
+  getMarketSkillCollectionResponseSchema,
   getMarketSkillResponseSchema,
+  listMarketSkillCollectionsResponseSchema,
   listMarketCategoriesResponseSchema,
   listMarketKeysResponseSchema,
   listMarketMcpResponseSchema,
@@ -109,6 +111,24 @@ export class MarketClient {
       `/v1/skills/${encode(slug)}`,
       { method: "GET" },
       getMarketSkillResponseSchema,
+    );
+  }
+
+  /** Published editorial collections, with how many public skills each holds. */
+  listSkillCollections() {
+    return this.request(
+      "/v1/skills/collections",
+      { method: "GET" },
+      listMarketSkillCollectionsResponseSchema,
+    );
+  }
+
+  /** A published collection and its public skills, in the editor's order. */
+  getSkillCollection(slug: string) {
+    return this.request(
+      `/v1/skills/collections/${encode(slug)}`,
+      { method: "GET" },
+      getMarketSkillCollectionResponseSchema,
     );
   }
 

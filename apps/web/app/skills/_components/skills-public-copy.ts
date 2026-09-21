@@ -22,15 +22,19 @@ export const skillsCopy = {
       recommended: {
         title: "Recommended",
         description:
-          "Verified skills first, then the ones workspaces install most.",
+          "Verified skills first, then the ones workspaces add most and whose repositories are most starred.",
       },
       newest: {
         title: "Newest",
         description: "Skills most recently listed in the directory.",
       },
       popular: {
-        title: "Most installed",
+        title: "Most added",
         description: "The skills SourceWeft workspaces add most often.",
+      },
+      collections: {
+        title: "Collections",
+        description: "Hand-picked sets of skills for common jobs.",
       },
     },
     viewAll: "View all",
@@ -85,7 +89,8 @@ export const skillsCopy = {
   },
   sortOptions: {
     recommended: "Recommended",
-    popular: "Most installed",
+    popular: "Most added",
+    stars: "Most starred",
     new: "Newest",
     name: "Name",
   },
@@ -116,11 +121,34 @@ export const skillsCopy = {
     verified: "Verified",
     executable: "Includes scripts",
     promptOnly: "Instructions only",
+    claimed: "Claimed by author",
+    claimedTitle: "The repository's author claimed it on SourceWeft",
+    archived: "Archived",
+    archivedTitle:
+      "The source repository is archived on GitHub: it no longer receives updates",
   },
   card: {
-    installs: (count: string) =>
-      count === "1" ? "1 install" : `${count} installs`,
+    // Workspace adds only: installing with the CLI sends nothing back.
+    workspaces: (count: string) =>
+      count === "1"
+        ? "Added to 1 workspace"
+        : `Added to ${count} workspaces`,
+    stars: (count: string) => `${count} GitHub stars`,
+    updated: (relative: string) => `updated ${relative}`,
     unknownAuthor: "Unknown author",
+  },
+  collections: {
+    itemCount: (count: number) =>
+      `${count.toLocaleString("en")} skill${count === 1 ? "" : "s"}`,
+    fallbackMetaTitle: "Skill Collection",
+    metaTitle: (title: string) => `${title} — Agent Skills`,
+    metaDescription: (title: string, summary: string) =>
+      summary
+        ? `${title}: ${summary}`
+        : `${title}: a hand-picked collection of agent skills.`,
+    eyebrow: "Collection",
+    back: "Back to skills directory",
+    empty: "No skills in this collection are public right now.",
   },
   detail: {
     fallbackMetaTitle: "Agent Skill",
@@ -133,12 +161,18 @@ export const skillsCopy = {
     source: "Source",
     listed: (date: string) => `Listed ${date}`,
     updated: (date: string) => `Updated ${date}`,
-    installs: (count: string) =>
-      count === "1" ? "1 install" : `${count} installs`,
+    workspaces: (count: string) =>
+      count === "1"
+        ? "Added to 1 workspace"
+        : `Added to ${count} workspaces`,
+    stars: (count: string) => `${count} stars`,
+    repoPushed: (relative: string) => `Repository updated ${relative}`,
+    claimLink: "Are you the author? Claim this repository",
     facts: {
       version: "Version",
       license: "License",
-      installs: "Installs",
+      workspaces: "Workspaces",
+      stars: "GitHub stars",
       files: "Files",
     },
     tabs: {
@@ -164,9 +198,13 @@ export const skillsCopy = {
       unpublishedDate: "Date unknown",
       commit: "commit",
       empty: "No published versions yet.",
+      noChanges: "No file changes",
+      compare: "Compare on GitHub",
+      newScripts: (paths: string) => `New scripts: ${paths}`,
+      newFlags: (flags: string) => `New scan flags: ${flags}`,
     },
     install: {
-      heading: "Add to SourceWeft",
+      heading: "Add to a SourceWeft workspace",
       cta: "Add to SourceWeft",
       steps: [
         "Open the skill in your dashboard and add it to a workspace.",
@@ -184,11 +222,17 @@ export const skillsCopy = {
         "This skill includes scripts. They run in your workspace sandbox when the skill is used — review the file list and source before adding it.",
       promptOnlyNote:
         "This skill is instructions only: it ships no scripts to execute.",
-      local: {
-        heading: "Install on your own machine",
-        lead: "For Claude Code, Codex, Cursor and other local agents. SourceWeft indexes this skill and does not host its files, so the command fetches it from the source repository — pinned to the exact commit that was scanned here.",
+      cli: {
+        heading: "Install on your own machine — recommended",
+        lead: "For Claude Code, Codex, Cursor and other local agents. The SourceWeft CLI fetches the skill from its source repository at the commit scanned here, and verifies every file against the hashes recorded when the skill was scanned. If anything differs, nothing is written.",
+        agentHint:
+          "Add --agent claude-code, codex, cursor or universal to choose which agent gets it (Claude Code by default).",
         executableNote:
-          "Installed locally, this skill's scripts run on your machine, not in a sandbox. Read them first.",
+          "Installed locally, this skill's scripts run on your machine, not in a sandbox. Read them first — the CLI asks before installing.",
+      },
+      upstream: {
+        heading: "Upstream installer — not verified by SourceWeft",
+        lead: "The open-source skills installer fetches the same pinned commit, but does not check the files against the hashes SourceWeft recorded.",
       },
     },
     scan: {
@@ -217,7 +261,10 @@ export const skillsCopy = {
         "Content belongs to its original authors. SourceWeft indexes it from a public repository.",
       report: "Report or request removal",
     },
-    related: (name: string) => `More skills like ${name}`,
+    related: {
+      sameRepository: (repository: string) => `More from ${repository}`,
+      sameCategory: (category: string) => `More in ${category}`,
+    },
   },
   faqHeading: "Skills FAQ",
   faqTitle: "Agent skill basics",
@@ -231,6 +278,11 @@ export const skillsCopy = {
       question: "How do I use a skill in SourceWeft?",
       answer:
         "Open the skill, choose Add to SourceWeft, and add it to a workspace from your dashboard. You can also paste a skill's page link in chat and ask the assistant to install it.",
+    },
+    {
+      question: "Can I install a skill without SourceWeft?",
+      answer:
+        "Yes. Run npx @sourceweft/cli skills install followed by the skill's name to install it for Claude Code, Codex, Cursor or another local agent. The CLI checks every file against the hashes recorded when the skill was scanned and installs nothing if one differs.",
     },
     {
       question: "Where do these skills come from?",

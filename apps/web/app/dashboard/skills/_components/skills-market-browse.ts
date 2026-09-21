@@ -35,6 +35,7 @@ export const skillInstalledValues = [
 export const skillSortValues = [
   "recommended",
   "popular",
+  "stars",
   "new",
   "name",
 ] as const satisfies readonly SkillCatalogSort[];

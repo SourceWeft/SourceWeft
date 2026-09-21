@@ -1,6 +1,12 @@
 import type {
+  AcknowledgeSkillVersionResponse,
+  CreateSkillCollectionRequest,
   RegistryVersionDetail,
+  SkillCollectionAdmin,
+  SkillListingQueueReason,
   SkillMarketStanding,
+  SkillVersionChangelog,
+  UpdateSkillCollectionRequest,
 } from "@sourceweft/contracts";
 import { HttpClient } from "@sourceweft/sdk";
 
@@ -22,6 +28,8 @@ export type SkillReviewSubmission = {
   displayName: string;
   description: string;
   submittedBy: string | null;
+  // The submitter's name, when the account has one; `submittedBy` otherwise.
+  submittedByName?: string | null;
   capability: "prompt-only" | "executable" | null;
   license: string | null;
   sourceUrl: string | null;
@@ -52,8 +60,19 @@ export function listSkillReviewQueue(): Promise<{
   return http.get(`${ADMIN_BASE}/submissions`);
 }
 
-/** A published skill with an advisory flag, waiting for a listing decision. */
-export type SkillListingQueueEntry = Omit<SkillReviewSubmission, "ingestion">;
+/**
+ * A skill waiting for a listing decision: published with an advisory flag and
+ * not public yet, or public already with a new version that adds flags or
+ * scripts (`reason`). `reason`, `visibility` and `changes` are absent from an
+ * older API, which only had the first kind.
+ */
+export type SkillListingQueueEntry = Omit<SkillReviewSubmission, "ingestion"> & {
+  reason?: SkillListingQueueReason;
+  visibility?: "public" | "restricted";
+  changes?: SkillVersionChangelog | null;
+};
+
+export type { SkillCollectionAdmin, SkillListingQueueReason };
 
 export function listSkillListingQueue(): Promise<{
   items: SkillListingQueueEntry[];
@@ -98,6 +117,46 @@ export function setSkillVerified(skillId: string, verified: boolean) {
   return http.put<SkillMarketStanding>(`${skillPath(skillId)}/verified`, {
     verified,
   });
+}
+
+/** Keeps a public skill whose new version is in the listing queue. */
+export function acknowledgeSkillVersion(versionId: string) {
+  return http.post<AcknowledgeSkillVersionResponse>(
+    `${ADMIN_BASE}/listing-queue/${encodeURIComponent(versionId)}/acknowledge`,
+    {},
+  );
+}
+
+function collectionPath(id: string) {
+  return `${ADMIN_BASE}/collections/${encodeURIComponent(id)}`;
+}
+
+export function listSkillCollections(): Promise<{
+  items: SkillCollectionAdmin[];
+}> {
+  return http.get(`${ADMIN_BASE}/collections`);
+}
+
+export function createSkillCollection(input: CreateSkillCollectionRequest) {
+  return http.post<SkillCollectionAdmin>(`${ADMIN_BASE}/collections`, input);
+}
+
+export function updateSkillCollection(
+  id: string,
+  input: UpdateSkillCollectionRequest,
+) {
+  return http.patch<SkillCollectionAdmin>(collectionPath(id), input);
+}
+
+/** The collection's skills, in order, by slug; replaces what was there. */
+export function setSkillCollectionItems(id: string, slugs: string[]) {
+  return http.put<SkillCollectionAdmin>(`${collectionPath(id)}/items`, {
+    slugs,
+  });
+}
+
+export function deleteSkillCollection(id: string) {
+  return http.delete<{ deleted: boolean }>(collectionPath(id));
 }
 
 export function setSkillCategories(skillId: string, categorySlugs: string[]) {

@@ -96,10 +96,11 @@ export type SkillCatalogCursor =
   | { sort: "name"; name: string; id: string }
   | { sort: "popular"; installCount: number; id: string }
   | { sort: "new"; listedAtMicros: string; id: string }
+  | { sort: "stars"; repoStars: number; id: string }
   | {
       sort: "recommended";
       verified: boolean;
-      installCount: number;
+      rankScore: number;
       listedAtMicros: string;
       id: string;
     };
@@ -111,6 +112,8 @@ export type SkillCatalogSortKeyRow = {
     displayName: string;
     verified: boolean;
     installCount: number;
+    rankScore: number;
+    repoStars: number;
   };
   listedAtMicros: string | number | bigint;
 };
@@ -119,7 +122,8 @@ export function skillCatalogCursorForRow(
   sort: SkillCatalogSort,
   row: SkillCatalogSortKeyRow,
 ): SkillCatalogCursor {
-  const { id, displayName, verified, installCount } = row.definition;
+  const { id, displayName, verified, installCount, rankScore, repoStars } =
+    row.definition;
   const micros = String(row.listedAtMicros);
   switch (sort) {
     case "name":
@@ -128,10 +132,21 @@ export function skillCatalogCursorForRow(
       return { sort, installCount, id };
     case "new":
       return { sort, listedAtMicros: micros, id };
+    case "stars":
+      return { sort, repoStars, id };
     case "recommended":
-      return { sort, verified, installCount, listedAtMicros: micros, id };
+      return { sort, verified, rankScore, listedAtMicros: micros, id };
   }
 }
+
+/**
+ * Marks the `recommended` cursor that is keyed by the rank score. The one
+ * before it had the same shape keyed by the install count; without the mark an
+ * old cursor would decode and quietly resume at the wrong place. Unmarked, it
+ * is now refused as a bad cursor, which clients already handle by starting
+ * over from the first page.
+ */
+const RANK_CURSOR_MARK = "rank";
 
 export function encodeSkillCatalogCursor(cursor: SkillCatalogCursor): string {
   const keys: Array<string | number | boolean> = (() => {
@@ -142,8 +157,15 @@ export function encodeSkillCatalogCursor(cursor: SkillCatalogCursor): string {
         return [cursor.installCount];
       case "new":
         return [cursor.listedAtMicros];
+      case "stars":
+        return [cursor.repoStars];
       case "recommended":
-        return [cursor.verified, cursor.installCount, cursor.listedAtMicros];
+        return [
+          RANK_CURSOR_MARK,
+          cursor.verified,
+          cursor.rankScore,
+          cursor.listedAtMicros,
+        ];
     }
   })();
   return Buffer.from(
@@ -204,14 +226,21 @@ export function decodeSkillCatalogCursor(
         ? { sort, listedAtMicros: micros, id }
         : null;
     }
+    case "stars": {
+      const [repoStars, id] = keys;
+      return keys.length === 2 && isInstallCount(repoStars) && isId(id)
+        ? { sort, repoStars, id }
+        : null;
+    }
     case "recommended": {
-      const [verified, installCount, micros, id] = keys;
-      return keys.length === 4 &&
+      const [mark, verified, rankScore, micros, id] = keys;
+      return keys.length === 5 &&
+        mark === RANK_CURSOR_MARK &&
         typeof verified === "boolean" &&
-        isInstallCount(installCount) &&
+        isInstallCount(rankScore) &&
         isMicros(micros) &&
         isId(id)
-        ? { sort, verified, installCount, listedAtMicros: micros, id }
+        ? { sort, verified, rankScore, listedAtMicros: micros, id }
         : null;
     }
     default:
@@ -220,9 +249,10 @@ export function decodeSkillCatalogCursor(
 }
 
 /**
- * ORDER BY for a sort. The SQL form of "recommended" — verified, then most
- * installed, then newest — is the registry slice of the ordering `rank.ts`
- * defines; a database test holds the two together.
+ * ORDER BY for a sort. The SQL form of "recommended" — verified, then the rank
+ * score, then newest — is the registry slice of the ordering `rank.ts`
+ * defines, over the score the scheduler stores; a database test holds the two
+ * together.
  */
 export function skillCatalogOrderBy(sort: SkillCatalogSort): SQL[] {
   switch (sort) {
@@ -232,10 +262,12 @@ export function skillCatalogOrderBy(sort: SkillCatalogSort): SQL[] {
       return [desc(skillDefinitions.installCount), desc(skillDefinitions.id)];
     case "new":
       return [desc(listedAtMicros), desc(skillDefinitions.id)];
+    case "stars":
+      return [desc(skillDefinitions.repoStars), desc(skillDefinitions.id)];
     case "recommended":
       return [
         desc(skillDefinitions.verified),
-        desc(skillDefinitions.installCount),
+        desc(skillDefinitions.rankScore),
         desc(listedAtMicros),
         desc(skillDefinitions.id),
       ];
@@ -255,8 +287,10 @@ export function skillCatalogKeysetCondition(cursor: SkillCatalogCursor): SQL {
       return sql`(${skillDefinitions.installCount}, ${skillDefinitions.id}) < (${cursor.installCount}::integer, ${cursor.id})`;
     case "new":
       return sql`(${listedAtMicros}, ${skillDefinitions.id}) < (${cursor.listedAtMicros}::bigint, ${cursor.id})`;
+    case "stars":
+      return sql`(${skillDefinitions.repoStars}, ${skillDefinitions.id}) < (${cursor.repoStars}::integer, ${cursor.id})`;
     case "recommended":
-      return sql`(${skillDefinitions.verified}, ${skillDefinitions.installCount}, ${listedAtMicros}, ${skillDefinitions.id}) < (${cursor.verified}::boolean, ${cursor.installCount}::integer, ${cursor.listedAtMicros}::bigint, ${cursor.id})`;
+      return sql`(${skillDefinitions.verified}, ${skillDefinitions.rankScore}, ${listedAtMicros}, ${skillDefinitions.id}) < (${cursor.verified}::boolean, ${cursor.rankScore}::integer, ${cursor.listedAtMicros}::bigint, ${cursor.id})`;
   }
 }
 

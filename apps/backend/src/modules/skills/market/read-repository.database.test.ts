@@ -342,7 +342,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
     const byIdDesc = (a: Fixture, b: Fixture) =>
       a.id < b.id ? 1 : a.id > b.id ? -1 : 0;
     const expectedOrder: Record<
-      Exclude<MarketSkillSort, "name">,
+      Exclude<MarketSkillSort, "name" | "stars">,
       (a: Fixture, b: Fixture) => number
     > = {
       popular: (a, b) => b.installCount - a.installCount || byIdDesc(a, b),
@@ -721,6 +721,11 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
         listedAt: new Date(LISTED_BASE_MS[0]!).toISOString(),
         version: SHA_NEW.slice(0, 12),
         updatedAt: "2026-05-02T00:00:00.000Z",
+        cliInstallable: true,
+        stars: 0,
+        repoPushedAt: null,
+        repoArchived: false,
+        claimed: false,
       });
     });
 
@@ -860,6 +865,15 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
           publishedAt: "2026-05-02T00:00:00.000Z",
           commitSha: SHA_NEW,
           committedAt: "2026-04-30T12:00:00.000Z",
+          // Against the published version before it; the draft is skipped.
+          changes: {
+            added: [],
+            removed: [],
+            modified: [],
+            newScripts: [],
+            newFlags: [],
+            compareUrl: `${repoUrl}/compare/${SHA_OLD}...${SHA_NEW}`,
+          },
         },
         {
           version: SHA_OLD.slice(0, 12),

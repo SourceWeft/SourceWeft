@@ -170,12 +170,16 @@ export function SkillsListingView({
   total: number;
 }) {
   const categoryNames = skillCategoryNames(categories);
-  const exactCount = hasOnlyCategoryFacet(state)
-    ? state.category === "all"
-      ? total
-      : (categories.find((category) => category.slug === state.category)
-          ?.count ?? 0)
-    : null;
+  // The API counts whatever the filters and search match; an older API that
+  // does not only has the category counts to go on.
+  const exactCount =
+    market.totalCount ??
+    (hasOnlyCategoryFacet(state)
+      ? state.category === "all"
+        ? total
+        : (categories.find((category) => category.slug === state.category)
+            ?.count ?? 0)
+      : null);
   const hasFilters =
     Boolean(state.query) ||
     state.category !== "all" ||

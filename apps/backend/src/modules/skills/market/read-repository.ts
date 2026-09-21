@@ -1,4 +1,4 @@
-import { and, count, desc, eq, ilike, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, inArray, notInArray, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type {
   GetMarketSkillResponse,
@@ -12,10 +12,12 @@ import {
   skillCategories,
   skillDefinitionCategories,
   skillDefinitions,
+  skillRepositories,
   skillVersionFiles,
   skillVersions,
 } from "@sourceweft/db";
 import type { SkillManifestJson } from "@sourceweft/db";
+import { isSafeSkillDirName } from "@sourceweft/skill-format";
 import { ContentError } from "../../content/errors";
 import { getSkillLogo } from "../logo";
 import { parseGithubStoragePointer } from "../storage/source-pointer";
@@ -31,6 +33,7 @@ import {
   skillCatalogSearchConditions,
   skillCatalogSortKeyColumns,
 } from "./catalog-query";
+import { changelogVersion, diffSkillVersions } from "./changelog";
 import { listSkillCategorySlugs } from "./listing";
 import { skillCategoryDefinitions } from "./taxonomy";
 
@@ -46,6 +49,13 @@ export const MARKET_SKILLS_DEFAULT_PAGE_SIZE = 24;
 // A skill re-indexed on every upstream commit grows a long tail of versions;
 // the public page shows the recent ones.
 const MARKET_SKILL_VERSIONS_LIMIT = 50;
+
+// The versions whose changes the detail spells out. Older ones are listed
+// without: nobody deciding whether to trust a skill reads that far back.
+const MARKET_SKILL_CHANGELOG_VERSIONS = 10;
+
+// Related skills per section on a skill's page.
+const MARKET_RELATED_SKILLS_LIMIT = 6;
 
 // ---------------------------------------------------------------------------
 // The one public predicate
@@ -74,6 +84,13 @@ export function publicMarketSkillCondition(): SQL {
 }
 
 const onSkillVersion = eq(skillVersions.skillId, skillDefinitions.id);
+
+// The repository's GitHub facts, when the scheduler has fetched them. A left
+// join: a skill whose repository was never read is still on the market.
+const onSkillRepository = and(
+  eq(skillRepositories.repoOwner, skillDefinitions.repoOwner),
+  eq(skillRepositories.repoName, skillDefinitions.repoName),
+);
 
 // ---------------------------------------------------------------------------
 // Summary mapping
@@ -160,12 +177,16 @@ type MarketSkillRow = {
     installCount: number;
     listedAt: Date | null;
     createdAt: Date;
+    repoStars?: number;
+    claimedAt?: Date | null;
   };
   version: {
     version: string;
     publishedAt: Date | null;
     manifestJson: SkillManifestJson;
   };
+  /** Null until the scheduler has read the repository from GitHub. */
+  repository?: { pushedAt: Date | null; archived: boolean | null } | null;
 };
 
 /** The catalog's own logo rule, without the path it keeps for the dashboard. */
@@ -182,9 +203,10 @@ export function mapMarketSkillSummary(
 ): MarketSkillSummary {
   const manifest = row.version.manifestJson;
   const registry = manifest.registry;
+  const name = marketSkillName({ slug: row.definition.slug, manifest });
   return {
     slug: row.definition.slug,
-    name: marketSkillName({ slug: row.definition.slug, manifest }),
+    name,
     // As the catalog does for a community skill: the version on show speaks
     // for itself, the definition row being only the last one indexed.
     displayName: manifest.displayName,
@@ -206,6 +228,13 @@ export function mapMarketSkillSummary(
     ).toISOString(),
     version: row.version.version,
     updatedAt: row.version.publishedAt?.toISOString() ?? null,
+    // The CLI installs a skill as a directory named after it and refuses a
+    // name that is not a safe one, so a command would only fail.
+    cliInstallable: isSafeSkillDirName(name),
+    stars: row.definition.repoStars ?? 0,
+    repoPushedAt: row.repository?.pushedAt?.toISOString() ?? null,
+    repoArchived: row.repository?.archived ?? false,
+    claimed: (row.definition.claimedAt ?? null) !== null,
   };
 }
 
@@ -256,6 +285,12 @@ const summaryColumns = {
     installCount: skillDefinitions.installCount,
     listedAt: skillDefinitions.listedAt,
     createdAt: skillDefinitions.createdAt,
+    // Sort keys the cursor carries, and facts the summary shows.
+    rankScore: skillDefinitions.rankScore,
+    repoStars: skillDefinitions.repoStars,
+    claimedAt: skillDefinitions.claimedAt,
+    repoOwner: skillDefinitions.repoOwner,
+    repoName: skillDefinitions.repoName,
   },
   // Not the whole row: `skill_md` is the full document and a list has no use
   // for it.
@@ -266,7 +301,60 @@ const summaryColumns = {
     storagePointer: skillVersions.storagePointer,
     manifestJson: skillVersions.manifestJson,
   },
+  repository: {
+    pushedAt: skillRepositories.pushedAt,
+    archived: skillRepositories.archived,
+  },
 };
+
+/**
+ * Public skills matching `where`, as summaries with their categories, in
+ * `orderBy` order. For the lists that are not the paged catalog: related
+ * skills and a collection's skills.
+ */
+async function selectMarketSkillSummaries(input: {
+  where: SQL | undefined;
+  orderBy: SQL[];
+  limit: number;
+}): Promise<Array<MarketSkillSummary & { id: string }>> {
+  const rows = await db
+    .select(summaryColumns)
+    .from(skillDefinitions)
+    .innerJoin(skillVersions, onSkillVersion)
+    .leftJoin(skillRepositories, onSkillRepository)
+    .where(and(publicMarketSkillCondition(), input.where))
+    .orderBy(...input.orderBy)
+    .limit(input.limit);
+  const categories = await listSkillCategorySlugs(
+    rows.map((row) => row.definition.id),
+  );
+  return rows.map((row) => ({
+    ...mapMarketSkillSummary(row, categories.get(row.definition.id) ?? []),
+    id: row.definition.id,
+  }));
+}
+
+/** Public skills by id, as summaries, in the order the ids are given. */
+export async function findMarketSkillSummariesByIds(
+  ids: readonly string[],
+): Promise<Array<MarketSkillSummary & { id: string }>> {
+  if (ids.length === 0) return [];
+  const found = await selectMarketSkillSummaries({
+    where: inArray(skillDefinitions.id, [...ids]),
+    orderBy: [desc(skillDefinitions.id)],
+    limit: ids.length,
+  });
+  const byId = new Map(found.map((summary) => [summary.id, summary]));
+  return ids.flatMap((id) => {
+    const summary = byId.get(id);
+    return summary ? [summary] : [];
+  });
+}
+
+const withoutId = ({
+  id: _id,
+  ...summary
+}: MarketSkillSummary & { id: string }): MarketSkillSummary => summary;
 
 export async function listMarketSkills(
   input: ListMarketSkillsRequest,
@@ -289,7 +377,7 @@ export async function listMarketSkills(
     );
   }
 
-  const conditions: Array<SQL | undefined> = [
+  const filters: Array<SQL | undefined> = [
     publicMarketSkillCondition(),
     ...skillCatalogFilterConditions({
       ...NO_SKILL_CATALOG_FILTERS,
@@ -302,21 +390,27 @@ export async function listMarketSkills(
             : "community",
       capability: input.capability ?? "all",
     }),
-  ];
-  if (after) {
-    conditions.push(skillCatalogKeysetCondition(after));
-  }
-  conditions.push(
     ...skillCatalogSearchConditions(skillCatalogQueryWords(input.query ?? "")),
-  );
+  ];
 
-  const rows = await db
-    .select({ ...summaryColumns, ...skillCatalogSortKeyColumns })
-    .from(skillDefinitions)
-    .innerJoin(skillVersions, onSkillVersion)
-    .where(and(...conditions))
-    .orderBy(...skillCatalogOrderBy(sort))
-    .limit(limit + 1);
+  const [rows, [total]] = await Promise.all([
+    db
+      .select({ ...summaryColumns, ...skillCatalogSortKeyColumns })
+      .from(skillDefinitions)
+      .innerJoin(skillVersions, onSkillVersion)
+      .leftJoin(skillRepositories, onSkillRepository)
+      .where(
+        and(...filters, after ? skillCatalogKeysetCondition(after) : undefined),
+      )
+      .orderBy(...skillCatalogOrderBy(sort))
+      .limit(limit + 1),
+    // The same skills with no cursor: how many the whole walk will show.
+    db
+      .select({ total: count() })
+      .from(skillDefinitions)
+      .innerJoin(skillVersions, onSkillVersion)
+      .where(and(...filters)),
+  ]);
 
   const pageRows = rows.slice(0, limit);
   const categories = await listSkillCategorySlugs(
@@ -331,6 +425,7 @@ export async function listMarketSkills(
       rows.length > limit && last
         ? encodeSkillCatalogCursor(skillCatalogCursorForRow(sort, last))
         : null,
+    totalCount: Number(total?.total ?? 0),
   };
 }
 
@@ -446,11 +541,12 @@ export async function findMarketSkill(
     .select({ ...summaryColumns, skillMd: skillVersions.skillMd })
     .from(skillDefinitions)
     .innerJoin(skillVersions, onSkillVersion)
+    .leftJoin(skillRepositories, onSkillRepository)
     .where(and(publicMarketSkillCondition(), eq(skillDefinitions.slug, slug)))
     .limit(1);
   if (!row) return null;
 
-  const [categories, files, versions] = await Promise.all([
+  const [categories, files, versions, sameRepository] = await Promise.all([
     listSkillCategorySlugs([row.definition.id]),
     db
       .select({
@@ -483,24 +579,71 @@ export async function findMarketSkill(
         ),
       )
       .orderBy(desc(skillVersions.createdAt), desc(skillVersions.id))
-      .limit(MARKET_SKILL_VERSIONS_LIMIT),
+      // One past the list, so the oldest listed version still has the one
+      // before it to be compared with.
+      .limit(MARKET_SKILL_VERSIONS_LIMIT + 1),
+    row.definition.repoOwner && row.definition.repoName
+      ? selectMarketSkillSummaries({
+          where: and(
+            eq(skillDefinitions.repoOwner, row.definition.repoOwner),
+            eq(skillDefinitions.repoName, row.definition.repoName),
+            sql`${skillDefinitions.id} <> ${row.definition.id}`,
+          ),
+          orderBy: skillCatalogOrderBy("recommended"),
+          limit: MARKET_RELATED_SKILLS_LIMIT,
+        })
+      : Promise.resolve([]),
   ]);
+
+  const skillCategoryList = categories.get(row.definition.id) ?? [];
+  const primaryCategory = skillCategoryList[0];
+  // Filed together, and not already shown as from the same repository.
+  const sameCategory = primaryCategory
+    ? await selectMarketSkillSummaries({
+        where: and(
+          ...skillCatalogFilterConditions({
+            ...NO_SKILL_CATALOG_FILTERS,
+            category: primaryCategory,
+          }),
+          notInArray(skillDefinitions.id, [
+            row.definition.id,
+            ...sameRepository.map((summary) => summary.id),
+          ]),
+        ),
+        orderBy: skillCatalogOrderBy("recommended"),
+        limit: MARKET_RELATED_SKILLS_LIMIT,
+      })
+    : [];
 
   const registry = row.version.manifestJson.registry;
   return {
-    skill: mapMarketSkillSummary(row, categories.get(row.definition.id) ?? []),
+    skill: mapMarketSkillSummary(row, skillCategoryList),
     skillMd:
       row.skillMd ??
       files.find((file) => file.skillMd !== null)?.skillMd ??
       null,
     files: marketSkillFiles(files, registry?.fileManifest ?? []),
-    versions: versions.map((version) => ({
-      version: version.version,
-      isCurrent: version.isCurrent,
-      publishedAt: version.publishedAt?.toISOString() ?? null,
-      commitSha: marketSkillCommitSha(version),
-      committedAt: version.manifestJson.registry?.committedAt ?? null,
-    })),
+    versions: versions
+      .slice(0, MARKET_SKILL_VERSIONS_LIMIT)
+      .map((version, index) => {
+        // Newest first, so the version before this one is the next entry.
+        const previous = versions[index + 1];
+        return {
+          version: version.version,
+          isCurrent: version.isCurrent,
+          publishedAt: version.publishedAt?.toISOString() ?? null,
+          commitSha: marketSkillCommitSha(version),
+          committedAt: version.manifestJson.registry?.committedAt ?? null,
+          ...(previous && index < MARKET_SKILL_CHANGELOG_VERSIONS
+            ? {
+                changes: diffSkillVersions(
+                  changelogVersion(previous),
+                  changelogVersion(version),
+                ),
+              }
+            : {}),
+        };
+      }),
     source: {
       repoUrl: registry?.repoUrl ?? null,
       sourceUrl: registry?.sourceUrl ?? null,
@@ -511,6 +654,10 @@ export async function findMarketSkill(
         null,
     },
     scanFlags: registry?.scan?.flags ?? [],
+    related: {
+      sameRepository: sameRepository.map(withoutId),
+      sameCategory: sameCategory.map(withoutId),
+    },
   };
 }
 

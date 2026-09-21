@@ -316,3 +316,63 @@ test("viewing the current version while an older one is installed offers the upd
   // installed one.
   expect(container.textContent).toContain("Use this version");
 });
+
+test("the update notice says what the newer version changed", async () => {
+  const base = fixture().version;
+  const installed = { ...base, id: "v1", status: "published" as const };
+  const current = {
+    ...base,
+    id: "v2",
+    version: "cccccccccccc",
+    status: "published" as const,
+    isCurrent: true,
+  };
+  api.listRegistryVersions.mockResolvedValue({
+    items: [current, installed],
+    nextCursor: null,
+    installed: { id: "ws-skill", skillVersionId: "v1", enabled: true },
+  });
+  api.getRegistryVersion.mockImplementation(
+    async (_ws: string, _catalog: string, id: string) => ({
+      ...fixture(),
+      version: id === "v2" ? current : installed,
+      changelog:
+        id === "v2"
+          ? {
+              added: ["a.md", "scripts/run.sh"],
+              removed: [],
+              modified: ["SKILL.md"],
+              newScripts: ["scripts/run.sh"],
+              newFlags: [],
+              compareUrl: "https://github.com/acme/skills/compare/aaa...ccc",
+            }
+          : null,
+    }),
+  );
+  container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  // Viewing the installed version: the target's changelog is fetched for it.
+  await act(async () =>
+    root.render(
+      <RegistryVersions
+        workspaceId="workspace"
+        catalogId="skill:v1"
+        initialVersionId="v1"
+        currentVersionId="v2"
+        onView={() => {}}
+        onChanged={() => {}}
+      />,
+    ),
+  );
+  const changes = container.querySelector(
+    '[data-testid="skill-update-changes"]',
+  );
+  expect(changes?.textContent).toContain(
+    "What changed: 3 files, 1 new script",
+  );
+  expect(changes?.querySelector("a")?.href).toBe(
+    "https://github.com/acme/skills/compare/aaa...ccc",
+  );
+  expect(api.switchRegistryVersion).not.toHaveBeenCalled();
+});

@@ -231,7 +231,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
     const byIdDesc = (a: Fixture, b: Fixture) =>
       a.id < b.id ? 1 : a.id > b.id ? -1 : 0;
     const expectedOrder: Record<
-      Exclude<SkillCatalogSort, "name">,
+      Exclude<SkillCatalogSort, "name" | "stars">,
       (a: Fixture, b: Fixture) => number
     > = {
       popular: (a, b) => b.installCount - a.installCount || byIdDesc(a, b),
@@ -903,6 +903,8 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
           categorySlugs: [],
           installCount: 0,
           listedAt: null,
+          // Nobody has claimed its repository.
+          claim: null,
         });
 
         const listedOnce = await call("/list", "POST");

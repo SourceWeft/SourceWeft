@@ -1,6 +1,14 @@
 import { and, asc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import type { SQLWrapper } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
+import type { SkillListingQueueReason } from "@sourceweft/contracts";
 import { db, skillDefinitions, skillVersions } from "@sourceweft/db";
 import { logger } from "../../../shared/logger";
+import {
+  changelogVersion,
+  diffSkillVersions,
+  type SkillVersionChangelog,
+} from "./changelog";
 import {
   listSkillPublicly,
   prepareSkillListing,
@@ -95,16 +103,35 @@ export type SkillListingQueueEntry = {
   sourceUrl: string | null;
   flags: string[];
   createdAt: string;
+  reason: SkillListingQueueReason;
+  visibility: "public" | "restricted";
+  /** For a new version of a public skill: what it changed from the last one. */
+  changes: SkillVersionChangelog | null;
 };
 
 /**
- * Skills that are usable by whoever imported them but carry an advisory flag,
- * so going public is an admin's decision: list it, or withdraw it (which holds
- * it and takes it out of this queue).
+ * Two kinds of skill wait for an admin here:
+ *
+ * - Usable by whoever imported them but carrying an advisory flag, so going
+ *   public is an admin's decision: list it, or withdraw it (which holds it and
+ *   takes it out of this queue).
+ * - Already public, whose current version brought scan flags or scripts the
+ *   version before it did not have. Taking it down on its own would punish
+ *   every author for every update; leaving it unseen would let a skill turn
+ *   into something else after it was trusted. So it stays public and an admin
+ *   looks: keep it (`acknowledgeSkillVersion`) or withdraw it.
  */
 export async function listSkillListingQueue(): Promise<
   SkillListingQueueEntry[]
 > {
+  const [unlisted, updated] = await Promise.all([
+    listFlaggedUnlistedSkills(),
+    listEscalatedPublicSkills(),
+  ]);
+  return [...unlisted, ...updated];
+}
+
+async function listFlaggedUnlistedSkills(): Promise<SkillListingQueueEntry[]> {
   const rows = await db
     .select({ definition: skillDefinitions, version: skillVersions })
     .from(skillDefinitions)
@@ -140,8 +167,151 @@ export async function listSkillListingQueue(): Promise<
       sourceUrl: registry?.sourceUrl ?? null,
       flags: registry?.scan.flags ?? [],
       createdAt: definition.createdAt.toISOString(),
+      reason: "flagged" as const,
+      visibility: "restricted" as const,
+      changes: null,
     };
   });
+}
+
+const previousVersion = alias(skillVersions, "previous_version");
+
+type ManifestColumn = typeof skillVersions.manifestJson;
+const flagsOf = (manifest: ManifestColumn | SQLWrapper) =>
+  sql`coalesce(${manifest}->'registry'->'scan'->'flags', '[]'::jsonb)`;
+const filesOf = (manifest: ManifestColumn | SQLWrapper) =>
+  sql`coalesce(${manifest}->'registry'->'fileManifest', '[]'::jsonb)`;
+
+/**
+ * Public community skills whose current version carries a scan flag or ships a
+ * script that the published version before it did not, and that no admin has
+ * kept since. "Before it" is the latest published version created earlier —
+ * the version the workspace update notice and the public changelog compare
+ * with too.
+ */
+async function listEscalatedPublicSkills(): Promise<SkillListingQueueEntry[]> {
+  const rows = await db
+    .select({
+      definition: skillDefinitions,
+      version: skillVersions,
+      previous: {
+        storagePointer: previousVersion.storagePointer,
+        manifestJson: previousVersion.manifestJson,
+      },
+    })
+    .from(skillDefinitions)
+    .innerJoin(
+      skillVersions,
+      and(
+        eq(skillVersions.skillId, skillDefinitions.id),
+        eq(skillVersions.isCurrent, true),
+        eq(skillVersions.status, "published"),
+      ),
+    )
+    .innerJoin(
+      previousVersion,
+      sql`${previousVersion.id} = (
+        select earlier.id from ${skillVersions} earlier
+        where earlier.skill_id = ${skillDefinitions.id}
+          and earlier.status = 'published'
+          and earlier.id <> ${skillVersions.id}
+          and earlier.created_at < ${skillVersions.createdAt}
+        order by earlier.created_at desc, earlier.id desc
+        limit 1
+      )`,
+    )
+    .where(
+      and(
+        eq(skillDefinitions.sourceType, "registry_github"),
+        eq(skillDefinitions.status, "active"),
+        eq(skillDefinitions.visibility, "public"),
+        sql`${skillVersions.manifestJson}->'market'->>'acknowledgedAt' is null`,
+        sql`(
+          exists (
+            select 1 from jsonb_array_elements_text(${flagsOf(skillVersions.manifestJson)}) as flag(name)
+            where not (${flagsOf(previousVersion.manifestJson)} @> jsonb_build_array(flag.name))
+          )
+          or exists (
+            select 1 from jsonb_array_elements(${filesOf(skillVersions.manifestJson)}) as file(entry)
+            where file.entry->>'role' = 'script'
+              and not exists (
+                select 1 from jsonb_array_elements(${filesOf(previousVersion.manifestJson)}) as earlier(entry)
+                where earlier.entry->>'role' = 'script'
+                  and earlier.entry->>'path' = file.entry->>'path'
+              )
+          )
+        )`,
+      ),
+    )
+    .orderBy(asc(skillVersions.createdAt), asc(skillVersions.id))
+    .limit(AUTO_LIST_BATCH_SIZE);
+  return rows.map(({ definition, version, previous }) => {
+    const registry = version.manifestJson.registry;
+    const changes = diffSkillVersions(
+      changelogVersion(previous),
+      changelogVersion(version),
+    );
+    return {
+      skillId: definition.id,
+      skillVersionId: version.id,
+      slug: definition.slug,
+      displayName: definition.displayName,
+      description: definition.description,
+      submittedBy: definition.ownerUserId,
+      capability: registry?.capability ?? null,
+      license: registry?.license ?? null,
+      sourceUrl: registry?.sourceUrl ?? null,
+      flags: registry?.scan.flags ?? [],
+      // When the version arrived, which is what the admin is deciding about.
+      createdAt: version.createdAt.toISOString(),
+      reason:
+        changes.newFlags.length > 0 ? "new-version-flags" : "new-version-scripts",
+      visibility: "public" as const,
+      changes,
+    };
+  });
+}
+
+/**
+ * The admin keeps a public skill whose new version entered the queue. Recorded
+ * on that version's manifest (`market.acknowledgedAt`/`acknowledgedBy`), so the
+ * decision is about this content: the next version that adds flags or scripts
+ * asks again. null when the version is not the current published version of a
+ * public community skill — nothing is waiting on it.
+ */
+export async function acknowledgeSkillVersion(input: {
+  skillVersionId: string;
+  actorUserId: string;
+}): Promise<{
+  skillId: string;
+  skillVersionId: string;
+  acknowledgedAt: string;
+} | null> {
+  const acknowledgedAt = new Date().toISOString();
+  const [row] = await db
+    .update(skillVersions)
+    .set({
+      manifestJson: sql`jsonb_set(${skillVersions.manifestJson}, '{market}', coalesce(${skillVersions.manifestJson}->'market', '{}'::jsonb) || jsonb_build_object('acknowledgedAt', ${acknowledgedAt}::text, 'acknowledgedBy', ${input.actorUserId}::text))`,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(skillVersions.id, input.skillVersionId),
+        eq(skillVersions.isCurrent, true),
+        eq(skillVersions.status, "published"),
+        sql`exists (
+          select 1 from ${skillDefinitions}
+          where ${skillDefinitions.id} = ${skillVersions.skillId}
+            and ${skillDefinitions.sourceType} = 'registry_github'
+            and ${skillDefinitions.status} = 'active'
+            and ${skillDefinitions.visibility} = 'public'
+        )`,
+      ),
+    )
+    .returning({ skillId: skillVersions.skillId, id: skillVersions.id });
+  return row
+    ? { skillId: row.skillId, skillVersionId: row.id, acknowledgedAt }
+    : null;
 }
 
 /**

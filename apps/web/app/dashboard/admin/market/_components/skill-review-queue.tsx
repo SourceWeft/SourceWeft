@@ -15,6 +15,7 @@ import { Badge } from "@sourceweft/ui-web/components/ui/badge";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { Input } from "@sourceweft/ui-web/components/ui/input";
 import {
+  acknowledgeSkillVersion,
   delistSkill,
   getSkillReviewVersion,
   listSkillListingQueue,
@@ -33,11 +34,24 @@ import { skillsMarketCopy } from "../../../skills/_components/skills-market-copy
 type QueueItem = SkillListingQueueEntry;
 
 /**
+ * A public skill whose new version added scan flags or scripts. It is public
+ * already, so "yes" keeps it public (acknowledges this version) and "no"
+ * withdraws it; the other listing-queue entries are not public yet.
+ */
+function isPublicUpdate(item: QueueItem) {
+  return (
+    item.reason === "new-version-flags" || item.reason === "new-version-scripts"
+  );
+}
+
+/**
  * The two admin queues look and behave alike — a flagged skill, its SKILL.md to
  * read, and a yes/no — and differ in what the answer does:
  * - `review`: a flagged DRAFT version. Approve publishes it, reject deprecates.
  * - `listing`: a PUBLISHED skill with an advisory flag. Yes lists it publicly,
- *   no keeps it private and holds it. There is no reason to record.
+ *   no keeps it private and holds it. For a skill that is public already and
+ *   whose new version brought the flag or a script, yes keeps it public and
+ *   no withdraws it. There is no reason to record.
  */
 const QUEUES = {
   review: {
@@ -53,7 +67,10 @@ const QUEUES = {
     copy: { ...skillsMarketCopy.review, ...skillsMarketCopy.listingQueue },
     takesReason: false,
     load: listSkillListingQueue,
-    approve: (item: QueueItem) => listSkillPublicly(item.skillId),
+    approve: (item: QueueItem) =>
+      isPublicUpdate(item)
+        ? acknowledgeSkillVersion(item.skillVersionId)
+        : listSkillPublicly(item.skillId),
     decline: (item: QueueItem) => delistSkill(item.skillId),
   },
 } as const;
@@ -199,6 +216,14 @@ export function SkillReviewQueue({
             const isBusy = busy.has(key);
             const isExpanded = expanded.has(key);
             const skillDoc = skillMd[key];
+            const publicUpdate = queue === "listing" && isPublicUpdate(item);
+            const listingCopy = skillsMarketCopy.listingQueue;
+            const changes = item.changes ?? null;
+            const compareUrl =
+              changes?.compareUrl &&
+              /^https:\/\/github\.com\//.test(changes.compareUrl)
+                ? changes.compareUrl
+                : null;
             return (
               <div
                 key={key}
@@ -213,6 +238,11 @@ export function SkillReviewQueue({
                       <code className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
                         {item.slug}
                       </code>
+                      {queue === "listing" && item.reason ? (
+                        <Badge variant={publicUpdate ? "default" : "outline"}>
+                          {listingCopy.reasons[item.reason] ?? item.reason}
+                        </Badge>
+                      ) : null}
                     </div>
                     {item.description ? (
                       <p className="mt-1 line-clamp-2 max-w-2xl text-xs text-muted-foreground">
@@ -246,7 +276,11 @@ export function SkillReviewQueue({
                         {item.license ?? copy.noLicense}
                       </span>
                       {item.submittedBy ? (
-                        <span>{copy.submittedBy(item.submittedBy)}</span>
+                        <span title={item.submittedBy}>
+                          {copy.submittedBy(
+                            item.submittedByName || item.submittedBy,
+                          )}
+                        </span>
                       ) : null}
                       <span>{relativeTime(item.createdAt)}</span>
                     </div>
@@ -276,7 +310,7 @@ export function SkillReviewQueue({
                       ) : (
                         <CheckCircle2 className="size-4" />
                       )}
-                      {copy.publish}
+                      {publicUpdate ? listingCopy.keepPublic : copy.publish}
                     </Button>
                     <Button
                       disabled={isBusy}
@@ -285,10 +319,67 @@ export function SkillReviewQueue({
                       variant="outline"
                     >
                       <XCircle className="size-4" />
-                      {copy.reject}
+                      {publicUpdate ? listingCopy.withdraw : copy.reject}
                     </Button>
                   </div>
                 </div>
+
+                {changes ? (
+                  <div
+                    className="mt-3 space-y-0.5 rounded-lg border bg-muted/20 px-3 py-2 text-xs text-muted-foreground"
+                    data-testid="listing-queue-changes"
+                  >
+                    <p className="font-medium text-foreground">
+                      {listingCopy.changesTitle}
+                    </p>
+                    {changes.newScripts.length > 0 ? (
+                      <p className="text-amber-700 dark:text-amber-300">
+                        {listingCopy.changesNewScripts(
+                          changes.newScripts.join(", "),
+                        )}
+                      </p>
+                    ) : null}
+                    {changes.newFlags.length > 0 ? (
+                      <p className="text-amber-700 dark:text-amber-300">
+                        {listingCopy.changesNewFlags(
+                          changes.newFlags
+                            .map((flag) =>
+                              skillFlagLabel(flag, skillsMarketCopy.flagLabels),
+                            )
+                            .join(", "),
+                        )}
+                      </p>
+                    ) : null}
+                    {changes.added.length > 0 ? (
+                      <p className="break-all">
+                        {listingCopy.changesAdded(changes.added.join(", "))}
+                      </p>
+                    ) : null}
+                    {changes.modified.length > 0 ? (
+                      <p className="break-all">
+                        {listingCopy.changesModified(
+                          changes.modified.join(", "),
+                        )}
+                      </p>
+                    ) : null}
+                    {changes.removed.length > 0 ? (
+                      <p className="break-all">
+                        {listingCopy.changesRemoved(changes.removed.join(", "))}
+                      </p>
+                    ) : null}
+                    {compareUrl ? (
+                      <a
+                        className="inline-flex items-center gap-1 underline-offset-2 hover:text-foreground hover:underline"
+                        href={compareUrl}
+                        rel="noreferrer noopener"
+                        target="_blank"
+                      >
+                        {listingCopy.compare}
+                        <ExternalLink className="size-3" />
+                      </a>
+                    ) : null}
+                  </div>
+                ) : null}
 
                 <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <button

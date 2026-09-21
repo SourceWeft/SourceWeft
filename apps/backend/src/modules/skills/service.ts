@@ -163,7 +163,8 @@ function registryCatalogFields(
   definition: Pick<
     typeof skillDefinitions.$inferSelect,
     "verified" | "installCount" | "listedAt"
-  >,
+  > &
+    Partial<Pick<typeof skillDefinitions.$inferSelect, "repoStars">>,
 ) {
   const registry = manifest.registry;
   return {
@@ -173,6 +174,7 @@ function registryCatalogFields(
     license: registry?.license ?? null,
     flagged: registry?.scan?.reviewRequired ?? false,
     installCount: definition.installCount,
+    repoStars: definition.repoStars ?? 0,
     listedAt: definition.listedAt?.toISOString() ?? null,
     capability: registry?.capability ?? null,
   };
@@ -578,16 +580,24 @@ export class ContentSkillsService {
     // submitter-owned-restricted visibility (skill-registry-index.md §0/§5.5).
     // Same DB-row → `SkillCatalogItem` convergence as the rest. One row past
     // the page tells us whether another page exists without a count.
-    const registryRows = await this.listRegistryCatalogRows({
+    const registryScope = {
       teamId: input.teamId,
       workspaceId: input.workspaceId,
       userId: input.userId,
       everyTerm: query ? skillCatalogQueryWords(query) : undefined,
-      sort,
       filters,
-      after,
-      limit: limit + 1,
-    });
+    };
+    const [registryRows, registryTotal] = await Promise.all([
+      this.listRegistryCatalogRows({
+        ...registryScope,
+        sort,
+        after,
+        limit: limit + 1,
+      }),
+      // The same query without the cursor, counted: how many community skills
+      // the whole walk will show.
+      this.countRegistryCatalogRows(registryScope),
+    ]);
     const pageRows = registryRows.slice(0, limit);
     items.push(...(await mapRegistryCatalogRows(pageRows)));
     const last = pageRows.at(-1);
@@ -603,6 +613,7 @@ export class ContentSkillsService {
         registryRows.length > limit && last
           ? encodeSkillCatalogCursor(skillCatalogCursorForRow(sort, last))
           : null,
+      registryTotal,
     };
   }
 
@@ -693,6 +704,86 @@ export class ContentSkillsService {
     after?: SkillCatalogCursor;
     limit?: number;
   }): Promise<Array<CatalogRow & { listedAtMicros: string }>> {
+    const { conditions, entitledHere } = this.registryCatalogConditions(input);
+    if (input.after) {
+      conditions.push(skillCatalogKeysetCondition(input.after));
+    }
+
+    const rows = await db
+      .select({
+        definition: skillDefinitions,
+        version: skillVersions,
+        enabled: workspaceSkills,
+        entitled: sql<boolean>`${entitledHere}`,
+        ...skillCatalogSortKeyColumns,
+      })
+      .from(skillDefinitions)
+      .innerJoin(skillVersions, eq(skillVersions.skillId, skillDefinitions.id))
+      .leftJoin(
+        workspaceSkills,
+        and(
+          eq(workspaceSkills.teamId, input.teamId),
+          eq(workspaceSkills.workspaceId, input.workspaceId),
+          eq(workspaceSkills.skillId, skillDefinitions.id),
+        ),
+      )
+      .where(and(...conditions))
+      .orderBy(...skillCatalogOrderBy(input.sort ?? "name"))
+      .limit(input.limit ?? REGISTRY_CATALOG_QUERY_LIMIT);
+
+    // Defense-in-depth: re-apply the visibility predicate in process so a
+    // restricted entry can never leak even if the SQL guard ever regresses.
+    return rows.filter((row) =>
+      isRegistryRowVisibleToViewer({
+        visibility: row.definition.visibility,
+        ownerUserId: row.definition.ownerUserId,
+        viewerUserId: input.userId,
+        entitled: row.entitled,
+      }),
+    );
+  }
+
+  /**
+   * How many rows `listRegistryCatalogRows` would walk through in all for
+   * these filters, cursor aside — the catalog's `registryTotal`.
+   */
+  private async countRegistryCatalogRows(
+    input: Parameters<ContentSkillsService["registryCatalogConditions"]>[0],
+  ): Promise<number> {
+    const { conditions } = this.registryCatalogConditions(input);
+    const [row] = await db
+      .select({
+        total: sql<number>`count(distinct ${skillDefinitions.id})::int`,
+      })
+      .from(skillDefinitions)
+      .innerJoin(skillVersions, eq(skillVersions.skillId, skillDefinitions.id))
+      .leftJoin(
+        workspaceSkills,
+        and(
+          eq(workspaceSkills.teamId, input.teamId),
+          eq(workspaceSkills.workspaceId, input.workspaceId),
+          eq(workspaceSkills.skillId, skillDefinitions.id),
+        ),
+      )
+      .where(and(...conditions));
+    return Number(row?.total ?? 0);
+  }
+
+  /**
+   * The WHERE of the registry catalog for a viewer: its visibility rule, and
+   * whatever slug, filters and search terms narrow it. The cursor is the
+   * caller's to add, so the same conditions can be counted.
+   */
+  private registryCatalogConditions(input: {
+    teamId: string;
+    workspaceId: string;
+    userId: string;
+    query?: string;
+    terms?: string[];
+    everyTerm?: string[];
+    slug?: string;
+    filters?: SkillCatalogFilters;
+  }) {
     const entitledHere = sql`exists (
       select 1 from ${skillEntitlements}
       where ${skillEntitlements.skillId} = ${skillDefinitions.id}
@@ -730,9 +821,6 @@ export class ContentSkillsService {
     if (input.filters) {
       conditions.push(...skillCatalogFilterConditions(input.filters));
     }
-    if (input.after) {
-      conditions.push(skillCatalogKeysetCondition(input.after));
-    }
     conditions.push(...skillCatalogSearchConditions(input.everyTerm ?? []));
     const terms = input.terms ?? (input.query ? [input.query] : []);
     if (terms.length > 0) {
@@ -756,39 +844,7 @@ export class ContentSkillsService {
         ),
       );
     }
-
-    const rows = await db
-      .select({
-        definition: skillDefinitions,
-        version: skillVersions,
-        enabled: workspaceSkills,
-        entitled: sql<boolean>`${entitledHere}`,
-        ...skillCatalogSortKeyColumns,
-      })
-      .from(skillDefinitions)
-      .innerJoin(skillVersions, eq(skillVersions.skillId, skillDefinitions.id))
-      .leftJoin(
-        workspaceSkills,
-        and(
-          eq(workspaceSkills.teamId, input.teamId),
-          eq(workspaceSkills.workspaceId, input.workspaceId),
-          eq(workspaceSkills.skillId, skillDefinitions.id),
-        ),
-      )
-      .where(and(...conditions))
-      .orderBy(...skillCatalogOrderBy(input.sort ?? "name"))
-      .limit(input.limit ?? REGISTRY_CATALOG_QUERY_LIMIT);
-
-    // Defense-in-depth: re-apply the visibility predicate in process so a
-    // restricted entry can never leak even if the SQL guard ever regresses.
-    return rows.filter((row) =>
-      isRegistryRowVisibleToViewer({
-        visibility: row.definition.visibility,
-        ownerUserId: row.definition.ownerUserId,
-        viewerUserId: input.userId,
-        entitled: row.entitled,
-      }),
-    );
+    return { conditions, entitledHere };
   }
 
   /**
@@ -856,10 +912,13 @@ export class ContentSkillsService {
         `${item.slug} ${item.displayName} ${item.description}`.toLowerCase();
       return terms.filter((term) => haystack.includes(term)).length;
     };
-    const registryItems = await mapRegistryCatalogRows(
-      (await this.listRegistryCatalogRows({ ...input, terms })).filter(
-        (row) => row.version.manifestJson.listing !== "hidden",
-      ),
+    const registryRows = (
+      await this.listRegistryCatalogRows({ ...input, terms })
+    ).filter((row) => row.version.manifestJson.listing !== "hidden");
+    const registryItems = await mapRegistryCatalogRows(registryRows);
+    // Stars are a rank signal; only community skills have a repository.
+    const repoStars = new Map(
+      registryRows.map((row) => [row.definition.id, row.definition.repoStars]),
     );
     const ownItems = (await listCatalogSkillVersionsForWorkspace(input))
       .filter(
@@ -881,6 +940,7 @@ export class ContentSkillsService {
       sourceType: item.sourceType,
       verified: item.verified ?? false,
       installCount: installs.get(item.skillId) ?? 0,
+      repoStars: repoStars.get(item.skillId) ?? 0,
       listedAt: item.listedAt,
     });
     const items = matched
@@ -891,7 +951,7 @@ export class ContentSkillsService {
             skillSearchRelevanceRank({ ...b.item, query }) ||
           // Same textual fit: whatever the market would recommend first —
           // ours, the workspace's own, verified community skills, the rest;
-          // then whatever more workspaces actually keep on (`market/rank.ts`).
+          // then the rank score of installs and stars (`market/rank.ts`).
           // The install count is the live one, which is also what is reported.
           compareRecommendedSkills(rankSignals(a.item), rankSignals(b.item)),
       )

@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { db } from "@sourceweft/db";
+import { skillRankScoreSql } from "./rank";
 
 /**
  * Recomputes `skill_definitions.install_count` from `workspace_skills`: the
@@ -7,6 +8,9 @@ import { db } from "@sourceweft/db";
  * `countSkillInstalls` reports. Done here on a timer rather than on
  * install/uninstall, so sorting the market by popularity costs the install path
  * nothing. Only rows whose count changed are written.
+ *
+ * Then `rank_score`, which is made of the install count and the repository's
+ * stars (`rank.ts`), so it is refreshed right after the count it depends on.
  */
 export async function refreshSkillInstallCounts(): Promise<void> {
   await db.execute(sql`
@@ -20,5 +24,19 @@ export async function refreshSkillInstallCounts(): Promise<void> {
     ) c
     where d.id = c.id
       and d.install_count <> c.installs
+  `);
+  await refreshSkillRankScores();
+}
+
+/**
+ * Writes `rank_score` wherever it no longer matches its inputs. Separate from
+ * the install count so the repository-metadata step can call it after copying
+ * new star counts.
+ */
+export async function refreshSkillRankScores(): Promise<void> {
+  await db.execute(sql`
+    update skill_definitions
+    set rank_score = ${skillRankScoreSql}
+    where rank_score <> ${skillRankScoreSql}
   `);
 }

@@ -1,15 +1,19 @@
 import Link from "next/link";
 import {
+  Archive,
   ArrowRight,
+  BadgeCheck,
   CheckCircle2,
-  Download,
   ExternalLink,
   FileText,
+  Layers,
+  Star,
   TerminalSquare,
 } from "lucide-react";
 import type {
   MarketSkillCapability,
   MarketSkillCategory,
+  MarketSkillCollection,
   MarketSkillSummary,
 } from "@sourceweft/market-sdk";
 
@@ -17,8 +21,10 @@ import { cn } from "@sourceweft/ui-web/lib/utils";
 
 import {
   formatCompactCount,
+  formatRelativeTime,
   formatSkillDate,
   skillCategoryLabel,
+  skillCollectionPath,
   skillPath,
   skillsContainerClassName,
 } from "./skills-format";
@@ -62,6 +68,30 @@ export function SkillVerifiedBadge() {
   );
 }
 
+/** The repository's author claimed it on SourceWeft. */
+export function SkillClaimedBadge() {
+  return (
+    <span title={skillsCopy.badges.claimedTitle}>
+      <SkillBadge>
+        <BadgeCheck className="size-3.5" />
+        {skillsCopy.badges.claimed}
+      </SkillBadge>
+    </span>
+  );
+}
+
+/** The source repository is archived on GitHub: no more updates will come. */
+export function SkillArchivedBadge() {
+  return (
+    <span title={skillsCopy.badges.archivedTitle}>
+      <SkillBadge tone="warn">
+        <Archive className="size-3.5" />
+        {skillsCopy.badges.archived}
+      </SkillBadge>
+    </span>
+  );
+}
+
 /** Nothing for an unknown capability: we do not guess either way. */
 export function SkillCapabilityBadge({
   capability,
@@ -101,7 +131,15 @@ export function SkillMarketCard({
     highlightCategory && skill.categories.includes(highlightCategory)
       ? highlightCategory
       : skill.categories[0];
-  const updated = formatSkillDate(skill.updatedAt ?? skill.listedAt);
+  // When the repository was last pushed, once GitHub has been asked; until
+  // then, when this version was published here.
+  const pushed = formatRelativeTime(skill.repoPushedAt);
+  const updated = pushed
+    ? skillsCopy.card.updated(pushed)
+    : formatSkillDate(skill.updatedAt ?? skill.listedAt);
+  const stars = skill.stars ?? 0;
+  const badges =
+    skill.capability === "executable" || skill.claimed || skill.repoArchived;
   return (
     <Link
       className="group flex h-full flex-col rounded-xl border border-zinc-300 bg-white/62 p-5 transition-all hover:-translate-y-0.5 hover:border-zinc-950/40 hover:bg-white hover:shadow-[0_18px_70px_rgba(39,39,42,0.1)] dark:border-white/10 dark:bg-white/[0.035] dark:hover:border-white/35 dark:hover:bg-white/[0.055]"
@@ -124,27 +162,41 @@ export function SkillMarketCard({
         {skill.description}
       </p>
 
-      {skill.capability === "executable" ? (
+      {badges ? (
         <div className="mt-4 flex flex-wrap gap-2">
-          <SkillCapabilityBadge capability={skill.capability} />
+          {skill.capability === "executable" ? (
+            <SkillCapabilityBadge capability={skill.capability} />
+          ) : null}
+          {skill.claimed ? <SkillClaimedBadge /> : null}
+          {skill.repoArchived ? <SkillArchivedBadge /> : null}
         </div>
       ) : null}
 
       <div className="mt-auto pt-4">
-        <div className="flex items-center gap-x-4 gap-y-2 border-t border-zinc-200 pt-4 text-xs text-zinc-500 dark:border-white/10">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-zinc-200 pt-4 text-xs text-zinc-500 dark:border-white/10">
           {primaryCategory ? (
             <span className="min-w-0 truncate">
               {skillCategoryLabel(primaryCategory, categoryNames)}
             </span>
           ) : null}
-          {skill.installCount > 0 ? (
-            <span className="inline-flex shrink-0 items-center gap-1.5">
-              <Download className="size-3.5" />
-              {skillsCopy.card.installs(formatCompactCount(skill.installCount))}
+          {stars > 0 ? (
+            <span
+              aria-label={skillsCopy.card.stars(formatCompactCount(stars))}
+              className="inline-flex shrink-0 items-center gap-1"
+              title={skillsCopy.card.stars(formatCompactCount(stars))}
+            >
+              <Star className="size-3.5" />
+              {formatCompactCount(stars)}
             </span>
           ) : null}
           {updated ? <span className="ml-auto shrink-0">{updated}</span> : null}
         </div>
+        {skill.installCount > 0 ? (
+          <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-zinc-500">
+            <Layers className="size-3.5" />
+            {skillsCopy.card.workspaces(formatCompactCount(skill.installCount))}
+          </p>
+        ) : null}
       </div>
     </Link>
   );
@@ -216,6 +268,53 @@ export function SkillDirectorySection({
         </Link>
       </div>
       <SkillCardGrid categoryNames={categoryNames} skills={skills} />
+    </section>
+  );
+}
+
+/** The published collections, as links to their pages. Nothing when none. */
+export function SkillCollectionsSection({
+  collections,
+}: {
+  collections: MarketSkillCollection[];
+}) {
+  const shown = collections.filter((collection) => collection.itemCount > 0);
+  if (shown.length === 0) {
+    return null;
+  }
+  const { title, description } = skillsCopy.landing.sections.collections;
+  return (
+    <section>
+      <div className="mb-5 min-w-0">
+        <h2 className="text-2xl font-semibold tracking-tight text-zinc-950 dark:text-white">
+          {title}
+        </h2>
+        <p className="mt-1.5 text-sm leading-6 text-zinc-500 dark:text-zinc-400">
+          {description}
+        </p>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {shown.map((collection) => (
+          <Link
+            className="group flex flex-col rounded-xl border border-zinc-300 bg-white/62 p-5 transition-colors hover:border-zinc-950/40 hover:bg-white dark:border-white/10 dark:bg-white/[0.035] dark:hover:border-white/35"
+            href={skillCollectionPath(collection.slug)}
+            key={collection.slug}
+          >
+            <h3 className="text-base font-semibold text-zinc-950 dark:text-white">
+              {collection.title}
+            </h3>
+            {collection.summary ? (
+              <p className="mt-2 line-clamp-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+                {collection.summary}
+              </p>
+            ) : null}
+            <span className="mt-auto inline-flex items-center gap-1.5 pt-4 text-xs font-medium text-zinc-500 group-hover:text-zinc-950 dark:group-hover:text-white">
+              {skillsCopy.collections.itemCount(collection.itemCount)}
+              <ArrowRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
+            </span>
+          </Link>
+        ))}
+      </div>
     </section>
   );
 }

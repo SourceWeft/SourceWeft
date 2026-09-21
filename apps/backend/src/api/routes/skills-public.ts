@@ -1,7 +1,9 @@
 import type { Context, Hono } from "hono";
 import {
+  getMarketSkillCollectionResponseSchema,
   getMarketSkillResponseSchema,
   listMarketSkillCategoriesResponseSchema,
+  listMarketSkillCollectionsResponseSchema,
   listMarketSkillsRequestSchema,
   listMarketSkillsResponseSchema,
 } from "@sourceweft/market-contracts";
@@ -11,6 +13,10 @@ import {
   listMarketSkillCategories,
   listMarketSkills,
 } from "../../modules/skills/market/read-repository";
+import {
+  findPublicSkillCollection,
+  listPublicSkillCollections,
+} from "../../modules/skills/market/collections";
 import { ApiError } from "../response/api-response";
 import { cachedJson } from "../response/cached-json";
 
@@ -30,6 +36,7 @@ const PUBLIC_MAX_AGE_SECONDS = 60;
 export const RESERVED_MARKET_SKILL_SLUGS: ReadonlySet<string> = new Set([
   "categories",
   "category-counts",
+  "collections",
   "registry",
 ]);
 
@@ -118,6 +125,33 @@ export function registerSkillPublicRoutes(app: Hono) {
       ),
     ),
   );
+
+  // Literal segments too, for the same reason.
+  app.get("/v1/skills/collections", async (c) =>
+    publicJson(
+      c,
+      conforming(
+        listMarketSkillCollectionsResponseSchema,
+        await listPublicSkillCollections(),
+      ),
+    ),
+  );
+
+  app.get("/v1/skills/collections/:slug", async (c) => {
+    const slug = c.req.param("slug");
+    // Unpublished and missing are the same 404.
+    const found =
+      slug.length > MAX_SLUG_LENGTH
+        ? null
+        : await findPublicSkillCollection(slug);
+    if (!found) {
+      throw ApiError.notFound("Collection not found");
+    }
+    return publicJson(
+      c,
+      conforming(getMarketSkillCollectionResponseSchema, found),
+    );
+  });
 
   app.get("/v1/skills/:slug", async (c) => {
     const slug = c.req.param("slug");

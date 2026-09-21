@@ -835,6 +835,10 @@ function SkillsGalleryView({
   );
   const [items, setItems] = React.useState<SkillCatalogItem[]>([]);
   const [nextCursor, setNextCursor] = React.useState<string | null>(null);
+  // How many community skills the filters match in all, from the first page.
+  const [registryTotal, setRegistryTotal] = React.useState<number | null>(
+    null,
+  );
   const [isLoadingMore, setIsLoadingMore] = React.useState(false);
   // Set by a failed page load so the sentinel does not hammer a failing
   // endpoint; the "Load more" button stays as the retry.
@@ -1000,6 +1004,7 @@ function SkillsGalleryView({
       if (!soft) {
         setItems([]);
         setNextCursor(null);
+        setRegistryTotal(null);
         setError(null);
         setCatalogStatus("loading_catalog");
       }
@@ -1011,6 +1016,7 @@ function SkillsGalleryView({
         if (catalogGenerationRef.current !== generation) return;
         setItems(page.items);
         setNextCursor(page.nextCursor ?? null);
+        setRegistryTotal(page.registryTotal ?? null);
         setError(null);
         setCatalogStatus("ready");
       } catch (loadError) {
@@ -1362,6 +1368,11 @@ function SkillsGalleryView({
                 </p>
               ) : null}
               <MySubmissions submissions={submissions} />
+              {catalogStatus === "ready" && !error && registryTotal ? (
+                <p className="mb-3 text-xs text-muted-foreground">
+                  {copy.gallery.communityTotal(registryTotal)}
+                </p>
+              ) : null}
 
               {pageLoading ? (
                 <SkillsCatalogSkeletonGrid variant={variant} />

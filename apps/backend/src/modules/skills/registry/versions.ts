@@ -21,6 +21,7 @@ import {
 } from "../repository";
 import { getSkillLogo } from "../logo";
 import { isMarketAdmin } from "../../market/admin";
+import { changelogVersion, diffSkillVersions } from "../market/changelog";
 import { teamAuditService } from "../../team-audit";
 
 export type RegistryViewer = {
@@ -223,6 +224,22 @@ export async function getRegistryVersionDetail(
         .filter((f) => old.has(f.path) && old.get(f.path) !== f.contentHash)
         .map((f) => f.path),
     },
+    // What the update notice summarises: the same comparison, plus the
+    // scripts and scan flags this version adds and a GitHub compare link.
+    changelog: previous
+      ? diffSkillVersions(
+          // A version indexed before files had rows of their own is read
+          // from its manifest instead.
+          changelogVersion({
+            ...previous,
+            files: older.length > 0 ? older : undefined,
+          }),
+          changelogVersion({
+            ...version,
+            files: files.length > 0 ? files : undefined,
+          }),
+        )
+      : null,
   };
 }
 function sameConfigContract(

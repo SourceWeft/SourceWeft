@@ -5,8 +5,10 @@ import { cache } from "react";
 import {
   MarketClient,
   MarketClientError,
+  type GetMarketSkillCollectionResponse,
   type GetMarketSkillResponse,
   type ListMarketSkillCategoriesResponse,
+  type ListMarketSkillCollectionsResponse,
   type ListMarketSkillsRequest,
   type ListMarketSkillsResponse,
 } from "@sourceweft/market-sdk";
@@ -23,7 +25,9 @@ export function isMarketNotFound(error: unknown) {
   return error instanceof MarketClientError && error.status === 404;
 }
 
-const SKILL_REVALIDATE_SECONDS = 300;
+// A new version or a withdrawal shows within about two minutes: this cache,
+// then the API's own 60-second public cache in front of it.
+const SKILL_REVALIDATE_SECONDS = 60;
 
 // The catalog is identical for every visitor, so it is cached across requests
 // rather than re-fetched per crawl. Each cached callback rethrows on failure so
@@ -79,4 +83,31 @@ const cachedSkill = unstable_cache(
 // generateMetadata + page render pair within one request.
 export const getPublicSkill = cache(
   (slug: string): Promise<GetMarketSkillResponse> => cachedSkill(slug),
+);
+
+const cachedListSkillCollections = unstable_cache(
+  async () => marketClient().listSkillCollections(),
+  ["public-skills-collections"],
+  { revalidate: SKILL_REVALIDATE_SECONDS },
+);
+
+/** Published collections; none on an outage, so the directory still renders. */
+export async function listPublicSkillCollections(): Promise<ListMarketSkillCollectionsResponse> {
+  try {
+    return await cachedListSkillCollections();
+  } catch {
+    return { items: [] };
+  }
+}
+
+const cachedSkillCollection = unstable_cache(
+  async (slug: string) => marketClient().getSkillCollection(slug),
+  ["public-skill-collection"],
+  { revalidate: SKILL_REVALIDATE_SECONDS },
+);
+
+// Never swallowed, like a skill's page: a 404 and an outage must stay apart.
+export const getPublicSkillCollection = cache(
+  (slug: string): Promise<GetMarketSkillCollectionResponse> =>
+    cachedSkillCollection(slug),
 );

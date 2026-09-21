@@ -69,6 +69,11 @@ function response(
       updatedAt: "2026-09-15T00:00:00.000Z",
       verified: true,
       version: "1.2.0",
+      cliInstallable: true,
+      stars: 0,
+      repoPushedAt: null,
+      repoArchived: false,
+      claimed: false,
       ...skillPatch,
     },
     skillMd:
@@ -130,7 +135,8 @@ describe("public skill detail page", () => {
     expect(html).toContain("anthropics");
     expect(html).toContain("v1.2.0");
     expect(html).toContain("MIT");
-    expect(html).toContain("1.2K installs");
+    // Workspaces that added it — the CLI reports nothing back.
+    expect(html).toContain("Added to 1.2K workspaces");
     expect(html).toContain("Verified");
     expect(html).toContain("Includes scripts");
     expect(html).toContain("Listed Sep 1, 2026");
@@ -144,7 +150,7 @@ describe("public skill detail page", () => {
       response({}, { installCount: 0, license: null, verified: false }),
     );
     const html = await render();
-    expect(html).not.toContain("installs");
+    expect(html).not.toContain("Added to");
     expect(html).toContain("No license");
     expect(html).not.toContain("Verified");
   });
@@ -206,6 +212,109 @@ describe("public skill detail page", () => {
     expect(html).toContain("Add to SourceWeft");
     // The chat alternative names the skill by its unique slug, as a skill.
     expect(html).toContain("Install the skill pdf-forms");
+  });
+
+  it("offers the workspace, then the verified CLI, then the upstream installer", async () => {
+    const html = await render("install");
+    const workspace = html.indexOf("Add to a SourceWeft workspace");
+    const cli = html.indexOf("Install on your own machine — recommended");
+    const upstream = html.indexOf(
+      "Upstream installer — not verified by SourceWeft",
+    );
+    expect(workspace).toBeGreaterThan(-1);
+    expect(cli).toBeGreaterThan(workspace);
+    expect(upstream).toBeGreaterThan(cli);
+    expect(html).toContain("npx @sourceweft/cli skills install pdf-forms");
+    expect(html).toContain("--agent claude-code, codex, cursor or universal");
+    expect(html).toContain("verifies every file against the hashes");
+    expect(html).toContain(
+      `npx skills add https://github.com/anthropics/skills/tree/${SHA}/pdf`,
+    );
+  });
+
+  it("offers no CLI command for a skill the CLI would refuse", async () => {
+    market.getPublicSkill.mockResolvedValue(
+      response({}, { cliInstallable: false }),
+    );
+    const html = await render("install");
+    expect(html).not.toContain("@sourceweft/cli");
+    expect(html).toContain("Upstream installer");
+  });
+
+  it("shows stars, the repository's last push, and the author's claim", async () => {
+    market.getPublicSkill.mockResolvedValue(
+      response(
+        {},
+        {
+          stars: 4321,
+          repoPushedAt: new Date(Date.now() - 3 * 86_400_000).toISOString(),
+          repoArchived: true,
+        },
+      ),
+    );
+    let html = await render();
+    expect(html).toContain("4.3K stars");
+    expect(html).toContain("Repository updated 3 days ago");
+    expect(html).toContain("Archived");
+    expect(html).toContain(
+      'href="/dashboard/skills/claim?repo=anthropics/skills"',
+    );
+    expect(html).not.toContain("Claimed by author");
+
+    market.getPublicSkill.mockResolvedValue(response({}, { claimed: true }));
+    html = await render();
+    expect(html).toContain("Claimed by author");
+    expect(html).not.toContain("/dashboard/skills/claim");
+  });
+
+  it("shows related skills from the same repository and the same category", async () => {
+    const other = (slug: string) => ({
+      ...response().skill,
+      slug,
+      displayName: `Other ${slug}`,
+    });
+    market.getPublicSkill.mockResolvedValue(
+      response({
+        related: {
+          sameRepository: [other("docx")],
+          sameCategory: [other("xlsx")],
+        },
+      }),
+    );
+    const html = await render();
+    expect(html).toContain("More from anthropics/skills");
+    expect(html).toContain('href="/skills/docx"');
+    expect(html).toContain("More in Documents");
+    expect(html).toContain('href="/skills/xlsx"');
+  });
+
+  it("says what each recent version changed", async () => {
+    const base = response();
+    market.getPublicSkill.mockResolvedValue(
+      response({
+        versions: [
+          {
+            ...base.versions[0]!,
+            changes: {
+              added: ["scripts/new.sh"],
+              removed: [],
+              modified: ["SKILL.md", "ref.md"],
+              newScripts: ["scripts/new.sh"],
+              newFlags: ["binary:executable"],
+              compareUrl: `https://github.com/anthropics/skills/compare/${"a".repeat(40)}...${SHA}`,
+            },
+          },
+          base.versions[1]!,
+        ],
+      }),
+    );
+    const html = await render("versions");
+    expect(html).toContain("1 added · 2 modified");
+    expect(html).toContain("New scripts: scripts/new.sh");
+    expect(html).toContain("New scan flags: Ships an executable binary");
+    expect(html).toContain(
+      `href="https://github.com/anthropics/skills/compare/${"a".repeat(40)}...${SHA}"`,
+    );
   });
 
   it("sends a signed-in visitor straight to the dashboard install", async () => {

@@ -3,6 +3,7 @@ import { test } from "vitest";
 import {
   type SkillRankSignals,
   compareRecommendedSkills,
+  skillRankScore,
   skillTrustTier,
 } from "./rank";
 
@@ -69,4 +70,26 @@ test("the id settles what nothing else does, so the order is total", () => {
   assert.deepEqual(order(tied), ["c", "b", "a"]);
   assert.deepEqual(order([...tied].reverse()), ["c", "b", "a"]);
   assert.equal(compareRecommendedSkills(skill("a"), skill("a")), 0);
+});
+
+test("the rank score: installs count linearly, stars on a log scale", () => {
+  assert.equal(skillRankScore({}), 0);
+  assert.equal(skillRankScore({ installCount: 3 }), 300);
+  // round(100 * ln(11)) = 240, round(100 * ln(1001)) = 691.
+  assert.equal(skillRankScore({ repoStars: 10 }), 240);
+  assert.equal(skillRankScore({ installCount: 2, repoStars: 1000 }), 891);
+  // Nonsense in, nothing out of range.
+  assert.equal(skillRankScore({ installCount: -4, repoStars: -9 }), 0);
+  assert.equal(skillRankScore({ installCount: 1e12 }), 2_147_483_647);
+});
+
+test("within a trust tier stars lift a skill, but installs weigh more", () => {
+  assert.deepEqual(
+    order([
+      skill("starred", { repoStars: 5000 }),
+      skill("plain"),
+      skill("used", { installCount: 9 }),
+    ]),
+    ["used", "starred", "plain"],
+  );
 });
