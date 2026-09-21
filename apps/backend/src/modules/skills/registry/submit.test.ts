@@ -185,29 +185,31 @@ test("a flagged skill queues for review (draft version)", async () => {
   assert.equal(mocks.upsert.mock.calls[0]?.[0]?.versionStatus, "draft");
 });
 
-test("an ownership conflict throws before any upsert", async () => {
+test("another submitter's commit of an indexed skill is written, not refused", async () => {
   mocks.read.mockResolvedValue(readResult(1));
   mocks.analyze.mockReturnValue(analyzed());
   mocks.getExisting.mockResolvedValue({
-    ownerUserId: "victim",
+    ownerUserId: "first-importer",
     definitionStatus: "active",
     currentVersionStatus: "published",
+    currentVersion: null,
+  });
+  mocks.upsert.mockResolvedValue({
+    slug: "gh-acme-skills-a",
+    skillId: "skill_1",
+    skillVersionId: "ver_1",
+    version: "aaaaaaaaaaaa",
+    status: "indexed",
+    flags: [],
+    diagnostics: [],
   });
 
-  await assert.rejects(
-    () =>
-      submitRegistrySkillFromGitHub({
-        repoUrl: "https://github.com/acme/skills",
-        userId: "attacker",
-      }),
-    (error) =>
-      error instanceof RegistrySubmissionError &&
-      error.code === "REGISTRY_SUBMISSION_NOT_SKILL" &&
-      (
-        error.details?.skills as Array<{ diagnostics: Array<{ code: string }> }>
-      )[0]?.diagnostics[0]?.code === "REGISTRY_SUBMISSION_CONFLICT",
-  );
-  assert.equal(mocks.upsert.mock.calls.length, 0);
+  await submitRegistrySkillFromGitHub({
+    repoUrl: "https://github.com/acme/skills",
+    userId: "someone-else",
+  });
+  assert.equal(mocks.upsert.mock.calls.length, 1);
+  assert.equal(mocks.upsert.mock.calls[0]?.[0]?.submitterId, "someone-else");
 });
 
 test("a multi-skill repo aggregates to queued when any skill is flagged", async () => {

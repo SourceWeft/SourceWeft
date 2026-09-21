@@ -27,6 +27,7 @@ import {
   updateWorkspaceSkillRecord,
   upsertCustomSkillVersionFile,
   upsertWorkspaceSkill,
+  skillEntitlementScopeCondition,
 } from "./repository";
 import {
   scanCustomSkillBundle,
@@ -45,6 +46,7 @@ import {
   type SkillManifestJson,
   skillVersions,
   workspaceSkills,
+  skillEntitlements,
 } from "@sourceweft/db";
 import type {
   SkillCatalogItem,
@@ -118,13 +120,17 @@ function isRegistryRowVisibleToViewer(input: {
   visibility: string;
   ownerUserId: string | null;
   viewerUserId: string;
+  /** This workspace (or its team) holds an entitlement to the skill. */
+  entitled?: boolean;
 }) {
   if (input.visibility === "public") {
     return true;
   }
   if (input.visibility === "restricted") {
     return (
-      input.ownerUserId !== null && input.ownerUserId === input.viewerUserId
+      (input.ownerUserId !== null &&
+        input.ownerUserId === input.viewerUserId) ||
+      input.entitled === true
     );
   }
   return false;
@@ -687,6 +693,12 @@ export class ContentSkillsService {
     after?: SkillCatalogCursor;
     limit?: number;
   }): Promise<Array<CatalogRow & { listedAtMicros: string }>> {
+    const entitledHere = sql`exists (
+      select 1 from ${skillEntitlements}
+      where ${skillEntitlements.skillId} = ${skillDefinitions.id}
+        and ${skillEntitlementScopeCondition(input)}
+        and (${skillEntitlements.expiresAt} is null or ${skillEntitlements.expiresAt} > now())
+    )`;
     const conditions = [
       eq(skillDefinitions.sourceType, "registry_github"),
       eq(skillDefinitions.status, "active"),
@@ -703,7 +715,12 @@ export class ContentSkillsService {
         eq(skillDefinitions.visibility, "public"),
         and(
           eq(skillDefinitions.visibility, "restricted"),
-          eq(skillDefinitions.ownerUserId, input.userId),
+          or(
+            eq(skillDefinitions.ownerUserId, input.userId),
+            // Imported by someone else first, and granted to this scope when
+            // someone here imported the same repository.
+            entitledHere,
+          ),
         ),
       ),
     ];
@@ -745,6 +762,7 @@ export class ContentSkillsService {
         definition: skillDefinitions,
         version: skillVersions,
         enabled: workspaceSkills,
+        entitled: sql<boolean>`${entitledHere}`,
         ...skillCatalogSortKeyColumns,
       })
       .from(skillDefinitions)
@@ -768,6 +786,7 @@ export class ContentSkillsService {
         visibility: row.definition.visibility,
         ownerUserId: row.definition.ownerUserId,
         viewerUserId: input.userId,
+        entitled: row.entitled,
       }),
     );
   }

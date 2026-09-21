@@ -1,7 +1,7 @@
 import { getSkillLogo } from "./logo";
 import { randomUUID } from "node:crypto";
 import { sha256 } from "./hash";
-import { and, eq, inArray, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import {
   db,
@@ -572,6 +572,44 @@ async function grantSkillEntitlement(
     teamId: input.teamId,
     workspaceId: input.workspaceId,
     grantedBy: input.grantedBy,
+  });
+}
+
+/**
+ * Gives a workspace — or, with no workspace, the whole team — the right to use
+ * a skill it cannot otherwise see: a `restricted` community skill. Issued when
+ * someone in that scope imports the same public repository an earlier
+ * submitter already indexed: proving they can read the source is what the
+ * entitlement stands for. Idempotent.
+ */
+export async function grantSkillAccess(input: {
+  skillId: string;
+  teamId: string;
+  workspaceId: string | null;
+  grantedBy: string;
+}) {
+  await db.transaction(async (tx) => {
+    const [existing] = await tx
+      .select({ id: skillEntitlements.id })
+      .from(skillEntitlements)
+      .where(
+        and(
+          eq(skillEntitlements.skillId, input.skillId),
+          eq(skillEntitlements.teamId, input.teamId),
+          input.workspaceId
+            ? eq(skillEntitlements.workspaceId, input.workspaceId)
+            : isNull(skillEntitlements.workspaceId),
+        ),
+      )
+      .limit(1);
+    if (existing) return;
+    await tx.insert(skillEntitlements).values({
+      id: randomUUID(),
+      skillId: input.skillId,
+      teamId: input.teamId,
+      workspaceId: input.workspaceId,
+      grantedBy: input.grantedBy,
+    });
   });
 }
 

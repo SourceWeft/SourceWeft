@@ -2,6 +2,7 @@ import type {
   SkillSubmissionOnComplete,
   SkillSubmissionSkillResult,
 } from "@sourceweft/db";
+import type { compareCommits } from "../../../market/parser/github";
 import {
   downloadRepoZip,
   resolvePinnedGitHubSource,
@@ -20,10 +21,7 @@ import {
   type AnalyzedSubmissionSkill,
 } from "../submit";
 import { describeIngestError } from "./errors";
-import type {
-  SkillSubmissionRow,
-  SubmissionProgressPatch,
-} from "./repository";
+import type { SkillSubmissionRow, SubmissionProgressPatch } from "./repository";
 
 /**
  * The ingest pipeline as an ordered list of named stages. Each stage reads what
@@ -49,6 +47,8 @@ export type IngestDeps = {
   resolveSource: typeof resolvePinnedGitHubSource;
   downloadArchive: typeof downloadRepoZip;
   installSkill: InstallSkillFn;
+  /** GitHub's ancestry answer between two commits; defaults to the real API. */
+  compareCommits?: typeof compareCommits;
 };
 
 export const defaultIngestDeps: IngestDeps = {
@@ -63,7 +63,7 @@ export const defaultIngestDeps: IngestDeps = {
 export type IngestContext = {
   submission: Pick<
     SkillSubmissionRow,
-    "id" | "teamId" | "workspaceId" | "submittedBy" | "sourceInput"
+    "id" | "teamId" | "workspaceId" | "submittedBy" | "sourceInput" | "target"
   > & { onComplete: SkillSubmissionOnComplete | null };
   /** The job's overall deadline. Checked between stages and handed to GitHub. */
   signal: AbortSignal;
@@ -164,6 +164,17 @@ const triageWriteStage: IngestStage = {
           read,
           userId: ctx.submission.submittedBy,
           skill,
+          ...(ctx.deps.compareCommits
+            ? { compare: ctx.deps.compareCommits }
+            : {}),
+          grantTo: {
+            teamId: ctx.submission.teamId,
+            // A team-scoped import grants the whole team.
+            workspaceId:
+              ctx.submission.target === "team"
+                ? null
+                : ctx.submission.workspaceId,
+          },
         }),
       );
     }

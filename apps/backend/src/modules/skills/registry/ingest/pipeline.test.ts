@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   analyze: vi.fn(),
   getExisting: vi.fn(),
   upsert: vi.fn(),
+  grant: vi.fn(),
 }));
 
 vi.mock("./repository", () => ({
@@ -52,6 +53,7 @@ vi.mock("../repository", () => ({
   getRegistrySkillForSubmission: mocks.getExisting,
   upsertRegistrySkillIndex: mocks.upsert,
 }));
+vi.mock("../../repository", () => ({ grantSkillAccess: mocks.grant }));
 vi.mock("../../../../shared/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
@@ -123,7 +125,10 @@ function skillsRead(names: string[]) {
   });
   for (const name of names) {
     mocks.analyze.mockReturnValueOnce(
-      analyzed(name, name.startsWith("flagged") ? ["egress:pipe-to-shell"] : []),
+      analyzed(
+        name,
+        name.startsWith("flagged") ? ["egress:pipe-to-shell"] : [],
+      ),
     );
   }
 }
@@ -147,6 +152,7 @@ beforeEach(() => {
   seedRow();
   mocks.getExisting.mockResolvedValue(null);
   mocks.upsert.mockImplementation(async (input) => ({
+    skillId: `skill_${input.slug}`,
     status: input.outcome,
     flags: input.manifestJson.registry.scan.flags,
     diagnostics: [],
@@ -194,10 +200,7 @@ test("stages run in their declared order and each transition is persisted before
   assert.equal(state.row!.status, "succeeded");
   assert.equal(state.row!.stage, null);
   assert.equal(state.row!.commitSha, source.commitSha);
-  assert.deepEqual(
-    state.row!.commitCommittedAt,
-    new Date(source.committedAt),
-  );
+  assert.deepEqual(state.row!.commitCommittedAt, new Date(source.committedAt));
   assert.equal(
     (state.row!.results as Array<{ slug: string }>)[0]?.slug,
     "gh-acme-skills-writer",
@@ -223,7 +226,10 @@ test("a deterministic failure marks the row failed with its code, even when retr
   mocks.readArchive.mockRejectedValue(
     new RegistrySubmissionError("REGISTRY_SUBMISSION_NOT_SKILL", "No SKILL.md"),
   );
-  await assert.rejects(run({ willRetryTransient: true }), RegistrySubmissionError);
+  await assert.rejects(
+    run({ willRetryTransient: true }),
+    RegistrySubmissionError,
+  );
 
   assert.equal(state.row!.status, "failed");
   assert.deepEqual(state.row!.error, {
@@ -336,11 +342,12 @@ test("a fired deadline fails the run as a deadline, whatever the interrupted cal
 
 test("a submission that indexes nothing fails but still shows every skill's diagnostics", async () => {
   skillsRead(["writer"]);
-  mocks.getExisting.mockResolvedValue({
-    ownerUserId: "someone-else",
-    definitionStatus: "active",
-    currentVersionStatus: "published",
-  });
+  mocks.upsert.mockRejectedValue(
+    new RegistrySubmissionError(
+      "REGISTRY_VERSION_UNAVAILABLE",
+      "This version was revoked or disabled; resubmitting cannot restore it",
+    ),
+  );
   await assert.rejects(run());
 
   assert.equal(state.row!.status, "failed");
@@ -353,8 +360,51 @@ test("a submission that indexes nothing fails but still shows every skill's diag
     diagnostics: Array<{ code: string }>;
   }>;
   assert.equal(results[0]?.status, "failed");
-  assert.equal(results[0]?.diagnostics[0]?.code, "REGISTRY_SUBMISSION_CONFLICT");
-  assert.equal(mocks.upsert.mock.calls.length, 0);
+  assert.equal(
+    results[0]?.diagnostics[0]?.code,
+    "REGISTRY_VERSION_UNAVAILABLE",
+  );
+});
+
+test("importing a repository someone else indexed first grants this scope the skill", async () => {
+  skillsRead(["writer"]);
+  mocks.getExisting.mockResolvedValue({
+    ownerUserId: "first-importer",
+    definitionStatus: "active",
+    currentVersionStatus: "published",
+    currentVersion: null,
+  });
+  await run();
+  assert.deepEqual(
+    mocks.grant.mock.calls.map((call) => call[0]),
+    [
+      {
+        skillId: "skill_gh-acme-skills-writer",
+        teamId: "team_1",
+        workspaceId: "ws_1",
+        grantedBy: "user_1",
+      },
+    ],
+  );
+
+  // A team-scoped import grants the whole team; your own skill needs no grant.
+  mocks.grant.mockClear();
+  seedRow();
+  state.row!.target = "team";
+  skillsRead(["writer"]);
+  await run();
+  assert.equal(mocks.grant.mock.calls[0]?.[0]?.workspaceId, null);
+  mocks.grant.mockClear();
+  seedRow();
+  skillsRead(["writer"]);
+  mocks.getExisting.mockResolvedValue({
+    ownerUserId: "user_1",
+    definitionStatus: "active",
+    currentVersionStatus: "published",
+    currentVersion: null,
+  });
+  await run();
+  assert.equal(mocks.grant.mock.calls.length, 0);
 });
 
 test("one bad skill does not stop the others", async () => {
@@ -450,12 +500,15 @@ test("the install filter narrows by author name or slug; the rest are indexed bu
 
   assert.equal(mocks.upsert.mock.calls.length, 2);
   assert.deepEqual(
-    vi.mocked(injected.installSkill).mock.calls.map(
-      (call) => call[0].ref.source,
-    ),
+    vi
+      .mocked(injected.installSkill)
+      .mock.calls.map((call) => call[0].ref.source),
     ["gh-acme-skills-reader"],
   );
-  assert.equal(vi.mocked(injected.installSkill).mock.calls[0]?.[0].installedVia, "user");
+  assert.equal(
+    vi.mocked(injected.installSkill).mock.calls[0]?.[0].installedVia,
+    "user",
+  );
   const results = state.row!.results as Array<{ install?: unknown }>;
   assert.equal(results[0]?.install, undefined);
 });

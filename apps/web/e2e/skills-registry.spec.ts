@@ -380,11 +380,11 @@ test("E4 builtin contracts and public capability spoof remain distinct", async (
   });
   expect(external.tools ?? []).not.toContain("generate_image");
 });
-test("E5 repeat import is immutable and other user cannot claim it", async ({
+test("E5 repeat import is immutable; another user importing it gets to use it, not to control it", async ({
   page,
   browser,
 }) => {
-  await login(page);
+  const ownerWs = await login(page);
   const first = await submit(page);
   await publish(first.skills[0]!);
   await closeResult(page);
@@ -393,15 +393,73 @@ test("E5 repeat import is immutable and other user cannot claim it", async ({
     skillVersionId: first.skills[0]!.skillVersionId,
     status: "indexed",
   });
+  const slug = first.skills[0]!.slug!;
   const context = await browser.newContext({ baseURL: web });
-  const other = await context.newPage();
-  await login(other, "other");
-  const rejected = await submit(other);
-  expect(rejected.submission.status).toBe("failed");
-  await expect(
-    other.getByRole("region", { name: "Import results" }),
-  ).toContainText("failed");
-  await context.close();
+  try {
+    const other = await context.newPage();
+    const otherWs = await login(other, "other");
+    // The same public repository: no longer refused. Same version, no copy.
+    const theirs = await submit(other);
+    expect(theirs.submission.status).toBe("succeeded");
+    expect(theirs.skills[0]).toMatchObject({
+      skillVersionId: first.skills[0]!.skillVersionId,
+    });
+    // It is in their catalog to use...
+    const found = await other.request.get(
+      `${api}/v1/workspaces/${otherWs}/skills/catalog/by-slug/${slug}`,
+    );
+    expect(found.status(), await found.text()).toBe(200);
+    const { skill } = (await found.json()) as {
+      skill: { catalogId: string };
+    };
+    // ...but the listing is not theirs to decide. It still is the owner's.
+    expect(
+      (
+        await other.request.get(
+          `${api}/v1/workspaces/${otherWs}/skills/catalog/${skill.catalogId}/listing`,
+        )
+      ).status(),
+    ).toBe(404);
+    expect(
+      (
+        await page.request.get(
+          `${api}/v1/workspaces/${ownerWs}/skills/catalog/${skill.catalogId}/listing`,
+        )
+      ).status(),
+    ).toBe(200);
+  } finally {
+    await context.close();
+  }
+});
+
+// A commit that exists only in a fork is served under the upstream's own URLs
+// by GitHub. Imported by sha, it would be indexed under the upstream's name and
+// avatar. This one lives in a fork of obra/superpowers (found 2026-09-21).
+const FORK_ONLY_COMMIT = "adf6afdb91052e95d53fa835b5536c0fde5cd071";
+test("E19 a fork's commit named under the upstream repository is refused", async ({
+  page,
+}) => {
+  const probe = await request.newContext();
+  const served = await probe.get(
+    `https://api.github.com/repos/obra/superpowers/commits/${FORK_ONLY_COMMIT}`,
+  );
+  await probe.dispose();
+  test.skip(
+    served.status() !== 200,
+    `GitHub no longer serves the fork commit under the upstream (HTTP ${served.status()})`,
+  );
+
+  await login(page);
+  const refused = await submit(
+    page,
+    `https://github.com/obra/superpowers/tree/${FORK_ONLY_COMMIT}/skills/brainstorming`,
+  );
+  expect(refused.submission.status).toBe("failed");
+  expect(refused.submission.error).toMatchObject({
+    code: "REGISTRY_SUBMISSION_NOT_IN_REPOSITORY",
+  });
+  // Nothing was indexed under obra's name.
+  expect(refused.skills ?? []).toEqual([]);
 });
 test("E6 published B leaves A installed until explicit switch and rollback", async ({
   page,

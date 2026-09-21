@@ -60,6 +60,13 @@ export type UpsertRegistrySkillInput = {
   outcome: "indexed" | "queued";
   /** The whole bundle, SKILL.md included, as raw bytes; paths bundle-relative. */
   files: RegistrySkillFile[];
+  /**
+   * How this commit relates to the skill's current version, when the caller
+   * asked GitHub (`compareCommits`): newer = it descends from the current
+   * commit. Decides currency ahead of commit dates, which whoever writes the
+   * commit sets. Applied only if the current version is still the one compared.
+   */
+  currency?: { againstVersionId: string; candidateIsNewer: boolean };
 };
 
 export type RegistrySkillFile = {
@@ -282,15 +289,21 @@ export function registryVersionTakesCurrent(input: {
  * Existing registry entry for a slug (or null) — the ownership/sticky inputs
  * Stage 4 needs. `currentVersionStatus` is the status of the `isCurrent` version.
  */
-export async function getRegistrySkillForSubmission(
-  slug: string,
-): Promise<(RegistryExistingEntry & { skillId: string }) | null> {
+export async function getRegistrySkillForSubmission(slug: string): Promise<
+  | (NonNullable<RegistryExistingEntry> & {
+      skillId: string;
+      currentVersion: { id: string; storagePointer: string } | null;
+    })
+  | null
+> {
   const [row] = await db
     .select({
       skillId: skillDefinitions.id,
       ownerUserId: skillDefinitions.ownerUserId,
       definitionStatus: skillDefinitions.status,
       currentVersionStatus: skillVersions.status,
+      currentVersionId: skillVersions.id,
+      currentStoragePointer: skillVersions.storagePointer,
     })
     .from(skillDefinitions)
     .leftJoin(
@@ -315,6 +328,13 @@ export async function getRegistrySkillForSubmission(
     ownerUserId: row.ownerUserId,
     definitionStatus: row.definitionStatus,
     currentVersionStatus: row.currentVersionStatus ?? null,
+    currentVersion:
+      row.currentVersionId && row.currentStoragePointer
+        ? {
+            id: row.currentVersionId,
+            storagePointer: row.currentStoragePointer,
+          }
+        : null,
   };
 }
 
@@ -370,14 +390,12 @@ export async function upsertRegistrySkillIndex(
       .from(skillDefinitions)
       .where(eq(skillDefinitions.slug, input.slug))
       .limit(1);
-    if (
-      existing &&
-      (existing.sourceType !== "registry_github" ||
-        (existing.ownerUserId && existing.ownerUserId !== input.submitterId))
-    ) {
+    // Another kind of skill holding this slug is a real conflict. Another
+    // submitter of the same repository is not: see `triageRegistrySubmission`.
+    if (existing && existing.sourceType !== "registry_github") {
       throw new RegistrySubmissionError(
         "REGISTRY_SUBMISSION_CONFLICT",
-        "This skill belongs to another submitter or source",
+        "This skill belongs to another source",
       );
     }
     const skillId = existing?.id ?? randomUUID();
@@ -477,7 +495,10 @@ export async function upsertRegistrySkillIndex(
     // commit has either fully landed or not started: the comparison below sees
     // a settled current version whichever transaction runs second.
     const [current] = await tx
-      .select({ manifestJson: skillVersions.manifestJson })
+      .select({
+        id: skillVersions.id,
+        manifestJson: skillVersions.manifestJson,
+      })
       .from(skillVersions)
       .where(
         and(
@@ -487,14 +508,19 @@ export async function upsertRegistrySkillIndex(
       )
       .limit(1);
     const isPublished = values.version.status === "published";
+    // Ancestry first — GitHub's answer to "does this commit descend from the
+    // current one" — and commit dates only when that answer is not for the
+    // version that is current now (another write got in between).
     const takesCurrent =
       isPublished &&
-      registryVersionTakesCurrent({
-        candidateCommittedAt: input.manifestJson.registry?.committedAt,
-        current: current
-          ? { committedAt: current.manifestJson.registry?.committedAt }
-          : null,
-      });
+      (current && input.currency?.againstVersionId === current.id
+        ? input.currency.candidateIsNewer
+        : registryVersionTakesCurrent({
+            candidateCommittedAt: input.manifestJson.registry?.committedAt,
+            current: current
+              ? { committedAt: current.manifestJson.registry?.committedAt }
+              : null,
+          }));
     if (!existing) {
       await tx.insert(skillDefinitions).values({
         id: skillId,
