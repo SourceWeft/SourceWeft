@@ -1,0 +1,64 @@
+name: Publish CLI
+
+on:
+  push:
+    tags:
+      - "cli-v*"
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: publish-cli-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish @sourceweft/cli
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.19.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+          registry-url: https://registry.npmjs.org
+
+      # The CLI bundles its workspace packages, so it needs them installed but
+      # ships none of them as dependencies.
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile --filter "@sourceweft/cli..."
+
+      - name: Check version tag
+        shell: bash
+        run: |
+          version="$(node -p "require('./cli/package.json').version")"
+          expected="refs/tags/cli-v${version}"
+          if [[ "${GITHUB_REF}" != "${expected}" ]]; then
+            echo "Tag ${GITHUB_REF} does not match package version ${version}."
+            echo "Expected ${expected}."
+            exit 1
+          fi
+
+      - name: Check types
+        run: pnpm --filter @sourceweft/cli check-types
+
+      - name: Test
+        run: pnpm --filter @sourceweft/cli test
+
+      - name: Build
+        run: pnpm --filter @sourceweft/cli build
+
+      - name: Publish
+        working-directory: cli
+        run: npm publish --access public
