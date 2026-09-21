@@ -1,4 +1,5 @@
 import path from "node:path";
+import { isAgentSkillName } from "@sourceweft/skill-format";
 import type { SkillDiagnostic } from "@sourceweft/contracts";
 import type { SkillManifestJson } from "@sourceweft/db";
 import { parseSkillFrontmatter } from "../frontmatter";
@@ -51,7 +52,6 @@ export type AnalyzedRegistrySkill = {
 
 const MAX_NAME_LENGTH = 64;
 const MAX_DESCRIPTION_LENGTH = 1024;
-const SKILL_NAME_PATTERN = /^[a-z0-9-]+$/;
 
 // Files whose bytes must NOT be mounted as model-readable text at runtime: they
 // are executable material streamed into the execution sandbox instead (§6a/§6b).
@@ -272,15 +272,12 @@ export function analyzeRegistrySkill(input: {
     );
   const name = frontmatter.name;
   const description = frontmatter.description;
-  if (
-    typeof name !== "string" ||
-    name.length === 0 ||
-    name.length > MAX_NAME_LENGTH ||
-    !SKILL_NAME_PATTERN.test(name)
-  ) {
+  // The Agent Skills specification's rule, shared with the CLI so every name
+  // the registry accepts is also a name the CLI will install under.
+  if (typeof name !== "string" || !isAgentSkillName(name)) {
     throw new RegistrySubmissionError(
       "REGISTRY_SUBMISSION_INVALID_SKILL",
-      `SKILL.md 'name' must be 1-${MAX_NAME_LENGTH} chars of [a-z0-9-]`,
+      `SKILL.md 'name' must be 1-${MAX_NAME_LENGTH} lowercase letters, digits or hyphens, not starting or ending with a hyphen and without '--'`,
     );
   }
   // The frontmatter `name` is authoritative; the directory it happens to sit in

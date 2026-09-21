@@ -78,3 +78,16 @@ const SKILL_DIR_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/u;
 export function isSafeSkillDirName(name: string): boolean {
   return SKILL_DIR_NAME.test(name) && isSafePathSegment(name);
 }
+
+const AGENT_SKILL_NAME = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/u;
+
+/**
+ * A SKILL.md `name` as the Agent Skills specification (agentskills.io) defines
+ * it: 1–64 lowercase letters, digits and hyphens, neither starting nor ending
+ * with a hyphen, never two in a row. What the registry accepts at import, so
+ * every indexed name is also a safe directory name (`isSafeSkillDirName`,
+ * which is the looser rule a CLI install checks).
+ */
+export function isAgentSkillName(name: string): boolean {
+  return AGENT_SKILL_NAME.test(name) && !name.includes("--");
+}

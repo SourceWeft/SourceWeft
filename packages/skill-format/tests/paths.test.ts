@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   findCaseCollisions,
+  isAgentSkillName,
   isSafeBundlePath,
   isSafeSkillDirName,
 } from "../src";
@@ -101,5 +102,25 @@ describe("findCaseCollisions", () => {
 
   it("finds nothing in a clean set, and ignores a repeated identical path", () => {
     assert.deepEqual(findCaseCollisions(["a", "b", "a"]), []);
+  });
+});
+
+describe("isAgentSkillName", () => {
+  it("accepts the specification's names", () => {
+    for (const name of ["pdf", "test-driven-development", "a", "x1-y2", "a".repeat(64)]) {
+      assert.equal(isAgentSkillName(name), true, name);
+    }
+  });
+
+  it("refuses edge hyphens, doubled hyphens, capitals and overlong names", () => {
+    for (const name of ["-pdf", "pdf-", "pdf--forms", "PDF", "pdf forms", "", "a".repeat(65)]) {
+      assert.equal(isAgentSkillName(name), false, name);
+    }
+  });
+
+  it("every name it accepts is also a safe directory name", () => {
+    for (const name of ["pdf", "test-driven-development", "a".repeat(64)]) {
+      assert.equal(isSafeSkillDirName(name), true, name);
+    }
   });
 });

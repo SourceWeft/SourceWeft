@@ -2,6 +2,7 @@ export { sha256 } from "./hash";
 export { SKILL_STORAGE_LIMITS } from "./limits";
 export {
   findCaseCollisions,
+  isAgentSkillName,
   isSafeBundlePath,
   isSafePathSegment,
   isSafeSkillDirName,
