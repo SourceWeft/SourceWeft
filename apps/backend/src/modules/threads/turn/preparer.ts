@@ -134,7 +134,7 @@ import {
   resolveCapabilitySkillRuntimeWorkflow,
 } from "./capability-command-workflows";
 import { resolveSelectedSkillRuntimeContract } from "./active-skill-runtime";
-import { resolveActiveSkillPromptIds } from "./invoked-skills";
+import { normalizeInvokedSkillIds } from "./invoked-skills";
 import { toObjectRecord } from "../../../shared/records";
 
 const CHAT_IMAGE_MIME_TYPES = new Set([
@@ -1390,10 +1390,13 @@ export async function prepareThreadTurn(
   });
   const invokedSkillIds = Array.from(
     new Set([
-      ...resolveActiveSkillPromptIds({
+      // Only an explicit invocation (slash command, invocation chip) makes a
+      // skill take over the turn. A checked skill is available — its
+      // instructions and tools are offered — but the model decides whether
+      // the request calls for it.
+      ...normalizeInvokedSkillIds({
         enabledSkills,
-        invokedSkillIds: input.tools?.invokedSkillIds,
-        selectedSkillIds,
+        requestedSkillIds: input.tools?.invokedSkillIds,
       }),
       ...(commandSkillId ? [commandSkillId] : []),
       ...(invocationSkillId ? [invocationSkillId] : []),

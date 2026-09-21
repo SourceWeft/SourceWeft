@@ -1476,6 +1476,7 @@
       "default": "默认",
       "changed": "已更改 {count} 项",
       "skillLimit": "每条消息最多可启用 {max} 个技能。",
+      "skillSelectionSaveFailed": "无法保存此对话的技能选择。",
       "options": "选项",
       "connectorTools": "{name} 工具",
       "reset": "重置",

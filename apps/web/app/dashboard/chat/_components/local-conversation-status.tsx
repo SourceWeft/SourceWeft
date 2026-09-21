@@ -107,6 +107,13 @@ export function LocalConversationNotice({
 }) {
   const t = useTranslations("dashboardChat");
   if (status.ready) return null;
+  // Until the target is known to be a computer, a check in progress is not
+  // news: cloud conversations never depend on a PC connection.
+  if (
+    status.status === "checking" &&
+    status.info?.executionTarget.kind !== "local"
+  )
+    return null;
   return (
     <div
       role="status"

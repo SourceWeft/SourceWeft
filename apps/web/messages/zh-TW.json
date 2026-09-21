@@ -1476,6 +1476,7 @@
       "default": "預設",
       "changed": "已更改 {count} 項",
       "skillLimit": "每條訊息最多可啟用 {max} 個技能。",
+      "skillSelectionSaveFailed": "無法儲存此對話的技能選擇。",
       "options": "選項",
       "connectorTools": "{name} 工具",
       "reset": "重置",

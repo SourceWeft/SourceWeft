@@ -82,6 +82,24 @@ const threadThinkingPreferencesPatchSchema = z
   })
   .strip();
 
+/**
+ * How many skills may be active in one turn.
+ *
+ * Single source of truth for every enforcement point: the per-turn request
+ * schema (a 400 at the API boundary), the backend's `resolveSelectedSkills` (a
+ * typed ContentError), the web composer (silent truncation plus a toast), and a
+ * thread's saved selection below. Lives here rather than in `stream.ts`, which
+ * re-exports it, because `stream.ts` already imports this module.
+ */
+export const MAX_SELECTED_SKILLS_PER_TURN = 5;
+
+// The skills the user checked for this conversation. Absent until the user
+// makes a choice, which is what lets a thread without one follow the current
+// defaults instead of freezing whatever the defaults were when it was created.
+const threadSkillSelectionSchema = z
+  .array(z.string().trim().min(1).max(256))
+  .max(MAX_SELECTED_SKILLS_PER_TURN);
+
 export const threadChatPreferencesSchema = z
   .object({
     thinking: threadThinkingPreferencesSchema.default({
@@ -90,6 +108,7 @@ export const threadChatPreferencesSchema = z
     }),
     webAccess: z.boolean().default(true),
     composerOptions: z.record(z.string(), z.unknown()).default({}),
+    skillIds: threadSkillSelectionSchema.optional(),
   })
   .strip();
 
@@ -98,6 +117,7 @@ export const updateThreadChatPreferencesRequestSchema = z
     thinking: threadThinkingPreferencesPatchSchema.optional(),
     webAccess: z.boolean().optional(),
     composerOptions: z.record(z.string(), z.unknown()).optional(),
+    skillIds: threadSkillSelectionSchema.optional(),
   })
   .strip()
   .refine(
@@ -105,7 +125,8 @@ export const updateThreadChatPreferencesRequestSchema = z
       value.thinking?.mode !== undefined ||
       value.thinking?.effort !== undefined ||
       value.webAccess !== undefined ||
-      value.composerOptions !== undefined,
+      value.composerOptions !== undefined ||
+      value.skillIds !== undefined,
     { message: "At least one chat preference must be provided" },
   );
 

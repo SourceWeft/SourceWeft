@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import type { EnabledSkillDescriptor } from "../../skills/types";
-import { resolveActiveSkillPromptIds } from "./invoked-skills";
+import { normalizeInvokedSkillIds } from "./invoked-skills";
 
 function skill(input: {
   id: string;
@@ -19,35 +19,27 @@ function skill(input: {
   };
 }
 
-test("selected non-default skills contribute prompt while default skills stay passive", () => {
+test("only explicitly invoked, enabled skills are invoked", () => {
   const enabledSkills = [
     skill({ id: "image-generate", defaultEnabled: true }),
-    skill({ id: "ppt-deck", defaultEnabled: true }),
     skill({ id: "video-presentation", defaultEnabled: false }),
   ];
 
   assert.deepEqual(
-    resolveActiveSkillPromptIds({
+    normalizeInvokedSkillIds({
       enabledSkills,
-      invokedSkillIds: [],
-      selectedSkillIds: ["image-generate", "ppt-deck", "video-presentation"],
+      requestedSkillIds: ["image-generate", "missing-skill"],
     }),
-    ["video-presentation"],
+    ["image-generate"],
   );
 });
 
-test("an explicitly invoked default skill remains prompt-active", () => {
-  const enabledSkills = [
-    skill({ id: "image-generate", defaultEnabled: true }),
-    skill({ id: "video-presentation", defaultEnabled: false }),
-  ];
-
+test("a checked non-default skill is not invoked by being selected", () => {
   assert.deepEqual(
-    resolveActiveSkillPromptIds({
-      enabledSkills,
-      invokedSkillIds: ["image-generate", "missing-skill"],
-      selectedSkillIds: ["image-generate", "video-presentation"],
+    normalizeInvokedSkillIds({
+      enabledSkills: [skill({ id: "video-presentation", defaultEnabled: false })],
+      requestedSkillIds: undefined,
     }),
-    ["video-presentation", "image-generate"],
+    [],
   );
 });

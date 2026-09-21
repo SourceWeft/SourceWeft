@@ -621,11 +621,14 @@ class ContentThreadService {
       userId: input.userId,
     });
 
-    return {
-      initialChatPreferences: recentThread
-        ? normalizeThreadChatPreferences(recentThread.chatPreferences)
-        : DEFAULT_THREAD_CHAT_PREFERENCES,
-    };
+    if (!recentThread) {
+      return { initialChatPreferences: DEFAULT_THREAD_CHAT_PREFERENCES };
+    }
+    // A skill selection belongs to the conversation it was made in; a new
+    // chat starts from the defaults rather than the last thread's checks.
+    const { skillIds: _skillIds, ...initialChatPreferences } =
+      normalizeThreadChatPreferences(recentThread.chatPreferences);
+    return { initialChatPreferences };
   }
 
   async listThreadModelCatalog(input: { workspaceId: string; userId: string }) {

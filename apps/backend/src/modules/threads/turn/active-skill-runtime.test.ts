@@ -111,12 +111,14 @@ test("default-enabled skill contributes tools and permissions without imposing w
   assert.equal(runtime.successCriteria, undefined);
 });
 
-test("explicit non-default skill carries its strict tool surface without a slash command", () => {
+test("an invoked skill carries its strict tool surface without a slash command", () => {
   const workflow = videoWorkflow();
   const runtime = resolveSelectedSkillRuntimeContract({
+    invokedSkillIds: ["builtin:video-presentation"],
     selectedSkills: [
       pptDeckSkill({
         name: "video-presentation",
+        workspaceSkillId: "builtin:video-presentation",
         displayName: "Video",
         defaultEnabled: false,
       }),
@@ -129,7 +131,7 @@ test("explicit non-default skill carries its strict tool surface without a slash
   assert.deepEqual(runtime.successCriteria, workflow.successCriteria);
 });
 
-test("explicit non-default policy is not diluted by default-enabled skills", () => {
+test("an invoked skill's policy is not diluted by other selected skills", () => {
   const strictWorkflow = videoWorkflow();
   const passiveWorkflow: CapabilityCommandWorkflow = {
     ...videoWorkflow(),
@@ -141,6 +143,7 @@ test("explicit non-default policy is not diluted by default-enabled skills", () 
     },
   };
   const runtime = resolveSelectedSkillRuntimeContract({
+    invokedSkillIds: ["builtin:video-presentation"],
     selectedSkills: [
       pptDeckSkill({
         name: "image-generate",
@@ -149,6 +152,7 @@ test("explicit non-default policy is not diluted by default-enabled skills", () 
       }),
       pptDeckSkill({
         name: "video-presentation",
+        workspaceSkillId: "builtin:video-presentation",
         displayName: "Video",
         defaultEnabled: false,
       }),
@@ -188,6 +192,7 @@ test("command workflow replaces selected-skill policy and success criteria", () 
     selectedSkills: [
       pptDeckSkill({
         name: "video-presentation",
+        workspaceSkillId: "builtin:video-presentation",
         displayName: "Video",
         defaultEnabled: false,
       }),
@@ -214,19 +219,25 @@ test("command workflow replaces selected-skill policy and success criteria", () 
   assert.deepEqual(runtime.successCriteria, commandWorkflow.successCriteria);
 });
 
-test("two explicit strict workflows fail instead of dropping success criteria", () => {
+test("two invoked strict workflows fail instead of dropping success criteria", () => {
   const workflow = videoWorkflow();
   assert.throws(
     () =>
       resolveSelectedSkillRuntimeContract({
+        invokedSkillIds: [
+          "builtin:video-presentation",
+          "builtin:another-studio",
+        ],
         selectedSkills: [
           pptDeckSkill({
             name: "video-presentation",
+            workspaceSkillId: "builtin:video-presentation",
             displayName: "Video",
             defaultEnabled: false,
           }),
           pptDeckSkill({
             name: "another-studio",
+            workspaceSkillId: "builtin:another-studio",
             displayName: "Another Studio",
             defaultEnabled: false,
           }),
@@ -242,4 +253,24 @@ test("two explicit strict workflows fail instead of dropping success criteria", 
       "code" in error &&
       error.code === "MULTIPLE_STRICT_SKILL_WORKFLOWS",
   );
+});
+
+test("a checked but not invoked non-default skill offers its tools without its policy", () => {
+  const workflow = videoWorkflow();
+  const runtime = resolveSelectedSkillRuntimeContract({
+    selectedSkills: [
+      pptDeckSkill({
+        name: "video-presentation",
+        workspaceSkillId: "builtin:video-presentation",
+        displayName: "Video",
+        defaultEnabled: false,
+      }),
+    ],
+    command: null,
+    skillRuntimeWorkflows: new Map([["video-presentation", workflow]]),
+  });
+
+  assert.deepEqual(runtime.defaultTools, workflow.defaultTools);
+  assert.equal(runtime.toolPolicy, undefined);
+  assert.equal(runtime.successCriteria, undefined);
 });

@@ -333,7 +333,6 @@ export function useThreadPageController({
     selectedSources,
     setActiveMcpInstallIds,
     setActiveMcpToolIds,
-    setActiveSkillIds,
     handleSkillSelectionChange,
     setDisabledToolNames,
   } = useThreadSources({ threadId, workspaceId });
@@ -812,7 +811,9 @@ export function useThreadPageController({
     bootstrappedThreadKeyRef,
     loadThreadMessagesRef,
     persistActiveSourceIds,
-    setActiveSkillIds,
+    // The skills checked on the new-chat page become this thread's saved
+    // choice, the same as a check made here.
+    setActiveSkillIds: handleSkillSelectionChange,
     setAvailableModels,
     setBaseSelectedModels,
     setCatalogKindEnabled,

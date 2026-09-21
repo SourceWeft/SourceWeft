@@ -53,13 +53,10 @@ export function resolveSelectedSkillRuntimeContract(input: {
       defaultTools.add(toolName);
     }
     Object.assign(permissionOverrides, workflow.permissionOverrides);
-    // Default skills expand ordinary chat unless the user explicitly invoked
-    // one. Invocation chips and slash commands keep their declared output
-    // requirement even when that skill is also enabled by default.
-    if (
-      skill.defaultEnabled !== true ||
-      input.invokedSkillIds?.includes(skill.workspaceSkillId)
-    ) {
+    // A selected skill only offers its tools. Its tool policy and output
+    // requirement apply when the user explicitly invoked it (invocation chip or
+    // slash command); otherwise one checked skill would restrict every turn.
+    if (input.invokedSkillIds?.includes(skill.workspaceSkillId)) {
       mergeToolPolicy(workflow.toolPolicy);
       skillSuccessCriteria.push(workflow.successCriteria);
     }

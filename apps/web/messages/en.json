@@ -1476,6 +1476,7 @@
       "default": "Default",
       "changed": "{count} changed",
       "skillLimit": "You can enable at most {max} skills per message.",
+      "skillSelectionSaveFailed": "Could not save the skill selection for this chat.",
       "options": "Options",
       "connectorTools": "{name} tools",
       "reset": "Reset",

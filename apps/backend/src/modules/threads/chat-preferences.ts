@@ -1,9 +1,13 @@
-import type { ThreadChatPreferences } from "@sourceweft/contracts";
+import {
+  MAX_SELECTED_SKILLS_PER_TURN,
+  type ThreadChatPreferences,
+} from "@sourceweft/contracts";
 
 export type ThreadChatPreferencesPatch = {
   thinking?: Partial<ThreadChatPreferences["thinking"]>;
   webAccess?: boolean;
   composerOptions?: Record<string, unknown>;
+  skillIds?: string[];
 };
 
 export const DEFAULT_THREAD_CHAT_PREFERENCES: ThreadChatPreferences = {
@@ -83,6 +87,17 @@ function normalizeThinking(value: unknown): ThreadChatPreferences["thinking"] {
   };
 }
 
+function normalizeSkillIds(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const skillIds = value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0 && item.length <= 256);
+  return [...new Set(skillIds)].slice(0, MAX_SELECTED_SKILLS_PER_TURN);
+}
+
 export function normalizeThreadChatPreferences(
   value: unknown,
 ): ThreadChatPreferences {
@@ -101,6 +116,11 @@ export function normalizeThreadChatPreferences(
     !Array.isArray(input.composerOptions)
   ) {
     next.composerOptions = sanitizeComposerOptions(input.composerOptions);
+  }
+  // Absent means "never chosen": the thread keeps following the defaults.
+  const skillIds = normalizeSkillIds(input.skillIds);
+  if (skillIds) {
+    next.skillIds = skillIds;
   }
 
   if (jsonSize(next) > MAX_JSON_BYTES) {
@@ -128,5 +148,6 @@ export function mergeThreadChatPreferences(
       patch.composerOptions === undefined
         ? current.composerOptions
         : patch.composerOptions,
+    skillIds: patch.skillIds === undefined ? current.skillIds : patch.skillIds,
   });
 }
