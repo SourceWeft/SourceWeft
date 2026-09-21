@@ -712,6 +712,7 @@ export default async function PublicSkillDetailPage({
         <div className="min-w-0">
           {tab === "skill" ? (
             <PublicSkillOverview
+              locale={uiLocale}
               signedIn={authState.isSignedIn}
               slug={skill.slug}
             />
@@ -833,13 +834,18 @@ export default async function PublicSkillDetailPage({
           ) : null}
 
           <PublicSkillRunStats
+            locale={uiLocale}
             signedIn={authState.isSignedIn}
             slug={skill.slug}
           />
         </aside>
       </div>
 
-      <PublicSkillReviews signedIn={authState.isSignedIn} slug={skill.slug} />
+      <PublicSkillReviews
+        locale={uiLocale}
+        signedIn={authState.isSignedIn}
+        slug={skill.slug}
+      />
 
       <section className={`mx-auto pb-12 ${skillsContainerClassName}`}>
         <div className="border-t border-zinc-300 pt-8 text-sm leading-6 text-zinc-600 dark:border-white/10 dark:text-zinc-400">
@@ -895,6 +901,7 @@ export default async function PublicSkillDetailPage({
             </a>
           </p>
           <PublicSkillReport
+            locale={uiLocale}
             signedIn={authState.isSignedIn}
             slug={skill.slug}
           />
