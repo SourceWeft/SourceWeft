@@ -430,7 +430,11 @@ test("resolveSelectedSkills resolves N object skills from their manifests with z
   const skill = skills[0]!;
   assert.equal(skill.sourceType, "registry_github");
   assert.equal(skill.skillMd, skillMd);
-  assert.deepEqual(skill.bundle, {
+  // `ensureStored` rides along: object storage is a cache, and the sandbox
+  // plan calls it before handing out the bundle. Resolving a skill never does.
+  const { ensureStored, ...storedBundle } = skill.bundle!;
+  assert.equal(typeof ensureStored, "function");
+  assert.deepEqual(storedBundle, {
     sha256: "b".repeat(64),
     objectKey: `skills/bundles/${"b".repeat(64)}.zip`,
     sizeBytes: 2048,

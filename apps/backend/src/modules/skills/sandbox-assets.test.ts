@@ -247,6 +247,31 @@ test("an object skill's plan is the stored bundle: its sha, a presigned URL, a w
   assert.equal(store.zipped, 0);
 });
 
+test("a stored bundle is made sure of before either rung hands it out, and never at planning", async () => {
+  const base = objectSkill();
+  const order: string[] = [];
+  const descriptor = {
+    ...base,
+    bundle: {
+      ...base.bundle!,
+      ensureStored: async () => {
+        order.push("ensure");
+        // A lost bundle is back by the time this resolves.
+        store.bundles.set(base.bundle!.objectKey, new Uint8Array([7]));
+      },
+    },
+  };
+  store.bundles.delete(base.bundle!.objectKey);
+
+  const plan = await buildSkillSandboxAssetPlan(descriptor);
+  assert.deepEqual(order, []);
+
+  await plan.fetchUrl!();
+  assert.deepEqual(order, ["ensure"]);
+  assert.deepEqual(await plan.loadContent!(), new Uint8Array([7]));
+  assert.deepEqual(order, ["ensure", "ensure"]);
+});
+
 test("normalizes unsafe version strings without losing content authority", async () => {
   const plan = await buildSkillSandboxAssetPlan(
     skill({ version: "2.0 β/beta" }),
