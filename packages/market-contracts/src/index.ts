@@ -257,6 +257,14 @@ export const marketSkillSummarySchema = z.object({
   name: z.string(),
   displayName: z.string(),
   description: z.string(),
+  // The skill's own logo (a small PNG thumbnail made at ingest, as a data: URL)
+  // or, failing that, its publisher's avatar. Null when neither is known.
+  logo: z
+    .object({
+      url: z.string().max(100_000),
+      source: z.enum(["skill", "publisher"]),
+    })
+    .nullable(),
   // Market category slugs, in taxonomy order.
   categories: z.array(z.string()),
   // A market admin vouched for it. Never self-asserted.

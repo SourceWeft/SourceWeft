@@ -24,6 +24,7 @@ import {
   untrustedMarkdownLink,
   isolateSkillMarkerTags,
   skillLocalInstallCommand,
+  safeSkillLogoUrl,
 } from "./skills-format";
 
 describe("paths", () => {
@@ -345,6 +346,27 @@ describe("skillLocalInstallCommand", () => {
       { repoUrl: "https://github.com/a/b; curl x | sh", commitSha: sha },
     ]) {
       expect(skillLocalInstallCommand(source)).toBeNull();
+    }
+  });
+});
+
+describe("safeSkillLogoUrl", () => {
+  it("lets through a PNG thumbnail or an https image, and nothing else", () => {
+    const png = "data:image/png;base64,iVBORw0KGgo=";
+    expect(safeSkillLogoUrl(png)).toBe(png);
+    expect(safeSkillLogoUrl("https://github.com/obra.png?size=128")).toBe(
+      "https://github.com/obra.png?size=128",
+    );
+    for (const bad of [
+      "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=",
+      "data:text/html;base64,PGI+",
+      "http://example.com/a.png",
+      "https://user:pw@example.com/a.png",
+      "javascript:alert(1)",
+      "",
+      null,
+    ]) {
+      expect(safeSkillLogoUrl(bad)).toBeNull();
     }
   });
 });

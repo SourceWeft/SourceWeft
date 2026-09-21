@@ -46,6 +46,10 @@ const summary = {
   name: "pdf",
   displayName: "PDF",
   description: "Work with PDF files",
+  logo: {
+    url: "https://github.com/anthropics.png?size=128",
+    source: "publisher",
+  },
   categories: ["documents-office"],
   verified: true,
   capability: "executable",
@@ -91,10 +95,18 @@ const detail = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.listMarketSkills.mockResolvedValue({ items: [summary], nextCursor: null });
+  mocks.listMarketSkills.mockResolvedValue({
+    items: [summary],
+    nextCursor: null,
+  });
   mocks.listMarketSkillCategories.mockResolvedValue({
     items: [
-      { slug: "documents-office", name: "Documents", description: null, count: 1 },
+      {
+        slug: "documents-office",
+        name: "Documents",
+        description: null,
+        count: 1,
+      },
     ],
     total: 1,
   });
@@ -109,7 +121,10 @@ test("the list is served without a session, with every filter parsed", async () 
   );
 
   assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), { items: [summary], nextCursor: null });
+  assert.deepEqual(await response.json(), {
+    items: [summary],
+    nextCursor: null,
+  });
   assert.deepEqual(mocks.listMarketSkills.mock.calls[0]?.[0], {
     query: "pdf form",
     category: "documents-office",
@@ -216,7 +231,12 @@ test("categories is a route of its own, not a skill called 'categories'", async 
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), {
     items: [
-      { slug: "documents-office", name: "Documents", description: null, count: 1 },
+      {
+        slug: "documents-office",
+        name: "Documents",
+        description: null,
+        count: 1,
+      },
     ],
     total: 1,
   });
@@ -224,10 +244,11 @@ test("categories is a route of its own, not a skill called 'categories'", async 
 });
 
 test("reserved path segments are a 404 without a lookup", async () => {
-  assert.deepEqual(
-    [...RESERVED_MARKET_SKILL_SLUGS].sort(),
-    ["categories", "category-counts", "registry"],
-  );
+  assert.deepEqual([...RESERVED_MARKET_SKILL_SLUGS].sort(), [
+    "categories",
+    "category-counts",
+    "registry",
+  ]);
   const app = createTestApp();
   for (const slug of ["registry", "category-counts"]) {
     const response = await app.request(`/v1/skills/${slug}`);

@@ -138,6 +138,24 @@ export function safeExternalUrl(value?: string | null) {
 }
 
 /** `owner/repo` for a GitHub-style URL, otherwise the host and path. */
+/**
+ * A logo we are willing to put in an <img>: the PNG thumbnail ingest makes, or
+ * an https image. Nothing else — in particular no other data: type, since an
+ * SVG data URL is a document, not a picture.
+ */
+export function safeSkillLogoUrl(value?: string | null) {
+  if (!value) return null;
+  if (/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(value)) return value;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && !url.username && !url.password
+      ? url.toString()
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export function repoLabel(repoUrl: string) {
   try {
     const url = new URL(repoUrl);

@@ -62,7 +62,10 @@ export async function generateMetadata({
   const category = items.find((entry) => entry.slug === decodedSlug);
 
   if (!category) {
-    return { ...NO_INDEX_METADATA, title: skillsCopy.category.fallbackMetaTitle };
+    return {
+      ...NO_INDEX_METADATA,
+      title: skillsCopy.category.fallbackMetaTitle,
+    };
   }
 
   const state = parseSkillsBrowseState(await searchParams, {
@@ -174,7 +177,9 @@ export default async function PublicSkillCategoryPage({
           aria-hidden
           className="absolute inset-0 bg-[linear-gradient(rgba(24,24,27,0.055)_1px,transparent_1px),linear-gradient(90deg,rgba(24,24,27,0.055)_1px,transparent_1px)] bg-[size:42px_42px] dark:bg-[linear-gradient(rgba(255,255,255,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.045)_1px,transparent_1px)]"
         />
-        <div className={`relative mx-auto pb-8 pt-24 ${skillsContainerClassName}`}>
+        <div
+          className={`relative mx-auto pb-8 pt-24 ${skillsContainerClassName}`}
+        >
           <Link
             className="mb-8 inline-flex items-center gap-2 text-sm text-zinc-500 transition-colors hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-white"
             href="/skills"

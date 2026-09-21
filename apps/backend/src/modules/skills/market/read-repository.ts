@@ -17,6 +17,7 @@ import {
 } from "@sourceweft/db";
 import type { SkillManifestJson } from "@sourceweft/db";
 import { ContentError } from "../../content/errors";
+import { getSkillLogo } from "../logo";
 import { parseGithubStoragePointer } from "../storage/source-pointer";
 import {
   NO_SKILL_CATALOG_FILTERS,
@@ -167,6 +168,14 @@ type MarketSkillRow = {
   };
 };
 
+/** The catalog's own logo rule, without the path it keeps for the dashboard. */
+function marketSkillLogo(
+  manifest: SkillManifestJson,
+): MarketSkillSummary["logo"] {
+  const logo = getSkillLogo(manifest);
+  return logo ? { url: logo.url, source: logo.source } : null;
+}
+
 export function mapMarketSkillSummary(
   row: MarketSkillRow,
   categorySlugs: string[],
@@ -180,6 +189,7 @@ export function mapMarketSkillSummary(
     // for itself, the definition row being only the last one indexed.
     displayName: manifest.displayName,
     description: manifest.description,
+    logo: marketSkillLogo(manifest),
     categories: categorySlugs,
     verified: row.definition.verified,
     capability: registry?.capability ?? null,

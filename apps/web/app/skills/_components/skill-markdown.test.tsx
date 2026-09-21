@@ -15,6 +15,15 @@ describe("SkillMarkdown", () => {
     expect(html).toContain("<li");
   });
 
+  it("keeps the page's <h1> the only one: the document's headings sit a level down", () => {
+    const html = render("# Title\n\n## Section\n\n###### Deep");
+    expect(html).not.toContain("<h1");
+    expect(html).toMatch(/<h2[^>]*>Title<\/h2>/);
+    expect(html).toMatch(/<h3[^>]*>Section<\/h3>/);
+    // Nothing below <h6> exists, so the deepest level becomes a paragraph.
+    expect(html).toMatch(/<p[^>]*>Deep<\/p>/);
+  });
+
   it("never turns embedded HTML into markup", () => {
     const html = render(
       [
@@ -45,7 +54,9 @@ describe("SkillMarkdown", () => {
   });
 
   it("marks every external link nofollow ugc and opens it in a new tab", () => {
-    const html = render("See [the docs](https://example.com/docs) or <https://example.org>.");
+    const html = render(
+      "See [the docs](https://example.com/docs) or <https://example.org>.",
+    );
     const anchors = html.match(/<a [^>]*>/g) ?? [];
     expect(anchors.length).toBe(2);
     for (const anchor of anchors) {

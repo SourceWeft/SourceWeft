@@ -368,6 +368,11 @@ test("a summary carries the market's facts, not the author's own claims", () => 
     name: "pdf",
     displayName: "PDF",
     description: "Work with PDF files",
+    // No logo of its own, so its publisher's avatar stands in.
+    logo: {
+      url: "https://github.com/anthropics.png?size=128",
+      source: "publisher",
+    },
     // The market's filing, not the manifest's `self-styled`.
     categories: ["documents-office"],
     verified: true,

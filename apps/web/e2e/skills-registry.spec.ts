@@ -108,6 +108,9 @@ test.beforeAll(async ({ browser }) => {
     data: accounts.admin,
   });
   expect(r.status(), "Normal administrator login").toBe(200);
+  // The admin's browser cases reuse this session rather than signing in a
+  // second time: sign-in is rate limited here, as in production.
+  sessions.admin = await admin.storageState();
 });
 test.afterAll(async () => {
   await admin?.dispose();
@@ -635,6 +638,237 @@ test("E8 published is not public; explicit admin visibility controls history acc
     other.getByRole("heading", { name: skillTitle, exact: true }),
   ).toBeVisible();
   await context.close();
+});
+
+// The market: what is listed is public for anyone, what is not is not, and the
+// person who imported a skill has the last word on their own. This environment
+// runs no scheduler, so an admin lists the skill here — the same function the
+// auto-listing pass calls (its rules are covered by the database suites).
+async function skillIdOf(page: Page, ws: string, slug: string) {
+  const r = await page.request.get(
+    `${api}/v1/workspaces/${ws}/skills/catalog/by-slug/${slug}`,
+  );
+  expect(r.status(), await r.text()).toBe(200);
+  return ((await r.json()) as { skill: { skillId: string; catalogId: string } })
+    .skill;
+}
+
+test("E16 a listed skill is public for anyone; its owner can take it down, and an admin's hold outranks them", async ({
+  page,
+  browser,
+}) => {
+  const ws = await login(page);
+  const item = (await submit(page)).skills[0]!;
+  await publish(item);
+  const slug = item.slug!;
+  const { skillId, catalogId } = await skillIdOf(page, ws, slug);
+  const anonymous = await request.newContext({ baseURL: api });
+  const listingUrl = `${api}/v1/workspaces/${ws}/skills/catalog/${catalogId}/listing`;
+
+  // Published is not public: nobody without an account can see it yet.
+  expect((await anonymous.get(`/v1/skills/${slug}`)).status()).toBe(404);
+
+  const listed = await admin.post(
+    `/v1/skills/registry/admin/skills/${skillId}/list`,
+    { data: {} },
+  );
+  expect(listed.status(), await listed.text()).toBe(200);
+  const standing = await listed.json();
+  expect(standing).toMatchObject({ visibility: "public", listingHold: false });
+  expect(standing.listedAt).toBeTruthy();
+  expect(standing.categorySlugs.length).toBeGreaterThan(0);
+
+  // The public API, with no session at all.
+  const list = await anonymous.get(`/v1/skills?query=${skillName}`);
+  expect(list.status()).toBe(200);
+  expect(
+    ((await list.json()) as { items: Array<{ slug: string }> }).items.map(
+      (entry) => entry.slug,
+    ),
+  ).toContain(slug);
+  const detail = await anonymous.get(`/v1/skills/${slug}`);
+  expect(detail.status()).toBe(200);
+  const body = (await detail.json()) as {
+    skillMd: string | null;
+    files: Array<{ path: string; contentHash: string }>;
+    source: { commitSha: string | null; repoSubpath: string | null };
+  };
+  expect(body.skillMd).toContain(skillName);
+  expect(body.files.map((file) => file.path)).toContain("SKILL.md");
+  for (const file of body.files)
+    expect(file.contentHash).toMatch(/^[0-9a-f]{64}$/);
+  expect(body.source.commitSha).toMatch(/^[0-9a-f]{40}$/);
+  expect(body.source.repoSubpath).not.toBeNull();
+
+  // The public page, in a browser that has never signed in.
+  const visitor = await browser.newContext({ baseURL: web });
+  try {
+    const publicPage = await visitor.newPage();
+    await publicPage.goto(`/skills/${slug}`);
+    await expect(
+      publicPage.getByRole("heading", {
+        level: 1,
+        name: skillTitle,
+        exact: true,
+      }),
+    ).toBeVisible({ timeout: 45000 });
+    // The embedded SKILL.md brings its own title; the page still has one <h1>.
+    await expect(publicPage.getByRole("heading", { level: 1 })).toHaveCount(1);
+    await expect(
+      publicPage.getByText("Content belongs to its original authors"),
+    ).toBeVisible();
+    await expect(
+      publicPage.getByRole("link", { name: "Report or request removal" }),
+    ).toHaveAttribute("href", new RegExp(`^mailto:.*${slug}`));
+    await publicPage.goto(`/skills/${slug}?tab=install`);
+    await expect(
+      publicPage.getByText(
+        new RegExp(
+          `npx skills add https://github\\.com/.+/tree/${body.source.commitSha}`,
+        ),
+      ),
+    ).toBeVisible();
+  } finally {
+    await visitor.close();
+  }
+
+  // Someone else has no say, and cannot even tell whose skill it is: from
+  // their own workspace the route answers as if the skill did not exist.
+  const otherContext = await browser.newContext({ baseURL: web });
+  try {
+    const otherPage = await otherContext.newPage();
+    const otherWs = await login(otherPage, "other");
+    const theirs = `${api}/v1/workspaces/${otherWs}/skills/catalog/${catalogId}/listing`;
+    expect((await otherPage.request.get(theirs)).status()).toBe(404);
+    expect(
+      (
+        await otherPage.request.put(theirs, { data: { listed: false } })
+      ).status(),
+    ).toBe(404);
+    await otherPage.goto(`/dashboard/skills/${slug}`);
+    await expect(
+      otherPage.getByRole("heading", { name: skillTitle }).first(),
+    ).toBeVisible({ timeout: 45000 });
+    await expect(otherPage.getByTestId("skill-owner-listing")).toHaveCount(0);
+  } finally {
+    await otherContext.close();
+  }
+  // Still public: the stranger's attempt changed nothing.
+  expect((await anonymous.get(`/v1/skills/${slug}`)).status()).toBe(200);
+
+  // The owner takes it down: gone for everyone at once, and held.
+  const down = await page.request.put(listingUrl, {
+    data: { listed: false },
+  });
+  expect(down.status(), await down.text()).toBe(200);
+  expect(await down.json()).toMatchObject({ listed: false, heldBy: "owner" });
+  expect((await anonymous.get(`/v1/skills/${slug}`)).status()).toBe(404);
+
+  // Lifting their own hold does not list it by itself.
+  const lifted = await page.request.put(listingUrl, { data: { listed: true } });
+  expect(await lifted.json()).toMatchObject({ listed: false, heldBy: null });
+
+  // An admin's withdrawal is not the owner's to undo.
+  await admin.post(`/v1/skills/registry/admin/skills/${skillId}/list`, {
+    data: {},
+  });
+  const withdrawn = await admin.post(
+    `/v1/skills/registry/admin/skills/${skillId}/delist`,
+    { data: {} },
+  );
+  expect(await withdrawn.json()).toMatchObject({
+    visibility: "restricted",
+    listingHold: true,
+    listingHoldBy: "admin",
+  });
+  const refused = await page.request.put(listingUrl, {
+    data: { listed: true },
+  });
+  expect(refused.status()).toBe(409);
+  expect(JSON.stringify(await refused.json())).toContain(
+    "SKILL_LISTING_HELD_BY_ADMIN",
+  );
+
+  // And the owner sees it on the skill's page: the switch, locked.
+  await page.goto(`/dashboard/skills/${slug}`);
+  const ownerSwitch = page
+    .getByTestId("skill-owner-listing")
+    .getByRole("switch");
+  await expect(ownerSwitch).toBeVisible({ timeout: 45000 });
+  await expect(ownerSwitch).toBeDisabled();
+
+  await anonymous.dispose();
+});
+
+test("E17 the gallery searches and sorts on the server, from the URL", async ({
+  page,
+}) => {
+  await login(page);
+  await publish((await submit(page)).skills[0]!);
+
+  const filtered = page.waitForResponse(
+    (r) => {
+      const url = new URL(r.url());
+      return (
+        /\/skills\/catalog$/.test(url.pathname) &&
+        url.searchParams.get("q") === skillName &&
+        url.searchParams.get("sort") === "new"
+      );
+    },
+    { timeout: 60000 },
+  );
+  await Promise.all([
+    filtered,
+    page.goto(`/dashboard/skills?q=${skillName}&sort=new`),
+  ]);
+  await expect(
+    page.getByRole("heading", { name: skillTitle, exact: true }),
+  ).toBeVisible({ timeout: 45000 });
+
+  // A query nothing matches: the server answers with nothing, so nothing shows.
+  const empty = page.waitForResponse(
+    (r) => new URL(r.url()).searchParams.get("q") === "zz-no-such-skill-zz",
+    { timeout: 60000 },
+  );
+  await Promise.all([
+    empty,
+    page.goto("/dashboard/skills?q=zz-no-such-skill-zz"),
+  ]);
+  await expect(
+    page.getByRole("heading", { name: skillTitle, exact: true }),
+  ).toHaveCount(0);
+});
+
+test("E18 a market admin reviews a flagged skill from the Skills tab", async ({
+  page,
+}) => {
+  test.skip(!fixtures.versionC, "needs the review fixture");
+  await login(page);
+  const pending = (await submit(page, fixtures.versionC!)).skills[0]!;
+  expect(pending.status).toBe("queued");
+
+  await page.context().clearCookies();
+  await page.context().addCookies(sessions.admin!.cookies);
+  await page.goto("/dashboard/admin/market?tab=skills");
+  const row = page.locator("li, article, tr, div").filter({
+    has: page.getByText(pending.slug!, { exact: true }),
+  });
+  await expect(page.getByText(pending.slug!, { exact: true })).toBeVisible({
+    timeout: 45000,
+  });
+  const decided = page.waitForResponse(
+    (r) =>
+      r.url().endsWith(`/submissions/${pending.skillVersionId}/publish`) &&
+      r.request().method() === "POST",
+    { timeout: 30000 },
+  );
+  const [response] = await Promise.all([
+    decided,
+    row.getByRole("button", { name: "Approve and publish" }).last().click(),
+  ]);
+  expect(response.status()).toBe(200);
+  // Decided, so it leaves the queue.
+  await expect(page.getByText(pending.slug!, { exact: true })).toHaveCount(0);
 });
 
 // The chat agent and skills, end to end: browser → API → worker → real model.

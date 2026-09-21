@@ -128,7 +128,10 @@ function CategorySidebar({
                   ? "border-zinc-950 bg-zinc-950 text-white dark:border-white dark:bg-white dark:text-zinc-950"
                   : "border-zinc-300 text-zinc-600 hover:bg-white/70 hover:text-zinc-950 dark:border-white/12 dark:text-zinc-400 dark:hover:bg-white/[0.05] dark:hover:text-white",
               )}
-              href={skillsBrowseHref(state, { category: entry.slug, view: true })}
+              href={skillsBrowseHref(state, {
+                category: entry.slug,
+                view: true,
+              })}
               key={entry.slug}
             >
               <span className="truncate">{entry.label}</span>
@@ -220,7 +223,10 @@ export function SkillsListingView({
               {skillSortOptions.map((option) => (
                 <Pill
                   active={state.sort === option.value}
-                  href={skillsBrowseHref(state, { sort: option.value, view: true })}
+                  href={skillsBrowseHref(state, {
+                    sort: option.value,
+                    view: true,
+                  })}
                   key={option.value}
                 >
                   {option.label}
@@ -231,7 +237,10 @@ export function SkillsListingView({
               {skillTrustOptions.map((option) => (
                 <Pill
                   active={state.trust === option.value}
-                  href={skillsBrowseHref(state, { trust: option.value, view: true })}
+                  href={skillsBrowseHref(state, {
+                    trust: option.value,
+                    view: true,
+                  })}
                   key={option.value}
                 >
                   {option.label}

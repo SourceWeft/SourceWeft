@@ -15,7 +15,6 @@ import type {
 
 import { cn } from "@sourceweft/ui-web/lib/utils";
 
-import { SkillIcon } from "../../_components/site-icons";
 import {
   formatCompactCount,
   formatSkillDate,
@@ -23,6 +22,7 @@ import {
   skillPath,
   skillsContainerClassName,
 } from "./skills-format";
+import { SkillTile } from "./skill-logo";
 import { skillsCopy } from "./skills-public-copy";
 
 export function skillCategoryNames(categories: MarketSkillCategory[]) {
@@ -87,28 +87,6 @@ export function SkillCapabilityBadge({
   return null;
 }
 
-export function SkillTile({
-  size = "md",
-  verified,
-}: {
-  size?: "md" | "lg";
-  verified: boolean;
-}) {
-  return (
-    <span
-      className={cn(
-        "flex shrink-0 items-center justify-center rounded-xl",
-        size === "lg" ? "size-16" : "size-11",
-        verified
-          ? "bg-zinc-950 text-white dark:bg-white dark:text-zinc-950"
-          : "bg-zinc-200 text-zinc-700 dark:bg-white/10 dark:text-zinc-200",
-      )}
-    >
-      <SkillIcon className={size === "lg" ? "size-7" : "size-5"} />
-    </span>
-  );
-}
-
 export function SkillMarketCard({
   categoryNames,
   highlightCategory,
@@ -130,7 +108,7 @@ export function SkillMarketCard({
       href={skillPath(skill.slug)}
     >
       <div className="flex items-start gap-3">
-        <SkillTile verified={skill.verified} />
+        <SkillTile logo={skill.logo} verified={skill.verified} />
         <div className="min-w-0 flex-1">
           <h3 className="truncate text-base font-semibold leading-6 text-zinc-950 dark:text-white">
             {skill.displayName}

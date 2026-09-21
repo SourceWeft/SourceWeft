@@ -243,7 +243,9 @@ export default async function PublicSkillsMarketPage({
                 </h1>
                 <p className="mt-6 max-w-2xl text-lg leading-8 text-zinc-600 dark:text-zinc-300">
                   {total > 0
-                    ? skillsCopy.landing.heroWithCount(total.toLocaleString("en"))
+                    ? skillsCopy.landing.heroWithCount(
+                        total.toLocaleString("en"),
+                      )
                     : skillsCopy.landing.heroWithoutCount}{" "}
                   {skillsCopy.landing.heroTail}
                 </p>
@@ -257,7 +259,9 @@ export default async function PublicSkillsMarketPage({
             state={state}
           />
 
-          {listView ? null : <GetStartedPanels signedIn={authState.isSignedIn} />}
+          {listView ? null : (
+            <GetStartedPanels signedIn={authState.isSignedIn} />
+          )}
         </div>
       </section>
 
@@ -276,7 +280,9 @@ export default async function PublicSkillsMarketPage({
       ) : null}
 
       {home ? (
-        <div className={cn("mx-auto space-y-14 py-12", skillsContainerClassName)}>
+        <div
+          className={cn("mx-auto space-y-14 py-12", skillsContainerClassName)}
+        >
           {directoryCategories.length > 0 ? (
             <section>
               <h2 className="mb-5 text-2xl font-semibold tracking-tight">
@@ -289,7 +295,9 @@ export default async function PublicSkillsMarketPage({
                     href={skillCategoryPath(category.slug)}
                     key={category.slug}
                   >
-                    <span className="truncate font-medium">{category.name}</span>
+                    <span className="truncate font-medium">
+                      {category.name}
+                    </span>
                     <span className="text-xs tabular-nums text-zinc-400">
                       {category.count.toLocaleString("en")}
                     </span>

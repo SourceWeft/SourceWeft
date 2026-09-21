@@ -57,6 +57,7 @@ function response(
       capability: "executable",
       categories: ["documents"],
       description: "Fill PDF forms.",
+      logo: null,
       displayName: "PDF Forms",
       installCount: 1290,
       license: "MIT",
@@ -71,7 +72,7 @@ function response(
       ...skillPatch,
     },
     skillMd:
-      '---\nname: pdf-forms\ndescription: secret-frontmatter\n---\n# Using PDF Forms\n\n<script>alert(1)</script>\n\nSee [docs](https://example.com).',
+      "---\nname: pdf-forms\ndescription: secret-frontmatter\n---\n# Using PDF Forms\n\n<script>alert(1)</script>\n\nSee [docs](https://example.com).",
     source: {
       commitSha: SHA,
       committedAt: "2026-09-14T00:00:00.000Z",
@@ -111,7 +112,9 @@ beforeEach(() => {
   auth.isSignedIn = false;
   market.getPublicSkill.mockReset().mockResolvedValue(response());
   market.listPublicSkillCategories.mockReset().mockResolvedValue({
-    items: [{ count: 4, description: null, name: "Documents", slug: "documents" }],
+    items: [
+      { count: 4, description: null, name: "Documents", slug: "documents" },
+    ],
     total: 4,
   });
   market.listPublicSkills
@@ -224,15 +227,18 @@ describe("public skill detail page", () => {
 
   it("never links a non-http source address", async () => {
     market.getPublicSkill.mockResolvedValue(
-      response({
-        source: {
-          commitSha: SHA,
-          committedAt: null,
-          repoSubpath: null,
-          repoUrl: "javascript:alert(1)",
-          sourceUrl: "javascript:alert(2)",
+      response(
+        {
+          source: {
+            commitSha: SHA,
+            committedAt: null,
+            repoSubpath: null,
+            repoUrl: "javascript:alert(1)",
+            sourceUrl: "javascript:alert(2)",
+          },
         },
-      }, { repoUrl: null, sourceUrl: null }),
+        { repoUrl: null, sourceUrl: null },
+      ),
     );
     const html = await render();
     expect(html).not.toContain("javascript:");
@@ -244,7 +250,9 @@ describe("public skill detail page", () => {
     const blocks = [
       ...html.matchAll(/<script type="application\/ld\+json">(.*?)<\/script>/g),
     ].map((match) => JSON.parse(match[1]!) as Record<string, unknown>);
-    const code = blocks.find((block) => block["@type"] === "SoftwareSourceCode");
+    const code = blocks.find(
+      (block) => block["@type"] === "SoftwareSourceCode",
+    );
     expect(code).toMatchObject({
       author: { name: "anthropics" },
       codeRepository: "https://github.com/anthropics/skills",

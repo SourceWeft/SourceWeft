@@ -26,7 +26,31 @@ const rehypePlugins = [
 // third-party diagram/TeX source in the visitor's browser.
 const plugins = { code };
 
+// The document is embedded in a page that already has its <h1> (the skill's
+// name), so its own headings sit one level down: `# Title` is an <h2> here.
+// Sizes stay what a reader expects of each level in the source.
+const headingClass = "mt-6 mb-2 font-semibold";
+const headings: Pick<Components, "h1" | "h2" | "h3" | "h4" | "h5" | "h6"> = {
+  h1: ({ children }) => (
+    <h2 className={`${headingClass} text-2xl`}>{children}</h2>
+  ),
+  h2: ({ children }) => (
+    <h3 className={`${headingClass} text-xl`}>{children}</h3>
+  ),
+  h3: ({ children }) => (
+    <h4 className={`${headingClass} text-lg`}>{children}</h4>
+  ),
+  h4: ({ children }) => (
+    <h5 className={`${headingClass} text-base`}>{children}</h5>
+  ),
+  h5: ({ children }) => (
+    <h6 className={`${headingClass} text-sm`}>{children}</h6>
+  ),
+  h6: ({ children }) => <p className={`${headingClass} text-sm`}>{children}</p>,
+};
+
 const components: Components = {
+  ...headings,
   a: ({ children, href }) => {
     const link = untrustedMarkdownLink(href);
     if (link.kind === "external") {

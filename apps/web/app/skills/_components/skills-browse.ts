@@ -62,7 +62,9 @@ function oneOf<T extends string>(
   value: string | undefined,
   options: readonly { value: T }[],
 ): T {
-  return options.find((option) => option.value === value)?.value ?? options[0]!.value;
+  return (
+    options.find((option) => option.value === value)?.value ?? options[0]!.value
+  );
 }
 
 export function parseSkillsBrowseState(

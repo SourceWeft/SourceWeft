@@ -696,6 +696,11 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
         name: "p06",
         displayName: entry.displayName,
         description: entry.description,
+        // No logo of its own: the publisher's avatar stands in.
+        logo: {
+          url: `https://github.com/${repoOwner}.png?size=128`,
+          source: "publisher",
+        },
         categories: ["documents-office", "design-creative"].sort(
           (a, b) =>
             taxonomy.skillCategoryDefinitions.findIndex((c) => c.slug === a) -

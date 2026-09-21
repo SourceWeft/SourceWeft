@@ -20,8 +20,10 @@ describe("parseSkillsBrowseState", () => {
 
   it("takes the category from the route, not the query string", () => {
     expect(
-      parseSkillsBrowseState({ category: "ignored" }, { category: "data-analysis" })
-        .category,
+      parseSkillsBrowseState(
+        { category: "ignored" },
+        { category: "data-analysis" },
+      ).category,
     ).toBe("data-analysis");
     expect(parseSkillsBrowseState({ category: "data-analysis" }).category).toBe(
       "all",
@@ -92,9 +94,9 @@ describe("list view", () => {
 
   it("only trusts category counts when nothing else filters", () => {
     const base = defaultSkillsBrowseState;
-    expect(hasOnlyCategoryFacet({ ...base, category: "writing", sort: "new" })).toBe(
-      true,
-    );
+    expect(
+      hasOnlyCategoryFacet({ ...base, category: "writing", sort: "new" }),
+    ).toBe(true);
     expect(hasOnlyCategoryFacet({ ...base, query: "pdf" })).toBe(false);
     expect(hasOnlyCategoryFacet({ ...base, trust: "verified" })).toBe(false);
     expect(hasOnlyCategoryFacet({ ...base, capability: "executable" })).toBe(
@@ -147,7 +149,11 @@ describe("skillsBrowseHref", () => {
     expect(
       skillsBrowseHref(
         { ...base, query: "pdf forms", trust: "verified" },
-        { capability: "executable", category: "data-analysis", sort: "popular" },
+        {
+          capability: "executable",
+          category: "data-analysis",
+          sort: "popular",
+        },
       ),
     ).toBe(
       "/skills/category/data-analysis?q=pdf+forms&sort=popular&trust=verified&type=executable",
@@ -193,7 +199,10 @@ describe("skillsBrowseHref", () => {
       sort: "name" as const,
       trust: "verified" as const,
     };
-    const url = new URL(skillsBrowseHref(state, { cursor: state.cursor }), "https://x.test");
+    const url = new URL(
+      skillsBrowseHref(state, { cursor: state.cursor }),
+      "https://x.test",
+    );
     const params = Object.fromEntries(url.searchParams.entries());
     expect(parseSkillsBrowseState(params)).toEqual(state);
   });

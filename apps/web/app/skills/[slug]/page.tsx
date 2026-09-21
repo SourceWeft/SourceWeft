@@ -27,9 +27,9 @@ import {
   SkillCardGrid,
   skillCategoryNames,
   SkillExternalLink,
-  SkillTile,
   SkillVerifiedBadge,
 } from "../_components/skills-display";
+import { SkillTile } from "../_components/skill-logo";
 import {
   commitUrl,
   formatCompactCount,
@@ -442,7 +442,11 @@ export default async function PublicSkillDetailPage({
           <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
             <div className="min-w-0">
               <div className="flex items-start gap-4">
-                <SkillTile size="lg" verified={skill.verified} />
+                <SkillTile
+                  logo={skill.logo}
+                  size="lg"
+                  verified={skill.verified}
+                />
                 <div className="min-w-0">
                   <h1 className="break-words text-4xl font-semibold leading-tight tracking-tight sm:text-5xl">
                     {skill.displayName}
