@@ -6,6 +6,7 @@ import {
   listMarketSkillCollectionsResponseSchema,
   listMarketSkillsRequestSchema,
   listMarketSkillsResponseSchema,
+  marketSkillLocaleSchema,
 } from "@sourceweft/market-contracts";
 import type { z } from "zod";
 import {
@@ -92,6 +93,8 @@ function publicJson(c: Context, body: unknown) {
 
 export function registerSkillPublicRoutes(app: Hono) {
   app.get("/v1/skills", async (c) => {
+    // The language of each `aiSummary`; English when not given.
+    const locale = given(c.req.query("locale"));
     const parsed = listMarketSkillsRequestSchema.safeParse({
       query: given(c.req.query("query")),
       category: given(c.req.query("category")),
@@ -101,6 +104,7 @@ export function registerSkillPublicRoutes(app: Hono) {
       sort: given(c.req.query("sort")),
       limit: numberQuery(c.req.query("limit")),
       cursor: given(c.req.query("cursor")),
+      ...(locale === undefined ? {} : { locale }),
     });
     if (!parsed.success) {
       throw ApiError.validation(
@@ -156,12 +160,21 @@ export function registerSkillPublicRoutes(app: Hono) {
 
   app.get("/v1/skills/:slug", async (c) => {
     const slug = c.req.param("slug");
+    // The language of the AI overview; English when not given.
+    const locale = marketSkillLocaleSchema
+      .optional()
+      .safeParse(given(c.req.query("locale")));
+    if (!locale.success) {
+      throw ApiError.validation(
+        locale.error.flatten() as Record<string, unknown>,
+      );
+    }
     // Not public, not there and not a skill at all are one answer: a 404 that
     // does not say which.
     const found =
       RESERVED_MARKET_SKILL_SLUGS.has(slug) || slug.length > MAX_SLUG_LENGTH
         ? null
-        : await findMarketSkill(slug);
+        : await findMarketSkill(slug, { locale: locale.data });
     if (!found) {
       throw ApiError.notFound("Skill not found");
     }

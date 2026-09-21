@@ -465,9 +465,8 @@ test("a collection that is not published is a plain 404", async () => {
 });
 
 test("a summary from an older server still parses, with the new facts at their defaults", async () => {
-  const { marketSkillSummarySchema } = await import(
-    "@sourceweft/market-contracts"
-  );
+  const { marketSkillSummarySchema } =
+    await import("@sourceweft/market-contracts");
   const {
     cliInstallable: _cli,
     stars: _stars,
@@ -482,4 +481,51 @@ test("a summary from an older server still parses, with the new facts at their d
   assert.equal(parsed.repoArchived, false);
   assert.equal(parsed.claimed, false);
   assert.equal(parsed.cliInstallable, undefined);
+});
+
+// --- AI overview language (§17.4) ---
+
+test("locale is passed to the list and the detail, and an unknown one is a 400", async () => {
+  const app = createTestApp();
+  assert.equal((await app.request("/v1/skills?locale=zh-TW")).status, 200);
+  assert.equal(mocks.listMarketSkills.mock.calls[0]?.[0].locale, "zh-TW");
+  assert.equal((await app.request("/v1/skills?locale=fr")).status, 400);
+
+  const found = await app.request(
+    "/v1/skills/gh-anthropics-skills-pdf?locale=zh-CN",
+  );
+  assert.equal(found.status, 200);
+  assert.deepEqual(mocks.findMarketSkill.mock.calls[0]?.[1], {
+    locale: "zh-CN",
+  });
+  assert.equal(
+    (await app.request("/v1/skills/gh-anthropics-skills-pdf?locale=de")).status,
+    400,
+  );
+  // No locale: the repository's default (English).
+  await app.request("/v1/skills/gh-anthropics-skills-pdf");
+  assert.deepEqual(mocks.findMarketSkill.mock.calls[1]?.[1], {
+    locale: undefined,
+  });
+});
+
+test("aiSummary and aiOverview are optional for answers from older servers", async () => {
+  const { getMarketSkillResponseSchema } =
+    await import("@sourceweft/market-contracts");
+  const parsed = getMarketSkillResponseSchema.parse(detail);
+  assert.equal(parsed.aiOverview, undefined);
+  assert.equal(parsed.skill.aiSummary, undefined);
+  const withOverview = getMarketSkillResponseSchema.parse({
+    ...detail,
+    skill: { ...summary, aiSummary: "One line." },
+    aiOverview: {
+      summary: "One line.",
+      whatItDoes: "Fills PDF forms.",
+      whenToUse: "When a form arrives.",
+      requirements: "",
+      locale: "en",
+      generatedAt: "2026-09-22T00:00:00.000Z",
+    },
+  });
+  assert.equal(withOverview.aiOverview?.locale, "en");
 });

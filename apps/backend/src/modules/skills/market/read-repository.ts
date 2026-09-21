@@ -5,6 +5,7 @@ import type {
   ListMarketSkillCategoriesResponse,
   ListMarketSkillsRequest,
   ListMarketSkillsResponse,
+  MarketSkillLocale,
   MarketSkillSummary,
 } from "@sourceweft/market-contracts";
 import {
@@ -35,6 +36,7 @@ import {
 } from "./catalog-query";
 import { changelogVersion, diffSkillVersions } from "./changelog";
 import { listSkillCategorySlugs } from "./listing";
+import { readSkillOverviews } from "./overview-repository";
 import { skillCategoryDefinitions } from "./taxonomy";
 
 /**
@@ -319,6 +321,8 @@ async function selectMarketSkillSummaries(input: {
   where: SQL | undefined;
   orderBy: SQL[];
   limit: number;
+  // Adds each summary's `aiSummary` in this language.
+  locale?: MarketSkillLocale;
 }): Promise<Array<MarketSkillSummary & { id: string }>> {
   const rows = await db
     .select(summaryColumns)
@@ -328,13 +332,39 @@ async function selectMarketSkillSummaries(input: {
     .where(and(publicMarketSkillCondition(), input.where))
     .orderBy(...input.orderBy)
     .limit(input.limit);
-  const categories = await listSkillCategorySlugs(
-    rows.map((row) => row.definition.id),
-  );
+  const [categories, aiSummaries] = await Promise.all([
+    listSkillCategorySlugs(rows.map((row) => row.definition.id)),
+    input.locale
+      ? readMarketSkillAiSummaries(rows, input.locale)
+      : Promise.resolve(null),
+  ]);
   return rows.map((row) => ({
     ...mapMarketSkillSummary(row, categories.get(row.definition.id) ?? []),
+    ...(aiSummaries
+      ? { aiSummary: aiSummaries.get(row.version.id) ?? null }
+      : {}),
     id: row.definition.id,
   }));
+}
+
+/**
+ * Each row's AI summary in `locale` (English when that one is missing), by
+ * version id. Hidden overviews are not read.
+ */
+async function readMarketSkillAiSummaries(
+  rows: ReadonlyArray<{ version: { id: string } }>,
+  locale: MarketSkillLocale,
+): Promise<Map<string, string>> {
+  const overviews = await readSkillOverviews({
+    skillVersionIds: rows.map((row) => row.version.id),
+    locale,
+  });
+  return new Map(
+    [...overviews].map(([versionId, read]) => [
+      versionId,
+      read.overview.summary,
+    ]),
+  );
 }
 
 /** Public skills by id, as summaries, in the order the ids are given. */
@@ -418,14 +448,16 @@ export async function listMarketSkills(
   ]);
 
   const pageRows = rows.slice(0, limit);
-  const categories = await listSkillCategorySlugs(
-    pageRows.map((row) => row.definition.id),
-  );
+  const [categories, aiSummaries] = await Promise.all([
+    listSkillCategorySlugs(pageRows.map((row) => row.definition.id)),
+    readMarketSkillAiSummaries(pageRows, input.locale ?? "en"),
+  ]);
   const last = pageRows.at(-1);
   return {
-    items: pageRows.map((row) =>
-      mapMarketSkillSummary(row, categories.get(row.definition.id) ?? []),
-    ),
+    items: pageRows.map((row) => ({
+      ...mapMarketSkillSummary(row, categories.get(row.definition.id) ?? []),
+      aiSummary: aiSummaries.get(row.version.id) ?? null,
+    })),
     nextCursor:
       rows.length > limit && last
         ? encodeSkillCatalogCursor(skillCatalogCursorForRow(sort, last))
@@ -541,7 +573,9 @@ export function marketSkillFiles(
  */
 export async function findMarketSkill(
   slug: string,
+  options: { locale?: MarketSkillLocale } = {},
 ): Promise<GetMarketSkillResponse | null> {
+  const locale = options.locale ?? "en";
   const [row] = await db
     .select({ ...summaryColumns, skillMd: skillVersions.skillMd })
     .from(skillDefinitions)
@@ -551,54 +585,58 @@ export async function findMarketSkill(
     .limit(1);
   if (!row) return null;
 
-  const [categories, files, versions, sameRepository] = await Promise.all([
-    listSkillCategorySlugs([row.definition.id]),
-    db
-      .select({
-        path: skillVersionFiles.path,
-        sizeBytes: skillVersionFiles.sizeBytes,
-        mimeType: skillVersionFiles.mimeType,
-        contentHash: skillVersionFiles.contentHash,
-        // The one file whose text is public here, and only as a fallback for
-        // a version that does not carry it in `skill_md`.
-        skillMd: sql<
-          string | null
-        >`case when ${skillVersionFiles.path} = 'SKILL.md' then ${skillVersionFiles.contentText} end`,
-      })
-      .from(skillVersionFiles)
-      .where(eq(skillVersionFiles.skillVersionId, row.version.id))
-      .orderBy(skillVersionFiles.path),
-    db
-      .select({
-        version: skillVersions.version,
-        isCurrent: skillVersions.isCurrent,
-        publishedAt: skillVersions.publishedAt,
-        storagePointer: skillVersions.storagePointer,
-        manifestJson: skillVersions.manifestJson,
-      })
-      .from(skillVersions)
-      .where(
-        and(
-          eq(skillVersions.skillId, row.definition.id),
-          eq(skillVersions.status, "published"),
-        ),
-      )
-      .orderBy(desc(skillVersions.createdAt), desc(skillVersions.id))
-      // One past the list, so the oldest listed version still has the one
-      // before it to be compared with.
-      .limit(MARKET_SKILL_VERSIONS_LIMIT + 1),
-    row.definition.repoOwner && row.definition.repoName
-      ? selectMarketSkillSummaries({
-          where: and(
-            eq(skillDefinitions.repoOwner, row.definition.repoOwner),
-            eq(skillDefinitions.repoName, row.definition.repoName),
-            sql`${skillDefinitions.id} <> ${row.definition.id}`,
-          ),
-          orderBy: skillCatalogOrderBy("recommended"),
-          limit: MARKET_RELATED_SKILLS_LIMIT,
+  const [categories, files, versions, sameRepository, overviews] =
+    await Promise.all([
+      listSkillCategorySlugs([row.definition.id]),
+      db
+        .select({
+          path: skillVersionFiles.path,
+          sizeBytes: skillVersionFiles.sizeBytes,
+          mimeType: skillVersionFiles.mimeType,
+          contentHash: skillVersionFiles.contentHash,
+          // The one file whose text is public here, and only as a fallback for
+          // a version that does not carry it in `skill_md`.
+          skillMd: sql<
+            string | null
+          >`case when ${skillVersionFiles.path} = 'SKILL.md' then ${skillVersionFiles.contentText} end`,
         })
-      : Promise.resolve([]),
-  ]);
+        .from(skillVersionFiles)
+        .where(eq(skillVersionFiles.skillVersionId, row.version.id))
+        .orderBy(skillVersionFiles.path),
+      db
+        .select({
+          version: skillVersions.version,
+          isCurrent: skillVersions.isCurrent,
+          publishedAt: skillVersions.publishedAt,
+          storagePointer: skillVersions.storagePointer,
+          manifestJson: skillVersions.manifestJson,
+        })
+        .from(skillVersions)
+        .where(
+          and(
+            eq(skillVersions.skillId, row.definition.id),
+            eq(skillVersions.status, "published"),
+          ),
+        )
+        .orderBy(desc(skillVersions.createdAt), desc(skillVersions.id))
+        // One past the list, so the oldest listed version still has the one
+        // before it to be compared with.
+        .limit(MARKET_SKILL_VERSIONS_LIMIT + 1),
+      row.definition.repoOwner && row.definition.repoName
+        ? selectMarketSkillSummaries({
+            where: and(
+              eq(skillDefinitions.repoOwner, row.definition.repoOwner),
+              eq(skillDefinitions.repoName, row.definition.repoName),
+              sql`${skillDefinitions.id} <> ${row.definition.id}`,
+            ),
+            orderBy: skillCatalogOrderBy("recommended"),
+            limit: MARKET_RELATED_SKILLS_LIMIT,
+            locale,
+          })
+        : Promise.resolve([]),
+      readSkillOverviews({ skillVersionIds: [row.version.id], locale }),
+    ]);
+  const aiOverview = overviews.get(row.version.id) ?? null;
 
   const skillCategoryList = categories.get(row.definition.id) ?? [];
   const primaryCategory = skillCategoryList[0];
@@ -617,12 +655,16 @@ export async function findMarketSkill(
         ),
         orderBy: skillCatalogOrderBy("recommended"),
         limit: MARKET_RELATED_SKILLS_LIMIT,
+        locale,
       })
     : [];
 
   const registry = row.version.manifestJson.registry;
   return {
-    skill: mapMarketSkillSummary(row, skillCategoryList),
+    skill: {
+      ...mapMarketSkillSummary(row, skillCategoryList),
+      aiSummary: aiOverview?.overview.summary ?? null,
+    },
     skillMd:
       row.skillMd ??
       files.find((file) => file.skillMd !== null)?.skillMd ??
@@ -659,6 +701,16 @@ export async function findMarketSkill(
         null,
     },
     scanFlags: registry?.scan?.flags ?? [],
+    aiOverview: aiOverview
+      ? {
+          summary: aiOverview.overview.summary,
+          whatItDoes: aiOverview.overview.whatItDoes,
+          whenToUse: aiOverview.overview.whenToUse,
+          requirements: aiOverview.overview.requirements,
+          locale: aiOverview.locale,
+          generatedAt: aiOverview.generatedAt.toISOString(),
+        }
+      : null,
     related: {
       sameRepository: sameRepository.map(withoutId),
       sameCategory: sameCategory.map(withoutId),

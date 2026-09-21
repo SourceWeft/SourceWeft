@@ -300,6 +300,11 @@ export class TurnSkillSandboxAssets {
     });
   }
 
+  /** The stageable skills by staging name — what `/skills/<name>` runs. */
+  stagedSkills(): ReadonlyMap<string, EnabledSkillDescriptor> {
+    return this.skillsByName;
+  }
+
   /** True while there is anything a /skills command could be waiting on. */
   hasPlans() {
     return this.skillsByName.size > 0 || this.rejectedByName.size > 0;

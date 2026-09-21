@@ -97,6 +97,7 @@
     "ioredis": "^5.11.1",
     "langchain": "^1.5.10",
     "music-metadata": "^11.14.0",
+    "opencc-js": "^1.4.2",
     "pdfjs-dist": "^6.2.108",
     "pg": "^8.23.0",
     "pino": "^10.3.1",

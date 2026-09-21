@@ -22,6 +22,8 @@ import {
 import { processSyncModelPricingJob } from "./processors/sync-model-pricing";
 import { processProviderCostReconciliationJob } from "../shared/model-gateway/provider-cost-reconciliation";
 import { processThreadTitleGenerateJob } from "./processors/thread-title";
+import { processSkillOverviewGenerateJob } from "./processors/skill-overview-generate";
+import { SKILL_OVERVIEW_GENERATE_JOB } from "../modules/skills/market/overview-queue";
 import {
   handleSkillIngestJobFailure,
   processSkillRegistryIngestJob,
@@ -56,6 +58,7 @@ const primaryProcessors: Record<string, JobProcessor> = {
   "reconcile-provider-cost": processProviderCostReconciliationJob,
   "thread-chat-run": processThreadChatRunJob,
   "thread-title-generate": processThreadTitleGenerateJob,
+  [SKILL_OVERVIEW_GENERATE_JOB]: processSkillOverviewGenerateJob,
 };
 
 const skillIngestProcessors: Record<string, JobProcessor> = {

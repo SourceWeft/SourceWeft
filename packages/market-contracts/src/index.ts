@@ -300,6 +300,27 @@ export const marketSkillSummarySchema = z.object({
   repoArchived: z.boolean().default(false),
   // The repository's author claimed it on SourceWeft.
   claimed: z.boolean().default(false),
+  // An AI-written one-sentence summary in the requested language (falling
+  // back to English), or null when there is none. Model output from
+  // third-party content: plain text, render it as untrusted. Optional for
+  // answers from before it existed.
+  aiSummary: z.string().nullable().optional(),
+});
+
+// Languages the market's AI overviews are written in.
+export const marketSkillLocaleSchema = z.enum(["en", "zh-CN", "zh-TW"]);
+
+// A skill's AI-written overview, in the requested language or English when
+// that one is missing. Plain text, labelled as AI-generated wherever shown.
+export const marketSkillAiOverviewSchema = z.object({
+  summary: z.string(),
+  whatItDoes: z.string(),
+  whenToUse: z.string(),
+  // Dependencies, scripts, credentials; "" when it needs none.
+  requirements: z.string(),
+  // The language it is actually in.
+  locale: marketSkillLocaleSchema,
+  generatedAt: z.string(),
 });
 
 export const listMarketSkillsRequestSchema = z.object({
@@ -312,6 +333,8 @@ export const listMarketSkillsRequestSchema = z.object({
   limit: z.number().int().min(1).max(100).optional(),
   // Only good for the sort that produced it.
   cursor: z.string().min(1).max(1024).optional(),
+  // Language of `aiSummary`; English when omitted.
+  locale: marketSkillLocaleSchema.optional(),
 });
 
 export const listMarketSkillsResponseSchema = z.object({
@@ -392,6 +415,9 @@ export const getMarketSkillResponseSchema = z.object({
   }),
   // Advisory scan flags the current version carries (e.g. `binary:executable`).
   scanFlags: z.array(z.string()),
+  // The current version's AI-written overview (`?locale=`, English fallback);
+  // null when there is none. Optional for answers from before it existed.
+  aiOverview: marketSkillAiOverviewSchema.nullable().optional(),
   // Other public skills from the same repository and in the same category,
   // this one excluded. Optional for answers from before it existed.
   related: z
@@ -424,6 +450,8 @@ export const getMarketSkillCollectionResponseSchema = z.object({
 export type MarketSkillSort = z.infer<typeof marketSkillSortSchema>;
 export type MarketSkillCapability = z.infer<typeof marketSkillCapabilitySchema>;
 export type MarketSkillSummary = z.infer<typeof marketSkillSummarySchema>;
+export type MarketSkillLocale = z.infer<typeof marketSkillLocaleSchema>;
+export type MarketSkillAiOverview = z.infer<typeof marketSkillAiOverviewSchema>;
 export type ListMarketSkillsRequest = z.infer<
   typeof listMarketSkillsRequestSchema
 >;
