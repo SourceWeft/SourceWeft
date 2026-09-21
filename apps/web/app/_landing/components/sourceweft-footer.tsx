@@ -57,6 +57,7 @@ export function SourceWeftFooter({
     ["/#pricing", "Pricing"],
     ["/download", "Download"],
     ["/mcp", "MCP Servers"],
+    ["/skills", "Skills"],
     ["/blog", "Blog"],
     [
       authState?.isSignedIn ? "/dashboard" : "/auth/sign-in",

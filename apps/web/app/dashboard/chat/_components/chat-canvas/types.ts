@@ -205,6 +205,8 @@ export type ChatSkillItem = {
   registryCapability?: "prompt-only" | "executable";
   /** Set when the chat agent installed this skill on its own initiative. */
   installedVia?: "agent";
+  /** Set when the install is pinned behind the skill's published current version. */
+  updateAvailable?: true;
 };
 
 export type CitationRecord = {

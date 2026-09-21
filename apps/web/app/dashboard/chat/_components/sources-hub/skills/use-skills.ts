@@ -20,6 +20,8 @@ export type HubSkillItem = {
   tools?: string[];
   registryCapability?: "prompt-only" | "executable";
   installedVia?: "agent";
+  /** The install is pinned behind the skill's published current version. */
+  updateAvailable?: true;
 };
 
 export type SkillIconSpec = Pick<

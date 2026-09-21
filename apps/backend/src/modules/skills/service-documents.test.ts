@@ -22,7 +22,10 @@ const input = {
 };
 function service(
   item: Partial<SkillCatalogItem> = {},
-  ownerUserId: string | null = "submitter",
+  stored: { visibility: string; ownerUserId: string | null } = {
+    visibility: "restricted",
+    ownerUserId: "submitter",
+  },
 ) {
   const instance = new ContentSkillsService();
   // The detail resolves its item with a direct query; stub that seam so these
@@ -42,10 +45,10 @@ function service(
   } as SkillCatalogItem);
   vi.spyOn(
     instance as unknown as {
-      findSkillOwnerUserId: () => Promise<string | null>;
+      findSkillTextAccess: () => Promise<typeof stored | null>;
     },
-    "findSkillOwnerUserId",
-  ).mockResolvedValue(ownerUserId);
+    "findSkillTextAccess",
+  ).mockResolvedValue(stored);
   listCatalog = vi.spyOn(instance, "listCatalog");
   return instance;
 }
@@ -82,7 +85,7 @@ const documents = {
   skillContent: "# Instructions",
 };
 
-test("a stranger gets a community skill's listing but not its text", async () => {
+test("a stranger gets a restricted community skill's listing but not its text", async () => {
   mocks.getRegistryVersionDetail.mockResolvedValue(documents);
   const result = await service().getCatalogSkillDetail({
     ...input,
@@ -96,7 +99,27 @@ test("a stranger gets a community skill's listing but not its text", async () =>
   expect(result.readmePath).toBe("README.md");
 });
 
-test("a workspace that installed it, its submitter and a market admin get the full text", async () => {
+// Once a skill is public it is on the market, and the market shows what it
+// lists (skill-marketplace-plan.md §3).
+test("a public community skill's text is for everyone", async () => {
+  mocks.getRegistryVersionDetail.mockResolvedValue(documents);
+  const stranger = { ...input, userId: "stranger" };
+  // Known from the catalog item, or only from the stored definition.
+  const fromItem = await service({
+    visibility: "public",
+  }).getCatalogSkillDetail(stranger);
+  const fromStore = await service(
+    {},
+    { visibility: "public", ownerUserId: "submitter" },
+  ).getCatalogSkillDetail(stranger);
+  for (const result of [fromItem, fromStore]) {
+    expect(result.skillContent).toBe("# Instructions");
+    expect(result.readmeContent).toBe("# Author introduction");
+    expect("contentRestricted" in result).toBe(false);
+  }
+});
+
+test("a restricted skill: the workspace that installed it, its submitter and a market admin get the full text", async () => {
   mocks.getRegistryVersionDetail.mockResolvedValue(documents);
   const stranger = { ...input, userId: "stranger" };
 

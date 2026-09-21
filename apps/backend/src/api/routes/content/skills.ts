@@ -128,8 +128,28 @@ export function registerSkillRoutes(app: Hono) {
       limit: parsed.data.limit,
       cursor: parsed.data.cursor,
       query: parsed.data.q,
+      sort: parsed.data.sort,
+      filters: {
+        category: parsed.data.category,
+        trust: parsed.data.trust,
+        capability: parsed.data.capability,
+        installed: parsed.data.installed,
+      },
     });
     return ApiResponse.success(c, result);
+  });
+
+  // Registered before `/skills/catalog/:catalogId`, like `by-slug` below: Hono
+  // matches in registration order, and that route would otherwise take
+  // `categories` for a catalogId.
+  app.get("/skills/catalog/categories", async (c) => {
+    const { session } = await resolveSkillContext(c);
+    return ApiResponse.success(
+      c,
+      await contentSkillsService.listCatalogCategories({
+        userId: getSessionUserId(session),
+      }),
+    );
   });
 
   // Registered before `/skills/catalog/:catalogId`: Hono matches in

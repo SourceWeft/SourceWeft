@@ -110,6 +110,13 @@ export const workspaceInstalledSkillSchema = z.object({
   // `agent`: the chat agent installed it on its own initiative.
   installedVia: z.enum(["user", "agent"]).default("user"),
   enabledAt: z.string().nullable(),
+  // An install pins one version. `currentVersionId` is the skill's published
+  // current version (null while there is none, e.g. the newest one is still
+  // under review); `updateAvailable` says it is not the pinned one. Optional so
+  // an older API answering a newer client reads as "no update", never as an
+  // error.
+  currentVersionId: z.string().nullable().optional(),
+  updateAvailable: z.boolean().optional(),
   // Registry entries only: whether the bundle ships runnable scripts. Surfaced
   // because an `executable` skill installs DISABLED — the UI has to be able to
   // say WHY it is off, or a skill the user asked for looks broken rather than
@@ -187,6 +194,13 @@ export const skillCatalogItemSchema = z.object({
   sourceUrl: z.string().nullable().optional(),
   license: z.string().nullable().optional(),
   flagged: z.boolean().optional(),
+  // Market surface of a community skill (undefined for builtins and a
+  // workspace's own skills). For these entries `categories` holds the market's
+  // category slugs and `verified` is the market admin's grant.
+  installCount: z.number().int().nonnegative().optional(),
+  // When the skill first went public; null while it is not listed.
+  listedAt: z.string().nullable().optional(),
+  capability: z.enum(["prompt-only", "executable"]).nullable().optional(),
 });
 
 export const skillManifestJsonSchema = z.object({
@@ -226,6 +240,38 @@ export const SKILLS_CATALOG_MAX_PAGE_SIZE = 100;
 // rest of the catalog (builtins, the workspace's and team's own skills) is a
 // small bounded set returned whole on the first page. `cursor` is the opaque
 // `nextCursor` of the previous page.
+// `recommended` = verified first, then most installed, then newest.
+export const skillCatalogSortSchema = z.enum([
+  "recommended",
+  "popular",
+  "new",
+  "name",
+]);
+export type SkillCatalogSort = z.infer<typeof skillCatalogSortSchema>;
+// `builtin` = ours; `verified` = a market admin vouched for it; `community` =
+// everything else anyone imported.
+export const skillCatalogTrustSchema = z.enum([
+  "all",
+  "builtin",
+  "verified",
+  "community",
+]);
+export type SkillCatalogTrust = z.infer<typeof skillCatalogTrustSchema>;
+export const skillCatalogCapabilitySchema = z.enum([
+  "all",
+  "prompt-only",
+  "executable",
+]);
+export type SkillCatalogCapability = z.infer<
+  typeof skillCatalogCapabilitySchema
+>;
+export const skillCatalogInstalledSchema = z.enum([
+  "all",
+  "installed",
+  "not_installed",
+]);
+export type SkillCatalogInstalled = z.infer<typeof skillCatalogInstalledSchema>;
+
 export const listSkillsCatalogQuerySchema = z.object({
   limit: z.coerce
     .number()
@@ -235,6 +281,15 @@ export const listSkillsCatalogQuerySchema = z.object({
     .default(SKILLS_CATALOG_DEFAULT_PAGE_SIZE),
   cursor: z.string().min(1).max(1024).optional(),
   q: z.string().trim().max(200).optional(),
+  // Market filters, all applied in SQL so a page is `limit` matching skills —
+  // not `limit` skills of which some match.
+  category: z.string().trim().min(1).max(64).optional(),
+  trust: skillCatalogTrustSchema.default("all"),
+  capability: skillCatalogCapabilitySchema.default("all"),
+  installed: skillCatalogInstalledSchema.default("all"),
+  // Orders the community skills. A cursor is only good for the sort that
+  // produced it; the server answers INVALID_CURSOR otherwise.
+  sort: skillCatalogSortSchema.default("recommended"),
 });
 
 export const listSkillsCatalogResponseSchema = z.object({
@@ -242,6 +297,45 @@ export const listSkillsCatalogResponseSchema = z.object({
   // null once the last page has been served.
   nextCursor: z.string().nullable(),
 });
+
+// GET /skills/catalog/categories — the market's categories with how many
+// community skills this viewer would find under each. Categories with none are
+// included (count 0) so the list does not reshuffle as the catalog grows.
+export const skillCatalogCategorySchema = z.object({
+  slug: z.string(),
+  name: z.string(),
+  description: z.string().nullable(),
+  count: z.number().int().nonnegative(),
+});
+export type SkillCatalogCategory = z.infer<typeof skillCatalogCategorySchema>;
+export const listSkillCatalogCategoriesResponseSchema = z.object({
+  items: z.array(skillCatalogCategorySchema),
+});
+export type ListSkillCatalogCategoriesResponse = z.infer<
+  typeof listSkillCatalogCategoriesResponseSchema
+>;
+
+// Market admin: a community skill's standing on the public market.
+// GET /v1/skills/registry/admin/skills/:skillId/market, and the body every
+// market admin action answers with.
+export const skillMarketStandingSchema = z.object({
+  skillId: z.string(),
+  slug: z.string(),
+  visibility: z.enum(["public", "restricted"]),
+  // Withdrawn by an admin: the auto-listing pass leaves it alone.
+  listingHold: z.boolean(),
+  verified: z.boolean(),
+  categorySlugs: z.array(z.string()),
+  installCount: z.number().int().nonnegative(),
+  listedAt: z.string().nullable(),
+});
+export type SkillMarketStanding = z.infer<typeof skillMarketStandingSchema>;
+export const setSkillMarketVerifiedRequestSchema = z
+  .object({ verified: z.boolean() })
+  .strict();
+export const setSkillMarketCategoriesRequestSchema = z
+  .object({ categorySlugs: z.array(z.string().min(1).max(64)).min(1).max(5) })
+  .strict();
 
 // GET /skills/registry/search?q= — relevance-ranked registry entries sharing the
 // SkillCatalogItem shape (so the gallery reuses the same card). `q` < 2 chars
@@ -436,6 +530,11 @@ export type ListSkillsCatalogParams = {
   limit?: number;
   cursor?: string;
   q?: string;
+  category?: string;
+  trust?: SkillCatalogTrust;
+  capability?: SkillCatalogCapability;
+  installed?: SkillCatalogInstalled;
+  sort?: SkillCatalogSort;
 };
 export type ListSkillsCatalogResponse = z.infer<
   typeof listSkillsCatalogResponseSchema

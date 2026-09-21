@@ -1,11 +1,15 @@
 import {
   getMarketMcpManifestResponseSchema,
   getMarketMcpResponseSchema,
+  getMarketSkillResponseSchema,
   listMarketCategoriesResponseSchema,
   listMarketKeysResponseSchema,
   listMarketMcpResponseSchema,
+  listMarketSkillCategoriesResponseSchema,
+  listMarketSkillsResponseSchema,
   marketCategoryCountsResponseSchema,
   type ListMarketMcpRequest,
+  type ListMarketSkillsRequest,
 } from "@sourceweft/market-contracts";
 
 export type MarketClientOptions = {
@@ -57,6 +61,55 @@ export class MarketClient {
     this.baseUrl = options.baseUrl.replace(/\/+$/, "");
     this.getToken = options.getToken;
     this.fetchImpl = options.fetch ?? fetch;
+  }
+
+  /** One page of the public skill market. */
+  listSkills(input: ListMarketSkillsRequest = {}) {
+    const params = new URLSearchParams();
+    if (input.query) {
+      params.set("query", input.query);
+    }
+    if (input.category) {
+      params.set("category", input.category);
+    }
+    if (typeof input.verified === "boolean") {
+      params.set("verified", String(input.verified));
+    }
+    if (input.capability) {
+      params.set("capability", input.capability);
+    }
+    if (input.sort) {
+      params.set("sort", input.sort);
+    }
+    if (input.limit !== undefined) {
+      params.set("limit", String(input.limit));
+    }
+    if (input.cursor) {
+      params.set("cursor", input.cursor);
+    }
+    return this.request(
+      appendQuery("/v1/skills", params),
+      { method: "GET" },
+      listMarketSkillsResponseSchema,
+    );
+  }
+
+  /** Every skill category with its public count. */
+  listSkillCategories() {
+    return this.request(
+      "/v1/skills/categories",
+      { method: "GET" },
+      listMarketSkillCategoriesResponseSchema,
+    );
+  }
+
+  /** A public skill: listing, SKILL.md, file manifest, versions, source. */
+  getSkill(slug: string) {
+    return this.request(
+      `/v1/skills/${encode(slug)}`,
+      { method: "GET" },
+      getMarketSkillResponseSchema,
+    );
   }
 
   listMcp(input: ListMarketMcpRequest = {}) {

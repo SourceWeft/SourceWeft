@@ -439,7 +439,10 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       expect(fake.calls).toEqual({ resolve: 2, download: 2 });
     });
 
-    test("a compiled binary in the bundle holds the skill for review, stored but not published", async () => {
+    // `binary:executable` is advisory (scan.ts `ADVISORY_SCAN_FLAGS`): recorded
+    // and named per file, but the importer can use their own skill straight
+    // away. Whether it is shown to anyone else is a separate, admin decision.
+    test("a compiled binary in the bundle is flagged but does not hold the skill for review", async () => {
       const repoName = `bin${tag}`;
       const fake = github({
         repo: repoName,
@@ -461,7 +464,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       });
       const [result] = (await fresh(submission.id)).results;
       expect(result).toMatchObject({
-        status: "queued",
+        status: "indexed",
         flags: ["binary:executable"],
       });
       expect(result!.diagnostics).toEqual([
@@ -471,10 +474,10 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
         .select()
         .from(data.skillVersions)
         .where(eq(data.skillVersions.id, result!.skillVersionId!));
-      expect(version).toMatchObject({ status: "draft", isCurrent: false });
+      expect(version).toMatchObject({ status: "published", isCurrent: true });
       expect(version!.manifestJson.registry).toMatchObject({
         capability: "executable",
-        scan: { reviewRequired: true, flags: ["binary:executable"] },
+        scan: { reviewRequired: false, flags: ["binary:executable"] },
       });
       expect(version!.manifestJson.registry!.ingestion!.findings).toEqual([
         { ruleId: "binary:executable", file: "bin/tool" },

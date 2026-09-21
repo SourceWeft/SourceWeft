@@ -13,6 +13,10 @@ import { contentSourceService } from "../modules/sources";
 import { scheduleConnectorSyncs } from "./schedules/connectors";
 import { scheduleMarketFederation } from "./schedules/market-federation";
 import {
+  scheduleSkillMarketUpkeep,
+  SKILL_MARKET_INTERVAL_MS,
+} from "./schedules/skill-market";
+import {
   reconcileBillingSchedule as reconcileTeamSubscriptionsSchedule,
   billingSchedulesEnabled,
 } from "../billing-host/bindings";
@@ -109,6 +113,18 @@ async function marketFederationTick() {
   }
 }
 
+async function skillMarketTick() {
+  if (!config.market.enabled) {
+    return;
+  }
+  try {
+    await scheduleSkillMarketUpkeep();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error("Failed to run skill market upkeep", { message });
+  }
+}
+
 void tick();
 const timer = setInterval(() => {
   void tick();
@@ -123,6 +139,11 @@ const marketFederationTimer = setInterval(() => {
   void marketFederationTick();
 }, config.market.federationIntervalMs);
 
+void skillMarketTick();
+const skillMarketTimer = setInterval(() => {
+  void skillMarketTick();
+}, SKILL_MARKET_INTERVAL_MS);
+
 logger.info("Scheduler started", {
   intervalMs: config.schedulerIntervalMs,
   modelPricingSyncIntervalMs: config.modelPricingSyncIntervalMs,
@@ -134,6 +155,7 @@ async function shutdown() {
   clearInterval(timer);
   clearInterval(modelPricingSyncTimer);
   clearInterval(marketFederationTimer);
+  clearInterval(skillMarketTimer);
   logger.info("Scheduler shutting down");
   await closeQueue();
   process.exit(0);

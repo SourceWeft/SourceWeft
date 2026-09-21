@@ -79,6 +79,14 @@ const sections = [
     ],
   },
   {
+    title: "Third-Party Skills and Indexed Content",
+    body: [
+      "The SourceWeft skill directory indexes skills that their authors have published in public repositories. Those skills remain the property of their original authors and are offered under the licenses their authors chose. SourceWeft displays them with attribution to the source repository and the indexed commit, and does not claim ownership of them.",
+      "Review a skill's license and contents before you install or rely on it. We do not author indexed skills or guarantee that they are accurate, safe, or fit for your purpose.",
+      "If you hold rights in an indexed skill and want it removed, contact us at support@sourceweft.com with the skill's name or URL. We will remove it and will not list it again.",
+    ],
+  },
+  {
     title: "Intellectual Property",
     body: [
       "SourceWeft and its software, design, trademarks, documentation, and service materials are owned by SourceWeft or its licensors. These Terms do not grant you any ownership rights in SourceWeft.",

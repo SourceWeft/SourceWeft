@@ -130,6 +130,7 @@ function workspaceInstalledSkillToChatSkill(
       ? { registryCapability: skill.registryCapability }
       : {}),
     ...(skill.installedVia === "agent" ? { installedVia: "agent" } : {}),
+    ...(skill.updateAvailable === true ? { updateAvailable: true } : {}),
   };
 }
 

@@ -87,6 +87,9 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
           ...viewer,
           limit: options.limit,
           query: options.query,
+          // These tests are about paging as such and assert the name order;
+          // the market's sorts have their own suite (market/catalog-market).
+          sort: "name",
           cursor,
         });
         pages.push(page.items.map((item) => item.slug));
@@ -211,7 +214,11 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
     });
 
     test("by-slug finds a skill beyond the first page without listing the catalog", async () => {
-      const firstPage = await service.listCatalog({ ...stranger, query: tag });
+      const firstPage = await service.listCatalog({
+        ...stranger,
+        query: tag,
+        sort: "name",
+      });
       assert.equal(firstPage.items.length, 50);
       assert.ok(firstPage.nextCursor);
       assert.ok(!firstPage.items.some((item) => item.slug === lastSlug));

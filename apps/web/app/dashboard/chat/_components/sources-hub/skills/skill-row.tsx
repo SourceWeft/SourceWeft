@@ -1,7 +1,10 @@
 import type { MouseEvent } from "react";
+import Link from "next/link";
+import { ArrowUpCircle } from "lucide-react";
 
 import { Checkbox } from "@sourceweft/ui-web/components/ui/checkbox";
 import { SkillAvatar } from "../../../../skills/_components/skill-avatar";
+import { skillsMarketCopy } from "../../../../skills/_components/skills-market-copy";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { TypeBadge } from "../type-badge";
 import {
@@ -9,6 +12,11 @@ import {
   type HubSkillItem,
   type SkillIconSpec,
 } from "./use-skills";
+
+/** The skill's dashboard page, opened at its version control. */
+export function skillUpdateHref(slug: string) {
+  return `/dashboard/skills/${encodeURIComponent(slug)}#versions`;
+}
 
 export function SkillRow({
   icon,
@@ -88,6 +96,22 @@ export function SkillRow({
           */}
           {skill.installedVia === "agent" ? (
             <TypeBadge label="Added by agent" />
+          ) : null}
+          {/*
+            An install stays on the version it was made with. This only points
+            at the skill's page, where updating asks first when the newer
+            version can do more — nothing is updated from here. Only community
+            skills have that version switch.
+          */}
+          {skill.updateAvailable && skill.sourceType === "registry_github" ? (
+            <Link
+              className="inline-flex items-center gap-1 rounded-md border border-primary/30 bg-primary/5 px-1.5 py-0.5 text-[10px] font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              href={skillUpdateHref(skill.slug)}
+              title={skillsMarketCopy.updates.hubBadgeTitle}
+            >
+              <ArrowUpCircle aria-hidden className="size-3" />
+              {skillsMarketCopy.updates.hubBadge}
+            </Link>
           ) : null}
           {/*
             A switched-off skill that ships scripts says so, so whoever turns it

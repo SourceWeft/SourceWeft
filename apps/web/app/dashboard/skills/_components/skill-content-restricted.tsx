@@ -1,10 +1,16 @@
 import { ExternalLink, Lock } from "lucide-react";
+import { skillsMarketCopy } from "./skills-market-copy";
+
+const copy = skillsMarketCopy.detail;
 
 /**
  * Shown in place of a community skill's SKILL.md / README when the server
- * withheld them (`contentRestricted`): the catalog indexes other people's
- * repositories, so the full text goes to workspaces that installed the skill.
- * The listing around it — description, license, scan state, files — is complete.
+ * withheld them (`contentRestricted`). That only happens for a skill that is
+ * NOT publicly listed (restricted, or withdrawn from the market) and that this
+ * viewer has no claim to — they have not installed it, did not submit it and
+ * are not a market admin. A public skill always carries its full text. The
+ * listing around the notice — description, license, scan state, files — is
+ * complete either way.
  */
 export function SkillContentRestricted({
   description,
@@ -23,17 +29,17 @@ export function SkillContentRestricted({
       >
         <Lock className="mt-0.5 size-4 shrink-0" />
         <span>
-          Install to read the full instructions
+          {copy.restrictedNotice}
           {sourceUrl ? (
             <>
-              {" — or "}
+              {copy.restrictedSourceJoin}
               <a
                 className="inline-flex items-center gap-1 font-medium text-foreground underline-offset-4 hover:underline"
                 href={sourceUrl}
                 rel="noreferrer noopener"
                 target="_blank"
               >
-                view the source
+                {copy.restrictedSourceLink}
                 <ExternalLink className="size-3.5" />
               </a>
             </>

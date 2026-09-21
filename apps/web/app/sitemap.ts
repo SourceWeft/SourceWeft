@@ -5,9 +5,17 @@ import {
   listPublishedBlogSitemapEntries,
 } from "../lib/blog-db";
 import { listPublicMcp, listPublicMcpCategories } from "../lib/market-mcp";
+import {
+  listPublicSkillCategories,
+  listPublicSkills,
+} from "../lib/market-skills";
 import { blogTagPath } from "./blog/_components/blog-list";
 import { mcpCategoryPath } from "./mcp/_components/mcp-display";
 import { isIndexableListing, SITE_URL } from "./seo";
+import {
+  skillCategoryPath,
+  skillPath,
+} from "./skills/_components/skills-format";
 
 export const dynamic = "force-dynamic";
 
@@ -37,16 +45,52 @@ async function listAllPublicMcpItems() {
   return items;
 }
 
+const SKILL_SITEMAP_PAGE_LIMIT = 100;
+const SKILL_SITEMAP_MAX_PAGES = 50;
+
+// Same cursor walk as the MCP market. `new` sorts on the immutable listing
+// date, so a skill cannot move between pages while the walk is in progress. A
+// market outage yields an empty page from the swallowing wrapper, which ends
+// the walk and leaves the rest of the sitemap intact.
+async function listAllPublicSkills() {
+  const items: Awaited<ReturnType<typeof listPublicSkills>>["items"] = [];
+  let cursor: string | null = null;
+
+  for (let page = 0; page < SKILL_SITEMAP_MAX_PAGES; page += 1) {
+    const response: Awaited<ReturnType<typeof listPublicSkills>> =
+      await listPublicSkills({
+        cursor: cursor ?? undefined,
+        limit: SKILL_SITEMAP_PAGE_LIMIT,
+        sort: "new",
+      });
+    items.push(...response.items);
+    cursor = response.nextCursor;
+    if (!cursor) {
+      break;
+    }
+  }
+
+  return items;
+}
+
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   // Static marketing routes have no real edit timestamp; claiming "now" on every
   // request tells crawlers they change constantly, so they carry no lastModified.
-  const [blogPosts, blogPostSummaries, mcpItems, mcpCategories] =
-    await Promise.all([
-      listPublishedBlogSitemapEntries(),
-      listPublishedBlogPosts(),
-      listAllPublicMcpItems(),
-      listPublicMcpCategories(),
-    ]);
+  const [
+    blogPosts,
+    blogPostSummaries,
+    mcpItems,
+    mcpCategories,
+    skills,
+    skillCategories,
+  ] = await Promise.all([
+    listPublishedBlogSitemapEntries(),
+    listPublishedBlogPosts(),
+    listAllPublicMcpItems(),
+    listPublicMcpCategories(),
+    listAllPublicSkills(),
+    listPublicSkillCategories(),
+  ]);
 
   // Listing pages below the threshold render with noindex, so submitting them
   // here would contradict that signal.
@@ -67,6 +111,11 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
   const indexableCategories = mcpCategories.items.filter((category) =>
     isIndexableListing(countByCategory.get(category.slug.toLowerCase()) ?? 0),
+  );
+  // The skill categories endpoint carries its own public counts, and the
+  // category page reads the same number for its noindex decision.
+  const indexableSkillCategories = skillCategories.items.filter((category) =>
+    isIndexableListing(category.count),
   );
   const indexableTags = [...countByTag.entries()].filter(([, count]) =>
     isIndexableListing(count),
@@ -113,6 +162,11 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       priority: 0.7,
       url: `${SITE_URL}/mcp`,
     },
+    {
+      changeFrequency: "daily",
+      priority: 0.7,
+      url: `${SITE_URL}/skills`,
+    },
     ...blogPosts.map((post) => ({
       changeFrequency: "monthly" as const,
       lastModified: post.updatedAt ?? post.publishedAt ?? undefined,
@@ -135,5 +189,20 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       priority: 0.55,
       url: `${SITE_URL}/mcp/${encodeURIComponent(item.identifier)}`,
     })),
+    ...indexableSkillCategories.map((category) => ({
+      changeFrequency: "weekly" as const,
+      priority: 0.5,
+      url: `${SITE_URL}${skillCategoryPath(category.slug)}`,
+    })),
+    ...skills.map((skill) => {
+      const modified = new Date(skill.updatedAt ?? skill.listedAt);
+      return {
+        changeFrequency: "weekly" as const,
+        // One unparseable date must not throw away the whole sitemap.
+        lastModified: Number.isNaN(modified.getTime()) ? undefined : modified,
+        priority: 0.55,
+        url: `${SITE_URL}${skillPath(skill.slug)}`,
+      };
+    }),
   ];
 }

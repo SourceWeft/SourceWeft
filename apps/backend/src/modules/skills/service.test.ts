@@ -10,7 +10,11 @@ const {
   skillSearchRelevanceRank,
   compareSkillSearchRelevance,
   mapCatalogRow,
+  registrySkillTextReadable,
 } = testExports;
+
+// A definition the market has not touched: unlisted, unverified, no installs.
+const unlisted = { verified: false, installCount: 0, listedAt: null };
 
 type CatalogRowParam = Parameters<typeof mapCatalogRow>[0];
 
@@ -36,6 +40,7 @@ function catalogRow(input: {
   displayName: string;
   description: string;
   manifest: SkillManifestJson;
+  market?: { verified: boolean; installCount: number; listedAt: Date | null };
 }): CatalogRowParam {
   return {
     definition: {
@@ -49,6 +54,8 @@ function catalogRow(input: {
       visibility: input.visibility,
       status: "active",
       ownerUserId: input.ownerUserId,
+      ...(input.market ?? unlisted),
+      listingHold: false,
       createdAt: new Date(),
       updatedAt: new Date(),
     },
@@ -160,6 +167,7 @@ test("registryCatalogFields: Community publisher, unverified, attribution from m
       license: "MIT",
       fileManifest: [],
     }),
+    unlisted,
   );
   assert.equal(fields.publisher, "Community");
   assert.equal(fields.verified, false);
@@ -172,12 +180,112 @@ test("registryCatalogFields: Community publisher, unverified, attribution from m
 });
 
 test("registryCatalogFields: safe defaults when the registry block is absent", () => {
-  const fields = registryCatalogFields(registryManifest(undefined));
+  const fields = registryCatalogFields(registryManifest(undefined), unlisted);
   assert.equal(fields.publisher, "Community");
   assert.equal(fields.verified, false);
   assert.equal(fields.sourceUrl, null);
   assert.equal(fields.license, null);
   assert.equal(fields.flagged, false);
+  assert.equal(fields.capability, null);
+  assert.equal(fields.listedAt, null);
+  assert.equal(fields.installCount, 0);
+});
+
+// `verified` is the admin's grant on the definition. A manifest is the
+// author's own words, so nothing in it can set the flag.
+test("registryCatalogFields: verified and the market numbers come from the definition", () => {
+  const listedAt = new Date("2026-09-01T00:00:00.000Z");
+  const fields = registryCatalogFields(
+    {
+      ...registryManifest({
+        identifier: "gh:owner/repo",
+        sourceUrl: "https://github.com/owner/repo",
+        repoUrl: "https://github.com/owner/repo",
+        submittedBy: "submitter",
+        capability: "executable",
+        scan: { reviewRequired: false, flags: [] },
+        fileManifest: [],
+      }),
+      verified: true,
+    } as SkillManifestJson,
+    { verified: false, installCount: 7, listedAt },
+  );
+  assert.equal(fields.verified, false);
+  assert.equal(fields.installCount, 7);
+  assert.equal(fields.listedAt, "2026-09-01T00:00:00.000Z");
+  assert.equal(fields.capability, "executable");
+  assert.equal(
+    registryCatalogFields(registryManifest(undefined), {
+      ...unlisted,
+      verified: true,
+    }).verified,
+    true,
+  );
+});
+
+test("mapCatalogRow: a registry row's categories are the market's, not the manifest's", () => {
+  const row = catalogRow({
+    id: "reg-cat",
+    sourceType: "registry_github",
+    visibility: "public",
+    ownerUserId: "submitter",
+    displayName: "Repo Skill",
+    description: "A community skill.",
+    manifest: { ...registryManifest(undefined), categories: ["self-styled"] },
+    market: { verified: true, installCount: 3, listedAt: null },
+  });
+  const item = mapCatalogRow(row, { categorySlugs: ["documents-office"] });
+  assert.deepEqual(item.categories, ["documents-office"]);
+  assert.equal(item.verified, true);
+  assert.equal(item.installCount, 3);
+  // Without the market's answer there is nothing to show — never the manifest's.
+  assert.deepEqual(mapCatalogRow(row).categories, []);
+
+  const own = mapCatalogRow(
+    catalogRow({
+      id: "cus-cat",
+      sourceType: "workspace_custom",
+      visibility: "workspace",
+      ownerUserId: "author",
+      displayName: "Custom Skill",
+      description: "A workspace skill.",
+      manifest: { ...registryManifest(undefined), categories: ["notes"] },
+    }),
+  );
+  assert.deepEqual(own.categories, ["notes"]);
+  assert.equal(own.installCount, undefined);
+});
+
+// --- who reads a community skill's full text ---
+
+test("registrySkillTextReadable: a public skill's text is for everyone", () => {
+  assert.equal(
+    registrySkillTextReadable({
+      visibility: "public",
+      installed: false,
+      isOwner: false,
+      isMarketAdmin: false,
+    }),
+    true,
+  );
+});
+
+test("registrySkillTextReadable: a restricted skill's text needs a reason to hold it", () => {
+  const stranger = {
+    visibility: "restricted",
+    installed: false,
+    isOwner: false,
+    isMarketAdmin: false,
+  };
+  assert.equal(registrySkillTextReadable(stranger), false);
+  assert.equal(registrySkillTextReadable({ ...stranger, installed: true }), true);
+  assert.equal(registrySkillTextReadable({ ...stranger, isOwner: true }), true);
+  assert.equal(
+    registrySkillTextReadable({ ...stranger, isMarketAdmin: true }),
+    true,
+  );
+  // A skill that could not be found is nobody's to read.
+  assert.equal(registrySkillTextReadable({ ...stranger, visibility: null }), false);
 });
 
 test("mapCatalogRow: registry rows carry Community/attribution; others do not", () => {

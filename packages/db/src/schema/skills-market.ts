@@ -179,6 +179,21 @@ export const skillDefinitions = pgTable(
       .notNull()
       .default("active"),
     ownerUserId: text("owner_user_id"),
+    // Marketplace columns, owned by `modules/skills/market` — nothing in the
+    // ingest path writes them.
+    //
+    // When the skill first became public. Set once and never moved, so it is a
+    // stable keyset key for "newest": re-listing or a new version must not
+    // reshuffle pages someone is scrolling through.
+    listedAt: timestamp("listed_at", { withTimezone: true, mode: "date" }),
+    // Granted by a market admin only; never read from a manifest.
+    verified: boolean("verified").notNull().default(false),
+    // Refreshed by the scheduler from `workspace_skills`, so sorting by
+    // popularity does not put a write on the install path.
+    installCount: integer("install_count").notNull().default(0),
+    // An admin took this off the public market. The auto-listing pass skips it,
+    // so a withdrawn skill does not come back on the next tick.
+    listingHold: boolean("listing_hold").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .defaultNow(),
@@ -214,6 +229,56 @@ export const skillDefinitions = pgTable(
       table.workspaceId,
       table.status,
     ),
+    index("skill_definitions_market_new_idx").on(
+      table.visibility,
+      table.status,
+      desc(table.listedAt),
+      desc(table.id),
+    ),
+    index("skill_definitions_market_popular_idx").on(
+      table.visibility,
+      table.status,
+      desc(table.installCount),
+      desc(table.id),
+    ),
+    check(
+      "skill_definitions_install_count_check",
+      sql`${table.installCount} >= 0`,
+    ),
+  ],
+);
+
+// The skill market's own taxonomy. Deliberately not `market_categories`: that
+// table is the MCP catalog's, and sharing it would put a `kind` filter on every
+// MCP category query for no gain.
+export const skillCategories = pgTable(
+  "skill_categories",
+  {
+    id: text("id").primaryKey(),
+    slug: text("slug").notNull(),
+    name: text("name").notNull(),
+    description: text("description"),
+    sortOrder: integer("sort_order").notNull().default(0),
+  },
+  (table) => [uniqueIndex("skill_categories_slug_uq").on(table.slug)],
+);
+
+export const skillDefinitionCategories = pgTable(
+  "skill_definition_categories",
+  {
+    skillId: text("skill_id")
+      .notNull()
+      .references(() => skillDefinitions.id, { onDelete: "cascade" }),
+    categoryId: text("category_id")
+      .notNull()
+      .references(() => skillCategories.id, { onDelete: "cascade" }),
+  },
+  (table) => [
+    primaryKey({
+      name: "skill_definition_categories_pk",
+      columns: [table.skillId, table.categoryId],
+    }),
+    index("skill_definition_categories_category_idx").on(table.categoryId),
   ],
 );
 

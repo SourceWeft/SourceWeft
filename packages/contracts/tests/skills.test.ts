@@ -7,6 +7,7 @@ import {
   listSkillsCatalogQuerySchema,
   skillSubmissionSchema,
   skillManifestJsonSchema,
+  workspaceInstalledSkillSchema,
 } from "../src/skills";
 
 function manifest(defaultEnabled?: boolean) {
@@ -37,15 +38,54 @@ test("skill manifest preserves an explicit default selection independently of vi
 });
 
 test("catalog query defaults to one page of 50 and refuses out-of-range paging", () => {
-  assert.deepEqual(listSkillsCatalogQuerySchema.parse({}), { limit: 50 });
+  // With nothing asked for: the whole catalog, in the recommended order.
+  const unfiltered = {
+    trust: "all",
+    capability: "all",
+    installed: "all",
+    sort: "recommended",
+  };
+  assert.deepEqual(listSkillsCatalogQuerySchema.parse({}), {
+    limit: 50,
+    ...unfiltered,
+  });
   assert.deepEqual(
     listSkillsCatalogQuerySchema.parse({ limit: "100", cursor: "abc", q: " pdf " }),
-    { limit: 100, cursor: "abc", q: "pdf" },
+    { limit: 100, cursor: "abc", q: "pdf", ...unfiltered },
   );
   for (const limit of ["0", "101", "1.5", "many"]) {
     assert.equal(listSkillsCatalogQuerySchema.safeParse({ limit }).success, false);
   }
   assert.equal(listSkillsCatalogQuerySchema.safeParse({ cursor: "" }).success, false);
+});
+
+test("catalog query takes the market's filters and sort, and nothing it does not know", () => {
+  assert.deepEqual(
+    listSkillsCatalogQuerySchema.parse({
+      category: " development ",
+      trust: "verified",
+      capability: "prompt-only",
+      installed: "not_installed",
+      sort: "popular",
+    }),
+    {
+      limit: 50,
+      category: "development",
+      trust: "verified",
+      capability: "prompt-only",
+      installed: "not_installed",
+      sort: "popular",
+    },
+  );
+  for (const bad of [
+    { sort: "trending" },
+    { trust: "official" },
+    { capability: "scripts" },
+    { installed: "yes" },
+    { category: "  " },
+  ]) {
+    assert.equal(listSkillsCatalogQuerySchema.safeParse(bad).success, false);
+  }
 });
 
 test("a skill submission request takes a source and an optional install narrowing, nothing else", () => {
@@ -142,6 +182,59 @@ test("a skill detail may say its full text was withheld from this viewer", () =>
       skillContent: null,
       contentRestricted: true,
     },
+  );
+});
+
+test("an installed skill may say a newer version is current, and older answers still parse", () => {
+  const installed = {
+    workspaceSkillId: "ws-1",
+    selectionId: "ws-1",
+    catalogId: "skill-1:v1",
+    sourceType: "registry_github" as const,
+    skillId: "skill-1",
+    skillVersionId: "v1",
+    slug: "gh-acme-tools-example",
+    name: "Example",
+    version: "1.0.0",
+    displayName: "Example",
+    description: "Example installed skill.",
+    visibility: "public" as const,
+    categories: [],
+    enabled: true,
+    configJson: {},
+    enabledBy: null,
+    enabledAt: null,
+    createdAt: "2026-09-21T00:00:00.000Z",
+    updatedAt: "2026-09-21T00:00:00.000Z",
+  };
+  // An API that predates the signal: absent, not an error and not `false`.
+  const before = workspaceInstalledSkillSchema.parse(installed);
+  assert.equal(before.updateAvailable, undefined);
+  assert.equal(before.currentVersionId, undefined);
+
+  const behind = workspaceInstalledSkillSchema.parse({
+    ...installed,
+    currentVersionId: "v2",
+    updateAvailable: true,
+  });
+  assert.equal(behind.currentVersionId, "v2");
+  assert.equal(behind.updateAvailable, true);
+
+  // No published current version (the newest is still under review).
+  const held = workspaceInstalledSkillSchema.parse({
+    ...installed,
+    currentVersionId: null,
+    updateAvailable: false,
+  });
+  assert.equal(held.currentVersionId, null);
+  assert.equal(held.updateAvailable, false);
+
+  assert.equal(
+    workspaceInstalledSkillSchema.safeParse({
+      ...installed,
+      updateAvailable: "yes",
+    }).success,
+    false,
   );
 });
 
