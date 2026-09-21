@@ -3,6 +3,7 @@
 import type { DashboardSkillSlotProps } from "./slot-props";
 
 /** Report this skill (§17.2). */
-export function SkillReportButton(_props: DashboardSkillSlotProps) {
+export function SkillReportButton(props: DashboardSkillSlotProps) {
+  void props;
   return null;
 }
