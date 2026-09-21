@@ -380,7 +380,7 @@ test("E4 builtin contracts and public capability spoof remain distinct", async (
   });
   expect(external.tools ?? []).not.toContain("generate_image");
 });
-test("E5 repeat import is immutable; another user importing it gets to use it, not to control it", async ({
+test("E5 repeat import is immutable; another user importing it gets to use it, and no importer controls it", async ({
   page,
   browser,
 }) => {
@@ -412,7 +412,8 @@ test("E5 repeat import is immutable; another user importing it gets to use it, n
     const { skill } = (await found.json()) as {
       skill: { catalogId: string };
     };
-    // ...but the listing is not theirs to decide. It still is the owner's.
+    // ...but the listing is not theirs to decide — nor the first importer's:
+    // an unclaimed skill's listing is the platform's and its admins' call.
     expect(
       (
         await other.request.get(
@@ -426,7 +427,7 @@ test("E5 repeat import is immutable; another user importing it gets to use it, n
           `${api}/v1/workspaces/${ownerWs}/skills/catalog/${skill.catalogId}/listing`,
         )
       ).status(),
-    ).toBe(200);
+    ).toBe(404);
   } finally {
     await context.close();
   }
@@ -1049,10 +1050,14 @@ test("E21 an admin features a skill and puts it in a collection; the public mark
   await expect(
     page.getByRole("heading", { name: "E2E picks" }).first(),
   ).toBeVisible({ timeout: 45000 });
-  await page.goto(`/skills/${item.slug}`);
-  await expect(page.getByText("Featured").first()).toBeVisible({
-    timeout: 45000,
-  });
+  // The public page caches its read for a minute, and E20 may have just
+  // rendered this same slug before it was featured: reload until it shows.
+  await expect(async () => {
+    await page.goto(`/skills/${item.slug}`);
+    await expect(page.getByText("Featured").first()).toBeVisible({
+      timeout: 5000,
+    });
+  }).toPass({ timeout: 120000, intervals: [5000] });
 
   await admin.delete(`/v1/skills/registry/admin/collections/${id}`);
 });
