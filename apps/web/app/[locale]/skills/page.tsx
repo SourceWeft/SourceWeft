@@ -1,7 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowRight, Upload, Wrench } from "lucide-react";
-import type { MarketSkillSummary } from "@sourceweft/market-sdk";
+import type {
+  MarketSkillLocale,
+  MarketSkillSummary,
+} from "@sourceweft/market-sdk";
 import { hasLocale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { notFound } from "next/navigation";
@@ -22,6 +25,7 @@ import {
   listPublicSkillCategories,
   listPublicSkillCollections,
   listPublicSkills,
+  marketSkillLocale,
 } from "../../../lib/market-skills";
 import {
   defaultSkillsBrowseState,
@@ -117,11 +121,12 @@ function uniqueSkills(skills: MarketSkillSummary[]) {
   });
 }
 
-async function loadHomeSections() {
+// `locale` is the language of each card's AI summary.
+async function loadHomeSections(locale: MarketSkillLocale) {
   const [recommended, newest, popular, collections] = await Promise.all([
-    listPublicSkills({ limit: HOME_SECTION_SIZE, sort: "recommended" }),
-    listPublicSkills({ limit: HOME_SECTION_SIZE, sort: "new" }),
-    listPublicSkills({ limit: HOME_SECTION_SIZE, sort: "popular" }),
+    listPublicSkills({ limit: HOME_SECTION_SIZE, sort: "recommended", locale }),
+    listPublicSkills({ limit: HOME_SECTION_SIZE, sort: "new", locale }),
+    listPublicSkills({ limit: HOME_SECTION_SIZE, sort: "popular", locale }),
     listPublicSkillCollections(),
   ]);
   return {
@@ -205,8 +210,13 @@ export default async function PublicSkillsMarketPage({
   const [authState, categoriesResponse, market, home] = await Promise.all([
     resolveInitialLandingAuthState(),
     listPublicSkillCategories(),
-    listView ? listPublicSkills(skillsListRequest(state)) : null,
-    listView ? null : loadHomeSections(),
+    listView
+      ? listPublicSkills({
+          ...skillsListRequest(state),
+          locale: marketSkillLocale(uiLocale),
+        })
+      : null,
+    listView ? null : loadHomeSections(marketSkillLocale(uiLocale)),
   ]);
   const categories = categoriesResponse.items;
   const total = categoriesResponse.total;

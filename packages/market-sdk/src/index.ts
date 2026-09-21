@@ -137,10 +137,20 @@ export class MarketClient {
     );
   }
 
-  /** A published collection and its public skills, in the editor's order. */
-  getSkillCollection(slug: string) {
+  /**
+   * A published collection and its public skills, in the editor's order.
+   * `locale` asks for each skill's `aiSummary` in that language.
+   */
+  getSkillCollection(
+    slug: string,
+    options: { locale?: MarketSkillLocale } = {},
+  ) {
+    const params = new URLSearchParams();
+    if (options.locale) {
+      params.set("locale", options.locale);
+    }
     return this.request(
-      `/v1/skills/collections/${encode(slug)}`,
+      appendQuery(`/v1/skills/collections/${encode(slug)}`, params),
       { method: "GET" },
       getMarketSkillCollectionResponseSchema,
     );

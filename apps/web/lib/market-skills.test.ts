@@ -121,7 +121,9 @@ describe("categories", () => {
 
   it("returns the categories when the market answers", async () => {
     const response = {
-      items: [{ count: 3, description: null, name: "Writing", slug: "writing" }],
+      items: [
+        { count: 3, description: null, name: "Writing", slug: "writing" },
+      ],
       total: 3,
     };
     client.listSkillCategories.mockResolvedValue(response);
@@ -168,6 +170,39 @@ describe("collections", () => {
     client.getSkillCollection.mockRejectedValue(marketError(404));
     await expect(getPublicSkillCollection("drafts")).rejects.toMatchObject({
       status: 404,
+    });
+  });
+});
+
+describe("locale", () => {
+  it("maps a route locale to one the market writes summaries in", async () => {
+    const { marketSkillLocale } = await import("./market-skills");
+    expect(marketSkillLocale("zh-TW")).toBe("zh-TW");
+    expect(marketSkillLocale("zh-CN")).toBe("zh-CN");
+    expect(marketSkillLocale("fr")).toBe("en");
+    expect(marketSkillLocale(undefined)).toBe("en");
+  });
+
+  it("passes the locale to the list read, as part of the request", async () => {
+    client.listSkills.mockResolvedValue({ items: [], nextCursor: null });
+    await listPublicSkills({ limit: 6, sort: "new", locale: "zh-CN" });
+    expect(client.listSkills).toHaveBeenCalledWith({
+      limit: 6,
+      sort: "new",
+      locale: "zh-CN",
+    });
+  });
+
+  it("asks for the detail and a collection in the locale when given", async () => {
+    client.getSkill.mockResolvedValue({ skill: { slug: "pdf" } });
+    await getPublicSkill("pdf-zh", "zh-TW");
+    expect(client.getSkill).toHaveBeenCalledWith("pdf-zh", {
+      locale: "zh-TW",
+    });
+    client.getSkillCollection.mockResolvedValue({ collection: {}, items: [] });
+    await getPublicSkillCollection("starter", "zh-CN");
+    expect(client.getSkillCollection).toHaveBeenCalledWith("starter", {
+      locale: "zh-CN",
     });
   });
 });

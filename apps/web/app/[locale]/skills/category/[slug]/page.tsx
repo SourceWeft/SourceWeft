@@ -20,6 +20,7 @@ import {
 } from "../../../../seo";
 import {
   listPublicSkills,
+  marketSkillLocale,
   requirePublicSkillCategories,
 } from "../../../../../lib/market-skills";
 import {
@@ -141,7 +142,11 @@ export default async function PublicSkillCategoryPage({
   const state = parseSkillsBrowseState(rawSearchParams, {
     category: category.slug,
   });
-  const market = await listPublicSkills(skillsListRequest(state));
+  const market = await listPublicSkills({
+    ...skillsListRequest(state),
+    // The language of each card's AI summary.
+    locale: marketSkillLocale(locale),
+  });
   const title = t("category.title", { name: category.name });
   const description =
     category.description ?? t("category.description", { name: category.name });

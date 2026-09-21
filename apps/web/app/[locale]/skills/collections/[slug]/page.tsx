@@ -20,6 +20,7 @@ import {
 } from "../../../../seo";
 import {
   getPublicSkillCollection,
+  marketSkillLocale,
   isMarketNotFound,
   listPublicSkillCategories,
 } from "../../../../../lib/market-skills";
@@ -43,9 +44,13 @@ type PageProps = {
   params: Promise<{ locale: string; slug: string }>;
 };
 
-async function loadCollection(slug: string) {
+async function loadCollection(slug: string, locale?: string) {
   try {
-    return await getPublicSkillCollection(slug);
+    // The locale picks the language of each card's AI summary.
+    return await getPublicSkillCollection(
+      slug,
+      locale ? marketSkillLocale(locale) : undefined,
+    );
   } catch (error) {
     // Unpublished or never there: one 404. An outage must stay a 5xx, or it
     // would deindex the page.
@@ -114,7 +119,7 @@ export default async function PublicSkillCollectionPage({ params }: PageProps) {
   const t = await getTranslations("publicSkills.collections");
   const [authState, result, categories] = await Promise.all([
     resolveInitialLandingAuthState(),
-    loadCollection(decodeURIComponent(slug)),
+    loadCollection(decodeURIComponent(slug), locale),
     listPublicSkillCategories(),
   ]);
   const { collection, items } = result;
