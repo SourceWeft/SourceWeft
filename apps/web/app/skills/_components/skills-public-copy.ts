@@ -22,7 +22,7 @@ export const skillsCopy = {
       recommended: {
         title: "Recommended",
         description:
-          "Verified skills first, then the ones workspaces add most and whose repositories are most starred.",
+          "Skills from featured publishers and verified skills first, then the ones workspaces add most and whose repositories are most starred.",
       },
       newest: {
         title: "Newest",
@@ -96,6 +96,7 @@ export const skillsCopy = {
   },
   trustOptions: {
     all: "Any trust",
+    featured: "Featured",
     verified: "Verified",
   },
   capabilityOptions: {
@@ -119,6 +120,9 @@ export const skillsCopy = {
   },
   badges: {
     verified: "Verified",
+    featured: "Featured",
+    featuredTitle:
+      "From a featured publisher: a major vendor's own skills repository",
     executable: "Includes scripts",
     promptOnly: "Instructions only",
     claimed: "Claimed by author",
@@ -249,6 +253,7 @@ export const skillsCopy = {
       listed: "Listed",
       updated: "Updated",
       unverified: "Community",
+      featuredAndVerified: "Featured, Verified",
     },
     attribution: {
       heading: "Source and attribution",

@@ -7,6 +7,7 @@ import {
   ExternalLink,
   FileText,
   Layers,
+  Sparkles,
   Star,
   TerminalSquare,
 } from "lucide-react";
@@ -65,6 +66,21 @@ export function SkillVerifiedBadge() {
       <CheckCircle2 className="size-3.5" />
       {skillsCopy.badges.verified}
     </SkillBadge>
+  );
+}
+
+/**
+ * From a featured publisher. Quieter than Verified on purpose: it says who
+ * publishes the skill, not that anyone reviewed it.
+ */
+export function SkillFeaturedBadge() {
+  return (
+    <span title={skillsCopy.badges.featuredTitle}>
+      <SkillBadge>
+        <Sparkles className="size-3.5 text-amber-500 dark:text-amber-300" />
+        {skillsCopy.badges.featured}
+      </SkillBadge>
+    </span>
   );
 }
 
@@ -155,7 +171,12 @@ export function SkillMarketCard({
             {skill.author ?? skill.slug}
           </p>
         </div>
-        {skill.verified ? <SkillVerifiedBadge /> : null}
+        {skill.featured || skill.verified ? (
+          <div className="flex shrink-0 flex-col items-end gap-1">
+            {skill.featured ? <SkillFeaturedBadge /> : null}
+            {skill.verified ? <SkillVerifiedBadge /> : null}
+          </div>
+        ) : null}
       </div>
 
       <p className="mt-4 line-clamp-3 text-sm leading-6 text-zinc-600 dark:text-zinc-400">

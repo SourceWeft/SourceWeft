@@ -18,8 +18,10 @@ vi.mock("../../sources/storage", () => ({
 
 /**
  * Author claims against real PostgreSQL: what a verified claim hands the
- * author, that a repository has one author, that removal takes skills off the
- * market without breaking a single install, and that an admin can undo it.
+ * author, that only a personal repository's owner claims it themselves and an
+ * organization's is granted by an admin, that a repository has one author,
+ * that removal takes skills off the market without breaking a single install,
+ * and that an admin can undo it.
  *
  * GitHub is a fake handed to the claim functions — nothing leaves the machine.
  * Every repository, user and skill here is this file's own.
@@ -183,17 +185,22 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
     /** GitHub as the claim functions see it. */
     function fakeGitHub(input: {
       facts: Omit<GitHubRepoFacts, "defaultBranch"> & { defaultBranch?: string };
-      file?: () => string | null;
-    }): ClaimGitHub & { branches: string[] } {
-      const branches: string[] = [];
-      return {
-        branches,
-        fetchRepoFacts: async () => ({ defaultBranch: "main", ...input.facts }),
-        fetchClaimFile: async (_repo, branch) => {
-          branches.push(branch);
-          return input.file ? input.file() : null;
+    }): ClaimGitHub & { calls: number } {
+      const fake = {
+        calls: 0,
+        fetchRepoFacts: async () => {
+          fake.calls += 1;
+          return { defaultBranch: "main", ...input.facts };
         },
       };
+      return fake;
+    }
+
+    async function emailOf(userId: string) {
+      const result = await data.db.execute<{ email: string }>(
+        sql`select email from "user" where id = ${userId}`,
+      );
+      return result.rows[0]!.email;
     }
 
     test("a verified account claim hands the author every skill of the repository", async () => {
@@ -214,7 +221,6 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
         { userId: author, repo: target.label, method: "github_account" },
         github,
       );
-      expect(started.verification).toBeNull();
       expect(started.claim).toMatchObject({
         repo: target.label,
         method: "github_account",
@@ -277,13 +283,13 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
 
       // Asking again is answered with the claim already held.
       const again = await claims.startSkillClaim(
-        { userId: author, repo: target.label, method: "verification_file" },
+        { userId: author, repo: target.label, method: "github_account" },
         github,
       );
-      expect(again).toEqual({ claim: started.claim, verification: null });
+      expect(again).toEqual({ claim: started.claim });
     });
 
-    test("the account method refuses what GitHub does not vouch for", async () => {
+    test("only a personal repository's owner claims it themselves", async () => {
       const target = newRepo();
       const importer = await user();
       await registrySkill({ ...target, submitterId: importer });
@@ -308,12 +314,16 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       await expect(start(unlinked, personal)).rejects.toMatchObject({
         code: "SKILL_CLAIM_GITHUB_NOT_LINKED",
       });
+      // A collaborator on someone else's personal repository is not its owner.
       await expect(start(stranger, personal)).rejects.toMatchObject({
         code: "SKILL_CLAIM_ACCOUNT_MISMATCH",
         statusCode: 403,
       });
+      // An organization's repository is never self-service, whoever asks.
       await expect(start(member, organization)).rejects.toMatchObject({
         code: "SKILL_CLAIM_ORGANIZATION_REPO",
+        statusCode: 409,
+        message: expect.stringMatching(/admin/),
       });
       // A refused attempt leaves nothing behind.
       const rows = await data.db
@@ -326,118 +336,124 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       const empty = newRepo();
       await expect(
         claims.startSkillClaim(
-          { userId: stranger, repo: empty.label, method: "verification_file" },
+          { userId: stranger, repo: empty.label, method: "github_account" },
           personal,
         ),
       ).rejects.toMatchObject({ code: "SKILL_CLAIM_REPO_NOT_FOUND", statusCode: 404 });
     });
 
-    test("the verification file proves an organization's repository", async () => {
+    test("an admin grants an organization's repository to its author", async () => {
       const target = newRepo();
       const importer = await user();
       const author = await user();
       const skill = await registrySkill({ ...target, submitterId: importer });
-      let file: string | null = null;
-      const github = fakeGitHub({
-        facts: {
-          fullName: target.label,
-          ownerGithubId: "9001",
-          ownerType: "Organization",
-          defaultBranch: "trunk",
-        },
-        file: () => file,
-      });
 
-      const abandoned = await claims.startSkillClaim(
-        { userId: author, repo: target.label, method: "verification_file" },
-        github,
-      );
-      const started = await claims.startSkillClaim(
-        { userId: author, repo: target.label, method: "verification_file" },
-        github,
-      );
-      expect(started.claim.status).toBe("pending");
-      expect(started.claim.expiresAt).not.toBeNull();
-      expect(started.verification).toMatchObject({
-        path: ".sourceweft/claim",
-        branch: "trunk",
-      });
-      const token = started.verification!.token;
-      // Starting again replaced the first pending claim; only a hash is kept.
-      const rows = await data.db
-        .select()
-        .from(data.skillRepoClaims)
-        .where(eq(data.skillRepoClaims.repoOwner, target.owner));
-      expect(rows.map((row) => row.id)).toEqual([started.claim.id]);
-      expect(rows[0]!.tokenHash).toBe(claims.hashClaimToken(token));
-      expect(JSON.stringify(rows)).not.toContain(token);
+      // No such account: nothing is written.
       await expect(
-        claims.verifySkillClaim(
-          { userId: author, claimId: abandoned.claim.id },
-          github,
-        ),
-      ).rejects.toMatchObject({ code: "SKILL_CLAIM_NOT_FOUND" });
-
-      const verify = () =>
-        claims.verifySkillClaim(
-          { userId: author, claimId: started.claim.id },
-          github,
-        );
-      await expect(verify()).rejects.toMatchObject({
-        code: "SKILL_CLAIM_FILE_MISSING",
-      });
-      file = abandoned.verification!.token;
-      await expect(verify()).rejects.toMatchObject({
-        code: "SKILL_CLAIM_FILE_MISMATCH",
-      });
+        claims.grantSkillClaim({
+          repo: target.label,
+          email: `nobody-${randomUUID()}@example.test`,
+        }),
+      ).rejects.toMatchObject({ code: "SKILL_CLAIM_USER_NOT_FOUND", statusCode: 404 });
       expect((await definition(skill.skillId)).claimedAt).toBeNull();
-      // Nobody else can verify it for them.
-      await expect(
-        claims.verifySkillClaim(
-          { userId: importer, claimId: started.claim.id },
-          github,
-        ),
-      ).rejects.toMatchObject({ code: "SKILL_CLAIM_NOT_FOUND" });
 
-      file = `${token}\n`;
-      expect(await verify()).toMatchObject({ status: "verified" });
-      expect(github.branches.every((branch) => branch === "trunk")).toBe(true);
+      // Before the grant, the importer has no say over the unclaimed skill.
+      expect(
+        await listing.setOwnerSkillListing({
+          skillId: skill.skillId,
+          userId: importer,
+          listed: false,
+        }),
+      ).toBeNull();
+
+      const granted = await claims.grantSkillClaim({
+        repo: target.label.toUpperCase(),
+        email: ` ${(await emailOf(author)).toUpperCase()} `,
+      });
+      expect(granted).toMatchObject({
+        userId: author,
+        claim: { repo: target.label, method: "admin_grant", status: "verified" },
+      });
+      // The same transfer as a self-service claim.
       const row = await definition(skill.skillId);
       expect(row.ownerUserId).toBe(author);
       expect(row.claimedAt).toBeInstanceOf(Date);
-      // Verifying twice is harmless.
-      expect(await verify()).toMatchObject({ status: "verified" });
+      expect(
+        (await standing.getSkillMarketStanding(skill.skillId))?.claim,
+      ).toMatchObject({ claimId: granted.claim.id, userId: author, method: "admin_grant" });
+
+      // The author now holds the listing switch; the importer does not.
+      expect(
+        await listing.setOwnerSkillListing({
+          skillId: skill.skillId,
+          userId: author,
+          listed: false,
+        }),
+      ).toEqual({ skillId: skill.skillId, listed: false, heldBy: "owner" });
+      expect(
+        await listing.getOwnerSkillListing({
+          skillId: skill.skillId,
+          userId: importer,
+        }),
+      ).toBeNull();
+
+      // The author sees it as theirs.
+      const overview = await claims.getSkillClaimsOverview({
+        userId: author,
+        skillId: skill.skillId,
+      });
+      expect(overview.claims).toEqual([granted.claim]);
+      expect(overview.repository).toMatchObject({
+        claimedBy: "you",
+        viewerClaim: { id: granted.claim.id, method: "admin_grant" },
+      });
+
+      // A repository already held is not granted again.
+      await expect(
+        claims.grantSkillClaim({ repo: target.label, email: await emailOf(importer) }),
+      ).rejects.toMatchObject({ code: "SKILL_REPO_ALREADY_CLAIMED", statusCode: 409 });
+
+      // And the grant's author can take it off the market like any claimant.
+      expect(
+        await claims.removeClaimedRepoFromMarket({
+          userId: author,
+          claimId: granted.claim.id,
+        }),
+      ).toEqual({ repo: target.label, skillCount: 1 });
     });
 
-    test("a pending claim expires after seven days", async () => {
+    test("a claim left pending by the retired file method is ignored", async () => {
       const target = newRepo();
-      const author = await user();
-      await registrySkill({ ...target, submitterId: await user() });
-      const github = fakeGitHub({
-        facts: { fullName: target.label, ownerGithubId: "1", ownerType: "User" },
+      const importer = await user();
+      const author = await user("7201");
+      await registrySkill({ ...target, submitterId: importer });
+      await data.db.insert(data.skillRepoClaims).values({
+        id: `claim-${randomUUID()}`,
+        repoOwner: target.owner,
+        repoName: target.name,
+        userId: author,
+        method: "verification_file",
+        tokenHash: "0".repeat(64),
+        status: "pending",
       });
-      const started = await claims.startSkillClaim(
-        { userId: author, repo: target.label, method: "verification_file" },
-        github,
+      const before = await claims.getSkillClaimsOverview({
+        userId: author,
+        repo: { owner: target.owner, name: target.name },
+      });
+      expect(before.claims).toEqual([]);
+      expect(before.repository).toMatchObject({ claimedBy: null, viewerClaim: null });
+
+      // It neither blocks nor counts toward the owner's own claim.
+      const { claim } = await claims.startSkillClaim(
+        { userId: author, repo: target.label, method: "github_account" },
+        fakeGitHub({
+          facts: { fullName: target.label, ownerGithubId: "7201", ownerType: "User" },
+        }),
       );
-      await data.db
-        .update(data.skillRepoClaims)
-        .set({ createdAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000) })
-        .where(eq(data.skillRepoClaims.id, started.claim.id));
-      await expect(
-        claims.verifySkillClaim(
-          { userId: author, claimId: started.claim.id },
-          fakeGitHub({
-            facts: { fullName: target.label, ownerGithubId: "1", ownerType: "User" },
-            file: () => started.verification!.token,
-          }),
-        ),
-      ).rejects.toMatchObject({ code: "SKILL_CLAIM_EXPIRED", statusCode: 410 });
-      const overview = await claims.getSkillClaimsOverview({ userId: author });
-      expect(overview.claims[0]).toMatchObject({
-        id: started.claim.id,
-        status: "expired",
-      });
+      expect(claim).toMatchObject({ method: "github_account", status: "verified" });
+      expect(
+        (await claims.getSkillClaimsOverview({ userId: author })).claims,
+      ).toEqual([claim]);
     });
 
     test("a repository has one author: the second claimant is refused", async () => {
@@ -452,31 +468,26 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
         ownerType: "User" as const,
       };
 
-      // The second one started first, waiting on their file...
-      const pending = await claims.startSkillClaim(
-        { userId: second, repo: target.label, method: "verification_file" },
-        fakeGitHub({ facts }),
-      );
-      // ...the first one verified meanwhile.
       await claims.startSkillClaim(
         { userId: first, repo: target.label, method: "github_account" },
         fakeGitHub({ facts }),
       );
 
+      // Refused before GitHub is even asked.
+      const github = fakeGitHub({ facts });
       await expect(
-        claims.verifySkillClaim(
-          { userId: second, claimId: pending.claim.id },
-          fakeGitHub({ facts, file: () => pending.verification!.token }),
+        claims.startSkillClaim(
+          { userId: second, repo: target.label, method: "github_account" },
+          github,
         ),
       ).rejects.toMatchObject({
         code: "SKILL_REPO_ALREADY_CLAIMED",
         statusCode: 409,
       });
+      expect(github.calls).toBe(0);
+      // Not by an admin's grant either, until the claim is revoked.
       await expect(
-        claims.startSkillClaim(
-          { userId: second, repo: target.label, method: "verification_file" },
-          fakeGitHub({ facts }),
-        ),
+        claims.grantSkillClaim({ repo: target.label, email: await emailOf(second) }),
       ).rejects.toMatchObject({ code: "SKILL_REPO_ALREADY_CLAIMED" });
       expect((await definition(skill.skillId)).ownerUserId).toBe(first);
 

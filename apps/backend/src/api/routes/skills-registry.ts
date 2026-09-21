@@ -1,6 +1,8 @@
 import { z } from "zod";
 import {
+  grantSkillClaimRequestSchema,
   setSkillMarketCategoriesRequestSchema,
+  setSkillMarketFeaturedRequestSchema,
   setSkillMarketVerifiedRequestSchema,
 } from "@sourceweft/contracts";
 import { logger } from "../../shared/logger";
@@ -17,11 +19,15 @@ import {
   listSkillPublicly,
   releaseSkillListingHold,
   setSkillCategories,
+  setSkillFeatured,
   setSkillVerified,
 } from "../../modules/skills/market/listing";
 import { listSkillListingQueue } from "../../modules/skills/market/auto-list";
 import { getSkillMarketStanding } from "../../modules/skills/market/standing";
-import { revokeSkillClaim } from "../../modules/skills/market/claims";
+import {
+  grantSkillClaim,
+  revokeSkillClaim,
+} from "../../modules/skills/market/claims";
 import { getSessionUserId, requireSession } from "../middleware/auth-session";
 import { ApiError, ApiResponse } from "../response/api-response";
 
@@ -233,6 +239,28 @@ export function registerSkillRegistryAdminRoutes(app: Hono) {
     return ApiResponse.success(c, await requireStanding(input.skillId));
   });
 
+  // Featured is set by the platform's import for a short list of major
+  // publishers; an admin setting it here makes it the admin's choice, which
+  // later imports leave alone.
+  app.put("/v1/skills/registry/admin/skills/:skillId/featured", async (c) => {
+    const session = await requireSkillRegistryAdmin(c);
+    const parsed = setSkillMarketFeaturedRequestSchema.safeParse(
+      await c.req.json().catch(() => { throw ApiError.invalidJson(); }),
+    );
+    if (!parsed.success) throw ApiError.validation();
+    const input = {
+      skillId: c.req.param("skillId"),
+      featured: parsed.data.featured,
+    };
+    await requireStanding(input.skillId);
+    if (!(await setSkillFeatured(input))) throw ApiError.notFound();
+    logger.info("Registry skill featured changed", {
+      actorUserId: getSessionUserId(session),
+      ...input,
+    });
+    return ApiResponse.success(c, await requireStanding(input.skillId));
+  });
+
   app.put("/v1/skills/registry/admin/skills/:skillId/categories", async (c) => {
     const session = await requireSkillRegistryAdmin(c);
     const parsed = setSkillMarketCategoriesRequestSchema.safeParse(
@@ -250,6 +278,30 @@ export function registerSkillRegistryAdminRoutes(app: Hono) {
       ...input,
     });
     return ApiResponse.success(c, await requireStanding(input.skillId));
+  });
+
+  // A repository granted to an author by hand: how an organization's
+  // repository is claimed, since only its owner may claim it and the owner is
+  // the organization. Same transfer as a self-service claim
+  // (`market/claims.ts`); 409 when someone already holds it.
+  app.post("/v1/skills/registry/admin/claims", async (c) => {
+    const session = await requireSkillRegistryAdmin(c);
+    const parsed = grantSkillClaimRequestSchema.safeParse(
+      await c.req.json().catch(() => { throw ApiError.invalidJson(); }),
+    );
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+    const result = await grantSkillClaim(parsed.data);
+    logger.info("Skill repository claim granted by an admin", {
+      actorUserId: getSessionUserId(session),
+      claimId: result.claim.id,
+      repo: result.claim.repo,
+      userId: result.userId,
+    });
+    return ApiResponse.success(c, result, 201);
   });
 
   // An author's claim on a repository, undone. The claim's skills go back to

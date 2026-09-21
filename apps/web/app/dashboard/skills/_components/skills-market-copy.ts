@@ -34,7 +34,9 @@ export const skillsMarketCopy = {
   trustOptions: {
     all: "All publishers",
     builtin: "Official",
+    featured: "Featured",
     verified: "Verified",
+    // Neither featured nor verified.
     community: "Community",
   },
   capabilityOptions: {
@@ -58,6 +60,9 @@ export const skillsMarketCopy = {
   // CLI send nothing back, so the number never includes them.
   card: {
     verified: "Verified",
+    featured: "Featured",
+    featuredTitle:
+      "From a featured publisher: a major vendor's own skills repository",
     includesScripts: "Includes scripts",
     installs: (formatted: string) => `Added to ${formatted} workspaces`,
     installsOne: "Added to 1 workspace",
@@ -154,14 +159,16 @@ export const skillsMarketCopy = {
     footnote: "Skill review uses the same admin allowlist as the MCP market.",
   },
   // The owner's switch on a community skill they imported.
+  // Shown only to a repository's author who claimed it: nobody else decides
+  // whether a community skill is public, apart from the platform and admins.
   ownerListing: {
     label: "Allow on the public market",
     listed:
       "This skill is listed publicly: anyone can find it and read its SKILL.md. Turn this off to take it down — workspaces that installed it keep it.",
     pending:
-      "Skills that pass the automated scan are listed publicly a few minutes after import; flagged ones wait for a review first. Turn this off to keep it to yourself.",
+      "Allowed: it is listed once its scan is clean and its commit is confirmed to be your repository's; flagged versions wait for a review first. Turn this off to keep it off the market.",
     private:
-      "Only you and the workspaces you add it to can see this skill. It will not be listed.",
+      "Not listed. Workspaces that already added it keep it; nobody new can find it on the market.",
     heldByAdmin:
       "A market admin took this skill off the public market. Only they can list it again.",
     allowedToast: "This skill may be listed publicly",

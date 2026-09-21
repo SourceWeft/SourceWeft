@@ -16,20 +16,67 @@ function skill(
 const order = (skills: SkillRankSignals[]) =>
   [...skills].sort(compareRecommendedSkills).map((entry) => entry.skillId);
 
-test("trust runs ours, the workspace's own, verified community, community", () => {
+test("trust runs ours, the workspace's own, featured, verified, community", () => {
   assert.equal(skillTrustTier({ sourceType: "builtin" }), 0);
   assert.equal(skillTrustTier({ sourceType: "workspace_custom" }), 1);
   assert.equal(skillTrustTier({ sourceType: "team_custom" }), 1);
   assert.equal(
-    skillTrustTier({ sourceType: "registry_github", verified: true }),
+    skillTrustTier({ sourceType: "registry_github", featured: true }),
+    2,
+  );
+  // Both counts as featured.
+  assert.equal(
+    skillTrustTier({
+      sourceType: "registry_github",
+      featured: true,
+      verified: true,
+    }),
     2,
   );
   assert.equal(
-    skillTrustTier({ sourceType: "registry_github", verified: false }),
+    skillTrustTier({ sourceType: "registry_github", verified: true }),
     3,
   );
-  // Verified is granted, so its absence is "no".
-  assert.equal(skillTrustTier({ sourceType: "registry_github" }), 3);
+  assert.equal(
+    skillTrustTier({ sourceType: "registry_github", verified: false }),
+    4,
+  );
+  // Verified and featured are granted, so their absence is "no".
+  assert.equal(skillTrustTier({ sourceType: "registry_github" }), 4);
+  // Only a community skill can be featured; the flag cannot lift anything
+  // above ours or the workspace's own.
+  assert.equal(skillTrustTier({ sourceType: "builtin", featured: true }), 0);
+  assert.equal(
+    skillTrustTier({ sourceType: "workspace_custom", featured: true }),
+    1,
+  );
+});
+
+test("the ladder: builtin, custom, featured, verified, community — whatever the installs", () => {
+  assert.deepEqual(
+    order([
+      skill("community-popular", { installCount: 900, repoStars: 90_000 }),
+      skill("verified", { verified: true, installCount: 50 }),
+      skill("featured-new", { featured: true }),
+      skill("team", { sourceType: "team_custom" }),
+      skill("builtin", { sourceType: "builtin" }),
+    ]),
+    ["builtin", "team", "featured-new", "verified", "community-popular"],
+  );
+  // Within featured: verified as well goes first, as the SQL's
+  // (featured, verified, …) has it; then the rank score, as everywhere else.
+  assert.deepEqual(
+    order([
+      skill("featured-few", { featured: true, installCount: 1 }),
+      skill("featured-many", { featured: true, installCount: 30 }),
+      skill("featured-verified", {
+        featured: true,
+        verified: true,
+        installCount: 0,
+      }),
+    ]),
+    ["featured-verified", "featured-many", "featured-few"],
+  );
 });
 
 // The point of the shared ranking: `verified` was hard-coded false, so a

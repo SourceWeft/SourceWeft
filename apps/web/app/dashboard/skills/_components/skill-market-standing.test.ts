@@ -5,6 +5,7 @@ import {
   claimErrorMessage,
   claimPageHref,
   claimPanelView,
+  claimRepoOfSourceUrl,
   SKILL_CATEGORY_LIMIT,
   skillStandingKind,
   standingClaim,
@@ -133,7 +134,6 @@ describe("author claims", () => {
     status: "verified" as const,
     createdAt: "2026-09-21T00:00:00.000Z",
     verifiedAt: "2026-09-21T00:00:00.000Z",
-    expiresAt: null,
   };
 
   it("offers the claim link until someone has claimed the repository", () => {
@@ -142,13 +142,6 @@ describe("author claims", () => {
       kind: "unclaimed",
       repo: "ada/skills",
     });
-    // A pending claim of the viewer's is not a claim yet.
-    expect(
-      claimPanelView({
-        ...repository,
-        viewerClaim: { ...verified, status: "pending", verifiedAt: null },
-      }),
-    ).toEqual({ kind: "unclaimed", repo: "ada/skills" });
     expect(
       claimPanelView({ ...repository, claimedBy: "someone" }),
     ).toEqual({ kind: "claimedByAuthor", repo: "ada/skills" });
@@ -162,6 +155,26 @@ describe("author claims", () => {
         viewerClaim: verified,
       }),
     ).toEqual({ kind: "claimedByYou", claimId: "claim-1", repo: "ada/skills" });
+  });
+
+  it("finds the repository an admin grants a claim on from the source URL", () => {
+    expect(
+      claimRepoOfSourceUrl(
+        "https://github.com/Acme/Skills/tree/0123456789abcdef/skills/pdf",
+      ),
+    ).toBe("acme/skills");
+    expect(claimRepoOfSourceUrl("https://github.com/acme/skills.git")).toBe(
+      "acme/skills",
+    );
+    expect(claimRepoOfSourceUrl("https://gitlab.com/acme/skills")).toBeNull();
+    expect(claimRepoOfSourceUrl("https://github.com/acme")).toBeNull();
+    expect(claimRepoOfSourceUrl(null)).toBeNull();
+  });
+
+  it("tells an organization's author to ask an admin", () => {
+    expect(
+      claimErrorMessage({ code: "SKILL_CLAIM_ORGANIZATION_REPO" }),
+    ).toMatch(/admin.*support@sourceweft\.com/);
   });
 
   it("links to the claim page with the repository", () => {
@@ -178,6 +191,8 @@ describe("author claims", () => {
       listingHold: false,
       listingHoldBy: null,
       verified: false,
+      featured: false,
+      featuredSetBy: null,
       categorySlugs: [],
       installCount: 0,
       listedAt: null,
@@ -186,7 +201,7 @@ describe("author claims", () => {
     const claim = {
       claimId: "claim-1",
       userId: "u",
-      method: "verification_file" as const,
+      method: "admin_grant" as const,
       verifiedAt: null,
     };
     expect(standingClaim({ ...base, claim })).toEqual(claim);

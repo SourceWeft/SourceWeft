@@ -223,7 +223,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
     test("a freshly published skill waits before it lists itself", async () => {
       const skill = await registrySkill({});
       const scope = { onlySkillIds: [skill.skillId] };
-      // Just imported: its owner still has time to keep it private.
+      // Just imported: the provenance sweep and admins get a window first.
       expect(await autoList.listAutoListCandidateIds(scope)).toEqual([]);
 
       await data.db
@@ -235,10 +235,48 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       ]);
     });
 
-    test("the owner can keep their skill private, and only they can lift that", async () => {
+    /**
+     * The skill as its author's, the way a verified claim leaves it: owned by
+     * the claimant and stamped `claimed_at` (`claims.database.test.ts` covers
+     * the claim itself). Here the importer stands in as the claimant.
+     */
+    async function claimAsOwner(skillId: string) {
+      await data.db
+        .update(data.skillDefinitions)
+        .set({ claimedAt: new Date() })
+        .where(eq(data.skillDefinitions.id, skillId));
+    }
+
+    test("whoever imported an unclaimed skill has no say over its listing", async () => {
+      const skill = await registrySkill({});
+      const scope = { onlySkillIds: [skill.skillId], skipGrace: true };
+      const importer = { skillId: skill.skillId, userId: "skill-owner" };
+      expect((await definition(skill.skillId)).ownerUserId).toBe("skill-owner");
+
+      // Not theirs to hold, or even to look at: the route answers 404.
+      expect(await listing.getOwnerSkillListing(importer)).toBeNull();
+      expect(
+        await listing.setOwnerSkillListing({ ...importer, listed: false }),
+      ).toBeNull();
+      const row = await definition(skill.skillId);
+      expect(row.listingHold).toBe(false);
+      expect(row.listingHoldBy).toBeNull();
+
+      // The platform's rules decide: a clean skill lists itself.
+      expect(await autoList.runSkillAutoListing(scope)).toMatchObject({
+        listed: 1,
+      });
+      expect(
+        await listing.setOwnerSkillListing({ ...importer, listed: false }),
+      ).toBeNull();
+      expect((await definition(skill.skillId)).visibility).toBe("public");
+    });
+
+    test("the author can keep their claimed skill private, and only they can lift that", async () => {
       const skill = await registrySkill({});
       const scope = { onlySkillIds: [skill.skillId], skipGrace: true };
       const owner = { skillId: skill.skillId, userId: "skill-owner" };
+      await claimAsOwner(skill.skillId);
 
       // Someone else: not their skill, as far as they can tell.
       expect(
@@ -284,9 +322,10 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       expect(row.listingHoldBy).toBe("owner");
     });
 
-    test("an owner cannot put back what an admin withdrew", async () => {
+    test("an author cannot put back what an admin withdrew", async () => {
       const skill = await registrySkill({});
       const owner = { skillId: skill.skillId, userId: "skill-owner" };
+      await claimAsOwner(skill.skillId);
       await listing.listSkillPublicly({
         skillId: skill.skillId,
         actorUserId: "skill-test-admin",

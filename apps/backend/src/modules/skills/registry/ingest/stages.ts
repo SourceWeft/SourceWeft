@@ -64,7 +64,13 @@ export const defaultIngestDeps: IngestDeps = {
 export type IngestContext = {
   submission: Pick<
     SkillSubmissionRow,
-    "id" | "teamId" | "workspaceId" | "submittedBy" | "sourceInput" | "target"
+    | "id"
+    | "teamId"
+    | "workspaceId"
+    | "submittedBy"
+    | "sourceInput"
+    | "target"
+    | "options"
   > & { onComplete: SkillSubmissionOnComplete | null };
   /** The job's overall deadline. Checked between stages and handed to GitHub. */
   signal: AbortSignal;
@@ -178,6 +184,9 @@ const triageWriteStage: IngestStage = {
           read,
           userId: ctx.submission.submittedBy,
           skill,
+          ...(ctx.submission.options?.featured !== undefined
+            ? { featured: ctx.submission.options.featured }
+            : {}),
           ...(ctx.deps.compareCommits
             ? { compare: ctx.deps.compareCommits }
             : {}),

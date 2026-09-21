@@ -174,6 +174,7 @@ type MarketSkillRow = {
     id: string;
     slug: string;
     verified: boolean;
+    featured?: boolean;
     installCount: number;
     listedAt: Date | null;
     createdAt: Date;
@@ -214,6 +215,7 @@ export function mapMarketSkillSummary(
     logo: marketSkillLogo(manifest),
     categories: categorySlugs,
     verified: row.definition.verified,
+    featured: row.definition.featured ?? false,
     capability: registry?.capability ?? null,
     license: registry?.license ?? null,
     author: repositoryOwnerFromUrl(registry?.repoUrl),
@@ -282,6 +284,7 @@ const summaryColumns = {
     slug: skillDefinitions.slug,
     displayName: skillDefinitions.displayName,
     verified: skillDefinitions.verified,
+    featured: skillDefinitions.featured,
     installCount: skillDefinitions.installCount,
     listedAt: skillDefinitions.listedAt,
     createdAt: skillDefinitions.createdAt,
@@ -382,14 +385,16 @@ export async function listMarketSkills(
     ...skillCatalogFilterConditions({
       ...NO_SKILL_CATALOG_FILTERS,
       category: input.category,
-      trust:
-        input.verified === undefined
-          ? "all"
-          : input.verified
-            ? "verified"
-            : "community",
       capability: input.capability ?? "all",
     }),
+    // Each flag on its own, not the dashboard's trust ladder: `verified=false`
+    // has always meant "not verified", featured or not, and the two combine.
+    input.verified === undefined
+      ? undefined
+      : eq(skillDefinitions.verified, input.verified),
+    input.featured === undefined
+      ? undefined
+      : eq(skillDefinitions.featured, input.featured),
     ...skillCatalogSearchConditions(skillCatalogQueryWords(input.query ?? "")),
   ];
 

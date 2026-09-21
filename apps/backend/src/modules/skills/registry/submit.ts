@@ -144,6 +144,8 @@ export async function writeSubmittedSkill(input: {
   grantTo?: { teamId: string; workspaceId: string | null };
   /** Tests replace GitHub's ancestry answer; production asks it. */
   compare?: typeof compareCommits;
+  /** From the platform's own import only: mark the skill featured (or not). */
+  featured?: boolean;
 }): Promise<RegistrySkillSubmissionResult> {
   if ("failure" in input.skill) {
     return input.skill.failure;
@@ -216,6 +218,7 @@ export async function writeSubmittedSkill(input: {
     });
     const saved = await upsertRegistrySkillIndex({
       ...(currency ? { currency } : {}),
+      ...(input.featured !== undefined ? { featured: input.featured } : {}),
       slug: analyzed.slug,
       displayName: analyzed.displayName,
       description: analyzed.description,

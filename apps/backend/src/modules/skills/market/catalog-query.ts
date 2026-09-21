@@ -99,6 +99,7 @@ export type SkillCatalogCursor =
   | { sort: "stars"; repoStars: number; id: string }
   | {
       sort: "recommended";
+      featured: boolean;
       verified: boolean;
       rankScore: number;
       listedAtMicros: string;
@@ -110,6 +111,7 @@ export type SkillCatalogSortKeyRow = {
   definition: {
     id: string;
     displayName: string;
+    featured: boolean;
     verified: boolean;
     installCount: number;
     rankScore: number;
@@ -122,8 +124,15 @@ export function skillCatalogCursorForRow(
   sort: SkillCatalogSort,
   row: SkillCatalogSortKeyRow,
 ): SkillCatalogCursor {
-  const { id, displayName, verified, installCount, rankScore, repoStars } =
-    row.definition;
+  const {
+    id,
+    displayName,
+    featured,
+    verified,
+    installCount,
+    rankScore,
+    repoStars,
+  } = row.definition;
   const micros = String(row.listedAtMicros);
   switch (sort) {
     case "name":
@@ -135,18 +144,26 @@ export function skillCatalogCursorForRow(
     case "stars":
       return { sort, repoStars, id };
     case "recommended":
-      return { sort, verified, rankScore, listedAtMicros: micros, id };
+      return {
+        sort,
+        featured,
+        verified,
+        rankScore,
+        listedAtMicros: micros,
+        id,
+      };
   }
 }
 
 /**
- * Marks the `recommended` cursor that is keyed by the rank score. The one
- * before it had the same shape keyed by the install count; without the mark an
- * old cursor would decode and quietly resume at the wrong place. Unmarked, it
- * is now refused as a bad cursor, which clients already handle by starting
- * over from the first page.
+ * Marks the current shape of the `recommended` cursor: featured, verified, the
+ * rank score, the listing time. Each earlier shape (keyed by the install count,
+ * then by verified and the rank score without featured) resumed a different
+ * order; without a new mark an old cursor would decode and quietly resume at
+ * the wrong place. Under any other mark it is refused as a bad cursor, which
+ * clients already handle by starting over from the first page.
  */
-const RANK_CURSOR_MARK = "rank";
+const RANK_CURSOR_MARK = "featured-rank";
 
 export function encodeSkillCatalogCursor(cursor: SkillCatalogCursor): string {
   const keys: Array<string | number | boolean> = (() => {
@@ -162,6 +179,7 @@ export function encodeSkillCatalogCursor(cursor: SkillCatalogCursor): string {
       case "recommended":
         return [
           RANK_CURSOR_MARK,
+          cursor.featured,
           cursor.verified,
           cursor.rankScore,
           cursor.listedAtMicros,
@@ -233,14 +251,15 @@ export function decodeSkillCatalogCursor(
         : null;
     }
     case "recommended": {
-      const [mark, verified, rankScore, micros, id] = keys;
-      return keys.length === 5 &&
+      const [mark, featured, verified, rankScore, micros, id] = keys;
+      return keys.length === 6 &&
         mark === RANK_CURSOR_MARK &&
+        typeof featured === "boolean" &&
         typeof verified === "boolean" &&
         isInstallCount(rankScore) &&
         isMicros(micros) &&
         isId(id)
-        ? { sort, verified, rankScore, listedAtMicros: micros, id }
+        ? { sort, featured, verified, rankScore, listedAtMicros: micros, id }
         : null;
     }
     default:
@@ -249,8 +268,8 @@ export function decodeSkillCatalogCursor(
 }
 
 /**
- * ORDER BY for a sort. The SQL form of "recommended" — verified, then the rank
- * score, then newest — is the registry slice of the ordering `rank.ts`
+ * ORDER BY for a sort. The SQL form of "recommended" — featured publishers,
+ * then verified, then the rank score, then newest — is the registry slice of the ordering `rank.ts`
  * defines, over the score the scheduler stores; a database test holds the two
  * together.
  */
@@ -265,7 +284,10 @@ export function skillCatalogOrderBy(sort: SkillCatalogSort): SQL[] {
     case "stars":
       return [desc(skillDefinitions.repoStars), desc(skillDefinitions.id)];
     case "recommended":
+      // Leads with the columns of `skill_definitions_market_rank_idx`, in its
+      // directions, so the index can serve the page.
       return [
+        desc(skillDefinitions.featured),
         desc(skillDefinitions.verified),
         desc(skillDefinitions.rankScore),
         desc(listedAtMicros),
@@ -290,7 +312,7 @@ export function skillCatalogKeysetCondition(cursor: SkillCatalogCursor): SQL {
     case "stars":
       return sql`(${skillDefinitions.repoStars}, ${skillDefinitions.id}) < (${cursor.repoStars}::integer, ${cursor.id})`;
     case "recommended":
-      return sql`(${skillDefinitions.verified}, ${skillDefinitions.rankScore}, ${listedAtMicros}, ${skillDefinitions.id}) < (${cursor.verified}::boolean, ${cursor.rankScore}::integer, ${cursor.listedAtMicros}::bigint, ${cursor.id})`;
+      return sql`(${skillDefinitions.featured}, ${skillDefinitions.verified}, ${skillDefinitions.rankScore}, ${listedAtMicros}, ${skillDefinitions.id}) < (${cursor.featured}::boolean, ${cursor.verified}::boolean, ${cursor.rankScore}::integer, ${cursor.listedAtMicros}::bigint, ${cursor.id})`;
   }
 }
 
@@ -379,9 +401,16 @@ export function skillCatalogFilterConditions(
       ),
     );
   }
-  if (filters.trust === "verified" || filters.trust === "community") {
+  if (filters.trust === "featured") {
+    conditions.push(eq(skillDefinitions.featured, true));
+  } else if (filters.trust === "verified") {
+    conditions.push(eq(skillDefinitions.verified, true));
+  } else if (filters.trust === "community") {
+    // The rest: nothing about who publishes it or who vouched for it sets it
+    // apart. A featured skill that is also verified is in both of those.
     conditions.push(
-      eq(skillDefinitions.verified, filters.trust === "verified"),
+      eq(skillDefinitions.featured, false),
+      eq(skillDefinitions.verified, false),
     );
   }
   if (filters.capability !== "all") {
@@ -403,8 +432,8 @@ export function skillCatalogFilterConditions(
  * The same filters over the bounded part of the catalog — builtins and the
  * workspace's and team's own skills — which is filtered in process. Those
  * skills are not on the market: they have no market category, no recorded
- * capability and no verified grant, so any filter on one of those leaves none
- * of them. An always-on builtin has no install row but is in every workspace,
+ * capability, no featured mark and no verified grant, so any filter on one of
+ * those leaves none of them. An always-on builtin has no install row but is in every workspace,
  * and counts as installed.
  */
 export function boundedCatalogItemMatchesFilters(
@@ -418,7 +447,11 @@ export function boundedCatalogItemMatchesFilters(
   if (filters.category || filters.capability !== "all") {
     return false;
   }
-  if (filters.trust === "verified" || filters.trust === "community") {
+  if (
+    filters.trust === "featured" ||
+    filters.trust === "verified" ||
+    filters.trust === "community"
+  ) {
     return false;
   }
   if (filters.trust === "builtin" && item.sourceType !== "builtin") {

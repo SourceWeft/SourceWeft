@@ -33,10 +33,11 @@ import {
  */
 
 /**
- * How long a freshly published version waits before it lists itself. Someone
- * who imported a skill for their own use needs a moment to say "keep it
- * private" (`setOwnerSkillListing`); without this the pass could publish it
- * seconds after the import finished.
+ * How long a freshly published version waits before it lists itself: a window
+ * for the provenance sweep and market admins to act on it before anyone else
+ * can see it, rather than the pass publishing it seconds after the import
+ * finished. (Whoever imported an unclaimed skill has no say in this; only a
+ * claimed skill's author does, through `setOwnerSkillListing`.)
  */
 const AUTO_LIST_GRACE_MINUTES = 10;
 

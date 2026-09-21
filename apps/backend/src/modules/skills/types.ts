@@ -231,6 +231,9 @@ export type SkillCatalogItem = {
   // skill-registry-index.md §0/§5.5.
   publisher?: string | null;
   verified?: boolean;
+  // From a publisher the platform highlights — set by its own import or an
+  // admin, never by the skill.
+  featured?: boolean;
   sourceUrl?: string | null;
   license?: string | null;
   flagged?: boolean;

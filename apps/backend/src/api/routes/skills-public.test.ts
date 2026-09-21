@@ -58,6 +58,7 @@ const summary = {
   },
   categories: ["documents-office"],
   verified: true,
+  featured: true,
   capability: "executable",
   license: "MIT",
   author: "anthropics",
@@ -141,7 +142,7 @@ beforeEach(() => {
 
 test("the list is served without a session, with every filter parsed", async () => {
   const response = await createTestApp().request(
-    "/v1/skills?query=pdf%20form&category=documents-office&verified=true&capability=executable&sort=popular&limit=10&cursor=abc",
+    "/v1/skills?query=pdf%20form&category=documents-office&verified=true&featured=false&capability=executable&sort=popular&limit=10&cursor=abc",
   );
 
   assert.equal(response.status, 200);
@@ -153,6 +154,7 @@ test("the list is served without a session, with every filter parsed", async () 
     query: "pdf form",
     category: "documents-office",
     verified: true,
+    featured: false,
     capability: "executable",
     sort: "popular",
     limit: 10,
@@ -169,7 +171,7 @@ test("no parameters means no filters; the repository picks sort and page size", 
 
 test("a parameter left empty is a parameter not given", async () => {
   const response = await createTestApp().request(
-    "/v1/skills?query=&category=&verified=&capability=&sort=&limit=&cursor=",
+    "/v1/skills?query=&category=&verified=&featured=&capability=&sort=&limit=&cursor=",
   );
   assert.equal(response.status, 200);
   assert.deepEqual(listRequest(), {});
@@ -198,6 +200,29 @@ test("verified reads true/false and 1/0, and refuses anything else", async () =>
   };
   assert.equal(body.code, "VALIDATION_ERROR");
   assert.ok(body.details.fieldErrors.verified);
+  assert.equal(mocks.listMarketSkills.mock.calls.length, 0);
+});
+
+test("featured reads as verified does, and refuses anything else", async () => {
+  const app = createTestApp();
+  for (const [raw, expected] of [
+    ["true", true],
+    ["1", true],
+    ["false", false],
+    ["0", false],
+  ] as const) {
+    mocks.listMarketSkills.mockClear();
+    const response = await app.request(`/v1/skills?featured=${raw}`);
+    assert.equal(response.status, 200, raw);
+    assert.equal(mocks.listMarketSkills.mock.calls[0]?.[0].featured, expected);
+  }
+  mocks.listMarketSkills.mockClear();
+  const response = await app.request("/v1/skills?featured=yes");
+  assert.equal(response.status, 400);
+  const body = (await response.json()) as {
+    details: { fieldErrors: Record<string, string[]> };
+  };
+  assert.ok(body.details.fieldErrors.featured);
   assert.equal(mocks.listMarketSkills.mock.calls.length, 0);
 });
 

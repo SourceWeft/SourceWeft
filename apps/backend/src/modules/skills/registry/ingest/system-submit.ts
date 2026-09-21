@@ -60,18 +60,54 @@ function describeError(error: unknown) {
   };
 }
 
+/**
+ * A source to import: its URL, and optionally whether its skills are featured
+ * (the sync marks sources from a short list of major publishers). Absent
+ * `featured` leaves whatever the skill already has.
+ */
+export type SystemSubmitSource =
+  string | { source: string; featured?: boolean };
+
+/** The sync's stdin items, checked; anything else is refused whole. */
+export function parseSystemSubmitSources(value: unknown): SystemSubmitSource[] {
+  if (!Array.isArray(value)) {
+    throw new Error("stdin.sources must be an array");
+  }
+  return value.map((item, index) => {
+    if (typeof item === "string" && item.trim()) return item;
+    if (
+      item &&
+      typeof item === "object" &&
+      typeof (item as { source?: unknown }).source === "string" &&
+      (item as { source: string }).source.trim() &&
+      ["undefined", "boolean"].includes(
+        typeof (item as { featured?: unknown }).featured,
+      ) &&
+      Object.keys(item).every((key) => key === "source" || key === "featured")
+    ) {
+      return item as { source: string; featured?: boolean };
+    }
+    throw new Error(
+      `stdin.sources[${index}] must be a non-empty string or {"source": string, "featured"?: boolean}`,
+    );
+  });
+}
+
 /** One import per source. A source that is refused does not stop the rest. */
 export async function submitSkillSourcesAsSystem(
   scope: SystemSubmitScope,
-  sources: readonly string[],
+  sources: readonly SystemSubmitSource[],
 ): Promise<SystemSubmitResult[]> {
   const results: SystemSubmitResult[] = [];
-  for (const source of sources) {
+  for (const item of sources) {
+    const source = typeof item === "string" ? item : item.source;
+    const featured = typeof item === "string" ? undefined : item.featured;
     try {
       const { submission, created } = await createSkillSubmission({
         ...scope,
         userId: SYSTEM_SUBMITTER_ID,
         source,
+        ...(featured !== undefined ? { options: { featured } } : {}),
       });
       results.push({ source, ok: true, created, submission });
     } catch (error) {

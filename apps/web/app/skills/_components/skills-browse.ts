@@ -19,6 +19,7 @@ export const skillSortOptions = [
 
 export const skillTrustOptions = [
   { label: skillsCopy.trustOptions.all, value: "all" },
+  { label: skillsCopy.trustOptions.featured, value: "featured" },
   { label: skillsCopy.trustOptions.verified, value: "verified" },
 ] as const;
 
@@ -110,6 +111,7 @@ export function skillsListRequest(
   return {
     ...(state.category !== "all" ? { category: state.category } : {}),
     ...(state.trust === "verified" ? { verified: true } : {}),
+    ...(state.trust === "featured" ? { featured: true } : {}),
     ...(state.capability !== "all" ? { capability: state.capability } : {}),
     ...(state.query ? { query: state.query } : {}),
     ...(state.cursor ? { cursor: state.cursor } : {}),

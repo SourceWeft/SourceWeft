@@ -157,6 +157,27 @@ test("asks the server for one page and sections built-ins, own and community ski
   expect(container.textContent).not.toContain("Load more");
 });
 
+test("a featured skill carries its own mark, and no unverified caution", async () => {
+  api.listSkillsCatalog.mockResolvedValue({
+    items: [
+      skill("docx", { featured: true }),
+      skill("plain", {}),
+    ],
+    nextCursor: null,
+  });
+  await render();
+
+  const cardOf = (name: string) =>
+    [...container.querySelectorAll("article")].find((node) =>
+      node.textContent?.includes(`Skill ${name}`),
+    )!;
+  expect(cardOf("docx").textContent).toContain("Featured");
+  expect(cardOf("docx").textContent).not.toContain("Verified");
+  expect(cardOf("docx").textContent).not.toContain("Unverified");
+  expect(cardOf("plain").textContent).not.toContain("Featured");
+  expect(cardOf("plain").textContent).toContain("Unverified");
+});
+
 test("sends the URL's filters, sort and query to the server", async () => {
   navigation.search =
     "category=writing&trust=community&capability=executable&installed=installed&sort=new&q=pdf";

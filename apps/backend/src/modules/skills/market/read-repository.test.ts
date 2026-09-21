@@ -376,6 +376,8 @@ test("a summary carries the market's facts, not the author's own claims", () => 
     // The market's filing, not the manifest's `self-styled`.
     categories: ["documents-office"],
     verified: true,
+    // Not given on the definition: not featured.
+    featured: false,
     capability: "executable",
     license: "MIT",
     author: "anthropics",
@@ -393,6 +395,24 @@ test("a summary carries the market's facts, not the author's own claims", () => 
     claimed: false,
   });
   assert.ok(marketSkillSummarySchema.safeParse(summary).success);
+});
+
+test("featured is the definition's, never the manifest's", () => {
+  const of = (featured: boolean | undefined) =>
+    mapMarketSkillSummary(
+      {
+        definition: { ...definition, featured },
+        version: {
+          version: "1",
+          publishedAt: null,
+          manifestJson: manifest({}, { featured: true }),
+        },
+      },
+      [],
+    ).featured;
+  assert.equal(of(true), true);
+  assert.equal(of(false), false);
+  assert.equal(of(undefined), false);
 });
 
 test("a summary carries the repository's GitHub facts and whether it was claimed", () => {

@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import {
   db,
   skillCategories,
@@ -171,7 +171,28 @@ export type OwnerSkillListing = {
   heldBy: "admin" | "owner" | null;
 };
 
-/** The owner's view of their skill's listing; null for anyone else's skill. */
+/**
+ * The skill's author's say over it, and only its author's: the skill must be
+ * claimed (`claimed_at`) and the caller must be the claimant, who is its
+ * owner from the claim on. Whoever merely imported an unclaimed skill has no
+ * say — whether an unclaimed skill is public is decided by the platform's
+ * rules (the scan, provenance, auto-listing) and by market admins. Importing
+ * a public repository's skill is not authoring it.
+ */
+function authorOwnsSkill(input: { skillId: string; userId: string }) {
+  return and(
+    eq(skillDefinitions.id, input.skillId),
+    eq(skillDefinitions.sourceType, "registry_github"),
+    eq(skillDefinitions.status, "active"),
+    eq(skillDefinitions.ownerUserId, input.userId),
+    isNotNull(skillDefinitions.claimedAt),
+  );
+}
+
+/**
+ * The author's view of their skill's listing; null for anyone else, the
+ * importer of an unclaimed skill included.
+ */
 export async function getOwnerSkillListing(input: {
   skillId: string;
   userId: string;
@@ -182,14 +203,7 @@ export async function getOwnerSkillListing(input: {
       listingHoldBy: skillDefinitions.listingHoldBy,
     })
     .from(skillDefinitions)
-    .where(
-      and(
-        eq(skillDefinitions.id, input.skillId),
-        eq(skillDefinitions.sourceType, "registry_github"),
-        eq(skillDefinitions.status, "active"),
-        eq(skillDefinitions.ownerUserId, input.userId),
-      ),
-    )
+    .where(authorOwnsSkill(input))
     .limit(1);
   if (!definition) return null;
   return {
@@ -200,15 +214,14 @@ export async function getOwnerSkillListing(input: {
 }
 
 /**
- * The person who imported a skill decides whether it may be on the public
- * market: a clean skill lists itself, and importing something for your own use
- * must not mean publishing it.
+ * The author of a claimed skill decides whether it may be on the public
+ * market (see `authorOwnsSkill`).
  *
  * `listed: false` takes it off (or keeps it off) and holds it as the owner.
  * `listed: true` only lifts the owner's own hold — whether the skill then lists
  * is the same decision as for any other skill (clean → listed, flagged → the
  * admin's queue), so this is never a way around a flag or an admin's hold.
- * null when the skill is not this user's active registry skill.
+ * null when the skill is not a claimed, active registry skill of this user's.
  */
 export async function setOwnerSkillListing(input: {
   skillId: string;
@@ -222,14 +235,7 @@ export async function setOwnerSkillListing(input: {
       listingHoldBy: skillDefinitions.listingHoldBy,
     })
     .from(skillDefinitions)
-    .where(
-      and(
-        eq(skillDefinitions.id, input.skillId),
-        eq(skillDefinitions.sourceType, "registry_github"),
-        eq(skillDefinitions.status, "active"),
-        eq(skillDefinitions.ownerUserId, input.userId),
-      ),
-    )
+    .where(authorOwnsSkill(input))
     .limit(1);
   if (!definition) return null;
 
@@ -284,6 +290,36 @@ export async function setSkillVerified(input: {
     .returning({
       skillId: skillDefinitions.id,
       verified: skillDefinitions.verified,
+    });
+  return row ?? null;
+}
+
+/**
+ * An admin marks a skill featured, or not. The platform's import sets
+ * `featured` for a short list of major publishers; recording the choice as
+ * the admin's (`featured_set_by = 'admin'`) is what keeps a later import from
+ * overwriting it (`registry/repository.ts`).
+ */
+export async function setSkillFeatured(input: {
+  skillId: string;
+  featured: boolean;
+}) {
+  const [row] = await db
+    .update(skillDefinitions)
+    .set({
+      featured: input.featured,
+      featuredSetBy: "admin",
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(skillDefinitions.id, input.skillId),
+        eq(skillDefinitions.sourceType, "registry_github"),
+      ),
+    )
+    .returning({
+      skillId: skillDefinitions.id,
+      featured: skillDefinitions.featured,
     });
   return row ?? null;
 }

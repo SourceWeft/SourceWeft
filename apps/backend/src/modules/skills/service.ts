@@ -78,7 +78,7 @@ import {
   skillCatalogSortKeyColumns,
 } from "./market/catalog-query";
 import { listSkillCategorySlugs } from "./market/listing";
-import { compareRecommendedSkills } from "./market/rank";
+import { compareRecommendedSkills, skillTrustTier } from "./market/rank";
 import { isMarketAdmin } from "../market/admin";
 import { normalizeGitHubSource } from "../market/parser/github";
 import { config } from "../../shared/config";
@@ -156,7 +156,8 @@ function registrySkillTextReadable(input: {
 // UI-facing attribution + trust + market surface for a registry entry.
 // `publisher` is always "Community". `verified` is the market admin's grant on
 // the definition — never anything the skill says about itself (the trust
-// firewall, skill-registry-index.md §0/§3). `flagged` mirrors the ingest scan
+// firewall, skill-registry-index.md §0/§3) — and `featured` likewise comes from
+// the definition (set by the platform's own import or an admin). `flagged` mirrors the ingest scan
 // verdict; `capability` is the shown version's, null when it records none.
 function registryCatalogFields(
   manifest: SkillManifestJson,
@@ -164,12 +165,15 @@ function registryCatalogFields(
     typeof skillDefinitions.$inferSelect,
     "verified" | "installCount" | "listedAt"
   > &
-    Partial<Pick<typeof skillDefinitions.$inferSelect, "repoStars">>,
+    Partial<
+      Pick<typeof skillDefinitions.$inferSelect, "repoStars" | "featured">
+    >,
 ) {
   const registry = manifest.registry;
   return {
     publisher: "Community",
     verified: definition.verified,
+    featured: definition.featured ?? false,
     sourceUrl: registry?.sourceUrl ?? null,
     license: registry?.license ?? null,
     flagged: registry?.scan?.reviewRequired ?? false,
@@ -669,7 +673,15 @@ export class ContentSkillsService {
       }
       items.push(mapBuiltinSkillToCatalogItem(skill));
     }
-    return items;
+    // Ours first, then what the workspace or its team wrote — the top of the
+    // same trust ladder the registry rows continue below them — and by name
+    // within each, since the rows above come back in no particular order.
+    return items.sort(
+      (a, b) =>
+        skillTrustTier(a) - skillTrustTier(b) ||
+        a.displayName.localeCompare(b.displayName) ||
+        (a.skillId < b.skillId ? -1 : a.skillId > b.skillId ? 1 : 0),
+    );
   }
 
   /**
@@ -939,6 +951,7 @@ export class ContentSkillsService {
       skillId: item.skillId,
       sourceType: item.sourceType,
       verified: item.verified ?? false,
+      featured: item.featured ?? false,
       installCount: installs.get(item.skillId) ?? 0,
       repoStars: repoStars.get(item.skillId) ?? 0,
       listedAt: item.listedAt,
@@ -950,7 +963,8 @@ export class ContentSkillsService {
           skillSearchRelevanceRank({ ...a.item, query }) -
             skillSearchRelevanceRank({ ...b.item, query }) ||
           // Same textual fit: whatever the market would recommend first —
-          // ours, the workspace's own, verified community skills, the rest;
+          // ours, the workspace's own, featured publishers, verified
+          // community skills, the rest;
           // then the rank score of installs and stars (`market/rank.ts`).
           // The install count is the live one, which is also what is reported.
           compareRecommendedSkills(rankSignals(a.item), rankSignals(b.item)),

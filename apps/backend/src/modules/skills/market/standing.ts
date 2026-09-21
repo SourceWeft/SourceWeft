@@ -39,6 +39,8 @@ export async function getSkillMarketStanding(
     listingHold: definition.listingHold,
     listingHoldBy: definition.listingHoldBy,
     verified: definition.verified,
+    featured: definition.featured,
+    featuredSetBy: definition.featuredSetBy,
     categorySlugs,
     installCount: definition.installCount,
     listedAt: definition.listedAt?.toISOString() ?? null,

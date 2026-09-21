@@ -9,7 +9,6 @@ const mocks = vi.hoisted(() => ({
   requireSkillWorkspace: vi.fn(),
   overview: vi.fn(),
   start: vi.fn(),
-  verify: vi.fn(),
   remove: vi.fn(),
 }));
 
@@ -23,7 +22,6 @@ vi.mock("../../../modules/skills/registry/permissions", () => ({
 vi.mock("../../../modules/skills/market/claims", () => ({
   getSkillClaimsOverview: mocks.overview,
   startSkillClaim: mocks.start,
-  verifySkillClaim: mocks.verify,
   removeClaimedRepoFromMarket: mocks.remove,
 }));
 
@@ -48,15 +46,14 @@ const post = (path: string, body?: unknown) =>
     body: body === undefined ? undefined : JSON.stringify(body),
   });
 
-const claim = (status: string) => ({
+const claim = {
   id: "claim_1",
   repo: "ada/skills",
-  method: status === "pending" ? "verification_file" : "github_account",
-  status,
+  method: "github_account",
+  status: "verified",
   createdAt: "2026-09-21T00:00:00.000Z",
-  verifiedAt: null,
-  expiresAt: null,
-});
+  verifiedAt: "2026-09-21T00:00:00.000Z",
+};
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -114,54 +111,43 @@ test("starting takes a strict body and claims for the session's user only", asyn
     { repo: "ada/skills" },
     { repo: "ada", method: "github_account" },
     { repo: "ada/skills", method: "github_account", userId: "user_2" },
+    // The verification file is gone; a grant is only an admin's.
+    { repo: "ada/skills", method: "verification_file" },
+    { repo: "ada/skills", method: "admin_grant" },
   ]) {
-    assert.equal((await post(base, body)).status, 400, JSON.stringify(body));
+    const response = await post(base, body);
+    assert.equal(response.status, 400, JSON.stringify(body));
+    assert.match(await response.text(), /VALIDATION_ERROR/);
   }
   assert.equal(mocks.start.mock.calls.length, 0);
 
-  mocks.start.mockResolvedValue({ claim: claim("verified"), verification: null });
+  mocks.start.mockResolvedValue({ claim });
   const decided = await post(base, { repo: " ada/skills ", method: "github_account" });
   assert.equal(decided.status, 200);
   assert.deepEqual(mocks.start.mock.calls[0], [
     { userId: "user_1", repo: "ada/skills", method: "github_account" },
   ]);
-
-  mocks.start.mockResolvedValue({
-    claim: claim("pending"),
-    verification: { token: "t", path: ".sourceweft/claim", branch: "main" },
-  });
-  const pending = await post(base, {
-    repo: "ada/skills",
-    method: "verification_file",
-  });
-  assert.equal(pending.status, 201);
-  assert.equal(
-    ((await pending.json()) as { verification: { token: string } }).verification
-      .token,
-    "t",
-  );
+  assert.deepEqual(await decided.json(), { claim });
 });
 
 test("the service's refusals reach the author with their codes", async () => {
-  mocks.start.mockRejectedValue(
-    new ContentError(409, "SKILL_REPO_ALREADY_CLAIMED", "Already claimed"),
-  );
-  const response = await post(base, {
-    repo: "ada/skills",
-    method: "verification_file",
-  });
-  assert.equal(response.status, 409);
-  assert.match(await response.text(), /SKILL_REPO_ALREADY_CLAIMED/);
+  for (const [status, code] of [
+    [409, "SKILL_REPO_ALREADY_CLAIMED"],
+    [403, "SKILL_CLAIM_ACCOUNT_MISMATCH"],
+    [409, "SKILL_CLAIM_ORGANIZATION_REPO"],
+  ] as const) {
+    mocks.start.mockRejectedValueOnce(new ContentError(status, code, code));
+    const response = await post(base, {
+      repo: "ada/skills",
+      method: "github_account",
+    });
+    assert.equal(response.status, status);
+    assert.match(await response.text(), new RegExp(code));
+  }
 });
 
-test("verify and remove act on the caller's claim", async () => {
-  mocks.verify.mockResolvedValue(claim("verified"));
-  const verified = await post(`${base}/claim_1/verify`);
-  assert.equal(verified.status, 200);
-  assert.deepEqual(mocks.verify.mock.calls[0], [
-    { userId: "user_1", claimId: "claim_1" },
-  ]);
-  assert.deepEqual(await verified.json(), { claim: claim("verified") });
+test("there is no verify route any more; remove acts on the caller's claim", async () => {
+  assert.equal((await post(`${base}/claim_1/verify`)).status, 404);
 
   mocks.remove.mockResolvedValue({ repo: "ada/skills", skillCount: 2 });
   const removed = await post(`${base}/claim_1/remove-from-market`);

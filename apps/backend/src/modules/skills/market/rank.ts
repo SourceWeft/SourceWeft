@@ -10,8 +10,8 @@ import type { SQL } from "drizzle-orm";
  * Three readers. The scheduler stores the score in
  * `skill_definitions.rank_score` (`refreshSkillInstallCounts`), so the catalog
  * can page by it. The catalog's `recommended` sort is the same ordering over
- * community skills alone — where only the verified/community step of the trust
- * ladder is left — written as ORDER BY in `catalog-query.ts`. The agent's
+ * community skills alone — where only the featured/verified/community steps of
+ * the trust ladder are left — written as ORDER BY in `catalog-query.ts`. The agent's
  * `search_skills` uses the comparator to order entries that fit the query
  * equally well. A database test holds the SQL and the comparator together.
  */
@@ -21,6 +21,11 @@ export type SkillRankSignals = {
   sourceType: string;
   /** A market admin's grant. Never self-asserted, so absent means false. */
   verified?: boolean;
+  /**
+   * From a publisher the platform highlights, set by its own import or an
+   * admin. Never self-asserted, so absent means false.
+   */
+  featured?: boolean;
   installCount?: number;
   /** GitHub stars of the repository the skill comes from; 0 when unknown. */
   repoStars?: number;
@@ -63,10 +68,14 @@ export const skillRankScoreSql: SQL<number> = sql<number>`least(${MAX_RANK_SCORE
 
 /**
  * Lower is more trusted: ours, then what this workspace or its team wrote
- * themselves, then community skills a market admin vouched for, then the rest.
+ * themselves, then community skills from a featured publisher, then ones a
+ * market admin vouched for, then the rest. Featured goes above verified
+ * because it is about who stands behind the skill — a major vendor's own
+ * repository — which is the stronger word; a skill that is both counts as
+ * featured (and leads the featured ones, see `compareRecommendedSkills`).
  */
 export function skillTrustTier(
-  skill: Pick<SkillRankSignals, "sourceType" | "verified">,
+  skill: Pick<SkillRankSignals, "sourceType" | "verified" | "featured">,
 ): number {
   if (skill.sourceType === "builtin") {
     return 0;
@@ -74,7 +83,10 @@ export function skillTrustTier(
   if (skill.sourceType !== "registry_github") {
     return 1;
   }
-  return skill.verified ? 2 : 3;
+  if (skill.featured) {
+    return 2;
+  }
+  return skill.verified ? 3 : 4;
 }
 
 function listedAtMs(listedAt: string | null | undefined): number {
@@ -90,6 +102,10 @@ export function compareRecommendedSkills(
 ): number {
   return (
     skillTrustTier(a) - skillTrustTier(b) ||
+    // Only decides anything among featured skills — every other tier is all
+    // verified or all not — where an admin's word on top of the publisher's
+    // goes first. The SQL order is (featured, verified, …) for the same reason.
+    Number(b.verified ?? false) - Number(a.verified ?? false) ||
     skillRankScore(b) - skillRankScore(a) ||
     listedAtMs(b.listedAt) - listedAtMs(a.listedAt) ||
     (a.skillId < b.skillId ? 1 : a.skillId > b.skillId ? -1 : 0)

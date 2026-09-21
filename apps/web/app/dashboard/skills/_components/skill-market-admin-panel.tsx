@@ -19,6 +19,7 @@ import {
   AlertDialogTitle,
 } from "@sourceweft/ui-web/components/ui/alert-dialog";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
+import { Input } from "@sourceweft/ui-web/components/ui/input";
 import { Switch } from "@sourceweft/ui-web/components/ui/switch";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import {
@@ -27,9 +28,10 @@ import {
   isSkillMarketAdminUnavailable,
   listSkillPublicly,
   setSkillCategories,
+  setSkillFeatured,
   setSkillVerified,
 } from "../../../../lib/skill-market-admin";
-import { revokeSkillClaim } from "../../../../lib/skill-claims";
+import { grantSkillClaim, revokeSkillClaim } from "../../../../lib/skill-claims";
 import { formatInstallCount } from "./skills-market-browse";
 import {
   canSaveSkillCategories,
@@ -43,6 +45,7 @@ import { skillsMarketCopy } from "./skills-market-copy";
 
 const copy = skillsMarketCopy.adminPanel;
 const claimCopy = skillsClaimCopy.admin;
+const featuredCopy = skillsClaimCopy.featured;
 
 function formatDate(iso: string) {
   const date = new Date(iso);
@@ -59,6 +62,14 @@ function errorCode(error: unknown) {
   return (error as { code?: unknown } | null)?.code;
 }
 
+function grantErrorMessage(error: unknown) {
+  const code = errorCode(error);
+  return code === "SKILL_CLAIM_USER_NOT_FOUND" ||
+    code === "SKILL_REPO_ALREADY_CLAIMED"
+    ? claimCopy.grantErrors[code]
+    : claimCopy.grantErrors.fallback;
+}
+
 /**
  * Market-admin controls for one community skill. Whether the viewer is an
  * admin is answered by the standing request itself: 403/404 renders nothing —
@@ -68,11 +79,20 @@ function errorCode(error: unknown) {
 export function SkillMarketAdminPanel({
   categories,
   onChanged,
+  onClaimChanged,
+  repo,
   skillId,
 }: {
   categories: SkillCatalogCategory[];
   /** The skill's public facts changed; the page may want to reload them. */
   onChanged?: () => void;
+  /** A claim was granted or revoked: who holds the skill changed. */
+  onClaimChanged?: () => void;
+  /**
+   * The skill's GitHub repository as `owner/repo`, which a claim is granted
+   * on; null hides the grant form.
+   */
+  repo: string | null;
   skillId: string;
 }) {
   // The route also answers with the author's claim on the repository.
@@ -87,6 +107,7 @@ export function SkillMarketAdminPanel({
     "list" | "withdraw" | "revokeClaim"
   >("list");
   const [confirmOpen, setConfirmOpen] = React.useState(false);
+  const [grantEmail, setGrantEmail] = React.useState("");
   const generationRef = React.useRef(0);
 
   const load = React.useCallback(async () => {
@@ -114,7 +135,11 @@ export function SkillMarketAdminPanel({
     };
   }, [load]);
 
-  async function run(action: () => Promise<unknown>, successMessage: string) {
+  async function run(
+    action: () => Promise<unknown>,
+    successMessage: string,
+    failureMessage?: (error: unknown) => string,
+  ) {
     setBusy(true);
     try {
       await action();
@@ -122,11 +147,13 @@ export function SkillMarketAdminPanel({
       onChanged?.();
     } catch (actionError) {
       toast.error(
-        errorCode(actionError) === "SKILL_CATEGORY_INVALID"
-          ? copy.categoryInvalid
-          : actionError instanceof Error && actionError.message
-            ? actionError.message
-            : copy.actionFailed,
+        failureMessage
+          ? failureMessage(actionError)
+          : errorCode(actionError) === "SKILL_CATEGORY_INVALID"
+            ? copy.categoryInvalid
+            : actionError instanceof Error && actionError.message
+              ? actionError.message
+              : copy.actionFailed,
       );
     } finally {
       await load();
@@ -220,6 +247,55 @@ export function SkillMarketAdminPanel({
             >
               {claimCopy.revoke}
             </Button>
+          ) : repo ? (
+            // Only unclaimed: a claim someone holds is revoked first.
+            <form
+              aria-label={claimCopy.grantTitle}
+              className="mt-2 space-y-1.5"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const email = grantEmail.trim();
+                if (!email) return;
+                void run(
+                  async () => {
+                    await grantSkillClaim({ repo, email });
+                    setGrantEmail("");
+                    onClaimChanged?.();
+                  },
+                  claimCopy.grantedToast,
+                  grantErrorMessage,
+                );
+              }}
+            >
+              <label
+                className="block font-medium text-foreground"
+                htmlFor="skill-market-grant-email"
+              >
+                {claimCopy.grantTitle}
+              </label>
+              <p className="text-muted-foreground">{claimCopy.grantHint}</p>
+              <div className="flex gap-2">
+                <Input
+                  aria-label={claimCopy.grantEmailLabel}
+                  autoComplete="off"
+                  className="h-8 min-w-0 flex-1 text-xs"
+                  disabled={busy}
+                  id="skill-market-grant-email"
+                  onChange={(event) => setGrantEmail(event.target.value)}
+                  placeholder={claimCopy.grantEmailPlaceholder}
+                  type="email"
+                  value={grantEmail}
+                />
+                <Button
+                  disabled={busy || !grantEmail.trim()}
+                  size="sm"
+                  type="submit"
+                  variant="outline"
+                >
+                  {claimCopy.grant}
+                </Button>
+              </div>
+            </form>
           ) : null}
         </div>
       </dl>
@@ -273,6 +349,37 @@ export function SkillMarketAdminPanel({
             void run(
               () => setSkillVerified(skillId, checked),
               checked ? copy.verifiedToast : copy.unverifiedToast,
+            )
+          }
+        />
+      </div>
+
+      <div className="mt-4 flex items-start justify-between gap-3 border-t border-border pt-3">
+        <div className="min-w-0 text-xs">
+          <label
+            className="font-medium text-foreground"
+            htmlFor="skill-market-featured"
+          >
+            {featuredCopy.label}
+          </label>
+          <p className="mt-0.5 text-muted-foreground">{featuredCopy.hint}</p>
+          {standing.featuredSetBy ? (
+            <p className="mt-0.5 text-muted-foreground">
+              {standing.featuredSetBy === "admin"
+                ? featuredCopy.setByAdmin
+                : featuredCopy.setBySync}
+            </p>
+          ) : null}
+        </div>
+        <Switch
+          // An older backend's standing has no `featured`: read it as off.
+          checked={standing.featured === true}
+          disabled={busy}
+          id="skill-market-featured"
+          onCheckedChange={(checked) =>
+            void run(
+              () => setSkillFeatured(skillId, checked),
+              checked ? featuredCopy.featuredToast : featuredCopy.unfeaturedToast,
             )
           }
         />
@@ -356,10 +463,10 @@ export function SkillMarketAdminPanel({
                 if (confirmAction === "revokeClaim") {
                   const claimId = claim?.claimId;
                   if (claimId) {
-                    void run(
-                      () => revokeSkillClaim(claimId),
-                      claimCopy.revokedToast,
-                    );
+                    void run(async () => {
+                      await revokeSkillClaim(claimId);
+                      onClaimChanged?.();
+                    }, claimCopy.revokedToast);
                   }
                 } else if (confirmAction === "withdraw") {
                   void run(() => delistSkill(skillId), copy.withdrawnToast);

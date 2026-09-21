@@ -82,7 +82,6 @@ test("offers the verified claimant removal", async () => {
         status: "verified",
         createdAt: "2026-09-21T00:00:00.000Z",
         verifiedAt: "2026-09-21T00:00:00.000Z",
-        expiresAt: null,
       },
     },
   });

@@ -12,6 +12,7 @@ import {
 } from "../_components/skill-install-intent";
 import { SkillIntroduction } from "../_components/skill-introduction";
 import { SkillMarketAdminPanel } from "../_components/skill-market-admin-panel";
+import { claimRepoOfSourceUrl } from "../_components/skill-market-standing";
 import { SkillOwnerListing } from "../_components/skill-owner-listing";
 import { SkillMarketFacts } from "../_components/skill-market-facts";
 import {
@@ -700,7 +701,7 @@ export default function SkillDetailPage() {
               ) : null}
               {detail?.skill.sourceType === "registry_github" && workspace ? (
                 <SkillClaimPanel
-                  key={`claim-${detail.skill.skillId}`}
+                  key={`claim-${detail.skill.skillId}-${claimRevision}`}
                   onChanged={() => {
                     setClaimRevision((revision) => revision + 1);
                     void refreshDetail();
@@ -716,6 +717,12 @@ export default function SkillDetailPage() {
                   // standing the removal just produced without a reload.
                   key={`admin-${detail.skill.skillId}-${claimRevision}`}
                   onChanged={() => void refreshDetail()}
+                  // A grant or revoke changes who holds the skill: the claim
+                  // panel and the author's switch read it afresh.
+                  onClaimChanged={() =>
+                    setClaimRevision((revision) => revision + 1)
+                  }
+                  repo={claimRepoOfSourceUrl(detail.skill.sourceUrl)}
                   skillId={detail.skill.skillId}
                 />
               ) : null}

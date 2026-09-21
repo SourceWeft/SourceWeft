@@ -14,7 +14,9 @@ const mocks = vi.hoisted(() => ({
   releaseSkillListingHold: vi.fn(),
   setSkillVerified: vi.fn(),
   setSkillCategories: vi.fn(),
+  setSkillFeatured: vi.fn(),
   revokeSkillClaim: vi.fn(),
+  grantSkillClaim: vi.fn(),
 }));
 
 vi.mock("../middleware/auth-session", () => ({
@@ -37,9 +39,11 @@ vi.mock("../../modules/skills/market/listing", () => ({
   releaseSkillListingHold: mocks.releaseSkillListingHold,
   setSkillVerified: mocks.setSkillVerified,
   setSkillCategories: mocks.setSkillCategories,
+  setSkillFeatured: mocks.setSkillFeatured,
 }));
 vi.mock("../../modules/skills/market/claims", () => ({
   revokeSkillClaim: mocks.revokeSkillClaim,
+  grantSkillClaim: mocks.grantSkillClaim,
 }));
 vi.mock("../../modules/skills/market/standing", () => ({
   getSkillMarketStanding: async () => mocks.standing,
@@ -63,6 +67,8 @@ const standing = {
   listingHold: false,
   listingHoldBy: null,
   verified: false,
+  featured: false,
+  featuredSetBy: null,
   categorySlugs: ["documents-office"],
   installCount: 0,
   listedAt: null,
@@ -85,6 +91,7 @@ beforeEach(() => {
     "releaseSkillListingHold",
     "setSkillVerified",
     "setSkillCategories",
+    "setSkillFeatured",
   ] as const) {
     mocks[name].mockImplementation(async () => {
       mocks.calls.push(name);
@@ -101,6 +108,7 @@ test("every market admin route refuses someone who is not a market admin", async
     ["/list", { method: "POST" }],
     ["/delist", { method: "POST" }],
     ["/verified", json("PUT", { verified: true })],
+    ["/featured", json("PUT", { featured: true })],
     ["/categories", json("PUT", { categorySlugs: ["other"] })],
     ["/visibility", json("PUT", { visibility: "public" })],
   ] as const) {
@@ -121,6 +129,7 @@ test("the standing is read as stored, and 404s for what is not a registry skill"
     ["/list", { method: "POST" }],
     ["/delist", { method: "POST" }],
     ["/verified", json("PUT", { verified: true })],
+    ["/featured", json("PUT", { featured: true })],
     ["/categories", json("PUT", { categorySlugs: ["other"] })],
     ["/visibility", json("PUT", { visibility: "restricted" })],
   ] as const) {
@@ -236,4 +245,86 @@ test("revoking a claim is a market admin's act, recorded with who did it", async
     (await createTestApp().request(path, { method: "POST" })).status,
     404,
   );
+});
+
+test("featured is an admin's choice, answered with the stored standing", async () => {
+  // What `setSkillFeatured` stores, as the standing then reads it back.
+  mocks.setSkillFeatured.mockImplementation(async () => {
+    mocks.calls.push("setSkillFeatured");
+    mocks.standing = { ...standing, featured: true, featuredSetBy: "admin" };
+    return { skillId: "skill_1", featured: true };
+  });
+  const app = createTestApp();
+  const featured = await app.request(
+    `${base}/featured`,
+    json("PUT", { featured: true }),
+  );
+  assert.equal(featured.status, 200);
+  assert.deepEqual(mocks.setSkillFeatured.mock.calls, [
+    [{ skillId: "skill_1", featured: true }],
+  ]);
+  assert.deepEqual(await featured.json(), {
+    ...standing,
+    featured: true,
+    featuredSetBy: "admin",
+  });
+
+  for (const body of [{ featured: "yes" }, { featured: true, setBy: "sync" }, {}]) {
+    const response = await app.request(`${base}/featured`, json("PUT", body));
+    assert.equal(response.status, 400, JSON.stringify(body));
+  }
+  assert.equal(mocks.setSkillFeatured.mock.calls.length, 1);
+});
+
+test("granting a claim is a market admin's act, by repository and email", async () => {
+  const path = "/v1/skills/registry/admin/claims";
+  const body = { repo: "acme/skills", email: "author@example.com" };
+  mocks.admin = false;
+  assert.equal(
+    (await createTestApp().request(path, json("POST", body))).status,
+    403,
+  );
+  assert.equal(mocks.grantSkillClaim.mock.calls.length, 0);
+
+  mocks.admin = true;
+  const claim = {
+    id: "claim_2",
+    repo: "acme/skills",
+    method: "admin_grant",
+    status: "verified",
+    createdAt: "2026-09-21T00:00:00.000Z",
+    verifiedAt: "2026-09-21T00:00:00.000Z",
+  };
+  mocks.grantSkillClaim.mockResolvedValue({ claim, userId: "user_7" });
+  const granted = await createTestApp().request(
+    path,
+    json("POST", { repo: "acme/skills", email: " Author@Example.com " }),
+  );
+  assert.equal(granted.status, 201);
+  assert.deepEqual(await granted.json(), { claim, userId: "user_7" });
+  assert.deepEqual(mocks.grantSkillClaim.mock.calls[0], [body]);
+
+  for (const invalid of [
+    { repo: "acme/skills" },
+    { repo: "acme", email: "author@example.com" },
+    { repo: "acme/skills", email: "nope" },
+    { ...body, userId: "user_7" },
+  ]) {
+    const response = await createTestApp().request(path, json("POST", invalid));
+    assert.equal(response.status, 400, JSON.stringify(invalid));
+  }
+  assert.equal(mocks.grantSkillClaim.mock.calls.length, 1);
+
+  const { ContentError } = await import("../../modules/content/errors");
+  for (const [status, code] of [
+    [404, "SKILL_CLAIM_USER_NOT_FOUND"],
+    [409, "SKILL_REPO_ALREADY_CLAIMED"],
+  ] as const) {
+    mocks.grantSkillClaim.mockRejectedValueOnce(
+      new ContentError(status, code, code),
+    );
+    const response = await createTestApp().request(path, json("POST", body));
+    assert.equal(response.status, status);
+    assert.match(await response.text(), new RegExp(code));
+  }
 });

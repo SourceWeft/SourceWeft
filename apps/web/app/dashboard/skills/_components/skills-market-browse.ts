@@ -19,6 +19,7 @@ export const SKILLS_QUERY_MAX_LENGTH = 200;
 export const skillTrustValues = [
   "all",
   "builtin",
+  "featured",
   "verified",
   "community",
 ] as const satisfies readonly SkillCatalogTrust[];
@@ -156,6 +157,7 @@ export function excludesBoundedSkills(state: SkillsBrowseState) {
   return (
     state.category !== "all" ||
     state.capability !== "all" ||
+    state.trust === "featured" ||
     state.trust === "verified" ||
     state.trust === "community"
   );

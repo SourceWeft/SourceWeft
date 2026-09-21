@@ -54,6 +54,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       versionId: string;
       slug: string;
       verified: boolean;
+      featured: boolean;
       installCount: number;
       /** Microseconds since the epoch; null = no `listed_at`. */
       listedAtMicros: number | null;
@@ -81,6 +82,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
         versionId: randomUUID(),
         slug,
         verified: false,
+        featured: false,
         installCount: 0,
         listedAtMicros: Date.parse("2026-05-01T00:00:00.000Z") * 1000,
         visibility: "public",
@@ -196,6 +198,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
           status: entry.status,
           ownerUserId: "public-owner",
           verified: entry.verified,
+          featured: entry.featured,
         })),
       );
       // Through SQL, not a Date: the microseconds are the point.
@@ -348,6 +351,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       popular: (a, b) => b.installCount - a.installCount || byIdDesc(a, b),
       new: (a, b) => micros(b) - micros(a) || byIdDesc(a, b),
       recommended: (a, b) =>
+        Number(b.featured) - Number(a.featured) ||
         Number(b.verified) - Number(a.verified) ||
         b.installCount - a.installCount ||
         micros(b) - micros(a) ||
@@ -397,6 +401,9 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
           fixture({
             name: `p${String(index).padStart(2, "0")}`,
             verified: index % 5 === 0,
+            // 0, 7, 14 — 0 verified as well — so featured rows lead several
+            // pages' worth of the walk and span install counts.
+            featured: index % 7 === 0,
             // 0..3, so every count is shared by several skills.
             installCount: index % 4,
             // Same millisecond, 0/100/200 µs apart — and exact ties too. One
@@ -421,6 +428,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       const never = {
         installCount: 3,
         verified: true,
+        featured: true,
         categories: ["documents-office"],
       };
       entries.push(
@@ -635,6 +643,11 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
         [{ category: "no-such-category" }, () => false],
         [{ verified: true }, (e) => e.verified],
         [{ verified: false }, (e) => !e.verified],
+        [{ featured: true }, (e) => e.featured],
+        [{ featured: false }, (e) => !e.featured],
+        // Each flag on its own terms, so together they narrow.
+        [{ featured: true, verified: false }, (e) => e.featured && !e.verified],
+        [{ featured: false, verified: false }, (e) => !e.featured && !e.verified],
         [{ capability: "executable" }, (e) => e.capability === "executable"],
         [{ capability: "prompt-only" }, (e) => e.capability === "prompt-only"],
         [
@@ -712,6 +725,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
             taxonomy.skillCategoryDefinitions.findIndex((c) => c.slug === b),
         ),
         verified: false,
+        featured: false,
         capability: "executable",
         license: null,
         author: repoOwner,
@@ -727,6 +741,23 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
         repoArchived: false,
         claimed: false,
       });
+    });
+
+    test("featured shows on the summary and on the detail", async () => {
+      const entry = bySlugName("p07");
+      assert.equal(entry.featured, true);
+      const page = await list({ query: `${word} p07` });
+      assert.equal(page.items[0]!.featured, true);
+      assert.equal((await detail(entry.slug)).skill.featured, true);
+      assert.equal((await detail(bySlugName("p01").slug)).skill.featured, false);
+    });
+
+    test("featured= must be a boolean", async () => {
+      const body = await getJson<{ code: string }>(
+        `/v1/skills?featured=maybe`,
+        400,
+      );
+      assert.equal(body.code, "VALIDATION_ERROR");
     });
 
     test("a public skill with no listing date reports the day it was created", async () => {

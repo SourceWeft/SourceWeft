@@ -140,6 +140,7 @@ describe("filters", () => {
       false,
     );
     expect(excludesBoundedSkills({ ...base, query: "git" })).toBe(false);
+    expect(excludesBoundedSkills({ ...base, trust: "featured" })).toBe(true);
     expect(excludesBoundedSkills({ ...base, trust: "verified" })).toBe(true);
     expect(excludesBoundedSkills({ ...base, trust: "community" })).toBe(true);
     expect(excludesBoundedSkills({ ...base, category: "writing" })).toBe(true);

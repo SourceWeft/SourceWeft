@@ -1,8 +1,9 @@
-import type {
-  OwnerSkillListing,
-  SkillClaimRepository,
-  SkillMarketClaim,
-  SkillMarketStanding,
+import {
+  parseSkillClaimRepo,
+  type OwnerSkillListing,
+  type SkillClaimRepository,
+  type SkillMarketClaim,
+  type SkillMarketStanding,
 } from "@sourceweft/contracts";
 
 import { skillsClaimCopy } from "./skills-claim-copy";
@@ -14,8 +15,8 @@ export type SkillStandingKind =
   "public" | "withdrawn" | "ownerPrivate" | "restricted";
 
 /**
- * `withdrawn` = an admin took it off the market; `ownerPrivate` = the person
- * who imported it keeps it private. Either way the auto-listing pass is held
+ * `withdrawn` = an admin took it off the market; `ownerPrivate` = its author
+ * (the claimant of its repository) keeps it private. Either way the auto-listing pass is held
  * off it. `restricted` = simply not listed (yet). A public skill is public
  * whatever its hold flag says.
  */
@@ -29,7 +30,7 @@ export function skillStandingKind(
 }
 
 /**
- * The owner's switch. "Allowed" is not "listed": lifting your own hold lets the
+ * The author's switch on a claimed skill. "Allowed" is not "listed": lifting your own hold lets the
  * usual rules decide, which for a clean skill means listed within minutes and
  * for a flagged one means an admin looks first. An admin's hold locks it.
  */
@@ -96,8 +97,7 @@ export type SkillClaimPanelView =
 
 /**
  * What the panel on a community skill's page offers. Hidden when the skill has
- * no known repository. Only the verified claimant gets the removal action;
- * their pending claim still reads as unclaimed, with a link back to finish it.
+ * no known repository. Only the verified claimant gets the removal action.
  */
 export function claimPanelView(
   repository: SkillClaimRepository | null,
@@ -117,6 +117,21 @@ export function claimPanelView(
     return { kind: "claimedByAuthor", repo: repository.repo };
   }
   return { kind: "unclaimed", repo: repository.repo };
+}
+
+/**
+ * `owner/repo` of a community skill's GitHub source URL
+ * (`https://github.com/owner/repo/tree/<sha>/<path>`), lowercased the way
+ * claims store it; null for anything else. What an admin grants a claim on.
+ */
+export function claimRepoOfSourceUrl(sourceUrl: string | null | undefined) {
+  const match = /^https:\/\/github\.com\/([^/?#]+)\/([^/?#]+)/.exec(
+    sourceUrl ?? "",
+  );
+  const parsed = match
+    ? parseSkillClaimRepo(`${match[1]}/${(match[2] ?? "").replace(/\.git$/, "")}`)
+    : null;
+  return parsed ? `${parsed.owner}/${parsed.name}` : null;
 }
 
 /** Where "Claim this repository" goes. */

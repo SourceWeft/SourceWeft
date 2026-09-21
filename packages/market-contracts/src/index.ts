@@ -239,8 +239,8 @@ export type ListMarketKeysResponse = z.infer<
 // of public skill shows up here without this contract changing.
 // ---------------------------------------------------------------------------
 
-// `recommended` = verified first, then the rank score (workspaces that added it
-// and the repository's GitHub stars), then newest. `stars` = GitHub stars of
+// `recommended` = featured publishers first, then verified, then the rank score
+// (workspaces that added it and the repository's GitHub stars), then newest. `stars` = GitHub stars of
 // the source repository.
 export const marketSkillSortSchema = z.enum([
   "recommended",
@@ -272,6 +272,9 @@ export const marketSkillSummarySchema = z.object({
   categories: z.array(z.string()),
   // A market admin vouched for it. Never self-asserted.
   verified: z.boolean(),
+  // From a publisher the platform highlights (a short list of major vendors).
+  // About who publishes it, not its content. Defaulted for older servers.
+  featured: z.boolean().default(false),
   capability: marketSkillCapabilitySchema.nullable(),
   license: z.string().nullable(),
   // Repository owner, e.g. "anthropics". Null when it cannot be told.
@@ -303,6 +306,7 @@ export const listMarketSkillsRequestSchema = z.object({
   query: z.string().trim().max(200).optional(),
   category: z.string().trim().min(1).max(64).optional(),
   verified: z.boolean().optional(),
+  featured: z.boolean().optional(),
   capability: marketSkillCapabilitySchema.optional(),
   sort: marketSkillSortSchema.optional(),
   limit: z.number().int().min(1).max(100).optional(),

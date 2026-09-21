@@ -68,6 +68,7 @@ function response(
       sourceUrl: `https://github.com/anthropics/skills/tree/${SHA}/pdf`,
       updatedAt: "2026-09-15T00:00:00.000Z",
       verified: true,
+      featured: false,
       version: "1.2.0",
       cliInstallable: true,
       stars: 0,
@@ -153,6 +154,20 @@ describe("public skill detail page", () => {
     expect(html).not.toContain("Added to");
     expect(html).toContain("No license");
     expect(html).not.toContain("Verified");
+  });
+
+  it("marks a featured publisher's skill, apart from verified", async () => {
+    expect(await render()).not.toContain("Featured");
+    market.getPublicSkill.mockResolvedValue(
+      response({}, { featured: true, verified: false }),
+    );
+    const html = await render();
+    expect(html).toContain("Featured");
+    expect(html).not.toContain(">Verified<");
+    market.getPublicSkill.mockResolvedValue(
+      response({}, { featured: true, verified: true }),
+    );
+    expect(await render()).toContain("Featured, Verified");
   });
 
   it("renders SKILL.md without its frontmatter and without raw HTML", async () => {

@@ -20,10 +20,19 @@ const cursors: SkillCatalogCursor[] = [
   { sort: "stars", repoStars: 4200, id: "skill-1" },
   {
     sort: "recommended",
+    featured: false,
     verified: true,
     rankScore: 0,
     listedAtMicros: "0",
     id: "skill-1",
+  },
+  {
+    sort: "recommended",
+    featured: true,
+    verified: false,
+    rankScore: 1240,
+    listedAtMicros: "1789300800123456",
+    id: "skill-2",
   },
 ];
 
@@ -50,6 +59,7 @@ test("the cursor carries listed_at to the microsecond", () => {
     definition: {
       id: "skill-1",
       displayName: "Pdf",
+      featured: false,
       verified: false,
       installCount: 3,
       rankScore: 300,
@@ -68,6 +78,7 @@ test("the cursor carries listed_at to the microsecond", () => {
       definition: {
         id: "skill-1",
         displayName: "Pdf",
+        featured: true,
         verified: true,
         installCount: 3,
         rankScore: 540,
@@ -77,6 +88,7 @@ test("the cursor carries listed_at to the microsecond", () => {
     }),
     {
       sort: "recommended",
+      featured: true,
       verified: true,
       rankScore: 540,
       listedAtMicros: "0",
@@ -88,6 +100,7 @@ test("the cursor carries listed_at to the microsecond", () => {
       definition: {
         id: "skill-1",
         displayName: "Pdf",
+        featured: true,
         verified: true,
         installCount: 3,
         rankScore: 540,
@@ -105,6 +118,15 @@ test("the cursor carries listed_at to the microsecond", () => {
 test("a recommended cursor from before the rank score is refused", () => {
   const old = Buffer.from(
     JSON.stringify(["recommended", true, 3, "0", "skill-1"]),
+  ).toString("base64url");
+  assert.equal(decodeSkillCatalogCursor(old), null);
+});
+
+// Featured now leads the order. A cursor without it names a place in the old
+// order, which is not a place in this one, so it is refused like the one above.
+test("a recommended cursor from before featured is refused", () => {
+  const old = Buffer.from(
+    JSON.stringify(["recommended", "rank", true, 540, "0", "skill-1"]),
   ).toString("base64url");
   assert.equal(decodeSkillCatalogCursor(old), null);
 });
@@ -140,10 +162,12 @@ test("anything that is not a catalog cursor decodes to null", () => {
     encode(["new", "yesterday", "skill-1"]),
     encode(["new", "1; drop table skills", "skill-1"]),
     encode(["new", 1789300800123456, "skill-1"]),
-    encode(["recommended", "rank", "true", 1, "0", "skill-1"]),
-    encode(["recommended", "rank", true, 1, "0"]),
-    encode(["recommended", "installs", true, 1, "0", "skill-1"]),
-    encode(["recommended", "rank", true, -1, "0", "skill-1"]),
+    encode(["recommended", "featured-rank", "true", true, 1, "0", "skill-1"]),
+    encode(["recommended", "featured-rank", true, "true", 1, "0", "skill-1"]),
+    encode(["recommended", "featured-rank", true, true, 1, "0"]),
+    encode(["recommended", "installs", true, true, 1, "0", "skill-1"]),
+    encode(["recommended", "rank", true, true, 1, "0", "skill-1"]),
+    encode(["recommended", "featured-rank", true, true, -1, "0", "skill-1"]),
     encode(["stars", "12", "skill-1"]),
     encode(["stars", -1, "skill-1"]),
   ]) {
@@ -203,11 +227,12 @@ test("with no filter every bounded item is kept", () => {
   assert.deepEqual(kept({}), bounded);
 });
 
-test("trust=builtin keeps only ours; verified and community are market terms", () => {
+test("trust=builtin keeps only ours; featured, verified and community are market terms", () => {
   assert.deepEqual(kept({ trust: "builtin" }), [
     alwaysOnBuiltin,
     managedBuiltin,
   ]);
+  assert.deepEqual(kept({ trust: "featured" }), []);
   assert.deepEqual(kept({ trust: "verified" }), []);
   assert.deepEqual(kept({ trust: "community" }), []);
 });
@@ -244,7 +269,7 @@ test("only trust=builtin rules the registry out before it is queried", () => {
     }),
     true,
   );
-  for (const trust of ["all", "verified", "community"] as const) {
+  for (const trust of ["all", "featured", "verified", "community"] as const) {
     assert.equal(
       skillCatalogFiltersExcludeRegistry({
         ...NO_SKILL_CATALOG_FILTERS,

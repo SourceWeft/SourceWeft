@@ -77,6 +77,9 @@ export class MarketClient {
     if (typeof input.verified === "boolean") {
       params.set("verified", String(input.verified));
     }
+    if (typeof input.featured === "boolean") {
+      params.set("featured", String(input.featured));
+    }
     if (input.capability) {
       params.set("capability", input.capability);
     }

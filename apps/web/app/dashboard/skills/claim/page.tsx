@@ -5,20 +5,12 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import type {
-  SkillClaimMethod,
-  SkillClaimsOverview,
-  StartSkillClaimResponse,
-} from "@sourceweft/contracts";
+import type { SkillClaimsOverview } from "@sourceweft/contracts";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { Input } from "@sourceweft/ui-web/components/ui/input";
 import { ScrollArea } from "@sourceweft/ui-web/components/ui/scroll-area";
 
-import {
-  getSkillClaims,
-  startSkillClaim,
-  verifySkillClaim,
-} from "../../../../lib/skill-claims";
+import { getSkillClaims, startSkillClaim } from "../../../../lib/skill-claims";
 import { workspaceClient } from "../../../../lib/sdk";
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
 import { claimErrorMessage } from "../_components/skill-market-standing";
@@ -55,10 +47,6 @@ function ClaimPage() {
   const [busy, setBusy] = React.useState(false);
   const [draft, setDraft] = React.useState(repoParam ?? "");
   const [draftInvalid, setDraftInvalid] = React.useState(false);
-  // The response that issued a token: the only place the token ever exists.
-  const [issued, setIssued] = React.useState<StartSkillClaimResponse | null>(
-    null,
-  );
   const generationRef = React.useRef(0);
 
   React.useEffect(() => {
@@ -132,25 +120,10 @@ function ClaimPage() {
     }
   }
 
-  function start(method: SkillClaimMethod) {
+  function claim() {
     if (!workspaceId || !repo) return;
     void act(async () => {
-      const result = await startSkillClaim(workspaceId, { repo, method });
-      if (result.verification) {
-        setIssued(result);
-        toast.success(copy.started);
-      } else {
-        setIssued(null);
-        toast.success(copy.verified);
-      }
-    });
-  }
-
-  function verify(claimId: string) {
-    if (!workspaceId) return;
-    void act(async () => {
-      await verifySkillClaim(workspaceId, claimId);
-      setIssued(null);
+      await startSkillClaim(workspaceId, { repo, method: "github_account" });
       toast.success(copy.verified);
     });
   }
@@ -240,9 +213,8 @@ function ClaimPage() {
                   <ClaimRepositoryCard
                     busy={busy}
                     error={actionError}
-                    onStart={start}
-                    onVerify={verify}
-                    plan={claimRepositoryPlan(repository, issued)}
+                    onClaim={claim}
+                    plan={claimRepositoryPlan(repository)}
                     repository={repository}
                   />
                 ) : (

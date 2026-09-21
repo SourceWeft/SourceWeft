@@ -1,13 +1,11 @@
-import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { and, count, desc, eq, notExists, sql } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
+import { and, count, desc, eq, ne, notExists, sql } from "drizzle-orm";
 import {
   parseSkillClaimRepo,
-  SKILL_CLAIM_FILE_PATH,
-  SKILL_CLAIM_PENDING_TTL_DAYS,
+  type GrantSkillClaimResponse,
   type RemoveSkillRepoFromMarketResponse,
   type RevokeSkillClaimResponse,
   type SkillClaimAccountMethod,
-  type SkillClaimMethod,
   type SkillClaimRepository,
   type SkillClaimsOverview,
   type SkillMarketClaim,
@@ -31,12 +29,14 @@ import { setOwnerSkillListing } from "./listing";
  * Authors claiming the GitHub repository their community skills come from
  * (skill-marketplace-plan §13.3).
  *
- * A claim is only ever started by the author, and ownership only changes once
- * GitHub itself vouches for them: either their linked GitHub account is the
- * repository's (personal) owner, or they commit a one-time token to the
- * default branch. Nothing here asks for an OAuth scope or keeps a token — the
- * account method compares ids from public API answers, the file method stores
- * only the token's hash.
+ * Only a repository's owner may claim it. For a personal repository the
+ * author proves that themselves: their linked GitHub account is the
+ * repository's owner, compared by id from GitHub's public API — no OAuth
+ * scope, no token kept. An organization's repository is owned by the
+ * organization; being a member, a maintainer or an admin of it is not being
+ * its owner, and nothing we could read without a new scope would tell us who
+ * speaks for it. So those are never self-service: a market admin grants the
+ * claim (`grantSkillClaim`) after hearing from the organization.
  *
  * A verified claim moves every active community skill of the repository to
  * the author: listing control, the "claimed" mark, and removal. Workspaces
@@ -46,45 +46,11 @@ import { setOwnerSkillListing } from "./listing";
 
 export type ClaimRepo = { owner: string; name: string };
 
-const PENDING_TTL_MS = SKILL_CLAIM_PENDING_TTL_DAYS * 24 * 60 * 60 * 1000;
-
 /** The one index that keeps a repository to a single author. */
 const VERIFIED_CLAIM_CONSTRAINT = "skill_repo_claims_verified_uq";
 
 function repoLabel(repo: ClaimRepo) {
   return `${repo.owner}/${repo.name}`;
-}
-
-// --- Token ---------------------------------------------------------------
-
-/** sha256 hex of a token, as `skill_repo_claims.token_hash` stores it. */
-export function hashClaimToken(token: string): string {
-  return createHash("sha256").update(token, "utf8").digest("hex");
-}
-
-/**
- * A fresh token and its hash. 32 random bytes — guessing one is not a way
- * into someone's repository. The prefix makes a stray file recognizable.
- */
-export function createClaimToken(): { token: string; tokenHash: string } {
-  const token = `sourceweft-claim-${randomBytes(32).toString("base64url")}`;
-  return { token, tokenHash: hashClaimToken(token) };
-}
-
-/**
- * Whether a verification file holds the token behind `tokenHash`. Surrounding
- * whitespace is forgiven — editors add a trailing newline — anything else is
- * not. Hashes are compared in constant time.
- */
-export function claimFileMatches(
-  fileContent: string,
-  tokenHash: string,
-): boolean {
-  const candidate = Buffer.from(hashClaimToken(fileContent.trim()), "hex");
-  const expected = Buffer.from(tokenHash, "hex");
-  return (
-    candidate.length === expected.length && timingSafeEqual(candidate, expected)
-  );
 }
 
 // --- Rules ---------------------------------------------------------------
@@ -99,9 +65,8 @@ export type GitHubRepoFacts = {
 
 /**
  * Whether the account method can work, from what is known without asking
- * GitHub. An organization's repository can never be claimed by the account
- * method: being a member is not the same as being its author, and reading
- * membership would need a scope we do not ask for.
+ * GitHub. An organization's repository can never be claimed by it: its owner
+ * is the organization, not any one member (see above).
  */
 export function accountMethodAvailability(input: {
   linkedGithubId: string | null;
@@ -133,7 +98,7 @@ export function assertAccountOwnsRepo(input: {
     throw new ContentError(
       409,
       "SKILL_CLAIM_ORGANIZATION_REPO",
-      "This repository belongs to an organization; use the verification file",
+      "This repository belongs to an organization, so only its owner may claim it and a SourceWeft admin grants that claim; ask support@sourceweft.com",
     );
   }
   if (input.facts.ownerGithubId !== input.linkedGithubId) {
@@ -149,7 +114,7 @@ function githubNotLinked(): ContentError {
   return new ContentError(
     409,
     "SKILL_CLAIM_GITHUB_NOT_LINKED",
-    "Link your GitHub account in settings, or use the verification file",
+    "Link the GitHub account that owns this repository in settings first",
   );
 }
 
@@ -166,31 +131,6 @@ function assertSameRepo(repo: ClaimRepo, facts: GitHubRepoFacts) {
       `This repository is now ${facts.fullName} on GitHub; its skills here were indexed under the old name`,
     );
   }
-}
-
-/** The file method's verdict on what the default branch holds. */
-export function assertClaimFile(input: {
-  fileContent: string | null;
-  tokenHash: string | null;
-}) {
-  if (input.fileContent === null) {
-    throw new ContentError(
-      422,
-      "SKILL_CLAIM_FILE_MISSING",
-      `${SKILL_CLAIM_FILE_PATH} was not found on the repository's default branch`,
-    );
-  }
-  if (!input.tokenHash || !claimFileMatches(input.fileContent, input.tokenHash)) {
-    throw new ContentError(
-      422,
-      "SKILL_CLAIM_FILE_MISMATCH",
-      `${SKILL_CLAIM_FILE_PATH} does not contain this claim's token`,
-    );
-  }
-}
-
-function claimExpired(createdAt: Date, now: Date) {
-  return now.getTime() - createdAt.getTime() > PENDING_TTL_MS;
 }
 
 // --- GitHub --------------------------------------------------------------
@@ -262,49 +202,11 @@ export async function fetchGitHubRepoFacts(
   };
 }
 
-/** Largest verification file read; the token is under a hundred bytes. */
-const CLAIM_FILE_MAX_BYTES = 4096;
-
-/**
- * The verification file on `branch`, decoded; null when it is not there (or
- * is not a file). Read by branch name from the repository itself, so a commit
- * that only exists in a fork cannot supply it.
- */
-export async function fetchClaimFile(
-  repo: ClaimRepo,
-  branch: string,
-): Promise<string | null> {
-  const path = SKILL_CLAIM_FILE_PATH.split("/")
-    .map((segment) => encodeURIComponent(segment))
-    .join("/");
-  const data = (await githubJson(
-    `https://api.github.com/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/contents/${path}?ref=${encodeURIComponent(branch)}`,
-  )) as {
-    type?: unknown;
-    encoding?: unknown;
-    content?: unknown;
-    size?: unknown;
-  } | null;
-  if (!data || data.type !== "file") return null;
-  if (typeof data.size === "number" && data.size > CLAIM_FILE_MAX_BYTES) {
-    // Present, but cannot be a token file.
-    return "";
-  }
-  if (data.encoding !== "base64" || typeof data.content !== "string") {
-    return null;
-  }
-  return Buffer.from(data.content, "base64").toString("utf8");
-}
-
 export type ClaimGitHub = {
   fetchRepoFacts: (repo: ClaimRepo) => Promise<GitHubRepoFacts | null>;
-  fetchClaimFile: (repo: ClaimRepo, branch: string) => Promise<string | null>;
 };
 
-const defaultGitHub: ClaimGitHub = {
-  fetchRepoFacts: fetchGitHubRepoFacts,
-  fetchClaimFile,
-};
+const defaultGitHub: ClaimGitHub = { fetchRepoFacts: fetchGitHubRepoFacts };
 
 /** GitHub's answer, or the 404 an author sees for a repository it lacks. */
 async function requireRepoFacts(repo: ClaimRepo, github: ClaimGitHub) {
@@ -385,22 +287,30 @@ async function requireRepoWithSkills(repo: ClaimRepo): Promise<number> {
 
 type ClaimRow = typeof skillRepoClaims.$inferSelect;
 
-function toClaim(row: ClaimRow, now = new Date()): SkillRepoClaim {
-  const pending = row.status === "pending";
+/**
+ * `pending` rows are left over from the retired verification-file method:
+ * never shown, never acted on, so every read leaves them out.
+ */
+type DecidedClaimRow = ClaimRow & { status: "verified" | "revoked" };
+
+function isDecided(row: ClaimRow): row is DecidedClaimRow {
+  return row.status !== "pending";
+}
+
+function toClaim(row: DecidedClaimRow): SkillRepoClaim {
   return {
     id: row.id,
     repo: `${row.repoOwner}/${row.repoName}`,
     method: row.method,
-    status: pending && claimExpired(row.createdAt, now) ? "expired" : row.status,
+    status: row.status,
     createdAt: row.createdAt.toISOString(),
     verifiedAt: row.verifiedAt?.toISOString() ?? null,
-    expiresAt: pending
-      ? new Date(row.createdAt.getTime() + PENDING_TTL_MS).toISOString()
-      : null,
   };
 }
 
-async function findVerifiedClaim(repo: ClaimRepo) {
+async function findVerifiedClaim(
+  repo: ClaimRepo,
+): Promise<DecidedClaimRow | null> {
   const [row] = await db
     .select()
     .from(skillRepoClaims)
@@ -412,16 +322,22 @@ async function findVerifiedClaim(repo: ClaimRepo) {
       ),
     )
     .limit(1);
-  return row ?? null;
+  return row && isDecided(row) ? row : null;
 }
 
-async function listUserClaims(userId: string): Promise<ClaimRow[]> {
-  return db
+async function listUserClaims(userId: string): Promise<DecidedClaimRow[]> {
+  const rows = await db
     .select()
     .from(skillRepoClaims)
-    .where(eq(skillRepoClaims.userId, userId))
+    .where(
+      and(
+        eq(skillRepoClaims.userId, userId),
+        ne(skillRepoClaims.status, "pending"),
+      ),
+    )
     .orderBy(desc(skillRepoClaims.createdAt))
     .limit(100);
+  return rows.filter(isDecided);
 }
 
 /**
@@ -499,7 +415,7 @@ async function describeRepository(input: {
   repo: ClaimRepo;
   userId: string;
   linkedGithubId: string | null;
-  userClaims: ClaimRow[];
+  userClaims: DecidedClaimRow[];
 }): Promise<SkillClaimRepository | null> {
   const skillCount = await countRepoSkills(input.repo);
   if (skillCount === 0) return null;
@@ -517,13 +433,11 @@ async function describeRepository(input: {
     )
     .limit(1);
   const verified = await findVerifiedClaim(input.repo);
-  const now = new Date();
   const viewerClaim = input.userClaims.find(
     (row) =>
       row.repoOwner === input.repo.owner &&
       row.repoName === input.repo.name &&
-      (row.status === "verified" ||
-        (row.status === "pending" && !claimExpired(row.createdAt, now))),
+      row.status === "verified",
   );
   return {
     repo: repoLabel(input.repo),
@@ -534,7 +448,7 @@ async function describeRepository(input: {
         ? "you"
         : "someone"
       : null,
-    viewerClaim: viewerClaim ? toClaim(viewerClaim, now) : null,
+    viewerClaim: viewerClaim ? toClaim(viewerClaim) : null,
     accountMethod: accountMethodAvailability({
       linkedGithubId: input.linkedGithubId,
       ownerType: facts?.ownerType ?? null,
@@ -557,10 +471,9 @@ export async function getSkillClaimsOverview(input: {
   const userClaims = await listUserClaims(input.userId);
   const repo =
     input.repo ?? (input.skillId ? await repoOfSkill(input.skillId) : null);
-  const now = new Date();
   return {
     githubLinked: linkedGithubId !== null,
-    claims: userClaims.map((row) => toClaim(row, now)),
+    claims: userClaims.map(toClaim),
     suggestions: linkedGithubId
       ? await listClaimSuggestions(linkedGithubId)
       : [],
@@ -603,77 +516,41 @@ function alreadyClaimed(): ContentError {
   );
 }
 
-type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
-
 /**
- * The claim becomes verified and the repository's skills become the author's,
- * in one transaction. The partial unique index is the arbiter between two
- * authors racing: the second one's update fails and nothing of theirs lands.
+ * Records a verified claim and hands the repository's skills to its author,
+ * in one transaction — the one path for every way a claim is made, so a
+ * self-service claim and an admin's grant transfer exactly the same things.
+ * The partial unique index is the arbiter between two claims racing: the
+ * second insert fails and nothing of it lands.
  */
-async function applyVerifiedClaim(
-  tx: Tx,
-  input: { claimId: string; userId: string; repo: ClaimRepo; now: Date },
-) {
-  await tx
-    .update(skillRepoClaims)
-    .set({ status: "verified", verifiedAt: input.now })
-    .where(eq(skillRepoClaims.id, input.claimId));
-  // The previous importer loses listing control; what they (and everyone
-  // else) installed stays installed.
-  await tx
-    .update(skillDefinitions)
-    .set({
-      ownerUserId: input.userId,
-      claimedAt: input.now,
-      updatedAt: input.now,
-    })
-    .where(activeRegistrySkillsOf(input.repo));
-}
-
-async function insertClaim(input: {
+async function recordVerifiedClaim(input: {
   repo: ClaimRepo;
   userId: string;
-  method: SkillClaimMethod;
-  tokenHash: string | null;
-  verify: boolean;
-}): Promise<ClaimRow> {
+  method: "github_account" | "admin_grant";
+}): Promise<DecidedClaimRow> {
   const now = new Date();
   try {
     return await db.transaction(async (tx) => {
-      // Starting again replaces a pending claim rather than piling them up;
-      // only the newest token is worth committing.
-      await tx
-        .delete(skillRepoClaims)
-        .where(
-          and(
-            eq(skillRepoClaims.userId, input.userId),
-            eq(skillRepoClaims.repoOwner, input.repo.owner),
-            eq(skillRepoClaims.repoName, input.repo.name),
-            eq(skillRepoClaims.status, "pending"),
-          ),
-        );
-      const id = randomUUID();
       const [row] = await tx
         .insert(skillRepoClaims)
         .values({
-          id,
+          id: randomUUID(),
           repoOwner: input.repo.owner,
           repoName: input.repo.name,
           userId: input.userId,
           method: input.method,
-          tokenHash: input.tokenHash,
-          status: "pending",
+          status: "verified",
           createdAt: now,
+          verifiedAt: now,
         })
         .returning();
-      if (!input.verify) return row!;
-      await applyVerifiedClaim(tx, {
-        claimId: id,
-        userId: input.userId,
-        repo: input.repo,
-        now,
-      });
-      return { ...row!, status: "verified" as const, verifiedAt: now };
+      // The previous importer loses listing control; what they (and everyone
+      // else) installed stays installed.
+      await tx
+        .update(skillDefinitions)
+        .set({ ownerUserId: input.userId, claimedAt: now, updatedAt: now })
+        .where(activeRegistrySkillsOf(input.repo));
+      return { ...row!, status: "verified" as const };
     });
   } catch (error) {
     if (isVerifiedClaimConflict(error)) throw alreadyClaimed();
@@ -681,19 +558,8 @@ async function insertClaim(input: {
   }
 }
 
-/**
- * Starts a claim. The account method is decided on the spot (GitHub answers,
- * the claim is verified or refused, nothing pending is left behind); the file
- * method returns a token — once — for the author to commit.
- *
- * A repository the user already holds answers with that claim; one someone
- * else holds is refused before anything is written.
- */
-export async function startSkillClaim(
-  input: { userId: string; repo: string; method: SkillClaimMethod },
-  github: ClaimGitHub = defaultGitHub,
-): Promise<StartSkillClaimResponse> {
-  const repo = parseSkillClaimRepo(input.repo);
+function requireClaimRepo(value: string): ClaimRepo {
+  const repo = parseSkillClaimRepo(value);
   if (!repo) {
     throw new ContentError(
       400,
@@ -701,60 +567,80 @@ export async function startSkillClaim(
       "Expected a GitHub repository as owner/repo",
     );
   }
+  return repo;
+}
+
+/**
+ * An author claims a personal repository they own. Decided on the spot:
+ * GitHub answers, and the claim is verified or refused with nothing written.
+ * An organization's repository is refused with the way to ask an admin.
+ *
+ * A repository the user already holds answers with that claim; one someone
+ * else holds is refused before GitHub is asked.
+ */
+export async function startSkillClaim(
+  input: { userId: string; repo: string; method: "github_account" },
+  github: ClaimGitHub = defaultGitHub,
+): Promise<StartSkillClaimResponse> {
+  const repo = requireClaimRepo(input.repo);
   await requireRepoWithSkills(repo);
   const verified = await findVerifiedClaim(repo);
   if (verified) {
     if (verified.userId !== input.userId) throw alreadyClaimed();
-    return { claim: toClaim(verified), verification: null };
+    return { claim: toClaim(verified) };
   }
 
-  if (input.method === "github_account") {
-    const linkedGithubId = await getLinkedGithubAccountId(input.userId);
-    // Refused before asking GitHub: there is nothing to compare against.
-    if (!linkedGithubId) throw githubNotLinked();
-    const facts = await requireRepoFacts(repo, github);
-    await rememberRepoFacts(repo, facts);
-    assertAccountOwnsRepo({ repo, linkedGithubId, facts });
-    const row = await insertClaim({
-      repo,
-      userId: input.userId,
-      method: "github_account",
-      tokenHash: null,
-      verify: true,
-    });
-    return { claim: toClaim(row), verification: null };
-  }
-
-  // The branch is only a hint for the author; verify reads GitHub again. A
-  // GitHub outage must not stop someone from getting their token.
-  let branch: string | null = null;
-  try {
-    const facts = await github.fetchRepoFacts(repo);
-    if (facts) {
-      assertSameRepo(repo, facts);
-      await rememberRepoFacts(repo, facts);
-      branch = facts.defaultBranch;
-    }
-  } catch (error) {
-    if (
-      error instanceof ContentError &&
-      error.code === "SKILL_CLAIM_REPO_MOVED"
-    ) {
-      throw error;
-    }
-  }
-  const { token, tokenHash } = createClaimToken();
-  const row = await insertClaim({
+  const linkedGithubId = await getLinkedGithubAccountId(input.userId);
+  // Refused before asking GitHub: there is nothing to compare against.
+  if (!linkedGithubId) throw githubNotLinked();
+  const facts = await requireRepoFacts(repo, github);
+  await rememberRepoFacts(repo, facts);
+  assertAccountOwnsRepo({ repo, linkedGithubId, facts });
+  const row = await recordVerifiedClaim({
     repo,
     userId: input.userId,
-    method: "verification_file",
-    tokenHash,
-    verify: false,
+    method: "github_account",
   });
-  return {
-    claim: toClaim(row),
-    verification: { token, path: SKILL_CLAIM_FILE_PATH, branch },
-  };
+  return { claim: toClaim(row) };
+}
+
+/** The auth user behind an email address; null when there is none. */
+async function findUserIdByEmail(email: string): Promise<string | null> {
+  const result = await db.execute<{ id: string }>(sql`
+    select id from "user"
+    where lower(email) = lower(${email.trim()})
+    limit 1
+  `);
+  return result.rows?.[0]?.id ?? null;
+}
+
+/**
+ * A market admin grants a repository to the account behind `email` — how an
+ * organization's repository is claimed, once its owner has asked. Nothing is
+ * asked of GitHub: the admin is the one vouching. Refused when the repository
+ * is already claimed; an admin revokes that claim first.
+ */
+export async function grantSkillClaim(input: {
+  repo: string;
+  email: string;
+}): Promise<GrantSkillClaimResponse> {
+  const repo = requireClaimRepo(input.repo);
+  await requireRepoWithSkills(repo);
+  if (await findVerifiedClaim(repo)) throw alreadyClaimed();
+  const userId = await findUserIdByEmail(input.email);
+  if (!userId) {
+    throw new ContentError(
+      404,
+      "SKILL_CLAIM_USER_NOT_FOUND",
+      "No SourceWeft account uses that email address",
+    );
+  }
+  const row = await recordVerifiedClaim({
+    repo,
+    userId,
+    method: "admin_grant",
+  });
+  return { claim: toClaim(row), userId };
 }
 
 async function requireUserClaim(input: { userId: string; claimId: string }) {
@@ -773,78 +659,6 @@ async function requireUserClaim(input: { userId: string; claimId: string }) {
     throw new ContentError(404, "SKILL_CLAIM_NOT_FOUND", "Claim not found");
   }
   return row;
-}
-
-/**
- * Checks a pending verification-file claim against the default branch as it
- * is now, and applies it when the token is there.
- */
-export async function verifySkillClaim(
-  input: { userId: string; claimId: string },
-  github: ClaimGitHub = defaultGitHub,
-): Promise<SkillRepoClaim> {
-  const claim = await requireUserClaim(input);
-  if (claim.status === "verified") return toClaim(claim);
-  if (claim.status !== "pending" || claim.method !== "verification_file") {
-    throw new ContentError(
-      409,
-      "SKILL_CLAIM_NOT_PENDING",
-      "This claim is not waiting for verification; start a new one",
-    );
-  }
-  if (claimExpired(claim.createdAt, new Date())) {
-    throw new ContentError(
-      410,
-      "SKILL_CLAIM_EXPIRED",
-      `This claim expired after ${SKILL_CLAIM_PENDING_TTL_DAYS} days; start a new one for a fresh token`,
-    );
-  }
-  const repo = { owner: claim.repoOwner, name: claim.repoName };
-  if ((await findVerifiedClaim(repo)) !== null) throw alreadyClaimed();
-
-  // GitHub is read outside the transaction: a slow API must not hold locks.
-  const facts = await requireRepoFacts(repo, github);
-  assertSameRepo(repo, facts);
-  await rememberRepoFacts(repo, facts);
-  assertClaimFile({
-    fileContent: await github.fetchClaimFile(repo, facts.defaultBranch),
-    tokenHash: claim.tokenHash,
-  });
-
-  const now = new Date();
-  try {
-    return await db.transaction(async (tx) => {
-      // Re-read under lock: the claim may have been replaced by a newer start
-      // (a different token) or verified by a parallel request meanwhile.
-      const [current] = await tx
-        .select()
-        .from(skillRepoClaims)
-        .where(eq(skillRepoClaims.id, claim.id))
-        .limit(1)
-        .for("update");
-      if (!current) {
-        throw new ContentError(404, "SKILL_CLAIM_NOT_FOUND", "Claim not found");
-      }
-      if (current.status === "verified") return toClaim(current);
-      if (current.status !== "pending") {
-        throw new ContentError(
-          409,
-          "SKILL_CLAIM_NOT_PENDING",
-          "This claim is not waiting for verification; start a new one",
-        );
-      }
-      await applyVerifiedClaim(tx, {
-        claimId: claim.id,
-        userId: input.userId,
-        repo,
-        now,
-      });
-      return toClaim({ ...current, status: "verified", verifiedAt: now });
-    });
-  } catch (error) {
-    if (isVerifiedClaimConflict(error)) throw alreadyClaimed();
-    throw error;
-  }
 }
 
 /**

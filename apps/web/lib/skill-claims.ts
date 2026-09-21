@@ -1,9 +1,9 @@
 import type {
+  GrantSkillClaimResponse,
   RemoveSkillRepoFromMarketResponse,
   RevokeSkillClaimResponse,
-  SkillClaimMethod,
   SkillClaimsOverview,
-  SkillRepoClaim,
+  StartSkillClaimRequest,
   StartSkillClaimResponse,
 } from "@sourceweft/contracts";
 import { HttpClient } from "@sourceweft/sdk";
@@ -12,8 +12,8 @@ import { apiBaseUrl } from "./api-base-url";
 
 /**
  * An author claiming the GitHub repository their community skills come from.
- * The workspace routes act on the signed-in user's own claims; the revoke
- * route is a market admin's (403 for everyone else).
+ * The workspace routes act on the signed-in user's own claims; the grant and
+ * revoke routes are a market admin's (403 for everyone else).
  */
 const http = new HttpClient({ baseUrl: apiBaseUrl, credentials: "include" });
 
@@ -39,18 +39,12 @@ export function getSkillClaims(
   );
 }
 
+/** Decided at once: the claim comes back verified, or the request fails. */
 export function startSkillClaim(
   workspaceId: string,
-  input: { repo: string; method: SkillClaimMethod },
+  input: StartSkillClaimRequest,
 ) {
   return http.post<StartSkillClaimResponse>(claimsPath(workspaceId), input);
-}
-
-export function verifySkillClaim(workspaceId: string, claimId: string) {
-  return http.post<{ claim: SkillRepoClaim }>(
-    `${claimPath(workspaceId, claimId)}/verify`,
-    {},
-  );
 }
 
 export function removeClaimedRepoFromMarket(
@@ -60,6 +54,14 @@ export function removeClaimedRepoFromMarket(
   return http.post<RemoveSkillRepoFromMarketResponse>(
     `${claimPath(workspaceId, claimId)}/remove-from-market`,
     {},
+  );
+}
+
+/** A market admin grants a repository to the account behind `email`. */
+export function grantSkillClaim(input: { repo: string; email: string }) {
+  return http.post<GrantSkillClaimResponse>(
+    "/v1/skills/registry/admin/claims",
+    input,
   );
 }
 

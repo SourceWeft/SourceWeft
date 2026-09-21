@@ -18,6 +18,7 @@ import {
   PanelsTopLeft,
   Scale,
   Search,
+  Sparkles,
   SquareTerminal,
   Trash2,
 } from "lucide-react";
@@ -107,8 +108,12 @@ function publisherLabel(sourceType: SkillCatalogItem["sourceType"]) {
   return "Workspace";
 }
 
+// A featured publisher's skill is not flagged as unverified: who publishes it
+// already ranks it above verified ones, and the caution would contradict that.
 function isUnverifiedRegistrySkill(item: SkillCatalogItem) {
-  return item.sourceType === "registry_github" && !item.verified;
+  return (
+    item.sourceType === "registry_github" && !item.verified && !item.featured
+  );
 }
 
 function SortMenu<T extends string>({
@@ -580,6 +585,16 @@ function SkillCard({
           <Badge className="h-5 px-1.5 text-[10px]" variant="outline">
             {publisherLabel(item.sourceType)}
           </Badge>
+          {isRegistry && item.featured ? (
+            <Badge
+              className="h-5 gap-1 px-1.5 text-[10px]"
+              title={copy.card.featuredTitle}
+              variant="outline"
+            >
+              <Sparkles className="h-2.5 w-2.5 text-amber-500 dark:text-amber-300" />
+              {copy.card.featured}
+            </Badge>
+          ) : null}
           {isRegistry && item.verified ? (
             <Badge className="h-5 gap-1 px-1.5 text-[10px]" variant="secondary">
               <BadgeCheck className="h-2.5 w-2.5" />

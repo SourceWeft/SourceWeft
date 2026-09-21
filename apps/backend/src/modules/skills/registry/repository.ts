@@ -69,6 +69,12 @@ export type UpsertRegistrySkillInput = {
    * commit sets. Applied only if the current version is still the one compared.
    */
   currency?: { againstVersionId: string; candidateIsNewer: boolean };
+  /**
+   * From the platform's own import only: mark the skill featured (or not).
+   * Written when the skill is created, and afterwards unless a market admin
+   * set it — an admin's choice is never overwritten by an import.
+   */
+  featured?: boolean;
 };
 
 export type RegistrySkillFile = {
@@ -469,6 +475,22 @@ export async function upsertRegistrySkillIndex(
         "REGISTRY_VERSION_UNAVAILABLE",
         "This skill is archived",
       );
+    if (
+      existing &&
+      input.featured !== undefined &&
+      existing.featuredSetBy !== "admin" &&
+      (existing.featured !== input.featured ||
+        existing.featuredSetBy !== "sync")
+    ) {
+      await tx
+        .update(skillDefinitions)
+        .set({
+          featured: input.featured,
+          featuredSetBy: "sync",
+          updatedAt: now,
+        })
+        .where(eq(skillDefinitions.id, existing.id));
+    }
     const [latest] = await tx
       .select()
       .from(skillVersions)
@@ -499,6 +521,9 @@ export async function upsertRegistrySkillIndex(
     const [current] = await tx
       .select({
         id: skillVersions.id,
+        version: skillVersions.version,
+        status: skillVersions.status,
+        bundleSha256: skillVersions.bundleSha256,
         manifestJson: skillVersions.manifestJson,
       })
       .from(skillVersions)
@@ -509,6 +534,46 @@ export async function upsertRegistrySkillIndex(
         ),
       )
       .limit(1);
+    // Byte-for-byte the skill that is current already, just at another
+    // commit: not a version of its own. It would only be a duplicate with a
+    // new label — listed in the versions, and announced as an update to every
+    // workspace that has the old one. The newer commit is noted instead.
+    if (current && current.bundleSha256 === stored.bundle.sha256) {
+      const registry = current.manifestJson.registry;
+      const candidateAt = input.manifestJson.registry?.committedAt;
+      const seenAt = registry?.seenAt?.committedAt ?? registry?.committedAt;
+      if (
+        registry &&
+        candidateAt &&
+        (!seenAt || Date.parse(candidateAt) > Date.parse(seenAt))
+      ) {
+        await tx
+          .update(skillVersions)
+          .set({
+            manifestJson: {
+              ...current.manifestJson,
+              registry: {
+                ...registry,
+                seenAt: {
+                  commitSha: input.commitSha,
+                  committedAt: candidateAt,
+                },
+              },
+            },
+            updatedAt: now,
+          })
+          .where(eq(skillVersions.id, current.id));
+      }
+      return {
+        slug: input.slug,
+        skillId,
+        skillVersionId: current.id,
+        version: current.version,
+        status: current.status === "published" ? "indexed" : "queued",
+        flags: registry?.scan.flags ?? [],
+        diagnostics: registry?.ingestion?.diagnostics ?? [],
+      };
+    }
     const isPublished = values.version.status === "published";
     // Ancestry first — GitHub's answer to "does this commit descend from the
     // current one" — and commit dates only when that answer is not for the
@@ -553,6 +618,8 @@ export async function upsertRegistrySkillIndex(
         ownerUserId: claim?.userId ?? input.submitterId,
         repoOwner,
         repoName,
+        featured: input.featured ?? false,
+        featuredSetBy: input.featured === undefined ? null : "sync",
         claimedAt: claim ? (claim.verifiedAt ?? now) : null,
         createdAt: now,
         updatedAt: now,

@@ -1,6 +1,7 @@
 /**
  * Every user-facing string of author claims: the claim page, the panel on a
- * community skill's page, and the claim row in the market admin panel. Kept
+ * community skill's page, and the claim rows in the market admin panel — plus
+ * that panel's "Featured" switch, which arrived with the same change. Kept
  * apart from `skills-market-copy.ts` so the market and claims can change
  * independently; both are what gets swapped for message lookups once `main`
  * has an i18n library.
@@ -30,41 +31,24 @@ export const skillsClaimCopy = {
     claimedByYou: "You have claimed this repository.",
     claimedBySomeone:
       "Another author has already claimed this repository. A market admin can review a claim that looks wrong.",
-    methodsTitle: "Prove it is yours",
+    methodsTitle: "Only the repository's owner can claim it",
     accountTitle: "With your GitHub account",
     accountBody:
-      "For a repository under your personal GitHub account: we check that your linked GitHub account owns it.",
+      "For a repository under your personal GitHub account: we check that your linked GitHub account owns it. Collaborators and maintainers cannot claim a repository they do not own.",
     accountAction: "Claim with GitHub account",
     accountHints: {
-      not_linked: "Link your GitHub account in settings first.",
+      not_linked: "Link the GitHub account that owns this repository first.",
       organization:
-        "This repository belongs to an organization — use the verification file instead.",
+        "This repository belongs to an organization, so it cannot be claimed here.",
       not_owner:
-        "Your linked GitHub account does not own this repository — use the verification file instead.",
+        "Your linked GitHub account does not own this repository, so it cannot claim it.",
     },
     linkGitHub: "Open security settings",
-    fileTitle: "With a verification file",
-    fileBody:
-      "Works for any repository you can push to, including an organization's.",
-    fileAction: "Get a verification token",
-    fileNewToken: "Get a new token",
-    fileSteps: {
-      create: "Create this file",
-      branch: (branch: string) => `on the default branch (${branch})`,
-      branchUnknown: "on the repository's default branch",
-      contents: "with exactly this content:",
-      then: "Commit and push it, then verify. You can delete the file afterwards.",
-    },
-    tokenOnce:
-      "This token is shown only once. If you lose it, get a new one — the old one stops working.",
-    tokenPending: (expires: string) =>
-      `A verification is waiting. Its token was shown when you started it; it expires ${expires}.`,
-    copy: "Copy",
-    copied: "Copied",
-    copyFailed: "Could not copy — select the text and copy it yourself.",
-    verify: "Verify",
+    organizationTitle: "Owned by an organization",
+    organizationBody:
+      "Only a repository's owner can claim it, and this one's owner is an organization, so no one can claim it for themselves. A SourceWeft admin grants the claim instead: email support from an address that shows you speak for the organization, and tell us which SourceWeft account should hold it.",
+    organizationAction: "Email support to request the claim",
     verified: "Repository claimed. Its skills are now yours to manage.",
-    started: "Token created. Commit the file, then verify.",
     yourClaims: "Your claims",
     noClaims: "You have not claimed any repositories yet.",
     suggestionsTitle: "Repositories you could claim",
@@ -72,14 +56,14 @@ export const skillsClaimCopy = {
       "These repositories belong to your linked GitHub account and have community skills here. Nothing changes until you claim one.",
     suggestionAction: "Claim",
     status: {
-      pending: "Waiting for verification",
       verified: "Claimed",
       revoked: "Revoked",
-      expired: "Expired",
     },
     methodLabel: {
       github_account: "GitHub account",
+      // Retired; a claim recorded under it keeps its label.
       verification_file: "Verification file",
+      admin_grant: "Granted by an admin",
     },
     noWorkspace: "Open a workspace to claim a repository.",
     loadFailed: "Claims could not be loaded.",
@@ -114,6 +98,20 @@ export const skillsClaimCopy = {
     method: {
       github_account: "via GitHub account",
       verification_file: "via verification file",
+      admin_grant: "granted by an admin",
+    },
+    grantTitle: "Grant claim",
+    grantHint:
+      "For an organization's repository, which no one can claim for themselves. The account behind this email becomes the repository's author.",
+    grantEmailLabel: "Author's email",
+    grantEmailPlaceholder: "author@example.com",
+    grant: "Grant",
+    grantedToast: "Claim granted",
+    grantErrors: {
+      SKILL_CLAIM_USER_NOT_FOUND: "No SourceWeft account uses that email.",
+      SKILL_REPO_ALREADY_CLAIMED:
+        "Someone already holds this repository. Revoke that claim first.",
+      fallback: "The claim could not be granted.",
     },
     revoke: "Revoke claim",
     confirmRevokeTitle: "Revoke this author claim?",
@@ -121,32 +119,33 @@ export const skillsClaimCopy = {
       "The repository's skills lose the “Claimed by author” mark and go back to whoever first imported each of them. The author can claim again.",
     revokedToast: "Claim revoked",
   },
+  featured: {
+    label: "Featured",
+    hint: "The platform's import features a short list of major publishers. Changing it here makes it your choice, which later imports leave alone.",
+    setByAdmin: "Set by an admin",
+    setBySync: "Set by the platform's import",
+    featuredToast: "Skill featured",
+    unfeaturedToast: "Skill no longer featured",
+  },
   errors: {
     SKILL_CLAIM_REPO_NOT_FOUND:
       "No community skills on SourceWeft come from this repository, or GitHub does not know it.",
     SKILL_REPO_ALREADY_CLAIMED:
       "Another author has already claimed this repository.",
     SKILL_CLAIM_GITHUB_NOT_LINKED:
-      "Link your GitHub account in settings, or use the verification file.",
+      "Link the GitHub account that owns this repository in settings first.",
     SKILL_CLAIM_ORGANIZATION_REPO:
-      "This repository belongs to an organization. Use the verification file.",
+      "This repository belongs to an organization, so only an admin can grant its claim. Email support@sourceweft.com to ask.",
     SKILL_CLAIM_ACCOUNT_MISMATCH:
       "Your linked GitHub account does not own this repository.",
     SKILL_CLAIM_REPO_MOVED:
       "This repository was renamed or moved on GitHub, so its skills here cannot be claimed under this name.",
-    SKILL_CLAIM_FILE_MISSING:
-      "The verification file was not found on the default branch yet. Check the path and branch, push, and try again.",
-    SKILL_CLAIM_FILE_MISMATCH:
-      "The verification file does not contain this token. Check its content and try again.",
-    SKILL_CLAIM_EXPIRED:
-      "This verification expired. Get a new token to try again.",
     SKILL_CLAIM_NOT_FOUND: "This claim was not found.",
-    SKILL_CLAIM_NOT_PENDING:
-      "This claim is not waiting for verification. Start a new one.",
     SKILL_CLAIM_NOT_VERIFIED:
       "Only a claimed repository's author can do this.",
     SKILL_CLAIM_GITHUB_UNAVAILABLE:
       "GitHub could not be reached. Try again in a moment.",
+    SKILL_CLAIM_USER_NOT_FOUND: "No SourceWeft account uses that email.",
     fallback: "Something went wrong. Try again.",
   },
 } as const;

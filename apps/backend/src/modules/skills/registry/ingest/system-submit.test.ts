@@ -24,6 +24,7 @@ vi.mock("@sourceweft/db", () => ({
 
 import {
   assertSystemSubmitScope,
+  parseSystemSubmitSources,
   readSystemSubmissions,
   submitSkillSourcesAsSystem,
   SYSTEM_SUBMITTER_ID,
@@ -96,4 +97,45 @@ test("a workspace that is not in the named team is refused before anything is su
     assertSystemSubmitScope(scope),
     /does not exist in team 'team-1'/,
   );
+});
+
+test("a source can say whether its skills are featured; a plain string leaves it", async () => {
+  mocks.create.mockResolvedValue({
+    submission: { id: "s1", status: "queued" },
+    created: true,
+  });
+  await submitSkillSourcesAsSystem(scope, [
+    { source: "anthropics/skills", featured: true },
+    { source: "someone/skills", featured: false },
+    "acme/skills",
+  ]);
+  const calls = mocks.create.mock.calls.map((call) => call[0]);
+  assert.deepEqual(calls[0].options, { featured: true });
+  assert.deepEqual(calls[1].options, { featured: false });
+  assert.equal("options" in calls[2], false);
+});
+
+test("stdin sources are strings or {source, featured}; anything else is refused whole", () => {
+  assert.deepEqual(
+    parseSystemSubmitSources([
+      "acme/skills",
+      { source: "anthropics/skills", featured: true },
+      { source: "x/y" },
+    ]),
+    [
+      "acme/skills",
+      { source: "anthropics/skills", featured: true },
+      { source: "x/y" },
+    ],
+  );
+  for (const bad of [
+    "acme/skills",
+    [""],
+    [{ source: "" }],
+    [{ source: "x/y", featured: "yes" }],
+    [{ source: "x/y", verified: true }],
+    [42],
+  ]) {
+    assert.throws(() => parseSystemSubmitSources(bad));
+  }
 });

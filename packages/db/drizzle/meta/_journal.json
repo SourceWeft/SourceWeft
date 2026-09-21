@@ -337,6 +337,13 @@
       "when": 1790003214098,
       "tag": "0047_skill_repo_removal",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1790004944146,
+      "tag": "0048_skill_featured_dedupe_claims",
+      "breakpoints": true
     }
   ]
 }

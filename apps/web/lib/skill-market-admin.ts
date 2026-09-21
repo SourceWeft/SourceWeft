@@ -119,6 +119,13 @@ export function setSkillVerified(skillId: string, verified: boolean) {
   });
 }
 
+/** Makes featured an admin's choice, which later imports leave alone. */
+export function setSkillFeatured(skillId: string, featured: boolean) {
+  return http.put<SkillMarketStanding>(`${skillPath(skillId)}/featured`, {
+    featured,
+  });
+}
+
 /** Keeps a public skill whose new version is in the listing queue. */
 export function acknowledgeSkillVersion(versionId: string) {
   return http.post<AcknowledgeSkillVersionResponse>(

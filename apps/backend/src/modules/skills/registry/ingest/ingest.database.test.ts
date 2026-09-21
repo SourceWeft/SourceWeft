@@ -983,5 +983,89 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
         .where(eq(data.skillDefinitions.id, definition!.id));
       expect(still!.ownerUserId).toBe(alice.userId);
     });
+
+    test("the same skill at a new commit is not a new version; featured follows the platform's import unless an admin set it", async () => {
+      const repoName = `same${tag}`;
+      const files = { "SKILL.md": skillMd(`same${tag}`) };
+      const run = async (
+        sha: string,
+        committedAt: string,
+        options: { featured?: boolean } = {},
+      ) => {
+        const { submission } = await service.createSkillSubmission({
+          ...alice,
+          source: `${owner}/${repoName}`,
+          ...(options.featured !== undefined
+            ? { options: { featured: options.featured } }
+            : {}),
+        });
+        await pipeline.runIngestPipeline({
+          submissionId: submission.id,
+          signal: signal(),
+          willRetryTransient: true,
+          deps: github({
+            repo: repoName,
+            sha,
+            files,
+            committedAt,
+            compare: () => "ahead",
+          }).deps,
+        });
+        return fresh(submission.id);
+      };
+      const first = await run("a".repeat(40), "2026-03-01T00:00:00.000Z", {
+        featured: true,
+      });
+      const [result] = first.results;
+      const skillId = (
+        await data.db
+          .select({ id: data.skillDefinitions.id })
+          .from(data.skillDefinitions)
+          .where(eq(data.skillDefinitions.slug, result!.slug!))
+      )[0]!.id;
+      const versionsOf = () =>
+        data.db
+          .select()
+          .from(data.skillVersions)
+          .where(eq(data.skillVersions.skillId, skillId));
+      const definitionOf = async () =>
+        (
+          await data.db
+            .select()
+            .from(data.skillDefinitions)
+            .where(eq(data.skillDefinitions.id, skillId))
+        )[0]!;
+      expect(await definitionOf()).toMatchObject({
+        featured: true,
+        featuredSetBy: "sync",
+      });
+
+      // A newer commit where this skill did not change: no second version,
+      // the newer commit noted on the one there is.
+      const second = await run("b".repeat(40), "2026-04-01T00:00:00.000Z");
+      expect(second.results[0]!.skillVersionId).toBe(result!.skillVersionId);
+      const versions = await versionsOf();
+      expect(versions).toHaveLength(1);
+      expect(versions[0]!.manifestJson.registry?.seenAt).toEqual({
+        commitSha: "b".repeat(40),
+        committedAt: "2026-04-01T00:00:00.000Z",
+      });
+
+      // An admin's choice holds against the next import.
+      await data.db
+        .update(data.skillDefinitions)
+        .set({ featured: false, featuredSetBy: "admin" })
+        .where(eq(data.skillDefinitions.id, skillId));
+      await run("c".repeat(40), "2026-05-01T00:00:00.000Z", { featured: true });
+      expect(await definitionOf()).toMatchObject({
+        featured: false,
+        featuredSetBy: "admin",
+      });
+
+      // A person's import cannot pass `featured` at all: the public request is
+      // strict (checked in the contracts); here it simply never sets it.
+      await run("d".repeat(40), "2026-06-01T00:00:00.000Z");
+      expect((await definitionOf()).featuredSetBy).toBe("admin");
+    });
   },
 );

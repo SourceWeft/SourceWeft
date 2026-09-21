@@ -191,6 +191,8 @@ export const skillCatalogItemSchema = z.object({
   // docs/architecture/skill-registry-index.md §0/§5.5.
   publisher: z.string().nullable().optional(),
   verified: z.boolean().optional(),
+  // A featured publisher's skill (community entries only).
+  featured: z.boolean().optional(),
   sourceUrl: z.string().nullable().optional(),
   license: z.string().nullable().optional(),
   flagged: z.boolean().optional(),
@@ -242,9 +244,9 @@ export const SKILLS_CATALOG_MAX_PAGE_SIZE = 100;
 // rest of the catalog (builtins, the workspace's and team's own skills) is a
 // small bounded set returned whole on the first page. `cursor` is the opaque
 // `nextCursor` of the previous page.
-// `recommended` = verified first, then the rank score (installs and GitHub
-// stars, `market/rank.ts`), then newest. `stars` = the source repository's
-// GitHub stars.
+// `recommended` = featured publishers first, then verified, then the rank score
+// (installs and GitHub stars, `market/rank.ts`), then newest. `stars` = the
+// source repository's GitHub stars.
 export const skillCatalogSortSchema = z.enum([
   "recommended",
   "popular",
@@ -253,11 +255,13 @@ export const skillCatalogSortSchema = z.enum([
   "stars",
 ]);
 export type SkillCatalogSort = z.infer<typeof skillCatalogSortSchema>;
-// `builtin` = ours; `verified` = a market admin vouched for it; `community` =
-// everything else anyone imported.
+// `builtin` = ours; `featured` = from a publisher the platform highlights;
+// `verified` = a market admin vouched for it; `community` = everything else
+// anyone imported (neither featured nor verified).
 export const skillCatalogTrustSchema = z.enum([
   "all",
   "builtin",
+  "featured",
   "verified",
   "community",
 ]);
@@ -336,6 +340,10 @@ export const skillMarketStandingSchema = z.object({
   // Who holds it — an admin withdrew it, or its owner keeps it private.
   listingHoldBy: z.enum(["admin", "owner"]).nullable(),
   verified: z.boolean(),
+  // Featured publisher, and who set it: the platform's import, or an admin
+  // (whose choice an import never overwrites).
+  featured: z.boolean().default(false),
+  featuredSetBy: z.enum(["sync", "admin"]).nullable().default(null),
   categorySlugs: z.array(z.string()),
   installCount: z.number().int().nonnegative(),
   listedAt: z.string().nullable(),
@@ -438,6 +446,10 @@ export const ownerSkillListingSchema = z.object({
 export type OwnerSkillListing = z.infer<typeof ownerSkillListingSchema>;
 export const setOwnerSkillListingRequestSchema = z
   .object({ listed: z.boolean() })
+  .strict();
+
+export const setSkillMarketFeaturedRequestSchema = z
+  .object({ featured: z.boolean() })
   .strict();
 
 export const setSkillMarketVerifiedRequestSchema = z

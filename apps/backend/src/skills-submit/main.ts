@@ -4,6 +4,7 @@ import { closeDatabase } from "@sourceweft/db";
 import { closeQueue } from "../shared/queue";
 import {
   assertSystemSubmitScope,
+  parseSystemSubmitSources,
   readSystemSubmissions,
   submitSkillSourcesAsSystem,
 } from "../modules/skills/registry/ingest/system-submit";
@@ -14,6 +15,7 @@ import {
  * on the deployed version's schema and queue format by construction.
  *
  *   node dist/skills-submit.js submit --team <id> --workspace <id>   stdin: {"sources": [...]}
+ *     each source is a URL string, or {"source": "<url>", "featured": true|false}
  *   node dist/skills-submit.js status --team <id> --workspace <id>   stdin: {"ids": [...]}
  *
  * The answer is the one stdout line that starts with RESULT_PREFIX — the logger
@@ -71,7 +73,7 @@ async function run() {
     ? {
         submissions: await submitSkillSourcesAsSystem(
           scope,
-          stringList(input.sources, "sources"),
+          parseSystemSubmitSources(input.sources),
         ),
       }
     : {

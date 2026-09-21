@@ -12,13 +12,14 @@ import { skillsMarketCopy } from "./skills-market-copy";
 const copy = skillsMarketCopy.ownerListing;
 
 /**
- * The owner's say over whether a community skill they imported may be on the
- * public market. A clean skill lists itself a few minutes after import, and
- * importing something for your own use must not mean publishing it.
+ * The author's say over whether their claimed community skill may be on the
+ * public market. Only the claimant of the skill's repository has it: whether
+ * an unclaimed skill is public is decided by the platform's rules and market
+ * admins, not by whoever imported it.
  *
  * Mounted for every community skill; the route answers 404 for anyone who is
- * not the owner, and then this renders nothing — like the admin panel, nobody
- * else learns it exists.
+ * not the author — the importer of an unclaimed skill included — and then
+ * this renders nothing, so nobody else learns it exists.
  */
 export function SkillOwnerListing({
   workspaceId,

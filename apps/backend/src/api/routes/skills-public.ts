@@ -96,6 +96,7 @@ export function registerSkillPublicRoutes(app: Hono) {
       query: given(c.req.query("query")),
       category: given(c.req.query("category")),
       verified: booleanQuery(c.req.query("verified")),
+      featured: booleanQuery(c.req.query("featured")),
       capability: given(c.req.query("capability")),
       sort: given(c.req.query("sort")),
       limit: numberQuery(c.req.query("limit")),

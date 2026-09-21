@@ -3,20 +3,21 @@ import { skillMarketStandingSchema } from "./skills";
 
 /**
  * An author claiming the GitHub repository their community skills come from.
- * A claim is always started by the author and proven one of two ways — their
- * linked GitHub account owns the repository, or they commit a one-time token
- * to it — so ownership never changes because of something we inferred.
+ * Only the repository's owner may claim it. A personal repository's owner
+ * proves it themselves — their linked GitHub account is the owner — so
+ * ownership never changes because of something we inferred. An
+ * organization's repository is owned by the organization, which no single
+ * person can prove to be; a market admin grants those claims by hand.
  */
-
-/** Where the verification method expects the token, on the default branch. */
-export const SKILL_CLAIM_FILE_PATH = ".sourceweft/claim";
-
-/** How long a verification-file claim waits for its file. */
-export const SKILL_CLAIM_PENDING_TTL_DAYS = 7;
 
 export const skillClaimMethodSchema = z.enum([
   "github_account",
+  // No longer offered — anyone who could push to a repository could prove it
+  // with a file, and pushing is not owning. Kept so a row recorded under it
+  // still parses.
   "verification_file",
+  // A market admin granted it: how an organization's repository is claimed.
+  "admin_grant",
 ]);
 export type SkillClaimMethod = z.infer<typeof skillClaimMethodSchema>;
 
@@ -51,9 +52,10 @@ export const skillClaimRepoSchema = z
     message: "Expected a GitHub repository as owner/repo",
   });
 
-// POST /skills/claims
+// POST /skills/claims — the account method is the only one an author can
+// start; `admin_grant` is the admin route's and nothing else is offered.
 export const startSkillClaimRequestSchema = z
-  .object({ repo: skillClaimRepoSchema, method: skillClaimMethodSchema })
+  .object({ repo: skillClaimRepoSchema, method: z.literal("github_account") })
   .strict();
 export type StartSkillClaimRequest = z.infer<
   typeof startSkillClaimRequestSchema
@@ -64,35 +66,16 @@ export const skillRepoClaimSchema = z.object({
   // `owner/repo`, lowercased.
   repo: z.string(),
   method: skillClaimMethodSchema,
-  // `expired`: a pending claim whose file never showed up in time. Stored as
-  // pending; derived on read so nothing has to sweep old rows.
-  status: z.enum(["pending", "verified", "revoked", "expired"]),
+  status: z.enum(["verified", "revoked"]),
   createdAt: z.string(),
   verifiedAt: z.string().nullable(),
-  // Pending claims only.
-  expiresAt: z.string().nullable(),
 });
 export type SkillRepoClaim = z.infer<typeof skillRepoClaimSchema>;
 
-/**
- * What the author has to commit. The token is shown exactly once — only its
- * hash is stored — so losing it means starting the claim again.
- */
-export const skillClaimVerificationSchema = z.object({
-  token: z.string(),
-  path: z.string(),
-  // The repository's default branch as GitHub reported it; null when GitHub
-  // could not be asked (the author commits to their default branch anyway).
-  branch: z.string().nullable(),
-});
-export type SkillClaimVerification = z.infer<
-  typeof skillClaimVerificationSchema
->;
-
+// Every claim is decided when it is made: verified, or refused with nothing
+// written.
 export const startSkillClaimResponseSchema = z.object({
   claim: skillRepoClaimSchema,
-  // The verification-file method only; the account method is decided at once.
-  verification: skillClaimVerificationSchema.nullable(),
 });
 export type StartSkillClaimResponse = z.infer<
   typeof startSkillClaimResponseSchema
@@ -115,7 +98,7 @@ export const skillClaimRepositorySchema = z.object({
   ownerType: z.enum(["User", "Organization"]).nullable(),
   // Whose it is now: never names another person.
   claimedBy: z.enum(["you", "someone"]).nullable(),
-  // The viewer's verified or live pending claim on it.
+  // The viewer's verified claim on it.
   viewerClaim: skillRepoClaimSchema.nullable(),
   accountMethod: skillClaimAccountMethodSchema,
 });
@@ -163,6 +146,26 @@ export type SkillMarketStandingWithClaim = z.infer<
   typeof skillMarketStandingWithClaimSchema
 >;
 
+// POST /skills/registry/admin/claims — a market admin grants a repository to
+// the account behind an email address; how an organization's repository is
+// claimed.
+export const grantSkillClaimRequestSchema = z
+  .object({
+    repo: skillClaimRepoSchema,
+    email: z.string().trim().toLowerCase().email().max(320),
+  })
+  .strict();
+export type GrantSkillClaimRequest = z.infer<
+  typeof grantSkillClaimRequestSchema
+>;
+export const grantSkillClaimResponseSchema = z.object({
+  claim: skillRepoClaimSchema,
+  userId: z.string(),
+});
+export type GrantSkillClaimResponse = z.infer<
+  typeof grantSkillClaimResponseSchema
+>;
+
 // POST /skills/registry/admin/claims/:claimId/revoke
 export const revokeSkillClaimResponseSchema = z.object({
   claimId: z.string(),
@@ -181,12 +184,9 @@ export const SKILL_CLAIM_ERROR_CODES = [
   "SKILL_CLAIM_ORGANIZATION_REPO",
   "SKILL_CLAIM_ACCOUNT_MISMATCH",
   "SKILL_CLAIM_REPO_MOVED",
-  "SKILL_CLAIM_FILE_MISSING",
-  "SKILL_CLAIM_FILE_MISMATCH",
-  "SKILL_CLAIM_EXPIRED",
   "SKILL_CLAIM_NOT_FOUND",
-  "SKILL_CLAIM_NOT_PENDING",
   "SKILL_CLAIM_NOT_VERIFIED",
+  "SKILL_CLAIM_USER_NOT_FOUND",
   "SKILL_CLAIM_GITHUB_UNAVAILABLE",
 ] as const;
 export type SkillClaimErrorCode = (typeof SKILL_CLAIM_ERROR_CODES)[number];

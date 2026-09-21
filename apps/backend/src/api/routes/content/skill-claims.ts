@@ -8,7 +8,6 @@ import {
   getSkillClaimsOverview,
   removeClaimedRepoFromMarket,
   startSkillClaim,
-  verifySkillClaim,
 } from "../../../modules/skills/market/claims";
 import { logger } from "../../../shared/logger";
 import {
@@ -67,31 +66,15 @@ export function registerSkillClaimRoutes(app: Hono) {
       );
     }
     const result = await startSkillClaim({ userId, ...parsed.data });
-    logger.info("Skill repository claim started", {
+    logger.info("Skill repository claimed", {
       userId,
       claimId: result.claim.id,
       repo: result.claim.repo,
       method: result.claim.method,
       status: result.claim.status,
     });
-    // 201 for a claim waiting on its file; 200 when it was decided at once.
-    return ApiResponse.success(
-      c,
-      result,
-      result.claim.status === "pending" ? 201 : 200,
-    );
-  });
-
-  app.post("/skills/claims/:claimId/verify", async (c) => {
-    const userId = await resolveClaimant(c);
-    const claimId = requireRouteParam(c, "claimId");
-    const claim = await verifySkillClaim({ userId, claimId });
-    logger.info("Skill repository claim verified", {
-      userId,
-      claimId,
-      repo: claim.repo,
-    });
-    return ApiResponse.success(c, { claim });
+    // Decided at once: verified here, or refused with an error.
+    return ApiResponse.success(c, result);
   });
 
   app.post("/skills/claims/:claimId/remove-from-market", async (c) => {

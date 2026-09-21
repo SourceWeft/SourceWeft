@@ -66,6 +66,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       versionId: string;
       slug: string;
       verified: boolean;
+      featured: boolean;
       installCount: number;
       /** Microseconds since the epoch; null = never listed. */
       listedAtMicros: number | null;
@@ -93,6 +94,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
         versionId: randomUUID(),
         slug: `gh-mkt-${tag}-${input.name}`,
         verified: false,
+        featured: false,
         installCount: 0,
         listedAtMicros: null,
         visibility: "public",
@@ -116,6 +118,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
           status: "active" as const,
           ownerUserId: owner.userId,
           verified: entry.verified,
+          featured: entry.featured,
         })),
       );
       // Through SQL, not a Date: the microseconds are the point.
@@ -237,6 +240,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       popular: (a, b) => b.installCount - a.installCount || byIdDesc(a, b),
       new: (a, b) => micros(b) - micros(a) || byIdDesc(a, b),
       recommended: (a, b) =>
+        Number(b.featured) - Number(a.featured) ||
         Number(b.verified) - Number(a.verified) ||
         b.installCount - a.installCount ||
         micros(b) - micros(a) ||
@@ -278,6 +282,10 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
           fixture({
             name: `p${String(index).padStart(2, "0")}`,
             verified: index % 5 === 0,
+            // 0, 7, 14, 21: one of them (0) verified as well, and each tier
+            // spans several install counts and listing times, so featured
+            // rows are split across pages and interleave nothing.
+            featured: index % 7 === 0,
             // 0..3, so every count is shared by several skills.
             installCount: index % 4,
             // Same millisecond, 0/100/200 µs apart — and exact ties too.
@@ -302,6 +310,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
             visibility: "restricted",
             installCount: index === 0 ? 3 : 0,
             verified: index === 1,
+            featured: index === 2,
             categories: index === 2 ? ["documents-office"] : [],
           }),
         );
@@ -425,6 +434,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
             skillId: "",
             sourceType: item.sourceType,
             verified: item.verified,
+            featured: item.featured,
             installCount: item.installCount,
             listedAt: item.listedAt,
           }),
@@ -433,6 +443,93 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
           rank.compareRecommendedSkills(before!, after!) <= 0,
           `${items[index - 1]!.slug} is ranked below ${items[index]!.slug}`,
         );
+      }
+    });
+
+    test("sort=recommended: featured first, then verified, then the rest", async () => {
+      const tiers = (
+        await walk(stranger, {
+          limit: 4,
+          query: pagedQuery,
+          sort: "recommended",
+        })
+      )
+        .flat()
+        .map((slug) => {
+          const entry = fixtures.find((f) => f.slug === slug)!;
+          return entry.featured ? 0 : entry.verified ? 1 : 2;
+        });
+      assert.ok(tiers.includes(0) && tiers.includes(1) && tiers.includes(2));
+      assert.deepEqual(tiers, [...tiers].sort());
+    });
+
+    test("a recommended cursor from before featured is refused", async () => {
+      const old = Buffer.from(
+        JSON.stringify(["recommended", "rank", true, 0, "0", randomUUID()]),
+      ).toString("base64url");
+      await assert.rejects(
+        service.listCatalog({ ...stranger, sort: "recommended", cursor: old }),
+        (error: { code?: string; statusCode?: number }) =>
+          error.code === "INVALID_CURSOR" && error.statusCode === 400,
+      );
+    });
+
+    test("the first page leads with builtins, then the workspace's own skills", async () => {
+      const own = {
+        id: randomUUID(),
+        versionId: randomUUID(),
+        slug: `own-${tag}`,
+      };
+      await data.db.insert(data.skillDefinitions).values({
+        id: own.id,
+        sourceType: "workspace_custom",
+        slug: own.slug,
+        // Sorts before every builtin by name, so only the tier puts it after.
+        displayName: `000 own ${tag}`,
+        description: "own",
+        visibility: "workspace",
+        status: "active",
+        ownerUserId: stranger.userId,
+        teamId: stranger.teamId,
+        workspaceId: stranger.workspaceId,
+      });
+      await data.db.insert(data.skillVersions).values({
+        id: own.versionId,
+        skillId: own.id,
+        version: "1.0.0",
+        status: "published",
+        storageType: "db_text",
+        storagePointer: `db://${own.versionId}`,
+        isCurrent: true,
+        contentHash: "hash",
+        manifestJson: {
+          slug: own.slug,
+          displayName: `000 own ${tag}`,
+          version: "1.0.0",
+          description: "own",
+          visibility: "workspace",
+          categories: [],
+        },
+      });
+      try {
+        const page = await service.listCatalog({ ...stranger, limit: 3 });
+        const kinds = page.items.map((item) =>
+          item.sourceType === "builtin"
+            ? 0
+            : item.sourceType === "registry_github"
+              ? 2
+              : 1,
+        );
+        assert.ok(kinds.includes(0), "no builtin on the first page");
+        assert.ok(
+          page.items.some((item) => item.slug === own.slug),
+          "the workspace's own skill is missing",
+        );
+        assert.deepEqual(kinds, [...kinds].sort());
+      } finally {
+        await data.db
+          .delete(data.skillDefinitions)
+          .where(inArray(data.skillDefinitions.id, [own.id]));
       }
     });
 
@@ -479,8 +576,10 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
             (e) => e.categories.includes("design-creative"),
           ],
           [{ category: "no-such-category" }, () => false],
+          [{ trust: "featured" }, (e) => e.featured],
           [{ trust: "verified" }, (e) => e.verified],
-          [{ trust: "community" }, (e) => !e.verified],
+          // Neither: a featured skill is not "community" even unverified.
+          [{ trust: "community" }, (e) => !e.verified && !e.featured],
           [{ capability: "executable" }, (e) => e.capability === "executable"],
           [
             { capability: "prompt-only" },
@@ -565,6 +664,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
     test("a market filter leaves no builtin or workspace skill on the first page", async () => {
       for (const filters of [
         { category: "documents-office" },
+        { trust: "featured" },
         { trust: "verified" },
         { capability: "prompt-only" },
       ] as const) {
@@ -591,6 +691,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       // In the taxonomy's order, and not the manifest's "self-styled".
       assert.deepEqual(p00.categories, ["documents-office", "design-creative"]);
       assert.equal(p00.verified, true);
+      assert.equal(p00.featured, true);
       assert.equal(p00.installCount, 0);
       assert.equal(p00.capability, "executable");
       assert.equal(
@@ -600,6 +701,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       const p01 = page.items.find((item) => item.slug === `gh-mkt-${tag}-p01`)!;
       assert.deepEqual(p01.categories, []);
       assert.equal(p01.verified, false);
+      assert.equal(p01.featured, false);
       // One installer workspace, and the stranger's own.
       assert.equal(p01.installCount, 2);
 
@@ -695,6 +797,37 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       );
       assert.equal(result.items[0]!.verified, true);
       assert.equal(result.items[1]!.installCount, 1);
+    });
+
+    test("search_skills puts a featured skill above verified and more installed ones", async () => {
+      const word = `tierword${tag}`;
+      const community = fixture({
+        name: "tier-community",
+        description: `${word} community`,
+        installCount: 2,
+        listedAtMicros: LISTED_BASE_MS[2]! * 1000,
+      });
+      const verified = fixture({
+        name: "tier-verified",
+        description: `${word} verified`,
+        verified: true,
+        installCount: 1,
+        listedAtMicros: LISTED_BASE_MS[2]! * 1000,
+      });
+      const featured = fixture({
+        name: "tier-featured",
+        description: `${word} featured`,
+        featured: true,
+        listedAtMicros: LISTED_BASE_MS[0]! * 1000,
+      });
+      await insertFixtures([community, verified, featured]);
+      const result = await service.searchCatalog({ ...stranger, query: word });
+      assert.deepEqual(
+        result.items.map((item) => item.slug),
+        [featured.slug, verified.slug, community.slug],
+      );
+      assert.equal(result.items[0]!.featured, true);
+      assert.equal(result.items[1]!.featured, false);
     });
 
     // --- category counts ---------------------------------------------------------
@@ -900,6 +1033,8 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
           listingHold: false,
           listingHoldBy: null,
           verified: false,
+          featured: false,
+          featuredSetBy: null,
           categorySlugs: [],
           installCount: 0,
           listedAt: null,

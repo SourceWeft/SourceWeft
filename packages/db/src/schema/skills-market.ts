@@ -137,6 +137,12 @@ export type SkillManifestJson = {
      * indexed before the check existed; the market checks those itself.
      */
     provenance?: { defaultBranch: string; checkedAt: string };
+    /**
+     * The newest commit this exact content was seen at. A later commit whose
+     * skill is byte-for-byte the same does not become a version of its own —
+     * it would be a duplicate with a different label — so it is noted here.
+     */
+    seenAt?: { commitSha: string; committedAt?: string };
     /** Decides sandbox material sync, not permission (§6b). */
     capability: "prompt-only" | "executable";
     scan: { reviewRequired: boolean; flags: string[] };
@@ -220,6 +226,13 @@ export const skillDefinitions = pgTable(
     // folded into one number by the scheduler (`market/rank.ts`), so the order
     // is keyset-pageable on a real column.
     rankScore: integer("rank_score").notNull().default(0),
+    // Featured: a skill from a publisher the platform highlights (a short list
+    // of major vendors). About who publishes it, not about its content — so,
+    // unlike `verified`, a new version does not clear it. Set by the platform's
+    // own import (skills-sync) or by a market admin; an admin's choice is never
+    // overwritten by a later import.
+    featured: boolean("featured").notNull().default(false),
+    featuredSetBy: text("featured_set_by").$type<"sync" | "admin">(),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .defaultNow(),
@@ -270,6 +283,7 @@ export const skillDefinitions = pgTable(
     index("skill_definitions_market_rank_idx").on(
       table.visibility,
       table.status,
+      desc(table.featured),
       desc(table.verified),
       desc(table.rankScore),
       desc(table.id),
@@ -339,7 +353,7 @@ export const skillRepoClaims = pgTable(
     repoName: text("repo_name").notNull(),
     userId: text("user_id").notNull(),
     method: text("method")
-      .$type<"github_account" | "verification_file">()
+      .$type<"github_account" | "verification_file" | "admin_grant">()
       .notNull(),
     // sha256 of the token a verification file must contain; null for the
     // account method.
@@ -363,7 +377,11 @@ export const skillRepoClaims = pgTable(
   (table) => [
     check(
       "skill_repo_claims_method_check",
-      sql`${table.method} in ('github_account', 'verification_file')`,
+      // `admin_grant`: an organisation's repository, which no one can claim
+      // for themselves — only its owner may, and the owner is the
+      // organisation — so a market admin grants it. `verification_file` is no
+      // longer offered; kept so a row recorded under it stays valid.
+      sql`${table.method} in ('github_account', 'verification_file', 'admin_grant')`,
     ),
     check(
       "skill_repo_claims_status_check",
@@ -685,6 +703,15 @@ export type SkillSubmissionOnComplete = {
   install?: { skill?: string; installedVia?: "user" | "agent" };
 };
 
+/**
+ * How the platform's own import (skills-sync) marks what it submits. Never
+ * accepted from a person's import: the public submission request is strict.
+ */
+export type SkillSubmissionOptions = {
+  /** Mark the source's skills featured (or not). Absent = leave as is. */
+  featured?: boolean;
+};
+
 export const skillRegistrySubmissions = pgTable(
   "skill_registry_submissions",
   {
@@ -728,6 +755,10 @@ export const skillRegistrySubmissions = pgTable(
       .notNull()
       .default(sql`'[]'::jsonb`),
     onComplete: jsonb("on_complete").$type<SkillSubmissionOnComplete>(),
+    options: jsonb("options")
+      .$type<SkillSubmissionOptions>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
     error: jsonb("error").$type<{ code: string; message: string }>(),
     attempts: integer("attempts").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })

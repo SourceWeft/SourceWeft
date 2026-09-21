@@ -28,6 +28,7 @@ import {
   skillCategoryNames,
   SkillClaimedBadge,
   SkillExternalLink,
+  SkillFeaturedBadge,
   SkillVerifiedBadge,
 } from "../_components/skills-display";
 import { SkillTile } from "../_components/skill-logo";
@@ -415,7 +416,13 @@ export default async function PublicSkillDetailPage({
       : []),
     [
       copy.details.trust,
-      skill.verified ? skillsCopy.badges.verified : copy.details.unverified,
+      skill.featured && skill.verified
+        ? copy.details.featuredAndVerified
+        : skill.featured
+          ? skillsCopy.badges.featured
+          : skill.verified
+            ? skillsCopy.badges.verified
+            : copy.details.unverified,
     ],
     ...(listed ? ([[copy.details.listed, listed]] as [string, string][]) : []),
     ...(updated
@@ -550,6 +557,7 @@ export default async function PublicSkillDetailPage({
                 {skill.description}
               </p>
               <div className="mt-6 flex flex-wrap gap-2">
+                {skill.featured ? <SkillFeaturedBadge /> : null}
                 {skill.verified ? <SkillVerifiedBadge /> : null}
                 {skill.claimed ? <SkillClaimedBadge /> : null}
                 {skill.repoArchived ? <SkillArchivedBadge /> : null}

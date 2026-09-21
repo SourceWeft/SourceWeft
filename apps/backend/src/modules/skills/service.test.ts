@@ -221,6 +221,21 @@ test("registryCatalogFields: verified and the market numbers come from the defin
     }).verified,
     true,
   );
+  // Featured is the definition's too; a manifest claiming it is ignored.
+  assert.equal(
+    registryCatalogFields(
+      { ...registryManifest(undefined), featured: true } as SkillManifestJson,
+      unlisted,
+    ).featured,
+    false,
+  );
+  assert.equal(
+    registryCatalogFields(registryManifest(undefined), {
+      ...unlisted,
+      featured: true,
+    }).featured,
+    true,
+  );
 });
 
 test("mapCatalogRow: a registry row's categories are the market's, not the manifest's", () => {

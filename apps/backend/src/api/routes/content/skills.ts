@@ -48,9 +48,9 @@ async function resolveSkillContext(c: import("hono").Context) {
 }
 
 export function registerSkillRoutes(app: Hono) {
-  // The owner's say over a community skill they imported: may it be on the
-  // public market? Anyone else gets the same 404 as for a skill that does not
-  // exist, so the route does not reveal who imported what.
+  // A claimed community skill's author's say: may it be on the public market?
+  // Anyone else — the importer of an unclaimed skill included — gets the same
+  // 404 as for a skill that does not exist (`market/listing.ts`).
   app.get("/skills/catalog/:catalogId/listing", async (c) => {
     const context = await resolveSkillContext(c);
     const [skillId = ""] = requireRouteParam(c, "catalogId").split(":");

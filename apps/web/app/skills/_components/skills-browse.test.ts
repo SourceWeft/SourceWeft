@@ -135,6 +135,19 @@ describe("skillsListRequest", () => {
     });
   });
 
+  it("maps the featured facet onto featured=true, and nothing else", () => {
+    expect(
+      skillsListRequest({ ...defaultSkillsBrowseState, trust: "featured" }),
+    ).toEqual({
+      featured: true,
+      limit: SKILLS_PAGE_SIZE,
+      sort: "recommended",
+    });
+    expect(parseSkillsBrowseState({ trust: "featured" }).trust).toBe(
+      "featured",
+    );
+  });
+
   it("never sends verified=false: unverified skills are not a facet", () => {
     expect(skillsListRequest(defaultSkillsBrowseState)).not.toHaveProperty(
       "verified",

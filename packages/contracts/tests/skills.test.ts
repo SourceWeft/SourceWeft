@@ -77,6 +77,9 @@ test("catalog query takes the market's filters and sort, and nothing it does not
       sort: "popular",
     },
   );
+  for (const trust of ["all", "builtin", "featured", "verified", "community"]) {
+    assert.equal(listSkillsCatalogQuerySchema.parse({ trust }).trust, trust);
+  }
   for (const bad of [
     { sort: "trending" },
     { trust: "official" },
