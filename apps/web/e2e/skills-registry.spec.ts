@@ -1178,9 +1178,8 @@ test("E22 a workspace that installed a skill reviews it; anyone reports it; an a
   await expect(page.getByTestId("skill-reviews")).toBeVisible({
     timeout: 45000,
   });
-  await expect(
-    page.getByRole("button", { name: "Report", exact: true }),
-  ).toBeVisible();
+  // The skill's own report button; each review carries one of its own.
+  await expect(page.getByTestId("skill-report-button")).toBeVisible();
   await page.goto(`/skills/${slug}`);
   await expect(
     page.getByRole("button", { name: /Report this skill/ }).first(),
