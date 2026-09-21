@@ -5,10 +5,20 @@ import type { SkillClaimsOverview } from "@sourceweft/contracts";
 import { Badge } from "@sourceweft/ui-web/components/ui/badge";
 
 import { useTranslations } from "next-intl";
+import { RestoreToMarketButton } from "../../_components/community/restore-to-market-button";
 import { claimPageSearch, formatClaimDate, sortClaims } from "./claim-view";
 
 /** The user's claims, then repositories their linked account could claim. */
-export function ClaimLists({ overview }: { overview: SkillClaimsOverview }) {
+export function ClaimLists({
+  overview,
+  workspaceId,
+  onChanged,
+}: {
+  overview: SkillClaimsOverview;
+  // For putting a removed repository back; without them no restore is offered.
+  workspaceId?: string | null;
+  onChanged?: () => void;
+}) {
   const t = useTranslations("dashboardSkillsClaim");
   const claims = sortClaims(overview.claims);
   return (
@@ -85,6 +95,15 @@ export function ClaimLists({ overview }: { overview: SkillClaimsOverview }) {
                       ? t(`page.status.${claim.status}`)
                       : claim.status}
                   </Badge>
+                  {workspaceId &&
+                  claim.status === "verified" &&
+                  claim.removedAt ? (
+                    <RestoreToMarketButton
+                      claimId={claim.id}
+                      onRestored={() => onChanged?.()}
+                      workspaceId={workspaceId}
+                    />
+                  ) : null}
                 </span>
               </li>
             ))}

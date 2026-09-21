@@ -22,6 +22,7 @@ import {
   getSkillClaims,
   removeClaimedRepoFromMarket,
 } from "../../../../lib/skill-claims";
+import { RestoreToMarketButton } from "./community/restore-to-market-button";
 import {
   claimErrorMessage,
   claimPageHref,
@@ -68,6 +69,9 @@ export function SkillClaimPanel({
 
   const view = claimPanelView(repository);
   if (view.kind === "hidden") return null;
+  // The author already took the repository off SourceWeft: what is left to
+  // offer is putting it back.
+  const removed = Boolean(repository?.viewerClaim?.removedAt);
 
   async function remove(claimId: string) {
     setBusy(true);
@@ -106,7 +110,15 @@ export function SkillClaimPanel({
               ? t("panel.claimedByYou")
               : t("panel.claimedByAuthor")}
           </p>
-          {view.kind === "claimedByYou" && view.claimId ? (
+          {view.kind === "claimedByYou" && view.claimId && removed ? (
+            <RestoreToMarketButton
+              className="w-full"
+              claimId={view.claimId}
+              onRestored={() => onChanged?.()}
+              workspaceId={workspaceId}
+            />
+          ) : null}
+          {view.kind === "claimedByYou" && view.claimId && !removed ? (
             <>
               <p className="text-muted-foreground">{t("panel.removeHint")}</p>
               <Button

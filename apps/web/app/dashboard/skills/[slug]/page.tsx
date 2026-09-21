@@ -3,6 +3,7 @@
 import { RegistryVersions } from "../_components/registry-versions";
 import { SkillAvatar } from "../_components/skill-avatar";
 import { SkillAiOverview } from "../_components/community/skill-ai-overview";
+import { SkillMarketEvents } from "../_components/community/skill-market-events";
 import { SkillOverviewAdmin } from "../_components/community/skill-overview-admin";
 import { SkillReportButton } from "../_components/community/skill-report-button";
 import { SkillReviews } from "../_components/community/skill-reviews";
@@ -751,6 +752,18 @@ export default function SkillDetailPage() {
                 <>
                   <SkillRunStats {...communitySlot} />
                   <SkillOverviewAdmin {...communitySlot} />
+                  <SkillMarketEvents
+                    // Remounted with the admin panel, so an action there
+                    // shows up in the history at once.
+                    key={`events-${communitySlot.skillId}-${claimRevision}`}
+                    // A re-inference changes the standing the admin panel
+                    // shows: remount it too.
+                    onChanged={() => {
+                      setClaimRevision((revision) => revision + 1);
+                      void refreshDetail();
+                    }}
+                    skillId={communitySlot.skillId}
+                  />
                   <SkillReportButton {...communitySlot} />
                 </>
               ) : null}

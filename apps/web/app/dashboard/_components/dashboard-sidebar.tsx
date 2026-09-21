@@ -37,6 +37,7 @@ import { WorkspaceMembersDialog } from "./workspace-members-dialog";
 import { copyStoredByokState } from "../chat/_components/byok-state";
 import { useWorkspaceLayout } from "./dashboard-workspace-layout";
 import { DashboardSidebarBrand } from "./dashboard-sidebar-brand";
+import { MarketAdminNavLink } from "./market-admin-nav-link";
 
 type NavItem = {
   labelKey: string;
@@ -346,6 +347,11 @@ export function DashboardSidebar() {
               </Link>
             </DropdownMenuItem>
           ))}
+          {/* Market admins only; renders nothing for anyone else. */}
+          <MarketAdminNavLink
+            onNavigate={() => setOpenMobile(false)}
+            variant="menu-item"
+          />
         </DropdownMenuContent>
       </DropdownMenu>
     </nav>

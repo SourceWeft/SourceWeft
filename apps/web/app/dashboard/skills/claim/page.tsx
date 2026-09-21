@@ -224,7 +224,13 @@ function ClaimPage() {
               ) : null}
             </div>
 
-            {overview ? <ClaimLists overview={overview} /> : null}
+            {overview ? (
+              <ClaimLists
+                onChanged={() => void load()}
+                overview={overview}
+                workspaceId={workspaceId}
+              />
+            ) : null}
           </div>
         </ScrollArea>
       </section>
