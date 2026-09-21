@@ -204,7 +204,8 @@ describe("public skill detail page", () => {
       'href="/auth/sign-in?redirectTo=%2Fdashboard%2Fskills%2Fpdf-forms%3Finstall%3D1"',
     );
     expect(html).toContain("Add to SourceWeft");
-    expect(html).toContain("install pdf-forms");
+    // The chat alternative names the skill by its unique slug, as a skill.
+    expect(html).toContain("Install the skill pdf-forms");
   });
 
   it("sends a signed-in visitor straight to the dashboard install", async () => {

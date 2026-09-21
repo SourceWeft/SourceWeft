@@ -147,7 +147,7 @@ function InstallCta({
   installHref: string;
   skill: MarketSkillSummary;
 }) {
-  const chatPrompt = copy.install.chatPrompt(skill.name);
+  const chatPrompt = copy.install.chatPrompt(skill.slug);
   return (
     <div className={className}>
       <Link

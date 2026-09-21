@@ -45,7 +45,7 @@ export const skillsCopy = {
         steps: [
           "Pick a skill and read its SKILL.md, files, and license.",
           "Add it to a workspace from the Skills page in your dashboard.",
-          "Use it in chat — or just ask the assistant to install it by name.",
+          "Use it in chat — or paste the skill's page link and ask the assistant to install it.",
         ],
         ctaSignedIn: "Open Skills in dashboard",
         ctaSignedOut: "Sign in to install",
@@ -175,7 +175,10 @@ export const skillsCopy = {
       signedOutNote:
         "You will be asked to sign in first, then taken straight to this skill.",
       chatLead: "or just ask in chat:",
-      chatPrompt: (name: string) => `install ${name}`,
+      // The full slug, and the word "skill": a short name like `pdf` exists in
+      // many repositories (the assistant would have to ask which), and a bare
+      // "install pdf" reads like a package to install in a sandbox.
+      chatPrompt: (slug: string) => `Install the skill ${slug}`,
       copy: "Copy",
       executableNote:
         "This skill includes scripts. They run in your workspace sandbox when the skill is used — review the file list and source before adding it.",
@@ -227,7 +230,7 @@ export const skillsCopy = {
     {
       question: "How do I use a skill in SourceWeft?",
       answer:
-        "Open the skill, choose Add to SourceWeft, and add it to a workspace from your dashboard. You can also ask the assistant in chat to install a skill by name.",
+        "Open the skill, choose Add to SourceWeft, and add it to a workspace from your dashboard. You can also paste a skill's page link in chat and ask the assistant to install it.",
     },
     {
       question: "Where do these skills come from?",

@@ -381,7 +381,10 @@ function describeInstallableRow(
 
 const SKILL_NAME_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
 const COMMIT_SHA_PATTERN = /^[0-9a-f]{40}$/i;
-const OWN_SKILL_PAGE_PATTERN = /^\/dashboard\/skills\/([^/]+)\/?$/;
+// A skill's own page, in the dashboard or on the public market — whichever one
+// somebody copied the address of. `/skills/category/<slug>` is a listing, not a
+// skill: it has a second segment and so does not match.
+const OWN_SKILL_PAGE_PATTERN = /^\/(?:dashboard\/)?skills\/([^/]+)\/?$/;
 
 /**
  * What an `install_skill` source string refers to. A bare name is looked up in

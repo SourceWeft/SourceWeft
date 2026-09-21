@@ -148,6 +148,24 @@ test("a link to our own skill page names a catalog entry", async () => {
   assert.equal(state.submissions.length, 0);
 });
 
+test("the public market page of a skill names it just as well", async () => {
+  state.byName = [row("gh-obra-superpowers-brainstorming")];
+  // What someone copies from the address bar of /skills/<slug>, query and all.
+  await installBySource(
+    "https://app.sourceweft.test/skills/gh-obra-superpowers-brainstorming?tab=install",
+  );
+  assert.equal(state.upserts.length, 1);
+  assert.equal(state.submissions.length, 0);
+});
+
+test("a market listing page is not a skill", async () => {
+  await assert.rejects(
+    installBySource("https://app.sourceweft.test/skills/category/development"),
+    { code: "SKILL_SOURCE_UNSUPPORTED" },
+  );
+  assert.equal(state.upserts.length, 0);
+});
+
 test("links to other sites are refused, not handed to the GitHub reader", async () => {
   await assert.rejects(
     installBySource("https://lobehub.com/skills/anthropics-skills-pptx"),
