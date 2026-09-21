@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { parseGithubStoragePointer } from "../storage/source-pointer";
 import { and, desc, eq, sql } from "drizzle-orm";
 import {
   db,
@@ -6,6 +7,7 @@ import {
   type SkillManifestJson,
   skillVersionFiles,
   skillVersions,
+  skillRepoClaims,
 } from "@sourceweft/db";
 import {
   putSkillBlob,
@@ -521,12 +523,37 @@ export async function upsertRegistrySkillIndex(
               ? { committedAt: current.manifestJson.registry?.committedAt }
               : null,
           }));
+    const pointer = parseGithubStoragePointer(input.storagePointer);
+    const repoOwner = pointer?.owner.toLowerCase() ?? null;
+    const repoName = pointer?.repo.toLowerCase() ?? null;
     if (!existing) {
+      // A repository its author has claimed: a skill it ships later is theirs
+      // from the start, whoever happened to import it.
+      const [claim] =
+        repoOwner && repoName
+          ? await tx
+              .select({
+                userId: skillRepoClaims.userId,
+                verifiedAt: skillRepoClaims.verifiedAt,
+              })
+              .from(skillRepoClaims)
+              .where(
+                and(
+                  eq(skillRepoClaims.repoOwner, repoOwner),
+                  eq(skillRepoClaims.repoName, repoName),
+                  eq(skillRepoClaims.status, "verified"),
+                ),
+              )
+              .limit(1)
+          : [];
       await tx.insert(skillDefinitions).values({
         id: skillId,
         ...values.definition,
         slug: input.slug,
-        ownerUserId: input.submitterId,
+        ownerUserId: claim?.userId ?? input.submitterId,
+        repoOwner,
+        repoName,
+        claimedAt: claim ? (claim.verifiedAt ?? now) : null,
         createdAt: now,
         updatedAt: now,
       });
@@ -538,6 +565,11 @@ export async function upsertRegistrySkillIndex(
         .set({
           displayName: input.displayName,
           description: input.description,
+          // `verified` vouches for content: new content is not vouched for
+          // until an admin looks again.
+          verified: false,
+          repoOwner: existing.repoOwner ?? repoOwner,
+          repoName: existing.repoName ?? repoName,
           updatedAt: now,
         })
         .where(eq(skillDefinitions.id, skillId));

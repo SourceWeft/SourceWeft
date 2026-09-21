@@ -206,6 +206,20 @@ export const skillDefinitions = pgTable(
     // market themselves; an admin's hold outranks theirs, so an owner can never
     // put back what an admin withdrew.
     listingHoldBy: text("listing_hold_by").$type<"admin" | "owner">(),
+    // The GitHub repository a community skill comes from, lowercased. Kept on
+    // the definition so a repository's skills can be found together — for a
+    // claim, for "more from this repository", for its GitHub metadata.
+    repoOwner: text("repo_owner"),
+    repoName: text("repo_name"),
+    // When the repository's author claimed it (`skill_repo_claims`); null for
+    // a skill nobody has claimed.
+    claimedAt: timestamp("claimed_at", { withTimezone: true, mode: "date" }),
+    // Copied from `skill_repositories` by the scheduler so sorting needs no join.
+    repoStars: integer("repo_stars").notNull().default(0),
+    // What "recommended" sorts by after `verified`: installs and GitHub stars
+    // folded into one number by the scheduler (`market/rank.ts`), so the order
+    // is keyset-pageable on a real column.
+    rankScore: integer("rank_score").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .defaultNow(),
@@ -253,6 +267,14 @@ export const skillDefinitions = pgTable(
       desc(table.installCount),
       desc(table.id),
     ),
+    index("skill_definitions_market_rank_idx").on(
+      table.visibility,
+      table.status,
+      desc(table.verified),
+      desc(table.rankScore),
+      desc(table.id),
+    ),
+    index("skill_definitions_repo_idx").on(table.repoOwner, table.repoName),
     check(
       "skill_definitions_listing_hold_by_check",
       sql`(${table.listingHold} = false and ${table.listingHoldBy} is null) or (${table.listingHold} = true and ${table.listingHoldBy} in ('admin', 'owner'))`,
@@ -277,6 +299,116 @@ export const skillCategories = pgTable(
     sortOrder: integer("sort_order").notNull().default(0),
   },
   (table) => [uniqueIndex("skill_categories_slug_uq").on(table.slug)],
+);
+
+// GitHub's facts about a repository community skills come from, refreshed by
+// the scheduler with conditional requests. One row per repository, however many
+// skills it ships.
+export const skillRepositories = pgTable(
+  "skill_repositories",
+  {
+    repoOwner: text("repo_owner").notNull(),
+    repoName: text("repo_name").notNull(),
+    githubId: text("github_id"),
+    ownerGithubId: text("owner_github_id"),
+    ownerType: text("owner_type").$type<"User" | "Organization">(),
+    defaultBranch: text("default_branch"),
+    stars: integer("stars").notNull().default(0),
+    forks: integer("forks").notNull().default(0),
+    pushedAt: timestamp("pushed_at", { withTimezone: true, mode: "date" }),
+    archived: boolean("archived").notNull().default(false),
+    etag: text("etag"),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true, mode: "date" }),
+  },
+  (table) => [
+    primaryKey({
+      name: "skill_repositories_pk",
+      columns: [table.repoOwner, table.repoName],
+    }),
+    index("skill_repositories_fetched_idx").on(table.fetchedAt),
+  ],
+);
+
+// A repository's author claiming its skills: started by them, proven by their
+// linked GitHub account or a token file they commit, never assigned for them.
+export const skillRepoClaims = pgTable(
+  "skill_repo_claims",
+  {
+    id: text("id").primaryKey(),
+    repoOwner: text("repo_owner").notNull(),
+    repoName: text("repo_name").notNull(),
+    userId: text("user_id").notNull(),
+    method: text("method")
+      .$type<"github_account" | "verification_file">()
+      .notNull(),
+    // sha256 of the token a verification file must contain; null for the
+    // account method.
+    tokenHash: text("token_hash"),
+    status: text("status")
+      .$type<"pending" | "verified" | "revoked">()
+      .notNull()
+      .default("pending"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    verifiedAt: timestamp("verified_at", { withTimezone: true, mode: "date" }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "date" }),
+    revokedBy: text("revoked_by"),
+  },
+  (table) => [
+    check(
+      "skill_repo_claims_method_check",
+      sql`${table.method} in ('github_account', 'verification_file')`,
+    ),
+    check(
+      "skill_repo_claims_status_check",
+      sql`${table.status} in ('pending', 'verified', 'revoked')`,
+    ),
+    // One author per repository at a time.
+    uniqueIndex("skill_repo_claims_verified_uq")
+      .on(table.repoOwner, table.repoName)
+      .where(sql`${table.status} = 'verified'`),
+    index("skill_repo_claims_user_idx").on(table.userId),
+  ],
+);
+
+// Editorial collections on the public market: a titled, ordered set of skills.
+export const skillCollections = pgTable(
+  "skill_collections",
+  {
+    id: text("id").primaryKey(),
+    slug: text("slug").notNull(),
+    title: text("title").notNull(),
+    summary: text("summary").notNull().default(""),
+    position: integer("position").notNull().default(0),
+    published: boolean("published").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [uniqueIndex("skill_collections_slug_uq").on(table.slug)],
+);
+
+export const skillCollectionItems = pgTable(
+  "skill_collection_items",
+  {
+    collectionId: text("collection_id")
+      .notNull()
+      .references(() => skillCollections.id, { onDelete: "cascade" }),
+    skillId: text("skill_id")
+      .notNull()
+      .references(() => skillDefinitions.id, { onDelete: "cascade" }),
+    position: integer("position").notNull().default(0),
+  },
+  (table) => [
+    primaryKey({
+      name: "skill_collection_items_pk",
+      columns: [table.collectionId, table.skillId],
+    }),
+  ],
 );
 
 export const skillDefinitionCategories = pgTable(
