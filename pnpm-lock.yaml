@@ -248,6 +248,9 @@ importers:
       music-metadata:
         specifier: ^11.14.0
         version: 11.14.0
+      opencc-js:
+        specifier: ^1.4.2
+        version: 1.4.2
       pdfjs-dist:
         specifier: ^6.2.108
         version: 6.2.108

@@ -712,6 +712,8 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       assert.deepEqual(page.items[0], {
         slug: entry.slug,
         name: "p06",
+        // No overview has been generated for it.
+        aiSummary: null,
         displayName: entry.displayName,
         description: entry.description,
         // No logo of its own: the publisher's avatar stands in.

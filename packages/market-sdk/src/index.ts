@@ -12,6 +12,7 @@ import {
   marketCategoryCountsResponseSchema,
   type ListMarketMcpRequest,
   type ListMarketSkillsRequest,
+  type MarketSkillLocale,
 } from "@sourceweft/market-contracts";
 
 export type MarketClientOptions = {
@@ -92,6 +93,9 @@ export class MarketClient {
     if (input.cursor) {
       params.set("cursor", input.cursor);
     }
+    if (input.locale) {
+      params.set("locale", input.locale);
+    }
     return this.request(
       appendQuery("/v1/skills", params),
       { method: "GET" },
@@ -108,10 +112,17 @@ export class MarketClient {
     );
   }
 
-  /** A public skill: listing, SKILL.md, file manifest, versions, source. */
-  getSkill(slug: string) {
+  /**
+   * A public skill: listing, SKILL.md, file manifest, versions, source, and
+   * its AI overview in `locale` (English when omitted or missing).
+   */
+  getSkill(slug: string, options: { locale?: MarketSkillLocale } = {}) {
+    const params = new URLSearchParams();
+    if (options.locale) {
+      params.set("locale", options.locale);
+    }
     return this.request(
-      `/v1/skills/${encode(slug)}`,
+      appendQuery(`/v1/skills/${encode(slug)}`, params),
       { method: "GET" },
       getMarketSkillResponseSchema,
     );
