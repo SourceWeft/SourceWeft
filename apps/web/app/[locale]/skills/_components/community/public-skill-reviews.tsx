@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { PenLine } from "lucide-react";
+import { getTranslations } from "next-intl/server";
 import {
   getPublicSkillReviews,
   PUBLIC_SKILL_REVIEWS_PAGE_SIZE,
@@ -7,8 +8,7 @@ import {
 import { SkillReviewItem } from "../../../../dashboard/skills/_components/community/skill-review-item";
 import { SkillReviewSummary } from "../../../../dashboard/skills/_components/community/skill-review-summary";
 import { skillsContainerClassName } from "../skills-format";
-import { PublicReviewReportLink } from "./public-review-report-link";
-import { publicReviewsCopy as copy } from "./public-reviews-copy";
+import { SkillReviewReportLink } from "../../../../dashboard/skills/_components/community/skill-review-report-link";
 import { skillReviewHref } from "./public-reviews-format";
 import { PublicSkillReviewsMore } from "./public-skill-reviews-more";
 import type { PublicSkillSlotProps } from "./slot-props";
@@ -29,6 +29,8 @@ export async function PublicSkillReviews({
   const hasReviews = reviews.summary.count > 0 && reviews.items.length > 0;
   if (!hasReviews && !signedIn) return null;
   const now = Date.now();
+  const t = await getTranslations("publicSkills.community.reviews");
+  const tReviews = await getTranslations("dashboardSkillReviews");
 
   return (
     <section
@@ -43,7 +45,7 @@ export async function PublicSkillReviews({
             id="public-skill-reviews-heading"
             className="text-base font-semibold text-zinc-950 dark:text-white"
           >
-            {copy.heading}
+            {tReviews("heading")}
           </h2>
           <Link
             href={skillReviewHref(slug, signedIn)}
@@ -51,7 +53,7 @@ export async function PublicSkillReviews({
             className="inline-flex h-9 items-center gap-2 rounded-lg bg-zinc-950 px-3 text-sm font-medium text-white transition-colors hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-100"
           >
             <PenLine aria-hidden className="size-4" />
-            {signedIn ? copy.writeReview : copy.signInToReview}
+            {signedIn ? tReviews("writeReview") : t("signInToReview")}
           </Link>
         </div>
 
@@ -67,7 +69,7 @@ export async function PublicSkillReviews({
                   review={review}
                   now={now}
                   actions={
-                    <PublicReviewReportLink
+                    <SkillReviewReportLink
                       slug={slug}
                       reviewId={review.id}
                       signedIn={signedIn}

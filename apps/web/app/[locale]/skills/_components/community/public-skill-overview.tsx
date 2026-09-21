@@ -3,7 +3,6 @@ import {
   marketSkillLocale,
 } from "../../../../../lib/market-skills";
 import { SkillAiOverviewView } from "../../../../dashboard/skills/_components/community/skill-ai-overview-view";
-import { publicOverviewCopy } from "./public-overview-copy";
 import type { PublicSkillSlotProps } from "./slot-props";
 
 /**
@@ -30,7 +29,6 @@ export async function PublicSkillOverview({
   if (!overview) return null;
   return (
     <SkillAiOverviewView
-      labels={publicOverviewCopy(locale).block}
       overview={overview}
       requestedLocale={requested}
     />

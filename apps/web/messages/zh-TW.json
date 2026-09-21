@@ -47,7 +47,7 @@
       "badge": "搶先體驗中",
       "headlineLine1": "你的 AI 筆記",
       "headlineLine2": "工作區。",
-      "subtitle": "上傳資料，連接 Notion、Google Drive、Gmail、Slack 等工具。基於你自己的內容，生成有據可查、帶引用的答案，以及音訊概覽、學習指南、常見問答和深度 AI 洞察。",
+      "subtitle": "上傳資料，連接 Notion、Google Drive、Gmail、Slack 等工具。基於你自己的內容，產生有據可查、帶引用的答案，以及音訊概覽、學習指南、常見問答和深度 AI 洞察。",
       "ctaSignedIn": "開啟儀表板",
       "ctaSignedOut": "免費開始",
       "seeHowItWorks": "瞭解運作方式",
@@ -84,8 +84,8 @@
       "intro": "上傳資料，連接你的工具，獲得答案、音訊概覽、學習指南等等——全部基於你已有的知識，引用可逐條查證。",
       "items": {
         "outputs": {
-          "title": "從來源生成多種成果",
-          "description": "提出問題，或生成音訊概覽、學習指南、常見問答、簡報文件或時間軸——全部基於你上傳的資料，並附帶行內引用。",
+          "title": "從來源產生多種成果",
+          "description": "提出問題，或產生音訊概覽、學習指南、常見問答、簡報文件或時間軸——全部基於你上傳的資料，並附帶行內引用。",
           "bullets": [
             "音訊概覽與 Podcast",
             "學習指南、常見問答與時間軸",
@@ -194,7 +194,7 @@
       "items": [
         "在網頁、桌面與瀏覽器擴充功能工作流中更深入地覆蓋連接來源",
         "為學習、簡報與綜合提供更多有據可查的輸出格式",
-        "更清晰的引用審閱方式，讓生成的成果始終易於查證"
+        "更清晰的引用審閱方式，讓產生的成果始終易於查證"
       ]
     },
     "buildLabel": "建置 {sha}"
@@ -202,11 +202,11 @@
   "changelog": {
     "meta": {
       "title": "更新日誌",
-      "description": "SourceWeft 的產品更新——連接知識來源、生成有據可查成果的 AI 筆記工作區。"
+      "description": "SourceWeft 的產品更新——連接知識來源、產生有據可查成果的 AI 筆記工作區。"
     },
     "badge": "產品更新",
     "heading": "更新日誌",
-    "subtitle": "SourceWeft 發布的簡明記錄，依據 Git 標籤生成，讓公開更新始終與已上線的程式碼對應。",
+    "subtitle": "SourceWeft 發布的簡明記錄，依據 Git 標籤產生，讓公開更新始終與已上線的程式碼對應。",
     "ctaAbout": "關於 SourceWeft",
     "ctaFeatures": "檢視功能",
     "category": {
@@ -523,7 +523,7 @@
     "PERSONAL_ACCOUNT": "個人帳戶",
     "API_KEYS": "API 金鑰",
     "API_KEYS_DESCRIPTION": "管理你的 API 金鑰以實現安全存取。",
-    "API_KEYS_INSTRUCTIONS": "生成 API 金鑰以透過程式存取你的帳戶。",
+    "API_KEYS_INSTRUCTIONS": "產生 API 金鑰以透過程式存取你的帳戶。",
     "CREATE_API_KEY": "建立 API 金鑰",
     "CREATE_API_KEY_DESCRIPTION": "為你的 API 金鑰輸入一個唯一名稱，以便與其他金鑰區分。",
     "API_KEY_NAME_PLACEHOLDER": "新 API 金鑰",
@@ -1555,7 +1555,7 @@
     "toolCard": {
       "status": {
         "running": "執行中",
-        "generating": "生成中",
+        "generating": "產生中",
         "needs-approval": "需要核准",
         "failed": "失敗",
         "rejected": "已拒絕",
@@ -1676,7 +1676,7 @@
       "possibleEvidence": "可能的證據",
       "untitledSource": "未命名來源",
       "moreCount": "還有 {count} 個",
-      "noInlineCitations": "回答中未包含行內引用標記；這些來源是在生成過程中讀取或檢索的。"
+      "noInlineCitations": "回答中未包含行內引用標記；這些來源是在產生過程中讀取或檢索的。"
     },
     "sources": {
       "mentionedSource": "提及的來源"
@@ -1693,7 +1693,7 @@
       "fallback": "製品",
       "titleFailed": "{label}失敗",
       "titlePipeline": "{label}管線",
-      "titleBuilding": "正在生成{label}",
+      "titleBuilding": "正在產生{label}",
       "detailsMismatch": "製品詳細資訊與請求不符。",
       "detailsLoadFailed": "無法載入製品詳細資訊。",
       "versionMismatch": "製品版本詳細資訊與請求不符。",
@@ -1701,8 +1701,8 @@
     },
     "errors": {
       "invalidStructuredContent": "模型未傳回有效的結構化內容",
-      "toolArgsInvalidNamed": "{tool} 失敗，因為生成的工具引數無效。請重試。",
-      "toolArgsInvalid": "生成的工具引數無效。請重試。",
+      "toolArgsInvalidNamed": "{tool} 失敗，因為產生的工具引數無效。請重試。",
+      "toolArgsInvalid": "產生的工具引數無效。請重試。",
       "reloadFailed": "重新載入對話訊息失敗。",
       "confirmationMissing": "確認訊息缺失。請重新整理對話後重試。",
       "noWorkspaceSelected": "尚未選擇工作區。",
@@ -1716,7 +1716,7 @@
       "keepWritingDraft": "你可以繼續撰寫草稿。"
     },
     "messageList": {
-      "generationStopped": "生成已被使用者停止。",
+      "generationStopped": "產生已被使用者停止。",
       "artifactCount": "{count} 個製品",
       "callSubagent": "呼叫子代理程式",
       "instruction": "指令",
@@ -1862,9 +1862,9 @@
       "description": "此操作將永久刪除該製品並停用其公開連結，且無法撤銷。"
     },
     "fallback": {
-      "pendingTitle": "製品仍在生成中",
+      "pendingTitle": "製品仍在產生中",
       "pendingDetail": "製品就緒後即可預覽。",
-      "failedTitle": "製品生成失敗",
+      "failedTitle": "製品產生失敗",
       "unsupportedTitle": "暫不支援預覽",
       "unsupportedDetail": "當有可用檔案時，你仍可從工具列開啟或下載此製品。"
     },
@@ -3384,6 +3384,19 @@
       "scope:other-skill-file": "讀取其他技能的檔案",
       "tool:sensitive": "請求程式碼執行類工具",
       "binary:executable": "附帶可執行二進位檔案"
+    },
+    "community": {
+      "overview": {
+        "cardSummaryTitle": "AI 產生的簡介"
+      },
+      "reviews": {
+        "signInToReview": "登入以評價",
+        "showMore": "顯示更多評價",
+        "loadMoreFailed": "無法載入更多評價，請重試。"
+      },
+      "report": {
+        "description": "向 SourceWeft 市場管理員回報此技能的問題：抄襲他人作品、存在不安全行為、垃圾內容或無法正常使用。"
+      }
     }
   },
   "dashboardSkillsClaim": {
@@ -3746,28 +3759,28 @@
   },
   "dashboardSkillOverview": {
     "block": {
-      "title": "AI 生成的概覽",
+      "title": "AI 產生的概覽",
       "explainer": "由 AI 模型根據該技能的 SKILL.md 和檔案列表撰寫，可能有誤或不完整。使用前請以技能自身的文件為準。",
       "explainerLabel": "關於此概覽",
       "whatItDoes": "功能",
-      "whenToUse": "適用場景",
-      "requirements": "執行要求",
-      "englishFallback": "以英文顯示：暫無你所用語言的概覽。"
+      "whenToUse": "適用情境",
+      "requirements": "執行需求",
+      "englishFallback": "暫無中文概覽，以下為英文版本。"
     },
     "admin": {
       "title": "AI 概覽",
       "loading": "正在載入概覽…",
       "none": "目前版本暫無概覽。",
-      "notEligible": "未為此技能生成：只有從 GitHub 匯入的公開技能才會生成概覽。",
+      "notEligible": "未為此技能產生：只有從 GitHub 匯入的公開技能才會產生概覽。",
       "noVersion": "此技能沒有目前發布的版本。",
       "hidden": "已隱藏",
       "visible": "已顯示",
       "missing": "缺失",
       "model": "模型",
-      "generatedAt": "生成時間",
-      "regenerate": "重新生成",
+      "generatedAt": "產生時間",
+      "regenerate": "重新產生",
       "regenerateQueued": "已加入佇列，新概覽將在幾分鐘內出現。",
-      "regenerateNotQueued": "已移除。此技能不在生成概覽的範圍內，因此未加入佇列。",
+      "regenerateNotQueued": "已移除。此技能不在產生概覽的範圍內，因此未加入佇列。",
       "hide": "隱藏",
       "show": "顯示",
       "hiddenDone": "概覽已隱藏。",
@@ -3776,9 +3789,9 @@
     },
     "settings": {
       "title": "AI 概覽",
-      "description": "概覽由預設對話模型撰寫，費用計入此處選擇的團隊、工作區和成員。設定完成前不會生成任何概覽。",
+      "description": "概覽由預設對話模型撰寫，費用計入此處選擇的團隊、工作區和成員。設定完成前不會產生任何概覽。",
       "current": "計費對象",
-      "notSet": "未設定：目前不會生成任何概覽。",
+      "notSet": "未設定：目前不會產生任何概覽。",
       "team": "團隊",
       "workspace": "工作區",
       "member": "計費成員（使用者 ID）",
@@ -3976,6 +3989,10 @@
       "cancel": "取消",
       "resolveError": "無法處理該檢舉。",
       "resolved": "{count, plural, =0 {檢舉已處理。} =1 {檢舉已處理。} other {已處理 # 條檢舉。}}"
+    },
+    "review": {
+      "title": "檢舉此評價",
+      "description": "請告訴我們這條評價存在什麼問題。每條檢舉都會由管理員審核。"
     }
   },
   "dashboardSkillsMarketAdmin": {
@@ -4096,7 +4113,7 @@
           "dismissed": "檢舉已駁回"
         },
         "overview": {
-          "regenerated": "AI 概覽已重新生成",
+          "regenerated": "AI 概覽已重新產生",
           "hidden": "AI 概覽已隱藏",
           "shown": "AI 概覽已重新顯示"
         },

@@ -62,6 +62,15 @@ describe("formatReviewDate", () => {
     expect(formatReviewDate("2025-09-01T12:00:00.000Z", now)).toBe("last year");
   });
 
+  it("speaks the given locale", () => {
+    expect(formatReviewDate("2026-09-19T12:00:00.000Z", now, "zh-CN")).toBe(
+      "3天前",
+    );
+    expect(formatReviewDate("2026-09-21T12:00:00.000Z", now, "zh-CN")).toBe(
+      "昨天",
+    );
+  });
+
   it("shows nothing for a date it cannot read", () => {
     expect(formatReviewDate("not a date", now)).toBe("");
   });

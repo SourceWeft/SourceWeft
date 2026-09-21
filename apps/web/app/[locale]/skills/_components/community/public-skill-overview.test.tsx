@@ -5,6 +5,8 @@ import { afterEach, expect, test, vi } from "vitest";
 import { NextIntlClientProvider } from "next-intl";
 import type { MarketSkillSummary } from "@sourceweft/market-sdk";
 import messages from "../../../../../messages/en.json";
+import zhCNMessages from "../../../../../messages/zh-CN.json";
+import zhTWMessages from "../../../../../messages/zh-TW.json";
 
 const market = vi.hoisted(() => ({ getPublicSkill: vi.fn() }));
 vi.mock("../../../../../lib/market-skills", () => ({
@@ -14,7 +16,6 @@ vi.mock("../../../../../lib/market-skills", () => ({
 }));
 
 import { PublicSkillOverview } from "./public-skill-overview";
-import { publicOverviewCopy } from "./public-overview-copy";
 import { SkillMarketCard, skillCardText } from "../skills-display";
 
 let root: Root;
@@ -25,9 +26,12 @@ afterEach(() => {
   vi.resetAllMocks();
 });
 
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
+type IntlMessages = ComponentProps<typeof NextIntlClientProvider>["messages"];
+const catalogs: Record<string, IntlMessages> = {
+  en: messages as IntlMessages,
+  "zh-CN": zhCNMessages as IntlMessages,
+  "zh-TW": zhTWMessages as IntlMessages,
+};
 
 async function render(node: ReactNode, locale = "en") {
   container = document.createElement("div");
@@ -35,7 +39,7 @@ async function render(node: ReactNode, locale = "en") {
   root = createRoot(container);
   await act(async () =>
     root.render(
-      <NextIntlClientProvider locale={locale} messages={intlMessages}>
+      <NextIntlClientProvider locale={locale} messages={catalogs[locale]}>
         {node}
       </NextIntlClientProvider>,
     ),
@@ -64,12 +68,18 @@ test("the overview is read in the page's locale and shown as labelled plain text
   );
   await render(node, "zh-CN");
   const block = container.querySelector('[data-testid="skill-ai-overview"]');
-  expect(block?.textContent).toContain("AI 生成的概览");
-  expect(block?.textContent).toContain("适用场景");
+  expect(block?.textContent).toContain(
+    zhCNMessages.dashboardSkillOverview.block.title,
+  );
+  expect(block?.textContent).toContain(
+    zhCNMessages.dashboardSkillOverview.block.whenToUse,
+  );
   expect(block?.textContent).toContain("<script>alert(1)</script>");
   expect(container.querySelector("script")).toBeNull();
   // In the language asked for: no fallback note.
-  expect(block?.textContent).not.toContain("以下为英文版本");
+  expect(block?.textContent).not.toContain(
+    zhCNMessages.dashboardSkillOverview.block.englishFallback,
+  );
 });
 
 test("an English fallback is noted in the visitor's language", async () => {
@@ -82,8 +92,12 @@ test("an English fallback is noted in the visitor's language", async () => {
     locale: "zh-TW",
   });
   await render(node, "zh-TW");
-  expect(container.textContent).toContain("AI 產生的概覽");
-  expect(container.textContent).toContain("以下為英文版本");
+  expect(container.textContent).toContain(
+    zhTWMessages.dashboardSkillOverview.block.title,
+  );
+  expect(container.textContent).toContain(
+    zhTWMessages.dashboardSkillOverview.block.englishFallback,
+  );
 });
 
 test("nothing renders without an overview, or when the read fails", async () => {
@@ -99,10 +113,6 @@ test("nothing renders without an overview, or when the read fails", async () => 
   expect(
     await PublicSkillOverview({ slug: "a", signedIn: false, locale: "en" }),
   ).toBeNull();
-});
-
-test("copy falls back to English for an unknown locale", () => {
-  expect(publicOverviewCopy("fr").block.title).toBe("AI-generated overview");
 });
 
 const summary: MarketSkillSummary = {

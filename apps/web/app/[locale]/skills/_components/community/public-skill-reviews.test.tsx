@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
-import { act } from "react";
+import { act, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { NextIntlClientProvider } from "next-intl";
+import messages from "../../../../../messages/en.json";
 import type {
   ListSkillReviewsResponse,
   SkillReview,
@@ -18,6 +20,20 @@ vi.mock("../../../../../lib/public-skill-reviews", () => ({
   PUBLIC_SKILL_REVIEWS_PAGE_SIZE: 2,
 }));
 vi.mock("../../../../../lib/skill-reviews", () => client);
+// next-intl reads its request config through the Next plugin, which a unit
+// test does not have: serve the real English catalog directly instead.
+vi.mock("next-intl/server", async () => {
+  const { createTranslator } = await import("next-intl");
+  const messages = (await import("../../../../../messages/en.json")).default;
+  return {
+    getTranslations: async (namespace?: string) =>
+      createTranslator({
+        locale: "en",
+        messages,
+        namespace: namespace as never,
+      }),
+  };
+});
 // The report form is the reports feature's; here it only has to receive the
 // review it is about.
 vi.mock(
@@ -36,6 +52,10 @@ vi.mock(
 );
 
 import { PublicSkillReviews } from "./public-skill-reviews";
+
+const intlMessages = messages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
 
 (
   globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -94,7 +114,13 @@ async function renderSection(signedIn: boolean) {
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
-  await act(async () => root.render(node));
+  await act(async () =>
+    root.render(
+      <NextIntlClientProvider locale="en" messages={intlMessages}>
+        {node}
+      </NextIntlClientProvider>,
+    ),
+  );
   return node;
 }
 
@@ -214,7 +240,7 @@ test("a failed Show more says so and can be tried again", async () => {
 test("Report opens the report form for that one review", async () => {
   await renderSection(false);
   const reports = container.querySelectorAll<HTMLButtonElement>(
-    '[data-testid="public-review-report"]',
+    '[data-testid="skill-review-report"]',
   );
   expect(reports).toHaveLength(2);
   await act(async () => reports[1]!.click());

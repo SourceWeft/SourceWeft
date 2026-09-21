@@ -30,7 +30,6 @@ import {
   skillPath,
   skillsContainerClassName,
 } from "./skills-format";
-import { publicOverviewCopy } from "./community/public-overview-copy";
 import { SkillTile } from "./skill-logo";
 
 /**
@@ -164,6 +163,7 @@ export function SkillMarketCard({
   skill: MarketSkillSummary;
 }) {
   const t = useTranslations("publicSkills.card");
+  const tOverview = useTranslations("publicSkills.community.overview");
   const locale = useLocale();
   const primaryCategory =
     highlightCategory && skill.categories.includes(highlightCategory)
@@ -207,7 +207,7 @@ export function SkillMarketCard({
         {...(cardText.ai
           ? {
               "data-ai-summary": "",
-              title: publicOverviewCopy(locale).cardSummaryTitle,
+              title: tOverview("cardSummaryTitle"),
             }
           : {})}
       >

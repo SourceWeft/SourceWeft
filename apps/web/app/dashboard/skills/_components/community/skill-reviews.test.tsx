@@ -343,3 +343,45 @@ test("a skill whose reviews the viewer cannot read shows nothing; other failures
     container.querySelectorAll('[data-testid="skill-review-item"]'),
   ).toHaveLength(2);
 });
+
+test("every review but the viewer's own can be reported, signed in", async () => {
+  const mine = review("r2");
+  api.listSkillReviews.mockResolvedValue(
+    page({ viewer: { canReview: true, canReply: false, ownReview: mine } }),
+  );
+  await renderReviews();
+  const reportIn = (id: string) =>
+    item(id).querySelector<HTMLButtonElement>(
+      '[data-testid="skill-review-report"]',
+    );
+  expect(reportIn("r2")).toBeNull();
+  expect(reportIn("r1")?.textContent?.trim()).toBe("Report");
+  await click(reportIn("r1")!);
+  expect(document.body.textContent).toContain("Report this review");
+  // Signed in: the contact address is optional.
+  expect(
+    document.body.querySelector<HTMLInputElement>('[name="contactEmail"]')
+      ?.required,
+  ).toBe(false);
+});
+
+test("the section is #reviews, and is scrolled to once loaded when the URL asks", async () => {
+  const scrollIntoView = vi.fn();
+  const original = Element.prototype.scrollIntoView;
+  Element.prototype.scrollIntoView = scrollIntoView;
+  window.history.replaceState(null, "", "#reviews");
+  try {
+    await renderReviews();
+    const section = container.querySelector('[data-testid="skill-reviews"]');
+    expect(section?.id).toBe("reviews");
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(scrollIntoView.mock.contexts[0]).toBe(section);
+    // Not again on a later reload of the list.
+    await click(button("Highest rated"));
+    await flush();
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+  } finally {
+    window.history.replaceState(null, "", "#");
+    Element.prototype.scrollIntoView = original;
+  }
+});

@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { Flag } from "lucide-react";
+import { useTranslations } from "next-intl";
 import {
   Dialog,
   DialogContent,
@@ -9,14 +10,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@sourceweft/ui-web/components/ui/dialog";
-import { SkillReportForm } from "../../../../dashboard/skills/_components/community/skill-report-form";
-import { publicReviewsCopy as copy } from "./public-reviews-copy";
+import { SkillReportForm } from "./skill-report-form";
 
 /**
- * "Report" on one review: opens the shared report form for that review.
- * Signed out, the form asks for a contact address. Reopening starts afresh.
+ * "Report" on one review, for the dashboard's list and the public page:
+ * opens the shared report form for that review. Signed out, the form asks
+ * for a contact address. Reopening starts afresh.
  */
-export function PublicReviewReportLink({
+export function SkillReviewReportLink({
   slug,
   reviewId,
   signedIn,
@@ -25,6 +26,7 @@ export function PublicReviewReportLink({
   reviewId: string;
   signedIn: boolean;
 }) {
+  const t = useTranslations("dashboardSkillReports");
   const [open, setOpen] = React.useState(false);
   // A new key per opening, so a sent report does not greet the next one.
   const [attempt, setAttempt] = React.useState(0);
@@ -32,21 +34,21 @@ export function PublicReviewReportLink({
     <>
       <button
         type="button"
-        data-testid="public-review-report"
-        className="inline-flex items-center gap-1 rounded text-xs text-zinc-500 underline-offset-4 hover:text-zinc-900 hover:underline dark:text-zinc-400 dark:hover:text-white"
+        data-testid="skill-review-report"
+        className="inline-flex items-center gap-1 rounded text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
         onClick={() => {
           setAttempt((value) => value + 1);
           setOpen(true);
         }}
       >
         <Flag aria-hidden className="size-3" />
-        {copy.report}
+        {t("button.label")}
       </button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>{copy.reportTitle}</DialogTitle>
-            <DialogDescription>{copy.reportDescription}</DialogDescription>
+            <DialogTitle>{t("review.title")}</DialogTitle>
+            <DialogDescription>{t("review.description")}</DialogDescription>
           </DialogHeader>
           <SkillReportForm
             key={attempt}

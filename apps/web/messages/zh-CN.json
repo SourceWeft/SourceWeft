@@ -3384,6 +3384,19 @@
       "scope:other-skill-file": "读取其他技能的文件",
       "tool:sensitive": "请求代码执行类工具",
       "binary:executable": "附带可执行二进制文件"
+    },
+    "community": {
+      "overview": {
+        "cardSummaryTitle": "AI 生成的简介"
+      },
+      "reviews": {
+        "signInToReview": "登录以评价",
+        "showMore": "显示更多评价",
+        "loadMoreFailed": "无法加载更多评价，请重试。"
+      },
+      "report": {
+        "description": "向 SourceWeft 市场管理员反馈此技能的问题：抄袭他人作品、存在不安全行为、垃圾内容或无法正常使用。"
+      }
     }
   },
   "dashboardSkillsClaim": {
@@ -3752,7 +3765,7 @@
       "whatItDoes": "功能",
       "whenToUse": "适用场景",
       "requirements": "运行要求",
-      "englishFallback": "以英文显示：暂无你所用语言的概览。"
+      "englishFallback": "暂无中文概览，以下为英文版本。"
     },
     "admin": {
       "title": "AI 概览",
@@ -3976,6 +3989,10 @@
       "cancel": "取消",
       "resolveError": "无法处理该举报。",
       "resolved": "{count, plural, =0 {举报已处理。} =1 {举报已处理。} other {已处理 # 条举报。}}"
+    },
+    "review": {
+      "title": "举报此评价",
+      "description": "请告诉我们这条评价存在什么问题。每条举报都会由管理员审核。"
     }
   },
   "dashboardSkillsMarketAdmin": {

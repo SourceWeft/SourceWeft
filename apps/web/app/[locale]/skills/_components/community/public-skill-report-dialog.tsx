@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { Flag } from "lucide-react";
+import { useTranslations } from "next-intl";
 import {
   Dialog,
   DialogContent,
@@ -10,7 +11,6 @@ import {
   DialogTitle,
 } from "@sourceweft/ui-web/components/ui/dialog";
 import { SkillReportForm } from "../../../../dashboard/skills/_components/community/skill-report-form";
-import { publicReportCopy } from "./public-report-copy";
 import type { PublicSkillSlotProps } from "./slot-props";
 
 /**
@@ -21,9 +21,9 @@ import type { PublicSkillSlotProps } from "./slot-props";
 export function PublicSkillReportDialog({
   slug,
   signedIn,
-  locale,
 }: PublicSkillSlotProps) {
-  const copy = publicReportCopy(locale);
+  const t = useTranslations("dashboardSkillReports.button");
+  const tPublic = useTranslations("publicSkills.community.report");
   const [open, setOpen] = React.useState(false);
   // A new key per opening, so a sent report does not greet the next one.
   const [attempt, setAttempt] = React.useState(0);
@@ -41,14 +41,14 @@ export function PublicSkillReportDialog({
           data-testid="public-skill-report-button"
         >
           <Flag className="size-3.5" aria-hidden />
-          {copy.button}
+          {t("title")}
         </button>
       </p>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>{copy.title}</DialogTitle>
-            <DialogDescription>{copy.description}</DialogDescription>
+            <DialogTitle>{t("title")}</DialogTitle>
+            <DialogDescription>{tPublic("description")}</DialogDescription>
           </DialogHeader>
           <SkillReportForm
             key={attempt}

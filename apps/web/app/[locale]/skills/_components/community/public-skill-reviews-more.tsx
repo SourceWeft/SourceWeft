@@ -2,13 +2,13 @@
 
 import * as React from "react";
 import { Loader2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import {
   listSkillReviews,
   type SkillReview,
 } from "../../../../../lib/skill-reviews";
 import { SkillReviewItem } from "../../../../dashboard/skills/_components/community/skill-review-item";
-import { PublicReviewReportLink } from "./public-review-report-link";
-import { publicReviewsCopy as copy } from "./public-reviews-copy";
+import { SkillReviewReportLink } from "../../../../dashboard/skills/_components/community/skill-review-report-link";
 
 /**
  * "Show more" under the server-rendered first page: later pages load in the
@@ -28,6 +28,7 @@ export function PublicSkillReviewsMore({
   shownIds: string[];
   pageSize: number;
 }) {
+  const t = useTranslations("publicSkills.community.reviews");
   const [items, setItems] = React.useState<SkillReview[]>([]);
   const [cursor, setCursor] = React.useState<string | null>(initialCursor);
   const [loading, setLoading] = React.useState(false);
@@ -62,7 +63,7 @@ export function PublicSkillReviewsMore({
           key={review.id}
           review={review}
           actions={
-            <PublicReviewReportLink
+            <SkillReviewReportLink
               slug={slug}
               reviewId={review.id}
               signedIn={signedIn}
@@ -72,7 +73,7 @@ export function PublicSkillReviewsMore({
       ))}
       {failed ? (
         <p role="alert" className="py-2 text-sm text-red-700 dark:text-red-400">
-          {copy.loadMoreFailed}
+          {t("loadMoreFailed")}
         </p>
       ) : null}
       {cursor ? (
@@ -86,7 +87,7 @@ export function PublicSkillReviewsMore({
             {loading ? (
               <Loader2 aria-hidden className="size-4 animate-spin" />
             ) : null}
-            {copy.showMore}
+            {t("showMore")}
           </button>
         </div>
       ) : null}

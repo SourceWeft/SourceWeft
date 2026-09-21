@@ -1,15 +1,27 @@
+import type { ComponentProps, ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import { NextIntlClientProvider } from "next-intl";
+import messages from "../../../../../messages/en.json";
+import zhCNMessages from "../../../../../messages/zh-CN.json";
 
 const api = vi.hoisted(() => ({ getPublicSkillRunStats: vi.fn() }));
 vi.mock("../../../../../lib/public-skill-run-stats", () => api);
 
 import { PublicSkillRunStats } from "./public-skill-run-stats";
-import {
-  formatPublicSuccessRate,
-  publicRunStatsSentence,
-  PublicSkillRunStatsPanel,
-} from "./public-skill-run-stats-view";
+import { PublicSkillRunStatsPanel } from "./public-skill-run-stats-view";
+
+type IntlMessages = ComponentProps<typeof NextIntlClientProvider>["messages"];
+const catalogs: Record<string, IntlMessages> = {
+  en: messages as IntlMessages,
+  "zh-CN": zhCNMessages as IntlMessages,
+};
+const renderWithIntl = (node: ReactNode, locale = "en") =>
+  renderToStaticMarkup(
+    <NextIntlClientProvider locale={locale} messages={catalogs[locale]}>
+      {node}
+    </NextIntlClientProvider>,
+  );
 
 const stats = {
   available: true as const,
@@ -30,71 +42,44 @@ beforeEach(() => {
   api.getPublicSkillRunStats.mockReset();
 });
 
-describe("publicRunStatsSentence", () => {
+// The sentence is the dashboard's (`skillRunStatsSentence`, tested there);
+// here it only has to come out in the page's language.
+describe("PublicSkillRunStatsPanel", () => {
   test("en", () => {
-    expect(publicRunStatsSentence(stats, "en")).toBe(
+    expect(renderWithIntl(<PublicSkillRunStatsPanel stats={stats} />)).toContain(
       "Ran 1,240 times in SourceWeft sandboxes in the last 30 days · 92% succeeded · Common issue: missing pptxgenjs",
     );
   });
 
-  test("zh-CN", () => {
-    expect(publicRunStatsSentence(stats, "zh-CN")).toBe(
-      "近 30 天在 SourceWeft 沙箱中运行 1,240 次 · 成功率 92% · 常见问题：缺少 pptxgenjs",
-    );
-  });
-
-  test("zh-TW, without a named dependency", () => {
-    expect(
-      publicRunStatsSentence(
-        {
-          ...stats,
-          topErrors: [
-            { errorClass: "missing_dependency", subject: null, count: 1 },
-          ],
-        },
-        "zh-TW",
-      ),
-    ).toContain("常見問題：缺少相依套件");
-  });
-
   test("one run, no issue", () => {
     expect(
-      publicRunStatsSentence(
-        { ...stats, runs: 1, successRate: 1, topErrors: [] },
-        "en",
+      renderWithIntl(
+        <PublicSkillRunStatsPanel
+          stats={{ ...stats, runs: 1, successRate: 1, topErrors: [] }}
+        />,
       ),
-    ).toBe(
-      "Ran 1 time in SourceWeft sandboxes in the last 30 days · 100% succeeded",
+    ).toContain(
+      "Ran 1 time in SourceWeft sandboxes in the last 30 days · 100% succeeded</p>",
     );
   });
 
-  test.each([
-    ["timeout", "timed out"],
-    ["permission", "permission denied"],
-    ["other", "other errors"],
-  ] as const)("%s → %s", (errorClass, label) => {
-    expect(
-      publicRunStatsSentence(
-        { ...stats, topErrors: [{ errorClass, subject: null, count: 1 }] },
-        "en",
-      ),
-    ).toContain(`Common issue: ${label}`);
-  });
-
-  test.each([
-    [1, "100%"],
-    [0.999, "99%"],
-    [0.004, "1%"],
-    [0, "0%"],
-  ])("success rate %d → %s", (rate, text) => {
-    expect(formatPublicSuccessRate(rate, "en")).toBe(text);
+  test("zh-CN, in the aside's own style", () => {
+    const html = renderWithIntl(
+      <PublicSkillRunStatsPanel stats={stats} />,
+      "zh-CN",
+    );
+    expect(html).toContain(zhCNMessages.dashboardSkillRunStats.heading);
+    expect(html).toContain(
+      "过去 30 天在 SourceWeft 沙箱中运行了 1,240 次 · 成功率 92% · 常见问题：缺少 pptxgenjs",
+    );
+    expect(html).toContain("rounded-xl");
   });
 });
 
 describe("PublicSkillRunStats", () => {
   test("renders the panel when the stats are available", async () => {
     api.getPublicSkillRunStats.mockResolvedValue(stats);
-    const html = renderToStaticMarkup(
+    const html = renderWithIntl(
       await PublicSkillRunStats({
         slug: "deck-builder",
         signedIn: false,
@@ -116,13 +101,5 @@ describe("PublicSkillRunStats", () => {
         locale: "zh-CN",
       }),
     ).toBeNull();
-  });
-
-  test("the panel alone", () => {
-    const html = renderToStaticMarkup(
-      <PublicSkillRunStatsPanel locale="zh-CN" stats={stats} />,
-    );
-    expect(html).toContain("沙箱运行");
-    expect(html).toContain("rounded-xl");
   });
 });

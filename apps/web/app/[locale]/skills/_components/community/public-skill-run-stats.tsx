@@ -7,12 +7,7 @@ import type { PublicSkillSlotProps } from "./slot-props";
  * once the skill clears the API's floor of runs and workspaces. Nothing below
  * it, for a skill that is not public, or when the request fails.
  */
-export async function PublicSkillRunStats({
-  slug,
-  locale,
-}: PublicSkillSlotProps) {
+export async function PublicSkillRunStats({ slug }: PublicSkillSlotProps) {
   const stats = await getPublicSkillRunStats(slug);
-  return stats ? (
-    <PublicSkillRunStatsPanel locale={locale} stats={stats} />
-  ) : null;
+  return stats ? <PublicSkillRunStatsPanel stats={stats} /> : null;
 }

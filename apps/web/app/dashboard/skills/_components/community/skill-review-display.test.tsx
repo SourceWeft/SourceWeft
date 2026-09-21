@@ -8,6 +8,7 @@ import { SkillReviewStarPicker, SkillReviewStars } from "./skill-review-stars";
 import { SkillReviewSummary } from "./skill-review-summary";
 import { NextIntlClientProvider } from "next-intl";
 import messages from "../../../../../messages/en.json";
+import zhCNMessages from "../../../../../messages/zh-CN.json";
 
 const intlMessages = messages as ComponentProps<
   typeof NextIntlClientProvider
@@ -123,6 +124,28 @@ test("a review shows who, stars, text, version, when, and the author's reply", (
       ?.textContent,
   ).toContain("Docs are coming.");
   expect(container.textContent).not.toContain("Hidden");
+});
+
+test("in a zh-CN page the dates are relative in Chinese, never English", () => {
+  act(() =>
+    root.render(
+      <NextIntlClientProvider
+        locale="zh-CN"
+        messages={
+          zhCNMessages as ComponentProps<
+            typeof NextIntlClientProvider
+          >["messages"]
+        }
+      >
+        <SkillReviewItem review={review} now={now} />
+      </NextIntlClientProvider>,
+    ),
+  );
+  const times = [...container.querySelectorAll("time")].map(
+    (node) => node.textContent,
+  );
+  expect(times).toEqual(["前天", "昨天"]);
+  expect(container.textContent).not.toContain("ago");
 });
 
 test("a hidden review is marked; controls and a replacement reply slot in", () => {

@@ -24,6 +24,7 @@ import {
 import { SkillReviewReplyEditor } from "./skill-review-editor";
 import { SkillReviewAuthorReply, SkillReviewItem } from "./skill-review-item";
 import { SkillReviewOwn } from "./skill-review-own";
+import { SkillReviewReportLink } from "./skill-review-report-link";
 import { SkillReviewSummary } from "./skill-review-summary";
 import type { DashboardSkillSlotProps } from "./slot-props";
 
@@ -68,6 +69,8 @@ export function SkillReviews({ slug }: DashboardSkillSlotProps) {
   const [replyingTo, setReplyingTo] = React.useState<string | null>(null);
   // Guards against an older response landing after a newer request.
   const requestRef = React.useRef(0);
+  const sectionRef = React.useRef<HTMLElement | null>(null);
+  const scrolledToHashRef = React.useRef(false);
 
   const load = React.useCallback(
     async (nextSort: SkillReviewSort) => {
@@ -106,6 +109,18 @@ export function SkillReviews({ slug }: DashboardSkillSlotProps) {
       active = false;
     };
   }, []);
+
+  // `#reviews` (the public page's "Write a review"): the list loads after
+  // the page, too late for the browser's own anchor scroll — as `#versions`
+  // on the page does, scroll once it is there.
+  const ready = state.status === "ready";
+  React.useEffect(() => {
+    if (!ready || scrolledToHashRef.current) return;
+    scrolledToHashRef.current = true;
+    if (window.location.hash === "#reviews") {
+      sectionRef.current?.scrollIntoView({ block: "start" });
+    }
+  }, [ready]);
 
   /** Swaps one review in the shown list, leaving the rest as they are. */
   const replaceReview = (review: SkillReview) =>
@@ -242,6 +257,8 @@ export function SkillReviews({ slug }: DashboardSkillSlotProps) {
 
   return (
     <section
+      id="reviews"
+      ref={sectionRef}
       data-testid="skill-reviews"
       aria-labelledby="skill-reviews-heading"
       className="mt-4 rounded-2xl border border-border bg-background p-4 shadow-xs"
@@ -310,6 +327,7 @@ export function SkillReviews({ slug }: DashboardSkillSlotProps) {
                 const acting = busy === review.id;
                 const canReply =
                   state.page.viewer.canReply && review.status === "visible";
+                const isOwn = review.id === state.page.viewer.ownReview?.id;
                 return (
                   <SkillReviewItem
                     key={review.id}
@@ -359,6 +377,13 @@ export function SkillReviews({ slug }: DashboardSkillSlotProps) {
                             {review.status === "hidden" ? t("show") : t("hide")}
                           </Button>
                         ) : null}
+                        {isOwn ? null : (
+                          <SkillReviewReportLink
+                            slug={slug}
+                            reviewId={review.id}
+                            signedIn
+                          />
+                        )}
                       </>
                     }
                     reply={

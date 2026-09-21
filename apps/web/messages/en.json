@@ -3384,6 +3384,19 @@
       "scope:other-skill-file": "Reads another skill's files",
       "tool:sensitive": "Requests code-execution tools",
       "binary:executable": "Ships an executable binary"
+    },
+    "community": {
+      "overview": {
+        "cardSummaryTitle": "AI-generated summary"
+      },
+      "reviews": {
+        "signInToReview": "Sign in to review",
+        "showMore": "Show more reviews",
+        "loadMoreFailed": "More reviews could not be loaded. Try again."
+      },
+      "report": {
+        "description": "Tell the SourceWeft market admins about a problem with this skill: a copied work, unsafe behavior, spam, or something broken."
+      }
     }
   },
   "dashboardSkillsClaim": {
@@ -3976,6 +3989,10 @@
       "cancel": "Cancel",
       "resolveError": "The report could not be resolved.",
       "resolved": "{count, plural, =0 {Report resolved.} one {Report resolved.} other {Resolved # reports.}}"
+    },
+    "review": {
+      "title": "Report this review",
+      "description": "Tell us what is wrong with this review. A moderator looks at every report."
     }
   },
   "dashboardSkillsMarketAdmin": {

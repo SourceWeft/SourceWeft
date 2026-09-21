@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, test, vi } from "vitest";
 import { NextIntlClientProvider } from "next-intl";
 import messages from "../../../../../messages/en.json";
+import zhCNMessages from "../../../../../messages/zh-CN.json";
 
 const api = vi.hoisted(() => ({ post: vi.fn() }));
 vi.mock("@sourceweft/sdk", async (importOriginal) => {
@@ -18,18 +19,19 @@ vi.mock("@sourceweft/sdk", async (importOriginal) => {
 });
 
 import { PublicSkillReport } from "./public-skill-report";
-import { publicReportCopy } from "./public-report-copy";
 
 (
   globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
 
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
-// The shared form may read its text from next-intl; the page provides it.
-const withIntl = (node: ReactNode) => (
-  <NextIntlClientProvider locale="en" messages={intlMessages}>
+type IntlMessages = ComponentProps<typeof NextIntlClientProvider>["messages"];
+const catalogs: Record<string, IntlMessages> = {
+  en: messages as IntlMessages,
+  "zh-CN": zhCNMessages as IntlMessages,
+};
+// The page provides next-intl, in the visitor's language.
+const withIntl = (node: ReactNode, locale = "en") => (
+  <NextIntlClientProvider locale={locale} messages={catalogs[locale]}>
     {node}
   </NextIntlClientProvider>
 );
@@ -43,11 +45,11 @@ afterEach(() => {
   vi.resetAllMocks();
 });
 
-async function render(node: ReactNode) {
+async function render(node: ReactNode, locale = "en") {
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
-  await act(async () => root.render(withIntl(node)));
+  await act(async () => root.render(withIntl(node, locale)));
 }
 
 async function open() {
@@ -80,14 +82,28 @@ const submitButton = () =>
   document.body.querySelector<HTMLButtonElement>('button[type="submit"]')!;
 
 test("the button is labeled in the page's language and opens the form", async () => {
-  await render(<PublicSkillReport slug="gh-a-b-pdf" signedIn locale="zh-CN" />);
-  expect(container.textContent).toContain(publicReportCopy("zh-CN").button);
+  await render(
+    <PublicSkillReport slug="gh-a-b-pdf" signedIn locale="zh-CN" />,
+    "zh-CN",
+  );
+  expect(container.textContent).toContain(
+    zhCNMessages.dashboardSkillReports.button.title,
+  );
   expect(field("reason")).toBeNull();
   await open();
   expect(document.body.textContent).toContain(
-    publicReportCopy("zh-CN").description,
+    zhCNMessages.publicSkills.community.report.description,
   );
   expect(field("reason")).not.toBeNull();
+});
+
+test("in English: the button, and the dialog naming SourceWeft's admins", async () => {
+  await render(<PublicSkillReport slug="gh-a-b-pdf" signedIn locale="en" />);
+  expect(container.textContent).toContain("Report this skill");
+  await open();
+  expect(document.body.textContent).toContain(
+    "Tell the SourceWeft market admins about a problem with this skill",
+  );
 });
 
 test("signed out, nothing is sent until an email is given", async () => {
@@ -130,12 +146,4 @@ test("signed in, the email is optional", async () => {
   expect(api.post).toHaveBeenCalledWith("/v1/skills/gh-a-b-pdf/reports", {
     reason: "spam",
   });
-});
-
-test("every locale has its text, and an unknown one falls back to English", () => {
-  for (const locale of ["en", "zh-CN", "zh-TW"] as const) {
-    const copy = publicReportCopy(locale);
-    expect(copy.button && copy.title && copy.description).toBeTruthy();
-  }
-  expect(publicReportCopy("xx" as never)).toEqual(publicReportCopy("en"));
 });
