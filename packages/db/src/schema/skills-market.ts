@@ -354,6 +354,11 @@ export const skillRepoClaims = pgTable(
     verifiedAt: timestamp("verified_at", { withTimezone: true, mode: "date" }),
     revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "date" }),
     revokedBy: text("revoked_by"),
+    // The author took the repository off SourceWeft. While this verified claim
+    // stands, nothing from the repository is imported again; what workspaces
+    // already installed keeps working.
+    removedAt: timestamp("removed_at", { withTimezone: true, mode: "date" }),
+    removedBy: text("removed_by"),
   },
   (table) => [
     check(

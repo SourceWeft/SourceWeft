@@ -1,7 +1,11 @@
 import type {
   OwnerSkillListing,
+  SkillClaimRepository,
+  SkillMarketClaim,
   SkillMarketStanding,
 } from "@sourceweft/contracts";
+
+import { skillsClaimCopy } from "./skills-claim-copy";
 
 /** The categories route accepts 1–5 slugs. */
 export const SKILL_CATEGORY_LIMIT = 5;
@@ -72,4 +76,63 @@ export function canSaveSkillCategories(
   if (saved.length !== selected.length) return true;
   const savedSet = new Set(saved);
   return selected.some((slug) => !savedSet.has(slug));
+}
+
+/**
+ * The author's claim on a skill's repository, from the admin's standing. The
+ * route adds `claim`; an older backend without it reads as unclaimed.
+ */
+export function standingClaim(
+  standing: SkillMarketStanding & { claim?: SkillMarketClaim | null },
+): SkillMarketClaim | null {
+  return standing.claim ?? null;
+}
+
+export type SkillClaimPanelView =
+  | { kind: "hidden" }
+  | { kind: "claimedByYou"; claimId: string | null; repo: string }
+  | { kind: "claimedByAuthor"; repo: string }
+  | { kind: "unclaimed"; repo: string };
+
+/**
+ * What the panel on a community skill's page offers. Hidden when the skill has
+ * no known repository. Only the verified claimant gets the removal action;
+ * their pending claim still reads as unclaimed, with a link back to finish it.
+ */
+export function claimPanelView(
+  repository: SkillClaimRepository | null,
+): SkillClaimPanelView {
+  if (!repository) return { kind: "hidden" };
+  if (repository.claimedBy === "you") {
+    return {
+      kind: "claimedByYou",
+      claimId:
+        repository.viewerClaim?.status === "verified"
+          ? repository.viewerClaim.id
+          : null,
+      repo: repository.repo,
+    };
+  }
+  if (repository.claimedBy === "someone") {
+    return { kind: "claimedByAuthor", repo: repository.repo };
+  }
+  return { kind: "unclaimed", repo: repository.repo };
+}
+
+/** Where "Claim this repository" goes. */
+export function claimPageHref(repo: string) {
+  return `/dashboard/skills/claim?repo=${encodeURIComponent(repo)}`;
+}
+
+/** The author-facing message for a failed claim request. */
+export function claimErrorMessage(
+  error: unknown,
+  fallback: string = skillsClaimCopy.errors.fallback,
+): string {
+  const code = (error as { code?: unknown } | null)?.code;
+  const messages: Record<string, string> = skillsClaimCopy.errors;
+  if (typeof code === "string" && code !== "fallback" && messages[code]) {
+    return messages[code];
+  }
+  return fallback;
 }

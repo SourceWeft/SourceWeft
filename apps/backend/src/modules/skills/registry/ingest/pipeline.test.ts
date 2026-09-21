@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   getExisting: vi.fn(),
   upsert: vi.fn(),
   grant: vi.fn(),
+  removed: vi.fn(async () => false),
 }));
 
 vi.mock("./repository", () => ({
@@ -52,6 +53,7 @@ vi.mock("../analyze", () => ({ analyzeRegistrySkill: mocks.analyze }));
 vi.mock("../repository", () => ({
   getRegistrySkillForSubmission: mocks.getExisting,
   upsertRegistrySkillIndex: mocks.upsert,
+  isSkillRepositoryRemoved: mocks.removed,
 }));
 vi.mock("../../repository", () => ({ grantSkillAccess: mocks.grant }));
 vi.mock("../../../../shared/logger", () => ({
@@ -151,6 +153,7 @@ beforeEach(() => {
   state.superseded = false;
   seedRow();
   mocks.getExisting.mockResolvedValue(null);
+  mocks.removed.mockResolvedValue(false);
   mocks.upsert.mockImplementation(async (input) => ({
     skillId: `skill_${input.slug}`,
     status: input.outcome,
@@ -537,4 +540,17 @@ test("without an install request on-complete does nothing", async () => {
   const injected = deps();
   await run({ deps: injected });
   assert.equal(vi.mocked(injected.installSkill).mock.calls.length, 0);
+});
+
+test("a repository its author removed from SourceWeft is not imported again", async () => {
+  skillsRead(["writer"]);
+  mocks.removed.mockResolvedValue(true);
+  await assert.rejects(run());
+  assert.equal(state.row!.status, "failed");
+  assert.equal(
+    (state.row!.error as { code: string }).code,
+    "REGISTRY_SUBMISSION_REPO_REMOVED",
+  );
+  // Refused before anything was written.
+  assert.equal(mocks.upsert.mock.calls.length, 0);
 });

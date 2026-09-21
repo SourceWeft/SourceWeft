@@ -2,11 +2,16 @@ import { describe, expect, it } from "vitest";
 
 import {
   canSaveSkillCategories,
+  claimErrorMessage,
+  claimPageHref,
+  claimPanelView,
   SKILL_CATEGORY_LIMIT,
   skillStandingKind,
+  standingClaim,
   toggleSkillCategory,
   ownerListingView,
 } from "./skill-market-standing";
+import { skillsClaimCopy } from "./skills-claim-copy";
 
 describe("skillStandingKind", () => {
   it("tells listed, withdrawn and simply-unlisted apart", () => {
@@ -109,5 +114,92 @@ describe("ownerListingView", () => {
       locked: true,
       state: "heldByAdmin",
     });
+  });
+});
+
+describe("author claims", () => {
+  const repository = {
+    repo: "ada/skills",
+    skillCount: 2,
+    ownerType: "User" as const,
+    claimedBy: null,
+    viewerClaim: null,
+    accountMethod: { available: true, reason: null },
+  };
+  const verified = {
+    id: "claim-1",
+    repo: "ada/skills",
+    method: "github_account" as const,
+    status: "verified" as const,
+    createdAt: "2026-09-21T00:00:00.000Z",
+    verifiedAt: "2026-09-21T00:00:00.000Z",
+    expiresAt: null,
+  };
+
+  it("offers the claim link until someone has claimed the repository", () => {
+    expect(claimPanelView(null)).toEqual({ kind: "hidden" });
+    expect(claimPanelView(repository)).toEqual({
+      kind: "unclaimed",
+      repo: "ada/skills",
+    });
+    // A pending claim of the viewer's is not a claim yet.
+    expect(
+      claimPanelView({
+        ...repository,
+        viewerClaim: { ...verified, status: "pending", verifiedAt: null },
+      }),
+    ).toEqual({ kind: "unclaimed", repo: "ada/skills" });
+    expect(
+      claimPanelView({ ...repository, claimedBy: "someone" }),
+    ).toEqual({ kind: "claimedByAuthor", repo: "ada/skills" });
+  });
+
+  it("gives removal only to the verified claimant", () => {
+    expect(
+      claimPanelView({
+        ...repository,
+        claimedBy: "you",
+        viewerClaim: verified,
+      }),
+    ).toEqual({ kind: "claimedByYou", claimId: "claim-1", repo: "ada/skills" });
+  });
+
+  it("links to the claim page with the repository", () => {
+    expect(claimPageHref("ada/skills")).toBe(
+      "/dashboard/skills/claim?repo=ada%2Fskills",
+    );
+  });
+
+  it("reads the claim off the standing, absent on an older backend", () => {
+    const base = {
+      skillId: "s",
+      slug: "s",
+      visibility: "public" as const,
+      listingHold: false,
+      listingHoldBy: null,
+      verified: false,
+      categorySlugs: [],
+      installCount: 0,
+      listedAt: null,
+    };
+    expect(standingClaim(base)).toBeNull();
+    const claim = {
+      claimId: "claim-1",
+      userId: "u",
+      method: "verification_file" as const,
+      verifiedAt: null,
+    };
+    expect(standingClaim({ ...base, claim })).toEqual(claim);
+  });
+
+  it("explains a refusal by its code, and falls back otherwise", () => {
+    expect(claimErrorMessage({ code: "SKILL_REPO_ALREADY_CLAIMED" })).toBe(
+      skillsClaimCopy.errors.SKILL_REPO_ALREADY_CLAIMED,
+    );
+    expect(claimErrorMessage({ code: "SOMETHING_ELSE" })).toBe(
+      skillsClaimCopy.errors.fallback,
+    );
+    expect(claimErrorMessage(new Error("boom"), "Custom")).toBe("Custom");
+    expect(claimErrorMessage({ code: "fallback" }, "Custom")).toBe("Custom");
   });
 });

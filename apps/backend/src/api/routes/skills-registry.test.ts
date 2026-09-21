@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   releaseSkillListingHold: vi.fn(),
   setSkillVerified: vi.fn(),
   setSkillCategories: vi.fn(),
+  revokeSkillClaim: vi.fn(),
 }));
 
 vi.mock("../middleware/auth-session", () => ({
@@ -36,6 +37,9 @@ vi.mock("../../modules/skills/market/listing", () => ({
   releaseSkillListingHold: mocks.releaseSkillListingHold,
   setSkillVerified: mocks.setSkillVerified,
   setSkillCategories: mocks.setSkillCategories,
+}));
+vi.mock("../../modules/skills/market/claims", () => ({
+  revokeSkillClaim: mocks.revokeSkillClaim,
 }));
 vi.mock("../../modules/skills/market/standing", () => ({
   getSkillMarketStanding: async () => mocks.standing,
@@ -199,4 +203,37 @@ test("verified and categories validate their body and answer the standing", asyn
     const response = await app.request(`${base}${path}`, json("PUT", body));
     assert.equal(response.status, 400, JSON.stringify(body));
   }
+});
+
+test("revoking a claim is a market admin's act, recorded with who did it", async () => {
+  const path = "/v1/skills/registry/admin/claims/claim_1/revoke";
+  mocks.admin = false;
+  assert.equal(
+    (await createTestApp().request(path, { method: "POST" })).status,
+    403,
+  );
+  assert.equal(mocks.revokeSkillClaim.mock.calls.length, 0);
+
+  mocks.admin = true;
+  mocks.revokeSkillClaim.mockResolvedValue({
+    claimId: "claim_1",
+    repo: "ada/skills",
+    status: "revoked",
+  });
+  const revoked = await createTestApp().request(path, { method: "POST" });
+  assert.equal(revoked.status, 200);
+  assert.deepEqual(await revoked.json(), {
+    claimId: "claim_1",
+    repo: "ada/skills",
+    status: "revoked",
+  });
+  assert.deepEqual(mocks.revokeSkillClaim.mock.calls[0], [
+    { claimId: "claim_1", actorUserId: "admin_1" },
+  ]);
+
+  mocks.revokeSkillClaim.mockResolvedValue(null);
+  assert.equal(
+    (await createTestApp().request(path, { method: "POST" })).status,
+    404,
+  );
 });

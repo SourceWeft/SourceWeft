@@ -5,6 +5,7 @@ import { Loader2, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 import type {
   SkillCatalogCategory,
+  SkillMarketClaim,
   SkillMarketStanding,
 } from "@sourceweft/contracts";
 import {
@@ -28,16 +29,20 @@ import {
   setSkillCategories,
   setSkillVerified,
 } from "../../../../lib/skill-market-admin";
+import { revokeSkillClaim } from "../../../../lib/skill-claims";
 import { formatInstallCount } from "./skills-market-browse";
 import {
   canSaveSkillCategories,
   SKILL_CATEGORY_LIMIT,
   skillStandingKind,
+  standingClaim,
   toggleSkillCategory,
 } from "./skill-market-standing";
+import { skillsClaimCopy } from "./skills-claim-copy";
 import { skillsMarketCopy } from "./skills-market-copy";
 
 const copy = skillsMarketCopy.adminPanel;
+const claimCopy = skillsClaimCopy.admin;
 
 function formatDate(iso: string) {
   const date = new Date(iso);
@@ -70,16 +75,17 @@ export function SkillMarketAdminPanel({
   onChanged?: () => void;
   skillId: string;
 }) {
-  const [standing, setStanding] = React.useState<SkillMarketStanding | null>(
-    null,
-  );
+  // The route also answers with the author's claim on the repository.
+  const [standing, setStanding] = React.useState<
+    (SkillMarketStanding & { claim?: SkillMarketClaim | null }) | null
+  >(null);
   const [selectedSlugs, setSelectedSlugs] = React.useState<string[]>([]);
   const [busy, setBusy] = React.useState(false);
   // The action outlives the dialog's open state so its wording does not
   // change while the dialog animates out.
-  const [confirmAction, setConfirmAction] = React.useState<"list" | "withdraw">(
-    "list",
-  );
+  const [confirmAction, setConfirmAction] = React.useState<
+    "list" | "withdraw" | "revokeClaim"
+  >("list");
   const [confirmOpen, setConfirmOpen] = React.useState(false);
   const generationRef = React.useRef(0);
 
@@ -131,6 +137,7 @@ export function SkillMarketAdminPanel({
   if (!standing) return null;
 
   const kind = skillStandingKind(standing);
+  const claim = standingClaim(standing);
   const installs = formatInstallCount(standing.installCount) ?? "0";
   const categoriesDirty = canSaveSkillCategories(
     standing.categorySlugs,
@@ -189,6 +196,31 @@ export function SkillMarketAdminPanel({
         <div>
           <dt className="text-muted-foreground">{copy.installs}</dt>
           <dd className="mt-1 font-medium text-foreground">{installs}</dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">{claimCopy.claim}</dt>
+          <dd className="mt-1 font-medium break-all text-foreground">
+            {claim
+              ? `${claimCopy.claimedBy(claim.userId)} ${claimCopy.method[claim.method]}${
+                  claim.verifiedAt ? ` · ${formatDate(claim.verifiedAt)}` : ""
+                }`
+              : claimCopy.unclaimed}
+          </dd>
+          {claim ? (
+            <Button
+              className="mt-2 w-full"
+              disabled={busy}
+              onClick={() => {
+                setConfirmAction("revokeClaim");
+                setConfirmOpen(true);
+              }}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              {claimCopy.revoke}
+            </Button>
+          ) : null}
         </div>
       </dl>
 
@@ -302,14 +334,18 @@ export function SkillMarketAdminPanel({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {confirmAction === "withdraw"
-                ? copy.confirmWithdrawTitle
-                : copy.confirmListTitle}
+              {confirmAction === "revokeClaim"
+                ? claimCopy.confirmRevokeTitle
+                : confirmAction === "withdraw"
+                  ? copy.confirmWithdrawTitle
+                  : copy.confirmListTitle}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {confirmAction === "withdraw"
-                ? copy.confirmWithdrawBody
-                : copy.confirmListBody}
+              {confirmAction === "revokeClaim"
+                ? claimCopy.confirmRevokeBody
+                : confirmAction === "withdraw"
+                  ? copy.confirmWithdrawBody
+                  : copy.confirmListBody}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -317,14 +353,26 @@ export function SkillMarketAdminPanel({
             <AlertDialogAction
               onClick={() => {
                 setConfirmOpen(false);
-                if (confirmAction === "withdraw") {
+                if (confirmAction === "revokeClaim") {
+                  const claimId = claim?.claimId;
+                  if (claimId) {
+                    void run(
+                      () => revokeSkillClaim(claimId),
+                      claimCopy.revokedToast,
+                    );
+                  }
+                } else if (confirmAction === "withdraw") {
                   void run(() => delistSkill(skillId), copy.withdrawnToast);
                 } else {
                   void run(() => listSkillPublicly(skillId), copy.listedToast);
                 }
               }}
             >
-              {confirmAction === "withdraw" ? copy.withdraw : copy.listPublicly}
+              {confirmAction === "revokeClaim"
+                ? claimCopy.revoke
+                : confirmAction === "withdraw"
+                  ? copy.withdraw
+                  : copy.listPublicly}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

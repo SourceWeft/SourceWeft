@@ -7,6 +7,7 @@ import { logger } from "../../shared/logger";
 import { getRegistryVersionDetail } from "../../modules/skills/registry/versions";
 import type { Hono } from "hono";
 import { isMarketAdmin } from "../../modules/market/admin";
+import { findUserIdentitiesByIds } from "../../modules/workspace/store";
 import {
   listRegistryReviewQueue,
   setRegistrySkillVersionStatus,
@@ -20,6 +21,7 @@ import {
 } from "../../modules/skills/market/listing";
 import { listSkillListingQueue } from "../../modules/skills/market/auto-list";
 import { getSkillMarketStanding } from "../../modules/skills/market/standing";
+import { revokeSkillClaim } from "../../modules/skills/market/claims";
 import { getSessionUserId, requireSession } from "../middleware/auth-session";
 import { ApiError, ApiResponse } from "../response/api-response";
 
@@ -31,6 +33,34 @@ import { ApiError, ApiResponse } from "../response/api-response";
  * submission is a `draft` version an admin publishes or deprecates (no hard
  * delete).
  */
+/**
+ * The queues record who submitted a skill by user id; an admin deciding on it
+ * wants to see a person. Names come from the auth user table in one query; a
+ * user who has no name (or no longer exists) is shown by id.
+ */
+async function withSubmitterNames<T extends { submittedBy: string | null }>(
+  items: T[],
+): Promise<Array<T & { submittedByName: string | null }>> {
+  const ids = [
+    ...new Set(
+      items
+        .map((item) => item.submittedBy)
+        .filter((id): id is string => !!id && !id.startsWith("system")),
+    ),
+  ];
+  const names = new Map(
+    (ids.length > 0 ? await findUserIdentitiesByIds(ids) : []).map(
+      (identity) => [identity.userId, identity.name],
+    ),
+  );
+  return items.map((item) => ({
+    ...item,
+    submittedByName: item.submittedBy
+      ? (names.get(item.submittedBy) ?? null)
+      : null,
+  }));
+}
+
 export function registerSkillRegistryAdminRoutes(app: Hono) {
   async function requireSkillRegistryAdmin(
     c: Parameters<typeof requireSession>[0],
@@ -49,12 +79,16 @@ export function registerSkillRegistryAdminRoutes(app: Hono) {
   // going public is this admin's call (`market/auto-list.ts`).
   app.get("/v1/skills/registry/admin/listing-queue", async (c) => {
     await requireSkillRegistryAdmin(c);
-    return ApiResponse.success(c, { items: await listSkillListingQueue() });
+    return ApiResponse.success(c, {
+      items: await withSubmitterNames(await listSkillListingQueue()),
+    });
   });
 
   app.get("/v1/skills/registry/admin/submissions", async (c) => {
     await requireSkillRegistryAdmin(c);
-    return ApiResponse.success(c, { items: await listRegistryReviewQueue() });
+    return ApiResponse.success(c, {
+      items: await withSubmitterNames(await listRegistryReviewQueue()),
+    });
   });
 
   app.post(
@@ -216,6 +250,20 @@ export function registerSkillRegistryAdminRoutes(app: Hono) {
       ...input,
     });
     return ApiResponse.success(c, await requireStanding(input.skillId));
+  });
+
+  // An author's claim on a repository, undone. The claim's skills go back to
+  // their importers and lose the "claimed" mark (`market/claims.ts`).
+  app.post("/v1/skills/registry/admin/claims/:claimId/revoke", async (c) => {
+    const session = await requireSkillRegistryAdmin(c);
+    const input = {
+      claimId: c.req.param("claimId"),
+      actorUserId: getSessionUserId(session),
+    };
+    const result = await revokeSkillClaim(input);
+    if (!result) throw ApiError.notFound("No such claim");
+    logger.info("Skill repository claim revoked", { ...input, ...result });
+    return ApiResponse.success(c, result);
   });
 
   // The older form of list/delist, kept for its callers. It goes through the

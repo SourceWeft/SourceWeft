@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { parseGithubStoragePointer } from "../storage/source-pointer";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import {
   db,
   skillDefinitions,
@@ -614,4 +614,29 @@ export async function upsertRegistrySkillIndex(
       diagnostics: input.manifestJson.registry?.ingestion?.diagnostics ?? [],
     };
   });
+}
+
+/**
+ * Whether the author of this GitHub repository removed it from SourceWeft: a
+ * verified claim on it carries `removed_at`. Such a repository is not
+ * imported again — a new skill in it would otherwise be indexed and, once
+ * clean, listed as if the author had never asked.
+ */
+export async function isSkillRepositoryRemoved(repo: {
+  owner: string;
+  name: string;
+}): Promise<boolean> {
+  const [row] = await db
+    .select({ id: skillRepoClaims.id })
+    .from(skillRepoClaims)
+    .where(
+      and(
+        eq(skillRepoClaims.repoOwner, repo.owner.toLowerCase()),
+        eq(skillRepoClaims.repoName, repo.name.toLowerCase()),
+        eq(skillRepoClaims.status, "verified"),
+        isNotNull(skillRepoClaims.removedAt),
+      ),
+    )
+    .limit(1);
+  return row !== undefined;
 }

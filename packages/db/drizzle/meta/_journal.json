@@ -330,6 +330,13 @@
       "when": 1790001404485,
       "tag": "0046_skill_market_phase3",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1790003214098,
+      "tag": "0047_skill_repo_removal",
+      "breakpoints": true
     }
   ]
 }

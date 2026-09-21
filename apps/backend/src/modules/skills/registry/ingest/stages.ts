@@ -9,6 +9,7 @@ import {
   type PinnedGitHubSource,
 } from "../../../market/parser/github-zip";
 import { RegistrySubmissionError } from "../errors";
+import { isSkillRepositoryRemoved } from "../repository";
 import {
   readRegistrySkillsFromArchive,
   requireCommittedAt,
@@ -153,6 +154,19 @@ const triageWriteStage: IngestStage = {
   name: "triage-write",
   async run(ctx) {
     const read = need(ctx.read, "read");
+    // Its author took it off SourceWeft: nothing from it is indexed again,
+    // whoever submits it. Refused before anything is stored.
+    if (
+      await isSkillRepositoryRemoved({
+        owner: read.source.owner,
+        name: read.source.repo,
+      })
+    ) {
+      throw new RegistrySubmissionError(
+        "REGISTRY_SUBMISSION_REPO_REMOVED",
+        `${read.source.owner}/${read.source.repo} was removed from SourceWeft by its author`,
+      );
+    }
     const results: SkillSubmissionSkillResult[] = [];
     ctx.results = results;
     for (const skill of need(ctx.analyzed, "analyzed")) {

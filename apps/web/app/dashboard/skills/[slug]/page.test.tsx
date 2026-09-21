@@ -39,6 +39,9 @@ vi.mock("../_components/registry-versions", () => ({
 vi.mock("../_components/skill-market-admin-panel", () => ({
   SkillMarketAdminPanel: () => null,
 }));
+vi.mock("../_components/skill-claim-panel", () => ({
+  SkillClaimPanel: () => null,
+}));
 vi.mock("../_components/skill-introduction", () => ({
   SkillIntroduction: () => null,
 }));

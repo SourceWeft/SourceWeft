@@ -2,6 +2,7 @@
 
 import { RegistryVersions } from "../_components/registry-versions";
 import { SkillAvatar } from "../_components/skill-avatar";
+import { SkillClaimPanel } from "../_components/skill-claim-panel";
 
 import { SkillContentRestricted } from "../_components/skill-content-restricted";
 import {
@@ -120,6 +121,9 @@ export default function SkillDetailPage() {
     [],
   );
   const versionsRef = React.useRef<HTMLDivElement | null>(null);
+  // Bumped when the author removes the repository from the market, so the
+  // owner switch below reads its (now held) listing again.
+  const [claimRevision, setClaimRevision] = React.useState(0);
 
   const resolveWorkspace = React.useCallback(async () => {
     if (dashboardState.workspaceId) {
@@ -689,15 +693,28 @@ export default function SkillDetailPage() {
               {detail?.skill.sourceType === "registry_github" && workspace ? (
                 <SkillOwnerListing
                   catalogId={detail.skill.catalogId}
-                  key={`owner-${detail.skill.skillId}`}
+                  key={`owner-${detail.skill.skillId}-${claimRevision}`}
                   onChanged={() => void refreshDetail()}
+                  workspaceId={workspace.id}
+                />
+              ) : null}
+              {detail?.skill.sourceType === "registry_github" && workspace ? (
+                <SkillClaimPanel
+                  key={`claim-${detail.skill.skillId}`}
+                  onChanged={() => {
+                    setClaimRevision((revision) => revision + 1);
+                    void refreshDetail();
+                  }}
+                  skillId={detail.skill.skillId}
                   workspaceId={workspace.id}
                 />
               ) : null}
               {detail?.skill.sourceType === "registry_github" ? (
                 <SkillMarketAdminPanel
                   categories={categories}
-                  key={detail.skill.skillId}
+                  // Remounted after a claim action too, so an admin sees the
+                  // standing the removal just produced without a reload.
+                  key={`admin-${detail.skill.skillId}-${claimRevision}`}
                   onChanged={() => void refreshDetail()}
                   skillId={detail.skill.skillId}
                 />
