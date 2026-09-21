@@ -86,8 +86,7 @@ export const skillsMarketCopy = {
     action: "Update to the newest version",
     // What the newer version changed from the one before it.
     changesLead: "What changed:",
-    changedFiles: (count: number) =>
-      `${count} file${count === 1 ? "" : "s"}`,
+    changedFiles: (count: number) => `${count} file${count === 1 ? "" : "s"}`,
     noFileChanges: "no file changes",
     newScripts: (count: number) =>
       `${count} new script${count === 1 ? "" : "s"}`,
@@ -135,6 +134,9 @@ export const skillsMarketCopy = {
     pageEyebrow: "Market · Admin",
     tabMcp: "MCP",
     tabSkills: "Skills",
+    tabAll: "All skills",
+    tabReports: "Reports",
+    tabSettings: "Settings",
     title: "Review skill submissions",
     intro:
       "Skills that pass the automated scan are published automatically. This queue contains flagged versions that need manual review.",
@@ -219,7 +221,8 @@ export const skillsMarketCopy = {
     newTitle: "New collection",
     slugLabel: "Slug",
     slugPlaceholder: "office-work",
-    slugHint: "Lowercase letters, digits and dashes. It is the page address and cannot change.",
+    slugHint:
+      "Lowercase letters, digits and dashes. It is the page address and cannot change.",
     titleLabel: "Title",
     summaryLabel: "Summary",
     positionLabel: "Position",
@@ -234,8 +237,7 @@ export const skillsMarketCopy = {
     view: "View",
     saved: "Saved",
     failed: "The change was not saved.",
-    skillCount: (count: number) =>
-      `${count} skill${count === 1 ? "" : "s"}`,
+    skillCount: (count: number) => `${count} skill${count === 1 ? "" : "s"}`,
   },
   flagLabels: {
     "egress:pipe-to-shell": "Fetch and run: curl | sh",

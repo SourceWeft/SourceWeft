@@ -1038,6 +1038,9 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       expect(await definitionOf()).toMatchObject({
         featured: true,
         featuredSetBy: "sync",
+        categoriesSetBy: null,
+        ratingCount: 0,
+        ratingAvg: null,
       });
 
       // A newer commit where this skill did not change: no second version,
@@ -1060,6 +1063,9 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       expect(await definitionOf()).toMatchObject({
         featured: false,
         featuredSetBy: "admin",
+        categoriesSetBy: null,
+        ratingCount: 0,
+        ratingAvg: null,
       });
 
       // A person's import cannot pass `featured` at all: the public request is
