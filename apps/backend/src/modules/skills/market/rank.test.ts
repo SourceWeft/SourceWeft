@@ -4,6 +4,7 @@ import {
   type SkillRankSignals,
   compareRecommendedSkills,
   skillRankScore,
+  skillRatingRankTerm,
   skillTrustTier,
 } from "./rank";
 
@@ -138,5 +139,63 @@ test("within a trust tier stars lift a skill, but installs weigh more", () => {
       skill("used", { installCount: 9 }),
     ]),
     ["used", "starred", "plain"],
+  );
+});
+
+test("the rating counts from five visible reviews on, smoothed toward 3.5", () => {
+  // Too few reviews, or none: nothing, whatever the average.
+  assert.equal(skillRatingRankTerm({}), 0);
+  assert.equal(skillRatingRankTerm({ ratingCount: 4, ratingAvg: 5 }), 0);
+  assert.equal(skillRatingRankTerm({ ratingCount: 9, ratingAvg: null }), 0);
+  // Five fives: (5*3.5 + 5*5) / 10 = 4.25, 60 * 0.75 = 45.
+  assert.equal(skillRatingRankTerm({ ratingCount: 5, ratingAvg: 5 }), 45);
+  // Five ones: (17.5 + 5) / 10 = 2.25, 60 * -1.25 = -75.
+  assert.equal(skillRatingRankTerm({ ratingCount: 5, ratingAvg: 1 }), -75);
+  // The prior itself moves nothing.
+  assert.equal(skillRatingRankTerm({ ratingCount: 40, ratingAvg: 3.5 }), 0);
+  // (17.5 + 20 * 4.2) / 25 = 4.06, 60 * 0.56 = 33.6.
+  assert.equal(skillRatingRankTerm({ ratingCount: 20, ratingAvg: 4.2 }), 34);
+  // A negative half rounds away from zero, as PostgreSQL's `round` does
+  // (`Math.round` would give -7): (17.5 + 5 * 3.25) / 10 = 3.375, and
+  // 60 * -0.125 = -7.5 exactly.
+  assert.equal(skillRatingRankTerm({ ratingCount: 5, ratingAvg: 3.25 }), -8);
+});
+
+test("the rating term is bounded: never as much as two installs", () => {
+  const many = 1_000_000;
+  const best = skillRatingRankTerm({ ratingCount: many, ratingAvg: 5 });
+  const worst = skillRatingRankTerm({ ratingCount: many, ratingAvg: 1 });
+  assert.ok(best > 0 && best <= 90, `best ${best}`);
+  assert.ok(worst < 0 && worst >= -150, `worst ${worst}`);
+});
+
+test("the rank score adds the rating term and never goes below 0", () => {
+  assert.equal(
+    skillRankScore({ installCount: 3, ratingCount: 5, ratingAvg: 5 }),
+    345,
+  );
+  assert.equal(
+    skillRankScore({ installCount: 3, ratingCount: 5, ratingAvg: 1 }),
+    225,
+  );
+  // A badly rated skill nobody uses ranks with the unrated ones.
+  assert.equal(skillRankScore({ ratingCount: 50, ratingAvg: 1 }), 0);
+});
+
+test("a great rating breaks a tie in installs but does not beat an install lead of two", () => {
+  assert.deepEqual(
+    order([
+      skill("unrated", { installCount: 4 }),
+      skill("loved", { installCount: 4, ratingCount: 30, ratingAvg: 4.9 }),
+      skill("hated", { installCount: 4, ratingCount: 30, ratingAvg: 1.2 }),
+    ]),
+    ["loved", "unrated", "hated"],
+  );
+  assert.deepEqual(
+    order([
+      skill("loved", { installCount: 4, ratingCount: 500, ratingAvg: 5 }),
+      skill("used", { installCount: 6 }),
+    ]),
+    ["used", "loved"],
   );
 });
