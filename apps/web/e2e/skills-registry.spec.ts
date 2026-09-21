@@ -1062,6 +1062,170 @@ test("E21 an admin features a skill and puts it in a collection; the public mark
   await admin.delete(`/v1/skills/registry/admin/collections/${id}`);
 });
 
+test("E22 a workspace that installed a skill reviews it; anyone reports it; an admin moderates both, and the audit trail says so", async ({
+  page,
+}) => {
+  const ws = await login(page);
+  const item = (await submit(page)).skills[0]!;
+  await publish(item);
+  const slug = item.slug!;
+  const { skillId } = await skillIdOf(page, ws, slug);
+  expect(
+    (
+      await admin.post(`/v1/skills/registry/admin/skills/${skillId}/list`, {
+        data: {},
+      })
+    ).status(),
+  ).toBe(200);
+
+  // Only someone whose workspace installed it may review it.
+  const review = { rating: 4, body: "Formats my notes well. E2E review." };
+  const early = await page.request.put(`${api}/v1/skills/${slug}/reviews/mine`, {
+    data: review,
+  });
+  expect(early.status(), await early.text()).toBe(403);
+  expect(
+    (
+      await page.request.post(`${api}/v1/workspaces/${ws}/skills`, {
+        data: { skillId, skillVersionId: item.skillVersionId },
+      })
+    ).ok(),
+  ).toBeTruthy();
+  const written = await page.request.put(
+    `${api}/v1/skills/${slug}/reviews/mine`,
+    { data: review },
+  );
+  expect(written.status(), await written.text()).toBe(200);
+  const reviewId = ((await written.json()) as { review: { id: string } })
+    .review.id;
+
+  // Anyone reads it; the summary counts it.
+  const anonymous = await request.newContext({ baseURL: api });
+  const listed = await anonymous.get(`/v1/skills/${slug}/reviews`);
+  expect(listed.status()).toBe(200);
+  expect(await listed.json()).toMatchObject({
+    summary: { count: 1, average: 4 },
+    items: [{ id: reviewId, rating: 4, body: review.body }],
+  });
+
+  // A visitor without an account reports it — only with an email.
+  expect(
+    (
+      await anonymous.post(`/v1/skills/${slug}/reports`, {
+        data: { reason: "spam", details: "E2E report" },
+      })
+    ).status(),
+  ).toBe(400);
+  const reported = await anonymous.post(`/v1/skills/${slug}/reports`, {
+    data: {
+      reason: "spam",
+      details: "E2E report",
+      contactEmail: "reporter@example.com",
+    },
+  });
+  expect(reported.status(), await reported.text()).toBe(201);
+  const { id: reportId } = (await reported.json()) as { id: string };
+  const queue = await admin.get(
+    "/v1/skills/registry/admin/reports?status=open",
+  );
+  expect(JSON.stringify(await queue.json())).toContain(reportId);
+  const dismissed = await admin.post(
+    `/v1/skills/registry/admin/reports/${reportId}/resolve`,
+    { data: { action: "dismiss", resolution: "E2E: not spam" } },
+  );
+  expect(dismissed.status(), await dismissed.text()).toBe(200);
+
+  // An admin hides the review: it leaves the public page and every count.
+  expect(
+    (
+      await admin.post(`/v1/skills/registry/admin/reviews/${reviewId}/status`, {
+        data: { status: "hidden", reason: "E2E" },
+      })
+    ).status(),
+  ).toBe(200);
+  expect(await (await anonymous.get(`/v1/skills/${slug}/reviews`)).json())
+    .toMatchObject({ summary: { count: 0 }, items: [] });
+  await anonymous.dispose();
+
+  // Every decision is on the record.
+  const events = await admin.get(
+    `/v1/skills/registry/admin/skills/${skillId}/events`,
+  );
+  expect(events.status()).toBe(200);
+  const actions = (
+    (await events.json()) as { items: Array<{ action: string }> }
+  ).items.map((event) => event.action);
+  expect(actions).toEqual(
+    expect.arrayContaining([
+      "listing.listed",
+      "review.written",
+      "report.dismissed",
+      "review.hidden",
+    ]),
+  );
+  expect(
+    (await (await admin.get("/v1/skills/registry/admin/me")).json()) as {
+      isMarketAdmin: boolean;
+    },
+  ).toMatchObject({ isMarketAdmin: true });
+  expect(
+    await (await page.request.get(`${api}/v1/skills/registry/admin/me`)).json(),
+  ).toMatchObject({ isMarketAdmin: false });
+
+  // The dashboard shows the section and the report button; the public page
+  // offers the report form.
+  await page.goto(`/dashboard/skills/${slug}`);
+  await expect(page.getByTestId("skill-reviews")).toBeVisible({
+    timeout: 45000,
+  });
+  await expect(
+    page.getByRole("button", { name: "Report", exact: true }),
+  ).toBeVisible();
+  await page.goto(`/skills/${slug}`);
+  await expect(
+    page.getByRole("button", { name: /Report this skill/ }).first(),
+  ).toBeVisible({ timeout: 45000 });
+});
+
+test("E23 one upkeep pass lists a clean import by itself; run stats stay private below the threshold", async ({
+  page,
+}) => {
+  const ws = await login(page);
+  const item = (await submit(page)).skills[0]!;
+  await publish(item);
+  const slug = item.slug!;
+  const anonymous = await request.newContext({ baseURL: api });
+  expect((await anonymous.get(`/v1/skills/${slug}`)).status()).toBe(404);
+
+  // What the scheduler does every five minutes, once. The grace period after
+  // publishing is the pass's own rule, so only a version already past it is
+  // listed: this one is not yet.
+  const pass = () =>
+    execFileSync("pnpm", ["exec", "tsx", "scripts/run-skill-market-upkeep.ts"], {
+      cwd: resolve("../backend"),
+      stdio: "pipe",
+      timeout: 180000,
+    });
+  pass();
+  expect((await anonymous.get(`/v1/skills/${slug}`)).status()).toBe(404);
+  const { skillId } = await skillIdOf(page, ws, slug);
+  const standing = await admin.get(
+    `/v1/skills/registry/admin/skills/${skillId}/market`,
+  );
+  expect(standing.status()).toBe(200);
+  expect(await standing.json()).toMatchObject({ visibility: "restricted" });
+
+  // Listed by hand, its sandbox numbers stay private until enough runs from
+  // enough workspaces exist.
+  await admin.post(`/v1/skills/registry/admin/skills/${skillId}/list`, {
+    data: {},
+  });
+  const stats = await anonymous.get(`/v1/skills/${slug}/run-stats`);
+  expect(stats.status(), await stats.text()).toBe(200);
+  expect(await stats.json()).toEqual({ available: false });
+  await anonymous.dispose();
+});
+
 // The chat agent and skills, end to end: browser → API → worker → real model.
 // These need a real model, so the isolated deployment must have been prepared
 // from a source env that carries a DeepSeek key.
