@@ -24,12 +24,26 @@ import {
  * therefore waits in the listing queue below instead of listing itself.
  */
 
+/**
+ * How long a freshly published version waits before it lists itself. Someone
+ * who imported a skill for their own use needs a moment to say "keep it
+ * private" (`setOwnerSkillListing`); without this the pass could publish it
+ * seconds after the import finished.
+ */
+const AUTO_LIST_GRACE_MINUTES = 10;
+
 /** Most skills listed in one pass; the rest wait for the next tick. */
 const AUTO_LIST_BATCH_SIZE = 200;
 
 const currentVersionFlags = sql`coalesce(${skillVersions.manifestJson}->'registry'->'scan'->'flags', '[]'::jsonb)`;
 
-function publishedCurrentVersion(flags: "none" | "some") {
+function publishedCurrentVersion(
+  flags: "none" | "some",
+  options: { settled?: boolean } = {},
+) {
+  const settled = options.settled
+    ? sql`and ${skillVersions.publishedAt} <= now() - make_interval(mins => ${AUTO_LIST_GRACE_MINUTES})`
+    : sql``;
   return sql`exists (
     select 1 from ${skillVersions}
     where ${skillVersions.skillId} = ${skillDefinitions.id}
@@ -37,11 +51,15 @@ function publishedCurrentVersion(flags: "none" | "some") {
       and ${skillVersions.status} = 'published'
       and ${skillVersions.manifestJson}->>'listing' is distinct from 'hidden'
       and jsonb_array_length(${currentVersionFlags}) ${flags === "none" ? sql`= 0` : sql`> 0`}
+      ${settled}
   )`;
 }
 
-/** Narrows a pass to these skills; the scheduler passes nothing. */
-type AutoListScope = { onlySkillIds?: string[] };
+/**
+ * Narrows a pass to these skills; the scheduler passes nothing. `skipGrace` is
+ * for a caller that knows the wait is over for another reason.
+ */
+type AutoListScope = { onlySkillIds?: string[]; skipGrace?: boolean };
 
 export async function listAutoListCandidateIds(scope: AutoListScope = {}) {
   const rows = await db
@@ -53,7 +71,7 @@ export async function listAutoListCandidateIds(scope: AutoListScope = {}) {
         eq(skillDefinitions.status, "active"),
         eq(skillDefinitions.visibility, "restricted"),
         eq(skillDefinitions.listingHold, false),
-        publishedCurrentVersion("none"),
+        publishedCurrentVersion("none", { settled: !scope.skipGrace }),
         scope.onlySkillIds
           ? inArray(skillDefinitions.id, scope.onlySkillIds)
           : undefined,

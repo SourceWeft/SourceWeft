@@ -35,6 +35,7 @@ export async function getSkillMarketStanding(
     // The registry only ever holds these two (`skill_definitions_scope_check`).
     visibility: definition.visibility === "public" ? "public" : "restricted",
     listingHold: definition.listingHold,
+    listingHoldBy: definition.listingHoldBy,
     verified: definition.verified,
     categorySlugs,
     installCount: definition.installCount,

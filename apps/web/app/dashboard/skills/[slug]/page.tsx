@@ -11,6 +11,7 @@ import {
 } from "../_components/skill-install-intent";
 import { SkillIntroduction } from "../_components/skill-introduction";
 import { SkillMarketAdminPanel } from "../_components/skill-market-admin-panel";
+import { SkillOwnerListing } from "../_components/skill-owner-listing";
 import { SkillMarketFacts } from "../_components/skill-market-facts";
 import {
   formatInstallCount,
@@ -26,11 +27,7 @@ import {
   useRouter,
   useSearchParams,
 } from "next/navigation";
-import {
-  ArrowLeft,
-  Loader2,
-  Trash2,
-} from "lucide-react";
+import { ArrowLeft, Loader2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import type {
   RegistryVersionDetail,
@@ -41,7 +38,12 @@ import { MessageResponse } from "@sourceweft/ui-web/components/ai-elements/messa
 import { Badge } from "@sourceweft/ui-web/components/ui/badge";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { ScrollArea } from "@sourceweft/ui-web/components/ui/scroll-area";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@sourceweft/ui-web/components/ui/tabs";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@sourceweft/ui-web/components/ui/tabs";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { contentClient, workspaceClient } from "../../../../lib/sdk";
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
@@ -83,17 +85,18 @@ function visibilityLabel(visibility: SkillCatalogItem["visibility"]) {
   return visibility.charAt(0).toUpperCase() + visibility.slice(1);
 }
 
-
 export default function SkillDetailPage() {
   const params = useParams<{ slug?: string | string[] }>();
-  const rawSlug = Array.isArray(params.slug)
-    ? params.slug[0]
-    : params.slug;
+  const rawSlug = Array.isArray(params.slug) ? params.slug[0] : params.slug;
   const slug = rawSlug ? safeDecode(rawSlug) : null;
   const dashboardState = useDashboardChatState();
-  const [workspace, setWorkspace] = React.useState<ResolvedWorkspace | null>(null);
+  const [workspace, setWorkspace] = React.useState<ResolvedWorkspace | null>(
+    null,
+  );
   const [detail, setDetail] = React.useState<SkillCatalogDetail | null>(null);
-  const [categories, setCategories] = React.useState<SkillCatalogCategory[]>([]);
+  const [categories, setCategories] = React.useState<SkillCatalogCategory[]>(
+    [],
+  );
   const [isResolvingWorkspace, setIsResolvingWorkspace] = React.useState(true);
   const [isLoading, setIsLoading] = React.useState(false);
   const [isInstalling, setIsInstalling] = React.useState(false);
@@ -159,7 +162,10 @@ export default function SkillDetailPage() {
       setIsLoading(true);
       // Resolved by slug on the server. Listing the catalog to find it here
       // only ever saw one page, so any skill past it read as missing.
-      const result = await contentClient.getSkillCatalogDetailBySlug(resolved.id, slug);
+      const result = await contentClient.getSkillCatalogDetailBySlug(
+        resolved.id,
+        slug,
+      );
       if (detailGenerationRef.current !== generation) {
         return;
       }
@@ -172,7 +178,9 @@ export default function SkillDetailPage() {
       setError(
         isSkillNotFound(loadError)
           ? "Skill was not found."
-          : loadError instanceof Error ? loadError.message : "Failed to load skill.",
+          : loadError instanceof Error
+            ? loadError.message
+            : "Failed to load skill.",
       );
     } finally {
       if (detailGenerationRef.current === generation) {
@@ -212,7 +220,10 @@ export default function SkillDetailPage() {
     if (!workspace || !slug) return;
     const generation = detailGenerationRef.current;
     try {
-      const result = await contentClient.getSkillCatalogDetailBySlug(workspace.id, slug);
+      const result = await contentClient.getSkillCatalogDetailBySlug(
+        workspace.id,
+        slug,
+      );
       if (detailGenerationRef.current === generation) setDetail(result);
     } catch {
       // Keep what is on screen.
@@ -260,7 +271,11 @@ export default function SkillDetailPage() {
           .catch(() => undefined);
       }
     } catch (installError) {
-      toast.error(installError instanceof Error ? installError.message : "Failed to install skill.");
+      toast.error(
+        installError instanceof Error
+          ? installError.message
+          : "Failed to install skill.",
+      );
     } finally {
       setIsInstalling(false);
     }
@@ -268,7 +283,11 @@ export default function SkillDetailPage() {
 
   async function uninstallSkill() {
     if (!workspace || !detail || !detail.skill.enabled) return;
-    if (detail.skill.sourceType === "builtin" && detail.skill.installable === false) return;
+    if (
+      detail.skill.sourceType === "builtin" &&
+      detail.skill.installable === false
+    )
+      return;
     if (!detail.skill.enabledWorkspaceSkillId) {
       toast.error("Skill install record is missing. Refresh and try again.");
       return;
@@ -276,7 +295,10 @@ export default function SkillDetailPage() {
 
     setIsUninstalling(true);
     try {
-      await contentClient.deleteWorkspaceSkill(workspace.id, detail.skill.enabledWorkspaceSkillId);
+      await contentClient.deleteWorkspaceSkill(
+        workspace.id,
+        detail.skill.enabledWorkspaceSkillId,
+      );
       setDetail((currentDetail) =>
         currentDetail
           ? {
@@ -290,7 +312,11 @@ export default function SkillDetailPage() {
       );
       toast.success("Skill uninstalled");
     } catch (uninstallError) {
-      toast.error(uninstallError instanceof Error ? uninstallError.message : "Failed to uninstall skill.");
+      toast.error(
+        uninstallError instanceof Error
+          ? uninstallError.message
+          : "Failed to uninstall skill.",
+      );
     } finally {
       setIsUninstalling(false);
     }
@@ -347,7 +373,8 @@ export default function SkillDetailPage() {
   const showInstallPrompt =
     installPromptOpen && !!detail && !detail.skill.enabled && canManageInstall;
   const installPending = isInstalling || isUninstalling;
-  const installBlocked = !!detail && !detail.skill.enabled && !viewedInstallable;
+  const installBlocked =
+    !!detail && !detail.skill.enabled && !viewedInstallable;
 
   // `#versions` (the hub's "Update available" badge): the section renders after
   // the skill loads, which is too late for the browser's own anchor scroll.
@@ -364,7 +391,14 @@ export default function SkillDetailPage() {
         <div className="border-b border-border px-4 py-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-3">
-              <Button asChild aria-label="Back to skills" className="h-8 w-8 rounded-full p-0" size="icon-sm" type="button" variant="ghost">
+              <Button
+                asChild
+                aria-label="Back to skills"
+                className="h-8 w-8 rounded-full p-0"
+                size="icon-sm"
+                type="button"
+                variant="ghost"
+              >
                 <Link href="/dashboard/skills">
                   <ArrowLeft className="h-4 w-4" />
                 </Link>
@@ -377,21 +411,32 @@ export default function SkillDetailPage() {
                       {detail.skill.displayName}
                     </h1>
                     <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                      <Badge className="h-5 px-1.5 text-[10px]" variant="outline">
+                      <Badge
+                        className="h-5 px-1.5 text-[10px]"
+                        variant="outline"
+                      >
                         {publisherLabel(detail.skill.sourceType)}
                       </Badge>
                       {detail.skill.enabled && canManageInstall ? (
-                        <Badge className="h-5 px-1.5 text-[10px]" variant="secondary">
+                        <Badge
+                          className="h-5 px-1.5 text-[10px]"
+                          variant="secondary"
+                        >
                           Installed
                         </Badge>
                       ) : null}
-                      <SkillMarketFacts categories={categories} item={detail.skill} />
+                      <SkillMarketFacts
+                        categories={categories}
+                        item={detail.skill}
+                      />
                     </div>
                   </div>
                 </>
               ) : (
                 <div className="min-w-0">
-                  <h1 className="truncate text-base font-semibold text-foreground">Skill details</h1>
+                  <h1 className="truncate text-base font-semibold text-foreground">
+                    Skill details
+                  </h1>
                 </div>
               )}
             </div>
@@ -406,7 +451,11 @@ export default function SkillDetailPage() {
                       "ring-2 ring-primary ring-offset-2 ring-offset-background",
                   )}
                   disabled={installPending || installBlocked}
-                  onClick={() => void (detail.skill.enabled ? uninstallSkill() : installSkill())}
+                  onClick={() =>
+                    void (detail.skill.enabled
+                      ? uninstallSkill()
+                      : installSkill())
+                  }
                   size="sm"
                   type="button"
                   variant={detail.skill.enabled ? "secondary" : "default"}
@@ -431,7 +480,9 @@ export default function SkillDetailPage() {
               data-testid="skill-install-prompt"
             >
               <p className="min-w-0 font-medium text-foreground">
-                {skillsMarketCopy.updates.installPrompt(detail.skill.displayName)}
+                {skillsMarketCopy.updates.installPrompt(
+                  detail.skill.displayName,
+                )}
               </p>
               <div className="flex items-center gap-2">
                 <Button
@@ -451,7 +502,9 @@ export default function SkillDetailPage() {
                   size="sm"
                   type="button"
                 >
-                  {isInstalling ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                  {isInstalling ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : null}
                   {skillsMarketCopy.updates.installConfirm}
                 </Button>
               </div>
@@ -459,148 +512,196 @@ export default function SkillDetailPage() {
           ) : null}
 
           {error ? (
-            <p className="mt-2 text-xs text-red-600 dark:text-red-300">{error}</p>
+            <p className="mt-2 text-xs text-red-600 dark:text-red-300">
+              {error}
+            </p>
           ) : null}
         </div>
 
         <ScrollArea className="min-h-0 flex-1">
           <div className="mx-auto grid max-w-6xl gap-4 px-4 py-5 lg:grid-cols-[minmax(0,1fr)_280px]">
             <div className="flex min-w-0 flex-col gap-4">
-            {detail && isRegistrySkill && workspace ? (
-              <div id="versions" ref={versionsRef}>
-                <RegistryVersions
-                  key={detail.skill.skillId}
-                  workspaceId={workspace.id}
-                  catalogId={detail.skill.catalogId}
-                  initialVersionId={detail.skill.skillVersionId}
-                  // The catalog resolves a slug to the published current
-                  // version; an owner's unpublished draft is not an update.
-                  currentVersionId={
-                    detail.skill.installable === false
-                      ? null
-                      : detail.skill.skillVersionId
-                  }
-                  refreshKey={`${detail.skill.enabledWorkspaceSkillId ?? ""}:${detail.skill.enabled}`}
-                  onView={handleVersionView}
-                  onChanged={() => void refreshDetail()}
-                />
-              </div>
-            ) : null}
-            <article className="min-w-0 rounded-2xl border border-border bg-background shadow-xs">
-              {pageLoading ? (
-                <div className="flex items-center justify-center px-5 py-16 text-sm text-muted-foreground">
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Loading skill...
+              {detail && isRegistrySkill && workspace ? (
+                <div id="versions" ref={versionsRef}>
+                  <RegistryVersions
+                    key={detail.skill.skillId}
+                    workspaceId={workspace.id}
+                    catalogId={detail.skill.catalogId}
+                    initialVersionId={detail.skill.skillVersionId}
+                    // The catalog resolves a slug to the published current
+                    // version; an owner's unpublished draft is not an update.
+                    currentVersionId={
+                      detail.skill.installable === false
+                        ? null
+                        : detail.skill.skillVersionId
+                    }
+                    refreshKey={`${detail.skill.enabledWorkspaceSkillId ?? ""}:${detail.skill.enabled}`}
+                    onView={handleVersionView}
+                    onChanged={() => void refreshDetail()}
+                  />
                 </div>
-              ) : error ? (
-                <div role="alert" className="space-y-3 px-5 py-10 text-sm">
-                  <p className="text-destructive">{error}</p>
-                  <Button variant="outline" size="sm" onClick={() => void loadDetail()}>Retry</Button>
-                </div>
-              ) : (
-                <Tabs className="gap-0" defaultValue="overview">
-                  <div className="border-b border-border px-5 py-3">
-                    <TabsList className="h-8" variant="line">
-                      <TabsTrigger className="px-2.5 text-xs" value="overview">
-                        Overview
-                      </TabsTrigger>
-                      <TabsTrigger className="px-2.5 text-xs" value="skill">
-                        SKILL.md
-                      </TabsTrigger>
-                    </TabsList>
+              ) : null}
+              <article className="min-w-0 rounded-2xl border border-border bg-background shadow-xs">
+                {pageLoading ? (
+                  <div className="flex items-center justify-center px-5 py-16 text-sm text-muted-foreground">
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Loading skill...
                   </div>
-                  <TabsContent className="m-0 px-5 py-5" value="overview">
-                    {contentRestricted && detail ? (
-                      <SkillContentRestricted description={detail.skill.description} sourceUrl={detail.skill.sourceUrl} />
-                    ) : detail && documents ? (
-                      <SkillIntroduction
-                        // Version documents are immutable: never share streaming block state between two of them.
-                        key={`${viewedVersion?.id ?? detail.skill.skillVersionId}:overview`}
-                        {...documents}
-                        displayName={detail.skill.displayName}
-                        description={detail.skill.description}
-                      />
-                    ) : null}
-                  </TabsContent>
-                  <TabsContent className="m-0 px-5 py-5" value="skill">
-                    {contentRestricted ? (
-                      <SkillContentRestricted sourceUrl={detail?.skill.sourceUrl} />
-                    ) : !documents ? (
-                      <div className="flex items-center py-10 text-sm text-muted-foreground">
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Loading skill...
-                      </div>
-                    ) : skillContent ? (
-                      <MessageResponse
-                        key={`${viewedVersion?.id ?? detail?.skill.skillVersionId ?? ""}:skill`}
-                        className="text-sm leading-7 text-foreground [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:bg-muted/40 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left">
-                        {skillContent}
-                      </MessageResponse>
-                    ) : (
-                      <div className="py-10 text-sm text-muted-foreground">
-                        This skill does not include SKILL.md content.
-                      </div>
-                    )}
-                  </TabsContent>
-                </Tabs>
-              )}
-            </article>
+                ) : error ? (
+                  <div role="alert" className="space-y-3 px-5 py-10 text-sm">
+                    <p className="text-destructive">{error}</p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void loadDetail()}
+                    >
+                      Retry
+                    </Button>
+                  </div>
+                ) : (
+                  <Tabs className="gap-0" defaultValue="overview">
+                    <div className="border-b border-border px-5 py-3">
+                      <TabsList className="h-8" variant="line">
+                        <TabsTrigger
+                          className="px-2.5 text-xs"
+                          value="overview"
+                        >
+                          Overview
+                        </TabsTrigger>
+                        <TabsTrigger className="px-2.5 text-xs" value="skill">
+                          SKILL.md
+                        </TabsTrigger>
+                      </TabsList>
+                    </div>
+                    <TabsContent className="m-0 px-5 py-5" value="overview">
+                      {contentRestricted && detail ? (
+                        <SkillContentRestricted
+                          description={detail.skill.description}
+                          sourceUrl={detail.skill.sourceUrl}
+                        />
+                      ) : detail && documents ? (
+                        <SkillIntroduction
+                          // Version documents are immutable: never share streaming block state between two of them.
+                          key={`${viewedVersion?.id ?? detail.skill.skillVersionId}:overview`}
+                          {...documents}
+                          displayName={detail.skill.displayName}
+                          description={detail.skill.description}
+                        />
+                      ) : null}
+                    </TabsContent>
+                    <TabsContent className="m-0 px-5 py-5" value="skill">
+                      {contentRestricted ? (
+                        <SkillContentRestricted
+                          sourceUrl={detail?.skill.sourceUrl}
+                        />
+                      ) : !documents ? (
+                        <div className="flex items-center py-10 text-sm text-muted-foreground">
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Loading skill...
+                        </div>
+                      ) : skillContent ? (
+                        <MessageResponse
+                          key={`${viewedVersion?.id ?? detail?.skill.skillVersionId ?? ""}:skill`}
+                          className="text-sm leading-7 text-foreground [&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:bg-muted/40 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left"
+                        >
+                          {skillContent}
+                        </MessageResponse>
+                      ) : (
+                        <div className="py-10 text-sm text-muted-foreground">
+                          This skill does not include SKILL.md content.
+                        </div>
+                      )}
+                    </TabsContent>
+                  </Tabs>
+                )}
+              </article>
             </div>
 
             <div className="flex h-fit min-w-0 flex-col gap-4">
-            <aside className="h-fit rounded-2xl border border-border bg-background p-4 shadow-xs">
-              <h2 className="text-sm font-semibold text-foreground">Details</h2>
-              {detail ? (
-                <dl className="mt-3 space-y-3 text-xs">
-                  <div>
-                    <dt className="text-muted-foreground">Name</dt>
-                    <dd className="mt-1 font-medium text-foreground">{detail.skill.name}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-muted-foreground">Publisher</dt>
-                    <dd className="mt-1 font-medium text-foreground">{publisherLabel(detail.skill.sourceType)}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-muted-foreground">Version</dt>
-                    <dd className="mt-1 break-words font-medium text-foreground">{viewedVersion?.version ?? detail.skill.version}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-muted-foreground">Visibility</dt>
-                    <dd className="mt-1 font-medium text-foreground">{visibilityLabel(detail.skill.visibility)}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-muted-foreground">README</dt>
-                    <dd className="mt-1 font-medium text-foreground">{detail.skill.hasReadme ? "Included" : "Not included"}</dd>
-                  </div>
-                  {detail.skill.sourceType === "registry_github" && detail.skill.categories.length > 0 ? (
+              <aside className="h-fit rounded-2xl border border-border bg-background p-4 shadow-xs">
+                <h2 className="text-sm font-semibold text-foreground">
+                  Details
+                </h2>
+                {detail ? (
+                  <dl className="mt-3 space-y-3 text-xs">
                     <div>
-                      <dt className="text-muted-foreground">{skillsMarketCopy.detail.categories}</dt>
+                      <dt className="text-muted-foreground">Name</dt>
                       <dd className="mt-1 font-medium text-foreground">
-                        {detail.skill.categories.map((entry) => skillCategoryName(entry, categories)).join(", ")}
+                        {detail.skill.name}
                       </dd>
                     </div>
-                  ) : null}
-                  {formatInstallCount(detail.skill.installCount) ? (
                     <div>
-                      <dt className="text-muted-foreground">{skillsMarketCopy.detail.installs}</dt>
-                      <dd className="mt-1 font-medium text-foreground">{formatInstallCount(detail.skill.installCount)}</dd>
+                      <dt className="text-muted-foreground">Publisher</dt>
+                      <dd className="mt-1 font-medium text-foreground">
+                        {publisherLabel(detail.skill.sourceType)}
+                      </dd>
                     </div>
-                  ) : null}
-                </dl>
-              ) : (
-                <div className="mt-3 text-xs text-muted-foreground">
-                  No skill loaded.
-                </div>
-              )}
-            </aside>
-            {detail?.skill.sourceType === "registry_github" ? (
-              <SkillMarketAdminPanel
-                categories={categories}
-                key={detail.skill.skillId}
-                onChanged={() => void refreshDetail()}
-                skillId={detail.skill.skillId}
-              />
-            ) : null}
+                    <div>
+                      <dt className="text-muted-foreground">Version</dt>
+                      <dd className="mt-1 break-words font-medium text-foreground">
+                        {viewedVersion?.version ?? detail.skill.version}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-muted-foreground">Visibility</dt>
+                      <dd className="mt-1 font-medium text-foreground">
+                        {visibilityLabel(detail.skill.visibility)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-muted-foreground">README</dt>
+                      <dd className="mt-1 font-medium text-foreground">
+                        {detail.skill.hasReadme ? "Included" : "Not included"}
+                      </dd>
+                    </div>
+                    {detail.skill.sourceType === "registry_github" &&
+                    detail.skill.categories.length > 0 ? (
+                      <div>
+                        <dt className="text-muted-foreground">
+                          {skillsMarketCopy.detail.categories}
+                        </dt>
+                        <dd className="mt-1 font-medium text-foreground">
+                          {detail.skill.categories
+                            .map((entry) =>
+                              skillCategoryName(entry, categories),
+                            )
+                            .join(", ")}
+                        </dd>
+                      </div>
+                    ) : null}
+                    {formatInstallCount(detail.skill.installCount) ? (
+                      <div>
+                        <dt className="text-muted-foreground">
+                          {skillsMarketCopy.detail.installs}
+                        </dt>
+                        <dd className="mt-1 font-medium text-foreground">
+                          {formatInstallCount(detail.skill.installCount)}
+                        </dd>
+                      </div>
+                    ) : null}
+                  </dl>
+                ) : (
+                  <div className="mt-3 text-xs text-muted-foreground">
+                    No skill loaded.
+                  </div>
+                )}
+              </aside>
+              {detail?.skill.sourceType === "registry_github" && workspace ? (
+                <SkillOwnerListing
+                  catalogId={detail.skill.catalogId}
+                  key={`owner-${detail.skill.skillId}`}
+                  onChanged={() => void refreshDetail()}
+                  workspaceId={workspace.id}
+                />
+              ) : null}
+              {detail?.skill.sourceType === "registry_github" ? (
+                <SkillMarketAdminPanel
+                  categories={categories}
+                  key={detail.skill.skillId}
+                  onChanged={() => void refreshDetail()}
+                  skillId={detail.skill.skillId}
+                />
+              ) : null}
             </div>
           </div>
         </ScrollArea>

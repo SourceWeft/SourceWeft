@@ -141,7 +141,7 @@ export async function delistSkill(input: {
   if (!result) return null;
   await db
     .update(skillDefinitions)
-    .set({ listingHold: true, updatedAt: new Date() })
+    .set({ listingHold: true, listingHoldBy: "admin", updatedAt: new Date() })
     .where(eq(skillDefinitions.id, input.skillId));
   return { ...result, listingHold: true };
 }
@@ -150,7 +150,7 @@ export async function delistSkill(input: {
 export async function releaseSkillListingHold(input: { skillId: string }) {
   const [row] = await db
     .update(skillDefinitions)
-    .set({ listingHold: false, updatedAt: new Date() })
+    .set({ listingHold: false, listingHoldBy: null, updatedAt: new Date() })
     .where(
       and(
         eq(skillDefinitions.id, input.skillId),
@@ -159,6 +159,109 @@ export async function releaseSkillListingHold(input: { skillId: string }) {
     )
     .returning({ skillId: skillDefinitions.id });
   return row ? { ...row, listingHold: false } : null;
+}
+
+export type OwnerSkillListing = {
+  skillId: string;
+  /** On the public market right now. */
+  listed: boolean;
+  heldBy: "admin" | "owner" | null;
+};
+
+/** The owner's view of their skill's listing; null for anyone else's skill. */
+export async function getOwnerSkillListing(input: {
+  skillId: string;
+  userId: string;
+}): Promise<OwnerSkillListing | null> {
+  const [definition] = await db
+    .select({
+      visibility: skillDefinitions.visibility,
+      listingHoldBy: skillDefinitions.listingHoldBy,
+    })
+    .from(skillDefinitions)
+    .where(
+      and(
+        eq(skillDefinitions.id, input.skillId),
+        eq(skillDefinitions.sourceType, "registry_github"),
+        eq(skillDefinitions.status, "active"),
+        eq(skillDefinitions.ownerUserId, input.userId),
+      ),
+    )
+    .limit(1);
+  if (!definition) return null;
+  return {
+    skillId: input.skillId,
+    listed: definition.visibility === "public",
+    heldBy: definition.listingHoldBy,
+  };
+}
+
+/**
+ * The person who imported a skill decides whether it may be on the public
+ * market: a clean skill lists itself, and importing something for your own use
+ * must not mean publishing it.
+ *
+ * `listed: false` takes it off (or keeps it off) and holds it as the owner.
+ * `listed: true` only lifts the owner's own hold — whether the skill then lists
+ * is the same decision as for any other skill (clean → listed, flagged → the
+ * admin's queue), so this is never a way around a flag or an admin's hold.
+ * null when the skill is not this user's active registry skill.
+ */
+export async function setOwnerSkillListing(input: {
+  skillId: string;
+  userId: string;
+  listed: boolean;
+}): Promise<OwnerSkillListing | null> {
+  const [definition] = await db
+    .select({
+      visibility: skillDefinitions.visibility,
+      listingHold: skillDefinitions.listingHold,
+      listingHoldBy: skillDefinitions.listingHoldBy,
+    })
+    .from(skillDefinitions)
+    .where(
+      and(
+        eq(skillDefinitions.id, input.skillId),
+        eq(skillDefinitions.sourceType, "registry_github"),
+        eq(skillDefinitions.status, "active"),
+        eq(skillDefinitions.ownerUserId, input.userId),
+      ),
+    )
+    .limit(1);
+  if (!definition) return null;
+
+  if (definition.listingHoldBy === "admin") {
+    if (input.listed) {
+      throw new ContentError(
+        409,
+        "SKILL_LISTING_HELD_BY_ADMIN",
+        "A market admin withdrew this skill; only they can list it again",
+      );
+    }
+    return { skillId: input.skillId, listed: false, heldBy: "admin" };
+  }
+
+  if (!input.listed) {
+    if (definition.visibility === "public") {
+      await setRegistryVisibility({
+        skillId: input.skillId,
+        visibility: "restricted",
+        actorUserId: input.userId,
+      });
+    }
+    await db
+      .update(skillDefinitions)
+      .set({ listingHold: true, listingHoldBy: "owner", updatedAt: new Date() })
+      .where(eq(skillDefinitions.id, input.skillId));
+    return { skillId: input.skillId, listed: false, heldBy: "owner" };
+  }
+
+  await releaseSkillListingHold({ skillId: input.skillId });
+  return {
+    skillId: input.skillId,
+    listed: definition.visibility === "public",
+    heldBy: null,
+  };
 }
 
 /** `verified` is a market admin's call alone; nothing else writes it. */

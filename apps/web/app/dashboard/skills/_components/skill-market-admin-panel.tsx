@@ -77,9 +77,9 @@ export function SkillMarketAdminPanel({
   const [busy, setBusy] = React.useState(false);
   // The action outlives the dialog's open state so its wording does not
   // change while the dialog animates out.
-  const [confirmAction, setConfirmAction] = React.useState<
-    "list" | "withdraw"
-  >("list");
+  const [confirmAction, setConfirmAction] = React.useState<"list" | "withdraw">(
+    "list",
+  );
   const [confirmOpen, setConfirmOpen] = React.useState(false);
   const generationRef = React.useRef(0);
 
@@ -108,10 +108,7 @@ export function SkillMarketAdminPanel({
     };
   }, [load]);
 
-  async function run(
-    action: () => Promise<unknown>,
-    successMessage: string,
-  ) {
+  async function run(action: () => Promise<unknown>, successMessage: string) {
     setBusy(true);
     try {
       await action();
@@ -178,7 +175,9 @@ export function SkillMarketAdminPanel({
               ? copy.standingPublic
               : kind === "withdrawn"
                 ? copy.standingWithdrawn
-                : copy.standingRestricted}
+                : kind === "ownerPrivate"
+                  ? copy.standingOwnerPrivate
+                  : copy.standingRestricted}
           </dd>
         </div>
         <div>

@@ -73,6 +73,7 @@ import type {
   ListSourceStatusesResponse,
   ListSkillCatalogCategoriesResponse,
   ListSkillsCatalogParams,
+  OwnerSkillListing,
   ListSkillsCatalogResponse,
   SearchRegistrySkillsResponse,
   ListThreadsRequest,
@@ -759,6 +760,23 @@ export class ContentClient {
     const suffix = search.size > 0 ? `?${search.toString()}` : "";
     return this.http.get<ListSkillsCatalogResponse>(
       `/v1/workspaces/${encode(workspaceId)}/skills/catalog${suffix}`,
+    );
+  }
+
+  /**
+   * Whether a community skill the caller imported may be on the public market.
+   * Rejects with 404 for a skill that is not theirs.
+   */
+  getOwnerSkillListing(workspaceId: string, catalogId: string) {
+    return this.http.get<OwnerSkillListing>(
+      `/v1/workspaces/${encode(workspaceId)}/skills/catalog/${encode(catalogId)}/listing`,
+    );
+  }
+
+  setOwnerSkillListing(workspaceId: string, catalogId: string, listed: boolean) {
+    return this.http.put<OwnerSkillListing>(
+      `/v1/workspaces/${encode(workspaceId)}/skills/catalog/${encode(catalogId)}/listing`,
+      { listed },
     );
   }
 

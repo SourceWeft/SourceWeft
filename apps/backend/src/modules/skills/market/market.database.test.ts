@@ -148,7 +148,10 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
     test("a clean skill is listed; a flagged one waits for review", async () => {
       const clean = await registrySkill({});
       const flagged = await registrySkill({ flagged: true });
-      const scope = { onlySkillIds: [clean.skillId, flagged.skillId] };
+      const scope = {
+        onlySkillIds: [clean.skillId, flagged.skillId],
+        skipGrace: true,
+      };
 
       expect(await autoList.listAutoListCandidateIds(scope)).toEqual([
         clean.skillId,
@@ -177,7 +180,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
 
     test("a published skill with an advisory flag waits for an admin", async () => {
       const skill = await registrySkill({ advisoryFlag: "binary:executable" });
-      const scope = { onlySkillIds: [skill.skillId] };
+      const scope = { onlySkillIds: [skill.skillId], skipGrace: true };
 
       expect(await autoList.listAutoListCandidateIds(scope)).toEqual([]);
       expect(await autoList.runSkillAutoListing(scope)).toMatchObject({
@@ -206,9 +209,102 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       ).toBe(false);
     });
 
-    test("a withdrawn skill is held and does not come back", async () => {
+    test("a freshly published skill waits before it lists itself", async () => {
       const skill = await registrySkill({});
       const scope = { onlySkillIds: [skill.skillId] };
+      // Just imported: its owner still has time to keep it private.
+      expect(await autoList.listAutoListCandidateIds(scope)).toEqual([]);
+
+      await data.db
+        .update(data.skillVersions)
+        .set({ publishedAt: new Date(Date.now() - 11 * 60 * 1000) })
+        .where(eq(data.skillVersions.id, skill.skillVersionId));
+      expect(await autoList.listAutoListCandidateIds(scope)).toEqual([
+        skill.skillId,
+      ]);
+    });
+
+    test("the owner can keep their skill private, and only they can lift that", async () => {
+      const skill = await registrySkill({});
+      const scope = { onlySkillIds: [skill.skillId], skipGrace: true };
+      const owner = { skillId: skill.skillId, userId: "skill-owner" };
+
+      // Someone else: not their skill, as far as they can tell.
+      expect(
+        await listing.setOwnerSkillListing({
+          skillId: skill.skillId,
+          userId: "someone-else",
+          listed: false,
+        }),
+      ).toBeNull();
+      expect(
+        await listing.getOwnerSkillListing({
+          skillId: skill.skillId,
+          userId: "someone-else",
+        }),
+      ).toBeNull();
+
+      // Before it ever lists: held, so the pass leaves it alone.
+      expect(
+        await listing.setOwnerSkillListing({ ...owner, listed: false }),
+      ).toEqual({ skillId: skill.skillId, listed: false, heldBy: "owner" });
+      expect(await autoList.runSkillAutoListing(scope)).toMatchObject({
+        listed: 0,
+      });
+      expect((await definition(skill.skillId)).visibility).toBe("restricted");
+
+      // Lifting their own hold does not list it — the pass does, by its rules.
+      expect(
+        await listing.setOwnerSkillListing({ ...owner, listed: true }),
+      ).toEqual({ skillId: skill.skillId, listed: false, heldBy: null });
+      expect(await autoList.runSkillAutoListing(scope)).toMatchObject({
+        listed: 1,
+      });
+      expect(await listing.getOwnerSkillListing(owner)).toEqual({
+        skillId: skill.skillId,
+        listed: true,
+        heldBy: null,
+      });
+
+      // Taking a listed skill off the market.
+      await listing.setOwnerSkillListing({ ...owner, listed: false });
+      const row = await definition(skill.skillId);
+      expect(row.visibility).toBe("restricted");
+      expect(row.listingHoldBy).toBe("owner");
+    });
+
+    test("an owner cannot put back what an admin withdrew", async () => {
+      const skill = await registrySkill({});
+      const owner = { skillId: skill.skillId, userId: "skill-owner" };
+      await listing.listSkillPublicly({
+        skillId: skill.skillId,
+        actorUserId: "skill-test-admin",
+      });
+      await listing.delistSkill({
+        skillId: skill.skillId,
+        actorUserId: "skill-test-admin",
+      });
+      expect((await definition(skill.skillId)).listingHoldBy).toBe("admin");
+
+      await expect(
+        listing.setOwnerSkillListing({ ...owner, listed: true }),
+      ).rejects.toMatchObject({ code: "SKILL_LISTING_HELD_BY_ADMIN" });
+      // Asking for private when an admin already holds it changes nothing.
+      expect(
+        await listing.setOwnerSkillListing({ ...owner, listed: false }),
+      ).toEqual({ skillId: skill.skillId, listed: false, heldBy: "admin" });
+      expect((await definition(skill.skillId)).listingHoldBy).toBe("admin");
+
+      // An admin listing it again clears the hold entirely.
+      await listing.releaseSkillListingHold({ skillId: skill.skillId });
+      const row = await definition(skill.skillId);
+      expect(row.listingHold).toBe(false);
+      expect(row.listingHoldBy).toBeNull();
+    });
+
+    test("a withdrawn skill is held and does not come back", async () => {
+      const skill = await registrySkill({});
+      const scope = { onlySkillIds: [skill.skillId], skipGrace: true };
       await autoList.runSkillAutoListing(scope);
       const firstListedAt = (await definition(skill.skillId)).listedAt!;
 
@@ -276,6 +372,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
         .where(eq(data.skillDefinitions.id, skill.skillId));
       const result = await autoList.runSkillAutoListing({
         onlySkillIds: [skill.skillId],
+        skipGrace: true,
       });
       expect(result).toMatchObject({ listed: 0, backfilled: 1 });
       expect((await definition(skill.skillId)).listedAt).toBeInstanceOf(Date);

@@ -322,14 +322,31 @@ export const skillMarketStandingSchema = z.object({
   skillId: z.string(),
   slug: z.string(),
   visibility: z.enum(["public", "restricted"]),
-  // Withdrawn by an admin: the auto-listing pass leaves it alone.
+  // Held: the auto-listing pass leaves it alone.
   listingHold: z.boolean(),
+  // Who holds it — an admin withdrew it, or its owner keeps it private.
+  listingHoldBy: z.enum(["admin", "owner"]).nullable(),
   verified: z.boolean(),
   categorySlugs: z.array(z.string()),
   installCount: z.number().int().nonnegative(),
   listedAt: z.string().nullable(),
 });
 export type SkillMarketStanding = z.infer<typeof skillMarketStandingSchema>;
+// GET|PUT /skills/catalog/:catalogId/listing — the OWNER's say over whether a
+// community skill they imported may be on the public market. 404 for anyone
+// else. `listed: true` only lifts the owner's own hold; whether the skill then
+// lists is decided the usual way (clean → listed, flagged → admin's queue).
+export const ownerSkillListingSchema = z.object({
+  skillId: z.string(),
+  // On the public market right now.
+  listed: z.boolean(),
+  heldBy: z.enum(["admin", "owner"]).nullable(),
+});
+export type OwnerSkillListing = z.infer<typeof ownerSkillListingSchema>;
+export const setOwnerSkillListingRequestSchema = z
+  .object({ listed: z.boolean() })
+  .strict();
+
 export const setSkillMarketVerifiedRequestSchema = z
   .object({ verified: z.boolean() })
   .strict();

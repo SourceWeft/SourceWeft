@@ -893,6 +893,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
           slug: skill.slug,
           visibility: "restricted",
           listingHold: false,
+          listingHoldBy: null,
           verified: false,
           categorySlugs: [],
           installCount: 0,

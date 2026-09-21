@@ -194,6 +194,10 @@ export const skillDefinitions = pgTable(
     // An admin took this off the public market. The auto-listing pass skips it,
     // so a withdrawn skill does not come back on the next tick.
     listingHold: boolean("listing_hold").notNull().default(false),
+    // Who holds it. The person who imported a skill can keep it off the public
+    // market themselves; an admin's hold outranks theirs, so an owner can never
+    // put back what an admin withdrew.
+    listingHoldBy: text("listing_hold_by").$type<"admin" | "owner">(),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .defaultNow(),
@@ -240,6 +244,10 @@ export const skillDefinitions = pgTable(
       table.status,
       desc(table.installCount),
       desc(table.id),
+    ),
+    check(
+      "skill_definitions_listing_hold_by_check",
+      sql`(${table.listingHold} = false and ${table.listingHoldBy} is null) or (${table.listingHold} = true and ${table.listingHoldBy} in ('admin', 'owner'))`,
     ),
     check(
       "skill_definitions_install_count_check",

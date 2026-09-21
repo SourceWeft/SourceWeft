@@ -84,6 +84,7 @@ export const skillsMarketCopy = {
     standingPublic: "Public",
     standingRestricted: "Restricted",
     standingWithdrawn: "Withdrawn (held)",
+    standingOwnerPrivate: "Kept private by its owner",
     listed: "Listed",
     notListed: "Not listed",
     installs: "Installs",
@@ -135,6 +136,21 @@ export const skillsMarketCopy = {
     publish: "Approve and publish",
     reject: "Reject",
     footnote: "Skill review uses the same admin allowlist as the MCP market.",
+  },
+  // The owner's switch on a community skill they imported.
+  ownerListing: {
+    label: "Allow on the public market",
+    listed:
+      "This skill is listed publicly: anyone can find it and read its SKILL.md. Turn this off to take it down — workspaces that installed it keep it.",
+    pending:
+      "Skills that pass the automated scan are listed publicly a few minutes after import; flagged ones wait for a review first. Turn this off to keep it to yourself.",
+    private:
+      "Only you and the workspaces you add it to can see this skill. It will not be listed.",
+    heldByAdmin:
+      "A market admin took this skill off the public market. Only they can list it again.",
+    allowedToast: "This skill may be listed publicly",
+    privateToast: "This skill is kept private",
+    failed: "Could not change the listing. Please try again.",
   },
   // The second admin queue: published skills that carry an advisory flag. Their
   // importer can already use them; going public is the admin's decision.

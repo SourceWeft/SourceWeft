@@ -57,6 +57,7 @@ const standing = {
   slug: "gh-owner-repo-pdf",
   visibility: "restricted",
   listingHold: false,
+  listingHoldBy: null,
   verified: false,
   categorySlugs: ["documents-office"],
   installCount: 0,

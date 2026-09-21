@@ -316,6 +316,13 @@
       "when": 1789915884417,
       "tag": "0044_skill_marketplace",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1789951207499,
+      "tag": "0045_skill_listing_hold_by",
+      "breakpoints": true
     }
   ]
 }
