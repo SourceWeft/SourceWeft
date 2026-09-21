@@ -61,7 +61,7 @@ export function SourceWeftFooter({
       // this i18n work started; stay plain paths like an un-migrated route.
       ["/download", t("links.download"), false],
       [addLocalePrefix("/mcp", localePrefix), t("links.mcpServers"), false],
-      ["/skills", t("links.skills"), false],
+      [addLocalePrefix("/skills", localePrefix), t("links.skills"), false],
       [addLocalePrefix("/blog", localePrefix), t("links.blog"), false],
       [
         authState?.isSignedIn ? "/dashboard" : "/auth/sign-in",

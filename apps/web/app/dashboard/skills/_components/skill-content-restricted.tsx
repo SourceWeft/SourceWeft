@@ -1,7 +1,5 @@
 import { ExternalLink, Lock } from "lucide-react";
-import { skillsMarketCopy } from "./skills-market-copy";
-
-const copy = skillsMarketCopy.detail;
+import { useTranslations } from "next-intl";
 
 /**
  * Shown in place of a community skill's SKILL.md / README when the server
@@ -20,6 +18,7 @@ export function SkillContentRestricted({
   description?: string;
   sourceUrl?: string | null;
 }) {
+  const t = useTranslations("dashboardSkillsMarket");
   return (
     <div className="min-w-0 space-y-4 text-sm">
       {description ? <p className="leading-7">{description}</p> : null}
@@ -29,22 +28,22 @@ export function SkillContentRestricted({
       >
         <Lock className="mt-0.5 size-4 shrink-0" />
         <span>
-          {copy.restrictedNotice}
+          {t("detail.restrictedNotice")}
           {sourceUrl ? (
             <>
-              {copy.restrictedSourceJoin}
+              {t("detail.restrictedSourceJoin")}
               <a
                 className="inline-flex items-center gap-1 font-medium text-foreground underline-offset-4 hover:underline"
                 href={sourceUrl}
                 rel="noreferrer noopener"
                 target="_blank"
               >
-                {copy.restrictedSourceLink}
+                {t("detail.restrictedSourceLink")}
                 <ExternalLink className="size-3.5" />
               </a>
             </>
           ) : null}
-          .
+          {t("detail.restrictedEnd")}
         </span>
       </p>
     </div>

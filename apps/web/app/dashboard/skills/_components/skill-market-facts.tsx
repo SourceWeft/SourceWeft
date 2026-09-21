@@ -1,11 +1,9 @@
 import { BadgeCheck, Download, Sparkles, SquareTerminal } from "lucide-react";
+import { useTranslations } from "next-intl";
 import type { SkillCatalogCategory } from "@sourceweft/contracts";
 import { Badge } from "@sourceweft/ui-web/components/ui/badge";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { formatInstallCount, skillCategoryName } from "./skills-market-browse";
-import { skillsMarketCopy } from "./skills-market-copy";
-
-const copy = skillsMarketCopy;
 
 /**
  * A skill's market facts for a detail header: featured and verified marks,
@@ -28,6 +26,7 @@ export function SkillMarketFacts({
     installCount?: number;
   };
 }) {
+  const t = useTranslations("dashboardSkillsMarket");
   const isRegistry = item.sourceType === "registry_github";
   const categorySlugs = item.categories
     .map((slug) => slug.trim())
@@ -35,9 +34,9 @@ export function SkillMarketFacts({
   const installCount = formatInstallCount(item.installCount);
   const installCountLabel =
     item.installCount === 1
-      ? copy.card.installsOne
+      ? t("card.installsOne")
       : installCount
-        ? copy.card.installs(installCount)
+        ? t("card.installs", { formatted: installCount })
         : null;
   const verified = isRegistry && item.verified === true;
   const featured = isRegistry && item.featured === true;
@@ -58,17 +57,17 @@ export function SkillMarketFacts({
       {featured ? (
         <Badge
           className="h-5 gap-1 px-1.5 text-[10px]"
-          title={copy.card.featuredTitle}
+          title={t("card.featuredTitle")}
           variant="outline"
         >
           <Sparkles className="size-2.5 text-amber-500 dark:text-amber-300" />
-          {copy.card.featured}
+          {t("card.featured")}
         </Badge>
       ) : null}
       {verified ? (
         <Badge className="h-5 gap-1 px-1.5 text-[10px]" variant="secondary">
           <BadgeCheck className="size-2.5" />
-          {copy.card.verified}
+          {t("card.verified")}
         </Badge>
       ) : null}
       {categorySlugs.map((slug) => (
@@ -82,7 +81,7 @@ export function SkillMarketFacts({
           variant="outline"
         >
           <SquareTerminal className="size-2.5" />
-          {copy.card.includesScripts}
+          {t("card.includesScripts")}
         </Badge>
       ) : null}
       {installCountLabel ? (

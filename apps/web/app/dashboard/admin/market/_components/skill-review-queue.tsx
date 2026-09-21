@@ -11,6 +11,7 @@ import {
   Scale,
   XCircle,
 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { Badge } from "@sourceweft/ui-web/components/ui/badge";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { Input } from "@sourceweft/ui-web/components/ui/input";
@@ -29,7 +30,6 @@ import {
   isCriticalSkillFlag,
   skillFlagLabel,
 } from "../../../skills/_components/skills-market-browse";
-import { skillsMarketCopy } from "../../../skills/_components/skills-market-copy";
 
 type QueueItem = SkillListingQueueEntry;
 
@@ -55,7 +55,9 @@ function isPublicUpdate(item: QueueItem) {
  */
 const QUEUES = {
   review: {
-    copy: skillsMarketCopy.review,
+    // Where the queue's own wording lives in `dashboardSkillsMarket`; the
+    // listing queue shares the rest of the review queue's.
+    section: "review",
     takesReason: true,
     load: listSkillReviewQueue,
     approve: (item: QueueItem, reason?: string) =>
@@ -64,7 +66,7 @@ const QUEUES = {
       rejectSkillSubmission(item.skillVersionId, reason),
   },
   listing: {
-    copy: { ...skillsMarketCopy.review, ...skillsMarketCopy.listingQueue },
+    section: "listingQueue",
     takesReason: false,
     load: listSkillListingQueue,
     approve: (item: QueueItem) =>
@@ -75,14 +77,15 @@ const QUEUES = {
   },
 } as const;
 
-function relativeTime(iso: string) {
+/** `t` is the `dashboardAdmin` translator, whose wording the MCP queue shares. */
+function relativeTime(iso: string, t: ReturnType<typeof useTranslations>) {
   const diffMs = Date.now() - new Date(iso).getTime();
   const mins = Math.round(diffMs / 60000);
-  if (mins < 1) return "Just now";
-  if (mins < 60) return `${mins} min ago`;
+  if (mins < 1) return t("relativeTime.justNow");
+  if (mins < 60) return t("relativeTime.minutes", { count: mins });
   const hours = Math.round(mins / 60);
-  if (hours < 24) return `${hours} hr ago`;
-  return `${Math.round(hours / 24)} d ago`;
+  if (hours < 24) return t("relativeTime.hours", { count: hours });
+  return t("relativeTime.days", { count: Math.round(hours / 24) });
 }
 
 type SkillMdState =
@@ -100,8 +103,10 @@ export function SkillReviewQueue({
 }: {
   queue?: keyof typeof QUEUES;
 }) {
+  const tm = useTranslations("dashboardSkillsMarket");
+  const ta = useTranslations("dashboardAdmin");
   const {
-    copy,
+    section,
     takesReason,
     load: loadQueue,
     approve,
@@ -115,6 +120,8 @@ export function SkillReviewQueue({
     {},
   );
   const [reasons, setReasons] = React.useState<Record<string, string>>({});
+  // Scan flags in words; an unknown flag is shown as it is.
+  const flagLabels = tm.raw("flagLabels") as Record<string, string>;
 
   const load = React.useCallback(async () => {
     setError(null);
@@ -123,10 +130,14 @@ export function SkillReviewQueue({
       setItems(result.items);
     } catch (caught) {
       const status = (caught as { status?: number } | null)?.status;
-      setError(status === 403 ? copy.forbidden : copy.loadFailed);
+      setError(
+        status === 403
+          ? tm(`${section}.forbidden`)
+          : tm(`${section}.loadFailed`),
+      );
       setItems([]);
     }
-  }, [copy, loadQueue]);
+  }, [loadQueue, section, tm]);
 
   React.useEffect(() => {
     void load();
@@ -170,7 +181,7 @@ export function SkillReviewQueue({
         prev ? prev.filter((entry) => entry.skillVersionId !== key) : prev,
       );
     } catch {
-      setError(copy.actionFailed(item.slug));
+      setError(tm("review.actionFailed", { slug: item.slug }));
     } finally {
       setBusy((prev) => {
         const next = new Set(prev);
@@ -183,12 +194,16 @@ export function SkillReviewQueue({
   return (
     <div className={queue === "listing" ? "mt-12" : undefined}>
       {queue === "review" ? (
-        <h1 className="text-2xl font-semibold tracking-tight">{copy.title}</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">
+          {tm(`${section}.title`)}
+        </h1>
       ) : (
-        <h2 className="text-xl font-semibold tracking-tight">{copy.title}</h2>
+        <h2 className="text-xl font-semibold tracking-tight">
+          {tm(`${section}.title`)}
+        </h2>
       )}
       <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-        {copy.intro}
+        {tm(`${section}.intro`)}
       </p>
 
       {error ? (
@@ -201,12 +216,12 @@ export function SkillReviewQueue({
       {items === null ? (
         <div className="mt-10 flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="size-4 animate-spin" />
-          {copy.loading}
+          {tm(`${section}.loading`)}
         </div>
       ) : items.length === 0 && !error ? (
         <div className="mt-10 flex flex-col items-center gap-2 rounded-xl border border-dashed py-16 text-center text-muted-foreground">
           <CheckCircle2 className="size-6 text-emerald-500" />
-          <p className="text-sm">{copy.empty}</p>
+          <p className="text-sm">{tm(`${section}.empty`)}</p>
         </div>
       ) : (
         <div className="mt-6 divide-y overflow-hidden rounded-xl border">
@@ -217,7 +232,6 @@ export function SkillReviewQueue({
             const isExpanded = expanded.has(key);
             const skillDoc = skillMd[key];
             const publicUpdate = queue === "listing" && isPublicUpdate(item);
-            const listingCopy = skillsMarketCopy.listingQueue;
             const changes = item.changes ?? null;
             const compareUrl =
               changes?.compareUrl &&
@@ -240,7 +254,9 @@ export function SkillReviewQueue({
                       </code>
                       {queue === "listing" && item.reason ? (
                         <Badge variant={publicUpdate ? "default" : "outline"}>
-                          {listingCopy.reasons[item.reason] ?? item.reason}
+                          {tm.has(`listingQueue.reasons.${item.reason}`)
+                            ? tm(`listingQueue.reasons.${item.reason}`)
+                            : item.reason}
                         </Badge>
                       ) : null}
                     </div>
@@ -267,22 +283,22 @@ export function SkillReviewQueue({
                       {item.capability ? (
                         <span>
                           {item.capability === "executable"
-                            ? copy.capabilityExecutable
-                            : copy.capabilityPromptOnly}
+                            ? tm("review.capabilityExecutable")
+                            : tm("review.capabilityPromptOnly")}
                         </span>
                       ) : null}
                       <span className="inline-flex items-center gap-1">
                         <Scale className="size-3" />
-                        {item.license ?? copy.noLicense}
+                        {item.license ?? tm("review.noLicense")}
                       </span>
                       {item.submittedBy ? (
                         <span title={item.submittedBy}>
-                          {copy.submittedBy(
-                            item.submittedByName || item.submittedBy,
-                          )}
+                          {tm("review.submittedBy", {
+                            who: item.submittedByName || item.submittedBy,
+                          })}
                         </span>
                       ) : null}
-                      <span>{relativeTime(item.createdAt)}</span>
+                      <span>{relativeTime(item.createdAt, ta)}</span>
                     </div>
                     <div className="mt-2.5 flex flex-wrap gap-1.5">
                       {item.flags.map((flag) => (
@@ -294,7 +310,7 @@ export function SkillReviewQueue({
                               : "secondary"
                           }
                         >
-                          ⚠ {skillFlagLabel(flag, skillsMarketCopy.flagLabels)}
+                          ⚠ {skillFlagLabel(flag, flagLabels)}
                         </Badge>
                       ))}
                     </div>
@@ -310,7 +326,9 @@ export function SkillReviewQueue({
                       ) : (
                         <CheckCircle2 className="size-4" />
                       )}
-                      {publicUpdate ? listingCopy.keepPublic : copy.publish}
+                      {publicUpdate
+                        ? tm("listingQueue.keepPublic")
+                        : tm(`${section}.publish`)}
                     </Button>
                     <Button
                       disabled={isBusy}
@@ -319,7 +337,9 @@ export function SkillReviewQueue({
                       variant="outline"
                     >
                       <XCircle className="size-4" />
-                      {publicUpdate ? listingCopy.withdraw : copy.reject}
+                      {publicUpdate
+                        ? tm("listingQueue.withdraw")
+                        : tm(`${section}.reject`)}
                     </Button>
                   </div>
                 </div>
@@ -330,41 +350,43 @@ export function SkillReviewQueue({
                     data-testid="listing-queue-changes"
                   >
                     <p className="font-medium text-foreground">
-                      {listingCopy.changesTitle}
+                      {tm("listingQueue.changesTitle")}
                     </p>
                     {changes.newScripts.length > 0 ? (
                       <p className="text-amber-700 dark:text-amber-300">
-                        {listingCopy.changesNewScripts(
-                          changes.newScripts.join(", "),
-                        )}
+                        {tm("listingQueue.changesNewScripts", {
+                          paths: changes.newScripts.join(", "),
+                        })}
                       </p>
                     ) : null}
                     {changes.newFlags.length > 0 ? (
                       <p className="text-amber-700 dark:text-amber-300">
-                        {listingCopy.changesNewFlags(
-                          changes.newFlags
-                            .map((flag) =>
-                              skillFlagLabel(flag, skillsMarketCopy.flagLabels),
-                            )
+                        {tm("listingQueue.changesNewFlags", {
+                          flags: changes.newFlags
+                            .map((flag) => skillFlagLabel(flag, flagLabels))
                             .join(", "),
-                        )}
+                        })}
                       </p>
                     ) : null}
                     {changes.added.length > 0 ? (
                       <p className="break-all">
-                        {listingCopy.changesAdded(changes.added.join(", "))}
+                        {tm("listingQueue.changesAdded", {
+                          paths: changes.added.join(", "),
+                        })}
                       </p>
                     ) : null}
                     {changes.modified.length > 0 ? (
                       <p className="break-all">
-                        {listingCopy.changesModified(
-                          changes.modified.join(", "),
-                        )}
+                        {tm("listingQueue.changesModified", {
+                          paths: changes.modified.join(", "),
+                        })}
                       </p>
                     ) : null}
                     {changes.removed.length > 0 ? (
                       <p className="break-all">
-                        {listingCopy.changesRemoved(changes.removed.join(", "))}
+                        {tm("listingQueue.changesRemoved", {
+                          paths: changes.removed.join(", "),
+                        })}
                       </p>
                     ) : null}
                     {compareUrl ? (
@@ -374,7 +396,7 @@ export function SkillReviewQueue({
                         rel="noreferrer noopener"
                         target="_blank"
                       >
-                        {listingCopy.compare}
+                        {tm("listingQueue.compare")}
                         <ExternalLink className="size-3" />
                       </a>
                     ) : null}
@@ -393,11 +415,13 @@ export function SkillReviewQueue({
                     ) : (
                       <ChevronRight className="size-3.5" />
                     )}
-                    {isExpanded ? copy.hideSkillMd : copy.readSkillMd}
+                    {isExpanded
+                      ? tm("review.hideSkillMd")
+                      : tm("review.readSkillMd")}
                   </button>
                   {takesReason ? (
                     <Input
-                      aria-label={copy.reasonLabel}
+                      aria-label={tm("review.reasonLabel")}
                       className="h-8 text-xs sm:max-w-xs"
                       disabled={isBusy}
                       maxLength={1000}
@@ -407,7 +431,7 @@ export function SkillReviewQueue({
                           [key]: event.target.value,
                         }))
                       }
-                      placeholder={`${copy.reasonLabel} — ${copy.reasonPlaceholder}`}
+                      placeholder={`${tm("review.reasonLabel")} — ${tm("review.reasonPlaceholder")}`}
                       value={reasons[key] ?? ""}
                     />
                   ) : null}
@@ -418,11 +442,11 @@ export function SkillReviewQueue({
                     {!skillDoc || skillDoc.status === "loading" ? (
                       <div className="flex items-center gap-2 text-xs text-muted-foreground">
                         <Loader2 className="size-3.5 animate-spin" />
-                        {copy.loadingSkillMd}
+                        {tm("review.loadingSkillMd")}
                       </div>
                     ) : skillDoc.status === "error" ? (
                       <p className="text-xs text-destructive">
-                        {copy.skillMdFailed}
+                        {tm("review.skillMdFailed")}
                       </p>
                     ) : skillDoc.content ? (
                       // Raw source, not rendered markdown: a reviewer has to see
@@ -433,7 +457,7 @@ export function SkillReviewQueue({
                       </pre>
                     ) : (
                       <p className="text-xs text-muted-foreground">
-                        {copy.skillMdMissing}
+                        {tm("review.skillMdMissing")}
                       </p>
                     )}
                   </div>
@@ -444,7 +468,9 @@ export function SkillReviewQueue({
         </div>
       )}
 
-      <p className="mt-6 text-xs text-muted-foreground">{copy.footnote}</p>
+      <p className="mt-6 text-xs text-muted-foreground">
+        {tm(`${section}.footnote`)}
+      </p>
     </div>
   );
 }

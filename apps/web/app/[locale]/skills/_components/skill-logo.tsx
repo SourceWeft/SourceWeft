@@ -5,7 +5,7 @@ import type { MarketSkillSummary } from "@sourceweft/market-sdk";
 
 import { cn } from "@sourceweft/ui-web/lib/utils";
 
-import { SkillIcon } from "../../_components/site-icons";
+import { SkillIcon } from "../../../_components/site-icons";
 import { safeSkillLogoUrl } from "./skills-format";
 
 /**

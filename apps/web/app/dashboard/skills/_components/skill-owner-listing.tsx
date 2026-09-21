@@ -1,15 +1,13 @@
 "use client";
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import type { OwnerSkillListing } from "@sourceweft/contracts";
 import { Switch } from "@sourceweft/ui-web/components/ui/switch";
 
 import { contentClient } from "../../../../lib/sdk";
 import { ownerListingView } from "./skill-market-standing";
-import { skillsMarketCopy } from "./skills-market-copy";
-
-const copy = skillsMarketCopy.ownerListing;
 
 /**
  * The author's say over whether their claimed community skill may be on the
@@ -30,6 +28,7 @@ export function SkillOwnerListing({
   catalogId: string;
   onChanged?: () => void;
 }) {
+  const t = useTranslations("dashboardSkillsMarket");
   const [listing, setListing] = React.useState<OwnerSkillListing | null>(null);
   const [busy, setBusy] = React.useState(false);
 
@@ -62,10 +61,14 @@ export function SkillOwnerListing({
           allowed,
         ),
       );
-      toast.success(allowed ? copy.allowedToast : copy.privateToast);
+      toast.success(
+        allowed
+          ? t("ownerListing.allowedToast")
+          : t("ownerListing.privateToast"),
+      );
       onChanged?.();
     } catch {
-      toast.error(copy.failed);
+      toast.error(t("ownerListing.failed"));
     } finally {
       setBusy(false);
     }
@@ -82,9 +85,11 @@ export function SkillOwnerListing({
             className="text-sm font-medium text-foreground"
             htmlFor="skill-owner-listing-switch"
           >
-            {copy.label}
+            {t("ownerListing.label")}
           </label>
-          <p className="mt-1 text-muted-foreground">{copy[view.state]}</p>
+          <p className="mt-1 text-muted-foreground">
+            {t(`ownerListing.${view.state}`)}
+          </p>
         </div>
         <Switch
           checked={view.allowed}

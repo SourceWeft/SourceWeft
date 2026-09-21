@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { act, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { NextIntlClientProvider } from "next-intl";
+import { createTranslator, NextIntlClientProvider } from "next-intl";
+import type { useTranslations } from "next-intl";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { SkillSubmission } from "@sourceweft/contracts";
 import {
@@ -15,6 +16,11 @@ import messages from "../../../../messages/en.json";
 const intlMessages = messages as ComponentProps<
   typeof NextIntlClientProvider
 >["messages"];
+const tm = createTranslator({
+  locale: "en",
+  messages,
+  namespace: "dashboardSkillsMarket",
+}) as unknown as ReturnType<typeof useTranslations>;
 
 const api = vi.hoisted(() => ({
   createSkillSubmission: vi.fn(),
@@ -83,7 +89,7 @@ test("stage rows keep the server's order, then list what is still ahead", () => 
     stages: { resolve: stage("succeeded"), download: stage("running") },
   });
   expect(
-    submissionStageRows(running).map((row) => [row.name, row.status]),
+    submissionStageRows(running, tm).map((row) => [row.name, row.status]),
   ).toEqual([
     ["resolve", "succeeded"],
     ["download", "running"],
@@ -93,7 +99,7 @@ test("stage rows keep the server's order, then list what is still ahead", () => 
   ]);
   // The install stage is only announced to a submission that asked for one.
   expect(
-    submissionStageRows({ ...running, onComplete: { install: {} } }).at(-1)
+    submissionStageRows({ ...running, onComplete: { install: {} } }, tm).at(-1)
       ?.name,
   ).toBe("on-complete");
   // A finished run lists what ran — including a stage this client has never
@@ -108,7 +114,7 @@ test("stage rows keep the server's order, then list what is still ahead", () => 
       },
     },
   });
-  expect(submissionStageRows(failed)).toEqual([
+  expect(submissionStageRows(failed, tm)).toEqual([
     { name: "resolve", label: "Pin the version", status: "succeeded" },
     {
       name: "translate",
@@ -136,7 +142,11 @@ async function mount(onFinished = vi.fn()) {
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
-  await act(async () => root.render(<Harness onFinished={onFinished} />));
+  await act(async () => root.render(
+      <NextIntlClientProvider locale="en" messages={intlMessages}>
+        <Harness onFinished={onFinished} />
+      </NextIntlClientProvider>,
+    ));
   return onFinished;
 }
 

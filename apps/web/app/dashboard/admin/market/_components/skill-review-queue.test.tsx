@@ -1,7 +1,18 @@
 // @vitest-environment jsdom
-import { act } from "react";
+import { act, type ComponentProps, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, test, vi } from "vitest";
+import { NextIntlClientProvider } from "next-intl";
+import messages from "../../../../../messages/en.json";
+
+const intlMessages = messages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
+const withIntl = (node: ReactNode) => (
+  <NextIntlClientProvider locale="en" messages={intlMessages}>
+    {node}
+  </NextIntlClientProvider>
+);
 
 const admin = vi.hoisted(() => ({
   listSkillListingQueue: vi.fn(),
@@ -45,7 +56,7 @@ async function renderListing(items: unknown[]) {
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
-  await act(async () => root.render(<SkillReviewQueue queue="listing" />));
+  await act(async () => root.render(withIntl(<SkillReviewQueue queue="listing" />)));
 }
 
 const button = (label: string) =>

@@ -9,6 +9,7 @@ import {
   Save,
   Trash2,
 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { Badge } from "@sourceweft/ui-web/components/ui/badge";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { Input } from "@sourceweft/ui-web/components/ui/input";
@@ -22,9 +23,6 @@ import {
   updateSkillCollection,
   type SkillCollectionAdmin,
 } from "../../../../../lib/skill-market-admin";
-import { skillsMarketCopy } from "../../../skills/_components/skills-market-copy";
-
-const copy = skillsMarketCopy.collections;
 
 /** Slugs typed one per line (commas too), blanks dropped, order kept. */
 export function parseCollectionSlugs(text: string): string[] {
@@ -38,9 +36,12 @@ export function parseCollectionSlugs(text: string): string[] {
   ];
 }
 
-function errorMessage(error: unknown) {
+/** The server's own message, or ours; `t` is `dashboardSkillsMarket`. */
+function errorMessage(error: unknown, t: ReturnType<typeof useTranslations>) {
   const message = (error as { message?: unknown } | null)?.message;
-  return typeof message === "string" && message ? message : copy.failed;
+  return typeof message === "string" && message
+    ? message
+    : t("collections.failed");
 }
 
 /**
@@ -57,6 +58,7 @@ function CollectionEditor({
   onChange: (next: SkillCollectionAdmin) => void;
   onDelete: (id: string) => void;
 }) {
+  const t = useTranslations("dashboardSkillsMarket");
   const [title, setTitle] = React.useState(collection.title);
   const [summary, setSummary] = React.useState(collection.summary);
   const [position, setPosition] = React.useState(String(collection.position));
@@ -75,9 +77,9 @@ function CollectionEditor({
         onChange(next);
         setSlugs(next.items.map((item) => item.slug).join("\n"));
       }
-      setMessage(copy.saved);
+      setMessage(t("collections.saved"));
     } catch (error) {
-      setMessage(errorMessage(error));
+      setMessage(errorMessage(error, t));
     } finally {
       setBusy(false);
     }
@@ -92,7 +94,7 @@ function CollectionEditor({
           <code className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
             {collection.slug}
           </code>
-          <Badge variant="outline">{copy.skillCount(collection.items.length)}</Badge>
+          <Badge variant="outline">{t("collections.skillCount", { count: collection.items.length })}</Badge>
           {collection.published ? (
             <a
               className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
@@ -100,7 +102,7 @@ function CollectionEditor({
               rel="noreferrer noopener"
               target="_blank"
             >
-              {copy.view}
+              {t("collections.view")}
               <ExternalLink className="size-3" />
             </a>
           ) : null}
@@ -108,7 +110,7 @@ function CollectionEditor({
         <div className="flex items-center gap-3">
           <label className="flex items-center gap-2 text-xs text-muted-foreground">
             <Switch
-              aria-label={copy.publishedLabel}
+              aria-label={t("collections.publishedLabel")}
               checked={collection.published}
               disabled={busy}
               onCheckedChange={(checked) =>
@@ -119,12 +121,14 @@ function CollectionEditor({
                 )
               }
             />
-            {copy.publishedLabel}
+            {t("collections.publishedLabel")}
           </label>
           <Button
             disabled={busy}
             onClick={() => {
-              if (window.confirm(copy.confirmDelete(collection.title))) {
+              if (window.confirm(
+                  t("collections.confirmDelete", { title: collection.title }),
+                )) {
                 void run(async () => {
                   await deleteSkillCollection(collection.id);
                   onDelete(collection.id);
@@ -135,35 +139,35 @@ function CollectionEditor({
             variant="outline"
           >
             <Trash2 className="size-4" />
-            {copy.delete}
+            {t("collections.delete")}
           </Button>
         </div>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-[1fr_120px]">
         <Input
-          aria-label={copy.titleLabel}
+          aria-label={t("collections.titleLabel")}
           disabled={busy}
           maxLength={120}
           onChange={(event) => setTitle(event.target.value)}
-          placeholder={copy.titleLabel}
+          placeholder={t("collections.titleLabel")}
           value={title}
         />
         <Input
-          aria-label={copy.positionLabel}
+          aria-label={t("collections.positionLabel")}
           disabled={busy}
           inputMode="numeric"
           onChange={(event) => setPosition(event.target.value)}
-          placeholder={copy.positionLabel}
+          placeholder={t("collections.positionLabel")}
           value={position}
         />
         <Textarea
-          aria-label={copy.summaryLabel}
+          aria-label={t("collections.summaryLabel")}
           className="sm:col-span-2"
           disabled={busy}
           maxLength={500}
           onChange={(event) => setSummary(event.target.value)}
-          placeholder={copy.summaryLabel}
+          placeholder={t("collections.summaryLabel")}
           rows={2}
           value={summary}
         />
@@ -187,16 +191,16 @@ function CollectionEditor({
         size="sm"
       >
         <Save className="size-4" />
-        {copy.save}
+        {t("collections.save")}
       </Button>
 
       <div className="space-y-2">
         <Textarea
-          aria-label={copy.skillsLabel}
+          aria-label={t("collections.skillsLabel")}
           className="font-mono text-xs"
           disabled={busy}
           onChange={(event) => setSlugs(event.target.value)}
-          placeholder={copy.skillsLabel}
+          placeholder={t("collections.skillsLabel")}
           rows={Math.min(12, Math.max(3, collection.items.length + 1))}
           value={slugs}
         />
@@ -204,7 +208,7 @@ function CollectionEditor({
           <p className="text-xs text-muted-foreground">
             {collection.items
               .filter((item) => !item.public)
-              .map((item) => `${item.slug} (${copy.notPublic})`)
+              .map((item) => `${item.slug} (${t("collections.notPublic")})`)
               .join(", ")}
           </p>
         ) : null}
@@ -222,7 +226,7 @@ function CollectionEditor({
           variant="outline"
         >
           <Save className="size-4" />
-          {copy.saveSkills}
+          {t("collections.saveSkills")}
         </Button>
       </div>
 
@@ -241,6 +245,7 @@ function CollectionEditor({
  * skills, publish it to the public directory, delete it.
  */
 export function SkillCollectionsAdmin() {
+  const t = useTranslations("dashboardSkillsMarket");
   const [items, setItems] = React.useState<SkillCollectionAdmin[] | null>(
     null,
   );
@@ -255,10 +260,10 @@ export function SkillCollectionsAdmin() {
       setItems((await listSkillCollections()).items);
     } catch (caught) {
       const status = (caught as { status?: number } | null)?.status;
-      setError(status === 403 ? copy.forbidden : copy.loadFailed);
+      setError(status === 403 ? t("collections.forbidden") : t("collections.loadFailed"));
       setItems([]);
     }
-  }, []);
+  }, [t]);
 
   React.useEffect(() => {
     void load();
@@ -277,7 +282,7 @@ export function SkillCollectionsAdmin() {
       setSlug("");
       setTitle("");
     } catch (caught) {
-      setError(errorMessage(caught));
+      setError(errorMessage(caught, t));
     } finally {
       setCreating(false);
     }
@@ -285,9 +290,9 @@ export function SkillCollectionsAdmin() {
 
   return (
     <div>
-      <h1 className="text-2xl font-semibold tracking-tight">{copy.title}</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">{t("collections.title")}</h1>
       <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-        {copy.intro}
+        {t("collections.intro")}
       </p>
 
       <form
@@ -295,25 +300,25 @@ export function SkillCollectionsAdmin() {
         onSubmit={(event) => void create(event)}
       >
         <div className="flex-1 space-y-1">
-          <p className="text-xs font-medium">{copy.newTitle}</p>
+          <p className="text-xs font-medium">{t("collections.newTitle")}</p>
           <Input
-            aria-label={copy.slugLabel}
+            aria-label={t("collections.slugLabel")}
             disabled={creating}
             maxLength={64}
             onChange={(event) => setSlug(event.target.value)}
             pattern="[a-z0-9]+(-[a-z0-9]+)*"
-            placeholder={copy.slugPlaceholder}
-            title={copy.slugHint}
+            placeholder={t("collections.slugPlaceholder")}
+            title={t("collections.slugHint")}
             value={slug}
           />
         </div>
         <Input
-          aria-label={copy.titleLabel}
+          aria-label={t("collections.titleLabel")}
           className="flex-1"
           disabled={creating}
           maxLength={120}
           onChange={(event) => setTitle(event.target.value)}
-          placeholder={copy.titleLabel}
+          placeholder={t("collections.titleLabel")}
           value={title}
         />
         <Button
@@ -326,7 +331,7 @@ export function SkillCollectionsAdmin() {
           ) : (
             <Plus className="size-4" />
           )}
-          {copy.create}
+          {t("collections.create")}
         </Button>
       </form>
 
@@ -340,12 +345,12 @@ export function SkillCollectionsAdmin() {
       {items === null ? (
         <div className="mt-10 flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="size-4 animate-spin" />
-          {copy.loading}
+          {t("collections.loading")}
         </div>
       ) : items.length === 0 ? (
         error ? null : (
           <p className="mt-10 rounded-xl border border-dashed py-12 text-center text-sm text-muted-foreground">
-            {copy.empty}
+            {t("collections.empty")}
           </p>
         )
       ) : (

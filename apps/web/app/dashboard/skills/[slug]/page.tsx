@@ -24,7 +24,6 @@ import {
   formatInstallCount,
   skillCategoryName,
 } from "../_components/skills-market-browse";
-import { skillsMarketCopy } from "../_components/skills-market-copy";
 
 import * as React from "react";
 import Link from "next/link";
@@ -84,6 +83,7 @@ function isSkillNotFound(error: unknown) {
 
 export default function SkillDetailPage() {
   const t = useTranslations("dashboardSkills");
+  const tm = useTranslations("dashboardSkillsMarket");
   const publisherLabel = (sourceType: SkillCatalogItem["sourceType"]) => {
     if (sourceType === "builtin") return t("publisher.official");
     if (sourceType === "team_custom") return t("publisher.team");
@@ -497,14 +497,14 @@ export default function SkillDetailPage() {
 
           {showInstallPrompt && detail ? (
             <section
-              aria-label={skillsMarketCopy.updates.installPromptLabel}
+              aria-label={tm("updates.installPromptLabel")}
               className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-xs"
               data-testid="skill-install-prompt"
             >
               <p className="min-w-0 font-medium text-foreground">
-                {skillsMarketCopy.updates.installPrompt(
-                  detail.skill.displayName,
-                )}
+                {tm("updates.installPrompt", {
+                  name: detail.skill.displayName,
+                })}
               </p>
               <div className="flex items-center gap-2">
                 <Button
@@ -515,7 +515,7 @@ export default function SkillDetailPage() {
                   type="button"
                   variant="ghost"
                 >
-                  {skillsMarketCopy.updates.installCancel}
+                  {tm("updates.installCancel")}
                 </Button>
                 <Button
                   className="h-7 px-3 text-xs"
@@ -527,7 +527,7 @@ export default function SkillDetailPage() {
                   {isInstalling ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : null}
-                  {skillsMarketCopy.updates.installConfirm}
+                  {tm("updates.installConfirm")}
                 </Button>
               </div>
             </section>
@@ -684,7 +684,7 @@ export default function SkillDetailPage() {
                     detail.skill.categories.length > 0 ? (
                       <div>
                         <dt className="text-muted-foreground">
-                          {skillsMarketCopy.detail.categories}
+                          {tm("detail.categories")}
                         </dt>
                         <dd className="mt-1 font-medium text-foreground">
                           {detail.skill.categories
@@ -698,7 +698,7 @@ export default function SkillDetailPage() {
                     {formatInstallCount(detail.skill.installCount) ? (
                       <div>
                         <dt className="text-muted-foreground">
-                          {skillsMarketCopy.detail.installs}
+                          {tm("detail.installs")}
                         </dt>
                         <dd className="mt-1 font-medium text-foreground">
                           {formatInstallCount(detail.skill.installCount)}

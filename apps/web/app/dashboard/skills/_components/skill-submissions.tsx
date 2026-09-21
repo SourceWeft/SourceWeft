@@ -13,6 +13,7 @@ import {
   RotateCw,
   X,
 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { Badge } from "@sourceweft/ui-web/components/ui/badge";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
@@ -34,16 +35,19 @@ import { contentClient } from "../../../../lib/sdk";
 const SUBMISSION_POLL_INTERVAL_MS = 2_000;
 const SUBMISSIONS_PAGE_SIZE = 20;
 
+type Translate = ReturnType<typeof useTranslations>;
+
 // The pipeline's stages in execution order, so the ones that have not started
 // can be listed ahead of time. A stage the server adds later still shows up —
-// under its own name — once it starts.
-const KNOWN_STAGES: ReadonlyArray<{ name: string; label: string }> = [
-  { name: "resolve", label: "Pin the version" },
-  { name: "download", label: "Download the repository" },
-  { name: "discover", label: "Find skills" },
-  { name: "analyze-scan", label: "Analyze and safety-scan" },
-  { name: "triage-write", label: "Index" },
-  { name: "on-complete", label: "Install" },
+// under its own name — once it starts. Each is worded by
+// `dashboardSkillsMarket.submissions.stages.<name>`.
+const KNOWN_STAGES: readonly string[] = [
+  "resolve",
+  "download",
+  "discover",
+  "analyze-scan",
+  "triage-write",
+  "on-complete",
 ];
 
 export type SubmissionStageRow = {
@@ -57,15 +61,20 @@ export function isSubmissionInFlight(submission: SkillSubmission) {
   return submission.status === "queued" || submission.status === "running";
 }
 
-/** Started stages as the server ordered them, then the known ones still ahead. */
+/**
+ * Started stages as the server ordered them, then the known ones still ahead.
+ * `t` is the `dashboardSkillsMarket` translator.
+ */
 export function submissionStageRows(
   submission: SkillSubmission,
+  t: Translate,
 ): SubmissionStageRow[] {
-  const labels = new Map(KNOWN_STAGES.map((stage) => [stage.name, stage.label]));
+  const label = (name: string) =>
+    KNOWN_STAGES.includes(name) ? t(`submissions.stages.${name}`) : name;
   const rows: SubmissionStageRow[] = Object.entries(submission.stages).map(
     ([name, stage]) => ({
       name,
-      label: labels.get(name) ?? name,
+      label: label(name),
       status: stage.status,
       ...(stage.error ? { error: stage.error.message } : {}),
     }),
@@ -75,13 +84,13 @@ export function submissionStageRows(
     return rows;
   }
   const started = new Set(rows.map((row) => row.name));
-  for (const stage of KNOWN_STAGES) {
-    if (started.has(stage.name)) continue;
+  for (const name of KNOWN_STAGES) {
+    if (started.has(name)) continue;
     // Only a submission that asked for an install runs that stage visibly.
-    if (stage.name === "on-complete" && !submission.onComplete?.install) {
+    if (name === "on-complete" && !submission.onComplete?.install) {
       continue;
     }
-    rows.push({ name: stage.name, label: stage.label, status: "pending" });
+    rows.push({ name, label: label(name), status: "pending" });
   }
   return rows;
 }
@@ -121,6 +130,7 @@ export function useSkillSubmissions({
   workspaceId: string | null;
   onFinished?: (submission: SkillSubmission) => void;
 }) {
+  const tm = useTranslations("dashboardSkillsMarket");
   const [items, setItems] = React.useState<SkillSubmission[]>([]);
   const onFinishedRef = React.useRef(onFinished);
   // Two polls of one submission can both come back terminal before the
@@ -205,11 +215,13 @@ export function useSkillSubmissions({
         track(submission);
       } catch (error) {
         toast.error(
-          error instanceof Error ? error.message : "The import was not retried.",
+          error instanceof Error
+            ? error.message
+            : tm("submissions.retryFailed"),
         );
       }
     },
-    [track, workspaceId],
+    [tm, track, workspaceId],
   );
 
   return { items, track, retry };
@@ -217,18 +229,13 @@ export function useSkillSubmissions({
 
 export type SkillSubmissionsController = ReturnType<typeof useSkillSubmissions>;
 
-const STATUS_LABELS: Record<SkillSubmission["status"], string> = {
-  queued: "Queued",
-  running: "Importing",
-  succeeded: "Done",
-  failed: "Failed",
-};
-
 export function SubmissionStatusBadge({
   submission,
 }: {
   submission: SkillSubmission;
 }) {
+  const tm = useTranslations("dashboardSkillsMarket");
+  const status = `submissions.status.${submission.status}`;
   return (
     <Badge
       className={cn(
@@ -243,7 +250,7 @@ export function SubmissionStatusBadge({
       {isSubmissionInFlight(submission) ? (
         <Loader2 className="size-3 animate-spin" />
       ) : null}
-      {STATUS_LABELS[submission.status]}
+      {tm.has(status) ? tm(status) : submission.status}
     </Badge>
   );
 }
@@ -266,11 +273,12 @@ export function SubmissionStages({
 }: {
   submission: SkillSubmission;
 }) {
-  const rows = submissionStageRows(submission);
+  const tm = useTranslations("dashboardSkillsMarket");
+  const rows = submissionStageRows(submission, tm);
   // Only an import that never reached a worker (it could not be queued).
   if (rows.length === 0) return null;
   return (
-    <ol aria-label="Import progress" className="space-y-1.5 text-xs">
+    <ol aria-label={tm("submissions.progressLabel")} className="space-y-1.5 text-xs">
       {rows.map((row) => (
         <li
           className={cn(
@@ -295,39 +303,31 @@ export function SubmissionStages({
   );
 }
 
-const RESULT_STATUS_LABELS: Record<
-  SkillSubmissionSkillResult["status"],
-  string
-> = {
-  indexed: "indexed",
-  queued: "held for review",
-  failed: "failed",
-};
-
 export function SubmissionResults({
   results,
 }: {
   results: SkillSubmissionSkillResult[];
 }) {
+  const t = useTranslations("dashboardSkills");
+  const tm = useTranslations("dashboardSkillsMarket");
   if (results.length === 0) return null;
   const summary = summarizeSubmissionResults(results);
   return (
-    <section aria-label="Import results" className="space-y-3 text-sm">
-      <p role="status">
-        {summary.indexed} indexed · {summary.queued} awaiting review ·{" "}
-        {summary.failed} failed
-      </p>
+    <section aria-label={t("submit.resultsAriaLabel")} className="space-y-3 text-sm">
+      <p role="status">{t("submit.resultsSummary", summary)}</p>
       {results.map((result, index) => (
         <div
           className="rounded-md border p-3"
           key={`${result.sourcePath}-${index}`}
         >
           <p className="font-medium">
-            {result.name ?? result.sourcePath ?? "Skill"} —{" "}
-            {RESULT_STATUS_LABELS[result.status]}
+            {result.name ?? result.sourcePath ?? t("submit.skillFallback")} —{" "}
+            {tm.has(`submissions.resultStatus.${result.status}`)
+              ? tm(`submissions.resultStatus.${result.status}`)
+              : result.status}
           </p>
           <p className="text-xs text-muted-foreground">
-            {result.sourcePath || "Repository root"}
+            {result.sourcePath || t("submit.repositoryRoot")}
             {result.version ? ` · ${result.version}` : ""}
           </p>
           {result.diagnostics.map((diagnostic, i) => (
@@ -347,12 +347,15 @@ export function SubmissionResults({
             </p>
           ))}
           {result.flags.length ? (
-            <p>Review flags: {result.flags.join(", ")}</p>
+            <p>{t("submit.reviewFlags", { flags: result.flags.join(", ") })}</p>
           ) : null}
           {result.install?.status === "failed" ? (
             <p className="text-destructive">
-              Indexed, but not installed:{" "}
-              {result.install.error?.message ?? "install it from the catalog."}
+              {tm("submissions.notInstalled", {
+                reason:
+                  result.install.error?.message ??
+                  tm("submissions.notInstalledFallback"),
+              })}
             </p>
           ) : null}
         </div>
@@ -369,6 +372,8 @@ export function SubmissionDetail({
   submission: SkillSubmission;
   onRetry: (submissionId: string) => Promise<void>;
 }) {
+  const t = useTranslations("dashboardSkills");
+  const tm = useTranslations("dashboardSkillsMarket");
   const [retrying, setRetrying] = React.useState(false);
   return (
     <div className="space-y-3">
@@ -376,7 +381,7 @@ export function SubmissionDetail({
       {submission.status === "failed" ? (
         <div className="space-y-2 text-sm" role="alert">
           <p className="text-destructive">
-            {submission.error?.message ?? "The import failed."}
+            {submission.error?.message ?? tm("submissions.failed")}
           </p>
           <Button
             className="h-7 gap-1.5 px-2 text-xs"
@@ -394,7 +399,7 @@ export function SubmissionDetail({
             ) : (
               <RotateCw className="size-3.5" />
             )}
-            Retry
+            {t("actions.retry")}
           </Button>
         </div>
       ) : null}
@@ -419,6 +424,7 @@ export function MySubmissions({
 }: {
   submissions: SkillSubmissionsController;
 }) {
+  const tm = useTranslations("dashboardSkillsMarket");
   const { items, retry } = submissions;
   const running = items.filter(isSubmissionInFlight).length;
   const [open, setOpen] = React.useState(false);
@@ -435,10 +441,12 @@ export function MySubmissions({
     >
       <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs font-medium hover:bg-accent/40">
         <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-90" />
-        My submissions
+        {tm("submissions.title")}
         <span className="text-muted-foreground">
           {items.length}
-          {running > 0 ? ` · ${running} in progress` : ""}
+          {running > 0
+            ? ` · ${tm("submissions.inProgress", { count: running })}`
+            : ""}
         </span>
       </summary>
       <ul className="divide-y divide-border border-t border-border">

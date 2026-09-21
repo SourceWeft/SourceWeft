@@ -3102,5 +3102,646 @@
       "loadFailed": "加载工作区失败。",
       "noActiveTeam": "尚未选择活跃团队。"
     }
+  },
+  "publicSkills": {
+    "brand": "SourceWeft 技能",
+    "landing": {
+      "title": "智能体技能目录",
+      "description": "浏览 SourceWeft 的公开智能体技能。在添加到工作区之前，可以查看每个技能完整的 SKILL.md、文件、版本、许可证和源代码仓库。",
+      "socialDescription": "公开的智能体技能目录，附带完整的 SKILL.md、文件、版本、许可证和来源。",
+      "heroWithCount": "探索 {count, number} 个智能体技能",
+      "heroWithoutCount": "探索智能体技能",
+      "heroTail": "完整的说明、文件、许可证和来源一目了然，随后即可添加到 SourceWeft 工作区。",
+      "searchLabel": "搜索技能",
+      "searchPlaceholder": "按名称、作者或技能用途搜索",
+      "searchSubmit": "搜索",
+      "sections": {
+        "recommended": {
+          "title": "推荐",
+          "description": "优先展示精选发布者的技能和已验证技能，其次是被工作区添加最多、仓库星标最多的技能。"
+        },
+        "newest": {
+          "title": "最新",
+          "description": "最近收录到目录中的技能。"
+        },
+        "popular": {
+          "title": "添加最多",
+          "description": "SourceWeft 工作区最常添加的技能。"
+        },
+        "collections": {
+          "title": "合集",
+          "description": "为常见任务精心挑选的技能组合。"
+        }
+      },
+      "viewAll": "查看全部",
+      "browseByCategory": "按分类浏览",
+      "emptyTitle": "技能正在同步中。",
+      "emptyBody": "公开目录已可访问，但目前还没有收录任何技能。",
+      "getStarted": {
+        "install": {
+          "title": "安装",
+          "description": "将任意已收录的技能添加到 SourceWeft 工作区。",
+          "steps": [
+            "选择一个技能，阅读它的 SKILL.md、文件和许可证。",
+            "在控制台的“技能”页面将它添加到工作区。",
+            "在对话中使用它——或者粘贴技能页面链接，让助手帮你安装。"
+          ],
+          "ctaSignedIn": "在控制台中打开技能",
+          "ctaSignedOut": "登录后安装"
+        },
+        "publish": {
+          "title": "发布",
+          "description": "从你自己的公开仓库收录技能。",
+          "steps": [
+            "将技能放在包含 SKILL.md 的公开 GitHub 仓库中。",
+            "在控制台的“技能”页面导入该仓库。",
+            "通过自动扫描的技能会被收录；被标记的技能需等待审核。"
+          ],
+          "ctaSignedIn": "导入技能",
+          "ctaSignedOut": "登录后导入"
+        }
+      }
+    },
+    "listing": {
+      "allSkills": "全部技能",
+      "allSkillsTitle": "全部技能",
+      "resultsFor": "“{query}”的搜索结果",
+      "resultsForIn": "{category}中“{query}”的搜索结果",
+      "categories": "分类",
+      "marketHome": "目录首页",
+      "sortLabel": "排序",
+      "clearFilters": "清除筛选",
+      "exactCount": "{count, plural, other {# 个技能}}",
+      "pageCount": "本页 {count, plural, other {# 个技能}}",
+      "noMatchTitle": "没有符合这些筛选条件的技能。",
+      "noMatchBody": "试试更宽泛的搜索或其他分类。",
+      "firstPage": "第一页",
+      "nextPage": "下一页",
+      "pagination": "分页"
+    },
+    "sortOptions": {
+      "recommended": "推荐",
+      "popular": "添加最多",
+      "stars": "星标最多",
+      "new": "最新",
+      "name": "名称"
+    },
+    "trustOptions": {
+      "all": "不限信任级别",
+      "featured": "精选",
+      "verified": "已验证"
+    },
+    "capabilityOptions": {
+      "all": "不限类型",
+      "prompt-only": "仅含说明",
+      "executable": "包含脚本"
+    },
+    "category": {
+      "title": "{name} 技能",
+      "fallbackMetaTitle": "技能分类",
+      "metaDescription": "浏览公开的 {name} 智能体技能，附带完整的 SKILL.md、文件、版本、许可证和来源。",
+      "description": "可以添加到 SourceWeft 工作区的公开 {name} 智能体技能。",
+      "back": "返回技能目录"
+    },
+    "breadcrumb": {
+      "label": "面包屑导航",
+      "home": "首页",
+      "skills": "技能"
+    },
+    "badges": {
+      "verified": "已验证",
+      "featured": "精选",
+      "featuredTitle": "来自精选发布者：主要厂商自己的技能仓库",
+      "executable": "包含脚本",
+      "promptOnly": "仅含说明",
+      "claimed": "作者已认领",
+      "claimedTitle": "该仓库的作者已在 SourceWeft 上认领",
+      "archived": "已归档",
+      "archivedTitle": "源代码仓库已在 GitHub 上归档：不会再有更新"
+    },
+    "card": {
+      "workspaces": "{count, plural, =1 {已添加到 1 个工作区} other {已添加到 {compact} 个工作区}}",
+      "stars": "{count} 个 GitHub 星标",
+      "updated": "{relative}更新",
+      "unknownAuthor": "未知作者"
+    },
+    "collections": {
+      "itemCount": "{count, plural, other {# 个技能}}",
+      "fallbackMetaTitle": "技能合集",
+      "metaTitle": "{title} — 智能体技能",
+      "metaDescription": "{title}：{summary}",
+      "metaDescriptionNoSummary": "{title}：精心挑选的智能体技能合集。",
+      "eyebrow": "合集",
+      "back": "返回技能目录",
+      "empty": "该合集中目前没有公开的技能。"
+    },
+    "detail": {
+      "fallbackMetaTitle": "智能体技能",
+      "metaTitle": "{name} 智能体技能",
+      "metaDescription": "{name}：{description} 查看完整的 SKILL.md、文件、版本、许可证和来源。",
+      "noLicense": "无许可证",
+      "by": "作者",
+      "repository": "仓库",
+      "source": "来源",
+      "listed": "收录于 {date}",
+      "updated": "更新于 {date}",
+      "workspaces": "{count, plural, =1 {已添加到 1 个工作区} other {已添加到 {compact} 个工作区}}",
+      "stars": "{count} 个星标",
+      "repoPushed": "仓库{relative}更新",
+      "claimLink": "你是作者吗？认领此仓库",
+      "facts": {
+        "version": "版本",
+        "license": "许可证",
+        "workspaces": "工作区",
+        "stars": "GitHub 星标",
+        "files": "文件"
+      },
+      "tabs": {
+        "skill": "SKILL.md",
+        "files": "文件（{count}）",
+        "versions": "版本（{count}）",
+        "install": "安装"
+      },
+      "tabsLabel": "技能分区",
+      "skillMdMissing": "该技能的 SKILL.md 没有可显示的正文。",
+      "imagePlaceholder": "图片",
+      "files": {
+        "path": "路径",
+        "size": "大小",
+        "type": "类型",
+        "unknownType": "—",
+        "note": "仅公开文件列表。将技能安装到工作区后即可查看文件内容。",
+        "empty": "此版本没有列出任何文件。"
+      },
+      "versions": {
+        "current": "当前",
+        "published": "发布于 {date}",
+        "unpublishedDate": "日期未知",
+        "commit": "提交",
+        "empty": "尚无已发布的版本。",
+        "noChanges": "无文件变更",
+        "compare": "在 GitHub 上比较",
+        "added": "新增 {count} 个",
+        "modified": "修改 {count} 个",
+        "removed": "删除 {count} 个",
+        "newScripts": "新增脚本：{paths}",
+        "newFlags": "新增扫描标记：{flags}"
+      },
+      "install": {
+        "heading": "添加到 SourceWeft 工作区",
+        "cta": "添加到 SourceWeft",
+        "steps": [
+          "在控制台中打开该技能，并将它添加到工作区。",
+          "为需要使用它的对话启用该技能。"
+        ],
+        "signedOutNote": "系统会先要求你登录，然后直接带你回到这个技能。",
+        "chatLead": "或者直接在对话中说：",
+        "chatPrompt": "安装技能 {slug}",
+        "copy": "复制",
+        "executableNote": "该技能包含脚本。使用该技能时，脚本会在你的工作区沙箱中运行——添加前请先查看文件列表和源代码。",
+        "promptOnlyNote": "该技能仅含说明：不附带任何可执行的脚本。",
+        "cli": {
+          "heading": "安装到你自己的电脑——推荐",
+          "lead": "适用于 Claude Code、Codex、Cursor 及其他本地智能体。SourceWeft CLI 会从源代码仓库中获取此处扫描过的那次提交，并根据扫描时记录的哈希值逐一校验每个文件。只要有任何不一致，就不会写入任何内容。",
+          "agentHint": "添加 --agent claude-code、codex、cursor 或 universal 来选择安装给哪个智能体（默认为 Claude Code）。",
+          "executableNote": "在本地安装后，该技能的脚本会直接在你的电脑上运行，而不是在沙箱中。请先阅读这些脚本——CLI 会在安装前征求你的确认。"
+        },
+        "upstream": {
+          "heading": "上游安装器——未经 SourceWeft 校验",
+          "lead": "开源的 skills 安装器会获取同一个固定的提交，但不会根据 SourceWeft 记录的哈希值校验文件。"
+        }
+      },
+      "scan": {
+        "heading": "自动扫描提示",
+        "body": "我们的自动扫描在此版本中标记了以下内容。这些标记仅供参考——安装前请阅读源代码。"
+      },
+      "details": {
+        "heading": "技能详情",
+        "slug": "Slug",
+        "name": "名称",
+        "author": "作者",
+        "type": "类型",
+        "trust": "信任级别",
+        "listed": "收录时间",
+        "updated": "更新时间",
+        "unverified": "社区",
+        "featuredAndVerified": "精选、已验证"
+      },
+      "attribution": {
+        "heading": "来源与署名",
+        "source": "来源：",
+        "inDirectory": "位于",
+        "atCommit": "提交",
+        "unknownSource": "未记录源代码仓库",
+        "license": "许可证：",
+        "ownership": "内容归原作者所有。SourceWeft 从公开仓库中收录这些内容。",
+        "report": "举报或申请下架"
+      },
+      "related": {
+        "sameRepository": "更多来自 {repository} 的技能",
+        "sameCategory": "更多{category}技能"
+      }
+    },
+    "faq": {
+      "heading": "技能常见问题",
+      "title": "智能体技能基础知识",
+      "items": {
+        "what": {
+          "question": "什么是智能体技能？",
+          "answer": "技能是一个文件夹，其中包含写有说明的 SKILL.md 文件，以及可选的脚本和参考文件。AI 智能体会按需加载它，以便更好地完成特定的工作流程。"
+        },
+        "use": {
+          "question": "如何在 SourceWeft 中使用技能？",
+          "answer": "打开技能，选择“添加到 SourceWeft”，然后在控制台中将它添加到工作区。你也可以在对话中粘贴技能页面链接，让助手帮你安装。"
+        },
+        "standalone": {
+          "question": "不使用 SourceWeft 也能安装技能吗？",
+          "answer": "可以。运行 npx @sourceweft/cli skills install 并在后面加上技能名称，即可为 Claude Code、Codex、Cursor 或其他本地智能体安装。CLI 会根据扫描时记录的哈希值校验每个文件，只要有一个不一致就不会安装任何内容。"
+        },
+        "origin": {
+          "question": "这些技能从哪里来？",
+          "answer": "技能收录自公开仓库。每个页面都会链接到源代码仓库和确切的提交，并显示作者选择的许可证。内容归原作者所有。"
+        },
+        "safety": {
+          "question": "安装技能安全吗？",
+          "answer": "技能属于第三方内容。每个版本都会经过自动扫描，已验证的技能经过了 SourceWeft 的审核，但你仍应阅读 SKILL.md 和文件列表，尤其是包含脚本的技能。"
+        },
+        "removal": {
+          "question": "如何下架我的技能？",
+          "answer": "使用技能页面上的“举报或申请下架”链接，或发送邮件至 support@sourceweft.com。我们会移除该条目，并且不会再次收录。"
+        }
+      }
+    },
+    "scanFlags": {
+      "egress:pipe-to-shell": "下载并运行远程代码（curl | sh）",
+      "egress:base64-exec": "解码并运行经过编码的命令",
+      "egress:external-post": "向外部主机发送数据",
+      "egress:fetch": "发起出站网络请求",
+      "injection:override": "包含试图覆盖助手指令的文本",
+      "injection:system-prompt": "提及系统提示词",
+      "secrets:read-credentials": "读取凭据文件",
+      "secrets:env-access": "读取环境变量",
+      "scope:other-skill-file": "读取其他技能的文件",
+      "tool:sensitive": "请求代码执行类工具",
+      "binary:executable": "附带可执行二进制文件"
+    }
+  },
+  "dashboardSkillsClaim": {
+    "page": {
+      "title": "认领仓库",
+      "back": "返回技能",
+      "intro": "如果 GitHub 仓库中的技能是你编写的，认领该仓库即可掌控它们在 SourceWeft 上的呈现方式。",
+      "benefitsTitle": "认领后你将获得",
+      "benefits": [
+        "控制该仓库的每个技能是否在公开市场上架。",
+        "这些技能会带有「作者已认领」标记。",
+        "可以将它们从 SourceWeft 公开市场中全部移除。"
+      ],
+      "benefitsNote": "无论你如何决定，已安装技能的工作区都会继续保留它。",
+      "repoLabel": "仓库",
+      "repoPlaceholder": "owner/repo",
+      "lookUp": "查找",
+      "repoInvalid": "请以 owner/repo 格式输入 GitHub 仓库。",
+      "repoNotFound": "SourceWeft 上没有来自此仓库的社区技能。",
+      "skillCount": "{count, plural, other {# 个社区技能}}",
+      "claimedByYou": "你已认领此仓库。",
+      "claimedBySomeone": "另一位作者已认领此仓库。如果认领看起来有误，市场管理员可以进行复核。",
+      "methodsTitle": "只有仓库所有者才能认领",
+      "accountTitle": "使用你的 GitHub 账号",
+      "accountBody": "适用于你个人 GitHub 账号下的仓库：我们会检查你关联的 GitHub 账号是否拥有该仓库。协作者和维护者无法认领不属于自己的仓库。",
+      "accountAction": "使用 GitHub 账号认领",
+      "accountHints": {
+        "not_linked": "请先关联拥有此仓库的 GitHub 账号。",
+        "organization": "此仓库属于某个组织，无法在此认领。",
+        "not_owner": "你关联的 GitHub 账号不拥有此仓库，因此无法认领。"
+      },
+      "linkGitHub": "打开安全设置",
+      "organizationTitle": "归组织所有",
+      "organizationBody": "只有仓库所有者才能认领，而此仓库的所有者是一个组织，因此任何人都无法自行认领。改由 SourceWeft 管理员授予认领：请从能证明你代表该组织的邮箱地址发邮件给支持团队，并告诉我们应由哪个 SourceWeft 账号持有认领。",
+      "organizationAction": "发邮件给支持团队申请认领",
+      "verified": "仓库已认领，其中的技能现在由你管理。",
+      "yourClaims": "你的认领",
+      "noClaims": "你还没有认领任何仓库。",
+      "suggestionsTitle": "你可以认领的仓库",
+      "suggestionsBody": "这些仓库属于你关联的 GitHub 账号，并且在这里有社区技能。在你认领之前不会有任何变化。",
+      "suggestionAction": "认领",
+      "status": {
+        "verified": "已认领",
+        "revoked": "已撤销"
+      },
+      "methodLabel": {
+        "github_account": "GitHub 账号",
+        "verification_file": "验证文件",
+        "admin_grant": "由管理员授予"
+      },
+      "noWorkspace": "请打开一个工作区以认领仓库。",
+      "loadFailed": "无法加载认领信息。",
+      "retry": "重试"
+    },
+    "panel": {
+      "title": "作者",
+      "claimedByYou": "已由你认领",
+      "claimedByAuthor": "已由作者认领",
+      "unclaimedBody": "此仓库中的技能是你编写的吗？认领它即可控制它们在这里的呈现方式。",
+      "claimLink": "认领此仓库",
+      "manageLink": "管理认领",
+      "remove": "从 SourceWeft 移除",
+      "removeHint": "将此仓库的所有技能从公开市场下架。已安装它们的工作区会继续保留。",
+      "confirmTitle": "从 SourceWeft 移除此仓库的技能？",
+      "confirmBody": "来自 {repo} 的所有技能都将从公开市场下架，并保持下架状态。已安装的工作区可以继续使用。之后你可以通过技能的上架开关重新上架。",
+      "confirm": "移除",
+      "cancel": "取消",
+      "removedToast": "{count, plural, other {已从公开市场移除 # 个技能}}",
+      "removeFailed": "无法移除此仓库的技能。"
+    },
+    "admin": {
+      "claim": "作者认领",
+      "unclaimed": "未认领",
+      "claimedBy": "已由用户 {userId} 认领",
+      "method": {
+        "github_account": "（通过 GitHub 账号）",
+        "verification_file": "（通过验证文件）",
+        "admin_grant": "（由管理员授予）"
+      },
+      "grantTitle": "授予认领",
+      "grantHint": "适用于组织的仓库，这类仓库任何人都无法自行认领。此邮箱对应的账号将成为该仓库的作者。",
+      "grantEmailLabel": "作者邮箱",
+      "grantEmailPlaceholder": "author@example.com",
+      "grant": "授予",
+      "grantedToast": "认领已授予",
+      "grantErrors": {
+        "SKILL_CLAIM_USER_NOT_FOUND": "没有使用该邮箱的 SourceWeft 账号。",
+        "SKILL_REPO_ALREADY_CLAIMED": "已有人持有此仓库，请先撤销该认领。",
+        "fallback": "无法授予认领。"
+      },
+      "revoke": "撤销认领",
+      "confirmRevokeTitle": "撤销此作者认领？",
+      "confirmRevokeBody": "此仓库的技能将失去「作者已认领」标记，并各自归还给最初导入它们的人。作者可以再次认领。",
+      "revokedToast": "认领已撤销"
+    },
+    "featured": {
+      "label": "精选",
+      "hint": "平台导入会将少数知名发布者设为精选。在此处更改即表示由你决定，之后的导入不会再改动它。",
+      "setByAdmin": "由管理员设置",
+      "setBySync": "由平台导入设置",
+      "featuredToast": "技能已设为精选",
+      "unfeaturedToast": "技能已取消精选"
+    },
+    "errors": {
+      "SKILL_CLAIM_REPO_NOT_FOUND": "SourceWeft 上没有来自此仓库的社区技能，或者 GitHub 上不存在该仓库。",
+      "SKILL_REPO_ALREADY_CLAIMED": "另一位作者已认领此仓库。",
+      "SKILL_CLAIM_GITHUB_NOT_LINKED": "请先在设置中关联拥有此仓库的 GitHub 账号。",
+      "SKILL_CLAIM_ORGANIZATION_REPO": "此仓库属于某个组织，只有管理员才能授予其认领。请发邮件至 support@sourceweft.com 申请。",
+      "SKILL_CLAIM_ACCOUNT_MISMATCH": "你关联的 GitHub 账号不拥有此仓库。",
+      "SKILL_CLAIM_REPO_MOVED": "此仓库已在 GitHub 上重命名或迁移，因此无法以此名称认领其在这里的技能。",
+      "SKILL_CLAIM_NOT_FOUND": "未找到此认领。",
+      "SKILL_CLAIM_NOT_VERIFIED": "只有已认领仓库的作者才能执行此操作。",
+      "SKILL_CLAIM_GITHUB_UNAVAILABLE": "无法连接到 GitHub，请稍后重试。",
+      "SKILL_CLAIM_USER_NOT_FOUND": "没有使用该邮箱的 SourceWeft 账号。",
+      "fallback": "出了点问题，请重试。"
+    }
+  },
+  "dashboardSkillsMarket": {
+    "gallery": {
+      "capabilityLabel": "能力",
+      "sectionBuiltin": "内置",
+      "sectionYours": "你的技能",
+      "sectionCommunity": "社区",
+      "communityTotal": "{count, plural, other {{count, number} 个社区技能}}",
+      "loadMore": "加载更多",
+      "loadingMore": "正在加载更多技能…",
+      "loadMoreFailed": "加载更多技能失败。"
+    },
+    "trustOptions": {
+      "all": "全部发布者",
+      "builtin": "官方",
+      "featured": "精选",
+      "verified": "已验证",
+      "community": "社区"
+    },
+    "capabilityOptions": {
+      "all": "任意能力",
+      "prompt-only": "仅含指令",
+      "executable": "包含脚本"
+    },
+    "sortOptions": {
+      "recommended": "推荐",
+      "popular": "添加最多",
+      "stars": "星标最多",
+      "new": "最新",
+      "name": "名称 A-Z"
+    },
+    "card": {
+      "verified": "已验证",
+      "featured": "精选",
+      "featuredTitle": "来自精选发布者：知名厂商自己的技能仓库",
+      "includesScripts": "包含脚本",
+      "installs": "已添加到 {formatted} 个工作区",
+      "installsOne": "已添加到 1 个工作区"
+    },
+    "detail": {
+      "categories": "分类",
+      "installs": "工作区",
+      "restrictedNotice": "此技能未公开上架，完整指令仅向已安装它的工作区显示。安装后即可阅读",
+      "restrictedSourceJoin": "，或",
+      "restrictedSourceLink": "查看源代码",
+      "restrictedEnd": "。"
+    },
+    "updates": {
+      "hubBadge": "有可用更新",
+      "hubBadgeTitle": "有更新的版本可用——打开技能即可更新",
+      "notice": "有更新的版本可用。",
+      "noticeWithVersion": "有更新的版本可用：{version}。",
+      "action": "更新到最新版本",
+      "changesLead": "变更内容：",
+      "changedFiles": "{count, plural, other {# 个文件}}",
+      "noFileChanges": "无文件变更",
+      "newScripts": "{count, plural, other {# 个新脚本}}",
+      "newFlags": "{count, plural, other {# 个新扫描标记}}",
+      "compare": "在 GitHub 上比较",
+      "installPrompt": "将 {name} 安装到此工作区？",
+      "installPromptLabel": "确认安装",
+      "installConfirm": "安装",
+      "installCancel": "取消",
+      "listSeparator": "，"
+    },
+    "adminPanel": {
+      "title": "市场管理",
+      "standing": "状态",
+      "standingPublic": "公开",
+      "standingRestricted": "受限",
+      "standingWithdrawn": "已撤下（保留）",
+      "standingOwnerPrivate": "由所有者设为私有",
+      "listed": "上架时间",
+      "notListed": "未上架",
+      "installs": "工作区",
+      "verified": "已验证",
+      "verifiedHint": "在市场上为此技能背书。",
+      "categories": "分类",
+      "categoriesHint": "请选择 1 到 5 个。",
+      "saveCategories": "保存分类",
+      "listPublicly": "公开上架",
+      "withdraw": "撤下",
+      "confirmListTitle": "公开上架此技能？",
+      "confirmListBody": "任何人都能在市场上找到此技能并阅读其完整指令。",
+      "confirmWithdrawTitle": "从市场撤下此技能？",
+      "confirmWithdrawBody": "它将离开公开市场，并且不会再被自动上架。已安装它的工作区可以继续使用。",
+      "cancel": "取消",
+      "actionFailed": "市场操作失败。",
+      "categoryInvalid": "所选分类中有一个已不存在。",
+      "listedToast": "技能已公开上架",
+      "withdrawnToast": "技能已从市场撤下",
+      "verifiedToast": "技能已标记为已验证",
+      "unverifiedToast": "已移除已验证标记",
+      "categoriesToast": "分类已更新"
+    },
+    "review": {
+      "pageEyebrow": "市场 · 管理",
+      "tabMcp": "MCP",
+      "tabSkills": "技能",
+      "tabAll": "全部技能",
+      "tabReports": "举报",
+      "tabSettings": "设置",
+      "title": "审核技能提交",
+      "intro": "通过自动扫描的技能会自动发布。此队列包含需要人工审核的被标记版本。",
+      "forbidden": "你没有审核技能提交的权限。",
+      "loadFailed": "加载技能审核队列失败，请重试。",
+      "loading": "正在加载审核队列…",
+      "empty": "没有需要审核的技能提交。",
+      "actionFailed": "操作失败：{slug}",
+      "submittedBy": "提交者：{who}",
+      "noLicense": "无许可证",
+      "capabilityPromptOnly": "仅含指令",
+      "capabilityExecutable": "包含脚本",
+      "readSkillMd": "阅读 SKILL.md",
+      "hideSkillMd": "隐藏 SKILL.md",
+      "loadingSkillMd": "正在加载 SKILL.md…",
+      "skillMdFailed": "加载 SKILL.md 失败。",
+      "skillMdMissing": "此版本没有 SKILL.md 文本。",
+      "reasonLabel": "原因（可选）",
+      "reasonPlaceholder": "将与决定一并记录",
+      "publish": "批准并发布",
+      "reject": "拒绝",
+      "footnote": "技能审核与 MCP 市场使用相同的管理员白名单。"
+    },
+    "ownerListing": {
+      "label": "允许在公开市场上架",
+      "listed": "此技能已公开上架：任何人都能找到它并阅读其 SKILL.md。关闭此项即可下架——已安装它的工作区会继续保留。",
+      "pending": "已允许：扫描结果干净且确认其提交来自你的仓库后即会上架；被标记的版本需先等待审核。关闭此项可使其不在市场上架。",
+      "private": "未上架。已添加它的工作区会继续保留；新用户无法在市场上找到它。",
+      "heldByAdmin": "市场管理员已将此技能从公开市场撤下，只有管理员能重新上架。",
+      "allowedToast": "此技能可以公开上架",
+      "privateToast": "此技能已设为私有",
+      "failed": "无法更改上架状态，请重试。"
+    },
+    "listingQueue": {
+      "title": "决定哪些技能公开",
+      "intro": "扫描结果干净的技能会自动上架。这些技能已发布，导入者可以使用，但带有提示性标记——是否向所有人展示由你决定。新版本增加了扫描标记或脚本的公开技能也在这里：在你选择保留或撤下之前，它们仍保持公开。",
+      "forbidden": "你没有管理技能上架的权限。",
+      "loadFailed": "加载上架队列失败，请重试。",
+      "loading": "正在加载上架队列…",
+      "empty": "没有等待上架决定的技能。",
+      "publish": "公开上架",
+      "reject": "保持私有",
+      "footnote": "将技能保持私有会锁定它：之后不会自动上架。你随时可以在它自己的页面上将其上架。",
+      "reasons": {
+        "flagged": "已标记，尚未公开",
+        "new-version-flags": "公开 · 新版本增加了扫描标记",
+        "new-version-scripts": "公开 · 新版本增加了脚本"
+      },
+      "keepPublic": "保持公开",
+      "withdraw": "撤下",
+      "changesTitle": "与上一版本相比的变更",
+      "changesAdded": "新增：{paths}",
+      "changesRemoved": "删除：{paths}",
+      "changesModified": "修改：{paths}",
+      "changesNewScripts": "新脚本：{paths}",
+      "changesNewFlags": "新扫描标记：{flags}",
+      "compare": "在 GitHub 上比较"
+    },
+    "collections": {
+      "tab": "合集",
+      "title": "合集",
+      "intro": "精心挑选的公开技能集合，展示在公开技能目录中。只有已发布的合集会出现在那里，且合集中只显示公开的技能。",
+      "loading": "正在加载合集…",
+      "loadFailed": "加载合集失败，请重试。",
+      "forbidden": "你没有管理合集的权限。",
+      "empty": "暂无合集。",
+      "newTitle": "新建合集",
+      "slugLabel": "Slug",
+      "slugPlaceholder": "office-work",
+      "slugHint": "仅限小写字母、数字和连字符。它是页面地址，创建后不可更改。",
+      "titleLabel": "标题",
+      "summaryLabel": "摘要",
+      "positionLabel": "位置",
+      "publishedLabel": "已发布",
+      "create": "创建",
+      "save": "保存",
+      "delete": "删除",
+      "confirmDelete": "删除合集「{title}」？",
+      "skillsLabel": "技能，每行一个 slug，按顺序排列",
+      "saveSkills": "保存技能",
+      "notPublic": "未公开",
+      "view": "查看",
+      "saved": "已保存",
+      "failed": "更改未保存。",
+      "skillCount": "{count, plural, other {# 个技能}}"
+    },
+    "flagLabels": {
+      "egress:pipe-to-shell": "下载并运行：curl | sh",
+      "egress:base64-exec": "base64 | sh",
+      "egress:external-post": "向外部主机发送数据",
+      "egress:fetch": "出站网络调用",
+      "injection:override": "提示注入：覆盖指令",
+      "injection:system-prompt": "提及系统提示词",
+      "secrets:read-credentials": "读取凭据文件",
+      "secrets:env-access": "读取环境变量",
+      "scope:other-skill-file": "读取其他技能的文件",
+      "tool:sensitive": "请求代码执行工具",
+      "binary:executable": "附带可执行二进制文件",
+      "sticky-review": "暂缓审核：较早的版本尚未处理"
+    },
+    "escalation": {
+      "title": "此版本具有更多能力",
+      "description": "与当前已安装的版本相比，它：",
+      "addsScripts": "新增在沙箱中运行的脚本",
+      "cancel": "保留已安装的版本",
+      "confirm": "切换到此版本",
+      "flags": {
+        "binary": "附带已编译的二进制文件",
+        "sensitiveTools": "请求敏感工具",
+        "egress": "向外发送数据或运行远程代码（{flag}）",
+        "injection": "包含针对模型的指令（{flag}）",
+        "secret": "包含疑似凭据的内容（{flag}）"
+      }
+    },
+    "submissions": {
+      "title": "我的提交",
+      "inProgress": "{count} 个进行中",
+      "progressLabel": "导入进度",
+      "stages": {
+        "resolve": "固定版本",
+        "download": "下载仓库",
+        "discover": "查找技能",
+        "analyze-scan": "分析与安全扫描",
+        "triage-write": "索引",
+        "on-complete": "安装"
+      },
+      "status": {
+        "queued": "排队中",
+        "running": "导入中",
+        "succeeded": "已完成",
+        "failed": "失败"
+      },
+      "resultStatus": {
+        "indexed": "已索引",
+        "queued": "待审核",
+        "failed": "失败"
+      },
+      "notInstalled": "已索引，但未安装：{reason}",
+      "notInstalledFallback": "请从技能库中安装。",
+      "failed": "导入失败。",
+      "retryFailed": "未能重试导入。"
+    }
   }
 }

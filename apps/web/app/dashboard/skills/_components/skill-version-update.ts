@@ -1,3 +1,5 @@
+import type { useTranslations } from "next-intl";
+
 /**
  * Which version an "update" moves an install to. `currentVersionId` is the
  * skill's published current version as the catalog reports it; the version
@@ -36,24 +38,22 @@ type VersionChangelog = {
  */
 export function summarizeVersionChangelog(
   changelog: VersionChangelog,
-  words: {
-    changedFiles: (count: number) => string;
-    noFileChanges: string;
-    newScripts: (count: number) => string;
-    newFlags: (count: number) => string;
-  },
+  // The `dashboardSkillsMarket` translator: reads `updates.*`.
+  t: ReturnType<typeof useTranslations>,
 ) {
   const files =
     changelog.added.length +
     changelog.removed.length +
     changelog.modified.length;
   const parts = [
-    files > 0 ? words.changedFiles(files) : words.noFileChanges,
+    files > 0
+      ? t("updates.changedFiles", { count: files })
+      : t("updates.noFileChanges"),
     changelog.newScripts.length > 0
-      ? words.newScripts(changelog.newScripts.length)
+      ? t("updates.newScripts", { count: changelog.newScripts.length })
       : null,
     changelog.newFlags.length > 0
-      ? words.newFlags(changelog.newFlags.length)
+      ? t("updates.newFlags", { count: changelog.newFlags.length })
       : null,
   ].filter((part): part is string => part !== null);
   let compareUrl: string | null = null;
@@ -66,7 +66,7 @@ export function summarizeVersionChangelog(
     compareUrl = null;
   }
   return {
-    summary: parts.join(", "),
+    summary: parts.join(t("updates.listSeparator")),
     compareUrl,
     escalates:
       changelog.newScripts.length > 0 || changelog.newFlags.length > 0,

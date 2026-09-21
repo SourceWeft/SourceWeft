@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { code } from "@streamdown/code";
 import {
   defaultRehypePlugins,
@@ -9,7 +10,6 @@ import {
 } from "streamdown";
 
 import { isolateSkillMarkerTags, untrustedMarkdownLink } from "./skills-format";
-import { skillsCopy } from "./skills-public-copy";
 
 // SKILL.md is third-party text. Streamdown's default pipeline is
 // raw → sanitize → harden, where `raw` (rehype-raw) is what turns embedded HTML
@@ -49,56 +49,69 @@ const headings: Pick<Components, "h1" | "h2" | "h3" | "h4" | "h5" | "h6"> = {
   h6: ({ children }) => <p className={`${headingClass} text-sm`}>{children}</p>,
 };
 
-const components: Components = {
-  ...headings,
-  a: ({ children, href }) => {
-    const link = untrustedMarkdownLink(href);
-    if (link.kind === "external") {
-      return (
+function skillMarkdownComponents(imagePlaceholder: string): Components {
+  return {
+    ...headings,
+    a: ({ children, href }) => {
+      const link = untrustedMarkdownLink(href);
+      if (link.kind === "external") {
+        return (
+          <a
+            className="font-medium underline underline-offset-4"
+            href={link.href}
+            rel={link.rel}
+            target={link.target}
+          >
+            {children}
+          </a>
+        );
+      }
+      if (link.kind === "anchor") {
+        return (
+          <a
+            className="font-medium underline underline-offset-4"
+            href={link.href}
+          >
+            {children}
+          </a>
+        );
+      }
+      return <span>{children}</span>;
+    },
+    // Remote images are not loaded: they would let a third party track visitors
+    // of our page and swap the picture after indexing. The alt text stays, as a
+    // link to the image when it has a safe address.
+    img: ({ alt, src }) => {
+      const label = alt?.trim() || imagePlaceholder;
+      const link = untrustedMarkdownLink(typeof src === "string" ? src : null);
+      return link.kind === "external" ? (
         <a
           className="font-medium underline underline-offset-4"
           href={link.href}
           rel={link.rel}
           target={link.target}
         >
-          {children}
+          [{label}]
         </a>
+      ) : (
+        <span>[{label}]</span>
       );
-    }
-    if (link.kind === "anchor") {
-      return (
-        <a
-          className="font-medium underline underline-offset-4"
-          href={link.href}
-        >
-          {children}
-        </a>
-      );
-    }
-    return <span>{children}</span>;
-  },
-  // Remote images are not loaded: they would let a third party track visitors
-  // of our page and swap the picture after indexing. The alt text stays, as a
-  // link to the image when it has a safe address.
-  img: ({ alt, src }) => {
-    const label = alt?.trim() || skillsCopy.detail.imagePlaceholder;
-    const link = untrustedMarkdownLink(typeof src === "string" ? src : null);
-    return link.kind === "external" ? (
-      <a
-        className="font-medium underline underline-offset-4"
-        href={link.href}
-        rel={link.rel}
-        target={link.target}
-      >
-        [{label}]
-      </a>
-    ) : (
-      <span>[{label}]</span>
-    );
-  },
-};
+    },
+  };
+}
 
-export function SkillMarkdown({ children }: { children: string }) {
+export function SkillMarkdown({
+  children,
+  imagePlaceholder,
+}: {
+  children: string;
+  /** The localized word shown for an image that is not loaded, e.g. "Image". */
+  imagePlaceholder: string;
+}) {
+  const components = useMemo(
+    () => skillMarkdownComponents(imagePlaceholder),
+    [imagePlaceholder],
+  );
   return (
     <Streamdown
       className="w-full min-w-0 max-w-full text-sm leading-7 [overflow-wrap:anywhere] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:[overflow-wrap:normal]"

@@ -9,23 +9,71 @@ const market = vi.hoisted(() => ({
 }));
 const auth = vi.hoisted(() => ({ isSignedIn: false }));
 
-vi.mock("../../../lib/market-skills", () => ({
+vi.mock("../../../../lib/market-skills", () => ({
   ...market,
   isMarketNotFound: (error: unknown) =>
     (error as { status?: number } | null)?.status === 404,
 }));
-vi.mock("../../_landing/auth-state-server", () => ({
+vi.mock("../../../_landing/auth-state-server", () => ({
   resolveInitialLandingAuthState: async () => ({
     isPending: false,
     isSignedIn: auth.isSignedIn,
     user: null,
   }),
 }));
-vi.mock("../../_landing/components/sourceweft-header", () => ({
+vi.mock("../../../_landing/components/sourceweft-header", () => ({
   SourceWeftHeader: () => null,
 }));
-vi.mock("../../_landing/components/sourceweft-footer", () => ({
+vi.mock("../../../_landing/components/sourceweft-footer", () => ({
   SourceWeftFooter: () => null,
+}));
+// next-intl reads its request config through the Next plugin, which a unit
+// test does not have: serve the real English catalog directly instead.
+vi.mock("next-intl/server", async () => {
+  const { createTranslator } = await import("next-intl");
+  const messages = (await import("../../../../messages/en.json")).default;
+  return {
+    getTranslations: async (
+      input?: string | { locale?: string; namespace?: string },
+    ) =>
+      createTranslator({
+        locale: "en",
+        messages,
+        namespace: (typeof input === "string"
+          ? input
+          : input?.namespace) as never,
+      }),
+    setRequestLocale: () => {},
+  };
+});
+vi.mock("next-intl", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("next-intl")>();
+  const messages = (await import("../../../../messages/en.json")).default;
+  return {
+    ...actual,
+    useLocale: () => "en",
+    useTranslations: (namespace?: string) =>
+      actual.createTranslator({
+        locale: "en",
+        messages,
+        namespace: namespace as never,
+      }),
+  };
+});
+
+// The community slots are async placeholders that renderToStaticMarkup cannot
+// render synchronously; this suite is about the page around them.
+vi.mock("../_components/community/public-skill-overview", () => ({
+  PublicSkillOverview: () => null,
+}));
+vi.mock("../_components/community/public-skill-report", () => ({
+  PublicSkillReport: () => null,
+}));
+vi.mock("../_components/community/public-skill-reviews", () => ({
+  PublicSkillReviews: () => null,
+}));
+vi.mock("../_components/community/public-skill-run-stats", () => ({
+  PublicSkillRunStats: () => null,
 }));
 
 import PublicSkillDetailPage, { generateMetadata } from "./page";
@@ -108,7 +156,7 @@ function response(
 
 async function render(tab?: string) {
   const element = await PublicSkillDetailPage({
-    params: Promise.resolve({ slug: "pdf-forms" }),
+    params: Promise.resolve({ locale: "en", slug: "pdf-forms" }),
     searchParams: Promise.resolve(tab ? { tab } : {}),
   });
   return renderToStaticMarkup(element);
@@ -403,7 +451,7 @@ describe("public skill detail page", () => {
 describe("generateMetadata", () => {
   it("canonicalises every tab to the bare skill URL and indexes only the default", async () => {
     const base = await generateMetadata({
-      params: Promise.resolve({ slug: "pdf-forms" }),
+      params: Promise.resolve({ locale: "en", slug: "pdf-forms" }),
       searchParams: Promise.resolve({}),
     });
     expect(base.title).toBe("PDF Forms Agent Skill");
@@ -411,7 +459,7 @@ describe("generateMetadata", () => {
     expect(base.robots).toBeUndefined();
 
     const files = await generateMetadata({
-      params: Promise.resolve({ slug: "pdf-forms" }),
+      params: Promise.resolve({ locale: "en", slug: "pdf-forms" }),
       searchParams: Promise.resolve({ tab: "files" }),
     });
     expect(String(files.alternates?.canonical)).toMatch(/\/skills\/pdf-forms$/);

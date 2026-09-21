@@ -4,7 +4,9 @@ import { describe, expect, it } from "vitest";
 import { SkillMarkdown } from "./skill-markdown";
 
 function render(markdown: string) {
-  return renderToStaticMarkup(<SkillMarkdown>{markdown}</SkillMarkdown>);
+  return renderToStaticMarkup(
+    <SkillMarkdown imagePlaceholder="Image">{markdown}</SkillMarkdown>,
+  );
 }
 
 describe("SkillMarkdown", () => {

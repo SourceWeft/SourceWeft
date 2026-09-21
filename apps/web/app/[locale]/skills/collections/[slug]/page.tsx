@@ -2,24 +2,27 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
+import { hasLocale } from "next-intl";
+import { getTranslations, setRequestLocale } from "next-intl/server";
 
-import { JsonLd } from "../../../_components/seo/json-ld";
-import { SkillIcon } from "../../../_components/site-icons";
-import { resolveInitialLandingAuthState } from "../../../_landing/auth-state-server";
-import { SourceWeftFooter } from "../../../_landing/components/sourceweft-footer";
-import { SourceWeftHeader } from "../../../_landing/components/sourceweft-header";
+import { routing } from "../../../../../i18n/routing";
+import { JsonLd } from "../../../../_components/seo/json-ld";
+import { SkillIcon } from "../../../../_components/site-icons";
+import { resolveInitialLandingAuthState } from "../../../../_landing/auth-state-server";
+import { SourceWeftFooter } from "../../../../_landing/components/sourceweft-footer";
+import { SourceWeftHeader } from "../../../../_landing/components/sourceweft-header";
 import {
   isIndexableListing,
   NO_INDEX_METADATA,
   OG_IMAGE,
   SITE_NAME,
   SITE_URL,
-} from "../../../seo";
+} from "../../../../seo";
 import {
   getPublicSkillCollection,
   isMarketNotFound,
   listPublicSkillCategories,
-} from "../../../../lib/market-skills";
+} from "../../../../../lib/market-skills";
 import {
   SkillCardGrid,
   skillCategoryNames,
@@ -30,7 +33,6 @@ import {
   skillPath,
   skillsContainerClassName,
 } from "../../_components/skills-format";
-import { skillsCopy } from "../../_components/skills-public-copy";
 
 // Canonical and JSON-LD embed the public site URL, injected at container
 // start, so this is never prerendered at build time. Freshness comes from the
@@ -38,10 +40,8 @@ import { skillsCopy } from "../../_components/skills-public-copy";
 export const dynamic = "force-dynamic";
 
 type PageProps = {
-  params: Promise<{ slug: string }>;
+  params: Promise<{ locale: string; slug: string }>;
 };
-
-const copy = skillsCopy.collections;
 
 async function loadCollection(slug: string) {
   try {
@@ -59,12 +59,24 @@ async function loadCollection(slug: string) {
 export async function generateMetadata({
   params,
 }: PageProps): Promise<Metadata> {
-  const { slug } = await params;
+  const { locale, slug } = await params;
+  if (!hasLocale(routing.locales, locale)) {
+    return {};
+  }
+  const t = await getTranslations({
+    locale,
+    namespace: "publicSkills.collections",
+  });
   try {
     const { collection } = await loadCollection(decodeURIComponent(slug));
-    const title = copy.metaTitle(collection.title);
+    const title = t("metaTitle", { title: collection.title });
     const description = shortSeoText(
-      copy.metaDescription(collection.title, collection.summary),
+      collection.summary
+        ? t("metaDescription", {
+            summary: collection.summary,
+            title: collection.title,
+          })
+        : t("metaDescriptionNoSummary", { title: collection.title }),
     );
     const url = `${SITE_URL}${skillCollectionPath(collection.slug)}`;
     return {
@@ -89,14 +101,17 @@ export async function generateMetadata({
       },
     };
   } catch {
-    return { title: copy.fallbackMetaTitle };
+    return { title: t("fallbackMetaTitle") };
   }
 }
 
-export default async function PublicSkillCollectionPage({
-  params,
-}: PageProps) {
-  const { slug } = await params;
+export default async function PublicSkillCollectionPage({ params }: PageProps) {
+  const { locale, slug } = await params;
+  if (!hasLocale(routing.locales, locale)) {
+    notFound();
+  }
+  setRequestLocale(locale);
+  const t = await getTranslations("publicSkills.collections");
   const [authState, result, categories] = await Promise.all([
     resolveInitialLandingAuthState(),
     loadCollection(decodeURIComponent(slug)),
@@ -138,12 +153,12 @@ export default async function PublicSkillCollectionPage({
             href="/skills"
           >
             <ArrowLeft className="size-4" />
-            {copy.back}
+            {t("back")}
           </Link>
           <div className="max-w-4xl">
             <span className="mb-5 inline-flex items-center gap-2 rounded-full border border-zinc-300 bg-white/48 px-3 py-1 text-xs font-medium text-zinc-600 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-400">
               <SkillIcon className="size-3.5" />
-              {copy.eyebrow}
+              {t("eyebrow")}
             </span>
             <h1 className="text-4xl font-semibold leading-tight tracking-tight sm:text-5xl">
               {collection.title}
@@ -154,7 +169,7 @@ export default async function PublicSkillCollectionPage({
               </p>
             ) : null}
             <p className="mt-3 text-sm text-zinc-500">
-              {copy.itemCount(items.length)}
+              {t("itemCount", { count: items.length })}
             </p>
           </div>
         </div>
@@ -168,7 +183,7 @@ export default async function PublicSkillCollectionPage({
           />
         ) : (
           <p className="rounded-xl border border-zinc-300 bg-white/54 p-10 text-center text-sm text-zinc-500 dark:border-white/10 dark:bg-white/[0.03]">
-            {copy.empty}
+            {t("empty")}
           </p>
         )}
       </section>

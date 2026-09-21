@@ -37,7 +37,6 @@ import {
   resolveUpdateTarget,
   summarizeVersionChangelog,
 } from "./skill-version-update";
-import { skillsMarketCopy } from "./skills-market-copy";
 
 /** What the API reports when a version can do more than the installed one. */
 type VersionEscalation = { addsScripts: boolean; newFlags: string[] };
@@ -55,15 +54,16 @@ function readEscalation(details: unknown): VersionEscalation {
 }
 
 /** A scan flag in words; an unknown one is shown as it is rather than hidden. */
-function describeScanFlag(flag: string) {
-  if (flag === "binary:executable") return "Ships a compiled binary";
-  if (flag === "tool:sensitive") return "Asks for sensitive tools";
-  if (flag.startsWith("egress:"))
-    return `Sends data out or runs remote code (${flag})`;
+function describeScanFlag(
+  flag: string,
+  t: ReturnType<typeof useTranslations>,
+) {
+  if (flag === "binary:executable") return t("escalation.flags.binary");
+  if (flag === "tool:sensitive") return t("escalation.flags.sensitiveTools");
+  if (flag.startsWith("egress:")) return t("escalation.flags.egress", { flag });
   if (flag.startsWith("injection:"))
-    return `Contains instructions aimed at the model (${flag})`;
-  if (flag.startsWith("secret:"))
-    return `Contains something that looks like a credential (${flag})`;
+    return t("escalation.flags.injection", { flag });
+  if (flag.startsWith("secret:")) return t("escalation.flags.secret", { flag });
   return flag;
 }
 
@@ -93,6 +93,7 @@ export function RegistryVersions({
   onChanged: () => void;
 }) {
   const t = useTranslations("dashboardSkills");
+  const tm = useTranslations("dashboardSkillsMarket");
   const [list, setList] = React.useState<RegistryVersionsResponse | null>(null);
   const [selected, setSelected] = React.useState(initialVersionId);
   const [detail, setDetail] = React.useState<RegistryVersionDetail | null>(
@@ -233,7 +234,7 @@ export function RegistryVersions({
       ? targetChangelog.changelog
       : null;
   const updateSummary = updateChangelog
-    ? summarizeVersionChangelog(updateChangelog, skillsMarketCopy.updates)
+    ? summarizeVersionChangelog(updateChangelog, tm)
     : null;
   // Offered whenever the viewed version is not the installed one — also when it
   // is the update target. The notice above is a shortcut to the same switch,
@@ -337,10 +338,10 @@ export function RegistryVersions({
         >
           <span className="text-foreground">
             {updateTargetVersion
-              ? skillsMarketCopy.updates.noticeWithVersion(
-                  shortVersion(updateTargetVersion),
-                )
-              : skillsMarketCopy.updates.notice}
+              ? tm("updates.noticeWithVersion", {
+                  version: shortVersion(updateTargetVersion),
+                })
+              : tm("updates.notice")}
           </span>
           <Button
             size="sm"
@@ -348,7 +349,7 @@ export function RegistryVersions({
             disabled={busy}
             onClick={() => void switchVersion(updateTargetId)}
           >
-            {skillsMarketCopy.updates.action}
+            {tm("updates.action")}
           </Button>
           {updateSummary ? (
             <span
@@ -359,7 +360,7 @@ export function RegistryVersions({
               }
               data-testid="skill-update-changes"
             >
-              {skillsMarketCopy.updates.changesLead} {updateSummary.summary}
+              {tm("updates.changesLead")} {updateSummary.summary}
               {updateSummary.compareUrl ? (
                 <>
                   {" · "}
@@ -369,7 +370,7 @@ export function RegistryVersions({
                     rel="noreferrer noopener"
                     target="_blank"
                   >
-                    {skillsMarketCopy.updates.compare}
+                    {tm("updates.compare")}
                     <ExternalLink className="size-3" />
                   </a>
                 </>
@@ -511,22 +512,22 @@ export function RegistryVersions({
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>This version can do more</AlertDialogTitle>
+            <AlertDialogTitle>{tm("escalation.title")}</AlertDialogTitle>
             <AlertDialogDescription>
-              Compared with the version installed now, it:
+              {tm("escalation.description")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <ul className="list-disc space-y-1 pl-5 text-sm">
             {escalation?.addsScripts ? (
-              <li>Adds scripts that run in the sandbox</li>
+              <li>{tm("escalation.addsScripts")}</li>
             ) : null}
             {escalation?.newFlags.map((flag) => (
-              <li key={flag}>{describeScanFlag(flag)}</li>
+              <li key={flag}>{describeScanFlag(flag, tm)}</li>
             ))}
           </ul>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={busy}>
-              Keep the installed version
+              {tm("escalation.cancel")}
             </AlertDialogCancel>
             <AlertDialogAction
               disabled={busy}
@@ -537,7 +538,7 @@ export function RegistryVersions({
               }}
             >
               {busy ? <Loader2 className="size-3.5 animate-spin" /> : null}
-              Switch to it
+              {tm("escalation.confirm")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -20,6 +20,7 @@ const LOCALIZED_PREFIXES: readonly string[] = [
   "/changelog",
   "/blog",
   "/mcp",
+  "/skills",
 ];
 
 /** True when `bare` (a locale-stripped pathname) belongs to the localized marketing tree. */

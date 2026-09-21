@@ -17,7 +17,7 @@ import {
   skillCategoryPath,
   skillCollectionPath,
   skillPath,
-} from "./skills/_components/skills-format";
+} from "./[locale]/skills/_components/skills-format";
 import { sitemapLocaleAlternates } from "../lib/i18n/metadata";
 
 export const dynamic = "force-dynamic";
@@ -187,6 +187,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       url: `${SITE_URL}/mcp`,
     },
     {
+      alternates: sitemapLocaleAlternates("/skills"),
       changeFrequency: "daily",
       priority: 0.7,
       url: `${SITE_URL}/skills`,

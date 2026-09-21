@@ -87,7 +87,7 @@
           "title": "從來源生成多種成果",
           "description": "提出問題，或生成音訊概覽、學習指南、常見問答、簡報文件或時間軸——全部基於你上傳的資料，並附帶行內引用。",
           "bullets": [
-            "音訊概覽與播客",
+            "音訊概覽與 Podcast",
             "學習指南、常見問答與時間軸",
             "行內來源引用"
           ]
@@ -103,7 +103,7 @@
         },
         "everywhere": {
           "title": "在你所到之處皆可用",
-          "description": "網頁應用、桌面版與瀏覽器擴充功能——始終保持同步。在任何地方擷取網頁，在任何裝置上繼續對話。你的筆記隨你而行。",
+          "description": "網頁版、桌面版與瀏覽器擴充功能——始終保持同步。在任何地方擷取網頁，在任何裝置上繼續對話。你的筆記隨你而行。",
           "bullets": [
             "macOS 與 Windows 桌面版",
             "Chrome 與 Edge 擴充功能",
@@ -126,7 +126,7 @@
         },
         "step3": {
           "title": "與你的 AI 對話",
-          "body": "提出問題、獲取摘要、探索關聯。每個答案都基於你自己的來源，並附帶可逐條查證的行內引用。"
+          "body": "提出問題、取得摘要、探索關聯。每個答案都基於你自己的來源，並附帶可逐條查證的行內引用。"
         }
       }
     },
@@ -144,7 +144,7 @@
     "hero": {
       "eyebrow": "關於 SourceWeft",
       "heading": "一個用於有據可查思考的 AI 筆記工作區。",
-      "subtitle": "SourceWeft 幫助人們收集、連接並推理自己的材料。它專為“來源至關重要”的工作而設計：研究、學習、寫作、分析，以及團隊知識。",
+      "subtitle": "SourceWeft 幫助人們收集、連接並推理自己的材料。它專為「來源至關重要」的工作而設計：研究、學習、寫作、分析，以及團隊知識。",
       "ctaSignedIn": "開啟儀表板",
       "ctaSignedOut": "免費開始",
       "exploreFeatures": "探索功能",
@@ -166,7 +166,7 @@
       "items": {
         "grounded": {
           "title": "答案應當始終附著於來源",
-          "body": "SourceWeft 圍繞有據可查的工作構建：引用、可查證的上下文，以及能清楚交代出處的成果。"
+          "body": "SourceWeft 圍繞有據可查的工作打造：引用、可查證的上下文，以及能清楚交代出處的成果。"
         },
         "workspace": {
           "title": "工作區應當貼合你的知識",
@@ -185,11 +185,11 @@
         "在筆記、論文與來源集之間比對的研究者",
         "把課堂材料轉化為學習指南與有據講解的學生",
         "在草稿、片段與參考之間串聯想法的寫作者與創作者",
-        "需要共享上下文、又不願丟失回到原始文件線索的團隊"
+        "需要共享上下文、又不願遺失回到原始文件線索的團隊"
       ]
     },
     "direction": {
-      "eyebrow": "當前方向",
+      "eyebrow": "目前方向",
       "heading": "搶先體驗階段，專注於讓連接知識變得可靠。",
       "items": [
         "在網頁、桌面與瀏覽器擴充功能工作流中更深入地覆蓋連接來源",
@@ -197,7 +197,7 @@
         "更清晰的引用審閱方式，讓生成的成果始終易於查證"
       ]
     },
-    "buildLabel": "構建 {sha}"
+    "buildLabel": "建置 {sha}"
   },
   "changelog": {
     "meta": {
@@ -206,11 +206,11 @@
     },
     "badge": "產品更新",
     "heading": "更新日誌",
-    "subtitle": "SourceWeft 釋出的簡明記錄，依據 Git 標籤生成，讓公開更新始終與已上線的程式碼對應。",
+    "subtitle": "SourceWeft 發布的簡明記錄，依據 Git 標籤生成，讓公開更新始終與已上線的程式碼對應。",
     "ctaAbout": "關於 SourceWeft",
     "ctaFeatures": "檢視功能",
     "category": {
-      "Release": "釋出"
+      "Release": "發布"
     }
   },
   "blog": {
@@ -221,7 +221,7 @@
     },
     "badge": "SourceWeft 部落格",
     "heading": "AI 工作區的實戰筆記。",
-    "lead": "面向用連接知識來源構建產品的團隊的產品文章、實現指南與研究運作範式。",
+    "lead": "面向用連接知識來源打造產品的團隊的產品文章、實作指南與研究運作範式。",
     "sublead": "按主題瀏覽文章，從模型評估到研究運作與產品更新。",
     "latestWriting": "最新文章",
     "latestHeading": "指南、更新與系統筆記",
@@ -235,7 +235,7 @@
     "readEssay": "閱讀文章",
     "empty": {
       "title": "文章即將上線。",
-      "body": "目前還沒有釋出任何文章。請稍後再來檢視產品文章、實現指南與研究運作範式。"
+      "body": "目前還沒有發布任何文章。請稍後再來檢視產品文章、實作指南與研究運作範式。"
     },
     "article": {
       "backToBlog": "返回部落格",
@@ -248,22 +248,22 @@
     "tag": {
       "back": "返回部落格",
       "topicBadge": "主題",
-      "notFound": "未找到標籤",
+      "notFound": "找不到標籤",
       "metaTitle": "#{tag} 相關文章",
-      "description": "{count, plural, other {# 篇}}帶 #{tag} 標籤的 SourceWeft 文章：產品筆記、實現指南與研究工作流。",
-      "emptyText": "該標籤下暫無已釋出文章。",
+      "description": "{count, plural, other {# 篇}}帶 #{tag} 標籤的 SourceWeft 文章：產品筆記、實作指南與研究工作流。",
+      "emptyText": "該標籤下暫無已發布文章。",
       "browseAll": "瀏覽全部文章"
     }
   },
   "mcp": {
     "meta": {
       "title": "MCP 服務市場",
-      "description": "瀏覽面向 SourceWeft 及其他 MCP 客戶端的公開 MCP 服務。探索 HTTP、SSE 與桌面 MCP 服務，含工具、執行時與驗證資訊。",
-      "socialDescription": "一個公開的 MCP 服務目錄，含工具、傳輸、執行時與驗證資訊。"
+      "description": "瀏覽面向 SourceWeft 及其他 MCP 客戶端的公開 MCP 服務。探索 HTTP、SSE 與桌面 MCP 服務，含工具、執行環境與驗證資訊。",
+      "socialDescription": "一個公開的 MCP 服務目錄，含工具、傳輸、執行環境與驗證資訊。"
     },
     "hero": {
       "badge": "SourceWeft MCP 市場",
-      "subtitle": "{count, plural, other {探索 # 個 MCP 服務}}，工具、傳輸、鑑權與信任資訊一目瞭然，然後把它們新增到 SourceWeft 工作區。"
+      "subtitle": "{count, plural, other {探索 # 個 MCP 服務}}，工具、傳輸、驗證方式與信任資訊一目瞭然，然後把它們新增到 SourceWeft 工作區。"
     },
     "getStarted": {
       "install": {
@@ -272,36 +272,36 @@
         "ctaSignedIn": "在儀表板中開啟 MCP",
         "ctaSignedOut": "登入以安裝",
         "steps": [
-          "挑選一個服務，檢視它的工具、鑑權與信任級別。",
+          "挑選一個服務，檢視它的工具、驗證方式與信任等級。",
           "在你的工作區儀表板的 MCP 頁面新增它。",
           "私密地連接憑證，然後為對話啟用它。"
         ]
       },
       "publish": {
-        "title": "釋出",
+        "title": "發布",
         "description": "把你自己的 MCP 服務列給每一個 SourceWeft 工作區。",
         "ctaSignedIn": "提交你的服務",
         "ctaSignedOut": "登入以提交",
         "steps": [
-          "在公開的 GitHub 倉庫中釋出你的服務原始碼。",
-          "在儀表板的 MCP 頁面提交該倉庫。",
-          "經稽核後上線；受信任的釋出者會獲得徽章。"
+          "在公開的 GitHub 儲存庫中發布你的服務原始碼。",
+          "在儀表板的 MCP 頁面提交該儲存庫。",
+          "經審核後上線；受信任的發布者會獲得徽章。"
         ]
       }
     },
     "directory": {
       "featuredTitle": "精選",
-      "featuredDescription": "來自官方釋出者或經稽核驗證的服務。",
+      "featuredDescription": "來自官方發布者或經審核驗證的服務。",
       "recentTitle": "最近更新",
       "recentDescription": "新收錄的服務與最近更新的條目。",
       "categoryPopular": "熱門的 {category} MCP 服務。",
-      "browseByCategory": "按分類瀏覽"
+      "browseByCategory": "依分類瀏覽"
     },
-    "results": "“{query}”的搜尋結果",
+    "results": "「{query}」的搜尋結果",
     "allServers": "全部 MCP 服務",
     "search": {
       "ariaLabel": "搜尋 MCP 服務",
-      "placeholder": "按名稱、提供方或能力搜尋",
+      "placeholder": "依名稱、提供方或能力搜尋",
       "button": "搜尋"
     },
     "listing": {
@@ -314,7 +314,7 @@
       "noMatchTitle": "沒有符合這些篩選條件的 MCP 服務。",
       "noMatchBody": "試試更寬泛的搜尋或另一個分類。",
       "syncingTitle": "MCP 服務正在同步。",
-      "syncingBody": "公開市場已可用，但目前還沒有已釋出的 MCP 服務。",
+      "syncingBody": "公開市場已可用，但目前還沒有已發布的 MCP 服務。",
       "paginationLabel": "分頁",
       "firstPage": "第一頁",
       "nextPage": "下一頁"
@@ -323,9 +323,9 @@
       "backToMarket": "返回 MCP 市場",
       "notFound": "MCP 分類",
       "title": "{name} MCP 服務",
-      "descriptionTemplate": "瀏覽公開的 {name} MCP 服務，含工具、傳輸、執行時與驗證資訊。",
+      "descriptionTemplate": "瀏覽公開的 {name} MCP 服務，含工具、傳輸、執行環境與驗證資訊。",
       "bodyDescription": "面向 SourceWeft 及其他 MCP 客戶端的公開 {name} MCP 服務。",
-      "resultsIn": "在 {category} 中“{query}”的搜尋結果"
+      "resultsIn": "在 {category} 中「{query}」的搜尋結果"
     },
     "badges": {
       "verification": {
@@ -346,7 +346,7 @@
       }
     },
     "card": {
-      "auth": "鑑權",
+      "auth": "驗證方式",
       "tools": "{count, plural, other {# 個工具}}",
       "viewAll": "檢視全部"
     },
@@ -361,11 +361,11 @@
       "items": {
         "what": {
           "question": "什麼是 MCP 服務？",
-          "answer": "MCP 服務通過 Model Context Protocol 暴露工具與上下文，讓 AI 客戶端能以結構化的方式呼叫外部系統。"
+          "answer": "MCP 服務透過 Model Context Protocol 暴露工具與上下文，讓 AI 客戶端能以結構化的方式呼叫外部系統。"
         },
         "use": {
           "question": "如何在 SourceWeft 中使用 MCP 服務？",
-          "answer": "在 SourceWeft 中開啟該 MCP 服務，將其安裝到工作區，按需配置憑證，然後在儀表板為對話執行啟用它。"
+          "answer": "在 SourceWeft 中開啟該 MCP 服務，將其安裝到工作區，按需設定憑證，然後在儀表板為對話執行啟用它。"
         },
         "safe": {
           "question": "未驗證的 MCP 服務安全嗎？",
@@ -373,11 +373,11 @@
         },
         "transport": {
           "question": "HTTP/SSE 與 STDIO MCP 有什麼區別？",
-          "answer": "HTTP 與 SSE MCP 服務在遠端執行，可從網頁執行時使用。STDIO MCP 服務會啟動本地程序，因此需要本地桌面宿主。"
+          "answer": "HTTP 與 SSE MCP 服務在遠端執行，可從網頁執行環境使用。STDIO MCP 服務會啟動本機處理程序，因此需要本機桌面主機。"
         },
         "keys": {
           "question": "MCP 服務需要 API 金鑰嗎？",
-          "answer": "有些 MCP 服務需要 Bearer 權杖、API 金鑰或自定義請求頭。SourceWeft 會私密地儲存工作區憑證，不會在公開市場頁面上展示。"
+          "answer": "有些 MCP 服務需要 Bearer 權杖、API 金鑰或自訂請求標頭。SourceWeft 會私密地儲存工作區憑證，不會在公開市場頁面上展示。"
         }
       }
     },
@@ -387,16 +387,16 @@
       "breadcrumbServers": "MCP 服務",
       "updated": "更新於 {date}",
       "tools": "工具",
-      "auth": "鑑權",
-      "license": "許可證",
+      "auth": "驗證方式",
+      "license": "授權條款",
       "language": "語言",
       "required": "需要",
       "notRequired": "無需",
       "unknown": "未知",
       "addToWorkspace": "新增到工作區",
       "signInToInstall": "登入以安裝",
-      "homepage": "主頁",
-      "repository": "倉庫",
+      "homepage": "首頁",
+      "repository": "儲存庫",
       "source": "原始碼",
       "nav": {
         "overview": "概覽",
@@ -413,22 +413,22 @@
       "step2": "連接 {name} 憑證。它們會被私密儲存，絕不會在公開頁面上展示。",
       "step2Fallback": "所需的",
       "step3": "為需要使用其工具的對話啟用該服務。",
-      "runtimeVia": "{runtime}，通過 {transport}。",
-      "stdioNote": " STDIO 服務會啟動本地程序，因此需要 SourceWeft 桌面宿主。",
-      "remoteNote": " 遠端服務在工作區中配置後即可從網頁執行時執行。",
+      "runtimeVia": "{runtime}，透過 {transport}。",
+      "stdioNote": " STDIO 服務會啟動本機處理程序，因此需要 SourceWeft 桌面主機。",
+      "remoteNote": " 遠端服務在工作區中設定後即可從網頁執行環境執行。",
       "otherClients": "其他 MCP 客戶端",
-      "otherClientsConfig": "把它新增到你客戶端的 <code>mcpServers</code> 配置中。",
+      "otherClientsConfig": "把它新增到你客戶端的 <code>mcpServers</code> 設定中。",
       "oauthNote": " 客戶端會在首次連接時完成 OAuth 登入。",
-      "followRepo": "參照 <link>倉庫</link> 中的啟動說明。",
+      "followRepo": "參照 <link>儲存庫</link> 中的啟動說明。",
       "toolsHeading": "工具",
       "versionsHeading": "版本歷史",
       "latest": "最新",
-      "serverDetails": "服務詳情",
-      "identifier": "識別符號",
+      "serverDetails": "服務詳細資訊",
+      "identifier": "識別碼",
       "transport": "傳輸",
-      "runtime": "執行時",
+      "runtime": "執行環境",
       "trust": "信任",
-      "published": "釋出於",
+      "published": "發布於",
       "securityHeading": "安全提示",
       "securityBody": "MCP 服務會從對話中接收工具引數，並可能執行外部操作。允許列出未驗證的服務，但 SourceWeft 會對其加以標記，以便你在啟用前先審查該服務。",
       "relatedHeading": "更多類似 {name} 的服務"
@@ -442,22 +442,22 @@
     "APP": "應用",
     "ACCOUNT": "帳戶",
     "ACCOUNTS": "帳戶",
-    "ACCOUNTS_DESCRIPTION": "管理你當前已登入的帳戶。",
+    "ACCOUNTS_DESCRIPTION": "管理你目前已登入的帳戶。",
     "ACCOUNTS_INSTRUCTIONS": "登入另一個帳戶。",
     "ADD_ACCOUNT": "新增帳戶",
     "ADD_PASSKEY": "新增通行金鑰",
     "ALREADY_HAVE_AN_ACCOUNT": "已有帳戶？",
-    "AVATAR": "頭像",
-    "AVATAR_DESCRIPTION": "點選頭像即可從你的檔案中上傳自定義頭像。",
-    "AVATAR_INSTRUCTIONS": "頭像為可選項，但強烈建議設定。",
-    "BACKUP_CODE_REQUIRED": "請輸入備份碼",
-    "BACKUP_CODES": "備份碼",
-    "BACKUP_CODES_DESCRIPTION": "請將這些備份碼儲存在安全的地方。如果你丟失了兩步驗證方式，可以使用它們來訪問你的帳戶。",
-    "BACKUP_CODE_PLACEHOLDER": "備份碼",
-    "BACKUP_CODE": "備份碼",
+    "AVATAR": "大頭貼",
+    "AVATAR_DESCRIPTION": "點選大頭貼即可從你的檔案中上傳自訂大頭貼。",
+    "AVATAR_INSTRUCTIONS": "大頭貼為選填，但強烈建議設定。",
+    "BACKUP_CODE_REQUIRED": "請輸入備用碼",
+    "BACKUP_CODES": "備用碼",
+    "BACKUP_CODES_DESCRIPTION": "請將這些備用碼儲存在安全的地方。如果你遺失了兩步驟驗證方式，可以使用它們來存取你的帳戶。",
+    "BACKUP_CODE_PLACEHOLDER": "備用碼",
+    "BACKUP_CODE": "備用碼",
     "CANCEL": "取消",
     "CHANGE_PASSWORD": "修改密碼",
-    "CHANGE_PASSWORD_DESCRIPTION": "請輸入你的當前密碼和新密碼。",
+    "CHANGE_PASSWORD_DESCRIPTION": "請輸入你的目前密碼和新密碼。",
     "CHANGE_PASSWORD_INSTRUCTIONS": "請至少使用 8 個字元。",
     "CHANGE_PASSWORD_SUCCESS": "你的密碼已修改。",
     "CONFIRM_PASSWORD": "確認密碼",
@@ -466,46 +466,46 @@
     "CONTINUE_WITH_AUTHENTICATOR": "使用身份驗證器繼續",
     "COPIED_TO_CLIPBOARD": "已複製到剪貼簿",
     "COPY_TO_CLIPBOARD": "複製到剪貼簿",
-    "COPY_ALL_CODES": "複製全部備份碼",
+    "COPY_ALL_CODES": "複製全部備用碼",
     "CONTINUE": "繼續",
-    "CURRENT_PASSWORD": "當前密碼",
-    "CURRENT_PASSWORD_PLACEHOLDER": "當前密碼",
-    "CURRENT_SESSION": "當前會話",
+    "CURRENT_PASSWORD": "目前密碼",
+    "CURRENT_PASSWORD_PLACEHOLDER": "目前密碼",
+    "CURRENT_SESSION": "目前工作階段",
     "UPDATE": "更新",
     "DELETE": "刪除",
-    "DELETE_AVATAR": "刪除頭像",
+    "DELETE_AVATAR": "刪除大頭貼",
     "DELETE_ACCOUNT": "刪除帳戶",
     "DELETE_ACCOUNT_DESCRIPTION": "永久刪除你的帳戶及其所有內容。此操作不可撤銷，請謹慎操作。",
     "DELETE_ACCOUNT_INSTRUCTIONS": "請確認刪除你的帳戶。此操作不可撤銷，請謹慎操作。",
     "DELETE_ACCOUNT_VERIFY": "請查收郵件以驗證帳戶刪除操作。",
     "DELETE_ACCOUNT_SUCCESS": "你的帳戶已刪除。",
-    "DISABLE_TWO_FACTOR": "關閉兩步驗證",
+    "DISABLE_TWO_FACTOR": "關閉兩步驟驗證",
     "DONT_HAVE_AN_ACCOUNT": "還沒有帳戶？",
     "DONE": "完成",
-    "EMAIL": "郵箱",
-    "EMAIL_DESCRIPTION": "請輸入你要用於登入的郵箱地址。",
-    "EMAIL_INSTRUCTIONS": "請輸入有效的郵箱地址。",
-    "EMAIL_IS_THE_SAME": "郵箱未更改",
+    "EMAIL": "電子郵件",
+    "EMAIL_DESCRIPTION": "請輸入你要用於登入的電子郵件地址。",
+    "EMAIL_INSTRUCTIONS": "請輸入有效的電子郵件地址。",
+    "EMAIL_IS_THE_SAME": "電子郵件未更改",
     "EMAIL_PLACEHOLDER": "m@example.com",
-    "EMAIL_REQUIRED": "請輸入郵箱地址",
+    "EMAIL_REQUIRED": "請輸入電子郵件地址",
     "EMAIL_VERIFY_CHANGE": "請查收郵件以驗證此更改。",
-    "EMAIL_VERIFICATION": "郵箱驗證",
+    "EMAIL_VERIFICATION": "電子郵件驗證",
     "EMAIL_VERIFICATION_DESCRIPTION": "請查收郵件中的驗證碼以完成註冊。",
-    "EMAIL_VERIFICATION_SUCCESS": "郵箱驗證成功。",
-    "ENABLE_TWO_FACTOR": "開啟兩步驗證",
+    "EMAIL_VERIFICATION_SUCCESS": "電子郵件驗證成功。",
+    "ENABLE_TWO_FACTOR": "開啟兩步驟驗證",
     "IS_INVALID": "無效",
     "IS_REQUIRED": "為必填項",
     "IS_THE_SAME": "未更改",
     "FORGOT_AUTHENTICATOR": "無法使用身份驗證器？",
     "FORGOT_PASSWORD": "忘記密碼",
-    "FORGOT_PASSWORD_ACTION": "傳送重置連結",
-    "FORGOT_PASSWORD_DESCRIPTION": "請輸入你的郵箱以重置密碼",
-    "FORGOT_PASSWORD_EMAIL": "請查收郵件中的密碼重置連結。",
+    "FORGOT_PASSWORD_ACTION": "傳送重設連結",
+    "FORGOT_PASSWORD_DESCRIPTION": "請輸入你的電子郵件以重設密碼",
+    "FORGOT_PASSWORD_EMAIL": "請查收郵件中的密碼重設連結。",
     "FORGOT_PASSWORD_LINK": "忘記密碼？",
     "LINK": "關聯",
     "MAGIC_LINK": "魔法連結",
     "MAGIC_LINK_ACTION": "傳送魔法連結",
-    "MAGIC_LINK_DESCRIPTION": "請輸入你的郵箱以接收魔法連結",
+    "MAGIC_LINK_DESCRIPTION": "請輸入你的電子郵件以接收魔法連結",
     "MAGIC_LINK_EMAIL": "請查收郵件中的魔法連結",
     "NAME": "姓名",
     "NAME_DESCRIPTION": "請輸入你的全名或顯示名稱。",
@@ -518,15 +518,15 @@
     "OR_CONTINUE_WITH": "或使用以下方式繼續",
     "PASSKEY": "通行金鑰",
     "PASSKEYS": "通行金鑰",
-    "PASSKEYS_DESCRIPTION": "管理你的通行金鑰以實現安全訪問。",
-    "PASSKEYS_INSTRUCTIONS": "無需密碼即可安全訪問你的帳戶。",
+    "PASSKEYS_DESCRIPTION": "管理你的通行金鑰以實現安全存取。",
+    "PASSKEYS_INSTRUCTIONS": "無需密碼即可安全存取你的帳戶。",
     "PERSONAL_ACCOUNT": "個人帳戶",
     "API_KEYS": "API 金鑰",
-    "API_KEYS_DESCRIPTION": "管理你的 API 金鑰以實現安全訪問。",
-    "API_KEYS_INSTRUCTIONS": "生成 API 金鑰以通過程式訪問你的帳戶。",
+    "API_KEYS_DESCRIPTION": "管理你的 API 金鑰以實現安全存取。",
+    "API_KEYS_INSTRUCTIONS": "生成 API 金鑰以透過程式存取你的帳戶。",
     "CREATE_API_KEY": "建立 API 金鑰",
     "CREATE_API_KEY_DESCRIPTION": "為你的 API 金鑰輸入一個唯一名稱，以便與其他金鑰區分。",
-    "API_KEY_NAME_PLACEHOLDER": "新建 API 金鑰",
+    "API_KEY_NAME_PLACEHOLDER": "新 API 金鑰",
     "API_KEY_CREATED": "API 金鑰已建立",
     "CREATE_API_KEY_SUCCESS": "請複製你的 API 金鑰並妥善保管。出於安全考慮，我們無法再次顯示它。",
     "NEVER_EXPIRES": "永不過期",
@@ -548,17 +548,17 @@
     "PASSWORD_REQUIRED": "請輸入密碼",
     "PASSWORDS_DO_NOT_MATCH": "兩次輸入的密碼不一致",
     "PROVIDERS": "第三方帳號",
-    "PROVIDERS_DESCRIPTION": "將你的帳戶與第三方服務關聯。",
+    "PROVIDERS_DESCRIPTION": "將你的帳戶與第三方服務連結。",
     "RECOVER_ACCOUNT": "恢復帳戶",
     "RECOVER_ACCOUNT_ACTION": "恢復帳戶",
-    "RECOVER_ACCOUNT_DESCRIPTION": "請輸入備份碼以訪問你的帳戶",
+    "RECOVER_ACCOUNT_DESCRIPTION": "請輸入備用碼以存取你的帳戶",
     "REMEMBER_ME": "記住我",
-    "RESEND_CODE": "重新發送驗證碼",
-    "RESEND_VERIFICATION_EMAIL": "重新發送驗證郵件",
-    "RESET_PASSWORD": "重置密碼",
+    "RESEND_CODE": "重新傳送驗證碼",
+    "RESEND_VERIFICATION_EMAIL": "重新傳送驗證郵件",
+    "RESET_PASSWORD": "重設密碼",
     "RESET_PASSWORD_ACTION": "儲存新密碼",
     "RESET_PASSWORD_DESCRIPTION": "請在下方輸入你的新密碼",
-    "RESET_PASSWORD_SUCCESS": "密碼重置成功",
+    "RESET_PASSWORD_SUCCESS": "密碼重設成功",
     "REQUEST_FAILED": "請求失敗",
     "REVOKE": "撤銷",
     "DELETE_API_KEY": "刪除 API 金鑰",
@@ -566,15 +566,15 @@
     "API_KEY": "API 金鑰",
     "SIGN_IN": "登入",
     "SIGN_IN_ACTION": "登入",
-    "SIGN_IN_DESCRIPTION": "請在下方輸入你的郵箱以登入帳戶",
+    "SIGN_IN_DESCRIPTION": "請在下方輸入你的電子郵件以登入帳戶",
     "SIGN_IN_WITH": "使用",
-    "SIGN_OUT": "退出登入",
+    "SIGN_OUT": "登出",
     "SIGN_UP": "註冊",
     "SIGN_UP_ACTION": "建立帳戶",
     "SIGN_UP_DESCRIPTION": "請輸入你的資訊以建立帳戶",
     "SIGN_UP_EMAIL": "請查收郵件中的驗證連結。",
-    "SESSIONS": "會話",
-    "SESSIONS_DESCRIPTION": "管理你的活躍會話並撤銷訪問許可權。",
+    "SESSIONS": "工作階段",
+    "SESSIONS_DESCRIPTION": "管理你使用中的工作階段並撤銷存取權限。",
     "SET_PASSWORD": "設定密碼",
     "SET_PASSWORD_DESCRIPTION": "點選下方按鈕，接收一封為你的帳戶設定密碼的郵件。",
     "SETTINGS": "設定",
@@ -582,28 +582,28 @@
     "SECURITY": "安全",
     "SWITCH_ACCOUNT": "切換帳戶",
     "TRUST_DEVICE": "信任此裝置",
-    "TWO_FACTOR": "兩步驗證",
+    "TWO_FACTOR": "兩步驟驗證",
     "TWO_FACTOR_ACTION": "驗證",
     "TWO_FACTOR_DESCRIPTION": "請輸入你的一次性密碼以繼續",
     "TWO_FACTOR_CARD_DESCRIPTION": "為你的帳戶增加一層額外的安全保護。",
-    "TWO_FACTOR_DISABLE_INSTRUCTIONS": "請輸入你的密碼以關閉兩步驗證。",
-    "TWO_FACTOR_ENABLE_INSTRUCTIONS": "請輸入你的密碼以開啟兩步驗證",
-    "TWO_FACTOR_ENABLED": "兩步驗證已開啟",
-    "TWO_FACTOR_DISABLED": "兩步驗證已關閉",
-    "TWO_FACTOR_PROMPT": "兩步驗證",
-    "TWO_FACTOR_TOTP_LABEL": "使用身份驗證器掃描二維碼",
+    "TWO_FACTOR_DISABLE_INSTRUCTIONS": "請輸入你的密碼以關閉兩步驟驗證。",
+    "TWO_FACTOR_ENABLE_INSTRUCTIONS": "請輸入你的密碼以開啟兩步驟驗證",
+    "TWO_FACTOR_ENABLED": "兩步驟驗證已開啟",
+    "TWO_FACTOR_DISABLED": "兩步驟驗證已關閉",
+    "TWO_FACTOR_PROMPT": "兩步驟驗證",
+    "TWO_FACTOR_TOTP_LABEL": "使用身份驗證器掃描QR 碼",
     "SEND_VERIFICATION_CODE": "傳送驗證碼",
-    "UNLINK": "取消關聯",
+    "UNLINK": "取消連結",
     "UPDATED_SUCCESSFULLY": "更新成功",
-    "OPTIONAL_BRACKETS": "（可選）",
-    "VERIFY_YOUR_EMAIL": "驗證你的郵箱",
-    "VERIFY_YOUR_EMAIL_DESCRIPTION": "請驗證你的郵箱地址。請在收件箱中查收驗證郵件。如果你沒有收到郵件，請點選下方按鈕重新發送。",
+    "OPTIONAL_BRACKETS": "（選填）",
+    "VERIFY_YOUR_EMAIL": "驗證你的電子郵件",
+    "VERIFY_YOUR_EMAIL_DESCRIPTION": "請驗證你的電子郵件地址。請在收件匣中查收驗證郵件。如果你沒有收到郵件，請點選下方按鈕重新傳送。",
     "GO_BACK": "返回",
-    "SESSION_NOT_FRESH": "你的會話已過期，請重新登入。",
-    "UPLOAD_AVATAR": "上傳頭像",
+    "SESSION_NOT_FRESH": "你的工作階段已過期，請重新登入。",
+    "UPLOAD_AVATAR": "上傳大頭貼",
     "LOGO": "標誌",
-    "LOGO_DESCRIPTION": "點選標誌即可從你的檔案中上傳自定義標誌。",
-    "LOGO_INSTRUCTIONS": "標誌為可選項，但強烈建議設定。",
+    "LOGO_DESCRIPTION": "點選標誌即可從你的檔案中上傳自訂標誌。",
+    "LOGO_INSTRUCTIONS": "標誌為選填，但強烈建議設定。",
     "UPLOAD": "上傳",
     "UPLOAD_LOGO": "上傳標誌",
     "DELETE_LOGO": "刪除標誌",
@@ -614,9 +614,9 @@
     "ORGANIZATIONS": "組織",
     "ORGANIZATIONS_DESCRIPTION": "管理你的組織和成員身份。",
     "ORGANIZATIONS_INSTRUCTIONS": "建立組織以與其他使用者協作。",
-    "LEAVE_ORGANIZATION": "退出組織",
-    "LEAVE_ORGANIZATION_CONFIRM": "確定要退出此組織嗎？",
-    "LEAVE_ORGANIZATION_SUCCESS": "你已成功退出該組織。",
+    "LEAVE_ORGANIZATION": "離開組織",
+    "LEAVE_ORGANIZATION_CONFIRM": "確定要離開此組織嗎？",
+    "LEAVE_ORGANIZATION_SUCCESS": "你已成功離開該組織。",
     "MANAGE_ORGANIZATION": "管理組織",
     "REMOVE_MEMBER": "移除成員",
     "REMOVE_MEMBER_CONFIRM": "確定要將該成員從組織中移除嗎？",
@@ -631,7 +631,7 @@
     "ADMIN": "管理員",
     "MEMBER": "成員",
     "GUEST": "訪客",
-    "OWNER": "所有者",
+    "OWNER": "擁有者",
     "UPDATE_ROLE_DESCRIPTION": "更新該成員的角色",
     "UPDATE_ROLE": "更新角色",
     "MEMBER_ROLE_UPDATED": "成員角色更新成功",
@@ -654,7 +654,7 @@
     "DELETE_ORGANIZATION_SUCCESS": "組織刪除成功",
     "DELETE_ORGANIZATION_INSTRUCTIONS": "請輸入組織的 slug 以繼續：",
     "SLUG_REQUIRED": "請輸入組織 slug",
-    "SLUG_DOES_NOT_MATCH": "slug 不匹配",
+    "SLUG_DOES_NOT_MATCH": "slug 不符",
     "MEMBER_SINGULAR": "成員",
     "MEMBER_PLURAL": "成員",
     "UNKNOWN": "未知"
@@ -668,19 +668,19 @@
       "chat": "對話",
       "more": "更多",
       "me": "我",
-      "mainNavigation": "主導航"
+      "mainNavigation": "主導覽"
     },
     "sidebar": {
-      "newChat": "新建對話",
+      "newChat": "新對話",
       "showConversations": "顯示對話",
       "expandSidebar": "展開側邊欄",
       "collapseSidebar": "收起側邊欄",
       "hideSidebar": "隱藏側邊欄",
       "showSidebar": "顯示側邊欄",
-      "sheetTitle": "導航與對話",
+      "sheetTitle": "導覽與對話",
       "inviteManageMembers": "邀請並管理成員",
-      "conversationLoadError": "無法載入對話詳情",
-      "newAgentChat": "新建智慧體對話"
+      "conversationLoadError": "無法載入對話詳細資訊",
+      "newAgentChat": "新代理程式對話"
     },
     "workspace": {
       "workspaces": "工作區",
@@ -705,12 +705,12 @@
       "all": "所有對話",
       "shared": "共享",
       "private": "私密",
-      "archived": "歸檔",
+      "archived": "封存",
       "clearFilter": "清除{filter}篩選",
       "openActions": "開啟對話操作",
       "makePrivate": "設為私密",
       "makeVisible": "設為工作區可見",
-      "archive": "歸檔",
+      "archive": "封存",
       "delete": "刪除",
       "nowPrivate": "對話已設為私密",
       "nowVisible": "對話現在對工作區可見",
@@ -724,36 +724,36 @@
         "attention": "需注意"
       },
       "loadingChats": "正在載入對話…",
-      "noMatching": "沒有匹配的已載入對話。載入更多以檢視較早的對話。",
+      "noMatching": "沒有符合的已載入對話。載入更多以檢視較早的對話。",
       "noneYet": "還沒有對話。",
       "filterEmpty": {
         "shared": "沒有共享對話。",
         "private": "沒有私密對話。",
-        "archived": "沒有歸檔對話。"
+        "archived": "沒有已封存對話。"
       },
       "loading": "載入中…",
       "loadMore": "載入更多",
       "clearScope": {
-        "archived": "歸檔對話",
+        "archived": "已封存對話",
         "private": "私密對話"
       },
       "clearAll": "清除所有{scope}",
       "clearConfirmTitle": "清除所有{scope}？",
-      "clearConfirmDescription": "這將移除 {count} 個{scope}，包括被當前篩選隱藏的對話。此操作無法撤銷。",
+      "clearConfirmDescription": "這將移除 {count} 個{scope}，包括被目前篩選隱藏的對話。此操作無法撤銷。",
       "clearing": "清除中…",
       "clearAllButton": "清除全部"
     },
     "account": {
       "accountAndSettings": "帳戶與設定",
       "userAlt": "使用者",
-      "userAvatarAlt": "使用者頭像",
+      "userAvatarAlt": "使用者大頭貼",
       "accountFallback": "帳戶",
       "sourceweftUser": "SourceWeft 使用者",
       "signedIn": "已登入",
       "profile": "個人資料",
       "usage": "用量",
       "billing": "帳單",
-      "logOut": "退出登入"
+      "logOut": "登出"
     },
     "team": {
       "add": "新增團隊",
@@ -763,14 +763,14 @@
       "switchError": "切換團隊失敗。"
     },
     "mobileMe": {
-      "signOut": "退出登入",
-      "signingOut": "正在退出登入…",
-      "endSession": "結束此會話",
+      "signOut": "登出",
+      "signingOut": "正在登出…",
+      "endSession": "結束此工作階段",
       "observeDescription": "LLM 追蹤、指標和時間軸",
       "panels": {
         "account": {
           "label": "個人資料",
-          "description": "帳戶、頭像、主題和偏好設定"
+          "description": "帳戶、大頭貼、主題和偏好設定"
         },
         "team": {
           "label": "團隊",
@@ -782,19 +782,19 @@
         },
         "usage": {
           "label": "用量",
-          "description": "套餐用量和近期活動"
+          "description": "方案用量和近期活動"
         },
         "billing": {
           "label": "帳單",
-          "description": "訂閱、套餐和帳單門戶"
+          "description": "訂閱、方案和帳單入口"
         },
         "approvals": {
-          "label": "批准",
+          "label": "核准",
           "description": "你選擇始終允許的操作"
         },
         "about": {
           "label": "關於",
-          "description": "版本和構建詳情"
+          "description": "版本和建置詳細資訊"
         }
       }
     },
@@ -802,10 +802,10 @@
       "dialogTitle": "工作區成員"
     },
     "shortcuts": {
-      "title": "快捷鍵",
+      "title": "快速鍵",
       "description": "對話工作區中可用的快捷操作。",
-      "searchPlaceholder": "搜尋快捷鍵…",
-      "empty": "未找到快捷鍵。"
+      "searchPlaceholder": "搜尋快速鍵…",
+      "empty": "找不到快速鍵。"
     },
     "common": {
       "cancel": "取消",
@@ -825,7 +825,7 @@
       "team": "團隊",
       "usage": "用量",
       "billing": "帳單",
-      "approvals": "審批",
+      "approvals": "核准",
       "localComputer": "這臺電腦",
       "about": "關於",
       "userFallback": "SourceWeft 使用者",
@@ -834,7 +834,7 @@
     },
     "account": {
       "profileTitle": "個人資料",
-      "changeAvatar": "更換頭像",
+      "changeAvatar": "更換大頭貼",
       "changeAvatarOverlay": "更換",
       "displayName": "顯示名稱",
       "displayNamePlaceholder": "你的顯示名稱",
@@ -844,9 +844,9 @@
       "profileSaved": "個人資料已儲存",
       "saveError": "無法儲存。",
       "accountTitle": "帳戶",
-      "signedInAccount": "當前登入帳戶",
-      "signOut": "退出登入",
-      "signingOut": "正在退出…",
+      "signedInAccount": "目前登入帳戶",
+      "signOut": "登出",
+      "signingOut": "正在登出…",
       "deleteAccount": "刪除帳戶",
       "deleteAccountDescription": "永久刪除你的帳戶及所有資料，此操作無法撤銷。",
       "delete": "刪除",
@@ -882,7 +882,7 @@
       "membersTitle": "成員",
       "invite": "邀請",
       "colName": "名稱",
-      "colEmail": "郵箱",
+      "colEmail": "電子郵件",
       "colRole": "角色",
       "removeMember": "移除成員",
       "transferOwnershipFirst": "移除該成員前請先轉移所有權",
@@ -892,7 +892,7 @@
       "revoking": "撤銷中…",
       "personalNoMembers": "個人團隊不支援成員或邀請。建立或切換到團隊以開展協作。",
       "inviteMemberTitle": "邀請團隊成員",
-      "emailAddress": "郵箱地址",
+      "emailAddress": "電子郵件地址",
       "emailPlaceholder": "colleague@company.com",
       "roleLabel": "角色",
       "roleMember": "成員",
@@ -911,7 +911,7 @@
     "members": {
       "selectWorkspacePrompt": "選擇一個工作區以管理其成員。",
       "title": "工作區成員",
-      "description": "每個工作區都有各自的成員和角色。團隊所有者和管理員始終可以管理所有工作區。",
+      "description": "每個工作區都有各自的成員和角色。團隊擁有者和管理員始終可以管理所有工作區。",
       "addMember": "新增成員",
       "workspaceLabel": "工作區",
       "selectWorkspacePlaceholder": "選擇工作區",
@@ -922,12 +922,12 @@
       "removeMemberSr": "移除成員",
       "thisMember": "該成員",
       "removeDialogTitle": "移除成員？",
-      "removeDialogBody": "{name} 將失去對此工作區的訪問許可權，但仍是團隊成員。",
+      "removeDialogBody": "{name} 將失去對此工作區的存取權限，但仍是團隊成員。",
       "addDialogTitle": "新增工作區成員",
-      "addDialogDescription": "選擇一位團隊成員，授予其此工作區的訪問許可權。若要將新成員加入團隊，請先在“團隊”面板中邀請他們。",
+      "addDialogDescription": "選擇一位團隊成員，授予其此工作區的存取權限。若要將新成員加入團隊，請先在「團隊」面板中邀請他們。",
       "roleForNewMembers": "新成員的角色",
-      "searchPlaceholder": "按姓名或郵箱搜尋團隊成員…",
-      "noTeammates": "未找到團隊成員。",
+      "searchPlaceholder": "按姓名或電子郵件搜尋團隊成員…",
+      "noTeammates": "找不到團隊成員。",
       "everyoneAdded": "團隊中的所有人都已在此工作區中。",
       "roleChanged": "{name} 現在是{role}",
       "roleChangeError": "無法更改該成員的角色。",
@@ -942,11 +942,11 @@
       "editor": "編輯者",
       "editorHint": "建立和編輯內容",
       "viewer": "檢視者",
-      "viewerHint": "只讀訪問"
+      "viewerHint": "唯讀存取"
     },
     "guests": {
       "title": "訪客",
-      "description": "僅受邀加入此工作區的外部協作者。訪客不屬於你的團隊，且許可權不會超過編輯者。",
+      "description": "僅受邀加入此工作區的外部協作者。訪客不屬於你的團隊，且權限不會超過編輯者。",
       "inviteGuest": "邀請訪客",
       "loading": "正在載入訪客…",
       "loadError": "無法載入訪客。",
@@ -958,14 +958,14 @@
       "revokeInvitationSr": "撤銷邀請",
       "removeDialogTitle": "移除訪客？",
       "thisGuest": "該訪客",
-      "removeDialogBody": "{name} 將失去對此工作區的訪問許可權。",
+      "removeDialogBody": "{name} 將失去對此工作區的存取權限。",
       "inviteDialogTitle": "邀請訪客",
       "inviteDialogDescription": "邀請團隊以外的人僅在此工作區中協作。他們會收到一封郵件連結以接受邀請。",
-      "emailAddress": "郵箱地址",
+      "emailAddress": "電子郵件地址",
       "emailPlaceholder": "guest@example.com",
       "roleLabel": "角色",
       "sendInvitation": "傳送邀請",
-      "enterEmail": "請輸入要邀請的郵箱地址。",
+      "enterEmail": "請輸入要邀請的電子郵件地址。",
       "invitationSent": "已傳送邀請",
       "inviteError": "無法傳送該邀請。",
       "guestRemoved": "已將 {name} 從工作區移除",
@@ -980,33 +980,33 @@
       "statusOnline": "這臺電腦已線上",
       "statusConnecting": "正在連接這臺電腦…",
       "statusSettingUp": "正在設定這臺電腦…",
-      "remoteAccessTitle": "允許其他裝置訪問",
-      "remoteAccessDescription": "讓使用同一帳戶的其他裝置訪問這臺電腦。它們可以訪問任務資料夾和已授權的工作目錄。即使關閉遠端訪問，你仍可在這臺電腦上繼續工作。",
-      "turnOffRemoteAccess": "關閉遠端訪問",
+      "remoteAccessTitle": "允許其他裝置存取",
+      "remoteAccessDescription": "讓使用同一帳戶的其他裝置存取這臺電腦。它們可以存取任務資料夾和已授權的工作目錄。即使關閉遠端存取，你仍可在這臺電腦上繼續工作。",
+      "turnOffRemoteAccess": "關閉遠端存取",
       "workingDirectoriesTitle": "工作目錄",
-      "workingDirectoriesDescription": "每個對話都會獲得獨立的任務資料夾。移除資料夾訪問許可權會停止受影響任務的後續本地操作，並保留其中的檔案。",
-      "removeAccess": "移除訪問許可權",
+      "workingDirectoriesDescription": "每個對話都會獲得獨立的任務資料夾。移除資料夾存取權限會停止受影響任務的後續本機操作，並保留其中的檔案。",
+      "removeAccess": "移除存取權限",
       "addFolder": "新增資料夾"
     },
     "approvals": {
-      "title": "審批",
+      "title": "核准",
       "description": "你在此工作區中選擇始終允許的操作。每項授權都僅屬於你本人，會自行過期，並可隨時在此撤銷。",
-      "loading": "正在載入審批…",
-      "empty": "沒有已記住的審批。每個需要審批的操作都會先徵求你的同意。",
+      "loading": "正在載入核准…",
+      "empty": "沒有已記住的核准。每個需要核准的操作都會先徵求你的同意。",
       "connectorRisk": "連接器：{connector} · 風險：{risk}",
       "expiresLastUsed": "過期時間：{expiry} · 上次使用：{lastUsed}",
       "fromConfirmation": "來自確認 {source}",
       "revoke": "撤銷",
       "revoking": "撤銷中…",
-      "revokedToast": "已撤銷審批。下次將再次徵求你的同意。",
-      "revokeError": "無法撤銷審批。",
-      "loadError": "無法載入已記住的審批。"
+      "revokedToast": "已撤銷核准。下次將再次徵求你的同意。",
+      "revokeError": "無法撤銷核准。",
+      "loadError": "無法載入已記住的核准。"
     },
     "about": {
       "title": "關於",
       "description": "關於你正在執行的 SourceWeft 客戶端的詳細資訊。報告問題時請附上這些資訊。",
-      "detailDesktop": "桌面應用 · {platform} {arch}",
-      "detailDesktopShort": "桌面應用",
+      "detailDesktop": "桌面版 · {platform} {arch}",
+      "detailDesktopShort": "桌面版",
       "detailWeb": "網頁版 · {date}",
       "detailWebShort": "網頁版",
       "buildLabel": "版本 {sha}",
@@ -1016,15 +1016,15 @@
       "viewChangelog": "檢視更新日誌",
       "copyDesktopWithInfo": "SourceWeft 桌面版 {version}（{platform} {arch}）",
       "copyDesktopNoInfo": "SourceWeft 桌面版 {version}",
-      "copyWebWithDate": "SourceWeft 網頁構建 {sha}（{date}）",
-      "copyWebNoDate": "SourceWeft 網頁構建 {sha}"
+      "copyWebWithDate": "SourceWeft 網頁建置 {sha}（{date}）",
+      "copyWebNoDate": "SourceWeft 網頁建置 {sha}"
     }
   },
   "dashboardSkills": {
     "actions": {
       "install": "安裝",
       "uninstall": "解除安裝",
-      "details": "詳情",
+      "details": "詳細資訊",
       "retry": "重試",
       "source": "來源"
     },
@@ -1033,7 +1033,7 @@
       "builtin": "內建",
       "unavailable": "不可用",
       "unverified": "未驗證",
-      "underReview": "稽核中"
+      "underReview": "審核中"
     },
     "tabs": {
       "overview": "概覽"
@@ -1057,13 +1057,13 @@
       "team": "團隊"
     },
     "fields": {
-      "heading": "詳情",
+      "heading": "詳細資訊",
       "name": "名稱",
-      "publisher": "釋出者",
+      "publisher": "發布者",
       "version": "版本",
       "visibility": "可見性",
       "readme": "README",
-      "license": "許可證",
+      "license": "授權條款",
       "included": "已包含",
       "notIncluded": "未包含"
     },
@@ -1085,7 +1085,7 @@
       "facets": {
         "search": "搜尋",
         "category": "分類",
-        "publisher": "釋出者",
+        "publisher": "發布者",
         "status": "狀態"
       },
       "categories": {
@@ -1094,7 +1094,7 @@
         "research": "研究",
         "write": "寫作",
         "review": "審閱",
-        "operate": "運營"
+        "operate": "營運"
       },
       "publishers": {
         "all": "全部發布者",
@@ -1116,11 +1116,11 @@
       "workspace": {
         "select": "選擇工作區",
         "none": "暫無工作區",
-        "current": "當前工作區"
+        "current": "目前工作區"
       },
       "empty": {
         "none": "此工作區暫無可用技能。",
-        "noMatch": "沒有符合當前篩選條件的技能。"
+        "noMatch": "沒有符合目前篩選條件的技能。"
       },
       "error": {
         "title": "無法載入技能",
@@ -1130,20 +1130,20 @@
     },
     "detail": {
       "back": "返回技能庫",
-      "titleFallback": "技能詳情",
+      "titleFallback": "技能詳細資訊",
       "noSkillLoaded": "未載入技能。",
       "errors": {
-        "slugMissing": "缺少技能標識。",
-        "notFound": "未找到技能。",
+        "slugMissing": "缺少技能識別碼。",
+        "notFound": "找不到技能。",
         "loadFailed": "載入技能失敗。"
       }
     },
     "dialog": {
-      "titleFallback": "技能詳情",
-      "descriptionLoading": "正在載入技能詳情。",
-      "loadFailed": "載入技能詳情失敗。",
+      "titleFallback": "技能詳細資訊",
+      "descriptionLoading": "正在載入技能詳細資訊。",
+      "loadFailed": "載入技能詳細資訊失敗。",
       "docsPending": "選定版本載入後將顯示文件。",
-      "flaggedNotice": "自動檢查在該技能中發現了稽核標記。請檢視選定版本以瞭解其當前的稽核結論。",
+      "flaggedNotice": "自動檢查在該技能中發現了審核標記。請檢視選定版本以瞭解其目前的審核結論。",
       "unverifiedNotice": "這是一個從 GitHub 索引的未驗證社群技能。安裝前請先檢視來源——它的指令會在你的對話中執行。"
     },
     "versions": {
@@ -1155,8 +1155,8 @@
       "installed": "已安裝",
       "off": "已關閉",
       "status": {
-        "draft": "稽核中",
-        "published": "已釋出",
+        "draft": "審核中",
+        "published": "已發布",
         "deprecated": "已棄用",
         "disabled": "已停用"
       },
@@ -1166,32 +1166,32 @@
       "moreVersions": "更多版本",
       "switchFailed": "版本切換失敗",
       "loadFailed": "無法載入版本",
-      "detailsSummary": "版本詳情",
+      "detailsSummary": "版本詳細資訊",
       "files": "{count} 個檔案",
-      "reviewNotes": "{count} 條稽核說明",
+      "reviewNotes": "{count} 條審核說明",
       "sourceRevision": "來源修訂版本",
       "noDiagnostics": "未記錄此版本的匯入診斷資訊。",
-      "reviewLabel": "稽核",
+      "reviewLabel": "審核",
       "filesSummary": "檔案（{count}）"
     },
     "submit": {
       "button": "提交技能",
       "title": "提交技能",
-      "description": "從公開的 GitHub 倉庫匯入固定版本的技能。我們會儲存技能檔案並在使用前進行檢查。被標記的技能需等待稽核。匯入在後臺執行——你可以關閉此對話方塊，之後在「我的提交」中找到它。",
-      "repoAriaLabel": "GitHub 技能倉庫",
-      "enterUrl": "請輸入公開的 GitHub 倉庫 URL。",
+      "description": "從公開的 GitHub 儲存庫匯入固定版本的技能。我們會儲存技能檔案並在使用前進行檢查。被標記的技能需等待審核。匯入在背景執行——你可以關閉此對話方塊，之後在「我的提交」中找到它。",
+      "repoAriaLabel": "GitHub 技能儲存庫",
+      "enterUrl": "請輸入公開的 GitHub 儲存庫 URL。",
       "selectWorkspace": "提交技能前請先選擇工作區。",
       "interrupted": "提交已中斷。",
-      "partialWarning": "部分專案可能已儲存；重試前請重新整理技能庫。",
+      "partialWarning": "部分項目可能已儲存；重試前請重新整理技能庫。",
       "resultsAriaLabel": "匯入結果",
-      "resultsSummary": "{indexed} 個已索引 · {queued} 個待稽核 · {failed} 個失敗",
+      "resultsSummary": "{indexed} 個已索引 · {queued} 個待審核 · {failed} 個失敗",
       "skillFallback": "技能",
-      "repositoryRoot": "倉庫根目錄",
-      "reviewFlags": "稽核標記：{flags}",
+      "repositoryRoot": "儲存庫根目錄",
+      "reviewFlags": "審核標記：{flags}",
       "submit": "提交",
       "status": {
         "indexed": "已索引",
-        "queued": "待稽核",
+        "queued": "待審核",
         "failed": "失敗"
       },
       "notStarted": "匯入未能開始。",
@@ -1203,7 +1203,7 @@
     },
     "avatar": {
       "logoUnavailable": "標誌不可用：{name}",
-      "publisherAvatar": "{name} 的 GitHub 釋出者頭像",
+      "publisherAvatar": "{name} 的 GitHub 發布者大頭貼",
       "logo": "{name} 標誌"
     }
   },
@@ -1219,12 +1219,12 @@
       "loadingToast": "模型目錄仍在載入。請稍後重試。"
     },
     "newChat": {
-      "title": "新建對話"
+      "title": "新對話"
     },
     "thread": {
       "fallbackTitle": "對話",
       "unavailableTitle": "對話不可用",
-      "unavailableBody": "此對話可能已被刪除、移動，或你已無權訪問。",
+      "unavailableBody": "此對話可能已被刪除、移動，或你已無權存取。",
       "messageNotStarted": "訊息未能開始",
       "retryFirstMessage": "重試第一條訊息",
       "imagesSaved": "已儲存 {count} 張附加圖片",
@@ -1253,7 +1253,7 @@
     },
     "workfile": {
       "title": "工作檔案",
-      "fallbackDescription": "助手在此對話中建立的工作材料。",
+      "fallbackDescription": "助理在此對話中建立的工作材料。",
       "purpose": {
         "scratch": "草稿區",
         "draft": "草稿",
@@ -1272,7 +1272,7 @@
       "messagePreview": "排隊的訊息"
     },
     "work": {
-      "conversationDetails": "對話詳情",
+      "conversationDetails": "對話詳細資訊",
       "chooseCloudOrComputer": "選擇雲端或電腦",
       "cloud": "雲端",
       "statusUnavailable": "狀態不可用",
@@ -1285,7 +1285,7 @@
       "runsInCloud": "此對話在雲端執行。",
       "fixedComputer": "此對話使用固定的電腦與工作目錄。",
       "computerOnline": "電腦已線上。",
-      "computerOffline": "電腦已離線。重新連接後本地任務可繼續。",
+      "computerOffline": "電腦已離線。重新連接後本機任務可繼續。",
       "workingDirectory": "工作目錄",
       "directoryConnectedWhenUsed": "工作目錄將在首次使用時連接。",
       "myComputers": "我的電腦",
@@ -1295,10 +1295,10 @@
       "connectComputerEllipsis": "連接電腦…",
       "filesDescription": "此對話工作目錄中的檔案。",
       "connectComputerTitle": "連接電腦",
-      "connectComputerDescription": "在那臺電腦上使用同一帳戶登入，然後在“設定 → 這臺電腦”中啟用來自其他裝置的訪問。",
+      "connectComputerDescription": "在那臺電腦上使用同一帳戶登入，然後在「設定 → 這臺電腦」中啟用來自其他裝置的存取。",
       "open": "開啟",
       "connect": "連接",
-      "accessDisabled": "訪問已停用",
+      "accessDisabled": "存取已停用",
       "noComputers": "暫無可用的電腦。",
       "draftDataUnavailable": "工作目錄草稿資料不可用。",
       "restoreSelectionFailed": "無法恢復工作目錄的選擇。",
@@ -1335,12 +1335,12 @@
       "createConversationFailed": "建立對話失敗。",
       "chatStayedBusy": "對話一直忙碌——請重試。",
       "computerUnavailable": "電腦不可用。",
-      "queuedWillSend": "已排隊——將在對話空閒時傳送。",
+      "queuedWillSend": "已排隊——將在對話閒置時傳送。",
       "sourcesLoadingOrSaving": "來源仍在載入或儲存中。",
-      "sourcesLoadingOrSavingWait": "來源仍在載入或儲存中。請等待完成後再發送。",
+      "sourcesLoadingOrSavingWait": "來源仍在載入或儲存中。請等待完成後再傳送。",
       "workspaceNotReady": "工作區尚未就緒。",
       "thinkingPreferenceSaveFailed": "無法為此對話儲存思考偏好。",
-      "webAccessPreferenceSaveFailed": "無法為此對話儲存聯網訪問偏好。",
+      "webAccessPreferenceSaveFailed": "無法為此對話儲存網路存取偏好。",
       "optionsSaveFailed": "無法為此對話儲存選項。",
       "modelUpdateFailedDetail": "無法為此對話更新模型：{message}",
       "modelUpdateFailed": "無法為此對話更新模型。",
@@ -1357,8 +1357,8 @@
       "firstMessageSavedCheck": "你的第一條訊息已儲存。重試相同請求前請先檢視對話。"
     },
     "subagent": {
-      "srConversation": "子智慧體對話",
-      "fallbackTitle": "子智慧體",
+      "srConversation": "子代理程式對話",
+      "fallbackTitle": "子代理程式",
       "parentChatFallback": "父對話"
     }
   },
@@ -1382,7 +1382,7 @@
       "noModelsAvailable": "暫無可用模型。",
       "searchModels": "搜尋模型",
       "searchModelsEllipsis": "搜尋模型…",
-      "global": "全域性",
+      "global": "全域",
       "byokTab": "BYOK",
       "auto": "自動",
       "none": "無",
@@ -1393,19 +1393,19 @@
       "typeModelsLoading": "正在載入{type}模型",
       "typeModelAria": "{type}模型：{model}",
       "noTypeModel": "無{type}",
-      "byokTooltip": "{type}：{model}（通過 {provider}）",
+      "byokTooltip": "{type}：{model}（透過 {provider}）",
       "typeTooltip": "{type}：{model}",
       "noTypeModelAvailable": "無可用的{type}模型",
       "byok": {
-        "customProvider": "自定義提供方",
+        "customProvider": "自訂提供方",
         "system": "系統",
-        "custom": "自定義",
+        "custom": "自訂",
         "status": {
           "addModelId": "新增模型 ID",
-          "customEndpoint": "自定義端點",
+          "customEndpoint": "自訂端點",
           "addCredential": "新增憑證後使用",
           "byokModels": "BYOK 模型",
-          "notConfigured": "未配置"
+          "notConfigured": "未設定"
         },
         "addModel": {
           "image": "新增影像模型",
@@ -1417,20 +1417,20 @@
           "llm": "新增憑證",
           "vision": "新增視覺憑證"
         },
-        "noModelsConfigured": "尚未配置{provider}模型",
+        "noModelsConfigured": "尚未設定{provider}模型",
         "getStartedAddModel": "使用此提供方新增一個模型即可開始。",
         "getStartedSaveKey": "為此提供方儲存 API 金鑰即可開始。",
-        "noModelsMatchSearch": "沒有匹配此搜尋的模型。",
+        "noModelsMatchSearch": "沒有符合此搜尋的模型。",
         "noSavedModels": "尚未為{provider}儲存任何{type}模型。"
       }
     },
     "byokDialog": {
-      "customProvider": "自定義提供方",
-      "toastConfigured": "BYOK 模型已配置。",
-      "toastFailed": "配置 BYOK 模型失敗。",
-      "title": "新增新配置",
+      "customProvider": "自訂提供方",
+      "toastConfigured": "BYOK 模型已設定。",
+      "toastFailed": "設定 BYOK 模型失敗。",
+      "title": "新增設定",
       "description": "設定新的{type} BYOK 模型。",
-      "modelConfiguration": "模型配置",
+      "modelConfiguration": "模型設定",
       "provider": "提供方",
       "selectProvider": "選擇提供方",
       "modelId": "模型 ID",
@@ -1439,13 +1439,13 @@
       "displayName": "顯示名稱",
       "savedCredential": "已儲存的憑證",
       "selectSavedCredential": "選擇已儲存的憑證",
-      "credentialAliasHelp": "憑證別名用於標識已儲存的 API 金鑰。模型會儲存在該憑證下。",
+      "credentialAliasHelp": "憑證別名用於識別已儲存的 API 金鑰。模型會儲存在該憑證下。",
       "useNewApiKey": "改用新的 API 金鑰",
       "useExistingCredential": "使用已儲存的憑證",
       "apiKey": "API 金鑰",
       "apiBaseUrl": "API 基礎 URL",
       "systemDefault": "系統預設",
-      "customProviderHelp": "相容 OpenAI 的提供方和私有代理請在“自定義提供方”下配置。",
+      "customProviderHelp": "相容 OpenAI 的提供方和私有代理請在「自訂提供方」下設定。",
       "cancel": "取消",
       "addModel": "新增模型"
     },
@@ -1454,18 +1454,18 @@
       "failed": "失敗",
       "working": "處理中…",
       "openPreview": "開啟預覽：{value}",
-      "subagent": "子智慧體",
+      "subagent": "子代理程式",
       "yes": "是",
       "no": "否"
     },
     "emptyState": {
       "title": "你想做些什麼？",
-      "description": "先輸入提示、對比證據，或讓智慧體在你新建會話前先歸納出最重要的內容。",
+      "description": "先輸入提示、比較證據，或讓代理程式在你開啟新對話前先歸納出最重要的內容。",
       "suggestions": {
         "summarize": "總結所選來源",
-        "compareClaims": "對比這些文件中的主要論點",
+        "compareClaims": "比較這些文件中的主要論點",
         "whatChanged": "這些報告之間有哪些變化？",
-        "strongestEvidence": "列出最有力的支援性證據"
+        "strongestEvidence": "列出最有力的支持性證據"
       }
     },
     "composer": {
@@ -1479,15 +1479,15 @@
       "skillSelectionSaveFailed": "無法儲存此對話的技能選擇。",
       "options": "選項",
       "connectorTools": "{name} 工具",
-      "reset": "重置",
+      "reset": "重設",
       "enableTool": "啟用工具",
-      "noConfigurableOptions": "無可配置的選項",
+      "noConfigurableOptions": "無可設定的選項",
       "enableSkill": "啟用技能",
       "thinking": "思考",
       "auto": "自動",
       "thinkingEffortUnavailable": "思考強度不可用",
       "noReasoningOptions": "無可用的推理選項",
-      "webAccess": "聯網訪問",
+      "webAccess": "網路存取",
       "disableThinking": "關閉思考",
       "enableThinking": "開啟思考",
       "cancelEdit": "取消編輯（Esc）",
@@ -1533,14 +1533,14 @@
     "delegate": {
       "status": {
         "running": "執行中",
-        "approval_requested": "等待審批",
+        "approval_requested": "等待核准",
         "completed": "已完成",
         "error": "失敗"
       },
       "delegatedTo": "已委派給 {agent}",
       "delegatedToStatus": "已委派給 {agent} · {status}",
-      "openThread": "開啟子智慧體會話",
-      "newWindow": "新建視窗"
+      "openThread": "開啟子代理程式對話",
+      "newWindow": "新視窗"
     },
     "userQuestion": {
       "waitingForAnswer": "正在等待你的回答",
@@ -1550,13 +1550,13 @@
       "askedSingular": "已提問 {count} 個問題",
       "askedPlural": "已提問 {count} 個問題",
       "askedFallback": "已提出一個問題",
-      "errorFallback": "無法獲取你的回答。"
+      "errorFallback": "無法取得你的回答。"
     },
     "toolCard": {
       "status": {
         "running": "執行中",
         "generating": "生成中",
-        "needs-approval": "需要審批",
+        "needs-approval": "需要核准",
         "failed": "失敗",
         "rejected": "已拒絕",
         "done": "完成"
@@ -1579,53 +1579,53 @@
         "label": "讀取檔案：",
         "previewTruncatedLines": "預覽已截斷至 {count} 行。",
         "thisFile": "該檔案",
-        "binaryUnsupported": "{path} 不是 UTF-8 文本檔案。請使用製品預覽、媒體感知檢查，或將其釋出為製品，而不要使用 read_file。",
+        "binaryUnsupported": "{path} 不是 UTF-8 文字檔案。請使用製品預覽、媒體感知檢查，或將其發布為製品，而不要使用 read_file。",
         "noVisibleContent": "（無可見內容）"
       }
     },
     "toolConfirmation": {
       "resolved": {
-        "expired": "審批已過期且未作出決定。該操作未執行。",
-        "stopped": "審批已停止。該操作未執行。",
-        "rejected": "審批已拒絕。該操作未執行。",
-        "approvedWaiting": "審批已記錄。正在等待執行繼續。",
-        "approvedMayRun": "審批已記錄。該操作現在可以執行。",
-        "failed": "審批失敗。該操作未執行。",
-        "running": "審批已記錄。該操作正在執行。",
-        "completed": "審批已記錄。該操作已完成。"
+        "expired": "核准已過期且未作出決定。該操作未執行。",
+        "stopped": "核准已停止。該操作未執行。",
+        "rejected": "核准已拒絕。該操作未執行。",
+        "approvedWaiting": "核准已記錄。正在等待執行繼續。",
+        "approvedMayRun": "核准已記錄。該操作現在可以執行。",
+        "failed": "核准失敗。該操作未執行。",
+        "running": "核准已記錄。該操作正在執行。",
+        "completed": "核准已記錄。該操作已完成。"
       },
       "approvalLabel": {
-        "failed": "{tool} 審批失敗",
-        "expired": "{tool} 審批已過期",
-        "stopped": "{tool} 審批已停止",
-        "rejected": "{tool} 審批已拒絕",
-        "recorded": "{tool} 審批已記錄",
-        "waiting": "{tool} 正在等待審批",
-        "actionFailed": "{tool} 已批准的操作失敗"
+        "failed": "{tool} 核准失敗",
+        "expired": "{tool} 核准已過期",
+        "stopped": "{tool} 核准已停止",
+        "rejected": "{tool} 核准已拒絕",
+        "recorded": "{tool} 核准已記錄",
+        "waiting": "{tool} 正在等待核准",
+        "actionFailed": "{tool} 已核准的操作失敗"
       },
-      "approvedInSourceweft": "已在 SourceWeft 中批准。",
+      "approvedInSourceweft": "已在 SourceWeft 中核准。",
       "rejectedInSourceweft": "已在 SourceWeft 中拒絕。",
       "rejectedNotRun": "已在 SourceWeft 中拒絕。該操作未執行。",
       "actionFailed": "操作失敗。",
       "confirmationFailed": "確認失敗。",
       "missingWorkspace": "SourceWeft 確認缺少工作區上下文。",
       "notAttached": "此確認已不再關聯到活動執行。",
-      "approving": "正在批准…",
+      "approving": "正在核准…",
       "rememberFor": "記住時長",
-      "rememberAria": "記住此審批的時長",
+      "rememberAria": "記住此核准的時長",
       "viewCommand": "檢視命令（{lines} 行，{characters} 個字元）",
       "pending": "{count} 個待處理",
-      "waitingForApproval": "正在等待審批",
-      "endApprovalWait": "結束審批等待",
+      "waitingForApproval": "正在等待核准",
+      "endApprovalWait": "結束核准等待",
       "end": "結束",
       "decision": {
         "reject": "拒絕",
-        "approve": "批准"
+        "approve": "核准"
       },
       "outcome": {
-        "approvedNotRemembered": "已在 SourceWeft 中批准。此審批未被記住——僅適用於本次操作。",
-        "approvedUntil": "已在 SourceWeft 中批准。在 {expiry} 之前，此操作將被自動批准。可在“設定 → 審批”中管理。",
-        "approvedAlways": "已在 SourceWeft 中批准。此操作將被自動批准。可在“設定 → 審批”中管理。"
+        "approvedNotRemembered": "已在 SourceWeft 中核准。此核准未被記住——僅適用於本次操作。",
+        "approvedUntil": "已在 SourceWeft 中核准。在 {expiry} 之前，此操作將被自動核准。可在「設定 → 核准」中管理。",
+        "approvedAlways": "已在 SourceWeft 中核准。此操作將被自動核准。可在「設定 → 核准」中管理。"
       },
       "trustDuration": {
         "day": "{count} 天",
@@ -1648,8 +1648,8 @@
         "commandNotProvided": "未提供命令",
         "command": "命令：{summary}",
         "workingDirectoryPrefix": "工作目錄：",
-        "reviewRisk": "批准前請評估網路、依賴和金鑰訪問方面的風險。",
-        "editableBeforeApproval": "批准前可編輯",
+        "reviewRisk": "核准前請評估網路、相依套件和金鑰存取方面的風險。",
+        "editableBeforeApproval": "核准前可編輯",
         "collectOutput": "收集 {count} 個輸出",
         "collectOutputs": "收集 {count} 個輸出",
         "overwriteYes": "是",
@@ -1676,37 +1676,37 @@
       "possibleEvidence": "可能的證據",
       "untitledSource": "未命名來源",
       "moreCount": "還有 {count} 個",
-      "noInlineCitations": "回答中未包含內聯引用標記；這些來源是在生成過程中讀取或檢索的。"
+      "noInlineCitations": "回答中未包含行內引用標記；這些來源是在生成過程中讀取或檢索的。"
     },
     "sources": {
       "mentionedSource": "提及的來源"
     },
     "artifact": {
       "unavailable": "製品不可用",
-      "noLongerAvailable": "已釋出的製品不再可用。",
+      "noLongerAvailable": "已發布的製品不再可用。",
       "open": "開啟",
-      "publishedArtifact": "已釋出的製品",
-      "loadingPublished": "正在載入已釋出的製品…",
+      "publishedArtifact": "已發布的製品",
+      "loadingPublished": "正在載入已發布的製品…",
       "openArtifact": "開啟製品",
       "attempt": "第 {attempt}/{maxAttempts} 次嘗試",
       "stagesCompleted": "已完成 {completed}/{total} 個階段",
       "fallback": "製品",
       "titleFailed": "{label}失敗",
-      "titlePipeline": "{label}流水線",
+      "titlePipeline": "{label}管線",
       "titleBuilding": "正在生成{label}",
-      "detailsMismatch": "製品詳情與請求不匹配。",
-      "detailsLoadFailed": "無法載入製品詳情。",
-      "versionMismatch": "製品版本詳情與請求不匹配。",
+      "detailsMismatch": "製品詳細資訊與請求不符。",
+      "detailsLoadFailed": "無法載入製品詳細資訊。",
+      "versionMismatch": "製品版本詳細資訊與請求不符。",
       "versionLoadFailed": "無法載入製品版本。"
     },
     "errors": {
-      "invalidStructuredContent": "模型未返回有效的結構化內容",
+      "invalidStructuredContent": "模型未傳回有效的結構化內容",
       "toolArgsInvalidNamed": "{tool} 失敗，因為生成的工具引數無效。請重試。",
       "toolArgsInvalid": "生成的工具引數無效。請重試。",
       "reloadFailed": "重新載入對話訊息失敗。",
       "confirmationMissing": "確認訊息缺失。請重新整理對話後重試。",
       "noWorkspaceSelected": "尚未選擇工作區。",
-      "noResumeData": "確認響應未包含恢復資料。",
+      "noResumeData": "確認回應未包含恢復資料。",
       "resumeHandlerUnavailable": "工具確認恢復處理器不可用。"
     },
     "chatRoot": {
@@ -1718,7 +1718,7 @@
     "messageList": {
       "generationStopped": "生成已被使用者停止。",
       "artifactCount": "{count} 個製品",
-      "callSubagent": "呼叫子智慧體",
+      "callSubagent": "呼叫子代理程式",
       "instruction": "指令",
       "result": "結果",
       "sourceCount": "{count} 個來源",
@@ -1732,19 +1732,19 @@
       "toastCopied": "訊息已複製。",
       "toastCopyFailed": "無法複製該訊息。",
       "loadEarlier": "載入更早的訊息",
-      "olderHidden": "已隱藏 {count} 組較早的訊息，以保持該長會話的響應速度。",
+      "olderHidden": "已隱藏 {count} 組較早的訊息，以保持該長對話的回應速度。",
       "showHiddenHistory": "顯示隱藏的歷史記錄"
     },
     "sandbox": {
       "placeholder": {
-        "waitingApproval": "執行前正在等待審批。",
-        "notApproved": "執行未獲批准。",
+        "waitingApproval": "執行前正在等待核准。",
+        "notApproved": "執行未獲核准。",
         "running": "命令正在執行。執行完成後將顯示輸出。",
         "error": "無法執行該命令。",
         "noOutput": "命令已完成，但無輸出。"
       },
-      "details": "詳情",
-      "commandDetails": "命令詳情",
+      "details": "詳細資訊",
+      "commandDetails": "命令詳細資訊",
       "runCommand": "執行命令",
       "commandUnavailable": "命令輸入不可用。",
       "copyCommand": "複製命令",
@@ -1759,17 +1759,17 @@
       "truncated": "已截斷",
       "fileReady": "{count} 個檔案",
       "filesReady": "{count} 個檔案",
-      "filePlanned": "{count} 個計劃檔案",
-      "filesPlanned": "{count} 個計劃檔案",
+      "filePlanned": "{count} 個預定檔案",
+      "filesPlanned": "{count} 個預定檔案",
       "detailFile": "{count} 個檔案",
       "detailFiles": "{count} 個檔案",
       "detailOutput": "{count} 個輸出",
       "detailOutputs": "{count} 個輸出",
       "detailOutputChar": "{count} 個輸出字元",
       "detailOutputChars": "{count} 個輸出字元",
-      "exitCode": "退出碼 {code}",
+      "exitCode": "結束代碼 {code}",
       "outputTruncated": "輸出已截斷",
-      "operationFailed": "操作失敗。請檢視詳情後重試。",
+      "operationFailed": "操作失敗。請檢視詳細資訊後重試。",
       "op": {
         "preparedWorkspace": "已準備工作區",
         "executedCommand": "已執行命令",
@@ -1778,19 +1778,19 @@
         "fallback": "沙盒操作"
       },
       "safeError": {
-        "SANDBOX_BINARY_OUTPUT_UNSUPPORTED": "該輸出似乎是二進位制內容。此處暫不支援收集二進位制輸出；如有可用的製品流程，請改用該流程。",
-        "SANDBOX_COLLECT_CONFLICT": "目標 /files 檔案已存在。請選擇其他目標位置，或在再次審批操作時啟用覆蓋。",
+        "SANDBOX_BINARY_OUTPUT_UNSUPPORTED": "該輸出似乎是二進位內容。此處暫不支援收集二進位輸出；如有可用的製品流程，請改用該流程。",
+        "SANDBOX_COLLECT_CONFLICT": "目標 /files 檔案已存在。請選擇其他目標位置，或在再次核准操作時啟用覆蓋。",
         "SANDBOX_COLLECT_PATH_DENIED": "請求的輸出路徑超出了提供方允許的收集範圍。請使用已授權的輸出目錄。",
-        "SANDBOX_COMMAND_TIMEOUT": "命令超出了配置的超時時間。請嘗試更短的命令，或將工作拆分為更小的步驟。",
-        "SANDBOX_DOWNLOAD_UNSUPPORTED_RESULT": "該操作返回了不受支援的下載結果。請改為收集純文本輸出檔案。",
+        "SANDBOX_COMMAND_TIMEOUT": "命令超出了設定的逾時時間。請嘗試更短的命令，或將工作拆分為更小的步驟。",
+        "SANDBOX_DOWNLOAD_UNSUPPORTED_RESULT": "該操作傳回了不受支援的下載結果。請改為收集純文字輸出檔案。",
         "SANDBOX_EXECUTE_CWD_DENIED": "命令的工作目錄必須保持在已授權的工作區內。",
         "SANDBOX_EXECUTE_COMMAND_DENIED": "命令在執行前被拒絕，因為它為空或包含不安全的控制字元。請修改命令後重試。",
         "SANDBOX_EXECUTE_VFS_PATH_DENIED": "命令引用了工作目錄中不存在的檔案。請在執行命令前先準備好所需檔案。",
-        "SANDBOX_FILE_NOT_FOUND": "未找到請求的檔案。請重新執行命令，或在收集前檢查輸出路徑。",
+        "SANDBOX_FILE_NOT_FOUND": "找不到請求的檔案。請重新執行命令，或在收集前檢查輸出路徑。",
         "SANDBOX_SKILL_STAGING_UNAVAILABLE": "無法在工作目錄中準備所需的技能檔案。請檢查技能檔案後重試。",
         "SANDBOX_FILE_TOO_LARGE": "所選檔案超出了檔案傳輸上限。請減小檔案大小，或收集更小的輸出。",
-        "SANDBOX_NOT_CONFIGURED": "尚未配置命令執行。請聯絡管理員。",
-        "SANDBOX_NOT_FOUND_OR_EXPIRED": "未找到執行會話或會話已過期。請重試以啟動新的會話。",
+        "SANDBOX_NOT_CONFIGURED": "尚未設定命令執行。請聯絡管理員。",
+        "SANDBOX_NOT_FOUND_OR_EXPIRED": "找不到執行工作階段或工作階段已過期。請重試以啟動新的工作階段。",
         "SANDBOX_PREPARE_PATH_DENIED": "請選擇一個已存在的工作檔案和一個已授權的目標目錄。",
         "SANDBOX_PROVIDER_AUTH_FAILED": "執行服務無法完成身份驗證。請聯絡管理員。",
         "SANDBOX_PROVIDER_ERROR": "操作失敗。請重試或聯絡支援團隊。",
@@ -1799,17 +1799,17 @@
     },
     "userQuestionPanel": {
       "other": "其他…",
-      "otherFreeText": "其他…（可選的自由文本）",
+      "otherFreeText": "其他…（選填的自由文字）",
       "typeAnswer": "輸入你的回答",
       "otherAnswerAria": "其他回答",
       "answerAria": "回答",
-      "optional": "（可選）",
+      "optional": "（選填）",
       "required": "此問題為必答。",
       "answerRequired": "傳送前請回答必答問題。",
       "cancel": "取消",
       "sending": "正在傳送…",
       "sendAnswer": "傳送回答",
-      "needsInput": "助手需要你的輸入",
+      "needsInput": "助理需要你的輸入",
       "dismissQuestion": "忽略問題",
       "end": "結束"
     }
@@ -1819,7 +1819,7 @@
       "close": "關閉",
       "artifactsBack": "製品",
       "share": "分享製品",
-      "openInNewTab": "在新標籤頁中開啟製品",
+      "openInNewTab": "在新分頁中開啟製品",
       "download": "下載製品",
       "delete": "刪除製品",
       "cancel": "取消",
@@ -1832,7 +1832,7 @@
       "downloadFile": "下載檔案",
       "copyPreview": "複製預覽",
       "save": "儲存",
-      "openCurrent": "開啟當前版本"
+      "openCurrent": "開啟目前版本"
     },
     "labels": {
       "artifactPreview": "製品預覽",
@@ -1842,7 +1842,7 @@
       "prompt": "提示詞"
     },
     "errors": {
-      "noDetails": "未儲存錯誤詳情。"
+      "noDetails": "未儲存錯誤詳細資訊。"
     },
     "toasts": {
       "openHandledByPreview": "該製品預覽會自行處理開啟操作。",
@@ -1866,7 +1866,7 @@
       "pendingDetail": "製品就緒後即可預覽。",
       "failedTitle": "製品生成失敗",
       "unsupportedTitle": "暫不支援預覽",
-      "unsupportedDetail": "當有可用檔案時，你仍可從工具欄開啟或下載此製品。"
+      "unsupportedDetail": "當有可用檔案時，你仍可從工具列開啟或下載此製品。"
     },
     "video": {
       "previewTitle": "影片預覽"
@@ -1875,11 +1875,11 @@
       "title": "分享製品",
       "anyoneWithLink": "任何擁有連結的人",
       "onlyYourWorkspace": "僅限你的工作區",
-      "publicDescription": "公開的只讀頁面，託管在隔離的獨立源上。",
-      "turnOnDescription": "開啟後即可釋出公開連結。",
+      "publicDescription": "公開的唯讀頁面，託管在隔離的獨立來源上。",
+      "turnOnDescription": "開啟後即可發布公開連結。",
       "publicLinkLabel": "公開連結",
       "hideFromSearch": "對搜尋引擎隱藏",
-      "hideFromSearchDescription": "公開連結預設會被索引以擴大觸達；如果是敏感的一次性內容，請開啟此項。",
+      "hideFromSearchDescription": "公開連結預設會被索引以擴大觸及；如果是敏感的一次性內容，請開啟此項。",
       "views": "瀏覽量"
     },
     "filePreview": {
@@ -1902,7 +1902,7 @@
     },
     "location": {
       "page": "第 {page} 頁",
-      "slide": "第 {slide} 張幻燈片",
+      "slide": "第 {slide} 張投影片",
       "paragraph": "第 {index} 段",
       "line": "第 {line} 行",
       "lines": "第 {start}–{end} 行",
@@ -1925,7 +1925,7 @@
   "dashboardConnectors": {
     "common": {
       "returnToSourceweft": "返回 SourceWeft",
-      "closeTab": "關閉標籤頁"
+      "closeTab": "關閉分頁"
     },
     "start": {
       "loadingTitle": "正在開啟授權",
@@ -1939,7 +1939,7 @@
       "errorTitle": "授權失敗",
       "redirectSuccess": "正在返回 SourceWeft 以完成設定。",
       "redirectError": "正在帶著授權錯誤返回 SourceWeft。",
-      "popupSuccess": "SourceWeft 正在原始標籤頁中更新連接器狀態。",
+      "popupSuccess": "SourceWeft 正在原始分頁中更新連接器狀態。",
       "fallbackError": "連接器授權未完成。"
     }
   },
@@ -1964,7 +1964,7 @@
         "not_installed": "未安裝"
       },
       "trust": {
-        "all": "所有信任級別",
+        "all": "所有信任等級",
         "trusted": "官方或已驗證",
         "unverified": "未驗證"
       },
@@ -2006,9 +2006,9 @@
       "error": "錯誤"
     },
     "card": {
-      "viewDetailsAria": "檢視 {name} 詳情",
+      "viewDetailsAria": "檢視 {name} 詳細資訊",
       "openSourceAria": "開啟 {name} 來源",
-      "openGithub": "開啟 GitHub 倉庫",
+      "openGithub": "開啟 GitHub 儲存庫",
       "openSource": "開啟來源",
       "credentialsRequired": "需要憑證",
       "toolsSyncedTitle": "已同步 {count} 個工具",
@@ -2016,8 +2016,8 @@
       "notTestedYet": "尚未測試",
       "testAria": "測試 {name}",
       "testConnection": "測試連接",
-      "configureAria": "配置 {name}",
-      "configureRequired": "配置所需憑證",
+      "configureAria": "設定 {name}",
+      "configureRequired": "設定所需憑證",
       "settings": "設定",
       "uninstallAria": "解除安裝 {name}",
       "uninstall": "解除安裝",
@@ -2030,7 +2030,7 @@
     },
     "empty": {
       "none": "此工作區暫無可用的 MCP 伺服器。",
-      "noMatch": "沒有符合當前篩選條件的 MCP 伺服器。"
+      "noMatch": "沒有符合目前篩選條件的 MCP 伺服器。"
     },
     "errors": {
       "loadTitle": "無法載入 MCP 市場",
@@ -2059,38 +2059,38 @@
     },
     "detail": {
       "backAria": "返回 MCP 市場",
-      "titleFallback": "MCP 詳情",
-      "loadingDescription": "正在載入 MCP 詳情。",
+      "titleFallback": "MCP 詳細資訊",
+      "loadingDescription": "正在載入 MCP 詳細資訊。",
       "test": "測試",
       "settings": "設定",
       "uninstall": "解除安裝",
       "install": "安裝",
       "loading": "正在載入 MCP…",
       "retry": "重試",
-      "notFound": "在此工作區目錄中未找到該 MCP 伺服器。",
-      "loadFailedDetail": "載入 MCP 詳情失敗。",
+      "notFound": "在此工作區目錄中找不到該 MCP 伺服器。",
+      "loadFailedDetail": "載入 MCP 詳細資訊失敗。",
       "loadFailedShort": "載入 MCP 失敗。",
-      "identifierMissing": "缺少 MCP 識別符號。",
+      "identifierMissing": "缺少 MCP 識別碼。",
       "enabled": "已啟用",
       "disabled": "已停用",
-      "configureCredentials": "配置憑證",
+      "configureCredentials": "設定憑證",
       "toolsSynced": "已同步 {count} 個工具",
       "testedSuffix": " · 已測試 {time}",
       "notTestedSuffix": " · 尚未測試",
       "unverifiedNoticeLong": "此 MCP 伺服器未經驗證。它可以接收對話的工具引數，並可能執行外部操作。啟用前請先檢視該伺服器。",
-      "unverifiedNoticeMedium": "此 MCP 伺服器未經驗證。在允許其訪問對話工具引數之前，請先檢視它。",
+      "unverifiedNoticeMedium": "此 MCP 伺服器未經驗證。在允許其存取對話工具引數之前，請先檢視它。",
       "toolsHeading": "工具",
       "toolsTotal": "共 {count} 個",
-      "toolsPending": "工具詳情將在伺服器被索引或安裝後公佈。",
-      "serverDetails": "伺服器詳情",
+      "toolsPending": "工具詳細資訊將在伺服器被索引或安裝後公佈。",
+      "serverDetails": "伺服器詳細資訊",
       "fields": {
-        "identifier": "識別符號",
+        "identifier": "識別碼",
         "version": "版本",
         "transport": "傳輸方式",
-        "runtime": "執行時",
+        "runtime": "執行環境",
         "auth": "認證",
         "tools": "工具",
-        "license": "許可證",
+        "license": "授權條款",
         "updated": "更新時間"
       },
       "fieldValues": {
@@ -2099,51 +2099,51 @@
         "authNotRequired": "非必需"
       },
       "links": {
-        "homepage": "主頁",
-        "repository": "程式碼倉庫",
+        "homepage": "首頁",
+        "repository": "程式碼儲存庫",
         "source": "來源"
       },
       "categories": "分類",
-      "runtimeSecurity": "執行時與安全",
-      "security": "憑證按工作區私密配置，靜態加密儲存，且僅在工具呼叫期間傳送給此伺服器。",
+      "runtimeSecurity": "執行環境與安全",
+      "security": "憑證按工作區私密設定，靜態加密儲存，且僅在工具呼叫期間傳送給此伺服器。",
       "securityDesktop": "此伺服器僅在桌面版主機上執行。",
-      "securityWeb": "此伺服器在完成配置後可通過網頁執行時執行。",
+      "securityWeb": "此伺服器在完成設定後可透過網頁執行環境執行。",
       "securityShort": "憑證按工作區加密，且僅在工具呼叫期間傳送給此伺服器。"
     },
     "credentials": {
-      "title": "配置 MCP 憑證",
+      "title": "設定 MCP 憑證",
       "description": "憑證在 SourceWeft 中加密儲存，且僅在工具呼叫期間傳送給此 MCP 伺服器。",
       "serverFallback": "MCP 伺服器",
       "authType": {
         "bearer": "Bearer 權杖",
-        "api_key_header": "API 金鑰請求頭",
-        "custom_headers": "自定義請求頭",
+        "api_key_header": "API 金鑰請求標頭",
+        "custom_headers": "自訂請求標頭",
         "oauth": "OAuth",
         "none": "無需認證"
       },
       "fields": {
         "bearerToken": "Bearer 權杖",
-        "headerName": "請求頭名稱",
+        "headerName": "請求標頭名稱",
         "apiKey": "API 金鑰",
-        "headers": "請求頭"
+        "headers": "請求標頭"
       },
       "placeholders": {
         "pasteToken": "貼上權杖",
         "pasteKey": "貼上金鑰"
       },
-      "headersHint": "每行填寫一個請求頭。儲存後將不再顯示機密值。",
+      "headersHint": "每行填寫一個請求標頭。儲存後將不再顯示機密值。",
       "noAuthNote": "此 MCP 伺服器無需憑證。",
-      "oauthNote": "此 MCP 伺服器使用 OAuth。請與提供方連接你的帳戶——你將被重定向以授予訪問許可權，然後返回此處。你的權杖將加密儲存並自動重新整理。",
+      "oauthNote": "此 MCP 伺服器使用 OAuth。請與提供方連接你的帳戶——你將被重新導向以授予存取權限，然後返回此處。你的權杖將加密儲存並自動重新整理。",
       "connect": "連接",
       "close": "關閉",
       "cancel": "取消",
       "save": "儲存",
       "errors": {
-        "oneHeaderPerLine": "每行填寫一個請求頭，例如：X-API-Key: value",
-        "nameAndValueRequired": "請求頭的名稱和值均為必填。",
+        "oneHeaderPerLine": "每行填寫一個請求標頭，例如：X-API-Key: value",
+        "nameAndValueRequired": "請求標頭的名稱和值均為必填。",
         "bearerRequired": "儲存前請輸入 Bearer 權杖。",
-        "apiKeyRequired": "儲存前請輸入請求頭名稱和 API 金鑰。",
-        "headerRequired": "儲存前請至少新增一個請求頭。"
+        "apiKeyRequired": "儲存前請輸入請求標頭名稱和 API 金鑰。",
+        "headerRequired": "儲存前請至少新增一個請求標頭。"
       },
       "toasts": {
         "saved": "MCP 憑證已儲存",
@@ -2155,11 +2155,11 @@
     "submit": {
       "trigger": "提交 MCP",
       "title": "提交 MCP 伺服器",
-      "description": "貼上一個公開的 GitHub 倉庫連結。我們會自動解析並進行安全掃描——乾淨的倉庫將直接釋出，可疑的則轉入人工稽核。",
-      "urlRequired": "請輸入公開的 GitHub 倉庫 URL。",
-      "published": "已釋出：{identifier}",
-      "queued": "已提交 {identifier}，已加入人工稽核佇列（有 {count} 項待確認）。",
-      "failed": "提交失敗。請確認這是一個公開的 MCP 倉庫。",
+      "description": "貼上一個公開的 GitHub 儲存庫連結。我們會自動解析並進行安全掃描——乾淨的儲存庫將直接發布，可疑的則轉入人工審核。",
+      "urlRequired": "請輸入公開的 GitHub 儲存庫 URL。",
+      "published": "已發布：{identifier}",
+      "queued": "已提交 {identifier}，已加入人工審核佇列（有 {count} 項待確認）。",
+      "failed": "提交失敗。請確認這是一個公開的 MCP 儲存庫。",
       "submit": "提交"
     }
   },
@@ -2187,8 +2187,8 @@
       "close": "關閉資料中心",
       "syncing": "正在同步 {count}",
       "executionError": "無法讀取檔案位置：{error}",
-      "scrollTabsLeft": "向左滾動標籤",
-      "scrollTabsRight": "向右滾動標籤"
+      "scrollTabsLeft": "向左捲動分頁",
+      "scrollTabsRight": "向右捲動分頁"
     },
     "tabs": {
       "Sources": "來源",
@@ -2202,7 +2202,7 @@
     "search": {
       "placeholder": {
         "Sources": "搜尋來源…",
-        "Files": "按名稱或路徑篩選檔案…",
+        "Files": "依名稱或路徑篩選檔案…",
         "Artifacts": "搜尋製品…",
         "Skills": "搜尋已安裝的技能…",
         "MCP": "搜尋 MCP 工具…",
@@ -2217,22 +2217,22 @@
       "installed": "已安裝 {count} 個",
       "files": "{count} 個檔案",
       "artifacts": "{count} 個製品",
-      "active": "{count} 個活躍",
+      "active": "{count} 個使用中",
       "inThread": "對話中 {count} 個",
-      "current": "當前 {count} 個"
+      "current": "目前 {count} 個"
     },
     "sources": {
       "refresh": "重新整理來源",
       "selectAll": "全選來源",
       "unselectAll": "取消全選來源",
       "deleteSelected": "刪除所選來源",
-      "createFolder": "新建資料夾",
+      "createFolder": "新增資料夾",
       "addSource": "新增來源",
       "loading": "正在載入來源…",
       "emptyTitle": "來源將顯示在此處。",
-      "emptyDescription": "新增文件、連結、筆記或資料夾，為該專案構建來源集合。",
-      "noMatchTitle": "沒有來源匹配“{query}”",
-      "noMatchDescription": "試試其他來源標題、資料夾、型別或狀態。",
+      "emptyDescription": "新增文件、連結、筆記或資料夾，為該專案建立來源集合。",
+      "noMatchTitle": "沒有來源符合「{query}」",
+      "noMatchDescription": "試試其他來源標題、資料夾、類型或狀態。",
       "emptyFolder": "空資料夾",
       "row": {
         "select": "選擇 {title}",
@@ -2242,7 +2242,7 @@
         "actions": "來源操作",
         "retry": "重試",
         "addSource": "新增來源",
-        "newFolder": "新建資料夾",
+        "newFolder": "新增資料夾",
         "editReadme": "編輯 README",
         "preview": "預覽",
         "download": "下載",
@@ -2252,24 +2252,24 @@
         "delete": "刪除",
         "collapseFolder": "收起資料夾",
         "expandFolder": "展開資料夾",
-        "itemCount": "{count, plural, other {# 個專案}}",
+        "itemCount": "{count, plural, other {# 個項目}}",
         "connectorFallback": "連接器",
         "openConnectorSettings": "開啟 {label} 連接器設定"
       }
     },
     "addSourceDialog": {
       "title": "新增來源",
-      "description": "將網頁、文本筆記或上傳的檔案新增為來源。",
+      "description": "將網頁、文字筆記或上傳的檔案新增為來源。",
       "selectedFolderFallback": "所選資料夾",
       "tab": {
-        "Text": "文本",
+        "Text": "文字",
         "URL": "URL",
         "File": "檔案"
       },
-      "textTitlePlaceholder": "標題（可選）",
+      "textTitlePlaceholder": "標題（選填）",
       "textContentPlaceholder": "貼上或撰寫來源內容…",
-      "urlTitlePlaceholder": "標題（可選）",
-      "urlHint": "SourceWeft 將抓取網頁內容併為其建立搜尋索引。",
+      "urlTitlePlaceholder": "標題（選填）",
+      "urlHint": "SourceWeft 將抓取網頁內容並為其建立搜尋索引。",
       "dropHere": "將檔案拖放到此處",
       "dragHere": "將檔案拖到此處",
       "browseHint": "或<browse>瀏覽</browse>檔案",
@@ -2283,11 +2283,11 @@
       "sourcesRoot": "來源根目錄"
     },
     "createDirectoryDialog": {
-      "title": "新建資料夾",
+      "title": "新增資料夾",
       "description": "新增資料夾以整理來源。",
       "namePlaceholder": "資料夾名稱",
-      "readmePlaceholder": "README 說明（可選）",
-      "create": "新建資料夾"
+      "readmePlaceholder": "README 說明（選填）",
+      "create": "新增資料夾"
     },
     "moveSourceDialog": {
       "title": "移動來源",
@@ -2316,13 +2316,13 @@
     "files": {
       "refresh": "重新整理檔案",
       "storageNote": "雲端 · 隨此對話儲存",
-      "willAppearNew": "對話開始後文件將顯示在此處。",
+      "willAppearNew": "對話開始後檔案將顯示在此處。",
       "loadingLocation": "正在載入檔案位置…",
       "loading": "正在載入檔案…",
       "emptyTitle": "檔案將顯示在此處。",
       "emptyDescription": "你上傳的檔案以及在此對話中建立的檔案將顯示在此處。",
-      "noMatchTitle": "沒有檔案匹配“{query}”",
-      "noMatchDescription": "試試其他路徑、用途或檔案型別。",
+      "noMatchTitle": "沒有檔案符合「{query}」",
+      "noMatchDescription": "試試其他路徑、用途或檔案類型。",
       "actions": "檔案操作",
       "uploadFiles": "上傳檔案",
       "chooseFiles": "選擇要上傳的檔案",
@@ -2344,12 +2344,12 @@
       "readError": "無法讀取檔案。"
     },
     "artifacts": {
-      "refresh": "刷新制品",
+      "refresh": "重新整理製品",
       "loading": "正在載入製品…",
       "emptyTitle": "完成的製品將顯示在此處。",
-      "emptyDescription": "報告、幻燈片、圖片、表格、音訊簡報及其他已完成的成果將顯示在此處。",
-      "noMatchTitle": "沒有製品匹配“{query}”",
-      "noMatchDescription": "試試其他標題、製品型別或提示詞。",
+      "emptyDescription": "報告、投影片、圖片、表格、音訊簡報及其他已完成的成果將顯示在此處。",
+      "noMatchTitle": "沒有製品符合「{query}」",
+      "noMatchDescription": "試試其他標題、製品類型或提示詞。",
       "loadMore": "載入更多",
       "preview": "預覽 {title}",
       "completed": "完成於 {date}",
@@ -2361,14 +2361,14 @@
     "skills": {
       "gallery": "技能庫",
       "emptyTitle": "技能將顯示在此處。",
-      "emptyDescription": "安裝技能，為該專案新增可複用的創作流程與智慧體能力。",
-      "noMatchTitle": "沒有已安裝的技能匹配“{query}”",
-      "noMatchDescription": "試試其他技能名稱、標識、描述或來源。",
+      "emptyDescription": "安裝技能，為該專案新增可重複使用的創作流程與代理程式能力。",
+      "noMatchTitle": "沒有已安裝的技能符合「{query}」",
+      "noMatchDescription": "試試其他技能名稱、識別碼、描述或來源。",
       "openIntro": "開啟技能介紹",
       "toolOff": "工具已關閉",
       "hubOn": "資料中心已啟用",
       "hubOff": "資料中心未啟用",
-      "shipsScripts": "附帶指令碼 — 啟用後才會執行",
+      "shipsScripts": "附帶腳本 — 啟用後才會執行",
       "source": {
         "builtin": "官方",
         "team": "團隊",
@@ -2380,28 +2380,28 @@
       "readmeFallbackTitle": "技能",
       "readmeFallbackDescription": "選擇前先了解此技能。",
       "readmeLoading": "正在載入技能…",
-      "readmeLoadFailed": "載入技能詳情失敗。",
+      "readmeLoadFailed": "載入技能詳細資訊失敗。",
       "galleryDialogTitle": "技能庫",
-      "galleryDialogDescription": "為 {workspace} 安裝可複用的技能。",
-      "currentWorkspaceFallback": "當前工作區",
-      "addedByAgent": "由智慧體新增"
+      "galleryDialogDescription": "為 {workspace} 安裝可重複使用的技能。",
+      "currentWorkspaceFallback": "目前工作區",
+      "addedByAgent": "由代理程式新增"
     },
     "mcp": {
       "refresh": "重新整理 MCP 工具",
       "market": "MCP 市場",
       "marketDialogTitle": "MCP 市場",
-      "marketDialogDescription": "為 {workspace} 安裝並配置 MCP 伺服器。",
+      "marketDialogDescription": "為 {workspace} 安裝並設定 MCP 伺服器。",
       "loadError": "無法載入 MCP 工具。",
       "loadFailed": "載入 MCP 工具失敗。",
       "loading": "正在載入 MCP 工具…",
       "emptyTitle": "尚未安裝 MCP 工具。",
       "emptyDescription": "從 MCP 市場安裝 MCP 伺服器，即可在對話中使用。",
-      "noMatchTitle": "沒有 MCP 工具匹配“{query}”",
+      "noMatchTitle": "沒有 MCP 工具符合「{query}」",
       "noMatchDescription": "試試其他伺服器、工具或描述。",
       "official": "官方",
       "verified": "已驗證",
       "unverified": "未驗證",
-      "authConfigured": "已配置憑證",
+      "authConfigured": "已設定憑證",
       "authRequired": "需要憑證",
       "desktopOnly": "僅限桌面版",
       "disabled": "已停用",
@@ -2412,35 +2412,35 @@
     "citations": {
       "untitledSource": "未命名來源",
       "reference": "引用 {number}",
-      "scopeCurrent": "當前（{count}）",
+      "scopeCurrent": "目前（{count}）",
       "scopeThread": "對話（{count}）",
-      "noMatch": "沒有引用匹配“{query}”。",
+      "noMatch": "沒有引用符合「{query}」。",
       "noneInThread": "此對話中沒有找到引用。",
       "noneInAnswer": "所選回答中未使用引用。",
       "open": "開啟"
     },
     "connectors": {
       "manage": "管理",
-      "emptyTitle": "尚無活躍的連接器。",
+      "emptyTitle": "尚無使用中的連接器。",
       "emptyDescription": "開啟目錄以連接 Notion，或預覽即將推出的整合。",
       "openSettings": "開啟 {name} 設定",
       "syncPausedManual": "手動同步已暫停的 {name}",
       "isDisabled": "{name} 已停用",
       "sync": "同步 {name}",
-      "configure": "配置 {name}",
+      "configure": "設定 {name}",
       "resume": "恢復 {name}",
       "pause": "暫停 {name}",
       "resumeShort": "恢復",
       "pauseShort": "暫停",
       "enableShort": "啟用",
-      "disconnect": "斷開 {name}",
+      "disconnect": "中斷連接 {name}",
       "removeAria": "移除 {name}",
       "removeShort": "移除",
       "syncNow": "立即同步",
       "backToCatalog": "返回目錄",
       "cancel": "取消",
       "statusLabel": {
-        "active": "活躍",
+        "active": "使用中",
         "paused": "已暫停",
         "disabled": "已停用",
         "error": "錯誤",
@@ -2448,7 +2448,7 @@
         "connected": "已連接"
       },
       "status": {
-        "active": "活躍",
+        "active": "使用中",
         "syncing": "同步中",
         "connected": "已連接",
         "available": "可用",
@@ -2481,25 +2481,25 @@
         "request": "申請",
         "connecting": "連接中…",
         "connected": "已連接",
-        "configure": "配置",
+        "configure": "設定",
         "connect": "連接"
       },
       "detail": {
         "syncing": "連接器操作正在執行。",
         "disabled": "同步已停用。啟用此連接器以恢復。",
-        "needsAttention": "連接器需要關注。",
+        "needsAttention": "連接器需要注意。",
         "paused": "同步已暫停，恢復此連接器後繼續。",
-        "needsSetupWebhook": "配置一個公開的 HTTPS webhook 端點。",
+        "needsSetupWebhook": "設定一個公開的 HTTPS webhook 端點。",
         "lastSync": "上次同步 {date}",
-        "connectedAutoCreate": "已存在授權但沒有活躍的連接器。重新連接以建立連接器。",
-        "connectedConfigure": "OAuth 已連接。配置此連接器以啟用同步。",
-        "available": "可通過 {name} OAuth 進行連接。",
-        "comingSoonSearch": "用於即時智慧體搜尋的不可索引連接器。",
+        "connectedAutoCreate": "已存在授權但沒有使用中的連接器。重新連接以建立連接器。",
+        "connectedConfigure": "OAuth 已連接。設定此連接器以啟用同步。",
+        "available": "可透過 {name} OAuth 進行連接。",
+        "comingSoonSearch": "用於即時代理程式搜尋的不可索引連接器。",
         "comingSoonIndexable": "規劃中的可索引資料來源連接器。",
         "comingSoonNonIndexable": "規劃中的不可索引連接器。"
       },
       "webhookUrl": "Webhook URL",
-      "webhookLocal": "本地",
+      "webhookLocal": "本機",
       "copyWebhook": "複製 webhook URL",
       "webhookNote": "完成 OAuth 後，在 {name} 連接設定中新增此 URL。提供方 webhook 需要公開的 HTTPS。",
       "manageTitle": "管理連接器",
@@ -2510,7 +2510,7 @@
       "filterManaged": "已管理",
       "searchPlaceholder": "搜尋連接器",
       "loading": "正在載入連接器…",
-      "noMatchTitle": "沒有連接器匹配“{query}”",
+      "noMatchTitle": "沒有連接器符合「{query}」",
       "noMatchDescription": "試試其他提供方、能力或分類。",
       "noConnectorsTitle": "尚無連接器。",
       "managedEmptyDescription": "連接 Notion，或從目錄中選擇即將推出的整合。",
@@ -2520,12 +2520,12 @@
         "File Storage": "檔案儲存",
         "Communication": "溝通協作",
         "Projects & Data": "專案與資料",
-        "Publishing": "釋出"
+        "Publishing": "發布"
       },
       "settingsDescription": "連接器設定、執行歷史和提供方事件。",
       "settingsTab": {
         "overview": "概覽",
-        "configuration": "配置",
+        "configuration": "設定",
         "sync": "同步歷史",
         "actions": "操作",
         "webhooks": "Webhook",
@@ -2535,20 +2535,20 @@
         "status": "狀態",
         "lastSuccessfulSync": "上次成功同步",
         "latestRun": "最近一次執行",
-        "nextScheduled": "下次計劃",
+        "nextScheduled": "下次排程",
         "never": "從未",
         "noActivity": "暫無活動",
-        "notScheduled": "未計劃",
-        "needsAttention": "需要關注",
+        "notScheduled": "未排程",
+        "needsAttention": "需要注意",
         "latestRunValue": "{kind} · {status}",
         "activityDescription": "同步、操作和 webhook 的最近連接器執行記錄。",
         "activityEmpty": "尚無連接器活動。"
       },
       "config": {
-        "general": "常規",
+        "general": "一般",
         "name": "名稱",
-        "syncSchedule": "同步計劃",
-        "customIntervalMinutes": "自定義間隔（分鐘）",
+        "syncSchedule": "同步排程",
+        "customIntervalMinutes": "自訂間隔（分鐘）",
         "nonIndexableNote": "不可索引的搜尋連接器無法執行週期性索引。",
         "saveSettings": "儲存設定",
         "schedule": "計劃",
@@ -2571,11 +2571,11 @@
         "cannotPeriodic": "此連接器無法使用週期性同步。"
       },
       "syncHistory": {
-        "description": "手動、計劃、webhook、回填和跳過的同步嘗試。",
+        "description": "手動、排程、webhook、回填和跳過的同步嘗試。",
         "empty": "尚無同步執行。"
       },
       "actionsHistory": {
-        "description": "已批准的連接器寫入、更新、刪除、評論和檔案上傳。",
+        "description": "已核准的連接器寫入、更新、刪除、留言和檔案上傳。",
         "empty": "尚無連接器操作。"
       },
       "webhooksHistory": {
@@ -2593,15 +2593,15 @@
         "1440": "每天",
         "10080": "每週",
         "manual": "手動",
-        "custom": "自定義"
+        "custom": "自訂"
       },
       "disconnectTitle": "管理連接器移除",
       "disconnectDescription": "選擇臨時停用此連接器，還是將其從 SourceWeft 中永久刪除。",
       "disableOption": "停用連接器",
-      "disableOptionDesc": "停止同步。保留授權、配置、歷史和已索引的內容。稍後可再次啟用。",
+      "disableOptionDesc": "停止同步。保留授權、設定、歷史和已索引的內容。稍後可再次啟用。",
       "deleteOption": "刪除連接器及其所有已索引內容",
-      "deleteOptionDesc": "永久刪除此連接器、其本地授權，以及它匯入的所有內容。此操作無法撤銷。",
-      "disconnectNote": "SourceWeft 不會撤銷第三方提供方中的訪問許可權。",
+      "deleteOptionDesc": "永久刪除此連接器、其本機授權，以及它匯入的所有內容。此操作無法撤銷。",
+      "disconnectNote": "SourceWeft 不會撤銷第三方提供方中的存取權限。",
       "deleting": "刪除中…",
       "disabling": "停用中…",
       "deleteConfirm": "刪除連接器及內容",
@@ -2650,18 +2650,18 @@
     "sourcePreview": {
       "mode": {
         "preview": "預覽",
-        "chunks": "分塊",
+        "chunks": "區塊",
         "raw": "原始 MD",
         "sourceFile": "檔案"
       },
       "sourceFallback": "來源",
-      "chunkLabel": "分塊 {number}",
-      "citedChunk": "引用的分塊",
+      "chunkLabel": "區塊 {number}",
+      "citedChunk": "引用的區塊",
       "sourcePreview": "來源預覽",
-      "chunksCount": "{count} 個分塊",
+      "chunksCount": "{count} 個區塊",
       "historical": "歷史版本",
       "sourceDeleted": "來源已刪除",
-      "jumpToCited": "跳轉到被引用處",
+      "jumpToCited": "跳至被引用處",
       "webCitation": "網頁引用",
       "webCitationNote": "此引用指向一個公開網頁。",
       "open": "開啟",
@@ -2674,33 +2674,33 @@
       "noExcerptSaved": "未儲存任何引用摘錄。",
       "loadFailed": "載入來源預覽失敗。",
       "download": "下載",
-      "noSourceFile": "沒有可用的來原始檔。",
-      "fileDetails": "檔案詳情",
+      "noSourceFile": "沒有可用的來源檔案。",
+      "fileDetails": "檔案詳細資訊",
       "fileDetailsNote": "原始來源資源的快速後設資料。",
       "metaName": "名稱",
-      "metaType": "型別",
+      "metaType": "類型",
       "metaFormat": "格式",
       "metaSize": "大小",
       "metaUpdated": "更新時間",
-      "metaIndexedChunks": "已索引分塊",
+      "metaIndexedChunks": "已索引區塊",
       "unknown": "未知",
       "noMarkdown": "沒有可用的 Markdown 內容。",
       "citedSource": "被引用的來源",
       "raw": "原始",
-      "noRawChunk": "沒有原始分塊內容。",
-      "noChunks": "此來源尚無已索引的分塊。"
+      "noRawChunk": "沒有原始區塊內容。",
+      "noChunks": "此來源尚無已索引的區塊。"
     },
     "localFiles": {
-      "ariaLabel": "本地檔案",
+      "ariaLabel": "本機檔案",
       "heading": "檔案",
       "refresh": "重新整理檔案",
-      "lastListingNote": " 正在顯示上次載入的列表；檔案當前不可訪問。",
-      "parentFolder": "上級資料夾",
+      "lastListingNote": " 正在顯示上次載入的列表；檔案目前不可存取。",
+      "parentFolder": "上層資料夾",
       "loading": "正在從這臺電腦載入檔案…",
       "emptyFolder": "此資料夾為空。在此建立的檔案會自動顯示。",
-      "noMatch": "沒有檔案匹配你的搜尋。",
+      "noMatch": "沒有檔案符合你的搜尋。",
       "openFolder": "開啟資料夾",
-      "previewInApp": "在應用中預覽",
+      "previewInApp": "在應用程式中預覽",
       "openFolderAria": "開啟資料夾 {name}",
       "previewAria": "預覽 {name}",
       "downloadAria": "下載 {name}"
@@ -2750,10 +2750,10 @@
         "settingsUnavailable": "連接器設定暫不可用。",
         "noWorkspace": "尚未選擇工作區。",
         "notAvailableOAuth": "{name} 暫不支援 OAuth。",
-        "redirecting": "正在跳轉到 {name} 授權。",
+        "redirecting": "正在重新導向至 {name} 授權。",
         "reconnectFirst": "建立連接器前請先重新連接 {name}。",
-        "connectedConfigureNext": "{name} 已連接。接下來配置同步。",
-        "connectedConfigureDone": "{name} 已連接。接下來配置同步。",
+        "connectedConfigureNext": "{name} 已連接。接下來設定同步。",
+        "connectedConfigureDone": "{name} 已連接。接下來設定同步。",
         "connectedFallback": "{name} 已連接。",
         "syncAlreadyRunningNamed": "{name} 同步已在執行中。",
         "enabledInitialSync": "{name} 連接器已啟用。已加入首次同步佇列。",
@@ -2784,16 +2784,16 @@
   },
   "dashboardAdmin": {
     "eyebrow": "市場 · 管理",
-    "heading": "稽核 MCP 提交",
-    "description": "通過自動檢查的提交將自動釋出。此佇列包含需要人工稽核的被標記提交。",
-    "loading": "正在載入稽核佇列…",
-    "empty": "沒有需要稽核的提交。",
+    "heading": "審核 MCP 提交",
+    "description": "通過自動檢查的提交將自動發布。此佇列包含需要人工審核的被標記提交。",
+    "loading": "正在載入審核佇列…",
+    "empty": "沒有需要審核的提交。",
     "submittedBy": "由 {name} 提交",
-    "approve": "批准併發布",
+    "approve": "核准並發布",
     "reject": "拒絕",
     "errors": {
-      "forbidden": "你沒有稽核市場提交的許可權。",
-      "loadFailed": "載入稽核佇列失敗。請重試。",
+      "forbidden": "你沒有審核市場提交的權限。",
+      "loadFailed": "載入審核佇列失敗。請重試。",
       "actionFailed": "操作失敗：{identifier}"
     },
     "relativeTime": {
@@ -2808,20 +2808,20 @@
       "eval": "eval(",
       "base64Exec": "base64 | sh",
       "chmodExec": "chmod +x",
-      "internalAddress": "內部/後設資料地址"
+      "internalAddress": "內部/後設資料位址"
     },
-    "footer": "只有列入 <code>MARKET_ADMIN_USER_IDS</code> 的使用者才能訪問此頁面。批准與拒絕操作使用同一份允許名單。"
+    "footer": "只有列入 <code>MARKET_ADMIN_USER_IDS</code> 的使用者才能存取此頁面。核准與拒絕操作使用同一份允許名單。"
   },
   "dashboardObservability": {
     "notices": {
-      "payloadExcluded": "此次輕量追蹤載入已排除載荷。",
-      "payloadHidden": "載荷已被可觀測性訪問策略隱藏：{reason}",
+      "payloadExcluded": "此次輕量追蹤載入已排除酬載。",
+      "payloadHidden": "酬載已被可觀測性存取原則隱藏：{reason}",
       "redactedTooltip": "敏感值已在儲存前移除",
-      "redactedValue": "已脫敏的敏感值"
+      "redactedValue": "已遮蔽的敏感值"
     },
     "roles": {
       "system": "系統",
-      "assistant": "助手",
+      "assistant": "助理",
       "tool": "工具",
       "user": "使用者"
     },
@@ -2842,13 +2842,13 @@
     },
     "mcp": {
       "title": "MCP 活動",
-      "subtitle": "所選工作區的脫敏 MCP 工具呼叫與批准提案。",
+      "subtitle": "所選工作區經遮蔽的 MCP 工具呼叫與核准提案。",
       "toolCallsBadge": "{count} 個工具呼叫",
-      "approvalsBadge": "{count} 個批准",
+      "approvalsBadge": "{count} 個核准",
       "unknown": "未知 MCP",
-      "empty": "未找到此工作區的 MCP 工具呼叫。",
+      "empty": "找不到此工作區的 MCP 工具呼叫。",
       "loadOlder": "載入更早的 MCP 呼叫",
-      "approvals": "批准提案",
+      "approvals": "核准提案",
       "columns": {
         "time": "時間",
         "server": "伺服器",
@@ -2858,7 +2858,7 @@
         "latency": "延遲",
         "input": "輸入",
         "outputError": "輸出 / 錯誤",
-        "thread": "執行緒"
+        "thread": "對話"
       }
     },
     "tree": {
@@ -2873,7 +2873,7 @@
       "count": "{count} 個觀測",
       "columns": {
         "observation": "觀測",
-        "type": "型別",
+        "type": "類型",
         "timeline": "時間軸",
         "latency": "延遲"
       }
@@ -2893,15 +2893,15 @@
       "traceIdPlaceholder": "精確的追蹤 ID",
       "userId": "使用者 ID",
       "userIdPlaceholder": "按使用者篩選",
-      "sessionId": "會話 ID",
-      "sessionIdPlaceholder": "按會話篩選",
+      "sessionId": "工作階段 ID",
+      "sessionIdPlaceholder": "按工作階段篩選",
       "status": "狀態",
-      "apply": "應用篩選"
+      "apply": "套用篩選"
     },
     "summary": {
       "status": "狀態：",
       "latency": "延遲：",
-      "session": "會話：",
+      "session": "工作階段：",
       "user": "使用者：",
       "env": "環境：",
       "observations": "觀測：",
@@ -2944,12 +2944,12 @@
       "tabMcp": "MCP 活動",
       "refresh": "重新整理",
       "mcpScoped": "MCP 活動僅限單個工作區。請從篩選器中選擇一個工作區以檢視 MCP 工具呼叫。",
-      "sessionPrefix": "會話：{value}",
-      "emptyNoTraces": "未找到追蹤。",
-      "emptyNoMatch": "沒有符合當前搜尋條件的追蹤。",
+      "sessionPrefix": "工作階段：{value}",
+      "emptyNoTraces": "找不到追蹤。",
+      "emptyNoMatch": "沒有符合目前搜尋條件的追蹤。",
       "loadOlder": "載入更早的追蹤",
       "columns": {
-        "timestamp": "時間戳",
+        "timestamp": "時間戳記",
         "name": "名稱",
         "workspace": "工作區",
         "status": "狀態",
@@ -2957,7 +2957,7 @@
         "model": "模型",
         "tokens": "權杖",
         "obs": "觀測",
-        "sessionId": "會話 ID",
+        "sessionId": "工作階段 ID",
         "user": "使用者",
         "traceId": "追蹤 ID"
       }
@@ -2965,16 +2965,16 @@
     "drawer": {
       "filtersTitle": "可觀測性篩選器",
       "traceFallback": "追蹤",
-      "sessionId": "會話 ID：{value}",
-      "traceDetail": "追蹤詳情",
+      "sessionId": "工作階段 ID：{value}",
+      "traceDetail": "追蹤詳細資訊",
       "timeline": "時間軸",
-      "detail": "詳情"
+      "detail": "詳細資訊"
     },
     "errors": {
       "loadTraces": "載入追蹤失敗",
       "loadMcp": "載入 MCP 活動失敗",
-      "traceWorkspaceRequired": "載入團隊追蹤詳情需要指定追蹤所屬工作區",
-      "loadDetail": "載入追蹤詳情失敗",
+      "traceWorkspaceRequired": "載入團隊追蹤詳細資訊需要指定追蹤所屬工作區",
+      "loadDetail": "載入追蹤詳細資訊失敗",
       "loadMoreObservations": "載入更多觀測失敗"
     }
   },
@@ -2983,27 +2983,27 @@
       "uploadRunningToast": "仍有上傳或資源操作正在進行。請等待其完成後再關閉 Hub。",
       "discardCloseConfirm": "放棄已開啟的 Hub 表單並關閉此視窗？",
       "accountMismatch": "Hub 帳戶與主視窗不一致。",
-      "mainWindowRestarted": "主視窗已重啟。請在重試前檢查所選內容。",
+      "mainWindowRestarted": "主視窗已重新啟動。請在重試前檢查所選內容。",
       "connectionInterrupted": "與主視窗的連接已中斷。",
-      "notResponding": "主視窗無響應。請在更改前重新連接。",
-      "sessionEnded": "Hub 會話已結束。",
-      "disconnected": "Hub 已斷開連接。",
+      "notResponding": "主視窗無回應。請在更改前重新連接。",
+      "sessionEnded": "Hub 工作階段已結束。",
+      "disconnected": "Hub 已中斷連接。",
       "actionNotConfirmed": "Hub 操作未確認。請重新整理後重試。",
       "dockNotConfirmed": "主視窗未確認停靠。Hub 仍保留在此視窗中。",
       "dockFailed": "無法停靠 Hub。",
-      "openFromDesktop": "請從 SourceWeft 桌面應用開啟 Hub。",
+      "openFromDesktop": "請從 SourceWeft 桌面版開啟 Hub。",
       "signInAgain": "請在主視窗重新登入以使用 Hub。",
       "connecting": "正在將 Hub 連接到主視窗…",
       "followingPaused": "跟隨已暫停",
-      "followingCurrent": "正在跟隨當前對話",
+      "followingCurrent": "正在跟隨目前對話",
       "closeTitleBusy": "請先完成編輯或上傳，再停靠 Hub",
       "closeTitleReturn": "關閉視窗並將 Hub 返回主視窗",
       "closeTitlePlain": "關閉 Hub 視窗",
       "closeAria": "關閉 Hub 視窗",
       "reconnectAria": "重新連接 Hub",
       "pausedCrossWorkspace": "主視窗已切換工作區。請返回原工作區以完成已開啟的表單。",
-      "pausedFollow": "請完成或取消“{current}”中開啟的表單，以跟隨“{target}”。",
-      "discardFollowConfirm": "放棄已開啟的 Hub 表單並跟隨當前對話？",
+      "pausedFollow": "請完成或取消「{current}」中開啟的表單，以跟隨「{target}」。",
+      "discardFollowConfirm": "放棄已開啟的 Hub 表單並跟隨目前對話？",
       "discardFollow": "放棄並跟隨",
       "operationContinues": "該操作將在其原工作區中繼續。",
       "mainWindowLeft": "主視窗已離開此對話。",
@@ -3030,8 +3030,8 @@
       "placeholder": "搜尋工作區…"
     },
     "rail": {
-      "scrollLeft": "向左滾動最近的工作區",
-      "scrollRight": "向右滾動最近的工作區"
+      "scrollLeft": "向左捲動最近的工作區",
+      "scrollRight": "向右捲動最近的工作區"
     },
     "overview": {
       "resumeIn": "在 {name} 中繼續",
@@ -3040,7 +3040,7 @@
       "setupDescription": "建立工作區來整理來源、集中管理上下文，並直接進入對話。",
       "openWorkspace": "開啟工作區",
       "activityColumn": "活動",
-      "typeColumn": "型別",
+      "typeColumn": "類型",
       "activityEmpty": "工作區、來源和對話的活動將顯示在此處。"
     },
     "actions": {
@@ -3058,14 +3058,14 @@
     },
     "cover": {
       "noFilesYet": "還沒有檔案",
-      "addSourcesDescription": "新增來源，開始構建上下文。",
+      "addSourcesDescription": "新增來源，開始建立上下文。",
       "extraFiles": "+{count} 個檔案"
     },
     "empty": {
       "title": "還沒有工作區",
       "description": "建立工作區，開始整理來源與對話。",
-      "searchTitle": "沒有工作區匹配你的搜尋",
-      "searchDescription": "試試其他關鍵詞，或清除搜尋以重新瀏覽最近的工作區。"
+      "searchTitle": "沒有工作區符合你的搜尋",
+      "searchDescription": "試試其他關鍵字，或清除搜尋以重新瀏覽最近的工作區。"
     },
     "activity": {
       "created": "已建立",
@@ -3097,10 +3097,651 @@
       "days": "{count} 天前"
     },
     "toasts": {
-      "created": "已建立“{name}”",
+      "created": "已建立「{name}」",
       "createFailed": "建立工作區失敗。",
       "loadFailed": "載入工作區失敗。",
-      "noActiveTeam": "尚未選擇活躍團隊。"
+      "noActiveTeam": "尚未選擇使用中的團隊。"
+    }
+  },
+  "publicSkills": {
+    "brand": "SourceWeft 技能",
+    "landing": {
+      "title": "代理程式技能目錄",
+      "description": "瀏覽 SourceWeft 的公開代理程式技能。在新增到工作區之前，可以檢視每個技能完整的 SKILL.md、檔案、版本、授權條款和原始碼儲存庫。",
+      "socialDescription": "公開的代理程式技能目錄，附帶完整的 SKILL.md、檔案、版本、授權條款和來源。",
+      "heroWithCount": "探索 {count, number} 個代理程式技能",
+      "heroWithoutCount": "探索代理程式技能",
+      "heroTail": "完整的說明、檔案、授權條款和來源一目瞭然，隨後即可新增到 SourceWeft 工作區。",
+      "searchLabel": "搜尋技能",
+      "searchPlaceholder": "依名稱、作者或技能用途搜尋",
+      "searchSubmit": "搜尋",
+      "sections": {
+        "recommended": {
+          "title": "推薦",
+          "description": "優先展示精選發布者的技能和已驗證技能，其次是被工作區新增最多、儲存庫星標最多的技能。"
+        },
+        "newest": {
+          "title": "最新",
+          "description": "最近收錄到目錄中的技能。"
+        },
+        "popular": {
+          "title": "新增最多",
+          "description": "SourceWeft 工作區最常新增的技能。"
+        },
+        "collections": {
+          "title": "合集",
+          "description": "為常見任務精心挑選的技能組合。"
+        }
+      },
+      "viewAll": "檢視全部",
+      "browseByCategory": "依分類瀏覽",
+      "emptyTitle": "技能正在同步中。",
+      "emptyBody": "公開目錄已可存取，但目前還沒有收錄任何技能。",
+      "getStarted": {
+        "install": {
+          "title": "安裝",
+          "description": "將任意已收錄的技能新增到 SourceWeft 工作區。",
+          "steps": [
+            "選擇一個技能，閱讀它的 SKILL.md、檔案和授權條款。",
+            "在儀表板的「技能」頁面將它新增到工作區。",
+            "在對話中使用它——或者貼上技能頁面連結，讓助理幫你安裝。"
+          ],
+          "ctaSignedIn": "在儀表板中開啟技能",
+          "ctaSignedOut": "登入後安裝"
+        },
+        "publish": {
+          "title": "發布",
+          "description": "從你自己的公開儲存庫收錄技能。",
+          "steps": [
+            "將技能放在包含 SKILL.md 的公開 GitHub 儲存庫中。",
+            "在儀表板的「技能」頁面匯入該儲存庫。",
+            "通過自動掃描的技能會被收錄；被標記的技能需等待審核。"
+          ],
+          "ctaSignedIn": "匯入技能",
+          "ctaSignedOut": "登入後匯入"
+        }
+      }
+    },
+    "listing": {
+      "allSkills": "全部技能",
+      "allSkillsTitle": "全部技能",
+      "resultsFor": "「{query}」的搜尋結果",
+      "resultsForIn": "{category}中「{query}」的搜尋結果",
+      "categories": "分類",
+      "marketHome": "目錄首頁",
+      "sortLabel": "排序",
+      "clearFilters": "清除篩選",
+      "exactCount": "{count, plural, other {# 個技能}}",
+      "pageCount": "本頁 {count, plural, other {# 個技能}}",
+      "noMatchTitle": "沒有符合這些篩選條件的技能。",
+      "noMatchBody": "試試更寬泛的搜尋或其他分類。",
+      "firstPage": "第一頁",
+      "nextPage": "下一頁",
+      "pagination": "分頁"
+    },
+    "sortOptions": {
+      "recommended": "推薦",
+      "popular": "新增最多",
+      "stars": "星標最多",
+      "new": "最新",
+      "name": "名稱"
+    },
+    "trustOptions": {
+      "all": "不限信任等級",
+      "featured": "精選",
+      "verified": "已驗證"
+    },
+    "capabilityOptions": {
+      "all": "不限類型",
+      "prompt-only": "僅含說明",
+      "executable": "包含腳本"
+    },
+    "category": {
+      "title": "{name} 技能",
+      "fallbackMetaTitle": "技能分類",
+      "metaDescription": "瀏覽公開的 {name} 代理程式技能，附帶完整的 SKILL.md、檔案、版本、授權條款和來源。",
+      "description": "可以新增到 SourceWeft 工作區的公開 {name} 代理程式技能。",
+      "back": "返回技能目錄"
+    },
+    "breadcrumb": {
+      "label": "麵包屑導覽",
+      "home": "首頁",
+      "skills": "技能"
+    },
+    "badges": {
+      "verified": "已驗證",
+      "featured": "精選",
+      "featuredTitle": "來自精選發布者：主要廠商自己的技能儲存庫",
+      "executable": "包含腳本",
+      "promptOnly": "僅含說明",
+      "claimed": "作者已認領",
+      "claimedTitle": "該儲存庫的作者已在 SourceWeft 上認領",
+      "archived": "已封存",
+      "archivedTitle": "原始碼儲存庫已在 GitHub 上封存：不會再有更新"
+    },
+    "card": {
+      "workspaces": "{count, plural, =1 {已新增到 1 個工作區} other {已新增到 {compact} 個工作區}}",
+      "stars": "{count} 個 GitHub 星標",
+      "updated": "{relative}更新",
+      "unknownAuthor": "未知作者"
+    },
+    "collections": {
+      "itemCount": "{count, plural, other {# 個技能}}",
+      "fallbackMetaTitle": "技能合集",
+      "metaTitle": "{title} — 代理程式技能",
+      "metaDescription": "{title}：{summary}",
+      "metaDescriptionNoSummary": "{title}：精心挑選的代理程式技能合集。",
+      "eyebrow": "合集",
+      "back": "返回技能目錄",
+      "empty": "該合集中目前沒有公開的技能。"
+    },
+    "detail": {
+      "fallbackMetaTitle": "代理程式技能",
+      "metaTitle": "{name} 代理程式技能",
+      "metaDescription": "{name}：{description} 檢視完整的 SKILL.md、檔案、版本、授權條款和來源。",
+      "noLicense": "無授權條款",
+      "by": "作者",
+      "repository": "儲存庫",
+      "source": "來源",
+      "listed": "收錄於 {date}",
+      "updated": "更新於 {date}",
+      "workspaces": "{count, plural, =1 {已新增到 1 個工作區} other {已新增到 {compact} 個工作區}}",
+      "stars": "{count} 個星標",
+      "repoPushed": "儲存庫{relative}更新",
+      "claimLink": "你是作者嗎？認領此儲存庫",
+      "facts": {
+        "version": "版本",
+        "license": "授權條款",
+        "workspaces": "工作區",
+        "stars": "GitHub 星標",
+        "files": "檔案"
+      },
+      "tabs": {
+        "skill": "SKILL.md",
+        "files": "檔案（{count}）",
+        "versions": "版本（{count}）",
+        "install": "安裝"
+      },
+      "tabsLabel": "技能分區",
+      "skillMdMissing": "該技能的 SKILL.md 沒有可顯示的正文。",
+      "imagePlaceholder": "圖片",
+      "files": {
+        "path": "路徑",
+        "size": "大小",
+        "type": "類型",
+        "unknownType": "—",
+        "note": "僅公開檔案列表。將技能安裝到工作區後即可檢視檔案內容。",
+        "empty": "此版本沒有列出任何檔案。"
+      },
+      "versions": {
+        "current": "目前",
+        "published": "發布於 {date}",
+        "unpublishedDate": "日期未知",
+        "commit": "提交",
+        "empty": "尚無已發布的版本。",
+        "noChanges": "無檔案變更",
+        "compare": "在 GitHub 上比較",
+        "added": "新增 {count} 個",
+        "modified": "修改 {count} 個",
+        "removed": "刪除 {count} 個",
+        "newScripts": "新增腳本：{paths}",
+        "newFlags": "新增掃描標記：{flags}"
+      },
+      "install": {
+        "heading": "新增到 SourceWeft 工作區",
+        "cta": "新增到 SourceWeft",
+        "steps": [
+          "在儀表板中開啟該技能，並將它新增到工作區。",
+          "為需要使用它的對話啟用該技能。"
+        ],
+        "signedOutNote": "系統會先要求你登入，然後直接帶你回到這個技能。",
+        "chatLead": "或者直接在對話中說：",
+        "chatPrompt": "安裝技能 {slug}",
+        "copy": "複製",
+        "executableNote": "該技能包含腳本。使用該技能時，腳本會在你的工作區沙箱中執行——新增前請先檢視檔案列表和原始碼。",
+        "promptOnlyNote": "該技能僅含說明：不附帶任何可執行的腳本。",
+        "cli": {
+          "heading": "安裝到你自己的電腦——推薦",
+          "lead": "適用於 Claude Code、Codex、Cursor 及其他本機代理程式。SourceWeft CLI 會從原始碼儲存庫中取得此處掃描過的那次提交，並根據掃描時記錄的雜湊值逐一驗證每個檔案。只要有任何不一致，就不會寫入任何內容。",
+          "agentHint": "新增 --agent claude-code、codex、cursor 或 universal 來選擇安裝給哪個代理程式（預設為 Claude Code）。",
+          "executableNote": "在本機安裝後，該技能的腳本會直接在你的電腦上執行，而不是在沙箱中。請先閱讀這些腳本——CLI 會在安裝前徵求你的確認。"
+        },
+        "upstream": {
+          "heading": "上游安裝器——未經 SourceWeft 驗證",
+          "lead": "開源的 skills 安裝器會取得同一個固定的提交，但不會根據 SourceWeft 記錄的雜湊值驗證檔案。"
+        }
+      },
+      "scan": {
+        "heading": "自動掃描提示",
+        "body": "我們的自動掃描在此版本中標記了以下內容。這些標記僅供參考——安裝前請閱讀原始碼。"
+      },
+      "details": {
+        "heading": "技能詳細資訊",
+        "slug": "Slug",
+        "name": "名稱",
+        "author": "作者",
+        "type": "類型",
+        "trust": "信任等級",
+        "listed": "收錄時間",
+        "updated": "更新時間",
+        "unverified": "社群",
+        "featuredAndVerified": "精選、已驗證"
+      },
+      "attribution": {
+        "heading": "來源與署名",
+        "source": "來源：",
+        "inDirectory": "位於",
+        "atCommit": "提交",
+        "unknownSource": "未記錄原始碼儲存庫",
+        "license": "授權條款：",
+        "ownership": "內容歸原作者所有。SourceWeft 從公開儲存庫中收錄這些內容。",
+        "report": "檢舉或申請下架"
+      },
+      "related": {
+        "sameRepository": "更多來自 {repository} 的技能",
+        "sameCategory": "更多{category}技能"
+      }
+    },
+    "faq": {
+      "heading": "技能常見問題",
+      "title": "代理程式技能基礎知識",
+      "items": {
+        "what": {
+          "question": "什麼是代理程式技能？",
+          "answer": "技能是一個資料夾，其中包含寫有說明的 SKILL.md 檔案，以及選用的腳本和參考檔案。AI 代理程式會按需載入它，以便更好地完成特定的工作流程。"
+        },
+        "use": {
+          "question": "如何在 SourceWeft 中使用技能？",
+          "answer": "開啟技能，選擇「新增到 SourceWeft」，然後在儀表板中將它新增到工作區。你也可以在對話中貼上技能頁面連結，讓助理幫你安裝。"
+        },
+        "standalone": {
+          "question": "不使用 SourceWeft 也能安裝技能嗎？",
+          "answer": "可以。執行 npx @sourceweft/cli skills install 並在後面加上技能名稱，即可為 Claude Code、Codex、Cursor 或其他本機代理程式安裝。CLI 會根據掃描時記錄的雜湊值驗證每個檔案，只要有一個不一致就不會安裝任何內容。"
+        },
+        "origin": {
+          "question": "這些技能從哪裡來？",
+          "answer": "技能收錄自公開儲存庫。每個頁面都會連結到原始碼儲存庫和確切的提交，並顯示作者選擇的授權條款。內容歸原作者所有。"
+        },
+        "safety": {
+          "question": "安裝技能安全嗎？",
+          "answer": "技能屬於第三方內容。每個版本都會經過自動掃描，已驗證的技能經過了 SourceWeft 的審核，但你仍應閱讀 SKILL.md 和檔案列表，尤其是包含腳本的技能。"
+        },
+        "removal": {
+          "question": "如何下架我的技能？",
+          "answer": "使用技能頁面上的「檢舉或申請下架」連結，或寄電子郵件至 support@sourceweft.com。我們會移除該條目，並且不會再次收錄。"
+        }
+      }
+    },
+    "scanFlags": {
+      "egress:pipe-to-shell": "下載並執行遠端程式碼（curl | sh）",
+      "egress:base64-exec": "解碼並執行經過編碼的命令",
+      "egress:external-post": "向外部主機傳送資料",
+      "egress:fetch": "發起對外網路請求",
+      "injection:override": "包含試圖覆蓋助理指令的文字",
+      "injection:system-prompt": "提及系統提示詞",
+      "secrets:read-credentials": "讀取憑證檔案",
+      "secrets:env-access": "讀取環境變數",
+      "scope:other-skill-file": "讀取其他技能的檔案",
+      "tool:sensitive": "請求程式碼執行類工具",
+      "binary:executable": "附帶可執行二進位檔案"
+    }
+  },
+  "dashboardSkillsClaim": {
+    "page": {
+      "title": "認領儲存庫",
+      "back": "返回技能",
+      "intro": "如果 GitHub 儲存庫中的技能是你編寫的，認領該儲存庫即可掌控它們在 SourceWeft 上的呈現方式。",
+      "benefitsTitle": "認領後你將獲得",
+      "benefits": [
+        "控制該儲存庫的每個技能是否在公開市場上架。",
+        "這些技能會帶有「作者已認領」標記。",
+        "可以將它們從 SourceWeft 公開市場中全部移除。"
+      ],
+      "benefitsNote": "無論你如何決定，已安裝技能的工作區都會繼續保留它。",
+      "repoLabel": "儲存庫",
+      "repoPlaceholder": "owner/repo",
+      "lookUp": "查詢",
+      "repoInvalid": "請以 owner/repo 格式輸入 GitHub 儲存庫。",
+      "repoNotFound": "SourceWeft 上沒有來自此儲存庫的社群技能。",
+      "skillCount": "{count, plural, other {# 個社群技能}}",
+      "claimedByYou": "你已認領此儲存庫。",
+      "claimedBySomeone": "另一位作者已認領此儲存庫。如果認領看起來有誤，市場管理員可以進行複核。",
+      "methodsTitle": "只有儲存庫擁有者才能認領",
+      "accountTitle": "使用你的 GitHub 帳號",
+      "accountBody": "適用於你個人 GitHub 帳號下的儲存庫：我們會檢查你連結的 GitHub 帳號是否擁有該儲存庫。協作者和維護者無法認領不屬於自己的儲存庫。",
+      "accountAction": "使用 GitHub 帳號認領",
+      "accountHints": {
+        "not_linked": "請先連結擁有此儲存庫的 GitHub 帳號。",
+        "organization": "此儲存庫屬於某個組織，無法在此認領。",
+        "not_owner": "你連結的 GitHub 帳號不擁有此儲存庫，因此無法認領。"
+      },
+      "linkGitHub": "開啟安全設定",
+      "organizationTitle": "歸組織所有",
+      "organizationBody": "只有儲存庫擁有者才能認領，而此儲存庫的擁有者是一個組織，因此任何人都無法自行認領。改由 SourceWeft 管理員授予認領：請從能證明你代表該組織的電子郵件地址寄電子郵件給支援團隊，並告訴我們應由哪個 SourceWeft 帳號持有認領。",
+      "organizationAction": "寄電子郵件給支援團隊申請認領",
+      "verified": "儲存庫已認領，其中的技能現在由你管理。",
+      "yourClaims": "你的認領",
+      "noClaims": "你還沒有認領任何儲存庫。",
+      "suggestionsTitle": "你可以認領的儲存庫",
+      "suggestionsBody": "這些儲存庫屬於你連結的 GitHub 帳號，並且在這裡有社群技能。在你認領之前不會有任何變化。",
+      "suggestionAction": "認領",
+      "status": {
+        "verified": "已認領",
+        "revoked": "已撤銷"
+      },
+      "methodLabel": {
+        "github_account": "GitHub 帳號",
+        "verification_file": "驗證檔案",
+        "admin_grant": "由管理員授予"
+      },
+      "noWorkspace": "請開啟一個工作區以認領儲存庫。",
+      "loadFailed": "無法載入認領資訊。",
+      "retry": "重試"
+    },
+    "panel": {
+      "title": "作者",
+      "claimedByYou": "已由你認領",
+      "claimedByAuthor": "已由作者認領",
+      "unclaimedBody": "此儲存庫中的技能是你編寫的嗎？認領它即可控制它們在這裡的呈現方式。",
+      "claimLink": "認領此儲存庫",
+      "manageLink": "管理認領",
+      "remove": "從 SourceWeft 移除",
+      "removeHint": "將此儲存庫的所有技能從公開市場下架。已安裝它們的工作區會繼續保留。",
+      "confirmTitle": "從 SourceWeft 移除此儲存庫的技能？",
+      "confirmBody": "來自 {repo} 的所有技能都將從公開市場下架，並保持下架狀態。已安裝的工作區可以繼續使用。之後你可以透過技能的上架開關重新上架。",
+      "confirm": "移除",
+      "cancel": "取消",
+      "removedToast": "{count, plural, other {已從公開市場移除 # 個技能}}",
+      "removeFailed": "無法移除此儲存庫的技能。"
+    },
+    "admin": {
+      "claim": "作者認領",
+      "unclaimed": "未認領",
+      "claimedBy": "已由使用者 {userId} 認領",
+      "method": {
+        "github_account": "（透過 GitHub 帳號）",
+        "verification_file": "（透過驗證檔案）",
+        "admin_grant": "（由管理員授予）"
+      },
+      "grantTitle": "授予認領",
+      "grantHint": "適用於組織的儲存庫，這類儲存庫任何人都無法自行認領。此電子郵件對應的帳號將成為該儲存庫的作者。",
+      "grantEmailLabel": "作者電子郵件",
+      "grantEmailPlaceholder": "author@example.com",
+      "grant": "授予",
+      "grantedToast": "認領已授予",
+      "grantErrors": {
+        "SKILL_CLAIM_USER_NOT_FOUND": "沒有使用該電子郵件的 SourceWeft 帳號。",
+        "SKILL_REPO_ALREADY_CLAIMED": "已有人持有此儲存庫，請先撤銷該認領。",
+        "fallback": "無法授予認領。"
+      },
+      "revoke": "撤銷認領",
+      "confirmRevokeTitle": "撤銷此作者認領？",
+      "confirmRevokeBody": "此儲存庫的技能將失去「作者已認領」標記，並各自歸還給最初匯入它們的人。作者可以再次認領。",
+      "revokedToast": "認領已撤銷"
+    },
+    "featured": {
+      "label": "精選",
+      "hint": "平臺匯入會將少數知名發布者設為精選。在此處更改即表示由你決定，之後的匯入不會再改動它。",
+      "setByAdmin": "由管理員設定",
+      "setBySync": "由平臺匯入設定",
+      "featuredToast": "技能已設為精選",
+      "unfeaturedToast": "技能已取消精選"
+    },
+    "errors": {
+      "SKILL_CLAIM_REPO_NOT_FOUND": "SourceWeft 上沒有來自此儲存庫的社群技能，或者 GitHub 上不存在該儲存庫。",
+      "SKILL_REPO_ALREADY_CLAIMED": "另一位作者已認領此儲存庫。",
+      "SKILL_CLAIM_GITHUB_NOT_LINKED": "請先在設定中連結擁有此儲存庫的 GitHub 帳號。",
+      "SKILL_CLAIM_ORGANIZATION_REPO": "此儲存庫屬於某個組織，只有管理員才能授予其認領。請寄電子郵件至 support@sourceweft.com 申請。",
+      "SKILL_CLAIM_ACCOUNT_MISMATCH": "你連結的 GitHub 帳號不擁有此儲存庫。",
+      "SKILL_CLAIM_REPO_MOVED": "此儲存庫已在 GitHub 上重新命名或遷移，因此無法以此名稱認領其在這裡的技能。",
+      "SKILL_CLAIM_NOT_FOUND": "找不到此認領。",
+      "SKILL_CLAIM_NOT_VERIFIED": "只有已認領儲存庫的作者才能執行此操作。",
+      "SKILL_CLAIM_GITHUB_UNAVAILABLE": "無法連接到 GitHub，請稍後重試。",
+      "SKILL_CLAIM_USER_NOT_FOUND": "沒有使用該電子郵件的 SourceWeft 帳號。",
+      "fallback": "出了點問題，請重試。"
+    }
+  },
+  "dashboardSkillsMarket": {
+    "gallery": {
+      "capabilityLabel": "能力",
+      "sectionBuiltin": "內建",
+      "sectionYours": "你的技能",
+      "sectionCommunity": "社群",
+      "communityTotal": "{count, plural, other {{count, number} 個社群技能}}",
+      "loadMore": "載入更多",
+      "loadingMore": "正在載入更多技能…",
+      "loadMoreFailed": "載入更多技能失敗。"
+    },
+    "trustOptions": {
+      "all": "全部發布者",
+      "builtin": "官方",
+      "featured": "精選",
+      "verified": "已驗證",
+      "community": "社群"
+    },
+    "capabilityOptions": {
+      "all": "任意能力",
+      "prompt-only": "僅含指令",
+      "executable": "包含腳本"
+    },
+    "sortOptions": {
+      "recommended": "推薦",
+      "popular": "新增最多",
+      "stars": "星標最多",
+      "new": "最新",
+      "name": "名稱 A-Z"
+    },
+    "card": {
+      "verified": "已驗證",
+      "featured": "精選",
+      "featuredTitle": "來自精選發布者：知名廠商自己的技能儲存庫",
+      "includesScripts": "包含腳本",
+      "installs": "已新增到 {formatted} 個工作區",
+      "installsOne": "已新增到 1 個工作區"
+    },
+    "detail": {
+      "categories": "分類",
+      "installs": "工作區",
+      "restrictedNotice": "此技能未公開上架，完整指令僅向已安裝它的工作區顯示。安裝後即可閱讀",
+      "restrictedSourceJoin": "，或",
+      "restrictedSourceLink": "檢視原始碼",
+      "restrictedEnd": "。"
+    },
+    "updates": {
+      "hubBadge": "有可用更新",
+      "hubBadgeTitle": "有更新的版本可用——開啟技能即可更新",
+      "notice": "有更新的版本可用。",
+      "noticeWithVersion": "有更新的版本可用：{version}。",
+      "action": "更新到最新版本",
+      "changesLead": "變更內容：",
+      "changedFiles": "{count, plural, other {# 個檔案}}",
+      "noFileChanges": "無檔案變更",
+      "newScripts": "{count, plural, other {# 個新腳本}}",
+      "newFlags": "{count, plural, other {# 個新掃描標記}}",
+      "compare": "在 GitHub 上比較",
+      "installPrompt": "將 {name} 安裝到此工作區？",
+      "installPromptLabel": "確認安裝",
+      "installConfirm": "安裝",
+      "installCancel": "取消",
+      "listSeparator": "，"
+    },
+    "adminPanel": {
+      "title": "市場管理",
+      "standing": "狀態",
+      "standingPublic": "公開",
+      "standingRestricted": "受限",
+      "standingWithdrawn": "已撤下（保留）",
+      "standingOwnerPrivate": "由擁有者設為私有",
+      "listed": "上架時間",
+      "notListed": "未上架",
+      "installs": "工作區",
+      "verified": "已驗證",
+      "verifiedHint": "在市場上為此技能背書。",
+      "categories": "分類",
+      "categoriesHint": "請選擇 1 到 5 個。",
+      "saveCategories": "儲存分類",
+      "listPublicly": "公開上架",
+      "withdraw": "撤下",
+      "confirmListTitle": "公開上架此技能？",
+      "confirmListBody": "任何人都能在市場上找到此技能並閱讀其完整指令。",
+      "confirmWithdrawTitle": "從市場撤下此技能？",
+      "confirmWithdrawBody": "它將離開公開市場，並且不會再被自動上架。已安裝它的工作區可以繼續使用。",
+      "cancel": "取消",
+      "actionFailed": "市場操作失敗。",
+      "categoryInvalid": "所選分類中有一個已不存在。",
+      "listedToast": "技能已公開上架",
+      "withdrawnToast": "技能已從市場撤下",
+      "verifiedToast": "技能已標記為已驗證",
+      "unverifiedToast": "已移除已驗證標記",
+      "categoriesToast": "分類已更新"
+    },
+    "review": {
+      "pageEyebrow": "市場 · 管理",
+      "tabMcp": "MCP",
+      "tabSkills": "技能",
+      "tabAll": "全部技能",
+      "tabReports": "檢舉",
+      "tabSettings": "設定",
+      "title": "審核技能提交",
+      "intro": "通過自動掃描的技能會自動發布。此佇列包含需要人工審核的被標記版本。",
+      "forbidden": "你沒有審核技能提交的權限。",
+      "loadFailed": "載入技能審核佇列失敗，請重試。",
+      "loading": "正在載入審核佇列…",
+      "empty": "沒有需要審核的技能提交。",
+      "actionFailed": "操作失敗：{slug}",
+      "submittedBy": "提交者：{who}",
+      "noLicense": "無授權條款",
+      "capabilityPromptOnly": "僅含指令",
+      "capabilityExecutable": "包含腳本",
+      "readSkillMd": "閱讀 SKILL.md",
+      "hideSkillMd": "隱藏 SKILL.md",
+      "loadingSkillMd": "正在載入 SKILL.md…",
+      "skillMdFailed": "載入 SKILL.md 失敗。",
+      "skillMdMissing": "此版本沒有 SKILL.md 文字。",
+      "reasonLabel": "原因（選填）",
+      "reasonPlaceholder": "將與決定一併記錄",
+      "publish": "核准並發布",
+      "reject": "拒絕",
+      "footnote": "技能審核與 MCP 市場使用相同的管理員允許清單。"
+    },
+    "ownerListing": {
+      "label": "允許在公開市場上架",
+      "listed": "此技能已公開上架：任何人都能找到它並閱讀其 SKILL.md。關閉此項即可下架——已安裝它的工作區會繼續保留。",
+      "pending": "已允許：掃描結果乾淨且確認其提交來自你的儲存庫後即會上架；被標記的版本需先等待審核。關閉此項可使其不在市場上架。",
+      "private": "未上架。已新增它的工作區會繼續保留；新使用者無法在市場上找到它。",
+      "heldByAdmin": "市場管理員已將此技能從公開市場撤下，只有管理員能重新上架。",
+      "allowedToast": "此技能可以公開上架",
+      "privateToast": "此技能已設為私有",
+      "failed": "無法更改上架狀態，請重試。"
+    },
+    "listingQueue": {
+      "title": "決定哪些技能公開",
+      "intro": "掃描結果乾淨的技能會自動上架。這些技能已發布，匯入者可以使用，但帶有提示性標記——是否向所有人展示由你決定。新版本增加了掃描標記或腳本的公開技能也在這裡：在你選擇保留或撤下之前，它們仍保持公開。",
+      "forbidden": "你沒有管理技能上架的權限。",
+      "loadFailed": "載入上架佇列失敗，請重試。",
+      "loading": "正在載入上架佇列…",
+      "empty": "沒有等待上架決定的技能。",
+      "publish": "公開上架",
+      "reject": "保持私有",
+      "footnote": "將技能保持私有會鎖定它：之後不會自動上架。你隨時可以在它自己的頁面上將其上架。",
+      "reasons": {
+        "flagged": "已標記，尚未公開",
+        "new-version-flags": "公開 · 新版本增加了掃描標記",
+        "new-version-scripts": "公開 · 新版本增加了腳本"
+      },
+      "keepPublic": "保持公開",
+      "withdraw": "撤下",
+      "changesTitle": "與上一版本相比的變更",
+      "changesAdded": "新增：{paths}",
+      "changesRemoved": "刪除：{paths}",
+      "changesModified": "修改：{paths}",
+      "changesNewScripts": "新腳本：{paths}",
+      "changesNewFlags": "新掃描標記：{flags}",
+      "compare": "在 GitHub 上比較"
+    },
+    "collections": {
+      "tab": "合集",
+      "title": "合集",
+      "intro": "精心挑選的公開技能集合，展示在公開技能目錄中。只有已發布的合集會出現在那裡，且合集中只顯示公開的技能。",
+      "loading": "正在載入合集…",
+      "loadFailed": "載入合集失敗，請重試。",
+      "forbidden": "你沒有管理合集的權限。",
+      "empty": "暫無合集。",
+      "newTitle": "新增合集",
+      "slugLabel": "Slug",
+      "slugPlaceholder": "office-work",
+      "slugHint": "僅限小寫字母、數字和連字元。它是頁面網址，建立後不可更改。",
+      "titleLabel": "標題",
+      "summaryLabel": "摘要",
+      "positionLabel": "位置",
+      "publishedLabel": "已發布",
+      "create": "建立",
+      "save": "儲存",
+      "delete": "刪除",
+      "confirmDelete": "刪除合集「{title}」？",
+      "skillsLabel": "技能，每行一個 slug，依順序排列",
+      "saveSkills": "儲存技能",
+      "notPublic": "未公開",
+      "view": "檢視",
+      "saved": "已儲存",
+      "failed": "更改未儲存。",
+      "skillCount": "{count, plural, other {# 個技能}}"
+    },
+    "flagLabels": {
+      "egress:pipe-to-shell": "下載並執行：curl | sh",
+      "egress:base64-exec": "base64 | sh",
+      "egress:external-post": "向外部主機傳送資料",
+      "egress:fetch": "對外網路呼叫",
+      "injection:override": "提示注入：覆蓋指令",
+      "injection:system-prompt": "提及系統提示詞",
+      "secrets:read-credentials": "讀取憑證檔案",
+      "secrets:env-access": "讀取環境變數",
+      "scope:other-skill-file": "讀取其他技能的檔案",
+      "tool:sensitive": "請求程式碼執行工具",
+      "binary:executable": "附帶可執行二進位檔案",
+      "sticky-review": "暫緩審核：較早的版本尚未處理"
+    },
+    "escalation": {
+      "title": "此版本具有更多能力",
+      "description": "與目前已安裝的版本相比，它：",
+      "addsScripts": "新增在沙箱中執行的腳本",
+      "cancel": "保留已安裝的版本",
+      "confirm": "切換到此版本",
+      "flags": {
+        "binary": "附帶已編譯的二進位檔案",
+        "sensitiveTools": "請求敏感工具",
+        "egress": "向外傳送資料或執行遠端程式碼（{flag}）",
+        "injection": "包含針對模型的指令（{flag}）",
+        "secret": "包含疑似憑證的內容（{flag}）"
+      }
+    },
+    "submissions": {
+      "title": "我的提交",
+      "inProgress": "{count} 個進行中",
+      "progressLabel": "匯入進度",
+      "stages": {
+        "resolve": "固定版本",
+        "download": "下載儲存庫",
+        "discover": "尋找技能",
+        "analyze-scan": "分析與安全掃描",
+        "triage-write": "索引",
+        "on-complete": "安裝"
+      },
+      "status": {
+        "queued": "排隊中",
+        "running": "匯入中",
+        "succeeded": "已完成",
+        "failed": "失敗"
+      },
+      "resultStatus": {
+        "indexed": "已索引",
+        "queued": "待審核",
+        "failed": "失敗"
+      },
+      "notInstalled": "已索引，但未安裝：{reason}",
+      "notInstalledFallback": "請從技能庫中安裝。",
+      "failed": "匯入失敗。",
+      "retryFailed": "未能重試匯入。"
     }
   }
 }

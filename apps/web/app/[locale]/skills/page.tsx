@@ -2,20 +2,27 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowRight, Upload, Wrench } from "lucide-react";
 import type { MarketSkillSummary } from "@sourceweft/market-sdk";
+import { hasLocale } from "next-intl";
+import { getTranslations, setRequestLocale } from "next-intl/server";
+import { notFound } from "next/navigation";
+import { formatNumber } from "@sourceweft/i18n/format";
+import { DEFAULT_LOCALE, isLocale } from "@sourceweft/i18n/locales";
 
 import { cn } from "@sourceweft/ui-web/lib/utils";
+import { routing } from "../../../i18n/routing";
+import { buildAlternates } from "../../../lib/i18n/metadata";
 
-import { JsonLd } from "../_components/seo/json-ld";
-import { SkillIcon } from "../_components/site-icons";
-import { resolveInitialLandingAuthState } from "../_landing/auth-state-server";
-import { SourceWeftFooter } from "../_landing/components/sourceweft-footer";
-import { SourceWeftHeader } from "../_landing/components/sourceweft-header";
-import { NO_INDEX_METADATA, OG_IMAGE, SITE_NAME, SITE_URL } from "../seo";
+import { JsonLd } from "../../_components/seo/json-ld";
+import { SkillIcon } from "../../_components/site-icons";
+import { resolveInitialLandingAuthState } from "../../_landing/auth-state-server";
+import { SourceWeftFooter } from "../../_landing/components/sourceweft-footer";
+import { SourceWeftHeader } from "../../_landing/components/sourceweft-header";
+import { NO_INDEX_METADATA, OG_IMAGE, SITE_NAME, SITE_URL } from "../../seo";
 import {
   listPublicSkillCategories,
   listPublicSkillCollections,
   listPublicSkills,
-} from "../../lib/market-skills";
+} from "../../../lib/market-skills";
 import {
   defaultSkillsBrowseState,
   isSkillsListView,
@@ -28,6 +35,7 @@ import {
   skillCategoryNames,
   SkillCollectionsSection,
   SkillDirectorySection,
+  skillsFaqKeys,
   SkillsFaqSection,
 } from "./_components/skills-display";
 import {
@@ -39,25 +47,41 @@ import {
   SkillsListingView,
   SkillsSearchForm,
 } from "./_components/skills-listing";
-import { skillsCopy } from "./_components/skills-public-copy";
 
 export const revalidate = 60;
 
 const HOME_SECTION_SIZE = 6;
 
 type PageProps = {
+  params: Promise<{ locale: string }>;
   searchParams: Promise<SkillsSearchParams>;
 };
 
 export async function generateMetadata({
+  params,
   searchParams,
 }: PageProps): Promise<Metadata> {
+  const { locale } = await params;
+  if (!hasLocale(routing.locales, locale)) {
+    return {};
+  }
   const state = parseSkillsBrowseState(await searchParams);
-  const { description, socialDescription, title } = skillsCopy.landing;
+  const listView = isSkillsListView(state);
+  const t = await getTranslations({
+    locale,
+    namespace: "publicSkills.landing",
+  });
+  const title = t("title");
+  const description = t("description");
+  const socialDescription = t("socialDescription");
 
   return {
     alternates: {
-      canonical: `${SITE_URL}/skills`,
+      // The directory shell is localized → hreflang across locales; search,
+      // facet and paged permutations stay noindex with a plain canonical.
+      ...(listView
+        ? { canonical: `${SITE_URL}/skills` }
+        : buildAlternates("/skills", locale)),
       // For agents: how to search and install from this directory with the
       // CLI, as a SKILL.md. The same address for everyone — no UA sniffing.
       types: { "text/markdown": "/skills/SKILL.md" },
@@ -73,7 +97,7 @@ export async function generateMetadata({
     },
     // Search, facet, sort, and paged permutations are infinite and add nothing
     // over the directory itself, so they stay crawlable but out of the index.
-    ...(isSkillsListView(state) ? NO_INDEX_METADATA : {}),
+    ...(listView ? NO_INDEX_METADATA : {}),
     title,
     twitter: {
       card: "summary_large_image",
@@ -110,15 +134,18 @@ async function loadHomeSections() {
   };
 }
 
-function GetStartedPanels({ signedIn }: { signedIn: boolean }) {
+async function GetStartedPanels({ signedIn }: { signedIn: boolean }) {
+  const t = await getTranslations("publicSkills.landing.getStarted");
   const dashboardHref = signedIn
     ? "/dashboard/skills"
     : `/auth/sign-in?redirectTo=${encodeURIComponent("/dashboard/skills")}`;
-  const { install, publish } = skillsCopy.landing.getStarted;
-  const panels = [
-    { ...install, icon: Wrench },
-    { ...publish, icon: Upload },
-  ];
+  const panels = (["install", "publish"] as const).map((key) => ({
+    cta: signedIn ? t(`${key}.ctaSignedIn`) : t(`${key}.ctaSignedOut`),
+    description: t(`${key}.description`),
+    icon: key === "install" ? Wrench : Upload,
+    steps: t.raw(`${key}.steps`) as string[],
+    title: t(`${key}.title`),
+  }));
   return (
     <div className="mt-10 grid gap-4 md:grid-cols-2">
       {panels.map((panel) => (
@@ -151,7 +178,7 @@ function GetStartedPanels({ signedIn }: { signedIn: boolean }) {
             className="group mt-5 inline-flex items-center gap-1.5 self-start text-sm font-medium text-zinc-950 dark:text-white"
             href={dashboardHref}
           >
-            {signedIn ? panel.ctaSignedIn : panel.ctaSignedOut}
+            {panel.cta}
             <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
           </Link>
         </div>
@@ -161,8 +188,16 @@ function GetStartedPanels({ signedIn }: { signedIn: boolean }) {
 }
 
 export default async function PublicSkillsMarketPage({
+  params: routeParams,
   searchParams,
 }: PageProps) {
+  const { locale } = await routeParams;
+  if (!hasLocale(routing.locales, locale)) {
+    notFound();
+  }
+  setRequestLocale(locale);
+  const t = await getTranslations("publicSkills");
+  const uiLocale = isLocale(locale) ? locale : DEFAULT_LOCALE;
   const params = await searchParams;
   const state = parseSkillsBrowseState(params);
   const listView = isSkillsListView(state);
@@ -198,13 +233,13 @@ export default async function PublicSkillsMarketPage({
   const faqJsonLd = {
     "@context": "https://schema.org",
     "@type": "FAQPage",
-    mainEntity: skillsCopy.faq.map((item) => ({
+    mainEntity: skillsFaqKeys.map((key) => ({
       "@type": "Question",
       acceptedAnswer: {
         "@type": "Answer",
-        text: item.answer,
+        text: t(`faq.items.${key}.answer`),
       },
-      name: item.question,
+      name: t(`faq.items.${key}.question`),
     })),
   };
   const homeIsEmpty =
@@ -237,24 +272,22 @@ export default async function PublicSkillsMarketPage({
           <div className="max-w-4xl">
             <span className="mb-5 inline-flex items-center gap-2 rounded-full border border-zinc-300 bg-white/48 px-3 py-1 text-xs font-medium text-zinc-600 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-400">
               <SkillIcon className="size-3.5" />
-              {skillsCopy.brand}
+              {t("brand")}
             </span>
             {listView ? (
               <p className="text-3xl font-semibold tracking-tight sm:text-4xl">
-                {skillsCopy.landing.title}
+                {t("landing.title")}
               </p>
             ) : (
               <>
                 <h1 className="text-5xl font-semibold leading-[0.95] tracking-tight sm:text-6xl lg:text-7xl">
-                  {skillsCopy.landing.title}
+                  {t("landing.title")}
                 </h1>
                 <p className="mt-6 max-w-2xl text-lg leading-8 text-zinc-600 dark:text-zinc-300">
                   {total > 0
-                    ? skillsCopy.landing.heroWithCount(
-                        total.toLocaleString("en"),
-                      )
-                    : skillsCopy.landing.heroWithoutCount}{" "}
-                  {skillsCopy.landing.heroTail}
+                    ? t("landing.heroWithCount", { count: total })
+                    : t("landing.heroWithoutCount")}{" "}
+                  {t("landing.heroTail")}
                 </p>
               </>
             )}
@@ -279,8 +312,8 @@ export default async function PublicSkillsMarketPage({
           state={state}
           title={
             state.query
-              ? skillsCopy.listing.resultsFor(state.query)
-              : skillsCopy.listing.allSkillsTitle
+              ? t("listing.resultsFor", { query: state.query })
+              : t("listing.allSkillsTitle")
           }
           total={total}
         />
@@ -293,7 +326,7 @@ export default async function PublicSkillsMarketPage({
           {directoryCategories.length > 0 ? (
             <section>
               <h2 className="mb-5 text-2xl font-semibold tracking-tight">
-                {skillsCopy.landing.browseByCategory}
+                {t("landing.browseByCategory")}
               </h2>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 {directoryCategories.map((category) => (
@@ -306,7 +339,7 @@ export default async function PublicSkillsMarketPage({
                       {category.name}
                     </span>
                     <span className="text-xs tabular-nums text-zinc-400">
-                      {category.count.toLocaleString("en")}
+                      {formatNumber(category.count, uiLocale)}
                     </span>
                   </Link>
                 ))}
@@ -318,27 +351,27 @@ export default async function PublicSkillsMarketPage({
 
           <SkillDirectorySection
             categoryNames={categoryNames}
-            description={skillsCopy.landing.sections.recommended.description}
+            description={t("landing.sections.recommended.description")}
             skills={home.recommended}
-            title={skillsCopy.landing.sections.recommended.title}
+            title={t("landing.sections.recommended.title")}
             viewAllHref={skillsBrowseHref(defaultSkillsBrowseState, {
               view: true,
             })}
           />
           <SkillDirectorySection
             categoryNames={categoryNames}
-            description={skillsCopy.landing.sections.newest.description}
+            description={t("landing.sections.newest.description")}
             skills={home.newest}
-            title={skillsCopy.landing.sections.newest.title}
+            title={t("landing.sections.newest.title")}
             viewAllHref={skillsBrowseHref(defaultSkillsBrowseState, {
               sort: "new",
             })}
           />
           <SkillDirectorySection
             categoryNames={categoryNames}
-            description={skillsCopy.landing.sections.popular.description}
+            description={t("landing.sections.popular.description")}
             skills={home.popular}
-            title={skillsCopy.landing.sections.popular.title}
+            title={t("landing.sections.popular.title")}
             viewAllHref={skillsBrowseHref(defaultSkillsBrowseState, {
               sort: "popular",
             })}
@@ -348,10 +381,10 @@ export default async function PublicSkillsMarketPage({
             <div className="rounded-xl border border-zinc-300 bg-white/54 p-10 text-center dark:border-white/10 dark:bg-white/[0.03]">
               <SkillIcon className="mx-auto mb-4 size-8 text-zinc-400" />
               <h2 className="text-2xl font-semibold tracking-tight">
-                {skillsCopy.landing.emptyTitle}
+                {t("landing.emptyTitle")}
               </h2>
               <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-zinc-500 dark:text-zinc-400">
-                {skillsCopy.landing.emptyBody}
+                {t("landing.emptyBody")}
               </p>
             </div>
           ) : null}

@@ -5,7 +5,6 @@ import { useTranslations } from "next-intl";
 
 import { Checkbox } from "@sourceweft/ui-web/components/ui/checkbox";
 import { SkillAvatar } from "../../../../skills/_components/skill-avatar";
-import { skillsMarketCopy } from "../../../../skills/_components/skills-market-copy";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { TypeBadge } from "../type-badge";
 import type { HubSkillItem, SkillIconSpec } from "./use-skills";
@@ -40,6 +39,7 @@ export function SkillRow({
   onOpenSkill: (catalogId: string) => void;
 }) {
   const t = useTranslations("dashboardSourcesHub");
+  const tm = useTranslations("dashboardSkillsMarket");
   function handleRowClick(event: MouseEvent<HTMLElement>) {
     if (disabled) {
       return;
@@ -112,10 +112,10 @@ export function SkillRow({
             <Link
               className="inline-flex items-center gap-1 rounded-md border border-primary/30 bg-primary/5 px-1.5 py-0.5 text-[10px] font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               href={skillUpdateHref(skill.slug)}
-              title={skillsMarketCopy.updates.hubBadgeTitle}
+              title={tm("updates.hubBadgeTitle")}
             >
               <ArrowUpCircle aria-hidden className="size-3" />
-              {skillsMarketCopy.updates.hubBadge}
+              {tm("updates.hubBadge")}
             </Link>
           ) : null}
           {/*

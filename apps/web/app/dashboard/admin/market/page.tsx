@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { Flag, LibraryBig, List, Settings, ShieldAlert } from "lucide-react";
+import { useTranslations } from "next-intl";
 import {
   Tabs,
   TabsContent,
@@ -9,15 +10,12 @@ import {
   TabsTrigger,
 } from "@sourceweft/ui-web/components/ui/tabs";
 import { McpIcon, SkillIcon } from "../../../_components/site-icons";
-import { skillsMarketCopy } from "../../skills/_components/skills-market-copy";
 import { McpReviewQueue } from "./_components/mcp-review-queue";
 import { SkillAllAdmin } from "./_components/skill-all-admin";
 import { SkillCollectionsAdmin } from "./_components/skill-collections-admin";
 import { SkillMarketSettingsAdmin } from "./_components/skill-market-settings-admin";
 import { SkillReportsAdmin } from "./_components/skill-reports-admin";
 import { SkillReviewQueue } from "./_components/skill-review-queue";
-
-const copy = skillsMarketCopy.review;
 
 type ReviewTab =
   "mcp" | "skills" | "all" | "reports" | "collections" | "settings";
@@ -41,6 +39,7 @@ function tabFromLocation(): ReviewTab {
 }
 
 export default function MarketReviewPage() {
+  const t = useTranslations("dashboardSkillsMarket");
   const [tab, setTab] = React.useState<ReviewTab>("mcp");
 
   // `?tab=skills` / `?tab=collections` make those tabs linkable. Read after
@@ -69,33 +68,33 @@ export default function MarketReviewPage() {
     <div className="mx-auto w-full max-w-5xl px-6 py-10">
       <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
         <ShieldAlert className="size-4" />
-        {copy.pageEyebrow}
+        {t("review.pageEyebrow")}
       </div>
       <Tabs className="mt-4 gap-6" onValueChange={changeTab} value={tab}>
         <TabsList>
           <TabsTrigger className="px-3" value="mcp">
             <McpIcon />
-            {copy.tabMcp}
+            {t("review.tabMcp")}
           </TabsTrigger>
           <TabsTrigger className="px-3" value="skills">
             <SkillIcon />
-            {copy.tabSkills}
+            {t("review.tabSkills")}
           </TabsTrigger>
           <TabsTrigger className="px-3" value="collections">
             <LibraryBig />
-            {skillsMarketCopy.collections.tab}
+            {t("collections.tab")}
           </TabsTrigger>
           <TabsTrigger className="px-3" value="all">
             <List />
-            {skillsMarketCopy.review.tabAll}
+            {t("review.tabAll")}
           </TabsTrigger>
           <TabsTrigger className="px-3" value="reports">
             <Flag />
-            {skillsMarketCopy.review.tabReports}
+            {t("review.tabReports")}
           </TabsTrigger>
           <TabsTrigger className="px-3" value="settings">
             <Settings />
-            {skillsMarketCopy.review.tabSettings}
+            {t("review.tabSettings")}
           </TabsTrigger>
         </TabsList>
         {/* Each queue loads when its tab is first opened, not before. */}

@@ -2,23 +2,26 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
+import { hasLocale } from "next-intl";
+import { getTranslations, setRequestLocale } from "next-intl/server";
 
-import { JsonLd } from "../../../_components/seo/json-ld";
-import { SkillIcon } from "../../../_components/site-icons";
-import { resolveInitialLandingAuthState } from "../../../_landing/auth-state-server";
-import { SourceWeftFooter } from "../../../_landing/components/sourceweft-footer";
-import { SourceWeftHeader } from "../../../_landing/components/sourceweft-header";
+import { routing } from "../../../../../i18n/routing";
+import { JsonLd } from "../../../../_components/seo/json-ld";
+import { SkillIcon } from "../../../../_components/site-icons";
+import { resolveInitialLandingAuthState } from "../../../../_landing/auth-state-server";
+import { SourceWeftFooter } from "../../../../_landing/components/sourceweft-footer";
+import { SourceWeftHeader } from "../../../../_landing/components/sourceweft-header";
 import {
   isIndexableListing,
   NO_INDEX_METADATA,
   OG_IMAGE,
   SITE_NAME,
   SITE_URL,
-} from "../../../seo";
+} from "../../../../seo";
 import {
   listPublicSkills,
   requirePublicSkillCategories,
-} from "../../../../lib/market-skills";
+} from "../../../../../lib/market-skills";
 import {
   isSkillsNarrowed,
   parseSkillsBrowseState,
@@ -34,7 +37,6 @@ import {
   SkillsListingView,
   SkillsSearchForm,
 } from "../../_components/skills-listing";
-import { skillsCopy } from "../../_components/skills-public-copy";
 
 // Canonical and JSON-LD embed the public site URL, which is injected at
 // container start, so this must never be prerendered at build time. Freshness
@@ -42,7 +44,7 @@ import { skillsCopy } from "../../_components/skills-public-copy";
 export const dynamic = "force-dynamic";
 
 type PageProps = {
-  params: Promise<{ slug: string }>;
+  params: Promise<{ locale: string; slug: string }>;
   searchParams: Promise<SkillsSearchParams>;
 };
 
@@ -56,7 +58,14 @@ export async function generateMetadata({
   params,
   searchParams,
 }: PageProps): Promise<Metadata> {
-  const { slug } = await params;
+  const { locale, slug } = await params;
+  if (!hasLocale(routing.locales, locale)) {
+    return {};
+  }
+  const t = await getTranslations({
+    locale,
+    namespace: "publicSkills.category",
+  });
   const decodedSlug = decodeURIComponent(slug);
   const { items } = await loadCategories();
   const category = items.find((entry) => entry.slug === decodedSlug);
@@ -64,16 +73,16 @@ export async function generateMetadata({
   if (!category) {
     return {
       ...NO_INDEX_METADATA,
-      title: skillsCopy.category.fallbackMetaTitle,
+      title: t("fallbackMetaTitle"),
     };
   }
 
   const state = parseSkillsBrowseState(await searchParams, {
     category: category.slug,
   });
-  const title = skillsCopy.category.title(category.name);
+  const title = t("title", { name: category.name });
   const description =
-    category.description ?? skillsCopy.category.metaDescription(category.name);
+    category.description ?? t("metaDescription", { name: category.name });
   const url = `${SITE_URL}${skillCategoryPath(category.slug)}`;
 
   return {
@@ -107,7 +116,15 @@ export default async function PublicSkillCategoryPage({
   params,
   searchParams,
 }: PageProps) {
-  const [{ slug }, rawSearchParams] = await Promise.all([params, searchParams]);
+  const [{ locale, slug }, rawSearchParams] = await Promise.all([
+    params,
+    searchParams,
+  ]);
+  if (!hasLocale(routing.locales, locale)) {
+    notFound();
+  }
+  setRequestLocale(locale);
+  const t = await getTranslations("publicSkills");
   const decodedSlug = decodeURIComponent(slug);
   const [authState, categoriesResponse] = await Promise.all([
     resolveInitialLandingAuthState(),
@@ -125,9 +142,9 @@ export default async function PublicSkillCategoryPage({
     category: category.slug,
   });
   const market = await listPublicSkills(skillsListRequest(state));
-  const title = skillsCopy.category.title(category.name);
+  const title = t("category.title", { name: category.name });
   const description =
-    category.description ?? skillsCopy.category.description(category.name);
+    category.description ?? t("category.description", { name: category.name });
   const breadcrumbJsonLd = {
     "@context": "https://schema.org",
     "@type": "BreadcrumbList",
@@ -135,13 +152,13 @@ export default async function PublicSkillCategoryPage({
       {
         "@type": "ListItem",
         item: SITE_URL,
-        name: skillsCopy.breadcrumb.home,
+        name: t("breadcrumb.home"),
         position: 1,
       },
       {
         "@type": "ListItem",
         item: `${SITE_URL}/skills`,
-        name: skillsCopy.breadcrumb.skills,
+        name: t("breadcrumb.skills"),
         position: 2,
       },
       {
@@ -185,7 +202,7 @@ export default async function PublicSkillCategoryPage({
             href="/skills"
           >
             <ArrowLeft className="size-4" />
-            {skillsCopy.category.back}
+            {t("category.back")}
           </Link>
           <div className="max-w-4xl">
             <span className="mb-5 inline-flex items-center gap-2 rounded-full border border-zinc-300 bg-white/48 px-3 py-1 text-xs font-medium text-zinc-600 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-400">
@@ -214,7 +231,10 @@ export default async function PublicSkillCategoryPage({
         state={state}
         title={
           state.query
-            ? skillsCopy.listing.resultsForIn(state.query, category.name)
+            ? t("listing.resultsForIn", {
+                category: category.name,
+                query: state.query,
+              })
             : undefined
         }
         total={categoriesResponse.total}

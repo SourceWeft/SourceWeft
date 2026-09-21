@@ -4,26 +4,25 @@ import Link from "next/link";
 import type { SkillClaimsOverview } from "@sourceweft/contracts";
 import { Badge } from "@sourceweft/ui-web/components/ui/badge";
 
-import { skillsClaimCopy } from "../../_components/skills-claim-copy";
+import { useTranslations } from "next-intl";
 import { claimPageSearch, formatClaimDate, sortClaims } from "./claim-view";
-
-const copy = skillsClaimCopy.page;
 
 /** The user's claims, then repositories their linked account could claim. */
 export function ClaimLists({ overview }: { overview: SkillClaimsOverview }) {
+  const t = useTranslations("dashboardSkillsClaim");
   const claims = sortClaims(overview.claims);
   return (
     <div className="space-y-4">
       {overview.suggestions.length > 0 ? (
         <section
-          aria-label={copy.suggestionsTitle}
+          aria-label={t("page.suggestionsTitle")}
           className="rounded-2xl border border-border bg-background p-5 shadow-xs"
         >
           <h2 className="text-sm font-semibold text-foreground">
-            {copy.suggestionsTitle}
+            {t("page.suggestionsTitle")}
           </h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            {copy.suggestionsBody}
+            {t("page.suggestionsBody")}
           </p>
           <ul className="mt-3 divide-y divide-border text-xs">
             {overview.suggestions.map((suggestion) => (
@@ -34,14 +33,14 @@ export function ClaimLists({ overview }: { overview: SkillClaimsOverview }) {
                 <span className="min-w-0 truncate font-medium text-foreground">
                   {suggestion.repo}
                   <span className="ml-2 font-normal text-muted-foreground">
-                    {copy.skillCount(suggestion.skillCount)}
+                    {t("page.skillCount", { count: suggestion.skillCount })}
                   </span>
                 </span>
                 <Link
                   className="font-medium text-primary underline-offset-2 hover:underline"
                   href={`/dashboard/skills/claim${claimPageSearch(suggestion.repo)}`}
                 >
-                  {copy.suggestionAction}
+                  {t("page.suggestionAction")}
                 </Link>
               </li>
             ))}
@@ -50,14 +49,14 @@ export function ClaimLists({ overview }: { overview: SkillClaimsOverview }) {
       ) : null}
 
       <section
-        aria-label={copy.yourClaims}
+        aria-label={t("page.yourClaims")}
         className="rounded-2xl border border-border bg-background p-5 shadow-xs"
       >
         <h2 className="text-sm font-semibold text-foreground">
-          {copy.yourClaims}
+          {t("page.yourClaims")}
         </h2>
         {claims.length === 0 ? (
-          <p className="mt-2 text-xs text-muted-foreground">{copy.noClaims}</p>
+          <p className="mt-2 text-xs text-muted-foreground">{t("page.noClaims")}</p>
         ) : (
           <ul className="mt-3 divide-y divide-border text-xs">
             {claims.map((claim) => (
@@ -72,7 +71,9 @@ export function ClaimLists({ overview }: { overview: SkillClaimsOverview }) {
                   {claim.repo}
                 </Link>
                 <span className="flex items-center gap-2 text-muted-foreground">
-                  <span>{copy.methodLabel[claim.method]}</span>
+                  <span>{t.has(`page.methodLabel.${claim.method}`)
+                      ? t(`page.methodLabel.${claim.method}`)
+                      : claim.method}</span>
                   <span>
                     {formatClaimDate(claim.verifiedAt ?? claim.createdAt)}
                   </span>
@@ -80,7 +81,9 @@ export function ClaimLists({ overview }: { overview: SkillClaimsOverview }) {
                     className="h-5 px-1.5 text-[10px]"
                     variant={claim.status === "verified" ? "secondary" : "outline"}
                   >
-                    {copy.status[claim.status]}
+                    {t.has(`page.status.${claim.status}`)
+                      ? t(`page.status.${claim.status}`)
+                      : claim.status}
                   </Badge>
                 </span>
               </li>

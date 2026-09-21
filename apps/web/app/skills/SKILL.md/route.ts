@@ -1,6 +1,6 @@
 import { apiBaseUrl } from "../../../lib/api-base-url";
 import { SITE_URL } from "../../seo";
-import { agentSkillMarkdown } from "../_components/agent-skill-md";
+import { agentSkillMarkdown } from "../../[locale]/skills/_components/agent-skill-md";
 
 // The site and API addresses are injected at container start, so this is
 // rendered per request rather than baked in at build time.

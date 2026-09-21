@@ -2,14 +2,12 @@
 
 import Link from "next/link";
 import { BadgeCheck, Building2, Mail } from "lucide-react";
+import { useTranslations } from "next-intl";
 import type { SkillClaimRepository } from "@sourceweft/contracts";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 
 import { GitHubIcon } from "../../../../_components/brand-icons";
-import { skillsClaimCopy } from "../../_components/skills-claim-copy";
 import { claimRequestMailto, type ClaimRepositoryPlan } from "./claim-view";
-
-const copy = skillsClaimCopy.page;
 
 /** Where a user links their GitHub account (better-auth-ui's security view). */
 const SECURITY_SETTINGS_HREF = "/settings/security";
@@ -32,6 +30,7 @@ export function ClaimRepositoryCard({
   plan: ClaimRepositoryPlan;
   repository: SkillClaimRepository;
 }) {
+  const t = useTranslations("dashboardSkillsClaim");
   return (
     <section
       aria-label={repository.repo}
@@ -44,23 +43,23 @@ export function ClaimRepositoryCard({
           {repository.repo}
         </h2>
         <span className="text-xs text-muted-foreground">
-          {copy.skillCount(repository.skillCount)}
+          {t("page.skillCount", { count: repository.skillCount })}
         </span>
       </div>
 
       {plan.kind === "claimedByYou" ? (
         <p className="mt-3 flex items-center gap-1.5 text-sm text-foreground">
           <BadgeCheck className="size-4 text-primary" />
-          {copy.claimedByYou}
+          {t("page.claimedByYou")}
         </p>
       ) : plan.kind === "claimedBySomeone" ? (
         <p className="mt-3 text-sm text-muted-foreground">
-          {copy.claimedBySomeone}
+          {t("page.claimedBySomeone")}
         </p>
       ) : (
         <div className="mt-4 space-y-4">
           <h3 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-            {copy.methodsTitle}
+            {t("page.methodsTitle")}
           </h3>
 
           {plan.kind === "organization" ? (
@@ -70,33 +69,37 @@ export function ClaimRepositoryCard({
             >
               <h4 className="flex items-center gap-1.5 text-sm font-medium text-foreground">
                 <Building2 className="size-4" />
-                {copy.organizationTitle}
+                {t("page.organizationTitle")}
               </h4>
               <p className="mt-1 text-muted-foreground">
-                {copy.organizationBody}
+                {t("page.organizationBody")}
               </p>
               <Button asChild className="mt-3" size="sm" variant="outline">
                 <a href={claimRequestMailto(repository.repo)}>
                   <Mail className="size-3.5" />
-                  {copy.organizationAction}
+                  {t("page.organizationAction")}
                 </a>
               </Button>
             </div>
           ) : (
             <div className="rounded-lg border border-border p-4 text-xs">
               <h4 className="text-sm font-medium text-foreground">
-                {copy.accountTitle}
+                {t("page.accountTitle")}
               </h4>
-              <p className="mt-1 text-muted-foreground">{copy.accountBody}</p>
+              <p className="mt-1 text-muted-foreground">
+                {t("page.accountBody")}
+              </p>
               {plan.account.reason ? (
                 <p className="mt-2 text-amber-700 dark:text-amber-300">
-                  {copy.accountHints[plan.account.reason]}{" "}
+                  {t.has(`page.accountHints.${plan.account.reason}`)
+                    ? t(`page.accountHints.${plan.account.reason}`)
+                    : null}{" "}
                   {plan.account.reason === "not_linked" ? (
                     <Link
                       className="font-medium underline underline-offset-2"
                       href={SECURITY_SETTINGS_HREF}
                     >
-                      {copy.linkGitHub}
+                      {t("page.linkGitHub")}
                     </Link>
                   ) : null}
                 </p>
@@ -109,7 +112,7 @@ export function ClaimRepositoryCard({
                 type="button"
               >
                 <GitHubIcon className="size-3.5" />
-                {copy.accountAction}
+                {t("page.accountAction")}
               </Button>
             </div>
           )}

@@ -17,6 +17,7 @@ import type {
   MarketSkillCollection,
   MarketSkillSummary,
 } from "@sourceweft/market-sdk";
+import { useLocale, useTranslations } from "next-intl";
 
 import { cn } from "@sourceweft/ui-web/lib/utils";
 
@@ -30,7 +31,6 @@ import {
   skillsContainerClassName,
 } from "./skills-format";
 import { SkillTile } from "./skill-logo";
-import { skillsCopy } from "./skills-public-copy";
 
 export function skillCategoryNames(categories: MarketSkillCategory[]) {
   return new Map(categories.map((category) => [category.slug, category.name]));
@@ -61,10 +61,11 @@ export function SkillBadge({
 }
 
 export function SkillVerifiedBadge() {
+  const t = useTranslations("publicSkills.badges");
   return (
     <SkillBadge tone="good">
       <CheckCircle2 className="size-3.5" />
-      {skillsCopy.badges.verified}
+      {t("verified")}
     </SkillBadge>
   );
 }
@@ -74,11 +75,12 @@ export function SkillVerifiedBadge() {
  * publishes the skill, not that anyone reviewed it.
  */
 export function SkillFeaturedBadge() {
+  const t = useTranslations("publicSkills.badges");
   return (
-    <span title={skillsCopy.badges.featuredTitle}>
+    <span title={t("featuredTitle")}>
       <SkillBadge>
         <Sparkles className="size-3.5 text-amber-500 dark:text-amber-300" />
-        {skillsCopy.badges.featured}
+        {t("featured")}
       </SkillBadge>
     </span>
   );
@@ -86,11 +88,12 @@ export function SkillFeaturedBadge() {
 
 /** The repository's author claimed it on SourceWeft. */
 export function SkillClaimedBadge() {
+  const t = useTranslations("publicSkills.badges");
   return (
-    <span title={skillsCopy.badges.claimedTitle}>
+    <span title={t("claimedTitle")}>
       <SkillBadge>
         <BadgeCheck className="size-3.5" />
-        {skillsCopy.badges.claimed}
+        {t("claimed")}
       </SkillBadge>
     </span>
   );
@@ -98,11 +101,12 @@ export function SkillClaimedBadge() {
 
 /** The source repository is archived on GitHub: no more updates will come. */
 export function SkillArchivedBadge() {
+  const t = useTranslations("publicSkills.badges");
   return (
-    <span title={skillsCopy.badges.archivedTitle}>
+    <span title={t("archivedTitle")}>
       <SkillBadge tone="warn">
         <Archive className="size-3.5" />
-        {skillsCopy.badges.archived}
+        {t("archived")}
       </SkillBadge>
     </span>
   );
@@ -114,11 +118,12 @@ export function SkillCapabilityBadge({
 }: {
   capability: MarketSkillCapability | null;
 }) {
+  const t = useTranslations("publicSkills.badges");
   if (capability === "executable") {
     return (
       <SkillBadge tone="warn">
         <TerminalSquare className="size-3.5" />
-        {skillsCopy.badges.executable}
+        {t("executable")}
       </SkillBadge>
     );
   }
@@ -126,7 +131,7 @@ export function SkillCapabilityBadge({
     return (
       <SkillBadge>
         <FileText className="size-3.5" />
-        {skillsCopy.badges.promptOnly}
+        {t("promptOnly")}
       </SkillBadge>
     );
   }
@@ -143,16 +148,18 @@ export function SkillMarketCard({
   highlightCategory?: string;
   skill: MarketSkillSummary;
 }) {
+  const t = useTranslations("publicSkills.card");
+  const locale = useLocale();
   const primaryCategory =
     highlightCategory && skill.categories.includes(highlightCategory)
       ? highlightCategory
       : skill.categories[0];
   // When the repository was last pushed, once GitHub has been asked; until
   // then, when this version was published here.
-  const pushed = formatRelativeTime(skill.repoPushedAt);
+  const pushed = formatRelativeTime(skill.repoPushedAt, undefined, locale);
   const updated = pushed
-    ? skillsCopy.card.updated(pushed)
-    : formatSkillDate(skill.updatedAt ?? skill.listedAt);
+    ? t("updated", { relative: pushed })
+    : formatSkillDate(skill.updatedAt ?? skill.listedAt, locale);
   const stars = skill.stars ?? 0;
   const badges =
     skill.capability === "executable" || skill.claimed || skill.repoArchived;
@@ -202,9 +209,9 @@ export function SkillMarketCard({
           ) : null}
           {stars > 0 ? (
             <span
-              aria-label={skillsCopy.card.stars(formatCompactCount(stars))}
+              aria-label={t("stars", { count: formatCompactCount(stars) })}
               className="inline-flex shrink-0 items-center gap-1"
-              title={skillsCopy.card.stars(formatCompactCount(stars))}
+              title={t("stars", { count: formatCompactCount(stars) })}
             >
               <Star className="size-3.5" />
               {formatCompactCount(stars)}
@@ -215,7 +222,10 @@ export function SkillMarketCard({
         {skill.installCount > 0 ? (
           <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-zinc-500">
             <Layers className="size-3.5" />
-            {skillsCopy.card.workspaces(formatCompactCount(skill.installCount))}
+            {t("workspaces", {
+              compact: formatCompactCount(skill.installCount),
+              count: skill.installCount,
+            })}
           </p>
         ) : null}
       </div>
@@ -266,6 +276,7 @@ export function SkillDirectorySection({
   title: string;
   viewAllHref: string;
 }) {
+  const t = useTranslations("publicSkills.landing");
   if (skills.length === 0) {
     return null;
   }
@@ -284,7 +295,7 @@ export function SkillDirectorySection({
           className="group inline-flex shrink-0 items-center gap-1.5 text-sm font-medium text-zinc-600 transition-colors hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-white"
           href={viewAllHref}
         >
-          {skillsCopy.landing.viewAll}
+          {t("viewAll")}
           <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
         </Link>
       </div>
@@ -299,11 +310,13 @@ export function SkillCollectionsSection({
 }: {
   collections: MarketSkillCollection[];
 }) {
+  const t = useTranslations("publicSkills");
   const shown = collections.filter((collection) => collection.itemCount > 0);
   if (shown.length === 0) {
     return null;
   }
-  const { title, description } = skillsCopy.landing.sections.collections;
+  const title = t("landing.sections.collections.title");
+  const description = t("landing.sections.collections.description");
   return (
     <section>
       <div className="mb-5 min-w-0">
@@ -330,7 +343,7 @@ export function SkillCollectionsSection({
               </p>
             ) : null}
             <span className="mt-auto inline-flex items-center gap-1.5 pt-4 text-xs font-medium text-zinc-500 group-hover:text-zinc-950 dark:group-hover:text-white">
-              {skillsCopy.collections.itemCount(collection.itemCount)}
+              {t("collections.itemCount", { count: collection.itemCount })}
               <ArrowRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
             </span>
           </Link>
@@ -371,29 +384,40 @@ export function SkillExternalLink({
   );
 }
 
+/** FAQ entries, in page order; each is `publicSkills.faq.items.<key>`. */
+export const skillsFaqKeys = [
+  "what",
+  "use",
+  "standalone",
+  "origin",
+  "safety",
+  "removal",
+] as const;
+
 export function SkillsFaqSection() {
+  const t = useTranslations("publicSkills.faq");
   return (
     <section className={`mx-auto pb-16 ${skillsContainerClassName}`}>
       <div className="border-t border-zinc-300 pt-10 dark:border-white/10">
         <div className="mb-7 max-w-2xl">
           <p className="text-xs font-semibold uppercase text-zinc-400">
-            {skillsCopy.faqHeading}
+            {t("heading")}
           </p>
           <h2 className="mt-2 text-3xl font-semibold tracking-tight">
-            {skillsCopy.faqTitle}
+            {t("title")}
           </h2>
         </div>
         <div className="grid gap-4 md:grid-cols-2">
-          {skillsCopy.faq.map((item) => (
+          {skillsFaqKeys.map((key) => (
             <article
               className="rounded-lg border border-zinc-300 bg-white/54 p-5 dark:border-white/10 dark:bg-white/[0.03]"
-              key={item.question}
+              key={key}
             >
               <h3 className="text-base font-semibold text-zinc-950 dark:text-white">
-                {item.question}
+                {t(`items.${key}.question`)}
               </h3>
               <p className="mt-3 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-                {item.answer}
+                {t(`items.${key}.answer`)}
               </p>
             </article>
           ))}

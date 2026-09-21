@@ -4,7 +4,7 @@ import {
   type SkillRepoClaim,
 } from "@sourceweft/contracts";
 
-import { SUPPORT_EMAIL } from "../../../../skills/_components/skills-public-copy";
+import { SUPPORT_EMAIL } from "../../../../[locale]/skills/_components/skills-constants";
 
 /**
  * `?repo=owner/repo` as the claim page uses it: lowercased like the server

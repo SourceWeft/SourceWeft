@@ -3,6 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { BadgeCheck, Loader2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import type { SkillClaimRepository } from "@sourceweft/contracts";
 import {
@@ -26,9 +27,6 @@ import {
   claimPageHref,
   claimPanelView,
 } from "./skill-market-standing";
-import { skillsClaimCopy } from "./skills-claim-copy";
-
-const copy = skillsClaimCopy.panel;
 
 /**
  * Who stands behind a community skill's repository, on the skill's page: its
@@ -47,6 +45,7 @@ export function SkillClaimPanel({
   skillId: string;
   workspaceId: string;
 }) {
+  const t = useTranslations("dashboardSkillsClaim");
   const [repository, setRepository] =
     React.useState<SkillClaimRepository | null>(null);
   const [busy, setBusy] = React.useState(false);
@@ -74,10 +73,10 @@ export function SkillClaimPanel({
     setBusy(true);
     try {
       const result = await removeClaimedRepoFromMarket(workspaceId, claimId);
-      toast.success(copy.removedToast(result.skillCount));
+      toast.success(t("panel.removedToast", { count: result.skillCount }));
       onChanged?.();
     } catch (error) {
-      toast.error(claimErrorMessage(error, copy.removeFailed));
+      toast.error(claimErrorMessage(error, t, t("panel.removeFailed")));
     } finally {
       setBusy(false);
     }
@@ -85,16 +84,18 @@ export function SkillClaimPanel({
 
   return (
     <section
-      aria-label={copy.title}
+      aria-label={t("panel.title")}
       className="rounded-2xl border border-border bg-background p-4 shadow-xs"
       data-testid="skill-claim-panel"
     >
-      <h2 className="text-sm font-semibold text-foreground">{copy.title}</h2>
+      <h2 className="text-sm font-semibold text-foreground">
+        {t("panel.title")}
+      </h2>
       {view.kind === "unclaimed" ? (
         <div className="mt-2 space-y-3 text-xs">
-          <p className="text-muted-foreground">{copy.unclaimedBody}</p>
+          <p className="text-muted-foreground">{t("panel.unclaimedBody")}</p>
           <Button asChild className="w-full" size="sm" variant="outline">
-            <Link href={claimPageHref(view.repo)}>{copy.claimLink}</Link>
+            <Link href={claimPageHref(view.repo)}>{t("panel.claimLink")}</Link>
           </Button>
         </div>
       ) : (
@@ -102,12 +103,12 @@ export function SkillClaimPanel({
           <p className="flex items-center gap-1.5 font-medium text-foreground">
             <BadgeCheck className="size-4 text-primary" />
             {view.kind === "claimedByYou"
-              ? copy.claimedByYou
-              : copy.claimedByAuthor}
+              ? t("panel.claimedByYou")
+              : t("panel.claimedByAuthor")}
           </p>
           {view.kind === "claimedByYou" && view.claimId ? (
             <>
-              <p className="text-muted-foreground">{copy.removeHint}</p>
+              <p className="text-muted-foreground">{t("panel.removeHint")}</p>
               <Button
                 className="w-full"
                 disabled={busy}
@@ -117,13 +118,13 @@ export function SkillClaimPanel({
                 variant="outline"
               >
                 {busy ? <Loader2 className="size-3.5 animate-spin" /> : null}
-                {copy.remove}
+                {t("panel.remove")}
               </Button>
               <Link
                 className="block text-muted-foreground underline-offset-2 hover:underline"
                 href={claimPageHref(view.repo)}
               >
-                {copy.manageLink}
+                {t("panel.manageLink")}
               </Link>
             </>
           ) : null}
@@ -134,13 +135,13 @@ export function SkillClaimPanel({
         <AlertDialog onOpenChange={setConfirmOpen} open={confirmOpen}>
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>{copy.confirmTitle}</AlertDialogTitle>
+              <AlertDialogTitle>{t("panel.confirmTitle")}</AlertDialogTitle>
               <AlertDialogDescription>
-                {copy.confirmBody(view.repo)}
+                {t("panel.confirmBody", { repo: view.repo })}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel>{copy.cancel}</AlertDialogCancel>
+              <AlertDialogCancel>{t("panel.cancel")}</AlertDialogCancel>
               <AlertDialogAction
                 onClick={() => {
                   setConfirmOpen(false);
@@ -148,7 +149,7 @@ export function SkillClaimPanel({
                   if (claimId) void remove(claimId);
                 }}
               >
-                {copy.confirm}
+                {t("panel.confirm")}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>

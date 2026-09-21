@@ -4,6 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, Loader2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import type { SkillClaimsOverview } from "@sourceweft/contracts";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
@@ -14,7 +15,6 @@ import { getSkillClaims, startSkillClaim } from "../../../../lib/skill-claims";
 import { workspaceClient } from "../../../../lib/sdk";
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
 import { claimErrorMessage } from "../_components/skill-market-standing";
-import { skillsClaimCopy } from "../_components/skills-claim-copy";
 import { ClaimLists } from "./_components/claim-lists";
 import { ClaimRepositoryCard } from "./_components/claim-repository-card";
 import {
@@ -23,14 +23,13 @@ import {
   normalizeClaimRepo,
 } from "./_components/claim-view";
 
-const copy = skillsClaimCopy.page;
-
 /**
  * `/dashboard/skills/claim?repo=owner/repo` — where an author claims the
  * GitHub repository their community skills come from. The public skill page
  * links here; so does the panel on a dashboard skill page.
  */
 function ClaimPage() {
+  const t = useTranslations("dashboardSkillsClaim");
   const dashboardState = useDashboardChatState();
   const router = useRouter();
   const pathname = usePathname();
@@ -88,9 +87,9 @@ function ClaimPage() {
       );
       if (generationRef.current === generation) setOverview(result);
     } catch {
-      if (generationRef.current === generation) setLoadError(copy.loadFailed);
+      if (generationRef.current === generation) setLoadError(t("page.loadFailed"));
     }
-  }, [repo, workspaceId]);
+  }, [repo, t, workspaceId]);
 
   React.useEffect(() => {
     void load();
@@ -113,7 +112,7 @@ function ClaimPage() {
     try {
       await action();
     } catch (error) {
-      setActionError(claimErrorMessage(error));
+      setActionError(claimErrorMessage(error, t));
     } finally {
       await load();
       setBusy(false);
@@ -124,7 +123,7 @@ function ClaimPage() {
     if (!workspaceId || !repo) return;
     void act(async () => {
       await startSkillClaim(workspaceId, { repo, method: "github_account" });
-      toast.success(copy.verified);
+      toast.success(t("page.verified"));
     });
   }
 
@@ -136,7 +135,7 @@ function ClaimPage() {
         <div className="flex items-center gap-3 border-b border-border px-4 py-3">
           <Button
             asChild
-            aria-label={copy.back}
+            aria-label={t("page.back")}
             className="h-8 w-8 rounded-full p-0"
             size="icon-sm"
             type="button"
@@ -147,7 +146,7 @@ function ClaimPage() {
             </Link>
           </Button>
           <h1 className="text-base font-semibold text-foreground">
-            {copy.title}
+            {t("page.title")}
           </h1>
         </div>
 
@@ -155,22 +154,22 @@ function ClaimPage() {
           <div className="mx-auto grid max-w-5xl gap-4 px-4 py-5 lg:grid-cols-[minmax(0,1fr)_300px]">
             <div className="flex min-w-0 flex-col gap-4">
               <section className="rounded-2xl border border-border bg-background p-5 shadow-xs">
-                <p className="text-sm text-foreground">{copy.intro}</p>
+                <p className="text-sm text-foreground">{t("page.intro")}</p>
                 <h2 className="mt-4 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-                  {copy.benefitsTitle}
+                  {t("page.benefitsTitle")}
                 </h2>
                 <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-foreground">
-                  {copy.benefits.map((benefit) => (
+                  {(t.raw("page.benefits") as string[]).map((benefit) => (
                     <li key={benefit}>{benefit}</li>
                   ))}
                 </ul>
                 <p className="mt-3 text-xs text-muted-foreground">
-                  {copy.benefitsNote}
+                  {t("page.benefitsNote")}
                 </p>
 
                 <form className="mt-5 flex flex-wrap gap-2" onSubmit={lookUp}>
                   <label className="sr-only" htmlFor="skill-claim-repo">
-                    {copy.repoLabel}
+                    {t("page.repoLabel")}
                   </label>
                   <Input
                     aria-invalid={draftInvalid}
@@ -178,17 +177,17 @@ function ClaimPage() {
                     className="min-w-0 flex-1"
                     id="skill-claim-repo"
                     onChange={(event) => setDraft(event.target.value)}
-                    placeholder={copy.repoPlaceholder}
+                    placeholder={t("page.repoPlaceholder")}
                     spellCheck={false}
                     value={draft}
                   />
                   <Button disabled={!workspaceId} type="submit" variant="outline">
-                    {copy.lookUp}
+                    {t("page.lookUp")}
                   </Button>
                 </form>
                 {draftInvalid || (repoParam && !repo) ? (
                   <p className="mt-2 text-xs text-destructive">
-                    {copy.repoInvalid}
+                    {t("page.repoInvalid")}
                   </p>
                 ) : null}
               </section>
@@ -199,13 +198,13 @@ function ClaimPage() {
                 </div>
               ) : !workspaceId ? (
                 <p className="text-sm text-muted-foreground">
-                  {copy.noWorkspace}
+                  {t("page.noWorkspace")}
                 </p>
               ) : loadError ? (
                 <div className="space-y-3 text-sm" role="alert">
                   <p className="text-destructive">{loadError}</p>
                   <Button onClick={() => void load()} size="sm" variant="outline">
-                    {copy.retry}
+                    {t("page.retry")}
                   </Button>
                 </div>
               ) : repo && overview ? (
@@ -219,7 +218,7 @@ function ClaimPage() {
                   />
                 ) : (
                   <p className="rounded-2xl border border-border bg-background p-5 text-sm text-muted-foreground">
-                    {copy.repoNotFound}
+                    {t("page.repoNotFound")}
                   </p>
                 )
               ) : null}

@@ -3,9 +3,12 @@ import { NextRequest } from "next/server";
 import { test } from "vitest";
 
 import { SW_LOCALE_HEADER } from "./lib/i18n/constants";
-import { proxy } from "./proxy";
+import { config, proxy } from "./proxy";
 
-function req(path: string, init?: { cookie?: string; headers?: Record<string, string> }) {
+function req(
+  path: string,
+  init?: { cookie?: string; headers?: Record<string, string> },
+) {
   const headers = new Headers(init?.headers);
   if (init?.cookie) {
     headers.set("cookie", init.cookie);
@@ -33,7 +36,10 @@ test("does not redirect when the proxy is re-invoked on its own rewrite target",
 test("bare / rewrites onto the default locale segment without redirecting", () => {
   const res = proxy(req("/"));
   assert.equal(res.status, 200);
-  assert.equal(res.headers.get("x-middleware-rewrite"), "http://localhost:3000/en");
+  assert.equal(
+    res.headers.get("x-middleware-rewrite"),
+    "http://localhost:3000/en",
+  );
   assert.equal(res.headers.get("location"), null);
 });
 
@@ -68,4 +74,27 @@ test("app-tree routes are never prefixed or redirected, only header-tagged", () 
   assert.equal(res.headers.get("x-middleware-next"), "1");
   assert.equal(res.headers.get("location"), null);
   assert.equal(res.headers.get("x-middleware-rewrite"), null);
+});
+
+test("/skills is localized: the bare path rewrites onto /en and /en/skills canonicalizes", () => {
+  const bare = proxy(req("/skills/pdf-forms"));
+  assert.equal(bare.status, 200);
+  assert.equal(
+    bare.headers.get("x-middleware-rewrite"),
+    "http://localhost:3000/en/skills/pdf-forms",
+  );
+  const prefixed = proxy(req("/en/skills"));
+  assert.equal(prefixed.status, 308);
+  assert.equal(
+    prefixed.headers.get("location"),
+    "http://localhost:3000/skills",
+  );
+});
+
+// /skills/SKILL.md stays at app/skills/SKILL.md/route.ts (not under [locale]):
+// the matcher skips any path with a file extension, so it is never rewritten.
+test("the agent entry point /skills/SKILL.md is outside the proxy matcher", () => {
+  const matcher = new RegExp(`^${config.matcher[0]}$`);
+  assert.equal(matcher.test("/skills"), true);
+  assert.equal(matcher.test("/skills/SKILL.md"), false);
 });

@@ -6,7 +6,7 @@ import {
   type SkillMarketStanding,
 } from "@sourceweft/contracts";
 
-import { skillsClaimCopy } from "./skills-claim-copy";
+import type { useTranslations } from "next-intl";
 
 /** The categories route accepts 1–5 slugs. */
 export const SKILL_CATEGORY_LIMIT = 5;
@@ -139,15 +139,22 @@ export function claimPageHref(repo: string) {
   return `/dashboard/skills/claim?repo=${encodeURIComponent(repo)}`;
 }
 
-/** The author-facing message for a failed claim request. */
+/**
+ * The author-facing message for a failed claim request. `t` is the
+ * `dashboardSkillsClaim` translator; an unknown code gets the fallback.
+ */
 export function claimErrorMessage(
   error: unknown,
-  fallback: string = skillsClaimCopy.errors.fallback,
+  t: ReturnType<typeof useTranslations>,
+  fallback: string = t("errors.fallback"),
 ): string {
   const code = (error as { code?: unknown } | null)?.code;
-  const messages: Record<string, string> = skillsClaimCopy.errors;
-  if (typeof code === "string" && code !== "fallback" && messages[code]) {
-    return messages[code];
+  if (
+    typeof code === "string" &&
+    /^[A-Z_]+$/.test(code) &&
+    t.has(`errors.${code}`)
+  ) {
+    return t(`errors.${code}`);
   }
   return fallback;
 }

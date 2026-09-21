@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import en from "../../../../messages/en.json";
+
 import {
   commitUrl,
   formatCompactCount,
@@ -105,6 +107,9 @@ describe("numbers and dates", () => {
   it("formats dates in UTC so server and client agree", () => {
     expect(formatSkillDate("2026-09-20T23:30:00.000Z")).toBe("Sep 20, 2026");
     expect(formatSkillDate("2026-01-01T00:00:00+14:00")).toBe("Dec 31, 2025");
+    expect(formatSkillDate("2026-09-20T23:30:00.000Z", "zh-CN")).toBe(
+      "2026年9月20日",
+    );
   });
 
   it("returns null for a missing or unparseable date", () => {
@@ -192,10 +197,13 @@ describe("source attribution", () => {
   });
 
   it("puts a scan flag in words, and shows an unknown one as it is", () => {
-    expect(scanFlagLabel("binary:executable")).toBe(
+    const labels = en.publicSkills.scanFlags;
+    expect(scanFlagLabel("binary:executable", labels)).toBe(
       "Ships an executable binary",
     );
-    expect(scanFlagLabel("future:flag")).toBe("future:flag");
+    expect(scanFlagLabel("future:flag", labels)).toBe("future:flag");
+    // Not one of our flags, even though every object has it.
+    expect(scanFlagLabel("constructor", labels)).toBe("constructor");
   });
 });
 
@@ -404,6 +412,15 @@ describe("formatRelativeTime", () => {
     expect(formatRelativeTime(at(-5), now)).toBe("today");
     expect(formatRelativeTime(null, now)).toBeNull();
     expect(formatRelativeTime("not a date", now)).toBeNull();
+  });
+
+  it("speaks the page's locale", () => {
+    expect(formatRelativeTime(at(0.2), now, "zh-CN")).toBe("今天");
+    expect(formatRelativeTime(at(1.5), now, "zh-CN")).toBe("昨天");
+    expect(formatRelativeTime(at(20), now, "zh-CN")).toBe("2周前");
+    expect(formatRelativeTime(at(10), now)).toBe("10 days ago");
+    expect(formatRelativeTime(at(7), now)).toBe("7 days ago");
+    expect(formatRelativeTime(at(14), now)).toBe("2 weeks ago");
   });
 });
 

@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { Loader2, ShieldAlert } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import type {
   SkillCatalogCategory,
@@ -40,12 +41,6 @@ import {
   standingClaim,
   toggleSkillCategory,
 } from "./skill-market-standing";
-import { skillsClaimCopy } from "./skills-claim-copy";
-import { skillsMarketCopy } from "./skills-market-copy";
-
-const copy = skillsMarketCopy.adminPanel;
-const claimCopy = skillsClaimCopy.admin;
-const featuredCopy = skillsClaimCopy.featured;
 
 function formatDate(iso: string) {
   const date = new Date(iso);
@@ -62,12 +57,16 @@ function errorCode(error: unknown) {
   return (error as { code?: unknown } | null)?.code;
 }
 
-function grantErrorMessage(error: unknown) {
+/** `t` is the `dashboardSkillsClaim` translator. */
+function grantErrorMessage(
+  error: unknown,
+  t: ReturnType<typeof useTranslations>,
+) {
   const code = errorCode(error);
   return code === "SKILL_CLAIM_USER_NOT_FOUND" ||
     code === "SKILL_REPO_ALREADY_CLAIMED"
-    ? claimCopy.grantErrors[code]
-    : claimCopy.grantErrors.fallback;
+    ? t(`admin.grantErrors.${code}`)
+    : t("admin.grantErrors.fallback");
 }
 
 /**
@@ -95,6 +94,8 @@ export function SkillMarketAdminPanel({
   repo: string | null;
   skillId: string;
 }) {
+  const t = useTranslations("dashboardSkillsMarket");
+  const tc = useTranslations("dashboardSkillsClaim");
   // The route also answers with the author's claim on the repository.
   const [standing, setStanding] = React.useState<
     (SkillMarketStanding & { claim?: SkillMarketClaim | null }) | null
@@ -150,10 +151,10 @@ export function SkillMarketAdminPanel({
         failureMessage
           ? failureMessage(actionError)
           : errorCode(actionError) === "SKILL_CATEGORY_INVALID"
-            ? copy.categoryInvalid
+            ? t("adminPanel.categoryInvalid")
             : actionError instanceof Error && actionError.message
               ? actionError.message
-              : copy.actionFailed,
+              : t("adminPanel.actionFailed"),
       );
     } finally {
       await load();
@@ -185,12 +186,12 @@ export function SkillMarketAdminPanel({
 
   return (
     <section
-      aria-label={copy.title}
+      aria-label={t("adminPanel.title")}
       className="rounded-2xl border border-border bg-background p-4 shadow-xs"
     >
       <div className="flex items-center gap-2">
         <ShieldAlert className="size-4 text-muted-foreground" />
-        <h2 className="text-sm font-semibold text-foreground">{copy.title}</h2>
+        <h2 className="text-sm font-semibold text-foreground">{t("adminPanel.title")}</h2>
         {busy ? (
           <Loader2 className="ml-auto size-3.5 animate-spin text-muted-foreground" />
         ) : null}
@@ -198,7 +199,7 @@ export function SkillMarketAdminPanel({
 
       <dl className="mt-3 space-y-3 text-xs">
         <div>
-          <dt className="text-muted-foreground">{copy.standing}</dt>
+          <dt className="text-muted-foreground">{t("adminPanel.standing")}</dt>
           <dd
             className={cn(
               "mt-1 font-medium text-foreground",
@@ -206,32 +207,36 @@ export function SkillMarketAdminPanel({
             )}
           >
             {kind === "public"
-              ? copy.standingPublic
+              ? t("adminPanel.standingPublic")
               : kind === "withdrawn"
-                ? copy.standingWithdrawn
+                ? t("adminPanel.standingWithdrawn")
                 : kind === "ownerPrivate"
-                  ? copy.standingOwnerPrivate
-                  : copy.standingRestricted}
+                  ? t("adminPanel.standingOwnerPrivate")
+                  : t("adminPanel.standingRestricted")}
           </dd>
         </div>
         <div>
-          <dt className="text-muted-foreground">{copy.listed}</dt>
+          <dt className="text-muted-foreground">{t("adminPanel.listed")}</dt>
           <dd className="mt-1 font-medium text-foreground">
-            {standing.listedAt ? formatDate(standing.listedAt) : copy.notListed}
+            {standing.listedAt ? formatDate(standing.listedAt) : t("adminPanel.notListed")}
           </dd>
         </div>
         <div>
-          <dt className="text-muted-foreground">{copy.installs}</dt>
+          <dt className="text-muted-foreground">{t("adminPanel.installs")}</dt>
           <dd className="mt-1 font-medium text-foreground">{installs}</dd>
         </div>
         <div>
-          <dt className="text-muted-foreground">{claimCopy.claim}</dt>
+          <dt className="text-muted-foreground">{tc("admin.claim")}</dt>
           <dd className="mt-1 font-medium break-all text-foreground">
             {claim
-              ? `${claimCopy.claimedBy(claim.userId)} ${claimCopy.method[claim.method]}${
+              ? `${tc("admin.claimedBy", { userId: claim.userId })} ${
+                  tc.has(`admin.method.${claim.method}`)
+                    ? tc(`admin.method.${claim.method}`)
+                    : claim.method
+                }${
                   claim.verifiedAt ? ` · ${formatDate(claim.verifiedAt)}` : ""
                 }`
-              : claimCopy.unclaimed}
+              : tc("admin.unclaimed")}
           </dd>
           {claim ? (
             <Button
@@ -245,12 +250,12 @@ export function SkillMarketAdminPanel({
               type="button"
               variant="outline"
             >
-              {claimCopy.revoke}
+              {tc("admin.revoke")}
             </Button>
           ) : repo ? (
             // Only unclaimed: a claim someone holds is revoked first.
             <form
-              aria-label={claimCopy.grantTitle}
+              aria-label={tc("admin.grantTitle")}
               className="mt-2 space-y-1.5"
               onSubmit={(event) => {
                 event.preventDefault();
@@ -262,8 +267,8 @@ export function SkillMarketAdminPanel({
                     setGrantEmail("");
                     onClaimChanged?.();
                   },
-                  claimCopy.grantedToast,
-                  grantErrorMessage,
+                  tc("admin.grantedToast"),
+                  (error) => grantErrorMessage(error, tc),
                 );
               }}
             >
@@ -271,18 +276,18 @@ export function SkillMarketAdminPanel({
                 className="block font-medium text-foreground"
                 htmlFor="skill-market-grant-email"
               >
-                {claimCopy.grantTitle}
+                {tc("admin.grantTitle")}
               </label>
-              <p className="text-muted-foreground">{claimCopy.grantHint}</p>
+              <p className="text-muted-foreground">{tc("admin.grantHint")}</p>
               <div className="flex gap-2">
                 <Input
-                  aria-label={claimCopy.grantEmailLabel}
+                  aria-label={tc("admin.grantEmailLabel")}
                   autoComplete="off"
                   className="h-8 min-w-0 flex-1 text-xs"
                   disabled={busy}
                   id="skill-market-grant-email"
                   onChange={(event) => setGrantEmail(event.target.value)}
-                  placeholder={claimCopy.grantEmailPlaceholder}
+                  placeholder={tc("admin.grantEmailPlaceholder")}
                   type="email"
                   value={grantEmail}
                 />
@@ -292,7 +297,7 @@ export function SkillMarketAdminPanel({
                   type="submit"
                   variant="outline"
                 >
-                  {claimCopy.grant}
+                  {tc("admin.grant")}
                 </Button>
               </div>
             </form>
@@ -313,7 +318,7 @@ export function SkillMarketAdminPanel({
             type="button"
             variant="outline"
           >
-            {copy.withdraw}
+            {t("adminPanel.withdraw")}
           </Button>
         ) : (
           <Button
@@ -326,7 +331,7 @@ export function SkillMarketAdminPanel({
             size="sm"
             type="button"
           >
-            {copy.listPublicly}
+            {t("adminPanel.listPublicly")}
           </Button>
         )}
       </div>
@@ -337,9 +342,9 @@ export function SkillMarketAdminPanel({
             className="font-medium text-foreground"
             htmlFor="skill-market-verified"
           >
-            {copy.verified}
+            {t("adminPanel.verified")}
           </label>
-          <p className="mt-0.5 text-muted-foreground">{copy.verifiedHint}</p>
+          <p className="mt-0.5 text-muted-foreground">{t("adminPanel.verifiedHint")}</p>
         </div>
         <Switch
           checked={standing.verified}
@@ -348,7 +353,7 @@ export function SkillMarketAdminPanel({
           onCheckedChange={(checked) =>
             void run(
               () => setSkillVerified(skillId, checked),
-              checked ? copy.verifiedToast : copy.unverifiedToast,
+              checked ? t("adminPanel.verifiedToast") : t("adminPanel.unverifiedToast"),
             )
           }
         />
@@ -360,14 +365,14 @@ export function SkillMarketAdminPanel({
             className="font-medium text-foreground"
             htmlFor="skill-market-featured"
           >
-            {featuredCopy.label}
+            {tc("featured.label")}
           </label>
-          <p className="mt-0.5 text-muted-foreground">{featuredCopy.hint}</p>
+          <p className="mt-0.5 text-muted-foreground">{tc("featured.hint")}</p>
           {standing.featuredSetBy ? (
             <p className="mt-0.5 text-muted-foreground">
               {standing.featuredSetBy === "admin"
-                ? featuredCopy.setByAdmin
-                : featuredCopy.setBySync}
+                ? tc("featured.setByAdmin")
+                : tc("featured.setBySync")}
             </p>
           ) : null}
         </div>
@@ -379,7 +384,7 @@ export function SkillMarketAdminPanel({
           onCheckedChange={(checked) =>
             void run(
               () => setSkillFeatured(skillId, checked),
-              checked ? featuredCopy.featuredToast : featuredCopy.unfeaturedToast,
+              checked ? tc("featured.featuredToast") : tc("featured.unfeaturedToast"),
             )
           }
         />
@@ -387,9 +392,9 @@ export function SkillMarketAdminPanel({
 
       <div className="mt-4 border-t border-border pt-3 text-xs">
         <div className="flex items-baseline justify-between gap-2">
-          <h3 className="font-medium text-foreground">{copy.categories}</h3>
+          <h3 className="font-medium text-foreground">{t("adminPanel.categories")}</h3>
           <span className="text-muted-foreground">
-            {copy.categoriesHint} {selectedSlugs.length}/{SKILL_CATEGORY_LIMIT}
+            {t("adminPanel.categoriesHint")} {selectedSlugs.length}/{SKILL_CATEGORY_LIMIT}
           </span>
         </div>
         <div className="mt-2 flex flex-wrap gap-1.5">
@@ -426,14 +431,14 @@ export function SkillMarketAdminPanel({
           onClick={() =>
             void run(
               () => setSkillCategories(skillId, selectedSlugs),
-              copy.categoriesToast,
+              t("adminPanel.categoriesToast"),
             )
           }
           size="sm"
           type="button"
           variant="outline"
         >
-          {copy.saveCategories}
+          {t("adminPanel.saveCategories")}
         </Button>
       </div>
 
@@ -442,21 +447,21 @@ export function SkillMarketAdminPanel({
           <AlertDialogHeader>
             <AlertDialogTitle>
               {confirmAction === "revokeClaim"
-                ? claimCopy.confirmRevokeTitle
+                ? tc("admin.confirmRevokeTitle")
                 : confirmAction === "withdraw"
-                  ? copy.confirmWithdrawTitle
-                  : copy.confirmListTitle}
+                  ? t("adminPanel.confirmWithdrawTitle")
+                  : t("adminPanel.confirmListTitle")}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {confirmAction === "revokeClaim"
-                ? claimCopy.confirmRevokeBody
+                ? tc("admin.confirmRevokeBody")
                 : confirmAction === "withdraw"
-                  ? copy.confirmWithdrawBody
-                  : copy.confirmListBody}
+                  ? t("adminPanel.confirmWithdrawBody")
+                  : t("adminPanel.confirmListBody")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>{copy.cancel}</AlertDialogCancel>
+            <AlertDialogCancel>{t("adminPanel.cancel")}</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
                 setConfirmOpen(false);
@@ -466,20 +471,20 @@ export function SkillMarketAdminPanel({
                     void run(async () => {
                       await revokeSkillClaim(claimId);
                       onClaimChanged?.();
-                    }, claimCopy.revokedToast);
+                    }, tc("admin.revokedToast"));
                   }
                 } else if (confirmAction === "withdraw") {
-                  void run(() => delistSkill(skillId), copy.withdrawnToast);
+                  void run(() => delistSkill(skillId), t("adminPanel.withdrawnToast"));
                 } else {
-                  void run(() => listSkillPublicly(skillId), copy.listedToast);
+                  void run(() => listSkillPublicly(skillId), t("adminPanel.listedToast"));
                 }
               }}
             >
               {confirmAction === "revokeClaim"
-                ? claimCopy.revoke
+                ? tc("admin.revoke")
                 : confirmAction === "withdraw"
-                  ? copy.withdraw
-                  : copy.listPublicly}
+                  ? t("adminPanel.withdraw")
+                  : t("adminPanel.listPublicly")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -1,4 +1,4 @@
-import { SUPPORT_EMAIL, skillsCopy } from "./skills-public-copy";
+import { SUPPORT_EMAIL } from "./skills-constants";
 
 export const skillsContainerClassName = "max-w-7xl px-5 sm:px-6 lg:px-8";
 
@@ -83,18 +83,29 @@ export function formatCompactCount(value: number) {
   return `${trimFraction(Math.floor(whole / 100_000) / 10)}M`;
 }
 
-const dateFormat = new Intl.DateTimeFormat("en", {
-  day: "numeric",
-  month: "short",
-  timeZone: "UTC",
-  year: "numeric",
-});
+const dateFormats = new Map<string, Intl.DateTimeFormat>();
+
+function dateFormatFor(locale: string) {
+  let format = dateFormats.get(locale);
+  if (!format) {
+    format = new Intl.DateTimeFormat(locale, {
+      day: "numeric",
+      month: "short",
+      timeZone: "UTC",
+      year: "numeric",
+    });
+    dateFormats.set(locale, format);
+  }
+  return format;
+}
 
 /** Null for a missing or unparseable date, so callers can omit the field. */
-export function formatSkillDate(value?: string | null) {
+export function formatSkillDate(value?: string | null, locale = "en") {
   if (!value) return null;
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : dateFormat.format(date);
+  return Number.isNaN(date.getTime())
+    ? null
+    : dateFormatFor(locale).format(date);
 }
 
 /**
@@ -116,19 +127,28 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  * when exactly it was pushed. Null for a missing or unparseable date, and a
  * date in the future reads as today rather than as nonsense.
  */
-export function formatRelativeTime(value?: string | null, now = Date.now()) {
+export function formatRelativeTime(
+  value?: string | null,
+  now = Date.now(),
+  locale = "en",
+) {
   if (!value) return null;
   const time = new Date(value).getTime();
   if (Number.isNaN(time)) return null;
   const days = Math.floor(Math.max(0, now - time) / DAY_MS);
-  const ago = (count: number, unit: string) =>
-    `${count} ${unit}${count === 1 ? "" : "s"} ago`;
-  if (days < 1) return "today";
-  if (days < 2) return "yesterday";
-  if (days < 14) return ago(days, "day");
-  if (days < 60) return ago(Math.floor(days / 7), "week");
-  if (days < 730) return ago(Math.floor(days / 30), "month");
-  return ago(Math.floor(days / 365), "year");
+  // "today" / "yesterday" in words, everything else as a plain count ("1 week
+  // ago", never "last week").
+  if (days < 2) {
+    return new Intl.RelativeTimeFormat(locale, { numeric: "auto" }).format(
+      -days,
+      "day",
+    );
+  }
+  const ago = new Intl.RelativeTimeFormat(locale, { numeric: "always" });
+  if (days < 14) return ago.format(-days, "day");
+  if (days < 60) return ago.format(-Math.floor(days / 7), "week");
+  if (days < 730) return ago.format(-Math.floor(days / 30), "month");
+  return ago.format(-Math.floor(days / 365), "year");
 }
 
 export function formatFileSize(bytes: number) {
@@ -270,8 +290,15 @@ export function skillTakedownMailto(slug: string) {
   )}`;
 }
 
-export function scanFlagLabel(flag: string) {
-  return skillsCopy.scanFlagLabels[flag] ?? flag;
+/**
+ * An advisory scan flag in words, from the `publicSkills.scanFlags` messages.
+ * An unknown flag is shown as it is rather than hidden.
+ */
+export function scanFlagLabel(
+  flag: string,
+  labels: Readonly<Record<string, string>>,
+) {
+  return Object.hasOwn(labels, flag) ? labels[flag]! : flag;
 }
 
 // --- Untrusted markdown ----------------------------------------------------

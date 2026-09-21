@@ -4,10 +4,13 @@ import type {
   ListMarketSkillsResponse,
   MarketSkillCategory,
 } from "@sourceweft/market-sdk";
+import { useLocale, useTranslations } from "next-intl";
+import { formatNumber } from "@sourceweft/i18n/format";
+import { DEFAULT_LOCALE, isLocale } from "@sourceweft/i18n/locales";
 
 import { cn } from "@sourceweft/ui-web/lib/utils";
 
-import { SkillIcon } from "../../_components/site-icons";
+import { SkillIcon } from "../../../_components/site-icons";
 import {
   hasOnlyCategoryFacet,
   skillCapabilityOptions,
@@ -18,7 +21,6 @@ import {
 } from "./skills-browse";
 import { SkillCardGrid, skillCategoryNames } from "./skills-display";
 import { skillsContainerClassName } from "./skills-format";
-import { skillsCopy } from "./skills-public-copy";
 
 export function SkillsSearchForm({
   action,
@@ -30,6 +32,7 @@ export function SkillsSearchForm({
   className?: string;
   state: SkillsBrowseState;
 }) {
+  const t = useTranslations("publicSkills.landing");
   return (
     <form action={action} className={className}>
       {state.sort !== "recommended" ? (
@@ -44,19 +47,19 @@ export function SkillsSearchForm({
       <div className="relative max-w-3xl">
         <Search className="pointer-events-none absolute left-4 top-1/2 size-4 -translate-y-1/2 text-zinc-400" />
         <input
-          aria-label={skillsCopy.landing.searchLabel}
+          aria-label={t("searchLabel")}
           className="h-14 w-full rounded-xl border border-zinc-300 bg-white/78 pl-11 pr-28 text-sm text-zinc-950 shadow-[0_18px_70px_rgba(39,39,42,0.08)] outline-none transition-colors placeholder:text-zinc-400 focus:border-zinc-950 dark:border-white/10 dark:bg-white/[0.05] dark:text-white dark:shadow-[0_18px_70px_rgba(0,0,0,0.28)] dark:focus:border-white/45"
           defaultValue={state.query}
           maxLength={200}
           name="q"
-          placeholder={skillsCopy.landing.searchPlaceholder}
+          placeholder={t("searchPlaceholder")}
           type="search"
         />
         <button
           className="absolute right-2 top-1/2 h-10 -translate-y-1/2 rounded-lg bg-zinc-950 px-4 text-sm font-medium text-white transition-colors hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-100"
           type="submit"
         >
-          {skillsCopy.landing.searchSubmit}
+          {t("searchSubmit")}
         </button>
       </div>
     </form>
@@ -98,8 +101,11 @@ function CategorySidebar({
   state: SkillsBrowseState;
   total: number;
 }) {
+  const t = useTranslations("publicSkills.listing");
+  const locale = useLocale();
+  const uiLocale = isLocale(locale) ? locale : DEFAULT_LOCALE;
   const entries = [
-    { count: total, label: skillsCopy.listing.allSkills, slug: "all" },
+    { count: total, label: t("allSkills"), slug: "all" },
     // An empty category is a dead end; the one being browsed always stays.
     ...categories
       .filter(
@@ -114,7 +120,7 @@ function CategorySidebar({
   return (
     <aside className="lg:sticky lg:top-20 lg:self-start">
       <p className="mb-3 hidden text-xs font-semibold uppercase text-zinc-400 lg:block">
-        {skillsCopy.listing.categories}
+        {t("categories")}
       </p>
       <nav className="-mx-5 flex gap-2 overflow-x-auto px-5 pb-2 [scrollbar-width:none] sm:-mx-6 sm:px-6 lg:mx-0 lg:flex-col lg:gap-0.5 lg:overflow-visible lg:px-0 lg:pb-0 [&::-webkit-scrollbar]:hidden">
         {entries.map((entry) => {
@@ -141,7 +147,7 @@ function CategorySidebar({
                   active ? "opacity-70" : "text-zinc-400",
                 )}
               >
-                {entry.count.toLocaleString("en")}
+                {formatNumber(entry.count, uiLocale)}
               </span>
             </Link>
           );
@@ -169,6 +175,7 @@ export function SkillsListingView({
   title?: string;
   total: number;
 }) {
+  const t = useTranslations("publicSkills");
   const categoryNames = skillCategoryNames(categories);
   // The API counts whatever the filters and search match; an older API that
   // does not only has the category counts to go on.
@@ -205,7 +212,7 @@ export function SkillsListingView({
                   href="/skills"
                 >
                   <ArrowLeft className="size-3.5" />
-                  {skillsCopy.listing.marketHome}
+                  {t("listing.marketHome")}
                 </Link>
                 <h1 className="truncate text-2xl font-semibold tracking-tight">
                   {title}
@@ -214,13 +221,13 @@ export function SkillsListingView({
             ) : null}
             <p className="ml-auto text-sm text-zinc-500 dark:text-zinc-400">
               {exactCount !== null
-                ? skillsCopy.listing.exactCount(exactCount)
-                : skillsCopy.listing.pageCount(market.items.length)}
+                ? t("listing.exactCount", { count: exactCount })
+                : t("listing.pageCount", { count: market.items.length })}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
             <div
-              aria-label={skillsCopy.listing.sortLabel}
+              aria-label={t("listing.sortLabel")}
               className="flex flex-wrap gap-1.5"
               role="group"
             >
@@ -233,7 +240,7 @@ export function SkillsListingView({
                   })}
                   key={option.value}
                 >
-                  {option.label}
+                  {t(`sortOptions.${option.value}`)}
                 </Pill>
               ))}
             </div>
@@ -247,7 +254,7 @@ export function SkillsListingView({
                   })}
                   key={option.value}
                 >
-                  {option.label}
+                  {t(`trustOptions.${option.value}`)}
                 </Pill>
               ))}
             </div>
@@ -261,7 +268,7 @@ export function SkillsListingView({
                   })}
                   key={option.value}
                 >
-                  {option.label}
+                  {t(`capabilityOptions.${option.value}`)}
                 </Pill>
               ))}
             </div>
@@ -270,7 +277,7 @@ export function SkillsListingView({
                 className="text-xs font-medium text-zinc-500 underline decoration-zinc-300 underline-offset-4 hover:text-zinc-950 dark:decoration-white/20 dark:hover:text-white"
                 href="/skills?view=all"
               >
-                {skillsCopy.listing.clearFilters}
+                {t("listing.clearFilters")}
               </Link>
             ) : null}
           </div>
@@ -287,21 +294,17 @@ export function SkillsListingView({
           <div className="mt-6 rounded-xl border border-zinc-300 bg-white/54 p-10 text-center dark:border-white/10 dark:bg-white/[0.03]">
             <SkillIcon className="mx-auto mb-4 size-8 text-zinc-400" />
             <h2 className="text-xl font-semibold tracking-tight">
-              {hasFilters
-                ? skillsCopy.listing.noMatchTitle
-                : skillsCopy.landing.emptyTitle}
+              {hasFilters ? t("listing.noMatchTitle") : t("landing.emptyTitle")}
             </h2>
             <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-zinc-500 dark:text-zinc-400">
-              {hasFilters
-                ? skillsCopy.listing.noMatchBody
-                : skillsCopy.landing.emptyBody}
+              {hasFilters ? t("listing.noMatchBody") : t("landing.emptyBody")}
             </p>
           </div>
         )}
 
         {state.cursor || market.nextCursor ? (
           <nav
-            aria-label={skillsCopy.listing.pagination}
+            aria-label={t("listing.pagination")}
             className="mt-8 flex items-center justify-between gap-4 border-t border-zinc-300 pt-6 dark:border-white/10"
           >
             {state.cursor ? (
@@ -310,7 +313,7 @@ export function SkillsListingView({
                 href={skillsBrowseHref(state, { view: true })}
               >
                 <ArrowLeft className="size-4" />
-                {skillsCopy.listing.firstPage}
+                {t("listing.firstPage")}
               </Link>
             ) : (
               <span />
@@ -324,7 +327,7 @@ export function SkillsListingView({
                 })}
                 rel="next"
               >
-                {skillsCopy.listing.nextPage}
+                {t("listing.nextPage")}
                 <ArrowRight className="size-4" />
               </Link>
             ) : null}

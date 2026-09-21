@@ -5,30 +5,30 @@ import type {
 } from "@sourceweft/market-sdk";
 
 import { skillCategoryPath } from "./skills-format";
-import { skillsCopy } from "./skills-public-copy";
 
 export const SKILLS_PAGE_SIZE = 24;
 
+// Values only: the listing labels each one from the `publicSkills.sortOptions`
+// / `trustOptions` / `capabilityOptions` messages.
 export const skillSortOptions = [
-  { label: skillsCopy.sortOptions.recommended, value: "recommended" },
-  { label: skillsCopy.sortOptions.popular, value: "popular" },
-  { label: skillsCopy.sortOptions.stars, value: "stars" },
-  { label: skillsCopy.sortOptions.new, value: "new" },
-  { label: skillsCopy.sortOptions.name, value: "name" },
-] as const satisfies readonly { label: string; value: MarketSkillSort }[];
+  { value: "recommended" },
+  { value: "popular" },
+  { value: "stars" },
+  { value: "new" },
+  { value: "name" },
+] as const satisfies readonly { value: MarketSkillSort }[];
 
 export const skillTrustOptions = [
-  { label: skillsCopy.trustOptions.all, value: "all" },
-  { label: skillsCopy.trustOptions.featured, value: "featured" },
-  { label: skillsCopy.trustOptions.verified, value: "verified" },
+  { value: "all" },
+  { value: "featured" },
+  { value: "verified" },
 ] as const;
 
 export const skillCapabilityOptions = [
-  { label: skillsCopy.capabilityOptions.all, value: "all" },
-  { label: skillsCopy.capabilityOptions["prompt-only"], value: "prompt-only" },
-  { label: skillsCopy.capabilityOptions.executable, value: "executable" },
+  { value: "all" },
+  { value: "prompt-only" },
+  { value: "executable" },
 ] as const satisfies readonly {
-  label: string;
   value: "all" | MarketSkillCapability;
 }[];
 

@@ -66,7 +66,6 @@ import {
   visibleSkillCategories,
   type SkillsBrowseState,
 } from "./skills-market-browse";
-import { skillsMarketCopy } from "./skills-market-copy";
 import { SubmitSkillDialog } from "./submit-skill-dialog";
 
 type SkillsCatalogResponse = Awaited<
@@ -82,25 +81,7 @@ type ResolvedWorkspace = {
 type CatalogStatus =
   "resolving_workspace" | "loading_catalog" | "ready" | "error";
 
-const copy = skillsMarketCopy;
 const QUERY_DEBOUNCE_MS = 300;
-
-const trustOptions = skillTrustValues.map((key) => ({
-  key,
-  label: copy.trustOptions[key],
-}));
-const capabilityOptions = skillCapabilityValues.map((key) => ({
-  key,
-  label: copy.capabilityOptions[key],
-}));
-const installedOptions = skillInstalledValues.map((key) => ({
-  key,
-  label: copy.installedOptions[key],
-}));
-const sortOptions = skillSortValues.map((key) => ({
-  key,
-  label: copy.sortOptions[key],
-}));
 
 function publisherLabel(
   sourceType: SkillCatalogItem["sourceType"],
@@ -394,10 +375,24 @@ function SkillsFilterPanel({
   state: SkillsBrowseState;
   placement?: "desktop" | "drawer";
 }) {
+  const t = useTranslations("dashboardSkills");
+  const tm = useTranslations("dashboardSkillsMarket");
+  const trustOptions = skillTrustValues.map((key) => ({
+    key,
+    label: tm(`trustOptions.${key}`),
+  }));
+  const capabilityOptions = skillCapabilityValues.map((key) => ({
+    key,
+    label: tm(`capabilityOptions.${key}`),
+  }));
+  const installedOptions = skillInstalledValues.map((key) => ({
+    key,
+    label: t(`gallery.statuses.${key}`),
+  }));
   const offeredCategories = visibleSkillCategories(categories, state.category);
   const categorySummary =
     state.category === "all"
-      ? copy.gallery.categoryAll
+      ? t("gallery.categories.all")
       : (categories.find((item) => item.slug === state.category)?.name ??
         state.category);
 
@@ -413,22 +408,22 @@ function SkillsFilterPanel({
       <div className="border-b border-border px-3 py-2">
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-sm font-semibold text-foreground">
-            {copy.gallery.filtersTitle}
+            {t("gallery.filters")}
           </h2>
           <button
             className="text-[11px] text-muted-foreground hover:text-foreground"
             onClick={onClear}
             type="button"
           >
-            {copy.gallery.clearAll}
+            {t("gallery.clearAll")}
           </button>
         </div>
       </div>
       <ScrollArea className="min-h-0 flex-1">
         <FilterFacet
           defaultOpen
-          label={copy.gallery.searchLabel}
-          summary={queryInput.trim() || copy.gallery.searchSummaryAll}
+          label={t("gallery.facets.search")}
+          summary={queryInput.trim() || t("gallery.summaryAll")}
         >
           <div className="relative">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -436,7 +431,7 @@ function SkillsFilterPanel({
               className="h-7 pl-8 text-xs"
               maxLength={SKILLS_QUERY_MAX_LENGTH}
               onChange={(event) => onQueryInputChange(event.target.value)}
-              placeholder={copy.gallery.searchPlaceholder}
+              placeholder={t("gallery.searchPlaceholder")}
               value={queryInput}
             />
           </div>
@@ -444,13 +439,13 @@ function SkillsFilterPanel({
 
         <FilterFacet
           defaultOpen
-          label={copy.gallery.categoryLabel}
+          label={t("gallery.facets.category")}
           summary={categorySummary}
         >
           <div className="space-y-1">
             <FacetChoice
               active={state.category === "all"}
-              label={copy.gallery.categoryAll}
+              label={t("gallery.categories.all")}
               onClick={() => onChange({ category: "all" })}
             />
             {offeredCategories.map((item) => (
@@ -470,8 +465,8 @@ function SkillsFilterPanel({
         </FilterFacet>
 
         <FilterFacet
-          label={copy.gallery.trustLabel}
-          summary={copy.trustOptions[state.trust]}
+          label={t("gallery.facets.publisher")}
+          summary={tm(`trustOptions.${state.trust}`)}
         >
           <div className="space-y-1">
             {trustOptions.map((item) => (
@@ -486,8 +481,8 @@ function SkillsFilterPanel({
         </FilterFacet>
 
         <FilterFacet
-          label={copy.gallery.capabilityLabel}
-          summary={copy.capabilityOptions[state.capability]}
+          label={tm("gallery.capabilityLabel")}
+          summary={tm(`capabilityOptions.${state.capability}`)}
         >
           <div className="space-y-1">
             {capabilityOptions.map((item) => (
@@ -502,8 +497,8 @@ function SkillsFilterPanel({
         </FilterFacet>
 
         <FilterFacet
-          label={copy.gallery.installedLabel}
-          summary={copy.installedOptions[state.installed]}
+          label={t("gallery.facets.status")}
+          summary={t(`gallery.statuses.${state.installed}`)}
         >
           <div className="space-y-1">
             {installedOptions.map((item) => (
@@ -539,6 +534,7 @@ function SkillCard({
   variant?: "page" | "modal";
 }) {
   const t = useTranslations("dashboardSkills");
+  const tm = useTranslations("dashboardSkillsMarket");
   const compact = variant === "modal";
   const installed =
     item.sourceType === "registry_github"
@@ -553,9 +549,9 @@ function SkillCard({
   const installCount = formatInstallCount(item.installCount);
   const installCountLabel =
     item.installCount === 1
-      ? copy.card.installsOne
+      ? tm("card.installsOne")
       : installCount
-        ? copy.card.installs(installCount)
+        ? tm("card.installs", { formatted: installCount })
         : null;
 
   return (
@@ -600,17 +596,17 @@ function SkillCard({
           {isRegistry && item.featured ? (
             <Badge
               className="h-5 gap-1 px-1.5 text-[10px]"
-              title={copy.card.featuredTitle}
+              title={tm("card.featuredTitle")}
               variant="outline"
             >
               <Sparkles className="h-2.5 w-2.5 text-amber-500 dark:text-amber-300" />
-              {copy.card.featured}
+              {tm("card.featured")}
             </Badge>
           ) : null}
           {isRegistry && item.verified ? (
             <Badge className="h-5 gap-1 px-1.5 text-[10px]" variant="secondary">
               <BadgeCheck className="h-2.5 w-2.5" />
-              {copy.card.verified}
+              {tm("card.verified")}
             </Badge>
           ) : null}
           {categoryName ? (
@@ -641,7 +637,7 @@ function SkillCard({
               variant="outline"
             >
               <SquareTerminal className="h-2.5 w-2.5" />
-              {copy.card.includesScripts}
+              {tm("card.includesScripts")}
             </Badge>
           ) : null}
           {item.license ? (
@@ -857,6 +853,7 @@ function SkillsGalleryView({
   onBrowseStateChange: (next: SkillsBrowseState) => void;
 }) {
   const t = useTranslations("dashboardSkills");
+  const tm = useTranslations("dashboardSkillsMarket");
   const dashboardState = useDashboardChatState();
   const [workspace, setWorkspace] = React.useState<ResolvedWorkspace | null>(
     null,
@@ -1008,14 +1005,14 @@ function SkillsGalleryView({
         setError(
           resolveError instanceof Error
             ? resolveError.message
-            : copy.gallery.loadFailed,
+            : t("gallery.error.loadFailed"),
         );
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [resolveWorkspace]);
+  }, [resolveWorkspace, t]);
 
   // Page one of a result set. `soft` keeps what is on screen until the answer
   // lands (a refresh of the same view); otherwise the grid resets to skeletons.
@@ -1057,11 +1054,11 @@ function SkillsGalleryView({
         setError(
           loadError instanceof Error
             ? loadError.message
-            : copy.gallery.loadFailed,
+            : t("gallery.error.loadFailed"),
         );
       }
     },
-    [],
+    [t],
   );
 
   const activeWorkspaceId = workspace?.id ?? null;
@@ -1129,7 +1126,7 @@ function SkillsGalleryView({
       }
       // Stop auto-paging on a failure — the button below remains as a retry.
       setLoadMoreFailed(true);
-      toast.error(copy.gallery.loadMoreFailed);
+      toast.error(tm("gallery.loadMoreFailed"));
     } finally {
       if (loadingMoreGenerationRef.current === generation) {
         loadingMoreGenerationRef.current = null;
@@ -1138,7 +1135,7 @@ function SkillsGalleryView({
         setIsLoadingMore(false);
       }
     }
-  }, [activeWorkspaceId, browseState, loadFirstPage, nextCursor]);
+  }, [activeWorkspaceId, browseState, loadFirstPage, nextCursor, tm]);
 
   const clearFilters = React.useCallback(() => {
     committedQueryRef.current = "";
@@ -1297,11 +1294,15 @@ function SkillsGalleryView({
   // filter rules them out); community skills follow, page by page.
   const sections = partitionSkills(items);
   const sectionList = [
-    { key: "builtin", label: copy.gallery.sectionBuiltin, items: sections.builtin },
-    { key: "yours", label: copy.gallery.sectionYours, items: sections.yours },
+    {
+      key: "builtin",
+      label: tm("gallery.sectionBuiltin"),
+      items: sections.builtin,
+    },
+    { key: "yours", label: tm("gallery.sectionYours"), items: sections.yours },
     {
       key: "community",
-      label: copy.gallery.sectionCommunity,
+      label: tm("gallery.sectionCommunity"),
       items: sections.community,
     },
   ].filter((section) => section.items.length > 0);
@@ -1385,7 +1386,10 @@ function SkillsGalleryView({
                   />
                   <SortMenu
                     onChange={(sort) => changeBrowseState({ sort })}
-                    options={sortOptions}
+                    options={skillSortValues.map((key) => ({
+                      key,
+                      label: tm(`sortOptions.${key}`),
+                    }))}
                     value={browseState.sort}
                   />
                 </div>
@@ -1398,7 +1402,7 @@ function SkillsGalleryView({
               <MySubmissions submissions={submissions} />
               {catalogStatus === "ready" && !error && registryTotal ? (
                 <p className="mb-3 text-xs text-muted-foreground">
-                  {copy.gallery.communityTotal(registryTotal)}
+                  {tm("gallery.communityTotal", { count: registryTotal })}
                 </p>
               ) : null}
 
@@ -1406,14 +1410,14 @@ function SkillsGalleryView({
                 <SkillsCatalogSkeletonGrid variant={variant} />
               ) : error ? (
                 <div className="rounded-2xl border border-destructive/30 bg-destructive/10 px-4 py-5 text-sm text-destructive">
-                  <p className="font-medium">{copy.gallery.loadFailedTitle}</p>
+                  <p className="font-medium">{t("gallery.error.title")}</p>
                   <p className="mt-1 text-destructive/85">{error}</p>
                 </div>
               ) : items.length === 0 ? (
                 <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">
                   {filtersActive
-                    ? copy.gallery.emptyFiltered
-                    : copy.gallery.emptyCatalog}
+                    ? t("gallery.empty.noMatch")
+                    : t("gallery.empty.none")}
                 </div>
               ) : showSectionHeadings ? (
                 <div className="space-y-6">
@@ -1454,8 +1458,8 @@ function SkillsGalleryView({
                         <Loader2 className="h-4 w-4 animate-spin" />
                       ) : null}
                       {isLoadingMore
-                        ? copy.gallery.loadingMore
-                        : copy.gallery.loadMore}
+                        ? tm("gallery.loadingMore")
+                        : tm("gallery.loadMore")}
                     </Button>
                   </div>
                 </>

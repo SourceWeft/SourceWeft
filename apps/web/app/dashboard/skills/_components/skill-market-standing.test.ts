@@ -12,7 +12,15 @@ import {
   toggleSkillCategory,
   ownerListingView,
 } from "./skill-market-standing";
-import { skillsClaimCopy } from "./skills-claim-copy";
+import { createTranslator } from "next-intl";
+import type { useTranslations } from "next-intl";
+import messages from "../../../../messages/en.json";
+
+const t = createTranslator({
+  locale: "en",
+  messages,
+  namespace: "dashboardSkillsClaim",
+}) as unknown as ReturnType<typeof useTranslations>;
 
 describe("skillStandingKind", () => {
   it("tells listed, withdrawn and simply-unlisted apart", () => {
@@ -173,7 +181,7 @@ describe("author claims", () => {
 
   it("tells an organization's author to ask an admin", () => {
     expect(
-      claimErrorMessage({ code: "SKILL_CLAIM_ORGANIZATION_REPO" }),
+      claimErrorMessage({ code: "SKILL_CLAIM_ORGANIZATION_REPO" }, t),
     ).toMatch(/admin.*support@sourceweft\.com/);
   });
 
@@ -208,13 +216,13 @@ describe("author claims", () => {
   });
 
   it("explains a refusal by its code, and falls back otherwise", () => {
-    expect(claimErrorMessage({ code: "SKILL_REPO_ALREADY_CLAIMED" })).toBe(
-      skillsClaimCopy.errors.SKILL_REPO_ALREADY_CLAIMED,
+    expect(claimErrorMessage({ code: "SKILL_REPO_ALREADY_CLAIMED" }, t)).toBe(
+      "Another author has already claimed this repository.",
     );
-    expect(claimErrorMessage({ code: "SOMETHING_ELSE" })).toBe(
-      skillsClaimCopy.errors.fallback,
+    expect(claimErrorMessage({ code: "SOMETHING_ELSE" }, t)).toBe(
+      "Something went wrong. Try again.",
     );
-    expect(claimErrorMessage(new Error("boom"), "Custom")).toBe("Custom");
-    expect(claimErrorMessage({ code: "fallback" }, "Custom")).toBe("Custom");
+    expect(claimErrorMessage(new Error("boom"), t, "Custom")).toBe("Custom");
+    expect(claimErrorMessage({ code: "fallback" }, t, "Custom")).toBe("Custom");
   });
 });

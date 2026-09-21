@@ -1,5 +1,5 @@
 import { SITE_URL } from "../seo";
-import { llmsText } from "../skills/_components/agent-skill-md";
+import { llmsText } from "../[locale]/skills/_components/agent-skill-md";
 
 export const dynamic = "force-dynamic";
 
