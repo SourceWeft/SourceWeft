@@ -928,9 +928,9 @@ export class ContentSkillsService {
       await this.listRegistryCatalogRows({ ...input, terms })
     ).filter((row) => row.version.manifestJson.listing !== "hidden");
     const registryItems = await mapRegistryCatalogRows(registryRows);
-    // Stars are a rank signal; only community skills have a repository.
-    const repoStars = new Map(
-      registryRows.map((row) => [row.definition.id, row.definition.repoStars]),
+    // Stars and ratings are rank signals; only community skills have them.
+    const registrySignals = new Map(
+      registryRows.map((row) => [row.definition.id, row.definition]),
     );
     const ownItems = (await listCatalogSkillVersionsForWorkspace(input))
       .filter(
@@ -953,7 +953,9 @@ export class ContentSkillsService {
       verified: item.verified ?? false,
       featured: item.featured ?? false,
       installCount: installs.get(item.skillId) ?? 0,
-      repoStars: repoStars.get(item.skillId) ?? 0,
+      repoStars: registrySignals.get(item.skillId)?.repoStars ?? 0,
+      ratingCount: registrySignals.get(item.skillId)?.ratingCount ?? 0,
+      ratingAvg: registrySignals.get(item.skillId)?.ratingAvg ?? null,
       listedAt: item.listedAt,
     });
     const items = matched
