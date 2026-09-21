@@ -9,6 +9,7 @@ import type {
   GetMarketSkillCollectionResponse,
   ListMarketSkillCollectionsResponse,
   MarketSkillCollection,
+  MarketSkillLocale,
 } from "@sourceweft/market-contracts";
 import {
   db,
@@ -92,9 +93,13 @@ export async function listPublicSkillCollections(): Promise<ListMarketSkillColle
   };
 }
 
-/** null for a slug that is not a published collection. */
+/**
+ * null for a slug that is not a published collection. Each item's `aiSummary`
+ * is in `locale`, English when not given (or missing in it).
+ */
 export async function findPublicSkillCollection(
   slug: string,
+  options: { locale?: MarketSkillLocale } = {},
 ): Promise<GetMarketSkillCollectionResponse | null> {
   const [row] = await db
     .select()
@@ -112,6 +117,7 @@ export async function findPublicSkillCollection(
   // Only public skills come back from here, in the order asked for.
   const summaries = await findMarketSkillSummariesByIds(
     items.map((item) => item.skillId),
+    { locale: options.locale ?? "en" },
   );
   return {
     collection: publicCollection(row, summaries.length),

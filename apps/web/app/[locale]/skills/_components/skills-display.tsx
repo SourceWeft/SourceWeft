@@ -30,7 +30,22 @@ import {
   skillPath,
   skillsContainerClassName,
 } from "./skills-format";
+import { publicOverviewCopy } from "./community/public-overview-copy";
 import { SkillTile } from "./skill-logo";
+
+/**
+ * What a card says about a skill: the AI summary in the visitor's language
+ * when the market has one, else the author's own description. Plain text
+ * either way.
+ */
+export function skillCardText(
+  skill: Pick<MarketSkillSummary, "aiSummary" | "description">,
+): { text: string; ai: boolean } {
+  const summary = skill.aiSummary?.trim();
+  return summary
+    ? { text: summary, ai: true }
+    : { text: skill.description, ai: false };
+}
 
 export function skillCategoryNames(categories: MarketSkillCategory[]) {
   return new Map(categories.map((category) => [category.slug, category.name]));
@@ -163,6 +178,7 @@ export function SkillMarketCard({
   const stars = skill.stars ?? 0;
   const badges =
     skill.capability === "executable" || skill.claimed || skill.repoArchived;
+  const cardText = skillCardText(skill);
   return (
     <Link
       className="group flex h-full flex-col rounded-xl border border-zinc-300 bg-white/62 p-5 transition-all hover:-translate-y-0.5 hover:border-zinc-950/40 hover:bg-white hover:shadow-[0_18px_70px_rgba(39,39,42,0.1)] dark:border-white/10 dark:bg-white/[0.035] dark:hover:border-white/35 dark:hover:bg-white/[0.055]"
@@ -186,8 +202,16 @@ export function SkillMarketCard({
         ) : null}
       </div>
 
-      <p className="mt-4 line-clamp-3 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-        {skill.description}
+      <p
+        className="mt-4 line-clamp-3 text-sm leading-6 text-zinc-600 dark:text-zinc-400"
+        {...(cardText.ai
+          ? {
+              "data-ai-summary": "",
+              title: publicOverviewCopy(locale).cardSummaryTitle,
+            }
+          : {})}
+      >
+        {cardText.text}
       </p>
 
       {badges ? (

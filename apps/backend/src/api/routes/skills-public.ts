@@ -144,11 +144,20 @@ export function registerSkillPublicRoutes(app: Hono) {
 
   app.get("/v1/skills/collections/:slug", async (c) => {
     const slug = c.req.param("slug");
+    // The language of each item's `aiSummary`; English when not given.
+    const locale = marketSkillLocaleSchema
+      .optional()
+      .safeParse(given(c.req.query("locale")));
+    if (!locale.success) {
+      throw ApiError.validation(
+        locale.error.flatten() as Record<string, unknown>,
+      );
+    }
     // Unpublished and missing are the same 404.
     const found =
       slug.length > MAX_SLUG_LENGTH
         ? null
-        : await findPublicSkillCollection(slug);
+        : await findPublicSkillCollection(slug, { locale: locale.data });
     if (!found) {
       throw ApiError.notFound("Collection not found");
     }

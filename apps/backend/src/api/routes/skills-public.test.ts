@@ -529,3 +529,22 @@ test("aiSummary and aiOverview are optional for answers from older servers", asy
   });
   assert.equal(withOverview.aiOverview?.locale, "en");
 });
+
+test("a collection is read in the locale asked for; an unknown one is a 400", async () => {
+  const app = createTestApp();
+  const found = await app.request(
+    "/v1/skills/collections/starter?locale=zh-CN",
+  );
+  assert.equal(found.status, 200);
+  assert.deepEqual(mocks.findPublicSkillCollection.mock.calls[0]?.[1], {
+    locale: "zh-CN",
+  });
+  await app.request("/v1/skills/collections/starter");
+  assert.deepEqual(mocks.findPublicSkillCollection.mock.calls[1]?.[1], {
+    locale: undefined,
+  });
+  assert.equal(
+    (await app.request("/v1/skills/collections/starter?locale=xx")).status,
+    400,
+  );
+});

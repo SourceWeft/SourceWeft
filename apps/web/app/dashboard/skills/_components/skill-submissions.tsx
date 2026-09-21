@@ -13,13 +13,14 @@ import {
   RotateCw,
   X,
 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { Badge } from "@sourceweft/ui-web/components/ui/badge";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 
 import { contentClient } from "../../../../lib/sdk";
+import { SubmissionRateLimitNotice } from "./community/submission-rate-limit-notice";
 
 /**
  * A community skill is imported by a background job; the submission row is its
@@ -374,10 +375,12 @@ export function SubmissionDetail({
 }) {
   const t = useTranslations("dashboardSkills");
   const tm = useTranslations("dashboardSkillsMarket");
+  const locale = useLocale();
   const [retrying, setRetrying] = React.useState(false);
   return (
     <div className="space-y-3">
       <SubmissionStages submission={submission} />
+      <SubmissionRateLimitNotice locale={locale} submission={submission} />
       {submission.status === "failed" ? (
         <div className="space-y-2 text-sm" role="alert">
           <p className="text-destructive">

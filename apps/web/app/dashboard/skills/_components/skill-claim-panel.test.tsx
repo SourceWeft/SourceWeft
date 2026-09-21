@@ -103,6 +103,27 @@ test("offers the verified claimant removal", async () => {
   expect(container.textContent).toContain("Remove from SourceWeft");
 });
 
+test("offers the claimant who removed the repository a way back instead", async () => {
+  api.getSkillClaims.mockResolvedValue({
+    repository: {
+      ...repository,
+      claimedBy: "you",
+      viewerClaim: {
+        id: "claim-1",
+        repo: "ada/skills",
+        method: "github_account",
+        status: "verified",
+        createdAt: "2026-09-21T00:00:00.000Z",
+        verifiedAt: "2026-09-21T00:00:00.000Z",
+        removedAt: "2026-09-22T00:00:00.000Z",
+      },
+    },
+  });
+  await render();
+  expect(container.textContent).toContain("Restore to SourceWeft");
+  expect(container.textContent).not.toContain("Remove from SourceWeft");
+});
+
 test("renders nothing when the skill has no repository or the request fails", async () => {
   api.getSkillClaims.mockResolvedValue({ repository: null });
   await render();

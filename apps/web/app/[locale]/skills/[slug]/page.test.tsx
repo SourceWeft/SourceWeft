@@ -8,9 +8,12 @@ const market = vi.hoisted(() => ({
   listPublicSkills: vi.fn(),
 }));
 const auth = vi.hoisted(() => ({ isSignedIn: false }));
+const reviews = vi.hoisted(() => ({ getPublicSkillReviews: vi.fn() }));
+vi.mock("../../../../lib/public-skill-reviews", () => reviews);
 
 vi.mock("../../../../lib/market-skills", () => ({
   ...market,
+  marketSkillLocale: (locale: string) => locale,
   isMarketNotFound: (error: unknown) =>
     (error as { status?: number } | null)?.status === 404,
 }));
@@ -165,6 +168,7 @@ async function render(tab?: string) {
 beforeEach(() => {
   auth.isSignedIn = false;
   market.getPublicSkill.mockReset().mockResolvedValue(response());
+  reviews.getPublicSkillReviews.mockReset().mockResolvedValue(null);
   market.listPublicSkillCategories.mockReset().mockResolvedValue({
     items: [
       { count: 4, description: null, name: "Documents", slug: "documents" },
@@ -434,6 +438,37 @@ describe("public skill detail page", () => {
       name: "PDF Forms",
     });
     expect(String(code?.url)).toMatch(/\/skills\/pdf-forms$/);
+    // Nobody rated it: no rating is claimed.
+    expect(code).not.toHaveProperty("aggregateRating");
+  });
+
+  it("adds the rating to the JSON-LD once someone rated it", async () => {
+    reviews.getPublicSkillReviews.mockResolvedValue({
+      items: [],
+      nextCursor: null,
+      summary: {
+        count: 3,
+        average: 4.333,
+        distribution: { "1": 0, "2": 0, "3": 0, "4": 2, "5": 1 },
+      },
+    });
+    const html = await render();
+    const code = [
+      ...html.matchAll(/<script type="application\/ld\+json">(.*?)<\/script>/g),
+    ]
+      .map((match) => JSON.parse(match[1]!) as Record<string, unknown>)
+      .find((block) => block["@type"] === "SoftwareSourceCode");
+    expect(code?.aggregateRating).toMatchObject({
+      "@type": "AggregateRating",
+      ratingCount: 3,
+      bestRating: 5,
+      worstRating: 1,
+    });
+  });
+
+  it("reads the page body in the page's locale", async () => {
+    await render();
+    expect(market.getPublicSkill).toHaveBeenCalledWith("pdf-forms", "en");
   });
 
   it("404s what the market says is not public, and 5xxs an outage", async () => {

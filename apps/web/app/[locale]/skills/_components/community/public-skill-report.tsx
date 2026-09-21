@@ -1,7 +1,10 @@
+import { PublicSkillReportDialog } from "./public-skill-report-dialog";
 import type { PublicSkillSlotProps } from "./slot-props";
 
-/** The report link in the attribution section (§17.2). */
+/**
+ * The report button in the attribution section (§17.2). The mailto link
+ * beside it stays, for anyone who cannot use the form.
+ */
 export function PublicSkillReport(props: PublicSkillSlotProps) {
-  void props;
-  return null;
+  return <PublicSkillReportDialog {...props} />;
 }
