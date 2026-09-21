@@ -13,8 +13,8 @@ npx @sourceweft/cli skills search pdf
 npm install -g @sourceweft/cli   # then: sourceweft skills …
 ```
 
-Requires Node 20 or newer. Until a release is published, run it from the
-repository: `pnpm --filter @sourceweft/cli build`, then `node cli/dist/main.js …`.
+Requires Node 20 or newer. Installing skills from the public marketplace needs no
+account and no token.
 
 ## Commands
 
@@ -22,6 +22,7 @@ repository: `pnpm --filter @sourceweft/cli build`, then `node cli/dist/main.js �
 sourceweft skills search [query]   Search the marketplace
 sourceweft skills info <slug>      Show a skill and where it comes from
 sourceweft skills install <slug>   Install a skill for a coding agent
+sourceweft skills agents           List supported agents and where they keep skills
 sourceweft skills list             List skills installed by sourceweft
 sourceweft skills update [slug]    Update installed skills to the registry's version
 sourceweft skills remove <slug>    Remove an installed skill

@@ -56,6 +56,149 @@ describe("isSafeBundlePath", () => {
     }
     assert.equal(isSafeBundlePath("console.md"), true);
   });
+
+  it("rejects every reserved device name, with or without an extension", () => {
+    const names = [
+      "con",
+      "prn",
+      "aux",
+      "nul",
+      ...Array.from({ length: 10 }, (_, i) => `com${i}`),
+      ...Array.from({ length: 10 }, (_, i) => `lpt${i}`),
+      "com\u00b9",
+      "com\u00b2",
+      "com\u00b3",
+      "lpt\u00b9",
+      "lpt\u00b2",
+      "lpt\u00b3",
+      "conin$",
+      "conout$",
+    ];
+    for (const name of names) {
+      for (const variant of [
+        name,
+        name.toUpperCase(),
+        `${name}.txt`,
+        `${name}.tar.gz`,
+        `${name} .txt`,
+        `dir/${name}`,
+        `dir/${name}.md`,
+      ]) {
+        assert.equal(isSafeBundlePath(variant, "win32"), false, variant);
+      }
+    }
+  });
+
+  it("keeps names that merely contain or resemble a reserved one", () => {
+    for (const path of [
+      "console.md",
+      "auxiliary.md",
+      "nully",
+      "com10.md",
+      "com.md",
+      "lpt.txt",
+      "com\u2074.md",
+      "prn-notes.md",
+      "a.con",
+    ]) {
+      assert.equal(isSafeBundlePath(path, "win32"), true, path);
+    }
+    // A reserved name is refused as a directory too, not only as a file.
+    assert.equal(isSafeBundlePath("scripts/aux/run.sh", "win32"), false);
+  });
+
+  it("rejects NTFS alternate data streams and drive-relative segments", () => {
+    for (const path of [
+      "SKILL.md:hidden",
+      "SKILL.md::$DATA",
+      "scripts/run.sh:stream:$DATA",
+      "a/C:x",
+      "a/c:/x",
+      ":x",
+      "x:",
+    ]) {
+      assert.equal(isSafeBundlePath(path, "win32"), false, path);
+    }
+  });
+
+  it("rejects the other characters Windows cannot put in a name", () => {
+    for (const char of ["<", ">", '"', "|", "?", "*"]) {
+      assert.equal(isSafeBundlePath(`a${char}b.md`, "win32"), false, char);
+      assert.equal(isSafeBundlePath(`dir/${char}`, "win32"), false, char);
+    }
+  });
+
+  it("rejects Win32 and NT namespace prefixes", () => {
+    for (const path of [
+      "\\\\?\\C:\\x",
+      "\\\\.\\pipe\\x",
+      "\\??\\C:\\x",
+      "//?/C:/x",
+      "//./nul",
+      "//server/share/x",
+    ]) {
+      assert.equal(isSafeBundlePath(path, "win32"), false, path);
+    }
+  });
+
+  it("still accepts characters that are fine everywhere", () => {
+    for (const path of [
+      "a b/c d.md",
+      "notes (1).md",
+      "a-b_c+d=e,f;g@h#i%j&k.md",
+      "\u00e9t\u00e9/\u65e5\u672c\u8a9e.md",
+      "a.b/c.d",
+      ".claude/x",
+      "$x/y",
+    ]) {
+      assert.equal(isSafeBundlePath(path, "win32"), true, path);
+    }
+  });
+
+  it("keeps every name that installs on macOS and Linux installing there", () => {
+    // What only Windows refuses is enforced only when writing on Windows.
+    for (const path of [
+      "notes/a:b.md",
+      "what?.md",
+      "a*b",
+      'q"x.md',
+      "a<b>|c.md",
+      "com0.md",
+      "lpt0",
+      "com\u00b9.md",
+      "conin$",
+      "nul .txt",
+      "a/x:",
+    ]) {
+      assert.equal(isSafeBundlePath(path, "linux"), true, path);
+      assert.equal(isSafeBundlePath(path, "darwin"), true, path);
+    }
+  });
+
+  it("refuses the portable baseline on every platform", () => {
+    for (const platform of ["linux", "darwin", "win32"] as const) {
+      for (const path of [
+        "C:x",
+        "c:/x",
+        "con",
+        "nul.txt",
+        "com1.md",
+        "lpt9",
+        "a/aux/b",
+        "a/b.",
+        "a/b ",
+        "../x",
+        "/x",
+        "a\\b",
+      ]) {
+        assert.equal(
+          isSafeBundlePath(path, platform),
+          false,
+          `${platform} ${path}`,
+        );
+      }
+    }
+  });
 });
 
 describe("isSafeSkillDirName", () => {
@@ -107,13 +250,27 @@ describe("findCaseCollisions", () => {
 
 describe("isAgentSkillName", () => {
   it("accepts the specification's names", () => {
-    for (const name of ["pdf", "test-driven-development", "a", "x1-y2", "a".repeat(64)]) {
+    for (const name of [
+      "pdf",
+      "test-driven-development",
+      "a",
+      "x1-y2",
+      "a".repeat(64),
+    ]) {
       assert.equal(isAgentSkillName(name), true, name);
     }
   });
 
   it("refuses edge hyphens, doubled hyphens, capitals and overlong names", () => {
-    for (const name of ["-pdf", "pdf-", "pdf--forms", "PDF", "pdf forms", "", "a".repeat(65)]) {
+    for (const name of [
+      "-pdf",
+      "pdf-",
+      "pdf--forms",
+      "PDF",
+      "pdf forms",
+      "",
+      "a".repeat(65),
+    ]) {
       assert.equal(isAgentSkillName(name), false, name);
     }
   });

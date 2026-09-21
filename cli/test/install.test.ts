@@ -5,11 +5,10 @@ import {
   readdir,
   readFile,
   rm,
-  symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, sep } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { sha256 } from "@sourceweft/skill-format";
 import {
@@ -33,6 +32,7 @@ import {
   type ManifestFile,
 } from "../src/install/verify";
 import { InstallConflictError, writeSkillDir } from "../src/install/write";
+import { linkOrSkip } from "./links";
 
 const enc = new TextEncoder();
 const bytes = (text: string) => enc.encode(text);
@@ -317,12 +317,14 @@ describe("writeSkillDir", () => {
     );
   });
 
-  it("does not write through a symlink that stands where the skill goes", async () => {
+  it("does not write through a symlink that stands where the skill goes", async (t) => {
     const dest = skillsRoot("linked");
     const outside = skillsRoot("outside");
     await mkdir(dest, { recursive: true });
     await mkdir(outside, { recursive: true });
-    await symlink(outside, join(dest, "pdf"));
+    if (!(await linkOrSkip(t, outside, join(dest, "pdf")))) {
+      return;
+    }
     await assert.rejects(
       writeSkillDir({
         root: dest,
@@ -409,29 +411,35 @@ describe("detectLocalChanges", () => {
   });
 });
 
+// `resolve` gives a drive-qualified path on Windows (`/h` becomes `C:\h`), so
+// the expected values are built the same way instead of hard-coding a POSIX form.
+const HOME = resolve("/h");
+const PROJECT = resolve("/p");
+const EXPLICIT = resolve("/x", "skills");
+
 describe("agents", () => {
   it("resolves user, project and explicit directories", () => {
     const claude = findAgent("claude-code")!;
     assert.equal(
-      resolveSkillsRoot({ agent: claude, scope: "user", home: "/h" }),
-      join("/h", ".claude", "skills"),
+      resolveSkillsRoot({ agent: claude, scope: "user", home: HOME }),
+      join(HOME, ".claude", "skills"),
     );
     assert.equal(
-      resolveSkillsRoot({ agent: claude, scope: "project", cwd: "/p" }),
-      join("/p", ".claude", "skills"),
+      resolveSkillsRoot({ agent: claude, scope: "project", cwd: PROJECT }),
+      join(PROJECT, ".claude", "skills"),
     );
     assert.equal(
-      resolveSkillsRoot({ agent: claude, scope: "user", dir: "/x/y" }),
-      "/x/y",
+      resolveSkillsRoot({ agent: claude, scope: "user", dir: EXPLICIT }),
+      EXPLICIT,
     );
     assert.equal(
       resolveSkillsRoot({
         agent: claude,
         scope: "user",
         dir: "rel",
-        cwd: "/p",
+        cwd: PROJECT,
       }),
-      join("/p", "rel"),
+      join(PROJECT, "rel"),
     );
   });
 
@@ -446,23 +454,28 @@ describe("the agent table", () => {
     for (const agent of AGENTS) {
       for (const dir of [agent.userDir, agent.projectDir]) {
         assert.equal(isAbsolute(dir), false, `${agent.id}: ${dir}`);
+        assert.equal(dir.includes("\\"), false, `${agent.id}: ${dir}`);
         assert.equal(
-          dir.split(sep).includes(".."),
+          dir.split("/").includes(".."),
           false,
           `${agent.id}: ${dir}`,
         );
-        assert.equal(dir.split(sep).at(-1), "skills", `${agent.id}: ${dir}`);
+        assert.equal(dir.split("/").at(-1), "skills", `${agent.id}: ${dir}`);
       }
     }
   });
 
   it("puts Codex, Goose and the shared directory in the same place", () => {
     const roots = ["codex", "goose", "universal"].map((id) =>
-      resolveSkillsRoot({ agent: findAgent(id)!, scope: "project", cwd: "/p" }),
+      resolveSkillsRoot({
+        agent: findAgent(id)!,
+        scope: "project",
+        cwd: PROJECT,
+      }),
     );
     assert.deepEqual(
       new Set(roots),
-      new Set([join("/p", ".agents", "skills")]),
+      new Set([join(PROJECT, ".agents", "skills")]),
     );
   });
 
@@ -471,23 +484,23 @@ describe("the agent table", () => {
       resolveSkillsRoot({
         agent: findAgent(id)!,
         scope,
-        home: "/h",
-        cwd: "/p",
+        home: HOME,
+        cwd: PROJECT,
       });
-    assert.equal(at("cursor", "user"), join("/h", ".cursor", "skills"));
+    assert.equal(at("cursor", "user"), join(HOME, ".cursor", "skills"));
     assert.equal(
       at("github-copilot", "project"),
-      join("/p", ".github", "skills"),
+      join(PROJECT, ".github", "skills"),
     );
     assert.equal(
       at("windsurf", "user"),
-      join("/h", ".codeium", "windsurf", "skills"),
+      join(HOME, ".codeium", "windsurf", "skills"),
     );
     assert.equal(
       at("opencode", "user"),
-      join("/h", ".config", "opencode", "skills"),
+      join(HOME, ".config", "opencode", "skills"),
     );
-    assert.equal(at("amp", "user"), join("/h", ".config", "agents", "skills"));
+    assert.equal(at("amp", "user"), join(HOME, ".config", "agents", "skills"));
   });
 });
 
@@ -498,25 +511,25 @@ describe("resolveTargets", () => {
         findAgent(id)!,
       ),
       scope: "user",
-      home: "/h",
+      home: HOME,
     });
     assert.equal(targets.length, 2);
     assert.deepEqual(
       targets[0]?.agents.map((a) => a.id),
       ["codex", "goose", "universal"],
     );
-    assert.equal(targets[0]?.root, join("/h", ".agents", "skills"));
+    assert.equal(targets[0]?.root, join(HOME, ".agents", "skills"));
   });
 
   it("gives an explicit directory to one place regardless of agent", () => {
     const targets = resolveTargets({
       agents: [findAgent("cursor")!],
       scope: "user",
-      dir: "/x/skills",
+      dir: EXPLICIT,
     });
     assert.deepEqual(
       targets.map((t) => t.root),
-      ["/x/skills"],
+      [EXPLICIT],
     );
   });
 });

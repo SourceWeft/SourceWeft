@@ -3,6 +3,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { isSafeSkillDirName } from "@sourceweft/skill-format";
 import {
   AGENTS,
+  pathKey,
   resolveSkillsRoot,
   type AgentProfile,
   type InstallScope,
@@ -14,7 +15,7 @@ import {
   type InstalledMetadata,
   type LocalChanges,
 } from "./metadata";
-import { InstallConflictError } from "./write";
+import { InstallConflictError, REMOVE_TREE_OPTIONS } from "./write";
 
 /**
  * What this CLI has installed, found by looking at the skills directories of
@@ -85,8 +86,9 @@ export function selectRoots(selection: RootSelection = {}): SkillsRoot[] {
           ...(selection.home ? { home: selection.home } : {}),
         }),
       );
-      if (!seen.has(root)) {
-        seen.add(root);
+      const key = pathKey(root);
+      if (!seen.has(key)) {
+        seen.add(key);
         roots.push({ agent: agent.id, scope, root });
       }
     }
@@ -151,7 +153,7 @@ export async function removeInstalled(
   if (
     !isSafeSkillDirName(skill.name) ||
     basename(skill.dir) !== skill.name ||
-    resolve(dirname(skill.dir)) !== resolve(skill.root)
+    pathKey(resolve(dirname(skill.dir))) !== pathKey(resolve(skill.root))
   ) {
     throw new Error(`Refusing to remove ${skill.dir}`);
   }
@@ -177,7 +179,12 @@ export async function removeInstalled(
       `${skill.dir} has local changes that removing it would delete. Re-run with --force to remove it anyway.`,
     );
   }
-  await rm(skill.dir, { recursive: true });
+  // Not `force`: a directory that is already gone should still be an error here.
+  await rm(skill.dir, {
+    recursive: true,
+    maxRetries: REMOVE_TREE_OPTIONS.maxRetries,
+    retryDelay: REMOVE_TREE_OPTIONS.retryDelay,
+  });
 }
 
 /** Installs of the same slug that sit at different commits. */

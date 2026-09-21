@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join, posix, resolve } from "node:path";
 
 /**
  * Where each coding agent looks for skills, taken from that agent's own
@@ -23,7 +23,25 @@ export type AgentProfile = {
   readsShared?: boolean;
 };
 
-const skills = (...parts: string[]) => join(...parts, "skills");
+/**
+ * The directories below are relative and `/`-separated on every OS (so the
+ * `agents` command and its JSON read the same everywhere); `join(home, dir)`
+ * turns them into native paths when they are used.
+ */
+const skills = (...parts: string[]) => posix.join(...parts, "skills");
+
+/**
+ * A key for telling whether two paths name the same place. Windows compares
+ * paths without regard to case, and the same directory can arrive spelled two
+ * ways (`C:\Users\me` from the home directory, `c:\users\me` from the
+ * working directory). Other systems compare exactly, as before.
+ */
+export function pathKey(
+  path: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  return platform === "win32" ? path.toLowerCase() : path;
+}
 
 export const AGENTS: readonly AgentProfile[] = [
   {
@@ -185,11 +203,12 @@ export function resolveTargets(input: {
         ...(input.cwd ? { cwd: input.cwd } : {}),
       }),
     );
-    const target = targets.get(root);
+    const key = pathKey(root);
+    const target = targets.get(key);
     if (target) {
       target.agents.push(agent);
     } else {
-      targets.set(root, { root, agents: [agent] });
+      targets.set(key, { root, agents: [agent] });
     }
   }
   return [...targets.values()];

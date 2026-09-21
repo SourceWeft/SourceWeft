@@ -1,5 +1,5 @@
 import { lstat, mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, join, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { isSafeBundlePath, isSafeSkillDirName } from "@sourceweft/skill-format";
 import {
   detectLocalChanges,
@@ -48,15 +48,81 @@ export type WriteSkillResult = {
   replaced: boolean;
 };
 
-/** `rel` under `root`, refusing anything that resolves outside it. */
-function resolveInside(root: string, rel: string): string {
+/**
+ * `rel` (a `/`-separated bundle path) under `root`, refusing anything that
+ * resolves outside it. Asks `path.relative` rather than comparing string
+ * prefixes: that stays right when `root` ends in a separator already (a drive
+ * root such as `D:\`), when the two differ in case (Windows), and when `rel`
+ * carries a drive of its own (`E:x`, which `resolve` follows to another drive).
+ */
+export function resolveInside(root: string, rel: string): string {
   const base = resolve(root);
   const target = resolve(base, ...rel.split("/"));
-  if (target !== base && !target.startsWith(base + sep)) {
+  const from = relative(base, target);
+  if (from === ".." || from.startsWith(`..${sep}`) || isAbsolute(from)) {
     throw new Error(`Refusing to write outside ${base}: ${rel}`);
   }
   return target;
 }
+
+/** Codes Windows gives a rename that fails only because something has the path open. */
+const BUSY_RENAME_CODES = new Set(["EPERM", "EBUSY", "EACCES"]);
+/** Pauses between attempts: six tries over about three seconds, then give up. */
+const RENAME_RETRY_DELAYS_MS: readonly number[] = [
+  50, 100, 200, 400, 800, 1600,
+];
+
+export type RenameRetryOptions = {
+  /** Replaceable in tests. */
+  rename?: (from: string, to: string) => Promise<void>;
+  platform?: NodeJS.Platform;
+  delaysMs?: readonly number[];
+};
+
+/**
+ * `rename`, tried again a few times on Windows when it fails with EPERM, EBUSY
+ * or EACCES. Renaming a directory fails there while any file inside it is open
+ * — and an antivirus scanner, the search indexer or an editor watching the
+ * skills directory opens files for a moment right after they are written. It is
+ * a transient failure, so a short bounded wait clears it. Elsewhere those codes
+ * mean a real permission problem, so nothing is retried and the first error
+ * stands.
+ */
+export async function renameWithRetry(
+  from: string,
+  to: string,
+  options: RenameRetryOptions = {},
+): Promise<void> {
+  const doRename = options.rename ?? rename;
+  const delays =
+    (options.platform ?? process.platform) === "win32"
+      ? (options.delaysMs ?? RENAME_RETRY_DELAYS_MS)
+      : [];
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await doRename(from, to);
+    } catch (error) {
+      const delay = delays[attempt];
+      const code = (error as NodeJS.ErrnoException).code;
+      if (
+        delay === undefined ||
+        code === undefined ||
+        !BUSY_RENAME_CODES.has(code)
+      ) {
+        throw error;
+      }
+      await new Promise((done) => setTimeout(done, delay));
+    }
+  }
+}
+
+/** Deleting a tree can hit the same transient locks as renaming one. */
+export const REMOVE_TREE_OPTIONS = {
+  recursive: true,
+  force: true,
+  maxRetries: 5,
+  retryDelay: 100,
+} as const;
 
 async function exists(path: string): Promise<boolean> {
   try {
@@ -137,21 +203,26 @@ export async function writeSkillDir(
     });
 
     if (replaced) {
-      await rename(target, backup);
+      await renameWithRetry(target, backup);
     }
     try {
-      await rename(staging, target);
+      await renameWithRetry(staging, target);
     } catch (error) {
       if (replaced) {
-        await rename(backup, target);
+        await renameWithRetry(backup, target);
       }
       throw error;
     }
     if (replaced) {
-      await rm(backup, { recursive: true, force: true });
+      // The new install is already in place, so failing to delete the old one
+      // (Windows: a file in it is still open) must not fail the install. What
+      // is left is a stale `.sourceweft-tmp-*.old` directory, which `doctor`
+      // reports as safe to delete.
+      await rm(backup, REMOVE_TREE_OPTIONS).catch(() => undefined);
     }
   } catch (error) {
-    await rm(staging, { recursive: true, force: true });
+    // Best effort: a cleanup failure must not hide why the install failed.
+    await rm(staging, REMOVE_TREE_OPTIONS).catch(() => undefined);
     throw error;
   }
   return { dir: target, replaced };

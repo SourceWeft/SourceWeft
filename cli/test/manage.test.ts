@@ -7,7 +7,6 @@ import {
   readFile,
   readdir,
   rm,
-  symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -32,6 +31,7 @@ import {
 } from "../src/install/inventory";
 import { createRegistryClient } from "../src/registry/client";
 import { fetchSkillFiles } from "../src/source/github";
+import { linkOrSkip } from "./links";
 
 const SHA_A = "a".repeat(40);
 const SHA_B = "b".repeat(40);
@@ -196,8 +196,10 @@ describe("managing installed skills", () => {
     assert.match(out(), /files missing/u);
   });
 
-  it("does not treat a symlink at a skill's place as an install", async () => {
-    await symlink(skillDir(), join(root, "alias"));
+  it("does not treat a symlink at a skill's place as an install", async (t) => {
+    if (!(await linkOrSkip(t, skillDir(), join(root, "alias")))) {
+      return;
+    }
     const { skills } = await scanRoots(selectRoots({ dir: root }));
     assert.deepEqual(
       skills.map((s) => s.name),
@@ -368,13 +370,15 @@ describe("managing installed skills", () => {
       assert.deepEqual(await readdir(root), ["pdf"]);
     });
 
-    it("re-checks at deletion time: a link swapped in since the scan is not followed", async () => {
+    it("re-checks at deletion time: a link swapped in since the scan is not followed", async (t) => {
       const outside = join(work, `outside-${counter}`);
       await mkdir(outside);
       await writeFile(join(outside, "precious"), "keep");
       const { skills } = await scanRoots(selectRoots({ dir: root }));
       await rm(skillDir(), { recursive: true });
-      await symlink(outside, skillDir());
+      if (!(await linkOrSkip(t, outside, skillDir()))) {
+        return;
+      }
       const { removeInstalled } = await import("../src/install/inventory");
       await assert.rejects(removeInstalled(skills[0]!, { force: true }));
       assert.equal(await readFile(join(outside, "precious"), "utf8"), "keep");

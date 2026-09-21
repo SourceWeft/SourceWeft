@@ -131,6 +131,48 @@ jobs:
           # it. Any non-empty value works — requests are mocked.
           PDF2MARKDOWN_API_KEY: ci-test-pdf2markdown-key
 
+  cli-cross-platform:
+    # The CLI writes files into people's home directories on their own machines,
+    # so it is exercised on every OS it will run on, and on the oldest Node it
+    # claims to support. Windows starts non-blocking: path and reserved-name
+    # handling has only ever been run on macOS and Linux, so its first runs are
+    # information. Make it blocking once it has been green.
+    name: CLI (${{ matrix.os }}, Node ${{ matrix.node }})
+    needs: lint-and-type
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            node: "20.x"
+          - os: macos-latest
+            node: "24.18.0"
+          - os: windows-latest
+            node: "24.18.0"
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.19.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile --filter "@sourceweft/cli..."
+      - run: pnpm --filter @sourceweft/skill-format test
+      - run: pnpm --filter @sourceweft/cli test
+      - run: pnpm --filter @sourceweft/cli build
+      - name: Smoke-test the built binary
+        run: |
+          node cli/dist/main.js --version
+          node cli/dist/main.js skills agents
+
   docker-build:
     name: Docker Build
     needs: test
