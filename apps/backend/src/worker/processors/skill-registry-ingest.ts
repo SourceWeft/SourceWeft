@@ -9,6 +9,7 @@ import {
   runIngestPipeline,
   type IngestRunOutcome,
 } from "../../modules/skills/registry/ingest/pipeline";
+import { enqueueSkillIngestJob } from "../../modules/skills/registry/ingest/queue";
 import { failSubmissionIfInFlight } from "../../modules/skills/registry/ingest/repository";
 import type { IngestDeps } from "../../modules/skills/registry/ingest/stages";
 
@@ -38,8 +39,9 @@ export async function processSkillRegistryIngestJob(
     throw new UnrecoverableError("skill-registry-ingest job has no submissionId");
   }
   const maxAttempts = job.opts?.attempts ?? 1;
+  let outcome: IngestRunOutcome;
   try {
-    return await runIngestPipeline({
+    outcome = await runIngestPipeline({
       submissionId,
       signal: AbortSignal.timeout(
         options.deadlineMs ?? SKILL_INGEST_JOB_DEADLINE_MS,
@@ -64,6 +66,18 @@ export async function processSkillRegistryIngestJob(
     const described = describeIngestError(error);
     throw new UnrecoverableError(`${described.code}: ${described.message}`);
   }
+  if (outcome.status === "deferred") {
+    // A new job rather than this one retried: a BullMQ retry would come back
+    // in seconds and spend an attempt on a limit that has hours to run. The
+    // claim bumped `attempts`, so the job id is fresh. Should the enqueue
+    // fail, throwing lets BullMQ retry this job, which meets the limit again
+    // and tries the enqueue again — and the failure boundary closes the row
+    // if it never succeeds.
+    await enqueueSkillIngestJob(outcome.submission, {
+      notBefore: outcome.resumeAt,
+    });
+  }
+  return outcome;
 }
 
 /**

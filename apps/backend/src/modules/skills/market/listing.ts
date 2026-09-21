@@ -7,6 +7,7 @@ import {
 } from "@sourceweft/db";
 import { ContentError } from "../../content/errors";
 import { setRegistryVisibility } from "../registry/review";
+import { recordSkillMarketEvent } from "./events";
 import { ensureListingProvenance } from "./provenance";
 import {
   classifySkillCategories,
@@ -102,7 +103,24 @@ export async function prepareSkillListing(skillId: string): Promise<void> {
         slugs.map((slug) => ({ skillId, categoryId: skillCategoryId(slug) })),
       )
       .onConflictDoNothing();
+    await tx
+      .update(skillDefinitions)
+      .set({ categoriesSetBy: "auto" })
+      .where(eq(skillDefinitions.id, skillId));
   });
+}
+
+/** Visibility and hold as they stand, for an event's `from`. */
+async function readListingState(skillId: string) {
+  const [row] = await db
+    .select({
+      visibility: skillDefinitions.visibility,
+      listingHoldBy: skillDefinitions.listingHoldBy,
+    })
+    .from(skillDefinitions)
+    .where(eq(skillDefinitions.id, skillId))
+    .limit(1);
+  return row ?? null;
 }
 
 /**
@@ -116,15 +134,42 @@ export async function prepareSkillListing(skillId: string): Promise<void> {
 export async function listSkillPublicly(input: {
   skillId: string;
   actorUserId: string;
+  /**
+   * An admin listing by hand also lifts any hold: left in place, it would be
+   * a lie about a skill that is public again.
+   */
+  releaseHold?: boolean;
 }) {
+  const before = await readListingState(input.skillId);
+  if (input.releaseHold) {
+    await releaseSkillListingHold({ skillId: input.skillId });
+  }
   // Its commit must be its repository's, not a fork's served under its name.
   await ensureListingProvenance(input.skillId);
   await prepareSkillListing(input.skillId);
-  return setRegistryVisibility({
+  const result = await setRegistryVisibility({
     skillId: input.skillId,
     visibility: "public",
     actorUserId: input.actorUserId,
   });
+  if (result) {
+    const automatic = input.actorUserId === SKILL_AUTO_LIST_ACTOR;
+    await recordSkillMarketEvent({
+      skillId: input.skillId,
+      actorKind: automatic ? "system" : "admin",
+      actorUserId: input.actorUserId,
+      action: automatic ? "listing.auto_listed" : "listing.listed",
+      detail: {
+        visibility: { from: before?.visibility ?? null, to: "public" },
+        ...(input.releaseHold
+          ? {
+              listingHoldBy: { from: before?.listingHoldBy ?? null, to: null },
+            }
+          : {}),
+      },
+    });
+  }
+  return result;
 }
 
 /**
@@ -136,6 +181,7 @@ export async function delistSkill(input: {
   skillId: string;
   actorUserId: string;
 }) {
+  const before = await readListingState(input.skillId);
   const result = await setRegistryVisibility({
     skillId: input.skillId,
     visibility: "restricted",
@@ -146,6 +192,16 @@ export async function delistSkill(input: {
     .update(skillDefinitions)
     .set({ listingHold: true, listingHoldBy: "admin", updatedAt: new Date() })
     .where(eq(skillDefinitions.id, input.skillId));
+  await recordSkillMarketEvent({
+    skillId: input.skillId,
+    actorKind: "admin",
+    actorUserId: input.actorUserId,
+    action: "listing.withdrawn",
+    detail: {
+      visibility: { from: before?.visibility ?? null, to: "restricted" },
+      listingHoldBy: { from: before?.listingHoldBy ?? null, to: "admin" },
+    },
+  });
   return { ...result, listingHold: true };
 }
 
@@ -227,6 +283,8 @@ export async function setOwnerSkillListing(input: {
   skillId: string;
   userId: string;
   listed: boolean;
+  /** Recorded on the event when a larger act did this (`claim.removed`). */
+  via?: string;
 }): Promise<OwnerSkillListing | null> {
   const [definition] = await db
     .select({
@@ -250,6 +308,22 @@ export async function setOwnerSkillListing(input: {
     return { skillId: input.skillId, listed: false, heldBy: "admin" };
   }
 
+  const ownerEvent = (action: string, to: "owner" | null) =>
+    recordSkillMarketEvent({
+      skillId: input.skillId,
+      actorKind: "owner",
+      actorUserId: input.userId,
+      action,
+      detail: {
+        visibility: {
+          from: definition.visibility,
+          to: to === "owner" ? "restricted" : definition.visibility,
+        },
+        listingHoldBy: { from: definition.listingHoldBy, to },
+        ...(input.via ? { via: input.via } : {}),
+      },
+    });
+
   if (!input.listed) {
     if (definition.visibility === "public") {
       await setRegistryVisibility({
@@ -262,10 +336,20 @@ export async function setOwnerSkillListing(input: {
       .update(skillDefinitions)
       .set({ listingHold: true, listingHoldBy: "owner", updatedAt: new Date() })
       .where(eq(skillDefinitions.id, input.skillId));
+    // Asking again for what already holds is not a decision worth a row.
+    if (
+      definition.listingHoldBy !== "owner" ||
+      definition.visibility === "public"
+    ) {
+      await ownerEvent("listing.owner_private", "owner");
+    }
     return { skillId: input.skillId, listed: false, heldBy: "owner" };
   }
 
   await releaseSkillListingHold({ skillId: input.skillId });
+  if (definition.listingHold) {
+    await ownerEvent("listing.owner_allowed", null);
+  }
   return {
     skillId: input.skillId,
     listed: definition.visibility === "public",
@@ -273,25 +357,57 @@ export async function setOwnerSkillListing(input: {
   };
 }
 
-/** `verified` is a market admin's call alone; nothing else writes it. */
-export async function setSkillVerified(input: {
-  skillId: string;
-  verified: boolean;
-}) {
-  const [row] = await db
-    .update(skillDefinitions)
-    .set({ verified: input.verified, updatedAt: new Date() })
+/** The value a column holds now, read inside the transaction about to change it. */
+async function lockDefinition(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  skillId: string,
+) {
+  const [row] = await tx
+    .select()
+    .from(skillDefinitions)
     .where(
       and(
-        eq(skillDefinitions.id, input.skillId),
+        eq(skillDefinitions.id, skillId),
         eq(skillDefinitions.sourceType, "registry_github"),
       ),
     )
-    .returning({
-      skillId: skillDefinitions.id,
-      verified: skillDefinitions.verified,
-    });
+    .limit(1)
+    .for("update");
   return row ?? null;
+}
+
+/**
+ * `verified` is a market admin's call alone; nothing else writes it (a new
+ * version clears it — `registry/repository.ts`).
+ */
+export async function setSkillVerified(input: {
+  skillId: string;
+  verified: boolean;
+  actorUserId: string;
+}) {
+  return db.transaction(async (tx) => {
+    const before = await lockDefinition(tx, input.skillId);
+    if (!before) return null;
+    const [row] = await tx
+      .update(skillDefinitions)
+      .set({ verified: input.verified, updatedAt: new Date() })
+      .where(eq(skillDefinitions.id, input.skillId))
+      .returning({
+        skillId: skillDefinitions.id,
+        verified: skillDefinitions.verified,
+      });
+    await recordSkillMarketEvent(
+      {
+        skillId: input.skillId,
+        actorKind: "admin",
+        actorUserId: input.actorUserId,
+        action: "verified.set",
+        detail: { verified: { from: before.verified, to: input.verified } },
+      },
+      tx,
+    );
+    return row ?? null;
+  });
 }
 
 /**
@@ -303,31 +419,48 @@ export async function setSkillVerified(input: {
 export async function setSkillFeatured(input: {
   skillId: string;
   featured: boolean;
+  actorUserId: string;
 }) {
-  const [row] = await db
-    .update(skillDefinitions)
-    .set({
-      featured: input.featured,
-      featuredSetBy: "admin",
-      updatedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(skillDefinitions.id, input.skillId),
-        eq(skillDefinitions.sourceType, "registry_github"),
-      ),
-    )
-    .returning({
-      skillId: skillDefinitions.id,
-      featured: skillDefinitions.featured,
-    });
-  return row ?? null;
+  return db.transaction(async (tx) => {
+    const before = await lockDefinition(tx, input.skillId);
+    if (!before) return null;
+    const [row] = await tx
+      .update(skillDefinitions)
+      .set({
+        featured: input.featured,
+        featuredSetBy: "admin",
+        updatedAt: new Date(),
+      })
+      .where(eq(skillDefinitions.id, input.skillId))
+      .returning({
+        skillId: skillDefinitions.id,
+        featured: skillDefinitions.featured,
+      });
+    await recordSkillMarketEvent(
+      {
+        skillId: input.skillId,
+        actorKind: "admin",
+        actorUserId: input.actorUserId,
+        action: "featured.set",
+        detail: {
+          featured: { from: before.featured, to: input.featured },
+          featuredSetBy: { from: before.featuredSetBy, to: "admin" },
+        },
+      },
+      tx,
+    );
+    return row ?? null;
+  });
 }
 
-/** Replaces a skill's categories with an admin's choice. */
+/**
+ * Replaces a skill's categories with an admin's choice, recorded as the
+ * admin's (`categories_set_by = 'admin'`) so a bulk re-inference leaves it.
+ */
 export async function setSkillCategories(input: {
   skillId: string;
   categorySlugs: string[];
+  actorUserId: string;
 }) {
   const slugs = [...new Set(input.categorySlugs)];
   const unknown = slugs.filter((slug) => !getSkillCategoryDefinition(slug));
@@ -343,23 +476,206 @@ export async function setSkillCategories(input: {
   await ensureSkillCategories();
   return db.transaction(async (tx) => {
     const [definition] = await tx
-      .select({ id: skillDefinitions.id })
+      .select({
+        id: skillDefinitions.id,
+        categoriesSetBy: skillDefinitions.categoriesSetBy,
+      })
       .from(skillDefinitions)
       .where(eq(skillDefinitions.id, input.skillId))
       .limit(1)
       .for("update");
     if (!definition) return null;
-    await tx
-      .delete(skillDefinitionCategories)
-      .where(eq(skillDefinitionCategories.skillId, input.skillId));
-    await tx.insert(skillDefinitionCategories).values(
-      slugs.map((slug) => ({
+    const from = await categorySlugsIn(tx, input.skillId);
+    await replaceCategories(tx, input.skillId, slugs, "admin");
+    await recordSkillMarketEvent(
+      {
         skillId: input.skillId,
-        categoryId: skillCategoryId(slug),
-      })),
+        actorKind: "admin",
+        actorUserId: input.actorUserId,
+        action: "categories.set",
+        detail: {
+          categorySlugs: { from, to: slugs },
+          categoriesSetBy: { from: definition.categoriesSetBy, to: "admin" },
+        },
+      },
+      tx,
     );
     return { skillId: input.skillId, categorySlugs: slugs };
   });
+}
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+async function categorySlugsIn(tx: Tx, skillId: string): Promise<string[]> {
+  const rows = await tx
+    .select({ slug: skillCategories.slug })
+    .from(skillDefinitionCategories)
+    .innerJoin(
+      skillCategories,
+      eq(skillCategories.id, skillDefinitionCategories.categoryId),
+    )
+    .where(eq(skillDefinitionCategories.skillId, skillId))
+    .orderBy(skillCategories.sortOrder);
+  return rows.map((row) => row.slug);
+}
+
+async function replaceCategories(
+  tx: Tx,
+  skillId: string,
+  slugs: string[],
+  setBy: "auto" | "admin",
+) {
+  await tx
+    .delete(skillDefinitionCategories)
+    .where(eq(skillDefinitionCategories.skillId, skillId));
+  await tx
+    .insert(skillDefinitionCategories)
+    .values(
+      slugs.map((slug) => ({ skillId, categoryId: skillCategoryId(slug) })),
+    );
+  await tx
+    .update(skillDefinitions)
+    .set({ categoriesSetBy: setBy, updatedAt: new Date() })
+    .where(eq(skillDefinitions.id, skillId));
+}
+
+const sameSlugs = (a: string[], b: string[]) =>
+  a.length === b.length && [...a].sort().join() === [...b].sort().join();
+
+/**
+ * Files one skill under the categories inferred from its text now, even where
+ * an admin had picked them — asking for it is the admin's act; the choice is
+ * then the classifier's again (`auto`). null for anything that is not a
+ * registry skill.
+ */
+export async function reinferSkillCategories(input: {
+  skillId: string;
+  actorUserId: string;
+}): Promise<{ skillId: string; categorySlugs: string[] } | null> {
+  await ensureSkillCategories();
+  return db.transaction(async (tx) => {
+    const definition = await lockDefinition(tx, input.skillId);
+    if (!definition) return null;
+    const from = await categorySlugsIn(tx, input.skillId);
+    const slugs = classifySkillCategories({
+      name: definition.displayName,
+      description: definition.description,
+    });
+    await replaceCategories(tx, input.skillId, slugs, "auto");
+    await recordSkillMarketEvent(
+      {
+        skillId: input.skillId,
+        actorKind: "admin",
+        actorUserId: input.actorUserId,
+        action: "categories.reinferred",
+        detail: {
+          categorySlugs: { from, to: slugs },
+          categoriesSetBy: { from: definition.categoriesSetBy, to: "auto" },
+        },
+      },
+      tx,
+    );
+    return { skillId: input.skillId, categorySlugs: slugs };
+  });
+}
+
+/** Skills re-inferred per transaction in the bulk pass. */
+export const REINFER_CATEGORIES_BATCH_SIZE = 200;
+
+/**
+ * Files every active community skill already filed under inferred categories
+ * (never one an admin picked) under what the classifier says now — after the
+ * taxonomy or the classifier changed. In batches, each its own transaction,
+ * keyed by id; a skill an admin corrects meanwhile is skipped (re-checked
+ * under the row lock). Each skill whose categories changed gets an event,
+ * and the run as a whole one more.
+ */
+export async function reinferAllSkillCategories(input: {
+  actorUserId: string;
+  batchSize?: number;
+  /** Narrows the pass to these skills; the admin route passes nothing. */
+  onlySkillIds?: string[];
+}): Promise<{ considered: number; changed: number }> {
+  await ensureSkillCategories();
+  const batchSize = input.batchSize ?? REINFER_CATEGORIES_BATCH_SIZE;
+  const tally = { considered: 0, changed: 0 };
+  let afterId: string | null = null;
+  for (;;) {
+    const ids: string[] = (
+      await db
+        .select({ id: skillDefinitions.id })
+        .from(skillDefinitions)
+        .where(
+          and(
+            eq(skillDefinitions.sourceType, "registry_github"),
+            eq(skillDefinitions.status, "active"),
+            sql`${skillDefinitions.categoriesSetBy} is distinct from 'admin'`,
+            // Filed already: a skill gets its first categories when it is
+            // first listed (`prepareSkillListing`), not from this pass.
+            sql`exists (select 1 from ${skillDefinitionCategories} where ${skillDefinitionCategories.skillId} = ${skillDefinitions.id})`,
+            afterId ? sql`${skillDefinitions.id} > ${afterId}` : undefined,
+            input.onlySkillIds
+              ? inArray(skillDefinitions.id, input.onlySkillIds)
+              : undefined,
+          ),
+        )
+        .orderBy(skillDefinitions.id)
+        .limit(batchSize)
+    ).map((row) => row.id);
+    if (ids.length === 0) break;
+    afterId = ids.at(-1)!;
+    await db.transaction(async (tx) => {
+      const rows = await tx
+        .select()
+        .from(skillDefinitions)
+        .where(
+          and(
+            inArray(skillDefinitions.id, ids),
+            sql`${skillDefinitions.categoriesSetBy} is distinct from 'admin'`,
+          ),
+        )
+        .orderBy(skillDefinitions.id)
+        .for("update");
+      for (const definition of rows) {
+        tally.considered += 1;
+        const from = await categorySlugsIn(tx, definition.id);
+        const slugs = classifySkillCategories({
+          name: definition.displayName,
+          description: definition.description,
+        });
+        if (sameSlugs(from, slugs)) {
+          // Filed before `categories_set_by` existed: now known to be inferred.
+          if (definition.categoriesSetBy !== "auto") {
+            await tx
+              .update(skillDefinitions)
+              .set({ categoriesSetBy: "auto" })
+              .where(eq(skillDefinitions.id, definition.id));
+          }
+          continue;
+        }
+        await replaceCategories(tx, definition.id, slugs, "auto");
+        tally.changed += 1;
+        await recordSkillMarketEvent(
+          {
+            skillId: definition.id,
+            actorKind: "admin",
+            actorUserId: input.actorUserId,
+            action: "categories.reinferred",
+            detail: { categorySlugs: { from, to: slugs }, bulk: true },
+          },
+          tx,
+        );
+      }
+    });
+    if (ids.length < batchSize) break;
+  }
+  await recordSkillMarketEvent({
+    actorKind: "admin",
+    actorUserId: input.actorUserId,
+    action: "categories.reinferred",
+    detail: { bulk: true, ...tally },
+  });
+  return tally;
 }
 
 /** Category slugs per skill, for the catalog rows being rendered. */

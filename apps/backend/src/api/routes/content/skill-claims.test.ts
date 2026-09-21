@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   overview: vi.fn(),
   start: vi.fn(),
   remove: vi.fn(),
+  restore: vi.fn(),
 }));
 
 vi.mock("../../middleware/auth-session", () => ({
@@ -23,6 +24,7 @@ vi.mock("../../../modules/skills/market/claims", () => ({
   getSkillClaimsOverview: mocks.overview,
   startSkillClaim: mocks.start,
   removeClaimedRepoFromMarket: mocks.remove,
+  restoreClaimedRepoToMarket: mocks.restore,
 }));
 
 import { registerSkillClaimRoutes } from "./skill-claims";
@@ -156,4 +158,26 @@ test("there is no verify route any more; remove acts on the caller's claim", asy
     { userId: "user_1", claimId: "claim_1" },
   ]);
   assert.deepEqual(await removed.json(), { repo: "ada/skills", skillCount: 2 });
+});
+
+test("restore acts on the caller's claim and answers what it released", async () => {
+  mocks.session.mockResolvedValue(null);
+  assert.equal((await post(`${base}/claim_1/restore-to-market`)).status, 401);
+  assert.equal(mocks.restore.mock.calls.length, 0);
+
+  mocks.session.mockResolvedValue({ user: { id: "user_1" } });
+  mocks.restore.mockResolvedValue({ repo: "ada/skills", skillCount: 2 });
+  const restored = await post(`${base}/claim_1/restore-to-market`);
+  assert.equal(restored.status, 200);
+  assert.deepEqual(mocks.restore.mock.calls[0], [
+    { userId: "user_1", claimId: "claim_1" },
+  ]);
+  assert.deepEqual(await restored.json(), { repo: "ada/skills", skillCount: 2 });
+
+  mocks.restore.mockRejectedValueOnce(
+    new ContentError(409, "SKILL_CLAIM_NOT_VERIFIED", "not verified"),
+  );
+  const refused = await post(`${base}/claim_1/restore-to-market`);
+  assert.equal(refused.status, 409);
+  assert.match(await refused.text(), /SKILL_CLAIM_NOT_VERIFIED/);
 });

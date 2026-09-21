@@ -17,12 +17,15 @@ import {
 import {
   delistSkill,
   listSkillPublicly,
-  releaseSkillListingHold,
   setSkillCategories,
   setSkillFeatured,
   setSkillVerified,
 } from "../../modules/skills/market/listing";
 import { listSkillListingQueue } from "../../modules/skills/market/auto-list";
+import {
+  getVersionForAudit,
+  recordVersionModeration,
+} from "../../modules/skills/market/events";
 import { getSkillMarketStanding } from "../../modules/skills/market/standing";
 import {
   grantSkillClaim,
@@ -109,14 +112,23 @@ export function registerSkillRegistryAdminRoutes(app: Hono) {
         .strict()
         .safeParse(await c.req.json().catch(() => { throw ApiError.invalidJson(); }));
       if (!parsed.success) throw ApiError.validation();
+      const versionId = decodeURIComponent(c.req.param("versionId"));
+      const before = await getVersionForAudit(versionId);
       const result = await setRegistrySkillVersionStatus(
-        decodeURIComponent(c.req.param("versionId")),
+        versionId,
         "published",
         { ...parsed.data, actorUserId: getSessionUserId(session) },
       );
-      if (!result) {
+      if (!result || !before) {
         throw ApiError.notFound("No draft registry version awaiting review");
       }
+      await recordVersionModeration({
+        skillVersionId: versionId,
+        before,
+        target: "published",
+        actorUserId: getSessionUserId(session),
+        ...parsed.data,
+      });
       logger.info("Registry version moderated", { actorUserId: getSessionUserId(session), ...result });
       return ApiResponse.success(c, result);
     },
@@ -134,14 +146,24 @@ export function registerSkillRegistryAdminRoutes(app: Hono) {
         .strict()
         .safeParse(await c.req.json().catch(() => { throw ApiError.invalidJson(); }));
       if (!parsed.success) throw ApiError.validation();
+      const versionId = decodeURIComponent(c.req.param("versionId"));
+      const before = await getVersionForAudit(versionId);
       const result = await setRegistrySkillVersionStatus(
-        decodeURIComponent(c.req.param("versionId")),
+        versionId,
         "deprecated",
         { reason: parsed.data.reason, actorUserId: getSessionUserId(session) },
       );
-      if (!result) {
+      if (!result || !before) {
         throw ApiError.notFound("No registry version to deprecate");
       }
+      // A draft turned down, or a published version revoked.
+      await recordVersionModeration({
+        skillVersionId: versionId,
+        before,
+        target: "deprecated",
+        actorUserId: getSessionUserId(session),
+        reason: parsed.data.reason,
+      });
       logger.info("Registry version moderated", { actorUserId: getSessionUserId(session), ...result });
       return ApiResponse.success(c, result);
     },
@@ -174,12 +196,12 @@ export function registerSkillRegistryAdminRoutes(app: Hono) {
   }
 
   // Listing and withdrawing are the same two acts whichever route asks for
-  // them. Listing by hand is also the admin lifting their own hold: left in
-  // place, the hold would be a lie about a skill that is public again.
+  // them. Listing by hand is also the admin lifting any hold (`releaseHold`).
   async function listOnMarket(input: { skillId: string; actorUserId: string }) {
     await requireStanding(input.skillId);
-    await releaseSkillListingHold({ skillId: input.skillId });
-    if (!(await listSkillPublicly(input))) throw ApiError.notFound();
+    if (!(await listSkillPublicly({ ...input, releaseHold: true }))) {
+      throw ApiError.notFound();
+    }
     logger.info("Registry skill listed on the market", input);
     return requireStanding(input.skillId);
   }
@@ -229,13 +251,11 @@ export function registerSkillRegistryAdminRoutes(app: Hono) {
     const input = {
       skillId: c.req.param("skillId"),
       verified: parsed.data.verified,
+      actorUserId: getSessionUserId(session),
     };
     await requireStanding(input.skillId);
     if (!(await setSkillVerified(input))) throw ApiError.notFound();
-    logger.info("Registry skill verified grant changed", {
-      actorUserId: getSessionUserId(session),
-      ...input,
-    });
+    logger.info("Registry skill verified grant changed", input);
     return ApiResponse.success(c, await requireStanding(input.skillId));
   });
 
@@ -251,13 +271,11 @@ export function registerSkillRegistryAdminRoutes(app: Hono) {
     const input = {
       skillId: c.req.param("skillId"),
       featured: parsed.data.featured,
+      actorUserId: getSessionUserId(session),
     };
     await requireStanding(input.skillId);
     if (!(await setSkillFeatured(input))) throw ApiError.notFound();
-    logger.info("Registry skill featured changed", {
-      actorUserId: getSessionUserId(session),
-      ...input,
-    });
+    logger.info("Registry skill featured changed", input);
     return ApiResponse.success(c, await requireStanding(input.skillId));
   });
 
@@ -270,13 +288,11 @@ export function registerSkillRegistryAdminRoutes(app: Hono) {
     const input = {
       skillId: c.req.param("skillId"),
       categorySlugs: parsed.data.categorySlugs,
+      actorUserId: getSessionUserId(session),
     };
     await requireStanding(input.skillId);
     if (!(await setSkillCategories(input))) throw ApiError.notFound();
-    logger.info("Registry skill categories changed", {
-      actorUserId: getSessionUserId(session),
-      ...input,
-    });
+    logger.info("Registry skill categories changed", input);
     return ApiResponse.success(c, await requireStanding(input.skillId));
   });
 
@@ -294,7 +310,10 @@ export function registerSkillRegistryAdminRoutes(app: Hono) {
         parsed.error.flatten() as Record<string, unknown>,
       );
     }
-    const result = await grantSkillClaim(parsed.data);
+    const result = await grantSkillClaim({
+      ...parsed.data,
+      actorUserId: getSessionUserId(session),
+    });
     logger.info("Skill repository claim granted by an admin", {
       actorUserId: getSessionUserId(session),
       claimId: result.claim.id,

@@ -4,6 +4,7 @@ import {
   parseSkillClaimRepo,
   type GrantSkillClaimResponse,
   type RemoveSkillRepoFromMarketResponse,
+  type RestoreSkillRepoToMarketResponse,
   type RevokeSkillClaimResponse,
   type SkillClaimAccountMethod,
   type SkillClaimRepository,
@@ -23,6 +24,7 @@ import {
   githubDownloadHeaders,
   githubFetch,
 } from "../../market/parser/github";
+import { recordSkillMarketEvent } from "./events";
 import { setOwnerSkillListing } from "./listing";
 
 /**
@@ -527,6 +529,8 @@ async function recordVerifiedClaim(input: {
   repo: ClaimRepo;
   userId: string;
   method: "github_account" | "admin_grant";
+  /** The admin granting it; the claimant themselves otherwise. */
+  actorUserId?: string | null;
 }): Promise<DecidedClaimRow> {
   const now = new Date();
   try {
@@ -546,10 +550,27 @@ async function recordVerifiedClaim(input: {
         .returning();
       // The previous importer loses listing control; what they (and everyone
       // else) installed stays installed.
-      await tx
+      const moved = await tx
         .update(skillDefinitions)
         .set({ ownerUserId: input.userId, claimedAt: now, updatedAt: now })
-        .where(activeRegistrySkillsOf(input.repo));
+        .where(activeRegistrySkillsOf(input.repo))
+        .returning({ id: skillDefinitions.id });
+      const byAdmin = input.method === "admin_grant";
+      await recordSkillMarketEvent(
+        {
+          repo: input.repo,
+          actorKind: byAdmin ? "admin" : "owner",
+          actorUserId: byAdmin ? (input.actorUserId ?? null) : input.userId,
+          action: "claim.granted",
+          detail: {
+            claimId: row!.id,
+            method: input.method,
+            userId: input.userId,
+            skillCount: moved.length,
+          },
+        },
+        tx,
+      );
       return { ...row!, status: "verified" as const };
     });
   } catch (error) {
@@ -623,6 +644,7 @@ async function findUserIdByEmail(email: string): Promise<string | null> {
 export async function grantSkillClaim(input: {
   repo: string;
   email: string;
+  actorUserId?: string;
 }): Promise<GrantSkillClaimResponse> {
   const repo = requireClaimRepo(input.repo);
   await requireRepoWithSkills(repo);
@@ -639,6 +661,7 @@ export async function grantSkillClaim(input: {
     repo,
     userId,
     method: "admin_grant",
+    actorUserId: input.actorUserId ?? null,
   });
   return { claim: toClaim(row), userId };
 }
@@ -703,17 +726,125 @@ export async function removeClaimedRepoFromMarket(input: {
       skillId: skill.id,
       userId: input.userId,
       listed: false,
+      via: "claim.removed",
     });
     if (result) removed += 1;
   }
   // Recorded on the claim, not on the skills: the repository as a whole is
   // off SourceWeft, so a skill it ships later is refused at import too
-  // (`isSkillRepositoryRemoved`). An admin revoking the claim lifts it.
+  // (`isSkillRepositoryRemoved`). An admin revoking the claim, or the author
+  // restoring it (`restoreClaimedRepoToMarket`), lifts it.
   await db
     .update(skillRepoClaims)
     .set({ removedAt: new Date(), removedBy: input.userId })
     .where(eq(skillRepoClaims.id, claim.id));
+  await recordSkillMarketEvent({
+    repo,
+    actorKind: "owner",
+    actorUserId: input.userId,
+    action: "claim.removed",
+    detail: { claimId: claim.id, skillCount: removed },
+  });
   return { repo: repoLabel(repo), skillCount: removed };
+}
+
+/**
+ * Lifts the holds an author's own decisions put on a repository's skills —
+ * never an admin's. Only the skills the author owns: those are the ones the
+ * author's switch could have held.
+ */
+async function liftOwnerHolds(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  input: { repo: ClaimRepo; userId: string; now: Date },
+): Promise<string[]> {
+  const rows = await tx
+    .update(skillDefinitions)
+    .set({ listingHold: false, listingHoldBy: null, updatedAt: input.now })
+    .where(
+      and(
+        eq(skillDefinitions.sourceType, "registry_github"),
+        eq(skillDefinitions.repoOwner, input.repo.owner),
+        eq(skillDefinitions.repoName, input.repo.name),
+        eq(skillDefinitions.ownerUserId, input.userId),
+        eq(skillDefinitions.listingHoldBy, "owner"),
+      ),
+    )
+    .returning({ id: skillDefinitions.id });
+  return rows.map((row) => row.id);
+}
+
+/**
+ * "Restore to SourceWeft": the author undoes `removeClaimedRepoFromMarket`.
+ * The repository may be imported again, and the holds the author put on its
+ * skills are lifted. Nothing is listed here: the platform's rules decide that
+ * on the next upkeep pass (clean scan, confirmed provenance) exactly as for
+ * any other skill, and a market admin's hold stays where it is.
+ *
+ * Lifts every hold the author holds on the repository's skills, including
+ * one set by hand before the removal: holds do not record why they were set,
+ * and "restore" reads as "put it back as it would be without me".
+ * Idempotent: a repository that is not removed is left as it is (0 lifted).
+ */
+export async function restoreClaimedRepoToMarket(input: {
+  userId: string;
+  claimId: string;
+}): Promise<RestoreSkillRepoToMarketResponse> {
+  const claim = await requireUserClaim(input);
+  if (claim.status !== "verified") {
+    throw new ContentError(
+      409,
+      "SKILL_CLAIM_NOT_VERIFIED",
+      "Only a verified claim can restore the repository's skills",
+    );
+  }
+  const repo = { owner: claim.repoOwner, name: claim.repoName };
+  return db.transaction(async (tx) => {
+    const now = new Date();
+    const [locked] = await tx
+      .select({ removedAt: skillRepoClaims.removedAt })
+      .from(skillRepoClaims)
+      .where(
+        and(
+          eq(skillRepoClaims.id, claim.id),
+          eq(skillRepoClaims.status, "verified"),
+        ),
+      )
+      .limit(1)
+      .for("update");
+    // Revoked between the read above and this lock.
+    if (!locked) {
+      throw new ContentError(
+        409,
+        "SKILL_CLAIM_NOT_VERIFIED",
+        "Only a verified claim can restore the repository's skills",
+      );
+    }
+    // Not removed: nothing to undo, and the author's per-skill switches are
+    // not this action's to touch.
+    if (!locked.removedAt) {
+      return { repo: repoLabel(repo), skillCount: 0 };
+    }
+    await tx
+      .update(skillRepoClaims)
+      .set({ removedAt: null, removedBy: null })
+      .where(eq(skillRepoClaims.id, claim.id));
+    const lifted = await liftOwnerHolds(tx, {
+      repo,
+      userId: input.userId,
+      now,
+    });
+    await recordSkillMarketEvent(
+      {
+        repo,
+        actorKind: "owner",
+        actorUserId: input.userId,
+        action: "claim.restored",
+        detail: { claimId: claim.id, skillCount: lifted.length },
+      },
+      tx,
+    );
+    return { repo: repoLabel(repo), skillCount: lifted.length };
+  });
 }
 
 /**
@@ -748,7 +879,17 @@ export async function revokeSkillClaim(input: {
       .update(skillRepoClaims)
       .set({ status: "revoked", revokedAt: now, revokedBy: input.actorUserId })
       .where(eq(skillRepoClaims.id, claim.id));
+    let liftedHolds: string[] = [];
     if (claim.status === "verified") {
+      // Before ownership moves back: the author's holds are the ones on the
+      // skills the author owns. Their say ends with the claim, so their
+      // "keep it private" does too — the platform's rules decide again. An
+      // admin's hold stays.
+      liftedHolds = await liftOwnerHolds(tx, {
+        repo,
+        userId: claim.userId,
+        now,
+      });
       await tx
         .update(skillDefinitions)
         .set({
@@ -770,6 +911,22 @@ export async function revokeSkillClaim(input: {
           ),
         );
     }
+    await recordSkillMarketEvent(
+      {
+        repo,
+        actorKind: "admin",
+        actorUserId: input.actorUserId,
+        action: "claim.revoked",
+        detail: {
+          claimId: claim.id,
+          userId: claim.userId,
+          from: claim.status,
+          wasRemoved: claim.removedAt !== null,
+          holdsLifted: liftedHolds.length,
+        },
+      },
+      tx,
+    );
     return answer;
   });
 }

@@ -1,5 +1,6 @@
 import { isContentError } from "../../../content/errors";
 import { GitHubArchiveError } from "../../../market/parser/github-zip";
+import { GitHubRateLimitedError } from "../../../market/parser/github";
 import { SkillParseError } from "../../frontmatter";
 import { RegistrySubmissionError } from "../errors";
 import { mapRegistryArchiveError } from "../read";
@@ -13,6 +14,47 @@ import { mapRegistryArchiveError } from "../read";
 export const INGEST_DEADLINE_CODE = "REGISTRY_SUBMISSION_DEADLINE";
 /** Fallback for an error that carries no code of its own. */
 export const INGEST_FAILED_CODE = "REGISTRY_SUBMISSION_FAILED";
+/**
+ * GitHub's rate limit is spent. While the submission waits for it to lift the
+ * row is `queued` with this code and `resumeAt`; past the longest wait it is
+ * `failed` with it.
+ */
+export const INGEST_RATE_LIMITED_CODE = "GITHUB_RATE_LIMITED";
+
+/** What a submission row records about a failure (or a pause). */
+export type IngestErrorDescription = {
+  code: string;
+  message: string;
+  /** Rate limited: when the import runs again, ISO 8601. */
+  resumeAt?: string;
+};
+
+/**
+ * Past this long after the submission was made, a rate limit fails it instead
+ * of pushing it back once more: someone waiting a day for an import has
+ * stopped waiting, and a token that never recovers must not keep a row in
+ * flight (and the submitter's in-flight slot taken) forever.
+ */
+export const INGEST_RATE_LIMIT_MAX_WAIT_MS = 24 * 60 * 60_000;
+
+/**
+ * A little after GitHub's reset: its clock and ours differ by a second or two,
+ * and the first request after a reset should not be the one that finds it
+ * still in force.
+ */
+const RATE_LIMIT_RESUME_MARGIN_MS = 15_000;
+
+/** When a rate-limited submission runs again. */
+export function ingestResumeAt(error: GitHubRateLimitedError): Date {
+  return new Date(error.resetAt.getTime() + RATE_LIMIT_RESUME_MARGIN_MS);
+}
+
+/** Whether a submission made at `createdAt` may still wait until `resumeAt`. */
+export function mayWaitForRateLimit(createdAt: Date, resumeAt: Date): boolean {
+  return (
+    resumeAt.getTime() - createdAt.getTime() <= INGEST_RATE_LIMIT_MAX_WAIT_MS
+  );
+}
 
 /**
  * This run no longer owns the submission: its claim was taken over by a
@@ -42,6 +84,11 @@ export function isTransientIngestError(error: unknown): boolean {
   if (error instanceof IngestSupersededError) {
     return false;
   }
+  // Not transient in the queue's sense: retrying in seconds would only meet
+  // the same limit. The pipeline reschedules it for when the limit lifts.
+  if (error instanceof GitHubRateLimitedError) {
+    return false;
+  }
   if (error instanceof GitHubArchiveError) {
     return (
       error.code === "ARCHIVE_TIMEOUT" ||
@@ -63,10 +110,15 @@ export function isTransientIngestError(error: unknown): boolean {
 }
 
 /** The `{ code, message }` a failed stage / submission records. */
-export function describeIngestError(error: unknown): {
-  code: string;
-  message: string;
-} {
+export function describeIngestError(error: unknown): IngestErrorDescription {
+  if (error instanceof GitHubRateLimitedError) {
+    const resumeAt = ingestResumeAt(error);
+    return {
+      code: INGEST_RATE_LIMITED_CODE,
+      message: `GitHub's rate limit was reached; the import resumes at about ${resumeAt.toISOString().slice(11, 16)} UTC`,
+      resumeAt: resumeAt.toISOString(),
+    };
+  }
   const mapped = mapRegistryArchiveError(error);
   if (
     mapped instanceof RegistrySubmissionError ||

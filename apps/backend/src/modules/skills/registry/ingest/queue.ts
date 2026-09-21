@@ -30,6 +30,10 @@ export async function enqueueSkillIngestJob(
     SkillSubmissionRow,
     "id" | "teamId" | "workspaceId" | "attempts"
   >,
+  options: {
+    /** Run no earlier than this — a submission waiting out a rate limit. */
+    notBefore?: Date;
+  } = {},
 ) {
   const payload: SkillRegistryIngestJobPayload = {
     submissionId: submission.id,
@@ -45,6 +49,9 @@ export async function enqueueSkillIngestJob(
       backoff: { type: "exponential", delay: SKILL_INGEST_BACKOFF_MS },
       removeOnComplete: 100,
       removeOnFail: 100,
+      ...(options.notBefore
+        ? { delay: Math.max(0, options.notBefore.getTime() - Date.now()) }
+        : {}),
     },
     { queue: skillIngestQueue, queueName: config.skillIngestQueueName },
   );

@@ -128,6 +128,20 @@ export type RemoveSkillRepoFromMarketResponse = z.infer<
   typeof removeSkillRepoFromMarketResponseSchema
 >;
 
+// POST /skills/claims/:claimId/restore-to-market — undoes a removal: the
+// repository may be imported again, and its skills the author held there are
+// released. Nothing is listed on the spot; the platform's rules list them
+// again on the next upkeep pass (clean scan, confirmed provenance), and a
+// market admin's hold stays.
+export const restoreSkillRepoToMarketResponseSchema = z.object({
+  repo: z.string(),
+  // Skills whose author-held listing hold was lifted.
+  skillCount: z.number().int().nonnegative(),
+});
+export type RestoreSkillRepoToMarketResponse = z.infer<
+  typeof restoreSkillRepoToMarketResponseSchema
+>;
+
 /** The verified claim behind a skill, as the market admin sees it. */
 export const skillMarketClaimSchema = z.object({
   claimId: z.string(),

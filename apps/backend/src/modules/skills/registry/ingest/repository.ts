@@ -21,7 +21,12 @@ import {
  */
 
 export type SkillSubmissionRow = typeof skillRegistrySubmissions.$inferSelect;
-export type SkillSubmissionError = { code: string; message: string };
+export type SkillSubmissionError = {
+  code: string;
+  message: string;
+  /** `GITHUB_RATE_LIMITED`: when the import runs again, ISO 8601. */
+  resumeAt?: string;
+};
 
 const IN_FLIGHT = ["queued", "running"] as const;
 

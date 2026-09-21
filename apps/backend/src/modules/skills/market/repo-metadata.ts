@@ -4,6 +4,9 @@ import { logger } from "../../../shared/logger";
 import {
   githubDownloadHeaders,
   githubFetch,
+  githubRateLimitResetAt,
+  GitHubRateLimitedError,
+  isGitHubRateLimitResponse,
 } from "../../market/parser/github";
 
 /**
@@ -72,9 +75,28 @@ export async function refreshSkillRepositoryMetadata(
   notModified: number;
   missing: number;
   failed: number;
+  /**
+   * Set when GitHub's rate limit stopped the pass: when it lifts. The
+   * repositories not reached keep their place (oldest first) for a later pass.
+   */
+  rateLimitedUntil?: string;
 }> {
   const deps = options.deps ?? defaultDeps;
-  const result = { refreshed: 0, notModified: 0, missing: 0, failed: 0 };
+  const result: Awaited<ReturnType<typeof refreshSkillRepositoryMetadata>> = {
+    refreshed: 0,
+    notModified: 0,
+    missing: 0,
+    failed: 0,
+  };
+  // Every request after a rate-limited one would fail the same way: the pass
+  // stops, logged once, and the rest of the upkeep carries on.
+  const stopForRateLimit = (resetAt: Date) => {
+    result.rateLimitedUntil = resetAt.toISOString();
+    logger.warn(
+      "Skill repository metadata refresh stopped: GitHub rate limit reached",
+      { resetAt: result.rateLimitedUntil, refreshed: result.refreshed },
+    );
+  };
 
   // A repository a skill was indexed from since the last pass gets its row.
   await db.execute(sql`
@@ -115,6 +137,10 @@ export async function refreshSkillRepositoryMetadata(
         },
       );
     } catch (error) {
+      if (error instanceof GitHubRateLimitedError) {
+        stopForRateLimit(error.resetAt);
+        break;
+      }
       // Unreachable or too slow: tried again on a later pass, after the rest.
       result.failed += 1;
       logger.warn("Skill repository metadata fetch failed", {
@@ -135,11 +161,9 @@ export async function refreshSkillRepositoryMetadata(
         .where(key);
       continue;
     }
-    if (response.status === 403 || response.status === 429) {
-      // Out of rate limit (githubFetch already waited what it could). Every
-      // request after this one would fail the same way; the rest of the batch
-      // keeps its place for the next pass.
-      result.failed += 1;
+    if (isGitHubRateLimitResponse(response)) {
+      // `githubFetch` raises this itself; a fetch handed in may answer it.
+      stopForRateLimit(githubRateLimitResetAt(response));
       break;
     }
     if (!response.ok) {

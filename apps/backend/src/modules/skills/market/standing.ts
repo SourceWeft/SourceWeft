@@ -42,6 +42,9 @@ export async function getSkillMarketStanding(
     featured: definition.featured,
     featuredSetBy: definition.featuredSetBy,
     categorySlugs,
+    categoriesSetBy: definition.categoriesSetBy,
+    ratingCount: definition.ratingCount,
+    ratingAvg: definition.ratingAvg,
     installCount: definition.installCount,
     listedAt: definition.listedAt?.toISOString() ?? null,
     // The author's verified claim on the skill's repository, which an admin

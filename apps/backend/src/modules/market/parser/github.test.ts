@@ -3,7 +3,9 @@ import { afterEach, describe, test, vi } from "vitest";
 import {
   GITHUB_REQUEST_TIMEOUTS,
   GitHubArchiveError,
+  GitHubRateLimitedError,
   githubFetch,
+  resolveDefaultBranch,
   normalizeGitHubSource,
   assertCommitOnDefaultBranch,
   resolveCommit,
@@ -76,6 +78,89 @@ describe("githubFetch deadline", () => {
         !(error instanceof GitHubArchiveError) &&
         error instanceof Error &&
         error.message === "caller went away",
+    );
+  });
+});
+
+describe("githubFetch rate limits", () => {
+  const limited = (headers: Record<string, string>, status = 403) =>
+    new Response(JSON.stringify({ message: "API rate limit exceeded" }), {
+      status,
+      headers,
+    });
+
+  test("a spent primary limit that resets later is raised with its reset time, not waited on", async () => {
+    const reset = Math.floor(Date.now() / 1000) + 3600;
+    const fetchMock = vi.fn(async () =>
+      limited({
+        "x-ratelimit-remaining": "0",
+        "x-ratelimit-reset": String(reset),
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const started = Date.now();
+    await assert.rejects(
+      githubFetch("https://api.github.com/x", {}),
+      (error: unknown) =>
+        error instanceof GitHubRateLimitedError &&
+        // A GitHubArchiveError too, so resolvers pass it through untouched.
+        error instanceof GitHubArchiveError &&
+        error.code === "ARCHIVE_RATE_LIMITED" &&
+        error.resetAt.getTime() === reset * 1000,
+    );
+    assert.equal(fetchMock.mock.calls.length, 1);
+    assert.ok(Date.now() - started < 1000);
+  });
+
+  test("a secondary limit (429 + retry-after) past the budget is raised with now + retry-after", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => limited({ "retry-after": "3600" }, 429)),
+    );
+    const before = Date.now();
+    await assert.rejects(
+      githubFetch("https://api.github.com/x", {}),
+      (error: unknown) =>
+        error instanceof GitHubRateLimitedError &&
+        Math.abs(error.resetAt.getTime() - (before + 3_600_000)) < 5_000,
+    );
+  });
+
+  test("a limit that has already lifted is asked again at once", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(limited({ "retry-after": "0" }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await githubFetch("https://api.github.com/x", {});
+    assert.equal(response.status, 200);
+    assert.equal(fetchMock.mock.calls.length, 2);
+  });
+
+  test("a plain 403 is a real refusal: answered, not retried or raised", async () => {
+    const fetchMock = vi.fn(async () =>
+      jsonResponse({ message: "Forbidden" }, 403),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await githubFetch("https://api.github.com/x", {});
+    assert.equal(response.status, 403);
+    assert.equal(fetchMock.mock.calls.length, 1);
+  });
+
+  test("resolvers carry the rate limit up as it is", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        limited({
+          "x-ratelimit-remaining": "0",
+          "x-ratelimit-reset": String(Math.floor(Date.now() / 1000) + 3600),
+        }),
+      ),
+    );
+    await assert.rejects(resolveDefaultBranch(source), GitHubRateLimitedError);
+    await assert.rejects(
+      resolveCommit(source, "f".repeat(40)),
+      GitHubRateLimitedError,
     );
   });
 });

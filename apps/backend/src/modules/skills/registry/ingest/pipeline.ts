@@ -1,15 +1,19 @@
 import type { SkillSubmissionStages } from "@sourceweft/db";
 import { logger } from "../../../../shared/logger";
+import { GitHubRateLimitedError } from "../../../market/parser/github";
 import { RegistrySubmissionError } from "../errors";
 import {
   describeIngestError,
   INGEST_DEADLINE_CODE,
+  ingestResumeAt,
   IngestSupersededError,
   isTransientIngestError,
+  mayWaitForRateLimit,
 } from "./errors";
 import {
   claimSubmission,
   writeSubmissionProgress,
+  type SkillSubmissionRow,
   type SubmissionFence,
   type SubmissionProgressPatch,
 } from "./repository";
@@ -31,7 +35,20 @@ import {
 export type IngestRunOutcome =
   | { status: "succeeded"; submissionId: string; skills: number }
   /** Nothing to run: the row is gone or already finished. */
-  | { status: "skipped"; submissionId: string };
+  | { status: "skipped"; submissionId: string }
+  /**
+   * GitHub's rate limit is spent. The row is back in `queued`, saying so and
+   * when it resumes; the caller schedules the run for `resumeAt`.
+   */
+  | {
+      status: "deferred";
+      submissionId: string;
+      resumeAt: Date;
+      submission: Pick<
+        SkillSubmissionRow,
+        "id" | "teamId" | "workspaceId" | "attempts"
+      >;
+    };
 
 export async function runIngestPipeline(input: {
   submissionId: string;
@@ -108,6 +125,38 @@ export async function runIngestPipeline(input: {
         });
         await persist({ stages: stagesState });
         continue;
+      }
+
+      // Rate limited: nothing is wrong with the source, and asking again
+      // before GitHub's reset only meets the same answer. The row goes back to
+      // `queued` with the reason and the time it resumes, which is what the
+      // submitter sees meanwhile — unless it has waited too long already.
+      if (error instanceof GitHubRateLimitedError) {
+        const resumeAt = ingestResumeAt(error);
+        if (mayWaitForRateLimit(submission.createdAt, resumeAt)) {
+          await persist({
+            stages: stagesState,
+            ...(ctx.results ? { results: ctx.results } : {}),
+            status: "queued",
+            error: describeIngestError(error),
+          });
+          logger.warn("Skill ingest paused by GitHub's rate limit", {
+            submissionId: submission.id,
+            stage: stage.name,
+            resumeAt: resumeAt.toISOString(),
+          });
+          return {
+            status: "deferred",
+            submissionId: submission.id,
+            resumeAt,
+            submission: {
+              id: submission.id,
+              teamId: submission.teamId,
+              workspaceId: submission.workspaceId,
+              attempts: submission.attempts,
+            },
+          };
+        }
       }
 
       const retrying = input.willRetryTransient && isTransientIngestError(error);
