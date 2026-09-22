@@ -403,7 +403,12 @@ export function OrganizationInvitations({
 
             <TableBody>
               {isPending ? (
-                <OrganizationInvitationRowSkeleton />
+                <OrganizationInvitationRowSkeleton
+                  showSelection={showSelection}
+                  showCreatedAt={table.getColumn("createdAt")?.getIsVisible()}
+                  showRole={table.getColumn("role")?.getIsVisible()}
+                  showStatus={table.getColumn("status")?.getIsVisible()}
+                />
               ) : !table.getRowModel().rows.length ? (
                 <TableRow>
                   <TableCell

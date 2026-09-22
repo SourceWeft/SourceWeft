@@ -126,3 +126,7 @@ export function useWorkspaceLayout() {
     throw new Error("Workspace layout must be inside DashboardWorkspaceLayout");
   return value;
 }
+
+export function useOptionalWorkspaceLayout() {
+  return useContext(Context);
+}

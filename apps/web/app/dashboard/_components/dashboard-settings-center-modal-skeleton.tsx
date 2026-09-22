@@ -1,5 +1,8 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import { desktopBridge } from "../../../lib/desktop-bridge";
+
 import { useBillingAvailable } from "../../../lib/billing-edition/capabilities";
 import {
   isSettingsTabAvailable,
@@ -251,6 +254,31 @@ export function BillingPanelSkeleton() {
   );
 }
 
+function UtilityPanelSkeleton({
+  tab,
+}: {
+  tab: "approvals" | "about" | "local";
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <SettingsSkeletonLine className="h-5 w-32" />
+        <SettingsSkeletonLine className="w-64 max-w-full" />
+      </div>
+      <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/20 p-4">
+        {tab === "about" && (
+          <SettingsSkeletonBlock className="size-9 shrink-0" />
+        )}
+        <div className="min-w-0 flex-1 space-y-2">
+          <SettingsSkeletonLine className="w-32" />
+          <SettingsSkeletonLine className="w-48 max-w-full" />
+        </div>
+      </div>
+      {tab !== "about" && <TableRowsSkeleton rows={3} />}
+    </div>
+  );
+}
+
 export function SettingsCenterPanelSkeleton({
   activeTab = "account",
 }: {
@@ -267,6 +295,13 @@ export function SettingsCenterPanelSkeleton({
   if (visibleTab === "billing") {
     return <BillingPanelSkeleton />;
   }
+  if (
+    visibleTab === "approvals" ||
+    visibleTab === "about" ||
+    visibleTab === "local"
+  ) {
+    return <UtilityPanelSkeleton tab={visibleTab} />;
+  }
   return <AccountPanelSkeleton />;
 }
 
@@ -276,22 +311,40 @@ export function DashboardSettingsCenterModalSkeleton({
   activeTab?: SettingsCenterTab;
 }) {
   const billingAvailable = useBillingAvailable();
+  const [isLocalPc, setIsLocalPc] = useState(false);
+  useEffect(() => {
+    if (!desktopBridge.isAvailable()) return;
+    let active = true;
+    void desktopBridge.info().then(
+      (info) => {
+        if (active) setIsLocalPc(info.platform === "macos");
+      },
+      () => {
+        if (active) setIsLocalPc(false);
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, []);
   const navItems: SettingsCenterTab[] = [
     "account",
     "team",
     "usage",
     "billing",
     "approvals",
+    ...(isLocalPc ? ["local" as const] : []),
+    "about",
   ];
 
   return (
     <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm">
       <div
         aria-modal="true"
-        className="fixed left-1/2 top-1/2 z-50 h-[min(780px,calc(100svh-2rem))] w-[calc(100vw-2rem)] max-w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-xl border border-border/80 bg-background p-0 shadow-2xl sm:w-[min(900px,calc(100vw-2rem))] sm:max-w-[min(900px,calc(100vw-2rem))]"
+        className="settings-center fixed left-1/2 top-1/2 z-50 h-[min(780px,calc(100svh-2rem))] w-[calc(100vw-2rem)] max-w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-xl border border-border/80 bg-background p-0 shadow-2xl sm:w-[min(900px,calc(100vw-2rem))] sm:max-w-[min(900px,calc(100vw-2rem))]"
         role="dialog"
       >
-        <div className="grid h-full grid-cols-1 sm:grid-cols-[180px_minmax(0,1fr)]">
+        <div className="settings-center-grid grid h-full min-h-0 grid-cols-1 sm:grid-cols-[180px_minmax(0,1fr)]">
           <aside className="flex min-h-0 flex-col border-b border-border/70 bg-muted/30 sm:border-b-0 sm:border-r">
             <div className="border-b border-border/70 px-4 py-3.5">
               <div className="flex items-center gap-2.5">
@@ -329,7 +382,7 @@ export function DashboardSettingsCenterModalSkeleton({
 
           <div className="relative min-h-0 overflow-hidden">
             <SettingsSkeletonBlock className="absolute right-3 top-3 z-10 h-7 w-7 rounded-md" />
-            <div className="absolute inset-0 overflow-y-auto overflow-x-hidden overscroll-contain px-6 pb-10 pt-6 pr-12">
+            <div className="settings-center-content absolute inset-0 overflow-y-auto overflow-x-hidden overscroll-contain px-4 pb-6 pt-5 pr-12 sm:pl-6">
               <SettingsCenterPanelSkeleton activeTab={activeTab} />
             </div>
           </div>

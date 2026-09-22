@@ -6,6 +6,7 @@ import { Fragment } from "react"
 import { Card, CardContent } from "@sourceweft/ui-web/components/ui/card"
 import {
   Item,
+  ItemActions,
   ItemContent,
   ItemGroup,
   ItemMedia,
@@ -106,13 +107,16 @@ export function LinkedAccounts({ className }: LinkedAccountsProps) {
 function AccountRowSkeleton() {
   return (
     <Item>
-      <ItemMedia>
-        <Skeleton className="size-10 rounded-md" />
+      <ItemMedia variant="icon">
+        <Skeleton className="size-4 rounded-sm" />
       </ItemMedia>
       <ItemContent>
         <Skeleton className="h-4 w-20" />
         <Skeleton className="h-3 w-32" />
       </ItemContent>
+      <ItemActions>
+        <Skeleton className="h-8 w-20 rounded-md" />
+      </ItemActions>
     </Item>
   )
 }

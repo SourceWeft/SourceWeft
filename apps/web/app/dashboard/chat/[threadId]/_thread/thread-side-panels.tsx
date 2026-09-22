@@ -7,7 +7,7 @@ import {
   SheetContent,
   SheetTitle,
 } from "@sourceweft/ui-web/components/ui/sheet";
-import { SourcesHubPanelSkeleton } from "../../../../_components/route-loading-skeleton";
+import { ArtifactPreviewPanelSkeleton } from "../../../../_components/route-loading-skeleton";
 import type { ChatHubSubagentPanel } from "../../_components/chat-hub-context";
 import type { ArtifactListItem } from "../../_components/sources-hub";
 import { SubagentPanel } from "./subagent-panel";
@@ -19,7 +19,7 @@ const ArtifactPreviewPanel = dynamic(
     ),
   {
     loading: () => (
-      <SourcesHubPanelSkeleton className="hidden w-[min(640px,45vw)] shrink-0 md:block" />
+      <ArtifactPreviewPanelSkeleton />
     ),
     ssr: false,
   },

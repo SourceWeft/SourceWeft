@@ -6,7 +6,7 @@ import {
 export default function Loading() {
   return (
     <DashboardContentRouteSkeleton>
-      <SkillDetailRouteSkeleton />
+      <SkillDetailRouteSkeleton kind="mcp" />
     </DashboardContentRouteSkeleton>
   );
 }

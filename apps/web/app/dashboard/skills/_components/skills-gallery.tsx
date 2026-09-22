@@ -1,5 +1,7 @@
 "use client";
 
+import { SkillsCatalogSkeletonGrid } from "../../../_components/catalog-loading-skeleton";
+
 import { SkillAvatar } from "./skill-avatar";
 
 import * as React from "react";
@@ -224,65 +226,6 @@ function WorkspacePill({
       <span className="min-w-0 flex-1 truncate text-left font-medium">
         {workspaceName || t("gallery.workspace.current")}
       </span>
-    </div>
-  );
-}
-
-function SkillSkeletonBlock({ className }: { className?: string }) {
-  return (
-    <div className={cn("animate-pulse rounded-md bg-muted/80", className)} />
-  );
-}
-
-function SkillSkeletonLine({ className }: { className?: string }) {
-  return <SkillSkeletonBlock className={cn("h-3", className)} />;
-}
-
-function SkillsCatalogSkeletonGrid({
-  variant = "page",
-}: {
-  variant?: "page" | "modal";
-}) {
-  return (
-    <div
-      className={cn(
-        "grid gap-4",
-        variant === "modal"
-          ? "grid-cols-[repeat(auto-fill,minmax(min(100%,280px),1fr))]"
-          : "grid-cols-[repeat(auto-fill,minmax(260px,1fr))] 2xl:grid-cols-4",
-      )}
-    >
-      {Array.from({ length: variant === "modal" ? 6 : 9 }).map((_, index) => (
-        <article
-          className={cn(
-            "flex flex-col overflow-hidden rounded-2xl border border-border bg-background px-4 pb-4 pt-4 shadow-xs",
-            variant === "modal" ? "min-h-[190px]" : "min-h-[202px]",
-          )}
-          key={index}
-        >
-          <div className="flex min-w-0 items-center gap-3">
-            <SkillSkeletonBlock className="size-9 shrink-0 rounded-full" />
-            <div className="min-w-0 flex-1 space-y-2">
-              <SkillSkeletonLine className="w-36" />
-              <SkillSkeletonLine className="w-20" />
-            </div>
-            <SkillSkeletonBlock className="h-5 w-16 rounded-full" />
-          </div>
-          <div className="mt-3 space-y-2">
-            <SkillSkeletonLine className="w-full" />
-            <SkillSkeletonLine className="w-11/12" />
-            <SkillSkeletonLine className="w-3/4" />
-          </div>
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            <SkillSkeletonBlock className="h-5 w-16 rounded-full" />
-            <SkillSkeletonBlock className="h-5 w-20 rounded-full" />
-          </div>
-          <div className="mt-auto grid grid-cols-2 gap-2 border-t border-border pt-3">
-            <SkillSkeletonBlock className="h-7 rounded-full" />
-            <SkillSkeletonBlock className="h-7 rounded-full" />
-          </div>
-        </article>
-      ))}
     </div>
   );
 }

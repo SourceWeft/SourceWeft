@@ -92,7 +92,15 @@ export function OrganizationInvitationRow({
     ] ?? invitation.status
 
   if (cancelPermissionPending || invitePermissionPending) {
-    return <OrganizationInvitationRowSkeleton />
+    return (
+      <OrganizationInvitationRowSkeleton
+        showSelection={Boolean(selectableRow)}
+        showEmail={showEmail}
+        showCreatedAt={showCreatedAt}
+        showRole={showRole}
+        showStatus={showStatus}
+      />
+    )
   }
 
   const isPending = invitation.status === "pending"

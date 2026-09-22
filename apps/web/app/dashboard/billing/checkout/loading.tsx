@@ -7,7 +7,7 @@ import {
 export default function Loading() {
   return (
     <DashboardContentRouteSkeleton>
-      <BillingRouteSkeleton />
+      <BillingRouteSkeleton checkout />
     </DashboardContentRouteSkeleton>
   );
 }

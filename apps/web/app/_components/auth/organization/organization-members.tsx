@@ -501,7 +501,11 @@ export function OrganizationMembers({
 
             <TableBody>
               {isPending ? (
-                <OrganizationMemberRowSkeleton showTeams={showTeams} />
+                <OrganizationMemberRowSkeleton
+                  showSelection={showSelection}
+                  showRole={table.getColumn("role")?.getIsVisible()}
+                  showTeams={showTeams && table.getColumn("teams")?.getIsVisible() === true}
+                />
               ) : (
                 !!activeOrganization &&
                 table

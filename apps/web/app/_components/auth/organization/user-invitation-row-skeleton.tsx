@@ -1,6 +1,11 @@
 "use client"
 
-import { Item, ItemContent, ItemMedia } from "@sourceweft/ui-web/components/ui/item"
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemMedia
+} from "@sourceweft/ui-web/components/ui/item"
 import { Skeleton } from "@sourceweft/ui-web/components/ui/skeleton"
 
 /**
@@ -9,13 +14,17 @@ import { Skeleton } from "@sourceweft/ui-web/components/ui/skeleton"
 export function UserInvitationRowSkeleton() {
   return (
     <Item>
-      <ItemMedia>
-        <Skeleton className="size-10 shrink-0 rounded-md" />
+      <ItemMedia variant="icon">
+        <Skeleton className="size-4 shrink-0 rounded-sm" />
       </ItemMedia>
       <ItemContent>
         <Skeleton className="h-4 w-40 rounded-md" />
         <Skeleton className="h-3 w-28 rounded-md" />
       </ItemContent>
+      <ItemActions>
+        <Skeleton className="h-8 w-20" />
+        <Skeleton className="size-8" />
+      </ItemActions>
     </Item>
   )
 }

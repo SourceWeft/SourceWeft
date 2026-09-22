@@ -1,5 +1,7 @@
 "use client";
 
+import { McpSkeletonGrid } from "../../../_components/catalog-loading-skeleton";
+
 import * as React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -638,37 +640,6 @@ function McpFilterPanel({
         </FilterFacet>
       </ScrollArea>
     </aside>
-  );
-}
-
-function McpSkeletonGrid() {
-  return (
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-      {Array.from({ length: 8 }).map((_, index) => (
-        <article
-          className="flex h-[286px] flex-col rounded-2xl border border-border bg-background p-4 shadow-xs"
-          key={index}
-        >
-          <div className="flex items-center gap-3">
-            <div className="size-9 animate-pulse rounded-full bg-muted" />
-            <div className="min-w-0 flex-1 space-y-2">
-              <div className="h-3 w-32 animate-pulse rounded bg-muted" />
-              <div className="h-3 w-20 animate-pulse rounded bg-muted" />
-            </div>
-          </div>
-          <div className="mt-4 space-y-2">
-            <div className="h-3 w-full animate-pulse rounded bg-muted" />
-            <div className="h-3 w-11/12 animate-pulse rounded bg-muted" />
-            <div className="h-3 w-2/3 animate-pulse rounded bg-muted" />
-          </div>
-          <div className="mt-auto flex h-11 items-end gap-2 border-t border-border pt-3">
-            <div className="h-7 flex-1 animate-pulse rounded-full bg-muted" />
-            <div className="size-7 animate-pulse rounded-lg bg-muted" />
-            <div className="size-7 animate-pulse rounded-lg bg-muted" />
-          </div>
-        </article>
-      ))}
-    </div>
   );
 }
 

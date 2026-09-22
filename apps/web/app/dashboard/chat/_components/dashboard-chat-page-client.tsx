@@ -96,7 +96,7 @@ import { connectorsClient, contentClient } from "../../../../lib/sdk";
 import type { SourceConnector } from "@sourceweft/sdk";
 import {
   ChatCanvasPanelSkeleton,
-  SourcesHubPanelSkeleton,
+  ArtifactPreviewPanelSkeleton,
 } from "../../../_components/route-loading-skeleton";
 import { resolveChatUiState } from "./chat-ui-state";
 import {
@@ -143,7 +143,7 @@ const ChatCanvas = dynamic(
 const ArtifactPreviewPanel = dynamic(
   () => import("./sources-hub").then((mod) => mod.ArtifactPreviewPanel),
   {
-    loading: () => <SourcesHubSkeleton />,
+    loading: () => <ArtifactPreviewSkeleton />,
     ssr: false,
   },
 );
@@ -176,9 +176,9 @@ function ModelCatalogErrorState() {
   );
 }
 
-function SourcesHubSkeleton() {
+function ArtifactPreviewSkeleton() {
   return (
-    <SourcesHubPanelSkeleton className="hidden h-full w-[360px] shrink-0 border-l md:flex" />
+    <ArtifactPreviewPanelSkeleton />
   );
 }
 

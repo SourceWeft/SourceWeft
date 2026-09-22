@@ -24,7 +24,7 @@ import { isEmbedMode } from "../../lib/thread-embed-params";
 // Only chat surfaces read the registry, so marketing pages no longer pay for
 // the connector tool definitions at boot.
 registerBuiltinAgentTools();
-import { DashboardShellRouteSkeleton } from "../_components/route-loading-skeleton";
+import { DashboardShellRouteSkeleton } from "../_components/dashboard-loading-skeleton";
 
 const SESSION_CONFIRM_ATTEMPTS = 3;
 const SESSION_CONFIRM_DELAY_MS = 250;
@@ -218,7 +218,7 @@ export function DashboardLayoutClient({
     redirecting ||
     (!hasSession && (!isPending || !hasConfirmedSession))
   ) {
-    return <DashboardShellRouteSkeleton pathname={pathname} />;
+    return <DashboardShellRouteSkeleton pathname={pathname} embedMode={embedMode} />;
   }
 
   if (isAuxiliaryWindow) {
