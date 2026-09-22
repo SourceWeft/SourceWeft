@@ -6,6 +6,7 @@
     }
   },
   "header": {
+    "githubRepository": "GitHub 仓库",
     "nav": {
       "features": "功能",
       "howItWorks": "工作原理",

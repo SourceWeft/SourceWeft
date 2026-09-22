@@ -6,6 +6,7 @@
     }
   },
   "header": {
+    "githubRepository": "GitHub 儲存庫",
     "nav": {
       "features": "功能",
       "howItWorks": "運作方式",

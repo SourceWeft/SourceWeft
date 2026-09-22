@@ -21,6 +21,7 @@ import { McpIcon, SkillIcon } from "../../_components/site-icons";
 import { LanguageSwitcher } from "../../_components/language-switcher";
 import { SourceWeftBrandLockup } from "./sourceweft-brand";
 import { ThemeToggle } from "./theme-toggle";
+import { GitHubLink } from "./github-link";
 import { useCheckoutAvailable } from "../../../lib/billing-edition/capabilities";
 import { type LandingAuthState } from "./use-landing-auth-state";
 
@@ -235,6 +236,7 @@ export function SourceWeftHeader({
         </div>
         <div className="flex shrink-0 items-center gap-1 lg:gap-2">
           <div className="hidden items-center gap-1 lg:flex">
+            <GitHubLink iconOnly />
             <LanguageSwitcher />
             <ThemeToggle />
           </div>
@@ -284,6 +286,7 @@ export function SourceWeftHeader({
                 ))}
               </div>
               <div className="mt-4 flex flex-wrap gap-2 border-t border-zinc-100 pt-3 dark:border-white/10">
+                <GitHubLink onClick={closeMenus} />
                 {directLinks.map((item) => (
                   <Link
                     key={item.href}

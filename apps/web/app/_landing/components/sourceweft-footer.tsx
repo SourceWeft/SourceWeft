@@ -8,6 +8,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { useCheckoutAvailable } from "../../../lib/billing-edition/capabilities";
 
 import { SourceWeftBrandLockup } from "./sourceweft-brand";
+import { GitHubLink } from "./github-link";
 import type { LandingAuthState } from "./use-landing-auth-state";
 
 function FooterColumn({
@@ -89,6 +90,7 @@ export function SourceWeftFooter({
             <p className="mt-3 text-xs leading-relaxed text-zinc-400 dark:text-zinc-600">
               {t("tagline")}
             </p>
+            <GitHubLink className="-ml-3 mt-3" />
           </div>
 
           <FooterColumn title={t("product")} links={productLinks} />
