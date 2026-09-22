@@ -1,15 +1,21 @@
 "use client";
 
 import Link from "next/link";
+import type { CSSProperties, ReactNode } from "react";
+import { Reveal } from "./motion";
+import styles from "./motion.module.css";
 import {
   ArrowRight,
+  Download,
   Brain,
   Check,
   Database,
   FileText,
   Layers,
   LayoutDashboard,
+  LoaderCircle,
 } from "lucide-react";
+import { LocaleLink } from "../../[locale]/_components/locale-link";
 import { useTranslations } from "next-intl";
 import { SourceWeftFooter } from "../components/sourceweft-footer";
 import { SourceWeftHeader } from "../components/sourceweft-header";
@@ -24,7 +30,13 @@ import { PricingToggle } from "./pricing-toggle";
 
 // ─── Hero ─────────────────────────────────────────────────────────────────────
 
-function HeroSection({ authState }: { authState: LandingAuthState }) {
+function HeroSection({
+  authState,
+  marketStats,
+}: {
+  authState: LandingAuthState;
+  marketStats: ReactNode;
+}) {
   const t = useTranslations("landing");
   const primaryHref = authState.isSignedIn ? "/dashboard" : "/auth/sign-in";
   const primaryLabel = authState.isSignedIn
@@ -64,16 +76,15 @@ function HeroSection({ authState }: { authState: LandingAuthState }) {
       <div className="relative mx-auto max-w-6xl px-6">
         <div className="grid items-center gap-12 lg:grid-cols-2">
           {/* Left — copy */}
-          <div>
+          <div className={styles.entrance}>
             <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs text-zinc-500 dark:border-white/10 dark:bg-white/5 dark:text-zinc-400">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
               {t("hero.badge")}
             </div>
 
-            <h1 className="text-4xl font-bold tracking-tight text-zinc-900 md:text-5xl lg:text-[3.5rem] lg:leading-[1.1] dark:text-white">
+            <h1 className="text-4xl font-bold tracking-tight text-balance text-zinc-900 md:text-5xl lg:text-[3.25rem] lg:leading-[1.15] dark:text-white">
               {t("hero.headlineLine1")}
-              <br />
-              <span className="text-zinc-400 dark:text-zinc-400">
+              <span className={`${styles.outcome} text-zinc-400`}>
                 {t("hero.headlineLine2")}
               </span>
             </h1>
@@ -87,8 +98,8 @@ function HeroSection({ authState }: { authState: LandingAuthState }) {
                 href={primaryHref}
                 className={
                   authState.isSignedIn
-                    ? "inline-flex items-center gap-2 rounded-lg border border-zinc-200 px-5 py-2.5 text-sm font-medium text-zinc-700 transition-colors hover:border-zinc-300 hover:bg-zinc-50 dark:border-white/16 dark:text-white dark:hover:border-white/30 dark:hover:bg-white/5"
-                    : "inline-flex items-center gap-2 rounded-lg bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-zinc-700 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-100"
+                    ? "group inline-flex items-center gap-2 rounded-lg border border-zinc-200 px-5 py-2.5 text-sm font-medium text-zinc-700 transition-colors hover:border-zinc-300 hover:bg-zinc-50 dark:border-white/16 dark:text-white dark:hover:border-white/30 dark:hover:bg-white/5"
+                    : "group inline-flex items-center gap-2 rounded-lg bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-zinc-700 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-100"
                 }
               >
                 {authState.isSignedIn ? (
@@ -96,201 +107,127 @@ function HeroSection({ authState }: { authState: LandingAuthState }) {
                 ) : null}
                 {primaryLabel}
                 {authState.isSignedIn ? null : (
-                  <ArrowRight aria-hidden="true" className="h-4 w-4" />
+                  <ArrowRight
+                    aria-hidden="true"
+                    className="h-4 w-4 motion-safe:transition-transform motion-safe:group-hover:translate-x-1"
+                  />
                 )}
               </Link>
-              <a
-                href="#how-it-works"
+              <LocaleLink
+                href="/download"
                 className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 px-5 py-2.5 text-sm text-zinc-700 transition-colors hover:border-zinc-300 hover:bg-zinc-50 dark:border-white/16 dark:text-white dark:hover:border-white/30 dark:hover:bg-white/5"
               >
-                {t("hero.seeHowItWorks")}
-              </a>
+                <Download aria-hidden className="h-4 w-4" />
+                {t("hero.download")}
+              </LocaleLink>
             </div>
 
-            {/* Stats */}
-            <div className="mt-10 flex flex-wrap gap-6 border-t border-zinc-200 pt-8 dark:border-white/8">
-              {(
-                [
-                  ["10+", "hero.stats.llmProviders"],
-                  ["5+", "hero.stats.outputFormats"],
-                  ["10+", "hero.stats.integrations"],
-                ] as const
-              ).map(([num, labelKey]) => (
-                <div key={labelKey}>
-                  <p className="text-xl font-bold text-zinc-900 dark:text-white">
-                    {num}
-                  </p>
-                  <p className="text-xs text-zinc-400 dark:text-zinc-500">
-                    {t(labelKey)}
-                  </p>
-                </div>
-              ))}
+            <div className="mt-10 border-t border-zinc-200 pt-8 dark:border-white/8">
+              {marketStats}
             </div>
           </div>
 
-          {/* Right — mock UI. Decorative sample copy (including invented
-              metrics), so it is kept out of the accessibility tree and out of
-              search snippets. */}
-          <div className="relative" aria-hidden="true">
-            <div
-              className="relative rounded-2xl border border-zinc-200 bg-white shadow-xl dark:border-white/10 dark:bg-zinc-900/80"
-              style={{ backdropFilter: "blur(8px)" }}
+          {/* Illustrative task workflow, not a live execution. */}
+          <div className="min-w-0" data-nosnippet>
+            <Reveal
+              demo
+              className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-xl dark:border-white/10 dark:bg-zinc-900/80"
             >
-              {/* Window chrome */}
               <div className="flex items-center gap-2 border-b border-zinc-100 px-4 py-3 dark:border-white/8">
-                <span className="h-2.5 w-2.5 rounded-full bg-zinc-200 dark:bg-zinc-700" />
-                <span className="h-2.5 w-2.5 rounded-full bg-zinc-200 dark:bg-zinc-700" />
-                <span className="h-2.5 w-2.5 rounded-full bg-zinc-200 dark:bg-zinc-700" />
-                <span className="ml-3 text-xs text-zinc-400 dark:text-zinc-600">
-                  SourceWeft — Research workspace
+                <span
+                  aria-hidden
+                  className="h-2 w-2 rounded-full bg-emerald-500"
+                />
+                <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                  {t("hero.demo.workspace")}
                 </span>
               </div>
-
-              {/* Chat messages */}
-              <div className="space-y-4 p-5">
-                {/* User message */}
-                <div className="flex justify-end">
-                  <div className="max-w-[75%] rounded-xl rounded-tr-sm bg-zinc-100 px-4 py-2.5 text-sm text-zinc-800 dark:bg-zinc-700/80 dark:text-zinc-100">
-                    Summarise the key findings from my Q4 research notes
+              <div className="space-y-5 p-5">
+                <div className={`${styles.request} flex justify-end`}>
+                  <div className="max-w-[90%] rounded-xl rounded-tr-sm bg-zinc-100 px-4 py-3 text-sm text-zinc-800 dark:bg-zinc-800 dark:text-zinc-100">
+                    {t("hero.demo.request")}
                   </div>
                 </div>
-
-                {/* AI reply */}
-                <div className="flex gap-3">
-                  <SourceWeftBrandMark className="mt-0.5 h-6 w-6 rounded-full" />
-                  <div className="flex-1 space-y-2">
-                    <div className="rounded-xl rounded-tl-sm border border-zinc-100 bg-zinc-50 px-4 py-3 text-sm text-zinc-700 leading-relaxed dark:border-white/8 dark:bg-zinc-800/60 dark:text-zinc-200">
-                      Based on your Q4 research notes, here are the key
-                      findings:
-                      <ol className="mt-2 space-y-1.5 pl-4 text-zinc-600 dark:text-zinc-300">
-                        <li className="list-decimal">
-                          User retention increased 23% after onboarding revamp
-                        </li>
-                        <li className="list-decimal">
-                          Mobile sessions now account for 61% of total traffic
-                        </li>
-                        <li className="list-decimal">
-                          Search latency reduced to under 120 ms p95
-                        </li>
-                      </ol>
+                <div className={`${styles.response} flex gap-3`}>
+                  <SourceWeftBrandMark className="mt-0.5 h-6 w-6 shrink-0 rounded-full" />
+                  <div className="min-w-0 flex-1 space-y-4">
+                    <div
+                      className={`${styles.status} ${styles.summary} text-sm leading-relaxed text-zinc-600 dark:text-zinc-300`}
+                    >
+                      <p className={styles.pending}>{t("hero.demo.working")}</p>
+                      <p className={styles.complete}>{t("hero.demo.reply")}</p>
                     </div>
-
-                    {/* Source citations + connector to badge */}
-                    <div className="relative flex w-fit flex-wrap gap-1.5">
-                      {["Q4-notes.pdf", "retro-oct.md", "metrics-nov.csv"].map(
-                        (src) => (
-                          <span
-                            key={src}
-                            className="relative z-10 inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] text-zinc-400 dark:border-white/8 dark:bg-zinc-800/60 dark:text-zinc-500"
+                    <ul className="space-y-3">
+                      {(t.raw("hero.demo.tasks") as string[]).map(
+                        (task, index) => (
+                          <li
+                            key={task}
+                            className={`${styles.task} flex items-start gap-2 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400`}
+                            style={{ "--task-index": index } as CSSProperties}
                           >
-                            <FileText aria-hidden="true" className="h-3 w-3" />
-                            {src}
-                          </span>
+                            <span
+                              className={`${styles.status} mt-0.5 h-3.5 w-3.5 shrink-0`}
+                              aria-hidden
+                            >
+                              <LoaderCircle
+                                className={`${styles.pending} ${styles.spinner} h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400`}
+                              />
+                              <Check
+                                className={`${styles.complete} h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400`}
+                              />
+                            </span>
+                            <span className={styles.status}>
+                              <span className={styles.pending}>
+                                {
+                                  (t.raw("hero.demo.activeTasks") as string[])[
+                                    index
+                                  ]
+                                }
+                              </span>
+                              <span className={styles.complete}>{task}</span>
+                            </span>
+                          </li>
                         ),
                       )}
-
-                      {/*
-                        Z-shaped connector (Step-down pattern):
-                        1. Bottom line: Starts at chip right edge (right:0), extends RIGHT by 40px.
-                        2. Vertical line: Positioned 40px to the right of chips (right:-40px).
-                        3. Top line: From vertical pivot (right:-40px), extends RIGHT to badge.
-                      */}
-
-                      {/* Segment 1: bottom horizontal — extending RIGHT from the chip edge */}
-                      <div
-                        className="pointer-events-none absolute hidden md:block"
-                        style={{
-                          right: "-40px",
-                          top: "50%",
-                          width: "40px",
-                          height: "1px",
-                          backgroundImage:
-                            "repeating-linear-gradient(to right, #a1a1aa 0px, #a1a1aa 4px, transparent 4px, transparent 8px)",
-                        }}
-                      />
-                      {/* Segment 2: vertical — moved 40px to the right of the chips, going up */}
-                      <div
-                        className="pointer-events-none absolute hidden md:block"
-                        style={{
-                          right: "-40px",
-                          top: "calc(50% - 124px)",
-                          width: "1px",
-                          height: "124px",
-                          backgroundImage:
-                            "repeating-linear-gradient(to bottom, #a1a1aa 0px, #a1a1aa 4px, transparent 4px, transparent 8px)",
-                        }}
-                      />
-                      {/* Segment 3: top horizontal — from vertical pivot (right:-40px) to badge (right:-240px) */}
-                      <div
-                        className="pointer-events-none absolute hidden md:block"
-                        style={{
-                          right: "-240px",
-                          top: "calc(50% - 124px)",
-                          width: "200px",
-                          height: "1px",
-                          backgroundImage:
-                            "repeating-linear-gradient(to right, #a1a1aa 0px, #a1a1aa 4px, transparent 4px, transparent 8px)",
-                        }}
-                      />
-                      {/* Badge — positioned relative to the right edge of the chips */}
-                      <div
-                        className="pointer-events-none absolute hidden md:block"
-                        style={{
-                          right: "-240px",
-                          top: "calc(50% - 152px)",
-                        }}
-                      >
-                        <div className="w-32 rounded-xl border border-zinc-200 bg-white px-3 py-2.5 shadow-lg dark:border-white/10 dark:bg-zinc-900">
-                          <p className="text-xs font-semibold text-zinc-900 dark:text-white">
-                            3 sources cited
+                    </ul>
+                    <div
+                      className={`${styles.artifact} rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-white/10 dark:bg-zinc-800/60`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <FileText
+                          aria-hidden
+                          className="h-5 w-5 shrink-0 text-zinc-500"
+                        />
+                        <div>
+                          <p className="text-sm font-semibold text-zinc-900 dark:text-white">
+                            {t("hero.demo.artifact")}
                           </p>
-                          <p className="mt-0.5 text-[11px] leading-snug text-zinc-400 dark:text-zinc-500">
-                            Grounded in your documents
+                          <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                            {t("hero.demo.status")}
                           </p>
                         </div>
                       </div>
+                      <p className="mt-3 border-t border-zinc-200 pt-3 text-xs text-zinc-500 dark:border-white/10 dark:text-zinc-400">
+                        {t("hero.demo.sources")}
+                      </p>
                     </div>
-                  </div>
-                </div>
-
-                {/* Typing indicator */}
-                <div className="flex gap-3">
-                  <SourceWeftBrandMark className="mt-0.5 h-6 w-6 rounded-full" />
-                  <div className="flex items-center gap-1.5 rounded-xl rounded-tl-sm border border-zinc-100 bg-zinc-50 px-4 py-3 dark:border-white/8 dark:bg-zinc-800/60">
-                    <span
-                      className="h-1.5 w-1.5 rounded-full bg-zinc-300 dark:bg-zinc-500"
-                      style={{
-                        animation: "blink 1.2s ease-in-out 0s infinite",
-                      }}
-                    />
-                    <span
-                      className="h-1.5 w-1.5 rounded-full bg-zinc-300 dark:bg-zinc-500"
-                      style={{
-                        animation: "blink 1.2s ease-in-out 0.2s infinite",
-                      }}
-                    />
-                    <span
-                      className="h-1.5 w-1.5 rounded-full bg-zinc-300 dark:bg-zinc-500"
-                      style={{
-                        animation: "blink 1.2s ease-in-out 0.4s infinite",
-                      }}
-                    />
+                    <p
+                      className={`${styles.next} text-xs text-zinc-500 dark:text-zinc-400`}
+                    >
+                      {t("hero.demo.next")}
+                    </p>
                   </div>
                 </div>
               </div>
-
-              {/* Input bar */}
               <div className="border-t border-zinc-100 px-4 py-3 dark:border-white/8">
                 <div className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-white/10 dark:bg-zinc-800/60">
-                  <span className="flex-1 text-sm text-zinc-400 dark:text-zinc-600">
-                    Ask anything about your knowledge base…
+                  <span className="flex-1 text-sm text-zinc-400 dark:text-zinc-500">
+                    {t("hero.demo.input")}
                   </span>
-                  <span className="flex h-6 w-6 items-center justify-center rounded-md bg-zinc-200 text-zinc-500 dark:bg-zinc-700 dark:text-zinc-400">
-                    <ArrowRight aria-hidden="true" className="h-4 w-4" />
-                  </span>
+                  <ArrowRight aria-hidden className="h-4 w-4 text-zinc-400" />
                 </div>
               </div>
-            </div>
+            </Reveal>
           </div>
         </div>
       </div>
@@ -302,7 +239,12 @@ function HeroSection({ authState }: { authState: LandingAuthState }) {
 
 function SocialProof() {
   const t = useTranslations("landing.socialProof");
-  const roleKeys = ["researchers", "writers", "developers", "students"] as const;
+  const roleKeys = [
+    "researchers",
+    "writers",
+    "developers",
+    "students",
+  ] as const;
   return (
     <section className="border-y border-zinc-200 py-10 dark:border-white/[0.06]">
       <div className="mx-auto max-w-6xl px-6">
@@ -332,7 +274,7 @@ function FeaturesSection() {
   const t = useTranslations("landing.features");
   const features = [
     {
-      key: "outputs",
+      key: "agents",
       icon: <Brain aria-hidden="true" className="h-5 w-5" />,
     },
     {
@@ -340,7 +282,7 @@ function FeaturesSection() {
       icon: <Database aria-hidden="true" className="h-5 w-5" />,
     },
     {
-      key: "everywhere",
+      key: "create",
       icon: <Layers aria-hidden="true" className="h-5 w-5" />,
     },
   ] as const;
@@ -359,10 +301,11 @@ function FeaturesSection() {
         </div>
 
         <div className="grid gap-4 md:grid-cols-3">
-          {features.map((f) => (
-            <div
+          {features.map((f, index) => (
+            <Reveal
+              delay={index * 100}
               key={f.key}
-              className="group rounded-2xl border border-zinc-200 bg-zinc-50 p-6 transition-all duration-200 hover:-translate-y-1 hover:border-zinc-300 hover:bg-white hover:shadow-sm dark:border-white/8 dark:bg-zinc-900/40 dark:hover:border-white/16 dark:hover:bg-zinc-900/60"
+              className="group rounded-2xl border border-zinc-200 bg-zinc-50 p-6 transition-all duration-200 motion-safe:hover:-translate-y-1 hover:border-zinc-300 hover:bg-white hover:shadow-sm dark:border-white/8 dark:bg-zinc-900/40 dark:hover:border-white/16 dark:hover:bg-zinc-900/60"
             >
               <div className="mb-4 inline-flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 bg-white text-zinc-600 dark:border-white/10 dark:bg-zinc-800 dark:text-zinc-300">
                 {f.icon}
@@ -384,7 +327,7 @@ function FeaturesSection() {
                   </li>
                 ))}
               </ul>
-            </div>
+            </Reveal>
           ))}
         </div>
       </div>
@@ -401,26 +344,19 @@ function HowItWorks() {
       num: "01",
       key: "step1",
       visual: (
-        <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 text-xs dark:border-white/8 dark:bg-zinc-900/60">
-          <div className="mb-3 flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-emerald-500" />
-            <span className="text-zinc-500 dark:text-zinc-400">
-              New workspace
-            </span>
-          </div>
-          <div className="space-y-2">
-            {["Research 2025", "Product docs", "Weekly reading"].map((ws) => (
-              <div
-                key={ws}
-                className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-zinc-700 dark:border-white/6 dark:bg-zinc-800/60 dark:text-zinc-300"
-              >
-                <span className="flex h-5 w-5 items-center justify-center rounded-md bg-zinc-100 text-[10px] font-bold text-zinc-500 dark:bg-zinc-700 dark:text-zinc-400">
-                  {ws[0]}
-                </span>
-                {ws}
-              </div>
-            ))}
-          </div>
+        <div className="space-y-3 rounded-xl border border-zinc-200 bg-zinc-50 p-5 dark:border-white/8 dark:bg-zinc-900/60">
+          <p className="text-sm font-medium text-zinc-800 dark:text-zinc-100">
+            {t("visual.request")}
+          </p>
+          {["context", "result"].map((key) => (
+            <div
+              key={key}
+              className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-500 dark:border-white/8 dark:bg-zinc-800/60 dark:text-zinc-400"
+            >
+              <FileText aria-hidden className="h-4 w-4 shrink-0" />
+              {t(`visual.${key}`)}
+            </div>
+          ))}
         </div>
       ),
     },
@@ -428,68 +364,41 @@ function HowItWorks() {
       num: "02",
       key: "step2",
       visual: (
-        <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 text-xs dark:border-white/8 dark:bg-zinc-900/60">
-          <p className="mb-3 text-zinc-400 dark:text-zinc-500">Sources added</p>
-          <div className="space-y-2">
-            {[
-              {
-                name: "thesis-draft.pdf",
-                type: "PDF",
-                color:
-                  "bg-red-100 text-red-500 dark:bg-red-500/20 dark:text-red-400",
-              },
-              {
-                name: "arxiv.org/abs/2401...",
-                type: "URL",
-                color:
-                  "bg-blue-100 text-blue-500 dark:bg-blue-500/20 dark:text-blue-400",
-              },
-              {
-                name: "meeting-notes.md",
-                type: "MD",
-                color:
-                  "bg-zinc-200 text-zinc-500 dark:bg-zinc-700 dark:text-zinc-400",
-              },
-            ].map((src) => (
-              <div
-                key={src.name}
-                className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 dark:border-white/6 dark:bg-zinc-800/60"
-              >
-                <span
-                  className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${src.color}`}
-                >
-                  {src.type}
-                </span>
-                <span className="truncate text-zinc-600 dark:text-zinc-300">
-                  {src.name}
-                </span>
-                <span className="ml-auto text-emerald-500">
-                  <Check aria-hidden="true" className="h-4 w-4 shrink-0" />
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
+        <ol className="space-y-3 rounded-xl border border-zinc-200 bg-zinc-50 p-5 dark:border-white/8 dark:bg-zinc-900/60">
+          {(t.raw("visual.agents") as string[]).map((task, index) => (
+            <li
+              key={task}
+              className="flex items-center gap-3 rounded-lg border border-zinc-200 bg-white px-3 py-3 text-sm text-zinc-600 dark:border-white/8 dark:bg-zinc-800/60 dark:text-zinc-300"
+            >
+              <span className="text-xs text-zinc-400">0{index + 1}</span>
+              {task}
+              <Check
+                aria-hidden
+                className="ml-auto h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400"
+              />
+            </li>
+          ))}
+        </ol>
       ),
     },
     {
       num: "03",
       key: "step3",
       visual: (
-        <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 text-xs dark:border-white/8 dark:bg-zinc-900/60">
-          <div className="mb-2 flex justify-end">
-            <div className="max-w-[80%] rounded-lg rounded-tr-sm bg-zinc-100 px-3 py-2 text-zinc-800 dark:bg-zinc-700/80 dark:text-zinc-100">
-              What did I learn about attention mechanisms?
+        <div className="space-y-3 rounded-xl border border-zinc-200 bg-zinc-50 p-5 text-xs dark:border-white/8 dark:bg-zinc-900/60">
+          <div className="flex justify-end">
+            <div className="max-w-[85%] rounded-lg rounded-tr-sm bg-zinc-100 px-3 py-2 text-zinc-800 dark:bg-zinc-700/80 dark:text-zinc-100">
+              {t("visual.review")}
             </div>
           </div>
           <div className="flex gap-2">
-            <SourceWeftBrandMark className="mt-0.5 h-5 w-5 rounded-full" />
-            <div className="rounded-lg rounded-tl-sm border border-zinc-100 bg-white px-3 py-2 text-zinc-700 leading-relaxed dark:border-white/8 dark:bg-zinc-800/60 dark:text-zinc-200">
-              From your thesis draft: attention is a mechanism that allows
-              models to focus on relevant parts of the input…{" "}
-              <span className="rounded border border-zinc-200 bg-zinc-100 px-1 text-zinc-400 dark:border-white/8 dark:bg-zinc-700/60 dark:text-zinc-500">
-                thesis-draft.pdf p.12
-              </span>
+            <SourceWeftBrandMark className="mt-0.5 h-5 w-5 shrink-0 rounded-full" />
+            <div className="space-y-3 rounded-lg rounded-tl-sm border border-zinc-100 bg-white px-3 py-3 leading-relaxed text-zinc-700 dark:border-white/8 dark:bg-zinc-800/60 dark:text-zinc-200">
+              <p>{t("visual.reply")}</p>
+              <p className="flex items-center gap-2 border-t border-zinc-100 pt-3 dark:border-white/8">
+                <FileText aria-hidden className="h-4 w-4 shrink-0" />
+                {t("visual.artifact")}
+              </p>
             </div>
           </div>
         </div>
@@ -514,7 +423,7 @@ function HowItWorks() {
 
         <div className="space-y-16">
           {steps.map((step, i) => (
-            <div
+            <Reveal
               key={step.num}
               className={`grid items-center gap-10 md:grid-cols-2 ${
                 i % 2 === 1 ? "md:[&>*:first-child]:order-2" : ""
@@ -532,7 +441,7 @@ function HowItWorks() {
                 </p>
               </div>
               <div>{step.visual}</div>
-            </div>
+            </Reveal>
           ))}
         </div>
       </div>
@@ -581,34 +490,22 @@ function PricingSection({ authState }: { authState: LandingAuthState }) {
   );
 }
 
-// ─── Keyframe styles (injected via style tag) ────────────────────────────────
-
-function GlobalStyles() {
-  return (
-    <style>{`
-      @keyframes blink {
-        0%, 100% { opacity: 0.3; }
-        50% { opacity: 1; }
-      }
-    `}</style>
-  );
-}
-
 // ─── Page root ────────────────────────────────────────────────────────────────
 
 export default function LandingV1({
   initialAuthState,
+  marketStats,
 }: {
   initialAuthState?: LandingAuthState;
+  marketStats: ReactNode;
 }) {
   const authState = useLandingAuthState(initialAuthState);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <GlobalStyles />
       <SourceWeftHeader authState={authState} />
       <main>
-        <HeroSection authState={authState} />
+        <HeroSection authState={authState} marketStats={marketStats} />
         <SocialProof />
         <FeaturesSection />
         <HowItWorks />

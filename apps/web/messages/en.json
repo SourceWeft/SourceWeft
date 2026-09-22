@@ -1,8 +1,8 @@
 {
   "metadata": {
     "home": {
-      "title": "SourceWeft - AI Notebook Workspace",
-      "description": "SourceWeft is an AI notebook workspace for connected knowledge sources: upload documents, connect your tools, and get source-grounded answers with citations."
+      "title": "SourceWeft - AI Workspace | Built to get work done",
+      "description": "Bring your knowledge, files, and tools together in SourceWeft. Let AI agents research, plan, and create, then review and refine the results in one workspace."
     }
   },
   "header": {
@@ -13,14 +13,31 @@
       "mcpServers": "MCP Servers",
       "skills": "Skills",
       "blog": "Blog",
-      "download": "Download"
+      "download": "Download",
+      "explore": "Explore",
+      "resources": "Resources",
+      "changelog": "Changelog",
+      "about": "About"
     },
     "signIn": "Sign in",
     "getStarted": "Get Started",
-    "openDashboard": "Open Dashboard"
+    "openDashboard": "Open Dashboard",
+    "navigation": "Main navigation",
+    "menu": "Toggle navigation menu",
+    "language": "Language",
+    "appearance": "Appearance",
+    "navDescriptions": {
+      "explore": "Give your agents more ways to work",
+      "resources": "Ideas, updates, and the story behind SourceWeft",
+      "mcpServers": "Connect agents to your tools and services",
+      "skills": "Find reusable skills for your next task",
+      "blog": "Read ideas, guides, and product stories",
+      "changelog": "See what’s new and what’s improved",
+      "about": "Meet the workspace and the thinking behind it"
+    }
   },
   "footer": {
-    "tagline": "Your AI notebook workspace. Connect everything. Think deeper.",
+    "tagline": "Your AI workspace. Built to get work done.",
     "product": "Product",
     "company": "Company",
     "legal": "Legal",
@@ -45,89 +62,127 @@
   "landing": {
     "hero": {
       "badge": "Now in early access",
-      "headlineLine1": "Your AI Notebook",
-      "headlineLine2": "Workspace.",
-      "subtitle": "Upload sources, connect Notion, Google Drive, Gmail, Slack and more. Generate source-grounded answers with citations, audio overviews, study guides, FAQs, and deep AI insights from your own content.",
+      "headlineLine1": "Your AI workspace",
+      "headlineLine2": "Built to get work done",
+      "subtitle": "Bring your knowledge, files, and tools together. Let AI agents research, plan, and create—then review and refine the results, all in one workspace.",
       "ctaSignedIn": "Open Dashboard",
       "ctaSignedOut": "Start for free",
       "seeHowItWorks": "See how it works",
       "stats": {
-        "llmProviders": "LLM providers",
-        "outputFormats": "output formats",
-        "integrations": "integrations"
-      }
+        "mcp": "MCP servers to explore",
+        "skills": "Available Skills",
+        "openSource": "Open Source",
+        "selfHosted": "Self-hosting supported",
+        "unavailable": "Unavailable",
+        "loading": "Loading"
+      },
+      "demo": {
+        "workspace": "SourceWeft — Project workspace",
+        "request": "Use these research notes to draft a project brief with recommendations.",
+        "reply": "The brief is ready for your review. Here is what went into it:",
+        "tasks": [
+          "Research agent · Reviewed the source material",
+          "Planning agent · Organised findings and recommendations",
+          "Writing agent · Prepared the project brief"
+        ],
+        "artifact": "Project brief",
+        "status": "Draft ready to review",
+        "sources": "Based on your selected sources",
+        "input": "What would you like to work on?",
+        "next": "Review the draft and ask for changes",
+        "working": "I’ll research the sources, organise the findings, and draft your brief.",
+        "activeTasks": [
+          "Research agent · Reviewing source material",
+          "Planning agent · Organising findings and recommendations",
+          "Writing agent · Drafting the project brief"
+        ]
+      },
+      "download": "Download"
     },
     "socialProof": {
-      "heading": "For researchers, students, and creators who go deep",
+      "heading": "For the work you want to move forward",
       "roles": {
         "researchers": {
           "title": "Researchers",
-          "desc": "who need to trust their sources"
+          "desc": "Turn sources into research briefs"
         },
         "writers": {
           "title": "Writers",
-          "desc": "who connect ideas across notes"
+          "desc": "Develop ideas into working drafts"
         },
         "developers": {
           "title": "Developers",
-          "desc": "who live in docs and RFCs"
+          "desc": "Research decisions and plan projects"
         },
         "students": {
           "title": "Students",
-          "desc": "who want to learn, not just read"
+          "desc": "Turn course material into study guides"
         }
       }
     },
     "features": {
       "eyebrow": "Features",
-      "heading": "Everything your AI knowledge workspace needs",
-      "intro": "Upload sources. Connect your tools. Get answers, audio overviews, study guides and more — all grounded in what you know, with citations you can inspect.",
+      "heading": "From the first task to the next draft",
+      "intro": "Give AI the context and tools to move work forward. Keep your sources, conversations, and results together as each project takes shape.",
       "items": {
-        "outputs": {
-          "title": "Multiple outputs from your sources",
-          "description": "Ask questions, or generate an audio overview, study guide, FAQ, briefing doc, or timeline — all grounded in your uploaded sources, with inline citations.",
+        "agents": {
+          "title": "Let agents move the work forward",
+          "description": "Describe what you need. Agents can divide research, planning, and execution into focused tasks, using tools and Skills to bring the results together.",
           "bullets": [
-            "Audio overviews & podcasts",
-            "Study guides, FAQs & timelines",
-            "Inline source citations"
+            "Research, planning, and agent collaboration",
+            "Web tools, MCP integrations, and Skills",
+            "Built-in and reusable custom Skills"
           ]
         },
         "connect": {
-          "title": "Connect everything",
-          "description": "Don't just upload files — connect Notion, Google Drive, Gmail, Slack, and more. SourceWeft indexes your existing tools so your knowledge is always at hand.",
+          "title": "Bring your working context together",
+          "description": "Upload documents or connect Notion, Google Drive, Gmail, and Slack. Give each task the relevant sources and follow citations back to the original material.",
           "bullets": [
-            "Notion, Google Drive, Gmail, Slack",
-            "25+ file formats supported",
-            "Browser extension for instant capture"
+            "Documents, web pages, and connected sources",
+            "Source citations you can inspect",
+            "Shared spaces for project knowledge"
           ]
         },
-        "everywhere": {
-          "title": "Works everywhere you do",
-          "description": "Web app, desktop, and browser extension — all in sync. Capture a page anywhere, continue the conversation on any device. Your notebook travels with you.",
+        "create": {
+          "title": "Create work you can build on",
+          "description": "Turn your material into reports, presentations, study guides, and more. Review the output, ask for changes, and return to saved conversations and files to keep working.",
           "bullets": [
-            "macOS & Windows desktop",
-            "Chrome & Edge extension",
-            "Mobile app (coming soon)"
+            "Reports, presentations, and creative outputs",
+            "Review and refine generated results",
+            "Saved conversations and working files"
           ]
         }
       }
     },
     "howItWorks": {
       "eyebrow": "How it works",
-      "heading": "From zero to AI-powered in minutes",
+      "heading": "From a task to work you can use",
       "steps": {
         "step1": {
-          "title": "Create your workspace",
-          "body": "Set up a personal or team workspace in seconds. Organise knowledge into spaces — one for each project, topic, or area of your life."
+          "title": "Describe the work",
+          "body": "Start with a goal: a research brief, a presentation, or a draft. Add the files and sources the task needs, and tell your AI what a useful result looks like."
         },
         "step2": {
-          "title": "Connect your knowledge sources",
-          "body": "Connect Notion, Google Drive, Gmail, or Slack — or drop in PDFs, paste URLs, and capture any web page. SourceWeft indexes everything, wherever your knowledge lives."
+          "title": "Let agents work with your tools",
+          "body": "Agents break down the task and delegate focused work. They use available sources, tools, and Skills to research, plan, and create the result."
         },
         "step3": {
-          "title": "Chat with your AI",
-          "body": "Ask questions, get summaries, explore connections. Every answer is grounded in your own sources with inline citations you can inspect."
+          "title": "Review, refine, and keep going",
+          "body": "Open the result, check its sources, and ask for changes. Your conversations and files stay in the workspace so you can pick up the task again."
         }
+      },
+      "visual": {
+        "request": "Create a project brief",
+        "context": "Research notes + project goals",
+        "result": "A draft with recommendations",
+        "agents": [
+          "Research the sources",
+          "Organise the findings",
+          "Draft the brief"
+        ],
+        "review": "Add more detail to the recommendations.",
+        "reply": "The revised brief is ready. Review the recommendations alongside the source notes.",
+        "artifact": "Project brief · Revised draft"
       }
     },
     "pricing": {

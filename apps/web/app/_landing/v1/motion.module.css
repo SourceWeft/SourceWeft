@@ -1,0 +1,128 @@
+.outcome {
+  display: block;
+  margin-top: 0.35em;
+  font-size: 0.7em;
+  line-height: 1.25;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+}
+
+/* Both states occupy the same grid cell, so translating copy never shifts layout. */
+.status {
+  display: grid;
+}
+.status > * {
+  grid-area: 1 / 1;
+}
+.pending {
+  visibility: hidden;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .entrance > * {
+    animation: arrive 440ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  }
+  .entrance > :nth-child(2) {
+    animation-delay: 60ms;
+  }
+  .entrance > :nth-child(3) {
+    animation-delay: 120ms;
+  }
+  .entrance > :nth-child(4) {
+    animation-delay: 180ms;
+  }
+  .entrance > :nth-child(5) {
+    animation-delay: 240ms;
+  }
+
+  .reveal[data-visible="true"] {
+    animation: arrive 600ms cubic-bezier(0.2, 0.7, 0.2, 1)
+      var(--reveal-delay, 0ms) backwards;
+  }
+  .demo[data-visible="true"] .request {
+    animation: arrive 400ms ease-out 150ms backwards;
+  }
+  .demo[data-visible="true"] .response {
+    animation: arrive 400ms ease-out 550ms backwards;
+  }
+  .demo[data-visible="true"] .task {
+    animation: task-progress 900ms ease-out
+      calc(850ms + var(--task-index) * 850ms) both;
+  }
+  .demo[data-visible="true"] .task .pending {
+    animation: hide-pending 40ms step-end
+      calc(1750ms + var(--task-index) * 850ms) both;
+  }
+  .demo[data-visible="true"] .task .spinner {
+    animation: active-spin 900ms linear calc(850ms + var(--task-index) * 850ms)
+      both;
+  }
+  .demo[data-visible="true"] .task .complete {
+    animation: show-complete 40ms step-end
+      calc(1750ms + var(--task-index) * 850ms) backwards;
+  }
+  .demo[data-visible="true"] .summary .pending {
+    animation: hide-pending 40ms step-end 3500ms both;
+  }
+  .demo[data-visible="true"] .summary .complete {
+    animation: show-complete 40ms step-end 3500ms backwards;
+  }
+  .demo[data-visible="true"] .artifact {
+    animation: arrive 500ms cubic-bezier(0.2, 0.7, 0.2, 1) 3550ms backwards;
+  }
+  .demo[data-visible="true"] .next {
+    animation: arrive 350ms ease-out 3850ms backwards;
+  }
+}
+
+@keyframes arrive {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes task-progress {
+  0% {
+    opacity: 0.35;
+  }
+  20%,
+  100% {
+    opacity: 1;
+  }
+}
+@keyframes hide-pending {
+  from {
+    opacity: 1;
+    visibility: visible;
+  }
+  to {
+    opacity: 0;
+    visibility: hidden;
+  }
+}
+@keyframes active-spin {
+  0% {
+    visibility: hidden;
+    transform: rotate(0);
+  }
+  1%,
+  99% {
+    visibility: visible;
+  }
+  100% {
+    visibility: hidden;
+    transform: rotate(360deg);
+  }
+}
+@keyframes show-complete {
+  from {
+    visibility: hidden;
+  }
+  to {
+    visibility: visible;
+  }
+}

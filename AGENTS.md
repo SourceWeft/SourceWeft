@@ -1,5 +1,14 @@
 # Repository agent instructions
 
+## Superpowers document locations
+
+- Store all Superpowers-generated documents under `.docs/`, never under `docs/`.
+- Write brainstorming specifications to `.docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`.
+- Write implementation plans to `.docs/superpowers/plans/YYYY-MM-DD-<topic>.md`.
+- When a skill specifies a path beginning with `docs/` (including legacy `docs/plans/`), replace that prefix with `.docs/` and preserve the remaining path.
+- Use the actual `.docs/` paths in links, handoffs, review prompts, and subsequent execution steps. Create the required directories as needed.
+- These project-specific locations override the default document locations in Superpowers skills.
+
 ## Fallback policy
 
 - Do not silently fallback to a different implementation, model, provider, data source, command, test strategy, or dependency.

@@ -1,8 +1,8 @@
 {
   "metadata": {
     "home": {
-      "title": "SourceWeft - AI 筆記工作區",
-      "description": "SourceWeft 是一個連接知識來源的 AI 筆記工作區：上傳文件、連接你的工具，獲得有據可查、帶引用的答案。"
+      "title": "SourceWeft - AI 工作空間 | 讓想法成為成果",
+      "description": "在 SourceWeft 連接你的知識、檔案與工具，讓 AI Agent 協作研究、規劃和創作。在同一個工作空間中檢查成果、持續完善，推進每一項任務。"
     }
   },
   "header": {
@@ -13,14 +13,31 @@
       "mcpServers": "MCP 服務",
       "skills": "技能",
       "blog": "部落格",
-      "download": "下載"
+      "download": "下載",
+      "explore": "探索",
+      "resources": "資源",
+      "changelog": "更新日誌",
+      "about": "關於"
     },
     "signIn": "登入",
     "getStarted": "開始使用",
-    "openDashboard": "開啟儀表板"
+    "openDashboard": "開啟儀表板",
+    "navigation": "主導覽",
+    "menu": "開啟或關閉選單",
+    "language": "語言",
+    "appearance": "外觀",
+    "navDescriptions": {
+      "explore": "為你的 Agent 拓展工作能力",
+      "resources": "瞭解產品、發現新想法、跟進更新",
+      "mcpServers": "連接工具與服務，擴充功能 Agent 的能力",
+      "skills": "發現可重複使用的技能，用於下一項任務",
+      "blog": "閱讀產品故事、實踐指南與新想法",
+      "changelog": "檢視最新功能、改進與發布記錄",
+      "about": "瞭解 SourceWeft 的理念與願景"
+    }
   },
   "footer": {
-    "tagline": "你的 AI 筆記工作區。連接一切，深入思考。",
+    "tagline": "你的 AI 工作空間。讓想法成為成果。",
     "product": "產品",
     "company": "公司",
     "legal": "法律",
@@ -45,89 +62,127 @@
   "landing": {
     "hero": {
       "badge": "搶先體驗中",
-      "headlineLine1": "你的 AI 筆記",
-      "headlineLine2": "工作區。",
-      "subtitle": "上傳資料，連接 Notion、Google Drive、Gmail、Slack 等工具。基於你自己的內容，產生有據可查、帶引用的答案，以及音訊概覽、學習指南、常見問答和深度 AI 洞察。",
+      "headlineLine1": "你的 AI 工作空間",
+      "headlineLine2": "讓想法成為成果",
+      "subtitle": "連接你的知識、檔案與工具，讓 AI Agent 協作研究、規劃和創作。在同一個工作空間中檢查成果、持續完善，推進每一項任務。",
       "ctaSignedIn": "開啟儀表板",
       "ctaSignedOut": "免費開始",
       "seeHowItWorks": "瞭解運作方式",
       "stats": {
-        "llmProviders": "個大型語言模型供應商",
-        "outputFormats": "種輸出格式",
-        "integrations": "項整合"
-      }
+        "mcp": "可探索的 MCP 服務",
+        "skills": "可用 Skills",
+        "openSource": "開源",
+        "selfHosted": "支援自託管",
+        "unavailable": "暫不可用",
+        "loading": "載入中"
+      },
+      "demo": {
+        "workspace": "SourceWeft — 專案工作空間",
+        "request": "根據這些研究筆記，起草一份包含建議的專案簡報。",
+        "reply": "簡報草稿已準備好，供你檢查。以下是協作過程：",
+        "tasks": [
+          "研究 Agent · 閱讀來源資料",
+          "規劃 Agent · 整理發現與建議",
+          "寫作 Agent · 起草專案簡報"
+        ],
+        "artifact": "專案簡報",
+        "status": "草稿待檢查",
+        "sources": "基於你選定的資料",
+        "input": "你想完成什麼工作？",
+        "next": "檢查草稿，提出修改",
+        "working": "我會先研究資料、整理發現，再起草專案簡報。",
+        "activeTasks": [
+          "研究 Agent · 正在閱讀來源資料",
+          "規劃 Agent · 正在整理發現與建議",
+          "寫作 Agent · 正在起草專案簡報"
+        ]
+      },
+      "download": "下載客戶端"
     },
     "socialProof": {
-      "heading": "為深入鑽研的研究者、學生與創作者而生",
+      "heading": "為你想推進的每一項工作",
       "roles": {
         "researchers": {
           "title": "研究者",
-          "desc": "需要信任自己的來源"
+          "desc": "把資料整理成研究簡報"
         },
         "writers": {
           "title": "寫作者",
-          "desc": "在筆記之間串聯想法"
+          "desc": "讓想法成為可用的草稿"
         },
         "developers": {
           "title": "開發者",
-          "desc": "以文件和 RFC 為伴"
+          "desc": "研究技術決策，規劃專案"
         },
         "students": {
           "title": "學生",
-          "desc": "想真正學會，而不只是讀過"
+          "desc": "把課程資料變成學習指南"
         }
       }
     },
     "features": {
       "eyebrow": "功能",
-      "heading": "AI 知識工作區所需的一切",
-      "intro": "上傳資料，連接你的工具，獲得答案、音訊概覽、學習指南等等——全部基於你已有的知識，引用可逐條查證。",
+      "heading": "從交代任務，到持續完善成果",
+      "intro": "為 AI 提供完成工作所需的背景與工具。讓資料、對話和成果匯聚在同一個空間，伴隨專案持續積累。",
       "items": {
-        "outputs": {
-          "title": "從來源產生多種成果",
-          "description": "提出問題，或產生音訊概覽、學習指南、常見問答、簡報文件或時間軸——全部基於你上傳的資料，並附帶行內引用。",
+        "agents": {
+          "title": "讓 Agent 協作推進任務",
+          "description": "描述你需要完成的工作。Agent 可以分工研究、規劃和執行，結合工具與 Skills 彙總成果，逐步推進任務。",
           "bullets": [
-            "音訊概覽與 Podcast",
-            "學習指南、常見問答與時間軸",
-            "行內來源引用"
+            "研究、規劃與 Agent 協作",
+            "Web 工具、MCP 整合與 Skills",
+            "內建及可重複使用的自訂 Skills"
           ]
         },
         "connect": {
-          "title": "連接一切",
-          "description": "不止是上傳檔案——連接 Notion、Google Drive、Gmail、Slack 等工具。SourceWeft 為你已有的工具建立索引，讓知識隨手可得。",
+          "title": "把工作所需的背景帶進來",
+          "description": "上傳文件，或連接 Notion、Google Drive、Gmail 和 Slack。為每項任務提供相關資料，通過引用回到原文核對。",
           "bullets": [
-            "Notion、Google Drive、Gmail、Slack",
-            "支援 25+ 種檔案格式",
-            "瀏覽器擴充功能，隨手擷取"
+            "文件、網頁與已連接的資料源",
+            "可查證的來源引用",
+            "組織專案知識的共享空間"
           ]
         },
-        "everywhere": {
-          "title": "在你所到之處皆可用",
-          "description": "網頁版、桌面版與瀏覽器擴充功能——始終保持同步。在任何地方擷取網頁，在任何裝置上繼續對話。你的筆記隨你而行。",
+        "create": {
+          "title": "讓成果成為下一步的起點",
+          "description": "將資料轉化為報告、演示、學習指南等成果。檢查輸出、提出修改，再回到儲存的對話與檔案中繼續完善。",
           "bullets": [
-            "macOS 與 Windows 桌面版",
-            "Chrome 與 Edge 擴充功能",
-            "行動應用程式（即將推出）"
+            "報告、演示與創作成果",
+            "檢查並持續完善產生結果",
+            "儲存的對話與工作檔案"
           ]
         }
       }
     },
     "howItWorks": {
       "eyebrow": "運作方式",
-      "heading": "幾分鐘，從零到 AI 加持",
+      "heading": "從一項任務，到可用的成果",
       "steps": {
         "step1": {
-          "title": "建立你的工作區",
-          "body": "幾秒鐘即可建立個人或團隊工作區。把知識整理進不同空間——每個專案、主題或人生領域各歸其位。"
+          "title": "交代你要完成的工作",
+          "body": "從一個目標開始：研究簡報、演示或文章草稿。新增任務所需的檔案與資料，告訴 AI 你希望獲得怎樣的結果。"
         },
         "step2": {
-          "title": "連接你的知識來源",
-          "body": "連接 Notion、Google Drive、Gmail 或 Slack——或直接放入 PDF、貼上網址、擷取任意網頁。無論知識存放在哪，SourceWeft 都會為其建立索引。"
+          "title": "讓 Agent 協作呼叫工具",
+          "body": "Agent 拆解任務並分工處理，結合可用的資料、工具和 Skills 開展研究、規劃和創作。"
         },
         "step3": {
-          "title": "與你的 AI 對話",
-          "body": "提出問題、取得摘要、探索關聯。每個答案都基於你自己的來源，並附帶可逐條查證的行內引用。"
+          "title": "檢查成果，繼續完善",
+          "body": "開啟成果、核對來源，並提出修改。對話與檔案儲存在工作空間中，方便你隨時回來繼續推進任務。"
         }
+      },
+      "visual": {
+        "request": "起草一份專案簡報",
+        "context": "研究筆記 + 專案目標",
+        "result": "包含建議的簡報草稿",
+        "agents": [
+          "研究來源資料",
+          "整理關鍵發現",
+          "起草專案簡報"
+        ],
+        "review": "請進一步補充建議部分的細節。",
+        "reply": "簡報已修訂。你可以對照來源筆記，檢查建議部分。",
+        "artifact": "專案簡報 · 修訂稿"
       }
     },
     "pricing": {

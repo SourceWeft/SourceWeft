@@ -1,8 +1,8 @@
 {
   "metadata": {
     "home": {
-      "title": "SourceWeft - AI 笔记工作区",
-      "description": "SourceWeft 是一个连接知识来源的 AI 笔记工作区：上传文档、连接你的工具，获得有据可查、带引用的答案。"
+      "title": "SourceWeft - AI 工作空间 | 让想法成为成果",
+      "description": "在 SourceWeft 连接你的知识、文件与工具，让 AI Agent 协作研究、规划和创作。在同一个工作空间中检查成果、持续完善，推进每一项任务。"
     }
   },
   "header": {
@@ -13,14 +13,31 @@
       "mcpServers": "MCP 服务",
       "skills": "技能",
       "blog": "博客",
-      "download": "下载"
+      "download": "下载",
+      "explore": "探索",
+      "resources": "资源",
+      "changelog": "更新日志",
+      "about": "关于"
     },
     "signIn": "登录",
     "getStarted": "开始使用",
-    "openDashboard": "打开控制台"
+    "openDashboard": "打开控制台",
+    "navigation": "主导航",
+    "menu": "打开或关闭菜单",
+    "language": "语言",
+    "appearance": "外观",
+    "navDescriptions": {
+      "explore": "为你的 Agent 拓展工作能力",
+      "resources": "了解产品、发现新想法、跟进更新",
+      "mcpServers": "连接工具与服务，扩展 Agent 的能力",
+      "skills": "发现可复用的技能，用于下一项任务",
+      "blog": "阅读产品故事、实践指南与新想法",
+      "changelog": "查看最新功能、改进与发布记录",
+      "about": "了解 SourceWeft 的理念与愿景"
+    }
   },
   "footer": {
-    "tagline": "你的 AI 笔记工作区。连接一切，深入思考。",
+    "tagline": "你的 AI 工作空间。让想法成为成果。",
     "product": "产品",
     "company": "公司",
     "legal": "法律",
@@ -45,89 +62,127 @@
   "landing": {
     "hero": {
       "badge": "抢先体验中",
-      "headlineLine1": "你的 AI 笔记",
-      "headlineLine2": "工作区。",
-      "subtitle": "上传资料，连接 Notion、Google Drive、Gmail、Slack 等工具。基于你自己的内容，生成有据可查、带引用的答案，以及音频概览、学习指南、常见问答和深度 AI 洞察。",
+      "headlineLine1": "你的 AI 工作空间",
+      "headlineLine2": "让想法成为成果",
+      "subtitle": "连接你的知识、文件与工具，让 AI Agent 协作研究、规划和创作。在同一个工作空间中检查成果、持续完善，推进每一项任务。",
       "ctaSignedIn": "打开控制台",
       "ctaSignedOut": "免费开始",
       "seeHowItWorks": "了解工作原理",
       "stats": {
-        "llmProviders": "个大模型供应商",
-        "outputFormats": "种输出格式",
-        "integrations": "项集成"
-      }
+        "mcp": "可探索的 MCP 服务",
+        "skills": "可用 Skills",
+        "openSource": "开源",
+        "selfHosted": "支持自托管",
+        "unavailable": "暂不可用",
+        "loading": "加载中"
+      },
+      "demo": {
+        "workspace": "SourceWeft — 项目工作空间",
+        "request": "根据这些研究笔记，起草一份包含建议的项目简报。",
+        "reply": "简报草稿已准备好，供你检查。以下是协作过程：",
+        "tasks": [
+          "研究 Agent · 阅读来源资料",
+          "规划 Agent · 整理发现与建议",
+          "写作 Agent · 起草项目简报"
+        ],
+        "artifact": "项目简报",
+        "status": "草稿待检查",
+        "sources": "基于你选定的资料",
+        "input": "你想完成什么工作？",
+        "next": "检查草稿，提出修改",
+        "working": "我会先研究资料、整理发现，再起草项目简报。",
+        "activeTasks": [
+          "研究 Agent · 正在阅读来源资料",
+          "规划 Agent · 正在整理发现与建议",
+          "写作 Agent · 正在起草项目简报"
+        ]
+      },
+      "download": "下载客户端"
     },
     "socialProof": {
-      "heading": "为深入钻研的研究者、学生与创作者而生",
+      "heading": "为你想推进的每一项工作",
       "roles": {
         "researchers": {
           "title": "研究者",
-          "desc": "需要信任自己的来源"
+          "desc": "把资料整理成研究简报"
         },
         "writers": {
           "title": "写作者",
-          "desc": "在笔记之间串联想法"
+          "desc": "让想法成为可用的草稿"
         },
         "developers": {
           "title": "开发者",
-          "desc": "以文档和 RFC 为伴"
+          "desc": "研究技术决策，规划项目"
         },
         "students": {
           "title": "学生",
-          "desc": "想真正学会，而不只是读过"
+          "desc": "把课程资料变成学习指南"
         }
       }
     },
     "features": {
       "eyebrow": "功能",
-      "heading": "AI 知识工作区所需的一切",
-      "intro": "上传资料，连接你的工具，获得答案、音频概览、学习指南等等——全部基于你已有的知识，引用可逐条查证。",
+      "heading": "从交代任务，到持续完善成果",
+      "intro": "为 AI 提供完成工作所需的背景与工具。让资料、对话和成果汇聚在同一个空间，伴随项目持续积累。",
       "items": {
-        "outputs": {
-          "title": "从来源生成多种成果",
-          "description": "提出问题，或生成音频概览、学习指南、常见问答、简报文档或时间线——全部基于你上传的资料，并附带行内引用。",
+        "agents": {
+          "title": "让 Agent 协作推进任务",
+          "description": "描述你需要完成的工作。Agent 可以分工研究、规划和执行，结合工具与 Skills 汇总成果，逐步推进任务。",
           "bullets": [
-            "音频概览与播客",
-            "学习指南、常见问答与时间线",
-            "行内来源引用"
+            "研究、规划与 Agent 协作",
+            "Web 工具、MCP 集成与 Skills",
+            "内置及可复用的自定义 Skills"
           ]
         },
         "connect": {
-          "title": "连接一切",
-          "description": "不止是上传文件——连接 Notion、Google Drive、Gmail、Slack 等工具。SourceWeft 为你已有的工具建立索引，让知识随手可得。",
+          "title": "把工作所需的背景带进来",
+          "description": "上传文档，或连接 Notion、Google Drive、Gmail 和 Slack。为每项任务提供相关资料，通过引用回到原文核对。",
           "bullets": [
-            "Notion、Google Drive、Gmail、Slack",
-            "支持 25+ 种文件格式",
-            "浏览器扩展，随手捕获"
+            "文档、网页与已连接的资料源",
+            "可查证的来源引用",
+            "组织项目知识的共享空间"
           ]
         },
-        "everywhere": {
-          "title": "在你所到之处皆可用",
-          "description": "网页应用、桌面端与浏览器扩展——始终保持同步。在任何地方捕获网页，在任何设备上继续对话。你的笔记随你而行。",
+        "create": {
+          "title": "让成果成为下一步的起点",
+          "description": "将资料转化为报告、演示、学习指南等成果。检查输出、提出修改，再回到保存的对话与文件中继续完善。",
           "bullets": [
-            "macOS 与 Windows 桌面端",
-            "Chrome 与 Edge 扩展",
-            "移动应用（即将推出）"
+            "报告、演示与创作成果",
+            "检查并持续完善生成结果",
+            "保存的对话与工作文件"
           ]
         }
       }
     },
     "howItWorks": {
       "eyebrow": "工作原理",
-      "heading": "几分钟，从零到 AI 加持",
+      "heading": "从一项任务，到可用的成果",
       "steps": {
         "step1": {
-          "title": "创建你的工作区",
-          "body": "几秒钟即可创建个人或团队工作区。把知识整理进不同空间——每个项目、主题或人生领域各归其位。"
+          "title": "交代你要完成的工作",
+          "body": "从一个目标开始：研究简报、演示或文章草稿。添加任务所需的文件与资料，告诉 AI 你希望获得怎样的结果。"
         },
         "step2": {
-          "title": "连接你的知识来源",
-          "body": "连接 Notion、Google Drive、Gmail 或 Slack——或直接放入 PDF、粘贴网址、捕获任意网页。无论知识存放在哪，SourceWeft 都会为其建立索引。"
+          "title": "让 Agent 协作调用工具",
+          "body": "Agent 拆解任务并分工处理，结合可用的资料、工具和 Skills 开展研究、规划和创作。"
         },
         "step3": {
-          "title": "与你的 AI 对话",
-          "body": "提出问题、获取摘要、探索关联。每个答案都基于你自己的来源，并附带可逐条查证的行内引用。"
+          "title": "检查成果，继续完善",
+          "body": "打开成果、核对来源，并提出修改。对话与文件保存在工作空间中，方便你随时回来继续推进任务。"
         }
+      },
+      "visual": {
+        "request": "起草一份项目简报",
+        "context": "研究笔记 + 项目目标",
+        "result": "包含建议的简报草稿",
+        "agents": [
+          "研究来源资料",
+          "整理关键发现",
+          "起草项目简报"
+        ],
+        "review": "请进一步补充建议部分的细节。",
+        "reply": "简报已修订。你可以对照来源笔记，检查建议部分。",
+        "artifact": "项目简报 · 修订稿"
       }
     },
     "pricing": {

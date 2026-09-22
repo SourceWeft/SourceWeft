@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
-import type { ComponentType } from "react";
+import { Suspense, type ComponentType, type ReactNode } from "react";
+import { MarketStats } from "../_landing/components/market-stats";
+import { MarketStatsView } from "../_landing/components/market-stats-view";
 import { hasLocale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { notFound } from "next/navigation";
@@ -12,6 +14,7 @@ import { buildAlternates } from "../../lib/i18n/metadata";
 
 type LandingPageProps = {
   initialAuthState?: LandingAuthState;
+  marketStats: ReactNode;
 };
 
 // Register landing page versions here.
@@ -49,7 +52,13 @@ export default async function RootPage({ params }: PageProps<"/[locale]">) {
 
   return (
     <MobileHomeGate>
-      <LandingPage />
+      <LandingPage
+        marketStats={
+          <Suspense fallback={<MarketStatsView loading />}>
+            <MarketStats />
+          </Suspense>
+        }
+      />
     </MobileHomeGate>
   );
 }

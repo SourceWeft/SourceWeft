@@ -81,7 +81,7 @@ function SectionHeading({
 function ChecksumRow({ artifact }: { artifact: DownloadArtifact }) {
   const t = useTranslations("download.allDownloads");
   return (
-    <div className="flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+    <div className="flex min-w-0 max-w-full items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
       <span className="shrink-0">SHA-256</span>
       <code
         title={artifact.sha256}
@@ -103,13 +103,16 @@ function ArtifactRow({
 }) {
   const t = useTranslations("download.allDownloads");
   return (
-    <div className="rounded-xl border border-zinc-100 bg-zinc-50 p-4 dark:border-white/[0.08] dark:bg-white/[0.03]">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
+    <div className="min-w-0 rounded-xl border border-zinc-100 bg-zinc-50 p-4 dark:border-white/[0.08] dark:bg-white/[0.03]">
+      <div className="flex flex-col items-start gap-3">
+        <div className="w-full min-w-0">
           <p className="text-sm font-semibold text-zinc-950 dark:text-white">
             {display.archLabels[artifact.arch]}
           </p>
-          <p className="mt-0.5 truncate text-xs text-zinc-500 dark:text-zinc-400">
+          <p
+            title={artifact.filename}
+            className="mt-0.5 truncate text-xs text-zinc-500 dark:text-zinc-400"
+          >
             {artifact.filename}
           </p>
           <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
@@ -126,7 +129,7 @@ function ArtifactRow({
           {t("download")}
         </a>
       </div>
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+      <div className="mt-3 grid justify-items-start gap-2">
         <ChecksumRow artifact={artifact} />
         <a
           href={artifact.githubUrl}
@@ -160,10 +163,10 @@ function PlatformCard({
   return (
     <article
       id={`download-${display.id}`}
-      className="flex flex-col rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-white/[0.08] dark:bg-zinc-900/50"
+      className="row-span-2 grid min-w-0 grid-rows-subgrid gap-5 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-white/[0.08] dark:bg-zinc-900/50"
     >
-      <div className="flex items-center gap-3">
-        <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-50 text-zinc-700 dark:border-white/10 dark:bg-zinc-800 dark:text-zinc-200">
+      <div className="flex items-start gap-3">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-50 text-zinc-700 dark:border-white/10 dark:bg-zinc-800 dark:text-zinc-200">
           <Icon className="size-5" />
         </span>
         <div>
@@ -175,7 +178,7 @@ function PlatformCard({
           </p>
         </div>
       </div>
-      <div className="mt-5 flex flex-1 flex-col gap-3">
+      <div className="flex min-w-0 flex-col gap-3">
         {hasAny ? (
           artifacts.map(({ arch, artifact }) =>
             artifact ? (

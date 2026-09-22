@@ -2,12 +2,13 @@ import { publicWebBaseUrl } from "../lib/public-runtime-config";
 
 export const SITE_NAME = "SourceWeft";
 export const SITE_URL = publicWebBaseUrl();
-export const DEFAULT_TITLE = "SourceWeft - AI Notebook Workspace";
+export const DEFAULT_TITLE =
+  "SourceWeft - AI Workspace | Built to get work done";
 export const DEFAULT_DESCRIPTION =
-  "SourceWeft is an AI notebook workspace for connected knowledge sources: upload documents, connect your tools, and get source-grounded answers with citations.";
+  "Bring your knowledge, files, and tools together in SourceWeft. Let AI agents research, plan, and create, then review and refine the results in one workspace.";
 
 export const OG_IMAGE = {
-  alt: "SourceWeft - AI notebook workspace for connected knowledge sources",
+  alt: "SourceWeft - Your AI workspace. Built to get work done.",
   height: 630,
   url: "/og",
   width: 1200,

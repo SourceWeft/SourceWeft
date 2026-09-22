@@ -35,7 +35,13 @@ function IconGlobe() {
   );
 }
 
-export function LanguageSwitcher() {
+export function LanguageSwitcher({
+  align = "end",
+  side = "bottom",
+}: {
+  align?: "start" | "end";
+  side?: "top" | "bottom";
+}) {
   const t = useTranslations("languageSwitcher");
   const activeLocale = useLocale();
   const router = useRouter();
@@ -127,7 +133,7 @@ export function LanguageSwitcher() {
         <ul
           role="listbox"
           aria-label={t("label")}
-          className="absolute right-0 top-full z-50 mt-1 min-w-36 overflow-hidden rounded-lg border border-zinc-200 bg-white py-1 shadow-lg dark:border-white/10 dark:bg-zinc-900"
+          className={`absolute ${align === "start" ? "left-0" : "right-0"} ${side === "top" ? "bottom-full mb-1" : "top-full mt-1"} z-50 min-w-36 overflow-hidden rounded-lg border border-zinc-200 bg-white py-1 shadow-lg dark:border-white/10 dark:bg-zinc-900`}
         >
           {LOCALES.map((meta) => {
             const isActive = isLocale(activeLocale) && meta.id === activeLocale;
