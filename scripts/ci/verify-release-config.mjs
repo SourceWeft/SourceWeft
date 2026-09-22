@@ -1,4 +1,4 @@
-import { appendFileSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 export function releaseVersion(tag) {
@@ -22,22 +22,46 @@ export function releaseVersion(tag) {
   };
 }
 
-export function validateReleaseConfig(env) {
+export function validateReleaseConfig(env, metadata = {}) {
   const result = releaseVersion(env.GITHUB_REF_NAME);
-  return result;
+  if (
+    Object.hasOwn(metadata, "githubPrerelease") &&
+    typeof metadata.githubPrerelease !== "boolean"
+  ) {
+    throw new Error("Changelog githubPrerelease must be a boolean.");
+  }
+  // GitHub's presentation flag is independent of semver update channels.
+  // An RC can be a regular GitHub Release without advancing stable/latest.
+  return {
+    ...result,
+    githubPrerelease: metadata.githubPrerelease ?? result.prerelease,
+  };
 }
 
 if (
   process.argv[1] &&
   import.meta.url === pathToFileURL(process.argv[1]).href
 ) {
-  const result = validateReleaseConfig(process.env);
+  const { version } = releaseVersion(process.env.GITHUB_REF_NAME);
+  const metadata = JSON.parse(
+    readFileSync(
+      new URL(
+        `../../apps/web/content/changelog/v${version}.json`,
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  );
+  if (metadata.tag !== process.env.GITHUB_REF_NAME) {
+    throw new Error("Changelog tag must match the release tag.");
+  }
+  const result = validateReleaseConfig(process.env, metadata);
   if (process.env.GITHUB_OUTPUT)
     appendFileSync(
       process.env.GITHUB_OUTPUT,
-      `latest=${result.latest}\nprerelease=${result.prerelease}\n`,
+      `latest=${result.latest}\nprerelease=${result.githubPrerelease}\n`,
     );
   console.log(
-    `Release ${result.version} configuration passed (${result.prerelease ? "prerelease" : "stable"}).`,
+    `Release ${result.version} configuration passed (GitHub prerelease=${result.githubPrerelease}, latest=${result.latest}).`,
   );
 }

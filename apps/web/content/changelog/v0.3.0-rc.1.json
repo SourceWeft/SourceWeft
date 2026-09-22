@@ -1,0 +1,20 @@
+{
+  "tag": "v0.3.0-rc.1",
+  "releasedAt": "2026-09-22",
+  "category": "Release",
+  "commit": "6b31d0bf",
+  "title": "Multilingual workspaces, a community skill marketplace, and signed desktop updates",
+  "summary": "SourceWeft now supports English, Simplified Chinese, and Traditional Chinese across the application and public pages. This release adds a community skill marketplace, richer sub-agent conversations, and signed desktop updates.",
+  "items": [
+    "Added English, Simplified Chinese, and Traditional Chinese interfaces across authentication, workspaces, settings, skill discovery, sharing, and downloads. Language choices follow your account across devices and update the desktop tray.",
+    "Introduced public and in-app community skill discovery with search, categories, collections, version history, installation instructions, and author claims. Repository owners can request removal of their skills from the marketplace.",
+    "Added skill ratings, reviews, reports, and sandbox run statistics, with moderation controls and an audit trail. AI-generated skill overviews are available in three languages when analysis has been configured.",
+    "Improved community skill imports with asynchronous processing, source provenance checks, workspace-scoped installation, and confirmation when an update requests broader capabilities. Skills installed by an agent can be used during the same conversation turn.",
+    "Added dedicated sub-agent conversations, workspace personas, and a side panel for following delegated work. Selected skills remain available per conversation without being treated as explicit invocations.",
+    "Added signed application updates and Linux x64 AppImage packaging, alongside the existing macOS and Windows installers. The download page now includes localized installation guidance.",
+    "Updated authentication screens and invitation flows. Self-hosted installations require email verification only when a delivery provider is configured, and read that setting through the internal API.",
+    "Expanded public MCP pages and improved localized navigation, sharing metadata, and search indexing. Skill pages and sitemap entries advertise only languages with visible AI overviews.",
+    "Improved mobile sign-in and chat layout, local folder browsing before a first message, sandbox connection recovery, and resilience when tool calls fail."
+  ],
+  "githubPrerelease": false
+}

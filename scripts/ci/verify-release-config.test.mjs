@@ -32,3 +32,40 @@ test("universal image release does not require publisher URLs or a desktop versi
     true,
   );
 });
+
+test("GitHub release flag can be disabled without promoting an RC to stable", () => {
+  assert.deepEqual(
+    validateReleaseConfig(
+      { GITHUB_REF_NAME: "v0.3.0-rc.1" },
+      { githubPrerelease: false },
+    ),
+    {
+      version: "0.3.0-rc.1",
+      prerelease: true,
+      latest: false,
+      githubPrerelease: false,
+    },
+  );
+  assert.equal(releaseVersion("v0.3.0-rc.1").prerelease, true);
+});
+
+test("GitHub release flag defaults to semver and rejects malformed overrides", () => {
+  assert.equal(
+    validateReleaseConfig({ GITHUB_REF_NAME: "v0.3.0-rc.2" }).githubPrerelease,
+    true,
+  );
+  assert.equal(
+    validateReleaseConfig({ GITHUB_REF_NAME: "v0.3.0" }).githubPrerelease,
+    false,
+  );
+  for (const githubPrerelease of ["false", 0, null, undefined]) {
+    assert.throws(
+      () =>
+        validateReleaseConfig(
+          { GITHUB_REF_NAME: "v0.3.0-rc.1" },
+          { githubPrerelease },
+        ),
+      /must be a boolean/,
+    );
+  }
+});

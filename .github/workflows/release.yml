@@ -205,9 +205,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_ID: ${{ steps.github_release.outputs.id }}
+          RELEASE_PRERELEASE: ${{ needs.preflight.outputs.prerelease }}
         run: |
           gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
             -F draft=false -f tag_name="$GITHUB_REF_NAME" -f name="$GITHUB_REF_NAME" \
+            -F prerelease="$RELEASE_PRERELEASE" \
             --jq .html_url
 
       - name: Promote verified application update channels

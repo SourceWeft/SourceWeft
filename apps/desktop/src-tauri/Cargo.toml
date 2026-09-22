@@ -1,6 +1,6 @@
 [package]
 name = "sourceweft-desktop"
-version = "0.2.0-rc.3"
+version = "0.3.0-rc.1"
 description = "SourceWeft desktop app"
 edition = "2021"
 license = "Apache-2.0"
