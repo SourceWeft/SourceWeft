@@ -2,6 +2,12 @@ name: CI
 
 on:
   workflow_call:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "Commit SHA on main to check and publish (7–40 hex characters)"
+        required: true
+        type: string
   pull_request:
     branches: [main]
   push:
@@ -12,10 +18,48 @@ permissions:
   packages: read
 
 jobs:
+  revision:
+    name: Resolve source commit
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Resolve and validate source commit
+        id: resolve
+        shell: bash
+        env:
+          SELECTED_COMMIT: ${{ inputs.commit }}
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+            if [[ "$GITHUB_REF" != refs/heads/main ]]; then
+              echo "::error::Run manual image publication from the main workflow branch."
+              exit 1
+            fi
+            if [[ ! "$SELECTED_COMMIT" =~ ^[0-9a-fA-F]{7,40}$ ]]; then
+              echo "::error::Provide a commit SHA containing 7–40 hexadecimal characters."
+              exit 1
+            fi
+            sha=$(git rev-parse --verify "${SELECTED_COMMIT}^{commit}")
+            if ! git merge-base --is-ancestor "$sha" refs/remotes/origin/main; then
+              echo "::error::The selected commit must belong to main."
+              exit 1
+            fi
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Source commit: $sha" >> "$GITHUB_STEP_SUMMARY"
+
   update-signatures:
+    needs: revision
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.revision.outputs.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 24.18.0
@@ -25,10 +69,13 @@ jobs:
         env:
           DESKTOP_UPDATE_VERIFIER: scripts/ci/update-verifier/target/debug/sourceweft-update-verifier
   lint-and-type:
+    needs: revision
     name: Lint & Type Check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.revision.outputs.sha }}
       - uses: pnpm/action-setup@v4
         with:
           version: 10.19.0
@@ -40,12 +87,15 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: .turbo
-          key: turbo-${{ runner.os }}-node22.23.2-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.sha }}
+          key: turbo-${{ runner.os }}-node22.23.2-${{ hashFiles('pnpm-lock.yaml') }}-${{ needs.revision.outputs.sha }}
           restore-keys: |
             turbo-${{ runner.os }}-node22.23.2-${{ hashFiles('pnpm-lock.yaml') }}-
             turbo-${{ runner.os }}-node22.23.2-
       - run: pnpm install --frozen-lockfile
       - run: pnpm audit --audit-level=moderate
+      - name: Verify manual image workflow when present in selected revision
+        if: hashFiles('scripts/ci/manual-image-workflow.test.mjs') != ''
+        run: node --test scripts/ci/manual-image-workflow.test.mjs
       - run: node --test scripts/ci/verify-release-config.test.mjs scripts/ci/publish-downloads.test.mjs scripts/ci/publish-desktop-updates.test.mjs scripts/ci/desktop-update-manifest.test.mjs docker/selfhost-config.test.mjs
       - run: pnpm lint
       - run: pnpm check-types
@@ -56,7 +106,7 @@ jobs:
       fail-fast: false
       matrix:
         node: ["22.23.2", "24.18.0"]
-    needs: lint-and-type
+    needs: [revision, lint-and-type]
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -85,6 +135,8 @@ jobs:
           --health-retries 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.revision.outputs.sha }}
       - uses: pnpm/action-setup@v4
         with:
           version: 10.19.0
@@ -96,7 +148,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: .turbo
-          key: turbo-${{ runner.os }}-node${{ matrix.node }}-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.sha }}
+          key: turbo-${{ runner.os }}-node${{ matrix.node }}-${{ hashFiles('pnpm-lock.yaml') }}-${{ needs.revision.outputs.sha }}
           restore-keys: |
             turbo-${{ runner.os }}-node${{ matrix.node }}-${{ hashFiles('pnpm-lock.yaml') }}-
             turbo-${{ runner.os }}-node${{ matrix.node }}-
@@ -138,7 +190,7 @@ jobs:
     # handling has only ever been run on macOS and Linux, so its first runs are
     # information. Make it blocking once it has been green.
     name: CLI (${{ matrix.os }}, Node ${{ matrix.node }})
-    needs: lint-and-type
+    needs: [revision, lint-and-type]
     runs-on: ${{ matrix.os }}
     continue-on-error: ${{ matrix.os == 'windows-latest' }}
     strategy:
@@ -156,6 +208,8 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.revision.outputs.sha }}
       - uses: pnpm/action-setup@v4
         with:
           version: 10.19.0
@@ -175,7 +229,7 @@ jobs:
 
   docker-build:
     name: Docker Build
-    needs: test
+    needs: [revision, test]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     services:
@@ -203,6 +257,8 @@ jobs:
           --health-retries 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.revision.outputs.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22.23.2
@@ -228,7 +284,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: selfhost-compose-${{ github.sha }}
+          name: selfhost-compose-${{ needs.revision.outputs.sha }}
           path: |
             output/ci/selfhost/
             output/selfhost-playwright/
@@ -243,17 +299,20 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: docker-startup-${{ github.sha }}
+          name: docker-startup-${{ needs.revision.outputs.sha }}
           path: output/ci/docker-startup/
           if-no-files-found: ignore
           retention-days: 7
 
   html-artifacts:
+    needs: revision
     name: HTML runtime and complete library
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.revision.outputs.sha }}
       - uses: pnpm/action-setup@v4
         with:
           version: 10.19.0
@@ -288,9 +347,116 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: html-verification-${{ github.sha }}
+          name: html-verification-${{ needs.revision.outputs.sha }}
           path: |
             output/html-library
             output/html-pages
             output/html-behavior
           retention-days: 7
+
+  docker-image:
+    name: Docker Image
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    needs:
+      [
+        revision,
+        update-signatures,
+        lint-and-type,
+        test,
+        cli-cross-platform,
+        docker-build,
+        html-artifacts,
+      ]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    concurrency:
+      group: docker-image-${{ needs.revision.outputs.sha }}
+      cancel-in-progress: false
+    outputs:
+      digest: ${{ steps.result.outputs.digest }}
+      image: ${{ steps.metadata.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.revision.outputs.sha }}
+      - name: Set image metadata
+        id: metadata
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ needs.revision.outputs.sha }}
+        run: |
+          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+          echo "tag=sha-$SOURCE_SHA" >> "$GITHUB_OUTPUT"
+          echo "time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Check for an existing commit image
+        id: existing
+        shell: bash
+        env:
+          IMAGE: ${{ steps.metadata.outputs.image }}
+          TAG: ${{ steps.metadata.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if docker buildx imagetools inspect "$IMAGE:$TAG" --format '{{json .Manifest}}' > manifest.json 2> manifest-error.txt; then
+            digest=$(jq -er '.digest | select(test("^sha256:[0-9a-f]{64}$"))' manifest.json)
+            echo "digest=$digest" >> "$GITHUB_OUTPUT"
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          elif grep -Fxq "ERROR: $IMAGE:$TAG: not found" manifest-error.txt; then
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          else
+            cat manifest-error.txt >&2
+            exit 1
+          fi
+      - name: Build and push image
+        id: build
+        if: steps.existing.outputs.exists == 'false'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.metadata.outputs.image }}:${{ steps.metadata.outputs.tag }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ needs.revision.outputs.sha }}
+          build-args: |
+            BUILD_SHA=${{ needs.revision.outputs.sha }}
+            BUILD_TIME=${{ steps.metadata.outputs.time }}
+          cache-from: type=gha,scope=docker-image
+          cache-to: type=gha,scope=docker-image,mode=max
+          provenance: mode=max
+          sbom: true
+      - name: Record immutable image reference
+        id: result
+        shell: bash
+        env:
+          IMAGE: ${{ steps.metadata.outputs.image }}
+          TAG: ${{ steps.metadata.outputs.tag }}
+          SOURCE_SHA: ${{ needs.revision.outputs.sha }}
+          DIGEST: ${{ steps.build.outputs.digest || steps.existing.outputs.digest }}
+        run: |
+          set -euo pipefail
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          docker buildx imagetools inspect "$IMAGE@$DIGEST"
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Docker Image"
+            echo ""
+            echo "Commit: $SOURCE_SHA"
+            echo ""
+            echo "Tag: $IMAGE:$TAG"
+            echo ""
+            echo "Deploy by digest: $IMAGE@$DIGEST"
+            echo ""
+            echo "Publication does not trigger deployment."
+          } >> "$GITHUB_STEP_SUMMARY"
