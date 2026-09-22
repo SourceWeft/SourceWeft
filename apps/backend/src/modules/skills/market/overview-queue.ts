@@ -1,3 +1,9 @@
+import {
+  requestSkillAnalysis,
+  failSkillAnalysis,
+  readSkillAnalysis,
+  findInterruptedSkillAnalyses,
+} from "./analysis-repository";
 import { enqueueWithAudit, jobsQueue } from "../../../shared/queue";
 
 /**
@@ -20,6 +26,7 @@ export type SkillOverviewGenerateJobPayload = {
   // job audit trail attribute the job.
   skillId: string;
   reason: "scheduled" | "regenerate";
+  requestId?: string;
   // The billing team/workspace at the time it was queued, for the audit
   // trail; the processor reads the setting afresh.
   teamId?: string;
@@ -41,18 +48,73 @@ export async function enqueueSkillOverviewJob(
   payload: SkillOverviewGenerateJobPayload,
   options: { jobId?: string } = {},
 ) {
-  return enqueueWithAudit(SKILL_OVERVIEW_GENERATE_JOB, payload, {
-    jobId: options.jobId ?? skillOverviewJobId(payload.skillVersionId),
-    attempts: SKILL_OVERVIEW_JOB_ATTEMPTS,
-    backoff: { type: "exponential", delay: SKILL_OVERVIEW_BACKOFF_MS },
-    removeOnComplete: true,
-    // Kept, so the id keeps blocking the same content; bounded all the same.
-    removeOnFail: { count: 5_000 },
-  });
+  const state = payload.requestId
+    ? await readSkillAnalysis(payload.skillVersionId)
+    : await requestSkillAnalysis(
+        payload.skillVersionId,
+        payload.reason === "regenerate",
+      );
+  if (
+    !state ||
+    (payload.requestId &&
+      (state.requestId !== payload.requestId ||
+        !["pending", "running"].includes(state.status)))
+  )
+    return null;
+  try {
+    return await enqueueWithAudit(
+      SKILL_OVERVIEW_GENERATE_JOB,
+      { ...payload, requestId: state.requestId },
+      {
+        jobId:
+          options.jobId ??
+          `${skillOverviewJobId(payload.skillVersionId)}_${state.requestId}`,
+        attempts: SKILL_OVERVIEW_JOB_ATTEMPTS,
+        backoff: { type: "exponential", delay: SKILL_OVERVIEW_BACKOFF_MS },
+        removeOnComplete: true,
+        removeOnFail: { count: 5_000 },
+      },
+    );
+  } catch (error) {
+    await failSkillAnalysis(
+      payload.skillVersionId,
+      state.requestId,
+      "Could not queue analysis; retry from administration",
+      false,
+    );
+    throw error;
+  }
 }
 
 /** Whether a job with this id is queued, running, delayed or failed. */
 export async function skillOverviewJobExists(jobId: string): Promise<boolean> {
   const job = await jobsQueue.getJob(jobId);
   return Boolean(job);
+}
+
+/** Repair a crash between the durable reservation and Redis enqueue; failed jobs stay failed. */
+export async function recoverSkillOverviewJobs() {
+  let recovered = 0;
+  for (const state of await findInterruptedSkillAnalyses()) {
+    const jobId = `${skillOverviewJobId(state.skillVersionId)}_${state.requestId}`;
+    const job = await jobsQueue.getJob(jobId);
+    if (job) {
+      if ((await job.getState()) === "failed")
+        await failSkillAnalysis(
+          state.skillVersionId,
+          state.requestId,
+          "Worker job failed; retry from administration",
+          false,
+        );
+      continue;
+    }
+    const result = await enqueueSkillOverviewJob({
+      skillVersionId: state.skillVersionId,
+      skillId: state.skillId,
+      requestId: state.requestId,
+      reason: state.force ? "regenerate" : "scheduled",
+    });
+    if (result) recovered++;
+  }
+  return recovered;
 }

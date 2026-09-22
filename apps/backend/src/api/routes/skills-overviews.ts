@@ -1,5 +1,12 @@
+import {
+  previewSkillAnalysis,
+  enqueueSkillAnalysisBatch,
+} from "../../modules/skills/market/analysis-admin";
 import type { Hono } from "hono";
 import {
+  skillAnalysisPreviewResponseSchema,
+  skillAnalysisBatchRequestSchema,
+  skillAnalysisBatchResponseSchema,
   getSkillOverviewAdminResponseSchema,
   getSkillOverviewBillingResponseSchema,
   putSkillOverviewBillingRequestSchema,
@@ -98,6 +105,35 @@ export function registerSkillOverviewRoutes(app: Hono) {
     );
   });
 
+  app.get("/v1/skills/registry/admin/overviews/preview", async (c) => {
+    await requireSkillMarketAdmin(c);
+    const cursor = c.req.query("cursor");
+    if (cursor && cursor.length > 200) throw ApiError.invalidJson();
+    return ApiResponse.success(
+      c,
+      skillAnalysisPreviewResponseSchema.parse(
+        await previewSkillAnalysis(cursor),
+      ),
+    );
+  });
+  app.post("/v1/skills/registry/admin/overviews/batch", async (c) => {
+    const session = await requireSkillMarketAdmin(c);
+    const parsed = skillAnalysisBatchRequestSchema.safeParse(await readJson(c));
+    if (!parsed.success)
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    return ApiResponse.success(
+      c,
+      skillAnalysisBatchResponseSchema.parse(
+        await enqueueSkillAnalysisBatch(
+          parsed.data.skillVersionIds,
+          getSessionUserId(session),
+        ),
+      ),
+    );
+  });
+
   app.get("/v1/skills/registry/admin/overviews/status", async (c) => {
     await requireSkillMarketAdmin(c);
     return ApiResponse.success(
@@ -114,6 +150,12 @@ export function registerSkillOverviewRoutes(app: Hono) {
       c,
       getSkillOverviewAdminResponseSchema.parse({
         ...state,
+        analysis: state.analysis
+          ? {
+              ...state.analysis,
+              updatedAt: state.analysis.updatedAt.toISOString(),
+            }
+          : null,
         overviews: state.overviews.map((entry) => ({
           ...entry,
           generatedAt: entry.generatedAt.toISOString(),

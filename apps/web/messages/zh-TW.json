@@ -3324,7 +3324,8 @@
       "workspaces": "{count, plural, =1 {已新增到 1 個工作區} other {已新增到 {compact} 個工作區}}",
       "stars": "{count} 個 GitHub 星標",
       "updated": "{relative}更新",
-      "unknownAuthor": "未知作者"
+      "unknownAuthor": "未知作者",
+      "pendingCategory": "待分類"
     },
     "collections": {
       "itemCount": "{count, plural, other {# 個技能}}",
@@ -3651,7 +3652,8 @@
       "featuredTitle": "來自精選發布者：知名廠商自己的技能儲存庫",
       "includesScripts": "包含腳本",
       "installs": "已新增到 {formatted} 個工作區",
-      "installsOne": "已新增到 1 個工作區"
+      "installsOne": "已新增到 1 個工作區",
+      "pendingCategory": "待分類"
     },
     "detail": {
       "categories": "分類",
@@ -3886,7 +3888,27 @@
       "show": "顯示",
       "hiddenDone": "概覽已隱藏。",
       "shownDone": "概覽已顯示。",
-      "failed": "出了點問題，請重試。"
+      "failed": "出了點問題，請重試。",
+      "analysisState": "分析狀態",
+      "categorySource": "分類來源",
+      "rationale": "分類原因",
+      "evidence": "判斷依據",
+      "retained": "新分析完成前，既有概述仍會保留。",
+      "analysisStatuses": {
+        "pending": "等候分析",
+        "running": "分析中",
+        "ready": "已完成",
+        "failed": "分析失敗",
+        "needs-review": "需要人工審核",
+        "legacy": "舊版分析，請重新產生",
+        "missing": "尚未分析"
+      },
+      "categorySources": {
+        "auto": "舊版規則",
+        "admin": "管理員",
+        "ai": "AI 分析",
+        "none": "尚未分類"
+      }
     },
     "settings": {
       "title": "AI 概覽",
@@ -3911,7 +3933,20 @@
       "billingSet": "已設定計費",
       "yes": "是",
       "no": "否",
-      "updatedByNote": "（最後修改人 <who>{userId}</who>{hasDate, select, yes {，{date}} other {}}）"
+      "updatedByNote": "（最後修改人 <who>{userId}</who>{hasDate, select, yes {，{date}} other {}}）",
+      "qualityGate": "準確率評估經審核並達標後，即可執行批次移轉。",
+      "batchTitle": "檢視並重新產生分析",
+      "batchDescription": "每批可先檢視最多 20 項技能，確認後才執行付費分析。管理員指定的分類會保留；產生失敗時，既有內容也會繼續顯示。",
+      "previewBatch": "預覽分析批次",
+      "batchQueued": "已排入 {queued} 項，略過 {skipped} 項。",
+      "batchEmpty": "此批次沒有技能。",
+      "stale": "待更新",
+      "currentCategories": "目前分類",
+      "suggestedCategories": "AI 分類建議",
+      "noCategories": "尚未分類",
+      "noSuggestion": "尚無建議",
+      "generateBatch": "產生或重試這批分析（{count} 項）",
+      "nextBatch": "下一批"
     }
   },
   "dashboardSkillReviews": {

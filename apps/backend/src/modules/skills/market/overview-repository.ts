@@ -1,3 +1,4 @@
+import { readSkillAnalysis } from "./analysis-repository";
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import {
@@ -6,6 +7,7 @@ import {
   skillMarketSettings,
   skillVersionFiles,
   skillVersionOverviews,
+  skillVersionAnalysis,
   skillVersions,
   workspaceMemberships,
   workspaces,
@@ -81,6 +83,7 @@ export async function findSkillOverviewCandidates(input: {
       and(
         skillOverviewEligibleCondition(),
         sql`not ${hasOverview}`,
+        sql`not exists (select 1 from ${skillVersionAnalysis} a where a.skill_version_id = ${skillVersions.id})`,
         input.skillIds
           ? inArray(skillDefinitions.id, [...input.skillIds])
           : undefined,
@@ -92,82 +95,6 @@ export async function findSkillOverviewCandidates(input: {
       asc(skillDefinitions.id),
     )
     .limit(input.limit);
-}
-
-/**
- * Copies another version's overviews when it has the same content — the same
- * skill re-indexed, or the same folder imported twice — so identical text is
- * never summarized twice. The newest source per locale; an admin's `hidden`
- * travels with it, since it is a judgement about the text. Returns how many
- * rows were written.
- */
-export async function copySkillOverviewsFromSameBundle(input: {
-  skillVersionId: string;
-  bundleSha256: string;
-}): Promise<number> {
-  const result = await db.execute(sql`
-    insert into skill_version_overviews
-      (skill_version_id, locale, bundle_sha256, overview, model, hidden, generated_at)
-    select distinct on (source.locale)
-      ${input.skillVersionId}, source.locale, source.bundle_sha256,
-      source.overview, source.model, source.hidden, source.generated_at
-    from skill_version_overviews source
-    where source.bundle_sha256 = ${input.bundleSha256}
-      and source.skill_version_id <> ${input.skillVersionId}
-    order by source.locale, source.generated_at desc
-    on conflict (skill_version_id, locale) do nothing
-  `);
-  return Number((result as { rowCount?: number | null }).rowCount ?? 0);
-}
-
-/**
- * The same copy for every eligible version that lacks an overview, in one
- * statement. Returns how many versions received one. `skillIds` narrows it
- * (tests use it to stay within their own rows).
- */
-export async function copySkillOverviewsForAllSameBundles(
-  input: { skillIds?: readonly string[] } = {},
-): Promise<number> {
-  const scope =
-    input.skillIds && input.skillIds.length > 0
-      ? sql`and d.id in (${sql.join(
-          input.skillIds.map((id) => sql`${id}`),
-          sql`, `,
-        )})`
-      : input.skillIds
-        ? sql`and false`
-        : sql``;
-  const result = await db.execute(sql`
-    insert into skill_version_overviews
-      (skill_version_id, locale, bundle_sha256, overview, model, hidden, generated_at)
-    select distinct on (v.id, source.locale)
-      v.id, source.locale, source.bundle_sha256,
-      source.overview, source.model, source.hidden, source.generated_at
-    from skill_definitions d
-    join skill_versions v on v.skill_id = d.id
-    join skill_version_overviews source
-      on source.bundle_sha256 = coalesce(v.bundle_sha256, v.content_hash)
-     and source.skill_version_id <> v.id
-    where d.visibility = 'public'
-      and d.source_type = 'registry_github'
-      and d.status = 'active'
-      and v.status = 'published'
-      and v.is_current = true
-      and not exists (
-        select 1 from skill_version_overviews existing
-        where existing.skill_version_id = v.id
-      )
-      ${scope}
-    order by v.id, source.locale, source.generated_at desc
-    on conflict (skill_version_id, locale) do nothing
-    returning skill_version_id
-  `);
-  // The `where` above is `skillOverviewEligibleCondition` over the aliases
-  // this statement needs; change the two together.
-  const rows = (
-    result as unknown as { rows?: Array<{ skill_version_id: string }> }
-  ).rows;
-  return new Set((rows ?? []).map((row) => row.skill_version_id)).size;
 }
 
 // ---------------------------------------------------------------------------
@@ -335,6 +262,8 @@ export type SkillOverviewAdminState = {
   skillVersionId: string | null;
   bundleSha256: string | null;
   eligible: boolean;
+  categoriesSource: "auto" | "admin" | "ai" | null;
+  analysis: Awaited<ReturnType<typeof readSkillAnalysis>>;
   overviews: Array<{
     locale: SkillOverviewLocale;
     overview: SkillOverviewJson;
@@ -352,7 +281,10 @@ export async function findSkillOverviewAdminState(
   skillId: string,
 ): Promise<SkillOverviewAdminState | null> {
   const [skill] = await db
-    .select({ id: skillDefinitions.id })
+    .select({
+      id: skillDefinitions.id,
+      categoriesSource: skillDefinitions.categoriesSetBy,
+    })
     .from(skillDefinitions)
     .where(eq(skillDefinitions.id, skillId))
     .limit(1);
@@ -379,6 +311,8 @@ export async function findSkillOverviewAdminState(
       skillVersionId: null,
       bundleSha256: null,
       eligible: false,
+      categoriesSource: skill.categoriesSource,
+      analysis: null,
       overviews: [],
     };
   }
@@ -399,6 +333,8 @@ export async function findSkillOverviewAdminState(
     skillVersionId: version.skillVersionId,
     bundleSha256: version.bundleSha256,
     eligible: Boolean(version.eligible),
+    categoriesSource: skill.categoriesSource,
+    analysis: await readSkillAnalysis(version.skillVersionId),
     overviews: rows,
   };
 }

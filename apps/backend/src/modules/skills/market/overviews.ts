@@ -11,12 +11,12 @@
 import { logger } from "../../../shared/logger";
 import {
   enqueueSkillOverviewJob,
+  recoverSkillOverviewJobs,
   skillOverviewJobExists,
   skillOverviewJobId,
   type SkillOverviewGenerateJobPayload,
 } from "./overview-queue";
 import {
-  copySkillOverviewsForAllSameBundles,
   findSkillOverviewCandidates,
   readSkillOverviewBilling,
   type SkillOverviewBillingTarget,
@@ -31,15 +31,15 @@ const SKILL_OVERVIEW_SCAN_LIMIT = 1_000;
 
 export type EnqueueSkillOverviewsDeps = {
   readBilling: () => Promise<SkillOverviewBillingTarget | null>;
-  copyFromSameBundles: () => Promise<number>;
   findCandidates: (limit: number) => Promise<SkillOverviewCandidate[]>;
   jobExists: (jobId: string) => Promise<boolean>;
+  recover?: () => Promise<number>;
   enqueue: (payload: SkillOverviewGenerateJobPayload) => Promise<unknown>;
 };
 
 const defaultDeps: EnqueueSkillOverviewsDeps = {
+  recover: recoverSkillOverviewJobs,
   readBilling: async () => (await readSkillOverviewBilling()).billing,
-  copyFromSameBundles: () => copySkillOverviewsForAllSameBundles(),
   findCandidates: (limit) => findSkillOverviewCandidates({ limit }),
   jobExists: skillOverviewJobExists,
   enqueue: (payload) => enqueueSkillOverviewJob(payload),
@@ -56,8 +56,9 @@ export async function enqueueSkillOverviews(
     );
     return { queued: 0, copied: 0, skipped: 0 };
   }
+  await deps.recover?.();
   // Identical content first: free, and it takes those versions off the list.
-  const copied = await deps.copyFromSameBundles();
+  const copied = 0; // Cache reuse happens inside the versioned worker, never by bundle alone.
   const candidates = await deps.findCandidates(SKILL_OVERVIEW_SCAN_LIMIT);
   let queued = 0;
   let skipped = 0;

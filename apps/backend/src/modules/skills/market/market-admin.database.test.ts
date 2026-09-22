@@ -1,3 +1,7 @@
+vi.mock("./analysis-quality", () => ({
+  skillAnalysisQualityApproved: async () => true,
+  currentSkillAnalysisModelKey: async () => "test-config",
+}));
 import { randomBytes, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import { eq, inArray, sql } from "drizzle-orm";
@@ -314,7 +318,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
         actorName: null,
       });
       // Listing filed it under inferred categories, recorded as such.
-      expect((await definition(clean.skillId)).categoriesSetBy).toBe("auto");
+      expect((await definition(clean.skillId)).categoriesSetBy).toBeNull();
 
       // A foreign commit found by the sweep.
       const forged = await registrySkill({ unstamped: true });
@@ -395,12 +399,25 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       });
       const categoriesOf = async (skillId: string) =>
         (await listing.listSkillCategorySlugs([skillId])).get(skillId) ?? [];
-      // What the classifier files this text under.
-      const inferredSlugs = taxonomy.classifySkillCategories({
-        name: "pptx",
-        description: "Create and edit PowerPoint presentations.",
-      });
-      expect(inferredSlugs).not.toContain("other");
+      const inferredSlugs = ["documents-office"];
+      for (const skill of [picked, inferred])
+        await data.db
+          .insert(data.skillVersionAnalysis)
+          .values({
+            skillVersionId: skill.skillVersionId,
+            requestId: randomUUID(),
+            status: "ready",
+            promptVersion: "2",
+            taxonomyVersion: "1",
+            modelConfigurationKey: "test-config",
+            classification: {
+              status: "ready",
+              primary: "documents-office",
+              secondary: null,
+              rationale: "Creates presentations",
+              evidence: ["PowerPoint"],
+            },
+          });
       expect(
         await listing.reinferSkillCategories({
           skillId: "no-such",
@@ -416,7 +433,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       expect(bulk).toEqual({ considered: 1, changed: 1 });
       expect(await categoriesOf(picked.skillId)).toEqual(["writing-content"]);
       expect(await categoriesOf(inferred.skillId)).toEqual(inferredSlugs);
-      expect((await definition(inferred.skillId)).categoriesSetBy).toBe("auto");
+      expect((await definition(inferred.skillId)).categoriesSetBy).toBe("ai");
       expect((await actionsOf(inferred.skillId))[0]).toBe(
         "categories.reinferred",
       );
@@ -435,7 +452,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
           actorUserId: admin,
         }),
       ).toEqual({ skillId: picked.skillId, categorySlugs: inferredSlugs });
-      expect((await definition(picked.skillId)).categoriesSetBy).toBe("auto");
+      expect((await definition(picked.skillId)).categoriesSetBy).toBe("ai");
       const [reinferred] = (await events.listSkillMarketEvents({
         skillId: picked.skillId,
         limit: 1,
@@ -444,19 +461,37 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
         action: "categories.reinferred",
         detail: {
           categorySlugs: { from: ["writing-content"], to: inferredSlugs },
-          categoriesSetBy: { from: "admin", to: "auto" },
+          categoriesSetBy: { from: "admin", to: "ai" },
         },
       });
     });
 
-    test("re-inferring prefers the current version's AI overview, unless it is hidden", async () => {
+    test("re-inferring uses independent classification even if overview is hidden", async () => {
       const skill = await registrySkill();
       await listing.prepareSkillListing(skill.skillId);
-      const keywordSlugs = taxonomy.classifySkillCategories({
-        name: "pptx",
-        description: "Create and edit PowerPoint presentations.",
-      });
-      expect(keywordSlugs).not.toContain("ai-agents");
+      await expect(
+        listing.reinferSkillCategories({
+          skillId: skill.skillId,
+          actorUserId: admin,
+        }),
+      ).rejects.toMatchObject({ code: "SKILL_ANALYSIS_REQUIRED" });
+      await data.db
+        .insert(data.skillVersionAnalysis)
+        .values({
+          skillVersionId: skill.skillVersionId,
+          requestId: randomUUID(),
+          status: "ready",
+          promptVersion: "2",
+          taxonomyVersion: "1",
+          modelConfigurationKey: "test-config",
+          classification: {
+            status: "ready",
+            primary: "ai-agents",
+            secondary: null,
+            rationale: "Agent orchestration",
+            evidence: ["agents"],
+          },
+        });
       await data.db.insert(data.skillVersionOverviews).values({
         skillVersionId: skill.skillVersionId,
         locale: "en",
@@ -486,10 +521,10 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       }))!;
       expect(event).toMatchObject({
         action: "categories.reinferred",
-        detail: { source: "overview" },
+        detail: { source: "ai" },
       });
 
-      // Hidden by an admin: the keyword classifier decides again, in bulk too.
+      // Hiding text does not change or revoke the independently stored classification.
       await data.db
         .update(data.skillVersionOverviews)
         .set({ hidden: true })
@@ -501,8 +536,8 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
           actorUserId: admin,
           onlySkillIds: [skill.skillId],
         }),
-      ).toEqual({ considered: 1, changed: 1 });
-      expect(await categoriesOf(skill.skillId)).toEqual(keywordSlugs);
+      ).toEqual({ considered: 1, changed: 0 });
+      expect(await categoriesOf(skill.skillId)).toEqual(["ai-agents"]);
     });
 
     test("an author restores a removed repository; the admin's hold stays", async () => {

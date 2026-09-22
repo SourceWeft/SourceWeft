@@ -1,9 +1,8 @@
 import { recordSkillMarketEvent } from "./events";
-import { enqueueSkillOverviewJob, skillOverviewJobId } from "./overview-queue";
+import { enqueueSkillOverviewJob } from "./overview-queue";
 import {
   checkSkillOverviewBillingTarget,
   countSkillOverviewCoverage,
-  deleteSkillOverviews,
   findSkillOverviewAdminState,
   readSkillOverviewBilling,
   setSkillOverviewsHidden,
@@ -49,13 +48,14 @@ export async function setSkillOverviewBilling(input: {
 }
 
 /**
- * Deletes the current version's overviews and queues a new one. Null when
+ * Keeps the current version's overviews and queues a replacement. Null when
  * there is no such skill or it has no current version; `queued` is false for
- * a skill overviews are not written for (the rows are still removed).
+ * a skill overviews are not written for.
  */
 export async function regenerateSkillOverview(input: {
   skillId: string;
   actorUserId: string;
+  expectedVersionId?: string;
 }): Promise<{
   skillId: string;
   skillVersionId: string;
@@ -65,23 +65,22 @@ export async function regenerateSkillOverview(input: {
   const state = await findSkillOverviewAdminState(input.skillId);
   if (!state?.skillVersionId) return null;
   const skillVersionId = state.skillVersionId;
-  const deleted = await deleteSkillOverviews(skillVersionId);
+  if (input.expectedVersionId && input.expectedVersionId !== skillVersionId)
+    return null;
+  const deleted = 0; // Existing output stays live until an atomic replacement succeeds.
   let queued = false;
   if (state.eligible) {
     const { billing } = await readSkillOverviewBilling();
     // A fresh id: the scheduled one may still be held by a finished or
     // failed job, which would swallow this request.
-    await enqueueSkillOverviewJob(
-      {
-        skillVersionId,
-        skillId: input.skillId,
-        reason: "regenerate",
-        ...(billing
-          ? { teamId: billing.teamId, workspaceId: billing.workspaceId }
-          : {}),
-      },
-      { jobId: `${skillOverviewJobId(skillVersionId)}_regen_${Date.now()}` },
-    );
+    await enqueueSkillOverviewJob({
+      skillVersionId,
+      skillId: input.skillId,
+      reason: "regenerate",
+      ...(billing
+        ? { teamId: billing.teamId, workspaceId: billing.workspaceId }
+        : {}),
+    });
     queued = true;
   }
   await recordSkillMarketEvent({

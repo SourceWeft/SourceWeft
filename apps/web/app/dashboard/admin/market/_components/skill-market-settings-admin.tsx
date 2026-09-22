@@ -8,6 +8,9 @@ import type { Workspace } from "@sourceweft/contracts";
 import { authClient } from "../../../../../lib/auth-client";
 import { workspaceClient } from "../../../../../lib/sdk";
 import {
+  getSkillAnalysisPreview,
+  queueSkillAnalysisBatch,
+  type SkillAnalysisPreviewResponse,
   getSkillOverviewBilling,
   getSkillOverviewStatus,
   setSkillOverviewBilling,
@@ -272,6 +275,8 @@ export function OverviewBillingSettings({
         </p>
       ) : null}
 
+      <SkillAnalysisBatchPreview />
+
       {counts.length > 0 ? (
         <div>
           <h3 className="text-xs font-medium text-foreground">{t("status")}</h3>
@@ -306,4 +311,168 @@ export function SkillMarketSettingsAdmin() {
     [data],
   );
   return <OverviewBillingSettings teams={teams} />;
+}
+
+/** Preview each bounded batch before explicitly scheduling paid analysis. */
+export function SkillAnalysisBatchPreview() {
+  const t = useTranslations("dashboardSkillOverview.settings");
+  const a = useTranslations("dashboardSkillOverview.admin");
+  const [preview, setPreview] =
+    React.useState<SkillAnalysisPreviewResponse | null>(null);
+  const [cursor, setCursor] = React.useState<string | undefined>();
+  const [busy, setBusy] = React.useState(false);
+  const [message, setMessage] = React.useState<string | null>(null);
+  const requestEpoch = React.useRef(0);
+  React.useEffect(
+    () => () => {
+      requestEpoch.current++;
+    },
+    [],
+  );
+  const eligible =
+    preview?.items.filter(
+      (item) =>
+        item.categoriesSource !== "admin" &&
+        item.status !== "pending" &&
+        item.status !== "running" &&
+        (item.stale ||
+          item.status === "failed" ||
+          item.status === "missing" ||
+          item.status === "legacy" ||
+          item.status === "needs-review"),
+    ) ?? [];
+
+  async function load(next?: string) {
+    const epoch = ++requestEpoch.current;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const result = await getSkillAnalysisPreview(next);
+      if (epoch !== requestEpoch.current) return;
+      setPreview(result);
+      setCursor(next);
+    } catch (error) {
+      if (epoch === requestEpoch.current)
+        setMessage(errorMessage(error, t("loadFailed")));
+    } finally {
+      if (epoch === requestEpoch.current) setBusy(false);
+    }
+  }
+
+  async function queue() {
+    const epoch = ++requestEpoch.current;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const result = await queueSkillAnalysisBatch(
+        eligible.map((item) => item.skillVersionId),
+      );
+      const updated = await getSkillAnalysisPreview(cursor);
+      if (epoch !== requestEpoch.current) return;
+      setMessage(t("batchQueued", result));
+      setPreview(updated);
+    } catch (error) {
+      if (epoch === requestEpoch.current)
+        setMessage(errorMessage(error, t("failed")));
+    } finally {
+      if (epoch === requestEpoch.current) setBusy(false);
+    }
+  }
+
+  React.useEffect(() => {
+    if (
+      !preview?.items.some(
+        (item) => item.status === "pending" || item.status === "running",
+      )
+    )
+      return;
+    let cancelled = false;
+    const timer = window.setInterval(() => {
+      const epoch = requestEpoch.current;
+      void getSkillAnalysisPreview(cursor)
+        .then((result) => {
+          if (!cancelled && epoch === requestEpoch.current) setPreview(result);
+        })
+        .catch(() => {
+          if (!cancelled && epoch === requestEpoch.current)
+            setMessage(t("loadFailed"));
+        });
+    }, 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [preview, cursor, t]);
+
+  return (
+    <div className="space-y-3 border-t border-border pt-4 text-xs">
+      <h3 className="font-medium">{t("batchTitle")}</h3>
+      <p className="text-muted-foreground">{t("batchDescription")}</p>
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={busy}
+        onClick={() => void load()}
+      >
+        {t("previewBatch")}
+      </Button>
+      {preview ? (
+        <>
+          {preview.items.length === 0 ? (
+            <p>{t("batchEmpty")}</p>
+          ) : (
+            <ul className="space-y-2" aria-label={t("batchTitle")}>
+              {preview.items.map((item) => (
+                <li
+                  key={item.skillVersionId}
+                  className="space-y-1 rounded-md border border-border p-2"
+                >
+                  <p className="font-medium">
+                    {item.name} · {a(`analysisStatuses.${item.status}`)}
+                    {item.stale ? ` · ${t("stale")}` : ""}
+                  </p>
+                  <p>
+                    {a("categorySource")}:{" "}
+                    {a(`categorySources.${item.categoriesSource ?? "none"}`)}
+                  </p>
+                  <p>
+                    {t("currentCategories")}:{" "}
+                    {item.categories.join(", ") || t("noCategories")}
+                  </p>
+                  <p>
+                    {t("suggestedCategories")}:{" "}
+                    {item.suggestedCategories.join(", ") || t("noSuggestion")}
+                  </p>
+                  {item.error ? <p role="alert">{item.error}</p> : null}
+                </li>
+              ))}
+            </ul>
+          )}
+          {!preview.qualityApproved ? <p>{t("qualityGate")}</p> : null}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              disabled={
+                busy || eligible.length === 0 || !preview.qualityApproved
+              }
+              onClick={() => void queue()}
+            >
+              {t("generateBatch", { count: eligible.length })}
+            </Button>
+            {preview.nextCursor ? (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => void load(preview.nextCursor!)}
+              >
+                {t("nextBatch")}
+              </Button>
+            ) : null}
+          </div>
+        </>
+      ) : null}
+      {message ? <p role="status">{message}</p> : null}
+    </div>
+  );
 }

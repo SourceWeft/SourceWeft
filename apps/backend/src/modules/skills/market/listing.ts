@@ -1,10 +1,19 @@
+import {
+  currentSkillAnalysisModelKey,
+  skillAnalysisQualityApproved,
+} from "./analysis-quality";
+import {
+  SKILL_ANALYSIS_PROMPT_VERSION,
+  SKILL_ANALYSIS_TAXONOMY_VERSION,
+} from "./overview-prompt";
+import { applyAnalysisCategories } from "./analysis-repository";
 import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import {
   db,
   skillCategories,
   skillDefinitionCategories,
   skillDefinitions,
-  skillVersionOverviews,
+  skillVersionAnalysis,
   skillVersions,
 } from "@sourceweft/db";
 import { ContentError } from "../../content/errors";
@@ -12,7 +21,6 @@ import { setRegistryVisibility } from "../registry/review";
 import { recordSkillMarketEvent } from "./events";
 import { ensureListingProvenance } from "./provenance";
 import {
-  classifySkillCategories,
   getSkillCategoryDefinition,
   skillCategoryDefinitions,
   skillCategoryId,
@@ -23,7 +31,7 @@ import {
  *
  * `listSkillPublicly` is the one way a skill is listed: the admin action and
  * the scheduler's auto-listing pass both go through it, so a listed skill
- * always has its `listed_at` and its categories, whoever listed it.
+ * always has its `listed_at`; categories arrive with AI analysis.
  */
 
 /** Recorded as the actor when the auto-listing pass lists a skill. */
@@ -66,8 +74,8 @@ export function ensureSkillCategories(): Promise<void> {
 
 /**
  * Stamps `listed_at` (first listing only — it is the keyset key for "newest"
- * and must not move) and files the skill under inferred categories unless it
- * already has some, so an admin's correction survives a re-listing.
+ * and must not move). Categories remain pending until AI analysis; existing
+ * categories and administrator corrections survive re-listing.
  */
 export async function prepareSkillListing(skillId: string): Promise<void> {
   await ensureSkillCategories();
@@ -88,27 +96,8 @@ export async function prepareSkillListing(skillId: string): Promise<void> {
       .set({ listedAt: sql`coalesce(${skillDefinitions.listedAt}, now())` })
       .where(eq(skillDefinitions.id, skillId));
 
-    const [existing] = await tx
-      .select({ categoryId: skillDefinitionCategories.categoryId })
-      .from(skillDefinitionCategories)
-      .where(eq(skillDefinitionCategories.skillId, skillId))
-      .limit(1);
-    if (existing) return;
-
-    const slugs = classifySkillCategories({
-      name: definition.displayName,
-      description: definition.description,
-    });
-    await tx
-      .insert(skillDefinitionCategories)
-      .values(
-        slugs.map((slug) => ({ skillId, categoryId: skillCategoryId(slug) })),
-      )
-      .onConflictDoNothing();
-    await tx
-      .update(skillDefinitions)
-      .set({ categoriesSetBy: "auto" })
-      .where(eq(skillDefinitions.id, skillId));
+    // New listings remain unclassified until AI analysis succeeds. Existing
+    // categories (including manual corrections) survive relisting.
   });
 }
 
@@ -541,203 +530,158 @@ async function replaceCategories(
     .where(eq(skillDefinitions.id, skillId));
 }
 
-const sameSlugs = (a: string[], b: string[]) =>
-  a.length === b.length && [...a].sort().join() === [...b].sort().join();
-
-/**
- * The categories the AI overview of each skill's current version suggests —
- * the English one, unless an admin hid it — kept to known slugs. Skills
- * without one are absent.
- */
-async function overviewCategorySuggestions(
-  tx: Tx,
-  skillIds: string[],
-): Promise<Map<string, string[]>> {
-  const found = new Map<string, string[]>();
-  if (skillIds.length === 0) return found;
-  const rows = await tx
-    .select({
-      skillId: skillVersions.skillId,
-      overview: skillVersionOverviews.overview,
-    })
-    .from(skillVersions)
-    .innerJoin(
-      skillVersionOverviews,
-      and(
-        eq(skillVersionOverviews.skillVersionId, skillVersions.id),
-        eq(skillVersionOverviews.locale, "en"),
-        eq(skillVersionOverviews.hidden, false),
-      ),
-    )
-    .where(
-      and(
-        inArray(skillVersions.skillId, skillIds),
-        eq(skillVersions.isCurrent, true),
-      ),
-    );
-  for (const row of rows) {
-    const slugs = [
-      ...new Set(
-        (row.overview.suggestedCategories ?? []).filter((slug) =>
-          getSkillCategoryDefinition(slug),
-        ),
-      ),
-    ];
-    if (slugs.length > 0) found.set(row.skillId, slugs);
-  }
-  return found;
-}
-
-/**
- * What a re-inference files a skill under: the AI overview's suggestion when
- * its current version has one — the model read the whole SKILL.md, where the
- * keyword classifier sees only the name and description — and the classifier
- * otherwise.
- */
-function inferredCategories(
-  definition: { id: string; displayName: string; description: string },
-  suggestions: Map<string, string[]>,
-): { slugs: string[]; source: "overview" | "keywords" } {
-  const suggested = suggestions.get(definition.id);
-  if (suggested) return { slugs: suggested, source: "overview" };
-  return {
-    slugs: classifySkillCategories({
-      name: definition.displayName,
-      description: definition.description,
-    }),
-    source: "keywords",
-  };
-}
-
-/**
- * Files one skill under the categories inferred now (`inferredCategories`:
- * its AI overview's suggestion, else the keyword classifier), even where an
- * admin had picked them — asking for it is the admin's act; the choice is
- * then an automatic one again (`auto`). null for anything that is not a
- * registry skill.
- */
+/** Explicitly return to AI-owned categories; hidden overview text is unrelated. */
 export async function reinferSkillCategories(input: {
   skillId: string;
   actorUserId: string;
 }): Promise<{ skillId: string; categorySlugs: string[] } | null> {
-  await ensureSkillCategories();
+  const modelKey = await currentSkillAnalysisModelKey();
   return db.transaction(async (tx) => {
     const definition = await lockDefinition(tx, input.skillId);
     if (!definition) return null;
-    const from = await categorySlugsIn(tx, input.skillId);
-    const { slugs, source } = inferredCategories(
-      definition,
-      await overviewCategorySuggestions(tx, [input.skillId]),
-    );
-    await replaceCategories(tx, input.skillId, slugs, "auto");
-    await recordSkillMarketEvent(
-      {
-        skillId: input.skillId,
-        actorKind: "admin",
-        actorUserId: input.actorUserId,
-        action: "categories.reinferred",
-        detail: {
-          categorySlugs: { from, to: slugs },
-          categoriesSetBy: { from: definition.categoriesSetBy, to: "auto" },
-          source,
-        },
-      },
+    const [result] = await tx
+      .select({
+        versionId: skillVersions.id,
+        classification: skillVersionAnalysis.classification,
+      })
+      .from(skillVersions)
+      .innerJoin(
+        skillVersionAnalysis,
+        eq(skillVersionAnalysis.skillVersionId, skillVersions.id),
+      )
+      .where(
+        and(
+          eq(skillVersions.skillId, input.skillId),
+          eq(skillVersions.isCurrent, true),
+          eq(skillVersionAnalysis.status, "ready"),
+          eq(skillVersionAnalysis.promptVersion, SKILL_ANALYSIS_PROMPT_VERSION),
+          eq(
+            skillVersionAnalysis.taxonomyVersion,
+            SKILL_ANALYSIS_TAXONOMY_VERSION,
+          ),
+          modelKey
+            ? eq(skillVersionAnalysis.modelConfigurationKey, modelKey)
+            : sql`false`,
+        ),
+      );
+    if (!result?.classification || result.classification.status !== "ready") {
+      throw new ContentError(
+        409,
+        "SKILL_ANALYSIS_REQUIRED",
+        "Generate a valid AI analysis before applying categories",
+      );
+    }
+    await applyAnalysisCategories(
       tx,
+      input.skillId,
+      result.versionId,
+      result.classification,
+      input.actorUserId,
     );
-    return { skillId: input.skillId, categorySlugs: slugs };
+    return {
+      skillId: input.skillId,
+      categorySlugs: await categorySlugsIn(tx, input.skillId),
+    };
   });
 }
 
-/** Skills re-inferred per transaction in the bulk pass. */
 export const REINFER_CATEGORIES_BATCH_SIZE = 200;
 
-/**
- * Files every active community skill already filed under inferred categories
- * (never one an admin picked) under what `inferredCategories` says now — after
- * the taxonomy or the classifier changed, or overviews arrived. In batches, each its own transaction,
- * keyed by id; a skill an admin corrects meanwhile is skipped (re-checked
- * under the row lock). Each skill whose categories changed gets an event,
- * and the run as a whole one more.
- */
+/** Apply existing AI results in bounded transactions; no keyword fallback. */
 export async function reinferAllSkillCategories(input: {
   actorUserId: string;
   batchSize?: number;
-  /** Narrows the pass to these skills; the admin route passes nothing. */
   onlySkillIds?: string[];
 }): Promise<{ considered: number; changed: number }> {
-  await ensureSkillCategories();
-  const batchSize = input.batchSize ?? REINFER_CATEGORIES_BATCH_SIZE;
+  if (!(await skillAnalysisQualityApproved()))
+    throw new ContentError(
+      409,
+      "SKILL_ANALYSIS_QUALITY_REQUIRED",
+      "Complete the reviewed accuracy evaluation before bulk migration",
+    );
+  const modelKey = await currentSkillAnalysisModelKey();
   const tally = { considered: 0, changed: 0 };
   let afterId: string | null = null;
+  const limit = Math.max(
+    1,
+    Math.min(input.batchSize ?? REINFER_CATEGORIES_BATCH_SIZE, 200),
+  );
   for (;;) {
-    const ids: string[] = (
-      await db
-        .select({ id: skillDefinitions.id })
-        .from(skillDefinitions)
-        .where(
-          and(
-            eq(skillDefinitions.sourceType, "registry_github"),
-            eq(skillDefinitions.status, "active"),
-            sql`${skillDefinitions.categoriesSetBy} is distinct from 'admin'`,
-            // Filed already: a skill gets its first categories when it is
-            // first listed (`prepareSkillListing`), not from this pass.
-            sql`exists (select 1 from ${skillDefinitionCategories} where ${skillDefinitionCategories.skillId} = ${skillDefinitions.id})`,
-            afterId ? sql`${skillDefinitions.id} > ${afterId}` : undefined,
-            input.onlySkillIds
-              ? inArray(skillDefinitions.id, input.onlySkillIds)
-              : undefined,
+    const rows = await db
+      .select({ id: skillDefinitions.id, versionId: skillVersions.id })
+      .from(skillDefinitions)
+      .innerJoin(
+        skillVersions,
+        and(
+          eq(skillVersions.skillId, skillDefinitions.id),
+          eq(skillVersions.isCurrent, true),
+        ),
+      )
+      .innerJoin(
+        skillVersionAnalysis,
+        eq(skillVersionAnalysis.skillVersionId, skillVersions.id),
+      )
+      .where(
+        and(
+          eq(skillDefinitions.sourceType, "registry_github"),
+          eq(skillDefinitions.status, "active"),
+          sql`${skillDefinitions.categoriesSetBy} is distinct from 'admin'`,
+          eq(skillVersionAnalysis.status, "ready"),
+          eq(skillVersionAnalysis.promptVersion, SKILL_ANALYSIS_PROMPT_VERSION),
+          eq(
+            skillVersionAnalysis.taxonomyVersion,
+            SKILL_ANALYSIS_TAXONOMY_VERSION,
           ),
-        )
-        .orderBy(skillDefinitions.id)
-        .limit(batchSize)
-    ).map((row) => row.id);
-    if (ids.length === 0) break;
-    afterId = ids.at(-1)!;
-    await db.transaction(async (tx) => {
-      const rows = await tx
-        .select()
-        .from(skillDefinitions)
-        .where(
-          and(
-            inArray(skillDefinitions.id, ids),
-            sql`${skillDefinitions.categoriesSetBy} is distinct from 'admin'`,
-          ),
-        )
-        .orderBy(skillDefinitions.id)
-        .for("update");
-      const suggestions = await overviewCategorySuggestions(
-        tx,
-        rows.map((row) => row.id),
-      );
-      for (const definition of rows) {
-        tally.considered += 1;
-        const from = await categorySlugsIn(tx, definition.id);
-        const { slugs, source } = inferredCategories(definition, suggestions);
-        if (sameSlugs(from, slugs)) {
-          // Filed before `categories_set_by` existed: now known to be inferred.
-          if (definition.categoriesSetBy !== "auto") {
-            await tx
-              .update(skillDefinitions)
-              .set({ categoriesSetBy: "auto" })
-              .where(eq(skillDefinitions.id, definition.id));
-          }
-          continue;
-        }
-        await replaceCategories(tx, definition.id, slugs, "auto");
-        tally.changed += 1;
-        await recordSkillMarketEvent(
-          {
-            skillId: definition.id,
-            actorKind: "admin",
-            actorUserId: input.actorUserId,
-            action: "categories.reinferred",
-            detail: { categorySlugs: { from, to: slugs }, source, bulk: true },
-          },
-          tx,
-        );
-      }
-    });
-    if (ids.length < batchSize) break;
+          modelKey
+            ? eq(skillVersionAnalysis.modelConfigurationKey, modelKey)
+            : sql`false`,
+          afterId ? sql`${skillDefinitions.id} > ${afterId}` : undefined,
+          input.onlySkillIds
+            ? inArray(skillDefinitions.id, input.onlySkillIds)
+            : undefined,
+        ),
+      )
+      .orderBy(skillDefinitions.id)
+      .limit(limit);
+    if (!rows.length) break;
+    for (const row of rows) {
+      tally.considered++;
+      const changed = await db.transaction(async (tx) => {
+        const definition = await lockDefinition(tx, row.id);
+        if (!definition || definition.categoriesSetBy === "admin") return false;
+        const [result] = await tx
+          .select()
+          .from(skillVersionAnalysis)
+          .where(
+            and(
+              eq(skillVersionAnalysis.skillVersionId, row.versionId),
+              eq(skillVersionAnalysis.status, "ready"),
+              eq(
+                skillVersionAnalysis.promptVersion,
+                SKILL_ANALYSIS_PROMPT_VERSION,
+              ),
+              eq(
+                skillVersionAnalysis.taxonomyVersion,
+                SKILL_ANALYSIS_TAXONOMY_VERSION,
+              ),
+              modelKey
+                ? eq(skillVersionAnalysis.modelConfigurationKey, modelKey)
+                : sql`false`,
+            ),
+          );
+        return result?.classification
+          ? applyAnalysisCategories(
+              tx,
+              row.id,
+              row.versionId,
+              result.classification,
+            )
+          : false;
+      });
+      if (changed) tally.changed++;
+    }
+    afterId = rows.at(-1)!.id;
+    if (rows.length < limit) break;
   }
   await recordSkillMarketEvent({
     actorKind: "admin",
@@ -764,8 +708,26 @@ export async function listSkillCategorySlugs(
       skillCategories,
       eq(skillCategories.id, skillDefinitionCategories.categoryId),
     )
+    .innerJoin(
+      skillDefinitions,
+      eq(skillDefinitions.id, skillDefinitionCategories.skillId),
+    )
+    .leftJoin(
+      skillVersions,
+      and(
+        eq(skillVersions.skillId, skillDefinitions.id),
+        eq(skillVersions.isCurrent, true),
+      ),
+    )
+    .leftJoin(
+      skillVersionAnalysis,
+      eq(skillVersionAnalysis.skillVersionId, skillVersions.id),
+    )
     .where(inArray(skillDefinitionCategories.skillId, skillIds))
-    .orderBy(skillCategories.sortOrder);
+    .orderBy(
+      sql`case when ${skillDefinitions.categoriesSetBy} = 'ai' and ${skillCategories.slug} = ${skillVersionAnalysis.classification}->>'primary' then 0 else 1 end`,
+      skillCategories.sortOrder,
+    );
   for (const row of rows) {
     const slugs = result.get(row.skillId) ?? [];
     slugs.push(row.slug);

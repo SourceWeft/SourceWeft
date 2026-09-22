@@ -36,18 +36,30 @@ export function SkillOverviewAdmin({ skillId }: DashboardSkillSlotProps) {
   const [busy, setBusy] = React.useState(false);
   const [message, setMessage] = React.useState<string | null>(null);
 
+  const viewEpoch = React.useRef(0);
+  const requestEpoch = React.useRef(0);
   const load = React.useCallback(async () => {
+    const view = viewEpoch.current;
+    const request = ++requestEpoch.current;
+    const current = () =>
+      view === viewEpoch.current && request === requestEpoch.current;
     try {
-      setState(await getSkillOverviewAdmin(skillId));
+      const result = await getSkillOverviewAdmin(skillId);
+      if (current()) setState(result);
     } catch {
-      setMessage(t("failed"));
+      if (current()) setMessage(t("failed"));
     } finally {
-      setLoading(false);
+      if (current()) setLoading(false);
     }
   }, [skillId, t]);
 
   React.useEffect(() => {
     let cancelled = false;
+    const epoch = viewEpoch.current;
+    setState(null);
+    setLoading(true);
+    setBusy(false);
+    setMessage(null);
     void getSkillMarketAdminMe().then((admin) => {
       if (cancelled) return;
       setIsAdmin(admin);
@@ -55,22 +67,35 @@ export function SkillOverviewAdmin({ skillId }: DashboardSkillSlotProps) {
     });
     return () => {
       cancelled = true;
+      viewEpoch.current = epoch + 1;
     };
   }, [load]);
+
+  React.useEffect(() => {
+    if (
+      !isAdmin ||
+      !["pending", "running"].includes(state?.analysis?.status ?? "")
+    )
+      return;
+    const timer = window.setInterval(() => void load(), 3000);
+    return () => window.clearInterval(timer);
+  }, [isAdmin, state?.analysis?.status, load]);
 
   if (!isAdmin) return null;
 
   async function run(action: () => Promise<string>) {
+    const view = viewEpoch.current;
     setBusy(true);
     setMessage(null);
     try {
       const done = await action();
+      if (view !== viewEpoch.current) return;
       await load();
-      setMessage(done);
+      if (view === viewEpoch.current) setMessage(done);
     } catch {
-      setMessage(t("failed"));
+      if (view === viewEpoch.current) setMessage(t("failed"));
     } finally {
-      setBusy(false);
+      if (view === viewEpoch.current) setBusy(false);
     }
   }
 
@@ -99,6 +124,33 @@ export function SkillOverviewAdmin({ skillId }: DashboardSkillSlotProps) {
         <p className="mt-3 text-xs text-muted-foreground">{t("loading")}</p>
       ) : state ? (
         <div className="mt-3 space-y-3 text-xs">
+          <div className="space-y-1" data-testid="analysis-state">
+            <p>
+              {t("analysisState")}:{" "}
+              {t(
+                `analysisStatuses.${state.analysis?.status ?? (state.overviews.length ? "legacy" : "missing")}`,
+              )}
+            </p>
+            <p>
+              {t("categorySource")}:{" "}
+              {t(`categorySources.${state.categoriesSource ?? "none"}`)}
+            </p>
+            {state.analysis?.classification ? (
+              <>
+                <p>
+                  {t("rationale")}: {state.analysis.classification.rationale}
+                </p>
+                <p>
+                  {t("evidence")}:{" "}
+                  {state.analysis.classification.evidence.join(" · ")}
+                </p>
+              </>
+            ) : null}
+            {state.analysis?.error ? (
+              <p role="alert">{state.analysis.error}</p>
+            ) : null}
+            <p className="text-muted-foreground">{t("retained")}</p>
+          </div>
           {!state.skillVersionId ? (
             <p className="text-muted-foreground">{t("noVersion")}</p>
           ) : !state.eligible ? (
@@ -151,7 +203,12 @@ export function SkillOverviewAdmin({ skillId }: DashboardSkillSlotProps) {
               <Button
                 size="sm"
                 variant="outline"
-                disabled={busy}
+                disabled={
+                  busy ||
+                  !state.eligible ||
+                  state.analysis?.status === "pending" ||
+                  state.analysis?.status === "running"
+                }
                 onClick={() =>
                   void run(async () => {
                     const result = await regenerateSkillOverview(skillId);

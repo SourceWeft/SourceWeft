@@ -5,6 +5,8 @@ import type {
   RegenerateSkillOverviewResponse,
   SetSkillOverviewVisibilityResponse,
   SkillMarketAdminMeResponse,
+  SkillAnalysisPreviewResponse,
+  SkillAnalysisBatchResponse,
   SkillOverviewStatusResponse,
 } from "@sourceweft/contracts";
 import type {
@@ -30,6 +32,7 @@ export type {
   GetSkillOverviewBillingResponse,
   MarketSkillAiOverview,
   MarketSkillLocale,
+  SkillAnalysisPreviewResponse,
   SkillOverviewStatusResponse,
 };
 
@@ -85,7 +88,7 @@ export function getSkillOverviewAdmin(skillId: string) {
   return http.get<GetSkillOverviewAdminResponse>(overviewPath(skillId));
 }
 
-/** Deletes the current version's overview and queues a new one. */
+/** Queues fresh analysis while retaining the current overview. */
 export function regenerateSkillOverview(skillId: string) {
   return http.post<RegenerateSkillOverviewResponse>(
     `${overviewPath(skillId)}/regenerate`,
@@ -117,5 +120,18 @@ export function setSkillOverviewBilling(input: PutSkillOverviewBillingRequest) {
 export function getSkillOverviewStatus() {
   return http.get<SkillOverviewStatusResponse>(
     `${ADMIN_BASE}/overviews/status`,
+  );
+}
+
+export function getSkillAnalysisPreview(cursor?: string) {
+  return http.get<SkillAnalysisPreviewResponse>(
+    `${ADMIN_BASE}/overviews/preview${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`,
+  );
+}
+
+export function queueSkillAnalysisBatch(skillVersionIds: string[]) {
+  return http.post<SkillAnalysisBatchResponse>(
+    `${ADMIN_BASE}/overviews/batch`,
+    { skillVersionIds },
   );
 }

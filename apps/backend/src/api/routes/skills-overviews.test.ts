@@ -16,6 +16,14 @@ const mocks = vi.hoisted(() => ({
   readSkillOverviewBilling: vi.fn(),
 }));
 
+vi.mock("./skills-market-admin", () => ({
+  requireSkillMarketAdmin: async () => {
+    if (!mocks.admin)
+      throw ApiError.forbidden("Registry admin access required");
+    return { user: { id: "admin_1" } };
+  },
+}));
+
 vi.mock("../middleware/auth-session", () => ({
   getSessionUserId: () => "admin_1",
   requireSession: async () => ({ user: { id: "admin_1" } }),
@@ -35,6 +43,11 @@ vi.mock("../../modules/skills/market/overview-admin", () => ({
 vi.mock("../../modules/skills/market/overview-repository", () => ({
   findSkillOverviewAdminState: mocks.findSkillOverviewAdminState,
   readSkillOverviewBilling: mocks.readSkillOverviewBilling,
+}));
+
+vi.mock("../../modules/skills/market/analysis-admin", () => ({
+  previewSkillAnalysis: vi.fn(),
+  enqueueSkillAnalysisBatch: vi.fn(),
 }));
 
 import { registerSkillOverviewRoutes } from "./skills-overviews";
@@ -72,6 +85,8 @@ test("every overview admin route refuses someone who is not a market admin", asy
     [`${admin}/settings/overview-billing`, undefined],
     [`${admin}/settings/overview-billing`, json("PUT", billing)],
     [`${admin}/overviews/status`, undefined],
+    [`${admin}/overviews/preview`, undefined],
+    [`${admin}/overviews/batch`, json("POST", { skillVersionIds: ["v1"] })],
     [`${admin}/skills/skill_1/overview`, undefined],
     [`${admin}/skills/skill_1/overview/regenerate`, { method: "POST" }],
     [

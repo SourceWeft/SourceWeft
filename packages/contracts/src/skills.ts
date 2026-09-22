@@ -350,7 +350,7 @@ export const skillMarketStandingSchema = z.object({
   // a bulk re-inference leaves alone.
   // Optional in the type so standings built before these existed still fit;
   // the API always sends them.
-  categoriesSetBy: z.enum(["auto", "admin"]).nullable().optional(),
+  categoriesSetBy: z.enum(["auto", "admin", "ai"]).nullable().optional(),
   // Visible reviews, as the upkeep last counted them; `ratingAvg` is null
   // while there are none.
   ratingCount: z.number().int().nonnegative().optional(),

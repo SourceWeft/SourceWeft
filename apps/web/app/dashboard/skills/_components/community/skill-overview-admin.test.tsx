@@ -30,6 +30,7 @@ afterEach(() => {
   act(() => root?.unmount());
   container?.remove();
   vi.resetAllMocks();
+  vi.useRealTimers();
 });
 
 const slot = {
@@ -65,7 +66,9 @@ async function render() {
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
-  await act(async () => root.render(withIntl(<SkillOverviewAdmin {...slot} />)));
+  await act(async () =>
+    root.render(withIntl(<SkillOverviewAdmin {...slot} />)),
+  );
 }
 const button = (label: string) =>
   [...container.querySelectorAll("button")].find(
@@ -122,5 +125,59 @@ test("a skill that is not eligible says so, with no Hide button", async () => {
   await render();
   expect(container.textContent).toContain("only public skills");
   expect(button("Hide")).toBeUndefined();
-  expect(button("Regenerate")).toBeDefined();
+  expect(button("Regenerate")!.disabled).toBe(true);
+});
+
+test("failed regeneration retains the existing locale rows and shows legacy state", async () => {
+  api.getSkillMarketAdminMe.mockResolvedValue(true);
+  api.getSkillOverviewAdmin.mockResolvedValue(state(false));
+  api.regenerateSkillOverview.mockRejectedValue(new Error("Unavailable"));
+  await render();
+  await act(async () => button("Regenerate")!.click());
+  expect(container.textContent).toContain("Legacy analysis");
+  expect(container.textContent).toContain("deepseek-v4");
+  expect(container.querySelectorAll("li")).toHaveLength(3);
+});
+
+test("polls running analysis and displays failure rationale without discarding content", async () => {
+  vi.useFakeTimers();
+  api.getSkillMarketAdminMe.mockResolvedValue(true);
+  const analysis = {
+    status: "running",
+    error: null,
+    promptVersion: "p1",
+    taxonomyVersion: "t1",
+    classification: null,
+    updatedAt: "2026-09-22",
+  };
+  api.getSkillOverviewAdmin.mockResolvedValue({
+    ...state(false),
+    categoriesSource: "ai",
+    analysis,
+  });
+  await render();
+  expect(button("Regenerate")!.disabled).toBe(true);
+  api.getSkillOverviewAdmin.mockResolvedValue({
+    ...state(false),
+    categoriesSource: "ai",
+    analysis: {
+      ...analysis,
+      status: "failed",
+      error: "Model unavailable",
+      classification: {
+        status: "needs-review",
+        primary: null,
+        secondary: null,
+        rationale: "Insufficient evidence",
+        evidence: ["SKILL.md"],
+      },
+    },
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(3000);
+  });
+  expect(container.textContent).toContain("Model unavailable");
+  expect(container.textContent).toContain("Insufficient evidence");
+  expect(button("Regenerate")!.disabled).toBe(false);
+  expect(container.querySelectorAll("li")).toHaveLength(3);
 });

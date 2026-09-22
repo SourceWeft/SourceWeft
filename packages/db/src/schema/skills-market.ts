@@ -234,10 +234,9 @@ export const skillDefinitions = pgTable(
     // overwritten by a later import.
     featured: boolean("featured").notNull().default(false),
     featuredSetBy: text("featured_set_by").$type<"sync" | "admin">(),
-    // Who chose the categories: null or 'auto' = inferred from the skill's
-    // text, which a bulk re-inference may replace; 'admin' = picked by a market
-    // admin, which nothing automatic touches again.
-    categoriesSetBy: text("categories_set_by").$type<"auto" | "admin">(),
+    // Category ownership: 'auto' = legacy rules, 'ai' = model analysis,
+    // null = not classified yet; 'admin' is protected from automatic changes.
+    categoriesSetBy: text("categories_set_by").$type<"auto" | "admin" | "ai">(),
     // Visible reviews, refreshed by the scheduler from `skill_reviews` so the
     // catalog needs no join. `ratingAvg` is null while there are none.
     ratingCount: integer("rating_count").notNull().default(0),
@@ -1021,6 +1020,44 @@ export const skillVersionOverviews = pgTable(
       table.bundleSha256,
       table.locale,
     ),
+  ],
+);
+
+// Durable generation state and language-independent classification. Old output
+// remains live while a newer request runs. requestId fences stale workers.
+export const skillVersionAnalysis = pgTable(
+  "skill_version_analysis",
+  {
+    skillVersionId: text("skill_version_id")
+      .primaryKey()
+      .references(() => skillVersions.id, { onDelete: "cascade" }),
+    requestId: text("request_id").notNull(),
+    status: text("status")
+      .$type<"pending" | "running" | "ready" | "failed" | "needs-review">()
+      .notNull(),
+    force: boolean("force").notNull().default(false),
+    resultKey: text("result_key"),
+    modelConfigurationKey: text("model_configuration_key"),
+    promptVersion: text("prompt_version"),
+    taxonomyVersion: text("taxonomy_version"),
+    classification: jsonb("classification").$type<{
+      status: "ready" | "needs-review";
+      primary: string | null;
+      secondary: string | null;
+      rationale: string;
+      evidence: string[];
+    }>(),
+    error: text("error"),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    check(
+      "skill_version_analysis_status_check",
+      sql`${table.status} in ('pending','running','ready','failed','needs-review')`,
+    ),
+    index("skill_version_analysis_result_idx").on(table.resultKey),
   ],
 );
 

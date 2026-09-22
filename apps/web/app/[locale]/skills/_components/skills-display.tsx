@@ -226,11 +226,11 @@ export function SkillMarketCard({
 
       <div className="mt-auto pt-4">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-zinc-200 pt-4 text-xs text-zinc-500 dark:border-white/10">
-          {primaryCategory ? (
-            <span className="min-w-0 truncate">
-              {skillCategoryLabel(primaryCategory, categoryNames)}
-            </span>
-          ) : null}
+          <span className="min-w-0 truncate">
+            {primaryCategory
+              ? skillCategoryLabel(primaryCategory, categoryNames)
+              : t("pendingCategory")}
+          </span>
           {stars > 0 ? (
             <span
               aria-label={t("stars", { count: formatCompactCount(stars) })}

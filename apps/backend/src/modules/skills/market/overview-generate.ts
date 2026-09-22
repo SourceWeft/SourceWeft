@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { SkillOverviewJson, SkillOverviewLocale } from "@sourceweft/db";
 import { logger } from "../../../shared/logger";
 import {
@@ -6,7 +7,12 @@ import {
 } from "../../../shared/model-gateway/index";
 import type { ContentBillingPort } from "../../content/billing-port";
 import { marketSkillName } from "./read-repository";
-import { convertOverviewToZhTw } from "./overview-opencc";
+import {
+  claimSkillAnalysis,
+  findCachedSkillAnalysis,
+  publishSkillAnalysis,
+  requestSkillAnalysis,
+} from "./analysis-repository";
 import {
   SKILL_OVERVIEW_OUTPUT_JSON_SCHEMA,
   SKILL_OVERVIEW_OUTPUT_NAME,
@@ -15,25 +21,21 @@ import {
   type SkillOverviewPrompt,
 } from "./overview-prompt";
 import {
-  copySkillOverviewsFromSameBundle,
-  countSkillOverviews,
   findSkillOverviewSubject,
   readSkillOverviewBilling,
-  storeSkillOverviews,
   type SkillOverviewBillingTarget,
 } from "./overview-repository";
 import { skillCategoryDefinitions } from "./taxonomy";
 
 /**
  * Writing one version's AI overview (skill-marketplace-plan §17.4): read
- * SKILL.md and the file list, ask the default chat model for an English and a
- * Simplified Chinese overview, convert the Chinese one to Traditional, store
- * all three. Billed to the market's configured team, workspace and member.
+ * SKILL.md and the file list, ask the default chat model for three independently written locale
+ * overviews plus one evidence-backed classification, and publish atomically. Billed to the market's configured team, workspace and member.
  */
 
 // The answer is two short overviews; nothing hidden is spent first, since
 // thinking is off.
-export const SKILL_OVERVIEW_MAX_OUTPUT_TOKENS = 2_000;
+export const SKILL_OVERVIEW_MAX_OUTPUT_TOKENS = 4_500;
 const SKILL_OVERVIEW_TIMEOUT_MS = 120_000;
 
 export type SkillOverviewModelCall = (input: {
@@ -51,12 +53,15 @@ export type SkillOverviewModelCall = (input: {
  */
 export function createSkillOverviewModelCall(
   billingPort: ContentBillingPort,
+  resolvedProfile?: Awaited<ReturnType<typeof resolveModelGatewayProfile>>,
 ): SkillOverviewModelCall {
   return async ({ prompt, billing, skillVersionId, scopeId }) => {
-    const profile = await resolveModelGatewayProfile({
-      kind: "chat",
-      defaultRequired: true,
-    });
+    const profile =
+      resolvedProfile ??
+      (await resolveModelGatewayProfile({
+        kind: "chat",
+        defaultRequired: true,
+      }));
     if (!profile) {
       throw new Error("Default chat model gateway profile is not configured");
     }
@@ -87,7 +92,7 @@ export function createSkillOverviewModelCall(
             structuredOutput: {
               name: SKILL_OVERVIEW_OUTPUT_NAME,
               description:
-                "A catalog overview of the skill in English and Simplified Chinese.",
+                "A catalog overview of the skill in English, Simplified Chinese and Taiwan Traditional Chinese, plus one classification.",
               schema: SKILL_OVERVIEW_OUTPUT_JSON_SCHEMA,
             },
             thinking: { mode: "off", enabled: false, includeReasoning: false },
@@ -156,18 +161,22 @@ export async function generateSkillOverview(input: {
   callModel: SkillOverviewModelCall;
   // Who pays; the market setting unless given.
   readBilling?: () => Promise<SkillOverviewBillingTarget | null>;
+  requestId?: string;
+  force?: boolean;
+  modelConfigurationKey?: string;
 }): Promise<GenerateSkillOverviewResult> {
   const subject = await findSkillOverviewSubject(input.skillVersionId);
   if (!subject) return { status: "skipped", reason: "missing-version" };
   if (!subject.eligible) return { status: "skipped", reason: "not-eligible" };
-  if ((await countSkillOverviews(subject.skillVersionId)) > 0) {
-    return { status: "skipped", reason: "already-generated" };
-  }
-  const copied = await copySkillOverviewsFromSameBundle({
-    skillVersionId: subject.skillVersionId,
-    bundleSha256: subject.bundleSha256,
-  });
-  if (copied > 0) return { status: "copied", rows: copied };
+  const state = input.requestId
+    ? await claimSkillAnalysis(subject.skillVersionId, input.requestId)
+    : await requestSkillAnalysis(
+        subject.skillVersionId,
+        Boolean(input.force),
+      ).then((row) =>
+        row ? claimSkillAnalysis(subject.skillVersionId, row.requestId) : null,
+      );
+  if (!state) return { status: "skipped", reason: "already-generated" };
   if (!subject.skillMd?.trim()) {
     return { status: "skipped", reason: "no-skill-md" };
   }
@@ -184,11 +193,38 @@ export async function generateSkillOverview(input: {
     files: (registry?.fileManifest ?? [])
       .filter((file) => file.path !== "SKILL.md")
       .map((file) => ({ path: file.path, role: file.role })),
-    categories: skillCategoryDefinitions.map(({ slug, name }) => ({
-      slug,
-      name,
-    })),
+    categories: skillCategoryDefinitions,
   });
+  // Test-injected callers without a model identity cannot reuse production cache.
+  const resultKey = createHash("sha256")
+    .update(
+      JSON.stringify({
+        bundle: subject.bundleSha256,
+        prompt,
+        model: input.modelConfigurationKey ?? input.scopeId,
+      }),
+    )
+    .digest("hex");
+  if (!state.force && !input.force && input.modelConfigurationKey) {
+    const cached = await findCachedSkillAnalysis(
+      resultKey,
+      subject.skillVersionId,
+    );
+    if (cached) {
+      const published = await publishSkillAnalysis({
+        ...cached,
+        skillId: subject.skillId,
+        skillVersionId: subject.skillVersionId,
+        requestId: state.requestId,
+        resultKey,
+        modelConfigurationKey: input.modelConfigurationKey,
+        bundleSha256: subject.bundleSha256,
+      });
+      return published
+        ? { status: "copied", rows: 3 }
+        : { status: "skipped", reason: "not-eligible" };
+    }
+  }
   const { output, model } = await input.callModel({
     prompt,
     billing,
@@ -198,18 +234,26 @@ export async function generateSkillOverview(input: {
   const parsed = parseSkillOverviewOutput(
     output,
     skillCategoryDefinitions.map((category) => category.slug),
+    subject.skillMd,
+    prompt.sourceText,
   );
   const overviews: Record<SkillOverviewLocale, SkillOverviewJson> = {
     en: parsed.en,
     "zh-CN": parsed["zh-CN"],
-    "zh-TW": convertOverviewToZhTw(parsed["zh-CN"]),
+    "zh-TW": parsed["zh-TW"],
   };
-  await storeSkillOverviews({
+  const published = await publishSkillAnalysis({
+    skillId: subject.skillId,
+    requestId: state.requestId,
+    resultKey,
+    modelConfigurationKey: input.modelConfigurationKey,
+    classification: parsed.classification,
     skillVersionId: subject.skillVersionId,
     bundleSha256: subject.bundleSha256,
     model,
     overviews,
   });
+  if (!published) return { status: "skipped", reason: "not-eligible" };
   logger.info("Skill overview generated", {
     skillId: subject.skillId,
     skillVersionId: subject.skillVersionId,

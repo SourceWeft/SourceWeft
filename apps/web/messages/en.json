@@ -3324,7 +3324,8 @@
       "workspaces": "{count, plural, =1 {Added to 1 workspace} other {Added to {compact} workspaces}}",
       "stars": "{count} GitHub stars",
       "updated": "updated {relative}",
-      "unknownAuthor": "Unknown author"
+      "unknownAuthor": "Unknown author",
+      "pendingCategory": "Awaiting classification"
     },
     "collections": {
       "itemCount": "{count, plural, one {# skill} other {# skills}}",
@@ -3651,7 +3652,8 @@
       "featuredTitle": "From a featured publisher: a major vendor's own skills repository",
       "includesScripts": "Includes scripts",
       "installs": "Added to {formatted} workspaces",
-      "installsOne": "Added to 1 workspace"
+      "installsOne": "Added to 1 workspace",
+      "pendingCategory": "Awaiting classification"
     },
     "detail": {
       "categories": "Categories",
@@ -3886,7 +3888,27 @@
       "show": "Show",
       "hiddenDone": "Overview hidden.",
       "shownDone": "Overview shown.",
-      "failed": "Something went wrong. Try again."
+      "failed": "Something went wrong. Try again.",
+      "analysisState": "Analysis status",
+      "categorySource": "Category source",
+      "rationale": "Classification rationale",
+      "evidence": "Evidence",
+      "retained": "Existing overviews remain available until new analysis succeeds.",
+      "analysisStatuses": {
+        "pending": "Pending",
+        "running": "Analyzing",
+        "ready": "Ready",
+        "failed": "Failed",
+        "needs-review": "Needs review",
+        "legacy": "Legacy analysis — refresh needed",
+        "missing": "Not analyzed"
+      },
+      "categorySources": {
+        "auto": "Legacy rules",
+        "admin": "Administrator",
+        "ai": "AI analysis",
+        "none": "Unclassified"
+      }
     },
     "settings": {
       "title": "AI overviews",
@@ -3911,7 +3933,20 @@
       "billingSet": "Billing set",
       "yes": "Yes",
       "no": "No",
-      "updatedByNote": "(Last changed by <who>{userId}</who>{hasDate, select, yes {, {date}} other {}})"
+      "updatedByNote": "(Last changed by <who>{userId}</who>{hasDate, select, yes {, {date}} other {}})",
+      "qualityGate": "Bulk migration is available after the reviewed accuracy evaluation passes.",
+      "batchTitle": "Review and regenerate analysis",
+      "batchDescription": "Review up to 20 skills at a time before generating paid analysis. Administrator categories are preserved. Existing content stays available if generation fails.",
+      "previewBatch": "Preview analysis batch",
+      "batchQueued": "Queued {queued}; skipped {skipped}.",
+      "batchEmpty": "No skills in this batch.",
+      "stale": "Outdated",
+      "currentCategories": "Current categories",
+      "suggestedCategories": "AI suggestions",
+      "noCategories": "Unclassified",
+      "noSuggestion": "No suggestion yet",
+      "generateBatch": "Generate / retry this batch ({count})",
+      "nextBatch": "Next batch"
     }
   },
   "dashboardSkillReviews": {

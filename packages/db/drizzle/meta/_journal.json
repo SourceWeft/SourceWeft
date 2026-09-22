@@ -351,6 +351,13 @@
       "when": 1790010020011,
       "tag": "0049_skill_market_community",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1790065628757,
+      "tag": "0050_skill_ai_analysis",
+      "breakpoints": true
     }
   ]
 }

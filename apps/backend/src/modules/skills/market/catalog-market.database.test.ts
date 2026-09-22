@@ -1050,12 +1050,8 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
         assert.equal(listedOnce.body.visibility, "public");
         assert.equal(listedOnce.body.listingHold, false);
         assert.equal(typeof listedOnce.body.listedAt, "string");
-        // Filed by the classifier on first listing.
-        assert.ok(
-          (listedOnce.body.categorySlugs as string[]).includes(
-            "documents-office",
-          ),
-        );
+        // Available immediately, but no guessed keyword categories before AI.
+        assert.deepEqual(listedOnce.body.categorySlugs, []);
 
         const withdrawn = await call("/delist", "POST");
         assert.equal(withdrawn.status, 200);

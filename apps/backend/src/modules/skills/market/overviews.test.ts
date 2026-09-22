@@ -8,6 +8,15 @@ vi.mock("../../../shared/queue", () => ({
   jobsQueue: {},
 }));
 
+vi.mock("./analysis-repository", () => ({
+  requestSkillAnalysis: vi.fn(),
+  failSkillAnalysis: vi.fn(),
+}));
+vi.mock("./overview-repository", () => ({
+  findSkillOverviewCandidates: vi.fn(),
+  readSkillOverviewBilling: vi.fn(),
+}));
+
 import { SKILL_OVERVIEW_BATCH_SIZE, enqueueSkillOverviews } from "./overviews";
 import { skillOverviewJobId } from "./overview-queue";
 
@@ -24,7 +33,6 @@ function candidates(count: number) {
 test("nothing happens while no billing team is set", async () => {
   const deps = {
     readBilling: vi.fn(async () => null),
-    copyFromSameBundles: vi.fn(async () => 0),
     findCandidates: vi.fn(async () => candidates(3)),
     jobExists: vi.fn(async () => false),
     enqueue: vi.fn(async () => undefined),
@@ -34,16 +42,14 @@ test("nothing happens while no billing team is set", async () => {
     copied: 0,
     skipped: 0,
   });
-  assert.equal(deps.copyFromSameBundles.mock.calls.length, 0);
   assert.equal(deps.findCandidates.mock.calls.length, 0);
   assert.equal(deps.enqueue.mock.calls.length, 0);
 });
 
-test("copies first, then queues one job per version up to the batch size", async () => {
+test("queues one job per version up to the batch size; cache reuse belongs to the worker", async () => {
   const enqueued: Array<Record<string, unknown>> = [];
   const deps = {
     readBilling: vi.fn(async () => billing),
-    copyFromSameBundles: vi.fn(async () => 4),
     findCandidates: vi.fn(async () =>
       candidates(SKILL_OVERVIEW_BATCH_SIZE + 10),
     ),
@@ -60,7 +66,7 @@ test("copies first, then queues one job per version up to the batch size", async
   const result = await enqueueSkillOverviews(deps);
   assert.deepEqual(result, {
     queued: SKILL_OVERVIEW_BATCH_SIZE,
-    copied: 4,
+    copied: 0,
     skipped: 2,
   });
   assert.equal(enqueued.length, SKILL_OVERVIEW_BATCH_SIZE);

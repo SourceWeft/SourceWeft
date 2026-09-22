@@ -4,6 +4,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, test, vi } from "vitest";
 
 const api = vi.hoisted(() => ({
+  getSkillAnalysisPreview: vi.fn(),
+  queueSkillAnalysisBatch: vi.fn(),
   getSkillOverviewBilling: vi.fn(),
   getSkillOverviewStatus: vi.fn(),
   setSkillOverviewBilling: vi.fn(),
@@ -179,4 +181,142 @@ test("a saved setting preselects its team and workspace; a refusal shows the rea
     userId: "user_9",
   });
   expect(container.textContent).toContain("not a member of this workspace");
+});
+
+const button = (label: string) =>
+  [...container.querySelectorAll("button")].find(
+    (node) => node.textContent?.trim() === label,
+  )!;
+test("preview preserves manual categories and queues only eligible reviewed batch IDs", async () => {
+  api.getSkillOverviewBilling.mockResolvedValue({
+    billing: null,
+    updatedBy: null,
+    updatedAt: null,
+  });
+  api.getSkillOverviewStatus.mockResolvedValue(status);
+  const item = {
+    skillId: "s1",
+    skillVersionId: "v1",
+    name: "PDF skill",
+    categoriesSource: "auto",
+    status: "legacy",
+    categories: ["development"],
+    suggestedCategories: ["documents"],
+    error: null,
+    stale: true,
+  };
+  api.getSkillAnalysisPreview.mockResolvedValue({
+    qualityApproved: true,
+    items: [
+      item,
+      { ...item, skillVersionId: "manual", categoriesSource: "admin" },
+      { ...item, skillVersionId: "running", status: "running" },
+    ],
+    nextCursor: "next",
+  });
+  api.queueSkillAnalysisBatch.mockResolvedValue({ queued: 1, skipped: 0 });
+  await render();
+  expect(api.getSkillAnalysisPreview).not.toHaveBeenCalled();
+  await act(async () => button("Preview analysis batch").click());
+  expect(container.textContent).toContain("Current categories: development");
+  expect(container.textContent).toContain("AI suggestions: documents");
+  await act(async () => button("Generate / retry this batch (1)").click());
+  expect(api.queueSkillAnalysisBatch).toHaveBeenCalledWith(["v1"]);
+  expect(container.textContent).toContain("Queued 1; skipped 0.");
+  await act(async () => button("Next batch").click());
+  expect(api.getSkillAnalysisPreview).toHaveBeenLastCalledWith("next");
+});
+
+test("quality approval is required for bulk migration", async () => {
+  api.getSkillOverviewBilling.mockResolvedValue({
+    billing: null,
+    updatedBy: null,
+    updatedAt: null,
+  });
+  api.getSkillOverviewStatus.mockResolvedValue(status);
+  api.getSkillAnalysisPreview.mockResolvedValue({
+    qualityApproved: false,
+    items: [
+      {
+        skillId: "s",
+        skillVersionId: "v",
+        name: "Skill",
+        categoriesSource: "auto",
+        status: "legacy",
+        categories: [],
+        suggestedCategories: [],
+        error: null,
+        stale: true,
+      },
+    ],
+    nextCursor: null,
+  });
+  await render();
+  await act(async () => button("Preview analysis batch").click());
+  expect(button("Generate / retry this batch (1)").disabled).toBe(true);
+  expect(container.textContent).toContain(
+    "reviewed accuracy evaluation passes",
+  );
+  expect(api.queueSkillAnalysisBatch).not.toHaveBeenCalled();
+});
+
+test("a delayed poll cannot replace the next preview page", async () => {
+  vi.useFakeTimers();
+  try {
+    api.getSkillOverviewBilling.mockResolvedValue({
+      billing: null,
+      updatedBy: null,
+      updatedAt: null,
+    });
+    api.getSkillOverviewStatus.mockResolvedValue(status);
+    const row = {
+      skillId: "a",
+      skillVersionId: "va",
+      name: "Page A",
+      categoriesSource: null,
+      status: "running",
+      categories: [],
+      suggestedCategories: [],
+      error: null,
+      stale: true,
+    };
+    const pageA = {
+      qualityApproved: false,
+      items: [row],
+      nextCursor: "page-b",
+    };
+    const pageB = {
+      qualityApproved: false,
+      items: [
+        {
+          ...row,
+          skillId: "b",
+          skillVersionId: "vb",
+          name: "Page B",
+          status: "missing",
+        },
+      ],
+      nextCursor: null,
+    };
+    let resolvePoll!: (value: typeof pageA) => void;
+    api.getSkillAnalysisPreview
+      .mockResolvedValueOnce(pageA)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolvePoll = resolve;
+          }),
+      )
+      .mockResolvedValueOnce(pageB);
+    await render();
+    await act(async () => button("Preview analysis batch").click());
+    await act(async () => vi.advanceTimersByTime(3000));
+    await act(async () => button("Next batch").click());
+    expect(container.textContent).toContain("Page B");
+    await act(async () => resolvePoll(pageA));
+    expect(container.textContent).toContain("Page B");
+    expect(container.textContent).not.toContain("Page A");
+  } finally {
+    vi.useRealTimers();
+  }
 });

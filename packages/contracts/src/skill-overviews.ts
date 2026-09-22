@@ -65,13 +65,33 @@ export const getSkillOverviewAdminResponseSchema = z.object({
   // imported from GitHub).
   eligible: z.boolean(),
   overviews: z.array(skillOverviewAdminEntrySchema),
+  categoriesSource: z.enum(["auto", "admin", "ai"]).nullable().default(null),
+  analysis: z
+    .object({
+      status: z.enum(["pending", "running", "ready", "failed", "needs-review"]),
+      error: z.string().nullable(),
+      promptVersion: z.string().nullable(),
+      taxonomyVersion: z.string().nullable(),
+      classification: z
+        .object({
+          status: z.enum(["ready", "needs-review"]),
+          primary: z.string().nullable(),
+          secondary: z.string().nullable(),
+          rationale: z.string(),
+          evidence: z.array(z.string()),
+        })
+        .nullable(),
+      updatedAt: z.string(),
+    })
+    .nullable()
+    .default(null),
 });
 
 // POST /v1/skills/registry/admin/skills/:skillId/overview/regenerate
 export const regenerateSkillOverviewResponseSchema = z.object({
   skillId: z.string(),
   skillVersionId: z.string(),
-  // Rows removed before the new job was queued.
+  // Deprecated compatibility field; always 0. Existing content is retained.
   deleted: z.number().int().nonnegative(),
   queued: z.boolean(),
 });
@@ -125,4 +145,46 @@ export type SetSkillOverviewVisibilityResponse = z.infer<
 >;
 export type SkillOverviewStatusResponse = z.infer<
   typeof skillOverviewStatusResponseSchema
+>;
+
+export const skillAnalysisPreviewResponseSchema = z.object({
+  qualityApproved: z.boolean().default(false),
+  items: z.array(
+    z.object({
+      skillId: z.string(),
+      skillVersionId: z.string(),
+      name: z.string(),
+      categoriesSource: z.enum(["auto", "admin", "ai"]).nullable(),
+      status: z.enum([
+        "pending",
+        "running",
+        "ready",
+        "failed",
+        "needs-review",
+        "legacy",
+        "missing",
+      ]),
+      categories: z.array(z.string()),
+      suggestedCategories: z.array(z.string()),
+      error: z.string().nullable(),
+      stale: z.boolean(),
+    }),
+  ),
+  nextCursor: z.string().nullable(),
+});
+export const skillAnalysisBatchRequestSchema = z.object({
+  skillVersionIds: z.array(z.string().min(1)).min(1).max(20),
+});
+export const skillAnalysisBatchResponseSchema = z.object({
+  queued: z.number().int().nonnegative(),
+  skipped: z.number().int().nonnegative(),
+});
+export type SkillAnalysisPreviewResponse = z.infer<
+  typeof skillAnalysisPreviewResponseSchema
+>;
+export type SkillAnalysisBatchRequest = z.infer<
+  typeof skillAnalysisBatchRequestSchema
+>;
+export type SkillAnalysisBatchResponse = z.infer<
+  typeof skillAnalysisBatchResponseSchema
 >;

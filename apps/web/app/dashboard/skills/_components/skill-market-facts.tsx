@@ -43,6 +43,7 @@ export function SkillMarketFacts({
   const executable = item.capability === "executable";
 
   if (
+    !isRegistry &&
     !featured &&
     !verified &&
     !executable &&
@@ -69,6 +70,9 @@ export function SkillMarketFacts({
           <BadgeCheck className="size-2.5" />
           {t("card.verified")}
         </Badge>
+      ) : null}
+      {isRegistry && categorySlugs.length === 0 ? (
+        <Badge variant="outline">{t("card.pendingCategory")}</Badge>
       ) : null}
       {categorySlugs.map((slug) => (
         <Badge className="h-5 px-1.5 text-[10px]" key={slug} variant="outline">

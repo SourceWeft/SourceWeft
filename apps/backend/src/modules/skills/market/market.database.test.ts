@@ -176,8 +176,8 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       expect(
         (await listing.listSkillCategorySlugs([clean.skillId])).get(
           clean.skillId,
-        ),
-      ).toContain("documents-office");
+        ) ?? [],
+      ).toEqual([]);
 
       const held = await definition(flagged.skillId);
       expect(held.visibility).toBe("restricted");

@@ -192,39 +192,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       assert.equal(forTwin?.bundleSha256, sharedSha);
     });
 
-    test("identical content is copied instead of summarized again", async () => {
-      const copied = await repo.copySkillOverviewsForAllSameBundles({
-        skillIds,
-      });
-      assert.equal(copied, 1);
-      const state = await repo.findSkillOverviewAdminState(twin.id);
-      assert.deepEqual(
-        state?.overviews.map((row) => row.locale),
-        ["en", "zh-CN", "zh-TW"],
-      );
-      assert.equal(state?.overviews[0]?.overview.summary, "English summary");
-      assert.equal(state?.overviews[0]?.model, "fixture-model");
-      // Nothing left to copy, and the twin is no longer a candidate.
-      assert.equal(
-        await repo.copySkillOverviewsForAllSameBundles({ skillIds }),
-        0,
-      );
-      const left = await repo.findSkillOverviewCandidates({
-        limit: 50,
-        skillIds,
-      });
-      assert.deepEqual(
-        left.map((c) => c.skillVersionId),
-        [fresh.versionId],
-      );
-      // An empty scope touches nothing.
-      assert.equal(
-        await repo.copySkillOverviewsForAllSameBundles({ skillIds: [] }),
-        0,
-      );
-    });
-
-    test("generation stores en, zh-CN and a converted zh-TW; the model is mocked", async () => {
+    test("generation stores three independently authored locales; the model is mocked", async () => {
       const calls: Array<{ userPrompt: string; userId: string }> = [];
       const result = await generate.generateSkillOverview({
         skillVersionId: fresh.versionId,
@@ -240,14 +208,25 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
                 whatItDoes: "Reads a sheet and draws charts.",
                 whenToUse: "When a chart is needed.",
                 requirements: "Python 3; ships a script.",
-                suggestedCategories: ["data-analytics", "nope"],
               },
               "zh-CN": {
                 summary: "从表格生成图表。",
                 whatItDoes: "读取表格并绘制图表。",
                 whenToUse: "需要图表时。",
                 requirements: "需要 Python 3。",
-                suggestedCategories: [],
+              },
+              "zh-TW": {
+                summary: "製作圖表，整理資料。",
+                whatItDoes: "讀取試算表並繪製圖表。",
+                whenToUse: "需要圖表時。",
+                requirements: "需要 Python 3。",
+              },
+              classification: {
+                status: "ready",
+                primary: "data-analytics",
+                secondary: null,
+                rationale: "Creates charts",
+                evidence: ["Makes charts."],
               },
             },
           };
@@ -264,7 +243,10 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
         state!.overviews.map((row) => [row.locale, row]),
       );
       assert.equal(byLocale.get("en")?.model, "mock-model");
-      assert.equal(byLocale.get("zh-TW")?.overview.summary, "從表格生成圖表。");
+      assert.equal(
+        byLocale.get("zh-TW")?.overview.summary,
+        "製作圖表，整理資料。",
+      );
       assert.deepEqual(byLocale.get("zh-TW")?.overview.suggestedCategories, [
         "data-analytics",
       ]);
@@ -418,7 +400,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       }
     });
 
-    test("deleting a version's overviews puts it back on the list", async () => {
+    test("deleting output does not silently restart a completed analysis", async () => {
       assert.equal(await repo.deleteSkillOverviews(fresh.versionId), 1);
       const left = await repo.findSkillOverviewCandidates({
         limit: 50,
@@ -426,7 +408,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       });
       assert.deepEqual(
         left.map((c) => c.skillVersionId),
-        [fresh.versionId],
+        [twin.versionId],
       );
     });
 
