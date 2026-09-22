@@ -30,11 +30,25 @@ export function validateReleaseConfig(env, metadata = {}) {
   ) {
     throw new Error("Changelog githubPrerelease must be a boolean.");
   }
+  const desktopPolicy = Object.hasOwn(metadata, "desktopPublicationPolicy")
+    ? metadata.desktopPublicationPolicy
+    : "signed";
+  if (!["signed", "candidate"].includes(desktopPolicy)) {
+    throw new Error(
+      "Changelog desktopPublicationPolicy must be signed or candidate.",
+    );
+  }
+  if (desktopPolicy === "candidate" && !result.prerelease) {
+    throw new Error(
+      "Unsigned candidate installers require a semver prerelease version.",
+    );
+  }
   // GitHub's presentation flag is independent of semver update channels.
   // An RC can be a regular GitHub Release without advancing stable/latest.
   return {
     ...result,
     githubPrerelease: metadata.githubPrerelease ?? result.prerelease,
+    desktopPolicy,
   };
 }
 
@@ -59,9 +73,9 @@ if (
   if (process.env.GITHUB_OUTPUT)
     appendFileSync(
       process.env.GITHUB_OUTPUT,
-      `latest=${result.latest}\nprerelease=${result.githubPrerelease}\n`,
+      `latest=${result.latest}\nprerelease=${result.githubPrerelease}\ndesktop_policy=${result.desktopPolicy}\n`,
     );
   console.log(
-    `Release ${result.version} configuration passed (GitHub prerelease=${result.githubPrerelease}, latest=${result.latest}).`,
+    `Release ${result.version} configuration passed (GitHub prerelease=${result.githubPrerelease}, latest=${result.latest}, desktop=${result.desktopPolicy}).`,
   );
 }

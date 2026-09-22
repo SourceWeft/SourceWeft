@@ -44,9 +44,56 @@ test("GitHub release flag can be disabled without promoting an RC to stable", ()
       prerelease: true,
       latest: false,
       githubPrerelease: false,
+      desktopPolicy: "signed",
     },
   );
   assert.equal(releaseVersion("v0.3.0-rc.1").prerelease, true);
+});
+
+test("unsigned installers require an explicit candidate policy and stay off stable/latest", () => {
+  const result = validateReleaseConfig(
+    { GITHUB_REF_NAME: "v0.3.0-rc.1" },
+    {
+      githubPrerelease: false,
+      desktopPublicationPolicy: "candidate",
+    },
+  );
+  assert.equal(result.desktopPolicy, "candidate");
+  assert.equal(result.githubPrerelease, false);
+  assert.equal(result.prerelease, true);
+  assert.equal(result.latest, false);
+  assert.equal(
+    validateReleaseConfig({ GITHUB_REF_NAME: "v0.3.0-rc.2" }).desktopPolicy,
+    "signed",
+  );
+  assert.throws(
+    () =>
+      validateReleaseConfig(
+        { GITHUB_REF_NAME: "v0.3.0" },
+        {
+          desktopPublicationPolicy: "candidate",
+        },
+      ),
+    /require a semver prerelease/,
+  );
+  for (const desktopPublicationPolicy of [
+    "unsigned",
+    "",
+    true,
+    null,
+    undefined,
+  ]) {
+    assert.throws(
+      () =>
+        validateReleaseConfig(
+          { GITHUB_REF_NAME: "v0.3.0-rc.1" },
+          {
+            desktopPublicationPolicy,
+          },
+        ),
+      /must be signed or candidate/,
+    );
+  }
 });
 
 test("GitHub release flag defaults to semver and rejects malformed overrides", () => {

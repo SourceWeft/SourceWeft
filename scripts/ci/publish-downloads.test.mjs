@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createRequire } from "node:module";
 import { describeInstaller, digest } from "./desktop-release-artifacts.mjs";
 import {
   downloadConfig,
@@ -313,5 +314,73 @@ test("workflow uploads and verifies before GitHub publication and promotes last"
   assert(
     workflow.indexOf("publish-downloads.mjs validate") <
       workflow.indexOf("Build and push image"),
+  );
+});
+
+test("candidate publication requires successful builds and never publishes application updates", async () => {
+  const require = createRequire(
+    new URL("../../apps/backend/package.json", import.meta.url),
+  );
+  const { parse } = require("yaml");
+  const workflow = parse(
+    await readFile(
+      new URL("../../.github/workflows/release.yml", import.meta.url),
+      "utf8",
+    ),
+  );
+  const signedOnly = "needs.preflight.outputs.desktop_policy == 'signed'";
+  assert.equal(workflow.jobs.desktop.if, signedOnly);
+  assert.equal(
+    workflow.jobs["desktop-candidate"].if,
+    "needs.preflight.outputs.desktop_policy == 'candidate'",
+  );
+  assert.equal(
+    workflow.jobs["desktop-candidate"].uses,
+    "./.github/workflows/desktop-build.yml",
+  );
+  assert.equal(workflow.jobs["desktop-candidate"].secrets, undefined);
+  const release = workflow.jobs.release;
+  assert.deepEqual(release.needs, [
+    "preflight",
+    "quality",
+    "desktop",
+    "desktop-candidate",
+  ]);
+  assert.match(release.if, /needs\.quality\.result == 'success'/);
+  assert.match(release.if, /needs\.desktop-candidate\.result == 'success'/);
+  assert.match(release.if, /!cancelled\(\)/);
+  for (const name of [
+    "Build update verifier",
+    "Prepare deterministic update notes",
+    "Upload and verify application updates",
+    "Promote verified application update channels",
+  ]) {
+    assert.equal(
+      release.steps.find((step) => step.name === name).if,
+      signedOnly,
+      name,
+    );
+  }
+  assert.equal(
+    workflow.jobs.preflight.steps.find(
+      (step) => step.name === "Validate update publication configuration",
+    ).if,
+    "steps.config.outputs.desktop_policy == 'signed'",
+  );
+  const draft = release.steps.find(
+    (step) => step.id === "github_release_candidate",
+  );
+  assert.match(draft.if, /desktop_policy == 'candidate'/);
+  assert.equal(draft.with.draft, true);
+  assert.equal(draft.with.fail_on_unmatched_files, true);
+  assert.doesNotMatch(draft.with.files, /\.sig|\.app\.tar\.gz/);
+  assert.match(draft.with.body, /not distribution-signed/);
+  assert.match(
+    draft.with.body,
+    /does not publish automatic application updates/,
+  );
+  assert.match(
+    release.steps.find((step) => step.name === "Publish completed release").run,
+    /-F prerelease="\$RELEASE_PRERELEASE"/,
   );
 });
