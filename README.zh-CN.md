@@ -4,11 +4,21 @@
 
 # SourceWeft
 
-**让 Agent 协作，把你的知识用起来。**
+**你的 AI 工作站，让想法成为成果。**
 
-连接知识与 Agent 协作的开源 AI 工作空间。
+研究、规划、创作、执行。
 
-支持自托管 · 多模型 · 自定义 Skills
+将模型、智能体、知识与工具汇聚到同一个开源工作站。
+
+让多智能体与专业子 Agent 分工推进任务，通过丰富的技能库、MCP 集成与沙箱执行拓展能力。跨设备继续工作，也可以为整个团队部署一套。
+
+**模型自己选，工具自由接，工作站自己部署。**
+
+多智能体与子 Agent · 技能库与 MCP · 沙箱执行 · 多端支持 · 自托管
+
+[![Download macOS Apple Silicon](https://img.shields.io/badge/Download-macOS_Apple_Silicon-111111?style=for-the-badge)](https://github.com/SourceWeft/SourceWeft/releases/download/v0.3.0-rc.1/SourceWeft_0.3.0-rc.1_aarch64.dmg)
+[![Download Windows x64](https://img.shields.io/badge/Download-Windows_x64-0078D4?style=for-the-badge)](https://github.com/SourceWeft/SourceWeft/releases/download/v0.3.0-rc.1/SourceWeft_0.3.0-rc.1_x64-setup.exe)
+[![Download Linux x64](https://img.shields.io/badge/Download-Linux_x64-E95420?style=for-the-badge)](https://github.com/SourceWeft/SourceWeft/releases/download/v0.3.0-rc.1/SourceWeft_0.3.0-rc.1_amd64.AppImage)
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![GitHub Stars](https://img.shields.io/github/stars/SourceWeft/SourceWeft?style=social)](https://github.com/SourceWeft/SourceWeft/stargazers)
@@ -19,7 +29,7 @@
 
 ---
 
-**SourceWeft** 将资料、文件与工具连接到同一个 AI 工作空间。让 Agent 分工研究、规划和执行，结合来源核对结果，再回到保存的对话与文件中继续推进工作。
+**SourceWeft** 将对话、知识、工作文件与任务执行连接在同一个工作站中。交代你要完成的工作，让 Agent 拆解任务、调用工具，再检查并持续完善成果。对话与文件保存在一起，让每一项成果成为下一步工作的起点。
 
 <p align="center"><img src="assets/chat-page.png" alt="SourceWeft interface" width="800" /></p>
 
@@ -27,14 +37,15 @@
 
 ## 核心功能
 
-- **资料与引用。** 接入 PDF、网页、笔记、YouTube、Notion、Google Drive、Gmail、Slack 等资料源。围绕选定资料提问，通过引用回到来源核对。
-- **Agent 协作。** 将探索、规划和执行委派给专门的子 Agent，再结合返回的结果继续处理任务。
-- **工具与 Skills。** 通过 Web 工具、MCP 集成、内置和自定义 Skills 扩展 Agent，复用工作方法。
-- **创作与工作文件。** 生成报告、演示、学习指南、音频概览和图像成果。检查输出，再回到保存的对话与文件中继续完善。
-- **多模型与自托管。** 选择受支持的模型 Provider，自行部署工作空间。
-- **共享工作空间。** 与团队组织资料和对话，通过角色与访问控制开展协作。
-
-可选的沙箱命令执行目前处于 **Alpha** 阶段，需要配置执行环境并获得批准。参见[执行说明](docker/sandbox-execution.zh-CN.md)。
+- **多智能体协作与子 Agent。** 将研究、探索、规划和执行委派给专门的子 Agent，结合工作上下文汇总结果，持续推进任务。
+- **丰富的技能库，持续扩展的能力。** 探索[技能库](https://sourceweft.com/skills)，使用演示、HTML 页面、图像、会议纪要和学习等内置 Skills，也可以添加自定义 Skills，复用自己的工作方法。
+- **MCP 与工具集成。** 通过 MCP 服务、网页搜索和内容抓取扩展 Agent，连接外部工具与服务，让信息获取和实际操作融入任务过程。
+- **沙箱执行。** 在隔离的临时执行环境中运行经批准的命令、处理文件，再将输出收集回工作文件。需要配置执行环境并获得批准，参见[执行说明](docker/sandbox-execution.zh-CN.md)。
+- **多模型与 BYOK。** 自由选择受支持的模型 Provider，使用自己的 API Key，按部署需要配置聊天与索引模型。
+- **多端使用与远程访问。** 通过网页端或 macOS、Windows、Linux 桌面客户端开展工作。远程访问已部署的工作站，在不同设备上回到保存的对话与文件继续推进。
+- **内容创作与工作文件。** 生成报告、演示、HTML 页面、学习指南、音频概览和图像。检查成果、提出修改，在同一个工作站中持续完善。
+- **知识接入与来源核对。** 接入 PDF、网页、笔记、YouTube、Notion、Google Drive、Gmail、Slack 等资料源，为任务提供所需背景，通过引用回到原文核对。
+- **自主部署与团队协作。** 为自己或企业部署工作站，自主管理数据库与文件存储，通过共享工作空间、角色与访问控制开展协作。外部模型与工具会根据你的配置处理发送给它们的数据。
 
 ## 使用场景
 
@@ -46,6 +57,10 @@
 | 已连接的团队资料源   | 获取关于决策、项目和共享上下文的可追溯回答 |
 
 ## 开始使用
+
+### 下载客户端
+
+点击上方下载 badge，获取 macOS（Apple Silicon）、Windows（x64）或 Linux（x64）客户端。按钮指向已发布的 `v0.3.0-rc.1` 安装包，其他版本见 [Releases](https://github.com/SourceWeft/SourceWeft/releases)。
 
 ### Docker 自托管
 
