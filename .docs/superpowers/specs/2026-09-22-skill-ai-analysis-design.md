@@ -1,7 +1,0 @@
-# Skill AI analysis
-
-Approved in conversation on 2026-09-22. Generate English, Simplified Chinese and Taiwan Traditional Chinese directly from source in one model call; no OpenCC. Generate one language-independent classification (primary, optional secondary, rationale/evidence or needs-review). Classify by purpose and output, not incidental tools or repository identity. Use bounded section-aware source extraction.
-
-Use existing gateway and billing. Persist all locales atomically and automatically apply classification for the eligible current version unless categories are administrator-owned. Hide/show only affects overview visibility. No keyword fallback for new listings or re-inference. Existing categories remain while analysis is pending or fails. Record pending/running/ready/failed/needs-review, source and version metadata. Preserve previous overview during regeneration; forced regeneration bypasses cache. Cache keys include source, prompt/taxonomy versions and model configuration identity. Old OpenCC results are stale and regenerated.
-
-Admin exposes states and retry; bulk migration uses preview and bounded batches, protects manual categories and records audit events. Evaluate at least 100 representative skills against reviewed labels, compare rule baseline and AI; require >=90% primary accuracy and improvement before bulk migration. Test transaction/race safety, locale completeness, retries, manual protection and cache invalidation. No release or deployment.
