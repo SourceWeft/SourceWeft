@@ -1,3 +1,4 @@
+import { useLocale as useDisplayLocale } from "next-intl";
 import { useCallback, useEffect, useRef } from "react";
 
 import { connectorsClient, contentClient } from "../../../../../lib/sdk";
@@ -122,6 +123,7 @@ export function useConnectorSyncRuns(input: {
       | undefined,
   ) => void;
 } {
+  const displayLocale = useDisplayLocale();
   const {
     workspaceId,
     isPollingTab,
@@ -344,7 +346,7 @@ export function useConnectorSyncRuns(input: {
               : {}),
           })
           .then((sourcesResult) => {
-            const mapped = mapSourcesToUi(sourcesResult.items);
+            const mapped = mapSourcesToUi(sourcesResult.items, displayLocale);
             const newestUpdatedAt = sourcesResult.items
               .map((item) => item.updatedAt)
               .filter(Boolean)
@@ -379,7 +381,7 @@ export function useConnectorSyncRuns(input: {
               })
               .then((sourcesResult) => ({
                 connectorId,
-                items: mapSourcesToUi(sourcesResult.items),
+                items: mapSourcesToUi(sourcesResult.items, displayLocale),
               }))
               .catch(() => ({ connectorId, items: [] as SourceItem[] })),
         );
@@ -588,6 +590,7 @@ export function useConnectorSyncRuns(input: {
     replaceConnectorSources,
     refreshConnectors,
     workspaceId,
+    displayLocale,
   ]);
 
   return { trackConnectorSyncRun };

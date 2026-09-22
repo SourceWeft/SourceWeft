@@ -1,5 +1,6 @@
 "use client";
 
+import { useLocale as useDisplayLocale } from "next-intl";
 import Link from "next/link";
 import type { SkillClaimsOverview } from "@sourceweft/contracts";
 import { Badge } from "@sourceweft/ui-web/components/ui/badge";
@@ -19,6 +20,7 @@ export function ClaimLists({
   workspaceId?: string | null;
   onChanged?: () => void;
 }) {
+  const displayLocale = useDisplayLocale();
   const t = useTranslations("dashboardSkillsClaim");
   const claims = sortClaims(overview.claims);
   return (
@@ -66,7 +68,9 @@ export function ClaimLists({
           {t("page.yourClaims")}
         </h2>
         {claims.length === 0 ? (
-          <p className="mt-2 text-xs text-muted-foreground">{t("page.noClaims")}</p>
+          <p className="mt-2 text-xs text-muted-foreground">
+            {t("page.noClaims")}
+          </p>
         ) : (
           <ul className="mt-3 divide-y divide-border text-xs">
             {claims.map((claim) => (
@@ -81,15 +85,22 @@ export function ClaimLists({
                   {claim.repo}
                 </Link>
                 <span className="flex items-center gap-2 text-muted-foreground">
-                  <span>{t.has(`page.methodLabel.${claim.method}`)
-                      ? t(`page.methodLabel.${claim.method}`)
-                      : claim.method}</span>
                   <span>
-                    {formatClaimDate(claim.verifiedAt ?? claim.createdAt)}
+                    {t.has(`page.methodLabel.${claim.method}`)
+                      ? t(`page.methodLabel.${claim.method}`)
+                      : claim.method}
+                  </span>
+                  <span>
+                    {formatClaimDate(
+                      claim.verifiedAt ?? claim.createdAt,
+                      displayLocale,
+                    )}
                   </span>
                   <Badge
                     className="h-5 px-1.5 text-[10px]"
-                    variant={claim.status === "verified" ? "secondary" : "outline"}
+                    variant={
+                      claim.status === "verified" ? "secondary" : "outline"
+                    }
                   >
                     {t.has(`page.status.${claim.status}`)
                       ? t(`page.status.${claim.status}`)

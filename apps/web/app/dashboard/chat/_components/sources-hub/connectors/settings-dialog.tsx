@@ -1,3 +1,6 @@
+import { formatDisplayDate } from "@/lib/i18n/format";
+
+import { useLocale as useDisplayLocale } from "next-intl";
 import { useEffect, useState } from "react";
 import {
   Copy,
@@ -130,6 +133,7 @@ export function ConnectorSettingsDialog({
   open: boolean;
   webhookConfig: ConnectorWebhookConfig | null;
 }) {
+  const displayLocale = useDisplayLocale();
   const t = useTranslations("dashboardSourcesHub");
   const [tab, setTab] = useState<ConnectorSettingsTab>("overview");
   const connectorType = connector?.raw.connectorType ?? "connector";
@@ -352,9 +356,10 @@ export function ConnectorSettingsDialog({
                     </p>
                     <p className="mt-1 text-sm font-medium text-foreground">
                       {latestSuccessfulSync
-                        ? new Date(
-                            latestSuccessfulSync.createdAt,
-                          ).toLocaleString()
+                        ? formatDisplayDate(
+                            new Date(latestSuccessfulSync.createdAt),
+                            displayLocale,
+                          )
                         : t("connectors.overview.never")}
                     </p>
                   </div>
@@ -377,9 +382,10 @@ export function ConnectorSettingsDialog({
                     </p>
                     <p className="mt-1 text-sm font-medium text-foreground">
                       {connector.raw.nextScheduledAt
-                        ? new Date(
-                            connector.raw.nextScheduledAt,
-                          ).toLocaleString()
+                        ? formatDisplayDate(
+                            new Date(connector.raw.nextScheduledAt),
+                            displayLocale,
+                          )
                         : t("connectors.overview.notScheduled")}
                     </p>
                   </div>
@@ -543,7 +549,9 @@ export function ConnectorSettingsDialog({
                             <TypeBadge label={t("connectors.config.actions")} />
                           ) : null}
                           {catalogItem.supportsWebhook ? (
-                            <TypeBadge label={t("connectors.config.webhooks")} />
+                            <TypeBadge
+                              label={t("connectors.config.webhooks")}
+                            />
                           ) : null}
                         </>
                       ) : (

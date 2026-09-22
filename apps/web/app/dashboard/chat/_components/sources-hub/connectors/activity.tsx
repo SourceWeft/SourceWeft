@@ -1,3 +1,6 @@
+import { formatDisplayDate } from "@/lib/i18n/format";
+
+import { useLocale as useDisplayLocale } from "next-intl";
 import { Clock3, Loader2, RotateCcw, Sparkles, Webhook } from "lucide-react";
 import { useTranslations } from "next-intl";
 
@@ -105,14 +108,18 @@ function formatConnectorActivityTitle(
   return item.title;
 }
 
-function formatConnectorActivityValue(value: unknown, t: ActivityT) {
+function formatConnectorActivityValue(
+  value: unknown,
+  t: ActivityT,
+  displayLocale: string,
+) {
   if (typeof value === "boolean") {
     return value ? t("connectorActivity.yes") : t("connectorActivity.no");
   }
   if (typeof value === "string") {
     const date = new Date(value);
     if (/^\d{4}-\d{2}-\d{2}T/.test(value) && !Number.isNaN(date.getTime())) {
-      return date.toLocaleString();
+      return formatDisplayDate(date, displayLocale);
     }
     return value;
   }
@@ -126,6 +133,7 @@ function formatConnectorActivityValue(value: unknown, t: ActivityT) {
 }
 
 function ActivityRow({ item }: { item: ConnectorActivityItem }) {
+  const displayLocale = useDisplayLocale();
   const t = useTranslations("dashboardSourcesHub");
   const Icon =
     item.kind === "sync"
@@ -154,7 +162,7 @@ function ActivityRow({ item }: { item: ConnectorActivityItem }) {
                 {formatConnectorActivityTitle(item, t)}
               </p>
               <p className="mt-0.5 truncate text-[10px] text-muted-foreground">
-                {new Date(item.createdAt).toLocaleString()} ·{" "}
+                {formatDisplayDate(new Date(item.createdAt), displayLocale)} ·{" "}
                 {formatDuration(item.durationMs)}
               </p>
             </div>
@@ -173,7 +181,7 @@ function ActivityRow({ item }: { item: ConnectorActivityItem }) {
                       : key}
                   </span>
                   <span className="block truncate text-[11px] text-foreground">
-                    {formatConnectorActivityValue(value, t)}
+                    {formatConnectorActivityValue(value, t, displayLocale)}
                   </span>
                 </div>
               ))}

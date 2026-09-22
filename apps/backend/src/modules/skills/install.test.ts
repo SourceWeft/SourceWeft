@@ -55,6 +55,14 @@ vi.mock("@sourceweft/db", async (original) => {
 // Skill blobs live in object storage, whose client is built at import time
 // from config this file stubs down to what `installSkill` reads.
 vi.mock("./storage", () => ({ readSkillBlob: vi.fn() }));
+// Catalog browsing is not part of installation. Loading its real listing
+// module also initializes analysis/model-gateway services against this test's
+// deliberately minimal config. Fail if installation ever starts calling it.
+vi.mock("./market/listing", () => ({
+  listSkillCategorySlugs: vi.fn(() => {
+    throw new Error("Unexpected category lookup during skill installation");
+  }),
+}));
 vi.mock("./registry/repository", () => ({
   getRegistrySkillBySlug: async () => state.held,
 }));

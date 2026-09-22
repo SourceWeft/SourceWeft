@@ -1,5 +1,7 @@
 "use client";
 
+import { formatDisplayDate } from "@/lib/i18n/format";
+import { useLocale as useDisplayLocale } from "next-intl";
 import * as React from "react";
 import type {
   SkillSubmission,
@@ -151,9 +153,9 @@ export function useSkillSubmissions({
         // Anything tracked while the list was loading is newer than the list.
         if (active) {
           setItems((current) =>
-            current.reduce(upsert, result.items.slice()).sort((a, b) =>
-              b.createdAt.localeCompare(a.createdAt),
-            ),
+            current
+              .reduce(upsert, result.items.slice())
+              .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
           );
         }
       })
@@ -279,7 +281,10 @@ export function SubmissionStages({
   // Only an import that never reached a worker (it could not be queued).
   if (rows.length === 0) return null;
   return (
-    <ol aria-label={tm("submissions.progressLabel")} className="space-y-1.5 text-xs">
+    <ol
+      aria-label={tm("submissions.progressLabel")}
+      className="space-y-1.5 text-xs"
+    >
       {rows.map((row) => (
         <li
           className={cn(
@@ -314,7 +319,10 @@ export function SubmissionResults({
   if (results.length === 0) return null;
   const summary = summarizeSubmissionResults(results);
   return (
-    <section aria-label={t("submit.resultsAriaLabel")} className="space-y-3 text-sm">
+    <section
+      aria-label={t("submit.resultsAriaLabel")}
+      className="space-y-3 text-sm"
+    >
       <p role="status">{t("submit.resultsSummary", summary)}</p>
       {results.map((result, index) => (
         <div
@@ -411,11 +419,11 @@ export function SubmissionDetail({
   );
 }
 
-function formatSubmittedAt(value: string) {
+function formatSubmittedAt(value: string, displayLocale: string) {
   const date = new Date(value);
   return Number.isNaN(date.getTime())
     ? value
-    : date.toLocaleString(undefined, {
+    : formatDisplayDate(date, displayLocale, {
         dateStyle: "medium",
         timeStyle: "short",
       });
@@ -427,6 +435,7 @@ export function MySubmissions({
 }: {
   submissions: SkillSubmissionsController;
 }) {
+  const displayLocale = useDisplayLocale();
   const tm = useTranslations("dashboardSkillsMarket");
   const { items, retry } = submissions;
   const running = items.filter(isSubmissionInFlight).length;
@@ -466,7 +475,7 @@ export function MySubmissions({
                   className="shrink-0 text-muted-foreground"
                   dateTime={submission.createdAt}
                 >
-                  {formatSubmittedAt(submission.createdAt)}
+                  {formatSubmittedAt(submission.createdAt, displayLocale)}
                 </time>
               </summary>
               <div className="px-3 pb-3 pl-8">

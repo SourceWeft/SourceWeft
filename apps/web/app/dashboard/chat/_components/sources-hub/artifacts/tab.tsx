@@ -1,3 +1,6 @@
+import { formatDisplayDate } from "@/lib/i18n/format";
+
+import { useLocale as useDisplayLocale } from "next-intl";
 import { Loader2, Presentation, RotateCcw, Sparkles } from "lucide-react";
 import { useMemo } from "react";
 import { useTranslations } from "next-intl";
@@ -43,6 +46,7 @@ export const ArtifactsTab = memoComponent(function ArtifactsTab({
   searchQuery: string;
   workspaceId?: string | null;
 }) {
+  const displayLocale = useDisplayLocale();
   const t = useTranslations("dashboardSourcesHub");
   const q = searchQuery.trim().toLowerCase();
   const filtered = useMemo(
@@ -182,11 +186,19 @@ export const ArtifactsTab = memoComponent(function ArtifactsTab({
                 ) : null}
               </div>
               <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
-                <span>{new Date(artifact.createdAt).toLocaleString()}</span>
+                <span>
+                  {formatDisplayDate(
+                    new Date(artifact.createdAt),
+                    displayLocale,
+                  )}
+                </span>
                 {artifact.completedAt ? (
                   <span>
                     {t("artifacts.completed", {
-                      date: new Date(artifact.completedAt).toLocaleString(),
+                      date: formatDisplayDate(
+                        new Date(artifact.completedAt),
+                        displayLocale,
+                      ),
                     })}
                   </span>
                 ) : null}

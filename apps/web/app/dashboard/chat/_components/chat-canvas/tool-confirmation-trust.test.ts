@@ -107,6 +107,7 @@ test("an approve_always response with no trust rule does not claim anything was 
       trustRule: null,
     },
     t,
+    "en",
   );
   assert.match(message, /not remembered/i);
   assert.doesNotMatch(message, /automatically/i);
@@ -120,6 +121,7 @@ test("an approve_always response with a trust rule reports the expiry", () => {
       now: new Date("2026-07-21T00:00:00.000Z"),
     },
     t,
+    "en",
   );
   assert.match(message, /approved automatically until/i);
   assert.doesNotMatch(message, /not remembered/i);
@@ -127,11 +129,11 @@ test("an approve_always response with a trust rule reports the expiry", () => {
 
 test("plain approve and reject copy is unchanged", () => {
   assert.equal(
-    describeDecisionOutcome({ decision: "approve" }, t),
+    describeDecisionOutcome({ decision: "approve" }, t, "en"),
     "Approved in SourceWeft.",
   );
   assert.match(
-    describeDecisionOutcome({ decision: "reject" }, t),
+    describeDecisionOutcome({ decision: "reject" }, t, "en"),
     /was not run/i,
   );
 });

@@ -30,6 +30,22 @@ export function sanitizeClientErrorMessage(
   if (!text) {
     return null;
   }
+  if (t) {
+    const localMessages: Record<string, string> = {
+      "Failed to send message.": "errors.sendFailed",
+      "Tool execution failed.": "errors.toolExecutionFailed",
+      "The generated tool arguments were invalid. Please retry.":
+        "errors.toolArgsInvalid",
+    };
+    const key = Object.hasOwn(localMessages, text) ? localMessages[text] : undefined;
+    if (key) return t(key);
+    // Data normalizers have already removed unsafe argument dumps. Translate
+    // their stable retry hint at display time, including historical messages.
+    const named = text.match(
+      /^(.+) failed because the generated tool arguments were invalid\. Please retry\.$/,
+    );
+    if (named) return t("errors.toolArgsInvalidNamed", { tool: named[1]! });
+  }
   if (
     /Error invoking tool/i.test(text) ||
     /Received tool input did not match expected schema/i.test(text) ||

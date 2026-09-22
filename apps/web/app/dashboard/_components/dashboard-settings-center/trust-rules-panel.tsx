@@ -1,5 +1,6 @@
 "use client";
 
+import { useLocale as useDisplayLocale } from "next-intl";
 import * as React from "react";
 import { useTranslations } from "next-intl";
 import { ShieldCheck } from "lucide-react";
@@ -27,6 +28,7 @@ export function TrustRulesPanelContent({
 }: {
   workspaceId: string | null;
 }) {
+  const displayLocale = useDisplayLocale();
   const t = useTranslations("dashboardSettings");
   const [rules, setRules] = React.useState<AgentToolTrustRule[]>([]);
   const [loading, setLoading] = React.useState(Boolean(workspaceId));
@@ -86,7 +88,7 @@ export function TrustRulesPanelContent({
     }
   }
 
-  const rows = rules.map((rule) => toTrustRuleRow(rule));
+  const rows = rules.map((rule) => toTrustRuleRow(rule, displayLocale, t));
 
   return (
     <div className="space-y-4">

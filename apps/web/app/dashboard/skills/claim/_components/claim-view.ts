@@ -1,3 +1,4 @@
+import { formatDisplayDate } from "@/lib/i18n/format";
 import {
   parseSkillClaimRepo,
   type SkillClaimRepository,
@@ -59,17 +60,16 @@ export function claimRequestMailto(repo: string) {
 export function sortClaims(claims: readonly SkillRepoClaim[]) {
   const rank = (claim: SkillRepoClaim) => (claim.status === "verified" ? 0 : 1);
   return [...claims].sort(
-    (a, b) =>
-      rank(a) - rank(b) || b.createdAt.localeCompare(a.createdAt),
+    (a, b) => rank(a) - rank(b) || b.createdAt.localeCompare(a.createdAt),
   );
 }
 
-export function formatClaimDate(iso: string | null) {
+export function formatClaimDate(iso: string | null, displayLocale: string) {
   if (!iso) return "";
   const date = new Date(iso);
   return Number.isNaN(date.getTime())
     ? iso
-    : date.toLocaleDateString(undefined, {
+    : formatDisplayDate(date, displayLocale, {
         day: "numeric",
         month: "short",
         year: "numeric",

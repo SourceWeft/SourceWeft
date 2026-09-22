@@ -1,5 +1,7 @@
 "use client";
+import { formatDisplayDate } from "@/lib/i18n/format";
 
+import { useLocale as useDisplayLocale } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { FileCitationPreview } from "./file-citation-preview";
 import {
@@ -108,12 +110,10 @@ function formatBytes(sizeBytes: number | null | undefined) {
   return `${value.toFixed(fractionDigits)} ${units[unitIndex]}`;
 }
 
-const sourceDateFormatter = new Intl.DateTimeFormat(undefined, {
-  dateStyle: "medium",
-  timeStyle: "short",
-});
-
-function formatTimestamp(value: string | null | undefined) {
+function formatTimestamp(
+  value: string | null | undefined,
+  displayLocale: string,
+) {
   if (!value) {
     return null;
   }
@@ -123,7 +123,10 @@ function formatTimestamp(value: string | null | undefined) {
     return null;
   }
 
-  return sourceDateFormatter.format(parsed);
+  return formatDisplayDate(parsed, displayLocale, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
 }
 
 function SourceMetaRow({ label, value }: { label: string; value: string }) {
@@ -150,6 +153,7 @@ export function SourcePreviewPanel({
   source?: SourceItem | null;
   workspaceId?: string | null;
 }) {
+  const displayLocale = useDisplayLocale();
   const t = useTranslations("dashboardSourcesHub");
   const [detail, setDetail] = useState<SourceDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -302,7 +306,10 @@ export function SourcePreviewPanel({
   const sourceDownloadUrl = detail?.source.downloadUrl ?? null;
   const sourceFileContent = detail?.source.contentText ?? "";
   const sourceSize = formatBytes(detail?.source.sizeBytes);
-  const sourceUpdatedAt = formatTimestamp(detail?.source.updatedAt);
+  const sourceUpdatedAt = formatTimestamp(
+    detail?.source.updatedAt,
+    displayLocale,
+  );
   const sourceTypeLabel =
     formatEnumLabel(detail?.source.sourceType ?? source?.sourceType) ??
     t("sourcePreview.sourceFallback");

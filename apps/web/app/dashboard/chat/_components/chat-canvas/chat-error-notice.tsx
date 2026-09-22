@@ -1,3 +1,4 @@
+import { sanitizeClientErrorMessage } from "./client-error-message";
 import { AlertTriangle } from "lucide-react";
 import { useTranslations } from "next-intl";
 
@@ -30,7 +31,7 @@ export function formatChatErrorMessage(
     codePrefix && message.startsWith(codePrefix)
       ? message.slice(codePrefix.length).trimStart()
       : message;
-  return withoutCode.replace(
+  return (sanitizeClientErrorMessage(withoutCode, t) ?? withoutCode).replace(
     /Provider returned invalid structured output(?: \(length=\d+, sha256=[a-f0-9]{64}\))?/giu,
     t("errors.invalidStructuredContent"),
   );

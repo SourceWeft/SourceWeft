@@ -1,5 +1,6 @@
 "use client";
 
+import { useLocale as useDisplayLocale } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import {
   CheckIcon,
@@ -158,6 +159,7 @@ function ToolConfirmationPanel({
   onStale?: (input: { item: ToolConfirmationItem }) => void;
   workspaceId?: string | null;
 }) {
+  const displayLocale = useDisplayLocale();
   const { confirmation } = item;
   const t = useTranslations("dashboardChatCanvas");
   const localStatus = useLocalOperationStatus();
@@ -265,6 +267,7 @@ function ToolConfirmationPanel({
           trustRule: result.trustRule ?? null,
         },
         t,
+        displayLocale,
       );
       if (isRejectDecision || status === "rejected") {
         setState("output-denied");

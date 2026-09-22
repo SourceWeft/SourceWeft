@@ -1,3 +1,4 @@
+import { formatDisplayDate } from "@/lib/i18n/format";
 import {
   AGENT_TOOL_TRUST_RULE_DEFAULT_TTL_SECONDS,
   AGENT_TOOL_TRUST_RULE_MAX_TTL_SECONDS,
@@ -166,6 +167,7 @@ export function formatTrustRuleExpiry(
   expiresAt: string | null | undefined,
   t: Translate,
   now = new Date(),
+  displayLocale: string,
 ) {
   if (!expiresAt) {
     return null;
@@ -178,7 +180,7 @@ export function formatTrustRuleExpiry(
   if (time <= now.getTime()) {
     return t("toolConfirmation.trustDuration.expired");
   }
-  return parsed.toLocaleDateString(undefined, {
+  return formatDisplayDate(parsed, displayLocale, {
     year: "numeric",
     month: "short",
     day: "numeric",
@@ -202,6 +204,7 @@ export function describeDecisionOutcome(
     now?: Date;
   },
   t: Translate,
+  displayLocale: string,
 ) {
   if (input.decision === "reject") {
     return t("toolConfirmation.rejectedNotRun");
@@ -216,6 +219,7 @@ export function describeDecisionOutcome(
     input.trustRule.expiresAt,
     t,
     input.now ?? new Date(),
+    displayLocale,
   );
   return expiry
     ? t("toolConfirmation.outcome.approvedUntil", { expiry })

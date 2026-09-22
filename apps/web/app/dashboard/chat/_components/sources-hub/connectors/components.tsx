@@ -1,3 +1,6 @@
+import { formatDisplayDate } from "@/lib/i18n/format";
+
+import { useLocale as useDisplayLocale } from "next-intl";
 import {
   ArrowLeft,
   CheckCircle2,
@@ -66,8 +69,14 @@ const syncReadinessUiByReason: Record<
   },
 };
 
-function formatConnectorDate(value: string | null, t: ConnectorT) {
-  return value ? new Date(value).toLocaleString() : t("connectors.never");
+function formatConnectorDate(
+  value: string | null,
+  t: ConnectorT,
+  displayLocale: string,
+) {
+  return value
+    ? formatDisplayDate(new Date(value), displayLocale)
+    : t("connectors.never");
 }
 
 export function formatConnectorSchedule(
@@ -158,11 +167,15 @@ export function compactConnectorProviderMeta(
 function compactConnectorExecutionMeta(
   connector: ConnectorItem,
   t: ConnectorT,
+  displayLocale: string,
 ) {
   const providerName = getConnectorProviderName(connector.raw.connectorType);
   const lastSync = connector.raw.lastIndexedAt
     ? t("connectors.lastSync", {
-        date: new Date(connector.raw.lastIndexedAt).toLocaleString(),
+        date: formatDisplayDate(
+          new Date(connector.raw.lastIndexedAt),
+          displayLocale,
+        ),
       })
     : t("connectors.neverSynced");
   return [providerName, lastSync].filter(Boolean).join(" · ");
@@ -222,15 +235,18 @@ export function getCatalogConnector(
   );
 }
 
-function getOAuthConnectorStatus(input: {
-  connector: ConnectorItem | null;
-  hasActiveAccount: boolean;
-  isBusy: boolean;
-  item: ConnectorCatalogItem;
-  readiness?: ConnectorReadinessState | null;
-  webhookConfig: ConnectorWebhookConfig | null;
-  t: ConnectorT;
-}): ConnectorCatalogStatus {
+function getOAuthConnectorStatus(
+  input: {
+    connector: ConnectorItem | null;
+    hasActiveAccount: boolean;
+    isBusy: boolean;
+    item: ConnectorCatalogItem;
+    readiness?: ConnectorReadinessState | null;
+    webhookConfig: ConnectorWebhookConfig | null;
+    t: ConnectorT;
+  },
+  displayLocale: string,
+): ConnectorCatalogStatus {
   const t = input.t;
   if (input.isBusy) {
     return {
@@ -253,7 +269,8 @@ function getOAuthConnectorStatus(input: {
       return {
         kind: "error",
         label: t("connectors.status.error"),
-        detail: connector.raw.lastError || t("connectors.detail.needsAttention"),
+        detail:
+          connector.raw.lastError || t("connectors.detail.needsAttention"),
       };
     }
     if (connector.status === "paused") {
@@ -281,7 +298,11 @@ function getOAuthConnectorStatus(input: {
       detail:
         formatConnectorReadinessSummary(input.readiness ?? null, t) ??
         t("connectors.detail.lastSync", {
-          date: formatConnectorDate(connector.raw.lastIndexedAt, t),
+          date: formatConnectorDate(
+            connector.raw.lastIndexedAt,
+            t,
+            displayLocale,
+          ),
         }),
     };
   }
@@ -304,16 +325,19 @@ function getOAuthConnectorStatus(input: {
   };
 }
 
-export function getCatalogStatus(input: {
-  item: ConnectorCatalogItem;
-  connectors: ConnectorItem[];
-  accounts: ConnectorAccountItem[];
-  connectorBusyById: Record<string, boolean>;
-  connectorWaitingByType: Record<string, boolean>;
-  connectorReadinessById?: Record<string, ConnectorReadinessState>;
-  webhookConfigsById: Record<string, ConnectorWebhookConfig | null>;
-  t: ConnectorT;
-}): ConnectorCatalogStatus {
+export function getCatalogStatus(
+  input: {
+    item: ConnectorCatalogItem;
+    connectors: ConnectorItem[];
+    accounts: ConnectorAccountItem[];
+    connectorBusyById: Record<string, boolean>;
+    connectorWaitingByType: Record<string, boolean>;
+    connectorReadinessById?: Record<string, ConnectorReadinessState>;
+    webhookConfigsById: Record<string, ConnectorWebhookConfig | null>;
+    t: ConnectorT;
+  },
+  displayLocale: string,
+): ConnectorCatalogStatus {
   const t = input.t;
   if (input.item.connectMode === "coming_soon") {
     if (input.item.statusKind === "non_indexable") {
@@ -343,22 +367,25 @@ export function getCatalogStatus(input: {
     (account) =>
       account.connectorType === input.item.id && account.status === "active",
   );
-  return getOAuthConnectorStatus({
-    connector,
-    hasActiveAccount: hasActiveAccount && !connector,
-    isBusy: Boolean(
-      input.connectorWaitingByType[input.item.id] ||
-      (connector && input.connectorBusyById[connector.id]),
-    ),
-    item: input.item,
-    readiness: connector
-      ? (input.connectorReadinessById?.[connector.id] ?? null)
-      : null,
-    webhookConfig: connector
-      ? (input.webhookConfigsById[connector.id] ?? null)
-      : null,
-    t,
-  });
+  return getOAuthConnectorStatus(
+    {
+      connector,
+      hasActiveAccount: hasActiveAccount && !connector,
+      isBusy: Boolean(
+        input.connectorWaitingByType[input.item.id] ||
+        (connector && input.connectorBusyById[connector.id]),
+      ),
+      item: input.item,
+      readiness: connector
+        ? (input.connectorReadinessById?.[connector.id] ?? null)
+        : null,
+      webhookConfig: connector
+        ? (input.webhookConfigsById[connector.id] ?? null)
+        : null,
+      t,
+    },
+    displayLocale,
+  );
 }
 
 function ConnectorStatusBadge({ status }: { status: ConnectorCatalogStatus }) {
@@ -617,36 +644,40 @@ export const ActiveConnectorCard = memoComponent(function ActiveConnectorCard({
   onSyncConnector: (connector: ConnectorItem) => void;
   onToggleStatus: (connector: ConnectorItem) => void;
 }) {
+  const displayLocale = useDisplayLocale();
   const t = useTranslations("dashboardSourcesHub");
   const isBusy = Boolean(connectorBusyById[connector.id]);
   const catalogItem =
     connectorCatalog.find((item) => item.id === connector.raw.connectorType) ??
     connectorCatalog.find((item) => item.id === "notion");
   const icon = catalogItem?.icon ?? Link2;
-  const status = getOAuthConnectorStatus({
-    connector,
-    hasActiveAccount: true,
-    isBusy,
-    item: catalogItem ?? {
-      id: connector.raw.connectorType,
-      name: connector.raw.connectorType,
-      category: "Knowledge & Docs",
-      description: connector.meta,
-      capabilities: [],
-      connectMode: "oauth_connector",
-      postOAuthMode: "configure_required",
-      icon: Link2,
-      isIndexable: true,
-      authKind: "oauth",
-      supportsPeriodicSync: true,
-      supportsActions: false,
-      supportsWebhook: false,
-      statusKind: "coming_soon",
+  const status = getOAuthConnectorStatus(
+    {
+      connector,
+      hasActiveAccount: true,
+      isBusy,
+      item: catalogItem ?? {
+        id: connector.raw.connectorType,
+        name: connector.raw.connectorType,
+        category: "Knowledge & Docs",
+        description: connector.meta,
+        capabilities: [],
+        connectMode: "oauth_connector",
+        postOAuthMode: "configure_required",
+        icon: Link2,
+        isIndexable: true,
+        authKind: "oauth",
+        supportsPeriodicSync: true,
+        supportsActions: false,
+        supportsWebhook: false,
+        statusKind: "coming_soon",
+      },
+      readiness: connectorReadinessById[connector.id] ?? null,
+      webhookConfig: catalogItem?.supportsWebhook ? webhookConfig : null,
+      t,
     },
-    readiness: connectorReadinessById[connector.id] ?? null,
-    webhookConfig: catalogItem?.supportsWebhook ? webhookConfig : null,
-    t,
-  });
+    displayLocale,
+  );
   const statusToggleLabel =
     connector.status === "disabled"
       ? t("connectors.enableShort")
@@ -698,7 +729,7 @@ export const ActiveConnectorCard = memoComponent(function ActiveConnectorCard({
                 </button>
               </h4>
               <p className="mt-1 truncate text-xs text-muted-foreground">
-                {compactConnectorExecutionMeta(connector, t)}
+                {compactConnectorExecutionMeta(connector, t, displayLocale)}
               </p>
             </div>
             <div className="hidden shrink-0 sm:block">

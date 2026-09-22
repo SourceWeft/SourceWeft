@@ -1,4 +1,6 @@
 "use client";
+
+import { useLocale as useDisplayLocale } from "next-intl";
 import * as React from "react";
 import type {
   RegistryVersionDetail,
@@ -54,10 +56,7 @@ function readEscalation(details: unknown): VersionEscalation {
 }
 
 /** A scan flag in words; an unknown one is shown as it is rather than hidden. */
-function describeScanFlag(
-  flag: string,
-  t: ReturnType<typeof useTranslations>,
-) {
+function describeScanFlag(flag: string, t: ReturnType<typeof useTranslations>) {
   if (flag === "binary:executable") return t("escalation.flags.binary");
   if (flag === "tool:sensitive") return t("escalation.flags.sensitiveTools");
   if (flag.startsWith("egress:")) return t("escalation.flags.egress", { flag });
@@ -92,6 +91,7 @@ export function RegistryVersions({
   onView: (detail: RegistryVersionDetail | null) => void;
   onChanged: () => void;
 }) {
+  const displayLocale = useDisplayLocale();
   const t = useTranslations("dashboardSkills");
   const tm = useTranslations("dashboardSkillsMarket");
   const [list, setList] = React.useState<RegistryVersionsResponse | null>(null);
@@ -250,7 +250,9 @@ export function RegistryVersions({
     >
       <div className="flex flex-wrap items-center gap-2 px-3 py-2.5">
         <GitCommitHorizontal className="size-4 shrink-0 text-muted-foreground" />
-        <span className="text-muted-foreground">{t("versions.versionLabel")}</span>
+        <span className="text-muted-foreground">
+          {t("versions.versionLabel")}
+        </span>
         <Select value={selected} onValueChange={setSelected}>
           <SelectTrigger
             aria-label={t("versions.versionLabel")}
@@ -411,9 +413,7 @@ export function RegistryVersions({
                   setList({ ...next, items: [...list.items, ...next.items] });
                 } catch (e) {
                   setError(
-                    e instanceof Error
-                      ? e.message
-                      : t("versions.loadFailed"),
+                    e instanceof Error ? e.message : t("versions.loadFailed"),
                   );
                 }
               }}
@@ -497,7 +497,7 @@ export function RegistryVersions({
                   >
                     <code className="min-w-0 break-all">{f.path}</code>
                     <span className="shrink-0 tabular-nums text-muted-foreground">
-                      {f.sizeBytes.toLocaleString("en-US")} B
+                      {f.sizeBytes.toLocaleString(displayLocale)} B
                     </span>
                   </div>
                 ))}

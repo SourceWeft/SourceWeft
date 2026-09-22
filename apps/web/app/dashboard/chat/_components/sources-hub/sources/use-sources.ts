@@ -1,3 +1,4 @@
+import { useLocale as useDisplayLocale } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
@@ -133,6 +134,7 @@ export function useSources(input: {
   };
   addSourceDialog: ReturnType<typeof useAddSourceDialogState>;
 }) {
+  const displayLocale = useDisplayLocale();
   const {
     workspaceId,
     expansionScope,
@@ -452,7 +454,7 @@ export function useSources(input: {
         return;
       }
 
-      const mapped = mapSourcesToUi(result.items);
+      const mapped = mapSourcesToUi(result.items, displayLocale);
       commitSources(mapped);
       autoExpandConnectorManagedDirectories(mapped);
       loadedSourcesWorkspaceIdRef.current = activeWorkspaceId;
@@ -493,6 +495,7 @@ export function useSources(input: {
     selectNewManualConnectorSources,
     workspaceId,
     t,
+    displayLocale,
   ]);
 
   const handleDirectoryExpandedChange = useCallback(
@@ -674,7 +677,7 @@ export function useSources(input: {
 
         const mapped = results.flatMap((result) =>
           result.status === "fulfilled"
-            ? mapSourcesToUi([result.value.source])
+            ? mapSourcesToUi([result.value.source], displayLocale)
             : [],
         );
         // Do not restore a source deleted while its detail request was in flight.
@@ -689,7 +692,9 @@ export function useSources(input: {
             .filter((source) => !isSyncingSource(source))
             .map((source) => source.id),
         );
-        setPendingSourceIds((prev) => prev.filter((id) => !finishedIds.has(id)));
+        setPendingSourceIds((prev) =>
+          prev.filter((id) => !finishedIds.has(id)),
+        );
         if (mapped.some((source) => source.status === "Failed")) {
           toast.error(t("toasts.sources.processingFailed"));
         }
@@ -710,6 +715,7 @@ export function useSources(input: {
     mergeIncrementalSources,
     currentWorkspaceIdRef,
     t,
+    displayLocale,
   ]);
 
   useEffect(() => {
@@ -1002,7 +1008,9 @@ export function useSources(input: {
       setDirectoryContext("");
       await refreshSources();
     } catch (error) {
-      toast.error(getErrorMessage(error, t("toasts.sources.folderCreateFailed")));
+      toast.error(
+        getErrorMessage(error, t("toasts.sources.folderCreateFailed")),
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -1030,7 +1038,9 @@ export function useSources(input: {
       setReadmeContent("");
       await refreshSources();
     } catch (error) {
-      toast.error(getErrorMessage(error, t("toasts.sources.readmeUpdateFailed")));
+      toast.error(
+        getErrorMessage(error, t("toasts.sources.readmeUpdateFailed")),
+      );
     } finally {
       setIsSubmitting(false);
       setRowBusy(readmeSource.id, false);

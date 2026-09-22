@@ -1,8 +1,9 @@
 "use client"
 
+import { useLocale as useDisplayLocale } from "next-intl"
 import {
   type ApiKeyAuthClient,
-  apiKeyExpirationDaysToSeconds
+  apiKeyExpirationDaysToSeconds,
 } from "@better-auth-ui/core/plugins/api-key"
 import { useAuth, useAuthPlugin } from "@better-auth-ui/react"
 import { useCreateApiKey } from "@better-auth-ui/react/plugins/api-key"
@@ -16,13 +17,13 @@ import {
   DialogDescription,
   DialogFooter,
   DialogHeader,
-  DialogTitle
+  DialogTitle,
 } from "@sourceweft/ui-web/components/ui/dialog"
 import {
   Field,
   FieldError,
   FieldGroup,
-  FieldLabel
+  FieldLabel,
 } from "@sourceweft/ui-web/components/ui/field"
 import { Input } from "@sourceweft/ui-web/components/ui/input"
 import {
@@ -31,7 +32,7 @@ import {
   SelectGroup,
   SelectItem,
   SelectTrigger,
-  SelectValue
+  SelectValue,
 } from "@sourceweft/ui-web/components/ui/select"
 import { apiKeyPlugin } from "@/lib/auth/api-key-plugin"
 import { useAuthForm } from "../auth-form"
@@ -47,13 +48,14 @@ export type CreateApiKeyDialogProps = {
 export function CreateApiKeyDialog({
   open,
   onOpenChange,
-  organizationId
+  organizationId,
 }: CreateApiKeyDialogProps) {
+  const displayLocale = useDisplayLocale()
   const { authClient, localization } = useAuth<ApiKeyAuthClient>()
   const {
     configurations,
     keyExpiration,
-    localization: apiKeyLocalization
+    localization: apiKeyLocalization,
   } = useAuthPlugin(apiKeyPlugin)
 
   const { mutateAsync: createApiKey, isPending: isCreating } =
@@ -63,7 +65,7 @@ export function CreateApiKeyDialog({
   const [keyName, setKeyName] = useState<string | null>(null)
   const [secretKey, setSecretKey] = useState<string | null>(null)
   const availableConfigurations = configurations.filter(
-    (configuration) => configuration.organization === Boolean(organizationId)
+    (configuration) => configuration.organization === Boolean(organizationId),
   )
 
   const form = useAuthForm({
@@ -73,7 +75,7 @@ export function CreateApiKeyDialog({
         keyExpiration === false || keyExpiration?.defaultInterval == null
           ? "never"
           : String(keyExpiration.defaultInterval),
-      name: ""
+      name: "",
     },
     onSubmit: async ({ value }) => {
       const name = value.name.trim()
@@ -89,25 +91,25 @@ export function CreateApiKeyDialog({
         ...(name ? { name } : {}),
         ...(expiresIn ? { expiresIn } : {}),
         ...(resolvedConfigId ? { configId: resolvedConfigId } : {}),
-        ...(organizationId ? { organizationId } : {})
+        ...(organizationId ? { organizationId } : {}),
       }
       // `CreateApiKeyParams` is `Pick<CreateApiKeyInput, …>`, and better-auth
       // infers `CreateApiKeyInput` as `any` here, which turns every picked key
       // into a required one. The payload below is the shape the endpoint wants.
       await createApiKey(
-        (Object.keys(payload).length > 0
-          ? payload
-          : undefined) as Parameters<typeof createApiKey>[0],
+        (Object.keys(payload).length > 0 ? payload : undefined) as Parameters<
+          typeof createApiKey
+        >[0],
         {
           onSuccess: (result) => {
             handleOpenChange(false)
             setKeyName(name)
             setSecretKey(result.key)
             setIsNewKeyDialogOpen(true)
-          }
-        }
+          },
+        },
       )
-    }
+    },
   })
 
   const handleOpenChange = (nextOpen: boolean) => {
@@ -234,7 +236,7 @@ export function CreateApiKeyDialog({
                             <SelectGroup>
                               {keyExpiration.intervals.map((days) => (
                                 <SelectItem key={days} value={String(days)}>
-                                  {days.toLocaleString()}{" "}
+                                  {days.toLocaleString(displayLocale)}{" "}
                                   {days === 1
                                     ? apiKeyLocalization.day
                                     : apiKeyLocalization.days}

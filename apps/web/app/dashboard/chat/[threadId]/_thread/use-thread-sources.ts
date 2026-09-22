@@ -1,5 +1,7 @@
 "use client";
 
+import { formatDisplayDate } from "@/lib/i18n/format";
+import { useLocale as useDisplayLocale } from "next-intl";
 import { useSourceSelection } from "./use-source-selection";
 
 import { authClient } from "../../../../../lib/auth-client";
@@ -139,10 +141,16 @@ export function useThreadSources({
   threadId,
   workspaceId,
 }: UseThreadSourcesInput) {
+  const displayLocale = useDisplayLocale();
   const t = useTranslations("dashboardChat");
   const tCanvas = useTranslations("dashboardChatCanvas");
   const [librarySources, setLibrarySources] = useState<SourceItem[]>([]);
-  const { activeSourceIds, persistActiveSourceIds, sourceSelectionReady, sourceSelectionRevision } = useSourceSelection(workspaceId, threadId);
+  const {
+    activeSourceIds,
+    persistActiveSourceIds,
+    sourceSelectionReady,
+    sourceSelectionRevision,
+  } = useSourceSelection(workspaceId, threadId);
   const [availableSkills, setAvailableSkills] = useState<ChatSkillItem[]>([]);
   const [hubSkills, setHubSkills] = useState<ChatSkillItem[]>([]);
   const [capabilityCatalog, setCapabilityCatalog] =
@@ -224,8 +232,7 @@ export function useThreadSources({
   );
 
   const selectionStorageKey = useMemo(
-    () =>
-      workspaceId ? `${workspaceId}:${threadId}` : null,
+    () => (workspaceId ? `${workspaceId}:${threadId}` : null),
     [workspaceId, threadId],
   );
 
@@ -284,14 +291,14 @@ export function useThreadSources({
               ? t("sourceMeta.processingFailed")
               : source.status === "queued" || source.status === "processing"
                 ? t("sourceMeta.syncInProgress")
-                : new Date(source.updatedAt).toLocaleString(),
+                : formatDisplayDate(new Date(source.updatedAt), displayLocale),
           title: source.title || t("sourceMeta.untitled"),
           type: source.mimeType ?? source.sourceType,
         })),
         nextCursor: result.nextCursor,
       };
     },
-    [workspaceId, t],
+    [workspaceId, t, displayLocale],
   );
 
   const handleLibrarySourcesLoad = useCallback(
@@ -328,17 +335,21 @@ export function useThreadSources({
 
     const activeWorkspaceId = workspaceId;
     try {
-      const [installedResult, catalogResult, savedSkillIds] = await Promise.all([
-        contentClient.listWorkspaceSkills(activeWorkspaceId),
-        contentClient.listSkillsCatalog(activeWorkspaceId),
-        // A failed read only loses the saved choice; the defaults still load.
-        threadId === "current"
-          ? null
-          : contentClient
-              .getThread(activeWorkspaceId, threadId)
-              .then((result) => result.thread.chatPreferences.skillIds ?? null)
-              .catch(() => null),
-      ]);
+      const [installedResult, catalogResult, savedSkillIds] = await Promise.all(
+        [
+          contentClient.listWorkspaceSkills(activeWorkspaceId),
+          contentClient.listSkillsCatalog(activeWorkspaceId),
+          // A failed read only loses the saved choice; the defaults still load.
+          threadId === "current"
+            ? null
+            : contentClient
+                .getThread(activeWorkspaceId, threadId)
+                .then(
+                  (result) => result.thread.chatPreferences.skillIds ?? null,
+                )
+                .catch(() => null),
+        ],
+      );
       if (
         skillsLoadGenerationRef.current !== loadGeneration ||
         skillScope.current !== expectedSkillScope ||

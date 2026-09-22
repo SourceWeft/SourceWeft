@@ -6,7 +6,13 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@sourceweft/ui-web/components/ui/tooltip";
 import Link from "next/link";
 import { ThemeProvider, useTheme } from "next-themes";
-import { useLocale } from "next-intl";
+import { useLocale, useMessages, useTranslations } from "next-intl";
+import { isLocale, DEFAULT_LOCALE } from "@sourceweft/i18n/locales";
+import {
+  buildAuthLocale,
+  type AuthLocaleMessages,
+} from "../lib/i18n/auth-locale";
+import { UiLocalizationProvider } from "@sourceweft/ui-web/components/ui/ui-localization";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef } from "react";
 import { Toaster } from "sonner";
@@ -193,6 +199,14 @@ export function Providers({
   requireEmailVerification?: boolean;
 }) {
   const router = useRouter();
+  const currentLocale = useLocale();
+  const messages = useMessages();
+  const t = useTranslations("ui");
+  const tProfile = useTranslations("authProfile");
+  const authLocale = buildAuthLocale(
+    isLocale(currentLocale) ? currentLocale : DEFAULT_LOCALE,
+    messages.authLocale as AuthLocaleMessages,
+  );
   const webBaseUrl = resolveWebBaseUrl();
   const queryClient = getQueryClient();
 
@@ -218,7 +232,13 @@ export function Providers({
     >
       <QueryClientProvider client={queryClient}>
         <AuthProvider
-          additionalFields={additionalFields}
+          locale={authLocale}
+          additionalFields={additionalFields.map((field) => ({
+            ...field,
+            label: tProfile(`${field.name}.label`),
+            description: tProfile(`${field.name}.description`),
+            placeholder: tProfile(`${field.name}.placeholder`),
+          }))}
           authClient={authClient}
           baseURL={webBaseUrl}
           emailAndPassword={{
@@ -244,25 +264,19 @@ export function Providers({
           redirectTo="/dashboard"
           socialProviders={["google", "github"]}
         >
-          {/* Supersedes the theme-only ThemeSettingsSync: also mirrors
-              appearance.language into the locale cookie (cross-device
-              follow, §5) and self-corrects a fresh device's first render.
-              TODO(i18n): @better-auth-ui/locales ships no zh-CN/zh-TW
-              bundle; the existing translated `authUi` catalog entries need
-              re-keying onto this provider's `localization`/`defineAuthLocale`
-              shape in a follow-up, once the package is installed and its
-              real types can be checked instead of guessed. */}
           <UserSettingsSync />
           <DesktopTraySync />
           <SessionRefreshSync />
           <GoogleOneTap />
-          <TooltipProvider>
-            <DeploymentCapabilitiesProvider
-              initialCapabilities={initialCapabilities}
-            >
-              <MobileRouteSheetProvider>{children}</MobileRouteSheetProvider>
-            </DeploymentCapabilitiesProvider>
-          </TooltipProvider>
+          <UiLocalizationProvider messages={{ close: t("close") }}>
+            <TooltipProvider>
+              <DeploymentCapabilitiesProvider
+                initialCapabilities={initialCapabilities}
+              >
+                <MobileRouteSheetProvider>{children}</MobileRouteSheetProvider>
+              </DeploymentCapabilitiesProvider>
+            </TooltipProvider>
+          </UiLocalizationProvider>
           <Toaster closeButton position="top-right" richColors />
         </AuthProvider>
       </QueryClientProvider>

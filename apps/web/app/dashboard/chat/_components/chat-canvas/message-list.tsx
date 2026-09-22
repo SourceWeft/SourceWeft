@@ -1,3 +1,6 @@
+import { formatDisplayDate } from "@/lib/i18n/format";
+
+import { useLocale as useDisplayLocale } from "next-intl";
 import { sanitizeClientErrorMessage } from "./client-error-message";
 import { memo, useMemo, useState } from "react";
 import {
@@ -122,12 +125,10 @@ import type { ActiveThreadRun } from "../../[threadId]/chat-stream-runner-contro
 
 type Translate = ReturnType<typeof useTranslations>;
 
-const messageTimestampFormatter = new Intl.DateTimeFormat(undefined, {
-  dateStyle: "medium",
-  timeStyle: "short",
-});
-
-function formatMessageTimestamp(value: string | null | undefined) {
+function formatMessageTimestamp(
+  value: string | null | undefined,
+  displayLocale: string,
+) {
   if (!value) {
     return null;
   }
@@ -137,7 +138,10 @@ function formatMessageTimestamp(value: string | null | undefined) {
     return null;
   }
 
-  return messageTimestampFormatter.format(parsed);
+  return formatDisplayDate(parsed, displayLocale, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
 }
 
 function toImageAttachmentData(image: ChatMessageImagePart) {
@@ -1173,6 +1177,7 @@ const MessageGroupItem = memo(function MessageGroupItem({
   sourceById,
   workspaceId,
 }: MessageGroupItemProps) {
+  const displayLocale = useDisplayLocale();
   const t = useTranslations("dashboardChatCanvas");
   const isAssistant = group.role === "assistant";
   const versionEntries = resolveVersionEntries({
@@ -1226,7 +1231,10 @@ const MessageGroupItem = memo(function MessageGroupItem({
                 version.effectiveMentionedSourceIds,
               )
             : [];
-          const messageTimestamp = formatMessageTimestamp(version.createdAt);
+          const messageTimestamp = formatMessageTimestamp(
+            version.createdAt,
+            displayLocale,
+          );
           const renderState = buildMessageRenderState({
             isAssistantStreaming: isStreamingThisVersion,
             mentionedSourceIds,

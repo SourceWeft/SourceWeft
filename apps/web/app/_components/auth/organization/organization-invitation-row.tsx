@@ -1,15 +1,17 @@
 "use client"
 
+import { formatDisplayDate } from "@/lib/i18n/format"
+import { useLocale as useDisplayLocale } from "next-intl"
 import { formatAdditionalFieldValue } from "@better-auth-ui/core"
 import {
   memberRoleLabels,
-  type OrganizationAuthClient
+  type OrganizationAuthClient,
 } from "@better-auth-ui/core/plugins/organization"
 import { useAuth, useAuthPlugin } from "@better-auth-ui/react"
 import {
   useCancelInvitation,
   useHasPermission,
-  useInviteMember
+  useInviteMember,
 } from "@better-auth-ui/react/plugins/organization"
 import type { Invitation } from "better-auth/client"
 import { Send, X } from "lucide-react"
@@ -24,7 +26,7 @@ import { cn } from "@sourceweft/ui-web/lib/utils"
 import { OrganizationInvitationRowSkeleton } from "./organization-invitation-row-skeleton"
 import {
   type OrganizationSelectableRow,
-  OrganizationTableSelectRow
+  OrganizationTableSelectRow,
 } from "./organization-table-selection"
 
 export type OrganizationInvitationRowProps = {
@@ -40,7 +42,7 @@ const statusBadgeClasses: Record<string, string> = {
   pending: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
   accepted: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
   rejected: "bg-destructive/10 text-destructive",
-  canceled: "bg-muted text-muted-foreground"
+  canceled: "bg-muted text-muted-foreground",
 }
 
 export function OrganizationInvitationRow({
@@ -49,20 +51,21 @@ export function OrganizationInvitationRow({
   showCreatedAt = true,
   showEmail = true,
   showRole = true,
-  showStatus = true
+  showStatus = true,
 }: OrganizationInvitationRowProps) {
+  const displayLocale = useDisplayLocale()
   const { authClient } = useAuth<OrganizationAuthClient>()
   const {
     modelFields: { invitation: invitationFields },
     localization: organizationLocalization,
-    roles
+    roles,
   } = useAuthPlugin(organizationPlugin)
 
   const {
     data: cancelInvitationPermission,
-    isPending: cancelPermissionPending
+    isPending: cancelPermissionPending,
   } = useHasPermission(authClient, {
-    permissions: { invitation: ["cancel"] }
+    permissions: { invitation: ["cancel"] },
   })
 
   const { mutate: cancelInvitation, isPending: cancelPending } =
@@ -70,7 +73,7 @@ export function OrganizationInvitationRow({
 
   const { data: inviteMemberPermission, isPending: invitePermissionPending } =
     useHasPermission(authClient, {
-      permissions: { invitation: ["create"] }
+      permissions: { invitation: ["create"] },
     })
 
   // Better Auth treats a re-invite as a resend: it extends the existing
@@ -78,7 +81,7 @@ export function OrganizationInvitationRow({
   // second row.
   const { mutate: resendInvitation, isPending: resendPending } =
     useInviteMember(authClient, {
-      onSuccess: () => toast.success(organizationLocalization.invitationResent)
+      onSuccess: () => toast.success(organizationLocalization.invitationResent),
     })
 
   const roleLabel = memberRoleLabels(invitation.role, roles).join(", ")
@@ -113,7 +116,7 @@ export function OrganizationInvitationRow({
             <span className="font-medium text-sm">{invitation.email}</span>
             {invitationFields.map((field) => {
               const value = formatAdditionalFieldValue(
-                (invitation as unknown as Record<string, unknown>)[field.name]
+                (invitation as unknown as Record<string, unknown>)[field.name],
               )
               return value ? (
                 <span
@@ -130,9 +133,9 @@ export function OrganizationInvitationRow({
 
       {showCreatedAt && (
         <TableCell className="text-muted-foreground text-xs tabular-nums whitespace-nowrap">
-          {new Date(invitation.createdAt).toLocaleString(undefined, {
+          {formatDisplayDate(new Date(invitation.createdAt), displayLocale, {
             dateStyle: "short",
-            timeStyle: "short"
+            timeStyle: "short",
           })}
         </TableCell>
       )}
@@ -166,14 +169,14 @@ export function OrganizationInvitationRow({
                         invitation as unknown as Record<string, unknown>
                       )[field.name]
                       return value === undefined ? [] : [[field.name, value]]
-                    })
+                    }),
                   ),
                   email: invitation.email,
                   organizationId: invitation.organizationId,
                   role: invitation.role as Parameters<
                     typeof resendInvitation
                   >[0]["role"],
-                  resend: true
+                  resend: true,
                 })
               }
               aria-label={organizationLocalization.resendInvitation}

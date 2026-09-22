@@ -1,4 +1,6 @@
 "use client";
+import { sanitizeClientErrorMessage } from "../../_components/chat-canvas/client-error-message";
+
 import { synchronizeHubBeforeSend } from "../../../../../lib/hub-send-barrier";
 
 import {
@@ -137,6 +139,14 @@ export function useThreadPageController({
     workspaces,
   } = dashboardState;
   const t = useTranslations("dashboardChat");
+  const tErrors = useTranslations("dashboardChatCanvas");
+  const displayStreamError = useCallback(
+    (error: unknown) => {
+      const message = getDisplayErrorMessage(error);
+      return sanitizeClientErrorMessage(message, tErrors) ?? message;
+    },
+    [tErrors],
+  );
 
   // The thread may be a sub-agent conversation nested under another chat, so
   // look one level down as well as at the top level.
@@ -408,7 +418,7 @@ export function useThreadPageController({
     stopStreaming: handleStopStreaming,
     updateActiveRunIfCurrent,
   } = useChatStreamRunnerControl({
-    getDisplayErrorMessage,
+    getDisplayErrorMessage: displayStreamError,
     threadId,
     throwStreamRequestError,
     workspaceId,
@@ -929,24 +939,27 @@ export function useThreadPageController({
   // A queued send that hit the server's 409 backstop (another client won the
   // free window). Re-queue it at the FIFO front with the SAME idempotency key,
   // bump attempts, and back off so the auto-send effect paces the retry.
-  const requeueSendAfterRunActive = useCallback((queued: QueuedSend) => {
-    const plan = planQueuedSendRetry({
-      queued,
-      maxAttempts: QUEUED_SEND_MAX_ATTEMPTS,
-    });
-    if ("dropped" in plan) {
-      toast.error(t("toasts.chatStayedBusy"));
-      return;
-    }
-    // Front-insert so the loser goes next (FIFO fairness).
-    pendingSendsRef.current = [plan.requeued, ...pendingSendsRef.current];
-    setQueuedSends(pendingSendsRef.current);
-    retryBackoffUntilRef.current = Date.now() + QUEUED_SEND_RETRY_BACKOFF_MS;
-    window.setTimeout(
-      () => setRetryTick((tick) => tick + 1),
-      QUEUED_SEND_RETRY_BACKOFF_MS,
-    );
-  }, [t]);
+  const requeueSendAfterRunActive = useCallback(
+    (queued: QueuedSend) => {
+      const plan = planQueuedSendRetry({
+        queued,
+        maxAttempts: QUEUED_SEND_MAX_ATTEMPTS,
+      });
+      if ("dropped" in plan) {
+        toast.error(t("toasts.chatStayedBusy"));
+        return;
+      }
+      // Front-insert so the loser goes next (FIFO fairness).
+      pendingSendsRef.current = [plan.requeued, ...pendingSendsRef.current];
+      setQueuedSends(pendingSendsRef.current);
+      retryBackoffUntilRef.current = Date.now() + QUEUED_SEND_RETRY_BACKOFF_MS;
+      window.setTimeout(
+        () => setRetryTick((tick) => tick + 1),
+        QUEUED_SEND_RETRY_BACKOFF_MS,
+      );
+    },
+    [t],
+  );
 
   const handleSendMessage = useCallback(
     async (

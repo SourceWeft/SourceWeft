@@ -1,5 +1,6 @@
 "use client";
 
+import { useLocale as useDisplayLocale } from "next-intl";
 import { parsePolicyPayload } from "@sourceweft/contracts/llm-observability";
 import { toObjectRecord } from "../../../lib/records";
 import * as React from "react";
@@ -124,11 +125,11 @@ function formatLatency(value: number | null | undefined) {
   return value >= 1000 ? `${(value / 1000).toFixed(1)}s` : `${value}ms`;
 }
 
-function formatTime(value: string | null | undefined) {
+function formatTime(value: string | null | undefined, displayLocale: string) {
   if (!value) {
     return "--";
   }
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(displayLocale, {
     month: "short",
     day: "numeric",
     hour: "2-digit",
@@ -651,6 +652,7 @@ function TraceMobileRow({
   trace: LlmTraceSummary;
   workspaces: Array<{ id: string; name: string }>;
 }) {
+  const displayLocale = useDisplayLocale();
   return (
     <button
       className={cn(
@@ -667,7 +669,7 @@ function TraceMobileRow({
           </div>
           <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
             <span className="whitespace-nowrap">
-              {formatTime(trace.startedAt)}
+              {formatTime(trace.startedAt, displayLocale)}
             </span>
             <span className="text-border">/</span>
             <span className="whitespace-nowrap">
@@ -1053,10 +1055,7 @@ function messageRoleClassName(role: string) {
   return "text-emerald-700 dark:text-emerald-300";
 }
 
-function messageRoleLabel(
-  role: string,
-  t: ReturnType<typeof useTranslations>,
-) {
+function messageRoleLabel(role: string, t: ReturnType<typeof useTranslations>) {
   const normalized = role.toLowerCase();
   if (normalized === "system") return t("roles.system");
   if (normalized === "assistant") return t("roles.assistant");
@@ -1235,6 +1234,7 @@ function TextValue({ value }: { value: string }) {
 }
 
 function MarkdownValue({ value }: { value: string }) {
+  const displayLocale = useDisplayLocale();
   const t = useTranslations("dashboardObservability");
   const isLong = value.length > 6000;
   if (!isLong) {
@@ -1253,7 +1253,7 @@ function MarkdownValue({ value }: { value: string }) {
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="min-w-0 break-words">
             {t("message.longMarkdown", {
-              count: value.length.toLocaleString(),
+              count: value.length.toLocaleString(displayLocale),
             })}
           </span>
           <span className="font-medium text-foreground group-open:hidden">
@@ -1764,7 +1764,9 @@ function StructuredValue({
       <article className="overflow-hidden rounded-lg border border-border">
         <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-3 py-2 text-xs font-medium text-muted-foreground">
           <Wrench className="h-3.5 w-3.5" />
-          {toolMessage.name ? String(toolMessage.name) : t("message.toolResult")}
+          {toolMessage.name
+            ? String(toolMessage.name)
+            : t("message.toolResult")}
           {toolMessage.id ? (
             <span className="truncate opacity-70">
               {String(toolMessage.id)}
@@ -1808,6 +1810,7 @@ function MessageList({
   value: unknown;
   fallbackRole?: string;
 }) {
+  const displayLocale = useDisplayLocale();
   const t = useTranslations("dashboardObservability");
   const envelope = extractMessageEnvelope(value);
   const messages = envelope?.messages ?? extractMessages(value);
@@ -1870,7 +1873,7 @@ function MessageList({
                   {contentLength !== null ? (
                     <span className="ml-auto shrink-0 font-mono max-sm:ml-0">
                       {t("message.chars", {
-                        count: contentLength.toLocaleString(),
+                        count: contentLength.toLocaleString(displayLocale),
                       })}
                     </span>
                   ) : null}
@@ -1916,6 +1919,7 @@ function McpRunTable({
   onLoadMore: () => void;
   toolRuns: WorkspaceMcpToolRun[];
 }) {
+  const displayLocale = useDisplayLocale();
   const t = useTranslations("dashboardObservability");
   return (
     <div className="min-h-0 flex-1 overflow-hidden">
@@ -1978,7 +1982,7 @@ function McpRunTable({
               {toolRuns.map((run) => (
                 <tr className="border-b border-border" key={run.id}>
                   <td className="whitespace-nowrap px-3 py-1.5 text-muted-foreground">
-                    {formatTime(run.createdAt)}
+                    {formatTime(run.createdAt, displayLocale)}
                   </td>
                   <td className="px-3 py-1.5">
                     <div className="truncate font-medium text-foreground">
@@ -2095,7 +2099,7 @@ function McpRunTable({
                       {run.install?.name ?? "MCP"} / {run.serverToolName}
                     </span>
                     <span className="shrink-0 text-[11px] text-muted-foreground">
-                      {formatTime(run.createdAt)}
+                      {formatTime(run.createdAt, displayLocale)}
                     </span>
                   </div>
                   <p className="mt-1 line-clamp-2 text-muted-foreground">
@@ -2566,6 +2570,7 @@ function TraceSummaryBar({
   onLoadMoreObservations?: () => void;
   viewModel: TraceDetailViewModel | null;
 }) {
+  const displayLocale = useDisplayLocale();
   const t = useTranslations("dashboardObservability");
   if (!detail) return null;
   const rootGeneration = viewModel?.rootGeneration;
@@ -2574,7 +2579,7 @@ function TraceSummaryBar({
   return (
     <div className="border-b border-border px-4 py-3">
       <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-muted-foreground">
-        <span>{formatTime(detail.trace.startedAt)}</span>
+        <span>{formatTime(detail.trace.startedAt, displayLocale)}</span>
         <span>
           {t("summary.status")}{" "}
           <span
@@ -2656,7 +2661,9 @@ function TraceSummaryBar({
       </div>
       {reason ? (
         <div className="mt-2">
-          <ErrorMessageBlock>{t("summary.error", { reason })}</ErrorMessageBlock>
+          <ErrorMessageBlock>
+            {t("summary.error", { reason })}
+          </ErrorMessageBlock>
         </div>
       ) : null}
     </div>
@@ -2676,6 +2683,7 @@ function TraceTree({
   onSelect: (node: SelectedNode) => void;
   viewModel: TraceDetailViewModel | null;
 }) {
+  const displayLocale = useDisplayLocale();
   const t = useTranslations("dashboardObservability");
   const rows = viewModel?.treeRows ?? EMPTY_TREE_ROWS;
   const defaultCollapsedIds = React.useMemo(
@@ -2777,9 +2785,7 @@ function TraceTree({
             }}
             role="button"
             tabIndex={-1}
-            title={
-              collapsed ? t("tree.showChildren") : t("tree.hideChildren")
-            }
+            title={collapsed ? t("tree.showChildren") : t("tree.hideChildren")}
           >
             <ChevronRight
               className={cn(
@@ -2800,7 +2806,7 @@ function TraceTree({
           </div>
           <p className="truncate text-xs text-muted-foreground">
             {row.kind} · {formatLatency(row.latencyMs)} ·{" "}
-            {formatTime(row.startedAt)}
+            {formatTime(row.startedAt, displayLocale)}
           </p>
         </div>
       </button>
@@ -2921,9 +2927,7 @@ function TraceLogView({
           <h4 className="text-sm font-medium text-foreground">
             {t("log.title")}
           </h4>
-          <p className="text-xs text-muted-foreground">
-            {t("log.subtitle")}
-          </p>
+          <p className="text-xs text-muted-foreground">{t("log.subtitle")}</p>
         </div>
         <Badge variant="secondary">
           {t("log.count", { count: rows.length })}
@@ -3192,6 +3196,7 @@ function NodeDetail({
 }
 
 export default function ObservabilityPage() {
+  const displayLocale = useDisplayLocale();
   const t = useTranslations("dashboardObservability");
   const {
     organizationId,
@@ -3360,9 +3365,7 @@ export default function ObservabilityPage() {
         if (requestId !== mcpRequestIdRef.current) {
           return;
         }
-        setError(
-          err instanceof Error ? err.message : t("errors.loadMcp"),
-        );
+        setError(err instanceof Error ? err.message : t("errors.loadMcp"));
       } finally {
         if (requestId === mcpRequestIdRef.current) {
           setLoadingMcpRuns(false);
@@ -3471,9 +3474,7 @@ export default function ObservabilityPage() {
         if (requestId !== detailRequestIdRef.current) {
           return;
         }
-        setError(
-          err instanceof Error ? err.message : t("errors.loadDetail"),
-        );
+        setError(err instanceof Error ? err.message : t("errors.loadDetail"));
         setDetail(null);
       } finally {
         if (requestId === detailRequestIdRef.current) {
@@ -3527,14 +3528,18 @@ export default function ObservabilityPage() {
       );
     } catch (err) {
       setError(
-        err instanceof Error
-          ? err.message
-          : t("errors.loadMoreObservations"),
+        err instanceof Error ? err.message : t("errors.loadMoreObservations"),
       );
     } finally {
       setLoadingMoreObservations(false);
     }
-  }, [allWorkspacesSelected, detail, loadingMoreObservations, organizationId, t]);
+  }, [
+    allWorkspacesSelected,
+    detail,
+    loadingMoreObservations,
+    organizationId,
+    t,
+  ]);
 
   const handleWorkspaceChange = React.useCallback(
     (nextWorkspaceId: string) => {
@@ -3819,7 +3824,7 @@ export default function ObservabilityPage() {
                             }
                           >
                             <td className="whitespace-nowrap px-3 py-1.5 text-muted-foreground">
-                              {formatTime(trace.startedAt)}
+                              {formatTime(trace.startedAt, displayLocale)}
                             </td>
                             <td className="px-3 py-1.5">
                               <div className="truncate font-medium text-foreground">
@@ -3938,9 +3943,7 @@ export default function ObservabilityPage() {
               {detail
                 ? t("drawer.sessionId", {
                     value:
-                      detail.trace.sessionId ??
-                      detail.trace.threadId ??
-                      "--",
+                      detail.trace.sessionId ?? detail.trace.threadId ?? "--",
                   })
                 : (selectedTraceKey ?? t("drawer.traceDetail"))}
             </SheetDescription>

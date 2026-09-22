@@ -1,3 +1,4 @@
+import { formatDisplayDate } from "@/lib/i18n/format";
 import { contentClient } from "../../../../../lib/sdk";
 import type { SourceItem } from "../source-types";
 
@@ -30,7 +31,10 @@ function apiTypeToSourceType(
   return "DOC";
 }
 
-export function mapSourcesToUi(items: SourceApiRecord[]): SourceItem[] {
+export function mapSourcesToUi(
+  items: SourceApiRecord[],
+  displayLocale: string,
+): SourceItem[] {
   return items.map((item) => ({
     id: item.id,
     title: item.title || "Untitled",
@@ -45,7 +49,7 @@ export function mapSourcesToUi(items: SourceApiRecord[]): SourceItem[] {
           ? "Processing failed"
           : item.status === "queued" || item.status === "processing"
             ? "Sync in progress"
-            : new Date(item.updatedAt).toLocaleString(),
+            : formatDisplayDate(new Date(item.updatedAt), displayLocale),
     contentText: item.contentText,
     connectorId: item.connectorId,
     externalUri: item.externalUri,

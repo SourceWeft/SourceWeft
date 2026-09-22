@@ -94,7 +94,9 @@ export function LanguageSwitcher() {
     // the new language instead of only the leaf segment's metadata changing.
     const { pathname: bare } = stripLocalePrefix(pathname ?? "/");
     if (isLocalizedPath(bare)) {
-      router.push(addLocalePrefix(bare, next));
+      router.push(
+        `${addLocalePrefix(bare, next)}${window.location.search}${window.location.hash}`,
+      );
       router.refresh();
     } else {
       router.refresh();
@@ -116,7 +118,9 @@ export function LanguageSwitcher() {
         className="flex h-8 items-center gap-1.5 rounded-lg px-2 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-white"
       >
         <IconGlobe />
-        <span className="hidden text-sm sm:inline">{activeMeta.nativeLabel}</span>
+        <span className="hidden text-sm sm:inline">
+          {activeMeta.nativeLabel}
+        </span>
       </button>
 
       {open ? (

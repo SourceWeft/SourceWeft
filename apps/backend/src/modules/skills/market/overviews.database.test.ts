@@ -311,6 +311,20 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       assert.equal(reads.get(source.versionId)?.overview.summary, "繁體摘要");
       assert.equal(reads.has(restricted.versionId), false);
 
+      const languages = await repo.readSkillOverviewLocales([
+        source.versionId,
+        fresh.versionId,
+        restricted.versionId,
+      ]);
+      assert.deepEqual(languages.get(source.versionId), [
+        "en",
+        "zh-CN",
+        "zh-TW",
+      ]);
+      assert.deepEqual(languages.get(fresh.versionId), ["en"]);
+      assert.equal(languages.has(restricted.versionId), false);
+      assert.equal((await repo.readSkillOverviewLocales([])).size, 0);
+
       // Hidden: gone from the public reads, still in the admin view.
       assert.equal(
         await repo.setSkillOverviewsHidden({
@@ -324,6 +338,22 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
         locale: "en",
       });
       assert.equal(hidden.has(source.versionId), false);
+      assert.equal(
+        (await repo.readSkillOverviewLocales([source.versionId])).has(
+          source.versionId,
+        ),
+        false,
+      );
+      const hiddenList = await read.listMarketSkills({
+        query: tag,
+        locale: "zh-TW",
+        limit: 50,
+      });
+      assert.deepEqual(
+        hiddenList.items.find((item) => item.slug === source.slug)
+          ?.overviewLocales,
+        [],
+      );
       const admin = await repo.findSkillOverviewAdminState(source.id);
       assert.equal(
         admin?.overviews.every((row) => row.hidden),
@@ -359,6 +389,12 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       const bySlug = new Map(list.items.map((item) => [item.slug, item]));
       assert.equal(bySlug.get(source.slug)?.aiSummary, "繁體摘要");
       assert.equal(bySlug.get(fresh.slug)?.aiSummary, "Only English");
+      assert.deepEqual(bySlug.get(source.slug)?.overviewLocales, [
+        "en",
+        "zh-CN",
+        "zh-TW",
+      ]);
+      assert.deepEqual(bySlug.get(fresh.slug)?.overviewLocales, ["en"]);
       // A list item carries only the summary.
       assert.equal("aiOverview" in (bySlug.get(source.slug) as object), false);
     });

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
-import { act, createElement } from "react";
+import { NextIntlClientProvider } from "next-intl";
+import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
@@ -128,7 +129,11 @@ async function renderHook(input: HookInput) {
     return null;
   }
   await act(async () => {
-    created.render(createElement(Harness, input));
+    created.render(
+      <NextIntlClientProvider locale="en" messages={{}}>
+        <Harness {...input} />
+      </NextIntlClientProvider>,
+    );
   });
   return captured;
 }

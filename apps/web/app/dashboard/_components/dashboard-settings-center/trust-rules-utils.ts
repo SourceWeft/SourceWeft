@@ -1,3 +1,5 @@
+import { formatDisplayDate } from "@/lib/i18n/format";
+import type { useTranslations } from "next-intl";
 import type { AgentToolTrustRule } from "@sourceweft/sdk";
 
 /**
@@ -21,7 +23,7 @@ export type TrustRuleRow = {
   isExpired: boolean;
 };
 
-function formatDate(value: string | null | undefined) {
+function formatDate(value: string | null | undefined, displayLocale: string) {
   if (!value) {
     return null;
   }
@@ -29,7 +31,7 @@ function formatDate(value: string | null | undefined) {
   if (!Number.isFinite(parsed.getTime())) {
     return null;
   }
-  return parsed.toLocaleDateString(undefined, {
+  return formatDisplayDate(parsed, displayLocale, {
     year: "numeric",
     month: "short",
     day: "numeric",
@@ -48,25 +50,29 @@ function isExpiredRule(rule: AgentToolTrustRule, now: Date) {
 
 export function toTrustRuleRow(
   rule: AgentToolTrustRule,
+  displayLocale: string,
+  t: ReturnType<typeof useTranslations>,
   now = new Date(),
 ): TrustRuleRow {
-  const expiryDate = formatDate(rule.expiresAt);
+  const expiryDate = formatDate(rule.expiresAt, displayLocale);
   const expired = isExpiredRule(rule, now);
   return {
     id: rule.id,
     toolName: rule.toolName,
-    connectorLabel: rule.connectorId ?? "No connector",
+    connectorLabel: rule.connectorId ?? t("approvals.noConnector"),
     riskLabel:
       rule.allowedRiskLevels.length > 0
         ? rule.allowedRiskLevels.join(", ")
-        : "unknown",
+        : t("approvals.unknownRisk"),
     expiryLabel: expired
       ? expiryDate
-        ? `Expired ${expiryDate}`
-        : "Expired"
-      : (expiryDate ?? "No expiry"),
-    lastUsedLabel: formatDate(rule.lastUsedAt) ?? "Never used",
-    sourceConfirmationLabel: rule.createdFromConfirmationId ?? "Unknown prompt",
+        ? t("approvals.expiredOn", { date: expiryDate })
+        : t("approvals.expired")
+      : (expiryDate ?? t("approvals.noExpiry")),
+    lastUsedLabel:
+      formatDate(rule.lastUsedAt, displayLocale) ?? t("approvals.neverUsed"),
+    sourceConfirmationLabel:
+      rule.createdFromConfirmationId ?? t("approvals.unknownPrompt"),
     isExpired: expired,
   };
 }

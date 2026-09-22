@@ -186,3 +186,23 @@ test("selecting the already-active locale is a no-op", async () => {
   assert.equal(push.mock.calls.length, 0);
   assert.equal(refresh.mock.calls.length, 0);
 });
+
+test("language changes retain repeated search parameters, pagination and the fragment", async () => {
+  state.pathname = "/skills";
+  window.history.replaceState(
+    {},
+    "",
+    "/skills?q=react&tag=a&tag=b&cursor=next%2Bpage#reviews",
+  );
+  const element = await render("en");
+  await act(async () => click(element.querySelector("button")!));
+  const option = [...element.querySelectorAll('button[role="option"]')].find(
+    (node) => node.textContent?.includes("简体中文"),
+  )!;
+  await act(async () => click(option));
+  assert.equal(
+    push.mock.calls[0]?.[0],
+    "/zh-CN/skills?q=react&tag=a&tag=b&cursor=next%2Bpage#reviews",
+  );
+  window.history.replaceState({}, "", "/");
+});

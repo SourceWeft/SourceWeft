@@ -1,4 +1,5 @@
 "use client";
+import { sanitizeClientErrorMessage } from "../../_components/chat-canvas/client-error-message";
 
 import { useCallback } from "react";
 import { toast } from "sonner";
@@ -203,6 +204,7 @@ export function useThreadStreamAction({
   workspaceId,
 }: UseThreadStreamActionInput) {
   const t = useTranslations("dashboardChat");
+  const tErrors = useTranslations("dashboardChatCanvas");
   const localStatus = useLocalConversationStatus(workspaceId, threadId);
   const streamThreadAction = useCallback(
     async (input: ThreadStreamActionInput) => {
@@ -981,7 +983,9 @@ export function useThreadStreamAction({
         if (isRunAlreadyActive && input.onRunAlreadyActive) {
           input.onRunAlreadyActive();
         } else if (!suppressErrorToast) {
-          toast.error(errorMessage);
+          toast.error(
+            sanitizeClientErrorMessage(errorMessage, tErrors) ?? errorMessage,
+          );
         }
       } finally {
         markRunTerminal({
@@ -993,6 +997,7 @@ export function useThreadStreamAction({
     },
     [
       t,
+      tErrors,
       catalogKindEnabled,
       clearAttachedRunKeyIfCurrent,
       clearEditingState,

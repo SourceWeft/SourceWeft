@@ -1,5 +1,7 @@
 "use client"
 
+import { formatDisplayDate } from "@/lib/i18n/format"
+import { useLocale as useDisplayLocale } from "next-intl"
 import { useAuth, useAuthPlugin } from "@better-auth-ui/react"
 import { Fingerprint, Pencil, X } from "lucide-react"
 import { useState } from "react"
@@ -11,13 +13,13 @@ import {
   ItemContent,
   ItemDescription,
   ItemMedia,
-  ItemTitle
+  ItemTitle,
 } from "@sourceweft/ui-web/components/ui/item"
 import { passkeyPlugin } from "@/lib/auth/passkey-plugin"
 
 import {
   DeletePasskeyDialog,
-  type ListedPasskey
+  type ListedPasskey,
 } from "./delete-passkey-dialog"
 import { RenamePasskeyDialog } from "./rename-passkey-dialog"
 
@@ -26,6 +28,7 @@ export type PasskeyProps = {
 }
 
 export function Passkey({ passkey }: PasskeyProps) {
+  const displayLocale = useDisplayLocale()
   const { localization } = useAuth()
   const { localization: passkeyLocalization } = useAuthPlugin(passkeyPlugin)
   const [deleteOpen, setDeleteOpen] = useState(false)
@@ -41,9 +44,9 @@ export function Passkey({ passkey }: PasskeyProps) {
       <ItemContent>
         <ItemTitle>{passkeyName}</ItemTitle>
         <ItemDescription>
-          {new Date(passkey.createdAt).toLocaleString(undefined, {
+          {formatDisplayDate(new Date(passkey.createdAt), displayLocale, {
             dateStyle: "medium",
-            timeStyle: "short"
+            timeStyle: "short",
           })}
         </ItemDescription>
       </ItemContent>
@@ -58,7 +61,7 @@ export function Passkey({ passkey }: PasskeyProps) {
           onClick={() => setDeleteOpen(true)}
           aria-label={passkeyLocalization.deletePasskey.replace(
             "{{name}}",
-            passkeyName
+            passkeyName,
           )}
         >
           <X />

@@ -36,7 +36,10 @@ import {
 } from "./catalog-query";
 import { changelogVersion, diffSkillVersions } from "./changelog";
 import { listSkillCategorySlugs } from "./listing";
-import { readSkillOverviews } from "./overview-repository";
+import {
+  readSkillOverviews,
+  readSkillOverviewLocales,
+} from "./overview-repository";
 import { skillCategoryDefinitions } from "./taxonomy";
 
 /**
@@ -453,15 +456,17 @@ export async function listMarketSkills(
   ]);
 
   const pageRows = rows.slice(0, limit);
-  const [categories, aiSummaries] = await Promise.all([
+  const [categories, aiSummaries, overviewLocales] = await Promise.all([
     listSkillCategorySlugs(pageRows.map((row) => row.definition.id)),
     readMarketSkillAiSummaries(pageRows, input.locale ?? "en"),
+    readSkillOverviewLocales(pageRows.map((row) => row.version.id)),
   ]);
   const last = pageRows.at(-1);
   return {
     items: pageRows.map((row) => ({
       ...mapMarketSkillSummary(row, categories.get(row.definition.id) ?? []),
       aiSummary: aiSummaries.get(row.version.id) ?? null,
+      overviewLocales: overviewLocales.get(row.version.id) ?? [],
     })),
     nextCursor:
       rows.length > limit && last

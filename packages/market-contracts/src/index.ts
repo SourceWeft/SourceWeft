@@ -305,6 +305,8 @@ export const marketSkillSummarySchema = z.object({
   // third-party content: plain text, render it as untrusted. Optional for
   // answers from before it existed.
   aiSummary: z.string().nullable().optional(),
+  // Actual visible overview languages for this version, without fallback.
+  overviewLocales: z.array(z.enum(["en", "zh-CN", "zh-TW"])).optional(),
 });
 
 // Languages the market's AI overviews are written in.

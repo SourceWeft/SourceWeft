@@ -1,5 +1,7 @@
 "use client";
 
+import { formatDisplayDate } from "@/lib/i18n/format";
+import { useLocale as useDisplayLocale } from "next-intl";
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import {
@@ -71,6 +73,7 @@ export function ArtifactPreviewPanel({
   onDeleted?: () => void;
   workspaceId?: string | null;
 }) {
+  const displayLocale = useDisplayLocale();
   const t = useTranslations("dashboardChatFiles");
   const pageUrl = resolveArtifactPageUrl({ artifact, workspaceId });
   const proxyFileUrl = resolveArtifactProxyFileUrl({ artifact, workspaceId });
@@ -327,11 +330,16 @@ export function ArtifactPreviewPanel({
           <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
             <TypeBadge label={artifactTypeLabel(artifact.artifactType)} />
             <TypeBadge label={artifact.status} />
-            <span>{new Date(artifact.createdAt).toLocaleString()}</span>
+            <span>
+              {formatDisplayDate(new Date(artifact.createdAt), displayLocale)}
+            </span>
             {artifact.completedAt ? (
               <span>
                 {t("labels.completedAt", {
-                  date: new Date(artifact.completedAt).toLocaleString(),
+                  date: formatDisplayDate(
+                    new Date(artifact.completedAt),
+                    displayLocale,
+                  ),
                 })}
               </span>
             ) : null}

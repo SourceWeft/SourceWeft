@@ -1,3 +1,4 @@
+import { useLocale as useDisplayLocale } from "next-intl";
 import { useEffect, useState } from "react";
 import {
   CheckCircle2,
@@ -127,6 +128,7 @@ export function ManageConnectorsDialog({
   webhookConfigsById: Record<string, ConnectorWebhookConfig | null>;
   webhookEventsByConnectorId: Record<string, ConnectorWebhookEventItem[]>;
 }) {
+  const displayLocale = useDisplayLocale();
   const t = useTranslations("dashboardSourcesHub");
   const [tab, setTab] = useState<ManageConnectorsTab>("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -280,16 +282,19 @@ export function ManageConnectorsDialog({
                               item,
                               connectors,
                             );
-                            const status = getCatalogStatus({
-                              item,
-                              connectors,
-                              accounts,
-                              connectorBusyById,
-                              connectorWaitingByType,
-                              connectorReadinessById,
-                              webhookConfigsById,
-                              t,
-                            });
+                            const status = getCatalogStatus(
+                              {
+                                item,
+                                connectors,
+                                accounts,
+                                connectorBusyById,
+                                connectorWaitingByType,
+                                connectorReadinessById,
+                                webhookConfigsById,
+                                t,
+                              },
+                              displayLocale,
+                            );
                             return (
                               <ConnectorCatalogCard
                                 connector={connector}

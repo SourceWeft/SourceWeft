@@ -1,10 +1,11 @@
 "use client"
 
+import { useLocale as useDisplayLocale } from "next-intl"
 import {
   type AdditionalField as AdditionalFieldConfig,
   type AdditionalFieldFormValue,
   getFormFieldErrors,
-  resolveInputType
+  resolveInputType,
 } from "@better-auth-ui/core"
 import { useAuth, useCopyToClipboard } from "@better-auth-ui/react"
 import { format } from "date-fns"
@@ -22,33 +23,33 @@ import {
   ComboboxEmpty,
   ComboboxInput,
   ComboboxItem,
-  ComboboxList
+  ComboboxList,
 } from "@sourceweft/ui-web/components/ui/combobox"
 import {
   Field,
   FieldDescription,
   FieldContent,
   FieldError,
-  FieldLabel
+  FieldLabel,
 } from "@sourceweft/ui-web/components/ui/field"
 import { Input } from "@sourceweft/ui-web/components/ui/input"
 import {
   InputGroup,
   InputGroupAddon,
   InputGroupButton,
-  InputGroupInput
+  InputGroupInput,
 } from "@sourceweft/ui-web/components/ui/input-group"
 import {
   Popover,
   PopoverContent,
-  PopoverTrigger
+  PopoverTrigger,
 } from "@sourceweft/ui-web/components/ui/popover"
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue
+  SelectValue,
 } from "@sourceweft/ui-web/components/ui/select"
 import { Slider } from "@sourceweft/ui-web/components/ui/slider"
 import { Switch } from "@sourceweft/ui-web/components/ui/switch"
@@ -103,7 +104,7 @@ function formatTime(date: Date) {
  */
 function CopyButton({
   getValue,
-  isDisabled
+  isDisabled,
 }: {
   getValue: () => string | undefined
   isDisabled?: boolean
@@ -113,7 +114,7 @@ function CopyButton({
     onError: (error) => {
       console.error("[Better Auth UI] Copy failed", error)
       toast.error(localization.errors.copyFailed)
-    }
+    },
   })
 
   async function handleCopy() {
@@ -163,7 +164,7 @@ export function AdditionalField({
   isInvalid,
   errors,
   isPending,
-  optionalLabel
+  optionalLabel,
 }: AdditionalFieldProps) {
   const t = useTranslations("authPages.additionalField")
   const field =
@@ -175,7 +176,7 @@ export function AdditionalField({
               {configuredField.label}
               {optionalLabel}
             </>
-          )
+          ),
         }
       : configuredField
   const inputType = resolveInputType(field)
@@ -252,7 +253,7 @@ export function AdditionalField({
           onBlur={onBlur}
           onChange={(event) =>
             onChange(
-              event.target.value === "" ? null : event.target.valueAsNumber
+              event.target.value === "" ? null : event.target.valueAsNumber,
             )
           }
           placeholder={field.placeholder}
@@ -297,7 +298,7 @@ export function AdditionalField({
 
         <FieldContent>
           <FieldLabel htmlFor={name}>{field.label}</FieldLabel>
-        {description}
+          {description}
         </FieldContent>
         <FieldError errors={fieldErrors} />
       </Field>
@@ -320,7 +321,7 @@ export function AdditionalField({
 
         <FieldContent>
           <FieldLabel htmlFor={name}>{field.label}</FieldLabel>
-        {description}
+          {description}
         </FieldContent>
         <FieldError errors={fieldErrors} />
       </Field>
@@ -365,7 +366,7 @@ export function AdditionalField({
 
   if (inputType === "combobox") {
     const selectedOption = field.options?.find(
-      (option) => option.value === valueToString(value)
+      (option) => option.value === valueToString(value),
     )
 
     return (
@@ -443,7 +444,7 @@ function InputField({
   onChange,
   isInvalid,
   errors,
-  isPending
+  isPending,
 }: AdditionalFieldProps) {
   const description = fieldDescription(field)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -516,7 +517,7 @@ function InputField({
   return (
     <Field data-invalid={isInvalid}>
       <FieldLabel htmlFor={name}>{field.label}</FieldLabel>
-        {description}
+      {description}
 
       <Input
         id={name}
@@ -552,8 +553,9 @@ function SliderField({
   onChange,
   isInvalid,
   errors,
-  isPending
+  isPending,
 }: AdditionalFieldProps) {
+  const displayLocale = useDisplayLocale()
   const description = fieldDescription(field)
   const maxFractionDigits = field.formatOptions?.maximumFractionDigits
   const min = field.min ?? 0
@@ -563,7 +565,7 @@ function SliderField({
   const numericValue = typeof value === "number" ? value : min
   const fieldErrors = getFormFieldErrors(errors ?? [])
 
-  const formatter = new Intl.NumberFormat(undefined, field.formatOptions)
+  const formatter = new Intl.NumberFormat(displayLocale, field.formatOptions)
 
   return (
     <Field data-invalid={isInvalid}>
@@ -608,7 +610,7 @@ function DateInput({
   onChange,
   isInvalid,
   errors,
-  isPending
+  isPending,
 }: AdditionalFieldProps) {
   const { localization } = useAuth()
   const inputType = resolveInputType(field)
@@ -617,7 +619,7 @@ function DateInput({
 
   const date = toDate(value)
   const [time, setTime] = useState<string>(
-    isDateTime && date ? formatTime(date) : ""
+    isDateTime && date ? formatTime(date) : "",
   )
   const [open, setOpen] = useState(false)
 
@@ -640,7 +642,7 @@ function DateInput({
             className={cn(
               buttonVariants({ variant: "outline" }),
               "flex-1 justify-between font-normal",
-              "data-[empty=true]:text-muted-foreground"
+              "data-[empty=true]:text-muted-foreground",
             )}
           >
             {date ? format(date, "PPP") : <span>{field.placeholder}</span>}
@@ -666,7 +668,7 @@ function DateInput({
                       Number(hours),
                       Number(minutes),
                       Number(seconds),
-                      0
+                      0,
                     )
                   } else {
                     nextValue.setHours(0, 0, 0, 0)
@@ -701,7 +703,7 @@ function DateInput({
                   Number(hours),
                   Number(minutes),
                   Number(seconds),
-                  0
+                  0,
                 )
                 onChange(nextValue)
               }}

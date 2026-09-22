@@ -253,6 +253,34 @@ export async function readSkillOverviews(input: {
   return found;
 }
 
+/** Actual visible translations, never the English fallback; one query per batch. */
+export async function readSkillOverviewLocales(
+  skillVersionIds: readonly string[],
+): Promise<Map<string, SkillOverviewLocale[]>> {
+  const result = new Map<string, SkillOverviewLocale[]>();
+  const ids = [...new Set(skillVersionIds)];
+  if (!ids.length) return result;
+  const rows = await db
+    .select({
+      versionId: skillVersionOverviews.skillVersionId,
+      locale: skillVersionOverviews.locale,
+    })
+    .from(skillVersionOverviews)
+    .where(
+      and(
+        inArray(skillVersionOverviews.skillVersionId, ids),
+        eq(skillVersionOverviews.hidden, false),
+      ),
+    );
+  for (const row of rows) {
+    const locales = result.get(row.versionId) ?? [];
+    if (!locales.includes(row.locale)) locales.push(row.locale);
+    result.set(row.versionId, locales);
+  }
+  for (const locales of result.values()) locales.sort();
+  return result;
+}
+
 // ---------------------------------------------------------------------------
 // Admin
 // ---------------------------------------------------------------------------

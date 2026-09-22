@@ -1,3 +1,4 @@
+import { buildTranslatedAlternates } from "../lib/i18n/metadata";
 import type { MetadataRoute } from "next";
 
 import {
@@ -241,6 +242,11 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       };
     }),
     ...skills.map((skill) => {
+      const { languages } = buildTranslatedAlternates(
+        skillPath(skill.slug),
+        "en",
+        skill.overviewLocales ?? [],
+      );
       const modified = new Date(skill.updatedAt ?? skill.listedAt);
       return {
         changeFrequency: "weekly" as const,
@@ -248,6 +254,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
         lastModified: Number.isNaN(modified.getTime()) ? undefined : modified,
         priority: 0.55,
         url: `${SITE_URL}${skillPath(skill.slug)}`,
+        ...(languages ? { alternates: { languages } } : {}),
       };
     }),
   ];

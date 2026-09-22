@@ -1,5 +1,7 @@
 "use client";
 
+import { formatDisplayDate } from "@/lib/i18n/format";
+import { useLocale as useDisplayLocale } from "next-intl";
 import * as React from "react";
 import { Loader2, ShieldAlert } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -32,7 +34,10 @@ import {
   setSkillFeatured,
   setSkillVerified,
 } from "../../../../lib/skill-market-admin";
-import { grantSkillClaim, revokeSkillClaim } from "../../../../lib/skill-claims";
+import {
+  grantSkillClaim,
+  revokeSkillClaim,
+} from "../../../../lib/skill-claims";
 import { formatInstallCount } from "./skills-market-browse";
 import {
   canSaveSkillCategories,
@@ -42,11 +47,11 @@ import {
   toggleSkillCategory,
 } from "./skill-market-standing";
 
-function formatDate(iso: string) {
+function formatDate(iso: string, displayLocale: string) {
   const date = new Date(iso);
   return Number.isNaN(date.getTime())
     ? iso
-    : date.toLocaleDateString(undefined, {
+    : formatDisplayDate(date, displayLocale, {
         day: "numeric",
         month: "short",
         year: "numeric",
@@ -94,6 +99,7 @@ export function SkillMarketAdminPanel({
   repo: string | null;
   skillId: string;
 }) {
+  const displayLocale = useDisplayLocale();
   const t = useTranslations("dashboardSkillsMarket");
   const tc = useTranslations("dashboardSkillsClaim");
   // The route also answers with the author's claim on the repository.
@@ -191,7 +197,9 @@ export function SkillMarketAdminPanel({
     >
       <div className="flex items-center gap-2">
         <ShieldAlert className="size-4 text-muted-foreground" />
-        <h2 className="text-sm font-semibold text-foreground">{t("adminPanel.title")}</h2>
+        <h2 className="text-sm font-semibold text-foreground">
+          {t("adminPanel.title")}
+        </h2>
         {busy ? (
           <Loader2 className="ml-auto size-3.5 animate-spin text-muted-foreground" />
         ) : null}
@@ -218,7 +226,9 @@ export function SkillMarketAdminPanel({
         <div>
           <dt className="text-muted-foreground">{t("adminPanel.listed")}</dt>
           <dd className="mt-1 font-medium text-foreground">
-            {standing.listedAt ? formatDate(standing.listedAt) : t("adminPanel.notListed")}
+            {standing.listedAt
+              ? formatDate(standing.listedAt, displayLocale)
+              : t("adminPanel.notListed")}
           </dd>
         </div>
         <div>
@@ -234,7 +244,9 @@ export function SkillMarketAdminPanel({
                     ? tc(`admin.method.${claim.method}`)
                     : claim.method
                 }${
-                  claim.verifiedAt ? ` · ${formatDate(claim.verifiedAt)}` : ""
+                  claim.verifiedAt
+                    ? ` · ${formatDate(claim.verifiedAt, displayLocale)}`
+                    : ""
                 }`
               : tc("admin.unclaimed")}
           </dd>
@@ -344,7 +356,9 @@ export function SkillMarketAdminPanel({
           >
             {t("adminPanel.verified")}
           </label>
-          <p className="mt-0.5 text-muted-foreground">{t("adminPanel.verifiedHint")}</p>
+          <p className="mt-0.5 text-muted-foreground">
+            {t("adminPanel.verifiedHint")}
+          </p>
         </div>
         <Switch
           checked={standing.verified}
@@ -353,7 +367,9 @@ export function SkillMarketAdminPanel({
           onCheckedChange={(checked) =>
             void run(
               () => setSkillVerified(skillId, checked),
-              checked ? t("adminPanel.verifiedToast") : t("adminPanel.unverifiedToast"),
+              checked
+                ? t("adminPanel.verifiedToast")
+                : t("adminPanel.unverifiedToast"),
             )
           }
         />
@@ -384,7 +400,9 @@ export function SkillMarketAdminPanel({
           onCheckedChange={(checked) =>
             void run(
               () => setSkillFeatured(skillId, checked),
-              checked ? tc("featured.featuredToast") : tc("featured.unfeaturedToast"),
+              checked
+                ? tc("featured.featuredToast")
+                : tc("featured.unfeaturedToast"),
             )
           }
         />
@@ -392,9 +410,12 @@ export function SkillMarketAdminPanel({
 
       <div className="mt-4 border-t border-border pt-3 text-xs">
         <div className="flex items-baseline justify-between gap-2">
-          <h3 className="font-medium text-foreground">{t("adminPanel.categories")}</h3>
+          <h3 className="font-medium text-foreground">
+            {t("adminPanel.categories")}
+          </h3>
           <span className="text-muted-foreground">
-            {t("adminPanel.categoriesHint")} {selectedSlugs.length}/{SKILL_CATEGORY_LIMIT}
+            {t("adminPanel.categoriesHint")} {selectedSlugs.length}/
+            {SKILL_CATEGORY_LIMIT}
           </span>
         </div>
         <div className="mt-2 flex flex-wrap gap-1.5">
@@ -474,9 +495,15 @@ export function SkillMarketAdminPanel({
                     }, tc("admin.revokedToast"));
                   }
                 } else if (confirmAction === "withdraw") {
-                  void run(() => delistSkill(skillId), t("adminPanel.withdrawnToast"));
+                  void run(
+                    () => delistSkill(skillId),
+                    t("adminPanel.withdrawnToast"),
+                  );
                 } else {
-                  void run(() => listSkillPublicly(skillId), t("adminPanel.listedToast"));
+                  void run(
+                    () => listSkillPublicly(skillId),
+                    t("adminPanel.listedToast"),
+                  );
                 }
               }}
             >

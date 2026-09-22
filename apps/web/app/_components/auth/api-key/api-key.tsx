@@ -1,5 +1,7 @@
 "use client"
 
+import { formatDisplayDate } from "@/lib/i18n/format"
+import { useLocale as useDisplayLocale } from "next-intl"
 import type { ListedApiKey } from "@better-auth-ui/core/plugins/api-key"
 import { useAuth, useAuthPlugin } from "@better-auth-ui/react"
 import { Key, Pencil, X } from "lucide-react"
@@ -12,7 +14,7 @@ import {
   ItemContent,
   ItemDescription,
   ItemMedia,
-  ItemTitle
+  ItemTitle,
 } from "@sourceweft/ui-web/components/ui/item"
 import { apiKeyPlugin } from "@/lib/auth/api-key-plugin"
 import { DeleteApiKeyDialog } from "./delete-api-key-dialog"
@@ -32,8 +34,9 @@ export function ApiKey({
   apiKey,
   hideDelete,
   hideUpdate,
-  organizationId
+  organizationId,
 }: ApiKeyProps) {
+  const displayLocale = useDisplayLocale()
   const { localization } = useAuth()
   const { localization: apiKeyLocalization } = useAuthPlugin(apiKeyPlugin)
   const [deleteOpen, setDeleteOpen] = useState(false)
@@ -51,19 +54,21 @@ export function ApiKey({
         <ItemDescription className="font-mono">{preview}</ItemDescription>
         <ItemDescription>
           {apiKeyLocalization.created}{" "}
-          {new Date(apiKey.createdAt).toLocaleString(undefined, {
+          {formatDisplayDate(new Date(apiKey.createdAt), displayLocale, {
             dateStyle: "medium",
-            timeStyle: "short"
+            timeStyle: "short",
           })}
         </ItemDescription>
         <ItemDescription>
           {apiKey.expiresAt
-            ? `${apiKeyLocalization.expires} ${new Date(
-                apiKey.expiresAt
-              ).toLocaleString(undefined, {
-                dateStyle: "medium",
-                timeStyle: "short"
-              })}`
+            ? `${apiKeyLocalization.expires} ${formatDisplayDate(
+                new Date(apiKey.expiresAt),
+                displayLocale,
+                {
+                  dateStyle: "medium",
+                  timeStyle: "short",
+                },
+              )}`
             : apiKeyLocalization.neverExpires}
         </ItemDescription>
         <ItemDescription>
@@ -78,7 +83,7 @@ export function ApiKey({
         <ItemDescription>
           {apiKeyLocalization.lastRequest}:{" "}
           {apiKey.lastRequest
-            ? new Date(apiKey.lastRequest).toLocaleString()
+            ? formatDisplayDate(new Date(apiKey.lastRequest), displayLocale)
             : apiKeyLocalization.neverRequested}
         </ItemDescription>
       </ItemContent>

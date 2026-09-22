@@ -1,3 +1,6 @@
+import { formatDisplayDate } from "@/lib/i18n/format";
+
+import { useLocale as useDisplayLocale } from "next-intl";
 import {
   FileText,
   Loader2,
@@ -44,6 +47,7 @@ export const WorkfilesTab = memoComponent(function WorkfilesTab({
   rowBusyByPath: Record<string, boolean>;
   searchQuery: string;
 }) {
+  const displayLocale = useDisplayLocale();
   const t = useTranslations("dashboardSourcesHub");
   const q = searchQuery.trim().toLowerCase();
   const filtered = useMemo(
@@ -119,12 +123,16 @@ export const WorkfilesTab = memoComponent(function WorkfilesTab({
               <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
                 <span className="truncate">{file.path}</span>
                 <span>{formatBytes(file.sizeBytes)}</span>
-                <span>{new Date(file.updatedAt).toLocaleString()}</span>
+                <span>
+                  {formatDisplayDate(new Date(file.updatedAt), displayLocale)}
+                </span>
               </div>
               <div className="mt-1 flex flex-wrap gap-1.5">
                 {file.purpose ? (
                   <TypeBadge
-                    label={t(`files.purpose.${workfilePurposeKey(file.purpose)}`)}
+                    label={t(
+                      `files.purpose.${workfilePurposeKey(file.purpose)}`,
+                    )}
                   />
                 ) : null}
                 <TypeBadge label={file.mimeType} />

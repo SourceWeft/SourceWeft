@@ -1,3 +1,6 @@
+import { formatDisplayDate } from "@/lib/i18n/format";
+
+import { useLocale as useDisplayLocale } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
@@ -128,10 +131,14 @@ function clearConnectorOAuthCompletionFromUrl() {
 function mapConnectorToUi(
   connector: SourceConnector,
   t: ReturnType<typeof useTranslations>,
+  displayLocale: string,
 ): ConnectorItem {
   const lastSync = connector.lastIndexedAt
     ? t("connectors.lastSync", {
-        date: new Date(connector.lastIndexedAt).toLocaleString(),
+        date: formatDisplayDate(
+          new Date(connector.lastIndexedAt),
+          displayLocale,
+        ),
       })
     : t("connectors.neverSynced");
   const schedule = formatConnectorSchedule(connector, t);
@@ -155,6 +162,7 @@ export function useConnectors(input: {
     current: Map<string, { knownSourceIds: Set<string> }>;
   };
 }) {
+  const displayLocale = useDisplayLocale();
   const {
     workspaceId,
     currentWorkspaceIdRef,
@@ -257,7 +265,7 @@ export function useConnectors(input: {
         return;
       }
       const uiConnectors = result.items.map((connector) =>
-        mapConnectorToUi(connector, t),
+        mapConnectorToUi(connector, t, displayLocale),
       );
       onConnectorsChange?.(result.items);
       setConnectorReadinessById((prev) => {
@@ -346,7 +354,13 @@ export function useConnectors(input: {
         setIsLoadingConnectors(false);
       }
     }
-  }, [currentWorkspaceIdRef, onConnectorsChange, workspaceId, t]);
+  }, [
+    currentWorkspaceIdRef,
+    onConnectorsChange,
+    workspaceId,
+    t,
+    displayLocale,
+  ]);
 
   const refreshConnectorSettingsActivity = useCallback(
     async (connectorId?: string | null, options: { silent?: boolean } = {}) => {
@@ -507,7 +521,9 @@ export function useConnectors(input: {
       }
 
       if (item.connectMode !== "oauth_connector") {
-        toast.error(t("toasts.connectors.notAvailableOAuth", { name: item.name }));
+        toast.error(
+          t("toasts.connectors.notAvailableOAuth", { name: item.name }),
+        );
         return;
       }
 
@@ -639,7 +655,7 @@ export function useConnectors(input: {
             );
           }
           await refreshConnectors();
-          return mapConnectorToUi(created.connector, t);
+          return mapConnectorToUi(created.connector, t, displayLocale);
         } catch (error) {
           if (isConnectorAlreadyHandledError(error)) {
             await refreshConnectors();
@@ -681,6 +697,7 @@ export function useConnectors(input: {
       trackManualConnectorSync,
       workspaceId,
       t,
+      displayLocale,
     ],
   );
 
@@ -845,24 +862,35 @@ export function useConnectors(input: {
     return () => window.clearInterval(timer);
   }, [connectorWaitingByType, ensureConnector, refreshConnectors, workspaceId]);
 
-  const handleRequestConnector = useCallback((item: ConnectorCatalogItem) => {
-    toast.info(t("toasts.connectors.onRoadmap", { name: item.name }));
-  }, [t]);
+  const handleRequestConnector = useCallback(
+    (item: ConnectorCatalogItem) => {
+      toast.info(t("toasts.connectors.onRoadmap", { name: item.name }));
+    },
+    [t],
+  );
 
-  const handleCancelConnector = useCallback((item: ConnectorCatalogItem) => {
-    delete connectorWaitingStartedAtRef.current[item.id];
-    setConnectorWaiting(item.id, false);
-    toast.info(t("toasts.connectors.connectionCanceled", { name: item.name }));
-  }, [t]);
+  const handleCancelConnector = useCallback(
+    (item: ConnectorCatalogItem) => {
+      delete connectorWaitingStartedAtRef.current[item.id];
+      setConnectorWaiting(item.id, false);
+      toast.info(
+        t("toasts.connectors.connectionCanceled", { name: item.name }),
+      );
+    },
+    [t],
+  );
 
-  const handleCopyWebhook = useCallback(async (value: string) => {
-    try {
-      await navigator.clipboard.writeText(value);
-      toast.success(t("toasts.connectors.webhookCopied"));
-    } catch {
-      toast.error(t("toasts.connectors.webhookCopyFailed"));
-    }
-  }, [t]);
+  const handleCopyWebhook = useCallback(
+    async (value: string) => {
+      try {
+        await navigator.clipboard.writeText(value);
+        toast.success(t("toasts.connectors.webhookCopied"));
+      } catch {
+        toast.error(t("toasts.connectors.webhookCopyFailed"));
+      }
+    },
+    [t],
+  );
 
   const handleSyncConnector = useCallback(
     async (connector: ConnectorItem) => {
@@ -879,9 +907,7 @@ export function useConnectors(input: {
             result.reason ?? "connector_not_ready",
             result.message ?? t("connectors.readinessNotReady"),
           );
-          toast.info(
-            result.message ?? t("toasts.connectors.syncSkipped"),
-          );
+          toast.info(result.message ?? t("toasts.connectors.syncSkipped"));
         } else if (result.alreadyRunning) {
           toast.info(
             result.message ?? t("toasts.connectors.syncAlreadyRunning"),
@@ -937,7 +963,9 @@ export function useConnectors(input: {
           await refreshConnectorSettingsActivity(connector.id);
         }
       } catch (error) {
-        toast.error(getErrorMessage(error, t("toasts.connectors.updateFailed")));
+        toast.error(
+          getErrorMessage(error, t("toasts.connectors.updateFailed")),
+        );
       } finally {
         setConnectorBusy(connector.id, false);
       }

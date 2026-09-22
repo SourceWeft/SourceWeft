@@ -82,7 +82,8 @@ function relatedMcpItems(input: {
     .map((item) => ({
       item,
       score:
-        item.categories.filter((category) => categorySet.has(category)).length * 4 +
+        item.categories.filter((category) => categorySet.has(category)).length *
+          4 +
         (item.runtime === input.runtime ? 1 : 0) +
         (item.transport === input.transport ? 1 : 0) +
         (item.official || item.verified ? 1 : 0),
@@ -222,7 +223,8 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
       price: 0,
       priceCurrency: "USD",
     },
-    operatingSystem: item.runtime === "desktop" ? "Windows, macOS, Linux" : "Web",
+    operatingSystem:
+      item.runtime === "desktop" ? "Windows, macOS, Linux" : "Web",
     provider: {
       "@type": "Organization",
       name: providerName ?? "SourceWeft MCP Market",
@@ -235,7 +237,12 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
     "@context": "https://schema.org",
     "@type": "BreadcrumbList",
     itemListElement: [
-      { "@type": "ListItem", item: SITE_URL, name: t("breadcrumbHome"), position: 1 },
+      {
+        "@type": "ListItem",
+        item: SITE_URL,
+        name: t("breadcrumbHome"),
+        position: 1,
+      },
       {
         "@type": "ListItem",
         item: `${SITE_URL}/mcp`,
@@ -266,10 +273,13 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
         />
         <div className={`relative mx-auto pb-8 pt-24 ${mcpContainerClassName}`}>
           <nav
-            aria-label="Breadcrumb"
+            aria-label={t("breadcrumb")}
             className="mb-8 flex min-w-0 items-center gap-1.5 text-sm text-zinc-500 dark:text-zinc-400"
           >
-            <LocaleLink className="shrink-0 hover:text-zinc-950 dark:hover:text-white" href="/mcp">
+            <LocaleLink
+              className="shrink-0 hover:text-zinc-950 dark:hover:text-white"
+              href="/mcp"
+            >
               {t("breadcrumbServers")}
             </LocaleLink>
             {primaryCategory ? (
@@ -304,7 +314,9 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
                       </span>
                     ) : null}
                     <span>v{version.version}</span>
-                    <span>{t("updated", { date: formatDate(item.updatedAt) })}</span>
+                    <span>
+                      {t("updated", { date: formatDate(item.updatedAt) })}
+                    </span>
                   </p>
                 </div>
               </div>
@@ -335,7 +347,10 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
                     t("auth"),
                     manifest.auth.required ? t("required") : t("notRequired"),
                   ],
-                  [t("license"), manifest.license ?? item.license ?? t("unknown")],
+                  [
+                    t("license"),
+                    manifest.license ?? item.license ?? t("unknown"),
+                  ],
                   [
                     t("language"),
                     manifest.language ?? item.language ?? t("unknown"),
@@ -362,7 +377,9 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
                 <ExternalTextLink href={repoUrl}>
                   {t("repository")}
                 </ExternalTextLink>
-                <ExternalTextLink href={sourceUrl}>{t("source")}</ExternalTextLink>
+                <ExternalTextLink href={sourceUrl}>
+                  {t("source")}
+                </ExternalTextLink>
               </div>
             </aside>
           </div>
@@ -370,7 +387,7 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
       </section>
 
       <nav
-        aria-label="Sections"
+        aria-label={t("sections")}
         className="sticky top-14 z-40 border-b border-zinc-300 bg-[#f7f4ed]/90 backdrop-blur-[12px] dark:border-white/10 dark:bg-zinc-950/90"
       >
         <div
@@ -394,8 +411,12 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
         <div className="min-w-0 space-y-12">
           {hasOverview ? (
             <section className="scroll-mt-32" id="overview">
-              <SectionHeading icon={McpBrandIcon}>{t("overviewHeading")}</SectionHeading>
-              <div className={`${panelClassName} space-y-4 divide-y divide-zinc-200 dark:divide-white/10 [&>*:not(:first-child)]:pt-4`}>
+              <SectionHeading icon={McpBrandIcon}>
+                {t("overviewHeading")}
+              </SectionHeading>
+              <div
+                className={`${panelClassName} space-y-4 divide-y divide-zinc-200 dark:divide-white/10 [&>*:not(:first-child)]:pt-4`}
+              >
                 {overviewText ? (
                   <p className="whitespace-pre-line text-sm leading-7 text-zinc-600 dark:text-zinc-300">
                     {overviewText}
@@ -478,7 +499,9 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
                   </pre>
                 </div>
               ) : repoUrl ? (
-                <div className={`${panelClassName} text-sm text-zinc-600 dark:text-zinc-400`}>
+                <div
+                  className={`${panelClassName} text-sm text-zinc-600 dark:text-zinc-400`}
+                >
                   <h3 className="font-semibold text-zinc-950 dark:text-white">
                     {t("otherClients")}
                   </h3>
@@ -523,7 +546,9 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
                       ) : null}
                     </span>
                     <span className="text-zinc-500">
-                      {entry.publishedAt ? formatDate(entry.publishedAt) : entry.status}
+                      {entry.publishedAt
+                        ? formatDate(entry.publishedAt)
+                        : entry.status}
                     </span>
                   </li>
                 ))}
@@ -534,14 +559,19 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
 
         <aside className="space-y-5 lg:sticky lg:top-32 lg:self-start">
           <section className={panelClassName}>
-            <h2 className="mb-4 text-base font-semibold">{t("serverDetails")}</h2>
+            <h2 className="mb-4 text-base font-semibold">
+              {t("serverDetails")}
+            </h2>
             <dl className="space-y-3 text-sm">
               {[
                 [t("identifier"), item.identifier],
                 [t("transport"), transportLabel(manifest.transport)],
                 [t("runtime"), runtimeLabel(item)],
                 [t("trust"), verificationLabel(item)],
-                [t("published"), formatDate(item.publishedAt ?? item.createdAt)],
+                [
+                  t("published"),
+                  formatDate(item.publishedAt ?? item.createdAt),
+                ],
               ].map(([label, value]) => (
                 <div
                   className="flex items-start justify-between gap-4 border-b border-zinc-200 pb-3 last:border-0 last:pb-0 dark:border-white/10"
