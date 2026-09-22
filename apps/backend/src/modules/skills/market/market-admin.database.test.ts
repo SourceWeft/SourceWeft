@@ -449,6 +449,62 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       });
     });
 
+    test("re-inferring prefers the current version's AI overview, unless it is hidden", async () => {
+      const skill = await registrySkill();
+      await listing.prepareSkillListing(skill.skillId);
+      const keywordSlugs = taxonomy.classifySkillCategories({
+        name: "pptx",
+        description: "Create and edit PowerPoint presentations.",
+      });
+      expect(keywordSlugs).not.toContain("ai-agents");
+      await data.db.insert(data.skillVersionOverviews).values({
+        skillVersionId: skill.skillVersionId,
+        locale: "en",
+        bundleSha256: "e2e".padEnd(64, "0"),
+        model: "test-model",
+        overview: {
+          summary: "Delegates independent tasks to parallel sub-agents.",
+          whatItDoes: "",
+          whenToUse: "",
+          requirements: "",
+          // An unknown slug is dropped, never filed.
+          suggestedCategories: ["ai-agents", "no-such-category"],
+        },
+      });
+      const categoriesOf = async (skillId: string) =>
+        (await listing.listSkillCategorySlugs([skillId])).get(skillId) ?? [];
+
+      expect(
+        await listing.reinferSkillCategories({
+          skillId: skill.skillId,
+          actorUserId: admin,
+        }),
+      ).toEqual({ skillId: skill.skillId, categorySlugs: ["ai-agents"] });
+      const [event] = (await events.listSkillMarketEvents({
+        skillId: skill.skillId,
+        limit: 1,
+      }))!;
+      expect(event).toMatchObject({
+        action: "categories.reinferred",
+        detail: { source: "overview" },
+      });
+
+      // Hidden by an admin: the keyword classifier decides again, in bulk too.
+      await data.db
+        .update(data.skillVersionOverviews)
+        .set({ hidden: true })
+        .where(
+          eq(data.skillVersionOverviews.skillVersionId, skill.skillVersionId),
+        );
+      expect(
+        await listing.reinferAllSkillCategories({
+          actorUserId: admin,
+          onlySkillIds: [skill.skillId],
+        }),
+      ).toEqual({ considered: 1, changed: 1 });
+      expect(await categoriesOf(skill.skillId)).toEqual(keywordSlugs);
+    });
+
     test("an author restores a removed repository; the admin's hold stays", async () => {
       const target = newRepo();
       const githubId = `8${randomBytes(4).readUInt32BE()}`;
