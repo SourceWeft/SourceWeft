@@ -799,7 +799,10 @@
       "clearConfirmTitle": "Clear all {scope}?",
       "clearConfirmDescription": "This will remove {count} {scope}, including chats hidden by the current filter. This action cannot be undone.",
       "clearing": "Clearing...",
-      "clearAllButton": "Clear all"
+      "clearAllButton": "Clear all",
+      "addSubagent": "Add sub-agent",
+      "openInNewWindow": "Open in new window",
+      "openBesideParent": "Open beside parent"
     },
     "account": {
       "accountAndSettings": "Account and settings",
@@ -5159,5 +5162,10 @@
       "description": "Used for notifications and scheduling",
       "placeholder": "Asia/Shanghai"
     }
+  },
+  "chatRecovery": {
+    "title": "This conversation could not be displayed",
+    "body": "Try displaying it again, or open another conversation from the sidebar.",
+    "retry": "Try again"
   }
 }

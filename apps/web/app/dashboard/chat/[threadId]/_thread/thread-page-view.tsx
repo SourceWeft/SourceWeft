@@ -351,6 +351,7 @@ export function DashboardChatThreadPageView({
             <ChatCanvasPanelSkeleton variant="thread" />
           ) : (
             <ChatCanvas
+              messageRecoveryKey={threadId}
               activeVersionByGroup={activeVersionByGroup}
               assistantVersionById={assistantVersionById}
               activeThreadRun={activeThreadRun}

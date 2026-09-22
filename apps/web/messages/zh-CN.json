@@ -799,7 +799,10 @@
       "clearConfirmTitle": "清除所有{scope}？",
       "clearConfirmDescription": "这将移除 {count} 个{scope}，包括被当前筛选隐藏的对话。此操作无法撤销。",
       "clearing": "清除中…",
-      "clearAllButton": "清除全部"
+      "clearAllButton": "清除全部",
+      "addSubagent": "添加子智能体",
+      "openInNewWindow": "在新窗口中打开",
+      "openBesideParent": "在父会话旁打开"
     },
     "account": {
       "accountAndSettings": "账户与设置",
@@ -5159,5 +5162,10 @@
       "description": "用于通知和日程安排",
       "placeholder": "Asia/Shanghai"
     }
+  },
+  "chatRecovery": {
+    "title": "无法显示此会话",
+    "body": "请重试显示，或从侧栏打开其他会话。",
+    "retry": "重试"
   }
 }

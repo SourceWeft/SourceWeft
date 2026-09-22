@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import { createElement, type ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { NextIntlClientProvider } from "next-intl";
+import { createTranslator, NextIntlClientProvider } from "next-intl";
 import { test } from "vitest";
 import { SidebarProvider } from "@sourceweft/ui-web/components/ui/sidebar";
 import { DashboardSidebarChatPanel } from "./dashboard-sidebar-chat-panel";
 import messages from "../../../messages/en.json";
+
+import zhCN from "../../../messages/zh-CN.json";
+import zhTW from "../../../messages/zh-TW.json";
 
 const intlMessages = messages as ComponentProps<
   typeof NextIntlClientProvider
@@ -35,44 +38,65 @@ const chats: ComponentProps<typeof DashboardSidebarChatPanel>["privateChats"] =
     sourceCount: 0,
     visibility: "private" as const,
   }));
-function render(activeChatId: string, search = "", desktopTitlebar = false) {
+function render(
+  activeChatId: string,
+  search = "",
+  desktopTitlebar = false,
+  locale = "en",
+  catalog = intlMessages,
+  includeChild = false,
+) {
   const noop = () => {};
   const asyncNoop = async () => {};
   return renderToStaticMarkup(
-    <NextIntlClientProvider locale="en" messages={intlMessages}>
+    <NextIntlClientProvider
+      locale={locale}
+      messages={catalog}
+      timeZone="UTC"
+      onError={(error) => {
+        throw error;
+      }}
+    >
       {createElement(
         SidebarProvider,
         null,
         createElement(DashboardSidebarChatPanel, {
-        desktopTitlebar,
-        heading: null,
-        navigation: null,
-        footer: null,
-        search,
-        onSearchChange: noop,
-        activeChatId,
-        privateChats: chats,
-        sharedChats: [],
-        archivedChats: [],
-        workspaceId: "w",
-        workspaceName: "Workspace",
-        workspaces: [],
-        hasMorePrivateChats: true,
-        isLoadingPrivateChats: false,
-        onArchiveChat: noop,
-        onClearArchivedChats: asyncNoop,
-        onClearPrivateChats: asyncNoop,
-        onCreateAgentChat: asyncNoop,
-        onCreateChat: noop,
-        onDeleteChat: asyncNoop,
-        onSetChatVisibility: asyncNoop,
-        onLoadMoreChats: noop,
-        onOpenChat: noop,
-        onOpenChatInNewWindow: noop,
-        onOpenChatInPanel: noop,
-        onCreateWorkspace: asyncNoop,
-        onRenameWorkspace: asyncNoop,
-        onWorkspaceChange: noop,
+          desktopTitlebar,
+          heading: null,
+          navigation: null,
+          footer: null,
+          search,
+          onSearchChange: noop,
+          activeChatId,
+          privateChats: includeChild
+            ? [
+                {
+                  ...chats[0]!,
+                  children: [{ ...chats[1]!, parentThreadId: chats[0]!.id }],
+                },
+              ]
+            : chats,
+          sharedChats: [],
+          archivedChats: [],
+          workspaceId: "w",
+          workspaceName: "Workspace",
+          workspaces: [],
+          hasMorePrivateChats: true,
+          isLoadingPrivateChats: false,
+          onArchiveChat: noop,
+          onClearArchivedChats: asyncNoop,
+          onClearPrivateChats: asyncNoop,
+          onCreateAgentChat: asyncNoop,
+          onCreateChat: noop,
+          onDeleteChat: asyncNoop,
+          onSetChatVisibility: asyncNoop,
+          onLoadMoreChats: noop,
+          onOpenChat: noop,
+          onOpenChatInNewWindow: noop,
+          onOpenChatInPanel: noop,
+          onCreateWorkspace: asyncNoop,
+          onRenameWorkspace: asyncNoop,
+          onWorkspaceChange: noop,
         }),
       )}
     </NextIntlClientProvider>,
@@ -117,4 +141,43 @@ test("new chat aligns with navigation and search belongs to the chats header", (
   assert.ok(newChatIndex >= 0);
   assert.ok(chatsIndex > newChatIndex);
   assert.ok(searchIndex > chatsIndex);
+});
+
+// Catalog alignment misses keys absent in every language. Rendering invokes
+// these translations even while the dropdown portal starts closed.
+test("all sidebar action branches have real translations in every supported locale", () => {
+  for (const [locale, catalog] of Object.entries({
+    en: messages,
+    "zh-CN": zhCN,
+    "zh-TW": zhTW,
+  })) {
+    render("cloud", "", false, locale, catalog, true);
+    const t = createTranslator({
+      locale,
+      messages: catalog,
+      namespace: "dashboardNav.chats",
+      onError: (error) => {
+        throw error;
+      },
+    });
+    for (const key of [
+      "addSubagent",
+      "openInNewWindow",
+      "openBesideParent",
+    ] as const) {
+      assert.notEqual(t(key), `dashboardNav.chats.${key}`);
+      assert.ok(t(key).length > 0);
+    }
+  }
+});
+
+test("sidebar rendering rejects each missing action key even if catalogs would otherwise align", () => {
+  for (const key of ["addSubagent", "openInNewWindow", "openBesideParent"]) {
+    const broken = structuredClone(messages);
+    Reflect.deleteProperty(broken.dashboardNav.chats, key);
+    assert.throws(
+      () => render("cloud", "", false, "en", broken, true),
+      /MISSING_MESSAGE/,
+    );
+  }
 });

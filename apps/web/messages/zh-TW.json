@@ -799,7 +799,10 @@
       "clearConfirmTitle": "清除所有{scope}？",
       "clearConfirmDescription": "這將移除 {count} 個{scope}，包括被目前篩選隱藏的對話。此操作無法撤銷。",
       "clearing": "清除中…",
-      "clearAllButton": "清除全部"
+      "clearAllButton": "清除全部",
+      "addSubagent": "新增子代理程式",
+      "openInNewWindow": "在新視窗中開啟",
+      "openBesideParent": "在父工作階段旁開啟"
     },
     "account": {
       "accountAndSettings": "帳戶與設定",
@@ -5159,5 +5162,10 @@
       "description": "用於通知和日程安排",
       "placeholder": "Asia/Shanghai"
     }
+  },
+  "chatRecovery": {
+    "title": "無法顯示此工作階段",
+    "body": "請重試顯示，或從側欄開啟其他工作階段。",
+    "retry": "重試"
   }
 }

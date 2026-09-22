@@ -1,3 +1,4 @@
+import { MessageRenderBoundary } from "@/app/_components/chat-error-recovery";
 import {
   useCallback,
   useEffect,
@@ -137,6 +138,7 @@ function countSelectedTools(tools: ChatSendInput["tools"]) {
 
 export function ChatCanvas({
   composerDraftKey,
+  messageRecoveryKey,
   workingFolderSlot,
   activeVersionByGroup = {},
   artifactStatuses,
@@ -203,6 +205,7 @@ export function ChatCanvas({
   onComposerOptionsChange,
 }: {
   composerDraftKey?: string;
+  messageRecoveryKey?: string;
   workingFolderSlot?: import("react").ReactNode;
   activeVersionByGroup?: Record<string, number>;
   artifactStatuses?: ReadonlyMap<string, ArtifactStatusSnapshot>;
@@ -714,29 +717,31 @@ export function ChatCanvas({
       data-approval-pending={hasPendingConfirmationItems ? "true" : undefined}
       className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background [scrollbar-gutter:stable]"
     >
-      <MessageList
-        activeThreadRun={activeThreadRun}
-        activeVersionByGroup={activeVersionByGroup}
-        artifactStatuses={artifactStatuses}
-        allSources={allSources}
-        hasOlderMessages={hasOlderMessages}
-        highlightedMessageId={highlightedMessageId}
-        isLoadingOlderMessages={isLoadingOlderMessages}
-        isStreaming={isStreaming}
-        messageGroups={messageGroups}
-        onActiveVersionChange={onActiveVersionChange}
-        onArtifactPreview={onArtifactPreview}
-        onCitationClick={onCitationClick}
-        onLoadOlderMessages={onLoadOlderMessages}
-        onRefreshLatest={localStatus.blocked ? undefined : onRefreshLatest}
-        onRestartFromMessage={
-          localStatus.blocked ? undefined : onRestartFromMessage
-        }
-        onSourcePreview={onSourcePreview}
-        onWorkfileClick={onWorkfileClick}
-        resolvedConfirmations={confirmationResolutions}
-        workspaceId={workspaceId}
-      />
+      <MessageRenderBoundary key={messageRecoveryKey ?? composerDraftKey}>
+        <MessageList
+          activeThreadRun={activeThreadRun}
+          activeVersionByGroup={activeVersionByGroup}
+          artifactStatuses={artifactStatuses}
+          allSources={allSources}
+          hasOlderMessages={hasOlderMessages}
+          highlightedMessageId={highlightedMessageId}
+          isLoadingOlderMessages={isLoadingOlderMessages}
+          isStreaming={isStreaming}
+          messageGroups={messageGroups}
+          onActiveVersionChange={onActiveVersionChange}
+          onArtifactPreview={onArtifactPreview}
+          onCitationClick={onCitationClick}
+          onLoadOlderMessages={onLoadOlderMessages}
+          onRefreshLatest={localStatus.blocked ? undefined : onRefreshLatest}
+          onRestartFromMessage={
+            localStatus.blocked ? undefined : onRestartFromMessage
+          }
+          onSourcePreview={onSourcePreview}
+          onWorkfileClick={onWorkfileClick}
+          resolvedConfirmations={confirmationResolutions}
+          workspaceId={workspaceId}
+        />
+      </MessageRenderBoundary>
 
       <ToolInterventionBar
         activeIntervention={activeIntervention}

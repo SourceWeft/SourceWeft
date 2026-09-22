@@ -1,5 +1,6 @@
 "use client";
 
+import { listenForClientErrors } from "@/lib/client-error-diagnostics";
 import { DeploymentCapabilitiesProvider } from "../lib/billing-edition/capabilities";
 import type { DeploymentCapabilities } from "@sourceweft/contracts/deployment-capabilities";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -218,8 +219,10 @@ export function Providers({
     };
 
     window.addEventListener("unhandledrejection", handler);
+    const stopDiagnostics = listenForClientErrors();
     return () => {
       window.removeEventListener("unhandledrejection", handler);
+      stopDiagnostics();
     };
   }, []);
 
