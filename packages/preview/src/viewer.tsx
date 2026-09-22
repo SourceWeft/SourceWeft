@@ -170,6 +170,9 @@ export async function createPreviewView(name: string) {
   };
   if (family === "lite") {
     const { default: preset } = await import("@file-viewer/preset-lite");
+    // The engine reloads the file whenever its options reference changes.
+    // Keep configuration stable across unrelated host renders.
+    const viewOptions: ViewerOptions = { ...options, preset };
     return function LightweightPreview({
       file,
       location,
@@ -181,7 +184,7 @@ export async function createPreviewView(name: string) {
         <EnginePreview
           file={file}
           location={location}
-          options={{ ...options, preset }}
+          options={viewOptions}
         />
       );
     };
@@ -200,6 +203,25 @@ export async function createPreviewView(name: string) {
             : family === "legacyPresentation"
               ? (await import("@file-viewer/renderer-ppt")).pptRenderer
               : (await import("@file-viewer/renderer-epub")).default;
+  // Upstream's public type uses HTMLElement while its React host and official
+  // renderer handlers use HTMLDivElement. This adapter owns that boundary.
+  const viewOptions: ViewerOptions = {
+    ...options,
+    renderers: [renderer] as unknown as ViewerOptions["renderers"],
+    ...(family === "legacyPresentation"
+      ? {
+          presentation: {
+            pptModuleUrl: "/file-viewer/vendor/ppt/index.mjs",
+            pptWorkerUrl: "/file-viewer/vendor/ppt/worker.mjs",
+            pptWasmUrl: "/file-viewer/vendor/ppt/ppt-native.wasm",
+            pptFontUrl: "/file-viewer/vendor/ppt/ppt-font-cjk.otf",
+            pptWorker: true,
+            // Private file previews should not persist rendered pages in IndexedDB.
+            pptCache: false,
+          },
+        }
+      : {}),
+  };
   return function DocumentPreview({
     file,
     location,
@@ -207,29 +229,11 @@ export async function createPreviewView(name: string) {
     file: File;
     location?: PreviewLocation;
   }) {
-    // Upstream's public type uses HTMLElement while its React host and official
-    // renderer handlers use HTMLDivElement. This adapter owns that boundary.
     return (
       <EnginePreview
         file={file}
         location={location}
-        options={{
-          ...options,
-          renderers: [renderer] as unknown as ViewerOptions["renderers"],
-          ...(family === "legacyPresentation"
-            ? {
-                presentation: {
-                  pptModuleUrl: "/file-viewer/vendor/ppt/index.mjs",
-                  pptWorkerUrl: "/file-viewer/vendor/ppt/worker.mjs",
-                  pptWasmUrl: "/file-viewer/vendor/ppt/ppt-native.wasm",
-                  pptFontUrl: "/file-viewer/vendor/ppt/ppt-font-cjk.otf",
-                  pptWorker: true,
-                  // Private file previews should not persist rendered pages in IndexedDB.
-                  pptCache: false,
-                },
-              }
-            : {}),
-        }}
+        options={viewOptions}
       />
     );
   };
