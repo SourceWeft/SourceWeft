@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   Loader2,
 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { Alert, AlertDescription } from "@sourceweft/ui-web/components/ui/alert";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { Input } from "@sourceweft/ui-web/components/ui/input";
@@ -81,6 +82,8 @@ function hasActiveSession(result: unknown) {
 
 export function MobileLoginView({ path }: { path: string }) {
   const router = useRouter();
+  const t = useTranslations("authPages.mobileLogin");
+  const tAuthUi = useTranslations("authUi");
   const [mode, setMode] = useState<MobileAuthMode>(() =>
     resolveInitialMode(path),
   );
@@ -118,22 +121,20 @@ export function MobileLoginView({ path }: { path: string }) {
   const copy = useMemo(() => {
     if (mode === "sign-up") {
       return {
-        title: "Create account",
-        description: "Start doing your best work with SourceWeft",
-        submit: "Create account",
-        alternatePrompt: "Already have an account?",
-        alternateAction: "Sign in",
+        description: t("signUp.description"),
+        submit: t("signUp.submit"),
+        alternatePrompt: tAuthUi("ALREADY_HAVE_AN_ACCOUNT"),
+        alternateAction: t("signUp.alternateAction"),
       };
     }
 
     return {
-      title: "Sign in",
-      description: "Do your best work with SourceWeft",
-      submit: "Sign in",
-      alternatePrompt: "New to SourceWeft?",
-      alternateAction: "Create account",
+      description: t("signIn.description"),
+      submit: t("signIn.submit"),
+      alternatePrompt: t("signIn.alternatePrompt"),
+      alternateAction: t("signIn.alternateAction"),
     };
-  }, [mode]);
+  }, [mode, t, tAuthUi]);
 
   function switchMode(nextMode: MobileAuthMode) {
     setMode(nextMode);
@@ -153,15 +154,14 @@ export function MobileLoginView({ path }: { path: string }) {
       setMode("sign-in");
       setPassword("");
       setNotice({
-        message:
-          "Account created, but we could not start your session. Please sign in.",
+        message: t("signUpSuccessNoSession"),
         variant: "success",
       });
       return;
     }
 
     setNotice({
-      message: "Signed in, but your session was not available. Please try again.",
+      message: t("signInErrorNoSession"),
       variant: "error",
     });
   }
@@ -218,8 +218,8 @@ export function MobileLoginView({ path }: { path: string }) {
         message: getErrorMessage(
           caughtError,
           mode === "sign-up"
-            ? "Unable to create your account. Check your details and try again."
-            : "Unable to sign in. Check your email and password and try again.",
+            ? t("signUpErrorFallback")
+            : t("signInErrorFallback"),
         ),
         variant: "error",
       });
@@ -288,7 +288,7 @@ export function MobileLoginView({ path }: { path: string }) {
               ) : (
                 <GoogleIcon className="size-5" />
               )}
-              Continue with Google
+              {t("continueWithGoogle")}
             </button>
 
             <button
@@ -298,14 +298,14 @@ export function MobileLoginView({ path }: { path: string }) {
               type="button"
             >
               <AppleIcon className="size-[18px]" />
-              Continue with Apple
+              {t("continueWithApple")}
             </button>
           </div>
 
           <div className="my-5 flex items-center gap-5 [@media(max-height:760px)]:my-3 [@media(max-height:680px)]:hidden">
             <div className="h-px flex-1 bg-border" />
             <span className="text-xs font-semibold text-muted-foreground">
-              OR
+              {t("or")}
             </span>
             <div className="h-px flex-1 bg-border" />
           </div>
@@ -322,7 +322,7 @@ export function MobileLoginView({ path }: { path: string }) {
                 id="mobile-auth-name"
                 name="name"
                 onChange={(event) => setName(event.target.value)}
-                placeholder="Full name"
+                placeholder={t("namePlaceholder")}
                 required
                 value={name}
               />
@@ -336,7 +336,7 @@ export function MobileLoginView({ path }: { path: string }) {
               inputMode="email"
               name="email"
               onChange={(event) => setEmail(event.target.value)}
-              placeholder="Personal or work email"
+              placeholder={t("emailPlaceholder")}
               required
               type="email"
               value={email}
@@ -349,7 +349,7 @@ export function MobileLoginView({ path }: { path: string }) {
               id="mobile-auth-password"
               name="password"
               onChange={(event) => setPassword(event.target.value)}
-              placeholder="Password"
+              placeholder={tAuthUi("PASSWORD_PLACEHOLDER")}
               required
               type="password"
               value={password}
@@ -409,25 +409,28 @@ export function MobileLoginView({ path }: { path: string }) {
           </div>
 
           <p className="mt-3 text-center text-xs text-muted-foreground [@media(max-height:760px)]:mt-2 [@media(max-height:680px)]:hidden">
-            Apple sign-in is coming soon.
+            {t("appleComingSoon")}
           </p>
 
           <p className="mt-6 px-5 text-center text-xs leading-5 text-muted-foreground [@media(max-height:760px)]:mt-3 [@media(max-height:680px)]:px-2 [@media(max-height:680px)]:leading-4">
-            By continuing, you agree to SourceWeft&apos;s{" "}
-            <Link
-              className="text-foreground underline underline-offset-4"
-              href="/terms"
-            >
-              Terms
-            </Link>{" "}
-            and acknowledge our{" "}
-            <Link
-              className="text-foreground underline underline-offset-4"
-              href="/privacy"
-            >
-              Privacy Policy
-            </Link>
-            .
+            {t.rich("termsNotice", {
+              terms: (chunks) => (
+                <Link
+                  className="text-foreground underline underline-offset-4"
+                  href="/terms"
+                >
+                  {chunks}
+                </Link>
+              ),
+              privacy: (chunks) => (
+                <Link
+                  className="text-foreground underline underline-offset-4"
+                  href="/privacy"
+                >
+                  {chunks}
+                </Link>
+              ),
+            })}
           </p>
         </div>
       </div>

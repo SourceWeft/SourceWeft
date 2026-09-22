@@ -165,7 +165,7 @@ export function ChatHeader({
             <button
               className="flex min-w-0 max-w-full items-center gap-0.5 text-[11px] leading-4 text-muted-foreground transition-colors hover:text-foreground focus-visible:underline focus-visible:outline-none"
               onClick={onOpenParentThread}
-              title={`Back to ${parentThread.title}`}
+              title={t("header.backToThread", { title: parentThread.title })}
               type="button"
             >
               <ChevronLeft className="size-3 shrink-0" />
@@ -200,7 +200,7 @@ export function ChatHeader({
               <Button
                 className="h-8 shrink-0 gap-1.5 px-2"
                 size="sm"
-                title="Sub-agents"
+                title={t("header.subagents")}
                 type="button"
                 variant="ghost"
               >
@@ -232,12 +232,12 @@ export function ChatHeader({
             className="size-8 shrink-0"
             onClick={onOpenInNewWindow}
             size="icon-sm"
-            title="Open in new window"
+            title={t("common.openInNewWindow")}
             type="button"
             variant="ghost"
           >
             <ExternalLink className="size-4" />
-            <span className="sr-only">Open in new window</span>
+            <span className="sr-only">{t("common.openInNewWindow")}</span>
           </Button>
         ) : null}
         <HeaderModelSelector

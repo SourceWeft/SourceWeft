@@ -1,8 +1,11 @@
+import type { useTranslations } from "next-intl";
 import type {
   ByokCredentialItem,
   ByokModelSelection,
   ByokSavedModelItem,
 } from "./byok-state";
+
+type CanvasT = ReturnType<typeof useTranslations<"dashboardChatCanvas">>;
 
 export type ModelType = "llm" | "image" | "vision";
 
@@ -180,7 +183,10 @@ function deriveDisplayNameFromAlias(alias: string) {
   return modelPart.split("/").at(-1) ?? modelPart;
 }
 
-function mapCatalogEntryToModelItem(entry: CatalogModelEntry): ModelItem {
+function mapCatalogEntryToModelItem(
+  entry: CatalogModelEntry,
+  t: CanvasT,
+): ModelItem {
   const isGlobalAutoModel = GLOBAL_AUTO_MODEL_ALIASES.has(entry.profileAlias);
   const rawProvider =
     entry.providerName?.trim() ||
@@ -190,13 +196,13 @@ function mapCatalogEntryToModelItem(entry: CatalogModelEntry): ModelItem {
     ? "sourceweft"
     : normalizeProviderSlug(rawProvider);
   const providerLabel = isGlobalAutoModel
-    ? "Global models"
+    ? t("modelSelector.globalModels")
     : toProviderLabel(rawProvider);
   const displayName = entry.displayName.trim() || entry.modelAlias;
   const subtitle =
     entry.subtitle.trim() || entry.targetModel?.trim() || entry.modelAlias;
   const name = isGlobalAutoModel
-    ? "Auto (Default)"
+    ? t("modelSelector.autoDefault")
     : displayName === entry.modelAlias &&
         isInternalOpenRouterAlias(entry.modelAlias)
       ? subtitle !== entry.modelAlias
@@ -213,12 +219,14 @@ function mapCatalogEntryToModelItem(entry: CatalogModelEntry): ModelItem {
     name,
     logoSrc: isGlobalAutoModel ? SOURCEWEFT_LOGO_SRC : undefined,
     provider: providerSlug,
-    subtitle: isGlobalAutoModel ? "Global models" : subtitle,
+    subtitle: isGlobalAutoModel ? t("modelSelector.globalModels") : subtitle,
     badges: Array.from(
       new Set([
         ...(entry.badges ?? []),
-        ...(entry.capabilities?.supportsThinking ? ["Thinking"] : []),
-        ...(entry.capabilities?.imageGeneration?.supported ? ["Image"] : []),
+        ...(entry.capabilities?.supportsThinking ? [t("composer.thinking")] : []),
+        ...(entry.capabilities?.imageGeneration?.supported
+          ? [t("modelSelector.type.image")]
+          : []),
       ]),
     ),
     capabilities: entry.capabilities,
@@ -228,17 +236,20 @@ function mapCatalogEntryToModelItem(entry: CatalogModelEntry): ModelItem {
   };
 }
 
-export function createCustomModelItem(input: {
-  byokCredentialId?: string | null;
-  byokModelId?: string | null;
-  capabilities?: ModelThinkingCapabilities | null;
-  modelAlias: string;
-  name?: string;
-  byokCredentialAlias?: string | null;
-  providerLabel: string;
-  providerSlug: string;
-  subtitle?: string;
-}) {
+export function createCustomModelItem(
+  input: {
+    byokCredentialId?: string | null;
+    byokModelId?: string | null;
+    capabilities?: ModelThinkingCapabilities | null;
+    modelAlias: string;
+    name?: string;
+    byokCredentialAlias?: string | null;
+    providerLabel: string;
+    providerSlug: string;
+    subtitle?: string;
+  },
+  t: CanvasT,
+) {
   const modelAlias = input.modelAlias.trim();
   const name = input.name?.trim() || modelAlias;
   const byokCredentialAlias = input.byokCredentialAlias?.trim() || null;
@@ -258,11 +269,13 @@ export function createCustomModelItem(input: {
     modelAlias,
     name,
     provider: input.providerSlug,
-    subtitle: input.subtitle?.trim() || `${input.providerLabel} BYOK`,
+    subtitle:
+      input.subtitle?.trim() ||
+      t("modelSelector.byok.providerBadge", { provider: input.providerLabel }),
     byokCredentialId: input.byokCredentialId ?? null,
     byokCredentialAlias,
     byokModelId: input.byokModelId ?? null,
-    badges: ["BYOK", "Custom"],
+    badges: [t("modelSelector.byokTab"), t("modelSelector.byok.custom")],
     capabilities: input.capabilities ?? undefined,
     availableViaGlobal: false,
     availableViaByokProviders: [input.providerSlug],
@@ -272,11 +285,12 @@ export function createCustomModelItem(input: {
 
 export function mapCatalogKindsToModelItems(
   kinds: CatalogModelKinds,
+  t: CanvasT,
 ): Record<ModelType, ModelItem[]> {
   return {
-    llm: kinds.llm.map(mapCatalogEntryToModelItem),
-    image: kinds.image.map(mapCatalogEntryToModelItem),
-    vision: kinds.vision.map(mapCatalogEntryToModelItem),
+    llm: kinds.llm.map((entry) => mapCatalogEntryToModelItem(entry, t)),
+    image: kinds.image.map((entry) => mapCatalogEntryToModelItem(entry, t)),
+    vision: kinds.vision.map((entry) => mapCatalogEntryToModelItem(entry, t)),
   };
 }
 
@@ -356,24 +370,25 @@ export function findModelItemByAlias(input: {
   );
 }
 
-const modelTypeLabels: Record<ModelType, string> = {
-  image: "Image",
-  llm: "LLM",
-  vision: "Vision",
-};
+function modelTypeLabel(t: CanvasT, type: ModelType) {
+  return t(`modelSelector.type.${type}`);
+}
 
 const CUSTOM_BYOK_PROVIDER_NAME = "custom";
 
-function getByokProviderLabel(providerName: string) {
+function getByokProviderLabel(providerName: string, t: CanvasT) {
   return providerName === CUSTOM_BYOK_PROVIDER_NAME
-    ? "Custom Provider"
+    ? t("modelSelector.byok.customProvider")
     : toProviderLabel(providerName);
 }
 
-function createCustomModelItemFromSelection(input: {
-  selection: ByokModelSelection;
-  type: ModelType;
-}) {
+function createCustomModelItemFromSelection(
+  input: {
+    selection: ByokModelSelection;
+    type: ModelType;
+  },
+  t: CanvasT,
+) {
   if (input.selection.mode !== "byok" || input.selection.source !== "custom") {
     return null;
   }
@@ -381,27 +396,36 @@ function createCustomModelItemFromSelection(input: {
   const providerName = input.selection.providerName?.trim();
   if (!customModelName || !providerName) return null;
 
-  const providerLabel = getByokProviderLabel(providerName);
-  return createCustomModelItem({
-    byokCredentialAlias: input.selection.credentialAlias,
-    byokCredentialId: input.selection.credentialId,
-    byokModelId: input.selection.byokModelId,
-    capabilities: input.selection.capabilities ?? null,
-    modelAlias: customModelName,
-    name: customModelName,
-    providerLabel,
-    providerSlug: normalizeProviderSlug(providerName),
-    subtitle: `${providerLabel} custom ${modelTypeLabels[input.type]} BYOK`,
-  });
+  const providerLabel = getByokProviderLabel(providerName, t);
+  return createCustomModelItem(
+    {
+      byokCredentialAlias: input.selection.credentialAlias,
+      byokCredentialId: input.selection.credentialId,
+      byokModelId: input.selection.byokModelId,
+      capabilities: input.selection.capabilities ?? null,
+      modelAlias: customModelName,
+      name: customModelName,
+      providerLabel,
+      providerSlug: normalizeProviderSlug(providerName),
+      subtitle: t("modelSelector.byok.customModelSubtitle", {
+        provider: providerLabel,
+        type: modelTypeLabel(t, input.type),
+      }),
+    },
+    t,
+  );
 }
 
-export function createCustomModelItemsFromSavedModels(input: {
-  credentials: ByokCredentialItem[];
-  savedModels: ByokSavedModelItem[];
-  providerName: string;
-  type: ModelType;
-}) {
-  const providerLabel = getByokProviderLabel(input.providerName);
+export function createCustomModelItemsFromSavedModels(
+  input: {
+    credentials: ByokCredentialItem[];
+    savedModels: ByokSavedModelItem[];
+    providerName: string;
+    type: ModelType;
+  },
+  t: CanvasT,
+) {
+  const providerLabel = getByokProviderLabel(input.providerName, t);
   const providerSlug = normalizeProviderSlug(input.providerName);
   const seen = new Set<string>();
   const models: ModelItem[] = [];
@@ -420,16 +444,22 @@ export function createCustomModelItemsFromSavedModels(input: {
     if (seen.has(dedupeKey)) continue;
     seen.add(dedupeKey);
     models.push({
-      ...createCustomModelItem({
-        byokCredentialAlias: credential?.credentialAlias ?? null,
-        capabilities:
-          savedModel.capabilities as ModelThinkingCapabilities | null,
-        modelAlias: savedModel.modelName,
-        name: savedModel.displayName,
-        providerLabel,
-        providerSlug,
-        subtitle: `${savedModel.modelName} via ${credential?.credentialAlias ?? providerLabel}`,
-      }),
+      ...createCustomModelItem(
+        {
+          byokCredentialAlias: credential?.credentialAlias ?? null,
+          capabilities:
+            savedModel.capabilities as ModelThinkingCapabilities | null,
+          modelAlias: savedModel.modelName,
+          name: savedModel.displayName,
+          providerLabel,
+          providerSlug,
+          subtitle: t("modelSelector.byok.savedModelSubtitle", {
+            model: savedModel.modelName,
+            credential: credential?.credentialAlias ?? providerLabel,
+          }),
+        },
+        t,
+      ),
       byokModelId: savedModel.id,
       byokCredentialId: savedModel.credentialId,
     });
@@ -437,11 +467,14 @@ export function createCustomModelItemsFromSavedModels(input: {
   return models;
 }
 
-function resolveByokSelectedModelItem(input: {
-  availableModels: Record<ModelType, ModelItem[]>;
-  selection: ByokModelSelection | null | undefined;
-  type: ModelType;
-}) {
+function resolveByokSelectedModelItem(
+  input: {
+    availableModels: Record<ModelType, ModelItem[]>;
+    selection: ByokModelSelection | null | undefined;
+    type: ModelType;
+  },
+  t: CanvasT,
+) {
   const selection = input.selection;
   if (!selection || selection.mode !== "byok") return null;
 
@@ -456,35 +489,50 @@ function resolveByokSelectedModelItem(input: {
     const providerName = selection.providerName?.trim();
     const modelAlias = selection.modelAlias?.trim();
     if (!providerName || !modelAlias) return null;
-    const providerLabel = getByokProviderLabel(providerName);
-    return createCustomModelItem({
-      byokCredentialAlias: selection.credentialAlias,
-      byokCredentialId: selection.credentialId,
-      byokModelId: selection.byokModelId,
-      capabilities: selection.capabilities ?? null,
-      modelAlias,
-      name: modelAlias,
-      providerLabel,
-      providerSlug: normalizeProviderSlug(providerName),
-      subtitle: `${providerLabel} ${modelTypeLabels[input.type]} BYOK`,
-    });
+    const providerLabel = getByokProviderLabel(providerName, t);
+    return createCustomModelItem(
+      {
+        byokCredentialAlias: selection.credentialAlias,
+        byokCredentialId: selection.credentialId,
+        byokModelId: selection.byokModelId,
+        capabilities: selection.capabilities ?? null,
+        modelAlias,
+        name: modelAlias,
+        providerLabel,
+        providerSlug: normalizeProviderSlug(providerName),
+        subtitle: t("modelSelector.byok.selectedModelSubtitle", {
+          provider: providerLabel,
+          type: modelTypeLabel(t, input.type),
+        }),
+      },
+      t,
+    );
   }
 
-  return createCustomModelItemFromSelection({ selection, type: input.type });
+  return createCustomModelItemFromSelection(
+    { selection, type: input.type },
+    t,
+  );
 }
 
-export function resolveSelectedModelsWithByok(input: {
-  availableModels: Record<ModelType, ModelItem[]>;
-  baseSelectedModels: SelectedModels;
-  byokSelections?: Partial<Record<ModelType, ByokModelSelection | null>>;
-}) {
+export function resolveSelectedModelsWithByok(
+  input: {
+    availableModels: Record<ModelType, ModelItem[]>;
+    baseSelectedModels: SelectedModels;
+    byokSelections?: Partial<Record<ModelType, ByokModelSelection | null>>;
+  },
+  t: CanvasT,
+) {
   const nextModels: SelectedModels = { ...input.baseSelectedModels };
   for (const type of ["llm", "image", "vision"] as const) {
-    const model = resolveByokSelectedModelItem({
-      availableModels: input.availableModels,
-      selection: input.byokSelections?.[type],
-      type,
-    });
+    const model = resolveByokSelectedModelItem(
+      {
+        availableModels: input.availableModels,
+        selection: input.byokSelections?.[type],
+        type,
+      },
+      t,
+    );
     if (model) nextModels[type] = model;
   }
   return nextModels;

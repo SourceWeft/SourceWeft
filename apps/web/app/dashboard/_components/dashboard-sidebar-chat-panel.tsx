@@ -319,6 +319,7 @@ function PersonaPickerDialog({
   refreshToken: number;
   workspaceId: string | null;
 }) {
+  const t = useTranslations("dashboardNav.personaPicker");
   const [personas, setPersonas] = useState<Persona[] | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [hasError, setHasError] = useState(false);
@@ -356,7 +357,7 @@ function PersonaPickerDialog({
       await onPick(persona.id);
       onOpenChange(false);
     } catch {
-      toast.error("Could not start the agent chat.");
+      toast.error(t("couldNotStart"));
     } finally {
       setPickingSlug(null);
     }
@@ -378,12 +379,12 @@ function PersonaPickerDialog({
         <span className="flex items-center gap-2 text-sm font-medium">
           <span className="truncate">
             {pickingSlug === persona.id
-              ? `Starting ${persona.name}...`
+              ? t("starting", { name: persona.name })
               : persona.name}
           </span>
           {persona.trust !== "system" ? (
             <span className="shrink-0 rounded-sm border border-border px-1.5 py-px text-[10px] font-normal uppercase tracking-wide text-muted-foreground">
-              Custom
+              {t("custom")}
             </span>
           ) : null}
         </span>
@@ -399,27 +400,29 @@ function PersonaPickerDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>
-            {parentTitle ? "Add sub-agent" : "New agent chat"}
+            {parentTitle ? t("addSubagentTitle") : t("newAgentChatTitle")}
           </DialogTitle>
           <DialogDescription>
             {parentTitle
-              ? `Start a sub-agent conversation under "${parentTitle}". It gets its own thread and shows nested in the list.`
-              : "Pick the agent that will own this conversation. You can keep talking to it in its own thread."}
+              ? t("subagentDescription", { title: parentTitle })
+              : t("defaultDescription")}
           </DialogDescription>
         </DialogHeader>
         <div className="flex max-h-[60vh] flex-col gap-1.5 overflow-y-auto">
           {isLoading && !personas ? (
-            <p className="text-xs text-muted-foreground">Loading agents...</p>
+            <p className="text-xs text-muted-foreground">
+              {t("loadingAgents")}
+            </p>
           ) : null}
           {hasError ? (
             <p className="text-xs text-destructive">
-              Could not load agents. Close and try again.
+              {t("couldNotLoadAgents")}
             </p>
           ) : null}
           {builtIn?.map(renderPersona)}
           {custom && custom.length > 0 ? (
             <p className="mt-2 px-0.5 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-              Your agents
+              {t("yourAgentsLabel")}
             </p>
           ) : null}
           {custom?.map(renderPersona)}
@@ -427,7 +430,7 @@ function PersonaPickerDialog({
         <DialogFooter className="sm:justify-start">
           <Button onClick={onManage} size="sm" type="button" variant="ghost">
             <PenSquare className="size-3.5" />
-            Manage agents...
+            {t("manageAgents")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -619,7 +622,7 @@ function ChatListRow({
                 onSelect={() => onAddSubagent(item.id, item.title)}
               >
                 <Bot className="size-4" />
-                <span>Add sub-agent...</span>
+                <span>{t("chats.addSubagent")}</span>
               </DropdownMenuItem>
             ) : null}
             {nested && onOpenInPanel && parentThreadId ? (
@@ -627,13 +630,13 @@ function ChatListRow({
                 onSelect={() => onOpenInPanel(parentThreadId, item.id)}
               >
                 <PanelRightOpen className="size-4" />
-                <span>Open beside parent</span>
+                <span>{t("chats.openBesideParent")}</span>
               </DropdownMenuItem>
             ) : null}
             {onOpenInNewWindow ? (
               <DropdownMenuItem onSelect={() => onOpenInNewWindow(item.id)}>
                 <ExternalLink className="size-4" />
-                <span>Open in new window</span>
+                <span>{t("chats.openInNewWindow")}</span>
               </DropdownMenuItem>
             ) : null}
             {canArchive ? (

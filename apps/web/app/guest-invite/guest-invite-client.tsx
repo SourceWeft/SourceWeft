@@ -4,6 +4,7 @@ import { CheckIcon, Loader2, LogIn, Users, XIcon } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import * as React from "react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import {
   Card,
@@ -18,7 +19,6 @@ import { workspaceClient } from "../../lib/sdk";
 
 // Where a guest lands once they have accepted and joined the workspace.
 const DASHBOARD_ROUTE = "/dashboard/chat";
-const INVALID_MESSAGE = "This invitation is not valid or has expired";
 
 type AcceptStatus =
   | "loading"
@@ -29,10 +29,12 @@ type AcceptStatus =
 
 export function GuestInviteClient() {
   const router = useRouter();
+  const t = useTranslations("authPages.guestInvite");
   const searchParams = useSearchParams();
   const token = searchParams.get("token");
   const { data: session, isPending: sessionPending } = authClient.useSession();
   const isSignedIn = Boolean(session?.user);
+  const invalidMessage = t("invalidMessage");
 
   const [status, setStatus] = React.useState<AcceptStatus>("loading");
   const [message, setMessage] = React.useState<string | null>(null);
@@ -42,7 +44,7 @@ export function GuestInviteClient() {
   React.useEffect(() => {
     if (!token) {
       setStatus("error");
-      setMessage(INVALID_MESSAGE);
+      setMessage(invalidMessage);
       return;
     }
 
@@ -72,7 +74,7 @@ export function GuestInviteClient() {
         });
         if (cancelled) return;
         setStatus("accepted");
-        toast.success("You have joined the workspace.");
+        toast.success(t("joinedToast"));
         // The backend attaches the guest to the workspace it belongs to; land
         // them in the dashboard where the active workspace resolves.
         void result.workspaceId;
@@ -81,7 +83,7 @@ export function GuestInviteClient() {
       } catch {
         if (cancelled) return;
         setStatus("error");
-        setMessage(INVALID_MESSAGE);
+        setMessage(invalidMessage);
       }
     }
 
@@ -90,7 +92,7 @@ export function GuestInviteClient() {
     return () => {
       cancelled = true;
     };
-  }, [token, sessionPending, isSignedIn, router]);
+  }, [token, sessionPending, isSignedIn, router, invalidMessage, t]);
 
   // Return the guest to this same page after they sign in, preserving the token.
   const signInHref = React.useMemo(() => {
@@ -107,9 +109,9 @@ export function GuestInviteClient() {
           <Logo className="h-10 w-10 rounded-lg" />
         </div>
         <div>
-          <CardTitle className="text-lg">Guest invitation</CardTitle>
+          <CardTitle className="text-lg">{t("title")}</CardTitle>
           <CardDescription className="mt-1">
-            You have been invited to collaborate in a SourceWeft workspace.
+            {t("description")}
           </CardDescription>
         </div>
       </CardHeader>
@@ -117,9 +119,7 @@ export function GuestInviteClient() {
         {status === "loading" || status === "accepting" ? (
           <div className="flex min-h-24 items-center justify-center text-sm text-muted-foreground">
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            {status === "accepting"
-              ? "Accepting invitation..."
-              : "Loading invitation..."}
+            {status === "accepting" ? t("accepting") : t("loading")}
           </div>
         ) : status === "signed-out" ? (
           <>
@@ -129,10 +129,10 @@ export function GuestInviteClient() {
               </div>
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-medium text-foreground">
-                  Collaborate as a guest
+                  {t("collaborateAsGuest")}
                 </div>
                 <div className="truncate text-xs text-muted-foreground">
-                  Sign in to accept your invitation.
+                  {t("signInToAcceptDescription")}
                 </div>
               </div>
             </div>
@@ -142,19 +142,19 @@ export function GuestInviteClient() {
               type="button"
             >
               <LogIn />
-              Sign in to accept
+              {t("signInToAccept")}
             </Button>
           </>
         ) : status === "accepted" ? (
           <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm text-foreground">
             <CheckIcon className="h-4 w-4" />
-            Invitation accepted. Taking you to your workspace...
+            {t("acceptedRedirecting")}
           </div>
         ) : (
           <>
             <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
               <XIcon className="mt-0.5 h-4 w-4 shrink-0" />
-              <span>{message ?? INVALID_MESSAGE}</span>
+              <span>{message ?? invalidMessage}</span>
             </div>
             <Button
               className="w-full"
@@ -165,7 +165,7 @@ export function GuestInviteClient() {
               type="button"
               variant="outline"
             >
-              {isSignedIn ? "Go to dashboard" : "Back to home"}
+              {isSignedIn ? t("goToDashboard") : t("backToHome")}
             </Button>
           </>
         )}

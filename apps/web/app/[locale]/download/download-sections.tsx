@@ -1,7 +1,6 @@
 "use client";
 
 import Image from "next/image";
-import Link from "next/link";
 import type { ComponentType } from "react";
 import {
   ArrowRight,
@@ -16,8 +15,10 @@ import {
   Smartphone,
   Terminal,
 } from "lucide-react";
-import { AppleIcon } from "../_components/brand-icons";
+import { useTranslations } from "next-intl";
+import { AppleIcon } from "../../_components/brand-icons";
 
+import { LocaleLink } from "../_components/locale-link";
 import {
   GITHUB_RELEASES_URL,
   findArtifact,
@@ -25,11 +26,11 @@ import {
   type DownloadArtifact,
   type DownloadChannelManifest,
   type DownloadPlatform,
-} from "../../lib/download-channels";
+} from "../../../lib/download-channels";
 import { CopyButton } from "./copy-button";
 import {
   DESKTOP_SCREENS,
-  DOWNLOAD_FAQ_ITEMS,
+  DOWNLOAD_FAQ_KEYS,
   MOBILE_PLATFORMS,
   PLATFORM_DISPLAY,
   SELF_HOST_GUIDE_URL,
@@ -78,6 +79,7 @@ function SectionHeading({
 }
 
 function ChecksumRow({ artifact }: { artifact: DownloadArtifact }) {
+  const t = useTranslations("download.allDownloads");
   return (
     <div className="flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
       <span className="shrink-0">SHA-256</span>
@@ -87,7 +89,7 @@ function ChecksumRow({ artifact }: { artifact: DownloadArtifact }) {
       >
         {artifact.sha256.slice(0, 16)}…
       </code>
-      <CopyButton value={artifact.sha256} label="Copy SHA-256 checksum" />
+      <CopyButton value={artifact.sha256} label={t("copyChecksum")} />
     </div>
   );
 }
@@ -99,6 +101,7 @@ function ArtifactRow({
   artifact: DownloadArtifact;
   display: PlatformDisplay;
 }) {
+  const t = useTranslations("download.allDownloads");
   return (
     <div className="rounded-xl border border-zinc-100 bg-zinc-50 p-4 dark:border-white/[0.08] dark:bg-white/[0.03]">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -120,7 +123,7 @@ function ArtifactRow({
           className={primaryButtonClassName}
         >
           <Download className="size-4" />
-          Download
+          {t("download")}
         </a>
       </div>
       <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
@@ -131,7 +134,7 @@ function ArtifactRow({
           rel="noopener noreferrer"
           className={mutedLinkClassName}
         >
-          GitHub mirror
+          {t("githubMirror")}
           <ExternalLink className="size-3" />
         </a>
       </div>
@@ -146,6 +149,7 @@ function PlatformCard({
   display: PlatformDisplay;
   manifest: DownloadChannelManifest;
 }) {
+  const t = useTranslations("download");
   const Icon = PLATFORM_ICONS[display.id];
   const artifacts = display.archOrder.map((arch) => ({
     arch,
@@ -167,7 +171,7 @@ function PlatformCard({
             {display.label}
           </h3>
           <p className="text-xs text-zinc-500 dark:text-zinc-400">
-            {display.requirement}
+            {t(`platforms.${display.id}.requirement`)}
           </p>
         </div>
       </div>
@@ -182,16 +186,13 @@ function PlatformCard({
                 className="flex items-center justify-between rounded-xl border border-dashed border-zinc-200 px-4 py-3 text-sm text-zinc-400 dark:border-white/10 dark:text-zinc-500"
               >
                 <span>{display.archLabels[arch]}</span>
-                <span className="text-xs">Not available yet</span>
+                <span className="text-xs">{t("allDownloads.notAvailable")}</span>
               </div>
             ),
           )
         ) : (
           <div className="flex flex-1 flex-col justify-between rounded-xl border border-dashed border-zinc-200 p-4 text-sm text-zinc-500 dark:border-white/10 dark:text-zinc-400">
-            <p>
-              {display.label} builds are not published yet. Use the web app in
-              your browser, or watch this page for the first release.
-            </p>
+            <p>{t("allDownloads.platformUnavailable", { platform: display.label })}</p>
           </div>
         )}
       </div>
@@ -204,16 +205,20 @@ export function AllDownloadsSection({
 }: {
   manifest: DownloadChannelManifest | null;
 }) {
+  const t = useTranslations("download");
   return (
     <section id="all-downloads" className="scroll-mt-20 py-20">
       <div className="mx-auto max-w-6xl px-6">
         <SectionHeading
-          eyebrow="All downloads"
-          title="Every build, with its checksum."
+          eyebrow={t("allDownloads.eyebrow")}
+          title={t("allDownloads.title")}
           description={
             manifest
-              ? `Version ${manifest.version} from the ${manifest.channel} channel. Compare the SHA-256 before installing an unsigned build.`
-              : "Desktop installers are published with every tagged release."
+              ? t("allDownloads.descriptionWithVersion", {
+                  version: manifest.version,
+                  channel: manifest.channel,
+                })
+              : t("allDownloads.descriptionFallback")
           }
         />
         {manifest ? (
@@ -229,9 +234,7 @@ export function AllDownloadsSection({
         ) : (
           <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-white/[0.08] dark:bg-zinc-900/50">
             <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-              The download channel has not been promoted yet. macOS and Windows
-              installers for the latest tagged release are available from GitHub
-              Releases, together with the self-hosting archive.
+              {t("allDownloads.channelNotPromoted")}
             </p>
             <a
               href={GITHUB_RELEASES_URL}
@@ -239,7 +242,7 @@ export function AllDownloadsSection({
               rel="noopener noreferrer"
               className={`mt-5 ${primaryButtonClassName}`}
             >
-              View releases on GitHub
+              {t("cta.viewReleasesGithub")}
               <ExternalLink className="size-4" />
             </a>
           </div>
@@ -264,6 +267,7 @@ function EntryCard({
   description: string;
   actions: EntryAction[];
 }) {
+  const t = useTranslations("download.everywhere");
   return (
     <article className="flex flex-col rounded-2xl border border-zinc-200 bg-zinc-50 p-6 dark:border-white/[0.08] dark:bg-zinc-900/40">
       <div className="mb-5 flex h-10 w-10 items-center justify-center rounded-xl border border-zinc-200 bg-white text-zinc-700 dark:border-white/10 dark:bg-zinc-800 dark:text-zinc-200">
@@ -282,7 +286,7 @@ function EntryCard({
               key={action.label}
               className="inline-flex items-center rounded-lg border border-dashed border-zinc-300 px-3 py-1.5 text-xs text-zinc-500 dark:border-white/15 dark:text-zinc-400"
             >
-              {action.label} · Coming soon
+              {t("comingSoonLabel", { name: action.label })}
             </span>
           ) : action.external ? (
             <a
@@ -296,14 +300,14 @@ function EntryCard({
               <ExternalLink className="size-3.5" />
             </a>
           ) : (
-            <Link
+            <LocaleLink
               key={action.label}
               href={action.href}
               className={secondaryButtonClassName}
             >
               {action.label}
               <ArrowRight className="size-3.5" />
-            </Link>
+            </LocaleLink>
           ),
         )}
       </div>
@@ -322,6 +326,7 @@ export function MobileSection({
   webHref: string;
   webLabel: string;
 }) {
+  const t = useTranslations("download");
   const anyStoreLive = MOBILE_PLATFORMS.some((entry) => STORE_LINKS[entry.id]);
   return (
     <section
@@ -330,12 +335,12 @@ export function MobileSection({
     >
       <div className="mx-auto max-w-6xl px-6">
         <SectionHeading
-          eyebrow="Mobile apps"
-          title="SourceWeft in your pocket."
+          eyebrow={t("mobile.eyebrow")}
+          title={t("mobile.title")}
           description={
             anyStoreLive
-              ? "Read, ask, and review your sources on the go. Signed in to the same workspaces as desktop and web."
-              : "Read, ask, and review your sources on the go. The iOS and Android apps are in preparation; until the store listings go live, the web app works in Safari and Chrome on any phone."
+              ? t("mobile.descriptionLive")
+              : t("mobile.descriptionComingSoon")
           }
         />
         <div className="grid gap-4 md:grid-cols-2">
@@ -356,7 +361,7 @@ export function MobileSection({
                       {entry.label}
                     </h3>
                     <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                      {entry.devices} · {entry.store}
+                      {t(`mobile.${entry.id}.devices`)} · {entry.store}
                     </p>
                   </div>
                 </div>
@@ -369,21 +374,24 @@ export function MobileSection({
                       className={primaryButtonClassName}
                     >
                       <Download className="size-4" />
-                      {entry.storeAction}
+                      {t(`mobile.${entry.id}.storeAction`)}
                     </a>
                   ) : (
                     <>
                       <div className="flex items-center justify-between rounded-xl border border-dashed border-zinc-200 px-4 py-3 text-sm text-zinc-500 dark:border-white/10 dark:text-zinc-400">
                         <span>{entry.store}</span>
-                        <span className="text-xs">Coming soon</span>
+                        <span className="text-xs">{t("comingSoon")}</span>
                       </div>
-                      <Link
+                      <LocaleLink
                         href={webHref}
                         className={`${secondaryButtonClassName} justify-center`}
                       >
-                        {webLabel} on {entry.label}
+                        {t("mobile.openWebOn", {
+                          webLabel,
+                          platform: entry.label,
+                        })}
                         <ArrowRight className="size-3.5" />
-                      </Link>
+                      </LocaleLink>
                     </>
                   )}
                 </div>
@@ -403,25 +411,26 @@ export function EverywhereSection({
   webHref: string;
   webLabel: string;
 }) {
+  const t = useTranslations("download.everywhere");
   return (
     <section className="border-t border-zinc-200 py-20 dark:border-white/[0.06]">
       <div className="mx-auto max-w-6xl px-6">
         <SectionHeading
-          eyebrow="Everywhere you work"
-          title="Same notebook, every surface."
-          description="Desktop and mobile are two entry points. Your workspaces stay in sync with the web app, the browser extension, and your own self-hosted instance."
+          eyebrow={t("eyebrow")}
+          title={t("title")}
+          description={t("description")}
         />
         <div className="grid gap-4 md:grid-cols-3">
           <EntryCard
             icon={Globe}
-            title="Web app"
-            description="No install required. Open SourceWeft in any modern browser and pick up where you left off."
+            title={t("webApp.title")}
+            description={t("webApp.description")}
             actions={[{ label: webLabel, href: webHref }]}
           />
           <EntryCard
             icon={Puzzle}
-            title="Browser extension"
-            description="Capture pages and clips into your notebook straight from Chrome or Edge."
+            title={t("browserExtension.title")}
+            description={t("browserExtension.description")}
             actions={[
               storeAction("Chrome", STORE_LINKS.chrome),
               storeAction("Edge", STORE_LINKS.edge),
@@ -429,15 +438,15 @@ export function EverywhereSection({
           />
           <EntryCard
             icon={Container}
-            title="Self-host"
-            description="Run SourceWeft on your own infrastructure with the Docker Compose bundle shipped with every release."
+            title={t("selfHost.title")}
+            description={t("selfHost.description")}
             actions={[
               {
-                label: "Docker guide",
+                label: t("selfHost.dockerGuide"),
                 href: SELF_HOST_GUIDE_URL,
                 external: true,
               },
-              { label: "Releases", href: GITHUB_RELEASES_URL, external: true },
+              { label: t("selfHost.releases"), href: GITHUB_RELEASES_URL, external: true },
             ]}
           />
         </div>
@@ -451,6 +460,7 @@ export function BeforeInstallSection({
 }: {
   manifest: DownloadChannelManifest | null;
 }) {
+  const t = useTranslations("download");
   const artifacts = manifest?.artifacts ?? [];
   const unsigned =
     artifacts.length === 0 ||
@@ -471,10 +481,10 @@ export function BeforeInstallSection({
       <div className="mx-auto grid max-w-6xl gap-10 px-6 lg:grid-cols-2">
         <div>
           <p className="mb-3 text-xs font-medium uppercase tracking-widest text-zinc-400 dark:text-zinc-600">
-            Before you install
+            {t("beforeInstall.eyebrow")}
           </p>
           <h2 className="text-3xl font-bold tracking-tight text-zinc-950 dark:text-white">
-            System requirements
+            {t("beforeInstall.title")}
           </h2>
           <ul className="mt-7 space-y-3">
             {PLATFORM_DISPLAY.map((display) => (
@@ -487,7 +497,7 @@ export function BeforeInstallSection({
                   <span className="font-medium text-zinc-900 dark:text-white">
                     {display.label}
                   </span>{" "}
-                  · {display.requirement}
+                  · {t(`platforms.${display.id}.requirement`)}
                 </span>
               </li>
             ))}
@@ -495,21 +505,25 @@ export function BeforeInstallSection({
               <Check className="mt-1 size-4 shrink-0 text-emerald-500" />
               <span>
                 <span className="font-medium text-zinc-900 dark:text-white">
-                  Account
+                  {t("beforeInstall.account")}
                 </span>{" "}
-                · the desktop app signs in with your existing SourceWeft account
+                · {t("beforeInstall.accountDescription")}
               </span>
             </li>
             <li className="flex gap-3 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
               <Check className="mt-1 size-4 shrink-0 text-emerald-500" />
               <span>
                 <span className="font-medium text-zinc-900 dark:text-white">
-                  Local device execution
+                  {t("beforeInstall.localExecution")}
                 </span>{" "}
                 ·{" "}
                 {localExecutionPlatforms.length > 0
-                  ? `${localExecutionPlatforms.join(" and ")} only for now`
-                  : "macOS first; Windows support is in progress"}
+                  ? t("beforeInstall.localExecutionAvailable", {
+                      platforms: localExecutionPlatforms.join(
+                        t("beforeInstall.listJoiner"),
+                      ),
+                    })
+                  : t("beforeInstall.localExecutionFallback")}
               </span>
             </li>
           </ul>
@@ -518,17 +532,19 @@ export function BeforeInstallSection({
         <div className="rounded-2xl border border-zinc-200 bg-white p-6 dark:border-white/[0.08] dark:bg-zinc-900/50">
           <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-widest text-zinc-400 dark:text-zinc-600">
             <ShieldAlert className="size-4 text-amber-500" />
-            {unsigned ? "Unsigned builds" : "Verifying your download"}
+            {unsigned
+              ? t("beforeInstall.unsignedEyebrow")
+              : t("beforeInstall.verifyingEyebrow")}
           </div>
           <h3 className="mt-3 text-2xl font-semibold tracking-tight text-zinc-950 dark:text-white">
             {unsigned
-              ? "Current installers are not code-signed yet."
-              : "Check the checksum before you install."}
+              ? t("beforeInstall.unsignedTitle")
+              : t("beforeInstall.verifyingTitle")}
           </h3>
           <p className="mt-3 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
             {unsigned
-              ? "Your operating system will warn about an unidentified developer. Verify the SHA-256 on this page, then allow the app once."
-              : "Every installer on this page lists its SHA-256 so you can confirm the file you downloaded is the one we published."}
+              ? t("beforeInstall.unsignedBody")
+              : t("beforeInstall.verifyingBody")}
           </p>
           {unsigned ? (
             <ul className="mt-5 space-y-4">
@@ -536,19 +552,18 @@ export function BeforeInstallSection({
                 <span className="font-medium text-zinc-900 dark:text-white">
                   macOS
                 </span>
-                : Control-click SourceWeft in Applications, choose Open, then
-                confirm in the dialog.
+                {t("beforeInstall.macosInstruction")}
               </li>
               <li className="border-l border-zinc-200 pl-4 text-sm leading-6 text-zinc-600 dark:border-white/10 dark:text-zinc-400">
                 <span className="font-medium text-zinc-900 dark:text-white">
                   Windows
                 </span>
-                : when SmartScreen appears, choose More info, then Run anyway.
+                {t("beforeInstall.windowsInstruction")}
               </li>
             </ul>
           ) : null}
           <p className="mt-5 text-xs font-medium uppercase tracking-widest text-zinc-400 dark:text-zinc-600">
-            Verify the checksum
+            {t("beforeInstall.verifyChecksum")}
           </p>
           <pre className="mt-2 overflow-x-auto rounded-lg bg-zinc-950 p-3 font-mono text-xs leading-6 text-zinc-200 dark:bg-black/40">
             {
@@ -562,13 +577,14 @@ export function BeforeInstallSection({
 }
 
 export function DesktopScreensSection() {
+  const t = useTranslations("download.screens");
   return (
     <section className="border-t border-zinc-200 py-20 dark:border-white/[0.06]">
       <div className="mx-auto max-w-6xl px-6">
         <SectionHeading
-          eyebrow="A closer look"
-          title="What you get on the desktop."
-          description="Captured from the macOS app. The same workspaces as the web, plus the parts that only make sense next to your files and your machine."
+          eyebrow={t("eyebrow")}
+          title={t("title")}
+          description={t("description")}
         />
         <div className="grid gap-6 md:grid-cols-2">
           {DESKTOP_SCREENS.map((screen) => (
@@ -579,7 +595,7 @@ export function DesktopScreensSection() {
               <div className="border-b border-zinc-200 bg-white dark:border-white/[0.08] dark:bg-zinc-900">
                 <Image
                   src={`/download/desktop-${screen.id}-light.png`}
-                  alt={screen.title}
+                  alt={t(`items.${screen.id}.title`)}
                   width={1440}
                   height={900}
                   sizes="(min-width: 768px) 560px, 100vw"
@@ -596,10 +612,10 @@ export function DesktopScreensSection() {
               </div>
               <figcaption className="p-5">
                 <h3 className="text-base font-semibold text-zinc-950 dark:text-white">
-                  {screen.title}
+                  {t(`items.${screen.id}.title`)}
                 </h3>
                 <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-                  {screen.caption}
+                  {t(`items.${screen.id}.caption`)}
                 </p>
               </figcaption>
             </figure>
@@ -611,21 +627,22 @@ export function DesktopScreensSection() {
 }
 
 export function DownloadFaqSection() {
+  const t = useTranslations("download.faq");
   return (
     <section className="border-t border-zinc-200 py-20 dark:border-white/[0.06]">
       <div className="mx-auto max-w-6xl px-6">
-        <SectionHeading eyebrow="FAQ" title="Download and install basics" />
+        <SectionHeading eyebrow={t("eyebrow")} title={t("title")} />
         <div className="grid gap-4 md:grid-cols-2">
-          {DOWNLOAD_FAQ_ITEMS.map((item) => (
+          {DOWNLOAD_FAQ_KEYS.map((key) => (
             <article
-              key={item.question}
+              key={key}
               className="rounded-2xl border border-zinc-200 bg-white p-5 dark:border-white/[0.08] dark:bg-zinc-900/50"
             >
               <h3 className="text-base font-semibold text-zinc-950 dark:text-white">
-                {item.question}
+                {t(`items.${key}.question`)}
               </h3>
               <p className="mt-3 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-                {item.answer}
+                {t(`items.${key}.answer`)}
               </p>
             </article>
           ))}

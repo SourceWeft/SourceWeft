@@ -624,7 +624,7 @@ export function useThreadStreamAction({
               streamToolCallsById.set(toolId, {
                 ...toolCall,
                 status: "error",
-                error: toolCall.error ?? "Tool execution failed.",
+                error: toolCall.error ?? t("toolExecutionFailed"),
               });
             }
           }

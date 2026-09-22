@@ -2,8 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { Check, Copy } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 export function CopyButton({ value, label }: { value: string; label: string }) {
+  const t = useTranslations("download.copyButton");
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -15,8 +17,8 @@ export function CopyButton({ value, label }: { value: string; label: string }) {
   return (
     <button
       type="button"
-      aria-label={copied ? "Copied" : label}
-      title={copied ? "Copied" : label}
+      aria-label={copied ? t("copied") : label}
+      title={copied ? t("copied") : label}
       onClick={() => {
         void navigator.clipboard?.writeText(value).then(() => setCopied(true));
       }}

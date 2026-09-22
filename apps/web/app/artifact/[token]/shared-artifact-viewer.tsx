@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Download, Maximize2, X } from "lucide-react";
+import { useTranslations } from "next-intl";
 import {
   resolveArtifactPreview,
   type ArtifactPreviewContext,
@@ -34,11 +35,12 @@ export function SharedArtifactViewer({
 }: {
   artifact: SharedArtifact;
 }) {
+  const t = useTranslations("artifactShare");
   const stageRef = useRef<HTMLDivElement>(null);
   const [nativeFullscreen, setNativeFullscreen] = useState(false);
   const [overlayFullscreen, setOverlayFullscreen] = useState(false);
   const immersive = nativeFullscreen || overlayFullscreen;
-  const title = artifact.title || "Shared artifact";
+  const title = artifact.title || t("fallbackTitle");
 
   // Resolve the artifact's own preview UI from the capability registry — the
   // same pluggable path the in-app panel uses, so each type's custom UI lives in
@@ -148,11 +150,11 @@ export function SharedArtifactViewer({
       </div>
     ) : artifact.fileUrl ? (
       <div className="flex h-full items-center justify-center p-8 text-center text-sm text-muted-foreground">
-        This file can’t be previewed in the browser — use Download above.
+        {t("noBrowserPreview")}
       </div>
     ) : (
       <div className="flex h-full items-center justify-center p-8 text-sm text-muted-foreground">
-        Nothing to preview.
+        {t("nothingToPreview")}
       </div>
     ));
 
@@ -169,11 +171,11 @@ export function SharedArtifactViewer({
             <button
               className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               onClick={enterFullscreen}
-              title="Fullscreen"
+              title={t("fullscreen")}
               type="button"
             >
               <Maximize2 className="size-3.5" />
-              Fullscreen
+              {t("fullscreen")}
             </button>
           ) : null}
           {artifact.downloadUrl && !capabilityOwnsDownload ? (
@@ -181,14 +183,14 @@ export function SharedArtifactViewer({
               className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               href={artifact.downloadUrl}
               rel="noopener"
-              title="Download"
+              title={t("download")}
             >
               <Download className="size-3.5" />
-              Download
+              {t("download")}
             </a>
           ) : null}
           <span className="text-xs text-muted-foreground">
-            {artifact.viewCount} {artifact.viewCount === 1 ? "view" : "views"}
+            {t("viewCount", { count: artifact.viewCount })}
           </span>
         </div>
       </header>
@@ -210,11 +212,11 @@ export function SharedArtifactViewer({
           <button
             className="absolute left-3 top-3 z-20 grid size-9 place-items-center rounded-full bg-black/25 text-white/90 backdrop-blur-sm transition hover:bg-black/45"
             onClick={exitFullscreen}
-            title="Exit fullscreen (Esc)"
+            title={t("exitFullscreenEsc")}
             type="button"
           >
             <X className="size-4" />
-            <span className="sr-only">Exit fullscreen</span>
+            <span className="sr-only">{t("exitFullscreen")}</span>
           </button>
         ) : null}
         {/* Fill via absolute inset, not `h-full`: an abs box takes the stage's
@@ -232,7 +234,11 @@ export function SharedArtifactViewer({
           href="/"
           rel="noopener"
         >
-          Made with <span className="font-medium">SourceWeft</span>
+          {t.rich("madeWith", {
+            brand: (chunks) => (
+              <span className="font-medium">{chunks}</span>
+            ),
+          })}
         </Link>
       </footer>
     </main>

@@ -11,6 +11,7 @@ import { format } from "date-fns"
 import { CalendarIcon, Check, ChevronDownIcon, Copy } from "lucide-react"
 import { type ComponentType, type ReactNode, useRef, useState } from "react"
 import { toast } from "sonner"
+import { useTranslations } from "next-intl"
 
 import { buttonVariants } from "@sourceweft/ui-web/components/ui/button"
 import { Calendar } from "@sourceweft/ui-web/components/ui/calendar"
@@ -164,6 +165,7 @@ export function AdditionalField({
   isPending,
   optionalLabel
 }: AdditionalFieldProps) {
+  const t = useTranslations("authPages.additionalField")
   const field =
     optionalLabel && !configuredField.required
       ? {
@@ -387,7 +389,7 @@ export function AdditionalField({
           />
 
           <ComboboxContent>
-            <ComboboxEmpty>No items found.</ComboboxEmpty>
+            <ComboboxEmpty>{t("noItemsFound")}</ComboboxEmpty>
 
             <ComboboxList>
               {(option) => (

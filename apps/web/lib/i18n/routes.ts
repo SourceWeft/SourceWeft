@@ -21,6 +21,7 @@ const LOCALIZED_PREFIXES: readonly string[] = [
   "/blog",
   "/mcp",
   "/skills",
+  "/download",
 ];
 
 /** True when `bare` (a locale-stripped pathname) belongs to the localized marketing tree. */

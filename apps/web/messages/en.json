@@ -811,6 +811,19 @@
       "cancel": "Cancel",
       "back": "Back",
       "observe": "Observe"
+    },
+    "personaPicker": {
+      "couldNotStart": "Could not start the agent chat.",
+      "starting": "Starting {name}...",
+      "custom": "Custom",
+      "addSubagentTitle": "Add sub-agent",
+      "newAgentChatTitle": "New agent chat",
+      "subagentDescription": "Start a sub-agent conversation under \"{title}\". It gets its own thread and shows nested in the list.",
+      "defaultDescription": "Pick the agent that will own this conversation. You can keep talking to it in its own thread.",
+      "loadingAgents": "Loading agents...",
+      "couldNotLoadAgents": "Could not load agents. Close and try again.",
+      "yourAgentsLabel": "Your agents",
+      "manageAgents": "Manage agents..."
     }
   },
   "dashboardSettings": {
@@ -1018,6 +1031,58 @@
       "copyDesktopNoInfo": "SourceWeft desktop {version}",
       "copyWebWithDate": "SourceWeft web build {sha} ({date})",
       "copyWebNoDate": "SourceWeft web build {sha}"
+    },
+    "desktopUpdate": {
+      "title": "Software update",
+      "description": "Settings apply to this computer’s current OS user, across SourceWeft accounts.",
+      "channel": "Update channel",
+      "channelStable": "Stable",
+      "channelPreview": "Preview + stable",
+      "channelPreviewHint": "Includes release candidates and stable releases. Preview versions may be less reliable.",
+      "autoCheck": "Check automatically",
+      "autoDownload": "Download automatically",
+      "autoDownloadHint": "Downloads run while the app is open. Installation always needs your confirmation.",
+      "loading": "Loading update settings…",
+      "statusWithVersion": "{status} · {version}",
+      "downloaded": "{size} MiB downloaded",
+      "lastChecked": "Last checked: {date}",
+      "check": "Check for updates",
+      "download": "Download update",
+      "install": "Install and restart",
+      "cancelDownload": "Cancel download",
+      "snooze": "Remind me tomorrow",
+      "status": {
+        "idle": "Ready to check",
+        "checking": "Checking for updates…",
+        "upToDate": "You are up to date",
+        "waitingForStable": "Waiting for a newer stable release; your app will not be downgraded",
+        "available": "An update is available",
+        "downloading": "Downloading in the background…",
+        "verifying": "Verifying update…",
+        "ready": "Ready to install",
+        "preparing": "Saving your work…",
+        "waitingForIdle": "Waiting for local work to finish…",
+        "installing": "Installing…",
+        "distributionPaused": "Updates paused by the publisher",
+        "withdrawn": "This update was withdrawn",
+        "channelUnavailable": "No update has been published to this channel",
+        "failed": "Update could not be completed"
+      },
+      "downloadAction": "Download",
+      "toastReadyTitle": "Update ready",
+      "toastReadyDescription": "SourceWeft {version} is ready to install.",
+      "toastAvailableTitle": "Update available",
+      "toastAvailableDescription": "SourceWeft {version} is available.",
+      "preparingDialogLabel": "Preparing software update",
+      "preparingTitle": "Preparing your update",
+      "preparingDescription": "Saving drafts and waiting for local work to finish. SourceWeft will restart when it is safe.",
+      "cancelInstallation": "Cancel installation",
+      "errors": {
+        "unsavedChanges": "Save or finish your pending settings changes before installing an update.",
+        "embeddedNotReady": "An embedded conversation is not ready to save.",
+        "draftSavingUnavailable": "Draft saving is unavailable.",
+        "connectionFailed": "Software update connection failed: {error}"
+      }
     }
   },
   "dashboardSkills": {
@@ -1359,8 +1424,16 @@
     "subagent": {
       "srConversation": "Sub-agent conversation",
       "fallbackTitle": "Sub-agent",
-      "parentChatFallback": "Parent chat"
-    }
+      "parentChatFallback": "Parent chat",
+      "switchTitle": "Switch sub-agent",
+      "openInNewWindow": "Open in new window",
+      "closeSubagent": "Close sub-agent",
+      "iframeTitle": "Sub-agent: {title}"
+    },
+    "workspaceFallback": "Workspace",
+    "defaultWorkspaceName": "Workspace {number}",
+    "switchWorkspaceFailed": "Failed to switch workspace.",
+    "toolExecutionFailed": "Tool execution failed."
   },
   "dashboardChatCanvas": {
     "header": {
@@ -1371,7 +1444,9 @@
       "showHubWindow": "Show Hub window",
       "hideSources": "Hide sources",
       "showSources": "Show sources",
-      "openHub": "Open Hub"
+      "openHub": "Open Hub",
+      "backToThread": "Back to {title}",
+      "subagents": "Sub-agents"
     },
     "modelSelector": {
       "type": {
@@ -1421,8 +1496,15 @@
         "getStartedAddModel": "Add a model with this provider to get started.",
         "getStartedSaveKey": "Save an API key for this provider to get started.",
         "noModelsMatchSearch": "No models match this search.",
-        "noSavedModels": "No {type} models have been saved for {provider} yet."
-      }
+        "noSavedModels": "No {type} models have been saved for {provider} yet.",
+        "customModelSubtitle": "{provider} custom {type} BYOK",
+        "savedModelSubtitle": "{model} via {credential}",
+        "selectedModelSubtitle": "{provider} {type} BYOK",
+        "providerBadge": "{provider} BYOK",
+        "newModelSubtitle": "{model} via {provider} BYOK"
+      },
+      "globalModels": "Global models",
+      "autoDefault": "Auto (Default)"
     },
     "byokDialog": {
       "customProvider": "Custom Provider",
@@ -1456,7 +1538,8 @@
       "openPreview": "Open preview: {value}",
       "subagent": "Sub-agent",
       "yes": "Yes",
-      "no": "No"
+      "no": "No",
+      "openInNewWindow": "Open in new window"
     },
     "emptyState": {
       "title": "What would you like to work on?",
@@ -1664,7 +1747,14 @@
       "locationWorkfile": "Workfile",
       "locationSandboxFile": "sandbox file",
       "wrote": "Wrote {location}: {name}",
-      "edited": "Edited {location}: {name}"
+      "edited": "Edited {location}: {name}",
+      "mutationPreview": {
+        "openWorkfile": "Open Workfile",
+        "lineCount": "{count, plural, one {# line} other {# lines}}",
+        "replacementCount": "{count, plural, one {# replacement} other {# replacements}}",
+        "diffLabel": "{name} diff",
+        "previewTruncated": "Preview truncated to {count, number} characters."
+      }
     },
     "duration": {
       "thoughtFor": "Thought for {duration}",
@@ -1920,6 +2010,17 @@
       "referencedPages": "Referenced web pages",
       "expand": "Expand referenced web pages",
       "collapse": "Collapse referenced web pages"
+    },
+    "draftFiles": {
+      "loadingLocation": "Loading file location…",
+      "cloudTitle": "Conversation cloud files",
+      "cloudDescription": "Files you upload and create after starting this conversation will be saved here.",
+      "offline": "This computer is offline. Your folder selection is preserved.",
+      "connectToBrowse": "Connect to this computer to browse its files.",
+      "workingDirectory": "Working directory",
+      "conversationFolder": "Conversation folder",
+      "autoFolderHint": "An independent folder will be created automatically on this computer when the conversation starts using files.",
+      "authorizeHint": "To authorize another folder, open SW on this computer. You can select an already authorized folder here."
     }
   },
   "dashboardConnectors": {
@@ -4150,5 +4251,377 @@
       "notice": "GitHub rate limit reached — resumes around {time}",
       "noticeUnknown": "GitHub rate limit reached — the import resumes shortly"
     }
+  },
+  "dashboardPersonas": {
+    "newAgentFrom": "New agent from {name}",
+    "editTitle": "Edit {name}",
+    "giveNameAndInstructions": "Give the agent a name and instructions.",
+    "agentUpdated": "Agent updated",
+    "agentCreated": "Agent created",
+    "couldNotSaveAgent": "Could not save the agent.",
+    "removedAgent": "Removed {name}",
+    "couldNotRemoveAgent": "Could not remove the agent.",
+    "yourAgents": "Your agents",
+    "yourAgentsDescription": "Agents you author here can own conversations like the built-in ones. Each starts as a copy of another agent.",
+    "loadingAgents": "Loading agents...",
+    "couldNotLoadAgents": "Could not load agents. Close and try again.",
+    "noCustomAgents": "No custom agents yet. Start from a built-in one.",
+    "noDescription": "No description",
+    "fromSource": "From {name}",
+    "editButtonTitle": "Edit",
+    "duplicateButtonTitle": "Duplicate",
+    "duplicateSr": "Duplicate {name}",
+    "remove": "Remove",
+    "removeSr": "Remove {name}",
+    "newAgentFromEllipsis": "New agent from...",
+    "startFromAgent": "Start from an agent",
+    "startFromAgentDescription": "The copy keeps the source’s instructions, model, and tools until you change them.",
+    "back": "Back",
+    "editDialogDescription": "Name, instructions, model, and the tools this agent may use.",
+    "nameLabel": "Name",
+    "descriptionLabel": "Description",
+    "instructionsLabel": "Instructions",
+    "modelLabel": "Model",
+    "workspaceDefault": "Workspace default",
+    "readOnlyLabel": "Read-only: the agent can read sources and files but never write, run, or publish",
+    "toolsLegend": "Tools",
+    "everyToolLabel": "Every tool the workspace offers",
+    "cancel": "Cancel",
+    "saving": "Saving...",
+    "saveChanges": "Save changes",
+    "createAgent": "Create agent",
+    "removeConfirmTitle": "Remove {name}?",
+    "removeConfirmDescription": "Conversations already started with this agent keep their history, but nobody can start a new one with it."
+  },
+  "authPages": {
+    "mobileLogin": {
+      "signIn": {
+        "description": "Do your best work with SourceWeft",
+        "submit": "Sign in",
+        "alternatePrompt": "New to SourceWeft?",
+        "alternateAction": "Create account"
+      },
+      "signUp": {
+        "description": "Start doing your best work with SourceWeft",
+        "submit": "Create account",
+        "alternateAction": "Sign in"
+      },
+      "continueWithGoogle": "Continue with Google",
+      "continueWithApple": "Continue with Apple",
+      "or": "OR",
+      "namePlaceholder": "Full name",
+      "emailPlaceholder": "Personal or work email",
+      "appleComingSoon": "Apple sign-in is coming soon.",
+      "termsNotice": "By continuing, you agree to SourceWeft's <terms>Terms</terms> and acknowledge our <privacy>Privacy Policy</privacy>.",
+      "signUpSuccessNoSession": "Account created, but we could not start your session. Please sign in.",
+      "signInErrorNoSession": "Signed in, but your session was not available. Please try again.",
+      "signUpErrorFallback": "Unable to create your account. Check your details and try again.",
+      "signInErrorFallback": "Unable to sign in. Check your email and password and try again."
+    },
+    "desktopLogin": {
+      "describeSignUp": "Create your account in the browser, then return here automatically.",
+      "describeRecovery": "Finish account recovery in the browser, then return to SourceWeft.",
+      "describeDefault": "Sign in with Google, email, or any web account method in your browser.",
+      "title": "Sign in to SourceWeft",
+      "description": "Continue securely in your browser.",
+      "openBrowserAgain": "Open browser again",
+      "signInWithBrowser": "Sign in with browser",
+      "reopen": "Reopen",
+      "copied": "Copied",
+      "copyLink": "Copy link",
+      "expiredMessage": "Desktop sign-in expired. Start sign-in again.",
+      "statusCheckFailed": "Desktop sign-in status check failed.",
+      "signInFailed": "Desktop sign-in failed.",
+      "noLoginLink": "No login link is available to copy.",
+      "loginLinkCopied": "Login link copied.",
+      "openBrowserFailed": "Unable to open the browser sign-in page."
+    },
+    "desktopConfirm": {
+      "title": "Continue to SourceWeft",
+      "description": "Confirm this account for the desktop app.",
+      "fallbackName": "SourceWeft User",
+      "fallbackEmail": "Signed in",
+      "continueButton": "Continue in desktop"
+    },
+    "desktopComplete": {
+      "initialStatus": "Returning to SourceWeft.",
+      "missingState": "This desktop sign-in link is missing its state. Start sign-in again from the SourceWeft desktop app.",
+      "tokenMissing": "Desktop sign-in token was not returned.",
+      "completionFailed": "Desktop sign-in completion failed.",
+      "genericFailure": "Unable to complete desktop sign-in.",
+      "title": "Returning to SourceWeft",
+      "description": "Finish sign-in in the SourceWeft desktop app.",
+      "openDesktopApp": "Open SourceWeft desktop"
+    },
+    "acceptInvitation": {
+      "title": "Accept invitation",
+      "description": "Join the team workspace in SourceWeft.",
+      "loading": "Loading invitation...",
+      "missingLink": "Invitation link is missing.",
+      "expired": "This invitation has expired.",
+      "noLongerPending": "This invitation is no longer pending.",
+      "notFound": "Invitation not found.",
+      "acceptFailed": "Failed to accept invitation.",
+      "rejectFailed": "Failed to reject invitation.",
+      "acceptedToast": "Invitation accepted.",
+      "declinedToast": "Invitation declined.",
+      "defaultOrgName": "SourceWeft team",
+      "roleForEmail": "{role} for {email}",
+      "decline": "Decline",
+      "accept": "Accept",
+      "goToDashboard": "Go to dashboard"
+    },
+    "consent": {
+      "title": "Authorization request",
+      "clientRequesting": "Client {clientId} is requesting access.",
+      "genericRequesting": "A client is requesting access.",
+      "loadingRequest": "Loading request...",
+      "allow": "Allow",
+      "deny": "Deny",
+      "consentActionFailed": "Consent action failed",
+      "consentFailed": "Consent failed",
+      "scope": {
+        "openid": "Confirm your identity",
+        "profile": "View your profile information",
+        "email": "View your email address",
+        "offline_access": "Access your account while you're offline"
+      }
+    },
+    "error": {
+      "title": "Sign-in error",
+      "descriptionFallback": "Authentication failed. Please try again, or contact support with the error code below.",
+      "errorCodeLabel": "Error code:",
+      "tryAgain": "Try again",
+      "goHome": "Go home",
+      "code": {
+        "access_denied": "You declined the sign-in request.",
+        "invalid_request": "The sign-in request was invalid.",
+        "invalid_client": "The sign-in client is not recognized.",
+        "invalid_grant": "The sign-in grant is invalid or has expired.",
+        "unauthorized_client": "This client is not authorized to sign in this way.",
+        "unsupported_response_type": "This sign-in method is not supported.",
+        "invalid_scope": "The requested access is invalid.",
+        "server_error": "The sign-in server ran into an error.",
+        "temporarily_unavailable": "Sign-in is temporarily unavailable. Please try again shortly.",
+        "invalid_token": "Your sign-in link is invalid or has expired.",
+        "account_not_linked": "This account is not linked yet. Try signing in a different way.",
+        "email_not_verified": "Please verify your email before signing in.",
+        "user_not_found": "We could not find an account for this sign-in."
+      }
+    },
+    "guestInvite": {
+      "invalidMessage": "This invitation is not valid or has expired",
+      "joinedToast": "You have joined the workspace.",
+      "title": "Guest invitation",
+      "description": "You have been invited to collaborate in a SourceWeft workspace.",
+      "accepting": "Accepting invitation...",
+      "loading": "Loading invitation...",
+      "collaborateAsGuest": "Collaborate as a guest",
+      "signInToAcceptDescription": "Sign in to accept your invitation.",
+      "signInToAccept": "Sign in to accept",
+      "acceptedRedirecting": "Invitation accepted. Taking you to your workspace...",
+      "goToDashboard": "Go to dashboard",
+      "backToHome": "Back to home"
+    },
+    "additionalField": {
+      "noItemsFound": "No items found."
+    }
+  },
+  "download": {
+    "meta": {
+      "title": "Download SourceWeft",
+      "description": "Download SourceWeft for macOS and Windows, find the iOS and Android apps, or use the web app, browser extension, and self-hosted Docker bundle. Every desktop installer is listed with its SHA-256 checksum.",
+      "ogImageAlt": "SourceWeft desktop app on macOS"
+    },
+    "web": {
+      "openDashboard": "Open Dashboard",
+      "openWebApp": "Open the web app",
+      "getStarted": "Get started"
+    },
+    "comingSoon": "Coming soon",
+    "hero": {
+      "badgeStable": "Stable release",
+      "badgePreview": "Preview build",
+      "badgeDefault": "Desktop app",
+      "heading": "Download SourceWeft.",
+      "subtitle": "Native apps for macOS and Windows today, with iOS and Android on the way. Every app signs in to the same account and workspaces as the web; local device capabilities arrive on macOS first.",
+      "releaseNotes": "Release notes",
+      "changelog": "Changelog",
+      "screenshotAlt": "SourceWeft desktop app on macOS: a workspace with a selected reading-notes source, a drafted question in the composer, and the Hub panel listing sources"
+    },
+    "highlights": [
+      "The same account, workspaces, and chats as the web app",
+      "A native window instead of a browser tab",
+      "Local working directories and file panels on macOS",
+      "Desktop MCP servers that need a local process"
+    ],
+    "channels": {
+      "ariaLabel": "Release channel",
+      "stable": "Stable",
+      "preview": "Preview"
+    },
+    "cta": {
+      "downloadFor": "Download for {platform}",
+      "allDownloads": "All downloads",
+      "choosePlatform": "Choose your platform",
+      "viewReleasesGithub": "View releases on GitHub",
+      "mobileApps": "Mobile apps",
+      "mobileComingSoon": "The {platform} app is coming soon. The web app works on your phone today.",
+      "mobileFallbackLabel": "mobile"
+    },
+    "platforms": {
+      "macos": {
+        "requirement": "macOS 11 or later"
+      },
+      "windows": {
+        "requirement": "Windows 10 or later, 64-bit"
+      },
+      "linux": {
+        "requirement": "Ubuntu 22.04 / Debian 12 or later, x64 (AppImage)"
+      }
+    },
+    "allDownloads": {
+      "eyebrow": "All downloads",
+      "title": "Every build, with its checksum.",
+      "descriptionWithVersion": "Version {version} from the {channel} channel. Compare the SHA-256 before installing an unsigned build.",
+      "descriptionFallback": "Desktop installers are published with every tagged release.",
+      "notAvailable": "Not available yet",
+      "platformUnavailable": "{platform} builds are not published yet. Use the web app in your browser, or watch this page for the first release.",
+      "channelNotPromoted": "The download channel has not been promoted yet. macOS and Windows installers for the latest tagged release are available from GitHub Releases, together with the self-hosting archive.",
+      "download": "Download",
+      "githubMirror": "GitHub mirror",
+      "copyChecksum": "Copy SHA-256 checksum"
+    },
+    "copyButton": {
+      "copied": "Copied"
+    },
+    "mobile": {
+      "eyebrow": "Mobile apps",
+      "title": "SourceWeft in your pocket.",
+      "descriptionLive": "Read, ask, and review your sources on the go. Signed in to the same workspaces as desktop and web.",
+      "descriptionComingSoon": "Read, ask, and review your sources on the go. The iOS and Android apps are in preparation; until the store listings go live, the web app works in Safari and Chrome on any phone.",
+      "openWebOn": "{webLabel} on {platform}",
+      "ios": {
+        "devices": "iPhone and iPad",
+        "storeAction": "Download on the App Store"
+      },
+      "android": {
+        "devices": "Phones and tablets",
+        "storeAction": "Get it on Google Play"
+      }
+    },
+    "everywhere": {
+      "eyebrow": "Everywhere you work",
+      "title": "Same notebook, every surface.",
+      "description": "Desktop and mobile are two entry points. Your workspaces stay in sync with the web app, the browser extension, and your own self-hosted instance.",
+      "webApp": {
+        "title": "Web app",
+        "description": "No install required. Open SourceWeft in any modern browser and pick up where you left off."
+      },
+      "browserExtension": {
+        "title": "Browser extension",
+        "description": "Capture pages and clips into your notebook straight from Chrome or Edge."
+      },
+      "selfHost": {
+        "title": "Self-host",
+        "description": "Run SourceWeft on your own infrastructure with the Docker Compose bundle shipped with every release.",
+        "dockerGuide": "Docker guide",
+        "releases": "Releases"
+      },
+      "comingSoonLabel": "{name} · Coming soon"
+    },
+    "beforeInstall": {
+      "eyebrow": "Before you install",
+      "title": "System requirements",
+      "account": "Account",
+      "accountDescription": "the desktop app signs in with your existing SourceWeft account",
+      "localExecution": "Local device execution",
+      "localExecutionAvailable": "{platforms} only for now",
+      "localExecutionFallback": "macOS first; Windows support is in progress",
+      "listJoiner": " and ",
+      "unsignedEyebrow": "Unsigned builds",
+      "verifyingEyebrow": "Verifying your download",
+      "unsignedTitle": "Current installers are not code-signed yet.",
+      "verifyingTitle": "Check the checksum before you install.",
+      "unsignedBody": "Your operating system will warn about an unidentified developer. Verify the SHA-256 on this page, then allow the app once.",
+      "verifyingBody": "Every installer on this page lists its SHA-256 so you can confirm the file you downloaded is the one we published.",
+      "macosInstruction": ": Control-click SourceWeft in Applications, choose Open, then confirm in the dialog.",
+      "windowsInstruction": ": when SmartScreen appears, choose More info, then Run anyway.",
+      "verifyChecksum": "Verify the checksum"
+    },
+    "screens": {
+      "eyebrow": "A closer look",
+      "title": "What you get on the desktop.",
+      "description": "Captured from the macOS app. The same workspaces as the web, plus the parts that only make sense next to your files and your machine.",
+      "items": {
+        "execution-target": {
+          "title": "Run in the cloud or on this computer",
+          "caption": "Pick where each chat executes. Your Mac shows up as an online device the moment the app is running."
+        },
+        "working-directory": {
+          "title": "Work inside a local folder",
+          "caption": "Give a chat a working directory so files it reads and writes stay on your machine."
+        },
+        "skills": {
+          "title": "Install skills into a workspace",
+          "caption": "Browse official and community skills, then enable them per workspace from the same window."
+        },
+        "mcp": {
+          "title": "Connect MCP servers, including desktop-only ones",
+          "caption": "STDIO servers that need a local process are available here because the desktop app hosts them."
+        }
+      }
+    },
+    "faq": {
+      "eyebrow": "FAQ",
+      "title": "Download and install basics",
+      "items": {
+        "desktopVsWeb": {
+          "question": "Is the desktop app different from the web app?",
+          "answer": "It signs in to the same SourceWeft account and opens the same workspaces, chats, and sources. On top of that it adds a native window and, on macOS, local device capabilities such as working directories and file panels."
+        },
+        "macosVerification": {
+          "question": "Why does macOS say the app cannot be verified?",
+          "answer": "Earlier verification builds were not signed or notarized. Check the release’s signing information and compare its SHA-256 checksum before installing. Signed releases are built with an Apple Developer certificate and notarization."
+        },
+        "windowsSmartScreen": {
+          "question": "Why does Windows SmartScreen warn about the installer?",
+          "answer": "Earlier verification installers were unsigned. Check the release’s signing information and SHA-256 checksum before proceeding. The signed release pipeline uses a Windows code-signing certificate."
+        },
+        "updates": {
+          "question": "How do updates work?",
+          "answer": "Updater-enabled clients check and download in the background, then ask before installation. Choose Stable or Preview in Settings → About → Software update. Older clients require one manual installation of an updater-enabled release. Linux in-app updates use the AppImage package."
+        },
+        "previewBuild": {
+          "question": "What is a preview build?",
+          "answer": "Preview builds are release candidates published from pre-release tags before a stable release. They may change before the stable version ships."
+        },
+        "linuxBuild": {
+          "question": "Is there a Linux build?",
+          "answer": "Linux x64 is packaged as an AppImage. When a release is published, its download appears above. Make the downloaded file executable and run it; some distributions require FUSE 2. AppImage updates use the same stable and preview channels. Local device execution still requires macOS."
+        }
+      }
+    }
+  },
+  "artifactShare": {
+    "fallbackTitle": "Shared artifact",
+    "noBrowserPreview": "This file can’t be previewed in the browser — use Download above.",
+    "nothingToPreview": "Nothing to preview.",
+    "fullscreen": "Fullscreen",
+    "download": "Download",
+    "viewCount": "{count, plural, one {# view} other {# views}}",
+    "exitFullscreenEsc": "Exit fullscreen (Esc)",
+    "exitFullscreen": "Exit fullscreen",
+    "madeWith": "Made with <brand>SourceWeft</brand>",
+    "preview": {
+      "missingIds": "Missing workspaceId or artifactId.",
+      "couldNotLoad": "Could not load this artifact.",
+      "unavailableTitle": "Artifact preview is unavailable",
+      "backToChat": "Back to chat",
+      "loading": "Loading artifact preview"
+    }
+  },
+  "mobileRouteSheet": {
+    "supplementaryPage": "Supplementary SourceWeft page"
   }
 }

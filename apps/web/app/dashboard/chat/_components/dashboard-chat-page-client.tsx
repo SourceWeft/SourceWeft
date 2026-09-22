@@ -265,6 +265,7 @@ function normalizeThinkingSettingsForModel(input: {
 
 export function DashboardChatPageClient() {
   const t = useTranslations("dashboardChat");
+  const tCanvas = useTranslations("dashboardChatCanvas");
   const creationContext = useChatCreationContext();
   const [visitedContexts, setVisitedContexts] = useState<string[]>([]);
   useEffect(() => {
@@ -519,7 +520,10 @@ export function DashboardChatPageClient() {
       catalog:
         ListThreadModelCatalogResponse | ListThreadModelSelectorCatalogResponse,
     ) {
-      const catalogModels = mapCatalogKindsToModelItems(catalog.kinds);
+      const catalogModels = mapCatalogKindsToModelItems(
+        catalog.kinds,
+        tCanvas,
+      );
       const kindEnabled = {
         llm: catalogModels.llm.length > 0,
         image: catalogModels.image.length > 0,
@@ -533,11 +537,14 @@ export function DashboardChatPageClient() {
         fallbackAliases: catalog.defaults,
       });
       setSelectedModels(
-        resolveSelectedModelsWithByok({
-          availableModels: catalogModels,
-          baseSelectedModels: resolvedModels,
-          byokSelections: storedByokSelections,
-        }),
+        resolveSelectedModelsWithByok(
+          {
+            availableModels: catalogModels,
+            baseSelectedModels: resolvedModels,
+            byokSelections: storedByokSelections,
+          },
+          tCanvas,
+        ),
       );
       setBaseSelectedModels(resolvedModels);
       setModelSelectionSources(DEFAULT_MODEL_SELECTION_SOURCES);
@@ -602,7 +609,7 @@ export function DashboardChatPageClient() {
     return () => {
       cancelled = true;
     };
-  }, [bootstrapModelCatalog, consumeBootstrapModelCatalog, workspaceId]);
+  }, [bootstrapModelCatalog, consumeBootstrapModelCatalog, tCanvas, workspaceId]);
 
   useEffect(() => {
     if (!desktopBridge.isAvailable()) {
@@ -1073,7 +1080,7 @@ export function DashboardChatPageClient() {
               );
         creationAttempt.current = { fingerprint, id: context.id };
         const result = await contentClient.createThread(workspaceId, {
-          title: "New chat",
+          title: t("newChat.title"),
           creationContextId: context.id,
           modelSettings: resolvedThreadModelSettings,
           chatPreferences: {

@@ -811,6 +811,19 @@
       "cancel": "取消",
       "back": "返回",
       "observe": "观测"
+    },
+    "personaPicker": {
+      "couldNotStart": "无法启动该智能体对话。",
+      "starting": "正在启动 {name}…",
+      "custom": "自定义",
+      "addSubagentTitle": "添加子智能体",
+      "newAgentChatTitle": "新建智能体对话",
+      "subagentDescription": "在「{title}」下开始一个子智能体对话。它会拥有独立的对话，并嵌套显示在列表中。",
+      "defaultDescription": "选择将拥有此对话的智能体。之后你可以在它的独立对话中继续交流。",
+      "loadingAgents": "正在加载智能体…",
+      "couldNotLoadAgents": "无法加载智能体。请关闭后重试。",
+      "yourAgentsLabel": "你的智能体",
+      "manageAgents": "管理智能体…"
     }
   },
   "dashboardSettings": {
@@ -1018,6 +1031,58 @@
       "copyDesktopNoInfo": "SourceWeft 桌面版 {version}",
       "copyWebWithDate": "SourceWeft 网页构建 {sha}（{date}）",
       "copyWebNoDate": "SourceWeft 网页构建 {sha}"
+    },
+    "desktopUpdate": {
+      "title": "软件更新",
+      "description": "设置适用于这台电脑当前操作系统用户下的所有 SourceWeft 账户。",
+      "channel": "更新通道",
+      "channelStable": "稳定版",
+      "channelPreview": "预览版 + 稳定版",
+      "channelPreviewHint": "包含候选发布版和稳定版。预览版可能不够稳定。",
+      "autoCheck": "自动检查更新",
+      "autoDownload": "自动下载更新",
+      "autoDownloadHint": "下载会在应用打开时在后台进行。安装始终需要你的确认。",
+      "loading": "正在加载更新设置…",
+      "statusWithVersion": "{status} · {version}",
+      "downloaded": "已下载 {size} MiB",
+      "lastChecked": "上次检查：{date}",
+      "check": "检查更新",
+      "download": "下载更新",
+      "install": "安装并重启",
+      "cancelDownload": "取消下载",
+      "snooze": "明天再提醒我",
+      "status": {
+        "idle": "准备就绪，可以检查",
+        "checking": "正在检查更新…",
+        "upToDate": "已是最新版本",
+        "waitingForStable": "正在等待更新的稳定版发布；你的应用不会被降级",
+        "available": "有可用更新",
+        "downloading": "正在后台下载…",
+        "verifying": "正在验证更新…",
+        "ready": "准备安装",
+        "preparing": "正在保存你的工作…",
+        "waitingForIdle": "正在等待本地任务完成…",
+        "installing": "正在安装…",
+        "distributionPaused": "发布方已暂停更新",
+        "withdrawn": "此更新已被撤回",
+        "channelUnavailable": "该通道尚未发布更新",
+        "failed": "更新未能完成"
+      },
+      "downloadAction": "下载",
+      "toastReadyTitle": "更新已就绪",
+      "toastReadyDescription": "SourceWeft {version} 已准备好安装。",
+      "toastAvailableTitle": "有可用更新",
+      "toastAvailableDescription": "SourceWeft {version} 现已可用。",
+      "preparingDialogLabel": "正在准备软件更新",
+      "preparingTitle": "正在准备更新",
+      "preparingDescription": "正在保存草稿并等待本地任务完成。安全后 SourceWeft 将会重启。",
+      "cancelInstallation": "取消安装",
+      "errors": {
+        "unsavedChanges": "请先保存或完成待处理的设置更改，再安装更新。",
+        "embeddedNotReady": "有一个嵌入的对话尚未准备好保存。",
+        "draftSavingUnavailable": "草稿保存功能当前不可用。",
+        "connectionFailed": "软件更新连接失败：{error}"
+      }
     }
   },
   "dashboardSkills": {
@@ -1359,8 +1424,16 @@
     "subagent": {
       "srConversation": "子智能体对话",
       "fallbackTitle": "子智能体",
-      "parentChatFallback": "父对话"
-    }
+      "parentChatFallback": "父对话",
+      "switchTitle": "切换子智能体",
+      "openInNewWindow": "在新窗口中打开",
+      "closeSubagent": "关闭子智能体",
+      "iframeTitle": "子智能体：{title}"
+    },
+    "workspaceFallback": "工作区",
+    "defaultWorkspaceName": "工作区 {number}",
+    "switchWorkspaceFailed": "切换工作区失败。",
+    "toolExecutionFailed": "工具执行失败。"
   },
   "dashboardChatCanvas": {
     "header": {
@@ -1371,7 +1444,9 @@
       "showHubWindow": "显示来源窗口",
       "hideSources": "隐藏来源",
       "showSources": "显示来源",
-      "openHub": "打开来源面板"
+      "openHub": "打开来源面板",
+      "backToThread": "返回{title}",
+      "subagents": "子智能体"
     },
     "modelSelector": {
       "type": {
@@ -1421,8 +1496,15 @@
         "getStartedAddModel": "使用此提供方添加一个模型即可开始。",
         "getStartedSaveKey": "为此提供方保存 API 密钥即可开始。",
         "noModelsMatchSearch": "没有匹配此搜索的模型。",
-        "noSavedModels": "尚未为{provider}保存任何{type}模型。"
-      }
+        "noSavedModels": "尚未为{provider}保存任何{type}模型。",
+        "customModelSubtitle": "{provider} 自定义 {type} BYOK",
+        "savedModelSubtitle": "{model}（通过 {credential}）",
+        "selectedModelSubtitle": "{provider} {type} BYOK",
+        "providerBadge": "{provider} BYOK",
+        "newModelSubtitle": "{model}（通过 {provider} BYOK）"
+      },
+      "globalModels": "全局模型",
+      "autoDefault": "自动（默认）"
     },
     "byokDialog": {
       "customProvider": "自定义提供方",
@@ -1456,7 +1538,8 @@
       "openPreview": "打开预览：{value}",
       "subagent": "子智能体",
       "yes": "是",
-      "no": "否"
+      "no": "否",
+      "openInNewWindow": "在新窗口中打开"
     },
     "emptyState": {
       "title": "你想做些什么？",
@@ -1664,7 +1747,14 @@
       "locationWorkfile": "工作文件",
       "locationSandboxFile": "沙盒文件",
       "wrote": "已写入{location}：{name}",
-      "edited": "已编辑{location}：{name}"
+      "edited": "已编辑{location}：{name}",
+      "mutationPreview": {
+        "openWorkfile": "打开工作文件",
+        "lineCount": "{count, plural, other {# 行}}",
+        "replacementCount": "{count, plural, other {# 处替换}}",
+        "diffLabel": "{name} 差异",
+        "previewTruncated": "预览已截断至 {count, number} 个字符。"
+      }
     },
     "duration": {
       "thoughtFor": "思考了 {duration}",
@@ -1920,6 +2010,17 @@
       "referencedPages": "引用的网页",
       "expand": "展开引用的网页",
       "collapse": "收起引用的网页"
+    },
+    "draftFiles": {
+      "loadingLocation": "正在加载文件位置…",
+      "cloudTitle": "对话云端文件",
+      "cloudDescription": "此对话开始后你上传或创建的文件都会保存在这里。",
+      "offline": "这台电脑当前离线。你选择的文件夹会被保留。",
+      "connectToBrowse": "连接到这台电脑以浏览其中的文件。",
+      "workingDirectory": "工作目录",
+      "conversationFolder": "对话文件夹",
+      "autoFolderHint": "当对话开始使用文件时，系统会在这台电脑上自动创建一个独立的文件夹。",
+      "authorizeHint": "要授权其他文件夹，请在这台电脑上打开 SW。你也可以在此选择一个已授权的文件夹。"
     }
   },
   "dashboardConnectors": {
@@ -4150,5 +4251,377 @@
       "notice": "已达到 GitHub 速率限制，预计 {time} 左右恢复",
       "noticeUnknown": "已达到 GitHub 速率限制，导入将很快恢复"
     }
+  },
+  "dashboardPersonas": {
+    "newAgentFrom": "从「{name}」新建智能体",
+    "editTitle": "编辑{name}",
+    "giveNameAndInstructions": "请为该智能体设置名称和指令。",
+    "agentUpdated": "智能体已更新",
+    "agentCreated": "智能体已创建",
+    "couldNotSaveAgent": "无法保存该智能体。",
+    "removedAgent": "已移除 {name}",
+    "couldNotRemoveAgent": "无法移除该智能体。",
+    "yourAgents": "你的智能体",
+    "yourAgentsDescription": "你在此创建的智能体可以像内置智能体一样拥有对话。每个智能体都是从另一个智能体复制而来。",
+    "loadingAgents": "正在加载智能体…",
+    "couldNotLoadAgents": "无法加载智能体。请关闭后重试。",
+    "noCustomAgents": "还没有自定义智能体。从内置智能体开始创建吧。",
+    "noDescription": "暂无描述",
+    "fromSource": "来自 {name}",
+    "editButtonTitle": "编辑",
+    "duplicateButtonTitle": "复制",
+    "duplicateSr": "复制 {name}",
+    "remove": "移除",
+    "removeSr": "移除 {name}",
+    "newAgentFromEllipsis": "从…新建智能体",
+    "startFromAgent": "从一个智能体开始",
+    "startFromAgentDescription": "副本会保留原智能体的指令、模型和工具，直到你修改它们。",
+    "back": "返回",
+    "editDialogDescription": "名称、指令、模型，以及该智能体可以使用的工具。",
+    "nameLabel": "名称",
+    "descriptionLabel": "描述",
+    "instructionsLabel": "指令",
+    "modelLabel": "模型",
+    "workspaceDefault": "工作区默认",
+    "readOnlyLabel": "只读：该智能体可以读取来源和文件，但不能写入、运行或发布",
+    "toolsLegend": "工具",
+    "everyToolLabel": "工作区提供的所有工具",
+    "cancel": "取消",
+    "saving": "正在保存…",
+    "saveChanges": "保存更改",
+    "createAgent": "创建智能体",
+    "removeConfirmTitle": "移除 {name}？",
+    "removeConfirmDescription": "已使用该智能体开始的对话会保留其历史记录，但没有人可以再用它开始新的对话。"
+  },
+  "authPages": {
+    "mobileLogin": {
+      "signIn": {
+        "description": "在 SourceWeft 做好你的工作",
+        "submit": "登录",
+        "alternatePrompt": "初次使用 SourceWeft？",
+        "alternateAction": "创建账号"
+      },
+      "signUp": {
+        "description": "开始在 SourceWeft 做好你的工作",
+        "submit": "创建账号",
+        "alternateAction": "登录"
+      },
+      "continueWithGoogle": "使用 Google 继续",
+      "continueWithApple": "使用 Apple 继续",
+      "or": "或",
+      "namePlaceholder": "姓名",
+      "emailPlaceholder": "个人或工作邮箱",
+      "appleComingSoon": "Apple 登录即将推出。",
+      "termsNotice": "继续即表示你同意 SourceWeft 的<terms>服务条款</terms>，并知悉我们的<privacy>隐私政策</privacy>。",
+      "signUpSuccessNoSession": "账号已创建，但无法启动你的会话。请登录。",
+      "signInErrorNoSession": "已登录，但会话不可用。请重试。",
+      "signUpErrorFallback": "无法创建你的账号。请检查填写信息后重试。",
+      "signInErrorFallback": "无法登录。请检查邮箱和密码后重试。"
+    },
+    "desktopLogin": {
+      "describeSignUp": "在浏览器中创建你的账号，随后会自动返回这里。",
+      "describeRecovery": "在浏览器中完成账号找回，随后返回 SourceWeft。",
+      "describeDefault": "在浏览器中使用 Google、邮箱或其他网页登录方式登录。",
+      "title": "登录 SourceWeft",
+      "description": "在浏览器中安全继续。",
+      "openBrowserAgain": "重新打开浏览器",
+      "signInWithBrowser": "在浏览器中登录",
+      "reopen": "重新打开",
+      "copied": "已复制",
+      "copyLink": "复制链接",
+      "expiredMessage": "桌面版登录已过期，请重新开始登录。",
+      "statusCheckFailed": "桌面版登录状态检查失败。",
+      "signInFailed": "桌面版登录失败。",
+      "noLoginLink": "暂无可复制的登录链接。",
+      "loginLinkCopied": "登录链接已复制。",
+      "openBrowserFailed": "无法打开浏览器登录页面。"
+    },
+    "desktopConfirm": {
+      "title": "继续前往 SourceWeft",
+      "description": "确认此账号用于桌面版应用。",
+      "fallbackName": "SourceWeft 用户",
+      "fallbackEmail": "已登录",
+      "continueButton": "在桌面版中继续"
+    },
+    "desktopComplete": {
+      "initialStatus": "正在返回 SourceWeft。",
+      "missingState": "此桌面版登录链接缺少状态参数，请从 SourceWeft 桌面版应用重新开始登录。",
+      "tokenMissing": "未返回桌面版登录令牌。",
+      "completionFailed": "桌面版登录完成失败。",
+      "genericFailure": "无法完成桌面版登录。",
+      "title": "正在返回 SourceWeft",
+      "description": "请在 SourceWeft 桌面版应用中完成登录。",
+      "openDesktopApp": "打开 SourceWeft 桌面版"
+    },
+    "acceptInvitation": {
+      "title": "接受邀请",
+      "description": "加入 SourceWeft 中的团队工作区。",
+      "loading": "正在加载邀请…",
+      "missingLink": "邀请链接缺失。",
+      "expired": "此邀请已过期。",
+      "noLongerPending": "此邀请已不再处于待处理状态。",
+      "notFound": "未找到该邀请。",
+      "acceptFailed": "接受邀请失败。",
+      "rejectFailed": "拒绝邀请失败。",
+      "acceptedToast": "邀请已接受。",
+      "declinedToast": "邀请已拒绝。",
+      "defaultOrgName": "SourceWeft 团队",
+      "roleForEmail": "{role}（{email}）",
+      "decline": "拒绝",
+      "accept": "接受",
+      "goToDashboard": "前往控制台"
+    },
+    "consent": {
+      "title": "授权请求",
+      "clientRequesting": "客户端 {clientId} 正在请求访问权限。",
+      "genericRequesting": "某个客户端正在请求访问权限。",
+      "loadingRequest": "正在加载请求…",
+      "allow": "允许",
+      "deny": "拒绝",
+      "consentActionFailed": "授权操作失败",
+      "consentFailed": "授权失败",
+      "scope": {
+        "openid": "确认你的身份",
+        "profile": "查看你的个人资料信息",
+        "email": "查看你的邮箱地址",
+        "offline_access": "在你离线时访问你的账号"
+      }
+    },
+    "error": {
+      "title": "登录错误",
+      "descriptionFallback": "身份验证失败。请重试，或携带下方错误代码联系支持团队。",
+      "errorCodeLabel": "错误代码：",
+      "tryAgain": "重试",
+      "goHome": "返回首页",
+      "code": {
+        "access_denied": "你拒绝了此次登录请求。",
+        "invalid_request": "登录请求无效。",
+        "invalid_client": "无法识别此登录客户端。",
+        "invalid_grant": "登录授权无效或已过期。",
+        "unauthorized_client": "此客户端无权以此方式登录。",
+        "unsupported_response_type": "不支持此登录方式。",
+        "invalid_scope": "请求的访问权限无效。",
+        "server_error": "登录服务器发生错误。",
+        "temporarily_unavailable": "登录服务暂时不可用，请稍后重试。",
+        "invalid_token": "你的登录链接无效或已过期。",
+        "account_not_linked": "此账号尚未关联，请尝试其他登录方式。",
+        "email_not_verified": "登录前请先验证你的邮箱。",
+        "user_not_found": "未找到与此次登录匹配的账号。"
+      }
+    },
+    "guestInvite": {
+      "invalidMessage": "此邀请无效或已过期",
+      "joinedToast": "你已加入该工作区。",
+      "title": "访客邀请",
+      "description": "你已受邀在 SourceWeft 工作区中协作。",
+      "accepting": "正在接受邀请…",
+      "loading": "正在加载邀请…",
+      "collaborateAsGuest": "以访客身份协作",
+      "signInToAcceptDescription": "登录以接受你的邀请。",
+      "signInToAccept": "登录以接受",
+      "acceptedRedirecting": "邀请已接受，正在带你前往工作区…",
+      "goToDashboard": "前往控制台",
+      "backToHome": "返回首页"
+    },
+    "additionalField": {
+      "noItemsFound": "未找到任何项目。"
+    }
+  },
+  "download": {
+    "meta": {
+      "title": "下载 SourceWeft",
+      "description": "下载适用于 macOS 和 Windows 的 SourceWeft 桌面版，查看 iOS 和 Android 移动版，或使用网页版、浏览器扩展和自托管 Docker 套件。每个桌面安装包都附有 SHA-256 校验值。",
+      "ogImageAlt": "在 macOS 上运行的 SourceWeft 桌面版"
+    },
+    "web": {
+      "openDashboard": "打开控制台",
+      "openWebApp": "打开网页版",
+      "getStarted": "开始使用"
+    },
+    "comingSoon": "即将推出",
+    "hero": {
+      "badgeStable": "正式版",
+      "badgePreview": "预览版",
+      "badgeDefault": "桌面版",
+      "heading": "下载 SourceWeft。",
+      "subtitle": "macOS 和 Windows 原生应用已上线，iOS 与 Android 正在路上。每个客户端都登录同一账户和工作区，与网页版保持一致；本机设备能力率先登陆 macOS。",
+      "releaseNotes": "更新说明",
+      "changelog": "更新日志",
+      "screenshotAlt": "macOS 上的 SourceWeft 桌面版：已选中一个阅读笔记来源，输入框中有草拟的问题，Hub 面板列出了各个来源"
+    },
+    "highlights": [
+      "与网页版共用同一账户、工作区和对话",
+      "原生窗口，而非浏览器标签页",
+      "macOS 上的本地工作目录和文件面板",
+      "需要本地进程的桌面端 MCP 服务器"
+    ],
+    "channels": {
+      "ariaLabel": "发布渠道",
+      "stable": "正式版",
+      "preview": "预览版"
+    },
+    "cta": {
+      "downloadFor": "下载 {platform} 版",
+      "allDownloads": "查看全部下载",
+      "choosePlatform": "选择你的平台",
+      "viewReleasesGithub": "在 GitHub 上查看发布版本",
+      "mobileApps": "移动版",
+      "mobileComingSoon": "{platform} 版即将推出。网页版今天就能在手机上使用。",
+      "mobileFallbackLabel": "移动版"
+    },
+    "platforms": {
+      "macos": {
+        "requirement": "macOS 11 或更高版本"
+      },
+      "windows": {
+        "requirement": "Windows 10 或更高版本，64 位"
+      },
+      "linux": {
+        "requirement": "Ubuntu 22.04 / Debian 12 或更高版本，x64（AppImage）"
+      }
+    },
+    "allDownloads": {
+      "eyebrow": "全部下载",
+      "title": "每个安装包，都附带校验值。",
+      "descriptionWithVersion": "{channel} 渠道的 {version} 版本。安装未签名的安装包前，请先比对 SHA-256 校验值。",
+      "descriptionFallback": "桌面安装包会随每个正式发布的版本一同发布。",
+      "notAvailable": "暂未提供",
+      "platformUnavailable": "{platform} 版安装包尚未发布。可以先在浏览器中使用网页版，或关注本页面获取首个发布版本。",
+      "channelNotPromoted": "该下载渠道尚未正式发布。最新标记版本的 macOS 和 Windows 安装包可在 GitHub Releases 获取，自托管压缩包也在其中。",
+      "download": "下载",
+      "githubMirror": "GitHub 镜像",
+      "copyChecksum": "复制 SHA-256 校验值"
+    },
+    "copyButton": {
+      "copied": "已复制"
+    },
+    "mobile": {
+      "eyebrow": "移动版",
+      "title": "把 SourceWeft 装进口袋。",
+      "descriptionLive": "随时随地阅读、提问、核对你的来源。与桌面版和网页版登录同一工作区。",
+      "descriptionComingSoon": "随时随地阅读、提问、核对你的来源。iOS 和 Android 应用正在准备中；在应用商店上架之前，网页版已可在手机上的 Safari 和 Chrome 中使用。",
+      "openWebOn": "在{platform}上{webLabel}",
+      "ios": {
+        "devices": "iPhone 与 iPad",
+        "storeAction": "在 App Store 下载"
+      },
+      "android": {
+        "devices": "手机与平板",
+        "storeAction": "在 Google Play 获取"
+      }
+    },
+    "everywhere": {
+      "eyebrow": "随处可用",
+      "title": "同一个笔记本，覆盖每个场景。",
+      "description": "桌面版和移动版只是两个入口。你的工作区会与网页版、浏览器扩展以及你自己的自托管实例保持同步。",
+      "webApp": {
+        "title": "网页版",
+        "description": "无需安装。在任意现代浏览器中打开 SourceWeft，从上次离开的地方继续。"
+      },
+      "browserExtension": {
+        "title": "浏览器扩展",
+        "description": "直接从 Chrome 或 Edge 将网页和剪辑采集进你的笔记本。"
+      },
+      "selfHost": {
+        "title": "自托管",
+        "description": "使用每个发布版本自带的 Docker Compose 套件，在自己的基础设施上运行 SourceWeft。",
+        "dockerGuide": "Docker 指南",
+        "releases": "发布版本"
+      },
+      "comingSoonLabel": "{name}·即将推出"
+    },
+    "beforeInstall": {
+      "eyebrow": "安装前须知",
+      "title": "系统要求",
+      "account": "账户",
+      "accountDescription": "桌面版使用你已有的 SourceWeft 账户登录",
+      "localExecution": "本地设备执行",
+      "localExecutionAvailable": "目前仅支持{platforms}",
+      "localExecutionFallback": "率先登陆 macOS；Windows 支持正在开发中",
+      "listJoiner": "和",
+      "unsignedEyebrow": "未签名安装包",
+      "verifyingEyebrow": "校验你的下载",
+      "unsignedTitle": "当前安装包尚未进行代码签名。",
+      "verifyingTitle": "安装前请先核对校验值。",
+      "unsignedBody": "你的操作系统会提示“开发者身份不明”。请先核对本页面上的 SHA-256 校验值，再允许运行该应用一次。",
+      "verifyingBody": "本页面每个安装包都列出了 SHA-256 校验值，方便你确认下载到的文件与我们发布的一致。",
+      "macosInstruction": "：在“应用程序”中按住 Control 点击 SourceWeft，选择“打开”，再在弹窗中确认。",
+      "windowsInstruction": "：出现 SmartScreen 提示时，选择“更多信息”，再选择“仍要运行”。",
+      "verifyChecksum": "校验哈希值"
+    },
+    "screens": {
+      "eyebrow": "近距离了解",
+      "title": "桌面版能带给你什么。",
+      "description": "截图来自 macOS 应用。工作区与网页版一致，另外还有一些只有贴近你本机文件和设备才有意义的功能。",
+      "items": {
+        "execution-target": {
+          "title": "在云端或本机运行",
+          "caption": "为每个对话选择执行位置。桌面应用运行起来后，你的 Mac 就会显示为一台在线设备。"
+        },
+        "working-directory": {
+          "title": "在本地文件夹中工作",
+          "caption": "为对话设置一个工作目录，让它读写的文件都留在你的电脑上。"
+        },
+        "skills": {
+          "title": "为工作区安装技能",
+          "caption": "浏览官方和社区技能，在同一个窗口里按工作区分别启用。"
+        },
+        "mcp": {
+          "title": "连接 MCP 服务器，包括仅限桌面端的服务器",
+          "caption": "需要本地进程的 STDIO 服务器只能在这里使用，因为桌面应用负责承载它们。"
+        }
+      }
+    },
+    "faq": {
+      "eyebrow": "常见问题",
+      "title": "下载与安装基础知识",
+      "items": {
+        "desktopVsWeb": {
+          "question": "桌面版和网页版有什么不同？",
+          "answer": "桌面版登录同一个 SourceWeft 账户，打开的也是同样的工作区、对话和来源。在此基础上，它还提供原生窗口，以及在 macOS 上的本地设备能力，比如工作目录和文件面板。"
+        },
+        "macosVerification": {
+          "question": "为什么 macOS 提示该应用无法验证？",
+          "answer": "早期的测试版本未经签名或公证。安装前请先查看该发布版本的签名信息，并比对其 SHA-256 校验值。已签名的发布版本使用 Apple 开发者证书签名，并完成公证。"
+        },
+        "windowsSmartScreen": {
+          "question": "为什么 Windows SmartScreen 会对安装包发出警告？",
+          "answer": "早期的测试安装包未经签名。继续安装前请先查看该发布版本的签名信息和 SHA-256 校验值。已签名的发布流程使用 Windows 代码签名证书。"
+        },
+        "updates": {
+          "question": "更新是如何工作的？",
+          "answer": "支持自动更新的客户端会在后台检查并下载更新，安装前会先征求你的确认。可在“设置 → 关于 → 软件更新”中选择正式版或预览版。较旧的客户端需要手动安装一次支持自动更新的发布版本。Linux 应用内更新使用同一个 AppImage 安装包。"
+        },
+        "previewBuild": {
+          "question": "什么是预览版？",
+          "answer": "预览版是在正式版发布前，由预发布标签生成的候选版本，正式发布前可能还会有变化。"
+        },
+        "linuxBuild": {
+          "question": "有 Linux 版本吗？",
+          "answer": "Linux x64 以 AppImage 形式打包。版本发布后，其下载链接会出现在上方。下载后需要为文件添加可执行权限并运行；部分发行版还需要 FUSE 2。AppImage 更新使用与其他平台相同的正式版和预览版渠道。本地设备执行目前仍仅限 macOS。"
+        }
+      }
+    }
+  },
+  "artifactShare": {
+    "fallbackTitle": "共享制品",
+    "noBrowserPreview": "此文件无法在浏览器中预览——请使用上方的下载。",
+    "nothingToPreview": "没有可预览的内容。",
+    "fullscreen": "全屏",
+    "download": "下载",
+    "viewCount": "{count, plural, other {# 次查看}}",
+    "exitFullscreenEsc": "退出全屏（Esc）",
+    "exitFullscreen": "退出全屏",
+    "madeWith": "由 <brand>SourceWeft</brand> 制作",
+    "preview": {
+      "missingIds": "缺少 workspaceId 或 artifactId。",
+      "couldNotLoad": "无法加载该制品。",
+      "unavailableTitle": "制品预览不可用",
+      "backToChat": "返回对话",
+      "loading": "正在加载制品预览"
+    }
+  },
+  "mobileRouteSheet": {
+    "supplementaryPage": "SourceWeft 补充页面"
   }
 }

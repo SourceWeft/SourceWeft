@@ -10,6 +10,7 @@ import {
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { detectNativeHostKind, nativeBridge } from "../lib/native-bridge";
 import {
   getMobileSheetTitle,
@@ -36,6 +37,7 @@ export function MobileRouteSheetProvider({
 }: {
   children: ReactNode;
 }) {
+  const t = useTranslations("mobileRouteSheet");
   const pathname = usePathname();
   const router = useRouter();
   const [isMobileHost, setIsMobileHost] = useState(false);
@@ -166,7 +168,7 @@ export function MobileRouteSheetProvider({
           <SheetHeader className="border-b border-border/70 px-5 py-4 pr-12 text-left">
             <SheetTitle className="text-base">{sheetRoute?.title}</SheetTitle>
             <SheetDescription className="sr-only">
-              Supplementary SourceWeft page
+              {t("supplementaryPage")}
             </SheetDescription>
           </SheetHeader>
           <div className="min-h-0 flex-1 bg-background">

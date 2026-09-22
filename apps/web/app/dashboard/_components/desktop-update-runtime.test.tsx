@@ -1,7 +1,13 @@
 // @vitest-environment jsdom
-import { act, createElement } from "react";
+import { act, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { NextIntlClientProvider } from "next-intl";
+import messages from "../../../messages/en.json";
+
+const intlMessages = messages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
 const mocks = vi.hoisted(() => ({
   available: vi.fn(),
   info: vi.fn(),
@@ -48,7 +54,13 @@ async function render() {
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
-  await act(async () => root.render(createElement(DesktopUpdateRuntime)));
+  await act(async () =>
+    root.render(
+      <NextIntlClientProvider locale="en" messages={intlMessages}>
+        <DesktopUpdateRuntime />
+      </NextIntlClientProvider>,
+    ),
+  );
 }
 afterEach(async () => {
   await act(async () => root?.unmount());

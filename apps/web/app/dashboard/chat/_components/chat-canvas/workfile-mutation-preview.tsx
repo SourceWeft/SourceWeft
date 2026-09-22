@@ -1,3 +1,4 @@
+import { useTranslations } from "next-intl";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import {
   WorkfileCodeBlock,
@@ -19,6 +20,22 @@ function formatBytes(sizeBytes: number) {
   return `${Math.round(sizeBytes / 1024 / 102.4) / 10} MB`;
 }
 
+function buildMetadata(
+  t: ReturnType<typeof useTranslations<"dashboardChatCanvas.workfile.mutationPreview">>,
+  preview: WorkfileMutationPreviewModel,
+) {
+  return preview.kind === "write"
+    ? [t("lineCount", { count: preview.lineCount }), formatBytes(preview.sizeBytes)]
+    : [
+        preview.occurrences !== null
+          ? t("replacementCount", { count: preview.occurrences })
+          : null,
+        preview.replaceAll !== null
+          ? `replace_all=${preview.replaceAll ? "true" : "false"}`
+          : null,
+      ].filter((item): item is string => item !== null);
+}
+
 export function WorkfileMutationPreview({
   onWorkfileClick,
   preview,
@@ -26,23 +43,9 @@ export function WorkfileMutationPreview({
   onWorkfileClick?: (path: string) => void;
   preview: WorkfileMutationPreviewModel;
 }) {
+  const t = useTranslations("dashboardChatCanvas.workfile.mutationPreview");
   const fileName = basename(preview.path);
-  const metadata =
-    preview.kind === "write"
-      ? [
-          `${preview.lineCount} ${preview.lineCount === 1 ? "line" : "lines"}`,
-          formatBytes(preview.sizeBytes),
-        ]
-      : [
-          preview.occurrences !== null
-            ? `${preview.occurrences} ${
-                preview.occurrences === 1 ? "replacement" : "replacements"
-              }`
-            : null,
-          preview.replaceAll !== null
-            ? `replace_all=${preview.replaceAll ? "true" : "false"}`
-            : null,
-        ].filter((item): item is string => item !== null);
+  const metadata = buildMetadata(t, preview);
 
   return (
     <div className="space-y-2.5">
@@ -56,7 +59,7 @@ export function WorkfileMutationPreview({
             type="button"
             variant="outline"
           >
-            Open Workfile
+            {t("openWorkfile")}
           </Button>
         }
         path={preview.path}
@@ -77,14 +80,15 @@ export function WorkfileMutationPreview({
         <WorkfileCodeBlock
           className="max-h-72 overflow-auto"
           code={preview.diffPreview}
-          fileName={`${fileName} diff`}
+          fileName={t("diffLabel", { name: fileName })}
           language="diff"
         />
       ) : null}
       {preview.previewTruncated ? (
         <p className="text-muted-foreground/65 text-xs">
-          Preview truncated to{" "}
-          {WORKFILE_MUTATION_PREVIEW_CHAR_LIMIT.toLocaleString()} characters.
+          {t("previewTruncated", {
+            count: WORKFILE_MUTATION_PREVIEW_CHAR_LIMIT,
+          })}
         </p>
       ) : null}
     </div>

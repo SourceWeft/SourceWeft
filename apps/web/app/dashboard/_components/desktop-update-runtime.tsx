@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import {
   desktopBridge,
@@ -18,6 +19,7 @@ declare global {
 }
 
 export function DesktopUpdateRuntime() {
+  const t = useTranslations("dashboardSettings.desktopUpdate");
   const [operation, setOperation] = useState<string | null>(null);
   useEffect(() => {
     if (!desktopBridge.isAvailable()) return;
@@ -35,9 +37,7 @@ export function DesktopUpdateRuntime() {
     window.__sourceweftSaveForUpdate = async () => {
       if (window.top !== window) document.body.inert = true;
       if (document.querySelector('[data-update-unsaved="true"]'))
-        throw new Error(
-          "Save or finish your pending settings changes before installing an update.",
-        );
+        throw new Error(t("errors.unsavedChanges"));
       await flushChatDrafts();
       for (const frame of document.querySelectorAll("iframe")) {
         const src = new URL(frame.src, location.href);
@@ -47,8 +47,7 @@ export function DesktopUpdateRuntime() {
         )
           continue;
         const save = frame.contentWindow?.__sourceweftSaveForUpdate;
-        if (!save)
-          throw new Error("An embedded conversation is not ready to save.");
+        if (!save) throw new Error(t("errors.embeddedNotReady"));
         await save();
       }
     };
@@ -83,10 +82,12 @@ export function DesktopUpdateRuntime() {
       ) {
         lastReady = state.candidateId;
         const id = state.candidateId;
-        toast("Update ready", {
-          description: `SourceWeft ${state.version} is ready to install.`,
+        toast(t("toastReadyTitle"), {
+          description: t("toastReadyDescription", {
+            version: state.version ?? "",
+          }),
           action: {
-            label: "Install and restart",
+            label: t("install"),
             onClick: () => {
               void desktopUpdates
                 .install(id)
@@ -104,10 +105,12 @@ export function DesktopUpdateRuntime() {
       ) {
         lastAvailable = state.candidateId;
         const id = state.candidateId;
-        toast("Update available", {
-          description: `SourceWeft ${state.version} is available.`,
+        toast(t("toastAvailableTitle"), {
+          description: t("toastAvailableDescription", {
+            version: state.version ?? "",
+          }),
           action: {
-            label: "Download",
+            label: t("downloadAction"),
             onClick: () => {
               void desktopUpdates
                 .download(id)
@@ -129,7 +132,7 @@ export function DesktopUpdateRuntime() {
               let error: string | null = null;
               try {
                 const save = window.__sourceweftSaveForUpdate;
-                if (!save) throw new Error("Draft saving is unavailable.");
+                if (!save) throw new Error(t("errors.draftSavingUnavailable"));
                 await save();
               } catch (e) {
                 error = e instanceof Error ? e.message : String(e);
@@ -159,7 +162,7 @@ export function DesktopUpdateRuntime() {
       })
       .catch((e) => {
         if (!disposed)
-          toast.error(`Software update connection failed: ${String(e)}`);
+          toast.error(t("errors.connectionFailed", { error: String(e) }));
       });
     return () => {
       disposed = true;
@@ -168,7 +171,7 @@ export function DesktopUpdateRuntime() {
       delete window.__sourceweftSaveForUpdate;
       for (const stop of cleanup) void stop();
     };
-  }, []);
+  }, [t]);
   useEffect(() => {
     if (!operation) return;
     const block = (event: Event) => {
@@ -193,14 +196,13 @@ export function DesktopUpdateRuntime() {
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="Preparing software update"
+        aria-label={t("preparingDialogLabel")}
         data-update-dialog
         className="max-w-sm space-y-4 rounded-xl border bg-card p-6 shadow-lg"
       >
-        <h2 className="font-semibold">Preparing your update</h2>
+        <h2 className="font-semibold">{t("preparingTitle")}</h2>
         <p className="text-sm text-muted-foreground">
-          Saving drafts and waiting for local work to finish. SourceWeft will
-          restart when it is safe.
+          {t("preparingDescription")}
         </p>
         <Button
           variant="outline"
@@ -210,7 +212,7 @@ export function DesktopUpdateRuntime() {
               .catch((e) => toast.error(String(e)));
           }}
         >
-          Cancel installation
+          {t("cancelInstallation")}
         </Button>
       </div>
     </div>,

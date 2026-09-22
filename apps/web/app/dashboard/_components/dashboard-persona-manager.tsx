@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Bot, ChevronLeft, Copy, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import type { Persona } from "@sourceweft/contracts";
 import {
   AlertDialog,
@@ -81,6 +82,7 @@ export function DashboardPersonaManager({
   open: boolean;
   workspaceId: string | null;
 }) {
+  const t = useTranslations("dashboardPersonas");
   const [personas, setPersonas] = useState<Persona[]>([]);
   const [availableTools, setAvailableTools] = useState<string[]>([]);
   const [models, setModels] = useState<ModelOption[]>([]);
@@ -136,7 +138,7 @@ export function DashboardPersonaManager({
       draft: draftFromPersona(source),
       sourceId: source.id,
       personaId: null,
-      title: `New agent from ${source.name}`,
+      title: t("newAgentFrom", { name: source.name }),
     });
   };
 
@@ -146,7 +148,7 @@ export function DashboardPersonaManager({
       draft: draftFromPersona(persona),
       sourceId: null,
       personaId: persona.id,
-      title: `Edit ${persona.name}`,
+      title: t("editTitle", { name: persona.name }),
     });
   };
 
@@ -155,7 +157,7 @@ export function DashboardPersonaManager({
       return;
     }
     if (!isDraftComplete(view.draft)) {
-      toast.error("Give the agent a name and instructions.");
+      toast.error(t("giveNameAndInstructions"));
       return;
     }
     setIsSaving(true);
@@ -166,13 +168,13 @@ export function DashboardPersonaManager({
           view.personaId,
           payloadFromDraft(view.draft),
         );
-        toast.success("Agent updated");
+        toast.success(t("agentUpdated"));
       } else if (view.sourceId) {
         await contentClient.createPersona(
           workspaceId,
           createPayloadFromDraft(view.sourceId, view.draft),
         );
-        toast.success("Agent created");
+        toast.success(t("agentCreated"));
       }
       onChanged();
       await load();
@@ -181,7 +183,7 @@ export function DashboardPersonaManager({
       toast.error(
         error instanceof Error && error.message
           ? error.message
-          : "Could not save the agent.",
+          : t("couldNotSaveAgent"),
       );
     } finally {
       setIsSaving(false);
@@ -196,11 +198,11 @@ export function DashboardPersonaManager({
     setPendingDelete(null);
     try {
       await contentClient.deletePersona(workspaceId, target.id);
-      toast.success(`Removed ${target.name}`);
+      toast.success(t("removedAgent", { name: target.name }));
       onChanged();
       await load();
     } catch {
-      toast.error("Could not remove the agent.");
+      toast.error(t("couldNotRemoveAgent"));
     }
   };
 
@@ -219,29 +221,30 @@ export function DashboardPersonaManager({
           {view.mode === "list" ? (
             <>
               <DialogHeader>
-                <DialogTitle>Your agents</DialogTitle>
+                <DialogTitle>{t("yourAgents")}</DialogTitle>
                 <DialogDescription>
-                  Agents you author here can own conversations like the built-in
-                  ones. Each starts as a copy of another agent.
+                  {t("yourAgentsDescription")}
                 </DialogDescription>
               </DialogHeader>
               <div className="flex flex-col gap-1.5">
                 {isLoading && personas.length === 0 ? (
                   <p className="text-xs text-muted-foreground">
-                    Loading agents...
+                    {t("loadingAgents")}
                   </p>
                 ) : null}
                 {hasError ? (
                   <p className="text-xs text-destructive">
-                    Could not load agents. Close and try again.
+                    {t("couldNotLoadAgents")}
                   </p>
                 ) : null}
                 {!isLoading && !hasError && custom.length === 0 ? (
                   <p className="rounded-md border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">
-                    No custom agents yet. Start from a built-in one.
+                    {t("noCustomAgents")}
                   </p>
                 ) : null}
-                {custom.map((persona) => (
+                {custom.map((persona) => {
+                  const sourceName = describePersonaSource(persona, personas);
+                  return (
                   <div
                     key={persona.id}
                     className="flex items-start gap-2.5 rounded-md border border-border px-3 py-2"
@@ -252,11 +255,11 @@ export function DashboardPersonaManager({
                         {persona.name}
                       </div>
                       <div className="line-clamp-2 text-xs text-muted-foreground">
-                        {persona.description || "No description"}
+                        {persona.description || t("noDescription")}
                       </div>
-                      {describePersonaSource(persona, personas) ? (
+                      {sourceName ? (
                         <div className="mt-0.5 text-[10px] text-muted-foreground/80">
-                          From {describePersonaSource(persona, personas)}
+                          {t("fromSource", { name: sourceName })}
                         </div>
                       ) : null}
                     </div>
@@ -264,39 +267,44 @@ export function DashboardPersonaManager({
                       <Button
                         onClick={() => startEdit(persona)}
                         size="icon-xs"
-                        title="Edit"
+                        title={t("editButtonTitle")}
                         type="button"
                         variant="ghost"
                       >
                         <Pencil className="size-3.5" />
-                        <span className="sr-only">Edit {persona.name}</span>
+                        <span className="sr-only">
+                          {t("editTitle", { name: persona.name })}
+                        </span>
                       </Button>
                       <Button
                         onClick={() => startClone(persona)}
                         size="icon-xs"
-                        title="Duplicate"
+                        title={t("duplicateButtonTitle")}
                         type="button"
                         variant="ghost"
                       >
                         <Copy className="size-3.5" />
                         <span className="sr-only">
-                          Duplicate {persona.name}
+                          {t("duplicateSr", { name: persona.name })}
                         </span>
                       </Button>
                       <Button
                         className="text-destructive hover:text-destructive"
                         onClick={() => setPendingDelete(persona)}
                         size="icon-xs"
-                        title="Remove"
+                        title={t("remove")}
                         type="button"
                         variant="ghost"
                       >
                         <Trash2 className="size-3.5" />
-                        <span className="sr-only">Remove {persona.name}</span>
+                        <span className="sr-only">
+                          {t("removeSr", { name: persona.name })}
+                        </span>
                       </Button>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
               <DialogFooter className="sm:justify-start">
                 <Button
@@ -306,7 +314,7 @@ export function DashboardPersonaManager({
                   type="button"
                 >
                   <Plus className="size-3.5" />
-                  New agent from...
+                  {t("newAgentFromEllipsis")}
                 </Button>
               </DialogFooter>
             </>
@@ -315,10 +323,9 @@ export function DashboardPersonaManager({
           {view.mode === "pick-source" ? (
             <>
               <DialogHeader>
-                <DialogTitle>Start from an agent</DialogTitle>
+                <DialogTitle>{t("startFromAgent")}</DialogTitle>
                 <DialogDescription>
-                  The copy keeps the source&apos;s instructions, model, and
-                  tools until you change them.
+                  {t("startFromAgentDescription")}
                 </DialogDescription>
               </DialogHeader>
               <div className="flex flex-col gap-1.5">
@@ -349,7 +356,7 @@ export function DashboardPersonaManager({
                   variant="ghost"
                 >
                   <ChevronLeft className="size-3.5" />
-                  Back
+                  {t("back")}
                 </Button>
               </DialogFooter>
             </>
@@ -359,13 +366,11 @@ export function DashboardPersonaManager({
             <>
               <DialogHeader>
                 <DialogTitle>{view.title}</DialogTitle>
-                <DialogDescription>
-                  Name, instructions, model, and the tools this agent may use.
-                </DialogDescription>
+                <DialogDescription>{t("editDialogDescription")}</DialogDescription>
               </DialogHeader>
               <div className="flex flex-col gap-3">
                 <label className="flex flex-col gap-1 text-xs font-medium">
-                  Name
+                  {t("nameLabel")}
                   <Input
                     maxLength={80}
                     onChange={(event) =>
@@ -375,7 +380,7 @@ export function DashboardPersonaManager({
                   />
                 </label>
                 <label className="flex flex-col gap-1 text-xs font-medium">
-                  Description
+                  {t("descriptionLabel")}
                   <Textarea
                     maxLength={500}
                     onChange={(event) =>
@@ -386,7 +391,7 @@ export function DashboardPersonaManager({
                   />
                 </label>
                 <label className="flex flex-col gap-1 text-xs font-medium">
-                  Instructions
+                  {t("instructionsLabel")}
                   <Textarea
                     className="font-mono text-xs"
                     maxLength={20000}
@@ -398,7 +403,7 @@ export function DashboardPersonaManager({
                   />
                 </label>
                 <label className="flex flex-col gap-1 text-xs font-medium">
-                  Model
+                  {t("modelLabel")}
                   <Select
                     onValueChange={(value) =>
                       updateDraft({
@@ -409,11 +414,11 @@ export function DashboardPersonaManager({
                     value={view.draft.llmProfileAlias || DEFAULT_MODEL_VALUE}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Workspace default" />
+                      <SelectValue placeholder={t("workspaceDefault")} />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value={DEFAULT_MODEL_VALUE}>
-                        Workspace default
+                        {t("workspaceDefault")}
                       </SelectItem>
                       {models.map((model) => (
                         <SelectItem key={model.value} value={model.value}>
@@ -438,11 +443,12 @@ export function DashboardPersonaManager({
                       updateDraft({ readOnly: checked === true })
                     }
                   />
-                  Read-only: the agent can read sources and files but never
-                  write, run, or publish
+                  {t("readOnlyLabel")}
                 </label>
                 <fieldset className="flex flex-col gap-1.5">
-                  <legend className="text-xs font-medium">Tools</legend>
+                  <legend className="text-xs font-medium">
+                    {t("toolsLegend")}
+                  </legend>
                   <label className="flex items-center gap-2 text-xs">
                     <Checkbox
                       checked={view.draft.toolAllowlist === null}
@@ -453,7 +459,7 @@ export function DashboardPersonaManager({
                         })
                       }
                     />
-                    Every tool the workspace offers
+                    {t("everyToolLabel")}
                   </label>
                   <div
                     className={cn(
@@ -495,7 +501,7 @@ export function DashboardPersonaManager({
                   type="button"
                   variant="outline"
                 >
-                  Cancel
+                  {t("cancel")}
                 </Button>
                 <Button
                   disabled={isSaving || !isDraftComplete(view.draft)}
@@ -503,10 +509,10 @@ export function DashboardPersonaManager({
                   type="button"
                 >
                   {isSaving
-                    ? "Saving..."
+                    ? t("saving")
                     : view.personaId
-                      ? "Save changes"
-                      : "Create agent"}
+                      ? t("saveChanges")
+                      : t("createAgent")}
                 </Button>
               </DialogFooter>
             </>
@@ -522,16 +528,17 @@ export function DashboardPersonaManager({
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Remove {pendingDelete?.name}?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {t("removeConfirmTitle", { name: pendingDelete?.name ?? "" })}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              Conversations already started with this agent keep their history,
-              but nobody can start a new one with it.
+              {t("removeConfirmDescription")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
             <AlertDialogAction onClick={() => void confirmDelete()}>
-              Remove
+              {t("remove")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

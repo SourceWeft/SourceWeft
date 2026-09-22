@@ -64,6 +64,7 @@ export function useThreadModels({
   workspaceId,
 }: UseThreadModelsInput) {
   const t = useTranslations("dashboardChat");
+  const tCanvas = useTranslations("dashboardChatCanvas");
   const [selectedModels, setSelectedModels] = useState<SelectedModels>(() =>
     resolveSelectedModels({ availableModels: emptyModelCatalog }),
   );
@@ -303,7 +304,10 @@ export function useThreadModels({
         return;
       }
 
-      const catalogModels = mapCatalogKindsToModelItems(catalog.kinds);
+      const catalogModels = mapCatalogKindsToModelItems(
+        catalog.kinds,
+        tCanvas,
+      );
       const kindEnabled = {
         llm: catalogModels.llm.length > 0,
         image: catalogModels.image.length > 0,
@@ -318,11 +322,14 @@ export function useThreadModels({
         fallbackAliases: catalog.defaults,
       });
       setSelectedModels(
-        resolveSelectedModelsWithByok({
-          availableModels: catalogModels,
-          baseSelectedModels: resolvedModels,
-          byokSelections: storedByokSelections,
-        }),
+        resolveSelectedModelsWithByok(
+          {
+            availableModels: catalogModels,
+            baseSelectedModels: resolvedModels,
+            byokSelections: storedByokSelections,
+          },
+          tCanvas,
+        ),
       );
       setBaseSelectedModels(resolvedModels);
       setModelSelectionSources(DEFAULT_MODEL_SELECTION_SOURCES);
@@ -371,7 +378,7 @@ export function useThreadModels({
       setComposerOptions(normalizeComposerOptionsState({}));
       setStreamWithSelectedLlm(false);
     }
-  }, [onChatPreferencesChange, threadId, workspaceId]);
+  }, [onChatPreferencesChange, tCanvas, threadId, workspaceId]);
 
   useEffect(() => {
     void loadThreadModelState();

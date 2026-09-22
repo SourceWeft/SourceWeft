@@ -57,9 +57,7 @@ export function SourceWeftFooter({
       [`${landingBase}#features`, t("links.features"), false],
       [`${landingBase}#how-it-works`, t("links.howItWorks"), false],
       [`${landingBase}#pricing`, t("links.pricing"), true],
-      // Not migrated into the locale-prefixed marketing tree yet — new since
-      // this i18n work started; stay plain paths like an un-migrated route.
-      ["/download", t("links.download"), false],
+      [addLocalePrefix("/download", localePrefix), t("links.download"), false],
       [addLocalePrefix("/mcp", localePrefix), t("links.mcpServers"), false],
       [addLocalePrefix("/skills", localePrefix), t("links.skills"), false],
       [addLocalePrefix("/blog", localePrefix), t("links.blog"), false],

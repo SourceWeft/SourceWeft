@@ -1,6 +1,7 @@
 "use client";
 
 import { Bot, ChevronDown, ExternalLink, X } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import {
   DropdownMenu,
@@ -25,6 +26,7 @@ export function SubagentPanel({
   className?: string;
   panel: ChatHubSubagentPanel;
 }) {
+  const t = useTranslations("dashboardChat.subagent");
   const current =
     panel.siblings.find((sibling) => sibling.id === panel.threadId) ?? null;
   const title = current?.title ?? panel.title;
@@ -44,7 +46,7 @@ export function SubagentPanel({
               <Button
                 className="h-8 min-w-0 max-w-[60%] justify-start gap-1.5 px-2"
                 size="sm"
-                title="Switch sub-agent"
+                title={t("switchTitle")}
                 type="button"
                 variant="ghost"
               >
@@ -79,23 +81,23 @@ export function SubagentPanel({
             className="size-8 text-muted-foreground"
             onClick={() => panel.onOpenInNewWindow(panel.threadId)}
             size="icon-sm"
-            title="Open in new window"
+            title={t("openInNewWindow")}
             type="button"
             variant="ghost"
           >
             <ExternalLink className="size-4" />
-            <span className="sr-only">Open in new window</span>
+            <span className="sr-only">{t("openInNewWindow")}</span>
           </Button>
           <Button
             className="size-8 text-muted-foreground"
             onClick={panel.onClose}
             size="icon-sm"
-            title="Close sub-agent"
+            title={t("closeSubagent")}
             type="button"
             variant="ghost"
           >
             <X className="size-4" />
-            <span className="sr-only">Close sub-agent</span>
+            <span className="sr-only">{t("closeSubagent")}</span>
           </Button>
         </div>
       </div>
@@ -104,7 +106,7 @@ export function SubagentPanel({
         key={panel.threadId}
         className="min-h-0 w-full flex-1 border-0 bg-background"
         src={buildEmbedThreadPath(panel.threadId)}
-        title={`Sub-agent: ${title}`}
+        title={t("iframeTitle", { title })}
       />
     </aside>
   );

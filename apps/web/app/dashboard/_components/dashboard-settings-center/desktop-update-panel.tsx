@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { useLocale, useTranslations } from "next-intl";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import {
   desktopUpdates,
@@ -7,25 +8,34 @@ import {
   type UpdatePreferences,
 } from "../../../../lib/desktop-bridge";
 
-const labels: Record<string, string> = {
-  idle: "Ready to check",
-  checking: "Checking for updates…",
-  upToDate: "You are up to date",
-  waitingForStable:
-    "Waiting for a newer stable release; your app will not be downgraded",
-  available: "An update is available",
-  downloading: "Downloading in the background…",
-  verifying: "Verifying update…",
-  ready: "Ready to install",
-  preparing: "Saving your work…",
-  waitingForIdle: "Waiting for local work to finish…",
-  installing: "Installing…",
-  distributionPaused: "Updates paused by the publisher",
-  withdrawn: "This update was withdrawn",
-  channelUnavailable: "No update has been published to this channel",
-  failed: "Update could not be completed",
-};
+const statusKeys = [
+  "idle",
+  "checking",
+  "upToDate",
+  "waitingForStable",
+  "available",
+  "downloading",
+  "verifying",
+  "ready",
+  "preparing",
+  "waitingForIdle",
+  "installing",
+  "distributionPaused",
+  "withdrawn",
+  "channelUnavailable",
+  "failed",
+] as const;
+function statusLabel(
+  t: ReturnType<typeof useTranslations<"dashboardSettings.desktopUpdate">>,
+  status: string,
+) {
+  return (statusKeys as readonly string[]).includes(status)
+    ? t(`status.${status as (typeof statusKeys)[number]}`)
+    : status;
+}
 export function DesktopUpdatePanel() {
+  const t = useTranslations("dashboardSettings.desktopUpdate");
+  const locale = useLocale();
   const [state, setState] = useState<DesktopUpdateState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -84,19 +94,18 @@ export function DesktopUpdatePanel() {
   return (
     <section
       className="space-y-4 rounded-lg border border-border p-4"
-      aria-label="Software update"
+      aria-label={t("title")}
     >
       <div>
-        <h3 className="text-sm font-medium">Software update</h3>
+        <h3 className="text-sm font-medium">{t("title")}</h3>
         <p className="mt-1 text-xs text-muted-foreground">
-          Settings apply to this computer’s current OS user, across SourceWeft
-          accounts.
+          {t("description")}
         </p>
       </div>
       {state?.preferences && (
         <div className="space-y-3 text-sm">
           <label className="flex items-center justify-between gap-4">
-            Update channel
+            {t("channel")}
             <select
               className="rounded-md border border-input bg-background px-2 py-1"
               value={state.preferences.channel}
@@ -105,18 +114,17 @@ export function DesktopUpdatePanel() {
                 preference({ channel: e.target.value as "stable" | "preview" })
               }
             >
-              <option value="stable">Stable</option>
-              <option value="preview">Preview + stable</option>
+              <option value="stable">{t("channelStable")}</option>
+              <option value="preview">{t("channelPreview")}</option>
             </select>
           </label>
           {state.preferences.channel === "preview" && (
             <p className="text-xs text-muted-foreground">
-              Includes release candidates and stable releases. Preview versions
-              may be less reliable.
+              {t("channelPreviewHint")}
             </p>
           )}
           <label className="flex items-center justify-between gap-4">
-            Check automatically
+            {t("autoCheck")}
             <input
               type="checkbox"
               checked={state.preferences.autoCheck}
@@ -125,7 +133,7 @@ export function DesktopUpdatePanel() {
             />
           </label>
           <label className="flex items-center justify-between gap-4">
-            Download automatically
+            {t("autoDownload")}
             <input
               type="checkbox"
               checked={state.preferences.autoDownload}
@@ -134,17 +142,20 @@ export function DesktopUpdatePanel() {
             />
           </label>
           <p className="text-xs text-muted-foreground">
-            Downloads run while the app is open. Installation always needs your
-            confirmation.
+            {t("autoDownloadHint")}
           </p>
         </div>
       )}
       <div aria-live="polite" className="space-y-2 text-sm">
         <p>
-          {state
-            ? (labels[state.status] ?? state.status)
-            : "Loading update settings…"}
-          {state?.version ? ` · ${state.version}` : ""}
+          {!state
+            ? t("loading")
+            : state.version
+              ? t("statusWithVersion", {
+                  status: statusLabel(t, state.status),
+                  version: state.version,
+                })
+              : statusLabel(t, state.status)}
         </p>
         {state?.status === "downloading" && (
           <>
@@ -154,7 +165,9 @@ export function DesktopUpdatePanel() {
               value={state.totalBytes ? state.downloadedBytes : undefined}
             />
             <p className="text-xs text-muted-foreground">
-              {(state.downloadedBytes / 1048576).toFixed(1)} MiB downloaded
+              {t("downloaded", {
+                size: (state.downloadedBytes / 1048576).toFixed(1),
+              })}
             </p>
           </>
         )}
@@ -170,7 +183,9 @@ export function DesktopUpdatePanel() {
         )}
         {state?.lastChecked && (
           <p className="text-xs text-muted-foreground">
-            Last checked: {new Date(state.lastChecked * 1000).toLocaleString()}
+            {t("lastChecked", {
+              date: new Date(state.lastChecked * 1000).toLocaleString(locale),
+            })}
           </p>
         )}
       </div>
@@ -181,7 +196,7 @@ export function DesktopUpdatePanel() {
           disabled={busy}
           onClick={() => void run(desktopUpdates.check)}
         >
-          Check for updates
+          {t("check")}
         </Button>
         {state?.candidateId && state.status === "available" && (
           <Button
@@ -191,7 +206,7 @@ export function DesktopUpdatePanel() {
               void run(() => desktopUpdates.download(state.candidateId!))
             }
           >
-            Download update
+            {t("download")}
           </Button>
         )}
         {state?.candidateId && state.status === "ready" && (
@@ -202,7 +217,7 @@ export function DesktopUpdatePanel() {
               void run(() => desktopUpdates.install(state.candidateId!))
             }
           >
-            Install and restart
+            {t("install")}
           </Button>
         )}
         {state?.operationId && state.status === "downloading" && (
@@ -213,7 +228,7 @@ export function DesktopUpdatePanel() {
               void run(() => desktopUpdates.cancelDownload(state.operationId!))
             }
           >
-            Cancel download
+            {t("cancelDownload")}
           </Button>
         )}
         {state?.candidateId &&
@@ -226,7 +241,7 @@ export function DesktopUpdatePanel() {
                 void run(() => desktopUpdates.snooze(state.candidateId!))
               }
             >
-              Remind me tomorrow
+              {t("snooze")}
             </Button>
           )}
       </div>

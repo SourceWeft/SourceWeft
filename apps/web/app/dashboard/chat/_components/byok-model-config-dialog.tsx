@@ -43,9 +43,12 @@ import {
 
 const CUSTOM_PROVIDER_NAME = "custom";
 
-function getProviderLabel(providerName: string) {
+function getProviderLabel(
+  t: ReturnType<typeof useTranslations<"dashboardChatCanvas">>,
+  providerName: string,
+) {
   return providerName === CUSTOM_PROVIDER_NAME
-    ? "Custom Provider"
+    ? t("byokDialog.customProvider")
     : toProviderLabel(providerName);
 }
 
@@ -357,7 +360,7 @@ export function ByokModelConfigDialog({
 
       await refreshByokState();
       const providerSlug = normalizeProviderSlug(trimmedProviderName);
-      const providerLabel = getProviderLabel(trimmedProviderName);
+      const providerLabel = getProviderLabel(t, trimmedProviderName);
       const selection = toByokSelectionFromCustomModel({
         byokModelId: createdModel.item.id,
         capabilities: createdModel.item
@@ -367,18 +370,24 @@ export function ByokModelConfigDialog({
         modelName: trimmedModelName,
         providerName: trimmedProviderName,
       });
-      const model = createCustomModelItem({
-        byokCredentialId: activeCredentialId,
-        byokCredentialAlias: activeCredentialAlias,
-        byokModelId: createdModel.item.id,
-        capabilities: createdModel.item
-          .capabilities as ModelThinkingCapabilities | null,
-        modelAlias: trimmedModelName,
-        name: trimmedDisplayName,
-        providerLabel,
-        providerSlug,
-        subtitle: `${trimmedModelName} via ${providerLabel} BYOK`,
-      });
+      const model = createCustomModelItem(
+        {
+          byokCredentialId: activeCredentialId,
+          byokCredentialAlias: activeCredentialAlias,
+          byokModelId: createdModel.item.id,
+          capabilities: createdModel.item
+            .capabilities as ModelThinkingCapabilities | null,
+          modelAlias: trimmedModelName,
+          name: trimmedDisplayName,
+          providerLabel,
+          providerSlug,
+          subtitle: t("modelSelector.byok.newModelSubtitle", {
+            model: trimmedModelName,
+            provider: providerLabel,
+          }),
+        },
+        t,
+      );
 
       onConfigured({ model, selection, type });
       onOpenChange(false);

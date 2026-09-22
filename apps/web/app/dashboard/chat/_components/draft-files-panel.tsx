@@ -1,6 +1,7 @@
 "use client";
 
 import { Folder } from "lucide-react";
+import { useTranslations } from "next-intl";
 import {
   WorkingFolderPicker,
   type ChatCreationContext,
@@ -23,45 +24,42 @@ export function DraftFilesPanel({
   onChooseFolder?: () => Promise<void>;
   searchQuery?: string;
 }) {
+  const t = useTranslations("dashboardChatFiles.draftFiles");
   if (!context || !context.ready || !context.target)
     return (
       <p
         role={context?.error ? "alert" : "status"}
         className="p-4 text-sm text-muted-foreground"
       >
-        {context?.error ?? "Loading file location…"}
+        {context?.error ?? t("loadingLocation")}
       </p>
     );
   if (context.target.kind === "cloud")
     return (
       <section className="space-y-2 p-4 text-sm">
-        <h3 className="font-medium">Conversation cloud files</h3>
-        <p className="text-muted-foreground">
-          Files you upload and create after starting this conversation will be
-          saved here.
-        </p>
+        <h3 className="font-medium">{t("cloudTitle")}</h3>
+        <p className="text-muted-foreground">{t("cloudDescription")}</p>
       </section>
     );
   const { target, selectedDevice } = context;
   const message =
     context.error ??
     (!selectedDevice?.online
-      ? "This computer is offline. Your folder selection is preserved."
+      ? t("offline")
       : !selectedDevice.connected
-        ? "Connect to this computer to browse its files."
+        ? t("connectToBrowse")
         : "");
   return (
     <section className="space-y-3">
       <div className="space-y-2 p-4">
         <h3 className="flex items-center gap-2 text-sm font-medium">
           <Folder className="size-4" />
-          {target.folderId ? "Working directory" : "Conversation folder"}
+          {target.folderId ? t("workingDirectory") : t("conversationFolder")}
         </h3>
         <p className="text-xs text-muted-foreground">{selectedDevice?.name}</p>
         {!target.folderId && (
           <p className="text-sm text-muted-foreground">
-            An independent folder will be created automatically on this computer
-            when the conversation starts using files.
+            {t("autoFolderHint")}
           </p>
         )}
         {onFolderChange && (
@@ -78,8 +76,7 @@ export function DraftFilesPanel({
         )}
         {target.deviceId !== context.nativeId && (
           <p className="text-xs text-muted-foreground">
-            To authorize another folder, open SW on this computer. You can
-            select an already authorized folder here.
+            {t("authorizeHint")}
           </p>
         )}
       </div>

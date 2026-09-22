@@ -1,7 +1,6 @@
 "use client";
 
 import Image from "next/image";
-import Link from "next/link";
 import { useState } from "react";
 import {
   ArrowDown,
@@ -12,13 +11,15 @@ import {
   Laptop,
   Tag,
 } from "lucide-react";
+import { useTranslations } from "next-intl";
 
-import { SourceWeftFooter } from "../_landing/components/sourceweft-footer";
-import { SourceWeftHeader } from "../_landing/components/sourceweft-header";
+import { LocaleLink } from "../_components/locale-link";
+import { SourceWeftFooter } from "../../_landing/components/sourceweft-footer";
+import { SourceWeftHeader } from "../../_landing/components/sourceweft-header";
 import {
   useLandingAuthState,
   type LandingAuthState,
-} from "../_landing/components/use-landing-auth-state";
+} from "../../_landing/components/use-landing-auth-state";
 import {
   GITHUB_RELEASES_URL,
   findArtifact,
@@ -27,18 +28,13 @@ import {
   type DownloadChannel,
   type DownloadChannelManifest,
   type DownloadChannels,
-} from "../../lib/download-channels";
+} from "../../../lib/download-channels";
 import {
   isMobilePlatform,
   type DetectedPlatform,
-} from "../../lib/detect-platform";
-import { useDetectedPlatform } from "../../lib/use-detected-platform";
-import {
-  DESKTOP_HIGHLIGHTS,
-  MOBILE_PLATFORMS,
-  STORE_LINKS,
-  platformDisplay,
-} from "./download-content";
+} from "../../../lib/detect-platform";
+import { useDetectedPlatform } from "../../../lib/use-detected-platform";
+import { MOBILE_PLATFORMS, STORE_LINKS, platformDisplay } from "./download-content";
 import {
   AllDownloadsSection,
   BeforeInstallSection,
@@ -89,6 +85,7 @@ function PrimaryCta({
   webHref: string;
   webLabel: string;
 }) {
+  const t = useTranslations("download");
   const artifact = primaryArtifactFor(manifest, platform);
 
   if (isMobilePlatform(platform)) {
@@ -104,28 +101,29 @@ function PrimaryCta({
             className={primaryButtonClassName}
           >
             <Download className="size-4" />
-            {store.storeAction}
+            {t(`mobile.${store.id}.storeAction`)}
           </a>
-          <Link href={webHref} className={secondaryButtonClassName}>
+          <LocaleLink href={webHref} className={secondaryButtonClassName}>
             {webLabel}
             <ArrowRight className="size-4" />
-          </Link>
+          </LocaleLink>
         </>
       );
     }
     return (
       <>
-        <Link href={webHref} className={primaryButtonClassName}>
+        <LocaleLink href={webHref} className={primaryButtonClassName}>
           {webLabel}
           <ArrowRight className="size-4" />
-        </Link>
+        </LocaleLink>
         <a href="#mobile" className={secondaryButtonClassName}>
-          Mobile apps
+          {t("cta.mobileApps")}
           <ArrowDown className="size-4" />
         </a>
         <p className="w-full text-xs text-zinc-500 dark:text-zinc-500">
-          The {store?.label ?? "mobile"} app is coming soon. The web app works
-          on your phone today.
+          {t("cta.mobileComingSoon", {
+            platform: store?.label ?? t("cta.mobileFallbackLabel"),
+          })}
         </p>
       </>
     );
@@ -143,10 +141,10 @@ function PrimaryCta({
           className={primaryButtonClassName}
         >
           <Icon className="size-4" />
-          Download for {display.label}
+          {t("cta.downloadFor", { platform: display.label })}
         </a>
         <a href="#all-downloads" className={secondaryButtonClassName}>
-          All downloads
+          {t("cta.allDownloads")}
           <ArrowDown className="size-4" />
         </a>
         <p className="w-full text-xs text-zinc-500 dark:text-zinc-500">
@@ -162,12 +160,12 @@ function PrimaryCta({
       <>
         <a href="#all-downloads" className={primaryButtonClassName}>
           <Download className="size-4" />
-          Choose your platform
+          {t("cta.choosePlatform")}
         </a>
-        <Link href={webHref} className={secondaryButtonClassName}>
+        <LocaleLink href={webHref} className={secondaryButtonClassName}>
           {webLabel}
           <ArrowRight className="size-4" />
-        </Link>
+        </LocaleLink>
       </>
     );
   }
@@ -180,13 +178,13 @@ function PrimaryCta({
         rel="noopener noreferrer"
         className={primaryButtonClassName}
       >
-        View releases on GitHub
+        {t("cta.viewReleasesGithub")}
         <ExternalLink className="size-4" />
       </a>
-      <Link href={webHref} className={secondaryButtonClassName}>
+      <LocaleLink href={webHref} className={secondaryButtonClassName}>
         {webLabel}
         <ArrowRight className="size-4" />
-      </Link>
+      </LocaleLink>
     </>
   );
 }
@@ -200,10 +198,11 @@ function ChannelToggle({
   selected: DownloadChannel;
   onSelect: (channel: DownloadChannel) => void;
 }) {
+  const t = useTranslations("download.channels");
   return (
     <div
       role="tablist"
-      aria-label="Release channel"
+      aria-label={t("ariaLabel")}
       className="inline-flex rounded-lg border border-zinc-200 p-0.5 text-xs dark:border-white/10"
     >
       {(["stable", "preview"] as const).map((channel) => {
@@ -222,7 +221,7 @@ function ChannelToggle({
                 : "rounded-md px-3 py-1 text-zinc-500 transition-colors hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white"
             }
           >
-            {channel === "stable" ? "Stable" : "Preview"}
+            {channel === "stable" ? t("stable") : t("preview")}
             {manifest ? ` v${manifest.version}` : ""}
           </button>
         );
@@ -244,10 +243,13 @@ function HeroSection({
   onSelectChannel: (channel: DownloadChannel) => void;
   initialPlatform: DetectedPlatform;
 }) {
+  const t = useTranslations("download");
   const manifest = channels[selectedChannel];
   const platform = useDetectedPlatform(initialPlatform);
   const webHref = authState.isSignedIn ? "/dashboard" : "/auth/sign-in";
-  const webLabel = authState.isSignedIn ? "Open Dashboard" : "Open the web app";
+  const webLabel = authState.isSignedIn
+    ? t("web.openDashboard")
+    : t("web.openWebApp");
   const bothChannels = Boolean(channels.stable && channels.preview);
 
   return (
@@ -277,9 +279,9 @@ function HeroSection({
             <Laptop className="size-3.5" />
             {manifest
               ? manifest.channel === "stable"
-                ? "Stable release"
-                : "Preview build"
-              : "Desktop app"}
+                ? t("hero.badgeStable")
+                : t("hero.badgePreview")
+              : t("hero.badgeDefault")}
             {manifest ? (
               <span className="text-zinc-400 dark:text-zinc-500">
                 v{manifest.version}
@@ -287,12 +289,10 @@ function HeroSection({
             ) : null}
           </p>
           <h1 className="mt-5 max-w-3xl text-4xl font-bold tracking-tight text-zinc-950 sm:text-5xl lg:text-6xl dark:text-white">
-            Download SourceWeft.
+            {t("hero.heading")}
           </h1>
           <p className="mt-6 max-w-2xl text-base leading-7 text-zinc-600 sm:text-lg dark:text-zinc-400">
-            Native apps for macOS and Windows today, with iOS and Android on the
-            way. Every app signs in to the same account and workspaces as the
-            web; local device capabilities arrive on macOS first.
+            {t("hero.subtitle")}
           </p>
           <div className="mt-8 flex flex-wrap items-center gap-3">
             <PrimaryCta
@@ -304,7 +304,7 @@ function HeroSection({
           </div>
 
           <ul className="mt-8 grid gap-x-6 gap-y-2.5 text-sm text-zinc-600 sm:grid-cols-2 dark:text-zinc-400">
-            {DESKTOP_HIGHLIGHTS.map((item) => (
+            {(t.raw("highlights") as string[]).map((item) => (
               <li key={item} className="flex items-start gap-2.5">
                 <Check className="mt-1 size-4 shrink-0 text-emerald-500" />
                 {item}
@@ -327,17 +327,17 @@ function HeroSection({
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-1 transition-colors hover:text-zinc-900 dark:hover:text-white"
                 >
-                  Release notes
+                  {t("hero.releaseNotes")}
                   <ExternalLink className="size-3.5" />
                 </a>
               </>
             ) : null}
-            <Link
+            <LocaleLink
               href="/changelog"
               className="transition-colors hover:text-zinc-900 dark:hover:text-white"
             >
-              Changelog
-            </Link>
+              {t("hero.changelog")}
+            </LocaleLink>
             {bothChannels ? (
               <ChannelToggle
                 channels={channels}
@@ -356,7 +356,7 @@ function HeroSection({
           <div className="relative overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xl shadow-zinc-900/10 lg:w-[136%] lg:max-w-none dark:border-white/10 dark:bg-zinc-900 dark:shadow-black/50">
             <Image
               src="/download/desktop-chat-light.png"
-              alt="SourceWeft desktop app on macOS: a workspace with a selected reading-notes source, a drafted question in the composer, and the Hub panel listing sources"
+              alt={t("hero.screenshotAlt")}
               width={1440}
               height={900}
               // Lazy on both variants: browsers skip fetching the display:none
@@ -393,13 +393,16 @@ export function DownloadPage({
   initialAuthState: LandingAuthState;
   initialPlatform?: DetectedPlatform;
 }) {
+  const t = useTranslations("download");
   const authState = useLandingAuthState(initialAuthState);
   const [selectedChannel, setSelectedChannel] = useState<DownloadChannel>(
     channels.stable ? "stable" : "preview",
   );
   const manifest = channels[selectedChannel];
   const webHref = authState.isSignedIn ? "/dashboard" : "/auth/sign-in";
-  const webLabel = authState.isSignedIn ? "Open Dashboard" : "Get started";
+  const webLabel = authState.isSignedIn
+    ? t("web.openDashboard")
+    : t("web.getStarted");
 
   return (
     <div className="min-h-screen bg-background text-foreground">

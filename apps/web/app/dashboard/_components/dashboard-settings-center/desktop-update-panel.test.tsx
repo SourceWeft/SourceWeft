@@ -1,8 +1,14 @@
 // @vitest-environment jsdom
-import { act, createElement } from "react";
+import { act, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, test, vi, expect } from "vitest";
+import { NextIntlClientProvider } from "next-intl";
 import type { DesktopUpdateState } from "../../../../lib/desktop-bridge";
+import messages from "../../../../messages/en.json";
+
+const intlMessages = messages as ComponentProps<
+  typeof NextIntlClientProvider
+>["messages"];
 const { api } = vi.hoisted(() => ({
   api: {
     state: vi.fn(),
@@ -50,7 +56,11 @@ async function render(initial = state()) {
   document.body.append(container);
   root = createRoot(container);
   await act(async () => {
-    root.render(createElement(DesktopUpdatePanel));
+    root.render(
+      <NextIntlClientProvider locale="en" messages={intlMessages}>
+        <DesktopUpdatePanel />
+      </NextIntlClientProvider>,
+    );
   });
 }
 afterEach(async () => {

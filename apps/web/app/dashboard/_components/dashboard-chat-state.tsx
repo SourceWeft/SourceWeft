@@ -10,6 +10,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { useTranslations } from "next-intl";
 import type {
   DashboardChatBootstrapCacheHints,
   ListThreadModelCatalogResponse,
@@ -185,6 +186,7 @@ export function DashboardChatStateProvider({
 }: {
   children: ReactNode;
 }) {
+  const t = useTranslations("dashboardChat");
   const { data: activeOrg } = authClient.useActiveOrganization();
   const { data: orgs } = authClient.useListOrganizations();
 
@@ -210,7 +212,7 @@ export function DashboardChatStateProvider({
     }
   }, [sourcesVisible, panelPreferenceLoaded]);
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
-  const [workspaceName, setWorkspaceName] = useState("Workspace");
+  const [workspaceName, setWorkspaceName] = useState(t("workspaceFallback"));
   const [organizationId, setOrganizationId] = useState<string | null>(null);
   const [organizationName, setOrganizationName] = useState("SourceWeft");
   const [workspaces, setWorkspaces] = useState<
@@ -254,7 +256,7 @@ export function DashboardChatStateProvider({
   );
 
   const [activeChatId, setActiveChatId] = useState("");
-  const [threadTitle, setThreadTitle] = useState("New chat");
+  const [threadTitle, setThreadTitle] = useState(t("newChat.title"));
   const activeOrganizationRef = useRef<string | null>(null);
   const hydrateGenerationRef = useRef(0);
   const workspaceSwitchGenerationRef = useRef(0);
@@ -306,7 +308,7 @@ export function DashboardChatStateProvider({
       if (!active) {
         setWorkspaces([]);
         setWorkspaceId(null);
-        setWorkspaceName("Workspace");
+        setWorkspaceName(t("workspaceFallback"));
         setPrivateChats([]);
         setSharedChats([]);
         setPrivateChatsCursor(null);
@@ -347,7 +349,7 @@ export function DashboardChatStateProvider({
         }
       }
     },
-    [fetchChatsPage],
+    [fetchChatsPage, t],
   );
 
   useEffect(() => {
@@ -362,7 +364,7 @@ export function DashboardChatStateProvider({
 
       if (organizationChanged) {
         setWorkspaceId(null);
-        setWorkspaceName("Workspace");
+        setWorkspaceName(t("workspaceFallback"));
         setWorkspaces([]);
         setPrivateChats([]);
         setPrivateChatsCursor(null);
@@ -370,7 +372,7 @@ export function DashboardChatStateProvider({
         setSharedChats([]);
         setArchivedChats([]);
         setActiveChatId("");
-        setThreadTitle("New chat");
+        setThreadTitle(t("newChat.title"));
         setMode("new");
         setPendingWorkspaceId(null);
         setWorkspaceSwitchStatus("idle");
@@ -498,7 +500,7 @@ export function DashboardChatStateProvider({
     return () => {
       cancelled = true;
     };
-  }, [activeOrg?.id, activeOrg?.name, hydrateWorkspace, orgs]);
+  }, [activeOrg?.id, activeOrg?.name, hydrateWorkspace, orgs, t]);
 
   const createWorkspace = useCallback(
     async (name?: string) => {
@@ -506,7 +508,9 @@ export function DashboardChatStateProvider({
         return null;
       }
 
-      const safeName = name?.trim() || `Workspace ${workspaces.length + 1}`;
+      const safeName =
+        name?.trim() ||
+        t("defaultWorkspaceName", { number: workspaces.length + 1 });
       const workspace = await workspaceClient.createWorkspace(organizationId, {
         name: safeName,
       });
@@ -531,7 +535,7 @@ export function DashboardChatStateProvider({
       setHasMorePrivateChats(false);
       setMode("new");
       setActiveChatId("");
-      setThreadTitle("New chat");
+      setThreadTitle(t("newChat.title"));
       setInitialChatPreferences(DEFAULT_THREAD_CHAT_PREFERENCES);
 
       try {
@@ -542,7 +546,7 @@ export function DashboardChatStateProvider({
 
       return nextWorkspace;
     },
-    [organizationId, workspaces.length],
+    [organizationId, t, workspaces.length],
   );
 
   const renameWorkspace = useCallback(
@@ -661,7 +665,7 @@ export function DashboardChatStateProvider({
             errorMessage:
               error instanceof Error
                 ? error.message
-                : "Failed to switch workspace.",
+                : t("switchWorkspaceFailed"),
           }),
         );
         return false;
@@ -678,6 +682,7 @@ export function DashboardChatStateProvider({
       mode,
       organizationId,
       pendingWorkspaceId,
+      t,
       threadTitle,
       workspaceSwitchStatus,
       workspaces,
@@ -709,8 +714,8 @@ export function DashboardChatStateProvider({
   const startNewChat = useCallback(() => {
     setActiveChatId("");
     setMode("new");
-    setThreadTitle("New chat");
-  }, []);
+    setThreadTitle(t("newChat.title"));
+  }, [t]);
 
   const openChat = useCallback((id: string, title: string) => {
     setMode("thread");
@@ -817,7 +822,7 @@ export function DashboardChatStateProvider({
       // A persona-owned thread is titled after the persona by the server; an
       // ordinary chat keeps the "New chat" placeholder until it is titled.
       const safeTitle =
-        trimmedTitle || (input?.personaId ? undefined : "New chat");
+        trimmedTitle || (input?.personaId ? undefined : t("newChat.title"));
 
       try {
         const result = await contentClient.createThread(workspaceId, {
@@ -868,6 +873,7 @@ export function DashboardChatStateProvider({
       privateChats,
       rememberChatPreferences,
       sharedChats,
+      t,
       workspaceId,
     ],
   );
@@ -964,10 +970,10 @@ export function DashboardChatStateProvider({
     setActiveChatId((value) => {
       if (value !== id) return value;
       setMode("new");
-      setThreadTitle("New chat");
+      setThreadTitle(t("newChat.title"));
       return "";
     });
-  }, []);
+  }, [t]);
 
   const deleteChat = useCallback(
     async (id: string) => {
@@ -1041,7 +1047,7 @@ export function DashboardChatStateProvider({
     setActiveChatId((value) => {
       if (!privateIds.has(value)) return value;
       setMode("new");
-      setThreadTitle("New chat");
+      setThreadTitle(t("newChat.title"));
       return "";
     });
 
@@ -1067,6 +1073,7 @@ export function DashboardChatStateProvider({
     privateChatsCursor,
     fetchChatsPage,
     removeChatFromState,
+    t,
   ]);
 
   const clearArchivedChats = useCallback(async () => {
@@ -1087,10 +1094,10 @@ export function DashboardChatStateProvider({
     setActiveChatId((value) => {
       if (!archivedIds.has(value)) return value;
       setMode("new");
-      setThreadTitle("New chat");
+      setThreadTitle(t("newChat.title"));
       return "";
     });
-  }, [workspaceId, archivedChats, removeChatFromState]);
+  }, [workspaceId, archivedChats, removeChatFromState, t]);
 
   const state = useMemo<DashboardChatState>(
     () => ({

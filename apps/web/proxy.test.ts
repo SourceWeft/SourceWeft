@@ -98,3 +98,18 @@ test("the agent entry point /skills/SKILL.md is outside the proxy matcher", () =
   assert.equal(matcher.test("/skills"), true);
   assert.equal(matcher.test("/skills/SKILL.md"), false);
 });
+
+test("/download is localized: the bare path rewrites onto /en and /en/download canonicalizes", () => {
+  const bare = proxy(req("/download"));
+  assert.equal(bare.status, 200);
+  assert.equal(
+    bare.headers.get("x-middleware-rewrite"),
+    "http://localhost:3000/en/download",
+  );
+  const prefixed = proxy(req("/en/download"));
+  assert.equal(prefixed.status, 308);
+  assert.equal(
+    prefixed.headers.get("location"),
+    "http://localhost:3000/download",
+  );
+});

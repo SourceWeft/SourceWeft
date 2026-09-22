@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Copy, ExternalLink, RotateCw } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import {
   Card,
@@ -25,20 +26,21 @@ import { apiBaseUrl } from "../../../lib/sdk";
 
 type DesktopLoginStatus = "idle" | "opening" | "waiting" | "error";
 
-function describePath(path: string) {
+function describePath(path: string, t: ReturnType<typeof useTranslations>) {
   if (path === "sign-up") {
-    return "Create your account in the browser, then return here automatically.";
+    return t("describeSignUp");
   }
 
   if (path === "forgot-password" || path === "reset-password") {
-    return "Finish account recovery in the browser, then return to SourceWeft.";
+    return t("describeRecovery");
   }
 
-  return "Sign in with Google, email, or any web account method in your browser.";
+  return t("describeDefault");
 }
 
 export function DesktopLoginView({ path }: { path: string }) {
   const router = useRouter();
+  const t = useTranslations("authPages.desktopLogin");
   const [status, setStatus] = useState<DesktopLoginStatus>("idle");
   const [loginUrl, setLoginUrl] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -68,7 +70,7 @@ export function DesktopLoginView({ path }: { path: string }) {
         if (!cancelled) {
           setStatus("idle");
           setLoginUrl(null);
-          setMessage("Desktop sign-in expired. Start sign-in again.");
+          setMessage(t("expiredMessage"));
         }
         return;
       }
@@ -85,13 +87,13 @@ export function DesktopLoginView({ path }: { path: string }) {
           if (!cancelled) {
             setStatus("idle");
             setLoginUrl(null);
-            setMessage("Desktop sign-in expired. Start sign-in again.");
+            setMessage(t("expiredMessage"));
           }
           return;
         }
 
         if (!response.ok) {
-          throw new Error("Desktop sign-in status check failed.");
+          throw new Error(t("statusCheckFailed"));
         }
 
         const body = (await response.json()) as
@@ -103,7 +105,7 @@ export function DesktopLoginView({ path }: { path: string }) {
           });
 
           if (result.error) {
-            throw new Error(result.error.message || "Desktop sign-in failed.");
+            throw new Error(result.error.message || t("signInFailed"));
           }
 
           clearPendingDesktopAuth(pendingAuth.state);
@@ -129,7 +131,7 @@ export function DesktopLoginView({ path }: { path: string }) {
         clearTimeout(timeoutId);
       }
     };
-  }, [router, status]);
+  }, [router, status, t]);
 
   async function openLogin(existingLoginUrl?: string | null) {
     const state = existingLoginUrl ? getPendingDesktopAuth().state : null;
@@ -155,9 +157,7 @@ export function DesktopLoginView({ path }: { path: string }) {
     } catch (error) {
       setStatus("error");
       setMessage(
-        error instanceof Error
-          ? error.message
-          : "Unable to open the browser sign-in page.",
+        error instanceof Error ? error.message : t("openBrowserFailed"),
       );
     }
   }
@@ -165,13 +165,13 @@ export function DesktopLoginView({ path }: { path: string }) {
   async function copyLoginLink() {
     const link = loginUrl;
     if (!link || typeof navigator === "undefined" || !navigator.clipboard) {
-      setMessage("No login link is available to copy.");
+      setMessage(t("noLoginLink"));
       return;
     }
 
     await navigator.clipboard.writeText(link);
     setCopied(true);
-    setMessage("Login link copied.");
+    setMessage(t("loginLinkCopied"));
   }
 
   const isOpening = status === "opening";
@@ -183,16 +183,16 @@ export function DesktopLoginView({ path }: { path: string }) {
         <div className="flex items-center gap-3">
           <Logo className="h-10 w-10 rounded-lg" />
           <div>
-            <CardTitle className="text-lg">Sign in to SourceWeft</CardTitle>
+            <CardTitle className="text-lg">{t("title")}</CardTitle>
             <CardDescription className="mt-1">
-              Continue securely in your browser.
+              {t("description")}
             </CardDescription>
           </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-5">
         <p className="text-sm leading-6 text-muted-foreground">
-          {describePath(path)}
+          {describePath(path, t)}
         </p>
 
         <div className="space-y-2">
@@ -204,7 +204,7 @@ export function DesktopLoginView({ path }: { path: string }) {
             type="button"
           >
             <ExternalLink />
-            {isWaiting ? "Open browser again" : "Sign in with browser"}
+            {isWaiting ? t("openBrowserAgain") : t("signInWithBrowser")}
           </Button>
 
           {loginUrl && (
@@ -216,7 +216,7 @@ export function DesktopLoginView({ path }: { path: string }) {
                 variant="outline"
               >
                 <RotateCw />
-                Reopen
+                {t("reopen")}
               </Button>
               <Button
                 disabled={isOpening}
@@ -225,7 +225,7 @@ export function DesktopLoginView({ path }: { path: string }) {
                 variant="outline"
               >
                 <Copy />
-                {copied ? "Copied" : "Copy link"}
+                {copied ? t("copied") : t("copyLink")}
               </Button>
             </div>
           )}

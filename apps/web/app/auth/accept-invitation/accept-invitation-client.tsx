@@ -5,6 +5,7 @@ import { CheckIcon, Loader2, MailCheck, XIcon } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import * as React from "react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import {
   Card,
@@ -107,21 +108,35 @@ function isExpired(expiresAt: InvitationRecord["expiresAt"]) {
   return new Date(expiresAt).getTime() < Date.now();
 }
 
-function formatRole(role: string | null | undefined) {
+// Better Auth's organization plugin defines this fixed role set; `authUi`
+// already carries a translated label for each one.
+const KNOWN_ROLE_KEYS = new Set(["OWNER", "ADMIN", "MEMBER", "GUEST"]);
+
+function formatRole(
+  role: string | null | undefined,
+  tAuthUi: ReturnType<typeof useTranslations>,
+) {
   if (!role) {
-    return "Member";
+    return tAuthUi("MEMBER");
   }
 
   return role
     .split(",")
     .map((part) => part.trim())
     .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .map((part) => {
+      const key = part.toUpperCase();
+      return KNOWN_ROLE_KEYS.has(key)
+        ? tAuthUi(key)
+        : part.charAt(0).toUpperCase() + part.slice(1);
+    })
     .join(", ");
 }
 
 export function AcceptInvitationClient() {
   const router = useRouter();
+  const t = useTranslations("authPages.acceptInvitation");
+  const tAuthUi = useTranslations("authUi");
   const searchParams = useSearchParams();
   const invitationId = searchParams.get("invitationId");
   const redirectTo = getSafeRedirectTo(searchParams.get("redirectTo"));
@@ -161,7 +176,7 @@ export function AcceptInvitationClient() {
   React.useEffect(() => {
     if (!invitationId) {
       setStatus("error");
-      setMessage("Invitation link is missing.");
+      setMessage(t("missingLink"));
       return;
     }
 
@@ -183,7 +198,7 @@ export function AcceptInvitationClient() {
         });
         const nextInvitation = unwrapAuthResult<InvitationRecord>(
           result,
-          "Invitation not found.",
+          t("notFound"),
         );
 
         if (cancelled) {
@@ -215,8 +230,8 @@ export function AcceptInvitationClient() {
           setStatus("error");
           setMessage(
             isExpired(nextInvitation.expiresAt)
-              ? "This invitation has expired."
-              : "This invitation is no longer pending.",
+              ? t("expired")
+              : t("noLongerPending"),
           );
           return;
         }
@@ -231,7 +246,7 @@ export function AcceptInvitationClient() {
         }
 
         setStatus("error");
-        setMessage(getErrorMessage(error, "Invitation not found."));
+        setMessage(getErrorMessage(error, t("notFound")));
       }
     }
 
@@ -247,6 +262,7 @@ export function AcceptInvitationClient() {
     redirectTo,
     refreshOrganizationState,
     router,
+    t,
   ]);
 
   async function handleAccept() {
@@ -264,7 +280,7 @@ export function AcceptInvitationClient() {
       });
       const accepted = unwrapAuthResult<AcceptInvitationResult>(
         result,
-        "Failed to accept invitation.",
+        t("acceptFailed"),
       );
       const organizationId =
         accepted.invitation?.organizationId ?? invitation?.organizationId;
@@ -273,13 +289,13 @@ export function AcceptInvitationClient() {
 
       trackTeamInvitationAccepted();
       setStatus("accepted");
-      toast.success("Invitation accepted.");
+      toast.success(t("acceptedToast"));
       router.replace(redirectTo);
       router.refresh();
     } catch (error) {
       await refreshOrganizationState(invitation?.organizationId ?? null);
       setStatus("error");
-      setMessage(getErrorMessage(error, "Failed to accept invitation."));
+      setMessage(getErrorMessage(error, t("acceptFailed")));
     }
   }
 
@@ -297,21 +313,21 @@ export function AcceptInvitationClient() {
         fetchOptions: { throw: true },
       });
 
-      unwrapAuthResult<unknown>(result, "Failed to reject invitation.");
+      unwrapAuthResult<unknown>(result, t("rejectFailed"));
       await refreshOrganizationState(null);
 
       setStatus("rejected");
-      toast.success("Invitation declined.");
+      toast.success(t("declinedToast"));
       router.replace("/dashboard");
       router.refresh();
     } catch (error) {
       setStatus("error");
-      setMessage(getErrorMessage(error, "Failed to reject invitation."));
+      setMessage(getErrorMessage(error, t("rejectFailed")));
     }
   }
 
   const isProcessing = status === "accepting" || status === "rejecting";
-  const orgName = invitation?.organizationName ?? "SourceWeft team";
+  const orgName = invitation?.organizationName ?? t("defaultOrgName");
 
   return (
     <Card className="w-full max-w-md rounded-lg border-border/80 shadow-sm">
@@ -320,9 +336,9 @@ export function AcceptInvitationClient() {
           <Logo className="h-10 w-10 rounded-lg" />
         </div>
         <div>
-          <CardTitle className="text-lg">Accept invitation</CardTitle>
+          <CardTitle className="text-lg">{t("title")}</CardTitle>
           <CardDescription className="mt-1">
-            Join the team workspace in SourceWeft.
+            {t("description")}
           </CardDescription>
         </div>
       </CardHeader>
@@ -330,7 +346,7 @@ export function AcceptInvitationClient() {
         {status === "loading" ? (
           <div className="flex min-h-24 items-center justify-center text-sm text-muted-foreground">
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            Loading invitation...
+            {t("loading")}
           </div>
         ) : (
           <>
@@ -343,8 +359,12 @@ export function AcceptInvitationClient() {
                   {orgName}
                 </div>
                 <div className="truncate text-xs text-muted-foreground">
-                  {formatRole(invitation?.role)}
-                  {invitation?.email ? ` for ${invitation.email}` : ""}
+                  {invitation?.email
+                    ? t("roleForEmail", {
+                        role: formatRole(invitation?.role, tAuthUi),
+                        email: invitation.email,
+                      })
+                    : formatRole(invitation?.role, tAuthUi)}
                 </div>
               </div>
             </div>
@@ -370,7 +390,7 @@ export function AcceptInvitationClient() {
                   ) : (
                     <XIcon />
                   )}
-                  Decline
+                  {t("decline")}
                 </Button>
                 <Button
                   disabled={isProcessing}
@@ -382,7 +402,7 @@ export function AcceptInvitationClient() {
                   ) : (
                     <CheckIcon />
                   )}
-                  Accept
+                  {t("accept")}
                 </Button>
               </div>
             ) : (
@@ -394,7 +414,7 @@ export function AcceptInvitationClient() {
                 }}
                 type="button"
               >
-                Go to dashboard
+                {t("goToDashboard")}
               </Button>
             )}
           </>

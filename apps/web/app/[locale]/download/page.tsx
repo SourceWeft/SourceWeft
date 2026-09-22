@@ -1,45 +1,57 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
+import { hasLocale } from "next-intl";
+import { getTranslations, setRequestLocale } from "next-intl/server";
+import { notFound } from "next/navigation";
 
-import { resolveInitialLandingAuthState } from "../_landing/auth-state-server";
-import { SITE_NAME, SITE_URL } from "../seo";
-import { detectPlatform } from "../../lib/detect-platform";
+import { resolveInitialLandingAuthState } from "../../_landing/auth-state-server";
+import { SITE_NAME, SITE_URL } from "../../seo";
+import { detectPlatform } from "../../../lib/detect-platform";
 import {
   fetchDownloadChannels,
   type DownloadChannelManifest,
-} from "../../lib/download-channels";
-import { DOWNLOAD_FAQ_ITEMS, PLATFORM_DISPLAY } from "./download-content";
+} from "../../../lib/download-channels";
+import { routing } from "../../../i18n/routing";
+import { buildAlternates } from "../../../lib/i18n/metadata";
+import { DOWNLOAD_FAQ_KEYS, PLATFORM_DISPLAY } from "./download-content";
 import { DownloadPage } from "./download-page";
 
 // Next parses segment config statically, so this has to be a literal.
 // Keep it equal to DOWNLOAD_CHANNEL_REVALIDATE_SECONDS in lib/download-channels.
 export const revalidate = 300;
 
-const description =
-  "Download SourceWeft for macOS and Windows, find the iOS and Android apps, or use the web app, browser extension, and self-hosted Docker bundle. Every desktop installer is listed with its SHA-256 checksum.";
-
-export const metadata: Metadata = {
-  title: "Download SourceWeft",
-  description,
-  alternates: {
-    canonical: `${SITE_URL}/download`,
-  },
-  openGraph: {
-    title: "Download SourceWeft",
+export async function generateMetadata({
+  params,
+}: PageProps<"/[locale]/download">): Promise<Metadata> {
+  const { locale } = await params;
+  if (!hasLocale(routing.locales, locale)) {
+    return {};
+  }
+  const t = await getTranslations({ locale, namespace: "download.meta" });
+  const alternates = buildAlternates("/download", locale);
+  const title = t("title");
+  const description = t("description");
+  return {
+    title,
     description,
-    siteName: SITE_NAME,
-    type: "website",
-    url: `${SITE_URL}/download`,
-    images: [
-      {
-        url: `${SITE_URL}/download/desktop-chat-light.png`,
-        width: 2880,
-        height: 1800,
-        alt: "SourceWeft desktop app on macOS",
-      },
-    ],
-  },
-};
+    alternates,
+    openGraph: {
+      title,
+      description,
+      siteName: SITE_NAME,
+      type: "website",
+      url: alternates.canonical,
+      images: [
+        {
+          url: `${SITE_URL}/download/desktop-chat-light.png`,
+          width: 2880,
+          height: 1800,
+          alt: t("ogImageAlt"),
+        },
+      ],
+    },
+  };
+}
 
 function softwareJsonLd(manifest: DownloadChannelManifest) {
   return {
@@ -60,11 +72,20 @@ function softwareJsonLd(manifest: DownloadChannelManifest) {
   };
 }
 
-export default async function DownloadRoute() {
-  const [authState, channels, requestHeaders] = await Promise.all([
+export default async function DownloadRoute({
+  params,
+}: PageProps<"/[locale]/download">) {
+  const { locale } = await params;
+  if (!hasLocale(routing.locales, locale)) {
+    notFound();
+  }
+  setRequestLocale(locale);
+
+  const [authState, channels, requestHeaders, t] = await Promise.all([
     resolveInitialLandingAuthState(),
     fetchDownloadChannels(),
     headers(),
+    getTranslations({ locale, namespace: "download.faq" }),
   ]);
   const initialPlatform = detectPlatform({
     userAgent: requestHeaders.get("user-agent") ?? undefined,
@@ -73,10 +94,10 @@ export default async function DownloadRoute() {
   const faqJsonLd = {
     "@context": "https://schema.org",
     "@type": "FAQPage",
-    mainEntity: DOWNLOAD_FAQ_ITEMS.map((item) => ({
+    mainEntity: DOWNLOAD_FAQ_KEYS.map((key) => ({
       "@type": "Question",
-      name: item.question,
-      acceptedAnswer: { "@type": "Answer", text: item.answer },
+      name: t(`items.${key}.question`),
+      acceptedAnswer: { "@type": "Answer", text: t(`items.${key}.answer`) },
     })),
   };
 

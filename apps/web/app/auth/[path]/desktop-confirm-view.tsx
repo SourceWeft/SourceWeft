@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Check, UserRound } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import {
   Card,
@@ -43,6 +44,7 @@ export function DesktopConfirmView({
 }: {
   onFallback: () => void;
 }) {
+  const t = useTranslations("authPages.desktopConfirm");
   const [isLoading, setIsLoading] = useState(true);
   const [isContinuing, setIsContinuing] = useState(false);
   const [user, setUser] = useState<SessionUser | null>(null);
@@ -103,9 +105,9 @@ export function DesktopConfirmView({
         <div className="flex items-center gap-3">
           <Logo className="h-10 w-10 rounded-lg" />
           <div>
-            <CardTitle className="text-lg">Continue to SourceWeft</CardTitle>
+            <CardTitle className="text-lg">{t("title")}</CardTitle>
             <CardDescription className="mt-1">
-              Confirm this account for the desktop app.
+              {t("description")}
             </CardDescription>
           </div>
         </div>
@@ -117,10 +119,10 @@ export function DesktopConfirmView({
           </div>
           <div className="min-w-0">
             <div className="truncate text-sm font-medium text-foreground">
-              {user?.name || "SourceWeft User"}
+              {user?.name || t("fallbackName")}
             </div>
             <div className="truncate text-xs text-muted-foreground">
-              {user?.email || "Signed in"}
+              {user?.email || t("fallbackEmail")}
             </div>
           </div>
         </div>
@@ -133,7 +135,7 @@ export function DesktopConfirmView({
           type="button"
         >
           <Check />
-          Continue in desktop
+          {t("continueButton")}
         </Button>
       </CardContent>
     </Card>

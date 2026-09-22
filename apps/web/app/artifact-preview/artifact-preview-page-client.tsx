@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { AlertCircle, ArrowLeft, Loader2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { contentClient } from "../../lib/sdk";
 // Imported directly rather than through the sources-hub barrel, which would
@@ -24,6 +25,7 @@ export function ArtifactPreviewPageClient({
   artifactVersionId?: string | null;
   workspaceId: string | null;
 }) {
+  const t = useTranslations("artifactShare.preview");
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const canLoad = Boolean(artifactId && workspaceId);
 
@@ -33,7 +35,7 @@ export function ArtifactPreviewPageClient({
     async function loadArtifact() {
       if (!artifactId || !workspaceId) {
         setState({
-          error: "Missing workspaceId or artifactId.",
+          error: t("missingIds"),
           status: "error",
         });
         return;
@@ -53,9 +55,7 @@ export function ArtifactPreviewPageClient({
         if (!cancelled) {
           setState({
             error:
-              error instanceof Error
-                ? error.message
-                : "Could not load this artifact.",
+              error instanceof Error ? error.message : t("couldNotLoad"),
             status: "error",
           });
         }
@@ -66,7 +66,7 @@ export function ArtifactPreviewPageClient({
     return () => {
       cancelled = true;
     };
-  }, [artifactId, artifactVersionId, workspaceId]);
+  }, [artifactId, artifactVersionId, workspaceId, t]);
 
   const handleClose = useCallback(() => {
     if (window.history.length > 1) {
@@ -87,17 +87,15 @@ export function ArtifactPreviewPageClient({
           <div className="w-full max-w-md rounded-lg border bg-background p-5 text-center shadow-sm">
             <AlertCircle className="mx-auto mb-3 size-5 text-destructive" />
             <h1 className="text-sm font-semibold text-foreground">
-              Artifact preview is unavailable
+              {t("unavailableTitle")}
             </h1>
             <p className="mt-2 text-xs leading-5 text-muted-foreground">
-              {state.status === "error"
-                ? state.error
-                : "Missing workspaceId or artifactId."}
+              {state.status === "error" ? state.error : t("missingIds")}
             </p>
             <Button asChild className="mt-4" size="sm" variant="outline">
               <Link href="/dashboard/chat">
                 <ArrowLeft className="size-3.5" />
-                Back to chat
+                {t("backToChat")}
               </Link>
             </Button>
           </div>
@@ -110,7 +108,7 @@ export function ArtifactPreviewPageClient({
         <div className="grid h-full place-items-center bg-muted/10">
           <div className="flex items-center gap-2 rounded-full border bg-background px-4 py-2 text-xs text-muted-foreground shadow-sm">
             <Loader2 className="size-3.5 animate-spin" />
-            Loading artifact preview
+            {t("loading")}
           </div>
         </div>
       );
@@ -125,7 +123,7 @@ export function ArtifactPreviewPageClient({
         workspaceId={workspaceId}
       />
     );
-  }, [canLoad, handleClose, state, workspaceId]);
+  }, [canLoad, handleClose, state, t, workspaceId]);
 
   return (
     <main className="h-svh min-h-0 overflow-hidden bg-background text-foreground">
