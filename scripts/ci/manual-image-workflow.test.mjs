@@ -35,6 +35,9 @@ test("every quality and publication checkout uses the one resolved commit", () =
 });
 
 test("publication is manual-only, gated by all checks, and scoped to commit tags", () => {
+  assert.equal(workflow.on.push, undefined);
+  assert.deepEqual(workflow.on.pull_request.branches, ["main"]);
+  assert.ok(Object.hasOwn(workflow.on, "workflow_call"));
   assert.equal(workflow.on.workflow_dispatch.inputs.commit.required, true);
   assert.equal(workflow.permissions.packages, "read");
   const publish = workflow.jobs["docker-image"];
