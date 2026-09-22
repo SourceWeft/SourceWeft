@@ -500,4 +500,40 @@ describe("generateMetadata", () => {
     expect(String(files.alternates?.canonical)).toMatch(/\/skills\/pdf-forms$/);
     expect(files.robots).toMatchObject({ index: false });
   });
+
+  it("makes a locale its own page only where the skill has an overview in it", async () => {
+    const overview = (locale: string) => ({
+      summary: "s",
+      whatItDoes: "w",
+      whenToUse: "u",
+      requirements: "r",
+      locale,
+      generatedAt: "2026-09-20T00:00:00.000Z",
+    });
+    // zh-CN has its own overview; zh-TW falls back to the English one.
+    market.getPublicSkill.mockImplementation(async (_slug, locale) => ({
+      ...response(),
+      aiOverview: overview(locale === "zh-CN" ? "zh-CN" : "en"),
+    }));
+
+    const zhCN = await generateMetadata({
+      params: Promise.resolve({ locale: "zh-CN", slug: "pdf-forms" }),
+      searchParams: Promise.resolve({}),
+    });
+    expect(String(zhCN.alternates?.canonical)).toMatch(
+      /\/zh-CN\/skills\/pdf-forms$/,
+    );
+    expect(Object.keys(zhCN.alternates?.languages ?? {}).sort()).toEqual([
+      "en",
+      "x-default",
+      "zh-CN",
+    ]);
+
+    const zhTW = await generateMetadata({
+      params: Promise.resolve({ locale: "zh-TW", slug: "pdf-forms" }),
+      searchParams: Promise.resolve({}),
+    });
+    expect(String(zhTW.alternates?.canonical)).toMatch(/\/skills\/pdf-forms$/);
+    expect(String(zhTW.alternates?.canonical)).not.toMatch(/zh-TW/);
+  });
 });

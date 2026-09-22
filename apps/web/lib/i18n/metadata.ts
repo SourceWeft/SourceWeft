@@ -38,3 +38,36 @@ export function sitemapLocaleAlternates(barePath: string) {
   }
   return { languages };
 }
+
+/**
+ * `alternates` for a page whose main content exists only in some locales (a
+ * skill whose AI overview is written in zh-CN but not zh-TW, a blog post with
+ * one translation…). hreflang links only the locales in `translated` plus the
+ * default; the canonical is this locale's URL when it is one of them, and the
+ * default locale's otherwise — an untranslated page is a copy of the English
+ * one, not a page of its own (§20: never manufacture duplicate content).
+ */
+export function buildTranslatedAlternates(
+  barePath: string,
+  locale: Locale,
+  translated: readonly Locale[],
+) {
+  const urlFor = (id: Locale) => `${SITE_URL}${addLocalePrefix(barePath, id)}`;
+  const available = LOCALE_IDS.filter(
+    (id) => id === DEFAULT_LOCALE || translated.includes(id),
+  );
+  if (available.length < 2) {
+    return { canonical: urlFor(DEFAULT_LOCALE) };
+  }
+
+  const languages: Record<string, string> = {};
+  for (const id of available) {
+    languages[id] = urlFor(id);
+  }
+  languages["x-default"] = urlFor(DEFAULT_LOCALE);
+
+  return {
+    canonical: urlFor(available.includes(locale) ? locale : DEFAULT_LOCALE),
+    languages,
+  };
+}

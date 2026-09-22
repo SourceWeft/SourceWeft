@@ -9,11 +9,12 @@ import type {
 import { hasLocale, useLocale, useTranslations } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { formatNumber } from "@sourceweft/i18n/format";
-import { DEFAULT_LOCALE, isLocale } from "@sourceweft/i18n/locales";
+import { DEFAULT_LOCALE, isLocale, type Locale } from "@sourceweft/i18n/locales";
 
 import { cn } from "@sourceweft/ui-web/lib/utils";
 
 import { routing } from "../../../../i18n/routing";
+import { buildTranslatedAlternates } from "../../../../lib/i18n/metadata";
 import { JsonLd } from "../../../_components/seo/json-ld";
 import { resolveInitialLandingAuthState } from "../../../_landing/auth-state-server";
 import { SourceWeftFooter } from "../../../_landing/components/sourceweft-footer";
@@ -100,6 +101,26 @@ async function loadSkill(slug: string, locale?: string) {
   }
 }
 
+/**
+ * The non-default locales this skill has an AI overview in. The market answers
+ * with the English overview when the asked-for one is missing (or hidden), so
+ * only an answer in the asked-for locale counts. A failed read counts as none.
+ */
+async function overviewLocales(slug: string): Promise<Locale[]> {
+  const candidates = routing.locales.filter((id) => id !== routing.defaultLocale);
+  const found = await Promise.all(
+    candidates.map(async (id) => {
+      try {
+        const detail = await getPublicSkill(slug, marketSkillLocale(id));
+        return detail.aiOverview?.locale === id;
+      } catch {
+        return false;
+      }
+    }),
+  );
+  return candidates.filter((_, index) => found[index]);
+}
+
 const panelClassName =
   "rounded-xl border border-zinc-300 bg-white/58 p-5 dark:border-white/10 dark:bg-white/[0.03]";
 
@@ -124,9 +145,18 @@ export async function generateMetadata({
         name: skill.displayName,
       }),
     );
-    const url = `${SITE_URL}${skillPath(skill.slug)}`;
+    // The body is the author's English; a locale counts as its own page only
+    // where the skill has an AI overview written in it (§20). Each read is
+    // the same cached market read the page body makes for that locale.
+    const translated = await overviewLocales(skill.slug);
+    const alternates = buildTranslatedAlternates(
+      skillPath(skill.slug),
+      locale,
+      translated,
+    );
+    const url = alternates.canonical;
     return {
-      alternates: { canonical: url },
+      alternates,
       description,
       openGraph: {
         description,
