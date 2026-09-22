@@ -4,6 +4,8 @@ import {
   skillCategories,
   skillDefinitionCategories,
   skillDefinitions,
+  skillVersionOverviews,
+  skillVersions,
 } from "@sourceweft/db";
 import { ContentError } from "../../content/errors";
 import { setRegistryVisibility } from "../registry/review";
@@ -543,9 +545,75 @@ const sameSlugs = (a: string[], b: string[]) =>
   a.length === b.length && [...a].sort().join() === [...b].sort().join();
 
 /**
- * Files one skill under the categories inferred from its text now, even where
- * an admin had picked them — asking for it is the admin's act; the choice is
- * then the classifier's again (`auto`). null for anything that is not a
+ * The categories the AI overview of each skill's current version suggests —
+ * the English one, unless an admin hid it — kept to known slugs. Skills
+ * without one are absent.
+ */
+async function overviewCategorySuggestions(
+  tx: Tx,
+  skillIds: string[],
+): Promise<Map<string, string[]>> {
+  const found = new Map<string, string[]>();
+  if (skillIds.length === 0) return found;
+  const rows = await tx
+    .select({
+      skillId: skillVersions.skillId,
+      overview: skillVersionOverviews.overview,
+    })
+    .from(skillVersions)
+    .innerJoin(
+      skillVersionOverviews,
+      and(
+        eq(skillVersionOverviews.skillVersionId, skillVersions.id),
+        eq(skillVersionOverviews.locale, "en"),
+        eq(skillVersionOverviews.hidden, false),
+      ),
+    )
+    .where(
+      and(
+        inArray(skillVersions.skillId, skillIds),
+        eq(skillVersions.isCurrent, true),
+      ),
+    );
+  for (const row of rows) {
+    const slugs = [
+      ...new Set(
+        (row.overview.suggestedCategories ?? []).filter((slug) =>
+          getSkillCategoryDefinition(slug),
+        ),
+      ),
+    ];
+    if (slugs.length > 0) found.set(row.skillId, slugs);
+  }
+  return found;
+}
+
+/**
+ * What a re-inference files a skill under: the AI overview's suggestion when
+ * its current version has one — the model read the whole SKILL.md, where the
+ * keyword classifier sees only the name and description — and the classifier
+ * otherwise.
+ */
+function inferredCategories(
+  definition: { id: string; displayName: string; description: string },
+  suggestions: Map<string, string[]>,
+): { slugs: string[]; source: "overview" | "keywords" } {
+  const suggested = suggestions.get(definition.id);
+  if (suggested) return { slugs: suggested, source: "overview" };
+  return {
+    slugs: classifySkillCategories({
+      name: definition.displayName,
+      description: definition.description,
+    }),
+    source: "keywords",
+  };
+}
+
+/**
+ * Files one skill under the categories inferred now (`inferredCategories`:
+ * its AI overview's suggestion, else the keyword classifier), even where an
+ * admin had picked them — asking for it is the admin's act; the choice is
+ * then an automatic one again (`auto`). null for anything that is not a
  * registry skill.
  */
 export async function reinferSkillCategories(input: {
@@ -557,10 +625,10 @@ export async function reinferSkillCategories(input: {
     const definition = await lockDefinition(tx, input.skillId);
     if (!definition) return null;
     const from = await categorySlugsIn(tx, input.skillId);
-    const slugs = classifySkillCategories({
-      name: definition.displayName,
-      description: definition.description,
-    });
+    const { slugs, source } = inferredCategories(
+      definition,
+      await overviewCategorySuggestions(tx, [input.skillId]),
+    );
     await replaceCategories(tx, input.skillId, slugs, "auto");
     await recordSkillMarketEvent(
       {
@@ -571,6 +639,7 @@ export async function reinferSkillCategories(input: {
         detail: {
           categorySlugs: { from, to: slugs },
           categoriesSetBy: { from: definition.categoriesSetBy, to: "auto" },
+          source,
         },
       },
       tx,
@@ -584,8 +653,8 @@ export const REINFER_CATEGORIES_BATCH_SIZE = 200;
 
 /**
  * Files every active community skill already filed under inferred categories
- * (never one an admin picked) under what the classifier says now — after the
- * taxonomy or the classifier changed. In batches, each its own transaction,
+ * (never one an admin picked) under what `inferredCategories` says now — after
+ * the taxonomy or the classifier changed, or overviews arrived. In batches, each its own transaction,
  * keyed by id; a skill an admin corrects meanwhile is skipped (re-checked
  * under the row lock). Each skill whose categories changed gets an event,
  * and the run as a whole one more.
@@ -636,13 +705,14 @@ export async function reinferAllSkillCategories(input: {
         )
         .orderBy(skillDefinitions.id)
         .for("update");
+      const suggestions = await overviewCategorySuggestions(
+        tx,
+        rows.map((row) => row.id),
+      );
       for (const definition of rows) {
         tally.considered += 1;
         const from = await categorySlugsIn(tx, definition.id);
-        const slugs = classifySkillCategories({
-          name: definition.displayName,
-          description: definition.description,
-        });
+        const { slugs, source } = inferredCategories(definition, suggestions);
         if (sameSlugs(from, slugs)) {
           // Filed before `categories_set_by` existed: now known to be inferred.
           if (definition.categoriesSetBy !== "auto") {
@@ -661,7 +731,7 @@ export async function reinferAllSkillCategories(input: {
             actorKind: "admin",
             actorUserId: input.actorUserId,
             action: "categories.reinferred",
-            detail: { categorySlugs: { from, to: slugs }, bulk: true },
+            detail: { categorySlugs: { from, to: slugs }, source, bulk: true },
           },
           tx,
         );
