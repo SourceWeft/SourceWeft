@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import { LocaleLink } from "../../_components/locale-link";
 import { notFound } from "next/navigation";
 import { AlertTriangle, ChevronRight } from "lucide-react";
 import type {
@@ -250,14 +250,14 @@ function InstallCta({
   const chatPrompt = t("chatPrompt", { slug: skill.slug });
   return (
     <div className={className}>
-      <Link
+      <LocaleLink
         className="inline-flex h-10 w-full items-center justify-center rounded-lg bg-zinc-950 px-4 text-sm font-medium text-white transition-colors hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-100"
         href={installHref}
         prefetch={false}
         rel="nofollow"
       >
         {t("cta")}
-      </Link>
+      </LocaleLink>
       <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
         <span>{t("chatLead")}</span>
         <code className="min-w-0 break-all rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-zinc-800 dark:bg-white/10 dark:text-zinc-200">
@@ -553,21 +553,21 @@ export default async function PublicSkillDetailPage({
             aria-label={t("breadcrumb.label")}
             className="mb-8 flex min-w-0 items-center gap-1.5 text-sm text-zinc-500 dark:text-zinc-400"
           >
-            <Link
+            <LocaleLink
               className="shrink-0 hover:text-zinc-950 dark:hover:text-white"
               href="/skills"
             >
               {t("breadcrumb.skills")}
-            </Link>
+            </LocaleLink>
             {primaryCategory ? (
               <>
                 <ChevronRight className="size-3.5 shrink-0" />
-                <Link
+                <LocaleLink
                   className="shrink-0 hover:text-zinc-950 dark:hover:text-white"
                   href={skillCategoryPath(primaryCategory)}
                 >
                   {skillCategoryLabel(primaryCategory, categoryNames)}
-                </Link>
+                </LocaleLink>
               </>
             ) : null}
             <ChevronRight className="size-3.5 shrink-0" />
@@ -638,13 +638,13 @@ export default async function PublicSkillDetailPage({
                 {skill.repoArchived ? <SkillArchivedBadge /> : null}
                 <SkillCapabilityBadge capability={skill.capability} />
                 {skill.categories.map((category) => (
-                  <Link
+                  <LocaleLink
                     className="inline-flex h-6 items-center rounded-full border border-zinc-300 bg-white/70 px-2.5 text-xs font-medium text-zinc-600 transition-colors hover:border-zinc-950 hover:text-zinc-950 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-300 dark:hover:border-white/40 dark:hover:text-white"
                     href={skillCategoryPath(category)}
                     key={category}
                   >
                     {skillCategoryLabel(category, categoryNames)}
-                  </Link>
+                  </LocaleLink>
                 ))}
               </div>
             </div>
@@ -677,14 +677,14 @@ export default async function PublicSkillDetailPage({
               </div>
               {claimHref ? (
                 <p className="mt-4 border-t border-zinc-200 pt-3 text-xs dark:border-white/10">
-                  <Link
+                  <LocaleLink
                     className="text-zinc-500 underline decoration-zinc-300 underline-offset-4 hover:text-zinc-950 hover:decoration-zinc-950 dark:decoration-white/20 dark:hover:text-white"
                     href={claimHref}
                     prefetch={false}
                     rel="nofollow"
                   >
                     {t("detail.claimLink")}
-                  </Link>
+                  </LocaleLink>
                 </p>
               ) : null}
             </aside>
@@ -700,7 +700,7 @@ export default async function PublicSkillDetailPage({
           className={`mx-auto flex gap-6 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${skillsContainerClassName}`}
         >
           {tabs.map(([id, label]) => (
-            <Link
+            <LocaleLink
               aria-current={tab === id ? "page" : undefined}
               className={cn(
                 "shrink-0 border-b-2 py-3 text-sm transition-colors",
@@ -713,7 +713,7 @@ export default async function PublicSkillDetailPage({
               scroll={false}
             >
               {label}
-            </Link>
+            </LocaleLink>
           ))}
         </div>
       </nav>

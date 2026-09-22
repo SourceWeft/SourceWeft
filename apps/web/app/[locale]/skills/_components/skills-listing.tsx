@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { LocaleLink } from "../../_components/locale-link";
 import { ArrowLeft, ArrowRight, Search } from "lucide-react";
 import type {
   ListMarketSkillsResponse,
@@ -20,6 +20,7 @@ import {
   type SkillsBrowseState,
 } from "./skills-browse";
 import { SkillCardGrid, skillCategoryNames } from "./skills-display";
+import { localeHref } from "../../../../lib/i18n/locale-href";
 import { skillsContainerClassName } from "./skills-format";
 
 export function SkillsSearchForm({
@@ -33,8 +34,9 @@ export function SkillsSearchForm({
   state: SkillsBrowseState;
 }) {
   const t = useTranslations("publicSkills.landing");
+  const locale = useLocale();
   return (
-    <form action={action} className={className}>
+    <form action={localeHref(action, locale)} className={className}>
       {state.sort !== "recommended" ? (
         <input name="sort" type="hidden" value={state.sort} />
       ) : null}
@@ -76,7 +78,7 @@ function Pill({
   href: string;
 }) {
   return (
-    <Link
+    <LocaleLink
       aria-current={active ? "page" : undefined}
       className={cn(
         "shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
@@ -88,7 +90,7 @@ function Pill({
       scroll={false}
     >
       {children}
-    </Link>
+    </LocaleLink>
   );
 }
 
@@ -126,7 +128,7 @@ function CategorySidebar({
         {entries.map((entry) => {
           const active = state.category === entry.slug;
           return (
-            <Link
+            <LocaleLink
               aria-current={active ? "page" : undefined}
               className={cn(
                 "flex shrink-0 items-center justify-between gap-3 rounded-full border px-3 py-1.5 text-sm transition-colors lg:rounded-lg lg:border-transparent lg:py-2",
@@ -149,7 +151,7 @@ function CategorySidebar({
               >
                 {formatNumber(entry.count, uiLocale)}
               </span>
-            </Link>
+            </LocaleLink>
           );
         })}
       </nav>
@@ -207,13 +209,13 @@ export function SkillsListingView({
           <div className="flex flex-wrap items-end justify-between gap-3">
             {title ? (
               <div className="min-w-0">
-                <Link
+                <LocaleLink
                   className="mb-2 inline-flex items-center gap-1.5 text-xs text-zinc-500 transition-colors hover:text-zinc-950 dark:hover:text-white"
                   href="/skills"
                 >
                   <ArrowLeft className="size-3.5" />
                   {t("listing.marketHome")}
-                </Link>
+                </LocaleLink>
                 <h1 className="truncate text-2xl font-semibold tracking-tight">
                   {title}
                 </h1>
@@ -273,12 +275,12 @@ export function SkillsListingView({
               ))}
             </div>
             {hasFilters ? (
-              <Link
+              <LocaleLink
                 className="text-xs font-medium text-zinc-500 underline decoration-zinc-300 underline-offset-4 hover:text-zinc-950 dark:decoration-white/20 dark:hover:text-white"
                 href="/skills?view=all"
               >
                 {t("listing.clearFilters")}
-              </Link>
+              </LocaleLink>
             ) : null}
           </div>
         </div>
@@ -308,18 +310,18 @@ export function SkillsListingView({
             className="mt-8 flex items-center justify-between gap-4 border-t border-zinc-300 pt-6 dark:border-white/10"
           >
             {state.cursor ? (
-              <Link
+              <LocaleLink
                 className="inline-flex h-10 items-center gap-1.5 rounded-lg border border-zinc-300 px-4 text-sm font-medium transition-colors hover:border-zinc-950 dark:border-white/12 dark:hover:border-white/40"
                 href={skillsBrowseHref(state, { view: true })}
               >
                 <ArrowLeft className="size-4" />
                 {t("listing.firstPage")}
-              </Link>
+              </LocaleLink>
             ) : (
               <span />
             )}
             {market.nextCursor ? (
-              <Link
+              <LocaleLink
                 className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-zinc-950 px-4 text-sm font-medium text-white transition-colors hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-100"
                 href={skillsBrowseHref(state, {
                   cursor: market.nextCursor,
@@ -329,7 +331,7 @@ export function SkillsListingView({
               >
                 {t("listing.nextPage")}
                 <ArrowRight className="size-4" />
-              </Link>
+              </LocaleLink>
             ) : null}
           </nav>
         ) : null}

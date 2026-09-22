@@ -471,16 +471,18 @@ export function RegistryVersions({
             ))}
             {detail.version.findings.map((f, i) => (
               <p key={i}>
-                {t("versions.reviewLabel")}: {f.ruleId} {f.file}
-                {f.line ? `:${f.line}` : ""}
+                {t("versions.reviewLine", {
+                  detail: `${f.ruleId} ${f.file}${f.line ? `:${f.line}` : ""}`,
+                })}
               </p>
             ))}
             {detail.version.moderation ? (
               <p>
-                {t("versions.reviewLabel")}: {detail.version.moderation.action}
-                {detail.version.moderation.reason
-                  ? ` — ${detail.version.moderation.reason}`
-                  : ""}
+                {t("versions.reviewLine", {
+                  detail: detail.version.moderation.reason
+                    ? `${detail.version.moderation.action} — ${detail.version.moderation.reason}`
+                    : detail.version.moderation.action,
+                })}
               </p>
             ) : null}
             <details>

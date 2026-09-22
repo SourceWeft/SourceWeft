@@ -1,5 +1,5 @@
 import Image from "next/image";
-import Link from "next/link";
+import { LocaleLink } from "../../[locale]/_components/locale-link";
 
 type BrandLockupVariant = "size-only" | "minimal-refined";
 
@@ -71,12 +71,12 @@ export function SourceWeftBrandLockup({
         : "text-sm font-semibold tracking-tight text-zinc-900 dark:text-white";
 
   return (
-    <Link href="/" className={`group inline-flex items-center ${gapClassName}`}>
+    <LocaleLink href="/" className={`group inline-flex items-center ${gapClassName}`}>
       <SourceWeftBrandMark
         className={markClassName}
         imageClassName={imageClassName}
       />
       <span className={`font-brand ${wordmarkClassName}`}>SourceWeft</span>
-    </Link>
+    </LocaleLink>
   );
 }

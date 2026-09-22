@@ -1171,8 +1171,8 @@
       "reviewNotes": "{count} 條審核說明",
       "sourceRevision": "來源修訂版本",
       "noDiagnostics": "未記錄此版本的匯入診斷資訊。",
-      "reviewLabel": "審核",
-      "filesSummary": "檔案（{count}）"
+      "filesSummary": "檔案（{count}）",
+      "reviewLine": "審核：{detail}"
     },
     "submit": {
       "button": "提交技能",
@@ -3694,11 +3694,11 @@
       "confirmDelete": "刪除合集「{title}」？",
       "skillsLabel": "技能，每行一個 slug，依順序排列",
       "saveSkills": "儲存技能",
-      "notPublic": "未公開",
       "view": "檢視",
       "saved": "已儲存",
       "failed": "更改未儲存。",
-      "skillCount": "{count, plural, other {# 個技能}}"
+      "skillCount": "{count, plural, other {# 個技能}}",
+      "notPublicItem": "{slug}（未公開）"
     },
     "flagLabels": {
       "egress:pipe-to-shell": "下載並執行：curl | sh",
@@ -3790,7 +3790,7 @@
     "settings": {
       "title": "AI 概覽",
       "description": "概覽由預設對話模型撰寫，費用計入此處選擇的團隊、工作區和成員。設定完成前不會產生任何概覽。",
-      "current": "計費對象",
+      "current": "計費對象：",
       "notSet": "未設定：目前不會產生任何概覽。",
       "team": "團隊",
       "workspace": "工作區",
@@ -3802,7 +3802,6 @@
       "saved": "已儲存。",
       "failed": "無法儲存。",
       "loadFailed": "無法載入概覽設定。",
-      "updatedBy": "最後修改人",
       "status": "覆蓋情況",
       "eligible": "符合條件的技能",
       "withOverview": "已有概覽",
@@ -3810,7 +3809,8 @@
       "hiddenCount": "已隱藏",
       "billingSet": "已設定計費",
       "yes": "是",
-      "no": "否"
+      "no": "否",
+      "updatedByNote": "（最後修改人 <who>{userId}</who>{hasDate, select, yes {，{date}} other {}}）"
     }
   },
   "dashboardSkillReviews": {

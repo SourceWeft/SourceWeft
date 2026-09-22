@@ -1,6 +1,6 @@
 import { McpIcon as McpBrandIcon } from "../../../_components/site-icons";
 import type { Metadata } from "next";
-import Link from "next/link";
+import { LocaleLink } from "../../_components/locale-link";
 import { notFound } from "next/navigation";
 import { hasLocale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
@@ -269,18 +269,18 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
             aria-label="Breadcrumb"
             className="mb-8 flex min-w-0 items-center gap-1.5 text-sm text-zinc-500 dark:text-zinc-400"
           >
-            <Link className="shrink-0 hover:text-zinc-950 dark:hover:text-white" href="/mcp">
+            <LocaleLink className="shrink-0 hover:text-zinc-950 dark:hover:text-white" href="/mcp">
               {t("breadcrumbServers")}
-            </Link>
+            </LocaleLink>
             {primaryCategory ? (
               <>
                 <ChevronRight className="size-3.5 shrink-0" />
-                <Link
+                <LocaleLink
                   className="shrink-0 hover:text-zinc-950 dark:hover:text-white"
                   href={`/mcp?category=${encodeURIComponent(primaryCategory)}`}
                 >
                   {mcpCategoryLabel(primaryCategory, categoryNames)}
-                </Link>
+                </LocaleLink>
               </>
             ) : null}
             <ChevronRight className="size-3.5 shrink-0" />
@@ -316,13 +316,13 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
                 <McpTransportBadge transport={manifest.transport} />
                 <McpRuntimeBadge item={item} />
                 {item.categories.map((category) => (
-                  <Link
+                  <LocaleLink
                     className="inline-flex h-6 items-center rounded-full border border-zinc-300 bg-white/70 px-2.5 text-xs font-medium text-zinc-600 transition-colors hover:border-zinc-950 hover:text-zinc-950 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-300 dark:hover:border-white/40 dark:hover:text-white"
                     href={`/mcp?category=${encodeURIComponent(category)}`}
                     key={category}
                   >
                     {mcpCategoryLabel(category, categoryNames)}
-                  </Link>
+                  </LocaleLink>
                 ))}
               </div>
             </div>
@@ -347,14 +347,14 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
                   </div>
                 ))}
               </dl>
-              <Link
+              <LocaleLink
                 className="mt-5 inline-flex h-10 w-full items-center justify-center rounded-lg bg-zinc-950 px-4 text-sm font-medium text-white transition-colors hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-100"
                 href={installHref}
               >
                 {authState.isSignedIn
                   ? t("addToWorkspace")
                   : t("signInToInstall")}
-              </Link>
+              </LocaleLink>
               <div className="mt-4 flex flex-wrap gap-x-4 gap-y-2">
                 <ExternalTextLink href={homepageUrl}>
                   {t("homepage")}
@@ -425,12 +425,12 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
                     {t.rich("step1", {
                       name: item.name,
                       link: (chunks) => (
-                        <Link
+                        <LocaleLink
                           className="font-medium text-zinc-950 underline underline-offset-4 dark:text-white"
                           href={installHref}
                         >
                           {chunks}
-                        </Link>
+                        </LocaleLink>
                       ),
                     })}
                   </li>

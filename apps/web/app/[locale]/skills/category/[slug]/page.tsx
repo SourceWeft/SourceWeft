@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import { LocaleLink } from "../../../_components/locale-link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { hasLocale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 
 import { routing } from "../../../../../i18n/routing";
+import { buildAlternates } from "../../../../../lib/i18n/metadata";
 import { JsonLd } from "../../../../_components/seo/json-ld";
 import { SkillIcon } from "../../../../_components/site-icons";
 import { resolveInitialLandingAuthState } from "../../../../_landing/auth-state-server";
@@ -87,7 +88,11 @@ export async function generateMetadata({
   const url = `${SITE_URL}${skillCategoryPath(category.slug)}`;
 
   return {
-    alternates: { canonical: url },
+    // The shell is localized, so the indexable page carries hreflang and a
+    // self-canonical per locale; narrowed views keep the plain canonical.
+    alternates: !isSkillsNarrowed(state) && isIndexableListing(category.count)
+      ? buildAlternates(skillCategoryPath(category.slug), locale)
+      : { canonical: url },
     description,
     openGraph: {
       description,
@@ -202,13 +207,13 @@ export default async function PublicSkillCategoryPage({
         <div
           className={`relative mx-auto pb-8 pt-24 ${skillsContainerClassName}`}
         >
-          <Link
+          <LocaleLink
             className="mb-8 inline-flex items-center gap-2 text-sm text-zinc-500 transition-colors hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-white"
             href="/skills"
           >
             <ArrowLeft className="size-4" />
             {t("category.back")}
-          </Link>
+          </LocaleLink>
           <div className="max-w-4xl">
             <span className="mb-5 inline-flex items-center gap-2 rounded-full border border-zinc-300 bg-white/48 px-3 py-1 text-xs font-medium text-zinc-600 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-400">
               <SkillIcon className="size-3.5" />

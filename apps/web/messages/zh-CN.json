@@ -1171,8 +1171,8 @@
       "reviewNotes": "{count} 条审核说明",
       "sourceRevision": "来源修订版本",
       "noDiagnostics": "未记录此版本的导入诊断信息。",
-      "reviewLabel": "审核",
-      "filesSummary": "文件（{count}）"
+      "filesSummary": "文件（{count}）",
+      "reviewLine": "审核：{detail}"
     },
     "submit": {
       "button": "提交技能",
@@ -3694,11 +3694,11 @@
       "confirmDelete": "删除合集「{title}」？",
       "skillsLabel": "技能，每行一个 slug，按顺序排列",
       "saveSkills": "保存技能",
-      "notPublic": "未公开",
       "view": "查看",
       "saved": "已保存",
       "failed": "更改未保存。",
-      "skillCount": "{count, plural, other {# 个技能}}"
+      "skillCount": "{count, plural, other {# 个技能}}",
+      "notPublicItem": "{slug}（未公开）"
     },
     "flagLabels": {
       "egress:pipe-to-shell": "下载并运行：curl | sh",
@@ -3790,7 +3790,7 @@
     "settings": {
       "title": "AI 概览",
       "description": "概览由默认对话模型撰写，费用计入此处选择的团队、工作区和成员。设置完成前不会生成任何概览。",
-      "current": "计费对象",
+      "current": "计费对象：",
       "notSet": "未设置：当前不会生成任何概览。",
       "team": "团队",
       "workspace": "工作区",
@@ -3802,7 +3802,6 @@
       "saved": "已保存。",
       "failed": "无法保存。",
       "loadFailed": "无法加载概览设置。",
-      "updatedBy": "最后修改人",
       "status": "覆盖情况",
       "eligible": "符合条件的技能",
       "withOverview": "已有概览",
@@ -3810,7 +3809,8 @@
       "hiddenCount": "已隐藏",
       "billingSet": "已设置计费",
       "yes": "是",
-      "no": "否"
+      "no": "否",
+      "updatedByNote": "（最后修改人 <who>{userId}</who>{hasDate, select, yes {，{date}} other {}}）"
     }
   },
   "dashboardSkillReviews": {

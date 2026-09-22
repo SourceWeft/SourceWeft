@@ -175,7 +175,7 @@ export function OverviewBillingSettings({
       </div>
 
       <div className="text-xs" data-testid="overview-billing-current">
-        <span className="text-muted-foreground">{t("current")}: </span>
+        <span className="text-muted-foreground">{t("current")}</span>
         {billing ? (
           <span className="text-foreground">
             {teamName(billing.teamId)} / {workspaceName(billing.workspaceId)} /{" "}
@@ -183,12 +183,14 @@ export function OverviewBillingSettings({
             {current?.updatedBy ? (
               <span className="text-muted-foreground">
                 {" "}
-                ({t("updatedBy")}{" "}
-                <span className="font-mono">{current.updatedBy}</span>
-                {current.updatedAt
-                  ? `, ${new Date(current.updatedAt).toLocaleString(locale)}`
-                  : ""}
-                )
+                {t.rich("updatedByNote", {
+                  userId: current.updatedBy,
+                  hasDate: current.updatedAt ? "yes" : "no",
+                  date: current.updatedAt
+                    ? new Date(current.updatedAt).toLocaleString(locale)
+                    : "",
+                  who: (chunks) => <span className="font-mono">{chunks}</span>,
+                })}
               </span>
             ) : null}
           </span>

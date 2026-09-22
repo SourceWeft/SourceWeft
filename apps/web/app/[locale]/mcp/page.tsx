@@ -1,6 +1,6 @@
 import { McpIcon as McpBrandIcon } from "../../_components/site-icons";
 import type { Metadata } from "next";
-import Link from "next/link";
+import { LocaleLink } from "../_components/locale-link";
 import { ArrowRight, Upload, Wrench } from "lucide-react";
 import type { MarketCategory, MarketItemSummary } from "@sourceweft/market-sdk";
 import { hasLocale } from "next-intl";
@@ -190,13 +190,13 @@ async function GetStartedPanels({ signedIn }: { signedIn: boolean }) {
               </li>
             ))}
           </ol>
-          <Link
+          <LocaleLink
             className="group mt-5 inline-flex items-center gap-1.5 self-start text-sm font-medium text-zinc-950 dark:text-white"
             href={dashboardHref}
           >
             {panel.cta}
             <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
-          </Link>
+          </LocaleLink>
         </div>
       ))}
     </div>
@@ -376,7 +376,7 @@ export default async function PublicMcpMarketPage({
               </h2>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 {categories.map((category) => (
-                  <Link
+                  <LocaleLink
                     className="group flex items-center justify-between gap-3 rounded-xl border border-zinc-300 bg-white/50 px-4 py-3 text-sm transition-colors hover:border-zinc-950 hover:bg-white dark:border-white/10 dark:bg-white/[0.03] dark:hover:border-white/35"
                     href={mcpCategoryPath(category.slug)}
                     key={category.slug}
@@ -385,7 +385,7 @@ export default async function PublicMcpMarketPage({
                     <span className="text-xs tabular-nums text-zinc-400">
                       {formatNumber(facets.counts[category.slug] ?? 0, uiLocale)}
                     </span>
-                  </Link>
+                  </LocaleLink>
                 ))}
               </div>
             </section>

@@ -1171,8 +1171,8 @@
       "reviewNotes": "{count} review notes",
       "sourceRevision": "Source revision",
       "noDiagnostics": "No import diagnostics were recorded for this version.",
-      "reviewLabel": "Review",
-      "filesSummary": "Files ({count})"
+      "filesSummary": "Files ({count})",
+      "reviewLine": "Review: {detail}"
     },
     "submit": {
       "button": "Submit skill",
@@ -3694,11 +3694,11 @@
       "confirmDelete": "Delete the collection “{title}”?",
       "skillsLabel": "Skills, one slug per line, in order",
       "saveSkills": "Save skills",
-      "notPublic": "not public",
       "view": "View",
       "saved": "Saved",
       "failed": "The change was not saved.",
-      "skillCount": "{count, plural, one {# skill} other {# skills}}"
+      "skillCount": "{count, plural, one {# skill} other {# skills}}",
+      "notPublicItem": "{slug} (not public)"
     },
     "flagLabels": {
       "egress:pipe-to-shell": "Fetch and run: curl | sh",
@@ -3790,7 +3790,7 @@
     "settings": {
       "title": "AI overviews",
       "description": "Overviews are written by the default chat model and billed to the team, workspace and member chosen here. Nothing is generated until this is set.",
-      "current": "Billed to",
+      "current": "Billed to: ",
       "notSet": "Not set — no overviews are being generated.",
       "team": "Team",
       "workspace": "Workspace",
@@ -3802,7 +3802,6 @@
       "saved": "Saved.",
       "failed": "Could not save.",
       "loadFailed": "Could not load the overview settings.",
-      "updatedBy": "Last changed by",
       "status": "Coverage",
       "eligible": "Eligible skills",
       "withOverview": "With an overview",
@@ -3810,7 +3809,8 @@
       "hiddenCount": "Hidden",
       "billingSet": "Billing set",
       "yes": "Yes",
-      "no": "No"
+      "no": "No",
+      "updatedByNote": "(Last changed by <who>{userId}</who>{hasDate, select, yes {, {date}} other {}})"
     }
   },
   "dashboardSkillReviews": {

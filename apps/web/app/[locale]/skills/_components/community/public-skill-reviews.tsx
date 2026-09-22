@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { LocaleLink } from "../../../_components/locale-link";
 import { PenLine } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import {
@@ -47,14 +47,14 @@ export async function PublicSkillReviews({
           >
             {tReviews("heading")}
           </h2>
-          <Link
+          <LocaleLink
             href={skillReviewHref(slug, signedIn)}
             data-testid="public-skill-reviews-cta"
             className="inline-flex h-9 items-center gap-2 rounded-lg bg-zinc-950 px-3 text-sm font-medium text-white transition-colors hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-100"
           >
             <PenLine aria-hidden className="size-4" />
             {signedIn ? tReviews("writeReview") : t("signInToReview")}
-          </Link>
+          </LocaleLink>
         </div>
 
         {hasReviews ? (

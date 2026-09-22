@@ -205,6 +205,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       };
     }),
     ...indexableCategories.map((category) => ({
+      alternates: sitemapLocaleAlternates(mcpCategoryPath(category.slug)),
       changeFrequency: "weekly" as const,
       priority: 0.5,
       url: `${SITE_URL}${mcpCategoryPath(category.slug)}`,
@@ -221,6 +222,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       url: `${SITE_URL}/mcp/${encodeURIComponent(item.identifier)}`,
     })),
     ...indexableSkillCategories.map((category) => ({
+      alternates: sitemapLocaleAlternates(skillCategoryPath(category.slug)),
       changeFrequency: "weekly" as const,
       priority: 0.5,
       url: `${SITE_URL}${skillCategoryPath(category.slug)}`,
@@ -228,6 +230,9 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     ...indexableSkillCollections.map((collection) => {
       const modified = new Date(collection.updatedAt);
       return {
+        alternates: sitemapLocaleAlternates(
+          skillCollectionPath(collection.slug),
+        ),
         changeFrequency: "weekly" as const,
         lastModified: Number.isNaN(modified.getTime()) ? undefined : modified,
         priority: 0.5,

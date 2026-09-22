@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { LocaleLink } from "../../_components/locale-link";
 import {
   Archive,
   ArrowRight,
@@ -180,7 +180,7 @@ export function SkillMarketCard({
     skill.capability === "executable" || skill.claimed || skill.repoArchived;
   const cardText = skillCardText(skill);
   return (
-    <Link
+    <LocaleLink
       className="group flex h-full flex-col rounded-xl border border-zinc-300 bg-white/62 p-5 transition-all hover:-translate-y-0.5 hover:border-zinc-950/40 hover:bg-white hover:shadow-[0_18px_70px_rgba(39,39,42,0.1)] dark:border-white/10 dark:bg-white/[0.035] dark:hover:border-white/35 dark:hover:bg-white/[0.055]"
       href={skillPath(skill.slug)}
     >
@@ -253,7 +253,7 @@ export function SkillMarketCard({
           </p>
         ) : null}
       </div>
-    </Link>
+    </LocaleLink>
   );
 }
 
@@ -315,13 +315,13 @@ export function SkillDirectorySection({
             {description}
           </p>
         </div>
-        <Link
+        <LocaleLink
           className="group inline-flex shrink-0 items-center gap-1.5 text-sm font-medium text-zinc-600 transition-colors hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-white"
           href={viewAllHref}
         >
           {t("viewAll")}
           <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
-        </Link>
+        </LocaleLink>
       </div>
       <SkillCardGrid categoryNames={categoryNames} skills={skills} />
     </section>
@@ -353,7 +353,7 @@ export function SkillCollectionsSection({
       </div>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {shown.map((collection) => (
-          <Link
+          <LocaleLink
             className="group flex flex-col rounded-xl border border-zinc-300 bg-white/62 p-5 transition-colors hover:border-zinc-950/40 hover:bg-white dark:border-white/10 dark:bg-white/[0.035] dark:hover:border-white/35"
             href={skillCollectionPath(collection.slug)}
             key={collection.slug}
@@ -370,7 +370,7 @@ export function SkillCollectionsSection({
               {t("collections.itemCount", { count: collection.itemCount })}
               <ArrowRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
             </span>
-          </Link>
+          </LocaleLink>
         ))}
       </div>
     </section>

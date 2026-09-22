@@ -208,8 +208,10 @@ function CollectionEditor({
           <p className="text-xs text-muted-foreground">
             {collection.items
               .filter((item) => !item.public)
-              .map((item) => `${item.slug} (${t("collections.notPublic")})`)
-              .join(", ")}
+              .map((item) =>
+                t("collections.notPublicItem", { slug: item.slug }),
+              )
+              .join(t("updates.listSeparator"))}
           </p>
         ) : null}
         <Button

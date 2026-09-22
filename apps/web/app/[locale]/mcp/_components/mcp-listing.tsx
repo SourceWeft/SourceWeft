@@ -1,5 +1,5 @@
 import { McpIcon as McpBrandIcon } from "../../../_components/site-icons";
-import Link from "next/link";
+import { LocaleLink } from "../../_components/locale-link";
 import { ArrowLeft, ArrowRight, Search } from "lucide-react";
 import type {
   ListMarketMcpResponse,
@@ -10,6 +10,8 @@ import { formatNumber } from "@sourceweft/i18n/format";
 import { DEFAULT_LOCALE, isLocale } from "@sourceweft/i18n/locales";
 
 import { cn } from "@sourceweft/ui-web/lib/utils";
+
+import { localeHref } from "../../../../lib/i18n/locale-href";
 
 import {
   hasOnlyCategoryFacet,
@@ -35,8 +37,9 @@ export async function McpSearchForm({
   state: McpBrowseState;
 }) {
   const t = await getTranslations("mcp.search");
+  const locale = await getLocale();
   return (
-    <form action={action} className={className}>
+    <form action={localeHref(action, locale)} className={className}>
       {state.trust !== "all" ? (
         <input name="trust" type="hidden" value={state.trust} />
       ) : null}
@@ -74,7 +77,7 @@ function Pill({
   href: string;
 }) {
   return (
-    <Link
+    <LocaleLink
       aria-current={active ? "page" : undefined}
       className={cn(
         "shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
@@ -86,7 +89,7 @@ function Pill({
       scroll={false}
     >
       {children}
-    </Link>
+    </LocaleLink>
   );
 }
 
@@ -121,7 +124,7 @@ async function CategorySidebar({
         {entries.map((entry) => {
           const active = state.category === entry.slug;
           return (
-            <Link
+            <LocaleLink
               aria-current={active ? "page" : undefined}
               className={cn(
                 "flex shrink-0 items-center justify-between gap-3 rounded-full border px-3 py-1.5 text-sm transition-colors lg:rounded-lg lg:border-transparent lg:py-2",
@@ -142,7 +145,7 @@ async function CategorySidebar({
               >
                 {formatNumber(entry.count, uiLocale)}
               </span>
-            </Link>
+            </LocaleLink>
           );
         })}
       </nav>
@@ -202,13 +205,13 @@ export async function McpListingView({
           <div className="flex flex-wrap items-end justify-between gap-3">
             {title ? (
               <div className="min-w-0">
-                <Link
+                <LocaleLink
                   className="mb-2 inline-flex items-center gap-1.5 text-xs text-zinc-500 transition-colors hover:text-zinc-950 dark:hover:text-white"
                   href="/mcp"
                 >
                   <ArrowLeft className="size-3.5" />
                   {t("marketHome")}
-                </Link>
+                </LocaleLink>
                 <h1 className="truncate text-2xl font-semibold tracking-tight">
                   {title}
                 </h1>
@@ -244,12 +247,12 @@ export async function McpListingView({
               ))}
             </div>
             {hasFilters ? (
-              <Link
+              <LocaleLink
                 className="text-xs font-medium text-zinc-500 underline decoration-zinc-300 underline-offset-4 hover:text-zinc-950 dark:decoration-white/20 dark:hover:text-white"
                 href="/mcp?view=all"
               >
                 {t("clearFilters")}
-              </Link>
+              </LocaleLink>
             ) : null}
           </div>
         </div>
@@ -279,18 +282,18 @@ export async function McpListingView({
             className="mt-8 flex items-center justify-between gap-4 border-t border-zinc-300 pt-6 dark:border-white/10"
           >
             {state.cursor ? (
-              <Link
+              <LocaleLink
                 className="inline-flex h-10 items-center gap-1.5 rounded-lg border border-zinc-300 px-4 text-sm font-medium transition-colors hover:border-zinc-950 dark:border-white/12 dark:hover:border-white/40"
                 href={mcpBrowseHref(state, { view: true })}
               >
                 <ArrowLeft className="size-4" />
                 {t("firstPage")}
-              </Link>
+              </LocaleLink>
             ) : (
               <span />
             )}
             {market.nextCursor ? (
-              <Link
+              <LocaleLink
                 className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-zinc-950 px-4 text-sm font-medium text-white transition-colors hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-100"
                 href={mcpBrowseHref(state, {
                   cursor: market.nextCursor,
@@ -300,7 +303,7 @@ export async function McpListingView({
               >
                 {t("nextPage")}
                 <ArrowRight className="size-4" />
-              </Link>
+              </LocaleLink>
             ) : null}
           </nav>
         ) : null}
