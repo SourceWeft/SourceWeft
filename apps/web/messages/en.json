@@ -2954,6 +2954,9 @@
     }
   },
   "dashboardAdmin": {
+    "checkingAccess": "Checking admin access…",
+    "accessCheckFailed": "Could not check admin access. Please try again.",
+    "retryAccessCheck": "Try again",
     "eyebrow": "Market · Admin",
     "heading": "Review MCP submissions",
     "description": "Submissions that pass automated checks are published automatically. This queue contains flagged submissions that need manual review.",

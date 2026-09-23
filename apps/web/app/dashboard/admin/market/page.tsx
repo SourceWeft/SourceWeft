@@ -65,59 +65,61 @@ export default function MarketReviewPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-5xl px-6 py-10">
-      <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-        <ShieldAlert className="size-4" />
-        {t("review.pageEyebrow")}
+    <div className="min-h-0 w-full flex-1 overflow-y-auto overscroll-contain">
+      <div className="mx-auto w-full max-w-5xl px-6 py-10">
+        <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+          <ShieldAlert className="size-4" />
+          {t("review.pageEyebrow")}
+        </div>
+        <Tabs className="mt-4 gap-6" onValueChange={changeTab} value={tab}>
+          <TabsList>
+            <TabsTrigger className="px-3" value="mcp">
+              <McpIcon />
+              {t("review.tabMcp")}
+            </TabsTrigger>
+            <TabsTrigger className="px-3" value="skills">
+              <SkillIcon />
+              {t("review.tabSkills")}
+            </TabsTrigger>
+            <TabsTrigger className="px-3" value="collections">
+              <LibraryBig />
+              {t("collections.tab")}
+            </TabsTrigger>
+            <TabsTrigger className="px-3" value="all">
+              <List />
+              {t("review.tabAll")}
+            </TabsTrigger>
+            <TabsTrigger className="px-3" value="reports">
+              <Flag />
+              {t("review.tabReports")}
+            </TabsTrigger>
+            <TabsTrigger className="px-3" value="settings">
+              <Settings />
+              {t("review.tabSettings")}
+            </TabsTrigger>
+          </TabsList>
+          {/* Each queue loads when its tab is first opened, not before. */}
+          <TabsContent value="mcp">
+            <McpReviewQueue />
+          </TabsContent>
+          <TabsContent value="skills">
+            <SkillReviewQueue />
+            <SkillReviewQueue queue="listing" />
+          </TabsContent>
+          <TabsContent value="collections">
+            <SkillCollectionsAdmin />
+          </TabsContent>
+          <TabsContent value="all">
+            <SkillAllAdmin />
+          </TabsContent>
+          <TabsContent value="reports">
+            <SkillReportsAdmin />
+          </TabsContent>
+          <TabsContent value="settings">
+            <SkillMarketSettingsAdmin />
+          </TabsContent>
+        </Tabs>
       </div>
-      <Tabs className="mt-4 gap-6" onValueChange={changeTab} value={tab}>
-        <TabsList>
-          <TabsTrigger className="px-3" value="mcp">
-            <McpIcon />
-            {t("review.tabMcp")}
-          </TabsTrigger>
-          <TabsTrigger className="px-3" value="skills">
-            <SkillIcon />
-            {t("review.tabSkills")}
-          </TabsTrigger>
-          <TabsTrigger className="px-3" value="collections">
-            <LibraryBig />
-            {t("collections.tab")}
-          </TabsTrigger>
-          <TabsTrigger className="px-3" value="all">
-            <List />
-            {t("review.tabAll")}
-          </TabsTrigger>
-          <TabsTrigger className="px-3" value="reports">
-            <Flag />
-            {t("review.tabReports")}
-          </TabsTrigger>
-          <TabsTrigger className="px-3" value="settings">
-            <Settings />
-            {t("review.tabSettings")}
-          </TabsTrigger>
-        </TabsList>
-        {/* Each queue loads when its tab is first opened, not before. */}
-        <TabsContent value="mcp">
-          <McpReviewQueue />
-        </TabsContent>
-        <TabsContent value="skills">
-          <SkillReviewQueue />
-          <SkillReviewQueue queue="listing" />
-        </TabsContent>
-        <TabsContent value="collections">
-          <SkillCollectionsAdmin />
-        </TabsContent>
-        <TabsContent value="all">
-          <SkillAllAdmin />
-        </TabsContent>
-        <TabsContent value="reports">
-          <SkillReportsAdmin />
-        </TabsContent>
-        <TabsContent value="settings">
-          <SkillMarketSettingsAdmin />
-        </TabsContent>
-      </Tabs>
     </div>
   );
 }
