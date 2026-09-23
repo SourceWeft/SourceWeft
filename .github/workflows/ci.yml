@@ -227,6 +227,9 @@ jobs:
 
   docker-build:
     name: Docker Build
+    # Full image/Compose validation is reserved for tag releases and manual
+    # image publication. PRs use the faster lint, type, and test jobs.
+    if: github.event_name != 'pull_request'
     needs: [revision, test]
     runs-on: ubuntu-latest
     timeout-minutes: 45

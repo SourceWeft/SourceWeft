@@ -83,7 +83,7 @@
 ## 贡献
 
 Bug 报告、功能建议、代码和设计——都欢迎。  
-欢迎通过 [Issues](https://github.com/SourceWeft/SourceWeft/issues) 报告问题或讨论改进建议。
+欢迎通过 [Issues](https://github.com/SourceWeft/SourceWeft/issues) 报告问题或讨论改进建议。Issue 与 PR 流程参见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 <a href="https://github.com/SourceWeft/SourceWeft/graphs/contributors">
   <img src="https://contrib.rocks/image?repo=SourceWeft/SourceWeft&1=1" alt="SourceWeft contributors" />

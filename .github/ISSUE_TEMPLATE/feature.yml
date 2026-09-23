@@ -1,0 +1,41 @@
+name: Feature request
+description: Propose a new feature or improvement
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the outcome you need. Public Issues are visible to everyone; keep confidential plans and credentials out of this form.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or opportunity
+      description: Who needs this, and what is difficult today?
+      placeholder: Describe the user and situation.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Expected outcome
+      description: What should users be able to do?
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List observable conditions that show the work is complete.
+      placeholder: |
+        - [ ] A user can ...
+        - [ ] The change is verified by ...
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Links, sketches, or constraints, if useful.
+    validations:
+      required: false

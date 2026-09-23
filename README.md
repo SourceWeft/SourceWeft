@@ -82,7 +82,7 @@ Deployment configuration and upgrades are covered in the [Docker guide](docker/R
 ## Contributing
 
 Bug reports, feature ideas, code, and design — all welcome.  
-Open an [issue](https://github.com/SourceWeft/SourceWeft/issues) to report a bug or discuss an improvement.
+Open an [issue](https://github.com/SourceWeft/SourceWeft/issues) to report a bug or discuss an improvement. See [CONTRIBUTING.md](CONTRIBUTING.md) for the Issue and PR workflow.
 
 <a href="https://github.com/SourceWeft/SourceWeft/graphs/contributors">
   <img src="https://contrib.rocks/image?repo=SourceWeft/SourceWeft&1=1" alt="SourceWeft contributors" />

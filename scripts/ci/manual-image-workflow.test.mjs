@@ -106,6 +106,24 @@ test("publication is manual-only, gated by all checks, and scoped to commit tags
   );
 });
 
+test("PRs skip Docker validation while releases and manual publication retain it", () => {
+  const docker = workflow.jobs["docker-build"];
+  assert.equal(docker.if, "github.event_name != 'pull_request'");
+  assert.deepEqual(docker.needs, ["revision", "test"]);
+
+  const release = parse(
+    readFileSync(
+      new URL("../../.github/workflows/release.yml", import.meta.url),
+      "utf8",
+    ),
+  );
+  assert.deepEqual(release.on.push.tags, ["v*"]);
+  assert.equal(release.jobs.quality.uses, "./.github/workflows/ci.yml");
+  assert.ok(Object.hasOwn(workflow.on, "workflow_dispatch"));
+  assert.ok(workflow.jobs["docker-image-platform"].needs.includes("docker-build"));
+  assert.ok(workflow.jobs["docker-image"].needs.includes("docker-build"));
+});
+
 test("the release caller permits CI's declared ceiling while quality jobs remain read-only", () => {
   const release = parse(
     readFileSync(
