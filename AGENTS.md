@@ -7,6 +7,7 @@
 - Track each Issue as one card in the private [SourceWeft Work Project](https://github.com/orgs/SourceWeft/projects/1). Do not add a duplicate PR card. Assign an owner and move the Issue through Todo, In Progress, In Review, and Done. Move to In Review when the PR is ready for review, not while it is a draft.
 - Open a PR targeting `main` for every change. Link the Issue in its description using `Closes #number` only when all acceptance criteria are met; use `Refs #number` for partial work. Include summary, verification, and rollout risks. Merge only after applicable CI checks and review are complete.
 - Treat Done as an Issue closed after the final PR merges. Track release status separately. Use the existing `enhancement`, `bug`, and optional `documentation` labels; do not add status, priority, or module labels for this workflow.
+- PR CI intentionally skips the full Docker image and Compose startup validation. Tag releases and manual image publication run it. A skipped Docker Build on a PR is expected; do not report it as a failed PR check.
 
 ## Superpowers document locations
 

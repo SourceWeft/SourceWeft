@@ -9,3 +9,5 @@ We use a small Issue → pull request workflow so a change has a clear reason, o
 5. Team members track the Issue on the private [SourceWeft Work board](https://github.com/orgs/SourceWeft/projects/1): Todo → In Progress → In Review → Done. A PR is linked to its Issue rather than added as a second card. Done means the Issue is closed after the final PR merges, not that a release was published.
 
 Use the existing `enhancement` or `bug` label when appropriate; `documentation` is optional. Status, priority, and module labels are not part of this workflow. For urgent fixes, create a short Issue and PR, then complete the reproduction and verification details as soon as practical.
+
+PR CI runs lint, types, and tests. The full Docker image and Compose startup validation runs during tag releases and manual image publication. A skipped Docker Build check on a PR is expected.
