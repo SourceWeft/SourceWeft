@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { SOURCEWEFT_WEB_RUN_STOP_SUFFIX } from "@sourceweft/sdk";
+import { requestThreadRunStop } from "@/lib/stop-thread-run";
 import { dispatchDashboardBillingSummaryRefresh } from "../../_components/dashboard-billing-summary-refresh";
 
 export type ActiveThreadRun = {
@@ -208,18 +208,7 @@ export function useChatStreamRunnerControl({
       ...run,
       status: "cancel_requested",
     });
-    void fetch(
-      `${apiBaseUrl}/v1/workspaces/${workspaceId}/threads/${threadId}/stream`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({
-          idempotencyKey: `${run.idempotencyKey}${SOURCEWEFT_WEB_RUN_STOP_SUFFIX}`,
-          stream: false,
-        }),
-      },
-    )
+    void requestThreadRunStop(workspaceId, threadId, run.idempotencyKey)
       .then(async (response) => {
         if (!response.ok) {
           await throwStreamRequestError(response);
@@ -260,5 +249,3 @@ export function useChatStreamRunnerControl({
     updateActiveRunIfCurrent,
   };
 }
-
-import { apiBaseUrl } from "../../../../lib/api-base-url";

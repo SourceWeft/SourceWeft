@@ -10,6 +10,14 @@ import en from "../../messages/en.json";
 import zhCN from "../../messages/zh-CN.json";
 import zhTW from "../../messages/zh-TW.json";
 
+vi.mock("../dashboard/_components/dashboard-chat-state", () => ({
+  useDashboardChatState: () => ({ workspaceId: null }),
+}));
+vi.mock("@/lib/auth-client", () => ({
+  authClient: { useSession: () => ({ data: null }) },
+}));
+vi.mock("next/navigation", () => ({ useParams: () => ({}) }));
+
 it("renders route recovery in each locale and invokes Next retry only on a click", async () => {
   const log = vi.spyOn(console, "error").mockImplementation(() => {});
   const host = document.createElement("div");

@@ -4,7 +4,13 @@ import { Component, type ErrorInfo, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
 import { reportClientError } from "@/lib/client-error-diagnostics";
 
-export function ChatErrorRecovery({ retry }: { retry: () => void }) {
+export function ChatErrorRecovery({
+  retry,
+  children,
+}: {
+  retry: () => void;
+  children?: ReactNode;
+}) {
   const t = useTranslations("chatRecovery");
   return (
     <section
@@ -13,6 +19,7 @@ export function ChatErrorRecovery({ retry }: { retry: () => void }) {
     >
       <h2 className="text-sm font-semibold">{t("title")}</h2>
       <p className="max-w-md text-sm text-muted-foreground">{t("body")}</p>
+      {children}
       <button
         type="button"
         className="rounded-md border px-4 py-2 text-sm focus-visible:outline-2"

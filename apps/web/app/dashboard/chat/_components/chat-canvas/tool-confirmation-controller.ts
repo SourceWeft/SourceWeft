@@ -104,6 +104,14 @@ export function syncToolConfirmationRun(input: {
       ? input.state.activeIntervention
       : null;
 
+  if (
+    sameRun &&
+    activeIntervention === input.state.activeIntervention &&
+    order === input.state.order
+  ) {
+    return input.state;
+  }
+
   return {
     ...input.state,
     activeIntervention,

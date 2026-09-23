@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { ChatErrorRecovery } from "@/app/_components/chat-error-recovery";
+import { ChatRouteRecovery } from "./_components/chat-route-recovery";
 import { reportClientError } from "@/lib/client-error-diagnostics";
 
 export default function ChatError({
@@ -12,5 +12,5 @@ export default function ChatError({
   retry: () => void;
 }) {
   useEffect(() => reportClientError(error, "chat-route"), [error]);
-  return <ChatErrorRecovery retry={retry} />;
+  return <ChatRouteRecovery retry={retry} />;
 }

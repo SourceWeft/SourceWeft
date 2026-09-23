@@ -464,6 +464,7 @@ export function ChatCanvas({
     function applyToolConfirmationState(
       nextState: ToolConfirmationControllerState,
     ) {
+      if (toolConfirmationStateRef.current === nextState) return nextState;
       toolConfirmationStateRef.current = nextState;
       setToolConfirmationState(nextState);
       return nextState;

@@ -5166,6 +5166,13 @@
   "chatRecovery": {
     "title": "This conversation could not be displayed",
     "body": "Try displaying it again, or open another conversation from the sidebar.",
-    "retry": "Try again"
+    "retry": "Try again",
+    "stop": "Stop generation",
+    "stopping": "Stopping…",
+    "stopped": "Generation stopped.",
+    "checkRun": "Check generation status",
+    "runStatusError": "Unable to check generation status. Please try again.",
+    "stopError": "Unable to stop generation. Please try again.",
+    "otherRun": "Another participant is generating this response."
   }
 }

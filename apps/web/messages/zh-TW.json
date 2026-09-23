@@ -5166,6 +5166,13 @@
   "chatRecovery": {
     "title": "無法顯示此工作階段",
     "body": "請重試顯示，或從側欄開啟其他工作階段。",
-    "retry": "重試"
+    "retry": "重試",
+    "stop": "停止產生",
+    "stopping": "正在停止…",
+    "stopped": "已停止產生。",
+    "checkRun": "檢查產生狀態",
+    "runStatusError": "無法檢查產生狀態，請重試。",
+    "stopError": "無法停止產生，請重試。",
+    "otherRun": "另一位參與者正在產生此回覆。"
   }
 }

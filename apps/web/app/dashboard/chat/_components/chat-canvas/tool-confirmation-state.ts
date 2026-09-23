@@ -504,7 +504,9 @@ export function updateToolConfirmationOrder(
       next.push(item.confirmation.id);
     }
   }
-  return next;
+  return next.length === previousConfirmationIds.length
+    ? previousConfirmationIds
+    : next;
 }
 
 export function getPendingToolConfirmationItems(
