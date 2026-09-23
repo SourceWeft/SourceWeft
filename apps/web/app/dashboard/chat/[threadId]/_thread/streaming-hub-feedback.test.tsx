@@ -189,6 +189,9 @@ messages.unshift(
 );
 const streamingBase = messages.find((message) => message.id === "a")!;
 
+// This replays 1,000 growing Markdown snapshots through the real UI tree.
+// CI shares its runner with the backend and package suites; allow CPU contention
+// without reducing the replay or relaxing the selection-identity assertions.
 test("streaming through real versioning, Hub registration, desktop host and SourcesHub settles", async () => {
   const element = document.createElement("div");
   document.body.append(element);
@@ -334,4 +337,4 @@ test("streaming through real versioning, Hub registration, desktop host and Sour
     await act(async () => root.unmount());
     element.remove();
   }
-}, 60000);
+}, 180000);
