@@ -22,6 +22,7 @@ describe("production mail base URL", () => {
       rendered.html,
       /https:\/\/tenant\.sourceweft\.test\/icon-512\.png/,
     );
+    assert.match(rendered.html, /href="https:\/\/tenant\.sourceweft\.test"/);
     assert.doesNotMatch(rendered.html, /deployment\.sourceweft\.test/);
     assert.doesNotMatch(rendered.html, /legacy\.sourceweft\.test/);
   });
