@@ -352,8 +352,8 @@ jobs:
             output/html-behavior
           retention-days: 7
 
-  docker-image:
-    name: Docker Image
+  docker-image-platform:
+    name: Docker Image (${{ matrix.arch }})
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     needs:
       [
@@ -365,17 +365,22 @@ jobs:
         docker-build,
         html-artifacts,
       ]
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     permissions:
       contents: read
       packages: write
     concurrency:
-      group: docker-image-${{ needs.revision.outputs.sha }}
+      group: docker-image-${{ needs.revision.outputs.sha }}-${{ matrix.arch }}
       cancel-in-progress: false
-    outputs:
-      digest: ${{ steps.result.outputs.digest }}
-      image: ${{ steps.metadata.outputs.image }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -387,9 +392,17 @@ jobs:
           SOURCE_SHA: ${{ needs.revision.outputs.sha }}
         run: |
           echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
-          echo "tag=sha-$SOURCE_SHA" >> "$GITHUB_OUTPUT"
+          echo "tag=sha-$SOURCE_SHA-${{ matrix.arch }}" >> "$GITHUB_OUTPUT"
           echo "time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
-      - uses: docker/setup-qemu-action@v3
+      - name: Require a native architecture runner
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          case "$ARCH:$(uname -m)" in
+            amd64:x86_64|arm64:aarch64) ;;
+            *) echo "Runner architecture does not match $ARCH" >&2; exit 1 ;;
+          esac
       - uses: docker/setup-buildx-action@v3
       - name: Login to GHCR
         uses: docker/login-action@v3
@@ -421,7 +434,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/${{ matrix.arch }}
           push: true
           tags: ${{ steps.metadata.outputs.image }}:${{ steps.metadata.outputs.tag }}
           labels: |
@@ -430,10 +443,121 @@ jobs:
           build-args: |
             BUILD_SHA=${{ needs.revision.outputs.sha }}
             BUILD_TIME=${{ steps.metadata.outputs.time }}
-          cache-from: type=gha,scope=docker-image
-          cache-to: type=gha,scope=docker-image,mode=max
+          cache-from: type=gha,scope=docker-image-${{ matrix.arch }}
+          cache-to: type=gha,scope=docker-image-${{ matrix.arch }},mode=max
           provenance: mode=max
           sbom: true
+      - name: Verify native runtime and record platform digest
+        env:
+          IMAGE: ${{ steps.metadata.outputs.image }}
+          SOURCE_SHA: ${{ needs.revision.outputs.sha }}
+          ARCH: ${{ matrix.arch }}
+          DIGEST: ${{ steps.build.outputs.digest || steps.existing.outputs.digest }}
+        run: |
+          set -euo pipefail
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          docker buildx imagetools inspect "$IMAGE@$DIGEST" --format '{{json .Manifest}}' > platform-manifest.json
+          jq -e --arg arch "$ARCH" '[.manifests[].platform | select(.os=="linux" and .architecture!="unknown") | .architecture] | unique | . == [$arch]' platform-manifest.json
+          docker run --rm --network none --entrypoint node "$IMAGE@$DIGEST" -e 'const fs=require("node:fs"); const expected={amd64:"x64",arm64:"arm64"}[process.argv[1]]; if(process.arch!==expected)throw new Error("Wrong runtime architecture"); for(const name of ["api","worker","scheduler","skills-submit"])if(!fs.existsSync("/app/apps/backend/dist/"+name+".js"))throw new Error("Missing entrypoint "+name); console.log("Native runtime verified",process.arch,process.version);' "$ARCH"
+          mkdir -p image-digests
+          jq -n --arg image "$IMAGE" --arg revision "$SOURCE_SHA" --arg arch "$ARCH" --arg digest "$DIGEST" '{image:$image,revision:$revision,arch:$arch,digest:$digest}' > "image-digests/$ARCH.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sourceweft-image-digest-${{ matrix.arch }}
+          overwrite: true
+          path: image-digests/${{ matrix.arch }}.json
+          if-no-files-found: error
+          retention-days: 7
+
+  docker-image:
+    name: Docker Image
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    needs:
+      [
+        revision,
+        update-signatures,
+        lint-and-type,
+        test,
+        cli-cross-platform,
+        docker-build,
+        html-artifacts,
+        docker-image-platform,
+      ]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    concurrency:
+      group: docker-image-${{ needs.revision.outputs.sha }}
+      cancel-in-progress: false
+    outputs:
+      digest: ${{ steps.result.outputs.digest }}
+      image: ${{ steps.metadata.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.revision.outputs.sha }}
+      - name: Set image metadata
+        id: metadata
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ needs.revision.outputs.sha }}
+        run: |
+          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+          echo "tag=sha-$SOURCE_SHA" >> "$GITHUB_OUTPUT"
+          echo "time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Check for an existing commit image
+        id: existing
+        shell: bash
+        env:
+          IMAGE: ${{ steps.metadata.outputs.image }}
+          TAG: ${{ steps.metadata.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if docker buildx imagetools inspect "$IMAGE:$TAG" --format '{{json .Manifest}}' > manifest.json 2> manifest-error.txt; then
+            digest=$(jq -er '.digest | select(test("^sha256:[0-9a-f]{64}$"))' manifest.json)
+            echo "digest=$digest" >> "$GITHUB_OUTPUT"
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          elif grep -Fxq "ERROR: $IMAGE:$TAG: not found" manifest-error.txt; then
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          else
+            cat manifest-error.txt >&2
+            exit 1
+          fi
+      - name: Download native platform digests
+        if: steps.existing.outputs.exists == 'false'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: sourceweft-image-digest-*
+          path: image-digests
+          merge-multiple: true
+      - name: Publish complete multi-platform manifest
+        id: build
+        if: steps.existing.outputs.exists == 'false'
+        env:
+          IMAGE: ${{ steps.metadata.outputs.image }}
+          TAG: ${{ steps.metadata.outputs.tag }}
+          SOURCE_SHA: ${{ needs.revision.outputs.sha }}
+        run: |
+          set -euo pipefail
+          sources=()
+          for arch in amd64 arm64; do
+            digest=$(jq -er --arg image "$IMAGE" --arg revision "$SOURCE_SHA" --arg arch "$arch" 'select(.image==$image and .revision==$revision and .arch==$arch) | .digest | select(test("^sha256:[0-9a-f]{64}$"))' "image-digests/$arch.json")
+            sources+=("$IMAGE@$digest")
+          done
+          docker buildx imagetools create --tag "$IMAGE:$TAG" "${sources[@]}"
+          docker buildx imagetools inspect "$IMAGE:$TAG" --format '{{json .Manifest}}' > manifest.json
+          jq -e '[.manifests[].platform | select(.os=="linux" and .architecture!="unknown") | .architecture] | unique | . == ["amd64","arm64"]' manifest.json
+          digest=$(jq -er '.digest | select(test("^sha256:[0-9a-f]{64}$"))' manifest.json)
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
       - name: Record immutable image reference
         id: result
         shell: bash
