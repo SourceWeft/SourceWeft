@@ -1,0 +1,46 @@
+name: Bug report
+description: Report behavior that is not working
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please remove credentials, private data, and sensitive logs before submitting this public Issue.
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: What actions trigger the problem?
+      placeholder: |
+        1. Open ...
+        2. Click ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Version and environment
+      description: App version, operating system, browser, or deployment type.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Sanitized screenshots or logs, if useful.
+    validations:
+      required: false

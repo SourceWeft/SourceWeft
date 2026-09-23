@@ -1,7 +1,16 @@
 # Repository agent instructions
 
+## GitHub work tracking
+
+- For every change intended for `main`, create or identify a GitHub Issue before implementation. Use the feature or bug Issue form when appropriate; use a blank Issue for maintenance or documentation. An urgent fix still needs an Issue and PR, with details completed as soon as practical.
+- Keep the Issue's expected result and acceptance criteria current. Put only publishable information in public Issues and PRs. Confidential planning belongs in a restricted location; the private Project does not hide public Issue content.
+- Track each Issue as one card in the private [SourceWeft Work Project](https://github.com/orgs/SourceWeft/projects/1). Do not add a duplicate PR card. Assign an owner and move the Issue through Todo, In Progress, In Review, and Done. Move to In Review when the PR is ready for review, not while it is a draft.
+- Open a PR targeting `main` for every change. Link the Issue in its description using `Closes #number` only when all acceptance criteria are met; use `Refs #number` for partial work. Include summary, verification, and rollout risks. Merge only after applicable CI checks and review are complete.
+- Treat Done as an Issue closed after the final PR merges. Track release status separately. Use the existing `enhancement`, `bug`, and optional `documentation` labels; do not add status, priority, or module labels for this workflow.
+
 ## Superpowers document locations
 
+- `.docs/` is local-only. Never stage, commit, force-add, or push files under `.docs/`, including Superpowers specifications and plans. Before every commit, inspect `git diff --cached --name-only` and remove any `.docs/` entries.
 - Store all Superpowers-generated documents under `.docs/`, never under `docs/`.
 - Write brainstorming specifications to `.docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`.
 - Write implementation plans to `.docs/superpowers/plans/YYYY-MM-DD-<topic>.md`.
