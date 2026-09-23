@@ -8,6 +8,24 @@ const url = "https://app.sourceweft.test/verify?token=abc";
 afterEach(() => vi.unstubAllEnvs());
 
 describe("production mail base URL", () => {
+  test("trusted per-message URL overrides deployment URL for email links", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("PUBLIC_WEB_BASE_URL", "https://deployment.sourceweft.test");
+    vi.stubEnv("NEXT_PUBLIC_WEB_BASE_URL", "https://legacy.sourceweft.test");
+
+    const rendered = renderMailTemplate("auth.email-otp.sign-in", {
+      baseUrl: "https://tenant.sourceweft.test/",
+      otp: "000000",
+    });
+
+    assert.match(
+      rendered.html,
+      /https:\/\/tenant\.sourceweft\.test\/icon-512\.png/,
+    );
+    assert.doesNotMatch(rendered.html, /deployment\.sourceweft\.test/);
+    assert.doesNotMatch(rendered.html, /legacy\.sourceweft\.test/);
+  });
+
   test("uses the canonical public web URL for an email OTP", () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("PUBLIC_WEB_BASE_URL", "https://sourceweft.test/");
