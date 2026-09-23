@@ -2954,6 +2954,9 @@
     }
   },
   "dashboardAdmin": {
+    "checkingAccess": "正在检查管理权限…",
+    "accessCheckFailed": "无法检查管理权限，请重试。",
+    "retryAccessCheck": "重试",
     "eyebrow": "市场 · 管理",
     "heading": "审核 MCP 提交",
     "description": "通过自动检查的提交将自动发布。此队列包含需要人工审核的被标记提交。",
