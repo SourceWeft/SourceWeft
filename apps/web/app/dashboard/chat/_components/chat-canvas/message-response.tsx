@@ -1,3 +1,5 @@
+import { resolveWorkfileLink } from "./workfile-link";
+
 import {
   cloneElement,
   createElement,
@@ -74,10 +76,7 @@ function CitationBadge({
           onCitationClick?.(citation);
         }
       }}
-      title={
-        citation?.excerpt ??
-        t("messageResponse.citationTitle", { label })
-      }
+      title={citation?.excerpt ?? t("messageResponse.citationTitle", { label })}
       type="button"
     >
       <span className="min-w-0 truncate">{label}</span>
@@ -109,7 +108,9 @@ function makeCitationNode(input: {
 function WorkfilePathLink({
   onWorkfileClick,
   path,
+  children,
 }: {
+  children?: ReactNode;
   onWorkfileClick?: (path: string) => void;
   path: string;
 }) {
@@ -121,7 +122,7 @@ function WorkfilePathLink({
       title={t("common.openPreview", { value: path })}
       type="button"
     >
-      {path}
+      {children ?? path}
     </button>
   );
 }
@@ -414,14 +415,31 @@ export function CitationAwareMessageResponse({
     <div className={className}>
       <MessageResponse
         components={{
-          a: ({ children: nodeChildren, href, ...props }) => (
-            <a
-              {...props}
-              href={resolveMessageAssetUrl(href) as string | undefined}
-            >
-              {nodeChildren}
-            </a>
-          ),
+          a: ({ children: nodeChildren, href, ...props }) => {
+            const path = resolveWorkfileLink(href);
+            return path && onWorkfileClick ? (
+              <WorkfilePathLink path={path} onWorkfileClick={onWorkfileClick}>
+                {nodeChildren}
+              </WorkfilePathLink>
+            ) : (
+              <a
+                {...props}
+                href={resolveMessageAssetUrl(href) as string | undefined}
+                onClick={(event) => {
+                  const sameOriginPath = resolveWorkfileLink(
+                    href,
+                    window.location.origin,
+                  );
+                  if (sameOriginPath && onWorkfileClick) {
+                    event.preventDefault();
+                    onWorkfileClick(sameOriginPath);
+                  }
+                }}
+              >
+                {nodeChildren}
+              </a>
+            );
+          },
           blockquote: blockquoteComponent as never,
           em: emphasisComponent as never,
           h1: h1Component as never,
@@ -494,9 +512,7 @@ function PossibleEvidenceStrip({
           </span>
         ) : null}
       </div>
-      <p className="mt-2 leading-5">
-        {t("messageResponse.noInlineCitations")}
-      </p>
+      <p className="mt-2 leading-5">{t("messageResponse.noInlineCitations")}</p>
     </div>
   );
 }
