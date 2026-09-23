@@ -1,3 +1,4 @@
+import { requireWorkspaceScope } from "./scope";
 import type {
   SkillSubmissionOnComplete,
   SkillSubmissionSkillResult,
@@ -65,6 +66,7 @@ export type IngestContext = {
   submission: Pick<
     SkillSubmissionRow,
     | "id"
+    | "scope"
     | "teamId"
     | "workspaceId"
     | "submittedBy"
@@ -190,14 +192,18 @@ const triageWriteStage: IngestStage = {
           ...(ctx.deps.compareCommits
             ? { compare: ctx.deps.compareCommits }
             : {}),
-          grantTo: {
-            teamId: ctx.submission.teamId,
-            // A team-scoped import grants the whole team.
-            workspaceId:
-              ctx.submission.target === "team"
-                ? null
-                : ctx.submission.workspaceId,
-          },
+          ...(ctx.submission.scope === "system"
+            ? {}
+            : {
+                grantTo: {
+                  teamId: requireWorkspaceScope(ctx.submission).teamId,
+                  // A team-scoped import grants the whole team.
+                  workspaceId:
+                    ctx.submission.target === "team"
+                      ? null
+                      : requireWorkspaceScope(ctx.submission).workspaceId,
+                },
+              }),
         }),
       );
     }
@@ -215,6 +221,7 @@ const onCompleteStage: IngestStage = {
     if (!install) {
       return;
     }
+    const workspace = requireWorkspaceScope(ctx.submission);
     const results = need(ctx.results, "results");
     const accepted = results.filter(
       (item) => item.status !== "failed" && item.slug && item.name,
@@ -250,8 +257,8 @@ const onCompleteStage: IngestStage = {
       }
       try {
         const { skills } = await ctx.deps.installSkill({
-          teamId: ctx.submission.teamId,
-          workspaceId: ctx.submission.workspaceId,
+          teamId: workspace.teamId,
+          workspaceId: workspace.workspaceId,
           userId: ctx.submission.submittedBy,
           ref: { kind: "source", source: item.slug! },
           installedVia: install.installedVia ?? "user",

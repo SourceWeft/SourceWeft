@@ -1,3 +1,4 @@
+import { requireWorkspaceScope, SYSTEM_SUBMITTER_ID } from "./scope";
 import type { SkillSubmissionOptions } from "@sourceweft/db";
 import type { SkillSubmission } from "@sourceweft/contracts";
 import { logger } from "../../../../shared/logger";
@@ -33,7 +34,7 @@ function iso(value: Date | null): string | null {
   return value ? value.toISOString() : null;
 }
 
-export function mapSkillSubmission(row: SkillSubmissionRow): SkillSubmission {
+function mapSubmission(row: SkillSubmissionRow) {
   return {
     id: row.id,
     workspaceId: row.workspaceId,
@@ -65,6 +66,57 @@ export function mapSkillSubmission(row: SkillSubmissionRow): SkillSubmission {
     startedAt: iso(row.startedAt),
     finishedAt: iso(row.finishedAt),
   };
+}
+
+export function mapSkillSubmission(row: SkillSubmissionRow): SkillSubmission {
+  const workspace = requireWorkspaceScope(row);
+  return { ...mapSubmission(row), workspaceId: workspace.workspaceId };
+}
+
+export type SystemSkillSubmission = Omit<SkillSubmission, "workspaceId"> & {
+  scope: "system";
+  workspaceId: null;
+};
+function mapSystemSubmission(row: SkillSubmissionRow): SystemSkillSubmission {
+  if (
+    row.scope !== "system" ||
+    row.submittedBy !== SYSTEM_SUBMITTER_ID ||
+    row.teamId !== null ||
+    row.workspaceId !== null
+  ) {
+    throw new ContentError(
+      404,
+      "SKILL_SUBMISSION_NOT_FOUND",
+      "System submission not found",
+    );
+  }
+  return { ...mapSubmission(row), scope: "system", workspaceId: null };
+}
+
+export async function createSystemSkillSubmission(input: {
+  source: string;
+  options?: SkillSubmissionOptions;
+}) {
+  const result = await createSubmission({
+    source: input.source,
+    options: input.options,
+    scope: "system",
+    teamId: null,
+    workspaceId: null,
+    userId: SYSTEM_SUBMITTER_ID,
+  });
+  return { ...result, submission: mapSystemSubmission(result.submission) };
+}
+
+export async function getSystemSkillSubmission(submissionId: string) {
+  const row = await getSubmission(submissionId);
+  if (!row)
+    throw new ContentError(
+      404,
+      "SKILL_SUBMISSION_NOT_FOUND",
+      "System submission not found",
+    );
+  return { submission: mapSystemSubmission(row) };
 }
 
 type SubmissionCursor = { createdAt: Date; id: string };
@@ -124,10 +176,27 @@ export async function createSkillSubmission(
   input: Viewer & {
     source: string;
     install?: { skill?: string; installedVia?: "user" | "agent" };
-    /** Only the platform's own import passes these (`system-submit.ts`). */
     options?: SkillSubmissionOptions;
   },
 ): Promise<{ submission: SkillSubmission; created: boolean }> {
+  requireWorkspaceScope({
+    ...input,
+    scope: "workspace",
+    submittedBy: input.userId,
+  });
+  const result = await createSubmission({ ...input, scope: "workspace" });
+  return { ...result, submission: mapSkillSubmission(result.submission) };
+}
+
+async function createSubmission(input: {
+  scope?: "workspace" | "system";
+  teamId: string | null;
+  workspaceId: string | null;
+  userId: string;
+  source: string;
+  install?: { skill?: string; installedVia?: "user" | "agent" };
+  options?: SkillSubmissionOptions;
+}): Promise<{ submission: SkillSubmissionRow; created: boolean }> {
   const sourceInput = input.source.trim();
   // Cheap, offline validation so garbage is refused here rather than becoming
   // a failed job. Whether the repository exists is the worker's to find out.
@@ -143,6 +212,7 @@ export async function createSkillSubmission(
   }
 
   const { submission, created } = await createOrReuseSubmission({
+    ...(input.scope ? { scope: input.scope } : {}),
     teamId: input.teamId,
     workspaceId: input.workspaceId,
     submittedBy: input.userId,
@@ -166,7 +236,7 @@ export async function createSkillSubmission(
   if (created) {
     await enqueueOrFail(submission);
   }
-  return { submission: mapSkillSubmission(submission), created };
+  return { submission, created };
 }
 
 export async function listSkillSubmissions(
@@ -198,6 +268,9 @@ async function requireVisibleSubmission(
   const row = await getSubmission(input.submissionId);
   if (
     !row ||
+    row.scope === "system" ||
+    row.submittedBy === SYSTEM_SUBMITTER_ID ||
+    row.teamId !== input.teamId ||
     row.workspaceId !== input.workspaceId ||
     (row.submittedBy !== input.userId && !isMarketAdmin(input.userId))
   ) {
@@ -213,7 +286,9 @@ async function requireVisibleSubmission(
 export async function getSkillSubmission(
   input: Viewer & { submissionId: string },
 ): Promise<{ submission: SkillSubmission }> {
-  return { submission: mapSkillSubmission(await requireVisibleSubmission(input)) };
+  return {
+    submission: mapSkillSubmission(await requireVisibleSubmission(input)),
+  };
 }
 
 function isUniqueViolation(error: unknown): boolean {

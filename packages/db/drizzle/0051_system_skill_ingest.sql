@@ -1,0 +1,6 @@
+ALTER TABLE "skill_registry_submissions" ALTER COLUMN "team_id" DROP NOT NULL;--> statement-breakpoint
+ALTER TABLE "skill_registry_submissions" ALTER COLUMN "workspace_id" DROP NOT NULL;--> statement-breakpoint
+ALTER TABLE "skill_registry_submissions" ADD COLUMN "scope" text DEFAULT 'workspace' NOT NULL;--> statement-breakpoint
+-- Detach historical system imports without changing their identity or lifecycle.
+UPDATE "skill_registry_submissions" SET "scope" = 'system', "team_id" = NULL, "workspace_id" = NULL WHERE "submitted_by" = 'system' AND "source_kind" = 'github' AND "on_complete" IS NULL;--> statement-breakpoint
+ALTER TABLE "skill_registry_submissions" ADD CONSTRAINT "skill_registry_submissions_scope_check" CHECK (("skill_registry_submissions"."scope" = 'workspace' and "skill_registry_submissions"."team_id" is not null and "skill_registry_submissions"."workspace_id" is not null and "skill_registry_submissions"."submitted_by" <> 'system') or ("skill_registry_submissions"."scope" = 'system' and "skill_registry_submissions"."team_id" is null and "skill_registry_submissions"."workspace_id" is null and "skill_registry_submissions"."submitted_by" = 'system' and "skill_registry_submissions"."source_kind" = 'github' and "skill_registry_submissions"."on_complete" is null));

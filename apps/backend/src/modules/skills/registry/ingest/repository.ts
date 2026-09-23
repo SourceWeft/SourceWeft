@@ -36,8 +36,9 @@ const IN_FLIGHT = ["queued", "running"] as const;
  * concurrent creates cannot both win.
  */
 export async function createOrReuseSubmission(input: {
-  teamId: string;
-  workspaceId: string;
+  scope?: "workspace" | "system";
+  teamId: string | null;
+  workspaceId: string | null;
   submittedBy: string;
   sourceInput: string;
   repoOwner: string;
@@ -60,6 +61,7 @@ export async function createOrReuseSubmission(input: {
         id: randomUUID(),
         createdAt: now,
         updatedAt: now,
+        scope: input.scope ?? "workspace",
         teamId: input.teamId,
         workspaceId: input.workspaceId,
         submittedBy: input.submittedBy,
@@ -82,6 +84,7 @@ export async function createOrReuseSubmission(input: {
       .from(skillRegistrySubmissions)
       .where(
         and(
+          eq(skillRegistrySubmissions.scope, input.scope ?? "workspace"),
           eq(skillRegistrySubmissions.submittedBy, input.submittedBy),
           eq(skillRegistrySubmissions.sourceKind, "github"),
           sql`lower(${skillRegistrySubmissions.sourceInput}) = lower(${input.sourceInput})`,
@@ -119,6 +122,7 @@ export async function listSubmissions(input: {
     .from(skillRegistrySubmissions)
     .where(
       and(
+        eq(skillRegistrySubmissions.scope, "workspace"),
         eq(skillRegistrySubmissions.workspaceId, input.workspaceId),
         eq(skillRegistrySubmissions.submittedBy, input.submittedBy),
         input.before
@@ -257,4 +261,12 @@ export async function requeueFailedSubmission(
     )
     .returning();
   return row ?? null;
+}
+
+/** Verify database connectivity and the required scope migration, without writes. */
+export async function assertSystemSubmissionStorage() {
+  await db
+    .select({ scope: skillRegistrySubmissions.scope })
+    .from(skillRegistrySubmissions)
+    .limit(0);
 }

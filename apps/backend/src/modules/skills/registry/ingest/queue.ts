@@ -15,8 +15,9 @@ export type SkillRegistryIngestJobPayload = {
   submissionId: string;
   // Not read by the processor — the row is the source of truth. They let the
   // job audit trail attribute the job to its team and workspace.
-  teamId: string;
-  workspaceId: string;
+  scope: "workspace" | "system";
+  teamId: string | null;
+  workspaceId: string | null;
 };
 
 /**
@@ -28,7 +29,7 @@ export type SkillRegistryIngestJobPayload = {
 export async function enqueueSkillIngestJob(
   submission: Pick<
     SkillSubmissionRow,
-    "id" | "teamId" | "workspaceId" | "attempts"
+    "id" | "scope" | "teamId" | "workspaceId" | "attempts"
   >,
   options: {
     /** Run no earlier than this — a submission waiting out a rate limit. */
@@ -37,6 +38,7 @@ export async function enqueueSkillIngestJob(
 ) {
   const payload: SkillRegistryIngestJobPayload = {
     submissionId: submission.id,
+    scope: submission.scope,
     teamId: submission.teamId,
     workspaceId: submission.workspaceId,
   };
