@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import {
   Archive,
   Bot,
@@ -485,10 +485,11 @@ function ChatListRow({
   onOpen: (id: string, title: string) => void;
   onPrefetch?: (id: string) => void;
 }) {
+  const locale = useLocale();
   const t = useTranslations("dashboardNav");
   const [menuOpen, setMenuOpen] = useState(false);
   const status = item.status || "ready";
-  const relativeUpdatedAt = formatShortRelativeTime(item.updatedAt);
+  const relativeUpdatedAt = formatShortRelativeTime(item.updatedAt, locale);
   const shared = isSharedChat(item);
   const parentThreadId = item.parentThreadId;
 

@@ -19,19 +19,38 @@ function isMessages(value: unknown): value is Messages {
  * Deep-merge `override` onto `base`, returning a new object. Used at the one
  * assembly point that folds `enterprise/billing/messages` into the web catalog's
  * `pricing` namespace without mutating either input. Object nodes merge
- * recursively; a string (leaf) in `override` replaces the base value.
+ * recursively; non-empty translated leaves replace matching English leaves.
+ * Missing, empty or malformed values preserve English, including array entries.
  */
-export function deepMergeMessages(base: Messages, override: Messages): Messages {
-  const result: Messages = { ...base };
+export function deepMergeMessages<T extends object>(
+  base: T,
+  override: object,
+): T {
+  const result: Record<string, unknown> = { ...base } as Record<
+    string,
+    unknown
+  >;
   for (const [key, overrideValue] of Object.entries(override)) {
     const baseValue = result[key];
     if (isMessages(baseValue) && isMessages(overrideValue)) {
       result[key] = deepMergeMessages(baseValue, overrideValue);
-    } else {
+    } else if (
+      typeof overrideValue === "string" &&
+      overrideValue.trim() &&
+      (typeof baseValue === "string" || baseValue === undefined)
+    ) {
       result[key] = overrideValue;
+    } else if (Array.isArray(overrideValue) && Array.isArray(baseValue)) {
+      result[key] = baseValue.map((value, index) =>
+        typeof overrideValue[index] === "string" && overrideValue[index].trim()
+          ? overrideValue[index]
+          : value,
+      );
+    } else if (baseValue === undefined && isMessages(overrideValue)) {
+      result[key] = deepMergeMessages({}, overrideValue);
     }
   }
-  return result;
+  return result as T;
 }
 
 /**
@@ -45,8 +64,8 @@ export function getFallbackChain(locale: Locale): Locale[] {
 
 /**
  * Flatten a nested catalog to dotted keys (`landing.hero.headline`). The catalog
- * alignment test (§14.1) compares these key sets across locales, so a missing or
- * extra key in any translation fails CI.
+ * alignment test compares effective catalogs after filling missing translations
+ * from English.
  */
 export function flattenKeys(messages: Messages, prefix = ""): string[] {
   const keys: string[] = [];

@@ -14,7 +14,7 @@ import {
   ShieldCheck,
   Trash2,
 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import {
   marketMcpManifestSchema,
   type McpRiskLevel,
@@ -125,6 +125,7 @@ export function McpDetailDialog({
   pending: boolean;
   workspaceId: string | null;
 }) {
+  const locale = useLocale();
   const t = useTranslations("dashboardMcpPanel");
   const [detail, setDetail] = React.useState<MarketMcpDetail | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -328,8 +329,7 @@ export function McpDetailDialog({
                           {install.lastTestedAt
                             ? t("detail.testedSuffix", {
                                 time: formatShortRelativeTime(
-                                  install.lastTestedAt,
-                                ),
+                                  install.lastTestedAt, locale),
                               })
                             : t("detail.notTestedSuffix")}
                         </p>

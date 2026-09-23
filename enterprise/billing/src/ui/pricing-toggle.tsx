@@ -1,5 +1,5 @@
 "use client";
-import { useBillingUiHost } from "./context";
+import { useBillingControls, useBillingUiHost } from "./context";
 import type { BillingClient } from "@sourceweft/sdk";
 
 import { Check } from "lucide-react";
@@ -166,6 +166,7 @@ function PricingToggleInner({
   billingTeamId: string | null;
   plans: PlanConfig[];
 }) {
+  const labels = useBillingControls();
   const {
     trackBeginCheckout,
     trackCheckoutError,
@@ -266,7 +267,7 @@ function PricingToggleInner({
         source: "landing",
       });
       toast.error(
-        error instanceof Error ? error.message : "Unable to start checkout.",
+        error instanceof Error ? error.message : labels.checkoutError,
       );
     } finally {
       setLoadingPlan(null);
@@ -277,7 +278,7 @@ function PricingToggleInner({
     <div>
       <div className="mb-10 flex justify-center">
         <div
-          aria-label="Billing period"
+          aria-label={labels.billingPeriod}
           className="inline-flex rounded-xl border border-zinc-200 bg-zinc-100 p-1 dark:border-white/12 dark:bg-white/5"
           role="group"
         >
@@ -286,7 +287,7 @@ function PricingToggleInner({
 
             return (
               <button
-                aria-label={period === "monthly" ? "Monthly" : "Yearly"}
+                aria-label={labels[period]}
                 aria-pressed={active}
                 className={`inline-flex min-w-24 items-center justify-center rounded-lg px-3 py-1.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 dark:focus-visible:ring-white/40 ${
                   active
@@ -298,12 +299,12 @@ function PricingToggleInner({
                 type="button"
               >
                 {period === "monthly" ? (
-                  "Monthly"
+                  labels.monthly
                 ) : (
                   <>
-                    Yearly
+                    {labels.yearly}
                     <span className="ml-1.5 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400">
-                      2 months free
+                      {labels.twoMonthsFree}
                     </span>
                   </>
                 )}
@@ -324,14 +325,10 @@ function PricingToggleInner({
           const isCurrent = currentPlanId === plan.id;
           const ctaLabel =
             loadingPlan === plan.id
-              ? "Opening..."
+              ? labels.opening
               : isCurrent
-                ? "Current plan"
-                : plan.id === "team"
-                  ? "Create team"
-                  : plan.id === "pro"
-                    ? "Upgrade to Pro"
-                    : plan.cta;
+                ? labels.currentPlan
+                : plan.cta;
           const ctaClassName = `block w-full rounded-lg px-4 py-2.5 text-center text-sm font-medium transition-colors ${
             plan.highlighted
               ? "bg-zinc-900 text-white hover:bg-zinc-700 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-100"
@@ -350,7 +347,7 @@ function PricingToggleInner({
               {plan.highlighted && (
                 <div className="absolute -top-3 left-1/2 -translate-x-1/2">
                   <span className="rounded-full border border-zinc-200 bg-zinc-900 px-3 py-1 text-xs font-medium text-white dark:border-white/20 dark:bg-zinc-700 dark:text-white">
-                    Most Popular
+                    {labels.popular}
                   </span>
                 </div>
               )}
@@ -361,19 +358,19 @@ function PricingToggleInner({
                 </p>
                 <div className="mt-2 flex items-end gap-1">
                   <span className="text-4xl font-bold tracking-tight text-zinc-900 dark:text-white">
-                    {formatPrice(price)}
+                    {price === 0 ? labels.free : formatPrice(price)}
                   </span>
                   {price > 0 && (
                     <span className="mb-1 text-sm text-zinc-400 dark:text-zinc-500">
-                      /{yearly ? "yr" : "mo"}
-                      {plan.id === "team" ? " / seat" : ""}
+                      /{yearly ? labels.year : labels.month}
+                      {plan.id === "team" ? ` / ${labels.seat}` : ""}
                     </span>
                   )}
                 </div>
                 <p
                   className={`mt-1 text-xs text-emerald-600 dark:text-emerald-400 ${discount > 0 ? "visible" : "invisible"}`}
                 >
-                  2 months free vs monthly
+                  {labels.yearlySavings}
                 </p>
                 <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-500">
                   {plan.description}

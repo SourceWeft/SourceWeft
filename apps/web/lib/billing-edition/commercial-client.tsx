@@ -1,5 +1,6 @@
 "use client";
 // Commercial UI adapter; subject to enterprise/LICENSE.
+import { useLocale } from "next-intl";
 import { type ComponentProps, type ReactNode } from "react";
 import { useDeploymentCapabilities } from "./capabilities";
 import * as UI from "@sourceweft/billing/ui";
@@ -32,6 +33,7 @@ const host = {
   subscribeDashboardBillingSummaryRefresh,
 };
 function Provider({ children }: { children: ReactNode }) {
+  const locale = useLocale();
   const state = useDeploymentCapabilities();
   if (state.status === "error") return <p role="alert">{state.error}</p>;
   if (state.status === "loading") return <p role="status">Loading billing…</p>;
@@ -42,6 +44,7 @@ function Provider({ children }: { children: ReactNode }) {
     <UI.BillingUiProvider
       value={{
         ...host,
+        locale,
         billingProvider: capabilities.billing.provider,
         billingTopupEnabled: capabilities.billing.topup,
         billingCheckoutEnabled: capabilities.billing.checkout,

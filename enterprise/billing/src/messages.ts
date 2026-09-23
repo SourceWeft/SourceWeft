@@ -16,7 +16,16 @@ export const billingMessages = {
 export type BillingMessageLocale = keyof typeof billingMessages;
 
 export function getBillingMessages(locale: string) {
-  return (
-    billingMessages[locale as BillingMessageLocale] ?? billingMessages.en
-  );
+  return billingMessages[locale as BillingMessageLocale] ?? billingMessages.en;
+}
+
+/** The interactive controls also accept incomplete translation catalogs. */
+export function getBillingControls(locale: string) {
+  const controls = { ...en.controls };
+  const translated = getBillingMessages(locale).controls;
+  for (const key of Object.keys(controls) as Array<keyof typeof controls>) {
+    const value = translated?.[key];
+    if (typeof value === "string" && value.trim()) controls[key] = value;
+  }
+  return controls;
 }

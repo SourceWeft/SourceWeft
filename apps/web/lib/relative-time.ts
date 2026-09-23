@@ -1,41 +1,27 @@
-import {
-  differenceInDays,
-  differenceInHours,
-  differenceInMinutes,
-  differenceInMonths,
-  differenceInSeconds,
-  differenceInWeeks,
-  differenceInYears,
-} from "date-fns";
+import { isLocale } from "@sourceweft/i18n/locales";
 
-export function formatShortRelativeTime(value: Date | string): string {
+export function formatShortRelativeTime(
+  value: Date | string,
+  locale = "en",
+  now = new Date(),
+): string {
   const target = value instanceof Date ? value : new Date(value);
-
-  if (Number.isNaN(target.getTime())) {
-    return "just now";
-  }
-
-  const now = new Date();
-  const seconds = differenceInSeconds(now, target);
-
-  if (seconds < 5) return "just now";
-  if (seconds < 60) return `${seconds}s ago`;
-
-  const minutes = differenceInMinutes(now, target);
-  if (minutes < 60) return `${minutes}m ago`;
-
-  const hours = differenceInHours(now, target);
-  if (hours < 24) return `${hours}h ago`;
-
-  const days = differenceInDays(now, target);
-  if (days < 7) return `${days}d ago`;
-
-  const weeks = differenceInWeeks(now, target);
-  if (weeks < 5) return `${weeks}w ago`;
-
-  const months = differenceInMonths(now, target);
-  if (months < 12) return `${Math.max(1, months)}mo ago`;
-
-  const years = differenceInYears(now, target);
-  return `${Math.max(1, years)}y ago`;
+  const formatter = new Intl.RelativeTimeFormat(
+    isLocale(locale) ? locale : "en",
+    { numeric: "auto", style: "short" },
+  );
+  const seconds = (target.getTime() - now.getTime()) / 1000;
+  if (!Number.isFinite(seconds) || Math.abs(seconds) < 5)
+    return formatter.format(0, "second");
+  const units: [Intl.RelativeTimeFormatUnit, number][] = [
+    ["year", 31536000],
+    ["month", 2592000],
+    ["week", 604800],
+    ["day", 86400],
+    ["hour", 3600],
+    ["minute", 60],
+    ["second", 1],
+  ];
+  const [unit, size] = units.find(([, size]) => Math.abs(seconds) >= size)!;
+  return formatter.format(Math.trunc(seconds / size), unit);
 }

@@ -39,5 +39,20 @@
         "專屬支援"
       ]
     }
+  },
+  "controls": {
+    "monthly": "按月付費",
+    "yearly": "按年付費",
+    "billingPeriod": "付費週期",
+    "twoMonthsFree": "贈送 2 個月",
+    "opening": "正在開啟…",
+    "currentPlan": "目前方案",
+    "popular": "最受歡迎",
+    "free": "免費",
+    "year": "年",
+    "month": "月",
+    "seat": "席位",
+    "yearlySavings": "比按月付費節省 2 個月",
+    "checkoutError": "無法發起結帳。"
   }
 }

@@ -1,5 +1,5 @@
 "use client";
-import { useBillingUiHost, type BillingUiHost } from "./context";
+import { useBillingControls, useBillingUiHost } from "./context";
 
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { cn } from "@sourceweft/ui-web/lib/utils";
@@ -18,6 +18,7 @@ export function BillingPlanActionControls({
   onBillingPeriodChange: (value: BillingInterval) => void;
   showBillingPeriod?: boolean;
 }) {
+  const labels = useBillingControls();
   const { billingCheckoutEnabled } = useBillingUiHost();
 
   if (!billingCheckoutEnabled) {
@@ -28,7 +29,7 @@ export function BillingPlanActionControls({
     <div className="flex flex-wrap items-center gap-2">
       {showBillingPeriod && !action.shouldManageBilling ? (
         <div
-          aria-label="Billing period"
+          aria-label={labels.billingPeriod}
           className="flex rounded-lg border border-border bg-muted/40 p-0.5"
           role="group"
         >
@@ -45,7 +46,7 @@ export function BillingPlanActionControls({
               onClick={() => onBillingPeriodChange(period)}
               type="button"
             >
-              {period === "monthly" ? "Monthly" : "Yearly"}
+              {labels[period]}
             </button>
           ))}
         </div>
@@ -57,7 +58,7 @@ export function BillingPlanActionControls({
         type="button"
         variant="outline"
       >
-        {action.actionLoading ? "Opening..." : action.actionLabel}
+        {action.actionLoading ? labels.opening : action.actionLabel}
       </Button>
     </div>
   );

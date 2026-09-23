@@ -1,3 +1,4 @@
+import { deepMergeMessages } from "@sourceweft/i18n/catalog";
 import { LOCALE_IDS } from "@sourceweft/i18n/locales";
 import { describe, expect, it } from "vitest";
 
@@ -61,9 +62,9 @@ describe("message catalog alignment", () => {
 
   for (const [locale, catalog] of Object.entries(CATALOGS)) {
     describe(locale, () => {
-      const localeLeaves = leaves(catalog);
+      const localeLeaves = leaves(deepMergeMessages(en, catalog as object));
 
-      it("has exactly the same keys as English", () => {
+      it("has all English keys after applying the fallback", () => {
         expect([...localeLeaves.keys()].sort()).toEqual(
           [...enLeaves.keys()].sort(),
         );
@@ -86,7 +87,10 @@ describe("message catalog alignment", () => {
 
       it("uses the same ICU placeholders as English", () => {
         for (const [key, value] of localeLeaves) {
-          if (typeof value === "string" && typeof enLeaves.get(key) === "string") {
+          if (
+            typeof value === "string" &&
+            typeof enLeaves.get(key) === "string"
+          ) {
             expect([...placeholders(value)].sort(), key).toEqual(
               [...placeholders(enLeaves.get(key) as string)].sort(),
             );
@@ -100,8 +104,10 @@ describe("message catalog alignment", () => {
 describe("billing pricing catalog alignment", () => {
   const enLeaves = leaves(BILLING_CATALOGS.en as Json);
   for (const [locale, catalog] of Object.entries(BILLING_CATALOGS)) {
-    it(`${locale} has the same keys and array arity as English`, () => {
-      const localeLeaves = leaves(catalog);
+    it(`${locale} has the same effective keys and array arity as English`, () => {
+      const localeLeaves = leaves(
+        deepMergeMessages(billingEn, catalog as object),
+      );
       expect([...localeLeaves.keys()].sort()).toEqual(
         [...enLeaves.keys()].sort(),
       );

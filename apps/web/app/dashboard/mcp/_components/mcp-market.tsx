@@ -21,7 +21,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import type {
   ListWorkspaceMarketMcpResponse,
   WorkspaceMcpInstall,
@@ -278,11 +278,12 @@ function installStatusMeta(status: WorkspaceMcpInstallStatus): {
 }
 
 function McpStatusIndicator({ install }: { install: WorkspaceMcpInstall }) {
+  const locale = useLocale();
   const t = useTranslations("dashboardMcpPanel");
   const meta = installStatusMeta(install.status);
   const testedLabel = install.lastTestedAt
     ? t("card.tested", {
-        time: formatShortRelativeTime(install.lastTestedAt),
+        time: formatShortRelativeTime(install.lastTestedAt, locale),
       })
     : t("card.notTestedYet");
   return (

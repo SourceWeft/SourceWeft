@@ -16,9 +16,12 @@ import {
   DialogDescription,
 } from "@sourceweft/ui-web/components/ui/dialog";
 import type { BillingClient } from "@sourceweft/sdk";
+import { getBillingControls } from "../messages";
+
 type Interval = "monthly" | "yearly";
 type Source = "landing" | "dashboard" | "settings";
 export type BillingUiHost = {
+  locale?: string;
   authClient: {
     useActiveOrganization(): { data: unknown };
     useListOrganizations(): { data: unknown };
@@ -124,4 +127,9 @@ export function useBillingUiHost(): BillingUiHost & CheckoutNavigation {
   const value = useContext(Context);
   if (!value) throw new Error("Billing UI requires an explicit host provider");
   return value;
+}
+
+export function useBillingControls() {
+  const { locale = "en" } = useBillingUiHost();
+  return getBillingControls(locale);
 }

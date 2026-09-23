@@ -44,3 +44,19 @@ test("flattenKeys yields sorted dotted paths for cross-locale key comparison", (
     "landing.hero.sub",
   ]);
 });
+
+test("partial, empty or malformed translations preserve English leaves and arrays", () => {
+  const en = {
+    title: "Title",
+    section: { value: "Value" },
+    list: ["One", "Two"],
+  };
+  assert.deepEqual(
+    deepMergeMessages(en, { title: "", section: null, list: ["一"] }),
+    { title: "Title", section: { value: "Value" }, list: ["一", "Two"] },
+  );
+  assert.deepEqual(
+    deepMergeMessages(en, { title: {}, section: "wrong shape" }),
+    en,
+  );
+});

@@ -1,6 +1,6 @@
 import { CircleAlert, Loader2 } from "lucide-react";
 import { useMemo } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 
 import type { McpToolSelection, WorkspaceMcpInstall } from "@sourceweft/sdk";
 import { Checkbox } from "@sourceweft/ui-web/components/ui/checkbox";
@@ -27,6 +27,7 @@ function McpRow({
   selectedToolIds: string[];
   onSelectionChange: (selection: McpToolSelection) => void;
 }) {
+  const locale = useLocale();
   const t = useTranslations("dashboardSourcesHub");
   const selectedInstallSet = useMemo(
     () => new Set(selectedInstallIds),
@@ -155,7 +156,7 @@ function McpRow({
               />
               {install.lastTestedAt
                 ? t("mcp.tested", {
-                    time: formatShortRelativeTime(install.lastTestedAt),
+                    time: formatShortRelativeTime(install.lastTestedAt, locale),
                   })
                 : t("mcp.notTested")}
             </span>

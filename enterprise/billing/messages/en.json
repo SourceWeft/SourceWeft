@@ -39,5 +39,20 @@
         "Dedicated support"
       ]
     }
+  },
+  "controls": {
+    "monthly": "Monthly",
+    "yearly": "Yearly",
+    "billingPeriod": "Billing period",
+    "twoMonthsFree": "2 months free",
+    "opening": "Opening...",
+    "currentPlan": "Current plan",
+    "popular": "Most Popular",
+    "free": "Free",
+    "year": "yr",
+    "month": "mo",
+    "seat": "seat",
+    "yearlySavings": "2 months free vs monthly",
+    "checkoutError": "Unable to start checkout."
   }
 }

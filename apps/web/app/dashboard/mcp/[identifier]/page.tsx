@@ -17,7 +17,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import {
   marketMcpManifestSchema,
   type McpRiskLevel,
@@ -73,6 +73,7 @@ function riskMeta(risk: McpRiskLevel): {
 }
 
 export default function McpDetailPage() {
+  const locale = useLocale();
   const t = useTranslations("dashboardMcpPanel");
   const params = useParams<{ identifier?: string | string[] }>();
   const rawIdentifier = Array.isArray(params.identifier)
@@ -480,8 +481,7 @@ export default function McpDetailPage() {
                             {install.lastTestedAt
                               ? t("detail.testedSuffix", {
                                   time: formatShortRelativeTime(
-                                    install.lastTestedAt,
-                                  ),
+                                    install.lastTestedAt, locale),
                                 })
                               : t("detail.notTestedSuffix")}
                           </div>
@@ -632,7 +632,7 @@ export default function McpDetailPage() {
                         key: "updated",
                         label: t("detail.fields.updated"),
                         value: item.updatedAt
-                          ? formatShortRelativeTime(item.updatedAt)
+                          ? formatShortRelativeTime(item.updatedAt, locale)
                           : t("detail.fieldValues.unknown"),
                       },
                     ].map(({ key, label, value }) => (
