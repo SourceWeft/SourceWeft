@@ -105,6 +105,7 @@ function deps(overrides: Partial<IngestDeps> = {}): IngestDeps {
 function seedRow(onComplete: unknown = null) {
   state.row = {
     id: "sub_1",
+    scope: "workspace",
     teamId: "team_1",
     workspaceId: "ws_1",
     submittedBy: "user_1",
@@ -308,6 +309,7 @@ test("GitHub's rate limit puts the submission back in the queue, saying when it 
   assert.ok(outcome.resumeAt.getTime() - resetAt.getTime() <= 60_000);
   assert.deepEqual(outcome.submission, {
     id: "sub_1",
+    scope: "workspace",
     teamId: "team_1",
     workspaceId: "ws_1",
     attempts: 1,
@@ -606,4 +608,23 @@ test("a repository its author removed from SourceWeft is not imported again", as
   );
   // Refused before anything was written.
   assert.equal(mocks.upsert.mock.calls.length, 0);
+});
+
+test("system ingestion indexes globally without granting or installing into any tenant", async () => {
+  Object.assign(state.row!, {
+    scope: "system",
+    teamId: null,
+    workspaceId: null,
+    submittedBy: "system",
+  });
+  skillsRead(["writer"]);
+  mocks.getExisting.mockResolvedValue({
+    id: "existing",
+    ownerUserId: "someone-else",
+  });
+  const io = deps();
+  const outcome = await run({ deps: io });
+  assert.equal(outcome.status, "succeeded");
+  assert.equal(mocks.grant.mock.calls.length, 0);
+  assert.equal(vi.mocked(io.installSkill).mock.calls.length, 0);
 });

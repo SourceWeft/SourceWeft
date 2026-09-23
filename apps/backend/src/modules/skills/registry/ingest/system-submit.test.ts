@@ -1,40 +1,27 @@
+vi.mock("./repository", () => ({
+  assertSystemSubmissionStorage: vi.fn(async () => undefined),
+}));
 import assert from "node:assert/strict";
 import { beforeEach, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   create: vi.fn(),
   get: vi.fn(),
-  workspaceRows: [] as Array<{ id: string }>,
 }));
 
 vi.mock("./service", () => ({
-  createSkillSubmission: mocks.create,
-  getSkillSubmission: mocks.get,
-}));
-vi.mock("@sourceweft/db", () => ({
-  workspaces: { id: "id", organizationId: "organization_id" },
-  db: {
-    select: () => ({
-      from: () => ({
-        where: () => ({ limit: async () => mocks.workspaceRows }),
-      }),
-    }),
-  },
+  createSystemSkillSubmission: mocks.create,
+  getSystemSkillSubmission: mocks.get,
 }));
 
 import {
-  assertSystemSubmitScope,
   parseSystemSubmitSources,
   readSystemSubmissions,
   submitSkillSourcesAsSystem,
-  SYSTEM_SUBMITTER_ID,
 } from "./system-submit";
-
-const scope = { teamId: "team-1", workspaceId: "workspace-1" };
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.workspaceRows = [{ id: "workspace-1" }];
 });
 
 test("platform imports go through the ordinary submission, attributed to the system", async () => {
@@ -42,10 +29,8 @@ test("platform imports go through the ordinary submission, attributed to the sys
     submission: { id: "s1", status: "queued" },
     created: true,
   });
-  const results = await submitSkillSourcesAsSystem(scope, ["acme/skills"]);
+  const results = await submitSkillSourcesAsSystem(["acme/skills"]);
   assert.deepEqual(mocks.create.mock.calls[0]![0], {
-    ...scope,
-    userId: SYSTEM_SUBMITTER_ID,
     source: "acme/skills",
   });
   // No install-on-complete: collecting a skill puts it in nobody's workspace.
@@ -68,7 +53,7 @@ test("a refused source is that source's result; the rest are still submitted", a
       }),
     )
     .mockResolvedValueOnce({ submission: { id: "s2" }, created: false });
-  const results = await submitSkillSourcesAsSystem(scope, ["nope", "ok/repo"]);
+  const results = await submitSkillSourcesAsSystem(["nope", "ok/repo"]);
   assert.deepEqual(results[0], {
     source: "nope",
     ok: false,
@@ -82,21 +67,9 @@ test("status is read as the system too, so it sees what it submitted", async () 
   mocks.get.mockResolvedValue({
     submission: { id: "s1", status: "succeeded" },
   });
-  const results = await readSystemSubmissions(scope, ["s1"]);
-  assert.deepEqual(mocks.get.mock.calls[0]![0], {
-    ...scope,
-    userId: SYSTEM_SUBMITTER_ID,
-    submissionId: "s1",
-  });
+  const results = await readSystemSubmissions(["s1"]);
+  assert.equal(mocks.get.mock.calls[0]![0], "s1");
   assert.equal(results[0]!.ok, true);
-});
-
-test("a workspace that is not in the named team is refused before anything is submitted", async () => {
-  mocks.workspaceRows = [];
-  await assert.rejects(
-    assertSystemSubmitScope(scope),
-    /does not exist in team 'team-1'/,
-  );
 });
 
 test("a source can say whether its skills are featured; a plain string leaves it", async () => {
@@ -104,7 +77,7 @@ test("a source can say whether its skills are featured; a plain string leaves it
     submission: { id: "s1", status: "queued" },
     created: true,
   });
-  await submitSkillSourcesAsSystem(scope, [
+  await submitSkillSourcesAsSystem([
     { source: "anthropics/skills", featured: true },
     { source: "someone/skills", featured: false },
     "acme/skills",

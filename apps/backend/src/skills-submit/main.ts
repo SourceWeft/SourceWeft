@@ -1,9 +1,9 @@
+import { parseSystemSubmitCommand } from "./arguments";
 // First: it loads the environment, which the database module reads on import.
 import "../shared/config";
 import { closeDatabase } from "@sourceweft/db";
 import { closeQueue } from "../shared/queue";
 import {
-  assertSystemSubmitScope,
   parseSystemSubmitSources,
   readSystemSubmissions,
   submitSkillSourcesAsSystem,
@@ -14,9 +14,9 @@ import {
  * Ships in the backend image as `dist/skills-submit.js`, so whatever runs it is
  * on the deployed version's schema and queue format by construction.
  *
- *   node dist/skills-submit.js submit --team <id> --workspace <id>   stdin: {"sources": [...]}
+ *   node dist/skills-submit.js submit   stdin: {"sources": [...]}
  *     each source is a URL string, or {"source": "<url>", "featured": true|false}
- *   node dist/skills-submit.js status --team <id> --workspace <id>   stdin: {"ids": [...]}
+ *   node dist/skills-submit.js status   stdin: {"ids": [...]}
  *
  * The answer is the one stdout line that starts with RESULT_PREFIX — the logger
  * shares stdout. Exit code 0 means the command ran; per-item failures are in
@@ -24,15 +24,6 @@ import {
  * no database or queue).
  */
 export const RESULT_PREFIX = "SKILLS_SUBMIT_RESULT ";
-
-function argument(name: string): string {
-  const index = process.argv.indexOf(`--${name}`);
-  const value = index < 0 ? undefined : process.argv[index + 1];
-  if (!value || value.startsWith("--")) {
-    throw new Error(`Missing --${name}`);
-  }
-  return value;
-}
 
 async function readStdinJson(): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
@@ -57,30 +48,16 @@ function stringList(value: unknown, field: string): string[] {
 }
 
 async function run() {
-  const command = process.argv[2];
-  if (command !== "submit" && command !== "status") {
-    throw new Error(
-      "Usage: skills-submit <submit|status> --team <id> --workspace <id>",
-    );
-  }
-  const scope = {
-    teamId: argument("team"),
-    workspaceId: argument("workspace"),
-  };
+  const command = parseSystemSubmitCommand(process.argv.slice(2));
   const input = await readStdinJson();
-  await assertSystemSubmitScope(scope);
   return command === "submit"
     ? {
         submissions: await submitSkillSourcesAsSystem(
-          scope,
           parseSystemSubmitSources(input.sources),
         ),
       }
     : {
-        submissions: await readSystemSubmissions(
-          scope,
-          stringList(input.ids, "ids"),
-        ),
+        submissions: await readSystemSubmissions(stringList(input.ids, "ids")),
       };
 }
 

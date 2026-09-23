@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { strToU8, unzipSync, zipSync } from "fflate";
 import {
@@ -9,7 +10,7 @@ import {
   test,
   vi,
 } from "vitest";
-import { and, eq, inArray, like } from "drizzle-orm";
+import { and, eq, inArray, like, sql } from "drizzle-orm";
 
 // No Redis in this suite: what is under test is the row, the fences, the
 // catalog write and the install — all PostgreSQL.
@@ -199,6 +200,166 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
           ]),
         );
       await data.closeDatabase();
+    });
+
+    test("migration detaches historical system jobs while preserving user jobs and lifecycle", async () => {
+      const migration = await readFile(
+        new URL(
+          "../../../../../../../packages/db/drizzle/0051_system_skill_ingest.sql",
+          import.meta.url,
+        ),
+        "utf8",
+      );
+      await data.db.transaction(async (tx) => {
+        await tx.execute(
+          sql.raw(`CREATE TEMP TABLE skill_registry_submissions (
+          id text PRIMARY KEY, team_id text NOT NULL, workspace_id text NOT NULL,
+          submitted_by text NOT NULL, source_kind text NOT NULL, on_complete jsonb,
+          status text NOT NULL, attempts integer NOT NULL, results jsonb NOT NULL
+        ) ON COMMIT DROP`),
+        );
+        await tx.execute(
+          sql.raw(`INSERT INTO skill_registry_submissions VALUES
+          ('old-system','t','w','system','github',NULL,'running',3,'[{"status":"indexed"}]'),
+          ('old-user','t','w','alice','github',NULL,'queued',0,'[]')`),
+        );
+        for (const statement of migration.split("--> statement-breakpoint")) {
+          if (statement.trim()) await tx.execute(sql.raw(statement));
+        }
+        const rows = await tx.execute(
+          sql.raw("SELECT * FROM skill_registry_submissions ORDER BY id"),
+        );
+        expect(rows.rows[0]).toMatchObject({
+          id: "old-system",
+          scope: "system",
+          team_id: null,
+          workspace_id: null,
+          status: "running",
+          attempts: 3,
+          results: [{ status: "indexed" }],
+        });
+        expect(rows.rows[1]).toMatchObject({
+          id: "old-user",
+          scope: "workspace",
+          team_id: "t",
+          workspace_id: "w",
+          status: "queued",
+        });
+      });
+    });
+
+    test("system rows survive workspace deletion, dedupe globally, and never grant tenant access", async () => {
+      const source = `${owner}/system-import`;
+      const first = await service.createSystemSkillSubmission({ source });
+      const again = await service.createSystemSkillSubmission({ source });
+      expect(again.submission.id).toBe(first.submission.id);
+      expect(again.created).toBe(false);
+      expect(await fresh(first.submission.id)).toMatchObject({
+        scope: "system",
+        teamId: null,
+        workspaceId: null,
+        submittedBy: "system",
+      });
+      const disposable = `skill-ws-${randomUUID()}`;
+      await data.db.insert(data.workspaces).values({
+        id: disposable,
+        organizationId: alice.teamId,
+        name: "Disposable",
+        slug: randomUUID(),
+      });
+      await data.db
+        .delete(data.workspaces)
+        .where(eq(data.workspaces.id, disposable));
+      expect(
+        (await service.getSystemSkillSubmission(first.submission.id)).submission
+          .id,
+      ).toBe(first.submission.id);
+      await expect(
+        service.getSkillSubmission({
+          ...alice,
+          submissionId: first.submission.id,
+        }),
+      ).rejects.toMatchObject({ statusCode: 404 });
+      const fixture = github({
+        repo: "system-import",
+        sha: "e".repeat(40),
+        files: { "SKILL.md": skillMd("system-fixture") },
+      });
+      const install = vi.fn();
+      const outcome = await pipeline.runIngestPipeline({
+        submissionId: first.submission.id,
+        signal: signal(),
+        willRetryTransient: false,
+        deps: { ...fixture.deps, installSkill: install },
+      });
+      expect(outcome.status).toBe("succeeded");
+      expect(install).not.toHaveBeenCalled();
+      const rows = await data.db
+        .select()
+        .from(data.skillDefinitions)
+        .where(like(data.skillDefinitions.slug, `gh-${owner}-%`));
+      const result = (await fresh(first.submission.id)).results.find(
+        (item) => item.status !== "failed",
+      )!;
+      const indexed = rows.find((row) => row.slug === result.slug);
+      expect(indexed).toMatchObject({ teamId: null, workspaceId: null });
+      const grants = await data.db
+        .select()
+        .from(data.skillEntitlements)
+        .where(eq(data.skillEntitlements.skillId, indexed!.id));
+      expect(grants).toHaveLength(0);
+      await data.db
+        .delete(data.skillRegistrySubmissions)
+        .where(eq(data.skillRegistrySubmissions.id, first.submission.id));
+    });
+
+    test("database rejects mixed system and workspace ownership", async () => {
+      for (const values of [
+        {
+          scope: "system" as const,
+          teamId: alice.teamId,
+          workspaceId: alice.workspaceId,
+          submittedBy: "system",
+          sourceKind: "github" as const,
+        },
+        {
+          scope: "workspace" as const,
+          teamId: null,
+          workspaceId: null,
+          submittedBy: alice.userId,
+          sourceKind: "github" as const,
+        },
+        {
+          scope: "system" as const,
+          teamId: null,
+          workspaceId: null,
+          submittedBy: alice.userId,
+          sourceKind: "github" as const,
+        },
+        {
+          scope: "system" as const,
+          teamId: null,
+          workspaceId: null,
+          submittedBy: "system",
+          sourceKind: "upload" as const,
+        },
+        {
+          scope: "system" as const,
+          teamId: null,
+          workspaceId: null,
+          submittedBy: "system",
+          sourceKind: "github" as const,
+          onComplete: { install: {} },
+        },
+      ]) {
+        await expect(
+          data.db.insert(data.skillRegistrySubmissions).values({
+            id: randomUUID(),
+            sourceInput: `${owner}/${randomUUID()}`,
+            ...values,
+          }),
+        ).rejects.toThrow();
+      }
     });
 
     beforeEach(() => {

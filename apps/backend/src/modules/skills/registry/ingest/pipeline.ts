@@ -46,7 +46,7 @@ export type IngestRunOutcome =
       resumeAt: Date;
       submission: Pick<
         SkillSubmissionRow,
-        "id" | "teamId" | "workspaceId" | "attempts"
+        "id" | "scope" | "teamId" | "workspaceId" | "attempts"
       >;
     };
 
@@ -151,6 +151,7 @@ export async function runIngestPipeline(input: {
             resumeAt,
             submission: {
               id: submission.id,
+              scope: submission.scope,
               teamId: submission.teamId,
               workspaceId: submission.workspaceId,
               attempts: submission.attempts,
@@ -159,7 +160,8 @@ export async function runIngestPipeline(input: {
         }
       }
 
-      const retrying = input.willRetryTransient && isTransientIngestError(error);
+      const retrying =
+        input.willRetryTransient && isTransientIngestError(error);
       // Best effort: if this write is refused the run was superseded, and the
       // original failure is still the more useful thing to surface.
       await writeSubmissionProgress(fence, {

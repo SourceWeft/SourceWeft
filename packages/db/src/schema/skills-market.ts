@@ -724,10 +724,14 @@ export const skillRegistrySubmissions = pgTable(
   "skill_registry_submissions",
   {
     id: text("id").primaryKey(),
-    teamId: text("team_id").notNull(),
-    workspaceId: text("workspace_id")
+    scope: text("scope")
+      .$type<"workspace" | "system">()
       .notNull()
-      .references(() => workspaces.id, { onDelete: "cascade" }),
+      .default("workspace"),
+    teamId: text("team_id"),
+    workspaceId: text("workspace_id").references(() => workspaces.id, {
+      onDelete: "cascade",
+    }),
     submittedBy: text("submitted_by").notNull(),
     sourceKind: text("source_kind")
       .$type<SkillSubmissionSourceKind>()
@@ -780,6 +784,10 @@ export const skillRegistrySubmissions = pgTable(
   },
   (table) => [
     check(
+      "skill_registry_submissions_scope_check",
+      sql`(${table.scope} = 'workspace' and ${table.teamId} is not null and ${table.workspaceId} is not null and ${table.submittedBy} <> 'system') or (${table.scope} = 'system' and ${table.teamId} is null and ${table.workspaceId} is null and ${table.submittedBy} = 'system' and ${table.sourceKind} = 'github' and ${table.onComplete} is null)`,
+    ),
+    check(
       "skill_registry_submissions_source_kind_check",
       sql`${table.sourceKind} in ('github', 'upload')`,
     ),
@@ -798,11 +806,7 @@ export const skillRegistrySubmissions = pgTable(
     // Dedupe: one in-flight ingest per person per source. Re-submitting while
     // it runs returns that record; once it finishes the slot is free again.
     uniqueIndex("skill_registry_submissions_inflight_uq")
-      .on(
-        table.submittedBy,
-        table.sourceKind,
-        sql`lower(${table.sourceInput})`,
-      )
+      .on(table.submittedBy, table.sourceKind, sql`lower(${table.sourceInput})`)
       .where(sql`${table.status} in ('queued', 'running')`),
   ],
 );
