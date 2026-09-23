@@ -180,6 +180,7 @@ function interpolateRaw(
 function resolveBaseUrl(variables: MailTemplateVariables) {
   const resolved =
     stringifyValue(variables.baseUrl).trim() ||
+    process.env.PUBLIC_WEB_BASE_URL?.trim() ||
     process.env.NEXT_PUBLIC_WEB_BASE_URL?.trim() ||
     process.env.BASE_URL?.trim();
   if (resolved) {
@@ -189,7 +190,7 @@ function resolveBaseUrl(variables: MailTemplateVariables) {
   if (process.env.NODE_ENV === "production") {
     throw new Error(
       "Cannot send mail in production without a configured base URL. " +
-        "Set NEXT_PUBLIC_WEB_BASE_URL or pass variables.baseUrl.",
+        "Set PUBLIC_WEB_BASE_URL or pass variables.baseUrl.",
     );
   }
 
@@ -229,7 +230,8 @@ export function renderMailTemplate(
   const htmlLang = getLocaleMeta(effectiveLocale).htmlLang;
   const baseUrl = resolveBaseUrl(variables);
   const subject = interpolateRaw(template.metadata.subject, variables);
-  const heading = interpolateRaw(template.metadata.heading, variables) || subject;
+  const heading =
+    interpolateRaw(template.metadata.heading, variables) || subject;
   const preview = interpolateRaw(template.metadata.preview, variables);
   const action = interpolateRaw(template.metadata.action, variables);
   const url = interpolateRaw(template.metadata.url, variables);

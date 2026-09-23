@@ -33,7 +33,9 @@ export class MailService {
     this.provider = provider;
   }
 
-  private extractRecipients(recipient: MailRecipient | MailRecipient[]): string[] {
+  private extractRecipients(
+    recipient: MailRecipient | MailRecipient[],
+  ): string[] {
     if (Array.isArray(recipient)) {
       return recipient.map((r) => (typeof r === "string" ? r : r.email));
     }
@@ -69,11 +71,21 @@ export class MailService {
   }
 
   async sendTemplate(input: TemplateMailSendInput): Promise<MailSendResult> {
-    const rendered = renderMailTemplate(
-      input.templateId,
-      input.variables,
-      input.locale,
-    );
+    let rendered: ReturnType<typeof renderMailTemplate>;
+    try {
+      rendered = renderMailTemplate(
+        input.templateId,
+        input.variables,
+        input.locale,
+      );
+    } catch (error) {
+      logger.error("Mail template render failed", {
+        messageType: input.messageType,
+        templateId: input.templateId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
     return this.send({
       to: input.to,
       ...rendered,

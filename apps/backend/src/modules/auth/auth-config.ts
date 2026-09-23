@@ -31,6 +31,7 @@ import {
 } from "./auth-error-i18n";
 import { resolveMailLocale } from "./mail-locale";
 import { mailDeliveryConfigured } from "../mail/delivery";
+import { serializeAuthLogArgs } from "./auth-log-args";
 import {
   isPersonalOrganizationMetadata,
   parseSourceweftOrganizationKind,
@@ -168,7 +169,8 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}): any {
         (process.env.BETTER_AUTH_LOG_LEVEL as
           "debug" | "info" | "warn" | "error" | undefined) || "info",
       log: (level, message, ...args) => {
-        const meta = args.length > 0 ? { args } : undefined;
+        const meta =
+          args.length > 0 ? { args: serializeAuthLogArgs(args) } : undefined;
         if (level === "debug") {
           logger.debug(`[BetterAuth] ${message}`, meta);
           return;
