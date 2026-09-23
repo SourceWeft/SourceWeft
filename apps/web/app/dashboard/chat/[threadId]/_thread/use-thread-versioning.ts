@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type {
   AssistantVersionIndexEntry,
   CitationRecord,
@@ -15,6 +22,9 @@ import {
   type PendingLatestVersionSelection,
 } from "./message-groups";
 
+const useBrowserLayoutEffect =
+  typeof window === "undefined" ? useEffect : useLayoutEffect;
+
 type UseThreadVersioningInput = {
   isStreaming: boolean;
   mergeStreamingAssistantIntoMessages: (
@@ -22,6 +32,17 @@ type UseThreadVersioningInput = {
   ) => ChatMessageItem[];
   messages: ChatMessageItem[];
 };
+
+function reuseVersionSelection(
+  previous: Record<string, number>,
+  next: Record<string, number>,
+) {
+  const keys = Object.keys(next);
+  return keys.length === Object.keys(previous).length &&
+    keys.every((key) => previous[key] === next[key])
+    ? previous
+    : next;
+}
 
 export function useThreadVersioning({
   isStreaming,
@@ -31,6 +52,12 @@ export function useThreadVersioning({
   const [activeVersionByGroup, setActiveVersionByGroup] = useState<
     Record<string, number>
   >({});
+  // Only read committed selections from the stream effect. Depending on the
+  // selection itself would immediately re-populate a reset from stale messages.
+  const committedSelection = useRef(activeVersionByGroup);
+  useBrowserLayoutEffect(() => {
+    committedSelection.current = activeVersionByGroup;
+  }, [activeVersionByGroup]);
   const [displayedCitations, setDisplayedCitations] = useState<
     CitationRecord[]
   >([]);
@@ -170,72 +197,73 @@ export function useThreadVersioning({
   }, [isStreaming, visibleCitations]);
 
   useEffect(() => {
-    setActiveVersionByGroup((previous) => {
-      const next: Record<string, number> = {};
-      const nextSignatures: Record<string, string> = {};
-      const pendingSelection = pendingLatestVersionSelectionRef.current;
-      const appliedPendingGroups = new Set<string>();
-
-      for (const group of messageGroups) {
-        const maxIndex = Math.max(group.versions.length - 1, 0);
-        const signature = `${group.groupId}:${group.latestVersionId}`;
-        nextSignatures[group.groupId] = signature;
-
-        if (
-          group.groupId === pendingSelection?.userGroupId ||
-          group.groupId === pendingSelection?.assistantGroupId ||
-          (group.role === "assistant" &&
-            group.turnId &&
-            group.turnId === pendingSelection?.turnId)
-        ) {
-          next[group.groupId] = maxIndex;
-          appliedPendingGroups.add(group.groupId);
-          continue;
-        }
-
-        const hasNewVersion =
-          latestSignatureByGroupRef.current[group.groupId] !== signature;
-
-        if (hasNewVersion) {
-          next[group.groupId] = maxIndex;
-          continue;
-        }
-
-        const previousIndex = previous[group.groupId];
-        if (typeof previousIndex !== "number") {
-          next[group.groupId] = maxIndex;
-          continue;
-        }
-
-        next[group.groupId] = Math.min(Math.max(previousIndex, 0), maxIndex);
-      }
-
-      if (
-        pendingSelection &&
-        (!pendingSelection.userGroupId ||
-          appliedPendingGroups.has(pendingSelection.userGroupId)) &&
-        (!pendingSelection.assistantGroupId ||
-          appliedPendingGroups.has(pendingSelection.assistantGroupId)) &&
-        (!pendingSelection.turnId ||
-          messageGroups.some(
-            (group) =>
-              group.role === "assistant" &&
-              group.turnId === pendingSelection.turnId &&
-              appliedPendingGroups.has(group.groupId),
-          ))
-      ) {
-        pendingLatestVersionSelectionRef.current = null;
-      }
-
-      latestSignatureByGroupRef.current = nextSignatures;
-      return next;
+    // Capture reconciliation inputs once. React may replay a state updater;
+    // consuming these refs inside it would make a replay choose another branch.
+    const pendingSelection = pendingLatestVersionSelectionRef.current;
+    const previousSignatures = latestSignatureByGroupRef.current;
+    const nextSignatures: Record<string, string> = {};
+    const appliedPendingGroups = new Set<string>();
+    const selections = messageGroups.map((group) => {
+      const signature = `${group.groupId}:${group.latestVersionId}`;
+      nextSignatures[group.groupId] = signature;
+      const pending = Boolean(
+        group.groupId === pendingSelection?.userGroupId ||
+        group.groupId === pendingSelection?.assistantGroupId ||
+        (group.role === "assistant" &&
+          group.turnId &&
+          group.turnId === pendingSelection?.turnId),
+      );
+      if (pending) appliedPendingGroups.add(group.groupId);
+      return {
+        groupId: group.groupId,
+        maxIndex: Math.max(group.versions.length - 1, 0),
+        selectLatest:
+          pending || previousSignatures[group.groupId] !== signature,
+      };
     });
+
+    const reconcile = (previous: Record<string, number>) => {
+      const next: Record<string, number> = {};
+      for (const { groupId, maxIndex, selectLatest } of selections) {
+        const previousIndex = previous[groupId];
+        next[groupId] =
+          selectLatest || typeof previousIndex !== "number"
+            ? maxIndex
+            : Math.min(Math.max(previousIndex, 0), maxIndex);
+      }
+      return reuseVersionSelection(previous, next);
+    };
+    // Returning the previous value from an updater can still schedule another
+    // render while a stream update is pending. Skip dispatch altogether when
+    // the committed selection is already valid for this message snapshot.
+    if (reconcile(committedSelection.current) !== committedSelection.current) {
+      setActiveVersionByGroup(reconcile);
+    }
+
+    latestSignatureByGroupRef.current = nextSignatures;
+    if (
+      pendingSelection &&
+      (!pendingSelection.userGroupId ||
+        appliedPendingGroups.has(pendingSelection.userGroupId)) &&
+      (!pendingSelection.assistantGroupId ||
+        appliedPendingGroups.has(pendingSelection.assistantGroupId)) &&
+      (!pendingSelection.turnId ||
+        messageGroups.some(
+          (group) =>
+            group.role === "assistant" &&
+            group.turnId === pendingSelection.turnId &&
+            appliedPendingGroups.has(group.groupId),
+        ))
+    ) {
+      pendingLatestVersionSelectionRef.current = null;
+    }
   }, [messageGroups]);
 
   const resetVersioningState = useCallback(() => {
-    setActiveVersionByGroup({});
+    setActiveVersionByGroup((previous) => reuseVersionSelection(previous, {}));
     setDisplayedCitations([]);
     latestSignatureByGroupRef.current = {};
+    pendingLatestVersionSelectionRef.current = null;
   }, []);
 
   const handleActiveVersionChange = useCallback(
@@ -250,13 +278,13 @@ export function useThreadVersioning({
           (group) => group.groupId === input.groupId,
         );
         if (!changedGroup) {
-          return next;
+          return reuseVersionSelection(previous, next);
         }
 
         if (changedGroup.role === "user") {
           const selectedUserVersion = changedGroup.versions[input.branchIndex];
           if (!selectedUserVersion) {
-            return next;
+            return reuseVersionSelection(previous, next);
           }
 
           for (const assistantGroup of messageGroups) {
@@ -277,13 +305,13 @@ export function useThreadVersioning({
             }
           }
 
-          return next;
+          return reuseVersionSelection(previous, next);
         }
 
         const selectedAssistantVersion =
           changedGroup.versions[input.branchIndex];
         if (!selectedAssistantVersion?.sourceUserMessageId) {
-          return next;
+          return reuseVersionSelection(previous, next);
         }
 
         for (const userGroup of messageGroups) {
@@ -301,7 +329,7 @@ export function useThreadVersioning({
           }
         }
 
-        return next;
+        return reuseVersionSelection(previous, next);
       });
     },
     [messageGroups],
