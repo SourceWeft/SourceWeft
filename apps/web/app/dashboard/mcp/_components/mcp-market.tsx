@@ -288,14 +288,14 @@ function McpStatusIndicator({ install }: { install: WorkspaceMcpInstall }) {
     : t("card.notTestedYet");
   return (
     <span
-      className="inline-flex min-w-0 items-center gap-1.5"
-      title={install.lastError ?? undefined}
+      className="flex w-full min-w-0 items-center gap-1.5"
+      title={install.lastError ?? testedLabel}
     >
       <span
         aria-label={t(`installStatus.${meta.statusKey}`)}
         className={cn("size-1.5 shrink-0 rounded-full", meta.dotClass)}
       />
-      <span className="truncate">{testedLabel}</span>
+      <span className="min-w-0 flex-1 truncate">{testedLabel}</span>
       {install.lastError ? (
         <AlertTriangle className="h-3 w-3 shrink-0 text-red-500" />
       ) : null}
@@ -699,7 +699,7 @@ function McpCard({
   return (
     <article
       className={cn(
-        "group flex h-[286px] flex-col overflow-hidden rounded-2xl border border-border bg-background p-4 shadow-xs transition-colors hover:bg-accent/20",
+        "group flex min-h-[306px] flex-col rounded-2xl border border-border bg-background p-4 shadow-xs transition-colors hover:bg-accent/20",
         highlight && "ring-2 ring-primary ring-offset-2 ring-offset-background",
       )}
       id={`mcp-card-${market.identifier}`}
@@ -822,12 +822,12 @@ function McpCard({
         </div>
       ) : null}
 
-      <div className="mt-auto flex h-11 items-center gap-1.5 border-t border-border pt-3">
+      <div className="mt-auto flex min-h-11 flex-col gap-2 border-t border-border pt-3">
         {install ? (
           <>
             <div
               className={cn(
-                "min-w-0 flex-1 text-[11px] text-muted-foreground",
+                "w-full min-w-0 text-[11px] text-muted-foreground",
                 needsCredentials && "text-amber-700 dark:text-amber-300",
               )}
               title={
@@ -840,80 +840,82 @@ function McpCard({
             >
               <McpStatusIndicator install={install} />
             </div>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  aria-label={t("card.testAria", { name: market.name })}
-                  disabled={pending || !canExecuteHere}
-                  onClick={() => onTest(install)}
-                  size="icon-xs"
-                  type="button"
-                >
-                  {pending ? (
-                    <Loader2 className="size-3.5 animate-spin" />
-                  ) : (
-                    <PlugZap className="size-3.5" />
-                  )}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("card.testConnection")}</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  aria-label={t("card.configureAria", { name: market.name })}
-                  className={cn(needsCredentials && "text-amber-600")}
-                  disabled={pending}
-                  onClick={() => onConfigure(install)}
-                  size="icon-xs"
-                  type="button"
-                  variant="ghost"
-                >
-                  <Settings2 className="size-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                {needsCredentials
-                  ? t("card.configureRequired")
-                  : t("card.settings")}
-              </TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  aria-label={t("card.uninstallAria", { name: market.name })}
-                  disabled={pending}
-                  onClick={() => onUninstall(item)}
-                  size="icon-xs"
-                  type="button"
-                  variant="ghost"
-                >
-                  <Trash2 className="size-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("card.uninstall")}</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div className="flex h-7 items-center border-l border-border pl-1.5">
-                  <Switch
-                    aria-label={
-                      install.enabled
-                        ? t("card.disableAria", { name: market.name })
-                        : t("card.enableAria", { name: market.name })
-                    }
-                    checked={install.enabled}
+            <div className="flex items-center justify-end gap-1.5">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    aria-label={t("card.testAria", { name: market.name })}
+                    disabled={pending || !canExecuteHere}
+                    onClick={() => onTest(install)}
+                    size="icon-xs"
+                    type="button"
+                  >
+                    {pending ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      <PlugZap className="size-3.5" />
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{t("card.testConnection")}</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    aria-label={t("card.configureAria", { name: market.name })}
+                    className={cn(needsCredentials && "text-amber-600")}
                     disabled={pending}
-                    onCheckedChange={(checked) =>
-                      onToggleEnabled(install, checked)
-                    }
-                  />
-                </div>
-              </TooltipTrigger>
-              <TooltipContent>
-                {install.enabled ? t("card.disable") : t("card.enable")}
-              </TooltipContent>
-            </Tooltip>
+                    onClick={() => onConfigure(install)}
+                    size="icon-xs"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <Settings2 className="size-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {needsCredentials
+                    ? t("card.configureRequired")
+                    : t("card.settings")}
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    aria-label={t("card.uninstallAria", { name: market.name })}
+                    disabled={pending}
+                    onClick={() => onUninstall(item)}
+                    size="icon-xs"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <Trash2 className="size-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{t("card.uninstall")}</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="flex h-7 items-center border-l border-border pl-1.5">
+                    <Switch
+                      aria-label={
+                        install.enabled
+                          ? t("card.disableAria", { name: market.name })
+                          : t("card.enableAria", { name: market.name })
+                      }
+                      checked={install.enabled}
+                      disabled={pending}
+                      onCheckedChange={(checked) =>
+                        onToggleEnabled(install, checked)
+                      }
+                    />
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {install.enabled ? t("card.disable") : t("card.enable")}
+                </TooltipContent>
+              </Tooltip>
+            </div>
           </>
         ) : (
           <Button
