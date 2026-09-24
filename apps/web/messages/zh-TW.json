@@ -4673,7 +4673,7 @@
       "verifyingTitle": "安裝前請先核對雜湊值。",
       "unsignedBody": "你的作業系統會提示「開發者身份不明」。請先核對本頁面上的 SHA-256 雜湊值，再允許執行該應用程式一次。",
       "verifyingBody": "本頁面每個安裝程式都列出了 SHA-256 雜湊值，方便你確認下載到的檔案與我們發布的一致。",
-      "macosInstruction": "：在「應用程式」中按住 Control 點選 SourceWeft，選擇「開啟」，再在對話框中確認。",
+      "macosInstruction": "：在「應用程式」中按住 Control 點選 SourceWeft，選擇「開啟」，再在彈出視窗中確認。",
       "windowsInstruction": "：出現 SmartScreen 提示時，選擇「更多資訊」，再選擇「仍要執行」。",
       "verifyChecksum": "驗證雜湊值"
     },
