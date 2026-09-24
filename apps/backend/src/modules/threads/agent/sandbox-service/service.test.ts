@@ -132,7 +132,7 @@ describe("AgentSandboxService", () => {
     assert.deepEqual(runtime.interruptOn, {});
   });
 
-  test("binds sandbox HITL interrupts when tool approval is enabled", async () => {
+  test("binds only the execute HITL interrupt when tool approval is enabled", async () => {
     config.sandbox.toolApprovalEnabled = true;
     const runtime = await agentSandboxService.createRuntimeForTurn({
       filesystem,
@@ -140,13 +140,18 @@ describe("AgentSandboxService", () => {
     });
 
     assert.ok(runtime);
-    assert.deepEqual(
-      Object.keys(runtime.interruptOn).sort(),
-      [
-        AGENT_TOOL_NAMES.collectSandboxOutputs,
-        AGENT_TOOL_NAMES.execute,
-        AGENT_TOOL_NAMES.prepareSandboxWorkspace,
-      ].sort(),
+    assert.deepEqual(Object.keys(runtime.interruptOn), [
+      AGENT_TOOL_NAMES.execute,
+    ]);
+    assert.ok(
+      runtime.tools.some(
+        (tool) => tool.name === AGENT_TOOL_NAMES.prepareSandboxWorkspace,
+      ),
+    );
+    assert.ok(
+      runtime.tools.some(
+        (tool) => tool.name === AGENT_TOOL_NAMES.collectSandboxOutputs,
+      ),
     );
   });
 
@@ -224,10 +229,7 @@ describe("AgentSandboxService", () => {
 
     assert.equal(warn.mock.calls.length, 1);
     assert.deepEqual(warn.mock.calls[0]?.[1], {
-      missingInterrupts: [
-        AGENT_TOOL_NAMES.execute,
-        AGENT_TOOL_NAMES.prepareSandboxWorkspace,
-      ],
+      missingInterrupts: [AGENT_TOOL_NAMES.execute],
       boundSandboxToolNames: [AGENT_TOOL_NAMES.prepareSandboxWorkspace],
     });
   });
@@ -244,15 +246,13 @@ describe("AgentSandboxService", () => {
     assert.equal(warn.mock.calls.length, 0);
   });
 
-  test("warnIfHitlBypassed stays quiet when sandbox interrupts are present", async () => {
+  test("warnIfHitlBypassed stays quiet when the execute interrupt is present", async () => {
     config.sandbox.toolApprovalEnabled = true;
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
 
     agentSandboxService.warnIfHitlBypassed({
       interruptOn: {
         [AGENT_TOOL_NAMES.execute]: {},
-        [AGENT_TOOL_NAMES.prepareSandboxWorkspace]: {},
-        [AGENT_TOOL_NAMES.collectSandboxOutputs]: {},
       },
       boundSandboxToolNames: [
         AGENT_TOOL_NAMES.prepareSandboxWorkspace,

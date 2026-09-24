@@ -6,9 +6,9 @@ SourceWeft 可以在隔离的临时沙箱中运行经批准的命令。沙箱用
 
 - `/work` 是 SourceWeft 工作空间的持久存储。
 - 沙箱中的 `/workspace` 是临时目录，运行环境可被销毁。
-- 只有经过明确批准，选定的 `/work` 文件才可以复制到沙箱的 `/workspace/input` 或 `/workspace/work`。
+- 任务需要时，选定的 `/work` 文件会复制到沙箱的 `/workspace/input` 或 `/workspace/work`。
 - `/kb` 中的来源证据不会直接挂载或复制到沙箱。
-- 命令需要人工批准后才会在沙箱中运行。
+- 设置 `SOURCEWEFT_SANDBOX_TOOL_APPROVAL_ENABLED=true` 后，每条沙箱命令都需要人工批准才会运行。复制文件进沙箱和收集产出不运行命令，不需要批准。
 - 输出只有回收到 `/work` 或通过受支持的成果发布流程保存后，才会持久保留。
 - 沙箱生成的内容需要对照可引用来源核实，不能自动成为可引用证据。
 
