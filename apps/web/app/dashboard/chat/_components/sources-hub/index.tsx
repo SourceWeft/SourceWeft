@@ -436,6 +436,7 @@ export function SourcesHub({
   const {
     connectors,
     connectorAccounts,
+    availableConnectorTypes,
     isLoadingConnectors,
     connectorsLoadingError,
     connectorBusyById,
@@ -1026,7 +1027,9 @@ export function SourcesHub({
                     ) : (
                       <Trash2 className="size-3.5" />
                     )}
-                    <span className="sr-only">{t("sources.deleteSelected")}</span>
+                    <span className="sr-only">
+                      {t("sources.deleteSelected")}
+                    </span>
                   </Button>
                   <Button
                     disabled={!workspaceId}
@@ -1370,6 +1373,7 @@ export function SourcesHub({
 
       <ManageConnectorsDialog
         accounts={connectorAccounts}
+        availableConnectorTypes={availableConnectorTypes}
         connectorBusyById={connectorBusyById}
         connectorReadinessById={connectorReadinessById}
         connectors={connectors}

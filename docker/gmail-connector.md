@@ -10,7 +10,7 @@ The Gmail connector supports live mailbox search and reading, optional indexing 
    - `https://www.googleapis.com/auth/gmail.readonly` — live search/read and optional indexing.
    - `https://www.googleapis.com/auth/gmail.send` — a separately approved outbound message.
 4. Create a Web application OAuth client. Register the exact redirect URI `https://<public-api-host>/v1/connectors/oauth/gmail/callback`. It must match the backend's `GMAIL_REDIRECT_URI` or the callback derived from its public base URL.
-5. Set `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, and, when needed, `GMAIL_REDIRECT_URI` on the backend. Keep the client secret out of the repository, browser, connector configuration, and logs. Restart the backend after changing deployment variables.
+5. Set `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, and, when needed, `GMAIL_REDIRECT_URI` on the backend. Set `GMAIL_CONNECTOR_ENABLED=true` only in an authorized test deployment or after the applicable production approval. Keep the client secret out of the repository, browser, connector configuration, and logs. Restart the backend after changing deployment variables.
 6. During Testing, add each intended tester on the Audience page. Google limits Testing access and test-user authorizations; use a production project and complete Google's verification process before a public rollout.
 
 Google's [OAuth publishing status guidance](https://support.google.com/cloud/answer/15549945) explains Testing limits and token expiry. [Gmail scope classifications](https://developers.google.com/workspace/gmail/api/auth/scopes) and [verification guidance](https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification) explain the review required for public use.

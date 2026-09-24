@@ -175,6 +175,9 @@ export function useConnectors(input: {
 
   const t = useTranslations("dashboardSourcesHub");
   const [connectors, setConnectors] = useState<ConnectorItem[]>([]);
+  const [availableConnectorTypes, setAvailableConnectorTypes] = useState<
+    string[]
+  >([]);
   const [connectorAccounts, setConnectorAccounts] = useState<
     ConnectorAccountItem[]
   >([]);
@@ -247,6 +250,7 @@ export function useConnectors(input: {
     if (!workspaceId) {
       setConnectors([]);
       setConnectorAccounts([]);
+      setAvailableConnectorTypes([]);
       setConnectorWebhookEventsById({});
       setConnectorWebhookConfigsById({});
       setConnectorsLoadingError(null);
@@ -257,9 +261,10 @@ export function useConnectors(input: {
     setIsLoadingConnectors(true);
     setConnectorsLoadingError(null);
     try {
-      const [result, accounts] = await Promise.all([
+      const [result, accounts, manifests] = await Promise.all([
         connectorsClient.list(activeWorkspaceId, { includeDisabled: true }),
         connectorsClient.listAccounts(activeWorkspaceId),
+        connectorsClient.listManifests(activeWorkspaceId),
       ]);
       if (currentWorkspaceIdRef.current !== activeWorkspaceId) {
         return;
@@ -292,6 +297,9 @@ export function useConnectors(input: {
       });
       setConnectors(uiConnectors);
       setConnectorAccounts(accounts.items);
+      setAvailableConnectorTypes(
+        manifests.items.map((manifest) => manifest.type),
+      );
       const webhookConnectors = uiConnectors.filter((connector) => {
         const catalogItem = connectorCatalog.find(
           (item) => item.id === connector.raw.connectorType,
@@ -1106,6 +1114,7 @@ export function useConnectors(input: {
 
   return {
     connectors,
+    availableConnectorTypes,
     connectorAccounts,
     isLoadingConnectors,
     connectorsLoadingError,

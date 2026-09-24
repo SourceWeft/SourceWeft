@@ -359,6 +359,17 @@ export const connectorCatalog: ConnectorCatalogItem[] = [
     supportsPeriodicSync: false,
   }),
 ];
+
+export function connectorCatalogForAvailableTypes(
+  availableConnectorTypes: readonly string[],
+): ConnectorCatalogItem[] {
+  return connectorCatalog.map((item) =>
+    item.id === "gmail" && !availableConnectorTypes.includes("gmail")
+      ? { ...item, connectMode: "coming_soon", statusKind: "coming_soon" }
+      : item,
+  );
+}
+
 export const connectorCatalogCategories: ConnectorCatalogCategory[] = [
   "Knowledge & Docs",
   "File Storage",
