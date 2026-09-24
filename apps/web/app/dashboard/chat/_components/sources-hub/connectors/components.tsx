@@ -5,7 +5,6 @@ import {
   ArrowLeft,
   CheckCircle2,
   CircleAlert,
-  Clock3,
   Copy,
   Link2,
   Loader2,
@@ -120,7 +119,6 @@ function statusIcon(status: ConnectorCatalogStatusKind) {
   if (status === "syncing") return Loader2;
   if (status === "needs_setup") return Webhook;
   if (status === "error") return CircleAlert;
-  if (status === "coming_soon") return Clock3;
   return PlugIcon;
 }
 
@@ -228,7 +226,6 @@ export function getCatalogConnector(
   item: ConnectorCatalogItem,
   connectors: ConnectorItem[],
 ) {
-  if (item.connectMode !== "oauth_connector") return null;
   return (
     connectors.find((connector) => connector.raw.connectorType === item.id) ??
     null
@@ -339,29 +336,6 @@ export function getCatalogStatus(
   displayLocale: string,
 ): ConnectorCatalogStatus {
   const t = input.t;
-  if (input.item.connectMode === "coming_soon") {
-    if (input.item.statusKind === "non_indexable") {
-      return {
-        kind: "coming_soon",
-        label: t("connectors.status.searchApi"),
-        detail: t("connectors.detail.comingSoonSearch"),
-      };
-    }
-    if (input.item.statusKind === "indexable") {
-      return {
-        kind: "coming_soon",
-        label: t("connectors.status.indexable"),
-        detail: t("connectors.detail.comingSoonIndexable"),
-      };
-    }
-    return {
-      kind: "coming_soon",
-      label: t("connectors.status.coming_soon"),
-      detail: input.item.isIndexable
-        ? t("connectors.detail.comingSoonIndexable")
-        : t("connectors.detail.comingSoonNonIndexable"),
-    };
-  }
   const connector = getCatalogConnector(input.item, input.connectors);
   const hasActiveAccount = input.accounts.some(
     (account) =>
@@ -463,7 +437,6 @@ export const ConnectorCatalogCard = memoComponent(
     onConnectConnector,
     onCreateConnector,
     onDisconnect,
-    onRequestConnector,
   }: {
     item: ConnectorCatalogItem;
     status: ConnectorCatalogStatus;
@@ -473,27 +446,18 @@ export const ConnectorCatalogCard = memoComponent(
     onConnectConnector: (item: ConnectorCatalogItem) => void;
     onCreateConnector: (item: ConnectorCatalogItem) => void;
     onDisconnect: (connector: ConnectorItem) => void;
-    onRequestConnector: (item: ConnectorCatalogItem) => void;
   }) {
     const t = useTranslations("dashboardSourcesHub");
     const isBusy = status.kind === "syncing";
-    const cta =
-      item.connectMode === "coming_soon"
-        ? t("connectors.cta.request")
-        : isBusy
-          ? t("connectors.cta.connecting")
-          : connector
-            ? t("connectors.cta.connected")
-            : status.kind === "connected" &&
-                item.postOAuthMode !== "auto_create"
-              ? t("connectors.cta.configure")
-              : t("connectors.cta.connect");
+    const cta = isBusy
+      ? t("connectors.cta.connecting")
+      : connector
+        ? t("connectors.cta.connected")
+        : status.kind === "connected" && item.postOAuthMode !== "auto_create"
+          ? t("connectors.cta.configure")
+          : t("connectors.cta.connect");
 
     function handleAction() {
-      if (item.connectMode === "coming_soon") {
-        onRequestConnector(item);
-        return;
-      }
       if (connector) {
         return;
       }
@@ -603,11 +567,7 @@ export const ConnectorCatalogCard = memoComponent(
               onClick={handleAction}
               size="xs"
               type="button"
-              variant={
-                connector || status.kind === "coming_soon"
-                  ? "outline"
-                  : "default"
-              }
+              variant={connector ? "outline" : "default"}
             >
               {isBusy ? <Loader2 className="size-3.5 animate-spin" /> : null}
               {cta}
@@ -662,15 +622,12 @@ export const ActiveConnectorCard = memoComponent(function ActiveConnectorCard({
         category: "Knowledge & Docs",
         description: connector.meta,
         capabilities: [],
-        connectMode: "oauth_connector",
         postOAuthMode: "configure_required",
         icon: Link2,
         isIndexable: true,
-        authKind: "oauth",
         supportsPeriodicSync: true,
         supportsActions: false,
         supportsWebhook: false,
-        statusKind: "coming_soon",
       },
       readiness: connectorReadinessById[connector.id] ?? null,
       webhookConfig: catalogItem?.supportsWebhook ? webhookConfig : null,
