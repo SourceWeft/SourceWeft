@@ -132,17 +132,8 @@ Commands execute on the user's bound PC inside its authorized working folder. In
       return;
     }
 
-    const missingRequiredTools: string[] = [AGENT_TOOL_NAMES.execute];
-    for (const toolName of input.boundSandboxToolNames) {
-      if (
-        toolName === AGENT_TOOL_NAMES.prepareSandboxWorkspace ||
-        toolName === AGENT_TOOL_NAMES.collectSandboxOutputs
-      ) {
-        missingRequiredTools.push(toolName);
-      }
-    }
-
-    const missingInterrupts = Array.from(new Set(missingRequiredTools)).filter(
+    // Only `execute` is gated (see createSandboxInterruptConfigs).
+    const missingInterrupts = [AGENT_TOOL_NAMES.execute].filter(
       (toolName) => !input.interruptOn[toolName],
     );
     if (missingInterrupts.length === 0) {

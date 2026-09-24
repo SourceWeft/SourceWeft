@@ -8,9 +8,9 @@ Mental model:
 
 - `/work` is durable SourceWeft workspace storage.
 - Sandbox `/workspace` is temporary and disposable.
-- Selected `/work` files may be copied into sandbox `/workspace/input` or `/workspace/work` only after explicit approval.
+- Selected `/work` files may be copied into sandbox `/workspace/input` or `/workspace/work` when a task needs them.
 - `/kb` source evidence is not mounted or copied directly into the sandbox.
-- Commands run in the sandbox only after human approval.
+- With `SOURCEWEFT_SANDBOX_TOOL_APPROVAL_ENABLED=true`, every sandbox command needs human approval before it runs. Copying files in and collecting outputs back do not run commands and need no approval.
 - Outputs are not durable until collected back into `/work` or published through a supported artifact pipeline.
 - Sandbox-generated outputs are not citable evidence unless verified against citable sources.
 
