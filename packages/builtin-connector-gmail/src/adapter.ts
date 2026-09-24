@@ -149,9 +149,11 @@ function gmailUrl(message: GmailMessage, email: string): string {
 }
 
 function messageMetadata(message: GmailMessage, email: string) {
+  const messageId = assertId(message.id, "message ID");
   return {
-    messageId: assertId(message.id, "message ID"),
+    messageId,
     threadId: assertId(message.threadId, "thread ID"),
+    citationKey: `gmail:${email.toLowerCase()}:${messageId}`,
     subject:
       safeString(header(message.payload, "Subject"), 998) || "(no subject)",
     from: safeString(header(message.payload, "From"), 1000),

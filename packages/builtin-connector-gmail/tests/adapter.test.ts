@@ -114,6 +114,10 @@ test("search is metadata-first and read fetches only the selected body", async (
   });
   assert.equal(search.result.messages instanceof Array, true);
   assert.equal(
+    (search.result.messages as Array<{ citationKey: string }>)[0]?.citationKey,
+    "gmail:reader@example.com:msg_123",
+  );
+  assert.equal(
     JSON.stringify(search.result).includes("Private message body"),
     false,
   );
@@ -210,6 +214,10 @@ test("initial indexing yields a durable checkpoint and one message item", async 
     pages.push(page);
   assert.equal(pages.length, 1);
   assert.equal(pages[0]?.items[0]?.externalId, "msg_123");
+  assert.equal(
+    pages[0]?.items[0]?.metadata.citationKey,
+    "gmail:reader@example.com:msg_123",
+  );
   assert.deepEqual(pages[0]?.checkpoint, { historyId: "100" });
   assert.equal(pages[0]?.reconcileMissing, true);
 });
