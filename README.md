@@ -16,9 +16,9 @@ Put agents and specialized sub-agents to work. Expand their capabilities with a 
 
 Multi-agent & Sub-agents · Skills & MCP · Sandbox · Cross-platform · Self-hostable
 
-[![Download macOS Apple Silicon](https://img.shields.io/badge/Download-macOS_Apple_Silicon-111111?style=for-the-badge)](https://github.com/SourceWeft/SourceWeft/releases/download/v0.3.0-rc.1/SourceWeft_0.3.0-rc.1_aarch64.dmg)
-[![Download Windows x64](https://img.shields.io/badge/Download-Windows_x64-0078D4?style=for-the-badge)](https://github.com/SourceWeft/SourceWeft/releases/download/v0.3.0-rc.1/SourceWeft_0.3.0-rc.1_x64-setup.exe)
-[![Download Linux x64](https://img.shields.io/badge/Download-Linux_x64-E95420?style=for-the-badge)](https://github.com/SourceWeft/SourceWeft/releases/download/v0.3.0-rc.1/SourceWeft_0.3.0-rc.1_amd64.AppImage)
+[![Download macOS Apple Silicon](https://img.shields.io/badge/Download-macOS_Apple_Silicon-111111?style=for-the-badge)](https://github.com/SourceWeft/SourceWeft/releases/download/v0.3.0-rc.2/SourceWeft_0.3.0-rc.2_aarch64.dmg)
+[![Download Windows x64](https://img.shields.io/badge/Download-Windows_x64-0078D4?style=for-the-badge)](https://github.com/SourceWeft/SourceWeft/releases/download/v0.3.0-rc.2/SourceWeft_0.3.0-rc.2_x64-setup.exe)
+[![Download Linux x64](https://img.shields.io/badge/Download-Linux_x64-E95420?style=for-the-badge)](https://github.com/SourceWeft/SourceWeft/releases/download/v0.3.0-rc.2/SourceWeft_0.3.0-rc.2_amd64.AppImage)
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
@@ -59,7 +59,7 @@ Multi-agent & Sub-agents · Skills & MCP · Sandbox · Cross-platform · Self-ho
 
 ### Download a client
 
-Use the download badges above for macOS (Apple Silicon), Windows (x64), or Linux (x64). They link to the published `v0.3.0-rc.1` installers. Check [Releases](https://github.com/SourceWeft/SourceWeft/releases) for other versions.
+Use the download badges above for macOS (Apple Silicon), Windows (x64), or Linux (x64). They link to the published `v0.3.0-rc.2` installers. Check [Releases](https://github.com/SourceWeft/SourceWeft/releases) for other versions.
 
 ### Self-host with Docker
 

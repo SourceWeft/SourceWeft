@@ -16,9 +16,9 @@
 
 多智能体与子 Agent · 技能库与 MCP · 沙箱执行 · 多端支持 · 自托管
 
-[![Download macOS Apple Silicon](https://img.shields.io/badge/Download-macOS_Apple_Silicon-111111?style=for-the-badge)](https://github.com/SourceWeft/SourceWeft/releases/download/v0.3.0-rc.1/SourceWeft_0.3.0-rc.1_aarch64.dmg)
-[![Download Windows x64](https://img.shields.io/badge/Download-Windows_x64-0078D4?style=for-the-badge)](https://github.com/SourceWeft/SourceWeft/releases/download/v0.3.0-rc.1/SourceWeft_0.3.0-rc.1_x64-setup.exe)
-[![Download Linux x64](https://img.shields.io/badge/Download-Linux_x64-E95420?style=for-the-badge)](https://github.com/SourceWeft/SourceWeft/releases/download/v0.3.0-rc.1/SourceWeft_0.3.0-rc.1_amd64.AppImage)
+[![Download macOS Apple Silicon](https://img.shields.io/badge/Download-macOS_Apple_Silicon-111111?style=for-the-badge)](https://github.com/SourceWeft/SourceWeft/releases/download/v0.3.0-rc.2/SourceWeft_0.3.0-rc.2_aarch64.dmg)
+[![Download Windows x64](https://img.shields.io/badge/Download-Windows_x64-0078D4?style=for-the-badge)](https://github.com/SourceWeft/SourceWeft/releases/download/v0.3.0-rc.2/SourceWeft_0.3.0-rc.2_x64-setup.exe)
+[![Download Linux x64](https://img.shields.io/badge/Download-Linux_x64-E95420?style=for-the-badge)](https://github.com/SourceWeft/SourceWeft/releases/download/v0.3.0-rc.2/SourceWeft_0.3.0-rc.2_amd64.AppImage)
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![GitHub Stars](https://img.shields.io/github/stars/SourceWeft/SourceWeft?style=social)](https://github.com/SourceWeft/SourceWeft/stargazers)
@@ -60,7 +60,7 @@
 
 ### 下载客户端
 
-点击上方下载 badge，获取 macOS（Apple Silicon）、Windows（x64）或 Linux（x64）客户端。按钮指向已发布的 `v0.3.0-rc.1` 安装包，其他版本见 [Releases](https://github.com/SourceWeft/SourceWeft/releases)。
+点击上方下载 badge，获取 macOS（Apple Silicon）、Windows（x64）或 Linux（x64）客户端。按钮指向已发布的 `v0.3.0-rc.2` 安装包，其他版本见 [Releases](https://github.com/SourceWeft/SourceWeft/releases)。
 
 ### Docker 自托管
 
