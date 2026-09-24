@@ -436,6 +436,7 @@ export const connectorContributionSchema = z.object({
   sync: z.object({
     supportsIncremental: z.boolean().default(false),
     defaultFrequencyMinutes: z.number().int().positive(),
+    minFrequencyMinutes: z.number().int().positive().optional(),
     resources: z.array(connectorResourceSchema).default([]),
   }),
   actions: z.array(connectorActionSchema).default([]),

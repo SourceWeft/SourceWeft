@@ -232,13 +232,25 @@ export async function enqueueConnectorSyncJob(
   const jobId = `connector_sync_${payload.connectorId}_${payload.runId}`;
   const existing = await jobsQueue.getJob(jobId);
   if (existing) {
-    return existing;
+    const state = await existing.getState();
+    if (state === "failed") {
+      await existing.retry();
+      return existing;
+    }
+    if (state === "completed") {
+      // A completed queue entry paired with a non-terminal DB run means the
+      // dispatch/result handshake was interrupted. Recreate the same job ID.
+      await existing.remove();
+    } else {
+      return existing;
+    }
   }
 
   try {
     return await jobsQueue.add(CONNECTOR_SYNC_JOB, payload, {
       jobId,
-      attempts: 1,
+      attempts: 3,
+      backoff: { type: "exponential", delay: 30_000 },
       removeOnComplete: 100,
       removeOnFail: 100,
     });
@@ -249,6 +261,16 @@ export async function enqueueConnectorSyncJob(
     }
     throw error;
   }
+}
+
+export async function getConnectorSyncJobState(input: {
+  connectorId: string;
+  runId: string;
+}) {
+  const job = await jobsQueue.getJob(
+    `connector_sync_${input.connectorId}_${input.runId}`,
+  );
+  return job ? await job.getState() : null;
 }
 
 /**

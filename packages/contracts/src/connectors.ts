@@ -103,6 +103,7 @@ export const connectorManifestSchema = z.object({
   sync: z.object({
     supportsIncremental: z.boolean(),
     defaultFrequencyMinutes: z.number().int().positive(),
+    minFrequencyMinutes: z.number().int().positive().optional(),
     resources: z.array(connectorResourceSpecSchema),
   }),
   actions: z.array(connectorActionSpecSchema),
@@ -140,6 +141,17 @@ export const sourceConnectorSchema = z.object({
   indexingFrequencyMinutes: z.number().int().positive().nullable(),
   lastIndexedAt: z.string().nullable(),
   nextScheduledAt: z.string().nullable(),
+  scheduleStatus: z
+    .object({
+      enabled: z.boolean(),
+      nextDueAt: z.string().nullable(),
+      retryAt: z.string().nullable(),
+      lastAttemptAt: z.string().nullable(),
+      lastSuccessAt: z.string().nullable(),
+      lastErrorCode: z.string().nullable(),
+    })
+    .nullable()
+    .optional(),
   lastError: z.string().nullable(),
   createdBy: z.string().nullable(),
   createdAt: z.string(),
@@ -537,6 +549,19 @@ export type ConnectorDiscoverInput = {
   cursor?: Record<string, unknown> | null;
 };
 
+/** A durable discovery page. The continuation is replayed until every item
+ * in the page has been applied. The committed checkpoint advances only on the
+ * final page of a complete provider change range. */
+export type ConnectorDiscoveryPage = {
+  items: ConnectorItem[];
+  deletedExternalIds?: string[];
+  continuation?: Record<string, unknown> | null;
+  checkpoint?: Record<string, unknown> | null;
+  complete: boolean;
+  /** True only for a complete authoritative scan of the selected scope. */
+  reconcileMissing?: boolean;
+};
+
 export type ConnectorExtractInput = ConnectorDiscoverInput & {
   item: ConnectorItem;
 };
@@ -641,6 +666,10 @@ export interface ConnectorAdapter {
     input: ConnectorDiscoverInput,
   ): Promise<ConnectorSyncReadinessResult>;
   discover(input: ConnectorDiscoverInput): AsyncIterable<ConnectorItem>;
+  /** Optional until existing full-scan adapters migrate to durable paging. */
+  discoverPages?(
+    input: ConnectorDiscoverInput,
+  ): AsyncIterable<ConnectorDiscoveryPage>;
   extract(input: ConnectorExtractInput): Promise<ConnectorExtractedContent>;
   executeAction(input: ConnectorActionInput): Promise<ConnectorActionResult>;
   verifyWebhook?(input: ConnectorWebhookVerifyInput): Promise<void>;

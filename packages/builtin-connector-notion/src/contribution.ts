@@ -17,6 +17,7 @@ export const notionConnectorContribution = {
   sync: {
     supportsIncremental: true,
     defaultFrequencyMinutes: 360,
+    minFrequencyMinutes: 15,
     resources: [
       {
         type: "notion_page",

@@ -7,26 +7,19 @@ import {
   findOAuthAccountRecord,
   findSourceConnectorRecord,
   findSourceConnectorRecordByName,
+  getConnectorScheduleStatus,
   hardDeleteSourceConnectorRecord,
   hasOtherSourceConnectorOAuthAccountReferences,
   hasSourceConnectorOAuthAccountReferences,
   listOAuthAccountRecords,
   listSourceConnectorRecords,
+  listConnectorScheduleStatuses,
   listWorkspaceSourceConnectorRecordsByOAuthAccount,
+  putConnectorSchedule,
   updateSourceConnectorRecord,
 } from "./repository";
 import { ConnectorRegistry, connectorRegistry } from "./registry";
 import type { ConnectorStatus } from "./types";
-
-function resolveNextScheduledAt(input: {
-  enabled: boolean;
-  frequencyMinutes: number | null;
-}) {
-  if (!input.enabled || !input.frequencyMinutes) {
-    return null;
-  }
-  return new Date(Date.now() + input.frequencyMinutes * 60_000);
-}
 
 export class ConnectorService {
   constructor(
@@ -145,6 +138,16 @@ export class ConnectorService {
         "This connector does not support periodic sync",
       );
     }
+    if (
+      periodicIndexingEnabled &&
+      frequency < (manifest.sync.minFrequencyMinutes ?? 1)
+    ) {
+      throw new ConnectorError(
+        400,
+        "CONNECTOR_SYNC_FREQUENCY_TOO_FAST",
+        `Minimum sync frequency is ${manifest.sync.minFrequencyMinutes} minutes`,
+      );
+    }
     const connector = await createSourceConnectorRecord({
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
@@ -154,14 +157,19 @@ export class ConnectorService {
       oauthAccountId: input.oauthAccountId ?? null,
       periodicIndexingEnabled,
       indexingFrequencyMinutes: periodicIndexingEnabled ? frequency : null,
-      nextScheduledAt: resolveNextScheduledAt({
-        enabled: periodicIndexingEnabled,
-        frequencyMinutes: frequency,
-      }),
       createdBy: input.userId,
     });
 
-    return { connector };
+    return {
+      connector: {
+        ...((await findSourceConnectorRecord({
+          teamId: workspace.organizationId,
+          workspaceId: workspace.id,
+          connectorId: connector.id,
+        })) ?? connector),
+        scheduleStatus: await getConnectorScheduleStatus(connector.id),
+      },
+    };
   }
 
   async listConnectors(input: {
@@ -179,7 +187,16 @@ export class ConnectorService {
       workspaceId: workspace.id,
       includeDisabled: input.includeDisabled,
     });
-    return { items };
+    const schedules = await listConnectorScheduleStatuses({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+    });
+    return {
+      items: items.map((connector) => ({
+        ...connector,
+        scheduleStatus: schedules.get(connector.id) ?? null,
+      })),
+    };
   }
 
   async updateConnector(input: {
@@ -231,7 +248,21 @@ export class ConnectorService {
       input.indexingFrequencyMinutes === undefined
         ? (current.indexingFrequencyMinutes ??
           manifest.sync.defaultFrequencyMinutes)
-        : input.indexingFrequencyMinutes;
+        : (input.indexingFrequencyMinutes ??
+          manifest.sync.defaultFrequencyMinutes);
+    if (
+      periodicIndexingEnabled &&
+      (input.indexingFrequencyMinutes !== undefined ||
+        (input.periodicIndexingEnabled === true &&
+          !current.periodicIndexingEnabled)) &&
+      frequency < (manifest.sync.minFrequencyMinutes ?? 1)
+    ) {
+      throw new ConnectorError(
+        400,
+        "CONNECTOR_SYNC_FREQUENCY_TOO_FAST",
+        `Minimum sync frequency is ${manifest.sync.minFrequencyMinutes} minutes`,
+      );
+    }
     const connector = await updateSourceConnectorRecord({
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
@@ -239,12 +270,6 @@ export class ConnectorService {
       name: input.name,
       configJson: input.configJson === undefined ? undefined : nextConfig,
       status: input.status,
-      periodicIndexingEnabled,
-      indexingFrequencyMinutes: periodicIndexingEnabled ? frequency : null,
-      nextScheduledAt: resolveNextScheduledAt({
-        enabled: periodicIndexingEnabled,
-        frequencyMinutes: frequency,
-      }),
       lastError: input.status === "active" ? null : undefined,
     });
 
@@ -255,7 +280,24 @@ export class ConnectorService {
         "Connector not found",
       );
     }
-    return { connector };
+    await putConnectorSchedule({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      connectorId: connector.id,
+      enabled: periodicIndexingEnabled && connector.status === "active",
+      requestedPeriodicIndexingEnabled: periodicIndexingEnabled,
+      intervalMinutes: frequency ?? manifest.sync.defaultFrequencyMinutes,
+    });
+    return {
+      connector: {
+        ...((await findSourceConnectorRecord({
+          teamId: workspace.organizationId,
+          workspaceId: workspace.id,
+          connectorId: connector.id,
+        })) ?? connector),
+        scheduleStatus: await getConnectorScheduleStatus(connector.id),
+      },
+    };
   }
 
   async deleteConnector(input: {
@@ -300,6 +342,17 @@ export class ConnectorService {
           "Connector not found",
         );
       }
+      await putConnectorSchedule({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        connectorId: input.connectorId,
+        enabled: false,
+        requestedPeriodicIndexingEnabled: false,
+        intervalMinutes:
+          current.indexingFrequencyMinutes ??
+          this.registry.getManifest(current.connectorType).sync
+            .defaultFrequencyMinutes,
+      });
       return {
         disabled: true,
         hardDeleted: false,

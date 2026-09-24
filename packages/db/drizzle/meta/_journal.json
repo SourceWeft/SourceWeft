@@ -365,6 +365,13 @@
       "when": 1790168823954,
       "tag": "0051_system_skill_ingest",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1790235380391,
+      "tag": "0052_sparkling_madame_hydra",
+      "breakpoints": true
     }
   ]
 }

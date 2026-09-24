@@ -403,6 +403,148 @@ export const connectorSyncRuns = pgTable(
   ],
 );
 
+/** Durable time rules. Only connector_sync targets are executable for now. */
+export const taskSchedules = pgTable(
+  "task_schedules",
+  {
+    id: text("id").primaryKey(),
+    teamId: text("team_id").notNull(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    taskKind: text("task_kind")
+      .$type<"connector_sync" | "agent_task">()
+      .notNull(),
+    ownerKind: text("owner_kind")
+      .$type<"workspace" | "user">()
+      .notNull()
+      .default("workspace"),
+    ownerUserId: text("owner_user_id"),
+    connectorId: text("connector_id").references(() => sourceConnectors.id, {
+      onDelete: "cascade",
+    }),
+    enabled: boolean("enabled").notNull().default(false),
+    intervalMinutes: integer("interval_minutes"),
+    specVersion: integer("spec_version").notNull().default(1),
+    specJson: jsonb("spec_json")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(emptyJsonObject),
+    timezone: text("timezone").notNull().default("UTC"),
+    nextDueAt: timestamp("next_due_at", { withTimezone: true, mode: "date" }),
+    retryAt: timestamp("retry_at", { withTimezone: true, mode: "date" }),
+    lastAttemptAt: timestamp("last_attempt_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    lastSuccessAt: timestamp("last_success_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    lastErrorCode: text("last_error_code"),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: "task_schedules_workspace_team_fk",
+      columns: [table.workspaceId, table.teamId],
+      foreignColumns: [workspaces.id, workspaces.organizationId],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "task_schedules_connector_workspace_team_fk",
+      columns: [table.connectorId, table.workspaceId, table.teamId],
+      foreignColumns: [
+        sourceConnectors.id,
+        sourceConnectors.workspaceId,
+        sourceConnectors.teamId,
+      ],
+    }).onDelete("cascade"),
+    check(
+      "task_schedules_kind_check",
+      sql`${table.taskKind} in ('connector_sync', 'agent_task')`,
+    ),
+    check(
+      "task_schedules_target_check",
+      sql`(${table.taskKind} = 'connector_sync' and ${table.ownerKind} = 'workspace' and ${table.connectorId} is not null and ${table.intervalMinutes} > 0) or (${table.taskKind} = 'agent_task' and ${table.ownerKind} = 'user' and ${table.ownerUserId} is not null)`,
+    ),
+    uniqueIndex("task_schedules_connector_uq").on(table.connectorId),
+    index("task_schedules_due_idx").on(table.enabled, table.nextDueAt),
+  ],
+);
+
+/** One durable occurrence per schedule slot, independent of BullMQ state. */
+export const scheduleOccurrences = pgTable(
+  "schedule_occurrences",
+  {
+    id: text("id").primaryKey(),
+    scheduleId: text("schedule_id")
+      .notNull()
+      .references(() => taskSchedules.id, { onDelete: "cascade" }),
+    scheduledFor: timestamp("scheduled_for", {
+      withTimezone: true,
+      mode: "date",
+    }).notNull(),
+    status: text("status")
+      .$type<
+        | "pending"
+        | "dispatching"
+        | "queued"
+        | "succeeded"
+        | "failed"
+        | "skipped"
+      >()
+      .notNull()
+      .default("pending"),
+    syncRunId: text("sync_run_id").references(() => connectorSyncRuns.id, {
+      onDelete: "set null",
+    }),
+    retryAt: timestamp("retry_at", { withTimezone: true, mode: "date" }),
+    leaseUntil: timestamp("lease_until", { withTimezone: true, mode: "date" }),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("schedule_occurrences_slot_uq").on(
+      table.scheduleId,
+      table.scheduledFor,
+    ),
+    index("schedule_occurrences_pending_idx").on(table.status, table.retryAt),
+    check("schedule_occurrences_attempts_check", sql`${table.attempts} >= 0`),
+  ],
+);
+
+/** Provider-owned progress, kept separate from schedule timing and public config. */
+export const connectorSyncState = pgTable("connector_sync_state", {
+  connectorId: text("connector_id")
+    .primaryKey()
+    .references(() => sourceConnectors.id, { onDelete: "cascade" }),
+  scopeHash: text("scope_hash").notNull(),
+  generation: integer("generation").notNull().default(0),
+  committedCursorJson: jsonb("committed_cursor_json").$type<Record<
+    string,
+    unknown
+  > | null>(),
+  pageCursorJson: jsonb("page_cursor_json").$type<Record<
+    string,
+    unknown
+  > | null>(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+});
+
 export const agentToolTrustRules = pgTable(
   "agent_tool_trust_rules",
   {

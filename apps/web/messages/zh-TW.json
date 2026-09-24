@@ -2707,6 +2707,8 @@
         "lastSuccessfulSync": "上次成功同步",
         "latestRun": "最近一次執行",
         "nextScheduled": "下次排程",
+        "lastScheduledAttempt": "上次計劃執行",
+        "nextRetry": "下次重試",
         "never": "從未",
         "noActivity": "暫無活動",
         "notScheduled": "未排程",

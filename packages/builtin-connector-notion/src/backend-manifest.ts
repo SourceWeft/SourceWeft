@@ -36,6 +36,7 @@ export function toBackendNotionConnectorManifest(
     sync: {
       supportsIncremental: contribution.sync.supportsIncremental,
       defaultFrequencyMinutes: contribution.sync.defaultFrequencyMinutes,
+      minFrequencyMinutes: contribution.sync.minFrequencyMinutes,
       resources: contribution.sync.resources.map((resource) => ({
         type: resource.type,
         displayName: resource.title,

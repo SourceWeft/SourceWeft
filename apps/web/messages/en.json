@@ -2707,6 +2707,8 @@
         "lastSuccessfulSync": "Last successful sync",
         "latestRun": "Latest run",
         "nextScheduled": "Next scheduled",
+        "lastScheduledAttempt": "Last scheduled attempt",
+        "nextRetry": "Next retry",
         "never": "Never",
         "noActivity": "No activity",
         "notScheduled": "Not scheduled",

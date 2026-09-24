@@ -12,11 +12,13 @@ import {
   db,
   documents,
   sourceConnectors,
+  taskSchedules,
   sources,
 } from "@sourceweft/db";
 import { ConnectorError } from "../errors";
 import { mapSourceConnector } from "../mappers";
 import type { ConnectorStatus } from "../types";
+import { stableJitterMs } from "./schedule";
 
 export async function createSourceConnectorRecord(input: {
   teamId: string;
@@ -27,37 +29,59 @@ export async function createSourceConnectorRecord(input: {
   oauthAccountId?: string | null;
   periodicIndexingEnabled?: boolean;
   indexingFrequencyMinutes?: number | null;
-  nextScheduledAt?: Date | null;
   createdBy?: string | null;
 }) {
-  const [row] = await db
-    .insert(sourceConnectors)
-    .values({
+  return db.transaction(async (tx) => {
+    const connectorId = randomUUID();
+    const intervalMinutes = input.indexingFrequencyMinutes ?? 360;
+    const nextDueAt = input.periodicIndexingEnabled
+      ? new Date(
+          Date.now() +
+            intervalMinutes * 60_000 +
+            stableJitterMs(connectorId, intervalMinutes),
+        )
+      : null;
+    const [row] = await tx
+      .insert(sourceConnectors)
+      .values({
+        id: connectorId,
+        teamId: input.teamId,
+        workspaceId: input.workspaceId,
+        connectorType: input.connectorType,
+        name: input.name,
+        configJson: input.configJson ?? {},
+        oauthAccountId: input.oauthAccountId ?? null,
+        status: "active",
+        periodicIndexingEnabled: input.periodicIndexingEnabled ?? false,
+        indexingFrequencyMinutes: input.indexingFrequencyMinutes ?? null,
+        nextScheduledAt: nextDueAt,
+        createdBy: input.createdBy ?? null,
+      })
+      .returning();
+
+    if (!row) {
+      throw new ConnectorError(
+        500,
+        "CONNECTOR_CREATE_FAILED",
+        "Failed to create connector",
+        { teamId: input.teamId, workspaceId: input.workspaceId },
+      );
+    }
+    await tx.insert(taskSchedules).values({
       id: randomUUID(),
       teamId: input.teamId,
       workspaceId: input.workspaceId,
-      connectorType: input.connectorType,
-      name: input.name,
-      configJson: input.configJson ?? {},
-      oauthAccountId: input.oauthAccountId ?? null,
-      status: "active",
-      periodicIndexingEnabled: input.periodicIndexingEnabled ?? false,
-      indexingFrequencyMinutes: input.indexingFrequencyMinutes ?? null,
-      nextScheduledAt: input.nextScheduledAt ?? null,
-      createdBy: input.createdBy ?? null,
-    })
-    .returning();
-
-  if (!row) {
-    throw new ConnectorError(
-      500,
-      "CONNECTOR_CREATE_FAILED",
-      "Failed to create connector",
-      { teamId: input.teamId, workspaceId: input.workspaceId },
-    );
-  }
-
-  return mapSourceConnector(row);
+      taskKind: "connector_sync",
+      ownerKind: "workspace",
+      connectorId,
+      enabled: input.periodicIndexingEnabled ?? false,
+      intervalMinutes,
+      specJson: { kind: "interval", minutes: intervalMinutes },
+      timezone: "UTC",
+      nextDueAt,
+    });
+    return mapSourceConnector(row);
+  });
 }
 
 export async function listSourceConnectorRecords(input: {
@@ -442,25 +466,19 @@ export async function listDueScheduledConnectorRecords(input: {
   return rows.map(mapSourceConnector);
 }
 
-export async function touchConnectorScheduleAfterSync(input: {
+export async function touchConnectorAfterSync(input: {
   teamId: string;
   workspaceId: string;
   connectorId: string;
   lastIndexedAt: Date;
-  frequencyMinutes: number | null;
   status: ConnectorStatus;
   lastError?: string | null;
 }) {
-  const nextScheduledAt = input.frequencyMinutes
-    ? new Date(input.lastIndexedAt.getTime() + input.frequencyMinutes * 60_000)
-    : null;
-
   await db
     .update(sourceConnectors)
     .set({
       status: input.status,
       lastIndexedAt: input.lastIndexedAt,
-      nextScheduledAt,
       lastError: input.lastError ?? null,
       updatedAt: new Date(),
     })
