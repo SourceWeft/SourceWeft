@@ -3,6 +3,7 @@ import { test, vi } from "vitest";
 import type { ConnectorRegistry } from "./registry";
 
 const mocks = vi.hoisted(() => ({
+  archiveConnectorSources: vi.fn(),
   findOAuthAccountRecord: vi.fn(),
   findSourceConnectorRecord: vi.fn(),
   getConnectorScheduleStatus: vi.fn(),
@@ -16,6 +17,7 @@ vi.mock("./permissions", () => ({
 }));
 
 vi.mock("./repository", () => ({
+  archiveConnectorSources: mocks.archiveConnectorSources,
   findOAuthAccountRecord: mocks.findOAuthAccountRecord,
   findSourceConnectorRecord: mocks.findSourceConnectorRecord,
   getConnectorScheduleStatus: mocks.getConnectorScheduleStatus,
@@ -127,4 +129,39 @@ test("Gmail reconnect rejects a different mailbox before changing the connector"
     { code: "CONNECTOR_OAUTH_ACCOUNT_MISMATCH" },
   );
   assert.equal(mocks.updateSourceConnectorRecord.mock.calls.length, 0);
+});
+
+test("disabling Gmail indexing archives retained sources after the config change", async () => {
+  vi.clearAllMocks();
+  const indexedConnector = {
+    ...connector,
+    configJson: { liveSearchEnabled: true, indexingEnabled: true },
+  };
+  mocks.requireConnectorWorkspace.mockResolvedValue({
+    workspace: { id: "workspace", organizationId: "team" },
+  });
+  mocks.findSourceConnectorRecord
+    .mockResolvedValueOnce(indexedConnector)
+    .mockResolvedValueOnce({
+      ...indexedConnector,
+      configJson: { liveSearchEnabled: true, indexingEnabled: false },
+    });
+  mocks.updateSourceConnectorRecord.mockResolvedValue({
+    ...indexedConnector,
+    configJson: { liveSearchEnabled: true, indexingEnabled: false },
+  });
+  mocks.getConnectorScheduleStatus.mockResolvedValue(null);
+  await service().updateConnector({
+    workspaceId: "workspace",
+    userId: "user",
+    connectorId: "connector",
+    configJson: { liveSearchEnabled: true, indexingEnabled: false },
+    periodicIndexingEnabled: false,
+  });
+  assert.equal(mocks.archiveConnectorSources.mock.calls.length, 1);
+  assert.deepEqual(mocks.archiveConnectorSources.mock.calls[0]?.[0], {
+    teamId: "team",
+    workspaceId: "workspace",
+    connectorId: "connector",
+  });
 });

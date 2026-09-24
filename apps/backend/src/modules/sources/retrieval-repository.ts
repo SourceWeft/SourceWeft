@@ -8,6 +8,7 @@ import {
   modelGatewayProfiles,
   retrievalHits,
   retrievalRuns,
+  sourceConnectors,
   sources,
 } from "@sourceweft/db";
 import type {
@@ -31,6 +32,23 @@ import {
 } from "./current-document-condition";
 
 const CHUNKS_BM25_INDEX_NAME = "chunks_bm25_universal_idx";
+
+const gmailIndexedSourceVisible = sql`
+  not exists (
+    select 1 from ${sourceConnectors} sc
+    where sc.id = s.connector_id
+      and sc.connector_type = 'gmail'
+      and sc.config_json ->> 'indexingEnabled' is distinct from 'true'
+  )
+`;
+const gmailIndexedSourceVisibleForTable = sql`
+  not exists (
+    select 1 from ${sourceConnectors} sc
+    where sc.id = ${sources.connectorId}
+      and sc.connector_type = 'gmail'
+      and sc.config_json ->> 'indexingEnabled' is distinct from 'true'
+  )
+`;
 
 type EmbeddingProfileRow = typeof modelGatewayProfiles.$inferSelect;
 type ChunkRow = typeof chunks.$inferSelect;
@@ -157,6 +175,7 @@ export async function listSourceChunksByProfile(input: {
     eq(chunks.workspaceId, input.workspaceId),
     eq(chunkEmbeddings.embeddingProfileId, input.embeddingProfileId),
     eq(sources.status, "indexed"),
+    gmailIndexedSourceVisibleForTable,
     currentDocumentCondition(),
   ];
 
@@ -241,6 +260,7 @@ export async function searchChunksByBm25(input: {
       where c.workspace_id = ${input.workspaceId}
         and c.team_id = ${input.teamId}
         and s.status = 'indexed'
+        and ${gmailIndexedSourceVisible}
         and c.source_id = any(${toPostgresTextArray(input.sourceIds)}::text[])
         and ${currentDocumentConditionForAlias("d")}
       order by ${bm25Score} asc
@@ -321,6 +341,7 @@ async function assertVectorQueryCompatible(
       and ce.embedding_profile_id = ${input.embeddingProfileId}
       and c.source_id = any(${toPostgresTextArray(input.sourceIds)}::text[])
       and s.status = 'indexed' and ${currentDocumentConditionForAlias("d")}
+      and ${gmailIndexedSourceVisible}
       and (ce.dim <> ${dim} or (
         d.document_metadata -> 'embeddingIdentity' is not null
         and d.document_metadata -> 'embeddingIdentity' <> ${JSON.stringify(input.embeddingIdentity)}::jsonb
@@ -370,6 +391,7 @@ export async function searchChunksByVectorExact(
     where ce.team_id = ${input.teamId}
       and ce.workspace_id = ${input.workspaceId}
       and s.status = 'indexed'
+      and ${gmailIndexedSourceVisible}
       and ce.embedding_profile_id = ${input.embeddingProfileId}
       and c.source_id = any(${toPostgresTextArray(input.sourceIds)}::text[])
       and ${currentDocumentConditionForAlias("d")}
@@ -436,6 +458,7 @@ export async function searchChunksByVectorAnn(
     where ce.team_id = ${input.teamId}
       and ce.workspace_id = ${input.workspaceId}
       and s.status = 'indexed'
+      and ${gmailIndexedSourceVisible}
       and ce.embedding_profile_id = ${input.embeddingProfileId}
       and c.source_id = any(${toPostgresTextArray(input.sourceIds)}::text[])
       and ce.dim = ${input.dim}
@@ -487,6 +510,7 @@ export async function listDocumentChunkStats(input: {
     where c.workspace_id = ${input.workspaceId}
       and c.team_id = ${input.teamId}
       and s.status = 'indexed'
+      and ${gmailIndexedSourceVisible}
       and c.document_id = any(${toPostgresTextArray(documentIds)}::text[])
       and c.source_id = any(${toPostgresTextArray(sourceIds)}::text[])
       and ${currentDocumentConditionForAlias("d")}
@@ -532,6 +556,7 @@ export async function listDocumentChunksInRange(input: {
     where c.workspace_id = ${input.workspaceId}
       and c.team_id = ${input.teamId}
       and s.status = 'indexed'
+      and ${gmailIndexedSourceVisible}
       and c.document_id = ${input.documentId}
       and c.source_id = ${input.sourceId}
       and c.chunk_no >= ${input.startChunkNo}
@@ -564,6 +589,7 @@ export async function listDocumentChunksForDocument(input: {
     where c.workspace_id = ${input.workspaceId}
       and c.team_id = ${input.teamId}
       and s.status = 'indexed'
+      and ${gmailIndexedSourceVisible}
       and c.document_id = ${input.documentId}
       and c.source_id = ${input.sourceId}
       and ${currentDocumentConditionForAlias("d")}

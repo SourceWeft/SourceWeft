@@ -15,6 +15,7 @@ let connectorRepo: typeof import("./connector");
 let syncRunRepo: typeof import("./sync-run");
 let syncLock: typeof import("./sync-lock");
 let connectorRuntime: typeof import("../index");
+let retrievalRepo: typeof import("../../sources/retrieval-repository");
 let scheduler: typeof import("../../../scheduler/schedules/connectors");
 let isolated: Awaited<ReturnType<typeof createIsolatedTestDatabase>>;
 const originalUrl = process.env.DATABASE_URL;
@@ -32,6 +33,7 @@ beforeAll(async () => {
   syncRunRepo = await import("./sync-run");
   syncLock = await import("./sync-lock");
   connectorRuntime = await import("../index");
+  retrievalRepo = await import("../../sources/retrieval-repository");
   scheduler = await import("../../../scheduler/schedules/connectors");
 }, 120_000);
 
@@ -87,6 +89,97 @@ test("creating a connector atomically creates one matching schedule", async () =
   assert.equal(schedule?.enabled, true);
   assert.equal(schedule?.intervalMinutes, 60);
   assert.equal(created.nextScheduledAt, schedule?.nextDueAt?.toISOString());
+});
+
+test("archiving connector sources hides retained indexed mail", async () => {
+  const target = await connector();
+  const sourceId = randomUUID();
+  await schema.db.insert(schema.sources).values({
+    id: sourceId,
+    teamId: target.teamId,
+    workspaceId: target.workspaceId,
+    ingestKind: "connector",
+    sourceType: "connector",
+    connectorId: target.connectorId,
+    title: "Retained mail",
+    status: "indexed",
+  });
+  assert.equal(await syncState.archiveConnectorSources(target), 1);
+  const [row] = await schema.db
+    .select({ status: schema.sources.status })
+    .from(schema.sources)
+    .where(eq(schema.sources.id, sourceId));
+  assert.equal(row?.status, "archived");
+});
+
+test("disabled Gmail indexing stays invisible to retrieval even during an in-flight sync", async () => {
+  const teamId = randomUUID();
+  const workspaceId = randomUUID();
+  const connectorId = randomUUID();
+  const sourceId = randomUUID();
+  const documentId = randomUUID();
+  await schema.db.insert(schema.workspaces).values({
+    id: workspaceId,
+    organizationId: teamId,
+    name: "Gmail retrieval gate",
+    slug: workspaceId,
+  });
+  await schema.db.insert(schema.sourceConnectors).values({
+    id: connectorId,
+    teamId,
+    workspaceId,
+    connectorType: "gmail",
+    name: "Gmail",
+    configJson: { indexingEnabled: true },
+  });
+  await schema.db.insert(schema.sources).values({
+    id: sourceId,
+    teamId,
+    workspaceId,
+    ingestKind: "connector",
+    sourceType: "connector",
+    connectorId,
+    title: "Private mail",
+    status: "indexed",
+  });
+  await schema.db.insert(schema.documents).values({
+    id: documentId,
+    teamId,
+    workspaceId,
+    sourceId,
+    contentText: "Private mail content",
+    status: "ready",
+  });
+  await schema.db.insert(schema.chunks).values({
+    id: randomUUID(),
+    teamId,
+    workspaceId,
+    sourceId,
+    documentId,
+    chunkNo: 0,
+    content: "Private mail content",
+  });
+  const query = {
+    teamId,
+    workspaceId,
+    documentId,
+    sourceId,
+    limit: 10,
+  };
+  assert.equal(
+    (await retrievalRepo.listDocumentChunksForDocument(query)).length,
+    1,
+  );
+  await connectorRepo.updateSourceConnectorRecord({
+    teamId,
+    workspaceId,
+    connectorId,
+    configJson: { indexingEnabled: false },
+  });
+  assert.equal(
+    (await retrievalRepo.listDocumentChunksForDocument(query)).length,
+    0,
+  );
 });
 
 test("connector sync lock excludes concurrent workers and releases after completion", async () => {

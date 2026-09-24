@@ -21,7 +21,7 @@ Connecting Gmail requests read and send permissions once. The connector records 
 
 Live search is on after connection and can be disabled independently. Live results are fetched for the current request; they do not create indexed sources or sync jobs.
 
-Indexing is off until enabled in Sources Hub. Choose labels, an optional starting date, and a maximum message count. Labels currently filter imports; indexed messages appear under one mailbox Messages directory. Run the initial sync manually. Scheduled sync is a separate opt-in setting. Disabling indexing stops future imports; use connector deletion with derived-content removal to remove indexed copies.
+Indexing is off until enabled in Sources Hub. Choose labels, an optional starting date, and a maximum message count. Labels currently filter imports; indexed messages appear under one mailbox Messages directory. Run the initial sync manually. Scheduled sync is a separate opt-in setting. Disabling indexing stops future imports and hides retained indexed messages from agent retrieval; re-enable and sync to restore them. Use connector deletion with derived-content removal to remove indexed copies.
 
 Before sending, SourceWeft shows the sender, all recipients, subject, and full body. The user must approve that exact message. A send approval cannot be reused for another message or automatically applied to future sends. An uncertain provider outcome is reported without automatic resend.
 

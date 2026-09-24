@@ -110,3 +110,25 @@ export async function archiveConnectorSourcesNotSeenInRun(input: {
     .returning({ id: sources.id });
   return rows.length;
 }
+
+/** Hide retained connector sources from retrieval when a mode is disabled. */
+export async function archiveConnectorSources(input: {
+  teamId: string;
+  workspaceId: string;
+  connectorId: string;
+}) {
+  const rows = await db
+    .update(sources)
+    .set({ status: "archived", updatedAt: new Date() })
+    .where(
+      and(
+        eq(sources.teamId, input.teamId),
+        eq(sources.workspaceId, input.workspaceId),
+        eq(sources.connectorId, input.connectorId),
+        eq(sources.sourceType, "connector"),
+        ne(sources.status, "archived"),
+      ),
+    )
+    .returning({ id: sources.id });
+  return rows.length;
+}

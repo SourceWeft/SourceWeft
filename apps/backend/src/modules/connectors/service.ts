@@ -2,6 +2,7 @@ import { ConnectorError } from "./errors";
 import { validateObjectWithJsonSchema } from "./config-validation";
 import { requireConnectorWorkspace } from "./permissions";
 import {
+  archiveConnectorSources,
   createSourceConnectorRecord,
   deleteOAuthAccountRecord,
   findOAuthAccountRecord,
@@ -267,6 +268,10 @@ export class ConnectorService {
 
     const manifest = this.registry.getManifest(current.connectorType);
     const nextConfig = input.configJson ?? current.configJson;
+    const gmailIndexTurnedOff =
+      current.connectorType === "gmail" &&
+      current.configJson.indexingEnabled === true &&
+      nextConfig.indexingEnabled !== true;
     validateObjectWithJsonSchema({
       schema: manifest.configSchema,
       value: nextConfig,
@@ -318,6 +323,13 @@ export class ConnectorService {
         "CONNECTOR_NOT_FOUND",
         "Connector not found",
       );
+    }
+    if (gmailIndexTurnedOff) {
+      await archiveConnectorSources({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        connectorId: connector.id,
+      });
     }
     await putConnectorSchedule({
       teamId: workspace.organizationId,
