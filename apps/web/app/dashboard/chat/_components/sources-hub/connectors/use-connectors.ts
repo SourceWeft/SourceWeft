@@ -25,6 +25,11 @@ import {
 } from "../workspace-hub-cache";
 import { connectorCatalog } from "./catalog";
 import {
+  gmailConfigForMode,
+  parseGmailUsageMode,
+  type GmailUsageMode,
+} from "./gmail-mode";
+import {
   formatConnectorSchedule,
   getConnectorReadinessFromConfig,
 } from "./components";
@@ -44,6 +49,7 @@ const CONNECTOR_OAUTH_URL_PARAMS = [
   "account_id",
   "workspace_id",
   "error",
+  "gmail_mode",
 ] as const;
 
 const WORKSPACE_CONNECTORS_CACHE_BUCKET = "connectors";
@@ -106,6 +112,10 @@ function readConnectorOAuthCompletionFromUrl(): ConnectorOAuthCompletionMessage 
     // A localized fallback is applied at the display site
     // (`toasts.connectors.authFailed`) when no provider error message is present.
     error: status === "error" ? (url.searchParams.get("error") ?? "") : null,
+    gmailMode:
+      connectorType === "gmail"
+        ? parseGmailUsageMode(url.searchParams.get("gmail_mode"))
+        : undefined,
     createdAt: new Date().toISOString(),
   };
 }
@@ -522,7 +532,7 @@ export function useConnectors(input: {
   }, []);
 
   const handleConnectConnector = useCallback(
-    (item: ConnectorCatalogItem) => {
+    (item: ConnectorCatalogItem, gmailMode: GmailUsageMode = "tools") => {
       if (!workspaceId) {
         toast.error(t("toasts.connectors.noWorkspace"));
         return;
@@ -535,7 +545,11 @@ export function useConnectors(input: {
       startUrl.searchParams.set("workspace_id", workspaceId);
       startUrl.searchParams.set("connector_type", item.id);
       startUrl.searchParams.set("mode", "redirect");
-      startUrl.searchParams.set("return_to", window.location.href);
+      const returnTo = new URL(window.location.href);
+      if (item.id === "gmail") {
+        returnTo.searchParams.set("gmail_mode", gmailMode);
+      }
+      startUrl.searchParams.set("return_to", returnTo.toString());
 
       connectorWaitingStartedAtRef.current[item.id] = Date.now();
       setConnectorWaiting(item.id, true);
@@ -550,7 +564,10 @@ export function useConnectors(input: {
     async (
       item: ConnectorCatalogItem,
       accountId?: string | null,
-      options: { silentMissingAccount?: boolean } = {},
+      options: {
+        silentMissingAccount?: boolean;
+        gmailMode?: GmailUsageMode;
+      } = {},
     ) => {
       if (!workspaceId) {
         return null;
@@ -648,22 +665,25 @@ export function useConnectors(input: {
             oauthAccountId: account.id,
             configJson:
               item.id === "gmail"
-                ? {
-                    liveSearchEnabled: true,
-                    indexingEnabled: false,
-                    labelIds: [],
-                    maxMessages: 500,
-                  }
+                ? gmailConfigForMode(options.gmailMode ?? "tools")
                 : { includePages: true },
             periodicIndexingEnabled: item.id === "notion",
             ...(item.id === "notion" ? { indexingFrequencyMinutes: 360 } : {}),
           });
           if (item.id === "gmail") {
             await refreshConnectors();
+            const mapped = mapConnectorToUi(
+              created.connector,
+              t,
+              displayLocale,
+            );
+            if (options.gmailMode && options.gmailMode !== "tools") {
+              openConnectorSettings(mapped);
+            }
             toast.success(
               t("toasts.connectors.connectedFallback", { name: item.name }),
             );
-            return mapConnectorToUi(created.connector, t, displayLocale);
+            return mapped;
           }
           const syncResult = await connectorsClient.sync(
             workspaceId,
@@ -732,6 +752,7 @@ export function useConnectors(input: {
       clearConnectorReadiness,
       connectors,
       markConnectorNotReady,
+      openConnectorSettings,
       refreshConnectors,
       trackConnectorSyncRun,
       trackManualConnectorSync,
@@ -793,7 +814,9 @@ export function useConnectors(input: {
       }
 
       if (item.postOAuthMode === "auto_create") {
-        void ensureConnector(item, message.accountId);
+        void ensureConnector(item, message.accountId, {
+          gmailMode: message.gmailMode,
+        });
         return;
       }
 

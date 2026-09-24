@@ -38,6 +38,7 @@ import {
   connectorCatalogCategories,
   connectorCatalogForAvailableTypes,
 } from "./catalog";
+import type { GmailUsageMode } from "./gmail-mode";
 import {
   ActiveConnectorCard,
   ConnectorCatalogCard,
@@ -118,7 +119,10 @@ export function ManageConnectorsDialog({
   isLoading: boolean;
   loadingError: string | null;
   onCancelConnector: (item: ConnectorCatalogItem) => void;
-  onConnectConnector: (item: ConnectorCatalogItem) => void;
+  onConnectConnector: (
+    item: ConnectorCatalogItem,
+    gmailMode?: GmailUsageMode,
+  ) => void;
   onCopyWebhook: (value: string) => void;
   onCreateConnector: (item: ConnectorCatalogItem) => void;
   onDisconnectConnector: (connector: ConnectorItem) => void;
@@ -134,6 +138,10 @@ export function ManageConnectorsDialog({
   const t = useTranslations("dashboardSourcesHub");
   const [tab, setTab] = useState<ManageConnectorsTab>("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [pendingGmail, setPendingGmail] = useState<ConnectorCatalogItem | null>(
+    null,
+  );
+  const [gmailMode, setGmailMode] = useState<GmailUsageMode>("tools");
   const activeConnectors = connectors.filter(
     (connector) => connector.status !== "disabled",
   );
@@ -156,6 +164,15 @@ export function ManageConnectorsDialog({
       setTab(initialTab);
     }
   }, [initialTab, open]);
+
+  function beginConnect(item: ConnectorCatalogItem) {
+    if (item.id !== "gmail") {
+      onConnectConnector(item);
+      return;
+    }
+    setGmailMode("tools");
+    setPendingGmail(item);
+  }
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
@@ -310,7 +327,7 @@ export function ManageConnectorsDialog({
                                   }
                                   setTab("active");
                                 }}
-                                onConnectConnector={onConnectConnector}
+                                onConnectConnector={beginConnect}
                                 onCreateConnector={onCreateConnector}
                                 onDisconnect={onDisconnectConnector}
                                 status={status}
@@ -362,7 +379,9 @@ export function ManageConnectorsDialog({
                       icon={Link2}
                       title={
                         searchQuery
-                          ? t("connectors.noMatchTitle", { query: searchQuery })
+                          ? t("connectors.noMatchTitle", {
+                              query: searchQuery,
+                            })
                           : t("connectors.noConnectorsTitle")
                       }
                     />
@@ -373,6 +392,75 @@ export function ManageConnectorsDialog({
           </ScrollArea>
         </>
       </DialogContent>
+      <Dialog
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) setPendingGmail(null);
+        }}
+        open={pendingGmail !== null}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t("connectors.gmail.modeTitle")}</DialogTitle>
+            <DialogDescription>
+              {t("connectors.gmail.modeDescription")}
+            </DialogDescription>
+          </DialogHeader>
+          <div
+            className="space-y-2"
+            role="radiogroup"
+            aria-label={t("connectors.gmail.modeTitle")}
+          >
+            {(["tools", "index", "both"] as const).map((mode) => (
+              <label
+                className={cn(
+                  "flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm",
+                  gmailMode === mode && "border-primary bg-primary/5",
+                )}
+                key={mode}
+              >
+                <input
+                  checked={gmailMode === mode}
+                  className="mt-1 accent-primary"
+                  name="gmail-usage-mode"
+                  onChange={() => setGmailMode(mode)}
+                  type="radio"
+                  value={mode}
+                />
+                <span className="space-y-0.5">
+                  <span className="block font-medium">
+                    {t(`connectors.gmail.mode.${mode}.title`)}
+                  </span>
+                  <span className="block text-xs text-muted-foreground">
+                    {t(`connectors.gmail.mode.${mode}.description`)}
+                  </span>
+                </span>
+              </label>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {t("connectors.gmail.modeScopeNote")}
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button
+              onClick={() => setPendingGmail(null)}
+              type="button"
+              variant="outline"
+            >
+              {t("connectors.gmail.modeCancel")}
+            </Button>
+            <Button
+              onClick={() => {
+                if (!pendingGmail) return;
+                onConnectConnector(pendingGmail, gmailMode);
+                setPendingGmail(null);
+              }}
+              type="button"
+            >
+              {t("connectors.gmail.modeContinue")}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </Dialog>
   );
 }

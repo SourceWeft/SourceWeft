@@ -533,6 +533,21 @@ export function createGmailConnectorAdapter(
           message: "Gmail indexing is disabled",
         };
       }
+      const labels = input.config.labelIds;
+      const after = input.config.after;
+      if (
+        !Array.isArray(labels) ||
+        labels.length === 0 ||
+        labels.some((label) => typeof label !== "string" || !label) ||
+        typeof after !== "string" ||
+        !Number.isFinite(Date.parse(after))
+      ) {
+        return {
+          ready: false,
+          reason: "gmail_indexing_scope_required",
+          message: "Choose Gmail labels and a start date before syncing",
+        };
+      }
       return { ready: true };
     },
     async *discover(_input: ConnectorDiscoverInput) {

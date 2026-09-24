@@ -2685,13 +2685,33 @@
       },
       "settingsDescription": "Connector settings, execution history, and provider events.",
       "gmail": {
+        "modeTitle": "Choose how to use Gmail",
+        "modeDescription": "Choose a starting mode before connecting. You can change it later in connector settings.",
+        "mode": {
+          "tools": {
+            "title": "Tools only",
+            "description": "Search and read live mail without storing messages in workspace sources."
+          },
+          "index": {
+            "title": "Index only",
+            "description": "Choose labels, a start date, and a limit after connecting. Live search stays off."
+          },
+          "both": {
+            "title": "Tools and index",
+            "description": "Use live mail tools and separately index a limited selection."
+          }
+        },
+        "modeScopeNote": "Google will request read and send permissions in all modes. Sending always requires review of each message.",
+        "modeCancel": "Cancel",
+        "modeContinue": "Continue to Google",
         "liveSearch": "Live Gmail search",
         "indexMail": "Index selected mail in this workspace",
         "indexNotice": "Indexing stores selected message content in workspace sources. Disabling it hides retained mail from agent search; deleting the connector removes the stored copies. Scheduled sync is a separate choice.",
-        "after": "Messages after date (optional)",
+        "after": "Messages after date (required for indexing)",
         "maxMessages": "Maximum messages",
-        "labels": "Labels (leave empty for all mail)",
-        "labelsNote": "Labels filter imports. Indexed messages appear in one Messages directory.",
+        "labels": "Labels (select at least one for indexing)",
+        "labelsNote": "Choose a label and start date before syncing. Indexed messages appear in one Messages directory.",
+        "scopeRequired": "Choose at least one label and a start date before enabling indexing.",
         "labelsLoadFailed": "Could not load Gmail labels."
       },
       "settingsTab": {
