@@ -1,4 +1,5 @@
 import Image from "next/image";
+import Link from "next/link";
 import { Card } from "@sourceweft/ui-web/card";
 import { Gradient } from "@sourceweft/ui-web/gradient";
 import { TurborepoLogo } from "@sourceweft/ui-web/turborepo-logo";
@@ -103,6 +104,23 @@ export default function Page() {
           </div>
         </div>
       </div>
+
+      <nav aria-label="Guides" className="z-10 mb-12 text-center">
+        <Link
+          href="/cli"
+          className="group inline-block rounded-lg border border-neutral-700 px-5 py-4 transition-colors hover:bg-neutral-800/30"
+        >
+          <span className="block text-2xl font-semibold">
+            Command line{" "}
+            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
+              -&gt;
+            </span>
+          </span>
+          <span className="block text-sm opacity-50">
+            Install skills from the marketplace with the sourceweft CLI.
+          </span>
+        </Link>
+      </nav>
 
       <div className="grid mb-32 text-center lg:max-w-5xl lg:w-full lg:mb-0 lg:grid-cols-4 lg:text-left">
         {LINKS.map(({ title, href, description }) => (
