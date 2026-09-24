@@ -21,6 +21,7 @@ type ThreadModelCatalogEntry = {
   isDefault: boolean;
   isActive: boolean;
   providerName: string | null;
+  providerDisplayName: string | null;
   providerKind: string | null;
   targetModel: string | null;
   availableViaGlobal: boolean;
@@ -164,6 +165,7 @@ async function listThreadModelCatalogForView(input: {
     string,
     {
       providerName: string;
+      providerDisplayName: string | null;
       providerKind: string;
       targetModel: string;
       globalReady: boolean;
@@ -193,6 +195,7 @@ async function listThreadModelCatalogForView(input: {
         .select({
           providerName: modelGatewayProviderConfigs.providerName,
           providerKind: modelGatewayProviderConfigs.providerKind,
+          providerConfigJson: modelGatewayProviderConfigs.configJson,
           providerActive: modelGatewayProviderConfigs.isActive,
           apiKeySource: modelGatewayProviderConfigs.apiKeySource,
           gatewayActive: modelGatewayConfigs.isActive,
@@ -209,6 +212,14 @@ async function listThreadModelCatalogForView(input: {
 
     const providerKindByName = new Map(
       providerRows.map((row) => [row.providerName, row.providerKind]),
+    );
+    const providerDisplayNameByName = new Map(
+      providerRows.map((row) => [
+        row.providerName,
+        typeof row.providerConfigJson?.displayName === "string"
+          ? row.providerConfigJson.displayName.trim() || null
+          : null,
+      ]),
     );
     const providerGlobalReadyByName = new Map(
       providerRows.map((row) => [
@@ -235,6 +246,8 @@ async function listThreadModelCatalogForView(input: {
 
         routeByKindAlias.set(key, {
           providerName: route.targetProviderName,
+          providerDisplayName:
+            providerDisplayNameByName.get(route.targetProviderName) ?? null,
           providerKind:
             providerKindByName.get(route.targetProviderName) ?? "unknown",
           targetModel: route.targetModel,
@@ -308,6 +321,7 @@ async function listThreadModelCatalogForView(input: {
       isDefault: row.isDefault,
       isActive: row.isActive,
       providerName: route?.providerName ?? null,
+      providerDisplayName: route?.providerDisplayName ?? null,
       providerKind: route?.providerKind ?? null,
       targetModel: route?.targetModel ?? null,
       availableViaGlobal: route?.globalReady ?? false,

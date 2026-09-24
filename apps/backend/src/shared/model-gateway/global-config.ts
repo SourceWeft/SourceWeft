@@ -20,6 +20,7 @@ export type GlobalGatewayEntry = {
   apiKeyHeaderPrefix?: string;
   defaultHeaders: Record<string, string>;
   providerName: string;
+  displayName?: string;
   providerKind: ModelGatewayProviderKind;
   supports: string[];
   timeoutMs?: number;
@@ -35,6 +36,7 @@ export type GlobalGatewayEntry = {
   isBYOK: boolean;
   modelCatalog?: {
     enabled: boolean;
+    displayNameOverrides?: Record<string, string>;
     kinds?: Array<
       | "chat"
       | "rerank"
@@ -93,6 +95,7 @@ export type GlobalModelProfileEntry = {
   profileId?: string;
   profileAlias: string;
   modelAlias: string;
+  displayName?: string;
   /** Ordered by ascending priority; `targets[0]` is the primary target. */
   targets: GlobalProfileTarget[];
   routingStrategy: ModelGatewayRoutingStrategy;
@@ -152,6 +155,7 @@ type RawGlobalGatewayEntry = {
   apiKeyHeaderPrefix?: unknown;
   defaultHeaders?: unknown;
   providerName?: unknown;
+  displayName?: unknown;
   providerKind?: unknown;
   supports?: unknown;
   timeoutMs?: unknown;
@@ -167,6 +171,7 @@ type RawGlobalModelProfileEntry = {
   profileId?: unknown;
   profileAlias?: unknown;
   modelAlias?: unknown;
+  displayName?: unknown;
   gatewaySlug?: unknown;
   providerName?: unknown;
   targetModel?: unknown;
@@ -202,6 +207,41 @@ const MODEL_CATALOG_KINDS = [
   "image",
   "video",
 ] as const;
+
+function asOptionalDisplayName(value: unknown, field: string) {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error(`Invalid global model gateway config field: ${field}`);
+  }
+  return value.trim();
+}
+
+function asDisplayNameOverrides(value: unknown, field: string) {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid global model gateway config field: ${field}`);
+  }
+  return Object.fromEntries(
+    Object.entries(value).map(([modelId, displayName]) => {
+      if (modelId.trim() !== modelId || modelId.length === 0) {
+        throw new Error(`Invalid global model gateway config field: ${field}`);
+      }
+      if (displayName === undefined) {
+        throw new Error(
+          `Invalid global model gateway config field: ${field}.${modelId}`,
+        );
+      }
+      return [
+        modelId,
+        asOptionalDisplayName(displayName, `${field}.${modelId}`),
+      ];
+    }),
+  ) as Record<string, string>;
+}
 
 function asModelCatalogKinds(value: unknown, field: string) {
   if (value === undefined || value === null) {
@@ -852,6 +892,11 @@ function parseGatewayEntry(
             (entry.modelCatalog as Record<string, unknown>).enabled,
             false,
           ),
+          displayNameOverrides: asDisplayNameOverrides(
+            (entry.modelCatalog as Record<string, unknown>)
+              .displayNameOverrides,
+            `gateways[${index}].modelCatalog.displayNameOverrides`,
+          ),
           kinds: asModelCatalogKinds(
             (entry.modelCatalog as Record<string, unknown>).kinds,
             `gateways[${index}].modelCatalog.kinds`,
@@ -880,6 +925,10 @@ function parseGatewayEntry(
       entry.providerName.trim().length > 0
         ? entry.providerName.trim()
         : slug,
+    displayName: asOptionalDisplayName(
+      entry.displayName,
+      `gateways[${index}].displayName`,
+    ),
     providerKind: asProviderKind(
       entry.providerKind ?? "openai-compatible",
       `gateways[${index}].providerKind`,
@@ -1162,6 +1211,10 @@ function parseModelProfileEntry(
         ? entry.profileAlias.trim()
         : modelAlias,
     modelAlias,
+    displayName: asOptionalDisplayName(
+      entry.displayName,
+      `${field}[${index}].displayName`,
+    ),
     targets,
     routingStrategy: asRoutingStrategy(
       entry.routingStrategy,

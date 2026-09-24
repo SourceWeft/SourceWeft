@@ -102,6 +102,13 @@ Model gateway catalog sync:
   `apps/backend/config/model-gateway.global.json` with
   `modelCatalog.enabled`; the removed `MODEL_GATEWAY_SYNC_OPENROUTER_CATALOG`
   environment variable is no longer used.
+- A gateway's optional `displayName` sets its catalog label without changing
+  `providerName`. Set `modelCatalog.displayNameOverrides` to map exact
+  provider model IDs to catalog labels, for example
+  `{"openai/gpt-6-luna":"GPT 6 Luna"}`. Unlisted models retain their
+  discovered names. Hand-written chat, image, and vision profiles may also
+  declare `displayName`; removing a configured name restores the catalog or
+  alias fallback on the next sync.
 - If `modelCatalog.kinds` is omitted, the scheduler imports every model kind
   that the catalog adapter can classify and the gateway transport supports.
 - Hand-written profiles in the JSON remain available when catalog sync is
