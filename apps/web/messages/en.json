@@ -2625,11 +2625,8 @@
         "available": "Available",
         "needs_setup": "Needs setup",
         "error": "Error",
-        "coming_soon": "Coming soon",
         "disabled": "Disabled",
-        "paused": "Paused",
-        "searchApi": "Search API",
-        "indexable": "Indexable"
+        "paused": "Paused"
       },
       "type": {
         "indexable": "Indexable",
@@ -2649,7 +2646,6 @@
       "readinessSetupRequired": "Connected · Setup required",
       "readinessNotReady": "Connector is not ready to sync.",
       "cta": {
-        "request": "Request",
         "connecting": "Connecting...",
         "connected": "Connected",
         "configure": "Configure",
@@ -2664,10 +2660,7 @@
         "lastSync": "Last sync {date}",
         "connectedAutoCreate": "Authorization exists without an active connector. Reconnect to create a connector.",
         "connectedConfigure": "OAuth is connected. Configure this connector to enable syncing.",
-        "available": "Ready to connect with {name} OAuth.",
-        "comingSoonSearch": "Non-indexable connector for live agent search.",
-        "comingSoonIndexable": "Indexable data source connector on the roadmap.",
-        "comingSoonNonIndexable": "Non-indexable connector on the roadmap."
+        "available": "Ready to connect with {name} OAuth."
       },
       "webhookUrl": "Webhook URL",
       "webhookLocal": "local",
@@ -2687,11 +2680,7 @@
       "managedEmptyDescription": "Connect Notion or choose an upcoming integration from the catalog.",
       "managedNoMatchDescription": "Try another connector name or status.",
       "category": {
-        "Knowledge & Docs": "Knowledge & Docs",
-        "File Storage": "File Storage",
-        "Communication": "Communication",
-        "Projects & Data": "Projects & Data",
-        "Publishing": "Publishing"
+        "Knowledge & Docs": "Knowledge & Docs"
       },
       "settingsDescription": "Connector settings, execution history, and provider events.",
       "settingsTab": {
@@ -2922,7 +2911,6 @@
         "activityLoadFailed": "Failed to load connector activity.",
         "settingsUnavailable": "Connector settings are not available yet.",
         "noWorkspace": "No workspace selected yet.",
-        "notAvailableOAuth": "{name} is not available for OAuth yet.",
         "redirecting": "Redirecting to {name} authorization.",
         "reconnectFirst": "Reconnect {name} before creating a connector.",
         "connectedConfigureNext": "{name} is connected. Configure syncing next.",
@@ -2934,7 +2922,6 @@
         "disabledConflict": "A disabled connector with this name already exists. Enable it or delete it before reconnecting.",
         "enableFailed": "Failed to enable {name} connector.",
         "authFailed": "{name} authorization failed.",
-        "onRoadmap": "{name} is on the roadmap.",
         "connectionCanceled": "{name} connection canceled.",
         "webhookCopied": "Webhook URL copied.",
         "webhookCopyFailed": "Could not copy webhook URL.",

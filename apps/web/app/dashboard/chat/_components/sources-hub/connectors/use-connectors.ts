@@ -520,13 +520,6 @@ export function useConnectors(input: {
         return;
       }
 
-      if (item.connectMode !== "oauth_connector") {
-        toast.error(
-          t("toasts.connectors.notAvailableOAuth", { name: item.name }),
-        );
-        return;
-      }
-
       const startUrl = new URL(
         "/dashboard/connectors/oauth/start",
         window.location.origin,
@@ -552,9 +545,6 @@ export function useConnectors(input: {
       options: { silentMissingAccount?: boolean } = {},
     ) => {
       if (!workspaceId) {
-        return null;
-      }
-      if (item.connectMode !== "oauth_connector") {
         return null;
       }
       const current = connectors.find(
@@ -735,7 +725,7 @@ export function useConnectors(input: {
       const item = connectorCatalog.find(
         (candidate) => candidate.id === message.connectorType,
       );
-      if (!item || item.connectMode !== "oauth_connector") {
+      if (!item) {
         setConnectorWaiting(message.connectorType, false);
         return;
       }
@@ -822,7 +812,7 @@ export function useConnectors(input: {
         const item = connectorCatalog.find(
           (candidate) => candidate.id === connectorType,
         );
-        if (!item || item.connectMode !== "oauth_connector") {
+        if (!item) {
           setConnectorWaiting(connectorType, false);
           continue;
         }
@@ -861,13 +851,6 @@ export function useConnectors(input: {
 
     return () => window.clearInterval(timer);
   }, [connectorWaitingByType, ensureConnector, refreshConnectors, workspaceId]);
-
-  const handleRequestConnector = useCallback(
-    (item: ConnectorCatalogItem) => {
-      toast.info(t("toasts.connectors.onRoadmap", { name: item.name }));
-    },
-    [t],
-  );
 
   const handleCancelConnector = useCallback(
     (item: ConnectorCatalogItem) => {
@@ -1089,7 +1072,6 @@ export function useConnectors(input: {
     openManageConnectors,
     handleConnectConnector,
     handleCreateConnector,
-    handleRequestConnector,
     handleCancelConnector,
     handleCopyWebhook,
     handleSyncConnector,

@@ -27,14 +27,7 @@ export type ConnectorItem = {
   raw: SourceConnector;
 };
 
-export type ConnectorCatalogCategory =
-  | "Knowledge & Docs"
-  | "File Storage"
-  | "Communication"
-  | "Projects & Data"
-  | "Publishing";
-
-export type ConnectorConnectMode = "oauth_connector" | "coming_soon";
+export type ConnectorCatalogCategory = "Knowledge & Docs";
 
 export type ConnectorCatalogItem = {
   id: string;
@@ -42,14 +35,11 @@ export type ConnectorCatalogItem = {
   category: ConnectorCatalogCategory;
   description: string;
   capabilities: string[];
-  connectMode: ConnectorConnectMode;
   postOAuthMode?: "auto_create" | "configure_required";
   isIndexable: boolean;
-  authKind: "oauth" | "api_key" | "native" | "mcp";
   supportsPeriodicSync: boolean;
   supportsActions: boolean;
   supportsWebhook: boolean;
-  statusKind: "available" | "coming_soon" | "non_indexable" | "indexable";
   icon: ConnectorIcon;
   logoIconName?: GlobalIconName;
   logoIconTone?: GlobalIconTone;
@@ -63,8 +53,7 @@ export type ConnectorCatalogStatusKind =
   | "active"
   | "needs_setup"
   | "syncing"
-  | "error"
-  | "coming_soon";
+  | "error";
 
 export type ConnectorCatalogStatus = {
   kind: ConnectorCatalogStatusKind;
