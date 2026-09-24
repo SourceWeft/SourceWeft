@@ -20,6 +20,7 @@ import type {
   ConnectorOAuthAccountStatus,
   ConnectorResourceSpec,
   ConnectorStatus,
+  ConnectorSyncBlock,
   ConnectorSyncReadinessResult,
   ConnectorSyncRunStatus,
   ConnectorSyncRunTriggerType,
@@ -52,6 +53,7 @@ export type {
   ConnectorOAuthAccountStatus,
   ConnectorResourceSpec,
   ConnectorStatus,
+  ConnectorSyncBlock,
   ConnectorSyncReadinessResult,
   ConnectorSyncRunStatus,
   ConnectorSyncRunTriggerType,
@@ -148,6 +150,7 @@ export type SourceConnectorRecord = {
   indexingFrequencyMinutes: number | null;
   lastIndexedAt: string | null;
   nextScheduledAt: string | null;
+  syncBlock?: ConnectorSyncBlock | null;
   lastError: string | null;
   createdBy: string | null;
   createdAt: string;

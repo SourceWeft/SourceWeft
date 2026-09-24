@@ -20,7 +20,22 @@ type ConnectorOAuthAccountStatus =
   "active" | "reauth_required" | "revoked" | "disabled";
 type SyncRunTriggerType = "manual" | "scheduled" | "webhook" | "backfill";
 type SyncRunStatus =
-  "queued" | "running" | "succeeded" | "failed" | "canceled" | "skipped";
+  | "queued"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "canceled"
+  | "skipped"
+  | "blocked";
+type ConnectorSyncBlock = {
+  reason: "PAGES_LIMIT_EXCEEDED" | "CONNECTOR_BILLING_OWNER_UNAVAILABLE";
+  runId: string;
+  blockedAt: string;
+  indexedCount: number;
+  requestedPages: number | null;
+  availablePages: number | null;
+  resumeCheckedAt?: string | null;
+};
 type ConnectorActionRiskLevel = "low" | "medium" | "high";
 type ConnectorActionRunStatus =
   | "proposed"
@@ -188,6 +203,9 @@ export const sourceConnectors = pgTable(
       mode: "date",
     }),
     lastError: text("last_error"),
+    // Platform-imposed pause (quota, no billable owner). Deliberately outside
+    // configJson: the sync cursor's scope hash covers configJson.
+    syncBlock: jsonb("sync_block").$type<ConnectorSyncBlock>(),
     createdBy: text("created_by"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
@@ -377,7 +395,7 @@ export const connectorSyncRuns = pgTable(
     ),
     check(
       "connector_sync_runs_status_check",
-      sql`${table.status} in ('queued', 'running', 'succeeded', 'failed', 'canceled', 'skipped')`,
+      sql`${table.status} in ('queued', 'running', 'succeeded', 'failed', 'canceled', 'skipped', 'blocked')`,
     ),
     check(
       "connector_sync_runs_discovered_count_check",

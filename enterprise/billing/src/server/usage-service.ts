@@ -28,6 +28,7 @@ import {
 import {
   consumePages,
   decidePageAdmission,
+  describeIngestionPageAdmission,
   getAvailablePages,
   getTotalPagesBalance,
   grantAddOnPages,
@@ -104,6 +105,26 @@ export class BillingUsageService {
           pendingInvitations,
         });
       },
+    );
+  }
+
+  /**
+   * The host's pre-work admission snapshot for one actor: credit balance for
+   * model scopes and the ingestion-page view, read in one locked transaction.
+   */
+  async getExecutionState(teamId: string, userId: string) {
+    return this.accountService.withLockedAccount(
+      teamId,
+      userId,
+      async ({ account }) => ({
+        mode: this.runtimeConfig.mode,
+        availableCredits: getAvailableCredits(account),
+        consumedThisCycle: account.creditsConsumedThisCycle,
+        ingestionPages: describeIngestionPageAdmission(
+          account,
+          this.runtimeConfig,
+        ),
+      }),
     );
   }
 

@@ -17,7 +17,7 @@ import {
 } from "@sourceweft/db";
 import { ConnectorError } from "../errors";
 import { mapSourceConnector } from "../mappers";
-import type { ConnectorStatus } from "../types";
+import type { ConnectorStatus, ConnectorSyncBlock } from "../types";
 import { stableJitterMs } from "./schedule";
 
 export async function createSourceConnectorRecord(input: {
@@ -476,6 +476,8 @@ export async function touchConnectorAfterSync(input: {
   lastIndexedAt: Date;
   status: ConnectorStatus;
   lastError?: string | null;
+  /** Every run end rewrites the block: set when blocked, cleared otherwise. */
+  syncBlock?: ConnectorSyncBlock | null;
 }) {
   await db
     .update(sourceConnectors)
@@ -483,6 +485,7 @@ export async function touchConnectorAfterSync(input: {
       status: input.status,
       lastIndexedAt: input.lastIndexedAt,
       lastError: input.lastError ?? null,
+      syncBlock: input.syncBlock ?? null,
       updatedAt: new Date(),
     })
     .where(
@@ -490,6 +493,48 @@ export async function touchConnectorAfterSync(input: {
         eq(sourceConnectors.id, input.connectorId),
         eq(sourceConnectors.teamId, input.teamId),
         eq(sourceConnectors.workspaceId, input.workspaceId),
+      ),
+    );
+}
+
+/**
+ * Quota-blocked connectors whose owner may have pages again: blocked (or last
+ * re-checked) before `checkedBefore`, oldest first. Runnable statuses only.
+ */
+export async function listQuotaBlockedConnectorRecords(input: {
+  checkedBefore: Date;
+  limit: number;
+}) {
+  const checkedAt = sql`coalesce(${sourceConnectors.syncBlock}->>'resumeCheckedAt', ${sourceConnectors.syncBlock}->>'blockedAt')::timestamptz`;
+  const rows = await db
+    .select()
+    .from(sourceConnectors)
+    .where(
+      and(
+        sql`${sourceConnectors.syncBlock}->>'reason' = 'PAGES_LIMIT_EXCEEDED'`,
+        sql`${sourceConnectors.status} in ('active', 'error')`,
+        sql`${checkedAt} < ${input.checkedBefore.toISOString()}::timestamptz`,
+      ),
+    )
+    .orderBy(asc(checkedAt))
+    .limit(input.limit);
+  return rows.map(mapSourceConnector);
+}
+
+/** Records a resume check that found no pages, so the next check waits. */
+export async function markConnectorSyncBlockChecked(input: {
+  connectorId: string;
+  checkedAt: Date;
+}) {
+  await db
+    .update(sourceConnectors)
+    .set({
+      syncBlock: sql`jsonb_set(${sourceConnectors.syncBlock}, '{resumeCheckedAt}', to_jsonb(${input.checkedAt.toISOString()}::text))`,
+    })
+    .where(
+      and(
+        eq(sourceConnectors.id, input.connectorId),
+        sql`${sourceConnectors.syncBlock} is not null`,
       ),
     );
 }

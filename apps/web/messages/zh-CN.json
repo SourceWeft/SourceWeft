@@ -2617,7 +2617,8 @@
         "needs_setup": "待设置",
         "error": "错误",
         "disabled": "已停用",
-        "paused": "已暂停"
+        "paused": "已暂停",
+        "blocked": "同步已暂停"
       },
       "type": {
         "indexable": "可索引",
@@ -2652,6 +2653,11 @@
         "connectedAutoCreate": "已存在授权但没有活跃的连接器。重新连接以创建连接器。",
         "connectedConfigure": "OAuth 已连接。配置此连接器以启用同步。",
         "available": "可通过 {name} OAuth 进行连接。"
+      },
+      "syncBlock": {
+        "pagesLimit": "页数额度已用完。上次同步索引了 {count} 条内容后暂停，额度恢复后会自动继续同步。",
+        "ownerUnavailable": "连接此账户的成员已离开团队，同步已暂停。请由当前成员重新连接后继续同步。",
+        "manageBilling": "管理计费"
       },
       "webhookUrl": "Webhook URL",
       "webhookLocal": "本地",
@@ -2799,6 +2805,7 @@
         "indexedCount": "已索引",
         "objectId": "对象 ID",
         "objectType": "对象",
+        "oversizedCount": "超出额度上限",
         "providerEventId": "提供方事件",
         "reason": "原因",
         "requestPreview": "请求",

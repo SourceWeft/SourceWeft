@@ -25,6 +25,7 @@ export type {
   CapabilityToolOption,
   ListCapabilityCatalogResponse,
   ConnectorActivityItem,
+  ConnectorSyncBlock,
   ConnectorWebhookConfigResponse,
   ConnectorWebhookEvent,
   DeleteConnectorAccountRequest,

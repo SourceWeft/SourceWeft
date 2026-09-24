@@ -58,6 +58,7 @@ import {
 } from "./catalog";
 import {
   ConnectorLogo,
+  ConnectorSyncBlockAlert,
   disabledConnectorIconButtonClass,
   formatConnectorReadinessSummary,
   formatConnectorSchedule,
@@ -156,10 +157,12 @@ export function ConnectorSettingsDialog({
   );
   const overviewStatus = connector?.raw.lastError
     ? t("connectors.overview.needsAttention")
-    : (formatConnectorReadinessSummary(readiness, t) ??
-      (connector
-        ? t(`connectors.statusLabel.${connector.status}`)
-        : undefined));
+    : connector?.raw.syncBlock
+      ? t("connectors.status.blocked")
+      : (formatConnectorReadinessSummary(readiness, t) ??
+        (connector
+          ? t(`connectors.statusLabel.${connector.status}`)
+          : undefined));
   const statusToggleLabel =
     connector?.status === "disabled"
       ? t("connectors.enableShort")
@@ -509,6 +512,9 @@ export function ConnectorSettingsDialog({
                       {connector.raw.lastError}
                     </AlertDescription>
                   </Alert>
+                ) : null}
+                {connector.raw.syncBlock ? (
+                  <ConnectorSyncBlockAlert block={connector.raw.syncBlock} />
                 ) : null}
                 <ActivityList
                   description={t("connectors.overview.activityDescription")}

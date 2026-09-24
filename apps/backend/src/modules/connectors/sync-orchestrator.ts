@@ -4,10 +4,14 @@ import { SourceIndexingService } from "../sources";
 import {
   createSourceRecord,
   createSourceRevisionRecord,
+  estimateIngestionPages,
   findSourceRecordByConnectorExternalId,
   updateSourceRecord,
 } from "../sources";
+import { getBillingDeploymentCapabilities } from "../../billing-host/bindings";
+import { workspaceService } from "../workspace";
 import { ConnectorError, toConnectorError } from "./errors";
+import { IngestionPageBudget, isPagesLimitExceeded } from "./ingestion-budget";
 import { requireConnectorWorkspace } from "./permissions";
 import {
   createSyncRunRecord,
@@ -27,6 +31,7 @@ import {
   incrementSyncRunCounts,
   listSyncRunRecords,
   listWorkspaceSyncRunRecords,
+  markConnectorSyncBlockChecked,
   touchConnectorAfterSync,
   updateSourceConnectorRecord,
   updateSyncRunRecord,
@@ -36,11 +41,64 @@ import { ConnectorRegistry, connectorRegistry } from "./registry";
 import type {
   ConnectorDirectoryNode,
   ConnectorItem,
+  ConnectorSyncBlock,
   ConnectorSyncReadinessResult,
   ConnectorSyncRunTriggerType,
+  SourceConnectorRecord,
 } from "./types";
 
 type RunnableConnectorStatus = "active" | "paused" | "error";
+
+/**
+ * A platform-imposed stop: the run ends `blocked`, keeps everything committed
+ * so far, and leaves the in-progress page uncommitted so the next run resumes
+ * there. Thrown before the blocked item writes anything.
+ */
+class ConnectorSyncBlocked extends Error {
+  constructor(
+    readonly reason: ConnectorSyncBlock["reason"],
+    readonly requestedPages: number | null,
+    readonly availablePages: number | null,
+  ) {
+    super(
+      reason === "PAGES_LIMIT_EXCEEDED"
+        ? "Ingestion page quota is exhausted; sync paused until pages are available"
+        : "Connector owner is no longer a team member; reconnect it from a current member to resume syncing",
+    );
+    this.name = "ConnectorSyncBlocked";
+  }
+}
+
+type UpsertItemResult =
+  | { kind: "indexed" }
+  | { kind: "unchanged" }
+  | { kind: "oversized"; requestedPages: number; cycleCapacity: number };
+
+export type ResolveConnectorBillingActor = (input: {
+  teamId: string;
+  ownerUserId: string | null;
+  triggerUserId: string;
+}) => Promise<string | null>;
+
+/**
+ * A connector's ingestion is always paid by its owner, whatever triggered the
+ * run (manual, schedule, webhook, backfill). An owner who has left the team has
+ * no billing account, so the run is blocked rather than billed to someone else.
+ * Without commercial billing there is no account to charge and the actor is
+ * attribution only.
+ */
+export const resolveConnectorBillingActor: ResolveConnectorBillingActor =
+  async (input) => {
+    if (!getBillingDeploymentCapabilities().billing.available) {
+      return input.ownerUserId ?? input.triggerUserId;
+    }
+    if (!input.ownerUserId) return null;
+    const membership = await workspaceService.getOrganizationMembership({
+      organizationId: input.teamId,
+      userId: input.ownerUserId,
+    });
+    return membership ? input.ownerUserId : null;
+  };
 
 function computeContentHash(value: string) {
   return createHash("sha256").update(value).digest("hex");
@@ -163,6 +221,12 @@ function shouldSkipExtract(input: {
   if (!input.existing) {
     return false;
   }
+  // Only a completed index is evidence the item is current. A failed,
+  // processing or never-indexed row carries the new watermark without the
+  // chunks, so it must be reprocessed.
+  if (input.existing.status !== "indexed") {
+    return false;
+  }
   if (input.item.metadata.forceRefetch) {
     return false;
   }
@@ -204,9 +268,10 @@ export class ConnectorSyncOrchestrator {
   private readonly indexingService: SourceIndexingService;
 
   constructor(
-    billing: ContentBillingPort,
+    private readonly billing: ContentBillingPort,
     private readonly registry: ConnectorRegistry = connectorRegistry,
     private readonly oauthService = new ConnectorOAuthService(registry),
+    private readonly resolveBillingActor: ResolveConnectorBillingActor = resolveConnectorBillingActor,
   ) {
     this.indexingService = new SourceIndexingService(billing);
   }
@@ -556,6 +621,74 @@ export class ConnectorSyncOrchestrator {
     return { run, jobId: job?.id === undefined ? null : String(job.id) };
   }
 
+  /**
+   * Resumes a quota-blocked connector as soon as its owner has pages again,
+   * whether or not it has a schedule. Nothing is queued while pages are still
+   * short; the check time is recorded so the caller can back off.
+   */
+  async enqueueQuotaResumeRun(input: {
+    connector: SourceConnectorRecord;
+    enqueue: (payload: {
+      runId: string;
+      teamId: string;
+      workspaceId: string;
+      connectorId: string;
+      userId: string;
+    }) => Promise<{ id?: string | number } | null>;
+  }) {
+    const { connector } = input;
+    if (connector.syncBlock?.reason !== "PAGES_LIMIT_EXCEEDED") {
+      return { queued: false as const, reason: "not_quota_blocked" };
+    }
+    const billingUserId = await this.resolveBillingActor({
+      teamId: connector.teamId,
+      ownerUserId: connector.createdBy,
+      triggerUserId: connector.createdBy ?? "system",
+    });
+    const admission = billingUserId
+      ? await new IngestionPageBudget(
+          this.billing,
+          connector.teamId,
+          billingUserId,
+        ).admit(1)
+      : null;
+    if (!billingUserId || admission?.outcome !== "admit") {
+      await markConnectorSyncBlockChecked({
+        connectorId: connector.id,
+        checkedAt: new Date(),
+      });
+      return {
+        queued: false as const,
+        reason: billingUserId
+          ? "pages_unavailable"
+          : "billing_owner_unavailable",
+      };
+    }
+    const created = await createSyncRunRecordIfNoActiveRun({
+      teamId: connector.teamId,
+      workspaceId: connector.workspaceId,
+      connectorId: connector.id,
+      triggerType: "backfill",
+      status: "queued",
+      createdBy: null,
+      metadataJson: {
+        resume: "quota",
+        blockedRunId: connector.syncBlock.runId,
+      },
+    });
+    if (!created.run || created.existing) {
+      return { queued: false as const, reason: "connector_already_running" };
+    }
+    await input.enqueue({
+      runId: created.run.id,
+      teamId: connector.teamId,
+      workspaceId: connector.workspaceId,
+      connectorId: connector.id,
+      userId: billingUserId,
+    });
+    return { queued: true as const, run: created.run };
+  }
+
   async createBackfillRun(input: {
     teamId: string;
     workspaceId: string;
@@ -643,7 +776,8 @@ export class ConnectorSyncOrchestrator {
     if (
       run.status === "succeeded" ||
       run.status === "failed" ||
-      run.status === "skipped"
+      run.status === "skipped" ||
+      run.status === "blocked"
     ) {
       return run;
     }
@@ -669,8 +803,40 @@ export class ConnectorSyncOrchestrator {
       let indexedCount = 0;
       let failedCount = 0;
       const itemFailures: Array<Record<string, unknown>> = [];
+      const oversizedItems: Array<Record<string, unknown>> = [];
+      const runMetadata = () => ({
+        ...(itemFailures.length ? { itemFailures } : {}),
+        ...(oversizedItems.length ? { oversizedItems } : {}),
+      });
 
       try {
+        const billingUserId = await this.resolveBillingActor({
+          teamId: input.teamId,
+          ownerUserId: connector.createdBy,
+          triggerUserId: input.userId,
+        });
+        if (!billingUserId) {
+          throw new ConnectorSyncBlocked(
+            "CONNECTOR_BILLING_OWNER_UNAVAILABLE",
+            null,
+            null,
+          );
+        }
+        const budget = new IngestionPageBudget(
+          this.billing,
+          input.teamId,
+          billingUserId,
+        );
+        // Out of pages before starting: stop before any provider traffic.
+        const opening = await budget.admit(1);
+        if (opening.outcome !== "admit") {
+          throw new ConnectorSyncBlocked(
+            "PAGES_LIMIT_EXCEEDED",
+            1,
+            opening.outcome === "insufficient" ? opening.available : 0,
+          );
+        }
+
         const adapter = this.registry.getAdapter(connector.connectorType);
         const accessToken = await this.oauthService.getRuntimeToken({
           teamId: input.teamId,
@@ -733,7 +899,7 @@ export class ConnectorSyncOrchestrator {
             });
 
             try {
-              const indexed = await this.upsertItem({
+              const result = await this.upsertItem({
                 teamId: input.teamId,
                 workspaceId: input.workspaceId,
                 connectorId: connector.id,
@@ -742,17 +908,33 @@ export class ConnectorSyncOrchestrator {
                 config: connector.configJson,
                 runId: input.runId,
                 userId: input.userId,
+                billingUserId,
+                budget,
                 accessToken,
                 item,
               });
-              if (indexed) {
+              if (result.kind === "indexed") {
                 indexedCount += 1;
                 await incrementSyncRunCounts({
                   ...input,
                   indexedDelta: 1,
                 });
+              } else if (result.kind === "oversized") {
+                oversizedItems.push({
+                  externalId: item.externalId,
+                  title: item.title,
+                  requestedPages: result.requestedPages,
+                  cycleCapacity: result.cycleCapacity,
+                });
+                await incrementSyncRunCounts({
+                  ...input,
+                  metadataPatch: { oversizedItems: oversizedItems.slice(-20) },
+                });
               }
             } catch (error) {
+              // A block ends the whole run here: no later item is extracted or
+              // embedded, and this page's cursor is never committed.
+              if (error instanceof ConnectorSyncBlocked) throw error;
               failedCount += 1;
               pageFailures += 1;
               const summary = asErrorSummary(error);
@@ -844,7 +1026,7 @@ export class ConnectorSyncOrchestrator {
           discoveredCount,
           indexedCount,
           failedCount,
-          metadataJson: itemFailures.length ? { itemFailures } : {},
+          metadataJson: runMetadata(),
           finishedAt: now,
           heartbeatAt: now,
         });
@@ -867,6 +1049,17 @@ export class ConnectorSyncOrchestrator {
         });
         return finalRun;
       } catch (error) {
+        if (error instanceof ConnectorSyncBlocked) {
+          return this.finishBlockedRun({
+            ...input,
+            connectorStatus: connector.status,
+            block: error,
+            discoveredCount,
+            indexedCount,
+            failedCount,
+            metadataJson: runMetadata(),
+          });
+        }
         const summary = asErrorSummary(error);
         if (summary.code === "CONNECTOR_CURSOR_EXPIRED") {
           await resetConnectorSyncState({
@@ -886,7 +1079,7 @@ export class ConnectorSyncOrchestrator {
           failedCount,
           errorCode: summary.code,
           errorMessage: summary.message,
-          metadataJson: itemFailures.length ? { itemFailures } : {},
+          metadataJson: runMetadata(),
           finishedAt: now,
           heartbeatAt: now,
         });
@@ -910,6 +1103,74 @@ export class ConnectorSyncOrchestrator {
     }
   }
 
+  private async finishBlockedRun(input: {
+    runId: string;
+    teamId: string;
+    workspaceId: string;
+    connectorId: string;
+    connectorStatus: RunnableConnectorStatus;
+    block: ConnectorSyncBlocked;
+    discoveredCount: number;
+    indexedCount: number;
+    failedCount: number;
+    metadataJson: Record<string, unknown>;
+  }) {
+    const now = new Date();
+    const blockedRun = await updateSyncRunRecord({
+      teamId: input.teamId,
+      workspaceId: input.workspaceId,
+      connectorId: input.connectorId,
+      runId: input.runId,
+      status: "blocked",
+      discoveredCount: input.discoveredCount,
+      indexedCount: input.indexedCount,
+      failedCount: input.failedCount,
+      errorCode: input.block.reason,
+      errorMessage: input.block.message,
+      metadataJson: {
+        ...input.metadataJson,
+        block: {
+          requestedPages: input.block.requestedPages,
+          availablePages: input.block.availablePages,
+        },
+      },
+      finishedAt: now,
+      heartbeatAt: now,
+    });
+    // Blocked is not broken: the connector keeps its status unless ordinary
+    // item failures in the same run already made it an error.
+    await touchConnectorAfterSync({
+      teamId: input.teamId,
+      workspaceId: input.workspaceId,
+      connectorId: input.connectorId,
+      lastIndexedAt: now,
+      status:
+        input.failedCount === 0
+          ? finalConnectorStatusAfterSync(input.connectorStatus)
+          : input.connectorStatus === "paused"
+            ? "paused"
+            : "error",
+      lastError:
+        input.failedCount === 0
+          ? null
+          : `${input.failedCount} connector items failed`,
+      syncBlock: {
+        reason: input.block.reason,
+        runId: input.runId,
+        blockedAt: now.toISOString(),
+        indexedCount: input.indexedCount,
+        requestedPages: input.block.requestedPages,
+        availablePages: input.block.availablePages,
+      },
+    });
+    await completeScheduleOccurrence({
+      runId: input.runId,
+      succeeded: false,
+      errorCode: input.block.reason,
+    });
+    return blockedRun;
+  }
+
   private async upsertItem(input: {
     teamId: string;
     workspaceId: string;
@@ -919,9 +1180,11 @@ export class ConnectorSyncOrchestrator {
     config: Record<string, unknown>;
     runId: string;
     userId: string;
+    billingUserId: string;
+    budget: IngestionPageBudget;
     accessToken: string;
     item: ConnectorItem;
-  }) {
+  }): Promise<UpsertItemResult> {
     const existing = await findSourceRecordByConnectorExternalId({
       teamId: input.teamId,
       workspaceId: input.workspaceId,
@@ -947,7 +1210,7 @@ export class ConnectorSyncOrchestrator {
           connectorType: input.connectorType,
         },
       });
-      return false;
+      return { kind: "unchanged" };
     }
 
     const adapter = this.registry.getAdapter(input.connectorType);
@@ -965,15 +1228,6 @@ export class ConnectorSyncOrchestrator {
     const contentHash =
       extracted.item.contentHash ?? computeContentHash(contentText);
     const title = normalizeSourceTitle(extracted.item.title);
-    const parentSourceId = await this.upsertDirectoryPath({
-      teamId: input.teamId,
-      workspaceId: input.workspaceId,
-      connectorId: input.connectorId,
-      connectorType: input.connectorType,
-      runId: input.runId,
-      userId: input.userId,
-      directoryPath: extracted.directoryPath,
-    });
     const metadata = {
       ...(existing?.metadata ?? {}),
       ...extracted.item.metadata,
@@ -981,7 +1235,20 @@ export class ConnectorSyncOrchestrator {
       parentExternalId: extracted.parentExternalId ?? null,
     };
 
-    if (existing && existing.contentHash === contentHash) {
+    if (
+      existing &&
+      existing.status === "indexed" &&
+      existing.contentHash === contentHash
+    ) {
+      const parentSourceId = await this.upsertDirectoryPath({
+        teamId: input.teamId,
+        workspaceId: input.workspaceId,
+        connectorId: input.connectorId,
+        connectorType: input.connectorType,
+        runId: input.runId,
+        userId: input.userId,
+        directoryPath: extracted.directoryPath,
+      });
       await updateSourceRecord({
         teamId: input.teamId,
         workspaceId: input.workspaceId,
@@ -998,8 +1265,48 @@ export class ConnectorSyncOrchestrator {
         parentSourceId,
         metadata,
       });
-      return false;
+      return { kind: "unchanged" };
     }
+
+    // Admission before any write: a blocked item leaves no source, revision or
+    // directory behind, and a replay of this page starts from a clean slate.
+    // The estimate is the one indexing settles, computed from the same text.
+    const pages = estimateIngestionPages({
+      mimeType: extracted.item.mimeType,
+      metadata,
+      contentText,
+    });
+    if (pages !== null) {
+      const admission = await input.budget.admit(pages);
+      if (admission.outcome === "insufficient") {
+        throw new ConnectorSyncBlocked(
+          "PAGES_LIMIT_EXCEEDED",
+          admission.requested,
+          admission.available,
+        );
+      }
+      if (admission.outcome === "oversized") {
+        // Waiting a cycle cannot admit it, so blocking here would stall every
+        // item behind it forever. Skip it without writing: its watermark is
+        // recorded only once it indexes, so any scan that rediscovers it
+        // re-checks it, and an existing indexed version stays searchable.
+        return {
+          kind: "oversized",
+          requestedPages: admission.requested,
+          cycleCapacity: admission.cycleCapacity,
+        };
+      }
+    }
+
+    const parentSourceId = await this.upsertDirectoryPath({
+      teamId: input.teamId,
+      workspaceId: input.workspaceId,
+      connectorId: input.connectorId,
+      connectorType: input.connectorType,
+      runId: input.runId,
+      userId: input.userId,
+      directoryPath: extracted.directoryPath,
+    });
 
     const source = existing
       ? await updateSourceRecord({
@@ -1054,16 +1361,33 @@ export class ConnectorSyncOrchestrator {
       externalUpdatedAt: extracted.item.externalUpdatedAt,
     });
 
-    await this.indexingService.indexSourceRevision({
-      workspaceId: input.workspaceId,
-      sourceId: source.id,
-      userId: input.userId,
-      sourceRevisionId: revision.id,
-      parsedTokens: Math.max(1, Math.ceil(contentText.length / 4)),
-      idempotencyKey: `connector-sync:${input.connectorId}:${extracted.item.externalId}:${contentHash}`,
-    });
+    try {
+      await this.indexingService.indexSourceRevision({
+        workspaceId: input.workspaceId,
+        sourceId: source.id,
+        userId: input.billingUserId,
+        sourceRevisionId: revision.id,
+        parsedTokens: Math.max(1, Math.ceil(contentText.length / 4)),
+        idempotencyKey: `connector-sync:${input.connectorId}:${extracted.item.externalId}:${contentHash}`,
+        pageAdmission: "checked_by_caller",
+      });
+    } catch (error) {
+      // A concurrent spender won the race to the last pages. The source is
+      // already `failed`, so the next run reprocesses it; this run stops.
+      if (isPagesLimitExceeded(error)) {
+        const details = (error as { details?: Record<string, unknown> })
+          .details;
+        throw new ConnectorSyncBlocked(
+          "PAGES_LIMIT_EXCEEDED",
+          typeof details?.requested === "number" ? details.requested : pages,
+          typeof details?.available === "number" ? details.available : null,
+        );
+      }
+      throw error;
+    }
+    if (pages !== null) input.budget.consumed(pages);
 
-    return true;
+    return { kind: "indexed" };
   }
 
   private async upsertDirectoryPath(input: {

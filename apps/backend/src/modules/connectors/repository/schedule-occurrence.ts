@@ -1,4 +1,5 @@
 import { and, asc, eq, inArray, lte } from "drizzle-orm";
+import { connectorSyncBlockReasonSchema } from "@sourceweft/contracts";
 import {
   connectorSyncRuns,
   db,
@@ -98,6 +99,7 @@ export async function listQueuedConnectorOccurrences(limit: number) {
           "succeeded",
           "failed",
           "skipped",
+          "blocked",
         ]),
       ),
     )
@@ -269,6 +271,10 @@ export async function retryScheduleOccurrence(input: {
   });
 }
 
+const CONNECTOR_SYNC_BLOCK_ERROR_CODES: ReadonlySet<string> = new Set(
+  connectorSyncBlockReasonSchema.options,
+);
+
 export async function completeScheduleOccurrence(input: {
   runId: string;
   succeeded: boolean;
@@ -289,15 +295,31 @@ export async function completeScheduleOccurrence(input: {
     const requiresReauth =
       input.errorCode === "CONNECTOR_REAUTH_REQUIRED" ||
       input.errorCode === "CONNECTOR_OAUTH_ACCOUNT_UNAVAILABLE";
+    // A block (quota, no billable owner) is resolved by time or a person, not
+    // by retrying: the occurrence is skipped and the schedule keeps its cadence,
+    // so the next due occurrence re-checks and resumes on its own.
+    const blocked =
+      !input.succeeded &&
+      input.errorCode != null &&
+      CONNECTOR_SYNC_BLOCK_ERROR_CODES.has(input.errorCode);
     const retry =
-      !input.succeeded && !requiresReauth && occurrence.occurrence.attempts < 3;
+      !input.succeeded &&
+      !requiresReauth &&
+      !blocked &&
+      occurrence.occurrence.attempts < 3;
     const retryAt = retry
       ? new Date(now.getTime() + 30_000 * 2 ** occurrence.occurrence.attempts)
       : null;
     await tx
       .update(scheduleOccurrences)
       .set({
-        status: input.succeeded ? "succeeded" : retry ? "pending" : "failed",
+        status: input.succeeded
+          ? "succeeded"
+          : blocked
+            ? "skipped"
+            : retry
+              ? "pending"
+              : "failed",
         syncRunId: retry ? null : occurrence.occurrence.syncRunId,
         retryAt,
         leaseUntil: null,

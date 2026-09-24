@@ -25,6 +25,9 @@ function activityTone(status: string) {
   if (status === "running" || status === "queued" || status === "received") {
     return "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300";
   }
+  if (status === "blocked") {
+    return "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300";
+  }
   if (status === "skipped" || status === "ignored") {
     return "border-border bg-muted/50 text-muted-foreground";
   }
@@ -59,6 +62,7 @@ const knownConnectorActivitySummaryKeys = new Set<string>([
   "indexedCount",
   "objectId",
   "objectType",
+  "oversizedCount",
   "providerEventId",
   "reason",
   "requestPreview",
@@ -188,9 +192,17 @@ function ActivityRow({ item }: { item: ConnectorActivityItem }) {
             </div>
           ) : null}
           {item.errorMessage ? (
-            <Alert className="mt-2" variant="destructive">
-              <AlertDescription>{item.errorMessage}</AlertDescription>
-            </Alert>
+            item.status === "blocked" ? (
+              <Alert className="mt-2 border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-200">
+                <AlertDescription className="text-inherit">
+                  {item.errorMessage}
+                </AlertDescription>
+              </Alert>
+            ) : (
+              <Alert className="mt-2" variant="destructive">
+                <AlertDescription>{item.errorMessage}</AlertDescription>
+              </Alert>
+            )
           ) : null}
           {Object.keys(item.resultJson).length > 0 ? (
             <details className="mt-2">

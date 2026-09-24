@@ -27,6 +27,7 @@ export {
   createSourceRecord,
 } from "./repository";
 export { createSourceRevisionRecord } from "./revision-repository";
+export { estimateIngestionPages } from "./billing-pages";
 
 // Parsers (used by content facade and others)
 export { getSourceParser, listSupportedSourceMimeTypes } from "./parsers";

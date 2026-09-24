@@ -417,3 +417,54 @@ test("empty source cannot become a one-page charge through stale estimates or ch
   ).rejects.toThrow(/Nonempty source content/);
   expect(billing.meterIngestion).not.toHaveBeenCalled();
 });
+
+function summaryWithPages(available: number, billingMode = "enforced") {
+  return {
+    billingMode,
+    credits: { available: 100, consumedThisCycle: 0 },
+    pages: { available, monthlyGrant: 300, addOnBalance: 0 },
+  };
+}
+
+test("an enforced page shortfall is refused before embedding or status changes", async () => {
+  billing.getSummary.mockResolvedValue(summaryWithPages(0));
+
+  await expect(
+    makeService().indexSource({
+      workspaceId: WORKSPACE_ID,
+      sourceId: SOURCE_ID,
+      userId: USER_ID,
+      chunks,
+    }),
+  ).rejects.toMatchObject({
+    code: "PAGES_LIMIT_EXCEEDED",
+    statusCode: 402,
+    details: { requested: 1, available: 0 },
+  });
+  expect(withBilledModelGateway).not.toHaveBeenCalled();
+  expect(updateSourceStatus).not.toHaveBeenCalled();
+  expect(billing.meterIngestion).not.toHaveBeenCalled();
+});
+
+test("shadow billing and caller-admitted pages skip the pre-embedding refusal", async () => {
+  billing.getSummary.mockResolvedValue(summaryWithPages(0, "shadow"));
+  await makeService().indexSource({
+    workspaceId: WORKSPACE_ID,
+    sourceId: SOURCE_ID,
+    userId: USER_ID,
+    chunks,
+  });
+  expect(withBilledModelGateway).toHaveBeenCalledTimes(1);
+
+  billing.getSummary.mockResolvedValue(summaryWithPages(0));
+  billing.getSummary.mockClear();
+  await makeService().indexSource({
+    workspaceId: WORKSPACE_ID,
+    sourceId: SOURCE_ID,
+    userId: USER_ID,
+    chunks,
+    pageAdmission: "checked_by_caller",
+  });
+  expect(billing.getSummary).not.toHaveBeenCalled();
+  expect(withBilledModelGateway).toHaveBeenCalledTimes(2);
+});

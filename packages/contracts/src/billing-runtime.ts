@@ -19,7 +19,26 @@ export type BillingExecutionState =
       mode: BillingMode;
       availableCredits: number;
       consumedThisCycle: number;
+      ingestionPages: IngestionPageAdmissionState;
     };
+
+/**
+ * What a host needs to decide, before doing billable ingestion work, whether
+ * `meterIngestion` would admit it. `enforced` is false whenever settlement would
+ * cover a shortfall instead of rejecting (shadow/disabled mode, limits or pages
+ * off), in which case the balances are informational only.
+ */
+export type IngestionPageAdmissionState = {
+  enforced: boolean;
+  /** Pages the actor can consume right now. */
+  available: number;
+  /**
+   * The most pages the actor holds at the start of a cycle without buying more
+   * (monthly grant plus carry-over add-on pages). A single item larger than
+   * this cannot be admitted by waiting for the next cycle.
+   */
+  cycleCapacity: number;
+};
 
 export type BillingSkipped = {
   status: "skipped";
