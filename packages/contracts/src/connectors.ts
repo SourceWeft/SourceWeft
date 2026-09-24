@@ -89,6 +89,8 @@ export const connectorActionSpecSchema = z.object({
   displayName: z.string().min(1),
   riskLevel: connectorActionRiskLevelSchema,
   requiresApproval: z.boolean(),
+  requestPrivacy: z.enum(["plain", "encrypted"]).optional(),
+  allowStandingApproval: z.boolean().optional(),
   inputSchema: jsonObjectSchema,
   agentToolName: z.string().min(1).optional(),
   description: z.string().min(1).optional(),
@@ -284,6 +286,7 @@ export const createConnectorRequestSchema = z.object({
 
 export const updateConnectorRequestSchema = z.object({
   name: z.string().trim().min(1).max(200).optional(),
+  oauthAccountId: z.string().trim().min(1).optional(),
   configJson: jsonObjectSchema.optional(),
   status: z.enum(["active", "paused", "disabled"]).optional(),
   periodicIndexingEnabled: z.boolean().optional(),
@@ -412,8 +415,12 @@ export type ConnectorActionCapability = z.infer<
 >;
 export type ConnectorWebhookEvent = z.infer<typeof connectorWebhookEventSchema>;
 export type ConnectorActivityItem = z.infer<typeof connectorActivityItemSchema>;
-export type ConnectorActionRiskLevel = z.infer<typeof connectorActionRiskLevelSchema>;
-export type ConnectorActionRunStatus = z.infer<typeof connectorActionRunStatusSchema>;
+export type ConnectorActionRiskLevel = z.infer<
+  typeof connectorActionRiskLevelSchema
+>;
+export type ConnectorActionRunStatus = z.infer<
+  typeof connectorActionRunStatusSchema
+>;
 export type ConnectorOAuthAccountStatus = z.infer<
   typeof connectorOAuthAccountStatusSchema
 >;
@@ -421,7 +428,9 @@ export type ConnectorStatus = z.infer<typeof connectorStatusSchema>;
 export type ConnectorSyncRunTriggerType = z.infer<
   typeof connectorSyncRunTriggerTypeSchema
 >;
-export type ConnectorSyncRunStatus = z.infer<typeof connectorSyncRunStatusSchema>;
+export type ConnectorSyncRunStatus = z.infer<
+  typeof connectorSyncRunStatusSchema
+>;
 export type ConnectorWebhookEventStatus = z.infer<
   typeof connectorWebhookEventStatusSchema
 >;
@@ -634,9 +643,7 @@ export type ConnectorWebhookPayload = {
 };
 
 export type ConnectorWebhookTargetAction =
-  | "sync"
-  | "archive_source"
-  | "record_only";
+  "sync" | "archive_source" | "record_only";
 
 export type ConnectorWebhookTarget = {
   action: ConnectorWebhookTargetAction;

@@ -61,6 +61,7 @@
     "@sourceweft/agent-tool-registry": "workspace:*",
     "@sourceweft/billing": "workspace:*",
     "@sourceweft/builtin-connector-notion": "workspace:*",
+    "@sourceweft/builtin-connector-gmail": "workspace:*",
     "@sourceweft/builtin-document-parsers": "workspace:*",
     "@sourceweft/builtin-retrieval": "workspace:*",
     "@sourceweft/builtin-skill-feynman": "workspace:*",

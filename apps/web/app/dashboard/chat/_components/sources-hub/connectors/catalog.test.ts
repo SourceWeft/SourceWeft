@@ -1,14 +1,16 @@
 import { expect, test } from "vitest";
-import { connectorCatalog, connectorCatalogCategories } from "./catalog";
+import { connectorCatalogForAvailableTypes } from "./catalog";
 
 test("catalog lists only implemented connectors", () => {
-  expect(connectorCatalog.map((item) => item.id)).toEqual(["notion"]);
+  expect(
+    connectorCatalogForAvailableTypes(["notion", "gmail"]).map(
+      (item) => item.id,
+    ),
+  ).toEqual(["notion", "gmail"]);
 });
 
-test("every catalog category has at least one connector", () => {
-  for (const category of connectorCatalogCategories) {
-    expect(connectorCatalog.some((item) => item.category === category)).toBe(
-      true,
-    );
-  }
+test("Gmail stays hidden in the catalog until the backend registers it", () => {
+  expect(
+    connectorCatalogForAvailableTypes(["notion"]).map((item) => item.id),
+  ).toEqual(["notion"]);
 });

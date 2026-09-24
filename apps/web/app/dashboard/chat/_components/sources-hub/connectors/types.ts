@@ -27,7 +27,7 @@ export type ConnectorItem = {
   raw: SourceConnector;
 };
 
-export type ConnectorCatalogCategory = "Knowledge & Docs";
+export type ConnectorCatalogCategory = "Knowledge & Docs" | "Communication";
 
 export type ConnectorCatalogItem = {
   id: string;

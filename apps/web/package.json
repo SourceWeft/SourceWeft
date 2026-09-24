@@ -45,6 +45,7 @@
     "@sourceweft/agent-tool-registry": "workspace:*",
     "@sourceweft/billing": "workspace:*",
     "@sourceweft/builtin-connector-notion": "workspace:*",
+    "@sourceweft/builtin-connector-gmail": "workspace:*",
     "@sourceweft/builtin-document-parsers": "workspace:*",
     "@sourceweft/builtin-tool-publish-artifact": "workspace:*",
     "@sourceweft/builtin-tool-video-presentation": "workspace:*",

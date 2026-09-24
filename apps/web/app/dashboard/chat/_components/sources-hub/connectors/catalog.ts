@@ -1,4 +1,4 @@
-import { FileText } from "lucide-react";
+import { FileText, Mail } from "lucide-react";
 import type { ConnectorCatalogCategory, ConnectorCatalogItem } from "./types";
 
 export const connectorCatalog: ConnectorCatalogItem[] = [
@@ -19,10 +19,34 @@ export const connectorCatalog: ConnectorCatalogItem[] = [
     webhookSupportNote:
       "Notion API version 2026-03-11. Page events use targeted sync; data source events rediscover currently shared pages.",
   },
+  {
+    id: "gmail",
+    name: "Gmail",
+    category: "Communication",
+    description:
+      "Search and read mail, optionally index it, and send reviewed messages.",
+    capabilities: ["Search", "Optional indexing", "Approved sending"],
+    postOAuthMode: "auto_create",
+    icon: Mail,
+    isIndexable: true,
+    supportsActions: true,
+    supportsPeriodicSync: true,
+    supportsWebhook: false,
+  },
 ];
+
+// Gmail ships behind a backend rollout gate; hide it until the API registers it.
+export function connectorCatalogForAvailableTypes(
+  availableConnectorTypes: readonly string[],
+): ConnectorCatalogItem[] {
+  return connectorCatalog.filter(
+    (item) => item.id !== "gmail" || availableConnectorTypes.includes("gmail"),
+  );
+}
 
 export const connectorCatalogCategories: ConnectorCatalogCategory[] = [
   "Knowledge & Docs",
+  "Communication",
 ];
 export const connectorSyncFrequencyOptions = [
   { label: "Manual", value: "manual" },

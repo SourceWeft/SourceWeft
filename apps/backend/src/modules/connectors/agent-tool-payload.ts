@@ -23,6 +23,8 @@ type ConnectorActionPayloadInput = {
   displayName?: string;
   connector: SourceConnectorRecord;
   toolCallId?: string;
+  previewRequestJson?: Record<string, unknown>;
+  allowStandingApproval?: boolean;
   target?: {
     externalUri?: string | null;
     id?: string | null;
@@ -72,7 +74,9 @@ function formatActionLabel(actionType: string) {
 export function connectorActionApprovalPayload(
   input: ConnectorActionPayloadInput,
 ): ToolConfirmationRequest {
-  const redactedRequest = redactConnectorSecrets(input.action.requestJson);
+  const redactedRequest = redactConnectorSecrets(
+    input.previewRequestJson ?? input.action.requestJson,
+  );
   const request =
     redactedRequest &&
     typeof redactedRequest === "object" &&
@@ -102,7 +106,7 @@ export function connectorActionApprovalPayload(
     // gate looks rules up by. Without it a rule could be written but never
     // matched, so the button would promise a standing approval that silently
     // never fires — worse than not offering it at all.
-    ...(input.action.agentToolName
+    ...(input.action.agentToolName && input.allowStandingApproval !== false
       ? [
           {
             decision: "approve_always" as const,
@@ -165,7 +169,7 @@ export function connectorActionApprovalPayload(
     status: input.action.status,
     userMessage:
       providerStatus === "succeeded"
-          ? "This action finished successfully in SourceWeft."
-          : "This action is waiting for confirmation in SourceWeft. The external provider action has not executed yet.",
+        ? "This action finished successfully in SourceWeft."
+        : "This action is waiting for confirmation in SourceWeft. The external provider action has not executed yet.",
   };
 }

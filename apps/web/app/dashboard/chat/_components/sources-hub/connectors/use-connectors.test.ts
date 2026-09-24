@@ -19,6 +19,7 @@ const intlMessages = messages as ComponentProps<
 const {
   list,
   listAccounts,
+  listManifests,
   getWebhookConfig,
   listWebhookEvents,
   listActivity,
@@ -29,6 +30,7 @@ const {
 } = vi.hoisted(() => ({
   list: vi.fn(),
   listAccounts: vi.fn(),
+  listManifests: vi.fn(),
   getWebhookConfig: vi.fn(),
   listWebhookEvents: vi.fn(),
   listActivity: vi.fn(),
@@ -42,6 +44,7 @@ vi.mock("../../../../../../lib/sdk", () => ({
   connectorsClient: {
     list,
     listAccounts,
+    listManifests,
     getWebhookConfig,
     listWebhookEvents,
     listActivity,
@@ -163,6 +166,7 @@ beforeEach(() => {
   for (const fn of [
     list,
     listAccounts,
+    listManifests,
     getWebhookConfig,
     listWebhookEvents,
     listActivity,
@@ -179,6 +183,7 @@ beforeEach(() => {
   // Sensible defaults; individual tests override as needed.
   list.mockResolvedValue({ items: [] });
   listAccounts.mockResolvedValue({ items: [] });
+  listManifests.mockResolvedValue({ items: [{ type: "notion" }] });
   listActivity.mockResolvedValue({ items: [] });
   getWebhookConfig.mockResolvedValue(null);
   listWebhookEvents.mockResolvedValue({ items: [] });

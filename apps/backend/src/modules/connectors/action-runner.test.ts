@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   createSyncRunRecord: vi.fn(),
   enqueueConnectorSyncJob: vi.fn(),
   findActionRunRecord: vi.fn(),
+  findOAuthAccountRecord: vi.fn(),
   findSourceConnectorRecord: vi.fn(),
   listActionRunRecords: vi.fn(),
   requireConnectorWorkspace: vi.fn(),
@@ -27,6 +28,7 @@ vi.mock("./repository", () => ({
   createActionRunRecord: mocks.createActionRunRecord,
   createSyncRunRecord: mocks.createSyncRunRecord,
   findActionRunRecord: mocks.findActionRunRecord,
+  findOAuthAccountRecord: mocks.findOAuthAccountRecord,
   findSourceConnectorRecord: mocks.findSourceConnectorRecord,
   listActionRunRecords: mocks.listActionRunRecords,
   updateActionRunRecord: mocks.updateActionRunRecord,
@@ -34,6 +36,17 @@ vi.mock("./repository", () => ({
 
 vi.mock("../content/queue", () => ({
   enqueueConnectorSyncJob: mocks.enqueueConnectorSyncJob,
+}));
+
+vi.mock("../../shared/team-secrets", () => ({
+  encryptTeamSecret: vi.fn(async () => "opaque-ciphertext"),
+  decryptTeamSecret: vi.fn(async () =>
+    JSON.stringify({
+      to: ["recipient@example.com"],
+      subject: "Hello",
+      body: "Private body",
+    }),
+  ),
 }));
 
 import { ConnectorActionRunner } from "./action-runner";
@@ -190,6 +203,124 @@ test("ConnectorActionRunner logs raw adapter responses on approved execution", a
     debug.mockRestore();
     vi.clearAllMocks();
   }
+});
+
+test("Gmail send proposal stores ciphertext and requires its approver and send grant", async () => {
+  vi.clearAllMocks();
+  const request = {
+    to: ["recipient@example.com"],
+    subject: "Hello",
+    body: "Private body",
+  };
+  const gmailManifest: ConnectorManifest = {
+    ...registry().getManifest(),
+    type: "gmail",
+    actions: [
+      {
+        type: "gmail.message.send",
+        displayName: "Send Gmail message",
+        riskLevel: "high",
+        requiresApproval: true,
+        requestPrivacy: "encrypted",
+        allowStandingApproval: false,
+        inputSchema: {
+          type: "object",
+          required: ["to", "subject", "body"],
+          additionalProperties: false,
+          properties: {
+            to: { type: "array", items: { type: "string" } },
+            subject: { type: "string" },
+            body: { type: "string" },
+          },
+        },
+        agentToolName: "send_gmail_message",
+        visibility: "agent",
+      },
+    ],
+  };
+  const adapter = {
+    executeAction: vi.fn().mockResolvedValue({
+      result: { sent: true, messageId: "sent_1" },
+      externalId: "sent_1",
+    }),
+  } as unknown as ConnectorAdapter;
+  const gmailRegistry = {
+    getManifest: vi.fn(() => gmailManifest),
+    getAdapter: vi.fn(() => adapter),
+  };
+  const oauthService = { getRuntimeToken: vi.fn().mockResolvedValue("token") };
+  mocks.requireConnectorWorkspace.mockResolvedValue({
+    workspace: { id: "workspace_1", organizationId: "team_1" },
+  });
+  mocks.findSourceConnectorRecord.mockResolvedValue(
+    connector({ connectorType: "gmail" }),
+  );
+  mocks.findOAuthAccountRecord.mockResolvedValue({
+    scopes: ["https://www.googleapis.com/auth/gmail.send"],
+  });
+  mocks.findActionRunRecord.mockResolvedValue(null);
+  mocks.createActionRunRecord.mockImplementation(async (input) =>
+    action({
+      connectorType: "gmail",
+      actionType: "gmail.message.send",
+      agentToolName: "send_gmail_message",
+      status: "proposed",
+      requestJson: input.requestJson,
+      requestPreview: input.requestPreview,
+    }),
+  );
+  const runner = new ConnectorActionRunner(
+    gmailRegistry as never,
+    oauthService as never,
+  );
+  const proposed = await runner.propose({
+    workspaceId: "workspace_1",
+    userId: "user_1",
+    connectorId: "connector_1",
+    actionType: "gmail.message.send",
+    requestJson: request,
+  });
+  assert.equal(JSON.stringify(proposed.action).includes("Private body"), false);
+  assert.equal(
+    proposed.action.requestJson.__connectorEncryptedRequest,
+    "opaque-ciphertext",
+  );
+  mocks.findActionRunRecord.mockResolvedValue(
+    action({
+      ...proposed.action,
+      status: "approved",
+      approvedBy: "user_1",
+    }),
+  );
+  mocks.updateActionRunRecord.mockImplementation(async (input) =>
+    action({
+      ...proposed.action,
+      status: input.status,
+      resultJson: input.resultJson ?? {},
+    }),
+  );
+  const executed = await runner.execute({
+    workspaceId: "workspace_1",
+    userId: "user_1",
+    connectorId: "connector_1",
+    actionRunId: "action_1",
+    expected: { requestJson: request },
+  });
+  assert.equal(executed.action.status, "succeeded");
+  assert.deepEqual(
+    vi.mocked(adapter.executeAction).mock.calls[0]?.[0].request,
+    request,
+  );
+  await assert.rejects(
+    runner.execute({
+      workspaceId: "workspace_1",
+      userId: "user_2",
+      connectorId: "connector_1",
+      actionRunId: "action_1",
+    }),
+    { code: "CONNECTOR_ACTION_APPROVER_MISMATCH" },
+  );
+  vi.clearAllMocks();
 });
 
 test("ConnectorActionRunner rejects approved execution when resumed args do not match", async () => {

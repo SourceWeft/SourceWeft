@@ -2680,9 +2680,20 @@
       "managedEmptyDescription": "Connect Notion or choose an upcoming integration from the catalog.",
       "managedNoMatchDescription": "Try another connector name or status.",
       "category": {
-        "Knowledge & Docs": "Knowledge & Docs"
+        "Knowledge & Docs": "Knowledge & Docs",
+        "Communication": "Communication"
       },
       "settingsDescription": "Connector settings, execution history, and provider events.",
+      "gmail": {
+        "liveSearch": "Live Gmail search",
+        "indexMail": "Index selected mail in this workspace",
+        "indexNotice": "Indexing stores selected message content in workspace sources. Disabling it hides retained mail from agent search; deleting the connector removes the stored copies. Scheduled sync is a separate choice.",
+        "after": "Messages after date (optional)",
+        "maxMessages": "Maximum messages",
+        "labels": "Labels (leave empty for all mail)",
+        "labelsNote": "Labels filter imports. Indexed messages appear in one Messages directory.",
+        "labelsLoadFailed": "Could not load Gmail labels."
+      },
       "settingsTab": {
         "overview": "Overview",
         "configuration": "Configuration",

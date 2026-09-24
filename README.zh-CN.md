@@ -77,6 +77,7 @@
 可使用网页端，也可从 [Releases](https://github.com/SourceWeft/SourceWeft/releases) 获取桌面安装包。桌面端连接方式参见[桌面端说明](apps/desktop/README.zh-CN.md)。
 
 部署配置和升级参见 [Docker 说明](docker/README.zh-CN.md)。
+自托管 Gmail OAuth 设置及连接器控制参见 [Gmail 连接器指南](docker/gmail-connector.md)。
 
 ---
 

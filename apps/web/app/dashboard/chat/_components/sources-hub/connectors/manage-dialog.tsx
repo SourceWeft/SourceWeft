@@ -34,7 +34,10 @@ import { ScrollArea } from "@sourceweft/ui-web/components/ui/scroll-area";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 
 import { HubEmptyState } from "../components/hub-empty-state";
-import { connectorCatalog, connectorCatalogCategories } from "./catalog";
+import {
+  connectorCatalogCategories,
+  connectorCatalogForAvailableTypes,
+} from "./catalog";
 import {
   ActiveConnectorCard,
   ConnectorCatalogCard,
@@ -84,6 +87,7 @@ function connectorMatchesSearch(connector: ConnectorItem, searchQuery: string) {
 
 export function ManageConnectorsDialog({
   accounts,
+  availableConnectorTypes,
   connectorBusyById,
   connectorReadinessById,
   connectors,
@@ -105,6 +109,7 @@ export function ManageConnectorsDialog({
   webhookEventsByConnectorId,
 }: {
   accounts: ConnectorAccountItem[];
+  availableConnectorTypes: string[];
   connectorBusyById: Record<string, boolean>;
   connectorReadinessById: Record<string, ConnectorReadinessState>;
   connectors: ConnectorItem[];
@@ -135,9 +140,9 @@ export function ManageConnectorsDialog({
   const disabledConnectors = connectors.filter(
     (connector) => connector.status === "disabled",
   );
-  const visibleCatalog = connectorCatalog.filter((item) =>
-    connectorCatalogMatches(item, searchQuery),
-  );
+  const visibleCatalog = connectorCatalogForAvailableTypes(
+    availableConnectorTypes,
+  ).filter((item) => connectorCatalogMatches(item, searchQuery));
   const visibleManagedConnectors = connectors.filter((connector) =>
     connectorMatchesSearch(connector, searchQuery),
   );

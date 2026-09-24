@@ -76,6 +76,7 @@ The release bundle runs the web app, API, background jobs, database, and file st
 Use the web app, or find desktop installers in [Releases](https://github.com/SourceWeft/SourceWeft/releases). Desktop connection details are in the [desktop guide](apps/desktop/README.md).
 
 Deployment configuration and upgrades are covered in the [Docker guide](docker/README.md).
+For self-hosted Gmail OAuth setup and connector controls, see the [Gmail connector guide](docker/gmail-connector.md).
 
 ---
 

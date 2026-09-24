@@ -423,6 +423,8 @@ export const connectorActionSchema = z.object({
   description: z.string().min(1).optional(),
   risk: connectorActionRiskSchema,
   requiresApproval: z.boolean().default(false),
+  requestPrivacy: z.enum(["plain", "encrypted"]).optional(),
+  allowStandingApproval: z.boolean().optional(),
   visibility: z.enum(["agent", "internal"]).default("internal"),
   capabilities: z.array(z.string().min(1)).default([]),
   inputSchema: jsonObjectSchema.default({}),

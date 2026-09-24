@@ -2,6 +2,7 @@ import { ConnectorError } from "./errors";
 import { validateObjectWithJsonSchema } from "./config-validation";
 import { requireConnectorWorkspace } from "./permissions";
 import {
+  archiveConnectorSources,
   createSourceConnectorRecord,
   deleteOAuthAccountRecord,
   findOAuthAccountRecord,
@@ -203,6 +204,7 @@ export class ConnectorService {
     workspaceId: string;
     userId: string;
     connectorId: string;
+    oauthAccountId?: string;
     name?: string;
     configJson?: Record<string, unknown>;
     status?: Extract<ConnectorStatus, "active" | "paused" | "disabled">;
@@ -226,9 +228,50 @@ export class ConnectorService {
         "Connector not found",
       );
     }
+    if (
+      input.oauthAccountId &&
+      input.oauthAccountId !== current.oauthAccountId
+    ) {
+      if (current.connectorType !== "gmail") {
+        throw new ConnectorError(
+          400,
+          "CONNECTOR_OAUTH_REBIND_UNSUPPORTED",
+          "Account rebinding is not supported for this connector",
+        );
+      }
+      const nextAccount = await findOAuthAccountRecord({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        accountId: input.oauthAccountId,
+      });
+      const currentAccount = current.oauthAccountId
+        ? await findOAuthAccountRecord({
+            teamId: workspace.organizationId,
+            workspaceId: workspace.id,
+            accountId: current.oauthAccountId,
+          })
+        : null;
+      if (
+        !nextAccount ||
+        nextAccount.status !== "active" ||
+        nextAccount.connectorType !== current.connectorType ||
+        (currentAccount?.providerAccountId &&
+          nextAccount.providerAccountId !== currentAccount.providerAccountId)
+      ) {
+        throw new ConnectorError(
+          409,
+          "CONNECTOR_OAUTH_ACCOUNT_MISMATCH",
+          "Reconnect with the same provider account in this workspace",
+        );
+      }
+    }
 
     const manifest = this.registry.getManifest(current.connectorType);
     const nextConfig = input.configJson ?? current.configJson;
+    const gmailIndexTurnedOff =
+      current.connectorType === "gmail" &&
+      current.configJson.indexingEnabled === true &&
+      nextConfig.indexingEnabled !== true;
     validateObjectWithJsonSchema({
       schema: manifest.configSchema,
       value: nextConfig,
@@ -267,6 +310,7 @@ export class ConnectorService {
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
       connectorId: input.connectorId,
+      oauthAccountId: input.oauthAccountId,
       name: input.name,
       configJson: input.configJson === undefined ? undefined : nextConfig,
       status: input.status,
@@ -279,6 +323,13 @@ export class ConnectorService {
         "CONNECTOR_NOT_FOUND",
         "Connector not found",
       );
+    }
+    if (gmailIndexTurnedOff) {
+      await archiveConnectorSources({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        connectorId: connector.id,
+      });
     }
     await putConnectorSchedule({
       teamId: workspace.organizationId,

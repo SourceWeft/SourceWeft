@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { test, vi } from "vitest";
 import {
+  approveConnectorActionForTrustRule,
   buildConnectorActionToolset,
   createConnectorActionInterruptConfigs,
   createConnectorActionTools,
+  resolveConnectorActionTrustScope,
   type ConnectorActionToolContext,
 } from "./agent-tools";
 import { connectorRegistry } from "./registry";
@@ -141,4 +143,75 @@ test("buildConnectorActionToolset applies connector exclusion consistently", asy
     false,
   );
   assert.equal(toolset.interruptOn.agent_toolset_test_create, undefined);
+});
+
+test("disabled Gmail live search removes read tools but keeps per-message send approval", async () => {
+  const gmailManifest: ConnectorManifest = {
+    ...manifest,
+    type: "gmail",
+    displayName: "Gmail",
+    actions: [
+      {
+        ...manifest.actions[1]!,
+        type: "gmail.message.search",
+        agentToolName: "search_gmail_messages",
+      },
+      {
+        ...manifest.actions[0]!,
+        type: "gmail.message.send",
+        agentToolName: "send_gmail_message",
+        riskLevel: "high",
+        allowStandingApproval: false,
+        requestPrivacy: "encrypted",
+      },
+    ],
+  };
+  connectorRegistry.register({ ...adapter, getManifest: () => gmailManifest });
+  vi.mocked(listSourceConnectorRecords).mockResolvedValue([
+    {
+      id: "gmail-connector",
+      connectorType: "gmail",
+      name: "Gmail",
+      status: "active",
+      oauthAccountId: "gmail-account",
+      configJson: { liveSearchEnabled: false, indexingEnabled: true },
+    } as never,
+  ]);
+  const tools = await createConnectorActionTools(context);
+  assert.equal(
+    tools.some((entry) => entry.name === "search_gmail_messages"),
+    false,
+  );
+  assert.equal(
+    tools.some((entry) => entry.name === "send_gmail_message"),
+    true,
+  );
+  assert.deepEqual(
+    createConnectorActionInterruptConfigs().send_gmail_message
+      ?.allowedDecisions,
+    ["approve", "edit", "reject"],
+  );
+  assert.equal(
+    await resolveConnectorActionTrustScope(context, {
+      toolName: "send_gmail_message",
+      args: {
+        to: ["recipient@example.com"],
+        subject: "Hello",
+        body: "Private body",
+      },
+    }),
+    null,
+  );
+  assert.equal(
+    await approveConnectorActionForTrustRule(context, {
+      toolName: "send_gmail_message",
+      toolCallId: "call-1",
+      args: {
+        to: ["recipient@example.com"],
+        subject: "Hello",
+        body: "Private body",
+      },
+    }),
+    null,
+  );
 });
