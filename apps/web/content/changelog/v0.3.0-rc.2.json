@@ -1,0 +1,19 @@
+{
+  "tag": "v0.3.0-rc.2",
+  "releasedAt": "2026-09-24",
+  "category": "Release",
+  "commit": "51e07c72",
+  "title": "Durable connector sync and steadier workspace workflows",
+  "summary": "This release candidate adds recoverable connector scheduling and incremental-sync groundwork, improves chat and sign-in reliability, and refreshes the workspace experience. Desktop installers remain unsigned manual downloads; automatic application updates are not published for this version.",
+  "items": [
+    "Made opt-in connector indexing schedules durable across scheduler restarts and queue failures. Missed intervals coalesce, retries are visible, and concurrent syncs for the same connector are serialized.",
+    "Added a replay-safe provider checkpoint contract with scoped progress, expired-cursor recovery, and deletion reconciliation. Existing Notion sync keeps its full-discovery behavior; new connectors can use durable incremental pages.",
+    "Improved chat streaming state, version selection, generated-file previews, and recovery after interrupted requests. Cross-origin authentication now accepts the locale header used by the client.",
+    "Fixed sign-in code email links to use the configured public web URL and added regression coverage for per-message URL overrides.",
+    "Protected market admin pages with server-side access checks and restored scrolling in the market review interface.",
+    "Refreshed the public AI workspace landing page, client download navigation, and translation fallbacks. System skill imports no longer depend on tenant workspaces.",
+    "Adjusted release infrastructure to validate full Docker images on tags, build published images on native architecture runners, and keep pull-request checks focused on lint, types, and tests."
+  ],
+  "githubPrerelease": false,
+  "desktopPublicationPolicy": "candidate"
+}

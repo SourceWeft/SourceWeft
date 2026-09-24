@@ -16,7 +16,7 @@ checkout the same release tag in Git; do not mix main's Compose with an older im
 Run from the directory containing `docker/`:
 
 ```sh
-VERSION=v0.2.0-rc.3 # replace with the release you downloaded
+VERSION=v0.3.0-rc.2 # replace with the release you downloaded
 IMAGE=ghcr.io/sourceweft/sourceweft:$VERSION
 docker run --rm --user "$(id -u):$(id -g)" --entrypoint node \
   -e SOURCEWEFT_IMAGE="$IMAGE" -v "$PWD/docker:/config" "$IMAGE" \
