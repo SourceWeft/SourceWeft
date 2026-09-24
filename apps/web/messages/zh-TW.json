@@ -2625,11 +2625,8 @@
         "available": "可用",
         "needs_setup": "待設定",
         "error": "錯誤",
-        "coming_soon": "即將推出",
         "disabled": "已停用",
-        "paused": "已暫停",
-        "searchApi": "Search API",
-        "indexable": "可索引"
+        "paused": "已暫停"
       },
       "type": {
         "indexable": "可索引",
@@ -2649,7 +2646,6 @@
       "readinessSetupRequired": "已連接 · 需要設定",
       "readinessNotReady": "連接器尚未就緒，無法同步。",
       "cta": {
-        "request": "申請",
         "connecting": "連接中…",
         "connected": "已連接",
         "configure": "設定",
@@ -2664,10 +2660,7 @@
         "lastSync": "上次同步 {date}",
         "connectedAutoCreate": "已存在授權但沒有使用中的連接器。重新連接以建立連接器。",
         "connectedConfigure": "OAuth 已連接。設定此連接器以啟用同步。",
-        "available": "可透過 {name} OAuth 進行連接。",
-        "comingSoonSearch": "用於即時代理程式搜尋的不可索引連接器。",
-        "comingSoonIndexable": "規劃中的可索引資料來源連接器。",
-        "comingSoonNonIndexable": "規劃中的不可索引連接器。"
+        "available": "可透過 {name} OAuth 進行連接。"
       },
       "webhookUrl": "Webhook URL",
       "webhookLocal": "本機",
@@ -2688,10 +2681,7 @@
       "managedNoMatchDescription": "試試其他連接器名稱或狀態。",
       "category": {
         "Knowledge & Docs": "知識與文件",
-        "File Storage": "檔案儲存",
-        "Communication": "溝通協作",
-        "Projects & Data": "專案與資料",
-        "Publishing": "發布"
+        "Communication": "溝通協作"
       },
       "settingsDescription": "連接器設定、執行歷史和提供方事件。",
       "gmail": {
@@ -2932,7 +2922,6 @@
         "activityLoadFailed": "載入連接器活動失敗。",
         "settingsUnavailable": "連接器設定暫不可用。",
         "noWorkspace": "尚未選擇工作區。",
-        "notAvailableOAuth": "{name} 暫不支援 OAuth。",
         "redirecting": "正在重新導向至 {name} 授權。",
         "reconnectFirst": "建立連接器前請先重新連接 {name}。",
         "connectedConfigureNext": "{name} 已連接。接下來設定同步。",
@@ -2944,7 +2933,6 @@
         "disabledConflict": "已存在同名的已停用連接器。請先啟用或刪除後再重新連接。",
         "enableFailed": "啟用 {name} 連接器失敗。",
         "authFailed": "{name} 授權失敗。",
-        "onRoadmap": "{name} 已在規劃中。",
         "connectionCanceled": "{name} 連接已取消。",
         "webhookCopied": "Webhook URL 已複製。",
         "webhookCopyFailed": "無法複製 webhook URL。",

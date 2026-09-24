@@ -1,16 +1,16 @@
 import { expect, test } from "vitest";
 import { connectorCatalogForAvailableTypes } from "./catalog";
 
-test("Gmail stays unavailable in the catalog until the backend registers it", () => {
-  const unavailable = connectorCatalogForAvailableTypes(["notion"]).find(
-    (item) => item.id === "gmail",
-  );
-  expect(unavailable?.connectMode).toBe("coming_soon");
-  expect(unavailable?.statusKind).toBe("coming_soon");
+test("catalog lists only implemented connectors", () => {
+  expect(
+    connectorCatalogForAvailableTypes(["notion", "gmail"]).map(
+      (item) => item.id,
+    ),
+  ).toEqual(["notion", "gmail"]);
+});
 
-  const available = connectorCatalogForAvailableTypes(["notion", "gmail"]).find(
-    (item) => item.id === "gmail",
-  );
-  expect(available?.connectMode).toBe("oauth_connector");
-  expect(available?.statusKind).toBe("available");
+test("Gmail stays hidden in the catalog until the backend registers it", () => {
+  expect(
+    connectorCatalogForAvailableTypes(["notion"]).map((item) => item.id),
+  ).toEqual(["notion"]);
 });

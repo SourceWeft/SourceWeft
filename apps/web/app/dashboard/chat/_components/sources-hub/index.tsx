@@ -462,7 +462,6 @@ export function SourcesHub({
     openManageConnectors,
     handleConnectConnector,
     handleCreateConnector,
-    handleRequestConnector,
     handleCancelConnector,
     handleCopyWebhook,
     handleSyncConnector,
@@ -1388,7 +1387,6 @@ export function SourcesHub({
         onDisconnectConnector={setPendingDisconnectConnector}
         onOpenChange={setIsManageConnectorsOpen}
         onOpenSettings={openConnectorSettings}
-        onRequestConnector={handleRequestConnector}
         onSyncConnector={(connector) => void handleSyncConnector(connector)}
         onToggleConnectorStatus={(connector) =>
           void handleToggleConnectorStatus(connector)

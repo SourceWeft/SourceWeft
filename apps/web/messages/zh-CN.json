@@ -2616,11 +2616,8 @@
         "available": "可用",
         "needs_setup": "待设置",
         "error": "错误",
-        "coming_soon": "即将推出",
         "disabled": "已停用",
-        "paused": "已暂停",
-        "searchApi": "Search API",
-        "indexable": "可索引"
+        "paused": "已暂停"
       },
       "type": {
         "indexable": "可索引",
@@ -2640,7 +2637,6 @@
       "readinessSetupRequired": "已连接 · 需要设置",
       "readinessNotReady": "连接器尚未就绪，无法同步。",
       "cta": {
-        "request": "申请",
         "connecting": "连接中…",
         "connected": "已连接",
         "configure": "配置",
@@ -2655,10 +2651,7 @@
         "lastSync": "上次同步 {date}",
         "connectedAutoCreate": "已存在授权但没有活跃的连接器。重新连接以创建连接器。",
         "connectedConfigure": "OAuth 已连接。配置此连接器以启用同步。",
-        "available": "可通过 {name} OAuth 进行连接。",
-        "comingSoonSearch": "用于实时智能体搜索的不可索引连接器。",
-        "comingSoonIndexable": "规划中的可索引数据源连接器。",
-        "comingSoonNonIndexable": "规划中的不可索引连接器。"
+        "available": "可通过 {name} OAuth 进行连接。"
       },
       "webhookUrl": "Webhook URL",
       "webhookLocal": "本地",
@@ -2679,10 +2672,7 @@
       "managedNoMatchDescription": "试试其他连接器名称或状态。",
       "category": {
         "Knowledge & Docs": "知识与文档",
-        "File Storage": "文件存储",
-        "Communication": "沟通协作",
-        "Projects & Data": "项目与数据",
-        "Publishing": "发布"
+        "Communication": "沟通协作"
       },
       "settingsDescription": "连接器设置、执行历史和提供方事件。",
       "gmail": {
@@ -2923,7 +2913,6 @@
         "activityLoadFailed": "加载连接器活动失败。",
         "settingsUnavailable": "连接器设置暂不可用。",
         "noWorkspace": "尚未选择工作区。",
-        "notAvailableOAuth": "{name} 暂不支持 OAuth。",
         "redirecting": "正在跳转到 {name} 授权。",
         "reconnectFirst": "创建连接器前请先重新连接 {name}。",
         "connectedConfigureNext": "{name} 已连接。接下来配置同步。",
@@ -2935,7 +2924,6 @@
         "disabledConflict": "已存在同名的已停用连接器。请先启用或删除后再重新连接。",
         "enableFailed": "启用 {name} 连接器失败。",
         "authFailed": "{name} 授权失败。",
-        "onRoadmap": "{name} 已在规划中。",
         "connectionCanceled": "{name} 连接已取消。",
         "webhookCopied": "Webhook URL 已复制。",
         "webhookCopyFailed": "无法复制 webhook URL。",

@@ -207,6 +207,59 @@ describe.sequential("catalog sync atomicity in PostgreSQL", () => {
     if (directory) await rm(directory, { recursive: true, force: true });
   });
 
+  test("configured display names sync and removed overrides restore catalog names", async () => {
+    Object.assign(raw.gateways[0]!, { displayName: "Catalog Provider" });
+    Object.assign(raw.gateways[0]!.modelCatalog, {
+      displayNameOverrides: {
+        "catalog-chat-original": "Friendly Catalog Chat",
+      },
+    });
+    Object.assign(raw.chatProfiles[0]!, {
+      displayName: "Friendly Static Chat",
+    });
+    await sync();
+
+    const configuredProfiles = await db.select().from(modelGatewayProfiles);
+    assert.equal(
+      configuredProfiles.find(
+        (row) => row.modelAlias === "catalog-chat-original",
+      )?.configJson.displayName,
+      "Friendly Catalog Chat",
+    );
+    assert.equal(
+      configuredProfiles.find(
+        (row) => row.modelAlias === `static-chat-${gatewaySlug}`,
+      )?.configJson.displayName,
+      "Friendly Static Chat",
+    );
+    const [provider] = await db.select().from(modelGatewayProviderConfigs);
+    assert.equal(provider?.configJson.displayName, "Catalog Provider");
+
+    Object.assign(raw.gateways[0]!, { displayName: undefined });
+    Object.assign(raw.gateways[0]!.modelCatalog, {
+      displayNameOverrides: undefined,
+    });
+    Object.assign(raw.chatProfiles[0]!, { displayName: undefined });
+    await sync();
+
+    const restoredProfiles = await db.select().from(modelGatewayProfiles);
+    assert.equal(
+      restoredProfiles.find((row) => row.modelAlias === "catalog-chat-original")
+        ?.configJson.displayName,
+      undefined,
+    );
+    assert.equal(
+      restoredProfiles.find(
+        (row) => row.modelAlias === `static-chat-${gatewaySlug}`,
+      )?.configJson.displayName,
+      undefined,
+    );
+    const [restoredProvider] = await db
+      .select()
+      .from(modelGatewayProviderConfigs);
+    assert.equal(restoredProvider?.configJson.displayName, null);
+  });
+
   test("a required registry failure preserves the complete previous configuration", async () => {
     const before = await snapshot();
     raw.chatProfiles[0]!.targetModel = "new-static-chat-not-activated";

@@ -67,7 +67,6 @@ function connectorCatalogMatches(
     item.name,
     item.category,
     item.description,
-    item.connectMode,
     ...item.capabilities,
   ].some((value) => value.toLowerCase().includes(q));
 }
@@ -103,7 +102,6 @@ export function ManageConnectorsDialog({
   onDisconnectConnector,
   onOpenChange,
   onOpenSettings,
-  onRequestConnector,
   onSyncConnector,
   onToggleConnectorStatus,
   open,
@@ -126,7 +124,6 @@ export function ManageConnectorsDialog({
   onDisconnectConnector: (connector: ConnectorItem) => void;
   onOpenChange: (open: boolean) => void;
   onOpenSettings: (connector: ConnectorItem) => void;
-  onRequestConnector: (item: ConnectorCatalogItem) => void;
   onSyncConnector: (connector: ConnectorItem) => void;
   onToggleConnectorStatus: (connector: ConnectorItem) => void;
   open: boolean;
@@ -316,7 +313,6 @@ export function ManageConnectorsDialog({
                                 onConnectConnector={onConnectConnector}
                                 onCreateConnector={onCreateConnector}
                                 onDisconnect={onDisconnectConnector}
-                                onRequestConnector={onRequestConnector}
                                 status={status}
                               />
                             );

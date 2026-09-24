@@ -84,6 +84,57 @@ test("loadGlobalModelGatewayConfig folds an inline target into a one-element tar
   ]);
 });
 
+test("parses configured display names and includes them in the version hash", async () => {
+  const config = baseConfig();
+  const original = await loadConfig(config);
+  config.gateways[0]!.displayName = "OpenRouter";
+  config.gateways[0]!.modelCatalog = {
+    enabled: true,
+    displayNameOverrides: { "openai/gpt-6-luna": "GPT 6 Luna" },
+  };
+  config.chatProfiles[0]!.displayName = "Configured chat";
+
+  const loaded = await loadConfig(config);
+  assert.equal(loaded?.gateways[0]?.displayName, "OpenRouter");
+  assert.equal(
+    loaded?.gateways[0]?.modelCatalog?.displayNameOverrides?.[
+      "openai/gpt-6-luna"
+    ],
+    "GPT 6 Luna",
+  );
+  assert.equal(loaded?.chatProfiles[0]?.displayName, "Configured chat");
+  assert.notEqual(loaded?.versionHash, original?.versionHash);
+});
+
+test("rejects invalid configured display names", async () => {
+  const config = baseConfig();
+  config.gateways[0]!.displayName = " ";
+  await assert.rejects(loadConfig(config), /gateways\[0\]\.displayName/);
+
+  config.gateways[0]!.displayName = "OpenRouter";
+  config.gateways[0]!.modelCatalog = {
+    enabled: true,
+    displayNameOverrides: { "openai/gpt-6-luna": " " },
+  };
+  await assert.rejects(
+    loadConfig(config),
+    /modelCatalog\.displayNameOverrides\.openai\/gpt-6-luna/,
+  );
+
+  config.gateways[0]!.modelCatalog = {
+    enabled: true,
+    displayNameOverrides: [],
+  };
+  await assert.rejects(
+    loadConfig(config),
+    /modelCatalog\.displayNameOverrides/,
+  );
+
+  delete config.gateways[0]!.modelCatalog;
+  config.chatProfiles[0]!.displayName = " ";
+  await assert.rejects(loadConfig(config), /chatProfiles\[0\]\.displayName/);
+});
+
 test("parses deployment modelCapabilities rules (override layer)", async () => {
   const config = baseConfig();
   config.modelCapabilities = [
