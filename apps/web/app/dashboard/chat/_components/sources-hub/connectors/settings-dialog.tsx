@@ -357,7 +357,10 @@ export function ConnectorSettingsDialog({
                     <p className="mt-1 text-sm font-medium text-foreground">
                       {latestSuccessfulSync
                         ? formatDisplayDate(
-                            new Date(latestSuccessfulSync.createdAt),
+                            new Date(
+                              latestSuccessfulSync.finishedAt ??
+                                latestSuccessfulSync.createdAt,
+                            ),
                             displayLocale,
                           )
                         : t("connectors.overview.never")}
@@ -389,6 +392,34 @@ export function ConnectorSettingsDialog({
                         : t("connectors.overview.notScheduled")}
                     </p>
                   </div>
+                  <div className="rounded-lg border bg-muted/20 p-3">
+                    <p className="text-[10px] text-muted-foreground">
+                      {t("connectors.overview.lastScheduledAttempt")}
+                    </p>
+                    <p className="mt-1 text-sm font-medium text-foreground">
+                      {connector.raw.scheduleStatus?.lastAttemptAt
+                        ? formatDisplayDate(
+                            new Date(
+                              connector.raw.scheduleStatus.lastAttemptAt,
+                            ),
+                            displayLocale,
+                          )
+                        : t("connectors.overview.never")}
+                    </p>
+                  </div>
+                  {connector.raw.scheduleStatus?.retryAt ? (
+                    <div className="rounded-lg border bg-muted/20 p-3">
+                      <p className="text-[10px] text-muted-foreground">
+                        {t("connectors.overview.nextRetry")}
+                      </p>
+                      <p className="mt-1 text-sm font-medium text-foreground">
+                        {formatDisplayDate(
+                          new Date(connector.raw.scheduleStatus.retryAt),
+                          displayLocale,
+                        )}
+                      </p>
+                    </div>
+                  ) : null}
                 </div>
                 {readiness ? (
                   <Alert>

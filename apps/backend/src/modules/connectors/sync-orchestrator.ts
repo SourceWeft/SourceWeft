@@ -12,13 +12,22 @@ import { requireConnectorWorkspace } from "./permissions";
 import {
   createSyncRunRecord,
   createSyncRunRecordIfNoActiveRun,
+  attachScheduleOccurrenceRun,
+  completeScheduleOccurrence,
+  commitConnectorSyncPage,
+  archiveConnectorSourcesNotSeenInRun,
   findSourceConnectorRecord,
   findSyncRunRecord,
+  getOrResetConnectorSyncState,
+  resetConnectorSyncState,
+  isConnectorScheduleEnabled,
+  skipScheduleOccurrenceByRunId,
+  tryAcquireConnectorSyncLock,
   hardDeleteSourceConnectorRecord,
   incrementSyncRunCounts,
   listSyncRunRecords,
   listWorkspaceSyncRunRecords,
-  touchConnectorScheduleAfterSync,
+  touchConnectorAfterSync,
   updateSourceConnectorRecord,
   updateSyncRunRecord,
 } from "./repository";
@@ -35,6 +44,46 @@ type RunnableConnectorStatus = "active" | "paused" | "error";
 
 function computeContentHash(value: string) {
   return createHash("sha256").update(value).digest("hex");
+}
+
+function canonicalJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalJson);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+        .map(([key, entry]) => [key, canonicalJson(entry)]),
+    );
+  }
+  return value;
+}
+
+function connectorScopeHash(type: string, config: Record<string, unknown>) {
+  return computeContentHash(
+    JSON.stringify({ type, config: canonicalJson(config) }),
+  );
+}
+
+/** Existing adapters explicitly use a full scan without a durable cursor. */
+async function* legacyDiscoveryPages(items: AsyncIterable<ConnectorItem>) {
+  for await (const item of items) {
+    yield {
+      items: [item],
+      deletedExternalIds: [],
+      continuation: null,
+      checkpoint: null,
+      complete: false,
+      reconcileMissing: false,
+    };
+  }
+  yield {
+    items: [],
+    deletedExternalIds: [],
+    continuation: null,
+    checkpoint: null,
+    complete: true,
+    reconcileMissing: false,
+  };
 }
 
 function normalizeSourceTitle(title: string) {
@@ -349,6 +398,8 @@ export class ConnectorSyncOrchestrator {
     workspaceId: string;
     connectorId: string;
     userId: string;
+    occurrenceId?: string;
+    existingRunId?: string | null;
     enqueue: (payload: {
       runId: string;
       teamId: string;
@@ -435,11 +486,32 @@ export class ConnectorSyncOrchestrator {
 
     let run;
     try {
-      run = await this.createScheduledRun({
-        teamId: input.teamId,
-        workspaceId: input.workspaceId,
-        connectorId: input.connectorId,
-      });
+      if (input.existingRunId) {
+        run = await findSyncRunRecord({
+          teamId: input.teamId,
+          workspaceId: input.workspaceId,
+          connectorId: input.connectorId,
+          runId: input.existingRunId,
+        });
+      } else {
+        const created = await createSyncRunRecordIfNoActiveRun({
+          teamId: input.teamId,
+          workspaceId: input.workspaceId,
+          connectorId: input.connectorId,
+          triggerType: "scheduled",
+          status: "queued",
+          createdBy: null,
+        });
+        if (created.existing) {
+          return {
+            run: created.run,
+            jobId: null,
+            skipped: true,
+            reason: "connector_already_running",
+          };
+        }
+        run = created.run;
+      }
     } catch (error) {
       if (isConnectorMissingError(error)) {
         return {
@@ -450,6 +522,20 @@ export class ConnectorSyncOrchestrator {
         };
       }
       throw error;
+    }
+    if (!run) {
+      return {
+        run: null,
+        jobId: null,
+        skipped: true,
+        reason: "run_missing",
+      };
+    }
+    if (input.occurrenceId) {
+      await attachScheduleOccurrenceRun({
+        occurrenceId: input.occurrenceId,
+        runId: run.id,
+      });
     }
     if (connector.status !== "active" || connector.lastError) {
       await updateSourceConnectorRecord({
@@ -537,6 +623,24 @@ export class ConnectorSyncOrchestrator {
       );
     }
     if (
+      run.triggerType === "scheduled" &&
+      run.status === "queued" &&
+      (connector.status === "paused" ||
+        !(await isConnectorScheduleEnabled(connector.id)))
+    ) {
+      const now = new Date();
+      const skipped = await updateSyncRunRecord({
+        ...input,
+        status: "skipped",
+        finishedAt: now,
+        heartbeatAt: now,
+        errorCode: "SCHEDULE_PAUSED",
+        errorMessage: "Scheduled sync was paused before execution",
+      });
+      await skipScheduleOccurrenceByRunId(run.id);
+      return skipped ?? run;
+    }
+    if (
       run.status === "succeeded" ||
       run.status === "failed" ||
       run.status === "skipped"
@@ -544,135 +648,265 @@ export class ConnectorSyncOrchestrator {
       return run;
     }
 
-    await updateSyncRunRecord({
-      ...input,
-      status: "running",
-      startedAt: new Date(),
-      heartbeatAt: new Date(),
-    });
-
-    let discoveredCount = 0;
-    let indexedCount = 0;
-    let failedCount = 0;
-    const itemFailures: Array<Record<string, unknown>> = [];
+    const releaseSyncLock = await tryAcquireConnectorSyncLock(connector.id);
+    if (!releaseSyncLock) {
+      throw new ConnectorError(
+        409,
+        "CONNECTOR_SYNC_ALREADY_RUNNING",
+        "Another sync is already running for this connector",
+      );
+    }
 
     try {
-      const adapter = this.registry.getAdapter(connector.connectorType);
-      const accessToken = await this.oauthService.getRuntimeToken({
-        teamId: input.teamId,
-        workspaceId: input.workspaceId,
-        accountId: connector.oauthAccountId,
-        connectorType: connector.connectorType,
-      });
-      const targetExternalIdSet = input.targetExternalIds?.length
-        ? new Set(input.targetExternalIds)
-        : null;
-
-      for await (const item of adapter.discover({
-        teamId: input.teamId,
-        workspaceId: input.workspaceId,
-        connectorId: connector.id,
-        connectorType: connector.connectorType,
-        connectorName: connector.name,
-        config: connector.configJson,
-        accessToken,
-      })) {
-        if (targetExternalIdSet && !targetExternalIdSet.has(item.externalId)) {
-          continue;
-        }
-        discoveredCount += 1;
-        await incrementSyncRunCounts({
-          ...input,
-          discoveredDelta: 1,
-        });
-
-        try {
-          const indexed = await this.upsertItem({
-            teamId: input.teamId,
-            workspaceId: input.workspaceId,
-            connectorId: connector.id,
-            connectorType: connector.connectorType,
-            connectorName: connector.name,
-            config: connector.configJson,
-            runId: input.runId,
-            userId: input.userId,
-            accessToken,
-            item,
-          });
-          if (indexed) {
-            indexedCount += 1;
-            await incrementSyncRunCounts({
-              ...input,
-              indexedDelta: 1,
-            });
-          }
-        } catch (error) {
-          failedCount += 1;
-          const summary = asErrorSummary(error);
-          itemFailures.push({
-            externalId: item.externalId,
-            ...summary,
-          });
-          await incrementSyncRunCounts({
-            ...input,
-            failedDelta: 1,
-            metadataPatch: {
-              itemFailures: itemFailures.slice(-20),
-            },
-          });
-        }
-      }
-
-      const now = new Date();
-      const finalRun = await updateSyncRunRecord({
-        ...input,
-        status: "succeeded",
-        discoveredCount,
-        indexedCount,
-        failedCount,
-        metadataJson: itemFailures.length ? { itemFailures } : {},
-        finishedAt: now,
-        heartbeatAt: now,
-      });
-      await touchConnectorScheduleAfterSync({
-        teamId: input.teamId,
-        workspaceId: input.workspaceId,
-        connectorId: connector.id,
-        lastIndexedAt: now,
-        frequencyMinutes: connector.periodicIndexingEnabled
-          ? connector.indexingFrequencyMinutes
-          : null,
-        status: finalConnectorStatusAfterSync(connector.status),
-        lastError: null,
-      });
-      return finalRun;
-    } catch (error) {
-      const summary = asErrorSummary(error);
-      const now = new Date();
       await updateSyncRunRecord({
         ...input,
-        status: "failed",
-        discoveredCount,
-        indexedCount,
-        failedCount,
-        errorCode: summary.code,
-        errorMessage: summary.message,
-        metadataJson: itemFailures.length ? { itemFailures } : {},
-        finishedAt: now,
-        heartbeatAt: now,
+        status: "running",
+        startedAt: new Date(),
+        heartbeatAt: new Date(),
       });
-      await touchConnectorScheduleAfterSync({
-        teamId: input.teamId,
-        workspaceId: input.workspaceId,
-        connectorId: connector.id,
-        lastIndexedAt: now,
-        frequencyMinutes: connector.periodicIndexingEnabled
-          ? connector.indexingFrequencyMinutes
-          : null,
-        status: connector.status === "paused" ? "paused" : "error",
-        lastError: summary.message,
-      });
-      throw error;
+
+      let discoveredCount = 0;
+      let indexedCount = 0;
+      let failedCount = 0;
+      const itemFailures: Array<Record<string, unknown>> = [];
+
+      try {
+        const adapter = this.registry.getAdapter(connector.connectorType);
+        const accessToken = await this.oauthService.getRuntimeToken({
+          teamId: input.teamId,
+          workspaceId: input.workspaceId,
+          accountId: connector.oauthAccountId,
+          connectorType: connector.connectorType,
+        });
+        const targetExternalIdSet = input.targetExternalIds?.length
+          ? new Set(input.targetExternalIds)
+          : null;
+
+        const scopeHash = connectorScopeHash(
+          connector.connectorType,
+          connector.configJson,
+        );
+        const syncState = adapter.discoverPages
+          ? await getOrResetConnectorSyncState({
+              connectorId: connector.id,
+              scopeHash,
+            })
+          : null;
+        let syncGeneration = syncState?.generation ?? 0;
+        const discoveryInput = {
+          teamId: input.teamId,
+          workspaceId: input.workspaceId,
+          connectorId: connector.id,
+          connectorType: connector.connectorType,
+          connectorName: connector.name,
+          config: connector.configJson,
+          accessToken,
+          ...(syncState
+            ? {
+                cursor: {
+                  committed: syncState.committedCursorJson,
+                  continuation: syncState.pageCursorJson,
+                },
+              }
+            : {}),
+        };
+        const pages = adapter.discoverPages
+          ? adapter.discoverPages(discoveryInput)
+          : legacyDiscoveryPages(adapter.discover(discoveryInput));
+        let completedDiscovery = false;
+        const allowsDeletion = adapter
+          .getManifest()
+          .sync.resources.some((resource) => resource.supportsDeleteDetection);
+        for await (const page of pages) {
+          let pageFailures = 0;
+          for (const item of page.items) {
+            if (
+              targetExternalIdSet &&
+              !targetExternalIdSet.has(item.externalId)
+            ) {
+              continue;
+            }
+            discoveredCount += 1;
+            await incrementSyncRunCounts({
+              ...input,
+              discoveredDelta: 1,
+            });
+
+            try {
+              const indexed = await this.upsertItem({
+                teamId: input.teamId,
+                workspaceId: input.workspaceId,
+                connectorId: connector.id,
+                connectorType: connector.connectorType,
+                connectorName: connector.name,
+                config: connector.configJson,
+                runId: input.runId,
+                userId: input.userId,
+                accessToken,
+                item,
+              });
+              if (indexed) {
+                indexedCount += 1;
+                await incrementSyncRunCounts({
+                  ...input,
+                  indexedDelta: 1,
+                });
+              }
+            } catch (error) {
+              failedCount += 1;
+              pageFailures += 1;
+              const summary = asErrorSummary(error);
+              itemFailures.push({
+                externalId: item.externalId,
+                ...summary,
+              });
+              await incrementSyncRunCounts({
+                ...input,
+                failedDelta: 1,
+                metadataPatch: {
+                  itemFailures: itemFailures.slice(-20),
+                },
+              });
+            }
+          }
+          if (pageFailures > 0) {
+            throw new ConnectorError(
+              502,
+              "CONNECTOR_PAGE_INCOMPLETE",
+              `${pageFailures} connector items failed; the page will be replayed`,
+            );
+          }
+          if (page.deletedExternalIds?.length) {
+            if (!allowsDeletion) {
+              throw new ConnectorError(
+                500,
+                "CONNECTOR_DELETE_UNSUPPORTED",
+                "Adapter reported deletions without declaring delete detection",
+              );
+            }
+            for (const externalId of page.deletedExternalIds) {
+              const source = await findSourceRecordByConnectorExternalId({
+                teamId: input.teamId,
+                workspaceId: input.workspaceId,
+                connectorId: connector.id,
+                externalId,
+              });
+              if (source) {
+                await updateSourceRecord({
+                  teamId: input.teamId,
+                  workspaceId: input.workspaceId,
+                  sourceId: source.id,
+                  status: "archived",
+                });
+              }
+            }
+          }
+          if (page.reconcileMissing) {
+            if (!page.complete || !allowsDeletion || targetExternalIdSet) {
+              throw new ConnectorError(
+                500,
+                "CONNECTOR_RECONCILIATION_INVALID",
+                "Full reconciliation requires a complete unrestricted scan with delete detection",
+              );
+            }
+            await archiveConnectorSourcesNotSeenInRun({
+              teamId: input.teamId,
+              workspaceId: input.workspaceId,
+              connectorId: connector.id,
+              runId: input.runId,
+            });
+          }
+          if (syncState) {
+            const committed = await commitConnectorSyncPage({
+              connectorId: connector.id,
+              scopeHash,
+              expectedGeneration: syncGeneration,
+              continuation: page.continuation,
+              checkpoint: page.checkpoint,
+              complete: page.complete,
+            });
+            syncGeneration = committed.generation;
+          }
+          if (page.complete) completedDiscovery = true;
+        }
+        if (!completedDiscovery) {
+          throw new ConnectorError(
+            502,
+            "CONNECTOR_DISCOVERY_INCOMPLETE",
+            "Connector discovery ended without a completed page",
+          );
+        }
+
+        const now = new Date();
+        const finalRun = await updateSyncRunRecord({
+          ...input,
+          status: failedCount === 0 ? "succeeded" : "failed",
+          discoveredCount,
+          indexedCount,
+          failedCount,
+          metadataJson: itemFailures.length ? { itemFailures } : {},
+          finishedAt: now,
+          heartbeatAt: now,
+        });
+        await touchConnectorAfterSync({
+          teamId: input.teamId,
+          workspaceId: input.workspaceId,
+          connectorId: connector.id,
+          lastIndexedAt: now,
+          status:
+            failedCount === 0
+              ? finalConnectorStatusAfterSync(connector.status)
+              : "error",
+          lastError:
+            failedCount === 0 ? null : `${failedCount} connector items failed`,
+        });
+        await completeScheduleOccurrence({
+          runId: input.runId,
+          succeeded: failedCount === 0,
+          errorCode: failedCount ? "CONNECTOR_ITEMS_FAILED" : null,
+        });
+        return finalRun;
+      } catch (error) {
+        const summary = asErrorSummary(error);
+        if (summary.code === "CONNECTOR_CURSOR_EXPIRED") {
+          await resetConnectorSyncState({
+            connectorId: connector.id,
+            scopeHash: connectorScopeHash(
+              connector.connectorType,
+              connector.configJson,
+            ),
+          });
+        }
+        const now = new Date();
+        await updateSyncRunRecord({
+          ...input,
+          status: "failed",
+          discoveredCount,
+          indexedCount,
+          failedCount,
+          errorCode: summary.code,
+          errorMessage: summary.message,
+          metadataJson: itemFailures.length ? { itemFailures } : {},
+          finishedAt: now,
+          heartbeatAt: now,
+        });
+        await touchConnectorAfterSync({
+          teamId: input.teamId,
+          workspaceId: input.workspaceId,
+          connectorId: connector.id,
+          lastIndexedAt: now,
+          status: connector.status === "paused" ? "paused" : "error",
+          lastError: summary.message,
+        });
+        await completeScheduleOccurrence({
+          runId: input.runId,
+          succeeded: false,
+          errorCode: summary.code,
+        });
+        throw error;
+      }
+    } finally {
+      await releaseSyncLock();
     }
   }
 
@@ -700,6 +934,7 @@ export class ConnectorSyncOrchestrator {
         teamId: input.teamId,
         workspaceId: input.workspaceId,
         sourceId: existing.id,
+        status: "indexed",
         title: normalizeSourceTitle(input.item.title),
         syncRunId: input.runId,
         externalUri: input.item.externalUri,
@@ -751,6 +986,7 @@ export class ConnectorSyncOrchestrator {
         teamId: input.teamId,
         workspaceId: input.workspaceId,
         sourceId: existing.id,
+        status: "indexed",
         title,
         syncRunId: input.runId,
         externalId: extracted.item.externalId,
