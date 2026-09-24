@@ -10,6 +10,7 @@ export type ConnectorOAuthCompletionMessage = {
   accountId: string | null;
   status: "success" | "error";
   error?: string | null;
+  gmailMode?: "tools" | "index" | "both";
   createdAt: string;
 };
 
@@ -53,7 +54,12 @@ export function parseConnectorOAuthCompletionMessage(
     accountId: maybe.accountId,
     status: maybe.status,
     error: typeof maybe.error === "string" ? maybe.error : null,
+    gmailMode:
+      maybe.gmailMode === "tools" ||
+      maybe.gmailMode === "index" ||
+      maybe.gmailMode === "both"
+        ? maybe.gmailMode
+        : undefined,
     createdAt: maybe.createdAt,
   };
 }
-

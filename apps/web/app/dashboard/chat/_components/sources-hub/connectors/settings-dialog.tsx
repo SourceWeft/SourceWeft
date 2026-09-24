@@ -258,10 +258,16 @@ export function ConnectorSettingsDialog({
     Number.isInteger(parsedGmailLimit) &&
     parsedGmailLimit >= 1 &&
     parsedGmailLimit <= 10000;
+  const validGmailScope =
+    !gmailIndexing ||
+    (gmailLabelIds.length > 0 &&
+      gmailAfter.length > 0 &&
+      Number.isFinite(Date.parse(gmailAfter)));
   const isSettingsValid =
     settingsName.trim().length > 0 &&
     (frequencyValue !== "custom" || hasValidCustomFrequency) &&
     (connector.raw.connectorType !== "gmail" || validGmailLimit) &&
+    (connector.raw.connectorType !== "gmail" || validGmailScope) &&
     (connector.raw.connectorType !== "gmail" ||
       gmailIndexing ||
       frequencyValue === "manual");
@@ -291,6 +297,10 @@ export function ConnectorSettingsDialog({
   function handleSaveSettings() {
     const currentConnector = connector;
     if (!currentConnector) {
+      return;
+    }
+    if (currentConnector.raw.connectorType === "gmail" && !validGmailScope) {
+      toast.error(t("connectors.gmail.scopeRequired"));
       return;
     }
     if (!isSettingsValid) {
@@ -615,6 +625,11 @@ export function ConnectorSettingsDialog({
                           </p>
                           {gmailIndexing ? (
                             <>
+                              {!validGmailScope ? (
+                                <p className="text-xs text-destructive">
+                                  {t("connectors.gmail.scopeRequired")}
+                                </p>
+                              ) : null}
                               <label className="block space-y-1.5 text-xs">
                                 <span>{t("connectors.gmail.after")}</span>
                                 <Input

@@ -2685,13 +2685,33 @@
       },
       "settingsDescription": "連接器設定、執行歷史和提供方事件。",
       "gmail": {
+        "modeTitle": "選擇 Gmail 用途",
+        "modeDescription": "連接前選擇初始模式，之後仍可在連接器設定中修改。",
+        "mode": {
+          "tools": {
+            "title": "僅工具",
+            "description": "即時搜尋和讀取郵件，不把郵件存入工作區資料源。"
+          },
+          "index": {
+            "title": "僅索引",
+            "description": "連接後先選擇標籤、起始日期和數量上限；關閉即時搜尋。"
+          },
+          "both": {
+            "title": "工具和索引",
+            "description": "使用即時郵件工具，並單獨索引限定範圍的郵件。"
+          }
+        },
+        "modeScopeNote": "所有模式都會向 Google 申請讀取和傳送權限；每封郵件傳送前都必須審核。",
+        "modeCancel": "取消",
+        "modeContinue": "繼續前往 Google",
         "liveSearch": "即時搜尋 Gmail",
         "indexMail": "將選定郵件索引到此工作區",
         "indexNotice": "索引會將選定郵件內容存入工作區資料源。關閉索引會使保留的郵件不再參與代理檢索；刪除連接器可移除儲存副本。定期同步需另行選擇。",
-        "after": "起始日期（選填）",
+        "after": "起始日期（索引必填）",
         "maxMessages": "最多索引郵件數",
-        "labels": "標籤（不選則包含所有郵件）",
-        "labelsNote": "標籤用於篩選匯入範圍；已索引郵件統一顯示在「郵件」目錄。",
+        "labels": "標籤（索引時至少選擇一個）",
+        "labelsNote": "同步前請選擇標籤和起始日期；已索引郵件統一顯示在「郵件」目錄。",
+        "scopeRequired": "啟用索引前，請選擇至少一個標籤和起始日期。",
         "labelsLoadFailed": "無法載入 Gmail 標籤。"
       },
       "settingsTab": {
