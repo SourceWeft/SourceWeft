@@ -69,7 +69,7 @@ export function McpSkeletonGrid() {
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
       {Array.from({ length: 8 }).map((_, index) => (
         <article
-          className="flex h-[286px] flex-col rounded-2xl border border-border bg-background p-4 shadow-xs"
+          className="flex min-h-[286px] flex-col rounded-2xl border border-border bg-background p-4 shadow-xs"
           key={index}
         >
           <div className="flex items-center gap-3">
