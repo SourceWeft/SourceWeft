@@ -229,14 +229,16 @@ export function mergeGlobalProfileConfigJson(input: {
   if (input.entry.supportsImageInput !== undefined) {
     protectedFields.push("supportsImageInput");
   }
+  const existingFields: Record<string, unknown> =
+    stripFormerlyProtectedProfileConfigFields(
+      input.existingConfigJson,
+      protectedFields,
+    );
+  // Configured names are authoritative. Removing one must restore the catalog
+  // or alias fallback instead of retaining the previously synced label.
+  delete existingFields.displayName;
   return withProtectedProfileConfigFields(
-    {
-      ...stripFormerlyProtectedProfileConfigFields(
-        input.existingConfigJson,
-        protectedFields,
-      ),
-      ...globalConfigJson,
-    },
+    { ...existingFields, ...globalConfigJson },
     protectedFields,
   );
 }
@@ -494,7 +496,15 @@ async function loadDynamicCatalogProfiles(input: {
         kinds: catalog.kinds,
       });
       const profiles = candidates.map((candidate) =>
-        toDynamicProfileEntry({ gateway, candidate }),
+        toDynamicProfileEntry({
+          gateway,
+          candidate: {
+            ...candidate,
+            displayName:
+              catalog.displayNameOverrides?.[candidate.modelId] ??
+              candidate.displayName,
+          },
+        }),
       );
       entries.push(...profiles);
     } catch (error) {
@@ -810,6 +820,7 @@ export async function syncGlobalModelGatewayConfigFromFile(
 
       const gatewayConfigJson = {
         providerName: entry.providerName,
+        displayName: entry.displayName ?? null,
         providerKind: entry.providerKind,
         supports: entry.supports,
         apiKeySource: entry.apiKeyEnv ?? null,
@@ -883,6 +894,7 @@ export async function syncGlobalModelGatewayConfigFromFile(
           isActive: entry.activation.enabled,
           capabilitiesJson: providerConfig.supports,
           configJson: {
+            displayName: entry.displayName ?? null,
             timeoutMs: resolveModelGatewayTimeoutMs(entry.timeoutMs),
             maxRetries: resolveModelGatewayMaxRetries(entry.maxRetries),
             isBYOK: entry.isBYOK,

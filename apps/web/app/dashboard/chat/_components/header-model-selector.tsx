@@ -53,6 +53,7 @@ import {
   type ByokProviderOption,
   type ByokSavedModelItem,
 } from "./byok-state";
+import { catalogProviderLabel } from "./model-catalog-utils";
 
 export type ModelType = "llm" | "image" | "vision";
 
@@ -140,6 +141,7 @@ type CatalogModelEntry = {
   availableViaGlobal?: boolean;
   availableViaByokProviders?: string[];
   providerName?: string | null;
+  providerDisplayName?: string | null;
   providerKind?: string | null;
   targetModel?: string | null;
   capabilities?: ModelThinkingCapabilities;
@@ -216,7 +218,7 @@ function mapCatalogEntryToModelItem(
     : normalizeProviderSlug(rawProvider);
   const providerLabel = isGlobalAutoModel
     ? t("modelSelector.globalModels")
-    : toProviderLabel(rawProvider);
+    : catalogProviderLabel(entry.providerDisplayName, rawProvider);
   const displayName = entry.displayName.trim() || entry.modelAlias;
   const subtitle =
     entry.subtitle.trim() || entry.targetModel?.trim() || entry.modelAlias;

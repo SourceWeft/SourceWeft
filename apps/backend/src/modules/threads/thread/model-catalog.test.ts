@@ -19,6 +19,7 @@ function fullEntry(index: number) {
     isDefault: index === 0,
     isActive: true,
     providerName: "provider",
+    providerDisplayName: "Provider",
     providerKind: "openai-compatible",
     targetModel: `provider/model-${index}`,
     availableViaGlobal: true,
@@ -53,6 +54,7 @@ test("selector projection keeps UI capabilities and removes billing fields", () 
   const row = projected.kinds.llm[0] as Record<string, unknown>;
 
   assert.equal(row.profileAlias, "profile-0");
+  assert.equal(row.providerDisplayName, "Provider");
   assert.equal(
     (row.capabilities as { supportsThinking: boolean }).supportsThinking,
     true,

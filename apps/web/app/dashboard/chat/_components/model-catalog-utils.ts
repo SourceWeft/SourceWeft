@@ -117,6 +117,7 @@ type CatalogModelEntry = {
   availableViaGlobal?: boolean;
   availableViaByokProviders?: string[];
   providerName?: string | null;
+  providerDisplayName?: string | null;
   providerKind?: string | null;
   targetModel?: string | null;
   capabilities?: ModelThinkingCapabilities;
@@ -153,6 +154,13 @@ export function toProviderLabel(value: string) {
     .join(" ");
 
   return label.length > 0 ? label : "Models";
+}
+
+export function catalogProviderLabel(
+  displayName: string | null | undefined,
+  providerName: string,
+) {
+  return displayName?.trim() || toProviderLabel(providerName);
 }
 
 const GLOBAL_AUTO_MODEL_ALIASES = new Set([
@@ -197,7 +205,7 @@ function mapCatalogEntryToModelItem(
     : normalizeProviderSlug(rawProvider);
   const providerLabel = isGlobalAutoModel
     ? t("modelSelector.globalModels")
-    : toProviderLabel(rawProvider);
+    : catalogProviderLabel(entry.providerDisplayName, rawProvider);
   const displayName = entry.displayName.trim() || entry.modelAlias;
   const subtitle =
     entry.subtitle.trim() || entry.targetModel?.trim() || entry.modelAlias;
