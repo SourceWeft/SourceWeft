@@ -203,6 +203,7 @@ export class ConnectorService {
     workspaceId: string;
     userId: string;
     connectorId: string;
+    oauthAccountId?: string;
     name?: string;
     configJson?: Record<string, unknown>;
     status?: Extract<ConnectorStatus, "active" | "paused" | "disabled">;
@@ -225,6 +226,43 @@ export class ConnectorService {
         "CONNECTOR_NOT_FOUND",
         "Connector not found",
       );
+    }
+    if (
+      input.oauthAccountId &&
+      input.oauthAccountId !== current.oauthAccountId
+    ) {
+      if (current.connectorType !== "gmail") {
+        throw new ConnectorError(
+          400,
+          "CONNECTOR_OAUTH_REBIND_UNSUPPORTED",
+          "Account rebinding is not supported for this connector",
+        );
+      }
+      const nextAccount = await findOAuthAccountRecord({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        accountId: input.oauthAccountId,
+      });
+      const currentAccount = current.oauthAccountId
+        ? await findOAuthAccountRecord({
+            teamId: workspace.organizationId,
+            workspaceId: workspace.id,
+            accountId: current.oauthAccountId,
+          })
+        : null;
+      if (
+        !nextAccount ||
+        nextAccount.status !== "active" ||
+        nextAccount.connectorType !== current.connectorType ||
+        (currentAccount?.providerAccountId &&
+          nextAccount.providerAccountId !== currentAccount.providerAccountId)
+      ) {
+        throw new ConnectorError(
+          409,
+          "CONNECTOR_OAUTH_ACCOUNT_MISMATCH",
+          "Reconnect with the same provider account in this workspace",
+        );
+      }
     }
 
     const manifest = this.registry.getManifest(current.connectorType);
@@ -267,6 +305,7 @@ export class ConnectorService {
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
       connectorId: input.connectorId,
+      oauthAccountId: input.oauthAccountId,
       name: input.name,
       configJson: input.configJson === undefined ? undefined : nextConfig,
       status: input.status,

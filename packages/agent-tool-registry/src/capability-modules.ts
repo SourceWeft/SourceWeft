@@ -35,6 +35,8 @@ export const BUILTIN_CAPABILITY_MODULES: Record<
 > = {
   "@sourceweft/builtin-connector-notion": () =>
     import("@sourceweft/builtin-connector-notion"),
+  "@sourceweft/builtin-connector-gmail": () =>
+    import("@sourceweft/builtin-connector-gmail"),
   "@sourceweft/builtin-retrieval": () =>
     import("@sourceweft/builtin-retrieval"),
   "@sourceweft/builtin-skill-ppt-deck": () =>
@@ -53,6 +55,8 @@ export const BUILTIN_CAPABILITY_MODULES: Record<
     import("@sourceweft/sandbox-provider-cloudflare"),
 };
 
-export function loadBuiltinCapabilityModule(packageName: string | null | undefined) {
+export function loadBuiltinCapabilityModule(
+  packageName: string | null | undefined,
+) {
   return packageName ? BUILTIN_CAPABILITY_MODULES[packageName] : undefined;
 }

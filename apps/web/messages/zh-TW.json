@@ -2694,6 +2694,16 @@
         "Publishing": "發布"
       },
       "settingsDescription": "連接器設定、執行歷史和提供方事件。",
+      "gmail": {
+        "liveSearch": "即時搜尋 Gmail",
+        "indexMail": "將選定郵件索引到此工作區",
+        "indexNotice": "索引會將選定郵件內容存入工作區資料源。需手動開啟；定期同步需另行選擇。",
+        "after": "起始日期（選填）",
+        "maxMessages": "最多索引郵件數",
+        "labels": "標籤（不選則包含所有郵件）",
+        "labelsNote": "標籤用於篩選匯入範圍；已索引郵件統一顯示在「郵件」目錄。",
+        "labelsLoadFailed": "無法載入 Gmail 標籤。"
+      },
       "settingsTab": {
         "overview": "概覽",
         "configuration": "設定",

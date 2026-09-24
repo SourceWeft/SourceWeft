@@ -563,6 +563,35 @@ export function useConnectors(input: {
           connector.status !== "disabled",
       );
       if (current) {
+        if (
+          item.id === "gmail" &&
+          accountId &&
+          current.raw.oauthAccountId !== accountId
+        ) {
+          try {
+            const updated = await connectorsClient.update(
+              workspaceId,
+              current.id,
+              {
+                oauthAccountId: accountId,
+                status: "active",
+              },
+            );
+            await refreshConnectors();
+            toast.success(
+              t("toasts.connectors.connectedFallback", { name: item.name }),
+            );
+            return mapConnectorToUi(updated.connector, t, displayLocale);
+          } catch (error) {
+            toast.error(
+              getErrorMessage(
+                error,
+                t("toasts.connectors.authFailed", { name: item.name }),
+              ),
+            );
+            return null;
+          }
+        }
         clearConnectorReadiness(current.id);
         setConnectorWaiting(item.id, false);
         return current;
@@ -605,7 +634,7 @@ export function useConnectors(input: {
             return null;
           }
 
-          if (item.id !== "notion") {
+          if (item.id !== "notion" && item.id !== "gmail") {
             toast.info(
               t("toasts.connectors.connectedConfigureNext", {
                 name: item.name,
@@ -616,15 +645,28 @@ export function useConnectors(input: {
           }
 
           const created = await connectorsClient.create(workspaceId, {
-            connectorType: "notion",
-            name: account.displayName || "Notion",
+            connectorType: item.id,
+            name: account.displayName || item.name,
             oauthAccountId: account.id,
-            configJson: {
-              includePages: true,
-            },
-            periodicIndexingEnabled: true,
-            indexingFrequencyMinutes: 360,
+            configJson:
+              item.id === "gmail"
+                ? {
+                    liveSearchEnabled: true,
+                    indexingEnabled: false,
+                    labelIds: [],
+                    maxMessages: 500,
+                  }
+                : { includePages: true },
+            periodicIndexingEnabled: item.id === "notion",
+            ...(item.id === "notion" ? { indexingFrequencyMinutes: 360 } : {}),
           });
+          if (item.id === "gmail") {
+            await refreshConnectors();
+            toast.success(
+              t("toasts.connectors.connectedFallback", { name: item.name }),
+            );
+            return mapConnectorToUi(created.connector, t, displayLocale);
+          }
           const syncResult = await connectorsClient.sync(
             workspaceId,
             created.connector.id,
@@ -986,6 +1028,7 @@ export function useConnectors(input: {
         name: string;
         periodicIndexingEnabled: boolean;
         indexingFrequencyMinutes: number | null;
+        configJson?: Record<string, unknown>;
       },
     ) => {
       if (!workspaceId) return;

@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { ConnectorError, toConnectorError } from "./errors";
 import { validateObjectWithJsonSchema } from "./config-validation";
 import { requireConnectorWorkspace } from "./permissions";
@@ -16,6 +16,86 @@ import { ConnectorRegistry, connectorRegistry } from "./registry";
 import { buildRequestPreview, redactConnectorSecrets } from "./security";
 import { logger } from "../../shared/logger";
 import { jsonValuesEqual, stableJsonStringify } from "./json-compare";
+import {
+  decryptTeamSecret,
+  encryptTeamSecret,
+} from "../../shared/team-secrets";
+import { findOAuthAccountRecord } from "./repository";
+import { config } from "../../shared/config";
+
+const ENCRYPTED_REQUEST_KEY = "__connectorEncryptedRequest";
+const BOUND_ACCOUNT_KEY = "__connectorOAuthAccountId";
+const REQUEST_HASH_KEY = "__connectorRequestHash";
+
+function privateRequestDigest(
+  teamId: string,
+  request: Record<string, unknown>,
+) {
+  return createHmac("sha256", config.modelGatewayEncryptionSecret)
+    .update(teamId)
+    .update(stableJsonStringify(request))
+    .digest("hex");
+}
+
+function privateRequestMatches(
+  stored: Record<string, unknown>,
+  request: Record<string, unknown>,
+  teamId: string,
+) {
+  return stored[REQUEST_HASH_KEY] === privateRequestDigest(teamId, request);
+}
+
+async function storeRequest(input: {
+  teamId: string;
+  oauthAccountId: string | null;
+  privacy: "plain" | "encrypted";
+  request: Record<string, unknown>;
+}) {
+  if (input.privacy === "plain") {
+    return redactConnectorSecrets(input.request) as Record<string, unknown>;
+  }
+  if (!input.oauthAccountId) {
+    throw new ConnectorError(
+      409,
+      "CONNECTOR_ACCOUNT_REQUIRED",
+      "Connector account is required",
+    );
+  }
+  return {
+    [ENCRYPTED_REQUEST_KEY]: await encryptTeamSecret(
+      stableJsonStringify(input.request),
+      input.teamId,
+    ),
+    [BOUND_ACCOUNT_KEY]: input.oauthAccountId,
+    [REQUEST_HASH_KEY]: privateRequestDigest(input.teamId, input.request),
+  };
+}
+
+async function loadRequest(input: {
+  teamId: string;
+  oauthAccountId: string | null;
+  stored: Record<string, unknown>;
+}) {
+  const encrypted = input.stored[ENCRYPTED_REQUEST_KEY];
+  if (typeof encrypted !== "string") return input.stored;
+  if (input.stored[BOUND_ACCOUNT_KEY] !== input.oauthAccountId) {
+    throw new ConnectorError(
+      409,
+      "CONNECTOR_ACCOUNT_CHANGED",
+      "Connector account changed after approval",
+    );
+  }
+  const plain = await decryptTeamSecret(encrypted, input.teamId);
+  const request = JSON.parse(plain) as Record<string, unknown>;
+  if (!privateRequestMatches(input.stored, request, input.teamId)) {
+    throw new ConnectorError(
+      409,
+      "CONNECTOR_ACTION_APPROVAL_MISMATCH",
+      "Approved request changed",
+    );
+  }
+  return request;
+}
 
 function buildActionIdempotencyKey(input: {
   connectorId: string;
@@ -103,7 +183,11 @@ export class ConnectorActionRunner {
       connectorId: input.connectorId,
     });
     if (!connector || connector.status === "disabled") {
-      throw new ConnectorError(404, "CONNECTOR_NOT_FOUND", "Connector not found");
+      throw new ConnectorError(
+        404,
+        "CONNECTOR_NOT_FOUND",
+        "Connector not found",
+      );
     }
     const manifest = this.registry.getManifest(connector.connectorType);
     const actionSpec = manifest.actions.find(
@@ -116,22 +200,49 @@ export class ConnectorActionRunner {
         "Connector action is not supported",
       );
     }
+    if (actionSpec.type === "gmail.message.send") {
+      const account = connector.oauthAccountId
+        ? await findOAuthAccountRecord({
+            teamId: workspace.organizationId,
+            workspaceId: workspace.id,
+            accountId: connector.oauthAccountId,
+          })
+        : null;
+      if (
+        !account?.scopes.includes("https://www.googleapis.com/auth/gmail.send")
+      ) {
+        throw new ConnectorError(
+          403,
+          "GMAIL_SEND_SCOPE_MISSING",
+          "Gmail sending permission is missing",
+        );
+      }
+    }
     validateObjectWithJsonSchema({
       schema: actionSpec.inputSchema,
       value: input.requestJson,
       label: "requestJson",
     });
 
-    const redactedRequest = redactConnectorSecrets(
-      input.requestJson,
-    ) as Record<string, unknown>;
+    const privateRequest = actionSpec.requestPrivacy === "encrypted";
+    const storedRequest = await storeRequest({
+      teamId: workspace.organizationId,
+      oauthAccountId: connector.oauthAccountId,
+      privacy: privateRequest ? "encrypted" : "plain",
+      request: input.requestJson,
+    });
     const idempotencyKey =
       input.idempotencyKey ??
-      buildActionIdempotencyKey({
-        connectorId: connector.id,
-        actionType: input.actionType,
-        request: redactedRequest,
-      });
+      (privateRequest
+        ? `connector-action:${connector.id}:${input.actionType}:${privateRequestDigest(
+            workspace.organizationId,
+            input.requestJson,
+          )}`
+        : buildActionIdempotencyKey({
+            connectorId: connector.id,
+            actionType: input.actionType,
+            request: input.requestJson,
+          }));
     for (let attempt = 0; attempt < 10; attempt += 1) {
       const proposalIdempotencyKey = nextActionProposalIdempotencyKey({
         attempt,
@@ -147,12 +258,20 @@ export class ConnectorActionRunner {
         input.agentToolName ?? actionSpec.agentToolName ?? null;
       if (
         existingAction?.status === "proposed" &&
-        isSameActionProposal({
-          action: existingAction,
-          actionType: input.actionType,
-          agentToolName,
-          requestJson: redactedRequest,
-        })
+        (privateRequest
+          ? existingAction.actionType === input.actionType &&
+            (existingAction.agentToolName ?? null) === agentToolName &&
+            privateRequestMatches(
+              existingAction.requestJson,
+              input.requestJson,
+              workspace.organizationId,
+            )
+          : isSameActionProposal({
+              action: existingAction,
+              actionType: input.actionType,
+              agentToolName,
+              requestJson: storedRequest,
+            }))
       ) {
         return { action: existingAction };
       }
@@ -169,13 +288,15 @@ export class ConnectorActionRunner {
         agentToolName,
         riskLevel: actionSpec.riskLevel,
         status: "proposed",
-        requestJson: redactedRequest,
+        requestJson: storedRequest,
         requestPreview:
           input.requestPreview ??
-          buildRequestPreview({
-            actionType: input.actionType,
-            request: redactedRequest,
-          }),
+          (privateRequest
+            ? "Review the exact message and recipients before sending"
+            : buildRequestPreview({
+                actionType: input.actionType,
+                request: storedRequest,
+              })),
         idempotencyKey: proposalIdempotencyKey,
       });
       if (action.status === "proposed") {
@@ -367,7 +488,13 @@ export class ConnectorActionRunner {
     }
     if (
       input.expected?.requestJson &&
-      !jsonValuesEqual(action.requestJson, input.expected.requestJson)
+      !(typeof action.requestJson[ENCRYPTED_REQUEST_KEY] === "string"
+        ? privateRequestMatches(
+            action.requestJson,
+            input.expected.requestJson,
+            workspace.organizationId,
+          )
+        : jsonValuesEqual(action.requestJson, input.expected.requestJson))
     ) {
       throw new ConnectorError(
         409,
@@ -376,16 +503,19 @@ export class ConnectorActionRunner {
       );
     }
     if (action.status === "succeeded" || action.status === "running") {
-      logger.debug("Connector action execution skipped for terminal or running status", {
-        ...connectorActionExecutionMeta({
-          ...lookup,
-          actionType: action.actionType,
-          agentToolName: action.agentToolName,
-          connectorType: action.connectorType,
-          userId: input.userId,
-        }),
-        status: action.status,
-      });
+      logger.debug(
+        "Connector action execution skipped for terminal or running status",
+        {
+          ...connectorActionExecutionMeta({
+            ...lookup,
+            actionType: action.actionType,
+            agentToolName: action.agentToolName,
+            connectorType: action.connectorType,
+            userId: input.userId,
+          }),
+          status: action.status,
+        },
+      );
       return { action };
     }
     if (action.status !== "approved") {
@@ -407,6 +537,38 @@ export class ConnectorActionRunner {
         "Connector is not active",
       );
     }
+    const privateRequest =
+      typeof action.requestJson[ENCRYPTED_REQUEST_KEY] === "string";
+    if (privateRequest && action.approvedBy !== input.userId) {
+      throw new ConnectorError(
+        403,
+        "CONNECTOR_ACTION_APPROVER_MISMATCH",
+        "Only the user who approved this message may send it",
+      );
+    }
+    if (action.actionType === "gmail.message.send") {
+      const account = connector.oauthAccountId
+        ? await findOAuthAccountRecord({
+            teamId: workspace.organizationId,
+            workspaceId: workspace.id,
+            accountId: connector.oauthAccountId,
+          })
+        : null;
+      if (
+        !account?.scopes.includes("https://www.googleapis.com/auth/gmail.send")
+      ) {
+        throw new ConnectorError(
+          403,
+          "GMAIL_SEND_SCOPE_MISSING",
+          "Gmail sending permission is missing",
+        );
+      }
+    }
+    const decryptedRequest = await loadRequest({
+      teamId: workspace.organizationId,
+      oauthAccountId: connector.oauthAccountId,
+      stored: action.requestJson,
+    });
 
     await updateActionRunRecord({
       ...lookup,
@@ -449,7 +611,7 @@ export class ConnectorActionRunner {
         connectorId: connector.id,
         connectorType: connector.connectorType,
         actionType: action.actionType,
-        request: action.requestJson,
+        request: decryptedRequest,
         config: connector.configJson,
         accessToken,
         idempotencyKey: action.idempotencyKey,

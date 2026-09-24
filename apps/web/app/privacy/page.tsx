@@ -72,6 +72,15 @@ const sections = [
     ],
   },
   {
+    title: "Gmail Connection",
+    body: [
+      "If you connect Gmail, SourceWeft requests permission to read your mailbox and send email on your behalf. Live search reads message metadata and fetches a selected message or thread when you ask for it. A live lookup does not by itself create an indexed workspace source; content used in a conversation follows the conversation's normal retention and AI processing settings.",
+      "Mailbox indexing is off until you enable it. If enabled, SourceWeft stores content and metadata from the selected date and label scope as workspace sources and may process that content for search and retrieval. Scheduled refresh requires a separate choice. You can turn off indexing, disconnect Gmail, and request removal of indexed content through the connector's removal controls.",
+      "SourceWeft sends a new email through your connected Gmail account only after you review and approve that message's sender, recipients, subject, and body. It does not automatically send, modify, delete, or label your mail. Gmail OAuth tokens are encrypted at rest and are not exposed to the browser or AI model.",
+      "SourceWeft's use of information received from Google Workspace APIs adheres to the Google API Services User Data Policy, including its Limited Use requirements.",
+    ],
+  },
+  {
     title: "Data Retention",
     body: [
       "We retain information for as long as needed to provide the service, maintain business records, comply with legal obligations, resolve disputes, and enforce agreements. You may delete workspace content or request account deletion where available, subject to legal, security, and backup retention requirements.",

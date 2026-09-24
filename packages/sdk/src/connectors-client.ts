@@ -50,6 +50,13 @@ function query(params: Record<string, string | undefined>) {
 }
 
 export class ConnectorsClient {
+  listGmailLabels(workspaceId: string, connectorId: string) {
+    return this.http.get<{
+      labels: Array<{ id: string; name: string; type: string }>;
+    }>(
+      `/v1/workspaces/${encode(workspaceId)}/connectors/${encode(connectorId)}/gmail/labels`,
+    );
+  }
   constructor(private readonly http: HttpClient) {}
 
   listManifests(workspaceId: string) {

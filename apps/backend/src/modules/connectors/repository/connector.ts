@@ -203,6 +203,7 @@ export async function updateSourceConnectorRecord(input: {
   teamId: string;
   workspaceId: string;
   connectorId: string;
+  oauthAccountId?: string;
   name?: string;
   configJson?: Record<string, unknown>;
   status?: ConnectorStatus;
@@ -216,6 +217,8 @@ export async function updateSourceConnectorRecord(input: {
     updatedAt: new Date(),
   };
   if (input.name !== undefined) updates.name = input.name;
+  if (input.oauthAccountId !== undefined)
+    updates.oauthAccountId = input.oauthAccountId;
   if (input.configJson !== undefined) updates.configJson = input.configJson;
   if (input.status !== undefined) updates.status = input.status;
   if (input.periodicIndexingEnabled !== undefined) {

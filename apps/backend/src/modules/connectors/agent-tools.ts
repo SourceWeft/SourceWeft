@@ -5,7 +5,10 @@ import {
   connectorOAuthService,
   connectorRegistry,
 } from ".";
-import { listSourceConnectorRecords } from "./repository";
+import {
+  findOAuthAccountRecord,
+  listSourceConnectorRecords,
+} from "./repository";
 import type {
   ConnectorActionRunRecord,
   ConnectorActionSpec,
@@ -231,9 +234,10 @@ export function createConnectorActionInterruptConfigs(
         continue;
       }
       configs[action.agentToolName] = {
-        allowedDecisions: isDestructiveAction(action)
-          ? ["approve", "reject"]
-          : ["approve", "edit", "reject"],
+        allowedDecisions:
+          isDestructiveAction(action) && action.type !== "gmail.message.send"
+            ? ["approve", "reject"]
+            : ["approve", "edit", "reject"],
         description: `Review ${manifest.displayName} action before execution: ${action.displayName}`,
         argsSchema: jsonSchemaWithConnectorId(action.inputSchema),
       };
@@ -272,6 +276,7 @@ export async function resolveConnectorActionTrustScope(
   if (!match || !match.action.requiresApproval || !match.action.agentToolName) {
     return null;
   }
+  if (match.action.allowStandingApproval === false) return null;
   const connectors = await listSourceConnectorRecords({
     teamId: context.teamId,
     workspaceId: context.workspaceId,
@@ -335,6 +340,7 @@ export async function approveConnectorActionForTrustRule(
   if (!match || !match.action.requiresApproval || !match.action.agentToolName) {
     return null;
   }
+  if (match.action.allowStandingApproval === false) return null;
   const connectors = await listSourceConnectorRecords({
     teamId: context.teamId,
     workspaceId: context.workspaceId,
@@ -429,6 +435,14 @@ export async function createConnectorActionApprovalRequest(
       toolName: input.toolName,
     }),
   });
+  const account =
+    match.action.type === "gmail.message.send" && connector.oauthAccountId
+      ? await findOAuthAccountRecord({
+          teamId: context.teamId,
+          workspaceId: context.workspaceId,
+          accountId: connector.oauthAccountId,
+        })
+      : null;
   return connectorActionApprovalPayload({
     action: result.action,
     agentToolName: match.action.agentToolName,
@@ -436,6 +450,11 @@ export async function createConnectorActionApprovalRequest(
     description: match.action.description,
     displayName: match.action.displayName,
     toolCallId: input.toolCallId,
+    allowStandingApproval: match.action.allowStandingApproval,
+    previewRequestJson:
+      match.action.requestPrivacy === "encrypted"
+        ? { from: account?.providerAccountEmail ?? null, ...requestJson }
+        : undefined,
   });
 }
 
@@ -463,6 +482,14 @@ export async function createConnectorActionTools(
       if (action.visibility !== "agent" || !action.agentToolName) {
         continue;
       }
+      const availableConnectors =
+        manifest.type === "gmail" &&
+        action.capabilities?.includes("connector_read")
+          ? activeConnectors.filter(
+              (connector) => connector.configJson.liveSearchEnabled !== false,
+            )
+          : activeConnectors;
+      if (availableConnectors.length === 0) continue;
       const agentToolName = action.agentToolName;
       tools.push(
         tool(
@@ -504,7 +531,7 @@ export async function createConnectorActionTools(
                 const connector = chooseConnector({
                   connectorId,
                   connectorType: manifest.type,
-                  connectors: activeConnectors,
+                  connectors: availableConnectors,
                 });
                 if (action.requiresApproval) {
                   const result = await connectorActionRunner.propose({
@@ -585,8 +612,12 @@ export async function createConnectorActionTools(
                         errorCode: connectorError.code,
                         errorMessage: connectorError.message,
                         latencyMs: Date.now() - startedAt,
-                        rawResponseJson:
-                          connectorError.details?.rawResponseJson,
+                        ...(connector.connectorType === "gmail"
+                          ? {}
+                          : {
+                              rawResponseJson:
+                                connectorError.details?.rawResponseJson,
+                            }),
                       },
                     );
                     throw error;
@@ -597,8 +628,12 @@ export async function createConnectorActionTools(
                     ...logMeta,
                     externalId: result.externalId ?? null,
                     latencyMs: Date.now() - startedAt,
-                    rawResponseJson: result.rawResponseJson,
-                    resultJson: result.result,
+                    ...(connector.connectorType === "gmail"
+                      ? {}
+                      : {
+                          rawResponseJson: result.rawResponseJson,
+                          resultJson: result.result,
+                        }),
                     shouldResync: Boolean(result.shouldResync),
                   },
                 );

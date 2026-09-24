@@ -2694,6 +2694,16 @@
         "Publishing": "Publishing"
       },
       "settingsDescription": "Connector settings, execution history, and provider events.",
+      "gmail": {
+        "liveSearch": "Live Gmail search",
+        "indexMail": "Index selected mail in this workspace",
+        "indexNotice": "Indexing stores selected message content in workspace sources. It is off until you enable it. Scheduled sync is a separate choice.",
+        "after": "Messages after date (optional)",
+        "maxMessages": "Maximum messages",
+        "labels": "Labels (leave empty for all mail)",
+        "labelsNote": "Labels filter imports. Indexed messages appear in one Messages directory.",
+        "labelsLoadFailed": "Could not load Gmail labels."
+      },
       "settingsTab": {
         "overview": "Overview",
         "configuration": "Configuration",

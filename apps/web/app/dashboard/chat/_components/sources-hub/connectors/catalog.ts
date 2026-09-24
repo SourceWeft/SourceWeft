@@ -43,10 +43,16 @@ function oauthCatalogItem(
   return {
     ...item,
     authKind: "oauth",
-    connectMode: item.id === "notion" ? "oauth_connector" : "coming_soon",
+    connectMode:
+      item.id === "notion" || item.id === "gmail"
+        ? "oauth_connector"
+        : "coming_soon",
     isIndexable: item.isIndexable ?? true,
     statusKind:
-      item.statusKind ?? (item.id === "notion" ? "available" : "coming_soon"),
+      item.statusKind ??
+      (item.id === "notion" || item.id === "gmail"
+        ? "available"
+        : "coming_soon"),
     supportsActions: item.supportsActions ?? false,
     supportsPeriodicSync: item.supportsPeriodicSync ?? true,
     supportsWebhook: item.supportsWebhook ?? false,
@@ -147,8 +153,10 @@ export const connectorCatalog: ConnectorCatalogItem[] = [
     id: "gmail",
     name: "Gmail",
     category: "Communication",
-    description: "Search, read, draft, and send approved emails.",
-    capabilities: ["Mail", "Drafts", "Actions"],
+    description:
+      "Search and read mail, optionally index it, and send reviewed messages.",
+    capabilities: ["Search", "Optional indexing", "Approved sending"],
+    postOAuthMode: "auto_create",
     icon: Mail,
     supportsActions: true,
   }),

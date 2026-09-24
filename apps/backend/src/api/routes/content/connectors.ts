@@ -17,6 +17,7 @@ import { config } from "../../../shared/config";
 import {
   connectorActionRunner,
   connectorOAuthService,
+  connectorRegistry,
   connectorService,
   connectorSyncOrchestrator,
   connectorWebhookService,
@@ -84,6 +85,52 @@ export function registerConnectorRoutes(app: Hono) {
     }
 
     return ApiResponse.success(c, connectorService.listManifests());
+  });
+
+  app.get("/connectors/:connectorId/gmail/labels", async (c) => {
+    const session = await requireSession(c);
+    if (!session) throw ApiError.unauthorized();
+    const workspaceId = requireRouteParam(c, "workspaceId");
+    const connectorId = requireRouteParam(c, "connectorId");
+    const { workspace } = await requireConnectorWorkspace({
+      workspaceId,
+      userId: getSessionUserId(session),
+      permission: "connector.read",
+    });
+    const connector = await findSourceConnectorRecord({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      connectorId,
+    });
+    if (
+      !connector ||
+      connector.connectorType !== "gmail" ||
+      connector.status !== "active"
+    ) {
+      throw new ApiError(
+        404,
+        "GMAIL_CONNECTOR_NOT_FOUND",
+        "Active Gmail connector not found",
+      );
+    }
+    const accessToken = await connectorOAuthService.getRuntimeToken({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      accountId: connector.oauthAccountId,
+      connectorType: "gmail",
+    });
+    const result = await connectorRegistry.getAdapter("gmail").executeAction({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      connectorId,
+      connectorType: "gmail",
+      actionType: "gmail.labels.list",
+      request: {},
+      config: connector.configJson,
+      accessToken,
+      idempotencyKey: "gmail.labels.list",
+    });
+    return ApiResponse.success(c, result.result);
   });
 
   app.post("/connectors/oauth/:connectorType/start", async (c) => {
@@ -265,6 +312,7 @@ export function registerConnectorRoutes(app: Hono) {
       workspaceId: requireRouteParam(c, "workspaceId"),
       userId: getSessionUserId(session),
       connectorId: requireRouteParam(c, "connectorId"),
+      oauthAccountId: parsed.data.oauthAccountId,
       name: parsed.data.name,
       configJson: parsed.data.configJson,
       status: parsed.data.status,
@@ -536,5 +584,4 @@ export function registerConnectorRoutes(app: Hono) {
     });
     return ApiResponse.success(c, result);
   });
-
 }

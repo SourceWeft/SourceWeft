@@ -23,6 +23,7 @@ import {
 } from "@sourceweft/ui-web/components/ui/alert";
 import { Badge } from "@sourceweft/ui-web/components/ui/badge";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
+import { Checkbox } from "@sourceweft/ui-web/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -48,6 +49,7 @@ import {
 } from "@sourceweft/ui-web/components/ui/tabs";
 
 import { TypeBadge } from "../type-badge";
+import { connectorsClient } from "../../../../../../lib/sdk";
 import { ActivityList } from "./activity";
 import {
   connectorCatalog,
@@ -126,6 +128,7 @@ export function ConnectorSettingsDialog({
       name: string;
       periodicIndexingEnabled: boolean;
       indexingFrequencyMinutes: number | null;
+      configJson?: Record<string, unknown>;
     },
   ) => void;
   onSyncConnector: (connector: ConnectorItem) => void;
@@ -177,6 +180,15 @@ export function ConnectorSettingsDialog({
   const [customFrequencyMinutes, setCustomFrequencyMinutes] = useState(
     initialFrequencyState.customFrequencyMinutes,
   );
+  const [gmailLiveSearch, setGmailLiveSearch] = useState(true);
+  const [gmailIndexing, setGmailIndexing] = useState(false);
+  const [gmailLabelIds, setGmailLabelIds] = useState<string[]>([]);
+  const [gmailAfter, setGmailAfter] = useState("");
+  const [gmailMaxMessages, setGmailMaxMessages] = useState("500");
+  const [gmailLabels, setGmailLabels] = useState<
+    Array<{ id: string; name: string }>
+  >([]);
+  const [gmailLabelsError, setGmailLabelsError] = useState<string | null>(null);
   const canUsePeriodicSync = catalogItem?.isIndexable ?? true;
   const isSavingSettings = isBusy;
 
@@ -192,19 +204,81 @@ export function ConnectorSettingsDialog({
     setSettingsName(connector.name);
     setFrequencyValue(next.frequencyValue);
     setCustomFrequencyMinutes(next.customFrequencyMinutes);
+    setGmailLiveSearch(connector.raw.configJson.liveSearchEnabled !== false);
+    setGmailIndexing(connector.raw.configJson.indexingEnabled === true);
+    setGmailLabelIds(
+      Array.isArray(connector.raw.configJson.labelIds)
+        ? connector.raw.configJson.labelIds.filter(
+            (id): id is string => typeof id === "string",
+          )
+        : [],
+    );
+    setGmailAfter(
+      typeof connector.raw.configJson.after === "string"
+        ? connector.raw.configJson.after
+        : "",
+    );
+    setGmailMaxMessages(
+      typeof connector.raw.configJson.maxMessages === "number"
+        ? String(connector.raw.configJson.maxMessages)
+        : "500",
+    );
   }, [connector]);
+
+  useEffect(() => {
+    if (!open || !connector || connector.raw.connectorType !== "gmail") return;
+    let active = true;
+    connectorsClient
+      .listGmailLabels(connector.raw.workspaceId, connector.id)
+      .then((result) => {
+        if (active) {
+          setGmailLabels(result.labels);
+          setGmailLabelsError(null);
+        }
+      })
+      .catch(() => {
+        if (active) setGmailLabelsError(t("connectors.gmail.labelsLoadFailed"));
+      });
+    return () => {
+      active = false;
+    };
+  }, [open, connector, t]);
 
   if (!connector) {
     return null;
   }
 
   const parsedCustomFrequency = Number(customFrequencyMinutes);
+  const minFrequency = connector.raw.connectorType === "gmail" ? 60 : 1;
   const hasValidCustomFrequency =
-    Number.isInteger(parsedCustomFrequency) && parsedCustomFrequency > 0;
+    Number.isInteger(parsedCustomFrequency) &&
+    parsedCustomFrequency >= minFrequency;
+  const parsedGmailLimit = Number(gmailMaxMessages);
+  const validGmailLimit =
+    Number.isInteger(parsedGmailLimit) &&
+    parsedGmailLimit >= 1 &&
+    parsedGmailLimit <= 10000;
   const isSettingsValid =
     settingsName.trim().length > 0 &&
-    (frequencyValue !== "custom" || hasValidCustomFrequency);
+    (frequencyValue !== "custom" || hasValidCustomFrequency) &&
+    (connector.raw.connectorType !== "gmail" || validGmailLimit) &&
+    (connector.raw.connectorType !== "gmail" ||
+      gmailIndexing ||
+      frequencyValue === "manual");
+  const gmailConfig = {
+    ...connector.raw.configJson,
+    liveSearchEnabled: gmailLiveSearch,
+    indexingEnabled: gmailIndexing,
+    labelIds: gmailLabelIds,
+    maxMessages: parsedGmailLimit,
+    ...(gmailAfter ? { after: gmailAfter } : {}),
+  };
+  if (!gmailAfter) delete gmailConfig.after;
+  const gmailChanged =
+    connector.raw.connectorType === "gmail" &&
+    JSON.stringify(gmailConfig) !== JSON.stringify(connector.raw.configJson);
   const settingsChanged =
+    gmailChanged ||
     settingsName.trim() !== connector.name ||
     (frequencyValue === "manual" && connector.raw.periodicIndexingEnabled) ||
     (frequencyValue !== "manual" &&
@@ -237,6 +311,9 @@ export function ConnectorSettingsDialog({
       name: settingsName.trim(),
       periodicIndexingEnabled,
       indexingFrequencyMinutes,
+      ...(connector.raw.connectorType === "gmail"
+        ? { configJson: gmailConfig }
+        : {}),
     });
   }
 
@@ -476,14 +553,19 @@ export function ConnectorSettingsDialog({
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            {connectorSyncFrequencyOptions.map((option) => (
-                              <SelectItem
-                                key={option.value}
-                                value={option.value}
-                              >
-                                {t(`connectors.frequency.${option.value}`)}
-                              </SelectItem>
-                            ))}
+                            {connectorSyncFrequencyOptions
+                              .filter(
+                                (option) =>
+                                  option.value !== "15" || minFrequency <= 15,
+                              )
+                              .map((option) => (
+                                <SelectItem
+                                  key={option.value}
+                                  value={option.value}
+                                >
+                                  {t(`connectors.frequency.${option.value}`)}
+                                </SelectItem>
+                              ))}
                           </SelectContent>
                         </Select>
                       </label>
@@ -495,7 +577,7 @@ export function ConnectorSettingsDialog({
                           <Input
                             className="h-8 text-xs"
                             disabled={isSavingSettings}
-                            min={1}
+                            min={minFrequency}
                             onChange={(event) =>
                               setCustomFrequencyMinutes(event.target.value)
                             }
@@ -503,6 +585,100 @@ export function ConnectorSettingsDialog({
                             value={customFrequencyMinutes}
                           />
                         </label>
+                      ) : null}
+                      {connector.raw.connectorType === "gmail" ? (
+                        <div className="space-y-3 rounded-md border p-3">
+                          <label className="flex items-center gap-2 text-xs">
+                            <Checkbox
+                              checked={gmailLiveSearch}
+                              disabled={isSavingSettings}
+                              onCheckedChange={(checked) =>
+                                setGmailLiveSearch(checked === true)
+                              }
+                            />
+                            {t("connectors.gmail.liveSearch")}
+                          </label>
+                          <label className="flex items-center gap-2 text-xs">
+                            <Checkbox
+                              checked={gmailIndexing}
+                              disabled={isSavingSettings}
+                              onCheckedChange={(checked) => {
+                                setGmailIndexing(checked === true);
+                                if (checked !== true)
+                                  setFrequencyValue("manual");
+                              }}
+                            />
+                            {t("connectors.gmail.indexMail")}
+                          </label>
+                          <p className="text-[10px] leading-4 text-muted-foreground">
+                            {t("connectors.gmail.indexNotice")}
+                          </p>
+                          {gmailIndexing ? (
+                            <>
+                              <label className="block space-y-1.5 text-xs">
+                                <span>{t("connectors.gmail.after")}</span>
+                                <Input
+                                  disabled={isSavingSettings}
+                                  onChange={(event) =>
+                                    setGmailAfter(event.target.value)
+                                  }
+                                  type="date"
+                                  value={gmailAfter}
+                                />
+                              </label>
+                              <label className="block space-y-1.5 text-xs">
+                                <span>{t("connectors.gmail.maxMessages")}</span>
+                                <Input
+                                  disabled={isSavingSettings}
+                                  max={10000}
+                                  min={1}
+                                  onChange={(event) =>
+                                    setGmailMaxMessages(event.target.value)
+                                  }
+                                  type="number"
+                                  value={gmailMaxMessages}
+                                />
+                              </label>
+                              <div className="space-y-1.5 text-xs">
+                                <p>{t("connectors.gmail.labels")}</p>
+                                <p className="text-[10px] text-muted-foreground">
+                                  {t("connectors.gmail.labelsNote")}
+                                </p>
+                                {gmailLabelsError ? (
+                                  <p className="text-destructive">
+                                    {gmailLabelsError}
+                                  </p>
+                                ) : null}
+                                {gmailLabels.map((label) => (
+                                  <label
+                                    className="flex items-center gap-2"
+                                    key={label.id}
+                                  >
+                                    <Checkbox
+                                      checked={gmailLabelIds.includes(label.id)}
+                                      disabled={isSavingSettings}
+                                      onCheckedChange={(checked) =>
+                                        setGmailLabelIds((previous) =>
+                                          checked === true
+                                            ? [
+                                                ...new Set([
+                                                  ...previous,
+                                                  label.id,
+                                                ]),
+                                              ]
+                                            : previous.filter(
+                                                (id) => id !== label.id,
+                                              ),
+                                        )
+                                      }
+                                    />
+                                    {label.name}
+                                  </label>
+                                ))}
+                              </div>
+                            </>
+                          ) : null}
+                        </div>
                       ) : null}
                       {!canUsePeriodicSync ? (
                         <p className="text-[10px] leading-4 text-muted-foreground">
