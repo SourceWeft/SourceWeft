@@ -139,7 +139,7 @@
           "title": "把工作所需的背景帶進來",
           "description": "上傳文件，或連接 Notion、Google Drive、Gmail 和 Slack。為每項任務提供相關資料，通過引用回到原文核對。",
           "bullets": [
-            "文件、網頁與已連接的資料源",
+            "文件、網頁與已連接的資料來源",
             "可查證的來源引用",
             "組織專案知識的共享空間"
           ]
@@ -2690,7 +2690,7 @@
         "mode": {
           "tools": {
             "title": "僅工具",
-            "description": "即時搜尋和讀取郵件，不把郵件存入工作區資料源。"
+            "description": "即時搜尋和讀取郵件，不把郵件存入工作區資料來源。"
           },
           "index": {
             "title": "僅索引",
@@ -2706,7 +2706,7 @@
         "modeContinue": "繼續前往 Google",
         "liveSearch": "即時搜尋 Gmail",
         "indexMail": "將選定郵件索引到此工作區",
-        "indexNotice": "索引會將選定郵件內容存入工作區資料源。關閉索引會使保留的郵件不再參與代理檢索；刪除連接器可移除儲存副本。定期同步需另行選擇。",
+        "indexNotice": "索引會將選定郵件內容存入工作區資料來源。關閉索引會使保留的郵件不再參與代理檢索；刪除連接器可移除儲存副本。定期同步需另行選擇。",
         "after": "起始日期（索引必填）",
         "maxMessages": "最多索引郵件數",
         "labels": "標籤（索引時至少選擇一個）",
@@ -4673,7 +4673,7 @@
       "verifyingTitle": "安裝前請先核對雜湊值。",
       "unsignedBody": "你的作業系統會提示「開發者身份不明」。請先核對本頁面上的 SHA-256 雜湊值，再允許執行該應用程式一次。",
       "verifyingBody": "本頁面每個安裝程式都列出了 SHA-256 雜湊值，方便你確認下載到的檔案與我們發布的一致。",
-      "macosInstruction": "：在「應用程式」中按住 Control 點選 SourceWeft，選擇「開啟」，再在彈窗中確認。",
+      "macosInstruction": "：在「應用程式」中按住 Control 點選 SourceWeft，選擇「開啟」，再在彈出視窗中確認。",
       "windowsInstruction": "：出現 SmartScreen 提示時，選擇「更多資訊」，再選擇「仍要執行」。",
       "verifyChecksum": "驗證雜湊值"
     },
