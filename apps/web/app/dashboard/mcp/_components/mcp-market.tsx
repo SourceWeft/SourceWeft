@@ -699,7 +699,7 @@ function McpCard({
   return (
     <article
       className={cn(
-        "group flex min-h-[306px] flex-col rounded-2xl border border-border bg-background p-4 shadow-xs transition-colors hover:bg-accent/20",
+        "group flex min-h-[286px] flex-col rounded-2xl border border-border bg-background p-4 shadow-xs transition-colors hover:bg-accent/20",
         highlight && "ring-2 ring-primary ring-offset-2 ring-offset-background",
       )}
       id={`mcp-card-${market.identifier}`}
@@ -752,6 +752,23 @@ function McpCard({
             <p className="truncate text-[11px] text-muted-foreground">
               {market.identifier}
             </p>
+            {install ? (
+              <div
+                className={cn(
+                  "mt-1 text-[11px] text-muted-foreground",
+                  needsCredentials && "text-amber-700 dark:text-amber-300",
+                )}
+                title={
+                  needsCredentials
+                    ? t("card.credentialsRequired")
+                    : t("card.toolsSyncedTitle", {
+                        count: install.tools.length,
+                      })
+                }
+              >
+                <McpStatusIndicator install={install} />
+              </div>
+            ) : null}
           </div>
         </button>
         {sourceUrl ? (
@@ -822,24 +839,9 @@ function McpCard({
         </div>
       ) : null}
 
-      <div className="mt-auto flex min-h-11 flex-col gap-2 border-t border-border pt-3">
+      <div className="mt-auto flex min-h-11 items-center justify-end border-t border-border pt-3">
         {install ? (
           <>
-            <div
-              className={cn(
-                "w-full min-w-0 text-[11px] text-muted-foreground",
-                needsCredentials && "text-amber-700 dark:text-amber-300",
-              )}
-              title={
-                needsCredentials
-                  ? t("card.credentialsRequired")
-                  : t("card.toolsSyncedTitle", {
-                      count: install.tools.length,
-                    })
-              }
-            >
-              <McpStatusIndicator install={install} />
-            </div>
             <div className="flex items-center justify-end gap-1.5">
               <Tooltip>
                 <TooltipTrigger asChild>
