@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { test, vi } from "vitest";
 import {
+  approveConnectorActionForTrustRule,
   buildConnectorActionToolset,
   createConnectorActionInterruptConfigs,
   createConnectorActionTools,
+  resolveConnectorActionTrustScope,
   type ConnectorActionToolContext,
 } from "./agent-tools";
 import { connectorRegistry } from "./registry";
@@ -188,5 +190,28 @@ test("disabled Gmail live search removes read tools but keeps per-message send a
     createConnectorActionInterruptConfigs().send_gmail_message
       ?.allowedDecisions,
     ["approve", "edit", "reject"],
+  );
+  assert.equal(
+    await resolveConnectorActionTrustScope(context, {
+      toolName: "send_gmail_message",
+      args: {
+        to: ["recipient@example.com"],
+        subject: "Hello",
+        body: "Private body",
+      },
+    }),
+    null,
+  );
+  assert.equal(
+    await approveConnectorActionForTrustRule(context, {
+      toolName: "send_gmail_message",
+      toolCallId: "call-1",
+      args: {
+        to: ["recipient@example.com"],
+        subject: "Hello",
+        body: "Private body",
+      },
+    }),
+    null,
   );
 });
