@@ -14,7 +14,11 @@
  *   the ones the runner otherwise drops) are folded into a transcript;
  * - when the `task` call finishes, the transcript is written as the child
  *   thread's messages and seeded into the child's own checkpoint, so the next
- *   user message there continues from what the delegate did.
+ *   user message there continues from what the delegate did;
+ * - when the delegate pauses for approval instead, only the brief is written.
+ *   Resuming re-runs the `task` call under the same call id — in the same run
+ *   after an auto-approved decision, or in the next run after the user
+ *   decides — and it continues in the same child thread, found by that id.
  *
  * Nothing here yields a stream event: the client wire stays byte-for-byte as
  * before. The parent keeps receiving only the delegate's report (context
@@ -50,7 +54,10 @@ import type {
 } from "../..";
 import { buildAgentConfig } from "..";
 import { createMessageRecord } from "../../message-repository";
-import { createThreadRecord } from "../../thread/repository";
+import {
+  createThreadRecord,
+  findSubagentThreadRecordByTaskCall,
+} from "../../thread/repository";
 import { findPersona } from "../personas";
 import { checkpointRefFromConfig } from "./checkpoint";
 import { namespaceSegments } from "./subagent-namespace";
@@ -451,6 +458,46 @@ function synthesizeToolTrace(
   };
 }
 
+function projectionMetadata(input: {
+  parentThreadId: string;
+  taskCallId: string;
+  subagentType: string | undefined;
+}) {
+  return {
+    source: "subagent_projection",
+    subagent: {
+      parentThreadId: input.parentThreadId,
+      taskCallId: input.taskCallId,
+      ...(input.subagentType ? { subagentType: input.subagentType } : {}),
+    },
+  };
+}
+
+/**
+ * Write the brief as the child thread's user turn. Done on its own when the
+ * delegate pauses for approval, so the waiting child thread shows its task and
+ * carries the `task` call id a resumed run finds it by.
+ */
+export async function persistSubagentBrief(input: {
+  scope: ThreadScope;
+  childThreadId: string;
+  parentThreadId: string;
+  taskCallId: string;
+  subagentType: string | undefined;
+  brief: string;
+  createdBy: string;
+}) {
+  await createMessageRecord({
+    teamId: input.scope.teamId,
+    workspaceId: input.scope.workspaceId,
+    threadId: input.childThreadId,
+    role: "user",
+    content: input.brief,
+    createdBy: input.createdBy,
+    metadata: projectionMetadata(input),
+  });
+}
+
 /**
  * Write the transcript as the child thread's messages and seed its checkpoint.
  * The brief is the user turn; each assistant turn keeps its tool calls in the
@@ -458,7 +505,7 @@ function synthesizeToolTrace(
  * turn (the runner's own traces where it recorded them, since it already
  * processed the delegate's tool events; a synthesized trace otherwise). The
  * seeded checkpoint is stamped on the last assistant row so the turn preparer
- * continues from it.
+ * continues from it. `briefPersisted` skips the user turn a pause already wrote.
  */
 export async function persistSubagentTranscript(input: {
   scope: ThreadScope;
@@ -467,6 +514,7 @@ export async function persistSubagentTranscript(input: {
   taskCallId: string;
   subagentType: string | undefined;
   brief: string;
+  briefPersisted?: boolean;
   report: string | null;
   entries: readonly TranscriptEntry[];
   toolTraces: ReadonlyMap<string, ToolCallTrace>;
@@ -474,14 +522,7 @@ export async function persistSubagentTranscript(input: {
   createdBy: string;
   seedCheckpoint: SeedChildCheckpoint;
 }) {
-  const projection = {
-    source: "subagent_projection",
-    subagent: {
-      parentThreadId: input.parentThreadId,
-      taskCallId: input.taskCallId,
-      ...(input.subagentType ? { subagentType: input.subagentType } : {}),
-    },
-  };
+  const projection = projectionMetadata(input);
 
   let checkpoint: AgentCheckpointRef | null = null;
   try {
@@ -501,15 +542,9 @@ export async function persistSubagentTranscript(input: {
     });
   }
 
-  await createMessageRecord({
-    teamId: input.scope.teamId,
-    workspaceId: input.scope.workspaceId,
-    threadId: input.childThreadId,
-    role: "user",
-    content: input.brief,
-    createdBy: input.createdBy,
-    metadata: { ...projection },
-  });
+  if (!input.briefPersisted) {
+    await persistSubagentBrief(input);
+  }
 
   const resultsById = new Map(
     input.entries
@@ -591,7 +626,12 @@ type TrackedTask = {
   brief: string;
   collector: SubagentTranscriptCollector;
   childThread: Promise<ThreadRecord | null>;
+  /** Whether the child thread already holds the brief (a pause wrote it). */
+  briefPersisted: boolean;
+  /** The pause's brief write, awaited before the transcript follows it. */
+  briefWrite: Promise<unknown> | null;
   finished: boolean;
+  paused: boolean;
 };
 
 export type SubagentProjector = ReturnType<typeof createSubagentProjector>;
@@ -611,11 +651,16 @@ export function createSubagentProjector(input: {
   toolTraces: ReadonlyMap<string, ToolCallTrace>;
   seedCheckpoint: SeedChildCheckpoint;
   createChildThread?: typeof createChildThreadForDelegate;
+  findChildThread?: typeof findSubagentThreadRecordByTaskCall;
   persist?: typeof persistSubagentTranscript;
+  persistBrief?: typeof persistSubagentBrief;
 }) {
   const createChildThread =
     input.createChildThread ?? createChildThreadForDelegate;
+  const findChildThread =
+    input.findChildThread ?? findSubagentThreadRecordByTaskCall;
   const persist = input.persist ?? persistSubagentTranscript;
+  const persistBrief = input.persistBrief ?? persistSubagentBrief;
   const tasksByCallId = new Map<string, TrackedTask>();
   const taskCallIdByNamespaceKey = new Map<string, string>();
   const pending = new Set<Promise<unknown>>();
@@ -651,21 +696,65 @@ export function createSubagentProjector(input: {
   }
 
   return {
-    /** The parent's `task` tool call started: open a child thread for it. */
+    /**
+     * The parent's `task` tool call started: open a child thread for it, or
+     * continue the one a paused run of the same call opened.
+     */
     startTask(task: {
       taskCallId: string;
       namespace: unknown;
       input: unknown;
     }) {
       const segments = namespaceSegments(task.namespace);
+      const namespaceKey = keyOf(segments);
+      const paused = tasksByCallId.get(task.taskCallId);
+      if (paused?.paused) {
+        // Resumed in this run: the delegate replays from its brief, so its
+        // transcript is collected afresh into the same child thread.
+        paused.paused = false;
+        paused.finished = false;
+        paused.collector = new SubagentTranscriptCollector();
+        paused.namespaceKey = namespaceKey;
+        if (segments.length > 0) {
+          taskCallIdByNamespaceKey.set(namespaceKey, task.taskCallId);
+        }
+        return;
+      }
       const brief = readBrief(task.input);
       const subagentType = readSubagentType(task.input);
-      const childThread = createChildThread({
-        parent: input.prepared.thread,
-        userId: input.prepared.userId,
+      const tracked: TrackedTask = {
+        taskCallId: task.taskCallId,
+        namespaceKey,
         subagentType,
         brief,
-      }).catch((error: unknown) => {
+        collector: new SubagentTranscriptCollector(),
+        childThread: Promise.resolve(null),
+        briefPersisted: false,
+        briefWrite: null,
+        finished: false,
+        paused: false,
+      };
+      tracked.childThread = (async () => {
+        // Resumed in a later run: the paused run left the child thread holding
+        // the brief under this call id.
+        const existing = await findChildThread({
+          teamId: scope.teamId,
+          workspaceId: scope.workspaceId,
+          parentThreadId:
+            input.prepared.thread.parentThreadId ?? input.prepared.thread.id,
+          taskCallId: task.taskCallId,
+        });
+        if (existing) {
+          tracked.briefPersisted = true;
+          return existing;
+        }
+        return createChildThread({
+          parent: input.prepared.thread,
+          userId: input.prepared.userId,
+          subagentType,
+          brief,
+        });
+      })().catch((error: unknown) => {
         logger.warn("Failed to create sub-agent child thread", {
           ...logContext(),
           taskCallId: task.taskCallId,
@@ -673,20 +762,53 @@ export function createSubagentProjector(input: {
         });
         return null;
       });
-      track(childThread);
-      const tracked: TrackedTask = {
-        taskCallId: task.taskCallId,
-        namespaceKey: keyOf(segments),
-        subagentType,
-        brief,
-        collector: new SubagentTranscriptCollector(),
-        childThread,
-        finished: false,
-      };
+      track(tracked.childThread);
       tasksByCallId.set(task.taskCallId, tracked);
       if (segments.length > 0) {
-        taskCallIdByNamespaceKey.set(tracked.namespaceKey, task.taskCallId);
+        taskCallIdByNamespaceKey.set(namespaceKey, task.taskCallId);
       }
+    },
+
+    /**
+     * The parent's `task` call paused because its delegate is waiting for
+     * approval. Nothing is closed: the child thread keeps only the brief until
+     * the resumed call finishes there.
+     */
+    pauseTask(taskCallId: string) {
+      const tracked = tasksByCallId.get(taskCallId);
+      if (!tracked || tracked.finished || tracked.paused) {
+        return;
+      }
+      tracked.paused = true;
+      if (tracked.briefPersisted || tracked.briefWrite) {
+        return;
+      }
+      tracked.briefWrite = track(
+        tracked.childThread
+          .then(async (childThread) => {
+            if (!childThread || tracked.briefPersisted) {
+              return;
+            }
+            await persistBrief({
+              scope,
+              childThreadId: childThread.id,
+              parentThreadId:
+                childThread.parentThreadId ?? input.prepared.thread.id,
+              taskCallId: tracked.taskCallId,
+              subagentType: tracked.subagentType,
+              brief: tracked.brief,
+              createdBy: input.prepared.userId,
+            });
+            tracked.briefPersisted = true;
+          })
+          .catch((error: unknown) => {
+            logger.warn("Failed to persist paused sub-agent brief", {
+              ...logContext(),
+              taskCallId,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }),
+      );
     },
 
     /** A delegate's model event (the runner drops these from the client). */
@@ -733,6 +855,7 @@ export function createSubagentProjector(input: {
       if (!childThread) {
         return null;
       }
+      await tracked.briefWrite;
       track(
         persist({
           scope,
@@ -742,6 +865,7 @@ export function createSubagentProjector(input: {
           taskCallId: tracked.taskCallId,
           subagentType: tracked.subagentType,
           brief: tracked.brief,
+          briefPersisted: tracked.briefPersisted,
           report: task.report,
           entries: tracked.collector.entries,
           toolTraces: input.toolTraces,

@@ -225,6 +225,7 @@ test("the projector opens a child thread per task and persists its transcript on
     prepared: createPrepared(),
     toolTraces: traces,
     seedCheckpoint: async () => null,
+    findChildThread: async () => null,
     createChildThread: async (input) => {
       created.push(input);
       return { id: "thread_child", parentThreadId: "thread_parent" } as never;
@@ -313,6 +314,7 @@ test("a failed child thread creation leaves the parent turn untouched", async ()
     prepared: createPrepared(),
     toolTraces: new Map(),
     seedCheckpoint: async () => null,
+    findChildThread: async () => null,
     createChildThread: async () => {
       throw new Error("db down");
     },
@@ -357,6 +359,7 @@ test("projection never adds a client event kind", async () => {
     prepared: createPrepared(),
     toolTraces: new Map(),
     seedCheckpoint: async () => null,
+    findChildThread: async () => null,
     createChildThread: async () => ({ id: "c", parentThreadId: "p" }) as never,
     persist: async () => ({ checkpoint: null, assistantRows: 0 }),
   });
@@ -381,4 +384,129 @@ test("projection never adds a client event kind", async () => {
     );
   }
   await projector.flush();
+});
+
+function createPausableProjector(options: {
+  existing?: { id: string; parentThreadId: string } | null;
+}) {
+  const created: unknown[] = [];
+  const found: unknown[] = [];
+  const briefs: unknown[] = [];
+  const persisted: Array<
+    Parameters<
+      NonNullable<Parameters<typeof createSubagentProjector>[0]["persist"]>
+    >[0]
+  > = [];
+  const projector = createSubagentProjector({
+    prepared: createPrepared(),
+    toolTraces: new Map(),
+    seedCheckpoint: async () => null,
+    findChildThread: async (input) => {
+      found.push(input);
+      return (options.existing ?? null) as never;
+    },
+    createChildThread: async (input) => {
+      created.push(input);
+      return { id: "thread_child", parentThreadId: "thread_parent" } as never;
+    },
+    persistBrief: async (input) => {
+      briefs.push(input);
+    },
+    persist: async (input) => {
+      persisted.push(input);
+      return { checkpoint: null, assistantRows: 1 };
+    },
+  });
+  return { projector, created, found, briefs, persisted };
+}
+
+const PAUSED_TASK_INPUT = {
+  description: "Send the weekly email.",
+  subagent_type: "general-purpose",
+};
+
+test("a paused task writes only its brief and resumes in the same child thread within the run", async () => {
+  const { projector, created, briefs, persisted } = createPausableProjector({});
+
+  projector.startTask({
+    taskCallId: "task-1",
+    namespace: ["tools:branch-a"],
+    input: PAUSED_TASK_INPUT,
+  });
+  projector.observeMessages(["tools:branch-a", "model_request:m1"], {
+    event: "message-start",
+  });
+  projector.pauseTask("task-1");
+  projector.pauseTask("task-1");
+  await projector.flush();
+
+  assert.equal(briefs.length, 1);
+  assert.equal(persisted.length, 0);
+  assert.deepEqual(briefs[0], {
+    scope: { teamId: "team_1", workspaceId: "workspace_1" },
+    childThreadId: "thread_child",
+    parentThreadId: "thread_parent",
+    taskCallId: "task-1",
+    subagentType: "general-purpose",
+    brief: "Send the weekly email.",
+    createdBy: "user_1",
+  });
+
+  // An auto-approved decision resumes the same call in this run: the delegate
+  // replays from its brief under a new branch namespace.
+  projector.startTask({
+    taskCallId: "task-1",
+    namespace: ["tools:branch-b"],
+    input: PAUSED_TASK_INPUT,
+  });
+  projector.observeMessages(["tools:branch-b", "model_request:m2"], {
+    event: "message-start",
+  });
+  assert.equal(
+    await projector.finishTask({ taskCallId: "task-1", report: "sent" }),
+    "thread_child",
+  );
+  await projector.flush();
+
+  assert.equal(created.length, 1);
+  assert.equal(persisted.length, 1);
+  assert.equal(persisted[0]?.childThreadId, "thread_child");
+  assert.equal(persisted[0]?.briefPersisted, true);
+  // Only the replayed run is in the transcript.
+  assert.deepEqual(
+    persisted[0]?.entries.map((entry) => entry.kind),
+    ["ai"],
+  );
+});
+
+test("a task resumed in a later run continues the child thread its paused run opened", async () => {
+  const { projector, created, found, briefs, persisted } =
+    createPausableProjector({
+      existing: { id: "thread_paused_child", parentThreadId: "thread_parent" },
+    });
+
+  projector.startTask({
+    taskCallId: "task-1",
+    namespace: ["tools:branch-a"],
+    input: PAUSED_TASK_INPUT,
+  });
+  assert.equal(
+    await projector.finishTask({ taskCallId: "task-1", report: "sent" }),
+    "thread_paused_child",
+  );
+  await projector.flush();
+
+  assert.deepEqual(found, [
+    {
+      teamId: "team_1",
+      workspaceId: "workspace_1",
+      parentThreadId: "thread_parent",
+      taskCallId: "task-1",
+    },
+  ]);
+  assert.equal(created.length, 0);
+  assert.equal(briefs.length, 0);
+  assert.equal(persisted.length, 1);
+  assert.equal(persisted[0]?.childThreadId, "thread_paused_child");
+  assert.equal(persisted[0]?.briefPersisted, true);
 });

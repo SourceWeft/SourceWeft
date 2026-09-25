@@ -250,3 +250,70 @@ test("a missing report and a checkpoint failure still leave a readable thread", 
     null,
   );
 });
+
+test("a paused task's brief lets a resumed run find its child thread by call id", async () => {
+  const parent = await createParent("workspace");
+  const child = await projection.createChildThreadForDelegate({
+    parent,
+    userId: owner,
+    subagentType: "general-purpose",
+    brief: "Send the weekly email.",
+  });
+  const lookup = {
+    teamId,
+    workspaceId,
+    parentThreadId: parent.id,
+    taskCallId: "task-1",
+  };
+  assert.equal(await threads.findSubagentThreadRecordByTaskCall(lookup), null);
+
+  await projection.persistSubagentBrief({
+    scope: { teamId, workspaceId },
+    childThreadId: child.id,
+    parentThreadId: parent.id,
+    taskCallId: "task-1",
+    subagentType: "general-purpose",
+    brief: "Send the weekly email.",
+    createdBy: owner,
+  });
+  assert.equal(
+    (await threads.findSubagentThreadRecordByTaskCall(lookup))?.id,
+    child.id,
+  );
+  assert.equal(
+    await threads.findSubagentThreadRecordByTaskCall({
+      ...lookup,
+      taskCallId: "task-2",
+    }),
+    null,
+  );
+
+  // The resumed run's transcript follows the brief without repeating it.
+  await projection.persistSubagentTranscript({
+    scope: { teamId, workspaceId },
+    childThreadId: child.id,
+    parentThreadId: parent.id,
+    taskCallId: "task-1",
+    subagentType: "general-purpose",
+    brief: "Send the weekly email.",
+    briefPersisted: true,
+    report: "sent",
+    entries: [{ kind: "ai", text: "sent", toolCalls: [] }],
+    toolTraces: new Map(),
+    modelAlias: null,
+    createdBy: owner,
+    seedCheckpoint: async () => null,
+  });
+  const rows = await messagesRepo.listMessageRecordsByThread({
+    teamId,
+    workspaceId,
+    threadId: child.id,
+  });
+  assert.deepEqual(
+    rows.map((row) => [row.role, row.content]),
+    [
+      ["user", "Send the weekly email."],
+      ["assistant", "sent"],
+    ],
+  );
+});

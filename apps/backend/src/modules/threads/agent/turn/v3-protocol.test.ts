@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { ToolMessage } from "@langchain/core/messages";
-import { MemorySaver } from "@langchain/langgraph";
+import { GraphInterrupt, MemorySaver } from "@langchain/langgraph";
 import { createDeepAgent } from "deepagents";
 import { tool } from "langchain";
 import { afterEach, beforeEach, describe, test } from "vitest";
@@ -15,6 +15,7 @@ import {
   adaptToolsEvent,
   adoptV3RunStream,
   interruptsToLegacyUpdatesPayload,
+  isSerializedInterruptMessage,
   unwrapCustomEvent,
 } from "./v3-protocol";
 
@@ -231,6 +232,44 @@ test("interruptsToLegacyUpdatesPayload reshapes run.interrupts into __interrupt_
       { value: { actionRequests: [] } },
     ],
   });
+});
+
+test("interruptsToLegacyUpdatesPayload collapses a delegate interrupt reported twice", () => {
+  // A `task` delegate's interrupt surfaces from its subgraph and again as it
+  // bubbles through the parent, under the same id.
+  const request = {
+    actionRequests: [{ name: "send_gmail_message", args: {} }],
+  };
+  const payload = interruptsToLegacyUpdatesPayload([
+    { interruptId: "int-1", payload: request },
+    { interruptId: "int-1", payload: request },
+    { interruptId: "int-2", payload: request },
+  ]);
+  assert.deepEqual(
+    payload.__interrupt__.map((entry) => entry.id),
+    ["int-1", "int-2"],
+  );
+});
+
+test("isSerializedInterruptMessage recognizes a GraphInterrupt's message", () => {
+  const interrupt = new GraphInterrupt([
+    { id: "int-1", value: { actionRequests: [] } },
+  ]);
+  assert.equal(isSerializedInterruptMessage(interrupt.message), true);
+});
+
+test("isSerializedInterruptMessage rejects ordinary tool errors", () => {
+  for (const message of [
+    "boom",
+    "[AGENT_TOOL_EXECUTION_TIMEOUT] Tool 'render_video' timed out.",
+    "[]",
+    '[{"value":1}]',
+    '[{"id":"x"}]',
+    '["x"]',
+    undefined,
+  ]) {
+    assert.equal(isSerializedInterruptMessage(message), false, String(message));
+  }
 });
 
 describe("v3-tool-error-rejection", () => {

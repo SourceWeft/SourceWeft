@@ -59,6 +59,7 @@ import {
   adaptToolArgDelta,
   adaptToolsEvent,
   interruptsToLegacyUpdatesPayload,
+  isSerializedInterruptMessage,
   unwrapCustomEvent,
   adoptV3RunStream,
   type V3RunStream,
@@ -376,6 +377,20 @@ export async function* invokeDeepAgentTurn(input: {
 
         const legacyToolPayload = adaptToolsEvent(data, toolNameByCallId);
         if (!legacyToolPayload) {
+          continue;
+        }
+        // An interrupt passing through a tool (`askUser` waiting for an answer,
+        // or a `task` whose delegate waits for approval) is a pause, not a
+        // failure: the call stays running and the post-drain interrupt handling
+        // below records the pause. A paused `task` keeps its child thread so the
+        // resumed call continues there.
+        if (
+          legacyToolPayload.event === "on_tool_error" &&
+          isSerializedInterruptMessage(legacyToolPayload.error)
+        ) {
+          if (!subagentEvent && legacyToolPayload.name === TASK_TOOL_NAME) {
+            projector.pauseTask(String(legacyToolPayload.toolCallId));
+          }
           continue;
         }
         // Child-thread projection of `task` delegates. A delegate's own tool

@@ -30,7 +30,12 @@ import {
   TASK_TOOL_NAME,
   transcriptToMessages,
 } from "./subagent-projection";
-import { adaptToolsEvent } from "./v3-protocol";
+import {
+  adaptToolsEvent,
+  adoptV3RunStream,
+  interruptsToLegacyUpdatesPayload,
+  isSerializedInterruptMessage,
+} from "./v3-protocol";
 
 const ECHO_MARKER = "ECHO_SUBAGENT_MARKER";
 
@@ -274,4 +279,58 @@ test("a task delegate's run is projected into a child thread the persona can con
     "ai:done",
     "human:and now?",
   ]);
+}, 30_000);
+
+test("a delegate paused for approval surfaces one interrupt and a paused, not failed, task", async () => {
+  const parentAgent = createDeepAgent({
+    model: scriptedModel() as never,
+    tools: [],
+    checkpointer: new MemorySaver(),
+    subagents: [{ ...buildEchoSubagent(), interruptOn: { echo: true } }],
+  } as never);
+
+  const run = adoptV3RunStream(
+    await (
+      parentAgent as never as {
+        streamEvents: (input: unknown, config: unknown) => Promise<unknown>;
+      }
+    ).streamEvents(
+      { messages: [new HumanMessage("please echo")] },
+      {
+        configurable: { thread_id: "thread_parent" },
+        version: "v3",
+        recursionLimit: 25,
+      },
+    ),
+  );
+  const toolNameByCallId = new Map<string, string>();
+  const taskEvents: Array<Record<string, unknown>> = [];
+  for await (const event of run as AsyncIterable<V3Event>) {
+    if (event?.method !== "tools") continue;
+    const namespace = Array.isArray(event.params?.namespace)
+      ? event.params?.namespace
+      : [];
+    if (isSubagentNamespace(namespace)) continue;
+    const payload = adaptToolsEvent(event.params?.data, toolNameByCallId);
+    if (payload?.name === TASK_TOOL_NAME) taskEvents.push(payload);
+  }
+
+  // The delegate's interrupt is reported by its subgraph and again as it
+  // bubbles through the parent; collapsed, it is one approval.
+  assert.equal(run.interrupted, true);
+  const ids = run.interrupts.map((entry) => entry.interruptId);
+  assert.ok(ids.length >= 2, `expected a repeated interrupt, got ${ids}`);
+  assert.equal(new Set(ids).size, 1);
+  assert.equal(
+    interruptsToLegacyUpdatesPayload(run.interrupts).__interrupt__.length,
+    1,
+  );
+
+  // The parent's `task` call ends in a tool error that is the interrupt itself,
+  // which the runner records as a pause rather than a failure.
+  assert.deepEqual(
+    taskEvents.map((payload) => payload.event),
+    ["on_tool_start", "on_tool_error"],
+  );
+  assert.equal(isSerializedInterruptMessage(taskEvents[1]?.error), true);
 }, 30_000);

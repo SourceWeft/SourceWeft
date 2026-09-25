@@ -596,3 +596,38 @@ export async function listChildThreadRecords(input: {
     mapRawThread(row, sourceCounts.get(row.id) ?? 0),
   );
 }
+
+/**
+ * The sub-agent thread a `task` call was projected into, found by the call id
+ * stamped on its projected messages. A `task` whose delegate paused for
+ * approval resumes in a later run under the same call id; this is how that run
+ * continues the same child thread instead of opening another.
+ */
+export async function findSubagentThreadRecordByTaskCall(input: {
+  teamId: string;
+  workspaceId: string;
+  parentThreadId: string;
+  taskCallId: string;
+}) {
+  const result = await database.query<RawThreadRow>(
+    `
+      select ${THREAD_RETURNING_SQL}
+      from threads
+      where team_id = $1
+        and workspace_id = $2
+        and parent_thread_id = $3
+        and origin = 'subagent'
+        and exists (
+          select 1
+          from messages
+          where messages.thread_id = threads.id
+            and messages.metadata->'subagent'->>'taskCallId' = $4
+        )
+      order by created_at desc
+      limit 1
+    `,
+    [input.teamId, input.workspaceId, input.parentThreadId, input.taskCallId],
+  );
+  const row = result.rows[0];
+  return row ? mapRawThread(row) : null;
+}
