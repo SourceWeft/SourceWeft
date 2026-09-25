@@ -24,7 +24,7 @@ function formatToolName(toolName: string) {
     .replace(/\b\w/g, (match) => match.toUpperCase());
 }
 
-function getToolDisplayName(toolName: string) {
+export function getToolDisplayName(toolName: string) {
   return (
     getAgentToolSlashCommand(toolName)?.displayName ?? formatToolName(toolName)
   );
