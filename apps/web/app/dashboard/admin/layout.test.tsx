@@ -1,10 +1,6 @@
 // @vitest-environment jsdom
-import { act, type ComponentProps } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { NextIntlClientProvider } from "next-intl";
+import { act } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-
-import messages from "../../../messages/en.json";
 
 const auth = vi.hoisted(() => ({ userId: "user-1" as string | undefined }));
 const audit = vi.hoisted(() => ({ getSkillMarketAdminMe: vi.fn() }));
@@ -26,37 +22,33 @@ vi.mock("next/navigation", () => ({
 }));
 
 import AdminLayout from "./layout";
+import { mount, type Mounted, unmountAll, withIntl } from "@/test/react";
 
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
-
+let view: Mounted | undefined;
 let container: HTMLDivElement;
-let root: Root;
 
 beforeEach(() => {
   auth.userId = "user-1";
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
 });
 
-afterEach(() => {
-  act(() => root.unmount());
-  container.remove();
+afterEach(async () => {
+  await unmountAll();
+  view = undefined;
   vi.resetAllMocks();
 });
 
+const layout = () =>
+  withIntl(
+    <AdminLayout>
+      <div>Private admin content</div>
+    </AdminLayout>,
+  );
+
+// A second render within one test updates the same root.
 async function render() {
-  await act(async () => {
-    root.render(
-      <NextIntlClientProvider locale="en" messages={intlMessages}>
-        <AdminLayout>
-          <div>Private admin content</div>
-        </AdminLayout>
-      </NextIntlClientProvider>,
-    );
-  });
+  if (view) return view.render(layout());
+  view = await mount(layout());
+  container = view.container;
 }
 
 test("renders admin content only after the current user is approved", async () => {

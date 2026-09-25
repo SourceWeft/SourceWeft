@@ -1,8 +1,6 @@
-import type { ComponentProps, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { NextIntlClientProvider } from "next-intl";
-import messages from "../../../../../messages/en.json";
 import zhCNMessages from "../../../../../messages/zh-CN.json";
 
 const api = vi.hoisted(() => ({ getPublicSkillRunStats: vi.fn() }));
@@ -10,18 +8,15 @@ vi.mock("../../../../../lib/public-skill-run-stats", () => api);
 
 import { PublicSkillRunStats } from "./public-skill-run-stats";
 import { PublicSkillRunStatsPanel } from "./public-skill-run-stats-view";
+import { type IntlOptions, messages, withIntl } from "@/test/react";
 
-type IntlMessages = ComponentProps<typeof NextIntlClientProvider>["messages"];
+type IntlMessages = IntlOptions["messages"];
 const catalogs: Record<string, IntlMessages> = {
-  en: messages as IntlMessages,
+  en: messages,
   "zh-CN": zhCNMessages as IntlMessages,
 };
 const renderWithIntl = (node: ReactNode, locale = "en") =>
-  renderToStaticMarkup(
-    <NextIntlClientProvider locale={locale} messages={catalogs[locale]}>
-      {node}
-    </NextIntlClientProvider>,
-  );
+  renderToStaticMarkup(withIntl(node, { locale, messages: catalogs[locale] }));
 
 const stats = {
   available: true as const,
@@ -46,7 +41,9 @@ beforeEach(() => {
 // here it only has to come out in the page's language.
 describe("PublicSkillRunStatsPanel", () => {
   test("en", () => {
-    expect(renderWithIntl(<PublicSkillRunStatsPanel stats={stats} />)).toContain(
+    expect(
+      renderWithIntl(<PublicSkillRunStatsPanel stats={stats} />),
+    ).toContain(
       "Ran 1,240 times in SourceWeft sandboxes in the last 30 days · 92% succeeded · Common issue: missing pptxgenjs",
     );
   });

@@ -1,14 +1,7 @@
 // @vitest-environment jsdom
-import { act, createElement, type ComponentProps } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { NextIntlClientProvider } from "next-intl";
+import { act, createElement } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { HubMessage, HubSnapshot } from "../chat/_components/hub-protocol";
-import messages from "../../../messages/en.json";
-
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
 
 const state = vi.hoisted(() => ({
   listener: undefined as ((message: HubMessage) => void) | undefined,
@@ -84,8 +77,8 @@ vi.mock("../chat/_components/sources-hub", () => ({
     ),
 }));
 import { DesktopHubWindow } from "./window-client";
+import { mountWithIntl, unmountAll } from "@/test/react";
 
-let root: Root;
 let container: HTMLDivElement;
 function snapshot(id: string, revision = 1): HubSnapshot {
   return {
@@ -132,24 +125,11 @@ async function click(action: string) {
   });
 }
 beforeEach(async () => {
-  (
-    globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }
-  ).IS_REACT_ACT_ENVIRONMENT = true;
   vi.clearAllMocks();
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
-  await act(async () =>
-    root.render(
-      <NextIntlClientProvider locale="en" messages={intlMessages}>
-        <DesktopHubWindow />
-      </NextIntlClientProvider>,
-    ),
-  );
+  ({ container } = await mountWithIntl(<DesktopHubWindow />));
 });
 afterEach(async () => {
-  await act(async () => root.unmount());
-  container.remove();
+  await unmountAll();
   vi.restoreAllMocks();
 });
 

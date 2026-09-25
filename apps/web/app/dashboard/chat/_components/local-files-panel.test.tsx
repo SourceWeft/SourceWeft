@@ -1,9 +1,7 @@
 // @vitest-environment jsdom
 import assert from "node:assert/strict";
-import { act, createElement, type ComponentProps, type ReactNode } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { act, createElement, type ReactNode } from "react";
 import { afterEach, beforeEach, test, vi } from "vitest";
-import { NextIntlClientProvider } from "next-intl";
 const mocks = vi.hoisted(() => ({
   request: vi.fn(),
   download: vi.fn(),
@@ -32,26 +30,24 @@ vi.mock("@sourceweft/preview/react", () => ({
     createElement("div", { "data-testid": "shared-preview" }, source.name),
 }));
 import { LocalFilesPanel } from "./local-files-panel";
-import messages from "../../../../messages/en.json";
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
-function withIntl(node: ReactNode) {
-  return (
-    <NextIntlClientProvider locale="en" messages={intlMessages}>
-      {node}
-    </NextIntlClientProvider>
-  );
+import {
+  mountWithIntl,
+  type Mounted,
+  unmountAll,
+  withIntl,
+} from "@/test/react";
+let view: Mounted | null = null;
+let container: HTMLDivElement;
+/** First call mounts; later calls re-render into the same root. */
+async function render(node: ReactNode) {
+  if (view) return view.render(withIntl(node));
+  view = await mountWithIntl(node);
+  container = view.container;
 }
-let root: Root, container: HTMLDivElement;
 beforeEach(() => {
   mocks.ready = true;
   mocks.scopeKey = "account-one";
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.useFakeTimers();
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
   mocks.preview
     .mockReset()
     .mockResolvedValue(new Blob(["physical file content"]));
@@ -67,23 +63,18 @@ beforeEach(() => {
   );
 });
 afterEach(async () => {
-  await act(async () => root.unmount());
-  container.remove();
+  await unmountAll();
+  view = null;
   vi.useRealTimers();
-  vi.unstubAllGlobals();
 });
 test("Hub Files reads the PC directory and clears its preview when offline", async () => {
-  await act(async () =>
-    root.render(
-      withIntl(
-        createElement(LocalFilesPanel, {
-          workspaceId: "w",
-          threadId: "t",
-          variant: "hub",
-          computerName: "Mac A",
-        }),
-      ),
-    ),
+  await render(
+    createElement(LocalFilesPanel, {
+      workspaceId: "w",
+      threadId: "t",
+      variant: "hub",
+      computerName: "Mac A",
+    }),
   );
   assert.match(container.textContent ?? "", /Files/);
   assert.match(container.textContent ?? "", /Mac A/);
@@ -128,20 +119,16 @@ test("Hub Files reads the PC directory and clears its preview when offline", asy
   );
 });
 test("offline retains a stale listing, disables access and refreshes on recovery", async () => {
-  const render = () =>
-    root.render(
-      withIntl(
-        createElement(LocalFilesPanel, {
-          workspaceId: "w",
-          threadId: "offline-test",
-          computerName: "Mac A",
-        }),
-      ),
-    );
-  await act(async () => render());
+  const panel = () =>
+    createElement(LocalFilesPanel, {
+      workspaceId: "w",
+      threadId: "offline-test",
+      computerName: "Mac A",
+    });
+  await render(panel());
   assert.match(container.textContent ?? "", /report.txt/);
   mocks.ready = false;
-  await act(async () => render());
+  await render(panel());
   const requestCount = mocks.request.mock.calls.length;
   await act(async () => vi.advanceTimersByTimeAsync(9000));
   assert.equal(mocks.request.mock.calls.length, requestCount);
@@ -164,34 +151,28 @@ test("offline retains a stale listing, disables access and refreshes on recovery
     path: "/local/task",
     files: [{ path: "/local/task/recovered.txt" }],
   });
-  await act(async () => render());
+  await render(panel());
   assert.match(container.textContent ?? "", /recovered.txt/);
   assert.doesNotMatch(container.textContent ?? "", /report.txt/);
 });
 test("account/session changes discard stale listings even for the same conversation id", async () => {
-  const render = () =>
-    root.render(
-      withIntl(createElement(LocalFilesPanel, { workspaceId: "w", threadId: "t" })),
-    );
-  await act(async () => render());
+  const panel = () =>
+    createElement(LocalFilesPanel, { workspaceId: "w", threadId: "t" });
+  await render(panel());
   assert.match(container.textContent ?? "", /report.txt/);
   mocks.scopeKey = "another-session";
   mocks.ready = false;
-  await act(async () => render());
+  await render(panel());
   assert.doesNotMatch(container.textContent ?? "", /report.txt/);
 });
 test("Hub search filters physical filenames without changing the file store", async () => {
-  await act(async () =>
-    root.render(
-      withIntl(
-        createElement(LocalFilesPanel, {
-          workspaceId: "w",
-          threadId: "t",
-          variant: "hub",
-          searchQuery: "missing",
-        }),
-      ),
-    ),
+  await render(
+    createElement(LocalFilesPanel, {
+      workspaceId: "w",
+      threadId: "t",
+      variant: "hub",
+      searchQuery: "missing",
+    }),
   );
   assert.match(container.textContent ?? "", /No files match/);
   assert.equal(container.textContent?.includes("report.txt"), false);
@@ -205,16 +186,12 @@ test("directories navigate instead of opening a file preview", async () => {
       ? []
       : [{ path: "/local/task/docs", is_dir: true }],
   }));
-  await act(async () =>
-    root.render(
-      withIntl(
-        createElement(LocalFilesPanel, {
-          workspaceId: "w",
-          threadId: "t",
-          variant: "hub",
-        }),
-      ),
-    ),
+  await render(
+    createElement(LocalFilesPanel, {
+      workspaceId: "w",
+      threadId: "t",
+      variant: "hub",
+    }),
   );
   const folder = container.querySelector<HTMLButtonElement>(
     '[aria-label="Open folder docs"]',
@@ -236,10 +213,8 @@ test("preview opens immediately without refetching the list and ignores a late r
     finish = resolve;
   });
   mocks.preview.mockReturnValue(pending);
-  await act(async () =>
-    root.render(
-      withIntl(createElement(LocalFilesPanel, { workspaceId: "w", threadId: "t" })),
-    ),
+  await render(
+    createElement(LocalFilesPanel, { workspaceId: "w", threadId: "t" }),
   );
   const file = container.querySelector<HTMLButtonElement>(
     '[aria-label="Preview report.txt"]',
@@ -274,10 +249,8 @@ test("preview opens immediately without refetching the list and ignores a late r
 
 test("failed binary reads show the error and retain the download action", async () => {
   mocks.preview.mockRejectedValue(new Error("File read failed"));
-  await act(async () =>
-    root.render(
-      withIntl(createElement(LocalFilesPanel, { workspaceId: "w", threadId: "t" })),
-    ),
+  await render(
+    createElement(LocalFilesPanel, { workspaceId: "w", threadId: "t" }),
   );
   const file = container.querySelector<HTMLButtonElement>(
     '[aria-label="Preview report.txt"]',
@@ -297,12 +270,8 @@ test("failed binary reads show the error and retain the download action", async 
 });
 
 test("changing conversations closes the old preview and resets directory navigation", async () => {
-  await act(async () =>
-    root.render(
-      withIntl(
-        createElement(LocalFilesPanel, { workspaceId: "w", threadId: "first" }),
-      ),
-    ),
+  await render(
+    createElement(LocalFilesPanel, { workspaceId: "w", threadId: "first" }),
   );
   const file = container.querySelector<HTMLButtonElement>(
     '[aria-label="Preview report.txt"]',
@@ -310,12 +279,8 @@ test("changing conversations closes the old preview and resets directory navigat
   assert(file);
   await act(async () => file.click());
   assert.ok(document.querySelector('[role="dialog"]'));
-  await act(async () =>
-    root.render(
-      withIntl(
-        createElement(LocalFilesPanel, { workspaceId: "w", threadId: "second" }),
-      ),
-    ),
+  await render(
+    createElement(LocalFilesPanel, { workspaceId: "w", threadId: "second" }),
   );
   assert.equal(document.querySelector('[role="dialog"]'), null);
   assert.equal(

@@ -1,31 +1,10 @@
 // @vitest-environment jsdom
 
 import assert from "node:assert/strict";
-import {
-  act,
-  createElement,
-  type ComponentProps,
-  type ReactNode,
-} from "react";
-import { createRoot } from "react-dom/client";
-import { NextIntlClientProvider } from "next-intl";
-import { beforeEach, test, vi } from "vitest";
+import { createElement } from "react";
+import { afterEach, beforeEach, test, vi } from "vitest";
 import "../artifact-render-host";
 import type { ArtifactStatusSnapshot, MessageRenderBlock } from "./types";
-
-import messages from "../../../../../messages/en.json";
-
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
-
-function withIntl(node: ReactNode) {
-  return (
-    <NextIntlClientProvider locale="en" messages={intlMessages}>
-      {node}
-    </NextIntlClientProvider>
-  );
-}
 
 const getArtifactMock = vi.hoisted(() => vi.fn());
 
@@ -34,15 +13,14 @@ vi.mock("../../../../../lib/sdk", () => ({
 }));
 
 import { ArtifactOutputCard } from "./artifact-output-card";
+import { flush, mountWithIntl, unmountAll } from "@/test/react";
 
 beforeEach(() => {
   getArtifactMock.mockReset();
 });
+afterEach(unmountAll);
 
 test("renders a committed sub-agent artifact without generation motion", async () => {
-  const container = document.createElement("div");
-  document.body.append(container);
-  const root = createRoot(container);
   const snapshot: ArtifactStatusSnapshot = {
     artifactType: "slides",
     capabilities: {
@@ -83,24 +61,19 @@ test("renders a committed sub-agent artifact without generation motion", async (
     type: "artifact_output",
   };
 
-  await act(async () => {
-    root.render(
-      withIntl(
-        createElement(ArtifactOutputCard, {
-          artifactStatuses: new Map([[snapshot.id, snapshot]]),
-          block,
-          workspaceId: snapshot.workspaceId,
-        }),
-      ),
-    );
-  });
+  const { container } = await mountWithIntl(
+    createElement(ArtifactOutputCard, {
+      artifactStatuses: new Map([[snapshot.id, snapshot]]),
+      block,
+      workspaceId: snapshot.workspaceId,
+    }),
+  );
 
   assert.match(container.textContent ?? "", /Demo deck/);
   assert.match(container.textContent ?? "", /general-purpose/);
   assert.equal(container.querySelectorAll(".animate-spin").length, 0);
 
-  await act(async () => root.unmount());
-  container.remove();
+  await unmountAll();
 });
 
 test("a stale non-terminal parent snapshot does not permanently block the card from refreshing to ready", async () => {
@@ -159,33 +132,21 @@ test("a stale non-terminal parent snapshot does not permanently block the card f
     type: "artifact_output",
   };
 
-  const container = document.createElement("div");
-  document.body.append(container);
-  const root = createRoot(container);
-
-  await act(async () => {
-    root.render(
-      withIntl(
-        createElement(ArtifactOutputCard, {
-          artifactStatuses: new Map([
-            [staleRunningSnapshot.id, staleRunningSnapshot],
-          ]),
-          block,
-          workspaceId: staleRunningSnapshot.workspaceId,
-        }),
-      ),
-    );
-  });
+  const { container } = await mountWithIntl(
+    createElement(ArtifactOutputCard, {
+      artifactStatuses: new Map([
+        [staleRunningSnapshot.id, staleRunningSnapshot],
+      ]),
+      block,
+      workspaceId: staleRunningSnapshot.workspaceId,
+    }),
+  );
   // Let the corrective fetch's promise resolve and the resulting state update flush.
-  await act(async () => {
-    await Promise.resolve();
-    await Promise.resolve();
-  });
+  await flush(2);
 
   assert.equal(getArtifactMock.mock.calls.length, 1);
   assert.doesNotMatch(container.textContent ?? "", /unavailable/i);
   assert.match(container.textContent ?? "", /Refreshed deck/);
 
-  await act(async () => root.unmount());
-  container.remove();
+  await unmountAll();
 });

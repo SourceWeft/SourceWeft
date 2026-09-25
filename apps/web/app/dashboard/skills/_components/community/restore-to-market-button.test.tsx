@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
-import { act, type ComponentProps, type ReactNode } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { act } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 
 const audit = vi.hoisted(() => ({ restoreClaimedRepoToMarket: vi.fn() }));
@@ -12,41 +11,22 @@ vi.mock("../../../../../lib/skill-market-audit", async (original) => ({
 vi.mock("sonner", () => ({ toast }));
 
 import { RestoreToMarketButton } from "./restore-to-market-button";
-import { NextIntlClientProvider } from "next-intl";
-import messages from "../../../../../messages/en.json";
+import { mountWithIntl, unmountAll } from "@/test/react";
 
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
-const withIntl = (node: ReactNode) => (
-  <NextIntlClientProvider locale="en" messages={intlMessages}>
-    {node}
-  </NextIntlClientProvider>
-);
-
-let root: Root;
 let container: HTMLDivElement;
-afterEach(() => {
-  act(() => root.unmount());
-  container.remove();
+afterEach(async () => {
+  await unmountAll();
   vi.resetAllMocks();
 });
 
 async function render(onRestored = vi.fn()) {
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
-  await act(async () =>
-    root.render(
-      withIntl(
-        <RestoreToMarketButton
-          claimId="claim_1"
-          onRestored={onRestored}
-          workspaceId="ws_1"
-        />,
-      ),
-    ),
-  );
+  ({ container } = await mountWithIntl(
+    <RestoreToMarketButton
+      claimId="claim_1"
+      onRestored={onRestored}
+      workspaceId="ws_1"
+    />,
+  ));
   return onRestored;
 }
 

@@ -1,19 +1,10 @@
 // @vitest-environment jsdom
-import { act, createElement, type ComponentProps } from "react";
-import { createRoot } from "react-dom/client";
+import { act, createElement } from "react";
 import { expect, test, vi } from "vitest";
-import { NextIntlClientProvider } from "next-intl";
 import { AddSourceDialog } from "./dialogs";
-import enMessages from "../../../../../../messages/en.json";
-
-const intlMessages = enMessages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
+import { mountWithIntl, unmountAll, withIntl } from "@/test/react";
 
 test("file submission waits for a usable workspace, then resumes without a timer", async () => {
-  const element = document.createElement("div");
-  document.body.append(element);
-  const root = createRoot(element);
   const upload = vi.fn();
   const noop = () => {};
   const props = {
@@ -51,28 +42,21 @@ test("file submission waits for a usable workspace, then resumes without a timer
       (node) => node.textContent?.trim() === "Upload files",
     )!;
   try {
-    await act(async () =>
-      root.render(
-        <NextIntlClientProvider locale="en" messages={intlMessages}>
-          {createElement(AddSourceDialog, { ...props, workspaceReady: false })}
-        </NextIntlClientProvider>,
-      ),
+    const view = await mountWithIntl(
+      createElement(AddSourceDialog, { ...props, workspaceReady: false }),
     );
     expect(button().disabled).toBe(true);
     await act(async () => button().click());
     expect(upload).not.toHaveBeenCalled();
-    await act(async () =>
-      root.render(
-        <NextIntlClientProvider locale="en" messages={intlMessages}>
-          {createElement(AddSourceDialog, { ...props, workspaceReady: true })}
-        </NextIntlClientProvider>,
+    await view.render(
+      withIntl(
+        createElement(AddSourceDialog, { ...props, workspaceReady: true }),
       ),
     );
     expect(button().disabled).toBe(false);
     await act(async () => button().click());
     expect(upload).toHaveBeenCalledTimes(1);
   } finally {
-    await act(async () => root.unmount());
-    element.remove();
+    await unmountAll();
   }
 });

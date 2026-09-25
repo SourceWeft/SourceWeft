@@ -1,24 +1,9 @@
 // @vitest-environment jsdom
-import {
-  act,
-  createElement,
-  type ComponentProps,
-  type ReactNode,
-} from "react";
+import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { NextIntlClientProvider } from "next-intl";
-import messages from "../../../../../messages/en.json";
 import { hubSkillMemory } from "../../../../../lib/hub-skill-memory";
-
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
-const withIntl = (node: ReactNode) => (
-  <NextIntlClientProvider locale="en" messages={intlMessages}>
-    {node}
-  </NextIntlClientProvider>
-);
+import { withIntl } from "@/test/react";
 
 vi.mock("../../../../../lib/auth-client", () => ({
   authClient: { useSession: () => ({ data: { user: { id: "user" } } }) },
@@ -89,7 +74,6 @@ async function render(threadId: string) {
   );
 }
 beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   hubSkillMemory.clear();
   savedSkillIds.clear();
   window.localStorage.clear();
@@ -98,7 +82,6 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   hubSkillMemory.clear();
-  vi.unstubAllGlobals();
 });
 
 it("keeps a deselected default skill deselected after A → B → A", async () => {

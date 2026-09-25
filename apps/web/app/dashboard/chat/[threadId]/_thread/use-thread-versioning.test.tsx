@@ -7,7 +7,6 @@ import {
   useStreamingAssistantTransientState,
   type ChatMessageItem,
 } from "../streaming-assistant-state";
-Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 function message(
   id: string,
   role: "user" | "assistant",

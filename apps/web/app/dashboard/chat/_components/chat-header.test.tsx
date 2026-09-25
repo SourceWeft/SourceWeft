@@ -1,14 +1,9 @@
 import assert from "node:assert/strict";
-import { createElement, type ComponentProps } from "react";
+import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, test, vi } from "vitest";
-import { NextIntlClientProvider } from "next-intl";
 import { ChatHeader } from "./chat-header";
-import messages from "../../../../messages/en.json";
-
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
+import { withIntl } from "@/test/react";
 
 const layout = vi.hoisted(() => ({
   conversationsOpen: true,
@@ -34,8 +29,8 @@ vi.mock("./chat-hub-context", () => ({
 
 function renderHeader() {
   return renderToStaticMarkup(
-    <NextIntlClientProvider locale="en" messages={intlMessages}>
-      {createElement(ChatHeader, {
+    withIntl(
+      createElement(ChatHeader, {
         threadTitle: "Conversation title",
         workspaceId: "workspace",
         isPersistentLayout: true,
@@ -44,8 +39,8 @@ function renderHeader() {
         onOpenHub: () => undefined,
         selectedModels: { llm: null, image: null, vision: null },
         setSelectedModels: () => undefined,
-      })}
-    </NextIntlClientProvider>,
+      }),
+    ),
   );
 }
 

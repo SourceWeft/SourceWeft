@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
-import { act, type ComponentProps, type ReactNode } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { act } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 
 const api = vi.hoisted(() => ({
@@ -25,23 +24,11 @@ import {
   SkillMarketSettingsAdmin,
   overviewBillingRequest,
 } from "./skill-market-settings-admin";
-import { NextIntlClientProvider } from "next-intl";
-import messages from "../../../../../messages/en.json";
+import { button, mountWithIntl, typeInto, unmountAll } from "@/test/react";
 
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
-const withIntl = (node: ReactNode) => (
-  <NextIntlClientProvider locale="en" messages={intlMessages}>
-    {node}
-  </NextIntlClientProvider>
-);
-
-let root: Root;
 let container: HTMLDivElement;
-afterEach(() => {
-  act(() => root?.unmount());
-  container?.remove();
+afterEach(async () => {
+  await unmountAll();
   vi.resetAllMocks();
 });
 
@@ -54,10 +41,7 @@ const status = {
 };
 
 async function render() {
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
-  await act(async () => root.render(withIntl(<SkillMarketSettingsAdmin />)));
+  ({ container } = await mountWithIntl(<SkillMarketSettingsAdmin />));
 }
 
 function select(label: string) {
@@ -162,14 +146,7 @@ test("a saved setting preselects its team and workspace; a refusal shows the rea
   const member = container.querySelector<HTMLInputElement>(
     'input[aria-label="Billed member (user id)"]',
   )!;
-  await act(async () => {
-    const setter = Object.getOwnPropertyDescriptor(
-      HTMLInputElement.prototype,
-      "value",
-    )!.set!;
-    setter.call(member, "user_9");
-    member.dispatchEvent(new Event("input", { bubbles: true }));
-  });
+  await act(async () => typeInto(member, "user_9"));
   await act(async () =>
     container
       .querySelector("form")!
@@ -183,10 +160,6 @@ test("a saved setting preselects its team and workspace; a refusal shows the rea
   expect(container.textContent).toContain("not a member of this workspace");
 });
 
-const button = (label: string) =>
-  [...container.querySelectorAll("button")].find(
-    (node) => node.textContent?.trim() === label,
-  )!;
 test("preview preserves manual categories and queues only eligible reviewed batch IDs", async () => {
   api.getSkillOverviewBilling.mockResolvedValue({
     billing: null,

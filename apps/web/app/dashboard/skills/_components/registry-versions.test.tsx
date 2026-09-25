@@ -1,24 +1,19 @@
 // @vitest-environment jsdom
-import { act, type ComponentProps, type ReactNode } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { act } from "react";
 import { afterEach, expect, test, vi } from "vitest";
-import { NextIntlClientProvider } from "next-intl";
 import type { RegistryVersionDetail } from "@sourceweft/contracts";
 import { RegistryVersions } from "./registry-versions";
-import messages from "../../../../messages/en.json";
+import {
+  button,
+  mount,
+  mountWithIntl,
+  unmountAll,
+  withIntl,
+} from "@/test/react";
 
 // Components under next-intl need the provider in scope; feed it the shell
 // catalog so the rendered chrome matches the English source of truth.
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
-function withIntl(node: ReactNode) {
-  return (
-    <NextIntlClientProvider locale="en" messages={intlMessages} timeZone="UTC">
-      {node}
-    </NextIntlClientProvider>
-  );
-}
+const intl = { timeZone: "UTC" };
 
 const api = vi.hoisted(() => ({
   listRegistryVersions: vi.fn(),
@@ -26,11 +21,9 @@ const api = vi.hoisted(() => ({
   switchRegistryVersion: vi.fn(),
 }));
 vi.mock("../../../../lib/sdk", () => ({ contentClient: api }));
-let root: Root;
 let container: HTMLDivElement;
-afterEach(() => {
-  act(() => root?.unmount());
-  container?.remove();
+afterEach(async () => {
+  await unmountAll();
   vi.resetAllMocks();
 });
 
@@ -70,22 +63,16 @@ test("compact version control separates revision and review status, with details
   });
   api.getRegistryVersion.mockResolvedValue(detail);
   const onView = vi.fn();
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
-  await act(async () =>
-    root.render(
-      withIntl(
-        <RegistryVersions
-          workspaceId="workspace"
-          catalogId="skill:v1"
-          initialVersionId="v1"
-          onView={onView}
-          onChanged={() => {}}
-        />,
-      ),
-    ),
-  );
+  ({ container } = await mountWithIntl(
+    <RegistryVersions
+      workspaceId="workspace"
+      catalogId="skill:v1"
+      initialVersionId="v1"
+      onView={onView}
+      onChanged={() => {}}
+    />,
+    intl,
+  ));
   expect(container.querySelector('[role="combobox"]')?.textContent).toBe(
     "41bbe19d",
   );
@@ -116,9 +103,6 @@ test("changing the viewed version clears old documents; a failed load stays empt
     .mockRejectedValueOnce(new Error("Version unavailable"))
     .mockResolvedValueOnce(second);
   const onView = vi.fn();
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
   const render = (id: string) =>
     withIntl(
       <RegistryVersions
@@ -129,9 +113,11 @@ test("changing the viewed version clears old documents; a failed load stays empt
         onView={onView}
         onChanged={() => {}}
       />,
+      intl,
     );
-  await act(async () => root.render(render("v1")));
-  await act(async () => root.render(render("v2")));
+  const view = await mount(render("v1"));
+  ({ container } = view);
+  await view.render(render("v2"));
   expect(onView).toHaveBeenLastCalledWith(null);
   expect(container.querySelector('[role="alert"]')?.textContent).toContain(
     "Version unavailable",
@@ -169,26 +155,16 @@ test("a version that can do more asks in the app's own dialog, names what change
   );
   const confirm = vi.spyOn(window, "confirm");
   const onChanged = vi.fn();
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
-  await act(async () =>
-    root.render(
-      withIntl(
-        <RegistryVersions
-          workspaceId="workspace"
-          catalogId="skill:v2"
-          initialVersionId="v2"
-          onView={() => {}}
-          onChanged={onChanged}
-        />,
-      ),
-    ),
+  await mountWithIntl(
+    <RegistryVersions
+      workspaceId="workspace"
+      catalogId="skill:v2"
+      initialVersionId="v2"
+      onView={() => {}}
+      onChanged={onChanged}
+    />,
+    intl,
   );
-  const button = (label: string) =>
-    [...document.body.querySelectorAll("button")].find(
-      (node) => node.textContent?.trim() === label,
-    )!;
 
   await act(async () => button("Use this version").click());
   const dialog = document.body.querySelector('[role="alertdialog"]')!;
@@ -224,7 +200,11 @@ test("an install behind the current version is offered the update, through the s
   api.listRegistryVersions.mockImplementation(async () => ({
     items: [current, installed],
     nextCursor: null,
-    installed: { id: "ws-skill", skillVersionId: installedVersionId, enabled: true },
+    installed: {
+      id: "ws-skill",
+      skillVersionId: installedVersionId,
+      enabled: true,
+    },
   }));
   api.getRegistryVersion.mockImplementation(
     async (_ws: string, _catalog: string, id: string) => ({
@@ -247,29 +227,23 @@ test("an install behind the current version is offered the update, through the s
     },
   );
   const onChanged = vi.fn();
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
   // Viewing the INSTALLED version: the update is offered all the same.
-  await act(async () =>
-    root.render(withIntl(
-      <RegistryVersions
-        workspaceId="workspace"
-        catalogId="skill:v1"
-        initialVersionId="v1"
-        currentVersionId="v2"
-        onView={() => {}}
-        onChanged={onChanged}
-      />),
-    ),
-  );
-  const button = (label: string) =>
-    [...document.body.querySelectorAll("button")].find(
-      (node) => node.textContent?.trim() === label,
-    )!;
+  ({ container } = await mountWithIntl(
+    <RegistryVersions
+      workspaceId="workspace"
+      catalogId="skill:v1"
+      initialVersionId="v1"
+      currentVersionId="v2"
+      onView={() => {}}
+      onChanged={onChanged}
+    />,
+    intl,
+  ));
   const notice = () =>
     container.querySelector('[data-testid="skill-update-notice"]');
-  expect(notice()?.textContent).toContain("A newer version is available: cccccccc.");
+  expect(notice()?.textContent).toContain(
+    "A newer version is available: cccccccc.",
+  );
   // Nothing moved on its own.
   expect(api.switchRegistryVersion).not.toHaveBeenCalled();
 
@@ -306,28 +280,29 @@ test("an install behind the current version is offered the update, through the s
 test("viewing the current version while an older one is installed offers the update and keeps the usual control", async () => {
   const base = fixture().version;
   const installed = { ...base, id: "v1", status: "published" as const };
-  const current = { ...base, id: "v2", status: "published" as const, isCurrent: true };
+  const current = {
+    ...base,
+    id: "v2",
+    status: "published" as const,
+    isCurrent: true,
+  };
   api.listRegistryVersions.mockResolvedValue({
     items: [current, installed],
     nextCursor: null,
     installed: { id: "ws-skill", skillVersionId: "v1", enabled: true },
   });
   api.getRegistryVersion.mockResolvedValue({ ...fixture(), version: current });
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
   // No `currentVersionId` from the caller: the list's own current version serves.
-  await act(async () =>
-    root.render(withIntl(
-      <RegistryVersions
-        workspaceId="workspace"
-        catalogId="skill:v2"
-        initialVersionId="v2"
-        onView={() => {}}
-        onChanged={() => {}}
-      />),
-    ),
-  );
+  ({ container } = await mountWithIntl(
+    <RegistryVersions
+      workspaceId="workspace"
+      catalogId="skill:v2"
+      initialVersionId="v2"
+      onView={() => {}}
+      onChanged={() => {}}
+    />,
+    intl,
+  ));
   expect(
     container.querySelector('[data-testid="skill-update-notice"]'),
   ).not.toBeNull();
@@ -369,28 +344,22 @@ test("the update notice says what the newer version changed", async () => {
           : null,
     }),
   );
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
   // Viewing the installed version: the target's changelog is fetched for it.
-  await act(async () =>
-    root.render(withIntl(
-      <RegistryVersions
-        workspaceId="workspace"
-        catalogId="skill:v1"
-        initialVersionId="v1"
-        currentVersionId="v2"
-        onView={() => {}}
-        onChanged={() => {}}
-      />),
-    ),
-  );
+  ({ container } = await mountWithIntl(
+    <RegistryVersions
+      workspaceId="workspace"
+      catalogId="skill:v1"
+      initialVersionId="v1"
+      currentVersionId="v2"
+      onView={() => {}}
+      onChanged={() => {}}
+    />,
+    intl,
+  ));
   const changes = container.querySelector(
     '[data-testid="skill-update-changes"]',
   );
-  expect(changes?.textContent).toContain(
-    "What changed: 3 files, 1 new script",
-  );
+  expect(changes?.textContent).toContain("What changed: 3 files, 1 new script");
   expect(changes?.querySelector("a")?.href).toBe(
     "https://github.com/acme/skills/compare/aaa...ccc",
   );

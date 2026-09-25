@@ -1,54 +1,27 @@
 // @vitest-environment jsdom
 
-import { act, createElement, type ComponentProps } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { act, createElement } from "react";
 import { afterEach, expect, test } from "vitest";
-import { NextIntlClientProvider } from "next-intl";
 
 import { SkillRow } from "./skill-row";
 import type { HubSkillItem } from "./use-skills";
-import enMessages from "../../../../../../messages/en.json";
+import { mountWithIntl, unmountAll } from "@/test/react";
 
-const intlMessages = enMessages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
+afterEach(unmountAll);
 
-(
-  globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }
-).IS_REACT_ACT_ENVIRONMENT = true;
-
-let root: Root | null = null;
-let container: HTMLDivElement | null = null;
-
-afterEach(() => {
-  act(() => root?.unmount());
-  container?.remove();
-  root = null;
-  container = null;
-});
-
-function render(skill: HubSkillItem, selected: boolean): string {
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
-  act(() => {
-    root?.render(
-      <NextIntlClientProvider locale="en" messages={intlMessages}>
-        {createElement(SkillRow, {
-          onOpenSkill: () => {},
-          onToggle: () => {},
-          selected,
-          skill,
-        })}
-      </NextIntlClientProvider>,
-    );
-  });
+async function render(skill: HubSkillItem, selected: boolean): Promise<string> {
+  const { container } = await mountWithIntl(
+    createElement(SkillRow, {
+      onOpenSkill: () => {},
+      onToggle: () => {},
+      selected,
+      skill,
+    }),
+  );
   return container.textContent ?? "";
 }
 
-function registrySkill(
-  overrides: Partial<HubSkillItem> = {},
-): HubSkillItem {
+function registrySkill(overrides: Partial<HubSkillItem> = {}): HubSkillItem {
   return {
     catalogId: "def-1:ver-1",
     description: "Builds slide decks.",
@@ -66,56 +39,52 @@ function registrySkill(
 
 // A switched-off skill that ships scripts says so on its row, so whoever turns
 // it back on knows that doing so makes code runnable, not just instructions.
-test("an off executable registry skill says why it is off", () => {
-  const text = render(
+test("an off executable registry skill says why it is off", async () => {
+  const text = await render(
     registrySkill({ registryCapability: "executable" }),
     false,
   );
   expect(text).toContain("Ships scripts");
 });
 
-test("the same skill switched on drops the notice", () => {
-  const text = render(registrySkill({ registryCapability: "executable" }), true);
+test("the same skill switched on drops the notice", async () => {
+  const text = await render(
+    registrySkill({ registryCapability: "executable" }),
+    true,
+  );
   expect(text).not.toContain("Ships scripts");
 });
 
-test("a prompt-only skill never shows it, on or off", () => {
+test("a prompt-only skill never shows it, on or off", async () => {
   expect(
-    render(registrySkill({ registryCapability: "prompt-only" }), false),
+    await render(registrySkill({ registryCapability: "prompt-only" }), false),
   ).not.toContain("Ships scripts");
   // Builtins and custom skills carry no registry capability at all.
-  expect(render(registrySkill(), false)).not.toContain("Ships scripts");
+  expect(await render(registrySkill(), false)).not.toContain("Ships scripts");
 });
 
 // The agent installs as the user, so the row is the only place this shows.
-test("a skill the agent installed says so; one a person installed does not", () => {
-  expect(render(registrySkill({ installedVia: "agent" }), true)).toContain(
-    "Added by agent",
-  );
-  expect(render(registrySkill(), true)).not.toContain("Added by agent");
+test("a skill the agent installed says so; one a person installed does not", async () => {
+  expect(
+    await render(registrySkill({ installedVia: "agent" }), true),
+  ).toContain("Added by agent");
+  expect(await render(registrySkill(), true)).not.toContain("Added by agent");
 });
 
 // An install stays on the version it was made with; the row only points at the
 // skill's page, where updating asks first. Nothing updates from the hub.
-test("a community skill behind its current version links to its versions; clicking the link does not toggle the row", () => {
+test("a community skill behind its current version links to its versions; clicking the link does not toggle the row", async () => {
   let toggled = 0;
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
-  act(() => {
-    root?.render(
-      <NextIntlClientProvider locale="en" messages={intlMessages}>
-        {createElement(SkillRow, {
-          onOpenSkill: () => {},
-          onToggle: () => {
-            toggled += 1;
-          },
-          selected: true,
-          skill: registrySkill({ updateAvailable: true }),
-        })}
-      </NextIntlClientProvider>,
-    );
-  });
+  const { container } = await mountWithIntl(
+    createElement(SkillRow, {
+      onOpenSkill: () => {},
+      onToggle: () => {
+        toggled += 1;
+      },
+      selected: true,
+      skill: registrySkill({ updateAvailable: true }),
+    }),
+  );
   const link = container.querySelector("a")!;
   expect(link.textContent).toContain("Update available");
   expect(link.getAttribute("href")).toBe(
@@ -127,10 +96,10 @@ test("a community skill behind its current version links to its versions; clicki
   expect(toggled).toBe(0);
 });
 
-test("an up-to-date skill, and a skill with no version switch, show no update badge", () => {
-  expect(render(registrySkill(), true)).not.toContain("Update available");
+test("an up-to-date skill, and a skill with no version switch, show no update badge", async () => {
+  expect(await render(registrySkill(), true)).not.toContain("Update available");
   expect(
-    render(
+    await render(
       registrySkill({ sourceType: "workspace_custom", updateAvailable: true }),
       true,
     ),

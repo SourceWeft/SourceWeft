@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
-import { act, type ComponentProps, type ReactNode } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { act } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type {
   ListSkillReviewsResponse,
@@ -28,23 +27,16 @@ vi.mock("../../../../../lib/skill-reviews", async (importActual) => ({
 vi.mock("sonner", () => ({ toast }));
 
 import { SkillReviews } from "./skill-reviews";
-import { NextIntlClientProvider } from "next-intl";
-import messages from "../../../../../messages/en.json";
+import {
+  button,
+  buttons,
+  click,
+  flush,
+  mountWithIntl,
+  typeInto,
+  unmountAll,
+} from "@/test/react";
 
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
-const withIntl = (node: ReactNode) => (
-  <NextIntlClientProvider locale="en" messages={intlMessages}>
-    {node}
-  </NextIntlClientProvider>
-);
-
-(
-  globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
-).IS_REACT_ACT_ENVIRONMENT = true;
-
-let root: Root;
 let container: HTMLDivElement;
 
 function review(id: string, extra: Partial<SkillReview> = {}): SkillReview {
@@ -78,48 +70,24 @@ function page(
   };
 }
 
-const flush = () => act(async () => {});
-
 async function renderReviews() {
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
-  await act(async () =>
-    root.render(
-      withIntl(
-        <SkillReviews
-          skillId="skill-1"
-          catalogId="skill-1:v1"
-          slug="pdf-tools"
-          workspaceId="ws-1"
-        />,
-      ),
-    ),
-  );
+  ({ container } = await mountWithIntl(
+    <SkillReviews
+      skillId="skill-1"
+      catalogId="skill-1:v1"
+      slug="pdf-tools"
+      workspaceId="ws-1"
+    />,
+  ));
   await flush();
 }
 
-const buttons = (label: string, scope: ParentNode = container) =>
-  [...scope.querySelectorAll("button")].filter(
-    (node) => node.textContent?.trim() === label,
-  );
-const button = (label: string, scope?: ParentNode) => buttons(label, scope)[0]!;
 const item = (id: string) =>
   container.querySelector<HTMLElement>(
     `[data-review-id="${id}"]:not([data-testid="skill-review-own"] *)`,
   )!;
 const own = () =>
   container.querySelector<HTMLElement>('[data-testid="skill-review-own"]')!;
-const click = (node: HTMLElement) => act(async () => node.click());
-
-function typeInto(textarea: HTMLTextAreaElement, value: string) {
-  const setter = Object.getOwnPropertyDescriptor(
-    HTMLTextAreaElement.prototype,
-    "value",
-  )!.set!;
-  setter.call(textarea, value);
-  textarea.dispatchEvent(new Event("input", { bubbles: true }));
-}
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -129,10 +97,7 @@ beforeEach(() => {
   api.deleteMySkillReview.mockResolvedValue({ deleted: true });
   api.setSkillReviewStatus.mockResolvedValue({});
 });
-afterEach(() => {
-  act(() => root.unmount());
-  container.remove();
-});
+afterEach(unmountAll);
 
 test("shows the summary and the list, newest first by default", async () => {
   await renderReviews();
@@ -330,8 +295,7 @@ test("a skill whose reviews the viewer cannot read shows nothing; other failures
   api.listSkillReviews.mockRejectedValue({ status: 404 });
   await renderReviews();
   expect(container.querySelector('[data-testid="skill-reviews"]')).toBeNull();
-  act(() => root.unmount());
-  container.remove();
+  await unmountAll();
 
   api.listSkillReviews.mockRejectedValueOnce({ status: 500 });
   api.listSkillReviews.mockResolvedValueOnce(page());

@@ -1,20 +1,10 @@
 // @vitest-environment jsdom
 
-import { act, createElement, StrictMode, type ComponentProps } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { act, createElement, StrictMode } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { NextIntlClientProvider } from "next-intl";
 
 import type { SourceItem } from "../source-types";
-import enMessages from "../../../../../messages/en.json";
-
-const intlMessages = enMessages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
-
-(
-  globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }
-).IS_REACT_ACT_ENVIRONMENT = true;
+import { mountWithIntl, unmountAll } from "@/test/react";
 
 // Disable the connector sync-run polling engine entirely: its timers +
 // BroadcastChannel are what made mounting SourcesHub hang under jsdom. The
@@ -85,9 +75,6 @@ vi.mock("../../../../../lib/sdk", () => ({
 
 import { SourcesHub } from "./index";
 
-let root: Root | null = null;
-let container: HTMLDivElement | null = null;
-
 type SourcesHubProps = Parameters<typeof SourcesHub>[0];
 
 // Stable prop values shared across renders. SourcesHub declares many props with
@@ -102,10 +89,6 @@ async function renderHub(
   props: Partial<SourcesHubProps> = {},
   options: { strict?: boolean } = {},
 ) {
-  container = document.createElement("div");
-  document.body.append(container);
-  const created = createRoot(container);
-  root = created;
   const merged: SourcesHubProps = {
     mode: "new",
     selectedIds: EMPTY,
@@ -124,24 +107,15 @@ async function renderHub(
     initialSources: EMPTY,
     ...props,
   };
-  await act(async () => {
-    const hub = createElement(SourcesHub, merged);
-    created.render(
-      <NextIntlClientProvider locale="en" messages={intlMessages}>
-        {options.strict ? <StrictMode>{hub}</StrictMode> : hub}
-      </NextIntlClientProvider>,
-    );
-  });
+  const hub = createElement(SourcesHub, merged);
+  const { container } = await mountWithIntl(
+    options.strict ? <StrictMode>{hub}</StrictMode> : hub,
+  );
   return container;
 }
 
 afterEach(async () => {
-  await act(async () => {
-    root?.unmount();
-  });
-  container?.remove();
-  root = null;
-  container = null;
+  await unmountAll();
   window.sessionStorage.clear();
   vi.clearAllMocks();
 });
@@ -199,9 +173,11 @@ test("Hub does not warn during a local connection recheck and reports confirmed 
     availability: { ready: true },
   };
   let resolveExecution!: (value: unknown) => void;
-  localRequestMock.mockReturnValueOnce(new Promise((resolve) => {
-    resolveExecution = resolve;
-  }));
+  localRequestMock.mockReturnValueOnce(
+    new Promise((resolve) => {
+      resolveExecution = resolve;
+    }),
+  );
   const el = await renderHub({
     mode: "thread",
     threadId: "local-recheck",
@@ -211,12 +187,13 @@ test("Hub does not warn during a local connection recheck and reports confirmed 
   await act(async () => resolveExecution(online));
   expect(el.querySelector('[role="alert"]')).toBeNull();
 
-  localRequestMock.mockReturnValueOnce(new Promise((resolve) => {
-    resolveExecution = resolve;
-  }));
-  const { reportLocalAvailabilityError } = await import(
-    "../../../../../lib/local-availability-events"
+  localRequestMock.mockReturnValueOnce(
+    new Promise((resolve) => {
+      resolveExecution = resolve;
+    }),
   );
+  const { reportLocalAvailabilityError } =
+    await import("../../../../../lib/local-availability-events");
   await act(async () => {
     reportLocalAvailabilityError(
       "/v1/workspaces/ws1/threads/local-recheck/files",
@@ -224,10 +201,16 @@ test("Hub does not warn during a local connection recheck and reports confirmed 
     );
   });
   expect(el.querySelector('[role="alert"]')).toBeNull();
-  await act(async () => resolveExecution({
-    ...online,
-    availability: { ready: false, code: "DEVICE_OFFLINE", message: "Computer offline" },
-  }));
+  await act(async () =>
+    resolveExecution({
+      ...online,
+      availability: {
+        ready: false,
+        code: "DEVICE_OFFLINE",
+        message: "Computer offline",
+      },
+    }),
+  );
   expect(el.querySelector('[role="alert"]')?.textContent).toBe(
     "Unable to read the file location: Computer offline",
   );

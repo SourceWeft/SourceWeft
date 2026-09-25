@@ -1,20 +1,9 @@
 // @vitest-environment jsdom
-import { act, type ComponentProps, type ReactNode } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { act } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { NextIntlClientProvider } from "next-intl";
 import { SkillsGallery } from "./skills-gallery";
 import { SKILLS_PAGE_SIZE } from "./skills-market-browse";
-import messages from "../../../../messages/en.json";
-
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
-const withIntl = (node: ReactNode) => (
-  <NextIntlClientProvider locale="en" messages={intlMessages}>
-    {node}
-  </NextIntlClientProvider>
-);
+import { flush, mountWithIntl, unmountAll } from "@/test/react";
 
 const api = vi.hoisted(() => ({
   listSkillsCatalog: vi.fn(),
@@ -50,10 +39,6 @@ vi.mock("./skill-submissions", () => ({
 vi.mock("./submit-skill-dialog", () => ({ SubmitSkillDialog: () => null }));
 vi.mock("./skill-detail-dialog", () => ({ SkillDetailDialog: () => null }));
 
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-  true;
-
-let root: Root;
 let container: HTMLDivElement;
 
 beforeEach(() => {
@@ -65,9 +50,8 @@ beforeEach(() => {
     ],
   });
 });
-afterEach(() => {
-  act(() => root?.unmount());
-  container?.remove();
+afterEach(async () => {
+  await unmountAll();
   vi.resetAllMocks();
 });
 
@@ -105,21 +89,9 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-async function flush() {
-  await act(async () => {
-    await Promise.resolve();
-    await Promise.resolve();
-  });
-}
-
 async function render(variant: "page" | "modal" = "page") {
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
-  await act(async () => {
-    root.render(withIntl(<SkillsGallery variant={variant} />));
-  });
-  await flush();
+  ({ container } = await mountWithIntl(<SkillsGallery variant={variant} />));
+  await flush(2);
 }
 
 function titles() {
@@ -141,7 +113,11 @@ test("asks the server for one page and sections built-ins, own and community ski
     items: [
       skill("feynman", { sourceType: "builtin" }),
       skill("house-style", { sourceType: "workspace_custom" }),
-      skill("pdf", { installCount: 1250, verified: true, categories: ["writing"] }),
+      skill("pdf", {
+        installCount: 1250,
+        verified: true,
+        categories: ["writing"],
+      }),
     ],
     nextCursor: null,
   });
@@ -170,10 +146,7 @@ test("asks the server for one page and sections built-ins, own and community ski
 
 test("a featured skill carries its own mark, and no unverified caution", async () => {
   api.listSkillsCatalog.mockResolvedValue({
-    items: [
-      skill("docx", { featured: true }),
-      skill("plain", {}),
-    ],
+    items: [skill("docx", { featured: true }), skill("plain", {})],
     nextCursor: null,
   });
   await render();
@@ -222,8 +195,14 @@ test("offers non-empty categories with counts, hiding empty ones", async () => {
 
 test("loads the next page with the cursor and drops repeats", async () => {
   api.listSkillsCatalog
-    .mockResolvedValueOnce({ items: [skill("a"), skill("b")], nextCursor: "c1" })
-    .mockResolvedValueOnce({ items: [skill("b"), skill("c")], nextCursor: null });
+    .mockResolvedValueOnce({
+      items: [skill("a"), skill("b")],
+      nextCursor: "c1",
+    })
+    .mockResolvedValueOnce({
+      items: [skill("b"), skill("c")],
+      nextCursor: null,
+    });
   await render();
   expect(titles()).toEqual(["Skill a", "Skill b"]);
 

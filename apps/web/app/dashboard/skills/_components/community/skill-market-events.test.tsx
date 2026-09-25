@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
-import { act, type ComponentProps, type ReactNode } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { act } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 
 const audit = vi.hoisted(() => ({
@@ -13,35 +12,18 @@ vi.mock("../../../../../lib/skill-market-audit", async (original) => ({
 }));
 
 import { SkillMarketEvents } from "./skill-market-events";
-import { NextIntlClientProvider } from "next-intl";
-import messages from "../../../../../messages/en.json";
+import { mountWithIntl, unmountAll } from "@/test/react";
 
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
-const withIntl = (node: ReactNode) => (
-  <NextIntlClientProvider locale="en" messages={intlMessages}>
-    {node}
-  </NextIntlClientProvider>
-);
-
-let root: Root;
 let container: HTMLDivElement;
-afterEach(() => {
-  act(() => root.unmount());
-  container.remove();
+afterEach(async () => {
+  await unmountAll();
   vi.resetAllMocks();
 });
 
 async function render(onChanged?: () => void) {
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
-  await act(async () =>
-    root.render(
-      withIntl(<SkillMarketEvents onChanged={onChanged} skillId="skill_1" />),
-    ),
-  );
+  ({ container } = await mountWithIntl(
+    <SkillMarketEvents onChanged={onChanged} skillId="skill_1" />,
+  ));
 }
 
 const cleared = {

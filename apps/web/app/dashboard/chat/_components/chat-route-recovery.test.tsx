@@ -1,9 +1,6 @@
 // @vitest-environment jsdom
 import { act } from "react";
-import { createRoot } from "react-dom/client";
-import { NextIntlClientProvider } from "next-intl";
 import { beforeEach, expect, test, vi } from "vitest";
-import messages from "@/messages/en.json";
 const api = vi.hoisted(() => ({ getActiveThreadRun: vi.fn(), stop: vi.fn() }));
 vi.mock("@/lib/sdk", () => ({
   contentClient: { getActiveThreadRun: api.getActiveThreadRun },
@@ -14,21 +11,15 @@ vi.mock("../../_components/dashboard-chat-state", () => ({
   useDashboardChatState: vi.fn(),
 }));
 import { RecoveryRunControl } from "./chat-route-recovery";
-Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+import { mountWithIntl } from "@/test/react";
 beforeEach(() => vi.resetAllMocks());
 async function mount() {
-  const host = document.createElement("div");
-  const root = createRoot(host);
-  await act(async () =>
-    root.render(
-      <NextIntlClientProvider locale="en" messages={messages}>
-        <RecoveryRunControl workspaceId="w" threadId="t" userId="me" />
-      </NextIntlClientProvider>,
-    ),
+  const { container: host, unmount: close } = await mountWithIntl(
+    <RecoveryRunControl workspaceId="w" threadId="t" userId="me" />,
   );
   return {
     host,
-    close: () => act(async () => root.unmount()),
+    close,
     button: (label: string) =>
       Array.from(host.querySelectorAll("button")).find(
         (button) => button.textContent === label,

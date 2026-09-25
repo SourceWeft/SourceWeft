@@ -1,24 +1,8 @@
 // @vitest-environment jsdom
-import {
-  act,
-  createElement,
-  type ComponentProps,
-  type ReactNode,
-} from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { act, createElement } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { NextIntlClientProvider } from "next-intl";
-import messages from "../../../../../messages/en.json";
 import { useSourceSelection } from "./use-source-selection";
-
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
-const withIntl = (node: ReactNode) => (
-  <NextIntlClientProvider locale="en" messages={intlMessages}>
-    {node}
-  </NextIntlClientProvider>
-);
+import { mountWithIntl, unmountAll, withIntl } from "@/test/react";
 
 const api = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn(), error: vi.fn() }));
 vi.mock("../../../../../lib/sdk", () => ({
@@ -28,22 +12,12 @@ vi.mock("../../../../../lib/sdk", () => ({
   },
 }));
 vi.mock("sonner", () => ({ toast: { error: api.error } }));
-let root: Root;
-let container: HTMLDivElement;
 beforeEach(() => {
   vi.resetAllMocks();
   localStorage.clear();
   sessionStorage.clear();
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
 });
-afterEach(async () => {
-  await act(async () => root.unmount());
-  container.remove();
-  vi.unstubAllGlobals();
-});
+afterEach(unmountAll);
 async function renderSelection(thread = "thread") {
   const result = {
     current: null as unknown as ReturnType<typeof useSourceSelection>,
@@ -52,12 +26,10 @@ async function renderSelection(thread = "thread") {
     result.current = useSourceSelection("ws", thread);
     return null;
   }
+  const view = await mountWithIntl(createElement(Probe, { thread }));
   async function rerender(thread: string) {
-    await act(async () =>
-      root.render(withIntl(createElement(Probe, { thread }))),
-    );
+    await view.render(withIntl(createElement(Probe, { thread })));
   }
-  await rerender(thread);
   return { result, rerender };
 }
 

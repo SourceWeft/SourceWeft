@@ -1,14 +1,7 @@
 // @vitest-environment jsdom
 
 import assert from "node:assert/strict";
-import {
-  act,
-  createElement,
-  type ComponentProps,
-  type ReactNode,
-} from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { NextIntlClientProvider } from "next-intl";
+import { act, createElement } from "react";
 import { afterEach, beforeEach, test, vi } from "vitest";
 import type { ArtifactStatusSnapshot } from "./types";
 
@@ -19,23 +12,7 @@ vi.mock("../../../../../lib/sdk", () => ({
 }));
 
 import { useArtifactSnapshot } from "./use-artifact-snapshot";
-import messages from "../../../../../messages/en.json";
-
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
-
-function withIntl(node: ReactNode) {
-  return (
-    <NextIntlClientProvider locale="en" messages={intlMessages}>
-      {node}
-    </NextIntlClientProvider>
-  );
-}
-
-(
-  globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }
-).IS_REACT_ACT_ENVIRONMENT = true;
+import { mountWithIntl, unmountAll, withIntl } from "@/test/react";
 
 function snapshot(input: {
   id: string;
@@ -91,41 +68,24 @@ function Probe(props: {
   );
 }
 
-let container: HTMLDivElement | null = null;
-let root: Root | null = null;
-
 beforeEach(() => {
   getArtifactMock.mockReset();
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
 });
 
-afterEach(async () => {
-  if (root) {
-    await act(async () => root?.unmount());
-  }
-  container?.remove();
-  root = null;
-  container = null;
-});
+afterEach(unmountAll);
 
 test("changing artifact identity clears the old terminal snapshot before fetching", async () => {
-  await act(async () => {
-    root?.render(
-      withIntl(
-        createElement(Probe, {
-          artifactId: "artifact-1",
-          artifactSnapshot: snapshot({
-            id: "artifact-1",
-            workspaceId: "workspace-1",
-          }),
-          workspaceId: "workspace-1",
-        }),
-      ),
-    );
-  });
-  assert.match(container?.textContent ?? "", /artifact-1\|artifact-1/u);
+  const view = await mountWithIntl(
+    createElement(Probe, {
+      artifactId: "artifact-1",
+      artifactSnapshot: snapshot({
+        id: "artifact-1",
+        workspaceId: "workspace-1",
+      }),
+      workspaceId: "workspace-1",
+    }),
+  );
+  assert.match(view.container.textContent ?? "", /artifact-1\|artifact-1/u);
 
   let resolveDetail!: (value: unknown) => void;
   getArtifactMock.mockReturnValueOnce(
@@ -133,18 +93,16 @@ test("changing artifact identity clears the old terminal snapshot before fetchin
       resolveDetail = resolve;
     }),
   );
-  await act(async () => {
-    root?.render(
-      withIntl(
-        createElement(Probe, {
-          artifactId: "artifact-2",
-          workspaceId: "workspace-1",
-        }),
-      ),
-    );
-  });
+  await view.render(
+    withIntl(
+      createElement(Probe, {
+        artifactId: "artifact-2",
+        workspaceId: "workspace-1",
+      }),
+    ),
+  );
 
-  assert.equal(container?.textContent, "artifact-2|none|");
+  assert.equal(view.container.textContent, "artifact-2|none|");
   assert.deepEqual(getArtifactMock.mock.calls[0]?.slice(0, 2), [
     "workspace-1",
     "artifact-2",
@@ -155,7 +113,7 @@ test("changing artifact identity clears the old terminal snapshot before fetchin
       artifact: snapshot({ id: "artifact-2", workspaceId: "workspace-1" }),
     });
   });
-  assert.equal(container?.textContent, "artifact-2|artifact-2|");
+  assert.equal(view.container.textContent, "artifact-2|artifact-2|");
 });
 
 test("a mismatched artifact detail response is rejected", async () => {
@@ -163,19 +121,15 @@ test("a mismatched artifact detail response is rejected", async () => {
     artifact: snapshot({ id: "artifact-other", workspaceId: "workspace-1" }),
   });
 
-  await act(async () => {
-    root?.render(
-      withIntl(
-        createElement(Probe, {
-          artifactId: "artifact-1",
-          workspaceId: "workspace-1",
-        }),
-      ),
-    );
-  });
+  const { container } = await mountWithIntl(
+    createElement(Probe, {
+      artifactId: "artifact-1",
+      workspaceId: "workspace-1",
+    }),
+  );
 
   assert.equal(
-    container?.textContent,
+    container.textContent,
     "artifact-1|none|Artifact details did not match the request.",
   );
 });
@@ -185,21 +139,17 @@ test("a mismatched parent snapshot is rejected without suppressing the requested
     artifact: snapshot({ id: "artifact-1", workspaceId: "workspace-1" }),
   });
 
-  await act(async () => {
-    root?.render(
-      withIntl(
-        createElement(Probe, {
-          artifactId: "artifact-1",
-          artifactSnapshot: snapshot({
-            id: "artifact-other",
-            workspaceId: "workspace-1",
-          }),
-          workspaceId: "workspace-1",
-        }),
-      ),
-    );
-  });
+  const { container } = await mountWithIntl(
+    createElement(Probe, {
+      artifactId: "artifact-1",
+      artifactSnapshot: snapshot({
+        id: "artifact-other",
+        workspaceId: "workspace-1",
+      }),
+      workspaceId: "workspace-1",
+    }),
+  );
 
-  assert.equal(container?.textContent, "artifact-1|artifact-1|");
+  assert.equal(container.textContent, "artifact-1|artifact-1|");
   assert.equal(getArtifactMock.mock.calls.length, 1);
 });

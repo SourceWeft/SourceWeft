@@ -1,44 +1,22 @@
 // @vitest-environment jsdom
-import { act, type ComponentProps, type ReactNode } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { act, type ReactNode } from "react";
+import { afterEach, expect, test, vi } from "vitest";
 import type { SkillReview } from "../../../../../lib/skill-reviews";
 import { SkillReviewItem } from "./skill-review-item";
 import { SkillReviewStarPicker, SkillReviewStars } from "./skill-review-stars";
 import { SkillReviewSummary } from "./skill-review-summary";
-import { NextIntlClientProvider } from "next-intl";
-import messages from "../../../../../messages/en.json";
 import zhCNMessages from "../../../../../messages/zh-CN.json";
-
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
-const withIntl = (node: ReactNode) => (
-  <NextIntlClientProvider locale="en" messages={intlMessages}>
-    {node}
-  </NextIntlClientProvider>
-);
+import { type IntlOptions, mountWithIntl, unmountAll } from "@/test/react";
 
 // The presentational parts: they render from data alone, with no fetch.
 
-(
-  globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
-).IS_REACT_ACT_ENVIRONMENT = true;
-
-let root: Root;
 let container: HTMLDivElement;
 
-beforeEach(() => {
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
-});
-afterEach(() => {
-  act(() => root.unmount());
-  container.remove();
-});
+afterEach(unmountAll);
 
-const render = (node: ReactNode) => act(() => root.render(withIntl(node)));
+async function render(node: ReactNode) {
+  ({ container } = await mountWithIntl(node));
+}
 
 const now = Date.parse("2026-09-22T12:00:00.000Z");
 const review: SkillReview = {
@@ -56,8 +34,8 @@ const review: SkillReview = {
   updatedAt: "2026-09-20T12:00:00.000Z",
 };
 
-test("the summary: average to one decimal, count, one bar per star", () => {
-  render(
+test("the summary: average to one decimal, count, one bar per star", async () => {
+  await render(
     <SkillReviewSummary
       summary={{
         count: 4,
@@ -79,8 +57,8 @@ test("the summary: average to one decimal, count, one bar per star", () => {
   expect(container.querySelector('[aria-label="5 stars: 2"]')).not.toBeNull();
 });
 
-test("an empty summary shows a dash and zero bars", () => {
-  render(
+test("an empty summary shows a dash and zero bars", async () => {
+  await render(
     <SkillReviewSummary
       summary={{
         count: 0,
@@ -93,16 +71,16 @@ test("an empty summary shows a dash and zero bars", () => {
   expect(container.textContent).toContain("0 reviews");
 });
 
-test("stars are labelled with the rating", () => {
-  render(<SkillReviewStars rating={1} />);
+test("stars are labelled with the rating", async () => {
+  await render(<SkillReviewStars rating={1} />);
   expect(
     container.querySelector('[role="img"]')?.getAttribute("aria-label"),
   ).toBe("1 star");
 });
 
-test("the star picker reports the chosen rating", () => {
+test("the star picker reports the chosen rating", async () => {
   const onChange = vi.fn();
-  render(<SkillReviewStarPicker value={2} onChange={onChange} />);
+  await render(<SkillReviewStarPicker value={2} onChange={onChange} />);
   const radios =
     container.querySelectorAll<HTMLButtonElement>('[role="radio"]');
   expect(radios).toHaveLength(5);
@@ -111,8 +89,8 @@ test("the star picker reports the chosen rating", () => {
   expect(onChange).toHaveBeenCalledWith(5);
 });
 
-test("a review shows who, stars, text, version, when, and the author's reply", () => {
-  render(<SkillReviewItem review={review} now={now} />);
+test("a review shows who, stars, text, version, when, and the author's reply", async () => {
+  await render(<SkillReviewItem review={review} now={now} />);
   const text = container.textContent ?? "";
   expect(text).toContain("Ada Lovelace");
   expect(text).toContain("AL"); // the avatar's fallback
@@ -126,21 +104,14 @@ test("a review shows who, stars, text, version, when, and the author's reply", (
   expect(container.textContent).not.toContain("Hidden");
 });
 
-test("in a zh-CN page the dates are relative in Chinese, never English", () => {
-  act(() =>
-    root.render(
-      <NextIntlClientProvider
-        locale="zh-CN"
-        messages={
-          zhCNMessages as ComponentProps<
-            typeof NextIntlClientProvider
-          >["messages"]
-        }
-      >
-        <SkillReviewItem review={review} now={now} />
-      </NextIntlClientProvider>,
-    ),
-  );
+test("in a zh-CN page the dates are relative in Chinese, never English", async () => {
+  ({ container } = await mountWithIntl(
+    <SkillReviewItem review={review} now={now} />,
+    {
+      locale: "zh-CN",
+      messages: zhCNMessages as IntlOptions["messages"],
+    },
+  ));
   const times = [...container.querySelectorAll("time")].map(
     (node) => node.textContent,
   );
@@ -148,8 +119,8 @@ test("in a zh-CN page the dates are relative in Chinese, never English", () => {
   expect(container.textContent).not.toContain("ago");
 });
 
-test("a hidden review is marked; controls and a replacement reply slot in", () => {
-  render(
+test("a hidden review is marked; controls and a replacement reply slot in", async () => {
+  await render(
     <SkillReviewItem
       review={{
         ...review,

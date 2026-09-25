@@ -1,16 +1,8 @@
 // @vitest-environment jsdom
 
 import assert from "node:assert/strict";
-import { act, createElement, type ComponentProps } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { NextIntlClientProvider } from "next-intl";
+import { act, createElement } from "react";
 import { afterEach, test, vi } from "vitest";
-
-import messages from "../../messages/en.json";
-
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
 
 const state = vi.hoisted(() => ({
   push: vi.fn(),
@@ -43,21 +35,11 @@ vi.mock("../../lib/sdk", () => ({
 }));
 
 import { LanguageSwitcher } from "./language-switcher";
-
-let root: Root | null = null;
-let container: HTMLDivElement | null = null;
+import { mountWithIntl, unmountAll } from "@/test/react";
 
 async function render(locale: "en" | "zh-CN" | "zh-TW") {
-  container = document.createElement("div");
-  document.body.append(container);
-  const createdRoot = createRoot(container);
-  root = createdRoot;
-  await act(async () => {
-    createdRoot.render(
-      <NextIntlClientProvider locale={locale} messages={intlMessages}>
-        {createElement(LanguageSwitcher)}
-      </NextIntlClientProvider>,
-    );
+  const { container } = await mountWithIntl(createElement(LanguageSwitcher), {
+    locale,
   });
   return container;
 }
@@ -67,12 +49,7 @@ function click(element: Element) {
 }
 
 afterEach(async () => {
-  await act(async () => {
-    root?.unmount();
-  });
-  container?.remove();
-  container = null;
-  root = null;
+  await unmountAll();
   push.mockClear();
   refresh.mockClear();
   updateSettings.mockClear();

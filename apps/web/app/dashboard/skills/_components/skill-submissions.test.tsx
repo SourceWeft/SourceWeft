@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 import { act, type ComponentProps } from "react";
-import { createRoot, type Root } from "react-dom/client";
 import { createTranslator, NextIntlClientProvider } from "next-intl";
 import type { useTranslations } from "next-intl";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -12,6 +11,7 @@ import {
 } from "./skill-submissions";
 import { SubmitSkillDialog } from "./submit-skill-dialog";
 import messages from "../../../../messages/en.json";
+import { button, mountWithIntl, unmountAll } from "@/test/react";
 
 const intlMessages = messages as ComponentProps<
   typeof NextIntlClientProvider
@@ -31,19 +31,13 @@ const api = vi.hoisted(() => ({
 vi.mock("../../../../lib/sdk", () => ({ contentClient: api }));
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
-// React only batches `act` work when told it runs under a test.
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-  true;
-
-let root: Root;
 let container: HTMLDivElement;
 beforeEach(() => {
   vi.useFakeTimers();
   api.listSkillSubmissions.mockResolvedValue({ items: [], nextCursor: null });
 });
-afterEach(() => {
-  act(() => root?.unmount());
-  container?.remove();
+afterEach(async () => {
+  await unmountAll();
   vi.useRealTimers();
   vi.resetAllMocks();
 });
@@ -139,21 +133,8 @@ function Harness({ onFinished }: { onFinished: () => void }) {
 }
 
 async function mount(onFinished = vi.fn()) {
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
-  await act(async () => root.render(
-      <NextIntlClientProvider locale="en" messages={intlMessages}>
-        <Harness onFinished={onFinished} />
-      </NextIntlClientProvider>,
-    ));
+  ({ container } = await mountWithIntl(<Harness onFinished={onFinished} />));
   return onFinished;
-}
-
-function button(name: string, scope: ParentNode = document.body) {
-  return [...scope.querySelectorAll("button")].find(
-    (item) => item.textContent?.trim() === name,
-  )!;
 }
 
 async function submitFromDialog(source: string) {

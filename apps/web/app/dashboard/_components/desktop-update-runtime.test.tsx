@@ -1,13 +1,7 @@
 // @vitest-environment jsdom
-import { act, type ComponentProps } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { act } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { NextIntlClientProvider } from "next-intl";
-import messages from "../../../messages/en.json";
 
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
 const mocks = vi.hoisted(() => ({
   available: vi.fn(),
   info: vi.fn(),
@@ -34,8 +28,7 @@ vi.mock("../../../lib/desktop-bridge", () => ({
   },
 }));
 import { DesktopUpdateRuntime } from "./desktop-update-runtime";
-let root: Root;
-let container: HTMLDivElement;
+import { mountWithIntl, unmountAll } from "@/test/react";
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.available.mockReturnValue(true);
@@ -51,20 +44,10 @@ beforeEach(() => {
   });
 });
 async function render() {
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
-  await act(async () =>
-    root.render(
-      <NextIntlClientProvider locale="en" messages={intlMessages}>
-        <DesktopUpdateRuntime />
-      </NextIntlClientProvider>,
-    ),
-  );
+  await mountWithIntl(<DesktopUpdateRuntime />);
 }
 afterEach(async () => {
-  await act(async () => root?.unmount());
-  container?.remove();
+  await unmountAll();
   vi.unstubAllGlobals();
 });
 test("save acknowledgement waits for real draft persistence", async () => {

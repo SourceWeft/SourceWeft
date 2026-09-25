@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
-import { act, type ComponentProps, type ReactNode } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { act } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 
 const api = vi.hoisted(() => ({
@@ -10,27 +9,11 @@ const api = vi.hoisted(() => ({
 vi.mock("../../../../../lib/skill-reports", () => api);
 
 import { reportActions, SkillReportsAdmin } from "./skill-reports-admin";
-import { NextIntlClientProvider } from "next-intl";
-import messages from "../../../../../messages/en.json";
+import { button, mountWithIntl, typeInto, unmountAll } from "@/test/react";
 
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
-const withIntl = (node: ReactNode) => (
-  <NextIntlClientProvider locale="en" messages={intlMessages}>
-    {node}
-  </NextIntlClientProvider>
-);
-
-(
-  globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
-).IS_REACT_ACT_ENVIRONMENT = true;
-
-let root: Root;
 let container: HTMLDivElement;
-afterEach(() => {
-  act(() => root?.unmount());
-  container?.remove();
+afterEach(async () => {
+  await unmountAll();
   vi.resetAllMocks();
 });
 
@@ -62,16 +45,8 @@ const report = (overrides: Record<string, unknown> = {}) => ({
 });
 
 async function render() {
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
-  await act(async () => root.render(withIntl(<SkillReportsAdmin />)));
+  ({ container } = await mountWithIntl(<SkillReportsAdmin />));
 }
-
-const button = (label: string) =>
-  [...container.querySelectorAll("button")].find(
-    (node) => node.textContent?.trim() === label,
-  ) as HTMLButtonElement | undefined;
 
 async function click(label: string) {
   await act(async () => {
@@ -149,11 +124,7 @@ test("dismiss resolves at once with the note and same-target option, then reload
     'input[type="checkbox"]',
   )!;
   await act(async () => {
-    Object.getOwnPropertyDescriptor(
-      HTMLTextAreaElement.prototype,
-      "value",
-    )!.set!.call(note, "Not a copy");
-    note.dispatchEvent(new Event("input", { bubbles: true }));
+    typeInto(note, "Not a copy");
     checkbox.click();
   });
   await click("Dismiss");

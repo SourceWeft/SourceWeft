@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import assert from "node:assert/strict";
 import { act, createElement, useState } from "react";
-import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, test, vi } from "vitest";
 import { resolveWorkspaceLayout } from "./workspace-layout";
 
@@ -15,8 +14,8 @@ import {
   DashboardWorkspaceLayout,
   useWorkspaceLayout,
 } from "./dashboard-workspace-layout";
+import { mount, unmountAll } from "@/test/react";
 
-let root: Root;
 let container: HTMLDivElement;
 let width = 390;
 let notifyResize: (() => void) | undefined;
@@ -66,18 +65,12 @@ beforeEach(async () => {
       disconnect() {}
     },
   );
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
-  await act(async () =>
-    root.render(
-      createElement(DashboardWorkspaceLayout, null, createElement(Harness)),
-    ),
-  );
+  ({ container } = await mount(
+    createElement(DashboardWorkspaceLayout, null, createElement(Harness)),
+  ));
 });
 afterEach(async () => {
-  await act(async () => root.unmount());
-  container.remove();
+  await unmountAll();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });

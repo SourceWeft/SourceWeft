@@ -1,14 +1,13 @@
 // @vitest-environment jsdom
 
-import { NextIntlClientProvider } from "next-intl";
 import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import {
   useConnectorSyncRuns,
   type SyncRunScheduler,
 } from "./use-connector-sync-runs";
+import { mountWithIntl, unmountAll } from "@/test/react";
 
 const { listWorkspaceSyncRuns, listSources } = vi.hoisted(() => ({
   listWorkspaceSyncRuns: vi.fn(),
@@ -112,29 +111,16 @@ function sourceRecord(id: string, connectorId: string) {
   };
 }
 
-let root: Root | null = null;
-let container: HTMLDivElement | null = null;
-
 type HookInput = Parameters<typeof useConnectorSyncRuns>[0];
 type HookApi = ReturnType<typeof useConnectorSyncRuns>;
 
 async function renderHook(input: HookInput) {
-  container = document.createElement("div");
-  document.body.append(container);
-  const created = createRoot(container);
-  root = created;
   const captured: { api: HookApi | null } = { api: null };
   function Harness(props: HookInput) {
     captured.api = useConnectorSyncRuns(props);
     return null;
   }
-  await act(async () => {
-    created.render(
-      <NextIntlClientProvider locale="en" messages={{}}>
-        <Harness {...input} />
-      </NextIntlClientProvider>,
-    );
-  });
+  await mountWithIntl(<Harness {...input} />, { messages: {} });
   return captured;
 }
 
@@ -143,14 +129,7 @@ beforeEach(() => {
   listSources.mockReset();
 });
 
-afterEach(async () => {
-  await act(async () => {
-    root?.unmount();
-  });
-  container?.remove();
-  root = null;
-  container = null;
-});
+afterEach(unmountAll);
 
 test("polls active runs and merges incrementally mapped sources", async () => {
   listWorkspaceSyncRuns.mockResolvedValue({
