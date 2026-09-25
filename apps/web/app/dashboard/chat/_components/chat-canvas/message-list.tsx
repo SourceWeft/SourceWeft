@@ -1332,17 +1332,6 @@ const MessageGroupItem = memo(function MessageGroupItem({
                   sources={referencedSources}
                 />
               ) : null}
-              {messageTimestamp ? (
-                <div
-                  className={cn(
-                    "flex min-h-5 px-1 text-[11px] leading-5 text-muted-foreground",
-                    isAssistant ? "justify-start" : "justify-end",
-                    toolbarVisibilityClass,
-                  )}
-                >
-                  <span>{messageTimestamp}</span>
-                </div>
-              ) : null}
               <Message from={group.role}>
                 <MessageContent
                   className={
@@ -1466,6 +1455,16 @@ const MessageGroupItem = memo(function MessageGroupItem({
                     <MessageBranchPage />
                     <MessageBranchNext className="text-muted-foreground hover:text-foreground" />
                   </MessageBranchSelector>
+                  {messageTimestamp ? (
+                    <span
+                      className={cn(
+                        "px-1 text-[11px] leading-5",
+                        !isAssistant && "-order-1",
+                      )}
+                    >
+                      {messageTimestamp}
+                    </span>
+                  ) : null}
                 </div>
               </MessageToolbar>
             </div>
