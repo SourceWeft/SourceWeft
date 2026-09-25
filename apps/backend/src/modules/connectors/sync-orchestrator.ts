@@ -650,9 +650,11 @@ export class ConnectorSyncOrchestrator {
           this.billing,
           connector.teamId,
           billingUserId,
-        ).admit(1)
+        ).admit(Math.max(1, connector.syncBlock.requestedPages ?? 1))
       : null;
-    if (!billingUserId || admission?.outcome !== "admit") {
+    // Resume once the blocked item fits. An item that no longer fits even a
+    // full cycle is skipped by the run as oversized, so it must not wait.
+    if (!billingUserId || !admission || admission.outcome === "insufficient") {
       await markConnectorSyncBlockChecked({
         connectorId: connector.id,
         checkedAt: new Date(),
@@ -804,6 +806,9 @@ export class ConnectorSyncOrchestrator {
       let failedCount = 0;
       const itemFailures: Array<Record<string, unknown>> = [];
       const oversizedItems: Array<Record<string, unknown>> = [];
+      // Only an untargeted run re-covers what an earlier run was blocked on, so
+      // only it may clear the block; a webhook run for other items keeps it.
+      const clearsSyncBlock = !input.targetExternalIds?.length;
       const runMetadata = () => ({
         ...(itemFailures.length ? { itemFailures } : {}),
         ...(oversizedItems.length ? { oversizedItems } : {}),
@@ -1041,6 +1046,7 @@ export class ConnectorSyncOrchestrator {
               : "error",
           lastError:
             failedCount === 0 ? null : `${failedCount} connector items failed`,
+          syncBlock: clearsSyncBlock ? null : undefined,
         });
         await completeScheduleOccurrence({
           runId: input.runId,
@@ -1090,6 +1096,7 @@ export class ConnectorSyncOrchestrator {
           lastIndexedAt: now,
           status: connector.status === "paused" ? "paused" : "error",
           lastError: summary.message,
+          syncBlock: clearsSyncBlock ? null : undefined,
         });
         await completeScheduleOccurrence({
           runId: input.runId,
@@ -1287,9 +1294,28 @@ export class ConnectorSyncOrchestrator {
       }
       if (admission.outcome === "oversized") {
         // Waiting a cycle cannot admit it, so blocking here would stall every
-        // item behind it forever. Skip it without writing: its watermark is
-        // recorded only once it indexes, so any scan that rediscovers it
-        // re-checks it, and an existing indexed version stays searchable.
+        // item behind it forever. Skip it without new content: its watermark
+        // is recorded only once it indexes, so any scan that rediscovers it
+        // re-checks it. An existing version is marked seen by this run so a
+        // reconciling scan keeps it searchable instead of archiving it.
+        if (existing) {
+          const parentSourceId = await this.upsertDirectoryPath({
+            teamId: input.teamId,
+            workspaceId: input.workspaceId,
+            connectorId: input.connectorId,
+            connectorType: input.connectorType,
+            runId: input.runId,
+            userId: input.userId,
+            directoryPath: extracted.directoryPath,
+          });
+          await updateSourceRecord({
+            teamId: input.teamId,
+            workspaceId: input.workspaceId,
+            sourceId: existing.id,
+            syncRunId: input.runId,
+            parentSourceId,
+          });
+        }
         return {
           kind: "oversized",
           requestedPages: admission.requested,

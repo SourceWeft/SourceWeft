@@ -476,7 +476,10 @@ export async function touchConnectorAfterSync(input: {
   lastIndexedAt: Date;
   status: ConnectorStatus;
   lastError?: string | null;
-  /** Every run end rewrites the block: set when blocked, cleared otherwise. */
+  /**
+   * Set when blocked, `null` to clear, omitted to keep: a run that only looked
+   * at targeted items did not re-cover what an earlier run was blocked on.
+   */
   syncBlock?: ConnectorSyncBlock | null;
 }) {
   await db
@@ -485,7 +488,7 @@ export async function touchConnectorAfterSync(input: {
       status: input.status,
       lastIndexedAt: input.lastIndexedAt,
       lastError: input.lastError ?? null,
-      syncBlock: input.syncBlock ?? null,
+      ...(input.syncBlock !== undefined ? { syncBlock: input.syncBlock } : {}),
       updatedAt: new Date(),
     })
     .where(
