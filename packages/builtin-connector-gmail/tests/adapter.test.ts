@@ -121,6 +121,20 @@ test("OAuth records a declined send grant without assuming requested scopes", as
   assert.deepEqual(token.scopes, [GMAIL_READ_SCOPE]);
 });
 
+test("OAuth refresh distinguishes temporary provider failures from rejected grants", async () => {
+  for (const [providerStatus, expectedStatus, expectedCode] of [
+    [503, 503, "GMAIL_OAUTH_UNAVAILABLE"],
+    [429, 503, "GMAIL_OAUTH_UNAVAILABLE"],
+    [400, 401, "GMAIL_OAUTH_FAILED"],
+  ] as const) {
+    const gmail = adapter(async () => json({}, providerStatus));
+    await assert.rejects(gmail.refreshOAuthToken!({
+      refreshToken: "refresh-token",
+      scopes: [GMAIL_READ_SCOPE],
+    }), { statusCode: expectedStatus, code: expectedCode });
+  }
+});
+
 test("search is metadata-first and read fetches only the selected body", async () => {
   const calls: string[] = [];
   const gmail = adapter(async (url) => {

@@ -413,10 +413,13 @@ export function createGmailConnectorAdapter(
       );
     }
     if (!response.ok) {
+      const retryable = response.status === 429 || response.status >= 500;
       throw new GmailAdapterError(
-        401,
-        "GMAIL_OAUTH_FAILED",
-        "Google OAuth authorization failed",
+        retryable ? 503 : 401,
+        retryable ? "GMAIL_OAUTH_UNAVAILABLE" : "GMAIL_OAUTH_FAILED",
+        retryable
+          ? "Google OAuth is unavailable"
+          : "Google OAuth authorization failed",
       );
     }
     const payload = (await response.json()) as {

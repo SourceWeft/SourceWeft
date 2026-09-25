@@ -4,7 +4,8 @@ import {
   decryptTeamSecret,
   encryptTeamSecret,
 } from "../../shared/team-secrets";
-import { ConnectorError } from "./errors";
+import { ConnectorError, toConnectorError } from "./errors";
+import { isRetryableOAuthRefreshError } from "./oauth-refresh-error";
 import { requireConnectorWorkspace } from "./permissions";
 import {
   consumeOAuthStateRecord,
@@ -364,6 +365,9 @@ export class ConnectorOAuthService {
       });
       return tokenSet.accessToken;
     } catch (error) {
+      if (isRetryableOAuthRefreshError(error)) {
+        throw toConnectorError(error);
+      }
       const message = error instanceof Error ? error.message : String(error);
       await updateOAuthAccountStatusRecord({
         teamId: account.teamId,
