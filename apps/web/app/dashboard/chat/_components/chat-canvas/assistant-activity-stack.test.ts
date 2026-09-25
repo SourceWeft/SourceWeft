@@ -154,8 +154,16 @@ test("assistant activity layout exposes one shared row rail", () => {
   assert.match(ASSISTANT_ACTIVITY_ICON_CLASS, /\bsize-5\b/);
   assert.match(ASSISTANT_ACTIVITY_ICON_CLASS, /\bjustify-start\b/);
   assert.match(ASSISTANT_ACTIVITY_LABEL_CLASS, /\bflex-1\b/);
-  assert.match(ASSISTANT_ACTIVITY_DETAIL_CLASS, /\bml-6\b/);
-  assert.match(ASSISTANT_ACTIVITY_DETAIL_TEXT_CLASS, /\bml-6\b/);
+  // Expanded detail hangs off a guide line under the icon, with its text on
+  // the label's edge.
+  for (const detail of [
+    ASSISTANT_ACTIVITY_DETAIL_CLASS,
+    ASSISTANT_ACTIVITY_DETAIL_TEXT_CLASS,
+  ]) {
+    assert.match(detail, /(^|\s)ml-\[10px\](\s|$)/);
+    assert.match(detail, /\bborder-l\b/);
+    assert.match(detail, /(^|\s)pl-\[17px\](\s|$)/);
+  }
 });
 
 test("redacted skill read tools render private skill instruction title", () => {

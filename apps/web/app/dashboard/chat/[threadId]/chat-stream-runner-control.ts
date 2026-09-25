@@ -197,7 +197,9 @@ export function useChatStreamRunnerControl({
     [clearAttachedRunKeyIfCurrent, clearRunIfCurrent],
   );
 
-  const stopStreaming = useCallback(() => {
+  // Settles once the stop request has finished, so a caller can reload the
+  // thread after the server has recorded the cancellation.
+  const stopStreaming = useCallback(async () => {
     const run = activeThreadRunRef.current;
     if (!workspaceId || !run || isStopping) {
       return;
@@ -208,7 +210,7 @@ export function useChatStreamRunnerControl({
       ...run,
       status: "cancel_requested",
     });
-    void requestThreadRunStop(workspaceId, threadId, run.idempotencyKey)
+    await requestThreadRunStop(workspaceId, threadId, run.idempotencyKey)
       .then(async (response) => {
         if (!response.ok) {
           await throwStreamRequestError(response);
