@@ -3,12 +3,12 @@ import test, { type TestContext } from "node:test";
 import { createChatModel, createEmbeddingsModel } from "../src/bridge/utils";
 import { resolveModelGatewayConfig } from "../src/config";
 import { createModelGateway, ModelGatewayError } from "../src/index";
-import type {
-  ModelGatewayConfig,
-  ProviderKind,
-  ResolvedRequestTarget,
-} from "../src/types";
-import { createJsonResponse, createSseResponse } from "./helpers";
+import type { ModelGatewayConfig, ProviderKind } from "../src/types";
+import {
+  createJsonResponse,
+  createSseResponse,
+  makeResolvedTarget,
+} from "./helpers";
 
 const messages = [{ role: "user" as const, content: "hello" }];
 const model = "network-test-model";
@@ -426,23 +426,14 @@ test("the bridge refuses missing chat and embeddings keys before an SDK can read
       throw new Error("Missing credentials must fail before fetching");
     }),
   );
-  const target: ResolvedRequestTarget = {
+  const target = makeResolvedTarget({
     provider: "local",
-    providerKind: "openai",
     providerModel: model,
     baseUrl: "http://models.internal:8080/v1",
     apiKey: undefined,
-    defaultHeaders: {},
     supports: ["chat", "embeddings"],
-    routeDecision: {
-      alias: "network-test",
-      mode: "BYOK",
-      strategy: "priority",
-      provider: "local",
-      providerKind: "openai",
-    },
-    requestMetadata: {},
-  };
+    routeDecision: { alias: "network-test", mode: "BYOK" },
+  });
   const isCredentialPolicy = (error: unknown) => {
     assert.ok(error instanceof ModelGatewayError);
     assert.equal(error.code, "POLICY");

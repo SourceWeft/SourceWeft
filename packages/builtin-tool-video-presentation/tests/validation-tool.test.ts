@@ -20,6 +20,7 @@ import {
   VIDEO_PRESENTATION_VALIDATION_RECEIPT_SCHEMA_VERSION,
   VIDEO_PRESENTATION_VALIDATOR_VERSION,
 } from "../src/agent/validation-identity";
+import { createFakeVideoServices } from "./helpers";
 
 const renderedVideoBytes = new Uint8Array([0, 0, 0, 8, 0x66, 0x74, 0x79, 0x70]);
 
@@ -147,6 +148,13 @@ function draft() {
   };
 }
 
+/** A prepared project whose only captured file is the draft under validation. */
+function draftTree(sourceBytes: Uint8Array) {
+  return [
+    { relativePath: "video-presentation.draft.json", bytes: sourceBytes },
+  ];
+}
+
 test("validation passes only after samples, vision, cover, and final MP4 receipt", async () => {
   const commands: string[] = [];
   const renderEvents: string[] = [];
@@ -162,47 +170,20 @@ test("validation passes only after samples, vision, cover, and final MP4 receipt
       profileAlias: "vision-default",
       modelAlias: "vision-model",
     },
-    services: {
-      media: {
-        probeAudioDurationSeconds: async () => null,
-      },
-      operationCache: {
-        claimMany: async (input) => ({
-          kind: "claimed",
-          items: [
-            {
-              semanticKey: input.semanticKeys[0]!,
-              action: "execute",
-              claimToken: "validation-claim",
-            },
-          ],
-        }),
-        complete: async () => ({ observationId: "validation-observation" }),
-        markUnknown: async () => undefined,
-      },
+    services: createFakeVideoServices({
       receipts: {
         issueCurrentRunReceipt: async (input) => {
           receipts.push(input);
           return { receiptId: "validation-receipt" };
         },
-        resolveCurrentRunReceipt: async () => null,
       },
       sandbox: {
-        allowedReadRoots: ["/workspace"],
-        ensureCurrentSession: async () => ({ sessionGeneration: "session" }),
-        uploadCurrentFiles: async () => undefined,
-        listCurrentFiles: async () => [],
         downloadCurrentFile: async () => new Uint8Array([0xff, 0xd8, 0xff]),
         executeCurrent: async (input) => {
           commands.push(input.command);
           return { exitCode: 0, output: "ok" };
         },
-        captureCurrentTree: async () => [
-          {
-            relativePath: "video-presentation.draft.json",
-            bytes: sourceBytes,
-          },
-        ],
+        captureCurrentTree: async () => draftTree(sourceBytes),
       },
       workBlobs: {
         putIfAbsent: async (input) => ({
@@ -210,9 +191,6 @@ test("validation passes only after samples, vision, cover, and final MP4 receipt
             input.contentType === "video/mp4" ? "video-wip" : "cover-wip",
           contentDigest: input.contentDigest,
         }),
-        getVerified: async () => null,
-        getBySemanticKey: async () => null,
-        deleteScope: async () => undefined,
       },
       modelGateway: {
         getClient: async () =>
@@ -233,7 +211,7 @@ test("validation passes only after samples, vision, cover, and final MP4 receipt
             },
           }) as never,
       },
-    },
+    }),
   });
 
   const output = (await validationTool.invoke(
@@ -274,58 +252,29 @@ test("final render failure issues no receipt or media WIP", async () => {
   const validationTool = createValidateVideoPresentationTool({
     profile: null,
     renderPort: failingFinalRenderPort(),
-    services: {
-      media: { probeAudioDurationSeconds: async () => null },
-      operationCache: {
-        claimMany: async (input) => ({
-          kind: "claimed",
-          items: [
-            {
-              semanticKey: input.semanticKeys[0]!,
-              action: "execute",
-              claimToken: "claim",
-            },
-          ],
-        }),
-        complete: async () => ({ observationId: "observation" }),
-        markUnknown: async () => undefined,
-      },
+    services: createFakeVideoServices({
       receipts: {
         issueCurrentRunReceipt: async () => {
           receipts += 1;
           return { receiptId: "unexpected" };
         },
-        resolveCurrentRunReceipt: async () => null,
       },
       sandbox: {
-        allowedReadRoots: ["/workspace"],
-        ensureCurrentSession: async () => ({ sessionGeneration: "session" }),
-        uploadCurrentFiles: async () => undefined,
-        listCurrentFiles: async () => [],
-        downloadCurrentFile: async () => new Uint8Array(),
         executeCurrent: async () => ({ exitCode: 0, output: "ok" }),
-        captureCurrentTree: async () => [
-          {
-            relativePath: "video-presentation.draft.json",
-            bytes: sourceBytes,
-          },
-        ],
+        captureCurrentTree: async () => draftTree(sourceBytes),
       },
       workBlobs: {
         putIfAbsent: async (input) => {
           wipWrites += 1;
           return { blobRef: "unexpected", contentDigest: input.contentDigest };
         },
-        getVerified: async () => null,
-        getBySemanticKey: async () => null,
-        deleteScope: async () => undefined,
       },
       modelGateway: {
         getClient: async () => {
           throw new Error("vision client must stay closed");
         },
       },
-    },
+    }),
   });
 
   const output = (await validationTool.invoke(
@@ -514,12 +463,7 @@ test("deterministic draft inconsistencies stop before claims or sandbox executio
             },
           },
           sandbox: {
-            captureCurrentTree: async () => [
-              {
-                relativePath: "video-presentation.draft.json",
-                bytes: sourceBytes,
-              },
-            ],
+            captureCurrentTree: async () => draftTree(sourceBytes),
             executeCurrent: async () => {
               executed = true;
               throw new Error("execute must not run");
@@ -547,48 +491,17 @@ test("missing vision profile preserves deterministic validation with an explicit
   const validationTool = createValidateVideoPresentationTool({
     renderPort: successfulRenderPort(),
     profile: null,
-    services: {
-      media: { probeAudioDurationSeconds: async () => null },
-      operationCache: {
-        claimMany: async (input) => ({
-          kind: "claimed",
-          items: [
-            {
-              semanticKey: input.semanticKeys[0]!,
-              action: "execute",
-              claimToken: "claim",
-            },
-          ],
-        }),
-        complete: async () => ({ observationId: "observation" }),
-        markUnknown: async () => undefined,
-      },
-      receipts: {
-        issueCurrentRunReceipt: async () => ({ receiptId: "receipt" }),
-        resolveCurrentRunReceipt: async () => null,
-      },
+    services: createFakeVideoServices({
       sandbox: {
-        allowedReadRoots: ["/workspace"],
-        ensureCurrentSession: async () => ({ sessionGeneration: "session" }),
-        uploadCurrentFiles: async () => undefined,
-        listCurrentFiles: async () => [],
         downloadCurrentFile: async () => new Uint8Array([0xff, 0xd8, 0xff]),
         executeCurrent: async () => ({ exitCode: 0, output: "ok" }),
-        captureCurrentTree: async () => [
-          {
-            relativePath: "video-presentation.draft.json",
-            bytes: sourceBytes,
-          },
-        ],
+        captureCurrentTree: async () => draftTree(sourceBytes),
       },
       workBlobs: {
         putIfAbsent: async (input) => ({
           blobRef: `blob-${input.contentDigest}`,
           contentDigest: input.contentDigest,
         }),
-        getVerified: async () => null,
-        getBySemanticKey: async () => null,
-        deleteScope: async () => undefined,
       },
       modelGateway: {
         getClient: async () => {
@@ -596,7 +509,7 @@ test("missing vision profile preserves deterministic validation with an explicit
           throw new Error("vision client must stay closed");
         },
       },
-    },
+    }),
   });
   const output = (await validationTool.invoke(
     {
@@ -638,41 +551,19 @@ test("validation re-probes frozen narration and receipts the host measurement", 
   const validationTool = createValidateVideoPresentationTool({
     renderPort: successfulRenderPort(),
     profile: null,
-    services: {
+    services: createFakeVideoServices({
       media: { probeAudioDurationSeconds: async () => 5 },
-      operationCache: {
-        claimMany: async (input) => ({
-          kind: "claimed",
-          items: [
-            {
-              semanticKey: input.semanticKeys[0]!,
-              action: "execute",
-              claimToken: "claim",
-            },
-          ],
-        }),
-        complete: async () => ({ observationId: "observation" }),
-        markUnknown: async () => undefined,
-      },
       receipts: {
         issueCurrentRunReceipt: async (input) => {
           receiptPayloads.push(input.payload);
           return { receiptId: "receipt" };
         },
-        resolveCurrentRunReceipt: async () => null,
       },
       sandbox: {
-        allowedReadRoots: ["/workspace"],
-        ensureCurrentSession: async () => ({ sessionGeneration: "session" }),
-        uploadCurrentFiles: async () => undefined,
-        listCurrentFiles: async () => [],
         downloadCurrentFile: async () => new Uint8Array([0xff, 0xd8, 0xff]),
         executeCurrent: async () => ({ exitCode: 0, output: "ok" }),
         captureCurrentTree: async () => [
-          {
-            relativePath: "video-presentation.draft.json",
-            bytes: sourceBytes,
-          },
+          ...draftTree(sourceBytes),
           {
             relativePath: "public/audio/slide-1.mp3",
             bytes: audioBytes,
@@ -688,15 +579,13 @@ test("validation re-probes frozen narration and receipts the host measurement", 
           input.blobRef === "audio-wip"
             ? { bytes: audioBytes, contentType: "audio/mpeg" }
             : null,
-        getBySemanticKey: async () => null,
-        deleteScope: async () => undefined,
       },
       modelGateway: {
         getClient: async () => {
           throw new Error("vision client must stay closed");
         },
       },
-    },
+    }),
   });
 
   const output = (await validationTool.invoke(
@@ -772,10 +661,7 @@ test("committed resource bytes cannot replace protected load authority", async (
       },
       sandbox: {
         captureCurrentTree: async () => [
-          {
-            relativePath: "video-presentation.draft.json",
-            bytes: sourceBytes,
-          },
+          ...draftTree(sourceBytes),
           {
             relativePath: "public/assets/old-hero.png",
             bytes: replacementBytes,
@@ -813,19 +699,8 @@ test("visual validation forwards cancellation, disposes rendering, and fences it
       profileAlias: "vision-default",
       modelAlias: "vision-model",
     },
-    services: {
-      media: { probeAudioDurationSeconds: async () => null },
+    services: createFakeVideoServices({
       operationCache: {
-        claimMany: async (input) => ({
-          kind: "claimed",
-          items: [
-            {
-              semanticKey: input.semanticKeys[0]!,
-              action: "execute",
-              claimToken: "validation-abort-claim",
-            },
-          ],
-        }),
         complete: async () => {
           throw new Error("an aborted validation must not complete");
         },
@@ -838,30 +713,16 @@ test("visual validation forwards cancellation, disposes rendering, and fences it
           receipts += 1;
           return { receiptId: "unexpected" };
         },
-        resolveCurrentRunReceipt: async () => null,
       },
       sandbox: {
-        allowedReadRoots: ["/workspace"],
-        ensureCurrentSession: async () => ({ sessionGeneration: "session" }),
-        uploadCurrentFiles: async () => undefined,
-        listCurrentFiles: async () => [],
-        downloadCurrentFile: async () => new Uint8Array(),
         executeCurrent: async () => ({ exitCode: 0, output: "ok" }),
-        captureCurrentTree: async () => [
-          {
-            relativePath: "video-presentation.draft.json",
-            bytes: sourceBytes,
-          },
-        ],
+        captureCurrentTree: async () => draftTree(sourceBytes),
       },
       workBlobs: {
         putIfAbsent: async (input) => {
           wipWrites += 1;
           return { blobRef: "unexpected", contentDigest: input.contentDigest };
         },
-        getVerified: async () => null,
-        getBySemanticKey: async () => null,
-        deleteScope: async () => undefined,
       },
       modelGateway: {
         getClient: async () =>
@@ -878,7 +739,7 @@ test("visual validation forwards cancellation, disposes rendering, and fences it
             },
           }) as never,
       },
-    },
+    }),
   });
 
   await assert.rejects(

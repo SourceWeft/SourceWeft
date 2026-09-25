@@ -5,7 +5,7 @@ import {
   ArtifactError,
   ARTIFACT_WRITE_ERROR_CODES,
 } from "@sourceweft/contracts/artifact-errors";
-import { withAgentToolHostInvocationSignal } from "@sourceweft/contracts/agent-tools";
+import { agentToolInvocationConfig } from "@sourceweft/contracts/testing";
 import { downloadPptxFromSandbox } from "../src/sandbox-output";
 import {
   createCapabilityAgentTools,
@@ -322,7 +322,7 @@ test("publish_artifact aborts its sandbox download and never enters the writer",
       title: "Cancelled export",
       source: { kind: "sandbox_path", path: "/workspace/output.txt" },
     },
-    withAgentToolHostInvocationSignal(
+    agentToolInvocationConfig(
       { toolCall: { id: "publish-cancelled" } },
       controller.signal,
     ) as never,

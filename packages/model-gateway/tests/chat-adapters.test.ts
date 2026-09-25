@@ -6,29 +6,10 @@ import { DeepInfraChatAdapter } from "../src/adapters/deepinfra-chat";
 import { OpenAICompatibleChatAdapter } from "../src/adapters/openai-compatible-chat";
 import { OpenRouterChatAdapter } from "../src/adapters/openrouter-chat";
 import { ModelGatewayError } from "../src/errors";
-import type {
-  ChatCompleteInput,
-  RequestOptions,
-  ResolvedRequestTarget,
-} from "../src/types";
+import type { ChatCompleteInput, RequestOptions } from "../src/types";
+import { makeResolvedTarget } from "./helpers";
 
-const target: ResolvedRequestTarget = {
-  provider: "openai",
-  providerKind: "openai",
-  providerModel: "test-model",
-  baseUrl: "https://gateway.example.com",
-  apiKey: "test-key",
-  defaultHeaders: {},
-  supports: ["chat", "tool_calling", "json_schema"],
-  routeDecision: {
-    alias: "chat-default",
-    mode: "GLOBAL",
-    strategy: "priority",
-    provider: "openai",
-    providerKind: "openai",
-  },
-  requestMetadata: {},
-};
+const target = makeResolvedTarget();
 
 const input: ChatCompleteInput = {
   model: "test-model",
@@ -91,8 +72,7 @@ function clientConfig(model: unknown) {
 test("OpenAI-compatible chat adapter configures custom API key headers through LangChain", () => {
   const adapter = new OpenAICompatibleChatAdapter();
   const model = adapter.createModel(
-    {
-      ...target,
+    makeResolvedTarget({
       provider: "cloudflare-aig",
       providerKind: "openai-compatible",
       providerModel: "deepseek/deepseek-v4-pro",
@@ -102,12 +82,7 @@ test("OpenAI-compatible chat adapter configures custom API key headers through L
       defaultHeaders: {
         "HTTP-Referer": "https://sourceweft.example",
       },
-      routeDecision: {
-        ...target.routeDecision,
-        provider: "cloudflare-aig",
-        providerKind: "openai-compatible",
-      },
-    },
+    }),
     input,
   );
 
@@ -121,18 +96,12 @@ test("OpenAI-compatible chat adapter configures custom API key headers through L
 test("OpenAI-compatible chat adapter forwards timeout and disables supported reasoning", () => {
   const adapter = new OpenAICompatibleChatAdapter();
   const model = adapter.createModel(
-    {
-      ...target,
+    makeResolvedTarget({
       provider: "cloudflare-aig",
       providerKind: "openai-compatible",
       providerModel: "deepseek/deepseek-v4-pro",
       supports: ["chat", "json_schema"],
-      routeDecision: {
-        ...target.routeDecision,
-        provider: "cloudflare-aig",
-        providerKind: "openai-compatible",
-      },
-    },
+    }),
     {
       ...input,
       thinking: {
@@ -161,17 +130,12 @@ test("OpenAI-compatible chat adapter forwards timeout and disables supported rea
 test("OpenAI-compatible chat adapter keeps standard SDK auth without custom headers", () => {
   const adapter = new OpenAICompatibleChatAdapter();
   const model = adapter.createModel(
-    {
-      ...target,
+    makeResolvedTarget({
       providerKind: "openai-compatible",
       defaultHeaders: {
         "HTTP-Referer": "https://sourceweft.example",
       },
-      routeDecision: {
-        ...target.routeDecision,
-        providerKind: "openai-compatible",
-      },
-    },
+    }),
     input,
   );
 
@@ -183,20 +147,14 @@ test("OpenAI-compatible chat adapter keeps standard SDK auth without custom head
 test("OpenRouter chat adapter merges provider routing into model kwargs", () => {
   const adapter = new OpenRouterChatAdapter();
   const model = adapter.createModel(
-    {
-      ...target,
+    makeResolvedTarget({
       provider: "openrouter",
       providerKind: "openrouter",
       providerRouting: {
         only: ["deepseek"],
         sort: "latency",
       },
-      routeDecision: {
-        ...target.routeDecision,
-        provider: "openrouter",
-        providerKind: "openrouter",
-      },
-    },
+    }),
     {
       ...input,
       extraBody: {
@@ -220,8 +178,7 @@ test("OpenRouter chat adapter merges provider routing into model kwargs", () => 
 test("OpenRouter chat adapter supports object provider routing sort", () => {
   const adapter = new OpenRouterChatAdapter();
   const model = adapter.createModel(
-    {
-      ...target,
+    makeResolvedTarget({
       provider: "openrouter",
       providerKind: "openrouter",
       providerRouting: {
@@ -230,12 +187,7 @@ test("OpenRouter chat adapter supports object provider routing sort", () => {
           partition: "none",
         },
       },
-      routeDecision: {
-        ...target.routeDecision,
-        provider: "openrouter",
-        providerKind: "openrouter",
-      },
-    },
+    }),
     input,
   );
 
@@ -255,17 +207,11 @@ test("OpenRouter chat adapter fails fast with a typed auth error when credential
   assert.throws(
     () =>
       adapter.createModel(
-        {
-          ...target,
+        makeResolvedTarget({
           apiKey: undefined,
           provider: "openrouter",
           providerKind: "openrouter",
-          routeDecision: {
-            ...target.routeDecision,
-            provider: "openrouter",
-            providerKind: "openrouter",
-          },
-        },
+        }),
         input,
       ),
     (error: unknown) => {
@@ -285,18 +231,12 @@ test("OpenRouter chat adapter does not treat an Authorization header as the SDK 
   assert.throws(
     () =>
       adapter.createModel(
-        {
-          ...target,
+        makeResolvedTarget({
           apiKey: undefined,
           defaultHeaders: { Authorization: "Bearer header-only" },
           provider: "openrouter",
           providerKind: "openrouter",
-          routeDecision: {
-            ...target.routeDecision,
-            provider: "openrouter",
-            providerKind: "openrouter",
-          },
-        },
+        }),
         input,
       ),
     (error: unknown) =>

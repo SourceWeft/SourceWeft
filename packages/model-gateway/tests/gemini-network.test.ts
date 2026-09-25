@@ -6,25 +6,17 @@ import { GeminiChatAdapter } from "../src/adapters/gemini-chat";
 import { GeminiEmbeddingsAdapter } from "../src/adapters/gemini-embeddings";
 import { createModelGateway, ModelGatewayError } from "../src/index";
 import { normalizeGatewayError } from "../src/errors";
-import type { ResolvedRequestTarget } from "../src/types";
+import { makeResolvedTarget } from "./helpers";
 
-const target: ResolvedRequestTarget = {
+const target = makeResolvedTarget({
   provider: "gemini-local",
   providerKind: "gemini",
   providerModel: "gemini-2.5-flash",
   baseUrl: "http://models.internal:8080/proxy",
   apiKey: "user-key",
-  defaultHeaders: {},
   supports: ["chat", "embeddings"],
-  requestMetadata: {},
-  routeDecision: {
-    alias: "gemini",
-    mode: "GLOBAL",
-    strategy: "priority",
-    provider: "gemini-local",
-    providerKind: "gemini",
-  },
-};
+  routeDecision: { alias: "gemini" },
+});
 const payload = {
   model: "gemini",
   messages: [{ role: "user" as const, content: "hello" }],

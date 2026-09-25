@@ -1,26 +1,18 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
 import {
   capabilityManifestSchema,
   parseCapabilityManifest,
 } from "@sourceweft/capability-contracts";
+import { loadCapabilityManifestFixture } from "@sourceweft/capability-contracts/testing";
 import { builtinGenerateImageCapabilityManifest } from "../src";
 
-const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+const packageRoot = new URL("../", import.meta.url);
 
 test("sourceweft.capability.json matches the package manifest export", async () => {
-  const rawManifest = await readFile(
-    join(packageRoot, "sourceweft.capability.json"),
-    "utf8",
-  );
+  const { raw } = await loadCapabilityManifestFixture(packageRoot);
 
-  assert.deepEqual(
-    JSON.parse(rawManifest),
-    builtinGenerateImageCapabilityManifest,
-  );
+  assert.deepEqual(raw, builtinGenerateImageCapabilityManifest);
 });
 
 test("generate-image manifest exposes tool contributions after parse", () => {

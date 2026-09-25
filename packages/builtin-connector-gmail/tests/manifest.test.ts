@@ -1,19 +1,17 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
 import { capabilityManifestSchema } from "@sourceweft/capability-contracts";
+import { loadCapabilityManifestFixture } from "@sourceweft/capability-contracts/testing";
 import {
   builtinGmailConnectorCapabilityManifest,
   toBackendGmailManifest,
 } from "../src";
 
-const root = dirname(dirname(fileURLToPath(import.meta.url)));
+const root = new URL("../", import.meta.url);
 
 test("JSON capability manifest matches the TypeScript export", async () => {
-  const raw = await readFile(join(root, "sourceweft.capability.json"), "utf8");
-  assert.deepEqual(JSON.parse(raw), builtinGmailConnectorCapabilityManifest);
+  const { raw } = await loadCapabilityManifestFixture(root);
+  assert.deepEqual(raw, builtinGmailConnectorCapabilityManifest);
   capabilityManifestSchema.parse(builtinGmailConnectorCapabilityManifest);
 });
 
