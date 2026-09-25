@@ -15,6 +15,7 @@ import {
   type PromptThinkingSettings,
 } from "../../_components/chat-canvas";
 import {
+  createPendingThreadRunKey,
   clearPendingThreadTurn,
   readPendingThreadTurn,
   hydratePendingThreadTurn,
@@ -137,7 +138,7 @@ export function useThreadBootstrap({
     sending.current = scope;
     const turn = {
       ...currentTurn,
-      durableRunKey: currentTurn.durableRunKey ?? crypto.randomUUID(),
+      durableRunKey: currentTurn.durableRunKey ?? createPendingThreadRunKey(),
       requiresRetry: true,
     };
     if (!save(turn)) return;

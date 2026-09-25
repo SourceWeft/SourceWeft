@@ -141,6 +141,7 @@ test("unconfirmed request is retained across remount and retries with the same k
   send.mockResolvedValue(undefined);
   await render();
   const key = send.mock.calls[0]![0].durableRunKey;
+  expect(key).toMatch(/^sourceweft-web-run:/);
   expect(result.recovery).not.toBeNull();
   await act(async () => root.unmount());
   root = createRoot(host);

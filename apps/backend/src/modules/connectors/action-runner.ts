@@ -1,4 +1,4 @@
-import { createHash, createHmac } from "node:crypto";
+import { createHash } from "node:crypto";
 import { ConnectorError, toConnectorError } from "./errors";
 import { validateObjectWithJsonSchema } from "./config-validation";
 import { requireConnectorWorkspace } from "./permissions";
@@ -21,29 +21,13 @@ import {
   encryptTeamSecret,
 } from "../../shared/team-secrets";
 import { findOAuthAccountRecord } from "./repository";
-import { config } from "../../shared/config";
-
-const ENCRYPTED_REQUEST_KEY = "__connectorEncryptedRequest";
-const BOUND_ACCOUNT_KEY = "__connectorOAuthAccountId";
-const REQUEST_HASH_KEY = "__connectorRequestHash";
-
-function privateRequestDigest(
-  teamId: string,
-  request: Record<string, unknown>,
-) {
-  return createHmac("sha256", config.modelGatewayEncryptionSecret)
-    .update(teamId)
-    .update(stableJsonStringify(request))
-    .digest("hex");
-}
-
-function privateRequestMatches(
-  stored: Record<string, unknown>,
-  request: Record<string, unknown>,
-  teamId: string,
-) {
-  return stored[REQUEST_HASH_KEY] === privateRequestDigest(teamId, request);
-}
+import {
+  BOUND_ACCOUNT_KEY,
+  ENCRYPTED_REQUEST_KEY,
+  REQUEST_HASH_KEY,
+  privateRequestDigest,
+  privateRequestMatches,
+} from "./private-request";
 
 async function storeRequest(input: {
   teamId: string;

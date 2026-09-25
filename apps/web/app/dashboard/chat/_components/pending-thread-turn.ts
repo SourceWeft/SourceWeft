@@ -1,5 +1,6 @@
 "use client";
 
+import { SOURCEWEFT_WEB_RUN_IDEMPOTENCY_PREFIX } from "@sourceweft/contracts";
 import { readChatDraft, clearChatDraft } from "../../../../lib/chat-drafts";
 
 import type { ByokModelSelection } from "./byok-state";
@@ -42,6 +43,10 @@ export type PendingThreadTurn = {
     byokSelections?: Partial<Record<ModelType, ByokModelSelection | null>>;
   };
 };
+
+export function createPendingThreadRunKey() {
+  return `${SOURCEWEFT_WEB_RUN_IDEMPOTENCY_PREFIX}${crypto.randomUUID()}`;
+}
 
 const pendingThreadTurns = new Map<string, PendingThreadTurn>();
 

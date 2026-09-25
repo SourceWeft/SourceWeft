@@ -71,6 +71,13 @@ afterEach(() => {
 });
 
 describe("pending-thread-turn", () => {
+  it("creates a key that the backend recognizes as a durable run", async () => {
+    const pendingTurns = await loadPendingTurnModule();
+    expect(pendingTurns.createPendingThreadRunKey()).toMatch(
+      /^sourceweft-web-run:[0-9a-f-]{36}$/,
+    );
+  });
+
   it("reads a pending turn without consuming it", async () => {
     const pendingTurns = await loadPendingTurnModule();
     pendingTurns.setPendingThreadTurn("thread-1", pendingTurn);

@@ -1,4 +1,8 @@
 import { jsonValuesEqual } from "./json-compare";
+import {
+  ENCRYPTED_REQUEST_KEY,
+  privateRequestMatches,
+} from "./private-request";
 
 export type ConnectorActionApprovalCursor = {
   value: number;
@@ -21,6 +25,7 @@ export type ConnectorActionApprovalIdempotencyContext = {
   actionApprovalCursor?: ConnectorActionApprovalCursor;
   actionExecutionCursor?: ConnectorActionExecutionCursor;
   actionApprovalScope?: string;
+  teamId?: string;
 };
 
 export function buildConnectorActionApprovalIdempotencyKey(input: {
@@ -128,12 +133,21 @@ function findConnectorActionExecutionRef(
     if (input.connectorId && candidate.connectorId !== input.connectorId) {
       return false;
     }
-    if (
-      input.requestJson &&
-      candidate.requestJson &&
-      !jsonValuesEqual(candidate.requestJson, input.requestJson)
-    ) {
-      return false;
+    if (input.requestJson && candidate.requestJson) {
+      if (typeof candidate.requestJson[ENCRYPTED_REQUEST_KEY] === "string") {
+        if (
+          !context.teamId ||
+          !privateRequestMatches(
+            candidate.requestJson,
+            input.requestJson,
+            context.teamId,
+          )
+        ) {
+          return false;
+        }
+      } else if (!jsonValuesEqual(candidate.requestJson, input.requestJson)) {
+        return false;
+      }
     }
     return true;
   });

@@ -50,6 +50,7 @@ vi.mock("../../shared/team-secrets", () => ({
 }));
 
 import { ConnectorActionRunner } from "./action-runner";
+import { resolveConnectorActionExecutionRef } from "./agent-tool-idempotency";
 
 function registry() {
   const manifest: ConnectorManifest = {
@@ -285,6 +286,30 @@ test("Gmail send proposal stores ciphertext and requires its approver and send g
     proposed.action.requestJson.__connectorEncryptedRequest,
     "opaque-ciphertext",
   );
+  const executionContext = {
+    teamId: "team_1",
+    actionExecutionCursor: {
+      refs: [{
+        actionRunId: proposed.action.id,
+        connectorId: "connector_1",
+        requestJson: proposed.action.requestJson,
+        toolName: "send_gmail_message",
+      }],
+      value: 0,
+    },
+  };
+  assert.equal(
+    resolveConnectorActionExecutionRef(executionContext, {
+      requestJson: { ...request, body: "Wrong body" },
+      toolName: "send_gmail_message",
+    }),
+    null,
+  );
+  const executionRef = resolveConnectorActionExecutionRef(executionContext, {
+    requestJson: request,
+    toolName: "send_gmail_message",
+  });
+  assert.equal(executionRef?.actionRunId, proposed.action.id);
   mocks.findActionRunRecord.mockResolvedValue(
     action({
       ...proposed.action,
@@ -303,7 +328,7 @@ test("Gmail send proposal stores ciphertext and requires its approver and send g
     workspaceId: "workspace_1",
     userId: "user_1",
     connectorId: "connector_1",
-    actionRunId: "action_1",
+    actionRunId: executionRef!.actionRunId,
     expected: { requestJson: request },
   });
   assert.equal(executed.action.status, "succeeded");

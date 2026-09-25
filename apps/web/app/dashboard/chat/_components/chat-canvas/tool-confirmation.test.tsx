@@ -135,6 +135,41 @@ test("offline blocks approval but leaves rejection available", async () => {
   assert.equal(respondToConfirmation.mock.calls.length, 0);
 });
 
+test("Gmail send approval shows the complete message and requires it before approval", async () => {
+  const item = createItem({
+    decisionOptions: [
+      { decision: "reject", label: "Reject" },
+      { decision: "approve", label: "Approve" },
+    ],
+  });
+  item.confirmation.action.type = "gmail.message.send";
+  item.confirmation.preview.requestJson = {
+    from: "sender@example.com",
+    to: ["recipient@example.com"],
+    subject: "Exact subject",
+    body: "Full private body, including the final sentence.",
+  };
+  const element = await render(item);
+  assert.match(element.textContent ?? "", /sender@example.com/);
+  assert.match(element.textContent ?? "", /recipient@example.com/);
+  assert.match(element.textContent ?? "", /Exact subject/);
+  assert.match(element.textContent ?? "", /including the final sentence/);
+  assert.equal(clickButton(element, "Approve").disabled, false);
+});
+
+test("Gmail send approval cannot proceed when exact message is unavailable", async () => {
+  const item = createItem({
+    decisionOptions: [
+      { decision: "reject", label: "Reject" },
+      { decision: "approve", label: "Approve" },
+    ],
+  });
+  item.confirmation.action.type = "gmail.message.send";
+  const element = await render(item);
+  assert.equal(clickButton(element, "Approve").disabled, true);
+  assert.equal(clickButton(element, "Reject").disabled, false);
+});
+
 afterEach(async () => {
   await act(async () => {
     root?.unmount();
