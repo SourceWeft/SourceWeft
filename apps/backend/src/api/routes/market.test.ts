@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
-import { Hono } from "hono";
 import { beforeEach, test, vi } from "vitest";
-import { ApiError, ApiResponse, toApiError } from "../response/api-response";
+import { createRouteTestApp } from "../../test/hono";
 
 const mocks = vi.hoisted(() => ({
   countMcpByCategory: vi.fn(),
@@ -30,13 +29,7 @@ vi.mock("../middleware/auth-session", () => ({
 
 import { registerMarketRoutes } from "./market";
 
-function createTestApp() {
-  const app = new Hono();
-  registerMarketRoutes(app);
-  app.notFound((c) => ApiResponse.error(c, ApiError.notFound()));
-  app.onError((error, c) => ApiResponse.error(c, toApiError(error)));
-  return app;
-}
+const createTestApp = () => createRouteTestApp(registerMarketRoutes);
 
 beforeEach(() => {
   vi.clearAllMocks();

@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
-import { Hono } from "hono";
 import { beforeEach, test, vi } from "vitest";
-import { ApiError, ApiResponse, toApiError } from "../../response/api-response";
+import { createWorkspaceRouteTestApp } from "../../../test/hono";
 
 vi.mock("../../../shared/config", () => ({
   config: { auth: { webBaseUrl: "https://web.example" } },
@@ -38,15 +37,7 @@ vi.mock("../../../modules/sharing", () => ({
 
 import { registerArtifactRoutes } from "./artifacts";
 
-function createTestApp() {
-  const app = new Hono();
-  const workspaceRoutes = new Hono();
-  registerArtifactRoutes(workspaceRoutes);
-  app.route("/v1/workspaces/:workspaceId", workspaceRoutes);
-  app.notFound((c) => ApiResponse.error(c, ApiError.notFound()));
-  app.onError((error, c) => ApiResponse.error(c, toApiError(error)));
-  return app;
-}
+const createTestApp = () => createWorkspaceRouteTestApp(registerArtifactRoutes);
 
 beforeEach(() => {
   vi.clearAllMocks();

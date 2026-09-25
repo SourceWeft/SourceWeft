@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
-import { Hono } from "hono";
 import { test, vi } from "vitest";
 import { McpError } from "../../../modules/mcp/errors";
-import { ApiError, ApiResponse, toApiError } from "../../response/api-response";
+import { createWorkspaceRouteTestApp, readJson } from "../../../test/hono";
 
 const mocks = vi.hoisted(() => ({
   getSessionUserId: vi.fn(),
@@ -43,15 +42,7 @@ vi.mock("../../../modules/mcp", () => ({
 
 import { registerMcpRoutes } from "./mcp";
 
-function createTestApp() {
-  const app = new Hono();
-  const workspaceRoutes = new Hono();
-  registerMcpRoutes(workspaceRoutes);
-  app.route("/v1/workspaces/:workspaceId", workspaceRoutes);
-  app.notFound((c) => ApiResponse.error(c, ApiError.notFound()));
-  app.onError((error, c) => ApiResponse.error(c, toApiError(error)));
-  return app;
-}
+const createTestApp = () => createWorkspaceRouteTestApp(registerMcpRoutes);
 
 function resetRouteMocks() {
   vi.clearAllMocks();
@@ -67,10 +58,6 @@ function resetRouteMocks() {
       userId: "user_1",
     },
   });
-}
-
-async function readJson(response: Response) {
-  return response.json() as Promise<Record<string, unknown>>;
 }
 
 test("MCP routes return unauthorized when there is no session", async () => {

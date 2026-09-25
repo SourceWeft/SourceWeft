@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
-import { Hono } from "hono";
 import { beforeEach, test, vi } from "vitest";
-import { ApiError, ApiResponse, toApiError } from "../../response/api-response";
+import { createWorkspaceRouteTestApp } from "../../../test/hono";
 
 const mocks = vi.hoisted(() => ({
   getSessionUserId: vi.fn(),
@@ -24,15 +23,8 @@ vi.mock("../../../modules/threads", () => ({
 
 import { registerModelGatewayRoutes } from "./model-gateway";
 
-function createTestApp() {
-  const app = new Hono();
-  const workspaceRoutes = new Hono();
-  registerModelGatewayRoutes(workspaceRoutes);
-  app.route("/v1/workspaces/:workspaceId", workspaceRoutes);
-  app.notFound((c) => ApiResponse.error(c, ApiError.notFound()));
-  app.onError((error, c) => ApiResponse.error(c, toApiError(error)));
-  return app;
-}
+const createTestApp = () =>
+  createWorkspaceRouteTestApp(registerModelGatewayRoutes);
 
 const selectorResult = {
   defaults: {
