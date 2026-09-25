@@ -76,13 +76,14 @@ test("a call the message's content still names is restored and answered", () => 
 
   const restored = result[1] as AIMessage;
   assert.equal(restored.id, "ai-1");
+  // Restored in the model's own order, with the results following it.
   assert.deepEqual(
     restored.tool_calls?.map((c) => c.id),
-    ["b", "a"],
+    ["a", "b"],
   );
   assert.deepEqual(
     result.slice(2).map((m) => (m as ToolMessage).tool_call_id),
-    ["b", "a"],
+    ["a", "b"],
   );
 });
 
@@ -171,8 +172,8 @@ test("with the middleware, the next model call keeps the model's message and ans
   assert.deepEqual(
     results.map((m) => [m.tool_call_id, String(m.content)]),
     [
-      ["b", "Do not send B."],
       ["a", UNANSWERED_TOOL_CALL_RESULT],
+      ["b", "Do not send B."],
     ],
   );
 });
