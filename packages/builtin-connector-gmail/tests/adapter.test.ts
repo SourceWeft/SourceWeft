@@ -53,6 +53,35 @@ const context = {
   accessToken: "access-token",
 };
 
+test("indexing waits for a selected label and start date", async () => {
+  const gmail = adapter(async () => {
+    throw new Error("No provider request is needed for readiness");
+  });
+  assert.deepEqual(
+    await gmail.checkSyncReadiness?.({
+      ...context,
+      config: { indexingEnabled: true, labelIds: [], maxMessages: 20 },
+    }),
+    {
+      ready: false,
+      reason: "gmail_indexing_scope_required",
+      message: "Choose Gmail labels and a start date before syncing",
+    },
+  );
+  assert.deepEqual(
+    await gmail.checkSyncReadiness?.({
+      ...context,
+      config: {
+        indexingEnabled: true,
+        labelIds: ["INBOX"],
+        after: "2026-09-01",
+        maxMessages: 20,
+      },
+    }),
+    { ready: true },
+  );
+});
+
 test("OAuth records actual read and send grants and mailbox identity", async () => {
   const gmail = adapter(async (url) => {
     if (String(url).includes("/token")) {

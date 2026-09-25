@@ -2682,13 +2682,33 @@
       },
       "settingsDescription": "连接器设置、执行历史和提供方事件。",
       "gmail": {
+        "modeTitle": "选择 Gmail 用途",
+        "modeDescription": "连接前选择初始模式，之后仍可在连接器设置中修改。",
+        "mode": {
+          "tools": {
+            "title": "仅工具",
+            "description": "实时搜索和读取邮件，不把邮件存入工作区资料源。"
+          },
+          "index": {
+            "title": "仅索引",
+            "description": "连接后先选择标签、起始日期和数量上限；关闭实时搜索。"
+          },
+          "both": {
+            "title": "工具和索引",
+            "description": "使用实时邮件工具，并单独索引限定范围的邮件。"
+          }
+        },
+        "modeScopeNote": "所有模式都会向 Google 申请读取和发送权限；每封邮件发送前都必须审核。",
+        "modeCancel": "取消",
+        "modeContinue": "继续前往 Google",
         "liveSearch": "实时搜索 Gmail",
         "indexMail": "将选定邮件索引到此工作区",
         "indexNotice": "索引会将选定邮件内容存入工作区资料源。关闭索引会使保留的邮件不再参与代理检索；删除连接器可移除存储副本。定期同步需另行选择。",
-        "after": "起始日期（可选）",
+        "after": "起始日期（索引必填）",
         "maxMessages": "最多索引邮件数",
-        "labels": "标签（不选则包含所有邮件）",
-        "labelsNote": "标签用于筛选导入范围；已索引邮件统一显示在“邮件”目录。",
+        "labels": "标签（索引时至少选择一个）",
+        "labelsNote": "同步前请选择标签和起始日期；已索引邮件统一显示在“邮件”目录。",
+        "scopeRequired": "启用索引前，请选择至少一个标签和起始日期。",
         "labelsLoadFailed": "无法加载 Gmail 标签。"
       },
       "settingsTab": {
