@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
-import { Hono } from "hono";
 import { beforeEach, test, vi } from "vitest";
-import { ApiError, ApiResponse, toApiError } from "../response/api-response";
+import { createRouteTestApp } from "../../test/hono";
 
 // The run-stats routes: who sees what, what is cached, and that a skill that is
 // not public is a 404 to everyone but its author and the admins.
@@ -18,11 +17,9 @@ const mocks = vi.hoisted(() => ({
   getFullSkillRunStats: vi.fn(),
 }));
 
-vi.mock("../middleware/auth-session", () => ({
-  getSessionUserId: () => "user_1",
-  requireSession: async () =>
-    mocks.signedIn ? { user: { id: "user_1" } } : null,
-}));
+vi.mock("../middleware/auth-session", async () =>
+  (await import("../../test/hono")).signedInWhen("user_1", mocks),
+);
 vi.mock("../../modules/market/admin", () => ({
   isMarketAdmin: () => mocks.admin,
 }));
@@ -38,16 +35,13 @@ vi.mock("../../modules/skills/market/run-stats", () => ({
 
 import { registerSkillRunStatsRoutes } from "./skills-run-stats";
 
-function createTestApp() {
-  const app = new Hono();
-  registerSkillRunStatsRoutes(app);
-  app.get("/v1/skills/collections/:slug", (c) =>
-    c.json({ collection: c.req.param("slug") }),
-  );
-  app.notFound((c) => ApiResponse.error(c, ApiError.notFound()));
-  app.onError((error, c) => ApiResponse.error(c, toApiError(error)));
-  return app;
-}
+const createTestApp = () =>
+  createRouteTestApp((app) => {
+    registerSkillRunStatsRoutes(app);
+    app.get("/v1/skills/collections/:slug", (c) =>
+      c.json({ collection: c.req.param("slug") }),
+    );
+  });
 
 const full = {
   skillId: "skill_1",

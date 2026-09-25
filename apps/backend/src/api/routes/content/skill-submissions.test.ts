@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
-import { Hono } from "hono";
 import { beforeEach, test, vi } from "vitest";
 import { ContentError } from "../../../modules/content/errors";
-import { ApiError, ApiResponse, toApiError } from "../../response/api-response";
+import { createWorkspaceRouteTestApp } from "../../../test/hono";
 
 const mocks = vi.hoisted(() => ({
   session: vi.fn(),
@@ -32,17 +31,14 @@ vi.mock("../../../modules/skills/registry/ingest/service", () => ({
 
 import { registerSkillSubmissionRoutes } from "./skill-submissions";
 
-function createTestApp() {
-  const app = new Hono();
-  const workspaceRoutes = new Hono();
-  registerSkillSubmissionRoutes(workspaceRoutes);
-  app.route("/v1/workspaces/:workspaceId", workspaceRoutes);
-  app.notFound((c) => ApiResponse.error(c, ApiError.notFound()));
-  app.onError((error, c) => ApiResponse.error(c, toApiError(error)));
-  return app;
-}
+const createTestApp = () =>
+  createWorkspaceRouteTestApp(registerSkillSubmissionRoutes);
 
-const viewer = { teamId: "team_1", workspaceId: "workspace_1", userId: "user_1" };
+const viewer = {
+  teamId: "team_1",
+  workspaceId: "workspace_1",
+  userId: "user_1",
+};
 const base = "/v1/workspaces/workspace_1/skills/registry/submissions";
 const post = (path: string, body?: unknown) =>
   createTestApp().request(path, {
@@ -57,21 +53,30 @@ beforeEach(() => {
   mocks.requireSkillWorkspace.mockResolvedValue({
     workspace: { id: "workspace_1", organizationId: "team_1" },
   });
-  mocks.create.mockResolvedValue({ submission: { id: "sub_1" }, created: true });
+  mocks.create.mockResolvedValue({
+    submission: { id: "sub_1" },
+    created: true,
+  });
   mocks.list.mockResolvedValue({ items: [], nextCursor: null });
   mocks.get.mockResolvedValue({ submission: { id: "sub_1" } });
   mocks.retry.mockResolvedValue({ submission: { id: "sub_1" } });
 });
 
 test("creating answers 202 for a new import and 200 for the one already in flight", async () => {
-  const created = await post(base, { source: " acme/skills ", install: { skill: "pdf" } });
+  const created = await post(base, {
+    source: " acme/skills ",
+    install: { skill: "pdf" },
+  });
   assert.equal(created.status, 202);
   assert.deepEqual(await created.json(), { submission: { id: "sub_1" } });
   assert.deepEqual(mocks.create.mock.calls[0], [
     { ...viewer, source: "acme/skills", install: { skill: "pdf" } },
   ]);
 
-  mocks.create.mockResolvedValue({ submission: { id: "sub_1" }, created: false });
+  mocks.create.mockResolvedValue({
+    submission: { id: "sub_1" },
+    created: false,
+  });
   assert.equal((await post(base, { source: "acme/skills" })).status, 200);
   assert.deepEqual(mocks.create.mock.calls[1], [
     { ...viewer, source: "acme/skills" },
@@ -100,7 +105,11 @@ test("a malformed create body is a validation error and nothing is created", asy
 
 test("a source the service refuses surfaces as its 422", async () => {
   mocks.create.mockRejectedValue(
-    new ContentError(422, "REGISTRY_SUBMISSION_INVALID_SOURCE", "Only github.com"),
+    new ContentError(
+      422,
+      "REGISTRY_SUBMISSION_INVALID_SOURCE",
+      "Only github.com",
+    ),
   );
   const response = await post(base, { source: "https://gitlab.com/a/b" });
   assert.equal(response.status, 422);
@@ -154,7 +163,13 @@ test("listing defaults to 20 and validates paging input", async () => {
     { ...viewer, limit: 100, cursor: { createdAt: new Date(0), id: "x" } },
   ]);
 
-  for (const query of ["limit=0", "limit=101", "limit=abc", "cursor=bad", "cursor="]) {
+  for (const query of [
+    "limit=0",
+    "limit=101",
+    "limit=abc",
+    "cursor=bad",
+    "cursor=",
+  ]) {
     const response = await createTestApp().request(`${base}?${query}`);
     assert.equal(response.status, 400, query);
   }
@@ -164,7 +179,9 @@ test("listing defaults to 20 and validates paging input", async () => {
 test("get and retry pass the submission id through; retry answers 202", async () => {
   const got = await createTestApp().request(`${base}/sub%2F1`);
   assert.equal(got.status, 200);
-  assert.deepEqual(mocks.get.mock.calls[0], [{ ...viewer, submissionId: "sub/1" }]);
+  assert.deepEqual(mocks.get.mock.calls[0], [
+    { ...viewer, submissionId: "sub/1" },
+  ]);
 
   const retried = await post(`${base}/sub_1/retry`);
   assert.equal(retried.status, 202);
@@ -173,7 +190,11 @@ test("get and retry pass the submission id through; retry answers 202", async ()
   ]);
 
   mocks.retry.mockRejectedValue(
-    new ContentError(409, "SKILL_SUBMISSION_NOT_RETRYABLE", "Only a failed import"),
+    new ContentError(
+      409,
+      "SKILL_SUBMISSION_NOT_RETRYABLE",
+      "Only a failed import",
+    ),
   );
   assert.equal((await post(`${base}/sub_1/retry`)).status, 409);
   mocks.get.mockRejectedValue(

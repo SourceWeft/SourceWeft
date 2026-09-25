@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
-import { Hono } from "hono";
 import { beforeEach, test, vi } from "vitest";
-import { ApiError, ApiResponse, toApiError } from "../response/api-response";
+import { createRouteTestApp } from "../../test/hono";
 
 // The market admin's own screens: who may ask what, how the query string is
 // read, and what each route hands the market module.
@@ -44,13 +43,7 @@ vi.mock("../../modules/skills/market/auto-list", () => ({
 
 import { registerSkillMarketAdminRoutes } from "./skills-market-admin";
 
-function createTestApp() {
-  const app = new Hono();
-  registerSkillMarketAdminRoutes(app);
-  app.notFound((c) => ApiResponse.error(c, ApiError.notFound()));
-  app.onError((error, c) => ApiResponse.error(c, toApiError(error)));
-  return app;
-}
+const createTestApp = () => createRouteTestApp(registerSkillMarketAdminRoutes);
 
 const admin = "/v1/skills/registry/admin";
 const standing = {

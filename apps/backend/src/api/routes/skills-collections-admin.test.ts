@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
-import { Hono } from "hono";
 import { beforeEach, test, vi } from "vitest";
-import { ApiError, ApiResponse, toApiError } from "../response/api-response";
+import { createRouteTestApp } from "../../test/hono";
 
 // The market admin's collection routes and the "keep public" decision: who may
 // call them, what reaches the collection functions, and what a bad body gets.
@@ -16,11 +15,9 @@ const mocks = vi.hoisted(() => ({
   acknowledgeSkillVersion: vi.fn(),
 }));
 
-vi.mock("../middleware/auth-session", () => ({
-  getSessionUserId: () => "admin_1",
-  requireSession: async () =>
-    mocks.signedIn ? { user: { id: "admin_1" } } : null,
-}));
+vi.mock("../middleware/auth-session", async () =>
+  (await import("../../test/hono")).signedInWhen("admin_1", mocks),
+);
 vi.mock("../../modules/market/admin", () => ({
   isMarketAdmin: () => mocks.admin,
 }));
@@ -38,14 +35,11 @@ vi.mock("../../modules/skills/market/auto-list", () => ({
 import { registerSkillCollectionAdminRoutes } from "./skills-collections-admin";
 import { registerSkillMarketAdminRoutes } from "./skills-market-admin";
 
-function createTestApp() {
-  const app = new Hono();
-  registerSkillMarketAdminRoutes(app);
-  registerSkillCollectionAdminRoutes(app);
-  app.notFound((c) => ApiResponse.error(c, ApiError.notFound()));
-  app.onError((error, c) => ApiResponse.error(c, toApiError(error)));
-  return app;
-}
+const createTestApp = () =>
+  createRouteTestApp((app) => {
+    registerSkillMarketAdminRoutes(app);
+    registerSkillCollectionAdminRoutes(app);
+  });
 
 const base = "/v1/skills/registry/admin/collections";
 const json = (method: string, body: unknown) => ({

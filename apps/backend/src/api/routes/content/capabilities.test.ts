@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
-import { Hono } from "hono";
 import { test, vi } from "vitest";
-import { ApiError, ApiResponse, toApiError } from "../../response/api-response";
+import { createWorkspaceRouteTestApp, readJson } from "../../../test/hono";
 
 const mocks = vi.hoisted(() => ({
   getSessionUserId: vi.fn(),
@@ -32,15 +31,8 @@ vi.mock("../../../modules/skills", () => ({
 
 import { registerCapabilityRoutes } from "./capabilities";
 
-function createTestApp() {
-  const app = new Hono();
-  const workspaceRoutes = new Hono();
-  registerCapabilityRoutes(workspaceRoutes);
-  app.route("/v1/workspaces/:workspaceId", workspaceRoutes);
-  app.notFound((c) => ApiResponse.error(c, ApiError.notFound()));
-  app.onError((error, c) => ApiResponse.error(c, toApiError(error)));
-  return app;
-}
+const createTestApp = () =>
+  createWorkspaceRouteTestApp(registerCapabilityRoutes);
 
 function resetRouteMocks() {
   vi.clearAllMocks();
@@ -61,10 +53,6 @@ function resetRouteMocks() {
     organizationId: "team_1",
   });
   mocks.listHiddenManagedBuiltinSlugs.mockResolvedValue([]);
-}
-
-async function readJson(response: Response) {
-  return response.json() as Promise<Record<string, unknown>>;
 }
 
 test("GET /capabilities/catalog includes command icon metadata", async () => {

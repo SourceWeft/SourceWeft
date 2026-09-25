@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
-import { Hono } from "hono";
 import { beforeEach, test, vi } from "vitest";
 import { ContentError } from "../../modules/content/errors";
-import { ApiError, ApiResponse, toApiError } from "../response/api-response";
+import { createRouteTestApp } from "../../test/hono";
 
 // The review routes: who may call each, what reaches the review functions,
 // what a bad body or query gets, and that nothing viewer-specific is cached.
@@ -16,11 +15,9 @@ const mocks = vi.hoisted(() => ({
   setSkillReviewStatus: vi.fn(),
 }));
 
-vi.mock("../middleware/auth-session", () => ({
-  getSessionUserId: () => "user_1",
-  requireSession: async () =>
-    mocks.signedIn ? { user: { id: "user_1" } } : null,
-}));
+vi.mock("../middleware/auth-session", async () =>
+  (await import("../../test/hono")).signedInWhen("user_1", mocks),
+);
 vi.mock("../../modules/market/admin", () => ({
   isMarketAdmin: () => mocks.admin,
 }));
@@ -37,13 +34,7 @@ vi.mock("../../modules/skills/market/auto-list", () => ({
 
 import { registerSkillReviewRoutes } from "./skills-reviews";
 
-function createTestApp() {
-  const app = new Hono();
-  registerSkillReviewRoutes(app);
-  app.notFound((c) => ApiResponse.error(c, ApiError.notFound()));
-  app.onError((error, c) => ApiResponse.error(c, toApiError(error)));
-  return app;
-}
+const createTestApp = () => createRouteTestApp(registerSkillReviewRoutes);
 
 const json = (method: string, body: unknown) => ({
   method,
