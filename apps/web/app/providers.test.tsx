@@ -1,16 +1,8 @@
 // @vitest-environment jsdom
 
 import assert from "node:assert/strict";
-import { act, createElement, type ComponentProps } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { NextIntlClientProvider } from "next-intl";
+import { createElement } from "react";
 import { afterEach, test, vi } from "vitest";
-
-import messages from "../messages/en.json";
-
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
 
 const state = vi.hoisted(() => ({
   refresh: vi.fn(),
@@ -49,21 +41,11 @@ vi.mock("../lib/sdk", () => ({
 // matching the account, and is a refresh triggered exactly when it must be".
 
 import { UserSettingsSync } from "./providers";
-
-let root: Root | null = null;
-let container: HTMLDivElement | null = null;
+import { flush, mountWithIntl, unmountAll } from "@/test/react";
 
 async function render(locale: "en" | "zh-CN" | "zh-TW") {
-  container = document.createElement("div");
-  document.body.append(container);
-  const createdRoot = createRoot(container);
-  root = createdRoot;
-  await act(async () => {
-    createdRoot.render(
-      <NextIntlClientProvider locale={locale} messages={intlMessages}>
-        {createElement(UserSettingsSync)}
-      </NextIntlClientProvider>,
-    );
+  const { container } = await mountWithIntl(createElement(UserSettingsSync), {
+    locale,
   });
   return container;
 }
@@ -73,12 +55,7 @@ function clearCookieJar() {
 }
 
 afterEach(async () => {
-  await act(async () => {
-    root?.unmount();
-  });
-  container?.remove();
-  container = null;
-  root = null;
+  await unmountAll();
   state.refresh.mockClear();
   state.setTheme.mockClear();
   state.userId = "user-1";
@@ -99,9 +76,7 @@ test("a fresh device with no cookie self-corrects to the account's explicit lang
   // Rendered as "en" (e.g. what Accept-Language negotiated) while the
   // account says zh-CN — a real mismatch a new device would hit.
   await render("en");
-  await act(async () => {
-    await Promise.resolve();
-  });
+  await flush();
   assert.equal(state.refresh.mock.calls.length, 1);
   assert.match(document.cookie, /sw_locale=zh-CN/);
 });
@@ -110,9 +85,7 @@ test("a returning visitor whose render already matches the account does not refr
   clearCookieJar();
   state.settings = { appearance: { theme: "system", language: "zh-CN" } };
   await render("zh-CN");
-  await act(async () => {
-    await Promise.resolve();
-  });
+  await flush();
   assert.equal(state.refresh.mock.calls.length, 0);
   assert.match(document.cookie, /sw_locale=zh-CN/);
 });
@@ -121,9 +94,7 @@ test('"system" clears a stale pinned cookie and refreshes, since behavior can ch
   document.cookie = "sw_locale=zh-TW; path=/";
   state.settings = { appearance: { theme: "system", language: "system" } };
   await render("zh-TW");
-  await act(async () => {
-    await Promise.resolve();
-  });
+  await flush();
   assert.equal(state.refresh.mock.calls.length, 1);
   assert.doesNotMatch(document.cookie, /sw_locale=zh-TW/);
 });
@@ -132,9 +103,7 @@ test('"system" with no pinned cookie is already correct and does not refresh', a
   clearCookieJar();
   state.settings = { appearance: { theme: "system", language: "system" } };
   await render("en");
-  await act(async () => {
-    await Promise.resolve();
-  });
+  await flush();
   assert.equal(state.refresh.mock.calls.length, 0);
 });
 
@@ -142,9 +111,7 @@ test("signed-out visitors are left alone entirely", async () => {
   state.userId = undefined;
   clearCookieJar();
   await render("en");
-  await act(async () => {
-    await Promise.resolve();
-  });
+  await flush();
   assert.equal(state.refresh.mock.calls.length, 0);
   assert.equal(state.setTheme.mock.calls.length, 0);
 });

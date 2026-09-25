@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
-import { act, type ComponentProps, type ReactNode } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { act } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 const audit = vi.hoisted(() => ({
@@ -14,19 +13,8 @@ vi.mock("../../../../../lib/skill-market-audit", async (original) => ({
 }));
 
 import { SkillAllAdmin, toSkillFilters } from "./skill-all-admin";
-import { NextIntlClientProvider } from "next-intl";
-import messages from "../../../../../messages/en.json";
+import { mountWithIntl, typeInto, unmountAll } from "@/test/react";
 
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
-const withIntl = (node: ReactNode) => (
-  <NextIntlClientProvider locale="en" messages={intlMessages}>
-    {node}
-  </NextIntlClientProvider>
-);
-
-let root: Root;
 let container: HTMLDivElement;
 
 const skill = {
@@ -66,14 +54,10 @@ beforeEach(async () => {
     items: [skill],
     nextCursor: "next",
   });
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
-  await act(async () => root.render(withIntl(<SkillAllAdmin />)));
+  ({ container } = await mountWithIntl(<SkillAllAdmin />));
 });
-afterEach(() => {
-  act(() => root.unmount());
-  container.remove();
+afterEach(async () => {
+  await unmountAll();
   vi.resetAllMocks();
   vi.restoreAllMocks();
 });
@@ -131,14 +115,7 @@ test("filters go to the API; load more appends the next page", async () => {
   const input = container.querySelector<HTMLInputElement>(
     'input[aria-label="Search skills"]',
   )!;
-  await act(async () => {
-    const setter = Object.getOwnPropertyDescriptor(
-      HTMLInputElement.prototype,
-      "value",
-    )!.set!;
-    setter.call(input, " pdf ");
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-  });
+  await act(async () => typeInto(input, " pdf "));
   await act(async () =>
     container
       .querySelector("form")!

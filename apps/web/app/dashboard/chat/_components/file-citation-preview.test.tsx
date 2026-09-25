@@ -1,17 +1,11 @@
 // @vitest-environment jsdom
 import { createHash, webcrypto } from "node:crypto";
 import { Blob as NodeBlob } from "node:buffer";
-import { act, createElement, type ComponentProps } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { act, createElement } from "react";
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
-import { NextIntlClientProvider } from "next-intl";
 import type { FileReference } from "@sourceweft/contracts";
 import { FileCitationPreview } from "./file-citation-preview";
-import messages from "../../../../messages/en.json";
-
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
+import { mountWithIntl, unmountAll } from "@/test/react";
 
 const api = vi.hoisted(() => ({
   read: vi.fn(),
@@ -35,7 +29,6 @@ vi.mock("@sourceweft/preview/react", () => ({
       "Original content",
     ),
 }));
-let container: HTMLDivElement, root: Root;
 const reference: FileReference = {
   workspaceId: "workspace",
   threadId: "thread",
@@ -63,28 +56,19 @@ const reference: FileReference = {
 beforeEach(() => {
   vi.resetAllMocks();
   vi.stubGlobal("crypto", webcrypto);
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
 });
 afterEach(async () => {
-  await act(async () => root.unmount());
-  container.remove();
+  await unmountAll();
   vi.unstubAllGlobals();
 });
 async function render(fileReference: FileReference = reference) {
-  await act(async () =>
-    root.render(
-      <NextIntlClientProvider locale="en" messages={intlMessages}>
-        {createElement(FileCitationPreview, {
-          reference: fileReference,
-          excerpt: "<script>cited</script>",
-          open: true,
-          onOpenChange: () => {},
-        })}
-      </NextIntlClientProvider>,
-    ),
+  await mountWithIntl(
+    createElement(FileCitationPreview, {
+      reference: fileReference,
+      excerpt: "<script>cited</script>",
+      open: true,
+      onOpenChange: () => {},
+    }),
   );
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 30));

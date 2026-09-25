@@ -1,9 +1,7 @@
 // @vitest-environment jsdom
 import { act, useMemo } from "react";
-import { createRoot } from "react-dom/client";
-import { NextIntlClientProvider } from "next-intl";
-import { expect, test, vi } from "vitest";
-import en from "@/messages/en.json";
+import { afterEach, expect, test, vi } from "vitest";
+import { mountWithIntl, unmountAll } from "@/test/react";
 import { useThreadSources } from "./use-thread-sources";
 import { useThreadVersioning } from "./use-thread-versioning";
 import {
@@ -83,7 +81,7 @@ vi.mock("@/lib/sdk", () => ({
     { get: () => vi.fn().mockResolvedValue(mocks.empty) },
   ),
 }));
-Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+afterEach(unmountAll);
 // jsdom has no layout observer; real scrolling remains browser acceptance.
 vi.stubGlobal(
   "ResizeObserver",
@@ -193,9 +191,6 @@ const streamingBase = messages.find((message) => message.id === "a")!;
 // CI shares its runner with the backend and package suites; allow CPU contention
 // without reducing the replay or relaxing the selection-identity assertions.
 test("streaming through real versioning, Hub registration, desktop host and SourcesHub settles", async () => {
-  const element = document.createElement("div");
-  document.body.append(element);
-  const root = createRoot(element);
   let stream: ReturnType<typeof useStreamingAssistantTransientState>;
   let versions: ReturnType<typeof useThreadVersioning>;
   let rewrites = 0;
@@ -289,52 +284,43 @@ test("streaming through real versioning, Hub registration, desktop host and Sour
     });
     return <RegisterView state={versions} sourceFields={sourceFields} />;
   }
-  try {
-    await act(async () =>
-      root.render(
-        <NextIntlClientProvider locale="en" messages={en}>
-          <ChatHubProvider>
-            <Controller />
-            <HubSlot />
-          </ChatHubProvider>
-        </NextIntlClientProvider>,
-      ),
-    );
-    let previous = versions!.activeVersionByGroup;
-    for (let n = 1; n <= 1000; n++) {
-      const content = `STREAM-END-${n}\n${Array.from({ length: n }, (_, i) => i + 1).join("\n")}`;
-      const message = {
-        ...streamingBase,
-        content,
-        metadata: {
-          ...streamingBase.metadata,
-          renderBlocks: [{ id: "stream-text-a", type: "text", text: content }],
-          threadRun: {
-            idempotencyKey: "synthetic-run",
-            status: "running",
-            mode: "send",
-          },
+  const { container: element } = await mountWithIntl(
+    <ChatHubProvider>
+      <Controller />
+      <HubSlot />
+    </ChatHubProvider>,
+  );
+  let previous = versions!.activeVersionByGroup;
+  for (let n = 1; n <= 1000; n++) {
+    const content = `STREAM-END-${n}\n${Array.from({ length: n }, (_, i) => i + 1).join("\n")}`;
+    const message = {
+      ...streamingBase,
+      content,
+      metadata: {
+        ...streamingBase.metadata,
+        renderBlocks: [{ id: "stream-text-a", type: "text", text: content }],
+        threadRun: {
+          idempotencyKey: "synthetic-run",
+          status: "running",
+          mode: "send",
         },
-      };
-      await act(async () =>
-        stream!.setStreamingAssistantSnapshot({
-          message,
-          messageId: "a",
-          messageIds: ["a"],
-          renderVersion: n,
-        }),
-      );
-      if (versions!.activeVersionByGroup !== previous) rewrites++;
-      previous = versions!.activeVersionByGroup;
-    }
-    expect(element.textContent).toContain("STREAM-END-1000");
-    expect(element.textContent).toContain("Sources");
-    expect(rewrites).toBe(0);
-    expect(
-      versions!.threadCitations.map((item) => item.citation.chunkId),
-    ).toEqual(["chunk"]);
-  } finally {
-    await act(async () => root.unmount());
-    element.remove();
+      },
+    };
+    await act(async () =>
+      stream!.setStreamingAssistantSnapshot({
+        message,
+        messageId: "a",
+        messageIds: ["a"],
+        renderVersion: n,
+      }),
+    );
+    if (versions!.activeVersionByGroup !== previous) rewrites++;
+    previous = versions!.activeVersionByGroup;
   }
+  expect(element.textContent).toContain("STREAM-END-1000");
+  expect(element.textContent).toContain("Sources");
+  expect(rewrites).toBe(0);
+  expect(
+    versions!.threadCitations.map((item) => item.citation.chunkId),
+  ).toEqual(["chunk"]);
 }, 180000);

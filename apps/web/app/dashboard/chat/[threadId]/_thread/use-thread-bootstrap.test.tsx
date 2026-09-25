@@ -1,26 +1,9 @@
 // @vitest-environment jsdom
-import {
-  act,
-  createElement,
-  StrictMode,
-  useRef,
-  type ComponentProps,
-  type ReactNode,
-} from "react";
+import { act, createElement, StrictMode, useRef } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { beforeEach, afterEach, expect, test, vi } from "vitest";
-import { NextIntlClientProvider } from "next-intl";
-import messages from "../../../../../messages/en.json";
 import { useThreadBootstrap } from "./use-thread-bootstrap";
-
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
-const withIntl = (node: ReactNode) => (
-  <NextIntlClientProvider locale="en" messages={intlMessages}>
-    {node}
-  </NextIntlClientProvider>
-);
+import { withIntl } from "@/test/react";
 import {
   setPendingThreadTurn,
   readPendingThreadTurn,

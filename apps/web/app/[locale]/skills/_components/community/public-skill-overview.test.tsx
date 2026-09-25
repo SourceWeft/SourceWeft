@@ -1,10 +1,7 @@
 // @vitest-environment jsdom
-import { act, type ComponentProps, type ReactNode } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import type { ReactNode } from "react";
 import { afterEach, expect, test, vi } from "vitest";
-import { NextIntlClientProvider } from "next-intl";
 import type { MarketSkillSummary } from "@sourceweft/market-sdk";
-import messages from "../../../../../messages/en.json";
 import zhCNMessages from "../../../../../messages/zh-CN.json";
 import zhTWMessages from "../../../../../messages/zh-TW.json";
 
@@ -17,33 +14,31 @@ vi.mock("../../../../../lib/market-skills", () => ({
 
 import { PublicSkillOverview } from "./public-skill-overview";
 import { SkillMarketCard, skillCardText } from "../skills-display";
+import {
+  type IntlOptions,
+  messages,
+  mountWithIntl,
+  unmountAll,
+} from "@/test/react";
 
-let root: Root;
 let container: HTMLDivElement;
-afterEach(() => {
-  act(() => root?.unmount());
-  container?.remove();
+afterEach(async () => {
+  await unmountAll();
   vi.resetAllMocks();
 });
 
-type IntlMessages = ComponentProps<typeof NextIntlClientProvider>["messages"];
+type IntlMessages = IntlOptions["messages"];
 const catalogs: Record<string, IntlMessages> = {
-  en: messages as IntlMessages,
+  en: messages,
   "zh-CN": zhCNMessages as IntlMessages,
   "zh-TW": zhTWMessages as IntlMessages,
 };
 
 async function render(node: ReactNode, locale = "en") {
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
-  await act(async () =>
-    root.render(
-      <NextIntlClientProvider locale={locale} messages={catalogs[locale]}>
-        {node}
-      </NextIntlClientProvider>,
-    ),
-  );
+  ({ container } = await mountWithIntl(node, {
+    locale,
+    messages: catalogs[locale],
+  }));
 }
 
 const overview = {
@@ -157,8 +152,7 @@ test("a card shows the AI summary when there is one, else the description", asyn
   expect(text?.getAttribute("title")).toBe("AI-generated summary");
   expect(container.textContent).not.toContain("The author's own description.");
 
-  act(() => root.unmount());
-  container.remove();
+  await unmountAll();
   await render(<SkillMarketCard skill={{ ...summary, aiSummary: null }} />);
   expect(container.querySelector("[data-ai-summary]")).toBeNull();
   expect(container.textContent).toContain("The author's own description.");

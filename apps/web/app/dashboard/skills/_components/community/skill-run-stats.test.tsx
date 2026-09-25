@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
-import { act, type ComponentProps, type ReactNode } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { SkillRunStatsFull } from "@sourceweft/contracts";
 import { createTranslator, type useTranslations } from "next-intl";
@@ -11,17 +10,8 @@ import {
   SkillRunStatsSummary,
   type AvailableSkillRunStats,
 } from "./skill-run-stats-view";
-import { NextIntlClientProvider } from "next-intl";
 import messages from "../../../../../messages/en.json";
-
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
-const withIntl = (node: ReactNode) => (
-  <NextIntlClientProvider locale="en" messages={intlMessages}>
-    {node}
-  </NextIntlClientProvider>
-);
+import { mountWithIntl, unmountAll } from "@/test/react";
 
 const t = createTranslator({
   locale: "en",
@@ -33,10 +23,6 @@ const api = vi.hoisted(() => ({ loadSkillRunStatsView: vi.fn() }));
 vi.mock("../../../../../lib/skill-run-stats", () => api);
 
 import { SkillRunStats } from "./skill-run-stats";
-
-(
-  globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
-).IS_REACT_ACT_ENVIRONMENT = true;
 
 const available: AvailableSkillRunStats = {
   available: true,
@@ -65,23 +51,14 @@ const full: SkillRunStatsFull = {
 };
 
 let container: HTMLDivElement;
-let root: Root;
 
 beforeEach(() => {
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
   api.loadSkillRunStatsView.mockReset();
 });
-afterEach(() => {
-  act(() => root.unmount());
-  container.remove();
-});
+afterEach(unmountAll);
 
 async function render(node: ReactNode) {
-  await act(async () => {
-    root.render(withIntl(node));
-  });
+  ({ container } = await mountWithIntl(node));
 }
 
 describe("formatting", () => {

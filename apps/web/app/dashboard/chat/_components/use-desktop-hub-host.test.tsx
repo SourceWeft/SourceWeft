@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 import { act, createElement } from "react";
-import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { HubMessage, HubSnapshot } from "./hub-protocol";
 import type { ChatHubRegistration } from "./chat-hub-context";
@@ -57,8 +56,9 @@ vi.mock("../../_components/dashboard-chat-state", () => ({
 }));
 vi.mock("sonner", () => ({ toast: { error: state.error } }));
 import { useDesktopHubHost } from "./use-desktop-hub-host";
+import { mount, type Mounted, unmountAll } from "@/test/react";
 
-let root: Root;
+let view: Mounted | null = null;
 let host: ReturnType<typeof useDesktopHubHost>;
 const registration = (threadId: string): ChatHubRegistration => ({
   threadId,
@@ -95,8 +95,11 @@ function Harness({ value }: { value: ChatHubRegistration }) {
   host = useDesktopHubHost(value, true, state.docked);
   return null;
 }
+/** First call mounts; later calls re-render into the same root. */
 async function render(value: ChatHubRegistration) {
-  await act(async () => root.render(createElement(Harness, { value })));
+  const harness = createElement(Harness, { value });
+  if (view) await view.render(harness);
+  else view = await mount(harness);
 }
 async function emit(message: HubMessage) {
   await act(async () => {
@@ -136,17 +139,14 @@ it("serves detached Files through the current main conversation without relaying
   expect(JSON.stringify(reply)).not.toContain("main-only-proof");
 });
 beforeEach(() => {
-  (
-    globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }
-  ).IS_REACT_ACT_ENVIRONMENT = true;
   vi.clearAllMocks();
   state.pathname = "/dashboard/chat/A";
   state.title = "Conversation A";
   state.workspaceId = "ws";
-  root = createRoot(document.createElement("div"));
 });
 afterEach(async () => {
-  await act(async () => root.unmount());
+  await unmountAll();
+  view = null;
   vi.useRealTimers();
 });
 

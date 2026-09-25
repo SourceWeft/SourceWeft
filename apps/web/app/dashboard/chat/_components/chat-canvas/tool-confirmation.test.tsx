@@ -1,15 +1,8 @@
 // @vitest-environment jsdom
 
 import assert from "node:assert/strict";
-import { act, createElement, type ComponentProps } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { createElement } from "react";
 import { afterEach, beforeEach, test, vi } from "vitest";
-import { NextIntlClientProvider } from "next-intl";
-import messages from "../../../../../messages/en.json";
-
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
 
 const respondToConfirmation = vi.fn();
 
@@ -27,6 +20,7 @@ vi.mock("sonner", () => ({
 import { ToolInterventionBar } from "./tool-confirmation";
 import { LocalOperationContext } from "../local-conversation-status";
 import type { ToolConfirmationItem } from "./tool-confirmation-state";
+import { click, mountWithIntl, unmountAll } from "@/test/react";
 
 type Item = ToolConfirmationItem;
 
@@ -76,28 +70,17 @@ function createItem(input: {
   } as unknown as Item;
 }
 
-let root: Root | null = null;
-let container: HTMLDivElement | null = null;
-
 async function render(item: Item, blocked = false) {
-  container = document.createElement("div");
-  document.body.append(container);
-  const createdRoot = createRoot(container);
-  root = createdRoot;
-  await act(async () => {
-    createdRoot.render(
-      <NextIntlClientProvider locale="en" messages={intlMessages}>
-        {createElement(
-          LocalOperationContext.Provider,
-          { value: { blocked, message: blocked ? "Computer offline" : null } },
-          createElement(ToolInterventionBar, {
-            items: [item],
-            workspaceId: "workspace-1",
-          }),
-        )}
-      </NextIntlClientProvider>,
-    );
-  });
+  const { container } = await mountWithIntl(
+    createElement(
+      LocalOperationContext.Provider,
+      { value: { blocked, message: blocked ? "Computer offline" : null } },
+      createElement(ToolInterventionBar, {
+        items: [item],
+        workspaceId: "workspace-1",
+      }),
+    ),
+  );
   return container;
 }
 
@@ -131,7 +114,7 @@ test("offline blocks approval but leaves rejection available", async () => {
   );
   assert.equal(clickButton(element, "Approve").disabled, true);
   assert.equal(clickButton(element, "Reject").disabled, false);
-  await act(async () => clickButton(element, "Approve").click());
+  await click(clickButton(element, "Approve"));
   assert.equal(respondToConfirmation.mock.calls.length, 0);
 });
 
@@ -170,14 +153,7 @@ test("Gmail send approval cannot proceed when exact message is unavailable", asy
   assert.equal(clickButton(element, "Reject").disabled, false);
 });
 
-afterEach(async () => {
-  await act(async () => {
-    root?.unmount();
-  });
-  container?.remove();
-  root = null;
-  container = null;
-});
+afterEach(unmountAll);
 
 test("the Always allow button is absent unless decisionOptions offers it", async () => {
   const element = await render(
@@ -221,9 +197,7 @@ test("a response without a trustRule never claims the approval was remembered", 
     }),
   );
   const button = clickButton(element, "Always allow");
-  await act(async () => {
-    button.click();
-  });
+  await click(button);
 
   const [, , payload] = respondToConfirmation.mock.calls[0] as [
     string,
@@ -272,9 +246,7 @@ test("a response with a trustRule reports the standing grant", async () => {
       ],
     }),
   );
-  await act(async () => {
-    clickButton(element, "Always allow").click();
-  });
+  await click(clickButton(element, "Always allow"));
 
   const text = element.textContent ?? "";
   assert.match(text, /approved automatically until/i);

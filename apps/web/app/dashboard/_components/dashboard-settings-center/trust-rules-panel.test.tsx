@@ -1,17 +1,9 @@
 // @vitest-environment jsdom
 
 import assert from "node:assert/strict";
-import { act, createElement, type ComponentProps } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { NextIntlClientProvider } from "next-intl";
+import { act, createElement } from "react";
 import { afterEach, beforeEach, test, vi } from "vitest";
 import type { AgentToolTrustRule } from "@sourceweft/sdk";
-
-import messages from "../../../../messages/en.json";
-
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
 
 const listAgentToolTrustRules = vi.fn();
 const revokeAgentToolTrustRule = vi.fn();
@@ -41,14 +33,7 @@ vi.mock("sonner", () => ({
 }));
 
 import { TrustRulesPanelContent } from "./trust-rules-panel";
-
-function withIntl(node: ReturnType<typeof createElement>) {
-  return (
-    <NextIntlClientProvider locale="en" messages={intlMessages}>
-      {node}
-    </NextIntlClientProvider>
-  );
-}
+import { mountWithIntl, unmountAll } from "@/test/react";
 
 function rule(input: Partial<AgentToolTrustRule> = {}): AgentToolTrustRule {
   return {
@@ -72,21 +57,10 @@ function rule(input: Partial<AgentToolTrustRule> = {}): AgentToolTrustRule {
   };
 }
 
-let root: Root | null = null;
-let container: HTMLDivElement | null = null;
-
 async function render() {
-  container = document.createElement("div");
-  document.body.append(container);
-  const createdRoot = createRoot(container);
-  root = createdRoot;
-  await act(async () => {
-    createdRoot.render(
-      withIntl(
-        createElement(TrustRulesPanelContent, { workspaceId: "workspace-1" }),
-      ),
-    );
-  });
+  const { container } = await mountWithIntl(
+    createElement(TrustRulesPanelContent, { workspaceId: "workspace-1" }),
+  );
   return container;
 }
 
@@ -99,14 +73,7 @@ beforeEach(() => {
   revokeAgentToolTrustRule.mockReset();
 });
 
-afterEach(async () => {
-  await act(async () => {
-    root?.unmount();
-  });
-  container?.remove();
-  root = null;
-  container = null;
-});
+afterEach(unmountAll);
 
 test("lists a rule with the facts needed to judge it", async () => {
   listAgentToolTrustRules.mockResolvedValue({ rules: [rule()] });
@@ -155,15 +122,9 @@ test("revoking removes the row", async () => {
 });
 
 test("no workspace means no request and an empty state", async () => {
-  container = document.createElement("div");
-  document.body.append(container);
-  const createdRoot = createRoot(container);
-  root = createdRoot;
-  await act(async () => {
-    createdRoot.render(
-      withIntl(createElement(TrustRulesPanelContent, { workspaceId: null })),
-    );
-  });
+  const { container } = await mountWithIntl(
+    createElement(TrustRulesPanelContent, { workspaceId: null }),
+  );
   assert.equal(listAgentToolTrustRules.mock.calls.length, 0);
   assert.equal(rows(container).length, 0);
   assert.match(container.textContent ?? "", /No remembered approvals/i);

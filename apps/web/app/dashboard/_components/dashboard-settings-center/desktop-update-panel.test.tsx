@@ -1,14 +1,8 @@
 // @vitest-environment jsdom
-import { act, type ComponentProps } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { act } from "react";
 import { afterEach, test, vi, expect } from "vitest";
-import { NextIntlClientProvider } from "next-intl";
 import type { DesktopUpdateState } from "../../../../lib/desktop-bridge";
-import messages from "../../../../messages/en.json";
 
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
 const { api } = vi.hoisted(() => ({
   api: {
     state: vi.fn(),
@@ -23,7 +17,7 @@ const { api } = vi.hoisted(() => ({
 }));
 vi.mock("../../../../lib/desktop-bridge", () => ({ desktopUpdates: api }));
 import { DesktopUpdatePanel } from "./desktop-update-panel";
-let root: Root;
+import { mountWithIntl, unmountAll } from "@/test/react";
 let container: HTMLDivElement;
 const state = (
   patch: Partial<DesktopUpdateState> = {},
@@ -52,21 +46,9 @@ async function render(initial = state()) {
   vi.clearAllMocks();
   api.state.mockResolvedValue(initial);
   api.onState.mockResolvedValue(async () => {});
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
-  await act(async () => {
-    root.render(
-      <NextIntlClientProvider locale="en" messages={intlMessages}>
-        <DesktopUpdatePanel />
-      </NextIntlClientProvider>,
-    );
-  });
+  ({ container } = await mountWithIntl(<DesktopUpdatePanel />));
 }
-afterEach(async () => {
-  await act(async () => root?.unmount());
-  container?.remove();
-});
+afterEach(unmountAll);
 test("ready update requires explicit install and renders notes as text", async () => {
   await render();
   expect(api.install).not.toHaveBeenCalled();

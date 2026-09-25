@@ -1,13 +1,9 @@
 // @vitest-environment jsdom
-import { createElement, type ComponentProps } from "react";
+import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test, vi } from "vitest";
-import { NextIntlClientProvider } from "next-intl";
-import messages from "../../../../messages/en.json";
+import { withIntl } from "@/test/react";
 
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
 vi.mock("./chat-work-context", () => ({
   WorkingFolderPicker: () =>
     createElement("button", null, "Choose existing folder…"),
@@ -39,9 +35,7 @@ const local: DraftWorkContext = {
 };
 const render = (context: DraftWorkContext) =>
   renderToStaticMarkup(
-    <NextIntlClientProvider locale="en" messages={intlMessages}>
-      <DraftFilesPanel context={context} onFolderChange={vi.fn()} />
-    </NextIntlClientProvider>,
+    withIntl(<DraftFilesPanel context={context} onFolderChange={vi.fn()} />),
   );
 test("unselected local draft explains lazy creation and offers a folder choice", () => {
   const html = render(local);

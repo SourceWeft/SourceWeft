@@ -1,19 +1,7 @@
 // @vitest-environment jsdom
-import { act, type ComponentProps, type ReactNode } from "react";
-import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { NextIntlClientProvider } from "next-intl";
 import { SkillClaimPanel } from "./skill-claim-panel";
-import messages from "../../../../messages/en.json";
-
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
-const withIntl = (node: ReactNode) => (
-  <NextIntlClientProvider locale="en" messages={intlMessages}>
-    {node}
-  </NextIntlClientProvider>
-);
+import { mountWithIntl, unmountAll, withIntl } from "@/test/react";
 
 const api = vi.hoisted(() => ({
   getSkillClaims: vi.fn(),
@@ -21,7 +9,14 @@ const api = vi.hoisted(() => ({
 }));
 vi.mock("../../../../lib/skill-claims", () => api);
 vi.mock("next/link", () => ({
-  default: ({ children, href, ...props }: { children: unknown; href: string }) => (
+  default: ({
+    children,
+    href,
+    ...props
+  }: {
+    children: unknown;
+    href: string;
+  }) => (
     <a href={href} {...props}>
       {children as never}
     </a>
@@ -29,10 +24,6 @@ vi.mock("next/link", () => ({
 }));
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-  true;
-
-let root: Root;
 let container: HTMLDivElement;
 
 const repository = {
@@ -46,27 +37,23 @@ const repository = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  root = createRoot(container);
 });
-afterEach(() => {
-  act(() => root.unmount());
-  container.remove();
-});
+afterEach(unmountAll);
 
 async function render() {
-  await act(async () => {
-    root.render(
-      withIntl(<SkillClaimPanel skillId="skill-1" workspaceId="ws-1" />),
-    );
-  });
+  const view = await mountWithIntl(
+    <SkillClaimPanel skillId="skill-1" workspaceId="ws-1" />,
+  );
+  ({ container } = view);
+  return view;
 }
 
 test("asks about the skill's own repository and links an unclaimed one to the claim page", async () => {
   api.getSkillClaims.mockResolvedValue({ repository });
   await render();
-  expect(api.getSkillClaims).toHaveBeenCalledWith("ws-1", { skillId: "skill-1" });
+  expect(api.getSkillClaims).toHaveBeenCalledWith("ws-1", {
+    skillId: "skill-1",
+  });
   const link = container.querySelector("a");
   expect(link?.textContent).toBe("Claim this repository");
   expect(link?.getAttribute("href")).toBe(
@@ -126,14 +113,12 @@ test("offers the claimant who removed the repository a way back instead", async 
 
 test("renders nothing when the skill has no repository or the request fails", async () => {
   api.getSkillClaims.mockResolvedValue({ repository: null });
-  await render();
+  const view = await render();
   expect(container.innerHTML).toBe("");
 
   api.getSkillClaims.mockRejectedValue(new Error("offline"));
-  await act(async () => {
-    root.render(
-      withIntl(<SkillClaimPanel skillId="skill-2" workspaceId="ws-1" />),
-    );
-  });
+  await view.render(
+    withIntl(<SkillClaimPanel skillId="skill-2" workspaceId="ws-1" />),
+  );
   expect(container.innerHTML).toBe("");
 });

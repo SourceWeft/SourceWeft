@@ -1,19 +1,12 @@
 // @vitest-environment jsdom
 
 import assert from "node:assert/strict";
-import { act, createElement, type ComponentProps } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { createElement } from "react";
 import { afterEach, test } from "vitest";
-import { NextIntlClientProvider } from "next-intl";
 import { WorkfileContentViewer } from "./workfile-content-viewer";
-import messages from "../../../../messages/en.json";
+import { mountWithIntl, unmountAll } from "@/test/react";
 
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
-
-let root: Root | null = null;
-let container: HTMLDivElement | null = null;
+afterEach(unmountAll);
 
 async function renderViewer(props: {
   contentText: string;
@@ -21,30 +14,11 @@ async function renderViewer(props: {
   mimeType?: string | null;
   path: string;
 }) {
-  container = document.createElement("div");
-  document.body.append(container);
-  const createdRoot = createRoot(container);
-  root = createdRoot;
-
-  await act(async () => {
-    createdRoot.render(
-      <NextIntlClientProvider locale="en" messages={intlMessages}>
-        {createElement(WorkfileContentViewer, props)}
-      </NextIntlClientProvider>,
-    );
-  });
-
+  const { container } = await mountWithIntl(
+    createElement(WorkfileContentViewer, props),
+  );
   return container;
 }
-
-afterEach(async () => {
-  await act(async () => {
-    root?.unmount();
-  });
-  container?.remove();
-  root = null;
-  container = null;
-});
 
 test("WorkfileContentViewer renders code workfiles with CodeBlock", async () => {
   const element = await renderViewer({

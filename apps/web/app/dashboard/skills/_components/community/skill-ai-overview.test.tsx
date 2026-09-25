@@ -1,8 +1,6 @@
 // @vitest-environment jsdom
-import { act, type ComponentProps, type ReactNode } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import type { ReactNode } from "react";
 import { afterEach, expect, test, vi } from "vitest";
-import { NextIntlClientProvider } from "next-intl";
 
 const api = vi.hoisted(() => ({ getSkillAiOverview: vi.fn() }));
 vi.mock("../../../../../lib/skill-overviews", async (importOriginal) => ({
@@ -15,17 +13,11 @@ vi.mock("../../../../../lib/skill-overviews", async (importOriginal) => ({
 import { SkillAiOverview } from "./skill-ai-overview";
 import { SkillAiOverviewView } from "./skill-ai-overview-view";
 import { overviewLocale } from "../../../../../lib/skill-overviews";
-import messages from "../../../../../messages/en.json";
+import { mountWithIntl, unmountAll } from "@/test/react";
 
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
-
-let root: Root;
 let container: HTMLDivElement;
-afterEach(() => {
-  act(() => root?.unmount());
-  container?.remove();
+afterEach(async () => {
+  await unmountAll();
   vi.resetAllMocks();
 });
 
@@ -45,16 +37,7 @@ const slot = {
 };
 
 async function render(node: ReactNode, locale = "en") {
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
-  await act(async () =>
-    root.render(
-      <NextIntlClientProvider locale={locale} messages={intlMessages}>
-        {node}
-      </NextIntlClientProvider>,
-    ),
-  );
+  ({ container } = await mountWithIntl(node, { locale }));
 }
 
 test("the view renders the overview's sections as plain text, labelled as AI-generated", async () => {
@@ -107,8 +90,7 @@ test("nothing renders when there is no overview (e.g. a restricted skill) or the
   await render(<SkillAiOverview {...slot} />);
   expect(container.innerHTML).toBe("");
 
-  act(() => root.unmount());
-  container.remove();
+  await unmountAll();
   api.getSkillAiOverview.mockRejectedValue(new Error("down"));
   await render(<SkillAiOverview {...slot} />);
   expect(container.innerHTML).toBe("");

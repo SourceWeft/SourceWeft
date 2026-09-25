@@ -1,30 +1,9 @@
 // @vitest-environment jsdom
 
 import assert from "node:assert/strict";
-import {
-  act,
-  createElement,
-  type ComponentProps,
-  type ReactNode,
-} from "react";
-import { createRoot } from "react-dom/client";
-import { NextIntlClientProvider } from "next-intl";
-import { test, vi } from "vitest";
+import { createElement } from "react";
+import { afterEach, test, vi } from "vitest";
 import type { ArtifactStatusSnapshot, MessageRenderBlock } from "./types";
-
-import messages from "../../../../../messages/en.json";
-
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
-
-function withIntl(node: ReactNode) {
-  return (
-    <NextIntlClientProvider locale="en" messages={intlMessages}>
-      {node}
-    </NextIntlClientProvider>
-  );
-}
 
 const getArtifactVersionMedia = vi.hoisted(() => vi.fn());
 const getArtifact = vi.hoisted(() => vi.fn());
@@ -38,6 +17,9 @@ vi.mock("../../../../../lib/sdk", () => ({
 
 import "../artifact-render-host";
 import { ArtifactOutputCard } from "./artifact-output-card";
+import { click, flush, mountWithIntl, unmountAll } from "@/test/react";
+
+afterEach(unmountAll);
 
 function currentSnapshot(): ArtifactStatusSnapshot {
   const now = "2026-08-31T00:00:00.000Z";
@@ -113,23 +95,15 @@ test("artifact-output card renders the recorded version and never the current pa
     type: "artifact_output",
   };
   const onArtifactPreview = vi.fn();
-  const container = document.createElement("div");
-  document.body.append(container);
-  const root = createRoot(container);
-
-  await act(async () => {
-    root.render(
-      withIntl(
-        createElement(ArtifactOutputCard, {
-          artifactStatuses: new Map([["artifact-1", currentSnapshot()]]),
-          block,
-          onArtifactPreview,
-          workspaceId: "workspace-1",
-        }),
-      ),
-    );
-    await Promise.resolve();
-  });
+  const { container } = await mountWithIntl(
+    createElement(ArtifactOutputCard, {
+      artifactStatuses: new Map([["artifact-1", currentSnapshot()]]),
+      block,
+      onArtifactPreview,
+      workspaceId: "workspace-1",
+    }),
+  );
+  await flush();
 
   assert.match(container.textContent ?? "", /Recorded version/u);
   assert.doesNotMatch(container.textContent ?? "", /Current version/u);
@@ -143,7 +117,7 @@ test("artifact-output card renders the recorded version and never the current pa
     button.textContent?.includes("Open"),
   );
   assert.ok(open);
-  await act(async () => open.click());
+  await click(open);
   const record = onArtifactPreview.mock.calls[0]?.[0] as {
     payloadJson?: Record<string, unknown>;
   };
@@ -151,8 +125,7 @@ test("artifact-output card renders the recorded version and never the current pa
   assert.doesNotMatch(serialized, /storageKey|sceneModules|VideoScene/u);
   assert.match(serialized, /artifactVersionId/u);
 
-  await act(async () => root.unmount());
-  container.remove();
+  await unmountAll();
 });
 
 test("an invalid current version cannot block a valid recorded version", async () => {
@@ -192,22 +165,13 @@ test("an invalid current version cannot block a valid recorded version", async (
     threadRunId: "run-1",
     type: "artifact_output",
   };
-  const container = document.createElement("div");
-  document.body.append(container);
-  const root = createRoot(container);
-
-  await act(async () => {
-    root.render(
-      withIntl(
-        createElement(ArtifactOutputCard, {
-          block,
-          workspaceId: "workspace-1",
-        }),
-      ),
-    );
-    await Promise.resolve();
-    await Promise.resolve();
-  });
+  const { container } = await mountWithIntl(
+    createElement(ArtifactOutputCard, {
+      block,
+      workspaceId: "workspace-1",
+    }),
+  );
+  await flush(2);
 
   assert.match(container.textContent ?? "", /Recorded version/u);
   assert.deepEqual(getArtifactVersionMedia.mock.calls.at(-1), [
@@ -216,6 +180,5 @@ test("an invalid current version cannot block a valid recorded version", async (
     "version-1",
   ]);
 
-  await act(async () => root.unmount());
-  container.remove();
+  await unmountAll();
 });

@@ -1,18 +1,6 @@
 // @vitest-environment jsdom
-import { act, type ComponentProps, type ReactNode } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { act } from "react";
 import { afterEach, expect, test, vi } from "vitest";
-import { NextIntlClientProvider } from "next-intl";
-import messages from "../../../../../messages/en.json";
-
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
-const withIntl = (node: ReactNode) => (
-  <NextIntlClientProvider locale="en" messages={intlMessages}>
-    {node}
-  </NextIntlClientProvider>
-);
 
 const admin = vi.hoisted(() => ({
   listSkillListingQueue: vi.fn(),
@@ -28,12 +16,11 @@ vi.mock("../../../../../lib/skill-market-admin", () => admin);
 
 import { SkillReviewQueue } from "./skill-review-queue";
 import { parseCollectionSlugs } from "./skill-collections-admin";
+import { button, mountWithIntl, unmountAll } from "@/test/react";
 
-let root: Root;
 let container: HTMLDivElement;
-afterEach(() => {
-  act(() => root?.unmount());
-  container?.remove();
+afterEach(async () => {
+  await unmountAll();
   vi.resetAllMocks();
 });
 
@@ -53,16 +40,8 @@ const entry = {
 
 async function renderListing(items: unknown[]) {
   admin.listSkillListingQueue.mockResolvedValue({ items });
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
-  await act(async () => root.render(withIntl(<SkillReviewQueue queue="listing" />)));
+  ({ container } = await mountWithIntl(<SkillReviewQueue queue="listing" />));
 }
-
-const button = (label: string) =>
-  [...container.querySelectorAll("button")].find(
-    (node) => node.textContent?.trim() === label,
-  );
 
 test("a public skill's new version shows why it is here and what changed; keeping it acknowledges the version", async () => {
   admin.acknowledgeSkillVersion.mockResolvedValue({});
@@ -102,7 +81,12 @@ test("a public skill's new version shows why it is here and what changed; keepin
 test("withdrawing a public skill's new version delists it", async () => {
   admin.delistSkill.mockResolvedValue({});
   await renderListing([
-    { ...entry, reason: "new-version-flags", visibility: "public", changes: null },
+    {
+      ...entry,
+      reason: "new-version-flags",
+      visibility: "public",
+      changes: null,
+    },
   ]);
   await act(async () => button("Withdraw")!.click());
   expect(admin.delistSkill).toHaveBeenCalledWith("skill_1");

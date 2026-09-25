@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-import { act, type ComponentProps, type ReactNode } from "react";
-import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 const audit = vi.hoisted(() => ({ getSkillMarketAdminMe: vi.fn() }));
@@ -12,35 +10,20 @@ import {
   MarketAdminNavLink,
   resetMarketAdminCheck,
 } from "./market-admin-nav-link";
-import { NextIntlClientProvider } from "next-intl";
-import messages from "../../../messages/en.json";
+import { mountWithIntl, unmountAll } from "@/test/react";
 
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
-const withIntl = (node: ReactNode) => (
-  <NextIntlClientProvider locale="en" messages={intlMessages}>
-    {node}
-  </NextIntlClientProvider>
-);
-
-let root: Root;
 let container: HTMLDivElement;
 beforeEach(() => {
   resetMarketAdminCheck();
   nav.pathname = "/dashboard";
 });
-afterEach(() => {
-  act(() => root.unmount());
-  container.remove();
+afterEach(async () => {
+  await unmountAll();
   vi.resetAllMocks();
 });
 
 async function render() {
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
-  await act(async () => root.render(withIntl(<MarketAdminNavLink />)));
+  ({ container } = await mountWithIntl(<MarketAdminNavLink />));
 }
 
 test("a market admin gets the link, marked current on the admin page", async () => {
@@ -57,8 +40,7 @@ test("everyone else, or a failed check, gets nothing", async () => {
   audit.getSkillMarketAdminMe.mockResolvedValue({ isMarketAdmin: false });
   await render();
   expect(container.innerHTML).toBe("");
-  act(() => root.unmount());
-  container.remove();
+  await unmountAll();
 
   resetMarketAdminCheck();
   audit.getSkillMarketAdminMe.mockRejectedValue(new Error("offline"));
@@ -69,8 +51,7 @@ test("everyone else, or a failed check, gets nothing", async () => {
 test("the question is asked once however many links render", async () => {
   audit.getSkillMarketAdminMe.mockResolvedValue({ isMarketAdmin: true });
   await render();
-  act(() => root.unmount());
-  container.remove();
+  await unmountAll();
   await render();
   expect(audit.getSkillMarketAdminMe).toHaveBeenCalledTimes(1);
   expect(container.querySelector("a")).not.toBeNull();

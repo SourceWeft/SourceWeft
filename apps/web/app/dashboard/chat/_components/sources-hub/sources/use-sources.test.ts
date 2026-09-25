@@ -1,22 +1,12 @@
 // @vitest-environment jsdom
 
-import { act, createElement, type ComponentProps } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { act, createElement } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { NextIntlClientProvider } from "next-intl";
 
 import type { SourceItem } from "../../source-types";
 import type { SourceTreeNode } from "../source-tree";
 import { useSources } from "./use-sources";
-import messages from "../../../../../../messages/en.json";
-
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
-
-(
-  globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }
-).IS_REACT_ACT_ENVIRONMENT = true;
+import { flush, mountWithIntl, unmountAll } from "@/test/react";
 
 // SDK mock. From the sources/ subdir the specifier the hook imports is one
 // level deeper than index.tsx's: "../../../../../../lib/sdk".
@@ -118,43 +108,15 @@ function makeProps(overrides: Partial<HookInput> = {}): HookInput {
   };
 }
 
-let root: Root | null = null;
-let container: HTMLDivElement | null = null;
-
-async function flush() {
-  await act(async () => {
-    for (let i = 0; i < 25; i += 1) {
-      await Promise.resolve();
-    }
-  });
-}
-
 /** Mount the hook once with a fixed (referentially stable) props object. */
 async function renderHook(input: HookInput) {
-  container = document.createElement("div");
-  document.body.append(container);
-  const created = createRoot(container);
-  root = created;
   const captured: { api: HookApi | null } = { api: null };
   function Harness() {
     captured.api = useSources(input);
     return null;
   }
-  await act(async () => {
-    created.render(
-      // This file has a .ts extension (no JSX), and NextIntlClientProvider's
-      // props type requires `children`, so the 3-arg createElement overload
-      // (children as a trailing positional arg) does not type-check here —
-      // children must be passed inside the props object.
-      // eslint-disable-next-line react/no-children-prop -- see above
-      createElement(NextIntlClientProvider, {
-        locale: "en",
-        messages: intlMessages,
-        children: createElement(Harness),
-      }),
-    );
-  });
-  await flush();
+  await mountWithIntl(createElement(Harness));
+  await flush(25);
   return captured;
 }
 
@@ -168,12 +130,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  await act(async () => {
-    root?.unmount();
-  });
-  container?.remove();
-  root = null;
-  container = null;
+  await unmountAll();
   vi.useRealTimers();
 });
 
@@ -190,53 +147,93 @@ test("processing completion updates only that source without loading the list", 
     items: [{ id: "upload", status: { status: "indexed" } }],
   });
   let finish!: (value: unknown) => void;
-  sdk.getSource.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+  sdk.getSource.mockReturnValue(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
   const props = makeProps({ selectedIds: ["ready"] });
   const captured = await renderHook(props);
-  const unchanged = captured.api!.sources.find((source) => source.id === "ready");
+  const unchanged = captured.api!.sources.find(
+    (source) => source.id === "ready",
+  );
   vi.mocked(props.onSelectionChange).mockClear();
 
-  await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(4000);
+  });
   expect(sdk.getSource).toHaveBeenCalledWith("ws1", "upload");
   expect(captured.api!.isLoading).toBe(false);
   // A slow detail request must not start overlapping polls.
-  await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(4000);
+  });
   expect(sdk.listSourceStatuses).toHaveBeenCalledTimes(1);
   await act(async () => {
     finish({ source: apiSource("upload", { contentText: "Parsed text" }) });
   });
-  expect(captured.api!.sources.map((source) => source.id)).toEqual(["ready", "upload"]);
+  expect(captured.api!.sources.map((source) => source.id)).toEqual([
+    "ready",
+    "upload",
+  ]);
   expect(captured.api!.sources[0]).toBe(unchanged);
-  expect(captured.api!.sources[1]).toMatchObject({ status: "Indexed", contentText: "Parsed text" });
+  expect(captured.api!.sources[1]).toMatchObject({
+    status: "Indexed",
+    contentText: "Parsed text",
+  });
   expect(captured.api!.isLoading).toBe(false);
   expect(sdk.listSources).toHaveBeenCalledTimes(1);
-  expect(props.onSourceMerge).toHaveBeenLastCalledWith([captured.api!.sources[1]]);
+  expect(props.onSourceMerge).toHaveBeenLastCalledWith([
+    captured.api!.sources[1],
+  ]);
   expect(props.onSelectionChange).not.toHaveBeenCalled();
-  await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(4000);
+  });
   expect(sdk.listSourceStatuses).toHaveBeenCalledTimes(1);
 });
 
 test("failed detail requests retry individually while other completed sources update", async () => {
   vi.useFakeTimers();
   sdk.listSources.mockResolvedValue({
-    items: [apiSource("s1", { status: "processing" }), apiSource("s2", { status: "queued" })],
-  });
-  sdk.listSourceStatuses.mockResolvedValueOnce({
     items: [
-      { id: "s1", status: { status: "indexed" } },
-      { id: "s2", status: { status: "failed" } },
+      apiSource("s1", { status: "processing" }),
+      apiSource("s2", { status: "queued" }),
     ],
-  }).mockResolvedValue({ items: [{ id: "s1", status: { status: "indexed" } }] });
-  sdk.getSource.mockRejectedValueOnce(new Error("Temporary failure"))
+  });
+  sdk.listSourceStatuses
+    .mockResolvedValueOnce({
+      items: [
+        { id: "s1", status: { status: "indexed" } },
+        { id: "s2", status: { status: "failed" } },
+      ],
+    })
+    .mockResolvedValue({
+      items: [{ id: "s1", status: { status: "indexed" } }],
+    });
+  sdk.getSource
+    .mockRejectedValueOnce(new Error("Temporary failure"))
     .mockResolvedValueOnce({ source: apiSource("s2", { status: "failed" }) })
     .mockResolvedValueOnce({ source: apiSource("s1") });
   const captured = await renderHook(makeProps());
-  await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
-  expect(captured.api!.sources.map((source) => source.status)).toEqual(["Syncing", "Failed"]);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(4000);
+  });
+  expect(captured.api!.sources.map((source) => source.status)).toEqual([
+    "Syncing",
+    "Failed",
+  ]);
   expect(toast.error).toHaveBeenCalledTimes(1);
-  await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
-  expect(sdk.listSourceStatuses).toHaveBeenLastCalledWith("ws1", { ids: ["s1"] });
-  expect(captured.api!.sources.map((source) => source.status)).toEqual(["Indexed", "Failed"]);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(4000);
+  });
+  expect(sdk.listSourceStatuses).toHaveBeenLastCalledWith("ws1", {
+    ids: ["s1"],
+  });
+  expect(captured.api!.sources.map((source) => source.status)).toEqual([
+    "Indexed",
+    "Failed",
+  ]);
   expect(sdk.listSources).toHaveBeenCalledTimes(1);
   expect(captured.api!.loadingError).toBeNull();
 });
@@ -337,7 +334,7 @@ test("handleConfirmDeleteSource deletes then re-fetches without the source", asy
   await act(async () => {
     await captured.api!.handleConfirmDeleteSource(s1);
   });
-  await flush();
+  await flush(25);
 
   expect(sdk.deleteSource).toHaveBeenCalledWith("ws1", "s1");
   expect(captured.api?.sources.map((s) => s.id)).toEqual(["s2"]);
@@ -360,7 +357,7 @@ test("handleCreateTextSource creates + indexes and auto-selects the new source",
   await act(async () => {
     await captured.api!.handleCreateTextSource();
   });
-  await flush();
+  await flush(25);
 
   expect(sdk.createSource).toHaveBeenCalledWith("ws1", {
     title: undefined,
@@ -390,7 +387,7 @@ test("refreshSources re-fetches and updates the source list", async () => {
   await act(async () => {
     await captured.api!.refreshSources();
   });
-  await flush();
+  await flush(25);
 
   expect(captured.api?.sources.map((s) => s.id).sort()).toEqual(["s1", "s2"]);
   expect(sdk.listSources).toHaveBeenCalledTimes(2);

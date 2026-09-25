@@ -1,21 +1,12 @@
 // @vitest-environment jsdom
 
 import assert from "node:assert/strict";
-import { act, createElement, type ComponentProps } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { createElement } from "react";
 import { afterEach, test, vi } from "vitest";
-import { NextIntlClientProvider } from "next-intl";
 import { AssistantToolCard } from "./assistant-tool-card";
 import type { ToolCallRecord } from "./types";
 import { WORKFILE_MUTATION_PREVIEW_CHAR_LIMIT } from "./workfile-mutation-state";
-import messages from "../../../../../messages/en.json";
-
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
-
-let root: Root | null = null;
-let container: HTMLDivElement | null = null;
+import { click, mountWithIntl, unmountAll } from "@/test/react";
 
 function toolCall(input: Partial<ToolCallRecord>): ToolCallRecord {
   return {
@@ -34,34 +25,18 @@ async function renderToolCard(input: {
   onWorkfileClick?: (path: string) => void;
   toolCall: ToolCallRecord;
 }) {
-  container = document.createElement("div");
-  document.body.append(container);
-  const createdRoot = createRoot(container);
-  root = createdRoot;
-
-  await act(async () => {
-    createdRoot.render(
-      <NextIntlClientProvider locale="en" messages={intlMessages}>
-        {createElement(AssistantToolCard, {
-          defaultOpen: true,
-          onWorkfileClick: input.onWorkfileClick,
-          toolCall: input.toolCall,
-        })}
-      </NextIntlClientProvider>,
-    );
-  });
+  const { container } = await mountWithIntl(
+    createElement(AssistantToolCard, {
+      defaultOpen: true,
+      onWorkfileClick: input.onWorkfileClick,
+      toolCall: input.toolCall,
+    }),
+  );
 
   return container;
 }
 
-afterEach(async () => {
-  await act(async () => {
-    root?.unmount();
-  });
-  container?.remove();
-  root = null;
-  container = null;
-});
+afterEach(unmountAll);
 
 test("AssistantToolCard renders write_file workfile preview and opens workfile", async () => {
   const onWorkfileClick = vi.fn();
@@ -91,9 +66,7 @@ test("AssistantToolCard renders write_file workfile preview and opens workfile",
   );
   assert.ok(openButton);
 
-  await act(async () => {
-    openButton.click();
-  });
+  await click(openButton);
 
   assert.equal(onWorkfileClick.mock.calls.length, 1);
   assert.equal(onWorkfileClick.mock.calls[0]?.[0], "/files/ppt/deck.js");

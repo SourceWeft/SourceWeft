@@ -1,17 +1,11 @@
 // @vitest-environment jsdom
 
-import { act, createElement, type ComponentProps } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { act, createElement } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { NextIntlClientProvider } from "next-intl";
 
 import type { SourceConnector } from "@sourceweft/sdk";
 import { useConnectors } from "./use-connectors";
-import messages from "../../../../../../messages/en.json";
-
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
+import { flush, mountWithIntl, unmountAll } from "@/test/react";
 
 // The hook imports `connectorsClient` from the web app's SDK barrel. From this
 // `connectors/` subdir that module is six levels up (one deeper than the
@@ -69,10 +63,6 @@ vi.mock("sonner", () => ({
   },
 }));
 
-(
-  globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }
-).IS_REACT_ACT_ENVIRONMENT = true;
-
 async function flushMicrotasks() {
   for (let i = 0; i < 25; i += 1) {
     await Promise.resolve();
@@ -108,8 +98,6 @@ function fakeConnector(
 type HookInput = Parameters<typeof useConnectors>[0];
 type HookApi = ReturnType<typeof useConnectors>;
 
-let root: Root | null = null;
-let container: HTMLDivElement | null = null;
 let latest: HookApi | null = null;
 
 function baseInput(
@@ -129,32 +117,13 @@ function baseInput(
 }
 
 async function mountHook(input: HookInput) {
-  container = document.createElement("div");
-  document.body.append(container);
-  const created = createRoot(container);
-  root = created;
   function Harness(props: HookInput) {
     latest = useConnectors(props);
     return null;
   }
-  await act(async () => {
-    created.render(
-      // This file has a .ts extension (no JSX), and NextIntlClientProvider's
-      // props type requires `children`, so the 3-arg createElement overload
-      // (children as a trailing positional arg) does not type-check here —
-      // children must be passed inside the props object.
-      // eslint-disable-next-line react/no-children-prop -- see above
-      createElement(NextIntlClientProvider, {
-        locale: "en",
-        messages: intlMessages,
-        children: createElement(Harness, input),
-      }),
-    );
-  });
+  await mountWithIntl(createElement(Harness, input));
   // Let the mount-time refreshConnectors() resolve.
-  await act(async () => {
-    await flushMicrotasks();
-  });
+  await flush(25);
 }
 
 function api(): HookApi {
@@ -190,12 +159,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  await act(async () => {
-    root?.unmount();
-  });
-  container?.remove();
-  root = null;
-  container = null;
+  await unmountAll();
   latest = null;
 });
 
@@ -262,9 +226,7 @@ test("handleSyncConnector marks connector busy, syncs, tracks run, then clears b
   expect(api().connectorBusyById[connector.id]).toBe(true);
 
   // Now let the sync + follow-up refresh resolve.
-  await act(async () => {
-    await flushMicrotasks();
-  });
+  await flush(25);
 
   expect(sync).toHaveBeenCalledWith("ws-sync", "c1");
   expect(trackConnectorSyncRun).toHaveBeenCalledTimes(1);

@@ -1,17 +1,15 @@
 import assert from "node:assert/strict";
-import { createElement, type ComponentProps } from "react";
+import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { test } from "vitest";
-import { NextIntlClientProvider, createTranslator } from "next-intl";
+import { createTranslator } from "next-intl";
 import type { useTranslations } from "next-intl";
 import { AssistantToolCard } from "./assistant-tool-card";
 import { getAssistantToolTitle } from "./assistant-tool-display";
 import type { ToolCallRecord } from "./types";
 import messages from "../../../../../messages/en.json";
+import { withIntl } from "@/test/react";
 
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
 const t = createTranslator({
   locale: "en",
   messages,
@@ -50,9 +48,12 @@ function questionCall(overrides: Partial<ToolCallRecord> = {}): ToolCallRecord {
 }
 function render(toolCall: ToolCallRecord) {
   return renderToStaticMarkup(
-    <NextIntlClientProvider locale="en" messages={intlMessages} timeZone="UTC">
-      {createElement(AssistantToolCard, { toolCall, defaultOpen: true })}
-    </NextIntlClientProvider>,
+    withIntl(
+      createElement(AssistantToolCard, { toolCall, defaultOpen: true }),
+      {
+        timeZone: "UTC",
+      },
+    ),
   );
 }
 

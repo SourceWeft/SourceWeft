@@ -1,19 +1,13 @@
 // @vitest-environment jsdom
-import { act, type ComponentProps, type ReactNode } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { act } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { NextIntlClientProvider } from "next-intl";
 import SkillDetailPage from "./page";
-import messages from "../../../../messages/en.json";
-
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
-const withIntl = (node: ReactNode) => (
-  <NextIntlClientProvider locale="en" messages={intlMessages}>
-    {node}
-  </NextIntlClientProvider>
-);
+import {
+  type Mounted,
+  mountWithIntl,
+  unmountAll,
+  withIntl,
+} from "@/test/react";
 
 const api = vi.hoisted(() => ({
   getSkillCatalogDetailBySlug: vi.fn(),
@@ -57,10 +51,7 @@ vi.mock("../_components/skill-introduction", () => ({
   SkillIntroduction: () => null,
 }));
 
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-  true;
-
-let root: Root;
+let view: Mounted;
 let container: HTMLDivElement;
 
 function detail(extra: Record<string, unknown> = {}) {
@@ -91,15 +82,13 @@ function detail(extra: Record<string, unknown> = {}) {
 }
 
 async function renderPage() {
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
-  await act(async () => root.render(withIntl(<SkillDetailPage />)));
+  view = await mountWithIntl(<SkillDetailPage />);
+  ({ container } = view);
 }
 // What Next does after `router.replace`: the same page, without the param.
 async function followReplace() {
   navigation.search = "";
-  await act(async () => root.render(withIntl(<SkillDetailPage />)));
+  await view.render(withIntl(<SkillDetailPage />));
 }
 const prompt = () =>
   container.querySelector('[data-testid="skill-install-prompt"]');
@@ -112,9 +101,8 @@ beforeEach(() => {
   navigation.search = "install=1";
   api.listSkillCatalogCategories.mockResolvedValue({ items: [] });
 });
-afterEach(() => {
-  act(() => root?.unmount());
-  container?.remove();
+afterEach(async () => {
+  await unmountAll();
   vi.resetAllMocks();
 });
 
@@ -163,8 +151,7 @@ test("an installed skill, or one that cannot be installed, only loses the param"
   await renderPage();
   expect(prompt()).toBeNull();
   expect(navigation.replace).toHaveBeenCalledTimes(1);
-  act(() => root.unmount());
-  container.remove();
+  await unmountAll();
   navigation.replace.mockClear();
 
   api.getSkillCatalogDetailBySlug.mockResolvedValue(

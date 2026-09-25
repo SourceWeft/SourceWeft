@@ -14,8 +14,6 @@ import {
   syncToolConfirmationRun,
 } from "./tool-confirmation-controller";
 
-Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
-
 test("unchanged confirmations preserve state identity even with fresh empty input arrays", () => {
   const state = syncToolConfirmationRun({
     items: [],

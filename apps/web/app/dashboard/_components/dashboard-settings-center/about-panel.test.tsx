@@ -1,16 +1,8 @@
 // @vitest-environment jsdom
 
 import assert from "node:assert/strict";
-import { act, createElement, type ComponentProps } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { NextIntlClientProvider } from "next-intl";
+import { act, createElement } from "react";
 import { afterEach, beforeEach, test, vi } from "vitest";
-
-import messages from "../../../../messages/en.json";
-
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
 
 const isAvailable = vi.fn();
 const info = vi.fn();
@@ -35,22 +27,10 @@ vi.mock("../../../_landing/components/sourceweft-brand", () => ({
 }));
 
 import { AboutPanel } from "./about-panel";
-
-let root: Root | null = null;
-let container: HTMLDivElement | null = null;
+import { mountWithIntl, unmountAll } from "@/test/react";
 
 async function render() {
-  container = document.createElement("div");
-  document.body.append(container);
-  const createdRoot = createRoot(container);
-  root = createdRoot;
-  await act(async () => {
-    createdRoot.render(
-      <NextIntlClientProvider locale="en" messages={intlMessages}>
-        {createElement(AboutPanel)}
-      </NextIntlClientProvider>,
-    );
-  });
+  const { container } = await mountWithIntl(createElement(AboutPanel));
   return container;
 }
 
@@ -61,14 +41,7 @@ beforeEach(() => {
   openExternalUrl.mockResolvedValue(undefined);
 });
 
-afterEach(async () => {
-  await act(async () => {
-    root?.unmount();
-  });
-  container?.remove();
-  root = null;
-  container = null;
-});
+afterEach(unmountAll);
 
 test("web shows a shortened build sha and the changelog link", async () => {
   isAvailable.mockReturnValue(false);

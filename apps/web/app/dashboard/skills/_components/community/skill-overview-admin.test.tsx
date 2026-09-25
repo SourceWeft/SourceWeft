@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
-import { act, type ComponentProps, type ReactNode } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { act } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 
 const api = vi.hoisted(() => ({
@@ -12,23 +11,11 @@ const api = vi.hoisted(() => ({
 vi.mock("../../../../../lib/skill-overviews", () => api);
 
 import { SkillOverviewAdmin } from "./skill-overview-admin";
-import { NextIntlClientProvider } from "next-intl";
-import messages from "../../../../../messages/en.json";
+import { mountWithIntl, unmountAll } from "@/test/react";
 
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
-const withIntl = (node: ReactNode) => (
-  <NextIntlClientProvider locale="en" messages={intlMessages}>
-    {node}
-  </NextIntlClientProvider>
-);
-
-let root: Root;
 let container: HTMLDivElement;
-afterEach(() => {
-  act(() => root?.unmount());
-  container?.remove();
+afterEach(async () => {
+  await unmountAll();
   vi.resetAllMocks();
   vi.useRealTimers();
 });
@@ -63,12 +50,7 @@ function state(hidden: boolean, locales = ["en", "zh-CN", "zh-TW"]) {
 }
 
 async function render() {
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
-  await act(async () =>
-    root.render(withIntl(<SkillOverviewAdmin {...slot} />)),
-  );
+  ({ container } = await mountWithIntl(<SkillOverviewAdmin {...slot} />));
 }
 const button = (label: string) =>
   [...container.querySelectorAll("button")].find(

@@ -1,25 +1,16 @@
 // @vitest-environment jsdom
-import { act, createElement } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { createElement } from "react";
+import { afterEach, expect, it, vi } from "vitest";
 
 const native = vi.hoisted(() => ({ desktop: false }));
 vi.mock("../../../lib/desktop-bridge", () => ({
   desktopBridge: { isAvailable: () => native.desktop },
 }));
 import { DashboardSidebarBrand } from "./dashboard-sidebar-brand";
+import { mount, unmountAll } from "@/test/react";
 
-let root: Root;
-let container: HTMLDivElement;
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
-});
 afterEach(async () => {
-  await act(async () => root.unmount());
-  container.remove();
+  await unmountAll();
   vi.unstubAllGlobals();
 });
 
@@ -28,22 +19,23 @@ it.each([480, 1440])(
   async (width) => {
     vi.stubGlobal("innerWidth", width);
     native.desktop = false;
-    await act(async () => root.render(createElement(DashboardSidebarBrand)));
+    const view = await mount(createElement(DashboardSidebarBrand));
+    const { container } = view;
     expect(container.textContent).toBe("SourceWeft");
     expect(container.querySelector("img")).not.toBeNull();
     expect(container.querySelector("a")?.getAttribute("href")).toBe(
       "/dashboard",
     );
     native.desktop = true;
-    await act(async () => root.render(createElement(DashboardSidebarBrand)));
+    await view.render(createElement(DashboardSidebarBrand));
     expect(container.querySelector("a")).toBeNull();
   },
 );
 
 it("keeps only an accessible logo in the collapsed Web rail", async () => {
   native.desktop = false;
-  await act(async () =>
-    root.render(createElement(DashboardSidebarBrand, { collapsed: true })),
+  const { container } = await mount(
+    createElement(DashboardSidebarBrand, { collapsed: true }),
   );
   expect(container.textContent).toBe("");
   expect(container.querySelector("img")).not.toBeNull();

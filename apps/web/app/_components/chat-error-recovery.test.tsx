@@ -1,10 +1,9 @@
 // @vitest-environment jsdom
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { NextIntlClientProvider } from "next-intl";
 import { expect, it, vi } from "vitest";
 import { MessageRenderBoundary } from "./chat-error-recovery";
-import messages from "../../messages/en.json";
+import { withIntl } from "@/test/react";
 
 it("isolates a render failure, retries without replacing sibling controls, and recovers on conversation change", async () => {
   const log = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -17,15 +16,17 @@ it("isolates a render failure, retries without replacing sibling controls, and r
       throw new Error("private message must not appear in recovery UI");
     return <p>Conversation loaded</p>;
   }
-  const render = (id: string) => (
-    <NextIntlClientProvider locale="en" messages={messages} timeZone="UTC">
-      <MessageRenderBoundary key={id}>
-        <Messages />
-      </MessageRenderBoundary>
-      <textarea aria-label="Draft" defaultValue="Keep my draft" />
-      <button>Stop</button>
-    </NextIntlClientProvider>
-  );
+  const render = (id: string) =>
+    withIntl(
+      <>
+        <MessageRenderBoundary key={id}>
+          <Messages />
+        </MessageRenderBoundary>
+        <textarea aria-label="Draft" defaultValue="Keep my draft" />
+        <button>Stop</button>
+      </>,
+      { timeZone: "UTC" },
+    );
   try {
     await act(async () => root.render(render("a")));
     const draft = host.querySelector("textarea");

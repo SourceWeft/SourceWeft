@@ -1,9 +1,5 @@
 // @vitest-environment jsdom
-import { act, type ComponentProps } from "react";
-import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { NextIntlClientProvider } from "next-intl";
-import messages from "../../../../../messages/en.json";
 import type {
   ListSkillReviewsResponse,
   SkillReview,
@@ -52,16 +48,8 @@ vi.mock(
 );
 
 import { PublicSkillReviews } from "./public-skill-reviews";
+import { button, click, mountWithIntl, unmountAll } from "@/test/react";
 
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
-
-(
-  globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
-).IS_REACT_ACT_ENVIRONMENT = true;
-
-let root: Root;
 let container: HTMLDivElement;
 
 function review(id: string, extra: Partial<SkillReview> = {}): SkillReview {
@@ -111,16 +99,7 @@ async function renderSection(signedIn: boolean) {
     signedIn,
     locale: "en",
   });
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
-  await act(async () =>
-    root.render(
-      <NextIntlClientProvider locale="en" messages={intlMessages}>
-        {node}
-      </NextIntlClientProvider>,
-    ),
-  );
+  ({ container } = await mountWithIntl(node));
   return node;
 }
 
@@ -136,19 +115,12 @@ const itemIds = () =>
       '[data-testid="skill-review-item"]',
     ),
   ].map((node) => node.dataset.reviewId);
-const button = (label: string) =>
-  [...document.querySelectorAll("button")].find(
-    (node) => node.textContent?.trim() === label,
-  );
 
 beforeEach(() => {
   vi.clearAllMocks();
   server.getPublicSkillReviews.mockResolvedValue(page());
 });
-afterEach(() => {
-  act(() => root?.unmount());
-  container?.remove();
-});
+afterEach(unmountAll);
 
 test("renders the summary and the first page, anchored as #reviews", async () => {
   await renderSection(false);
@@ -169,8 +141,7 @@ test("the call to action: sign in to review, or write one in the dashboard", asy
   expect(cta()?.getAttribute("href")).toBe(
     "/auth/sign-in?redirectTo=%2Fdashboard%2Fskills%2Fpdf-tools%23reviews",
   );
-  act(() => root.unmount());
-  container.remove();
+  await unmountAll();
 
   await renderSection(true);
   expect(cta()?.textContent).toContain("Write a review");
@@ -183,8 +154,7 @@ test("no reviews: nothing for a visitor, only the call to action when signed in"
   server.getPublicSkillReviews.mockResolvedValue(empty());
   expect(await renderSection(false)).toBeNull();
   expect(section()).toBeNull();
-  act(() => root.unmount());
-  container.remove();
+  await unmountAll();
 
   await renderSection(true);
   expect(section()).not.toBeNull();
@@ -209,14 +179,14 @@ test("Show more loads the next page in the browser and appends it once", async (
     page({ items: [review("r4")], nextCursor: null }),
   );
   await renderSection(false);
-  await act(async () => button("Show more reviews")!.click());
+  await click(button("Show more reviews"));
   expect(client.listSkillReviews).toHaveBeenLastCalledWith("pdf-tools", {
     sort: "newest",
     cursor: "c1",
     limit: 2,
   });
   expect(itemIds()).toEqual(["r1", "r2", "r3"]);
-  await act(async () => button("Show more reviews")!.click());
+  await click(button("Show more reviews"));
   expect(client.listSkillReviews).toHaveBeenLastCalledWith("pdf-tools", {
     sort: "newest",
     cursor: "c2",
@@ -230,7 +200,7 @@ test("a failed Show more says so and can be tried again", async () => {
   server.getPublicSkillReviews.mockResolvedValue(page({ nextCursor: "c1" }));
   client.listSkillReviews.mockRejectedValueOnce(new Error("offline"));
   await renderSection(false);
-  await act(async () => button("Show more reviews")!.click());
+  await click(button("Show more reviews"));
   expect(container.querySelector('[role="alert"]')?.textContent).toContain(
     "could not be loaded",
   );
@@ -243,7 +213,7 @@ test("Report opens the report form for that one review", async () => {
     '[data-testid="skill-review-report"]',
   );
   expect(reports).toHaveLength(2);
-  await act(async () => reports[1]!.click());
+  await click(reports[1]!);
   expect(
     document.querySelector('[data-testid="report-form"]')?.textContent,
   ).toBe("pdf-tools:r2:false");

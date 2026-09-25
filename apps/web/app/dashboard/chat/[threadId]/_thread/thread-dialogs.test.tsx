@@ -1,38 +1,17 @@
 // @vitest-environment jsdom
 
 import assert from "node:assert/strict";
-import {
-  act,
-  createElement,
-  type ComponentProps,
-  type ReactNode,
-} from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { createElement } from "react";
 import { afterEach, test, vi } from "vitest";
-import { NextIntlClientProvider } from "next-intl";
-import messages from "../../../../../messages/en.json";
 import { ThreadDialogs } from "./thread-dialogs";
 import type { WorkfileDetail } from "./message-normalizers";
-
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
-const withIntl = (node: ReactNode) => (
-  <NextIntlClientProvider locale="en" messages={intlMessages}>
-    {node}
-  </NextIntlClientProvider>
-);
-
-(
-  globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }
-).IS_REACT_ACT_ENVIRONMENT = true;
-
-let root: Root | null = null;
-let container: HTMLDivElement | null = null;
+import { mountWithIntl, unmountAll } from "@/test/react";
 
 function workfile(overrides: Partial<WorkfileDetail> = {}): WorkfileDetail {
   return {
-    payloadKind: "inline_text", contentHash: "a".repeat(64), origin: "unknown",
+    payloadKind: "inline_text",
+    contentHash: "a".repeat(64),
+    origin: "unknown",
     contentText: "console.log('deck');\n",
     createdAt: "2026-06-20T00:00:00.000Z",
     createdBy: null,
@@ -52,46 +31,30 @@ function workfile(overrides: Partial<WorkfileDetail> = {}): WorkfileDetail {
 async function renderDialogs(input: {
   previewWorkfile: WorkfileDetail | null;
 }) {
-  container = document.createElement("div");
-  document.body.append(container);
-  const createdRoot = createRoot(container);
-  root = createdRoot;
-
-  await act(async () => {
-    createdRoot.render(
-      withIntl(
-        createElement(ThreadDialogs, {
-          byokCredentials: [],
-          byokModelConfig: null,
-          byokProviders: [],
-          onByokConfigured: vi.fn(),
-          onByokModelConfigOpenChange: vi.fn(),
-          onByokStateChange: vi.fn(),
-          onPreviewSourceOpenChange: vi.fn(),
-          onPreviewWorkfileOpenChange: vi.fn(),
-          onShortcutsOpenChange: vi.fn(),
-          previewCitation: null,
-          previewSource: null,
-          previewWorkfile: input.previewWorkfile,
-          shortcutDefinitions: [],
-          shortcutsOpen: false,
-          workspaceId: "workspace-1",
-        }),
-      ),
-    );
-  });
+  await mountWithIntl(
+    createElement(ThreadDialogs, {
+      byokCredentials: [],
+      byokModelConfig: null,
+      byokProviders: [],
+      onByokConfigured: vi.fn(),
+      onByokModelConfigOpenChange: vi.fn(),
+      onByokStateChange: vi.fn(),
+      onPreviewSourceOpenChange: vi.fn(),
+      onPreviewWorkfileOpenChange: vi.fn(),
+      onShortcutsOpenChange: vi.fn(),
+      previewCitation: null,
+      previewSource: null,
+      previewWorkfile: input.previewWorkfile,
+      shortcutDefinitions: [],
+      shortcutsOpen: false,
+      workspaceId: "workspace-1",
+    }),
+  );
 
   return document.body;
 }
 
-afterEach(async () => {
-  await act(async () => {
-    root?.unmount();
-  });
-  container?.remove();
-  root = null;
-  container = null;
-});
+afterEach(unmountAll);
 
 test("ThreadDialogs renders .js workfiles as code even when mime type is markdown", async () => {
   const element = await renderDialogs({

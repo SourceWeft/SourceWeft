@@ -1,15 +1,7 @@
 // @vitest-environment jsdom
 import assert from "node:assert/strict";
-import {
-  act,
-  createElement,
-  type ComponentProps,
-  type ReactNode,
-} from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { act, createElement, type ReactNode } from "react";
 import { beforeEach, afterEach, test, vi } from "vitest";
-import { NextIntlClientProvider } from "next-intl";
-import messages from "../../../../messages/en.json";
 vi.mock("../../_components/dashboard-chat-state", () => ({
   useDashboardChatState: () => ({
     setWorkTarget: mocks.setWorkTarget,
@@ -50,16 +42,26 @@ import {
   ChatWorkContext,
   type ChatCreationContext,
 } from "./chat-work-context";
+import {
+  mountWithIntl,
+  type Mounted,
+  unmountAll,
+  withIntl,
+} from "@/test/react";
 
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
-const withIntl = (node: ReactNode) => (
-  <NextIntlClientProvider locale="en" messages={intlMessages}>
-    {node}
-  </NextIntlClientProvider>
-);
-let root: Root, container: HTMLDivElement, context: ChatCreationContext;
+let view: Mounted | null = null;
+let container: HTMLDivElement, context: ChatCreationContext;
+/** First call mounts; later calls re-render into the same root. */
+async function render(node: ReactNode) {
+  if (view) return view.render(withIntl(node));
+  view = await mountWithIntl(node);
+  container = view.container;
+}
+/** Unmount so the next render starts from a fresh root. */
+async function reset() {
+  await unmountAll();
+  view = null;
+}
 function Harness() {
   context = useChatCreationContext();
   return createElement(
@@ -73,7 +75,6 @@ function Harness() {
   );
 }
 beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   mocks.query = new URLSearchParams();
   mocks.native.mockReset().mockResolvedValue(null);
   mocks.isDesktop.mockReset().mockReturnValue(false);
@@ -85,37 +86,31 @@ beforeEach(() => {
   });
   mocks.push.mockClear();
   mocks.replace.mockClear();
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
 });
 afterEach(async () => {
-  await act(async () => root.unmount());
-  container.remove();
+  await reset();
   vi.useRealTimers();
-  vi.unstubAllGlobals();
 });
 test("Web defaults to cloud; a native bootstrap selects this computer", async () => {
-  await act(async () => root.render(withIntl(createElement(Harness))));
+  await render(createElement(Harness));
   assert.deepEqual(context.target, { kind: "cloud" });
-  await act(async () => root.unmount());
-  root = createRoot(container);
+  await reset();
   mocks.native.mockResolvedValue({ deviceId: "b" });
   mocks.isDesktop.mockReturnValue(true);
-  await act(async () => root.render(withIntl(createElement(Harness))));
+  await render(createElement(Harness));
   assert.deepEqual(context.target, { kind: "local", deviceId: "b" });
 });
 test("native initialization failure never creates an implicit cloud context", async () => {
   mocks.isDesktop.mockReturnValue(true);
   mocks.native.mockRejectedValue(new Error("KEYCHAIN_DENIED"));
-  await act(async () => root.render(withIntl(createElement(Harness))));
+  await render(createElement(Harness));
   assert.equal(context.target, null);
   assert.equal(context.ready, false);
   assert.equal(context.error, "KEYCHAIN_DENIED");
 });
 test("explicit URL choice survives refresh; changing computers clears only that folder selection", async () => {
   mocks.query = new URLSearchParams("computer=b&folder=folder-b");
-  await act(async () => root.render(withIntl(createElement(Harness))));
+  await render(createElement(Harness));
   assert.deepEqual(context.target, {
     kind: "local",
     deviceId: "b",
@@ -129,7 +124,7 @@ test("explicit URL choice survives refresh; changing computers clears only that 
     "a",
   );
   mocks.query = new URLSearchParams("computer=a");
-  await act(async () => root.render(withIntl(createElement(Harness))));
+  await render(createElement(Harness));
   await act(async () => context.select("b"));
   const restored = new URL(mocks.push.mock.lastCall?.[0], "http://localhost");
   assert.equal(restored.searchParams.get("computer"), "b");
@@ -142,7 +137,7 @@ test("explicit URL choice survives refresh; changing computers clears only that 
 });
 test("removed device stays invalid rather than selecting another online host", async () => {
   mocks.query = new URLSearchParams("computer=removed");
-  await act(async () => root.render(withIntl(createElement(Harness))));
+  await render(createElement(Harness));
   assert.deepEqual(context.target, { kind: "local", deviceId: "removed" });
   assert.ok(context.error);
 });
@@ -151,15 +146,11 @@ test("existing conversation shows its bound host without a target switcher", asy
     executionTarget: { kind: "local", deviceId: "a" },
     target: { deviceId: "a", name: "Mac A", online: true },
   });
-  await act(async () =>
-    root.render(
-      withIntl(
-        createElement(ChatWorkContext, {
-          workspaceId: "w",
-          threadId: "thread-a",
-        }),
-      ),
-    ),
+  await render(
+    createElement(ChatWorkContext, {
+      workspaceId: "w",
+      threadId: "thread-a",
+    }),
   );
   assert.match(container.textContent ?? "", /Mac A/);
   assert.equal(
@@ -172,7 +163,7 @@ test("existing conversation shows its bound host without a target switcher", asy
 test("explicit cloud remains available when this PC cannot initialize", async () => {
   mocks.query = new URLSearchParams("computer=cloud");
   mocks.native.mockRejectedValue(new Error("KEYCHAIN_DENIED"));
-  await act(async () => root.render(withIntl(createElement(Harness))));
+  await render(createElement(Harness));
   assert.deepEqual(context.target, { kind: "cloud" });
   assert.equal(context.ready, true);
   assert.equal(context.error, null);
@@ -181,7 +172,7 @@ test("explicit cloud remains available when this PC cannot initialize", async ()
 
 test("web defaults to cloud when computer discovery is unavailable", async () => {
   mocks.request.mockRejectedValue(new Error("Internal server error"));
-  await act(async () => root.render(withIntl(createElement(Harness))));
+  await render(createElement(Harness));
   assert.deepEqual(context.target, { kind: "cloud" });
   assert.equal(context.ready, true);
   assert.equal(context.error, null);
@@ -198,7 +189,7 @@ test("web defaults to cloud when computer discovery is unavailable", async () =>
 test("explicit cloud is ready while computer discovery remains pending", async () => {
   mocks.query = new URLSearchParams("computer=cloud");
   mocks.request.mockImplementation(() => new Promise(() => {}));
-  await act(async () => root.render(withIntl(createElement(Harness))));
+  await render(createElement(Harness));
   assert.equal(context.ready, true);
   assert.equal(mocks.request.mock.calls.length, 0);
   await act(async () => {
@@ -212,7 +203,7 @@ test("explicit cloud is ready while computer discovery remains pending", async (
 test("computer discovery failure blocks a selected local target without switching to cloud", async () => {
   mocks.query = new URLSearchParams("computer=a");
   mocks.request.mockRejectedValue(new Error("Internal server error"));
-  await act(async () => root.render(withIntl(createElement(Harness))));
+  await render(createElement(Harness));
   assert.equal(context.ready, false);
   assert.equal(context.target, null);
   assert.equal(context.error, "Internal server error");
@@ -229,15 +220,11 @@ test("an offline bound computer retains its identity without offering another ex
     executionTarget: { kind: "local", deviceId: "b" },
     target: { deviceId: "b", name: "Mac B", online: false },
   });
-  await act(async () =>
-    root.render(
-      withIntl(
-        createElement(ChatWorkContext, {
-          workspaceId: "w",
-          threadId: "thread-b",
-        }),
-      ),
-    ),
+  await render(
+    createElement(ChatWorkContext, {
+      workspaceId: "w",
+      threadId: "thread-b",
+    }),
   );
   assert.match(container.textContent ?? "", /Mac B · Status unavailable/);
   assert.equal(
@@ -252,15 +239,11 @@ test("an offline bound computer retains its identity without offering another ex
 
 test("an unavailable status endpoint is shown as an error, not an offline or cloud target", async () => {
   mocks.request.mockRejectedValue(new Error("Status service unavailable"));
-  await act(async () =>
-    root.render(
-      withIntl(
-        createElement(ChatWorkContext, {
-          workspaceId: "w",
-          threadId: "thread-b",
-        }),
-      ),
-    ),
+  await render(
+    createElement(ChatWorkContext, {
+      workspaceId: "w",
+      threadId: "thread-b",
+    }),
   );
   assert.match(container.textContent ?? "", /Computer unavailable/);
   assert.equal(container.textContent?.includes("Offline"), false);
@@ -278,16 +261,12 @@ test("selected directory remains visible after creation and survives an offline 
     target: { deviceId: "a", name: "Mac A", online: true },
   };
   mocks.request.mockResolvedValue(info);
-  const render = () =>
-    root.render(
-      withIntl(
-        createElement(ChatWorkContext, {
-          workspaceId: "w",
-          threadId: "selected-thread",
-        }),
-      ),
-    );
-  await act(async () => render());
+  const thread = () =>
+    createElement(ChatWorkContext, {
+      workspaceId: "w",
+      threadId: "selected-thread",
+    });
+  await render(thread());
   assert.equal(
     container.querySelector('[data-testid="thread-working-directory"]')
       ?.textContent,
@@ -303,13 +282,12 @@ test("selected directory remains visible after creation and survives an offline 
     container.querySelector('[aria-label="Choose cloud or computer"]'),
     null,
   );
-  await act(async () => root.unmount());
-  root = createRoot(container);
+  await reset();
   mocks.request.mockResolvedValue({
     ...info,
     target: { ...info.target, online: false },
   });
-  await act(async () => render());
+  await render(thread());
   assert.match(container.textContent ?? "", /Status unavailable/);
   assert.equal(
     container.querySelector('[data-testid="thread-working-directory"]')
@@ -321,10 +299,10 @@ test("selected directory remains visible after creation and survives an offline 
 test("desktop cloud discovery retains native identity and includes native proof", async () => {
   mocks.isDesktop.mockReturnValue(true);
   mocks.native.mockResolvedValue({ deviceId: "a" });
-  await act(async () => root.render(withIntl(createElement(Harness))));
+  await render(createElement(Harness));
   assert.equal(context.nativeId, "a");
   mocks.query = new URLSearchParams("computer=cloud");
-  await act(async () => root.render(withIntl(createElement(Harness))));
+  await render(createElement(Harness));
   assert.equal(context.ready, true);
   await act(async () => {
     await context.refresh();
@@ -345,7 +323,7 @@ test("native discovery failure in cloud is reported without blocking cloud", asy
   mocks.isDesktop.mockReturnValue(true);
   mocks.query = new URLSearchParams("computer=cloud");
   mocks.native.mockRejectedValue(new Error("KEYCHAIN_DENIED"));
-  await act(async () => root.render(withIntl(createElement(Harness))));
+  await render(createElement(Harness));
   await act(async () => {
     await context.refresh();
   });

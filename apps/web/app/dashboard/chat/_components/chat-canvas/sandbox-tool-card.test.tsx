@@ -1,20 +1,11 @@
 import assert from "node:assert/strict";
-import { createElement, type ComponentProps, type ReactNode } from "react";
+import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { test } from "vitest";
-import { NextIntlClientProvider } from "next-intl";
 import { SandboxToolCard } from "./sandbox-tool-card";
 import type { ToolCallRecord, ToolConfirmationResolution } from "./types";
-import messages from "../../../../../messages/en.json";
+import { withIntl } from "@/test/react";
 
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
-const withIntl = (node: ReactNode) => (
-  <NextIntlClientProvider locale="en" messages={intlMessages}>
-    {node}
-  </NextIntlClientProvider>
-);
 const toolCall: ToolCallRecord = {
   id: "execute-1",
   tool: "execute",
@@ -77,11 +68,13 @@ for (const [flag, label] of [
           : {}),
     };
     const html = renderToStaticMarkup(
-      withIntl(createElement(SandboxToolCard, {
-        toolCall,
-        defaultOpen: true,
-        resolvedConfirmations: [resolution],
-      })),
+      withIntl(
+        createElement(SandboxToolCard, {
+          toolCall,
+          defaultOpen: true,
+          resolvedConfirmations: [resolution],
+        }),
+      ),
     );
     assert.ok(html.includes(`approval ${label}`));
     assert.ok(!html.includes("Waiting for approval before execution."));

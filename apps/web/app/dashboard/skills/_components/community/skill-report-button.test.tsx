@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
-import { act, type ComponentProps, type ReactNode } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { act } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 import { HttpClientError } from "@sourceweft/sdk";
 
@@ -19,43 +18,19 @@ vi.mock("@sourceweft/sdk", async (importOriginal) => {
 import { skillReportBody } from "../../../../../lib/skill-reports";
 import { SkillReportButton } from "./skill-report-button";
 import { formatRetryWait, SkillReportForm } from "./skill-report-form";
-import { createTranslator, NextIntlClientProvider } from "next-intl";
+import { createTranslator } from "next-intl";
 import messages from "../../../../../messages/en.json";
+import { button, mountWithIntl, unmountAll } from "@/test/react";
 
-const intlMessages = messages as ComponentProps<
-  typeof NextIntlClientProvider
->["messages"];
-const withIntl = (node: ReactNode) => (
-  <NextIntlClientProvider locale="en" messages={intlMessages}>
-    {node}
-  </NextIntlClientProvider>
-);
-
-// React needs to know it is under test to flush effects inside act().
-(
-  globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
-).IS_REACT_ACT_ENVIRONMENT = true;
-
-let root: Root;
-let container: HTMLDivElement;
-afterEach(() => {
-  act(() => root?.unmount());
-  container?.remove();
+afterEach(async () => {
+  await unmountAll();
   document.body.innerHTML = "";
   vi.resetAllMocks();
 });
 
 async function render(node: React.ReactNode) {
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
-  await act(async () => root.render(withIntl(node)));
+  await mountWithIntl(node);
 }
-
-const button = (label: string) =>
-  [...document.body.querySelectorAll("button")].find(
-    (node) => node.textContent?.trim() === label,
-  ) as HTMLButtonElement | undefined;
 
 /** Sets a form control's value the way React notices. */
 function setValue(
