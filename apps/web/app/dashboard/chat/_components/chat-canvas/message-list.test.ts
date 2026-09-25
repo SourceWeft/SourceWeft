@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
-import { test } from "vitest";
+import { describe, test } from "vitest";
 import type { AssistantRenderSegment } from "./assistant-render-segments";
 import {
   getAttachedWebToolCallIds,
   shouldRenderWebToolResultsFallback,
 } from "../web-tool-results-state";
-import { findLastAnswerSegmentId } from "./message-evidence";
+import {
+  findLastAnswerSegmentId,
+  shouldShowPossibleEvidence,
+} from "./message-evidence";
 import {
   resolveAssistantFallbackActivity,
   shouldShowAssistantBottomLoading,
@@ -176,4 +179,50 @@ test("shouldShowAssistantBottomLoading hides for inactive assistant states", () 
     }),
     false,
   );
+});
+
+describe("message-response.test.ts", () => {
+  const citation = {} as never;
+
+  test("shouldShowPossibleEvidence requires available unused citations and stable text", () => {
+    assert.equal(
+      shouldShowPossibleEvidence({
+        availableCitations: [citation],
+        citations: [],
+        hasInlineCitationMarkers: false,
+        showLoading: false,
+      }),
+      true,
+    );
+
+    assert.equal(
+      shouldShowPossibleEvidence({
+        availableCitations: [citation],
+        citations: [],
+        hasInlineCitationMarkers: false,
+        showLoading: true,
+      }),
+      false,
+    );
+
+    assert.equal(
+      shouldShowPossibleEvidence({
+        availableCitations: [citation],
+        citations: [],
+        hasInlineCitationMarkers: true,
+        showLoading: false,
+      }),
+      false,
+    );
+
+    assert.equal(
+      shouldShowPossibleEvidence({
+        availableCitations: [citation],
+        citations: [citation],
+        hasInlineCitationMarkers: false,
+        showLoading: false,
+      }),
+      false,
+    );
+  });
 });
