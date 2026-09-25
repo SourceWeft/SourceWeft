@@ -1726,6 +1726,18 @@
         "noVisibleContent": "（无可见内容）"
       }
     },
+    "toolGroup": {
+      "command": "运行了 {count} 条命令",
+      "read": "{count, plural, =0 {读取了文件} other {读取了 # 个文件}}",
+      "edit": "{count, plural, =0 {编辑了文件} other {编辑了 # 个文件}}",
+      "searchFiles": "搜索了文件",
+      "skill": "加载了技能说明",
+      "web": "搜索了网页",
+      "sources": "检索了资料源",
+      "used": "使用了 {name}",
+      "more": "其他 {count} 项",
+      "failed": "{count} 项失败"
+    },
     "toolConfirmation": {
       "resolved": {
         "expired": "审批已过期且未作出决定。该操作未执行。",

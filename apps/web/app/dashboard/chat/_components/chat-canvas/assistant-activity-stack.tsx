@@ -94,7 +94,7 @@ function AssistantToolGroup({
                     />
                     <WebToolResults
                       availableCitations={availableCitations}
-                      className="ml-7"
+                      className="ml-6"
                       onCitationClick={onCitationClick}
                       toolCall={item.toolCall}
                       variant="activity-row"

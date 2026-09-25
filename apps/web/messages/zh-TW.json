@@ -1735,6 +1735,18 @@
         "noVisibleContent": "（無可見內容）"
       }
     },
+    "toolGroup": {
+      "command": "執行了 {count} 條命令",
+      "read": "{count, plural, =0 {讀取了檔案} other {讀取了 # 個檔案}}",
+      "edit": "{count, plural, =0 {編輯了檔案} other {編輯了 # 個檔案}}",
+      "searchFiles": "搜尋了檔案",
+      "skill": "載入了技能說明",
+      "web": "搜尋了網頁",
+      "sources": "檢索了資料來源",
+      "used": "使用了 {name}",
+      "more": "其他 {count} 項",
+      "failed": "{count} 項失敗"
+    },
     "toolConfirmation": {
       "resolved": {
         "expired": "核准已過期且未作出決定。該操作未執行。",

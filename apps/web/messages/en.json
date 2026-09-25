@@ -1735,6 +1735,18 @@
         "noVisibleContent": "(no visible content)"
       }
     },
+    "toolGroup": {
+      "command": "{count, plural, one {ran a command} other {ran # commands}}",
+      "read": "{count, plural, =0 {read files} one {read a file} other {read # files}}",
+      "edit": "{count, plural, =0 {edited files} one {edited a file} other {edited # files}}",
+      "searchFiles": "searched files",
+      "skill": "loaded skill instructions",
+      "web": "searched the web",
+      "sources": "searched your sources",
+      "used": "used {name}",
+      "more": "{count} more",
+      "failed": "{count} failed"
+    },
     "toolConfirmation": {
       "resolved": {
         "expired": "Approval expired without a decision. The action was not run.",

@@ -151,10 +151,11 @@ test("groupConsecutiveToolItems keeps tool-associated reasoning as its own activ
 test("assistant activity layout exposes one shared row rail", () => {
   assert.match(ASSISTANT_ACTIVITY_ROW_CLASS, /\bitems-center\b/);
   assert.match(ASSISTANT_ACTIVITY_ROW_CLASS, /\bpx-1\b/);
-  assert.match(ASSISTANT_ACTIVITY_ICON_CLASS, /\bsize-6\b/);
+  assert.match(ASSISTANT_ACTIVITY_ICON_CLASS, /\bsize-5\b/);
+  assert.match(ASSISTANT_ACTIVITY_ICON_CLASS, /\bjustify-start\b/);
   assert.match(ASSISTANT_ACTIVITY_LABEL_CLASS, /\bflex-1\b/);
-  assert.match(ASSISTANT_ACTIVITY_DETAIL_CLASS, /\bml-7\b/);
-  assert.match(ASSISTANT_ACTIVITY_DETAIL_TEXT_CLASS, /\bml-7\b/);
+  assert.match(ASSISTANT_ACTIVITY_DETAIL_CLASS, /\bml-6\b/);
+  assert.match(ASSISTANT_ACTIVITY_DETAIL_TEXT_CLASS, /\bml-6\b/);
 });
 
 test("redacted skill read tools render private skill instruction title", () => {

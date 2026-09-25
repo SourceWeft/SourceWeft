@@ -6,6 +6,7 @@ import { memo, useMemo, useState } from "react";
 import {
   Bot,
   ChevronDown,
+  CircleStop,
   Copy,
   Loader2,
   Pencil,
@@ -88,6 +89,11 @@ import {
   parseDelegateToolCall,
 } from "./delegate-tool-card-state";
 import { DelegateThreadLinks } from "./delegate-tool-card";
+import { WorkflowToolGroup } from "./workflow-tool-group";
+import {
+  groupWorkflowToolRuns,
+  isGroupableToolCall,
+} from "./workflow-tool-groups";
 import { formatCompactDuration } from "./duration-format";
 import "../artifact-render-host";
 import { useArtifactStatuses } from "./use-artifact-statuses";
@@ -550,6 +556,12 @@ function AssistantMessageBody({
       ?.producer;
   }
 
+  function resolveWorkflowToolCall(block: AssistantWorkflowBlock) {
+    return block.type === "tool"
+      ? version.toolCalls?.find((tool) => tool.id === block.toolCallId)
+      : undefined;
+  }
+
   function resolveWorkflowDelegate(block: AssistantWorkflowBlock) {
     if (block.type !== "tool") {
       return undefined;
@@ -722,16 +734,45 @@ function AssistantMessageBody({
               data-assistant-activity-stack="true"
               key={segment.id}
             >
-              {partitionWorkflowBlocksBySubagent(
-                segment.blocks,
-                resolveWorkflowBlockProducer,
-                resolveWorkflowDelegate,
+              {groupWorkflowToolRuns(
+                partitionWorkflowBlocksBySubagent(
+                  segment.blocks,
+                  resolveWorkflowBlockProducer,
+                  resolveWorkflowDelegate,
+                ),
+                (entry) => {
+                  const toolCall = resolveWorkflowToolCall(entry.block);
+                  return Boolean(
+                    toolCall &&
+                      isGroupableToolCall(toolCall, resolvedConfirmations),
+                  );
+                },
               ).map((item) => {
                 const lastBlockIndex = segment.blocks.length - 1;
                 const isBlockRunning = (blockIndex: number) =>
                   segment.id === lastWorkflowSegmentId &&
                   isWorkflowRunning &&
                   blockIndex === lastBlockIndex;
+                if (item.kind === "tool-group") {
+                  return (
+                    <WorkflowToolGroup
+                      entries={item.entries}
+                      isRunning={item.entries.some((entry) =>
+                        isBlockRunning(entry.index),
+                      )}
+                      key={item.key}
+                      renderEntry={(entry) =>
+                        renderWorkflowBlockAsActivity({
+                          block: entry.block,
+                          isRunning: isBlockRunning(entry.index),
+                        })
+                      }
+                      resolveToolCall={(entry) =>
+                        resolveWorkflowToolCall(entry.block)
+                      }
+                    />
+                  );
+                }
                 if (item.kind === "delegate" || item.kind === "agent-group") {
                   const taskBlock =
                     item.kind === "delegate" ? item.taskBlock.block : undefined;
@@ -913,7 +954,12 @@ function AssistantMessageBody({
         </div>
       ) : null}
       {cancelledNotice ? (
-        <p className="text-sm text-muted-foreground">{cancelledNotice}</p>
+        <p className="flex items-center gap-1 px-1 text-muted-foreground/70 text-xs">
+          <span className={ASSISTANT_ACTIVITY_ICON_CLASS}>
+            <CircleStop className="size-3.5" />
+          </span>
+          {cancelledNotice}
+        </p>
       ) : null}
     </>
   );
@@ -1286,17 +1332,6 @@ const MessageGroupItem = memo(function MessageGroupItem({
                   sources={referencedSources}
                 />
               ) : null}
-              {messageTimestamp ? (
-                <div
-                  className={cn(
-                    "flex min-h-5 px-1 text-[11px] leading-5 text-muted-foreground",
-                    isAssistant ? "justify-start" : "justify-end",
-                    toolbarVisibilityClass,
-                  )}
-                >
-                  <span>{messageTimestamp}</span>
-                </div>
-              ) : null}
               <Message from={group.role}>
                 <MessageContent
                   className={
@@ -1420,6 +1455,16 @@ const MessageGroupItem = memo(function MessageGroupItem({
                     <MessageBranchPage />
                     <MessageBranchNext className="text-muted-foreground hover:text-foreground" />
                   </MessageBranchSelector>
+                  {messageTimestamp ? (
+                    <span
+                      className={cn(
+                        "px-1 text-[11px] leading-5",
+                        !isAssistant && "-order-1",
+                      )}
+                    >
+                      {messageTimestamp}
+                    </span>
+                  ) : null}
                 </div>
               </MessageToolbar>
             </div>
