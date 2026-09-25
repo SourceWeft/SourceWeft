@@ -269,7 +269,7 @@ export function ChatCanvas({
     input: ChatSendInput,
     options?: { allowWhileStreaming?: boolean },
   ) => void;
-  onStopStreaming?: () => void;
+  onStopStreaming?: () => void | Promise<void>;
   allSources?: SourceItem[];
   sourceMentionLoader?: PromptInputMentionSourceLoader;
   selectedSources?: SourceItem[];
@@ -822,17 +822,17 @@ export function ChatCanvas({
               state: current,
             }),
           );
-          onStopStreaming?.();
-          if (!onReloadMessages) {
-            return;
-          }
-          void Promise.resolve(onReloadMessages()).catch((error) => {
-            const message =
-              error instanceof Error
-                ? error.message
-                : t("errors.reloadFailed");
-            toast.error(message);
-          });
+          // Reload only after the stop has landed: reloading straight away
+          // races the cancellation and brings back the still-pending card.
+          void Promise.resolve(onStopStreaming?.())
+            .then(() => onReloadMessages?.())
+            .catch((error) => {
+              const message =
+                error instanceof Error
+                  ? error.message
+                  : t("errors.reloadFailed");
+              toast.error(message);
+            });
         }}
         resolvedConfirmations={confirmationResolutions}
         workspaceId={workspaceId}

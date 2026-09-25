@@ -161,28 +161,43 @@ export function ChatHeader({
               : "items-center gap-2 sm:flex-col sm:items-start sm:justify-center sm:gap-0",
           )}
         >
-          {parentThread && !embedMode ? (
-            <button
-              className="flex min-w-0 max-w-full items-center gap-0.5 text-[11px] leading-4 text-muted-foreground transition-colors hover:text-foreground focus-visible:underline focus-visible:outline-none"
-              onClick={onOpenParentThread}
-              title={t("header.backToThread", { title: parentThread.title })}
-              type="button"
-            >
-              <ChevronLeft className="size-3 shrink-0" />
-              <span className="truncate">{parentThread.title}</span>
-            </button>
-          ) : null}
-          <h1
+          {/* A sub-agent thread shows its parent as a breadcrumb on the title's
+              own line: the header is a fixed height with room for two lines,
+              and the work context below takes the second. */}
+          <div
             className={cn(
-              "min-w-0 truncate text-sm font-semibold leading-5 text-foreground",
-              desktopTitlebar
-                ? "w-full flex-none"
-                : "flex-1 sm:w-full sm:flex-none",
+              "flex min-w-0 items-center gap-1",
+              desktopTitlebar ? "w-full" : "flex-1 sm:w-full sm:flex-none",
             )}
-            title={threadTitle}
           >
-            {threadTitle}
-          </h1>
+            {parentThread && !embedMode ? (
+              <>
+                <button
+                  className="flex min-w-0 max-w-[40%] shrink items-center gap-0.5 text-sm leading-5 text-muted-foreground transition-colors hover:text-foreground focus-visible:underline focus-visible:outline-none"
+                  onClick={onOpenParentThread}
+                  title={t("header.backToThread", {
+                    title: parentThread.title,
+                  })}
+                  type="button"
+                >
+                  <ChevronLeft className="size-3.5 shrink-0" />
+                  <span className="truncate">{parentThread.title}</span>
+                </button>
+                <span
+                  aria-hidden="true"
+                  className="shrink-0 text-sm leading-5 text-muted-foreground/60"
+                >
+                  /
+                </span>
+              </>
+            ) : null}
+            <h1
+              className="min-w-0 flex-1 truncate text-sm font-semibold leading-5 text-foreground"
+              title={threadTitle}
+            >
+              {threadTitle}
+            </h1>
+          </div>
           <ChatWorkContext
             workspaceId={workspaceId}
             threadId={threadId}

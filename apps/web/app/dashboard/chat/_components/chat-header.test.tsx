@@ -27,10 +27,11 @@ vi.mock("./chat-hub-context", () => ({
   useChatHubContext: () => null,
 }));
 
-function renderHeader() {
+function renderHeader(extra: Partial<Parameters<typeof ChatHeader>[0]> = {}) {
   return renderToStaticMarkup(
     withIntl(
       createElement(ChatHeader, {
+        ...extra,
         threadTitle: "Conversation title",
         workspaceId: "workspace",
         isPersistentLayout: true,
@@ -72,4 +73,23 @@ test("collapsed desktop chat header keeps the expand control beside the title", 
     html.indexOf('aria-label="Expand sidebar"') <
       html.indexOf("Conversation title"),
   );
+});
+
+test("a sub-agent thread shows its parent as a breadcrumb on the title's line", () => {
+  const html = renderHeader({
+    parentThread: { id: "parent", title: "Parent conversation" },
+    onOpenParentThread: () => undefined,
+  });
+  // Parent link and title share one row, so the fixed-height header keeps its
+  // two lines: breadcrumb + title, then the work context.
+  const row = html.match(
+    /<div class="flex min-w-0 items-center gap-1[^"]*">([\s\S]*?)<\/h1><\/div>/,
+  );
+  assert.ok(row, "breadcrumb row not found");
+  const rowHtml = row[1] ?? "";
+  assert.ok(
+    rowHtml.indexOf("Parent conversation") <
+      rowHtml.indexOf("Conversation title"),
+  );
+  assert.ok(html.indexOf("Conversation title") < html.indexOf("Work context"));
 });
