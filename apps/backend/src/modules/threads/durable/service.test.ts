@@ -9,14 +9,7 @@ import {
   toTerminalJobStatus,
   toTerminalRunError,
 } from "./service";
-
-function parseSseData(value: string) {
-  assert.equal(value.startsWith("data: "), true);
-  return JSON.parse(value.slice("data: ".length).trim()) as Record<
-    string,
-    unknown
-  >;
-}
+import { parseSseData } from "../../../test/thread-stream-fixtures";
 
 function createRun(
   input: Partial<ChatThreadRunRecord> = {},

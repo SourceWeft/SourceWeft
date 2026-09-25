@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "vitest";
-import { testExports } from "./runner";
-import { filterInheritableAgentTools } from "./tool-utils";
+import { filterInheritableAgentTools, shouldBindAgentTool } from "./tool-utils";
 
 test("root-only capability tools are removed from child Agent toolsets", () => {
   const tools = [
@@ -29,19 +28,17 @@ describe("from runner.test.ts", () => {
           ],
         },
       },
-    } as unknown as Parameters<
-      typeof testExports.shouldBindAgentTool
-    >[0]["prepared"];
+    } as unknown as Parameters<typeof shouldBindAgentTool>[0]["prepared"];
 
     assert.equal(
-      testExports.shouldBindAgentTool({
+      shouldBindAgentTool({
         prepared,
         toolName: "publish_artifact",
       }),
       true,
     );
     assert.equal(
-      testExports.shouldBindAgentTool({
+      shouldBindAgentTool({
         prepared,
         toolName: "unselected_tool",
       }),
@@ -60,19 +57,17 @@ describe("from runner.test.ts", () => {
           shouldBind: false,
         },
       },
-    } as unknown as Parameters<
-      typeof testExports.shouldBindAgentTool
-    >[0]["prepared"];
+    } as unknown as Parameters<typeof shouldBindAgentTool>[0]["prepared"];
 
     assert.equal(
-      testExports.shouldBindAgentTool({
+      shouldBindAgentTool({
         prepared,
         toolName: "publish_artifact",
       }),
       true,
     );
     assert.equal(
-      testExports.shouldBindAgentTool({
+      shouldBindAgentTool({
         prepared,
         toolName: "unselected_tool",
       }),

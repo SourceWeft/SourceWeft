@@ -134,40 +134,6 @@ import { buildAgentRuntimeContext } from "../prompts/agent-runtime-context";
 
 const MAX_AUTO_APPROVED_SANDBOX_HITL_RESUMES = 8;
 
-export const testExports = {
-  buildAgentRuntimeContext,
-  createMessageRenderBlockBuilder,
-  buildArtifactGenerationStep,
-  buildPresentationProgressThinkingStep,
-  buildPresentationProgressThinkingEvent,
-  buildDeepAgentTodosStep,
-  shouldSuppressRawToolCallText,
-  shouldSuppressLeakedCommandSpecText,
-  isDeepAgentsWriteTodosTool,
-  parseDeepAgentTodos,
-  resolveDeepAgentTodosStepStatus,
-  extractGeneratedImageArtifacts,
-  finalizeMessageRenderBlocks,
-  getFilesystemToolDescription,
-  getFilesystemToolEndTitle,
-  getFilesystemToolStartTitle,
-  getConnectorToolOutputContentError,
-  getConnectorToolErrorTextContentError,
-  createModelReasoningSegmentId,
-  commandResumeFromToolApprovalResume,
-  commandResumeFromHitlDecisions,
-  resolveHitlInterruptCheckpoint,
-  resolveAgentBaseConfig,
-  shouldBindAgentTool,
-  resolveFinalAssistantText,
-  shouldSilenceEmptyApprovalResume,
-  createTraceSequenceAllocator,
-  buildAutoApprovedHitlResume,
-  buildAutoApprovedHitlResumeDecisions,
-  buildFinalOutcome,
-  isCommandSuccessSatisfied,
-};
-
 export async function* invokeDeepAgentTurn(input: {
   prepared: PreparedThreadTurn;
   billing: ContentBillingPort;

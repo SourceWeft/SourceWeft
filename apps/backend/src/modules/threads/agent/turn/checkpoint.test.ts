@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, test } from "vitest";
-import { resolvePendingInterruptCheckpoint } from "./checkpoint";
+import {
+  resolveAgentBaseConfig,
+  resolveHitlInterruptCheckpoint,
+  resolvePendingInterruptCheckpoint,
+} from "./checkpoint";
 import type { AgentRunnableConfig } from "./checkpoint";
-import { testExports } from "./runner";
 
 type StateCall = { configurable?: Record<string, unknown> };
 
@@ -80,7 +83,7 @@ test("an unpinned config is passed through untouched", async () => {
 
 describe("from runner.test.ts", () => {
   test("HITL replay maps to the interrupted checkpoint without top-level checkpoint_id", () => {
-    const config = testExports.resolveAgentBaseConfig({
+    const config = resolveAgentBaseConfig({
       agentMode: "replay",
       agentRunThreadId: "unused-resume-thread",
       agentBaseCheckpoint: {
@@ -107,7 +110,7 @@ describe("from runner.test.ts", () => {
   });
 
   test("HITL interrupt checkpoint prefers the current stream checkpoint when getState is stale", () => {
-    const checkpoint = testExports.resolveHitlInterruptCheckpoint({
+    const checkpoint = resolveHitlInterruptCheckpoint({
       pendingCheckpoint: {
         pending: false,
         checkpoint: {
@@ -128,7 +131,7 @@ describe("from runner.test.ts", () => {
   });
 
   test("HITL interrupt checkpoint uses pending getState checkpoint when available", () => {
-    const checkpoint = testExports.resolveHitlInterruptCheckpoint({
+    const checkpoint = resolveHitlInterruptCheckpoint({
       pendingCheckpoint: {
         pending: true,
         checkpoint: {
@@ -149,7 +152,7 @@ describe("from runner.test.ts", () => {
   });
 
   test("fork mode pins the requested checkpoint", () => {
-    const config = testExports.resolveAgentBaseConfig({
+    const config = resolveAgentBaseConfig({
       agentMode: "fork",
       agentRunThreadId: "unused-refresh-thread",
       agentBaseCheckpoint: {
