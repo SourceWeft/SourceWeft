@@ -30,12 +30,23 @@ export function adaptBillingTestPort<T extends object>(
   const ingestion = legacy.meterIngestion;
   const runtime: BillingRuntime = {
     async getExecutionState(teamId, userId) {
-      const summary = await legacy.getSummary(teamId, userId);
+      const summary = await legacy.getSummary?.(teamId, userId);
+      // Fixtures that never stubbed a summary describe no billing account.
+      if (!summary) {
+        return { kind: "unmetered", reason: "billing_not_installed" };
+      }
       return {
         kind: "metered",
         mode: summary.billingMode ?? "enforced",
         availableCredits: summary.credits.available,
         consumedThisCycle: summary.credits.consumedThisCycle,
+        ingestionPages: {
+          enforced: (summary.billingMode ?? "enforced") === "enforced",
+          available: summary.pages?.available ?? Number.MAX_SAFE_INTEGER,
+          cycleCapacity:
+            (summary.pages?.monthlyGrant ?? Number.MAX_SAFE_INTEGER) +
+            (summary.pages?.addOnBalance ?? 0),
+        },
       };
     },
     async settleModelUsage(input) {

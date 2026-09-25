@@ -13,12 +13,40 @@ import {
   markScheduleOccurrenceQueued,
   markScheduleOccurrenceSkipped,
   materializeDueConnectorSchedules,
+  listQuotaBlockedConnectorRecords,
   retryScheduleOccurrence,
   recoverLostScheduleOccurrence,
   pauseConnectorScheduleForAuth,
 } from "../../modules/connectors/repository";
 
 const SCHEDULED_CONNECTOR_LIMIT = 25;
+/** How long a quota-blocked connector waits between resume checks. */
+const QUOTA_RESUME_CHECK_INTERVAL_MS = 10 * 60_000;
+
+/**
+ * Restarts connectors paused on ingestion pages once their owner has pages
+ * again (top-up, cycle regrant, plan change), including connectors with no
+ * schedule of their own.
+ */
+export async function resumeQuotaBlockedConnectors(now = new Date()) {
+  const blocked = await listQuotaBlockedConnectorRecords({
+    checkedBefore: new Date(now.getTime() - QUOTA_RESUME_CHECK_INTERVAL_MS),
+    limit: SCHEDULED_CONNECTOR_LIMIT,
+  });
+  for (const connector of blocked) {
+    try {
+      await connectorSyncOrchestrator.enqueueQuotaResumeRun({
+        connector,
+        enqueue: enqueueConnectorSyncJob,
+      });
+    } catch (error) {
+      logger.error("Failed to resume quota-blocked connector sync", {
+        connectorId: connector.id,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+}
 
 export async function scheduleConnectorSyncs() {
   const now = new Date();
@@ -38,7 +66,8 @@ export async function scheduleConnectorSyncs() {
       if (
         run.status === "succeeded" ||
         run.status === "failed" ||
-        run.status === "skipped"
+        run.status === "skipped" ||
+        run.status === "blocked"
       ) {
         await completeScheduleOccurrence({
           runId: run.id,
@@ -152,4 +181,6 @@ export async function scheduleConnectorSyncs() {
       }
     }
   }
+
+  await resumeQuotaBlockedConnectors(now);
 }

@@ -53,6 +53,7 @@ export type ConnectorCatalogStatusKind =
   | "active"
   | "needs_setup"
   | "syncing"
+  | "blocked"
   | "error";
 
 export type ConnectorCatalogStatus = {

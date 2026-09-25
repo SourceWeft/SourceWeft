@@ -94,6 +94,10 @@ export class BillingService {
     return this.usageService.getSummary(teamId, userId);
   }
 
+  getExecutionState(teamId: string, userId: string) {
+    return this.usageService.getExecutionState(teamId, userId);
+  }
+
   getUsage(teamId: string, userId: string) {
     return this.usageService.getUsage(teamId, userId);
   }

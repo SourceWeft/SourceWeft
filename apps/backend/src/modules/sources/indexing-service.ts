@@ -1,3 +1,4 @@
+import { BillingError } from "@sourceweft/contracts/billing-runtime";
 import type { ChunkSpec } from "../content/types";
 import type { ContentBillingPort } from "../content/billing-port";
 import { ContentError } from "../content/errors";
@@ -39,6 +40,12 @@ type StaleIndexingResult = {
   };
 };
 
+/**
+ * `checked_by_caller`: the caller already admitted these pages against the same
+ * estimate (the connector sync does so before writing the source at all).
+ */
+type PageAdmissionMode = "check" | "checked_by_caller";
+
 export class SourceIndexingService {
   constructor(private readonly billing: ContentBillingPort) {}
 
@@ -51,6 +58,7 @@ export class SourceIndexingService {
     parsedTokens?: number;
     idempotencyKey?: string;
     chunks?: readonly ChunkSpec[];
+    pageAdmission?: PageAdmissionMode;
   }) {
     return this.indexSourceInternal({ ...input, staleMode: "error" });
   }
@@ -65,6 +73,7 @@ export class SourceIndexingService {
     parsedTokens?: number;
     idempotencyKey?: string;
     chunks?: readonly ChunkSpec[];
+    pageAdmission?: PageAdmissionMode;
   }) {
     return this.indexSourceInternal({ ...input, staleMode: "noop" });
   }
@@ -80,6 +89,7 @@ export class SourceIndexingService {
     chunks?: readonly ChunkSpec[];
     sourceRevisionId?: string;
     staleMode: "error" | "noop";
+    pageAdmission?: PageAdmissionMode;
   }) {
     const { workspace, source } = await requireContentSource(input);
 
@@ -147,6 +157,16 @@ export class SourceIndexingService {
       ingestionBillingBasis:
         physicalPageCount === undefined ? "text-equivalent" : "physical-pages",
     };
+
+    // Refuse before embedding rather than discovering the shortfall at
+    // settlement, after the provider call has been paid for.
+    if (input.pageAdmission !== "checked_by_caller") {
+      await this.admitPages(
+        workspace.organizationId,
+        input.userId,
+        estimatedPages,
+      );
+    }
 
     const processingSource = input.sourceRevisionId
       ? await updateSourceStatusForLatestRevision({
@@ -420,6 +440,26 @@ export class SourceIndexingService {
         });
       }
       throw error;
+    }
+  }
+
+  private async admitPages(teamId: string, userId: string, pages: number) {
+    const state = await this.billing.getExecutionState(teamId, userId);
+    if (
+      state.kind === "metered" &&
+      state.ingestionPages.enforced &&
+      pages > state.ingestionPages.available
+    ) {
+      throw new BillingError(
+        "PAGES_LIMIT_EXCEEDED",
+        402,
+        "Ingestion pages limit exceeded",
+        {
+          teamId,
+          requested: pages,
+          available: state.ingestionPages.available,
+        },
+      );
     }
   }
 

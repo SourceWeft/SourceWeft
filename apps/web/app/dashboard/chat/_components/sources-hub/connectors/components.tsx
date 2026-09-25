@@ -1,10 +1,12 @@
 import { formatDisplayDate } from "@/lib/i18n/format";
 
 import { useLocale as useDisplayLocale } from "next-intl";
+import Link from "next/link";
 import {
   ArrowLeft,
   CheckCircle2,
   CircleAlert,
+  CirclePause,
   Copy,
   Link2,
   Loader2,
@@ -19,7 +21,8 @@ import {
 
 import { useTranslations } from "next-intl";
 
-import type { SourceConnector } from "@sourceweft/sdk";
+import type { ConnectorSyncBlock, SourceConnector } from "@sourceweft/sdk";
+import { useBillingAvailable } from "@/lib/billing-edition/capabilities";
 import {
   Alert,
   AlertDescription,
@@ -107,7 +110,7 @@ function statusTone(status: ConnectorCatalogStatusKind) {
     return "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300";
   if (status === "connected" || status === "available")
     return "border-primary/30 bg-primary/10 text-primary";
-  if (status === "needs_setup")
+  if (status === "needs_setup" || status === "blocked")
     return "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300";
   if (status === "error")
     return "border-destructive/30 bg-destructive/10 text-destructive";
@@ -118,8 +121,55 @@ function statusIcon(status: ConnectorCatalogStatusKind) {
   if (status === "active") return CheckCircle2;
   if (status === "syncing") return Loader2;
   if (status === "needs_setup") return Webhook;
+  if (status === "blocked") return CirclePause;
   if (status === "error") return CircleAlert;
   return PlugIcon;
+}
+
+/** Why the platform paused this connector's syncs, in the user's terms. */
+export function formatConnectorSyncBlock(
+  block: ConnectorSyncBlock,
+  t: ConnectorT,
+) {
+  return block.reason === "PAGES_LIMIT_EXCEEDED"
+    ? t("connectors.syncBlock.pagesLimit", { count: block.indexedCount })
+    : t("connectors.syncBlock.ownerUnavailable");
+}
+
+/**
+ * A platform pause (quota, no billable owner) is a warning, not an error: the
+ * connector is healthy and resumes on its own once the cause is resolved.
+ */
+export function ConnectorSyncBlockAlert({
+  block,
+  className,
+}: {
+  block: ConnectorSyncBlock;
+  className?: string;
+}) {
+  const t = useTranslations("dashboardSourcesHub");
+  const billingAvailable = useBillingAvailable();
+  return (
+    <Alert
+      className={cn(
+        "border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-200",
+        className,
+      )}
+    >
+      <CirclePause className="size-4" />
+      <AlertDescription className="text-inherit">
+        <span>{formatConnectorSyncBlock(block, t)}</span>
+        {block.reason === "PAGES_LIMIT_EXCEEDED" && billingAvailable ? (
+          <Link
+            className="font-medium underline underline-offset-2"
+            href="/dashboard/billing"
+          >
+            {t("connectors.syncBlock.manageBilling")}
+          </Link>
+        ) : null}
+      </AlertDescription>
+    </Alert>
+  );
 }
 
 export function PlugIcon({ className }: { className?: string }) {
@@ -275,6 +325,13 @@ function getOAuthConnectorStatus(
         kind: "needs_setup",
         label: t("connectors.status.paused"),
         detail: t("connectors.detail.paused"),
+      };
+    }
+    if (connector.raw.syncBlock) {
+      return {
+        kind: "blocked",
+        label: t("connectors.status.blocked"),
+        detail: formatConnectorSyncBlock(connector.raw.syncBlock, t),
       };
     }
     if (
@@ -710,6 +767,12 @@ export const ActiveConnectorCard = memoComponent(function ActiveConnectorCard({
             <Alert className="mt-3" variant="destructive">
               <AlertDescription>{connector.raw.lastError}</AlertDescription>
             </Alert>
+          ) : null}
+          {connector.raw.syncBlock ? (
+            <ConnectorSyncBlockAlert
+              block={connector.raw.syncBlock}
+              className="mt-3"
+            />
           ) : null}
           {catalogItem?.supportsWebhook && webhookConfig ? (
             <div className="mt-3 rounded-lg border bg-muted/25 p-2.5 text-xs">

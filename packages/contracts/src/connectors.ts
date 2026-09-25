@@ -28,7 +28,28 @@ export const connectorSyncRunStatusSchema = z.enum([
   "failed",
   "canceled",
   "skipped",
+  "blocked",
 ]);
+
+/**
+ * Why a connector's syncs are paused by the platform rather than by the user.
+ * Set when a run ends `blocked`, cleared when a later run gets past the block.
+ */
+export const connectorSyncBlockReasonSchema = z.enum([
+  "PAGES_LIMIT_EXCEEDED",
+  "CONNECTOR_BILLING_OWNER_UNAVAILABLE",
+]);
+
+export const connectorSyncBlockSchema = z.object({
+  reason: connectorSyncBlockReasonSchema,
+  runId: z.string(),
+  blockedAt: z.string(),
+  indexedCount: z.number().int().nonnegative(),
+  requestedPages: z.number().int().nonnegative().nullable(),
+  availablePages: z.number().int().nonnegative().nullable(),
+  /** Last time the scheduler found the owner still without pages. */
+  resumeCheckedAt: z.string().nullable().optional(),
+});
 
 export const connectorActionRiskLevelSchema = z.enum(["low", "medium", "high"]);
 
@@ -154,6 +175,7 @@ export const sourceConnectorSchema = z.object({
     })
     .nullable()
     .optional(),
+  syncBlock: connectorSyncBlockSchema.nullable().optional(),
   lastError: z.string().nullable(),
   createdBy: z.string().nullable(),
   createdAt: z.string(),
@@ -427,6 +449,10 @@ export type ConnectorOAuthAccountStatus = z.infer<
 export type ConnectorStatus = z.infer<typeof connectorStatusSchema>;
 export type ConnectorSyncRunTriggerType = z.infer<
   typeof connectorSyncRunTriggerTypeSchema
+>;
+export type ConnectorSyncBlock = z.infer<typeof connectorSyncBlockSchema>;
+export type ConnectorSyncBlockReason = z.infer<
+  typeof connectorSyncBlockReasonSchema
 >;
 export type ConnectorSyncRunStatus = z.infer<
   typeof connectorSyncRunStatusSchema

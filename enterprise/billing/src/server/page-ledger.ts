@@ -105,6 +105,25 @@ export function decidePageAdmission(input: {
   };
 }
 
+/**
+ * The pre-work view of {@link decidePageAdmission} a host uses to avoid doing
+ * billable ingestion that settlement would reject. `enforced` mirrors exactly
+ * when `meterIngestion` can reject: pages on, enforced mode, limits enforced.
+ */
+export function describeIngestionPageAdmission(
+  account: BillingAccountState,
+  config: { mode: BillingMode; enforceLimits: boolean; pagesEnabled: boolean },
+) {
+  return {
+    enforced:
+      config.pagesEnabled && config.mode === "enforced" && config.enforceLimits,
+    available: getAvailablePages(account),
+    cycleCapacity:
+      Math.max(account.monthlyPagesGrant, 0) +
+      Math.max(account.addOnPagesBalance, 0),
+  };
+}
+
 /** Adds pages to the carry-over bucket (top-up purchases, shadow overage). */
 export function grantAddOnPages(account: BillingAccountState, pages: number) {
   account.addOnPagesBalance += pages;

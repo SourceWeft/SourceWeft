@@ -27,7 +27,9 @@ function iso(value: Date | null) {
   return value ? value.toISOString() : null;
 }
 
-export function mapOAuthAccount(row: OAuthAccountRow): ConnectorOAuthAccountRecord {
+export function mapOAuthAccount(
+  row: OAuthAccountRow,
+): ConnectorOAuthAccountRecord {
   return {
     id: row.id,
     teamId: row.teamId,
@@ -73,6 +75,7 @@ export function mapSourceConnector(
     indexingFrequencyMinutes: row.indexingFrequencyMinutes,
     lastIndexedAt: iso(row.lastIndexedAt),
     nextScheduledAt: iso(row.nextScheduledAt),
+    syncBlock: row.syncBlock ?? null,
     lastError: row.lastError,
     createdBy: row.createdBy,
     createdAt: row.createdAt.toISOString(),

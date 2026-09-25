@@ -10,12 +10,9 @@ import type { BillingService } from "./service";
 export function createBillingRuntime(service: BillingService): BillingRuntime {
   return {
     async getExecutionState(teamId, actorUserId) {
-      const summary = await service.getSummary(teamId, actorUserId);
       return {
         kind: "metered",
-        mode: summary.billingMode,
-        availableCredits: summary.credits.available,
-        consumedThisCycle: summary.credits.consumedThisCycle,
+        ...(await service.getExecutionState(teamId, actorUserId)),
       };
     },
     settleModelUsage: (input) => settleModelUsage(service, input),

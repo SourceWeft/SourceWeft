@@ -1,0 +1,3 @@
+ALTER TABLE "connector_sync_runs" DROP CONSTRAINT "connector_sync_runs_status_check";--> statement-breakpoint
+ALTER TABLE "source_connectors" ADD COLUMN "sync_block" jsonb;--> statement-breakpoint
+ALTER TABLE "connector_sync_runs" ADD CONSTRAINT "connector_sync_runs_status_check" CHECK ("connector_sync_runs"."status" in ('queued', 'running', 'succeeded', 'failed', 'canceled', 'skipped', 'blocked'));

@@ -372,6 +372,13 @@
       "when": 1790235380391,
       "tag": "0052_sparkling_madame_hydra",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1790277162036,
+      "tag": "0053_connector_sync_block",
+      "breakpoints": true
     }
   ]
 }

@@ -6,6 +6,7 @@ import { createIsolatedTestDatabase } from "../../../test/isolated-database";
 import type { ContentBillingPort } from "../../content/billing-port";
 import type { ConnectorAdapter } from "../types";
 import { ConnectorError } from "../errors";
+import { createCoreBillingRuntime } from "../../../billing-host/core";
 
 let schema: typeof import("@sourceweft/db");
 let schedules: typeof import("./schedule") &
@@ -667,9 +668,10 @@ test("expired provider cursor resets durable progress before the next full scan"
     getRuntimeToken: async () => "test-token",
   } as unknown as InstanceType<typeof connectorRuntime.ConnectorOAuthService>;
   const orchestrator = new connectorRuntime.ConnectorSyncOrchestrator(
-    {} as ContentBillingPort,
+    createCoreBillingRuntime() as ContentBillingPort,
     registry,
     oauth,
+    async ({ triggerUserId }) => triggerUserId,
   );
   const run = await syncRunRepo.createSyncRunRecord({
     ...target,

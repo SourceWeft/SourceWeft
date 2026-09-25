@@ -96,6 +96,9 @@ function toSyncActivityItem(
     discoveredCount: run.discoveredCount,
     indexedCount: run.indexedCount,
     failedCount: run.failedCount,
+    oversizedCount: Array.isArray(run.metadataJson.oversizedItems)
+      ? run.metadataJson.oversizedItems.length
+      : null,
     heartbeatAt: run.heartbeatAt,
     createdBy: run.createdBy,
     targetExternalIds: run.metadataJson.targetExternalIds ?? null,

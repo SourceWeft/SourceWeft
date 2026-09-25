@@ -106,3 +106,59 @@ for (const modelKind of ["embedding", "rerank"]) {
     assert.equal(store.ledgers.length, 0);
   });
 }
+
+test("execution state reports ingestion-page admission exactly when settlement would reject", async () => {
+  const store = new MemoryBillingStore();
+  const runtime = createBillingRuntime(
+    new BillingService(store, runtimeConfig, noopProvider),
+  );
+  const initial = await runtime.getExecutionState("team_1", "user_1");
+  assert.equal(initial.kind, "metered");
+  if (initial.kind !== "metered") throw new Error("Expected metered state");
+  assert.deepEqual(initial.ingestionPages, {
+    enforced: true,
+    available: 300,
+    cycleCapacity: 300,
+  });
+
+  await runtime.meterIngestion(
+    "team_1",
+    {
+      pages: 300,
+      feature: "ingestion",
+      referenceId: "source:1",
+      idempotencyKey: "source-index:1",
+    },
+    "user_1",
+  );
+  const drained = await runtime.getExecutionState("team_1", "user_1");
+  if (drained.kind !== "metered") throw new Error("Expected metered state");
+  assert.equal(drained.ingestionPages.available, 0);
+  assert.equal(drained.ingestionPages.cycleCapacity, 300);
+  await assert.rejects(
+    runtime.meterIngestion(
+      "team_1",
+      {
+        pages: 1,
+        feature: "ingestion",
+        referenceId: "source:2",
+        idempotencyKey: "source-index:2",
+      },
+      "user_1",
+    ),
+    { code: "PAGES_LIMIT_EXCEEDED" },
+  );
+
+  for (const config of [
+    { ...runtimeConfig, mode: "shadow" as const },
+    { ...runtimeConfig, enforceLimits: false },
+    { ...runtimeConfig, pagesEnabled: false },
+  ]) {
+    const relaxed = createBillingRuntime(
+      new BillingService(new MemoryBillingStore(), config, noopProvider),
+    );
+    const state = await relaxed.getExecutionState("team_1", "user_1");
+    if (state.kind !== "metered") throw new Error("Expected metered state");
+    assert.equal(state.ingestionPages.enforced, false);
+  }
+});

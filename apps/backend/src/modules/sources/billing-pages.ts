@@ -81,3 +81,20 @@ export function resolveBillingPages(input: {
   // text equivalents, and old caller/source estimates are not billing evidence.
   return resolveIngestionPages({ parsedTokens });
 }
+
+/**
+ * The pages indexing will settle for this content, or `null` when the content
+ * is blank (indexing rejects it before any billable work). Pre-work admission
+ * checks must use this so the check and the charge cannot disagree.
+ */
+export function estimateIngestionPages(input: {
+  mimeType?: string | null;
+  metadata?: Readonly<Record<string, unknown>> | null;
+  contentText?: string | null;
+}): number | null {
+  if (estimateSourceTokens(input.contentText) === 0) return null;
+  return resolveBillingPages({
+    physicalPageCount: resolvePhysicalPageCount(input),
+    contentText: input.contentText,
+  });
+}

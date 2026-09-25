@@ -2626,7 +2626,8 @@
         "needs_setup": "待設定",
         "error": "錯誤",
         "disabled": "已停用",
-        "paused": "已暫停"
+        "paused": "已暫停",
+        "blocked": "同步已暫停"
       },
       "type": {
         "indexable": "可索引",
@@ -2661,6 +2662,11 @@
         "connectedAutoCreate": "已存在授權但沒有使用中的連接器。重新連接以建立連接器。",
         "connectedConfigure": "OAuth 已連接。設定此連接器以啟用同步。",
         "available": "可透過 {name} OAuth 進行連接。"
+      },
+      "syncBlock": {
+        "pagesLimit": "頁數額度已用完。上次同步索引了 {count} 條內容後暫停，額度恢復後會自動繼續同步。",
+        "ownerUnavailable": "連接此帳戶的成員已離開團隊，同步已暫停。請由目前成員重新連接後繼續同步。",
+        "manageBilling": "管理計費"
       },
       "webhookUrl": "Webhook URL",
       "webhookLocal": "本機",
@@ -2828,6 +2834,7 @@
         "indexedCount": "已索引",
         "objectId": "物件 ID",
         "objectType": "物件",
+        "oversizedCount": "超出額度上限",
         "providerEventId": "提供方事件",
         "reason": "原因",
         "requestPreview": "請求",
