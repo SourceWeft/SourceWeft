@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { Client } from "pg";
 import Redis from "ioredis";
 import { HeadBucketCommand, S3Client } from "@aws-sdk/client-s3";
-import { createIsolatedTestDatabase } from "../test/isolated-database";
+import { provisionMigratedDatabase } from "../test/migrated-database";
 
 const root = new URL("../../../../", import.meta.url);
 const statePath = new URL(
@@ -44,7 +44,7 @@ if (mode === "prepare") {
   }
   const originalDatabaseUrl = process.env.DATABASE_URL;
   if (!originalDatabaseUrl) throw new Error("DATABASE_URL is required");
-  const isolated = await createIsolatedTestDatabase("anydoc_e2e");
+  const isolated = await provisionMigratedDatabase("anydoc_e2e");
   await mkdir(new URL("output/playwright/anydoc/", root), { recursive: true });
   await writeFile(
     statePath,

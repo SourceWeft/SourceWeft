@@ -2,7 +2,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { resolve } from "node:path";
 import { parse } from "dotenv";
-import { createIsolatedTestDatabase } from "../src/test/isolated-database";
+import { provisionMigratedDatabase } from "../src/test/migrated-database";
 const source = process.env.SKILL_TEST_ENV_SOURCE;
 if (!source)
   throw new Error(
@@ -13,7 +13,7 @@ if (!values.DATABASE_URL) throw new Error("Source env has no DATABASE_URL");
 process.env.DATABASE_URL = values.DATABASE_URL;
 process.env.BETTER_AUTH_SECRET = randomBytes(32).toString("hex");
 process.env.MODEL_GATEWAY_ENCRYPTION_SECRET = randomBytes(32).toString("hex");
-const isolated = await createIsolatedTestDatabase("skillv6");
+const isolated = await provisionMigratedDatabase("skillv6");
 const env = {
   DATABASE_URL: isolated.url,
   REDIS_URL: values.REDIS_URL ?? "redis://127.0.0.1:6379",

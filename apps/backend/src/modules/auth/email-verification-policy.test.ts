@@ -5,6 +5,13 @@ import { afterEach, test, vi } from "vitest";
 // one (the self-hosted default) must not demand it: its operator would be
 // locked out of their own installation on the first sign-in.
 
+// Constructing the auth is required to read the resolved option, but the
+// oauth-provider plugin seeds its configured resources into PostgreSQL as a
+// side effect of construction. Stub the plugin so this stays a unit test.
+vi.mock("@better-auth/oauth-provider", () => ({
+  oauthProvider: () => ({ id: "oauth-provider" }),
+}));
+
 afterEach(() => {
   vi.resetModules();
   vi.unstubAllEnvs();

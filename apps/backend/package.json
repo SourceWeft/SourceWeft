@@ -19,6 +19,7 @@
     "test:watch": "vitest --config vitest.config.ts",
     "test:changed": "vitest run --config vitest.config.ts --changed",
     "test:coverage": "vitest run --config vitest.config.ts --coverage",
+    "test:database": "vitest run --config vitest.database.config.ts",
     "db:generate": "pnpm --filter @sourceweft/db db:generate",
     "db:migrate": "pnpm run migrate:auth && pnpm --filter @sourceweft/db db:migrate && pnpm run auth:provision-extension",
     "migrate:auth": "auth migrate --yes --config src/modules/auth/auth.migration.ts",

@@ -33,7 +33,7 @@ pnpm install --frozen-lockfile
 
 Run the full model-gateway tests, including `openai-sdk-options.test.ts` for ESM
 and CommonJS, `unauthenticated-system.test.ts` for actual adapters, and backend
-`local-llm-no-auth.test.ts` for config sync, real HTTP, database credentials and
+`local-llm-no-auth.database.test.ts` for config sync, real HTTP, database credentials and
 GLOBAL/BYOK isolation. Check Docker prune includes the patch and frozen lockfile.
 
 ## Gemini transport
