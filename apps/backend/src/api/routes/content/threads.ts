@@ -6,6 +6,7 @@ import type { Hono } from "hono";
 import {
   createPersonaRequestSchema,
   createThreadRequestSchema,
+  endThreadQuestionsRequestSchema,
   listThreadMessagesRequestSchema,
   listThreadsRequestSchema,
   startThreadTurnRequestSchema,
@@ -22,6 +23,7 @@ import {
   contentThreadService,
   durableChatRunService,
   contentThreadStreamService,
+  endPendingQuestions,
   parseDurableChatRunKey,
   getRunApprovalPauseState,
 } from "../../../modules/threads";
@@ -612,6 +614,30 @@ export function registerThreadRoutes(app: Hono) {
     });
   });
 
+  // End on a waiting `askUser` question: record it unanswered and stop the
+  // turn, without calling the model again (Cancel answers and continues).
+  app.post("/threads/:id/questions/end", async (c) => {
+    const session = await requireSession(c);
+    if (!session) {
+      throw ApiError.unauthorized();
+    }
+    const parsed = endThreadQuestionsRequestSchema.safeParse(
+      await c.req.json().catch(() => null),
+    );
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+    const result = await endPendingQuestions({
+      workspaceId: requireRouteParam(c, "workspaceId"),
+      threadId: requireRouteParam(c, "id"),
+      userId: getSessionUserId(session),
+      ...parsed.data,
+    });
+    return ApiResponse.success(c, result);
+  });
+
   app.get("/threads/:id/room", async (c) => {
     const session = await requireSession(c);
     if (!session) {
@@ -995,7 +1021,8 @@ export function registerThreadRoutes(app: Hono) {
                     images,
                     mentionedSourceIds: parsed.data.mentionedSourceIds,
                     sourceIds: parsed.data.sourceIds,
-                    sourceSelectionRevision: parsed.data.sourceSelectionRevision,
+                    sourceSelectionRevision:
+                      parsed.data.sourceSelectionRevision,
                     tools: parsed.data.tools,
                     command: parsed.data.command,
                     invocation: parsed.data.invocation,
@@ -1021,7 +1048,8 @@ export function registerThreadRoutes(app: Hono) {
                     images,
                     mentionedSourceIds: parsed.data.mentionedSourceIds,
                     sourceIds: parsed.data.sourceIds,
-                    sourceSelectionRevision: parsed.data.sourceSelectionRevision,
+                    sourceSelectionRevision:
+                      parsed.data.sourceSelectionRevision,
                     tools: parsed.data.tools,
                     command: parsed.data.command,
                     invocation: parsed.data.invocation,

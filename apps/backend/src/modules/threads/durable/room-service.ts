@@ -158,7 +158,10 @@ export async function* streamThreadRoom(input: {
         }
         return;
       }
-      if (payload.kind === "message_created") {
+      if (
+        payload.kind === "message_created" ||
+        payload.kind === "message_updated"
+      ) {
         push({
           type: "message",
           messageId: payload.messageId,

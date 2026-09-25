@@ -555,6 +555,19 @@ export async function resolveResumeThreadStreamInput(
     );
   }
 
+  // End on a waiting question records it unanswered and stops the turn; a
+  // late answer (another tab, a stale panel) must not revive it.
+  if (
+    input.toolApprovalResume?.askUser &&
+    toObjectRecord(latestAssistantMessage.metadata)?.isCancelled === true
+  ) {
+    throw new ContentError(
+      409,
+      "USER_QUESTION_ENDED",
+      "This question was ended and can no longer be answered",
+    );
+  }
+
   const checkpoint = resolveAgentCheckpointMetadata(latestAssistantMessage);
   const resumeCheckpoint = resolveToolConfirmationResumeCheckpoint(checkpoint);
 

@@ -136,6 +136,10 @@ export async function createThreadAgent(
 }
 
 export type { CommandExecutionPolicy } from "./middleware";
+export {
+  ASK_USER_CANCELLED_ANSWER,
+  formatAskUserTranscript,
+} from "./middleware/ask-user";
 
 /**
  * Build the config for agent invocation with checkpointer thread_id.

@@ -100,6 +100,8 @@ import type {
   ListChildThreadsResponse,
   StartThreadTurnRequest,
   StartThreadTurnResponse,
+  EndThreadQuestionsRequest,
+  EndThreadQuestionsResponse,
   StreamThreadRequest,
   StreamThreadResponse,
   CompleteSourceUploadResponse,
@@ -552,6 +554,18 @@ export class ContentClient {
       } | null;
     }>(
       `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/active-run`,
+    );
+  }
+
+  /** End a turn parked on an `askUser` question, without continuing it. */
+  endThreadQuestions(
+    workspaceId: string,
+    threadId: string,
+    input: EndThreadQuestionsRequest,
+  ) {
+    return this.http.post<EndThreadQuestionsResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/questions/end`,
+      input,
     );
   }
 

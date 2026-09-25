@@ -435,3 +435,31 @@ test("mergeToolApprovalResumeActions surfaces reconstructed MCP refs on the resu
     },
   ]);
 });
+
+test("an answer to a question that was ended is refused", async () => {
+  setThreadMessages([
+    message("user", { id: "user-1" }),
+    message("assistant", {
+      id: "assistant-1",
+      metadata: {
+        userMessageId: "user-1",
+        isCancelled: true,
+        errorCode: "CLIENT_CANCELLED",
+      },
+    }),
+  ]);
+
+  await assert.rejects(
+    resolveResumeThreadStreamInput({
+      workspaceId: "workspace-1",
+      threadId: "thread-1",
+      userId: "user-1",
+      assistantMessageId: "assistant-1",
+      toolApprovalResume: {
+        decisions: [],
+        askUser: { status: "answered", answers: ["Cats"] },
+      },
+    }),
+    { code: "USER_QUESTION_ENDED" },
+  );
+});
