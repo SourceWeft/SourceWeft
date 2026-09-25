@@ -1708,6 +1708,7 @@
         "running": "執行中",
         "generating": "產生中",
         "needs-approval": "需要核准",
+        "not-run": "未執行",
         "failed": "失敗",
         "rejected": "已拒絕",
         "done": "完成"

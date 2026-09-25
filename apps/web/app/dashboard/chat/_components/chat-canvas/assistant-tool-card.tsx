@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import {
   AlertTriangle,
   ChevronRight,
+  CircleSlash,
   Clock3,
   FileCode2,
   FilePenLine,
@@ -37,7 +38,11 @@ import {
   ASSISTANT_ACTIVITY_LABEL_CLASS,
   ASSISTANT_ACTIVITY_ROW_CLASS,
 } from "./assistant-activity-layout";
-import { resolveAssistantToolCardDefaultOpen } from "./assistant-tool-card-state";
+import {
+  isToolStatusUnexecuted,
+  resolveAssistantToolCardDefaultOpen,
+  resolveConfirmationStatusKey,
+} from "./assistant-tool-card-state";
 import type { ToolStatusKey } from "./assistant-tool-card-state";
 import { compactText, getToolOutputContent } from "./message-assets";
 import {
@@ -83,6 +88,15 @@ function getStatusKey(input: {
     return "rejected";
   }
   const confirmation = getToolConfirmationOutput(input.toolCall.output);
+  const confirmationStatusKey = confirmation
+    ? resolveConfirmationStatusKey({
+        confirmationResolution: input.confirmationResolution,
+        toolCallStatus: input.toolCall.status,
+      })
+    : null;
+  if (confirmationStatusKey) {
+    return confirmationStatusKey;
+  }
   if (
     confirmation &&
     !isToolConfirmationResolved({
@@ -181,6 +195,9 @@ function StatusIcon({
   }
   if (statusKey === "needs-approval") {
     return <Clock3 className="size-3.5 text-amber-700 dark:text-amber-300" />;
+  }
+  if (statusKey === "not-run") {
+    return <CircleSlash className="size-3.5 text-muted-foreground/75" />;
   }
   return <ToolTypeIcon toolName={toolName} />;
 }
@@ -408,9 +425,11 @@ function GenericAssistantToolCard({
       })
     : null;
   // Never show the fire-and-forget tool latency (~200ms) for video presentation.
-  const duration = formatToolDuration(
-    isDeliverableTool ? deliverableElapsedMs : toolCall.latencyMs,
-  );
+  const duration = isToolStatusUnexecuted(statusKey)
+    ? null
+    : formatToolDuration(
+        isDeliverableTool ? deliverableElapsedMs : toolCall.latencyMs,
+      );
   const deliverableProgress = isDeliverableTool
     ? resolveDeliverableProgress({
         artifactSnapshot: deliverableSnapshot,

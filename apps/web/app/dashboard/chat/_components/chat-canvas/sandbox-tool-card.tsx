@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   ChevronRight,
   CircleDot,
+  CircleSlash,
   Clock3,
   Download,
   ListTree,
@@ -32,6 +33,11 @@ import {
   TaskTrigger,
 } from "@sourceweft/ui-web/components/ai-elements/task";
 import { cn } from "@sourceweft/ui-web/lib/utils";
+import {
+  isToolStatusUnexecuted,
+  resolveConfirmationStatusKey,
+  type ToolStatusKey,
+} from "./assistant-tool-card-state";
 import { formatCompactDuration } from "./duration-format";
 import {
   ASSISTANT_ACTIVITY_DETAIL_CLASS,
@@ -104,6 +110,12 @@ function getConfirmationDisplay(input: {
       )
     : null;
   return {
+    statusKey: confirmation
+      ? resolveConfirmationStatusKey({
+          confirmationResolution: resolution,
+          toolCallStatus: input.toolCall.status,
+        })
+      : null,
     resolved: isToolConfirmationResolved({
       confirmation,
       confirmationResolution: resolution,
@@ -234,25 +246,25 @@ function SandboxOperationActivity({
 
 function sandboxToolStatusKey(
   state: ReturnType<typeof resolveSandboxToolUiState>,
-) {
+): ToolStatusKey {
   switch (state) {
     case "approval-requested":
-      return "needs-approval" as const;
+      return "needs-approval";
     case "input-available":
-      return "running" as const;
+      return "running";
     case "output-denied":
-      return "rejected" as const;
+      return "rejected";
     case "output-error":
-      return "failed" as const;
+      return "failed";
     default:
-      return "done" as const;
+      return "done";
   }
 }
 
 function ExecuteStatusIcon({
   statusKey,
 }: {
-  statusKey: ReturnType<typeof sandboxToolStatusKey>;
+  statusKey: ToolStatusKey;
 }) {
   if (statusKey === "running") {
     return (
@@ -267,6 +279,9 @@ function ExecuteStatusIcon({
   }
   if (statusKey === "needs-approval") {
     return <Clock3 className="size-3.5 text-amber-700 dark:text-amber-300" />;
+  }
+  if (statusKey === "not-run") {
+    return <CircleSlash className="size-3.5 text-muted-foreground/75" />;
   }
   return <SquareTerminal className="size-3.5 text-muted-foreground/75" />;
 }
@@ -291,7 +306,12 @@ function SandboxExecuteCard({
     status: toolCall.status,
     toolName: toolCall.tool,
   });
-  const statusKey = sandboxToolStatusKey(state);
+  const confirmation = getConfirmationDisplay({
+    resolvedConfirmations,
+    toolCall,
+    t,
+  });
+  const statusKey = confirmation.statusKey ?? sandboxToolStatusKey(state);
   const toolError = getSandboxToolSafeErrorMessage(
     {
       error: toolCall.error,
@@ -299,11 +319,6 @@ function SandboxExecuteCard({
     },
     t,
   );
-  const confirmation = getConfirmationDisplay({
-    resolvedConfirmations,
-    toolCall,
-    t,
-  });
   const effectiveDefaultOpen = defaultOpen ?? statusKey !== "done";
   const [isOpen, setIsOpen] = useState(effectiveDefaultOpen);
 
@@ -315,7 +330,9 @@ function SandboxExecuteCard({
     return null;
   }
 
-  const duration = formatDuration(toolCall.latencyMs);
+  const duration = isToolStatusUnexecuted(statusKey)
+    ? null
+    : formatDuration(toolCall.latencyMs);
   const operationTimeline = getSandboxToolOperationTimeline(
     {
       output: toolCall.output,
@@ -506,7 +523,7 @@ function TransferStatusIcon({
   statusKey,
 }: {
   direction: "collect" | "prepare";
-  statusKey: ReturnType<typeof sandboxToolStatusKey>;
+  statusKey: ToolStatusKey;
 }) {
   if (statusKey === "running") {
     return (
@@ -521,6 +538,9 @@ function TransferStatusIcon({
   }
   if (statusKey === "needs-approval") {
     return <Clock3 className="size-3.5 text-amber-700 dark:text-amber-300" />;
+  }
+  if (statusKey === "not-run") {
+    return <CircleSlash className="size-3.5 text-muted-foreground/75" />;
   }
   return direction === "prepare" ? (
     <Upload className="size-3.5 text-muted-foreground/75" />
@@ -550,12 +570,12 @@ function SandboxTransferCard({
     status: toolCall.status,
     toolName: toolCall.tool,
   });
-  const statusKey = sandboxToolStatusKey(state);
   const confirmation = getConfirmationDisplay({
     resolvedConfirmations,
     toolCall,
     t,
   });
+  const statusKey = confirmation.statusKey ?? sandboxToolStatusKey(state);
   const toolError = getSandboxToolSafeErrorMessage(
     {
       error: toolCall.error,
@@ -574,7 +594,9 @@ function SandboxTransferCard({
     return null;
   }
 
-  const duration = formatDuration(toolCall.latencyMs);
+  const duration = isToolStatusUnexecuted(statusKey)
+    ? null
+    : formatDuration(toolCall.latencyMs);
   const title =
     view.direction === "prepare"
       ? t("sandbox.prepareWorkspace")

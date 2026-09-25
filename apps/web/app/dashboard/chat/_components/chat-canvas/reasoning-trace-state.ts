@@ -511,6 +511,17 @@ export function getToolCallDetailParts(
       statusLabel = "completed";
     }
   }
+  // An action that never ran has no execution time worth reporting.
+  const neverExecuted =
+    Boolean(
+      confirmationResolution?.expired ||
+        confirmationResolution?.stale ||
+        confirmationResolution?.stopped ||
+        confirmationResolution?.decision === "reject",
+    ) ||
+    toolCall.approvalState === "rejected" ||
+    (toolCall.status === "approval_requested" &&
+      confirmationResolution?.decision !== "approve");
   const approvalState = formatApprovalState(toolCall.approvalState);
   const executeCommandDetail = getExecuteCommandDetail(toolCall);
   return [
@@ -533,7 +544,7 @@ export function getToolCallDetailParts(
       ? `${fetchCount} ${pluralize(fetchCount, "URL")}`
       : null,
     concurrency !== null ? `concurrency: ${concurrency}` : null,
-    typeof latencyMs === "number"
+    typeof latencyMs === "number" && !neverExecuted
       ? isDeliverableToolName(toolCall.tool)
         ? `time: ${formatCompactDuration(latencyMs)}`
         : `time: ${Math.round(latencyMs)}ms`
