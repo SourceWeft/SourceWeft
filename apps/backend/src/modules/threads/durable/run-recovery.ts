@@ -22,6 +22,7 @@ import {
 import { toObjectRecord } from "../../../shared/records";
 import {
   getRunApprovalPauseState,
+  hasLiveRunWorker,
   isApprovalWaitingRunExpired,
   isStaleActiveRun,
   isTerminalRunStatus,
@@ -493,12 +494,20 @@ export async function finishRunIfSnapshotIsTerminalWithDependencies(
     findRunById?: typeof findChatThreadRunById;
     finishRun?: typeof finishChatThreadRun;
     updateAssistantMetadata?: typeof updateAssistantMessageThreadRunMetadata;
+    nowMs?: number;
   } = {},
 ) {
   if (
     !isActiveChatRunStatus(run.status) ||
     run.status === "waiting_for_approval"
   ) {
+    return run;
+  }
+  // A backstop for runs whose worker died. A heartbeating worker writes the
+  // final answer into the snapshot just before it commits; finishing the run
+  // from the snapshot in that gap stops the worker mid-tail, and its stream
+  // then stamps the finished answer "stopped by the user".
+  if (hasLiveRunWorker(run, dependencies.nowMs)) {
     return run;
   }
   const snapshot = getSnapshotRecord(run);

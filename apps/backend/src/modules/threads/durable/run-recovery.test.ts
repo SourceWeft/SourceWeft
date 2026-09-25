@@ -121,3 +121,41 @@ test("stale recovery completes a run whose atomic publisher already committed", 
   assert.equal(result.status, "completed");
   assert.equal(finishCalls.length, 1);
 });
+
+test("a run whose worker is still heartbeating is not finished from its snapshot", async () => {
+  // The worker writes the final answer into the snapshot just before it
+  // commits; recovery in that gap must leave the run to its worker.
+  const heartbeatAt = "2026-09-25T16:17:02.012Z";
+  const live = {
+    ...run,
+    heartbeatAt,
+    updatedAt: heartbeatAt,
+    snapshotJson: { finishReason: "stop" } as ChatRunSnapshot,
+  };
+  const finishCalls: unknown[] = [];
+  const completed = { ...live, status: "completed" as const };
+  const dependencies = {
+    finishRun: (async (input: unknown) => {
+      finishCalls.push(input);
+      return completed;
+    }) as never,
+    findRunById: (async () =>
+      finishCalls.length > 0 ? completed : live) as never,
+    updateAssistantMetadata: (async () => null) as never,
+  };
+
+  const whileLive = await finishRunIfSnapshotIsTerminalWithDependencies(live, {
+    ...dependencies,
+    nowMs: Date.parse(heartbeatAt) + 125,
+  });
+  assert.equal(whileLive, live);
+  assert.equal(finishCalls.length, 0);
+
+  // Once the worker has been silent past the grace, recovery still finishes it.
+  const afterSilence = await finishRunIfSnapshotIsTerminalWithDependencies(
+    live,
+    { ...dependencies, nowMs: Date.parse(heartbeatAt) + 31_000 },
+  );
+  assert.equal(afterSilence.status, "completed");
+  assert.equal(finishCalls.length, 1);
+});

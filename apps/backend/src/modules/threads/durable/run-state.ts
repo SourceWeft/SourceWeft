@@ -11,6 +11,7 @@ import {
   CLIENT_CANCELLED_CODE,
   CLIENT_CANCELLED_MESSAGE,
   ORPHANED_QUEUED_RUN_GRACE_MS,
+  SNAPSHOT_TERMINAL_RECOVERY_GRACE_MS,
   STALE_ACTIVE_RUN_TIMEOUT_MS,
 } from "./run-constants";
 
@@ -110,6 +111,25 @@ function parseRunTimestamp(value: string | null) {
   return Number.isFinite(timestampMs) ? timestampMs : null;
 }
 
+/** Milliseconds since the run's worker last showed it was alive, if known. */
+function runSilenceMs(run: ChatThreadRunRecord, nowMs: number) {
+  const heartbeatAtMs =
+    parseRunTimestamp(run.heartbeatAt) ??
+    parseRunTimestamp(run.updatedAt) ??
+    parseRunTimestamp(run.startedAt) ??
+    parseRunTimestamp(run.createdAt);
+  return heartbeatAtMs === null ? null : nowMs - heartbeatAtMs;
+}
+
+/**
+ * Whether the run's worker heartbeat is recent enough that the worker is still
+ * finishing the run itself (see SNAPSHOT_TERMINAL_RECOVERY_GRACE_MS).
+ */
+export function hasLiveRunWorker(run: ChatThreadRunRecord, nowMs = Date.now()) {
+  const silenceMs = runSilenceMs(run, nowMs);
+  return silenceMs !== null && silenceMs < SNAPSHOT_TERMINAL_RECOVERY_GRACE_MS;
+}
+
 export function isStaleActiveRun(run: ChatThreadRunRecord, nowMs = Date.now()) {
   if (!["queued", "running", "cancel_requested"].includes(run.status)) {
     return false;
@@ -122,15 +142,8 @@ export function isStaleActiveRun(run: ChatThreadRunRecord, nowMs = Date.now()) {
     );
   }
 
-  const heartbeatAtMs =
-    parseRunTimestamp(run.heartbeatAt) ??
-    parseRunTimestamp(run.updatedAt) ??
-    parseRunTimestamp(run.startedAt) ??
-    parseRunTimestamp(run.createdAt);
-  return (
-    heartbeatAtMs !== null &&
-    nowMs - heartbeatAtMs > STALE_ACTIVE_RUN_TIMEOUT_MS
-  );
+  const silenceMs = runSilenceMs(run, nowMs);
+  return silenceMs !== null && silenceMs > STALE_ACTIVE_RUN_TIMEOUT_MS;
 }
 
 export function isUniqueConstraintError(error: unknown, constraint: string) {
