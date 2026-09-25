@@ -3,7 +3,13 @@ import { AGENT_TOOL_NAMES } from "@sourceweft/agent-tool-registry";
 import { beforeAll, test } from "vitest";
 import { connectorAdaptersReady } from "../../../connectors";
 import type { ConnectorActionExecutionCursor } from "../../../connectors/agent-tool-idempotency";
-import { testExports } from "./runner";
+import {
+  buildAutoApprovedHitlResume,
+  buildAutoApprovedHitlResumeDecisions,
+  commandResumeFromHitlDecisions,
+  commandResumeFromToolApprovalResume,
+  shouldSilenceEmptyApprovalResume,
+} from "./hitl-handler";
 
 // Connector tools register through an async import-time side effect. The
 // observability normalizer keys off that registry, so without awaiting it the
@@ -14,7 +20,7 @@ beforeAll(async () => {
 
 test("HITL sandbox active merge does not approve different command args", () => {
   assert.equal(
-    testExports.buildAutoApprovedHitlResumeDecisions({
+    buildAutoApprovedHitlResumeDecisions({
       connectorContext: {
         sandboxActionExecutionCursor: {
           refs: [
@@ -50,7 +56,7 @@ test("HITL sandbox active merge does not approve different command args", () => 
 
 test("HITL sandbox active merge auto-approves matching persisted binding without checkpoint tool calls", () => {
   assert.deepEqual(
-    testExports.buildAutoApprovedHitlResume({
+    buildAutoApprovedHitlResume({
       connectorContext: {
         sandboxActionExecutionCursor: {
           refs: [
@@ -88,7 +94,7 @@ test("HITL sandbox active merge auto-approves matching persisted binding without
 
 test("DeepAgents resume input excludes SourceWeft connector execution metadata", () => {
   assert.deepEqual(
-    testExports.commandResumeFromToolApprovalResume({
+    commandResumeFromToolApprovalResume({
       decisions: [{ type: "approve" }],
       sourceweft: {
         connectorActions: [
@@ -123,7 +129,7 @@ test("DeepAgents HITL duplicate connector interrupts auto-resume from approved e
   };
 
   assert.deepEqual(
-    testExports.buildAutoApprovedHitlResumeDecisions({
+    buildAutoApprovedHitlResumeDecisions({
       connectorContext: context,
       hitlInterrupts: [
         {
@@ -150,7 +156,7 @@ test("DeepAgents HITL duplicate connector interrupts auto-resume from approved e
 
 test("DeepAgents HITL duplicate sandbox interrupt auto-resumes each approved args ref once", () => {
   assert.deepEqual(
-    testExports.buildAutoApprovedHitlResumeDecisions({
+    buildAutoApprovedHitlResumeDecisions({
       connectorContext: {
         sandboxActionExecutionCursor: {
           refs: [
@@ -195,7 +201,7 @@ test("DeepAgents HITL duplicate sandbox interrupt auto-resumes each approved arg
 
 test("DeepAgents HITL auto-resume matches approved refs when replay adds undefined optional args", () => {
   assert.deepEqual(
-    testExports.buildAutoApprovedHitlResumeDecisions({
+    buildAutoApprovedHitlResumeDecisions({
       connectorContext: {
         actionExecutionCursor: {
           refs: [
@@ -242,7 +248,7 @@ test("DeepAgents HITL auto-resume matches approved refs when replay adds undefin
 
 test("DeepAgents HITL resume targets the persisted interrupt id when present", () => {
   assert.deepEqual(
-    testExports.commandResumeFromToolApprovalResume({
+    commandResumeFromToolApprovalResume({
       decisions: [{ type: "approve" }],
       sourceweft: {
         hitlInterruptId: "0123456789abcdef0123456789abcdef",
@@ -258,7 +264,7 @@ test("DeepAgents HITL resume targets the persisted interrupt id when present", (
 
 test("DeepAgents sandbox HITL edit resume targets the persisted interrupt id", () => {
   assert.deepEqual(
-    testExports.commandResumeFromToolApprovalResume({
+    commandResumeFromToolApprovalResume({
       decisions: [
         {
           type: "edit",
@@ -290,7 +296,7 @@ test("DeepAgents sandbox HITL edit resume targets the persisted interrupt id", (
 
 test("DeepAgents auto-approved HITL resume targets the interrupt id when present", () => {
   assert.deepEqual(
-    testExports.commandResumeFromHitlDecisions({
+    commandResumeFromHitlDecisions({
       decisions: [{ type: "approve" }],
       hitlInterruptId: "0123456789abcdef0123456789abcdef",
     }),
@@ -304,7 +310,7 @@ test("DeepAgents auto-approved HITL resume targets the interrupt id when present
 
 test("DeepAgents HITL auto-resume does not approve unmatched connector args", () => {
   assert.equal(
-    testExports.buildAutoApprovedHitlResumeDecisions({
+    buildAutoApprovedHitlResumeDecisions({
       connectorContext: {
         actionExecutionCursor: {
           refs: [
@@ -341,7 +347,7 @@ test("DeepAgents HITL auto-resume does not approve unmatched connector args", ()
 
 test("rejected approval resume can silence empty continuations", () => {
   assert.equal(
-    testExports.shouldSilenceEmptyApprovalResume({
+    shouldSilenceEmptyApprovalResume({
       assistantMessageId: "assistant-message-1",
       hasCompletedToolOutput: false,
       toolApprovalResume: {
@@ -354,7 +360,7 @@ test("rejected approval resume can silence empty continuations", () => {
 
 test("approval resume silence requires reject decision and existing assistant message", () => {
   assert.equal(
-    testExports.shouldSilenceEmptyApprovalResume({
+    shouldSilenceEmptyApprovalResume({
       assistantMessageId: "assistant-message-1",
       hasCompletedToolOutput: false,
       toolApprovalResume: {
@@ -364,7 +370,7 @@ test("approval resume silence requires reject decision and existing assistant me
     false,
   );
   assert.equal(
-    testExports.shouldSilenceEmptyApprovalResume({
+    shouldSilenceEmptyApprovalResume({
       assistantMessageId: "assistant-message-1",
       hasCompletedToolOutput: false,
       toolApprovalResume: {
@@ -382,7 +388,7 @@ test("approval resume silence requires reject decision and existing assistant me
     false,
   );
   assert.equal(
-    testExports.shouldSilenceEmptyApprovalResume({
+    shouldSilenceEmptyApprovalResume({
       assistantMessageId: null,
       hasCompletedToolOutput: false,
       toolApprovalResume: {
@@ -392,7 +398,7 @@ test("approval resume silence requires reject decision and existing assistant me
     false,
   );
   assert.equal(
-    testExports.shouldSilenceEmptyApprovalResume({
+    shouldSilenceEmptyApprovalResume({
       assistantMessageId: "assistant-message-1",
       hasCompletedToolOutput: true,
       toolApprovalResume: {

@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import type { ToolCallTrace } from "../..";
-import { testExports } from "./runner";
 import {
   applyToolsStreamToolStart,
+  buildDeepAgentTodosStep,
+  createTraceSequenceAllocator,
+  parseDeepAgentTodos,
+  resolveDeepAgentTodosStepStatus,
   resolveToolsStreamToolCall,
 } from "./tool-tracker";
 
@@ -61,7 +64,7 @@ test("main-agent tool calls carry no producer tag", () => {
 
 test("parses DeepAgents write_todos input into display-safe todos", () => {
   assert.deepEqual(
-    testExports.parseDeepAgentTodos({
+    parseDeepAgentTodos({
       todos: [
         { content: "Inspect current runner", status: "completed" },
         { content: "Surface todos in trace", status: "in_progress" },
@@ -86,7 +89,7 @@ test("builds a stable DeepAgents todo thinking step", () => {
   ];
 
   assert.deepEqual(
-    testExports.buildDeepAgentTodosStep({
+    buildDeepAgentTodosStep({
       toolCallId: "call-todos",
       todos,
     }),
@@ -114,20 +117,18 @@ test("builds a stable DeepAgents todo thinking step", () => {
 
 test("derives DeepAgents todo step status from todo states", () => {
   assert.equal(
-    testExports.resolveDeepAgentTodosStepStatus([
-      { content: "Plan", status: "pending" },
-    ]),
+    resolveDeepAgentTodosStepStatus([{ content: "Plan", status: "pending" }]),
     "pending",
   );
   assert.equal(
-    testExports.resolveDeepAgentTodosStepStatus([
+    resolveDeepAgentTodosStepStatus([
       { content: "Plan", status: "completed" },
       { content: "Implement", status: "completed" },
     ]),
     "completed",
   );
   assert.equal(
-    testExports.resolveDeepAgentTodosStepStatus([
+    resolveDeepAgentTodosStepStatus([
       { content: "Plan", status: "completed" },
       { content: "Implement", status: "in_progress" },
     ]),
@@ -136,7 +137,7 @@ test("derives DeepAgents todo step status from todo states", () => {
 });
 
 test("trace continuation keeps approval tool sequence and advances new events", () => {
-  const allocator = testExports.createTraceSequenceAllocator({
+  const allocator = createTraceSequenceAllocator({
     traceContinuation: {
       maxSequence: 4,
       toolSequenceById: {

@@ -10,6 +10,7 @@ import {
   buildAssistantMessageConfirmationMetadata,
   buildAssistantMessageSnapshotMetadata,
 } from "./assistant-message-metadata";
+import { parseSseData } from "../../../test/thread-stream-fixtures";
 
 function createRun(
   input: Partial<ChatThreadRunRecord> = {},
@@ -40,14 +41,6 @@ function createRun(
     updatedAt: now,
     ...input,
   };
-}
-
-function parseSseData(value: string) {
-  assert.equal(value.startsWith("data: "), true);
-  return JSON.parse(value.slice("data: ".length).trim()) as Record<
-    string,
-    unknown
-  >;
 }
 
 test("all durable snapshot writers preserve one copy across approval, resume, and failure", () => {

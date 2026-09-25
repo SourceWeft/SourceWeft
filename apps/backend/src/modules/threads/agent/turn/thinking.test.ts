@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { testExports } from "./runner";
+import { createModelReasoningSegmentId } from "./thinking";
 
 test("model reasoning segment ids include the run trace id", () => {
   assert.equal(
-    testExports.createModelReasoningSegmentId({
+    createModelReasoningSegmentId({
       runTraceId: "trace-1",
       index: 2,
     }),

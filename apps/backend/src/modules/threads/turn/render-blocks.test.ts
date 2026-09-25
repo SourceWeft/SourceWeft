@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, test } from "vitest";
-import { testExports } from "../agent/turn/runner";
-import { createMessageRenderBlockBuilder } from "./render-blocks";
+import {
+  createMessageRenderBlockBuilder,
+  finalizeMessageRenderBlocks,
+} from "./render-blocks";
 
 test("replaceText preserves existing text segmentation when final text has same prefix", () => {
   const builder = createMessageRenderBlockBuilder();
@@ -83,7 +85,7 @@ test("orders, attributes, and deduplicates committed artifact outputs", () => {
 
 describe("from runner.test.ts", () => {
   test("builds generated image render blocks in event order", () => {
-    const builder = testExports.createMessageRenderBlockBuilder();
+    const builder = createMessageRenderBlockBuilder();
 
     builder.appendText("Intro\n");
     builder.appendArtifactOutput({
@@ -96,7 +98,7 @@ describe("from runner.test.ts", () => {
     builder.appendText("\nDetails");
 
     assert.deepEqual(
-      testExports.finalizeMessageRenderBlocks({
+      finalizeMessageRenderBlocks({
         blocks: builder.list(),
         finalText: "Intro\n\nDetails",
       }),
@@ -127,14 +129,14 @@ describe("from runner.test.ts", () => {
   });
 
   test("builds generic tool render blocks in event order", () => {
-    const builder = testExports.createMessageRenderBlockBuilder();
+    const builder = createMessageRenderBlockBuilder();
 
     builder.appendText("Before tool");
     builder.appendTool("tool-1");
     builder.appendText("After tool");
 
     assert.deepEqual(
-      testExports.finalizeMessageRenderBlocks({
+      finalizeMessageRenderBlocks({
         blocks: builder.list(),
         finalText: "Before toolAfter tool",
       }),
@@ -159,7 +161,7 @@ describe("from runner.test.ts", () => {
   });
 
   test("builds generated presentation render blocks in event order", () => {
-    const builder = testExports.createMessageRenderBlockBuilder();
+    const builder = createMessageRenderBlockBuilder();
 
     builder.appendText("Intro\n");
     builder.appendArtifactOutput({
@@ -172,7 +174,7 @@ describe("from runner.test.ts", () => {
     builder.appendText("\nHere is the deck summary.");
 
     assert.deepEqual(
-      testExports.finalizeMessageRenderBlocks({
+      finalizeMessageRenderBlocks({
         blocks: builder.list(),
         finalText: "Intro\n\nHere is the deck summary.",
       }),
@@ -203,7 +205,7 @@ describe("from runner.test.ts", () => {
   });
 
   test("can clear leaked planning text while preserving generated artifact blocks", () => {
-    const builder = testExports.createMessageRenderBlockBuilder();
+    const builder = createMessageRenderBlockBuilder();
 
     builder.appendText('{"schemaVersion":1,"slides":[]}');
     builder.appendArtifactOutput({
@@ -216,7 +218,7 @@ describe("from runner.test.ts", () => {
     builder.replaceText("");
 
     assert.deepEqual(
-      testExports.finalizeMessageRenderBlocks({
+      finalizeMessageRenderBlocks({
         blocks: builder.list(),
         finalText: "",
       }),
@@ -237,7 +239,7 @@ describe("from runner.test.ts", () => {
   });
 
   test("preserves render blocks when final text diverges", () => {
-    const builder = testExports.createMessageRenderBlockBuilder();
+    const builder = createMessageRenderBlockBuilder();
 
     builder.appendText("Before citation [citation:missing]");
     builder.appendArtifactOutput({
@@ -249,7 +251,7 @@ describe("from runner.test.ts", () => {
     });
 
     assert.deepEqual(
-      testExports.finalizeMessageRenderBlocks({
+      finalizeMessageRenderBlocks({
         blocks: builder.list(),
         finalText: "Before citation",
       }),

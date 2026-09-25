@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { beforeAll, describe, test } from "vitest";
 import { connectorAdaptersReady } from "../../../connectors";
-import { testExports } from "./runner";
 import {
   appendSandboxOperationTimeline,
+  extractGeneratedImageArtifacts,
   formatToolInputItems,
+  getConnectorToolErrorTextContentError,
+  getConnectorToolOutputContentError,
   getFilesystemToolClientMetadata,
   getFilesystemToolDescription,
   getFilesystemToolEndTitle,
@@ -732,7 +734,7 @@ describe("from runner.test.ts", () => {
   });
 
   test("connector approval mismatches are surfaced as content errors", () => {
-    const error = testExports.getConnectorToolOutputContentError({
+    const error = getConnectorToolOutputContentError({
       type: "connector_tool_error",
       code: "CONNECTOR_ACTION_NOT_APPROVED",
       message:
@@ -745,7 +747,7 @@ describe("from runner.test.ts", () => {
   });
 
   test("connector approval mismatches are detected inside ToolMessage content", () => {
-    const error = testExports.getConnectorToolOutputContentError({
+    const error = getConnectorToolOutputContentError({
       type: "tool",
       lc_kwargs: {
         content: JSON.stringify({
@@ -762,7 +764,7 @@ describe("from runner.test.ts", () => {
   });
 
   test("connector approval mismatches are detected inside tool error text", () => {
-    const error = testExports.getConnectorToolErrorTextContentError(
+    const error = getConnectorToolErrorTextContentError(
       "Error: Connector action must be approved before execution\n Please fix your mistakes.",
     );
 
@@ -802,11 +804,11 @@ describe("from runner.test.ts", () => {
     };
 
     assert.equal(
-      testExports.getFilesystemToolEndTitle("publish_artifact", {}, output),
+      getFilesystemToolEndTitle("publish_artifact", {}, output),
       "Deck content needed",
     );
     assert.equal(
-      testExports.getFilesystemToolDescription(
+      getFilesystemToolDescription(
         "publish_artifact",
         {
           resultType: "presentation_artifact_input_required",
@@ -820,21 +822,21 @@ describe("from runner.test.ts", () => {
 
   test("filesystem tool titles classify glob scope from mounted pattern", () => {
     assert.equal(
-      testExports.getFilesystemToolStartTitle("glob", {
+      getFilesystemToolStartTitle("glob", {
         path: "/",
         pattern: "/files/**/*.md",
       }),
       "Finding matching Files",
     );
     assert.equal(
-      testExports.getFilesystemToolEndTitle("glob", {
+      getFilesystemToolEndTitle("glob", {
         path: "/",
         pattern: "/skills/**/*.md",
       }),
       "Found matching skill files",
     );
     assert.equal(
-      testExports.getFilesystemToolDescription(
+      getFilesystemToolDescription(
         "read_file",
         { chunkCount: 1 },
         { path: "/files/notes.md" },
@@ -842,7 +844,7 @@ describe("from runner.test.ts", () => {
       "Read 1 Workfile chunk.",
     );
     assert.equal(
-      testExports.getFilesystemToolDescription(
+      getFilesystemToolDescription(
         "read_file",
         { chunkCount: 1 },
         { path: "/kb/source.md", limit: 100 },
@@ -852,7 +854,7 @@ describe("from runner.test.ts", () => {
   });
 
   test("extracts generated image artifacts from completed tool calls", () => {
-    const artifacts = testExports.extractGeneratedImageArtifacts([
+    const artifacts = extractGeneratedImageArtifacts([
       {
         id: "tool-1",
         tool: "generate_image",

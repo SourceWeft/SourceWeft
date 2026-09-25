@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test, vi } from "vitest";
 import { collectToolStreamEvents } from "../../../../test/turn-stream-collectors";
-import { testExports } from "./runner";
+import { buildFinalOutcome } from "./final-outcome";
 import { createTurnRuntime } from "./turn-runtime";
 
 test("final outcome promotes pending stream from final LangChain tool call id", async () => {
@@ -20,7 +20,7 @@ test("final outcome promotes pending stream from final LangChain tool call id", 
   });
 
   const events = await collectToolStreamEvents(
-    testExports.buildFinalOutcome({
+    buildFinalOutcome({
       agent: {
         getState: vi.fn().mockResolvedValue({
           config: {
@@ -98,7 +98,7 @@ test("final outcome drops pending stream without a real LangChain tool call id",
   });
 
   const events = await collectToolStreamEvents(
-    testExports.buildFinalOutcome({
+    buildFinalOutcome({
       agent: { getState: vi.fn().mockResolvedValue(null) } as never,
       beforeAssistantCheckpoint: null,
       beforeInputCheckpoint: null,

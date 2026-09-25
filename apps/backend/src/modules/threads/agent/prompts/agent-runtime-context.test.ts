@@ -5,7 +5,6 @@ import {
   SYNTHETIC_PROMPT_MARKER,
   SYNTHETIC_TOOL_NAME,
 } from "../../../../test/synthetic-capability";
-import { testExports } from "../turn/runner";
 import { buildAgentRuntimeContext } from "./agent-runtime-context";
 import type { ArtifactToolRuntimePromptProvider } from "./tool-prompt-provider";
 
@@ -30,7 +29,7 @@ test("the skill catalog rule is present only when the catalog tools are bound", 
 
 describe("from runner.test.ts", () => {
   test("runtime prompt maps selected source mention labels to kb paths", () => {
-    const prompt = testExports.buildAgentRuntimeContext({
+    const prompt = buildAgentRuntimeContext({
       timezone: "UTC",
       availableWebTools: [],
       selectedSources: [
@@ -65,7 +64,7 @@ describe("from runner.test.ts", () => {
   });
 
   test("runtime prompt lists only available public web tools", () => {
-    const fetchOnlyPrompt = testExports.buildAgentRuntimeContext({
+    const fetchOnlyPrompt = buildAgentRuntimeContext({
       timezone: "UTC",
       availableWebTools: ["web_fetch"],
     });
@@ -75,7 +74,7 @@ describe("from runner.test.ts", () => {
     );
     assert.doesNotMatch(fetchOnlyPrompt, /web_search and web_fetch/);
 
-    const searchAndFetchPrompt = testExports.buildAgentRuntimeContext({
+    const searchAndFetchPrompt = buildAgentRuntimeContext({
       timezone: "UTC",
       availableWebTools: ["web_search", "web_fetch"],
     });
@@ -86,7 +85,7 @@ describe("from runner.test.ts", () => {
   });
 
   test("runtime prompt points active skills at SKILL.md without preloading content", () => {
-    const prompt = testExports.buildAgentRuntimeContext({
+    const prompt = buildAgentRuntimeContext({
       timezone: "UTC",
       enabledSkills: [
         {
@@ -122,7 +121,7 @@ describe("from runner.test.ts", () => {
   });
 
   test("runtime prompt does not force-read default selected skills", () => {
-    const prompt = testExports.buildAgentRuntimeContext({
+    const prompt = buildAgentRuntimeContext({
       timezone: "UTC",
       enabledSkills: [
         {
@@ -152,7 +151,7 @@ describe("from runner.test.ts", () => {
   });
 
   test("runtime prompt exposes invoked skill runtime config", () => {
-    const prompt = testExports.buildAgentRuntimeContext({
+    const prompt = buildAgentRuntimeContext({
       timezone: "UTC",
       invokedSkillIds: ["skill-1"],
       enabledSkills: [
@@ -197,7 +196,7 @@ describe("from runner.test.ts", () => {
    * packages' prompt-provider tests).
    */
   test("runtime prompt appends capability provider lines verbatim", () => {
-    const prompt = testExports.buildAgentRuntimeContext({
+    const prompt = buildAgentRuntimeContext({
       timezone: "UTC",
       availableArtifactTools: [SYNTHETIC_TOOL_NAME],
       artifactToolRuntimePromptProviders: [
@@ -214,7 +213,7 @@ describe("from runner.test.ts", () => {
   });
 
   test("runtime prompt keeps provider lines when no artifact tool is bound", () => {
-    const prompt = testExports.buildAgentRuntimeContext({
+    const prompt = buildAgentRuntimeContext({
       timezone: "UTC",
       availableArtifactTools: [],
       artifactToolRuntimePromptProviders: [
@@ -226,7 +225,7 @@ describe("from runner.test.ts", () => {
   });
 
   test("runtime prompt omits the artifact-tools section when nothing contributes", () => {
-    const prompt = testExports.buildAgentRuntimeContext({
+    const prompt = buildAgentRuntimeContext({
       timezone: "UTC",
       availableArtifactTools: [],
       artifactToolRuntimePromptProviders: [

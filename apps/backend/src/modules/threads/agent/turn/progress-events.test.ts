@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import {
+  buildArtifactGenerationStep,
+  buildPresentationProgressThinkingEvent,
+  buildPresentationProgressThinkingStep,
   normalizeGeneratedImageProgressEvent,
   normalizeGeneratedPresentationProgressEvent,
 } from "./progress-events";
-import { testExports } from "./runner";
 
 test("presentation publishing trace step stays active before tool execution", () => {
-  const step = testExports.buildArtifactGenerationStep({
+  const step = buildArtifactGenerationStep({
     phase: "planning",
     toolName: "publish_artifact",
   });
@@ -20,7 +22,7 @@ test("presentation publishing trace step stays active before tool execution", ()
 });
 
 test("presentation publishing trace step records completed artifacts", () => {
-  const step = testExports.buildArtifactGenerationStep({
+  const step = buildArtifactGenerationStep({
     latencyMs: 1234,
     phase: "completed",
     toolCallId: "call-1",
@@ -36,7 +38,7 @@ test("presentation publishing trace step records completed artifacts", () => {
 });
 
 test("presentation publishing trace step records needs_content repair state", () => {
-  const step = testExports.buildArtifactGenerationStep({
+  const step = buildArtifactGenerationStep({
     phase: "repairing",
     toolCallId: "call-1",
     toolName: "publish_artifact",
@@ -54,7 +56,7 @@ test("presentation publishing trace step records needs_content repair state", ()
 });
 
 test("presentation progress events map to CoT-safe publishing steps", () => {
-  const planning = testExports.buildPresentationProgressThinkingStep({
+  const planning = buildPresentationProgressThinkingStep({
     data: {
       type: "publish_artifact_progress",
       tool: "publish_artifact",
@@ -64,7 +66,7 @@ test("presentation progress events map to CoT-safe publishing steps", () => {
     },
     toolCallId: "call-1",
   });
-  const generating = testExports.buildPresentationProgressThinkingStep({
+  const generating = buildPresentationProgressThinkingStep({
     data: {
       type: "publish_artifact_progress",
       tool: "publish_artifact",
@@ -74,7 +76,7 @@ test("presentation progress events map to CoT-safe publishing steps", () => {
     },
     toolCallId: "call-1",
   });
-  const saving = testExports.buildPresentationProgressThinkingStep({
+  const saving = buildPresentationProgressThinkingStep({
     data: {
       type: "publish_artifact_progress",
       tool: "publish_artifact",
@@ -84,7 +86,7 @@ test("presentation progress events map to CoT-safe publishing steps", () => {
     },
     toolCallId: "call-1",
   });
-  const ready = testExports.buildPresentationProgressThinkingStep({
+  const ready = buildPresentationProgressThinkingStep({
     data: {
       type: "publish_artifact_progress",
       tool: "publish_artifact",
@@ -111,7 +113,7 @@ test("presentation progress events map to CoT-safe publishing steps", () => {
 
 test("unknown presentation progress stages do not create CoT steps", () => {
   assert.equal(
-    testExports.buildPresentationProgressThinkingStep({
+    buildPresentationProgressThinkingStep({
       data: {
         type: "publish_artifact_progress",
         tool: "publish_artifact",
@@ -132,7 +134,7 @@ test("presentation progress emits tool event before CoT step", () => {
     stage: "saving",
   });
   assert.ok(progressEvent);
-  const thinkingEvent = testExports.buildPresentationProgressThinkingEvent({
+  const thinkingEvent = buildPresentationProgressThinkingEvent({
     progressEvent,
     setThinkingStep: (step) => ({
       ...step,

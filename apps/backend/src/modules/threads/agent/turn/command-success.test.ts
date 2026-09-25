@@ -6,8 +6,10 @@ import {
   commandExecutionPolicyFor,
   commandSuccessFailureText,
   isCommandSuccessSatisfied,
+  resolveFinalAssistantText,
+  shouldSuppressLeakedCommandSpecText,
+  shouldSuppressRawToolCallText,
 } from "./command-success";
-import { testExports } from "./runner";
 
 const committedPublisher = defineAgentTool({
   id: "testCommittedPublisher",
@@ -259,7 +261,7 @@ describe("from runner.test.ts", () => {
 
   test("final assistant text stays empty for tool-only successful turns", () => {
     assert.equal(
-      testExports.resolveFinalAssistantText({
+      resolveFinalAssistantText({
         assistantContent: "",
         assistantContentFromUpdates: null,
         hasCompletedToolOutput: true,
@@ -267,7 +269,7 @@ describe("from runner.test.ts", () => {
       "",
     );
     assert.equal(
-      testExports.resolveFinalAssistantText({
+      resolveFinalAssistantText({
         assistantContent: "",
         assistantContentFromUpdates: null,
         hasCompletedToolOutput: false,
@@ -278,7 +280,7 @@ describe("from runner.test.ts", () => {
 
   test("final assistant text preserves natural artifact summaries", () => {
     assert.equal(
-      testExports.resolveFinalAssistantText({
+      resolveFinalAssistantText({
         assistantContent: "已生成 PPT，重点是概念、步骤和练习。",
         assistantContentFromUpdates: null,
         commandSuccessCriteria: {
@@ -294,7 +296,7 @@ describe("from runner.test.ts", () => {
 
   test("final assistant text can stay silent for rejected approval resumes", () => {
     assert.equal(
-      testExports.resolveFinalAssistantText({
+      resolveFinalAssistantText({
         assistantContent: "",
         assistantContentFromUpdates: null,
         hasCompletedToolOutput: false,
@@ -312,7 +314,7 @@ describe("from runner.test.ts", () => {
     };
 
     assert.equal(
-      testExports.shouldSuppressLeakedCommandSpecText({
+      shouldSuppressLeakedCommandSpecText({
         assistantContent: "",
         criteria,
         delta:
@@ -322,7 +324,7 @@ describe("from runner.test.ts", () => {
       true,
     );
     assert.equal(
-      testExports.shouldSuppressLeakedCommandSpecText({
+      shouldSuppressLeakedCommandSpecText({
         assistantContent: "",
         criteria,
         delta: "我已经生成了这份费曼学习法的 PPT，结构是概念、步骤和练习。",
@@ -331,7 +333,7 @@ describe("from runner.test.ts", () => {
       false,
     );
     assert.equal(
-      testExports.shouldSuppressLeakedCommandSpecText({
+      shouldSuppressLeakedCommandSpecText({
         assistantContent: "",
         criteria,
         delta: "artifact_url: /artifact-preview?artifactId=artifact-1",
@@ -343,7 +345,7 @@ describe("from runner.test.ts", () => {
 
   test("final assistant text prefers real assistant content over silent approval resume", () => {
     assert.equal(
-      testExports.resolveFinalAssistantText({
+      resolveFinalAssistantText({
         assistantContent: "The action was cancelled.",
         assistantContentFromUpdates: null,
         hasCompletedToolOutput: false,
@@ -352,7 +354,7 @@ describe("from runner.test.ts", () => {
       "The action was cancelled.",
     );
     assert.equal(
-      testExports.resolveFinalAssistantText({
+      resolveFinalAssistantText({
         assistantContent: "",
         assistantContentFromUpdates: "The action was cancelled.",
         hasCompletedToolOutput: false,
@@ -364,7 +366,7 @@ describe("from runner.test.ts", () => {
 
   test("command success requires generated image artifact metadata", () => {
     assert.equal(
-      testExports.isCommandSuccessSatisfied({
+      isCommandSuccessSatisfied({
         criteria: {
           artifactType: "image",
           kind: "artifact",
@@ -386,7 +388,7 @@ describe("from runner.test.ts", () => {
       false,
     );
     assert.equal(
-      testExports.isCommandSuccessSatisfied({
+      isCommandSuccessSatisfied({
         criteria: {
           artifactType: "image",
           kind: "artifact",
@@ -412,7 +414,7 @@ describe("from runner.test.ts", () => {
 
   test("command success accepts published PPTX artifact output", () => {
     assert.equal(
-      testExports.isCommandSuccessSatisfied({
+      isCommandSuccessSatisfied({
         criteria: {
           kind: "artifact",
           artifactType: "slides",
@@ -437,7 +439,7 @@ describe("from runner.test.ts", () => {
       true,
     );
     assert.equal(
-      testExports.isCommandSuccessSatisfied({
+      isCommandSuccessSatisfied({
         criteria: {
           kind: "artifact",
           artifactType: "slides",
@@ -462,7 +464,7 @@ describe("from runner.test.ts", () => {
 
   test("raw textual tool calls are suppressed while command success is pending", () => {
     assert.equal(
-      testExports.shouldSuppressRawToolCallText({
+      shouldSuppressRawToolCallText({
         assistantContent: "",
         criteria: {
           artifactType: "slides",
@@ -475,7 +477,7 @@ describe("from runner.test.ts", () => {
       true,
     );
     assert.equal(
-      testExports.shouldSuppressRawToolCallText({
+      shouldSuppressRawToolCallText({
         assistantContent: "",
         criteria: {
           artifactType: "slides",
@@ -488,7 +490,7 @@ describe("from runner.test.ts", () => {
       false,
     );
     assert.equal(
-      testExports.shouldSuppressRawToolCallText({
+      shouldSuppressRawToolCallText({
         assistantContent: "前置说明",
         criteria: {
           artifactType: "slides",
@@ -504,7 +506,7 @@ describe("from runner.test.ts", () => {
 
   test("command success accepts structured presentation artifact output", () => {
     assert.equal(
-      testExports.isCommandSuccessSatisfied({
+      isCommandSuccessSatisfied({
         criteria: {
           artifactType: "slides",
           kind: "artifact",
