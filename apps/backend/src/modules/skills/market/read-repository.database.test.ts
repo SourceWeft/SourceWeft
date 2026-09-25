@@ -750,8 +750,9 @@ describe.skipIf(!skillDatabaseEnabled)(
       assert.deepEqual(page.items[0], {
         slug: entry.slug,
         name: "p06",
-        // No overview has been generated for it.
+        // No overview has been generated for it, in any locale.
         aiSummary: null,
+        overviewLocales: [],
         displayName: entry.displayName,
         description: entry.description,
         // No logo of its own: the publisher's avatar stands in.
@@ -971,8 +972,12 @@ describe.skipIf(!skillDatabaseEnabled)(
       assert.equal(body.skill.name, "detailed");
       assert.deepEqual(body.skill.categories, ["documents-office"]);
       // The same summary the list gives.
+      // The detail's summary is the listing's, minus `overviewLocales`: the
+      // list attaches that for the sitemap, while the detail page derives the
+      // translated overviews itself.
       const [listed] = (await list({ query: `dq${tag}` })).items;
-      assert.deepEqual(body.skill, listed);
+      const { overviewLocales: _listOnly, ...summary } = listed!;
+      assert.deepEqual(body.skill, summary);
     });
 
     test("SKILL.md kept as an inline file row is served; a version with no file rows lists its manifest", async () => {
