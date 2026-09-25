@@ -5,6 +5,13 @@ export const STOP_RESULT_WAIT_TIMEOUT_MS = 10_000;
 export const COMPLETE_RESULT_WAIT_TIMEOUT_MS = 120_000;
 export const ORPHANED_QUEUED_RUN_GRACE_MS = 10_000;
 export const STALE_ACTIVE_RUN_TIMEOUT_MS = 10 * 60_000;
+/**
+ * How long a run's worker must have been silent before its snapshot alone may
+ * finish the run. The worker writes the final assistant message into the
+ * snapshot moments before it commits, so a fresher heartbeat means it is still
+ * finishing the run itself.
+ */
+export const SNAPSHOT_TERMINAL_RECOVERY_GRACE_MS = 30_000;
 export const CLIENT_CANCELLED_CODE = "CLIENT_CANCELLED";
 export const CLIENT_CANCELLED_MESSAGE = "Chat run was cancelled";
 export const STALE_CHAT_RUN_CODE = "CHAT_RUN_STALE";
