@@ -87,8 +87,14 @@ function item(
   };
 }
 
-/** Two cursor pages: [a] then [b, c]; resumes from page 2 on continuation. */
-function fakeAdapter(pagesOf: Array<ReturnType<typeof item>[]>) {
+/**
+ * Cursor pages that resume from page N on continuation. `reconcile` makes the
+ * last page a full reconciling scan (archives sources the run did not see).
+ */
+function fakeAdapter(
+  pagesOf: Array<ReturnType<typeof item>[]>,
+  options: { reconcile?: boolean } = {},
+) {
   const extract = vi.fn(async (input: { item: ConnectorItem }) => {
     const found = pagesOf
       .flat()
@@ -106,6 +112,7 @@ function fakeAdapter(pagesOf: Array<ReturnType<typeof item>[]>) {
         continuation: complete ? null : { page: String(index + 2) },
         checkpoint: complete ? { history: "h1" } : null,
         complete,
+        ...(complete && options.reconcile ? { reconcileMissing: true } : {}),
       };
     }
   });
@@ -126,7 +133,7 @@ function fakeAdapter(pagesOf: Array<ReturnType<typeof item>[]>) {
           {
             type: "document",
             displayName: "Document",
-            supportsDeleteDetection: false,
+            supportsDeleteDetection: options.reconcile === true,
           },
         ],
       },
@@ -192,6 +199,7 @@ async function setup(input: {
   pagesOf: Array<ReturnType<typeof item>[]>;
   billing?: Partial<Pages>;
   owner?: string | null;
+  reconcile?: boolean;
 }) {
   const teamId = randomUUID();
   const workspaceId = randomUUID();
@@ -211,7 +219,7 @@ async function setup(input: {
     createdBy: input.owner === undefined ? OWNER : input.owner,
   });
   const billing = fakeBilling(input.billing);
-  const fake = fakeAdapter(input.pagesOf);
+  const fake = fakeAdapter(input.pagesOf, { reconcile: input.reconcile });
   const index = stubIndexing(billing);
   const resolveActor = vi.fn(
     async (actor: { ownerUserId: string | null }) => actor.ownerUserId,
@@ -225,13 +233,21 @@ async function setup(input: {
     resolveActor,
   );
   const target = { teamId, workspaceId, connectorId };
-  async function sync(triggerType: "manual" | "scheduled" = "manual") {
+  async function sync(
+    triggerType: "manual" | "scheduled" | "webhook" = "manual",
+    targetExternalIds?: string[],
+  ) {
     const run = await syncRunRepo.createSyncRunRecord({
       ...target,
       triggerType,
       status: "queued",
     });
-    await orchestrator.run({ ...target, runId: run.id, userId: TRIGGER });
+    await orchestrator.run({
+      ...target,
+      runId: run.id,
+      userId: TRIGGER,
+      ...(targetExternalIds ? { targetExternalIds } : {}),
+    });
     const [row] = await schema.db
       .select()
       .from(schema.connectorSyncRuns)
@@ -605,4 +621,103 @@ test("a quota-blocked connector resumes on its own once the owner has pages, sch
   assert.equal(run?.status, "succeeded");
   assert.equal(run?.triggerType, "backfill");
   assert.equal((await t.connectorRow()).syncBlock, null);
+});
+
+test("a targeted webhook run for other items keeps the quota block, so the blocked item still resumes", async () => {
+  const t = await setup({
+    pagesOf: [[item("a", PAGE_CHARS * 3), item("b")]],
+    billing: { available: 2 },
+  });
+  const blocked = await t.sync();
+  assert.equal(blocked.status, "blocked");
+  assert.equal((await t.connectorRow()).syncBlock?.requestedPages, 3);
+
+  // A webhook for b succeeds, but it never looked at a: the block must stay.
+  const webhook = await t.sync("webhook", ["b"]);
+  assert.equal(webhook.status, "succeeded");
+  assert.equal(webhook.indexedCount, 1);
+  const kept = await t.connectorRow();
+  assert.equal(kept.syncBlock?.reason, "PAGES_LIMIT_EXCEEDED");
+  assert.equal(kept.syncBlock?.runId, blocked.id);
+
+  // An untargeted run covers a again, so it clears the block.
+  t.billing.pages.available = 10;
+  const full = await t.sync();
+  assert.equal(full.status, "succeeded");
+  assert.equal((await t.connectorRow()).syncBlock, null);
+  assert.deepEqual(
+    (await t.sourceRows()).map((row) => row.externalId).sort(),
+    ["a", "b"],
+  );
+});
+
+test("a quota-blocked connector resumes only once the blocked item fits", async () => {
+  const t = await setup({
+    pagesOf: [[item("a", PAGE_CHARS * 3)]],
+    billing: { available: 2 },
+  });
+  assert.equal((await t.sync()).status, "blocked");
+  const repo = await import("./repository/connector");
+  const enqueue = vi.fn(async () => ({ id: "job" }));
+
+  // 2 pages are available, but the blocked item needs 3: resuming now would
+  // only re-extract it and block again.
+  const tooFew = await t.orchestrator.enqueueQuotaResumeRun({
+    connector: (await repo.findSourceConnectorRecord(t))!,
+    enqueue,
+  });
+  assert.deepEqual(tooFew, { queued: false, reason: "pages_unavailable" });
+  assert.equal(enqueue.mock.calls.length, 0);
+
+  t.billing.pages.available = 3;
+  const resumed = await t.orchestrator.enqueueQuotaResumeRun({
+    connector: (await repo.findSourceConnectorRecord(t))!,
+    enqueue,
+  });
+  assert.equal(resumed.queued, true);
+});
+
+test("a quota-blocked item that outgrew the cycle allowance does not hold the resume back", async () => {
+  const t = await setup({
+    pagesOf: [[item("a", PAGE_CHARS * 3)]],
+    billing: { available: 2, cycleCapacity: 10 },
+  });
+  assert.equal((await t.sync()).status, "blocked");
+  const repo = await import("./repository/connector");
+  const enqueue = vi.fn(async () => ({ id: "job" }));
+
+  // The plan shrank below the item's size: the run will skip it as oversized.
+  t.billing.pages.cycleCapacity = 2;
+  const resumed = await t.orchestrator.enqueueQuotaResumeRun({
+    connector: (await repo.findSourceConnectorRecord(t))!,
+    enqueue,
+  });
+  assert.equal(resumed.queued, true);
+});
+
+test("an item that grew past the cycle allowance keeps its indexed version through a reconciling scan", async () => {
+  const pagesOf = [[item("doc"), item("other")]];
+  const t = await setup({ pagesOf, reconcile: true });
+  assert.equal((await t.sync()).status, "succeeded");
+
+  const doc = pagesOf[0]![0]!;
+  doc.body = "y".repeat(PAGE_CHARS * 6);
+  doc.externalUpdatedAt = new Date("2026-09-02T00:00:00.000Z");
+  t.billing.pages.available = 5;
+  t.billing.pages.cycleCapacity = 5;
+  const run = await t.sync();
+  assert.equal(run.status, "succeeded");
+  assert.deepEqual(
+    (run.metadataJson as { oversizedItems?: Array<{ externalId: string }> })
+      .oversizedItems?.map((entry) => entry.externalId),
+    ["doc"],
+  );
+  const rows = await t.sourceRows();
+  const kept = rows.find((row) => row.externalId === "doc");
+  assert.equal(kept?.status, "indexed");
+  assert.equal(kept?.contentText, "x".repeat(20));
+  assert.equal(
+    rows.find((row) => row.externalId === "other")?.status,
+    "indexed",
+  );
 });
