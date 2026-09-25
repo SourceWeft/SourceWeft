@@ -2,25 +2,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { DeepSeekChatAdapter } from "../src/adapters/deepseek-chat";
 import { ModelGatewayError } from "../src/errors";
-import type { ChatCompleteInput, ResolvedRequestTarget } from "../src/types";
+import type { ChatCompleteInput } from "../src/types";
+import { makeResolvedTarget } from "./helpers";
 
-const target: ResolvedRequestTarget = {
+const target = makeResolvedTarget({
   provider: "deepseek",
   providerKind: "deepseek",
   providerModel: "deepseek-v4-pro",
   baseUrl: "https://api.deepseek.com",
-  apiKey: "test-key",
-  defaultHeaders: {},
   supports: ["chat", "tool_calling", "json_object"],
-  routeDecision: {
-    alias: "chat-default",
-    mode: "GLOBAL",
-    strategy: "priority",
-    provider: "deepseek",
-    providerKind: "deepseek",
-  },
-  requestMetadata: {},
-};
+});
 
 const input: ChatCompleteInput = {
   model: "deepseek-v4-pro",
@@ -92,10 +83,11 @@ test("efforts below high enable thinking without buying more of it", () => {
 
 test("extraBody survives alongside the thinking kwargs", () => {
   const kwargs = modelKwargs(
-    new DeepSeekChatAdapter().createModel(
-      target,
-      { ...input, extraBody: { custom: 1 }, thinking: { enabled: false } },
-    ),
+    new DeepSeekChatAdapter().createModel(target, {
+      ...input,
+      extraBody: { custom: 1 },
+      thinking: { enabled: false },
+    }),
   );
 
   assert.deepEqual(kwargs, {

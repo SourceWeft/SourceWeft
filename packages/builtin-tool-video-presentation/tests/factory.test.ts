@@ -4,6 +4,7 @@ import {
   createCapabilityAgentTools,
   videoPresentationAgentToolDefs,
 } from "../src";
+import { createFakeVideoServices } from "./helpers";
 
 const toolNames = [
   "load_video_presentation",
@@ -38,58 +39,14 @@ test("selection binds the five root-only Video Presentation tools", () => {
       isToolDenied: () => false,
       shouldBindAgentTool: (name) => toolNames.includes(name),
     },
-    services: {
-      artifactVersions: {
-        readAuthorizedCurrentVersion: async () => null,
-      },
-      currentRunArtifacts: {
-        allocateArtifactId: () => "artifact-1",
-        cleanupPreallocatedArtifact: async () => undefined,
-        publishCommitted: async () => ({
-          ok: false,
-          reason: "run_inactive",
-        }),
-      },
-      media: { probeAudioDurationSeconds: async () => null },
-      modelGateway: { getClient: async () => ({}) as never },
+    services: createFakeVideoServices({
       operationCache: {
         claimMany: async () => ({
           kind: "unknown",
           code: "SIDE_EFFECT_OUTCOME_UNKNOWN",
         }),
-        complete: async () => ({ observationId: "observation" }),
-        markUnknown: async () => undefined,
       },
-      receipts: {
-        issueCurrentRunReceipt: async () => ({ receiptId: "receipt" }),
-        resolveCurrentRunReceipt: async () => null,
-      },
-      sandbox: {
-        allowedReadRoots: ["/workspace"],
-        ensureCurrentSession: async () => ({ sessionGeneration: "session" }),
-        uploadCurrentFiles: async () => undefined,
-        listCurrentFiles: async () => [],
-        downloadCurrentFile: async () => new Uint8Array(),
-        executeCurrent: async () => ({ exitCode: 0, output: "" }),
-        captureCurrentTree: async () => [],
-      },
-      storage: {
-        buildArtifactStorageKey: () => "key",
-        getBucketName: () => "bucket",
-        upload: async () => undefined,
-        delete: async () => undefined,
-        download: async () => null,
-      },
-      workBlobs: {
-        putIfAbsent: async () => ({
-          blobRef: "blob",
-          contentDigest: "sha256:digest",
-        }),
-        getVerified: async () => null,
-        getBySemanticKey: async () => null,
-        deleteScope: async () => undefined,
-      },
-    },
+    }),
   });
   const tools = ("tools" in result ? result.tools : result) ?? [];
   const names = tools.map((entry) => entry.tool.name);

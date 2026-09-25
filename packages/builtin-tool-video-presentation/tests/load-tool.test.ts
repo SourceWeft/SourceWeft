@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createLoadVideoPresentationTool } from "../src/agent/load-tool";
 import { sha256Digest } from "../src/agent/common";
+import { createFakeVideoServices } from "./helpers";
 
 function readyPayload() {
   return {
@@ -94,7 +95,7 @@ test("load tool materializes a draft and issues opaque edit authority", async ()
   const completions: Array<Record<string, unknown>> = [];
   const loadTool = createLoadVideoPresentationTool({
     workspaceId: "workspace-1",
-    services: {
+    services: createFakeVideoServices({
       artifactVersions: {
         readAuthorizedCurrentVersion: async () => ({
           artifactId: "artifact-1",
@@ -119,36 +120,22 @@ test("load tool materializes a draft and issues opaque edit authority", async ()
           completions.push(input);
           return { observationId: "observation-1" };
         },
-        markUnknown: async () => undefined,
       },
       receipts: {
         issueCurrentRunReceipt: async (input) => {
           receipts.push(input);
           return { receiptId: "load-receipt-1" };
         },
-        resolveCurrentRunReceipt: async () => null,
       },
       sandbox: {
-        allowedReadRoots: ["/workspace"],
         ensureCurrentSession: async () => ({
           sessionGeneration: "session-1",
         }),
         uploadCurrentFiles: async (files) => {
           uploads.push(...files);
         },
-        listCurrentFiles: async () => [],
-        downloadCurrentFile: async () => new Uint8Array(),
-        executeCurrent: async () => ({ exitCode: 0, output: "" }),
-        captureCurrentTree: async () => [],
       },
-      storage: {
-        buildArtifactStorageKey: () => "unused",
-        getBucketName: () => "content",
-        upload: async () => undefined,
-        delete: async () => undefined,
-        download: async () => null,
-      },
-    },
+    }),
   });
 
   const output = (await loadTool.invoke({ artifactId: "artifact-1" }, {
@@ -206,7 +193,7 @@ test("load preserves canonical stable scene asset identities", async () => {
   const uploads: Array<{ path: string; bytes: Uint8Array }> = [];
   const loadTool = createLoadVideoPresentationTool({
     workspaceId: "workspace-1",
-    services: {
+    services: createFakeVideoServices({
       artifactVersions: {
         readAuthorizedCurrentVersion: async () => ({
           artifactId: "artifact-1",
@@ -215,46 +202,18 @@ test("load preserves canonical stable scene asset identities", async () => {
           payload,
         }),
       },
-      operationCache: {
-        claimMany: async (input) => ({
-          kind: "claimed",
-          items: [
-            {
-              semanticKey: input.semanticKeys[0]!,
-              action: "execute",
-              claimToken: "claim",
-            },
-          ],
-        }),
-        complete: async () => ({ observationId: "observation" }),
-        markUnknown: async () => undefined,
-      },
-      receipts: {
-        issueCurrentRunReceipt: async () => ({ receiptId: "receipt" }),
-        resolveCurrentRunReceipt: async () => null,
-      },
       sandbox: {
-        allowedReadRoots: ["/workspace"],
-        ensureCurrentSession: async () => ({ sessionGeneration: "session" }),
         uploadCurrentFiles: async (files) => {
           uploads.push(...files);
         },
-        listCurrentFiles: async () => [],
-        downloadCurrentFile: async () => new Uint8Array(),
-        executeCurrent: async () => ({ exitCode: 0, output: "" }),
-        captureCurrentTree: async () => [],
       },
       storage: {
-        buildArtifactStorageKey: () => "unused",
-        getBucketName: () => "content",
-        upload: async () => undefined,
-        delete: async () => undefined,
         download: async () => ({
           body: new Uint8Array([1, 2, 3]),
           contentType: "image/jpeg",
         }),
       },
-    },
+    }),
   });
 
   const output = (await loadTool.invoke({ artifactId: "artifact-1" }, {
@@ -292,7 +251,7 @@ test("load rejects replaced resource bytes with a stable non-sensitive blocker",
   const uploads: Array<{ path: string; bytes: Uint8Array }> = [];
   const loadTool = createLoadVideoPresentationTool({
     workspaceId: "workspace-1",
-    services: {
+    services: createFakeVideoServices({
       artifactVersions: {
         readAuthorizedCurrentVersion: async () => ({
           artifactId: "artifact-1",
@@ -301,46 +260,18 @@ test("load rejects replaced resource bytes with a stable non-sensitive blocker",
           payload,
         }),
       },
-      operationCache: {
-        claimMany: async (input) => ({
-          kind: "claimed",
-          items: [
-            {
-              semanticKey: input.semanticKeys[0]!,
-              action: "execute",
-              claimToken: "claim",
-            },
-          ],
-        }),
-        complete: async () => ({ observationId: "observation" }),
-        markUnknown: async () => undefined,
-      },
-      receipts: {
-        issueCurrentRunReceipt: async () => ({ receiptId: "receipt" }),
-        resolveCurrentRunReceipt: async () => null,
-      },
       sandbox: {
-        allowedReadRoots: ["/workspace"],
-        ensureCurrentSession: async () => ({ sessionGeneration: "session" }),
         uploadCurrentFiles: async (files) => {
           uploads.push(...files);
         },
-        listCurrentFiles: async () => [],
-        downloadCurrentFile: async () => new Uint8Array(),
-        executeCurrent: async () => ({ exitCode: 0, output: "" }),
-        captureCurrentTree: async () => [],
       },
       storage: {
-        buildArtifactStorageKey: () => "unused",
-        getBucketName: () => "content",
-        upload: async () => undefined,
-        delete: async () => undefined,
         download: async () => ({
           body: new Uint8Array([9, 9, 9]),
           contentType: "image/jpeg",
         }),
       },
-    },
+    }),
   });
 
   const output = (await loadTool.invoke({ artifactId: "artifact-1" }, {

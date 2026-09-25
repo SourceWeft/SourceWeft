@@ -1,17 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { executeStructuredOutput } from "../src/bridge/structured-output";
-import type {
-  LangChainChatModelLike,
-  ResolvedRequestTarget,
-} from "../src/types";
+import type { LangChainChatModelLike } from "../src/types";
+import { makeResolvedTarget } from "./helpers";
 
-const TARGET = {
+const TARGET = makeResolvedTarget({
   provider: "deepseek",
   providerKind: "deepseek",
   providerModel: "deepseek-v4-pro",
-  routeDecision: { alias: "chat-default" },
-} as unknown as ResolvedRequestTarget;
+});
 
 const SCHEMA = {
   type: "object",

@@ -1,9 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  withAgentToolHostInvocationSignal,
-  type AgentToolCurrentRunArtifactPublicationServices,
-} from "@sourceweft/contracts/agent-tools";
+import type { AgentToolCurrentRunArtifactPublicationServices } from "@sourceweft/contracts/agent-tools";
+import { agentToolInvocationConfig } from "@sourceweft/contracts/testing";
 import { VIDEO_PRESENTATION_WORKFLOW_VERSION } from "@sourceweft/contracts/video-presentation";
 import { createPublishVideoPresentationTool } from "../src/agent/publication-tool";
 import { videoPresentationArtifactViewHandler } from "../src/artifact-view";
@@ -15,6 +13,7 @@ import {
   buildVideoValidationInputDigest,
   VIDEO_PRESENTATION_VALIDATOR_VERSION,
 } from "../src/agent/validation-identity";
+import { createFakeVideoServices } from "./helpers";
 
 function draft() {
   return {
@@ -96,7 +95,7 @@ function createUnknownPublicationHarness(input: {
   let publishCalls = 0;
   const tool = createPublishVideoPresentationTool({
     workspaceId: "workspace-1",
-    services: {
+    services: createFakeVideoServices({
       currentRunArtifacts: {
         allocateArtifactId: () => "artifact-unknown",
         cleanupPreallocatedArtifact: async () => {
@@ -108,23 +107,11 @@ function createUnknownPublicationHarness(input: {
         },
       },
       operationCache: {
-        claimMany: async (claimInput) => ({
-          kind: "claimed",
-          items: [
-            {
-              semanticKey: claimInput.semanticKeys[0]!,
-              action: "execute",
-              claimToken: "publish-unknown-claim",
-            },
-          ],
-        }),
-        complete: async () => ({ observationId: "observation" }),
         markUnknown: async () => {
           unknowns += 1;
         },
       },
       receipts: {
-        issueCurrentRunReceipt: async () => ({ receiptId: "unused" }),
         resolveCurrentRunReceipt: async (receiptInput) =>
           receiptInput.producerToolName === "validate_video_presentation"
             ? {
@@ -175,12 +162,6 @@ function createUnknownPublicationHarness(input: {
             : null,
       },
       sandbox: {
-        allowedReadRoots: ["/workspace"],
-        ensureCurrentSession: async () => ({ sessionGeneration: "session" }),
-        uploadCurrentFiles: async () => undefined,
-        listCurrentFiles: async () => [],
-        downloadCurrentFile: async () => new Uint8Array(),
-        executeCurrent: async () => ({ exitCode: 0, output: "" }),
         captureCurrentTree: async () => [
           {
             relativePath: "video-presentation.draft.json",
@@ -189,31 +170,21 @@ function createUnknownPublicationHarness(input: {
         ],
       },
       storage: {
-        buildArtifactStorageKey: ({ workspaceId, artifactId, fileName }) =>
-          `workspaces/${workspaceId}/artifacts/${artifactId}/${fileName}`,
-        getBucketName: () => "content",
         upload: async (uploadInput) => input.onStorageUpload?.(uploadInput),
-        download: async () => null,
         delete: async ({ key }) => {
           deletedObjects += 1;
           deletedKeys.push(key);
         },
       },
       workBlobs: {
-        putIfAbsent: async () => ({
-          blobRef: "unused",
-          contentDigest: "unused",
-        }),
         getVerified: async (blobInput) =>
           blobInput.blobRef === "cover-wip"
             ? { bytes: coverBytes, contentType: "image/jpeg" }
             : blobInput.blobRef === "video-wip"
               ? { bytes: renderedVideoBytes, contentType: "video/mp4" }
               : null,
-        getBySemanticKey: async () => null,
-        deleteScope: async () => undefined,
       },
-    },
+    }),
   });
   return {
     invoke: (signal?: AbortSignal) =>
@@ -223,12 +194,10 @@ function createUnknownPublicationHarness(input: {
           sourceJsonPath: "/workspace/video/video-presentation.draft.json",
           validationReceiptId: "validation-receipt",
         },
-        (signal
-          ? withAgentToolHostInvocationSignal(
-              { toolCallId: "publish-unknown-call" },
-              signal,
-            )
-          : { toolCallId: "publish-unknown-call" }) as never,
+        agentToolInvocationConfig(
+          { toolCallId: "publish-unknown-call" },
+          signal,
+        ) as never,
       ),
     counts: () => ({
       deletedObjects,
@@ -343,10 +312,8 @@ test("publisher rechecks validation digest and returns only the atomic committed
   };
   const publishTool = createPublishVideoPresentationTool({
     workspaceId: "workspace-1",
-    services: {
+    services: createFakeVideoServices({
       currentRunArtifacts: {
-        allocateArtifactId: () => "artifact-1",
-        cleanupPreallocatedArtifact: async () => undefined,
         publishCommitted: async (input) => {
           published.push(input as Record<string, unknown>);
           return {
@@ -357,22 +324,7 @@ test("publisher rechecks validation digest and returns only the atomic committed
           };
         },
       },
-      operationCache: {
-        claimMany: async (input) => ({
-          kind: "claimed",
-          items: [
-            {
-              semanticKey: input.semanticKeys[0]!,
-              action: "execute",
-              claimToken: "publish-claim",
-            },
-          ],
-        }),
-        complete: async () => ({ observationId: "publish-observation" }),
-        markUnknown: async () => undefined,
-      },
       receipts: {
-        issueCurrentRunReceipt: async () => ({ receiptId: "unused" }),
         resolveCurrentRunReceipt: async (input) =>
           input.producerToolName === "validate_video_presentation"
             ? {
@@ -423,12 +375,6 @@ test("publisher rechecks validation digest and returns only the atomic committed
             : null,
       },
       sandbox: {
-        allowedReadRoots: ["/workspace"],
-        ensureCurrentSession: async () => ({ sessionGeneration: "session" }),
-        uploadCurrentFiles: async () => undefined,
-        listCurrentFiles: async () => [],
-        downloadCurrentFile: async () => new Uint8Array(),
-        executeCurrent: async () => ({ exitCode: 0, output: "" }),
         captureCurrentTree: async () => [
           {
             relativePath: "video-presentation.draft.json",
@@ -443,18 +389,11 @@ test("publisher rechecks validation digest and returns only the atomic committed
       storage: {
         buildArtifactStorageKey: ({ workspaceId, artifactId, fileName }) =>
           `workspaces/${workspaceId}/artifacts/${artifactId}/host-${fileName}`,
-        getBucketName: () => "content",
         upload: async (input) => {
           uploaded.push({ key: input.key, body: input.body });
         },
-        delete: async () => undefined,
-        download: async () => null,
       },
       workBlobs: {
-        putIfAbsent: async () => ({
-          blobRef: "unused",
-          contentDigest: "unused",
-        }),
         getVerified: async (input) =>
           input.blobRef === "cover-wip"
             ? { bytes: coverBytes, contentType: "image/jpeg" }
@@ -463,10 +402,8 @@ test("publisher rechecks validation digest and returns only the atomic committed
               : input.blobRef === "asset-wip"
                 ? { bytes: assetBytes, contentType: "image/png" }
                 : null,
-        getBySemanticKey: async () => null,
-        deleteScope: async () => undefined,
       },
-    },
+    }),
   });
 
   const output = await publishTool.invoke(

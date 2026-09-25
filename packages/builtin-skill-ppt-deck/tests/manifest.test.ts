@@ -3,16 +3,12 @@ import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { capabilityManifestSchema } from "@sourceweft/capability-contracts";
+import { loadCapabilityManifestFixture } from "@sourceweft/capability-contracts/testing";
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 
 test("sourceweft.capability.json parses as a valid ppt-deck skill manifest", async () => {
-  const rawManifest = await readFile(
-    join(packageRoot, "sourceweft.capability.json"),
-    "utf8",
-  );
-  const manifest = capabilityManifestSchema.parse(JSON.parse(rawManifest));
+  const { manifest } = await loadCapabilityManifestFixture(packageRoot);
   const skill = manifest.contributes.skills[0];
 
   assert.equal(manifest.id, "sourceweft/ppt-deck");
@@ -25,11 +21,7 @@ test("sourceweft.capability.json parses as a valid ppt-deck skill manifest", asy
 });
 
 test("every stylePreset value maps to a documented theme preset", async () => {
-  const rawManifest = await readFile(
-    join(packageRoot, "sourceweft.capability.json"),
-    "utf8",
-  );
-  const manifest = capabilityManifestSchema.parse(JSON.parse(rawManifest));
+  const { manifest } = await loadCapabilityManifestFixture(packageRoot);
   const skill = manifest.contributes.skills[0];
   const stylePreset = skill?.options?.find(
     (option) => option.id === "stylePreset",

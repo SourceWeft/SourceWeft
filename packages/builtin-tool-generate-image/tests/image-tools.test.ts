@@ -12,8 +12,8 @@ import {
   sanitizeImageArtifactFileBase,
 } from "../src/index";
 import type { ImageToolContext, ImageToolRuntimeDeps } from "../src/index";
-import { withAgentToolHostInvocationSignal } from "@sourceweft/contracts/agent-tools";
 import { ARTIFACT_LIMITS } from "@sourceweft/contracts/artifact-files";
+import { agentToolInvocationConfig } from "@sourceweft/contracts/testing";
 import type { ArtifactPublishSpec } from "@sourceweft/contracts/artifact-write";
 
 test("image schema rejects malformed inputs", () => {
@@ -239,9 +239,7 @@ function createImageToolHarness(
       };
       return imageTool.invoke(
         args,
-        (signal
-          ? withAgentToolHostInvocationSignal(config, signal)
-          : config) as never,
+        agentToolInvocationConfig(config, signal) as never,
       );
     },
   };

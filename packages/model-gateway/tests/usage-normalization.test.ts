@@ -4,27 +4,17 @@ import { normalizeModelCallObservation } from "../src/observation/normalize";
 import { getProviderResponseAdapter } from "../src/adapters/providers/registry";
 import { extractRawUsage } from "../src/normalize/extract";
 import { normalizeOpenAICompatibleUsage } from "../src/normalize/protocols/openai-compatible";
-import type { ResolvedRequestTarget } from "../src/types";
+import { makeResolvedTarget } from "./helpers";
 
-function target(provider: string): ResolvedRequestTarget {
-  return {
+function target(provider: string) {
+  return makeResolvedTarget({
     provider,
     providerKind:
       provider === "openrouter" ? "openrouter" : "openai-compatible",
-    providerModel: "test-model",
     baseUrl: "https://provider.example/v1",
-    defaultHeaders: {},
+    apiKey: undefined,
     supports: ["chat"],
-    routeDecision: {
-      mode: "GLOBAL",
-      alias: "chat-default",
-      strategy: "priority",
-      provider,
-      providerKind:
-        provider === "openrouter" ? "openrouter" : "openai-compatible",
-    },
-    requestMetadata: {},
-  };
+  });
 }
 
 test("normalizes OpenAI-compatible token usage without provider extensions", () => {

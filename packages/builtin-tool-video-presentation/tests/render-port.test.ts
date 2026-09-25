@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AgentToolSandboxServices } from "@sourceweft/contracts/agent-tools";
+import { createFakeAgentToolSandbox } from "@sourceweft/contracts/testing";
 import {
   VIDEO_PRESENTATION_RENDER_POLICY,
   VideoPresentationRenderError,
@@ -181,7 +182,7 @@ function harness(options?: {
     }
     return { exitCode: 0, output: "ok" };
   };
-  const sandbox = {
+  const sandbox = createFakeAgentToolSandbox({
     ensureCurrentSession: async () => ({
       sessionGeneration: "session",
       ...(options?.hostLimits ? { hostLimits: options.hostLimits } : {}),
@@ -204,7 +205,7 @@ function harness(options?: {
         ? mp4
         : (options?.sampleBytes ?? new Uint8Array([0xff, 0xd8, 0xff, 0xd9]));
     },
-  } as AgentToolSandboxServices;
+  });
   return { commands, sandbox };
 }
 

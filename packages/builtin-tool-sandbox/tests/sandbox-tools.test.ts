@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { capabilityManifestSchema } from "@sourceweft/capability-contracts";
-import { withAgentToolHostInvocationSignal } from "@sourceweft/contracts/agent-tools";
+import { agentToolInvocationConfig } from "@sourceweft/contracts/testing";
 import { builtinSandboxCapabilityManifest } from "../src/manifest";
 import {
   buildSandboxToolDescriptions,
@@ -367,10 +367,7 @@ test("sandbox runtime prompt admits staged /skills scripts only when skill stagi
     /materialized read-only at the same \/skills\/<name>\/ paths/u,
   );
   assert.match(staged, /run bundled skill scripts directly/u);
-  assert.match(
-    staged,
-    /Never include \/files or \/kb in an execute command/u,
-  );
+  assert.match(staged, /Never include \/files or \/kb in an execute command/u);
   assert.match(staged, /Never write to \/skills from execute commands/u);
   assert.match(staged, /Skill bundles are already staged under \/skills/u);
   // The staged prompt must not carry the unstaged prohibitions.
@@ -694,7 +691,7 @@ test("prepare_sandbox_workspace forwards Stop through the Host side channel and 
   );
   assert.ok(prepareTool);
   const stop = new AbortController();
-  const config = withAgentToolHostInvocationSignal(
+  const config = agentToolInvocationConfig(
     {
       toolCall: {
         id: "prepare-stop-call",
@@ -831,7 +828,7 @@ test("collect_sandbox_outputs forwards Host timeout and never persists late sand
   );
   assert.ok(collectTool);
   const deadline = new AbortController();
-  const config = withAgentToolHostInvocationSignal(
+  const config = agentToolInvocationConfig(
     {
       toolCall: {
         id: "collect-timeout-call",

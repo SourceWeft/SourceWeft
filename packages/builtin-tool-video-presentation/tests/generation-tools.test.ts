@@ -5,6 +5,7 @@ import { createGenerateVideoNarrationTool } from "../src/agent/narration-tool";
 import { sha256Digest, videoModelSemanticIdentity } from "../src/agent/common";
 import { ModelGatewayError } from "@sourceweft/model-gateway";
 import { withAgentToolHostInvocationSignal } from "@sourceweft/contracts/agent-tools";
+import { createFakeVideoServices } from "./helpers";
 
 const profile = {
   gatewayConfigId: "gateway-1",
@@ -19,7 +20,7 @@ test("asset batch claims before provider work and stages WIP without an artifact
   const assetTool = createGenerateVideoAssetsTool({
     profile,
     traceId: "trace-1",
-    services: {
+    services: createFakeVideoServices({
       operationCache: {
         claimMany: async (input) => {
           events.push("claim");
@@ -36,7 +37,6 @@ test("asset batch claims before provider work and stages WIP without an artifact
           events.push("complete");
           return { observationId: "asset-observation" };
         },
-        markUnknown: async () => undefined,
       },
       modelGateway: {
         getClient: async () =>
@@ -64,16 +64,10 @@ test("asset batch claims before provider work and stages WIP without an artifact
           }) as never,
       },
       sandbox: {
-        allowedReadRoots: ["/workspace"],
-        ensureCurrentSession: async () => ({ sessionGeneration: "session" }),
         uploadCurrentFiles: async (files) => {
           uploaded.push(...files);
           events.push("upload");
         },
-        listCurrentFiles: async () => [],
-        downloadCurrentFile: async () => new Uint8Array(),
-        executeCurrent: async () => ({ exitCode: 0, output: "" }),
-        captureCurrentTree: async () => [],
       },
       workBlobs: {
         putIfAbsent: async (input) => {
@@ -81,11 +75,8 @@ test("asset batch claims before provider work and stages WIP without an artifact
           assert.equal(input.contentDigest, sha256Digest(bytes));
           return { blobRef: "wip-asset", contentDigest: input.contentDigest };
         },
-        getVerified: async () => null,
-        getBySemanticKey: async () => null,
-        deleteScope: async () => undefined,
       },
-    },
+    }),
   });
 
   const output = (await assetTool.invoke(
@@ -114,7 +105,7 @@ test("narration stores bytes before probing and records measured duration", asyn
   const audio = new Uint8Array([0x49, 0x44, 0x33, 1, 2, 3]);
   const narrationTool = createGenerateVideoNarrationTool({
     profile: { ...profile, modelAlias: "tts-default" },
-    services: {
+    services: createFakeVideoServices({
       operationCache: {
         claimMany: async (input) => {
           events.push("claim");
@@ -131,7 +122,6 @@ test("narration stores bytes before probing and records measured duration", asyn
           events.push("complete");
           return { observationId: "narration-observation" };
         },
-        markUnknown: async () => undefined,
       },
       media: {
         probeAudioDurationSeconds: async () => {
@@ -159,15 +149,9 @@ test("narration stores bytes before probing and records measured duration", asyn
           }) as never,
       },
       sandbox: {
-        allowedReadRoots: ["/workspace"],
-        ensureCurrentSession: async () => ({ sessionGeneration: "session" }),
         uploadCurrentFiles: async () => {
           events.push("upload");
         },
-        listCurrentFiles: async () => [],
-        downloadCurrentFile: async () => new Uint8Array(),
-        executeCurrent: async () => ({ exitCode: 0, output: "" }),
-        captureCurrentTree: async () => [],
       },
       workBlobs: {
         putIfAbsent: async (input) => {
@@ -177,11 +161,8 @@ test("narration stores bytes before probing and records measured duration", asyn
             contentDigest: input.contentDigest,
           };
         },
-        getVerified: async () => null,
-        getBySemanticKey: async () => null,
-        deleteScope: async () => undefined,
       },
-    },
+    }),
   });
 
   const output = (await narrationTool.invoke(
@@ -207,7 +188,7 @@ test("narration stores bytes before probing and records measured duration", asyn
 test("duplicate asset ids and slide numbers are rejected before claims or providers", async () => {
   let claims = 0;
   let clients = 0;
-  const commonServices = {
+  const commonServices = createFakeVideoServices({
     operationCache: {
       claimMany: async () => {
         claims += 1;
@@ -216,8 +197,6 @@ test("duplicate asset ids and slide numbers are rejected before claims or provid
           code: "SIDE_EFFECT_OUTCOME_UNKNOWN",
         } as const;
       },
-      complete: async () => ({ observationId: "unused" }),
-      markUnknown: async () => undefined,
     },
     modelGateway: {
       getClient: async () => {
@@ -225,28 +204,10 @@ test("duplicate asset ids and slide numbers are rejected before claims or provid
         return {} as never;
       },
     },
-    sandbox: {
-      allowedReadRoots: ["/workspace"],
-      ensureCurrentSession: async () => ({ sessionGeneration: "session" }),
-      uploadCurrentFiles: async () => undefined,
-      listCurrentFiles: async () => [],
-      downloadCurrentFile: async () => new Uint8Array(),
-      executeCurrent: async () => ({ exitCode: 0, output: "" }),
-      captureCurrentTree: async () => [],
-    },
-    workBlobs: {
-      putIfAbsent: async () => ({
-        blobRef: "unused",
-        contentDigest: "unused",
-      }),
-      getVerified: async () => null,
-      getBySemanticKey: async () => null,
-      deleteScope: async () => undefined,
-    },
-  };
+  });
   const assetTool = createGenerateVideoAssetsTool({
     profile,
-    services: commonServices as never,
+    services: commonServices,
   });
   const assetOutput = (await assetTool.invoke(
     {
@@ -275,7 +236,7 @@ test("duplicate asset ids and slide numbers are rejected before claims or provid
     services: {
       ...commonServices,
       media: { probeAudioDurationSeconds: async () => 1 },
-    } as never,
+    },
   });
   const narrationOutput = (await narrationTool.invoke(
     {
@@ -297,7 +258,7 @@ test("cached successes are path-independent and restage under the current root",
   const bytes = new Uint8Array([1, 2, 3]);
   const assetTool = createGenerateVideoAssetsTool({
     profile,
-    services: {
+    services: createFakeVideoServices({
       operationCache: {
         claimMany: async (input) => ({
           kind: "claimed",
@@ -317,8 +278,6 @@ test("cached successes are path-independent and restage under the current root",
             },
           ],
         }),
-        complete: async () => ({ observationId: "unused" }),
-        markUnknown: async () => undefined,
       },
       modelGateway: {
         getClient: async () => {
@@ -326,28 +285,17 @@ test("cached successes are path-independent and restage under the current root",
         },
       },
       sandbox: {
-        allowedReadRoots: ["/workspace"],
         ensureCurrentSession: async () => ({
           sessionGeneration: "new-session",
         }),
         uploadCurrentFiles: async (files) => {
           uploaded.push(...files.map((file) => file.path));
         },
-        listCurrentFiles: async () => [],
-        downloadCurrentFile: async () => new Uint8Array(),
-        executeCurrent: async () => ({ exitCode: 0, output: "" }),
-        captureCurrentTree: async () => [],
       },
       workBlobs: {
-        putIfAbsent: async () => ({
-          blobRef: "unused",
-          contentDigest: "unused",
-        }),
         getVerified: async () => ({ bytes, contentType: "image/png" }),
-        getBySemanticKey: async () => null,
-        deleteScope: async () => undefined,
       },
-    },
+    }),
   });
 
   const output = (await assetTool.invoke(
@@ -405,7 +353,7 @@ test("BYOK image requests carry the resolved route and semantic key identity", a
   const assetTool = createGenerateVideoAssetsTool({
     profile: byokProfile,
     execution,
-    services: {
+    services: createFakeVideoServices({
       operationCache: {
         claimMany: async (input) => {
           semanticKeys.push(...input.semanticKeys);
@@ -418,8 +366,6 @@ test("BYOK image requests carry the resolved route and semantic key identity", a
             })),
           };
         },
-        complete: async () => ({ observationId: "observation" }),
-        markUnknown: async () => undefined,
       },
       modelGateway: {
         getClient: async () =>
@@ -444,30 +390,19 @@ test("BYOK image requests carry the resolved route and semantic key identity", a
             },
           }) as never,
       },
-      sandbox: {
-        allowedReadRoots: ["/workspace"],
-        ensureCurrentSession: async () => ({ sessionGeneration: "session" }),
-        uploadCurrentFiles: async () => undefined,
-        listCurrentFiles: async () => [],
-        downloadCurrentFile: async () => new Uint8Array(),
-        executeCurrent: async () => ({ exitCode: 0, output: "" }),
-        captureCurrentTree: async () => [],
-      },
       workBlobs: {
         putIfAbsent: async (input) => ({
           blobRef: "asset-blob",
           contentDigest: input.contentDigest,
         }),
-        getVerified: async () => null,
         getBySemanticKey: async () => ({
           blobRef: "asset-blob",
           bytes,
           contentType: "image/png",
           contentDigest: sha256Digest(bytes),
         }),
-        deleteScope: async () => undefined,
       },
-    },
+    }),
   });
 
   await assetTool.invoke(
@@ -522,18 +457,8 @@ test("URL-only image responses terminate as known failure without fetching", asy
   try {
     const assetTool = createGenerateVideoAssetsTool({
       profile,
-      services: {
+      services: createFakeVideoServices({
         operationCache: {
-          claimMany: async (input) => ({
-            kind: "claimed",
-            items: [
-              {
-                semanticKey: input.semanticKeys[0]!,
-                action: "execute",
-                claimToken: "claim",
-              },
-            ],
-          }),
           complete: async (input) => {
             completed.push(input.observation);
             return { observationId: "failed-observation" };
@@ -554,25 +479,7 @@ test("URL-only image responses terminate as known failure without fetching", asy
               },
             }) as never,
         },
-        sandbox: {
-          allowedReadRoots: ["/workspace"],
-          ensureCurrentSession: async () => ({ sessionGeneration: "session" }),
-          uploadCurrentFiles: async () => undefined,
-          listCurrentFiles: async () => [],
-          downloadCurrentFile: async () => new Uint8Array(),
-          executeCurrent: async () => ({ exitCode: 0, output: "" }),
-          captureCurrentTree: async () => [],
-        },
-        workBlobs: {
-          putIfAbsent: async () => ({
-            blobRef: "unused",
-            contentDigest: "unused",
-          }),
-          getVerified: async () => null,
-          getBySemanticKey: async () => null,
-          deleteScope: async () => undefined,
-        },
-      },
+      }),
     });
     const output = (await assetTool.invoke(
       {
@@ -617,18 +524,8 @@ test("known gateway failures complete failed claims; timeouts become unknown", a
     let unknowns = 0;
     const assetTool = createGenerateVideoAssetsTool({
       profile,
-      services: {
+      services: createFakeVideoServices({
         operationCache: {
-          claimMany: async (input) => ({
-            kind: "claimed",
-            items: [
-              {
-                semanticKey: input.semanticKeys[0]!,
-                action: "execute",
-                claimToken: "claim",
-              },
-            ],
-          }),
           complete: async (input) => {
             completed.push(input.observation);
             return { observationId: "observation" };
@@ -650,25 +547,7 @@ test("known gateway failures complete failed claims; timeouts become unknown", a
               },
             }) as never,
         },
-        sandbox: {
-          allowedReadRoots: ["/workspace"],
-          ensureCurrentSession: async () => ({ sessionGeneration: "session" }),
-          uploadCurrentFiles: async () => undefined,
-          listCurrentFiles: async () => [],
-          downloadCurrentFile: async () => new Uint8Array(),
-          executeCurrent: async () => ({ exitCode: 0, output: "" }),
-          captureCurrentTree: async () => [],
-        },
-        workBlobs: {
-          putIfAbsent: async () => ({
-            blobRef: "unused",
-            contentDigest: "unused",
-          }),
-          getVerified: async () => null,
-          getBySemanticKey: async () => null,
-          deleteScope: async () => undefined,
-        },
-      },
+      }),
     });
     const output = (await assetTool.invoke(
       {
@@ -714,7 +593,7 @@ test("cached narration restages by file name under the current project root", as
   const uploaded: string[] = [];
   const narrationTool = createGenerateVideoNarrationTool({
     profile,
-    services: {
+    services: createFakeVideoServices({
       operationCache: {
         claimMany: async (input) => ({
           kind: "claimed",
@@ -735,8 +614,6 @@ test("cached narration restages by file name under the current project root", as
             },
           ],
         }),
-        complete: async () => ({ observationId: "unused" }),
-        markUnknown: async () => undefined,
       },
       media: { probeAudioDurationSeconds: async () => 2 },
       modelGateway: {
@@ -745,28 +622,17 @@ test("cached narration restages by file name under the current project root", as
         },
       },
       sandbox: {
-        allowedReadRoots: ["/workspace"],
         ensureCurrentSession: async () => ({
           sessionGeneration: "new-session",
         }),
         uploadCurrentFiles: async (files) => {
           uploaded.push(...files.map((file) => file.path));
         },
-        listCurrentFiles: async () => [],
-        downloadCurrentFile: async () => new Uint8Array(),
-        executeCurrent: async () => ({ exitCode: 0, output: "" }),
-        captureCurrentTree: async () => [],
       },
       workBlobs: {
-        putIfAbsent: async () => ({
-          blobRef: "unused",
-          contentDigest: "unused",
-        }),
         getVerified: async () => ({ bytes: audio, contentType: "audio/mpeg" }),
-        getBySemanticKey: async () => null,
-        deleteScope: async () => undefined,
       },
-    },
+    }),
   });
 
   const output = (await narrationTool.invoke(
@@ -810,7 +676,7 @@ test("BYOK narration is rejected before sandbox, cache, or provider access", asy
       modelAlias: "provider/tts-current",
     },
     execution,
-    services: {
+    services: createFakeVideoServices({
       operationCache: {
         claimMany: async () => {
           calls.push("claim");
@@ -819,8 +685,6 @@ test("BYOK narration is rejected before sandbox, cache, or provider access", asy
             code: "SIDE_EFFECT_OUTCOME_UNKNOWN",
           };
         },
-        complete: async () => ({ observationId: "observation" }),
-        markUnknown: async () => undefined,
       },
       media: {
         probeAudioDurationSeconds: async () => {
@@ -835,27 +699,18 @@ test("BYOK narration is rejected before sandbox, cache, or provider access", asy
         },
       },
       sandbox: {
-        allowedReadRoots: ["/workspace"],
         ensureCurrentSession: async () => {
           calls.push("sandbox");
           return { sessionGeneration: "session" };
         },
-        uploadCurrentFiles: async () => undefined,
-        listCurrentFiles: async () => [],
-        downloadCurrentFile: async () => new Uint8Array(),
-        executeCurrent: async () => ({ exitCode: 0, output: "" }),
-        captureCurrentTree: async () => [],
       },
       workBlobs: {
         putIfAbsent: async (input) => ({
           blobRef: "audio-blob",
           contentDigest: input.contentDigest,
         }),
-        getVerified: async () => null,
-        getBySemanticKey: async () => null,
-        deleteScope: async () => undefined,
       },
-    },
+    }),
   });
 
   const output = (await narrationTool.invoke(
@@ -878,18 +733,8 @@ test("asset generation forwards cancellation and fences its execute claim as unk
   const unknownReasons: string[] = [];
   const assetTool = createGenerateVideoAssetsTool({
     profile,
-    services: {
+    services: createFakeVideoServices({
       operationCache: {
-        claimMany: async (input) => ({
-          kind: "claimed",
-          items: [
-            {
-              semanticKey: input.semanticKeys[0]!,
-              action: "execute",
-              claimToken: "asset-abort-claim",
-            },
-          ],
-        }),
         complete: async () => {
           throw new Error("an aborted claim must not complete");
         },
@@ -912,24 +757,12 @@ test("asset generation forwards cancellation and fences its execute claim as unk
             },
           }) as never,
       },
-      sandbox: {
-        allowedReadRoots: ["/workspace"],
-        ensureCurrentSession: async () => ({ sessionGeneration: "session" }),
-        uploadCurrentFiles: async () => undefined,
-        listCurrentFiles: async () => [],
-        downloadCurrentFile: async () => new Uint8Array(),
-        executeCurrent: async () => ({ exitCode: 0, output: "" }),
-        captureCurrentTree: async () => [],
-      },
       workBlobs: {
         putIfAbsent: async () => {
           throw new Error("aborted provider bytes must not be stored");
         },
-        getVerified: async () => null,
-        getBySemanticKey: async () => null,
-        deleteScope: async () => undefined,
       },
-    },
+    }),
   });
 
   await assert.rejects(
@@ -961,18 +794,8 @@ test("narration generation forwards cancellation and fences its execute claim as
   const unknownReasons: string[] = [];
   const narrationTool = createGenerateVideoNarrationTool({
     profile: { ...profile, modelAlias: "tts-default" },
-    services: {
+    services: createFakeVideoServices({
       operationCache: {
-        claimMany: async (input) => ({
-          kind: "claimed",
-          items: [
-            {
-              semanticKey: input.semanticKeys[0]!,
-              action: "execute",
-              claimToken: "narration-abort-claim",
-            },
-          ],
-        }),
         complete: async () => {
           throw new Error("an aborted claim must not complete");
         },
@@ -1000,24 +823,12 @@ test("narration generation forwards cancellation and fences its execute claim as
             },
           }) as never,
       },
-      sandbox: {
-        allowedReadRoots: ["/workspace"],
-        ensureCurrentSession: async () => ({ sessionGeneration: "session" }),
-        uploadCurrentFiles: async () => undefined,
-        listCurrentFiles: async () => [],
-        downloadCurrentFile: async () => new Uint8Array(),
-        executeCurrent: async () => ({ exitCode: 0, output: "" }),
-        captureCurrentTree: async () => [],
-      },
       workBlobs: {
         putIfAbsent: async () => {
           throw new Error("aborted provider bytes must not be stored");
         },
-        getVerified: async () => null,
-        getBySemanticKey: async () => null,
-        deleteScope: async () => undefined,
       },
-    },
+    }),
   });
 
   await assert.rejects(
