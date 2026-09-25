@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { strToU8, zipSync } from "fflate";
 import { beforeEach, test, vi } from "vitest";
+import { zipball } from "../../../test/zip-fixture";
 
 /**
  * What the read stage makes of a real zipball: every bundle file is carried as
@@ -47,20 +47,6 @@ const SKILL_MD = "---\nname: poster\ndescription: Posters\n---\nBody\n";
 // Not valid UTF-8, so neither can be carried as text.
 const TTF = new Uint8Array([0x00, 0x01, 0x00, 0x00, 0xff, 0xfe, 0x00]);
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-
-/** A GitHub-shaped zipball: everything under one `<repo>-<sha>/` root. */
-function zipball(files: Record<string, string | Uint8Array>) {
-  return Buffer.from(
-    zipSync(
-      Object.fromEntries(
-        Object.entries(files).map(([path, content]) => [
-          `skills-abc/${path}`,
-          typeof content === "string" ? strToU8(content) : content,
-        ]),
-      ),
-    ),
-  );
-}
 
 const tooLarge = (error: unknown) =>
   error instanceof RegistrySubmissionError &&
