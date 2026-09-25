@@ -1708,6 +1708,7 @@
         "running": "Running",
         "generating": "Generating",
         "needs-approval": "Needs approval",
+        "not-run": "Not run",
         "failed": "Failed",
         "rejected": "Rejected",
         "done": "Done"

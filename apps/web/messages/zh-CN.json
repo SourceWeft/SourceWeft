@@ -1699,6 +1699,7 @@
         "running": "运行中",
         "generating": "生成中",
         "needs-approval": "需要审批",
+        "not-run": "未执行",
         "failed": "失败",
         "rejected": "已拒绝",
         "done": "完成"
