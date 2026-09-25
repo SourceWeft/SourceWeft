@@ -18,11 +18,6 @@ import {
   ToolMessage,
   type BaseMessage,
 } from "@langchain/core/messages";
-import {
-  BaseChatModel,
-  type BaseChatModelParams,
-} from "@langchain/core/language_models/chat_models";
-import type { ChatResult } from "@langchain/core/outputs";
 import { Command, MemorySaver } from "@langchain/langgraph";
 import { createDeepAgent, StateBackend } from "deepagents";
 import {
@@ -59,35 +54,21 @@ import {
   interruptsToLegacyUpdatesPayload,
   type V3RunStream,
 } from "../turn/v3-protocol";
+import { ScriptedChatModel } from "../../../../test/chat-model";
 
 /** Emits a scripted sequence of AI messages, one per model turn. */
-class ScriptedChatModel extends BaseChatModel {
-  private count = 0;
-
-  constructor(
-    private readonly script: Array<{ content: string; toolCalls?: unknown[] }>,
-    params: BaseChatModelParams = {},
-  ) {
-    super(params);
-  }
-
-  _llmType() {
-    return "scripted";
-  }
-
-  bindTools() {
-    return this;
-  }
-
-  async _generate(_messages: BaseMessage[]): Promise<ChatResult> {
-    const step = this.script[Math.min(this.count, this.script.length - 1)];
-    this.count += 1;
-    const message = new AIMessage({
+function scriptedModel(
+  script: Array<{ content: string; toolCalls?: unknown[] }>,
+) {
+  let count = 0;
+  return new ScriptedChatModel(() => {
+    const step = script[Math.min(count, script.length - 1)];
+    count += 1;
+    return new AIMessage({
       content: step?.content ?? "",
       tool_calls: (step?.toolCalls ?? []) as never,
     });
-    return { generations: [{ text: step?.content ?? "", message }] };
-  }
+  });
 }
 
 function buildAgent(
@@ -95,7 +76,7 @@ function buildAgent(
   extraMiddleware: AgentMiddleware[] = [],
 ) {
   return createDeepAgent({
-    model: new ScriptedChatModel(script),
+    model: scriptedModel(script),
     tools: [],
     middleware: [createAskUserMiddleware(), ...extraMiddleware],
     backend: new StateBackend(),
@@ -146,7 +127,7 @@ test("v3 continuation persists the new head and resumes a question beyond a pinn
     ],
     [
       createSourceWeftSummarizationMiddleware({
-        model: new ScriptedChatModel([{ content: "old history summary" }]),
+        model: scriptedModel([{ content: "old history summary" }]),
         backend: new StateBackend(),
         chatProfileConfig: { contextLength: 100_000 },
       }),

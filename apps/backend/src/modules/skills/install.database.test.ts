@@ -1,10 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { and, eq } from "drizzle-orm";
+import {
+  loadSkillDatabase,
+  seedSkillDefinition,
+  skillDatabaseEnabled,
+} from "../../test/skill-database";
 
 // The install predicate is SQL, so its real behaviour — who can see a
 // `restricted` registry skill by slug — is only provable against PostgreSQL.
-describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
+describe.skipIf(!skillDatabaseEnabled)(
   "install visibility against real PostgreSQL",
   () => {
     let data: typeof import("@sourceweft/db");
@@ -29,14 +34,10 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       const skillId = randomUUID();
       const versionId = randomUUID();
       definitionIds.push(skillId);
-      await data.db.insert(data.skillDefinitions).values({
+      await seedSkillDefinition(data, {
         id: skillId,
-        sourceType: "registry_github",
         slug: input.slug,
-        displayName: input.slug,
-        description: "fixture",
         visibility: input.visibility,
-        status: "active",
         ownerUserId: owner.userId,
       });
       await data.db.insert(data.skillVersions).values({
@@ -67,13 +68,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
     }
 
     beforeAll(async () => {
-      if (
-        !new URL(process.env.DATABASE_URL!).pathname.startsWith(
-          "/sourceweft_skillv6_",
-        )
-      )
-        throw new Error("Refusing non-isolated database");
-      data = await import("@sourceweft/db");
+      data = await loadSkillDatabase();
       skills = await import("./repository");
       for (const scope of [owner, stranger])
         await data.db.insert(data.workspaces).values({

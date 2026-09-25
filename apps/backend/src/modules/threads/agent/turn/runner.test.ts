@@ -32,7 +32,6 @@ import type { ToolCallTrace } from "../..";
 import { testExports } from "./runner";
 import { createTurnRuntime } from "./turn-runtime";
 import type { DeepAgentTurnEvent } from "./events";
-import type { PreparedThreadTurn } from "../..";
 import type { ConnectorActionExecutionCursor } from "../../../connectors/agent-tool-idempotency";
 import type { ArtifactToolRuntimePromptProvider } from "../prompts/tool-prompt-provider";
 import { adaptToolsEvent } from "./v3-protocol";
@@ -41,6 +40,7 @@ import {
   SYNTHETIC_PROMPT_MARKER,
   SYNTHETIC_TOOL_NAME,
 } from "../../../../test/synthetic-capability";
+import { createPreparedThreadTurn } from "../../../../test/prepared-turn";
 
 async function collectMessageStreamEvents(
   input: Parameters<typeof handleMessagesStreamChunk>[0],
@@ -95,13 +95,13 @@ function toolNames(tools: readonly unknown[]) {
 async function* emptyAgentStream() {}
 
 function createToolLoggingPreparedTurn() {
-  return {
+  return createPreparedThreadTurn({
     runTraceId: "trace-tool-logging",
     thread: { id: "thread-1" },
     userMessage: { id: "message-1" },
     workspace: { id: "workspace-1", organizationId: "team-1" },
     userId: "user-1",
-  } as unknown as PreparedThreadTurn;
+  });
 }
 
 async function collectToolStreamEvents(
@@ -953,7 +953,11 @@ test("turn runtime measures reasoning duration per segment", () => {
   vi.setSystemTime(new Date("2026-06-01T00:00:00.000Z"));
   try {
     const runtime = createTurnRuntime({
-      prepared: { runTraceId: "trace-reasoning-duration", workspace: { id: "workspace" }, thread: { id: "thread" } } as never,
+      prepared: {
+        runTraceId: "trace-reasoning-duration",
+        workspace: { id: "workspace" },
+        thread: { id: "thread" },
+      } as never,
     });
 
     vi.advanceTimersByTime(1000);
@@ -986,7 +990,11 @@ test("turn runtime measures reasoning duration per segment", () => {
 
 test("messages stream handler yields reasoning before text deltas and records tool calls", async () => {
   const runtime = createTurnRuntime({
-    prepared: { runTraceId: "trace-messages", workspace: { id: "workspace" }, thread: { id: "thread" } } as never,
+    prepared: {
+      runTraceId: "trace-messages",
+      workspace: { id: "workspace" },
+      thread: { id: "thread" },
+    } as never,
   });
 
   const events = await collectMessageStreamEvents({
@@ -1043,7 +1051,11 @@ test("messages stream handler yields reasoning before text deltas and records to
 
 test("messages stream handler preserves whitespace across streamed reasoning chunks", async () => {
   const runtime = createTurnRuntime({
-    prepared: { runTraceId: "trace-reasoning-whitespace", workspace: { id: "workspace" }, thread: { id: "thread" } } as never,
+    prepared: {
+      runTraceId: "trace-reasoning-whitespace",
+      workspace: { id: "workspace" },
+      thread: { id: "thread" },
+    } as never,
   });
 
   const firstEvents = await collectMessageStreamEvents({
@@ -1085,7 +1097,11 @@ test("messages stream handler preserves whitespace across streamed reasoning chu
 
 test("messages stream handler promotes pending run id tool stream when LangChain tool call id arrives", async () => {
   const runtime = createTurnRuntime({
-    prepared: { runTraceId: "trace-message-promote", workspace: { id: "workspace" }, thread: { id: "thread" } } as never,
+    prepared: {
+      runTraceId: "trace-message-promote",
+      workspace: { id: "workspace" },
+      thread: { id: "thread" },
+    } as never,
   });
   const pendingStartedAt = Date.now() - 25;
   runtime.pendingToolStreamsByRunId.set("run-write", {
@@ -1141,7 +1157,11 @@ test("messages stream handler promotes pending run id tool stream when LangChain
 
 test("HITL stream handler records update tool calls and assistant content without interrupting", async () => {
   const runtime = createTurnRuntime({
-    prepared: { runTraceId: "trace-hitl-updates", workspace: { id: "workspace" }, thread: { id: "thread" } } as never,
+    prepared: {
+      runTraceId: "trace-hitl-updates",
+      workspace: { id: "workspace" },
+      thread: { id: "thread" },
+    } as never,
   });
 
   const { events, result } = await collectHitlStreamResult({
@@ -1196,7 +1216,11 @@ test("HITL stream handler records update tool calls and assistant content withou
 
 test("HITL stream handler records LangChain AIMessage update content", async () => {
   const runtime = createTurnRuntime({
-    prepared: { runTraceId: "trace-hitl-langchain-ai-message", workspace: { id: "workspace" }, thread: { id: "thread" } } as never,
+    prepared: {
+      runTraceId: "trace-hitl-langchain-ai-message",
+      workspace: { id: "workspace" },
+      thread: { id: "thread" },
+    } as never,
   });
 
   const { events, result } = await collectHitlStreamResult({
@@ -1233,7 +1257,11 @@ test("HITL stream handler records LangChain AIMessage update content", async () 
 
 test("final outcome promotes pending stream from final LangChain tool call id", async () => {
   const runtime = createTurnRuntime({
-    prepared: { runTraceId: "trace-final-promote", workspace: { id: "workspace" }, thread: { id: "thread" } } as never,
+    prepared: {
+      runTraceId: "trace-final-promote",
+      workspace: { id: "workspace" },
+      thread: { id: "thread" },
+    } as never,
   });
   runtime.assistantContent = "Done.";
   runtime.pendingToolStreamsByRunId.set("run-write", {
@@ -1307,7 +1335,11 @@ test("final outcome promotes pending stream from final LangChain tool call id", 
 
 test("final outcome drops pending stream without a real LangChain tool call id", async () => {
   const runtime = createTurnRuntime({
-    prepared: { runTraceId: "trace-final-drop-pending", workspace: { id: "workspace" }, thread: { id: "thread" } } as never,
+    prepared: {
+      runTraceId: "trace-final-drop-pending",
+      workspace: { id: "workspace" },
+      thread: { id: "thread" },
+    } as never,
   });
   runtime.assistantContent = "Done.";
   runtime.pendingToolStreamsByRunId.set("run-write", {
@@ -1342,7 +1374,11 @@ test("final outcome drops pending stream without a real LangChain tool call id",
 
 test("stream handlers ignore non-assistant messages", async () => {
   const updatesRuntime = createTurnRuntime({
-    prepared: { runTraceId: "trace-hitl-non-assistant", workspace: { id: "workspace" }, thread: { id: "thread" } } as never,
+    prepared: {
+      runTraceId: "trace-hitl-non-assistant",
+      workspace: { id: "workspace" },
+      thread: { id: "thread" },
+    } as never,
   });
   const updatesResult = await collectHitlStreamResult({
     agent: { getState: vi.fn(), stream: vi.fn() } as never,
@@ -1373,7 +1409,11 @@ test("stream handlers ignore non-assistant messages", async () => {
   assert.equal(updatesRuntime.assistantContentFromUpdates, null);
 
   const messagesRuntime = createTurnRuntime({
-    prepared: { runTraceId: "trace-message-non-assistant", workspace: { id: "workspace" }, thread: { id: "thread" } } as never,
+    prepared: {
+      runTraceId: "trace-message-non-assistant",
+      workspace: { id: "workspace" },
+      thread: { id: "thread" },
+    } as never,
   });
   const messageEvents = await collectMessageStreamEvents({
     payload: [new HumanMessage("User text from messages stream.")],
@@ -1389,7 +1429,11 @@ test("stream handlers ignore non-assistant messages", async () => {
 
 test("HITL stream handler emits confirmation event sequence and interrupted final outcome", async () => {
   const runtime = createTurnRuntime({
-    prepared: { runTraceId: "trace-hitl-confirmation", workspace: { id: "workspace" }, thread: { id: "thread" } } as never,
+    prepared: {
+      runTraceId: "trace-hitl-confirmation",
+      workspace: { id: "workspace" },
+      thread: { id: "thread" },
+    } as never,
   });
   runtime.assistantContent = "I need approval";
   runtime.hasTextSinceLastToolBoundary = true;
@@ -1584,7 +1628,11 @@ test("HITL stream handler emits confirmation event sequence and interrupted fina
 
 test("HITL stream handler binds MCP interrupts to a payload-derived ref without checkpoint correlation", async () => {
   const runtime = createTurnRuntime({
-    prepared: { runTraceId: "trace-hitl-state-tool-call", workspace: { id: "workspace" }, thread: { id: "thread" } } as never,
+    prepared: {
+      runTraceId: "trace-hitl-state-tool-call",
+      workspace: { id: "workspace" },
+      thread: { id: "thread" },
+    } as never,
   });
   const confirmation = {
     type: "tool_confirmation_request",
@@ -1705,7 +1753,11 @@ test("HITL stream handler binds MCP interrupts to a payload-derived ref without 
 
 test("HITL stream handler creates sandbox confirmation without connector or Daytona backend", async () => {
   const runtime = createTurnRuntime({
-    prepared: { runTraceId: "trace-hitl-sandbox-confirmation", workspace: { id: "workspace" }, thread: { id: "thread" } } as never,
+    prepared: {
+      runTraceId: "trace-hitl-sandbox-confirmation",
+      workspace: { id: "workspace" },
+      thread: { id: "thread" },
+    } as never,
   });
 
   const { events, result } = await collectHitlStreamResult({
@@ -1845,7 +1897,11 @@ test("HITL stream handler creates sandbox confirmation without connector or Dayt
 
 test("HITL stream handler returns replace-stream for auto-approved connector resume", async () => {
   const runtime = createTurnRuntime({
-    prepared: { runTraceId: "trace-hitl-auto-resume", workspace: { id: "workspace" }, thread: { id: "thread" } } as never,
+    prepared: {
+      runTraceId: "trace-hitl-auto-resume",
+      workspace: { id: "workspace" },
+      thread: { id: "thread" },
+    } as never,
   });
   const replacementStream = emptyAgentStream();
   let resumeCommand: unknown;
@@ -1946,7 +2002,11 @@ test("HITL stream handler returns replace-stream for auto-approved connector res
 
 test("HITL stream handler returns replace-stream for auto-approved sandbox resume", async () => {
   const runtime = createTurnRuntime({
-    prepared: { runTraceId: "trace-hitl-auto-sandbox-resume", workspace: { id: "workspace" }, thread: { id: "thread" } } as never,
+    prepared: {
+      runTraceId: "trace-hitl-auto-sandbox-resume",
+      workspace: { id: "workspace" },
+      thread: { id: "thread" },
+    } as never,
   });
   const replacementStream = emptyAgentStream();
   let resumeCommand: unknown;
@@ -2069,7 +2129,11 @@ test("HITL stream handler returns replace-stream for auto-approved sandbox resum
 
 test("HITL stream handler binds new confirmation from pending checkpoint, not payload tool calls", async () => {
   const runtime = createTurnRuntime({
-    prepared: { runTraceId: "trace-hitl-pending-binding", workspace: { id: "workspace" }, thread: { id: "thread" } } as never,
+    prepared: {
+      runTraceId: "trace-hitl-pending-binding",
+      workspace: { id: "workspace" },
+      thread: { id: "thread" },
+    } as never,
   });
 
   const { events, result } = await collectHitlStreamResult({
@@ -2179,7 +2243,11 @@ test("HITL stream handler binds new confirmation from pending checkpoint, not pa
 
 test("HITL stream handler auto-approves repeated sandbox action from persisted binding", async () => {
   const runtime = createTurnRuntime({
-    prepared: { runTraceId: "trace-hitl-merge-sandbox-resume", workspace: { id: "workspace" }, thread: { id: "thread" } } as never,
+    prepared: {
+      runTraceId: "trace-hitl-merge-sandbox-resume",
+      workspace: { id: "workspace" },
+      thread: { id: "thread" },
+    } as never,
   });
   const replacementStream = emptyAgentStream();
   const streamMock = vi.fn();
@@ -2326,7 +2394,11 @@ test("HITL sandbox active merge auto-approves matching persisted binding without
 
 test("HITL stream handler preserves missing checkpoint content error", async () => {
   const runtime = createTurnRuntime({
-    prepared: { runTraceId: "trace-hitl-missing-checkpoint", workspace: { id: "workspace" }, thread: { id: "thread" } } as never,
+    prepared: {
+      runTraceId: "trace-hitl-missing-checkpoint",
+      workspace: { id: "workspace" },
+      thread: { id: "thread" },
+    } as never,
   });
 
   await assert.rejects(
@@ -3084,7 +3156,11 @@ test("presentation progress emits tool event before CoT step", () => {
 
 test("custom stream handler emits generated artifact progress events", async () => {
   const runtime = createTurnRuntime({
-    prepared: { runTraceId: "trace-custom-progress", workspace: { id: "workspace" }, thread: { id: "thread" } } as never,
+    prepared: {
+      runTraceId: "trace-custom-progress",
+      workspace: { id: "workspace" },
+      thread: { id: "thread" },
+    } as never,
   });
   runtime.toolCallsById.set("image-call", {
     id: "image-call",
@@ -3157,7 +3233,11 @@ test("custom stream handler emits generated artifact progress events", async () 
 
 test("custom stream handler ignores unknown custom payloads", async () => {
   const runtime = createTurnRuntime({
-    prepared: { runTraceId: "trace-unknown-custom-progress", workspace: { id: "workspace" }, thread: { id: "thread" } } as never,
+    prepared: {
+      runTraceId: "trace-unknown-custom-progress",
+      workspace: { id: "workspace" },
+      thread: { id: "thread" },
+    } as never,
   });
   runtime.toolCallsById.set("known-call", {
     id: "known-call",
@@ -3530,7 +3610,11 @@ test("raw textual tool calls are suppressed while command success is pending", (
 
 test("messages stream handler suppresses raw tool call text and keeps suppression active", async () => {
   const runtime = createTurnRuntime({
-    prepared: { runTraceId: "trace-raw-tool-call", workspace: { id: "workspace" }, thread: { id: "thread" } } as never,
+    prepared: {
+      runTraceId: "trace-raw-tool-call",
+      workspace: { id: "workspace" },
+      thread: { id: "thread" },
+    } as never,
   });
 
   const firstEvents = await collectMessageStreamEvents({
@@ -3573,7 +3657,11 @@ test("messages stream handler suppresses raw tool call text and keeps suppressio
 
 test("messages stream handler clears streamed text when leaked artifact specs appear", async () => {
   const runtime = createTurnRuntime({
-    prepared: { runTraceId: "trace-leaked-spec", workspace: { id: "workspace" }, thread: { id: "thread" } } as never,
+    prepared: {
+      runTraceId: "trace-leaked-spec",
+      workspace: { id: "workspace" },
+      thread: { id: "thread" },
+    } as never,
   });
   const criteria = {
     artifactType: "slides" as const,

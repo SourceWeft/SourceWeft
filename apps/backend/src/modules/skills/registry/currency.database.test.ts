@@ -2,18 +2,18 @@ import { randomUUID } from "node:crypto";
 import { beforeAll, afterAll, describe, test, expect, vi } from "vitest";
 import { asc, eq } from "drizzle-orm";
 import { sha256 } from "../hash";
+import {
+  loadSkillDatabase,
+  skillDatabaseEnabled,
+} from "../../../test/skill-database";
 
 // PostgreSQL is real; the object store under `../storage` is a map.
 const store = vi.hoisted(() => ({ objects: new Map<string, Buffer>() }));
-vi.mock("../../sources/storage", () => ({
-  getContentStorageBucketName: () => "bucket",
-  sandboxAssetObjectExists: async ({ key }: { key: string }) =>
-    store.objects.has(key),
-  uploadFileObject: async (input: { key: string; body: Buffer }) => {
-    store.objects.set(input.key, input.body);
-    return { bucket: "bucket", key: input.key };
-  },
-}));
+vi.mock("../../sources/storage", async () =>
+  (await import("../../../test/fake-content-storage")).fakeContentStorage(
+    store,
+  ),
+);
 
 /**
  * Which version is current is decided by the pinned commit's committer date,
@@ -21,7 +21,7 @@ vi.mock("../../sources/storage", () => ({
  * PostgreSQL, because the property under test is what the advisory lock and
  * the partial unique index on `is_current` actually let through.
  */
-describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
+describe.skipIf(!skillDatabaseEnabled)(
   "registry current version follows commit date (real PostgreSQL)",
   () => {
     let data: typeof import("@sourceweft/db");
@@ -33,13 +33,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
     const admin = { actorUserId: "skill-test-admin" };
 
     beforeAll(async () => {
-      if (
-        !new URL(process.env.DATABASE_URL!).pathname.startsWith(
-          "/sourceweft_skillv6_",
-        )
-      )
-        throw new Error("Refusing non-isolated database");
-      data = await import("@sourceweft/db");
+      data = await loadSkillDatabase();
       repo = await import("./repository");
       review = await import("./review");
     });

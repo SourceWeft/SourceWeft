@@ -21,6 +21,7 @@ import {
   createSyntheticSandboxProviderRecord,
   SYNTHETIC_SANDBOX_PROVIDER_ID,
 } from "../../../../test/synthetic-capability";
+import { createPreparedThreadTurn } from "../../../../test/prepared-turn";
 import {
   buildAgentBackend,
   buildRuntimePromptContext,
@@ -264,70 +265,23 @@ function stubSandboxBackend(
 function createPreparedTurn(
   toolPermissions: PreparedThreadTurn["toolPermissions"] = {},
 ): PreparedThreadTurn {
-  return {
+  return createPreparedThreadTurn({
     userId: "user_turn_assembly_test",
     workspace: {
       id: "workspace_turn_assembly_test",
       organizationId: "team_turn_assembly_test",
     },
     thread: { id: "thread_turn_assembly_test" },
-    messageContent: "test",
-    messageContentJson: { type: "text", text: "test" },
-    imageParts: [],
-    preflightBilling: [],
-    preflightThinkingSteps: [],
-    agentMessageContent: "test",
-    mentionedSourceIds: [],
-    effectiveMentionedSourceIds: [],
-    selectedSourceIds: [],
-    sourceIds: [],
-    sourceScope: {
-      requestedSourceIds: [],
-      effectiveSourceIds: [],
-      selectedDirectoryIds: [],
-      expandedDescendantSourceIds: [],
-    },
-    skillIds: [],
-    invokedSkillIds: [],
-    selectedSkillIds: [],
-    webAccessEnabled: false,
-    notionTools: {},
-    mcpTools: {},
-    command: null,
-    invocation: null,
-    commandSuccessCriteria: { kind: "none" },
     toolPermissions,
-    effectiveTools: {},
-    runtimeTools: {},
-    turnState: {},
-    timezone: "UTC",
-    enabledSkills: [],
     userMessage: { id: "message_turn_assembly_test", metadata: {} },
     runTraceId: "run_turn_assembly_test",
-    createdUserMessage: true,
-    assistantMessageParentId: null,
-    assistantMessageId: null,
-    profileAlias: "test-profile",
-    modelAlias: "test-model",
-    providerModel: "test-provider-model",
     chatProfile: {
       gatewayConfigId: "gateway_turn_assembly_test",
       configJson: {},
     },
-    llm: undefined,
     llmIdempotencyKey: "llm_turn_assembly_test",
-    agentMode: "continue",
-    agentBaseCheckpoint: null,
     agentRunThreadId: "agent_run_turn_assembly_test",
-    toolApprovalResume: null,
-    traceContinuation: null,
-    isFirstAssistantResponse: true,
-    isFirstAssistantAttempt: true,
-    initialTitle: "Test",
-    failurePersistence: "persist-error-turn",
-    mcpInstallIds: [],
-    persona: null,
-  } as unknown as PreparedThreadTurn;
+  });
 }
 
 async function promptFor(prepared: PreparedThreadTurn) {
@@ -362,7 +316,10 @@ test("agent backend preserves Deep Agents context paths without a sandbox", asyn
   } satisfies BackendProtocolV2;
   const backend = buildAgentBackend({
     filesystemBackend: {
-      citationRegistry: new AgentCitationRegistry({ workspaceId: "workspace", threadId: "thread" }),
+      citationRegistry: new AgentCitationRegistry({
+        workspaceId: "workspace",
+        threadId: "thread",
+      }),
       backend: stubBackend("mounted") as never,
       knowledgeBackend: stubBackend("kb") as never,
       workingFilesBackend: workingBackend as never,
@@ -397,7 +354,10 @@ test("agent backend preserves Deep Agents context paths without a sandbox", asyn
 test("agent backend routes VFS paths while execute stays on sandbox default", async () => {
   const backend = buildAgentBackend({
     filesystemBackend: {
-      citationRegistry: new AgentCitationRegistry({ workspaceId: "workspace", threadId: "thread" }),
+      citationRegistry: new AgentCitationRegistry({
+        workspaceId: "workspace",
+        threadId: "thread",
+      }),
       backend: stubBackend("mounted") as never,
       knowledgeBackend: stubBackend("kb") as never,
       workingFilesBackend: stubBackend("work") as never,
@@ -452,7 +412,10 @@ test("preconstructed agent backend receives concurrent-safe tool call context", 
     [];
   const backend = buildAgentBackend({
     filesystemBackend: {
-      citationRegistry: new AgentCitationRegistry({ workspaceId: "workspace", threadId: "thread" }),
+      citationRegistry: new AgentCitationRegistry({
+        workspaceId: "workspace",
+        threadId: "thread",
+      }),
       backend: stubBackend("mounted") as never,
       knowledgeBackend: stubBackend("kb") as never,
       workingFilesBackend: stubBackend("work") as never,
@@ -515,7 +478,10 @@ test("preconstructed agent backend receives the host invocation signal", async (
   }> = [];
   const backend = buildAgentBackend({
     filesystemBackend: {
-      citationRegistry: new AgentCitationRegistry({ workspaceId: "workspace", threadId: "thread" }),
+      citationRegistry: new AgentCitationRegistry({
+        workspaceId: "workspace",
+        threadId: "thread",
+      }),
       backend: stubBackend("mounted") as never,
       knowledgeBackend: stubBackend("kb") as never,
       workingFilesBackend: stubBackend("work") as never,
@@ -558,7 +524,10 @@ test("turn-scoped sandbox backend forwards one ALS signal to every sandbox file 
   } satisfies BackendProtocolV2;
   const backend = buildAgentBackend({
     filesystemBackend: {
-      citationRegistry: new AgentCitationRegistry({ workspaceId: "workspace", threadId: "thread" }),
+      citationRegistry: new AgentCitationRegistry({
+        workspaceId: "workspace",
+        threadId: "thread",
+      }),
       backend: stubBackend("mounted") as never,
       knowledgeBackend: stubBackend("kb") as never,
       workingFilesBackend: workingBackend as never,
@@ -625,7 +594,10 @@ description: Create a PowerPoint deck in the sandbox.
 Read this before creating slides.`;
   const backend = buildAgentBackend({
     filesystemBackend: {
-      citationRegistry: new AgentCitationRegistry({ workspaceId: "workspace", threadId: "thread" }),
+      citationRegistry: new AgentCitationRegistry({
+        workspaceId: "workspace",
+        threadId: "thread",
+      }),
       backend: stubBackend("mounted") as never,
       knowledgeBackend: stubBackend("kb") as never,
       workingFilesBackend: stubBackend("work") as never,
@@ -994,7 +966,9 @@ describe("skill installed mid-turn", () => {
         ],
       );
       // Its instructions stay readable through the /skills mount.
-      const read = await turnFilesystem.skillsBackend.read("/oversized/SKILL.md");
+      const read = await turnFilesystem.skillsBackend.read(
+        "/oversized/SKILL.md",
+      );
       assert.match(String(read.content), /# notes/u);
     } finally {
       createRuntime.mockRestore();
@@ -1051,7 +1025,11 @@ describe("skill installed mid-turn", () => {
         ...input,
       });
       assert.deepEqual(mounted, { scriptsStageable: false }, label);
-      assert.deepEqual(await turnFilesystem.skillSandboxAssets.plans(), [], label);
+      assert.deepEqual(
+        await turnFilesystem.skillSandboxAssets.plans(),
+        [],
+        label,
+      );
       // Only a bundle that was REJECTED is remembered: commands naming it get
       // the recoverable staging error instead of a bare "No such file".
       assert.deepEqual(
@@ -1068,18 +1046,29 @@ describe("skill installed mid-turn", () => {
 test("PC assembly omits the DB Files route and exposes a durable physical mount", async () => {
   const dbWrite = vi.fn(async (path: string) => ({ path, filesUpdate: null }));
   const localFilesystem = {
-    ...filesystemBackend, localFiles: true,
+    ...filesystemBackend,
+    localFiles: true,
     workingFilesBackend: { ...stubBackend("work"), write: dbWrite } as never,
   };
   const root = "/Users/example/task";
   const sandboxRuntime = {
     backend: stubSandboxBackend(),
-    pathPolicy: { ...SANDBOX_PATH_POLICY_STUB, workspaceRoot: root, defaultCwd: root },
+    pathPolicy: {
+      ...SANDBOX_PATH_POLICY_STUB,
+      workspaceRoot: root,
+      defaultCwd: root,
+    },
   } as never;
-  const mounts = filesystemMountsForPrompt({ filesystemBackend: localFilesystem, sandboxRuntime });
+  const mounts = filesystemMountsForPrompt({
+    filesystemBackend: localFilesystem,
+    sandboxRuntime,
+  });
   assert.ok(!mounts.some((mount) => mount.root === "/files"));
   assert.equal(mounts.find((mount) => mount.root === root)?.persisted, true);
-  const backend = buildAgentBackend({ filesystemBackend: localFilesystem, sandboxRuntime });
+  const backend = buildAgentBackend({
+    filesystemBackend: localFilesystem,
+    sandboxRuntime,
+  });
   await backend.write(`${root}/note.txt`, "local");
   await backend.write("/files/note.txt", "old path");
   assert.equal(dbWrite.mock.calls.length, 0);

@@ -12,6 +12,10 @@ import {
   type ListMarketSkillsResponse,
   type MarketSkillSort,
 } from "@sourceweft/market-contracts";
+import {
+  loadSkillDatabase,
+  skillDatabaseEnabled,
+} from "../../../test/skill-database";
 
 /**
  * The public skill market over HTTP against real PostgreSQL: nobody is signed
@@ -23,7 +27,7 @@ import {
  * category counts have no such handle, so they are read as "what is there
  * beyond everyone else's rows" (see `mineIn`).
  */
-describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
+describe.skipIf(!skillDatabaseEnabled)(
   "public skill market (real PostgreSQL)",
   () => {
     let data: typeof import("@sourceweft/db");
@@ -239,7 +243,10 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       assert.equal(response.status, status, path);
       // No route here knows a caller, so none may vary on one.
       if (status === 200)
-        assert.equal(response.headers.get("cache-control"), "public, max-age=60");
+        assert.equal(
+          response.headers.get("cache-control"),
+          "public, max-age=60",
+        );
       return (await response.json()) as T;
     }
 
@@ -247,7 +254,9 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       const search = new URLSearchParams(
         Object.entries(params).map(([key, value]) => [key, String(value)]),
       );
-      const body = await getJson<ListMarketSkillsResponse>(`/v1/skills?${search}`);
+      const body = await getJson<ListMarketSkillsResponse>(
+        `/v1/skills?${search}`,
+      );
       // Strict: a field the contract does not name must not be on the wire.
       listMarketSkillsResponseSchema.strict().parse(body);
       return body;
@@ -288,7 +297,8 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
             select 1 from skill_definition_categories dc
             join skill_categories c on c.id = dc.category_id
             where dc.skill_id = d.id and c.slug = ${category}::text))`);
-      const rows = (result as unknown as { rows?: Array<{ n: number }> }).rows ??
+      const rows =
+        (result as unknown as { rows?: Array<{ n: number }> }).rows ??
         (result as unknown as Array<{ n: number }>);
       return Number(rows[0]!.n);
     }
@@ -367,13 +377,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
     const builtinSlug = `builtin-${tag}-${word}`;
 
     beforeAll(async () => {
-      if (
-        !new URL(process.env.DATABASE_URL!).pathname.startsWith(
-          "/sourceweft_skillv6_",
-        )
-      )
-        throw new Error("Refusing non-isolated database");
-      data = await import("@sourceweft/db");
+      data = await loadSkillDatabase();
       skills = await import("../repository");
       taxonomy = await import("./taxonomy");
       listing = await import("./listing");
@@ -495,7 +499,8 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
         select d.visibility, d.status, d.source_type, v.status as version_status, v.is_current
         from skill_definitions d join skill_versions v on v.skill_id = d.id
         where d.slug = ${builtinSlug}`);
-      const rows = (result as unknown as { rows?: unknown[] }).rows ??
+      const rows =
+        (result as unknown as { rows?: unknown[] }).rows ??
         (result as unknown as unknown[]);
       assert.deepEqual(rows, [
         {
@@ -511,7 +516,11 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
     test("the list never holds a restricted, builtin, archived, unpublished or hidden skill", async () => {
       for (const sort of ["recommended", "popular", "new", "name"] as const) {
         const slugs = (await walk({ query: word, sort, limit: 100 })).flat();
-        assert.deepEqual(sorted(slugs), sorted(slugsOf(expectedPublic())), sort);
+        assert.deepEqual(
+          sorted(slugs),
+          sorted(slugsOf(expectedPublic())),
+          sort,
+        );
       }
       // Nor by asking for exactly what they are.
       for (const name of [
@@ -527,8 +536,14 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       }
       assert.deepEqual((await list({ query: builtinSlug })).items, []);
       assert.deepEqual(
-        (await list({ query: word, verified: true, category: "documents-office" }))
-          .items.map((item) => item.slug)
+        (
+          await list({
+            query: word,
+            verified: true,
+            category: "documents-office",
+          })
+        ).items
+          .map((item) => item.slug)
           .sort(),
         sorted(
           slugsOf(
@@ -559,7 +574,11 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
           `/v1/skills/${slug}`,
           404,
         );
-        assert.deepEqual(body, { code: "NOT_FOUND", message: "Skill not found" }, slug);
+        assert.deepEqual(
+          body,
+          { code: "NOT_FOUND", message: "Skill not found" },
+          slug,
+        );
       }
     });
 
@@ -638,8 +657,14 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       const cases: Array<
         [Record<string, string | boolean>, (entry: Fixture) => boolean]
       > = [
-        [{ category: "documents-office" }, (e) => e.categories.includes("documents-office")],
-        [{ category: "design-creative" }, (e) => e.categories.includes("design-creative")],
+        [
+          { category: "documents-office" },
+          (e) => e.categories.includes("documents-office"),
+        ],
+        [
+          { category: "design-creative" },
+          (e) => e.categories.includes("design-creative"),
+        ],
         [{ category: "no-such-category" }, () => false],
         [{ verified: true }, (e) => e.verified],
         [{ verified: false }, (e) => !e.verified],
@@ -647,11 +672,18 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
         [{ featured: false }, (e) => !e.featured],
         // Each flag on its own terms, so together they narrow.
         [{ featured: true, verified: false }, (e) => e.featured && !e.verified],
-        [{ featured: false, verified: false }, (e) => !e.featured && !e.verified],
+        [
+          { featured: false, verified: false },
+          (e) => !e.featured && !e.verified,
+        ],
         [{ capability: "executable" }, (e) => e.capability === "executable"],
         [{ capability: "prompt-only" }, (e) => e.capability === "prompt-only"],
         [
-          { category: "documents-office", verified: false, capability: "prompt-only" },
+          {
+            category: "documents-office",
+            verified: false,
+            capability: "prompt-only",
+          },
           (e) =>
             e.categories.includes("documents-office") &&
             !e.verified &&
@@ -685,14 +717,20 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
           name: "percent",
           description: `Gives 100% of the a_b it has sq${tag}`,
         }),
-        fixture({ name: "plain", description: `Nothing special 100 axb sq${tag}` }),
+        fixture({
+          name: "plain",
+          description: `Nothing special 100 axb sq${tag}`,
+        }),
       ];
       await insertFixtures(entries);
       const find = async (query: string) =>
         sorted((await list({ query })).items.map((item) => item.slug));
       const [formfiller, percent, plain] = entries.map((entry) => entry.slug);
 
-      assert.deepEqual(await find(`sq${tag}`), sorted([formfiller!, percent!, plain!]));
+      assert.deepEqual(
+        await find(`sq${tag}`),
+        sorted([formfiller!, percent!, plain!]),
+      );
       // Words from the description and the display name, in any order, any case.
       assert.deepEqual(await find(`PDF, helper sq${tag}`), [formfiller]);
       // One word from the slug, one from the description.
@@ -751,7 +789,10 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       const page = await list({ query: `${word} p07` });
       assert.equal(page.items[0]!.featured, true);
       assert.equal((await detail(entry.slug)).skill.featured, true);
-      assert.equal((await detail(bySlugName("p01").slug)).skill.featured, false);
+      assert.equal(
+        (await detail(bySlugName("p01").slug)).skill.featured,
+        false,
+      );
     });
 
     test("featured= must be a boolean", async () => {
@@ -870,7 +911,9 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
           contentHash: data.skillVersionFiles.contentHash,
         })
         .from(data.skillVersionFiles)
-        .where(sql`${data.skillVersionFiles.skillVersionId} = ${entry.versionId}`);
+        .where(
+          sql`${data.skillVersionFiles.skillVersionId} = ${entry.versionId}`,
+        );
       assert.equal(stored.length, 3);
       const byPath = (a: { path: string }, b: { path: string }) =>
         a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
@@ -933,7 +976,10 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
     });
 
     test("SKILL.md kept as an inline file row is served; a version with no file rows lists its manifest", async () => {
-      const inline = fixture({ name: "inline", description: `detail iq${tag}` });
+      const inline = fixture({
+        name: "inline",
+        description: `detail iq${tag}`,
+      });
       // A skill that is its whole repository.
       const bare = fixture({
         name: "bare",
@@ -952,10 +998,12 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
           listedAt: new Date(),
         })),
       );
-      await data.db.insert(data.skillVersions).values([
-        versionRow(inline, { skillMd: null, storageType: "db_text" }),
-        versionRow(bare),
-      ]);
+      await data.db
+        .insert(data.skillVersions)
+        .values([
+          versionRow(inline, { skillMd: null, storageType: "db_text" }),
+          versionRow(bare),
+        ]);
       await data.db.insert(data.skillVersionFiles).values({
         id: randomUUID(),
         skillVersionId: inline.versionId,

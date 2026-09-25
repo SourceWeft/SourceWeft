@@ -11,21 +11,12 @@
  */
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import {
-  BaseChatModel,
-  type BaseChatModelParams,
-} from "@langchain/core/language_models/chat_models";
-import {
-  AIMessage,
-  HumanMessage,
-  ToolMessage,
-  type BaseMessage,
-} from "@langchain/core/messages";
-import type { ChatResult } from "@langchain/core/outputs";
+import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
 import { tool } from "@langchain/core/tools";
 import { MemorySaver } from "@langchain/langgraph";
 import { createDeepAgent, StateBackend, type SubAgent } from "deepagents";
 import { z } from "zod";
+import { ScriptedChatModel } from "../../../../test/chat-model";
 import {
   isSubagentNamespace,
   recordToolCallNamespace,
@@ -42,31 +33,13 @@ const ECHO_MARKER = "ECHO_SUBAGENT_MARKER";
  * - the sub-agent's system prompt (carrying ECHO_MARKER) is present → call `echo`;
  * - otherwise (main agent, first turn) → delegate via `task`.
  */
-class ScriptedModel extends BaseChatModel {
-  private taskCounter = 0;
-  private echoCounter = 0;
-
-  constructor(params: BaseChatModelParams = {}) {
-    super(params);
-  }
-
-  _llmType() {
-    return "scripted";
-  }
-
-  getName() {
-    return "ChatScripted";
-  }
-
-  bindTools() {
-    return this;
-  }
-
-  async _generate(messages: BaseMessage[]): Promise<ChatResult> {
+function scriptedModel() {
+  let taskCounter = 0;
+  let echoCounter = 0;
+  return new ScriptedChatModel((messages) => {
     const last = messages.at(-1);
     if (last instanceof ToolMessage) {
-      const message = new AIMessage({ content: "done" });
-      return { generations: [{ text: "done", message }] };
+      return "done";
     }
 
     const inSubagent = messages.some((message) => {
@@ -85,26 +58,25 @@ class ScriptedModel extends BaseChatModel {
     });
 
     if (inSubagent) {
-      this.echoCounter += 1;
-      const message = new AIMessage({
+      echoCounter += 1;
+      return new AIMessage({
         content: "",
         tool_calls: [
           {
-            id: `echo-${this.echoCounter}`,
+            id: `echo-${echoCounter}`,
             name: "echo",
             args: { text: "hi" },
           },
         ],
       });
-      return { generations: [{ text: "", message }] };
     }
 
-    this.taskCounter += 1;
-    const message = new AIMessage({
+    taskCounter += 1;
+    return new AIMessage({
       content: "",
       tool_calls: [
         {
-          id: `task-${this.taskCounter}`,
+          id: `task-${taskCounter}`,
           name: "task",
           args: {
             description: "echo something back",
@@ -113,8 +85,7 @@ class ScriptedModel extends BaseChatModel {
         },
       ],
     });
-    return { generations: [{ text: "", message }] };
-  }
+  });
 }
 
 const echoTool = tool(async ({ text }: { text: string }) => `echoed: ${text}`, {
@@ -134,7 +105,7 @@ function buildEchoSubagent(): SubAgent {
 }
 
 test("subgraphs:true tags a delegate's tool events with a sub-agent namespace", async () => {
-  const model = new ScriptedModel();
+  const model = scriptedModel();
   const agent = createDeepAgent({
     model: model as never,
     tools: [],
@@ -144,7 +115,10 @@ test("subgraphs:true tags a delegate's tool events with a sub-agent namespace", 
 
   const stream = (await (
     agent as never as {
-      stream: (input: unknown, config: unknown) => Promise<AsyncIterable<unknown>>;
+      stream: (
+        input: unknown,
+        config: unknown,
+      ) => Promise<AsyncIterable<unknown>>;
     }
   ).stream(
     { messages: [new HumanMessage("please echo")] },

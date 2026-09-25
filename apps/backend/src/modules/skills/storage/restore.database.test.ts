@@ -2,6 +2,10 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { sha256 } from "../hash";
+import {
+  loadSkillDatabase,
+  skillDatabaseEnabled,
+} from "../../../test/skill-database";
 
 // PostgreSQL is real; object storage is a map in which a missing key fails the
 // way S3 does, so the cache-miss path is the one under test.
@@ -26,7 +30,7 @@ vi.mock("../../sources/storage", () => ({
  * again from the pinned commit, and is only written back when every file hashes
  * to what ingest recorded.
  */
-describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
+describe.skipIf(!skillDatabaseEnabled)(
   "restoring a skill version from its source (real PostgreSQL)",
   () => {
     let data: typeof import("@sourceweft/db");
@@ -38,13 +42,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
     const script = "print('hello')\n";
 
     beforeAll(async () => {
-      if (
-        !new URL(process.env.DATABASE_URL!).pathname.startsWith(
-          "/sourceweft_skillv6_",
-        )
-      )
-        throw new Error("Refusing non-isolated database");
-      data = await import("@sourceweft/db");
+      data = await loadSkillDatabase();
       repo = await import("../registry/repository");
       restore = await import("./restore");
     });

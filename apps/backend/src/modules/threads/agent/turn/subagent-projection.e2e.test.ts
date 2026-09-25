@@ -9,20 +9,16 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import {
-  BaseChatModel,
-  type BaseChatModelParams,
-} from "@langchain/core/language_models/chat_models";
-import {
   AIMessage,
   HumanMessage,
   ToolMessage,
   type BaseMessage,
 } from "@langchain/core/messages";
-import type { ChatResult } from "@langchain/core/outputs";
 import { tool } from "@langchain/core/tools";
 import { MemorySaver } from "@langchain/langgraph";
 import { createDeepAgent, type SubAgent } from "deepagents";
 import { z } from "zod";
+import { ScriptedChatModel } from "../../../../test/chat-model";
 import type { PreparedThreadTurn } from "../..";
 import { isSubagentNamespace } from "./subagent-namespace";
 import {
@@ -39,26 +35,13 @@ import { adaptToolsEvent } from "./v3-protocol";
 const ECHO_MARKER = "ECHO_SUBAGENT_MARKER";
 
 /** Main agent delegates via `task`; the delegate calls `echo`, then answers. */
-class ScriptedModel extends BaseChatModel {
-  private taskCounter = 0;
-  private echoCounter = 0;
-  constructor(params: BaseChatModelParams = {}) {
-    super(params);
-  }
-  _llmType() {
-    return "scripted";
-  }
-  getName() {
-    return "ChatScripted";
-  }
-  bindTools() {
-    return this;
-  }
-  async _generate(messages: BaseMessage[]): Promise<ChatResult> {
+function scriptedModel() {
+  let taskCounter = 0;
+  let echoCounter = 0;
+  return new ScriptedChatModel((messages) => {
     const last = messages.at(-1);
     if (last instanceof ToolMessage) {
-      const message = new AIMessage({ content: "done" });
-      return { generations: [{ text: "done", message }] };
+      return "done";
     }
     const inSubagent = messages.some((message) => {
       const content = message.content;
@@ -75,25 +58,24 @@ class ScriptedModel extends BaseChatModel {
       );
     });
     if (inSubagent) {
-      this.echoCounter += 1;
-      const message = new AIMessage({
+      echoCounter += 1;
+      return new AIMessage({
         content: "",
         tool_calls: [
           {
-            id: `echo-${this.echoCounter}`,
+            id: `echo-${echoCounter}`,
             name: "echo",
             args: { text: "hi" },
           },
         ],
       });
-      return { generations: [{ text: "", message }] };
     }
-    this.taskCounter += 1;
-    const message = new AIMessage({
+    taskCounter += 1;
+    return new AIMessage({
       content: "",
       tool_calls: [
         {
-          id: `task-${this.taskCounter}`,
+          id: `task-${taskCounter}`,
           name: "task",
           args: {
             description: "echo something back. Then stop.",
@@ -102,30 +84,20 @@ class ScriptedModel extends BaseChatModel {
         },
       ],
     });
-    return { generations: [{ text: "", message }] };
-  }
+  });
 }
 
 /** Records every message list it is asked to complete, answers "ok". */
-class RecordingModel extends BaseChatModel {
-  readonly seen: BaseMessage[][] = [];
-  constructor(params: BaseChatModelParams = {}) {
-    super(params);
-  }
-  _llmType() {
-    return "recording";
-  }
-  getName() {
-    return "ChatRecording";
-  }
-  bindTools() {
-    return this;
-  }
-  async _generate(messages: BaseMessage[]): Promise<ChatResult> {
-    this.seen.push([...messages]);
-    const message = new AIMessage({ content: "ok" });
-    return { generations: [{ text: "ok", message }] };
-  }
+function recordingModel() {
+  const seen: BaseMessage[][] = [];
+  const model = new ScriptedChatModel(
+    (messages) => {
+      seen.push([...messages]);
+      return "ok";
+    },
+    { name: "recording" },
+  );
+  return { model, seen };
 }
 
 const echoTool = tool(async ({ text }: { text: string }) => `echoed: ${text}`, {
@@ -152,7 +124,7 @@ type V3Event = {
 test("a task delegate's run is projected into a child thread the persona can continue", async () => {
   const saver = new MemorySaver();
   const parentAgent = createDeepAgent({
-    model: new ScriptedModel() as never,
+    model: scriptedModel() as never,
     tools: [],
     checkpointer: saver,
     subagents: [buildEchoSubagent()],
@@ -277,9 +249,9 @@ test("a task delegate's run is projected into a child thread the persona can con
 
   // The child thread's own agent (a different graph on the same checkpointer,
   // as the persona thread's turn builds) continues from the projected history.
-  const recording = new RecordingModel();
+  const recording = recordingModel();
   const childAgent = createDeepAgent({
-    model: recording as never,
+    model: recording.model as never,
     tools: [],
     checkpointer: saver,
   } as never);

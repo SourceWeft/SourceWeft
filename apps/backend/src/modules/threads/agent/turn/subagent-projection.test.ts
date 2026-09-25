@@ -3,6 +3,7 @@ import { test } from "vitest";
 import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
 import type { DeepAgentTurnEvent } from "./events";
 import type { PreparedThreadTurn, ToolCallTrace } from "../..";
+import { createPreparedThreadTurn } from "../../../../test/prepared-turn";
 import {
   attachChildThreadToTaskOutput,
   createSubagentProjector,
@@ -187,7 +188,7 @@ test("a dangling tool call gets a synthesized result and a missing answer gets t
 });
 
 function createPrepared(): PreparedThreadTurn {
-  return {
+  return createPreparedThreadTurn({
     userId: "user_1",
     modelAlias: "chat-default",
     workspace: { id: "workspace_1", organizationId: "team_1" },
@@ -199,7 +200,7 @@ function createPrepared(): PreparedThreadTurn {
       parentThreadId: null,
       modelSettings: {},
     },
-  } as unknown as PreparedThreadTurn;
+  });
 }
 
 test("the projector opens a child thread per task and persists its transcript once", async () => {

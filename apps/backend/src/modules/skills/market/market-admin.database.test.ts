@@ -7,18 +7,18 @@ import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import { eq, inArray, sql } from "drizzle-orm";
 import { sha256 } from "../hash";
 import type { ClaimGitHub } from "./claims";
+import {
+  loadSkillDatabase,
+  skillDatabaseEnabled,
+} from "../../../test/skill-database";
 
 // PostgreSQL is real; the object store under `../storage` is a map.
 const store = vi.hoisted(() => ({ objects: new Map<string, Buffer>() }));
-vi.mock("../../sources/storage", () => ({
-  getContentStorageBucketName: () => "bucket",
-  sandboxAssetObjectExists: async ({ key }: { key: string }) =>
-    store.objects.has(key),
-  uploadFileObject: async (input: { key: string; body: Buffer }) => {
-    store.objects.set(input.key, input.body);
-    return { bucket: "bucket", key: input.key };
-  },
-}));
+vi.mock("../../sources/storage", async () =>
+  (await import("../../../test/fake-content-storage")).fakeContentStorage(
+    store,
+  ),
+);
 
 /**
  * The market admin's side against real PostgreSQL (skill-marketplace-plan
@@ -32,7 +32,7 @@ vi.mock("../../sources/storage", () => ({
  * Every skill, repository, user and event here is this file's own; the
  * database is shared with other suites and a live e2e stack.
  */
-describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
+describe.skipIf(!skillDatabaseEnabled)(
   "skill market admin (real PostgreSQL)",
   () => {
     let data: typeof import("@sourceweft/db");
@@ -55,13 +55,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
     let admin: string;
 
     beforeAll(async () => {
-      if (
-        !new URL(process.env.DATABASE_URL!).pathname.startsWith(
-          "/sourceweft_skillv6_",
-        )
-      )
-        throw new Error("Refusing non-isolated database");
-      data = await import("@sourceweft/db");
+      data = await loadSkillDatabase();
       repo = await import("../registry/repository");
       listing = await import("./listing");
       autoList = await import("./auto-list");
@@ -401,23 +395,21 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
         (await listing.listSkillCategorySlugs([skillId])).get(skillId) ?? [];
       const inferredSlugs = ["documents-office"];
       for (const skill of [picked, inferred])
-        await data.db
-          .insert(data.skillVersionAnalysis)
-          .values({
-            skillVersionId: skill.skillVersionId,
-            requestId: randomUUID(),
+        await data.db.insert(data.skillVersionAnalysis).values({
+          skillVersionId: skill.skillVersionId,
+          requestId: randomUUID(),
+          status: "ready",
+          promptVersion: "2",
+          taxonomyVersion: "1",
+          modelConfigurationKey: "test-config",
+          classification: {
             status: "ready",
-            promptVersion: "2",
-            taxonomyVersion: "1",
-            modelConfigurationKey: "test-config",
-            classification: {
-              status: "ready",
-              primary: "documents-office",
-              secondary: null,
-              rationale: "Creates presentations",
-              evidence: ["PowerPoint"],
-            },
-          });
+            primary: "documents-office",
+            secondary: null,
+            rationale: "Creates presentations",
+            evidence: ["PowerPoint"],
+          },
+        });
       expect(
         await listing.reinferSkillCategories({
           skillId: "no-such",
@@ -475,23 +467,21 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
           actorUserId: admin,
         }),
       ).rejects.toMatchObject({ code: "SKILL_ANALYSIS_REQUIRED" });
-      await data.db
-        .insert(data.skillVersionAnalysis)
-        .values({
-          skillVersionId: skill.skillVersionId,
-          requestId: randomUUID(),
+      await data.db.insert(data.skillVersionAnalysis).values({
+        skillVersionId: skill.skillVersionId,
+        requestId: randomUUID(),
+        status: "ready",
+        promptVersion: "2",
+        taxonomyVersion: "1",
+        modelConfigurationKey: "test-config",
+        classification: {
           status: "ready",
-          promptVersion: "2",
-          taxonomyVersion: "1",
-          modelConfigurationKey: "test-config",
-          classification: {
-            status: "ready",
-            primary: "ai-agents",
-            secondary: null,
-            rationale: "Agent orchestration",
-            evidence: ["agents"],
-          },
-        });
+          primary: "ai-agents",
+          secondary: null,
+          rationale: "Agent orchestration",
+          evidence: ["agents"],
+        },
+      });
       await data.db.insert(data.skillVersionOverviews).values({
         skillVersionId: skill.skillVersionId,
         locale: "en",

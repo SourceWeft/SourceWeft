@@ -1,10 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { eq } from "drizzle-orm";
+import {
+  loadSkillDatabase,
+  seedSkillDefinition,
+  skillDatabaseEnabled,
+} from "../../test/skill-database";
 
 // "Update available" is a join in the installed-skills query — which version is
 // current, and whether it is published, is only provable against PostgreSQL.
-describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
+describe.skipIf(!skillDatabaseEnabled)(
   "installed skill update signal against real PostgreSQL",
   () => {
     let data: typeof import("@sourceweft/db");
@@ -16,18 +21,11 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
     const definitionIds: string[] = [];
 
     async function seedDefinition(slug: string) {
-      const skillId = randomUUID();
-      definitionIds.push(skillId);
-      await data.db.insert(data.skillDefinitions).values({
-        id: skillId,
-        sourceType: "registry_github",
+      const skillId = await seedSkillDefinition(data, {
         slug,
-        displayName: slug,
-        description: "fixture",
-        visibility: "public",
-        status: "active",
         ownerUserId: "update-signal-owner",
       });
+      definitionIds.push(skillId);
       return skillId;
     }
 
@@ -84,13 +82,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
     }
 
     beforeAll(async () => {
-      if (
-        !new URL(process.env.DATABASE_URL!).pathname.startsWith(
-          "/sourceweft_skillv6_",
-        )
-      )
-        throw new Error("Refusing non-isolated database");
-      data = await import("@sourceweft/db");
+      data = await loadSkillDatabase();
       skills = await import("./repository");
       await data.db.insert(data.workspaces).values({
         id: scope.workspaceId,

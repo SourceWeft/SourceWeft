@@ -4,16 +4,12 @@ import {
   ToolMessage,
   type BaseMessage,
 } from "@langchain/core/messages";
-import {
-  BaseChatModel,
-  type BaseChatModelParams,
-} from "@langchain/core/language_models/chat_models";
-import type { ChatResult } from "@langchain/core/outputs";
 import { Command, MemorySaver, Overwrite } from "@langchain/langgraph";
 import { CompositeBackend, StateBackend, createDeepAgent } from "deepagents";
 import { tool } from "langchain";
 import { test } from "vitest";
 import { z } from "zod";
+import { ScriptedChatModel } from "../../../test/chat-model";
 import { SelectedSkillsBackend } from "../../skills/backend";
 import { inlineSkillContent } from "../../skills/file-content";
 import type { EnabledSkillDescriptor } from "../../skills/types";
@@ -49,53 +45,36 @@ function skill(name: string): EnabledSkillDescriptor {
   };
 }
 
-class ScriptedModel extends BaseChatModel {
-  prompts: string[] = [];
-  step = 0;
-
-  constructor(params: BaseChatModelParams = {}) {
-    super(params);
-  }
-  _llmType() {
-    return "scripted";
-  }
-  bindTools() {
-    return this;
-  }
-  async _generate(messages: BaseMessage[]): Promise<ChatResult> {
-    this.prompts.push(
+async function run(initial: EnabledSkillDescriptor[]) {
+  // Captures the system prompt of every call: install, then read, then done.
+  const prompts: string[] = [];
+  let step = 0;
+  const model = new ScriptedChatModel((messages) => {
+    prompts.push(
       messages
         .filter((message) => message.getType() === "system")
         .map((message) => String(message.content))
         .join("\n"),
     );
-    this.step += 1;
-    const message =
-      this.step === 1
+    step += 1;
+    return step === 1
+      ? new AIMessage({
+          content: "",
+          tool_calls: [{ id: "call-install", name: "install_skill", args: {} }],
+        })
+      : step === 2
         ? new AIMessage({
             content: "",
             tool_calls: [
-              { id: "call-install", name: "install_skill", args: {} },
+              {
+                id: "call-read",
+                name: "read_file",
+                args: { file_path: "/skills/new-skill/SKILL.md" },
+              },
             ],
           })
-        : this.step === 2
-          ? new AIMessage({
-              content: "",
-              tool_calls: [
-                {
-                  id: "call-read",
-                  name: "read_file",
-                  args: { file_path: "/skills/new-skill/SKILL.md" },
-                },
-              ],
-            })
-          : new AIMessage("done");
-    return { generations: [{ text: String(message.content), message }] };
-  }
-}
-
-async function run(initial: EnabledSkillDescriptor[]) {
-  const model = new ScriptedModel();
+        : new AIMessage("done");
+  });
   const skillsBackend = new SelectedSkillsBackend([...initial]);
   const installed = skill("new-skill");
   const installSkill = tool(
@@ -138,7 +117,7 @@ async function run(initial: EnabledSkillDescriptor[]) {
       (message as ToolMessage).tool_call_id === "call-read",
   );
   return {
-    prompts: model.prompts,
+    prompts,
     readResult: JSON.stringify(readResult?.content ?? null),
   };
 }

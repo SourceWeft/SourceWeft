@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { eq, inArray } from "drizzle-orm";
+import {
+  loadSkillDatabase,
+  skillDatabaseEnabled,
+} from "../../../test/skill-database";
 
 /**
  * Sandbox run statistics against real PostgreSQL: that only registry skills
@@ -10,7 +14,7 @@ import { eq, inArray } from "drizzle-orm";
  * pruned. Every skill here is this file's own; the refresh itself is the
  * scheduler's global pass and only ever makes stats rows truer.
  */
-describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
+describe.skipIf(!skillDatabaseEnabled)(
   "skill run stats (real PostgreSQL)",
   () => {
     let data: typeof import("@sourceweft/db");
@@ -19,13 +23,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
     const skillIds: string[] = [];
 
     beforeAll(async () => {
-      if (
-        !new URL(process.env.DATABASE_URL!).pathname.startsWith(
-          "/sourceweft_skillv6_",
-        )
-      )
-        throw new Error("Refusing non-isolated database");
-      data = await import("@sourceweft/db");
+      data = await loadSkillDatabase();
       runStats = await import("./run-stats");
       // The module graph behind the sandbox package is slow to load cold.
     }, 120_000);
