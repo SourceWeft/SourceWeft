@@ -112,6 +112,7 @@ export function DashboardChatThreadPageView({
   handleMcpSelectionChange,
   handleModelSelect,
   handleRefreshLatest,
+  handleEndQuestions,
   handleResumeToolConfirmation,
   handleRestartFromMessage,
   handleSendMessage,
@@ -389,6 +390,7 @@ export function DashboardChatThreadPageView({
                 persistActiveSourceIds(activeSourceIds.filter((x) => x !== id))
               }
               onRefreshLatest={handleRefreshLatest}
+              onEndQuestions={handleEndQuestions}
               onResumeToolConfirmation={handleResumeToolConfirmation}
               onRestartFromMessage={handleRestartFromMessage}
               onSendMessage={handleSendMessage}

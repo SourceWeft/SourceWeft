@@ -23,6 +23,7 @@ import {
   isToolCallActivelyRunning,
   mergeToolConfirmationResolutions,
   orderToolConfirmationResolutions,
+  resolveQuestionEndTarget,
   shouldLockComposerForApproval,
   shouldLockComposerForRun,
   type ToolConfirmationItem,
@@ -1347,5 +1348,48 @@ test("a turn with no outstanding question exposes none", () => {
       messageGroups: questionGroup(version),
     }),
     [],
+  );
+});
+
+test("End ends a parked question on the server, but stops a run that is still active", () => {
+  const item = {
+    question: {
+      type: "user_question_request" as const,
+      schemaVersion: 1 as const,
+      id: "question-1",
+      toolCallId: "call-ask",
+      questions: [{ question: "Cats or dogs?", type: "text" as const }],
+    },
+    assistantMessageId: "assistant-1",
+    messageId: "assistant-1",
+    threadRunId: "run-1",
+    toolCall: {
+      id: "call-ask",
+      tool: "askUser",
+      input: {},
+      output: null,
+      latencyMs: 0,
+      status: "approval_requested" as const,
+      error: null,
+    },
+  };
+
+  assert.deepEqual(
+    resolveQuestionEndTarget({ activeThreadRun: null, items: [item] }),
+    { threadRunId: "run-1", assistantMessageId: "assistant-1" },
+  );
+  assert.equal(
+    resolveQuestionEndTarget({
+      activeThreadRun: { id: "run-2", status: "running" },
+      items: [item],
+    }),
+    null,
+  );
+  assert.equal(
+    resolveQuestionEndTarget({
+      activeThreadRun: null,
+      items: [{ ...item, threadRunId: null }],
+    }),
+    null,
   );
 });

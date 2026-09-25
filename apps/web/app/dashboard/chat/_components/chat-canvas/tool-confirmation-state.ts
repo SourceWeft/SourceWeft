@@ -229,6 +229,28 @@ export function getPendingUserQuestionItems(input: {
   return [];
 }
 
+/**
+ * The parked turn End should end on the server, or null when End must stop a
+ * run instead. A question pause leaves no active run (the parked run is
+ * recorded completed), so ending means rewriting the parked turn; a question
+ * seen while its run is still streaming is ended by stopping that run.
+ */
+export function resolveQuestionEndTarget(input: {
+  activeThreadRun: unknown;
+  items: UserQuestionItem[];
+}): { threadRunId: string; assistantMessageId: string } | null {
+  if (input.activeThreadRun) {
+    return null;
+  }
+  const parked = input.items.find((item) => item.threadRunId);
+  return parked?.threadRunId
+    ? {
+        threadRunId: parked.threadRunId,
+        assistantMessageId: parked.assistantMessageId,
+      }
+    : null;
+}
+
 function getPendingConfirmationItemsForVersion(
   version: MessageVersion,
 ): ToolConfirmationItem[] {

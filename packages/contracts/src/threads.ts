@@ -163,6 +163,16 @@ export const createThreadRequestSchema = z.object({
   personaId: z.string().trim().min(1).max(128).optional(),
 });
 
+// End the turn a run parked on an `askUser` question, without continuing it.
+export const endThreadQuestionsRequestSchema = z.object({
+  threadRunId: z.string().trim().min(1).max(128),
+  assistantMessageId: z.string().trim().min(1).max(256),
+});
+
+export const endThreadQuestionsResponseSchema = z.object({
+  ended: z.boolean(),
+});
+
 export const createThreadResponseSchema = z.object({
   thread: threadWithChatPreferencesSchema,
 });
@@ -249,6 +259,12 @@ export type ThreadModelSettingsPatch = z.infer<
   typeof threadModelSettingsPatchSchema
 >;
 export type CreateThreadRequest = z.infer<typeof createThreadRequestSchema>;
+export type EndThreadQuestionsRequest = z.infer<
+  typeof endThreadQuestionsRequestSchema
+>;
+export type EndThreadQuestionsResponse = z.infer<
+  typeof endThreadQuestionsResponseSchema
+>;
 export type CreateThreadResponse = z.infer<typeof createThreadResponseSchema>;
 export type GetThreadResponse = z.infer<typeof getThreadResponseSchema>;
 export type DeleteThreadResponse = z.infer<typeof deleteThreadResponseSchema>;

@@ -24,6 +24,7 @@ export const contentThreadStreamService = new ContentThreadStreamService(
 
 // Durable run
 export { durableChatRunService } from "./durable/service";
+export { endPendingQuestions } from "./durable/end-question";
 export { processThreadChatRunJob } from "./durable/runner";
 export { findChatThreadRunById } from "./durable/repository";
 export { getRunApprovalPauseState } from "./durable/service";

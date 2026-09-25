@@ -40,6 +40,7 @@ import {
   getPendingToolConfirmationItems,
   getToolConfirmationItemsForRun,
   getPendingUserQuestionItems,
+  resolveQuestionEndTarget,
   hasLiveToolConfirmationSignalForRun,
   mergeToolConfirmationResolutions,
   hasActivelyRunningToolWork,
@@ -174,6 +175,7 @@ export function ChatCanvas({
   onWorkfileClick,
   onRestartFromMessage,
   onRefreshLatest,
+  onEndQuestions,
   onResumeToolConfirmation,
   onSendMessage,
   onStopStreaming,
@@ -259,6 +261,11 @@ export function ChatCanvas({
     assistantMessageId: string;
     branchIndex: number;
   }) => void;
+  /** End the turn parked on the pending question(s), without continuing it. */
+  onEndQuestions?: (input: {
+    threadRunId: string;
+    assistantMessageId: string;
+  }) => Promise<void>;
   onResumeToolConfirmation?: (input: {
     approvalThreadRunId: string | null;
     assistantMessageId: string;
@@ -890,17 +897,25 @@ export function ChatCanvas({
             }
             return next;
           });
-          onStopStreaming?.();
-          if (!onReloadMessages) {
-            return;
-          }
-          void Promise.resolve(onReloadMessages()).catch((error) => {
-            const message =
-              error instanceof Error
-                ? error.message
-                : t("errors.reloadFailed");
-            toast.error(message);
+          // A question pause leaves no run to stop: end the parked turn on the
+          // server so it stays ended. A run still streaming is stopped instead.
+          const target = resolveQuestionEndTarget({
+            activeThreadRun,
+            items: pendingQuestionItems,
           });
+          const ended =
+            target && onEndQuestions
+              ? onEndQuestions(target)
+              : onStopStreaming?.();
+          void Promise.resolve(ended)
+            .then(() => onReloadMessages?.())
+            .catch((error) => {
+              const message =
+                error instanceof Error
+                  ? error.message
+                  : t("errors.reloadFailed");
+              toast.error(message);
+            });
         }}
       />
 

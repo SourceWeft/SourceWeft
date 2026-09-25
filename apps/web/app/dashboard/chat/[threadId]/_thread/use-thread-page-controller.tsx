@@ -1323,6 +1323,18 @@ export function useThreadPageController({
     void runToolConfirmationResume(next.runnable);
   }, [isStreaming, runToolConfirmationResume]);
 
+  // End on a waiting question: record it unanswered and stop the turn on the
+  // server, so it stays ended after a reload (Cancel answers and continues).
+  const handleEndQuestions = useCallback(
+    async (input: { threadRunId: string; assistantMessageId: string }) => {
+      if (!workspaceId) {
+        return;
+      }
+      await contentClient.endThreadQuestions(workspaceId, threadId, input);
+    },
+    [threadId, workspaceId],
+  );
+
   const handleRestartFromMessage = useCallback(
     (input: {
       groupId: string;
@@ -1442,6 +1454,7 @@ export function useThreadPageController({
     handleMcpSelectionChange,
     handleModelSelect,
     handleRefreshLatest,
+    handleEndQuestions,
     handleResumeToolConfirmation,
     handleRestartFromMessage,
     handleSendMessage,

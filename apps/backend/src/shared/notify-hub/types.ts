@@ -14,6 +14,8 @@ export const THREAD_EVENTS_CHANNEL = "thread_events";
 
 export type ThreadEventKind =
   | "message_created"
+  // An existing message changed outside a run (e.g. a parked question ended).
+  | "message_updated"
   | "run_created"
   | "run_started"
   | "run_waiting_approval"
