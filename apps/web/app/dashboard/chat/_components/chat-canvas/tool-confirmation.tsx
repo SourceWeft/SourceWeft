@@ -321,9 +321,9 @@ function ToolConfirmationPanel({
     >
       <ConfirmationRequest>
         <ConfirmationTitle className="block min-h-0 overflow-y-auto overscroll-contain pr-1 [overflow-wrap:anywhere]">
-          <span className="flex items-start gap-2">
+          <div className="flex items-start gap-2">
             <ShieldAlertIcon className="mt-0.5 size-4 shrink-0 text-amber-600" />
-            <span className="min-w-0">
+            <div className="min-w-0">
               <span className="block text-sm font-medium text-foreground">
                 {title}
               </span>
@@ -380,8 +380,8 @@ function ToolConfirmationPanel({
                   </pre>
                 </details>
               ) : null}
-            </span>
-          </span>
+            </div>
+          </div>
         </ConfirmationTitle>
       </ConfirmationRequest>
       <ConfirmationAccepted>
