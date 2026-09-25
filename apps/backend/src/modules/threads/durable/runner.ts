@@ -1686,9 +1686,14 @@ export async function processThreadChatRunJob(
     stopLocalMonitor();
     abortController.abort(reason);
   };
+  // Set once this worker starts committing its own terminal state. From then on
+  // the run is expected to leave `running`, so the cancel monitors must not read
+  // that as lost ownership and abort the commit's tail; a cancel racing the
+  // commit is settled by the commit's compare-and-set instead.
+  let terminalCommitStarted = false;
   const checkRunOwnership = async () => {
     const error = await durableChatRunService.getRunStopError(run);
-    if (error) {
+    if (error && !terminalCommitStarted) {
       abortTurn(error);
       throw error;
     }
@@ -1901,6 +1906,8 @@ export async function processThreadChatRunJob(
     const isWaitingForApproval =
       terminalStatus === "completed" &&
       finishReason === TOOL_CONFIRMATION_FINISH_REASON;
+    terminalCommitStarted = true;
+    clearInterval(cancelPoll);
     const finished = isWaitingForApproval
       ? await durableChatRunService.markWaitingForApproval({
           run,

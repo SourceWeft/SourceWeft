@@ -435,6 +435,43 @@ test("worker completion commits before a failing Redis finish delivery and remai
   );
 });
 
+test("a cancel check landing after the worker's own completion commit does not abort it", async () => {
+  // The worker's cancel subscription (or 2s poll) can fire in the gap between
+  // its terminal commit and its cleanup; the run then reads as no longer
+  // running, which must not be taken as lost ownership.
+  const { logger } = await import("../../../shared/logger");
+  const info = vi.spyOn(logger, "info");
+  let onCancel: (() => void) | null = null;
+  vi.spyOn(streams.chatRunStreamManager, "subscribeCancel").mockImplementation(
+    async (_runId, callback) => {
+      onCancel = callback;
+      return async () => {};
+    },
+  );
+  mocked.stream.mockImplementation(async function* () {
+    yield 'data: {"type":"finish"}\n\n';
+  });
+  vi.spyOn(streams.chatRunStreamManager, "appendEvent").mockImplementation(
+    async () => {
+      assert.equal((await current())?.status, "completed");
+      onCancel?.();
+      // Let the ownership check read the committed row before continuing.
+      await delay(100);
+      return 1;
+    },
+  );
+
+  const result = await runner.processThreadChatRunJob(jobPayload());
+
+  assert.equal(result.status, "completed");
+  assert.equal((await current())?.status, "completed");
+  assert.equal(
+    info.mock.calls.some(([message]) => message === "Stopping chat run worker"),
+    false,
+  );
+  info.mockRestore();
+});
+
 const jobPayload = () => ({
   runId: run.id,
   teamId,
