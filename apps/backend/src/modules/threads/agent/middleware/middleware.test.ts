@@ -3,7 +3,8 @@ import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
 import { AGENT_TOOL_NAMES } from "@sourceweft/agent-tool-registry";
 import { tool } from "langchain";
 import { StateBackend } from "deepagents";
-import { test, vi } from "vitest";
+import { describe, test, vi } from "vitest";
+import { testExports as agentTestExports } from "..";
 import { config } from "../../../../shared/config";
 import { logger } from "../../../../shared/logger";
 
@@ -687,4 +688,157 @@ test("tool observability logs execute failure diagnostics without raw command", 
     infoSpy.mockRestore();
     errorSpy.mockRestore();
   }
+});
+
+describe("from runner.test.ts", () => {
+  function toolNames(tools: readonly unknown[]) {
+    return tools.map((tool) => {
+      const name =
+        tool && typeof tool === "object" && !Array.isArray(tool)
+          ? (tool as { name?: unknown }).name
+          : undefined;
+      if (typeof name !== "string") {
+        throw new Error("Expected test tool to have a string name");
+      }
+      return name;
+    });
+  }
+
+  test("sanitizes image blocks from persisted agent history", () => {
+    const textOnly = new HumanMessage("hello");
+    const imageMessage = new HumanMessage({
+      content: [
+        { type: "text", text: "what is this?" },
+        {
+          type: "image_url",
+          image_url: { url: "data:image/png;base64,abcd" },
+        },
+      ],
+    });
+    const assistant = new AIMessage("answer");
+
+    const result = agentTestExports.sanitizeMessagesForHistory([
+      textOnly,
+      imageMessage,
+      assistant,
+    ]);
+
+    assert.equal(result.changed, true);
+    assert.equal(result.messages[0], textOnly);
+    assert.equal(result.messages[2], assistant);
+    assert.deepEqual((result.messages[1] as HumanMessage).content, [
+      { type: "text", text: "what is this?" },
+      {
+        type: "text",
+        text: "[attached image 1: image, omitted from conversation history]",
+      },
+    ]);
+  });
+
+  test("command tool choice middleware forces target on first call for explicit tool command", async () => {
+    const middleware = agentTestExports.createCommandToolChoiceMiddleware({
+      initialToolPolicy: {
+        kind: "force",
+        toolName: "target_tool",
+      },
+    });
+    const calls: Array<{ toolChoice?: unknown; tools: string[] }> = [];
+    const request = {
+      messages: [new HumanMessage("run target")],
+      state: { messages: [new HumanMessage("run target")] },
+      tools: [{ name: "web_search" }, { name: "target_tool" }],
+    } as never;
+
+    const response = await middleware.wrapModelCall?.(request, async (next) => {
+      calls.push({
+        toolChoice: next.toolChoice,
+        tools: toolNames(next.tools),
+      });
+      return new AIMessage({
+        content: "",
+        tool_calls: [
+          {
+            args: { title: "Target" },
+            id: "call-target",
+            name: "target_tool",
+          },
+        ],
+      });
+    });
+
+    assert.equal(AIMessage.isInstance(response), true);
+    assert.deepEqual(calls, [
+      {
+        toolChoice: agentTestExports.forcedToolChoice("target_tool"),
+        tools: ["target_tool"],
+      },
+    ]);
+  });
+
+  test("command tool choice middleware fails fast when target tool is missing", async () => {
+    const middleware = agentTestExports.createCommandToolChoiceMiddleware({
+      initialToolPolicy: {
+        kind: "force",
+        toolName: "missing_target_tool",
+      },
+    });
+    const request = {
+      messages: [new HumanMessage("run target")],
+      state: { messages: [new HumanMessage("run target")] },
+      tools: [{ name: "web_search" }],
+    } as never;
+
+    await assert.rejects(async () => {
+      await middleware.wrapModelCall?.(
+        request,
+        async () => new AIMessage("nope"),
+      );
+    }, /Command initial tool 'missing_target_tool' is not available under the command tool policy/);
+  });
+
+  test("command tool choice middleware re-calls explicit tool command when target is not called", async () => {
+    const middleware = agentTestExports.createCommandToolChoiceMiddleware({
+      initialToolPolicy: {
+        kind: "force",
+        toolName: "search_notion_pages",
+      },
+    });
+    const calls: Array<{ toolChoice?: unknown; tools: string[] }> = [];
+    const request = {
+      messages: [new HumanMessage("find page")],
+      state: { messages: [new HumanMessage("find page")] },
+      tools: [{ name: "web_search" }, { name: "search_notion_pages" }],
+    } as never;
+
+    const response = await middleware.wrapModelCall?.(request, async (next) => {
+      calls.push({
+        toolChoice: next.toolChoice,
+        tools: toolNames(next.tools),
+      });
+      return calls.length === 1
+        ? new AIMessage("I can search for that.")
+        : new AIMessage({
+            content: "",
+            tool_calls: [
+              {
+                args: { query: "project" },
+                id: "call-notion",
+                name: "search_notion_pages",
+              },
+            ],
+          });
+    });
+
+    assert.equal(AIMessage.isInstance(response), true);
+    assert.deepEqual(calls, [
+      {
+        toolChoice: agentTestExports.forcedToolChoice("search_notion_pages"),
+        tools: ["search_notion_pages"],
+      },
+      {
+        toolChoice: agentTestExports.forcedToolChoice("search_notion_pages"),
+        tools: ["search_notion_pages"],
+      },
+    ]);
+  });
 });

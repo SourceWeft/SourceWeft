@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { test } from "vitest";
+import { beforeAll, describe, test } from "vitest";
+import { connectorAdaptersReady } from "../../../connectors";
+import { testExports } from "./runner";
 import {
   appendSandboxOperationTimeline,
   formatToolInputItems,
@@ -502,4 +504,378 @@ test("physical PC paths are files, distinct from Sources and DB Files", () => {
     }),
     "Read Workfile",
   );
+});
+
+describe("from runner.test.ts", () => {
+  // Connector tools register through an async import-time side effect. The
+  // observability normalizer keys off that registry, so without awaiting it the
+  // connector cases below race the registration and see an unregistered tool.
+  beforeAll(async () => {
+    await connectorAdaptersReady();
+  });
+
+  test("normalizes read_file ToolMessage output content for observability", () => {
+    const output = normalizeToolOutputForObservability("read_file", {
+      type: "tool",
+      lc_kwargs: {
+        content: [{ text: "Path: /kb/invoice.md\nInvoice total is 50." }],
+      },
+      self: "[Circular]",
+    });
+
+    assert.deepEqual(output, {
+      content: "Path: /kb/invoice.md\nInvoice total is 50.",
+    });
+  });
+
+  test("preserves non-read_file tool outputs", () => {
+    const output = { content: "search result", self: "[Circular]" };
+
+    assert.equal(
+      normalizeToolOutputForObservability("search_sources", output),
+      output,
+    );
+  });
+
+  test("normalizes web tool outputs to display-safe metadata", () => {
+    const output = normalizeToolOutputForObservability(
+      "web_search",
+      "Use these web search results internally.\n\n<web_result id='c1' rank='1' url='https://example.com/a' title='A'>Snippet</web_result>",
+    );
+
+    assert.deepEqual(output, {
+      resultCount: 1,
+      urlCount: 1,
+      urls: ["https://example.com/a"],
+      pages: [
+        {
+          url: "https://example.com/a",
+          title: "A",
+          rank: 1,
+          citation: "c1",
+          hasContent: false,
+        },
+      ],
+      truncated: false,
+    });
+    assert.equal(
+      JSON.stringify(output).includes(
+        "Use these web search results internally",
+      ),
+      false,
+    );
+  });
+
+  test("normalizes web_search failure outputs to display-safe metadata", () => {
+    const output = normalizeToolOutputForObservability(
+      "web_search",
+      "web_search failed.\n\n<web_tool_error tool='web_search' provider='anycrawl' query='Shanghai weather' error='API Error 500: Internal server error'></web_tool_error>",
+    );
+
+    assert.deepEqual(output, {
+      errorCount: 1,
+      error: "API Error 500: Internal server error",
+      query: "Shanghai weather",
+      urlCount: 0,
+      urls: [],
+      truncated: false,
+    });
+  });
+
+  test("connector tool error outputs are preserved for tool error handling", () => {
+    const output = normalizeToolOutputForObservability("create_notion_page", {
+      type: "connector_tool_error",
+      code: "NOTION_TARGET_NOT_FOUND",
+      message:
+        "The provided sourceId does not resolve to an indexed Notion page.",
+      statusCode: 400,
+    });
+
+    assert.deepEqual(output, {
+      type: "connector_tool_error",
+      code: "NOTION_TARGET_NOT_FOUND",
+      message:
+        "The provided sourceId does not resolve to an indexed Notion page.",
+      statusCode: 400,
+    });
+  });
+
+  test("connector success outputs hide raw provider payloads", () => {
+    const output = normalizeToolOutputForObservability("create_notion_page", {
+      url: "https://www.notion.so/page",
+      title: "服务器配置查询总结",
+      pageId: "page-1",
+      postActionSyncRunId: "sync-1",
+      content: "private conversation summary",
+    });
+
+    assert.deepEqual(output, {
+      type: "connector_tool_result",
+      connector: "notion",
+      toolName: "create_notion_page",
+      title: "服务器配置查询总结",
+      url: "https://www.notion.so/page",
+      pageId: "page-1",
+    });
+  });
+
+  test("connector search outputs preserve public result details", () => {
+    const output = normalizeToolOutputForObservability("search_notion_pages", {
+      actionType: "notion.page.find",
+      query: "服务器",
+      resultCount: 2,
+      pages: [
+        {
+          pageId: "page-1",
+          title: "服务器配置",
+          url: "https://www.notion.so/page-1",
+          lastEditedTime: "2026-05-23T01:00:00.000Z",
+          content: "private page body",
+        },
+        {
+          pageId: "page-2",
+          title: "服务器部署",
+          url: "https://www.notion.so/page-2",
+        },
+      ],
+    });
+
+    assert.deepEqual(output, {
+      type: "connector_tool_result",
+      connector: "notion",
+      toolName: "search_notion_pages",
+      actionType: "notion.page.find",
+      query: "服务器",
+      resultCount: 2,
+      pages: [
+        {
+          pageId: "page-1",
+          title: "服务器配置",
+          url: "https://www.notion.so/page-1",
+          lastEditedTime: "2026-05-23T01:00:00.000Z",
+        },
+        {
+          pageId: "page-2",
+          title: "服务器部署",
+          url: "https://www.notion.so/page-2",
+        },
+      ],
+    });
+  });
+
+  test("connector confirmation outputs hide editable request payloads", () => {
+    const output = normalizeToolOutputForObservability("create_notion_page", {
+      type: "tool",
+      lc_kwargs: {
+        content: JSON.stringify({
+          type: "tool_confirmation_request",
+          schemaVersion: 1,
+          id: "action-1",
+          domain: "connector",
+          subject: {
+            label: "Lei Qin",
+            provider: "notion",
+            connectorId: "connector-1",
+          },
+          action: {
+            type: "notion.page.create",
+            toolName: "create_notion_page",
+            label: "Create",
+            riskLevel: "medium",
+            status: "proposed",
+            requiresApproval: true,
+          },
+          preview: {
+            title: "Create Notion page: 服务器配置查询总结",
+            requestJson: {
+              title: "服务器配置查询总结",
+              content: "private conversation summary",
+            },
+          },
+          editableArgs: {
+            value: {
+              title: "服务器配置查询总结",
+              content: "private conversation summary",
+            },
+          },
+          decisionOptions: [
+            { decision: "reject", label: "Reject" },
+            { decision: "approve", label: "Approve" },
+          ],
+          execution: {
+            providerStatus: "not_executed",
+            executor: {
+              kind: "connector_action_run",
+              connectorId: "connector-1",
+              actionRunId: "action-1",
+            },
+          },
+          status: "proposed",
+          userMessage: "Waiting for confirmation.",
+        }),
+      },
+    });
+
+    assert.equal(
+      (output as Record<string, unknown>).type,
+      "tool_confirmation_request",
+    );
+    assert.equal(
+      "requestJson" in
+        ((output as Record<string, unknown>).preview as Record<
+          string,
+          unknown
+        >),
+      false,
+    );
+    assert.equal("editableArgs" in (output as Record<string, unknown>), false);
+  });
+
+  test("connector approval mismatches are surfaced as content errors", () => {
+    const error = testExports.getConnectorToolOutputContentError({
+      type: "connector_tool_error",
+      code: "CONNECTOR_ACTION_NOT_APPROVED",
+      message:
+        "Approved action was not found for this resumed tool call. Please retry the confirmation.",
+      statusCode: 409,
+    });
+
+    assert.equal(error?.code, "CONNECTOR_ACTION_APPROVAL_MISMATCH");
+    assert.equal(error?.statusCode, 409);
+  });
+
+  test("connector approval mismatches are detected inside ToolMessage content", () => {
+    const error = testExports.getConnectorToolOutputContentError({
+      type: "tool",
+      lc_kwargs: {
+        content: JSON.stringify({
+          type: "connector_tool_error",
+          code: "CONNECTOR_ACTION_NOT_APPROVED",
+          message:
+            "Approved action was not found for this resumed tool call. Please retry the confirmation.",
+          statusCode: 409,
+        }),
+      },
+    });
+
+    assert.equal(error?.code, "CONNECTOR_ACTION_APPROVAL_MISMATCH");
+  });
+
+  test("connector approval mismatches are detected inside tool error text", () => {
+    const error = testExports.getConnectorToolErrorTextContentError(
+      "Error: Connector action must be approved before execution\n Please fix your mistakes.",
+    );
+
+    assert.equal(error?.code, "CONNECTOR_ACTION_APPROVAL_MISMATCH");
+  });
+
+  test("normalizes all-failed web_fetch outputs to display-safe metadata", () => {
+    const output = normalizeToolOutputForObservability(
+      "web_fetch",
+      "<web_page rank='1' url='https://example.com' error='API Error 500: Internal server error'></web_page>",
+    );
+
+    assert.deepEqual(output, {
+      pageCount: 1,
+      errorCount: 1,
+      urlCount: 1,
+      urls: ["https://example.com"],
+      pages: [
+        {
+          url: "https://example.com",
+          rank: 1,
+          error: "API Error 500: Internal server error",
+          hasContent: true,
+        },
+      ],
+      truncated: false,
+    });
+  });
+
+  test("presentation artifact trace labels needs_content without claiming artifact creation", () => {
+    const output = {
+      content: JSON.stringify({
+        type: "presentation_artifact_input_required",
+        status: "needs_content",
+        title: "费曼学习法",
+      }),
+    };
+
+    assert.equal(
+      testExports.getFilesystemToolEndTitle("publish_artifact", {}, output),
+      "Deck content needed",
+    );
+    assert.equal(
+      testExports.getFilesystemToolDescription(
+        "publish_artifact",
+        {
+          resultType: "presentation_artifact_input_required",
+          status: "needs_content",
+        },
+        {},
+      ),
+      "The deck tool needs explicit slide content before it can create an artifact.",
+    );
+  });
+
+  test("filesystem tool titles classify glob scope from mounted pattern", () => {
+    assert.equal(
+      testExports.getFilesystemToolStartTitle("glob", {
+        path: "/",
+        pattern: "/files/**/*.md",
+      }),
+      "Finding matching Files",
+    );
+    assert.equal(
+      testExports.getFilesystemToolEndTitle("glob", {
+        path: "/",
+        pattern: "/skills/**/*.md",
+      }),
+      "Found matching skill files",
+    );
+    assert.equal(
+      testExports.getFilesystemToolDescription(
+        "read_file",
+        { chunkCount: 1 },
+        { path: "/files/notes.md" },
+      ),
+      "Read 1 Workfile chunk.",
+    );
+    assert.equal(
+      testExports.getFilesystemToolDescription(
+        "read_file",
+        { chunkCount: 1 },
+        { path: "/kb/source.md", limit: 100 },
+      ),
+      "Read up to 100 source lines.",
+    );
+  });
+
+  test("extracts generated image artifacts from completed tool calls", () => {
+    const artifacts = testExports.extractGeneratedImageArtifacts([
+      {
+        id: "tool-1",
+        tool: "generate_image",
+        input: {},
+        output: {
+          content:
+            "Image artifact created.\nartifact_id: artifact-1\ntitle: Concept [draft]\nartifact_url: /artifact-preview?artifactId=artifact-1&workspaceId=workspace-1",
+        },
+        sequence: 1,
+        status: "completed",
+        latencyMs: 100,
+        error: null,
+      },
+    ]);
+
+    assert.deepEqual(artifacts, [
+      {
+        artifactId: "artifact-1",
+        artifactUrl:
+          "/artifact-preview?artifactId=artifact-1&workspaceId=workspace-1",
+        title: "Concept [draft]",
+        toolCallId: "tool-1",
+      },
+    ]);
+  });
 });

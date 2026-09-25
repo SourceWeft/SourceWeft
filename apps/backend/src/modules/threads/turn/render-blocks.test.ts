@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { test } from "vitest";
+import { describe, test } from "vitest";
+import { testExports } from "../agent/turn/runner";
 import { createMessageRenderBlockBuilder } from "./render-blocks";
 
 test("replaceText preserves existing text segmentation when final text has same prefix", () => {
@@ -78,4 +79,198 @@ test("orders, attributes, and deduplicates committed artifact outputs", () => {
       type: "artifact_output",
     },
   ]);
+});
+
+describe("from runner.test.ts", () => {
+  test("builds generated image render blocks in event order", () => {
+    const builder = testExports.createMessageRenderBlockBuilder();
+
+    builder.appendText("Intro\n");
+    builder.appendArtifactOutput({
+      artifactId: "artifact-1",
+      artifactVersionId: "version-1",
+      producer: { kind: "main" },
+      sourceToolCallId: "tool-1",
+      threadRunId: "run-1",
+    });
+    builder.appendText("\nDetails");
+
+    assert.deepEqual(
+      testExports.finalizeMessageRenderBlocks({
+        blocks: builder.list(),
+        finalText: "Intro\n\nDetails",
+      }),
+      [
+        {
+          id: "text-1",
+          type: "text",
+          text: "Intro\n",
+        },
+        {
+          artifactId: "artifact-1",
+          artifactVersionId: "version-1",
+          id: "artifact-output:run-1:artifact-1:version-1",
+          placement: "terminal",
+          producer: { kind: "main" },
+          sequence: 1,
+          sourceToolCallId: "tool-1",
+          threadRunId: "run-1",
+          type: "artifact_output",
+        },
+        {
+          id: "text-2",
+          type: "text",
+          text: "\nDetails",
+        },
+      ],
+    );
+  });
+
+  test("builds generic tool render blocks in event order", () => {
+    const builder = testExports.createMessageRenderBlockBuilder();
+
+    builder.appendText("Before tool");
+    builder.appendTool("tool-1");
+    builder.appendText("After tool");
+
+    assert.deepEqual(
+      testExports.finalizeMessageRenderBlocks({
+        blocks: builder.list(),
+        finalText: "Before toolAfter tool",
+      }),
+      [
+        {
+          id: "text-1",
+          type: "text",
+          text: "Before tool",
+        },
+        {
+          id: "tool-tool-1",
+          type: "tool",
+          toolCallId: "tool-1",
+        },
+        {
+          id: "text-2",
+          type: "text",
+          text: "After tool",
+        },
+      ],
+    );
+  });
+
+  test("builds generated presentation render blocks in event order", () => {
+    const builder = testExports.createMessageRenderBlockBuilder();
+
+    builder.appendText("Intro\n");
+    builder.appendArtifactOutput({
+      artifactId: "artifact-1",
+      artifactVersionId: "version-1",
+      producer: { kind: "main" },
+      sourceToolCallId: "tool-1",
+      threadRunId: "run-1",
+    });
+    builder.appendText("\nHere is the deck summary.");
+
+    assert.deepEqual(
+      testExports.finalizeMessageRenderBlocks({
+        blocks: builder.list(),
+        finalText: "Intro\n\nHere is the deck summary.",
+      }),
+      [
+        {
+          id: "text-1",
+          type: "text",
+          text: "Intro\n",
+        },
+        {
+          artifactId: "artifact-1",
+          artifactVersionId: "version-1",
+          id: "artifact-output:run-1:artifact-1:version-1",
+          placement: "terminal",
+          producer: { kind: "main" },
+          sequence: 1,
+          sourceToolCallId: "tool-1",
+          threadRunId: "run-1",
+          type: "artifact_output",
+        },
+        {
+          id: "text-2",
+          type: "text",
+          text: "\nHere is the deck summary.",
+        },
+      ],
+    );
+  });
+
+  test("can clear leaked planning text while preserving generated artifact blocks", () => {
+    const builder = testExports.createMessageRenderBlockBuilder();
+
+    builder.appendText('{"schemaVersion":1,"slides":[]}');
+    builder.appendArtifactOutput({
+      artifactId: "artifact-1",
+      artifactVersionId: "version-1",
+      producer: { kind: "main" },
+      sourceToolCallId: "tool-1",
+      threadRunId: "run-1",
+    });
+    builder.replaceText("");
+
+    assert.deepEqual(
+      testExports.finalizeMessageRenderBlocks({
+        blocks: builder.list(),
+        finalText: "",
+      }),
+      [
+        {
+          artifactId: "artifact-1",
+          artifactVersionId: "version-1",
+          id: "artifact-output:run-1:artifact-1:version-1",
+          placement: "terminal",
+          producer: { kind: "main" },
+          sequence: 1,
+          sourceToolCallId: "tool-1",
+          threadRunId: "run-1",
+          type: "artifact_output",
+        },
+      ],
+    );
+  });
+
+  test("preserves render blocks when final text diverges", () => {
+    const builder = testExports.createMessageRenderBlockBuilder();
+
+    builder.appendText("Before citation [citation:missing]");
+    builder.appendArtifactOutput({
+      artifactId: "artifact-1",
+      artifactVersionId: "version-1",
+      producer: { kind: "main" },
+      sourceToolCallId: "tool-1",
+      threadRunId: "run-1",
+    });
+
+    assert.deepEqual(
+      testExports.finalizeMessageRenderBlocks({
+        blocks: builder.list(),
+        finalText: "Before citation",
+      }),
+      [
+        {
+          id: "text-1",
+          type: "text",
+          text: "Before citation [citation:missing]",
+        },
+        {
+          artifactId: "artifact-1",
+          artifactVersionId: "version-1",
+          id: "artifact-output:run-1:artifact-1:version-1",
+          placement: "terminal",
+          producer: { kind: "main" },
+          sequence: 1,
+          sourceToolCallId: "tool-1",
+          threadRunId: "run-1",
+          type: "artifact_output",
+        },
+      ],
+    );
+  });
 });

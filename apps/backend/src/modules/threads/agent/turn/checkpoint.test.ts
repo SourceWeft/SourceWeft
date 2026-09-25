@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { test } from "vitest";
+import { describe, test } from "vitest";
 import { resolvePendingInterruptCheckpoint } from "./checkpoint";
 import type { AgentRunnableConfig } from "./checkpoint";
+import { testExports } from "./runner";
 
 type StateCall = { configurable?: Record<string, unknown> };
 
@@ -75,4 +76,94 @@ test("an unpinned config is passed through untouched", async () => {
 
   assert.equal(result.pending, true);
   assert.equal(calls[0], config);
+});
+
+describe("from runner.test.ts", () => {
+  test("HITL replay maps to the interrupted checkpoint without top-level checkpoint_id", () => {
+    const config = testExports.resolveAgentBaseConfig({
+      agentMode: "replay",
+      agentRunThreadId: "unused-resume-thread",
+      agentBaseCheckpoint: {
+        threadId: "agent-thread-1",
+        checkpointId: "interrupted-checkpoint",
+        checkpointNs: "",
+      },
+    });
+
+    assert.deepEqual(config, {
+      configurable: {
+        thread_id: "agent-thread-1",
+        checkpoint_map: {
+          "": "interrupted-checkpoint",
+        },
+        checkpoint_ns: "",
+      },
+    });
+    assert.equal(
+      "checkpoint_id" in config.configurable,
+      false,
+      "LangGraph keeps skipDoneTasks enabled only when checkpoint_id is not a top-level configurable key",
+    );
+  });
+
+  test("HITL interrupt checkpoint prefers the current stream checkpoint when getState is stale", () => {
+    const checkpoint = testExports.resolveHitlInterruptCheckpoint({
+      pendingCheckpoint: {
+        pending: false,
+        checkpoint: {
+          threadId: "agent-thread-1",
+          checkpointId: "old-fork-base",
+        },
+      },
+      observedCheckpoint: {
+        threadId: "agent-thread-1",
+        checkpointId: "current-interrupt",
+      },
+    });
+
+    assert.deepEqual(checkpoint, {
+      threadId: "agent-thread-1",
+      checkpointId: "current-interrupt",
+    });
+  });
+
+  test("HITL interrupt checkpoint uses pending getState checkpoint when available", () => {
+    const checkpoint = testExports.resolveHitlInterruptCheckpoint({
+      pendingCheckpoint: {
+        pending: true,
+        checkpoint: {
+          threadId: "agent-thread-1",
+          checkpointId: "pending-interrupt",
+        },
+      },
+      observedCheckpoint: {
+        threadId: "agent-thread-1",
+        checkpointId: "current-interrupt",
+      },
+    });
+
+    assert.deepEqual(checkpoint, {
+      threadId: "agent-thread-1",
+      checkpointId: "pending-interrupt",
+    });
+  });
+
+  test("fork mode pins the requested checkpoint", () => {
+    const config = testExports.resolveAgentBaseConfig({
+      agentMode: "fork",
+      agentRunThreadId: "unused-refresh-thread",
+      agentBaseCheckpoint: {
+        threadId: "agent-thread-1",
+        checkpointId: "before-input",
+      },
+    });
+
+    assert.deepEqual(config, {
+      configurable: {
+        thread_id: "agent-thread-1",
+        checkpoint_id: "before-input",
+        checkpoint_ns: "",
+      },
+    });
+  });
 });
