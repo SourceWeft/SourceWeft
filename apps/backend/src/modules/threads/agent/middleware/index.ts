@@ -24,6 +24,7 @@ import {
 } from "./context-compression";
 import { createKnowledgeFilesystemToolDescriptionMiddleware } from "./filesystem-descriptions";
 import { createSourceWeftImageHistorySanitizerMiddleware } from "./history-sanitizer";
+import { createSourceWeftUnansweredToolCallsMiddleware } from "./unanswered-tool-calls";
 import {
   createSourceWeftToolObservabilityMiddleware,
   type SourceWeftToolObservabilityContext,
@@ -121,6 +122,8 @@ export function createSourceWeftSubagentMiddlewareStack(
       chatProfileConfig: input.chatProfileConfig,
       model: input.model,
     }),
+    // Innermost request rewrite, so it sees the history after summarization.
+    createSourceWeftUnansweredToolCallsMiddleware(),
     modelRetryMiddleware({
       retryOn: isRetryableModelContentError,
       onFailure: "error",
@@ -186,6 +189,8 @@ export async function createSourceWeftAgentMiddlewareStack(
       model: input.model,
     }),
     ...contextCompressionMiddleware,
+    // Innermost request rewrite, so it sees the history after summarization.
+    createSourceWeftUnansweredToolCallsMiddleware(),
     modelRetryMiddleware({
       retryOn: isRetryableModelContentError,
       onFailure: "error",
