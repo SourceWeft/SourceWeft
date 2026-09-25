@@ -34,19 +34,29 @@ function contentToolCalls(message: AIMessage): ToolCall[] {
 
 /**
  * The assistant message as the model produced it: calls its content blocks
- * name but `tool_calls` dropped are put back.
+ * name but `tool_calls` dropped are put back, in the model's own order (a
+ * call's current arguments win, so an edited call keeps its edit).
  */
 function restoreModelToolCalls(message: AIMessage): AIMessage {
   const current = message.tool_calls ?? [];
-  const dropped = contentToolCalls(message).filter(
-    (block) => !current.some((call) => call.id === block.id),
-  );
-  if (dropped.length === 0) {
+  const produced = contentToolCalls(message);
+  const restored = [
+    ...produced.map(
+      (block) => current.find((call) => call.id === block.id) ?? block,
+    ),
+    ...current.filter(
+      (call) => !produced.some((block) => block.id === call.id),
+    ),
+  ];
+  const unchanged =
+    restored.length === current.length &&
+    restored.every((call, index) => call.id === current[index]?.id);
+  if (unchanged) {
     return message;
   }
   return new AIMessage({
     content: message.content,
-    tool_calls: [...current, ...dropped],
+    tool_calls: restored,
     invalid_tool_calls: message.invalid_tool_calls,
     additional_kwargs: message.additional_kwargs,
     response_metadata: message.response_metadata,
@@ -57,9 +67,9 @@ function restoreModelToolCalls(message: AIMessage): AIMessage {
 }
 
 /**
- * Keep every assistant tool-calling message as the model produced it and give
- * each of its calls a result, adding a "not run" ToolMessage after the ones
- * that already answer it.
+ * Keep every assistant tool-calling message as the model produced it — its
+ * calls in the model's own order — and give each call a result, in that order,
+ * adding a "not run" ToolMessage for a call nothing answered.
  *
  * LangChain's human-in-the-loop middleware, on a batch where any call is
  * rejected, keeps only the rejected calls and jumps back to the model: it
@@ -94,21 +104,29 @@ export function answerUnansweredToolCalls(
     if (!message.tool_calls?.length) {
       continue;
     }
-    // Keep the results that already follow this message, then add the missing.
+    // The results that answer this message, re-emitted in its calls' order.
+    const following: ToolMessage[] = [];
     while (
       index + 1 < messages.length &&
       ToolMessage.isInstance(messages[index + 1])
     ) {
       index += 1;
-      result.push(messages[index]!);
+      following.push(messages[index] as ToolMessage);
     }
+    const ordered: ToolMessage[] = [];
     for (const call of message.tool_calls) {
+      const existing = following.find(
+        (toolMessage) => toolMessage.tool_call_id === call.id,
+      );
+      if (existing) {
+        ordered.push(existing);
+        continue;
+      }
       if (!call.id || answered.has(call.id)) {
         continue;
       }
       answered.add(call.id);
-      changed = true;
-      result.push(
+      ordered.push(
         new ToolMessage({
           tool_call_id: call.id,
           name: call.name,
@@ -117,6 +135,15 @@ export function answerUnansweredToolCalls(
         }),
       );
     }
+    ordered.push(
+      ...following.filter((toolMessage) => !ordered.includes(toolMessage)),
+    );
+    changed ||=
+      ordered.length !== following.length ||
+      ordered.some(
+        (toolMessage, position) => toolMessage !== following[position],
+      );
+    result.push(...ordered);
   }
   return changed ? result : messages;
 }
