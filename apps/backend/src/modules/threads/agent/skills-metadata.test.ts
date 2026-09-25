@@ -1,44 +1,12 @@
 import assert from "node:assert/strict";
-import { AIMessage, type BaseMessage } from "@langchain/core/messages";
-import {
-  BaseChatModel,
-  type BaseChatModelParams,
-} from "@langchain/core/language_models/chat_models";
-import type { ChatResult } from "@langchain/core/outputs";
 import { MemorySaver, Overwrite } from "@langchain/langgraph";
 import { CompositeBackend, StateBackend, createDeepAgent } from "deepagents";
 import { test } from "vitest";
+import { ScriptedChatModel } from "../../../test/chat-model";
 import { SelectedSkillsBackend } from "../../skills/backend";
 import { inlineSkillContent } from "../../skills/file-content";
 import type { EnabledSkillDescriptor } from "../../skills/types";
 import { skillMetadataForTurn } from "./turn/turn-assembly";
-
-class SkillPromptCaptureModel extends BaseChatModel {
-  prompts: string[] = [];
-
-  constructor(params: BaseChatModelParams = {}) {
-    super(params);
-  }
-
-  _llmType() {
-    return "skill-prompt-capture";
-  }
-
-  bindTools() {
-    return this;
-  }
-
-  async _generate(messages: BaseMessage[]): Promise<ChatResult> {
-    this.prompts.push(
-      messages
-        .filter((message) => message.getType() === "system")
-        .map((message) => String(message.content))
-        .join("\n"),
-    );
-    const message = new AIMessage("done");
-    return { generations: [{ text: "done", message }] };
-  }
-}
 
 function selectedSkill(name: string): EnabledSkillDescriptor {
   const description = `${name} unique turn-scoped instructions`;
@@ -62,7 +30,20 @@ function selectedSkill(name: string): EnabledSkillDescriptor {
 }
 
 test("skills metadata is overwritten per turn on a reused checkpoint", async () => {
-  const model = new SkillPromptCaptureModel();
+  // Captures the system prompt of every call; replies "done" so each turn ends.
+  const prompts: string[] = [];
+  const model = new ScriptedChatModel(
+    (messages) => {
+      prompts.push(
+        messages
+          .filter((message) => message.getType() === "system")
+          .map((message) => String(message.content))
+          .join("\n"),
+      );
+      return "done";
+    },
+    { name: "skill-prompt-capture" },
+  );
   const checkpointer = new MemorySaver();
   const config = { configurable: { thread_id: "skills-metadata-reuse" } };
 
@@ -90,7 +71,7 @@ test("skills metadata is overwritten per turn on a reused checkpoint", async () 
       },
       effectiveConfig,
     );
-    return model.prompts.at(-1) ?? "";
+    return prompts.at(-1) ?? "";
   };
 
   const alpha = selectedSkill("alpha-skill");

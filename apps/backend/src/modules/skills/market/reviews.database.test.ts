@@ -1,6 +1,10 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { and, eq, inArray, sql } from "drizzle-orm";
+import {
+  loadSkillDatabase,
+  skillDatabaseEnabled,
+} from "../../../test/skill-database";
 
 /**
  * Ratings and reviews against real PostgreSQL: who may review (someone in a
@@ -11,7 +15,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
  * Every organization, workspace, user and skill here is this file's own, and
  * only those are cleaned up.
  */
-describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
+describe.skipIf(!skillDatabaseEnabled)(
   "skill reviews (real PostgreSQL)",
   () => {
     let data: typeof import("@sourceweft/db");
@@ -25,13 +29,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
     const repoOwner = `review-${tag}`;
 
     beforeAll(async () => {
-      if (
-        !new URL(process.env.DATABASE_URL!).pathname.startsWith(
-          "/sourceweft_skillv6_",
-        )
-      )
-        throw new Error("Refusing non-isolated database");
-      data = await import("@sourceweft/db");
+      data = await loadSkillDatabase();
       reviews = await import("./reviews");
       await data.db.execute(sql`
         insert into organization (id, name, slug, "createdAt")

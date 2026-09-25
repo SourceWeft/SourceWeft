@@ -1,15 +1,13 @@
 import assert from "node:assert/strict";
-import { AIMessage, type BaseMessage } from "@langchain/core/messages";
-import {
-  BaseChatModel,
-  type BaseChatModelParams,
-} from "@langchain/core/language_models/chat_models";
-import type { ChatResult } from "@langchain/core/outputs";
 import { MemorySaver } from "@langchain/langgraph";
 import { createDeepAgent } from "deepagents";
 import { tool } from "langchain";
 import { afterEach, beforeEach, test } from "vitest";
 import { z } from "zod";
+import {
+  ScriptedChatModel,
+  toolCallsThenDone,
+} from "../../../../test/chat-model";
 import { adoptV3RunStream } from "./v3-protocol";
 
 // A tool that throws — a sandbox that could not be reached — must not be able
@@ -17,29 +15,12 @@ import { adoptV3RunStream } from "./v3-protocol";
 // provider during an e2e run took the whole API down. This runs the installed
 // langchain/deepagents with a scripted model; no network.
 
-class OneFailingToolCallModel extends BaseChatModel {
-  step = 0;
-  constructor(params: BaseChatModelParams = {}) {
-    super(params);
-  }
-  _llmType() {
-    return "one-failing-tool-call";
-  }
-  bindTools() {
-    return this;
-  }
-  async _generate(_messages: BaseMessage[]): Promise<ChatResult> {
-    this.step += 1;
-    const message =
-      this.step === 1
-        ? new AIMessage({
-            content: "",
-            tool_calls: [{ id: "call-boom", name: "boom", args: {} }],
-          })
-        : new AIMessage("done");
-    return { generations: [{ text: String(message.content), message }] };
-  }
-}
+/** Calls `boom` once, then says done. */
+const oneFailingToolCallModel = () =>
+  new ScriptedChatModel(
+    toolCallsThenDone([{ id: "call-boom", name: "boom", args: {} }]),
+    { name: "one-failing-tool-call" },
+  );
 
 const boom = tool(
   async () => {
@@ -67,18 +48,15 @@ afterEach(() => {
 
 async function runFailingTurn(adopt: (raw: unknown) => unknown) {
   const agent = createDeepAgent({
-    model: new OneFailingToolCallModel() as never,
+    model: oneFailingToolCallModel() as never,
     tools: [boom],
     checkpointer: new MemorySaver(),
   });
   const stream = adopt(
-    await agent.streamEvents(
-      { messages: [{ role: "user", content: "go" }] },
-      {
-        configurable: { thread_id: `boom-${Math.random()}` },
-        version: "v3",
-      } as never,
-    ),
+    await agent.streamEvents({ messages: [{ role: "user", content: "go" }] }, {
+      configurable: { thread_id: `boom-${Math.random()}` },
+      version: "v3",
+    } as never),
   ) as AsyncIterable<{ method?: string }>;
   const methods: string[] = [];
   try {

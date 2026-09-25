@@ -1,11 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { eq } from "drizzle-orm";
+import {
+  loadSkillDatabase,
+  seedSkillDefinition,
+  skillDatabaseEnabled,
+} from "../../test/skill-database";
 
 // Grant scope and the escalation gate are both decided by SQL over real rows
 // (nullable columns, `now()`, jsonb manifests), so only PostgreSQL can prove
 // that one workspace's install stays in that workspace.
-describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
+describe.skipIf(!skillDatabaseEnabled)(
   "entitlement scope and version escalation against real PostgreSQL",
   () => {
     let data: typeof import("@sourceweft/db");
@@ -25,19 +30,13 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
 
     type Capability = "prompt-only" | "executable";
     async function seedDefinition() {
-      const skillId = randomUUID();
       const slug = `gh-fixture-${randomUUID().slice(0, 8)}-scope`;
-      definitionIds.push(skillId);
-      await data.db.insert(data.skillDefinitions).values({
-        id: skillId,
-        sourceType: "registry_github",
+      const skillId = await seedSkillDefinition(data, {
         slug,
-        displayName: slug,
-        description: "fixture",
         visibility: "restricted",
-        status: "active",
         ownerUserId: "scope-owner",
       });
+      definitionIds.push(skillId);
       return { skillId, slug };
     }
     async function seedVersion(input: {
@@ -110,13 +109,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
     }
 
     beforeAll(async () => {
-      if (
-        !new URL(process.env.DATABASE_URL!).pathname.startsWith(
-          "/sourceweft_skillv6_",
-        )
-      )
-        throw new Error("Refusing non-isolated database");
-      data = await import("@sourceweft/db");
+      data = await loadSkillDatabase();
       skills = await import("./repository");
       versions = await import("./registry/versions");
       for (const scope of [a, b, outsider])

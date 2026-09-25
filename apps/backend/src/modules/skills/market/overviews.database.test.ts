@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, test } from "vitest";
 import { inArray } from "drizzle-orm";
+import {
+  loadSkillDatabase,
+  seedSkillDefinition,
+  skillDatabaseEnabled,
+} from "../../../test/skill-database";
 
 /**
  * AI overviews against real PostgreSQL: which versions are picked, the copy
@@ -12,7 +17,7 @@ import { inArray } from "drizzle-orm";
  * `skillIds`); the market-wide `overview.billing` setting is never written,
  * since a live stack shares this database and would start generating.
  */
-describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
+describe.skipIf(!skillDatabaseEnabled)(
   "skill AI overviews (real PostgreSQL)",
   () => {
     let data: typeof import("@sourceweft/db");
@@ -50,14 +55,11 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       };
       skillIds.push(fixture.id);
       const visibility = input.visibility ?? "public";
-      await data.db.insert(data.skillDefinitions).values({
+      await seedSkillDefinition(data, {
         id: fixture.id,
-        sourceType: "registry_github",
         slug: fixture.slug,
         displayName: `Overview ${tag} ${input.name}`,
-        description: "fixture",
         visibility,
-        status: "active",
         ownerUserId,
       });
       await data.db.insert(data.skillVersions).values({
@@ -129,7 +131,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
     let fresh: Fixture;
 
     beforeAll(async () => {
-      data = await import("@sourceweft/db");
+      data = await loadSkillDatabase();
       repo = await import("./overview-repository");
       generate = await import("./overview-generate");
       read = await import("./read-repository");

@@ -5,15 +5,11 @@ import {
   ToolMessage,
   type BaseMessage,
 } from "@langchain/core/messages";
-import {
-  BaseChatModel,
-  type BaseChatModelParams,
-} from "@langchain/core/language_models/chat_models";
-import type { ChatResult } from "@langchain/core/outputs";
 import { ToolInputParsingException, tool } from "@langchain/core/tools";
 import { createDeepAgent, StateBackend } from "deepagents";
 import { test } from "vitest";
 import { z } from "zod";
+import { ScriptedChatModel } from "../../../../test/chat-model";
 import {
   createSourceWeftToolErrorMiddleware,
   formatSourceWeftToolError,
@@ -134,49 +130,37 @@ test("termination uncertainty caused by run cancellation remains control flow", 
   );
 });
 
-class ScriptedToolErrorModel extends BaseChatModel {
-  calls: BaseMessage[][] = [];
-  private index = 0;
-
-  constructor(params: BaseChatModelParams = {}) {
-    super(params);
-  }
-
-  _llmType() {
-    return "scripted-tool-error";
-  }
-
-  bindTools() {
-    return this;
-  }
-
-  async _generate(messages: BaseMessage[]): Promise<ChatResult> {
-    this.calls.push(messages);
-    const script = [
-      new AIMessage({
-        content: "",
-        tool_calls: [{ id: "call-bad", name: "validate_demo", args: {} }],
-      }),
-      new AIMessage({
-        content: "",
-        tool_calls: [
-          {
-            id: "call-fixed",
-            name: "validate_demo",
-            args: { value: "fixed" },
-          },
-        ],
-      }),
-      new AIMessage({ content: "Recovered successfully." }),
-    ];
-    const message = script[Math.min(this.index, script.length - 1)]!;
-    this.index += 1;
-    return { generations: [{ text: String(message.content), message }] };
-  }
-}
-
 test("a real Deep Agent continues after invalid tool arguments", async () => {
-  const model = new ScriptedToolErrorModel();
+  // Records every message list it is asked to complete; the closure keeps
+  // the script index and the recorded calls.
+  const calls: BaseMessage[][] = [];
+  let index = 0;
+  const model = new ScriptedChatModel(
+    (messages) => {
+      calls.push(messages);
+      const script = [
+        new AIMessage({
+          content: "",
+          tool_calls: [{ id: "call-bad", name: "validate_demo", args: {} }],
+        }),
+        new AIMessage({
+          content: "",
+          tool_calls: [
+            {
+              id: "call-fixed",
+              name: "validate_demo",
+              args: { value: "fixed" },
+            },
+          ],
+        }),
+        new AIMessage({ content: "Recovered successfully." }),
+      ];
+      const message = script[Math.min(index, script.length - 1)]!;
+      index += 1;
+      return message;
+    },
+    { name: "scripted-tool-error" },
+  );
   let executions = 0;
   const validateDemo = tool(
     async ({ value }) => {
@@ -216,9 +200,9 @@ test("a real Deep Agent continues after invalid tool arguments", async () => {
     /(?:rejected the generated arguments|generated tool arguments were invalid)/i,
   );
   assert.equal(executions, 1, "only the corrected call should reach the body");
-  assert.equal(model.calls.length, 3);
+  assert.equal(calls.length, 3);
   assert.ok(
-    model.calls[1]?.some(
+    calls[1]?.some(
       (message) =>
         ToolMessage.isInstance(message) && message.tool_call_id === "call-bad",
     ),

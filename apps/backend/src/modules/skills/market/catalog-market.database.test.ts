@@ -4,6 +4,10 @@ import { Hono } from "hono";
 import { afterAll, beforeAll, describe, test, vi } from "vitest";
 import { inArray, sql } from "drizzle-orm";
 import type { SkillCatalogSort } from "@sourceweft/contracts";
+import {
+  loadSkillDatabase,
+  skillDatabaseEnabled,
+} from "../../../test/skill-database";
 
 // The admin routes are driven over HTTP against the real database; only who is
 // calling is decided here.
@@ -25,7 +29,7 @@ vi.mock("../../market/admin", () => ({
  * Everything is scoped to this file's own rows — by a tag in the search query,
  * or by viewers nobody else has — because other suites share the database.
  */
-describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
+describe.skipIf(!skillDatabaseEnabled)(
   "catalog market surface (real PostgreSQL)",
   () => {
     let data: typeof import("@sourceweft/db");
@@ -248,13 +252,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
     };
 
     beforeAll(async () => {
-      if (
-        !new URL(process.env.DATABASE_URL!).pathname.startsWith(
-          "/sourceweft_skillv6_",
-        )
-      )
-        throw new Error("Refusing non-isolated database");
-      data = await import("@sourceweft/db");
+      data = await loadSkillDatabase();
       service = new (await import("../service")).ContentSkillsService();
       skills = await import("../repository");
       rank = await import("./rank");

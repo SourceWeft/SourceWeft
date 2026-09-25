@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { beforeEach, test, vi } from "vitest";
 import type { BillingSummaryResponse } from "@sourceweft/contracts";
 import type { LegacyBillingTestPort as ContentBillingPort } from "../../../../test/billing-runtime";
-import type { PreparedThreadTurn } from "../..";
+import { createPreparedThreadTurn } from "../../../../test/prepared-turn";
 import { createTurnRuntime } from "./turn-runtime";
 import { workspaceService } from "../../../workspace";
 
@@ -30,8 +30,8 @@ function createBilling(): ContentBillingPort {
   }) as unknown as ContentBillingPort;
 }
 
-function createPrepared(): PreparedThreadTurn {
-  return {
+const createPrepared = () =>
+  createPreparedThreadTurn({
     workspace: { id: "ws_1", organizationId: "team_1" },
     userId: "user_1",
     thread: { id: "thread_1" },
@@ -42,8 +42,7 @@ function createPrepared(): PreparedThreadTurn {
     providerModel: "gpt-4o",
     chatProfile: { gatewayConfigId: "gw_1" },
     llmIdempotencyKey: "base_key",
-  } as unknown as PreparedThreadTurn;
-}
+  });
 
 function stubGateway() {
   const scope = {

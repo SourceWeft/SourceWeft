@@ -2,10 +2,14 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, test } from "vitest";
 import { inArray } from "drizzle-orm";
+import {
+  loadSkillDatabase,
+  skillDatabaseEnabled,
+} from "../../test/skill-database";
 
 // Paging is an ORDER BY + keyset predicate in SQL, so "every skill exactly
 // once" is only provable against PostgreSQL (its collation decides the order).
-describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
+describe.skipIf(!skillDatabaseEnabled)(
   "catalog paging against real PostgreSQL",
   () => {
     let data: typeof import("@sourceweft/db");
@@ -100,13 +104,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
     }
 
     beforeAll(async () => {
-      if (
-        !new URL(process.env.DATABASE_URL!).pathname.startsWith(
-          "/sourceweft_skillv6_",
-        )
-      )
-        throw new Error("Refusing non-isolated database");
-      data = await import("@sourceweft/db");
+      data = await loadSkillDatabase();
       service = new (await import("./service")).ContentSkillsService();
       for (const scope of [owner, stranger])
         await data.db.insert(data.workspaces).values({

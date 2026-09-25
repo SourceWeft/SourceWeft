@@ -1,6 +1,19 @@
 import { createHash, randomUUID } from "node:crypto";
-import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+  vi,
+} from "vitest";
 import { eq } from "drizzle-orm";
+import {
+  loadSkillDatabase,
+  seedSkillDefinition,
+  skillDatabaseEnabled,
+} from "../../test/skill-database";
 
 // PostgreSQL is real; object storage is a map that records every read. The
 // rows are seeded here in the `object` shape directly — what is under test is
@@ -17,7 +30,7 @@ vi.mock("../sources/storage", () => ({
   },
 }));
 
-describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
+describe.skipIf(!skillDatabaseEnabled)(
   "reading skills by storage type against real PostgreSQL",
   () => {
     let data: typeof import("@sourceweft/db");
@@ -30,13 +43,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
     const definitionIds: string[] = [];
 
     beforeAll(async () => {
-      if (
-        !new URL(process.env.DATABASE_URL!).pathname.startsWith(
-          "/sourceweft_skillv6_",
-        )
-      )
-        throw new Error("Refusing non-isolated database");
-      data = await import("@sourceweft/db");
+      data = await loadSkillDatabase();
       skills = await import("./repository");
       selection = await import("./selection");
       versions = await import("./registry/versions");
@@ -82,17 +89,14 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
           ? `gh-fixture-${randomUUID().slice(0, 8)}-read`
           : `custom-${randomUUID().slice(0, 8)}`;
       definitionIds.push(skillId);
-      await data.db.insert(data.skillDefinitions).values({
+      await seedSkillDefinition(data, {
         id: skillId,
         sourceType,
         slug,
-        displayName: slug,
-        description: "fixture",
         // Public / workspace-owned, so visibility is not what is under test.
         ...(sourceType === "registry_github"
           ? { visibility: "public" as const }
           : { visibility: "workspace" as const, teamId, workspaceId }),
-        status: "active",
         ownerUserId: viewer.userId,
       });
       return { skillId, slug };
@@ -117,7 +121,11 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       slug: string;
       marker: string;
       createdAt: Date;
-      files: Array<{ path: string; mimeType: string; body: Uint8Array | string }>;
+      files: Array<{
+        path: string;
+        mimeType: string;
+        body: Uint8Array | string;
+      }>;
     }) {
       const versionId = randomUUID();
       const version = input.marker.repeat(12);
@@ -162,9 +170,21 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
         marker: "a",
         createdAt: new Date("2026-01-01T00:00:00Z"),
         files: [
-          { path: "SKILL.md", mimeType: "text/markdown", body: "# Brand\nrules" },
-          { path: "README.md", mimeType: "text/markdown", body: "# Hello\nintro" },
-          { path: "reference/guide.md", mimeType: "text/markdown", body: "guide" },
+          {
+            path: "SKILL.md",
+            mimeType: "text/markdown",
+            body: "# Brand\nrules",
+          },
+          {
+            path: "README.md",
+            mimeType: "text/markdown",
+            body: "# Hello\nintro",
+          },
+          {
+            path: "reference/guide.md",
+            mimeType: "text/markdown",
+            body: "guide",
+          },
           { path: "assets/brand.ttf", mimeType: "font/ttf", body: FONT },
         ],
       });
@@ -287,7 +307,10 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
         storagePointer: `db://${versionId}`,
         isCurrent: true,
         contentHash: "hash",
-        manifestJson: { ...manifestJson(slug, "1.0.0"), visibility: "workspace" },
+        manifestJson: {
+          ...manifestJson(slug, "1.0.0"),
+          visibility: "workspace",
+        },
       });
       const rows = [
         { path: "SKILL.md", contentText: "# Custom\nbody" },
@@ -327,10 +350,12 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
         skillVersionId: versionId,
         enabledBy: viewer.userId,
       });
-      const [skill] = await selection.resolveSelectedSkills({
-        ...viewer,
-        skillIds: [installed.id],
-      }).then((all) => all.filter((entry) => entry.name === slug));
+      const [skill] = await selection
+        .resolveSelectedSkills({
+          ...viewer,
+          skillIds: [installed.id],
+        })
+        .then((all) => all.filter((entry) => entry.name === slug));
       expect(skill!.skillMd).toBe("# Custom\nbody");
       expect(skill!.bundle).toBeUndefined();
       expect(await skill!.readFile!("reference/notes.md")).toEqual({
@@ -348,7 +373,11 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
         createdAt: new Date("2026-02-01T00:00:00Z"),
         files: [
           { path: "SKILL.md", mimeType: "text/markdown", body: "# Brand v2" },
-          { path: "README.md", mimeType: "text/markdown", body: "# Hello\nintro" },
+          {
+            path: "README.md",
+            mimeType: "text/markdown",
+            body: "# Hello\nintro",
+          },
           { path: "assets/logo.png", mimeType: "image/png", body: FONT },
           { path: "assets/brand.ttf", mimeType: "font/ttf", body: FONT },
         ],

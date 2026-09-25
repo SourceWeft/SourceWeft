@@ -11,6 +11,10 @@ import {
   vi,
 } from "vitest";
 import { and, eq, inArray, like, sql } from "drizzle-orm";
+import {
+  loadSkillDatabase,
+  skillDatabaseEnabled,
+} from "../../../../test/skill-database";
 
 // No Redis in this suite: what is under test is the row, the fences, the
 // catalog write and the install — all PostgreSQL.
@@ -60,7 +64,7 @@ vi.mock("../../../sources/storage", () => ({
  * property of `upsertRegistrySkillIndex` — none of which a mock can vouch for.
  * GitHub is replaced by an in-memory zipball; nothing touches the network.
  */
-describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
+describe.skipIf(!skillDatabaseEnabled)(
   "skill registry submissions against real PostgreSQL",
   () => {
     let data: typeof import("@sourceweft/db");
@@ -159,13 +163,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
     const fresh = async (id: string) => (await repo.getSubmission(id))!;
 
     beforeAll(async () => {
-      if (
-        !new URL(process.env.DATABASE_URL!).pathname.startsWith(
-          "/sourceweft_skillv6_",
-        )
-      )
-        throw new Error("Refusing non-isolated database");
-      data = await import("@sourceweft/db");
+      data = await loadSkillDatabase();
       repo = await import("./repository");
       service = await import("./service");
       pipeline = await import("./pipeline");

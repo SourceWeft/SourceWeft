@@ -22,6 +22,7 @@ import type {
   DeepAgentTurnOutcome,
 } from "../agent/turn/runner";
 import type { LegacyBillingTestPort as ContentBillingPort } from "../../../test/billing-runtime";
+import { createPreparedThreadTurn } from "../../../test/prepared-turn";
 import type { MessageRecord } from "../../content/types";
 import type {
   MeteredLlmCallTrace,
@@ -493,7 +494,7 @@ test("buildGatewayRequestMetadata keeps BYOK profileAlias out of observed metada
   assert.equal(metadata.keySource, "byokCredential");
 });
 
-const prepared: PreparedThreadTurn = {
+const prepared: PreparedThreadTurn = createPreparedThreadTurn({
   reasoningRun: { runId: "stream-test", parentRunId: null, base: "" },
   sourceSelectionRevision: 0,
   userId: "user-1",
@@ -534,33 +535,7 @@ const prepared: PreparedThreadTurn = {
     version: 1,
     parts: [{ type: "text", text: "What is in this invoice?" }],
   },
-  imageParts: [],
-  preflightBilling: [],
-  preflightThinkingSteps: [],
-  mcpInstallIds: [],
-  enabledSkills: [],
-  invokedSkillIds: [],
   agentMessageContent: "What is in this invoice?",
-  mentionedSourceIds: [],
-  effectiveMentionedSourceIds: [],
-  selectedSourceIds: [],
-  sourceIds: [],
-  sourceScope: {
-    requestedSourceIds: [],
-    effectiveSourceIds: [],
-    selectedDirectoryIds: [],
-    expandedDescendantSourceIds: [],
-  },
-
-  webAccessEnabled: false,
-  command: null,
-  invocation: null,
-  commandSuccessCriteria: { kind: "none" },
-  toolPermissions: {},
-  effectiveTools: {},
-  runtimeTools: {},
-  turnState: {},
-  timezone: "UTC",
   runTraceId: "user-message-1",
   userMessage: {
     id: "user-message-1",
@@ -577,28 +552,15 @@ const prepared: PreparedThreadTurn = {
     model: null,
     creditsConsumed: null,
   },
-  createdUserMessage: true,
-  assistantMessageParentId: null,
-  assistantMessageId: null,
   assistantMessageIdOverride: null,
-  profileAlias: "test-profile",
-  modelAlias: "test-model",
   providerModel: "test-model",
   chatProfile: {
     gatewayConfigId: "gateway-1",
   } as PreparedThreadTurn["chatProfile"],
-  llm: undefined,
   llmIdempotencyKey: "thread-stream:user-message-1:assistant",
-  agentMode: "continue",
-  agentBaseCheckpoint: null,
   agentRunThreadId: "thread-1",
-  toolApprovalResume: null,
-  traceContinuation: null,
-  isFirstAssistantResponse: true,
-  isFirstAssistantAttempt: true,
   initialTitle: "New chat",
-  failurePersistence: "persist-error-turn",
-};
+} satisfies Partial<PreparedThreadTurn>);
 
 function createTurnService(input?: {
   title?: string | null;

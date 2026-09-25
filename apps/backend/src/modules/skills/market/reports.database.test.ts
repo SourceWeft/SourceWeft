@@ -1,6 +1,10 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import { and, eq, inArray, sql } from "drizzle-orm";
+import {
+  loadSkillDatabase,
+  skillDatabaseEnabled,
+} from "../../../test/skill-database";
 
 // Hiding a review is the reviews module's own function, built alongside this
 // one; the queue only has to call it with the right review.
@@ -25,7 +29,7 @@ vi.mock("./reviews", () => ({
  * Every user, workspace, skill and report here is this file's own; other
  * reports in the shared database are only ever read around, never touched.
  */
-describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
+describe.skipIf(!skillDatabaseEnabled)(
   "skill reports (real PostgreSQL)",
   () => {
     let data: typeof import("@sourceweft/db");
@@ -36,13 +40,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
     const userIds = new Set<string>();
 
     beforeAll(async () => {
-      if (
-        !new URL(process.env.DATABASE_URL!).pathname.startsWith(
-          "/sourceweft_skillv6_",
-        )
-      )
-        throw new Error("Refusing non-isolated database");
-      data = await import("@sourceweft/db");
+      data = await loadSkillDatabase();
       reports = await import("./reports");
       await data.db.insert(data.workspaces).values({
         id: workspaceId,

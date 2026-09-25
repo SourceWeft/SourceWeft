@@ -11,6 +11,10 @@ import {
   type GetMarketSkillResponse,
   type ListMarketSkillsResponse,
 } from "@sourceweft/market-contracts";
+import {
+  loadSkillDatabase,
+  skillDatabaseEnabled,
+} from "../../../test/skill-database";
 
 /**
  * The market's discovery layer against real PostgreSQL: the rank-score and
@@ -21,7 +25,7 @@ import {
  * The database is shared with other suites, so every assertion is scoped to
  * rows this file made: a word only its fixtures carry, its own repositories.
  */
-describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
+describe.skipIf(!skillDatabaseEnabled)(
   "skill market discovery (real PostgreSQL)",
   () => {
     let data: typeof import("@sourceweft/db");
@@ -222,13 +226,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
     const extra: Fixture[] = [];
 
     beforeAll(async () => {
-      if (
-        !new URL(process.env.DATABASE_URL!).pathname.startsWith(
-          "/sourceweft_skillv6_",
-        )
-      )
-        throw new Error("Refusing non-isolated database");
-      data = await import("@sourceweft/db");
+      data = await loadSkillDatabase();
       rank = await import("./rank");
       installCounts = await import("./install-counts");
       autoList = await import("./auto-list");
@@ -420,9 +418,11 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
 
     test("related skills: same repository and same category, never itself or a private one", async () => {
       const self = byName("r00");
-      const body = getMarketSkillResponseSchema.strict().parse(
-        await getJson<GetMarketSkillResponse>(`/v1/skills/${self.slug}`),
-      );
+      const body = getMarketSkillResponseSchema
+        .strict()
+        .parse(
+          await getJson<GetMarketSkillResponse>(`/v1/skills/${self.slug}`),
+        );
       const sameRepository = body.related!.sameRepository.map((s) => s.slug);
       const sameCategory = body.related!.sameCategory.map((s) => s.slug);
       assert.ok(sameRepository.length > 0 && sameRepository.length <= 6);
@@ -433,7 +433,10 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       // Another repository of the same owner is not the same repository.
       assert.ok(!sameRepository.includes(byName("other1").slug));
       for (const slug of sameRepository)
-        assert.ok(ranked.some((entry) => entry.slug === slug), slug);
+        assert.ok(
+          ranked.some((entry) => entry.slug === slug),
+          slug,
+        );
       // Filed alike, and not already shown as from the same repository.
       for (const slug of sameCategory) {
         assert.ok(!sameRepository.includes(slug), slug);
@@ -486,9 +489,9 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
         [[`picks-${tag}`, 2]],
       );
 
-      const one = getMarketSkillCollectionResponseSchema.strict().parse(
-        await getJson(`/v1/skills/collections/picks-${tag}`),
-      );
+      const one = getMarketSkillCollectionResponseSchema
+        .strict()
+        .parse(await getJson(`/v1/skills/collections/picks-${tag}`));
       assert.deepEqual(
         one.items.map((item) => item.slug),
         [byName("r03").slug, byName("r01").slug],
@@ -512,7 +515,10 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
       });
       await getJson(`/v1/skills/collections/picks-${tag}`, 404);
       assert.ok(await collections.deleteSkillCollection(draft.id));
-      assert.equal(await collections.getSkillCollectionForAdmin(draft.id), null);
+      assert.equal(
+        await collections.getSkillCollectionForAdmin(draft.id),
+        null,
+      );
     });
 
     // --- listing queue, option A ---------------------------------------------
@@ -637,8 +643,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
         etag: '"gone-etag"',
       });
 
-      const calls: Array<{ url: string; headers: Record<string, string> }> =
-        [];
+      const calls: Array<{ url: string; headers: Record<string, string> }> = [];
       const fetch = async (url: string, headers: Record<string, string>) => {
         calls.push({ url, headers });
         if (url.endsWith(`/${owner}/alive`)) {

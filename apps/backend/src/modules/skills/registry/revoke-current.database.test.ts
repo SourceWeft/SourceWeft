@@ -1,19 +1,19 @@
 import { randomUUID } from "node:crypto";
 import { beforeAll, afterAll, describe, test, expect, vi } from "vitest";
 import { eq } from "drizzle-orm";
+import {
+  loadSkillDatabase,
+  skillDatabaseEnabled,
+} from "../../../test/skill-database";
 import { sha256 } from "../hash";
 
 // PostgreSQL is real; the object store under `../storage` is a map.
 const store = vi.hoisted(() => ({ objects: new Map<string, Buffer>() }));
-vi.mock("../../sources/storage", () => ({
-  getContentStorageBucketName: () => "bucket",
-  sandboxAssetObjectExists: async ({ key }: { key: string }) =>
-    store.objects.has(key),
-  uploadFileObject: async (input: { key: string; body: Buffer }) => {
-    store.objects.set(input.key, input.body);
-    return { bucket: "bucket", key: input.key };
-  },
-}));
+vi.mock("../../sources/storage", async () =>
+  (await import("../../../test/fake-content-storage")).fakeContentStorage(
+    store,
+  ),
+);
 
 /**
  * Revoking the current version must not take the skill out of the catalog while
@@ -22,7 +22,7 @@ vi.mock("../../sources/storage", () => ({
  * PostgreSQL, because the hand-over has to get past the partial unique index on
  * `is_current` inside one transaction.
  */
-describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
+describe.skipIf(!skillDatabaseEnabled)(
   "revoking the current registry version promotes a successor (real PostgreSQL)",
   () => {
     let data: typeof import("@sourceweft/db");
@@ -40,13 +40,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
     const revoke = { actorUserId: "skill-test-admin", reason: "bad release" };
 
     beforeAll(async () => {
-      if (
-        !new URL(process.env.DATABASE_URL!).pathname.startsWith(
-          "/sourceweft_skillv6_",
-        )
-      )
-        throw new Error("Refusing non-isolated database");
-      data = await import("@sourceweft/db");
+      data = await loadSkillDatabase();
       repo = await import("./repository");
       review = await import("./review");
       skills = await import("../repository");
@@ -153,8 +147,7 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
     }) =>
       (
         version.manifestJson.registry?.moderation as
-          | { promotedSkillVersionId?: string }
-          | undefined
+          { promotedSkillVersionId?: string } | undefined
       )?.promotedSkillVersionId;
 
     test("currency passes down the published versions by commit date", async () => {

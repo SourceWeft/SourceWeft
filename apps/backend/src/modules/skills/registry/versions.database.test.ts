@@ -2,6 +2,10 @@ import { randomUUID } from "node:crypto";
 import { beforeAll, afterAll, describe, test, expect, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { sha256 } from "../hash";
+import {
+  loadSkillDatabase,
+  skillDatabaseEnabled,
+} from "../../../test/skill-database";
 
 // PostgreSQL is real; the object store under `../storage` is a map.
 const store = vi.hoisted(() => ({ objects: new Map<string, Buffer>() }));
@@ -17,7 +21,7 @@ vi.mock("../../sources/storage", () => ({
     store.objects.get(key)!,
 }));
 
-describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
+describe.skipIf(!skillDatabaseEnabled)(
   "registry real PostgreSQL lifecycle",
   () => {
     let data: typeof import("@sourceweft/db");
@@ -31,26 +35,18 @@ describe.skipIf(process.env.RUN_SKILL_DB_TESTS !== "1")(
     const viewer = { teamId, workspaceId, userId: "skill-owner" };
     const ids: string[] = [];
     beforeAll(async () => {
-      if (
-        !new URL(process.env.DATABASE_URL!).pathname.startsWith(
-          "/sourceweft_skillv6_",
-        )
-      )
-        throw new Error("Refusing non-isolated database");
-      data = await import("@sourceweft/db");
+      data = await loadSkillDatabase();
       repo = await import("./repository");
       versions = await import("./versions");
       review = await import("./review");
       skills = await import("../repository");
       selection = await import("../selection");
-      await data.db
-        .insert(data.workspaces)
-        .values({
-          id: workspaceId,
-          organizationId: teamId,
-          name: "Skill tests",
-          slug: randomUUID(),
-        });
+      await data.db.insert(data.workspaces).values({
+        id: workspaceId,
+        organizationId: teamId,
+        name: "Skill tests",
+        slug: randomUUID(),
+      });
     });
     afterAll(async () => {
       if (!data) return;
