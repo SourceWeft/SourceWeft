@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
-import { Hono } from "hono";
 import { beforeEach, test, vi } from "vitest";
-import { ApiError, ApiResponse, toApiError } from "../response/api-response";
+import { createRouteTestApp } from "../../test/hono";
 
 // The report routes: who may send and read reports, what the body must hold,
 // and how each outcome of the market module is answered. The module itself is
@@ -35,13 +34,7 @@ vi.mock("../../modules/skills/market/auto-list", () => ({}));
 
 import { registerSkillReportRoutes } from "./skills-reports";
 
-function createTestApp() {
-  const app = new Hono();
-  registerSkillReportRoutes(app);
-  app.notFound((c) => ApiResponse.error(c, ApiError.notFound()));
-  app.onError((error, c) => ApiResponse.error(c, toApiError(error)));
-  return app;
-}
+const createTestApp = () => createRouteTestApp(registerSkillReportRoutes);
 
 const post = (body: unknown, headers: Record<string, string> = {}) => ({
   method: "POST",

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { Hono } from "hono";
 import { beforeEach, test, vi } from "vitest";
-import { ApiError, ApiResponse, toApiError } from "../response/api-response";
+import { createRouteTestApp } from "../../test/hono";
+import { ApiError } from "../response/api-response";
 
 // The overview admin routes: who may call them, what each passes down, and
 // the shapes that come back. The market functions are mocked; their SQL is
@@ -24,10 +24,9 @@ vi.mock("./skills-market-admin", () => ({
   },
 }));
 
-vi.mock("../middleware/auth-session", () => ({
-  getSessionUserId: () => "admin_1",
-  requireSession: async () => ({ user: { id: "admin_1" } }),
-}));
+vi.mock("../middleware/auth-session", async () =>
+  (await import("../../test/hono")).signedInAs("admin_1"),
+);
 vi.mock("../../modules/market/admin", () => ({
   isMarketAdmin: () => mocks.admin,
 }));
@@ -52,13 +51,7 @@ vi.mock("../../modules/skills/market/analysis-admin", () => ({
 
 import { registerSkillOverviewRoutes } from "./skills-overviews";
 
-function createTestApp() {
-  const app = new Hono();
-  registerSkillOverviewRoutes(app);
-  app.notFound((c) => ApiResponse.error(c, ApiError.notFound()));
-  app.onError((error, c) => ApiResponse.error(c, toApiError(error)));
-  return app;
-}
+const createTestApp = () => createRouteTestApp(registerSkillOverviewRoutes);
 
 const json = (method: string, body: unknown) => ({
   method,

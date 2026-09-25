@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
-import { Hono } from "hono";
 import { beforeEach, test, vi } from "vitest";
-import { ApiError, ApiResponse, toApiError } from "../response/api-response";
+import { createRouteTestApp } from "../../test/hono";
 
 const mocks = vi.hoisted(() => ({
   resolvePublicArtifactBytes: vi.fn(),
@@ -27,13 +26,7 @@ vi.mock("../../modules/artifacts", () => ({
 
 import { registerPublicShareRoutes } from "./public-shares";
 
-function createTestApp() {
-  const app = new Hono();
-  registerPublicShareRoutes(app);
-  app.notFound((c) => ApiResponse.error(c, ApiError.notFound()));
-  app.onError((error, c) => ApiResponse.error(c, toApiError(error)));
-  return app;
-}
+const createTestApp = () => createRouteTestApp(registerPublicShareRoutes);
 
 const artifact = {
   id: "artifact-1",

@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { Hono } from "hono";
 import { beforeEach, test, vi } from "vitest";
-import { ApiError, ApiResponse, toApiError } from "../response/api-response";
+import { createRouteTestApp } from "../../test/hono";
+import { ApiError, ApiResponse } from "../response/api-response";
 
 const mocks = vi.hoisted(() => ({
   findMarketSkill: vi.fn(),
@@ -32,13 +33,7 @@ import {
   registerSkillPublicRoutes,
 } from "./skills-public";
 
-function createTestApp() {
-  const app = new Hono();
-  registerSkillPublicRoutes(app);
-  app.notFound((c) => ApiResponse.error(c, ApiError.notFound()));
-  app.onError((error, c) => ApiResponse.error(c, toApiError(error)));
-  return app;
-}
+const createTestApp = () => createRouteTestApp(registerSkillPublicRoutes);
 
 /** What the repository was asked for, less the parameters nobody gave. */
 function listRequest() {

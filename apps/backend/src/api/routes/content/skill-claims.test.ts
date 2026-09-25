@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
-import { Hono } from "hono";
 import { beforeEach, test, vi } from "vitest";
 import { ContentError } from "../../../modules/content/errors";
-import { ApiError, ApiResponse, toApiError } from "../../response/api-response";
+import { createWorkspaceRouteTestApp } from "../../../test/hono";
 
 const mocks = vi.hoisted(() => ({
   session: vi.fn(),
@@ -29,15 +28,8 @@ vi.mock("../../../modules/skills/market/claims", () => ({
 
 import { registerSkillClaimRoutes } from "./skill-claims";
 
-function createTestApp() {
-  const app = new Hono();
-  const workspaceRoutes = new Hono();
-  registerSkillClaimRoutes(workspaceRoutes);
-  app.route("/v1/workspaces/:workspaceId", workspaceRoutes);
-  app.notFound((c) => ApiResponse.error(c, ApiError.notFound()));
-  app.onError((error, c) => ApiResponse.error(c, toApiError(error)));
-  return app;
-}
+const createTestApp = () =>
+  createWorkspaceRouteTestApp(registerSkillClaimRoutes);
 
 const base = "/v1/workspaces/workspace_1/skills/claims";
 const get = (path: string) => createTestApp().request(path);
@@ -124,7 +116,10 @@ test("starting takes a strict body and claims for the session's user only", asyn
   assert.equal(mocks.start.mock.calls.length, 0);
 
   mocks.start.mockResolvedValue({ claim });
-  const decided = await post(base, { repo: " ada/skills ", method: "github_account" });
+  const decided = await post(base, {
+    repo: " ada/skills ",
+    method: "github_account",
+  });
   assert.equal(decided.status, 200);
   assert.deepEqual(mocks.start.mock.calls[0], [
     { userId: "user_1", repo: "ada/skills", method: "github_account" },
@@ -172,7 +167,10 @@ test("restore acts on the caller's claim and answers what it released", async ()
   assert.deepEqual(mocks.restore.mock.calls[0], [
     { userId: "user_1", claimId: "claim_1" },
   ]);
-  assert.deepEqual(await restored.json(), { repo: "ada/skills", skillCount: 2 });
+  assert.deepEqual(await restored.json(), {
+    repo: "ada/skills",
+    skillCount: 2,
+  });
 
   mocks.restore.mockRejectedValueOnce(
     new ContentError(409, "SKILL_CLAIM_NOT_VERIFIED", "not verified"),

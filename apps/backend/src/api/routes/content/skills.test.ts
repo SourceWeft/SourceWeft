@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
-import { Hono } from "hono";
 import { beforeEach, test, vi } from "vitest";
-import { ApiError, ApiResponse, toApiError } from "../../response/api-response";
 import { ContentError } from "../../../modules/content/errors";
+import { createWorkspaceRouteTestApp } from "../../../test/hono";
 
 const mocks = vi.hoisted(() => ({
   listCatalog: vi.fn(),
@@ -12,10 +11,9 @@ const mocks = vi.hoisted(() => ({
   getRegistryVersionDetail: vi.fn(),
 }));
 
-vi.mock("../../middleware/auth-session", () => ({
-  getSessionUserId: () => "user_1",
-  requireSession: async () => ({ user: { id: "user_1" } }),
-}));
+vi.mock("../../middleware/auth-session", async () =>
+  (await import("../../../test/hono")).signedInAs("user_1"),
+);
 vi.mock("../../../modules/workspace", () => ({
   requireContentWorkspace: async () => ({
     id: "workspace_1",
@@ -39,17 +37,13 @@ vi.mock("../../../modules/skills/registry/permissions", () => ({
 
 import { registerSkillRoutes } from "./skills";
 
-function createTestApp() {
-  const app = new Hono();
-  const workspaceRoutes = new Hono();
-  registerSkillRoutes(workspaceRoutes);
-  app.route("/v1/workspaces/:workspaceId", workspaceRoutes);
-  app.notFound((c) => ApiResponse.error(c, ApiError.notFound()));
-  app.onError((error, c) => ApiResponse.error(c, toApiError(error)));
-  return app;
-}
+const createTestApp = () => createWorkspaceRouteTestApp(registerSkillRoutes);
 
-const viewer = { teamId: "team_1", workspaceId: "workspace_1", userId: "user_1" };
+const viewer = {
+  teamId: "team_1",
+  workspaceId: "workspace_1",
+  userId: "user_1",
+};
 const base = "/v1/workspaces/workspace_1/skills/catalog";
 
 beforeEach(() => {
@@ -142,7 +136,11 @@ test("an unknown filter value or sort is a validation error", async () => {
 // service, whose error must reach the client under its own code.
 test("a cursor used with another sort answers INVALID_CURSOR", async () => {
   mocks.listCatalog.mockRejectedValue(
-    new ContentError(400, "INVALID_CURSOR", "Catalog cursor belongs to the 'name' sort, not 'popular'"),
+    new ContentError(
+      400,
+      "INVALID_CURSOR",
+      "Catalog cursor belongs to the 'name' sort, not 'popular'",
+    ),
   );
   const response = await createTestApp().request(
     `${base}?cursor=good&sort=popular`,
@@ -156,7 +154,14 @@ test("a cursor used with another sort answers INVALID_CURSOR", async () => {
 
 test("categories is not shadowed by the catalogId route", async () => {
   mocks.listCatalogCategories.mockResolvedValue({
-    items: [{ slug: "documents-office", name: "Documents & Office", description: null, count: 2 }],
+    items: [
+      {
+        slug: "documents-office",
+        name: "Documents & Office",
+        description: null,
+        count: 2,
+      },
+    ],
   });
   const response = await createTestApp().request(`${base}/categories`);
   assert.equal(response.status, 200);
@@ -171,7 +176,13 @@ test("categories is not shadowed by the catalogId route", async () => {
 });
 
 test("bad catalog paging input is a validation error, not a query", async () => {
-  for (const query of ["limit=0", "limit=101", "limit=abc", "cursor=bad", "cursor="]) {
+  for (const query of [
+    "limit=0",
+    "limit=101",
+    "limit=abc",
+    "cursor=bad",
+    "cursor=",
+  ]) {
     const response = await createTestApp().request(`${base}?${query}`);
     assert.equal(response.status, 400, query);
     const body = (await response.json()) as { code?: string };

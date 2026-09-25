@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
-import { Hono } from "hono";
 import { beforeEach, test, vi } from "vitest";
-import { ApiError, ApiResponse, toApiError } from "../response/api-response";
+import { createRouteTestApp } from "../../test/hono";
 
 // The market admin routes: who may call them, which market function each one
 // goes through, and that every one answers with the stored standing.
@@ -22,10 +21,9 @@ const mocks = vi.hoisted(() => ({
   recordVersionModeration: vi.fn(),
 }));
 
-vi.mock("../middleware/auth-session", () => ({
-  getSessionUserId: () => "admin_1",
-  requireSession: async () => ({ user: { id: "admin_1" } }),
-}));
+vi.mock("../middleware/auth-session", async () =>
+  (await import("../../test/hono")).signedInAs("admin_1"),
+);
 vi.mock("../../modules/market/admin", () => ({
   isMarketAdmin: () => mocks.admin,
 }));
@@ -58,13 +56,8 @@ vi.mock("../../modules/skills/market/standing", () => ({
 
 import { registerSkillRegistryAdminRoutes } from "./skills-registry";
 
-function createTestApp() {
-  const app = new Hono();
-  registerSkillRegistryAdminRoutes(app);
-  app.notFound((c) => ApiResponse.error(c, ApiError.notFound()));
-  app.onError((error, c) => ApiResponse.error(c, toApiError(error)));
-  return app;
-}
+const createTestApp = () =>
+  createRouteTestApp(registerSkillRegistryAdminRoutes);
 
 const base = "/v1/skills/registry/admin/skills/skill_1";
 const standing = {
@@ -184,7 +177,10 @@ test("the visibility route is list and delist under another name", async () => {
   ]);
 
   mocks.calls.length = 0;
-  await app.request(`${base}/visibility`, json("PUT", { visibility: "restricted" }));
+  await app.request(
+    `${base}/visibility`,
+    json("PUT", { visibility: "restricted" }),
+  );
   assert.deepEqual(mocks.calls, ["delistSkill"]);
 
   const bad = await app.request(
@@ -290,7 +286,11 @@ test("featured is an admin's choice, answered with the stored standing", async (
     ratingAvg: null,
   });
 
-  for (const body of [{ featured: "yes" }, { featured: true, setBy: "sync" }, {}]) {
+  for (const body of [
+    { featured: "yes" },
+    { featured: true, setBy: "sync" },
+    {},
+  ]) {
     const response = await app.request(`${base}/featured`, json("PUT", body));
     assert.equal(response.status, 400, JSON.stringify(body));
   }
@@ -357,7 +357,10 @@ test("review-queue decisions are audited as what they were: publish, reject, rev
   const publish = "/v1/skills/registry/admin/submissions/v_1/publish";
   const reject = "/v1/skills/registry/admin/submissions/v_1/reject";
 
-  mocks.getVersionForAudit.mockResolvedValue({ skillId: "skill_1", status: "draft" });
+  mocks.getVersionForAudit.mockResolvedValue({
+    skillId: "skill_1",
+    status: "draft",
+  });
   mocks.setVersionStatus.mockResolvedValue({
     skillVersionId: "v_1",
     status: "published",
