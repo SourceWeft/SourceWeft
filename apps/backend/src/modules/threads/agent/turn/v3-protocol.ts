@@ -306,14 +306,61 @@ export function unwrapCustomEvent(data: unknown): unknown {
  * handlers parse (they were written against the old `updates`-mode interrupt
  * chunk). This is what lets the interrupt handling move from mid-stream to the
  * clean post-drain `run.interrupted` surface without touching those handlers.
+ *
+ * An interrupt raised inside a `task` delegate is reported twice under one id —
+ * once by the delegate's subgraph and once as it bubbles through the parent —
+ * so entries are collapsed by id; otherwise one pause would open two
+ * confirmations.
  */
 export function interruptsToLegacyUpdatesPayload(
   interrupts: ReadonlyArray<{ interruptId?: string; payload?: unknown }>,
 ): { __interrupt__: Array<{ id?: string; value: unknown }> } {
+  const seenIds = new Set<string>();
+  const unique = interrupts.filter((entry) => {
+    if (!entry.interruptId) {
+      return true;
+    }
+    if (seenIds.has(entry.interruptId)) {
+      return false;
+    }
+    seenIds.add(entry.interruptId);
+    return true;
+  });
   return {
-    __interrupt__: interrupts.map((entry) => ({
+    __interrupt__: unique.map((entry) => ({
       ...(entry.interruptId ? { id: entry.interruptId } : {}),
       value: entry.payload,
     })),
   };
+}
+
+/**
+ * Whether a v3 `tool-error` message is a LangGraph interrupt passing through the
+ * tool rather than a failure. v3 keeps only an error's message, and a
+ * `GraphInterrupt`'s message is `JSON.stringify(interrupts)` — a non-empty array
+ * of `{ id, value }`. That is what a `task` call carries while its delegate
+ * waits for approval, and what `askUser` carries while it waits for an answer.
+ */
+export function isSerializedInterruptMessage(message: unknown): boolean {
+  if (typeof message !== "string" || !message.trimStart().startsWith("[")) {
+    return false;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(message);
+  } catch {
+    return false;
+  }
+  return (
+    Array.isArray(parsed) &&
+    parsed.length > 0 &&
+    parsed.every((entry) => {
+      const record = toObjectRecord(entry);
+      return (
+        typeof record?.id === "string" &&
+        record.id.length > 0 &&
+        "value" in record
+      );
+    })
+  );
 }
