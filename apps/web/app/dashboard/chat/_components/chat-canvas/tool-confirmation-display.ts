@@ -10,6 +10,23 @@ type ToolConfirmationDisplayInput = Pick<
   "action" | "preview" | "editableArgs"
 >;
 
+export function gmailSendReview(confirmation: ToolConfirmationDisplayInput) {
+  if (confirmation.action.type !== "gmail.message.send") return null;
+  const request = record(confirmation.preview.requestJson);
+  const recipients = (value: unknown) =>
+    Array.isArray(value) && value.every((entry) => typeof entry === "string")
+      ? value.join(", ")
+      : null;
+  const from = typeof request.from === "string" ? request.from : null;
+  const to = recipients(request.to);
+  const cc = recipients(request.cc);
+  const bcc = recipients(request.bcc);
+  const subject = typeof request.subject === "string" ? request.subject : null;
+  const body = typeof request.body === "string" ? request.body : null;
+  if (!from || !to || !subject || !body) return null;
+  return { from, to, cc, bcc, subject, body };
+}
+
 function formatBytes(value: unknown, t: Translate) {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
     return t("toolConfirmation.detail.sizeNotProvided");

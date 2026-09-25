@@ -723,15 +723,29 @@ function getToolConfirmationRecord(output: unknown) {
     : null;
 }
 
-function normalizePublicToolConfirmationOutput(
+export function normalizePublicToolConfirmationOutput(
   confirmation: Record<string, unknown>,
 ) {
   const preview = toObjectRecord(confirmation.preview);
+  const action = toObjectRecord(confirmation.action);
+  const gmailSendRequest =
+    action?.type === "gmail.message.send"
+      ? toObjectRecord(preview?.requestJson)
+      : null;
+  const gmailSendFields = gmailSendRequest
+    ? Object.fromEntries(
+        ["from", "to", "cc", "bcc", "subject", "body"]
+          .filter((key) => key in gmailSendRequest)
+          .map((key) => [key, gmailSendRequest[key]]),
+      )
+    : null;
   const normalized = {
     ...confirmation,
     preview: preview
       ? Object.fromEntries(
-          Object.entries(preview).filter(([key]) => key !== "requestJson"),
+          Object.entries(preview)
+            .filter(([key]) => key !== "requestJson")
+            .concat(gmailSendFields ? [["requestJson", gmailSendFields]] : []),
         )
       : confirmation.preview,
   } as Record<string, unknown>;
