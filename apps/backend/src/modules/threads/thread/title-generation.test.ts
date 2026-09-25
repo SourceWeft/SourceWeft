@@ -1,8 +1,8 @@
-import { adaptBillingTestPort } from "../../../test/billing-runtime";
 import assert from "node:assert/strict";
 import { beforeEach, test, vi } from "vitest";
-import type { BillingSummaryResponse } from "@sourceweft/contracts";
+import type { BillingMode } from "@sourceweft/contracts";
 import type { LegacyBillingTestPort as ContentBillingPort } from "../../../test/billing-runtime";
+import { createBillingPort } from "../../../test/thread-stream-fixtures";
 
 const gatewayMocks = vi.hoisted(() => ({
   getRawModelGatewayClient: vi.fn(),
@@ -20,21 +20,10 @@ vi.mock("../../content/model-billing", () => modelBillingMocks);
 const { generateThreadTitle } = await import("./title-generation");
 
 function createBilling(
-  billingMode = "enforced",
+  billingMode: BillingMode = "enforced",
   available = 500,
 ): ContentBillingPort {
-  return adaptBillingTestPort({
-    getSummary: vi.fn(
-      async (teamId: string) =>
-        ({
-          teamId,
-          billingMode,
-          credits: { available, consumedThisCycle: 0 },
-        }) as unknown as BillingSummaryResponse,
-    ),
-    meterConsume: vi.fn(),
-    meterIngestion: vi.fn(),
-  }) as unknown as ContentBillingPort;
+  return createBillingPort({ billingMode, availableCredits: available });
 }
 
 const input = {

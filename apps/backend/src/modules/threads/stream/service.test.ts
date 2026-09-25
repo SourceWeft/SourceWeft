@@ -1,4 +1,3 @@
-import { adaptBillingTestPort } from "../../../test/billing-runtime";
 import assert from "node:assert/strict";
 import { afterAll, test, vi } from "vitest";
 import type { ToolConfirmationRequest } from "@sourceweft/contracts";
@@ -11,18 +10,20 @@ import type {
 import { closeQueue } from "../../../shared/queue";
 import { ContentError } from "../../content/errors";
 import {
-  buildAgentRunSpanMetadata,
-  buildAgentRunSpanOutput,
   ContentThreadStreamService,
   threadStreamObservability,
 } from "./service";
-import { buildGatewayRequestMetadata } from "../../content/model-gateway-audit";
 import type {
   DeepAgentTurnEvent,
   DeepAgentTurnOutcome,
 } from "../agent/turn/runner";
-import type { LegacyBillingTestPort as ContentBillingPort } from "../../../test/billing-runtime";
-import { createPreparedThreadTurn } from "../../../test/prepared-turn";
+import {
+  createBillingPort,
+  createCitation,
+  createStreamPreparedTurn,
+  createTurnOutcome,
+  parseSseData,
+} from "../../../test/thread-stream-fixtures";
 import type { MessageRecord } from "../../content/types";
 import type {
   MeteredLlmCallTrace,
@@ -38,74 +39,6 @@ import {
 afterAll(async () => {
   await closeQueue();
 });
-
-function parseSseData(value: string) {
-  assert.equal(value.startsWith("data: "), true);
-  return JSON.parse(value.slice("data: ".length).trim()) as Record<
-    string,
-    unknown
-  >;
-}
-
-function createBillingPort(
-  overrides: Partial<ContentBillingPort> = {},
-): ContentBillingPort {
-  return adaptBillingTestPort({
-    getSummary: vi.fn(async (teamId: string) => ({
-      teamId,
-      planFamily: "individual_free",
-      billingMode: "disabled",
-      cycleAnchorAt: new Date(0).toISOString(),
-      cycleSource: "free_account",
-      cycleStartAt: new Date(0).toISOString(),
-      cycleEndAt: new Date(0).toISOString(),
-      pages: {
-        limit: 0,
-        used: 0,
-        remaining: 0,
-        monthlyGrant: 0,
-        monthlyBalance: 0,
-        addOnBalance: 0,
-        consumedThisCycle: 0,
-        available: 0,
-      },
-      credits: {
-        monthlyGrant: 0,
-        monthlyBalance: 0,
-        addOnBalance: 0,
-        reserved: 0,
-        consumedThisCycle: 0,
-        available: 0,
-      },
-      seats: {
-        used: 0,
-        limit: 0,
-        remaining: 0,
-        activeMembers: 0,
-        pendingInvitations: 0,
-      },
-      spendLimits: {
-        softCapUsd: null,
-        hardCapUsd: null,
-      },
-    })),
-    meterConsume: vi.fn(async (teamId: string) => ({
-      teamId,
-      consumedCredits: 0,
-      availableCredits: 0,
-      consumedThisCycle: 0,
-      idempotencyReplayed: false,
-    })),
-    meterIngestion: vi.fn(async (teamId: string) => ({
-      teamId,
-      pagesConsumed: 0,
-      pagesUsed: 0,
-      pagesRemaining: 0,
-      idempotencyReplayed: false,
-    })),
-    ...overrides,
-  }) as unknown as ContentBillingPort;
-}
 
 function createAssistantMessageRecord(
   overrides: Partial<MessageRecord> = {},
@@ -128,35 +61,9 @@ function createAssistantMessageRecord(
   };
 }
 
-const outcome: DeepAgentTurnOutcome = {
-  assistantContent: "Answer",
-  retrieval: null,
-  citations: [],
-  availableCitations: [],
-  retrievalCalls: [],
-  toolCalls: [],
-  thinkingSteps: [],
-  reasoningSegments: [],
-  agentCheckpoint: {
-    beforeInput: null,
-    beforeAssistant: null,
-    resume: null,
-    final: null,
-  },
-};
+const outcome = createTurnOutcome();
 
-const citation = {
-  citation: "c1",
-  sourceId: "source-1",
-  sourceTitle: "invoice.pdf",
-  documentId: "document-1",
-  chunkId: "chunk-1",
-  chunkNo: 0,
-  score: 0.95,
-  excerpt: "Invoice total is 50.",
-  quoteText: "Invoice total is 50.",
-  origin: "search_sources" as const,
-};
+const citation = createCitation();
 
 function createToolConfirmation(
   overrides: Partial<ToolConfirmationRequest> = {},
@@ -255,312 +162,7 @@ function createMeteredLlmCall(
   };
 }
 
-test("buildAgentRunSpanOutput includes reasoning and usage", () => {
-  assert.deepEqual(
-    buildAgentRunSpanOutput({
-      ...outcome,
-      finishReason: "stop",
-      usage: {
-        inputTokens: 10,
-        outputTokens: 4,
-        totalTokens: 14,
-        cacheReadTokens: 3,
-      },
-      reasoning: "Used the invoice total from the retrieved source.",
-      thinkingSteps: [
-        {
-          id: "reasoning-summary",
-          kind: "reasoning_summary",
-          title: "Reasoning summary",
-          status: "completed",
-          items: [],
-          sequence: 0,
-          description: "Used the invoice total from the retrieved source.",
-        },
-      ],
-      reasoningSegments: [
-        {
-          id: "model-reasoning-1",
-          text: "Used the invoice total from the retrieved source.",
-          sequence: 0,
-        },
-      ],
-    }),
-    {
-      assistantContent: "Answer",
-      finishReason: "stop",
-      usage: {
-        inputTokens: 10,
-        outputTokens: 4,
-        totalTokens: 14,
-        cacheReadTokens: 3,
-      },
-      reasoning: "Used the invoice total from the retrieved source.",
-      reasoningSegments: [
-        {
-          id: "model-reasoning-1",
-          index: 0,
-          sequence: 0,
-          phase: "initial",
-          text: {
-            preview: "Used the invoice total from the retrieved source.",
-            length: 49,
-            truncated: false,
-          },
-        },
-      ],
-      toolCallCount: 0,
-      retrievalCallCount: 0,
-      citationCount: 0,
-      availableCitationCount: 0,
-      citations: [],
-      availableCitations: [],
-      thinkingStepCount: 1,
-      renderBlockCount: 0,
-      reasoningSegmentCount: 1,
-    },
-  );
-});
-
-test("buildAgentRunSpanOutput includes citation evidence summaries", () => {
-  const output = buildAgentRunSpanOutput({
-    ...outcome,
-    citations: [citation],
-    availableCitations: [
-      citation,
-      {
-        ...citation,
-        citation: "c2",
-        chunkId: "chunk-2",
-        chunkNo: 1,
-        origin: "read_file",
-        path: "/kb/invoice.md",
-        excerpt: "x".repeat(500),
-        quoteText: "y".repeat(500),
-      },
-    ],
-  });
-
-  assert.equal(output.citationCount, 1);
-  assert.equal(output.availableCitationCount, 2);
-  assert.deepEqual(output.citations, [
-    {
-      citation: "c1",
-      rank: 1,
-      sourceId: "source-1",
-      sourceTitle: "invoice.pdf",
-      documentId: "document-1",
-      chunkId: "chunk-1",
-      chunkNo: 0,
-      origin: "search_sources",
-      score: 0.95,
-      excerpt: {
-        preview: "Invoice total is 50.",
-        length: 20,
-        truncated: false,
-      },
-      quoteText: {
-        preview: "Invoice total is 50.",
-        length: 20,
-        truncated: false,
-      },
-    },
-  ]);
-
-  const available = output.availableCitations as Array<Record<string, unknown>>;
-  assert.equal(available.length, 2);
-  assert.equal(available[1]?.path, "/kb/invoice.md");
-  assert.deepEqual(available[1]?.excerpt, {
-    preview: "x".repeat(320),
-    length: 500,
-    truncated: true,
-  });
-  assert.deepEqual(available[1]?.quoteText, {
-    preview: "y".repeat(400),
-    length: 500,
-    truncated: true,
-  });
-});
-
-test("buildAgentRunSpanMetadata includes thinking settings", () => {
-  assert.deepEqual(
-    buildAgentRunSpanMetadata({
-      ...prepared,
-      llm: {
-        executionMode: "GLOBAL",
-        thinking: {
-          mode: "effort",
-          enabled: true,
-          effort: "high",
-          includeReasoning: true,
-        },
-      },
-    }),
-    {
-      mode: "continue",
-      modelAlias: "test-model",
-      profileAlias: "test-profile",
-      gateway: {
-        executionMode: "GLOBAL",
-        providerHint: null,
-        byokProvider: null,
-        thinkingMode: "effort",
-        thinkingEnabled: true,
-        thinkingEffort: "high",
-        thinkingIncludeReasoning: true,
-        keySource: "global",
-        provider: null,
-        routeStrategy: null,
-      },
-      selectedSkillCount: 0,
-    },
-  );
-});
-
-test("buildAgentRunSpanMetadata uses BYOK identity over catalog profile", () => {
-  assert.deepEqual(
-    buildAgentRunSpanMetadata({
-      ...prepared,
-      llm: {
-        executionMode: "BYOK",
-        providerHint: "openrouter",
-        byokModelId: "byok-model-1",
-        credentialId: "credential-1",
-        modelAlias: "openai/gpt-4o",
-        providerModel: "openai/gpt-4o",
-        byok: {
-          provider: "openrouter",
-          apiKey: "test-key",
-        },
-      },
-    }),
-    {
-      mode: "continue",
-      modelAlias: "byok:openrouter:openai/gpt-4o",
-      profileAlias: null,
-      catalogModelAlias: "test-model",
-      gateway: {
-        executionMode: "BYOK",
-        providerHint: "openrouter",
-        byokProvider: "openrouter",
-        byokModelId: "byok-model-1",
-        credentialId: "credential-1",
-        thinkingMode: null,
-        thinkingEnabled: false,
-        thinkingEffort: null,
-        thinkingIncludeReasoning: null,
-        keySource: "byokCredential",
-        provider: null,
-        routeStrategy: null,
-      },
-      selectedSkillCount: 0,
-    },
-  );
-});
-
-test("buildGatewayRequestMetadata keeps BYOK profileAlias out of observed metadata", () => {
-  const metadata = buildGatewayRequestMetadata({
-    teamId: "team-1",
-    workspaceId: "workspace-1",
-    userId: "user-1",
-    threadId: "thread-1",
-    messageId: "message-1",
-    feature: "chat",
-    operation: "chat.complete",
-    modelAlias: "catalog-model",
-    profileAlias: "global-profile",
-    modelKind: "chat",
-    llm: {
-      executionMode: "BYOK",
-      providerHint: "openrouter",
-      byokModelId: "byok-model-1",
-      credentialId: "credential-1",
-      modelAlias: "openai/gpt-4o",
-      providerModel: "openai/gpt-4o",
-      byok: {
-        provider: "openrouter",
-        apiKey: "test-key",
-      },
-    },
-  });
-
-  assert.equal(metadata.profileAlias, null);
-  assert.equal(metadata.catalogProfileAlias, undefined);
-  assert.equal(metadata.modelAlias, "byok:openrouter:openai/gpt-4o");
-  assert.equal(metadata.catalogModelAlias, "catalog-model");
-  assert.equal(metadata.byokModelId, "byok-model-1");
-  assert.equal(metadata.credentialId, "credential-1");
-  assert.equal(metadata.providerModel, "openai/gpt-4o");
-  assert.equal(metadata.keySource, "byokCredential");
-});
-
-const prepared: PreparedThreadTurn = createPreparedThreadTurn({
-  reasoningRun: { runId: "stream-test", parentRunId: null, base: "" },
-  sourceSelectionRevision: 0,
-  userId: "user-1",
-  workspace: {
-    id: "workspace-1",
-    organizationId: "team-1",
-  } as PreparedThreadTurn["workspace"],
-  thread: {
-    id: "thread-1",
-    teamId: "team-1",
-    workspaceId: "workspace-1",
-    title: "New chat",
-    modelSettings: {
-      llmProfileAlias: null,
-      imageProfileAlias: null,
-      visionProfileAlias: null,
-      llmModelAlias: null,
-      imageModelAlias: null,
-      visionModelAlias: null,
-    },
-    chatPreferences: {
-      thinking: { mode: "auto", effort: "medium" },
-      webAccess: true,
-      composerOptions: {},
-    },
-    sourceCount: 0,
-    visibility: "private",
-    parentThreadId: null,
-    personaId: null,
-    origin: "user",
-    createdBy: "user-1",
-    createdAt: new Date(0).toISOString(),
-    updatedAt: new Date(0).toISOString(),
-    lastMessageAt: null,
-  },
-  messageContent: "What is in this invoice?",
-  messageContentJson: {
-    version: 1,
-    parts: [{ type: "text", text: "What is in this invoice?" }],
-  },
-  agentMessageContent: "What is in this invoice?",
-  runTraceId: "user-message-1",
-  userMessage: {
-    id: "user-message-1",
-    teamId: "team-1",
-    workspaceId: "workspace-1",
-    threadId: "thread-1",
-    parentMessageId: null,
-    role: "user",
-    content: "What is in this invoice?",
-    contentJson: {},
-    metadata: {},
-    createdAt: new Date(0).toISOString(),
-    createdBy: "user-1",
-    model: null,
-    creditsConsumed: null,
-  },
-  assistantMessageIdOverride: null,
-  providerModel: "test-model",
-  chatProfile: {
-    gatewayConfigId: "gateway-1",
-  } as PreparedThreadTurn["chatProfile"],
-  llmIdempotencyKey: "thread-stream:user-message-1:assistant",
-  agentRunThreadId: "thread-1",
-  initialTitle: "New chat",
-} satisfies Partial<PreparedThreadTurn>);
+const prepared = createStreamPreparedTurn();
 
 function createTurnService(input?: {
   title?: string | null;

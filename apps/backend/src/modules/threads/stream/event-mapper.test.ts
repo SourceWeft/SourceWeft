@@ -5,15 +5,7 @@ import {
   normalizeToolOutputForSse,
 } from "./event-mapper";
 import type { DeepAgentTurnEvent } from "../agent/turn/runner";
-
-function parseSseData(value: string | null) {
-  assert.notEqual(value, null);
-  assert.equal(value!.startsWith("data: "), true);
-  return JSON.parse(value!.slice("data: ".length).trim()) as Record<
-    string,
-    unknown
-  >;
-}
+import { parseSseData } from "../../../test/thread-stream-fixtures";
 
 test("normalizeToolOutputForSse renders file listings as display content", () => {
   assert.deepEqual(
@@ -110,10 +102,7 @@ test("normalizeToolOutputForSse preserves structured confirmation payloads", () 
     userMessage: "This action is waiting for confirmation in SourceWeft.",
   };
 
-  assert.deepEqual(
-    normalizeToolOutputForSse(confirmation),
-    confirmation,
-  );
+  assert.deepEqual(normalizeToolOutputForSse(confirmation), confirmation);
 });
 
 test("normalizeToolOutputForSse preserves structured askUser question payloads", () => {
