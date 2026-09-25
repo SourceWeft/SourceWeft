@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { createIsolatedTestDatabase } from "../test/isolated-database";
+import { provisionMigratedDatabase } from "../test/migrated-database";
 const root = new URL("../../../../", import.meta.url);
 const fixture = new URL(
   "output/playwright/pc-context/environment.private.json",
@@ -17,7 +17,7 @@ try {
 } catch (e) {
   if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
 }
-const isolated = await createIsolatedTestDatabase("pc_context_e2e");
+const isolated = await provisionMigratedDatabase("pc_context_e2e");
 process.env.DATABASE_URL = isolated.url;
 for (const name of ["apps/backend/.env", "apps/web/.env.local"]) {
   const path = new URL(name, root);

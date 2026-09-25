@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
-import { test } from "vitest";
+import { test, vi } from "vitest";
 import { presentThreadRunSummary } from "./threads";
+
+// ./threads pulls in the auth-session middleware, whose module constructs the
+// better-auth instance; the oauth-provider plugin then seeds resources into
+// PostgreSQL. This file tests a pure presenter and must not open a connection.
+vi.mock("../../../modules/auth", () => ({
+  auth: {},
+  getSession: async () => null,
+}));
 
 function runRow(status: string) {
   return {

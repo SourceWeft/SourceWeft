@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { createIsolatedTestDatabase } from "../test/isolated-database";
+import { provisionMigratedDatabase } from "../test/migrated-database";
 
 const root = new URL("../../../../", import.meta.url);
 const statePath = new URL(
@@ -18,7 +18,7 @@ if (
   process.env.JOB_QUEUE_NAME !== "sourceweft-local-pc-e2e"
 )
   throw new Error("Expected isolated E2E ports and queue");
-const isolated = await createIsolatedTestDatabase("local_pc_e2e");
+const isolated = await provisionMigratedDatabase("local_pc_e2e");
 await mkdir(new URL("output/playwright/local-pc/", root), { recursive: true });
 await writeFile(statePath, JSON.stringify({ databaseUrl: isolated.url }), {
   mode: 0o600,

@@ -180,6 +180,19 @@ jobs:
           # module, whose config demands a key at load; locally .env supplies
           # it. Any non-empty value works — requests are mocked.
           PDF2MARKDOWN_API_KEY: ci-test-pdf2markdown-key
+      # Backend database suites are a separate, uncached lane: one migrated
+      # template database per run, cloned per file. Filtered to backend because
+      # enterprise/billing's test:database needs its own database and runs in
+      # billing-editions.yml.
+      - name: Run backend database tests
+        run: pnpm exec turbo run test:database --filter=@sourceweft/backend
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgresql://sourceweft:sourceweft@localhost:5432/sourceweft
+          REDIS_URL: redis://localhost:6379/0
+          BETTER_AUTH_SECRET: ci-test-secret-at-least-32-chars
+          MODEL_GATEWAY_ENCRYPTION_SECRET: ci-test-model-secret-at-least-32
+          PDF2MARKDOWN_API_KEY: ci-test-pdf2markdown-key
 
   cli-cross-platform:
     # The CLI writes files into people's home directories on their own machines,

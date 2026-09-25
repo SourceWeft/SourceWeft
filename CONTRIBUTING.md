@@ -11,3 +11,5 @@ We use a small Issue → pull request workflow so a change has a clear reason, o
 Use the existing `enhancement` or `bug` label when appropriate; `documentation` is optional. Status, priority, and module labels are not part of this workflow. For urgent fixes, create a short Issue and PR, then complete the reproduction and verification details as soon as practical.
 
 PR CI runs lint, types, and tests. The full Docker image and Compose startup validation runs during tag releases and manual image publication. A skipped Docker Build check on a PR is expected.
+
+Backend tests run in two lanes. `pnpm --filter @sourceweft/backend test` is the unit lane and needs no database. `pnpm --filter @sourceweft/backend test:database` runs the `*.database.test.ts` suites against PostgreSQL: it migrates one template database per run and clones it per file, so it needs `DATABASE_URL` with `CREATE DATABASE` permission. A test that opens a real PostgreSQL connection belongs in a `*.database.test.ts` file.
