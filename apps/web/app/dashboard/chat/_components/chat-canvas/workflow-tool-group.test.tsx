@@ -59,8 +59,8 @@ async function renderGroup(input: {
   calls: ToolCallRecord[];
   isRunning?: boolean;
 }) {
-  const byBlockId = new Map(
-    input.calls.map((call) => [`block-${call.id}`, call] as const),
+  const byBlockId = new Map<string, ToolCallRecord>(
+    input.calls.map((call) => [`block-${call.id}`, call]),
   );
   const element = document.createElement("div");
   document.body.append(element);
