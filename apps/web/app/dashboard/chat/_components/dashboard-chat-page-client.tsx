@@ -81,6 +81,7 @@ import type { RequestThinkingConfig } from "../[threadId]/streaming-request-body
 import type { ArtifactListItem } from "./sources-hub";
 import { writeStoredMcpSelection } from "./mcp-selection-storage";
 import {
+  createPendingThreadRunKey,
   setPendingThreadTurn,
   writePendingThreadTurnFallback,
   type PendingThreadTurn,
@@ -1105,7 +1106,7 @@ export function DashboardChatPageClient() {
             images?.length && creationContext.userId && creationContext.draftId
               ? `${creationContext.userId}:${workspaceId}:${creationContext.draftId}:${creationContext.key}`
               : undefined,
-          durableRunKey: crypto.randomUUID(),
+          durableRunKey: createPendingThreadRunKey(),
           userId: creationContext.userId ?? undefined,
           workspaceId,
           content: text,
