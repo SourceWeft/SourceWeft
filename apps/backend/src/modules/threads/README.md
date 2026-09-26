@@ -104,8 +104,9 @@ Triggered when a turn finishes with `finishReason === "tool_confirmation_request
    recover a stale run on the spot; the scheduler also sweeps them, because a
    run whose worker died can sit unread, and BullMQ redelivers its stalled job
    (lock: 5min) before the run looks stale, so that delivery just skips it.
-   A worker that shuts down on SIGTERM/SIGINT fails its in-flight turns itself
-   (`CHAT_RUN_WORKER_SHUTDOWN`) instead of leaving them to this path.
+   A worker that shuts down on SIGTERM/SIGINT gives its in-flight turns 5s to
+   end on their own, then fails the rest itself (`CHAT_RUN_WORKER_SHUTDOWN`)
+   instead of leaving them to this path.
 
 2. **One active run per thread, enforced three times.** `getOrCreateRun` checks
    for an active run, re-checks, and finally catches a unique-constraint

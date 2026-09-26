@@ -86,7 +86,8 @@ const CHAT_RUN_CANCEL_POLL_MS = 2000;
 const activeTurnInterrupts = new Set<(reason: ContentError) => void>();
 
 /**
- * Stops every chat turn this process is running. Each one commits as failed
+ * Stops every chat turn this process is running (a shutting-down worker's last
+ * step; see worker/shutdown.ts). Each one commits as failed
  * with WORKER_SHUTDOWN_CODE, keeping what it already streamed, and its job
  * returns. Returns how many turns were stopped.
  */
