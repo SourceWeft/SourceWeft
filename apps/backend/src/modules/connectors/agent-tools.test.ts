@@ -7,6 +7,8 @@ import {
   createConnectorActionTools,
   resolveConnectorActionTrustScope,
   type ConnectorActionToolContext,
+  CONNECTOR_ACTION_APPROVED_NOTE,
+  connectorActionToolOutput,
 } from "./agent-tools";
 import { connectorRegistry } from "./registry";
 import { listSourceConnectorRecords } from "./repository";
@@ -213,5 +215,47 @@ test("disabled Gmail live search removes read tools but keeps per-message send a
       },
     }),
     null,
+  );
+});
+
+test("an approved connector action's result says the user approved it", () => {
+  const action = {
+    id: "action-1",
+    teamId: "team-1",
+    workspaceId: "workspace-1",
+    connectorId: "connector-1",
+    connectorType: "gmail",
+    actionType: "gmail.message.send",
+    agentToolName: "send_gmail_message",
+    riskLevel: "high" as const,
+    status: "succeeded" as const,
+    requestJson: {},
+    requestPreview: "",
+    resultJson: { sent: true, messageId: "m-1" },
+    externalId: "m-1",
+    idempotencyKey: "key",
+    approvedBy: "user-1",
+    executedBy: "user-1",
+    errorCode: null,
+    errorMessage: null,
+    createdAt: "2026-09-26T00:00:00.000Z",
+    updatedAt: "2026-09-26T00:00:00.000Z",
+  };
+
+  // A delegated sub-agent resumes in a fresh run that never saw the approval
+  // prompt; the result is its only sign the action was approved.
+  assert.deepEqual(connectorActionToolOutput({ action }), {
+    sent: true,
+    messageId: "m-1",
+    actionType: "gmail.message.send",
+    toolName: "send_gmail_message",
+    approval: CONNECTOR_ACTION_APPROVED_NOTE,
+  });
+  assert.equal(
+    "approval" in
+      connectorActionToolOutput({
+        action: { ...action, approvedBy: null },
+      }),
+    false,
   );
 });
