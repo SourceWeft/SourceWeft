@@ -10,6 +10,7 @@ import {
 } from "../shared/model-gateway/index";
 import { connectionOptions } from "../shared/redis-connection";
 import { buildWorkerJobFailureLog } from "./job-failure-log";
+import { drainWorkerForShutdown } from "./shutdown";
 import {
   installWorkerProcessErrorGuards,
   runWorkerJobWithIsolation,
@@ -36,7 +37,10 @@ import {
   failThreadRunAtProcessorBoundary,
   processThreadChatRunJob,
 } from "./processors/thread-chat-run";
-import { agentSandboxService } from "../modules/threads";
+import {
+  agentSandboxService,
+  interruptActiveChatRuns,
+} from "../modules/threads";
 import { connectorAdaptersReady } from "../modules/connectors";
 
 validateBillingStartup();
@@ -312,9 +316,32 @@ function closeWorkers() {
   ]);
 }
 
+// On SIGTERM/SIGINT: stop taking jobs, let chat turns end on their own for a
+// moment, then stop the rest (see drainWorkerForShutdown) and exit. Jobs still
+// running at the deadline are cut off; BullMQ's stall handling redelivers them.
+// A repeated signal is ignored rather than cutting the drain short: process
+// wrappers (npm, pnpm, tsx) relay the one signal they receive, so a single
+// stop can arrive more than once.
+let shuttingDown = false;
 async function shutdown() {
+  if (shuttingDown) {
+    return;
+  }
+  shuttingDown = true;
   logger.info("Worker shutting down");
-  await closeWorkers();
+  const deadline = setTimeout(
+    () => process.exit(1),
+    WORKER_RESTART_DRAIN_TIMEOUT_MS,
+  );
+  await drainWorkerForShutdown({
+    closeWorkers,
+    interruptActiveChatRuns,
+    onInterrupted: (count) =>
+      logger.info("Stopped chat runs still running at shutdown", {
+        interruptedChatRuns: count,
+      }),
+  });
+  clearTimeout(deadline);
   process.exit(0);
 }
 

@@ -2,7 +2,7 @@ import { formatDisplayDate } from "@/lib/i18n/format";
 
 import { useLocale as useDisplayLocale } from "next-intl";
 import { sanitizeClientErrorMessage } from "./client-error-message";
-import { memo, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Bot,
   ChevronDown,
@@ -109,6 +109,10 @@ import {
   type MessageRenderState,
 } from "./message-render-state";
 import { resolveAssistantFallbackActivity } from "./message-list-state";
+import {
+  LATEST_USER_TURN_ATTRIBUTE,
+  pinnedUserTurnScrollTop,
+} from "./conversation-scroll";
 import {
   mergeSourceIds,
   SourceIcon,
@@ -1242,6 +1246,7 @@ const MessageGroupItem = memo(function MessageGroupItem({
     <MessageBranch
       className="group/message flex w-full flex-col gap-1"
       defaultBranch={activeVisibleBranchIndex}
+      {...(isLatestUserGroup ? { [LATEST_USER_TURN_ATTRIBUTE]: "" } : {})}
       onBranchChange={(branchIndex) => {
         const selectedEntry = versionEntries[branchIndex];
         if (!selectedEntry) {
@@ -1558,9 +1563,36 @@ export function MessageList({
     collapsedHistoryCount > 0
       ? messageGroups.slice(collapsedHistoryCount)
       : messageGroups;
+  // Once a turn streams here, following the bottom stops where the message it
+  // answers reaches the top, and stays so after the reply ends — until a newer
+  // turn — so finishing never jumps the view to the reply's end. A thread
+  // opened on a finished turn still opens at the bottom. Read through refs: the
+  // scroll state keeps the first target function it is given.
+  const latestUserGroupIdRef = useRef(latestUserGroupId);
+  const pinnedUserGroupIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    latestUserGroupIdRef.current = latestUserGroupId;
+    if (isStreaming && latestUserGroupId) {
+      pinnedUserGroupIdRef.current = latestUserGroupId;
+    }
+  }, [isStreaming, latestUserGroupId]);
+  const conversationScrollTop = useCallback(
+    (
+      bottomScrollTop: number,
+      elements: Parameters<typeof pinnedUserTurnScrollTop>[1],
+    ) =>
+      latestUserGroupIdRef.current &&
+      latestUserGroupIdRef.current === pinnedUserGroupIdRef.current
+        ? pinnedUserTurnScrollTop(bottomScrollTop, elements)
+        : bottomScrollTop,
+    [],
+  );
 
   return (
-    <Conversation className="h-full min-h-0 flex-1 overflow-hidden [scrollbar-gutter:stable]">
+    <Conversation
+      className="h-full min-h-0 flex-1 overflow-hidden [scrollbar-gutter:stable]"
+      targetScrollTop={conversationScrollTop}
+    >
       <ConversationContent className="px-6 py-8">
         <div className="mx-auto flex w-full min-w-0 max-w-4xl flex-col gap-4">
           {hasOlderMessages ? (

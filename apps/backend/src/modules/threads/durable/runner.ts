@@ -62,6 +62,7 @@ import {
   parseSsePayload,
   synthesizeTerminalRunEvents,
 } from "./run-state";
+import { WORKER_SHUTDOWN_CODE, WORKER_SHUTDOWN_MESSAGE } from "./run-constants";
 
 type TerminalRunStatus = Extract<
   ChatThreadRunStatus,
@@ -78,6 +79,27 @@ const TOOL_CONFIRMATION_FINISH_REASON = "tool_confirmation_requested";
 // Fallback cadence for detecting a cancel the pub/sub delivery may have missed
 // (a Stop that landed before the worker subscribed, or a dropped message).
 const CHAT_RUN_CANCEL_POLL_MS = 2000;
+
+// Stops for the chat turns this process is running, so a worker that is shutting
+// down can end them itself instead of leaving them `running` until stale
+// recovery gives up on their heartbeat.
+const activeTurnInterrupts = new Set<(reason: ContentError) => void>();
+
+/**
+ * Stops every chat turn this process is running (a shutting-down worker's last
+ * step; see worker/shutdown.ts). Each one commits as failed
+ * with WORKER_SHUTDOWN_CODE, keeping what it already streamed, and its job
+ * returns. Returns how many turns were stopped.
+ */
+export function interruptActiveChatRuns() {
+  const interrupts = [...activeTurnInterrupts];
+  for (const interrupt of interrupts) {
+    interrupt(
+      new ContentError(503, WORKER_SHUTDOWN_CODE, WORKER_SHUTDOWN_MESSAGE),
+    );
+  }
+  return interrupts.length;
+}
 function stableDurableUserMessageId(runId: string) {
   return `run-user-${runId}`;
 }
@@ -1691,6 +1713,13 @@ export async function processThreadChatRunJob(
   // that as lost ownership and abort the commit's tail; a cancel racing the
   // commit is settled by the commit's compare-and-set instead.
   let terminalCommitStarted = false;
+  // A shutdown stop leaves a turn that is already committing to finish it.
+  const interruptTurn = (reason: ContentError) => {
+    if (!terminalCommitStarted) {
+      abortTurn(reason);
+    }
+  };
+  activeTurnInterrupts.add(interruptTurn);
   const checkRunOwnership = async () => {
     const error = await durableChatRunService.getRunStopError(run);
     if (error && !terminalCommitStarted) {
@@ -2157,6 +2186,7 @@ export async function processThreadChatRunJob(
       ...(finalRun.errorMessage ? { errorMessage: finalRun.errorMessage } : {}),
     };
   } finally {
+    activeTurnInterrupts.delete(interruptTurn);
     clearInterval(cancelPoll);
     stopLocalMonitor();
     await unsubscribeCancel().catch(() => {});

@@ -46,6 +46,7 @@ async function tick() {
 
     jobs.push(scheduleConnectorSyncs());
     jobs.push(durableChatRunService.expireWaitingApprovals());
+    jobs.push(durableChatRunService.failStaleActiveRuns());
     jobs.push(agentSandboxService.cleanupExpiredSandboxes());
     jobs.push(agentSandboxService.cleanupStaleSandboxOperations());
     // Direct uploads have no request to fail when a client walks away, so the

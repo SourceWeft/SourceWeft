@@ -118,9 +118,11 @@ vi.mock("./repository", () => ({
 }));
 
 import {
+  MCP_TOOL_APPROVED_NOTE,
   McpService,
   mcpEndpointRequiresAuth,
   stripLangChainMcpToolPrefix,
+  withMcpApprovalNote,
 } from "./service";
 import { assertSafeMcpEndpoint } from "./security";
 import { config } from "../../shared/config";
@@ -976,7 +978,11 @@ test("approved high-risk MCP action resumes by args-matched ref under a differen
     { configurable: { tool_call_id: "call_subagent_fresh" } },
   );
 
-  assert.deepEqual(output, { url: "https://example.com/issue/1" });
+  // The result tells the model the user approved the call.
+  assert.deepEqual(output, {
+    url: "https://example.com/issue/1",
+    approval: MCP_TOOL_APPROVED_NOTE,
+  });
   assert.equal(invoke.mock.calls.length, 1);
   assert.equal(
     mocks.findMcpActionRun.mock.calls[0]?.[0].actionRunId,
@@ -987,6 +993,21 @@ test("approved high-risk MCP action resumes by args-matched ref under a differen
     mocks.updateMcpActionRun.mock.calls.at(-1)?.[0].status,
     "succeeded",
   );
+});
+
+test("the approval note is added to text, content-block and object results", () => {
+  assert.equal(
+    withMcpApprovalNote("created"),
+    `${MCP_TOOL_APPROVED_NOTE}\n\ncreated`,
+  );
+  assert.deepEqual(withMcpApprovalNote([{ type: "text", text: "created" }]), [
+    { type: "text", text: MCP_TOOL_APPROVED_NOTE },
+    { type: "text", text: "created" },
+  ]);
+  assert.deepEqual(withMcpApprovalNote({ id: 1 }), {
+    id: 1,
+    approval: MCP_TOOL_APPROVED_NOTE,
+  });
 });
 
 test("MCP action ref for different args does not approve the call", async () => {

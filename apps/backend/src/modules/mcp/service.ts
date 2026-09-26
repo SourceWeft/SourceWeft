@@ -547,6 +547,29 @@ function capMcpModelOutput(value: unknown): unknown {
 }
 
 /**
+ * Said in the result of an MCP call a person approved. An approved call runs in
+ * a later, resumed turn — for a delegated sub-agent, in a fresh run that never
+ * saw the approval prompt — so without this the model has no sign the call was
+ * approved and can report a normal approved call as a skipped approval.
+ */
+export const MCP_TOOL_APPROVED_NOTE =
+  "The user reviewed and approved this exact tool call in SourceWeft before it ran.";
+
+/** Adds MCP_TOOL_APPROVED_NOTE to a text, content-block or object result. */
+export function withMcpApprovalNote(value: unknown): unknown {
+  if (typeof value === "string") {
+    return `${MCP_TOOL_APPROVED_NOTE}\n\n${value}`;
+  }
+  if (Array.isArray(value)) {
+    return [{ type: "text", text: MCP_TOOL_APPROVED_NOTE }, ...value];
+  }
+  if (value && typeof value === "object") {
+    return { ...value, approval: MCP_TOOL_APPROVED_NOTE };
+  }
+  return value;
+}
+
+/**
  * Overlay per-user credential status onto installs. `credentialStatus` is a
  * per-user fact now (static credentials and OAuth tokens are both keyed by
  * user), so the value returned to a caller reflects THAT user's configuration,
@@ -1515,6 +1538,7 @@ export class McpService {
             // plaintext.
             `${input.runId ?? input.threadId ?? input.workspaceId}:${input.boundToolName}:${hashJson(toObject(args))}`,
         });
+        let approvedByUser = false;
         if (isHighRisk(risk)) {
           // Approval is resolved by args from the refs threaded into this
           // resumed turn, never by tool-call id: an interrupt raised inside a
@@ -1555,6 +1579,7 @@ export class McpService {
               },
             );
           }
+          approvedByUser = true;
         }
         const toolRun = await createMcpToolRun({
           teamId: input.teamId,
@@ -1608,7 +1633,10 @@ export class McpService {
               executedBy: input.userId,
             }),
           ]);
-          return capMcpModelOutput(output);
+          const modelOutput = capMcpModelOutput(output);
+          return approvedByUser
+            ? withMcpApprovalNote(modelOutput)
+            : modelOutput;
         } catch (error) {
           const message =
             error instanceof Error ? error.message : String(error);

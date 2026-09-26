@@ -398,6 +398,93 @@ for (const status of ["failed", "completed"] as const) {
   });
 }
 
+test("the stale-run sweep fails a silent run nobody is reading and leaves a live one", async () => {
+  vi.spyOn(streams.chatRunStreamManager, "appendEvent").mockResolvedValue(1);
+  await staleRunning();
+  const liveThreadId = randomUUID();
+  await schema.db.insert(schema.threads).values({
+    id: liveThreadId,
+    workspaceId,
+    teamId,
+    title: "Live run",
+  });
+  const live = await repository.createChatThreadRun({
+    teamId,
+    workspaceId,
+    threadId: liveThreadId,
+    userId: "test-user",
+    idempotencyKey: randomUUID(),
+    mode: "send",
+    requestJson: {
+      mode: "send",
+      workspaceId,
+      threadId: liveThreadId,
+      userId: "test-user",
+      content: "query",
+    },
+  });
+  assert.ok(live);
+  await repository.markChatThreadRunRunning({
+    runId: live.id,
+    teamId,
+    workspaceId,
+  });
+
+  const result = await service.durableChatRunService.failStaleActiveRuns();
+
+  assert.equal(result.recovered, 1);
+  assert.equal(result.failed, 0);
+  const stale = await current();
+  assert.equal(stale?.status, "failed");
+  assert.equal(stale?.errorCode, "CHAT_RUN_STALE");
+  assert.equal(
+    (
+      await repository.findChatThreadRunById({
+        runId: live.id,
+        teamId,
+        workspaceId,
+      })
+    )?.status,
+    "running",
+  );
+});
+
+test("a worker shutdown stops an in-flight turn and commits it as failed", async () => {
+  let started!: () => void;
+  const modelStarted = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  vi.spyOn(streams.chatRunStreamManager, "subscribeCancel").mockResolvedValue(
+    async () => {},
+  );
+  mocked.stream.mockImplementation(async function* (_request, options) {
+    started();
+    const signal = options.abortSignal as AbortSignal;
+    await new Promise<void>((_resolve, reject) => {
+      signal.addEventListener("abort", () => reject(signal.reason), {
+        once: true,
+      });
+    });
+    yield 'data: {"type":"finish"}\n\n';
+  });
+  const working = runner.processThreadChatRunJob(jobPayload());
+  await modelStarted;
+
+  assert.equal(runner.interruptActiveChatRuns(), 1);
+  const result = await working;
+
+  assert.equal(result.status, "failed");
+  assert.equal(
+    "errorCode" in result && result.errorCode,
+    "CHAT_RUN_WORKER_SHUTDOWN",
+  );
+  const stored = await current();
+  assert.equal(stored?.status, "failed");
+  assert.equal(stored?.errorCode, "CHAT_RUN_WORKER_SHUTDOWN");
+  // A finished turn is no longer tracked.
+  assert.equal(runner.interruptActiveChatRuns(), 0);
+});
+
 test("worker completion commits before a failing Redis finish delivery and remains completed on attach", async () => {
   vi.spyOn(streams.chatRunStreamManager, "subscribeCancel").mockResolvedValue(
     async () => {},
