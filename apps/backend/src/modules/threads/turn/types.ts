@@ -197,6 +197,8 @@ export type AgentCheckpointMetadata = {
 };
 
 export type TraceContinuationMetadata = {
+  /** Blocks the continued message already shows; the resume appends after them. */
+  renderBlocks?: MessageRenderBlock[];
   maxSequence: number;
   toolSequenceById: Record<string, number>;
   traceParts?: TracePart[];

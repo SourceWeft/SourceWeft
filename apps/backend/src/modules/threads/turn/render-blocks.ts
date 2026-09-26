@@ -39,9 +39,68 @@ export function finalizeMessageRenderBlocks(input: {
   return trimOuterTextBlocks(input.blocks);
 }
 
-export function createMessageRenderBlockBuilder() {
-  const blocks: MessageRenderBlock[] = [];
-  let nextTextId = 1;
+/**
+ * The text, reasoning and tool blocks a continued message already shows, read
+ * from its stored metadata. Committed artifact outputs are left out: the
+ * continuation merge keeps those on its own.
+ */
+export function readContinuationRenderBlocks(
+  value: unknown,
+): MessageRenderBlock[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.flatMap((entry): MessageRenderBlock[] => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      return [];
+    }
+    const block = entry as Record<string, unknown>;
+    if (typeof block.id !== "string" || !block.id) {
+      return [];
+    }
+    if (
+      (block.type === "text" || block.type === "reasoning") &&
+      typeof block.text === "string"
+    ) {
+      return [
+        {
+          id: block.id,
+          type: block.type,
+          text: block.text,
+          ...(block.type === "reasoning" && typeof block.durationMs === "number"
+            ? { durationMs: block.durationMs }
+            : {}),
+        } as MessageRenderBlock,
+      ];
+    }
+    if (block.type === "tool" && typeof block.toolCallId === "string") {
+      return [{ id: block.id, type: "tool", toolCallId: block.toolCallId }];
+    }
+    return [];
+  });
+}
+
+/**
+ * Builds a turn's render blocks. `initialBlocks` are the blocks a continued
+ * message already shows (a turn resumed after an approval or a question): they
+ * stay as they are, ahead of what this run adds — new text never merges into
+ * them and a text replace only rewrites text this run wrote — and new text ids
+ * continue after theirs.
+ */
+export function createMessageRenderBlockBuilder(
+  initialBlocks: readonly MessageRenderBlock[] = [],
+) {
+  const blocks: MessageRenderBlock[] = cloneBlocks([...initialBlocks]);
+  const seededCount = blocks.length;
+  let nextTextId =
+    Math.max(
+      0,
+      ...blocks.flatMap((block) => {
+        const match =
+          block.type === "text" ? /^text-(\d+)$/.exec(block.id) : null;
+        return match ? [Number(match[1])] : [];
+      }),
+    ) + 1;
 
   return {
     appendArtifactOutput(input: {
@@ -123,7 +182,7 @@ export function createMessageRenderBlockBuilder() {
       }
 
       const last = blocks[blocks.length - 1];
-      if (last?.type === "text") {
+      if (last?.type === "text" && blocks.length > seededCount) {
         last.text += text;
         return;
       }
@@ -137,7 +196,7 @@ export function createMessageRenderBlockBuilder() {
     },
     replaceText(text: string) {
       if (!text) {
-        for (let index = blocks.length - 1; index >= 0; index -= 1) {
+        for (let index = blocks.length - 1; index >= seededCount; index -= 1) {
           if (blocks[index]?.type === "text") {
             blocks.splice(index, 1);
           }
@@ -146,7 +205,7 @@ export function createMessageRenderBlockBuilder() {
       }
 
       let lastTextIndex = -1;
-      for (let index = blocks.length - 1; index >= 0; index -= 1) {
+      for (let index = blocks.length - 1; index >= seededCount; index -= 1) {
         if (blocks[index]?.type === "text") {
           lastTextIndex = index;
           break;
@@ -154,7 +213,7 @@ export function createMessageRenderBlockBuilder() {
       }
       if (lastTextIndex >= 0) {
         const prefix = blocks
-          .slice(0, lastTextIndex)
+          .slice(seededCount, lastTextIndex)
           .map((block) => (block.type === "text" ? block.text : ""))
           .join("");
         const lastText = blocks[lastTextIndex];
@@ -164,7 +223,7 @@ export function createMessageRenderBlockBuilder() {
         }
       }
 
-      for (let index = blocks.length - 1; index >= 0; index -= 1) {
+      for (let index = blocks.length - 1; index >= seededCount; index -= 1) {
         if (blocks[index]?.type === "text") {
           blocks.splice(index, 1);
         }

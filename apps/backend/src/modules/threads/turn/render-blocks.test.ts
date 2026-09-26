@@ -3,6 +3,7 @@ import { describe, test } from "vitest";
 import {
   createMessageRenderBlockBuilder,
   finalizeMessageRenderBlocks,
+  readContinuationRenderBlocks,
 } from "./render-blocks";
 
 test("replaceText preserves existing text segmentation when final text has same prefix", () => {
@@ -275,4 +276,68 @@ describe("from runner.test.ts", () => {
       ],
     );
   });
+});
+
+test("a resumed turn keeps the blocks its message already shows and appends after them", () => {
+  // What a turn parked on an approval stored: its reasoning, the tool card and
+  // a line of text written before the pause.
+  const parked = readContinuationRenderBlocks([
+    {
+      id: "reasoning-first",
+      type: "reasoning",
+      text: "Plan the send",
+      durationMs: 4000,
+    },
+    { id: "tool-call-a", type: "tool", toolCallId: "call-a" },
+    { id: "text-1", type: "text", text: "Sending now." },
+    { id: "artifact-output:x", type: "artifact_output" },
+    { id: 7, type: "text", text: "malformed" },
+  ]);
+  assert.deepEqual(
+    parked.map((block) => block.id),
+    ["reasoning-first", "tool-call-a", "text-1"],
+  );
+
+  const builder = createMessageRenderBlockBuilder(parked);
+  builder.appendTool("call-a"); // the resumed call is the same card
+  builder.appendReasoning({ id: "reasoning-resume", text: "Report it" });
+  builder.appendText("Sent.");
+  builder.appendText(" Done.");
+
+  assert.deepEqual(builder.list(), [
+    {
+      id: "reasoning-first",
+      type: "reasoning",
+      text: "Plan the send",
+      durationMs: 4000,
+    },
+    { id: "tool-call-a", type: "tool", toolCallId: "call-a" },
+    { id: "text-1", type: "text", text: "Sending now." },
+    { id: "reasoning-resume", type: "reasoning", text: "Report it" },
+    { id: "text-2", type: "text", text: "Sent. Done." },
+  ]);
+});
+
+test("new text in a resumed turn never merges into, or replaces, the parked turn's text", () => {
+  const builder = createMessageRenderBlockBuilder(
+    readContinuationRenderBlocks([
+      { id: "text-3", type: "text", text: "Before the pause." },
+    ]),
+  );
+  builder.appendText("After");
+  assert.deepEqual(
+    builder
+      .list()
+      .map((block) => (block.type === "text" ? [block.id, block.text] : null)),
+    [
+      ["text-3", "Before the pause."],
+      ["text-4", "After"],
+    ],
+  );
+
+  builder.replaceText("After the resume.");
+  builder.replaceText("");
+  assert.deepEqual(builder.list(), [
+    { id: "text-3", type: "text", text: "Before the pause." },
+  ]);
 });

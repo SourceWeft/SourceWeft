@@ -1,6 +1,7 @@
 import { loadThreadSourceSelection } from "../source-selection-service";
 import { resolveTurnSourceSelection, selectedSourceAnchors } from "../source-selection";
 import { extractImagePartsFromContentJson } from "./message-image-parts";
+import { readContinuationRenderBlocks } from "./render-blocks";
 import { randomUUID } from "node:crypto";
 import { beginReasoningRun } from "./reasoning-state";
 import type {
@@ -329,13 +330,16 @@ function resolveTraceContinuationMetadata(
     }
   }
 
+  const renderBlocks = readContinuationRenderBlocks(metadata.renderBlocks);
   return maxSequence > 0 ||
     Object.keys(toolSequenceById).length > 0 ||
-    traceParts.length > 0
+    traceParts.length > 0 ||
+    renderBlocks.length > 0
     ? {
         maxSequence,
         toolSequenceById,
         traceParts,
+        ...(renderBlocks.length > 0 ? { renderBlocks } : {}),
       }
     : null;
 }
