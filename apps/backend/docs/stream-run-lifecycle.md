@@ -46,7 +46,11 @@ Failed, cancelled and completed outcomes are committed before terminal SSE is
 sent. CAS losers use the persisted outcome instead of constructing a successful
 terminal result. If Redis notification fails after commit, attach reconstructs
 the terminal events from the database, including an explicit `CHAT_RUN_STALE`
-error and finish for an expired worker.
+error and finish for an expired worker. The scheduler runs the same recovery
+over silent active runs each tick, so an expired worker's run is failed even
+when no client reads the thread. A worker stopped with SIGTERM/SIGINT fails its
+in-flight turns itself with `CHAT_RUN_WORKER_SHUTDOWN`, keeping the output they
+had streamed.
 
 Preparation can fail before any message is inserted. Terminal updates only bind
 message IDs that already exist in the same thread and scope; a deterministic ID

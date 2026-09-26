@@ -20,6 +20,7 @@ import {
   findChatThreadRunById,
   findChatThreadRunByIdempotencyKey,
   listExpiredApprovalWaitingRuns,
+  listSilentActiveRuns,
   finishChatThreadRun,
   isActiveChatRunStatus,
   markChatThreadRunQueued,
@@ -45,6 +46,8 @@ import {
   CLIENT_CANCELLED_MESSAGE,
   COMPLETE_RESULT_WAIT_TIMEOUT_MS,
   EXPIRED_APPROVAL_SWEEP_LIMIT,
+  ORPHANED_QUEUED_RUN_GRACE_MS,
+  STALE_ACTIVE_RUN_SWEEP_LIMIT,
   STOP_RESULT_WAIT_TIMEOUT_MS,
 } from "./run-constants";
 import {
@@ -708,6 +711,41 @@ export class DurableChatRunService {
       });
     }
     return { attempted: runs.length, expired, failed };
+  }
+
+  /**
+   * Fails active runs whose worker went silent. Stale recovery otherwise runs
+   * only when someone reads or writes the thread, so a run whose worker died —
+   * and whose stalled job was redelivered before the run looked stale — would
+   * show a reply in progress for as long as nobody touched it.
+   */
+  async failStaleActiveRuns(input: { limit?: number; now?: Date } = {}) {
+    const now = input.now ?? new Date();
+    const runs = (
+      await listSilentActiveRuns({
+        limit: input.limit ?? STALE_ACTIVE_RUN_SWEEP_LIMIT,
+        silentBefore: new Date(now.getTime() - ORPHANED_QUEUED_RUN_GRACE_MS),
+      })
+    ).filter((run) => isStaleActiveRun(run, now.getTime()));
+    const results = await Promise.allSettled(
+      runs.map((run) => failRunIfStale(run)),
+    );
+    const recovered = results.filter(
+      (result) =>
+        result.status === "fulfilled" &&
+        isTerminalRunStatus(result.value.status),
+    ).length;
+    const failed = results.filter(
+      (result) => result.status === "rejected",
+    ).length;
+    if (failed > 0) {
+      logger.warn("Failed to recover some stale chat runs", {
+        attempted: runs.length,
+        recovered,
+        failed,
+      });
+    }
+    return { attempted: runs.length, recovered, failed };
   }
 }
 

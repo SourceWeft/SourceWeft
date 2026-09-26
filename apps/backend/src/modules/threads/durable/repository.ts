@@ -380,6 +380,33 @@ export async function listExpiredApprovalWaitingRuns(input: {
   return rows.map(mapRun);
 }
 
+/**
+ * Active runs whose worker has been silent at least `silentBefore`: the
+ * candidates for stale-run recovery, which makes the final call on each.
+ */
+export async function listSilentActiveRuns(input: {
+  limit: number;
+  silentBefore: Date;
+}) {
+  const rows = await db
+    .select()
+    .from(chatThreadRuns)
+    .where(
+      and(
+        inArray(chatThreadRuns.status, [
+          "queued",
+          "running",
+          "cancel_requested",
+        ]),
+        sql`coalesce(${chatThreadRuns.heartbeatAt}, ${chatThreadRuns.updatedAt}, ${chatThreadRuns.startedAt}, ${chatThreadRuns.createdAt}) <= ${input.silentBefore}`,
+      ),
+    )
+    .orderBy(chatThreadRuns.createdAt)
+    .limit(input.limit);
+
+  return rows.map(mapRun);
+}
+
 export async function createChatThreadRun(input: {
   teamId: string;
   workspaceId: string;

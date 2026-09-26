@@ -36,7 +36,10 @@ import {
   failThreadRunAtProcessorBoundary,
   processThreadChatRunJob,
 } from "./processors/thread-chat-run";
-import { agentSandboxService } from "../modules/threads";
+import {
+  agentSandboxService,
+  interruptActiveChatRuns,
+} from "../modules/threads";
 import { connectorAdaptersReady } from "../modules/connectors";
 
 validateBillingStartup();
@@ -312,9 +315,25 @@ function closeWorkers() {
   ]);
 }
 
+// On SIGTERM/SIGINT: stop the chat turns in flight — each commits as failed
+// with a restart error, keeping what it already streamed, so its thread is free
+// at once rather than showing a reply in progress until stale recovery fails it
+// — then let the jobs return and exit. A second signal, or jobs still running at
+// the deadline, exits at once; BullMQ's stall handling redelivers those.
+let shuttingDown = false;
 async function shutdown() {
-  logger.info("Worker shutting down");
+  if (shuttingDown) {
+    process.exit(1);
+  }
+  shuttingDown = true;
+  const interrupted = interruptActiveChatRuns();
+  logger.info("Worker shutting down", { interruptedChatRuns: interrupted });
+  const deadline = setTimeout(
+    () => process.exit(1),
+    WORKER_RESTART_DRAIN_TIMEOUT_MS,
+  );
   await closeWorkers();
+  clearTimeout(deadline);
   process.exit(0);
 }
 
