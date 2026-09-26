@@ -47,7 +47,10 @@ export function createTurnRuntime(input: { prepared: PreparedThreadTurn }) {
   const thinkingStepsById = new Map<string, ThinkingStepTrace>();
   const thinkingStepOrder: string[] = [];
   const reasoningSegments: DeepAgentTurnOutcome["reasoningSegments"] = [];
-  const renderBlocks = createMessageRenderBlockBuilder();
+  // A resumed turn continues the blocks its message already shows.
+  const renderBlocks = createMessageRenderBlockBuilder(
+    input.prepared.traceContinuation?.renderBlocks,
+  );
   const runStartedAt = Date.now();
   let currentReasoningSegmentStartedAt: number | null = null;
   const citationRegistry = new AgentCitationRegistry({
