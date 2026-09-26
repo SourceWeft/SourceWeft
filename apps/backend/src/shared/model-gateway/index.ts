@@ -2,6 +2,7 @@ export {
   resolveGlobalModelGatewayConfigPath,
   syncGlobalModelGatewayConfig,
 } from "./config-sync";
+export { syncGlobalModelGatewayConfigAtStartup } from "./startup-sync";
 export {
   listCustomByokProviders,
   resolveCustomByokProvider,

@@ -3,7 +3,7 @@ import { config } from "../shared/config";
 import { logger } from "../shared/logger";
 import {
   modelCatalog,
-  syncGlobalModelGatewayConfig,
+  syncGlobalModelGatewayConfigAtStartup,
 } from "../shared/model-gateway/index";
 import { closeQueue } from "../shared/queue";
 import { opsAlertService } from "../modules/ops";
@@ -23,7 +23,7 @@ import {
 import { scheduleSyncModelPricing } from "./schedules/sync-model-pricing";
 
 validateBillingStartup();
-await syncGlobalModelGatewayConfig();
+await syncGlobalModelGatewayConfigAtStartup();
 modelCatalog.startAutoRefresh(config.modelCatalogRefreshIntervalMs);
 
 let tickInFlight = false;

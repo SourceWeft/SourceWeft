@@ -6,7 +6,7 @@ import { logger } from "../shared/logger";
 import {
   ensureModelConfigAvailable,
   modelCatalog,
-  syncGlobalModelGatewayConfig,
+  syncGlobalModelGatewayConfigAtStartup,
 } from "../shared/model-gateway/index";
 import { closeQueue } from "../shared/queue";
 import { notifyHub } from "../shared/notify-hub";
@@ -22,7 +22,7 @@ import { connectorAdaptersReady } from "../modules/connectors";
 import { attachLocalDeviceGateway } from "../modules/devices/gateway";
 
 validateBillingStartup();
-await syncGlobalModelGatewayConfig({ syncPricing: false });
+await syncGlobalModelGatewayConfigAtStartup({ syncPricing: false });
 modelCatalog.startAutoRefresh(config.modelCatalogRefreshIntervalMs);
 await ensureModelConfigAvailable();
 await contentSkillsService.syncBuiltinCatalog();
