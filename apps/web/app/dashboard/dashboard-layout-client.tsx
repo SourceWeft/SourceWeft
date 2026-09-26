@@ -20,6 +20,7 @@ import { DashboardSidebar } from "./_components/dashboard-sidebar";
 import { DashboardWorkspaceLayout } from "./_components/dashboard-workspace-layout";
 import { authClient } from "../../lib/auth-client";
 import { isEmbedMode } from "../../lib/thread-embed-params";
+import { useIsHydrated } from "../_components/auth/use-is-hydrated";
 
 // Only chat surfaces read the registry, so marketing pages no longer pay for
 // the connector tool definitions at boot.
@@ -80,7 +81,14 @@ export function DashboardLayoutClient({
   const [sessionConfirming, setSessionConfirming] = useState(false);
   const [redirecting, setRedirecting] = useState(false);
   const [hasConfirmedSession, setHasConfirmedSession] = useState(false);
-  const { data, isPending, refetch } = authClient.useSession();
+  const session = authClient.useSession();
+  // better-auth hands React its live atom as the server snapshot, so a session
+  // that another subscriber fetched before this subtree hydrated would skip
+  // the skeleton the server rendered. Stay pending until hydration commits.
+  const hydrated = useIsHydrated();
+  const { refetch } = session;
+  const data = hydrated ? session.data : null;
+  const isPending = hydrated ? session.isPending : true;
   const previousAccountId = useRef<string | undefined>(undefined);
   useEffect(() => {
     const accountId = data?.user?.id;
