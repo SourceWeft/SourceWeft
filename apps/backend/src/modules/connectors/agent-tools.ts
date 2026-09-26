@@ -131,7 +131,16 @@ function connectorActionExecutionRef(input: {
   });
 }
 
-function connectorActionToolOutput(input: {
+/**
+ * Said in the result of an action a person approved. An approved action runs in
+ * a later, resumed turn — for a delegated sub-agent, in a fresh run that never
+ * saw the approval prompt — so without this the model has no sign the action
+ * was approved and can report a normal approved run as a skipped approval.
+ */
+export const CONNECTOR_ACTION_APPROVED_NOTE =
+  "The user reviewed and approved this exact action in SourceWeft before it ran.";
+
+export function connectorActionToolOutput(input: {
   action: ConnectorActionRunRecord;
 }) {
   if (input.action.status === "succeeded") {
@@ -140,6 +149,9 @@ function connectorActionToolOutput(input: {
       actionType: input.action.actionType,
       ...(input.action.agentToolName
         ? { toolName: input.action.agentToolName }
+        : {}),
+      ...(input.action.approvedBy
+        ? { approval: CONNECTOR_ACTION_APPROVED_NOTE }
         : {}),
     };
   }
