@@ -467,6 +467,32 @@ async function deactivateMissingProfiles(input: {
   }
 }
 
+/**
+ * A model catalog source (models.dev, LiteLLM, or a globally ready gateway's
+ * own catalog) could not be loaded. The sync stops before activating anything,
+ * so the previously active configuration version stays in force — unlike an
+ * invalid configuration, this is an outside failure worth retrying.
+ */
+export class ModelCatalogUnavailableError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "ModelCatalogUnavailableError";
+  }
+}
+
+async function refreshModelCatalog() {
+  try {
+    await modelCatalog.refresh();
+  } catch (error) {
+    throw new ModelCatalogUnavailableError(
+      `Failed to load the model catalog: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+      { cause: error },
+    );
+  }
+}
+
 async function loadDynamicCatalogProfiles(input: {
   gateways: GlobalGatewayEntry[];
   pricingCatalogRequired: boolean;
@@ -481,7 +507,7 @@ async function loadDynamicCatalogProfiles(input: {
         gateway.modelCatalog?.enabled && gateway.providerKind !== "openrouter",
     );
   if (registryRequired) {
-    await modelCatalog.refresh();
+    await refreshModelCatalog();
   }
   const entries: ReturnType<typeof toDynamicProfileEntry>[] = [];
   for (const gateway of input.gateways) {
@@ -508,7 +534,7 @@ async function loadDynamicCatalogProfiles(input: {
       );
       entries.push(...profiles);
     } catch (error) {
-      throw new Error(
+      throw new ModelCatalogUnavailableError(
         `Failed to discover model catalog for globally ready gateway '${gateway.slug}' (${gateway.providerName}): ${
           error instanceof Error ? error.message : String(error)
         }`,
@@ -669,7 +695,7 @@ export async function syncGlobalModelGatewayConfigFromFile(
   ) {
     // Provider catalogs can reveal unpriced dynamic models only after fetch.
     // Their auto-pricing source must also succeed before activating the version.
-    await modelCatalog.refresh();
+    await refreshModelCatalog();
   }
   const dynamicByKind = groupDynamicProfilesByKind({
     entries: dynamicCatalog.entries,

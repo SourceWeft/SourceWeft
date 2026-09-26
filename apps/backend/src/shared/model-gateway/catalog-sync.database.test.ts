@@ -27,6 +27,7 @@ let modelGatewayProfiles: DatabaseModule["modelGatewayProfiles"];
 let modelGatewayProviderConfigs: DatabaseModule["modelGatewayProviderConfigs"];
 let modelGatewayRoutes: DatabaseModule["modelGatewayRoutes"];
 let syncGlobalModelGatewayConfigFromFile: (typeof import("./config-sync"))["syncGlobalModelGatewayConfigFromFile"];
+let ModelCatalogUnavailableError: (typeof import("./config-sync"))["ModelCatalogUnavailableError"];
 let modelCatalog: (typeof import("./model-catalog/registry"))["modelCatalog"];
 let syncModelPricing: (typeof import("./sync-pricing"))["syncModelPricing"];
 
@@ -140,7 +141,8 @@ describe.sequential("catalog sync atomicity in PostgreSQL", () => {
       modelGatewayProviderConfigs,
       modelGatewayRoutes,
     } = await import("@sourceweft/db"));
-    ({ syncGlobalModelGatewayConfigFromFile } = await import("./config-sync"));
+    ({ syncGlobalModelGatewayConfigFromFile, ModelCatalogUnavailableError } =
+      await import("./config-sync"));
     ({ modelCatalog } = await import("./model-catalog/registry"));
     ({ syncModelPricing } = await import("./sync-pricing"));
   }, 120_000);
@@ -280,7 +282,14 @@ describe.sequential("catalog sync atomicity in PostgreSQL", () => {
     vi.mocked(modelCatalog.refresh).mockRejectedValue(
       new Error("Required pricing registry unavailable"),
     );
-    await assert.rejects(sync(true), /Required pricing registry unavailable/);
+    // A catalog source failure, not a config error: startup keeps the active
+    // version and retries (see startup-sync.ts).
+    await assert.rejects(
+      sync(true),
+      (error: unknown) =>
+        error instanceof ModelCatalogUnavailableError &&
+        /Required pricing registry unavailable/.test(error.message),
+    );
     assert.deepEqual(await snapshot(), before);
     assert.equal(vi.mocked(globalThis.fetch).mock.calls.length, 0);
   });
@@ -291,7 +300,12 @@ describe.sequential("catalog sync atomicity in PostgreSQL", () => {
     vi.mocked(globalThis.fetch).mockResolvedValue(
       new Response("Catalog unavailable", { status: 503 }),
     );
-    await assert.rejects(sync(), /Failed to discover model catalog/);
+    await assert.rejects(
+      sync(),
+      (error: unknown) =>
+        error instanceof ModelCatalogUnavailableError &&
+        /Failed to discover model catalog/.test(error.message),
+    );
     assert.deepEqual(await snapshot(), before);
     assert.equal(vi.mocked(modelCatalog.refresh).mock.calls.length, 1);
     assert.equal(vi.mocked(globalThis.fetch).mock.calls.length, 1);

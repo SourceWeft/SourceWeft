@@ -6,7 +6,7 @@ import { logger } from "../shared/logger";
 import {
   ensureModelConfigAvailable,
   modelCatalog,
-  syncGlobalModelGatewayConfig,
+  syncGlobalModelGatewayConfigAtStartup,
 } from "../shared/model-gateway/index";
 import { connectionOptions } from "../shared/redis-connection";
 import { buildWorkerJobFailureLog } from "./job-failure-log";
@@ -40,7 +40,7 @@ import { agentSandboxService } from "../modules/threads";
 import { connectorAdaptersReady } from "../modules/connectors";
 
 validateBillingStartup();
-await syncGlobalModelGatewayConfig({ syncPricing: false });
+await syncGlobalModelGatewayConfigAtStartup({ syncPricing: false });
 modelCatalog.startAutoRefresh(config.modelCatalogRefreshIntervalMs);
 await ensureModelConfigAvailable();
 // Connectors are contributed by capabilities, so registering them reads
