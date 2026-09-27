@@ -179,17 +179,6 @@ export const marketCategoryCountsResponseSchema = z.object({
   total: z.number().int().min(0),
 });
 
-export const marketSigningKeySchema = z.object({
-  keyId: z.string(),
-  alg: z.literal("ed25519"),
-  // Base64 SPKI-encoded Ed25519 public key in `keyId:publicKey` form.
-  publicKey: z.string(),
-});
-
-export const listMarketKeysResponseSchema = z.object({
-  keys: z.array(marketSigningKeySchema),
-});
-
 export type MarketItemStatus = z.infer<typeof marketItemStatusSchema>;
 export type MarketItemVisibility = z.infer<typeof marketItemVisibilitySchema>;
 export type McpTransport = z.infer<typeof mcpTransportSchema>;
@@ -216,10 +205,6 @@ export type ListMarketCategoriesResponse = z.infer<
 >;
 export type MarketCategoryCountsResponse = z.infer<
   typeof marketCategoryCountsResponseSchema
->;
-export type MarketSigningKey = z.infer<typeof marketSigningKeySchema>;
-export type ListMarketKeysResponse = z.infer<
-  typeof listMarketKeysResponseSchema
 >;
 
 // ---------------------------------------------------------------------------
