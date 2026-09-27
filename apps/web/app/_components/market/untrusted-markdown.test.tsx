@@ -1,15 +1,20 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { SkillMarkdown } from "./skill-markdown";
+import {
+  isolateSkillMarkerTags,
+  UntrustedMarkdown,
+} from "./untrusted-markdown";
 
 function render(markdown: string) {
   return renderToStaticMarkup(
-    <SkillMarkdown imagePlaceholder="Image">{markdown}</SkillMarkdown>,
+    <UntrustedMarkdown imagePlaceholder="Image" mode="skill">
+      {markdown}
+    </UntrustedMarkdown>,
   );
 }
 
-describe("SkillMarkdown", () => {
+describe("UntrustedMarkdown in skill mode", () => {
   it("renders ordinary markdown", () => {
     const html = render("# Title\n\nSome **bold** text.\n\n- one\n- two");
     expect(html).toContain("Title");
@@ -82,5 +87,40 @@ describe("SkillMarkdown", () => {
     expect(html).not.toMatch(/<img/i);
     expect(html).toContain("[Diagram]");
     expect(html).toContain('rel="nofollow ugc noopener noreferrer"');
+  });
+});
+
+describe("isolateSkillMarkerTags", () => {
+  it("frees the code fence under an author's own tag", () => {
+    const out = isolateSkillMarkerTags(
+      ["<Good>", "```ts", "ok();", "```", "Clear name", "</Good>"].join("\n"),
+    );
+    expect(out).toBe(
+      [
+        "`<Good>`",
+        "",
+        "```ts",
+        "ok();",
+        "```",
+        "Clear name",
+        "",
+        "`</Good>`",
+      ].join("\n"),
+    );
+  });
+
+  it("leaves real HTML blocks, inline tags and fenced content alone", () => {
+    const source = [
+      "<details>",
+      "text with <b>inline</b> tag",
+      "```html",
+      "<Good>",
+      "```",
+      "~~~~",
+      "```",
+      "<Bad>",
+      "~~~~",
+    ].join("\n");
+    expect(isolateSkillMarkerTags(source)).toBe(source);
   });
 });

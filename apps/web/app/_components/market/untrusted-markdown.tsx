@@ -9,15 +9,63 @@ import {
   type Components,
 } from "streamdown";
 
-import { isolateSkillMarkerTags, untrustedMarkdownLink } from "./skills-format";
+import { untrustedMarkdownLink } from "./untrusted-markdown-links";
 
-// SKILL.md is third-party text. Streamdown's default pipeline is
+// What HTML itself defines. A tag outside this list on a line of its own is an
+// author's own marker (`<Good>`, `<example>`, `<EXTREMELY-IMPORTANT>`), which
+// skills use heavily to structure instructions for a model.
+const HTML_BLOCK_TAGS = new Set(
+  "address article aside base basefont blockquote body caption center col colgroup dd details dialog dir div dl dt fieldset figcaption figure footer form frame frameset h1 h2 h3 h4 h5 h6 head header hr html iframe legend li link main menu menuitem nav noframes ol optgroup option p param pre script search section style summary table tbody td textarea tfoot th thead title tr track ul".split(
+    " ",
+  ),
+);
+
+/**
+ * Puts an author's own marker tags on lines of their own, as inline code.
+ *
+ * To a markdown parser `<Good>` alone on a line opens an HTML block that runs
+ * to the next blank line, so the code fence right under it is never parsed and
+ * a whole example collapses into one run of text. Raw HTML is off here anyway
+ * (the tag would show as literal text), so nothing is lost by showing it as
+ * `<Good>` — and the markdown around it renders the way its author meant.
+ * Lines inside a code fence are left exactly as they are.
+ */
+export function isolateSkillMarkerTags(markdown: string) {
+  const out: string[] = [];
+  let fence: string | null = null;
+  for (const line of markdown.split(/\r?\n/)) {
+    const fenceMatch = /^\s{0,3}(`{3,}|~{3,})/.exec(line);
+    if (fenceMatch) {
+      const marker = fenceMatch[1]!;
+      if (fence === null) fence = marker[0]!.repeat(marker.length);
+      else if (marker[0] === fence[0] && marker.length >= fence.length)
+        fence = null;
+      out.push(line);
+      continue;
+    }
+    const tag =
+      fence === null
+        ? /^\s{0,3}(<\/?([A-Za-z][A-Za-z0-9_-]*)>)\s*$/.exec(line)
+        : null;
+    if (tag && !HTML_BLOCK_TAGS.has(tag[2]!.toLowerCase())) {
+      out.push("", `\`${tag[1]}\``, "");
+      continue;
+    }
+    out.push(line);
+  }
+  return out
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+// A SKILL.md is third-party text. Streamdown's default pipeline is
 // raw → sanitize → harden, where `raw` (rehype-raw) is what turns embedded HTML
 // into real elements. Leaving it out means HTML in the markdown never becomes
 // markup: it is shown as the literal text the author typed (skills often use
 // XML-like tags such as <example> in their instructions, so dropping it would
 // lose content). Sanitize and harden still run over what markdown itself made.
-const rehypePlugins = [
+const skillRehypePlugins = [
   defaultRehypePlugins.sanitize!,
   defaultRehypePlugins.harden!,
 ];
@@ -49,7 +97,7 @@ const headings: Pick<Components, "h1" | "h2" | "h3" | "h4" | "h5" | "h6"> = {
   h6: ({ children }) => <p className={`${headingClass} text-sm`}>{children}</p>,
 };
 
-function skillMarkdownComponents(imagePlaceholder: string): Components {
+function untrustedMarkdownComponents(imagePlaceholder: string): Components {
   return {
     ...headings,
     a: ({ children, href }) => {
@@ -100,16 +148,25 @@ function skillMarkdownComponents(imagePlaceholder: string): Components {
   };
 }
 
-export function SkillMarkdown({
+/**
+ * How a third-party document is rendered. `skill`: a SKILL.md, whose embedded
+ * HTML is never turned into markup (see {@link skillRehypePlugins}).
+ */
+export type UntrustedMarkdownMode = "skill";
+
+/** Markdown someone else wrote, rendered so it cannot act on our page. */
+export function UntrustedMarkdown({
   children,
   imagePlaceholder,
+  mode,
 }: {
   children: string;
   /** The localized word shown for an image that is not loaded, e.g. "Image". */
   imagePlaceholder: string;
+  mode: UntrustedMarkdownMode;
 }) {
   const components = useMemo(
-    () => skillMarkdownComponents(imagePlaceholder),
+    () => untrustedMarkdownComponents(imagePlaceholder),
     [imagePlaceholder],
   );
   return (
@@ -121,10 +178,10 @@ export function SkillMarkdown({
       mode="static"
       parseIncompleteMarkdown={false}
       plugins={plugins}
-      rehypePlugins={rehypePlugins}
+      rehypePlugins={skillRehypePlugins}
       urlTransform={defaultUrlTransform}
     >
-      {isolateSkillMarkerTags(children)}
+      {mode === "skill" ? isolateSkillMarkerTags(children) : children}
     </Streamdown>
   );
 }

@@ -22,9 +22,6 @@ import {
   skillTabHref,
   skillTakedownMailto,
   stripSkillFrontmatter,
-  UNTRUSTED_LINK_REL,
-  untrustedMarkdownLink,
-  isolateSkillMarkerTags,
   skillLocalInstallCommand,
   safeSkillLogoUrl,
   formatRelativeTime,
@@ -238,48 +235,6 @@ describe("stripSkillFrontmatter", () => {
   });
 });
 
-describe("untrustedMarkdownLink", () => {
-  it("opens http(s) and mailto links in a new tab as nofollow ugc", () => {
-    expect(UNTRUSTED_LINK_REL).toBe("nofollow ugc noopener noreferrer");
-    for (const href of [
-      "https://example.com/docs",
-      "http://example.com",
-      "mailto:someone@example.com",
-      "HTTPS://EXAMPLE.COM/x",
-    ]) {
-      expect(untrustedMarkdownLink(href)).toMatchObject({
-        kind: "external",
-        rel: UNTRUSTED_LINK_REL,
-        target: "_blank",
-      });
-    }
-  });
-
-  it("keeps in-page anchors in the page", () => {
-    expect(untrustedMarkdownLink("#usage")).toEqual({
-      href: "#usage",
-      kind: "anchor",
-    });
-  });
-
-  it("refuses scripts, data, protocol-relative and repository-relative targets", () => {
-    for (const href of [
-      "javascript:alert(1)",
-      " JaVaScRiPt:alert(1)",
-      "data:text/html,<script>1</script>",
-      "vbscript:x",
-      "//evil.example/x",
-      "references/guide.md",
-      "/dashboard",
-      "",
-      null,
-      undefined,
-    ]) {
-      expect(untrustedMarkdownLink(href)).toEqual({ kind: "text" });
-    }
-  });
-});
-
 describe("formatSkillVersion", () => {
   it("prefixes version numbers and leaves commit prefixes alone", () => {
     expect(formatSkillVersion("1.2.0")).toBe("v1.2.0");
@@ -287,41 +242,6 @@ describe("formatSkillVersion", () => {
     // A commit-hash prefix that happens to start with a digit.
     expect(formatSkillVersion("5bf4e7801107")).toBe("5bf4e7801107");
     expect(formatSkillVersion("main")).toBe("main");
-  });
-});
-
-describe("isolateSkillMarkerTags", () => {
-  it("frees the code fence under an author's own tag", () => {
-    const out = isolateSkillMarkerTags(
-      ["<Good>", "```ts", "ok();", "```", "Clear name", "</Good>"].join("\n"),
-    );
-    expect(out).toBe(
-      [
-        "`<Good>`",
-        "",
-        "```ts",
-        "ok();",
-        "```",
-        "Clear name",
-        "",
-        "`</Good>`",
-      ].join("\n"),
-    );
-  });
-
-  it("leaves real HTML blocks, inline tags and fenced content alone", () => {
-    const source = [
-      "<details>",
-      "text with <b>inline</b> tag",
-      "```html",
-      "<Good>",
-      "```",
-      "~~~~",
-      "```",
-      "<Bad>",
-      "~~~~",
-    ].join("\n");
-    expect(isolateSkillMarkerTags(source)).toBe(source);
   });
 });
 

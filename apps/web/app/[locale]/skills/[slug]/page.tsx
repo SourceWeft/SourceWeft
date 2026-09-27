@@ -15,6 +15,7 @@ import { cn } from "@sourceweft/ui-web/lib/utils";
 
 import { routing } from "../../../../i18n/routing";
 import { buildTranslatedAlternates } from "../../../../lib/i18n/metadata";
+import { UntrustedMarkdown } from "../../../_components/market/untrusted-markdown";
 import { JsonLd } from "../../../_components/seo/json-ld";
 import { resolveInitialLandingAuthState } from "../../../_landing/auth-state-server";
 import { SourceWeftFooter } from "../../../_landing/components/sourceweft-footer";
@@ -33,7 +34,6 @@ import { PublicSkillOverview } from "../_components/community/public-skill-overv
 import { PublicSkillReport } from "../_components/community/public-skill-report";
 import { PublicSkillReviews } from "../_components/community/public-skill-reviews";
 import { PublicSkillRunStats } from "../_components/community/public-skill-run-stats";
-import { SkillMarkdown } from "../_components/skill-markdown";
 import {
   SkillArchivedBadge,
   SkillCapabilityBadge,
@@ -762,9 +762,12 @@ export default async function PublicSkillDetailPage({
           {tab === "skill" ? (
             skillMd ? (
               <article className={`${panelClassName} min-w-0 sm:p-7`}>
-                <SkillMarkdown imagePlaceholder={t("detail.imagePlaceholder")}>
+                <UntrustedMarkdown
+                  imagePlaceholder={t("detail.imagePlaceholder")}
+                  mode="skill"
+                >
                   {skillMd}
-                </SkillMarkdown>
+                </UntrustedMarkdown>
               </article>
             ) : (
               <p className={`${panelClassName} text-sm text-zinc-500`}>
