@@ -502,6 +502,56 @@
       "source": "來源：<link>{path}</link>",
       "sourceAtCommit": "來源：<link>{path}</link>，提交 <code>{commit}</code>",
       "viewInRepository": "在儲存庫中閱讀 README"
+    },
+    "aiOverview": {
+      "title": "AI 產生的概覽",
+      "explainerLabel": "關於此概覽",
+      "explainer": "由 AI 模型根據該服務在註冊中心的描述、清單和 README 撰寫，可能有誤或不完整。使用前請以服務自身的文件為準。",
+      "whatItDoes": "功能",
+      "whenToUse": "適用情境",
+      "requirements": "執行需求",
+      "englishFallback": "暫無中文概覽，以下為英文版本。",
+      "cardSummaryTitle": "AI 產生的簡介",
+      "admin": {
+        "title": "AI 概覽",
+        "loading": "正在載入概覽…",
+        "failed": "出了點問題，請重試。",
+        "analysisState": "分析狀態",
+        "analysisStatuses": {
+          "pending": "等待分析",
+          "running": "正在分析",
+          "ready": "已完成",
+          "failed": "分析失敗",
+          "needs-review": "待人工審核",
+          "missing": "尚未分析"
+        },
+        "categorySource": "分類來源",
+        "categorySources": {
+          "auto": "關鍵字規則",
+          "ai": "AI 分析",
+          "admin": "管理員",
+          "none": "未分類"
+        },
+        "retained": "新分析成功前，現有概覽會繼續顯示。",
+        "systemModel": "系統模型",
+        "systemModelReady": "已就緒",
+        "systemModelNotReady": "未就緒",
+        "notEligible": "未為此服務產生：只有已發布的公開服務，且有 README 或足夠詳細的描述，才會產生概覽。",
+        "none": "最新版本暫無概覽。",
+        "locales": "概覽語言",
+        "hidden": "已隱藏",
+        "visible": "已顯示",
+        "missing": "缺失",
+        "model": "模型",
+        "generatedAt": "產生時間",
+        "regenerate": "重新產生",
+        "regenerateQueued": "已加入佇列，新概覽將在幾分鐘內出現。",
+        "regenerateNotQueued": "未加入佇列：此服務不在產生概覽的範圍內。",
+        "hide": "隱藏",
+        "show": "顯示",
+        "hiddenDone": "概覽已隱藏。",
+        "shownDone": "概覽已顯示。"
+      }
     }
   },
   "languageSwitcher": {
