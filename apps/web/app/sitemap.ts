@@ -12,7 +12,11 @@ import {
   listPublicSkills,
 } from "../lib/market-skills";
 import { blogTagPath } from "./[locale]/blog/_components/blog-list";
-import { mcpCategoryPath } from "./[locale]/mcp/_components/mcp-display";
+import { readMcpOverviewLocales } from "../lib/mcp-ai-overview";
+import {
+  mcpCategoryPath,
+  mcpPath,
+} from "./[locale]/mcp/_components/mcp-display";
 import { isIndexableListing, SITE_URL } from "./seo";
 import {
   skillCategoryPath,
@@ -217,12 +221,22 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       priority: 0.45,
       url: `${SITE_URL}${blogTagPath(tag)}`,
     })),
-    ...mcpItems.map((item) => ({
-      changeFrequency: "weekly" as const,
-      lastModified: item.updatedAt ? new Date(item.updatedAt) : undefined,
-      priority: 0.55,
-      url: `${SITE_URL}/mcp/${encodeURIComponent(item.identifier)}`,
-    })),
+    ...mcpItems.map((item) => {
+      // Like a skill: another language is its own page only where the server
+      // has a visible AI overview written in it.
+      const { languages } = buildTranslatedAlternates(
+        mcpPath(item.identifier),
+        "en",
+        readMcpOverviewLocales(item) ?? [],
+      );
+      return {
+        changeFrequency: "weekly" as const,
+        lastModified: item.updatedAt ? new Date(item.updatedAt) : undefined,
+        priority: 0.55,
+        url: `${SITE_URL}/mcp/${encodeURIComponent(item.identifier)}`,
+        ...(languages ? { alternates: { languages } } : {}),
+      };
+    }),
     ...indexableSkillCategories.map((category) => ({
       alternates: sitemapLocaleAlternates(skillCategoryPath(category.slug)),
       changeFrequency: "weekly" as const,

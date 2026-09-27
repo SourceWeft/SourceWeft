@@ -16,9 +16,16 @@ import {
 } from "lucide-react";
 import type { MarketItemSummary } from "@sourceweft/market-sdk";
 
+import { buildTranslatedAlternates } from "../../../../lib/i18n/metadata";
+import {
+  getPublicMcpAiOverview,
+  getPublicMcpOverviewLocales,
+} from "../../../../lib/market-mcp-overview";
+import { mcpOverviewLocale } from "../../../../lib/mcp-ai-overview";
 import { resolveInitialLandingAuthState } from "../../../_landing/auth-state-server";
 import { SourceWeftFooter } from "../../../_landing/components/sourceweft-footer";
 import { SourceWeftHeader } from "../../../_landing/components/sourceweft-header";
+import { McpAiOverviewView } from "../../../_components/market/mcp-ai-overview-view";
 import {
   McpReadmeRepositoryLink,
   McpReadmeSection,
@@ -137,9 +144,16 @@ export async function generateMetadata({
     const result = await loadMcp(decodeURIComponent(identifier));
     const title = `${result.item.name} MCP Server`;
     const description = mcpDetailSeoDescription(result);
-    const url = `${SITE_URL}${mcpPath(result.item.identifier)}`;
+    // The body is the registry's English; a locale counts as its own page only
+    // where the server has a visible AI overview written in it, as for skills.
+    const alternates = buildTranslatedAlternates(
+      mcpPath(result.item.identifier),
+      hasLocale(routing.locales, locale) ? locale : routing.defaultLocale,
+      await getPublicMcpOverviewLocales(result.item.identifier),
+    );
+    const url = alternates.canonical;
     return {
-      alternates: { canonical: url },
+      alternates,
       description,
       openGraph: {
         description,
@@ -181,6 +195,13 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
       listPublicMcpCategories(),
     ]);
   const { item, manifest, version } = result;
+  // In the visitor's language, English when there is none in it. Read while
+  // the related servers load; it never fails, only comes back empty.
+  const requestedOverviewLocale = mcpOverviewLocale(locale);
+  const aiOverviewRead = getPublicMcpAiOverview(
+    item.identifier,
+    requestedOverviewLocale,
+  );
   const categoryNames = mcpCategoryNames(categoriesResponse.items);
   const relatedMarket =
     item.categories.length > 0
@@ -204,12 +225,17 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
   const repoUrl = manifest.repoUrl ?? item.repoUrl;
   const homepageUrl = manifest.homepageUrl ?? item.homepageUrl;
   const clientConfig = remoteMcpClientConfig(manifest);
-  // The hero already shows the summary; only a longer description adds anything.
+  const { aiOverview } = await aiOverviewRead;
+  // The hero already shows the summary; only a longer description adds
+  // anything. An AI overview, when there is one, takes the description's
+  // place; the description itself is never changed.
   const overviewText =
-    manifest.description && manifest.description !== item.summary
+    !aiOverview && manifest.description && manifest.description !== item.summary
       ? manifest.description
       : null;
-  const hasOverview = Boolean(overviewText || manifest.riskSummary);
+  const hasOverview = Boolean(
+    aiOverview || overviewText || manifest.riskSummary,
+  );
   const shownReadme = hasMcpReadmeToShow(readme) ? readme : null;
   const primaryCategory = item.categories[0];
   const installHref = authState.isSignedIn
@@ -428,23 +454,32 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
               <SectionHeading icon={McpBrandIcon}>
                 {t("overviewHeading")}
               </SectionHeading>
-              <div
-                className={`${panelClassName} space-y-4 divide-y divide-zinc-200 dark:divide-white/10 [&>*:not(:first-child)]:pt-4`}
-              >
-                {overviewText ? (
-                  <p className="whitespace-pre-line text-sm leading-7 text-zinc-600 dark:text-zinc-300">
-                    {overviewText}
-                  </p>
-                ) : null}
-                {manifest.riskSummary ? (
-                  <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-                    <span className="font-medium text-zinc-950 dark:text-white">
-                      {t("riskSummary")}
-                    </span>
-                    {manifest.riskSummary}
-                  </p>
-                ) : null}
-              </div>
+              {aiOverview ? (
+                <McpAiOverviewView
+                  className="last:mb-0"
+                  overview={aiOverview}
+                  requestedLocale={requestedOverviewLocale}
+                />
+              ) : null}
+              {overviewText || manifest.riskSummary ? (
+                <div
+                  className={`${panelClassName} space-y-4 divide-y divide-zinc-200 dark:divide-white/10 [&>*:not(:first-child)]:pt-4`}
+                >
+                  {overviewText ? (
+                    <p className="whitespace-pre-line text-sm leading-7 text-zinc-600 dark:text-zinc-300">
+                      {overviewText}
+                    </p>
+                  ) : null}
+                  {manifest.riskSummary ? (
+                    <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+                      <span className="font-medium text-zinc-950 dark:text-white">
+                        {t("riskSummary")}
+                      </span>
+                      {manifest.riskSummary}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
             </section>
           ) : null}
 

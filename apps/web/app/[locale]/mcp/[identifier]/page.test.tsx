@@ -18,6 +18,14 @@ vi.mock("../../../../lib/market-mcp", () => ({
   isMarketNotFound: (error: unknown) =>
     (error as { status?: number } | null)?.status === 404,
 }));
+// The AI overview has its own suite (page-ai-overview.test.tsx): none here.
+vi.mock("../../../../lib/market-mcp-overview", () => ({
+  getPublicMcpAiOverview: async () => ({
+    aiOverview: null,
+    overviewLocales: null,
+  }),
+  getPublicMcpOverviewLocales: async () => [],
+}));
 vi.mock("../../../_landing/auth-state-server", () => ({
   resolveInitialLandingAuthState: async () => ({
     isPending: false,
