@@ -3990,6 +3990,11 @@
       "retryFailed": "未能重試匯入。"
     }
   },
+  "market": {
+    "overview": {
+      "cautions": "安裝前請注意"
+    }
+  },
   "dashboardSkillOverview": {
     "block": {
       "title": "AI 產生的概覽",

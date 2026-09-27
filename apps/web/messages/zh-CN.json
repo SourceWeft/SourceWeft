@@ -3981,6 +3981,11 @@
       "retryFailed": "未能重试导入。"
     }
   },
+  "market": {
+    "overview": {
+      "cautions": "安装前请注意"
+    }
+  },
   "dashboardSkillOverview": {
     "block": {
       "title": "AI 生成的概览",

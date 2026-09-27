@@ -3990,6 +3990,11 @@
       "retryFailed": "The import was not retried."
     }
   },
+  "market": {
+    "overview": {
+      "cautions": "Before you install"
+    }
+  },
   "dashboardSkillOverview": {
     "block": {
       "title": "AI-generated overview",
