@@ -21,12 +21,17 @@ import {
   billingSchedulesEnabled,
 } from "../billing-host/bindings";
 import { scheduleSyncModelPricing } from "./schedules/sync-model-pricing";
+import { startServiceHeartbeat } from "../shared/service-heartbeat";
 
 validateBillingStartup();
 await syncGlobalModelGatewayConfigAtStartup();
 modelCatalog.startAutoRefresh(config.modelCatalogRefreshIntervalMs);
 
 let tickInFlight = false;
+let tickStartedAt = 0;
+// A tick that has not returned in this long is stuck; the scheduler then stops
+// reporting healthy (see the heartbeat below).
+const STUCK_TICK_MS = 10 * 60_000;
 
 async function tick() {
   if (tickInFlight) {
@@ -37,6 +42,7 @@ async function tick() {
   }
 
   tickInFlight = true;
+  tickStartedAt = Date.now();
   try {
     const jobs: Array<Promise<unknown>> = [];
 
@@ -145,6 +151,14 @@ const skillMarketTimer = setInterval(() => {
   void skillMarketTick();
 }, SKILL_MARKET_INTERVAL_MS);
 
+// Liveness for `launch.js health scheduler`: the event loop runs this timer
+// and no tick is stuck. A tick that is slow because a dependency is down still
+// ends within STUCK_TICK_MS through its own timeouts.
+const heartbeat = startServiceHeartbeat({
+  service: "scheduler",
+  isHealthy: () => !tickInFlight || Date.now() - tickStartedAt < STUCK_TICK_MS,
+});
+
 logger.info("Scheduler started", {
   intervalMs: config.schedulerIntervalMs,
   modelPricingSyncIntervalMs: config.modelPricingSyncIntervalMs,
@@ -153,6 +167,7 @@ logger.info("Scheduler started", {
 void agentSandboxService.logStartupWarning("scheduler");
 
 async function shutdown() {
+  heartbeat.stop();
   clearInterval(timer);
   clearInterval(modelPricingSyncTimer);
   clearInterval(marketFederationTimer);

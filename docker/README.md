@@ -88,6 +88,23 @@ docker compose --env-file docker/.env -f docker/docker-compose.yml down
 explicit disposable reset. Health HTTP 200 is not a replacement for testing a
 login, file upload and model response.
 
+## Health checks
+
+The API answers `GET /v1/health` on port 3001 and the Web server `GET /` on
+port 3000. The worker and scheduler have no HTTP port; they renew a heartbeat
+while healthy, and this command checks it (exit 0 when healthy):
+
+```sh
+node /app/apps/backend/dist/launch.js health worker     # or: health scheduler
+```
+
+Compose already uses it. On other platforms, run it as a container-command
+health check (for example Kubernetes `exec` probes). It needs no database or
+network access. A worker is healthy while its event loop runs and its queue
+workers are running; a scheduler, while no tick has been stuck for 10 minutes.
+A database or Redis outage alone does not fail it, since a restart would not
+help.
+
 ## Database migrations
 
 Every container applies pending migrations in the image entrypoint before its

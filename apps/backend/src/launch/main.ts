@@ -11,12 +11,14 @@ import {
   runLauncher,
   type LaunchCommand,
 } from "./launcher";
+import { runHealthCommand } from "./health";
 import { acquireMigrationLock } from "./migration-lock";
 import { listPendingSchemaMigrations } from "./pending-migrations";
 
 // `node dist/launch.js <command>`: `prepare` is the image entrypoint's database
-// step (docker/runtime-entrypoint.mjs), `migrate` the explicit migration, and
-// `api`/`worker`/`scheduler` start dist/<service>.js, built next to this file.
+// step (docker/runtime-entrypoint.mjs), `migrate` the explicit migration,
+// `api`/`worker`/`scheduler` start dist/<service>.js, built next to this file,
+// and `health <worker|scheduler>` is their container health check.
 
 /** How long a command waits for the database and the migration lock. */
 const MIGRATION_LOCK_TIMEOUT_MS = 10 * 60_000;
@@ -108,15 +110,21 @@ async function main(command: LaunchCommand) {
   });
 }
 
-try {
-  process.exitCode = await main(parseLaunchCommand(process.argv[2]));
-} catch (error) {
-  if (exitSignal) {
-    process.exitCode = exitCodeOf(null, exitSignal);
-  } else {
-    logger.error("Backend launch failed", {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    process.exitCode = 1;
+if (process.argv[2] === "health") {
+  const { code, message } = runHealthCommand(process.argv[3]);
+  (code === 0 ? console.log : console.error)(message);
+  process.exitCode = code;
+} else {
+  try {
+    process.exitCode = await main(parseLaunchCommand(process.argv[2]));
+  } catch (error) {
+    if (exitSignal) {
+      process.exitCode = exitCodeOf(null, exitSignal);
+    } else {
+      logger.error("Backend launch failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      process.exitCode = 1;
+    }
   }
 }

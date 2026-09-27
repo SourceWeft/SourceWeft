@@ -11,6 +11,7 @@ import {
 import { connectionOptions } from "../shared/redis-connection";
 import { buildWorkerJobFailureLog } from "./job-failure-log";
 import { drainWorkerForShutdown } from "./shutdown";
+import { startServiceHeartbeat } from "../shared/service-heartbeat";
 import {
   installWorkerProcessErrorGuards,
   runWorkerJobWithIsolation,
@@ -97,12 +98,16 @@ async function runIsolatedJob(
 // worker. Jobs still running at the deadline are redelivered by BullMQ's stall
 // handling, which chat runs already fence against.
 const WORKER_RESTART_DRAIN_TIMEOUT_MS = 30_000;
+// Set once the workers exist; a worker that is going away stops reporting
+// healthy.
+let heartbeat: { stop(): void } | null = null;
 let restarting = false;
 function restartAfterException() {
   if (restarting) {
     process.exit(1);
   }
   restarting = true;
+  heartbeat?.stop();
   logger.error("Worker draining after an uncaught exception, then exiting");
   const deadline = setTimeout(
     () => process.exit(1),
@@ -232,6 +237,17 @@ registerWorkerListeners(primaryWorker, config.queueName);
 registerWorkerListeners(deliverablesWorker, config.deliverablesQueueName);
 registerWorkerListeners(skillIngestWorker, config.skillIngestQueueName);
 
+// Liveness for `launch.js health worker`: the event loop runs this timer and
+// every queue worker is still taking jobs. A Redis outage leaves the workers
+// running and reconnecting, so it does not fail liveness.
+heartbeat = startServiceHeartbeat({
+  service: "worker",
+  isHealthy: () =>
+    [primaryWorker, deliverablesWorker, skillIngestWorker].every((worker) =>
+      worker.isRunning(),
+    ),
+});
+
 // Deliverable jobs that die outside the processor (stalled on worker
 // restart/crash, BullMQ-level failures) never reach the host's catch block —
 // mark their artifacts failed so they don't stay "running" forever.
@@ -328,6 +344,7 @@ async function shutdown() {
     return;
   }
   shuttingDown = true;
+  heartbeat?.stop();
   logger.info("Worker shutting down");
   const deadline = setTimeout(
     () => process.exit(1),
