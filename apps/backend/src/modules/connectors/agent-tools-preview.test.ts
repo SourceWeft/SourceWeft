@@ -71,7 +71,10 @@ it("rechecks current preview when a previously discovered read tool is invoked",
   const tools = await createConnectorActionTools(context);
   expect(tools).toHaveLength(1);
   mocks.enabled.mockResolvedValue(false);
-  const result = await tools[0]!.invoke({});
+  const readTool: {
+    invoke(input: Record<string, unknown>): Promise<unknown>;
+  } = tools[0]!;
+  const result = await readTool.invoke({});
   expect(result).toMatchObject({
     code: "CONNECTOR_PREVIEW_ACCESS_DENIED",
     statusCode: 403,
