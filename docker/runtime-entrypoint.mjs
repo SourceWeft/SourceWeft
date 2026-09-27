@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 export function runtimeEnvironment(input) {
   const env = { ...input };
@@ -43,23 +43,55 @@ export function runtimeEnvironment(input) {
   }
   return env;
 }
+/**
+ * The step every container runs before its command: bring the database schema
+ * up to date (or, with MIGRATION_ENABLED=false, check it) under the migration
+ * lock, whatever the command is. A container with no database has nothing to
+ * migrate — utility commands such as `pnpm --version` run without one.
+ */
+export function databasePreparationCommand(env) {
+  if (!env.DATABASE_URL) return null;
+  return [
+    process.execPath,
+    [
+      fileURLToPath(new URL("../apps/backend/dist/launch.js", import.meta.url)),
+      "prepare",
+    ],
+  ];
+}
+
 if (
   process.argv[1] &&
   import.meta.url === pathToFileURL(process.argv[1]).href
 ) {
   const [command, ...args] = process.argv.slice(2);
   if (!command) throw new Error("A service command is required");
-  const child = spawn(command, args, {
-    env: runtimeEnvironment(process.env),
-    stdio: "inherit",
-  });
+  const env = runtimeEnvironment(process.env);
+  let child = null;
+  let stopping = false;
   for (const signal of ["SIGTERM", "SIGINT"])
-    process.on(signal, () => child.kill(signal));
-  child.on("error", (error) => {
-    console.error(error.message);
-    process.exitCode = 1;
-  });
-  child.on("exit", (code, signal) => {
-    process.exit(code ?? (signal === "SIGTERM" ? 143 : 1));
-  });
+    process.on(signal, () => {
+      stopping = true;
+      child?.kill(signal);
+    });
+  const run = (file, fileArgs) =>
+    new Promise((resolve) => {
+      child = spawn(file, fileArgs, { env, stdio: "inherit" });
+      child.on("error", (error) => {
+        console.error(error.message);
+        resolve(1);
+      });
+      child.on("exit", (code, signal) => {
+        child = null;
+        resolve(code ?? (signal === "SIGTERM" ? 143 : 1));
+      });
+    });
+
+  const preparation = databasePreparationCommand(env);
+  const prepared = preparation ? await run(...preparation) : 0;
+  // A failed preparation, or a stop during it, ends the container before its
+  // command starts.
+  process.exit(
+    prepared !== 0 || stopping ? prepared || 143 : await run(command, args),
+  );
 }

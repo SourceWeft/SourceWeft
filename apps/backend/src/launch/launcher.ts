@@ -1,23 +1,37 @@
 import { parseStrictBooleanEnv } from "../shared/env";
 import type { MigrationLock } from "./migration-lock";
 
-export const LAUNCH_ROLES = ["api", "worker", "scheduler", "migrate"] as const;
-export type LaunchRole = (typeof LAUNCH_ROLES)[number];
+/**
+ * `launch.js` commands. `prepare` is the image entrypoint's step before any
+ * container command: migrate (or, with `MIGRATION_ENABLED=false`, only check).
+ * `migrate` always migrates. The service names start that service and nothing
+ * else — preparing the database is the entrypoint's job — and remain so that
+ * deployments started as `launch.js <service>` keep working.
+ */
+export const LAUNCH_COMMANDS = [
+  "prepare",
+  "migrate",
+  "api",
+  "worker",
+  "scheduler",
+] as const;
+export type LaunchCommand = (typeof LAUNCH_COMMANDS)[number];
+export type LaunchService = Exclude<LaunchCommand, "prepare" | "migrate">;
 
-export function parseLaunchRole(value: string | undefined): LaunchRole {
-  const role = LAUNCH_ROLES.find((candidate) => candidate === value);
-  if (!role) {
+export function parseLaunchCommand(value: string | undefined): LaunchCommand {
+  const command = LAUNCH_COMMANDS.find((candidate) => candidate === value);
+  if (!command) {
     throw new Error(
-      `Unknown launch role "${value ?? ""}"; expected one of: ${LAUNCH_ROLES.join(", ")}.`,
+      `Unknown launch command "${value ?? ""}"; expected one of: ${LAUNCH_COMMANDS.join(", ")}.`,
     );
   }
-  return role;
+  return command;
 }
 
 export class PendingMigrationsError extends Error {
   constructor(pending: string[]) {
     super(
-      `MIGRATION_ENABLED is false and the database is missing ${pending.length} migration(s): ${pending.join(", ")}. Run the migrate role first.`,
+      `MIGRATION_ENABLED is false and the database is missing ${pending.length} migration(s): ${pending.join(", ")}. Run the migrate command first.`,
     );
     this.name = "PendingMigrationsError";
   }
@@ -28,26 +42,17 @@ export type LauncherDependencies = {
   listPendingMigrations(lock: MigrationLock): Promise<string[]>;
   log(message: string): void;
   runMigrations(): Promise<void>;
-  startService(role: Exclude<LaunchRole, "migrate">): Promise<number>;
+  startService(service: LaunchService): Promise<number>;
 };
 
 /**
- * Starts a backend role on a migrated database. Under the migration lock, the
- * role applies pending migrations (`MIGRATION_ENABLED`, default true) or, with
- * migrations disabled, refuses to start while any are pending. The `migrate`
- * role always migrates and then exits. Only after the lock is released does a
- * service start; its exit code is returned.
+ * Under the migration lock, applies pending migrations (`migrate: true`) or
+ * refuses while any are pending, then releases the lock.
  */
-export async function runLauncher(input: {
-  deps: LauncherDependencies;
-  env: NodeJS.ProcessEnv;
-  role: LaunchRole;
-}): Promise<number> {
-  const { deps, role } = input;
-  const migrate =
-    role === "migrate" ||
-    parseStrictBooleanEnv("MIGRATION_ENABLED", true, input.env);
-
+async function prepareDatabase(
+  deps: LauncherDependencies,
+  migrate: boolean,
+): Promise<void> {
   const lock = await deps.acquireLock();
   try {
     if (migrate) {
@@ -63,8 +68,25 @@ export async function runLauncher(input: {
   } finally {
     await lock.release();
   }
+}
 
-  if (role === "migrate") return 0;
-  deps.log(`Starting ${role}`);
-  return deps.startService(role);
+/** Runs a `launch.js` command and returns the process exit code. */
+export async function runLauncher(input: {
+  command: LaunchCommand;
+  deps: LauncherDependencies;
+  env: NodeJS.ProcessEnv;
+}): Promise<number> {
+  const { command, deps } = input;
+  if (command === "prepare") {
+    await prepareDatabase(
+      deps,
+      parseStrictBooleanEnv("MIGRATION_ENABLED", true, input.env),
+    );
+    return 0;
+  }
+  if (command === "migrate") {
+    await prepareDatabase(deps, true);
+    return 0;
+  }
+  return deps.startService(command);
 }

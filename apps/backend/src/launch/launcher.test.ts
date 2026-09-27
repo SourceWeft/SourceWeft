@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import {
-  parseLaunchRole,
+  parseLaunchCommand,
   PendingMigrationsError,
   runLauncher,
   type LauncherDependencies,
@@ -29,8 +29,8 @@ function fakeDeps(
     runMigrations: async () => {
       calls.push("migrate");
     },
-    startService: async (role) => {
-      calls.push(`start:${role}`);
+    startService: async (service) => {
+      calls.push(`start:${service}`);
       return 0;
     },
     ...overrides,
@@ -38,30 +38,13 @@ function fakeDeps(
   return { calls, deps };
 }
 
-test("a role migrates under the lock and starts only after releasing it", async () => {
+test("prepare migrates under the lock and starts nothing", async () => {
   const { calls, deps } = fakeDeps();
-  const code = await runLauncher({ deps, env: {}, role: "api" });
-  assert.equal(code, 0);
-  assert.deepEqual(calls, ["lock", "migrate", "release", "start:api"]);
-});
-
-test("the service's exit code is returned", async () => {
-  const { deps } = fakeDeps({ startService: async () => 143 });
-  assert.equal(await runLauncher({ deps, env: {}, role: "worker" }), 143);
-});
-
-test("the migrate role migrates and exits without starting a service", async () => {
-  const { calls, deps } = fakeDeps();
-  const code = await runLauncher({
-    deps,
-    env: { MIGRATION_ENABLED: "false" },
-    role: "migrate",
-  });
-  assert.equal(code, 0);
+  assert.equal(await runLauncher({ command: "prepare", deps, env: {} }), 0);
   assert.deepEqual(calls, ["lock", "migrate", "release"]);
 });
 
-test("a failed migration releases the lock and starts nothing", async () => {
+test("a failed migration releases the lock and fails prepare", async () => {
   const { calls, deps } = fakeDeps({
     runMigrations: async () => {
       calls.push("migrate");
@@ -69,27 +52,27 @@ test("a failed migration releases the lock and starts nothing", async () => {
     },
   });
   await assert.rejects(
-    runLauncher({ deps, env: {}, role: "api" }),
+    runLauncher({ command: "prepare", deps, env: {} }),
     /migration failed/,
   );
   assert.deepEqual(calls, ["lock", "migrate", "release"]);
 });
 
-test("with migrations disabled, a current schema starts without migrating", async () => {
+test("with migrations disabled, prepare only checks a current schema", async () => {
   const { calls, deps } = fakeDeps();
   const code = await runLauncher({
+    command: "prepare",
     deps,
     env: { MIGRATION_ENABLED: " FALSE " },
-    role: "scheduler",
   });
   assert.equal(code, 0);
-  assert.deepEqual(calls, ["lock", "check", "release", "start:scheduler"]);
+  assert.deepEqual(calls, ["lock", "check", "release"]);
 });
 
-test("with migrations disabled, pending migrations stop the role", async () => {
+test("with migrations disabled, pending migrations fail prepare", async () => {
   const { calls, deps } = fakeDeps({ pending: ["0053_connector_sync_block"] });
   await assert.rejects(
-    runLauncher({ deps, env: { MIGRATION_ENABLED: "0" }, role: "api" }),
+    runLauncher({ command: "prepare", deps, env: { MIGRATION_ENABLED: "0" } }),
     (error: unknown) =>
       error instanceof PendingMigrationsError &&
       error.message.includes("0053_connector_sync_block"),
@@ -100,15 +83,47 @@ test("with migrations disabled, pending migrations stop the role", async () => {
 test("an invalid MIGRATION_ENABLED fails before touching the database", async () => {
   const { calls, deps } = fakeDeps();
   await assert.rejects(
-    runLauncher({ deps, env: { MIGRATION_ENABLED: "yes" }, role: "api" }),
+    runLauncher({
+      command: "prepare",
+      deps,
+      env: { MIGRATION_ENABLED: "yes" },
+    }),
     /MIGRATION_ENABLED must be one of: true, false, 1, 0/,
   );
   assert.deepEqual(calls, []);
 });
 
-test("launch roles are the backend services and migrate", () => {
-  assert.equal(parseLaunchRole("worker"), "worker");
-  assert.equal(parseLaunchRole("migrate"), "migrate");
-  assert.throws(() => parseLaunchRole("web"), /Unknown launch role "web"/);
-  assert.throws(() => parseLaunchRole(undefined), /Unknown launch role ""/);
+test("migrate always migrates, even with migrations disabled", async () => {
+  const { calls, deps } = fakeDeps();
+  const code = await runLauncher({
+    command: "migrate",
+    deps,
+    env: { MIGRATION_ENABLED: "false" },
+  });
+  assert.equal(code, 0);
+  assert.deepEqual(calls, ["lock", "migrate", "release"]);
+});
+
+test("a service command starts the service without touching the database", async () => {
+  const { calls, deps } = fakeDeps({
+    startService: async (service) => {
+      calls.push(`start:${service}`);
+      return 143;
+    },
+  });
+  assert.equal(await runLauncher({ command: "worker", deps, env: {} }), 143);
+  assert.deepEqual(calls, ["start:worker"]);
+});
+
+test("launch commands are prepare, migrate and the backend services", () => {
+  assert.equal(parseLaunchCommand("prepare"), "prepare");
+  assert.equal(parseLaunchCommand("scheduler"), "scheduler");
+  assert.throws(
+    () => parseLaunchCommand("web"),
+    /Unknown launch command "web"/,
+  );
+  assert.throws(
+    () => parseLaunchCommand(undefined),
+    /Unknown launch command ""/,
+  );
 });
