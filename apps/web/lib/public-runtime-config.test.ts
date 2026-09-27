@@ -17,10 +17,17 @@ test("production builds do not inherit publisher NEXT_PUBLIC addresses", () => {
   vi.stubEnv("PUBLIC_WEB_BASE_URL", "");
   expect(serverPublicRuntimeConfig().apiBaseUrl).toBe("");
 });
+test("GTM id is read at runtime into analytics.gtmId", () => {
+  vi.stubEnv("PUBLIC_GTM_ID", " GTM-ABC ");
+  expect(serverPublicRuntimeConfig().analytics.gtmId).toBe("GTM-ABC");
+  vi.stubEnv("PUBLIC_GTM_ID", "");
+  expect(serverPublicRuntimeConfig().analytics.gtmId).toBeUndefined();
+});
 test("runtime injection controls auth and all request clients without rebuilding", async () => {
   vi.stubGlobal("window", {
     location: { origin: "http://localhost:4567" },
     __SOURCEWEFT_CONFIG__: {
+      analytics: {},
       apiBaseUrl: "",
       webBaseUrl: "",
       googleOneTapEnabled: false,

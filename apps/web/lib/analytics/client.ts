@@ -138,7 +138,7 @@ let singleton: AnalyticsClient | null = null;
 
 function analyticsClient(): AnalyticsClient {
   singleton ??= createAnalyticsClient({
-    destinations: buildDestinations({ gtmId: publicRuntimeConfig().gtmId }),
+    destinations: buildDestinations(publicRuntimeConfig().analytics ?? {}),
     resolveContext: resolveAnalyticsContext,
     strict: process.env.NODE_ENV !== "production",
   });

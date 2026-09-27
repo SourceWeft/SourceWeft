@@ -1,13 +1,4 @@
-"use client";
+import type { AnalyticsValue } from "./analytics/catalog";
 
-import { sendGTMEvent } from "@next/third-parties/google";
-
-type AnalyticsPrimitive = string | number | boolean | null | undefined;
-export type AnalyticsParams = Record<
-  string,
-  AnalyticsPrimitive | AnalyticsPrimitive[] | Record<string, AnalyticsPrimitive>[]
->;
-
-export function trackEvent(name: string, params?: AnalyticsParams) {
-  sendGTMEvent({ ...(params ?? {}), event: name });
-}
+export { trackEvent } from "./analytics/client";
+export type AnalyticsParams = Record<string, AnalyticsValue>;

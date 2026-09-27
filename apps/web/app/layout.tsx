@@ -4,7 +4,6 @@ import {
   serverPublicRuntimeConfig,
   serializePublicConfig,
 } from "../lib/public-runtime-config";
-import { GoogleTagManager } from "@next/third-parties/google";
 import type { Metadata } from "next";
 import { connection } from "next/server";
 import { NextIntlClientProvider } from "next-intl";
@@ -18,6 +17,7 @@ import {
 import { resolveDeploymentCapabilities } from "../lib/billing-edition/capabilities-server";
 import { resolveRequireEmailVerification } from "../lib/auth/auth-config-server";
 import { SeoJsonLd } from "./_components/seo/json-ld";
+import { AnalyticsScripts } from "../lib/analytics/analytics-scripts";
 import { Providers } from "./providers";
 import { DesktopWindowChrome } from "./_components/desktop-window-chrome";
 import {
@@ -71,7 +71,6 @@ export default async function RootLayout({
   // Runtime config (base URL, GTM) is injected at container start, so never prerender with build-time values.
   await connection();
   const runtimeConfig = serverPublicRuntimeConfig();
-  const gtmId = runtimeConfig.gtmId;
   const [capabilities, requireEmailVerification] = await Promise.all([
     resolveDeploymentCapabilities(),
     resolveRequireEmailVerification(),
@@ -102,7 +101,7 @@ export default async function RootLayout({
         />
         <SeoJsonLd />
       </head>
-      {gtmId ? <GoogleTagManager gtmId={gtmId} /> : null}
+      <AnalyticsScripts config={runtimeConfig.analytics} />
       <body className="flex min-h-svh flex-col antialiased">
         <NextIntlClientProvider locale={resolvedLocale} messages={messages}>
           <Providers

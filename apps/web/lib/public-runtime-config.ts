@@ -1,6 +1,8 @@
+import type { AnalyticsRuntimeConfig } from "./analytics/client";
+
 export type PublicRuntimeConfig = {
+  analytics: AnalyticsRuntimeConfig;
   googleMobileClientId?: string;
-  gtmId?: string;
   apiBaseUrl: string;
   webBaseUrl: string;
   googleOneTapEnabled: boolean;
@@ -20,7 +22,9 @@ export function serverPublicRuntimeConfig(): PublicRuntimeConfig {
     googleMobileClientId:
       env("PUBLIC_GOOGLE_MOBILE_CLIENT_ID") ||
       env("NEXT_PUBLIC_GOOGLE_MOBILE_CLIENT_ID"),
-    gtmId: env("PUBLIC_GTM_ID"),
+    analytics: {
+      gtmId: env("PUBLIC_GTM_ID") || undefined,
+    },
     apiBaseUrl:
       env("PUBLIC_API_BASE_URL") ||
       (process.env.NODE_ENV === "development"
@@ -46,6 +50,7 @@ export function publicRuntimeConfig(): PublicRuntimeConfig {
   return typeof window === "undefined"
     ? serverPublicRuntimeConfig()
     : (window.__SOURCEWEFT_CONFIG__ ?? {
+        analytics: {},
         apiBaseUrl:
           process.env.NODE_ENV === "development"
             ? (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001")
