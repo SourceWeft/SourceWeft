@@ -117,8 +117,6 @@ export function registerMarketRoutes(app: Hono) {
         item: found.record.item,
         version: found.itemVersion,
         manifest: manifest.data,
-        signature: null,
-        signingKeyId: null,
       },
       { maxAge: 3600, immutable: true },
     );

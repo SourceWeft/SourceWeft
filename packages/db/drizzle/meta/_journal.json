@@ -379,6 +379,13 @@
       "when": 1790277162036,
       "tag": "0053_connector_sync_block",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1790526182103,
+      "tag": "0054_mcp_catalog_rename",
+      "breakpoints": true
     }
   ]
 }

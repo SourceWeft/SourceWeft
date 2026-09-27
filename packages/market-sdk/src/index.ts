@@ -5,7 +5,6 @@ import {
   getMarketSkillResponseSchema,
   listMarketSkillCollectionsResponseSchema,
   listMarketCategoriesResponseSchema,
-  listMarketKeysResponseSchema,
   listMarketMcpResponseSchema,
   listMarketSkillCategoriesResponseSchema,
   listMarketSkillsResponseSchema,
@@ -223,14 +222,6 @@ export class MarketClient {
       appendQuery("/v1/mcp/category-counts", params),
       { method: "GET" },
       marketCategoryCountsResponseSchema,
-    );
-  }
-
-  listKeys() {
-    return this.request(
-      "/v1/mcp/keys",
-      { method: "GET" },
-      listMarketKeysResponseSchema,
     );
   }
 

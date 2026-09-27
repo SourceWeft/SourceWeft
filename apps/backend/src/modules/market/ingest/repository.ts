@@ -2,10 +2,10 @@ import { eq, sql } from "drizzle-orm";
 import type { MarketMcpManifest } from "@sourceweft/market-contracts";
 import {
   db,
-  marketCategories,
-  marketItemCategories,
-  marketItems,
-  marketItemVersions,
+  mcpCategories,
+  mcpServerCategories,
+  mcpServers,
+  mcpServerVersions,
 } from "@sourceweft/db";
 import type { McpRepositoryIngestOptions } from "../types";
 import { getMcpCategoryDefinition } from "../parser/categories";
@@ -46,8 +46,8 @@ function metadataFromManifest(manifest: MarketMcpManifest) {
   };
 }
 
-type MarketItemStatus = McpRepositoryIngestOptions["status"];
-type MarketItemVisibility = McpRepositoryIngestOptions["visibility"];
+type McpServerStatus = McpRepositoryIngestOptions["status"];
+type McpServerVisibility = McpRepositoryIngestOptions["visibility"];
 
 /**
  * Derive the promoted facet columns from the final metadata blob, so listing can
@@ -80,21 +80,21 @@ function facetsFromMetadata(metadataJson: Record<string, unknown>) {
  */
 export async function getMarketItemForSubmission(identifier: string): Promise<{
   hasUpstream: boolean;
-  status: MarketItemStatus;
+  status: McpServerStatus;
   submittedBy: string | null;
 } | null> {
   const [item] = await db
     .select()
-    .from(marketItems)
-    .where(eq(marketItems.identifier, identifier))
+    .from(mcpServers)
+    .where(eq(mcpServers.identifier, identifier))
     .limit(1);
   if (!item) {
     return null;
   }
   const versions = await db
     .select()
-    .from(marketItemVersions)
-    .where(eq(marketItemVersions.itemId, item.id));
+    .from(mcpServerVersions)
+    .where(eq(mcpServerVersions.serverId, item.id));
   const hasUpstream = versions.some((version) => version.origin === "upstream");
   const submittedBy =
     versions
@@ -111,8 +111,8 @@ export async function getMarketItemForSubmission(identifier: string): Promise<{
  */
 export async function upsertMarketMcp(input: {
   manifest: MarketMcpManifest;
-  status: MarketItemStatus;
-  visibility: MarketItemVisibility;
+  status: McpServerStatus;
+  visibility: McpServerVisibility;
   origin: "upstream" | "submitted";
   source?: string | null;
   owner?: string | null;
@@ -137,11 +137,10 @@ export async function upsertMarketMcp(input: {
   const provenanceJson = input.provenanceJson ?? {};
   const facets = facetsFromMetadata(metadataJson);
 
-  await db
-    .insert(marketItems)
+  const [server] = await db
+    .insert(mcpServers)
     .values({
       id: itemId,
-      kind: "mcp",
       identifier: manifest.identifier,
       name: manifest.name,
       summary: manifest.summary,
@@ -161,7 +160,7 @@ export async function upsertMarketMcp(input: {
       updatedAt: now,
     })
     .onConflictDoUpdate({
-      target: marketItems.identifier,
+      target: mcpServers.identifier,
       set: {
         name: manifest.name,
         summary: manifest.summary,
@@ -183,26 +182,31 @@ export async function upsertMarketMcp(input: {
         // sync-touch time and broke every in-flight keyset pagination on every
         // scheduled sync (rows jumped ahead of open cursors). Only a
         // null->published transition sets it.
-        publishedAt: sql`coalesce(${marketItems.publishedAt}, excluded.published_at)`,
+        publishedAt: sql`coalesce(${mcpServers.publishedAt}, excluded.published_at)`,
       },
-    });
+    })
+    .returning({ categoriesSetBy: mcpServers.categoriesSetBy });
+  if (!server) {
+    throw new Error(
+      `MCP catalog upsert returned no row for ${manifest.identifier}`,
+    );
+  }
 
   await db
-    .insert(marketItemVersions)
+    .insert(mcpServerVersions)
     .values({
       id: versionId,
-      itemId,
+      serverId: itemId,
       version: manifest.version,
       status: input.status,
       origin: input.origin,
       source: input.source ?? null,
       manifestJson: manifest,
-      readmeMd: undefined,
       provenanceJson,
       publishedAt,
     })
     .onConflictDoUpdate({
-      target: [marketItemVersions.itemId, marketItemVersions.version],
+      target: [mcpServerVersions.serverId, mcpServerVersions.version],
       set: {
         status: input.status,
         origin: input.origin,
@@ -210,18 +214,25 @@ export async function upsertMarketMcp(input: {
         manifestJson: manifest,
         provenanceJson,
         // Same first-publish preservation as the item row.
-        publishedAt: sql`coalesce(${marketItemVersions.publishedAt}, excluded.published_at)`,
+        publishedAt: sql`coalesce(${mcpServerVersions.publishedAt}, excluded.published_at)`,
       },
     });
 
+  // Categories follow the manifest only while nobody has chosen them: once the
+  // AI overview ('ai') or a market admin ('admin') owns them, a re-sync leaves
+  // them alone.
+  if (server.categoriesSetBy !== "auto") {
+    return itemId;
+  }
+
   await db
-    .delete(marketItemCategories)
-    .where(eq(marketItemCategories.itemId, itemId));
+    .delete(mcpServerCategories)
+    .where(eq(mcpServerCategories.serverId, itemId));
 
   for (const slug of manifest.categories) {
     const categoryId = hashId("mcp-cat", slug);
     await db
-      .insert(marketCategories)
+      .insert(mcpCategories)
       .values({
         id: categoryId,
         slug,
@@ -229,17 +240,17 @@ export async function upsertMarketMcp(input: {
         description: categoryDescription(slug),
       })
       .onConflictDoUpdate({
-        target: marketCategories.slug,
+        target: mcpCategories.slug,
         set: {
           name: categoryName(slug),
           description: categoryDescription(slug),
         },
       });
     await db
-      .insert(marketItemCategories)
-      .values({ itemId, categoryId })
+      .insert(mcpServerCategories)
+      .values({ serverId: itemId, categoryId })
       .onConflictDoNothing({
-        target: [marketItemCategories.itemId, marketItemCategories.categoryId],
+        target: [mcpServerCategories.serverId, mcpServerCategories.categoryId],
       });
   }
 

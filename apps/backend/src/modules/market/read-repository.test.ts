@@ -56,7 +56,7 @@ test("multiple categories use an EXISTS union before database pagination", async
     assert.ok(predicate);
     const query = new PgDialect().sqlToQuery(predicate);
     assert.match(query.sql, /exists \(select/);
-    assert.match(query.sql, /"market_categories"\."slug" in \(/);
+    assert.match(query.sql, /"mcp_categories"\."slug" in \(/);
     assert.equal(
       query.params.filter((value) => value === "files-storage").length,
       1,
