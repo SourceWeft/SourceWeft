@@ -9,7 +9,7 @@ import {
 } from "@sourceweft/db";
 import type { McpRepositoryIngestOptions } from "../types";
 import { getMcpCategoryDefinition } from "../parser/categories";
-import { hashId } from "./plan";
+import { hashId, mcpServerId, mcpServerVersionId } from "./plan";
 
 function categoryName(slug: string) {
   const definition = getMcpCategoryDefinition(slug);
@@ -92,7 +92,10 @@ export async function getMarketItemForSubmission(identifier: string): Promise<{
     return null;
   }
   const versions = await db
-    .select()
+    .select({
+      origin: mcpServerVersions.origin,
+      provenanceJson: mcpServerVersions.provenanceJson,
+    })
     .from(mcpServerVersions)
     .where(eq(mcpServerVersions.serverId, item.id));
   const hasUpstream = versions.some((version) => version.origin === "upstream");
@@ -126,11 +129,8 @@ export async function upsertMarketMcp(input: {
     input.origin === "submitted"
       ? { ...metadataFromManifest(manifest), official: false, verified: false }
       : metadataFromManifest(manifest);
-  const itemId = hashId("mcp", manifest.identifier);
-  const versionId = hashId(
-    "mcpv",
-    `${manifest.identifier}@${manifest.version}`,
-  );
+  const itemId = mcpServerId(manifest.identifier);
+  const versionId = mcpServerVersionId(manifest.identifier, manifest.version);
   const now = new Date();
   const publishedAt = input.status === "published" ? now : null;
   const owner = input.owner ?? null;
@@ -192,6 +192,10 @@ export async function upsertMarketMcp(input: {
     );
   }
 
+  // The README columns (`readme_md`, `readme_*`) are deliberately absent from
+  // both the insert and the conflict update: a new version starts `pending`
+  // and due by the column defaults, and a re-sync never clears or rewrites a
+  // README the fetch job (or a submission) stored.
   await db
     .insert(mcpServerVersions)
     .values({

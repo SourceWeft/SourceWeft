@@ -348,7 +348,10 @@ export type MarketMcpToolManifest = z.infer<
   typeof marketMcpToolManifestSchema
 >;
 export type {
+  MarketMcpReadme,
+  MarketMcpReadmeSource,
   McpAuthType,
+  McpReadmeStatus,
   McpRiskLevel,
   McpTransport,
 } from "@sourceweft/market-contracts";

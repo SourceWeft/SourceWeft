@@ -786,7 +786,7 @@ export type SkillVersionFileManifestRow = {
   contentText: string | null;
 };
 
-/** `readSkillDocuments`' README pattern, in Postgres syntax (matched with `~*`). */
+/** The shared `README_PATH` (shared/catalog-readme.ts), in Postgres syntax (matched with `~*`). */
 const README_PATH_PATTERN = "^readme(\\.[a-z0-9-]+)?\\.md$";
 
 export async function listSkillVersionFileManifest(

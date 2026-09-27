@@ -128,3 +128,79 @@ test("accepts explicit MCP subdirectories with runnable entrypoints", async () =
     ),
   );
 });
+
+// An MCP server whose README the parser has to find; `files` adds the READMEs.
+function readmeFixture(files: Record<string, string>) {
+  return createRepositoryFixture({
+    repo: "weather",
+    files: {
+      "mcp/server.json": JSON.stringify({
+        name: "io.github.example/weather",
+        version: "1.0.0",
+        packages: [
+          {
+            registryType: "npm",
+            identifier: "@example/weather-mcp",
+            transport: { type: "stdio" },
+          },
+        ],
+      }),
+      "mcp/package.json": JSON.stringify({
+        name: "@example/weather-mcp",
+        dependencies: { "@modelcontextprotocol/sdk": "^1.0.0" },
+      }),
+      ...files,
+    },
+  });
+}
+
+test("the README is the repository root's first", async () => {
+  const result = await parseStaticRepository(
+    readmeFixture({
+      "README.md": "# Weather\n\nThe repository.",
+      "mcp/README.md": "# Weather MCP\n\nThe server.",
+    }),
+  );
+  assert.equal(result.readme?.path, "README.md");
+  assert.equal(result.readme?.content, "# Weather\n\nThe repository.");
+});
+
+test("without one at the root, the README next to server.json", async () => {
+  const result = await parseStaticRepository(
+    readmeFixture({
+      "mcp/README.md": "# Weather MCP\n\nThe server.",
+      "docs/README.md": "# Docs",
+    }),
+  );
+  assert.equal(result.readme?.path, "mcp/README.md");
+});
+
+test("a README anywhere else in the tree is never taken", async () => {
+  const result = await parseStaticRepository(
+    readmeFixture({
+      "docs/README.md": "# Docs",
+      "mcp/node_modules/dep/README.md": "# A dependency",
+      "packages/other/README.md": "# Another package",
+    }),
+  );
+  assert.equal(result.readme, undefined);
+});
+
+test("in one directory a Markdown README wins, README.md before its variants", async () => {
+  const result = await parseStaticRepository(
+    readmeFixture({
+      README: "plain text",
+      "README.rst": "Weather\n=======",
+      "README.zh-CN.md": "# 天气",
+      "readme.md": "# weather",
+      "README.md": "# Weather",
+    }),
+  );
+  assert.equal(result.readme?.path, "README.md");
+
+  const withoutMarkdown = await parseStaticRepository(
+    readmeFixture({ "README.rst": "Weather\n=======", README: "plain text" }),
+  );
+  // Not Markdown, but still read for its evidence.
+  assert.equal(withoutMarkdown.readme?.path, "README");
+});

@@ -8,7 +8,11 @@ vi.mock("../../shared/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn() },
 }));
 
-import { ingestFromRegistry, mapRegistryServerToManifest } from "./federation";
+import {
+  ingestFromRegistry,
+  mapRegistryServerToManifest,
+  registryRepositoryProvenance,
+} from "./federation";
 
 function serverEntry(id: number) {
   return {
@@ -124,4 +128,82 @@ test("a clean walk to the end reports the full count and is not partial", async 
   assert.equal(result.ingested, 3);
   assert.equal(result.partial, false);
   assert.equal(result.error, undefined);
+});
+
+test("the registry's repository, subfolder included, is kept in provenance", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  // The two real registry entries the README fetch was designed against.
+  const entries = [
+    {
+      server: {
+        name: "io.github.prakhar1605/carrerlift",
+        version: "1.0.0",
+        description: "Career tools",
+        repository: {
+          url: "https://github.com/prakhar1605/carrerlift-mcp",
+          source: "github",
+        },
+      },
+    },
+    {
+      server: {
+        name: "io.github.FTHTrading/genesis402-mcp",
+        version: "0.2.0",
+        description: "Genesis402 agent kit",
+        repository: {
+          url: "https://github.com/FTHTrading/genesis402-agent-kit",
+          source: "github",
+          subfolder: "mcp",
+          unknownField: { nested: true },
+        },
+      },
+    },
+  ];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ servers: entries, metadata: { nextCursor: null } }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    ),
+  );
+
+  await ingestFromRegistry({
+    source: "registry.test",
+    baseUrl: "https://registry.test",
+    verified: true,
+  });
+
+  const provenance = mocks.upsert.mock.calls.map(
+    ([input]) => input.provenanceJson,
+  );
+  assert.deepEqual(provenance[0].repository, {
+    url: "https://github.com/prakhar1605/carrerlift-mcp",
+    source: "github",
+  });
+  assert.deepEqual(provenance[1].repository, {
+    url: "https://github.com/FTHTrading/genesis402-agent-kit",
+    source: "github",
+    subfolder: "mcp",
+  });
+  // Upserts never carry README state: a new version starts `pending` by the
+  // column defaults, and a re-sync leaves a stored README alone.
+  for (const [input] of mocks.upsert.mock.calls) {
+    assert.equal("readme" in input, false);
+  }
+});
+
+test("an entry without a repository keeps none", () => {
+  assert.equal(
+    registryRepositoryProvenance({ server: { name: "x", version: "1" } }),
+    undefined,
+  );
+  assert.equal(
+    registryRepositoryProvenance({
+      server: { name: "x", version: "1", repository: null },
+    }),
+    undefined,
+  );
 });

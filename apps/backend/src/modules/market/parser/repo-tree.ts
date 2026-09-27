@@ -57,6 +57,11 @@ export class RepoTree {
     return this.files.get(filePath)?.toString("utf8") ?? "";
   }
 
+  /** The file's bytes as stored, or undefined when there is no such file. */
+  readBytes(filePath: string): Buffer | undefined {
+    return this.files.get(filePath);
+  }
+
   sizeOf(filePath: string): number | null {
     return this.files.get(filePath)?.byteLength ?? null;
   }

@@ -1,18 +1,9 @@
+import {
+  MAX_README_BYTES,
+  README_PATH,
+  byReadmePreference,
+} from "../../shared/catalog-readme";
 import { readSkillObjectFile } from "./file-content";
-
-/**
- * A README is shown in a catalog panel, not executed: past this size it is not
- * worth a download, and the panel falls back to SKILL.md.
- */
-const MAX_README_BYTES = 512 * 1024;
-
-const README_PATH = /^readme(?:\.[a-z0-9-]+)?\.md$/i;
-
-function byReadmePreference(a: { path: string }, b: { path: string }) {
-  const rank = (name: string) =>
-    name === "README.md" ? 0 : /^readme\.md$/i.test(name) ? 1 : 2;
-  return rank(a.path) - rank(b.path) || a.path.localeCompare(b.path, "en");
-}
 
 /**
  * Select documentation from the frozen bundle, never from a moving upstream ref.
@@ -37,7 +28,8 @@ export function readSkillDocuments(
  * The same selection for a stored version of any storage type. An `object`
  * version keeps SKILL.md on the version row (`skill_md`) and its README as a
  * blob, which is read bounded and only after the manifest picked it — no other
- * file is touched.
+ * file is touched. A README past `MAX_README_BYTES` is passed over, and the
+ * panel falls back to SKILL.md.
  */
 export async function readSkillVersionDocuments(input: {
   version: { skillMd: string | null };

@@ -38,7 +38,12 @@ type RegistryServer = {
   remotes?: RegistryRemote[];
   icons?: unknown[];
   packages?: unknown[];
-  repository?: { url?: string; source?: string } | null;
+  repository?: {
+    url?: string;
+    source?: string;
+    id?: string;
+    subfolder?: string;
+  } | null;
   websiteUrl?: string;
   _meta?: Record<string, unknown>;
 };
@@ -102,6 +107,29 @@ function registryIconUrl(server: RegistryServer) {
     }
   }
   return undefined;
+}
+
+/**
+ * The registry's `repository` object, kept in the version's provenance: its
+ * `subfolder` is where a monorepo keeps this server, and so the directory
+ * whose README the README fetch reads. Only the string fields the registry
+ * defines are kept.
+ */
+export function registryRepositoryProvenance(
+  entry: RegistryEntry,
+): Record<string, string> | undefined {
+  const repository = (entry.server ?? entry).repository;
+  if (!repository || typeof repository !== "object") {
+    return undefined;
+  }
+  const kept: Record<string, string> = {};
+  for (const key of ["url", "source", "id", "subfolder"] as const) {
+    const value = repository[key];
+    if (typeof value === "string" && value.trim()) {
+      kept[key] = value.trim();
+    }
+  }
+  return Object.keys(kept).length > 0 ? kept : undefined;
 }
 
 /**
@@ -278,7 +306,11 @@ export async function ingestFromRegistry(input: {
           origin: "upstream",
           source: input.source,
           owner: manifest.providerName ?? null,
-          provenanceJson: { source: input.source, meta: entry._meta ?? {} },
+          provenanceJson: {
+            source: input.source,
+            meta: entry._meta ?? {},
+            repository: registryRepositoryProvenance(entry),
+          },
         });
         ingested += 1;
       } catch (error) {

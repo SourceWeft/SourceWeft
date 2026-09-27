@@ -76,7 +76,11 @@ export class MarketService {
     if (!record) {
       throw new McpError(404, "MCP_ITEM_NOT_FOUND", "MCP item not found");
     }
-    return { item: record.item, versions: record.versions };
+    return {
+      item: record.item,
+      versions: record.versions,
+      readme: record.readme,
+    };
   }
 
   async getMcpManifest(identifier: string, input: { version?: string } = {}) {

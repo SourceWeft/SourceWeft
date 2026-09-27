@@ -228,3 +228,78 @@ VALUES ('skill-1', 'skill', 'acme/skill', 'Skill', 'published', 'public');`,
     ).rejects.toThrow("market_items holds rows whose kind is not mcp");
   });
 });
+
+describe("0055 MCP README columns", () => {
+  test("every existing version starts pending and due, with the fetch state checked and indexed", async () => {
+    await withIsolatedSchema(
+      {
+        prefix: "mcp_readme_columns",
+        setupSql: `${await legacyCatalogSql()};\n${seed}`,
+        migrations: ["0054_mcp_catalog_rename.sql", "0055_mcp_readme.sql"],
+      },
+      async (client) => {
+        const versions = await client.query(
+          `SELECT id, readme_md, readme_status, readme_attempts,
+             readme_next_fetch_at = now() AS due_now, readme_path, readme_ref,
+             readme_sha256, readme_etag, readme_fetched_at, readme_error
+           FROM mcp_server_versions ORDER BY id`,
+        );
+        expect(versions.rows).toEqual([
+          {
+            id: "v-1",
+            // Text a row already held is kept; the fetch replaces it.
+            readme_md: "# Weather",
+            readme_status: "pending",
+            readme_attempts: 0,
+            due_now: true,
+            readme_path: null,
+            readme_ref: null,
+            readme_sha256: null,
+            readme_etag: null,
+            readme_fetched_at: null,
+            readme_error: null,
+          },
+          {
+            id: "v-2",
+            readme_md: null,
+            readme_status: "pending",
+            readme_attempts: 0,
+            due_now: true,
+            readme_path: null,
+            readme_ref: null,
+            readme_sha256: null,
+            readme_etag: null,
+            readme_fetched_at: null,
+            readme_error: null,
+          },
+        ]);
+
+        // A version inserted later is pending and due by default too.
+        await client.query(
+          `INSERT INTO mcp_server_versions (id, server_id, version, status)
+           VALUES ('v-3', 'mcp-weather', '1.2.0', 'published')`,
+        );
+        expect(
+          (
+            await client.query(
+              "SELECT readme_status, readme_next_fetch_at IS NOT NULL AS due FROM mcp_server_versions WHERE id = 'v-3'",
+            )
+          ).rows[0],
+        ).toEqual({ readme_status: "pending", due: true });
+
+        await client.query("SAVEPOINT invalid_status");
+        await expect(
+          client.query(
+            "UPDATE mcp_server_versions SET readme_status = 'fetched' WHERE id = 'v-1'",
+          ),
+        ).rejects.toThrow("mcp_server_versions_readme_status_check");
+        await client.query("ROLLBACK TO SAVEPOINT invalid_status");
+
+        const index = await client.query(
+          "SELECT indexdef FROM pg_indexes WHERE schemaname = current_schema() AND indexname = 'mcp_server_versions_readme_due_idx'",
+        );
+        expect(index.rows[0]?.indexdef).toMatch(/\(readme_next_fetch_at\)$/);
+      },
+    );
+  });
+});
