@@ -26,7 +26,10 @@ before the command:
 3. Release the lock.
 
 If that step fails, the container exits with its code and the command never
-starts. Otherwise the command runs unchanged, with SIGTERM/SIGINT forwarded
+starts. A failed schema migration logs the PostgreSQL error with its SQLSTATE
+code, the migration and the statement that failed (`packages/db/scripts/migrate.mjs`
+applies them with drizzle-orm's migrator; `drizzle-kit migrate` exits without
+saying why). Otherwise the command runs unchanged, with SIGTERM/SIGINT forwarded
 and its exit code passed through. Containers that start together migrate once:
 the others wait for the lock and then find nothing pending, so deployment order
 does not matter. A container without a database configuration skips the step
