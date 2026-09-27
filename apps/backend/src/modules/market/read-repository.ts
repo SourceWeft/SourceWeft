@@ -8,10 +8,10 @@ import {
 import { and, desc, eq, exists, ilike, inArray, or, sql } from "drizzle-orm";
 import {
   db,
-  marketCategories,
-  marketItemCategories,
-  marketItems,
-  marketItemVersions,
+  mcpCategories,
+  mcpServerCategories,
+  mcpServers,
+  mcpServerVersions,
 } from "@sourceweft/db";
 
 type MarketMcpRecord = {
@@ -34,14 +34,14 @@ function queryIncludesTechnicalIdentifierSyntax(query: string) {
 }
 
 function marketSearchCondition(query: string) {
-  const normalizedIdentifier = sql<string>`regexp_replace(${marketItems.identifier}, '^(io|com)\\.github\\.', '', 'i')`;
+  const normalizedIdentifier = sql<string>`regexp_replace(${mcpServers.identifier}, '^(io|com)\\.github\\.', '', 'i')`;
   const conditions = [
-    ilike(marketItems.name, `%${query}%`),
-    ilike(marketItems.summary, `%${query}%`),
+    ilike(mcpServers.name, `%${query}%`),
+    ilike(mcpServers.summary, `%${query}%`),
     ilike(normalizedIdentifier, `%${query}%`),
   ];
   if (queryIncludesTechnicalIdentifierSyntax(query)) {
-    conditions.push(ilike(marketItems.identifier, `%${query}%`));
+    conditions.push(ilike(mcpServers.identifier, `%${query}%`));
   }
   return or(...conditions)!;
 }
@@ -266,7 +266,7 @@ function deriveIconUrl(input: {
 }
 
 function mapItemRow(input: {
-  row: typeof marketItems.$inferSelect;
+  row: typeof mcpServers.$inferSelect;
   categories: string[];
   latestVersion?: string | null;
   latestManifestJson?: Record<string, unknown> | null;
@@ -278,7 +278,6 @@ function mapItemRow(input: {
   const meta = toManifestMeta(mergedMeta);
   return {
     id: input.row.id,
-    kind: input.row.kind,
     identifier: input.row.identifier,
     name: input.row.name,
     summary: input.row.summary,
@@ -315,18 +314,12 @@ function mapItemRow(input: {
 }
 
 function mapVersionRow(
-  row: typeof marketItemVersions.$inferSelect,
+  row: typeof mcpServerVersions.$inferSelect,
 ): MarketItemVersion {
   return {
     version: row.version,
     status: row.status,
     manifestJson: row.manifestJson,
-    packageSha256: row.packageSha256,
-    // Signing was removed from the market pipeline; the versions table no longer
-    // carries signature/signingKeyId columns. The wire contract still declares
-    // these nullable fields, so surface them as null.
-    signature: null,
-    signingKeyId: null,
     provenanceJson: row.provenanceJson ?? {},
     publishedAt: iso(row.publishedAt),
   };
@@ -338,21 +331,21 @@ async function categoriesByItemIds(itemIds: string[]) {
   }
   const rows = await db
     .select({
-      itemId: marketItemCategories.itemId,
-      slug: marketCategories.slug,
+      serverId: mcpServerCategories.serverId,
+      slug: mcpCategories.slug,
     })
-    .from(marketItemCategories)
+    .from(mcpServerCategories)
     .innerJoin(
-      marketCategories,
-      eq(marketCategories.id, marketItemCategories.categoryId),
+      mcpCategories,
+      eq(mcpCategories.id, mcpServerCategories.categoryId),
     )
-    .where(inArray(marketItemCategories.itemId, itemIds));
+    .where(inArray(mcpServerCategories.serverId, itemIds));
 
   const map = new Map<string, string[]>();
   for (const row of rows) {
-    const existing = map.get(row.itemId) ?? [];
+    const existing = map.get(row.serverId) ?? [];
     existing.push(row.slug);
-    map.set(row.itemId, existing);
+    map.set(row.serverId, existing);
   }
   return map;
 }
@@ -366,18 +359,18 @@ async function latestVersionsByItemIds(itemIds: string[]) {
   }
   const rows = await db
     .select()
-    .from(marketItemVersions)
+    .from(mcpServerVersions)
     .where(
       and(
-        inArray(marketItemVersions.itemId, itemIds),
-        eq(marketItemVersions.status, "published"),
+        inArray(mcpServerVersions.serverId, itemIds),
+        eq(mcpServerVersions.status, "published"),
       ),
     )
     // Deterministic "latest": newest published first, so the first row we keep
     // per item is stable rather than whatever order Postgres returns.
     .orderBy(
-      desc(marketItemVersions.publishedAt),
-      desc(marketItemVersions.createdAt),
+      desc(mcpServerVersions.publishedAt),
+      desc(mcpServerVersions.createdAt),
     );
 
   const map = new Map<
@@ -385,8 +378,8 @@ async function latestVersionsByItemIds(itemIds: string[]) {
     { manifestJson: Record<string, unknown>; version: string }
   >();
   for (const row of rows) {
-    if (!map.has(row.itemId)) {
-      map.set(row.itemId, {
+    if (!map.has(row.serverId)) {
+      map.set(row.serverId, {
         manifestJson: row.manifestJson,
         version: row.version,
       });
@@ -449,44 +442,43 @@ export async function listMcp(input: {
   // — so the whole catalog is filtered/ordered/paginated in the database. No
   // in-memory scan cap, so results are complete at any catalog size.
   const conditions = [
-    eq(marketItems.kind, "mcp" as const),
-    eq(marketItems.status, "published" as const),
-    eq(marketItems.visibility, "public" as const),
+    eq(mcpServers.status, "published" as const),
+    eq(mcpServers.visibility, "public" as const),
   ];
   if (query) {
     conditions.push(marketSearchCondition(query));
   }
   if (typeof input.desktopOnly === "boolean") {
-    conditions.push(eq(marketItems.desktopOnly, input.desktopOnly));
+    conditions.push(eq(mcpServers.desktopOnly, input.desktopOnly));
   } else if (!input.includeDesktopOnly) {
-    conditions.push(eq(marketItems.desktopOnly, false));
+    conditions.push(eq(mcpServers.desktopOnly, false));
   }
   if (input.transport) {
-    conditions.push(eq(marketItems.transport, input.transport));
+    conditions.push(eq(mcpServers.transport, input.transport));
   }
   if (typeof input.official === "boolean") {
-    conditions.push(eq(marketItems.official, input.official));
+    conditions.push(eq(mcpServers.official, input.official));
   }
   if (typeof input.verified === "boolean") {
-    conditions.push(eq(marketItems.verified, input.verified));
+    conditions.push(eq(mcpServers.verified, input.verified));
   }
   if (input.runtime) {
-    conditions.push(eq(marketItems.runtime, input.runtime));
+    conditions.push(eq(mcpServers.runtime, input.runtime));
   }
   if (categories.length > 0) {
     conditions.push(
       exists(
         db
           .select({ one: sql`1` })
-          .from(marketItemCategories)
+          .from(mcpServerCategories)
           .innerJoin(
-            marketCategories,
-            eq(marketCategories.id, marketItemCategories.categoryId),
+            mcpCategories,
+            eq(mcpCategories.id, mcpServerCategories.categoryId),
           )
           .where(
             and(
-              eq(marketItemCategories.itemId, marketItems.id),
-              inArray(marketCategories.slug, categories),
+              eq(mcpServerCategories.serverId, mcpServers.id),
+              inArray(mcpCategories.slug, categories),
             ),
           ),
       ),
@@ -497,17 +489,17 @@ export async function listMcp(input: {
     // Next page in the (publishedAt desc, id desc) ordering: rows strictly after
     // the cursor row, via a row-value comparison the browse index can serve.
     conditions.push(
-      sql`(${marketItems.publishedAt}, ${marketItems.id}) < (${cursor.publishedAt}, ${cursor.id})`,
+      sql`(${mcpServers.publishedAt}, ${mcpServers.id}) < (${cursor.publishedAt}, ${cursor.id})`,
     );
   }
 
-  let dbRows: Array<typeof marketItems.$inferSelect>;
+  let dbRows: Array<typeof mcpServers.$inferSelect>;
   try {
     dbRows = await db
       .select()
-      .from(marketItems)
+      .from(mcpServers)
       .where(and(...conditions))
-      .orderBy(desc(marketItems.publishedAt), desc(marketItems.id))
+      .orderBy(desc(mcpServers.publishedAt), desc(mcpServers.id))
       .limit(limit + 1);
   } catch (error) {
     if (isDatabaseUnavailable(error)) {
@@ -549,40 +541,39 @@ export async function countMcpByCategory(input: {
 }): Promise<{ counts: Record<string, number>; total: number }> {
   const query = input.query?.trim().toLowerCase();
   const conditions = [
-    eq(marketItems.kind, "mcp" as const),
-    eq(marketItems.status, "published" as const),
-    eq(marketItems.visibility, "public" as const),
+    eq(mcpServers.status, "published" as const),
+    eq(mcpServers.visibility, "public" as const),
   ];
   if (query) {
     conditions.push(marketSearchCondition(query));
   }
   if (typeof input.desktopOnly === "boolean") {
-    conditions.push(eq(marketItems.desktopOnly, input.desktopOnly));
+    conditions.push(eq(mcpServers.desktopOnly, input.desktopOnly));
   } else if (!input.includeDesktopOnly) {
-    conditions.push(eq(marketItems.desktopOnly, false));
+    conditions.push(eq(mcpServers.desktopOnly, false));
   }
 
   try {
     const [categoryRows, totalRows] = await Promise.all([
       db
         .select({
-          slug: marketCategories.slug,
-          count: sql<number>`count(distinct ${marketItems.id})::int`,
+          slug: mcpCategories.slug,
+          count: sql<number>`count(distinct ${mcpServers.id})::int`,
         })
-        .from(marketItems)
+        .from(mcpServers)
         .innerJoin(
-          marketItemCategories,
-          eq(marketItemCategories.itemId, marketItems.id),
+          mcpServerCategories,
+          eq(mcpServerCategories.serverId, mcpServers.id),
         )
         .innerJoin(
-          marketCategories,
-          eq(marketCategories.id, marketItemCategories.categoryId),
+          mcpCategories,
+          eq(mcpCategories.id, mcpServerCategories.categoryId),
         )
         .where(and(...conditions))
-        .groupBy(marketCategories.slug),
+        .groupBy(mcpCategories.slug),
       db
         .select({ count: sql<number>`count(*)::int` })
-        .from(marketItems)
+        .from(mcpServers)
         .where(and(...conditions)),
     ]);
     const counts: Record<string, number> = {};
@@ -599,17 +590,16 @@ export async function countMcpByCategory(input: {
 }
 
 export async function findMcp(identifier: string) {
-  let row: typeof marketItems.$inferSelect | undefined;
+  let row: typeof mcpServers.$inferSelect | undefined;
   try {
     [row] = await db
       .select()
-      .from(marketItems)
+      .from(mcpServers)
       .where(
         and(
-          eq(marketItems.kind, "mcp"),
-          eq(marketItems.identifier, identifier),
-          eq(marketItems.status, "published"),
-          eq(marketItems.visibility, "public"),
+          eq(mcpServers.identifier, identifier),
+          eq(mcpServers.status, "published"),
+          eq(mcpServers.visibility, "public"),
         ),
       )
       .limit(1);
@@ -625,16 +615,16 @@ export async function findMcp(identifier: string) {
     // and would leak its manifest. Newest published first.
     const versions = await db
       .select()
-      .from(marketItemVersions)
+      .from(mcpServerVersions)
       .where(
         and(
-          eq(marketItemVersions.itemId, row.id),
-          eq(marketItemVersions.status, "published"),
+          eq(mcpServerVersions.serverId, row.id),
+          eq(mcpServerVersions.status, "published"),
         ),
       )
       .orderBy(
-        desc(marketItemVersions.publishedAt),
-        desc(marketItemVersions.createdAt),
+        desc(mcpServerVersions.publishedAt),
+        desc(mcpServerVersions.createdAt),
       );
     const categoryMap = await categoriesByItemIds([row.id]);
     const latest = versions[0];

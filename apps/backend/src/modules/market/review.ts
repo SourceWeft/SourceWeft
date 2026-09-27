@@ -1,5 +1,5 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
-import { db, marketItems, marketItemVersions } from "@sourceweft/db";
+import { db, mcpServers, mcpServerVersions } from "@sourceweft/db";
 
 export type ReviewQueueEntry = {
   identifier: string;
@@ -30,26 +30,26 @@ function readScan(provenance: Record<string, unknown> | null | undefined) {
 export async function listReviewQueue(): Promise<ReviewQueueEntry[]> {
   const items = await db
     .select()
-    .from(marketItems)
-    .where(eq(marketItems.status, "reviewing"))
-    .orderBy(desc(marketItems.createdAt));
+    .from(mcpServers)
+    .where(eq(mcpServers.status, "reviewing"))
+    .orderBy(desc(mcpServers.createdAt));
   if (items.length === 0) {
     return [];
   }
 
   const versions = await db
     .select()
-    .from(marketItemVersions)
+    .from(mcpServerVersions)
     .where(
       inArray(
-        marketItemVersions.itemId,
+        mcpServerVersions.serverId,
         items.map((item) => item.id),
       ),
     );
   const provenanceByItem = new Map<string, Record<string, unknown>>();
   for (const version of versions) {
-    if (!provenanceByItem.has(version.itemId)) {
-      provenanceByItem.set(version.itemId, version.provenanceJson ?? {});
+    if (!provenanceByItem.has(version.serverId)) {
+      provenanceByItem.set(version.serverId, version.provenanceJson ?? {});
     }
   }
 
@@ -81,11 +81,11 @@ export async function setSubmissionStatus(
 ): Promise<{ identifier: string; status: string } | null> {
   const [item] = await db
     .select()
-    .from(marketItems)
+    .from(mcpServers)
     .where(
       and(
-        eq(marketItems.identifier, identifier),
-        eq(marketItems.status, "reviewing"),
+        eq(mcpServers.identifier, identifier),
+        eq(mcpServers.status, "reviewing"),
       ),
     )
     .limit(1);
@@ -96,20 +96,20 @@ export async function setSubmissionStatus(
   const now = new Date();
   const publishedAt = status === "published" ? now : null;
   await db
-    .update(marketItems)
+    .update(mcpServers)
     .set({ status, publishedAt, updatedAt: now })
-    .where(eq(marketItems.id, item.id));
+    .where(eq(mcpServers.id, item.id));
   // Only the version(s) actually sitting in review move with the decision. A
   // blanket item-wide update would republish previously REJECTED (archived)
   // versions on approve — serving an admin-rejected manifest again — and
   // archive previously approved clean versions on reject.
   await db
-    .update(marketItemVersions)
+    .update(mcpServerVersions)
     .set({ status, publishedAt })
     .where(
       and(
-        eq(marketItemVersions.itemId, item.id),
-        eq(marketItemVersions.status, "reviewing"),
+        eq(mcpServerVersions.serverId, item.id),
+        eq(mcpServerVersions.status, "reviewing"),
       ),
     );
 

@@ -1,6 +1,5 @@
 import { z } from "zod";
 
-export const marketItemKindSchema = z.enum(["skill", "mcp"]);
 export const marketItemStatusSchema = z.enum([
   "draft",
   "reviewing",
@@ -94,7 +93,6 @@ export const marketMcpManifestSchema = z.object({
 
 export const marketItemSummarySchema = z.object({
   id: z.string(),
-  kind: marketItemKindSchema,
   identifier: z.string(),
   name: z.string(),
   summary: z.string(),
@@ -128,9 +126,6 @@ export const marketItemVersionSchema = z.object({
   version: z.string(),
   status: marketItemStatusSchema,
   manifestJson: z.record(z.string(), z.unknown()),
-  packageSha256: z.string().nullable().default(null),
-  signature: z.string().nullable().default(null),
-  signingKeyId: z.string().nullable().default(null),
   provenanceJson: z.record(z.string(), z.unknown()).default({}),
   publishedAt: z.string().nullable().default(null),
 });
@@ -163,8 +158,6 @@ export const getMarketMcpManifestResponseSchema = z.object({
   item: marketItemSummarySchema,
   version: marketItemVersionSchema,
   manifest: marketMcpManifestSchema,
-  signature: z.string().nullable().default(null),
-  signingKeyId: z.string().nullable().default(null),
 });
 
 export const marketCategorySchema = z.object({
@@ -197,7 +190,6 @@ export const listMarketKeysResponseSchema = z.object({
   keys: z.array(marketSigningKeySchema),
 });
 
-export type MarketItemKind = z.infer<typeof marketItemKindSchema>;
 export type MarketItemStatus = z.infer<typeof marketItemStatusSchema>;
 export type MarketItemVisibility = z.infer<typeof marketItemVisibilitySchema>;
 export type McpTransport = z.infer<typeof mcpTransportSchema>;

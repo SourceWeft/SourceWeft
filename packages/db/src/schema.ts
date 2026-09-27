@@ -9,6 +9,7 @@ export * from "./schema/threads";
 export * from "./schema/agent-sandboxes";
 export * from "./schema/retrieval";
 export * from "./schema/skills-market";
+export * from "./schema/mcp-catalog";
 export * from "./schema/notes";
 export * from "./schema/artifacts";
 export * from "./schema/personas";
