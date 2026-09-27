@@ -69,10 +69,7 @@ type TrustFilter = "all" | "trusted" | "unverified";
 type DeviceFilter = "all" | "web" | "desktop";
 type SortKey = "recommended" | "name_asc" | "installed_first" | "trusted_first";
 type CatalogStatus =
-  | "resolving_workspace"
-  | "loading_catalog"
-  | "ready"
-  | "error";
+  "resolving_workspace" | "loading_catalog" | "ready" | "error";
 
 type ResolvedWorkspace = {
   id: string;
@@ -959,6 +956,8 @@ export function McpMarket() {
     string | null
   >(null);
   const deepLinkHandledRef = React.useRef(false);
+  const deepLinkHighlightPendingRef = React.useRef(false);
+  const highlightTimeoutRef = React.useRef<number | undefined>(undefined);
 
   const startPendingAction = React.useCallback((key: string) => {
     setPendingActions((current) => {
@@ -1021,6 +1020,11 @@ export function McpMarket() {
   const [selectedIdentifier, setSelectedIdentifier] = React.useState<
     string | null
   >(null);
+  // The ?mcp= deep-link target when it is not on the loaded catalog page
+  // (the catalog is paged, so most identifiers are not in `items`).
+  const [deepLinkItem, setDeepLinkItem] = React.useState<MarketMcpItem | null>(
+    null,
+  );
   const [isDesktopHost, setIsDesktopHost] = React.useState(false);
   const workspaceIdRef = React.useRef<string | null>(null);
   const loadedCatalogWorkspaceIdRef = React.useRef<string | null>(null);
@@ -1109,9 +1113,7 @@ export function McpMarket() {
       loadedCatalogWorkspaceIdRef.current = null;
       setCatalogStatus("error");
       setError(
-        loadError instanceof Error
-          ? loadError.message
-          : t("errors.loadFailed"),
+        loadError instanceof Error ? loadError.message : t("errors.loadFailed"),
       );
     }
   }, [resolveWorkspace, serverQuery, category, deviceFilter, t]);
@@ -1190,27 +1192,63 @@ export function McpMarket() {
   ]);
 
   // Honor the ?mcp=<identifier> deep link from the public MCP detail page:
-  // once the catalog is loaded, scroll the matching card into view and give it
-  // a brief highlight. Runs once per identifier value.
+  // once the catalog is loaded, open the item's detail dialog. When the card is
+  // on the loaded page, jump it into view behind the dialog (a smooth scroll is
+  // cancelled by the dialog's scroll lock) and highlight it once the dialog
+  // closes; otherwise fetch the item directly. Runs once per page load.
   React.useEffect(() => {
     if (!deepLinkIdentifier || deepLinkHandledRef.current) return;
-    if (catalogStatus !== "ready") return;
+    if (catalogStatus !== "ready" || !workspace?.id) return;
+    deepLinkHandledRef.current = true;
+    setSelectedIdentifier(deepLinkIdentifier);
     const exists = items.some(
       (item) => item.market.identifier === deepLinkIdentifier,
     );
-    if (!exists) return;
-    deepLinkHandledRef.current = true;
-    setHighlightIdentifier(deepLinkIdentifier);
-    const frame = window.requestAnimationFrame(() => {
-      const card = document.getElementById(`mcp-card-${deepLinkIdentifier}`);
-      card?.scrollIntoView({ behavior: "smooth", block: "center" });
-    });
-    const timeout = window.setTimeout(() => setHighlightIdentifier(null), 2600);
-    return () => {
-      window.cancelAnimationFrame(frame);
-      window.clearTimeout(timeout);
-    };
-  }, [catalogStatus, deepLinkIdentifier, items]);
+    if (!exists) {
+      const workspaceId = workspace.id;
+      void contentClient
+        .getWorkspaceMarketMcp(workspaceId, deepLinkIdentifier)
+        .then((result) => {
+          if (workspaceIdRef.current !== workspaceId) return;
+          setDeepLinkItem({
+            market: result.market.item,
+            install: result.install,
+          });
+        })
+        .catch((loadError) => {
+          if (workspaceIdRef.current !== workspaceId) return;
+          setSelectedIdentifier(null);
+          toast.error(
+            loadError instanceof Error
+              ? loadError.message
+              : t("detail.loadFailedDetail"),
+          );
+        });
+      return;
+    }
+    deepLinkHighlightPendingRef.current = true;
+    document
+      .getElementById(`mcp-card-${deepLinkIdentifier}`)
+      ?.scrollIntoView({ block: "center" });
+  }, [catalogStatus, deepLinkIdentifier, items, workspace?.id, t]);
+
+  React.useEffect(
+    () => () => window.clearTimeout(highlightTimeoutRef.current),
+    [],
+  );
+
+  function closeDetails() {
+    if (deepLinkHighlightPendingRef.current && selectedIdentifier) {
+      deepLinkHighlightPendingRef.current = false;
+      setHighlightIdentifier(selectedIdentifier);
+      window.clearTimeout(highlightTimeoutRef.current);
+      highlightTimeoutRef.current = window.setTimeout(
+        () => setHighlightIdentifier(null),
+        2600,
+      );
+    }
+    setSelectedIdentifier(null);
+  }
 
   // Surface the result of the OAuth redirect (GET /v1/mcp/oauth/callback bounces
   // back here with ?mcpOAuth=connected|error), then strip the query so a refresh
@@ -1276,15 +1314,20 @@ export function McpMarket() {
     }
   }
 
+  // Apply an item update to the catalog page and the deep-linked item alike, so
+  // the detail dialog reflects install changes for items off the loaded page.
+  function updateItems(update: (item: MarketMcpItem) => MarketMcpItem) {
+    setItems((currentItems) => currentItems.map(update));
+    setDeepLinkItem((current) => (current ? update(current) : current));
+  }
+
   function updateInstallInItems(nextInstall: WorkspaceMcpInstall) {
-    setItems((currentItems) =>
-      currentItems.map((item) =>
-        item.market.identifier === nextInstall.marketIdentifier
+    updateItems((item) =>
+      item.market.identifier === nextInstall.marketIdentifier
+        ? { ...item, install: nextInstall }
+        : item.install?.id === nextInstall.id
           ? { ...item, install: nextInstall }
-          : item.install?.id === nextInstall.id
-            ? { ...item, install: nextInstall }
-            : item,
-      ),
+          : item,
     );
   }
 
@@ -1329,13 +1372,11 @@ export function McpMarket() {
     startPendingAction(installId);
     try {
       await contentClient.deleteWorkspaceMcpInstall(workspaceId, installId);
-      setItems((currentItems) =>
-        currentItems.map((currentItem) =>
-          currentItem.install?.id === installId ||
-          currentItem.market.identifier === item.market.identifier
-            ? { ...currentItem, install: null }
-            : currentItem,
-        ),
+      updateItems((currentItem) =>
+        currentItem.install?.id === installId ||
+        currentItem.market.identifier === item.market.identifier
+          ? { ...currentItem, install: null }
+          : currentItem,
       );
       invalidateWorkspaceMcpCache(workspaceId);
       toast.success(t("toasts.uninstalled"));
@@ -1388,9 +1429,7 @@ export function McpMarket() {
       toast.success(t("toasts.tested", { count: result.toolCount }));
     } catch (testError) {
       toast.error(
-        testError instanceof Error
-          ? testError.message
-          : t("toasts.testFailed"),
+        testError instanceof Error ? testError.message : t("toasts.testFailed"),
       );
     } finally {
       endPendingAction(install.id);
@@ -1522,7 +1561,9 @@ export function McpMarket() {
     : false;
   const selectedItem = selectedIdentifier
     ? (items.find((item) => item.market.identifier === selectedIdentifier) ??
-      null)
+      (deepLinkItem?.market.identifier === selectedIdentifier
+        ? deepLinkItem
+        : null))
     : null;
   const selectedItemPending = selectedItem
     ? pendingActions.has(selectedItem.market.identifier) ||
@@ -1620,9 +1661,7 @@ export function McpMarket() {
                 catalogReadyForWorkspace &&
                 filteredItems.length === 0 ? (
                 <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">
-                  {items.length === 0
-                    ? t("empty.none")
-                    : t("empty.noMatch")}
+                  {items.length === 0 ? t("empty.none") : t("empty.noMatch")}
                 </div>
               ) : (
                 <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
@@ -1685,7 +1724,7 @@ export function McpMarket() {
         onConfigure={setCredentialsInstall}
         onInstall={(next) => void installMcp(next)}
         onOpenChange={(open) => {
-          if (!open) setSelectedIdentifier(null);
+          if (!open) closeDetails();
         }}
         onTest={(install) => void testInstall(install)}
         onToggleEnabled={(install, enabled) =>
