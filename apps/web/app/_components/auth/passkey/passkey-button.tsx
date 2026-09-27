@@ -1,5 +1,6 @@
 "use client"
 
+import { recordAuthIntent } from "@/lib/analytics/auth-intent"
 import {
   type AuthView,
   authMutationKeys,
@@ -39,6 +40,7 @@ export function PasskeyButton({ view }: PasskeyButtonProps) {
   const queryClient = useQueryClient()
 
   const handleSuccess = useCallback(async () => {
+    recordAuthIntent("passkey", redirectTo)
     await queryClient.invalidateQueries(
       { queryKey: authQueryKeys.session },
       { cancelRefetch: false }

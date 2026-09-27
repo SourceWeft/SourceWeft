@@ -1,5 +1,6 @@
 "use client"
 
+import { recordAuthIntent } from "@/lib/analytics/auth-intent"
 import {
   authMutationKeys,
   getAdditionalFieldDefaultValues,
@@ -152,6 +153,7 @@ export function SignUp({
       password: ""
     },
     onSubmit: async ({ value }) => {
+      recordAuthIntent("email", redirectTo)
       try {
         await signUpEmail({
           name: emailAndPassword?.name === false ? "" : value.name,

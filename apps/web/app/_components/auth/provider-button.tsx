@@ -1,5 +1,6 @@
 "use client"
 
+import { recordAuthIntent } from "@/lib/analytics/auth-intent"
 import {
   type AuthSocialProvider,
   type AuthView,
@@ -74,6 +75,7 @@ export function ProviderButton({
   const isPending = signInMutating + signUpMutating > 0
 
   const handleSignIn = () => {
+    recordAuthIntent(providerId, redirectTo)
     if (socialSignInMode === "popup") {
       signInPopup(
         {

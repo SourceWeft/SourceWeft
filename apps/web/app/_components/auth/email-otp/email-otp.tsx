@@ -1,5 +1,6 @@
 "use client"
 
+import { recordAuthIntent } from "@/lib/analytics/auth-intent"
 import { authMutationKeys } from "@better-auth-ui/core"
 import type { EmailOtpAuthClient } from "@better-auth-ui/core/plugins/email-otp"
 import { getSsoFallbackEmail } from "@better-auth-ui/core/plugins/sso"
@@ -65,6 +66,7 @@ export function EmailOtp({
     emailAndPassword,
     localization,
     plugins,
+    redirectTo,
     socialProviders,
     viewPaths,
     Link
@@ -108,6 +110,7 @@ export function EmailOtp({
   const verifyCode = async (completedCode: string) => {
     if (isPending || isSigningIn) return
 
+    recordAuthIntent("email_otp", redirectTo)
     await signInEmailOtp({
       email: form.state.values.email,
       otp: completedCode

@@ -41,6 +41,7 @@ import {
   setLocaleCookie,
 } from "../lib/i18n/cookie";
 import { desktopBridge } from "../lib/desktop-bridge";
+import { AuthAnalyticsTracker } from "../lib/analytics/auth-tracker";
 
 import { publicWebBaseUrl as resolveWebBaseUrl } from "../lib/public-runtime-config";
 
@@ -270,6 +271,7 @@ export function Providers({
           <UserSettingsSync />
           <DesktopTraySync />
           <SessionRefreshSync />
+          <AuthAnalyticsTracker />
           <GoogleOneTap />
           <UiLocalizationProvider messages={{ close: t("close") }}>
             <TooltipProvider>
