@@ -159,6 +159,17 @@ export function trackEvent<N extends AnalyticsEventName>(
   analyticsClient().track(name, params as Params | undefined);
 }
 
+/**
+ * Starts context resolution at page load, so each tool gets the platform
+ * before the page views it records on its own, not with the first event.
+ */
+export function startAnalytics(): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  analyticsClient();
+}
+
 export function markDestinationReady(id: DestinationId): void {
   if (typeof window === "undefined") {
     return;

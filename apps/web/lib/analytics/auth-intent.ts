@@ -16,10 +16,13 @@ export function recordAuthIntent(
   redirectTo?: string | null,
   now = Date.now(),
 ): void {
-  if (redirectTo?.startsWith(DESKTOP_COMPLETE_PREFIX)) {
-    return;
-  }
   try {
+    if (redirectTo?.startsWith(DESKTOP_COMPLETE_PREFIX)) {
+      // Drop any intent left by an earlier failed attempt, or the web tracker
+      // would report this desktop sign-in a second time under that method.
+      localStorage.removeItem(AUTH_INTENT_KEY);
+      return;
+    }
     const intent: StoredIntent = { method, at: now };
     localStorage.setItem(AUTH_INTENT_KEY, JSON.stringify(intent));
   } catch {

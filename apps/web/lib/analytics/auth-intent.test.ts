@@ -55,6 +55,12 @@ test("desktop-complete redirects record nothing", () => {
   assert.equal(storage.store.size, 0);
 });
 
+test("a desktop-complete sign-in clears a stale intent from an earlier attempt", () => {
+  recordAuthIntent("email", "/dashboard", NOW);
+  recordAuthIntent("email", "/auth/desktop-complete?code=1", NOW + 1000);
+  assert.equal(consumeAuthIntent(NOW + 2000), null);
+});
+
 test("storage that throws is ignored", () => {
   vi.stubGlobal("localStorage", {
     getItem: () => {
