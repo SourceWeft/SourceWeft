@@ -573,11 +573,11 @@ export function McpDetailDialog({
                 </section>
 
                 <section className="rounded-lg border border-border bg-muted/30 p-4 text-xs leading-5 text-muted-foreground">
-                  <div className="mb-1.5 inline-flex items-center gap-1.5 font-medium text-foreground">
+                  <h2 className="mb-1.5 flex items-center gap-1.5 font-medium text-foreground">
                     <ShieldCheck className="size-3.5" />
                     {t("detail.runtimeSecurity")}
-                  </div>
-                  {t("detail.securityShort")}
+                  </h2>
+                  <p>{t("detail.securityShort")}</p>
                 </section>
               </aside>
             </div>

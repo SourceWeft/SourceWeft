@@ -231,4 +231,22 @@ describe("McpDetailDialog tabs", { timeout: 30_000 }, () => {
       await unmountAll();
     }
   });
+
+  it("puts the Runtime & security heading on its own line above its text", async () => {
+    await open(readme("ok"));
+    const heading = [...document.querySelectorAll("h2")].find(
+      (node) => node.textContent === "Runtime & security",
+    )!;
+    // A block heading: an inline one let the text run on after it.
+    expect(heading.classList.contains("flex")).toBe(true);
+    expect(heading.classList.contains("inline-flex")).toBe(false);
+    const body = heading.nextElementSibling!;
+    expect(body.tagName).toBe("P");
+    expect(body.textContent).toBe(
+      "Credentials are encrypted per workspace and sent only to this server during tool calls.",
+    );
+    expect(heading.parentElement!.textContent).toBe(
+      `${heading.textContent}${body.textContent}`,
+    );
+  });
 });

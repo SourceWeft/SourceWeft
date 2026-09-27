@@ -290,3 +290,12 @@ describe("public MCP detail page README", () => {
     }
   });
 });
+
+describe("public MCP detail page security note", () => {
+  it("keeps its heading on its own line above its text", async () => {
+    const html = await render();
+    expect(html).toMatch(
+      /<div class="(?:[^"]* )?flex(?: [^"]*)?"><svg[\s\S]*?<\/svg>Security note<\/div><p>MCP servers receive tool arguments/,
+    );
+  });
+});
