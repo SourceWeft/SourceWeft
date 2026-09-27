@@ -6,9 +6,9 @@ import {
 } from "../../catalog-overview/text";
 import {
   mcpCategoryDefinitions,
+  mcpTaxonomyVersion,
   normalizeMcpCategorySlug,
 } from "../parser/categories";
-import { mcpTaxonomyVersion } from "../parser/classifier";
 import type {
   McpManifestFacts,
   McpOverviewInput,

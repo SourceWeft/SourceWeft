@@ -6,6 +6,7 @@ import {
 export {
   getMcpCategoryDefinition,
   mcpCategoryDefinitions,
+  mcpTaxonomyVersion,
   nonCategorySlugs,
   normalizeMcpCategorySlug,
   sourceMarketSlugs,

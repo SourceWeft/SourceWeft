@@ -97,6 +97,11 @@ export async function submitMcpFromGitHub(input: {
         url: github.repoUrl,
         ...(github.subpath ? { subfolder: github.subpath } : {}),
       },
+      // The repository's server.json packages and remotes, names and flags
+      // only, as federation keeps them: read by the AI overview.
+      ...(parsed.registryServer
+        ? { registryServer: parsed.registryServer }
+        : {}),
       scan,
     },
   });

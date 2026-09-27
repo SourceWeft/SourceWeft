@@ -524,7 +524,7 @@ test("each call logs exactly one line, without the prompt, the output or the key
   mockProvider();
   const info = vi.spyOn(logger, "info");
   const warn = vi.spyOn(logger, "warn");
-  const scope = context("mcp_market.classify");
+  const scope = context("mcp_market.overview");
   await withSystemModel(scope, async (chat) => {
     await chat.complete({ messages });
     await chat.complete({ messages });
@@ -532,7 +532,7 @@ test("each call logs exactly one line, without the prompt, the output or the key
   const logs = systemCallLogs(info);
   assert.equal(logs.length, 2);
   assert.deepEqual(logs[0]![1], {
-    purpose: "mcp_market.classify",
+    purpose: "mcp_market.overview",
     subjectRef: scope.subjectRef,
     scopeId: scope.scopeId,
     provider: "openrouter",

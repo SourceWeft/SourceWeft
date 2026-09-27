@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { marketMcpManifestSchema } from "@sourceweft/market-contracts";
 import { describe, test } from "vitest";
-import { mcpCategoryDefinitions } from "../parser/categories";
-import { mcpTaxonomyVersion } from "../parser/classifier";
+import {
+  mcpCategoryDefinitions,
+  mcpTaxonomyVersion,
+} from "../parser/categories";
 import type { RegistryServerJson } from "../types";
 import { buildMcpOverviewInput, type McpOverviewInput } from "./input";
 import {

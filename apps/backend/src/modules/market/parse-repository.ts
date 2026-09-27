@@ -3,11 +3,13 @@ import {
   readGitHubRepository,
   type ReadGitHubRepository,
 } from "./parser/repo-tree";
-import { classifyMcpRepository } from "./parser/classifier";
+import { inferMcpCategories, mcpTaxonomyVersion } from "./parser/categories";
 import { mapParsedRepositoryToManifest } from "./parser/manifest-mapper";
 import { parseStaticRepository } from "./parser/static-parser";
+import { registryServerProvenance } from "./registry-server";
 import { introspectRuntime } from "./runtime/runtime-introspect";
 import type {
+  McpClassificationResult,
   McpIngestReadme,
   McpIngestResult,
   McpRepositoryParseOptions,
@@ -27,6 +29,22 @@ function readmeOf(
   return bytes
     ? { path: path.posix.relative(source.rootDir, file), bytes }
     : undefined;
+}
+
+/**
+ * A submission is filed under the keyword rules. No model is asked here: the
+ * AI categories arrive with the server's AI overview (`overview/`), written
+ * on the system model once the version is published and its README read.
+ */
+function classifyByRules(
+  staticResult: StaticParseResult,
+  categories: string[],
+): McpClassificationResult {
+  return {
+    categories: inferMcpCategories(staticResult, categories),
+    method: "rules",
+    taxonomyVersion: mcpTaxonomyVersion,
+  };
 }
 
 export async function parseMcpRepository(
@@ -51,12 +69,14 @@ export async function parseMcpRepository(
           tools: [],
           warnings: [],
         };
-  const classification = await classifyMcpRepository(staticResult, {
-    categories: options.categories,
-    discovery: options.discovery,
-    mode: options.classificationMode ?? "model",
-  });
+  const classification = classifyByRules(
+    staticResult,
+    options.categories ?? [],
+  );
   const readme = readmeOf(source, staticResult);
+  const registryServer = registryServerProvenance(
+    staticResult.serverJson?.content,
+  );
   return {
     ...mapParsedRepositoryToManifest({
       categories: options.categories,
@@ -67,13 +87,13 @@ export async function parseMcpRepository(
       staticResult,
     }),
     ...(readme ? { readme } : {}),
+    ...(registryServer ? { registryServer } : {}),
   };
 }
 
 export type {
   DryRunIngestResult,
   McpIngestReadme,
-  McpClassificationMode,
   McpClassificationResult,
   McpIngestMode,
   McpIngestResult,
