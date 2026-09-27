@@ -69,6 +69,7 @@ import {
   type SkillsBrowseState,
 } from "./skills-market-browse";
 import { SubmitSkillDialog } from "./submit-skill-dialog";
+import { trackSkillInstalled } from "../../../../lib/analytics-events";
 
 type SkillsCatalogResponse = Awaited<
   ReturnType<typeof contentClient.listSkillsCatalog>
@@ -1152,6 +1153,7 @@ function SkillsGalleryView({
         );
       }
       toast.success(t("toasts.installed"));
+      trackSkillInstalled("gallery");
       await onCatalogChange?.();
     } catch (installError) {
       toast.error(

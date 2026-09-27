@@ -2,6 +2,7 @@
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { recordAuthIntent } from "../lib/analytics/auth-intent";
 import { authClient } from "../lib/auth-client";
 import { apiBaseUrl } from "../lib/api-base-url";
 import { resolveGoogleOneTapConfig } from "../lib/google-one-tap-config";
@@ -174,6 +175,7 @@ export function GoogleOneTap() {
           credentials: "include",
           onSuccess: () => {
             callbackCompleted = true;
+            recordAuthIntent("google_one_tap");
           },
         },
       });

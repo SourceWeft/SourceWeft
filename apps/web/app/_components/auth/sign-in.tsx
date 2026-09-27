@@ -1,5 +1,6 @@
 "use client"
 
+import { recordAuthIntent } from "@/lib/analytics/auth-intent"
 import {
   authMutationKeys,
   validateEmailAddress,
@@ -70,6 +71,7 @@ export function SignIn({
     socialProviders,
     viewPaths,
     navigate,
+    redirectTo,
     Link
   } = useAuth()
 
@@ -110,8 +112,9 @@ export function SignIn({
   const [isPasswordVisible, setIsPasswordVisible] = useState(false)
   const form = useAuthForm({
     defaultValues: { email: "", password: "", rememberMe: false },
-    onSubmit: async ({ value }) =>
-      await signInEmail({
+    onSubmit: async ({ value }) => {
+      recordAuthIntent("email", redirectTo)
+      return await signInEmail({
         email: value.email,
         password: value.password,
         ...(emailAndPassword?.rememberMe
@@ -119,6 +122,7 @@ export function SignIn({
           : {}),
         fetchOptions
       })
+    }
   })
 
   const showSeparator =

@@ -15,6 +15,7 @@ import {
 } from "@sourceweft/ui-web/components/ui/dialog";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import type { ShareLink } from "@sourceweft/contracts";
+import { trackArtifactShared } from "../../../../../lib/analytics-events";
 import { contentClient } from "../../../../../lib/sdk";
 
 /**
@@ -58,6 +59,7 @@ export function ShareArtifactDialog({
           artifactId,
         );
         onShareChange(result.share);
+        trackArtifactShared();
       } else {
         await contentClient.revokeArtifactShare(workspaceId, artifactId);
         onShareChange(null);

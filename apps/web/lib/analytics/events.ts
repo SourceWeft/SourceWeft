@@ -178,3 +178,50 @@ export function trackSourceAttached(sourceCount: number) {
 export function trackTeamInvitationAccepted() {
   trackEvent("team_invitation_accepted", { source: "invitation_link" });
 }
+
+export function trackConnectorConnected(input: {
+  connectorType: string;
+  gmailMode?: string;
+}) {
+  trackEvent("connector_connected", {
+    connector_type: input.connectorType,
+    gmail_mode: input.gmailMode,
+  });
+}
+
+export function trackMcpServerInstalled(input: {
+  // The web app installs MCP servers only from the market today.
+  source: "market";
+  authType?: string;
+}) {
+  trackEvent("mcp_server_installed", {
+    source: input.source,
+    auth_type: input.authType,
+  });
+}
+
+export function trackSourceAdded(input: {
+  kind: "file" | "url";
+  sourceCount: number;
+}) {
+  trackEvent("source_added", {
+    kind: input.kind,
+    source_count: input.sourceCount,
+  });
+}
+
+export function trackArtifactShared() {
+  trackEvent("artifact_shared", {});
+}
+
+export function trackSkillInstalled(surface: "gallery" | "detail") {
+  trackEvent("skill_installed", { surface });
+}
+
+export function trackWorkspaceCreated() {
+  trackEvent("workspace_created", {});
+}
+
+export function trackTeamCreated(edition: "core" | "commercial") {
+  trackEvent("team_created", { edition });
+}

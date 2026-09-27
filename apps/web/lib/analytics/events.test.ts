@@ -8,9 +8,16 @@ const sent = vi.hoisted(() => ({
 vi.mock("./client", () => ({ trackEvent: sent.trackEvent }));
 
 import {
+  trackArtifactShared,
   trackBeginCheckout,
   trackChatMessageSent,
+  trackConnectorConnected,
+  trackMcpServerInstalled,
   trackPurchase,
+  trackSkillInstalled,
+  trackSourceAdded,
+  trackTeamCreated,
+  trackWorkspaceCreated,
 } from "./events";
 
 afterEach(() => {
@@ -57,5 +64,54 @@ test("trackChatMessageSent maps camelCase to snake_case", () => {
       surface: "thread",
       tool_count: 1,
     },
+  ]);
+});
+
+test("trackConnectorConnected sends the connector type and gmail mode", () => {
+  trackConnectorConnected({ connectorType: "gmail", gmailMode: "tools" });
+  assert.deepEqual(sent.trackEvent.mock.calls[0], [
+    "connector_connected",
+    { connector_type: "gmail", gmail_mode: "tools" },
+  ]);
+});
+
+test("trackMcpServerInstalled sends source and auth type", () => {
+  trackMcpServerInstalled({ source: "market", authType: "oauth" });
+  assert.deepEqual(sent.trackEvent.mock.calls[0], [
+    "mcp_server_installed",
+    { source: "market", auth_type: "oauth" },
+  ]);
+});
+
+test("trackSourceAdded sends kind and count", () => {
+  trackSourceAdded({ kind: "file", sourceCount: 3 });
+  assert.deepEqual(sent.trackEvent.mock.calls[0], [
+    "source_added",
+    { kind: "file", source_count: 3 },
+  ]);
+});
+
+test("trackArtifactShared and trackWorkspaceCreated send no params", () => {
+  trackArtifactShared();
+  trackWorkspaceCreated();
+  assert.deepEqual(sent.trackEvent.mock.calls, [
+    ["artifact_shared", {}],
+    ["workspace_created", {}],
+  ]);
+});
+
+test("trackSkillInstalled sends the surface", () => {
+  trackSkillInstalled("gallery");
+  assert.deepEqual(sent.trackEvent.mock.calls[0], [
+    "skill_installed",
+    { surface: "gallery" },
+  ]);
+});
+
+test("trackTeamCreated sends the edition", () => {
+  trackTeamCreated("commercial");
+  assert.deepEqual(sent.trackEvent.mock.calls[0], [
+    "team_created",
+    { edition: "commercial" },
   ]);
 });

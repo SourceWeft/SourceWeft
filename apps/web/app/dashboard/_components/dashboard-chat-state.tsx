@@ -17,6 +17,7 @@ import type {
   ThreadChatPreferences,
 } from "@sourceweft/contracts";
 import { authClient } from "../../../lib/auth-client";
+import { trackWorkspaceCreated } from "../../../lib/analytics-events";
 import { ensureDashboardWorkspace } from "../../../lib/dashboard-workspace-bootstrap";
 import { setStoredDashboardWorkspaceId } from "../../../lib/dashboard-workspace-context";
 import {
@@ -514,6 +515,7 @@ export function DashboardChatStateProvider({
       const workspace = await workspaceClient.createWorkspace(organizationId, {
         name: safeName,
       });
+      trackWorkspaceCreated();
       const nextWorkspace = { id: workspace.id, name: workspace.name };
 
       setWorkspaces((value) => [...value, nextWorkspace]);

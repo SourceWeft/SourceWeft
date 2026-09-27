@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { afterEach, test, vi } from "vitest";
 
 import type { AnalyticsValue } from "./catalog";
-import { buildDestinations, createAnalyticsClient } from "./client";
+import {
+  buildDestinations,
+  createAnalyticsClient,
+  resetAnalyticsForTests,
+  startAnalytics,
+} from "./client";
 import type { AnalyticsContext } from "./context";
 import type { AnalyticsDestination, DestinationId } from "./destinations/types";
 
@@ -197,6 +202,25 @@ test("GTM only / Umami only / both / neither are built from runtime config", () 
   assert.deepEqual(ids({ umami }), ["umami"]);
   assert.deepEqual(ids({ gtmId: "GTM-1", umami }), ["gtm", "umami"]);
   assert.deepEqual(ids({}), []);
+});
+
+test("startAnalytics sends the platform context before any event", async () => {
+  const win = {
+    __SOURCEWEFT_CONFIG__: { analytics: { gtmId: "GTM-1" } },
+    dataLayer: [] as unknown[],
+  };
+  vi.stubGlobal("window", win);
+  resetAnalyticsForTests();
+  try {
+    startAnalytics();
+    await flush();
+    assert.deepEqual(win.dataLayer, [
+      { event: "analytics_context", platform: "web" },
+    ]);
+  } finally {
+    resetAnalyticsForTests();
+    vi.unstubAllGlobals();
+  }
 });
 
 test("events delivered in order", async () => {

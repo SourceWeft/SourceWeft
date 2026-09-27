@@ -2,8 +2,13 @@
 
 import { GoogleTagManager } from "@next/third-parties/google";
 import Script from "next/script";
+import { useEffect } from "react";
 
-import { markDestinationReady, type AnalyticsRuntimeConfig } from "./client";
+import {
+  markDestinationReady,
+  startAnalytics,
+  type AnalyticsRuntimeConfig,
+} from "./client";
 
 /** Loads the script of every analytics tool enabled in the runtime config. */
 export function AnalyticsScripts({
@@ -11,6 +16,10 @@ export function AnalyticsScripts({
 }: {
   config: AnalyticsRuntimeConfig;
 }) {
+  useEffect(() => {
+    startAnalytics();
+  }, []);
+
   return (
     <>
       {config.gtmId ? <GoogleTagManager gtmId={config.gtmId} /> : null}

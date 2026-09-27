@@ -1,5 +1,6 @@
 "use client"
 
+import { recordAuthIntent } from "@/lib/analytics/auth-intent"
 import { authMutationKeys, validateEmailAddress } from "@better-auth-ui/core"
 import type { MagicLinkAuthClient } from "@better-auth-ui/core/plugins/magic-link"
 import { getSsoFallbackEmail } from "@better-auth-ui/core/plugins/sso"
@@ -78,11 +79,13 @@ export function MagicLink({
 
   const form = useAuthForm({
     defaultValues: { email: getSsoFallbackEmail() },
-    onSubmit: async ({ value }) =>
-      await signInMagicLink({
+    onSubmit: async ({ value }) => {
+      recordAuthIntent("magic_link", redirectTo)
+      return await signInMagicLink({
         callbackURL: `${baseURL}${redirectTo}`,
         email: value.email
       })
+    }
   })
 
   const showSeparator = socialProviders && socialProviders.length > 0

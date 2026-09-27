@@ -53,6 +53,7 @@ import {
   TabsTrigger,
 } from "@sourceweft/ui-web/components/ui/tabs";
 import { cn } from "@sourceweft/ui-web/lib/utils";
+import { trackSkillInstalled } from "../../../../lib/analytics-events";
 import { contentClient, workspaceClient } from "../../../../lib/sdk";
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
 import { SkillIcon } from "../../../_components/site-icons";
@@ -269,6 +270,7 @@ export default function SkillDetailPage() {
           : currentDetail,
       );
       toast.success(t("toasts.installed"));
+      trackSkillInstalled("detail");
       if (detail.contentRestricted) {
         // Only a skill that is not publicly listed withholds its text, and
         // installing is what gives this workspace a claim to it. Fetched in

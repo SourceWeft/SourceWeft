@@ -21,6 +21,7 @@ import {
   ScrollBar,
 } from "@sourceweft/ui-web/components/ui/scroll-area";
 import { cn } from "@sourceweft/ui-web/lib/utils";
+import { trackWorkspaceCreated } from "../../lib/analytics-events";
 import { contentClient, workspaceClient } from "../../lib/sdk";
 import { ensureDashboardWorkspace } from "../../lib/dashboard-workspace-bootstrap";
 import {
@@ -705,6 +706,7 @@ export default function DashboardPage() {
         resolvedOrganizationId,
         { name },
       );
+      trackWorkspaceCreated();
 
       toast.success(t("toasts.created", { name: workspace.name }));
       setStoredDashboardWorkspaceId(resolvedOrganizationId, workspace.id);
