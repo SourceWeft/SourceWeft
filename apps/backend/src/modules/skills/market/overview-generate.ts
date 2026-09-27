@@ -1,18 +1,13 @@
-import { createHash } from "node:crypto";
-import type { SkillOverviewJson, SkillOverviewLocale } from "@sourceweft/db";
-import { logger } from "../../../shared/logger";
-import {
-  getSystemModelReadiness,
-  withSystemModel,
-  type SystemModelPurpose,
-} from "../../../shared/model-gateway/system-client";
+import type { SkillAnalysisClassification } from "@sourceweft/db";
+import { generateOverview } from "../../catalog-overview/generate";
+import { createOverviewModelCall } from "../../catalog-overview/model";
+import type {
+  OverviewGenerateResult,
+  OverviewSubject,
+  OverviewSubjectAdapter,
+} from "../../catalog-overview/types";
+import type { SystemModelPurpose } from "../../../shared/model-gateway/system-client";
 import { marketSkillName } from "./read-repository";
-import {
-  claimSkillAnalysis,
-  findCachedSkillAnalysis,
-  publishSkillAnalysis,
-  requestSkillAnalysis,
-} from "./analysis-repository";
 import {
   SKILL_OVERVIEW_OUTPUT_JSON_SCHEMA,
   SKILL_OVERVIEW_OUTPUT_NAME,
@@ -20,7 +15,11 @@ import {
   parseSkillOverviewOutput,
   type SkillOverviewPrompt,
 } from "./overview-prompt";
-import { findSkillOverviewSubject } from "./overview-repository";
+import {
+  findSkillOverviewSubject,
+  type SkillOverviewSubject,
+} from "./overview-repository";
+import { skillOverviewStore } from "./overview-store";
 import { skillCategoryDefinitions } from "./taxonomy";
 
 /**
@@ -29,11 +28,17 @@ import { skillCategoryDefinitions } from "./taxonomy";
  * written locale overviews plus one evidence-backed classification, and
  * publish atomically. Platform work: billed to no team (see
  * shared/model-gateway/system-client.ts).
+ *
+ * The pipeline is the catalog overview engine's (modules/catalog-overview);
+ * this is the skill kind's adapter to it.
  */
 
 // The answer is two short overviews; nothing hidden is spent first, since
 // thinking is off.
 export const SKILL_OVERVIEW_MAX_OUTPUT_TOKENS = 4_500;
+
+const SKILL_OVERVIEW_OUTPUT_DESCRIPTION =
+  "A catalog overview of the skill in English, Simplified Chinese and Taiwan Traditional Chinese, plus one classification.";
 
 export type SkillOverviewModelCall = (input: {
   prompt: SkillOverviewPrompt;
@@ -42,11 +47,76 @@ export type SkillOverviewModelCall = (input: {
   scopeId: string;
 }) => Promise<{ output: unknown; model: string }>;
 
+type SkillSubject = SkillOverviewSubject & OverviewSubject;
+
+/** The skill kind: SKILL.md and its file list in, the skill tables out. */
+export const skillOverviewAdapter: OverviewSubjectAdapter<
+  SkillSubject,
+  SkillOverviewPrompt,
+  SkillAnalysisClassification,
+  "no-skill-md"
+> = {
+  kind: "skill",
+  label: "Skill",
+  purpose: "skill_market.overview",
+  subjectRef: (skillVersionId) => `skill-version:${skillVersionId}`,
+  output: {
+    name: SKILL_OVERVIEW_OUTPUT_NAME,
+    description: SKILL_OVERVIEW_OUTPUT_DESCRIPTION,
+    schema: SKILL_OVERVIEW_OUTPUT_JSON_SCHEMA,
+    maxTokens: SKILL_OVERVIEW_MAX_OUTPUT_TOKENS,
+  },
+  async loadSubject(skillVersionId) {
+    const subject = await findSkillOverviewSubject(skillVersionId);
+    return subject
+      ? {
+          ...subject,
+          versionId: subject.skillVersionId,
+          fingerprint: subject.bundleSha256,
+        }
+      : null;
+  },
+  skipReason: (subject) => (subject.skillMd?.trim() ? null : "no-skill-md"),
+  buildPrompt(subject) {
+    const registry = subject.manifest.registry;
+    return buildSkillOverviewPrompt({
+      name: marketSkillName({ slug: subject.slug, manifest: subject.manifest }),
+      capability: registry?.capability ?? null,
+      skillMd: subject.skillMd ?? "",
+      files: (registry?.fileManifest ?? [])
+        .filter((file) => file.path !== "SKILL.md")
+        .map((file) => ({ path: file.path, role: file.role })),
+      categories: skillCategoryDefinitions,
+    });
+  },
+  parseOutput(raw, subject, prompt) {
+    const parsed = parseSkillOverviewOutput(
+      raw,
+      skillCategoryDefinitions.map((category) => category.slug),
+      subject.skillMd ?? "",
+      prompt.sourceText,
+    );
+    return {
+      overviews: {
+        en: parsed.en,
+        "zh-CN": parsed["zh-CN"],
+        "zh-TW": parsed["zh-TW"],
+      },
+      classification: parsed.classification,
+    };
+  },
+  logFields: (subject, prompt) => ({
+    skillId: subject.skillId,
+    skillVersionId: subject.skillVersionId,
+    truncated: prompt.truncated,
+  }),
+  store: skillOverviewStore,
+};
+
 /**
- * The model call through the system model: no tools, a JSON schema to answer
- * in, thinking pinned off (DeepSeek thinks by default, and a forced
- * structured-output tool choice is refused while it does), output capped.
- * The evaluation asks the same question under its own purpose.
+ * The model call through the system model (the engine's
+ * `createOverviewModelCall` with the skill adapter's output spec). The
+ * evaluation asks the same question under its own purpose.
  */
 export function createSkillOverviewModelCall(
   purpose: Extract<
@@ -54,62 +124,16 @@ export function createSkillOverviewModelCall(
     "skill_market.overview" | "skill_market.evaluation"
   > = "skill_market.overview",
 ): SkillOverviewModelCall {
-  return async ({ prompt, skillVersionId, scopeId }) => {
-    const result = await withSystemModel(
-      { purpose, subjectRef: `skill-version:${skillVersionId}`, scopeId },
-      (chat) =>
-        chat.complete({
-          messages: [
-            { role: "system", content: prompt.system },
-            { role: "user", content: prompt.user },
-          ],
-          structuredOutput: {
-            name: SKILL_OVERVIEW_OUTPUT_NAME,
-            description:
-              "A catalog overview of the skill in English, Simplified Chinese and Taiwan Traditional Chinese, plus one classification.",
-            schema: SKILL_OVERVIEW_OUTPUT_JSON_SCHEMA,
-          },
-          thinking: { mode: "off", enabled: false, includeReasoning: false },
-          maxTokens: SKILL_OVERVIEW_MAX_OUTPUT_TOKENS,
-          temperature: 0.2,
-        }),
-    );
-    const output = result.structuredOutput ?? textOf(result.raw?.content);
-    return {
-      output,
-      model: result.providerModel ?? result.model,
-    };
-  };
+  const call = createOverviewModelCall<SkillOverviewPrompt>({
+    purpose,
+    subjectRef: skillOverviewAdapter.subjectRef,
+    output: skillOverviewAdapter.output,
+  });
+  return ({ prompt, skillVersionId, scopeId }) =>
+    call({ prompt, versionId: skillVersionId, scopeId });
 }
 
-function textOf(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    return content
-      .map((part) =>
-        typeof part === "string"
-          ? part
-          : part && typeof part === "object" && typeof part.text === "string"
-            ? part.text
-            : "",
-      )
-      .join("");
-  }
-  return "";
-}
-
-export type GenerateSkillOverviewResult =
-  | { status: "generated"; model: string }
-  | { status: "copied"; rows: number }
-  | {
-      status: "skipped";
-      reason:
-        | "missing-version"
-        | "not-eligible"
-        | "already-generated"
-        | "no-skill-md"
-        | "system-model-not-ready";
-    };
+export type GenerateSkillOverviewResult = OverviewGenerateResult<"no-skill-md">;
 
 /**
  * Writes one version's overviews unless there is nothing to do: the version
@@ -127,100 +151,11 @@ export async function generateSkillOverview(input: {
   force?: boolean;
   modelConfigurationKey?: string;
 }): Promise<GenerateSkillOverviewResult> {
-  const subject = await findSkillOverviewSubject(input.skillVersionId);
-  if (!subject) return { status: "skipped", reason: "missing-version" };
-  if (!subject.eligible) return { status: "skipped", reason: "not-eligible" };
-  const state = input.requestId
-    ? await claimSkillAnalysis(subject.skillVersionId, input.requestId)
-    : await requestSkillAnalysis(
-        subject.skillVersionId,
-        Boolean(input.force),
-      ).then((row) =>
-        row ? claimSkillAnalysis(subject.skillVersionId, row.requestId) : null,
-      );
-  if (!state) return { status: "skipped", reason: "already-generated" };
-  if (!subject.skillMd?.trim()) {
-    return { status: "skipped", reason: "no-skill-md" };
-  }
-  const modelReady = input.modelReady
-    ? await input.modelReady()
-    : (await getSystemModelReadiness()).ready;
-  if (!modelReady)
-    return { status: "skipped", reason: "system-model-not-ready" };
-
-  const registry = subject.manifest.registry;
-  const prompt = buildSkillOverviewPrompt({
-    name: marketSkillName({ slug: subject.slug, manifest: subject.manifest }),
-    capability: registry?.capability ?? null,
-    skillMd: subject.skillMd,
-    files: (registry?.fileManifest ?? [])
-      .filter((file) => file.path !== "SKILL.md")
-      .map((file) => ({ path: file.path, role: file.role })),
-    categories: skillCategoryDefinitions,
+  const { skillVersionId, callModel, ...rest } = input;
+  return generateOverview(skillOverviewAdapter, {
+    ...rest,
+    versionId: skillVersionId,
+    callModel: ({ prompt, versionId, scopeId }) =>
+      callModel({ prompt, skillVersionId: versionId, scopeId }),
   });
-  // Test-injected callers without a model identity cannot reuse production cache.
-  const resultKey = createHash("sha256")
-    .update(
-      JSON.stringify({
-        bundle: subject.bundleSha256,
-        prompt,
-        model: input.modelConfigurationKey ?? input.scopeId,
-      }),
-    )
-    .digest("hex");
-  if (!state.force && !input.force && input.modelConfigurationKey) {
-    const cached = await findCachedSkillAnalysis(
-      resultKey,
-      subject.skillVersionId,
-    );
-    if (cached) {
-      const published = await publishSkillAnalysis({
-        ...cached,
-        skillId: subject.skillId,
-        skillVersionId: subject.skillVersionId,
-        requestId: state.requestId,
-        resultKey,
-        modelConfigurationKey: input.modelConfigurationKey,
-        bundleSha256: subject.bundleSha256,
-      });
-      return published
-        ? { status: "copied", rows: 3 }
-        : { status: "skipped", reason: "not-eligible" };
-    }
-  }
-  const { output, model } = await input.callModel({
-    prompt,
-    skillVersionId: subject.skillVersionId,
-    scopeId: input.scopeId,
-  });
-  const parsed = parseSkillOverviewOutput(
-    output,
-    skillCategoryDefinitions.map((category) => category.slug),
-    subject.skillMd,
-    prompt.sourceText,
-  );
-  const overviews: Record<SkillOverviewLocale, SkillOverviewJson> = {
-    en: parsed.en,
-    "zh-CN": parsed["zh-CN"],
-    "zh-TW": parsed["zh-TW"],
-  };
-  const published = await publishSkillAnalysis({
-    skillId: subject.skillId,
-    requestId: state.requestId,
-    resultKey,
-    modelConfigurationKey: input.modelConfigurationKey,
-    classification: parsed.classification,
-    skillVersionId: subject.skillVersionId,
-    bundleSha256: subject.bundleSha256,
-    model,
-    overviews,
-  });
-  if (!published) return { status: "skipped", reason: "not-eligible" };
-  logger.info("Skill overview generated", {
-    skillId: subject.skillId,
-    skillVersionId: subject.skillVersionId,
-    model,
-    truncated: prompt.truncated,
-  });
-  return { status: "generated", model };
 }

@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import type { SystemModelIdentity } from "../../../shared/model-gateway/system-client";
 import { SKILL_ANALYSIS_CATEGORY_SLUGS } from "./overview-taxonomy";
 import {
   SKILL_ANALYSIS_PROMPT_VERSION,
@@ -186,22 +185,10 @@ export function stratifyEvaluationCases(
 }
 
 /**
- * Non-secret identity of the model an analysis ran on: the system model's
- * Provider, endpoint and model. Credentials and their rotation are excluded.
+ * Non-secret identity of the model an analysis ran on, and the key results
+ * are stored under: the catalog overview engine's, shared by every kind.
  */
-export function skillAnalysisModelIdentity(identity: SystemModelIdentity) {
-  return {
-    provider: identity.provider,
-    kind: identity.kind,
-    baseUrl: identity.baseUrl,
-    apiVersion: identity.apiVersion,
-    model: identity.model,
-  };
-}
-export function skillAnalysisModelConfigurationKey(
-  identity: SystemModelIdentity,
-) {
-  return hash(
-    JSON.stringify({ systemModel: skillAnalysisModelIdentity(identity) }),
-  );
-}
+export {
+  overviewModelIdentity as skillAnalysisModelIdentity,
+  overviewModelConfigurationKey as skillAnalysisModelConfigurationKey,
+} from "../../catalog-overview/keys";

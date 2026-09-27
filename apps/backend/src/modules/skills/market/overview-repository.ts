@@ -1,7 +1,11 @@
-import { readSkillAnalysis } from "./analysis-repository";
-import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
+import {
+  readSkillAnalysis,
+  skillOverviewRepository,
+} from "./analysis-repository";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import {
+  CATALOG_OVERVIEW_LOCALES,
   db,
   skillDefinitions,
   skillVersionFiles,
@@ -12,14 +16,16 @@ import {
   type SkillOverviewJson,
   type SkillOverviewLocale,
 } from "@sourceweft/db";
+import type { CatalogOverviewRead } from "../../catalog-overview/repository";
 
-/** Storage for AI overviews (`skill_version_overviews`). */
+/**
+ * Storage for AI overviews (`skill_version_overviews`): which skills get one,
+ * what the prompt reads, and the admin view. The rows themselves are written
+ * and read through the catalog overview engine's repository.
+ */
 
-export const SKILL_OVERVIEW_LOCALES: readonly SkillOverviewLocale[] = [
-  "en",
-  "zh-CN",
-  "zh-TW",
-];
+export const SKILL_OVERVIEW_LOCALES: readonly SkillOverviewLocale[] =
+  CATALOG_OVERVIEW_LOCALES;
 
 // ---------------------------------------------------------------------------
 // Which skills get one
@@ -167,42 +173,20 @@ export async function storeSkillOverviews(input: {
   overviews: Record<SkillOverviewLocale, SkillOverviewJson>;
   generatedAt?: Date;
 }): Promise<void> {
-  const generatedAt = input.generatedAt ?? new Date();
-  await db
-    .insert(skillVersionOverviews)
-    .values(
-      SKILL_OVERVIEW_LOCALES.map((locale) => ({
-        skillVersionId: input.skillVersionId,
-        locale,
-        bundleSha256: input.bundleSha256,
-        overview: input.overviews[locale],
-        model: input.model,
-        generatedAt,
-      })),
-    )
-    .onConflictDoUpdate({
-      target: [
-        skillVersionOverviews.skillVersionId,
-        skillVersionOverviews.locale,
-      ],
-      set: {
-        bundleSha256: sql`excluded.bundle_sha256`,
-        overview: sql`excluded.overview`,
-        model: sql`excluded.model`,
-        generatedAt: sql`excluded.generated_at`,
-      },
-    });
+  await skillOverviewRepository.storeOverviews({
+    versionId: input.skillVersionId,
+    fingerprint: input.bundleSha256,
+    model: input.model,
+    overviews: input.overviews,
+    generatedAt: input.generatedAt,
+  });
 }
 
 // ---------------------------------------------------------------------------
 // Public reads
 // ---------------------------------------------------------------------------
 
-export type SkillOverviewRead = {
-  overview: SkillOverviewJson;
-  locale: SkillOverviewLocale;
-  generatedAt: Date;
-};
+export type SkillOverviewRead = CatalogOverviewRead;
 
 /**
  * Each version's visible overview in `locale`, or in English when that one
@@ -212,65 +196,17 @@ export async function readSkillOverviews(input: {
   skillVersionIds: readonly string[];
   locale: SkillOverviewLocale;
 }): Promise<Map<string, SkillOverviewRead>> {
-  const found = new Map<string, SkillOverviewRead>();
-  const ids = [...new Set(input.skillVersionIds)];
-  if (ids.length === 0) return found;
-  const locales = input.locale === "en" ? ["en"] : [input.locale, "en"];
-  const rows = await db
-    .select({
-      skillVersionId: skillVersionOverviews.skillVersionId,
-      locale: skillVersionOverviews.locale,
-      overview: skillVersionOverviews.overview,
-      generatedAt: skillVersionOverviews.generatedAt,
-    })
-    .from(skillVersionOverviews)
-    .where(
-      and(
-        inArray(skillVersionOverviews.skillVersionId, ids),
-        inArray(skillVersionOverviews.locale, locales as SkillOverviewLocale[]),
-        eq(skillVersionOverviews.hidden, false),
-      ),
-    );
-  for (const row of rows) {
-    const current = found.get(row.skillVersionId);
-    // The requested language wins over the fallback.
-    if (!current || row.locale === input.locale) {
-      found.set(row.skillVersionId, {
-        overview: row.overview,
-        locale: row.locale,
-        generatedAt: row.generatedAt,
-      });
-    }
-  }
-  return found;
+  return skillOverviewRepository.readOverviews({
+    versionIds: input.skillVersionIds,
+    locale: input.locale,
+  });
 }
 
 /** Actual visible translations, never the English fallback; one query per batch. */
 export async function readSkillOverviewLocales(
   skillVersionIds: readonly string[],
 ): Promise<Map<string, SkillOverviewLocale[]>> {
-  const result = new Map<string, SkillOverviewLocale[]>();
-  const ids = [...new Set(skillVersionIds)];
-  if (!ids.length) return result;
-  const rows = await db
-    .select({
-      versionId: skillVersionOverviews.skillVersionId,
-      locale: skillVersionOverviews.locale,
-    })
-    .from(skillVersionOverviews)
-    .where(
-      and(
-        inArray(skillVersionOverviews.skillVersionId, ids),
-        eq(skillVersionOverviews.hidden, false),
-      ),
-    );
-  for (const row of rows) {
-    const locales = result.get(row.versionId) ?? [];
-    if (!locales.includes(row.locale)) locales.push(row.locale);
-    result.set(row.versionId, locales);
-  }
-  for (const locales of result.values()) locales.sort();
-  return result;
+  return skillOverviewRepository.readOverviewLocales(skillVersionIds);
 }
 
 // ---------------------------------------------------------------------------
@@ -363,11 +299,7 @@ export async function findSkillOverviewAdminState(
 export async function deleteSkillOverviews(
   skillVersionId: string,
 ): Promise<number> {
-  const deleted = await db
-    .delete(skillVersionOverviews)
-    .where(eq(skillVersionOverviews.skillVersionId, skillVersionId))
-    .returning({ locale: skillVersionOverviews.locale });
-  return deleted.length;
+  return skillOverviewRepository.deleteOverviews(skillVersionId);
 }
 
 /** Hides or shows every locale of a version's overview; how many rows changed. */
@@ -375,17 +307,10 @@ export async function setSkillOverviewsHidden(input: {
   skillVersionId: string;
   hidden: boolean;
 }): Promise<number> {
-  const updated = await db
-    .update(skillVersionOverviews)
-    .set({ hidden: input.hidden })
-    .where(
-      and(
-        eq(skillVersionOverviews.skillVersionId, input.skillVersionId),
-        ne(skillVersionOverviews.hidden, input.hidden),
-      ),
-    )
-    .returning({ locale: skillVersionOverviews.locale });
-  return updated.length;
+  return skillOverviewRepository.setOverviewsHidden({
+    versionId: input.skillVersionId,
+    hidden: input.hidden,
+  });
 }
 
 /** How far the market's overviews have got. */

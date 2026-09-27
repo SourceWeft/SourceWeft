@@ -14,6 +14,15 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { emptyJsonObject } from "./shared";
+import {
+  catalogAnalysisColumns,
+  catalogAnalysisConstraints,
+  catalogOverviewColumns,
+  catalogOverviewConstraints,
+  type CatalogClassificationOutcome,
+  type CatalogOverviewJson,
+  type CatalogOverviewLocale,
+} from "./catalog-overview";
 import { workspaces } from "./identity-workspace";
 
 type SkillDefinitionSourceType =
@@ -978,54 +987,42 @@ export const skillReports = pgTable(
   ],
 );
 
-export type SkillOverviewLocale = "en" | "zh-CN" | "zh-TW";
-export type SkillOverviewJson = {
-  // One sentence, for cards.
-  summary: string;
-  whatItDoes: string;
-  whenToUse: string;
-  // Dependencies, scripts, credentials it needs; empty when none.
-  requirements: string;
-  suggestedCategories: string[];
-};
+// Skill overviews use the catalog-wide overview type. `cautions` is optional
+// there, and skill overviews do not write it.
+export type SkillOverviewLocale = CatalogOverviewLocale;
+export type SkillOverviewJson = CatalogOverviewJson;
 
 // An AI-written overview of one skill version in one language. Generated only
 // for a public skill's current version; keyed by the bundle so identical
-// content is never summarized twice.
+// content is never summarized twice. Shared columns: catalog-overview.ts.
 export const skillVersionOverviews = pgTable(
   "skill_version_overviews",
   {
     skillVersionId: text("skill_version_id")
       .notNull()
       .references(() => skillVersions.id, { onDelete: "cascade" }),
-    locale: text("locale").$type<SkillOverviewLocale>().notNull(),
-    bundleSha256: text("bundle_sha256").notNull(),
-    overview: jsonb("overview").$type<SkillOverviewJson>().notNull(),
-    model: text("model").notNull(),
-    // An admin hid it; the page falls back to the author's description.
-    hidden: boolean("hidden").notNull().default(false),
-    generatedAt: timestamp("generated_at", {
-      withTimezone: true,
-      mode: "date",
-    })
-      .notNull()
-      .defaultNow(),
+    ...catalogOverviewColumns({ key: "bundleSha256", name: "bundle_sha256" }),
   },
   (table) => [
-    primaryKey({
-      name: "skill_version_overviews_pk",
-      columns: [table.skillVersionId, table.locale],
+    ...catalogOverviewConstraints("skill_version_overviews", {
+      versionId: table.skillVersionId,
+      locale: table.locale,
     }),
-    check(
-      "skill_version_overviews_locale_check",
-      sql`${table.locale} in ('en', 'zh-CN', 'zh-TW')`,
-    ),
     index("skill_version_overviews_bundle_idx").on(
       table.bundleSha256,
       table.locale,
     ),
   ],
 );
+
+// A skill's classification: one primary category and at most one distinct
+// secondary, backed by quotations from SKILL.md.
+export type SkillAnalysisClassification = CatalogClassificationOutcome & {
+  primary: string | null;
+  secondary: string | null;
+  rationale: string;
+  evidence: string[];
+};
 
 // Durable generation state and language-independent classification. Old output
 // remains live while a newer request runs. requestId fences stale workers.
@@ -1035,34 +1032,9 @@ export const skillVersionAnalysis = pgTable(
     skillVersionId: text("skill_version_id")
       .primaryKey()
       .references(() => skillVersions.id, { onDelete: "cascade" }),
-    requestId: text("request_id").notNull(),
-    status: text("status")
-      .$type<"pending" | "running" | "ready" | "failed" | "needs-review">()
-      .notNull(),
-    force: boolean("force").notNull().default(false),
-    resultKey: text("result_key"),
-    modelConfigurationKey: text("model_configuration_key"),
-    promptVersion: text("prompt_version"),
-    taxonomyVersion: text("taxonomy_version"),
-    classification: jsonb("classification").$type<{
-      status: "ready" | "needs-review";
-      primary: string | null;
-      secondary: string | null;
-      rationale: string;
-      evidence: string[];
-    }>(),
-    error: text("error"),
-    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
-      .notNull()
-      .defaultNow(),
+    ...catalogAnalysisColumns<SkillAnalysisClassification>(),
   },
-  (table) => [
-    check(
-      "skill_version_analysis_status_check",
-      sql`${table.status} in ('pending','running','ready','failed','needs-review')`,
-    ),
-    index("skill_version_analysis_result_idx").on(table.resultKey),
-  ],
+  (table) => catalogAnalysisConstraints("skill_version_analysis", table),
 );
 
 export type SkillRunErrorClass =

@@ -1,5 +1,4 @@
-import { randomUUID } from "node:crypto";
-import { and, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import {
   db,
   skillDefinitions,
@@ -8,9 +7,14 @@ import {
   skillVersionOverviews,
   skillDefinitionCategories,
   skillCategories,
+  type SkillAnalysisClassification,
   type SkillOverviewJson,
   type SkillOverviewLocale,
 } from "@sourceweft/db";
+import {
+  createCatalogOverviewRepository,
+  type Tx,
+} from "../../catalog-overview/repository";
 import { recordSkillMarketEvent } from "./events";
 import { skillCategoryDefinitions, skillCategoryId } from "./taxonomy";
 import {
@@ -18,19 +22,79 @@ import {
   SKILL_ANALYSIS_TAXONOMY_VERSION,
 } from "./overview-prompt";
 
-type SkillClassification = NonNullable<
-  typeof skillVersionAnalysis.$inferSelect.classification
->;
+/**
+ * AI analysis of skills on the catalog overview engine's repository: the
+ * generation state (`skill_version_analysis`) and atomic publication into
+ * `skill_version_overviews`. What is skill-specific is here: which version
+ * may be published, and how its categories are applied.
+ */
 
-type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
-const locales = ["en", "zh-CN", "zh-TW"] as const;
+type SkillClassification = SkillAnalysisClassification;
+
+/**
+ * Locks the definition, then the version, and says whether the version is
+ * still the public, active GitHub skill's current published one.
+ */
+async function lockSkillVersion(
+  tx: Tx,
+  target: { versionId: string; parentId: string },
+): Promise<boolean> {
+  const [definition] = await tx
+    .select()
+    .from(skillDefinitions)
+    .where(eq(skillDefinitions.id, target.parentId))
+    .for("update");
+  const [version] = await tx
+    .select()
+    .from(skillVersions)
+    .where(eq(skillVersions.id, target.versionId))
+    .for("update");
+  return Boolean(
+    definition &&
+    definition.visibility === "public" &&
+    definition.status === "active" &&
+    definition.sourceType === "registry_github" &&
+    version?.isCurrent &&
+    version.status === "published" &&
+    version.skillId === target.parentId,
+  );
+}
+
+/** The engine's repository on the skill tables; overview rows are read through it too. */
+export const skillOverviewRepository = createCatalogOverviewRepository<
+  typeof skillVersionAnalysis,
+  SkillClassification
+>({
+  overviews: {
+    table: skillVersionOverviews,
+    versionId: skillVersionOverviews.skillVersionId,
+    fingerprint: skillVersionOverviews.bundleSha256,
+  },
+  analysis: {
+    table: skillVersionAnalysis,
+    versionId: skillVersionAnalysis.skillVersionId,
+  },
+  versions: {
+    table: skillVersions,
+    id: skillVersions.id,
+    parentId: skillVersions.skillId,
+  },
+  promptVersion: SKILL_ANALYSIS_PROMPT_VERSION,
+  taxonomyVersion: SKILL_ANALYSIS_TAXONOMY_VERSION,
+  lockTarget: lockSkillVersion,
+  applyCategories: (tx, target, classification) =>
+    applyAnalysisCategories(
+      tx,
+      target.parentId,
+      target.versionId,
+      classification,
+    ),
+});
+
+const repository = skillOverviewRepository;
 
 export async function readSkillAnalysis(skillVersionId: string) {
-  const [row] = await db
-    .select()
-    .from(skillVersionAnalysis)
-    .where(eq(skillVersionAnalysis.skillVersionId, skillVersionId));
-  return row ?? null;
+  return repository.read(skillVersionId);
 }
 
 /** Reserve before enqueue. A new request fences an older running worker. */
@@ -38,41 +102,14 @@ export async function requestSkillAnalysis(
   skillVersionId: string,
   force: boolean,
 ) {
-  const requestId = randomUUID();
-  const rows = await db
-    .insert(skillVersionAnalysis)
-    .values({ skillVersionId, requestId, status: "pending", force })
-    .onConflictDoUpdate({
-      target: skillVersionAnalysis.skillVersionId,
-      set: {
-        requestId,
-        status: "pending",
-        force,
-        error: null,
-        updatedAt: new Date(),
-      },
-      ...(force ? {} : { setWhere: sql`false` }),
-    })
-    .returning();
-  return rows[0] ?? null;
+  return repository.request(skillVersionId, force);
 }
 
 export async function claimSkillAnalysis(
   skillVersionId: string,
   requestId: string,
 ) {
-  const rows = await db
-    .update(skillVersionAnalysis)
-    .set({ status: "running", error: null, updatedAt: new Date() })
-    .where(
-      and(
-        eq(skillVersionAnalysis.skillVersionId, skillVersionId),
-        eq(skillVersionAnalysis.requestId, requestId),
-        inArray(skillVersionAnalysis.status, ["pending", "running"]),
-      ),
-    )
-    .returning();
-  return rows[0] ?? null;
+  return repository.claim(skillVersionId, requestId);
 }
 
 export async function failSkillAnalysis(
@@ -81,78 +118,19 @@ export async function failSkillAnalysis(
   error: string,
   retry: boolean,
 ) {
-  await db
-    .update(skillVersionAnalysis)
-    .set({
-      status: retry ? "pending" : "failed",
-      error: error.slice(0, 500),
-      updatedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(skillVersionAnalysis.skillVersionId, skillVersionId),
-        eq(skillVersionAnalysis.requestId, requestId),
-        inArray(skillVersionAnalysis.status, ["pending", "running"]),
-      ),
-    );
+  await repository.fail(skillVersionId, requestId, error, retry);
 }
 
 /** Only complete, versioned results are reusable. Never borrow legacy OpenCC rows. */
 export async function findCachedSkillAnalysis(
   resultKey: string,
   skillVersionId: string,
-) {
-  // One statement = one MVCC snapshot; classification and locale content
-  // cannot come from different generations during concurrent regeneration.
-  const rows = await db
-    .select({ analysis: skillVersionAnalysis, overview: skillVersionOverviews })
-    .from(skillVersionAnalysis)
-    .innerJoin(
-      skillVersionOverviews,
-      eq(
-        skillVersionOverviews.skillVersionId,
-        skillVersionAnalysis.skillVersionId,
-      ),
-    )
-    .where(
-      and(
-        eq(skillVersionAnalysis.resultKey, resultKey),
-        ne(skillVersionAnalysis.skillVersionId, skillVersionId),
-        inArray(skillVersionAnalysis.status, ["ready", "needs-review"]),
-        eq(skillVersionAnalysis.promptVersion, SKILL_ANALYSIS_PROMPT_VERSION),
-        eq(
-          skillVersionAnalysis.taxonomyVersion,
-          SKILL_ANALYSIS_TAXONOMY_VERSION,
-        ),
-      ),
-    )
-    .orderBy(skillVersionAnalysis.skillVersionId)
-    .limit(30);
-  const groups = new Map<string, typeof rows>();
-  for (const row of rows)
-    groups.set(row.analysis.skillVersionId, [
-      ...(groups.get(row.analysis.skillVersionId) ?? []),
-      row,
-    ]);
-  for (const group of groups.values()) {
-    const source = group[0]!.analysis;
-    if (
-      !source.classification ||
-      !locales.every((locale) =>
-        group.some((row) => row.overview.locale === locale),
-      ) ||
-      group.some((row) => row.overview.hidden)
-    )
-      continue;
-    return {
-      classification: source.classification,
-      model: group[0]!.overview.model,
-      overviews: Object.fromEntries(
-        group.map((row) => [row.overview.locale, row.overview.overview]),
-      ) as Record<SkillOverviewLocale, SkillOverviewJson>,
-    };
-  }
-  return null;
+): Promise<{
+  classification: SkillClassification;
+  model: string;
+  overviews: Record<SkillOverviewLocale, SkillOverviewJson>;
+} | null> {
+  return repository.findCached(resultKey, skillVersionId);
 }
 
 /** Caller holds definition lock. Human choices always win over automatic jobs. */
@@ -258,124 +236,26 @@ export async function publishSkillAnalysis(input: {
   classification: SkillClassification;
   overviews: Record<SkillOverviewLocale, SkillOverviewJson>;
 }) {
-  return db.transaction(async (tx) => {
-    // Lock order is definition -> version -> analysis throughout publication.
-    const [definition] = await tx
-      .select()
-      .from(skillDefinitions)
-      .where(eq(skillDefinitions.id, input.skillId))
-      .for("update");
-    const [version] = await tx
-      .select()
-      .from(skillVersions)
-      .where(eq(skillVersions.id, input.skillVersionId))
-      .for("update");
-    const [state] = await tx
-      .select()
-      .from(skillVersionAnalysis)
-      .where(eq(skillVersionAnalysis.skillVersionId, input.skillVersionId))
-      .for("update");
-    if (
-      !state ||
-      state.requestId !== input.requestId ||
-      state.status !== "running"
-    )
-      return false;
-    if (
-      !definition ||
-      definition.visibility !== "public" ||
-      definition.status !== "active" ||
-      definition.sourceType !== "registry_github" ||
-      !version?.isCurrent ||
-      version.status !== "published" ||
-      version.skillId !== input.skillId
-    ) {
-      await tx
-        .update(skillVersionAnalysis)
-        .set({
-          status: "failed",
-          error: "Version is no longer eligible",
-          updatedAt: new Date(),
-        })
-        .where(eq(skillVersionAnalysis.skillVersionId, input.skillVersionId));
-      return false;
-    }
-    if (!locales.every((locale) => input.overviews[locale]))
-      throw new Error("Incomplete overview locales");
-    const hiddenRows = await tx
-      .select({ hidden: skillVersionOverviews.hidden })
-      .from(skillVersionOverviews)
-      .where(eq(skillVersionOverviews.skillVersionId, input.skillVersionId));
-    const hidden = hiddenRows.some((row) => row.hidden);
-    await tx
-      .insert(skillVersionOverviews)
-      .values(
-        locales.map((locale) => ({
-          skillVersionId: input.skillVersionId,
-          locale,
-          bundleSha256: input.bundleSha256,
-          overview: input.overviews[locale],
-          model: input.model,
-          hidden,
-          generatedAt: new Date(),
-        })),
-      )
-      .onConflictDoUpdate({
-        target: [
-          skillVersionOverviews.skillVersionId,
-          skillVersionOverviews.locale,
-        ],
-        set: {
-          bundleSha256: sql`excluded.bundle_sha256`,
-          overview: sql`excluded.overview`,
-          model: sql`excluded.model`,
-          generatedAt: sql`excluded.generated_at`,
-        },
-      });
-    await tx
-      .update(skillVersionAnalysis)
-      .set({
-        status: input.classification.status,
-        resultKey: input.resultKey,
-        modelConfigurationKey: input.modelConfigurationKey ?? null,
-        classification: input.classification,
-        promptVersion: SKILL_ANALYSIS_PROMPT_VERSION,
-        taxonomyVersion: SKILL_ANALYSIS_TAXONOMY_VERSION,
-        force: false,
-        error: null,
-        updatedAt: new Date(),
-      })
-      .where(eq(skillVersionAnalysis.skillVersionId, input.skillVersionId));
-    await applyAnalysisCategories(
-      tx,
-      input.skillId,
-      input.skillVersionId,
-      input.classification,
-    );
-    return true;
+  return repository.publish({
+    parentId: input.skillId,
+    versionId: input.skillVersionId,
+    requestId: input.requestId,
+    resultKey: input.resultKey,
+    fingerprint: input.bundleSha256,
+    model: input.model,
+    modelConfigurationKey: input.modelConfigurationKey,
+    classification: input.classification,
+    overviews: input.overviews,
   });
 }
 
 /** Recover the DB-reserved requests if a process died before enqueueing Redis. */
 export async function findInterruptedSkillAnalyses() {
-  return db
-    .select({
-      skillVersionId: skillVersionAnalysis.skillVersionId,
-      requestId: skillVersionAnalysis.requestId,
-      force: skillVersionAnalysis.force,
-      skillId: skillVersions.skillId,
-    })
-    .from(skillVersionAnalysis)
-    .innerJoin(
-      skillVersions,
-      eq(skillVersions.id, skillVersionAnalysis.skillVersionId),
-    )
-    .where(
-      and(
-        inArray(skillVersionAnalysis.status, ["pending", "running"]),
-        sql`${skillVersionAnalysis.updatedAt} < now() - interval '5 minutes'`,
-      ),
-    )
-    .orderBy(skillVersionAnalysis.updatedAt)
-    .limit(20);
+  const rows = await repository.findInterrupted();
+  return rows.map((row) => ({
+    skillVersionId: row.versionId,
+    requestId: row.requestId,
+    force: row.force,
+    skillId: row.parentId,
+  }));
 }
