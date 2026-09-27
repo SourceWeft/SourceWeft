@@ -10,6 +10,7 @@ import {
 import { resolveAnalyticsContext, type AnalyticsContext } from "./context";
 import { createGtmDestination } from "./destinations/gtm";
 import type { AnalyticsDestination, DestinationId } from "./destinations/types";
+import { createUmamiDestination } from "./destinations/umami";
 
 type Params = Record<string, AnalyticsValue>;
 type PendingEvent = { name: string; params: Params };
@@ -130,6 +131,9 @@ export function buildDestinations(
   const destinations: AnalyticsDestination[] = [];
   if (config.gtmId) {
     destinations.push(createGtmDestination());
+  }
+  if (config.umami) {
+    destinations.push(createUmamiDestination());
   }
   return destinations;
 }

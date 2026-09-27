@@ -1,8 +1,9 @@
 "use client";
 
 import { GoogleTagManager } from "@next/third-parties/google";
+import Script from "next/script";
 
-import type { AnalyticsRuntimeConfig } from "./client";
+import { markDestinationReady, type AnalyticsRuntimeConfig } from "./client";
 
 /** Loads the script of every analytics tool enabled in the runtime config. */
 export function AnalyticsScripts({
@@ -10,5 +11,18 @@ export function AnalyticsScripts({
 }: {
   config: AnalyticsRuntimeConfig;
 }) {
-  return config.gtmId ? <GoogleTagManager gtmId={config.gtmId} /> : null;
+  return (
+    <>
+      {config.gtmId ? <GoogleTagManager gtmId={config.gtmId} /> : null}
+      {config.umami ? (
+        <Script
+          id="umami"
+          src={config.umami.scriptUrl}
+          data-website-id={config.umami.websiteId}
+          strategy="afterInteractive"
+          onReady={() => markDestinationReady("umami")}
+        />
+      ) : null}
+    </>
+  );
 }

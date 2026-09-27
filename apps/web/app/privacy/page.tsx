@@ -60,7 +60,7 @@ const sections = [
       "Provide core product features, including source ingestion, retrieval, AI chat, citations, collaboration, billing, and account management.",
       "Process authentication, organization access, customer support requests, payments, and service communications.",
       "Monitor reliability, prevent abuse, debug errors, measure product performance, and protect the security of users and the service.",
-      "Improve SourceWeft through aggregated analytics, product research, and user feedback.",
+      "Improve SourceWeft through aggregated analytics, product research, and user feedback. We use Google Analytics (via Google Tag Manager, which uses cookies) and Umami (cookieless) to measure product usage; analytics events contain no message content, file names, or email addresses.",
       "Comply with legal obligations and enforce our Terms of Service.",
     ],
   },

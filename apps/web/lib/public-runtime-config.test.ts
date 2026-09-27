@@ -4,6 +4,7 @@ import {
   serverPublicRuntimeConfig,
   publicRuntimeConfig,
   publicWebBaseUrl,
+  resolveUmamiConfig,
 } from "./public-runtime-config";
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -22,6 +23,28 @@ test("GTM id is read at runtime into analytics.gtmId", () => {
   expect(serverPublicRuntimeConfig().analytics.gtmId).toBe("GTM-ABC");
   vi.stubEnv("PUBLIC_GTM_ID", "");
   expect(serverPublicRuntimeConfig().analytics.gtmId).toBeUndefined();
+});
+test("umami enabled only when both vars are set", () => {
+  vi.stubEnv("PUBLIC_UMAMI_SCRIPT_URL", "https://umami.example/script.js");
+  vi.stubEnv("PUBLIC_UMAMI_WEBSITE_ID", "site-1");
+  expect(serverPublicRuntimeConfig().analytics.umami).toEqual({
+    scriptUrl: "https://umami.example/script.js",
+    websiteId: "site-1",
+  });
+});
+test("only one umami var logs an error and disables it", () => {
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  expect(resolveUmamiConfig("https://umami.example/script.js", "")).toBeUndefined();
+  expect(resolveUmamiConfig("", "site-1")).toBeUndefined();
+  // Reported once per process: the config is resolved on every request.
+  expect(error).toHaveBeenCalledTimes(1);
+  error.mockRestore();
+});
+test("neither umami var disables it silently", () => {
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  expect(resolveUmamiConfig("", "")).toBeUndefined();
+  expect(error).not.toHaveBeenCalled();
+  error.mockRestore();
 });
 test("runtime injection controls auth and all request clients without rebuilding", async () => {
   vi.stubGlobal("window", {
