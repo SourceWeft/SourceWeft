@@ -3,6 +3,7 @@ import {
   boolean,
   check,
   index,
+  integer,
   jsonb,
   pgTable,
   primaryKey,
@@ -25,6 +26,8 @@ type McpServerStatus =
 type McpServerVisibility = "public" | "private" | "internal";
 type McpServerVersionOrigin = "upstream" | "submitted";
 type McpServerCategoriesSetBy = "auto" | "ai" | "admin";
+type McpServerReadmeStatus =
+  "pending" | "ok" | "not_found" | "too_large" | "unsupported_host" | "error";
 
 export const mcpServers = pgTable(
   "mcp_servers",
@@ -114,7 +117,35 @@ export const mcpServerVersions = pgTable(
       .$type<Record<string, unknown>>()
       .notNull()
       .default(sql`'{}'::jsonb`),
+    // The author's README for this version, as GitHub's README API (or the
+    // submission's own repository read) returned it. Written by the README
+    // fetch job and the submission path only: a federation re-sync never
+    // touches the `readme_*` columns or `readme_md`.
     readmeMd: text("readme_md"),
+    // Where the README came from: its repository-relative path, the commit it
+    // was pinned to, and the sha256 of its bytes.
+    readmePath: text("readme_path"),
+    readmeRef: text("readme_ref"),
+    readmeSha256: text("readme_sha256"),
+    // What the version's README is. A failed refresh does not change it; the
+    // attempts and error below say the refresh is failing.
+    readmeStatus: text("readme_status")
+      .$type<McpServerReadmeStatus>()
+      .notNull()
+      .default("pending"),
+    readmeEtag: text("readme_etag"),
+    readmeFetchedAt: timestamp("readme_fetched_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    // When the fetch job should read the README again. A new version is due at
+    // once; null means the job gave up until a market admin asks again.
+    readmeNextFetchAt: timestamp("readme_next_fetch_at", {
+      withTimezone: true,
+      mode: "date",
+    }).defaultNow(),
+    readmeAttempts: integer("readme_attempts").notNull().default(0),
+    readmeError: text("readme_error"),
     provenanceJson: jsonb("provenance_json")
       .$type<Record<string, unknown>>()
       .notNull()
@@ -136,6 +167,8 @@ export const mcpServerVersions = pgTable(
       table.serverId,
       table.status,
     ),
+    // The README fetch scheduler's scan for versions that are due.
+    index("mcp_server_versions_readme_due_idx").on(table.readmeNextFetchAt),
     check(
       "mcp_server_versions_status_check",
       sql`${table.status} in ('draft', 'reviewing', 'published', 'unlisted', 'archived')`,
@@ -143,6 +176,10 @@ export const mcpServerVersions = pgTable(
     check(
       "mcp_server_versions_origin_check",
       sql`${table.origin} in ('upstream', 'submitted')`,
+    ),
+    check(
+      "mcp_server_versions_readme_status_check",
+      sql`${table.readmeStatus} in ('pending', 'ok', 'not_found', 'too_large', 'unsupported_host', 'error')`,
     ),
   ],
 );
