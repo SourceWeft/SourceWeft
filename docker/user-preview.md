@@ -14,7 +14,7 @@ The user settings API returns normalized preview flags but only accepts appearan
 ## Deployment order
 
 1. Deploy the preview-aware API, workers and scheduler. All processes that save user settings must use the atomic partial-update implementation before any preview grant is written. Older versions replace the complete JSON document and can erase grants when a user changes appearance.
-2. Configure Gmail using [Gmail connector setup](./gmail-connector.md). Deployment activation and complete OAuth configuration remain necessary; a user flag does not enable an unconfigured or disabled adapter.
+2. Configure `GMAIL_CONNECTOR_ENABLED`, `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, and the OAuth redirect URI on the backend. A user flag does not enable an unconfigured or disabled adapter.
 3. Use the operator command to grant preview to a test user. Use a dedicated mailbox with test messages and an isolated workspace for review recordings.
 4. Verify both an allowed account and an account without preview. Direct API calls and existing agent sessions must obey the same policy as the interface.
 
@@ -45,4 +45,4 @@ Preview is feature eligibility, not an additional confidentiality boundary for w
 
 ## Google review
 
-Application preview grants and Google OAuth Test users are independent. Follow [Gmail connector setup](./gmail-connector.md) for Google configuration and verification requirements. This feature does not publish the OAuth application, submit review materials, or remove restricted-scope security-assessment requirements.
+Application preview grants and Google OAuth Test users are independent. This feature does not publish the OAuth application, submit review materials, or remove restricted-scope security-assessment requirements.
