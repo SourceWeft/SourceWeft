@@ -27,10 +27,6 @@ export type SkillOverviewGenerateJobPayload = {
   skillId: string;
   reason: "scheduled" | "regenerate";
   requestId?: string;
-  // The billing team/workspace at the time it was queued, for the audit
-  // trail; the processor reads the setting afresh.
-  teamId?: string;
-  workspaceId?: string;
 };
 
 /**

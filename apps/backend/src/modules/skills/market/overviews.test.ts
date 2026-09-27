@@ -14,13 +14,15 @@ vi.mock("./analysis-repository", () => ({
 }));
 vi.mock("./overview-repository", () => ({
   findSkillOverviewCandidates: vi.fn(),
-  readSkillOverviewBilling: vi.fn(),
+}));
+vi.mock("../../../shared/model-gateway/system-client", () => ({
+  getSystemModelReadiness: vi.fn(),
 }));
 
 import { SKILL_OVERVIEW_BATCH_SIZE, enqueueSkillOverviews } from "./overviews";
 import { skillOverviewJobId } from "./overview-queue";
 
-const billing = { teamId: "team_1", workspaceId: "ws_1", userId: "user_1" };
+const ready = { ready: true, reason: null };
 
 function candidates(count: number) {
   return Array.from({ length: count }, (_, i) => ({
@@ -30,9 +32,12 @@ function candidates(count: number) {
   }));
 }
 
-test("nothing happens while no billing team is set", async () => {
+test("nothing happens while the system model is not ready", async () => {
   const deps = {
-    readBilling: vi.fn(async () => null),
+    readModelReadiness: vi.fn(async () => ({
+      ready: false,
+      reason: "SYSTEM_MODEL_ENABLED is not true",
+    })),
     findCandidates: vi.fn(async () => candidates(3)),
     jobExists: vi.fn(async () => false),
     enqueue: vi.fn(async () => undefined),
@@ -49,7 +54,7 @@ test("nothing happens while no billing team is set", async () => {
 test("queues one job per version up to the batch size; cache reuse belongs to the worker", async () => {
   const enqueued: Array<Record<string, unknown>> = [];
   const deps = {
-    readBilling: vi.fn(async () => billing),
+    readModelReadiness: vi.fn(async () => ready),
     findCandidates: vi.fn(async () =>
       candidates(SKILL_OVERVIEW_BATCH_SIZE + 10),
     ),
@@ -74,8 +79,6 @@ test("queues one job per version up to the batch size; cache reuse belongs to th
     skillVersionId: "ver_2",
     skillId: "skill_2",
     reason: "scheduled",
-    teamId: "team_1",
-    workspaceId: "ws_1",
   });
   // Deterministic, so the same version queued twice is one job.
   assert.equal(skillOverviewJobId("ver_2"), "skill-overview-generate_ver_2");

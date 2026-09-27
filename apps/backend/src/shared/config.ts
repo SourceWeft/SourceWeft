@@ -686,6 +686,18 @@ export const config = {
     6 * 60 * 60 * 1000,
   ),
   modelGatewayEncryptionSecret: requireEnv("MODEL_GATEWAY_ENCRYPTION_SECRET"),
+  // The platform's own model calls (market overviews, MCP classification),
+  // which belong to no tenant. They borrow the non-secret definition of the
+  // global Provider named here and always use this dedicated key — never that
+  // Provider's global key or its global activation. The switch is strict: an
+  // invalid value fails configuration loading. See
+  // shared/model-gateway/system-client.ts.
+  systemModel: {
+    enabled: parseStrictBooleanEnv("SYSTEM_MODEL_ENABLED", false),
+    provider: process.env.SYSTEM_MODEL_PROVIDER?.trim() || "",
+    apiKey: process.env.SYSTEM_MODEL_API_KEY?.trim() || "",
+    model: process.env.SYSTEM_MODEL_NAME?.trim() || "",
+  },
   openrouterModelsApiUrl:
     process.env.OPENROUTER_MODELS_API_URL ||
     "https://openrouter.ai/api/v1/models",

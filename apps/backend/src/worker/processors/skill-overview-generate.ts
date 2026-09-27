@@ -3,9 +3,7 @@ import {
   failSkillAnalysis,
   requestSkillAnalysis,
 } from "../../modules/skills/market/analysis-repository";
-import { resolveModelGatewayProfile } from "../../shared/model-gateway/index";
 import type { Job } from "bullmq";
-import { billingRuntime as billingService } from "../../billing-host/bindings";
 import { logger } from "../../shared/logger";
 import {
   createSkillOverviewModelCall,
@@ -37,23 +35,15 @@ export async function processSkillOverviewGenerateJob(
   }
   const attempt = job.attemptsMade + 1;
   try {
-    const profile = await resolveModelGatewayProfile({
-      kind: "chat",
-      defaultRequired: true,
-    });
     const result = await generateSkillOverview({
       requestId: payload.requestId,
       force: payload.reason === "regenerate",
-      modelConfigurationKey: profile
-        ? await resolveSkillAnalysisModelKey(profile)
-        : undefined,
+      modelConfigurationKey:
+        (await resolveSkillAnalysisModelKey()) ?? undefined,
       skillVersionId: payload.skillVersionId,
-      // One billing scope per try, so a retry is charged as the new call it is
-      // and a stalled redelivery of the same try is not charged twice.
+      // One scope per try, so each try's call is told apart in the logs.
       scopeId: `skill-overview:${String(job.id)}:${attempt}`,
-      // The job payload cannot carry a port, so the processor supplies the
-      // same singleton every worker model call is billed through.
-      callModel: createSkillOverviewModelCall(billingService, profile),
+      callModel: createSkillOverviewModelCall(),
     });
     if (result.status === "skipped") {
       if (payload.requestId && result.reason !== "already-generated")

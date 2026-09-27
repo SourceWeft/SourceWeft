@@ -65,9 +65,6 @@ importers:
 
   apps/backend:
     dependencies:
-      '@ai-sdk/openai-compatible':
-        specifier: ^2.0.67
-        version: 2.0.67(zod@4.4.3)
       '@anycrawl/js-sdk':
         specifier: ^0.0.5
         version: 0.0.5
@@ -212,9 +209,6 @@ importers:
       '@sourceweft/skill-format':
         specifier: workspace:*
         version: link:../../packages/skill-format
-      ai:
-        specifier: ^6.0.253
-        version: 6.0.253(zod@4.4.3)
       better-auth:
         specifier: 1.7.2
         version: 1.7.2(@opentelemetry/api@1.9.1)(@prisma/client@5.22.0)(better-sqlite3@12.8.0)(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@prisma/client@5.22.0)(@types/pg@8.21.0)(better-sqlite3@12.8.0)(kysely@0.29.5)(pg@8.23.0))(next@16.3.3(@opentelemetry/api@1.9.1)(@playwright/test@1.59.1)(@types/node@22.20.1)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(pg@8.23.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(vitest@4.1.11)
@@ -1831,12 +1825,6 @@ packages:
 
   '@ai-sdk/gateway@3.0.172':
     resolution: {integrity: sha512-FSH+0q6wKNq6/WjWy10m3gbeW8MR6D7Qt380evNQinpfG88mOT2sP3x1U82tBsLlKe9O306LPfgQ3NDXy7HNbA==}
-    engines: {node: '>=18'}
-    peerDependencies:
-      zod: ^3.25.76 || ^4.1.8
-
-  '@ai-sdk/openai-compatible@2.0.67':
-    resolution: {integrity: sha512-glcEJC2mBXJKj7joFI0fRhcbdDYKTBgXMPcT6Vcnlym67tTzuNG9pFx3zblxVv8TdOxhojJja5zGG19yeGJxuA==}
     engines: {node: '>=18'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -10846,12 +10834,6 @@ snapshots:
       '@ai-sdk/provider': 3.0.15
       '@ai-sdk/provider-utils': 4.0.45(zod@4.4.3)
       '@vercel/oidc': 3.2.0
-      zod: 4.4.3
-
-  '@ai-sdk/openai-compatible@2.0.67(zod@4.4.3)':
-    dependencies:
-      '@ai-sdk/provider': 3.0.15
-      '@ai-sdk/provider-utils': 4.0.45(zod@4.4.3)
       zod: 4.4.3
 
   '@ai-sdk/provider-utils@4.0.45(zod@4.4.3)':

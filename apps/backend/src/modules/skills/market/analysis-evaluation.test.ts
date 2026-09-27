@@ -38,27 +38,30 @@ const results = (count = 100, correct = count): EvaluationResult[] =>
   }));
 describe("analysis evaluation quality gate", () => {
   it("uses a stable non-secret model configuration identity", () => {
-    const profile = {
-      id: "p",
-      gatewayConfigId: "g",
-      profileAlias: "chat",
-      modelAlias: "model",
-      updatedAt: "v1",
-      configJson: { apiKey: "secret-one" },
+    const identity = {
+      provider: "openrouter",
+      kind: "openrouter",
+      baseUrl: "https://openrouter.ai/api/v1",
+      apiVersion: null,
+      model: "deepseek/deepseek-v4.1-flash",
     };
-    const key = skillAnalysisModelConfigurationKey(profile);
+    const key = skillAnalysisModelConfigurationKey(identity);
+    // Anything outside the allowlist, such as a credential, never counts.
     expect(
       skillAnalysisModelConfigurationKey({
-        ...profile,
-        configJson: { apiKey: "secret-two" },
-      } as typeof profile),
+        ...identity,
+        apiKey: "secret-two",
+      } as typeof identity),
     ).toBe(key);
     expect(
-      skillAnalysisModelConfigurationKey({ ...profile, modelAlias: "other" }),
+      skillAnalysisModelConfigurationKey({ ...identity, model: "other" }),
     ).not.toBe(key);
     expect(
-      skillAnalysisModelConfigurationKey({ ...profile, updatedAt: "v2" }),
-    ).toBe(key);
+      skillAnalysisModelConfigurationKey({ ...identity, provider: "site" }),
+    ).not.toBe(key);
+    expect(
+      skillAnalysisModelConfigurationKey({ ...identity, apiVersion: "2" }),
+    ).not.toBe(key);
   });
   it("requires 100 human-reviewed cases and 90% accuracy", () => {
     expect(summarizeEvaluation(dataset(), results(100, 90)).passed).toBe(true);

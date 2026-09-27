@@ -1,13 +1,12 @@
 import type {
   GetSkillOverviewAdminResponse,
-  GetSkillOverviewBillingResponse,
-  PutSkillOverviewBillingRequest,
   RegenerateSkillOverviewResponse,
   SetSkillOverviewVisibilityResponse,
   SkillMarketAdminMeResponse,
   SkillAnalysisPreviewResponse,
   SkillAnalysisBatchResponse,
   SkillOverviewStatusResponse,
+  SystemModelProblem,
 } from "@sourceweft/contracts";
 import type {
   GetMarketSkillResponse,
@@ -29,11 +28,11 @@ const ADMIN_BASE = "/v1/skills/registry/admin";
 
 export type {
   GetSkillOverviewAdminResponse,
-  GetSkillOverviewBillingResponse,
   MarketSkillAiOverview,
   MarketSkillLocale,
   SkillAnalysisPreviewResponse,
   SkillOverviewStatusResponse,
+  SystemModelProblem,
 };
 
 const LOCALES: readonly MarketSkillLocale[] = ["en", "zh-CN", "zh-TW"];
@@ -103,20 +102,7 @@ export function setSkillOverviewHidden(skillId: string, hidden: boolean) {
   );
 }
 
-export function getSkillOverviewBilling() {
-  return http.get<GetSkillOverviewBillingResponse>(
-    `${ADMIN_BASE}/settings/overview-billing`,
-  );
-}
-
-/** `userId` omitted bills the admin making the change. */
-export function setSkillOverviewBilling(input: PutSkillOverviewBillingRequest) {
-  return http.put<GetSkillOverviewBillingResponse>(
-    `${ADMIN_BASE}/settings/overview-billing`,
-    input,
-  );
-}
-
+/** Coverage, and whether the system model can write overviews and why not. */
 export function getSkillOverviewStatus() {
   return http.get<SkillOverviewStatusResponse>(
     `${ADMIN_BASE}/overviews/status`,

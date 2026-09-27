@@ -2,10 +2,10 @@ import { createHash } from "node:crypto";
 import type { SkillOverviewJson, SkillOverviewLocale } from "@sourceweft/db";
 import { logger } from "../../../shared/logger";
 import {
-  resolveModelGatewayProfile,
-  withBilledModelGateway,
-} from "../../../shared/model-gateway/index";
-import type { ContentBillingPort } from "../../content/billing-port";
+  getSystemModelReadiness,
+  withSystemModel,
+  type SystemModelPurpose,
+} from "../../../shared/model-gateway/system-client";
 import { marketSkillName } from "./read-repository";
 import {
   claimSkillAnalysis,
@@ -20,102 +20,64 @@ import {
   parseSkillOverviewOutput,
   type SkillOverviewPrompt,
 } from "./overview-prompt";
-import {
-  findSkillOverviewSubject,
-  readSkillOverviewBilling,
-  type SkillOverviewBillingTarget,
-} from "./overview-repository";
+import { findSkillOverviewSubject } from "./overview-repository";
 import { skillCategoryDefinitions } from "./taxonomy";
 
 /**
  * Writing one version's AI overview (skill-marketplace-plan §17.4): read
- * SKILL.md and the file list, ask the default chat model for three independently written locale
- * overviews plus one evidence-backed classification, and publish atomically. Billed to the market's configured team, workspace and member.
+ * SKILL.md and the file list, ask the system model for three independently
+ * written locale overviews plus one evidence-backed classification, and
+ * publish atomically. Platform work: billed to no team (see
+ * shared/model-gateway/system-client.ts).
  */
 
 // The answer is two short overviews; nothing hidden is spent first, since
 // thinking is off.
 export const SKILL_OVERVIEW_MAX_OUTPUT_TOKENS = 4_500;
-const SKILL_OVERVIEW_TIMEOUT_MS = 120_000;
 
 export type SkillOverviewModelCall = (input: {
   prompt: SkillOverviewPrompt;
-  billing: SkillOverviewBillingTarget;
   skillVersionId: string;
-  // Idempotency root for the billing scope: one per job try.
+  // The unit of work the call belongs to: one per job try.
   scopeId: string;
 }) => Promise<{ output: unknown; model: string }>;
 
 /**
- * The model call through the billed gateway: no tools, a JSON schema to answer
+ * The model call through the system model: no tools, a JSON schema to answer
  * in, thinking pinned off (DeepSeek thinks by default, and a forced
  * structured-output tool choice is refused while it does), output capped.
+ * The evaluation asks the same question under its own purpose.
  */
 export function createSkillOverviewModelCall(
-  billingPort: ContentBillingPort,
-  resolvedProfile?: Awaited<ReturnType<typeof resolveModelGatewayProfile>>,
+  purpose: Extract<
+    SystemModelPurpose,
+    "skill_market.overview" | "skill_market.evaluation"
+  > = "skill_market.overview",
 ): SkillOverviewModelCall {
-  return async ({ prompt, billing, skillVersionId, scopeId }) => {
-    const profile =
-      resolvedProfile ??
-      (await resolveModelGatewayProfile({
-        kind: "chat",
-        defaultRequired: true,
-      }));
-    if (!profile) {
-      throw new Error("Default chat model gateway profile is not configured");
-    }
-    const result = await withBilledModelGateway(
-      {
-        billing: billingPort,
-        gatewayConfigId: profile.gatewayConfigId,
-        context: {
-          teamId: billing.teamId,
-          workspaceId: billing.workspaceId,
-          actorUserId: billing.userId,
-          feature: "skill_market",
-          intent: { mode: "billed" },
-          scopeKind: "worker-job",
-          scopeId,
-        },
-      },
-      (gateway) =>
-        gateway.chat.complete(
-          {
-            model: profile.modelAlias,
-            profileAlias: profile.profileAlias,
-            executionMode: "GLOBAL",
-            messages: [
-              { role: "system", content: prompt.system },
-              { role: "user", content: prompt.user },
-            ],
-            structuredOutput: {
-              name: SKILL_OVERVIEW_OUTPUT_NAME,
-              description:
-                "A catalog overview of the skill in English, Simplified Chinese and Taiwan Traditional Chinese, plus one classification.",
-              schema: SKILL_OVERVIEW_OUTPUT_JSON_SCHEMA,
-            },
-            thinking: { mode: "off", enabled: false, includeReasoning: false },
-            maxTokens: SKILL_OVERVIEW_MAX_OUTPUT_TOKENS,
-            temperature: 0.2,
+  return async ({ prompt, skillVersionId, scopeId }) => {
+    const result = await withSystemModel(
+      { purpose, subjectRef: `skill-version:${skillVersionId}`, scopeId },
+      (chat) =>
+        chat.complete({
+          messages: [
+            { role: "system", content: prompt.system },
+            { role: "user", content: prompt.user },
+          ],
+          structuredOutput: {
+            name: SKILL_OVERVIEW_OUTPUT_NAME,
+            description:
+              "A catalog overview of the skill in English, Simplified Chinese and Taiwan Traditional Chinese, plus one classification.",
+            schema: SKILL_OVERVIEW_OUTPUT_JSON_SCHEMA,
           },
-          {
-            traceId: scopeId,
-            timeoutMs: SKILL_OVERVIEW_TIMEOUT_MS,
-            operation: "skill_market.overview",
-            modelKind: "chat",
-            gatewayConfigId: profile.gatewayConfigId,
-            profileAlias: profile.profileAlias,
-            modelAlias: profile.modelAlias,
-            referenceId: `skill-version:${skillVersionId}:overview`,
-            billingMetadata: { skillVersionId },
-          },
-        ),
+          thinking: { mode: "off", enabled: false, includeReasoning: false },
+          maxTokens: SKILL_OVERVIEW_MAX_OUTPUT_TOKENS,
+          temperature: 0.2,
+        }),
     );
     const output = result.structuredOutput ?? textOf(result.raw?.content);
     return {
       output,
-      model: result.providerModel ?? result.model ?? profile.modelAlias,
+      model: result.providerModel ?? result.model,
     };
   };
 }
@@ -146,7 +108,7 @@ export type GenerateSkillOverviewResult =
         | "not-eligible"
         | "already-generated"
         | "no-skill-md"
-        | "billing-unset";
+        | "system-model-not-ready";
     };
 
 /**
@@ -159,8 +121,8 @@ export async function generateSkillOverview(input: {
   skillVersionId: string;
   scopeId: string;
   callModel: SkillOverviewModelCall;
-  // Who pays; the market setting unless given.
-  readBilling?: () => Promise<SkillOverviewBillingTarget | null>;
+  // Whether the system model can take the call; its readiness unless given.
+  modelReady?: () => Promise<boolean>;
   requestId?: string;
   force?: boolean;
   modelConfigurationKey?: string;
@@ -180,10 +142,11 @@ export async function generateSkillOverview(input: {
   if (!subject.skillMd?.trim()) {
     return { status: "skipped", reason: "no-skill-md" };
   }
-  const billing = input.readBilling
-    ? await input.readBilling()
-    : (await readSkillOverviewBilling()).billing;
-  if (!billing) return { status: "skipped", reason: "billing-unset" };
+  const modelReady = input.modelReady
+    ? await input.modelReady()
+    : (await getSystemModelReadiness()).ready;
+  if (!modelReady)
+    return { status: "skipped", reason: "system-model-not-ready" };
 
   const registry = subject.manifest.registry;
   const prompt = buildSkillOverviewPrompt({
@@ -227,7 +190,6 @@ export async function generateSkillOverview(input: {
   }
   const { output, model } = await input.callModel({
     prompt,
-    billing,
     skillVersionId: subject.skillVersionId,
     scopeId: input.scopeId,
   });

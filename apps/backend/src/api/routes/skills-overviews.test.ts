@@ -8,12 +8,10 @@ import { ApiError } from "../response/api-response";
 // covered by the database suite.
 const mocks = vi.hoisted(() => ({
   admin: true,
-  setSkillOverviewBilling: vi.fn(),
   regenerateSkillOverview: vi.fn(),
   setSkillOverviewVisibility: vi.fn(),
   getSkillOverviewStatus: vi.fn(),
   findSkillOverviewAdminState: vi.fn(),
-  readSkillOverviewBilling: vi.fn(),
 }));
 
 vi.mock("./skills-market-admin", () => ({
@@ -34,14 +32,12 @@ vi.mock("../../modules/skills/market/auto-list", () => ({
   acknowledgeSkillVersion: vi.fn(),
 }));
 vi.mock("../../modules/skills/market/overview-admin", () => ({
-  setSkillOverviewBilling: mocks.setSkillOverviewBilling,
   regenerateSkillOverview: mocks.regenerateSkillOverview,
   setSkillOverviewVisibility: mocks.setSkillOverviewVisibility,
   getSkillOverviewStatus: mocks.getSkillOverviewStatus,
 }));
 vi.mock("../../modules/skills/market/overview-repository", () => ({
   findSkillOverviewAdminState: mocks.findSkillOverviewAdminState,
-  readSkillOverviewBilling: mocks.readSkillOverviewBilling,
 }));
 
 vi.mock("../../modules/skills/market/analysis-admin", () => ({
@@ -59,24 +55,16 @@ const json = (method: string, body: unknown) => ({
   body: JSON.stringify(body),
 });
 const admin = "/v1/skills/registry/admin";
-const billing = { teamId: "team_1", workspaceId: "ws_1", userId: "admin_1" };
 
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.admin = true;
-  mocks.readSkillOverviewBilling.mockResolvedValue({
-    billing,
-    updatedBy: "admin_1",
-    updatedAt: new Date("2026-09-22T00:00:00.000Z"),
-  });
 });
 
 test("every overview admin route refuses someone who is not a market admin", async () => {
   mocks.admin = false;
   const app = createTestApp();
   for (const [path, init] of [
-    [`${admin}/settings/overview-billing`, undefined],
-    [`${admin}/settings/overview-billing`, json("PUT", billing)],
     [`${admin}/overviews/status`, undefined],
     [`${admin}/overviews/preview`, undefined],
     [`${admin}/overviews/batch`, json("POST", { skillVersionIds: ["v1"] })],
@@ -90,55 +78,21 @@ test("every overview admin route refuses someone who is not a market admin", asy
     const response = await app.request(path, init);
     assert.equal(response.status, 403, path);
   }
-  assert.equal(mocks.setSkillOverviewBilling.mock.calls.length, 0);
   assert.equal(mocks.regenerateSkillOverview.mock.calls.length, 0);
 });
 
-test("the billing setting defaults the billed member to the admin", async () => {
-  mocks.setSkillOverviewBilling.mockResolvedValue({ ok: true, billing });
+test("the overview billing setting is gone", async () => {
   const app = createTestApp();
-  const response = await app.request(
-    `${admin}/settings/overview-billing`,
+  for (const init of [
+    undefined,
     json("PUT", { teamId: "team_1", workspaceId: "ws_1" }),
-  );
-  assert.equal(response.status, 200);
-  assert.deepEqual(mocks.setSkillOverviewBilling.mock.calls[0]?.[0], {
-    teamId: "team_1",
-    workspaceId: "ws_1",
-    userId: "admin_1",
-    actorUserId: "admin_1",
-  });
-  const body = (await response.json()) as Record<string, unknown>;
-  assert.deepEqual(body, {
-    billing,
-    updatedBy: "admin_1",
-    updatedAt: "2026-09-22T00:00:00.000Z",
-  });
-});
-
-test("a billing target that does not hold together is a 400", async () => {
-  mocks.setSkillOverviewBilling.mockResolvedValue({
-    ok: false,
-    problem: "workspace_not_in_team",
-  });
-  const app = createTestApp();
-  const response = await app.request(
-    `${admin}/settings/overview-billing`,
-    json("PUT", { teamId: "team_1", workspaceId: "ws_2", userId: "user_9" }),
-  );
-  assert.equal(response.status, 400);
-  const body = (await response.json()) as { code: string };
-  assert.equal(body.code, "SKILL_OVERVIEW_BILLING_INVALID");
-  assert.equal(
-    mocks.setSkillOverviewBilling.mock.calls[0]?.[0].userId,
-    "user_9",
-  );
-
-  const invalid = await app.request(
-    `${admin}/settings/overview-billing`,
-    json("PUT", { teamId: "" }),
-  );
-  assert.equal(invalid.status, 400);
+  ]) {
+    const response = await app.request(
+      `${admin}/settings/overview-billing`,
+      init,
+    );
+    assert.equal(response.status, 404);
+  }
 });
 
 test("one skill's overview comes back with every locale", async () => {
@@ -233,9 +187,18 @@ test("regenerate and visibility pass the acting admin down", async () => {
   );
 });
 
-test("status reports coverage", async () => {
+test("status reports coverage and why the system model is not ready", async () => {
+  const systemModel = {
+    enabled: true,
+    configured: false,
+    ready: false,
+    provider: "openrouter",
+    model: "deepseek/deepseek-v4.1-flash",
+    problems: ["api_key_unset"],
+    reason: "SYSTEM_MODEL_API_KEY is not set",
+  };
   mocks.getSkillOverviewStatus.mockResolvedValue({
-    billingConfigured: true,
+    systemModel,
     eligible: 10,
     withOverview: 7,
     missing: 3,
@@ -244,6 +207,10 @@ test("status reports coverage", async () => {
   const app = createTestApp();
   const response = await app.request(`${admin}/overviews/status`);
   assert.equal(response.status, 200);
-  const body = (await response.json()) as { missing: number };
+  const body = (await response.json()) as {
+    missing: number;
+    systemModel: unknown;
+  };
   assert.equal(body.missing, 3);
+  assert.deepEqual(body.systemModel, systemModel);
 });

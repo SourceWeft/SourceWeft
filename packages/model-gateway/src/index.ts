@@ -27,6 +27,8 @@ export {
   targetHealthKey,
 } from "./target-health";
 
+export { hasConfiguredCredentialHeaders } from "./auth-headers";
+
 export { createLangChainChatModel } from "./bridge/utils";
 export type { LangChainModelExecutionConfig } from "./bridge/utils";
 export { resolveThinkingMode } from "./thinking";

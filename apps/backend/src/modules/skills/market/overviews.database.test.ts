@@ -10,12 +10,11 @@ import {
 
 /**
  * AI overviews against real PostgreSQL: which versions are picked, the copy
- * from identical content, generation with the model mocked, the language
- * fallback on the public reads, and the billing target check.
+ * from identical content, generation with the model mocked, and the language
+ * fallback on the public reads.
  *
  * Scoped to this file's own rows (every query that could reach others takes
- * `skillIds`); the market-wide `overview.billing` setting is never written,
- * since a live stack shares this database and would start generating.
+ * `skillIds`).
  */
 describe.skipIf(!skillDatabaseEnabled)(
   "skill AI overviews (real PostgreSQL)",
@@ -29,9 +28,6 @@ describe.skipIf(!skillDatabaseEnabled)(
     const ownerUserId = `overview-owner-${tag}`;
     const sharedSha = randomUUID().replace(/-/g, "").padEnd(64, "a");
     const skillIds: string[] = [];
-    const workspaceId = `overview-ws-${randomUUID()}`;
-    const teamId = `overview-team-${randomUUID()}`;
-    const memberId = `overview-member-${tag}`;
 
     type Fixture = {
       id: string;
@@ -154,17 +150,6 @@ describe.skipIf(!skillDatabaseEnabled)(
           "zh-TW": overview("繁體摘要"),
         },
       });
-
-      await data.db.insert(data.workspaces).values({
-        id: workspaceId,
-        organizationId: teamId,
-        name: `Overview ${tag}`,
-        slug: `overview-${tag}`,
-      });
-      await data.db.insert(data.workspaceMemberships).values([
-        { workspaceId, userId: memberId, source: "direct" },
-        { workspaceId, userId: `${memberId}-guest`, source: "guest" },
-      ]);
       // Importing the read path loads the model gateway and the market.
     }, 180_000);
 
@@ -176,9 +161,6 @@ describe.skipIf(!skillDatabaseEnabled)(
           .delete(data.skillDefinitions)
           .where(inArray(data.skillDefinitions.id, skillIds));
       }
-      await data.db
-        .delete(data.workspaces)
-        .where(inArray(data.workspaces.id, [workspaceId]));
     });
 
     test("candidates are public GitHub skills' current versions without an overview", async () => {
@@ -195,13 +177,13 @@ describe.skipIf(!skillDatabaseEnabled)(
     });
 
     test("generation stores three independently authored locales; the model is mocked", async () => {
-      const calls: Array<{ userPrompt: string; userId: string }> = [];
+      const calls: Array<{ userPrompt: string; skillVersionId: string }> = [];
       const result = await generate.generateSkillOverview({
         skillVersionId: fresh.versionId,
         scopeId: `test-${tag}`,
-        readBilling: async () => ({ teamId, workspaceId, userId: memberId }),
-        callModel: async ({ prompt, billing }) => {
-          calls.push({ userPrompt: prompt.user, userId: billing.userId });
+        modelReady: async () => true,
+        callModel: async ({ prompt, skillVersionId }) => {
+          calls.push({ userPrompt: prompt.user, skillVersionId });
           return {
             model: "mock-model",
             output: {
@@ -236,7 +218,7 @@ describe.skipIf(!skillDatabaseEnabled)(
       });
       assert.deepEqual(result, { status: "generated", model: "mock-model" });
       assert.equal(calls.length, 1);
-      assert.equal(calls[0]?.userId, memberId);
+      assert.equal(calls[0]?.skillVersionId, fresh.versionId);
       assert.match(calls[0]!.userPrompt, /scripts\/plot\.py \(script\)/);
       assert.match(calls[0]!.userPrompt, /Makes charts\./);
 
@@ -257,7 +239,7 @@ describe.skipIf(!skillDatabaseEnabled)(
       const again = await generate.generateSkillOverview({
         skillVersionId: fresh.versionId,
         scopeId: `test-${tag}-2`,
-        readBilling: async () => ({ teamId, workspaceId, userId: memberId }),
+        modelReady: async () => true,
         callModel: async () => {
           throw new Error("must not be called");
         },
@@ -270,7 +252,7 @@ describe.skipIf(!skillDatabaseEnabled)(
       const notPublic = await generate.generateSkillOverview({
         skillVersionId: restricted.versionId,
         scopeId: `test-${tag}-3`,
-        readBilling: async () => ({ teamId, workspaceId, userId: memberId }),
+        modelReady: async () => true,
         callModel: async () => {
           throw new Error("must not be called");
         },
@@ -447,49 +429,6 @@ describe.skipIf(!skillDatabaseEnabled)(
       assert.deepEqual(
         left.map((c) => c.skillVersionId),
         [twin.versionId],
-      );
-    });
-
-    test("a billing target must hold together", async () => {
-      assert.equal(
-        await repo.checkSkillOverviewBillingTarget({
-          teamId,
-          workspaceId,
-          userId: memberId,
-        }),
-        null,
-      );
-      assert.equal(
-        await repo.checkSkillOverviewBillingTarget({
-          teamId: `${teamId}-other`,
-          workspaceId,
-          userId: memberId,
-        }),
-        "workspace_not_in_team",
-      );
-      assert.equal(
-        await repo.checkSkillOverviewBillingTarget({
-          teamId,
-          workspaceId: `${workspaceId}-missing`,
-          userId: memberId,
-        }),
-        "workspace_not_found",
-      );
-      assert.equal(
-        await repo.checkSkillOverviewBillingTarget({
-          teamId,
-          workspaceId,
-          userId: `${memberId}-guest`,
-        }),
-        "user_not_member",
-      );
-      assert.equal(
-        await repo.checkSkillOverviewBillingTarget({
-          teamId,
-          workspaceId,
-          userId: "nobody",
-        }),
-        "user_not_member",
       );
     });
   },

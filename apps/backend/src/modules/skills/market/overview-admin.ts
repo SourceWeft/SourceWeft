@@ -1,51 +1,16 @@
+import { getSystemModelReadiness } from "../../../shared/model-gateway/system-client";
 import { recordSkillMarketEvent } from "./events";
 import { enqueueSkillOverviewJob } from "./overview-queue";
 import {
-  checkSkillOverviewBillingTarget,
   countSkillOverviewCoverage,
   findSkillOverviewAdminState,
-  readSkillOverviewBilling,
   setSkillOverviewsHidden,
-  writeSkillOverviewBilling,
-  type SkillOverviewBillingProblem,
-  type SkillOverviewBillingTarget,
 } from "./overview-repository";
 
 /**
- * The market admin's hands on AI overviews: who pays for them, and for one
- * skill, regenerate or hide. Every change is audited.
+ * The market admin's hands on AI overviews: whether the system model can
+ * write them, and for one skill, regenerate or hide. Every change is audited.
  */
-
-export async function setSkillOverviewBilling(input: {
-  teamId: string;
-  workspaceId: string;
-  userId: string;
-  actorUserId: string;
-}): Promise<
-  | { ok: true; billing: SkillOverviewBillingTarget }
-  | { ok: false; problem: SkillOverviewBillingProblem }
-> {
-  const billing = {
-    teamId: input.teamId,
-    workspaceId: input.workspaceId,
-    userId: input.userId,
-  };
-  const problem = await checkSkillOverviewBillingTarget(billing);
-  if (problem) return { ok: false, problem };
-  const before = await readSkillOverviewBilling();
-  await writeSkillOverviewBilling({ billing, updatedBy: input.actorUserId });
-  await recordSkillMarketEvent({
-    actorKind: "admin",
-    actorUserId: input.actorUserId,
-    action: "settings.updated",
-    detail: {
-      key: "overview.billing",
-      before: before.billing,
-      after: billing,
-    },
-  });
-  return { ok: true, billing };
-}
 
 /**
  * Keeps the current version's overviews and queues a replacement. Null when
@@ -70,16 +35,12 @@ export async function regenerateSkillOverview(input: {
   const deleted = 0; // Existing output stays live until an atomic replacement succeeds.
   let queued = false;
   if (state.eligible) {
-    const { billing } = await readSkillOverviewBilling();
     // A fresh id: the scheduled one may still be held by a finished or
     // failed job, which would swallow this request.
     await enqueueSkillOverviewJob({
       skillVersionId,
       skillId: input.skillId,
       reason: "regenerate",
-      ...(billing
-        ? { teamId: billing.teamId, workspaceId: billing.workspaceId }
-        : {}),
     });
     queued = true;
   }
@@ -131,12 +92,21 @@ export async function setSkillOverviewVisibility(input: {
 }
 
 export async function getSkillOverviewStatus() {
-  const [coverage, { billing }] = await Promise.all([
+  const [coverage, readiness] = await Promise.all([
     countSkillOverviewCoverage(),
-    readSkillOverviewBilling(),
+    getSystemModelReadiness(),
   ]);
   return {
-    billingConfigured: billing !== null,
+    // Names settings and the Provider/model, never the key.
+    systemModel: {
+      enabled: readiness.enabled,
+      configured: readiness.configured,
+      ready: readiness.ready,
+      provider: readiness.provider,
+      model: readiness.model,
+      problems: readiness.problems,
+      reason: readiness.reason,
+    },
     eligible: coverage.eligible,
     withOverview: coverage.withOverview,
     missing: Math.max(0, coverage.eligible - coverage.withOverview),
