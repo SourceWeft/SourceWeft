@@ -11,13 +11,11 @@ and provider usage/cost observations. This package is not an agent capability.
 - `/postgres`: store accepting a caller-owned Pool and membership query source.
 - `/config`: explicit environment reader and enabled-feature validation.
 - `/integrations/http`: authenticated billing route factory.
-- `/integrations/auth`: runtime or schema-only Creem plugin factory.
 - `/integrations/creem`: webhook synchronization and scheduled-cancel handler.
 - `/integrations/jobs`: subscription/order reconciliation schedule factory.
 - `/ui`: billing, usage, checkout, pricing and sidebar components; requires an
   explicit BillingUiProvider containing host SDK/auth/UI adapters.
 - `/catalog`: concrete pricing presentation, isolated from open contracts.
-- `/auth-client`: shared Auth client integration (currently no provider plugins).
 
 Database structure and historical migrations remain owned by the open DB
 package. This store imports `@sourceweft/db/schema`, not the DB singleton. The
@@ -93,8 +91,8 @@ isolated `sourceweft_billing_test*` database.
 ## Migration and compatibility
 
 Run the edition's Auth migration, shared Drizzle migration, then the existing
-extension OAuth provisioning command. The current commercial Auth adapter registers no payment-provider plugin; shared
-billing migrations are applied independently of the module switch. No historical
+extension OAuth provisioning command. Billing registers no Better Auth plugins;
+shared billing migrations are applied independently of the module switch. No historical
 application migration is rewritten and no billing table is renamed or moved.
 
 Core preserves historical billing tables but does not create accounts or write

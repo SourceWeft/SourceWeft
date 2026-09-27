@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { test, vi } from "vitest";
 import { BillingService } from "../src/server/service";
-import { createBillingAuthPlugins } from "../src/integrations/auth";
 import {
   MemoryBillingStore,
   runtimeConfig,
@@ -90,23 +89,6 @@ test("Waffo timeout recovery keeps the same SDK idempotency key beyond its defau
   } finally {
     vi.useRealTimers();
   }
-});
-
-test("Creem uses common storage and does not expose provider checkout or management bypasses", () => {
-  const plugins = createBillingAuthPlugins({
-    mode: "runtime",
-    config: {
-      ...runtimeConfig,
-      provider: "creem",
-      creem: {
-        ...runtimeConfig.creem,
-        apiKey: "creem_test_fixture",
-        webhookSecret: "fixture",
-      },
-    },
-    sync: async () => {},
-  });
-  assert.deepEqual(plugins, []);
 });
 
 test("manual subscriptions expire locally without payment credentials and retain top-up credits", async () => {
