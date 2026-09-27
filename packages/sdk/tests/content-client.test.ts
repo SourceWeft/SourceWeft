@@ -62,6 +62,22 @@ for (const desktopOnly of [true, false, undefined]) {
   });
 }
 
+test("the workspace MCP list and detail ask for AI text in a locale only when given one", async () => {
+  const { client, paths } = recordingClient();
+
+  await client.listWorkspaceMarketMcp("workspace", { locale: "zh-TW" });
+  await client.getWorkspaceMarketMcp("workspace", "io.github.o/weather", {
+    locale: "zh-CN",
+  });
+  await client.getWorkspaceMarketMcp("workspace", "io.github.o/weather");
+
+  assert.deepEqual(paths, [
+    "/v1/workspaces/workspace/market/mcp?locale=zh-TW",
+    "/v1/workspaces/workspace/market/mcp/io.github.o%2Fweather?locale=zh-CN",
+    "/v1/workspaces/workspace/market/mcp/io.github.o%2Fweather",
+  ]);
+});
+
 test("listSkillsCatalog stays parameterless by default and encodes paging when asked", async () => {
   const { client, paths } = recordingClient();
 
