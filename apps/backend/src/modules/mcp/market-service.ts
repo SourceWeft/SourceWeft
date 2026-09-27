@@ -1,4 +1,7 @@
-import type { ListMarketMcpRequest } from "@sourceweft/market-contracts";
+import type {
+  ListMarketMcpRequest,
+  MarketMcpLocale,
+} from "@sourceweft/market-contracts";
 import { config } from "../../shared/config";
 import { logger } from "../../shared/logger";
 import { listMcpCategories as readMcpCategories } from "../market/read-categories";
@@ -68,11 +71,11 @@ export class MarketService {
     return readCountMcpByCategory(input);
   }
 
-  async getMcp(identifier: string) {
+  async getMcp(identifier: string, options: { locale?: MarketMcpLocale } = {}) {
     if (!this.isEnabled()) {
       throw new McpError(404, "MARKET_DISABLED", "MCP market is not enabled");
     }
-    const record = await findMcp(identifier);
+    const record = await findMcp(identifier, options);
     if (!record) {
       throw new McpError(404, "MCP_ITEM_NOT_FOUND", "MCP item not found");
     }
@@ -80,6 +83,7 @@ export class MarketService {
       item: record.item,
       versions: record.versions,
       readme: record.readme,
+      aiOverview: record.aiOverview,
     };
   }
 

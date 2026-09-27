@@ -4,6 +4,7 @@ import {
   updateWorkspaceMcpInstallRequestSchema,
   upsertWorkspaceMcpCredentialsRequestSchema,
 } from "@sourceweft/contracts";
+import { marketMcpLocaleSchema } from "@sourceweft/market-contracts";
 import { mcpService } from "../../../modules/mcp";
 import {
   completeMcpOAuthCallback,
@@ -29,6 +30,17 @@ function parseLimitQuery(value: string | undefined) {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
+/** The AI overview language (`?locale=`); English when not given. */
+function parseLocaleQuery(value: string | undefined) {
+  const parsed = marketMcpLocaleSchema.optional().safeParse(value || undefined);
+  if (!parsed.success) {
+    throw ApiError.validation(
+      parsed.error.flatten() as Record<string, unknown>,
+    );
+  }
+  return parsed.data;
+}
+
 export function registerMcpRoutes(app: Hono) {
   app.get("/market/mcp", async (c) => {
     const session = await requireSession(c);
@@ -45,6 +57,7 @@ export function registerMcpRoutes(app: Hono) {
       desktopOnly: parseBooleanQuery(c.req.query("desktopOnly")),
       limit: parseLimitQuery(c.req.query("limit")),
       cursor: c.req.query("cursor"),
+      locale: parseLocaleQuery(c.req.query("locale")),
     });
     return ApiResponse.success(c, result);
   });
@@ -88,6 +101,7 @@ export function registerMcpRoutes(app: Hono) {
       workspaceId: requireRouteParam(c, "workspaceId"),
       userId: getSessionUserId(session),
       identifier: decodeURIComponent(requireRouteParam(c, "identifier")),
+      locale: parseLocaleQuery(c.req.query("locale")),
     });
     return ApiResponse.success(c, result);
   });

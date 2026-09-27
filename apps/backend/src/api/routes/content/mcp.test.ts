@@ -4,6 +4,7 @@ import { McpError } from "../../../modules/mcp/errors";
 import { createWorkspaceRouteTestApp, readJson } from "../../../test/hono";
 
 const mocks = vi.hoisted(() => ({
+  getMarketMcp: vi.fn(),
   getSessionUserId: vi.fn(),
   listActionRuns: vi.fn(),
   listMarketMcpCategories: vi.fn(),
@@ -25,7 +26,7 @@ vi.mock("../../middleware/auth-session", () => ({
 
 vi.mock("../../../modules/mcp", () => ({
   mcpService: {
-    getMarketMcp: vi.fn(),
+    getMarketMcp: mocks.getMarketMcp,
     deleteInstall: mocks.deleteInstall,
     installMarketMcp: mocks.installMarketMcp,
     listActionRuns: mocks.listActionRuns,
@@ -329,10 +330,62 @@ for (const desktopOnly of [true, false, undefined]) {
       category: "files",
       cursor: "page-two",
       limit: 100,
+      locale: undefined,
     });
     assert.deepEqual(mocks.countMarketMcpCategories.mock.calls[0]?.[0], common);
   });
 }
+
+test("the workspace MCP market passes the AI overview locale through", async () => {
+  resetRouteMocks();
+  mocks.listMarketMcp.mockResolvedValue({ items: [], nextCursor: null });
+  const aiOverview = {
+    summary: "让助手按次付费调用数据 API。",
+    whatItDoes: "提供付费数据工具。",
+    whenToUse: "需要付费数据时。",
+    requirements: "",
+    cautions: null,
+    locale: "zh-CN",
+    generatedAt: "2026-09-28T00:00:00.000Z",
+  };
+  mocks.getMarketMcp.mockResolvedValue({
+    market: {
+      item: { id: "i", aiSummary: aiOverview.summary },
+      versions: [],
+      readme: null,
+      aiOverview,
+    },
+    install: null,
+  });
+  const app = createTestApp();
+
+  const listing = await app.request(
+    "/v1/workspaces/workspace_1/market/mcp?locale=zh-TW",
+  );
+  assert.equal(listing.status, 200);
+  assert.equal(mocks.listMarketMcp.mock.calls[0]?.[0].locale, "zh-TW");
+
+  const detail = await app.request(
+    `/v1/workspaces/workspace_1/market/mcp/${encodeURIComponent("io.github.acme/weather")}?locale=zh-CN`,
+  );
+  assert.equal(detail.status, 200);
+  assert.deepEqual(mocks.getMarketMcp.mock.calls[0]?.[0], {
+    workspaceId: "workspace_1",
+    userId: "user_1",
+    identifier: "io.github.acme/weather",
+    locale: "zh-CN",
+  });
+  const body = (await readJson(detail)) as {
+    market: { aiOverview: unknown };
+  };
+  assert.deepEqual(body.market.aiOverview, aiOverview);
+
+  const invalid = await app.request(
+    "/v1/workspaces/workspace_1/market/mcp/io.github.acme%2Fweather?locale=xx",
+  );
+  assert.equal(invalid.status, 400);
+  assert.equal(mocks.getMarketMcp.mock.calls.length, 1);
+});
 
 test("MCP listing forwards multiple categories together with the page cursor", async () => {
   resetRouteMocks();

@@ -80,6 +80,33 @@ test("countMcpByCategory surfaces non-DB read failures", async () => {
   );
 });
 
+test("getMcp asks for the AI overview in the given locale and passes it through", async () => {
+  const aiOverview = {
+    summary: "s",
+    whatItDoes: "w",
+    whenToUse: "u",
+    requirements: "",
+    cautions: null,
+    locale: "zh-TW",
+    generatedAt: "2026-09-28T00:00:00.000Z",
+  };
+  mocks.findMcp.mockResolvedValue({
+    item: { identifier: "io.github.acme/mcp" },
+    versions: [],
+    readme: null,
+    aiOverview,
+  });
+
+  const found = await new MarketService().getMcp("io.github.acme/mcp", {
+    locale: "zh-TW",
+  });
+  assert.deepEqual(mocks.findMcp.mock.calls.at(-1), [
+    "io.github.acme/mcp",
+    { locale: "zh-TW" },
+  ]);
+  assert.deepEqual(found.aiOverview, aiOverview);
+});
+
 test("getMcpManifest maps the found version, 404s when missing", async () => {
   mocks.findMcpVersion.mockResolvedValue({
     record: { item: { identifier: "io.github.acme/mcp" } },
