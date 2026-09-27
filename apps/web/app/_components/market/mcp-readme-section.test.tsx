@@ -1,18 +1,19 @@
 import type { ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import type {
+  MarketMcpReadme,
+  McpReadmeStatus,
+} from "@sourceweft/market-contracts";
 import { describe, expect, it } from "vitest";
 
 import zhCNMessages from "@/messages/zh-CN.json";
 import zhTWMessages from "@/messages/zh-TW.json";
 import { type IntlOptions, withIntl } from "@/test/react";
 
-import type { McpReadmePayload } from "@/lib/mcp-readme";
-
 import {
   McpReadmeRepositoryLink,
   McpReadmeSection,
   McpReadmeSourceLine,
-  type McpReadmeStatus,
 } from "./mcp-readme-section";
 
 const source = {
@@ -98,8 +99,8 @@ const SHA = "0123456789abcdef0123456789abcdef01234567";
 
 function readme(
   status: McpReadmeStatus,
-  patch: Partial<McpReadmePayload> = {},
-): McpReadmePayload {
+  patch: Partial<MarketMcpReadme> = {},
+): MarketMcpReadme {
   return {
     status,
     ...(status === "ok" ? { markdown: "# Title" } : {}),
@@ -135,24 +136,15 @@ describe("McpReadmeSection with a detail response's readme", () => {
     expect(html).not.toMatch(/<img/i);
   });
 
-  it("leaves relative links as text when the README's addresses are unknown", () => {
+  it("leaves relative links as text when no README file is known", () => {
     const html = render({
       markdown: "[Setup](docs/setup.md) and [site](https://example.com)",
-      source: { blobUrl: source.blobUrl, rawUrl: null },
+      source: null,
       status: "ok",
     });
     expect(html).not.toContain("docs/setup.md");
     expect(html).toContain("<span>Setup</span>");
     expect(html).toContain('href="https://example.com/"');
-  });
-
-  it("links a README too large to show even without its raw address", () => {
-    expect(
-      render({
-        source: { blobUrl: source.blobUrl, rawUrl: null },
-        status: "too_large",
-      }),
-    ).toContain(`href="${source.blobUrl}"`);
   });
 });
 

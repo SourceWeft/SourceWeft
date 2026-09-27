@@ -1,9 +1,12 @@
 // @vitest-environment jsdom
 import { act, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { marketItemSummarySchema } from "@sourceweft/market-contracts";
+import {
+  type MarketMcpReadme,
+  type McpReadmeStatus,
+  marketItemSummarySchema,
+} from "@sourceweft/market-contracts";
 
-import type { McpReadmePayload, McpReadmeStatus } from "@/lib/mcp-readme";
 import { flush, mountWithIntl, unmountAll } from "@/test/react";
 
 import McpDetailPage from "./page";
@@ -45,7 +48,6 @@ function summary(patch: Record<string, unknown> = {}) {
     createdAt: "2026-09-01T00:00:00.000Z",
     id: "mcp-1",
     identifier: route.identifier,
-    kind: "mcp",
     latestVersion: "1.0.0",
     name: "Weather",
     status: "published",
@@ -60,8 +62,8 @@ function summary(patch: Record<string, unknown> = {}) {
 
 function readme(
   status: McpReadmeStatus,
-  patch: Partial<McpReadmePayload> = {},
-): McpReadmePayload {
+  patch: Partial<MarketMcpReadme> = {},
+): MarketMcpReadme {
   return {
     status,
     ...(status === "ok"
@@ -82,7 +84,7 @@ function readme(
 }
 
 /** The workspace detail: `market` is the public detail, README included. */
-function detail(value?: McpReadmePayload | null, itemPatch = {}) {
+function detail(value?: MarketMcpReadme | null, itemPatch = {}) {
   return {
     install: null,
     market: {
@@ -115,7 +117,7 @@ function detail(value?: McpReadmePayload | null, itemPatch = {}) {
   };
 }
 
-async function open(value?: McpReadmePayload | null, itemPatch = {}) {
+async function open(value?: MarketMcpReadme | null, itemPatch = {}) {
   api.getWorkspaceMarketMcp.mockResolvedValue(detail(value, itemPatch));
   await mountWithIntl(<McpDetailPage />);
   await flush(4);

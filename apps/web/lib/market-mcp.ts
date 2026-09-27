@@ -7,6 +7,7 @@ import {
   MarketClientError,
   type GetMarketMcpManifestResponse,
   type GetMarketMcpResponse,
+  type MarketMcpReadme,
   type MarketCategoryCountsResponse,
   type ListMarketCategoriesResponse,
   type ListMarketMcpRequest,
@@ -14,7 +15,7 @@ import {
 } from "@sourceweft/market-sdk";
 
 import { apiBaseUrl } from "./api-base-url";
-import { readMcpReadme, type McpReadmePayload } from "./mcp-readme";
+import { readMcpReadme } from "./mcp-readme";
 
 const MCP_LIST_LIMIT = 100;
 
@@ -102,7 +103,7 @@ export async function countPublicMcpByCategory(
 
 export type PublicMcpDetail = {
   versions: GetMarketMcpResponse["versions"];
-  readme: McpReadmePayload | null;
+  readme: MarketMcpReadme | null;
 };
 
 const cachedMcpDetail = unstable_cache(

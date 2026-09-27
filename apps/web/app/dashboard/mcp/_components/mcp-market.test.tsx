@@ -46,7 +46,6 @@ function summary(identifier: string, name: string) {
     createdAt: "2026-09-01T00:00:00.000Z",
     id: `id-${identifier}`,
     identifier,
-    kind: "mcp",
     latestVersion: "1.0.0",
     name,
     status: "published",

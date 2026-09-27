@@ -1,18 +1,18 @@
 import type { ReactNode } from "react";
 import { ExternalLink } from "lucide-react";
 import { useTranslations } from "next-intl";
+import type {
+  MarketMcpReadme,
+  MarketMcpReadmeSource,
+  McpReadmeStatus,
+} from "@sourceweft/market-contracts";
 
 import {
   mcpReadmeBaseUrl,
   mcpReadmeFallbackLink,
-  type McpReadmePayload,
-  type McpReadmeSource,
-  type McpReadmeStatus,
 } from "../../../lib/mcp-readme";
 import { UntrustedMarkdown } from "./untrusted-markdown";
 import { untrustedMarkdownLink } from "./untrusted-markdown-links";
-
-export type { McpReadmeStatus };
 
 /**
  * The body of an MCP server's README section: the README itself, or why there
@@ -31,10 +31,10 @@ export function McpReadmeSection({
   markdown?: string | null;
   /**
    * The README's own addresses at its pinned commit. Its relative links and
-   * images resolve there (when both are known), and a README too large to
-   * show links to its page.
+   * images resolve there, and a README too large to show links to its page.
+   * Null when no README file is known.
    */
-  source?: Pick<McpReadmeSource, "blobUrl" | "rawUrl"> | null;
+  source?: Pick<MarketMcpReadmeSource, "blobUrl" | "rawUrl"> | null;
   status: McpReadmeStatus;
 }) {
   const t = useTranslations("mcp.readme");
@@ -86,14 +86,13 @@ const COMMIT_SHA = /^[0-9a-f]{40,}$/i;
 export function McpReadmeSourceLine({
   readme,
 }: {
-  readme: McpReadmePayload | null;
+  readme: MarketMcpReadme | null;
 }) {
   const t = useTranslations("mcp.readme");
   const source = readme?.source;
   if (readme?.status !== "ok" || !readme.markdown || !source) return null;
   const link = untrustedMarkdownLink(source.blobUrl);
-  if (!source.path && link.kind !== "external") return null;
-  const path = source.path ?? "README";
+  const { path } = source;
   const commit = source.ref
     ? COMMIT_SHA.test(source.ref)
       ? source.ref.slice(0, 7)
@@ -134,7 +133,7 @@ export function McpReadmeSourceLine({
 export function McpReadmeRepositoryLink({
   readme,
 }: {
-  readme: McpReadmePayload | null;
+  readme: MarketMcpReadme | null;
 }) {
   const t = useTranslations("mcp.readme");
   const link = mcpReadmeFallbackLink(readme);

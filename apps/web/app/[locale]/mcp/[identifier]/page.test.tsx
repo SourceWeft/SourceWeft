@@ -1,8 +1,10 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getMarketMcpManifestResponseSchema } from "@sourceweft/market-contracts";
-
-import type { McpReadmePayload, McpReadmeStatus } from "@/lib/mcp-readme";
+import {
+  type MarketMcpReadme,
+  type McpReadmeStatus,
+  getMarketMcpManifestResponseSchema,
+} from "@sourceweft/market-contracts";
 
 const market = vi.hoisted(() => ({
   getPublicMcpDetail: vi.fn(),
@@ -82,7 +84,6 @@ const manifestResponse = getMarketMcpManifestResponseSchema.parse({
     createdAt: "2026-09-01T00:00:00.000Z",
     id: "mcp-1",
     identifier: IDENTIFIER,
-    kind: "mcp",
     name: "Weather",
     repoUrl: "https://github.com/o/r",
     status: "published",
@@ -109,8 +110,8 @@ const manifestResponse = getMarketMcpManifestResponseSchema.parse({
 
 function readme(
   status: McpReadmeStatus,
-  patch: Partial<McpReadmePayload> = {},
-): McpReadmePayload {
+  patch: Partial<MarketMcpReadme> = {},
+): MarketMcpReadme {
   return {
     status,
     ...(status === "ok"
