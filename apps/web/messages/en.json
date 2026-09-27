@@ -457,6 +457,7 @@
       "nav": {
         "overview": "Overview",
         "installation": "Installation",
+        "readme": "README",
         "tools": "Tools ({count})",
         "versions": "Versions ({count})",
         "related": "Related"
@@ -476,6 +477,7 @@
       "otherClientsConfig": "Add this to your client's <code>mcpServers</code> config.",
       "oauthNote": " The client completes OAuth sign-in on first connect.",
       "followRepo": "Follow the launch instructions in the <link>repository</link>.",
+      "readmeHeading": "README",
       "toolsHeading": "Tools",
       "versionsHeading": "Version history",
       "latest": "Latest",
@@ -494,7 +496,12 @@
     "readme": {
       "imagePlaceholder": "Image",
       "notFound": "This repository has no README.",
-      "tooLarge": "The README is too large to show here — <link>open it on GitHub</link>."
+      "tooLarge": "The README is too large to show here — <link>open it on GitHub</link>.",
+      "showMore": "Show full README",
+      "showLess": "Show less",
+      "source": "Source: <link>{path}</link>",
+      "sourceAtCommit": "Source: <link>{path}</link> at commit <code>{commit}</code>",
+      "viewInRepository": "Read the README in its repository"
     }
   },
   "languageSwitcher": {
@@ -2268,6 +2275,11 @@
       "notTestedSuffix": " · not tested yet",
       "unverifiedNoticeLong": "This MCP server is unverified. It can receive a conversation's tool arguments and may perform external actions. Review the server before enabling it.",
       "unverifiedNoticeMedium": "This MCP server is unverified. Review it before enabling access to conversation tool arguments.",
+      "tabs": {
+        "overview": "Overview",
+        "readme": "README",
+        "tools": "Tools ({count})"
+      },
       "toolsHeading": "Tools",
       "toolsTotal": "{count} total",
       "toolsPending": "Tool details are published after the server is indexed or installed.",

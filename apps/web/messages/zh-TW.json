@@ -457,6 +457,7 @@
       "nav": {
         "overview": "概覽",
         "installation": "安裝",
+        "readme": "README",
         "tools": "工具（{count}）",
         "versions": "版本（{count}）",
         "related": "相關"
@@ -476,6 +477,7 @@
       "otherClientsConfig": "把它新增到你客戶端的 <code>mcpServers</code> 設定中。",
       "oauthNote": " 客戶端會在首次連接時完成 OAuth 登入。",
       "followRepo": "參照 <link>儲存庫</link> 中的啟動說明。",
+      "readmeHeading": "README",
       "toolsHeading": "工具",
       "versionsHeading": "版本歷史",
       "latest": "最新",
@@ -494,7 +496,12 @@
     "readme": {
       "imagePlaceholder": "圖片",
       "notFound": "該儲存庫沒有 README。",
-      "tooLarge": "README 過大，無法在此顯示，請<link>在 GitHub 上檢視</link>。"
+      "tooLarge": "README 過大，無法在此顯示，請<link>在 GitHub 上檢視</link>。",
+      "showMore": "展開完整 README",
+      "showLess": "收起",
+      "source": "來源：<link>{path}</link>",
+      "sourceAtCommit": "來源：<link>{path}</link>，提交 <code>{commit}</code>",
+      "viewInRepository": "在儲存庫中閱讀 README"
     }
   },
   "languageSwitcher": {
@@ -2268,6 +2275,11 @@
       "notTestedSuffix": " · 尚未測試",
       "unverifiedNoticeLong": "此 MCP 伺服器未經驗證。它可以接收對話的工具引數，並可能執行外部操作。啟用前請先檢視該伺服器。",
       "unverifiedNoticeMedium": "此 MCP 伺服器未經驗證。在允許其存取對話工具引數之前，請先檢視它。",
+      "tabs": {
+        "overview": "概覽",
+        "readme": "README",
+        "tools": "工具（{count}）"
+      },
       "toolsHeading": "工具",
       "toolsTotal": "共 {count} 個",
       "toolsPending": "工具詳細資訊將在伺服器被索引或安裝後公佈。",

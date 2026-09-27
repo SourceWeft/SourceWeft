@@ -14,6 +14,7 @@ import {
 } from "@sourceweft/market-sdk";
 
 import { apiBaseUrl } from "./api-base-url";
+import { readMcpReadme, type McpReadmePayload } from "./mcp-readme";
 
 const MCP_LIST_LIMIT = 100;
 
@@ -99,20 +100,32 @@ export async function countPublicMcpByCategory(
   }
 }
 
-const cachedMcpVersions = unstable_cache(
-  async (identifier: string) =>
-    (await marketClient().getMcp(identifier)).versions,
-  ["public-mcp-versions"],
+export type PublicMcpDetail = {
+  versions: GetMarketMcpResponse["versions"];
+  readme: McpReadmePayload | null;
+};
+
+const cachedMcpDetail = unstable_cache(
+  async (identifier: string): Promise<PublicMcpDetail> => {
+    const detail = await marketClient().getMcp(identifier);
+    return { readme: readMcpReadme(detail), versions: detail.versions };
+  },
+  ["public-mcp-detail"],
   { revalidate: MCP_MANIFEST_REVALIDATE_SECONDS },
 );
 
-export async function getPublicMcpVersions(
+/**
+ * The server's version history and README (`GET /v1/mcp/:identifier`). Both
+ * are extras on a page that the manifest already makes: when they cannot be
+ * read, the page goes without them.
+ */
+export async function getPublicMcpDetail(
   identifier: string,
-): Promise<GetMarketMcpResponse["versions"]> {
+): Promise<PublicMcpDetail> {
   try {
-    return await cachedMcpVersions(identifier);
+    return await cachedMcpDetail(identifier);
   } catch {
-    return [];
+    return { readme: null, versions: [] };
   }
 }
 
