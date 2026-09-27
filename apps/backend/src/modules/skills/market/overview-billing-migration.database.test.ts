@@ -28,7 +28,7 @@ afterAll(async () => {
 test("the migration deletes the overview billing setting and nothing else", async () => {
   const migration = await readFile(
     new URL(
-      "../../../../../../packages/db/drizzle/0055_remove_overview_billing_setting.sql",
+      "../../../../../../packages/db/drizzle/0056_remove_overview_billing_setting.sql",
       import.meta.url,
     ),
     "utf8",
