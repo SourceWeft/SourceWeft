@@ -37,6 +37,19 @@ The schedule schema reserves an `agent_task` kind and user ownership for future
 user-created tasks. The dispatcher currently filters to `connector_sync`, and
 there is no user-task creation API or worker handler.
 
+## MCP README fetch
+
+Every 30 minutes (`MCP_README_SCHEDULE_INTERVAL_MS`) the scheduler queues one
+`mcp-readme-fetch` batch of up to 200 MCP server versions whose README is due:
+the latest published version of each published, public server, installed
+servers first, then web-executable ones, then the rest. It only queues. The
+worker reads GitHub's README API, because `GITHUB_TOKEN` is given to the api
+and worker services and not to the scheduler. While a batch is queued or
+running, no second one is queued. A spent rate limit defers the rest of the
+batch to GitHub's reset. Refresh intervals, backoff and the attempt cap are
+constants in `modules/market/readme/readme-state.ts`; there is no env
+variable.
+
 Current phase note:
 
 - Scheduler also runs billing reconcile checks for team subscription plan consistency.

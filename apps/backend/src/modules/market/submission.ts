@@ -3,7 +3,10 @@ import {
   getMarketItemForSubmission,
   upsertMarketMcp,
 } from "./ingest/repository";
+import { mcpServerVersionId } from "./ingest/plan";
 import { parseMcpRepository } from "./parse-repository";
+import { writeMcpReadmeColumns } from "./readme/readme-repository";
+import { submittedReadmeColumns } from "./readme/readme-state";
 import { scanMcpSubmission } from "./scan";
 
 export class MarketSubmissionError extends Error {
@@ -76,20 +79,48 @@ export async function submitMcpFromGitHub(input: {
   const status: "published" | "reviewing" =
     scan.reviewRequired || stickyReview ? "reviewing" : "published";
 
+  const github = parsed.report.github;
   await upsertMarketMcp({
     manifest: parsed.manifest,
     status,
     visibility: "public",
     origin: "submitted",
-    owner: parsed.report.github.owner,
+    owner: github.owner,
     provenanceJson: {
       source: "submission",
       submittedBy: input.userId,
       submittedAt: new Date().toISOString(),
-      github: parsed.report.github,
+      github,
+      // Where the server lives, in the registry's own shape, for the README
+      // fetch: the directory the submission named, "" being the root.
+      repository: {
+        url: github.repoUrl,
+        ...(github.subpath ? { subfolder: github.subpath } : {}),
+      },
       scan,
     },
   });
+
+  // The parse already read the README at the commit it pinned: store it now
+  // rather than wait for the fetch job. Without one (or with bytes that are
+  // not text), the version stays `pending` and the fetch job decides.
+  const readme =
+    parsed.readme && github.commitSha
+      ? submittedReadmeColumns(
+          {
+            path: parsed.readme.path,
+            bytes: parsed.readme.bytes,
+            ref: github.commitSha,
+          },
+          new Date(),
+        )
+      : null;
+  if (readme) {
+    await writeMcpReadmeColumns(
+      mcpServerVersionId(parsed.manifest.identifier, parsed.manifest.version),
+      readme,
+    );
+  }
 
   logger.info("MCP submission processed", {
     identifier: parsed.manifest.identifier,

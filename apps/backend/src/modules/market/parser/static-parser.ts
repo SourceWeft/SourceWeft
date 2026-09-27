@@ -1,4 +1,8 @@
 import path from "node:path";
+import {
+  byReadmePreference,
+  README_PATH,
+} from "../../../shared/catalog-readme";
 import type { ReadGitHubRepository, RepoTree } from "./repo-tree";
 import type {
   ConnectionCandidate,
@@ -423,18 +427,50 @@ async function findServerJson(repo: RepoContext) {
   return files.find((file) => path.basename(file) === "server.json");
 }
 
-async function findReadme(repo: RepoContext) {
-  const entries = repo.tree.readDirNames(repo.workDir);
-  const direct = entries.find((entry) =>
-    /^readme(\.[a-z0-9_-]+)?$/i.test(entry),
-  );
-  if (direct) {
-    return path.join(repo.workDir, direct);
+/** Any README file name the parser reads for evidence, Markdown or not. */
+const ANY_README_NAME = /^readme(\.[a-z0-9_-]+)?$/i;
+
+/**
+ * The README file directly in `directory`: a Markdown README by the shared
+ * catalog rule first (`README.md` before its variants), then any other README
+ * (`README.rst`, `README`) so the parser still reads its evidence.
+ */
+function readmeIn(repo: RepoContext, directory: string) {
+  const names = repo.tree
+    .readDirNames(directory)
+    .filter((name) => README_PATH.test(name) || ANY_README_NAME.test(name))
+    .filter((name) => repo.tree.sizeOf(path.join(directory, name)) !== null);
+  const markdown = names
+    .filter((name) => README_PATH.test(name))
+    .map((name) => ({ path: name }))
+    .sort(byReadmePreference)
+    .map((entry) => entry.path);
+  const chosen =
+    markdown[0] ?? names.filter((name) => !README_PATH.test(name)).sort()[0];
+  return chosen ? path.join(directory, chosen) : undefined;
+}
+
+/**
+ * The repository's README: the one in the directory being parsed (the
+ * repository root, unless the submission named a subdirectory), else the one
+ * next to `server.json`. Never a README found elsewhere in the tree — a docs
+ * page or a dependency's README is not this server's.
+ */
+function findReadme(repo: RepoContext, serverJsonPath: string | undefined) {
+  const directories = [repo.workDir];
+  const serverJsonDirectory = serverJsonPath
+    ? path.dirname(serverJsonPath)
+    : undefined;
+  if (serverJsonDirectory && serverJsonDirectory !== repo.workDir) {
+    directories.push(serverJsonDirectory);
   }
-  const files = walkFiles(repo, 500);
-  return files.find((file) =>
-    /^readme(\.[a-z0-9_-]+)?$/i.test(path.basename(file)),
-  );
+  for (const directory of directories) {
+    const found = readmeIn(repo, directory);
+    if (found) {
+      return found;
+    }
+  }
+  return undefined;
 }
 
 function normalizeTransport(value: string | undefined) {
@@ -1085,7 +1121,7 @@ export async function parseStaticRepository(
     }
   }
 
-  const readmePath = await findReadme(repo);
+  const readmePath = findReadme(repo, serverJsonPath);
   let readme: ReadmeParseResult | undefined;
   if (readmePath) {
     const parsed = await parseReadme(repo, readmePath);

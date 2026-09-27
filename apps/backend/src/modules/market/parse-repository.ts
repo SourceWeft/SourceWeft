@@ -1,9 +1,33 @@
-import { readGitHubRepository } from "./parser/repo-tree";
+import path from "node:path";
+import {
+  readGitHubRepository,
+  type ReadGitHubRepository,
+} from "./parser/repo-tree";
 import { classifyMcpRepository } from "./parser/classifier";
 import { mapParsedRepositoryToManifest } from "./parser/manifest-mapper";
 import { parseStaticRepository } from "./parser/static-parser";
 import { introspectRuntime } from "./runtime/runtime-introspect";
-import type { McpIngestResult, McpRepositoryParseOptions } from "./types";
+import type {
+  McpIngestReadme,
+  McpIngestResult,
+  McpRepositoryParseOptions,
+  StaticParseResult,
+} from "./types";
+
+/** The README the static parse chose, with its bytes and repository path. */
+function readmeOf(
+  source: ReadGitHubRepository,
+  staticResult: StaticParseResult,
+): McpIngestReadme | undefined {
+  if (!staticResult.readme) {
+    return undefined;
+  }
+  const file = path.posix.join(source.workDir, staticResult.readme.path);
+  const bytes = source.tree.readBytes(file);
+  return bytes
+    ? { path: path.posix.relative(source.rootDir, file), bytes }
+    : undefined;
+}
 
 export async function parseMcpRepository(
   sourceUrl: string,
@@ -33,18 +57,23 @@ export async function parseMcpRepository(
     mode: options.classificationMode ?? "deepseek",
     refreshClassification: options.refreshClassification,
   });
-  return mapParsedRepositoryToManifest({
-    categories: options.categories,
-    classification,
-    discovery: options.discovery,
-    mode: options.mode,
-    runtime,
-    staticResult,
-  });
+  const readme = readmeOf(source, staticResult);
+  return {
+    ...mapParsedRepositoryToManifest({
+      categories: options.categories,
+      classification,
+      discovery: options.discovery,
+      mode: options.mode,
+      runtime,
+      staticResult,
+    }),
+    ...(readme ? { readme } : {}),
+  };
 }
 
 export type {
   DryRunIngestResult,
+  McpIngestReadme,
   McpClassificationMode,
   McpClassificationResult,
   McpIngestMode,

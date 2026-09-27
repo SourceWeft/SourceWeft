@@ -26,6 +26,8 @@ import { processProviderCostReconciliationJob } from "../shared/model-gateway/pr
 import { processThreadTitleGenerateJob } from "./processors/thread-title";
 import { processSkillOverviewGenerateJob } from "./processors/skill-overview-generate";
 import { SKILL_OVERVIEW_GENERATE_JOB } from "../modules/skills/market/overview-queue";
+import { processMcpReadmeFetchJob } from "./processors/mcp-readme-fetch";
+import { MCP_README_FETCH_JOB } from "../modules/market/readme/readme-queue";
 import {
   handleSkillIngestJobFailure,
   processSkillRegistryIngestJob,
@@ -64,6 +66,7 @@ const primaryProcessors: Record<string, JobProcessor> = {
   "thread-chat-run": processThreadChatRunJob,
   "thread-title-generate": processThreadTitleGenerateJob,
   [SKILL_OVERVIEW_GENERATE_JOB]: processSkillOverviewGenerateJob,
+  [MCP_README_FETCH_JOB]: (job) => processMcpReadmeFetchJob(job),
 };
 
 const skillIngestProcessors: Record<string, JobProcessor> = {

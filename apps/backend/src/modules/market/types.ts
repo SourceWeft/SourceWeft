@@ -221,9 +221,18 @@ export type McpParserReport = {
   };
 };
 
+/** The README the parse read, as the repository stores it. */
+export type McpIngestReadme = {
+  /** Repository-relative path, e.g. `README.md` or `mcp/README.md`. */
+  path: string;
+  bytes: Uint8Array;
+};
+
 export type McpIngestResult = {
   manifest: MarketMcpManifest;
   report: McpParserReport;
+  /** Absent when the repository has no README where the parser looks. */
+  readme?: McpIngestReadme;
 };
 
 export type McpRepositoryParseOptions = {

@@ -13,6 +13,10 @@ import { contentSourceService } from "../modules/sources";
 import { scheduleConnectorSyncs } from "./schedules/connectors";
 import { scheduleMarketFederation } from "./schedules/market-federation";
 import {
+  MCP_README_SCHEDULE_INTERVAL_MS,
+  scheduleMcpReadmeFetches,
+} from "./schedules/mcp-readme";
+import {
   scheduleSkillMarketUpkeep,
   SKILL_MARKET_INTERVAL_MS,
 } from "./schedules/skill-market";
@@ -120,6 +124,21 @@ async function marketFederationTick() {
   }
 }
 
+// The MCP catalog's README queue runs on its own, shorter interval than the
+// federation sync: a batch at a time, so the catalog is covered in hours
+// rather than one batch per federation run.
+async function mcpReadmeTick() {
+  if (!config.market.enabled) {
+    return;
+  }
+  try {
+    await scheduleMcpReadmeFetches();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error("Failed to queue MCP README fetches", { message });
+  }
+}
+
 async function skillMarketTick() {
   if (!config.market.enabled) {
     return;
@@ -146,8 +165,18 @@ const marketFederationTimer = setInterval(() => {
   void marketFederationTick();
 }, config.market.federationIntervalMs);
 
+void mcpReadmeTick();
+const mcpReadmeTimer = setInterval(() => {
+  void mcpReadmeTick();
+}, MCP_README_SCHEDULE_INTERVAL_MS);
+
 void skillMarketTick();
 const skillMarketTimer = setInterval(() => {
+  void mcpReadmeTick();
+  const mcpReadmeTimer = setInterval(() => {
+    void mcpReadmeTick();
+  }, MCP_README_SCHEDULE_INTERVAL_MS);
+
   void skillMarketTick();
 }, SKILL_MARKET_INTERVAL_MS);
 
@@ -171,6 +200,7 @@ async function shutdown() {
   clearInterval(timer);
   clearInterval(modelPricingSyncTimer);
   clearInterval(marketFederationTimer);
+  clearInterval(mcpReadmeTimer);
   clearInterval(skillMarketTimer);
   logger.info("Scheduler shutting down");
   await closeQueue();

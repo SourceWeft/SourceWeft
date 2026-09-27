@@ -149,9 +149,47 @@ export const listMarketMcpResponseSchema = z.object({
   nextCursor: z.string().nullable().default(null),
 });
 
+// Where an MCP server's README stands. `pending` until it is first read;
+// `not_found` when the repository has none to show (no README, or one that is
+// not Markdown); `unsupported_host` when the repository is not on GitHub.
+export const mcpReadmeStatusSchema = z.enum([
+  "pending",
+  "ok",
+  "not_found",
+  "too_large",
+  "unsupported_host",
+  "error",
+]);
+
+// The README file on GitHub. `blobUrl` and `rawUrl` are the file's OWN
+// addresses at `ref` (not its directory's), so a relative link in the README
+// resolves against them the way a browser resolves it on that page. `ref` is
+// the commit the README was read at; null when none was pinned (a README too
+// large to store), in which case the URLs name the default branch (`HEAD`).
+export const marketMcpReadmeSourceSchema = z.object({
+  repoUrl: z.string().url(),
+  ref: z.string().nullable(),
+  // Repository-relative, e.g. `README.md` or `mcp/README.md`.
+  path: z.string(),
+  blobUrl: z.string().url(),
+  rawUrl: z.string().url(),
+});
+
+// The latest version's README. `markdown` is present only when `status` is
+// `ok`; it is the author's text, so render it as untrusted markdown. `source`
+// is null when no README file is known.
+export const marketMcpReadmeSchema = z.object({
+  status: mcpReadmeStatusSchema,
+  markdown: z.string().optional(),
+  source: marketMcpReadmeSourceSchema.nullable(),
+});
+
 export const getMarketMcpResponseSchema = z.object({
   item: marketItemSummarySchema,
   versions: z.array(marketItemVersionSchema),
+  // Null when the server has no published version to read it from. Optional
+  // for answers from before it existed.
+  readme: marketMcpReadmeSchema.nullable().optional(),
 });
 
 export const getMarketMcpManifestResponseSchema = z.object({
@@ -195,6 +233,9 @@ export type MarketItemSummary = z.infer<typeof marketItemSummarySchema>;
 export type MarketItemVersion = z.infer<typeof marketItemVersionSchema>;
 export type ListMarketMcpRequest = z.infer<typeof listMarketMcpRequestSchema>;
 export type ListMarketMcpResponse = z.infer<typeof listMarketMcpResponseSchema>;
+export type McpReadmeStatus = z.infer<typeof mcpReadmeStatusSchema>;
+export type MarketMcpReadmeSource = z.infer<typeof marketMcpReadmeSourceSchema>;
+export type MarketMcpReadme = z.infer<typeof marketMcpReadmeSchema>;
 export type GetMarketMcpResponse = z.infer<typeof getMarketMcpResponseSchema>;
 export type GetMarketMcpManifestResponse = z.infer<
   typeof getMarketMcpManifestResponseSchema
