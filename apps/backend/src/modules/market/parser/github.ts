@@ -183,22 +183,32 @@ export function normalizeGitHubSource(input: string): NormalizedGitHubSource {
   };
 }
 
+/**
+ * Whether GitHub requests carry `GITHUB_TOKEN`. Without it they still work,
+ * anonymously, under GitHub's far smaller per-IP rate limit — a caller that
+ * reports on its reads says so rather than failing.
+ */
+export function hasGitHubToken(): boolean {
+  return Boolean(process.env.GITHUB_TOKEN);
+}
+
 /** Headers for a GitHub archive download (see `githubFetch`). */
 export function githubDownloadHeaders(): Record<string, string> {
   return {
     "User-Agent": githubUserAgent,
-    ...(process.env.GITHUB_TOKEN
+    ...(hasGitHubToken()
       ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` }
       : {}),
   };
 }
 
-function githubHeaders() {
+/** Headers for a GitHub REST API (JSON) request (see `githubFetch`). */
+export function githubHeaders(): Record<string, string> {
   const headers: Record<string, string> = {
     "User-Agent": githubUserAgent,
     Accept: "application/vnd.github+json",
   };
-  if (process.env.GITHUB_TOKEN) {
+  if (hasGitHubToken()) {
     headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
   }
   return headers;
