@@ -81,9 +81,17 @@ test("unsigned or wrongly signed deliveries are rejected before the type is read
 
 test("signed envelope without a string eventType is rejected", async () => {
   const f = fixture();
-  const raw = JSON.stringify({ id: "evt_1", object: {} });
-  const response = await f.handler(post(raw, sign(raw)));
-  assert.equal(response?.status, 400);
+  const missing = JSON.stringify({ id: "evt_1", object: {} });
+  const missingResponse = await f.handler(post(missing, sign(missing)));
+  assert.equal(missingResponse?.status, 400);
+
+  const nonString = JSON.stringify({
+    id: "evt_1",
+    eventType: 42,
+    object: {},
+  });
+  const nonStringResponse = await f.handler(post(nonString, sign(nonString)));
+  assert.equal(nonStringResponse?.status, 400);
 });
 
 test("signed unsupported types are acknowledged without a mode check", async () => {
