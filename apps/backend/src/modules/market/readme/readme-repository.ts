@@ -6,24 +6,14 @@ import {
   mcpServerVersions,
   workspaceMcpInstalls,
 } from "@sourceweft/db";
+import { latestPublishedVersionOf } from "../latest-version";
 import type { McpReadmeColumns } from "./readme-state";
 
 /**
  * Database access for MCP server READMEs. Only the latest published version
  * of a published, public server is ever fetched — the version the catalog
- * shows — so every query here scopes to it.
+ * shows (`latestPublishedVersionOf`) — so every query here scopes to it.
  */
-
-/**
- * The version the catalog shows for server `s`: its newest published one,
- * ordered exactly as `read-repository.ts` picks "latest".
- */
-const latestPublishedVersionOf = (serverId: unknown) => sql`(
-  select l.id from ${mcpServerVersions} l
-  where l.server_id = ${serverId} and l.status = 'published'
-  order by l.published_at desc, l.created_at desc
-  limit 1
-)`;
 
 export type DueMcpReadme = {
   versionId: string;

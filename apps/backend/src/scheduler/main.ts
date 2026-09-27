@@ -13,6 +13,10 @@ import { contentSourceService } from "../modules/sources";
 import { scheduleConnectorSyncs } from "./schedules/connectors";
 import { scheduleMarketFederation } from "./schedules/market-federation";
 import {
+  MCP_OVERVIEW_SCHEDULE_INTERVAL_MS,
+  scheduleMcpOverviews,
+} from "./schedules/mcp-overview";
+import {
   MCP_README_SCHEDULE_INTERVAL_MS,
   scheduleMcpReadmeFetches,
 } from "./schedules/mcp-readme";
@@ -139,6 +143,21 @@ async function mcpReadmeTick() {
   }
 }
 
+// MCP AI overviews: a batch per run on their own interval, only while the
+// system model is ready. A version becomes a candidate once its README
+// settles (the README tick above), so no other coupling is needed.
+async function mcpOverviewTick() {
+  if (!config.market.enabled) {
+    return;
+  }
+  try {
+    await scheduleMcpOverviews();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error("Failed to queue MCP overviews", { message });
+  }
+}
+
 async function skillMarketTick() {
   if (!config.market.enabled) {
     return;
@@ -170,13 +189,13 @@ const mcpReadmeTimer = setInterval(() => {
   void mcpReadmeTick();
 }, MCP_README_SCHEDULE_INTERVAL_MS);
 
+void mcpOverviewTick();
+const mcpOverviewTimer = setInterval(() => {
+  void mcpOverviewTick();
+}, MCP_OVERVIEW_SCHEDULE_INTERVAL_MS);
+
 void skillMarketTick();
 const skillMarketTimer = setInterval(() => {
-  void mcpReadmeTick();
-  const mcpReadmeTimer = setInterval(() => {
-    void mcpReadmeTick();
-  }, MCP_README_SCHEDULE_INTERVAL_MS);
-
   void skillMarketTick();
 }, SKILL_MARKET_INTERVAL_MS);
 
@@ -201,6 +220,7 @@ async function shutdown() {
   clearInterval(modelPricingSyncTimer);
   clearInterval(marketFederationTimer);
   clearInterval(mcpReadmeTimer);
+  clearInterval(mcpOverviewTimer);
   clearInterval(skillMarketTimer);
   logger.info("Scheduler shutting down");
   await closeQueue();
