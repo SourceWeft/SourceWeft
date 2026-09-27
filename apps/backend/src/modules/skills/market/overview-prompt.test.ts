@@ -7,11 +7,10 @@ import {
   SKILL_OVERVIEW_OUTPUT_JSON_SCHEMA,
   SkillOverviewOutputError,
   buildSkillOverviewPrompt,
-  capLength,
   parseSkillOverviewOutput,
-  toPlainText,
   truncateSkillMd,
 } from "./overview-prompt";
+import { capLength, toPlainText } from "../../catalog-overview/text";
 import {
   SKILL_ANALYSIS_CATEGORY_SLUGS,
   skillAnalysisTaxonomy,

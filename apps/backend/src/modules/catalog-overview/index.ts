@@ -18,7 +18,9 @@
  *   the public reads with their English fallback (`repository.ts`);
  * - the BullMQ job: one per request with a deduplicating id, bounded retries,
  *   failure recording, recovery of requests that never reached the queue,
- *   and the scheduler's batch (`jobs.ts`).
+ *   and the scheduler's batch (`jobs.ts`);
+ * - the text rules for model output every parser applies: plain text only,
+ *   capped lengths, JSON read out of a text answer (`text.ts`).
  *
  * A kind plugs in with:
  * 1. Two tables in `packages/db`, built from `catalogOverviewColumns()` and
@@ -54,3 +56,4 @@ export * from "./model";
 export * from "./generate";
 export * from "./repository";
 export * from "./jobs";
+export * from "./text";
