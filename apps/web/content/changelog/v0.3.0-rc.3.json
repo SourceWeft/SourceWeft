@@ -1,0 +1,19 @@
+{
+  "tag": "v0.3.0-rc.3",
+  "releasedAt": "2026-09-27",
+  "category": "Release",
+  "commit": "59d3dd7a",
+  "title": "Gmail connector, dependable approvals and self-migrating deployments",
+  "summary": "This release candidate adds a Gmail connector, makes chat runs, approvals and sub-agents more dependable, and lets backend services migrate the database on start. Desktop installers remain unsigned manual downloads; automatic application updates are not published for this version.",
+  "items": [
+    "Added a Gmail connector with live tools, mailbox indexing and approval-gated sending that shows the exact message before it is sent. The connection mode is chosen before OAuth, and approved connector and MCP actions now report in their result that the user approved them.",
+    "Connector syncs pause when the ingestion quota runs out instead of failing, and resume when quota and a real page need return. The connector catalog lists only implemented connectors.",
+    "Chat runs end cleanly when a worker shuts down, stale runs are swept, and cancellation monitoring stops once the worker records its own terminal state. A live run is no longer finished from its snapshot, and ending on a waiting question ends the turn on the server.",
+    "Approvals are steadier: sub-agent approvals stay to one pause in one child thread, a resumed turn keeps its earlier reasoning and tool cards, the model's tool-calling message stays intact after a mixed approval, and \"Needs approval\" clears once an approval resolves. Sandbox approval now gates only command execution.",
+    "Runs of tool calls collapse into one summary row, the prompt stays pinned while streaming, and sub-agent headers are no longer clipped. MCP cards no longer overlap their status and actions, and the dashboard's MCP deep link opens the server's details.",
+    "Backend images migrate the database in the entrypoint before any service starts and report why a migration failed. The worker and scheduler expose health checks, and the model gateway keeps serving its active configuration when the catalog is unreachable at startup. Catalog display names are configurable.",
+    "Added an optional, pluggable web analytics layer with Google Tag Manager and Umami destinations that load only when configured, plus sign-in and core product events. Refined Taiwan wording in zh-TW and added a command-line guide to the documentation site."
+  ],
+  "githubPrerelease": false,
+  "desktopPublicationPolicy": "candidate"
+}
