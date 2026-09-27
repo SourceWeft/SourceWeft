@@ -114,3 +114,75 @@ Model gateway catalog sync:
 - Hand-written profiles in the JSON remain available when catalog sync is
   disabled. Global dynamic catalog import skips models that cannot be matched
   to LiteLLM pricing/capabilities; BYOK still allows manual unknown models.
+
+System model:
+
+The platform makes some model calls on its own behalf, for no team: AI
+overviews and classification of public market entries (skills and MCP
+servers). These go through the system model (`withSystemModel` in
+`src/shared/model-gateway/system-client.ts`), never through a tenant's billing.
+Model calls a user triggers (titles, ingestion, retrieval) stay billed to that
+user's team.
+
+| Variable | Meaning |
+|---|---|
+| `SYSTEM_MODEL_ENABLED` | Strict boolean, default `false`. Only `true`, `false`, `1` or `0` (any case, surrounding whitespace ignored); any other value fails configuration loading. |
+| `SYSTEM_MODEL_PROVIDER` | The `providerName` of a gateway in the global gateway config whose definition is borrowed, e.g. `openrouter`. |
+| `SYSTEM_MODEL_API_KEY` | The dedicated key for these calls. |
+| `SYSTEM_MODEL_NAME` | The model id at that Provider, e.g. `deepseek/deepseek-v4.1-flash`. |
+
+- The system model is `configured` when the named Provider exists in the active
+  gateway configuration, declares `chat` and `json_schema` in `supports` and
+  carries no credential headers in its definition, and the key and model are
+  set. It is `ready` only when it is also enabled.
+- It borrows only the Provider's non-secret definition (kind, base URL, headers,
+  `supports`). It never uses that Provider's `*_API_KEY` or its `*_ENABLED`
+  state: a Provider disabled for GLOBAL traffic can still lend its definition,
+  and an empty `SYSTEM_MODEL_API_KEY` is never replaced by the global key.
+- Calls run through the same builder as tenant calls, so the endpoint policy,
+  model capability rules, adapters and retries are the same. The timeout is 120
+  seconds and a call is retried twice.
+- While it is not ready, overview jobs are not queued and the market admin page
+  shows exactly what is missing; MCP classification uses keyword rules with
+  `fallbackReason: "system_model_not_ready"` and logs a warning. Nothing falls
+  back to another key or model.
+- Nothing is billed or stored: no usage ledger, no generation records. Each
+  call writes one `system_model.call` log line with the purpose, subject,
+  Provider, model, status, duration, token counts and, when the Provider
+  reports it, `costUsd`, but never the prompt, the output or the key. Set a
+  spending limit on the dedicated key at the Provider (for OpenRouter, on the
+  key itself) and read its usage there.
+- Changing the key takes an environment change and a restart. A synchronized
+  gateway configuration change is picked up on the next call.
+- `pnpm exec tsx src/scripts/smoke-system-model.ts` makes one real
+  structured-output call with the current settings and prints the readiness,
+  token usage and cost, never the key.
+
+To use another site, declare it as a custom gateway in the global gateway
+config and point `SYSTEM_MODEL_PROVIDER` at it. Keep it disabled for GLOBAL
+traffic and out of catalog discovery so it serves only the system model, for
+example AtlasCloud:
+
+```json
+{
+  "slug": "atlascloud-system",
+  "providerName": "atlascloud",
+  "providerKind": "openai-compatible",
+  "baseUrl": "https://api.atlascloud.ai/v1",
+  "apiKeyEnv": "ATLASCLOUD_API_KEY",
+  "activation": {
+    "env": "ATLASCLOUD_ENABLED",
+    "default": false
+  },
+  "supports": ["chat", "json_schema"],
+  "modelCatalog": {
+    "enabled": false
+  }
+}
+```
+
+Then set `SYSTEM_MODEL_PROVIDER=atlascloud`, the site's model id in
+`SYSTEM_MODEL_NAME` and the site's key in `SYSTEM_MODEL_API_KEY`. Leave
+`ATLASCLOUD_ENABLED` unset: `ATLASCLOUD_API_KEY` and `ATLASCLOUD_ENABLED` belong
+to the gateway entry and take effect only if you also want the site for tenant
+traffic; the system model never reads them.

@@ -5,6 +5,7 @@ import {
   type ModelCapabilityRule,
   type ModelGateway,
   type ModelGatewayConfig,
+  type ObserveSink,
   type ProviderRoutingConfig,
 } from "@sourceweft/model-gateway";
 import { and, eq } from "drizzle-orm";
@@ -443,9 +444,24 @@ export function assertGatewayConfigAvailable(
   }
 }
 
+export type RoutedModelGatewayBuildOptions = {
+  /**
+   * Replaces the tenant observability sink, which persists every generation
+   * as an `llm_generations` row. `null` observes nothing.
+   */
+  observeSink?: ObserveSink | null;
+  /**
+   * Whether Provider definitions accept request-scoped BYOK credentials.
+   * Tenant calls keep the default (true); the system model turns it off.
+   */
+  byok?: boolean;
+};
+
 export function buildRoutedModelGatewayConfig(
   configInput: RoutedGatewayConfig,
+  options: RoutedModelGatewayBuildOptions = {},
 ): ModelGatewayConfig {
+  const byok = options.byok ?? true;
   return {
     fetch: createLlmFetch(
       llmEndpointPolicy(
@@ -473,7 +489,7 @@ export function buildRoutedModelGatewayConfig(
           defaultHeaders: provider.defaultHeaders,
           supports: provider.supports,
           enabled: provider.globalReady,
-          byokEnabled: true,
+          byokEnabled: byok,
           // Carried per provider so one slow gateway cannot widen every other
           // provider's timeout (previously hoisted via Math.max).
           timeoutMs: provider.timeoutMs,
@@ -491,28 +507,35 @@ export function buildRoutedModelGatewayConfig(
     timeoutMs: DEFAULT_TIMEOUT_MS,
     maxRetries: DEFAULT_MAX_RETRIES,
     allowNonDefaultAliases: false,
-    resolveApiKeyRef: resolveByokApiKeyRef,
-    resolveCustomByokProvider: async (input) => {
-      const provider = await resolveByokProviderRuntime({
-        provider: input.provider,
-        apiKeyRef: input.apiKeyRef,
-        metadata: input.metadata,
-      });
+    ...(byok
+      ? {
+          resolveApiKeyRef: resolveByokApiKeyRef,
+          resolveCustomByokProvider: async (input) => {
+            const provider = await resolveByokProviderRuntime({
+              provider: input.provider,
+              apiKeyRef: input.apiKeyRef,
+              metadata: input.metadata,
+            });
 
-      if (!provider) {
-        return null;
-      }
+            if (!provider) {
+              return null;
+            }
 
-      return {
-        kind: provider.providerKind,
-        baseUrl: provider.baseUrl,
-        apiKey: provider.apiKey ?? undefined,
-        defaultHeaders: provider.defaultHeaders,
-      };
-    },
-    observeSink: createLlmObservabilitySink({
-      resolveCost: resolveObservedGenerationCost,
-    }),
+            return {
+              kind: provider.providerKind,
+              baseUrl: provider.baseUrl,
+              apiKey: provider.apiKey ?? undefined,
+              defaultHeaders: provider.defaultHeaders,
+            };
+          },
+        }
+      : {}),
+    observeSink:
+      options.observeSink === undefined
+        ? createLlmObservabilitySink({
+            resolveCost: resolveObservedGenerationCost,
+          })
+        : (options.observeSink ?? undefined),
   };
 }
 
