@@ -43,14 +43,20 @@ export function runtimeEnvironment(input) {
   }
   return env;
 }
+/** The Web server the image runs by default (the Dockerfile CMD). */
+export const WEB_SERVER_SCRIPT = "/app/web-standalone/apps/web/server.js";
+
 /**
- * The step every container runs before its command: bring the database schema
- * up to date (or, with MIGRATION_ENABLED=false, check it) under the migration
- * lock, whatever the command is. A container with no database has nothing to
- * migrate — utility commands such as `pnpm --version` run without one.
+ * The step a backend container runs before its command: bring the database
+ * schema up to date (or, with MIGRATION_ENABLED=false, check it) under the
+ * migration lock, whatever the backend command is. Two kinds of container skip
+ * it: the Web server, which only reads the database and does not carry the
+ * backend's configuration, and a container with no database — utility commands
+ * such as `pnpm --version`.
  */
-export function databasePreparationCommand(env) {
+export function databasePreparationCommand(env, command = []) {
   if (!env.DATABASE_URL) return null;
+  if (command.includes(WEB_SERVER_SCRIPT)) return null;
   return [
     process.execPath,
     [
@@ -87,7 +93,7 @@ if (
       });
     });
 
-  const preparation = databasePreparationCommand(env);
+  const preparation = databasePreparationCommand(env, [command, ...args]);
   const prepared = preparation ? await run(...preparation) : 0;
   // A failed preparation, or a stop during it, ends the container before its
   // command starts.

@@ -7,6 +7,7 @@ import { execFileSync } from "node:child_process";
 import {
   databasePreparationCommand,
   runtimeEnvironment,
+  WEB_SERVER_SCRIPT,
 } from "./runtime-entrypoint.mjs";
 
 test("DB fields are encoded once and do not diverge from the database password", () => {
@@ -33,14 +34,31 @@ test("explicit external connection overrides derived settings; utility commands 
   assert.deepEqual(runtimeEnvironment({}), {});
   assert.throws(() => runtimeEnvironment({ DB_USER: "user" }), /DB_PASSWORD/);
 });
-test("every container with a database prepares it before its command; utility commands skip it", () => {
-  assert.equal(databasePreparationCommand({}), null);
-  const [file, args] = databasePreparationCommand(
-    runtimeEnvironment({ DB_USER: "u", DB_PASSWORD: "p", DB_NAME: "d" }),
+test("backend containers prepare the database before their command; Web and utility commands skip it", () => {
+  const env = runtimeEnvironment({
+    DB_USER: "u",
+    DB_PASSWORD: "p",
+    DB_NAME: "d",
+  });
+  assert.equal(databasePreparationCommand({}, ["pnpm", "--version"]), null);
+  for (const command of [
+    ["node", "/app/apps/backend/dist/api.js"],
+    ["pnpm", "--filter", "@sourceweft/backend", "start:worker"],
+  ]) {
+    const [file, args] = databasePreparationCommand(env, command);
+    assert.equal(file, process.execPath);
+    assert.equal(args.at(-1), "prepare");
+    assert.ok(args[0].endsWith("/apps/backend/dist/launch.js"));
+  }
+  assert.equal(
+    databasePreparationCommand(env, ["node", WEB_SERVER_SCRIPT]),
+    null,
   );
-  assert.equal(file, process.execPath);
-  assert.equal(args.at(-1), "prepare");
-  assert.ok(args[0].endsWith("/apps/backend/dist/launch.js"));
+  // The skipped Web server is the one the image runs by default.
+  assert.match(
+    readFileSync(new URL("../Dockerfile", import.meta.url), "utf8"),
+    new RegExp(`^CMD \\["node", "${WEB_SERVER_SCRIPT}"\\]$`, "m"),
+  );
 });
 test("README initializer generates independent secrets and never overwrites an existing installation", () => {
   const dir = mkdtempSync(join(tmpdir(), "sourceweft-init-test-"));
