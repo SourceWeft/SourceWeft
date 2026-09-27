@@ -14,7 +14,6 @@ Purpose of this directory:
 | `dashboard.ts` | `workspace` | Dashboard workspace listing |
 | `health.ts` | — | Readiness / liveness check |
 | `jobs.ts` | — (shared) | Job polling (source parse, sync, etc.) |
-| `desktop-auth.ts` | `auth` | Desktop auth rendezvous endpoints |
 | `workspace.ts` | `workspace` | Workspace CRUD |
 | `llm-observability.ts` | `llm-observability` | LLM span / trace / generation queries |
 | `connectors-oauth.ts` | `connectors` | OAuth callback + state init |

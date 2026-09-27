@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import { Copy, ExternalLink, RotateCw } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
@@ -17,12 +16,9 @@ import {
   buildDesktopWebAuthUrl,
   createDesktopAuthState,
   getPendingDesktopAuth,
-  clearPendingDesktopAuth,
   setPendingDesktopAuth,
 } from "../../../lib/desktop-auth";
-import { authClient } from "../../../lib/auth-client";
 import { desktopBridge } from "../../../lib/desktop-bridge";
-import { apiBaseUrl } from "../../../lib/sdk";
 
 type DesktopLoginStatus = "idle" | "opening" | "waiting" | "error";
 
@@ -38,8 +34,10 @@ function describePath(path: string, t: ReturnType<typeof useTranslations>) {
   return t("describeDefault");
 }
 
+// The browser hands the sign-in back only through the `sourceweft://` deep
+// link, which `DesktopAuthListener` picks up; this view just starts sign-in
+// and waits for it.
 export function DesktopLoginView({ path }: { path: string }) {
-  const router = useRouter();
   const t = useTranslations("authPages.desktopLogin");
   const [status, setStatus] = useState<DesktopLoginStatus>("idle");
   const [loginUrl, setLoginUrl] = useState<string | null>(null);
@@ -61,83 +59,33 @@ export function DesktopLoginView({ path }: { path: string }) {
       return;
     }
 
-    let cancelled = false;
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-
-    async function poll() {
-      const pendingAuth = getPendingDesktopAuth();
-      if (!pendingAuth.state) {
-        if (!cancelled) {
-          setStatus("idle");
-          setLoginUrl(null);
-          setMessage(t("expiredMessage"));
-        }
-        return;
-      }
-
-      try {
-        const url = new URL("/v1/desktop-auth/poll", apiBaseUrl);
-        url.searchParams.set("state", pendingAuth.state);
-        const response = await fetch(url, {
-          credentials: "include",
-        });
-
-        if (response.status === 410) {
-          clearPendingDesktopAuth(pendingAuth.state);
-          if (!cancelled) {
-            setStatus("idle");
-            setLoginUrl(null);
-            setMessage(t("expiredMessage"));
-          }
-          return;
-        }
-
-        if (!response.ok) {
-          throw new Error(t("statusCheckFailed"));
-        }
-
-        const body = (await response.json()) as
-          { status: "pending" } | { status: "complete"; token: string };
-
-        if (body.status === "complete") {
-          const result = await authClient.oneTimeToken.verify({
-            token: body.token,
-          });
-
-          if (result.error) {
-            throw new Error(result.error.message || t("signInFailed"));
-          }
-
-          clearPendingDesktopAuth(pendingAuth.state);
-          if (!cancelled) {
-            router.replace("/dashboard/chat");
-            router.refresh();
-          }
-          return;
-        }
-      } catch {
-        // Keep polling; transient network or backend startup races should not fail the desktop flow.
-      }
-
-      if (!cancelled) {
-        timeoutId = setTimeout(() => void poll(), 1500);
-      }
+    const { expiresAt } = getPendingDesktopAuth();
+    if (!expiresAt) {
+      return;
     }
 
-    timeoutId = setTimeout(() => void poll(), 500);
-    return () => {
-      cancelled = true;
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-      }
-    };
-  }, [router, status, t]);
+    const timeoutId = setTimeout(() => {
+      // Reading it again drops the expired sign-in from storage.
+      getPendingDesktopAuth();
+      setStatus("idle");
+      setLoginUrl(null);
+      setMessage(t("expiredMessage"));
+    }, Math.max(expiresAt - Date.now(), 0));
 
-  async function openLogin(existingLoginUrl?: string | null) {
-    const state = existingLoginUrl ? getPendingDesktopAuth().state : null;
-    const nextState = state || createDesktopAuthState();
+    return () => clearTimeout(timeoutId);
+  }, [status, t]);
+
+  async function openLogin(reusePending = false) {
+    // Reopen only the sign-in that is still pending; once it has expired its
+    // link is useless, so start a new one with a new state.
+    const pendingAuth = getPendingDesktopAuth();
+    const reused =
+      reusePending && pendingAuth.state && pendingAuth.loginUrl
+        ? { loginUrl: pendingAuth.loginUrl, state: pendingAuth.state }
+        : null;
+    const nextState = reused?.state ?? createDesktopAuthState();
     const nextLoginUrl =
-      existingLoginUrl ||
+      reused?.loginUrl ??
       buildDesktopWebAuthUrl({
         path: authPath,
         search:
@@ -150,7 +98,9 @@ export function DesktopLoginView({ path }: { path: string }) {
     setCopied(false);
 
     try {
-      setPendingDesktopAuth({ loginUrl: nextLoginUrl, state: nextState });
+      if (!reused) {
+        setPendingDesktopAuth({ loginUrl: nextLoginUrl, state: nextState });
+      }
       setLoginUrl(nextLoginUrl);
       await desktopBridge.openExternalUrl(nextLoginUrl);
       setStatus("waiting");
@@ -211,7 +161,7 @@ export function DesktopLoginView({ path }: { path: string }) {
             <div className="grid grid-cols-2 gap-2">
               <Button
                 disabled={isOpening}
-                onClick={() => void openLogin(loginUrl)}
+                onClick={() => void openLogin(true)}
                 type="button"
                 variant="outline"
               >
@@ -230,6 +180,12 @@ export function DesktopLoginView({ path }: { path: string }) {
             </div>
           )}
         </div>
+
+        {isWaiting && !message && (
+          <p className="text-sm leading-6 text-muted-foreground">
+            {t("waitingHint")}
+          </p>
+        )}
 
         {message && (
           <div className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">

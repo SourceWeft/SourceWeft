@@ -71,6 +71,10 @@ export function trackAuthError(input: {
   trackEvent("auth_error", input);
 }
 
+export function trackDesktopHandoffStarted() {
+  trackEvent("desktop_handoff_started", {});
+}
+
 export function trackBeginCheckout(input: {
   billingInterval: BillingInterval;
   plan: CheckoutPlan;

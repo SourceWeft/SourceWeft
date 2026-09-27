@@ -47,6 +47,10 @@ export const ANALYTICS_EVENTS = {
   sign_up: { params: ["method"], keyEvent: true },
   login: { params: ["method"], keyEvent: false },
   auth_error: { params: ["action", "method", "surface"], keyEvent: false },
+  // The browser handed a sign-in to the desktop app. The desktop app reports
+  // login / sign_up (method "desktop") once the handoff arrives, so the two
+  // counts give the share of handoffs that never reached the app.
+  desktop_handoff_started: { params: [], keyEvent: false },
   begin_checkout: {
     params: [
       "plan",

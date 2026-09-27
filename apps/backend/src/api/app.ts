@@ -21,7 +21,6 @@ import { registerContentRoutes } from "./routes/content";
 import { registerConnectorOAuthRoutes } from "./routes/connectors-oauth";
 import { registerConnectorWebhookRoutes } from "./routes/connectors-webhooks";
 import { registerDashboardRoutes } from "./routes/dashboard";
-import { registerDesktopAuthRoutes } from "./routes/desktop-auth";
 import { registerLocalDeviceRoutes } from "./routes/local-devices";
 import { healthResponse } from "./routes/health";
 import { registerJobRoutes } from "./routes/jobs";
@@ -82,7 +81,6 @@ export function createApp() {
   app.use("/v1/workspaces/:workspaceId/*", workspaceRoleGuard);
 
   registerAuthMetaRoutes(app);
-  registerDesktopAuthRoutes(app);
   registerLocalDeviceRoutes(app);
   registerConnectorOAuthRoutes(app);
   registerConnectorWebhookRoutes(app);
