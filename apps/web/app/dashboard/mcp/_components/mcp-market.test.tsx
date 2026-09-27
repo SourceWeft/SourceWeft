@@ -38,6 +38,7 @@ vi.mock("../../chat/_components/sources-hub/mcp/use-mcp", () => ({
 }));
 vi.mock("./submit-mcp-dialog", () => ({ SubmitMcpDialog: () => null }));
 vi.mock("./mcp-credentials-dialog", () => ({ CredentialsDialog: () => null }));
+vi.mock("./mcp-ai-overview", () => ({ McpAiOverview: () => null }));
 
 const SHA = "0123456789abcdef0123456789abcdef01234567";
 

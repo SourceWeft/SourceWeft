@@ -13,6 +13,8 @@ import { McpDetailDialog } from "./mcp-detail-dialog";
 
 const api = vi.hoisted(() => ({ getWorkspaceMarketMcp: vi.fn() }));
 vi.mock("../../../../lib/sdk", () => ({ contentClient: api }));
+// The AI overview has its own suite (mcp-detail-dialog-ai-overview.test.tsx).
+vi.mock("./mcp-ai-overview", () => ({ McpAiOverview: () => null }));
 
 const SHA = "0123456789abcdef0123456789abcdef01234567";
 const IDENTIFIER = "io.github.o/weather";

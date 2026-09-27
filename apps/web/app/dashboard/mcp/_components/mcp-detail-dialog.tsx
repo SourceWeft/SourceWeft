@@ -49,6 +49,7 @@ import {
   McpReadmeSourceLine,
 } from "../../../_components/market/mcp-readme-section";
 import { McpIcon } from "../../../_components/site-icons";
+import { McpAiOverview } from "./mcp-ai-overview";
 
 type MarketMcpItem = ListWorkspaceMarketMcpResponse["items"][number];
 type MarketMcpDetail = Awaited<
@@ -339,6 +340,7 @@ export function McpDetailDialog({
                     </TabsList>
                   </div>
                   <TabsContent className="m-0 p-5" value="overview">
+                    <McpAiOverview identifier={market.identifier} />
                     <div className="flex flex-wrap items-center gap-1.5">
                       {market.official ? (
                         <Badge variant="default">{t("badges.official")}</Badge>

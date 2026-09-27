@@ -46,6 +46,8 @@ import {
 import { McpIcon } from "../../../_components/site-icons";
 import { invalidateWorkspaceMcpCache } from "../../chat/_components/sources-hub/mcp/use-mcp";
 import { CredentialsDialog } from "../_components/mcp-credentials-dialog";
+import { McpAiOverview } from "../_components/mcp-ai-overview";
+import { McpOverviewAdmin } from "../_components/mcp-overview-admin";
 
 type MarketMcpDetail = Awaited<
   ReturnType<typeof contentClient.getWorkspaceMarketMcp>
@@ -517,6 +519,7 @@ export default function McpDetailPage() {
                       </TabsList>
                     </div>
                     <TabsContent className="m-0 p-5" value="overview">
+                      <McpAiOverview identifier={item.identifier} />
                       <p className="text-xs text-muted-foreground">
                         {item.providerName ?? item.identifier}
                       </p>
@@ -772,6 +775,9 @@ export default function McpDetailPage() {
                       : t("detail.securityWeb")}
                   </p>
                 </section>
+
+                {/* Market admins only; renders nothing for anyone else. */}
+                <McpOverviewAdmin identifier={item.identifier} />
               </aside>
             ) : null}
           </div>
