@@ -1,5 +1,6 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { expect, test, vi } from "vitest";
 const state = vi.hoisted(() => ({ checkout: false }));
 vi.mock("./capabilities", () => ({
@@ -20,10 +21,14 @@ for (const enabled of [false, true]) {
   test(`public checkout links follow runtime capabilities (${enabled})`, () => {
     state.checkout = enabled;
     for (const Component of [SourceWeftHeader, SourceWeftFooter]) {
-      // The chrome is internationalized, so it must render inside the intl
-      // provider; the default locale keeps the landing anchors prefix-free.
+      // Match the app's providers: the language switcher uses shared settings.
+      // The default locale keeps the landing anchors prefix-free.
       const html = renderToStaticMarkup(
-        withIntl(createElement(Component, { authState }), { timeZone: "UTC" }),
+        createElement(
+          QueryClientProvider,
+          { client: new QueryClient() },
+          withIntl(createElement(Component, { authState }), { timeZone: "UTC" }),
+        ),
       );
       expect(html.includes('href="/#pricing"')).toBe(enabled);
       expect(html).toContain("SourceWeft");
