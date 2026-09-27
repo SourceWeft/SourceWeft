@@ -90,13 +90,13 @@ login, file upload and model response.
 
 ## Database migrations
 
-The API, worker and scheduler apply pending migrations themselves before they
-start, one instance at a time under a PostgreSQL lock; the others wait and then
-start. The `migrate` service runs the same step on its own first. A failed
-migration stops the service from starting; read its logs. When migrations run
+Every container applies pending migrations in the image entrypoint before its
+command starts, one container at a time under a PostgreSQL lock; the others
+wait and then start. The `migrate` service runs the same step on its own first.
+A failed migration stops the container; read its logs. When migrations run
 elsewhere (for example a database account without DDL rights), set
-`MIGRATION_ENABLED=false`: services then refuse to start while any migration is
-pending. See [apps/backend/docs/database-migrations.md](../apps/backend/docs/database-migrations.md).
+`MIGRATION_ENABLED=false`: containers then refuse to start while any migration
+is pending. See [apps/backend/docs/database-migrations.md](../apps/backend/docs/database-migrations.md).
 
 ## Upgrade
 

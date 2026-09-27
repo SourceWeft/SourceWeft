@@ -1,39 +1,55 @@
 # Database migrations at startup
 
-Every backend role starts through one launcher, `node dist/launch.js <role>`,
-which the package scripts wrap: `start:api`, `start:worker`, `start:scheduler`
-and `migrate`. Any deployment that starts the backend this way — Compose,
-Kubernetes, a PaaS, or `pnpm start:*` on a host — gets the same behavior; the
-launcher depends on no platform hook.
+The SourceWeft image migrates the database in its entrypoint,
+`docker/runtime-entrypoint.mjs`, before it runs a container's command — the
+same place Dify's `entrypoint.sh` does. Every container passes through it, so
+the command does not matter: `pnpm --filter @sourceweft/backend start:api`,
+`node /app/apps/backend/dist/worker.js` and the default Web server all start on
+a migrated database. No role or extra setting tells the image what a container
+is.
 
-## What a role does before it starts
+## What the entrypoint does
+
+When a database is configured (`DATABASE_URL`, or the `DB_*` fields it is
+built from), the entrypoint runs `node apps/backend/dist/launch.js prepare`
+before the command:
 
 1. Take a PostgreSQL advisory lock (`src/launch/migration-lock.ts`). It is a
-   session lock on the launcher's own connection, so a launcher that dies
-   releases it with its connection. A role waits up to 10 minutes for the
-   database to accept connections and for the lock, then exits non-zero.
+   session lock on its own connection, so a process that dies releases it with
+   its connection. It waits up to 10 minutes for the database to accept
+   connections and for the lock, then fails.
 2. With `MIGRATION_ENABLED=true` (the default), run `db:migrate` — the auth
-   schema, the Drizzle schema, then the browser-extension OAuth client — in a
-   child process. A failure exits non-zero and the service does not start.
-   With `MIGRATION_ENABLED=false`, only compare the shipped Drizzle journal with
-   `drizzle.__drizzle_migrations`; any pending migration stops the role, naming
-   what is missing.
-3. Release the lock and start the service as a child process, forwarding
-   SIGTERM/SIGINT and passing its exit code through.
+   schema, the Drizzle schema, then the browser-extension OAuth client. With
+   `MIGRATION_ENABLED=false`, only compare the image's Drizzle journal with
+   `drizzle.__drizzle_migrations`; any pending migration fails, naming what is
+   missing.
+3. Release the lock.
 
-The `migrate` role always migrates, then exits. Use it as a separate step (the
-Compose `migrate` service, a Kubernetes Job, a release pipeline). Roles that
-start afterwards take the lock, find nothing pending and start. Instances that
-start together migrate once: the others wait for the lock, then find nothing
-to do. Deployment order does not matter.
+If that step fails, the container exits with its code and the command never
+starts. Otherwise the command runs unchanged, with SIGTERM/SIGINT forwarded
+and its exit code passed through. Containers that start together migrate once:
+the others wait for the lock and then find nothing pending, so deployment order
+does not matter. A container without a database configuration skips the step
+(utility commands such as `pnpm --version`).
 
 `MIGRATION_ENABLED` accepts only `true`, `false`, `1` or `0` (case-insensitive);
 any other value fails startup. Set it to `false` when the application's
-database account has no DDL rights or migrations are owned by another process;
-the auth and extension steps then also run only in that separate step.
+database account has no DDL rights or migrations are owned by another step;
+the auth and extension steps then also run only in that step.
 
-Local development (`pnpm dev`) does not use the launcher. Run
-`pnpm --filter @sourceweft/backend db:migrate` after pulling new migrations.
+## Running migrations as a separate step
+
+`pnpm --filter @sourceweft/backend migrate` (`launch.js migrate`) always
+migrates, whatever `MIGRATION_ENABLED` says. Use it for a Kubernetes Job, a
+release pipeline, or the Compose `migrate` service.
+
+Outside the image — running the backend from source with `pnpm start:*` —
+nothing migrates automatically: run `migrate` first, as with Dify's source
+deployment. Local development (`pnpm dev`) likewise uses
+`pnpm --filter @sourceweft/backend db:migrate`.
+
+`launch.js api|worker|scheduler` only start that service; they exist so that
+deployments already started that way keep working.
 
 ## Writing migrations
 

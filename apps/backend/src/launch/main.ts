@@ -6,14 +6,19 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { logger } from "../shared/logger";
 import { findBackendPackageRoot } from "../shared/runtime-paths";
-import { parseLaunchRole, runLauncher, type LaunchRole } from "./launcher";
+import {
+  parseLaunchCommand,
+  runLauncher,
+  type LaunchCommand,
+} from "./launcher";
 import { acquireMigrationLock } from "./migration-lock";
 import { listPendingSchemaMigrations } from "./pending-migrations";
 
-// Entry point for every backend role: `node dist/launch.js <role>`. Built next
-// to dist/api.js, dist/worker.js and dist/scheduler.js, which it starts.
+// `node dist/launch.js <command>`: `prepare` is the image entrypoint's database
+// step (docker/runtime-entrypoint.mjs), `migrate` the explicit migration, and
+// `api`/`worker`/`scheduler` start dist/<service>.js, built next to this file.
 
-/** How long a role waits for the database and the migration lock. */
+/** How long a command waits for the database and the migration lock. */
 const MIGRATION_LOCK_TIMEOUT_MS = 10 * 60_000;
 
 const distDir = path.dirname(fileURLToPath(import.meta.url));
@@ -54,17 +59,17 @@ function run(command: string, args: string[], options: { cwd?: string }) {
   });
 }
 
-async function main(role: LaunchRole) {
-  const connectionString = process.env.DATABASE_URL;
-  if (!connectionString) {
-    throw new Error("DATABASE_URL is required to start a backend role");
-  }
+async function main(command: LaunchCommand) {
   return runLauncher({
-    role,
+    command,
     env: process.env,
     deps: {
-      acquireLock: () =>
-        acquireMigrationLock({
+      acquireLock: () => {
+        const connectionString = process.env.DATABASE_URL;
+        if (!connectionString) {
+          throw new Error("DATABASE_URL is required to prepare the database");
+        }
+        return acquireMigrationLock({
           connectionString,
           signal: shutdown.signal,
           timeoutMs: MIGRATION_LOCK_TIMEOUT_MS,
@@ -73,9 +78,10 @@ async function main(role: LaunchRole) {
               reason === "database"
                 ? "Waiting for the database to accept connections"
                 : "Waiting for another instance to finish database migrations",
-              { role },
+              { command },
             ),
-        }),
+        });
+      },
       listPendingMigrations: (lock) =>
         listPendingSchemaMigrations({
           client: lock.client,
@@ -84,7 +90,7 @@ async function main(role: LaunchRole) {
             "../../packages/db/drizzle/meta/_journal.json",
           ),
         }),
-      log: (message) => logger.info(message, { role }),
+      log: (message) => logger.info(message, { command }),
       runMigrations: async () => {
         const code = await run("pnpm", ["run", "db:migrate"], {
           cwd: backendRoot!,
@@ -94,20 +100,16 @@ async function main(role: LaunchRole) {
           throw new Error(`Database migration failed (exit code ${code})`);
         }
       },
-      startService: (serviceRole) => {
+      startService: (service) => {
         shutdown.signal.throwIfAborted();
-        return run(
-          process.execPath,
-          [path.join(distDir, `${serviceRole}.js`)],
-          {},
-        );
+        return run(process.execPath, [path.join(distDir, `${service}.js`)], {});
       },
     },
   });
 }
 
 try {
-  process.exitCode = await main(parseLaunchRole(process.argv[2]));
+  process.exitCode = await main(parseLaunchCommand(process.argv[2]));
 } catch (error) {
   if (exitSignal) {
     process.exitCode = exitCodeOf(null, exitSignal);

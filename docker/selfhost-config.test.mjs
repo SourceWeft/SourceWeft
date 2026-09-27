@@ -4,7 +4,10 @@ import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
-import { runtimeEnvironment } from "./runtime-entrypoint.mjs";
+import {
+  databasePreparationCommand,
+  runtimeEnvironment,
+} from "./runtime-entrypoint.mjs";
 
 test("DB fields are encoded once and do not diverge from the database password", () => {
   const password = "space @:/?#%中文";
@@ -29,6 +32,15 @@ test("explicit external connection overrides derived settings; utility commands 
   );
   assert.deepEqual(runtimeEnvironment({}), {});
   assert.throws(() => runtimeEnvironment({ DB_USER: "user" }), /DB_PASSWORD/);
+});
+test("every container with a database prepares it before its command; utility commands skip it", () => {
+  assert.equal(databasePreparationCommand({}), null);
+  const [file, args] = databasePreparationCommand(
+    runtimeEnvironment({ DB_USER: "u", DB_PASSWORD: "p", DB_NAME: "d" }),
+  );
+  assert.equal(file, process.execPath);
+  assert.equal(args.at(-1), "prepare");
+  assert.ok(args[0].endsWith("/apps/backend/dist/launch.js"));
 });
 test("README initializer generates independent secrets and never overwrites an existing installation", () => {
   const dir = mkdtempSync(join(tmpdir(), "sourceweft-init-test-"));
