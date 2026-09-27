@@ -956,6 +956,8 @@ export function McpMarket() {
     string | null
   >(null);
   const deepLinkHandledRef = React.useRef(false);
+  const deepLinkHighlightPendingRef = React.useRef(false);
+  const highlightTimeoutRef = React.useRef<number | undefined>(undefined);
 
   const startPendingAction = React.useCallback((key: string) => {
     setPendingActions((current) => {
@@ -1191,8 +1193,9 @@ export function McpMarket() {
 
   // Honor the ?mcp=<identifier> deep link from the public MCP detail page:
   // once the catalog is loaded, open the item's detail dialog. When the card is
-  // on the loaded page, also scroll it into view with a brief highlight;
-  // otherwise fetch the item directly. Runs once per page load.
+  // on the loaded page, jump it into view behind the dialog (a smooth scroll is
+  // cancelled by the dialog's scroll lock) and highlight it once the dialog
+  // closes; otherwise fetch the item directly. Runs once per page load.
   React.useEffect(() => {
     if (!deepLinkIdentifier || deepLinkHandledRef.current) return;
     if (catalogStatus !== "ready" || !workspace?.id) return;
@@ -1223,17 +1226,29 @@ export function McpMarket() {
         });
       return;
     }
-    setHighlightIdentifier(deepLinkIdentifier);
-    const frame = window.requestAnimationFrame(() => {
-      const card = document.getElementById(`mcp-card-${deepLinkIdentifier}`);
-      card?.scrollIntoView({ behavior: "smooth", block: "center" });
-    });
-    const timeout = window.setTimeout(() => setHighlightIdentifier(null), 2600);
-    return () => {
-      window.cancelAnimationFrame(frame);
-      window.clearTimeout(timeout);
-    };
+    deepLinkHighlightPendingRef.current = true;
+    document
+      .getElementById(`mcp-card-${deepLinkIdentifier}`)
+      ?.scrollIntoView({ block: "center" });
   }, [catalogStatus, deepLinkIdentifier, items, workspace?.id, t]);
+
+  React.useEffect(
+    () => () => window.clearTimeout(highlightTimeoutRef.current),
+    [],
+  );
+
+  function closeDetails() {
+    if (deepLinkHighlightPendingRef.current && selectedIdentifier) {
+      deepLinkHighlightPendingRef.current = false;
+      setHighlightIdentifier(selectedIdentifier);
+      window.clearTimeout(highlightTimeoutRef.current);
+      highlightTimeoutRef.current = window.setTimeout(
+        () => setHighlightIdentifier(null),
+        2600,
+      );
+    }
+    setSelectedIdentifier(null);
+  }
 
   // Surface the result of the OAuth redirect (GET /v1/mcp/oauth/callback bounces
   // back here with ?mcpOAuth=connected|error), then strip the query so a refresh
@@ -1709,7 +1724,7 @@ export function McpMarket() {
         onConfigure={setCredentialsInstall}
         onInstall={(next) => void installMcp(next)}
         onOpenChange={(open) => {
-          if (!open) setSelectedIdentifier(null);
+          if (!open) closeDetails();
         }}
         onTest={(install) => void testInstall(install)}
         onToggleEnabled={(install, enabled) =>
