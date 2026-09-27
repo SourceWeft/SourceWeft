@@ -17,6 +17,26 @@ declare global {
 
 // Dynamic lookup intentionally avoids Next's NEXT_PUBLIC_* build-time replacement.
 const env = (name: string) => process.env[name]?.trim() ?? "";
+
+let umamiMisconfigReported = false;
+
+/** Umami needs both values; one without the other is a configuration error. */
+export function resolveUmamiConfig(
+  scriptUrl: string,
+  websiteId: string,
+): AnalyticsRuntimeConfig["umami"] {
+  if (scriptUrl && websiteId) {
+    return { scriptUrl, websiteId };
+  }
+  if ((scriptUrl || websiteId) && !umamiMisconfigReported) {
+    umamiMisconfigReported = true;
+    console.error(
+      "[analytics] PUBLIC_UMAMI_SCRIPT_URL and PUBLIC_UMAMI_WEBSITE_ID must be set together; Umami is disabled.",
+    );
+  }
+  return undefined;
+}
+
 export function serverPublicRuntimeConfig(): PublicRuntimeConfig {
   return {
     googleMobileClientId:
@@ -24,6 +44,10 @@ export function serverPublicRuntimeConfig(): PublicRuntimeConfig {
       env("NEXT_PUBLIC_GOOGLE_MOBILE_CLIENT_ID"),
     analytics: {
       gtmId: env("PUBLIC_GTM_ID") || undefined,
+      umami: resolveUmamiConfig(
+        env("PUBLIC_UMAMI_SCRIPT_URL"),
+        env("PUBLIC_UMAMI_WEBSITE_ID"),
+      ),
     },
     apiBaseUrl:
       env("PUBLIC_API_BASE_URL") ||

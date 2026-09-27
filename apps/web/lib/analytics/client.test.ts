@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, test, vi } from "vitest";
 
 import type { AnalyticsValue } from "./catalog";
-import { createAnalyticsClient } from "./client";
+import { buildDestinations, createAnalyticsClient } from "./client";
 import type { AnalyticsContext } from "./context";
 import type { AnalyticsDestination, DestinationId } from "./destinations/types";
 
@@ -187,6 +187,16 @@ test("consent gate skips consent-requiring destinations", async () => {
   await flush();
   assert.equal(gated.calls.length, 0);
   assert.equal(tracks(open.calls).length, 1);
+});
+
+test("GTM only / Umami only / both / neither are built from runtime config", () => {
+  const umami = { scriptUrl: "https://umami.example/script.js", websiteId: "s" };
+  const ids = (config: Parameters<typeof buildDestinations>[0]) =>
+    buildDestinations(config).map((d) => d.id);
+  assert.deepEqual(ids({ gtmId: "GTM-1" }), ["gtm"]);
+  assert.deepEqual(ids({ umami }), ["umami"]);
+  assert.deepEqual(ids({ gtmId: "GTM-1", umami }), ["gtm", "umami"]);
+  assert.deepEqual(ids({}), []);
 });
 
 test("events delivered in order", async () => {
