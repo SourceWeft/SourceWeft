@@ -9,7 +9,9 @@ import type {
 } from "@sourceweft/market-contracts";
 
 export type McpIngestMode = "static" | "mixed";
-export type McpClassificationMode = "deepseek" | "rules";
+// "model": the system model, cross-checked against keyword rules; "rules":
+// keyword rules only.
+export type McpClassificationMode = "model" | "rules";
 
 export type McpClassificationResult = {
   categories: string[];
@@ -23,7 +25,7 @@ export type McpClassificationResult = {
     reviewRequired: boolean;
     secondaryCategories: string[];
   };
-  method: "deepseek" | "rules-fallback";
+  method: "model" | "rules-fallback";
   model?: string;
   provider?: string;
   reviewRequired: boolean;
@@ -238,7 +240,6 @@ export type McpIngestResult = {
 export type McpRepositoryParseOptions = {
   categories?: string[];
   classificationMode?: McpClassificationMode;
-  refreshClassification?: boolean;
   discovery?: {
     confidence?: number;
     marketPageUrl?: string;

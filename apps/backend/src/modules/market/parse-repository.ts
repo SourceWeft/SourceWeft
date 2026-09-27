@@ -54,8 +54,7 @@ export async function parseMcpRepository(
   const classification = await classifyMcpRepository(staticResult, {
     categories: options.categories,
     discovery: options.discovery,
-    mode: options.classificationMode ?? "deepseek",
-    refreshClassification: options.refreshClassification,
+    mode: options.classificationMode ?? "model",
   });
   const readme = readmeOf(source, staticResult);
   return {

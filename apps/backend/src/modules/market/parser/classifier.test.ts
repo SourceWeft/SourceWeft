@@ -1,8 +1,28 @@
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import { test } from "vitest";
+import { readFileSync } from "node:fs";
+import { beforeEach, test, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({ withSystemModel: vi.fn() }));
+
+// Only the door to the model is replaced; the not-ready error and readiness
+// are the real ones.
+vi.mock(
+  "../../../shared/model-gateway/system-client",
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import("../../../shared/model-gateway/system-client")
+    >()),
+    withSystemModel: mocks.withSystemModel,
+  }),
+);
+
+import { logger } from "../../../shared/logger";
+import {
+  SystemModelUnavailableError,
+  evaluateSystemModelReadiness,
+  type SystemModelCallContext,
+  type SystemChatCompleteInput,
+} from "../../../shared/model-gateway/system-client";
 import { classifyMcpRepository } from "./classifier";
 import {
   classifyByText,
@@ -80,10 +100,54 @@ function staticParseFixture(input?: {
   };
 }
 
-async function tempCachePath() {
-  const dir = await mkdtemp(path.join(tmpdir(), "sourceweft-classifier-test-"));
-  return path.join(dir, "cache.json");
+type Answer = {
+  confidence: number;
+  primaryCategory: string;
+  reason: string;
+  reviewRequired: boolean;
+  secondaryCategories: string[];
+};
+
+/** The system model answers with `answer`; records what it was asked. */
+function modelAnswers(answer: Answer) {
+  const calls: Array<{
+    context: SystemModelCallContext;
+    input: SystemChatCompleteInput;
+  }> = [];
+  mocks.withSystemModel.mockImplementation(
+    async (
+      context: SystemModelCallContext,
+      run: (chat: {
+        complete: (input: SystemChatCompleteInput) => Promise<unknown>;
+      }) => Promise<unknown>,
+    ) =>
+      run({
+        complete: async (input) => {
+          calls.push({ context, input });
+          return {
+            model: "deepseek/deepseek-v4.1-flash",
+            provider: "openrouter",
+            providerModel: "deepseek/deepseek-v4.1-flash",
+            structuredOutput: answer,
+            raw: { content: "" },
+          };
+        },
+      }),
+  );
+  return calls;
 }
+
+const browserAnswer: Answer = {
+  confidence: 0.95,
+  primaryCategory: "browser-automation",
+  reason: "Playwright controls browsers.",
+  reviewRequired: false,
+  secondaryCategories: ["developer-tools"],
+};
+
+beforeEach(() => {
+  mocks.withSystemModel.mockReset();
+});
 
 test("classifyByText keyword-classifies plain text and pins explicit slugs", () => {
   // Registry-style text (no repo parse) still classifies from name/description.
@@ -110,52 +174,137 @@ test("filters source market slugs out of canonical categories", () => {
   assert.equal(normalizeMcpCategorySlug("browser"), "browser-automation");
 });
 
-test("uses DeepSeek result when it returns canonical categories", async () => {
+test("uses the system model's result when it returns canonical categories", async () => {
+  const calls = modelAnswers(browserAnswer);
   const result = await classifyMcpRepository(staticParseFixture(), {
-    cachePath: await tempCachePath(),
-    mode: "deepseek",
-    deepSeekRunner: async () => ({
-      confidence: 0.95,
-      primaryCategory: "browser-automation",
-      reason: "Playwright controls browsers.",
-      reviewRequired: false,
-      secondaryCategories: ["developer-tools"],
-    }),
+    mode: "model",
   });
 
-  assert.equal(result.method, "deepseek");
+  assert.equal(result.method, "model");
   assert.deepEqual(result.categories, [
     "browser-automation",
     "developer-tools",
   ]);
   assert.equal(result.reviewRequired, false);
+  assert.equal(result.provider, "openrouter");
+  assert.equal(result.model, "deepseek/deepseek-v4.1-flash");
+
+  // One structured call under the classifier's purpose, prompt unchanged.
+  assert.equal(calls.length, 1);
+  const [{ context, input }] = calls as [(typeof calls)[number]];
+  assert.equal(context.purpose, "mcp_market.classify");
+  assert.equal(context.subjectRef, "mcp-repository:microsoft/playwright-mcp");
+  assert.equal(input.structuredOutput?.name, "mcp_classification");
+  assert.deepEqual(
+    (input.structuredOutput?.schema as { required: string[] }).required,
+    [
+      "confidence",
+      "primaryCategory",
+      "reason",
+      "reviewRequired",
+      "secondaryCategories",
+    ],
+  );
+  assert.deepEqual(input.thinking, {
+    mode: "off",
+    enabled: false,
+    includeReasoning: false,
+  });
+  const prompt = String(input.messages[0]?.content);
+  assert.match(prompt, /^Classify this Model Context Protocol server/);
+  assert.match(prompt, /Rule-based candidates:\n\[.*"browser-automation"/);
+  assert.match(prompt, /-----BEGIN UNTRUSTED MCP SERVER EVIDENCE-----/);
 });
 
-test("falls back to rules when DeepSeek returns an unknown slug", async () => {
+test("falls back to rules when the system model returns an unknown slug", async () => {
+  modelAnswers({
+    confidence: 0.9,
+    primaryCategory: "not-a-real-category",
+    reason: "Invalid category.",
+    reviewRequired: false,
+    secondaryCategories: [],
+  });
   const result = await classifyMcpRepository(staticParseFixture(), {
-    cachePath: await tempCachePath(),
-    mode: "deepseek",
-    deepSeekRunner: async () => ({
-      confidence: 0.9,
-      primaryCategory: "not-a-real-category",
-      reason: "Invalid category.",
-      reviewRequired: false,
-      secondaryCategories: [],
-    }),
+    mode: "model",
   });
 
   assert.equal(result.method, "rules-fallback");
   assert.equal(
     result.fallbackReason,
-    "DeepSeek returned unknown category slug(s): not-a-real-category",
+    "The system model returned unknown category slug(s): not-a-real-category",
   );
   assert.ok(result.categories.includes("browser-automation"));
   assert.equal(result.categories.includes("not-a-real-category"), false);
 });
 
+test("an answer that shares nothing with the rule candidates requires review", async () => {
+  modelAnswers({
+    confidence: 0.99,
+    primaryCategory: "databases",
+    reason: "It stores data.",
+    reviewRequired: false,
+    secondaryCategories: [],
+  });
+  const result = await classifyMcpRepository(staticParseFixture(), {
+    mode: "model",
+  });
+  assert.equal(result.method, "model");
+  assert.deepEqual(result.categories, ["databases"]);
+  assert.equal(result.reviewRequired, true);
+  assert.equal(result.llmResult?.reviewRequired, true);
+  assert.match(
+    result.llmResult?.reason ?? "",
+    /\[flagged: category diverges from rule candidates \[.*"browser-automation"/,
+  );
+});
+
+test("when the system model is not ready, keyword rules are used with an explicit reason and a warning", async () => {
+  const readiness = evaluateSystemModelReadiness(
+    { enabled: false, provider: "openrouter", apiKey: "", model: "m" },
+    null,
+  );
+  mocks.withSystemModel.mockRejectedValue(
+    new SystemModelUnavailableError(readiness),
+  );
+  const warn = vi.spyOn(logger, "warn");
+  const result = await classifyMcpRepository(staticParseFixture(), {
+    mode: "model",
+  });
+
+  assert.equal(result.method, "rules-fallback");
+  assert.equal(result.fallbackReason, "system_model_not_ready");
+  assert.equal(result.reviewRequired, true);
+  assert.deepEqual(
+    result.categories,
+    inferMcpCategories(staticParseFixture(), []),
+  );
+  assert.equal(warn.mock.calls.length, 1);
+  assert.match(String(warn.mock.calls[0]?.[0]), /system model is not ready/);
+  assert.deepEqual(warn.mock.calls[0]?.[1], {
+    subjectRef: "mcp-repository:microsoft/playwright-mcp",
+    reason: readiness.reason,
+  });
+});
+
+test("a failed model call falls back to rules with its reason and a warning", async () => {
+  mocks.withSystemModel.mockRejectedValue(
+    Object.assign(new Error("Upstream unavailable"), { code: "UPSTREAM" }),
+  );
+  const warn = vi.spyOn(logger, "warn");
+  const result = await classifyMcpRepository(staticParseFixture(), {
+    mode: "model",
+  });
+  assert.equal(result.method, "rules-fallback");
+  assert.equal(result.fallbackReason, "Upstream unavailable");
+  assert.equal(warn.mock.calls.length, 1);
+  assert.equal(
+    (warn.mock.calls[0]?.[1] as { errorCode?: string }).errorCode,
+    "UPSTREAM",
+  );
+});
+
 test("never uses market source slugs as manifest categories", async () => {
   const result = await classifyMcpRepository(staticParseFixture(), {
-    cachePath: await tempCachePath(),
     categories: ["mcp-so", "mcpservers", "official", "featured", "browser"],
     discovery: { sourceMarket: "mcp-so" },
     mode: "rules",
@@ -229,52 +378,39 @@ test("rule classifier covers representative MCP categories", () => {
   }
 });
 
-test("serves successful DeepSeek classifications from cache", async () => {
-  let calls = 0;
-  const cachePath = await tempCachePath();
+test("every classification asks the model: there is no local cache", async () => {
+  const calls = modelAnswers(browserAnswer);
   const parsed = staticParseFixture();
-  const runner = async () => {
-    calls += 1;
-    return {
-      confidence: 0.95,
-      primaryCategory: "browser-automation",
-      reason: "Playwright controls browsers.",
-      reviewRequired: false,
-      secondaryCategories: ["developer-tools"],
-    };
-  };
-
-  await classifyMcpRepository(parsed, {
-    cachePath,
-    deepSeekRunner: runner,
-    mode: "deepseek",
-  });
-  const cached = await classifyMcpRepository(parsed, {
-    cachePath,
-    deepSeekRunner: runner,
-    mode: "deepseek",
-  });
-
-  assert.equal(calls, 1);
-  assert.equal(cached.method, "deepseek");
-  assert.deepEqual(cached.categories, [
-    "browser-automation",
-    "developer-tools",
-  ]);
+  await classifyMcpRepository(parsed, { mode: "model" });
+  const again = await classifyMcpRepository(parsed, { mode: "model" });
+  assert.equal(calls.length, 2);
+  assert.equal(again.method, "model");
 });
 
-test("rules mode skips the DeepSeek runner", async () => {
-  let calls = 0;
+test("the classifier keeps no direct client, cache file or classifier environment", () => {
+  const source = readFileSync(
+    new URL("./classifier.ts", import.meta.url),
+    "utf8",
+  );
+  for (const retired of [
+    "@ai-sdk/",
+    "generateText",
+    "ATLASCLOUD_API_KEY",
+    "MCP_CLASSIFIER_",
+    "mcp-classification-cache",
+    "process.env",
+    "node:fs",
+  ]) {
+    assert.equal(source.includes(retired), false, retired);
+  }
+});
+
+test("rules mode skips the model", async () => {
   const result = await classifyMcpRepository(staticParseFixture(), {
-    cachePath: await tempCachePath(),
-    deepSeekRunner: async () => {
-      calls += 1;
-      throw new Error("should not be called");
-    },
     mode: "rules",
   });
 
-  assert.equal(calls, 0);
+  assert.equal(mocks.withSystemModel.mock.calls.length, 0);
   assert.equal(result.method, "rules-fallback");
   assert.equal(result.fallbackReason, "Rules mode requested");
 });
