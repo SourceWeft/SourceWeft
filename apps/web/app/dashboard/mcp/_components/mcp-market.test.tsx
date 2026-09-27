@@ -38,7 +38,6 @@ vi.mock("../../chat/_components/sources-hub/mcp/use-mcp", () => ({
 }));
 vi.mock("./submit-mcp-dialog", () => ({ SubmitMcpDialog: () => null }));
 vi.mock("./mcp-credentials-dialog", () => ({ CredentialsDialog: () => null }));
-vi.mock("./mcp-ai-overview", () => ({ McpAiOverview: () => null }));
 
 const SHA = "0123456789abcdef0123456789abcdef01234567";
 
@@ -127,6 +126,7 @@ describe("McpMarket ?mcp= deep link", { timeout: 30_000 }, () => {
     expect(api.getWorkspaceMarketMcp).toHaveBeenCalledWith(
       "ws-1",
       onPage.identifier,
+      { locale: "en" },
     );
     expect(tabLabels()).toEqual(["Overview", "README", "Tools (0)"]);
     expect(Element.prototype.scrollIntoView).toHaveBeenCalledWith({

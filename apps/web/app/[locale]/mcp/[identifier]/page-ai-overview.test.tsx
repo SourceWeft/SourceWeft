@@ -4,17 +4,16 @@ import { getMarketMcpManifestResponseSchema } from "@sourceweft/market-contracts
 
 import enMessages from "../../../../messages/en.json";
 import zhCNMessages from "../../../../messages/zh-CN.json";
-import type { MarketMcpAiOverview } from "../../../../lib/mcp-ai-overview";
+import type {
+  MarketMcpAiOverview,
+  MarketMcpLocale,
+} from "../../../../lib/mcp-ai-overview";
 
 const market = vi.hoisted(() => ({
   getPublicMcpDetail: vi.fn(),
   getPublicMcpManifest: vi.fn(),
   listPublicMcp: vi.fn(),
   listPublicMcpCategories: vi.fn(),
-}));
-const overviews = vi.hoisted(() => ({
-  getPublicMcpAiOverview: vi.fn(),
-  getPublicMcpOverviewLocales: vi.fn(),
 }));
 // The locale the page is rendered in; the translators below follow it.
 const intl = vi.hoisted(() => ({ locale: "en" }));
@@ -24,7 +23,6 @@ vi.mock("../../../../lib/market-mcp", () => ({
   isMarketNotFound: (error: unknown) =>
     (error as { status?: number } | null)?.status === 404,
 }));
-vi.mock("../../../../lib/market-mcp-overview", () => overviews);
 vi.mock("../../../_landing/auth-state-server", () => ({
   resolveInitialLandingAuthState: async () => ({
     isPending: false,
@@ -144,10 +142,19 @@ function overview(
   };
 }
 
-function withOverview(aiOverview: MarketMcpAiOverview | null) {
-  overviews.getPublicMcpAiOverview.mockResolvedValue({
+/** What the market's detail says about the overview, for every locale. */
+function withDetail({
+  aiOverview = null,
+  overviewLocales = [],
+}: {
+  aiOverview?: MarketMcpAiOverview | null;
+  overviewLocales?: MarketMcpLocale[];
+} = {}) {
+  market.getPublicMcpDetail.mockResolvedValue({
     aiOverview,
-    overviewLocales: null,
+    overviewLocales,
+    readme: null,
+    versions: [],
   });
 }
 
@@ -179,24 +186,17 @@ function navLabels(html: string, label: string) {
 beforeEach(() => {
   intl.locale = "en";
   market.getPublicMcpManifest.mockReset().mockResolvedValue(manifestResponse);
-  market.getPublicMcpDetail
-    .mockReset()
-    .mockResolvedValue({ readme: null, versions: [] });
+  market.getPublicMcpDetail.mockReset();
   market.listPublicMcp.mockReset().mockResolvedValue({ items: [] });
   market.listPublicMcpCategories.mockReset().mockResolvedValue({ items: [] });
-  overviews.getPublicMcpAiOverview.mockReset();
-  overviews.getPublicMcpOverviewLocales.mockReset().mockResolvedValue([]);
-  withOverview(null);
+  withDetail();
 });
 
 describe("public MCP detail page AI overview", () => {
   it("shows the overview in the Overview section in place of the description, labelled AI-generated", async () => {
-    withOverview(overview());
+    withDetail({ aiOverview: overview() });
     const html = await render();
-    expect(overviews.getPublicMcpAiOverview).toHaveBeenCalledWith(
-      IDENTIFIER,
-      "en",
-    );
+    expect(market.getPublicMcpDetail).toHaveBeenCalledWith(IDENTIFIER, "en");
     expect(navLabels(html, "Sections")[0]).toBe("overview");
 
     const section = overviewSection(html)!;
@@ -217,7 +217,7 @@ describe("public MCP detail page AI overview", () => {
   });
 
   it("leaves the cautions note out when the overview has none", async () => {
-    withOverview(overview({ cautions: null }));
+    withDetail({ aiOverview: overview({ cautions: null }) });
     const section = overviewSection(await render())!;
     expect(section).toContain('data-testid="mcp-ai-overview"');
     expect(section).not.toContain("catalog-ai-overview-cautions");
@@ -230,12 +230,16 @@ describe("public MCP detail page AI overview", () => {
     expect(section).toContain(DESCRIPTION);
   });
 
-  it("asks in the visitor's language and notes an English fallback", async () => {
-    withOverview(overview({ locale: "en" }));
+  it("asks in the visitor's language, for the overview and the related cards, and notes an English fallback", async () => {
+    withDetail({ aiOverview: overview({ locale: "en" }) });
+    market.getPublicMcpManifest.mockResolvedValue({
+      ...manifestResponse,
+      item: { ...manifestResponse.item, categories: ["weather"] },
+    });
     const html = await render("zh-CN");
-    expect(overviews.getPublicMcpAiOverview).toHaveBeenCalledWith(
-      IDENTIFIER,
-      "zh-CN",
+    expect(market.getPublicMcpDetail).toHaveBeenCalledWith(IDENTIFIER, "zh-CN");
+    expect(market.listPublicMcp).toHaveBeenCalledWith(
+      expect.objectContaining({ category: "weather", locale: "zh-CN" }),
     );
     const section = overviewSection(html)!;
     expect(section).toContain(zhCNMessages.mcp.aiOverview.title);
@@ -243,7 +247,9 @@ describe("public MCP detail page AI overview", () => {
   });
 
   it("shows no fallback note when the overview is in the visitor's language", async () => {
-    withOverview(overview({ locale: "zh-CN", summary: "为出行查询天气。" }));
+    withDetail({
+      aiOverview: overview({ locale: "zh-CN", summary: "为出行查询天气。" }),
+    });
     const section = overviewSection(await render("zh-CN"))!;
     expect(section).toContain("为出行查询天气。");
     expect(section).not.toContain(zhCNMessages.mcp.aiOverview.englishFallback);
@@ -257,7 +263,7 @@ describe("public MCP detail page AI overview", () => {
     let html = await render();
     expect(navLabels(html, "Sections")).not.toContain("overview");
 
-    withOverview(overview());
+    withDetail({ aiOverview: overview() });
     html = await render();
     expect(navLabels(html, "Sections")[0]).toBe("overview");
     const section = overviewSection(html)!;
@@ -277,12 +283,11 @@ describe("public MCP detail page hreflang", () => {
     });
   }
 
-  it("lists English and each language with a visible overview", async () => {
-    overviews.getPublicMcpOverviewLocales.mockResolvedValue(["zh-CN"]);
+  it("lists English and each language the detail says has a visible overview", async () => {
+    withDetail({ overviewLocales: ["en", "zh-CN"] });
     const english = await metadata("en");
-    expect(overviews.getPublicMcpOverviewLocales).toHaveBeenCalledWith(
-      IDENTIFIER,
-    );
+    // The same read as the page body's, in the page's language.
+    expect(market.getPublicMcpDetail).toHaveBeenCalledWith(IDENTIFIER, "en");
     expect(english.alternates).toEqual({
       canonical: `${SITE_URL}${PATH}`,
       languages: {
@@ -298,17 +303,23 @@ describe("public MCP detail page hreflang", () => {
     expect((await metadata("zh-CN")).alternates?.canonical).toBe(
       `${SITE_URL}/zh-CN${PATH}`,
     );
+    expect(market.getPublicMcpDetail).toHaveBeenLastCalledWith(
+      IDENTIFIER,
+      "zh-CN",
+    );
     expect((await metadata("zh-TW")).alternates).toMatchObject({
       canonical: `${SITE_URL}${PATH}`,
     });
   });
 
   it("keeps the canonical on English, with no alternates, without an overview in another language", async () => {
-    overviews.getPublicMcpOverviewLocales.mockResolvedValue([]);
-    for (const locale of ["en", "zh-CN", "zh-TW"]) {
-      expect((await metadata(locale)).alternates).toEqual({
-        canonical: `${SITE_URL}${PATH}`,
-      });
+    for (const overviewLocales of [[], ["en"]] as MarketMcpLocale[][]) {
+      withDetail({ overviewLocales });
+      for (const locale of ["en", "zh-CN", "zh-TW"]) {
+        expect((await metadata(locale)).alternates).toEqual({
+          canonical: `${SITE_URL}${PATH}`,
+        });
+      }
     }
   });
 });

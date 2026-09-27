@@ -17,10 +17,6 @@ import {
 import type { MarketItemSummary } from "@sourceweft/market-sdk";
 
 import { buildTranslatedAlternates } from "../../../../lib/i18n/metadata";
-import {
-  getPublicMcpAiOverview,
-  getPublicMcpOverviewLocales,
-} from "../../../../lib/market-mcp-overview";
 import { mcpOverviewLocale } from "../../../../lib/mcp-ai-overview";
 import { resolveInitialLandingAuthState } from "../../../_landing/auth-state-server";
 import { SourceWeftFooter } from "../../../_landing/components/sourceweft-footer";
@@ -141,15 +137,23 @@ export async function generateMetadata({
 }: PageProps): Promise<Metadata> {
   const { locale, identifier } = await params;
   try {
-    const result = await loadMcp(decodeURIComponent(identifier));
+    const decodedIdentifier = decodeURIComponent(identifier);
+    const pageLocale = hasLocale(routing.locales, locale)
+      ? locale
+      : routing.defaultLocale;
+    const [result, detail] = await Promise.all([
+      loadMcp(decodedIdentifier),
+      // The same cached read as the page body's.
+      getPublicMcpDetail(decodedIdentifier, mcpOverviewLocale(pageLocale)),
+    ]);
     const title = `${result.item.name} MCP Server`;
     const description = mcpDetailSeoDescription(result);
     // The body is the registry's English; a locale counts as its own page only
     // where the server has a visible AI overview written in it, as for skills.
     const alternates = buildTranslatedAlternates(
       mcpPath(result.item.identifier),
-      hasLocale(routing.locales, locale) ? locale : routing.defaultLocale,
-      await getPublicMcpOverviewLocales(result.item.identifier),
+      pageLocale,
+      detail.overviewLocales,
     );
     const url = alternates.canonical;
     return {
@@ -187,21 +191,20 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
   setRequestLocale(locale);
   const t = await getTranslations("mcp.detail");
   const decodedIdentifier = decodeURIComponent(identifier);
-  const [authState, result, { readme, versions }, categoriesResponse] =
-    await Promise.all([
-      resolveInitialLandingAuthState(),
-      loadMcp(decodedIdentifier),
-      getPublicMcpDetail(decodedIdentifier),
-      listPublicMcpCategories(),
-    ]);
+  // AI text in the visitor's language, English when there is none in it.
+  const overviewLocale = mcpOverviewLocale(locale);
+  const [
+    authState,
+    result,
+    { aiOverview, readme, versions },
+    categoriesResponse,
+  ] = await Promise.all([
+    resolveInitialLandingAuthState(),
+    loadMcp(decodedIdentifier),
+    getPublicMcpDetail(decodedIdentifier, overviewLocale),
+    listPublicMcpCategories(),
+  ]);
   const { item, manifest, version } = result;
-  // In the visitor's language, English when there is none in it. Read while
-  // the related servers load; it never fails, only comes back empty.
-  const requestedOverviewLocale = mcpOverviewLocale(locale);
-  const aiOverviewRead = getPublicMcpAiOverview(
-    item.identifier,
-    requestedOverviewLocale,
-  );
   const categoryNames = mcpCategoryNames(categoriesResponse.items);
   const relatedMarket =
     item.categories.length > 0
@@ -209,6 +212,7 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
           category: item.categories.join(","),
           includeDesktopOnly: true,
           limit: 12,
+          locale: overviewLocale,
         })
       : { items: [] };
   const relatedItems = relatedMcpItems({
@@ -225,7 +229,6 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
   const repoUrl = manifest.repoUrl ?? item.repoUrl;
   const homepageUrl = manifest.homepageUrl ?? item.homepageUrl;
   const clientConfig = remoteMcpClientConfig(manifest);
-  const { aiOverview } = await aiOverviewRead;
   // The hero already shows the summary; only a longer description adds
   // anything. An AI overview, when there is one, takes the description's
   // place; the description itself is never changed.
@@ -458,7 +461,7 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
                 <McpAiOverviewView
                   className="last:mb-0"
                   overview={aiOverview}
-                  requestedLocale={requestedOverviewLocale}
+                  requestedLocale={overviewLocale}
                 />
               ) : null}
               {overviewText || manifest.riskSummary ? (

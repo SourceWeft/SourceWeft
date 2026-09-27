@@ -20,39 +20,42 @@ import {
   MCP_OVERVIEW_LOCALES,
   regenerateMcpOverview,
   setMcpOverviewHidden,
-  type McpOverviewAdminState,
+  type GetMcpOverviewAdminResponse,
 } from "../../../../lib/mcp-ai-overview";
 
-const ANALYSIS_STATUSES: readonly string[] = [
-  "pending",
-  "running",
-  "ready",
-  "failed",
-  "needs-review",
+// Skip reasons with their own wording; any other shows as the API names it.
+const SKIP_REASONS: readonly string[] = [
+  "not-eligible",
+  "readme-pending",
+  "invalid-manifest",
+  "no-content",
+  "missing-version",
 ];
-const CATEGORY_SOURCES: readonly string[] = ["auto", "ai", "admin"];
 
 function formatDate(value: string, locale: string) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString(locale);
 }
 
-function isRunning(state: McpOverviewAdminState | null) {
+function isRunning(state: GetMcpOverviewAdminResponse | null) {
   const status = state?.analysis?.status;
   return status === "pending" || status === "running";
 }
 
 /**
  * A market admin's view of one MCP server's AI overview: each language's
- * state, the latest analysis and its error, whether the system model can
- * write overviews, the model and when it wrote them, and Regenerate / Hide /
- * Show. Renders nothing for anyone who is not a market admin.
+ * state, the latest analysis (its error, rationale and evidence), why no
+ * overview is written when none is, whether the system model can write
+ * overviews, the model and when it wrote them, and Regenerate / Hide / Show.
+ * Renders nothing for anyone who is not a market admin.
  */
 export function McpOverviewAdmin({ identifier }: { identifier: string }) {
   const t = useTranslations("mcp.aiOverview.admin");
   const locale = useLocale();
   const [isAdmin, setIsAdmin] = React.useState(false);
-  const [state, setState] = React.useState<McpOverviewAdminState | null>(null);
+  const [state, setState] = React.useState<GetMcpOverviewAdminResponse | null>(
+    null,
+  );
   const [loading, setLoading] = React.useState(true);
   const [busy, setBusy] = React.useState(false);
   const [message, setMessage] = React.useState<string | null>(null);
@@ -119,13 +122,13 @@ export function McpOverviewAdmin({ identifier }: { identifier: string }) {
     }
   }
 
-  const entries = state?.entries ?? [];
-  const rows = new Map(entries.map((entry) => [entry.locale, entry]));
-  const first = entries[0];
+  const overviews = state?.overviews ?? [];
+  const rows = new Map(overviews.map((entry) => [entry.locale, entry]));
+  const first = overviews[0];
   const allHidden =
-    entries.length > 0 && entries.every((entry) => entry.hidden);
-  const status = state?.analysis?.status ?? "";
-  const source = state?.categoriesSource ?? null;
+    overviews.length > 0 && overviews.every((entry) => entry.hidden);
+  const classification = state?.analysis?.classification ?? null;
+  const skipReason = state?.skipReason ?? null;
 
   return (
     <section
@@ -151,20 +154,29 @@ export function McpOverviewAdmin({ identifier }: { identifier: string }) {
           <div className="space-y-1" data-testid="mcp-overview-analysis">
             <p>
               {t("analysisState")}:{" "}
-              {!state.analysis
-                ? t("analysisStatuses.missing")
-                : ANALYSIS_STATUSES.includes(status)
-                  ? t(`analysisStatuses.${status}`)
-                  : status}
+              {t(`analysisStatuses.${state.analysis?.status ?? "missing"}`)}
             </p>
             <p>
               {t("categorySource")}:{" "}
-              {!source
-                ? t("categorySources.none")
-                : CATEGORY_SOURCES.includes(source)
-                  ? t(`categorySources.${source}`)
-                  : source}
+              {t(`categorySources.${state.categoriesSource}`)}
             </p>
+            {classification ? (
+              <>
+                <p>
+                  {t("rationale")}: {classification.rationale}
+                </p>
+                {classification.categories.length > 0 ? (
+                  <p>
+                    {t("evidence")}:{" "}
+                    {classification.categories
+                      .map(
+                        (category) => `${category.slug}: ${category.evidence}`,
+                      )
+                      .join(" · ")}
+                  </p>
+                ) : null}
+              </>
+            ) : null}
             {state.analysis?.error ? (
               <p className="text-destructive" role="alert">
                 {state.analysis.error}
@@ -173,53 +185,54 @@ export function McpOverviewAdmin({ identifier }: { identifier: string }) {
             <p className="text-muted-foreground">{t("retained")}</p>
           </div>
 
-          {state.systemModel ? (
-            <div
-              className="space-y-0.5"
-              data-testid="mcp-overview-system-model"
-            >
-              <p className="flex items-center gap-1.5">
-                {state.systemModel.ready ? (
-                  <CheckCircle2
-                    className="size-3.5 text-foreground"
-                    aria-hidden
-                  />
-                ) : (
-                  <CircleAlert
-                    className="size-3.5 text-destructive"
-                    aria-hidden
-                  />
-                )}
-                <span className="font-medium text-foreground">
-                  {t("systemModel")}
-                </span>
-                <span
-                  className={
-                    state.systemModel.ready
-                      ? "text-foreground"
-                      : "text-destructive"
-                  }
-                >
-                  {state.systemModel.ready
-                    ? t("systemModelReady")
-                    : t("systemModelNotReady")}
-                </span>
+          <div className="space-y-0.5" data-testid="mcp-overview-system-model">
+            <p className="flex items-center gap-1.5">
+              {state.systemModel.ready ? (
+                <CheckCircle2
+                  className="size-3.5 text-foreground"
+                  aria-hidden
+                />
+              ) : (
+                <CircleAlert
+                  className="size-3.5 text-destructive"
+                  aria-hidden
+                />
+              )}
+              <span className="font-medium text-foreground">
+                {t("systemModel")}
+              </span>
+              <span
+                className={
+                  state.systemModel.ready
+                    ? "text-foreground"
+                    : "text-destructive"
+                }
+              >
+                {state.systemModel.ready
+                  ? t("systemModelReady")
+                  : t("systemModelNotReady")}
+              </span>
+            </p>
+            {!state.systemModel.ready && state.systemModel.reason ? (
+              <p className="text-muted-foreground">
+                {state.systemModel.reason}
               </p>
-              {!state.systemModel.ready && state.systemModel.reason ? (
-                <p className="text-muted-foreground">
-                  {state.systemModel.reason}
-                </p>
-              ) : null}
-            </div>
-          ) : null}
+            ) : null}
+          </div>
 
-          {!state.eligible ? (
-            <p className="text-muted-foreground">{t("notEligible")}</p>
-          ) : entries.length === 0 ? (
+          {!state.versionId ? (
+            <p className="text-muted-foreground">{t("noVersion")}</p>
+          ) : skipReason ? (
+            <p className="text-muted-foreground">
+              {SKIP_REASONS.includes(skipReason)
+                ? t(`skipReasons.${skipReason}`)
+                : skipReason}
+            </p>
+          ) : overviews.length === 0 ? (
             <p className="text-muted-foreground">{t("none")}</p>
           ) : null}
 
-          {entries.length > 0 ? (
+          {overviews.length > 0 ? (
             <>
               <ul aria-label={t("locales")} className="space-y-1">
                 {MCP_OVERVIEW_LOCALES.map((id) => {
@@ -230,15 +243,20 @@ export function McpOverviewAdmin({ identifier }: { identifier: string }) {
                       key={id}
                     >
                       <span className="font-mono">{id}</span>
-                      <Badge
-                        variant={row && !row.hidden ? "secondary" : "outline"}
-                      >
-                        {!row
-                          ? t("missing")
-                          : row.hidden
-                            ? t("hidden")
-                            : t("visible")}
-                      </Badge>
+                      <span className="flex items-center gap-1">
+                        {row && !row.current ? (
+                          <Badge variant="outline">{t("stale")}</Badge>
+                        ) : null}
+                        <Badge
+                          variant={row && !row.hidden ? "secondary" : "outline"}
+                        >
+                          {!row
+                            ? t("missing")
+                            : row.hidden
+                              ? t("hidden")
+                              : t("visible")}
+                        </Badge>
+                      </span>
                     </li>
                   );
                 })}
@@ -258,46 +276,48 @@ export function McpOverviewAdmin({ identifier }: { identifier: string }) {
             </>
           ) : null}
 
-          <div className="flex flex-wrap gap-2">
-            <Button
-              disabled={busy || !state.eligible || running}
-              onClick={() =>
-                void run(async () => {
-                  const { queued } = await regenerateMcpOverview(identifier);
-                  return queued === false
-                    ? t("regenerateNotQueued")
-                    : t("regenerateQueued");
-                })
-              }
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              <RefreshCw className="size-3.5" aria-hidden />
-              {t("regenerate")}
-            </Button>
-            {entries.length > 0 ? (
+          {state.versionId ? (
+            <div className="flex flex-wrap gap-2">
               <Button
-                disabled={busy}
+                disabled={busy || !state.eligible || running}
                 onClick={() =>
                   void run(async () => {
-                    await setMcpOverviewHidden(identifier, !allHidden);
-                    return allHidden ? t("shownDone") : t("hiddenDone");
+                    const { queued } = await regenerateMcpOverview(identifier);
+                    return queued
+                      ? t("regenerateQueued")
+                      : t("regenerateNotQueued");
                   })
                 }
                 size="sm"
                 type="button"
                 variant="outline"
               >
-                {allHidden ? (
-                  <Eye className="size-3.5" aria-hidden />
-                ) : (
-                  <EyeOff className="size-3.5" aria-hidden />
-                )}
-                {allHidden ? t("show") : t("hide")}
+                <RefreshCw className="size-3.5" aria-hidden />
+                {t("regenerate")}
               </Button>
-            ) : null}
-          </div>
+              {overviews.length > 0 ? (
+                <Button
+                  disabled={busy}
+                  onClick={() =>
+                    void run(async () => {
+                      await setMcpOverviewHidden(identifier, !allHidden);
+                      return allHidden ? t("shownDone") : t("hiddenDone");
+                    })
+                  }
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  {allHidden ? (
+                    <Eye className="size-3.5" aria-hidden />
+                  ) : (
+                    <EyeOff className="size-3.5" aria-hidden />
+                  )}
+                  {allHidden ? t("show") : t("hide")}
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       ) : null}
 

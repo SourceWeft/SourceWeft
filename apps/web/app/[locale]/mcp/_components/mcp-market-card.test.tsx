@@ -80,12 +80,9 @@ async function card(value: ReturnType<typeof item>) {
 
 describe("public MCP card", () => {
   it("shows the AI summary when the market has one, marked as AI-written", async () => {
-    // The market SDK's schema does not name `aiSummary` yet (#152): the field
-    // is added the way the API's answer carries it.
-    const html = await card({
-      ...item(),
-      aiSummary: "Weather lookups for trip planning.",
-    } as ReturnType<typeof item>);
+    const html = await card(
+      item({ aiSummary: "Weather lookups for trip planning." }),
+    );
     expect(html).toContain("Weather lookups for trip planning.");
     expect(html).not.toContain("Forecasts for any city.");
     expect(html).toContain("data-ai-summary");
@@ -96,9 +93,7 @@ describe("public MCP card", () => {
 
   it("falls back to the registry summary without one", async () => {
     for (const aiSummary of [undefined, null, "  "]) {
-      const html = await card({ ...item(), aiSummary } as ReturnType<
-        typeof item
-      >);
+      const html = await card(item({ aiSummary }));
       expect(html).toContain("Forecasts for any city.");
       expect(html).not.toContain("data-ai-summary");
     }

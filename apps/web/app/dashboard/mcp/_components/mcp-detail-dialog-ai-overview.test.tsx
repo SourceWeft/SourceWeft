@@ -1,17 +1,21 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { marketItemSummarySchema } from "@sourceweft/market-contracts";
+import {
+  marketItemSummarySchema,
+  type MarketMcpAiOverview,
+} from "@sourceweft/market-contracts";
 
 import enMessages from "@/messages/en.json";
-import { flush, mountWithIntl, unmountAll } from "@/test/react";
+import zhTWMessages from "@/messages/zh-TW.json";
+import {
+  flush,
+  type IntlOptions,
+  mountWithIntl,
+  unmountAll,
+} from "@/test/react";
 
 const api = vi.hoisted(() => ({ getWorkspaceMarketMcp: vi.fn() }));
-const overviews = vi.hoisted(() => ({ getMcpAiOverview: vi.fn() }));
 vi.mock("../../../../lib/sdk", () => ({ contentClient: api }));
-vi.mock("../../../../lib/mcp-ai-overview", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../../../lib/mcp-ai-overview")>()),
-  getMcpAiOverview: overviews.getMcpAiOverview,
-}));
 
 import { McpDetailDialog } from "./mcp-detail-dialog";
 
@@ -32,41 +36,45 @@ const summary = marketItemSummarySchema.parse({
   visibility: "public",
 });
 
-const detail = {
-  install: null,
-  market: {
-    item: summary,
-    readme: null,
-    versions: [
-      {
-        manifestJson: {
-          description: DESCRIPTION,
-          identifier: IDENTIFIER,
-          name: "Weather",
-          schemaVersion: 1,
-          summary: "Forecasts for any city.",
-          tools: [{ name: "forecast", risk: "read" }],
-          transport: "streamable_http",
-          version: "1.0.0",
-        },
-        status: "published",
-        version: "1.0.0",
-      },
-    ],
-  },
-};
-
-const overview = {
+const overview: MarketMcpAiOverview = {
   summary: "Weather lookups for trip planning.",
   whatItDoes: "Looks up forecasts and severe-weather alerts.",
   whenToUse: "When planning a trip.",
   requirements: "",
   cautions: "Sends city names to a third-party service.",
-  locale: "en" as const,
+  locale: "en",
   generatedAt: "2026-09-27T00:00:00.000Z",
 };
 
-async function open() {
+/** The workspace detail: `market` is the public detail, AI overview included. */
+function detail(aiOverview: MarketMcpAiOverview | null) {
+  return {
+    install: null,
+    market: {
+      item: summary,
+      readme: null,
+      aiOverview,
+      versions: [
+        {
+          manifestJson: {
+            description: DESCRIPTION,
+            identifier: IDENTIFIER,
+            name: "Weather",
+            schemaVersion: 1,
+            summary: "Forecasts for any city.",
+            tools: [{ name: "forecast", risk: "read" }],
+            transport: "streamable_http",
+            version: "1.0.0",
+          },
+          status: "published",
+          version: "1.0.0",
+        },
+      ],
+    },
+  };
+}
+
+async function open(options?: IntlOptions) {
   await mountWithIntl(
     <McpDetailDialog
       item={{ install: null, market: summary }}
@@ -79,6 +87,7 @@ async function open() {
       pending={false}
       workspaceId="ws-1"
     />,
+    options,
   );
   await flush(4);
 }
@@ -90,8 +99,7 @@ function activePanel() {
 }
 
 beforeEach(() => {
-  api.getWorkspaceMarketMcp.mockReset().mockResolvedValue(detail);
-  overviews.getMcpAiOverview.mockReset();
+  api.getWorkspaceMarketMcp.mockReset();
 });
 afterEach(async () => {
   await unmountAll();
@@ -99,9 +107,11 @@ afterEach(async () => {
 
 describe("MCP detail dialog AI overview", () => {
   it("opens the Overview tab with the AI overview at its top, above the description", async () => {
-    overviews.getMcpAiOverview.mockResolvedValue(overview);
+    api.getWorkspaceMarketMcp.mockResolvedValue(detail(overview));
     await open();
-    expect(overviews.getMcpAiOverview).toHaveBeenCalledWith(IDENTIFIER, "en");
+    expect(api.getWorkspaceMarketMcp).toHaveBeenCalledWith("ws-1", IDENTIFIER, {
+      locale: "en",
+    });
 
     const panel = activePanel();
     const block = panel.querySelector<HTMLElement>(
@@ -118,8 +128,23 @@ describe("MCP detail dialog AI overview", () => {
     ).toBeLessThan(panel.textContent!.indexOf(DESCRIPTION));
   });
 
+  it("asks in the viewer's language and notes an English fallback", async () => {
+    api.getWorkspaceMarketMcp.mockResolvedValue(detail(overview));
+    await open({
+      locale: "zh-TW",
+      messages: zhTWMessages as IntlOptions["messages"],
+    });
+    expect(api.getWorkspaceMarketMcp).toHaveBeenCalledWith("ws-1", IDENTIFIER, {
+      locale: "zh-TW",
+    });
+    expect(
+      activePanel().querySelector('[data-testid="mcp-ai-overview"]')
+        ?.textContent,
+    ).toContain(zhTWMessages.mcp.aiOverview.englishFallback);
+  });
+
   it("shows the Overview tab as before without an overview", async () => {
-    overviews.getMcpAiOverview.mockResolvedValue(null);
+    api.getWorkspaceMarketMcp.mockResolvedValue(detail(null));
     await open();
     const panel = activePanel();
     expect(panel.querySelector('[data-testid="mcp-ai-overview"]')).toBeNull();

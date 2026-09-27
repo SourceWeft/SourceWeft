@@ -12,7 +12,6 @@ import {
   listPublicSkills,
 } from "../lib/market-skills";
 import { blogTagPath } from "./[locale]/blog/_components/blog-list";
-import { readMcpOverviewLocales } from "../lib/mcp-ai-overview";
 import {
   mcpCategoryPath,
   mcpPath,
@@ -227,7 +226,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       const { languages } = buildTranslatedAlternates(
         mcpPath(item.identifier),
         "en",
-        readMcpOverviewLocales(item) ?? [],
+        item.overviewLocales ?? [],
       );
       return {
         changeFrequency: "weekly" as const,

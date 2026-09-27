@@ -65,7 +65,7 @@ it("lists an MCP server's other languages only where it has a visible overview i
   const server = (identifier: string, overviewLocales?: string[]) => ({
     categories: [],
     identifier,
-    // What the list carries once the API adds it (#152).
+    // Absent in answers from before it existed.
     ...(overviewLocales ? { overviewLocales } : {}),
     updatedAt: "2026-09-22T00:00:00.000Z",
   });

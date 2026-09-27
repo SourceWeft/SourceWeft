@@ -520,19 +520,28 @@
         "categorySources": {
           "auto": "关键词规则",
           "ai": "AI 分析",
-          "admin": "管理员",
-          "none": "未分类"
+          "admin": "管理员"
         },
+        "rationale": "分类理由",
+        "evidence": "依据",
         "retained": "新分析成功前，现有概览会继续显示。",
         "systemModel": "系统模型",
         "systemModelReady": "已就绪",
         "systemModelNotReady": "未就绪",
-        "notEligible": "未为此服务生成：只有已发布的公开服务，且有 README 或足够详细的描述，才会生成概览。",
+        "noVersion": "此服务没有已发布的版本。",
+        "skipReasons": {
+          "not-eligible": "未为此服务生成：只有公开服务的最新发布版本才会生成概览。",
+          "readme-pending": "正在等待读取 README，读取完成后再生成概览。",
+          "invalid-manifest": "未生成：已存储的清单无法解析。",
+          "no-content": "未生成：没有 README，描述也太短，无法说明此服务的用途。",
+          "missing-version": "未生成：找不到最新版本。"
+        },
         "none": "最新版本暂无概览。",
         "locales": "概览语言",
         "hidden": "已隐藏",
         "visible": "已显示",
         "missing": "缺失",
+        "stale": "已过时",
         "model": "模型",
         "generatedAt": "生成时间",
         "regenerate": "重新生成",

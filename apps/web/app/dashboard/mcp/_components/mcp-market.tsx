@@ -51,7 +51,11 @@ import {
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { contentClient, workspaceClient } from "../../../../lib/sdk";
 import { desktopBridge } from "../../../../lib/desktop-bridge";
-import { mcpCardText } from "../../../../lib/mcp-ai-overview";
+import {
+  mcpCardText,
+  mcpOverviewLocale,
+  type MarketMcpLocale,
+} from "../../../../lib/mcp-ai-overview";
 import { formatShortRelativeTime } from "../../../../lib/relative-time";
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
 import { GitHubIcon } from "../../../_components/brand-icons";
@@ -144,10 +148,12 @@ function fetchMcpCatalog(
     category?: string;
     cursor?: string;
     desktopOnly?: boolean;
+    // Language of each card's AI summary.
+    locale?: MarketMcpLocale;
   },
 ) {
-  // Dedupe concurrent identical requests (workspace + filters + page).
-  const requestKey = `${targetWorkspaceId}|${params?.query ?? ""}|${params?.category ?? ""}|${params?.cursor ?? ""}|${params?.desktopOnly ?? "all"}`;
+  // Dedupe concurrent identical requests (workspace + filters + page + language).
+  const requestKey = `${targetWorkspaceId}|${params?.query ?? ""}|${params?.category ?? ""}|${params?.cursor ?? ""}|${params?.desktopOnly ?? "all"}|${params?.locale ?? ""}`;
   const pending = catalogRequestsByWorkspace.get(requestKey);
   if (pending) {
     return pending;
@@ -949,6 +955,8 @@ function McpCard({
 
 export function McpMarket() {
   const t = useTranslations("dashboardMcpPanel");
+  // Cards show AI summaries in the viewer's language, English otherwise.
+  const overviewLocale = mcpOverviewLocale(useLocale());
   const router = useRouter();
   const searchParams = useSearchParams();
   const deepLinkIdentifier = searchParams.get("mcp");
@@ -1107,6 +1115,7 @@ export function McpMarket() {
           category,
           desktopOnly:
             deviceFilter === "all" ? undefined : deviceFilter === "desktop",
+          locale: overviewLocale,
         }),
         fetchMcpCategories(resolved.id),
       ]);
@@ -1125,7 +1134,7 @@ export function McpMarket() {
         loadError instanceof Error ? loadError.message : t("errors.loadFailed"),
       );
     }
-  }, [resolveWorkspace, serverQuery, category, deviceFilter, t]);
+  }, [resolveWorkspace, serverQuery, category, deviceFilter, overviewLocale, t]);
 
   React.useEffect(() => {
     void loadCatalog();
@@ -1174,6 +1183,7 @@ export function McpMarket() {
         cursor: nextCursor,
         desktopOnly:
           deviceFilter === "all" ? undefined : deviceFilter === "desktop",
+        locale: overviewLocale,
       });
       if (catalogGenerationRef.current !== generation) return;
       setItems((current) => {
@@ -1197,6 +1207,7 @@ export function McpMarket() {
     serverQuery,
     category,
     deviceFilter,
+    overviewLocale,
     t,
   ]);
 
@@ -1301,7 +1312,7 @@ export function McpMarket() {
       await dashboardState.switchWorkspace(nextWorkspaceId, nextWorkspaceName);
       if (workspaceIdRef.current !== nextWorkspaceId) return;
       const [result, categoryResult] = await Promise.all([
-        fetchMcpCatalog(nextWorkspaceId),
+        fetchMcpCatalog(nextWorkspaceId, { locale: overviewLocale }),
         // Refresh categories too, or the facet + bucketing keep the previous
         // workspace's taxonomy after a switch.
         fetchMcpCategories(nextWorkspaceId),

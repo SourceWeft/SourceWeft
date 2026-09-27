@@ -1,11 +1,11 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-
 import type {
   MarketMcpAiOverview,
-  MarketMcpOverviewLocale,
-} from "../../../lib/mcp-ai-overview";
+  MarketMcpLocale,
+} from "@sourceweft/market-contracts";
+
 import { CatalogAiOverview } from "./catalog-ai-overview";
 
 /**
@@ -22,7 +22,7 @@ export function McpAiOverviewView({
 }: {
   overview: MarketMcpAiOverview;
   // The language asked for; a note shows when the overview fell back.
-  requestedLocale?: MarketMcpOverviewLocale;
+  requestedLocale?: MarketMcpLocale;
   className?: string;
 }) {
   const t = useTranslations("mcp.aiOverview");

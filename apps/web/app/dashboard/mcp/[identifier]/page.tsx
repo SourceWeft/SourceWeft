@@ -35,6 +35,7 @@ import {
 } from "@sourceweft/ui-web/components/ui/tabs";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { contentClient, workspaceClient } from "../../../../lib/sdk";
+import { mcpOverviewLocale } from "../../../../lib/mcp-ai-overview";
 import { hasMcpReadmeToShow, readMcpReadme } from "../../../../lib/mcp-readme";
 import { formatShortRelativeTime } from "../../../../lib/relative-time";
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
@@ -43,10 +44,10 @@ import {
   McpReadmeSection,
   McpReadmeSourceLine,
 } from "../../../_components/market/mcp-readme-section";
+import { McpAiOverviewView } from "../../../_components/market/mcp-ai-overview-view";
 import { McpIcon } from "../../../_components/site-icons";
 import { invalidateWorkspaceMcpCache } from "../../chat/_components/sources-hub/mcp/use-mcp";
 import { CredentialsDialog } from "../_components/mcp-credentials-dialog";
-import { McpAiOverview } from "../_components/mcp-ai-overview";
 import { McpOverviewAdmin } from "../_components/mcp-overview-admin";
 
 type MarketMcpDetail = Awaited<
@@ -88,6 +89,8 @@ function riskMeta(risk: McpRiskLevel): {
 
 export default function McpDetailPage() {
   const locale = useLocale();
+  // The AI overview in the viewer's language, English when there is none.
+  const overviewLocale = mcpOverviewLocale(locale);
   const t = useTranslations("dashboardMcpPanel");
   const params = useParams<{ identifier?: string | string[] }>();
   const rawIdentifier = Array.isArray(params.identifier)
@@ -149,6 +152,7 @@ export default function McpDetailPage() {
       const result = await contentClient.getWorkspaceMarketMcp(
         resolved.id,
         identifier,
+        { locale: overviewLocale },
       );
       if (detailGenerationRef.current !== generation) return;
       setDetail(result);
@@ -167,7 +171,7 @@ export default function McpDetailPage() {
         setIsLoading(false);
       }
     }
-  }, [identifier, resolveWorkspace, t]);
+  }, [identifier, overviewLocale, resolveWorkspace, t]);
 
   React.useEffect(() => {
     void loadDetail();
@@ -519,7 +523,12 @@ export default function McpDetailPage() {
                       </TabsList>
                     </div>
                     <TabsContent className="m-0 p-5" value="overview">
-                      <McpAiOverview identifier={item.identifier} />
+                      {detail?.market.aiOverview ? (
+                        <McpAiOverviewView
+                          overview={detail.market.aiOverview}
+                          requestedLocale={overviewLocale}
+                        />
+                      ) : null}
                       <p className="text-xs text-muted-foreground">
                         {item.providerName ?? item.identifier}
                       </p>

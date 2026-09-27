@@ -529,19 +529,28 @@
         "categorySources": {
           "auto": "Keyword rules",
           "ai": "AI analysis",
-          "admin": "Administrator",
-          "none": "Unclassified"
+          "admin": "Administrator"
         },
+        "rationale": "Classification rationale",
+        "evidence": "Evidence",
         "retained": "Existing overviews stay visible until a new analysis succeeds.",
         "systemModel": "System model",
         "systemModelReady": "Ready",
         "systemModelNotReady": "Not ready",
-        "notEligible": "Not generated for this server: only published public servers with a README or a meaningful description get one.",
+        "noVersion": "This server has no published version.",
+        "skipReasons": {
+          "not-eligible": "Not generated for this server: only the latest published version of a public server gets one.",
+          "readme-pending": "Waiting for the README to be read; the overview is written once it is.",
+          "invalid-manifest": "Not generated: the stored manifest no longer parses.",
+          "no-content": "Not generated: there is no README, and the description is too short to say what the server does.",
+          "missing-version": "Not generated: the latest version could not be found."
+        },
         "none": "No overview for the latest version yet.",
         "locales": "Overview languages",
         "hidden": "Hidden",
         "visible": "Shown",
         "missing": "Missing",
+        "stale": "Outdated",
         "model": "Model",
         "generatedAt": "Generated",
         "regenerate": "Regenerate",
