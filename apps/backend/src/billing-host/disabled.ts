@@ -1,5 +1,4 @@
 import "dotenv/config";
-import type { BetterAuthPlugin } from "better-auth";
 import type { Hono } from "hono";
 import { BillingError } from "@sourceweft/contracts/billing-runtime";
 import {
@@ -14,11 +13,6 @@ export const billingRuntime = createCoreBillingRuntime();
 export const billingOrganizationHooks = createCoreBillingOrganizationHooks();
 export const getBillingDeploymentCapabilities = coreDeploymentCapabilities;
 export const billingSchedulesEnabled = false;
-export function getBillingAuthPlugins(
-  _mode: "runtime" | "migration",
-): BetterAuthPlugin[] {
-  return [];
-}
 export async function handleBillingAuthRequest(
   _request: Request,
 ): Promise<Response | null> {

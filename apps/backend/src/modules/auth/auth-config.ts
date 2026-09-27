@@ -12,10 +12,7 @@ import {
   username,
 } from "better-auth/plugins";
 import { apiKey } from "@better-auth/api-key";
-import {
-  getBillingAuthPlugins,
-  billingOrganizationHooks,
-} from "../../billing-host/bindings";
+import { billingOrganizationHooks } from "../../billing-host/bindings";
 import { oauthProvider } from "@better-auth/oauth-provider";
 import { passkey } from "@better-auth/passkey";
 import { APIError } from "better-auth/api";
@@ -618,7 +615,6 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}): any {
           requireName: true,
         },
       ]),
-      ...getBillingAuthPlugins(mode),
       ...(isRuntimeMode && config.auth.googleOneTapClientId
         ? [
             oneTap({

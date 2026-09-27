@@ -29,7 +29,6 @@ test("disabled runtime does not import commercial SDKs or initialize commercial 
   const host = await import("./bindings");
   expect(load).not.toHaveBeenCalled();
   expect(host.billingSchedulesEnabled).toBe(false);
-  expect(host.getBillingAuthPlugins("runtime")).toEqual([]);
   expect(host.getBillingDeploymentCapabilities().billing.available).toBe(false);
 });
 test("enabled runtime import failures propagate instead of falling back to unmetered core", async () => {

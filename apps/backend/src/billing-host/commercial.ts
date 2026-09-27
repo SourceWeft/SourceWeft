@@ -19,7 +19,6 @@ import {
   createCreemSubscriptionSync,
   createCreemWebhookHandler,
 } from "@sourceweft/billing/integrations/creem";
-import { createBillingAuthPlugins } from "@sourceweft/billing/integrations/auth";
 import { createBillingHttpRoutes } from "@sourceweft/billing/integrations/http";
 import {
   PostgresWaffoStateStore,
@@ -106,12 +105,6 @@ const sync: ReturnType<typeof createCreemSubscriptionSync> = (...args) =>
     config: billingConfig,
     logger,
   })(...args);
-export function getBillingAuthPlugins(
-  mode: "runtime" | "migration",
-): ReturnType<typeof createBillingAuthPlugins> {
-  if (mode === "runtime") validateBillingConfiguration(billingConfig);
-  return createBillingAuthPlugins({ mode, config: billingConfig, sync });
-}
 export const handleBillingAuthRequest = createCreemWebhookHandler({
   config: billingConfig,
   logger,

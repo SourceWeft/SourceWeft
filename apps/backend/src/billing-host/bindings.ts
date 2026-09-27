@@ -12,7 +12,6 @@ export const {
   billingOrganizationHooks,
   getBillingDeploymentCapabilities,
   billingSchedulesEnabled,
-  getBillingAuthPlugins,
   handleBillingAuthRequest,
   registerBillingHttpRoutes,
   reconcileBillingSchedule,
