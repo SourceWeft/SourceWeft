@@ -26,7 +26,8 @@ function isBackendPackageRoot(directory: string) {
   }
 }
 
-function findBackendPackageRoot(start: string) {
+/** The nearest directory at or above `start` holding the backend package. */
+export function findBackendPackageRoot(start: string) {
   let current = path.resolve(start);
 
   while (true) {

@@ -29,7 +29,8 @@ encryption secrets. It refuses to overwrite an existing `.env`. Do not run it on
 an existing installation and do not rotate the model encryption secret casually.
 
 Open **http://localhost:3000**, register and sign in. The migration and bucket
-initialization must finish before the API/worker start. This starts the application
+initialization must finish before the API/worker start (see
+[Database migrations](#database-migrations)). This starts the application
 without mail/OAuth/payment/model accounts. To use chat and embedding-dependent
 indexing, configure a model provider (for example OPENROUTER_ENABLED plus its key)
 or an authorized BYOK model. Missing models are not silently substituted.
@@ -86,6 +87,16 @@ docker compose --env-file docker/.env -f docker/docker-compose.yml down
 `down` keeps data. **`down -v` deletes this instance's data** and is only for an
 explicit disposable reset. Health HTTP 200 is not a replacement for testing a
 login, file upload and model response.
+
+## Database migrations
+
+The API, worker and scheduler apply pending migrations themselves before they
+start, one instance at a time under a PostgreSQL lock; the others wait and then
+start. The `migrate` service runs the same step on its own first. A failed
+migration stops the service from starting; read its logs. When migrations run
+elsewhere (for example a database account without DDL rights), set
+`MIGRATION_ENABLED=false`: services then refuse to start while any migration is
+pending. See [apps/backend/docs/database-migrations.md](../apps/backend/docs/database-migrations.md).
 
 ## Upgrade
 

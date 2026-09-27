@@ -57,6 +57,10 @@ docker compose --env-file docker/.env -f docker/docker-compose.yml down
 
 `down` 保留数据。**`down -v` 会删除当前实例的数据**，仅用于明确需要丢弃的临时实例。健康检查返回 HTTP 200 不能代替登录、文件上传和模型响应验证。
 
+## 数据库迁移
+
+API、worker 和 scheduler 启动前会自行执行待执行的迁移：通过 PostgreSQL 锁保证同一时间只有一个实例在迁移，其他实例等待完成后再启动。`migrate` 服务会先单独执行同样的步骤。迁移失败时服务不会启动，请查看其日志。如果迁移由其他方式执行（例如应用使用的数据库账号没有 DDL 权限），设置 `MIGRATION_ENABLED=false`：此时只要存在未执行的迁移，服务就会拒绝启动。详见 [apps/backend/docs/database-migrations.md](../apps/backend/docs/database-migrations.md)。
+
 ## 升级
 
 1. 停止写入，使用现有备份工具备份 PostgreSQL 和 S3 数据，并保存 `.env` 及加密密钥。
