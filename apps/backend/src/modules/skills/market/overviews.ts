@@ -1,14 +1,15 @@
 /**
  * AI-written overviews of public skills (skill-marketplace-plan §17.4).
  *
- * The scheduler calls `enqueueSkillOverviews` every tick. It copies overviews
- * over wherever the same content already has one, then queues a generation
- * job for public skills whose current version still has none — a few per
- * tick, so a large import is worked through over time rather than in one
- * burst. Nothing happens while the system model the overviews are written
- * with is not ready.
+ * The scheduler calls `enqueueSkillOverviews` every tick. It queues a
+ * generation job for public skills whose current version still has none — a
+ * few per tick, so a large import is worked through over time rather than in
+ * one burst; the job copies an identical earlier result instead of asking the
+ * model again. Nothing happens while the system model the overviews are
+ * written with is not ready. The tick itself is the catalog overview engine's
+ * `enqueueOverviewBatch`.
  */
-import { logger } from "../../../shared/logger";
+import { enqueueOverviewBatch } from "../../catalog-overview/jobs";
 import {
   getSystemModelReadiness,
   type SystemModelReadiness,
@@ -49,40 +50,36 @@ const defaultDeps: EnqueueSkillOverviewsDeps = {
   enqueue: (payload) => enqueueSkillOverviewJob(payload),
 };
 
-/** Queues an overview for every public skill whose current version has none. */
+/**
+ * Queues an overview for every public skill whose current version has none.
+ * `copied` stays 0: cache reuse happens inside the versioned worker, never by
+ * bundle alone.
+ */
 export async function enqueueSkillOverviews(
   deps: EnqueueSkillOverviewsDeps = defaultDeps,
 ): Promise<{ queued: number; copied: number; skipped: number }> {
-  const readiness = await deps.readModelReadiness();
-  if (!readiness.ready) {
-    logger.debug("Skill overviews not queued: the system model is not ready", {
-      reason: readiness.reason,
-    });
-    return { queued: 0, copied: 0, skipped: 0 };
-  }
-  await deps.recover?.();
-  // Identical content first: free, and it takes those versions off the list.
-  const copied = 0; // Cache reuse happens inside the versioned worker, never by bundle alone.
-  const candidates = await deps.findCandidates(SKILL_OVERVIEW_SCAN_LIMIT);
-  let queued = 0;
-  let skipped = 0;
-  for (const candidate of candidates) {
-    if (queued >= SKILL_OVERVIEW_BATCH_SIZE) break;
-    // A job already there is in progress, waiting to retry, or failed for
-    // good — which stands until the content (and so the version) changes.
-    if (await deps.jobExists(skillOverviewJobId(candidate.skillVersionId))) {
-      skipped += 1;
-      continue;
-    }
-    await deps.enqueue({
-      skillVersionId: candidate.skillVersionId,
-      skillId: candidate.skillId,
-      reason: "scheduled",
-    });
-    queued += 1;
-  }
-  if (queued > 0 || copied > 0) {
-    logger.info("Skill overviews queued", { queued, copied, skipped });
-  }
-  return { queued, copied, skipped };
+  const { queued, skipped } = await enqueueOverviewBatch(
+    {
+      readModelReadiness: deps.readModelReadiness,
+      recover: deps.recover,
+      findCandidates: async (limit) =>
+        (await deps.findCandidates(limit)).map((candidate) => ({
+          versionId: candidate.skillVersionId,
+          payload: {
+            skillVersionId: candidate.skillVersionId,
+            skillId: candidate.skillId,
+            reason: "scheduled" as const,
+          },
+        })),
+      jobExists: deps.jobExists,
+      enqueue: deps.enqueue,
+    },
+    {
+      jobId: skillOverviewJobId,
+      batchSize: SKILL_OVERVIEW_BATCH_SIZE,
+      scanLimit: SKILL_OVERVIEW_SCAN_LIMIT,
+      label: "Skill",
+    },
+  );
+  return { queued, copied: 0, skipped };
 }

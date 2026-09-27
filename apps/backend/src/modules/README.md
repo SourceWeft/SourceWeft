@@ -10,6 +10,7 @@ service interface via its `index.ts` barrel export.
 | `threads` | Thread CRUD, agent turns, SSE streaming, durable chat runs |
 | `sources` | Source CRUD, parsing (PDF, audio, web, etc.), indexing, retrieval |
 | `skills` | Workspace skill catalog and custom skill management |
+| `catalog-overview` | AI overview engine shared by catalog kinds (skills; MCP next): system-model calls, fenced all-locale publication, jobs |
 | `artifacts` | Generated artifacts (images, slides, presentations) |
 | `connectors` | External data source connectors and sync orchestration |
 | `mcp` | MCP (Model Context Protocol) server management |

@@ -1,5 +1,4 @@
-import { resolveSystemModelIdentity } from "../../../shared/model-gateway/system-client";
-import { skillAnalysisModelConfigurationKey } from "./analysis-evaluation";
+import { resolveOverviewModelConfigurationKey } from "../../catalog-overview/model";
 
 /**
  * The key analyses from the configured system model are stored under, so a
@@ -7,6 +6,5 @@ import { skillAnalysisModelConfigurationKey } from "./analysis-evaluation";
  * rotation does not. Null while the system model is not configured.
  */
 export async function resolveSkillAnalysisModelKey(): Promise<string | null> {
-  const identity = await resolveSystemModelIdentity();
-  return identity ? skillAnalysisModelConfigurationKey(identity) : null;
+  return resolveOverviewModelConfigurationKey();
 }
