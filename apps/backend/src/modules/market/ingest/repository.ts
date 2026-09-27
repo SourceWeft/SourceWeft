@@ -137,7 +137,7 @@ export async function upsertMarketMcp(input: {
   const provenanceJson = input.provenanceJson ?? {};
   const facets = facetsFromMetadata(metadataJson);
 
-  await db
+  const [server] = await db
     .insert(mcpServers)
     .values({
       id: itemId,
@@ -184,7 +184,13 @@ export async function upsertMarketMcp(input: {
         // null->published transition sets it.
         publishedAt: sql`coalesce(${mcpServers.publishedAt}, excluded.published_at)`,
       },
-    });
+    })
+    .returning({ categoriesSetBy: mcpServers.categoriesSetBy });
+  if (!server) {
+    throw new Error(
+      `MCP catalog upsert returned no row for ${manifest.identifier}`,
+    );
+  }
 
   await db
     .insert(mcpServerVersions)
@@ -211,6 +217,13 @@ export async function upsertMarketMcp(input: {
         publishedAt: sql`coalesce(${mcpServerVersions.publishedAt}, excluded.published_at)`,
       },
     });
+
+  // Categories follow the manifest only while nobody has chosen them: once the
+  // AI overview ('ai') or a market admin ('admin') owns them, a re-sync leaves
+  // them alone.
+  if (server.categoriesSetBy !== "auto") {
+    return itemId;
+  }
 
   await db
     .delete(mcpServerCategories)
