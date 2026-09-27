@@ -1,17 +1,12 @@
 import { eq } from "drizzle-orm";
 import { db, skillMarketSettings } from "@sourceweft/db";
-import { resolveModelGatewayProfile } from "../../../shared/model-gateway/index";
 import { resolveSkillAnalysisModelKey } from "./analysis-model";
 import {
   SKILL_ANALYSIS_PROMPT_VERSION,
   SKILL_ANALYSIS_TAXONOMY_VERSION,
 } from "./overview-prompt";
 export async function currentSkillAnalysisModelKey() {
-  const profile = await resolveModelGatewayProfile({
-    kind: "chat",
-    defaultRequired: false,
-  });
-  return profile ? resolveSkillAnalysisModelKey(profile) : null;
+  return resolveSkillAnalysisModelKey();
 }
 export async function skillAnalysisQualityApproved() {
   const [setting] = await db
@@ -30,16 +25,8 @@ export async function skillAnalysisQualityApproved() {
       }
     | undefined;
   if (!value?.reviewed) return false;
-  const profile = await resolveModelGatewayProfile({
-    kind: "chat",
-    defaultRequired: false,
-  });
-  if (
-    !profile ||
-    value.modelConfigurationKey !==
-      (await resolveSkillAnalysisModelKey(profile))
-  )
-    return false;
+  const modelKey = await resolveSkillAnalysisModelKey();
+  if (!modelKey || value.modelConfigurationKey !== modelKey) return false;
   return Boolean(
     value?.reviewed &&
     value.promptVersion === SKILL_ANALYSIS_PROMPT_VERSION &&

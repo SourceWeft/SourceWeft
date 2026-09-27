@@ -1,4 +1,3 @@
-import { resolveSkillAnalysisModelKey } from "../src/modules/skills/market/analysis-model";
 import "dotenv/config";
 import { randomUUID } from "node:crypto";
 import { readFile, writeFile, open } from "node:fs/promises";
@@ -14,6 +13,7 @@ import {
   parseEvaluationDataset,
   stratifyEvaluationCases,
   summarizeEvaluation,
+  skillAnalysisModelConfigurationKey,
   skillAnalysisModelIdentity,
   type EvaluationCase,
   type EvaluationResult,
@@ -25,10 +25,7 @@ import {
   SKILL_ANALYSIS_TAXONOMY_VERSION,
 } from "../src/modules/skills/market/overview-prompt";
 import { skillCategoryDefinitions } from "../src/modules/skills/market/taxonomy";
-import {
-  findSkillOverviewSubject,
-  readSkillOverviewBilling,
-} from "../src/modules/skills/market/overview-repository";
+import { findSkillOverviewSubject } from "../src/modules/skills/market/overview-repository";
 import { marketSkillName } from "../src/modules/skills/market/read-repository";
 
 async function main() {
@@ -105,26 +102,23 @@ async function main() {
   const data = parseEvaluationDataset(
     JSON.parse(await readFile(values.run!, "utf8")),
   );
-  const { billing } = await readSkillOverviewBilling();
-  if (!billing) throw new Error("Configure overview billing before evaluation");
-  const { resolveModelGatewayProfile } =
-    await import("../src/shared/model-gateway/index");
-  const profile = await resolveModelGatewayProfile({
-    kind: "chat",
-    defaultRequired: true,
-  });
-  if (!profile)
-    throw new Error("Default chat model gateway profile is not configured");
-  // Explicit allowlist: never serialize profile configJson, credentials, or provider errors.
-  const modelIdentity = skillAnalysisModelIdentity(profile);
-  const modelConfigurationKey = await resolveSkillAnalysisModelKey(profile);
-  // Reserve the report path before any billed call; never lose a run to an existing output.
+  const { getSystemModelReadiness, resolveSystemModelIdentity } =
+    await import("../src/shared/model-gateway/system-client");
+  const readiness = await getSystemModelReadiness();
+  // The reason names settings only, never their values.
+  if (!readiness.ready)
+    throw new Error(`System model is not ready: ${readiness.reason}`);
+  const identity = await resolveSystemModelIdentity();
+  if (!identity) throw new Error("System model is not ready: not configured");
+  // Explicit allowlist: never serialize credentials or provider errors.
+  const modelIdentity = skillAnalysisModelIdentity(identity);
+  const modelConfigurationKey = skillAnalysisModelConfigurationKey(identity);
+  // Reserve the report path before any model call; never lose a run to an existing output.
   const reportFile = await open(values.output, "wx");
   await reportFile.close();
-  const { billingRuntime } = await import("../src/billing-host/bindings");
   const { createSkillOverviewModelCall } =
     await import("../src/modules/skills/market/overview-generate");
-  const callModel = createSkillOverviewModelCall(billingRuntime, profile);
+  const callModel = createSkillOverviewModelCall("skill_market.evaluation");
   const runId = randomUUID();
   const startedAt = new Date().toISOString();
   const results: EvaluationResult[] = [];
@@ -140,7 +134,6 @@ async function main() {
     try {
       const result = await callModel({
         prompt,
-        billing,
         skillVersionId: row.skillVersionId,
         scopeId: `skill-analysis-eval:${runId}:${row.skillVersionId}`,
       });
@@ -176,7 +169,6 @@ async function main() {
     completedAt: new Date().toISOString(),
     modelIdentity,
     modelConfigurationKey,
-    billing,
   };
   await writeFile(values.output, JSON.stringify(report, null, 2) + "\n");
   if (values["record-quality"]) {
@@ -197,12 +189,13 @@ async function main() {
       modelConfigurationKey,
       completedAt: report.completedAt,
     };
+    // Recorded by an operator's run, not a signed-in member.
     await db
       .insert(skillMarketSettings)
-      .values({ key: "analysis.quality", value, updatedBy: billing.userId })
+      .values({ key: "analysis.quality", value, updatedBy: null })
       .onConflictDoUpdate({
         target: skillMarketSettings.key,
-        set: { value, updatedBy: billing.userId, updatedAt: new Date() },
+        set: { value, updatedBy: null, updatedAt: new Date() },
       });
   }
   console.log(
@@ -215,7 +208,7 @@ main()
   .catch((error: unknown) => {
     const message = error instanceof Error ? error.message : "";
     const safe =
-      /^(Choose --|Export does not|Count must|Need [0-9]+ unique|Invalid evaluation dataset:|Dataset versions are stale;|Duplicate evaluation (skillId|skillVersionId|source content)|--run requires|Configure overview billing|Default chat model gateway profile is not configured|Report saved; quality gate failed)/.test(
+      /^(Choose --|Export does not|Count must|Need [0-9]+ unique|Invalid evaluation dataset:|Dataset versions are stale;|Duplicate evaluation (skillId|skillVersionId|source content)|--run requires|System model is not ready:|Report saved; quality gate failed)/.test(
         message,
       );
     const code =

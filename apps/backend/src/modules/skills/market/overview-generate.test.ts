@@ -5,10 +5,11 @@ const mocks = vi.hoisted(() => ({
   cache: vi.fn(),
   publish: vi.fn(),
   request: vi.fn(),
+  readiness: vi.fn(),
+  withSystemModel: vi.fn(),
 }));
 vi.mock("./overview-repository", () => ({
   findSkillOverviewSubject: mocks.find,
-  readSkillOverviewBilling: vi.fn(),
 }));
 vi.mock("./analysis-repository", () => ({
   claimSkillAnalysis: mocks.claim,
@@ -17,11 +18,20 @@ vi.mock("./analysis-repository", () => ({
   requestSkillAnalysis: mocks.request,
 }));
 vi.mock("./read-repository", () => ({ marketSkillName: () => "Charts" }));
-vi.mock("../../../shared/model-gateway/index", () => ({
-  resolveModelGatewayProfile: vi.fn(),
-  withBilledModelGateway: vi.fn(),
+vi.mock("../../../shared/model-gateway/system-client", () => ({
+  getSystemModelReadiness: mocks.readiness,
+  withSystemModel: mocks.withSystemModel,
 }));
-import { generateSkillOverview } from "./overview-generate";
+import {
+  SKILL_OVERVIEW_MAX_OUTPUT_TOKENS,
+  createSkillOverviewModelCall,
+  generateSkillOverview,
+} from "./overview-generate";
+import {
+  SKILL_OVERVIEW_OUTPUT_JSON_SCHEMA,
+  SKILL_OVERVIEW_OUTPUT_NAME,
+  type SkillOverviewPrompt,
+} from "./overview-prompt";
 const localized = (summary: string) => ({
   summary,
   whatItDoes: summary,
@@ -45,7 +55,7 @@ const input = () => ({
   requestId: "r",
   scopeId: "scope",
   modelConfigurationKey: "model-config",
-  readBilling: async () => ({ teamId: "t", workspaceId: "w", userId: "u" }),
+  modelReady: async () => true,
   callModel: vi.fn(async () => ({ output, model: "test" })),
 });
 beforeEach(() => {
@@ -126,5 +136,74 @@ test("stale request does not call a model; stale publication is reported as skip
   expect(await generateSkillOverview(request)).toMatchObject({
     status: "skipped",
     reason: "not-eligible",
+  });
+});
+test("a system model that is not ready stops the job before any model call", async () => {
+  const request = { ...input(), modelReady: undefined };
+  mocks.readiness.mockResolvedValue({ ready: false });
+  expect(await generateSkillOverview(request)).toEqual({
+    status: "skipped",
+    reason: "system-model-not-ready",
+  });
+  expect(request.callModel).not.toHaveBeenCalled();
+  expect(mocks.publish).not.toHaveBeenCalled();
+});
+test("the model call goes through the system model with the overview request", async () => {
+  const complete = vi.fn(async () => ({
+    structuredOutput: output,
+    providerModel: "deepseek/deepseek-v4.1-flash",
+    model: "system:market",
+    raw: { content: "" },
+  }));
+  mocks.withSystemModel.mockImplementation(
+    async (_context: unknown, run: (chat: unknown) => Promise<unknown>) =>
+      run({ complete }),
+  );
+  const prompt: SkillOverviewPrompt = {
+    system: "system prompt",
+    user: "user prompt",
+    sourceText: "source",
+    truncated: false,
+    inputFingerprint: "fingerprint",
+  };
+  const result = await createSkillOverviewModelCall()({
+    prompt,
+    skillVersionId: "v",
+    scopeId: "scope",
+  });
+  expect(result).toEqual({
+    output,
+    model: "deepseek/deepseek-v4.1-flash",
+  });
+  expect(mocks.withSystemModel.mock.calls[0]![0]).toEqual({
+    purpose: "skill_market.overview",
+    subjectRef: "skill-version:v",
+    scopeId: "scope",
+  });
+  expect(complete).toHaveBeenCalledWith({
+    messages: [
+      { role: "system", content: "system prompt" },
+      { role: "user", content: "user prompt" },
+    ],
+    structuredOutput: {
+      name: SKILL_OVERVIEW_OUTPUT_NAME,
+      description:
+        "A catalog overview of the skill in English, Simplified Chinese and Taiwan Traditional Chinese, plus one classification.",
+      schema: SKILL_OVERVIEW_OUTPUT_JSON_SCHEMA,
+    },
+    thinking: { mode: "off", enabled: false, includeReasoning: false },
+    maxTokens: SKILL_OVERVIEW_MAX_OUTPUT_TOKENS,
+    temperature: 0.2,
+  });
+
+  await createSkillOverviewModelCall("skill_market.evaluation")({
+    prompt,
+    skillVersionId: "v2",
+    scopeId: "eval-scope",
+  });
+  expect(mocks.withSystemModel.mock.calls[1]![0]).toEqual({
+    purpose: "skill_market.evaluation",
+    subjectRef: "skill-version:v2",
+    scopeId: "eval-scope",
   });
 });

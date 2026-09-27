@@ -1,27 +1,19 @@
 import { readSkillAnalysis } from "./analysis-repository";
-import { and, asc, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import {
   db,
   skillDefinitions,
-  skillMarketSettings,
   skillVersionFiles,
   skillVersionOverviews,
   skillVersionAnalysis,
   skillVersions,
-  workspaceMemberships,
-  workspaces,
   type SkillManifestJson,
   type SkillOverviewJson,
   type SkillOverviewLocale,
 } from "@sourceweft/db";
 
-/**
- * Storage for AI overviews (`skill_version_overviews`) and the market setting
- * that pays for them (`skill_market_settings`, key `overview.billing`).
- */
-
-export const OVERVIEW_BILLING_SETTING_KEY = "overview.billing";
+/** Storage for AI overviews (`skill_version_overviews`). */
 
 export const SKILL_OVERVIEW_LOCALES: readonly SkillOverviewLocale[] = [
   "en",
@@ -416,111 +408,4 @@ export async function countSkillOverviewCoverage(): Promise<{
     withOverview: Number(row?.withOverview ?? 0),
     hidden: Number(row?.hidden ?? 0),
   };
-}
-
-// ---------------------------------------------------------------------------
-// Billing setting
-// ---------------------------------------------------------------------------
-
-export type SkillOverviewBillingTarget = {
-  teamId: string;
-  workspaceId: string;
-  userId: string;
-};
-
-export type StoredSkillOverviewBilling = {
-  billing: SkillOverviewBillingTarget | null;
-  updatedBy: string | null;
-  updatedAt: Date | null;
-};
-
-function asBillingTarget(value: unknown): SkillOverviewBillingTarget | null {
-  if (!value || typeof value !== "object") return null;
-  const record = value as Record<string, unknown>;
-  const text = (key: string) =>
-    typeof record[key] === "string" && (record[key] as string).trim()
-      ? (record[key] as string)
-      : null;
-  const teamId = text("teamId");
-  const workspaceId = text("workspaceId");
-  const userId = text("userId");
-  return teamId && workspaceId && userId
-    ? { teamId, workspaceId, userId }
-    : null;
-}
-
-export async function readSkillOverviewBilling(): Promise<StoredSkillOverviewBilling> {
-  const [row] = await db
-    .select({
-      value: skillMarketSettings.value,
-      updatedBy: skillMarketSettings.updatedBy,
-      updatedAt: skillMarketSettings.updatedAt,
-    })
-    .from(skillMarketSettings)
-    .where(eq(skillMarketSettings.key, OVERVIEW_BILLING_SETTING_KEY))
-    .limit(1);
-  if (!row) return { billing: null, updatedBy: null, updatedAt: null };
-  return {
-    billing: asBillingTarget(row.value),
-    updatedBy: row.updatedBy,
-    updatedAt: row.updatedAt,
-  };
-}
-
-export async function writeSkillOverviewBilling(input: {
-  billing: SkillOverviewBillingTarget;
-  updatedBy: string;
-}): Promise<void> {
-  const now = new Date();
-  await db
-    .insert(skillMarketSettings)
-    .values({
-      key: OVERVIEW_BILLING_SETTING_KEY,
-      value: { ...input.billing },
-      updatedBy: input.updatedBy,
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: skillMarketSettings.key,
-      set: {
-        value: { ...input.billing },
-        updatedBy: input.updatedBy,
-        updatedAt: now,
-      },
-    });
-}
-
-export type SkillOverviewBillingProblem =
-  "workspace_not_found" | "workspace_not_in_team" | "user_not_member";
-
-/**
- * Why a billing target will not do, or null when it will: the workspace must
- * exist, be live and belong to the team, and the user must be a member of it
- * in their own right (not a guest, whose runs bill their own organization).
- */
-export async function checkSkillOverviewBillingTarget(
-  target: SkillOverviewBillingTarget,
-): Promise<SkillOverviewBillingProblem | null> {
-  const [workspace] = await db
-    .select({ organizationId: workspaces.organizationId })
-    .from(workspaces)
-    .where(
-      and(eq(workspaces.id, target.workspaceId), isNull(workspaces.archivedAt)),
-    )
-    .limit(1);
-  if (!workspace) return "workspace_not_found";
-  if (workspace.organizationId !== target.teamId)
-    return "workspace_not_in_team";
-  const [membership] = await db
-    .select({ userId: workspaceMemberships.userId })
-    .from(workspaceMemberships)
-    .where(
-      and(
-        eq(workspaceMemberships.workspaceId, target.workspaceId),
-        eq(workspaceMemberships.userId, target.userId),
-        ne(workspaceMemberships.source, "guest"),
-      ),
-    )
-    .limit(1);
-  return membership ? null : "user_not_member";
 }

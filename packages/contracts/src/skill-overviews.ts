@@ -22,29 +22,29 @@ export const skillOverviewContentSchema = z.object({
   suggestedCategories: z.array(z.string()),
 });
 
-// The team, workspace and member the overviews' model calls are billed to.
-// Overviews are not generated while this is unset.
-export const skillOverviewBillingSchema = z.object({
-  teamId: z.string().min(1),
-  workspaceId: z.string().min(1),
-  // The member of that team whose allocation pays: the admin who set it,
-  // unless they named another member.
-  userId: z.string().min(1),
-});
+// What the system model is missing, when it is not ready. The model calls
+// behind overviews belong to the platform and are billed to no team.
+export const systemModelProblemSchema = z.enum([
+  "disabled",
+  "provider_unset",
+  "api_key_unset",
+  "model_unset",
+  "gateway_config_unavailable",
+  "provider_not_found",
+  "provider_capability_missing",
+  "provider_credential_headers",
+]);
 
-// GET/PUT /v1/skills/registry/admin/settings/overview-billing
-export const getSkillOverviewBillingResponseSchema = z.object({
-  billing: skillOverviewBillingSchema.nullable(),
-  updatedBy: z.string().nullable(),
-  updatedAt: z.string().nullable(),
-});
-
-export const putSkillOverviewBillingRequestSchema = z.object({
-  teamId: z.string().trim().min(1).max(200),
-  workspaceId: z.string().trim().min(1).max(200),
-  // Defaults to the admin making the change; must be a member of the
-  // workspace either way.
-  userId: z.string().trim().min(1).max(200).optional(),
+// Whether the system model can write overviews. Names settings, the Provider
+// and the model; never the key. Overviews are not generated until it is ready.
+export const systemModelReadinessSchema = z.object({
+  enabled: z.boolean(),
+  configured: z.boolean(),
+  ready: z.boolean(),
+  provider: z.string().nullable(),
+  model: z.string().nullable(),
+  problems: z.array(systemModelProblemSchema),
+  reason: z.string().nullable(),
 });
 
 // GET /v1/skills/registry/admin/skills/:skillId/overview
@@ -111,7 +111,7 @@ export const setSkillOverviewVisibilityResponseSchema = z.object({
 
 // GET /v1/skills/registry/admin/overviews/status
 export const skillOverviewStatusResponseSchema = z.object({
-  billingConfigured: z.boolean(),
+  systemModel: systemModelReadinessSchema,
   // Public, active GitHub skills with a current published version.
   eligible: z.number().int().nonnegative(),
   withOverview: z.number().int().nonnegative(),
@@ -121,13 +121,8 @@ export const skillOverviewStatusResponseSchema = z.object({
 
 export type SkillOverviewLocale = z.infer<typeof skillOverviewLocaleSchema>;
 export type SkillOverviewContent = z.infer<typeof skillOverviewContentSchema>;
-export type SkillOverviewBilling = z.infer<typeof skillOverviewBillingSchema>;
-export type GetSkillOverviewBillingResponse = z.infer<
-  typeof getSkillOverviewBillingResponseSchema
->;
-export type PutSkillOverviewBillingRequest = z.infer<
-  typeof putSkillOverviewBillingRequestSchema
->;
+export type SystemModelProblem = z.infer<typeof systemModelProblemSchema>;
+export type SystemModelReadiness = z.infer<typeof systemModelReadinessSchema>;
 export type SkillOverviewAdminEntry = z.infer<
   typeof skillOverviewAdminEntrySchema
 >;

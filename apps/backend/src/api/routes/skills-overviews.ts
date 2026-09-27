@@ -8,8 +8,6 @@ import {
   skillAnalysisBatchRequestSchema,
   skillAnalysisBatchResponseSchema,
   getSkillOverviewAdminResponseSchema,
-  getSkillOverviewBillingResponseSchema,
-  putSkillOverviewBillingRequestSchema,
   regenerateSkillOverviewResponseSchema,
   setSkillOverviewVisibilityRequestSchema,
   setSkillOverviewVisibilityResponseSchema,
@@ -18,30 +16,20 @@ import {
 import {
   getSkillOverviewStatus,
   regenerateSkillOverview,
-  setSkillOverviewBilling,
   setSkillOverviewVisibility,
 } from "../../modules/skills/market/overview-admin";
-import {
-  findSkillOverviewAdminState,
-  readSkillOverviewBilling,
-} from "../../modules/skills/market/overview-repository";
+import { findSkillOverviewAdminState } from "../../modules/skills/market/overview-repository";
 import { logger } from "../../shared/logger";
 import { getSessionUserId } from "../middleware/auth-session";
 import { ApiError, ApiResponse } from "../response/api-response";
 import { requireSkillMarketAdmin } from "./skills-market-admin";
 
 /**
- * Skill market AI overviews (§17.4), the market admin's side: who the model
- * calls are billed to, coverage, and one skill's overview — read,
+ * Skill market AI overviews (§17.4), the market admin's side: whether the
+ * system model can write them, coverage, and one skill's overview — read,
  * regenerated, hidden. The public side is the `locale` query and the
  * `aiSummary`/`aiOverview` fields of `skills-public.ts`.
  */
-
-const BILLING_PROBLEMS = {
-  workspace_not_found: "No live workspace with this id",
-  workspace_not_in_team: "The workspace does not belong to this team",
-  user_not_member: "The billed user is not a member of this workspace",
-} as const;
 
 async function readJson(c: { req: { json: () => Promise<unknown> } }) {
   return c.req.json().catch(() => {
@@ -50,61 +38,6 @@ async function readJson(c: { req: { json: () => Promise<unknown> } }) {
 }
 
 export function registerSkillOverviewRoutes(app: Hono) {
-  app.get("/v1/skills/registry/admin/settings/overview-billing", async (c) => {
-    await requireSkillMarketAdmin(c);
-    const stored = await readSkillOverviewBilling();
-    return ApiResponse.success(
-      c,
-      getSkillOverviewBillingResponseSchema.parse({
-        billing: stored.billing,
-        updatedBy: stored.updatedBy,
-        updatedAt: stored.updatedAt?.toISOString() ?? null,
-      }),
-    );
-  });
-
-  app.put("/v1/skills/registry/admin/settings/overview-billing", async (c) => {
-    const session = await requireSkillMarketAdmin(c);
-    const actorUserId = getSessionUserId(session);
-    const parsed = putSkillOverviewBillingRequestSchema.safeParse(
-      await readJson(c),
-    );
-    if (!parsed.success) {
-      throw ApiError.validation(
-        parsed.error.flatten() as Record<string, unknown>,
-      );
-    }
-    const result = await setSkillOverviewBilling({
-      teamId: parsed.data.teamId,
-      workspaceId: parsed.data.workspaceId,
-      // Never a user nobody named: the admin making the change, unless they
-      // named another member.
-      userId: parsed.data.userId ?? actorUserId,
-      actorUserId,
-    });
-    if (!result.ok) {
-      throw new ApiError(
-        400,
-        "SKILL_OVERVIEW_BILLING_INVALID",
-        BILLING_PROBLEMS[result.problem],
-        { problem: result.problem },
-      );
-    }
-    logger.info("Skill overview billing set", {
-      actorUserId,
-      ...result.billing,
-    });
-    const stored = await readSkillOverviewBilling();
-    return ApiResponse.success(
-      c,
-      getSkillOverviewBillingResponseSchema.parse({
-        billing: stored.billing,
-        updatedBy: stored.updatedBy,
-        updatedAt: stored.updatedAt?.toISOString() ?? null,
-      }),
-    );
-  });
-
   app.get("/v1/skills/registry/admin/overviews/preview", async (c) => {
     await requireSkillMarketAdmin(c);
     const cursor = c.req.query("cursor");

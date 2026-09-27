@@ -1134,10 +1134,12 @@ export const skillRunStats = pgTable("skill_run_stats", {
     .defaultNow(),
 });
 
-// Market-wide settings a market admin changes at runtime, kept in the database
-// rather than the environment. Known keys:
-// - `overview.billing`: { teamId, workspaceId } the AI overview's model calls
-//   are billed to; overviews are not generated while it is unset.
+// Market-wide settings changed at runtime, kept in the database rather than
+// the environment. Known keys:
+// - `analysis.quality`: the reviewed accuracy evaluation of AI analysis that
+//   bulk category migration requires (scripts/evaluate-skill-analysis.ts).
+// The retired `overview.billing` key is deleted by migration: overview model
+// calls run on the system model and are billed to no team.
 export const skillMarketSettings = pgTable("skill_market_settings", {
   key: text("key").primaryKey(),
   value: jsonb("value").$type<Record<string, unknown>>().notNull(),

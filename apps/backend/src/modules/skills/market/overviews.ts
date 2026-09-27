@@ -5,10 +5,14 @@
  * over wherever the same content already has one, then queues a generation
  * job for public skills whose current version still has none — a few per
  * tick, so a large import is worked through over time rather than in one
- * burst. Nothing happens until a market admin has said who pays
- * (`overview.billing`).
+ * burst. Nothing happens while the system model the overviews are written
+ * with is not ready.
  */
 import { logger } from "../../../shared/logger";
+import {
+  getSystemModelReadiness,
+  type SystemModelReadiness,
+} from "../../../shared/model-gateway/system-client";
 import {
   enqueueSkillOverviewJob,
   recoverSkillOverviewJobs,
@@ -18,8 +22,6 @@ import {
 } from "./overview-queue";
 import {
   findSkillOverviewCandidates,
-  readSkillOverviewBilling,
-  type SkillOverviewBillingTarget,
   type SkillOverviewCandidate,
 } from "./overview-repository";
 
@@ -30,7 +32,9 @@ export const SKILL_OVERVIEW_BATCH_SIZE = 20;
 const SKILL_OVERVIEW_SCAN_LIMIT = 1_000;
 
 export type EnqueueSkillOverviewsDeps = {
-  readBilling: () => Promise<SkillOverviewBillingTarget | null>;
+  readModelReadiness: () => Promise<
+    Pick<SystemModelReadiness, "ready" | "reason">
+  >;
   findCandidates: (limit: number) => Promise<SkillOverviewCandidate[]>;
   jobExists: (jobId: string) => Promise<boolean>;
   recover?: () => Promise<number>;
@@ -39,7 +43,7 @@ export type EnqueueSkillOverviewsDeps = {
 
 const defaultDeps: EnqueueSkillOverviewsDeps = {
   recover: recoverSkillOverviewJobs,
-  readBilling: async () => (await readSkillOverviewBilling()).billing,
+  readModelReadiness: getSystemModelReadiness,
   findCandidates: (limit) => findSkillOverviewCandidates({ limit }),
   jobExists: skillOverviewJobExists,
   enqueue: (payload) => enqueueSkillOverviewJob(payload),
@@ -49,11 +53,11 @@ const defaultDeps: EnqueueSkillOverviewsDeps = {
 export async function enqueueSkillOverviews(
   deps: EnqueueSkillOverviewsDeps = defaultDeps,
 ): Promise<{ queued: number; copied: number; skipped: number }> {
-  const billing = await deps.readBilling();
-  if (!billing) {
-    logger.debug(
-      "Skill overviews not queued: no billing team is set (overview.billing)",
-    );
+  const readiness = await deps.readModelReadiness();
+  if (!readiness.ready) {
+    logger.debug("Skill overviews not queued: the system model is not ready", {
+      reason: readiness.reason,
+    });
     return { queued: 0, copied: 0, skipped: 0 };
   }
   await deps.recover?.();
@@ -74,8 +78,6 @@ export async function enqueueSkillOverviews(
       skillVersionId: candidate.skillVersionId,
       skillId: candidate.skillId,
       reason: "scheduled",
-      teamId: billing.teamId,
-      workspaceId: billing.workspaceId,
     });
     queued += 1;
   }

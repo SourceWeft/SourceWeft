@@ -5,26 +5,12 @@ import { afterEach, expect, test, vi } from "vitest";
 const api = vi.hoisted(() => ({
   getSkillAnalysisPreview: vi.fn(),
   queueSkillAnalysisBatch: vi.fn(),
-  getSkillOverviewBilling: vi.fn(),
   getSkillOverviewStatus: vi.fn(),
-  setSkillOverviewBilling: vi.fn(),
 }));
 vi.mock("../../../../../lib/skill-overviews", () => api);
-vi.mock("../../../../../lib/auth-client", () => ({
-  authClient: {
-    useListOrganizations: () => ({
-      data: [{ id: "team_1", name: "Platform" }],
-    }),
-  },
-}));
-const workspaces = vi.hoisted(() => ({ listWorkspaces: vi.fn() }));
-vi.mock("../../../../../lib/sdk", () => ({ workspaceClient: workspaces }));
 
-import {
-  SkillMarketSettingsAdmin,
-  overviewBillingRequest,
-} from "./skill-market-settings-admin";
-import { button, mountWithIntl, typeInto, unmountAll } from "@/test/react";
+import { SkillMarketSettingsAdmin } from "./skill-market-settings-admin";
+import { button, mountWithIntl, unmountAll } from "@/test/react";
 
 let container: HTMLDivElement;
 afterEach(async () => {
@@ -32,8 +18,18 @@ afterEach(async () => {
   vi.resetAllMocks();
 });
 
+const readySystemModel = {
+  enabled: true,
+  configured: true,
+  ready: true,
+  provider: "openrouter",
+  model: "deepseek/deepseek-v4.1-flash",
+  problems: [],
+  reason: null,
+};
+
 const status = {
-  billingConfigured: false,
+  systemModel: readySystemModel,
   eligible: 12,
   withOverview: 9,
   missing: 3,
@@ -44,128 +40,69 @@ async function render() {
   ({ container } = await mountWithIntl(<SkillMarketSettingsAdmin />));
 }
 
-function select(label: string) {
-  return container.querySelector<HTMLSelectElement>(
-    `select[aria-label="${label}"]`,
-  )!;
-}
-
-async function choose(label: string, value: string) {
-  const node = select(label);
-  await act(async () => {
-    node.value = value;
-    node.dispatchEvent(new Event("change", { bubbles: true }));
-  });
-}
-
-test("a blank member bills the admin saving it", () => {
-  expect(
-    overviewBillingRequest({ teamId: "t", workspaceId: "w", userId: "  " }),
-  ).toEqual({ teamId: "t", workspaceId: "w" });
-  expect(
-    overviewBillingRequest({ teamId: "t", workspaceId: "w", userId: " u " }),
-  ).toEqual({ teamId: "t", workspaceId: "w", userId: "u" });
-});
-
-test("unset billing is shown as such, with the coverage counts", async () => {
-  api.getSkillOverviewBilling.mockResolvedValue({
-    billing: null,
-    updatedBy: null,
-    updatedAt: null,
-  });
+test("a ready system model is shown with its Provider and model, with the coverage counts", async () => {
   api.getSkillOverviewStatus.mockResolvedValue(status);
   await render();
-  expect(
-    container.querySelector('[data-testid="overview-billing-current"]')
-      ?.textContent,
-  ).toContain("Not set");
+  const model = container.querySelector('[data-testid="system-model-status"]');
+  expect(model?.textContent).toContain("System model");
+  expect(model?.textContent).toContain("Ready");
+  expect(model?.textContent).toContain(
+    "openrouter · deepseek/deepseek-v4.1-flash",
+  );
+  expect(model?.querySelector("ul")).toBeNull();
   const counts = container.querySelector('[data-testid="overview-status"]');
   expect(counts?.textContent).toContain("Eligible skills12");
   expect(counts?.textContent).toContain("Missing3");
-  expect(counts?.textContent).toContain("Billing setNo");
+  // Nothing about billing a team is left.
+  expect(container.querySelector("form")).toBeNull();
+  expect(container.textContent).not.toMatch(/billed to the team|Billed/);
 });
 
-test("choosing a team lists its workspaces; saving sends team and workspace", async () => {
-  api.getSkillOverviewBilling.mockResolvedValue({
-    billing: null,
-    updatedBy: null,
-    updatedAt: null,
-  });
-  api.getSkillOverviewStatus.mockResolvedValue(status);
-  workspaces.listWorkspaces.mockResolvedValue({
-    items: [{ id: "ws_1", name: "Ops", organizationId: "team_1" }],
-  });
-  api.setSkillOverviewBilling.mockResolvedValue({
-    billing: { teamId: "team_1", workspaceId: "ws_1", userId: "admin_1" },
-    updatedBy: "admin_1",
-    updatedAt: "2026-09-22T00:00:00.000Z",
-  });
-  await render();
-
-  await choose("Team", "team_1");
-  expect(workspaces.listWorkspaces).toHaveBeenCalledWith("team_1");
-  await choose("Workspace", "ws_1");
-
-  const form = container.querySelector("form")!;
-  await act(async () =>
-    form.dispatchEvent(
-      new Event("submit", { bubbles: true, cancelable: true }),
-    ),
-  );
-  expect(api.setSkillOverviewBilling).toHaveBeenCalledWith({
-    teamId: "team_1",
-    workspaceId: "ws_1",
-  });
-  const current = container.querySelector(
-    '[data-testid="overview-billing-current"]',
-  )?.textContent;
-  expect(current).toContain("Platform / Ops / admin_1");
-  expect(container.textContent).toContain("Saved.");
-});
-
-test("a saved setting preselects its team and workspace; a refusal shows the reason", async () => {
-  api.getSkillOverviewBilling.mockResolvedValue({
-    billing: { teamId: "team_1", workspaceId: "ws_1", userId: "admin_1" },
-    updatedBy: "admin_1",
-    updatedAt: "2026-09-22T00:00:00.000Z",
-  });
+test("a system model that is not ready lists exactly what is missing", async () => {
   api.getSkillOverviewStatus.mockResolvedValue({
     ...status,
-    billingConfigured: true,
+    systemModel: {
+      enabled: false,
+      configured: false,
+      ready: false,
+      provider: "atlascloud",
+      model: null,
+      problems: [
+        "disabled",
+        "provider_not_found",
+        "api_key_unset",
+        "model_unset",
+      ],
+      reason: "…",
+    },
   });
-  workspaces.listWorkspaces.mockResolvedValue({
-    items: [{ id: "ws_1", name: "Ops", organizationId: "team_1" }],
-  });
-  api.setSkillOverviewBilling.mockRejectedValue(
-    new Error("The billed user is not a member of this workspace"),
-  );
   await render();
-  expect(select("Team").value).toBe("team_1");
-  expect(select("Workspace").value).toBe("ws_1");
-
-  const member = container.querySelector<HTMLInputElement>(
-    'input[aria-label="Billed member (user id)"]',
-  )!;
-  await act(async () => typeInto(member, "user_9"));
-  await act(async () =>
-    container
-      .querySelector("form")!
-      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })),
+  const model = container.querySelector('[data-testid="system-model-status"]');
+  expect(model?.textContent).toContain("Not ready");
+  expect(model?.textContent).toContain("No Provider or model is set.");
+  const problems = [...(model?.querySelectorAll("li") ?? [])].map(
+    (item) => item.textContent,
   );
-  expect(api.setSkillOverviewBilling).toHaveBeenCalledWith({
-    teamId: "team_1",
-    workspaceId: "ws_1",
-    userId: "user_9",
-  });
-  expect(container.textContent).toContain("not a member of this workspace");
+  expect(problems).toEqual([
+    "SYSTEM_MODEL_ENABLED is not true.",
+    "Provider “atlascloud” is not in the global model gateway configuration.",
+    "SYSTEM_MODEL_API_KEY is not set.",
+    "SYSTEM_MODEL_NAME is not set.",
+  ]);
+});
+
+test("a failed status load is reported", async () => {
+  api.getSkillOverviewStatus.mockRejectedValue(new Error("offline"));
+  await render();
+  expect(container.textContent).toContain(
+    "Could not load the overview settings.",
+  );
+  expect(
+    container.querySelector('[data-testid="system-model-status"]'),
+  ).toBeNull();
 });
 
 test("preview preserves manual categories and queues only eligible reviewed batch IDs", async () => {
-  api.getSkillOverviewBilling.mockResolvedValue({
-    billing: null,
-    updatedBy: null,
-    updatedAt: null,
-  });
   api.getSkillOverviewStatus.mockResolvedValue(status);
   const item = {
     skillId: "s1",
@@ -201,11 +138,6 @@ test("preview preserves manual categories and queues only eligible reviewed batc
 });
 
 test("quality approval is required for bulk migration", async () => {
-  api.getSkillOverviewBilling.mockResolvedValue({
-    billing: null,
-    updatedBy: null,
-    updatedAt: null,
-  });
   api.getSkillOverviewStatus.mockResolvedValue(status);
   api.getSkillAnalysisPreview.mockResolvedValue({
     qualityApproved: false,
@@ -236,11 +168,6 @@ test("quality approval is required for bulk migration", async () => {
 test("a delayed poll cannot replace the next preview page", async () => {
   vi.useFakeTimers();
   try {
-    api.getSkillOverviewBilling.mockResolvedValue({
-      billing: null,
-      updatedBy: null,
-      updatedAt: null,
-    });
     api.getSkillOverviewStatus.mockResolvedValue(status);
     const row = {
       skillId: "a",

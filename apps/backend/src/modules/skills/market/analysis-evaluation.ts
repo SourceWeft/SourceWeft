@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import type { SystemModelIdentity } from "../../../shared/model-gateway/system-client";
 import { SKILL_ANALYSIS_CATEGORY_SLUGS } from "./overview-taxonomy";
 import {
   SKILL_ANALYSIS_PROMPT_VERSION,
@@ -144,7 +145,7 @@ export function summarizeEvaluation(
     durationMs: cases.reduce((sum, row) => sum + row.durationMs, 0),
     cost: null,
     costNote:
-      "The overview model-call interface does not expose settled cost; billing still applies.",
+      "System model calls are billed to no team; each call's tokens and provider-reported cost are on its system_model.call log line, and the total is on the dedicated key at the Provider.",
     perCategory,
     cases,
   };
@@ -184,26 +185,23 @@ export function stratifyEvaluationCases(
   return selected;
 }
 
-/** Non-secret identity; pricing timestamps and credential rotations are excluded. */
-export function skillAnalysisModelIdentity(profile: {
-  id: string;
-  gatewayConfigId: string;
-  profileAlias: string;
-  modelAlias: string;
-  updatedAt?: string;
-}) {
+/**
+ * Non-secret identity of the model an analysis ran on: the system model's
+ * Provider, endpoint and model. Credentials and their rotation are excluded.
+ */
+export function skillAnalysisModelIdentity(identity: SystemModelIdentity) {
   return {
-    profileId: profile.id,
-    gatewayConfigId: profile.gatewayConfigId,
-    profileAlias: profile.profileAlias,
-    modelAlias: profile.modelAlias,
+    provider: identity.provider,
+    kind: identity.kind,
+    baseUrl: identity.baseUrl,
+    apiVersion: identity.apiVersion,
+    model: identity.model,
   };
 }
 export function skillAnalysisModelConfigurationKey(
-  profile: Parameters<typeof skillAnalysisModelIdentity>[0],
-  routes: unknown = null,
+  identity: SystemModelIdentity,
 ) {
   return hash(
-    JSON.stringify({ profile: skillAnalysisModelIdentity(profile), routes }),
+    JSON.stringify({ systemModel: skillAnalysisModelIdentity(identity) }),
   );
 }
