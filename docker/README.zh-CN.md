@@ -57,6 +57,16 @@ docker compose --env-file docker/.env -f docker/docker-compose.yml down
 
 `down` 保留数据。**`down -v` 会删除当前实例的数据**，仅用于明确需要丢弃的临时实例。健康检查返回 HTTP 200 不能代替登录、文件上传和模型响应验证。
 
+## 健康检查
+
+API 在 3001 端口响应 `GET /v1/health`，Web 在 3000 端口响应 `GET /`。worker 和 scheduler 没有 HTTP 端口：它们在健康时定期更新心跳，用下面的命令检查（健康时退出码为 0）：
+
+```sh
+node /app/apps/backend/dist/launch.js health worker     # 或：health scheduler
+```
+
+Compose 已经使用该命令。在其他平台上，把它配置为容器命令型健康检查（例如 Kubernetes 的 `exec` 探针）。它不需要数据库或网络。worker 在事件循环正常且各队列 worker 仍在运行时视为健康；scheduler 在没有任何一轮调度卡住超过 10 分钟时视为健康。仅数据库或 Redis 故障不会判定为不健康，因为重启也无法解决。
+
 ## 数据库迁移
 
 每个容器在执行自身命令之前，都会先在镜像入口中执行待执行的迁移：通过 PostgreSQL 锁保证同一时间只有一个容器在迁移，其他容器等待完成后再启动。`migrate` 服务会先单独执行同样的步骤。迁移失败时容器不会启动，请查看其日志。如果迁移由其他方式执行（例如应用使用的数据库账号没有 DDL 权限），设置 `MIGRATION_ENABLED=false`：此时只要存在未执行的迁移，容器就会拒绝启动。详见 [apps/backend/docs/database-migrations.md](../apps/backend/docs/database-migrations.md)。

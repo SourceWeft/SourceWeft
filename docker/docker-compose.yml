@@ -225,6 +225,13 @@ services:
       - "host.docker.internal:host-gateway"
     stop_grace_period: 1m
     restart: unless-stopped
+    healthcheck:
+      test:
+        ["CMD", "node", "/app/apps/backend/dist/launch.js", "health", "worker"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
 
   scheduler:
     image: ${SOURCEWEFT_IMAGE:-ghcr.io/sourceweft/sourceweft:latest}
@@ -249,6 +256,19 @@ services:
       - "host.docker.internal:host-gateway"
     stop_grace_period: 1m
     restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "/app/apps/backend/dist/launch.js",
+          "health",
+          "scheduler",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
 
   web:
     image: ${SOURCEWEFT_IMAGE:-ghcr.io/sourceweft/sourceweft:latest}
