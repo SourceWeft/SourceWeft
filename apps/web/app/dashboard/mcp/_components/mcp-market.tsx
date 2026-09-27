@@ -51,6 +51,7 @@ import {
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { contentClient, workspaceClient } from "../../../../lib/sdk";
 import { desktopBridge } from "../../../../lib/desktop-bridge";
+import { mcpCardText } from "../../../../lib/mcp-ai-overview";
 import { formatShortRelativeTime } from "../../../../lib/relative-time";
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
 import { GitHubIcon } from "../../../_components/brand-icons";
@@ -668,8 +669,10 @@ function McpCard({
   pendingActions: ReadonlySet<string>;
 }) {
   const t = useTranslations("dashboardMcpPanel");
+  const tOverview = useTranslations("mcp.aiOverview");
   const install = item.install;
   const market = item.market;
+  const cardText = mcpCardText(market);
   const trusted = isTrustedMcp(market);
   const desktopOnly = market.desktopOnly || !market.webExecutable;
   const installed = Boolean(install);
@@ -803,8 +806,14 @@ function McpCard({
         className="mt-3 line-clamp-3 min-h-[60px] text-left text-xs leading-5 text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
         onClick={() => onOpenDetails(item)}
         type="button"
+        {...(cardText.ai
+          ? {
+              "data-ai-summary": "",
+              title: tOverview("cardSummaryTitle"),
+            }
+          : {})}
       >
-        {market.summary}
+        {cardText.text}
       </button>
 
       <div className="mt-3 flex flex-wrap gap-1.5">

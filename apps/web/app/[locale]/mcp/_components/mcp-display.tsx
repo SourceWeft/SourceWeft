@@ -24,6 +24,7 @@ import type {
 } from "@sourceweft/market-sdk";
 
 import { cn } from "@sourceweft/ui-web/lib/utils";
+import { mcpCardText } from "../../../../lib/mcp-ai-overview";
 import { slugify } from "../../../../lib/slug";
 
 import { McpIcon } from "./mcp-client";
@@ -256,11 +257,13 @@ export async function McpMarketCard({
   item: MarketItemSummary;
 }) {
   const t = await getTranslations("mcp.card");
+  const tOverview = await getTranslations("mcp.aiOverview");
   const trusted = Boolean(item.official || item.verified);
   const primaryCategory =
     highlightCategory && item.categories.includes(highlightCategory)
       ? highlightCategory
       : item.categories[0];
+  const cardText = mcpCardText(item);
   return (
     <LocaleLink
       className="group flex h-full flex-col rounded-xl border border-zinc-300 bg-white/62 p-5 transition-all hover:-translate-y-0.5 hover:border-zinc-950/40 hover:bg-white hover:shadow-[0_18px_70px_rgba(39,39,42,0.1)] dark:border-white/10 dark:bg-white/[0.035] dark:hover:border-white/35 dark:hover:bg-white/[0.055]"
@@ -281,8 +284,16 @@ export async function McpMarketCard({
         <McpVerificationBadge item={item} />
       </div>
 
-      <p className="mt-4 line-clamp-3 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-        {item.summary}
+      <p
+        className="mt-4 line-clamp-3 text-sm leading-6 text-zinc-600 dark:text-zinc-400"
+        {...(cardText.ai
+          ? {
+              "data-ai-summary": "",
+              title: tOverview("cardSummaryTitle"),
+            }
+          : {})}
+      >
+        {cardText.text}
       </p>
 
       <div className="mb-4 mt-4 flex flex-wrap gap-2">
