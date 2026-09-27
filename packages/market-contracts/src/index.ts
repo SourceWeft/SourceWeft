@@ -91,6 +91,26 @@ export const marketMcpManifestSchema = z.object({
   lastIndexedAt: z.string().optional(),
 });
 
+// Languages MCP servers' AI overviews are written in.
+export const marketMcpLocaleSchema = z.enum(["en", "zh-CN", "zh-TW"]);
+
+// An MCP server's AI-written overview, in the requested language or English
+// when that one is missing. Model output from third-party content: plain
+// text, labelled as AI-generated wherever shown, rendered as untrusted text.
+export const marketMcpAiOverviewSchema = z.object({
+  summary: z.string(),
+  whatItDoes: z.string(),
+  whenToUse: z.string(),
+  // Runtime, accounts and credentials it needs; "" when it needs none.
+  requirements: z.string(),
+  // Credentials, payments, keys, write or destructive actions to know about
+  // before installing; null when there are none.
+  cautions: z.string().nullable(),
+  // The language it is actually in.
+  locale: marketMcpLocaleSchema,
+  generatedAt: z.string(),
+});
+
 export const marketItemSummarySchema = z.object({
   id: z.string(),
   identifier: z.string(),
@@ -120,6 +140,14 @@ export const marketItemSummarySchema = z.object({
   createdAt: z.string(),
   updatedAt: z.string(),
   publishedAt: z.string().nullable().default(null),
+  // The AI overview's one-sentence summary in the requested language (falling
+  // back to English), or null when there is none. Model output from
+  // third-party content: plain text, render it as untrusted. Optional for
+  // answers from before it existed.
+  aiSummary: z.string().nullable().optional(),
+  // Languages the latest version has a visible AI overview in, without
+  // fallback. Optional for answers from before it existed.
+  overviewLocales: z.array(marketMcpLocaleSchema).optional(),
 });
 
 export const marketItemVersionSchema = z.object({
@@ -142,6 +170,8 @@ export const listMarketMcpRequestSchema = z.object({
   desktopOnly: z.boolean().optional(),
   limit: z.number().int().min(1).max(100).optional(),
   cursor: z.string().optional(),
+  // Language of `aiSummary`; English when omitted.
+  locale: marketMcpLocaleSchema.optional(),
 });
 
 export const listMarketMcpResponseSchema = z.object({
@@ -190,6 +220,10 @@ export const getMarketMcpResponseSchema = z.object({
   // Null when the server has no published version to read it from. Optional
   // for answers from before it existed.
   readme: marketMcpReadmeSchema.nullable().optional(),
+  // The latest version's AI-written overview (`?locale=`, English fallback);
+  // null when there is none or a market admin hid it. Optional for answers
+  // from before it existed.
+  aiOverview: marketMcpAiOverviewSchema.nullable().optional(),
 });
 
 export const getMarketMcpManifestResponseSchema = z.object({
@@ -236,6 +270,8 @@ export type ListMarketMcpResponse = z.infer<typeof listMarketMcpResponseSchema>;
 export type McpReadmeStatus = z.infer<typeof mcpReadmeStatusSchema>;
 export type MarketMcpReadmeSource = z.infer<typeof marketMcpReadmeSourceSchema>;
 export type MarketMcpReadme = z.infer<typeof marketMcpReadmeSchema>;
+export type MarketMcpLocale = z.infer<typeof marketMcpLocaleSchema>;
+export type MarketMcpAiOverview = z.infer<typeof marketMcpAiOverviewSchema>;
 export type GetMarketMcpResponse = z.infer<typeof getMarketMcpResponseSchema>;
 export type GetMarketMcpManifestResponse = z.infer<
   typeof getMarketMcpManifestResponseSchema

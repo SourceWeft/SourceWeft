@@ -2,6 +2,8 @@ import {
   mcpTransportSchema,
   type MarketItemSummary,
   type MarketItemVersion,
+  type MarketMcpAiOverview,
+  type MarketMcpLocale,
   type MarketMcpReadme,
   type McpRuntime,
   type McpTransport,
@@ -14,6 +16,10 @@ import {
   mcpServers,
   mcpServerVersions,
 } from "@sourceweft/db";
+import {
+  readMcpOverviewLocales,
+  readMcpOverviews,
+} from "./overview/repository";
 import { readMcpReadme } from "./readme/readme-repository";
 import { mcpReadmeView } from "./readme/readme-state";
 
@@ -22,6 +28,8 @@ type MarketMcpRecord = {
   versions: MarketItemVersion[];
   /** The latest version's README; null when it cannot be told. */
   readme: MarketMcpReadme | null;
+  /** The latest version's AI overview; null when there is none to show. */
+  aiOverview: MarketMcpAiOverview | null;
 };
 
 /**
@@ -374,15 +382,19 @@ async function categoriesByItemIds(itemIds: string[]) {
   return map;
 }
 
+type LatestVersion = {
+  id: string;
+  manifestJson: Record<string, unknown>;
+  version: string;
+};
+
 async function latestVersionsByItemIds(itemIds: string[]) {
   if (itemIds.length === 0) {
-    return new Map<
-      string,
-      { manifestJson: Record<string, unknown>; version: string }
-    >();
+    return new Map<string, LatestVersion>();
   }
   const rows = await db
     .select({
+      id: mcpServerVersions.id,
       serverId: mcpServerVersions.serverId,
       version: mcpServerVersions.version,
       manifestJson: mcpServerVersions.manifestJson,
@@ -401,19 +413,37 @@ async function latestVersionsByItemIds(itemIds: string[]) {
       desc(mcpServerVersions.createdAt),
     );
 
-  const map = new Map<
-    string,
-    { manifestJson: Record<string, unknown>; version: string }
-  >();
+  const map = new Map<string, LatestVersion>();
   for (const row of rows) {
     if (!map.has(row.serverId)) {
       map.set(row.serverId, {
+        id: row.id,
         manifestJson: row.manifestJson,
         version: row.version,
       });
     }
   }
   return map;
+}
+
+/**
+ * The AI summary (in `locale`, English fallback) and the visible overview
+ * languages of each latest version; one query each for the whole page.
+ */
+async function overviewFieldsByVersionIds(
+  versionIds: string[],
+  locale: MarketMcpLocale,
+) {
+  const [overviews, locales] = await Promise.all([
+    readMcpOverviews({ versionIds, locale }),
+    readMcpOverviewLocales(versionIds),
+  ]);
+  return (versionId: string | undefined) => ({
+    aiSummary: versionId
+      ? (overviews.get(versionId)?.overview.summary ?? null)
+      : null,
+    overviewLocales: versionId ? (locales.get(versionId) ?? []) : [],
+  });
 }
 
 // Keyset cursor over the (publishedAt desc, id desc) ordering. Opaque to
@@ -461,6 +491,8 @@ export async function listMcp(input: {
   desktopOnly?: boolean;
   limit?: number;
   cursor?: string;
+  // Language of each item's `aiSummary`; English when not given.
+  locale?: MarketMcpLocale;
 }) {
   const query = input.query?.trim().toLowerCase();
   const categories = parseMcpCategoryFilter(input.category);
@@ -541,14 +573,21 @@ export async function listMcp(input: {
   const itemIds = pageRows.map((row) => row.id);
   const categoryMap = await categoriesByItemIds(itemIds);
   const latestVersionMap = await latestVersionsByItemIds(itemIds);
+  const overviewFields = await overviewFieldsByVersionIds(
+    [...latestVersionMap.values()].map((latest) => latest.id),
+    input.locale ?? "en",
+  );
   const items = pageRows.map((row) => {
     const latest = latestVersionMap.get(row.id);
-    return mapItemRow({
-      row,
-      categories: categoryMap.get(row.id) ?? [],
-      latestManifestJson: latest?.manifestJson,
-      latestVersion: latest?.version ?? null,
-    });
+    return {
+      ...mapItemRow({
+        row,
+        categories: categoryMap.get(row.id) ?? [],
+        latestManifestJson: latest?.manifestJson,
+        latestVersion: latest?.version ?? null,
+      }),
+      ...overviewFields(latest?.id),
+    };
   });
   const last = pageRows[pageRows.length - 1];
   const nextCursor =
@@ -617,7 +656,15 @@ export async function countMcpByCategory(input: {
   }
 }
 
-export async function findMcp(identifier: string) {
+/**
+ * A published, public server with its published versions (newest first),
+ * the latest one's README, and its AI overview in `locale` (English when not
+ * given, and the fallback when that language has none or it is hidden).
+ */
+export async function findMcp(
+  identifier: string,
+  options: { locale?: MarketMcpLocale } = {},
+): Promise<MarketMcpRecord | null> {
   let row: typeof mcpServers.$inferSelect | undefined;
   try {
     [row] = await db
@@ -656,17 +703,42 @@ export async function findMcp(identifier: string) {
       );
     const categoryMap = await categoriesByItemIds([row.id]);
     const latest = versions[0];
-    const readme = latest ? await readMcpReadme(latest.id) : null;
+    const locale = options.locale ?? "en";
+    const [readme, overviews, overviewLocales] = latest
+      ? await Promise.all([
+          readMcpReadme(latest.id),
+          readMcpOverviews({ versionIds: [latest.id], locale }),
+          readMcpOverviewLocales([latest.id]),
+        ])
+      : [null, null, null];
+    const aiOverview = latest ? (overviews?.get(latest.id) ?? null) : null;
     return {
-      item: mapItemRow({
-        row,
-        categories: categoryMap.get(row.id) ?? [],
-        latestManifestJson: latest?.manifestJson,
-        latestVersion: latest?.version ?? null,
-      }),
+      item: {
+        ...mapItemRow({
+          row,
+          categories: categoryMap.get(row.id) ?? [],
+          latestManifestJson: latest?.manifestJson,
+          latestVersion: latest?.version ?? null,
+        }),
+        aiSummary: aiOverview?.overview.summary ?? null,
+        overviewLocales: latest ? (overviewLocales?.get(latest.id) ?? []) : [],
+      },
       versions: versions.map(mapVersionRow),
       readme: readme
         ? mcpReadmeView({ repoUrl: row.repoUrl, ...readme })
+        : null,
+      aiOverview: aiOverview
+        ? {
+            summary: aiOverview.overview.summary,
+            whatItDoes: aiOverview.overview.whatItDoes,
+            whenToUse: aiOverview.overview.whenToUse,
+            requirements: aiOverview.overview.requirements,
+            cautions: aiOverview.overview.cautions?.trim()
+              ? aiOverview.overview.cautions
+              : null,
+            locale: aiOverview.locale,
+            generatedAt: aiOverview.generatedAt.toISOString(),
+          }
         : null,
     };
   }

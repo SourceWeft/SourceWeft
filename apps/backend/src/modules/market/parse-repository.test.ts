@@ -6,21 +6,18 @@ import {
   type ReadGitHubRepository,
 } from "./parser/repo-tree";
 
-const mocks = vi.hoisted(() => ({ read: vi.fn() }));
+const mocks = vi.hoisted(() => ({ read: vi.fn(), withSystemModel: vi.fn() }));
 
 vi.mock("./parser/repo-tree", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./parser/repo-tree")>()),
   readGitHubRepository: mocks.read,
 }));
-vi.mock("./parser/classifier", () => ({
-  classifyMcpRepository: async () => ({
-    categories: [],
-    inputHash: "test",
-    method: "rules-fallback",
-    reviewRequired: false,
-    ruleCandidates: [],
-    taxonomyVersion: "test",
-  }),
+// A submission asks no model: anything reaching the system model is recorded.
+vi.mock("../../shared/model-gateway/system-client", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("../../shared/model-gateway/system-client")
+  >()),
+  withSystemModel: mocks.withSystemModel,
 }));
 
 import { parseMcpRepository } from "./parse-repository";
@@ -69,11 +66,22 @@ test("the parse hands back the README's bytes at its repository path", async () 
         "servers/weather/server.json": JSON.stringify({
           name: "io.github.acme/weather",
           version: "1.0.0",
+          description: "Weather forecasts and alerts for any city.",
           packages: [
             {
               registryType: "npm",
               identifier: "@acme/weather-mcp",
               transport: { type: "stdio" },
+              environmentVariables: [
+                {
+                  name: "WEATHER_API_KEY",
+                  description: "Key for the weather API.",
+                  isSecret: true,
+                  isRequired: true,
+                  value: "sk-live-should-not-be-kept",
+                  default: "also-not-kept",
+                },
+              ],
             },
           ],
         }),
@@ -95,4 +103,29 @@ test("the parse hands back the README's bytes at its repository path", async () 
   assert.deepEqual(Buffer.from(result.readme!.bytes), readme);
   assert.equal(result.report.static.readmePath, "README.md");
   assert.equal(result.report.github.commitSha, COMMIT);
+
+  // Filed by the keyword rules; no model was asked.
+  assert.equal(result.report.classification?.method, "rules");
+  assert.ok(result.manifest.categories.length > 0);
+  assert.equal(mocks.withSystemModel.mock.calls.length, 0);
+
+  // The server.json's settings are kept by name and flags, never by value.
+  assert.deepEqual(result.registryServer, {
+    packages: [
+      {
+        registryType: "npm",
+        identifier: "@acme/weather-mcp",
+        transport: { type: "stdio" },
+        environmentVariables: [
+          {
+            name: "WEATHER_API_KEY",
+            description: "Key for the weather API.",
+            isRequired: true,
+            isSecret: true,
+          },
+        ],
+      },
+    ],
+  });
+  assert.equal(JSON.stringify(result.registryServer).includes("kept"), false);
 });

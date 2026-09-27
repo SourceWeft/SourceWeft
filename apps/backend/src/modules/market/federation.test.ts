@@ -195,6 +195,114 @@ test("the registry's repository, subfolder included, is kept in provenance", asy
   }
 });
 
+test("the registry's packages and remotes are kept in provenance by name and flags, never by value", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  const entries = [
+    {
+      server: {
+        name: "io.github.FTHTrading/genesis402-mcp",
+        version: "0.2.0",
+        description: "179 x402 pay-per-call APIs",
+        packages: [
+          {
+            registryType: "npm",
+            identifier: "genesis402-mcp",
+            version: "0.2.0",
+            transport: { type: "stdio" },
+            runtimeArguments: [{ name: "--token", value: "arg-secret" }],
+            environmentVariables: [
+              {
+                name: "GENESIS402_PAYER_KEY",
+                description: "Private key of a Base wallet holding USDC.",
+                isSecret: true,
+                value: "0xdeadbeef-private-key",
+                default: "0xdefault-private-key",
+                placeholder: "0x...",
+              },
+            ],
+          },
+        ],
+      },
+    },
+    {
+      server: {
+        name: "io.github.prakhar1605/carrerlift",
+        version: "1.0.0",
+        description: "Jobs",
+        remotes: [
+          {
+            type: "streamable-http",
+            url: "https://www.carrerlift.in/api/mcp?key=query-secret",
+            headers: [
+              { name: "Authorization", isRequired: true, value: "Bearer x" },
+            ],
+          },
+        ],
+      },
+    },
+    {
+      server: { name: "io.github.acme/bare", version: "1.0.0" },
+    },
+  ];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ servers: entries, metadata: { nextCursor: null } }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    ),
+  );
+
+  await ingestFromRegistry({
+    source: "registry.test",
+    baseUrl: "https://registry.test",
+    verified: true,
+  });
+
+  const provenance = mocks.upsert.mock.calls.map(
+    ([input]) => input.provenanceJson,
+  );
+  assert.deepEqual(provenance[0].registryServer, {
+    packages: [
+      {
+        registryType: "npm",
+        identifier: "genesis402-mcp",
+        version: "0.2.0",
+        transport: { type: "stdio" },
+        environmentVariables: [
+          {
+            name: "GENESIS402_PAYER_KEY",
+            description: "Private key of a Base wallet holding USDC.",
+            isSecret: true,
+          },
+        ],
+      },
+    ],
+  });
+  assert.deepEqual(provenance[1].registryServer, {
+    remotes: [
+      {
+        type: "streamable-http",
+        url: "https://www.carrerlift.in/api/mcp",
+        headers: [{ name: "Authorization", isRequired: true }],
+      },
+    ],
+  });
+  assert.equal(provenance[2].registryServer, undefined);
+  const stored = JSON.stringify(provenance);
+  for (const secret of [
+    "0xdeadbeef",
+    "0xdefault",
+    "arg-secret",
+    "query-secret",
+    "Bearer x",
+  ]) {
+    assert.equal(stored.includes(secret), false, secret);
+  }
+});
+
 test("an entry without a repository keeps none", () => {
   assert.equal(
     registryRepositoryProvenance({ server: { name: "x", version: "1" } }),

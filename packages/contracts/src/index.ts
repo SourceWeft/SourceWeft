@@ -16,6 +16,7 @@ export * from "./skill-market-events";
 export * from "./skill-reports";
 export * from "./skill-reviews";
 export * from "./skill-overviews";
+export * from "./mcp-overviews";
 export * from "./skill-run-stats";
 export * from "./working-files";
 export * from "./model-catalog";

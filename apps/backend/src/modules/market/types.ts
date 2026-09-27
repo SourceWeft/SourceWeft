@@ -9,27 +9,16 @@ import type {
 } from "@sourceweft/market-contracts";
 
 export type McpIngestMode = "static" | "mixed";
-// "model": the system model, cross-checked against keyword rules; "rules":
-// keyword rules only.
-export type McpClassificationMode = "model" | "rules";
 
+/**
+ * How a parsed repository is filed when it enters the catalog: the keyword
+ * rules over its name, description, README summary and tools. AI categories
+ * arrive later with the server's AI overview (`overview/`), which takes the
+ * categories over unless a market admin chose them.
+ */
 export type McpClassificationResult = {
   categories: string[];
-  confidence?: number;
-  fallbackReason?: string;
-  inputHash: string;
-  llmResult?: {
-    confidence: number;
-    primaryCategory: string;
-    reason: string;
-    reviewRequired: boolean;
-    secondaryCategories: string[];
-  };
-  method: "model" | "rules-fallback";
-  model?: string;
-  provider?: string;
-  reviewRequired: boolean;
-  ruleCandidates: string[];
+  method: "rules";
   taxonomyVersion: string;
 };
 
@@ -235,11 +224,15 @@ export type McpIngestResult = {
   report: McpParserReport;
   /** Absent when the repository has no README where the parser looks. */
   readme?: McpIngestReadme;
+  /**
+   * The packages and remotes of the repository's `server.json`, names and
+   * flags only (`registry-server.ts`); absent without one.
+   */
+  registryServer?: Pick<RegistryServerJson, "packages" | "remotes">;
 };
 
 export type McpRepositoryParseOptions = {
   categories?: string[];
-  classificationMode?: McpClassificationMode;
   discovery?: {
     confidence?: number;
     marketPageUrl?: string;

@@ -117,9 +117,9 @@ Model gateway catalog sync:
 
 System model:
 
-The platform makes some model calls on its own behalf, for no team: AI
-overviews and classification of public market entries (skills and MCP
-servers). These go through the system model (`withSystemModel` in
+The platform makes some model calls on its own behalf, for no team: the AI
+overviews of public market entries (skills and MCP servers), with the
+categories that come with them. These go through the system model (`withSystemModel` in
 `src/shared/model-gateway/system-client.ts`), never through a tenant's billing.
 Model calls a user triggers (titles, ingestion, retrieval) stay billed to that
 user's team.
@@ -143,9 +143,10 @@ user's team.
   model capability rules, adapters and retries are the same. The timeout is 120
   seconds and a call is retried twice.
 - While it is not ready, overview jobs are not queued and the market admin page
-  shows exactly what is missing; MCP classification uses keyword rules with
-  `fallbackReason: "system_model_not_ready"` and logs a warning. Nothing falls
-  back to another key or model.
+  shows exactly what is missing. Nothing falls back to another key or model.
+  MCP servers are filed by keyword rules when they enter the catalog, whether
+  the system model is ready or not; their AI overview brings AI categories
+  later, except where a market admin chose the categories.
 - Nothing is billed or stored: no usage ledger, no generation records. Each
   call writes one `system_model.call` log line with the purpose, subject,
   Provider, model, status, duration, token counts and, when the Provider
@@ -157,6 +158,10 @@ user's team.
 - `pnpm exec tsx src/scripts/smoke-system-model.ts` makes one real
   structured-output call with the current settings and prints the readiness,
   token usage and cost, never the key.
+- `pnpm exec tsx src/scripts/smoke-mcp-overview.ts <identifier> [--dry-run]`
+  generates one MCP server's AI overview through the overview engine and
+  prints the three locales and the classification. Without `--dry-run` it
+  publishes, as a forced regeneration would.
 
 To use another site, declare it as a custom gateway in the global gateway
 config and point `SYSTEM_MODEL_PROVIDER` at it. Keep it disabled for GLOBAL

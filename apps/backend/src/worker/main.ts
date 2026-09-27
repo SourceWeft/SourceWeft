@@ -28,6 +28,8 @@ import { processSkillOverviewGenerateJob } from "./processors/skill-overview-gen
 import { SKILL_OVERVIEW_GENERATE_JOB } from "../modules/skills/market/overview-queue";
 import { processMcpReadmeFetchJob } from "./processors/mcp-readme-fetch";
 import { MCP_README_FETCH_JOB } from "../modules/market/readme/readme-queue";
+import { processMcpOverviewGenerateJob } from "./processors/mcp-overview-generate";
+import { MCP_OVERVIEW_GENERATE_JOB } from "../modules/market/overview/queue";
 import {
   handleSkillIngestJobFailure,
   processSkillRegistryIngestJob,
@@ -67,6 +69,7 @@ const primaryProcessors: Record<string, JobProcessor> = {
   "thread-title-generate": processThreadTitleGenerateJob,
   [SKILL_OVERVIEW_GENERATE_JOB]: processSkillOverviewGenerateJob,
   [MCP_README_FETCH_JOB]: (job) => processMcpReadmeFetchJob(job),
+  [MCP_OVERVIEW_GENERATE_JOB]: processMcpOverviewGenerateJob,
 };
 
 const skillIngestProcessors: Record<string, JobProcessor> = {

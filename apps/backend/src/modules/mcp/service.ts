@@ -2,6 +2,7 @@ import {
   marketMcpManifestSchema,
   type McpAuthType,
   type McpRiskLevel,
+  type MarketMcpLocale,
   type MarketMcpManifest,
 } from "@sourceweft/market-sdk";
 import { DynamicStructuredTool } from "@langchain/core/tools";
@@ -628,6 +629,7 @@ export class McpService {
     desktopOnly?: boolean;
     limit?: number;
     cursor?: string;
+    locale?: MarketMcpLocale;
   }) {
     const { workspace } = await requireMcpWorkspace({
       workspaceId: input.workspaceId,
@@ -642,6 +644,7 @@ export class McpService {
         desktopOnly: input.desktopOnly,
         limit: input.limit,
         cursor: input.cursor,
+        locale: input.locale,
       }),
       listWorkspaceMcpInstalls({
         teamId: workspace.organizationId,
@@ -703,6 +706,8 @@ export class McpService {
     workspaceId: string;
     userId: string;
     identifier: string;
+    // Language of the AI overview; English when not given.
+    locale?: MarketMcpLocale;
   }) {
     const { workspace } = await requireMcpWorkspace({
       workspaceId: input.workspaceId,
@@ -710,7 +715,7 @@ export class McpService {
       permission: "mcp.read",
     });
     const [market, install] = await Promise.all([
-      marketService.getMcp(input.identifier),
+      marketService.getMcp(input.identifier, { locale: input.locale }),
       findWorkspaceMcpInstallByMarketIdentifier({
         teamId: workspace.organizationId,
         workspaceId: workspace.id,

@@ -6,6 +6,7 @@ import {
 import { logger } from "../../shared/logger";
 import { upsertMarketMcp } from "./ingest/repository";
 import { classifyByText } from "./parser/categories";
+import { registryServerProvenance } from "./registry-server";
 
 /**
  * Upstream MCP registries we federate from. Both conform to the official MCP
@@ -310,6 +311,9 @@ export async function ingestFromRegistry(input: {
             source: input.source,
             meta: entry._meta ?? {},
             repository: registryRepositoryProvenance(entry),
+            // Packages and remotes, names and flags only: what the AI
+            // overview says the server needs to run.
+            registryServer: registryServerProvenance(entry.server ?? entry),
           },
         });
         ingested += 1;

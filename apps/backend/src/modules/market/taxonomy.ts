@@ -1,3 +1,10 @@
+/**
+ * The version of the category list below. Bump it when a category is added,
+ * removed or redefined: AI classifications record the version they were made
+ * under, and MCP overviews written under another one are regenerated.
+ */
+export const mcpTaxonomyVersion = "2026-05-23-v2";
+
 export type McpCategoryDefinition = {
   aliases: string[];
   description: string;

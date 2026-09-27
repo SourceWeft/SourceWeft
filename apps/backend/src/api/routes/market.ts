@@ -1,9 +1,23 @@
 import type { Hono } from "hono";
 import {
   listMarketMcpRequestSchema,
+  marketMcpLocaleSchema,
   marketMcpManifestSchema,
 } from "@sourceweft/market-contracts";
+import {
+  getMcpOverviewAdminResponseSchema,
+  mcpOverviewStatusResponseSchema,
+  regenerateMcpOverviewResponseSchema,
+  setMcpOverviewHiddenRequestSchema,
+  setMcpOverviewHiddenResponseSchema,
+} from "@sourceweft/contracts";
 import { isMarketAdmin } from "../../modules/market/admin";
+import {
+  findMcpOverviewAdminState,
+  getMcpOverviewStatus,
+  regenerateMcpOverview,
+  setMcpOverviewHidden,
+} from "../../modules/market/overview/admin";
 import { listMcpCategories } from "../../modules/market/read-categories";
 import {
   countMcpByCategory,
@@ -58,6 +72,7 @@ export function registerMarketRoutes(app: Hono) {
       desktopOnly: booleanQuery(c.req.query("desktopOnly")),
       limit: numberQuery(c.req.query("limit")),
       cursor: c.req.query("cursor"),
+      locale: c.req.query("locale") || undefined,
     });
     if (!parsed.success) {
       throw ApiError.validation(
@@ -85,13 +100,30 @@ export function registerMarketRoutes(app: Hono) {
   );
 
   app.get("/v1/mcp/:identifier", async (c) => {
-    const record = await findMcp(decodeURIComponent(c.req.param("identifier")));
+    // The language of the AI overview; English when not given.
+    const locale = marketMcpLocaleSchema
+      .optional()
+      .safeParse(c.req.query("locale") || undefined);
+    if (!locale.success) {
+      throw ApiError.validation(
+        locale.error.flatten() as Record<string, unknown>,
+      );
+    }
+    const record = await findMcp(
+      decodeURIComponent(c.req.param("identifier")),
+      { locale: locale.data },
+    );
     if (!record) {
       throw ApiError.notFound("MCP item not found");
     }
     return cachedJson(
       c,
-      { item: record.item, versions: record.versions, readme: record.readme },
+      {
+        item: record.item,
+        versions: record.versions,
+        readme: record.readme,
+        aiOverview: record.aiOverview,
+      },
       { maxAge: 60 },
     );
   });
@@ -200,6 +232,98 @@ export function registerMarketRoutes(app: Hono) {
       );
     }
     return ApiResponse.success(c, result, 202);
+  });
+
+  // --- AI overviews (market admins only) ---
+
+  // Whether the system model can write overviews, and how far they have got.
+  app.get("/v1/market/admin/mcp/overview/status", async (c) => {
+    await requireMarketAdmin(c);
+    return ApiResponse.success(
+      c,
+      mcpOverviewStatusResponseSchema.parse(await getMcpOverviewStatus()),
+    );
+  });
+
+  // One server's overview in every language (hidden ones included) and its
+  // generation state.
+  app.get("/v1/market/admin/mcp/:identifier/overview", async (c) => {
+    await requireMarketAdmin(c);
+    const state = await findMcpOverviewAdminState(
+      decodeURIComponent(c.req.param("identifier")),
+    );
+    if (!state) {
+      throw ApiError.notFound("No MCP server with that identifier");
+    }
+    return ApiResponse.success(
+      c,
+      getMcpOverviewAdminResponseSchema.parse({
+        ...state,
+        analysis: state.analysis
+          ? {
+              ...state.analysis,
+              updatedAt: state.analysis.updatedAt.toISOString(),
+            }
+          : null,
+        overviews: state.overviews.map((entry) => ({
+          ...entry,
+          generatedAt: entry.generatedAt.toISOString(),
+        })),
+      }),
+    );
+  });
+
+  // Write the latest version's overview again, even for unchanged input. The
+  // current one stays live until the new one is published.
+  app.post(
+    "/v1/market/admin/mcp/:identifier/overview/regenerate",
+    async (c) => {
+      const session = await requireMarketAdmin(c);
+      const result = await regenerateMcpOverview({
+        identifier: decodeURIComponent(c.req.param("identifier")),
+        actorUserId: getSessionUserId(session),
+      });
+      if (!result) {
+        throw ApiError.notFound(
+          "No MCP server with a published version for that identifier",
+        );
+      }
+      return ApiResponse.success(
+        c,
+        regenerateMcpOverviewResponseSchema.parse(result),
+        result.queued ? 202 : 200,
+      );
+    },
+  );
+
+  // Hide or show the latest version's overview in every language. The page
+  // falls back to the author's description; a hidden overview stays hidden
+  // when it is regenerated.
+  app.post("/v1/market/admin/mcp/:identifier/overview/hidden", async (c) => {
+    const session = await requireMarketAdmin(c);
+    const body = await c.req.json().catch(() => {
+      throw ApiError.invalidJson();
+    });
+    const parsed = setMcpOverviewHiddenRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    }
+    const result = await setMcpOverviewHidden({
+      identifier: decodeURIComponent(c.req.param("identifier")),
+      hidden: parsed.data.hidden,
+      actorUserId: getSessionUserId(session),
+    });
+    if (!result) {
+      throw ApiError.notFound(
+        "This MCP server's latest version has no overview",
+      );
+    }
+    return ApiResponse.success(
+      c,
+      setMcpOverviewHiddenResponseSchema.parse(result),
+    );
   });
 
   app.post("/v1/market/admin/submissions/:identifier/reject", async (c) => {

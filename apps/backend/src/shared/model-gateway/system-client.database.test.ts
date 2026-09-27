@@ -243,12 +243,12 @@ test("a GLOBAL-disabled Provider lends its definition; the call carries the dedi
   const before = await countRows();
   const result = await system.withSystemModel(
     {
-      purpose: "mcp_market.classify",
-      subjectRef: "mcp-repository:test",
+      purpose: "mcp_market.overview",
+      subjectRef: "mcp-server-version:test",
       scopeId: "system-model-db-test",
     },
     (chat) =>
-      chat.complete({ messages: [{ role: "user", content: "classify" }] }),
+      chat.complete({ messages: [{ role: "user", content: "describe" }] }),
   );
   assert.equal(result.raw.content, "system reply");
   assert.equal(requests.length, 1);

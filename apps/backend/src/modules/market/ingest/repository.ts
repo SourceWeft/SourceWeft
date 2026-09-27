@@ -28,6 +28,45 @@ function categoryDescription(slug: string) {
   );
 }
 
+/** The catalog row id of an MCP category, from its slug. */
+export function mcpCategoryId(slug: string) {
+  return hashId("mcp-cat", slug);
+}
+
+/** The database, or a transaction on it. */
+type Executor = Pick<typeof db, "insert">;
+
+/**
+ * Makes sure an `mcp_categories` row exists for each slug, with the
+ * taxonomy's current name and description; returns their ids in order.
+ */
+export async function upsertMcpCategories(
+  executor: Executor,
+  slugs: readonly string[],
+): Promise<string[]> {
+  const ids: string[] = [];
+  for (const slug of slugs) {
+    const categoryId = mcpCategoryId(slug);
+    await executor
+      .insert(mcpCategories)
+      .values({
+        id: categoryId,
+        slug,
+        name: categoryName(slug),
+        description: categoryDescription(slug),
+      })
+      .onConflictDoUpdate({
+        target: mcpCategories.slug,
+        set: {
+          name: categoryName(slug),
+          description: categoryDescription(slug),
+        },
+      });
+    ids.push(categoryId);
+  }
+  return ids;
+}
+
 function metadataFromManifest(manifest: MarketMcpManifest) {
   return {
     official: manifest.official,
@@ -233,23 +272,7 @@ export async function upsertMarketMcp(input: {
     .delete(mcpServerCategories)
     .where(eq(mcpServerCategories.serverId, itemId));
 
-  for (const slug of manifest.categories) {
-    const categoryId = hashId("mcp-cat", slug);
-    await db
-      .insert(mcpCategories)
-      .values({
-        id: categoryId,
-        slug,
-        name: categoryName(slug),
-        description: categoryDescription(slug),
-      })
-      .onConflictDoUpdate({
-        target: mcpCategories.slug,
-        set: {
-          name: categoryName(slug),
-          description: categoryDescription(slug),
-        },
-      });
+  for (const categoryId of await upsertMcpCategories(db, manifest.categories)) {
     await db
       .insert(mcpServerCategories)
       .values({ serverId: itemId, categoryId })

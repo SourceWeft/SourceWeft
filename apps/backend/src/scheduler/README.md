@@ -50,6 +50,22 @@ batch to GitHub's reset. Refresh intervals, backoff and the attempt cap are
 constants in `modules/market/readme/readme-state.ts`; there is no env
 variable.
 
+## MCP AI overviews
+
+Every 5 minutes (`MCP_OVERVIEW_SCHEDULE_INTERVAL_MS`), while the system model
+is ready, the scheduler queues up to 20 `mcp-overview-generate` jobs
+(`modules/market/overview/queue.ts`, through the catalog overview engine's
+batch). A candidate is the latest published version of a published, public
+server whose README is no longer `pending`: first those never analysed,
+installed servers first, then web-executable ones, then the rest; then, from a
+window of 500 analysed versions that moves through the catalog, those whose
+published overview was written from another input fingerprint (README,
+manifest, packages, description, prompt or taxonomy changed) and failures worth
+another try. A failure that keeps failing is tried again only after the README
+is read again. The README fetch settling a version is what makes it a
+candidate; there is no other coupling. It only queues; the worker calls the
+system model. There is no env variable.
+
 Current phase note:
 
 - Scheduler also runs billing reconcile checks for team subscription plan consistency.
