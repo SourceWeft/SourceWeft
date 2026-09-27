@@ -14,7 +14,7 @@
  * NOT for Provider activation. `activation.env` variables are governed by
  * AGENTS.md and must accept only `true`, `false`, `1`, `0`, failing
  * configuration loading on anything else; they use `parseStrictBooleanEnv`
- * (`shared/config.ts`, `shared/model-gateway/global-config.ts`). Do not route
+ * (below, and `shared/model-gateway/global-config.ts`). Do not route
  * an activation variable through here — silently defaulting an invalid
  * activation value is exactly what that rule forbids.
  */
@@ -46,4 +46,22 @@ export function parseBooleanEnv(
 /** {@link parseBooleanEnv} against `process.env`, by variable name. */
 export function readBooleanEnv(name: string, fallback: boolean): boolean {
   return parseBooleanEnv(process.env[name], fallback);
+}
+
+/**
+ * Strict boolean parsing for switches that must never be guessed: accepts only
+ * `true`, `false`, `1` or `0` (case-insensitive, trimmed) and throws on any
+ * other value. An absent variable takes `fallback`.
+ */
+export function parseStrictBooleanEnv(
+  name: string,
+  fallback: boolean,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const value = env[name];
+  if (value === undefined) return fallback;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "true" || normalized === "1") return true;
+  if (normalized === "false" || normalized === "0") return false;
+  throw new Error(`${name} must be one of: true, false, 1, 0.`);
 }

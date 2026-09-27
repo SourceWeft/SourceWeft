@@ -9,6 +9,7 @@ x-sourceweft-env: &sourceweft-env
   DB_USER: ${DB_USER:-sourceweft}
   DB_PASSWORD: ${DB_PASSWORD:?Run the configuration initialization command in docker/README.md}
   DB_NAME: ${DB_NAME:-sourceweft}
+  MIGRATION_ENABLED: ${MIGRATION_ENABLED:-true}
   REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
   PUBLIC_WEB_BASE_URL: ${PUBLIC_WEB_BASE_URL:-http://localhost:${WEB_PORT:-3000}}
   PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:-${PUBLIC_WEB_BASE_URL:-http://localhost:${WEB_PORT:-3000}}}

@@ -1,18 +1,12 @@
 import "dotenv/config";
 
-import { parseBooleanEnv as parseBoolean } from "./env";
+import {
+  parseBooleanEnv as parseBoolean,
+  parseStrictBooleanEnv,
+} from "./env";
 import { parseAllowedInternalOrigins } from "./security/endpoint-policy";
 
 type AlertLevel = "warn" | "error" | "critical";
-
-function parseStrictBooleanEnv(name: string, fallback: boolean) {
-  const value = process.env[name];
-  if (value === undefined) return fallback;
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "true" || normalized === "1") return true;
-  if (normalized === "false" || normalized === "0") return false;
-  throw new Error(`${name} must be one of: true, false, 1, 0.`);
-}
 
 function parseBoundedIntegerEnv(input: {
   name: string;

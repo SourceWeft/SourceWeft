@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "vitest";
-import { parseBooleanEnv, readBooleanEnv } from "./env";
+import { parseBooleanEnv, parseStrictBooleanEnv, readBooleanEnv } from "./env";
 
 const ORIGINAL = { ...process.env };
 
@@ -60,4 +60,19 @@ test("readBooleanEnv reads process.env by name", () => {
 
   delete process.env.SOURCEWEFT_ENV_TEST_FLAG;
   assert.equal(readBooleanEnv("SOURCEWEFT_ENV_TEST_FLAG", true), true);
+});
+
+test("strict booleans accept only true, false, 1 and 0", () => {
+  assert.equal(parseStrictBooleanEnv("FLAG", false, {}), false);
+  assert.equal(parseStrictBooleanEnv("FLAG", true, {}), true);
+  assert.equal(parseStrictBooleanEnv("FLAG", false, { FLAG: " TRUE " }), true);
+  assert.equal(parseStrictBooleanEnv("FLAG", true, { FLAG: "0" }), false);
+  assert.throws(
+    () => parseStrictBooleanEnv("FLAG", true, { FLAG: "yes" }),
+    /FLAG must be one of: true, false, 1, 0\./,
+  );
+  assert.throws(
+    () => parseStrictBooleanEnv("FLAG", true, { FLAG: "" }),
+    /FLAG must be one of/,
+  );
 });

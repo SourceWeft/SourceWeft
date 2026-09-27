@@ -6,6 +6,7 @@ export default defineConfig({
   dts: false,
   entry: {
     api: "src/api/main.ts",
+    launch: "src/launch/main.ts",
     scheduler: "src/scheduler/main.ts",
     "skills-submit": "src/skills-submit/main.ts",
     worker: "src/worker/main.ts",
