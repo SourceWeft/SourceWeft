@@ -1,3 +1,4 @@
+import { trackConnectorConnected } from "@/lib/analytics-events";
 import { formatDisplayDate } from "@/lib/i18n/format";
 
 import { useLocale as useDisplayLocale } from "next-intl";
@@ -669,6 +670,11 @@ export function useConnectors(input: {
                 : { includePages: true },
             periodicIndexingEnabled: item.id === "notion",
             ...(item.id === "notion" ? { indexingFrequencyMinutes: 360 } : {}),
+          });
+          trackConnectorConnected({
+            connectorType: item.id,
+            gmailMode:
+              item.id === "gmail" ? (options.gmailMode ?? "tools") : undefined,
           });
           if (item.id === "gmail") {
             await refreshConnectors();

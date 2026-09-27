@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
 
+import { trackSourceAdded } from "../../../../../../lib/analytics-events";
 import { apiBaseUrl, contentClient } from "../../../../../../lib/sdk";
 import { expandSelectedSources, type SourceItem } from "../../source-types";
 import {
@@ -1149,6 +1150,7 @@ export function useSources(input: {
         prev.includes(created.source.id) ? prev : [...prev, created.source.id],
       );
       selectNewSourceIds([created.source.id]);
+      trackSourceAdded({ kind: "url", sourceCount: 1 });
 
       toast.success(t("toasts.sources.urlAdded"));
       addSourceDialog.close(false);
@@ -1206,6 +1208,13 @@ export function useSources(input: {
       toast.error(getErrorMessage(error, t("toasts.sources.uploadFailed")));
     } finally {
       setIsSubmitting(false);
+      // Counts files uploaded before a mid-batch failure too.
+      if (createdSourceIds.length > 0) {
+        trackSourceAdded({
+          kind: "file",
+          sourceCount: createdSourceIds.length,
+        });
+      }
     }
   }, [workspaceId, addSourceDialog, refreshSources, selectNewSourceIds, t]);
 

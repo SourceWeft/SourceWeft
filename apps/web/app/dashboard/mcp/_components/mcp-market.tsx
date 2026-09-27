@@ -59,6 +59,7 @@ import { invalidateWorkspaceMcpCache } from "../../chat/_components/sources-hub/
 import { CredentialsDialog } from "./mcp-credentials-dialog";
 import { McpDetailDialog } from "./mcp-detail-dialog";
 import { SubmitMcpDialog } from "./submit-mcp-dialog";
+import { trackMcpServerInstalled } from "../../../../lib/analytics-events";
 
 type MarketMcpItem = ListWorkspaceMarketMcpResponse["items"][number];
 type MarketMcpSummary = MarketMcpItem["market"];
@@ -1301,6 +1302,10 @@ export function McpMarket() {
       updateInstallInItems(result.install);
       invalidateWorkspaceMcpCache(workspaceId);
       toast.success(t("toasts.installed"));
+      trackMcpServerInstalled({
+        source: "market",
+        authType: result.install.authType,
+      });
       // Installing an auth server immediately prompts for credentials; the user
       // then Tests to verify the connection. Install and Test stay separate.
       if (result.install.authType !== "none") {

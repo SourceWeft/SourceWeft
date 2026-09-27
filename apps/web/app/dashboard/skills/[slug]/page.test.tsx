@@ -19,6 +19,8 @@ const navigation = vi.hoisted(() => ({
   search: "",
   replace: vi.fn(),
 }));
+const analytics = vi.hoisted(() => ({ trackSkillInstalled: vi.fn() }));
+vi.mock("../../../../lib/analytics-events", () => analytics);
 
 vi.mock("../../../../lib/sdk", () => ({
   contentClient: api,
@@ -134,6 +136,8 @@ test("?install=1 asks first, leaves the URL at once, and installs only on yes", 
     skillVersionId: "v1",
   });
   expect(prompt()).toBeNull();
+  expect(analytics.trackSkillInstalled).toHaveBeenCalledTimes(1);
+  expect(analytics.trackSkillInstalled).toHaveBeenCalledWith("detail");
 });
 
 test("Cancel closes the question without installing", async () => {
@@ -142,6 +146,7 @@ test("Cancel closes the question without installing", async () => {
   await act(async () => promptButton("Cancel").click());
   expect(prompt()).toBeNull();
   expect(api.enableWorkspaceSkill).not.toHaveBeenCalled();
+  expect(analytics.trackSkillInstalled).not.toHaveBeenCalled();
 });
 
 test("an installed skill, or one that cannot be installed, only loses the param", async () => {

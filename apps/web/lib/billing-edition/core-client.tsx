@@ -7,6 +7,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@sourceweft/ui-web/components/ui/dialog";
+import { trackTeamCreated } from "../analytics/events";
 import { authClient } from "../auth-client";
 import type { PlanConfig } from "@sourceweft/contracts/pricing";
 export function BillingPanel() {
@@ -69,6 +70,7 @@ export function TeamCheckoutDialog({
                 throw new Error(
                   result.error.message || "Unable to create team",
                 );
+              trackTeamCreated("core");
               if (result.data?.id)
                 await authClient.organization.setActive({
                   organizationId: result.data.id,

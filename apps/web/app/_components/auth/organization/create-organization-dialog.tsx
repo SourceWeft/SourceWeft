@@ -22,7 +22,9 @@ import {
 } from "@sourceweft/ui-web/components/ui/dialog"
 import { Field, FieldLabel } from "@sourceweft/ui-web/components/ui/field"
 import { Input } from "@sourceweft/ui-web/components/ui/input"
+import { trackTeamCreated } from "@/lib/analytics-events"
 import { organizationPlugin } from "@/lib/auth/organization-plugin"
+import { useCheckoutAvailable } from "@/lib/billing-edition/capabilities"
 import {
   getAuthAdditionalFieldValidators,
   isAuthFormFieldInvalid,
@@ -49,6 +51,8 @@ export function CreateOrganizationDialog({
     hideSlug: pluginHideSlug
   } = useAuthPlugin(organizationPlugin)
   const hideSlug = hideSlugProp ?? pluginHideSlug ?? false
+  // Shared by both editions; paid checkout marks the commercial one.
+  const checkoutAvailable = useCheckoutAvailable()
 
   const [slugEdited, setSlugEdited] = useState(false)
   const submissionGeneration = useRef(0)
@@ -73,6 +77,7 @@ export function CreateOrganizationDialog({
         name: value.name,
         slug: hideSlug ? undefined : value.slug
       })
+      trackTeamCreated(checkoutAvailable ? "commercial" : "core")
       if (generation === submissionGeneration.current) onOpenChange(false)
     }
   })
