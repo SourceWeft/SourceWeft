@@ -11,6 +11,13 @@ import {
   timestamp,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
+import {
+  catalogAnalysisColumns,
+  catalogAnalysisConstraints,
+  catalogOverviewColumns,
+  catalogOverviewConstraints,
+  type CatalogClassificationOutcome,
+} from "./catalog-overview";
 
 // ---------------------------------------------------------------------------
 // MCP catalog (publisher side). Migrated from the retired sourceweft-api
@@ -210,4 +217,50 @@ export const mcpServerCategories = pgTable(
       name: "mcp_server_categories_pk",
     }),
   ],
+);
+
+// ---------------------------------------------------------------------------
+// AI overviews of MCP servers, built from the catalog overview column
+// definitions shared with skills (`catalog-overview.ts`) and written by the
+// backend's catalog overview engine. One row per (version, locale); the
+// author's own description stays on `mcp_servers` and is never overwritten.
+// ---------------------------------------------------------------------------
+
+/**
+ * One MCP server version's classification: one to three categories, main
+ * purpose first, each with a quotation from the input the model was shown.
+ */
+export type McpAnalysisClassification = CatalogClassificationOutcome & {
+  categories: Array<{ slug: string; evidence: string }>;
+  rationale: string;
+};
+
+export const mcpServerVersionOverviews = pgTable(
+  "mcp_server_version_overviews",
+  {
+    mcpServerVersionId: text("mcp_server_version_id")
+      .notNull()
+      .references(() => mcpServerVersions.id, { onDelete: "cascade" }),
+    // The input fingerprint (`buildMcpOverviewInput`'s `inputSha256`).
+    ...catalogOverviewColumns({ key: "inputSha256", name: "input_sha256" }),
+  },
+  (table) =>
+    catalogOverviewConstraints("mcp_server_version_overviews", {
+      versionId: table.mcpServerVersionId,
+      locale: table.locale,
+    }),
+);
+
+// Durable generation state and the language-independent classification. Old
+// output stays live while a newer request runs; `request_id` fences stale
+// workers.
+export const mcpServerVersionAnalysis = pgTable(
+  "mcp_server_version_analysis",
+  {
+    mcpServerVersionId: text("mcp_server_version_id")
+      .primaryKey()
+      .references(() => mcpServerVersions.id, { onDelete: "cascade" }),
+    ...catalogAnalysisColumns<McpAnalysisClassification>(),
+  },
+  (table) => catalogAnalysisConstraints("mcp_server_version_analysis", table),
 );
