@@ -33,9 +33,21 @@ import {
   DialogTitle,
 } from "@sourceweft/ui-web/components/ui/dialog";
 import { Switch } from "@sourceweft/ui-web/components/ui/switch";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@sourceweft/ui-web/components/ui/tabs";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { contentClient } from "../../../../lib/sdk";
+import { hasMcpReadmeToShow, readMcpReadme } from "../../../../lib/mcp-readme";
 import { formatShortRelativeTime } from "../../../../lib/relative-time";
+import {
+  McpReadmeRepositoryLink,
+  McpReadmeSection,
+  McpReadmeSourceLine,
+} from "../../../_components/market/mcp-readme-section";
 import { McpIcon } from "../../../_components/site-icons";
 
 type MarketMcpItem = ListWorkspaceMarketMcpResponse["items"][number];
@@ -177,6 +189,12 @@ export function McpDetailDialog({
     const parsed = marketMcpManifestSchema.safeParse(version.manifestJson);
     return parsed.success ? parsed.data : null;
   }, [detail]);
+  // The workspace detail's `market` is the public detail, README included.
+  const readme = React.useMemo(
+    () => (detail ? readMcpReadme(detail.market) : null),
+    [detail],
+  );
+  const shownReadme = hasMcpReadmeToShow(readme) ? readme : null;
   const trusted = Boolean(market?.official || market?.verified);
   const desktopOnly = Boolean(
     market && (market.desktopOnly || !market.webExecutable),
@@ -292,86 +310,6 @@ export function McpDetailDialog({
           ) : market ? (
             <div className="grid gap-4 p-5 lg:grid-cols-[minmax(0,1fr)_280px]">
               <article className="min-w-0 space-y-4">
-                <section className="rounded-lg border border-border bg-background p-5">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {market.official ? (
-                      <Badge variant="default">{t("badges.official")}</Badge>
-                    ) : market.verified ? (
-                      <Badge variant="secondary">{t("badges.verified")}</Badge>
-                    ) : (
-                      <Badge className="gap-1" variant="outline">
-                        <AlertTriangle className="size-3" />
-                        {t("badges.unverified")}
-                      </Badge>
-                    )}
-                    <Badge variant="outline">
-                      {desktopOnly
-                        ? t("badges.desktopOnly")
-                        : t("badges.webExecutable")}
-                    </Badge>
-                    {install ? (
-                      <Badge className="gap-1" variant="secondary">
-                        <Check className="size-3" />
-                        {t("badges.installed")}
-                      </Badge>
-                    ) : null}
-                  </div>
-                  <p className="mt-4 text-sm leading-6 text-foreground">
-                    {description}
-                  </p>
-                  {install ? (
-                    <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4 text-xs text-muted-foreground">
-                      <div className="min-w-0">
-                        <p>
-                          {t("detail.toolsSynced", {
-                            count: install.tools.length,
-                          })}
-                          {install.lastTestedAt
-                            ? t("detail.testedSuffix", {
-                                time: formatShortRelativeTime(
-                                  install.lastTestedAt, locale),
-                              })
-                            : t("detail.notTestedSuffix")}
-                        </p>
-                        {install.lastError ? (
-                          <p className="mt-1 text-destructive">
-                            {install.lastError}
-                          </p>
-                        ) : null}
-                        {needsCredentials ? (
-                          <button
-                            className="mt-1 inline-flex items-center gap-1 text-primary hover:underline"
-                            onClick={() => onConfigure(install)}
-                            type="button"
-                          >
-                            <KeyRound className="size-3" />
-                            {t("detail.configureCredentials")}
-                          </button>
-                        ) : null}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span>
-                          {install.enabled
-                            ? t("detail.enabled")
-                            : t("detail.disabled")}
-                        </span>
-                        <Switch
-                          aria-label={
-                            install.enabled
-                              ? t("card.disableAria", { name: market.name })
-                              : t("card.enableAria", { name: market.name })
-                          }
-                          checked={install.enabled}
-                          disabled={pending}
-                          onCheckedChange={(enabled) =>
-                            onToggleEnabled(install, enabled)
-                          }
-                        />
-                      </div>
-                    </div>
-                  ) : null}
-                </section>
-
                 {!trusted ? (
                   <section className="flex gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-xs leading-5 text-amber-800 dark:text-amber-200">
                     <AlertTriangle className="mt-0.5 size-4 shrink-0" />
@@ -379,55 +317,159 @@ export function McpDetailDialog({
                   </section>
                 ) : null}
 
-                <section className="rounded-lg border border-border bg-background p-5">
-                  <div className="flex items-center justify-between gap-2">
-                    <h2 className="text-sm font-semibold text-foreground">
-                      {t("detail.toolsHeading")}
-                    </h2>
-                    <span className="text-xs text-muted-foreground">
-                      {t("detail.toolsTotal", {
-                        count: tools.length || market.toolsCount,
-                      })}
-                    </span>
+                <Tabs
+                  className="gap-0 overflow-hidden rounded-lg border border-border bg-background"
+                  defaultValue="overview"
+                >
+                  <div className="border-b border-border px-5 py-3">
+                    <TabsList className="h-8" variant="line">
+                      <TabsTrigger className="px-2.5 text-xs" value="overview">
+                        {t("detail.tabs.overview")}
+                      </TabsTrigger>
+                      {shownReadme ? (
+                        <TabsTrigger className="px-2.5 text-xs" value="readme">
+                          {t("detail.tabs.readme")}
+                        </TabsTrigger>
+                      ) : null}
+                      <TabsTrigger className="px-2.5 text-xs" value="tools">
+                        {t("detail.tabs.tools", {
+                          count: tools.length || market.toolsCount,
+                        })}
+                      </TabsTrigger>
+                    </TabsList>
                   </div>
-                  {tools.length === 0 ? (
-                    <p className="mt-3 text-xs text-muted-foreground">
-                      {t("detail.toolsPending")}
+                  <TabsContent className="m-0 p-5" value="overview">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {market.official ? (
+                        <Badge variant="default">{t("badges.official")}</Badge>
+                      ) : market.verified ? (
+                        <Badge variant="secondary">
+                          {t("badges.verified")}
+                        </Badge>
+                      ) : (
+                        <Badge className="gap-1" variant="outline">
+                          <AlertTriangle className="size-3" />
+                          {t("badges.unverified")}
+                        </Badge>
+                      )}
+                      <Badge variant="outline">
+                        {desktopOnly
+                          ? t("badges.desktopOnly")
+                          : t("badges.webExecutable")}
+                      </Badge>
+                      {install ? (
+                        <Badge className="gap-1" variant="secondary">
+                          <Check className="size-3" />
+                          {t("badges.installed")}
+                        </Badge>
+                      ) : null}
+                    </div>
+                    <p className="mt-4 text-sm leading-6 text-foreground">
+                      {description}
                     </p>
-                  ) : (
-                    <ul className="mt-3 grid gap-2 md:grid-cols-2">
-                      {tools.map((tool) => {
-                        const meta = riskMeta(tool.risk);
-                        return (
-                          <li
-                            className="rounded-lg border border-border bg-card/40 px-3 py-2"
-                            key={tool.name}
-                          >
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="min-w-0 truncate font-mono text-xs font-medium text-foreground">
-                                {tool.title ?? tool.name}
-                              </span>
-                              <Badge
-                                className={cn(
-                                  "h-5 shrink-0 px-1.5 text-[10px]",
-                                  meta.className,
-                                )}
-                                variant="outline"
-                              >
-                                {t(`risk.${meta.riskKey}`)}
-                              </Badge>
-                            </div>
-                            {tool.description ? (
-                              <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
-                                {tool.description}
-                              </p>
-                            ) : null}
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
-                </section>
+                    {install ? (
+                      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4 text-xs text-muted-foreground">
+                        <div className="min-w-0">
+                          <p>
+                            {t("detail.toolsSynced", {
+                              count: install.tools.length,
+                            })}
+                            {install.lastTestedAt
+                              ? t("detail.testedSuffix", {
+                                  time: formatShortRelativeTime(
+                                    install.lastTestedAt,
+                                    locale,
+                                  ),
+                                })
+                              : t("detail.notTestedSuffix")}
+                          </p>
+                          {install.lastError ? (
+                            <p className="mt-1 text-destructive">
+                              {install.lastError}
+                            </p>
+                          ) : null}
+                          {needsCredentials ? (
+                            <button
+                              className="mt-1 inline-flex items-center gap-1 text-primary hover:underline"
+                              onClick={() => onConfigure(install)}
+                              type="button"
+                            >
+                              <KeyRound className="size-3" />
+                              {t("detail.configureCredentials")}
+                            </button>
+                          ) : null}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span>
+                            {install.enabled
+                              ? t("detail.enabled")
+                              : t("detail.disabled")}
+                          </span>
+                          <Switch
+                            aria-label={
+                              install.enabled
+                                ? t("card.disableAria", { name: market.name })
+                                : t("card.enableAria", { name: market.name })
+                            }
+                            checked={install.enabled}
+                            disabled={pending}
+                            onCheckedChange={(enabled) =>
+                              onToggleEnabled(install, enabled)
+                            }
+                          />
+                        </div>
+                      </div>
+                    ) : null}
+                  </TabsContent>
+
+                  {shownReadme ? (
+                    <TabsContent className="m-0 space-y-4 p-5" value="readme">
+                      <McpReadmeSection {...shownReadme} />
+                      <McpReadmeSourceLine readme={shownReadme} />
+                      <McpReadmeRepositoryLink readme={shownReadme} />
+                    </TabsContent>
+                  ) : null}
+
+                  <TabsContent className="m-0 p-5" value="tools">
+                    {tools.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">
+                        {t("detail.toolsPending")}
+                      </p>
+                    ) : (
+                      <ul className="grid gap-2 md:grid-cols-2">
+                        {tools.map((tool) => {
+                          const meta = riskMeta(tool.risk);
+                          return (
+                            <li
+                              className="rounded-lg border border-border bg-card/40 px-3 py-2"
+                              key={tool.name}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="min-w-0 truncate font-mono text-xs font-medium text-foreground">
+                                  {tool.title ?? tool.name}
+                                </span>
+                                <Badge
+                                  className={cn(
+                                    "h-5 shrink-0 px-1.5 text-[10px]",
+                                    meta.className,
+                                  )}
+                                  variant="outline"
+                                >
+                                  {t(`risk.${meta.riskKey}`)}
+                                </Badge>
+                              </div>
+                              {tool.description ? (
+                                <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
+                                  {tool.description}
+                                </p>
+                              ) : null}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </TabsContent>
+                </Tabs>
               </article>
 
               <aside className="space-y-4">
