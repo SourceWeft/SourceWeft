@@ -27,7 +27,9 @@ for (const enabled of [false, true]) {
         createElement(
           QueryClientProvider,
           { client: new QueryClient() },
-          withIntl(createElement(Component, { authState }), { timeZone: "UTC" }),
+          withIntl(createElement(Component, { authState }), {
+            timeZone: "UTC",
+          }),
         ),
       );
       expect(html.includes('href="/#pricing"')).toBe(enabled);
