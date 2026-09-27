@@ -9,6 +9,7 @@ import {
   AlertTriangle,
   ChevronRight,
   Code2,
+  FileText,
   History,
   KeyRound,
   LockKeyhole,
@@ -18,15 +19,24 @@ import type { MarketItemSummary } from "@sourceweft/market-sdk";
 import { resolveInitialLandingAuthState } from "../../../_landing/auth-state-server";
 import { SourceWeftFooter } from "../../../_landing/components/sourceweft-footer";
 import { SourceWeftHeader } from "../../../_landing/components/sourceweft-header";
+import {
+  McpReadmeRepositoryLink,
+  McpReadmeSection,
+  McpReadmeSourceLine,
+} from "../../../_components/market/mcp-readme-section";
 import { JsonLd } from "../../../_components/seo/json-ld";
 import { OG_IMAGE, SITE_NAME, SITE_URL } from "../../../seo";
 import {
+  getPublicMcpDetail,
   getPublicMcpManifest,
-  getPublicMcpVersions,
   isMarketNotFound,
   listPublicMcp,
   listPublicMcpCategories,
 } from "../../../../lib/market-mcp";
+import {
+  hasMcpReadmeToShow,
+  isLongMcpReadme,
+} from "../../../../lib/mcp-readme";
 import { CopyButton, McpIcon } from "../_components/mcp-client";
 import {
   ExternalTextLink,
@@ -47,6 +57,7 @@ import {
   verificationLabel,
 } from "../_components/mcp-display";
 import { remoteMcpClientConfig } from "../_components/mcp-install";
+import { McpReadmeCollapse } from "../_components/mcp-readme-collapse";
 
 // Not build-time prerendered: canonical/JSON-LD embed the public site URL, which
 // is injected at container start, so a build-time render would bake in the
@@ -162,12 +173,13 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
   setRequestLocale(locale);
   const t = await getTranslations("mcp.detail");
   const decodedIdentifier = decodeURIComponent(identifier);
-  const [authState, result, versions, categoriesResponse] = await Promise.all([
-    resolveInitialLandingAuthState(),
-    loadMcp(decodedIdentifier),
-    getPublicMcpVersions(decodedIdentifier),
-    listPublicMcpCategories(),
-  ]);
+  const [authState, result, { readme, versions }, categoriesResponse] =
+    await Promise.all([
+      resolveInitialLandingAuthState(),
+      loadMcp(decodedIdentifier),
+      getPublicMcpDetail(decodedIdentifier),
+      listPublicMcpCategories(),
+    ]);
   const { item, manifest, version } = result;
   const categoryNames = mcpCategoryNames(categoriesResponse.items);
   const relatedMarket =
@@ -198,6 +210,7 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
       ? manifest.description
       : null;
   const hasOverview = Boolean(overviewText || manifest.riskSummary);
+  const shownReadme = hasMcpReadmeToShow(readme) ? readme : null;
   const primaryCategory = item.categories[0];
   const installHref = authState.isSignedIn
     ? `/dashboard/mcp?mcp=${encodeURIComponent(item.identifier)}`
@@ -205,6 +218,7 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
   const sectionLinks = [
     ...(hasOverview ? [["overview", t("nav.overview")]] : []),
     ["installation", t("nav.installation")],
+    ...(shownReadme ? [["readme", t("nav.readme")]] : []),
     ["tools", t("nav.tools", { count: manifest.tools.length })],
     ...(versions.length > 0
       ? [["versions", t("nav.versions", { count: versions.length })]]
@@ -518,6 +532,23 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
               ) : null}
             </div>
           </section>
+
+          {shownReadme ? (
+            <section className="scroll-mt-32" id="readme">
+              <SectionHeading icon={FileText}>
+                {t("readmeHeading")}
+              </SectionHeading>
+              <div className={`${panelClassName} space-y-4`}>
+                <McpReadmeCollapse
+                  collapsible={isLongMcpReadme(shownReadme.markdown)}
+                >
+                  <McpReadmeSection {...shownReadme} />
+                </McpReadmeCollapse>
+                <McpReadmeSourceLine readme={shownReadme} />
+                <McpReadmeRepositoryLink readme={shownReadme} />
+              </div>
+            </section>
+          ) : null}
 
           <section className="scroll-mt-32" id="tools">
             <SectionHeading count={manifest.tools.length} icon={Code2}>
