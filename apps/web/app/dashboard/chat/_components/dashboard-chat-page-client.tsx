@@ -89,10 +89,8 @@ import {
 import { hasCachedWorkspaceHubValue } from "./sources-hub/workspace-hub-cache";
 import { WORKSPACE_SOURCES_CACHE_BUCKET } from "./source-types";
 import { loadThreadModelSelectorCatalog } from "./model-catalog-loader";
-import {
-  desktopBridge,
-  handleDesktopAuthDeepLink,
-} from "../../../../lib/desktop-bridge";
+import { desktopBridge } from "../../../../lib/desktop-bridge";
+import { useDesktopAuthDeepLink } from "../../../../lib/use-desktop-auth-deep-link";
 import { connectorsClient, contentClient } from "../../../../lib/sdk";
 import type { SourceConnector } from "@sourceweft/sdk";
 import {
@@ -612,35 +610,7 @@ export function DashboardChatPageClient() {
     };
   }, [bootstrapModelCatalog, consumeBootstrapModelCatalog, tCanvas, workspaceId]);
 
-  useEffect(() => {
-    if (!desktopBridge.isAvailable()) {
-      return;
-    }
-
-    const cleanupTask = desktopBridge.onDeepLink((payload) => {
-      const url = payload.url.trim();
-      if (!url) {
-        return;
-      }
-
-      void handleDesktopAuthDeepLink({
-        url,
-        onSuccess: () => {
-          router.replace("/dashboard");
-          router.refresh();
-        },
-        onError: (message) => toast.error(message),
-      }).then((handled) => {
-        if (handled) {
-          return;
-        }
-      });
-    });
-
-    return () => {
-      cleanupTask.then((cleanup) => void cleanup()).catch(() => {});
-    };
-  }, [router]);
+  useDesktopAuthDeepLink("/dashboard");
 
   useEffect(() => {
     if (!workspaceId) {

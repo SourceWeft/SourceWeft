@@ -1,4 +1,12 @@
 "use client";
+import { classifyAuthEvent } from "./analytics/auth-intent";
+import {
+  trackAuthError,
+  trackDesktopHandoffStarted,
+  trackLogin,
+  trackSignUp,
+} from "./analytics-events";
+import { authClient } from "./auth-client";
 import { publicRuntimeConfig } from "./public-runtime-config";
 
 const DESKTOP_AUTH_STATE_STORAGE_KEY = "sourceweft.desktop.auth.state.v1";
@@ -94,21 +102,32 @@ export function buildDesktopWebAuthUrl(input: {
   state: string;
   webBaseUrl?: string;
 }) {
-  const url = new URL(
-    normalizePath(input.path),
-    input.webBaseUrl
-      ? stripTrailingSlash(input.webBaseUrl)
-      : resolveWebBaseUrl(),
-  );
-  const searchParams = toSearchParams(input.search);
+  const webBaseUrl = input.webBaseUrl
+    ? stripTrailingSlash(input.webBaseUrl)
+    : resolveWebBaseUrl();
+  const redirectPath = buildDesktopAuthRedirectPath(input.state);
+  const path = normalizePath(input.path);
 
-  searchParams.delete("desktop");
-  searchParams.delete("redirectTo");
-  searchParams.set("desktop", "1");
-  searchParams.set("redirectTo", buildDesktopAuthRedirectPath(input.state));
+  // Signing in goes straight to the completion page. It shows who is signed in
+  // before anything is handed to the desktop app, and sends people who are not
+  // signed in to the sign-in page and back.
+  if (path === "/auth/sign-in") {
+    return new URL(redirectPath, webBaseUrl).toString();
+  }
+
+  const url = new URL(path, webBaseUrl);
+  const searchParams = toSearchParams(input.search);
+  searchParams.set("redirectTo", redirectPath);
   url.search = searchParams.toString();
 
   return url.toString();
+}
+
+/** Sign-in page that returns to the completion page for `state`. */
+export function buildDesktopSignInPath(state: string) {
+  const url = new URL("/auth/sign-in", FALLBACK_WEB_BASE_URL);
+  url.searchParams.set("redirectTo", buildDesktopAuthRedirectPath(state));
+  return `${url.pathname}${url.search}`;
 }
 
 export function buildDesktopCompleteDeepLink(input: {
@@ -183,4 +202,100 @@ export function clearPendingDesktopAuth(expectedState?: string | null) {
   window.sessionStorage.removeItem(DESKTOP_AUTH_STATE_STORAGE_KEY);
   window.sessionStorage.removeItem(DESKTOP_AUTH_LOGIN_URL_STORAGE_KEY);
   window.sessionStorage.removeItem(DESKTOP_AUTH_EXPIRES_AT_STORAGE_KEY);
+}
+
+export type DesktopAuthDeepLinkError = "missing-token" | "verification-failed";
+
+function trackDesktopHandoffError() {
+  trackAuthError({ action: "login", method: "desktop", surface: "desktop" });
+}
+
+/** Carries the server's (localized) message, if any; callers fall back to their own. */
+export class DesktopHandoffError extends Error {
+  constructor(message?: string) {
+    super(message ?? "");
+    this.name = "DesktopHandoffError";
+  }
+}
+
+/**
+ * Issues a one-time token for the browser's session and returns the deep link
+ * that hands it to the desktop app. Call it only from an explicit action of
+ * the signed-in person: opening a link must never be enough to issue a token.
+ */
+export async function createDesktopHandoffLink(state: string) {
+  const result = await authClient.oneTimeToken.generate();
+  const token = result.data?.token;
+  if (result.error || !token) {
+    trackDesktopHandoffError();
+    throw new DesktopHandoffError(result.error?.message);
+  }
+
+  trackDesktopHandoffStarted();
+  return buildDesktopCompleteDeepLink({ state, token });
+}
+
+/** Leaves the page for the desktop app; the browser asks before opening it. */
+export function openDesktopDeepLink(deepLink: string) {
+  window.location.href = deepLink;
+}
+
+/**
+ * Finishes a desktop sign-in from a `sourceweft://auth/complete` deep link.
+ * Returns false for any other URL, so callers can let it through.
+ *
+ * The deep link is the only way the browser hands the one-time token back,
+ * and the token is redeemed only for the sign-in this app started: a link
+ * whose state does not match the pending sign-in is dropped, whatever it
+ * carries. This is also where the handoff is reported, because only the app
+ * knows whether the token arrived.
+ */
+export async function handleDesktopAuthDeepLink(input: {
+  url: string;
+  onSuccess?: () => void;
+  onError?: (error: DesktopAuthDeepLinkError) => void;
+}) {
+  let parsed: URL;
+  try {
+    parsed = new URL(input.url);
+  } catch {
+    return false;
+  }
+
+  if (
+    parsed.protocol !== "sourceweft:" ||
+    parsed.hostname !== "auth" ||
+    parsed.pathname !== "/complete"
+  ) {
+    return false;
+  }
+
+  const state = parsed.searchParams.get("state");
+  if (!state || !isPendingDesktopAuthState(state)) {
+    return true;
+  }
+
+  const token = parsed.searchParams.get("ott");
+  if (!token) {
+    trackDesktopHandoffError();
+    input.onError?.("missing-token");
+    return true;
+  }
+
+  const result = await authClient.oneTimeToken.verify({ token });
+  if (result.error || !result.data) {
+    // Keep the pending sign-in: the browser page can hand over a fresh token.
+    trackDesktopHandoffError();
+    input.onError?.("verification-failed");
+    return true;
+  }
+
+  clearPendingDesktopAuth(state);
+  if (classifyAuthEvent(result.data.user?.createdAt) === "sign_up") {
+    trackSignUp("desktop");
+  } else {
+    trackLogin("desktop");
+  }
+  input.onSuccess?.();
+  return true;
 }

@@ -4469,28 +4469,25 @@
       "copied": "已复制",
       "copyLink": "复制链接",
       "expiredMessage": "桌面版登录已过期，请重新开始登录。",
-      "statusCheckFailed": "桌面版登录状态检查失败。",
       "signInFailed": "桌面版登录失败。",
       "noLoginLink": "暂无可复制的登录链接。",
-      "loginLinkCopied": "登录链接已复制。",
-      "openBrowserFailed": "无法打开浏览器登录页面。"
-    },
-    "desktopConfirm": {
-      "title": "继续前往 SourceWeft",
-      "description": "确认此账号用于桌面版应用。",
-      "fallbackName": "SourceWeft 用户",
-      "fallbackEmail": "已登录",
-      "continueButton": "在桌面版中继续"
+      "loginLinkCopied": "登录链接已复制，请在这台电脑的浏览器中打开。",
+      "openBrowserFailed": "无法打开浏览器登录页面。",
+      "waitingHint": "在浏览器中完成登录后，点击“打开 SourceWeft 桌面版”即可回到这里。",
+      "deepLinkMissingToken": "桌面版登录链接缺少令牌，请重新开始登录。"
     },
     "desktopComplete": {
-      "initialStatus": "正在返回 SourceWeft。",
       "missingState": "此桌面版登录链接缺少状态参数，请从 SourceWeft 桌面版应用重新开始登录。",
-      "tokenMissing": "未返回桌面版登录令牌。",
-      "completionFailed": "桌面版登录完成失败。",
       "genericFailure": "无法完成桌面版登录。",
-      "title": "正在返回 SourceWeft",
-      "description": "请在 SourceWeft 桌面版应用中完成登录。",
-      "openDesktopApp": "打开 SourceWeft 桌面版"
+      "title": "继续使用 SourceWeft 桌面版",
+      "description": "使用此账号登录桌面版应用。",
+      "fallbackName": "SourceWeft 用户",
+      "fallbackEmail": "已登录",
+      "openDesktopApp": "打开 SourceWeft 桌面版",
+      "openDesktopAppAgain": "再试一次",
+      "useAnotherAccount": "使用其他账号",
+      "confirmHint": "仅当你刚刚在这台电脑的 SourceWeft 桌面版中发起登录时才继续。",
+      "sentHint": "浏览器可能会询问是否打开 SourceWeft。如果没有反应，请确认桌面版已安装并正在运行，然后再试一次。"
     },
     "acceptInvitation": {
       "title": "接受邀请",

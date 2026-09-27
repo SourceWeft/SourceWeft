@@ -4478,28 +4478,25 @@
       "copied": "Copied",
       "copyLink": "Copy link",
       "expiredMessage": "Desktop sign-in expired. Start sign-in again.",
-      "statusCheckFailed": "Desktop sign-in status check failed.",
       "signInFailed": "Desktop sign-in failed.",
       "noLoginLink": "No login link is available to copy.",
-      "loginLinkCopied": "Login link copied.",
-      "openBrowserFailed": "Unable to open the browser sign-in page."
-    },
-    "desktopConfirm": {
-      "title": "Continue to SourceWeft",
-      "description": "Confirm this account for the desktop app.",
-      "fallbackName": "SourceWeft User",
-      "fallbackEmail": "Signed in",
-      "continueButton": "Continue in desktop"
+      "loginLinkCopied": "Sign-in link copied. Open it in a browser on this computer.",
+      "openBrowserFailed": "Unable to open the browser sign-in page.",
+      "waitingHint": "After you sign in, click “Open SourceWeft desktop” in the browser to come back here.",
+      "deepLinkMissingToken": "The desktop sign-in link is missing its token. Start sign-in again."
     },
     "desktopComplete": {
-      "initialStatus": "Returning to SourceWeft.",
       "missingState": "This desktop sign-in link is missing its state. Start sign-in again from the SourceWeft desktop app.",
-      "tokenMissing": "Desktop sign-in token was not returned.",
-      "completionFailed": "Desktop sign-in completion failed.",
       "genericFailure": "Unable to complete desktop sign-in.",
-      "title": "Returning to SourceWeft",
-      "description": "Finish sign-in in the SourceWeft desktop app.",
-      "openDesktopApp": "Open SourceWeft desktop"
+      "title": "Continue to SourceWeft desktop",
+      "description": "Sign in to the desktop app with this account.",
+      "fallbackName": "SourceWeft User",
+      "fallbackEmail": "Signed in",
+      "openDesktopApp": "Open SourceWeft desktop",
+      "openDesktopAppAgain": "Try again",
+      "useAnotherAccount": "Use another account",
+      "confirmHint": "Only continue if you just started signing in from the SourceWeft desktop app on this computer.",
+      "sentHint": "Your browser may ask to open SourceWeft. If nothing happens, make sure the desktop app is installed and running, then try again."
     },
     "acceptInvitation": {
       "title": "Accept invitation",

@@ -1,12 +1,11 @@
 "use client";
 
 import { Auth } from "../../_components/auth/auth";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   detectNativeHostKind,
   type NativeHostKind,
 } from "../../../lib/native-bridge";
-import { DesktopConfirmView } from "./desktop-confirm-view";
 import { DesktopLoginView } from "./desktop-login-view";
 import { MobileLoginView } from "./mobile-login-view";
 
@@ -17,7 +16,6 @@ function mobileLoginViewSupportsPath(path: string) {
 export function AuthViewClient({ path }: { path: string }) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [nativeHostKind, setNativeHostKind] = useState<NativeHostKind | null>();
-  const [showDesktopConfirm, setShowDesktopConfirm] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -34,14 +32,6 @@ export function AuthViewClient({ path }: { path: string }) {
         }
       });
 
-    if (typeof window !== "undefined") {
-      const params = new URLSearchParams(window.location.search);
-      setShowDesktopConfirm(
-        params.get("desktop") === "1" &&
-          Boolean(params.get("redirectTo")?.startsWith("/auth/desktop-complete?")),
-      );
-    }
-
     const handlePageShow = (event: PageTransitionEvent) => {
       if (event.persisted) {
         setRefreshKey((value) => value + 1);
@@ -56,9 +46,6 @@ export function AuthViewClient({ path }: { path: string }) {
   }, []);
 
   const renderKey = useMemo(() => `${path}:${refreshKey}`, [path, refreshKey]);
-  const fallbackToAuthView = useCallback(() => {
-    setShowDesktopConfirm(false);
-  }, []);
 
   if (nativeHostKind === undefined) {
     return <div className="min-h-40 w-full max-w-md" />;
@@ -74,10 +61,6 @@ export function AuthViewClient({ path }: { path: string }) {
 
   if (nativeHostKind === "mobile" && mobileLoginViewSupportsPath(path)) {
     return <MobileLoginView path={path} />;
-  }
-
-  if (showDesktopConfirm && path === "sign-in") {
-    return <DesktopConfirmView onFallback={fallbackToAuthView} />;
   }
 
   return <Auth key={renderKey} path={path} socialLayout="grid" />;
