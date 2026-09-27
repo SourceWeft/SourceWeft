@@ -12,6 +12,10 @@ import {
   listMcp,
 } from "../../modules/market/read-repository";
 import {
+  readMcpReadmeAdminStatus,
+  requestMcpReadmeRefetch,
+} from "../../modules/market/readme/readme-admin";
+import {
   listReviewQueue,
   setSubmissionStatus,
 } from "../../modules/market/review";
@@ -87,7 +91,7 @@ export function registerMarketRoutes(app: Hono) {
     }
     return cachedJson(
       c,
-      { item: record.item, versions: record.versions },
+      { item: record.item, versions: record.versions, readme: record.readme },
       { maxAge: 60 },
     );
   });
@@ -174,6 +178,28 @@ export function registerMarketRoutes(app: Hono) {
       throw ApiError.notFound("No submission awaiting review for that identifier");
     }
     return ApiResponse.success(c, result);
+  });
+
+  // README fetch state of the catalog, and whether the worker's GitHub reads
+  // carry a token.
+  app.get("/v1/market/admin/mcp/readme/status", async (c) => {
+    await requireMarketAdmin(c);
+    return ApiResponse.success(c, await readMcpReadmeAdminStatus());
+  });
+
+  // Fetch one server's README again now: back to `pending`, due now, no
+  // attempts counted, and a fetch job queued for it.
+  app.post("/v1/market/admin/mcp/:identifier/readme/refetch", async (c) => {
+    await requireMarketAdmin(c);
+    const result = await requestMcpReadmeRefetch(
+      decodeURIComponent(c.req.param("identifier")),
+    );
+    if (!result) {
+      throw ApiError.notFound(
+        "No published public MCP server with that identifier",
+      );
+    }
+    return ApiResponse.success(c, result, 202);
   });
 
   app.post("/v1/market/admin/submissions/:identifier/reject", async (c) => {

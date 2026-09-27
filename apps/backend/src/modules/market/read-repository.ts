@@ -2,6 +2,7 @@ import {
   mcpTransportSchema,
   type MarketItemSummary,
   type MarketItemVersion,
+  type MarketMcpReadme,
   type McpRuntime,
   type McpTransport,
 } from "@sourceweft/market-contracts";
@@ -13,11 +14,36 @@ import {
   mcpServers,
   mcpServerVersions,
 } from "@sourceweft/db";
+import { readMcpReadme } from "./readme/readme-repository";
+import { mcpReadmeView } from "./readme/readme-state";
 
 type MarketMcpRecord = {
   item: MarketItemSummary;
   versions: MarketItemVersion[];
+  /** The latest version's README; null when it cannot be told. */
+  readme: MarketMcpReadme | null;
 };
+
+/**
+ * A version row without its README text: list and detail reads load many
+ * versions, and only the latest one's README is ever shown (and that one on
+ * its own, see `findMcp`).
+ */
+const versionColumns = {
+  id: mcpServerVersions.id,
+  serverId: mcpServerVersions.serverId,
+  version: mcpServerVersions.version,
+  status: mcpServerVersions.status,
+  manifestJson: mcpServerVersions.manifestJson,
+  provenanceJson: mcpServerVersions.provenanceJson,
+  publishedAt: mcpServerVersions.publishedAt,
+  createdAt: mcpServerVersions.createdAt,
+};
+
+type VersionRow = Pick<
+  typeof mcpServerVersions.$inferSelect,
+  keyof typeof versionColumns
+>;
 
 const records: MarketMcpRecord[] = [];
 
@@ -313,9 +339,7 @@ function mapItemRow(input: {
   };
 }
 
-function mapVersionRow(
-  row: typeof mcpServerVersions.$inferSelect,
-): MarketItemVersion {
+function mapVersionRow(row: VersionRow): MarketItemVersion {
   return {
     version: row.version,
     status: row.status,
@@ -358,7 +382,11 @@ async function latestVersionsByItemIds(itemIds: string[]) {
     >();
   }
   const rows = await db
-    .select()
+    .select({
+      serverId: mcpServerVersions.serverId,
+      version: mcpServerVersions.version,
+      manifestJson: mcpServerVersions.manifestJson,
+    })
     .from(mcpServerVersions)
     .where(
       and(
@@ -614,7 +642,7 @@ export async function findMcp(identifier: string) {
     // here would let a consumer install an unpublished version by naming it,
     // and would leak its manifest. Newest published first.
     const versions = await db
-      .select()
+      .select(versionColumns)
       .from(mcpServerVersions)
       .where(
         and(
@@ -628,6 +656,7 @@ export async function findMcp(identifier: string) {
       );
     const categoryMap = await categoriesByItemIds([row.id]);
     const latest = versions[0];
+    const readme = latest ? await readMcpReadme(latest.id) : null;
     return {
       item: mapItemRow({
         row,
@@ -636,6 +665,9 @@ export async function findMcp(identifier: string) {
         latestVersion: latest?.version ?? null,
       }),
       versions: versions.map(mapVersionRow),
+      readme: readme
+        ? mcpReadmeView({ repoUrl: row.repoUrl, ...readme })
+        : null,
     };
   }
   return fallbackFindMcp(identifier);
