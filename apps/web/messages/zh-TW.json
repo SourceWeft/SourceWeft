@@ -490,6 +490,11 @@
       "relatedHeading": "更多類似 {name} 的服務",
       "breadcrumb": "麵包屑導覽",
       "sections": "章節導覽"
+    },
+    "readme": {
+      "imagePlaceholder": "圖片",
+      "notFound": "該儲存庫沒有 README。",
+      "tooLarge": "README 過大，無法在此顯示，請<link>在 GitHub 上檢視</link>。"
     }
   },
   "languageSwitcher": {

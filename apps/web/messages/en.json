@@ -490,6 +490,11 @@
       "relatedHeading": "More servers like {name}",
       "breadcrumb": "Breadcrumb",
       "sections": "Sections"
+    },
+    "readme": {
+      "imagePlaceholder": "Image",
+      "notFound": "This repository has no README.",
+      "tooLarge": "The README is too large to show here — <link>open it on GitHub</link>."
     }
   },
   "languageSwitcher": {

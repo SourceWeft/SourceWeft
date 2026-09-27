@@ -481,6 +481,11 @@
       "relatedHeading": "更多类似 {name} 的服务",
       "breadcrumb": "面包屑导航",
       "sections": "章节导航"
+    },
+    "readme": {
+      "imagePlaceholder": "图片",
+      "notFound": "该仓库没有 README。",
+      "tooLarge": "README 过大，无法在此显示，请<link>在 GitHub 上查看</link>。"
     }
   },
   "languageSwitcher": {
