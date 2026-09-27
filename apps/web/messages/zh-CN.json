@@ -448,6 +448,7 @@
       "nav": {
         "overview": "概览",
         "installation": "安装",
+        "readme": "README",
         "tools": "工具（{count}）",
         "versions": "版本（{count}）",
         "related": "相关"
@@ -467,6 +468,7 @@
       "otherClientsConfig": "把它添加到你客户端的 <code>mcpServers</code> 配置中。",
       "oauthNote": " 客户端会在首次连接时完成 OAuth 登录。",
       "followRepo": "参照 <link>仓库</link> 中的启动说明。",
+      "readmeHeading": "README",
       "toolsHeading": "工具",
       "versionsHeading": "版本历史",
       "latest": "最新",
@@ -481,6 +483,16 @@
       "relatedHeading": "更多类似 {name} 的服务",
       "breadcrumb": "面包屑导航",
       "sections": "章节导航"
+    },
+    "readme": {
+      "imagePlaceholder": "图片",
+      "notFound": "该仓库没有 README。",
+      "tooLarge": "README 过大，无法在此显示，请<link>在 GitHub 上查看</link>。",
+      "showMore": "展开完整 README",
+      "showLess": "收起",
+      "source": "来源：<link>{path}</link>",
+      "sourceAtCommit": "来源：<link>{path}</link>，提交 <code>{commit}</code>",
+      "viewInRepository": "在仓库中阅读 README"
     }
   },
   "languageSwitcher": {
@@ -2254,6 +2266,11 @@
       "notTestedSuffix": " · 尚未测试",
       "unverifiedNoticeLong": "此 MCP 服务器未经验证。它可以接收对话的工具参数，并可能执行外部操作。启用前请先查看该服务器。",
       "unverifiedNoticeMedium": "此 MCP 服务器未经验证。在允许其访问对话工具参数之前，请先查看它。",
+      "tabs": {
+        "overview": "概览",
+        "readme": "README",
+        "tools": "工具（{count}）"
+      },
       "toolsHeading": "工具",
       "toolsTotal": "共 {count} 个",
       "toolsPending": "工具详情将在服务器被索引或安装后公布。",
