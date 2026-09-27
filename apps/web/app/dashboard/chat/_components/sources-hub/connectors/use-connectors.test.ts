@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { SourceConnector } from "@sourceweft/sdk";
 import { useConnectors } from "./use-connectors";
-import { flush, mountWithIntl, unmountAll } from "@/test/react";
+import { flush, mountWithIntl, unmountAll, withIntl } from "@/test/react";
 
 // The hook imports `connectorsClient` from the web app's SDK barrel. From this
 // `connectors/` subdir that module is six levels up (one deeper than the
@@ -32,6 +32,14 @@ const {
   update: vi.fn(),
   deleteConnector: vi.fn(),
   create: vi.fn(),
+}));
+
+const sessionState = vi.hoisted(() => ({ userId: "user-1" }));
+
+vi.mock("@/lib/auth-client", () => ({
+  authClient: {
+    useSession: () => ({ data: { user: { id: sessionState.userId } } }),
+  },
 }));
 
 vi.mock("../../../../../../lib/sdk", () => ({
@@ -132,6 +140,7 @@ function api(): HookApi {
 }
 
 beforeEach(() => {
+  sessionState.userId = "user-1";
   for (const fn of [
     list,
     listAccounts,
@@ -312,4 +321,31 @@ test("handleConfirmDisconnectConnector deletes (soft) and clears pending state",
   expect(api().pendingDisconnectConnector).toBeNull();
   // Soft delete (not hardDeleted) must NOT trigger a sources refresh.
   expect(refreshSources).not.toHaveBeenCalled();
+});
+
+test("account switch clears prior manifest eligibility even while the next fetch is pending", async () => {
+  listManifests.mockResolvedValueOnce({ items: [{ type: "gmail" }] });
+  const input = baseInput("ws-shared-preview");
+  function Harness() {
+    latest = useConnectors(input);
+    return null;
+  }
+  const view = await mountWithIntl(createElement(Harness));
+  await flush(25);
+  expect(api().availableConnectorTypes).toEqual(["gmail"]);
+  listManifests.mockImplementationOnce(() => new Promise(() => {}));
+  sessionState.userId = "user-2";
+  await view.render(withIntl(createElement(Harness)));
+  expect(api().availableConnectorTypes).toEqual([]);
+});
+
+test("failed manifest refresh clears old Gmail eligibility", async () => {
+  listManifests.mockResolvedValueOnce({ items: [{ type: "gmail" }] });
+  await mountHook(baseInput("ws-preview-error"));
+  expect(api().availableConnectorTypes).toEqual(["gmail"]);
+  listManifests.mockRejectedValueOnce(new Error("offline"));
+  await act(async () => {
+    await api().refreshConnectors();
+  });
+  expect(api().availableConnectorTypes).toEqual([]);
 });

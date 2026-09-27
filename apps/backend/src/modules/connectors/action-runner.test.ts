@@ -1,3 +1,6 @@
+vi.mock("../preview", () => ({
+  previewAccessService: { isEnabled: vi.fn().mockResolvedValue(true) },
+}));
 import assert from "node:assert/strict";
 import { test, vi } from "vitest";
 import { logger } from "../../shared/logger";
@@ -289,12 +292,14 @@ test("Gmail send proposal stores ciphertext and requires its approver and send g
   const executionContext = {
     teamId: "team_1",
     actionExecutionCursor: {
-      refs: [{
-        actionRunId: proposed.action.id,
-        connectorId: "connector_1",
-        requestJson: proposed.action.requestJson,
-        toolName: "send_gmail_message",
-      }],
+      refs: [
+        {
+          actionRunId: proposed.action.id,
+          connectorId: "connector_1",
+          requestJson: proposed.action.requestJson,
+          toolName: "send_gmail_message",
+        },
+      ],
       value: 0,
     },
   };

@@ -15,7 +15,7 @@ import { useEffect, useRef, useState } from "react";
 import { setLocaleCookie } from "../../lib/i18n/cookie";
 import { isLocalizedPath } from "../../lib/i18n/routes";
 import { authClient } from "../../lib/auth-client";
-import { userSettingsClient } from "../../lib/sdk";
+import { useUpdateUserSettings } from "../../lib/user-settings";
 
 function IconGlobe() {
   return (
@@ -55,6 +55,7 @@ export function LanguageSwitcher({
   // contradict the account setting on their next device.
   const { data: session } = authClient.useSession();
   const userId = session?.user?.id;
+  const updateSettings = useUpdateUserSettings();
 
   useEffect(() => {
     if (!open) {
@@ -82,9 +83,7 @@ export function LanguageSwitcher({
       // on every device, not a per-browser fork of it. Best-effort — the
       // cookie already applied, so a failed write only costs a future
       // device's first-load guess, not this session's UI.
-      void userSettingsClient
-        .updateSettings({ appearance: { language: next } })
-        .catch(() => {});
+      void updateSettings({ appearance: { language: next } }).catch(() => {});
     }
 
     // On a localized route, swap the URL's locale prefix; elsewhere the cookie is

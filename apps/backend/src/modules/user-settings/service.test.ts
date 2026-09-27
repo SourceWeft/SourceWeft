@@ -15,6 +15,7 @@ test("normalizeUserSettings applies defaults and drops unknown fields", () => {
     }),
     {
       appearance: { theme: "dark", language: "system" },
+      preview: { gmail: false },
     },
   );
 });
@@ -51,10 +52,16 @@ test("normalizeUserSettings rejects oversized json", () => {
 test("mergeUserSettings keeps existing appearance fields", () => {
   assert.deepEqual(
     mergeUserSettings(
-      { appearance: { theme: "light", language: "system" } },
+      {
+        appearance: { theme: "light", language: "system" },
+        preview: { gmail: false },
+      },
       { appearance: { theme: "dark" } },
     ),
-    { appearance: { theme: "dark", language: "system" } },
+    {
+      appearance: { theme: "dark", language: "system" },
+      preview: { gmail: false },
+    },
   );
 });
 
@@ -82,6 +89,9 @@ test("normalizeUserSettings handles a user with no stored settings", () => {
 });
 
 test("normalizeUserSettings handles values with no JSON representation", () => {
-  assert.deepEqual(normalizeUserSettings(() => {}), DEFAULT_USER_SETTINGS);
+  assert.deepEqual(
+    normalizeUserSettings(() => {}),
+    DEFAULT_USER_SETTINGS,
+  );
   assert.deepEqual(normalizeUserSettings(Symbol("x")), DEFAULT_USER_SETTINGS);
 });

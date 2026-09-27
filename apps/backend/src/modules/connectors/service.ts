@@ -1,3 +1,4 @@
+import { ConnectorAccessPolicy } from "./access-policy";
 import { ConnectorError } from "./errors";
 import { validateObjectWithJsonSchema } from "./config-validation";
 import { requireConnectorWorkspace } from "./permissions";
@@ -25,10 +26,15 @@ import type { ConnectorStatus } from "./types";
 export class ConnectorService {
   constructor(
     private readonly registry: ConnectorRegistry = connectorRegistry,
+    private readonly access = new ConnectorAccessPolicy(undefined, registry),
   ) {}
 
-  listManifests() {
-    return { items: this.registry.listManifests() };
+  async listManifests(userId: string) {
+    const items = this.registry.listManifests();
+    const allowed = await Promise.all(
+      items.map((item) => this.access.isAvailable(item.type, userId)),
+    );
+    return { items: items.filter((_, index) => allowed[index]) };
   }
 
   async listAccounts(input: {
@@ -46,6 +52,7 @@ export class ConnectorService {
       workspaceId: workspace.id,
       connectorType: input.connectorType,
     });
+    // Retain existing rows under workspace ACL for disconnect and cleanup after revocation.
     return { items };
   }
 
@@ -64,6 +71,7 @@ export class ConnectorService {
       userId: input.userId,
       permission: "connector.manage",
     });
+    await this.access.requireAvailable(input.connectorType, input.userId);
     const manifest = this.registry.getManifest(input.connectorType);
     const configJson = input.configJson ?? {};
     validateObjectWithJsonSchema({
@@ -228,6 +236,7 @@ export class ConnectorService {
         "Connector not found",
       );
     }
+    await this.access.requireConnection(current, input.userId);
     if (
       input.oauthAccountId &&
       input.oauthAccountId !== current.oauthAccountId

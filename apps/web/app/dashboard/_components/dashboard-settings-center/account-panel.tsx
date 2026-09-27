@@ -16,8 +16,14 @@ import {
   type Locale,
 } from "@sourceweft/i18n/locales";
 import { authClient } from "../../../../lib/auth-client";
-import { userSettingsClient } from "../../../../lib/sdk";
-import { clearLocaleCookie, setLocaleCookie } from "../../../../lib/i18n/cookie";
+import {
+  useUserSettings,
+  useUpdateUserSettings,
+} from "../../../../lib/user-settings";
+import {
+  clearLocaleCookie,
+  setLocaleCookie,
+} from "../../../../lib/i18n/cookie";
 import { RawImage } from "../../../_components/raw-image";
 
 // Mirrors `userLanguageSchema` in @sourceweft/contracts: "system" follows the
@@ -51,6 +57,8 @@ export function AccountPanel({
   const [isLanguageSaving, setIsLanguageSaving] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const { theme, setTheme } = useTheme();
+  const { data: savedSettings } = useUserSettings();
+  const updateSettings = useUpdateUserSettings();
 
   React.useEffect(() => {
     setDisplayName(userName ?? "");
@@ -58,21 +66,10 @@ export function AccountPanel({
   // Hydrate the language control from the saved user setting (the same source
   // UserSettingsSync reads), so the dropdown shows the user's real choice.
   React.useEffect(() => {
-    let cancelled = false;
-    void userSettingsClient
-      .getSettings()
-      .then((result) => {
-        if (!cancelled) {
-          setLanguage(result.settings.appearance.language);
-        }
-      })
-      .catch(() => {
-        // Leave the default ("system"); the switcher still persists on change.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    if (savedSettings) {
+      setLanguage(savedSettings.settings.appearance.language);
+    }
+  }, [savedSettings]);
   React.useEffect(() => {
     setAvatarPreview(userImage ?? null);
     setAvatarDirty(false);
@@ -159,7 +156,7 @@ export function AccountPanel({
     setTheme(nextTheme);
     setIsThemeSaving(true);
     try {
-      await userSettingsClient.updateSettings({
+      await updateSettings({
         appearance: { theme: nextTheme },
       });
     } catch {
@@ -192,7 +189,7 @@ export function AccountPanel({
     setIsLanguageSaving(true);
     router.refresh();
     try {
-      await userSettingsClient.updateSettings({
+      await updateSettings({
         appearance: { language: next },
       });
     } catch {
@@ -417,9 +414,7 @@ export function AccountPanel({
               type="button"
               variant="outline"
             >
-              {isSigningOut
-                ? t("account.signingOut")
-                : t("account.signOut")}
+              {isSigningOut ? t("account.signingOut") : t("account.signOut")}
             </Button>
           </div>
           <div className="flex items-start justify-between gap-4 rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3">

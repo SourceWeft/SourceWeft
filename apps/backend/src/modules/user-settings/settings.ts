@@ -5,6 +5,8 @@ import {
   type UserSettings,
 } from "@sourceweft/contracts";
 
+import { parsePreviewFlags } from "../preview/features";
+
 export { DEFAULT_USER_SETTINGS };
 
 const MAX_JSON_BYTES = 16 * 1024;
@@ -42,17 +44,20 @@ function hasSecretLikeKey(value: unknown): boolean {
 }
 
 export function normalizeUserSettings(value: unknown): UserSettings {
-  if (hasSecretLikeKey(value)) {
-    return DEFAULT_USER_SETTINGS;
+  // Preference sanitization must never reinterpret independently managed access.
+  const preview = parsePreviewFlags(value);
+  if (hasSecretLikeKey(value) || jsonSize(value) > MAX_JSON_BYTES) {
+    return { appearance: DEFAULT_USER_SETTINGS.appearance, preview };
   }
-  if (jsonSize(value) > MAX_JSON_BYTES) {
-    return DEFAULT_USER_SETTINGS;
-  }
-  const parsed = userSettingsSchema.safeParse(value);
-  const next = parsed.success ? parsed.data : DEFAULT_USER_SETTINGS;
-  if (jsonSize(next) > MAX_JSON_BYTES) {
-    return DEFAULT_USER_SETTINGS;
-  }
+  const appearance =
+    value && typeof value === "object"
+      ? (value as Record<string, unknown>).appearance
+      : undefined;
+  const parsed = userSettingsSchema.shape.appearance.safeParse(appearance);
+  const next = {
+    appearance: parsed.success ? parsed.data : DEFAULT_USER_SETTINGS.appearance,
+    preview,
+  };
   return next;
 }
 

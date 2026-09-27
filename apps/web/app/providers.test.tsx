@@ -1,14 +1,18 @@
 // @vitest-environment jsdom
 
 import assert from "node:assert/strict";
-import { createElement } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, createElement } from "react";
 import { afterEach, test, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
   refresh: vi.fn(),
   setTheme: vi.fn(),
   userId: "user-1" as string | undefined,
-  settings: { appearance: { theme: "system", language: "system" as string } },
+  settings: {
+    preview: { gmail: false },
+    appearance: { theme: "system", language: "system" as string },
+  },
   cookie: "" as string,
 }));
 
@@ -44,8 +48,18 @@ import { UserSettingsSync } from "./providers";
 import { flush, mountWithIntl, unmountAll } from "@/test/react";
 
 async function render(locale: "en" | "zh-CN" | "zh-TW") {
-  const { container } = await mountWithIntl(createElement(UserSettingsSync), {
-    locale,
+  const { container } = await mountWithIntl(
+    createElement(
+      QueryClientProvider,
+      { client: new QueryClient() },
+      createElement(UserSettingsSync),
+    ),
+    {
+      locale,
+    },
+  );
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 20));
   });
   return container;
 }
@@ -59,7 +73,10 @@ afterEach(async () => {
   state.refresh.mockClear();
   state.setTheme.mockClear();
   state.userId = "user-1";
-  state.settings = { appearance: { theme: "system", language: "system" } };
+  state.settings = {
+    preview: { gmail: false },
+    appearance: { theme: "system", language: "system" },
+  };
   clearCookieJar();
 });
 
@@ -72,7 +89,10 @@ afterEach(async () => {
 // long-term truth across devices.
 test("a fresh device with no cookie self-corrects to the account's explicit language", async () => {
   clearCookieJar();
-  state.settings = { appearance: { theme: "system", language: "zh-CN" } };
+  state.settings = {
+    preview: { gmail: false },
+    appearance: { theme: "system", language: "zh-CN" },
+  };
   // Rendered as "en" (e.g. what Accept-Language negotiated) while the
   // account says zh-CN — a real mismatch a new device would hit.
   await render("en");
@@ -83,7 +103,10 @@ test("a fresh device with no cookie self-corrects to the account's explicit lang
 
 test("a returning visitor whose render already matches the account does not refresh", async () => {
   clearCookieJar();
-  state.settings = { appearance: { theme: "system", language: "zh-CN" } };
+  state.settings = {
+    preview: { gmail: false },
+    appearance: { theme: "system", language: "zh-CN" },
+  };
   await render("zh-CN");
   await flush();
   assert.equal(state.refresh.mock.calls.length, 0);
@@ -92,7 +115,10 @@ test("a returning visitor whose render already matches the account does not refr
 
 test('"system" clears a stale pinned cookie and refreshes, since behavior can change', async () => {
   document.cookie = "sw_locale=zh-TW; path=/";
-  state.settings = { appearance: { theme: "system", language: "system" } };
+  state.settings = {
+    preview: { gmail: false },
+    appearance: { theme: "system", language: "system" },
+  };
   await render("zh-TW");
   await flush();
   assert.equal(state.refresh.mock.calls.length, 1);
@@ -101,7 +127,10 @@ test('"system" clears a stale pinned cookie and refreshes, since behavior can ch
 
 test('"system" with no pinned cookie is already correct and does not refresh', async () => {
   clearCookieJar();
-  state.settings = { appearance: { theme: "system", language: "system" } };
+  state.settings = {
+    preview: { gmail: false },
+    appearance: { theme: "system", language: "system" },
+  };
   await render("en");
   await flush();
   assert.equal(state.refresh.mock.calls.length, 0);

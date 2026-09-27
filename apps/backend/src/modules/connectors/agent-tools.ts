@@ -1,3 +1,5 @@
+import { connectorAccessPolicy } from "./access-policy";
+import { requireConnectorWorkspace } from "./permissions";
 import { tool } from "langchain";
 import type { ToolRuntime } from "@langchain/core/tools";
 import {
@@ -7,6 +9,7 @@ import {
 } from ".";
 import {
   findOAuthAccountRecord,
+  findSourceConnectorRecord,
   listSourceConnectorRecords,
 } from "./repository";
 import type {
@@ -479,7 +482,9 @@ export async function createConnectorActionTools(
     teamId: context.teamId,
     workspaceId: context.workspaceId,
   });
-  const connectorsByType = activeConnectorsByType(connectors);
+  const connectorsByType = activeConnectorsByType(
+    await connectorAccessPolicy.filterAvailable(connectors, context.userId),
+  );
   const tools = [];
 
   for (const manifest of connectorRegistry.listManifests()) {
@@ -540,11 +545,45 @@ export async function createConnectorActionTools(
                   }
                 }
 
-                const connector = chooseConnector({
+                const selectedConnector = chooseConnector({
                   connectorId,
                   connectorType: manifest.type,
                   connectors: availableConnectors,
                 });
+                const connector =
+                  selectedConnector.connectorType === "gmail"
+                    ? await findSourceConnectorRecord({
+                        teamId: context.teamId,
+                        workspaceId: context.workspaceId,
+                        connectorId: selectedConnector.id,
+                      })
+                    : selectedConnector;
+                if (!connector || connector.status !== "active")
+                  throw new ConnectorError(
+                    409,
+                    "CONNECTOR_NOT_ACTIVE",
+                    "Connector is not active",
+                  );
+                if (connector.connectorType === "gmail")
+                  await requireConnectorWorkspace({
+                    workspaceId: context.workspaceId,
+                    userId: context.userId,
+                    permission: "connector.read",
+                  });
+                await connectorAccessPolicy.requireConnection(
+                  connector,
+                  context.userId,
+                );
+                if (
+                  connector.connectorType === "gmail" &&
+                  action.capabilities?.includes("connector_read") &&
+                  connector.configJson.liveSearchEnabled === false
+                )
+                  throw new ConnectorError(
+                    403,
+                    "GMAIL_LIVE_SEARCH_DISABLED",
+                    "Gmail live search is disabled",
+                  );
                 if (action.requiresApproval) {
                   const result = await connectorActionRunner.propose({
                     workspaceId: context.workspaceId,

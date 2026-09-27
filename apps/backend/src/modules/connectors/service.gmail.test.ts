@@ -1,3 +1,6 @@
+vi.mock("../preview", () => ({
+  previewAccessService: { isEnabled: vi.fn().mockResolvedValue(true) },
+}));
 import assert from "node:assert/strict";
 import { test, vi } from "vitest";
 import type { ConnectorRegistry } from "./registry";
@@ -29,6 +32,7 @@ import { ConnectorService } from "./service";
 
 const connector = {
   id: "connector",
+  createdBy: "user",
   teamId: "team",
   workspaceId: "workspace",
   connectorType: "gmail",
@@ -75,6 +79,7 @@ test("Gmail reconnect binds only the same provider identity in the workspace", a
       ? { id: "old-account", providerAccountId: "reader@example.com" }
       : {
           id: "new-account",
+          createdBy: "user",
           status: "active",
           connectorType: "gmail",
           providerAccountId: "reader@example.com",
@@ -114,6 +119,7 @@ test("Gmail reconnect rejects a different mailbox before changing the connector"
       ? { id: "old-account", providerAccountId: "reader@example.com" }
       : {
           id: "new-account",
+          createdBy: "user",
           status: "active",
           connectorType: "gmail",
           providerAccountId: "other@example.com",

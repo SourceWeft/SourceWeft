@@ -5,6 +5,7 @@ import { isBillingError } from "@sourceweft/contracts/billing-runtime";
 import { isConnectorError } from "../../modules/connectors/errors";
 import { isContentError } from "../../modules/content/errors";
 import { isMcpError } from "../../modules/mcp/errors";
+import { PreviewAccessError } from "../../modules/preview/errors";
 
 export type ApiErrorBody = {
   code: string;
@@ -83,9 +84,18 @@ function jsonResponse(c: Context, body: unknown, statusCode: number) {
 }
 
 export function toApiError(error: unknown): ApiError {
-  if (error instanceof SkillParseError) return new ApiError(422, error.code, error.message, { file: "SKILL.md", line: error.line, column: error.column });
+  if (error instanceof SkillParseError)
+    return new ApiError(422, error.code, error.message, {
+      file: "SKILL.md",
+      line: error.line,
+      column: error.column,
+    });
   if (error instanceof ApiError) {
     return error;
+  }
+
+  if (error instanceof PreviewAccessError) {
+    return new ApiError(error.statusCode, error.code, error.message);
   }
 
   if (isContentError(error)) {
