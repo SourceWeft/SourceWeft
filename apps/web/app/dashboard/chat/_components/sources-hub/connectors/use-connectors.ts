@@ -1,3 +1,4 @@
+import { authClient } from "@/lib/auth-client";
 import { trackConnectorConnected } from "@/lib/analytics-events";
 import { formatDisplayDate } from "@/lib/i18n/format";
 
@@ -174,6 +175,11 @@ export function useConnectors(input: {
   };
 }) {
   const displayLocale = useDisplayLocale();
+  const { data: session } = authClient.useSession();
+  const actorId = session?.user?.id;
+  const actorIdRef = useRef(actorId);
+  actorIdRef.current = actorId;
+  const connectorCacheBucket = `${WORKSPACE_CONNECTORS_CACHE_BUCKET}:${actorId ?? "anonymous"}`;
   const {
     workspaceId,
     currentWorkspaceIdRef,
@@ -186,9 +192,12 @@ export function useConnectors(input: {
 
   const t = useTranslations("dashboardSourcesHub");
   const [connectors, setConnectors] = useState<ConnectorItem[]>([]);
-  const [availableConnectorTypes, setAvailableConnectorTypes] = useState<
-    string[]
-  >([]);
+  const [availableManifests, setAvailableManifests] = useState<{
+    actorId: string | undefined;
+    types: string[];
+  }>({ actorId: undefined, types: [] });
+  const availableConnectorTypes =
+    availableManifests.actorId === actorId ? availableManifests.types : [];
   const [connectorAccounts, setConnectorAccounts] = useState<
     ConnectorAccountItem[]
   >([]);
@@ -261,7 +270,7 @@ export function useConnectors(input: {
     if (!workspaceId) {
       setConnectors([]);
       setConnectorAccounts([]);
-      setAvailableConnectorTypes([]);
+      setAvailableManifests({ actorId, types: [] });
       setConnectorWebhookEventsById({});
       setConnectorWebhookConfigsById({});
       setConnectorsLoadingError(null);
@@ -277,7 +286,10 @@ export function useConnectors(input: {
         connectorsClient.listAccounts(activeWorkspaceId),
         connectorsClient.listManifests(activeWorkspaceId),
       ]);
-      if (currentWorkspaceIdRef.current !== activeWorkspaceId) {
+      if (
+        currentWorkspaceIdRef.current !== activeWorkspaceId ||
+        actorIdRef.current !== actorId
+      ) {
         return;
       }
       const uiConnectors = result.items.map((connector) =>
@@ -308,9 +320,10 @@ export function useConnectors(input: {
       });
       setConnectors(uiConnectors);
       setConnectorAccounts(accounts.items);
-      setAvailableConnectorTypes(
-        manifests.items.map((manifest) => manifest.type),
-      );
+      setAvailableManifests({
+        actorId,
+        types: manifests.items.map((manifest) => manifest.type),
+      });
       const webhookConnectors = uiConnectors.filter((connector) => {
         const catalogItem = connectorCatalog.find(
           (item) => item.id === connector.raw.connectorType,
@@ -349,13 +362,16 @@ export function useConnectors(input: {
         nextWebhookEvents[result.value.connectorId] =
           result.value.webhookEvents;
       }
-      if (currentWorkspaceIdRef.current !== activeWorkspaceId) {
+      if (
+        currentWorkspaceIdRef.current !== activeWorkspaceId ||
+        actorIdRef.current !== actorId
+      ) {
         return;
       }
       setConnectorWebhookConfigsById(nextWebhookConfigs);
       setConnectorWebhookEventsById(nextWebhookEvents);
       setCachedWorkspaceHubValue<WorkspaceConnectorsCacheValue>(
-        WORKSPACE_CONNECTORS_CACHE_BUCKET,
+        connectorCacheBucket,
         activeWorkspaceId,
         {
           accounts: accounts.items,
@@ -365,15 +381,22 @@ export function useConnectors(input: {
         },
       );
     } catch (error) {
+      if (actorIdRef.current !== actorId) return;
+      setAvailableManifests({ actorId, types: [] });
       setConnectorsLoadingError(
         getErrorMessage(error, t("toasts.connectors.loadFailed")),
       );
     } finally {
-      if (currentWorkspaceIdRef.current === activeWorkspaceId) {
+      if (
+        currentWorkspaceIdRef.current === activeWorkspaceId &&
+        actorIdRef.current === actorId
+      ) {
         setIsLoadingConnectors(false);
       }
     }
   }, [
+    actorId,
+    connectorCacheBucket,
     currentWorkspaceIdRef,
     onConnectorsChange,
     workspaceId,
@@ -422,7 +445,7 @@ export function useConnectors(input: {
     }
 
     const cached = getCachedWorkspaceHubValue<WorkspaceConnectorsCacheValue>(
-      WORKSPACE_CONNECTORS_CACHE_BUCKET,
+      connectorCacheBucket,
       workspaceId,
     );
     if (cached) {
@@ -434,7 +457,7 @@ export function useConnectors(input: {
       setIsLoadingConnectors(false);
     }
     void refreshConnectors();
-  }, [refreshConnectors, workspaceId]);
+  }, [refreshConnectors, workspaceId, connectorCacheBucket]);
 
   useEffect(() => {
     if (!connectorSettingsConnectorId) {

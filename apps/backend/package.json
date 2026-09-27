@@ -29,6 +29,7 @@
     "check": "tsx src/scripts/check.ts",
     "audit:connector-ingestion": "tsx src/scripts/audit-connector-ingestion.ts",
     "blog:sync": "tsx src/scripts/sync-notion-blog.ts",
+    "preview:user": "tsx src/scripts/user-preview.ts",
     "mail:welcome": "tsx src/scripts/send-welcome-email.ts",
     "benchmark:video-render": "tsx src/scripts/benchmark-video-render.ts",
     "check-types": "tsc --noEmit",

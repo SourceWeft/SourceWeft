@@ -34,7 +34,7 @@ import { organizationPlugin } from "../lib/auth/organization-plugin";
 import { passkeyPlugin } from "../lib/auth/passkey-plugin";
 import { twoFactorPlugin } from "../lib/auth/two-factor-plugin";
 import { getQueryClient } from "../lib/query-client";
-import { userSettingsClient } from "../lib/sdk";
+import { useUserSettings } from "../lib/user-settings";
 import {
   clearLocaleCookie,
   getLocaleCookie,
@@ -75,58 +75,42 @@ function isCancelledPasskeyRejection(reason: unknown) {
 }
 
 export function UserSettingsSync() {
-  const { data: session } = authClient.useSession();
+  const { data: result } = useUserSettings();
   const { setTheme } = useTheme();
   const router = useRouter();
   const locale = useLocale();
-  const userId = session?.user?.id;
 
   useEffect(() => {
-    if (!userId) {
+    if (!result) {
       return;
     }
 
-    let cancelled = false;
-    void userSettingsClient
-      .getSettings()
-      .then((result) => {
-        if (cancelled) {
-          return;
-        }
-        const { theme, language } = result.settings.appearance;
-        setTheme(theme);
-        // Mirror the saved language into the cookie the proxy reads, so a signed-in
-        // user's choice follows them across devices (§5). The account setting is the
-        // one long-term truth — "system" means "follow the browser", so we clear the
-        // explicit cookie rather than pin one.
-        //
-        // A brand-new browser/device has no `sw_locale` cookie yet, so the very first
-        // SSR render used Accept-Language, not the account setting — on sign-in there,
-        // this can genuinely disagree with what the account says. Refresh only when
-        // what's already rendered (`locale`) would actually change, so a returning
-        // visitor (the common case, cookie already agrees) never sees a needless
-        // extra fetch on every mount.
-        const pinnedCookie = getLocaleCookie();
-        if (language === "system") {
-          clearLocaleCookie();
-          if (pinnedCookie) {
-            router.refresh();
-          }
-        } else {
-          setLocaleCookie(language);
-          if (locale !== language) {
-            router.refresh();
-          }
-        }
-      })
-      .catch(() => {
-        // Keep next-themes local cache and the existing cookie as the fallback.
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [setTheme, userId, router, locale]);
+    const { theme, language } = result.settings.appearance;
+    setTheme(theme);
+    // Mirror the saved language into the cookie the proxy reads, so a signed-in
+    // user's choice follows them across devices (§5). The account setting is the
+    // one long-term truth — "system" means "follow the browser", so we clear the
+    // explicit cookie rather than pin one.
+    //
+    // A brand-new browser/device has no `sw_locale` cookie yet, so the very first
+    // SSR render used Accept-Language, not the account setting — on sign-in there,
+    // this can genuinely disagree with what the account says. Refresh only when
+    // what's already rendered (`locale`) would actually change, so a returning
+    // visitor (the common case, cookie already agrees) never sees a needless
+    // extra fetch on every mount.
+    const pinnedCookie = getLocaleCookie();
+    if (language === "system") {
+      clearLocaleCookie();
+      if (pinnedCookie) {
+        router.refresh();
+      }
+    } else {
+      setLocaleCookie(language);
+      if (locale !== language) {
+        router.refresh();
+      }
+    }
+  }, [setTheme, result, router, locale]);
 
   return null;
 }

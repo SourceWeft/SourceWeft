@@ -30,8 +30,8 @@ vi.mock("../../lib/auth-client", () => ({
   },
 }));
 
-vi.mock("../../lib/sdk", () => ({
-  userSettingsClient: { updateSettings: state.updateSettings },
+vi.mock("../../lib/user-settings", () => ({
+  useUpdateUserSettings: () => state.updateSettings,
 }));
 
 import { LanguageSwitcher } from "./language-switcher";
