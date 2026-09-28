@@ -755,13 +755,13 @@ test("a refund whose transaction has no amount_paid raises the amount-unavailabl
 
   assert.equal(f.store.account?.addOnPagesBalance, 1000);
   assert.equal(reversalRows(f).length, 0);
-  assert.ok(
-    f.alerts.some(
-      (alert) =>
-        alert.alertKey ===
-        "billing:payment-reversal-amount-unavailable:creem:ref_no_paid_amount",
-    ),
+  const alert = f.alerts.find(
+    (entry) =>
+      entry.alertKey ===
+      "billing:payment-reversal-amount-unavailable:creem:ref_no_paid_amount",
   );
+  assert.ok(alert);
+  assert.equal(alert?.metadata?.cause, "paid_amount_missing");
 });
 
 test("a refund with no currency anywhere raises the amount-unavailable alert", async () => {
@@ -789,13 +789,13 @@ test("a refund with no currency anywhere raises the amount-unavailable alert", a
 
   assert.equal(f.store.account?.addOnPagesBalance, 1000);
   assert.equal(reversalRows(f).length, 0);
-  assert.ok(
-    f.alerts.some(
-      (alert) =>
-        alert.alertKey ===
-        "billing:payment-reversal-amount-unavailable:creem:ref_no_currency",
-    ),
+  const alert = f.alerts.find(
+    (entry) =>
+      entry.alertKey ===
+      "billing:payment-reversal-amount-unavailable:creem:ref_no_currency",
   );
+  assert.ok(alert);
+  assert.equal(alert?.metadata?.cause, "currency_missing");
 });
 
 test("a taxed refund reverses against the tax-inclusive paid amount, not the pre-tax subtotal", async () => {
