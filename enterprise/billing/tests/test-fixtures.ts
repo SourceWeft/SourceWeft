@@ -378,6 +378,26 @@ export class MemoryBillingStore implements BillingStore {
     return this.webhook;
   }
 
+  async listStrandedWebhookEvents(input: {
+    provider: BillingWebhookEventState["provider"];
+    receivedBefore: Date;
+    limit: number;
+  }): Promise<BillingWebhookEventState[]> {
+    return [...this.webhooks.values()]
+      .filter(
+        (webhook) =>
+          webhook.provider === input.provider &&
+          webhook.status === "failed" &&
+          new Date(webhook.receivedAt).getTime() <
+            input.receivedBefore.getTime(),
+      )
+      .sort(
+        (a, b) =>
+          new Date(a.receivedAt).getTime() - new Date(b.receivedAt).getTime(),
+      )
+      .slice(0, input.limit);
+  }
+
   async listAccountSubscriptionStates() {
     return [];
   }

@@ -193,6 +193,19 @@ export type BillingStore = {
     },
     client?: PoolClient,
   ): Promise<BillingWebhookEventState>;
+  /**
+   * Receipts still `failed` after a provider stops retrying delivery: oldest
+   * first, capped by `limit`. Used by the stranded-receipt alert scan, never
+   * to replay an event.
+   */
+  listStrandedWebhookEvents(
+    input: {
+      provider: BillingWebhookEventState["provider"];
+      receivedBefore: Date;
+      limit: number;
+    },
+    client?: PoolClient,
+  ): Promise<BillingWebhookEventState[]>;
   listAccountSubscriptionStates(client?: PoolClient): Promise<
     Array<{
       teamId: string;

@@ -529,7 +529,10 @@ test("reversal and usage on the same member serialize", async () => {
     });
     const before = await store.getAccount(teamId, userId);
     assert.equal(before?.addOnCreditsBalance, 10_000);
-    assert.equal(before?.monthlyCreditsBalance, runtimeConfig.defaultMonthlyCredits);
+    assert.equal(
+      before?.monthlyCreditsBalance,
+      runtimeConfig.defaultMonthlyCredits,
+    );
 
     // A partial refund (half of `paidAmount`) reclaims 5,000 of the 10,000
     // add-on grant; the concurrent usage charge spends 2,000 credits, well
@@ -668,6 +671,98 @@ test("reclaim stops at zero under real constraints", async () => {
       await pool.query("delete from billing_accounts where team_id=$1", [
         teamId,
       ]);
+    } finally {
+      await pool.end();
+    }
+  }
+});
+
+test("listStrandedWebhookEvents returns only failed rows of the provider received before the cutoff, oldest first, capped by limit", async () => {
+  const connectionString = requireBillingTestDatabase();
+  const pool = new Pool({ connectionString, max: 4 });
+  const memberships = {
+    async listTeamMemberUserIds() {
+      throw new Error("Unexpected membership lookup");
+    },
+    async countTeamMembers() {
+      throw new Error("Unexpected member count");
+    },
+    async countPendingTeamInvitations() {
+      throw new Error("Unexpected invitation count");
+    },
+  };
+  const store = new PostgresBillingStore(pool, memberships);
+  const now = new Date();
+  const cutoff = new Date(now.getTime() - 7 * 60 * 60 * 1000);
+  const seededIds: string[] = [];
+
+  async function seed(input: {
+    provider: "creem" | "waffo";
+    status: "failed" | "processed";
+    hoursAgo: number;
+  }) {
+    const created = await store.insertWebhookEvent({
+      provider: input.provider,
+      providerEventId: `evt_${randomUUID()}`,
+      eventType: "subscription.active",
+      teamId: "team_stranded",
+      externalSubscriptionId: "ext_sub_stranded",
+      payload: {},
+      metadata: {},
+    });
+    await store.updateWebhookEventState(created.id, {
+      status: input.status,
+      errorCode: input.status === "failed" ? "processing_error" : null,
+    });
+    await pool.query(
+      "update billing_webhook_events set received_at=$1 where id=$2",
+      [new Date(now.getTime() - input.hoursAgo * 60 * 60 * 1000), created.id],
+    );
+    seededIds.push(created.id);
+    return created.id;
+  }
+
+  try {
+    const oldest = await seed({
+      provider: "creem",
+      status: "failed",
+      hoursAgo: 10,
+    });
+    const middle = await seed({
+      provider: "creem",
+      status: "failed",
+      hoursAgo: 8,
+    });
+    await seed({ provider: "creem", status: "failed", hoursAgo: 1 }); // inside the redelivery window: not stranded yet
+    await seed({ provider: "creem", status: "processed", hoursAgo: 9 }); // not failed
+    await seed({ provider: "waffo", status: "failed", hoursAgo: 9 }); // different provider
+
+    const limited = await store.listStrandedWebhookEvents({
+      provider: "creem",
+      receivedBefore: cutoff,
+      limit: 1,
+    });
+    assert.equal(limited.length, 1);
+    assert.equal(limited[0]?.id, oldest);
+
+    const all = await store.listStrandedWebhookEvents({
+      provider: "creem",
+      receivedBefore: cutoff,
+      limit: 50,
+    });
+    assert.deepEqual(
+      all.map((row) => row.id),
+      [oldest, middle],
+    );
+    assert.ok(
+      all.every((row) => row.status === "failed" && row.provider === "creem"),
+    );
+  } finally {
+    try {
+      await pool.query(
+        "delete from billing_webhook_events where id = any($1)",
+        [seededIds],
+      );
     } finally {
       await pool.end();
     }

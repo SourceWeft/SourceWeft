@@ -701,9 +701,6 @@ importers:
 
   enterprise/billing:
     dependencies:
-      '@creem_io/better-auth':
-        specifier: ^1.1.4
-        version: 1.2.4(@cfworker/json-schema@4.1.1)(better-auth@1.7.2(@opentelemetry/api@1.9.1)(@prisma/client@5.22.0)(better-sqlite3@12.8.0)(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@prisma/client@5.22.0)(@types/pg@8.21.0)(better-sqlite3@12.8.0)(kysely@0.29.5)(pg@8.23.0))(next@16.3.3(@opentelemetry/api@1.9.1)(@playwright/test@1.59.1)(@types/node@22.20.1)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(pg@8.23.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(vitest@4.1.11))(zod@4.4.3)
       '@sourceweft/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
@@ -725,9 +722,9 @@ importers:
       '@waffo/pancake-ts':
         specifier: 0.25.0
         version: 0.25.0
-      better-auth:
-        specifier: 1.7.2
-        version: 1.7.2(@opentelemetry/api@1.9.1)(@prisma/client@5.22.0)(better-sqlite3@12.8.0)(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@prisma/client@5.22.0)(@types/pg@8.21.0)(better-sqlite3@12.8.0)(kysely@0.29.5)(pg@8.23.0))(next@16.3.3(@opentelemetry/api@1.9.1)(@playwright/test@1.59.1)(@types/node@22.20.1)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(pg@8.23.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(vitest@4.1.11)
+      creem:
+        specifier: 1.6.0
+        version: 1.6.0(@cfworker/json-schema@4.1.1)
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(@opentelemetry/api@1.9.1)(@prisma/client@5.22.0)(@types/pg@8.21.0)(better-sqlite3@12.8.0)(kysely@0.29.5)(pg@8.23.0)
@@ -11546,8 +11543,10 @@ snapshots:
     transitivePeerDependencies:
       - '@cfworker/json-schema'
       - supports-color
+    optional: true
 
-  '@creem_io/webhook-types@1.0.1': {}
+  '@creem_io/webhook-types@1.0.1':
+    optional: true
 
   '@csstools/color-helpers@5.1.0': {}
 

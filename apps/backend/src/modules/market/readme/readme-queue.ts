@@ -17,8 +17,14 @@ import {
 
 export const MCP_README_FETCH_JOB = "mcp-readme-fetch";
 
-/** Versions queued per scheduled batch. */
-export const MCP_README_BATCH_SIZE = 200;
+/**
+ * Versions queued per scheduled batch. About two thirds of registry entries
+ * name no repository and cost no GitHub request, so a full batch is roughly
+ * 500–600 README API reads: with the 10-minute schedule, a few thousand an
+ * hour, inside the token's 5,000 while leaving room for other GitHub reads. A
+ * spent rate limit defers the rest of the batch rather than failing it.
+ */
+export const MCP_README_BATCH_SIZE = 800;
 
 export type McpReadmeFetchJobPayload = {
   versionIds: string[];
