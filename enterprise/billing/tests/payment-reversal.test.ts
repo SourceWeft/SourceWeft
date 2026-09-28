@@ -124,3 +124,45 @@ test("reclaimPages stops at zero when the reclaim exceeds both balances", () => 
   assert.equal(account.addOnPagesBalance, 0);
   assert.equal(account.monthlyPagesBalance, 0);
 });
+
+test("reclaimCredits is a no-op for zero or negative units and never inflates a balance", () => {
+  const zero = createActiveTeamAccount({
+    addOnCreditsBalance: 300,
+    monthlyCreditsBalance: 500,
+  });
+  assert.deepEqual(reclaimCredits(zero, 0), { fromAddOn: 0, fromMonthly: 0 });
+  assert.equal(zero.addOnCreditsBalance, 300);
+  assert.equal(zero.monthlyCreditsBalance, 500);
+
+  const negative = createActiveTeamAccount({
+    addOnCreditsBalance: 300,
+    monthlyCreditsBalance: 500,
+  });
+  assert.deepEqual(reclaimCredits(negative, -100), {
+    fromAddOn: 0,
+    fromMonthly: 0,
+  });
+  assert.equal(negative.addOnCreditsBalance, 300);
+  assert.equal(negative.monthlyCreditsBalance, 500);
+});
+
+test("reclaimPages is a no-op for zero or negative units and never inflates a balance", () => {
+  const zero = createActiveTeamAccount({
+    addOnPagesBalance: 300,
+    monthlyPagesBalance: 500,
+  });
+  assert.deepEqual(reclaimPages(zero, 0), { fromAddOn: 0, fromMonthly: 0 });
+  assert.equal(zero.addOnPagesBalance, 300);
+  assert.equal(zero.monthlyPagesBalance, 500);
+
+  const negative = createActiveTeamAccount({
+    addOnPagesBalance: 300,
+    monthlyPagesBalance: 500,
+  });
+  assert.deepEqual(reclaimPages(negative, -100), {
+    fromAddOn: 0,
+    fromMonthly: 0,
+  });
+  assert.equal(negative.addOnPagesBalance, 300);
+  assert.equal(negative.monthlyPagesBalance, 500);
+});

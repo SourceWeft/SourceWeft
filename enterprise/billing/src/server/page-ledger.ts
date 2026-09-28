@@ -162,8 +162,14 @@ export function clawbackMonthlyPages(
  * legacy mirrors stay untouched — a caller that needs them refreshed calls
  * `syncPageMirrorFields` itself. The caller compares `fromAddOn + fromMonthly`
  * against the target delta to find the shortfall that could not be recovered.
+ * A non-positive `units` is a no-op, mirroring the `clawbackMonthly*` guard
+ * against mutating on a non-positive amount.
  */
 export function reclaimPages(account: BillingAccountState, units: number) {
+  if (units <= 0) {
+    return { fromAddOn: 0, fromMonthly: 0 };
+  }
+
   let remaining = units;
 
   const fromAddOn = Math.min(account.addOnPagesBalance, remaining);
