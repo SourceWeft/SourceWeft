@@ -188,6 +188,7 @@
     "failedToLoad": "用量載入失敗",
     "failedToLoadActivity": "用量活動載入失敗",
     "ledgerChangeSummary": "{delta} {unit} · 剩餘 {balance}",
+    "ledgerSeatChangeSummary": "{previous} → {next} {unit}",
     "activityKindDetail": "{kind} · {detail}",
     "kinds": {
       "image": "圖片",

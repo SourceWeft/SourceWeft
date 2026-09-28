@@ -173,12 +173,29 @@ export function formatLedgerUnit(
   return copy.common.units[unitType];
 }
 
+/**
+ * The activity row's "Usage" (Δ) column. Always rendered from the entry's
+ * structured fields (`delta`/`balanceAfter`/`unitType`) through the
+ * catalogue — never from `entry.activitySummary`, which the server writes
+ * as plain English (`formatSignedLedgerDelta`, `formatQuotaRenewalSummary`,
+ * plan-name arrows, "150 -> 200 seats", ...) and would leave the column
+ * unlocalised for nearly every visible row.
+ *
+ * Seat rows use a dedicated `usage.ledgerSeatChangeSummary` template
+ * (`"{previous} → {next} {unit}"`) instead of the delta/balance phrasing,
+ * since a seat count reads more naturally as "3 → 5 seats" than as a delta
+ * with a running balance.
+ */
 export function formatLedgerActivityChange(
   entry: BillingLedgerEntry,
   copy: BillingCopy,
 ) {
-  if (entry.activitySummary) {
-    return entry.activitySummary;
+  if (entry.unitType === "seat") {
+    return formatCopy(copy.usage.ledgerSeatChangeSummary, {
+      previous: formatNumber(entry.balanceAfter - entry.delta),
+      next: formatNumber(entry.balanceAfter),
+      unit: formatLedgerUnit(entry.unitType, copy),
+    });
   }
 
   return formatCopy(copy.usage.ledgerChangeSummary, {

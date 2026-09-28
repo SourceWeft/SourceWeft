@@ -303,20 +303,49 @@ test("formatLedgerUnit returns the catalogue's localized plural", () => {
   expect(formatLedgerUnit("seat", copy)).toBe(copy.common.units.seat);
 });
 
-test("formatLedgerActivityChange localises the composed summary but keeps a stored one verbatim", () => {
+test("formatLedgerActivityChange composes from structured fields and ignores any stored English summary", () => {
   const copy = getBillingCopy("zh-CN");
+  // Consume/grant rows compose from delta/balance, even though the server
+  // also wrote an English `activitySummary` (`formatSignedLedgerDelta`).
   expect(
     formatLedgerActivityChange(
-      makeEntry({ delta: -5, balanceAfter: 95, unitType: "credit" }),
+      makeEntry({
+        delta: -5,
+        balanceAfter: 95,
+        unitType: "credit",
+        activitySummary: "-5 credits",
+      }),
       copy,
     ),
   ).toBe("-5 积分 · 剩余 95");
+  // Plan-change grants store an English "Free -> Pro" plan-name arrow as
+  // their `activitySummary` (account-service.ts) — still ignored.
   expect(
     formatLedgerActivityChange(
-      makeEntry({ activitySummary: "150 -> 200 seats" }),
+      makeEntry({
+        eventType: "grant",
+        feature: "plan_upgrade_grant",
+        unitType: "credit",
+        delta: 200,
+        balanceAfter: 700,
+        activitySummary: "Free -> Pro",
+      }),
       copy,
     ),
-  ).toBe("150 -> 200 seats");
+  ).toBe("+200 积分 · 剩余 700");
+  // Seat rows use the dedicated previous/next composition instead of the
+  // delta/balance phrasing, and ignore the server's "150 -> 200 seats".
+  expect(
+    formatLedgerActivityChange(
+      makeEntry({
+        unitType: "seat",
+        delta: 50,
+        balanceAfter: 200,
+        activitySummary: "150 -> 200 seats",
+      }),
+      copy,
+    ),
+  ).toBe("150 → 200 席位");
 });
 
 // ---- Rendered panel ---------------------------------------------------------
@@ -338,9 +367,12 @@ test("known activity rows, including rows written before localisation, render in
       eventType: "adjust",
       feature: "seat_quota_change",
       unitType: "seat",
-      delta: 1,
-      balanceAfter: 5,
+      delta: 50,
+      balanceAfter: 200,
       activityTitle: "Seats updated",
+      // Server-composed English summary (account-service.ts) — must never
+      // leak through the "Usage" column.
+      activitySummary: "150 -> 200 seats",
       createdAt: "2026-09-06T00:00:00.000Z",
     }),
     makeEntry({
@@ -348,10 +380,24 @@ test("known activity rows, including rows written before localisation, render in
       eventType: "consume",
       feature: "retrieval",
       unitType: "credit",
-      delta: -20,
-      balanceAfter: 4980,
+      delta: -5,
+      balanceAfter: 995,
       activityTitle: "Chat credits used",
+      // formatSignedLedgerDelta-style English summary — ignored too.
+      activitySummary: "-5 credits",
       createdAt: "2026-09-07T00:00:00.000Z",
+    }),
+    makeEntry({
+      id: "row-4",
+      eventType: "grant",
+      feature: "plan_upgrade_grant",
+      unitType: "credit",
+      delta: 200,
+      balanceAfter: 700,
+      // Plan-name arrow (account-service.ts:327) — ignored, per the
+      // consume/grant delta/balance composition.
+      activitySummary: "Free -> Pro",
+      createdAt: "2026-09-08T00:00:00.000Z",
     }),
   ];
   const host = makeHost({
@@ -381,6 +427,15 @@ test("known activity rows, including rows written before localisation, render in
     expect(container.textContent).not.toContain("Monthly quota renewed");
     expect(container.textContent).not.toContain("Seats updated");
     expect(container.textContent).not.toContain("Chat credits used");
+
+    // The "Usage" (Δ) column renders from the structured ledger fields,
+    // localised — never the server's stored English `activitySummary`.
+    expect(container.textContent).toContain("150 → 200 席位");
+    expect(container.textContent).toContain("-5 积分 · 剩余 995");
+    expect(container.textContent).toContain("+200 积分 · 剩余 700");
+    expect(container.textContent).not.toContain("150 -> 200 seats");
+    expect(container.textContent).not.toContain("-5 credits");
+    expect(container.textContent).not.toContain("Free -> Pro");
   } finally {
     await unmount();
   }

@@ -188,6 +188,7 @@
     "failedToLoad": "Failed to load usage",
     "failedToLoadActivity": "Failed to load usage activity",
     "ledgerChangeSummary": "{delta} {unit} · {balance} left",
+    "ledgerSeatChangeSummary": "{previous} → {next} {unit}",
     "activityKindDetail": "{kind} · {detail}",
     "kinds": {
       "image": "Image",
