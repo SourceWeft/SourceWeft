@@ -82,7 +82,7 @@
       "active": "生效中",
       "past_due": "逾期未付",
       "paused": "已暫停",
-      "unpaid": "未支付",
+      "unpaid": "未付款",
       "canceled": "已取消",
       "expired": "已過期"
     },
@@ -151,9 +151,9 @@
     },
     "seatProviderActions": {
       "internal_partial_credit": "內部部分抵扣",
-      "none": "無需支付服務商調整",
+      "none": "無需付款服務商調整",
       "proration_charge_immediately": "立即按比例扣款",
-      "proration_credit": "支付服務商按比例退還"
+      "proration_credit": "付款服務商按比例退還"
     },
     "updatingSeats": "正在更新…",
     "confirmIncrease": "確認增加",
@@ -239,10 +239,10 @@
         "page": "已發放附加頁面額度"
       },
       "credit_topup_purchase": {
-        "credit": "已購買點數充值包"
+        "credit": "已購買點數儲值包"
       },
       "page_topup_purchase": {
-        "page": "已購買頁面充值包"
+        "page": "已購買頁面儲值包"
       }
     },
     "expire": {
@@ -258,12 +258,12 @@
         "seat": "席位數量已更新"
       },
       "payment_refund": {
-        "credit": "點數充值已退款",
-        "page": "頁面充值已退款"
+        "credit": "點數儲值已退款",
+        "page": "頁面儲值已退款"
       },
       "payment_chargeback": {
-        "credit": "點數充值已被拒付",
-        "page": "頁面充值已被拒付"
+        "credit": "點數儲值已被拒付",
+        "page": "頁面儲值已被拒付"
       }
     },
     "refund": {
@@ -281,24 +281,24 @@
     "invalidSeatCount": "該團隊結帳連結的席位數量無效。",
     "needsAttention": "結帳需要處理",
     "opening": "正在開啟結帳",
-    "openingDescription": "支付服務商的結帳頁面正在開啟。",
+    "openingDescription": "付款服務商的結帳頁面正在開啟。",
     "preparingDescription": "正在準備您的 {plan} 結帳。",
     "planTeam": "團隊版",
     "planPro": "專業版",
     "tryAgain": "重試",
     "backToPricing": "返回定價頁",
-    "securePaymentTitle": "安全支付",
+    "securePaymentTitle": "安全付款",
     "waffoCreditsDescription": "{count} 點數。請在新分頁中開啟 Waffo 結帳頁面核對總額並付款，目前頁面將保持開啟。",
     "waffoPagesDescription": "{count} 頁。請在新分頁中開啟 Waffo 結帳頁面核對總額並付款，目前頁面將保持開啟。",
     "waffoGenericDescription": "請在新分頁中開啟 Waffo 結帳頁面核對總額並付款，目前頁面將保持開啟。",
     "openCheckout": "開啟結帳頁面",
     "success": {
-      "finalizing": "正在完成支付",
+      "finalizing": "正在完成付款",
       "settingUp": "正在設定您的方案",
       "ready": "已就緒",
       "syncing": "仍在同步",
       "readyDescription": "您的帳單更新已在儀表板中就緒。",
-      "pendingDescription": "我們正在核實支付服務商的確認資訊並應用您的帳單狀態。",
+      "pendingDescription": "我們正在核實付款服務商的確認資訊並應用您的帳單狀態。",
       "openDashboard": "開啟儀表板"
     },
     "topup": {
