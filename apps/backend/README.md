@@ -142,6 +142,13 @@ user's team.
 - Calls run through the same builder as tenant calls, so the endpoint policy,
   model capability rules, adapters and retries are the same. The timeout is 120
   seconds and a call is retried twice.
+- A call's thinking intent (overviews ask for thinking off) is carried out with
+  the model's facts from the normalized model catalog: models.dev and LiteLLM,
+  plus `config/model-overrides.json` and the file at `MODEL_OVERRIDES_PATH`.
+  BYOK models take their facts from the same catalog, so this works whether or
+  not the Provider is ready for GLOBAL traffic. A model the catalog does not
+  list fails the call before any request; declare it in the overrides. On
+  OpenRouter, "off" is sent as `reasoning: { effort: "none", exclude: true }`.
 - While it is not ready, overview jobs are not queued and the market admin page
   shows exactly what is missing. Nothing falls back to another key or model.
   MCP servers are filed by keyword rules when they enter the catalog, whether
@@ -149,8 +156,9 @@ user's team.
   later, except where a market admin chose the categories.
 - Nothing is billed or stored: no usage ledger, no generation records. Each
   call writes one `system_model.call` log line with the purpose, subject,
-  Provider, model, status, duration, token counts and, when the Provider
-  reports it, `costUsd`, but never the prompt, the output or the key. Set a
+  Provider, model, status, duration, input, output and reasoning token counts
+  and, when the Provider reports it, `costUsd`, but never the prompt, the
+  output or the key. Set a
   spending limit on the dedicated key at the Provider (for OpenRouter, on the
   key itself) and read its usage there.
 - Changing the key takes an environment change and a restart. A synchronized

@@ -6,6 +6,7 @@ import {
   type ChatCompleteInput,
   type ChatCompleteResult,
   type ModelGateway,
+  type ThinkingConfig,
 } from "@sourceweft/model-gateway";
 import { config } from "../config";
 import { logger } from "../logger";
@@ -13,7 +14,8 @@ import {
   buildRoutedModelGatewayConfig,
   loadRoutedGatewayConfig,
 } from "./runtime";
-import { resolveChatThinkingWithDefaults } from "./thinking-defaults";
+import { resolveModelCapabilitiesFromLitellm } from "./sync-pricing";
+import { applyThinkingSupportDefaults } from "./thinking-defaults";
 import type { RoutedGatewayConfig } from "./types";
 
 /**
@@ -384,47 +386,40 @@ function logCall(input: {
     durationMs: Date.now() - input.startedAt,
     inputTokens: tokenCount(usage?.inputTokens),
     outputTokens: tokenCount(usage?.outputTokens),
+    reasoningTokens: tokenCount(usage?.reasoningTokens),
     ...(reportedCost !== undefined ? { costUsd: reportedCost } : {}),
   });
 }
 
 /**
  * Fills the thinking-support facts the adapter needs to honour a thinking
- * intent (e.g. `off`), from the borrowed Provider's catalog entry for this
- * model — the same lookup the billed door uses. Unknown facts leave the
- * intent inert, as they do there; this says so rather than staying silent.
+ * intent (e.g. `off`) from the normalized model catalog — where BYOK models
+ * take theirs from, so, like BYOK, it does not depend on the borrowed Provider
+ * being ready for GLOBAL traffic. A model the catalog does not list fails the
+ * call before any request: a platform call must not run with reasoning left
+ * at the Provider's default. Declare such a model in the catalog overrides
+ * (`config/model-overrides.json`, or the file at `MODEL_OVERRIDES_PATH`).
  */
 async function resolveThinking(
   input: SystemChatCompleteInput,
-  context: SystemModelCallContext,
   settings: SystemModelSettings,
-  gatewayConfigId: string | null,
-) {
+): Promise<ThinkingConfig | undefined> {
   if (!input.thinking) return input.thinking;
-  let thinking = input.thinking;
-  try {
-    thinking =
-      (await resolveChatThinkingWithDefaults({
-        thinking: input.thinking,
-        modelAlias: settings.model,
-        ...(gatewayConfigId ? { gatewayConfigId } : {}),
-      })) ?? input.thinking;
-  } catch (error) {
-    logger.warn("system_model.thinking_support_lookup_failed", {
-      purpose: context.purpose,
+  const capabilities = await resolveModelCapabilitiesFromLitellm(
+    settings.model,
+  );
+  if (!capabilities) {
+    throw new ModelGatewayError({
+      code: "CONFIGURATION",
+      message: `System model '${settings.model}' is not in the model catalog; declare it in config/model-overrides.json or the file at MODEL_OVERRIDES_PATH`,
+      retryable: false,
       provider: settings.provider,
-      model: settings.model,
-      error: error instanceof Error ? error.message : String(error),
     });
   }
-  if (thinking.supportedParameters === undefined) {
-    logger.warn("system_model.thinking_support_unknown", {
-      purpose: context.purpose,
-      provider: settings.provider,
-      model: settings.model,
-    });
-  }
-  return thinking;
+  return applyThinkingSupportDefaults(input.thinking, {
+    supportedParameters: capabilities.supportedParameters,
+    supportedEfforts: capabilities.supportedEfforts,
+  });
 }
 
 /**
@@ -447,8 +442,6 @@ export async function withSystemModel<T>(
     throw new SystemModelUnavailableError(readiness);
   }
   const client = systemModelClient(routed, settings, readiness);
-  const gatewayConfigId =
-    routed.providers[settings.provider]?.gatewayConfigId ?? null;
 
   const chat: SystemModelChat = {
     complete: async (input, options) => {
@@ -456,12 +449,7 @@ export async function withSystemModel<T>(
       let result: ChatCompleteResult;
       try {
         const request = withoutRoutingFields(input);
-        const thinking = await resolveThinking(
-          request,
-          context,
-          settings,
-          gatewayConfigId,
-        );
+        const thinking = await resolveThinking(request, settings);
         result = await client.chat.complete(
           {
             ...request,
