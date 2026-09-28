@@ -29,6 +29,7 @@
     "@sourceweft/contracts": "workspace:*",
     "@sourceweft/credits-core": "workspace:*",
     "@sourceweft/db": "workspace:*",
+    "@sourceweft/i18n": "workspace:*",
     "@creem_io/better-auth": "^1.1.4",
     "drizzle-orm": "^0.45.2",
     "pg": "^8.23.0",

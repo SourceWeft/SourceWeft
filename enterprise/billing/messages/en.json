@@ -54,5 +54,254 @@
     "seat": "seat",
     "yearlySavings": "2 months free vs monthly",
     "checkoutError": "Unable to start checkout."
+  },
+  "common": {
+    "loading": "Loading...",
+    "cancel": "Cancel",
+    "unknown": "Unknown",
+    "personal": "Personal",
+    "team": "Team",
+    "cycle": "Cycle",
+    "credits": "Credits",
+    "pages": "Pages",
+    "seats": "Seats",
+    "status": "Status",
+    "units": {
+      "credit": "credits",
+      "page": "pages",
+      "seat": "seats"
+    },
+    "intervals": {
+      "notSet": "Not set",
+      "monthly": "Monthly",
+      "annual": "Annual"
+    },
+    "planNames": {
+      "individual_free": "Free",
+      "individual_pro": "Pro",
+      "team_standard": "Team",
+      "team_premium": "Team Premium",
+      "enterprise_usage": "Enterprise"
+    }
+  },
+  "billing": {
+    "title": "Billing",
+    "scopePersonal": "Personal billing",
+    "scopeTeam": "{team} billing",
+    "planLabel": "{plan} plan",
+    "planAccount": "{plan} account",
+    "noPaidSubscription": "No paid subscription",
+    "loadingCycle": "Loading cycle...",
+    "creditsUnavailable": "Credit availability is unavailable",
+    "pagesUnavailable": "Page availability is unavailable",
+    "loadingValue": "Loading...",
+    "manageBilling": "Manage billing",
+    "upgradePlan": "Upgrade plan",
+    "portalUnavailable": "Billing portal is not available.",
+    "unableToOpenPortal": "Unable to open billing portal.",
+    "seatsSectionTitle": "Seats",
+    "updateSeats": "Update seats",
+    "addSeats": "Add seats",
+    "seatsUsedOfLimit": "{used} of {limit} seats used",
+    "seatsUnknown": "-- of -- seats used",
+    "loadingSeats": "Loading seats...",
+    "seatsRemaining": "{count} seats remaining",
+    "seatsUnavailable": "Seat availability is unavailable",
+    "totalSeatsLabel": "Total seats",
+    "seatsTotalSuffix": "total",
+    "seatReductionNotice": "Seat reductions require a billing preview before they are applied.",
+    "seatIncreaseNotice": "Seat increases require a billing preview before they are applied.",
+    "seatCountSynced": "Seat count is already synced.",
+    "subscriptionTitle": "Subscription",
+    "rows": {
+      "billingCadence": "Billing cadence",
+      "renewal": "Renewal",
+      "lastUpdated": "Last updated"
+    },
+    "renewalCancels": "Cancels at period end",
+    "renewalAuto": "Renews automatically",
+    "renewalNotScheduled": "Not scheduled",
+    "noSubscriptionUpdates": "No subscription updates yet",
+    "reviewSeatIncrease": "Review seat increase",
+    "reviewSeatReduction": "Review seat reduction",
+    "seatChangeSummary": "{current} to {next} seats",
+    "seatChangeDetail": "{used} members and {pending} pending invites will remain allocated.",
+    "seatPreview": {
+      "theoreticalRefund": "Theoretical refund",
+      "refundOrCredit": "Refund or credit",
+      "notRefundable": "Not refundable",
+      "refundRatio": "Refund ratio",
+      "creditsDeducted": "Credits deducted",
+      "pagesDeducted": "Pages deducted",
+      "billingAction": "Billing action",
+      "estimatedCharge": "Estimated prorated charge"
+    },
+    "seatProviderActions": {
+      "internal_partial_credit": "Internal partial credit",
+      "none": "No provider adjustment",
+      "proration_charge_immediately": "Immediate prorated charge",
+      "proration_credit": "Provider proration credit"
+    },
+    "updatingSeats": "Updating...",
+    "confirmIncrease": "Confirm increase",
+    "confirmReduction": "Confirm reduction",
+    "seatCountUpdated": "Seat count updated.",
+    "unableToUpdateSeats": "Unable to update seats.",
+    "failedToLoad": "Failed to load billing"
+  },
+  "usage": {
+    "title": "Usage",
+    "planLabel": "{plan} plan",
+    "creditsLabel": "{used} / {limit} credits",
+    "loadingCredits": "Loading credits...",
+    "creditsUnknown": "-- / -- credits",
+    "pagesLabel": "{used} used · {left} left",
+    "loadingPages": "Loading pages...",
+    "pagesUnknown": "-- used · -- left",
+    "pagesWallet": "Monthly {monthly} · Add-on {addOn}",
+    "pagesWalletLoading": "Monthly ... · Add-on ...",
+    "pagesWalletUnknown": "Monthly -- · Add-on --",
+    "seatsLabel": "{used} / {limit} seats",
+    "loadingSeats": "Loading seats...",
+    "seatsUnknown": "-- / -- seats",
+    "seatsUsage": "{used} used · {remaining} left",
+    "seatsUsageUnknown": "-- used · -- left",
+    "activityTitle": "Activity",
+    "filterAriaLabel": "Filter usage activity",
+    "filters": {
+      "all": "All",
+      "seat": "Seats",
+      "page": "Pages",
+      "credit": "Credits"
+    },
+    "table": {
+      "detail": "Detail",
+      "date": "Date",
+      "usage": "Usage"
+    },
+    "loadingActivity": "Loading activity...",
+    "noActivity": "No usage activity yet",
+    "noActivityForUnit": "No {unit} activity yet",
+    "accountUnavailable": "Usage account unavailable",
+    "loadMore": "Load more",
+    "loadingMore": "Loading...",
+    "failedToLoad": "Failed to load usage",
+    "failedToLoadActivity": "Failed to load usage activity",
+    "ledgerChangeSummary": "{delta} {unit} · {balance} left",
+    "activityKindDetail": "{kind} · {detail}",
+    "kinds": {
+      "image": "Image",
+      "vision": "Vision",
+      "video": "Video",
+      "chat": "Chat",
+      "other": "Other"
+    }
+  },
+  "activity": {
+    "consume": {
+      "default": "{feature} used",
+      "ingestion": {
+        "page": "Pages indexed"
+      }
+    },
+    "grant": {
+      "default": "{feature} granted",
+      "cycle_grant": {
+        "credit": "Monthly credits granted",
+        "page": "Monthly pages granted"
+      },
+      "seat_quota_grant": {
+        "credit": "Seat credits granted",
+        "page": "Seat pages granted"
+      },
+      "plan_upgrade_grant": {
+        "credit": "Plan credits granted",
+        "page": "Plan pages granted"
+      },
+      "shadow_auto_grant": {
+        "page": "Add-on pages granted"
+      },
+      "credit_topup_purchase": {
+        "credit": "Credits top-up purchased"
+      },
+      "page_topup_purchase": {
+        "page": "Pages top-up purchased"
+      }
+    },
+    "expire": {
+      "default": "{feature} expired",
+      "cycle_expire": {
+        "credit": "Unused credits expired",
+        "page": "Monthly pages expired"
+      }
+    },
+    "adjust": {
+      "default": "{feature} adjusted",
+      "seat_quota_change": {
+        "seat": "Seats updated"
+      },
+      "payment_refund": {
+        "credit": "Credits top-up refunded",
+        "page": "Pages top-up refunded"
+      },
+      "payment_chargeback": {
+        "credit": "Credits top-up charged back",
+        "page": "Pages top-up charged back"
+      }
+    },
+    "refund": {
+      "default": "{feature} refunded"
+    },
+    "reserve": {
+      "default": "{feature} reserved"
+    },
+    "release": {
+      "default": "{feature} released"
+    }
+  },
+  "checkout": {
+    "invalidLink": "This checkout link is no longer valid.",
+    "invalidSeatCount": "This team checkout link has an invalid seat count.",
+    "needsAttention": "Checkout needs attention",
+    "opening": "Opening checkout",
+    "openingDescription": "Your provider checkout is opening now.",
+    "preparingDescription": "Preparing your {plan} checkout.",
+    "planTeam": "Team",
+    "planPro": "Pro",
+    "tryAgain": "Try again",
+    "backToPricing": "Back to pricing",
+    "securePaymentTitle": "Secure payment",
+    "waffoCreditsDescription": "{count} credits. Open Waffo checkout in a new tab to review the total and pay. Your current page stays open.",
+    "waffoPagesDescription": "{count} pages. Open Waffo checkout in a new tab to review the total and pay. Your current page stays open.",
+    "waffoGenericDescription": "Open Waffo checkout in a new tab to review the total and pay. Your current page stays open.",
+    "openCheckout": "Open checkout",
+    "success": {
+      "finalizing": "Finalizing payment",
+      "settingUp": "Setting up your plan",
+      "ready": "Ready",
+      "syncing": "Still syncing",
+      "readyDescription": "Your billing update is ready in the dashboard.",
+      "pendingDescription": "We are checking the provider confirmation and applying your billing state.",
+      "openDashboard": "Open dashboard"
+    },
+    "saveTwoMonths": "Save 2 months",
+    "enterTeamName": "Enter a team name.",
+    "seatsRange": "Seats must be a whole number between {min} and {max}.",
+    "createTeam": "Create team",
+    "createTeamDescription": "Name the team and choose seats. The team is created after payment.",
+    "teamNameLabel": "Team name",
+    "teamNamePlaceholder": "Acme Research",
+    "billingLabel": "Billing",
+    "total": "Checkout total",
+    "perSeatSummary": "{price} per seat, {count} seats.",
+    "continue": "Continue to checkout"
+  },
+  "sidebar": {
+    "openUsageAriaLabel": "Open usage",
+    "usageLabel": "Usage",
+    "loading": "Loading",
+    "pagesLeft": "Pages left",
+    "cycleEnds": "Cycle ends",
+    "unavailable": "Unavailable"
   }
 }

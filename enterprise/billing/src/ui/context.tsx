@@ -129,7 +129,12 @@ export function useBillingUiHost(): BillingUiHost & CheckoutNavigation {
   return value;
 }
 
-export function useBillingControls() {
+/** The billing UI's resolved locale, defaulting to English like every accessor in `../messages`. */
+export function useBillingLocale(): string {
   const { locale = "en" } = useBillingUiHost();
-  return getBillingControls(locale);
+  return locale;
+}
+
+export function useBillingControls() {
+  return getBillingControls(useBillingLocale());
 }
