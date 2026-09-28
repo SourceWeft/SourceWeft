@@ -19,6 +19,7 @@ import {
   createCreemReversalSync,
   createCreemSubscriptionSync,
   createCreemWebhookHandler,
+  monitorStrandedCreemReceipts,
 } from "@sourceweft/billing/integrations/creem";
 import { createBillingHttpRoutes } from "@sourceweft/billing/integrations/http";
 import {
@@ -144,11 +145,13 @@ export function registerBillingHttpRoutes(app: Hono, host: BillingHttpHost) {
   if (billingConfig.provider === "stripe") registerStripeWebhook(app, stripe());
 }
 export const billingSchedulesEnabled =
-  ["waffo", "stripe"].includes(billingConfig.provider) ||
+  ["waffo", "stripe", "creem"].includes(billingConfig.provider) ||
   billingConfig.reconcileEnabled;
 export async function reconcileBillingSchedule() {
   if (billingConfig.provider === "waffo") await waffo().drain();
   if (billingConfig.provider === "stripe") await stripe().drain();
+  if (billingConfig.provider === "creem")
+    await monitorStrandedCreemReceipts({ store, alerts, logger });
   if (billingConfig.reconcileEnabled)
     return createBillingSchedule(billing().service, alerts, logger)();
 }

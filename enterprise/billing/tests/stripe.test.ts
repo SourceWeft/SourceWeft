@@ -410,6 +410,26 @@ test("expired Stripe checkout refresh uses a new idempotency key and the origina
   assert.equal(f.store.webhook!.status, "ignored");
 });
 
+test("a missing order at the checkout-expiry write is a durable failure, not ignored", async () => {
+  const f = stripeFixture();
+  await topup(f);
+  const oldId = f.store.order!.externalCheckoutId!;
+  const session = f.remote.sessions.get(oldId)!;
+  session.status = "expired";
+
+  // Simulate the order vanishing between drain()'s unlocked read (which
+  // resolves `reference`/`order` fine) and the expiry write's own locked
+  // re-read inside `updateOrderLocked`, without touching those earlier
+  // unlocked reads.
+  f.store.getOrderByIdForUpdate = async () => null;
+
+  await deliver(f, f.event("checkout.session.expired", session));
+
+  assert.equal(f.store.webhook?.status, "failed");
+  assert.notEqual(f.store.webhook?.status, "ignored");
+  assert.equal(f.store.webhook?.errorCode, "BILLING_ORDER_NOT_FOUND");
+});
+
 test("a processing failure remains durable and succeeds after recovery", async () => {
   const f = stripeFixture();
   await topup(f);

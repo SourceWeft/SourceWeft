@@ -506,6 +506,63 @@ test("an order without a currency is rejected as a currency mismatch", async () 
   ]);
 });
 
+test("a missing currency is rejected, not thrown", async () => {
+  const { store, alerts, service } = await setupTopup();
+
+  const result = await service.applyPaymentReversal(
+    reversal({ currency: undefined as unknown as string }),
+  );
+
+  assert.deepEqual(result, {
+    outcome: "rejected",
+    reason: "currency_mismatch",
+  });
+  assert.equal(store.account?.addOnCreditsBalance, 20_000);
+  assert.equal(reversalRows(store).length, 0);
+  assert.deepEqual(alertLevels(alerts), [
+    ["billing:payment-reversal-rejected:order_1", "error"],
+  ]);
+  assert.match(alerts[0]?.message ?? "", /currency missing/);
+});
+
+test("a non-string currency is rejected, not thrown", async () => {
+  const { store, alerts, service } = await setupTopup();
+
+  const result = await service.applyPaymentReversal(
+    reversal({ currency: 840 as unknown as string }),
+  );
+
+  assert.deepEqual(result, {
+    outcome: "rejected",
+    reason: "currency_mismatch",
+  });
+  assert.equal(store.account?.addOnCreditsBalance, 20_000);
+  assert.equal(reversalRows(store).length, 0);
+  assert.deepEqual(alertLevels(alerts), [
+    ["billing:payment-reversal-rejected:order_1", "error"],
+  ]);
+  assert.match(alerts[0]?.message ?? "", /currency missing/);
+});
+
+test("a whitespace-only currency is rejected, not thrown", async () => {
+  const { store, alerts, service } = await setupTopup();
+
+  const result = await service.applyPaymentReversal(
+    reversal({ currency: "  " }),
+  );
+
+  assert.deepEqual(result, {
+    outcome: "rejected",
+    reason: "currency_mismatch",
+  });
+  assert.equal(store.account?.addOnCreditsBalance, 20_000);
+  assert.equal(reversalRows(store).length, 0);
+  assert.deepEqual(alertLevels(alerts), [
+    ["billing:payment-reversal-rejected:order_1", "error"],
+  ]);
+  assert.match(alerts[0]?.message ?? "", /currency missing/);
+});
+
 test("invalid amounts are rejected with an alert", async () => {
   const { store, alerts, service } = await setupTopup();
 
@@ -943,6 +1000,70 @@ test("a fully refunded order reverses the whole grant at fulfillment whatever th
 
   assert.equal(store.order?.reversedUnits, 20_000);
   assert.equal(store.account?.addOnCreditsBalance, 0);
+});
+
+/**
+ * The fulfilment hook's reversal alert must not go out until the fulfilment
+ * transaction that produced it has actually committed: the final write
+ * (`status: "fulfilled"`) fails once, rolling everything in that attempt
+ * back (mirroring PostgreSQL), and only the successful retry may raise the
+ * alert.
+ */
+class FinalFulfilledWriteFailsOnceStore extends MemoryBillingStore {
+  private failuresLeft = 1;
+
+  async updateOrder(
+    ...args: Parameters<MemoryBillingStore["updateOrder"]>
+  ): ReturnType<MemoryBillingStore["updateOrder"]> {
+    const [order] = args;
+    if (order.status === "fulfilled" && this.failuresLeft > 0) {
+      this.failuresLeft -= 1;
+      throw new Error("db down");
+    }
+    return super.updateOrder(...args);
+  }
+
+  async runInTransaction<T>(
+    ...args: Parameters<MemoryBillingStore["runInTransaction"]>
+  ): Promise<T> {
+    const order = this.order ? { ...this.order } : null;
+    const account = this.account ? { ...this.account } : null;
+    const ledgerCount = this.ledgers.length;
+    try {
+      return (await super.runInTransaction(...args)) as T;
+    } catch (error) {
+      this.order = order;
+      this.account = account;
+      this.ledgers.length = ledgerCount;
+      throw error;
+    }
+  }
+}
+
+test("hook alerts are raised only after fulfilment commits", async () => {
+  const store = new FinalFulfilledWriteFailsOnceStore();
+  const { alerts, service } = await setupTopup({ store, fulfilled: false });
+
+  await service.applyPaymentReversal(reversal());
+  alerts.length = 0; // drop the "recorded before fulfillment" alert
+
+  await assert.rejects(
+    () => service.fulfillOrder({ orderId: "order_1" }),
+    /db down/,
+  );
+  assert.equal(
+    alerts.some(
+      (alert) => alert.alertKey === "billing:payment-reversal:order_1",
+    ),
+    false,
+  );
+
+  alerts.length = 0;
+  await service.fulfillOrder({ orderId: "order_1" });
+
+  assert.deepEqual(alertLevels(alerts), [
+    ["billing:payment-reversal:order_1", "warn"],
+  ]);
 });
 
 /**
