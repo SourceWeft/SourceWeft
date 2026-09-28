@@ -199,7 +199,10 @@
   },
   "activity": {
     "consume": {
-      "default": "{feature} 已使用",
+      "default": {
+        "credit": "{feature} 积分已使用",
+        "page": "{feature} 页面已使用"
+      },
       "ingestion": {
         "page": "已索引页面"
       }

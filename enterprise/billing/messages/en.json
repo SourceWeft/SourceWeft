@@ -199,7 +199,10 @@
   },
   "activity": {
     "consume": {
-      "default": "{feature} used",
+      "default": {
+        "credit": "{feature} credits used",
+        "page": "{feature} pages used"
+      },
       "ingestion": {
         "page": "Pages indexed"
       }

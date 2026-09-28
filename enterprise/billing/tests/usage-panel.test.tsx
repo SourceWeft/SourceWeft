@@ -1,0 +1,449 @@
+// @vitest-environment jsdom
+import { act } from "react";
+import { createRoot } from "react-dom/client";
+import { expect, test, vi } from "vitest";
+
+import { getBillingCopy } from "../src/messages";
+import { BillingUiProvider, type BillingUiHost } from "../src/ui/context";
+import { UsagePanel } from "../src/ui/usage-panel";
+import {
+  formatLedgerActivityChange,
+  formatLedgerDetail,
+  formatLedgerUnit,
+  formatUsageActivityDetail,
+  getUsageActivityKind,
+} from "../src/ui/billing-utils";
+import type { BillingCopy } from "../src/messages";
+import type { BillingLedgerEntry } from "../src/ui/types";
+
+vi.mock("../src/ui/billing-plan-action-controls", () => ({
+  BillingPlanActionControls: () => null,
+}));
+
+Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+
+// ---- Fixtures -------------------------------------------------------------
+
+function makeEntry(
+  overrides: Partial<BillingLedgerEntry> = {},
+): BillingLedgerEntry {
+  return {
+    id: "entry-1",
+    teamId: "team-1",
+    workspaceId: null,
+    actorUserId: null,
+    feature: "cycle_grant",
+    eventType: "grant",
+    unitType: "credit",
+    delta: 100,
+    balanceAfter: 100,
+    referenceId: null,
+    idempotencyKey: null,
+    operationId: null,
+    operationType: "cycle_renewal",
+    activityVisible: true,
+    activityTitle: null,
+    activitySummary: null,
+    metadata: {},
+    createdAt: "2026-09-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function makeSubscription() {
+  return {
+    teamId: "team-1",
+    provider: "none" as const,
+    planFamily: null,
+    status: "inactive" as const,
+    billingInterval: "unknown" as const,
+    currentPeriodStart: null,
+    currentPeriodEnd: null,
+    cancelAtPeriodEnd: false,
+    externalCustomerId: null,
+    externalSubscriptionId: null,
+    billingOrderId: null,
+    externalSubscriptionItemId: null,
+    lastEventAt: null,
+  };
+}
+
+function makeHost(overrides: Partial<BillingUiHost> = {}): BillingUiHost {
+  return {
+    locale: "zh-CN",
+    authClient: {
+      useActiveOrganization: () => ({
+        data: {
+          id: "team-1",
+          name: "Acme",
+          metadata: { sourceweft: { kind: "team" } },
+        },
+      }),
+      useListOrganizations: () => ({ data: [] }),
+      getSession: async () => ({ data: null }),
+    },
+    billingClient: {
+      getSummary: async () => makeSummary(),
+      getSubscription: async () => makeSubscription(),
+      getActivity: async () => ({
+        teamId: "team-1",
+        items: [],
+        nextCursor: null,
+      }),
+    } as unknown as BillingUiHost["billingClient"],
+    billingCheckoutEnabled: false,
+    OrgSwitcher: () => null,
+    BillingPanelSkeleton: () => null,
+    UsagePanelSkeleton: () => <p>skeleton</p>,
+    SettingsSkeletonBlock: () => null,
+    subscribeDashboardBillingSummaryRefresh: () => () => {},
+    trackBeginCheckout: () => {},
+    trackCheckoutError: () => {},
+    trackBillingPortalOpened: () => {},
+    trackPurchase: () => {},
+    ...overrides,
+  };
+}
+
+function makeSummary(
+  overrides: Partial<
+    Awaited<ReturnType<BillingUiHost["billingClient"]["getSummary"]>>
+  > = {},
+) {
+  return {
+    teamId: "team-1",
+    planFamily: "team_standard" as const,
+    billingMode: "enforced" as const,
+    cycleAnchorAt: "2026-09-01T00:00:00.000Z",
+    cycleSource: "provider_subscription" as const,
+    cycleStartAt: "2026-09-01T00:00:00.000Z",
+    cycleEndAt: "2026-10-01T00:00:00.000Z",
+    pages: {
+      limit: 1000,
+      used: 200,
+      remaining: 800,
+      monthlyGrant: 900,
+      monthlyBalance: 700,
+      addOnBalance: 100,
+      consumedThisCycle: 200,
+      available: 800,
+    },
+    credits: {
+      monthlyGrant: 5000,
+      monthlyBalance: 4000,
+      addOnBalance: 0,
+      reserved: 0,
+      consumedThisCycle: 1000,
+      available: 4000,
+    },
+    seats: {
+      used: 3,
+      limit: 5,
+      remaining: 2,
+      activeMembers: 3,
+      pendingInvitations: 0,
+    },
+    spendLimits: { softCapUsd: null, hardCapUsd: null },
+    ...overrides,
+  };
+}
+
+async function renderUsagePanel(host: BillingUiHost) {
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  await act(async () => {
+    root.render(
+      <BillingUiProvider value={host}>
+        <UsagePanel />
+      </BillingUiProvider>,
+    );
+  });
+  // Let the effect's promises resolve and flush the resulting state update.
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  return {
+    container,
+    unmount: () => act(async () => root.unmount()),
+  };
+}
+
+// ---- formatLedgerDetail lookup chain --------------------------------------
+
+test("activity rows render in zh-CN for known features, including rows written before localisation", () => {
+  const copy = getBillingCopy("zh-CN");
+
+  // A fresh row (no stored activityTitle) for a known grant feature.
+  expect(
+    formatLedgerDetail(
+      makeEntry({
+        eventType: "grant",
+        feature: "cycle_grant",
+        unitType: "credit",
+      }),
+      copy,
+    ),
+  ).toBe(copy.activity.grant.cycle_grant.credit);
+
+  // "Old" rows written before this catalogue existed already carry an
+  // English `activityTitle` — the catalogue must still win for known
+  // features (Review Focus 3), not the stored English text.
+  expect(
+    formatLedgerDetail(
+      makeEntry({
+        eventType: "grant",
+        feature: "cycle_grant",
+        unitType: "credit",
+        activityTitle: "Monthly quota renewed",
+      }),
+      copy,
+    ),
+  ).toBe(copy.activity.grant.cycle_grant.credit);
+  expect(
+    formatLedgerDetail(
+      makeEntry({
+        eventType: "adjust",
+        feature: "seat_quota_change",
+        unitType: "seat",
+        activityTitle: "Seats updated",
+      }),
+      copy,
+    ),
+  ).toBe(copy.activity.adjust.seat_quota_change.seat);
+  expect(
+    formatLedgerDetail(
+      makeEntry({
+        eventType: "consume",
+        feature: "ingestion",
+        unitType: "page",
+        activityTitle: "Pages indexed",
+      }),
+      copy,
+    ),
+  ).toBe(copy.activity.consume.ingestion.page);
+
+  // Open-ended "model-usage consume" features are also a *known* bucket —
+  // they localise through `activity.consume.default`, not through the
+  // (currently mislabeled) stored English title.
+  expect(
+    formatLedgerDetail(
+      makeEntry({
+        eventType: "consume",
+        feature: "retrieval",
+        unitType: "credit",
+        activityTitle: "Chat credits used",
+      }),
+      copy,
+    ),
+  ).toBe("Retrieval 积分已使用");
+  expect(
+    formatLedgerDetail(
+      makeEntry({
+        eventType: "consume",
+        feature: "source_ingestion",
+        unitType: "page",
+        activityTitle: "Pages indexed",
+      }),
+      copy,
+    ),
+  ).toBe("Source Ingestion 页面已使用");
+});
+
+test("an unknown feature falls back to its stored English title", () => {
+  const copy = getBillingCopy("zh-CN");
+  // Simulate a catalogue that genuinely has no entry for this event type at
+  // all (no specific key, no `default`) — the only way an "unknown
+  // feature" can occur, since every real `LedgerEventType` ships a
+  // `default`. This exercises the third tier of the fallback chain.
+  const brokenCopy = {
+    ...copy,
+    activity: { ...copy.activity, reserve: {} },
+  } as unknown as BillingCopy;
+
+  const entry = makeEntry({
+    eventType: "reserve",
+    feature: "future_reserve_feature",
+    unitType: "credit",
+    activityTitle: "Credits reserved (English)",
+  });
+
+  expect(formatLedgerDetail(entry, brokenCopy)).toBe(
+    "Credits reserved (English)",
+  );
+});
+
+test("formatLedgerDetail falls back to a generic, still-localised composition when even the stored title is missing", () => {
+  const copy = getBillingCopy("zh-CN");
+  const brokenCopy = {
+    ...copy,
+    activity: { ...copy.activity, reserve: {} },
+  } as unknown as BillingCopy;
+
+  const entry = makeEntry({
+    eventType: "reserve",
+    feature: "future_reserve_feature",
+    unitType: "credit",
+    activityTitle: null,
+  });
+
+  expect(formatLedgerDetail(entry, brokenCopy)).toBe(
+    formatUsageActivityDetail(
+      getUsageActivityKind(entry),
+      "Future Reserve Feature",
+      copy,
+    ),
+  );
+});
+
+test("formatLedgerUnit returns the catalogue's localized plural", () => {
+  const copy = getBillingCopy("zh-CN");
+  expect(formatLedgerUnit("credit", copy)).toBe(copy.common.units.credit);
+  expect(formatLedgerUnit("page", copy)).toBe(copy.common.units.page);
+  expect(formatLedgerUnit("seat", copy)).toBe(copy.common.units.seat);
+});
+
+test("formatLedgerActivityChange localises the composed summary but keeps a stored one verbatim", () => {
+  const copy = getBillingCopy("zh-CN");
+  expect(
+    formatLedgerActivityChange(
+      makeEntry({ delta: -5, balanceAfter: 95, unitType: "credit" }),
+      copy,
+    ),
+  ).toBe("-5 积分 · 剩余 95");
+  expect(
+    formatLedgerActivityChange(
+      makeEntry({ activitySummary: "150 -> 200 seats" }),
+      copy,
+    ),
+  ).toBe("150 -> 200 seats");
+});
+
+// ---- Rendered panel ---------------------------------------------------------
+
+test("known activity rows, including rows written before localisation, render in zh-CN", async () => {
+  const ledgerEntries: BillingLedgerEntry[] = [
+    makeEntry({
+      id: "row-1",
+      eventType: "grant",
+      feature: "cycle_grant",
+      unitType: "credit",
+      delta: 5000,
+      balanceAfter: 5000,
+      activityTitle: "Monthly quota renewed",
+      createdAt: "2026-09-05T00:00:00.000Z",
+    }),
+    makeEntry({
+      id: "row-2",
+      eventType: "adjust",
+      feature: "seat_quota_change",
+      unitType: "seat",
+      delta: 1,
+      balanceAfter: 5,
+      activityTitle: "Seats updated",
+      createdAt: "2026-09-06T00:00:00.000Z",
+    }),
+    makeEntry({
+      id: "row-3",
+      eventType: "consume",
+      feature: "retrieval",
+      unitType: "credit",
+      delta: -20,
+      balanceAfter: 4980,
+      activityTitle: "Chat credits used",
+      createdAt: "2026-09-07T00:00:00.000Z",
+    }),
+  ];
+  const host = makeHost({
+    billingClient: {
+      getSummary: async () => makeSummary(),
+      getSubscription: async () => makeSubscription(),
+      getActivity: async () => ({
+        teamId: "team-1",
+        items: ledgerEntries,
+        nextCursor: null,
+      }),
+    } as unknown as BillingUiHost["billingClient"],
+  });
+
+  const { container, unmount } = await renderUsagePanel(host);
+  try {
+    const copy = getBillingCopy("zh-CN");
+    expect(container.textContent).toContain(
+      copy.activity.grant.cycle_grant.credit,
+    );
+    expect(container.textContent).toContain(
+      copy.activity.adjust.seat_quota_change.seat,
+    );
+    expect(container.textContent).toContain("Retrieval 积分已使用");
+    // The stored English titles from before localisation must not leak
+    // through for these known features.
+    expect(container.textContent).not.toContain("Monthly quota renewed");
+    expect(container.textContent).not.toContain("Seats updated");
+    expect(container.textContent).not.toContain("Chat credits used");
+  } finally {
+    await unmount();
+  }
+});
+
+test("usage labels and empty states render in zh-CN", async () => {
+  const host = makeHost({
+    billingClient: {
+      getSummary: async () => makeSummary(),
+      getSubscription: async () => makeSubscription(),
+      getActivity: async () => ({
+        teamId: "team-1",
+        items: [],
+        nextCursor: null,
+      }),
+    } as unknown as BillingUiHost["billingClient"],
+  });
+
+  const { container, unmount } = await renderUsagePanel(host);
+  try {
+    const copy = getBillingCopy("zh-CN");
+    expect(container.textContent).toContain(copy.usage.title);
+    expect(container.textContent).toContain(copy.usage.activityTitle);
+    expect(container.textContent).toContain(copy.common.credits);
+    expect(container.textContent).toContain(copy.common.pages);
+    expect(container.textContent).toContain(copy.common.seats);
+    expect(container.textContent).toContain(copy.usage.table.detail);
+    expect(container.textContent).toContain(copy.usage.table.date);
+    expect(container.textContent).toContain(copy.usage.table.usage);
+    expect(container.textContent).toContain(copy.usage.noActivity);
+    expect(container.textContent).toContain(
+      copy.common.planNames.team_standard,
+    );
+
+    const filterGroup = container.querySelector(
+      `[aria-label="${copy.usage.filterAriaLabel}"]`,
+    );
+    expect(filterGroup).not.toBeNull();
+    expect(filterGroup?.textContent).toContain(copy.usage.filters.all);
+    expect(filterGroup?.textContent).toContain(copy.usage.filters.seat);
+    expect(filterGroup?.textContent).toContain(copy.usage.filters.page);
+    expect(filterGroup?.textContent).toContain(copy.usage.filters.credit);
+
+    // No hard-coded English leftovers from the pre-localisation copy.
+    expect(container.textContent).not.toContain("Usage");
+    expect(container.textContent).not.toContain("Activity");
+    expect(container.textContent).not.toContain("Detail");
+    expect(container.textContent).not.toContain("No usage activity yet");
+    expect(container.textContent).not.toContain("Load more");
+
+    // Filtering to a unit with no matching rows renders the localized
+    // per-unit empty state.
+    const seatFilterButton = Array.from(
+      container.querySelectorAll("button"),
+    ).find((button) => button.textContent === copy.usage.filters.seat);
+    expect(seatFilterButton).not.toBeUndefined();
+    await act(async () => {
+      seatFilterButton?.click();
+    });
+    expect(container.textContent).toContain(
+      copy.usage.noActivityForUnit.replace("{unit}", copy.common.units.seat),
+    );
+  } finally {
+    await unmount();
+  }
+});

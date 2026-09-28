@@ -1,4 +1,5 @@
 import { isPersonalOrganization } from "@sourceweft/contracts/organization-metadata";
+import { formatCopy, type BillingCopy } from "../messages";
 import type {
   BillingInterval,
   BillingLedgerEntry,
@@ -12,15 +13,17 @@ import type {
 
 export const USAGE_ACTIVITY_PAGE_SIZE = 20;
 export const ACTIVE_SUBSCRIPTION_STATUSES = new Set(["active", "past_due"]);
+/**
+ * The activity filter values, in display order. Labels come from
+ * `copy.usage.filters[value]` at render time — this only enumerates which
+ * filters exist, so it stays locale-independent.
+ */
 export const usageActivityFilters = [
-  { label: "All", value: "all" },
-  { label: "Seats", value: "seat" },
-  { label: "Pages", value: "page" },
-  { label: "Credits", value: "credit" },
-] as const satisfies Array<{
-  label: string;
-  value: UsageActivityFilter;
-}>;
+  "all",
+  "seat",
+  "page",
+  "credit",
+] as const satisfies ReadonlyArray<UsageActivityFilter>;
 
 export function resolveBillingTeamId(input: {
   activeOrg?: BillingOrg | null;
@@ -163,22 +166,26 @@ export function formatLedgerChange(entry: BillingLedgerEntry) {
   return `${prefix}${formatNumber(entry.delta)}`;
 }
 
-export function formatLedgerUnit(unitType: BillingLedgerEntry["unitType"]) {
-  if (unitType === "seat") {
-    return "seats";
-  }
-
-  return unitType === "page" ? "pages" : "credits";
+export function formatLedgerUnit(
+  unitType: BillingLedgerEntry["unitType"],
+  copy: BillingCopy,
+) {
+  return copy.common.units[unitType];
 }
 
-export function formatLedgerActivityChange(entry: BillingLedgerEntry) {
+export function formatLedgerActivityChange(
+  entry: BillingLedgerEntry,
+  copy: BillingCopy,
+) {
   if (entry.activitySummary) {
     return entry.activitySummary;
   }
 
-  return `${formatLedgerChange(entry)} ${formatLedgerUnit(
-    entry.unitType,
-  )} · ${formatNumber(Math.max(entry.balanceAfter, 0))} left`;
+  return formatCopy(copy.usage.ledgerChangeSummary, {
+    delta: formatLedgerChange(entry),
+    unit: formatLedgerUnit(entry.unitType, copy),
+    balance: formatNumber(Math.max(entry.balanceAfter, 0)),
+  });
 }
 
 export function getUsageActivityKind(
@@ -209,86 +216,87 @@ export function getUsageActivityKind(
 export function formatUsageActivityDetail(
   kind: UsageActivityKind,
   detail: string,
+  copy: BillingCopy,
 ) {
-  return `${kind} · ${detail}`;
+  return formatCopy(copy.usage.activityKindDetail, {
+    kind: copy.usage.kinds[kind],
+    detail,
+  });
 }
 
-export function formatLedgerDetail(entry: BillingLedgerEntry) {
+function isPlainCopyRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Reads `node[unitType]` when `node` is a plain object, else `undefined`. */
+function readUnitTemplate(
+  node: unknown,
+  unitType: BillingLedgerEntry["unitType"],
+): string | undefined {
+  if (!isPlainCopyRecord(node)) {
+    return undefined;
+  }
+
+  const value = node[unitType];
+  return typeof value === "string" ? value : undefined;
+}
+
+/**
+ * Localised activity-row detail text. See `formatLedgerDetail`'s docstring
+ * for the four-tier lookup order this implements.
+ */
+export function formatLedgerDetail(
+  entry: BillingLedgerEntry,
+  copy: BillingCopy,
+): string {
+  // Tier 1: an exact `activity.<eventType>.<feature>.<unitType>` entry —
+  // covers every known feature, including `consume.ingestion.page`. Always
+  // wins over a stored `activityTitle`, so old rows for known features
+  // localise too (Review Focus 3).
+  const activity = copy.activity as unknown as Record<string, unknown>;
+  const eventNode = activity[entry.eventType];
+  const featureNode = isPlainCopyRecord(eventNode)
+    ? eventNode[entry.feature]
+    : undefined;
+  const specific = readUnitTemplate(featureNode, entry.unitType);
+  if (specific) {
+    return specific;
+  }
+
+  // Tier 2: `activity.<eventType>.default`, `{feature}`-templated. Covers
+  // every other feature under a known event type, including open-ended
+  // model-usage `consume` rows (chat, retrieval, ...) — `consume.default`
+  // is unit-specific (`credit`/`page`) so the credits-vs-pages distinction
+  // the previous English composition made isn't lost.
+  const defaultNode = isPlainCopyRecord(eventNode)
+    ? eventNode.default
+    : undefined;
+  const defaultTemplate =
+    typeof defaultNode === "string"
+      ? defaultNode
+      : readUnitTemplate(defaultNode, entry.unitType);
+  if (defaultTemplate) {
+    return formatCopy(defaultTemplate, {
+      feature: formatFeatureName(entry.feature),
+    });
+  }
+
+  // Tier 3: the English title stored on the row at write time. In
+  // practice this is only reached for a feature/event-type combination the
+  // catalogue doesn't cover at all (every real `LedgerEventType` ships a
+  // `default`, so this tier is a defensive fallback for a malformed/partial
+  // `copy`, not a normal code path).
   if (entry.activityTitle) {
     return entry.activityTitle;
   }
 
-  const feature = formatFeatureName(entry.feature);
-  const kind = getUsageActivityKind(entry);
-  const detail = (() => {
-    if (entry.eventType === "consume") {
-      if (entry.unitType === "page" && entry.feature === "ingestion") {
-        return "Pages indexed";
-      }
-
-      if (entry.unitType === "credit") {
-        return `${feature} credits used`;
-      }
-
-      return `${feature} pages used`;
-    }
-
-    if (entry.eventType === "grant") {
-      if (entry.feature === "cycle_grant") {
-        return entry.unitType === "page"
-          ? "Monthly pages granted"
-          : "Monthly credits granted";
-      }
-
-      if (entry.feature === "seat_quota_grant") {
-        return entry.unitType === "page"
-          ? "Seat pages granted"
-          : "Seat credits granted";
-      }
-
-      if (entry.feature === "plan_upgrade_grant") {
-        return entry.unitType === "page"
-          ? "Plan pages granted"
-          : "Plan credits granted";
-      }
-
-      if (entry.unitType === "page" && entry.feature === "shadow_auto_grant") {
-        return "Add-on pages granted";
-      }
-
-      return `${feature} granted`;
-    }
-
-    if (entry.eventType === "expire") {
-      return entry.unitType === "page"
-        ? "Monthly pages expired"
-        : "Unused credits expired";
-    }
-
-    if (entry.eventType === "adjust") {
-      if (entry.feature === "seat_quota_change") {
-        return "Seats updated";
-      }
-
-      return `${feature} adjusted`;
-    }
-
-    if (entry.eventType === "refund") {
-      return `${feature} refunded`;
-    }
-
-    if (entry.eventType === "reserve") {
-      return `${feature} reserved`;
-    }
-
-    if (entry.eventType === "release") {
-      return `${feature} released`;
-    }
-
-    return feature;
-  })();
-
-  return formatUsageActivityDetail(kind, detail);
+  // Tier 4: a generic, still-localised composition — the last resort when
+  // even the stored title is empty.
+  return formatUsageActivityDetail(
+    getUsageActivityKind(entry),
+    formatFeatureName(entry.feature),
+    copy,
+  );
 }
 
 export function isLedgerEntryInCycle(
