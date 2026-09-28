@@ -85,13 +85,17 @@ explicit event list must include `refund.created` and `dispute.created` (an
 endpoint with an empty event list already receives every event type,
 including these). Enable the events only after every API, worker and
 scheduler instance runs a version that handles them, for the same reason as
-Waffo above. Before enabling on the live endpoint, verify in Creem test mode
-with a full refund and two successive partial refunds on one taxed payment
-that `transaction.refunded_amount` is a cumulative total that includes the
-current refund (not just this event's own `refund_amount`), and that
-`transaction.amount_paid` is the tax-inclusive amount actually paid, not the
-pre-tax `amount` (Creem's own example: `amount` 1000, `amount_paid` 1210,
-`tax_amount` 210).
+Waffo above. Verified in Creem test mode on one $5.00 payment with three
+successive partial refunds: the embedded `transaction` object on a
+`refund.created` event is a snapshot taken BEFORE the current refund, so
+`transaction.refunded_amount` is the cumulative total of the earlier
+refunds only — null when there were none, and never a total that already
+includes this event's own `refund_amount`. Each refund is therefore
+reversed by its own `refund_amount`; `transaction.refunded_amount` is used
+only as a sanity check against `transaction.amount_paid`, never as the
+reversal amount. `transaction.amount_paid` is the tax-inclusive amount
+actually paid, not the pre-tax `amount` (Creem's own example: `amount`
+1000, `amount_paid` 1210, `tax_amount` 210).
 
 To handle Stripe refunds and disputes, add `charge.refunded`,
 `charge.dispute.created` and `charge.dispute.closed` to the enabled events of

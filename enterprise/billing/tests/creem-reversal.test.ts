@@ -186,7 +186,8 @@ test("a succeeded Creem refund reverses the top-up once", async () => {
         amount_paid: 500,
         currency: "USD",
         status: "paid",
-        refunded_amount: 500,
+        // Snapshot before this (only) refund: no prior refunds.
+        refunded_amount: null,
       },
       checkout: {
         id: "ch_test",
@@ -221,14 +222,15 @@ test("a Creem refund found by transaction id when checkout metadata is absent", 
       amount: 500,
       amount_paid: 500,
       currency: "USD",
-      refunded_amount: 250,
+      // Snapshot before this (only) refund: no prior refunds.
+      refunded_amount: null,
     },
     webhookEventType: "refund.created",
     webhookId: "evt_refund_by_tx",
     webhookCreatedAt: Date.now(),
   });
 
-  // refunded_amount(250) / paidAmount(500) of the 1000 granted pages.
+  // refund_amount(250) / paidAmount(500) of the 1000 granted pages.
   assert.equal(f.store.account?.addOnPagesBalance, 500);
   assert.equal(reversalRows(f).length, 1);
   assert.equal(f.store.order?.reversalStatus, "partially_refunded");
@@ -251,7 +253,8 @@ test("a Creem refund found by transaction id when checkout metadata is missing",
       amount: 500,
       amount_paid: 500,
       currency: "USD",
-      refunded_amount: 500,
+      // Snapshot before this (only) refund: no prior refunds.
+      refunded_amount: null,
     },
     webhookEventType: "refund.created",
     webhookId: "evt_refund_by_tx_no_metadata",
@@ -293,7 +296,8 @@ test("a Creem refund found by the Creem order id when the checkout carried no tr
       amount: 500,
       amount_paid: 500,
       currency: "USD",
-      refunded_amount: 500,
+      // Snapshot before this (only) refund: no prior refunds.
+      refunded_amount: null,
     },
     webhookEventType: "refund.created",
     webhookId: "evt_refund_by_order_id",
@@ -310,8 +314,8 @@ test("a succeeded Creem refund with unusable amounts raises the amount-unavailab
   await f.reversalSync("refund.created", {
     id: "ref_amount_unavailable",
     status: "succeeded",
-    // No `refund_amount` and no `transaction.refunded_amount`: neither a
-    // per-refund amount nor a cumulative total is usable.
+    // No `refund_amount` at all: nothing to reverse, regardless of any
+    // prior total.
     transaction: {
       id: "tran_test",
       amount: 500,
@@ -339,11 +343,121 @@ test("a succeeded Creem refund with unusable amounts raises the amount-unavailab
   );
 });
 
-test("a stale cumulative refund total raises the amount-unavailable alert", async () => {
+test("successive partial refunds each reverse their own amount", async () => {
   const f = await fixture();
 
+  // Same shape as the observed Creem test-mode events on one $5.00
+  // payment: refund_amount 100 (prior null), then 150 (prior 100), then
+  // 250 (prior 250). Each `transaction.refunded_amount` is the snapshot
+  // from BEFORE that refund.
   await f.reversalSync("refund.created", {
-    id: "ref_stale_total",
+    id: "ref_multi_1",
+    status: "succeeded",
+    refund_amount: 100,
+    refund_currency: "USD",
+    transaction: {
+      id: "tran_test",
+      amount: 500,
+      amount_paid: 500,
+      currency: "USD",
+      refunded_amount: null,
+    },
+    checkout: { metadata: { orderId: f.store.order!.id } },
+    webhookEventType: "refund.created",
+    webhookId: "evt_multi_1",
+    webhookCreatedAt: Date.now(),
+  });
+  await f.reversalSync("refund.created", {
+    id: "ref_multi_2",
+    status: "succeeded",
+    refund_amount: 150,
+    refund_currency: "USD",
+    transaction: {
+      id: "tran_test",
+      amount: 500,
+      amount_paid: 500,
+      currency: "USD",
+      refunded_amount: 100,
+    },
+    checkout: { metadata: { orderId: f.store.order!.id } },
+    webhookEventType: "refund.created",
+    webhookId: "evt_multi_2",
+    webhookCreatedAt: Date.now(),
+  });
+  await f.reversalSync("refund.created", {
+    id: "ref_multi_3",
+    status: "succeeded",
+    refund_amount: 250,
+    refund_currency: "USD",
+    transaction: {
+      id: "tran_test",
+      amount: 500,
+      amount_paid: 500,
+      currency: "USD",
+      refunded_amount: 250,
+    },
+    checkout: { metadata: { orderId: f.store.order!.id } },
+    webhookEventType: "refund.created",
+    webhookId: "evt_multi_3",
+    webhookCreatedAt: Date.now(),
+  });
+
+  assert.equal(f.store.order?.refundedAmount, 500);
+  assert.equal(f.store.account?.addOnPagesBalance, 0);
+  assert.equal(reversalRows(f).length, 3);
+});
+
+test("a later refund smaller than an earlier one is still reversed", async () => {
+  const f = await fixture();
+
+  // This is the silent under-reversal case: the old code preferred
+  // `transaction.refunded_amount` (300, read as a stale cumulative total)
+  // over this event's own smaller `refund_amount` (100), so the core saw
+  // no change from the first refund's total and applied nothing.
+  await f.reversalSync("refund.created", {
+    id: "ref_shrink_1",
+    status: "succeeded",
+    refund_amount: 300,
+    refund_currency: "USD",
+    transaction: {
+      id: "tran_test",
+      amount: 500,
+      amount_paid: 500,
+      currency: "USD",
+      refunded_amount: null,
+    },
+    checkout: { metadata: { orderId: f.store.order!.id } },
+    webhookEventType: "refund.created",
+    webhookId: "evt_shrink_1",
+    webhookCreatedAt: Date.now(),
+  });
+  await f.reversalSync("refund.created", {
+    id: "ref_shrink_2",
+    status: "succeeded",
+    refund_amount: 100,
+    refund_currency: "USD",
+    transaction: {
+      id: "tran_test",
+      amount: 500,
+      amount_paid: 500,
+      currency: "USD",
+      refunded_amount: 300,
+    },
+    checkout: { metadata: { orderId: f.store.order!.id } },
+    webhookEventType: "refund.created",
+    webhookId: "evt_shrink_2",
+    webhookCreatedAt: Date.now(),
+  });
+
+  assert.equal(f.store.order?.refundedAmount, 400);
+  assert.equal(f.store.account?.addOnPagesBalance, 200);
+  assert.equal(reversalRows(f).length, 2);
+});
+
+test("a redelivered refund does not reverse twice", async () => {
+  const f = await fixture();
+  const event = {
+    id: "ref_redelivered",
     status: "succeeded",
     refund_amount: 500,
     refund_currency: "USD",
@@ -352,23 +466,96 @@ test("a stale cumulative refund total raises the amount-unavailable alert", asyn
       amount: 500,
       amount_paid: 500,
       currency: "USD",
-      // Stale/zero cumulative total: less than this event's own
-      // refund_amount would otherwise under-reverse silently.
-      refunded_amount: 0,
+      refunded_amount: null,
+    },
+    checkout: { metadata: { orderId: f.store.order!.id } },
+    webhookEventType: "refund.created" as const,
+    webhookCreatedAt: Date.now(),
+  };
+
+  // Different webhook delivery ids, same refund id: the webhook-receipt
+  // dedupe (keyed by webhookId) does not prevent a second delivery from
+  // reaching the reversal core, so idempotency here comes from the core's
+  // own ledger key, which is keyed by the refund id (`reversalId`).
+  await f.reversalSync("refund.created", {
+    ...event,
+    webhookId: "evt_redelivered_1",
+  });
+  await f.reversalSync("refund.created", {
+    ...event,
+    webhookId: "evt_redelivered_2",
+  });
+
+  assert.equal(f.store.order?.refundedAmount, 500);
+  assert.equal(f.store.account?.addOnPagesBalance, 0);
+  assert.equal(reversalRows(f).length, 1);
+});
+
+test("a refund exceeding the paid amount with prior refunds raises amount-unavailable", async () => {
+  const f = await fixture();
+
+  await f.reversalSync("refund.created", {
+    id: "ref_exceeds_paid",
+    status: "succeeded",
+    refund_amount: 300,
+    refund_currency: "USD",
+    transaction: {
+      id: "tran_test",
+      amount: 500,
+      amount_paid: 500,
+      currency: "USD",
+      // prior(250) + refund_amount(300) = 550 > amount_paid(500).
+      refunded_amount: 250,
     },
     checkout: { metadata: { orderId: f.store.order!.id } },
     webhookEventType: "refund.created",
-    webhookId: "evt_refund_stale_total",
+    webhookId: "evt_refund_exceeds_paid",
     webhookCreatedAt: Date.now(),
   });
 
+  assert.equal(f.store.order?.refundedAmount, 0);
+  assert.equal(f.store.account?.addOnPagesBalance, 1000);
+  assert.equal(reversalRows(f).length, 0);
+  const alert = f.alerts.find(
+    (entry) =>
+      entry.alertKey ===
+      "billing:payment-reversal-amount-unavailable:creem:ref_exceeds_paid",
+  );
+  assert.ok(alert);
+  assert.equal(alert?.metadata?.prior, 250);
+  assert.equal(alert?.metadata?.refundAmount, 300);
+  assert.equal(alert?.metadata?.paidAmount, 500);
+});
+
+test("a missing refund_amount raises amount-unavailable even when refunded_amount is present", async () => {
+  const f = await fixture();
+
+  await f.reversalSync("refund.created", {
+    id: "ref_missing_amount",
+    status: "succeeded",
+    refund_currency: "USD",
+    // No `refund_amount`, even though a prior total is present.
+    transaction: {
+      id: "tran_test",
+      amount: 500,
+      amount_paid: 500,
+      currency: "USD",
+      refunded_amount: 250,
+    },
+    checkout: { metadata: { orderId: f.store.order!.id } },
+    webhookEventType: "refund.created",
+    webhookId: "evt_refund_missing_amount",
+    webhookCreatedAt: Date.now(),
+  });
+
+  assert.equal(f.store.order?.refundedAmount, 0);
   assert.equal(f.store.account?.addOnPagesBalance, 1000);
   assert.equal(reversalRows(f).length, 0);
   assert.ok(
     f.alerts.some(
       (alert) =>
         alert.alertKey ===
-        "billing:payment-reversal-amount-unavailable:creem:ref_stale_total",
+        "billing:payment-reversal-amount-unavailable:creem:ref_missing_amount",
     ),
   );
 });
@@ -461,7 +648,8 @@ test("a taxed refund reverses against the tax-inclusive paid amount, not the pre
       amount: 500,
       amount_paid: 605,
       currency: "USD",
-      refunded_amount: 302,
+      // Snapshot before this (only) refund: no prior refunds.
+      refunded_amount: null,
     },
     checkout: { metadata: { orderId: f.store.order!.id } },
     webhookEventType: "refund.created",
@@ -489,7 +677,8 @@ test("a taxed refund recorded before fulfillment reverses against the tax-inclus
       amount: 500,
       amount_paid: 605,
       currency: "USD",
-      refunded_amount: 302,
+      // Snapshot before this (only) refund: no prior refunds.
+      refunded_amount: null,
     },
     checkout: { metadata: { orderId: f.store.order!.id } },
     webhookEventType: "refund.created",

@@ -186,7 +186,19 @@ export function createCreemReversalSync(deps: {
     }
 
     const transaction = toObjectRecord(data.transaction);
-    const refundedTotal = readNumber(transaction, "refunded_amount");
+    // The embedded `transaction` is a snapshot taken BEFORE the current
+    // refund. Observed in Creem test mode across three `refund.created`
+    // events on one $5.00 payment: refund_amount 100 with
+    // transaction.refunded_amount null, then refund_amount 150 with
+    // transaction.refunded_amount 100, then refund_amount 250 with
+    // transaction.refunded_amount 250 — each `refunded_amount` is the
+    // cumulative total of the EARLIER refunds only, excluding this one
+    // (null when there were none). It is never a total that already
+    // includes this event's own `refund_amount`, so every refund is
+    // reversed by its own amount; `refunded_amount` is used only below, as
+    // a sanity check against the paid amount.
+    const priorRefundedTotal = readNumber(transaction, "refunded_amount");
+    const prior = priorRefundedTotal ?? 0;
     const refundAmount = readNumber(data, "refund_amount");
     // Tax-inclusive: Creem's `amount_paid` is what the customer actually
     // paid (`amount` is the pre-tax subtotal). Reversing against `amount`
@@ -198,21 +210,20 @@ export function createCreemReversalSync(deps: {
       readString(data, "refund_currency") ??
       readString(transaction, "currency");
 
-    // Nothing here can be turned into a confident reversal when: neither a
-    // usable cumulative total nor a usable per-refund amount exists; the
-    // tax-inclusive paid amount is unusable; the cumulative total is stale
-    // (less than this event's own refund amount, which would otherwise
-    // under-reverse and look like a legitimate small refund); or the
-    // currency cannot be determined at all. Notice-and-stop in every case
-    // rather than let a wrong or zero-amount "applied" reversal through
-    // silently (mirrors the Waffo refund translation).
+    // Nothing here can be turned into a confident reversal when: this
+    // event's own refund amount is missing, not a number, or not positive;
+    // the tax-inclusive paid amount is unusable; the currency cannot be
+    // determined at all; or the prior total plus this refund would exceed
+    // what was paid (a data inconsistency, not a legitimate over-refund).
+    // Notice-and-stop in every case rather than let a wrong or zero-amount
+    // "applied" reversal through silently (mirrors the Waffo refund
+    // translation).
     const amountUnavailable =
-      (refundedTotal === null && refundAmount === null) ||
+      refundAmount === null ||
+      refundAmount <= 0 ||
       paidAmount === null ||
       !currency ||
-      (refundedTotal !== null &&
-        refundAmount !== null &&
-        refundedTotal < refundAmount);
+      prior + refundAmount > paidAmount;
 
     if (amountUnavailable) {
       logger.warn("Creem refund amount is unusable; not reversing", {
@@ -226,26 +237,24 @@ export function createCreemReversalSync(deps: {
         providerReference: reversalId,
         orderId: order.id,
         teamId: order.teamId,
-        amount: refundedTotal ?? refundAmount,
+        amount: refundAmount,
         currency,
+        metadata: { prior, refundAmount, paidAmount },
       });
       return;
     }
 
-    // `amountUnavailable` above already guarantees: at least one of
-    // refundedTotal/refundAmount is a number, paidAmount is a number, and
-    // currency is a non-empty string — hence the assertions rather than a
-    // silent `?? 0` / `?? ""` default.
+    // `amountUnavailable` above already guarantees refundAmount is a
+    // positive number, paidAmount is a number, and currency is a
+    // non-empty string — hence the assertions rather than a silent `?? 0`
+    // / `?? ""` default.
     await record(
       {
         orderId: order.id,
         provider: "creem",
         reversalId,
         kind: "refund",
-        amount:
-          refundedTotal !== null
-            ? { refundedTotal }
-            : { refundAmount: refundAmount as number },
+        amount: { refundAmount: refundAmount as number },
         paidAmount: paidAmount as number,
         currency: currency as string,
       },
