@@ -361,3 +361,315 @@ test("a refund committed while fulfillment fails survives the failure bookkeepin
     }
   }
 });
+
+function noThrowingMemberships(userId: string) {
+  return {
+    async listTeamMemberUserIds() {
+      return [userId];
+    },
+    async countTeamMembers() {
+      return 1;
+    },
+    async countPendingTeamInvitations() {
+      return 0;
+    },
+  };
+}
+
+/** A fulfilled single-unit credit top-up order, inserted `payment_confirmed`
+ * and then fulfilled through the real service path so the grant lands on the
+ * account through the same code the racing test above exercises. */
+async function insertAndFulfillCreditTopup(
+  billing: BillingService,
+  store: PostgresBillingStore,
+  input: {
+    orderId: string;
+    teamId: string;
+    userId: string;
+    externalPaymentId: string;
+    quantity: number;
+    grantedCredits: number;
+    amountTotal: number;
+  },
+) {
+  const now = new Date().toISOString();
+  await store.insertOrder({
+    id: input.orderId,
+    provider: "waffo",
+    kind: "credit_topup",
+    status: "payment_confirmed",
+    paymentStatus: "paid",
+    userId: input.userId,
+    teamId: input.teamId,
+    clientReferenceKey: null,
+    planFamily: null,
+    billingInterval: null,
+    quantity: input.quantity,
+    unitType: "credit",
+    unitAmount: 10_000,
+    grantedCredits: input.grantedCredits,
+    grantedPages: 0,
+    refundedAmount: 0,
+    reversedUnits: 0,
+    reversalStatus: "none",
+    externalCheckoutId: null,
+    externalPaymentId: null,
+    externalCustomerId: null,
+    externalSubscriptionId: null,
+    externalProductId: "prod_credit_topup",
+    amountTotal: input.amountTotal,
+    currency: "USD",
+    successUrl: null,
+    cancelUrl: null,
+    metadata: {},
+    errorCode: null,
+    errorMessage: null,
+    paidAt: now,
+    fulfilledAt: null,
+    expiresAt: null,
+    fulfillmentAttemptCount: 0,
+    nextRetryAt: null,
+    createdAt: now,
+    updatedAt: now,
+  });
+  await billing.fulfillOrder({
+    orderId: input.orderId,
+    externalPaymentId: input.externalPaymentId,
+  });
+}
+
+test("concurrent duplicate deliveries debit once", async () => {
+  const connectionString = requireBillingTestDatabase();
+  const pool = new Pool({ connectionString, max: 4 });
+  const id = randomUUID();
+  const teamId = `billing_test_${id}`;
+  const userId = `actor_${id}`;
+  const orderId = randomUUID();
+  const externalPaymentId = `PAY_${id}`;
+  const store = new PostgresBillingStore(pool, noThrowingMemberships(userId));
+  const billing = new BillingService(store, runtimeConfig, noopProvider);
+
+  try {
+    await billing.ensureBillingAccount(teamId, userId);
+    await insertAndFulfillCreditTopup(billing, store, {
+      orderId,
+      teamId,
+      userId,
+      externalPaymentId,
+      quantity: 2,
+      grantedCredits: 20_000,
+      amountTotal: 1000,
+    });
+    const addOnBefore = (await store.getAccount(teamId, userId))
+      ?.addOnCreditsBalance;
+    assert.equal(addOnBefore, 20_000);
+
+    // The same provider webhook redelivered: two calls race with the same
+    // reversalId, on separate connections from the same pool.
+    const redeliveredRefund = () =>
+      billing.applyPaymentReversal({
+        orderId,
+        provider: "waffo",
+        reversalId: "redelivered_refund",
+        kind: "refund",
+        amount: { refundedTotal: 1000 },
+        paidAmount: 1000,
+        currency: "USD",
+      });
+    const [first, second] = await Promise.all([
+      redeliveredRefund(),
+      redeliveredRefund(),
+    ]);
+
+    const outcomes = [first.outcome, second.outcome].sort();
+    assert.deepEqual(outcomes, ["applied", "duplicate"]);
+
+    const ledgerRows = await pool.query(
+      "select count(*)::int as count from usage_ledgers where team_id=$1 and reference_id=$2 and operation_type='payment_reversal'",
+      [teamId, orderId],
+    );
+    assert.equal(ledgerRows.rows[0]?.count, 1);
+
+    const account = await store.getAccount(teamId, userId);
+    assert.equal(account?.addOnCreditsBalance, 0);
+  } finally {
+    try {
+      await pool.query("delete from usage_ledgers where team_id=$1", [teamId]);
+      await pool.query("delete from billing_orders where id=$1", [orderId]);
+      await pool.query("delete from billing_accounts where team_id=$1", [
+        teamId,
+      ]);
+    } finally {
+      await pool.end();
+    }
+  }
+});
+
+test("reversal and usage on the same member serialize", async () => {
+  const connectionString = requireBillingTestDatabase();
+  const pool = new Pool({ connectionString, max: 4 });
+  const id = randomUUID();
+  const teamId = `billing_test_${id}`;
+  const userId = `actor_${id}`;
+  const orderId = randomUUID();
+  const externalPaymentId = `PAY_${id}`;
+  const store = new PostgresBillingStore(pool, noThrowingMemberships(userId));
+  const billing = new BillingService(store, runtimeConfig, noopProvider);
+
+  try {
+    await billing.ensureBillingAccount(teamId, userId);
+    await insertAndFulfillCreditTopup(billing, store, {
+      orderId,
+      teamId,
+      userId,
+      externalPaymentId,
+      quantity: 1,
+      grantedCredits: 10_000,
+      amountTotal: 1250,
+    });
+    const before = await store.getAccount(teamId, userId);
+    assert.equal(before?.addOnCreditsBalance, 10_000);
+    assert.equal(before?.monthlyCreditsBalance, runtimeConfig.defaultMonthlyCredits);
+
+    // A partial refund (half of `paidAmount`) reclaims 5,000 of the 10,000
+    // add-on grant; the concurrent usage charge spends 2,000 credits, well
+    // within the 3,000 monthly grant. The two touch disjoint buckets, so the
+    // "serial" result — running either order — is the same fixed numbers;
+    // this only proves the account row's lock actually serializes the two
+    // read-modify-writes instead of one clobbering the other.
+    const [reversal, consume] = await Promise.all([
+      billing.applyPaymentReversal({
+        orderId,
+        provider: "waffo",
+        reversalId: "partial_refund",
+        kind: "refund",
+        amount: { refundedTotal: 625 },
+        paidAmount: 1250,
+        currency: "USD",
+      }),
+      billing.meterConsume(
+        teamId,
+        { credits: 2000, feature: "test", idempotencyKey: `consume_${id}` },
+        userId,
+      ),
+    ]);
+
+    assert.equal(reversal.outcome, "applied");
+    if (reversal.outcome === "applied") {
+      assert.equal(reversal.deltaUnits, 5_000);
+      assert.equal(reversal.recovered, 5_000);
+      assert.equal(reversal.shortfall, 0);
+    }
+    assert.equal(consume.consumedCredits, 2000);
+
+    const after = await store.getAccount(teamId, userId);
+    assert.equal(after?.addOnCreditsBalance, 5_000);
+    assert.equal(
+      after?.monthlyCreditsBalance,
+      runtimeConfig.defaultMonthlyCredits - 2000,
+    );
+
+    const row = await pool.query(
+      "select add_on_credits_balance, monthly_credits_balance from billing_accounts where team_id=$1 and user_id=$2",
+      [teamId, userId],
+    );
+    assert.equal(row.rows[0]?.add_on_credits_balance, 5_000);
+    assert.equal(
+      row.rows[0]?.monthly_credits_balance,
+      runtimeConfig.defaultMonthlyCredits - 2000,
+    );
+  } finally {
+    try {
+      await pool.query("delete from usage_ledgers where team_id=$1", [teamId]);
+      await pool.query("delete from billing_orders where id=$1", [orderId]);
+      await pool.query("delete from billing_accounts where team_id=$1", [
+        teamId,
+      ]);
+    } finally {
+      await pool.end();
+    }
+  }
+});
+
+test("reclaim stops at zero under real constraints", async () => {
+  const connectionString = requireBillingTestDatabase();
+  const pool = new Pool({ connectionString, max: 4 });
+  const id = randomUUID();
+  const teamId = `billing_test_${id}`;
+  const userId = `actor_${id}`;
+  const orderId = randomUUID();
+  const externalPaymentId = `PAY_${id}`;
+  const store = new PostgresBillingStore(pool, noThrowingMemberships(userId));
+  const billing = new BillingService(store, runtimeConfig, noopProvider);
+
+  try {
+    await billing.ensureBillingAccount(teamId, userId);
+    await insertAndFulfillCreditTopup(billing, store, {
+      orderId,
+      teamId,
+      userId,
+      externalPaymentId,
+      quantity: 1,
+      grantedCredits: 10_000,
+      amountTotal: 1250,
+    });
+
+    // Spend down to less than the full-refund target (10,000): the monthly
+    // grant (3,000) goes first, then 9,000 of the 10,000 add-on grant,
+    // leaving only 1,000 of add-on for the reversal to reclaim.
+    await billing.meterConsume(
+      teamId,
+      {
+        credits: runtimeConfig.defaultMonthlyCredits + 9_000,
+        feature: "test",
+        idempotencyKey: `spend_${id}`,
+      },
+      userId,
+    );
+    const before = await store.getAccount(teamId, userId);
+    assert.equal(before?.monthlyCreditsBalance, 0);
+    assert.equal(before?.addOnCreditsBalance, 1_000);
+
+    const result = await billing.applyPaymentReversal({
+      orderId,
+      provider: "waffo",
+      reversalId: "full_refund",
+      kind: "refund",
+      amount: { refundedTotal: 1250 },
+      paidAmount: 1250,
+      currency: "USD",
+    });
+
+    assert.equal(result.outcome, "applied");
+    if (result.outcome === "applied") {
+      assert.equal(result.deltaUnits, 10_000);
+      assert.equal(result.recovered, 1_000);
+      assert.equal(result.shortfall, 9_000);
+      assert.equal(result.order.reversalStatus, "refunded");
+      assert.equal(result.order.reversedUnits, 10_000);
+    }
+
+    // The transaction committed (no CHECK violation) and both balances
+    // landed exactly at zero rather than going negative.
+    const after = await store.getAccount(teamId, userId);
+    assert.equal(after?.addOnCreditsBalance, 0);
+    assert.equal(after?.monthlyCreditsBalance, 0);
+
+    const row = await pool.query(
+      "select add_on_credits_balance, monthly_credits_balance from billing_accounts where team_id=$1 and user_id=$2",
+      [teamId, userId],
+    );
+    assert.equal(row.rows[0]?.add_on_credits_balance, 0);
+    assert.equal(row.rows[0]?.monthly_credits_balance, 0);
+  } finally {
+    try {
+      await pool.query("delete from usage_ledgers where team_id=$1", [teamId]);
+      await pool.query("delete from billing_orders where id=$1", [orderId]);
+      await pool.query("delete from billing_accounts where team_id=$1", [
+        teamId,
+      ]);
+    } finally {
+      await pool.end();
+    }
+  }
+});
