@@ -39,12 +39,19 @@ export default getRequestConfig(async ({ requestLocale }) => {
   return {
     locale,
     // The pricing card copy lives in the licensed billing package (D8/§20); it
-    // is a fresh top-level namespace, so a shallow add is enough.
+    // is a fresh top-level namespace, so a shallow add is enough. Only
+    // `plans` is merged in — the one next-intl reader of this namespace
+    // (`app/_landing/v1/index.tsx`'s `useTranslations("pricing")`) reads
+    // `plans.*` only, and the billing package's other namespaces
+    // (`common`/`billing`/`usage`/`activity`/`checkout`/`sidebar`, ~11 KB per
+    // locale) are served entirely through `enterprise/billing`'s own
+    // `getBillingCopy`/`useBillingCopy` accessors, not next-intl, so shipping
+    // them here would be dead weight on every page.
     messages: {
       ...(await loadMessages(locale)),
       pricing: deepMergeMessages(
-        getBillingMessages("en"),
-        getBillingMessages(locale),
+        { plans: getBillingMessages("en").plans },
+        { plans: getBillingMessages(locale).plans },
       ),
     },
     // A fixed default keeps server-rendered dates hydration-stable; user-facing

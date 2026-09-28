@@ -1,5 +1,6 @@
 "use client";
 import { lazy, Suspense, type ComponentProps, type ReactNode } from "react";
+import { useTranslations } from "next-intl";
 import { useDeploymentCapabilities } from "./capabilities";
 import { TeamCheckoutDialog as CoreTeamDialog } from "./core-client";
 
@@ -35,14 +36,14 @@ const Team = lazy(() =>
 );
 
 function Gate({ children }: { children: ReactNode }) {
+  const t = useTranslations("dashboardSettings.billing");
   const state = useDeploymentCapabilities();
   if (state.status === "error") return <p role="alert">{state.error}</p>;
   if (state.status === "loading")
-    return <p role="status">Loading available features…</p>;
-  if (!state.capabilities.billing.available)
-    return <p>Commercial features are disabled.</p>;
+    return <p role="status">{t("loadingFeatures")}</p>;
+  if (!state.capabilities.billing.available) return <p>{t("disabled")}</p>;
   return (
-    <Suspense fallback={<p role="status">Loading billing…</p>}>
+    <Suspense fallback={<p role="status">{t("loadingBilling")}</p>}>
       {children}
     </Suspense>
   );

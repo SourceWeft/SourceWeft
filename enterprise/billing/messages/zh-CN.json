@@ -54,5 +54,295 @@
     "seat": "席位",
     "yearlySavings": "比按月付费节省 2 个月",
     "checkoutError": "无法发起结账。"
+  },
+  "common": {
+    "loading": "正在加载…",
+    "cancel": "取消",
+    "unknown": "未知",
+    "personal": "个人",
+    "team": "团队",
+    "cycle": "周期",
+    "credits": "积分",
+    "pages": "页面",
+    "seats": "席位",
+    "status": "状态",
+    "units": {
+      "credit": "积分",
+      "page": "页",
+      "seat": "席位"
+    },
+    "intervals": {
+      "notSet": "未设置",
+      "monthly": "按月",
+      "annual": "按年"
+    },
+    "subscriptionStatuses": {
+      "inactive": "未激活",
+      "trialing": "试用中",
+      "active": "生效中",
+      "past_due": "逾期未付",
+      "paused": "已暂停",
+      "unpaid": "未支付",
+      "canceled": "已取消",
+      "expired": "已过期"
+    },
+    "planNames": {
+      "individual_free": "免费版",
+      "individual_pro": "专业版",
+      "team_standard": "团队版",
+      "team_premium": "团队高级版",
+      "enterprise_usage": "企业版"
+    },
+    "cycleSources": {
+      "free_account": "免费账户",
+      "provider_subscription": "服务商订阅",
+      "manual": "手动"
+    }
+  },
+  "billing": {
+    "title": "账单",
+    "scopePersonal": "个人账单",
+    "scopeTeam": "{team} 账单",
+    "planLabel": "{plan}套餐",
+    "planAccount": "{plan}账户",
+    "noPaidSubscription": "暂无付费订阅",
+    "loadingCycle": "正在加载周期…",
+    "cycleRange": "{start} 至 {end}",
+    "creditsUnavailable": "积分额度信息不可用",
+    "pagesUnavailable": "页面额度信息不可用",
+    "usedOfLimit": "{used} / {limit}",
+    "availableCount": "可用 {count}",
+    "loadingValue": "正在加载…",
+    "manageBilling": "管理账单",
+    "upgradePlan": "升级套餐",
+    "portalUnavailable": "账单管理入口暂不可用。",
+    "unableToOpenPortal": "无法打开账单管理入口。",
+    "seatsSectionTitle": "席位",
+    "updateSeats": "更新席位",
+    "addSeats": "添加席位",
+    "seatsUsedOfLimit": "已使用 {used}/{limit} 个席位",
+    "seatsUnknown": "已使用 --/-- 个席位",
+    "loadingSeats": "正在加载席位…",
+    "seatsRemaining": "剩余 {count} 个席位",
+    "seatsUnavailable": "席位可用信息不可用",
+    "totalSeatsLabel": "席位总数",
+    "seatsTotalSuffix": "总计",
+    "seatReductionNotice": "减少席位前需要先预览账单变更。",
+    "seatIncreaseNotice": "增加席位前需要先预览账单变更。",
+    "seatCountSynced": "席位数量已同步。",
+    "subscriptionTitle": "订阅",
+    "rows": {
+      "billingCadence": "计费周期",
+      "renewal": "续订",
+      "lastUpdated": "最近更新"
+    },
+    "renewalCancels": "将在当前周期结束时取消",
+    "renewalAuto": "自动续订",
+    "renewalNotScheduled": "未安排",
+    "noSubscriptionUpdates": "暂无订阅更新记录",
+    "reviewSeatIncrease": "确认增加席位",
+    "reviewSeatReduction": "确认减少席位",
+    "seatChangeSummary": "由 {current} 调整为 {next} 个席位",
+    "seatChangeDetail": "{used} 名成员和 {pending} 个待处理邀请将保留分配。",
+    "seatPreview": {
+      "theoreticalRefund": "理论退款金额",
+      "refundOrCredit": "退款或抵扣",
+      "notRefundable": "不可退款部分",
+      "refundRatio": "退款比例",
+      "creditsDeducted": "扣减积分",
+      "pagesDeducted": "扣减页面额度",
+      "billingAction": "账单处理方式",
+      "estimatedCharge": "预计按比例收费"
+    },
+    "seatProviderActions": {
+      "internal_partial_credit": "内部部分抵扣",
+      "none": "无需支付服务商调整",
+      "proration_charge_immediately": "立即按比例扣款",
+      "proration_credit": "支付服务商按比例退还"
+    },
+    "updatingSeats": "正在更新…",
+    "confirmIncrease": "确认增加",
+    "confirmReduction": "确认减少",
+    "seatCountUpdated": "席位数量已更新。",
+    "unableToUpdateSeats": "无法更新席位。",
+    "failedToLoad": "账单加载失败"
+  },
+  "usage": {
+    "title": "用量",
+    "planLabel": "{plan}套餐",
+    "creditsLabel": "{used} / {limit} 积分",
+    "loadingCredits": "正在加载积分…",
+    "creditsUnknown": "-- / -- 积分",
+    "pagesLabel": "已用 {used} · 剩余 {left}",
+    "loadingPages": "正在加载页面额度…",
+    "pagesUnknown": "已用 -- · 剩余 --",
+    "pagesWallet": "月度 {monthly} · 附加 {addOn}",
+    "pagesWalletLoading": "月度 … · 附加 …",
+    "pagesWalletUnknown": "月度 -- · 附加 --",
+    "seatsLabel": "{used} / {limit} 席位",
+    "loadingSeats": "正在加载席位…",
+    "seatsUnknown": "-- / -- 席位",
+    "seatsUsage": "已用 {used} · 剩余 {remaining}",
+    "seatsUsageUnknown": "已用 -- · 剩余 --",
+    "activityTitle": "活动记录",
+    "filterAriaLabel": "筛选用量活动",
+    "filters": {
+      "all": "全部",
+      "seat": "席位",
+      "page": "页面",
+      "credit": "积分"
+    },
+    "table": {
+      "detail": "详情",
+      "date": "日期",
+      "usage": "用量"
+    },
+    "loadingActivity": "正在加载活动记录…",
+    "noActivity": "暂无用量活动",
+    "noActivityForUnit": "暂无{unit}相关活动",
+    "accountUnavailable": "用量账户不可用",
+    "loadMore": "加载更多",
+    "loadingMore": "正在加载…",
+    "failedToLoad": "用量加载失败",
+    "failedToLoadActivity": "用量活动加载失败",
+    "ledgerChangeSummary": "{delta} {unit} · 剩余 {balance}",
+    "ledgerSeatChangeSummary": "{previous} → {next} {unit}",
+    "activityKindDetail": "{kind} · {detail}",
+    "kinds": {
+      "image": "图片",
+      "vision": "视觉",
+      "video": "视频",
+      "chat": "对话",
+      "other": "其他"
+    }
+  },
+  "activity": {
+    "consume": {
+      "default": {
+        "credit": "{feature} 积分已使用",
+        "page": "{feature} 页面已使用"
+      },
+      "ingestion": {
+        "page": "已索引页面"
+      }
+    },
+    "grant": {
+      "default": "{feature} 已发放",
+      "cycle_grant": {
+        "credit": "已发放月度积分",
+        "page": "已发放月度页面额度"
+      },
+      "seat_quota_grant": {
+        "credit": "已发放席位积分",
+        "page": "已发放席位页面额度"
+      },
+      "plan_upgrade_grant": {
+        "credit": "已发放套餐积分",
+        "page": "已发放套餐页面额度"
+      },
+      "shadow_auto_grant": {
+        "page": "已发放附加页面额度"
+      },
+      "credit_topup_purchase": {
+        "credit": "已购买积分充值包"
+      },
+      "page_topup_purchase": {
+        "page": "已购买页面充值包"
+      }
+    },
+    "expire": {
+      "default": "{feature} 已过期",
+      "cycle_expire": {
+        "credit": "未使用积分已过期",
+        "page": "月度页面额度已过期"
+      }
+    },
+    "adjust": {
+      "default": "{feature} 已调整",
+      "seat_quota_change": {
+        "seat": "席位数量已更新"
+      },
+      "payment_refund": {
+        "credit": "积分充值已退款",
+        "page": "页面充值已退款"
+      },
+      "payment_chargeback": {
+        "credit": "积分充值已被拒付",
+        "page": "页面充值已被拒付"
+      }
+    },
+    "refund": {
+      "default": "{feature} 已退款"
+    },
+    "reserve": {
+      "default": "{feature} 已预留"
+    },
+    "release": {
+      "default": "{feature} 已释放"
+    },
+    "featureNames": {
+      "chat": "对话",
+      "retrieval": "检索",
+      "retrieval_rerank": "检索重排序",
+      "source_ingestion": "来源导入",
+      "ingestion__asr": "语音转写",
+      "artifact__image": "图像生成",
+      "artifact__video_presentation__asset": "视频素材生成",
+      "artifact__video_presentation__narration": "视频旁白生成",
+      "artifact__video_presentation__validation": "视频校验",
+      "html__visual_qa": "视觉质检"
+    }
+  },
+  "checkout": {
+    "invalidLink": "该结账链接已失效。",
+    "invalidSeatCount": "该团队结账链接的席位数量无效。",
+    "needsAttention": "结账需要处理",
+    "opening": "正在打开结账",
+    "openingDescription": "支付服务商的结账页面正在打开。",
+    "preparingDescription": "正在准备您的 {plan} 结账。",
+    "planTeam": "团队版",
+    "planPro": "专业版",
+    "tryAgain": "重试",
+    "backToPricing": "返回定价页",
+    "securePaymentTitle": "安全支付",
+    "waffoCreditsDescription": "{count} 积分。请在新标签页中打开 Waffo 结账页面核对总额并付款，当前页面将保持打开。",
+    "waffoPagesDescription": "{count} 页。请在新标签页中打开 Waffo 结账页面核对总额并付款，当前页面将保持打开。",
+    "waffoGenericDescription": "请在新标签页中打开 Waffo 结账页面核对总额并付款，当前页面将保持打开。",
+    "openCheckout": "打开结账页面",
+    "success": {
+      "finalizing": "正在完成支付",
+      "settingUp": "正在设置您的套餐",
+      "ready": "已就绪",
+      "syncing": "仍在同步",
+      "readyDescription": "您的账单更新已在控制台中就绪。",
+      "pendingDescription": "我们正在核实支付服务商的确认信息并应用您的账单状态。",
+      "openDashboard": "打开控制台"
+    },
+    "topup": {
+      "title": "购买积分或页数",
+      "description": "选择充值包并在付款前核对总额。",
+      "buyCredits": "购买积分",
+      "buyPages": "购买页数",
+      "error": "无法准备结账"
+    },
+    "saveTwoMonths": "节省 2 个月",
+    "enterTeamName": "请输入团队名称。",
+    "seatsRange": "席位数量必须是 {min} 到 {max} 之间的整数。",
+    "createTeam": "创建团队",
+    "createTeamDescription": "为团队命名并选择席位数量，团队将在付款后创建。",
+    "teamNameLabel": "团队名称",
+    "teamNamePlaceholder": "星河研究组",
+    "billingLabel": "账单",
+    "total": "结账总额",
+    "perSeatSummary": "每席位 {price}，共 {count} 个席位。",
+    "continue": "继续结账"
+  },
+  "sidebar": {
+    "openUsageAriaLabel": "打开用量详情",
+    "usageLabel": "用量",
+    "loading": "加载中",
+    "pagesLeft": "剩余页面",
+    "cycleEnds": "周期结束",
+    "unavailable": "不可用"
   }
 }

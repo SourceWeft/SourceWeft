@@ -965,6 +965,11 @@
       "retry": "Retry",
       "memberFallback": "Member"
     },
+    "billing": {
+      "loadingFeatures": "Loading available features…",
+      "disabled": "Commercial features are disabled.",
+      "loadingBilling": "Loading billing…"
+    },
     "nav": {
       "profile": "Profile",
       "team": "Team",

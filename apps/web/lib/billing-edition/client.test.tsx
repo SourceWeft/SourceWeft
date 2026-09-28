@@ -13,6 +13,7 @@ import {
   TeamCheckoutDialog,
   SidebarUsageSummary,
 } from "./client";
+import { withIntl } from "@/test/react";
 const props = {
   open: true,
   onOpenChange() {},
@@ -27,10 +28,12 @@ beforeEach(() => {
   };
 });
 test("direct billing view is gated while module is off", () => {
-  expect(renderToStaticMarkup(createElement(BillingPanel))).toContain(
+  expect(renderToStaticMarkup(withIntl(createElement(BillingPanel)))).toContain(
     "Commercial features are disabled",
   );
-  expect(renderToStaticMarkup(createElement(SidebarUsageSummary, {}))).toBe("");
+  expect(
+    renderToStaticMarkup(withIntl(createElement(SidebarUsageSummary, {}))),
+  ).toBe("");
 });
 test("failed capability loading cannot offer a free team creation path", () => {
   state.value = {
@@ -38,13 +41,17 @@ test("failed capability loading cannot offer a free team creation path", () => {
     capabilities: null,
     error: "Deployment capabilities unavailable",
   };
-  const html = renderToStaticMarkup(createElement(TeamCheckoutDialog, props));
+  const html = renderToStaticMarkup(
+    withIntl(createElement(TeamCheckoutDialog, props)),
+  );
   expect(html).toContain('role="alert"');
   expect(html).not.toContain("Create team");
 });
 test("pending capabilities do not offer team creation or load commercial UI", () => {
   state.value = { status: "loading", capabilities: null, error: null };
-  const html = renderToStaticMarkup(createElement(TeamCheckoutDialog, props));
+  const html = renderToStaticMarkup(
+    withIntl(createElement(TeamCheckoutDialog, props)),
+  );
   expect(html).toContain("Loading available features");
   expect(html).not.toContain("Create team");
 });
