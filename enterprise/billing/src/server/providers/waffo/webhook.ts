@@ -10,6 +10,7 @@ import type { BillingStore } from "../../store-port";
 import type { BillingService } from "../../service";
 import type { BillingLogger } from "../../host";
 import { BillingError } from "../../errors";
+import { updateOrderLocked } from "../../order-locking";
 import { displayToCents } from "./client";
 import type { WaffoSettings, WaffoStateStore } from "./state";
 
@@ -455,18 +456,19 @@ export class WaffoWebhookService {
           };
           await billing.syncSubscriptionSnapshot(snapshot);
         }
-        const current = await billing.getOrder(order.id);
-        if (current)
-          await store.updateOrder({
-            ...current,
-            metadata: {
-              ...current.metadata,
-              waffoOrderId: event.data.orderId,
-              waffoLastEventAt: event.timestamp,
-              waffoLastEventType: event.eventType,
-            },
-            updatedAt: new Date().toISOString(),
-          });
+        // Locked read-modify-write: an unlocked `billing.getOrder` here could
+        // read the row before a concurrent reversal commits its
+        // refundedAmount/reversalStatus/metadata.reversalPaidAmount, and
+        // writing that stale snapshot back would erase them. Merge onto the
+        // freshly locked row's metadata instead, so those keys survive.
+        await updateOrderLocked(store, order.id, (locked) => ({
+          metadata: {
+            ...locked.metadata,
+            waffoOrderId: event.data.orderId,
+            waffoLastEventAt: event.timestamp,
+            waffoLastEventType: event.eventType,
+          },
+        }));
       }
     }
     const current = await billing.getOrder(order.id);

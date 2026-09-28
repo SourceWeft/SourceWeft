@@ -681,3 +681,160 @@ test("a failed top-up fulfillment keeps the provider payment id through the retr
   assert.equal(store.order?.status, "fulfilled");
   assert.equal(store.order?.externalPaymentId, "pi_1");
 });
+
+test("a failing failure-bookkeeping step does not mask the fulfilment error", async () => {
+  // The fulfilment transaction itself must run normally (call #1) so the
+  // real fulfilment error (BILLING_ORDER_INVALID_GRANT, a stable code) is
+  // what fails it; only `markFulfillmentFailed`'s own transaction (call #2)
+  // — armed right before the fulfilment attempt — throws "db down".
+  class FailBookkeepingStore extends MemoryBillingStore {
+    private armed = false;
+    private calls = 0;
+
+    armFailBookkeeping() {
+      this.armed = true;
+      this.calls = 0;
+    }
+
+    async runInTransaction<T>(
+      ...args: Parameters<MemoryBillingStore["runInTransaction"]>
+    ): Promise<T> {
+      if (this.armed) {
+        this.calls += 1;
+        if (this.calls === 2) {
+          throw new Error("db down");
+        }
+      }
+      return super.runInTransaction(...args) as Promise<T>;
+    }
+  }
+
+  const store = new FailBookkeepingStore();
+  const logged: Array<{ message: string; fields?: Record<string, unknown> }> =
+    [];
+  const billingService = new BillingService(
+    store,
+    {
+      ...runtimeConfig,
+      saasEnabled: true,
+      provider: "creem",
+    },
+    {
+      ...noopProvider,
+      async createCheckout() {
+        return {
+          provider: "creem",
+          checkoutUrl: "https://checkout.example.test/topup",
+          externalCheckoutId: null,
+          externalCustomerId: null,
+        };
+      },
+    },
+    undefined,
+    {
+      logger: {
+        info() {},
+        warn() {},
+        error(message, fields) {
+          logged.push({ message, fields });
+        },
+      },
+      organizationMetadata: () => ({}),
+      async createTeamOrganization() {
+        throw new Error("not implemented");
+      },
+      async ensureMembershipWorkspace() {},
+    },
+  );
+
+  const checkout = await billingService.createTopupCheckout(
+    "team_1",
+    { unitType: "credit", quantity: 2 },
+    "user_1",
+    "user@example.com",
+  );
+  // Force the grant check inside fulfilment to fail with a stable code.
+  store.order = { ...store.order!, grantedCredits: 0 };
+
+  store.armFailBookkeeping();
+  await assertRejectsWithBillingCode(
+    () => billingService.fulfillOrder({ orderId: checkout.orderId }),
+    "BILLING_ORDER_INVALID_GRANT",
+  );
+
+  assert.equal(logged.length, 1);
+  assert.equal(logged[0]?.message, "Failed to record fulfillment failure");
+  assert.equal(logged[0]?.fields?.orderId, checkout.orderId);
+  assert.equal(logged[0]?.fields?.code, "BILLING_ORDER_INVALID_GRANT");
+  assert.equal(logged[0]?.fields?.bookkeepingError, "db down");
+});
+
+test("a throwing alert sink during markFulfillmentFailed still marks the order failed and rethrows the original error", async () => {
+  const store = new MemoryBillingStore();
+  const logged: Array<{ message: string; fields?: Record<string, unknown> }> =
+    [];
+  const throwingAlerts = {
+    async trigger() {
+      throw new Error("alert sink down");
+    },
+    async resolve() {},
+  };
+  const billingService = new BillingService(
+    store,
+    {
+      ...runtimeConfig,
+      saasEnabled: true,
+      provider: "creem",
+    },
+    {
+      ...noopProvider,
+      async createCheckout() {
+        return {
+          provider: "creem",
+          checkoutUrl: "https://checkout.example.test/topup",
+          externalCheckoutId: null,
+          externalCustomerId: null,
+        };
+      },
+    },
+    throwingAlerts,
+    {
+      logger: {
+        info() {},
+        warn() {},
+        error(message, fields) {
+          logged.push({ message, fields });
+        },
+      },
+      organizationMetadata: () => ({}),
+      async createTeamOrganization() {
+        throw new Error("not implemented");
+      },
+      async ensureMembershipWorkspace() {},
+    },
+  );
+
+  const checkout = await billingService.createTopupCheckout(
+    "team_1",
+    { unitType: "credit", quantity: 2 },
+    "user_1",
+    "user@example.com",
+  );
+  // Force the grant check inside fulfilment to fail with a stable code.
+  store.order = { ...store.order!, grantedCredits: 0 };
+
+  await assertRejectsWithBillingCode(
+    () => billingService.fulfillOrder({ orderId: checkout.orderId }),
+    "BILLING_ORDER_INVALID_GRANT",
+  );
+
+  // The bookkeeping WRITE succeeded (only the alert sink failed), so this is
+  // not a bookkeeping failure: no "Failed to record fulfillment failure" log.
+  assert.equal(
+    logged.some(
+      (entry) => entry.message === "Failed to record fulfillment failure",
+    ),
+    false,
+  );
+  assert.equal(store.order?.status, "fulfillment_failed");
+});
