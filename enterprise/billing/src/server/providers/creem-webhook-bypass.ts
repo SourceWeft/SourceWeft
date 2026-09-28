@@ -1,4 +1,4 @@
-import { validateWebhookSignature } from "@creem_io/better-auth/server";
+import { verifyCreemSignature } from "./creem-client";
 import type { BillingRuntimeConfig, TeamSubscriptionSnapshot } from "../types";
 import type { BillingLogger } from "../host";
 import type { createCreemReversalSync } from "./creem-reversal-sync";
@@ -100,7 +100,7 @@ export function createCreemWebhookHandler(deps: {
     // unauthenticated caller must not be able to learn how eventType, mode,
     // or the object shape are validated.
     const signature = request.headers.get("creem-signature");
-    const valid = await validateWebhookSignature(
+    const valid = verifyCreemSignature(
       rawBody,
       signature,
       config.billing.creem.webhookSecret,

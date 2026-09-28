@@ -1,4 +1,4 @@
-import { createCreemClient, createPortal } from "@creem_io/better-auth/server";
+import { createCreemClient, createCreemPortalLink } from "./creem-client";
 import type { BillingRuntimeConfig } from "../types";
 import type {
   BillingProviderAdapter,
@@ -210,14 +210,14 @@ export class CreemBillingProvider implements BillingProviderAdapter {
       );
     }
 
-    const response = await createPortal(
-      this.options as any,
+    const portalUrl = await createCreemPortalLink(
+      this.options,
       externalCustomerId,
     );
 
     return {
       provider: "creem",
-      portalUrl: response.url,
+      portalUrl,
     };
   }
 
