@@ -39,6 +39,7 @@ import type {
   BillingRuntimeConfig,
   TeamSubscriptionSnapshot,
 } from "./types";
+import { updateOrderLocked } from "./order-locking";
 import { getTotalPagesBalance, grantAddOnPages } from "./page-ledger";
 import { applyRecordedReversalLocked } from "./payment-reversal";
 import {
@@ -792,8 +793,7 @@ export class BillingOrderService {
         metadata: order.metadata,
       });
     } catch (error) {
-      await this.store.updateOrder({
-        ...order,
+      await updateOrderLocked(this.store, order.id, () => ({
         status: "payment_failed",
         paymentStatus: "failed",
         errorCode:
@@ -801,29 +801,38 @@ export class BillingOrderService {
             ? error.code
             : "BILLING_CHECKOUT_CREATE_FAILED",
         errorMessage: "Unable to create payment checkout",
-        updatedAt: new Date().toISOString(),
-      });
+      }));
       throw error;
     }
-    return this.store.updateOrder({
-      ...order,
-      provider: providerResult.provider,
-      status: "checkout_created",
-      paymentStatus: "unpaid",
-      externalCheckoutId: providerResult.externalCheckoutId,
-      externalCustomerId: providerResult.externalCustomerId,
-      externalProductId:
-        providerResult.externalProductId ?? order.externalProductId,
-      expiresAt: providerResult.expiresAt ?? order.expiresAt,
-      metadata: {
-        ...order.metadata,
-        ...providerResult.metadata,
-        checkoutUrl: providerResult.checkoutUrl,
-      },
-      errorCode: null,
-      errorMessage: null,
-      updatedAt: new Date().toISOString(),
-    });
+    const updated = await updateOrderLocked(
+      this.store,
+      order.id,
+      (current) => ({
+        provider: providerResult.provider,
+        status: "checkout_created",
+        paymentStatus: "unpaid",
+        externalCheckoutId: providerResult.externalCheckoutId,
+        externalCustomerId: providerResult.externalCustomerId,
+        externalProductId:
+          providerResult.externalProductId ?? current.externalProductId,
+        expiresAt: providerResult.expiresAt ?? current.expiresAt,
+        metadata: {
+          ...current.metadata,
+          ...providerResult.metadata,
+          checkoutUrl: providerResult.checkoutUrl,
+        },
+        errorCode: null,
+        errorMessage: null,
+      }),
+    );
+    if (!updated)
+      throw new BillingError(
+        "BILLING_ORDER_NOT_FOUND",
+        404,
+        "Billing order not found",
+        { orderId: order.id },
+      );
+    return updated;
   }
 
   private async createProviderCheckoutForSubscriptionOrder(input: {
@@ -1331,39 +1340,33 @@ export class BillingOrderService {
       error instanceof Error ? error.message : "Unknown fulfillment error";
     const code =
       error instanceof BillingError ? error.code : "BILLING_FULFILLMENT_FAILED";
-    // Read-modify-write under the order row lock: a payment reversal can
-    // commit on this row between the rolled-back fulfillment and this write,
-    // and an unlocked read would write its reversal columns back stale.
-    const order = await this.store.runInTransaction(async (client) => {
-      const current = await this.store.getOrderByIdForUpdate(orderId, client);
-      if (!current || current.status === "fulfilled") {
-        return null;
-      }
-
-      return this.store.updateOrder(
-        {
-          ...current,
-          status: "fulfillment_failed",
-          // The transaction that would have persisted this rolled back, so
-          // the re-read `current` above can lack it. `input` reflects what
-          // the caller was actually confirming and survives the rollback in
-          // memory — use it to keep the provider payment id available for
-          // the retry job.
-          ...(input?.externalPaymentId
-            ? {
-                externalPaymentId: input.externalPaymentId,
-                paymentStatus: "paid",
-              }
-            : {}),
-          errorCode: code,
-          errorMessage: message,
-          nextRetryAt: buildRetryAt(),
-          updatedAt: new Date().toISOString(),
-        },
-        client,
-      );
+    // Read-modify-write through the shared locked helper: a payment reversal
+    // can commit on this row between the rolled-back fulfillment and this
+    // write, and an unlocked read would write its reversal columns back
+    // stale. Already-fulfilled is a no-op, surfaced by `apply` returning
+    // `null` — the helper then hands back the unchanged (still "fulfilled")
+    // row, which the check below treats the same as a missing order.
+    const order = await updateOrderLocked(this.store, orderId, (current) => {
+      if (current.status === "fulfilled") return null;
+      return {
+        status: "fulfillment_failed",
+        // The transaction that would have persisted this rolled back, so
+        // the re-read `current` above can lack it. `input` reflects what
+        // the caller was actually confirming and survives the rollback in
+        // memory — use it to keep the provider payment id available for
+        // the retry job.
+        ...(input?.externalPaymentId
+          ? {
+              externalPaymentId: input.externalPaymentId,
+              paymentStatus: "paid",
+            }
+          : {}),
+        errorCode: code,
+        errorMessage: message,
+        nextRetryAt: buildRetryAt(),
+      };
     });
-    if (!order) {
+    if (!order || order.status === "fulfilled") {
       return;
     }
 

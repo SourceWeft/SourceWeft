@@ -156,3 +156,74 @@ test("canceling delivered before activation establishes the paid order and keeps
   assert.equal(f.store.subscription?.cancelAtPeriodEnd, true);
   assert.equal(f.store.account!.monthlyCreditsBalance, balance);
 });
+
+test("a subscription event's metadata write keeps reversal fields committed under the order's row lock", async () => {
+  const f = createWaffoFixture();
+  await f.billing.ensureBillingAccount("team_1", "user_1");
+  await f.billing.createPricingCheckout(
+    { plan: "pro", billingInterval: "monthly", source: "dashboard" },
+    { userId: "user_1", email: "buyer@example.invalid" },
+    { personalTeamId: "team_1" },
+  );
+  const active = f.event({ eventType: "subscription.activated" });
+  Object.assign(active.data, {
+    amount: "12.00",
+    total: "12.00",
+    orderStatus: "active",
+    billingPeriod: "monthly",
+    currentPeriodStart: "2026-09-01T00:00:00Z",
+    currentPeriodEnd: "2026-10-01T00:00:00Z",
+    productMetadata: { sourceweftProductKey: "individual_pro:monthly" },
+  });
+  await deliver(f, active);
+  assert.equal(f.store.order?.status, "fulfilled");
+
+  // Simulate a refund that committed refundedAmount / reversalStatus and
+  // metadata.reversalPaidAmount onto the order row under its own row lock,
+  // while the unlocked `getOrderById` still serves the pre-reversal
+  // snapshot -- exactly what a real, concurrently committed reversal looks
+  // like to any reader that is not holding the row lock.
+  f.store.order = {
+    ...f.store.order!,
+    refundedAmount: 500,
+    reversedUnits: 5_000,
+    reversalStatus: "refunded",
+    metadata: { ...f.store.order!.metadata, reversalPaidAmount: 1200 },
+  };
+  f.store.orders.set(f.store.order.id, f.store.order);
+  const trueRead = f.store.getOrderById.bind(f.store);
+  f.store.getOrderById = async (id?: string) => {
+    const fresh = await trueRead(id);
+    if (!fresh) return fresh;
+    const staleMetadata = { ...fresh.metadata };
+    delete staleMetadata.reversalPaidAmount;
+    return {
+      ...fresh,
+      refundedAmount: 0,
+      reversedUnits: 0,
+      reversalStatus: "none" as const,
+      metadata: staleMetadata,
+    };
+  };
+  f.store.getOrderByIdForUpdate = async (id?: string) => trueRead(id);
+
+  const overdue = {
+    ...active,
+    id: "overdue",
+    eventId: "overdue",
+    eventType: "subscription.past_due",
+    timestamp: new Date().toISOString(),
+    data: { ...active.data, orderStatus: "past_due" },
+  };
+  await deliver(f, overdue);
+
+  assert.equal(f.store.webhook?.status, "processed");
+  assert.equal(f.store.order?.refundedAmount, 500);
+  assert.equal(f.store.order?.reversedUnits, 5_000);
+  assert.equal(f.store.order?.reversalStatus, "refunded");
+  assert.equal(f.store.order?.metadata.reversalPaidAmount, 1200);
+  assert.equal(
+    f.store.order?.metadata.waffoLastEventType,
+    "subscription.past_due",
+  );
+});

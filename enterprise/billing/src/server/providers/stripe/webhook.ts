@@ -9,6 +9,7 @@ import type { BillingStore } from "../../store-port";
 import type { BillingService } from "../../service";
 import type { BillingLogger } from "../../host";
 import type { PaymentReversalInput } from "../../payment-reversal";
+import { updateOrderLocked } from "../../order-locking";
 import { StripeBillingProvider, stripeId } from "./provider";
 import type { StripeInboxStore } from "./state";
 
@@ -397,34 +398,6 @@ export class StripeWebhookService {
     return session;
   }
   /**
-   * Read-modify-write of one order under its row lock. A payment reversal can
-   * commit on the row after this handler's unlocked read of it; writing that
-   * stale read back would erase the reversal columns. `change` sees the
-   * locked row and returns only the fields to set, or null to leave it as is.
-   */
-  private async updateOrderLocked(
-    orderId: string,
-    change: (current: BillingOrderState) => Partial<BillingOrderState> | null,
-  ): Promise<BillingOrderState | null> {
-    const { store } = this.input;
-    return store.runInTransaction(async (client) => {
-      const current = await store.getOrderByIdForUpdate(orderId, client);
-      if (!current)
-        throw new BillingError(
-          "BILLING_ORDER_NOT_FOUND",
-          404,
-          "Billing order not found",
-          { orderId },
-        );
-      const changes = change(current);
-      if (!changes) return null;
-      return store.updateOrder(
-        { ...current, ...changes, updatedAt: new Date().toISOString() },
-        client,
-      );
-    });
-  }
-  /**
    * Refunds and disputes on a resolved order, handed to the reversal core.
    * `amount_refunded` is the charge's cumulative refunded total in minor
    * units, so a redelivered event (same reversal id) or a later lower total
@@ -516,7 +489,7 @@ export class StripeWebhookService {
             422,
             "Cannot recover an unrelated checkout",
           );
-        order = (await this.updateOrderLocked(order.id, () => ({
+        order = (await updateOrderLocked(this.input.store, order.id, () => ({
           externalCheckoutId: recovered.id,
         })))!;
       }
@@ -547,7 +520,7 @@ export class StripeWebhookService {
         ) {
           const expired = session.status === "expired";
           const checkoutId = order.externalCheckoutId;
-          await this.updateOrderLocked(order.id, (current) =>
+          await updateOrderLocked(this.input.store, order.id, (current) =>
             current.paymentStatus === "paid" ||
             current.externalCheckoutId !== checkoutId
               ? null
