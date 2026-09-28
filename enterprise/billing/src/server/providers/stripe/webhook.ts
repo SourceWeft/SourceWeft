@@ -8,6 +8,7 @@ import type {
 import type { BillingStore } from "../../store-port";
 import type { BillingService } from "../../service";
 import type { BillingLogger } from "../../host";
+import type { PaymentReversalInput } from "../../payment-reversal";
 import { StripeBillingProvider, stripeId } from "./provider";
 import type { StripeInboxStore } from "./state";
 
@@ -275,11 +276,17 @@ export class StripeWebhookService {
                     422,
                     "Stripe order, account or environment does not match",
                   );
-                const applied = await this.process(event, order);
+                const result = await this.process(event, order);
+                const ignored =
+                  result === true
+                    ? null
+                    : result === false
+                      ? "STRIPE_AWAITING_PAYMENT"
+                      : result.ignore;
                 await this.state(
                   record.id,
-                  applied ? "processed" : "ignored",
-                  applied ? null : "STRIPE_AWAITING_PAYMENT",
+                  ignored ? "ignored" : "processed",
+                  ignored,
                   (await this.input.billing.getOrder(order.id)) ?? order,
                 );
               } catch (error) {
@@ -353,16 +360,108 @@ export class StripeWebhookService {
     }
     return session;
   }
+  /**
+   * Read-modify-write of one order under its row lock. A payment reversal can
+   * commit on the row after this handler's unlocked read of it; writing that
+   * stale read back would erase the reversal columns. `change` sees the
+   * locked row and returns only the fields to set, or null to leave it as is.
+   */
+  private async updateOrderLocked(
+    orderId: string,
+    change: (current: BillingOrderState) => Partial<BillingOrderState> | null,
+  ): Promise<BillingOrderState | null> {
+    const { store } = this.input;
+    return store.runInTransaction(async (client) => {
+      const current = await store.getOrderByIdForUpdate(orderId, client);
+      if (!current)
+        throw new BillingError(
+          "BILLING_ORDER_NOT_FOUND",
+          404,
+          "Billing order not found",
+          { orderId },
+        );
+      const changes = change(current);
+      if (!changes) return null;
+      return store.updateOrder(
+        { ...current, ...changes, updatedAt: new Date().toISOString() },
+        client,
+      );
+    });
+  }
+  /**
+   * Refunds and disputes on a resolved order, handed to the reversal core.
+   * `amount_refunded` is the charge's cumulative refunded total in minor
+   * units, so a redelivered event (same reversal id) or a later lower total
+   * (a refund that failed) never debits twice or re-grants. An opened dispute
+   * only raises an alert; a closed one reverses the grant only when lost.
+   */
+  private async reversal(
+    event: Stripe.Event,
+    order: BillingOrderState,
+  ): Promise<true | { ignore: string }> {
+    const { billing } = this.input;
+    let input: PaymentReversalInput;
+    if (event.type === "charge.refunded") {
+      const charge = event.data.object;
+      input = {
+        orderId: order.id,
+        provider: "stripe",
+        reversalId: `charge:${charge.id}:refunded:${charge.amount_refunded}`,
+        kind: "refund",
+        amount: { refundedTotal: charge.amount_refunded },
+        paidAmount: charge.amount,
+        currency: charge.currency,
+        metadata: {
+          chargeId: charge.id,
+          paymentIntentId: stripeId(charge.payment_intent),
+        },
+      };
+    } else if (
+      event.type === "charge.dispute.created" ||
+      event.type === "charge.dispute.closed"
+    ) {
+      const dispute = event.data.object;
+      const metadata = {
+        chargeId: stripeId(dispute.charge),
+        paymentIntentId: stripeId(dispute.payment_intent),
+        disputeStatus: dispute.status,
+      };
+      if (event.type === "charge.dispute.created") {
+        await billing.reportPaymentReversalNotice({
+          reason: "dispute_opened",
+          provider: "stripe",
+          providerReference: dispute.id,
+          orderId: order.id,
+          teamId: order.teamId,
+          amount: dispute.amount,
+          currency: dispute.currency,
+          metadata,
+        });
+        return true;
+      }
+      if (dispute.status !== "lost") return true;
+      input = {
+        orderId: order.id,
+        provider: "stripe",
+        reversalId: dispute.id,
+        kind: "chargeback",
+        amount: { refundedTotal: dispute.amount },
+        paidAmount: dispute.amount,
+        currency: dispute.currency,
+        metadata,
+      };
+    } else return { ignore: "STRIPE_EVENT_UNSUPPORTED" };
+    const result = await billing.applyPaymentReversal(input);
+    return result.outcome === "rejected"
+      ? { ignore: "STRIPE_REVERSAL_REJECTED" }
+      : true;
+  }
   private async process(
     event: Stripe.Event,
     order: BillingOrderState,
-  ): Promise<boolean> {
+  ): Promise<boolean | { ignore: string }> {
     const client = this.input.provider.client;
-    if (event.type.startsWith("charge.")) {
-      // Reference resolution only for now; reversal processing lands in a
-      // follow-up task, which will replace this early return.
-      return false;
-    }
+    if (event.type.startsWith("charge.")) return this.reversal(event, order);
     if (event.type.startsWith("checkout.session.")) {
       if (!order.externalCheckoutId) {
         const recovered = await client.checkout.sessions.retrieve(
@@ -380,11 +479,9 @@ export class StripeWebhookService {
             422,
             "Cannot recover an unrelated checkout",
           );
-        order = await this.input.store.updateOrder({
-          ...order,
+        order = (await this.updateOrderLocked(order.id, () => ({
           externalCheckoutId: recovered.id,
-          updatedAt: new Date().toISOString(),
-        });
+        })))!;
       }
       if (objectId(event) !== order.externalCheckoutId) {
         const previous = await client.checkout.sessions.retrieve(
@@ -408,16 +505,20 @@ export class StripeWebhookService {
       const session = await this.session(objectId(event), order);
       if (session.payment_status !== "paid") {
         if (
-          order.paymentStatus !== "paid" &&
-          (session.status === "expired" ||
-            event.type === "checkout.session.async_payment_failed")
+          session.status === "expired" ||
+          event.type === "checkout.session.async_payment_failed"
         ) {
-          await this.input.store.updateOrder({
-            ...order,
-            status: session.status === "expired" ? "expired" : "payment_failed",
-            paymentStatus: session.status === "expired" ? "expired" : "failed",
-            updatedAt: new Date().toISOString(),
-          });
+          const expired = session.status === "expired";
+          const checkoutId = order.externalCheckoutId;
+          await this.updateOrderLocked(order.id, (current) =>
+            current.paymentStatus === "paid" ||
+            current.externalCheckoutId !== checkoutId
+              ? null
+              : {
+                  status: expired ? "expired" : "payment_failed",
+                  paymentStatus: expired ? "expired" : "failed",
+                },
+          );
         }
         return false;
       }

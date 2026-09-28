@@ -93,6 +93,23 @@ current refund (not just this event's own `refund_amount`), and that
 pre-tax `amount` (Creem's own example: `amount` 1000, `amount_paid` 1210,
 `tax_amount` 210).
 
+To handle Stripe refunds and disputes, enable `charge.refunded`,
+`charge.dispute.created` and `charge.dispute.closed` on the Stripe webhook
+endpoint, in the Stripe Dashboard or with `webhookEndpoints.update`, for both
+the test-mode and the live endpoint. Enable the events only after every API,
+worker and scheduler instance runs a version that handles them, for the same
+reason as Waffo above: an older instance marks these receipts ignored, and
+receipts of these types stored earlier (for example by an endpoint that
+already sends every event) are not replayed, so review refunds and disputes
+from before the rollout by hand. A refund reverses the refunded share of a
+top-up from the charge's cumulative `amount_refunded` against its `amount`; a
+later lower total (a refund that failed) does not re-grant. An opened dispute
+only raises an alert; a closed dispute reverses the whole top-up only when it
+is lost. A refund or lost dispute on a subscription payment changes no balance
+and raises an alert instead. Before enabling on the live endpoint, verify in
+Stripe test mode with a full refund, two successive partial refunds on one
+payment and a lost dispute.
+
 Restart API, worker and scheduler together after changing module settings. Their
 startup capabilities must agree. The same image supports both states. Web and PC
 read `/v1/deployment/capabilities` at runtime; obsolete
