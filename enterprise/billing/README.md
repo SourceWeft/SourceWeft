@@ -68,10 +68,11 @@ product catalog. Use `CREEM_TEST_MODE=true`, `STRIPE_TEST_MODE=true`, or
 `WAFFO_ENVIRONMENT=test`, respectively. Missing required configuration fails
 startup; the application never switches provider or falls back to unmetered mode.
 
-After upgrading the `@waffo/pancake-ts` SDK, rerun `setup-waffo` with
-`--webhook-url` so the store's webhook is (re)registered with the full,
-current `WAFFO_WEBHOOK_EVENTS` list, including `refund.succeeded` and
-`refund.failed`.
+After this change, add `refund.succeeded` and `refund.failed` to the event
+list of the store's existing Waffo webhooks — both the test-mode and the live
+endpoint — in the Waffo dashboard or with `client.webhooks.update`.
+`setup-waffo --webhook-url` creates a new test-mode webhook and does not
+update an existing one.
 
 Restart API, worker and scheduler together after changing module settings. Their
 startup capabilities must agree. The same image supports both states. Web and PC
