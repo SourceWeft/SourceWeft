@@ -16,6 +16,12 @@ export type BillingCopyFormat = {
   number(value: number): string;
   /** `iso` is a `Date`-parseable timestamp, such as `entry.createdAt`. */
   date(iso: string): string;
+  /**
+   * Like `date`, but includes the time of day — for timestamps where the
+   * hour/minute matters (e.g. an activity-row's `createdAt`), not just the
+   * day (e.g. a billing-cycle boundary).
+   */
+  dateTime(iso: string): string;
   /** `cents` matches the ledger/order convention of USD minor units. */
   currency(cents: number, currency?: string): string;
 };
@@ -51,6 +57,14 @@ export function useBillingCopy(): {
             year: "numeric",
             month: "short",
             day: "2-digit",
+          }),
+        dateTime: (iso) =>
+          formatDate(new Date(iso), intlLocale, {
+            year: "numeric",
+            month: "short",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
           }),
         currency: (cents, currency = "USD") =>
           formatCurrency(cents / 100, intlLocale, currency),

@@ -13,7 +13,6 @@ import {
   formatLedgerDetail,
   formatLedgerUnit,
   formatPlanName,
-  formatUsageDate,
   isLedgerEntryInCycle,
   isPersonalBillingOrg,
   resolveBillingTeamId,
@@ -188,8 +187,8 @@ export function UsagePanel() {
     .slice(0, activityVisibleCount)
     .map<UsageActivityRow>((entry) => ({
       detail: formatLedgerDetail(entry, copy),
-      date: formatUsageDate(entry.createdAt),
-      change: formatLedgerActivityChange(entry, copy),
+      date: format.dateTime(entry.createdAt),
+      change: formatLedgerActivityChange(entry, copy, format),
       key: entry.id,
       unitType: entry.unitType,
     }));

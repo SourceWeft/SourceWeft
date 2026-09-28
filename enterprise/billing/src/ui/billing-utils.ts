@@ -1,5 +1,6 @@
 import { isPersonalOrganization } from "@sourceweft/contracts/organization-metadata";
 import { formatCopy, type BillingCopy } from "../messages";
+import type { BillingCopyFormat } from "./use-billing-copy";
 import type {
   BillingInterval,
   BillingLedgerEntry,
@@ -102,16 +103,6 @@ export function formatFeatureName(feature: string) {
   return label || "Usage";
 }
 
-export function formatUsageDate(value: string) {
-  return new Intl.DateTimeFormat(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(value));
-}
-
 export function formatBillingDate(value: string | null | undefined) {
   if (!value) {
     return "--";
@@ -161,9 +152,12 @@ export function getSeatPreviewDirection(preview: SeatPreview | null) {
     : ("decrease" as const);
 }
 
-export function formatLedgerChange(entry: BillingLedgerEntry) {
+export function formatLedgerChange(
+  entry: BillingLedgerEntry,
+  format: BillingCopyFormat,
+) {
   const prefix = entry.delta > 0 ? "+" : "";
-  return `${prefix}${formatNumber(entry.delta)}`;
+  return `${prefix}${format.number(entry.delta)}`;
 }
 
 export function formatLedgerUnit(
@@ -179,7 +173,9 @@ export function formatLedgerUnit(
  * catalogue — never from `entry.activitySummary`, which the server writes
  * as plain English (`formatSignedLedgerDelta`, `formatQuotaRenewalSummary`,
  * plan-name arrows, "150 -> 200 seats", ...) and would leave the column
- * unlocalised for nearly every visible row.
+ * unlocalised for nearly every visible row. Every number goes through
+ * `format` (from `useBillingCopy()`), never an ambient/`undefined`-locale
+ * `Intl.NumberFormat` — spec O2.
  *
  * Seat rows use a dedicated `usage.ledgerSeatChangeSummary` template
  * (`"{previous} → {next} {unit}"`) instead of the delta/balance phrasing,
@@ -189,19 +185,20 @@ export function formatLedgerUnit(
 export function formatLedgerActivityChange(
   entry: BillingLedgerEntry,
   copy: BillingCopy,
+  format: BillingCopyFormat,
 ) {
   if (entry.unitType === "seat") {
     return formatCopy(copy.usage.ledgerSeatChangeSummary, {
-      previous: formatNumber(entry.balanceAfter - entry.delta),
-      next: formatNumber(entry.balanceAfter),
+      previous: format.number(entry.balanceAfter - entry.delta),
+      next: format.number(entry.balanceAfter),
       unit: formatLedgerUnit(entry.unitType, copy),
     });
   }
 
   return formatCopy(copy.usage.ledgerChangeSummary, {
-    delta: formatLedgerChange(entry),
+    delta: formatLedgerChange(entry, format),
     unit: formatLedgerUnit(entry.unitType, copy),
-    balance: formatNumber(Math.max(entry.balanceAfter, 0)),
+    balance: format.number(Math.max(entry.balanceAfter, 0)),
   });
 }
 

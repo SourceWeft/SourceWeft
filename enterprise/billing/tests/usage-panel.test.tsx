@@ -2,6 +2,10 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, test, vi } from "vitest";
+import {
+  formatDate as i18nFormatDate,
+  formatNumber as i18nFormatNumber,
+} from "@sourceweft/i18n";
 
 import { getBillingCopy } from "../src/messages";
 import { BillingUiProvider, type BillingUiHost } from "../src/ui/context";
@@ -14,7 +18,36 @@ import {
   getUsageActivityKind,
 } from "../src/ui/billing-utils";
 import type { BillingCopy } from "../src/messages";
+import type { BillingCopyFormat } from "../src/ui/use-billing-copy";
 import type { BillingLedgerEntry } from "../src/ui/types";
+
+// A `BillingCopyFormat` built the same way `useBillingCopy()` builds one
+// (same `@sourceweft/i18n` calls, same options), pinned to zh-CN. Used both
+// to call functions that now require a `format` argument, and independently
+// of `use-billing-copy.ts` to compute the expected rendered text — so a
+// regression back to an ambient/`undefined`-locale `Intl.*` call would fail
+// these assertions instead of passing by coincidence of the test runner's
+// own default locale (spec O2).
+const zhCNFormat: BillingCopyFormat = {
+  number: (value) =>
+    i18nFormatNumber(value, "zh-CN", { maximumFractionDigits: 0 }),
+  date: (iso) =>
+    i18nFormatDate(new Date(iso), "zh-CN", {
+      year: "numeric",
+      month: "short",
+      day: "2-digit",
+    }),
+  dateTime: (iso) =>
+    i18nFormatDate(new Date(iso), "zh-CN", {
+      year: "numeric",
+      month: "short",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
+  currency: (cents, currency = "USD") =>
+    i18nFormatNumber(cents / 100, "zh-CN", { style: "currency", currency }),
+};
 
 vi.mock("../src/ui/billing-plan-action-controls", () => ({
   BillingPlanActionControls: () => null,
@@ -316,6 +349,7 @@ test("formatLedgerActivityChange composes from structured fields and ignores any
         activitySummary: "-5 credits",
       }),
       copy,
+      zhCNFormat,
     ),
   ).toBe("-5 积分 · 剩余 95");
   // Plan-change grants store an English "Free -> Pro" plan-name arrow as
@@ -331,6 +365,7 @@ test("formatLedgerActivityChange composes from structured fields and ignores any
         activitySummary: "Free -> Pro",
       }),
       copy,
+      zhCNFormat,
     ),
   ).toBe("+200 积分 · 剩余 700");
   // Seat rows use the dedicated previous/next composition instead of the
@@ -344,8 +379,21 @@ test("formatLedgerActivityChange composes from structured fields and ignores any
         activitySummary: "150 -> 200 seats",
       }),
       copy,
+      zhCNFormat,
     ),
   ).toBe("150 → 200 席位");
+  // A grouped number (thousands separator) also goes through the real
+  // `@sourceweft/i18n` formatter — not an ambient/`undefined`-locale
+  // `Intl.NumberFormat`.
+  expect(
+    formatLedgerActivityChange(
+      makeEntry({ delta: 12345, balanceAfter: 12345, unitType: "credit" }),
+      copy,
+      zhCNFormat,
+    ),
+  ).toBe(
+    `+${zhCNFormat.number(12345)} 积分 · 剩余 ${zhCNFormat.number(12345)}`,
+  );
 });
 
 // ---- Rendered panel ---------------------------------------------------------
@@ -357,8 +405,11 @@ test("known activity rows, including rows written before localisation, render in
       eventType: "grant",
       feature: "cycle_grant",
       unitType: "credit",
-      delta: 5000,
-      balanceAfter: 5000,
+      // A grouped number (thousands separator), to prove the balance
+      // renders through the billing locale's formatter, not an
+      // ambient/`undefined`-locale one.
+      delta: 12345,
+      balanceAfter: 12345,
       activityTitle: "Monthly quota renewed",
       createdAt: "2026-09-05T00:00:00.000Z",
     }),
@@ -436,6 +487,16 @@ test("known activity rows, including rows written before localisation, render in
     expect(container.textContent).not.toContain("150 -> 200 seats");
     expect(container.textContent).not.toContain("-5 credits");
     expect(container.textContent).not.toContain("Free -> Pro");
+
+    // Numbers and dates go through `@sourceweft/i18n` with the billing
+    // locale (spec O2) — computed independently of `use-billing-copy.ts`
+    // here, so a regression to an ambient/`undefined`-locale `Intl.*` call
+    // fails these instead of passing by coincidence of the test runner's
+    // own default locale.
+    expect(container.textContent).toContain(
+      zhCNFormat.dateTime("2026-09-05T00:00:00.000Z"),
+    );
+    expect(container.textContent).toContain(zhCNFormat.number(12345));
   } finally {
     await unmount();
   }
