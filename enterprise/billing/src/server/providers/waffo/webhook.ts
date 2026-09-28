@@ -28,6 +28,7 @@ export const WAFFO_WEBHOOK_EVENTS = [
   "refund.failed",
 ] as const;
 const supported = new Set<string>(WAFFO_WEBHOOK_EVENTS);
+type WaffoPriceSnapshot = WebhookEvent["data"]["listPrice"];
 const domainStatuses: Record<string, readonly string[]> = {
   "subscription.activated": ["active"],
   "subscription.renewed": ["active", "canceling"],
@@ -337,7 +338,7 @@ export class WaffoWebhookService {
           422,
           "One-time payment is not completed",
         );
-      this.validateAmount(event, order);
+      this.validateAmount(event.data.listPrice, order);
       await billing.fulfillOrder({
         orderId: order.id,
         externalPaymentId: event.data.paymentId,
@@ -363,7 +364,7 @@ export class WaffoWebhookService {
             422,
             "Subscription charge is not successful",
           );
-        this.validateAmount(event, order);
+        this.validateAmount(event.data.listPrice, order);
       } else {
         const confirmsCoverage = [
           "subscription.activated",
@@ -414,7 +415,7 @@ export class WaffoWebhookService {
         // A canceling subscription remains paid and active through its period.
         // It can arrive before activation, so establish the order before syncing it.
         if (status === "active" || status === "canceling") {
-          this.validateAmount(event, order);
+          this.validateAmount(event.data.planPrice, order);
 
           await billing.fulfillOrder({
             orderId: order.id,
@@ -670,9 +671,26 @@ export class WaffoWebhookService {
         "A different Waffo order is already bound to this checkout",
       );
   }
-  private validateAmount(event: WebhookEvent, order: BillingOrderState) {
-    const total = displayToCents(event.data.total ?? event.data.amount);
-    const tax = displayToCents(event.data.taxAmount);
+  /**
+   * Waffo names amounts by event family: a payment event
+   * (`order.completed`, `subscription.payment_succeeded`) carries the order's
+   * `listPrice`, and a subscription status event carries the phase's
+   * `planPrice`; each caller passes the snapshot its event family carries. The generic `total`/`amount`/`taxAmount` are deprecated, and
+   * a payment event's `amount` reports what the channel actually charged,
+   * which can differ from the list price (a prorated credit or a zero-amount
+   * card check). So only the event's own price snapshot is compared with the
+   * server-calculated checkout amount; a missing snapshot is an error, never
+   * a fallback to the deprecated fields.
+   */
+  private validateAmount(price: WaffoPriceSnapshot, order: BillingOrderState) {
+    if (!price)
+      throw new BillingError(
+        "WAFFO_AMOUNT_UNAVAILABLE",
+        422,
+        "Waffo event carries no price snapshot to verify the checkout amount",
+      );
+    const total = displayToCents(price.total);
+    const tax = displayToCents(price.taxAmount);
     const expected = order.amountTotal;
     if (
       !expected ||

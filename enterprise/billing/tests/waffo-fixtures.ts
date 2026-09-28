@@ -187,6 +187,7 @@ export function createWaffoFixture() {
       currency: "USD",
       amount: "12.50",
       total: "12.50",
+      listPrice: { total: "12.50", subtotal: "12.50", taxAmount: "0.00" },
       taxAmount: "0.00",
       productName: "SourceWeft Credits",
       productMetadata: { sourceweftProductKey: "credit_topup" },
