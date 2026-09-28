@@ -1,4 +1,4 @@
-import { stableSerialize } from "../../service-helpers";
+import { serialDrain, stableSerialize } from "../../service-helpers";
 import { createHash } from "node:crypto";
 import { verifyWebhook, type WebhookEvent } from "@waffo/pancake-ts";
 import type {
@@ -71,7 +71,7 @@ type Verify = (
   environment: "test" | "prod",
 ) => WebhookEvent;
 export class WaffoWebhookService {
-  private draining = false;
+  private readonly drainSerially = serialDrain(() => this.drainPending());
   constructor(
     private readonly input: {
       config: BillingRuntimeConfig;
@@ -205,60 +205,58 @@ export class WaffoWebhookService {
       });
     });
   }
-  async drain() {
-    if (this.draining) return;
-    this.draining = true;
-    try {
-      const settings = await this.settings();
-      for (const event of await this.input.state.pendingEvents(settings)) {
-        await this.input.state.withLock(
-          `order:${settings.merchantId}:${event.mode}:${event.data.orderMerchantExternalId ?? event.data.orderId}`,
-          async () => {
-            const record =
-              await this.input.store.getWebhookEventByProviderEventId(
-                "waffo",
-                waffoEventKey(event),
-              );
-            if (
-              !record ||
-              record.status === "processed" ||
-              record.status === "ignored"
-            )
-              return;
-            try {
-              await this.process(event, settings, record.id);
-            } catch (error) {
-              await this.input.store.updateWebhookEventState(record.id, {
-                status: "failed",
-                teamId: record.teamId,
-                externalSubscriptionId: record.externalSubscriptionId,
-                processedAt: null,
-                errorCode:
+  /** Processes pending receipts; see {@link serialDrain}. */
+  drain() {
+    return this.drainSerially();
+  }
+  private async drainPending() {
+    const settings = await this.settings();
+    for (const event of await this.input.state.pendingEvents(settings)) {
+      await this.input.state.withLock(
+        `order:${settings.merchantId}:${event.mode}:${event.data.orderMerchantExternalId ?? event.data.orderId}`,
+        async () => {
+          const record =
+            await this.input.store.getWebhookEventByProviderEventId(
+              "waffo",
+              waffoEventKey(event),
+            );
+          if (
+            !record ||
+            record.status === "processed" ||
+            record.status === "ignored"
+          )
+            return;
+          try {
+            await this.process(event, settings, record.id);
+          } catch (error) {
+            await this.input.store.updateWebhookEventState(record.id, {
+              status: "failed",
+              teamId: record.teamId,
+              externalSubscriptionId: record.externalSubscriptionId,
+              processedAt: null,
+              errorCode:
+                error instanceof BillingError
+                  ? error.code
+                  : "WAFFO_PROCESSING_FAILED",
+              errorMessage:
+                error instanceof BillingError
+                  ? error.message
+                  : "Waffo webhook processing failed",
+            });
+            this.input.logger.error(
+              "Waffo webhook processing failed; durable retry retained",
+              {
+                receiptId: record.id,
+                eventType: event.eventType,
+                code:
                   error instanceof BillingError
                     ? error.code
                     : "WAFFO_PROCESSING_FAILED",
-                errorMessage:
-                  error instanceof BillingError
-                    ? error.message
-                    : "Waffo webhook processing failed",
-              });
-              this.input.logger.error(
-                "Waffo webhook processing failed; durable retry retained",
-                {
-                  receiptId: record.id,
-                  eventType: event.eventType,
-                  code:
-                    error instanceof BillingError
-                      ? error.code
-                      : "WAFFO_PROCESSING_FAILED",
-                },
-              );
-            }
-          },
-        );
-      }
-    } finally {
-      this.draining = false;
+              },
+            );
+          }
+        },
+      );
     }
   }
   private async ignore(receiptId: string, reason: string) {

@@ -196,6 +196,44 @@ test("unpaid Checkout grants nothing; delayed payment and duplicate events grant
   );
 });
 
+test("an event received while a drain runs is processed by that drain in one more pass", async () => {
+  const f = stripeFixture();
+  await topup(f, "first");
+  const first = f.store.order!;
+  await topup(f, "second");
+  const second = f.store.order!;
+  const inbox = f.makeInbox();
+  const receive = async (order: typeof first) => {
+    const signed = f.sign(
+      f.event("checkout.session.completed", f.pay(order.externalCheckoutId!)),
+    );
+    await inbox.receive(signed.raw, signed.signature);
+  };
+  // Hold the first pass inside its first event until the second is received.
+  const withLock = f.state.withLock.bind(f.state);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  let entered!: () => void;
+  const blocked = new Promise<void>((resolve) => (entered = resolve));
+  vi.spyOn(f.state, "withLock").mockImplementationOnce(async (key, run) => {
+    entered();
+    await gate;
+    return withLock(key, run);
+  });
+  const passes = vi.spyOn(f.state, "pendingEvents");
+  await receive(first);
+  const running = inbox.drain();
+  await blocked;
+  await receive(second);
+  // Every request during the pass returns at once and adds one pass in total.
+  await Promise.all([inbox.drain(), inbox.drain(), inbox.drain()]);
+  release();
+  await running;
+  assert.equal(f.store.orders.get(first.id)!.status, "fulfilled");
+  assert.equal(f.store.orders.get(second.id)!.status, "fulfilled");
+  assert.equal(passes.mock.calls.length, 2);
+});
+
 test("Stripe webhook rejects tampered, stale, live and Connect deliveries", async () => {
   const f = stripeFixture();
   await topup(f);
