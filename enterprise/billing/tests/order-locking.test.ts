@@ -96,13 +96,17 @@ test("a null result writes nothing", async () => {
   assert.equal(store.order?.updatedAt, "2026-01-01T00:00:00.000Z");
 });
 
-test("a missing order returns null", async () => {
-  const store = new MemoryBillingStore();
+test("a missing order returns null without calling apply or writing", async () => {
+  const store = new CountingUpdateStore();
   store.order = null;
+  let applyCalls = 0;
 
-  const result = await updateOrderLocked(store, "missing_order", () => ({
-    status: "payment_failed",
-  }));
+  const result = await updateOrderLocked(store, "missing_order", () => {
+    applyCalls += 1;
+    return { status: "payment_failed" };
+  });
 
   assert.equal(result, null);
+  assert.equal(applyCalls, 0);
+  assert.equal(store.updateOrderCalls, 0);
 });

@@ -1389,10 +1389,10 @@ export class BillingOrderService {
       return {
         status: "fulfillment_failed",
         // The transaction that would have persisted this rolled back, so
-        // the re-read `current` above can lack it. `input` reflects what
-        // the caller was actually confirming and survives the rollback in
-        // memory — use it to keep the provider payment id available for
-        // the retry job.
+        // this callback's `current` (freshly locked, but read after that
+        // rollback) can lack it. `input` reflects what the caller was
+        // actually confirming and survives the rollback in memory — use it
+        // to keep the provider payment id available for the retry job.
         ...(input?.externalPaymentId
           ? {
               externalPaymentId: input.externalPaymentId,
@@ -1408,7 +1408,7 @@ export class BillingOrderService {
       return;
     }
 
-    await this.alerts?.trigger({
+    await triggerSafely(this.alerts, this.host?.logger, {
       alertKey: `billing:order-fulfillment:${orderId}`,
       level: "error",
       source: "billing.orders",

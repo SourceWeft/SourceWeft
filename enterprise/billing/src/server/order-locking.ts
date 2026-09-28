@@ -6,9 +6,10 @@ import type { BillingOrderState } from "./types";
  * commit `refundedAmount` / `reversedUnits` / `reversalStatus` (and
  * `metadata.reversalPaidAmount`) on the row between an unlocked read and a
  * later whole-row write; writing that stale read back would erase the
- * reversal columns. This is the one place every other order write should
- * route through: it always re-reads the row inside `store.getOrderByIdForUpdate`
- * and merges in only the fields `apply` changes.
+ * reversal columns. Any order write that does not already hold the row lock
+ * in its own transaction should route through here: it always re-reads the
+ * row inside `store.getOrderByIdForUpdate` and merges in only the fields
+ * `apply` changes.
  *
  * `apply` sees the freshly locked row, so any guard that compares against
  * current state (e.g. "only transition if still unpaid") belongs inside it,

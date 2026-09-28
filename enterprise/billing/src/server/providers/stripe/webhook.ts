@@ -489,9 +489,21 @@ export class StripeWebhookService {
             422,
             "Cannot recover an unrelated checkout",
           );
-        order = (await updateOrderLocked(this.input.store, order.id, () => ({
-          externalCheckoutId: recovered.id,
-        })))!;
+        const recoveredOrder = await updateOrderLocked(
+          this.input.store,
+          order.id,
+          () => ({
+            externalCheckoutId: recovered.id,
+          }),
+        );
+        if (!recoveredOrder)
+          throw new BillingError(
+            "BILLING_ORDER_NOT_FOUND",
+            404,
+            "Billing order not found",
+            { orderId: order.id },
+          );
+        order = recoveredOrder;
       }
       if (objectId(event) !== order.externalCheckoutId) {
         const previous = await client.checkout.sessions.retrieve(
@@ -520,15 +532,25 @@ export class StripeWebhookService {
         ) {
           const expired = session.status === "expired";
           const checkoutId = order.externalCheckoutId;
-          await updateOrderLocked(this.input.store, order.id, (current) =>
-            current.paymentStatus === "paid" ||
-            current.externalCheckoutId !== checkoutId
-              ? null
-              : {
-                  status: expired ? "expired" : "payment_failed",
-                  paymentStatus: expired ? "expired" : "failed",
-                },
+          const updated = await updateOrderLocked(
+            this.input.store,
+            order.id,
+            (current) =>
+              current.paymentStatus === "paid" ||
+              current.externalCheckoutId !== checkoutId
+                ? null
+                : {
+                    status: expired ? "expired" : "payment_failed",
+                    paymentStatus: expired ? "expired" : "failed",
+                  },
           );
+          if (!updated)
+            throw new BillingError(
+              "BILLING_ORDER_NOT_FOUND",
+              404,
+              "Billing order not found",
+              { orderId: order.id },
+            );
         }
         return false;
       }

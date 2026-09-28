@@ -768,3 +768,73 @@ test("a failing failure-bookkeeping step does not mask the fulfilment error", as
   assert.equal(logged[0]?.fields?.code, "BILLING_ORDER_INVALID_GRANT");
   assert.equal(logged[0]?.fields?.bookkeepingError, "db down");
 });
+
+test("a throwing alert sink during markFulfillmentFailed still marks the order failed and rethrows the original error", async () => {
+  const store = new MemoryBillingStore();
+  const logged: Array<{ message: string; fields?: Record<string, unknown> }> =
+    [];
+  const throwingAlerts = {
+    async trigger() {
+      throw new Error("alert sink down");
+    },
+    async resolve() {},
+  };
+  const billingService = new BillingService(
+    store,
+    {
+      ...runtimeConfig,
+      saasEnabled: true,
+      provider: "creem",
+    },
+    {
+      ...noopProvider,
+      async createCheckout() {
+        return {
+          provider: "creem",
+          checkoutUrl: "https://checkout.example.test/topup",
+          externalCheckoutId: null,
+          externalCustomerId: null,
+        };
+      },
+    },
+    throwingAlerts,
+    {
+      logger: {
+        info() {},
+        warn() {},
+        error(message, fields) {
+          logged.push({ message, fields });
+        },
+      },
+      organizationMetadata: () => ({}),
+      async createTeamOrganization() {
+        throw new Error("not implemented");
+      },
+      async ensureMembershipWorkspace() {},
+    },
+  );
+
+  const checkout = await billingService.createTopupCheckout(
+    "team_1",
+    { unitType: "credit", quantity: 2 },
+    "user_1",
+    "user@example.com",
+  );
+  // Force the grant check inside fulfilment to fail with a stable code.
+  store.order = { ...store.order!, grantedCredits: 0 };
+
+  await assertRejectsWithBillingCode(
+    () => billingService.fulfillOrder({ orderId: checkout.orderId }),
+    "BILLING_ORDER_INVALID_GRANT",
+  );
+
+  // The bookkeeping WRITE succeeded (only the alert sink failed), so this is
+  // not a bookkeeping failure: no "Failed to record fulfillment failure" log.
+  assert.equal(
+    logged.some(
+      (entry) => entry.message === "Failed to record fulfillment failure",
+    ),
+    false,
+  );
+  assert.equal(store.order?.status, "fulfillment_failed");
+});

@@ -628,6 +628,11 @@ function nextReversalStatus(
   return current;
 }
 
+/** A currency is only usable as a non-empty, non-blank string. */
+function hasUsableCurrency(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
 function rejectionReason(
   order: TopupOrder,
   input: PaymentReversalInput,
@@ -637,9 +642,8 @@ function rejectionReason(
   }
 
   if (
-    !order.currency ||
-    typeof input.currency !== "string" ||
-    input.currency.trim().length === 0 ||
+    !hasUsableCurrency(order.currency) ||
+    !hasUsableCurrency(input.currency) ||
     order.currency.toUpperCase() !== input.currency.toUpperCase()
   ) {
     return "currency_mismatch";
@@ -708,7 +712,8 @@ function rejectedAlert(
     title: "Payment reversal rejected",
     message:
       reason === "currency_mismatch"
-        ? !request.currency || !order.currency
+        ? !hasUsableCurrency(request.currency) ||
+          !hasUsableCurrency(order.currency)
           ? `Reversal ${request.reversalId} on order ${order.id} was not applied: currency missing.`
           : `Reversal ${request.reversalId} on order ${order.id} was not applied: currency ${request.currency} does not match the order currency ${order.currency}.`
         : reason === "provider_mismatch"
