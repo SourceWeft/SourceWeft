@@ -10,6 +10,10 @@ import {
 import { getBillingCopy } from "../src/messages";
 import { BillingUiProvider, type BillingUiHost } from "../src/ui/context";
 import { BillingPanel } from "../src/ui/billing-panel";
+import {
+  formatBillingStatus,
+  formatFeatureName,
+} from "../src/ui/billing-utils";
 import type { BillingCopyFormat } from "../src/ui/use-billing-copy";
 import type {
   BillingOrg,
@@ -288,6 +292,10 @@ test("billing panel renders plan, seats and seat preview in zh-CN", async () => 
     expect(active.page).toContain(copy.billing.rows.lastUpdated);
     expect(active.page).toContain(copy.common.intervals.annual);
     expect(active.page).toContain(copy.billing.renewalAuto);
+    // The subscription's "active" status renders its zh-CN label
+    // (`common.subscriptionStatuses.active`), not the raw English enum
+    // value `formatFeatureName` would otherwise Title-Case it to.
+    expect(active.page).toContain(copy.common.subscriptionStatuses.active);
     // Another rendered date, this time from the "Last updated" row.
     expect(active.page).toContain(zhCNFormat.date("2026-09-10T12:34:00.000Z"));
 
@@ -358,7 +366,14 @@ test("billing panel renders plan, seats and seat preview in zh-CN", async () => 
     // this instead of passing by coincidence of the test runner's own
     // default locale.
     expect(active.page).toContain(zhCNFormat.currency(12345, "USD"));
-    // A percent value, built on `format.percent` (new for this task).
+    // A percent value, built on `format.percent` (new for this task). Unlike
+    // the date/currency assertions above, this one is NOT a regression guard
+    // against an ambient/`undefined`-locale call: a sub-100% percentage such
+    // as "34.6%" formats identically in en-US and zh-CN (no locale-specific
+    // grouping or symbol placement comes into play), so a `format.percent`
+    // that silently fell back to the ambient locale would still pass this
+    // assertion by coincidence. It does confirm `format.percent` exists and
+    // renders the right numeric value.
     expect(active.page).toContain(zhCNFormat.percent(0.3456));
 
     // No hard-coded English leftovers from the pre-localisation copy. (The
@@ -375,6 +390,9 @@ test("billing panel renders plan, seats and seat preview in zh-CN", async () => 
     expect(active.page).not.toContain("Theoretical refund");
     expect(active.page).not.toContain("Billing action");
     expect(active.page).not.toContain("Provider proration credit");
+    // The English status label `formatFeatureName("active")` would have
+    // produced before this fix round.
+    expect(active.page).not.toContain("Active");
   } finally {
     await active.unmount();
   }
@@ -429,6 +447,43 @@ test("billing panel renders plan, seats and seat preview in zh-CN", async () => 
   } finally {
     await free.unmount();
   }
+});
+
+// ---- formatBillingStatus lookup chain --------------------------------------
+
+test("formatBillingStatus maps every known subscription status to its zh-CN label, and falls back to formatFeatureName for an unmapped one", () => {
+  const copy = getBillingCopy("zh-CN");
+
+  const knownStatuses = [
+    "inactive",
+    "trialing",
+    "active",
+    "past_due",
+    "paused",
+    "unpaid",
+    "canceled",
+    "expired",
+  ] as const;
+  for (const status of knownStatuses) {
+    expect(formatBillingStatus(status, copy)).toBe(
+      copy.common.subscriptionStatuses[status],
+    );
+  }
+
+  // A status value the catalogue doesn't list (e.g. a future provider state
+  // this catalogue hasn't caught up with yet) keeps the old
+  // `formatFeatureName` beautifier instead of throwing or rendering nothing.
+  expect(formatBillingStatus("some_future_status", copy)).toBe(
+    formatFeatureName("some_future_status"),
+  );
+  expect(formatBillingStatus("some_future_status", copy)).toBe(
+    "Some Future Status",
+  );
+
+  // A missing value still falls back to `common.unknown`, unchanged from
+  // before this fix round.
+  expect(formatBillingStatus(null, copy)).toBe(copy.common.unknown);
+  expect(formatBillingStatus(undefined, copy)).toBe(copy.common.unknown);
 });
 
 /**

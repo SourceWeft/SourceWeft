@@ -76,6 +76,16 @@
       "monthly": "Monthly",
       "annual": "Annual"
     },
+    "subscriptionStatuses": {
+      "inactive": "Inactive",
+      "trialing": "Trialing",
+      "active": "Active",
+      "past_due": "Past due",
+      "paused": "Paused",
+      "unpaid": "Unpaid",
+      "canceled": "Canceled",
+      "expired": "Expired"
+    },
     "planNames": {
       "individual_free": "Free",
       "individual_pro": "Pro",

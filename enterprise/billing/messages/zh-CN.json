@@ -76,6 +76,16 @@
       "monthly": "按月",
       "annual": "按年"
     },
+    "subscriptionStatuses": {
+      "inactive": "未激活",
+      "trialing": "试用中",
+      "active": "生效中",
+      "past_due": "逾期未付",
+      "paused": "已暂停",
+      "unpaid": "未支付",
+      "canceled": "已取消",
+      "expired": "已过期"
+    },
     "planNames": {
       "individual_free": "免费版",
       "individual_pro": "专业版",

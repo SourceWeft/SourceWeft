@@ -123,7 +123,11 @@ export function formatBillingStatus(
     return copy.common.unknown;
   }
 
-  return formatFeatureName(value);
+  const subscriptionStatuses = copy.common.subscriptionStatuses as Record<
+    string,
+    string
+  >;
+  return subscriptionStatuses[value] ?? formatFeatureName(value);
 }
 
 export function formatBillingInterval(
