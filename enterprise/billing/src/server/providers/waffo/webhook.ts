@@ -23,6 +23,8 @@ export const WAFFO_WEBHOOK_EVENTS = [
   "subscription.uncanceled",
   "subscription.canceled",
   "subscription.past_due",
+  "refund.succeeded",
+  "refund.failed",
 ] as const;
 const supported = new Set<string>(WAFFO_WEBHOOK_EVENTS);
 const domainStatuses: Record<string, readonly string[]> = {
@@ -277,6 +279,11 @@ export class WaffoWebhookService {
         "Waffo local billing order was not found",
       );
     this.validateOrder(event, order, settings);
+    if (
+      event.eventType === "refund.succeeded" ||
+      event.eventType === "refund.failed"
+    )
+      return this.processRefund(event, order, receiptId);
     const expectedProductKey =
       order.kind === "subscription"
         ? `${order.planFamily}:${order.billingInterval}`
@@ -456,6 +463,65 @@ export class WaffoWebhookService {
       eventId: event.id,
       eventType: event.eventType,
       orderId: order.id,
+      mode: event.mode,
+    });
+  }
+  /**
+   * Translates a Waffo refund event into the reversal core and nothing more.
+   * Runs ahead of the product-key check and the stale guard: a refund on an
+   * order Waffo otherwise considers stale (e.g. a canceled subscription) must
+   * still be applied or noticed, not dropped.
+   */
+  private async processRefund(
+    event: WebhookEvent,
+    order: BillingOrderState,
+    receiptId: string,
+  ) {
+    const { billing, store } = this.input;
+    if (event.eventType === "refund.failed")
+      return this.ignore(receiptId, "WAFFO_REFUND_FAILED");
+    const { data } = event;
+    if (!data.refundedAmount || !data.originalChargedAmount) {
+      await billing.reportPaymentReversalNotice({
+        reason: "amount_unavailable",
+        provider: "waffo",
+        providerReference: data.refundTicketMerchantExternalId ?? event.eventId,
+        orderId: order.id,
+        teamId: order.teamId,
+        currency: data.currency,
+      });
+      return this.ignore(receiptId, "WAFFO_REFUND_AMOUNT_UNAVAILABLE");
+    }
+    const result = await billing.applyPaymentReversal({
+      orderId: order.id,
+      provider: "waffo",
+      reversalId: data.refundTicketMerchantExternalId ?? event.eventId,
+      kind: "refund",
+      amount: { refundAmount: displayToCents(data.refundedAmount) },
+      paidAmount: displayToCents(data.originalChargedAmount),
+      currency: data.currency,
+      metadata: {
+        waffoOrderId: data.orderId,
+        refundStatus: data.refundStatus,
+        refundReason: data.refundReason,
+      },
+    });
+    if (result.outcome === "rejected")
+      return this.ignore(receiptId, "WAFFO_REFUND_REJECTED");
+    await store.updateWebhookEventState(receiptId, {
+      status: "processed",
+      processedAt: new Date().toISOString(),
+      teamId: order.teamId,
+      externalSubscriptionId:
+        order.kind === "subscription" ? data.orderId : null,
+      errorCode: null,
+      errorMessage: null,
+    });
+    this.input.logger.info("Waffo refund webhook processed", {
+      eventId: event.id,
+      eventType: event.eventType,
+      orderId: order.id,
+      outcome: result.outcome,
       mode: event.mode,
     });
   }
