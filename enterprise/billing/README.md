@@ -93,22 +93,36 @@ current refund (not just this event's own `refund_amount`), and that
 pre-tax `amount` (Creem's own example: `amount` 1000, `amount_paid` 1210,
 `tax_amount` 210).
 
-To handle Stripe refunds and disputes, enable `charge.refunded`,
-`charge.dispute.created` and `charge.dispute.closed` on the Stripe webhook
-endpoint, in the Stripe Dashboard or with `webhookEndpoints.update`, for both
-the test-mode and the live endpoint. Enable the events only after every API,
-worker and scheduler instance runs a version that handles them, for the same
-reason as Waffo above: an older instance marks these receipts ignored, and
-receipts of these types stored earlier (for example by an endpoint that
-already sends every event) are not replayed, so review refunds and disputes
-from before the rollout by hand. A refund reverses the refunded share of a
-top-up from the charge's cumulative `amount_refunded` against its `amount`; a
-later lower total (a refund that failed) does not re-grant. An opened dispute
-only raises an alert; a closed dispute reverses the whole top-up only when it
-is lost. A refund or lost dispute on a subscription payment changes no balance
-and raises an alert instead. Before enabling on the live endpoint, verify in
-Stripe test mode with a full refund, two successive partial refunds on one
-payment and a lost dispute.
+To handle Stripe refunds and disputes, add `charge.refunded`,
+`charge.dispute.created` and `charge.dispute.closed` to the enabled events of
+the Stripe webhook endpoint — both the test-mode and the live endpoint — in
+the Stripe Dashboard or with `webhookEndpoints.update`. That call replaces
+`enabled_events` as a whole: pass the endpoint's existing events plus the
+three (every event in `STRIPE_WEBHOOK_EVENTS`). Passing only the three new
+ones stops checkout, invoice and subscription events, and with them
+fulfilment. Enable the events only after every API, worker and scheduler
+instance runs a version that handles them, for the same reason as Waffo above:
+an older instance marks these receipts ignored, and receipts of these types
+stored earlier (for example by an endpoint that already sends every event) are
+not replayed, so review refunds and disputes from before the rollout by hand.
+A restricted key (`rk_…`) needs read access to PaymentIntents, Invoices,
+Invoice Payments and Subscriptions to match a refund or dispute to its order;
+without it Stripe answers 403, which is treated as transient, so the receipt
+fails and is retried until that access is granted.
+
+A Stripe refund reverses the refunded share of a top-up from the charge's
+cumulative `amount_refunded` against its `amount`. A refund that fails after
+it was reversed is not detected at all — Stripe reports that with
+`refund.failed` and `charge.refund.updated`, which are not subscribed — so its
+reversal stays and must be re-granted by hand; a later `charge.refunded` with
+a lower total changes nothing. An opened dispute only raises an alert; a
+closed dispute reverses the whole top-up only when it is lost. A refund or
+lost dispute on a subscription payment changes no balance and raises an alert
+instead. A refund or dispute on a charge this deployment did not sell — on an
+account that also sells other products, or a test account shared by several
+deployments — raises an error-level unmatched alert. Before enabling on the
+live endpoint, verify in Stripe test mode with a full refund, two successive
+partial refunds on one payment and a lost dispute.
 
 Restart API, worker and scheduler together after changing module settings. Their
 startup capabilities must agree. The same image supports both states. Web and PC

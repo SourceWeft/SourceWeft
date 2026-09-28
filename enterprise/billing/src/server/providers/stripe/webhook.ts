@@ -232,12 +232,9 @@ export class StripeWebhookService {
           const reference = await this.reference(event);
           if (!reference) {
             if (event.type.startsWith("charge."))
-              await this.input.billing.reportPaymentReversalNotice({
-                reason: "unmatched",
-                provider: "stripe",
-                providerReference: objectId(event),
-              });
-            await this.state(record.id, "ignored", "STRIPE_UNRELATED_ORDER");
+              await this.unmatchedReversal(event, record.id, null);
+            else
+              await this.state(record.id, "ignored", "STRIPE_UNRELATED_ORDER");
             continue;
           }
           await this.input.state.withLock(
@@ -270,12 +267,15 @@ export class StripeWebhookService {
                     this.input.config.stripe.testMode ||
                   order.metadata.stripeAccountId !==
                     (await this.input.provider.getCheckoutScope())
-                )
+                ) {
+                  if (event.type.startsWith("charge."))
+                    return this.unmatchedReversal(event, record.id, reference);
                   throw new BillingError(
                     "STRIPE_ORDER_BINDING_MISMATCH",
                     422,
                     "Stripe order, account or environment does not match",
                   );
+                }
                 const result = await this.process(event, order);
                 const ignored =
                   result === true
@@ -301,6 +301,42 @@ export class StripeWebhookService {
     } finally {
       this.draining = false;
     }
+  }
+  /**
+   * A refund or dispute with no usable local order: no PaymentIntent, a
+   * charge this deployment did not sell, or an order id (`resolvedOrderId`)
+   * that this database does not hold or that is bound to another Stripe
+   * account or mode, e.g. a test account shared across environments. None of
+   * these heals on retry, so raise the unmatched alert with what a manual
+   * follow-up needs and ignore the receipt rather than retry it forever.
+   */
+  private async unmatchedReversal(
+    event: Stripe.Event,
+    receiptId: string,
+    resolvedOrderId: string | null,
+  ) {
+    const object = event.data.object as {
+      amount?: number;
+      amount_refunded?: number;
+      currency?: string;
+      payment_intent?: string | { id: string } | null;
+    };
+    await this.input.billing.reportPaymentReversalNotice({
+      reason: "unmatched",
+      provider: "stripe",
+      providerReference: objectId(event),
+      amount: object.amount ?? null,
+      currency: object.currency ?? null,
+      metadata: {
+        eventType: event.type,
+        paymentIntentId: stripeId(object.payment_intent),
+        ...(object.amount_refunded === undefined
+          ? {}
+          : { amountRefunded: object.amount_refunded }),
+        ...(resolvedOrderId ? { resolvedOrderId } : {}),
+      },
+    });
+    await this.state(receiptId, "ignored", "STRIPE_UNRELATED_ORDER");
   }
   private async failed(event: Stripe.Event, receiptId: string, error: unknown) {
     const latest = await this.input.store.getWebhookEventByProviderEventId(
@@ -392,8 +428,9 @@ export class StripeWebhookService {
    * Refunds and disputes on a resolved order, handed to the reversal core.
    * `amount_refunded` is the charge's cumulative refunded total in minor
    * units, so a redelivered event (same reversal id) or a later lower total
-   * (a refund that failed) never debits twice or re-grants. An opened dispute
-   * only raises an alert; a closed one reverses the grant only when lost.
+   * never debits twice or re-grants. A refund that fails after it was
+   * reversed is not detected (its events are not subscribed). An opened
+   * dispute only raises an alert; a closed one reverses only when lost.
    */
   private async reversal(
     event: Stripe.Event,

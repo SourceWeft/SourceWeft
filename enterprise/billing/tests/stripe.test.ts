@@ -836,3 +836,88 @@ test("expiring a checkout keeps a reversal recorded after the handler read the o
   assert.equal(f.store.order!.refundedAmount, 1250);
   assert.equal(f.store.order!.reversalStatus, "refunded");
 });
+
+test("a charge event with no payment intent is unmatched and ignored", async () => {
+  const f = stripeFixture();
+  await deliver(
+    f,
+    f.event("charge.dispute.created", {
+      ...dispute("", "dp_no_pi", "needs_response"),
+      payment_intent: null,
+    }),
+  );
+  assert.equal(f.store.webhook?.status, "ignored");
+  assert.equal(f.store.webhook?.errorCode, "STRIPE_UNRELATED_ORDER");
+  const alert = f.alerts.find(
+    (entry) =>
+      entry.alertKey === "billing:payment-reversal-unmatched:stripe:dp_no_pi",
+  );
+  assert.equal(alert?.level, "error");
+  assert.equal(alert?.metadata?.amount, 1250);
+  assert.equal(alert?.metadata?.currency, "usd");
+  assert.equal(alert?.metadata?.eventType, "charge.dispute.created");
+  assert.equal(alert?.metadata?.paymentIntentId, null);
+  assert.equal(
+    f.requests.some((r) => r.path.startsWith("/v1/payment_intents/")),
+    false,
+  );
+});
+
+test("a refund resolved to an order this deployment cannot use is unmatched, not retried", async () => {
+  // A Stripe test account shared across environments: the PaymentIntent
+  // names an order id this database does not hold.
+  const foreign = stripeFixture();
+  foreign.remote.paymentIntents.set("pi_foreign", {
+    id: "pi_foreign",
+    object: "payment_intent",
+    metadata: { sourceweftOrderId: "order_elsewhere" },
+  } as unknown as Stripe.PaymentIntent);
+  await deliver(
+    foreign,
+    foreign.event(
+      "charge.refunded",
+      charge("pi_foreign", 500, { id: "ch_foreign" }),
+    ),
+  );
+  assert.equal(foreign.store.webhook?.status, "ignored");
+  assert.equal(foreign.store.webhook?.errorCode, "STRIPE_UNRELATED_ORDER");
+  const alert = foreign.alerts.find(
+    (entry) =>
+      entry.alertKey === "billing:payment-reversal-unmatched:stripe:ch_foreign",
+  );
+  assert.equal(alert?.level, "error");
+  assert.equal(alert?.metadata?.resolvedOrderId, "order_elsewhere");
+  assert.equal(alert?.metadata?.paymentIntentId, "pi_foreign");
+  assert.equal(alert?.metadata?.eventType, "charge.refunded");
+  assert.equal(alert?.metadata?.amount, 1250);
+  assert.equal(alert?.metadata?.amountRefunded, 500);
+  assert.equal(alert?.metadata?.currency, "usd");
+
+  // A local order bound to another Stripe account: the same, and no balance
+  // change.
+  const f = stripeFixture();
+  const order = await fulfilledTopup(f);
+  f.store.order!.metadata.stripeAccountId = "acct_other";
+  await deliver(
+    f,
+    f.event(
+      "charge.refunded",
+      charge(order.externalPaymentId!, 1250, { id: "ch_other_account" }),
+    ),
+  );
+  assert.equal(f.store.webhook?.status, "ignored");
+  assert.equal(f.store.webhook?.errorCode, "STRIPE_UNRELATED_ORDER");
+  assert.equal(
+    f.store.account!.addOnCreditsBalance,
+    stripeConfig.catalog.creditTopupUnitAmount,
+  );
+  assert.equal(f.store.order!.reversalStatus, "none");
+  assert.equal(
+    f.alerts.find(
+      (entry) =>
+        entry.alertKey ===
+        "billing:payment-reversal-unmatched:stripe:ch_other_account",
+    )?.metadata?.resolvedOrderId,
+    order.id,
+  );
+});
