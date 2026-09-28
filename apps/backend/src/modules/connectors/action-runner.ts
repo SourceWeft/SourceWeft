@@ -4,6 +4,7 @@ import { ConnectorError, toConnectorError } from "./errors";
 import { validateObjectWithJsonSchema } from "./config-validation";
 import { requireConnectorWorkspace } from "./permissions";
 import {
+  claimApprovedActionRunRecord,
   createActionRunRecord,
   createSyncRunRecord,
   findActionRunRecord,
@@ -560,11 +561,30 @@ export class ConnectorActionRunner {
       stored: action.requestJson,
     });
 
-    await updateActionRunRecord({
+    // The status check above is only a read; two executions of the same
+    // approved action (duplicate resume requests) can both pass it. Only the
+    // one that wins this claim may call the provider.
+    const claimed = await claimApprovedActionRunRecord({
       ...lookup,
-      status: "running",
       executedBy: input.userId,
     });
+    if (!claimed) {
+      const current = (await findActionRunRecord(lookup)) ?? action;
+      logger.debug(
+        "Connector action execution skipped after losing the running claim",
+        {
+          ...connectorActionExecutionMeta({
+            ...lookup,
+            actionType: action.actionType,
+            agentToolName: action.agentToolName,
+            connectorType: connector.connectorType,
+            userId: input.userId,
+          }),
+          status: current.status,
+        },
+      );
+      return { action: current };
+    }
     logger.debug("Connector action marked running", {
       ...connectorActionExecutionMeta({
         ...lookup,

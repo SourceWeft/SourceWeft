@@ -148,6 +148,40 @@ export async function listActionRunRecords(input: {
   return rows.map(mapActionRun);
 }
 
+/**
+ * Moves an approved action run to `running` only while it is still approved:
+ * the compare-and-set that lets exactly one of several concurrent executions
+ * reach the provider. Returns null when another execution claimed it first
+ * (or it is no longer approved).
+ */
+export async function claimApprovedActionRunRecord(input: {
+  teamId: string;
+  workspaceId: string;
+  connectorId: string;
+  actionRunId: string;
+  executedBy: string;
+}) {
+  const [row] = await db
+    .update(connectorActionRuns)
+    .set({
+      status: "running",
+      executedBy: input.executedBy,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(connectorActionRuns.id, input.actionRunId),
+        eq(connectorActionRuns.teamId, input.teamId),
+        eq(connectorActionRuns.workspaceId, input.workspaceId),
+        eq(connectorActionRuns.connectorId, input.connectorId),
+        eq(connectorActionRuns.status, "approved"),
+      ),
+    )
+    .returning();
+
+  return row ? mapActionRun(row) : null;
+}
+
 export async function updateActionRunRecord(input: {
   teamId: string;
   workspaceId: string;
