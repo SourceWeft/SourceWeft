@@ -67,6 +67,9 @@ test("subscription domain events own renewal; duplicate and stale events do not 
     });
     delete charge.data.orderStatus;
     await deliver(f, charge);
+    // The charge grants nothing, so the balance alone cannot show it was
+    // verified; the receipt status proves its listPrice was read.
+    assert.equal(f.store.webhook?.status, "processed");
     assert.equal(f.store.account!.monthlyCreditsBalance, spentBalance);
     const renewed = {
       ...active,
@@ -161,6 +164,36 @@ test("subscription status events verify the plan price, not the deprecated total
       expectedStatus === "processed" ? "paid" : "unpaid",
     );
   }
+});
+
+test("a subscription status event without a plan price fails without falling back to the deprecated total", async () => {
+  const f = createWaffoFixture();
+  await f.billing.ensureBillingAccount("team_1", "user_1");
+  await f.billing.createPricingCheckout(
+    { plan: "pro", billingInterval: "monthly", source: "dashboard" },
+    { userId: "user_1", email: "buyer@example.invalid" },
+    { personalTeamId: "team_1" },
+  );
+  const event = f.event({ eventType: "subscription.activated" });
+  Object.assign(event.data, {
+    // The deprecated amounts match the checkout, so only a fallback to them
+    // could make this pass; the error code pins "no fallback".
+    amount: "12.00",
+    total: "12.00",
+    orderStatus: "active",
+    paymentId: undefined,
+    paymentStatus: undefined,
+    billingPeriod: "monthly",
+    currentPeriodStart: "2026-09-01T00:00:00Z",
+    currentPeriodEnd: "2026-10-01T00:00:00Z",
+    productMetadata: { sourceweftProductKey: "individual_pro:monthly" },
+  });
+  delete event.data.listPrice;
+  delete event.data.planPrice;
+  await deliver(f, event);
+  assert.equal(f.store.webhook?.status, "failed");
+  assert.equal(f.store.webhook?.errorCode, "WAFFO_AMOUNT_UNAVAILABLE");
+  assert.equal(f.store.order?.paymentStatus, "unpaid");
 });
 
 test("canceling delivered before activation establishes the paid order and keeps scheduled cancellation", async () => {
