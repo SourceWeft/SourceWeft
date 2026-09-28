@@ -148,11 +148,16 @@ export function createCreemWebhookHandler(deps: {
         );
         return Response.json({ message: "Webhook received" });
       } catch (error) {
-        return failure(logger, "Failed to process Creem reversal webhook", error, {
-          eventType,
-          webhookId,
-          objectId,
-        });
+        return failure(
+          logger,
+          "Failed to process Creem reversal webhook",
+          error,
+          {
+            eventType,
+            webhookId,
+            objectId,
+          },
+        );
       }
     }
 

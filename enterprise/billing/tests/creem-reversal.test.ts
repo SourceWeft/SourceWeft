@@ -205,10 +205,7 @@ test("a succeeded Creem refund reverses the top-up once", async () => {
   assert.equal(f.store.account?.addOnPagesBalance, 0);
   assert.equal(reversalRows(f).length, 1);
   assert.equal(f.store.order?.reversalStatus, "refunded");
-  assert.equal(
-    f.store.webhooks.get("creem:evt_refund_1")?.status,
-    "processed",
-  );
+  assert.equal(f.store.webhooks.get("creem:evt_refund_1")?.status, "processed");
 });
 
 test("a Creem refund found by transaction id when checkout metadata is absent", async () => {

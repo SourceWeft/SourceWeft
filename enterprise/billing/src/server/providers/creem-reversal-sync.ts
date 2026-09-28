@@ -195,7 +195,8 @@ export function createCreemReversalSync(deps: {
     // enough".
     const paidAmount = readNumber(transaction, "amount_paid");
     const currency =
-      readString(data, "refund_currency") ?? readString(transaction, "currency");
+      readString(data, "refund_currency") ??
+      readString(transaction, "currency");
 
     // Nothing here can be turned into a confident reversal when: neither a
     // usable cumulative total nor a usable per-refund amount exists; the
