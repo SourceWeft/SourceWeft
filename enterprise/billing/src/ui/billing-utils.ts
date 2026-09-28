@@ -81,16 +81,16 @@ export function formatPercent(value: number) {
   }).format(value);
 }
 
-export function formatPlanName(planFamily: string, personal: boolean) {
-  const labelByPlan: Record<string, string> = {
-    individual_free: "Free",
-    individual_pro: "Pro",
-    team_standard: "Team",
-    team_premium: "Team Premium",
-    enterprise_usage: "Enterprise",
-  };
-
-  return labelByPlan[planFamily] ?? (personal ? "Personal" : "Team");
+export function formatPlanName(
+  planFamily: string,
+  personal: boolean,
+  copy: BillingCopy,
+) {
+  const planNames = copy.common.planNames as Record<string, string>;
+  return (
+    planNames[planFamily] ??
+    (personal ? copy.common.personal : copy.common.team)
+  );
 }
 
 export function formatFeatureName(feature: string) {
@@ -115,31 +115,43 @@ export function formatBillingDate(value: string | null | undefined) {
   }).format(new Date(value));
 }
 
-export function formatBillingStatus(value: string | null | undefined) {
+export function formatBillingStatus(
+  value: string | null | undefined,
+  copy: BillingCopy,
+) {
   if (!value) {
-    return "Unknown";
+    return copy.common.unknown;
   }
 
   return formatFeatureName(value);
 }
 
-export function formatBillingInterval(value: string | null | undefined) {
+export function formatBillingInterval(
+  value: string | null | undefined,
+  copy: BillingCopy,
+) {
   if (!value || value === "unknown") {
-    return "Not set";
+    return copy.common.intervals.notSet;
   }
 
-  return value === "yearly" ? "Annual" : "Monthly";
+  return value === "yearly"
+    ? copy.common.intervals.annual
+    : copy.common.intervals.monthly;
 }
 
-export function formatSeatProviderAction(value: string | undefined) {
-  const labelByAction: Record<string, string> = {
-    internal_partial_credit: "Internal partial credit",
-    none: "No provider adjustment",
-    proration_charge_immediately: "Immediate prorated charge",
-    proration_credit: "Provider proration credit",
-  };
+export function formatSeatProviderAction(
+  value: string | undefined,
+  copy: BillingCopy,
+) {
+  if (!value) {
+    return "--";
+  }
 
-  return value ? (labelByAction[value] ?? formatFeatureName(value)) : "--";
+  const seatProviderActions = copy.billing.seatProviderActions as Record<
+    string,
+    string
+  >;
+  return seatProviderActions[value] ?? formatFeatureName(value);
 }
 
 export function getSeatPreviewDirection(preview: SeatPreview | null) {

@@ -198,7 +198,7 @@ export function UsagePanel() {
     activityRows.length < totalActivityRowCount || Boolean(activityCursor);
   const planLabel = summary
     ? (copy.common.planNames[summary.planFamily] ??
-      formatPlanName(summary.planFamily, isPersonal))
+      formatPlanName(summary.planFamily, isPersonal, copy))
     : isPersonal
       ? copy.common.personal
       : copy.common.team;

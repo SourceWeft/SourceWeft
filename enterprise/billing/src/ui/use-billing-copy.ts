@@ -24,6 +24,8 @@ export type BillingCopyFormat = {
   dateTime(iso: string): string;
   /** `cents` matches the ledger/order convention of USD minor units. */
   currency(cents: number, currency?: string): string;
+  /** A ratio in `[0, 1]`, rendered as a percentage (e.g. `0.5` -> "50%"). */
+  percent(value: number): string;
 };
 
 /**
@@ -68,6 +70,11 @@ export function useBillingCopy(): {
           }),
         currency: (cents, currency = "USD") =>
           formatCurrency(cents / 100, intlLocale, currency),
+        percent: (value) =>
+          formatNumber(value, intlLocale, {
+            maximumFractionDigits: 1,
+            style: "percent",
+          }),
       },
     };
   }, [locale]);
