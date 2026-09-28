@@ -1,1 +1,1 @@
-export { createCreemClient } from "@creem_io/better-auth/server";
+export { createCreemClient } from "./creem-client";

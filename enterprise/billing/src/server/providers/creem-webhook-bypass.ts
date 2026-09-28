@@ -1,4 +1,4 @@
-import { validateWebhookSignature } from "@creem_io/better-auth/server";
+import { verifyCreemSignature } from "./creem-client";
 import type { BillingRuntimeConfig, TeamSubscriptionSnapshot } from "../types";
 import type { BillingLogger } from "../host";
 import type { createCreemReversalSync } from "./creem-reversal-sync";
@@ -55,6 +55,9 @@ export function createCreemWebhookHandler(deps: {
   const logger = deps.logger;
   const syncCreemSubscriptionEvent = deps.sync;
   const syncCreemReversalEvent = deps.reversalSync;
+  // The deployment's test/live mode never changes for the lifetime of this
+  // handler, so it is computed once here rather than per request.
+  const expectedMode = config.billing.creem.testMode ? "test" : "prod";
   return async function handleCreemWebhook(request: Request) {
     if (
       config.billing.provider !== "creem" ||
@@ -100,7 +103,7 @@ export function createCreemWebhookHandler(deps: {
     // unauthenticated caller must not be able to learn how eventType, mode,
     // or the object shape are validated.
     const signature = request.headers.get("creem-signature");
-    const valid = await validateWebhookSignature(
+    const valid = verifyCreemSignature(
       rawBody,
       signature,
       config.billing.creem.webhookSecret,
@@ -135,11 +138,18 @@ export function createCreemWebhookHandler(deps: {
         );
       }
 
-      if (data.mode !== (config.billing.creem.testMode ? "test" : "prod"))
+      if (data.mode !== expectedMode) {
+        logger.warn("Creem webhook mode mismatch", {
+          eventType,
+          webhookId,
+          receivedMode: data.mode ?? null,
+          expectedMode,
+        });
         return Response.json(
           { error: "Webhook environment mismatch" },
           { status: 403 },
         );
+      }
 
       try {
         await syncCreemReversalEvent(
@@ -190,11 +200,18 @@ export function createCreemWebhookHandler(deps: {
       );
     }
 
-    if (data.mode !== (config.billing.creem.testMode ? "test" : "prod"))
+    if (data.mode !== expectedMode) {
+      logger.warn("Creem webhook mode mismatch", {
+        eventType,
+        webhookId: readString(data, "webhookId"),
+        receivedMode: data.mode ?? null,
+        expectedMode,
+      });
       return Response.json(
         { error: "Webhook environment mismatch" },
         { status: 403 },
       );
+    }
     try {
       await syncCreemSubscriptionEvent(eventType, data, statuses[eventType]!);
       return Response.json({ message: "Webhook received" });

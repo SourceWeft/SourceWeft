@@ -65,7 +65,6 @@ upgrading any of:
 
 - `better-auth`
 - `@better-auth/*`
-- `@creem_io/better-auth`
 - Better Auth plugins in `src/modules/auth/auth-config.ts`
 
 Keep `better-auth`, the versioned `@better-auth/*` packages, and the `auth` CLI
