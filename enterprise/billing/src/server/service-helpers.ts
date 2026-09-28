@@ -386,3 +386,30 @@ export function createFallbackWebhookEventId(
 
   return `fallback:${digest}`;
 }
+
+/**
+ * Runs a provider inbox's drain passes one at a time. A call made while a
+ * pass runs returns at once and makes the running drain read its pending
+ * receipts again when that pass ends: the pass already read its list, so an
+ * event stored after that read would otherwise wait for the scheduler's
+ * drain. Any number of calls during one pass add one pass.
+ */
+export function serialDrain(pass: () => Promise<void>): () => Promise<void> {
+  let running = false;
+  let requested = false;
+  return async () => {
+    if (running) {
+      requested = true;
+      return;
+    }
+    running = true;
+    try {
+      do {
+        requested = false;
+        await pass();
+      } while (requested);
+    } finally {
+      running = false;
+    }
+  };
+}

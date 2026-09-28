@@ -10,6 +10,7 @@ import type { BillingService } from "../../service";
 import type { BillingLogger } from "../../host";
 import type { PaymentReversalInput } from "../../payment-reversal";
 import { updateOrderLocked } from "../../order-locking";
+import { serialDrain } from "../../service-helpers";
 import { StripeBillingProvider, stripeId } from "./provider";
 import type { StripeInboxStore } from "./state";
 
@@ -61,7 +62,7 @@ async function notFoundAsNull<T>(promise: Promise<T>): Promise<T | null> {
   }
 }
 export class StripeWebhookService {
-  private draining = false;
+  private readonly drainSerially = serialDrain(() => this.drainPending());
   constructor(
     private readonly input: {
       config: BillingRuntimeConfig;
@@ -212,95 +213,88 @@ export class StripeWebhookService {
     }
     return null;
   }
-  async drain() {
-    if (this.draining) return;
-    this.draining = true;
-    try {
-      for (const event of await this.input.state.pendingEvents(
-        this.input.config.stripe.testMode,
-      )) {
-        const record = await this.input.store.getWebhookEventByProviderEventId(
-          "stripe",
-          eventKey(event),
-        );
-        if (!record || ["processed", "ignored"].includes(record.status))
+  /** Processes pending receipts; see {@link serialDrain}. */
+  drain() {
+    return this.drainSerially();
+  }
+  private async drainPending() {
+    for (const event of await this.input.state.pendingEvents(
+      this.input.config.stripe.testMode,
+    )) {
+      const record = await this.input.store.getWebhookEventByProviderEventId(
+        "stripe",
+        eventKey(event),
+      );
+      if (!record || ["processed", "ignored"].includes(record.status)) continue;
+      try {
+        if (!supported.has(event.type)) {
+          await this.state(record.id, "ignored", "STRIPE_EVENT_UNSUPPORTED");
           continue;
-        try {
-          if (!supported.has(event.type)) {
-            await this.state(record.id, "ignored", "STRIPE_EVENT_UNSUPPORTED");
-            continue;
-          }
-          const reference = await this.reference(event);
-          if (!reference) {
-            if (event.type.startsWith("charge."))
-              await this.unmatchedReversal(event, record.id, null);
-            else
-              await this.state(record.id, "ignored", "STRIPE_UNRELATED_ORDER");
-            continue;
-          }
-          await this.input.state.withLock(
-            `${event.livemode}:${reference}`,
-            async () => {
-              try {
-                const latest =
-                  await this.input.store.getWebhookEventByProviderEventId(
-                    "stripe",
-                    eventKey(event),
-                  );
-                if (!latest || ["processed", "ignored"].includes(latest.status))
-                  return;
-                if (latest.status === "failed")
-                  await this.input.store.incrementWebhookEventAttempt(
-                    latest.id,
-                    {
-                      eventType: latest.eventType,
-                      teamId: latest.teamId,
-                      externalSubscriptionId: latest.externalSubscriptionId,
-                      payload: latest.payload,
-                      metadata: latest.metadata,
-                    },
-                  );
-                const order = await this.input.billing.getOrder(reference);
-                if (
-                  !order ||
-                  order.provider !== "stripe" ||
-                  order.metadata.stripeTestMode !==
-                    this.input.config.stripe.testMode ||
-                  order.metadata.stripeAccountId !==
-                    (await this.input.provider.getCheckoutScope())
-                ) {
-                  if (event.type.startsWith("charge."))
-                    return this.unmatchedReversal(event, record.id, reference);
-                  throw new BillingError(
-                    "STRIPE_ORDER_BINDING_MISMATCH",
-                    422,
-                    "Stripe order, account or environment does not match",
-                  );
-                }
-                const result = await this.process(event, order);
-                const ignored =
-                  result === true
-                    ? null
-                    : result === false
-                      ? "STRIPE_AWAITING_PAYMENT"
-                      : result.ignore;
-                await this.state(
-                  record.id,
-                  ignored ? "ignored" : "processed",
-                  ignored,
-                  (await this.input.billing.getOrder(order.id)) ?? order,
-                );
-              } catch (error) {
-                await this.failed(event, record.id, error);
-              }
-            },
-          );
-        } catch (error) {
-          await this.failed(event, record.id, error);
         }
+        const reference = await this.reference(event);
+        if (!reference) {
+          if (event.type.startsWith("charge."))
+            await this.unmatchedReversal(event, record.id, null);
+          else await this.state(record.id, "ignored", "STRIPE_UNRELATED_ORDER");
+          continue;
+        }
+        await this.input.state.withLock(
+          `${event.livemode}:${reference}`,
+          async () => {
+            try {
+              const latest =
+                await this.input.store.getWebhookEventByProviderEventId(
+                  "stripe",
+                  eventKey(event),
+                );
+              if (!latest || ["processed", "ignored"].includes(latest.status))
+                return;
+              if (latest.status === "failed")
+                await this.input.store.incrementWebhookEventAttempt(latest.id, {
+                  eventType: latest.eventType,
+                  teamId: latest.teamId,
+                  externalSubscriptionId: latest.externalSubscriptionId,
+                  payload: latest.payload,
+                  metadata: latest.metadata,
+                });
+              const order = await this.input.billing.getOrder(reference);
+              if (
+                !order ||
+                order.provider !== "stripe" ||
+                order.metadata.stripeTestMode !==
+                  this.input.config.stripe.testMode ||
+                order.metadata.stripeAccountId !==
+                  (await this.input.provider.getCheckoutScope())
+              ) {
+                if (event.type.startsWith("charge."))
+                  return this.unmatchedReversal(event, record.id, reference);
+                throw new BillingError(
+                  "STRIPE_ORDER_BINDING_MISMATCH",
+                  422,
+                  "Stripe order, account or environment does not match",
+                );
+              }
+              const result = await this.process(event, order);
+              const ignored =
+                result === true
+                  ? null
+                  : result === false
+                    ? "STRIPE_AWAITING_PAYMENT"
+                    : result.ignore;
+              await this.state(
+                record.id,
+                ignored ? "ignored" : "processed",
+                ignored,
+                (await this.input.billing.getOrder(order.id)) ?? order,
+              );
+            } catch (error) {
+              await this.failed(event, record.id, error);
+            }
+          },
+        );
+      } catch (error) {
+        await this.failed(event, record.id, error);
       }
-    } finally {
-      this.draining = false;
     }
   }
   /**

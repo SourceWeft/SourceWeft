@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, verify } from "node:crypto";
-import { test } from "vitest";
+import { test, vi } from "vitest";
 import { Hono } from "hono";
 import {
   readBillingConfig,
@@ -31,6 +31,38 @@ const checkout = async (f: ReturnType<typeof createWaffoFixture>) => {
     "buyer@example.invalid",
   );
 };
+
+test("an event received while a drain runs is processed by that drain in one more pass", async () => {
+  const f = createWaffoFixture();
+  await checkout(f);
+  const receive = async (event: ReturnType<typeof f.event>) => {
+    const payload = signedEvent(event);
+    await f.inbox.receive(payload.raw, payload.signature);
+  };
+  // Hold the first pass inside the payment event until the refund is received.
+  const withLock = f.state.withLock.bind(f.state);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  let entered!: () => void;
+  const blocked = new Promise<void>((resolve) => (entered = resolve));
+  vi.spyOn(f.state, "withLock").mockImplementationOnce(async (key, run) => {
+    entered();
+    await gate;
+    return withLock(key, run);
+  });
+  const passes = vi.spyOn(f.state, "pendingEvents");
+  await receive(f.event());
+  const running = f.inbox.drain();
+  await blocked;
+  await receive(f.refundEvent());
+  // Every request during the pass returns at once and adds one pass in total.
+  await Promise.all([f.inbox.drain(), f.inbox.drain(), f.inbox.drain()]);
+  release();
+  await running;
+  assert.equal(f.store.order?.status, "fulfilled");
+  assert.equal(f.store.order?.reversalStatus, "refunded");
+  assert.equal(passes.mock.calls.length, 2);
+});
 
 test("provider selection is explicit and Waffo needs only its two new credentials", () => {
   const credentials = {
