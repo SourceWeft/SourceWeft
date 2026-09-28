@@ -38,6 +38,26 @@ function objectId(event: Stripe.Event): string {
     );
   return object.id;
 }
+// A missing PaymentIntent/invoice/subscription is a permanent data problem
+// (the referenced resource is gone), not a transient one: retrying it every
+// 30s would never succeed. Only used while resolving a `charge.*` reference,
+// where "not found" already has a defined fallback (the next lookup, or
+// `unmatched`); every other Stripe error keeps propagating so the receipt is
+// marked `failed` and retried.
+function isStripeNotFoundError(error: unknown): boolean {
+  return (
+    error instanceof Stripe.errors.StripeError &&
+    (error.statusCode === 404 || error.code === "resource_missing")
+  );
+}
+async function notFoundAsNull<T>(promise: Promise<T>): Promise<T | null> {
+  try {
+    return await promise;
+  } catch (error) {
+    if (isStripeNotFoundError(error)) return null;
+    throw error;
+  }
+}
 export class StripeWebhookService {
   private draining = false;
   constructor(
@@ -156,25 +176,37 @@ export class StripeWebhookService {
         paymentIntentId,
       );
       if (order) return order.id;
-      const paymentIntent =
-        await this.input.provider.client.paymentIntents.retrieve(
-          paymentIntentId,
-        );
-      if (paymentIntent.metadata.sourceweftOrderId)
+      // A deleted/expired PaymentIntent, invoice or subscription is a
+      // permanent "not found", not a transient failure: fall through the
+      // remaining lookups (and ultimately to `unmatched`) instead of
+      // retrying the receipt forever.
+      const paymentIntent = await notFoundAsNull(
+        this.input.provider.client.paymentIntents.retrieve(paymentIntentId),
+      );
+      if (paymentIntent?.metadata.sourceweftOrderId)
         return paymentIntent.metadata.sourceweftOrderId;
-      const payments = await this.input.provider.client.invoicePayments.list({
-        payment: { type: "payment_intent", payment_intent: paymentIntentId },
-        limit: 1,
-      });
-      const invoiceId = stripeId(payments.data[0]?.invoice);
+      const payments = await notFoundAsNull(
+        this.input.provider.client.invoicePayments.list({
+          payment: {
+            type: "payment_intent",
+            payment_intent: paymentIntentId,
+          },
+          limit: 1,
+        }),
+      );
+      const invoiceId = stripeId(payments?.data[0]?.invoice);
       if (!invoiceId) return null;
-      const invoice =
-        await this.input.provider.client.invoices.retrieve(invoiceId);
+      const invoice = await notFoundAsNull(
+        this.input.provider.client.invoices.retrieve(invoiceId),
+      );
       const subscriptionId = stripeId(
-        invoice.parent?.subscription_details?.subscription,
+        invoice?.parent?.subscription_details?.subscription,
       );
       if (!subscriptionId) return null;
-      return this.subscriptionOrderId(subscriptionId);
+      const subscription = await notFoundAsNull(
+        this.input.provider.client.subscriptions.retrieve(subscriptionId),
+      );
+      return subscription?.metadata.sourceweftOrderId ?? null;
     }
     return null;
   }

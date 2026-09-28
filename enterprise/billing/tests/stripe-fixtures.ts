@@ -104,6 +104,12 @@ export function stripeFixture(
     rejectSeatPayment: false,
     paymentIntents: new Map<string, Stripe.PaymentIntent>(),
     invoicePayments: [] as Stripe.InvoicePayment[],
+    paymentIntentError: null as {
+      status: number;
+      type: string;
+      code?: string;
+      message: string;
+    } | null,
   };
   const client = new Stripe(stripeConfig.stripe.secretKey, {
     apiVersion: Stripe.API_VERSION,
@@ -203,9 +209,16 @@ export function stripeFixture(
       } else if (path.startsWith("/v1/subscriptions/"))
         data = remote.subscription;
       else if (path.startsWith("/v1/invoices/")) data = remote.invoice;
-      else if (path.startsWith("/v1/payment_intents/"))
+      else if (path.startsWith("/v1/payment_intents/")) {
+        if (remote.paymentIntentError) {
+          const { status, ...error } = remote.paymentIntentError;
+          return new Response(JSON.stringify({ error }), {
+            status,
+            headers: { "content-type": "application/json" },
+          });
+        }
         data = remote.paymentIntents.get(path.split("/").pop()!);
-      else if (path === "/v1/invoice_payments") {
+      } else if (path === "/v1/invoice_payments") {
         const paymentIntent = parsedUrl.searchParams.get(
           "payment[payment_intent]",
         );

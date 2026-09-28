@@ -505,3 +505,54 @@ test("an unresolvable charge event raises the unmatched alert and is ignored", a
     ),
   );
 });
+
+test("a 404 resource_missing while resolving a charge event is treated as not found and raises the unmatched alert", async () => {
+  const f = stripeFixture();
+  f.remote.paymentIntentError = {
+    status: 404,
+    type: "invalid_request_error",
+    code: "resource_missing",
+    message: "No such payment_intent: 'pi_gone'",
+  };
+  await deliver(
+    f,
+    f.event("charge.dispute.created", {
+      id: "dp_404",
+      object: "dispute",
+      payment_intent: "pi_gone",
+    }),
+  );
+  assert.equal(f.store.webhook?.status, "ignored");
+  assert.equal(f.store.webhook?.errorCode, "STRIPE_UNRELATED_ORDER");
+  assert.ok(
+    f.alerts.some(
+      (alert) =>
+        alert.alertKey === "billing:payment-reversal-unmatched:stripe:dp_404",
+    ),
+  );
+});
+
+test("a 500 while resolving a charge event leaves the receipt failed for retry, without an unmatched alert", async () => {
+  const f = stripeFixture();
+  f.remote.paymentIntentError = {
+    status: 500,
+    type: "api_error",
+    message: "Internal server error",
+  };
+  await deliver(
+    f,
+    f.event("charge.dispute.created", {
+      id: "dp_500",
+      object: "dispute",
+      payment_intent: "pi_transient",
+    }),
+  );
+  assert.equal(f.store.webhook?.status, "failed");
+  assert.equal(f.store.webhook?.errorCode, "STRIPE_PROCESSING_FAILED");
+  assert.equal(
+    f.alerts.some((alert) =>
+      alert.alertKey.startsWith("billing:payment-reversal-unmatched:"),
+    ),
+    false,
+  );
+});
