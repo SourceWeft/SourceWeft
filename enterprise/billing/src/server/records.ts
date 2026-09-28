@@ -24,3 +24,44 @@ export function toObjectRecord(value: unknown): Record<string, unknown> | null {
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
+
+/**
+ * Payload field readers shared by the provider webhook translators. Each
+ * reads one field off an already-parsed payload record and returns a usable
+ * value or `null` — never throws, since a provider payload is untrusted
+ * input.
+ */
+
+/** A trimmed-non-empty string at `record[key]`, else `null`. */
+export function readString(
+  record: Record<string, unknown> | null,
+  key: string,
+): string | null {
+  const value = record?.[key];
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+/**
+ * A number at `record[key]`, else `null`. Only a `typeof` check: NaN and
+ * Infinity pass through unchanged rather than being narrowed to `null`,
+ * since a payload value never actually arrives as either from parsed JSON.
+ */
+export function readNumber(
+  record: Record<string, unknown> | null,
+  key: string,
+): number | null {
+  const value = record?.[key];
+  return typeof value === "number" ? value : null;
+}
+
+/**
+ * A provider reference that shows up as either a bare id or an embedded
+ * object with its own `id`, depending on the event (e.g. Creem's
+ * `subscription`/`order`/`product` fields).
+ */
+export function readReferenceId(value: unknown): string | null {
+  if (typeof value === "string" && value.trim()) {
+    return value;
+  }
+  return readString(toObjectRecord(value), "id");
+}

@@ -3,7 +3,12 @@ import type {
   PaymentReversalInput,
   PaymentReversalNotice,
 } from "../payment-reversal";
-import { toObjectRecord } from "../records";
+import {
+  readNumber,
+  readReferenceId,
+  readString,
+  toObjectRecord,
+} from "../records";
 import type { BillingService } from "../service";
 import type { BillingOrderState } from "../types";
 
@@ -22,25 +27,6 @@ import type { BillingOrderState } from "../types";
  * see the `refund_id_missing` cause below, which exists for exactly the
  * case where it does not.
  */
-
-function readString(record: Record<string, unknown> | null, key: string) {
-  const value = record?.[key];
-  return typeof value === "string" && value.trim() ? value : null;
-}
-
-function readNumber(record: Record<string, unknown> | null, key: string) {
-  const value = record?.[key];
-  return typeof value === "number" ? value : null;
-}
-
-// Creem's `subscription`/`order` references show up as either a bare id or
-// an embedded object with its own `id`, depending on the event.
-function readReferenceId(value: unknown): string | null {
-  if (typeof value === "string" && value.trim()) {
-    return value;
-  }
-  return readString(toObjectRecord(value), "id");
-}
 
 /**
  * `checkout.metadata.orderId` when the refund/dispute carries an embedded

@@ -10,7 +10,7 @@ import type {
   BillingSubscriptionState,
   TeamSubscriptionSnapshot,
 } from "../types";
-import { toObjectRecord } from "../records";
+import { readString, toObjectRecord } from "../records";
 import { syncCreemCheckoutCompleted } from "./creem-checkout-sync";
 
 type CreemSubscriptionSyncDeps = {
@@ -28,11 +28,6 @@ type SubscriptionWebhookContext = {
 export function createCreemSubscriptionSync(deps: CreemSubscriptionSyncDeps) {
   const config = { billing: deps.config };
   const logger = deps.logger;
-
-  function readString(record: Record<string, unknown> | null, key: string) {
-    const value = record?.[key];
-    return typeof value === "string" && value.trim() ? value : null;
-  }
 
   function toDateIso(value: unknown) {
     const parsed =

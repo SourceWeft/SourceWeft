@@ -14,12 +14,7 @@ import type {
   BillingProviderUpdateSeatsResult,
 } from "../types";
 import { BillingError } from "../errors";
-import { toObjectRecord } from "../records";
-
-function readString(record: Record<string, unknown> | null, key: string) {
-  const value = record?.[key];
-  return typeof value === "string" && value.trim() ? value : null;
-}
+import { readString, toObjectRecord } from "../records";
 
 function resolveEntityId(value: unknown) {
   if (typeof value === "string" && value.trim()) {
