@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { Pool, type PoolClient } from "pg";
 import { test } from "vitest";
+import { updateOrderLocked } from "../src/server/order-locking";
 import { BillingService } from "../src/server/service";
 import { PostgresBillingStore } from "../src/server/store";
 import type { BillingLedgerRow, BillingOrderState } from "../src/server/types";
@@ -361,6 +362,146 @@ test("a refund committed while fulfillment fails survives the failure bookkeepin
     }
   }
 });
+
+test("checkout recovery's locked write keeps a reversal committed in between", async () => {
+  const connectionString = requireBillingTestDatabase();
+  const id = randomUUID();
+  const teamId = `billing_test_${id}`;
+  const userId = `actor_${id}`;
+  const orderId = randomUUID();
+  const racerName = `checkout_recovery_racer_${id}`;
+  const pool = new Pool({ connectionString, max: 4 });
+  const racerPool = new Pool({
+    connectionString,
+    max: 2,
+    application_name: racerName,
+  });
+  const memberships = noThrowingMemberships(userId);
+
+  // `updateOrderLocked` — the write Stripe checkout recovery (and the
+  // expiry write) uses — holds the order row lock inside its own
+  // transaction from `getOrderByIdForUpdate` through its commit. While it
+  // still holds that lock, a reversal is attempted on a separate
+  // connection: it can only proceed once the recovery transaction commits
+  // and releases the lock, at which point its own locked read sees the
+  // just-recovered row fresh and layers its reversal columns on top,
+  // rather than clobbering them with data read before the recovery.
+  let onLockedRead: (() => Promise<void>) | null = null;
+  class RecoveryRaceStore extends PostgresBillingStore {
+    private armed = true;
+    override async getOrderByIdForUpdate(
+      targetOrderId: string,
+      client: PoolClient,
+    ) {
+      const order = await super.getOrderByIdForUpdate(targetOrderId, client);
+      if (this.armed && order?.id === orderId) {
+        this.armed = false;
+        await onLockedRead?.();
+      }
+      return order;
+    }
+  }
+
+  const store = new RecoveryRaceStore(pool, memberships);
+  const racerStore = new PostgresBillingStore(racerPool, memberships);
+  const racerBilling = new BillingService(
+    racerStore,
+    runtimeConfig,
+    noopProvider,
+  );
+  const recordReversal = () =>
+    racerBilling.applyPaymentReversal({
+      orderId,
+      provider: "stripe",
+      reversalId: "race_refund",
+      kind: "refund",
+      amount: { refundedTotal: 625 },
+      paidAmount: 1250,
+      currency: "usd",
+    });
+  let racingReversal = null as ReturnType<typeof recordReversal> | null;
+  onLockedRead = async () => {
+    racingReversal = recordReversal();
+    await settledOrWaitingOnLock(racingReversal, pool, racerName);
+  };
+
+  const now = new Date().toISOString();
+
+  try {
+    const billing = new BillingService(store, runtimeConfig, noopProvider);
+    await billing.ensureBillingAccount(teamId, userId);
+    await store.insertOrder({
+      id: orderId,
+      provider: "stripe",
+      kind: "credit_topup",
+      status: "checkout_created",
+      paymentStatus: "unpaid",
+      userId,
+      teamId,
+      clientReferenceKey: null,
+      planFamily: null,
+      billingInterval: null,
+      quantity: 1,
+      unitType: "credit",
+      unitAmount: 10_000,
+      grantedCredits: 10_000,
+      grantedPages: 0,
+      refundedAmount: 0,
+      reversedUnits: 0,
+      reversalStatus: "none",
+      externalCheckoutId: null,
+      externalPaymentId: null,
+      externalCustomerId: null,
+      externalSubscriptionId: null,
+      externalProductId: "prod_credit_topup",
+      amountTotal: 1250,
+      currency: "USD",
+      successUrl: null,
+      cancelUrl: null,
+      metadata: {},
+      errorCode: null,
+      errorMessage: null,
+      paidAt: null,
+      fulfilledAt: null,
+      expiresAt: null,
+      fulfillmentAttemptCount: 0,
+      nextRetryAt: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    // The write checkout recovery performs: only `externalCheckoutId`
+    // changes; everything else, including any reversal columns committed
+    // in the meantime, is re-read fresh inside the lock.
+    const recovered = await updateOrderLocked(store, orderId, () => ({
+      externalCheckoutId: "cs_recovered",
+    }));
+    assert.equal(recovered?.externalCheckoutId, "cs_recovered");
+
+    assert.ok(racingReversal, "the reversal raced the recovery write");
+    const reversalResult = await racingReversal;
+    // The order was never fulfilled, so the reversal only records itself
+    // on the order for fulfillment to apply later.
+    assert.equal(reversalResult?.outcome, "recorded_before_fulfillment");
+
+    const final = await store.getOrderById(orderId);
+    assert.equal(final?.externalCheckoutId, "cs_recovered");
+    assert.equal(final?.refundedAmount, 625);
+    assert.equal(final?.reversedUnits, 0);
+    assert.equal(final?.reversalStatus, "partially_refunded");
+    assert.equal(final?.metadata.reversalPaidAmount, 1250);
+  } finally {
+    try {
+      await pool.query("delete from usage_ledgers where team_id=$1", [teamId]);
+      await pool.query("delete from billing_orders where id=$1", [orderId]);
+      await pool.query("delete from billing_accounts where team_id=$1", [
+        teamId,
+      ]);
+    } finally {
+      await Promise.all([pool.end(), racerPool.end()]);
+    }
+  }
+}, 30_000);
 
 function noThrowingMemberships(userId: string) {
   return {
