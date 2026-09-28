@@ -35,13 +35,13 @@ const zhCNFormat: BillingCopyFormat = {
     i18nFormatDate(new Date(iso), "zh-CN", {
       year: "numeric",
       month: "short",
-      day: "2-digit",
+      day: "numeric",
     }),
   dateTime: (iso) =>
     i18nFormatDate(new Date(iso), "zh-CN", {
       year: "numeric",
       month: "short",
-      day: "2-digit",
+      day: "numeric",
       hour: "2-digit",
       minute: "2-digit",
     }),
@@ -52,6 +52,13 @@ const zhCNFormat: BillingCopyFormat = {
       maximumFractionDigits: 1,
       style: "percent",
     }),
+  compactNumber: (value) =>
+    i18nFormatNumber(value, "zh-CN", {
+      maximumFractionDigits: 1,
+      notation: "compact",
+    }),
+  shortDate: (iso) =>
+    i18nFormatDate(new Date(iso), "zh-CN", { day: "numeric", month: "short" }),
 };
 
 // `billing-plan-action-controls.tsx` renders `useBillingPlanAction()`'s
@@ -376,11 +383,14 @@ test("billing panel renders plan, seats and seat preview in zh-CN", async () => 
     // renders the right numeric value.
     expect(active.page).toContain(zhCNFormat.percent(0.3456));
 
-    // No hard-coded English leftovers from the pre-localisation copy. (The
-    // Cycle row's detail legitimately still renders `formatFeatureName` of
-    // the raw `cycleSource` enum ("Provider Subscription") — that beautifier
-    // is out of this task's scope, matching the pattern already established
-    // for ledger feature names, so "Subscription" alone isn't checked here.)
+    // The Cycle row's detail renders the localized cycle source
+    // (`common.cycleSources.provider_subscription`), not the raw English
+    // enum `formatFeatureName` would otherwise Title-Case it to.
+    expect(active.page).toContain(
+      copy.common.cycleSources.provider_subscription,
+    );
+
+    // No hard-coded English leftovers from the pre-localisation copy.
     expect(active.page).not.toContain("Billing");
     expect(active.page).not.toContain("Seats");
     expect(active.page).not.toContain("Cancel");
@@ -393,6 +403,9 @@ test("billing panel renders plan, seats and seat preview in zh-CN", async () => 
     // The English status label `formatFeatureName("active")` would have
     // produced before this fix round.
     expect(active.page).not.toContain("Active");
+    // The English cycle-source label `formatFeatureName("provider_subscription")`
+    // would have produced before this fix round.
+    expect(active.page).not.toContain("Provider Subscription");
   } finally {
     await active.unmount();
   }

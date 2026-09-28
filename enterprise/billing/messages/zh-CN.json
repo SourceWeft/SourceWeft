@@ -92,6 +92,11 @@
       "team_standard": "团队版",
       "team_premium": "团队高级版",
       "enterprise_usage": "企业版"
+    },
+    "cycleSources": {
+      "free_account": "免费账户",
+      "provider_subscription": "服务商订阅",
+      "manual": "手动"
     }
   },
   "billing": {
@@ -274,6 +279,18 @@
     },
     "release": {
       "default": "{feature} 已释放"
+    },
+    "featureNames": {
+      "chat": "对话",
+      "retrieval": "检索",
+      "retrieval_rerank": "检索重排序",
+      "source_ingestion": "来源导入",
+      "ingestion.asr": "语音转写",
+      "artifact.image": "图像生成",
+      "artifact.video_presentation.asset": "视频素材生成",
+      "artifact.video_presentation.narration": "视频旁白生成",
+      "artifact.video_presentation.validation": "视频校验",
+      "html.visual_qa": "视觉质检"
     }
   },
   "checkout": {
@@ -303,7 +320,7 @@
     },
     "topup": {
       "title": "购买积分或页数",
-      "description": "选择套餐并在付款前核对总额。",
+      "description": "选择充值包并在付款前核对总额。",
       "buyCredits": "购买积分",
       "buyPages": "购买页数",
       "error": "无法准备结账"

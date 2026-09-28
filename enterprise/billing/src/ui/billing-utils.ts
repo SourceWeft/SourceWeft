@@ -83,6 +83,30 @@ export function formatFeatureName(feature: string) {
   return label || "Usage";
 }
 
+/**
+ * The `{feature}` placeholder inside an activity row's tiered composition
+ * (e.g. `activity.consume.default.credit` = "{feature} credits used"). Maps
+ * the raw ledger `feature` value the backend writes (`chat`, `retrieval`,
+ * `retrieval_rerank`, `source_ingestion`, `ingestion.asr`, `artifact.image`,
+ * `artifact.video_presentation.{asset,narration,validation}`,
+ * `html.visual_qa`, ...) through `activity.featureNames`, falling back to
+ * `formatFeatureName`'s raw-enum beautifier for any feature the catalogue
+ * doesn't (yet) name.
+ *
+ * `activity.featureNames`' keys are the literal, sometimes dotted, feature
+ * strings the backend writes (e.g. `"ingestion.asr"`) as flat JSON keys —
+ * not a nested path (`{ "ingestion": { "asr": ... } }`). A JSON object key
+ * is just a string; the dot only becomes a hazard if something reads it
+ * through a dotted-path walker (`get(obj, "a.b.c")`-style). This map is only
+ * ever read with a single bracket lookup (`featureNames[feature]`, right
+ * below), never through one, so the literal key is safe and reads better in
+ * the JSON than an escaped `"ingestion__asr"` encoding would.
+ */
+export function formatActivityFeatureName(feature: string, copy: BillingCopy) {
+  const featureNames = copy.activity.featureNames as Record<string, string>;
+  return featureNames[feature] ?? formatFeatureName(feature);
+}
+
 export function formatBillingStatus(
   value: string | null | undefined,
   copy: BillingCopy,
@@ -96,6 +120,25 @@ export function formatBillingStatus(
     string
   >;
   return subscriptionStatuses[value] ?? formatFeatureName(value);
+}
+
+/**
+ * The Cycle row's detail caption (where the billing-cycle boundary comes
+ * from — `billing_accounts.cycle_source`: `free_account` /
+ * `provider_subscription` / `manual`, `packages/db/src/schema/billing.ts`).
+ * Maps through `common.cycleSources`, falling back to `formatFeatureName`
+ * for any value the catalogue doesn't (yet) cover.
+ */
+export function formatCycleSource(
+  value: string | null | undefined,
+  copy: BillingCopy,
+) {
+  if (!value) {
+    return "--";
+  }
+
+  const cycleSources = copy.common.cycleSources as Record<string, string>;
+  return cycleSources[value] ?? formatFeatureName(value);
 }
 
 export function formatBillingInterval(
@@ -275,7 +318,7 @@ export function formatLedgerDetail(
       : readUnitTemplate(defaultNode, entry.unitType);
   if (defaultTemplate) {
     return formatCopy(defaultTemplate, {
-      feature: formatFeatureName(entry.feature),
+      feature: formatActivityFeatureName(entry.feature, copy),
     });
   }
 
@@ -292,7 +335,7 @@ export function formatLedgerDetail(
   // even the stored title is empty.
   return formatUsageActivityDetail(
     getUsageActivityKind(entry),
-    formatFeatureName(entry.feature),
+    formatActivityFeatureName(entry.feature, copy),
     copy,
   );
 }

@@ -92,6 +92,11 @@
       "team_standard": "團隊版",
       "team_premium": "團隊進階版",
       "enterprise_usage": "企業版"
+    },
+    "cycleSources": {
+      "free_account": "免費帳戶",
+      "provider_subscription": "服務商訂閱",
+      "manual": "手動"
     }
   },
   "billing": {
@@ -274,6 +279,18 @@
     },
     "release": {
       "default": "{feature} 已釋放"
+    },
+    "featureNames": {
+      "chat": "對話",
+      "retrieval": "檢索",
+      "retrieval_rerank": "檢索重排序",
+      "source_ingestion": "來源匯入",
+      "ingestion.asr": "語音轉寫",
+      "artifact.image": "影像產生",
+      "artifact.video_presentation.asset": "影片素材產生",
+      "artifact.video_presentation.narration": "影片旁白產生",
+      "artifact.video_presentation.validation": "影片驗證",
+      "html.visual_qa": "視覺質檢"
     }
   },
   "checkout": {
@@ -303,7 +320,7 @@
     },
     "topup": {
       "title": "購買點數或頁數",
-      "description": "選擇方案並在付款前核對總額。",
+      "description": "選擇儲值包並在付款前核對總額。",
       "buyCredits": "購買點數",
       "buyPages": "購買頁數",
       "error": "無法準備結帳"

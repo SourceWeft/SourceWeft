@@ -19,7 +19,7 @@ import { formatCopy } from "../messages";
 import {
   formatBillingInterval,
   formatBillingStatus,
-  formatFeatureName,
+  formatCycleSource,
   formatPlanName,
   formatSeatProviderAction,
   getSeatPreviewDirection,
@@ -222,7 +222,7 @@ export function BillingPanel() {
     {
       label: copy.common.cycle,
       value: cycleLabel,
-      detail: summary ? formatFeatureName(summary.cycleSource) : "--",
+      detail: summary ? formatCycleSource(summary.cycleSource, copy) : "--",
     },
     {
       label: copy.common.credits,

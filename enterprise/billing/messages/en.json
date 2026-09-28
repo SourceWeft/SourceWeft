@@ -92,6 +92,11 @@
       "team_standard": "Team",
       "team_premium": "Team Premium",
       "enterprise_usage": "Enterprise"
+    },
+    "cycleSources": {
+      "free_account": "Free account",
+      "provider_subscription": "Provider subscription",
+      "manual": "Manual"
     }
   },
   "billing": {
@@ -274,6 +279,18 @@
     },
     "release": {
       "default": "{feature} released"
+    },
+    "featureNames": {
+      "chat": "Chat",
+      "retrieval": "Retrieval",
+      "retrieval_rerank": "Retrieval rerank",
+      "source_ingestion": "Source ingestion",
+      "ingestion.asr": "Audio transcription",
+      "artifact.image": "Image generation",
+      "artifact.video_presentation.asset": "Video asset generation",
+      "artifact.video_presentation.narration": "Video narration",
+      "artifact.video_presentation.validation": "Video validation",
+      "html.visual_qa": "Visual QA"
     }
   },
   "checkout": {

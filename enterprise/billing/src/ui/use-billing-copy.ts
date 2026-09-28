@@ -68,13 +68,13 @@ export function useBillingCopy(): {
           formatDate(new Date(iso), intlLocale, {
             year: "numeric",
             month: "short",
-            day: "2-digit",
+            day: "numeric",
           }),
         dateTime: (iso) =>
           formatDate(new Date(iso), intlLocale, {
             year: "numeric",
             month: "short",
-            day: "2-digit",
+            day: "numeric",
             hour: "2-digit",
             minute: "2-digit",
           }),
