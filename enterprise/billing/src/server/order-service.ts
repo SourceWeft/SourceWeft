@@ -40,6 +40,7 @@ import type {
   TeamSubscriptionSnapshot,
 } from "./types";
 import { getTotalPagesBalance, grantAddOnPages } from "./page-ledger";
+import { applyRecordedReversalLocked } from "./payment-reversal";
 import {
   ensureBillingCheckoutEnabled,
   ensureTeamBillingEnabled,
@@ -1229,9 +1230,21 @@ export class BillingOrderService {
       await this.store.updateAccount(account, client);
     }
 
+    // A refund or chargeback recorded before this grant reverses it in the
+    // same transaction, so a refunded order nets to zero rather than being
+    // granted later by the retry job.
+    const reversed = await applyRecordedReversalLocked({
+      store: this.store,
+      client,
+      account,
+      order,
+      alerts: this.alerts,
+      logger: this.host?.logger,
+    });
+
     return this.store.updateOrder(
       {
-        ...order,
+        ...reversed,
         status: "fulfilled",
         paymentStatus: "paid",
         fulfilledAt: new Date().toISOString(),
