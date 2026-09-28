@@ -392,6 +392,73 @@ test("a refund without amounts raises an alert and changes nothing", async () =>
   );
 });
 
+test("a refund whose order no longer exists is unmatched, not retried forever", async () => {
+  const f = createWaffoFixture();
+  await checkout(f);
+  const missingOrderId = "missing-order-id";
+  const refunded = signedEvent(
+    f.refundEvent({
+      data: {
+        orderMerchantExternalId: missingOrderId,
+        orderMetadata: { sourceweftOrderId: missingOrderId },
+      },
+    }),
+  );
+  await f.inbox.receive(refunded.raw, refunded.signature);
+  await f.inbox.drain();
+  assert.equal(f.store.webhook?.status, "ignored");
+  assert.equal(f.store.webhook?.errorCode, "WAFFO_REFUND_UNMATCHED");
+  assert.ok(
+    f.alerts.some(
+      (alert) =>
+        alert.alertKey === "billing:payment-reversal-unmatched:waffo:RT_1",
+    ),
+  );
+});
+
+test("a refund missing its order reference is unmatched, not retried forever", async () => {
+  const f = createWaffoFixture();
+  await checkout(f);
+  const refunded = signedEvent(
+    f.refundEvent({ data: { orderMerchantExternalId: undefined } }),
+  );
+  await f.inbox.receive(refunded.raw, refunded.signature);
+  await f.inbox.drain();
+  assert.equal(f.store.webhook?.status, "ignored");
+  assert.equal(f.store.webhook?.errorCode, "WAFFO_REFUND_UNMATCHED");
+  assert.ok(
+    f.alerts.some(
+      (alert) =>
+        alert.alertKey === "billing:payment-reversal-unmatched:waffo:RT_1",
+    ),
+  );
+});
+
+test("a malformed refund amount raises an alert and changes nothing", async () => {
+  const f = createWaffoFixture();
+  await checkout(f);
+  const paid = signedEvent(f.event());
+  await f.inbox.receive(paid.raw, paid.signature);
+  await f.inbox.drain();
+  const before = f.store.account!.addOnCreditsBalance;
+
+  const malformed = signedEvent(
+    f.refundEvent({ data: { refundedAmount: "12,50" } }),
+  );
+  await f.inbox.receive(malformed.raw, malformed.signature);
+  await f.inbox.drain();
+  assert.equal(f.store.webhook?.status, "ignored");
+  assert.equal(f.store.webhook?.errorCode, "WAFFO_REFUND_AMOUNT_UNAVAILABLE");
+  assert.equal(f.store.account!.addOnCreditsBalance, before);
+  assert.ok(
+    f.alerts.some(
+      (alert) =>
+        alert.alertKey ===
+        "billing:payment-reversal-amount-unavailable:waffo:RT_1",
+    ),
+  );
+});
+
 test("a refund after subscription.canceled is not dropped as stale", async () => {
   const f = createWaffoFixture();
   await f.billing.ensureBillingAccount("team_1", "user_1");

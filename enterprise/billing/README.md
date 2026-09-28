@@ -68,11 +68,17 @@ product catalog. Use `CREEM_TEST_MODE=true`, `STRIPE_TEST_MODE=true`, or
 `WAFFO_ENVIRONMENT=test`, respectively. Missing required configuration fails
 startup; the application never switches provider or falls back to unmetered mode.
 
-After this change, add `refund.succeeded` and `refund.failed` to the event
-list of the store's existing Waffo webhooks — both the test-mode and the live
-endpoint — in the Waffo dashboard or with `client.webhooks.update`.
+To handle Waffo refunds, add `refund.succeeded` and `refund.failed` to the
+event list of the store's existing Waffo webhooks — both the test-mode and
+the live endpoint — in the Waffo dashboard or with `client.webhooks.update`;
 `setup-waffo --webhook-url` creates a new test-mode webhook and does not
-update an existing one.
+update an existing one. Add the events only once every API, worker and
+scheduler instance runs a version that handles them: an older instance marks
+a refund receipt ignored as unsupported, and receipt dedupe means Waffo never
+redelivers it once acknowledged, so a refund event seen before the rollout
+finishes is a refund silently not reversed. Verify the refund payload in the
+Waffo test environment first — a full refund and two successive partial
+refunds on one payment — before adding the events to the live endpoint.
 
 Restart API, worker and scheduler together after changing module settings. Their
 startup capabilities must agree. The same image supports both states. Web and PC

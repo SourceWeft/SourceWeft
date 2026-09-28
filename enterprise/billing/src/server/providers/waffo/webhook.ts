@@ -48,6 +48,21 @@ export const waffoEventKey = (event: WebhookEvent) =>
     )
     .digest("hex");
 
+/**
+ * A refund amount that is missing or does not parse as a display amount:
+ * both are "no usable figure" to the caller, which treats them identically
+ * (an `amount_unavailable` notice) rather than letting a malformed string
+ * throw and turn into a permanently failing, endlessly retried receipt.
+ */
+function parseRefundAmount(value: string | undefined): number | null {
+  if (!value) return null;
+  try {
+    return displayToCents(value);
+  } catch {
+    return null;
+  }
+}
+
 type Verify = (
   raw: string,
   signature: string | undefined,
@@ -262,9 +277,16 @@ export class WaffoWebhookService {
     const { billing, store } = this.input;
     if (!supported.has(event.eventType))
       return this.ignore(receiptId, "WAFFO_EVENT_UNSUPPORTED");
+    const isRefund =
+      event.eventType === "refund.succeeded" ||
+      event.eventType === "refund.failed";
     const reference = event.data.orderMerchantExternalId;
-    if (!reference || !event.data.orderMetadata?.sourceweftOrderId)
+    if (!reference || !event.data.orderMetadata?.sourceweftOrderId) {
+      // A refund with no local reference is an operator problem, not a
+      // transient one: notice-and-ignore rather than retry it forever.
+      if (isRefund) return this.unmatchedRefund(event, receiptId);
       return this.ignore(receiptId, "WAFFO_UNRELATED_ORDER");
+    }
     if (reference !== event.data.orderMetadata.sourceweftOrderId)
       throw new BillingError(
         "WAFFO_ORDER_MISMATCH",
@@ -272,18 +294,16 @@ export class WaffoWebhookService {
         "Waffo order references do not match",
       );
     const order = await billing.getOrder(reference);
-    if (!order)
+    if (!order) {
+      if (isRefund) return this.unmatchedRefund(event, receiptId);
       throw new BillingError(
         "WAFFO_ORDER_NOT_FOUND",
         422,
         "Waffo local billing order was not found",
       );
+    }
     this.validateOrder(event, order, settings);
-    if (
-      event.eventType === "refund.succeeded" ||
-      event.eventType === "refund.failed"
-    )
-      return this.processRefund(event, order, receiptId);
+    if (isRefund) return this.processRefund(event, order, receiptId);
     const expectedProductKey =
       order.kind === "subscription"
         ? `${order.planFamily}:${order.billingInterval}`
@@ -467,10 +487,29 @@ export class WaffoWebhookService {
     });
   }
   /**
+   * A refund with no local reference, or whose reference matches no local
+   * order: an operator problem (a stray receipt, a migrated/deleted order),
+   * not a transient one. Notice-and-ignore rather than throw, so it does not
+   * retry forever. Runs before an `order` is even resolved, so only the event
+   * itself is available for the notice.
+   */
+  private async unmatchedRefund(event: WebhookEvent, receiptId: string) {
+    await this.input.billing.reportPaymentReversalNotice({
+      reason: "unmatched",
+      provider: "waffo",
+      providerReference:
+        event.data.refundTicketMerchantExternalId ?? event.eventId,
+      currency: event.data.currency,
+    });
+    return this.ignore(receiptId, "WAFFO_REFUND_UNMATCHED");
+  }
+  /**
    * Translates a Waffo refund event into the reversal core and nothing more.
    * Runs ahead of the product-key check and the stale guard: a refund on an
    * order Waffo otherwise considers stale (e.g. a canceled subscription) must
-   * still be applied or noticed, not dropped.
+   * still be applied or noticed, not dropped. Every failure mode here ends
+   * the receipt `ignored` with a notice/alert rather than `failed`: none of
+   * them are transient, so retrying every 30s would only repeat them forever.
    */
   private async processRefund(
     event: WebhookEvent,
@@ -478,10 +517,18 @@ export class WaffoWebhookService {
     receiptId: string,
   ) {
     const { billing, store } = this.input;
-    if (event.eventType === "refund.failed")
+    if (event.eventType === "refund.failed") {
+      this.input.logger.info("Waffo refund failed upstream; ignored", {
+        eventId: event.id,
+        orderId: order.id,
+        refundTicketId: event.data.refundTicketMerchantExternalId,
+      });
       return this.ignore(receiptId, "WAFFO_REFUND_FAILED");
+    }
     const { data } = event;
-    if (!data.refundedAmount || !data.originalChargedAmount) {
+    const refundedAmount = parseRefundAmount(data.refundedAmount);
+    const paidAmount = parseRefundAmount(data.originalChargedAmount);
+    if (refundedAmount === null || paidAmount === null) {
       await billing.reportPaymentReversalNotice({
         reason: "amount_unavailable",
         provider: "waffo",
@@ -492,20 +539,44 @@ export class WaffoWebhookService {
       });
       return this.ignore(receiptId, "WAFFO_REFUND_AMOUNT_UNAVAILABLE");
     }
-    const result = await billing.applyPaymentReversal({
-      orderId: order.id,
-      provider: "waffo",
-      reversalId: data.refundTicketMerchantExternalId ?? event.eventId,
-      kind: "refund",
-      amount: { refundAmount: displayToCents(data.refundedAmount) },
-      paidAmount: displayToCents(data.originalChargedAmount),
-      currency: data.currency,
-      metadata: {
-        waffoOrderId: data.orderId,
-        refundStatus: data.refundStatus,
-        refundReason: data.refundReason,
-      },
-    });
+    let result;
+    try {
+      result = await billing.applyPaymentReversal({
+        orderId: order.id,
+        provider: "waffo",
+        reversalId: data.refundTicketMerchantExternalId ?? event.eventId,
+        kind: "refund",
+        amount: { refundAmount: refundedAmount },
+        paidAmount,
+        currency: data.currency,
+        metadata: {
+          waffoOrderId: data.orderId,
+          refundStatus: data.refundStatus,
+          refundReason: data.refundReason,
+        },
+      });
+    } catch (error) {
+      // The core rejects an order it cannot reverse (missing team/unit-type
+      // binding) by throwing rather than returning an outcome — that shape
+      // is for a caller bug, not a webhook event. Treat it the same as an
+      // unmatched order rather than retrying forever.
+      if (
+        error instanceof BillingError &&
+        error.code === "BILLING_ORDER_INVALID"
+      ) {
+        await billing.reportPaymentReversalNotice({
+          reason: "unmatched",
+          provider: "waffo",
+          providerReference:
+            data.refundTicketMerchantExternalId ?? event.eventId,
+          orderId: order.id,
+          teamId: order.teamId,
+          currency: data.currency,
+        });
+        return this.ignore(receiptId, "WAFFO_REFUND_REJECTED");
+      }
+      throw error;
+    }
     if (result.outcome === "rejected")
       return this.ignore(receiptId, "WAFFO_REFUND_REJECTED");
     await store.updateWebhookEventState(receiptId, {

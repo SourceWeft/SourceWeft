@@ -50,7 +50,10 @@ export type PaymentReversalInput = {
 
 export type PaymentReversalResult =
   | { outcome: "duplicate" }
-  | { outcome: "rejected"; reason: "currency_mismatch" | "invalid_amount" }
+  | {
+      outcome: "rejected";
+      reason: "currency_mismatch" | "invalid_amount" | "provider_mismatch";
+    }
   | { outcome: "subscription_notice"; order: BillingOrderState }
   | { outcome: "recorded_before_fulfillment"; order: BillingOrderState }
   | {
@@ -79,7 +82,8 @@ export type PaymentReversalNotice = {
 
 type AlertTrigger = Pick<BillingAlertSink, "trigger">;
 type AlertInput = Parameters<BillingAlertSink["trigger"]>[0];
-type RejectionReason = "currency_mismatch" | "invalid_amount";
+type RejectionReason =
+  "currency_mismatch" | "invalid_amount" | "provider_mismatch";
 
 type TopupOrder = BillingOrderState & {
   teamId: string;
@@ -633,6 +637,10 @@ function rejectionReason(
   order: TopupOrder,
   input: PaymentReversalInput,
 ): RejectionReason | null {
+  if (order.provider !== input.provider) {
+    return "provider_mismatch";
+  }
+
   if (
     !order.currency ||
     order.currency.toUpperCase() !== input.currency.toUpperCase()
@@ -704,10 +712,13 @@ function rejectedAlert(
     message:
       reason === "currency_mismatch"
         ? `Reversal ${request.reversalId} on order ${order.id} was not applied: currency ${request.currency ?? "(none)"} does not match the order currency ${order.currency ?? "(none)"}.`
-        : `Reversal ${request.reversalId} on order ${order.id} was not applied: the paid or refunded amount is invalid.`,
+        : reason === "provider_mismatch"
+          ? `Reversal ${request.reversalId} on order ${order.id} was not applied: provider ${request.provider} does not match the order's provider ${order.provider}.`
+          : `Reversal ${request.reversalId} on order ${order.id} was not applied: the paid or refunded amount is invalid.`,
     metadata: {
       ...metadata,
       reason,
+      orderProvider: order.provider,
       orderCurrency: order.currency,
       orderAmountTotal: order.amountTotal,
       orderRefundedAmount: order.refundedAmount,

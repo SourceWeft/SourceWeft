@@ -468,6 +468,27 @@ test("currency mismatch is rejected with an alert", async () => {
   assert.equal(alerts[0]?.source, "billing.payment-reversal");
 });
 
+test("provider mismatch is rejected with an alert", async () => {
+  const { store, alerts, service } = await setupTopup();
+
+  const result = await service.applyPaymentReversal(
+    reversal({ provider: "creem" }),
+  );
+
+  assert.deepEqual(result, {
+    outcome: "rejected",
+    reason: "provider_mismatch",
+  });
+  assert.equal(store.account?.addOnCreditsBalance, 20_000);
+  assert.equal(reversalRows(store).length, 0);
+  assert.equal(store.order?.refundedAmount, 0);
+  assert.equal(store.order?.reversalStatus, "none");
+  assert.deepEqual(alertLevels(alerts), [
+    ["billing:payment-reversal-rejected:order_1", "error"],
+  ]);
+  assert.equal(alerts[0]?.source, "billing.payment-reversal");
+});
+
 test("an order without a currency is rejected as a currency mismatch", async () => {
   const { store, alerts, service } = await setupTopup({
     order: { currency: null },
@@ -626,6 +647,29 @@ test("partial refund recorded before fulfillment grants the remainder", async ()
   assert.equal(store.order?.reversedUnits, 5_000);
   assert.equal(store.order?.reversalStatus, "partially_refunded");
   assert.equal(store.order?.refundedAmount, 250);
+});
+
+test("a redelivered partial refund while still unfulfilled is a duplicate, not a second reversal", async () => {
+  const { store, service } = await setupTopup({ fulfilled: false });
+  const event = reversal({ reversalId: "r1", amount: { refundAmount: 400 } });
+
+  const first = await service.applyPaymentReversal(event);
+  assert.equal(first.outcome, "recorded_before_fulfillment");
+  assert.equal(store.order?.refundedAmount, 400);
+
+  // The same event delivered again before fulfillment must not add another
+  // 400 on top of the first: the ledger's reversal-id idempotency key catches
+  // it before the order's `refundedAmount` is ever recomputed.
+  const second = await service.applyPaymentReversal(event);
+  assert.deepEqual(second, { outcome: "duplicate" });
+  assert.equal(store.order?.refundedAmount, 400);
+  assert.equal(reversalRows(store).length, 1);
+
+  await service.fulfillOrder({ orderId: "order_1" });
+
+  assert.equal(store.account?.addOnCreditsBalance, 12_000);
+  assert.equal(store.order?.reversedUnits, 8_000);
+  assert.equal(store.order?.refundedAmount, 400);
 });
 
 test("a recorded refund without an order amount is left for an operator at fulfillment", async () => {
