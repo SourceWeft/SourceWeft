@@ -142,6 +142,9 @@ function mapOrder(row: BillingOrderRow): BillingOrderState {
     unitAmount: row.unitAmount,
     grantedCredits: row.grantedCredits,
     grantedPages: row.grantedPages,
+    refundedAmount: row.refundedAmount,
+    reversedUnits: row.reversedUnits,
+    reversalStatus: row.reversalStatus,
     externalCheckoutId: row.externalCheckoutId,
     externalPaymentId: row.externalPaymentId,
     externalCustomerId: row.externalCustomerId,
@@ -630,6 +633,25 @@ export class PostgresBillingStore implements BillingStore {
     return row ? mapOrder(row) : null;
   }
 
+  async getOrderByProviderPaymentId(
+    provider: BillingOrderState["provider"],
+    externalPaymentId: string,
+    client?: PoolClient,
+  ) {
+    const [row] = await this.pickDb(client)
+      .select()
+      .from(billingOrders)
+      .where(
+        and(
+          eq(billingOrders.provider, provider),
+          eq(billingOrders.externalPaymentId, externalPaymentId),
+        ),
+      )
+      .limit(1);
+
+    return row ? mapOrder(row) : null;
+  }
+
   async insertOrder(order: BillingOrderState, client?: PoolClient) {
     const [row] = await this.pickDb(client)
       .insert(billingOrders)
@@ -649,6 +671,9 @@ export class PostgresBillingStore implements BillingStore {
         unitAmount: order.unitAmount,
         grantedCredits: order.grantedCredits,
         grantedPages: order.grantedPages,
+        refundedAmount: order.refundedAmount,
+        reversedUnits: order.reversedUnits,
+        reversalStatus: order.reversalStatus,
         externalCheckoutId: order.externalCheckoutId,
         externalPaymentId: order.externalPaymentId,
         externalCustomerId: order.externalCustomerId,
@@ -696,6 +721,9 @@ export class PostgresBillingStore implements BillingStore {
         unitAmount: order.unitAmount,
         grantedCredits: order.grantedCredits,
         grantedPages: order.grantedPages,
+        refundedAmount: order.refundedAmount,
+        reversedUnits: order.reversedUnits,
+        reversalStatus: order.reversalStatus,
         externalCheckoutId: order.externalCheckoutId,
         externalPaymentId: order.externalPaymentId,
         externalCustomerId: order.externalCustomerId,

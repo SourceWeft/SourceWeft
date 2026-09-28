@@ -242,6 +242,20 @@ export class MemoryBillingStore implements BillingStore {
     return this.order;
   }
 
+  async getOrderByProviderPaymentId(
+    provider: BillingOrderState["provider"],
+    externalPaymentId: string,
+  ) {
+    if (
+      this.order?.provider === provider &&
+      this.order.externalPaymentId === externalPaymentId
+    ) {
+      return this.order;
+    }
+
+    return null;
+  }
+
   async insertOrder(order: BillingOrderState) {
     this.order = { ...order, metadata: { ...order.metadata } };
     this.orders.set(order.id, this.order);

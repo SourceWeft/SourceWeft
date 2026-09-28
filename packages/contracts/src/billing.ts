@@ -64,6 +64,7 @@ export const billingOperationTypeSchema = z.enum([
   "topup",
   "usage",
   "quota_adjustment",
+  "payment_reversal",
 ]);
 
 export const billingOrderKindSchema = z.enum([
@@ -88,6 +89,13 @@ export const billingOrderPaymentStatusSchema = z.enum([
   "paid",
   "failed",
   "expired",
+]);
+
+export const billingOrderReversalStatusSchema = z.enum([
+  "none",
+  "partially_refunded",
+  "refunded",
+  "charged_back",
 ]);
 
 export const pricingCheckoutPlanSchema = z.enum(["pro", "team"]);
@@ -279,6 +287,9 @@ export const billingOrderResponseSchema = z.object({
   unitAmount: z.number().int().nonnegative().nullable(),
   grantedCredits: z.number().int().nonnegative(),
   grantedPages: z.number().int().nonnegative(),
+  refundedAmount: z.number().int().nonnegative(),
+  reversedUnits: z.number().int().nonnegative(),
+  reversalStatus: billingOrderReversalStatusSchema,
   externalCheckoutId: z.string().nullable(),
   externalPaymentId: z.string().nullable(),
   externalCustomerId: z.string().nullable(),
@@ -497,6 +508,9 @@ export type BillingOrderKind = z.infer<typeof billingOrderKindSchema>;
 export type BillingOrderStatus = z.infer<typeof billingOrderStatusSchema>;
 export type BillingOrderPaymentStatus = z.infer<
   typeof billingOrderPaymentStatusSchema
+>;
+export type BillingOrderReversalStatus = z.infer<
+  typeof billingOrderReversalStatusSchema
 >;
 export type PricingCheckoutPlan = z.infer<typeof pricingCheckoutPlanSchema>;
 export type BillingCheckoutSource = z.infer<typeof billingCheckoutSourceSchema>;
