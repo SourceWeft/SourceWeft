@@ -944,6 +944,7 @@ export class BillingOrderService {
       try {
         await this.fulfillOrder({
           orderId: order.id,
+          externalPaymentId: order.externalPaymentId,
           externalCustomerId: order.externalCustomerId,
           externalSubscriptionId: order.externalSubscriptionId,
           externalProductId: order.externalProductId,
@@ -1042,7 +1043,7 @@ export class BillingOrderService {
         return this.fulfillTopupOrderLocked(confirmed, client);
       });
     } catch (error) {
-      await this.markFulfillmentFailed(input.orderId, error);
+      await this.markFulfillmentFailed(input.orderId, error, input);
       throw error;
     }
   }
@@ -1308,7 +1309,11 @@ export class BillingOrderService {
     );
   }
 
-  private async markFulfillmentFailed(orderId: string, error: unknown) {
+  private async markFulfillmentFailed(
+    orderId: string,
+    error: unknown,
+    input?: FulfillInput,
+  ) {
     const order = await this.store.getOrderById(orderId);
     if (!order || order.status === "fulfilled") {
       return;
@@ -1321,6 +1326,13 @@ export class BillingOrderService {
     await this.store.updateOrder({
       ...order,
       status: "fulfillment_failed",
+      // The transaction that would have persisted this rolled back, so the
+      // re-read `order` above can be stale. `input` reflects what the caller
+      // was actually confirming and survives the rollback in memory — use it
+      // to keep the provider payment id available for the retry job.
+      ...(input?.externalPaymentId
+        ? { externalPaymentId: input.externalPaymentId, paymentStatus: "paid" }
+        : {}),
       errorCode: code,
       errorMessage: message,
       nextRetryAt: buildRetryAt(),
