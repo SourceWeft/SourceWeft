@@ -267,6 +267,28 @@ test("mode mismatch on a refund event logs the received and expected mode", asyn
   });
 });
 
+test("mode mismatch with no mode field logs receivedMode as null", async () => {
+  const f = fixture();
+  const raw = JSON.stringify({
+    id: "evt_no_mode",
+    eventType: "subscription.active",
+    object: {},
+  });
+  const response = await f.handler(post(raw, sign(raw)));
+  assert.equal(response?.status, 403);
+  assert.equal(f.syncCalls.length, 0);
+
+  assert.equal(f.warnCalls.length, 1);
+  // pino drops `undefined` fields silently, which would hide that a mode
+  // was expected at all; `null` makes the absence explicit in the log.
+  assert.deepEqual(f.warnCalls[0]?.fields, {
+    eventType: "subscription.active",
+    webhookId: "evt_no_mode",
+    receivedMode: null,
+    expectedMode: "test",
+  });
+});
+
 test("missing webhook secret rejects signed deliveries", async () => {
   const f = fixture({ webhookSecret: "" });
   const raw = JSON.stringify({

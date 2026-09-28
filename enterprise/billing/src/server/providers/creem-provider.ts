@@ -1,4 +1,8 @@
-import { createCreemClient, createCreemPortalLink } from "./creem-client";
+import {
+  createCreemClient,
+  createCreemPortalLink,
+  type CreemClientOptions,
+} from "./creem-client";
 import type { BillingRuntimeConfig } from "../types";
 import type {
   BillingProviderAdapter,
@@ -11,11 +15,6 @@ import type {
 } from "../types";
 import { BillingError } from "../errors";
 import { toObjectRecord } from "../records";
-
-type CreemServerOptions = {
-  apiKey: string;
-  testMode?: boolean;
-};
 
 function readString(record: Record<string, unknown> | null, key: string) {
   const value = record?.[key];
@@ -76,7 +75,7 @@ export function resolveCreemSubscriptionSeatUpdateItem(input: {
 }
 
 export class CreemBillingProvider implements BillingProviderAdapter {
-  private readonly options: CreemServerOptions;
+  private readonly options: CreemClientOptions;
   private readonly defaultSuccessUrl: string;
 
   constructor(config: BillingRuntimeConfig) {

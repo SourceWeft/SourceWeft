@@ -55,6 +55,9 @@ export function createCreemWebhookHandler(deps: {
   const logger = deps.logger;
   const syncCreemSubscriptionEvent = deps.sync;
   const syncCreemReversalEvent = deps.reversalSync;
+  // The deployment's test/live mode never changes for the lifetime of this
+  // handler, so it is computed once here rather than per request.
+  const expectedMode = config.billing.creem.testMode ? "test" : "prod";
   return async function handleCreemWebhook(request: Request) {
     if (
       config.billing.provider !== "creem" ||
@@ -135,15 +138,12 @@ export function createCreemWebhookHandler(deps: {
         );
       }
 
-      const expectedReversalMode = config.billing.creem.testMode
-        ? "test"
-        : "prod";
-      if (data.mode !== expectedReversalMode) {
+      if (data.mode !== expectedMode) {
         logger.warn("Creem webhook mode mismatch", {
           eventType,
           webhookId,
-          receivedMode: data.mode,
-          expectedMode: expectedReversalMode,
+          receivedMode: data.mode ?? null,
+          expectedMode,
         });
         return Response.json(
           { error: "Webhook environment mismatch" },
@@ -200,12 +200,11 @@ export function createCreemWebhookHandler(deps: {
       );
     }
 
-    const expectedMode = config.billing.creem.testMode ? "test" : "prod";
     if (data.mode !== expectedMode) {
       logger.warn("Creem webhook mode mismatch", {
         eventType,
         webhookId: readString(data, "webhookId"),
-        receivedMode: data.mode,
+        receivedMode: data.mode ?? null,
         expectedMode,
       });
       return Response.json(

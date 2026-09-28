@@ -54,17 +54,26 @@ export async function createCreemPortalLink(
  *
  * The header is trimmed and lower-cased before comparison so a casing or
  * whitespace difference from the sender never causes a spurious rejection.
- * A length mismatch is rejected before reaching `timingSafeEqual`, which
- * throws (rather than returning false) when its two buffers differ in
- * length; checking first also avoids leaking timing information tied to
- * the header's length.
+ *
+ * `timingSafeEqual` throws instead of returning false when its two buffers
+ * differ in length, so the length check below is required, not just an
+ * optimization. It does not leak anything secret: a hex-encoded SHA-256
+ * digest always has the same fixed, public length, so the check only
+ * reveals whether the supplied header happens to share that public length,
+ * not any byte of the actual signature.
+ *
+ * An empty secret is also rejected up front. `createHmac("sha256", "")`
+ * succeeds and produces a real digest (unlike the WebCrypto path this
+ * replaced, which threw on an empty key), so a misconfigured empty
+ * `CREEM_WEBHOOK_SECRET` must be checked explicitly rather than relying on
+ * the HMAC call itself to fail.
  */
 export function verifyCreemSignature(
   rawBody: string,
   header: string | null,
   secret: string,
 ): boolean {
-  if (!header) {
+  if (!header || !secret) {
     return false;
   }
 
