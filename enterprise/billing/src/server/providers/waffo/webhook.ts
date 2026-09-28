@@ -491,11 +491,33 @@ export class WaffoWebhookService {
   /**
    * A refund with no local reference, or whose reference matches no local
    * order: an operator problem (a stray receipt, a migrated/deleted order),
-   * not a transient one. Notice-and-ignore rather than throw, so it does not
-   * retry forever. Runs before an `order` is even resolved, so only the event
-   * itself is available for the notice.
+   * not a transient one — UNLESS the event's own Waffo order id is a
+   * subscription's `externalSubscriptionId`: a subscription *renewal*
+   * payment has no local SourceWeft order row at all (see
+   * `syncSubscriptionSnapshot`'s `externalSubscriptionId: event.data.orderId`
+   * above), so that is the expected, not exceptional, shape for a refund of
+   * one. Notice-and-ignore rather than throw either way, so it does not
+   * retry forever. Runs before an `order` is even resolved, so only the
+   * event itself is available for the notice.
    */
   private async unmatchedRefund(event: WebhookEvent, receiptId: string) {
+    const subscription = await this.input.billing.findSubscriptionByProvider(
+      "waffo",
+      event.data.orderId,
+    );
+    if (subscription) {
+      await this.input.billing.reportPaymentReversalNotice({
+        reason: "subscription_payment",
+        provider: "waffo",
+        providerReference:
+          event.data.refundTicketMerchantExternalId ?? event.eventId,
+        orderId: subscription.billingOrderId,
+        teamId: subscription.teamId,
+        currency: event.data.currency,
+      });
+      return this.ignore(receiptId, "WAFFO_REFUND_SUBSCRIPTION_PAYMENT");
+    }
+
     await this.input.billing.reportPaymentReversalNotice({
       reason: "unmatched",
       provider: "waffo",

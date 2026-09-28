@@ -1114,3 +1114,141 @@ test("an unmatched Creem refund raises the unmatched alert", async () => {
     ),
   );
 });
+
+// A subscription renewal payment has no local order row (Creem does not
+// create one for recurring charges), so a refund of one only ever resolves
+// through the provider subscription id — never through `resolveOrder`. The
+// subscription fixture below stands in for the row `syncSubscriptionSnapshot`
+// would have written when the subscription itself was first activated.
+function activeSubscriptionFixture() {
+  const now = new Date().toISOString();
+  return {
+    id: "sub_1",
+    teamId: "team_1",
+    provider: "creem" as const,
+    planFamily: "individual_pro" as const,
+    status: "active" as const,
+    billingInterval: "monthly" as const,
+    currentPeriodStart: now,
+    currentPeriodEnd: now,
+    externalCustomerId: "cus_1",
+    externalSubscriptionId: "sub_ext_1",
+    externalSubscriptionItemId: null,
+    externalProductId: "prod_individual_monthly",
+    billingOrderId: "order_sub_1",
+    cancelAtPeriodEnd: false,
+    metadata: {},
+    lastEventAt: now,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+test("a Creem renewal refund with no local order raises the subscription notice", async () => {
+  const f = await fixture();
+  f.store.subscription = activeSubscriptionFixture();
+
+  await f.reversalSync("refund.created", {
+    id: "ref_renewal",
+    status: "succeeded",
+    refund_amount: 1200,
+    refund_currency: "USD",
+    subscription: "sub_ext_1",
+    transaction: {
+      id: "tran_renewal",
+      type: "payment",
+      amount: 1200,
+      amount_paid: 1200,
+      currency: "USD",
+      refunded_amount: null,
+    },
+    order: { type: "recurring" },
+    webhookEventType: "refund.created",
+    webhookId: "evt_refund_renewal",
+    webhookCreatedAt: Date.now(),
+  });
+
+  // Never changes balances: the reversal core is never invoked for a
+  // subscription-payment notice.
+  assert.equal(f.store.account?.addOnPagesBalance, 1000);
+  assert.equal(reversalRows(f).length, 0);
+  const alert = f.alerts.find(
+    (entry) =>
+      entry.alertKey === "billing:subscription-payment-reversal:team_1",
+  );
+  assert.ok(alert);
+  assert.equal(alert?.teamId, "team_1");
+  assert.equal(alert?.metadata?.reason, "subscription_payment");
+  assert.equal(alert?.metadata?.orderId, "order_sub_1");
+  assert.equal(
+    f.store.webhooks.get("creem:evt_refund_renewal")?.status,
+    "processed",
+  );
+});
+
+test("a Creem refund with an unknown subscription id still ends unmatched", async () => {
+  const f = await fixture();
+  // No subscription recorded at all: the lookup must fail closed, not
+  // silently treat the refund as matched.
+
+  await f.reversalSync("refund.created", {
+    id: "ref_unknown_subscription",
+    status: "succeeded",
+    refund_amount: 500,
+    refund_currency: "USD",
+    subscription: "sub_does_not_exist",
+    transaction: {
+      id: "tran_other",
+      amount: 500,
+      amount_paid: 500,
+      currency: "USD",
+      refunded_amount: null,
+    },
+    webhookEventType: "refund.created",
+    webhookId: "evt_refund_unknown_subscription",
+    webhookCreatedAt: Date.now(),
+  });
+
+  assert.equal(f.store.account?.addOnPagesBalance, 1000);
+  assert.equal(reversalRows(f).length, 0);
+  const alert = f.alerts.find(
+    (entry) =>
+      entry.alertKey ===
+      "billing:payment-reversal-unmatched:creem:ref_unknown_subscription",
+  );
+  assert.ok(alert);
+  assert.equal(alert?.metadata?.reason, "unmatched");
+});
+
+test("a Creem dispute with no local order still resolves the team through the subscription", async () => {
+  const f = await fixture();
+  f.store.subscription = activeSubscriptionFixture();
+
+  await f.reversalSync("dispute.created", {
+    id: "dis_renewal",
+    amount: 1200,
+    currency: "USD",
+    subscription: "sub_ext_1",
+    transaction: {
+      id: "tran_dispute_renewal",
+      type: "payment",
+      amount: 1200,
+      amount_paid: 1200,
+      currency: "USD",
+    },
+    order: { type: "recurring" },
+    webhookEventType: "dispute.created",
+    webhookId: "evt_dispute_renewal",
+    webhookCreatedAt: Date.now(),
+  });
+
+  // A dispute always stays a dispute-opened notice; only the team/order it
+  // carries changes.
+  assert.equal(f.store.account?.addOnPagesBalance, 1000);
+  const alert = f.alerts.find(
+    (entry) => entry.alertKey === "billing:dispute-opened:creem:dis_renewal",
+  );
+  assert.ok(alert);
+  assert.equal(alert?.teamId, "team_1");
+  assert.equal(alert?.metadata?.orderId, "order_sub_1");
+});
