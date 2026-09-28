@@ -347,7 +347,11 @@ export class BillingPaymentReversalService {
     }
 
     const orderChanges = {
-      refundedAmount: request.refundedTotal,
+      // A cumulative dispute or refund amount can be smaller than a total
+      // already recorded (e.g. a chargeback's own paid amount, reported
+      // independently of prior refunds); the recorded total never moves
+      // backwards, for every reversal kind.
+      refundedAmount: Math.max(order.refundedAmount, request.refundedTotal),
       reversalStatus: nextReversalStatus(request, order.reversalStatus),
       updatedAt: new Date().toISOString(),
     };
@@ -458,15 +462,21 @@ async function reverseGrantLocked(input: {
   });
 
   const outcome = { deltaUnits, recovered, shortfall };
-  const alerts = [
-    orderAlert(order, request, {
-      key: "billing:payment-reversal",
-      level: "warn",
-      title: "Top-up payment reversed",
-      message: `A ${request.kind} reversed ${recovered} of ${deltaUnits} ${order.unitType} units on top-up order ${order.id}.`,
-      metadata: outcome,
-    }),
-  ];
+  // A no-op reversal (nothing left to take back, e.g. a redelivered or
+  // already-superseded event) still claims its ledger idempotency key below,
+  // but is not worth an operator's attention.
+  const alerts: AlertInput[] =
+    deltaUnits > 0
+      ? [
+          orderAlert(order, request, {
+            key: "billing:payment-reversal",
+            level: "warn",
+            title: "Top-up payment reversed",
+            message: `A ${request.kind} reversed ${recovered} of ${deltaUnits} ${order.unitType} units on top-up order ${order.id}.`,
+            metadata: outcome,
+          }),
+        ]
+      : [];
   if (shortfall > 0) {
     alerts.push(
       orderAlert(order, request, {

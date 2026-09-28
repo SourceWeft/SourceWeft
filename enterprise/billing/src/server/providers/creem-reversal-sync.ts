@@ -3,7 +3,12 @@ import type {
   PaymentReversalInput,
   PaymentReversalNotice,
 } from "../payment-reversal";
-import { toObjectRecord } from "../records";
+import {
+  readNumber,
+  readReferenceId,
+  readString,
+  toObjectRecord,
+} from "../records";
 import type { BillingService } from "../service";
 import type { BillingOrderState } from "../types";
 
@@ -22,25 +27,6 @@ import type { BillingOrderState } from "../types";
  * see the `refund_id_missing` cause below, which exists for exactly the
  * case where it does not.
  */
-
-function readString(record: Record<string, unknown> | null, key: string) {
-  const value = record?.[key];
-  return typeof value === "string" && value.trim() ? value : null;
-}
-
-function readNumber(record: Record<string, unknown> | null, key: string) {
-  const value = record?.[key];
-  return typeof value === "number" ? value : null;
-}
-
-// Creem's `subscription`/`order` references show up as either a bare id or
-// an embedded object with its own `id`, depending on the event.
-function readReferenceId(value: unknown): string | null {
-  if (typeof value === "string" && value.trim()) {
-    return value;
-  }
-  return readString(toObjectRecord(value), "id");
-}
 
 /**
  * `checkout.metadata.orderId` when the refund/dispute carries an embedded
@@ -86,6 +72,33 @@ async function resolveOrder(
   }
 
   return null;
+}
+
+/**
+ * A subscription *renewal* payment has no local order row at all — Creem
+ * does not create one for a recurring charge, only for the initial
+ * checkout — so a refund or dispute against one can never resolve through
+ * `resolveOrder`. This is the only other way to recover the team: look up
+ * the subscription the event itself references. Returns `null` (not an
+ * `unmatched`/`dispute_opened` notice) when there is no subscription id to
+ * try, or it matches no local subscription — the caller decides what that
+ * means for its own notice reason.
+ */
+async function resolveSubscriptionTeam(
+  billing: BillingService,
+  subscriptionId: string | null,
+): Promise<{ teamId: string; orderId: string | null } | null> {
+  if (!subscriptionId) {
+    return null;
+  }
+  const subscription = await billing.findSubscriptionByProvider(
+    "creem",
+    subscriptionId,
+  );
+  if (!subscription) {
+    return null;
+  }
+  return { teamId: subscription.teamId, orderId: subscription.billingOrderId };
 }
 
 type AmountUnavailableCause =
@@ -154,6 +167,13 @@ export function createCreemReversalSync(deps: {
     const externalSubscriptionId = readReferenceId(data.subscription);
     const order = await resolveOrder(billing, data);
     const reversalId = readString(data, "id") ?? webhookId ?? "unknown";
+    // The embedded `transaction` (parsed once, up front) carries the only
+    // other subscription reference Creem sends: `transaction.subscription`,
+    // present on a recurring payment's own transaction even when the event's
+    // top-level `subscription` is absent.
+    const transaction = toObjectRecord(data.transaction);
+    const subscriptionId =
+      externalSubscriptionId ?? readString(transaction, "subscription");
 
     async function record(
       paymentReversal: PaymentReversalInput | null,
@@ -164,8 +184,12 @@ export function createCreemReversalSync(deps: {
         providerEventId: webhookId,
         eventType,
         payload: data,
-        teamId: order?.teamId ?? null,
-        externalSubscriptionId,
+        teamId: order?.teamId ?? reversalNotice?.teamId ?? null,
+        // The resolved id (top-level `subscription` falling back to
+        // `transaction.subscription`), not only the top-level one — the
+        // receipt should record the same subscription reference the notice
+        // logic itself resolved through.
+        externalSubscriptionId: subscriptionId,
         snapshot: null,
         paymentReversal,
         reversalNotice,
@@ -175,18 +199,24 @@ export function createCreemReversalSync(deps: {
     if (eventType === "dispute.created") {
       // A dispute only ever produces a notice: balances change solely on a
       // provider's terminal "lost" decision, which Creem does not model as
-      // a separate event today.
+      // a separate event today. When there is no local order (a dispute on
+      // a subscription renewal payment), fall back to the subscription
+      // lookup so the notice still carries the team — the notice itself
+      // stays `dispute_opened` either way.
+      const subscriptionMatch = order
+        ? null
+        : await resolveSubscriptionTeam(billing, subscriptionId);
       logger.warn("Creem dispute opened", {
         disputeId: reversalId,
-        orderId: order?.id ?? null,
+        orderId: order?.id ?? subscriptionMatch?.orderId ?? null,
         webhookId,
       });
       await record(null, {
         reason: "dispute_opened",
         provider: "creem",
         providerReference: reversalId,
-        orderId: order?.id ?? null,
-        teamId: order?.teamId ?? null,
+        orderId: order?.id ?? subscriptionMatch?.orderId ?? null,
+        teamId: order?.teamId ?? subscriptionMatch?.teamId ?? null,
         amount: readNumber(data, "amount"),
         currency: readString(data, "currency"),
       });
@@ -207,10 +237,16 @@ export function createCreemReversalSync(deps: {
       // Anything that isn't a terminal success or failure — "pending",
       // "requiresAction", an unrecognized value, or a missing status
       // entirely — is not final yet. Treat it the same way and carry the
-      // raw status along so an operator can tell them apart.
+      // raw status along so an operator can tell them apart. Same
+      // no-order-but-maybe-a-subscription fallback as the dispute and
+      // succeeded-refund branches, so a pending refund on a renewal
+      // payment still carries the team rather than losing it.
+      const subscriptionMatch = order
+        ? null
+        : await resolveSubscriptionTeam(billing, subscriptionId);
       logger.warn("Creem refund is not final; reporting a pending notice", {
         refundId: reversalId,
-        orderId: order?.id ?? null,
+        orderId: order?.id ?? subscriptionMatch?.orderId ?? null,
         webhookId,
         status,
       });
@@ -218,8 +254,8 @@ export function createCreemReversalSync(deps: {
         reason: "refund_pending",
         provider: "creem",
         providerReference: reversalId,
-        orderId: order?.id ?? null,
-        teamId: order?.teamId ?? null,
+        orderId: order?.id ?? subscriptionMatch?.orderId ?? null,
+        teamId: order?.teamId ?? subscriptionMatch?.teamId ?? null,
         amount: readNumber(data, "refund_amount"),
         currency: readString(data, "refund_currency"),
         metadata: { status },
@@ -228,6 +264,32 @@ export function createCreemReversalSync(deps: {
     }
 
     if (!order) {
+      // No local order — the usual case is a top-up whose order truly
+      // vanished, but it is also what every subscription renewal refund
+      // looks like, since Creem never creates an order row for a recurring
+      // charge. Try the subscription before giving up as unmatched.
+      const subscriptionMatch = await resolveSubscriptionTeam(
+        billing,
+        subscriptionId,
+      );
+      if (subscriptionMatch) {
+        logger.warn("Creem refund matched a subscription, not an order", {
+          refundId: reversalId,
+          teamId: subscriptionMatch.teamId,
+          webhookId,
+        });
+        await record(null, {
+          reason: "subscription_payment",
+          provider: "creem",
+          providerReference: reversalId,
+          orderId: subscriptionMatch.orderId,
+          teamId: subscriptionMatch.teamId,
+          amount: readNumber(data, "refund_amount"),
+          currency: readString(data, "refund_currency"),
+        });
+        return;
+      }
+
       logger.warn("Creem refund matched no local order", {
         refundId: reversalId,
         orderId: null,
@@ -243,7 +305,6 @@ export function createCreemReversalSync(deps: {
       return;
     }
 
-    const transaction = toObjectRecord(data.transaction);
     // The embedded `transaction` is a snapshot taken BEFORE the current
     // refund. Observed in Creem test mode across three `refund.created`
     // events on one untaxed $5.00 payment: refund_amount 100 with

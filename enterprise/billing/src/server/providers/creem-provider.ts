@@ -14,27 +14,14 @@ import type {
   BillingProviderUpdateSeatsResult,
 } from "../types";
 import { BillingError } from "../errors";
-import { toObjectRecord } from "../records";
-
-function readString(record: Record<string, unknown> | null, key: string) {
-  const value = record?.[key];
-  return typeof value === "string" && value.trim() ? value : null;
-}
-
-function resolveEntityId(value: unknown) {
-  if (typeof value === "string" && value.trim()) {
-    return value;
-  }
-
-  return readString(toObjectRecord(value), "id");
-}
+import { readReferenceId, readString, toObjectRecord } from "../records";
 
 function resolveSubscriptionProductId(subscription: unknown) {
   const record = toObjectRecord(subscription);
   return (
     readString(record, "productId") ??
     readString(record, "product_id") ??
-    resolveEntityId(record?.product)
+    readReferenceId(record?.product)
   );
 }
 
@@ -112,25 +99,6 @@ export class CreemBillingProvider implements BillingProviderAdapter {
     return productId;
   }
 
-  private resolveSubscriptionCustomerId(subscription: unknown) {
-    const record =
-      subscription && typeof subscription === "object"
-        ? (subscription as Record<string, unknown>)
-        : null;
-    const customer = record?.customer;
-
-    if (typeof customer === "string" && customer.trim()) {
-      return customer;
-    }
-
-    if (customer && typeof customer === "object") {
-      const id = (customer as Record<string, unknown>).id;
-      return typeof id === "string" && id.trim() ? id : null;
-    }
-
-    return null;
-  }
-
   async createCheckout(
     input: BillingProviderCheckoutInput,
   ): Promise<BillingProviderCheckoutResult> {
@@ -183,7 +151,7 @@ export class CreemBillingProvider implements BillingProviderAdapter {
       provider: "creem",
       checkoutUrl: response.checkoutUrl,
       externalCheckoutId: response.id,
-      externalCustomerId: resolveEntityId(response.customer),
+      externalCustomerId: readReferenceId(response.customer),
       metadata: await this.checkoutMetadata(),
     };
   }
@@ -198,7 +166,9 @@ export class CreemBillingProvider implements BillingProviderAdapter {
       const subscription = await creemClient.subscriptions.get(
         input.externalSubscriptionId,
       );
-      externalCustomerId = this.resolveSubscriptionCustomerId(subscription);
+      externalCustomerId = readReferenceId(
+        toObjectRecord(subscription)?.customer,
+      );
     }
 
     if (!externalCustomerId) {

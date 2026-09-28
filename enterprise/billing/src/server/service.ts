@@ -33,6 +33,7 @@ import type {
   BillingProviderAdapter,
   BillingOrderState,
   BillingRuntimeConfig,
+  BillingSubscriptionState,
   BillingWebhookProcessInput,
   BillingWebhookProcessResult,
   TeamSubscriptionSnapshot,
@@ -203,6 +204,21 @@ export class BillingService {
     externalPaymentId: string,
   ): Promise<BillingOrderState | null> {
     return this.store.getOrderByProviderPaymentId(provider, externalPaymentId);
+  }
+
+  /**
+   * The subscription a provider's own subscription id points to — used to
+   * recover the team behind a refund/dispute on a subscription renewal
+   * payment, which (unlike a top-up) has no local order row to look up.
+   */
+  findSubscriptionByProvider(
+    provider: BillingSubscriptionState["provider"],
+    externalSubscriptionId: string,
+  ): Promise<BillingSubscriptionState | null> {
+    return this.store.getSubscriptionByProviderSubscription(
+      provider,
+      externalSubscriptionId,
+    );
   }
 
   applyPaymentReversal(input: PaymentReversalInput) {

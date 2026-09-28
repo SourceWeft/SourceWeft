@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test, vi } from "vitest";
-import type Stripe from "stripe";
+import Stripe from "stripe";
 import { Hono } from "hono";
 import {
   readBillingConfig,
@@ -940,4 +940,160 @@ test("a refund resolved to an order this deployment cannot use is unmatched, not
     )?.metadata?.resolvedOrderId,
     order.id,
   );
+});
+
+test("a charge event bound to the other Stripe mode is unmatched and ignored", async () => {
+  // The order was created in test mode; simulate it having been written
+  // under the deployment's other mode (e.g. a shared test account reused
+  // across a live/test split). The resolved order is still found by
+  // PaymentIntent, but the mode mismatch makes it unusable.
+  const f = stripeFixture();
+  const order = await fulfilledTopup(f);
+  f.store.order!.metadata.stripeTestMode = false;
+  await deliver(
+    f,
+    f.event(
+      "charge.refunded",
+      charge(order.externalPaymentId!, 1250, { id: "ch_other_mode" }),
+    ),
+  );
+  assert.equal(f.store.webhook?.status, "ignored");
+  assert.equal(f.store.webhook?.errorCode, "STRIPE_UNRELATED_ORDER");
+  assert.equal(
+    f.store.account!.addOnCreditsBalance,
+    stripeConfig.catalog.creditTopupUnitAmount,
+  );
+  assert.equal(f.store.order!.reversalStatus, "none");
+  assert.equal(
+    f.alerts.find(
+      (entry) =>
+        entry.alertKey ===
+        "billing:payment-reversal-unmatched:stripe:ch_other_mode",
+    )?.metadata?.resolvedOrderId,
+    order.id,
+  );
+});
+
+test("a 404 on the invoice step and on the subscription step resolves as unmatched", async () => {
+  // Step 1: the PaymentIntent resolves and points at an invoice_payment, but
+  // the invoice itself is gone (404) by the time `reference()` retrieves it.
+  const invoiceStep = stripeFixture();
+  invoiceStep.remote.paymentIntents.set("pi_invoice_step", {
+    id: "pi_invoice_step",
+    object: "payment_intent",
+    metadata: {},
+  } as unknown as Stripe.PaymentIntent);
+  invoiceStep.remote.invoicePayments.push({
+    id: "ip_invoice_step",
+    object: "invoice_payment",
+    invoice: "in_gone",
+    payment: { type: "payment_intent", payment_intent: "pi_invoice_step" },
+  } as unknown as Stripe.InvoicePayment);
+  vi.spyOn(invoiceStep.client.invoices, "retrieve").mockRejectedValueOnce(
+    new Stripe.errors.StripeInvalidRequestError({
+      statusCode: 404,
+      code: "resource_missing",
+      message: "No such invoice: 'in_gone'",
+    }),
+  );
+  await deliver(
+    invoiceStep,
+    invoiceStep.event(
+      "charge.dispute.created",
+      dispute("pi_invoice_step", "dp_invoice_step", "needs_response"),
+    ),
+  );
+  assert.equal(invoiceStep.store.webhook?.status, "ignored");
+  assert.equal(invoiceStep.store.webhook?.errorCode, "STRIPE_UNRELATED_ORDER");
+  assert.ok(
+    invoiceStep.alerts.some(
+      (alert) =>
+        alert.alertKey ===
+        "billing:payment-reversal-unmatched:stripe:dp_invoice_step",
+    ),
+  );
+
+  // Step 2: the invoice resolves and names a subscription, but the
+  // subscription itself is gone (404) by the time it is retrieved.
+  const subscriptionStep = stripeFixture();
+  subscriptionStep.remote.paymentIntents.set("pi_subscription_step", {
+    id: "pi_subscription_step",
+    object: "payment_intent",
+    metadata: {},
+  } as unknown as Stripe.PaymentIntent);
+  subscriptionStep.remote.invoicePayments.push({
+    id: "ip_subscription_step",
+    object: "invoice_payment",
+    invoice: "in_present",
+    payment: {
+      type: "payment_intent",
+      payment_intent: "pi_subscription_step",
+    },
+  } as unknown as Stripe.InvoicePayment);
+  vi.spyOn(subscriptionStep.client.invoices, "retrieve").mockResolvedValueOnce({
+    id: "in_present",
+    object: "invoice",
+    livemode: false,
+    parent: {
+      type: "subscription_details",
+      subscription_details: { subscription: "sub_gone" },
+    },
+  } as unknown as Stripe.Response<Stripe.Invoice>);
+  vi.spyOn(
+    subscriptionStep.client.subscriptions,
+    "retrieve",
+  ).mockRejectedValueOnce(
+    new Stripe.errors.StripeInvalidRequestError({
+      statusCode: 404,
+      code: "resource_missing",
+      message: "No such subscription: 'sub_gone'",
+    }),
+  );
+  await deliver(
+    subscriptionStep,
+    subscriptionStep.event(
+      "charge.dispute.created",
+      dispute("pi_subscription_step", "dp_subscription_step", "needs_response"),
+    ),
+  );
+  assert.equal(subscriptionStep.store.webhook?.status, "ignored");
+  assert.equal(
+    subscriptionStep.store.webhook?.errorCode,
+    "STRIPE_UNRELATED_ORDER",
+  );
+  assert.ok(
+    subscriptionStep.alerts.some(
+      (alert) =>
+        alert.alertKey ===
+        "billing:payment-reversal-unmatched:stripe:dp_subscription_step",
+    ),
+  );
+});
+
+test("a lost dispute on a subscription order raises the subscription notice", async () => {
+  const f = stripeFixture();
+  await subscription(f);
+  f.pay();
+  await deliver(f, f.event("invoice.paid", f.remote.invoice));
+  assert.equal(f.store.order!.status, "fulfilled");
+  const balance = f.store.account!.monthlyCreditsBalance;
+  invoicePayment(f, "pi_invoice");
+  await deliver(
+    f,
+    f.event(
+      "charge.dispute.closed",
+      dispute("pi_invoice", "dp_lost_sub", "lost"),
+    ),
+  );
+  assert.equal(f.store.webhook?.status, "processed");
+  assert.equal(f.store.account!.planFamily, "individual_pro");
+  assert.equal(f.store.account!.monthlyCreditsBalance, balance);
+  assert.equal(f.store.order!.reversalStatus, "none");
+  assert.equal(reversalRows(f).length, 0);
+  const alert = f.alerts.find(
+    (entry) =>
+      entry.alertKey === "billing:subscription-payment-reversal:team_1",
+  );
+  assert.equal(alert?.level, "error");
+  assert.equal(alert?.metadata?.orderId, f.store.order!.id);
 });

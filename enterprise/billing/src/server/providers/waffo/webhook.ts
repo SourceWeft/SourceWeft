@@ -491,11 +491,51 @@ export class WaffoWebhookService {
   /**
    * A refund with no local reference, or whose reference matches no local
    * order: an operator problem (a stray receipt, a migrated/deleted order),
-   * not a transient one. Notice-and-ignore rather than throw, so it does not
-   * retry forever. Runs before an `order` is even resolved, so only the event
-   * itself is available for the notice.
+   * not a transient one — UNLESS the event's own Waffo order id is a
+   * subscription's `externalSubscriptionId`: a subscription *renewal*
+   * payment has no local SourceWeft order row at all (see
+   * `syncSubscriptionSnapshot`'s `externalSubscriptionId: event.data.orderId`
+   * above), so that is the expected, not exceptional, shape for a refund of
+   * one. Notice-and-ignore rather than throw either way, so it does not
+   * retry forever. Runs before an `order` is even resolved, so only the
+   * event itself is available for the notice.
+   *
+   * `isRefund` (the caller) covers both `refund.succeeded` and
+   * `refund.failed` — a failed refund with no local reference reaches here
+   * too, but nothing was actually refunded, so it must not raise either
+   * notice (an error-level "Subscription payment reversed" alert for a
+   * refund that never happened is worse than the noise it would save).
+   * Mirrors `processRefund`'s own `refund.failed` short-circuit for the
+   * known-order case, and Creem's early `status === "failed"` return, which
+   * both skip notice logic entirely for a non-final/failed event.
    */
   private async unmatchedRefund(event: WebhookEvent, receiptId: string) {
+    if (event.eventType === "refund.failed") {
+      this.input.logger.info("Waffo refund failed upstream; ignored", {
+        eventId: event.id,
+        refundTicketId: event.data.refundTicketMerchantExternalId,
+      });
+      return this.ignore(receiptId, "WAFFO_REFUND_FAILED");
+    }
+
+    const subscription = await this.input.billing.findSubscriptionByProvider(
+      "waffo",
+      event.data.orderId,
+    );
+    if (subscription) {
+      await this.input.billing.reportPaymentReversalNotice({
+        reason: "subscription_payment",
+        provider: "waffo",
+        providerReference:
+          event.data.refundTicketMerchantExternalId ?? event.eventId,
+        orderId: subscription.billingOrderId,
+        teamId: subscription.teamId,
+        amount: parseRefundAmount(event.data.refundedAmount),
+        currency: event.data.currency,
+      });
+      return this.ignore(receiptId, "WAFFO_REFUND_SUBSCRIPTION_PAYMENT");
+    }
+
     await this.input.billing.reportPaymentReversalNotice({
       reason: "unmatched",
       provider: "waffo",

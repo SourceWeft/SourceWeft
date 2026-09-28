@@ -3,18 +3,13 @@ import type { BillingRuntimeConfig, TeamSubscriptionSnapshot } from "../types";
 import type { BillingLogger } from "../host";
 import type { createCreemReversalSync } from "./creem-reversal-sync";
 import type { createCreemSubscriptionSync } from "./creem-subscription-sync";
-import { toObjectRecord } from "../records";
+import { readString, toObjectRecord } from "../records";
 
 // Refund and dispute events go to the reversal sync, which translates them
 // into the payment-reversal core's input (or a notice, for anything the
 // core does not apply). This handler only authenticates the envelope and
 // checks the deployment mode before dispatching.
 const REVERSAL_EVENT_TYPES = new Set(["refund.created", "dispute.created"]);
-
-function readString(record: Record<string, unknown> | null, key: string) {
-  const value = record?.[key];
-  return typeof value === "string" && value.trim() ? value : null;
-}
 
 function failure(
   logger: BillingLogger,
