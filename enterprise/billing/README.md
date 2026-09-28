@@ -85,17 +85,22 @@ explicit event list must include `refund.created` and `dispute.created` (an
 endpoint with an empty event list already receives every event type,
 including these). Enable the events only after every API, worker and
 scheduler instance runs a version that handles them, for the same reason as
-Waffo above. Verified in Creem test mode on one $5.00 payment with three
-successive partial refunds: the embedded `transaction` object on a
+Waffo above. Verified in Creem test mode on one untaxed $5.00 payment with
+three successive partial refunds: the embedded `transaction` object on a
 `refund.created` event is a snapshot taken BEFORE the current refund, so
 `transaction.refunded_amount` is the cumulative total of the earlier
-refunds only — null when there were none, and never a total that already
-includes this event's own `refund_amount`. Each refund is therefore
-reversed by its own `refund_amount`; `transaction.refunded_amount` is used
-only as a sanity check against `transaction.amount_paid`, never as the
-reversal amount. `transaction.amount_paid` is the tax-inclusive amount
-actually paid, not the pre-tax `amount` (Creem's own example: `amount`
-1000, `amount_paid` 1210, `tax_amount` 210).
+refunds only — null when there were none, and in every observed event not
+a total that already includes this event's own `refund_amount`. Each
+refund is therefore reversed by its own `refund_amount`;
+`transaction.refunded_amount` is used only as a sanity check against
+`transaction.amount_paid`, never as the reversal amount. Creem documents
+`transaction.amount_paid` as the tax-inclusive amount actually paid, not
+the pre-tax `amount` (Creem's own example: `amount` 1000, `amount_paid`
+1210, `tax_amount` 210) — the observed payment above had no tax, so this
+distinction was not itself exercised. Before enabling `refund.created` on
+the live endpoint, verify on a taxed Creem test payment that one full
+refund's `refund_amount` equals `transaction.amount_paid`, and that two
+successive partial refunds on the same payment sum to it.
 
 To handle Stripe refunds and disputes, add `charge.refunded`,
 `charge.dispute.created` and `charge.dispute.closed` to the enabled events of

@@ -12,9 +12,15 @@ import type { BillingOrderState } from "../types";
  * authenticated and mode-checked by the webhook handler) into the
  * payment-reversal core's input. This module owns the Creem-specific
  * mapping; the handler only dispatches to it. Every event is recorded
- * through `processSubscriptionWebhookEvent`, so a redelivered refund or
- * dispute id is deduplicated at the webhook-receipt level rather than
- * reversing the top-up twice.
+ * through `processSubscriptionWebhookEvent`, which deduplicates receipts
+ * by webhook id — but a provider redelivery can arrive under a *new*
+ * webhook id, so webhook-receipt dedupe alone would not stop a refund
+ * from reversing the top-up twice. What actually prevents that, for a
+ * refund, is the payment-reversal core's own ledger key, which is keyed
+ * by the refund's own id (`reversalId`) rather than the webhook id. That
+ * per-refund idempotency only holds when the refund carries its own id —
+ * see the `refund_id_missing` cause below, which exists for exactly the
+ * case where it does not.
  */
 
 function readString(record: Record<string, unknown> | null, key: string) {
@@ -79,6 +85,58 @@ async function resolveOrder(
     }
   }
 
+  return null;
+}
+
+type AmountUnavailableCause =
+  | "refund_id_missing"
+  | "refund_amount_invalid"
+  | "paid_amount_missing"
+  | "currency_missing"
+  | "exceeds_paid";
+
+/**
+ * Why a succeeded refund cannot be turned into a confident reversal, or
+ * `null` when it can. Checked in this order: the refund's own id is
+ * missing (nothing safe to key the reversal ledger on — see the module
+ * docstring); its own refund amount is missing, not a number, or not
+ * positive; the tax-inclusive paid amount is unusable; the currency
+ * cannot be determined; or the prior total plus this refund would exceed
+ * what was paid.
+ */
+function amountUnavailableCause(input: {
+  refundId: string | null;
+  refundAmount: number | null;
+  paidAmount: number | null;
+  currency: string | null;
+  /** Raw `transaction.refunded_amount`; null when there were no prior refunds. */
+  prior: number | null;
+}): AmountUnavailableCause | null {
+  if (input.refundId === null) {
+    return "refund_id_missing";
+  }
+  if (input.refundAmount === null || input.refundAmount <= 0) {
+    return "refund_amount_invalid";
+  }
+  if (input.paidAmount === null) {
+    return "paid_amount_missing";
+  }
+  if (!input.currency) {
+    return "currency_missing";
+  }
+  // This consistency check runs before the payment-reversal core's own
+  // per-refund ledger idempotency check (keyed by reversalId). If a
+  // refund that was already fully applied is redelivered later carrying a
+  // transaction snapshot that, by then, includes that same refund in
+  // `refunded_amount`, this can read as exceeding the paid amount even
+  // though nothing would actually double-apply — the core would just
+  // no-op on the duplicate ledger key. Accepted: a visible alert on a
+  // provably-safe duplicate beats silently trusting a snapshot that might
+  // not be safe.
+  const priorTotal = input.prior ?? 0;
+  if (priorTotal + input.refundAmount > input.paidAmount) {
+    return "exceeds_paid";
+  }
   return null;
 }
 
@@ -188,48 +246,48 @@ export function createCreemReversalSync(deps: {
     const transaction = toObjectRecord(data.transaction);
     // The embedded `transaction` is a snapshot taken BEFORE the current
     // refund. Observed in Creem test mode across three `refund.created`
-    // events on one $5.00 payment: refund_amount 100 with
+    // events on one untaxed $5.00 payment: refund_amount 100 with
     // transaction.refunded_amount null, then refund_amount 150 with
     // transaction.refunded_amount 100, then refund_amount 250 with
     // transaction.refunded_amount 250 — each `refunded_amount` is the
     // cumulative total of the EARLIER refunds only, excluding this one
-    // (null when there were none). It is never a total that already
-    // includes this event's own `refund_amount`, so every refund is
-    // reversed by its own amount; `refunded_amount` is used only below, as
-    // a sanity check against the paid amount.
-    const priorRefundedTotal = readNumber(transaction, "refunded_amount");
-    const prior = priorRefundedTotal ?? 0;
+    // (null when there were none), and in every observed event not a
+    // total that already includes this event's own `refund_amount`. Every
+    // refund is therefore reversed by its own amount; `refunded_amount` is
+    // used only below, as a sanity check against the paid amount.
+    const refundId = readString(data, "id");
+    // Raw value (null when there were no prior refunds); only the
+    // consistency check below resolves it to 0.
+    const prior = readNumber(transaction, "refunded_amount");
     const refundAmount = readNumber(data, "refund_amount");
     // Tax-inclusive: Creem's `amount_paid` is what the customer actually
     // paid (`amount` is the pre-tax subtotal). Reversing against `amount`
     // would overstate the fraction refunded on a taxed payment, so there is
     // no fallback here — a missing `amount_paid` is unusable, not "close
-    // enough".
+    // enough". (Creem documents `amount_paid` as tax-inclusive; the
+    // observed payment above had no tax, so this itself was not observed —
+    // see the README's pre-live gate for a taxed-payment check.)
     const paidAmount = readNumber(transaction, "amount_paid");
     const currency =
       readString(data, "refund_currency") ??
       readString(transaction, "currency");
 
-    // Nothing here can be turned into a confident reversal when: this
-    // event's own refund amount is missing, not a number, or not positive;
-    // the tax-inclusive paid amount is unusable; the currency cannot be
-    // determined at all; or the prior total plus this refund would exceed
-    // what was paid (a data inconsistency, not a legitimate over-refund).
-    // Notice-and-stop in every case rather than let a wrong or zero-amount
-    // "applied" reversal through silently (mirrors the Waffo refund
-    // translation).
-    const amountUnavailable =
-      refundAmount === null ||
-      refundAmount <= 0 ||
-      paidAmount === null ||
-      !currency ||
-      prior + refundAmount > paidAmount;
+    // Notice-and-stop rather than let a wrong or zero-amount "applied"
+    // reversal through silently (mirrors the Waffo refund translation).
+    const cause = amountUnavailableCause({
+      refundId,
+      refundAmount,
+      paidAmount,
+      currency,
+      prior,
+    });
 
-    if (amountUnavailable) {
+    if (cause) {
       logger.warn("Creem refund amount is unusable; not reversing", {
         refundId: reversalId,
         orderId: order.id,
         webhookId,
+        cause,
       });
       await record(null, {
         reason: "amount_unavailable",
@@ -239,20 +297,23 @@ export function createCreemReversalSync(deps: {
         teamId: order.teamId,
         amount: refundAmount,
         currency,
-        metadata: { prior, refundAmount, paidAmount },
+        metadata: { cause, prior, refundAmount, paidAmount },
       });
       return;
     }
 
-    // `amountUnavailable` above already guarantees refundAmount is a
-    // positive number, paidAmount is a number, and currency is a
-    // non-empty string — hence the assertions rather than a silent `?? 0`
-    // / `?? ""` default.
+    // `cause` above already guarantees refundId is present, refundAmount
+    // is a positive number, paidAmount is a number, currency is a
+    // non-empty string, and prior (defaulting to 0) plus refundAmount does
+    // not exceed paidAmount — hence the assertions rather than a silent
+    // `?? 0` / `?? ""` default. `refundId`, not the webhookId-falling-back
+    // `reversalId`, is what keys the reversal ledger (see the module
+    // docstring).
     await record(
       {
         orderId: order.id,
         provider: "creem",
-        reversalId,
+        reversalId: refundId as string,
         kind: "refund",
         amount: { refundAmount: refundAmount as number },
         paidAmount: paidAmount as number,
