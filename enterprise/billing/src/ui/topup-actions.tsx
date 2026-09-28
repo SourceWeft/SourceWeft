@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { useBillingUiHost } from "./context";
+import { useBillingCopy } from "./use-billing-copy";
 
 export function TopupActions({ teamId }: { teamId: string | null }) {
   const {
@@ -10,6 +11,7 @@ export function TopupActions({ teamId }: { teamId: string | null }) {
     billingCheckoutEnabled,
     openCheckout,
   } = useBillingUiHost();
+  const { copy } = useBillingCopy();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   if (!teamId || !billingTopupEnabled || !billingCheckoutEnabled) return null;
@@ -26,7 +28,7 @@ export function TopupActions({ teamId }: { teamId: string | null }) {
       openCheckout(result);
     } catch (error) {
       setError(
-        error instanceof Error ? error.message : "Unable to prepare checkout",
+        error instanceof Error ? error.message : copy.checkout.topup.error,
       );
     } finally {
       setBusy(false);
@@ -34,9 +36,9 @@ export function TopupActions({ teamId }: { teamId: string | null }) {
   }
   return (
     <div className="space-y-3 py-7">
-      <p className="text-base font-semibold">Add credits or pages</p>
+      <p className="text-base font-semibold">{copy.checkout.topup.title}</p>
       <p className="text-sm text-muted-foreground">
-        Choose a pack and review its total before paying.
+        {copy.checkout.topup.description}
       </p>
       <div className="flex gap-2">
         <Button
@@ -46,7 +48,7 @@ export function TopupActions({ teamId }: { teamId: string | null }) {
             void buy("credit");
           }}
         >
-          Buy credits
+          {copy.checkout.topup.buyCredits}
         </Button>
         <Button
           variant="outline"
@@ -55,7 +57,7 @@ export function TopupActions({ teamId }: { teamId: string | null }) {
             void buy("page");
           }}
         >
-          Buy pages
+          {copy.checkout.topup.buyPages}
         </Button>
       </div>
       {error && (

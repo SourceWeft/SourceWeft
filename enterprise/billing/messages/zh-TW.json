@@ -54,5 +54,295 @@
     "seat": "席位",
     "yearlySavings": "比按月付費節省 2 個月",
     "checkoutError": "無法發起結帳。"
+  },
+  "common": {
+    "loading": "正在載入…",
+    "cancel": "取消",
+    "unknown": "未知",
+    "personal": "個人",
+    "team": "團隊",
+    "cycle": "週期",
+    "credits": "點數",
+    "pages": "頁面",
+    "seats": "席位",
+    "status": "狀態",
+    "units": {
+      "credit": "點數",
+      "page": "頁",
+      "seat": "席位"
+    },
+    "intervals": {
+      "notSet": "未設定",
+      "monthly": "按月",
+      "annual": "按年"
+    },
+    "subscriptionStatuses": {
+      "inactive": "未啟用",
+      "trialing": "試用中",
+      "active": "生效中",
+      "past_due": "逾期未付",
+      "paused": "已暫停",
+      "unpaid": "未付款",
+      "canceled": "已取消",
+      "expired": "已過期"
+    },
+    "planNames": {
+      "individual_free": "免費版",
+      "individual_pro": "專業版",
+      "team_standard": "團隊版",
+      "team_premium": "團隊進階版",
+      "enterprise_usage": "企業版"
+    },
+    "cycleSources": {
+      "free_account": "免費帳戶",
+      "provider_subscription": "服務商訂閱",
+      "manual": "手動"
+    }
+  },
+  "billing": {
+    "title": "帳單",
+    "scopePersonal": "個人帳單",
+    "scopeTeam": "{team} 帳單",
+    "planLabel": "{plan}方案",
+    "planAccount": "{plan}帳戶",
+    "noPaidSubscription": "暫無付費訂閱",
+    "loadingCycle": "正在載入週期…",
+    "cycleRange": "{start} 至 {end}",
+    "creditsUnavailable": "點數額度資訊不可用",
+    "pagesUnavailable": "頁面額度資訊不可用",
+    "usedOfLimit": "{used} / {limit}",
+    "availableCount": "可用 {count}",
+    "loadingValue": "正在載入…",
+    "manageBilling": "管理帳單",
+    "upgradePlan": "升級方案",
+    "portalUnavailable": "帳單管理入口暫不可用。",
+    "unableToOpenPortal": "無法開啟帳單管理入口。",
+    "seatsSectionTitle": "席位",
+    "updateSeats": "更新席位",
+    "addSeats": "新增席位",
+    "seatsUsedOfLimit": "已使用 {used}/{limit} 個席位",
+    "seatsUnknown": "已使用 --/-- 個席位",
+    "loadingSeats": "正在載入席位…",
+    "seatsRemaining": "剩餘 {count} 個席位",
+    "seatsUnavailable": "席位可用資訊不可用",
+    "totalSeatsLabel": "席位總數",
+    "seatsTotalSuffix": "總計",
+    "seatReductionNotice": "減少席位前需要先預覽帳單變更。",
+    "seatIncreaseNotice": "增加席位前需要先預覽帳單變更。",
+    "seatCountSynced": "席位數量已同步。",
+    "subscriptionTitle": "訂閱",
+    "rows": {
+      "billingCadence": "計費週期",
+      "renewal": "續訂",
+      "lastUpdated": "最近更新"
+    },
+    "renewalCancels": "將在目前週期結束時取消",
+    "renewalAuto": "自動續訂",
+    "renewalNotScheduled": "未安排",
+    "noSubscriptionUpdates": "暫無訂閱更新記錄",
+    "reviewSeatIncrease": "確認增加席位",
+    "reviewSeatReduction": "確認減少席位",
+    "seatChangeSummary": "由 {current} 調整為 {next} 個席位",
+    "seatChangeDetail": "{used} 名成員和 {pending} 個待處理邀請將保留分配。",
+    "seatPreview": {
+      "theoreticalRefund": "理論退款金額",
+      "refundOrCredit": "退款或抵扣",
+      "notRefundable": "不可退款部分",
+      "refundRatio": "退款比例",
+      "creditsDeducted": "扣減點數",
+      "pagesDeducted": "扣減頁面額度",
+      "billingAction": "帳單處理方式",
+      "estimatedCharge": "預計按比例收費"
+    },
+    "seatProviderActions": {
+      "internal_partial_credit": "內部部分抵扣",
+      "none": "無需付款服務商調整",
+      "proration_charge_immediately": "立即按比例扣款",
+      "proration_credit": "付款服務商按比例退還"
+    },
+    "updatingSeats": "正在更新…",
+    "confirmIncrease": "確認增加",
+    "confirmReduction": "確認減少",
+    "seatCountUpdated": "席位數量已更新。",
+    "unableToUpdateSeats": "無法更新席位。",
+    "failedToLoad": "帳單載入失敗"
+  },
+  "usage": {
+    "title": "用量",
+    "planLabel": "{plan}方案",
+    "creditsLabel": "{used} / {limit} 點數",
+    "loadingCredits": "正在載入點數…",
+    "creditsUnknown": "-- / -- 點數",
+    "pagesLabel": "已用 {used} · 剩餘 {left}",
+    "loadingPages": "正在載入頁面額度…",
+    "pagesUnknown": "已用 -- · 剩餘 --",
+    "pagesWallet": "月度 {monthly} · 附加 {addOn}",
+    "pagesWalletLoading": "月度 … · 附加 …",
+    "pagesWalletUnknown": "月度 -- · 附加 --",
+    "seatsLabel": "{used} / {limit} 席位",
+    "loadingSeats": "正在載入席位…",
+    "seatsUnknown": "-- / -- 席位",
+    "seatsUsage": "已用 {used} · 剩餘 {remaining}",
+    "seatsUsageUnknown": "已用 -- · 剩餘 --",
+    "activityTitle": "活動記錄",
+    "filterAriaLabel": "篩選用量活動",
+    "filters": {
+      "all": "全部",
+      "seat": "席位",
+      "page": "頁面",
+      "credit": "點數"
+    },
+    "table": {
+      "detail": "詳細資訊",
+      "date": "日期",
+      "usage": "用量"
+    },
+    "loadingActivity": "正在載入活動記錄…",
+    "noActivity": "暫無用量活動",
+    "noActivityForUnit": "暫無{unit}相關活動",
+    "accountUnavailable": "用量帳戶不可用",
+    "loadMore": "載入更多",
+    "loadingMore": "正在載入…",
+    "failedToLoad": "用量載入失敗",
+    "failedToLoadActivity": "用量活動載入失敗",
+    "ledgerChangeSummary": "{delta} {unit} · 剩餘 {balance}",
+    "ledgerSeatChangeSummary": "{previous} → {next} {unit}",
+    "activityKindDetail": "{kind} · {detail}",
+    "kinds": {
+      "image": "圖片",
+      "vision": "視覺",
+      "video": "影片",
+      "chat": "對話",
+      "other": "其他"
+    }
+  },
+  "activity": {
+    "consume": {
+      "default": {
+        "credit": "{feature} 點數已使用",
+        "page": "{feature} 頁面已使用"
+      },
+      "ingestion": {
+        "page": "已索引頁面"
+      }
+    },
+    "grant": {
+      "default": "{feature} 已發放",
+      "cycle_grant": {
+        "credit": "已發放月度點數",
+        "page": "已發放月度頁面額度"
+      },
+      "seat_quota_grant": {
+        "credit": "已發放席位點數",
+        "page": "已發放席位頁面額度"
+      },
+      "plan_upgrade_grant": {
+        "credit": "已發放方案點數",
+        "page": "已發放方案頁面額度"
+      },
+      "shadow_auto_grant": {
+        "page": "已發放附加頁面額度"
+      },
+      "credit_topup_purchase": {
+        "credit": "已購買點數儲值包"
+      },
+      "page_topup_purchase": {
+        "page": "已購買頁面儲值包"
+      }
+    },
+    "expire": {
+      "default": "{feature} 已過期",
+      "cycle_expire": {
+        "credit": "未使用點數已過期",
+        "page": "月度頁面額度已過期"
+      }
+    },
+    "adjust": {
+      "default": "{feature} 已調整",
+      "seat_quota_change": {
+        "seat": "席位數量已更新"
+      },
+      "payment_refund": {
+        "credit": "點數儲值已退款",
+        "page": "頁面儲值已退款"
+      },
+      "payment_chargeback": {
+        "credit": "點數儲值已被拒付",
+        "page": "頁面儲值已被拒付"
+      }
+    },
+    "refund": {
+      "default": "{feature} 已退款"
+    },
+    "reserve": {
+      "default": "{feature} 已預留"
+    },
+    "release": {
+      "default": "{feature} 已釋放"
+    },
+    "featureNames": {
+      "chat": "對話",
+      "retrieval": "檢索",
+      "retrieval_rerank": "檢索重排序",
+      "source_ingestion": "來源匯入",
+      "ingestion__asr": "語音轉寫",
+      "artifact__image": "影像產生",
+      "artifact__video_presentation__asset": "影片素材產生",
+      "artifact__video_presentation__narration": "影片旁白產生",
+      "artifact__video_presentation__validation": "影片驗證",
+      "html__visual_qa": "視覺質檢"
+    }
+  },
+  "checkout": {
+    "invalidLink": "該結帳連結已失效。",
+    "invalidSeatCount": "該團隊結帳連結的席位數量無效。",
+    "needsAttention": "結帳需要處理",
+    "opening": "正在開啟結帳",
+    "openingDescription": "付款服務商的結帳頁面正在開啟。",
+    "preparingDescription": "正在準備您的 {plan} 結帳。",
+    "planTeam": "團隊版",
+    "planPro": "專業版",
+    "tryAgain": "重試",
+    "backToPricing": "返回定價頁",
+    "securePaymentTitle": "安全付款",
+    "waffoCreditsDescription": "{count} 點數。請在新分頁中開啟 Waffo 結帳頁面核對總額並付款，目前頁面將保持開啟。",
+    "waffoPagesDescription": "{count} 頁。請在新分頁中開啟 Waffo 結帳頁面核對總額並付款，目前頁面將保持開啟。",
+    "waffoGenericDescription": "請在新分頁中開啟 Waffo 結帳頁面核對總額並付款，目前頁面將保持開啟。",
+    "openCheckout": "開啟結帳頁面",
+    "success": {
+      "finalizing": "正在完成付款",
+      "settingUp": "正在設定您的方案",
+      "ready": "已就緒",
+      "syncing": "仍在同步",
+      "readyDescription": "您的帳單更新已在儀表板中就緒。",
+      "pendingDescription": "我們正在核實付款服務商的確認資訊並應用您的帳單狀態。",
+      "openDashboard": "開啟儀表板"
+    },
+    "topup": {
+      "title": "購買點數或頁數",
+      "description": "選擇儲值包並在付款前核對總額。",
+      "buyCredits": "購買點數",
+      "buyPages": "購買頁數",
+      "error": "無法準備結帳"
+    },
+    "saveTwoMonths": "節省 2 個月",
+    "enterTeamName": "請輸入團隊名稱。",
+    "seatsRange": "席位數量必須是 {min} 到 {max} 之間的整數。",
+    "createTeam": "建立團隊",
+    "createTeamDescription": "為團隊命名並選擇席位數量，團隊將在付款後建立。",
+    "teamNameLabel": "團隊名稱",
+    "teamNamePlaceholder": "星河研究組",
+    "billingLabel": "帳單",
+    "total": "結帳總額",
+    "perSeatSummary": "每席位 {price}，共 {count} 個席位。",
+    "continue": "繼續結帳"
+  },
+  "sidebar": {
+    "openUsageAriaLabel": "開啟用量詳細資訊",
+    "usageLabel": "用量",
+    "loading": "載入中",
+    "pagesLeft": "剩餘頁面",
+    "cycleEnds": "週期結束",
+    "unavailable": "不可用"
   }
 }

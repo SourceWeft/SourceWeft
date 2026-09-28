@@ -7,19 +7,18 @@ import { Progress } from "@sourceweft/ui-web/components/ui/progress";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 
 import { BillingPlanActionControls } from "./billing-plan-action-controls";
+import { formatCopy } from "../messages";
 import {
   formatLedgerActivityChange,
   formatLedgerDetail,
-  formatLedgerUnit,
-  formatNumber,
   formatPlanName,
-  formatUsageDate,
   isLedgerEntryInCycle,
   isPersonalBillingOrg,
   resolveBillingTeamId,
   usageActivityFilters,
   USAGE_ACTIVITY_PAGE_SIZE,
 } from "./billing-utils";
+import { useBillingCopy } from "./use-billing-copy";
 
 import type {
   BillingInterval,
@@ -40,6 +39,7 @@ export function UsagePanel() {
     UsagePanelSkeleton,
     OrgSwitcher,
   } = useBillingUiHost();
+  const { copy, format } = useBillingCopy();
 
   const { data: orgs } = authClient.useListOrganizations();
   const { data: activeOrg } = authClient.useActiveOrganization();
@@ -64,7 +64,25 @@ export function UsagePanel() {
   const [loadingMoreActivity, setLoadingMoreActivity] = React.useState(false);
   const [billingPeriod, setBillingPeriod] =
     React.useState<BillingInterval>("yearly");
-  const [error, setError] = React.useState<string | null>(null);
+  // The raw failure, not the localized message: a caught `Error`'s own
+  // `.message` is stored verbatim (it's already fixed text, not affected by
+  // locale), but a non-`Error` rejection stores which catalogue fallback
+  // applies — resolved against the *current* `copy` at render time (below),
+  // not the `copy` captured in the effect's closure when the error was set.
+  // This keeps `copy` out of the load/load-more effects' dependency arrays,
+  // so switching locale can't re-trigger them (a locale change was
+  // re-fetching the summary/activity and silently dropping any "Load more"
+  // pages the user had already fetched).
+  const [error, setError] = React.useState<
+    | { message: string }
+    | { fallbackKey: "failedToLoad" | "failedToLoadActivity" }
+    | null
+  >(null);
+  const errorText = error
+    ? "message" in error
+      ? error.message
+      : copy.usage[error.fallbackKey]
+    : null;
   const [activityFilter, setActivityFilter] =
     React.useState<UsageActivityFilter>("all");
   const [activityVisibleCount, setActivityVisibleCount] = React.useState(
@@ -114,7 +132,11 @@ export function UsagePanel() {
         setSubscription(null);
         setLedger([]);
         setActivityCursor(null);
-        setError(err instanceof Error ? err.message : "Failed to load usage");
+        setError(
+          err instanceof Error
+            ? { message: err.message }
+            : { fallbackKey: "failedToLoad" },
+        );
       } finally {
         if (!cancelled) {
           setLoading(false);
@@ -154,7 +176,9 @@ export function UsagePanel() {
       setActivityCursor(nextLedger.nextCursor ?? null);
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Failed to load usage activity",
+        err instanceof Error
+          ? { message: err.message }
+          : { fallbackKey: "failedToLoadActivity" },
       );
     } finally {
       setLoadingMoreActivity(false);
@@ -185,9 +209,9 @@ export function UsagePanel() {
   const ledgerActivityRows = filteredLedgerEntries
     .slice(0, activityVisibleCount)
     .map<UsageActivityRow>((entry) => ({
-      detail: formatLedgerDetail(entry),
-      date: formatUsageDate(entry.createdAt),
-      change: formatLedgerActivityChange(entry),
+      detail: formatLedgerDetail(entry, copy),
+      date: format.dateTime(entry.createdAt),
+      change: formatLedgerActivityChange(entry, copy, format),
       key: entry.id,
       unitType: entry.unitType,
     }));
@@ -195,53 +219,69 @@ export function UsagePanel() {
   const totalActivityRowCount = filteredLedgerEntries.length;
   const hasMoreActivityRows =
     activityRows.length < totalActivityRowCount || Boolean(activityCursor);
+  const planLabel = summary
+    ? (copy.common.planNames[summary.planFamily] ??
+      formatPlanName(summary.planFamily, isPersonal, copy))
+    : isPersonal
+      ? copy.common.personal
+      : copy.common.team;
   const data = {
-    plan: summary
-      ? formatPlanName(summary.planFamily, isPersonal)
-      : isPersonal
-        ? "Personal"
-        : "Team",
+    plan: planLabel,
     creditsLabel: summary
-      ? `${formatNumber(creditsUsed)} / ${formatNumber(creditsLimit)} credits`
+      ? formatCopy(copy.usage.creditsLabel, {
+          used: format.number(creditsUsed),
+          limit: format.number(creditsLimit),
+        })
       : loading
-        ? "Loading credits..."
-        : "-- / -- credits",
+        ? copy.usage.loadingCredits
+        : copy.usage.creditsUnknown,
     creditsPercent,
     pagesLabel: summary
-      ? `${formatNumber(pagesUsed)} used · ${formatNumber(
-          summary.pages.available,
-        )} left`
+      ? formatCopy(copy.usage.pagesLabel, {
+          used: format.number(pagesUsed),
+          left: format.number(summary.pages.available),
+        })
       : loading
-        ? "Loading pages..."
-        : "-- used · -- left",
+        ? copy.usage.loadingPages
+        : copy.usage.pagesUnknown,
     pagesPercent,
     pagesWallet: summary
-      ? `Monthly ${formatNumber(
-          summary.pages.monthlyBalance,
-        )} · Add-on ${formatNumber(summary.pages.addOnBalance)}`
+      ? formatCopy(copy.usage.pagesWallet, {
+          monthly: format.number(summary.pages.monthlyBalance),
+          addOn: format.number(summary.pages.addOnBalance),
+        })
       : loading
-        ? "Monthly ... · Add-on ..."
-        : "Monthly -- · Add-on --",
+        ? copy.usage.pagesWalletLoading
+        : copy.usage.pagesWalletUnknown,
     seatsLabel: summary
-      ? `${formatNumber(seatsUsed)} / ${formatNumber(seatsLimit)} seats`
+      ? formatCopy(copy.usage.seatsLabel, {
+          used: format.number(seatsUsed),
+          limit: format.number(seatsLimit),
+        })
       : loading
-        ? "Loading seats..."
-        : "-- / -- seats",
+        ? copy.usage.loadingSeats
+        : copy.usage.seatsUnknown,
     seatsUsage: summary
-      ? `${formatNumber(seatsUsed)} used · ${formatNumber(
-          summary.seats.remaining,
-        )} left`
+      ? formatCopy(copy.usage.seatsUsage, {
+          used: format.number(seatsUsed),
+          remaining: format.number(summary.seats.remaining),
+        })
       : loading
-        ? "Loading seats..."
-        : "-- used · -- left",
+        ? copy.usage.loadingSeats
+        : copy.usage.seatsUsageUnknown,
   };
   const emptyActivityLabel = loading
-    ? "Loading activity..."
+    ? copy.usage.loadingActivity
     : teamId
       ? activityFilter === "all"
-        ? "No usage activity yet"
-        : `No ${formatLedgerUnit(activityFilter)} activity yet`
-      : "Usage account unavailable";
+        ? copy.usage.noActivity
+        : // The filter noun (e.g. "页面"), not `common.units.page` ("页") —
+          // that suffix reads naturally after a number ("12 页") but not as
+          // a standalone noun in "暂无页相关活动".
+          formatCopy(copy.usage.noActivityForUnit, {
+            unit: copy.usage.filters[activityFilter],
+          })
+      : copy.usage.accountUnavailable;
   const planAction = useBillingPlanAction({
     billingPeriod,
     isPersonal,
@@ -259,7 +299,9 @@ export function UsagePanel() {
     <div className="w-full max-w-2xl divide-y divide-border/60">
       {/* ── Header ── */}
       <div className="flex items-center justify-between gap-3 pb-7 pt-1">
-        <p className="text-base font-semibold text-foreground">Usage</p>
+        <p className="text-base font-semibold text-foreground">
+          {copy.usage.title}
+        </p>
         <OrgSwitcher />
       </div>
 
@@ -268,7 +310,7 @@ export function UsagePanel() {
         <div className="overflow-hidden rounded-lg border border-border">
           <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
             <p className="text-sm font-medium text-foreground">
-              {data.plan} plan
+              {formatCopy(copy.usage.planLabel, { plan: data.plan })}
             </p>
             <BillingPlanActionControls
               action={planAction}
@@ -278,7 +320,9 @@ export function UsagePanel() {
           </div>
           <div className="px-4 py-3">
             <div className="mb-1.5 flex items-center justify-between text-xs">
-              <span className="text-muted-foreground">Credits</span>
+              <span className="text-muted-foreground">
+                {copy.common.credits}
+              </span>
               <span className="font-medium text-foreground">
                 {data.creditsLabel}
               </span>
@@ -287,7 +331,7 @@ export function UsagePanel() {
           </div>
           <div className="border-t border-border px-4 py-3">
             <div className="mb-1.5 flex items-center justify-between gap-3 text-xs">
-              <span className="text-muted-foreground">Pages</span>
+              <span className="text-muted-foreground">{copy.common.pages}</span>
               <span className="text-right font-medium text-foreground">
                 {data.pagesLabel}
               </span>
@@ -300,7 +344,9 @@ export function UsagePanel() {
           {!isPersonal && (
             <div className="border-t border-border px-4 py-3">
               <div className="mb-1.5 flex items-center justify-between gap-3 text-xs">
-                <span className="text-muted-foreground">Seats</span>
+                <span className="text-muted-foreground">
+                  {copy.common.seats}
+                </span>
                 <span className="text-right font-medium text-foreground">
                   {data.seatsLabel}
                 </span>
@@ -317,29 +363,31 @@ export function UsagePanel() {
       {/* ── Activity ── */}
       <div className="pt-7">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <p className="text-base font-semibold text-foreground">Activity</p>
+          <p className="text-base font-semibold text-foreground">
+            {copy.usage.activityTitle}
+          </p>
           <div
-            aria-label="Filter usage activity"
+            aria-label={copy.usage.filterAriaLabel}
             className="flex rounded-lg border border-border bg-muted/40 p-0.5"
             role="group"
           >
-            {usageActivityFilters.map((filter) => (
+            {usageActivityFilters.map((filterValue) => (
               <button
-                aria-pressed={activityFilter === filter.value}
+                aria-pressed={activityFilter === filterValue}
                 className={cn(
                   "min-w-14 rounded-md px-2.5 py-1 text-xs transition-colors",
-                  activityFilter === filter.value
+                  activityFilter === filterValue
                     ? "bg-background text-foreground shadow-sm"
                     : "text-muted-foreground hover:text-foreground",
                 )}
-                key={filter.value}
+                key={filterValue}
                 onClick={() => {
-                  setActivityFilter(filter.value);
+                  setActivityFilter(filterValue);
                   setActivityVisibleCount(USAGE_ACTIVITY_PAGE_SIZE);
                 }}
                 type="button"
               >
-                {filter.label}
+                {copy.usage.filters[filterValue]}
               </button>
             ))}
           </div>
@@ -349,13 +397,13 @@ export function UsagePanel() {
             <thead className="border-b border-border bg-muted/30">
               <tr>
                 <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">
-                  Detail
+                  {copy.usage.table.detail}
                 </th>
                 <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">
-                  Date
+                  {copy.usage.table.date}
                 </th>
                 <th className="px-4 py-2.5 text-right text-xs font-medium text-muted-foreground">
-                  Usage
+                  {copy.usage.table.usage}
                 </th>
               </tr>
             </thead>
@@ -423,11 +471,15 @@ export function UsagePanel() {
               type="button"
               variant="ghost"
             >
-              {loadingMoreActivity ? "Loading..." : "Load more"}
+              {loadingMoreActivity
+                ? copy.usage.loadingMore
+                : copy.usage.loadMore}
             </Button>
           </div>
         )}
-        {error && <p className="mt-3 text-xs text-muted-foreground">{error}</p>}
+        {errorText && (
+          <p className="mt-3 text-xs text-muted-foreground">{errorText}</p>
+        )}
       </div>
     </div>
   );

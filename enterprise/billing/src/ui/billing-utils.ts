@@ -1,4 +1,6 @@
 import { isPersonalOrganization } from "@sourceweft/contracts/organization-metadata";
+import { formatCopy, type BillingCopy } from "../messages";
+import type { BillingCopyFormat } from "./use-billing-copy";
 import type {
   BillingInterval,
   BillingLedgerEntry,
@@ -12,15 +14,17 @@ import type {
 
 export const USAGE_ACTIVITY_PAGE_SIZE = 20;
 export const ACTIVE_SUBSCRIPTION_STATUSES = new Set(["active", "past_due"]);
+/**
+ * The activity filter values, in display order. Labels come from
+ * `copy.usage.filters[value]` at render time — this only enumerates which
+ * filters exist, so it stays locale-independent.
+ */
 export const usageActivityFilters = [
-  { label: "All", value: "all" },
-  { label: "Seats", value: "seat" },
-  { label: "Pages", value: "page" },
-  { label: "Credits", value: "credit" },
-] as const satisfies Array<{
-  label: string;
-  value: UsageActivityFilter;
-}>;
+  "all",
+  "seat",
+  "page",
+  "credit",
+] as const satisfies ReadonlyArray<UsageActivityFilter>;
 
 export function resolveBillingTeamId(input: {
   activeOrg?: BillingOrg | null;
@@ -57,36 +61,16 @@ export function openBillingPortalWindow(url: string) {
   window.open(url, "_blank", "noopener,noreferrer");
 }
 
-export function formatNumber(value: number) {
-  return new Intl.NumberFormat(undefined, {
-    maximumFractionDigits: 0,
-  }).format(value);
-}
-
-export function formatCurrencyCents(value: number, currency = "USD") {
-  return new Intl.NumberFormat(undefined, {
-    style: "currency",
-    currency: currency.toUpperCase(),
-  }).format(value / 100);
-}
-
-export function formatPercent(value: number) {
-  return new Intl.NumberFormat(undefined, {
-    maximumFractionDigits: 1,
-    style: "percent",
-  }).format(value);
-}
-
-export function formatPlanName(planFamily: string, personal: boolean) {
-  const labelByPlan: Record<string, string> = {
-    individual_free: "Free",
-    individual_pro: "Pro",
-    team_standard: "Team",
-    team_premium: "Team Premium",
-    enterprise_usage: "Enterprise",
-  };
-
-  return labelByPlan[planFamily] ?? (personal ? "Personal" : "Team");
+export function formatPlanName(
+  planFamily: string,
+  personal: boolean,
+  copy: BillingCopy,
+) {
+  const planNames = copy.common.planNames as Record<string, string>;
+  return (
+    planNames[planFamily] ??
+    (personal ? copy.common.personal : copy.common.team)
+  );
 }
 
 export function formatFeatureName(feature: string) {
@@ -99,53 +83,98 @@ export function formatFeatureName(feature: string) {
   return label || "Usage";
 }
 
-export function formatUsageDate(value: string) {
-  return new Intl.DateTimeFormat(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(value));
+/**
+ * The `{feature}` placeholder inside an activity row's tiered composition
+ * (e.g. `activity.consume.default.credit` = "{feature} credits used"). Maps
+ * the raw ledger `feature` value the backend writes (`chat`, `retrieval`,
+ * `retrieval_rerank`, `source_ingestion`, `ingestion.asr`, `artifact.image`,
+ * `artifact.video_presentation.{asset,narration,validation}`,
+ * `html.visual_qa`, ...) through `activity.featureNames`, falling back to
+ * `formatFeatureName`'s raw-enum beautifier for any feature the catalogue
+ * doesn't (yet) name.
+ *
+ * `activity.featureNames`' keys are flat, with every `.` in the raw feature
+ * string replaced by `__` (e.g. `"ingestion.asr"` -> `"ingestion__asr"`), so
+ * `feature` gets the same encoding applied before the lookup below. A
+ * literal dotted key would work for a bracket lookup within this package
+ * alone (a JSON object key is just a string, not a nested path) — but
+ * apps/web's next-intl `pricing` namespace merges this catalogue (today
+ * scoped to just `plans`, see `apps/web/i18n/request.ts`) and next-intl
+ * rejects *any* key containing `.` outright, anywhere in the tree it is
+ * handed (`INVALID_KEY: Namespace keys cannot contain the character "."`),
+ * not only inside whichever sub-key a particular page happens to read. A
+ * dotted key here previously broke exactly that way once `activity` briefly
+ * flowed into `pricing` too. `messages.test.ts` guards this catalogue-wide,
+ * for every locale, so the property holds regardless of what request.ts
+ * merges in today.
+ */
+export function formatActivityFeatureName(feature: string, copy: BillingCopy) {
+  const featureNames = copy.activity.featureNames as Record<string, string>;
+  return (
+    featureNames[feature.replaceAll(".", "__")] ?? formatFeatureName(feature)
+  );
 }
 
-export function formatBillingDate(value: string | null | undefined) {
+export function formatBillingStatus(
+  value: string | null | undefined,
+  copy: BillingCopy,
+) {
+  if (!value) {
+    return copy.common.unknown;
+  }
+
+  const subscriptionStatuses = copy.common.subscriptionStatuses as Record<
+    string,
+    string
+  >;
+  return subscriptionStatuses[value] ?? formatFeatureName(value);
+}
+
+/**
+ * The Cycle row's detail caption (where the billing-cycle boundary comes
+ * from — `billing_accounts.cycle_source`: `free_account` /
+ * `provider_subscription` / `manual`, `packages/db/src/schema/billing.ts`).
+ * Maps through `common.cycleSources`, falling back to `formatFeatureName`
+ * for any value the catalogue doesn't (yet) cover.
+ */
+export function formatCycleSource(
+  value: string | null | undefined,
+  copy: BillingCopy,
+) {
   if (!value) {
     return "--";
   }
 
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "2-digit",
-    year: "numeric",
-  }).format(new Date(value));
+  const cycleSources = copy.common.cycleSources as Record<string, string>;
+  return cycleSources[value] ?? formatFeatureName(value);
 }
 
-export function formatBillingStatus(value: string | null | undefined) {
-  if (!value) {
-    return "Unknown";
-  }
-
-  return formatFeatureName(value);
-}
-
-export function formatBillingInterval(value: string | null | undefined) {
+export function formatBillingInterval(
+  value: string | null | undefined,
+  copy: BillingCopy,
+) {
   if (!value || value === "unknown") {
-    return "Not set";
+    return copy.common.intervals.notSet;
   }
 
-  return value === "yearly" ? "Annual" : "Monthly";
+  return value === "yearly"
+    ? copy.common.intervals.annual
+    : copy.common.intervals.monthly;
 }
 
-export function formatSeatProviderAction(value: string | undefined) {
-  const labelByAction: Record<string, string> = {
-    internal_partial_credit: "Internal partial credit",
-    none: "No provider adjustment",
-    proration_charge_immediately: "Immediate prorated charge",
-    proration_credit: "Provider proration credit",
-  };
+export function formatSeatProviderAction(
+  value: string | undefined,
+  copy: BillingCopy,
+) {
+  if (!value) {
+    return "--";
+  }
 
-  return value ? (labelByAction[value] ?? formatFeatureName(value)) : "--";
+  const seatProviderActions = copy.billing.seatProviderActions as Record<
+    string,
+    string
+  >;
+  return seatProviderActions[value] ?? formatFeatureName(value);
 }
 
 export function getSeatPreviewDirection(preview: SeatPreview | null) {
@@ -158,27 +187,54 @@ export function getSeatPreviewDirection(preview: SeatPreview | null) {
     : ("decrease" as const);
 }
 
-export function formatLedgerChange(entry: BillingLedgerEntry) {
+export function formatLedgerChange(
+  entry: BillingLedgerEntry,
+  format: BillingCopyFormat,
+) {
   const prefix = entry.delta > 0 ? "+" : "";
-  return `${prefix}${formatNumber(entry.delta)}`;
+  return `${prefix}${format.number(entry.delta)}`;
 }
 
-export function formatLedgerUnit(unitType: BillingLedgerEntry["unitType"]) {
-  if (unitType === "seat") {
-    return "seats";
-  }
-
-  return unitType === "page" ? "pages" : "credits";
+export function formatLedgerUnit(
+  unitType: BillingLedgerEntry["unitType"],
+  copy: BillingCopy,
+) {
+  return copy.common.units[unitType];
 }
 
-export function formatLedgerActivityChange(entry: BillingLedgerEntry) {
-  if (entry.activitySummary) {
-    return entry.activitySummary;
+/**
+ * The activity row's "Usage" (Δ) column. Always rendered from the entry's
+ * structured fields (`delta`/`balanceAfter`/`unitType`) through the
+ * catalogue — never from `entry.activitySummary`, which the server writes
+ * as plain English (`formatSignedLedgerDelta`, `formatQuotaRenewalSummary`,
+ * plan-name arrows, "150 -> 200 seats", ...) and would leave the column
+ * unlocalised for nearly every visible row. Every number goes through
+ * `format` (from `useBillingCopy()`), never an ambient/`undefined`-locale
+ * `Intl.NumberFormat` — spec O2.
+ *
+ * Seat rows use a dedicated `usage.ledgerSeatChangeSummary` template
+ * (`"{previous} → {next} {unit}"`) instead of the delta/balance phrasing,
+ * since a seat count reads more naturally as "3 → 5 seats" than as a delta
+ * with a running balance.
+ */
+export function formatLedgerActivityChange(
+  entry: BillingLedgerEntry,
+  copy: BillingCopy,
+  format: BillingCopyFormat,
+) {
+  if (entry.unitType === "seat") {
+    return formatCopy(copy.usage.ledgerSeatChangeSummary, {
+      previous: format.number(entry.balanceAfter - entry.delta),
+      next: format.number(entry.balanceAfter),
+      unit: formatLedgerUnit(entry.unitType, copy),
+    });
   }
 
-  return `${formatLedgerChange(entry)} ${formatLedgerUnit(
-    entry.unitType,
-  )} · ${formatNumber(Math.max(entry.balanceAfter, 0))} left`;
+  return formatCopy(copy.usage.ledgerChangeSummary, {
+    delta: formatLedgerChange(entry, format),
+    unit: formatLedgerUnit(entry.unitType, copy),
+    balance: format.number(Math.max(entry.balanceAfter, 0)),
+  });
 }
 
 export function getUsageActivityKind(
@@ -209,86 +265,87 @@ export function getUsageActivityKind(
 export function formatUsageActivityDetail(
   kind: UsageActivityKind,
   detail: string,
+  copy: BillingCopy,
 ) {
-  return `${kind} · ${detail}`;
+  return formatCopy(copy.usage.activityKindDetail, {
+    kind: copy.usage.kinds[kind],
+    detail,
+  });
 }
 
-export function formatLedgerDetail(entry: BillingLedgerEntry) {
+function isPlainCopyRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Reads `node[unitType]` when `node` is a plain object, else `undefined`. */
+function readUnitTemplate(
+  node: unknown,
+  unitType: BillingLedgerEntry["unitType"],
+): string | undefined {
+  if (!isPlainCopyRecord(node)) {
+    return undefined;
+  }
+
+  const value = node[unitType];
+  return typeof value === "string" ? value : undefined;
+}
+
+/**
+ * Localised activity-row detail text. See `formatLedgerDetail`'s docstring
+ * for the four-tier lookup order this implements.
+ */
+export function formatLedgerDetail(
+  entry: BillingLedgerEntry,
+  copy: BillingCopy,
+): string {
+  // Tier 1: an exact `activity.<eventType>.<feature>.<unitType>` entry —
+  // covers every known feature, including `consume.ingestion.page`. Always
+  // wins over a stored `activityTitle`, so old rows for known features
+  // localise too (Review Focus 3).
+  const activity = copy.activity as unknown as Record<string, unknown>;
+  const eventNode = activity[entry.eventType];
+  const featureNode = isPlainCopyRecord(eventNode)
+    ? eventNode[entry.feature]
+    : undefined;
+  const specific = readUnitTemplate(featureNode, entry.unitType);
+  if (specific) {
+    return specific;
+  }
+
+  // Tier 2: `activity.<eventType>.default`, `{feature}`-templated. Covers
+  // every other feature under a known event type, including open-ended
+  // model-usage `consume` rows (chat, retrieval, ...) — `consume.default`
+  // is unit-specific (`credit`/`page`) so the credits-vs-pages distinction
+  // the previous English composition made isn't lost.
+  const defaultNode = isPlainCopyRecord(eventNode)
+    ? eventNode.default
+    : undefined;
+  const defaultTemplate =
+    typeof defaultNode === "string"
+      ? defaultNode
+      : readUnitTemplate(defaultNode, entry.unitType);
+  if (defaultTemplate) {
+    return formatCopy(defaultTemplate, {
+      feature: formatActivityFeatureName(entry.feature, copy),
+    });
+  }
+
+  // Tier 3: the English title stored on the row at write time. In
+  // practice this is only reached for a feature/event-type combination the
+  // catalogue doesn't cover at all (every real `LedgerEventType` ships a
+  // `default`, so this tier is a defensive fallback for a malformed/partial
+  // `copy`, not a normal code path).
   if (entry.activityTitle) {
     return entry.activityTitle;
   }
 
-  const feature = formatFeatureName(entry.feature);
-  const kind = getUsageActivityKind(entry);
-  const detail = (() => {
-    if (entry.eventType === "consume") {
-      if (entry.unitType === "page" && entry.feature === "ingestion") {
-        return "Pages indexed";
-      }
-
-      if (entry.unitType === "credit") {
-        return `${feature} credits used`;
-      }
-
-      return `${feature} pages used`;
-    }
-
-    if (entry.eventType === "grant") {
-      if (entry.feature === "cycle_grant") {
-        return entry.unitType === "page"
-          ? "Monthly pages granted"
-          : "Monthly credits granted";
-      }
-
-      if (entry.feature === "seat_quota_grant") {
-        return entry.unitType === "page"
-          ? "Seat pages granted"
-          : "Seat credits granted";
-      }
-
-      if (entry.feature === "plan_upgrade_grant") {
-        return entry.unitType === "page"
-          ? "Plan pages granted"
-          : "Plan credits granted";
-      }
-
-      if (entry.unitType === "page" && entry.feature === "shadow_auto_grant") {
-        return "Add-on pages granted";
-      }
-
-      return `${feature} granted`;
-    }
-
-    if (entry.eventType === "expire") {
-      return entry.unitType === "page"
-        ? "Monthly pages expired"
-        : "Unused credits expired";
-    }
-
-    if (entry.eventType === "adjust") {
-      if (entry.feature === "seat_quota_change") {
-        return "Seats updated";
-      }
-
-      return `${feature} adjusted`;
-    }
-
-    if (entry.eventType === "refund") {
-      return `${feature} refunded`;
-    }
-
-    if (entry.eventType === "reserve") {
-      return `${feature} reserved`;
-    }
-
-    if (entry.eventType === "release") {
-      return `${feature} released`;
-    }
-
-    return feature;
-  })();
-
-  return formatUsageActivityDetail(kind, detail);
+  // Tier 4: a generic, still-localised composition — the last resort when
+  // even the stored title is empty.
+  return formatUsageActivityDetail(
+    getUsageActivityKind(entry),
+    formatActivityFeatureName(entry.feature, copy),
+    copy,
+  );
 }
 
 export function isLedgerEntryInCycle(

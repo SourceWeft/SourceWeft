@@ -6,6 +6,9 @@ import { Gauge } from "lucide-react";
 import { Progress } from "@sourceweft/ui-web/components/ui/progress";
 import { isPersonalOrganization } from "@sourceweft/contracts/organization-metadata";
 
+import { useBillingCopy } from "./use-billing-copy";
+import type { BillingCopyFormat } from "./use-billing-copy";
+
 type BillingSummary = Awaited<ReturnType<BillingClient["getSummary"]>>;
 type BillingOrg = {
   id: string;
@@ -25,24 +28,14 @@ function resolveSidebarBillingTeamId(input: {
   return input.orgs?.find(isPersonalOrganization)?.id ?? null;
 }
 
-function formatUsageNumber(value: number) {
-  return new Intl.NumberFormat(undefined, {
-    maximumFractionDigits: 1,
-    notation: "compact",
-  }).format(value);
-}
-
-function formatUsageDate(value: string) {
+function formatUsageDate(value: string, format: BillingCopyFormat) {
   const date = new Date(value);
 
   if (Number.isNaN(date.getTime())) {
     return "--";
   }
 
-  return new Intl.DateTimeFormat(undefined, {
-    day: "numeric",
-    month: "short",
-  }).format(date);
+  return format.shortDate(value);
 }
 
 export function SidebarUsageSummary({
@@ -52,6 +45,7 @@ export function SidebarUsageSummary({
 }) {
   const { billingClient, authClient, subscribeDashboardBillingSummaryRefresh } =
     useBillingUiHost();
+  const { copy, format } = useBillingCopy();
 
   const { data: orgs } = authClient.useListOrganizations();
   const { data: activeOrg } = authClient.useActiveOrganization();
@@ -133,16 +127,18 @@ export function SidebarUsageSummary({
   const creditsPercent =
     creditsLimit > 0 ? Math.min(100, (creditsUsed / creditsLimit) * 100) : 0;
   const creditsLabel = summary
-    ? `${formatUsageNumber(creditsUsed)} / ${formatUsageNumber(creditsLimit)}`
+    ? `${format.compactNumber(creditsUsed)} / ${format.compactNumber(creditsLimit)}`
     : loading
-      ? "Loading"
+      ? copy.sidebar.loading
       : "-- / --";
   const pagesAvailable = summary?.pages.available ?? 0;
-  const cycleEndsAt = summary ? formatUsageDate(summary.cycleEndAt) : "--";
+  const cycleEndsAt = summary
+    ? formatUsageDate(summary.cycleEndAt, format)
+    : "--";
 
   return (
     <button
-      aria-label="Open usage"
+      aria-label={copy.sidebar.openUsageAriaLabel}
       className="w-full rounded-lg border border-sidebar-border bg-sidebar-accent/35 p-2.5 text-left transition-colors hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       onClick={onOpenUsage}
       type="button"
@@ -151,7 +147,7 @@ export function SidebarUsageSummary({
         <div className="flex min-w-0 items-center gap-1.5">
           <Gauge className="size-3.5 shrink-0 text-muted-foreground" />
           <span className="truncate text-[10px] font-medium text-sidebar-foreground">
-            Usage
+            {copy.sidebar.usageLabel}
           </span>
         </div>
         <span className="shrink-0 text-[10px] font-medium text-sidebar-foreground">
@@ -161,7 +157,7 @@ export function SidebarUsageSummary({
 
       <div className="mt-2">
         <div className="mb-1 flex items-center justify-between gap-2 text-[10px]">
-          <span className="text-muted-foreground">Credits</span>
+          <span className="text-muted-foreground">{copy.common.credits}</span>
           <span className="truncate text-right font-medium text-sidebar-foreground">
             {creditsLabel}
           </span>
@@ -171,19 +167,23 @@ export function SidebarUsageSummary({
 
       <div className="mt-2 grid grid-cols-2 gap-2 text-[10px]">
         <div className="min-w-0">
-          <p className="truncate text-muted-foreground">Pages left</p>
+          <p className="truncate text-muted-foreground">
+            {copy.sidebar.pagesLeft}
+          </p>
           <p className="truncate font-medium text-sidebar-foreground">
             {summary
-              ? formatUsageNumber(pagesAvailable)
+              ? format.compactNumber(pagesAvailable)
               : loading
                 ? "..."
                 : "--"}
           </p>
         </div>
         <div className="min-w-0 text-right">
-          <p className="truncate text-muted-foreground">Cycle ends</p>
+          <p className="truncate text-muted-foreground">
+            {copy.sidebar.cycleEnds}
+          </p>
           <p className="truncate font-medium text-sidebar-foreground">
-            {hasError ? "Unavailable" : cycleEndsAt}
+            {hasError ? copy.sidebar.unavailable : cycleEndsAt}
           </p>
         </div>
       </div>

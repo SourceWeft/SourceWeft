@@ -15,20 +15,18 @@ import { cn } from "@sourceweft/ui-web/lib/utils";
 import { toast } from "sonner";
 
 import { BillingPlanActionControls } from "./billing-plan-action-controls";
+import { formatCopy } from "../messages";
 import {
-  formatBillingDate,
   formatBillingInterval,
   formatBillingStatus,
-  formatCurrencyCents,
-  formatFeatureName,
-  formatNumber,
-  formatPercent,
+  formatCycleSource,
   formatPlanName,
   formatSeatProviderAction,
   getSeatPreviewDirection,
   isPersonalBillingOrg,
   resolveBillingTeamId,
 } from "./billing-utils";
+import { useBillingCopy } from "./use-billing-copy";
 
 import type {
   BillingInterval,
@@ -48,6 +46,7 @@ export function BillingPanel() {
     BillingPanelSkeleton,
     OrgSwitcher,
   } = useBillingUiHost();
+  const { copy, format } = useBillingCopy();
 
   const { data: orgs } = authClient.useListOrganizations();
   const { data: activeOrg } = authClient.useActiveOrganization();
@@ -101,14 +100,16 @@ export function BillingPanel() {
       } catch (err) {
         setSummary(null);
         setSubscription(null);
-        setError(err instanceof Error ? err.message : "Failed to load billing");
+        setError(
+          err instanceof Error ? err.message : copy.billing.failedToLoad,
+        );
       } finally {
         if (!options?.silent) {
           setLoading(false);
         }
       }
     },
-    [resolvingPersonalTeamId, teamId, billingClient],
+    [copy, resolvingPersonalTeamId, teamId, billingClient],
   );
 
   React.useEffect(() => {
@@ -153,7 +154,7 @@ export function BillingPanel() {
       setSeatPreviewOpen(true);
     } catch (err) {
       toast.error(
-        err instanceof Error ? err.message : "Unable to update seats.",
+        err instanceof Error ? err.message : copy.billing.unableToUpdateSeats,
       );
     } finally {
       setSeatActionLoading(false);
@@ -170,13 +171,13 @@ export function BillingPanel() {
       await billingClient.updateSubscriptionSeats(teamId, {
         seatCount: seatPreview.seatCount,
       });
-      toast.success("Seat count updated.");
+      toast.success(copy.billing.seatCountUpdated);
       setSeatPreviewOpen(false);
       setSeatPreview(null);
       await loadBilling({ silent: true });
     } catch (err) {
       toast.error(
-        err instanceof Error ? err.message : "Unable to update seats.",
+        err instanceof Error ? err.message : copy.billing.unableToUpdateSeats,
       );
     } finally {
       setSeatActionLoading(false);
@@ -184,21 +185,23 @@ export function BillingPanel() {
   }
 
   const planName = summary
-    ? formatPlanName(summary.planFamily, isPersonal)
+    ? formatPlanName(summary.planFamily, isPersonal, copy)
     : isPersonal
-      ? "Personal"
-      : "Team";
+      ? copy.common.personal
+      : copy.common.team;
   const activeScopeLabel = isPersonal
-    ? "Personal billing"
-    : `${activeOrgRecord?.name ?? "Team"} billing`;
+    ? copy.billing.scopePersonal
+    : formatCopy(copy.billing.scopeTeam, {
+        team: activeOrgRecord?.name ?? copy.common.team,
+      });
   const subscriptionStatus = subscription?.status ?? "inactive";
   const hasPaidSubscription = Boolean(subscription?.externalSubscriptionId);
   const subscriptionStatusLabel = hasPaidSubscription
-    ? formatBillingStatus(subscriptionStatus)
-    : "No paid subscription";
+    ? formatBillingStatus(subscriptionStatus, copy)
+    : copy.billing.noPaidSubscription;
   const planStateLabel = hasPaidSubscription
     ? subscriptionStatusLabel
-    : `${planName} account`;
+    : formatCopy(copy.billing.planAccount, { plan: planName });
   const seatsUsed = summary?.seats.used ?? 0;
   const seatsLimit = summary?.seats.limit ?? 0;
   const seatsRemaining = summary?.seats.remaining ?? 0;
@@ -208,39 +211,50 @@ export function BillingPanel() {
   const pagesUsed = summary?.pages.consumedThisCycle ?? 0;
   const pagesLimit = summary?.pages.monthlyGrant ?? 0;
   const cycleLabel = summary
-    ? `${formatBillingDate(summary.cycleStartAt)} - ${formatBillingDate(
-        summary.cycleEndAt,
-      )}`
+    ? formatCopy(copy.billing.cycleRange, {
+        start: format.date(summary.cycleStartAt),
+        end: format.date(summary.cycleEndAt),
+      })
     : loading
-      ? "Loading cycle..."
+      ? copy.billing.loadingCycle
       : "--";
   const billingRows = [
     {
-      label: "Cycle",
+      label: copy.common.cycle,
       value: cycleLabel,
-      detail: summary ? formatFeatureName(summary.cycleSource) : "--",
+      detail: summary ? formatCycleSource(summary.cycleSource, copy) : "--",
     },
     {
-      label: "Credits",
+      label: copy.common.credits,
       value: summary
-        ? `${formatNumber(creditsUsed)} / ${formatNumber(creditsLimit)}`
+        ? formatCopy(copy.billing.usedOfLimit, {
+            used: format.number(creditsUsed),
+            limit: format.number(creditsLimit),
+          })
         : loading
-          ? "Loading..."
+          ? copy.billing.loadingValue
           : "-- / --",
       detail: summary
-        ? `${formatNumber(summary.credits.available)} available`
-        : "Credit availability is unavailable",
+        ? formatCopy(copy.billing.availableCount, {
+            count: format.number(summary.credits.available),
+          })
+        : copy.billing.creditsUnavailable,
     },
     {
-      label: "Pages",
+      label: copy.common.pages,
       value: summary
-        ? `${formatNumber(pagesUsed)} / ${formatNumber(pagesLimit)}`
+        ? formatCopy(copy.billing.usedOfLimit, {
+            used: format.number(pagesUsed),
+            limit: format.number(pagesLimit),
+          })
         : loading
-          ? "Loading..."
+          ? copy.billing.loadingValue
           : "-- / --",
       detail: summary
-        ? `${formatNumber(summary.pages.available)} available`
-        : "Page availability is unavailable",
+        ? formatCopy(copy.billing.availableCount, {
+            count: format.number(summary.pages.available),
+          })
+        : copy.billing.pagesUnavailable,
     },
   ];
   const planAction = useBillingPlanAction({
@@ -272,72 +286,80 @@ export function BillingPanel() {
     seatPreviewDirection === "decrease"
       ? [
           {
-            label: "Theoretical refund",
+            label: copy.billing.seatPreview.theoreticalRefund,
             value: seatPreviewBilling
-              ? formatCurrencyCents(
+              ? format.currency(
                   seatPreviewBilling.theoreticalRefundCents,
                   seatPreviewBilling.currency,
                 )
               : "--",
           },
           {
-            label: "Refund or credit",
+            label: copy.billing.seatPreview.refundOrCredit,
             value: seatPreviewBilling
-              ? formatCurrencyCents(
+              ? format.currency(
                   seatPreviewBilling.actualRefundCents,
                   seatPreviewBilling.currency,
                 )
               : "--",
           },
           {
-            label: "Not refundable",
+            label: copy.billing.seatPreview.notRefundable,
             value: seatPreviewBilling
-              ? formatCurrencyCents(
+              ? format.currency(
                   seatPreviewBilling.unrefundedCents,
                   seatPreviewBilling.currency,
                 )
               : "--",
           },
           {
-            label: "Refund ratio",
+            label: copy.billing.seatPreview.refundRatio,
             value: seatPreviewQuota
-              ? formatPercent(seatPreviewQuota.refundRatio)
+              ? format.percent(seatPreviewQuota.refundRatio)
               : "--",
           },
           {
-            label: "Credits deducted",
+            label: copy.billing.seatPreview.creditsDeducted,
             value: seatPreviewQuota
-              ? `${formatNumber(seatPreviewQuota.actualCredits)} / ${formatNumber(
-                  seatPreviewQuota.targetCredits,
-                )}`
+              ? formatCopy(copy.billing.usedOfLimit, {
+                  used: format.number(seatPreviewQuota.actualCredits),
+                  limit: format.number(seatPreviewQuota.targetCredits),
+                })
               : "--",
           },
           {
-            label: "Pages deducted",
+            label: copy.billing.seatPreview.pagesDeducted,
             value: seatPreviewQuota
-              ? `${formatNumber(seatPreviewQuota.actualPages)} / ${formatNumber(
-                  seatPreviewQuota.targetPages,
-                )}`
+              ? formatCopy(copy.billing.usedOfLimit, {
+                  used: format.number(seatPreviewQuota.actualPages),
+                  limit: format.number(seatPreviewQuota.targetPages),
+                })
               : "--",
           },
           {
-            label: "Billing action",
-            value: formatSeatProviderAction(seatPreviewBilling?.providerAction),
+            label: copy.billing.seatPreview.billingAction,
+            value: formatSeatProviderAction(
+              seatPreviewBilling?.providerAction,
+              copy,
+            ),
           },
         ]
       : [
           {
-            label: "Estimated prorated charge",
+            label: copy.billing.seatPreview.estimatedCharge,
             value: seatPreviewBilling
-              ? formatCurrencyCents(
+              ? format.currency(
                   seatPreviewBilling.estimatedChargeCents,
                   seatPreviewBilling.currency,
                 )
               : "--",
           },
           {
-            label: "Billing action",
-            value: formatSeatProviderAction(seatPreviewBilling?.providerAction),
+            label: copy.billing.seatPreview.billingAction,
+            value: formatSeatProviderAction(
+              seatPreviewBilling?.providerAction,
+              copy,
+            ),
           },
         ];
 
@@ -346,7 +368,9 @@ export function BillingPanel() {
       <div className="w-full max-w-2xl divide-y divide-border/60">
         {/* ── Header ── */}
         <div className="flex items-center justify-between gap-3 pb-7 pt-1">
-          <p className="text-base font-semibold text-foreground">Billing</p>
+          <p className="text-base font-semibold text-foreground">
+            {copy.billing.title}
+          </p>
           <OrgSwitcher />
         </div>
 
@@ -360,11 +384,11 @@ export function BillingPanel() {
                   {activeScopeLabel}
                 </div>
                 <p className="mt-3 text-lg font-semibold text-foreground">
-                  {planName} plan
+                  {formatCopy(copy.billing.planLabel, { plan: planName })}
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
                   {planStateLabel} ·{" "}
-                  {formatBillingInterval(subscription?.billingInterval)}
+                  {formatBillingInterval(subscription?.billingInterval, copy)}
                 </p>
               </div>
               <BillingPlanActionControls
@@ -396,7 +420,9 @@ export function BillingPanel() {
         {!isPersonal && (
           <div className="pt-7">
             <div className="mb-4 flex items-center justify-between gap-3">
-              <p className="text-base font-semibold text-foreground">Seats</p>
+              <p className="text-base font-semibold text-foreground">
+                {copy.billing.seatsSectionTitle}
+              </p>
               <Button
                 disabled={
                   planAction.actionLoading ||
@@ -414,7 +440,9 @@ export function BillingPanel() {
                 type="button"
                 variant="outline"
               >
-                {isSubscriptionActive ? "Update seats" : "Add seats"}
+                {isSubscriptionActive
+                  ? copy.billing.updateSeats
+                  : copy.billing.addSeats}
               </Button>
             </div>
             <div className="rounded-lg border border-border px-4 py-3">
@@ -422,22 +450,25 @@ export function BillingPanel() {
                 <div>
                   <p className="text-sm font-medium text-foreground">
                     {summary
-                      ? `${formatNumber(seatsUsed)} of ${formatNumber(
-                          seatsLimit,
-                        )} seats used`
+                      ? formatCopy(copy.billing.seatsUsedOfLimit, {
+                          used: format.number(seatsUsed),
+                          limit: format.number(seatsLimit),
+                        })
                       : loading
-                        ? "Loading seats..."
-                        : "-- of -- seats used"}
+                        ? copy.billing.loadingSeats
+                        : copy.billing.seatsUnknown}
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground">
                     {summary
-                      ? `${formatNumber(seatsRemaining)} seats remaining`
-                      : "Seat availability is unavailable"}
+                      ? formatCopy(copy.billing.seatsRemaining, {
+                          count: format.number(seatsRemaining),
+                        })
+                      : copy.billing.seatsUnavailable}
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   <input
-                    aria-label="Total seats"
+                    aria-label={copy.billing.totalSeatsLabel}
                     className="h-9 w-20 rounded-md border border-input bg-background px-2 text-right text-sm font-medium text-foreground outline-none transition-colors focus:border-ring"
                     disabled={!isSubscriptionActive || seatActionLoading}
                     min={minimumSeatCount}
@@ -454,25 +485,23 @@ export function BillingPanel() {
                     value={targetSeatCount}
                   />
                   <span className="text-sm font-medium text-foreground">
-                    total
+                    {copy.billing.seatsTotalSuffix}
                   </span>
                 </div>
               </div>
               {isSubscriptionActive && targetSeatCount < seatsLimit && (
                 <p className="mt-3 text-xs text-muted-foreground">
-                  Seat reductions require a billing preview before they are
-                  applied.
+                  {copy.billing.seatReductionNotice}
                 </p>
               )}
               {isSubscriptionActive && targetSeatCount > seatsLimit && (
                 <p className="mt-3 text-xs text-muted-foreground">
-                  Seat increases require a billing preview before they are
-                  applied.
+                  {copy.billing.seatIncreaseNotice}
                 </p>
               )}
               {isSubscriptionActive && targetSeatCount === seatsLimit && (
                 <p className="mt-3 text-xs text-muted-foreground">
-                  Seat count is already synced.
+                  {copy.billing.seatCountSynced}
                 </p>
               )}
             </div>
@@ -481,31 +510,34 @@ export function BillingPanel() {
 
         <div className="pt-7">
           <p className="mb-4 text-base font-semibold text-foreground">
-            Subscription
+            {copy.billing.subscriptionTitle}
           </p>
           <div className="overflow-hidden rounded-lg border border-border">
             {[
               {
-                label: "Status",
+                label: copy.common.status,
                 value: subscriptionStatusLabel,
               },
               {
-                label: "Billing cadence",
-                value: formatBillingInterval(subscription?.billingInterval),
+                label: copy.billing.rows.billingCadence,
+                value: formatBillingInterval(
+                  subscription?.billingInterval,
+                  copy,
+                ),
               },
               {
-                label: "Renewal",
+                label: copy.billing.rows.renewal,
                 value: subscription?.cancelAtPeriodEnd
-                  ? "Cancels at period end"
+                  ? copy.billing.renewalCancels
                   : isSubscriptionActive
-                    ? "Renews automatically"
-                    : "Not scheduled",
+                    ? copy.billing.renewalAuto
+                    : copy.billing.renewalNotScheduled,
               },
               {
-                label: "Last updated",
+                label: copy.billing.rows.lastUpdated,
                 value: subscription?.lastEventAt
-                  ? formatBillingDate(subscription.lastEventAt)
-                  : "No subscription updates yet",
+                  ? format.date(subscription.lastEventAt)
+                  : copy.billing.noSubscriptionUpdates,
               },
             ].map((row, index) => (
               <div
@@ -540,8 +572,8 @@ export function BillingPanel() {
           <DialogHeader>
             <DialogTitle>
               {seatPreviewIsIncrease
-                ? "Review seat increase"
-                : "Review seat reduction"}
+                ? copy.billing.reviewSeatIncrease
+                : copy.billing.reviewSeatReduction}
             </DialogTitle>
           </DialogHeader>
           {seatPreview ? (
@@ -553,13 +585,16 @@ export function BillingPanel() {
                   ) : (
                     <Minus className="h-3.5 w-3.5" />
                   )}
-                  {formatNumber(seatPreview.currentSeatCount)} to{" "}
-                  {formatNumber(seatPreview.seatCount)} seats
+                  {formatCopy(copy.billing.seatChangeSummary, {
+                    current: format.number(seatPreview.currentSeatCount),
+                    next: format.number(seatPreview.seatCount),
+                  })}
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {formatNumber(seatPreview.seatsUsed)} members and{" "}
-                  {formatNumber(seatPreview.pendingInvitations)} pending invites
-                  will remain allocated.
+                  {formatCopy(copy.billing.seatChangeDetail, {
+                    used: format.number(seatPreview.seatsUsed),
+                    pending: format.number(seatPreview.pendingInvitations),
+                  })}
                 </p>
               </div>
               <div className="overflow-hidden rounded-lg border border-border">
@@ -588,7 +623,7 @@ export function BillingPanel() {
               type="button"
               variant="ghost"
             >
-              Cancel
+              {copy.common.cancel}
             </Button>
             <Button
               disabled={
@@ -601,10 +636,10 @@ export function BillingPanel() {
               type="button"
             >
               {seatActionLoading
-                ? "Updating..."
+                ? copy.billing.updatingSeats
                 : seatPreviewIsIncrease
-                  ? "Confirm increase"
-                  : "Confirm reduction"}
+                  ? copy.billing.confirmIncrease
+                  : copy.billing.confirmReduction}
             </Button>
           </DialogFooter>
         </DialogContent>

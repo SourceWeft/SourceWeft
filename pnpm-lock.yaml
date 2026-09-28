@@ -710,6 +710,9 @@ importers:
       '@sourceweft/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@sourceweft/i18n':
+        specifier: workspace:*
+        version: link:../../packages/i18n
       '@sourceweft/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk

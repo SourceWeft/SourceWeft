@@ -1,5 +1,7 @@
 "use client";
-import { useBillingUiHost } from "./context";
+import { useBillingControls, useBillingUiHost } from "./context";
+import { useBillingCopy } from "./use-billing-copy";
+import { formatCopy } from "../messages";
 
 import * as React from "react";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
@@ -17,17 +19,9 @@ type CheckoutSource = "landing" | "dashboard";
 
 const MIN_TEAM_SEATS = 2;
 const MAX_TEAM_SEATS = 99;
-const billingIntervalOptions = [
-  { value: "yearly", label: "Yearly", badge: "Save 2 months" },
-  { value: "monthly", label: "Monthly", badge: undefined },
-] as const satisfies Array<{
-  value: BillingInterval;
-  label: string;
-  badge?: string;
-}>;
 
-function formatPrice(cents: number): string {
-  if (cents === 0) return "Free";
+function formatPrice(cents: number, freeLabel: string): string {
+  if (cents === 0) return freeLabel;
   return `$${(cents / 100).toFixed(0)}`;
 }
 
@@ -141,6 +135,16 @@ export function TeamCheckoutDialog({
     billingClient,
     openCheckout,
   } = useBillingUiHost();
+  const { copy, format } = useBillingCopy();
+  const controls = useBillingControls();
+  const billingIntervalOptions = [
+    {
+      value: "yearly" as const,
+      label: controls.yearly,
+      badge: copy.checkout.saveTwoMonths,
+    },
+    { value: "monthly" as const, label: controls.monthly, badge: undefined },
+  ];
 
   const [teamName, setTeamName] = React.useState("");
   const [seatCountInput, setSeatCountInput] = React.useState(
@@ -172,14 +176,17 @@ export function TeamCheckoutDialog({
 
     const normalizedTeamName = teamName.trim();
     if (!normalizedTeamName) {
-      toast.error("Enter a team name.");
+      toast.error(copy.checkout.enterTeamName);
       return;
     }
 
     const requestedSeatCount = parseTeamSeatCount(seatCountInput);
     if (!requestedSeatCount) {
       toast.error(
-        `Seats must be a whole number between ${MIN_TEAM_SEATS} and ${MAX_TEAM_SEATS}.`,
+        formatCopy(copy.checkout.seatsRange, {
+          min: format.number(MIN_TEAM_SEATS),
+          max: format.number(MAX_TEAM_SEATS),
+        }),
       );
       return;
     }
@@ -228,7 +235,7 @@ export function TeamCheckoutDialog({
         source,
       });
       toast.error(
-        error instanceof Error ? error.message : "Unable to start checkout.",
+        error instanceof Error ? error.message : controls.checkoutError,
       );
     } finally {
       setIsLoading(false);
@@ -249,9 +256,11 @@ export function TeamCheckoutDialog({
         constrainWidth={false}
       >
         <DialogHeader className="border-b px-4 py-3.5">
-          <DialogTitle className="text-base">Create team</DialogTitle>
+          <DialogTitle className="text-base">
+            {copy.checkout.createTeam}
+          </DialogTitle>
           <DialogDescription className="text-xs leading-5">
-            Name the team and choose seats. The team is created after payment.
+            {copy.checkout.createTeamDescription}
           </DialogDescription>
         </DialogHeader>
 
@@ -261,7 +270,7 @@ export function TeamCheckoutDialog({
               className="text-sm font-medium text-foreground"
               htmlFor={nameInputId}
             >
-              Team name
+              {copy.checkout.teamNameLabel}
             </label>
             <input
               autoComplete="organization"
@@ -271,7 +280,7 @@ export function TeamCheckoutDialog({
               id={nameInputId}
               maxLength={80}
               onChange={(event) => setTeamName(event.currentTarget.value)}
-              placeholder="Acme Research"
+              placeholder={copy.checkout.teamNamePlaceholder}
               required
               type="text"
               value={teamName}
@@ -283,7 +292,7 @@ export function TeamCheckoutDialog({
               className="text-sm font-medium text-foreground"
               htmlFor={seatsInputId}
             >
-              Seats
+              {copy.common.seats}
             </label>
             <input
               className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none transition-colors focus:border-ring focus:ring-3 focus:ring-ring/20 disabled:cursor-not-allowed disabled:opacity-60"
@@ -306,7 +315,9 @@ export function TeamCheckoutDialog({
 
           {allowBillingIntervalSwitch ? (
             <div className="space-y-1.5">
-              <p className="text-sm font-medium text-foreground">Billing</p>
+              <p className="text-sm font-medium text-foreground">
+                {copy.checkout.billingLabel}
+              </p>
               <div className="grid grid-cols-2 gap-1 rounded-md border border-border bg-muted/40 p-1">
                 {billingIntervalOptions.map((option) => {
                   const isActive = currentBillingInterval === option.value;
@@ -338,16 +349,24 @@ export function TeamCheckoutDialog({
 
           <div className="rounded-md border border-border bg-muted/40 px-3 py-2.5 text-sm">
             <div className="flex items-center justify-between gap-3">
-              <span className="text-muted-foreground">Checkout total</span>
+              <span className="text-muted-foreground">
+                {copy.checkout.total}
+              </span>
               <span className="font-semibold text-foreground">
-                {formatPrice(totalPrice)}
+                {formatPrice(totalPrice, controls.free)}
                 <span className="font-normal text-muted-foreground">
-                  /{currentBillingInterval === "yearly" ? "yr" : "mo"}
+                  /
+                  {currentBillingInterval === "yearly"
+                    ? controls.year
+                    : controls.month}
                 </span>
               </span>
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
-              {formatPrice(currentPerSeatPrice)} per seat, {seatCount} seats.
+              {formatCopy(copy.checkout.perSeatSummary, {
+                price: formatPrice(currentPerSeatPrice, controls.free),
+                count: format.number(seatCount),
+              })}
             </p>
           </div>
 
@@ -358,10 +377,10 @@ export function TeamCheckoutDialog({
               type="button"
               variant="outline"
             >
-              Cancel
+              {copy.common.cancel}
             </Button>
             <Button disabled={isLoading} type="submit">
-              {isLoading ? "Opening..." : "Continue to checkout"}
+              {isLoading ? controls.opening : copy.checkout.continue}
             </Button>
           </div>
         </form>

@@ -1,5 +1,6 @@
 "use client";
 import { useBillingUiHost, type BillingUiHost } from "./context";
+import { useBillingCopy } from "./use-billing-copy";
 
 import * as React from "react";
 import { CheckCircle2, Loader2 } from "lucide-react";
@@ -23,15 +24,15 @@ function resolveState(status?: string): SyncState {
   return "finalizing";
 }
 
-const labels: Record<SyncState, string> = {
-  finalizing: "Finalizing payment",
-  setting_up: "Setting up your plan",
-  ready: "Ready",
-  syncing: "Still syncing",
-};
-
 export function BillingSuccessClient({ orderId }: { orderId?: string | null }) {
   const { trackPurchase, billingClient } = useBillingUiHost();
+  const { copy } = useBillingCopy();
+  const labels: Record<SyncState, string> = {
+    finalizing: copy.checkout.success.finalizing,
+    setting_up: copy.checkout.success.settingUp,
+    ready: copy.checkout.success.ready,
+    syncing: copy.checkout.success.syncing,
+  };
   function trackPurchaseOnce(
     input: Parameters<BillingUiHost["trackPurchase"]>[0],
   ) {
@@ -110,11 +111,11 @@ export function BillingSuccessClient({ orderId }: { orderId?: string | null }) {
       </h1>
       <p className="mt-2 text-sm leading-6 text-muted-foreground">
         {state === "ready"
-          ? "Your billing update is ready in the dashboard."
-          : "We are checking the provider confirmation and applying your billing state."}
+          ? copy.checkout.success.readyDescription
+          : copy.checkout.success.pendingDescription}
       </p>
       <Button asChild className="mt-6" size="sm">
-        <a href="/dashboard">Open dashboard</a>
+        <a href="/dashboard">{copy.checkout.success.openDashboard}</a>
       </Button>
     </div>
   );

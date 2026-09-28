@@ -1,5 +1,7 @@
 "use client";
-import { useBillingUiHost } from "./context";
+import { useBillingControls, useBillingUiHost } from "./context";
+import { useBillingCopy } from "./use-billing-copy";
+import { formatCopy, type BillingCopy } from "../messages";
 
 import * as React from "react";
 import Link from "next/link";
@@ -91,8 +93,8 @@ function getOrCreateIntent(input: {
   return next;
 }
 
-function labelForPlan(plan: PricingPlan | null) {
-  return plan === "team" ? "Team" : "Pro";
+function labelForPlan(plan: PricingPlan | null, copy: BillingCopy) {
+  return plan === "team" ? copy.checkout.planTeam : copy.checkout.planPro;
 }
 
 export function BillingCheckoutClient({
@@ -116,9 +118,31 @@ export function BillingCheckoutClient({
     billingClient,
     openCheckout,
   } = useBillingUiHost();
+  const { copy } = useBillingCopy();
+  const controls = useBillingControls();
 
   const [state, setState] = React.useState<CheckoutState>("preparing");
-  const [error, setError] = React.useState<string | null>(null);
+  // The raw failure, not the localized message — resolved against the
+  // *current* `copy`/`controls` at render time (`errorText` below), not the
+  // values captured in the effect's closure when the error was set. This
+  // keeps `copy`/`controls` out of the checkout-start effect's dependency
+  // array: including them meant a locale change re-ran the whole effect,
+  // and after a failed checkout `startedRef.current` had already been reset
+  // to `false` in the `catch` block, so the re-run re-attempted checkout
+  // from scratch (and could re-navigate via `openCheckout`).
+  const [error, setError] = React.useState<
+    | { message: string }
+    | { fallbackKey: "invalidLink" | "invalidSeatCount" }
+    | { checkoutStartFailed: true }
+    | null
+  >(null);
+  const errorText = error
+    ? "message" in error
+      ? error.message
+      : "fallbackKey" in error
+        ? copy.checkout[error.fallbackKey]
+        : controls.checkoutError
+    : null;
   const startedRef = React.useRef(false);
 
   React.useEffect(() => {
@@ -127,7 +151,7 @@ export function BillingCheckoutClient({
     }
 
     if (!isPricingPlan(plan) || !isBillingInterval(billingInterval)) {
-      setError("This checkout link is no longer valid.");
+      setError({ fallbackKey: "invalidLink" });
       setState("error");
       return;
     }
@@ -139,7 +163,7 @@ export function BillingCheckoutClient({
     const normalizedTeamName = teamName?.trim() ?? "";
     const normalizedSeatCount = parseTeamSeatCount(seatCount);
     if (checkoutPlan === "team" && normalizedSeatCount === null) {
-      setError("This team checkout link has an invalid seat count.");
+      setError({ fallbackKey: "invalidSeatCount" });
       setState("error");
       startedRef.current = false;
       return;
@@ -187,8 +211,8 @@ export function BillingCheckoutClient({
         });
         setError(
           checkoutError instanceof Error
-            ? checkoutError.message
-            : "Unable to start checkout.",
+            ? { message: checkoutError.message }
+            : { checkoutStartFailed: true },
         );
         setState("error");
         startedRef.current = false;
@@ -211,13 +235,15 @@ export function BillingCheckoutClient({
 
   const resolvedPlan = isPricingPlan(plan) ? plan : null;
   const title =
-    state === "error" ? "Checkout needs attention" : "Opening checkout";
+    state === "error" ? copy.checkout.needsAttention : copy.checkout.opening;
   const description =
     state === "error"
-      ? error
+      ? errorText
       : state === "opening"
-        ? "Your provider checkout is opening now."
-        : `Preparing your ${labelForPlan(resolvedPlan)} checkout.`;
+        ? copy.checkout.openingDescription
+        : formatCopy(copy.checkout.preparingDescription, {
+            plan: labelForPlan(resolvedPlan, copy),
+          });
 
   return (
     <div className="flex min-h-0 flex-1 items-center justify-center p-6">
@@ -240,10 +266,10 @@ export function BillingCheckoutClient({
               size="sm"
               type="button"
             >
-              Try again
+              {copy.checkout.tryAgain}
             </Button>
             <Button asChild size="sm" variant="outline">
-              <Link href="/#pricing">Back to pricing</Link>
+              <Link href="/#pricing">{copy.checkout.backToPricing}</Link>
             </Button>
           </div>
         ) : null}
