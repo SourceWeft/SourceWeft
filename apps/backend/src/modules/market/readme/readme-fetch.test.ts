@@ -55,7 +55,7 @@ describe("scheduling", () => {
     });
     assert.deepEqual(result, { queued: 2, inFlight: false });
     assert.deepEqual(findDue.mock.calls[0], [{ limit: MCP_README_BATCH_SIZE }]);
-    assert.equal(MCP_README_BATCH_SIZE, 200);
+    assert.equal(MCP_README_BATCH_SIZE, 800);
     assert.deepEqual(enqueue.mock.calls[0], [
       { versionIds: ["v-installed", "v-web"], reason: "scheduled" },
       MCP_README_SCHEDULED_JOB_ID,
@@ -242,6 +242,11 @@ describe("fetching a batch", () => {
     assert.deepEqual(
       writes.map(([, columns]) => columns.readmeStatus),
       ["unsupported_host", "unsupported_host"],
+    );
+    // A server with no repository at all is told apart from one elsewhere.
+    assert.deepEqual(
+      writes.map(([, columns]) => columns.readmeError),
+      ["The repository is not on github.com", "The server lists no repository"],
     );
     assert.equal(summary.tokenPresent, null);
   });

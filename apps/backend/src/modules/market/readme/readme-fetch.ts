@@ -113,6 +113,9 @@ const UNSUPPORTED_MESSAGES = {
   invalid_path: "The repository URL names no GitHub repository directory",
 } as const;
 
+/** Most registry entries for hosted servers list no repository at all. */
+const NO_REPOSITORY_MESSAGE = "The server lists no repository";
+
 async function fetchOne(
   claimed: ClaimedMcpReadme,
   deps: FetchMcpReadmeBatchDeps,
@@ -124,7 +127,9 @@ async function fetchOne(
   if ("unsupported" in repository) {
     return {
       status: "unsupported_host",
-      message: UNSUPPORTED_MESSAGES[repository.reason],
+      message: claimed.repoUrl?.trim()
+        ? UNSUPPORTED_MESSAGES[repository.reason]
+        : NO_REPOSITORY_MESSAGE,
     };
   }
   try {

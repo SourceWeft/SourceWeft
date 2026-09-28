@@ -39,8 +39,8 @@ there is no user-task creation API or worker handler.
 
 ## MCP README fetch
 
-Every 30 minutes (`MCP_README_SCHEDULE_INTERVAL_MS`) the scheduler queues one
-`mcp-readme-fetch` batch of up to 200 MCP server versions whose README is due:
+Every 10 minutes (`MCP_README_SCHEDULE_INTERVAL_MS`) the scheduler queues one
+`mcp-readme-fetch` batch of up to 800 MCP server versions whose README is due:
 the latest published version of each published, public server, installed
 servers first, then web-executable ones, then the rest. It only queues. The
 worker reads GitHub's README API, because `GITHUB_TOKEN` is given to the api
