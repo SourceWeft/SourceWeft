@@ -138,9 +138,9 @@
     },
     "seatProviderActions": {
       "internal_partial_credit": "內部部分抵扣",
-      "none": "無需支付方調整",
+      "none": "無需支付服務商調整",
       "proration_charge_immediately": "立即按比例扣款",
-      "proration_credit": "支付方按比例退還"
+      "proration_credit": "支付服務商按比例退還"
     },
     "updatingSeats": "正在更新…",
     "confirmIncrease": "確認增加",
@@ -264,7 +264,7 @@
     "invalidSeatCount": "該團隊結帳連結的席位數量無效。",
     "needsAttention": "結帳需要處理",
     "opening": "正在開啟結帳",
-    "openingDescription": "支付方的結帳頁面正在開啟。",
+    "openingDescription": "支付服務商的結帳頁面正在開啟。",
     "preparingDescription": "正在準備您的 {plan} 結帳。",
     "planTeam": "團隊版",
     "planPro": "專業版",
@@ -281,7 +281,7 @@
       "ready": "已就緒",
       "syncing": "仍在同步",
       "readyDescription": "您的帳單更新已在儀表板中就緒。",
-      "pendingDescription": "我們正在核實支付方的確認資訊並應用您的帳單狀態。",
+      "pendingDescription": "我們正在核實支付服務商的確認資訊並應用您的帳單狀態。",
       "openDashboard": "開啟儀表板"
     },
     "saveTwoMonths": "節省 2 個月",
@@ -290,7 +290,7 @@
     "createTeam": "建立團隊",
     "createTeamDescription": "為團隊命名並選擇席位數量，團隊將在付款後建立。",
     "teamNameLabel": "團隊名稱",
-    "teamNamePlaceholder": "示例團隊",
+    "teamNamePlaceholder": "星河研究組",
     "billingLabel": "帳單",
     "total": "結帳總額",
     "perSeatSummary": "每席位 {price}，共 {count} 個席位。",
