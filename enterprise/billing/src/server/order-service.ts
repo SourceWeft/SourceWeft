@@ -41,7 +41,11 @@ import type {
 } from "./types";
 import { updateOrderLocked } from "./order-locking";
 import { getTotalPagesBalance, grantAddOnPages } from "./page-ledger";
-import { applyRecordedReversalLocked } from "./payment-reversal";
+import {
+  applyRecordedReversalLocked,
+  triggerSafely,
+  type AlertInput,
+} from "./payment-reversal";
 import {
   ensureBillingCheckoutEnabled,
   ensureTeamBillingEnabled,
@@ -980,8 +984,13 @@ export class BillingOrderService {
   }
 
   async fulfillOrder(input: FulfillInput) {
+    // Alerts the fulfilment hook wants to raise are collected here rather
+    // than triggered inline, so a rolled-back attempt (the transaction below
+    // throws) never raises one — only the transaction's actual commit does.
+    const pendingAlerts: AlertInput[] = [];
+    let fulfilled: BillingOrderState;
     try {
-      return await this.store.runInTransaction(async (client) => {
+      fulfilled = await this.store.runInTransaction(async (client) => {
         const observed = await this.store.getOrderById(input.orderId, client);
         if (observed?.kind === "subscription") {
           const team = observed.teamId ?? observed.metadata.existingTeamId;
@@ -1050,12 +1059,18 @@ export class BillingOrderService {
           return this.fulfillSubscriptionOrderLocked(confirmed, input, client);
         }
 
-        return this.fulfillTopupOrderLocked(confirmed, client);
+        return this.fulfillTopupOrderLocked(confirmed, client, pendingAlerts);
       });
     } catch (error) {
       await this.markFulfillmentFailed(input.orderId, error, input);
       throw error;
     }
+
+    for (const alert of pendingAlerts) {
+      await triggerSafely(this.alerts, this.host?.logger, alert);
+    }
+
+    return fulfilled;
   }
 
   private async fulfillSubscriptionOrderLocked(
@@ -1159,6 +1174,7 @@ export class BillingOrderService {
   private async fulfillTopupOrderLocked(
     order: BillingOrderState,
     client: PoolClient,
+    pendingAlerts: AlertInput[],
   ) {
     if (!order.teamId || !order.unitType || !order.unitAmount) {
       throw new BillingError(
@@ -1247,8 +1263,7 @@ export class BillingOrderService {
       client,
       account,
       order,
-      alerts: this.alerts,
-      logger: this.host?.logger,
+      pendingAlerts,
     });
 
     return this.store.updateOrder(

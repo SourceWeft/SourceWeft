@@ -81,7 +81,7 @@ export type PaymentReversalNotice = {
 };
 
 type AlertTrigger = Pick<BillingAlertSink, "trigger">;
-type AlertInput = Parameters<BillingAlertSink["trigger"]>[0];
+export type AlertInput = Parameters<BillingAlertSink["trigger"]>[0];
 type RejectionReason =
   "currency_mismatch" | "invalid_amount" | "provider_mismatch";
 
@@ -198,8 +198,10 @@ export function computeReversalTarget(input: {
  * A `refunded` or `charged_back` order reverses the whole grant; a partial
  * refund is measured against the paid amount recorded with it, falling back
  * to `amountTotal`. Returns the order with `reversedUnits` advanced; the
- * caller persists it in its final order update. Alerts go out inline through
- * the safe trigger. An order without a usable paid amount is left for an
+ * caller persists it in its final order update. Alerts are pushed onto
+ * `pendingAlerts` rather than triggered inline, so the caller — still mid
+ * fulfillment transaction here — raises them only once that transaction has
+ * actually committed. An order without a usable paid amount is left for an
  * operator (rejected alert) rather than failing the grant.
  */
 export async function applyRecordedReversalLocked(input: {
@@ -207,8 +209,7 @@ export async function applyRecordedReversalLocked(input: {
   client: PoolClient;
   account: BillingAccountState;
   order: BillingOrderState;
-  alerts?: AlertTrigger;
-  logger?: BillingLogger;
+  pendingAlerts: AlertInput[];
 }): Promise<BillingOrderState> {
   if (input.order.reversalStatus === "none") {
     return input.order;
@@ -232,11 +233,7 @@ export async function applyRecordedReversalLocked(input: {
     currency: order.currency,
   };
   if (paidAmount <= 0) {
-    await triggerSafely(
-      input.alerts,
-      input.logger,
-      rejectedAlert(order, request, "invalid_amount"),
-    );
+    input.pendingAlerts.push(rejectedAlert(order, request, "invalid_amount"));
     return input.order;
   }
   if (await hasReversalLedger(input.store, input.client, order, request)) {
@@ -244,9 +241,7 @@ export async function applyRecordedReversalLocked(input: {
   }
 
   const applied = await reverseGrantLocked({ ...input, order, request });
-  for (const alert of applied.alerts) {
-    await triggerSafely(input.alerts, input.logger, alert);
-  }
+  input.pendingAlerts.push(...applied.alerts);
 
   return applied.order;
 }
@@ -752,7 +747,7 @@ function noticeAlert(notice: PaymentReversalNotice): AlertInput {
   };
 }
 
-async function triggerSafely(
+export async function triggerSafely(
   alerts: AlertTrigger | undefined,
   logger: BillingLogger | undefined,
   alert: AlertInput,

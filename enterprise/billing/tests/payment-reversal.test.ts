@@ -946,6 +946,70 @@ test("a fully refunded order reverses the whole grant at fulfillment whatever th
 });
 
 /**
+ * The fulfilment hook's reversal alert must not go out until the fulfilment
+ * transaction that produced it has actually committed: the final write
+ * (`status: "fulfilled"`) fails once, rolling everything in that attempt
+ * back (mirroring PostgreSQL), and only the successful retry may raise the
+ * alert.
+ */
+class FinalFulfilledWriteFailsOnceStore extends MemoryBillingStore {
+  private failuresLeft = 1;
+
+  async updateOrder(
+    ...args: Parameters<MemoryBillingStore["updateOrder"]>
+  ): ReturnType<MemoryBillingStore["updateOrder"]> {
+    const [order] = args;
+    if (order.status === "fulfilled" && this.failuresLeft > 0) {
+      this.failuresLeft -= 1;
+      throw new Error("db down");
+    }
+    return super.updateOrder(...args);
+  }
+
+  async runInTransaction<T>(
+    ...args: Parameters<MemoryBillingStore["runInTransaction"]>
+  ): Promise<T> {
+    const order = this.order ? { ...this.order } : null;
+    const account = this.account ? { ...this.account } : null;
+    const ledgerCount = this.ledgers.length;
+    try {
+      return (await super.runInTransaction(...args)) as T;
+    } catch (error) {
+      this.order = order;
+      this.account = account;
+      this.ledgers.length = ledgerCount;
+      throw error;
+    }
+  }
+}
+
+test("hook alerts are raised only after fulfilment commits", async () => {
+  const store = new FinalFulfilledWriteFailsOnceStore();
+  const { alerts, service } = await setupTopup({ store, fulfilled: false });
+
+  await service.applyPaymentReversal(reversal());
+  alerts.length = 0; // drop the "recorded before fulfillment" alert
+
+  await assert.rejects(
+    () => service.fulfillOrder({ orderId: "order_1" }),
+    /db down/,
+  );
+  assert.equal(
+    alerts.some(
+      (alert) => alert.alertKey === "billing:payment-reversal:order_1",
+    ),
+    false,
+  );
+
+  alerts.length = 0;
+  await service.fulfillOrder({ orderId: "order_1" });
+
+  assert.deepEqual(alertLevels(alerts), [
+    ["billing:payment-reversal:order_1", "warn"],
+  ]);
+});
+
+/**
  * Models the order row lock around fulfillment-failure bookkeeping. The
  * first grant write fails, and the transaction's order, account and ledger
  * writes roll back as PostgreSQL would;
