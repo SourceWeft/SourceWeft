@@ -3,21 +3,21 @@
 // `null`, which apps/backend/src/api/app.ts would otherwise hand to Better
 // Auth, which 404s). These tests exercise `createCreemWebhookHandler`'s own
 // ordering — signature verification, then event-type dispatch, then the
-// refund/dispute manual-handling alert — in isolation from the rest of the
+// refund/dispute reversal dispatch — in isolation from the rest of the
 // billing stack.
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import { createHmac } from "node:crypto";
 import { createCreemWebhookHandler } from "../src/server/providers/creem-webhook-bypass";
-import type { BillingAlertSink } from "../src/server/host";
 import { runtimeConfig } from "./test-fixtures";
 
 const WEBHOOK_URL = "http://localhost/api/auth/creem/webhook";
 
-type RecordedAlert = Parameters<BillingAlertSink["trigger"]>[0];
-
 function fixture(
-  overrides: { webhookSecret?: string; alerts?: BillingAlertSink } = {},
+  overrides: {
+    webhookSecret?: string;
+    reversalSync?: (...args: unknown[]) => Promise<void>;
+  } = {},
 ) {
   const config = {
     ...runtimeConfig,
@@ -28,23 +28,21 @@ function fixture(
       webhookSecret: overrides.webhookSecret ?? "creem-fixture-signing-secret",
     },
   };
-  const recordedAlerts: RecordedAlert[] = [];
-  const alerts: BillingAlertSink = overrides.alerts ?? {
-    async trigger(input) {
-      recordedAlerts.push(input);
-    },
-    async resolve() {},
-  };
   const syncCalls: unknown[][] = [];
+  const reversalCalls: unknown[][] = [];
   const handler = createCreemWebhookHandler({
     config,
     logger: { info() {}, warn() {}, error() {} },
-    alerts,
     sync: async (...args: unknown[]) => {
       syncCalls.push(args);
     },
+    reversalSync:
+      overrides.reversalSync ??
+      (async (...args: unknown[]) => {
+        reversalCalls.push(args);
+      }),
   });
-  return { config, handler, alerts: recordedAlerts, syncCalls };
+  return { config, handler, syncCalls, reversalCalls };
 }
 
 function sign(raw: string, secret = "creem-fixture-signing-secret") {
@@ -95,7 +93,7 @@ test("unsigned or wrongly signed deliveries are rejected before the type is read
   assert.equal(wronglySignedRefund?.status, 400);
 
   assert.equal(f.syncCalls.length, 0);
-  assert.equal(f.alerts.length, 0);
+  assert.equal(f.reversalCalls.length, 0);
 });
 
 test("signed envelope without a string eventType is rejected", async () => {
@@ -123,10 +121,10 @@ test("signed unsupported types are acknowledged without a mode check", async () 
   const response = await f.handler(post(raw, sign(raw)));
   assert.equal(response?.status, 200);
   assert.equal(f.syncCalls.length, 0);
-  assert.equal(f.alerts.length, 0);
+  assert.equal(f.reversalCalls.length, 0);
 });
 
-test("signed refund and dispute events are acknowledged and flagged for manual handling", async () => {
+test("signed refund and dispute events are dispatched to the reversal sync", async () => {
   const f = fixture();
 
   const refundRaw = JSON.stringify({
@@ -161,29 +159,26 @@ test("signed refund and dispute events are acknowledged and flagged for manual h
   const disputeResponse = await f.handler(post(disputeRaw, sign(disputeRaw)));
   assert.equal(disputeResponse?.status, 200);
 
-  assert.equal(f.alerts.length, 2);
-  assert.equal(f.alerts[0]?.alertKey, "billing:creem-reversal-manual:ref_1");
-  assert.equal(f.alerts[0]?.level, "error");
-  assert.equal(f.alerts[0]?.source, "billing.creem");
-  assert.equal(f.alerts[0]?.metadata?.status, "succeeded");
-  assert.equal(f.alerts[0]?.metadata?.amount, 500);
-  assert.equal(f.alerts[0]?.metadata?.currency, "usd");
-  assert.equal(f.alerts[0]?.metadata?.transactionId, "tran_123");
-  assert.equal(f.alerts[0]?.metadata?.orderId, "ord_123");
-
-  assert.equal(f.alerts[1]?.alertKey, "billing:creem-reversal-manual:dis_1");
-  assert.equal(f.alerts[1]?.level, "error");
-  assert.equal(f.alerts[1]?.source, "billing.creem");
-  assert.equal(f.alerts[1]?.metadata?.status, "disputed");
-  assert.equal(f.alerts[1]?.metadata?.amount, 700);
-  assert.equal(f.alerts[1]?.metadata?.currency, "usd");
-  assert.equal(f.alerts[1]?.metadata?.transactionId, "tran_456");
-  assert.equal(f.alerts[1]?.metadata?.orderId, "ord_456");
+  assert.equal(f.reversalCalls.length, 2);
+  assert.equal(f.reversalCalls[0]?.[0], "refund.created");
+  assert.equal(
+    (f.reversalCalls[0]?.[1] as Record<string, unknown>).id,
+    "ref_1",
+  );
+  assert.equal(
+    (f.reversalCalls[0]?.[1] as Record<string, unknown>).webhookId,
+    "evt_refund_1",
+  );
+  assert.equal(f.reversalCalls[1]?.[0], "dispute.created");
+  assert.equal(
+    (f.reversalCalls[1]?.[1] as Record<string, unknown>).id,
+    "dis_1",
+  );
 
   assert.equal(f.syncCalls.length, 0);
 });
 
-test("reversal events are checked against the deployment mode before alerting", async () => {
+test("reversal events are checked against the deployment mode before dispatching", async () => {
   const f = fixture();
   const raw = JSON.stringify({
     id: "evt_refund_3",
@@ -192,17 +187,14 @@ test("reversal events are checked against the deployment mode before alerting", 
   });
   const response = await f.handler(post(raw, sign(raw)));
   assert.equal(response?.status, 403);
-  assert.equal(f.alerts.length, 0);
+  assert.equal(f.reversalCalls.length, 0);
   assert.equal(f.syncCalls.length, 0);
 });
 
-test("refund notice alert failure returns 500 so Creem redelivers", async () => {
+test("reversal sync failure returns 500 so Creem redelivers", async () => {
   const f = fixture({
-    alerts: {
-      async trigger() {
-        throw new Error("ops alert service unavailable");
-      },
-      async resolve() {},
+    reversalSync: async () => {
+      throw new Error("reversal sync unavailable");
     },
   });
   const raw = JSON.stringify({
@@ -263,8 +255,8 @@ test("other paths and providers are left to Better Auth", async () => {
   const stripeHandler = createCreemWebhookHandler({
     config: { ...f.config, provider: "stripe" as const },
     logger: { info() {}, warn() {}, error() {} },
-    alerts: { async trigger() {}, async resolve() {} },
     sync: async () => {},
+    reversalSync: async () => {},
   });
   const stripeResult = await stripeHandler(post("{}"));
   assert.equal(stripeResult, null);

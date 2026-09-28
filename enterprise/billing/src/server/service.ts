@@ -79,22 +79,23 @@ export class BillingService {
       alerts,
       host?.logger,
     );
-    this.webhookService = new BillingWebhookService(
-      store,
-      runtimeConfig,
-      this.subscriptionService,
-      this.orderService,
-    );
-    this.reconcileService = new BillingReconcileService(
-      store,
-      runtimeConfig,
-      this.accountService,
-    );
     this.paymentReversalService = new BillingPaymentReversalService(
       store,
       this.accountService,
       alerts,
       host?.logger,
+    );
+    this.webhookService = new BillingWebhookService(
+      store,
+      runtimeConfig,
+      this.subscriptionService,
+      this.orderService,
+      this.paymentReversals,
+    );
+    this.reconcileService = new BillingReconcileService(
+      store,
+      runtimeConfig,
+      this.accountService,
     );
   }
 

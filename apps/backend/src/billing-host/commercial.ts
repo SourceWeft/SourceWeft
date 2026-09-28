@@ -16,6 +16,7 @@ import {
   validateBillingConfiguration,
 } from "@sourceweft/billing/config";
 import {
+  createCreemReversalSync,
   createCreemSubscriptionSync,
   createCreemWebhookHandler,
 } from "@sourceweft/billing/integrations/creem";
@@ -105,11 +106,16 @@ const sync: ReturnType<typeof createCreemSubscriptionSync> = (...args) =>
     config: billingConfig,
     logger,
   })(...args);
+const reversalSync: ReturnType<typeof createCreemReversalSync> = (...args) =>
+  createCreemReversalSync({
+    billing: billing().service,
+    logger,
+  })(...args);
 export const handleBillingAuthRequest = createCreemWebhookHandler({
   config: billingConfig,
   logger,
-  alerts,
   sync,
+  reversalSync,
 });
 let waffoInbox: WaffoWebhookService | undefined;
 function waffo() {

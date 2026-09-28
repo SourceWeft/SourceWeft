@@ -80,6 +80,19 @@ finishes is a refund silently not reversed. Verify the refund payload in the
 Waffo test environment first — a full refund and two successive partial
 refunds on one payment — before adding the events to the live endpoint.
 
+To handle Creem refunds and disputes, a Creem endpoint configured with an
+explicit event list must include `refund.created` and `dispute.created` (an
+endpoint with an empty event list already receives every event type,
+including these). Enable the events only after every API, worker and
+scheduler instance runs a version that handles them, for the same reason as
+Waffo above. Before enabling on the live endpoint, verify in Creem test mode
+with a full refund and two successive partial refunds on one taxed payment
+that `transaction.refunded_amount` is a cumulative total that includes the
+current refund (not just this event's own `refund_amount`), and that
+`transaction.amount_paid` is the tax-inclusive amount actually paid, not the
+pre-tax `amount` (Creem's own example: `amount` 1000, `amount_paid` 1210,
+`tax_amount` 210).
+
 Restart API, worker and scheduler together after changing module settings. Their
 startup capabilities must agree. The same image supports both states. Web and PC
 read `/v1/deployment/capabilities` at runtime; obsolete

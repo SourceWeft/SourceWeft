@@ -137,7 +137,7 @@ const NOTICE_ALERTS: Record<
     level: "warn",
     title: "Payment dispute opened",
     message:
-      "A payment dispute was opened. Balances change only if it is lost.",
+      "A payment dispute was opened. Balances change only if the provider reports the dispute as lost; merchant-of-record providers resolve disputes themselves.",
   },
   unmatched: {
     key: "billing:payment-reversal-unmatched",

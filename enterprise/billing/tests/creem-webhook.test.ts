@@ -1,12 +1,80 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import { createCreemSubscriptionSync } from "../src/server/providers/creem-subscription-sync";
+import type { PaymentReversalInput } from "../src/server/payment-reversal";
 import { BillingService } from "../src/server/service";
+import type {
+  BillingOrderState,
+  BillingWebhookProcessInput,
+} from "../src/server/types";
 import {
+  createActiveTeamAccount,
   runtimeConfig,
   MemoryBillingStore,
   noopProvider,
 } from "./test-fixtures";
+
+function createReversalTopupOrder(
+  overrides: Partial<BillingOrderState> = {},
+): BillingOrderState {
+  const now = new Date().toISOString();
+
+  return {
+    id: "order_1",
+    provider: "creem",
+    kind: "credit_topup",
+    status: "fulfilled",
+    paymentStatus: "paid",
+    userId: "user_1",
+    teamId: "team_1",
+    clientReferenceKey: null,
+    planFamily: null,
+    billingInterval: null,
+    quantity: 2,
+    unitType: "credit",
+    unitAmount: 10_000,
+    grantedCredits: 20_000,
+    grantedPages: 0,
+    refundedAmount: 0,
+    reversedUnits: 0,
+    reversalStatus: "none",
+    externalCheckoutId: "checkout_1",
+    externalPaymentId: "pay_1",
+    externalCustomerId: null,
+    externalSubscriptionId: null,
+    externalProductId: "prod_credit_topup",
+    amountTotal: 1000,
+    currency: "USD",
+    successUrl: null,
+    cancelUrl: null,
+    metadata: {},
+    errorCode: null,
+    errorMessage: null,
+    paidAt: now,
+    fulfilledAt: now,
+    expiresAt: null,
+    fulfillmentAttemptCount: 0,
+    nextRetryAt: null,
+    createdAt: now,
+    updatedAt: now,
+    ...overrides,
+  };
+}
+
+function creemReversal(
+  overrides: Partial<PaymentReversalInput> = {},
+): PaymentReversalInput {
+  return {
+    orderId: "order_1",
+    provider: "creem",
+    reversalId: "refund_1",
+    kind: "refund",
+    amount: { refundAmount: 1000 },
+    paidAmount: 1000,
+    currency: "USD",
+    ...overrides,
+  };
+}
 
 test("webhook with active snapshot without usable period is ignored without retry failure", async () => {
   const store = new MemoryBillingStore();
@@ -573,4 +641,102 @@ test("creem active webhook after scheduled cancel clears personal pro period-end
   assert.equal(store.account?.teamId, "personal_1");
   assert.equal(store.account?.planFamily, "individual_pro");
   assert.equal(store.account?.cycleSource, "provider_subscription");
+});
+
+// The Creem receipt service also carries payment reversals (refunds and
+// chargebacks against top-up orders) and reversal notices through the same
+// webhook-receipt bookkeeping as subscription events: one row per provider
+// event, `processed`/`ignored`/`duplicate` outcomes, idempotent redelivery.
+
+test("receipt service applies a payment reversal and records it processed", async () => {
+  const store = new MemoryBillingStore();
+  store.account = createActiveTeamAccount({ userId: "user_1" });
+  store.order = createReversalTopupOrder();
+  const billingService = new BillingService(
+    store,
+    { ...runtimeConfig, provider: "creem" },
+    noopProvider,
+  );
+
+  const result = await billingService.processSubscriptionWebhookEvent({
+    provider: "creem",
+    providerEventId: "evt_refund_1",
+    eventType: "refund.created",
+    payload: {},
+    teamId: "team_1",
+    externalSubscriptionId: null,
+    snapshot: null,
+    paymentReversal: creemReversal(),
+  });
+
+  assert.equal(result.outcome, "processed");
+  assert.equal(store.webhook?.status, "processed");
+  assert.equal(store.webhook?.errorCode, null);
+  assert.equal(store.order?.reversalStatus, "refunded");
+  assert.equal(store.order?.reversedUnits, 20_000);
+  assert.equal(store.account?.addOnCreditsBalance, 0);
+  assert.equal(store.account?.monthlyCreditsBalance, 20_000);
+});
+
+test("receipt service records a rejected reversal as ignored", async () => {
+  const store = new MemoryBillingStore();
+  store.account = createActiveTeamAccount({ userId: "user_1" });
+  store.order = createReversalTopupOrder();
+  const billingService = new BillingService(
+    store,
+    { ...runtimeConfig, provider: "creem" },
+    noopProvider,
+  );
+
+  const result = await billingService.processSubscriptionWebhookEvent({
+    provider: "creem",
+    providerEventId: "evt_refund_currency_mismatch",
+    eventType: "refund.created",
+    payload: {},
+    teamId: "team_1",
+    externalSubscriptionId: null,
+    snapshot: null,
+    paymentReversal: creemReversal({ currency: "EUR" }),
+  });
+
+  assert.equal(result.outcome, "ignored");
+  assert.equal(result.reason, "payment_reversal_rejected");
+  assert.equal(store.webhook?.status, "ignored");
+  assert.equal(store.webhook?.errorCode, "PAYMENT_REVERSAL_CURRENCY_MISMATCH");
+  assert.equal(store.order?.reversalStatus, "none");
+  assert.equal(store.account?.addOnCreditsBalance, 0);
+  assert.equal(store.account?.monthlyCreditsBalance, 40_000);
+});
+
+test("a duplicate receipt does not reapply the reversal", async () => {
+  const store = new MemoryBillingStore();
+  store.account = createActiveTeamAccount({ userId: "user_1" });
+  store.order = createReversalTopupOrder();
+  const billingService = new BillingService(
+    store,
+    { ...runtimeConfig, provider: "creem" },
+    noopProvider,
+  );
+  const input: BillingWebhookProcessInput = {
+    provider: "creem",
+    providerEventId: "evt_refund_dup",
+    eventType: "refund.created",
+    payload: {},
+    teamId: "team_1",
+    externalSubscriptionId: null,
+    snapshot: null,
+    paymentReversal: creemReversal(),
+  };
+
+  const first = await billingService.processSubscriptionWebhookEvent(input);
+  assert.equal(first.outcome, "processed");
+  const ledgerCountAfterFirst = store.ledgers.length;
+  const balanceAfterFirst = store.account?.monthlyCreditsBalance;
+
+  const second = await billingService.processSubscriptionWebhookEvent(input);
+
+  assert.equal(second.outcome, "duplicate");
+  assert.equal(store.webhook?.attemptCount, 2);
+  assert.equal(store.ledgers.length, ledgerCountAfterFirst);
+  assert.equal(store.account?.monthlyCreditsBalance, balanceAfterFirst);
 });
