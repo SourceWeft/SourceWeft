@@ -42,7 +42,7 @@
     "sonner": "^2.0.8",
     "@sourceweft/ui-web": "workspace:*",
     "@sourceweft/sdk": "workspace:*",
-    "@waffo/pancake-ts": "0.20.0",
+    "@waffo/pancake-ts": "0.25.0",
     "stripe": "22.6.1"
   },
   "devDependencies": {
