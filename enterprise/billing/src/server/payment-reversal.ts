@@ -638,6 +638,8 @@ function rejectionReason(
 
   if (
     !order.currency ||
+    typeof input.currency !== "string" ||
+    input.currency.trim().length === 0 ||
     order.currency.toUpperCase() !== input.currency.toUpperCase()
   ) {
     return "currency_mismatch";
@@ -706,7 +708,9 @@ function rejectedAlert(
     title: "Payment reversal rejected",
     message:
       reason === "currency_mismatch"
-        ? `Reversal ${request.reversalId} on order ${order.id} was not applied: currency ${request.currency ?? "(none)"} does not match the order currency ${order.currency ?? "(none)"}.`
+        ? !request.currency || !order.currency
+          ? `Reversal ${request.reversalId} on order ${order.id} was not applied: currency missing.`
+          : `Reversal ${request.reversalId} on order ${order.id} was not applied: currency ${request.currency} does not match the order currency ${order.currency}.`
         : reason === "provider_mismatch"
           ? `Reversal ${request.reversalId} on order ${order.id} was not applied: provider ${request.provider} does not match the order's provider ${order.provider}.`
           : `Reversal ${request.reversalId} on order ${order.id} was not applied: the paid or refunded amount is invalid.`,

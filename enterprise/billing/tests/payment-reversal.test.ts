@@ -506,6 +506,25 @@ test("an order without a currency is rejected as a currency mismatch", async () 
   ]);
 });
 
+test("a missing currency is rejected, not thrown", async () => {
+  const { store, alerts, service } = await setupTopup();
+
+  const result = await service.applyPaymentReversal(
+    reversal({ currency: undefined as unknown as string }),
+  );
+
+  assert.deepEqual(result, {
+    outcome: "rejected",
+    reason: "currency_mismatch",
+  });
+  assert.equal(store.account?.addOnCreditsBalance, 20_000);
+  assert.equal(reversalRows(store).length, 0);
+  assert.deepEqual(alertLevels(alerts), [
+    ["billing:payment-reversal-rejected:order_1", "error"],
+  ]);
+  assert.match(alerts[0]?.message ?? "", /currency missing/);
+});
+
 test("invalid amounts are rejected with an alert", async () => {
   const { store, alerts, service } = await setupTopup();
 

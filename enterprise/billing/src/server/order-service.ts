@@ -246,6 +246,13 @@ function buildRetryAt() {
   return new Date(Date.now() + 5 * 60_000).toISOString();
 }
 
+/** The stable error code fulfillment-failure bookkeeping records and logs. */
+function fulfillmentErrorCode(error: unknown) {
+  return error instanceof BillingError
+    ? error.code
+    : "BILLING_FULFILLMENT_FAILED";
+}
+
 function createOrderBase(input: {
   provider: BillingRuntimeConfig["provider"];
   kind: BillingOrderState["kind"];
@@ -1062,7 +1069,17 @@ export class BillingOrderService {
         return this.fulfillTopupOrderLocked(confirmed, client, pendingAlerts);
       });
     } catch (error) {
-      await this.markFulfillmentFailed(input.orderId, error, input);
+      try {
+        await this.markFulfillmentFailed(input.orderId, error, input);
+      } catch {
+        // Bookkeeping itself failed (e.g. the DB is down for this write
+        // too): log it, but the fulfilment error below is still the real
+        // failure — it must reach the caller unmasked.
+        this.host?.logger.error("Failed to record fulfillment failure", {
+          orderId: input.orderId,
+          code: fulfillmentErrorCode(error),
+        });
+      }
       throw error;
     }
 
@@ -1353,8 +1370,7 @@ export class BillingOrderService {
   ) {
     const message =
       error instanceof Error ? error.message : "Unknown fulfillment error";
-    const code =
-      error instanceof BillingError ? error.code : "BILLING_FULFILLMENT_FAILED";
+    const code = fulfillmentErrorCode(error);
     // Read-modify-write through the shared locked helper: a payment reversal
     // can commit on this row between the rolled-back fulfillment and this
     // write, and an unlocked read would write its reversal columns back
