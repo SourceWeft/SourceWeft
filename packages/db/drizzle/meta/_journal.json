@@ -414,6 +414,13 @@
       "when": 1790554159457,
       "tag": "0058_payment_reversal",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1790605083450,
+      "tag": "0059_drop_mcp_readme_etag",
+      "breakpoints": true
     }
   ]
 }

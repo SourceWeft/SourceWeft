@@ -1,26 +1,27 @@
 import { createHash } from "node:crypto";
-import { MAX_README_BYTES, README_PATH } from "../../../shared/catalog-readme";
 import {
-  GITHUB_REQUEST_TIMEOUTS,
+  byReadmePreference,
+  MAX_README_BYTES,
+  README_PATH,
+} from "../../../shared/catalog-readme";
+import {
   GitHubRateLimitedError,
-  githubFetch,
-  githubHeaders,
-  githubTimeoutError,
-  hasGitHubToken,
-  isGitHubTimeoutError,
+  githubGraphql,
   normalizeGitHubSource,
-  resolveCommit,
+  type GitHubGraphqlError,
 } from "../parser/github";
 import type { NormalizedGitHubSource } from "../types";
 
 /**
- * An MCP server's README, read through GitHub's README API — the same file
- * GitHub shows for the repository, or for one directory of it.
+ * An MCP server's README, read from GitHub — the file GitHub shows for the
+ * repository, or for one directory of it, on the default branch — through
+ * the GraphQL API, many directories per query.
  *
- * The API is the only source. When it cannot answer (rate limit, outage, a
- * refused request) the caller is told which, and decides when to ask again;
- * nothing here falls back to raw.githubusercontent.com, a clone or an archive.
- * No database access either: the caller stores what comes back.
+ * GitHub's GraphQL API is the only source. When it cannot answer (rate limit,
+ * outage, a token it does not accept) the caller is told which, and decides
+ * when to ask again; nothing here falls back to the REST API,
+ * raw.githubusercontent.com, a clone or an archive. No database access
+ * either: the caller stores what comes back.
  */
 
 /** Owner and repository names as GitHub allows them. */
@@ -142,246 +143,606 @@ export function parseGitHubRepoRef(
 // README fetch
 // ---------------------------------------------------------------------------
 
-export type FetchGitHubReadmeInput = {
-  owner: string;
-  repo: string;
-  /** Directory whose README is wanted; omitted or "" for the repository's own. */
-  subfolder?: string | null;
-  /** The ETag stored with the last README; an unchanged one then answers 304. */
-  etag?: string | null;
-  /** Caller cancellation. It is re-thrown, never reported as a result. */
-  signal?: AbortSignal;
-};
+/** A directory whose README is wanted: `subfolder` "" is the repository's own. */
+export type GitHubReadmeTarget = GitHubRepoRef;
 
-type GitHubReadmeOutcome =
+export type GitHubReadmeResult =
   | {
       status: "ok";
       markdown: string;
       /** Repository-relative path, e.g. `README.md` or `mcp/README.md`. */
       path: string;
-      /** The default branch's commit the README was pinned to. */
+      /** The default branch's commit the README was read at. */
       ref: string;
       /** Hex sha256 of the README bytes. */
       sha256: string;
-      etag: string | null;
       byteSize: number;
     }
-  /** Unchanged since `etag`: keep what was stored. */
-  | { status: "not_modified" }
-  /** GitHub has no README there. */
+  /** No README there: no such repository or directory, or no README in it. */
   | { status: "not_found"; reason: "missing" }
-  /**
-   * GitHub's README there is not one to show: not Markdown (`README.rst`,
-   * `README`), or blank. `etag` lets the next ask be a cheap 304.
-   */
-  | {
-      status: "not_found";
-      reason: "not_markdown" | "empty";
-      path: string;
-      etag: string | null;
-    }
-  | { status: "too_large"; path: string; byteSize: number; etag: string | null }
+  /** A README that is not one to show: not Markdown (`README.rst`), or blank. */
+  | { status: "not_found"; reason: "not_markdown" | "empty"; path: string }
+  | { status: "too_large"; path: string; byteSize: number }
   /** GitHub's rate limit is spent; ask again after `resetAt`. */
   | { status: "rate_limited"; resetAt: Date }
+  /** GitHub did not accept `GITHUB_TOKEN`, or there is none: nothing was read. */
+  | { status: "unauthorized"; message: string }
   | { status: "error"; message: string };
 
+export type GitHubReadmeBatch = {
+  /** One result per target, in the targets' order. */
+  results: GitHubReadmeResult[];
+  /** GraphQL points the queries cost. */
+  cost: number;
+  /** Points GitHub says are left in the hour, and when they reset; null before any answer. */
+  remaining: number | null;
+  resetAt: Date | null;
+};
+
 /**
- * `tokenPresent` rides on every outcome: without `GITHUB_TOKEN` reads still
- * work, anonymously and under a far smaller rate limit, and the caller is the
- * one to report that.
+ * Directories per probe query. Measured against the catalog in September
+ * 2026, 25 answered in 4–8 seconds and 50 in up to 8 — against GitHub's hard
+ * 10-second limit — so 20 leaves room for a slow repository.
  */
-export type GitHubReadmeResult = GitHubReadmeOutcome & {
-  tokenPresent: boolean;
+export const GITHUB_README_QUERY_SIZE = 20;
+
+/**
+ * Directories per follow-up query. Follow-ups are rare (a README under
+ * another name, a symlinked one) and a listing can be large.
+ */
+const GITHUB_README_FOLLOW_UP_SIZE = 5;
+
+/**
+ * README names asked for directly, in every directory: the canonical name
+ * and the casings of it that occur. A README by any other name (a variant
+ * like `README.zh-CN.md`, a rarer casing, `README.rst`) costs a listing of
+ * the directory, as GitHub's own README lookup is case-insensitive.
+ */
+const README_NAMES = [
+  "README.md",
+  "readme.md",
+  "Readme.md",
+  "README.MD",
+  "ReadMe.md",
+] as const;
+
+/** A README file by name, Markdown or not (`README`, `README.rst`, …). */
+const ANY_README_NAME = /^readme(?:\.[^/]*)?$/i;
+
+/** Git's file mode for a symbolic link (0o120000). */
+const SYMLINK_MODE = 40960;
+
+/** A tree entry's fields a README read uses; `object` only when asked for. */
+type TreeEntry = {
+  name: string;
+  type: string;
+  mode: number;
+  oid: string;
+  object?: {
+    byteSize?: number;
+    isBinary?: boolean | null;
+    isTruncated?: boolean;
+    text?: string | null;
+  } | null;
 };
 
-/** The fields of GitHub's contents response this module reads. */
-type GitHubReadmeBody = {
-  type?: unknown;
-  path?: unknown;
-  size?: unknown;
-  encoding?: unknown;
-  content?: unknown;
+const ENTRY_WITH_BLOB =
+  "name type mode oid object { ... on Blob { byteSize isBinary isTruncated text } }";
+
+type RateLimitField = {
+  rateLimit?: { cost?: number; remaining?: number; resetAt?: string } | null;
 };
 
-function githubReadmeApiUrl(owner: string, repo: string, subfolder: string[]) {
-  const base = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/readme`;
-  return subfolder.length > 0 ? `${base}/${encodePath(subfolder)}` : base;
+/** One distinct directory asked about, and the targets that asked for it. */
+type Directory = {
+  owner: string;
+  repo: string;
+  /** Path segments below the repository root; empty for the root. */
+  dir: string[];
+  targets: number[];
+};
+
+/** A file still to read at `commit`: a directory's pick, or a symlink's target. */
+type FileRead = {
+  directory: Directory;
+  commit: string;
+  path: string;
+  /** The path the result names: a symlinked README keeps its own path. */
+  reportPath: string;
+  /** Symlinks already followed to reach `path`. */
+  hops: number;
+};
+
+type Listing = { directory: Directory; commit: string };
+
+const joinPath = (dir: readonly string[], name: string) =>
+  [...dir, name].join("/");
+
+/** Git's object id for a blob with these bytes. */
+function gitBlobId(bytes: Uint8Array) {
+  return createHash("sha1")
+    .update(`blob ${bytes.byteLength}\0`)
+    .update(bytes)
+    .digest("hex");
 }
 
-function describeError(error: unknown) {
-  if (!(error instanceof Error)) {
-    return String(error);
+const UTF8_BOM = Buffer.from([0xef, 0xbb, 0xbf]);
+
+/**
+ * The README's bytes, rebuilt from GitHub's `text` and checked against the
+ * blob id — so a README whose bytes are not UTF-8 (GitHub then substitutes
+ * characters) is caught, not stored altered. A byte-order mark GitHub leaves
+ * out of `text` is put back for the check.
+ */
+function verifiedBytes(text: string, oid: string): Buffer | null {
+  const bytes = Buffer.from(text, "utf8");
+  if (gitBlobId(bytes) === oid) {
+    return bytes;
   }
-  // `fetch` reports every network failure as "fetch failed"; the cause says which.
-  const cause = error.cause instanceof Error ? error.cause.message : null;
-  return cause ? `${error.message} (${cause})` : error.message;
+  const withBom = Buffer.concat([UTF8_BOM, bytes]);
+  return gitBlobId(withBom) === oid ? withBom : null;
 }
 
-/** UTF-8 text without NULs, or null — the same bar a skill README file meets. */
-function decodeText(bytes: Uint8Array): string | null {
-  if (bytes.includes(0)) {
-    return null;
+/** The result for a README file GitHub returned with its blob. */
+function readmeFromEntry(
+  entry: TreeEntry,
+  path: string,
+  ref: string,
+): GitHubReadmeResult {
+  const blob = entry.object;
+  if (entry.type !== "blob" || !blob || typeof blob.byteSize !== "number") {
+    return { status: "error", message: `GitHub README is not a file: ${path}` };
   }
-  try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch {
-    return null;
+  if (blob.byteSize > MAX_README_BYTES) {
+    return { status: "too_large", path, byteSize: blob.byteSize };
   }
+  if (blob.isTruncated) {
+    return {
+      status: "error",
+      message: `GitHub returned the README truncated: ${path}`,
+    };
+  }
+  const bytes =
+    !blob.isBinary && typeof blob.text === "string"
+      ? verifiedBytes(blob.text, entry.oid)
+      : null;
+  if (!bytes || bytes.includes(0)) {
+    return {
+      status: "error",
+      message: `GitHub README is not UTF-8 text: ${path}`,
+    };
+  }
+  // The same text a fatal UTF-8 decode of the bytes gives, BOM dropped.
+  const markdown = bytes
+    .subarray(bytes.subarray(0, 3).equals(UTF8_BOM) ? 3 : 0)
+    .toString("utf8");
+  if (!markdown.trim()) {
+    return { status: "not_found", reason: "empty", path };
+  }
+  return {
+    status: "ok",
+    markdown,
+    path,
+    ref,
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+    byteSize: bytes.byteLength,
+  };
 }
 
 /**
- * Reads the README of a GitHub repository, or of one directory of it, with
- * `GET /repos/{owner}/{repo}/readme/{subfolder}`.
+ * Where a symlink in `dir` points, as a repository path, or null when it
+ * leaves the repository (an absolute target, or one that climbs out).
+ */
+function resolveLink(dir: readonly string[], target: string): string | null {
+  if (!target || target.startsWith("/")) {
+    return null;
+  }
+  const segments = [...dir];
+  for (const segment of target.split("/")) {
+    if (!segment || segment === ".") continue;
+    if (segment === "..") {
+      if (segments.length === 0) return null;
+      segments.pop();
+    } else {
+      segments.push(segment);
+    }
+  }
+  return segments.length > 0 ? segments.join("/") : null;
+}
+
+/**
+ * The query's errors by the root alias they belong to. A file or commit that
+ * is not there is reported as a `NOT_FOUND` error on its own field, which is
+ * then null: that is an answer, not a failure, and is left to the field.
+ */
+function errorsByAlias(errors: readonly GitHubGraphqlError[]) {
+  const byAlias = new Map<string, GitHubGraphqlError>();
+  for (const error of errors) {
+    const [alias, ...field] = error.path ?? [];
+    if (typeof alias !== "string" || byAlias.has(alias)) continue;
+    if (field.length > 0 && error.type === "NOT_FOUND") continue;
+    byAlias.set(alias, error);
+  }
+  return byAlias;
+}
+
+/** An alias's own error: a repository GitHub does not have is no README. */
+function aliasErrorResult(error: GitHubGraphqlError): GitHubReadmeResult {
+  return error.type === "NOT_FOUND"
+    ? { status: "not_found", reason: "missing" }
+    : { status: "error", message: `GitHub: ${error.message}` };
+}
+
+type Query = { query: string; variables: Record<string, unknown> };
+
+/**
+ * Builds a query of one aliased `repository` field per item (`r0`, `r1`, …)
+ * plus the rate limit. Every name and path is a variable: nothing a registry
+ * entry says is spliced into the query text.
+ */
+function repositoryQuery<Item extends { directory: Directory }>(
+  items: readonly Item[],
+  body: (
+    item: Item,
+    index: number,
+    variable: (name: string, type: string, value: unknown) => string,
+  ) => string,
+): Query {
+  const params: string[] = [];
+  const variables: Record<string, unknown> = {};
+  const fields = items.map((item, index) => {
+    const variable = (name: string, type: string, value: unknown) => {
+      const key = `${name}${index}`;
+      params.push(`$${key}: ${type}`);
+      variables[key] = value;
+      return `$${key}`;
+    };
+    const owner = variable("o", "String!", item.directory.owner);
+    const repo = variable("n", "String!", item.directory.repo);
+    return `r${index}: repository(owner: ${owner}, name: ${repo}) { ${body(item, index, variable)} }`;
+  });
+  return {
+    query: `query(${params.join(", ")}) { rateLimit { cost remaining resetAt } ${fields.join(" ")} }`,
+    variables,
+  };
+}
+
+/**
+ * Reads the README of each target directory, on its repository's default
+ * branch, in as few GraphQL queries as it takes:
  *
- * A fresh README is pinned to the default branch's current commit with one
- * more call; a 304 or a README that is not shown costs no second call. The
- * README comes from the default branch's head and the commit is read just
- * after, so a push landing between the two pins a commit one newer than the
- * text — close enough for resolving the README's relative links.
+ * 1. One probe query per {@link GITHUB_README_QUERY_SIZE} directories asks
+ *    for each of {@link README_NAMES} there, with its text, and for the
+ *    default branch's commit — so a README comes back pinned to the commit it
+ *    was read at, in one request.
+ * 2. A directory where none of those names exists is listed, at that commit,
+ *    and its README picked by the rule skills use (`README_PATH`,
+ *    `byReadmePreference`); another README file is `not_markdown`.
+ * 3. A symlinked README is followed once, within the repository; its result
+ *    keeps the link's path, as GitHub shows it.
+ *
+ * Targets naming the same directory are asked about once. A query GitHub
+ * could not answer (a timeout) is asked again as two halves, down to a single
+ * directory, which then alone is an error. A spent rate limit or a refused
+ * token ends the reading: every target not yet answered gets that result.
  */
-export async function fetchGitHubReadme(
-  input: FetchGitHubReadmeInput,
-): Promise<GitHubReadmeResult> {
-  const tokenPresent = hasGitHubToken();
-  const done = (outcome: GitHubReadmeOutcome): GitHubReadmeResult => ({
-    ...outcome,
-    tokenPresent,
+export async function fetchGitHubReadmes(
+  targets: readonly GitHubReadmeTarget[],
+  options: { signal?: AbortSignal } = {},
+): Promise<GitHubReadmeBatch> {
+  const results: Array<GitHubReadmeResult | undefined> = targets.map(
+    () => undefined,
+  );
+  const batch = {
+    cost: 0,
+    remaining: null as number | null,
+    resetAt: null as Date | null,
+  };
+  /** Set once GitHub stops answering: the result every unanswered target gets. */
+  const halt: { stopped: GitHubReadmeResult | null } = { stopped: null };
+
+  const settle = (directory: Directory, result: GitHubReadmeResult) => {
+    for (const index of directory.targets) {
+      results[index] = result;
+    }
+  };
+
+  // Distinct directories; owner and repository names are case-insensitive on
+  // GitHub, paths are not.
+  const directories = new Map<string, Directory>();
+  targets.forEach((target, index) => {
+    const dir = subfolderSegments(target.subfolder);
+    if (!isGitHubName(target.owner) || !isGitHubName(target.repo) || !dir) {
+      results[index] = {
+        status: "error",
+        message: `Not a GitHub repository directory: ${target.owner}/${target.repo}/${target.subfolder}`,
+      };
+      return;
+    }
+    const key = [
+      target.owner.toLowerCase(),
+      target.repo.toLowerCase(),
+      ...dir,
+    ].join("/");
+    const directory = directories.get(key) ?? {
+      owner: target.owner,
+      repo: target.repo,
+      dir,
+      targets: [],
+    };
+    directory.targets.push(index);
+    directories.set(key, directory);
   });
 
-  const subfolder = subfolderSegments(input.subfolder);
-  if (
-    !isGitHubName(input.owner) ||
-    !isGitHubName(input.repo) ||
-    subfolder === null
-  ) {
-    return done({
-      status: "error",
-      message: `Not a GitHub repository directory: ${input.owner}/${input.repo}/${input.subfolder ?? ""}`,
-    });
+  /**
+   * Asks `items` in queries of `size`, halving a query GitHub did not answer
+   * as a whole; `read` gets each answered item's data (or its own error).
+   */
+  async function ask<Item extends { directory: Directory }, Data>(
+    items: readonly Item[],
+    size: number,
+    build: (items: readonly Item[]) => Query,
+    read: (
+      item: Item,
+      data: Data | null,
+      error: GitHubGraphqlError | undefined,
+    ) => void,
+  ): Promise<void> {
+    for (let start = 0; start < items.length; start += size) {
+      await askPart(items.slice(start, start + size), build, read);
+    }
   }
 
-  const url = githubReadmeApiUrl(input.owner, input.repo, subfolder);
-  const headers = githubHeaders();
-  if (input.etag) {
-    headers["If-None-Match"] = input.etag;
-  }
-  const options = input.signal ? { signal: input.signal } : {};
-
-  try {
-    const response = await githubFetch(url, headers, options);
-    if (response.status === 304 || response.status === 404) {
-      void response.body?.cancel().catch(() => undefined);
-      return done(
-        response.status === 304
-          ? { status: "not_modified" }
-          : { status: "not_found", reason: "missing" },
-      );
+  async function askPart<Item extends { directory: Directory }, Data>(
+    items: readonly Item[],
+    build: (items: readonly Item[]) => Query,
+    read: (
+      item: Item,
+      data: Data | null,
+      error: GitHubGraphqlError | undefined,
+    ) => void,
+  ): Promise<void> {
+    if (halt.stopped || items.length === 0) {
+      return;
     }
-    if (!response.ok) {
-      void response.body?.cancel().catch(() => undefined);
-      return done({
-        status: "error",
-        message: `GitHub README request failed ${response.status}: ${url}`,
-      });
-    }
-
-    const etag = response.headers.get("etag");
-    const body = (await response.json()) as GitHubReadmeBody;
-    if (
-      body.type !== "file" ||
-      typeof body.path !== "string" ||
-      typeof body.size !== "number"
-    ) {
-      return done({
-        status: "error",
-        message: `GitHub README response is not a file: ${url}`,
-      });
-    }
-    const path = body.path;
-    const name = path.slice(path.lastIndexOf("/") + 1);
-    if (!README_PATH.test(name)) {
-      return done({ status: "not_found", reason: "not_markdown", path, etag });
-    }
-    if (body.size > MAX_README_BYTES) {
-      return done({ status: "too_large", path, byteSize: body.size, etag });
-    }
-    if (body.encoding !== "base64" || typeof body.content !== "string") {
-      return done({
-        status: "error",
-        message: `GitHub README content is not base64: ${url}`,
-      });
-    }
-    const bytes = Buffer.from(body.content, "base64");
-    if (bytes.byteLength > MAX_README_BYTES) {
-      return done({
-        status: "too_large",
-        path,
-        byteSize: bytes.byteLength,
-        etag,
-      });
-    }
-    if (bytes.byteLength !== body.size) {
-      return done({
-        status: "error",
-        message: `GitHub README content is ${bytes.byteLength} bytes, not the declared ${body.size}: ${url}`,
-      });
-    }
-    const markdown = decodeText(bytes);
-    if (markdown === null) {
-      return done({
-        status: "error",
-        message: `GitHub README is not UTF-8 text: ${url}`,
-      });
-    }
-    if (!markdown.trim()) {
-      return done({ status: "not_found", reason: "empty", path, etag });
-    }
-
-    const repoUrl = `https://github.com/${input.owner}/${input.repo}`;
-    const commit = await resolveCommit(
-      {
-        owner: input.owner,
-        repo: input.repo,
-        subpath: "",
-        repoUrl,
-        sourceUrl: repoUrl,
-      },
-      "HEAD",
-      options,
-    );
-    if (!commit) {
-      return done({
-        status: "error",
-        message: `GitHub did not resolve the default branch of ${repoUrl} to a commit`,
-      });
-    }
-
-    return done({
-      status: "ok",
-      markdown,
-      path,
-      ref: commit.sha,
-      sha256: createHash("sha256").update(bytes).digest("hex"),
-      etag,
-      byteSize: bytes.byteLength,
-    });
-  } catch (error) {
-    if (input.signal?.aborted) {
+    const { query, variables } = build(items);
+    let answer;
+    try {
+      answer = await githubGraphql<
+        Record<string, Data | null> & RateLimitField
+      >(query, variables, options.signal ? { signal: options.signal } : {});
+    } catch (error) {
+      if (error instanceof GitHubRateLimitedError && !options.signal?.aborted) {
+        halt.stopped = { status: "rate_limited", resetAt: error.resetAt };
+        return;
+      }
       throw error;
     }
-    if (error instanceof GitHubRateLimitedError) {
-      return done({ status: "rate_limited", resetAt: error.resetAt });
+    if (answer.status === "unauthorized") {
+      halt.stopped = { status: "unauthorized", message: answer.message };
+      return;
     }
-    if (isGitHubTimeoutError(error)) {
-      // The deadline struck while the body was being read.
-      return done({
-        status: "error",
-        message: githubTimeoutError(url, GITHUB_REQUEST_TIMEOUTS.metadataMs)
-          .message,
-      });
+    if (answer.status === "failed") {
+      if (items.length === 1) {
+        settle(items[0]!.directory, {
+          status: "error",
+          message: answer.message,
+        });
+        return;
+      }
+      const half = Math.ceil(items.length / 2);
+      await askPart(items.slice(0, half), build, read);
+      await askPart(items.slice(half), build, read);
+      return;
     }
-    return done({ status: "error", message: describeError(error) });
+    const rateLimit = answer.data.rateLimit;
+    batch.cost += rateLimit?.cost ?? 0;
+    if (typeof rateLimit?.remaining === "number") {
+      batch.remaining = rateLimit.remaining;
+    }
+    if (rateLimit?.resetAt) {
+      batch.resetAt = new Date(rateLimit.resetAt);
+    }
+    const errors = errorsByAlias(answer.errors);
+    items.forEach((item, index) => {
+      read(item, answer.data[`r${index}`] ?? null, errors.get(`r${index}`));
+    });
   }
+
+  const listings: Listing[] = [];
+  let reads: FileRead[] = [];
+
+  // 1. Probe every directory for the usual README names.
+  type ProbeCommit = { oid?: string } & Record<
+    string,
+    TreeEntry | null | string | undefined
+  >;
+  type Probe = { defaultBranchRef: { target: ProbeCommit | null } | null };
+  await ask<{ directory: Directory }, Probe>(
+    [...directories.values()].map((directory) => ({ directory })),
+    GITHUB_README_QUERY_SIZE,
+    (items) =>
+      repositoryQuery(items, ({ directory }, _index, variable) => {
+        const files = README_NAMES.map(
+          (name, k) =>
+            `f${k}: file(path: ${variable(`p${k}_`, "String!", joinPath(directory.dir, name))}) { ${ENTRY_WITH_BLOB} }`,
+        );
+        return `defaultBranchRef { target { ... on Commit { oid ${files.join(" ")} } } }`;
+      }),
+    ({ directory }, data, error) => {
+      if (error || !data) {
+        settle(
+          directory,
+          error
+            ? aliasErrorResult(error)
+            : { status: "not_found", reason: "missing" },
+        );
+        return;
+      }
+      const commit = data.defaultBranchRef?.target;
+      if (!data.defaultBranchRef) {
+        // An empty repository has no default branch, and so no README.
+        settle(directory, { status: "not_found", reason: "missing" });
+        return;
+      }
+      if (!commit || typeof commit.oid !== "string") {
+        settle(directory, {
+          status: "error",
+          message: `GitHub did not resolve the default branch of ${directory.owner}/${directory.repo} to a commit`,
+        });
+        return;
+      }
+      const found = README_NAMES.map((_, k) => commit[`f${k}`])
+        .filter((entry): entry is TreeEntry =>
+          Boolean(entry && typeof entry === "object" && entry.type === "blob"),
+        )
+        .sort((a, b) => byReadmePreference({ path: a.name }, { path: b.name }));
+      const pick = found[0];
+      if (!pick) {
+        listings.push({ directory, commit: commit.oid });
+        return;
+      }
+      const path = joinPath(directory.dir, pick.name);
+      if (pick.mode === SYMLINK_MODE) {
+        const target = resolveLink(directory.dir, pick.object?.text ?? "");
+        if (!target) {
+          settle(directory, { status: "not_found", reason: "missing" });
+          return;
+        }
+        reads.push({
+          directory,
+          commit: commit.oid,
+          path: target,
+          reportPath: path,
+          hops: 1,
+        });
+        return;
+      }
+      settle(directory, readmeFromEntry(pick, path, commit.oid));
+    },
+  );
+
+  // 2. List the directories where no usual name was found.
+  type ListedTree = { entries?: TreeEntry[] | null };
+  type ListingCommit = {
+    object: {
+      tree?: ListedTree | null;
+      file?: { type: string; object: ListedTree | null } | null;
+    } | null;
+  };
+  await ask<Listing, ListingCommit>(
+    listings,
+    GITHUB_README_FOLLOW_UP_SIZE,
+    (items) =>
+      repositoryQuery(items, ({ directory, commit }, _index, variable) => {
+        const at = variable("c", "GitObjectID!", commit);
+        const entries = "entries { name type mode oid }";
+        return directory.dir.length === 0
+          ? `object(oid: ${at}) { ... on Commit { tree { ${entries} } } }`
+          : `object(oid: ${at}) { ... on Commit { file(path: ${variable("p", "String!", directory.dir.join("/"))}) { type object { ... on Tree { ${entries} } } } } }`;
+      }),
+    ({ directory, commit }, data, error) => {
+      if (error) {
+        settle(directory, aliasErrorResult(error));
+        return;
+      }
+      if (!data?.object) {
+        settle(directory, {
+          status: "error",
+          message: `GitHub no longer has commit ${commit} of ${directory.owner}/${directory.repo}`,
+        });
+        return;
+      }
+      const tree =
+        directory.dir.length === 0
+          ? data.object.tree
+          : data.object.file?.type === "tree"
+            ? data.object.file.object
+            : null;
+      const files = (tree?.entries ?? []).filter(
+        (entry) => entry.type === "blob",
+      );
+      const markdown = files
+        .filter((entry) => README_PATH.test(entry.name))
+        .sort((a, b) =>
+          byReadmePreference({ path: a.name }, { path: b.name }),
+        )[0];
+      if (markdown) {
+        const path = joinPath(directory.dir, markdown.name);
+        reads.push({ directory, commit, path, reportPath: path, hops: 0 });
+        return;
+      }
+      const other = files
+        .filter((entry) => ANY_README_NAME.test(entry.name))
+        .sort((a, b) => a.name.localeCompare(b.name, "en"))[0];
+      settle(
+        directory,
+        other
+          ? {
+              status: "not_found",
+              reason: "not_markdown",
+              path: joinPath(directory.dir, other.name),
+            }
+          : { status: "not_found", reason: "missing" },
+      );
+    },
+  );
+
+  // 3. Read the files the listings picked and the symlinks point at.
+  type ReadCommit = { object: { file?: TreeEntry | null } | null };
+  while (reads.length > 0 && !halt.stopped) {
+    const pending = reads;
+    reads = [];
+    await ask<FileRead, ReadCommit>(
+      pending,
+      GITHUB_README_FOLLOW_UP_SIZE,
+      (items) =>
+        repositoryQuery(
+          items,
+          ({ commit, path }, _index, variable) =>
+            `object(oid: ${variable("c", "GitObjectID!", commit)}) { ... on Commit { file(path: ${variable("p", "String!", path)}) { ${ENTRY_WITH_BLOB} } } }`,
+        ),
+      (read, data, error) => {
+        const { directory } = read;
+        if (error) {
+          settle(directory, aliasErrorResult(error));
+          return;
+        }
+        const entry = data?.object?.file;
+        if (!entry || entry.type !== "blob") {
+          settle(directory, { status: "not_found", reason: "missing" });
+          return;
+        }
+        if (entry.mode === SYMLINK_MODE) {
+          const target =
+            read.hops < 1
+              ? resolveLink(
+                  read.path.split("/").slice(0, -1),
+                  entry.object?.text ?? "",
+                )
+              : null;
+          if (!target) {
+            settle(directory, { status: "not_found", reason: "missing" });
+            return;
+          }
+          reads.push({ ...read, path: target, hops: read.hops + 1 });
+          return;
+        }
+        settle(directory, readmeFromEntry(entry, read.reportPath, read.commit));
+      },
+    );
+  }
+
+  const unanswered: GitHubReadmeResult = halt.stopped ?? {
+    status: "error",
+    message: "GitHub left the README unanswered",
+  };
+  return {
+    results: results.map((result) => result ?? unanswered),
+    cost: batch.cost,
+    remaining: batch.remaining,
+    resetAt: batch.resetAt,
+  };
 }
 
 // ---------------------------------------------------------------------------

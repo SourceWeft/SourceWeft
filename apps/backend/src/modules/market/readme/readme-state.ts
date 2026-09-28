@@ -47,7 +47,6 @@ export type McpReadmeColumns = {
   readmePath?: string | null;
   readmeRef?: string | null;
   readmeSha256?: string | null;
-  readmeEtag?: string | null;
   readmeFetchedAt?: Date | null;
   readmeNextFetchAt?: Date | null;
   readmeAttempts?: number;
@@ -69,8 +68,18 @@ export type McpReadmeUnsupportedHost = {
 /** A failure the README client did not report as an outcome (it threw). */
 export type McpReadmeUnexpectedError = { status: "error"; message: string };
 
+/** The README read is exactly the one stored: only the fetch times move. */
+export type McpReadmeNotModified = { status: "not_modified" };
+
+/**
+ * What one fetch did for a version. A refused token is not among them: it
+ * stops the batch before anything is written (see `fetchMcpReadmeBatch`).
+ */
 export type McpReadmeFetchOutcome =
-  GitHubReadmeResult | McpReadmeUnsupportedHost | McpReadmeUnexpectedError;
+  | Exclude<GitHubReadmeResult, { status: "unauthorized" }>
+  | McpReadmeNotModified
+  | McpReadmeUnsupportedHost
+  | McpReadmeUnexpectedError;
 
 const after = (now: Date, ms: number) => new Date(now.getTime() + ms);
 
@@ -84,12 +93,24 @@ export function mcpReadmeErrorBackoffMs(attempts: number): number {
 }
 
 /**
- * Statuses a stored ETag can confirm: a 304 then means "still exactly this".
- * A version with nothing settled (`pending`, `error`) or one that was never
- * asked (`unsupported_host`) makes a full request.
+ * Whether a fresh read found exactly the README already stored — same file,
+ * same bytes — so the version keeps its text and the commit it was pinned to,
+ * and only its fetch times move.
  */
-export function mcpReadmeEtagApplies(status: McpReadmeStatus): boolean {
-  return status === "ok" || status === "not_found" || status === "too_large";
+export function mcpReadmeUnchanged(
+  current: {
+    readmeStatus: McpReadmeStatus;
+    readmeSha256: string | null;
+    readmePath: string | null;
+  },
+  result: GitHubReadmeResult,
+): boolean {
+  return (
+    result.status === "ok" &&
+    current.readmeStatus === "ok" &&
+    current.readmeSha256 === result.sha256 &&
+    current.readmePath === result.path
+  );
 }
 
 function refreshIntervalFor(status: McpReadmeStatus) {
@@ -128,7 +149,6 @@ export function mcpReadmeTransition(
         readmePath: outcome.path,
         readmeRef: outcome.ref,
         readmeSha256: outcome.sha256,
-        readmeEtag: outcome.etag,
         readmeNextFetchAt: after(now, MCP_README_REFRESH_MS),
       };
     case "not_modified":
@@ -145,7 +165,6 @@ export function mcpReadmeTransition(
         readmeSha256: null,
         readmeRef: null,
         readmePath: file?.path ?? null,
-        readmeEtag: file?.etag ?? null,
         readmeNextFetchAt: after(now, MCP_README_ABSENT_REFRESH_MS),
       };
     }
@@ -157,7 +176,6 @@ export function mcpReadmeTransition(
         // The fetch pins no commit for a README it does not store; the file's
         // links then name the default branch.
         readmeRef: null,
-        readmeEtag: outcome.etag,
         readmeNextFetchAt: after(now, MCP_README_ABSENT_REFRESH_MS),
       };
     case "unsupported_host":
@@ -167,7 +185,6 @@ export function mcpReadmeTransition(
         readmeSha256: null,
         readmeRef: null,
         readmePath: null,
-        readmeEtag: null,
         readmeFetchedAt: now,
         readmeAttempts: 0,
         readmeError: outcome.message,
@@ -222,7 +239,6 @@ export function submittedReadmeColumns(
   const name = input.path.slice(input.path.lastIndexOf("/") + 1);
   const read = {
     readmePath: input.path,
-    readmeEtag: null,
     readmeFetchedAt: now,
     readmeAttempts: 0,
     readmeError: null,
