@@ -173,8 +173,11 @@ test("wrong environment and store are rejected before persistence", async () => 
 test("amount, currency and order-binding mismatches never grant credits", async () => {
   for (const mutate of [
     (event: ReturnType<ReturnType<typeof createWaffoFixture>["event"]>) => {
-      event.data.amount = "1.00";
-      event.data.total = "1.00";
+      event.data.listPrice = {
+        total: "1.00",
+        subtotal: "1.00",
+        taxAmount: "0.00",
+      };
     },
     (event: ReturnType<ReturnType<typeof createWaffoFixture>["event"]>) => {
       event.data.currency = "EUR";
@@ -194,6 +197,38 @@ test("amount, currency and order-binding mismatches never grant credits", async 
     assert.equal(f.store.account!.addOnCreditsBalance, 0);
     assert.equal(f.store.order?.paymentStatus, "unpaid");
   }
+});
+
+test("the list price, not the deprecated amount fields, verifies a one-time payment", async () => {
+  const f = createWaffoFixture();
+  await checkout(f);
+  const event = f.event();
+  // Waffo's `amount` now reports what the channel charged, which can differ
+  // from the list price; `total` and `taxAmount` are deprecated and may be
+  // absent. Only `listPrice` describes what the checkout was priced at.
+  event.data.amount = "0.00";
+  delete event.data.total;
+  delete (event.data as { taxAmount?: string }).taxAmount;
+  const payload = signedEvent(event);
+  await f.inbox.receive(payload.raw, payload.signature);
+  await f.inbox.drain();
+  assert.equal(f.store.webhook?.status, "processed");
+  assert.equal(f.store.order?.paymentStatus, "paid");
+  assert.ok(f.store.account!.addOnCreditsBalance > 0);
+});
+
+test("a payment event without a list price fails and grants nothing", async () => {
+  const f = createWaffoFixture();
+  await checkout(f);
+  const event = f.event();
+  delete event.data.listPrice;
+  const payload = signedEvent(event);
+  await f.inbox.receive(payload.raw, payload.signature);
+  await f.inbox.drain();
+  assert.equal(f.store.webhook?.status, "failed");
+  assert.equal(f.store.webhook?.errorCode, "WAFFO_AMOUNT_UNAVAILABLE");
+  assert.equal(f.store.account!.addOnCreditsBalance, 0);
+  assert.equal(f.store.order?.paymentStatus, "unpaid");
 });
 
 test("failed processing stays durable and is retried after recovery", async () => {
@@ -588,6 +623,7 @@ test("a refund after subscription.canceled is not dropped as stale", async () =>
   Object.assign(active.data, {
     amount: "12.00",
     total: "12.00",
+    planPrice: { total: "12.00", subtotal: "12.00", taxAmount: "0.00" },
     orderStatus: "active",
     paymentId: undefined,
     paymentStatus: undefined,

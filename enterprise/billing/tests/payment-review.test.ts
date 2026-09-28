@@ -16,6 +16,7 @@ async function waffoActive() {
   Object.assign(event.data, {
     amount: "12.00",
     total: "12.00",
+    planPrice: { total: "12.00", subtotal: "12.00", taxAmount: "0.00" },
     orderStatus: "active",
     billingPeriod: "monthly",
     currentPeriodStart: "2026-09-01T00:00:00Z",

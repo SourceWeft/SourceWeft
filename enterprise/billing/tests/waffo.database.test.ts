@@ -118,6 +118,7 @@ test("Postgres Waffo inbox survives restart and concurrent duplicate deliveries 
         currency: "USD",
         amount: "12.50",
         total: "12.50",
+        listPrice: { total: "12.50", subtotal: "12.50", taxAmount: "0.00" },
         taxAmount: "0.00",
         productName: "SourceWeft Credits",
         paymentId: `PAY_${suffix}`,
