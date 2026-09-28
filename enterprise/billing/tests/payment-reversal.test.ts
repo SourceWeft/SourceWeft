@@ -247,9 +247,10 @@ async function setupTopup(
     order?: Partial<BillingOrderState>;
     fulfilled?: boolean;
     alerts?: BillingAlertSink;
+    store?: MemoryBillingStore;
   } = {},
 ) {
-  const store = new MemoryBillingStore();
+  const store = options.store ?? new MemoryBillingStore();
   const alerts: RecordedAlert[] = [];
   const service = new BillingService(
     store,
@@ -813,4 +814,187 @@ test("orders resolve by provider payment id", async () => {
     await service.findOrderByProviderPaymentId("waffo", "pay_other"),
     null,
   );
+});
+
+test("a refund after a chargeback keeps the order charged back", async () => {
+  const { store, service } = await setupTopup();
+  await service.applyPaymentReversal(
+    reversal({
+      reversalId: "dispute_1",
+      kind: "chargeback",
+      amount: { refundedTotal: 0 },
+    }),
+  );
+
+  const refund = await service.applyPaymentReversal(
+    reversal({ reversalId: "refund_1", amount: { refundAmount: 400 } }),
+  );
+
+  assert.ok(refund.outcome === "applied");
+  assert.equal(refund.deltaUnits, 0);
+  assert.equal(store.order?.reversalStatus, "charged_back");
+  assert.equal(store.order?.refundedAmount, 1000);
+  assert.equal(store.order?.reversedUnits, 20_000);
+  assert.equal(store.account?.addOnCreditsBalance, 0);
+});
+
+test("a chargeback recorded before fulfillment stays charged back through a later refund", async () => {
+  const { store, service } = await setupTopup({ fulfilled: false });
+  await service.applyPaymentReversal(
+    reversal({
+      reversalId: "dispute_1",
+      kind: "chargeback",
+      amount: { refundedTotal: 0 },
+    }),
+  );
+  const refund = await service.applyPaymentReversal(
+    reversal({ reversalId: "refund_1", amount: { refundAmount: 300 } }),
+  );
+  assert.equal(refund.outcome, "recorded_before_fulfillment");
+  assert.equal(store.order?.reversalStatus, "charged_back");
+
+  await service.fulfillOrder({ orderId: "order_1" });
+
+  assert.equal(store.order?.status, "fulfilled");
+  assert.equal(store.order?.reversalStatus, "charged_back");
+  assert.equal(store.order?.reversedUnits, 20_000);
+  assert.equal(store.account?.addOnCreditsBalance, 0);
+  const fulfillmentRow = reversalRows(store).find(
+    (row) => row.metadata.reversalId === "fulfillment",
+  );
+  assert.equal(fulfillmentRow?.delta, -20_000);
+  assert.equal(fulfillmentRow?.feature, "payment_chargeback");
+  assert.equal(fulfillmentRow?.activityTitle, "Credits top-up charged back");
+});
+
+test("a refund recorded before fulfillment is measured against the provider's paid amount", async () => {
+  // amountTotal 1000; the provider charged 1100 (e.g. with tax).
+  const { store, service } = await setupTopup({ fulfilled: false });
+
+  await service.applyPaymentReversal(
+    reversal({ paidAmount: 1100, amount: { refundAmount: 550 } }),
+  );
+  assert.equal(store.order?.metadata.reversalPaidAmount, 1100);
+  assert.equal(store.order?.reversalStatus, "partially_refunded");
+
+  await service.fulfillOrder({ orderId: "order_1" });
+
+  assert.equal(store.order?.reversedUnits, 10_000);
+  assert.equal(store.account?.addOnCreditsBalance, 10_000);
+  const fulfillmentRow = reversalRows(store).find(
+    (row) => row.metadata.reversalId === "fulfillment",
+  );
+  assert.equal(fulfillmentRow?.delta, -10_000);
+  assert.equal(fulfillmentRow?.metadata.paidAmount, 1100);
+  assert.equal(fulfillmentRow?.metadata.refundedTotal, 550);
+});
+
+test("a fully refunded order reverses the whole grant at fulfillment whatever the amounts", async () => {
+  const { store, service } = await setupTopup({
+    fulfilled: false,
+    order: { refundedAmount: 400, reversalStatus: "refunded" },
+  });
+
+  await service.fulfillOrder({ orderId: "order_1" });
+
+  assert.equal(store.order?.reversedUnits, 20_000);
+  assert.equal(store.account?.addOnCreditsBalance, 0);
+});
+
+/**
+ * Models the order row lock around fulfillment-failure bookkeeping. The
+ * first grant write fails, and the transaction's order, account and ledger
+ * writes roll back as PostgreSQL would;
+ * the next order read is `markFulfillmentFailed`'s, and a concurrent refund
+ * races it. After an unlocked read the refund commits before the reader
+ * writes back what it read; after a locked read the refund waits until the
+ * reader's transaction commits (`blocked`, run by the test).
+ */
+class RacingReversalStore extends MemoryBillingStore {
+  concurrentReversal: (() => Promise<unknown>) | null = null;
+  blocked: (() => Promise<unknown>) | null = null;
+  private grantFailuresLeft = 1;
+  private race: (() => Promise<unknown>) | null = null;
+
+  async appendLedger(
+    ...args: Parameters<MemoryBillingStore["appendLedger"]>
+  ): ReturnType<MemoryBillingStore["appendLedger"]> {
+    if (this.grantFailuresLeft > 0) {
+      this.grantFailuresLeft -= 1;
+      this.race = this.concurrentReversal;
+      throw new Error("ledger unavailable");
+    }
+    return super.appendLedger(...args);
+  }
+
+  async runInTransaction<T>(
+    ...args: Parameters<MemoryBillingStore["runInTransaction"]>
+  ): Promise<T> {
+    const order = this.order ? { ...this.order } : null;
+    const account = this.account ? { ...this.account } : null;
+    const ledgerCount = this.ledgers.length;
+    try {
+      return (await super.runInTransaction(...args)) as T;
+    } catch (error) {
+      this.order = order;
+      this.account = account;
+      this.ledgers.length = ledgerCount;
+      throw error;
+    }
+  }
+
+  async getOrderById(
+    ...args: Parameters<MemoryBillingStore["getOrderById"]>
+  ): ReturnType<MemoryBillingStore["getOrderById"]> {
+    const order = await super.getOrderById(...args);
+    const race = this.takeRace();
+    if (race) {
+      await race();
+    }
+    return order;
+  }
+
+  async getOrderByIdForUpdate(
+    ...args: Parameters<MemoryBillingStore["getOrderByIdForUpdate"]>
+  ): ReturnType<MemoryBillingStore["getOrderByIdForUpdate"]> {
+    const order = await super.getOrderByIdForUpdate(...args);
+    this.blocked = this.takeRace() ?? this.blocked;
+    return order;
+  }
+
+  private takeRace() {
+    const race = this.race;
+    this.race = null;
+    return race;
+  }
+}
+
+test("a refund that lands while fulfillment fails survives the failure bookkeeping", async () => {
+  const store = new RacingReversalStore();
+  const { service } = await setupTopup({ store, fulfilled: false });
+  store.concurrentReversal = () => service.applyPaymentReversal(reversal());
+
+  await assert.rejects(
+    () =>
+      service.fulfillOrder({ orderId: "order_1", externalPaymentId: "pay_1" }),
+    /ledger unavailable/,
+  );
+  await store.blocked?.();
+
+  assert.equal(store.order?.status, "fulfillment_failed");
+  assert.equal(store.order?.externalPaymentId, "pay_1");
+  assert.equal(store.order?.refundedAmount, 1000);
+  assert.equal(store.order?.reversalStatus, "refunded");
+
+  assert.deepEqual(await service.reconcileBillingOrders(), {
+    checked: 1,
+    retried: 1,
+    failed: 0,
+  });
+  assert.equal(store.order?.status, "fulfilled");
+  assert.equal(store.order?.reversedUnits, 20_000);
+  assert.equal(store.account?.addOnCreditsBalance, 0);
+  assert.deepEqual(await service.applyPaymentReversal(reversal()), {
+    outcome: "duplicate",
+  });
 });

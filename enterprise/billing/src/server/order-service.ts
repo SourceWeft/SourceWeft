@@ -1327,30 +1327,45 @@ export class BillingOrderService {
     error: unknown,
     input?: FulfillInput,
   ) {
-    const order = await this.store.getOrderById(orderId);
-    if (!order || order.status === "fulfilled") {
-      return;
-    }
-
     const message =
       error instanceof Error ? error.message : "Unknown fulfillment error";
     const code =
       error instanceof BillingError ? error.code : "BILLING_FULFILLMENT_FAILED";
-    await this.store.updateOrder({
-      ...order,
-      status: "fulfillment_failed",
-      // The transaction that would have persisted this rolled back, so the
-      // re-read `order` above can be stale. `input` reflects what the caller
-      // was actually confirming and survives the rollback in memory — use it
-      // to keep the provider payment id available for the retry job.
-      ...(input?.externalPaymentId
-        ? { externalPaymentId: input.externalPaymentId, paymentStatus: "paid" }
-        : {}),
-      errorCode: code,
-      errorMessage: message,
-      nextRetryAt: buildRetryAt(),
-      updatedAt: new Date().toISOString(),
+    // Read-modify-write under the order row lock: a payment reversal can
+    // commit on this row between the rolled-back fulfillment and this write,
+    // and an unlocked read would write its reversal columns back stale.
+    const order = await this.store.runInTransaction(async (client) => {
+      const current = await this.store.getOrderByIdForUpdate(orderId, client);
+      if (!current || current.status === "fulfilled") {
+        return null;
+      }
+
+      return this.store.updateOrder(
+        {
+          ...current,
+          status: "fulfillment_failed",
+          // The transaction that would have persisted this rolled back, so
+          // the re-read `current` above can lack it. `input` reflects what
+          // the caller was actually confirming and survives the rollback in
+          // memory — use it to keep the provider payment id available for
+          // the retry job.
+          ...(input?.externalPaymentId
+            ? {
+                externalPaymentId: input.externalPaymentId,
+                paymentStatus: "paid",
+              }
+            : {}),
+          errorCode: code,
+          errorMessage: message,
+          nextRetryAt: buildRetryAt(),
+          updatedAt: new Date().toISOString(),
+        },
+        client,
+      );
     });
+    if (!order) {
+      return;
+    }
 
     await this.alerts?.trigger({
       alertKey: `billing:order-fulfillment:${orderId}`,

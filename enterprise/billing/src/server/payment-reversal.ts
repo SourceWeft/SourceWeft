@@ -99,6 +99,10 @@ type ReversalRequest = {
 
 const ALERT_SOURCE = "billing.payment-reversal";
 const FULFILLMENT_REVERSAL_ID = "fulfillment";
+// Order metadata key holding the provider's paid amount from the latest
+// reversal recorded before fulfillment: the basis `refundedAmount` was
+// measured against, which can differ from `amountTotal` (e.g. tax).
+const RECORDED_PAID_AMOUNT_KEY = "reversalPaidAmount";
 
 const ACTIVITY_TITLES = {
   credit: {
@@ -187,10 +191,12 @@ export function computeReversalTarget(input: {
  * Fulfillment hook: right after a top-up grant, applies a reversal recorded
  * on the order before fulfillment, inside the fulfillment transaction and
  * against the member row it already holds locked (reversal id `fulfillment`).
- * Returns the order with `reversedUnits` advanced; the caller persists it in
- * its final order update. Alerts go out inline through the safe trigger. An
- * order without a usable paid amount is left for an operator (rejected alert)
- * rather than failing the grant.
+ * A `refunded` or `charged_back` order reverses the whole grant; a partial
+ * refund is measured against the paid amount recorded with it, falling back
+ * to `amountTotal`. Returns the order with `reversedUnits` advanced; the
+ * caller persists it in its final order update. Alerts go out inline through
+ * the safe trigger. An order without a usable paid amount is left for an
+ * operator (rejected alert) rather than failing the grant.
  */
 export async function applyRecordedReversalLocked(input: {
   store: BillingStore;
@@ -207,15 +213,17 @@ export async function applyRecordedReversalLocked(input: {
   const order = requireTopupOrder(input.order);
   const kind =
     order.reversalStatus === "charged_back" ? "chargeback" : "refund";
-  const paidAmount = order.amountTotal ?? 0;
+  const paidAmount = recordedPaidAmount(order) ?? order.amountTotal ?? 0;
+  const fullReversal =
+    order.reversalStatus === "refunded" ||
+    order.reversalStatus === "charged_back";
   const request: ReversalRequest = {
     reversalId: FULFILLMENT_REVERSAL_ID,
     kind,
     provider: order.provider,
-    refundedTotal:
-      kind === "chargeback"
-        ? paidAmount
-        : Math.min(order.refundedAmount, paidAmount),
+    refundedTotal: fullReversal
+      ? paidAmount
+      : Math.min(order.refundedAmount, paidAmount),
     paidAmount,
     currency: order.currency,
   };
@@ -381,7 +389,14 @@ export class BillingPaymentReversalService {
       return {
         outcome: "recorded_before_fulfillment",
         order: await this.store.updateOrder(
-          { ...locked, ...orderChanges },
+          {
+            ...locked,
+            ...orderChanges,
+            metadata: {
+              ...locked.metadata,
+              [RECORDED_PAID_AMOUNT_KEY]: request.paidAmount,
+            },
+          },
           client,
         ),
       };
@@ -563,6 +578,14 @@ function targetUnits(order: TopupOrder, request: ReversalRequest) {
   });
 }
 
+/** The paid amount recorded with a pre-fulfillment reversal, when usable. */
+function recordedPaidAmount(order: BillingOrderState) {
+  const value = order.metadata[RECORDED_PAID_AMOUNT_KEY];
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0
+    ? value
+    : null;
+}
+
 /** The amount the provider reported for this event, before capping. */
 function eventAmount(input: PaymentReversalInput) {
   if (input.kind === "chargeback") {
@@ -588,11 +611,12 @@ function nextRefundedTotal(order: TopupOrder, input: PaymentReversalInput) {
     : order.refundedAmount + input.amount.refundAmount;
 }
 
+/** `charged_back` is terminal: a later refund cannot downgrade it. */
 function nextReversalStatus(
   request: ReversalRequest,
   current: BillingOrderState["reversalStatus"],
 ): BillingOrderState["reversalStatus"] {
-  if (request.kind === "chargeback") {
+  if (current === "charged_back" || request.kind === "chargeback") {
     return "charged_back";
   }
   if (request.refundedTotal >= request.paidAmount) {
