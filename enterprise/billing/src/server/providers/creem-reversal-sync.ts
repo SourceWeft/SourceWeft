@@ -27,8 +27,8 @@ function readNumber(record: Record<string, unknown> | null, key: string) {
   return typeof value === "number" ? value : null;
 }
 
-// Creem's `subscription` reference shows up as either a bare id or an
-// embedded object with its own `id`, depending on the event.
+// Creem's `subscription`/`order` references show up as either a bare id or
+// an embedded object with its own `id`, depending on the event.
 function readReferenceId(value: unknown): string | null {
   if (typeof value === "string" && value.trim()) {
     return value;
@@ -38,8 +38,12 @@ function readReferenceId(value: unknown): string | null {
 
 /**
  * `checkout.metadata.orderId` when the refund/dispute carries an embedded
- * checkout object; otherwise the transaction id on the top-up order
- * recorded at fulfillment (see `syncCreemCheckoutCompleted`).
+ * checkout object; otherwise the local order may be stored under the
+ * transaction id or under the Creem order id, depending on whether the
+ * original checkout's payment carried a `transaction` field (see
+ * `syncCreemCheckoutCompleted`, which falls back to the payment's own `id`
+ * when it did not). Try every order reference the refund/dispute itself
+ * carries, in order, until one resolves.
  */
 async function resolveOrder(
   billing: BillingService,
@@ -53,10 +57,29 @@ async function resolveOrder(
     return billing.getOrder(orderId);
   }
 
-  const transactionId = readString(toObjectRecord(data.transaction), "id");
-  return transactionId
-    ? billing.findOrderByProviderPaymentId("creem", transactionId)
-    : null;
+  const transaction = toObjectRecord(data.transaction);
+  const candidates = [
+    readReferenceId(data.transaction),
+    readReferenceId(data.order),
+    readString(transaction, "order"),
+  ];
+
+  const tried = new Set<string>();
+  for (const candidate of candidates) {
+    if (!candidate || tried.has(candidate)) {
+      continue;
+    }
+    tried.add(candidate);
+    const found = await billing.findOrderByProviderPaymentId(
+      "creem",
+      candidate,
+    );
+    if (found) {
+      return found;
+    }
+  }
+
+  return null;
 }
 
 export function createCreemReversalSync(deps: {
@@ -95,6 +118,11 @@ export function createCreemReversalSync(deps: {
       // A dispute only ever produces a notice: balances change solely on a
       // provider's terminal "lost" decision, which Creem does not model as
       // a separate event today.
+      logger.warn("Creem dispute opened", {
+        disputeId: reversalId,
+        orderId: order?.id ?? null,
+        webhookId,
+      });
       await record(null, {
         reason: "dispute_opened",
         provider: "creem",
@@ -117,7 +145,17 @@ export function createCreemReversalSync(deps: {
       return;
     }
 
-    if (status === "pending" || status === "requiresAction") {
+    if (status !== "succeeded") {
+      // Anything that isn't a terminal success or failure — "pending",
+      // "requiresAction", an unrecognized value, or a missing status
+      // entirely — is not final yet. Treat it the same way and carry the
+      // raw status along so an operator can tell them apart.
+      logger.warn("Creem refund is not final; reporting a pending notice", {
+        refundId: reversalId,
+        orderId: order?.id ?? null,
+        webhookId,
+        status,
+      });
       await record(null, {
         reason: "refund_pending",
         provider: "creem",
@@ -126,13 +164,17 @@ export function createCreemReversalSync(deps: {
         teamId: order?.teamId ?? null,
         amount: readNumber(data, "refund_amount"),
         currency: readString(data, "refund_currency"),
+        metadata: { status },
       });
       return;
     }
 
-    // Only "succeeded" remains once failed/canceled/pending/requiresAction
-    // are handled above.
     if (!order) {
+      logger.warn("Creem refund matched no local order", {
+        refundId: reversalId,
+        orderId: null,
+        webhookId,
+      });
       await record(null, {
         reason: "unmatched",
         provider: "creem",
@@ -146,17 +188,37 @@ export function createCreemReversalSync(deps: {
     const transaction = toObjectRecord(data.transaction);
     const refundedTotal = readNumber(transaction, "refunded_amount");
     const refundAmount = readNumber(data, "refund_amount");
-    const paidAmount =
-      readNumber(transaction, "amount_paid") ??
-      readNumber(transaction, "amount");
+    // Tax-inclusive: Creem's `amount_paid` is what the customer actually
+    // paid (`amount` is the pre-tax subtotal). Reversing against `amount`
+    // would overstate the fraction refunded on a taxed payment, so there is
+    // no fallback here — a missing `amount_paid` is unusable, not "close
+    // enough".
+    const paidAmount = readNumber(transaction, "amount_paid");
     const currency =
       readString(data, "refund_currency") ?? readString(transaction, "currency");
 
-    // Neither a usable cumulative total nor a usable per-refund amount, or no
-    // usable paid amount to measure against: nothing here can be turned into
-    // a reversal. Notice-and-stop rather than let a zero-amount "applied"
-    // reversal through silently (mirrors the Waffo refund translation).
-    if ((refundedTotal === null && refundAmount === null) || paidAmount === null) {
+    // Nothing here can be turned into a confident reversal when: neither a
+    // usable cumulative total nor a usable per-refund amount exists; the
+    // tax-inclusive paid amount is unusable; the cumulative total is stale
+    // (less than this event's own refund amount, which would otherwise
+    // under-reverse and look like a legitimate small refund); or the
+    // currency cannot be determined at all. Notice-and-stop in every case
+    // rather than let a wrong or zero-amount "applied" reversal through
+    // silently (mirrors the Waffo refund translation).
+    const amountUnavailable =
+      (refundedTotal === null && refundAmount === null) ||
+      paidAmount === null ||
+      !currency ||
+      (refundedTotal !== null &&
+        refundAmount !== null &&
+        refundedTotal < refundAmount);
+
+    if (amountUnavailable) {
+      logger.warn("Creem refund amount is unusable; not reversing", {
+        refundId: reversalId,
+        orderId: order.id,
+        webhookId,
+      });
       await record(null, {
         reason: "amount_unavailable",
         provider: "creem",
@@ -169,6 +231,10 @@ export function createCreemReversalSync(deps: {
       return;
     }
 
+    // `amountUnavailable` above already guarantees: at least one of
+    // refundedTotal/refundAmount is a number, paidAmount is a number, and
+    // currency is a non-empty string — hence the assertions rather than a
+    // silent `?? 0` / `?? ""` default.
     await record(
       {
         orderId: order.id,
@@ -178,9 +244,9 @@ export function createCreemReversalSync(deps: {
         amount:
           refundedTotal !== null
             ? { refundedTotal }
-            : { refundAmount: refundAmount ?? 0 },
-        paidAmount,
-        currency: currency ?? "",
+            : { refundAmount: refundAmount as number },
+        paidAmount: paidAmount as number,
+        currency: currency as string,
       },
       null,
     );
