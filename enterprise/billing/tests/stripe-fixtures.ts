@@ -1,6 +1,7 @@
 import Stripe from "stripe";
 import { MemoryBillingStore, runtimeConfig } from "./test-fixtures";
 import type { BillingStore } from "../src/server/store-port";
+import type { BillingAlertSink } from "../src/server/host";
 import { BillingService } from "../src/server/service";
 import { StripeBillingProvider } from "../src/server/providers/stripe/provider";
 import { StripeWebhookService } from "../src/server/providers/stripe/webhook";
@@ -101,13 +102,16 @@ export function stripeFixture(
     subscription: null as Stripe.Subscription | null,
     invoice: null as Stripe.Invoice | null,
     rejectSeatPayment: false,
+    paymentIntents: new Map<string, Stripe.PaymentIntent>(),
+    invoicePayments: [] as Stripe.InvoicePayment[],
   };
   const client = new Stripe(stripeConfig.stripe.secretKey, {
     apiVersion: Stripe.API_VERSION,
     telemetry: false,
     maxNetworkRetries: 0,
     httpClient: Stripe.createFetchHttpClient(async (url, init) => {
-      const path = new URL(String(url)).pathname;
+      const parsedUrl = new URL(String(url));
+      const path = parsedUrl.pathname;
       const method = init?.method ?? "GET";
       const body = new URLSearchParams(String(init?.body ?? ""));
       requests.push({
@@ -199,7 +203,24 @@ export function stripeFixture(
       } else if (path.startsWith("/v1/subscriptions/"))
         data = remote.subscription;
       else if (path.startsWith("/v1/invoices/")) data = remote.invoice;
-      else if (path === "/v1/billing_portal/sessions")
+      else if (path.startsWith("/v1/payment_intents/"))
+        data = remote.paymentIntents.get(path.split("/").pop()!);
+      else if (path === "/v1/invoice_payments") {
+        const paymentIntent = parsedUrl.searchParams.get(
+          "payment[payment_intent]",
+        );
+        data = {
+          object: "list",
+          data: remote.invoicePayments.filter((entry) => {
+            const value = entry.payment.payment_intent;
+            return (
+              (typeof value === "string" ? value : value?.id) === paymentIntent
+            );
+          }),
+          has_more: false,
+          url: "/v1/invoice_payments",
+        };
+      } else if (path === "/v1/billing_portal/sessions")
         data = {
           id: "bps_fixture",
           object: "billing_portal.session",
@@ -217,7 +238,13 @@ export function stripeFixture(
   const store = new StripeMemoryStore();
   const state = new MemoryStripeInbox(store);
   const provider = new StripeBillingProvider(config, client);
-  const billing = new BillingService(store, config, provider);
+  const alerts: Array<Parameters<BillingAlertSink["trigger"]>[0]> = [];
+  const billing = new BillingService(store, config, provider, {
+    async trigger(input) {
+      alerts.push(input);
+    },
+    async resolve() {},
+  });
   const makeInbox = () =>
     new StripeWebhookService({
       config,
@@ -307,6 +334,7 @@ export function stripeFixture(
     state,
     provider,
     billing,
+    alerts,
     makeInbox,
     pay,
     event,

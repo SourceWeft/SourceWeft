@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test, vi } from "vitest";
+import type Stripe from "stripe";
 import { Hono } from "hono";
 import {
   readBillingConfig,
@@ -388,4 +389,119 @@ test("failed renewal records past-due status without advancing the paid period o
   assert.equal(f.store.subscription!.status, "past_due");
   assert.equal(f.store.subscription!.currentPeriodEnd, paidEnd);
   assert.equal(f.store.account!.monthlyCreditsBalance, balance);
+});
+
+test("a charge event resolves a one-time order by its payment intent", async () => {
+  const f = stripeFixture();
+  await topup(f);
+  await deliver(f, f.event("checkout.session.completed", f.pay()));
+  assert.equal(f.store.order!.status, "fulfilled");
+  const paymentIntentId = f.store.order!.externalPaymentId!;
+  await deliver(
+    f,
+    f.event("charge.refunded", {
+      id: "ch_1",
+      object: "charge",
+      payment_intent: paymentIntentId,
+    }),
+  );
+  // Resolved and passed the order-binding check; process() ignores charge
+  // events for now (reversal processing is a follow-up task).
+  assert.equal(f.store.webhook?.status, "ignored");
+  assert.equal(f.store.webhook?.errorCode, "STRIPE_AWAITING_PAYMENT");
+  assert.equal(
+    f.requests.some((r) => r.path.startsWith("/v1/payment_intents/")),
+    false,
+  );
+  assert.equal(
+    f.requests.some((r) => r.path === "/v1/invoice_payments"),
+    false,
+  );
+});
+
+test("a charge event resolves through PaymentIntent metadata when the order has no payment id", async () => {
+  const f = stripeFixture();
+  await topup(f);
+  assert.equal(f.store.order!.externalPaymentId, null);
+  f.remote.paymentIntents.set("pi_recovered", {
+    id: "pi_recovered",
+    object: "payment_intent",
+    metadata: { sourceweftOrderId: f.store.order!.id },
+  } as unknown as Stripe.PaymentIntent);
+  await deliver(
+    f,
+    f.event("charge.refunded", {
+      id: "ch_2",
+      object: "charge",
+      payment_intent: "pi_recovered",
+    }),
+  );
+  assert.equal(f.store.webhook?.status, "ignored");
+  assert.equal(f.store.webhook?.errorCode, "STRIPE_AWAITING_PAYMENT");
+  assert.ok(
+    f.requests.some((r) => r.path === "/v1/payment_intents/pi_recovered"),
+  );
+  assert.equal(
+    f.requests.some((r) => r.path === "/v1/invoice_payments"),
+    false,
+  );
+});
+
+test("a charge event on a subscription invoice resolves to the subscription order", async () => {
+  const f = stripeFixture();
+  await subscription(f);
+  f.pay();
+  assert.equal(f.store.order!.kind, "subscription");
+  f.remote.paymentIntents.set("pi_invoice", {
+    id: "pi_invoice",
+    object: "payment_intent",
+    metadata: {},
+  } as unknown as Stripe.PaymentIntent);
+  f.remote.invoicePayments.push({
+    id: "ip_1",
+    object: "invoice_payment",
+    invoice: f.remote.invoice!.id,
+    payment: { type: "payment_intent", payment_intent: "pi_invoice" },
+  } as unknown as Stripe.InvoicePayment);
+  await deliver(
+    f,
+    f.event("charge.dispute.created", {
+      id: "dp_1",
+      object: "dispute",
+      payment_intent: "pi_invoice",
+    }),
+  );
+  assert.equal(f.store.webhook?.status, "ignored");
+  assert.equal(f.store.webhook?.errorCode, "STRIPE_AWAITING_PAYMENT");
+  assert.equal(f.store.webhook?.teamId, "team_1");
+  assert.ok(
+    f.requests.some((r) => r.path === "/v1/payment_intents/pi_invoice"),
+  );
+  assert.ok(f.requests.some((r) => r.path === "/v1/invoice_payments"));
+});
+
+test("an unresolvable charge event raises the unmatched alert and is ignored", async () => {
+  const f = stripeFixture();
+  f.remote.paymentIntents.set("pi_missing", {
+    id: "pi_missing",
+    object: "payment_intent",
+    metadata: {},
+  } as unknown as Stripe.PaymentIntent);
+  await deliver(
+    f,
+    f.event("charge.dispute.created", {
+      id: "dp_unmatched",
+      object: "dispute",
+      payment_intent: "pi_missing",
+    }),
+  );
+  assert.equal(f.store.webhook?.status, "ignored");
+  assert.equal(f.store.webhook?.errorCode, "STRIPE_UNRELATED_ORDER");
+  assert.ok(
+    f.alerts.some(
+      (alert) =>
+        alert.alertKey ===
+        "billing:payment-reversal-unmatched:stripe:dp_unmatched",
+    ),
+  );
 });

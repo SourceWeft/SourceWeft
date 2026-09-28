@@ -21,6 +21,9 @@ export const STRIPE_WEBHOOK_EVENTS = [
   "customer.subscription.created",
   "customer.subscription.updated",
   "customer.subscription.deleted",
+  "charge.refunded",
+  "charge.dispute.created",
+  "charge.dispute.closed",
 ] as const;
 const supported = new Set<string>(STRIPE_WEBHOOK_EVENTS);
 const eventKey = (event: Stripe.Event) =>
@@ -115,12 +118,22 @@ export class StripeWebhookService {
       externalSubscriptionId: order?.externalSubscriptionId ?? null,
     });
   }
+  /** The order id recorded in a subscription's metadata, if any. */
+  private async subscriptionOrderId(
+    subscriptionId: string,
+  ): Promise<string | null> {
+    return (
+      (await this.input.provider.client.subscriptions.retrieve(subscriptionId))
+        .metadata.sourceweftOrderId ?? null
+    );
+  }
   private async reference(event: Stripe.Event): Promise<string | null> {
     const object = event.data.object as {
       id: string;
       metadata?: Record<string, string>;
       client_reference_id?: string | null;
       parent?: Stripe.Invoice.Parent | null;
+      payment_intent?: string | Stripe.PaymentIntent | null;
     };
     const direct =
       object.metadata?.sourceweftOrderId ??
@@ -133,14 +146,35 @@ export class StripeWebhookService {
       const subscriptionId = stripeId(
         invoice.parent?.subscription_details?.subscription,
       );
-      if (subscriptionId)
-        return (
-          (
-            await this.input.provider.client.subscriptions.retrieve(
-              subscriptionId,
-            )
-          ).metadata.sourceweftOrderId ?? null
+      if (subscriptionId) return this.subscriptionOrderId(subscriptionId);
+    }
+    if (event.type.startsWith("charge.")) {
+      const paymentIntentId = stripeId(object.payment_intent);
+      if (!paymentIntentId) return null;
+      const order = await this.input.billing.findOrderByProviderPaymentId(
+        "stripe",
+        paymentIntentId,
+      );
+      if (order) return order.id;
+      const paymentIntent =
+        await this.input.provider.client.paymentIntents.retrieve(
+          paymentIntentId,
         );
+      if (paymentIntent.metadata.sourceweftOrderId)
+        return paymentIntent.metadata.sourceweftOrderId;
+      const payments = await this.input.provider.client.invoicePayments.list({
+        payment: { type: "payment_intent", payment_intent: paymentIntentId },
+        limit: 1,
+      });
+      const invoiceId = stripeId(payments.data[0]?.invoice);
+      if (!invoiceId) return null;
+      const invoice =
+        await this.input.provider.client.invoices.retrieve(invoiceId);
+      const subscriptionId = stripeId(
+        invoice.parent?.subscription_details?.subscription,
+      );
+      if (!subscriptionId) return null;
+      return this.subscriptionOrderId(subscriptionId);
     }
     return null;
   }
@@ -164,6 +198,12 @@ export class StripeWebhookService {
           }
           const reference = await this.reference(event);
           if (!reference) {
+            if (event.type.startsWith("charge."))
+              await this.input.billing.reportPaymentReversalNotice({
+                reason: "unmatched",
+                provider: "stripe",
+                providerReference: objectId(event),
+              });
             await this.state(record.id, "ignored", "STRIPE_UNRELATED_ORDER");
             continue;
           }
@@ -286,6 +326,11 @@ export class StripeWebhookService {
     order: BillingOrderState,
   ): Promise<boolean> {
     const client = this.input.provider.client;
+    if (event.type.startsWith("charge.")) {
+      // Reference resolution only for now; reversal processing lands in a
+      // follow-up task, which will replace this early return.
+      return false;
+    }
     if (event.type.startsWith("checkout.session.")) {
       if (!order.externalCheckoutId) {
         const recovered = await client.checkout.sessions.retrieve(
