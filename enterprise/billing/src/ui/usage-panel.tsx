@@ -11,7 +11,6 @@ import { formatCopy } from "../messages";
 import {
   formatLedgerActivityChange,
   formatLedgerDetail,
-  formatLedgerUnit,
   formatPlanName,
   isLedgerEntryInCycle,
   isPersonalBillingOrg,
@@ -65,7 +64,25 @@ export function UsagePanel() {
   const [loadingMoreActivity, setLoadingMoreActivity] = React.useState(false);
   const [billingPeriod, setBillingPeriod] =
     React.useState<BillingInterval>("yearly");
-  const [error, setError] = React.useState<string | null>(null);
+  // The raw failure, not the localized message: a caught `Error`'s own
+  // `.message` is stored verbatim (it's already fixed text, not affected by
+  // locale), but a non-`Error` rejection stores which catalogue fallback
+  // applies — resolved against the *current* `copy` at render time (below),
+  // not the `copy` captured in the effect's closure when the error was set.
+  // This keeps `copy` out of the load/load-more effects' dependency arrays,
+  // so switching locale can't re-trigger them (a locale change was
+  // re-fetching the summary/activity and silently dropping any "Load more"
+  // pages the user had already fetched).
+  const [error, setError] = React.useState<
+    | { message: string }
+    | { fallbackKey: "failedToLoad" | "failedToLoadActivity" }
+    | null
+  >(null);
+  const errorText = error
+    ? "message" in error
+      ? error.message
+      : copy.usage[error.fallbackKey]
+    : null;
   const [activityFilter, setActivityFilter] =
     React.useState<UsageActivityFilter>("all");
   const [activityVisibleCount, setActivityVisibleCount] = React.useState(
@@ -115,7 +132,11 @@ export function UsagePanel() {
         setSubscription(null);
         setLedger([]);
         setActivityCursor(null);
-        setError(err instanceof Error ? err.message : copy.usage.failedToLoad);
+        setError(
+          err instanceof Error
+            ? { message: err.message }
+            : { fallbackKey: "failedToLoad" },
+        );
       } finally {
         if (!cancelled) {
           setLoading(false);
@@ -128,7 +149,7 @@ export function UsagePanel() {
     return () => {
       cancelled = true;
     };
-  }, [copy, resolvingPersonalTeamId, teamId]);
+  }, [resolvingPersonalTeamId, teamId]);
 
   React.useEffect(() => {
     setActivityVisibleCount(USAGE_ACTIVITY_PAGE_SIZE);
@@ -155,12 +176,14 @@ export function UsagePanel() {
       setActivityCursor(nextLedger.nextCursor ?? null);
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : copy.usage.failedToLoadActivity,
+        err instanceof Error
+          ? { message: err.message }
+          : { fallbackKey: "failedToLoadActivity" },
       );
     } finally {
       setLoadingMoreActivity(false);
     }
-  }, [activityCursor, copy, loadingMoreActivity, teamId]);
+  }, [activityCursor, loadingMoreActivity, teamId]);
 
   const creditsUsed = summary?.credits.consumedThisCycle ?? 0;
   const creditsLimit = summary?.credits.monthlyGrant ?? 0;
@@ -252,8 +275,11 @@ export function UsagePanel() {
     : teamId
       ? activityFilter === "all"
         ? copy.usage.noActivity
-        : formatCopy(copy.usage.noActivityForUnit, {
-            unit: formatLedgerUnit(activityFilter, copy),
+        : // The filter noun (e.g. "页面"), not `common.units.page` ("页") —
+          // that suffix reads naturally after a number ("12 页") but not as
+          // a standalone noun in "暂无页相关活动".
+          formatCopy(copy.usage.noActivityForUnit, {
+            unit: copy.usage.filters[activityFilter],
           })
       : copy.usage.accountUnavailable;
   const planAction = useBillingPlanAction({
@@ -451,7 +477,9 @@ export function UsagePanel() {
             </Button>
           </div>
         )}
-        {error && <p className="mt-3 text-xs text-muted-foreground">{error}</p>}
+        {errorText && (
+          <p className="mt-3 text-xs text-muted-foreground">{errorText}</p>
+        )}
       </div>
     </div>
   );

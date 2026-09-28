@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
-import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -50,13 +49,13 @@ const zhCNFormat: BillingCopyFormat = {
     i18nFormatDate(new Date(iso), "zh-CN", {
       year: "numeric",
       month: "short",
-      day: "2-digit",
+      day: "numeric",
     }),
   dateTime: (iso) =>
     i18nFormatDate(new Date(iso), "zh-CN", {
       year: "numeric",
       month: "short",
-      day: "2-digit",
+      day: "numeric",
       hour: "2-digit",
       minute: "2-digit",
     }),
@@ -569,6 +568,88 @@ test("checkout dialog, success page and sidebar usage render in zh-CN", async ()
   }
 });
 
+// ---- Locale change must not re-trigger the checkout-start effect ----------
+
+test("a locale change after a failed checkout does not re-attempt checkout", async () => {
+  // eslint-disable-next-line @typescript-eslint/require-await -- rejects
+  const createPricingCheckout = vi.fn(async () => {
+    throw "boom";
+  });
+  // Stable references, reused across both locale renders below.
+  // `billingClient`/`trackBeginCheckout`/`trackCheckoutError` are themselves
+  // among the checkout-start effect's dependencies (`makeHost()`'s own
+  // defaults are a fresh closure per call) — a *new* object/function on
+  // every `hostFor` call would re-trigger the effect regardless of the
+  // `copy`/`controls` fix under test, and this assertion would then pass
+  // for the wrong reason.
+  const billingClient = {
+    createPricingCheckout,
+  } as unknown as BillingUiHost["billingClient"];
+  const trackBeginCheckout = () => {};
+  const trackCheckoutError = () => {};
+  const hostFor = (locale: string): BillingUiHost =>
+    makeHost({ locale, billingClient, trackBeginCheckout, trackCheckoutError });
+  const checkoutProps = {
+    billingInterval: "monthly" as const,
+    intent: "abc",
+    plan: "pro",
+    seatCount: null,
+    source: "landing" as const,
+    teamName: null,
+  };
+
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => {
+      root.render(
+        <BillingUiProvider value={hostFor("zh-CN")}>
+          <BillingCheckoutClient {...checkoutProps} />
+        </BillingUiProvider>,
+      );
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(createPricingCheckout).toHaveBeenCalledTimes(1);
+    expect(document.body.textContent).toContain(
+      getBillingControls("zh-CN").checkoutError,
+    );
+
+    // Re-render the *same* mounted component with a new locale on the host —
+    // before the fix, `copy`/`controls` sat in the checkout-start effect's
+    // dependency array, and the `catch` block had already reset
+    // `startedRef.current` to `false`, so a locale change re-ran the whole
+    // effect and re-attempted checkout (and could re-navigate via
+    // `openCheckout`, e.g. `window.location.assign` to a fresh session).
+    await act(async () => {
+      root.render(
+        <BillingUiProvider value={hostFor("en")}>
+          <BillingCheckoutClient {...checkoutProps} />
+        </BillingUiProvider>,
+      );
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(createPricingCheckout).toHaveBeenCalledTimes(1);
+    // The displayed error text still re-localizes on the locale change (it is
+    // resolved from the live `copy`/`controls` at render time, not frozen at
+    // the moment the error was set) — only the checkout *attempt* must not
+    // repeat.
+    expect(document.body.textContent).toContain(
+      getBillingControls("en").checkoutError,
+    );
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
 // ---- Top-up actions ---------------------------------------------------------
 
 test("top-up actions render in zh-CN and open the shared checkout dialog", async () => {
@@ -674,22 +755,15 @@ const uiDir = resolve(
   "ui",
 );
 
+/**
+ * `src/ui` is a flat directory (no subdirectories) — a plain `readdirSync`
+ * is enough, no recursion, and it does not depend on `git` being on `PATH`
+ * or the files being staged/committed.
+ */
 function listTrackedUiSourceFiles(): string[] {
-  const output = execFileSync(
-    "git",
-    ["ls-files", "src/ui/*.tsx", "src/ui/*.ts"],
-    {
-      cwd: resolve(dirname(fileURLToPath(import.meta.url)), ".."),
-      encoding: "utf8",
-    },
-  );
-  return output
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((relative) =>
-      join(resolve(dirname(fileURLToPath(import.meta.url)), ".."), relative),
-    );
+  return readdirSync(uiDir)
+    .filter((name) => name.endsWith(".ts") || name.endsWith(".tsx"))
+    .map((name) => join(uiDir, name));
 }
 
 /**
@@ -769,7 +843,12 @@ test("no un-localized capitalized English text remains in enterprise/billing/src
       }
 
       const hits: string[] = [];
-      for (const match of trimmed.matchAll(jsxTextRe)) hits.push(match[1]);
+      // `noUncheckedIndexedAccess` types a capture group as possibly
+      // `undefined` even though `jsxTextRe`'s single group is mandatory
+      // (not `?`-quantified) — a match always populates it.
+      for (const match of trimmed.matchAll(jsxTextRe)) {
+        hits.push(match[1] ?? "");
+      }
       for (const match of trimmed.matchAll(quotedRe)) hits.push(match[0]);
       if (
         standaloneRe.test(trimmed) &&

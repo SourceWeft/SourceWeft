@@ -122,7 +122,27 @@ export function BillingCheckoutClient({
   const controls = useBillingControls();
 
   const [state, setState] = React.useState<CheckoutState>("preparing");
-  const [error, setError] = React.useState<string | null>(null);
+  // The raw failure, not the localized message — resolved against the
+  // *current* `copy`/`controls` at render time (`errorText` below), not the
+  // values captured in the effect's closure when the error was set. This
+  // keeps `copy`/`controls` out of the checkout-start effect's dependency
+  // array: including them meant a locale change re-ran the whole effect,
+  // and after a failed checkout `startedRef.current` had already been reset
+  // to `false` in the `catch` block, so the re-run re-attempted checkout
+  // from scratch (and could re-navigate via `openCheckout`).
+  const [error, setError] = React.useState<
+    | { message: string }
+    | { fallbackKey: "invalidLink" | "invalidSeatCount" }
+    | { checkoutStartFailed: true }
+    | null
+  >(null);
+  const errorText = error
+    ? "message" in error
+      ? error.message
+      : "fallbackKey" in error
+        ? copy.checkout[error.fallbackKey]
+        : controls.checkoutError
+    : null;
   const startedRef = React.useRef(false);
 
   React.useEffect(() => {
@@ -131,7 +151,7 @@ export function BillingCheckoutClient({
     }
 
     if (!isPricingPlan(plan) || !isBillingInterval(billingInterval)) {
-      setError(copy.checkout.invalidLink);
+      setError({ fallbackKey: "invalidLink" });
       setState("error");
       return;
     }
@@ -143,7 +163,7 @@ export function BillingCheckoutClient({
     const normalizedTeamName = teamName?.trim() ?? "";
     const normalizedSeatCount = parseTeamSeatCount(seatCount);
     if (checkoutPlan === "team" && normalizedSeatCount === null) {
-      setError(copy.checkout.invalidSeatCount);
+      setError({ fallbackKey: "invalidSeatCount" });
       setState("error");
       startedRef.current = false;
       return;
@@ -191,8 +211,8 @@ export function BillingCheckoutClient({
         });
         setError(
           checkoutError instanceof Error
-            ? checkoutError.message
-            : controls.checkoutError,
+            ? { message: checkoutError.message }
+            : { checkoutStartFailed: true },
         );
         setState("error");
         startedRef.current = false;
@@ -211,8 +231,6 @@ export function BillingCheckoutClient({
     openCheckout,
     trackBeginCheckout,
     trackCheckoutError,
-    copy,
-    controls,
   ]);
 
   const resolvedPlan = isPricingPlan(plan) ? plan : null;
@@ -220,7 +238,7 @@ export function BillingCheckoutClient({
     state === "error" ? copy.checkout.needsAttention : copy.checkout.opening;
   const description =
     state === "error"
-      ? error
+      ? errorText
       : state === "opening"
         ? copy.checkout.openingDescription
         : formatCopy(copy.checkout.preparingDescription, {
