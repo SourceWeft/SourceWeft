@@ -4,10 +4,12 @@ import {
   WaffoPancake,
   verifyWebhook,
   type WebhookEvent,
+  type WebhookEventData,
 } from "@waffo/pancake-ts";
 import { MemoryBillingStore, runtimeConfig } from "./test-fixtures";
 import type { BillingStore } from "../src/server/store-port";
 import { BillingService } from "../src/server/service";
+import type { BillingAlertSink } from "../src/server/host";
 import { WaffoBillingProvider } from "../src/server/providers/waffo/provider";
 import { WaffoWebhookService } from "../src/server/providers/waffo/webhook";
 import type {
@@ -147,7 +149,13 @@ export function createWaffoFixture() {
   const store = new WaffoMemoryStore();
   const state = new MemoryWaffoState(store);
   const provider = new WaffoBillingProvider(waffoConfig, state, client);
-  const billing = new BillingService(store, waffoConfig, provider);
+  const alerts: Array<Parameters<BillingAlertSink["trigger"]>[0]> = [];
+  const billing = new BillingService(store, waffoConfig, provider, {
+    async trigger(input) {
+      alerts.push(input);
+    },
+    async resolve() {},
+  });
   const logger = { info() {}, warn() {}, error() {} };
   const makeInbox = () =>
     new WaffoWebhookService({
@@ -188,6 +196,29 @@ export function createWaffoFixture() {
     },
     ...overrides,
   });
+  // Same order references as `event()`; only the refund-specific fields differ.
+  const refundEvent = (
+    overrides: Partial<Omit<WebhookEvent, "data">> & {
+      data?: Partial<WebhookEventData>;
+    } = {},
+  ): WebhookEvent => {
+    const base = event();
+    return {
+      ...base,
+      id: "refund_delivery",
+      eventId: "REF_1",
+      eventType: "refund.succeeded",
+      ...overrides,
+      data: {
+        ...base.data,
+        refundTicketMerchantExternalId: "RT_1",
+        refundedAmount: "12.50",
+        originalChargedAmount: "12.50",
+        refundStatus: "succeeded",
+        ...overrides.data,
+      },
+    };
+  };
   return {
     requests,
     client,
@@ -195,9 +226,11 @@ export function createWaffoFixture() {
     state,
     provider,
     billing,
+    alerts,
     inbox,
     makeInbox,
     event,
+    refundEvent,
   };
 }
 export function signedEvent(event: WebhookEvent, timestamp = Date.now()) {

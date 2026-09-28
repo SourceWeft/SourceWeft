@@ -27,7 +27,8 @@ type BillingOperationType =
   | "plan_change"
   | "topup"
   | "usage"
-  | "quota_adjustment";
+  | "quota_adjustment"
+  | "payment_reversal";
 type BillingProvider = "none" | "creem" | "waffo" | "stripe" | "manual";
 type BillingSubscriptionStatus =
   | "inactive"
@@ -212,7 +213,7 @@ export const usageLedgers = pgTable(
     ),
     check(
       "usage_ledgers_operation_type_check",
-      sql`${table.operationType} is null or ${table.operationType} in ('seat_change', 'cycle_renewal', 'plan_change', 'topup', 'usage', 'quota_adjustment')`,
+      sql`${table.operationType} is null or ${table.operationType} in ('seat_change', 'cycle_renewal', 'plan_change', 'topup', 'usage', 'quota_adjustment', 'payment_reversal')`,
     ),
     index("usage_ledgers_team_created_idx").on(
       table.teamId,
@@ -301,6 +302,15 @@ export const billingOrders = pgTable(
     unitAmount: integer("unit_amount"),
     grantedCredits: integer("granted_credits").notNull().default(0),
     grantedPages: integer("granted_pages").notNull().default(0),
+    // Cumulative provider-reported refund amount, in minor units, and the
+    // credit/page units clawed back for it; reversalStatus tracks the
+    // provider's refund lifecycle for this order.
+    refundedAmount: integer("refunded_amount").notNull().default(0),
+    reversedUnits: integer("reversed_units").notNull().default(0),
+    reversalStatus: text("reversal_status")
+      .$type<"none" | "partially_refunded" | "refunded" | "charged_back">()
+      .notNull()
+      .default("none"),
     externalCheckoutId: text("external_checkout_id"),
     externalPaymentId: text("external_payment_id"),
     externalCustomerId: text("external_customer_id"),
@@ -357,6 +367,9 @@ export const billingOrders = pgTable(
       table.status,
       table.nextRetryAt,
     ),
+    index("billing_orders_provider_payment_idx")
+      .on(table.provider, table.externalPaymentId)
+      .where(sql`${table.externalPaymentId} is not null`),
     check(
       "billing_orders_provider_check",
       sql`${table.provider} in ('none', 'creem', 'waffo', 'stripe', 'manual')`,
@@ -397,6 +410,18 @@ export const billingOrders = pgTable(
     check(
       "billing_orders_granted_pages_check",
       sql`${table.grantedPages} >= 0`,
+    ),
+    check(
+      "billing_orders_refunded_amount_check",
+      sql`${table.refundedAmount} >= 0`,
+    ),
+    check(
+      "billing_orders_reversed_units_check",
+      sql`${table.reversedUnits} >= 0 and ${table.reversedUnits} <= ${table.grantedCredits} + ${table.grantedPages}`,
+    ),
+    check(
+      "billing_orders_reversal_status_check",
+      sql`${table.reversalStatus} in ('none', 'partially_refunded', 'refunded', 'charged_back')`,
     ),
     check(
       "billing_orders_amount_total_check",

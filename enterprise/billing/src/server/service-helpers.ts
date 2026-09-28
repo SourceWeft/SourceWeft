@@ -216,6 +216,36 @@ export function clawbackMonthlyCredits(
   return creditsToClawback;
 }
 
+/**
+ * Recovers a payment-reversal delta from the buyer's own balance: add-on
+ * bucket first, then monthly, each clamped to its own balance so neither
+ * bucket goes negative. Unlike `clawbackMonthlyCredits` (seat-downgrade,
+ * monthly-only), a reversal claws back purchased credits that may already
+ * have been spent from either bucket, so both are eligible. Cycle counters
+ * stay untouched — reclaimed credits were granted, not consumed. The caller
+ * compares `fromAddOn + fromMonthly` against the target delta to find the
+ * shortfall that could not be recovered. A non-positive `units` is a no-op,
+ * mirroring the `clawbackMonthly*` guard against mutating on a non-positive
+ * amount.
+ */
+export function reclaimCredits(account: BillingAccountState, units: number) {
+  if (units <= 0) {
+    return { fromAddOn: 0, fromMonthly: 0 };
+  }
+
+  let remaining = units;
+
+  const fromAddOn = Math.min(account.addOnCreditsBalance, remaining);
+  account.addOnCreditsBalance -= fromAddOn;
+  remaining -= fromAddOn;
+
+  const fromMonthly = Math.min(account.monthlyCreditsBalance, remaining);
+  account.monthlyCreditsBalance -= fromMonthly;
+  remaining -= fromMonthly;
+
+  return { fromAddOn, fromMonthly };
+}
+
 export function getTotalCreditsBalance(account: BillingAccountState) {
   return account.monthlyCreditsBalance + account.addOnCreditsBalance;
 }

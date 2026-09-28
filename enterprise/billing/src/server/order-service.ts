@@ -40,6 +40,7 @@ import type {
   TeamSubscriptionSnapshot,
 } from "./types";
 import { getTotalPagesBalance, grantAddOnPages } from "./page-ledger";
+import { applyRecordedReversalLocked } from "./payment-reversal";
 import {
   ensureBillingCheckoutEnabled,
   ensureTeamBillingEnabled,
@@ -277,6 +278,9 @@ function createOrderBase(input: {
     unitAmount: input.unitAmount,
     grantedCredits: input.grantedCredits,
     grantedPages: input.grantedPages,
+    refundedAmount: 0,
+    reversedUnits: 0,
+    reversalStatus: "none",
     externalCheckoutId: null,
     externalPaymentId: null,
     externalCustomerId: null,
@@ -941,6 +945,7 @@ export class BillingOrderService {
       try {
         await this.fulfillOrder({
           orderId: order.id,
+          externalPaymentId: order.externalPaymentId,
           externalCustomerId: order.externalCustomerId,
           externalSubscriptionId: order.externalSubscriptionId,
           externalProductId: order.externalProductId,
@@ -1039,7 +1044,7 @@ export class BillingOrderService {
         return this.fulfillTopupOrderLocked(confirmed, client);
       });
     } catch (error) {
-      await this.markFulfillmentFailed(input.orderId, error);
+      await this.markFulfillmentFailed(input.orderId, error, input);
       throw error;
     }
   }
@@ -1225,9 +1230,21 @@ export class BillingOrderService {
       await this.store.updateAccount(account, client);
     }
 
+    // A refund or chargeback recorded before this grant reverses it in the
+    // same transaction, so a refunded order nets to zero rather than being
+    // granted later by the retry job.
+    const reversed = await applyRecordedReversalLocked({
+      store: this.store,
+      client,
+      account,
+      order,
+      alerts: this.alerts,
+      logger: this.host?.logger,
+    });
+
     return this.store.updateOrder(
       {
-        ...order,
+        ...reversed,
         status: "fulfilled",
         paymentStatus: "paid",
         fulfilledAt: new Date().toISOString(),
@@ -1305,24 +1322,50 @@ export class BillingOrderService {
     );
   }
 
-  private async markFulfillmentFailed(orderId: string, error: unknown) {
-    const order = await this.store.getOrderById(orderId);
-    if (!order || order.status === "fulfilled") {
-      return;
-    }
-
+  private async markFulfillmentFailed(
+    orderId: string,
+    error: unknown,
+    input?: FulfillInput,
+  ) {
     const message =
       error instanceof Error ? error.message : "Unknown fulfillment error";
     const code =
       error instanceof BillingError ? error.code : "BILLING_FULFILLMENT_FAILED";
-    await this.store.updateOrder({
-      ...order,
-      status: "fulfillment_failed",
-      errorCode: code,
-      errorMessage: message,
-      nextRetryAt: buildRetryAt(),
-      updatedAt: new Date().toISOString(),
+    // Read-modify-write under the order row lock: a payment reversal can
+    // commit on this row between the rolled-back fulfillment and this write,
+    // and an unlocked read would write its reversal columns back stale.
+    const order = await this.store.runInTransaction(async (client) => {
+      const current = await this.store.getOrderByIdForUpdate(orderId, client);
+      if (!current || current.status === "fulfilled") {
+        return null;
+      }
+
+      return this.store.updateOrder(
+        {
+          ...current,
+          status: "fulfillment_failed",
+          // The transaction that would have persisted this rolled back, so
+          // the re-read `current` above can lack it. `input` reflects what
+          // the caller was actually confirming and survives the rollback in
+          // memory — use it to keep the provider payment id available for
+          // the retry job.
+          ...(input?.externalPaymentId
+            ? {
+                externalPaymentId: input.externalPaymentId,
+                paymentStatus: "paid",
+              }
+            : {}),
+          errorCode: code,
+          errorMessage: message,
+          nextRetryAt: buildRetryAt(),
+          updatedAt: new Date().toISOString(),
+        },
+        client,
+      );
     });
+    if (!order) {
+      return;
+    }
 
     await this.alerts?.trigger({
       alertKey: `billing:order-fulfillment:${orderId}`,

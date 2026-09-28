@@ -100,6 +100,11 @@ export type BillingStore = {
     externalCheckoutId: string,
     client?: PoolClient,
   ): Promise<BillingOrderState | null>;
+  getOrderByProviderPaymentId(
+    provider: BillingOrderState["provider"],
+    externalPaymentId: string,
+    client?: PoolClient,
+  ): Promise<BillingOrderState | null>;
   insertOrder(
     order: BillingOrderState,
     client?: PoolClient,

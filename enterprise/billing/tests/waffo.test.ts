@@ -11,6 +11,7 @@ import {
   centsToDisplay,
   displayToCents,
 } from "../src/server/providers/waffo/client";
+import { WAFFO_WEBHOOK_EVENTS } from "../src/server/providers/waffo/webhook";
 import {
   createWaffoFixture,
   merchantId,
@@ -278,4 +279,238 @@ test("changing the Waffo environment does not reuse a test checkout URL or refer
   );
   assert.equal(f.store.order?.id, first.orderId);
   assert.equal(f.store.order?.metadata.waffoEnvironment, "test");
+});
+
+// Waffo is the first provider wired to the payment-reversal core: these
+// tests cover only the translation from a Waffo refund event to the core's
+// input, not the reversal math itself (covered in payment-reversal.test.ts).
+
+function reversalRows(f: ReturnType<typeof createWaffoFixture>) {
+  return f.store.ledgers.filter(
+    (entry) => entry.operationType === "payment_reversal",
+  );
+}
+
+test("a verified Waffo refund reverses the top-up once", async () => {
+  const f = createWaffoFixture();
+  await checkout(f);
+  const before = f.store.account!.addOnCreditsBalance;
+  const paid = signedEvent(f.event());
+  await f.inbox.receive(paid.raw, paid.signature);
+  await f.inbox.drain();
+  assert.equal(f.store.order?.status, "fulfilled");
+  assert.equal(
+    f.store.account!.addOnCreditsBalance,
+    before + waffoConfig.catalog.creditTopupUnitAmount,
+  );
+
+  const refunded = signedEvent(f.refundEvent());
+  await f.inbox.receive(refunded.raw, refunded.signature);
+  await Promise.all([f.makeInbox().drain(), f.makeInbox().drain()]);
+  assert.equal(f.store.account!.addOnCreditsBalance, before);
+  assert.equal(reversalRows(f).length, 1);
+  assert.equal(f.store.webhook?.status, "processed");
+});
+
+test("a partial Waffo refund reverses proportionally", async () => {
+  const f = createWaffoFixture();
+  await checkout(f);
+  const before = f.store.account!.addOnCreditsBalance;
+  const paid = signedEvent(f.event());
+  await f.inbox.receive(paid.raw, paid.signature);
+  await f.inbox.drain();
+  const granted = waffoConfig.catalog.creditTopupUnitAmount;
+
+  const refunded = signedEvent(
+    f.refundEvent({ data: { refundedAmount: "5.00" } }),
+  );
+  await f.inbox.receive(refunded.raw, refunded.signature);
+  await f.inbox.drain();
+  const reversedUnits = Math.floor((granted * 500) / 1250);
+  assert.equal(
+    f.store.account!.addOnCreditsBalance,
+    before + granted - reversedUnits,
+  );
+  assert.equal(f.store.webhook?.status, "processed");
+});
+
+test("a refund delivered before order.completed nets to zero", async () => {
+  const f = createWaffoFixture();
+  await checkout(f);
+  const before = f.store.account!.addOnCreditsBalance;
+
+  const refunded = signedEvent(f.refundEvent());
+  await f.inbox.receive(refunded.raw, refunded.signature);
+  await f.inbox.drain();
+  assert.equal(f.store.webhook?.status, "processed");
+
+  const paid = signedEvent(f.event());
+  await f.inbox.receive(paid.raw, paid.signature);
+  await f.inbox.drain();
+  assert.equal(f.store.order?.status, "fulfilled");
+  assert.equal(f.store.account!.addOnCreditsBalance, before);
+});
+
+test("refund.failed is ignored", async () => {
+  const f = createWaffoFixture();
+  await checkout(f);
+  const paid = signedEvent(f.event());
+  await f.inbox.receive(paid.raw, paid.signature);
+  await f.inbox.drain();
+  const before = f.store.account!.addOnCreditsBalance;
+
+  const failed = signedEvent(f.refundEvent({ eventType: "refund.failed" }));
+  await f.inbox.receive(failed.raw, failed.signature);
+  await f.inbox.drain();
+  assert.equal(f.store.webhook?.status, "ignored");
+  assert.equal(f.store.webhook?.errorCode, "WAFFO_REFUND_FAILED");
+  assert.equal(f.store.account!.addOnCreditsBalance, before);
+});
+
+test("a refund without amounts raises an alert and changes nothing", async () => {
+  const f = createWaffoFixture();
+  await checkout(f);
+  const paid = signedEvent(f.event());
+  await f.inbox.receive(paid.raw, paid.signature);
+  await f.inbox.drain();
+  const before = f.store.account!.addOnCreditsBalance;
+
+  const unavailable = signedEvent(
+    f.refundEvent({ data: { refundedAmount: undefined } }),
+  );
+  await f.inbox.receive(unavailable.raw, unavailable.signature);
+  await f.inbox.drain();
+  assert.equal(f.store.webhook?.status, "ignored");
+  assert.equal(f.store.webhook?.errorCode, "WAFFO_REFUND_AMOUNT_UNAVAILABLE");
+  assert.equal(f.store.account!.addOnCreditsBalance, before);
+  assert.ok(
+    f.alerts.some(
+      (alert) =>
+        alert.alertKey ===
+        "billing:payment-reversal-amount-unavailable:waffo:RT_1",
+    ),
+  );
+});
+
+test("a refund whose order no longer exists is unmatched, not retried forever", async () => {
+  const f = createWaffoFixture();
+  await checkout(f);
+  const missingOrderId = "missing-order-id";
+  const refunded = signedEvent(
+    f.refundEvent({
+      data: {
+        orderMerchantExternalId: missingOrderId,
+        orderMetadata: { sourceweftOrderId: missingOrderId },
+      },
+    }),
+  );
+  await f.inbox.receive(refunded.raw, refunded.signature);
+  await f.inbox.drain();
+  assert.equal(f.store.webhook?.status, "ignored");
+  assert.equal(f.store.webhook?.errorCode, "WAFFO_REFUND_UNMATCHED");
+  assert.ok(
+    f.alerts.some(
+      (alert) =>
+        alert.alertKey === "billing:payment-reversal-unmatched:waffo:RT_1",
+    ),
+  );
+});
+
+test("a refund missing its order reference is unmatched, not retried forever", async () => {
+  const f = createWaffoFixture();
+  await checkout(f);
+  const refunded = signedEvent(
+    f.refundEvent({ data: { orderMerchantExternalId: undefined } }),
+  );
+  await f.inbox.receive(refunded.raw, refunded.signature);
+  await f.inbox.drain();
+  assert.equal(f.store.webhook?.status, "ignored");
+  assert.equal(f.store.webhook?.errorCode, "WAFFO_REFUND_UNMATCHED");
+  assert.ok(
+    f.alerts.some(
+      (alert) =>
+        alert.alertKey === "billing:payment-reversal-unmatched:waffo:RT_1",
+    ),
+  );
+});
+
+test("a malformed refund amount raises an alert and changes nothing", async () => {
+  const f = createWaffoFixture();
+  await checkout(f);
+  const paid = signedEvent(f.event());
+  await f.inbox.receive(paid.raw, paid.signature);
+  await f.inbox.drain();
+  const before = f.store.account!.addOnCreditsBalance;
+
+  const malformed = signedEvent(
+    f.refundEvent({ data: { refundedAmount: "12,50" } }),
+  );
+  await f.inbox.receive(malformed.raw, malformed.signature);
+  await f.inbox.drain();
+  assert.equal(f.store.webhook?.status, "ignored");
+  assert.equal(f.store.webhook?.errorCode, "WAFFO_REFUND_AMOUNT_UNAVAILABLE");
+  assert.equal(f.store.account!.addOnCreditsBalance, before);
+  assert.ok(
+    f.alerts.some(
+      (alert) =>
+        alert.alertKey ===
+        "billing:payment-reversal-amount-unavailable:waffo:RT_1",
+    ),
+  );
+});
+
+test("a refund after subscription.canceled is not dropped as stale", async () => {
+  const f = createWaffoFixture();
+  await f.billing.ensureBillingAccount("team_1", "user_1");
+  await f.billing.createPricingCheckout(
+    { plan: "pro", billingInterval: "monthly", source: "dashboard" },
+    { userId: "user_1", email: "buyer@example.invalid" },
+    { personalTeamId: "team_1" },
+  );
+  const active = f.event({ eventType: "subscription.activated" });
+  Object.assign(active.data, {
+    amount: "12.00",
+    total: "12.00",
+    orderStatus: "active",
+    paymentId: undefined,
+    paymentStatus: undefined,
+    billingPeriod: "monthly",
+    currentPeriodStart: "2026-09-01T00:00:00Z",
+    currentPeriodEnd: "2026-10-01T00:00:00Z",
+    productMetadata: { sourceweftProductKey: "individual_pro:monthly" },
+  });
+  const activated = signedEvent(active);
+  await f.inbox.receive(activated.raw, activated.signature);
+  await f.inbox.drain();
+  assert.equal(f.store.order?.status, "fulfilled");
+
+  const canceled = {
+    ...active,
+    id: "subscription_cancel",
+    eventType: "subscription.canceled",
+    timestamp: new Date().toISOString(),
+    data: { ...active.data, orderStatus: "canceled" },
+  };
+  const canceledDelivery = signedEvent(canceled);
+  await f.inbox.receive(canceledDelivery.raw, canceledDelivery.signature);
+  await f.inbox.drain();
+  assert.equal(
+    f.store.order?.metadata.waffoLastEventType,
+    "subscription.canceled",
+  );
+
+  const refunded = signedEvent(f.refundEvent());
+  await f.inbox.receive(refunded.raw, refunded.signature);
+  await f.inbox.drain();
+  assert.equal(f.store.webhook?.status, "processed");
+  assert.ok(
+    f.alerts.some((alert) =>
+      alert.alertKey.startsWith("billing:subscription-payment-reversal:"),
+    ),
+  );
+});
+
+test("setup registers the refund events", () => {
+  assert.ok(WAFFO_WEBHOOK_EVENTS.includes("refund.succeeded"));
+  assert.ok(WAFFO_WEBHOOK_EVENTS.includes("refund.failed"));
 });

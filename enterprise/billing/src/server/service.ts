@@ -21,6 +21,11 @@ import type {
 } from "@sourceweft/contracts";
 import { BillingAccountService } from "./account-service";
 import { BillingOrderService } from "./order-service";
+import {
+  BillingPaymentReversalService,
+  type PaymentReversalInput,
+  type PaymentReversalNotice,
+} from "./payment-reversal";
 import { BillingReconcileService } from "./reconcile-service";
 import { BillingSubscriptionService } from "./subscription-service";
 import type { BillingStore } from "./store-port";
@@ -42,6 +47,7 @@ export class BillingService {
   private readonly subscriptionService: BillingSubscriptionService;
   private readonly webhookService: BillingWebhookService;
   private readonly reconcileService: BillingReconcileService;
+  private readonly paymentReversalService: BillingPaymentReversalService;
 
   constructor(
     private readonly store: BillingStore,
@@ -84,6 +90,16 @@ export class BillingService {
       runtimeConfig,
       this.accountService,
     );
+    this.paymentReversalService = new BillingPaymentReversalService(
+      store,
+      this.accountService,
+      alerts,
+      host?.logger,
+    );
+  }
+
+  get paymentReversals() {
+    return this.paymentReversalService;
   }
 
   ensureBillingAccount(teamId: string, userId: string) {
@@ -179,6 +195,21 @@ export class BillingService {
 
   fulfillOrder(input: Parameters<BillingOrderService["fulfillOrder"]>[0]) {
     return this.orderService.fulfillOrder(input);
+  }
+
+  findOrderByProviderPaymentId(
+    provider: BillingOrderState["provider"],
+    externalPaymentId: string,
+  ): Promise<BillingOrderState | null> {
+    return this.store.getOrderByProviderPaymentId(provider, externalPaymentId);
+  }
+
+  applyPaymentReversal(input: PaymentReversalInput) {
+    return this.paymentReversalService.applyPaymentReversal(input);
+  }
+
+  reportPaymentReversalNotice(notice: PaymentReversalNotice) {
+    return this.paymentReversalService.reportNotice(notice);
   }
 
   createBillingPortal(

@@ -75,6 +75,9 @@ test("billing portal never uses a customer from an unrelated personal subscripti
     unitAmount: null,
     grantedCredits: 0,
     grantedPages: 0,
+    refundedAmount: 0,
+    reversedUnits: 0,
+    reversalStatus: "none",
     externalCheckoutId: "checkout_1",
     externalPaymentId: "pay_1",
     externalCustomerId: "cus_personal_1",
@@ -596,4 +599,85 @@ test("top-up fulfillment is idempotent and ledger backed", async () => {
   assert.equal(topupLedgers[0]?.activitySummary, "+20,000 credits");
   assert.equal(store.account?.addOnCreditsBalance, 20_000);
   assert.equal(store.order?.status, "fulfilled");
+});
+
+test("a failed top-up fulfillment keeps the provider payment id through the retry job", async () => {
+  // MemoryBillingStore.runInTransaction is a passthrough, so a throw inside
+  // it would otherwise leave the "payment_confirmed" write from fulfillOrder
+  // in place. PostgresBillingStore rolls that write back on error (see
+  // store.ts's runInTransaction), which is exactly what strands
+  // externalPaymentId in production. Mirror that rollback here so the ledger
+  // failure below reproduces the real bug instead of masking it.
+  class FlakyLedgerStore extends MemoryBillingStore {
+    private ledgerFailuresLeft = 1;
+    async appendLedger(
+      ...args: Parameters<MemoryBillingStore["appendLedger"]>
+    ): ReturnType<MemoryBillingStore["appendLedger"]> {
+      if (this.ledgerFailuresLeft > 0) {
+        this.ledgerFailuresLeft -= 1;
+        throw new Error("ledger unavailable");
+      }
+      return super.appendLedger(...args);
+    }
+
+    async runInTransaction<T>(
+      ...args: Parameters<MemoryBillingStore["runInTransaction"]>
+    ): Promise<T> {
+      const snapshot = this.order ? { ...this.order } : null;
+      try {
+        return (await super.runInTransaction(...args)) as T;
+      } catch (error) {
+        this.order = snapshot;
+        throw error;
+      }
+    }
+  }
+
+  const store = new FlakyLedgerStore();
+  const billingService = new BillingService(
+    store,
+    {
+      ...runtimeConfig,
+      saasEnabled: true,
+      provider: "creem",
+    },
+    {
+      ...noopProvider,
+      async createCheckout() {
+        return {
+          provider: "creem",
+          checkoutUrl: "https://checkout.example.test/topup",
+          externalCheckoutId: null,
+          externalCustomerId: null,
+        };
+      },
+    },
+  );
+
+  const checkout = await billingService.createTopupCheckout(
+    "team_1",
+    {
+      unitType: "credit",
+      quantity: 2,
+    },
+    "user_1",
+    "user@example.com",
+  );
+
+  await assert.rejects(
+    billingService.fulfillOrder({
+      orderId: checkout.orderId,
+      externalPaymentId: "pi_1",
+    }),
+  );
+
+  assert.equal(store.order?.status, "fulfillment_failed");
+  assert.equal(store.order?.externalPaymentId, "pi_1");
+  assert.equal(store.order?.paymentStatus, "paid");
+
+  const result = await billingService.reconcileBillingOrders();
+
+  assert.equal(result.retried, 1);
+  assert.equal(store.order?.status, "fulfilled");
+  assert.equal(store.order?.externalPaymentId, "pi_1");
 });
