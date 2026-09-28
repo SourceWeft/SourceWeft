@@ -693,6 +693,44 @@ test("a negative refund_amount raises amount-unavailable", async () => {
   assert.equal(alert?.metadata?.cause, "refund_amount_invalid");
 });
 
+test("a NaN refund_amount raises amount-unavailable", async () => {
+  const f = await fixture();
+
+  // A NaN can never arrive through JSON.parse; this exercises a caller that
+  // constructs the event object directly. Both `NaN <= 0` and `NaN ===
+  // null` are false, so a non-finite value must be filtered before it ever
+  // reaches amountUnavailableCause's `refundAmount <= 0` guard, or it would
+  // evade it and reach the reversal core.
+  await f.reversalSync("refund.created", {
+    id: "ref_nan_amount",
+    status: "succeeded",
+    refund_amount: Number.NaN,
+    refund_currency: "USD",
+    transaction: {
+      id: "tran_test",
+      amount: 500,
+      amount_paid: 500,
+      currency: "USD",
+      refunded_amount: null,
+    },
+    checkout: { metadata: { orderId: f.store.order!.id } },
+    webhookEventType: "refund.created",
+    webhookId: "evt_refund_nan_amount",
+    webhookCreatedAt: Date.now(),
+  });
+
+  assert.equal(f.store.order?.refundedAmount, 0);
+  assert.equal(f.store.account?.addOnPagesBalance, 1000);
+  assert.equal(reversalRows(f).length, 0);
+  const alert = f.alerts.find(
+    (entry) =>
+      entry.alertKey ===
+      "billing:payment-reversal-amount-unavailable:creem:ref_nan_amount",
+  );
+  assert.ok(alert);
+  assert.equal(alert?.metadata?.cause, "refund_amount_invalid");
+});
+
 test("a succeeded refund with no refund id raises amount-unavailable instead of keying the ledger on the webhook id", async () => {
   const f = await fixture();
 

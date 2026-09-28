@@ -42,16 +42,19 @@ export function readString(
 }
 
 /**
- * A number at `record[key]`, else `null`. Only a `typeof` check: NaN and
- * Infinity pass through unchanged rather than being narrowed to `null`,
- * since a payload value never actually arrives as either from parsed JSON.
+ * A finite number at `record[key]`, else `null`. `JSON.parse` never
+ * produces `NaN` or `Infinity`, so a real payload never triggers this, but
+ * a non-finite value must never reach the reversal core: it can otherwise
+ * evade a validity guard written as `value <= 0` (both `NaN <= 0` and
+ * `Infinity <= 0` are `false`), so `Number.isFinite` is checked explicitly
+ * rather than relying only on `typeof`.
  */
 export function readNumber(
   record: Record<string, unknown> | null,
   key: string,
 ): number | null {
   const value = record?.[key];
-  return typeof value === "number" ? value : null;
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 /**

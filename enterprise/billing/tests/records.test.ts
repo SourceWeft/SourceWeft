@@ -56,11 +56,10 @@ test("readString rejects a non-string value", () => {
   assert.equal(readString({ key: { nested: true } }, "key"), null);
 });
 
-// readNumber: a number at record[key], else null. Only a `typeof` check —
-// NaN and Infinity pass through as-is, matching the Creem reversal-sync
-// copy this replaces (values never come from parsed JSON as NaN/Infinity,
-// so this has never mattered in practice, but the behaviour is preserved
-// exactly rather than tightened to Number.isFinite).
+// readNumber: a finite number at record[key], else null. NaN and Infinity
+// must never pass through: a non-finite value must never reach the
+// reversal core (see amountUnavailableCause's `refundAmount <= 0` guard in
+// creem-reversal-sync.ts, which NaN and Infinity both evade).
 
 test("readNumber returns a number as-is, including zero and negatives", () => {
   assert.equal(readNumber({ key: 42 }, "key"), 42);
@@ -68,10 +67,10 @@ test("readNumber returns a number as-is, including zero and negatives", () => {
   assert.equal(readNumber({ key: -5 }, "key"), -5);
 });
 
-test("readNumber lets NaN and Infinity through unchanged", () => {
-  assert.ok(Number.isNaN(readNumber({ key: NaN }, "key")));
-  assert.equal(readNumber({ key: Infinity }, "key"), Infinity);
-  assert.equal(readNumber({ key: -Infinity }, "key"), -Infinity);
+test("readNumber rejects NaN, Infinity, and -Infinity", () => {
+  assert.equal(readNumber({ key: NaN }, "key"), null);
+  assert.equal(readNumber({ key: Infinity }, "key"), null);
+  assert.equal(readNumber({ key: -Infinity }, "key"), null);
 });
 
 test("readNumber rejects a numeric string, a missing key, and a null record", () => {

@@ -434,6 +434,35 @@ test("a zero-delta reversal writes its ledger key but raises no warn alert", asy
   );
 });
 
+test("the fulfilment hook writes its ledger key but raises no warn alert when nothing is left to reverse", async () => {
+  // A recorded reversal with a zero refunded total but a non-"none" status
+  // is synthetic (the service's own mutation logic never produces a
+  // partially_refunded order with refundedAmount 0), but it is the direct
+  // way to drive applyRecordedReversalLocked's own deltaUnits-to-0 case:
+  // its computed target (computeReversalTarget with refundedTotal 0) is 0,
+  // matching the order's pre-fulfilment reversedUnits of 0.
+  const { store, alerts, service } = await setupTopup({
+    fulfilled: false,
+    order: { refundedAmount: 0, reversalStatus: "partially_refunded" },
+  });
+
+  const fulfilled = await service.fulfillOrder({ orderId: "order_1" });
+
+  assert.equal(fulfilled.status, "fulfilled");
+  assert.equal(store.account?.addOnCreditsBalance, 20_000);
+  assert.equal(store.order?.reversedUnits, 0);
+
+  const fulfillmentRow = reversalRows(store).find(
+    (row) =>
+      row.idempotencyKey ===
+      "user_1:billing-order:order_1:reversal:fulfillment",
+  );
+  assert.ok(fulfillmentRow);
+  assert.equal(fulfillmentRow?.delta, 0);
+  assert.equal(fulfillmentRow?.activityVisible, false);
+  assert.deepEqual(alertLevels(alerts), []);
+});
+
 test("a chargeback never lowers the recorded refunded amount", async () => {
   const { store, service } = await setupTopup();
 

@@ -14,22 +14,14 @@ import type {
   BillingProviderUpdateSeatsResult,
 } from "../types";
 import { BillingError } from "../errors";
-import { readString, toObjectRecord } from "../records";
-
-function resolveEntityId(value: unknown) {
-  if (typeof value === "string" && value.trim()) {
-    return value;
-  }
-
-  return readString(toObjectRecord(value), "id");
-}
+import { readReferenceId, readString, toObjectRecord } from "../records";
 
 function resolveSubscriptionProductId(subscription: unknown) {
   const record = toObjectRecord(subscription);
   return (
     readString(record, "productId") ??
     readString(record, "product_id") ??
-    resolveEntityId(record?.product)
+    readReferenceId(record?.product)
   );
 }
 
@@ -178,7 +170,7 @@ export class CreemBillingProvider implements BillingProviderAdapter {
       provider: "creem",
       checkoutUrl: response.checkoutUrl,
       externalCheckoutId: response.id,
-      externalCustomerId: resolveEntityId(response.customer),
+      externalCustomerId: readReferenceId(response.customer),
       metadata: await this.checkoutMetadata(),
     };
   }
