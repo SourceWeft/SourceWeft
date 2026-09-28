@@ -590,3 +590,4 @@ export function createCreemSubscriptionSync(deps: CreemSubscriptionSyncDeps) {
 }
 
 export { createCreemWebhookHandler } from "./creem-webhook-bypass";
+export { createCreemReversalSync } from "./creem-reversal-sync";

@@ -57,7 +57,7 @@ test("concurrent signed Creem callbacks produce one persisted top-up grant", asy
     config,
     sync,
     logger: { info() {}, warn() {}, error() {} },
-    alerts: { async trigger() {}, async resolve() {} },
+    reversalSync: async () => {},
   });
   try {
     await billing.ensureBillingAccount(teamId, userId);
