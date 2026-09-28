@@ -214,6 +214,70 @@ test("a Creem refund found by transaction id when checkout metadata is absent", 
   assert.equal(f.store.order?.reversalStatus, "partially_refunded");
 });
 
+test("a Creem refund found by transaction id when checkout metadata is missing", async () => {
+  const f = await fixture();
+
+  // `checkout` is present (unlike the previous test) but carries no
+  // `metadata.orderId` — the lookup must still fall back to the
+  // transaction id rather than treating this as unmatched.
+  await f.reversalSync("refund.created", {
+    id: "ref_by_tx_no_metadata",
+    status: "succeeded",
+    refund_amount: 500,
+    refund_currency: "USD",
+    checkout: { id: "ch_test", metadata: {} },
+    transaction: {
+      id: "tran_test",
+      amount: 500,
+      amount_paid: 500,
+      currency: "USD",
+      refunded_amount: 500,
+    },
+    webhookEventType: "refund.created",
+    webhookId: "evt_refund_by_tx_no_metadata",
+    webhookCreatedAt: Date.now(),
+  });
+
+  assert.equal(f.store.account?.addOnPagesBalance, 0);
+  assert.equal(reversalRows(f).length, 1);
+  assert.equal(f.store.order?.reversalStatus, "refunded");
+});
+
+test("a succeeded Creem refund with unusable amounts raises the amount-unavailable alert", async () => {
+  const f = await fixture();
+
+  await f.reversalSync("refund.created", {
+    id: "ref_amount_unavailable",
+    status: "succeeded",
+    // No `refund_amount` and no `transaction.refunded_amount`: neither a
+    // per-refund amount nor a cumulative total is usable.
+    transaction: {
+      id: "tran_test",
+      amount: 500,
+      amount_paid: 500,
+      currency: "USD",
+    },
+    checkout: { metadata: { orderId: f.store.order!.id } },
+    webhookEventType: "refund.created",
+    webhookId: "evt_refund_amount_unavailable",
+    webhookCreatedAt: Date.now(),
+  });
+
+  assert.equal(f.store.account?.addOnPagesBalance, 1000);
+  assert.equal(reversalRows(f).length, 0);
+  assert.equal(
+    f.store.webhooks.get("creem:evt_refund_amount_unavailable")?.status,
+    "processed",
+  );
+  assert.ok(
+    f.alerts.some(
+      (alert) =>
+        alert.alertKey ===
+        "billing:payment-reversal-amount-unavailable:creem:ref_amount_unavailable",
+    ),
+  );
+});
+
 test("a pending Creem refund raises the pending alert and changes nothing", async () => {
   const f = await fixture();
 

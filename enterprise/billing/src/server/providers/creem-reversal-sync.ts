@@ -148,12 +148,26 @@ export function createCreemReversalSync(deps: {
     const refundAmount = readNumber(data, "refund_amount");
     const paidAmount =
       readNumber(transaction, "amount_paid") ??
-      readNumber(transaction, "amount") ??
-      0;
+      readNumber(transaction, "amount");
     const currency =
-      readString(data, "refund_currency") ??
-      readString(transaction, "currency") ??
-      "";
+      readString(data, "refund_currency") ?? readString(transaction, "currency");
+
+    // Neither a usable cumulative total nor a usable per-refund amount, or no
+    // usable paid amount to measure against: nothing here can be turned into
+    // a reversal. Notice-and-stop rather than let a zero-amount "applied"
+    // reversal through silently (mirrors the Waffo refund translation).
+    if ((refundedTotal === null && refundAmount === null) || paidAmount === null) {
+      await record(null, {
+        reason: "amount_unavailable",
+        provider: "creem",
+        providerReference: reversalId,
+        orderId: order.id,
+        teamId: order.teamId,
+        amount: refundedTotal ?? refundAmount,
+        currency,
+      });
+      return;
+    }
 
     await record(
       {
@@ -166,7 +180,7 @@ export function createCreemReversalSync(deps: {
             ? { refundedTotal }
             : { refundAmount: refundAmount ?? 0 },
         paidAmount,
-        currency,
+        currency: currency ?? "",
       },
       null,
     );
