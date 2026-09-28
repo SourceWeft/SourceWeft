@@ -7,6 +7,7 @@ import { hasLocale } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { routing } from "../../../../../i18n/routing";
 import { buildAlternates } from "../../../../../lib/i18n/metadata";
+import { mcpOverviewLocale } from "../../../../../lib/mcp-ai-overview";
 
 import { resolveInitialLandingAuthState } from "../../../../_landing/auth-state-server";
 import { SourceWeftFooter } from "../../../../_landing/components/sourceweft-footer";
@@ -145,7 +146,11 @@ export default async function PublicMcpCategoryPage({
   });
   const [facets, market] = await Promise.all([
     countPublicMcpByCategory(mcpCountRequest(state)),
-    listPublicMcp(mcpListRequest(state)),
+    // Cards show AI summaries in the visitor's language, English otherwise.
+    listPublicMcp({
+      ...mcpListRequest(state),
+      locale: mcpOverviewLocale(locale),
+    }),
   ]);
   const description =
     category.description ?? t("bodyDescription", { name: category.name });

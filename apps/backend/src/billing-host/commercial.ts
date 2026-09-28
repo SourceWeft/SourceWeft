@@ -108,6 +108,7 @@ const sync: ReturnType<typeof createCreemSubscriptionSync> = (...args) =>
 export const handleBillingAuthRequest = createCreemWebhookHandler({
   config: billingConfig,
   logger,
+  alerts,
   sync,
 });
 let waffoInbox: WaffoWebhookService | undefined;

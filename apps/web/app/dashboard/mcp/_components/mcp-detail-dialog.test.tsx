@@ -141,7 +141,11 @@ afterEach(async () => {
 describe("McpDetailDialog tabs", { timeout: 30_000 }, () => {
   it("opens on Overview, with README and Tools beside it", async () => {
     await open(readme("ok"));
-    expect(api.getWorkspaceMarketMcp).toHaveBeenCalledWith("ws-1", IDENTIFIER);
+    expect(api.getWorkspaceMarketMcp).toHaveBeenCalledWith(
+      "ws-1",
+      IDENTIFIER,
+      { locale: "en" },
+    );
     expect(tabs().map((node) => node.textContent)).toEqual([
       "Overview",
       "README",

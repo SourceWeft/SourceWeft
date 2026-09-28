@@ -1,0 +1,271 @@
+// Entry-point ordering for the Creem webhook handler: every POST to the
+// webhook path on a Creem deployment must be answered directly (never
+// `null`, which apps/backend/src/api/app.ts would otherwise hand to Better
+// Auth, which 404s). These tests exercise `createCreemWebhookHandler`'s own
+// ordering — signature verification, then event-type dispatch, then the
+// refund/dispute manual-handling alert — in isolation from the rest of the
+// billing stack.
+import assert from "node:assert/strict";
+import { test } from "vitest";
+import { createHmac } from "node:crypto";
+import { createCreemWebhookHandler } from "../src/server/providers/creem-webhook-bypass";
+import type { BillingAlertSink } from "../src/server/host";
+import { runtimeConfig } from "./test-fixtures";
+
+const WEBHOOK_URL = "http://localhost/api/auth/creem/webhook";
+
+type RecordedAlert = Parameters<BillingAlertSink["trigger"]>[0];
+
+function fixture(
+  overrides: { webhookSecret?: string; alerts?: BillingAlertSink } = {},
+) {
+  const config = {
+    ...runtimeConfig,
+    saasEnabled: true,
+    provider: "creem" as const,
+    creem: {
+      ...runtimeConfig.creem,
+      webhookSecret: overrides.webhookSecret ?? "creem-fixture-signing-secret",
+    },
+  };
+  const recordedAlerts: RecordedAlert[] = [];
+  const alerts: BillingAlertSink = overrides.alerts ?? {
+    async trigger(input) {
+      recordedAlerts.push(input);
+    },
+    async resolve() {},
+  };
+  const syncCalls: unknown[][] = [];
+  const handler = createCreemWebhookHandler({
+    config,
+    logger: { info() {}, warn() {}, error() {} },
+    alerts,
+    sync: async (...args: unknown[]) => {
+      syncCalls.push(args);
+    },
+  });
+  return { config, handler, alerts: recordedAlerts, syncCalls };
+}
+
+function sign(raw: string, secret = "creem-fixture-signing-secret") {
+  return createHmac("sha256", secret).update(raw).digest("hex");
+}
+
+function post(body: string, signature?: string) {
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+  };
+  if (signature !== undefined) headers["creem-signature"] = signature;
+  return new Request(WEBHOOK_URL, { method: "POST", headers, body });
+}
+
+test("malformed and non-object bodies are rejected, never passed to Better Auth", async () => {
+  const f = fixture();
+  for (const body of ["{", "[]", "null", "42"]) {
+    const response = await f.handler(post(body));
+    assert.notEqual(response, null);
+    assert.equal(response?.status, 400);
+  }
+});
+
+test("unsigned or wrongly signed deliveries are rejected before the type is read", async () => {
+  const f = fixture();
+  const raw = JSON.stringify({
+    id: "evt_1",
+    eventType: "credits.granted",
+    object: {},
+  });
+
+  const unsigned = await f.handler(post(raw));
+  assert.equal(unsigned?.status, 400);
+
+  const wronglySigned = await f.handler(post(raw, "invalid"));
+  assert.equal(wronglySigned?.status, 400);
+
+  const refundRaw = JSON.stringify({
+    id: "evt_refund_0",
+    eventType: "refund.created",
+    object: { id: "ref_0", mode: "test", status: "succeeded" },
+  });
+
+  const unsignedRefund = await f.handler(post(refundRaw));
+  assert.equal(unsignedRefund?.status, 400);
+
+  const wronglySignedRefund = await f.handler(post(refundRaw, "invalid"));
+  assert.equal(wronglySignedRefund?.status, 400);
+
+  assert.equal(f.syncCalls.length, 0);
+  assert.equal(f.alerts.length, 0);
+});
+
+test("signed envelope without a string eventType is rejected", async () => {
+  const f = fixture();
+  const missing = JSON.stringify({ id: "evt_1", object: {} });
+  const missingResponse = await f.handler(post(missing, sign(missing)));
+  assert.equal(missingResponse?.status, 400);
+
+  const nonString = JSON.stringify({
+    id: "evt_1",
+    eventType: 42,
+    object: {},
+  });
+  const nonStringResponse = await f.handler(post(nonString, sign(nonString)));
+  assert.equal(nonStringResponse?.status, 400);
+});
+
+test("signed unsupported types are acknowledged without a mode check", async () => {
+  const f = fixture();
+  const raw = JSON.stringify({
+    id: "evt_1",
+    eventType: "credits.granted",
+    object: {},
+  });
+  const response = await f.handler(post(raw, sign(raw)));
+  assert.equal(response?.status, 200);
+  assert.equal(f.syncCalls.length, 0);
+  assert.equal(f.alerts.length, 0);
+});
+
+test("signed refund and dispute events are acknowledged and flagged for manual handling", async () => {
+  const f = fixture();
+
+  const refundRaw = JSON.stringify({
+    id: "evt_refund_1",
+    eventType: "refund.created",
+    object: {
+      id: "ref_1",
+      mode: "test",
+      status: "succeeded",
+      refund_amount: 500,
+      refund_currency: "usd",
+      transaction: "tran_123",
+      order: "ord_123",
+    },
+  });
+  const refundResponse = await f.handler(post(refundRaw, sign(refundRaw)));
+  assert.equal(refundResponse?.status, 200);
+
+  const disputeRaw = JSON.stringify({
+    id: "evt_dispute_1",
+    eventType: "dispute.created",
+    object: {
+      id: "dis_1",
+      mode: "test",
+      status: "disputed",
+      amount: 700,
+      currency: "usd",
+      transaction: "tran_456",
+      order: { id: "ord_456" },
+    },
+  });
+  const disputeResponse = await f.handler(post(disputeRaw, sign(disputeRaw)));
+  assert.equal(disputeResponse?.status, 200);
+
+  assert.equal(f.alerts.length, 2);
+  assert.equal(f.alerts[0]?.alertKey, "billing:creem-reversal-manual:ref_1");
+  assert.equal(f.alerts[0]?.level, "error");
+  assert.equal(f.alerts[0]?.source, "billing.creem");
+  assert.equal(f.alerts[0]?.metadata?.status, "succeeded");
+  assert.equal(f.alerts[0]?.metadata?.amount, 500);
+  assert.equal(f.alerts[0]?.metadata?.currency, "usd");
+  assert.equal(f.alerts[0]?.metadata?.transactionId, "tran_123");
+  assert.equal(f.alerts[0]?.metadata?.orderId, "ord_123");
+
+  assert.equal(f.alerts[1]?.alertKey, "billing:creem-reversal-manual:dis_1");
+  assert.equal(f.alerts[1]?.level, "error");
+  assert.equal(f.alerts[1]?.source, "billing.creem");
+  assert.equal(f.alerts[1]?.metadata?.status, "disputed");
+  assert.equal(f.alerts[1]?.metadata?.amount, 700);
+  assert.equal(f.alerts[1]?.metadata?.currency, "usd");
+  assert.equal(f.alerts[1]?.metadata?.transactionId, "tran_456");
+  assert.equal(f.alerts[1]?.metadata?.orderId, "ord_456");
+
+  assert.equal(f.syncCalls.length, 0);
+});
+
+test("reversal events are checked against the deployment mode before alerting", async () => {
+  const f = fixture();
+  const raw = JSON.stringify({
+    id: "evt_refund_3",
+    eventType: "refund.created",
+    object: { id: "ref_3", mode: "prod", status: "succeeded" },
+  });
+  const response = await f.handler(post(raw, sign(raw)));
+  assert.equal(response?.status, 403);
+  assert.equal(f.alerts.length, 0);
+  assert.equal(f.syncCalls.length, 0);
+});
+
+test("refund notice alert failure returns 500 so Creem redelivers", async () => {
+  const f = fixture({
+    alerts: {
+      async trigger() {
+        throw new Error("ops alert service unavailable");
+      },
+      async resolve() {},
+    },
+  });
+  const raw = JSON.stringify({
+    id: "evt_refund_2",
+    eventType: "refund.created",
+    object: { id: "ref_2", mode: "test", status: "succeeded" },
+  });
+  const response = await f.handler(post(raw, sign(raw)));
+  assert.equal(response?.status, 500);
+});
+
+test("mode mismatch on a handled event is rejected", async () => {
+  const f = fixture();
+  const raw = JSON.stringify({
+    id: "evt_2",
+    eventType: "subscription.active",
+    object: { mode: "prod" },
+  });
+  const response = await f.handler(post(raw, sign(raw)));
+  assert.equal(response?.status, 403);
+  assert.equal(f.syncCalls.length, 0);
+});
+
+test("missing webhook secret rejects signed deliveries", async () => {
+  const f = fixture({ webhookSecret: "" });
+  const raw = JSON.stringify({
+    id: "evt_3",
+    eventType: "subscription.active",
+    object: { mode: "test" },
+  });
+  const response = await f.handler(post(raw, sign(raw)));
+  assert.equal(response?.status, 400);
+});
+
+test("a POST to the webhook path is always answered", async () => {
+  const f = fixture();
+  const signedUnsupported = JSON.stringify({
+    id: "evt_1",
+    eventType: "credits.granted",
+    object: {},
+  });
+  for (const body of ["{", "[]", "null", "42"]) {
+    assert.notEqual(await f.handler(post(body)), null);
+  }
+  assert.notEqual(
+    await f.handler(post(signedUnsupported, sign(signedUnsupported))),
+    null,
+  );
+});
+
+test("other paths and providers are left to Better Auth", async () => {
+  const f = fixture();
+  const otherPath = await f.handler(
+    new Request("http://localhost/api/auth/sign-in/email", { method: "POST" }),
+  );
+  assert.equal(otherPath, null);
+
+  const stripeHandler = createCreemWebhookHandler({
+    config: { ...f.config, provider: "stripe" as const },
+    logger: { info() {}, warn() {}, error() {} },
+    alerts: { async trigger() {}, async resolve() {} },
+    sync: async () => {},
+  });
+  const stripeResult = await stripeHandler(post("{}"));
+  assert.equal(stripeResult, null);
+});

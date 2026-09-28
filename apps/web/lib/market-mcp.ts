@@ -7,6 +7,8 @@ import {
   MarketClientError,
   type GetMarketMcpManifestResponse,
   type GetMarketMcpResponse,
+  type MarketMcpAiOverview,
+  type MarketMcpLocale,
   type MarketMcpReadme,
   type MarketCategoryCountsResponse,
   type ListMarketCategoriesResponse,
@@ -104,29 +106,53 @@ export async function countPublicMcpByCategory(
 export type PublicMcpDetail = {
   versions: GetMarketMcpResponse["versions"];
   readme: MarketMcpReadme | null;
+  // The AI overview in the language asked for, English when there is none in
+  // it; null when there is none to show.
+  aiOverview: MarketMcpAiOverview | null;
+  // The languages the server has a visible overview in, without fallback.
+  overviewLocales: MarketMcpLocale[];
 };
 
+// A hidden or regenerated overview shows within about two minutes: this
+// cache, then the API's own 60-second public cache in front of it.
+const MCP_DETAIL_REVALIDATE_SECONDS = 60;
+
+// The locale is an argument, so it is part of each read's cache key.
 const cachedMcpDetail = unstable_cache(
-  async (identifier: string): Promise<PublicMcpDetail> => {
-    const detail = await marketClient().getMcp(identifier);
-    return { readme: readMcpReadme(detail), versions: detail.versions };
+  async (
+    identifier: string,
+    locale: MarketMcpLocale,
+  ): Promise<PublicMcpDetail> => {
+    const detail = await marketClient().getMcp(identifier, { locale });
+    return {
+      aiOverview: detail.aiOverview ?? null,
+      overviewLocales: detail.item.overviewLocales ?? [],
+      readme: readMcpReadme(detail),
+      versions: detail.versions,
+    };
   },
   ["public-mcp-detail"],
-  { revalidate: MCP_MANIFEST_REVALIDATE_SECONDS },
+  { revalidate: MCP_DETAIL_REVALIDATE_SECONDS },
 );
 
 /**
- * The server's version history and README (`GET /v1/mcp/:identifier`). Both
- * are extras on a page that the manifest already makes: when they cannot be
- * read, the page goes without them.
+ * The server's version history, README and AI overview in `locale`
+ * (`GET /v1/mcp/:identifier`). All are extras on a page that the manifest
+ * already makes: when they cannot be read, the page goes without them.
  */
 export async function getPublicMcpDetail(
   identifier: string,
+  locale: MarketMcpLocale,
 ): Promise<PublicMcpDetail> {
   try {
-    return await cachedMcpDetail(identifier);
+    return await cachedMcpDetail(identifier, locale);
   } catch {
-    return { readme: null, versions: [] };
+    return {
+      aiOverview: null,
+      overviewLocales: [],
+      readme: null,
+      versions: [],
+    };
   }
 }
 

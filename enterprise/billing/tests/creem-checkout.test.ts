@@ -85,6 +85,7 @@ test("Creem webhook entry verifies raw signatures and invokes one-time fulfillme
     config: f.config,
     sync: f.sync,
     logger: { info() {}, warn() {}, error() {} },
+    alerts: { async trigger() {}, async resolve() {} },
   });
   const raw = JSON.stringify(
     {
@@ -121,6 +122,7 @@ test("Creem returns HTTP 500 on processing failure so a signed retry can fulfill
   const handler = createCreemWebhookHandler({
     config: f.config,
     logger: { info() {}, warn() {}, error() {} },
+    alerts: { async trigger() {}, async resolve() {} },
     sync: async (...args) => {
       if (fail) throw new Error("temporary database outage");
       await f.sync(...args);

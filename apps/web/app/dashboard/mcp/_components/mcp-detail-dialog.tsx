@@ -41,6 +41,7 @@ import {
 } from "@sourceweft/ui-web/components/ui/tabs";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { contentClient } from "../../../../lib/sdk";
+import { mcpOverviewLocale } from "../../../../lib/mcp-ai-overview";
 import { hasMcpReadmeToShow, readMcpReadme } from "../../../../lib/mcp-readme";
 import { formatShortRelativeTime } from "../../../../lib/relative-time";
 import {
@@ -48,6 +49,7 @@ import {
   McpReadmeSection,
   McpReadmeSourceLine,
 } from "../../../_components/market/mcp-readme-section";
+import { McpAiOverviewView } from "../../../_components/market/mcp-ai-overview-view";
 import { McpIcon } from "../../../_components/site-icons";
 
 type MarketMcpItem = ListWorkspaceMarketMcpResponse["items"][number];
@@ -138,6 +140,8 @@ export function McpDetailDialog({
   workspaceId: string | null;
 }) {
   const locale = useLocale();
+  // The AI overview in the viewer's language, English when there is none.
+  const overviewLocale = mcpOverviewLocale(locale);
   const t = useTranslations("dashboardMcpPanel");
   const [detail, setDetail] = React.useState<MarketMcpDetail | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -159,7 +163,9 @@ export function McpDetailDialog({
     setError(null);
     setLoading(true);
     void contentClient
-      .getWorkspaceMarketMcp(workspaceId, identifier)
+      .getWorkspaceMarketMcp(workspaceId, identifier, {
+        locale: overviewLocale,
+      })
       .then((result) => {
         if (generationRef.current !== generation) return;
         setDetail(result);
@@ -175,7 +181,7 @@ export function McpDetailDialog({
       .finally(() => {
         if (generationRef.current === generation) setLoading(false);
       });
-  }, [identifier, reloadKey, workspaceId, t]);
+  }, [identifier, overviewLocale, reloadKey, workspaceId, t]);
 
   const market = item?.market ?? null;
   const install = item?.install ?? null;
@@ -339,6 +345,12 @@ export function McpDetailDialog({
                     </TabsList>
                   </div>
                   <TabsContent className="m-0 p-5" value="overview">
+                    {detail?.market.aiOverview ? (
+                      <McpAiOverviewView
+                        overview={detail.market.aiOverview}
+                        requestedLocale={overviewLocale}
+                      />
+                    ) : null}
                     <div className="flex flex-wrap items-center gap-1.5">
                       {market.official ? (
                         <Badge variant="default">{t("badges.official")}</Badge>
