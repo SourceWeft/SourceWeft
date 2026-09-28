@@ -93,18 +93,26 @@ export function formatFeatureName(feature: string) {
  * `formatFeatureName`'s raw-enum beautifier for any feature the catalogue
  * doesn't (yet) name.
  *
- * `activity.featureNames`' keys are the literal, sometimes dotted, feature
- * strings the backend writes (e.g. `"ingestion.asr"`) as flat JSON keys —
- * not a nested path (`{ "ingestion": { "asr": ... } }`). A JSON object key
- * is just a string; the dot only becomes a hazard if something reads it
- * through a dotted-path walker (`get(obj, "a.b.c")`-style). This map is only
- * ever read with a single bracket lookup (`featureNames[feature]`, right
- * below), never through one, so the literal key is safe and reads better in
- * the JSON than an escaped `"ingestion__asr"` encoding would.
+ * `activity.featureNames`' keys are flat, with every `.` in the raw feature
+ * string replaced by `__` (e.g. `"ingestion.asr"` -> `"ingestion__asr"`), so
+ * `feature` gets the same encoding applied before the lookup below. A
+ * literal dotted key would work for a bracket lookup within this package
+ * alone (a JSON object key is just a string, not a nested path) — but
+ * apps/web's next-intl `pricing` namespace merges this catalogue (today
+ * scoped to just `plans`, see `apps/web/i18n/request.ts`) and next-intl
+ * rejects *any* key containing `.` outright, anywhere in the tree it is
+ * handed (`INVALID_KEY: Namespace keys cannot contain the character "."`),
+ * not only inside whichever sub-key a particular page happens to read. A
+ * dotted key here previously broke exactly that way once `activity` briefly
+ * flowed into `pricing` too. `messages.test.ts` guards this catalogue-wide,
+ * for every locale, so the property holds regardless of what request.ts
+ * merges in today.
  */
 export function formatActivityFeatureName(feature: string, copy: BillingCopy) {
   const featureNames = copy.activity.featureNames as Record<string, string>;
-  return featureNames[feature] ?? formatFeatureName(feature);
+  return (
+    featureNames[feature.replaceAll(".", "__")] ?? formatFeatureName(feature)
+  );
 }
 
 export function formatBillingStatus(

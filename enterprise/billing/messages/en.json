@@ -285,12 +285,12 @@
       "retrieval": "Retrieval",
       "retrieval_rerank": "Retrieval rerank",
       "source_ingestion": "Source ingestion",
-      "ingestion.asr": "Audio transcription",
-      "artifact.image": "Image generation",
-      "artifact.video_presentation.asset": "Video asset generation",
-      "artifact.video_presentation.narration": "Video narration",
-      "artifact.video_presentation.validation": "Video validation",
-      "html.visual_qa": "Visual QA"
+      "ingestion__asr": "Audio transcription",
+      "artifact__image": "Image generation",
+      "artifact__video_presentation__asset": "Video asset generation",
+      "artifact__video_presentation__narration": "Video narration",
+      "artifact__video_presentation__validation": "Video validation",
+      "html__visual_qa": "Visual QA"
     }
   },
   "checkout": {

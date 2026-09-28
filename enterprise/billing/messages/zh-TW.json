@@ -103,8 +103,8 @@
     "title": "帳單",
     "scopePersonal": "個人帳單",
     "scopeTeam": "{team} 帳單",
-    "planLabel": "{plan} 方案",
-    "planAccount": "{plan} 帳戶",
+    "planLabel": "{plan}方案",
+    "planAccount": "{plan}帳戶",
     "noPaidSubscription": "暫無付費訂閱",
     "loadingCycle": "正在載入週期…",
     "cycleRange": "{start} 至 {end}",
@@ -169,7 +169,7 @@
   },
   "usage": {
     "title": "用量",
-    "planLabel": "{plan} 方案",
+    "planLabel": "{plan}方案",
     "creditsLabel": "{used} / {limit} 點數",
     "loadingCredits": "正在載入點數…",
     "creditsUnknown": "-- / -- 點數",
@@ -285,12 +285,12 @@
       "retrieval": "檢索",
       "retrieval_rerank": "檢索重排序",
       "source_ingestion": "來源匯入",
-      "ingestion.asr": "語音轉寫",
-      "artifact.image": "影像產生",
-      "artifact.video_presentation.asset": "影片素材產生",
-      "artifact.video_presentation.narration": "影片旁白產生",
-      "artifact.video_presentation.validation": "影片驗證",
-      "html.visual_qa": "視覺質檢"
+      "ingestion__asr": "語音轉寫",
+      "artifact__image": "影像產生",
+      "artifact__video_presentation__asset": "影片素材產生",
+      "artifact__video_presentation__narration": "影片旁白產生",
+      "artifact__video_presentation__validation": "影片驗證",
+      "html__visual_qa": "視覺質檢"
     }
   },
   "checkout": {

@@ -98,6 +98,46 @@ test("every en key exists in zh-CN and zh-TW with the same placeholders", () => 
   }
 });
 
+/**
+ * next-intl treats "." inside a message key as a nesting separator and
+ * rejects any key that literally contains one, at any depth, with
+ * `INVALID_KEY: Namespace keys cannot contain the character "."`. This
+ * catalogue is merged into apps/web's next-intl `pricing` namespace (only
+ * `plans` today, but next-intl's message validator walks whatever object it
+ * is given, not just the namespace a particular `useTranslations()` call
+ * reads), so a raw, dotted value — e.g. a ledger `feature` string like
+ * `"ingestion.asr"` used as a lookup key — must be encoded (this catalogue
+ * uses "." -> "__", see `activity.featureNames` / `formatActivityFeatureName`
+ * in `billing-utils.ts`) before it becomes a JSON object key here.
+ */
+function collectDottedKeys(node: Json, path: string[] = []): string[] {
+  if (typeof node !== "object" || node === null || Array.isArray(node)) {
+    return [];
+  }
+
+  const found: string[] = [];
+  for (const key of Object.keys(node)) {
+    if (key.includes(".")) {
+      found.push([...path, key].join(" > "));
+    }
+    found.push(...collectDottedKeys(node[key] as Json, [...path, key]));
+  }
+  return found;
+}
+
+test("no catalogue key at any depth contains a literal '.' in any locale", () => {
+  for (const [locale, catalogue] of Object.entries({
+    en,
+    "zh-CN": zhCN,
+    "zh-TW": zhTW,
+  })) {
+    expect(
+      collectDottedKeys(catalogue as Json),
+      `${locale} has one or more dotted keys`,
+    ).toEqual([]);
+  }
+});
+
 test("missing translations fall back to English", async () => {
   vi.resetModules();
   vi.doMock("../messages/zh-CN.json", () => ({

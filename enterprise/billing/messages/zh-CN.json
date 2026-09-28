@@ -103,8 +103,8 @@
     "title": "账单",
     "scopePersonal": "个人账单",
     "scopeTeam": "{team} 账单",
-    "planLabel": "{plan} 套餐",
-    "planAccount": "{plan} 账户",
+    "planLabel": "{plan}套餐",
+    "planAccount": "{plan}账户",
     "noPaidSubscription": "暂无付费订阅",
     "loadingCycle": "正在加载周期…",
     "cycleRange": "{start} 至 {end}",
@@ -169,7 +169,7 @@
   },
   "usage": {
     "title": "用量",
-    "planLabel": "{plan} 套餐",
+    "planLabel": "{plan}套餐",
     "creditsLabel": "{used} / {limit} 积分",
     "loadingCredits": "正在加载积分…",
     "creditsUnknown": "-- / -- 积分",
@@ -285,12 +285,12 @@
       "retrieval": "检索",
       "retrieval_rerank": "检索重排序",
       "source_ingestion": "来源导入",
-      "ingestion.asr": "语音转写",
-      "artifact.image": "图像生成",
-      "artifact.video_presentation.asset": "视频素材生成",
-      "artifact.video_presentation.narration": "视频旁白生成",
-      "artifact.video_presentation.validation": "视频校验",
-      "html.visual_qa": "视觉质检"
+      "ingestion__asr": "语音转写",
+      "artifact__image": "图像生成",
+      "artifact__video_presentation__asset": "视频素材生成",
+      "artifact__video_presentation__narration": "视频旁白生成",
+      "artifact__video_presentation__validation": "视频校验",
+      "html__visual_qa": "视觉质检"
     }
   },
   "checkout": {
