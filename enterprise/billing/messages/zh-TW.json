@@ -301,6 +301,13 @@
       "pendingDescription": "我們正在核實支付服務商的確認資訊並應用您的帳單狀態。",
       "openDashboard": "開啟儀表板"
     },
+    "topup": {
+      "title": "購買點數或頁數",
+      "description": "選擇方案並在付款前核對總額。",
+      "buyCredits": "購買點數",
+      "buyPages": "購買頁數",
+      "error": "無法準備結帳"
+    },
     "saveTwoMonths": "節省 2 個月",
     "enterTeamName": "請輸入團隊名稱。",
     "seatsRange": "席位數量必須是 {min} 到 {max} 之間的整數。",

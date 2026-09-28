@@ -301,6 +301,13 @@
       "pendingDescription": "We are checking the provider confirmation and applying your billing state.",
       "openDashboard": "Open dashboard"
     },
+    "topup": {
+      "title": "Add credits or pages",
+      "description": "Choose a pack and review its total before paying.",
+      "buyCredits": "Buy credits",
+      "buyPages": "Buy pages",
+      "error": "Unable to prepare checkout"
+    },
     "saveTwoMonths": "Save 2 months",
     "enterTeamName": "Enter a team name.",
     "seatsRange": "Seats must be a whole number between {min} and {max}.",

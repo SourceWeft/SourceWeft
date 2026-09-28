@@ -1,5 +1,6 @@
 "use client";
-import { useBillingUiHost } from "./context";
+import { useBillingControls, useBillingUiHost } from "./context";
+import { useBillingCopy } from "./use-billing-copy";
 
 import * as React from "react";
 import { toast } from "sonner";
@@ -32,6 +33,8 @@ export function useBillingPlanAction(input: {
     billingClient,
     openCheckout,
   } = useBillingUiHost();
+  const { copy } = useBillingCopy();
+  const controls = useBillingControls();
 
   const [actionLoading, setActionLoading] = React.useState(false);
   const subscriptionStatus = input.subscription?.status ?? "inactive";
@@ -40,7 +43,9 @@ export function useBillingPlanAction(input: {
   const shouldManageBilling = input.summary
     ? isNonFreePlanFamily(input.summary.planFamily)
     : Boolean(input.subscription?.externalSubscriptionId);
-  const actionLabel = shouldManageBilling ? "Manage billing" : "Upgrade plan";
+  const actionLabel = shouldManageBilling
+    ? copy.billing.manageBilling
+    : copy.billing.upgradePlan;
   const actionDisabled =
     actionLoading ||
     (shouldManageBilling &&
@@ -74,10 +79,10 @@ export function useBillingPlanAction(input: {
           return;
         }
 
-        toast.error("Billing portal is not available.");
+        toast.error(copy.billing.portalUnavailable);
       } catch (err) {
         toast.error(
-          err instanceof Error ? err.message : "Unable to open billing portal.",
+          err instanceof Error ? err.message : copy.billing.unableToOpenPortal,
         );
       } finally {
         setActionLoading(false);
@@ -143,9 +148,7 @@ export function useBillingPlanAction(input: {
         plan: input.isPersonal ? "pro" : "team",
         source: "settings",
       });
-      toast.error(
-        err instanceof Error ? err.message : "Unable to start checkout.",
-      );
+      toast.error(err instanceof Error ? err.message : controls.checkoutError);
     } finally {
       setActionLoading(false);
     }
@@ -163,6 +166,8 @@ export function useBillingPlanAction(input: {
     input.teamSeatCount,
     shouldManageBilling,
     input.subscription?.capabilities?.managePortal,
+    copy,
+    controls,
   ]);
 
   return {

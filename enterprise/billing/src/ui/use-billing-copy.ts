@@ -26,6 +26,16 @@ export type BillingCopyFormat = {
   currency(cents: number, currency?: string): string;
   /** A ratio in `[0, 1]`, rendered as a percentage (e.g. `0.5` -> "50%"). */
   percent(value: number): string;
+  /**
+   * Compact notation (e.g. `12345` -> "12.3K") — for tight spaces like the
+   * sidebar summary, where `number` would overflow.
+   */
+  compactNumber(value: number): string;
+  /**
+   * Day + short month, no year — for tight spaces like the sidebar's "cycle
+   * ends" line, where `date`'s full year would overflow.
+   */
+  shortDate(iso: string): string;
 };
 
 /**
@@ -74,6 +84,16 @@ export function useBillingCopy(): {
           formatNumber(value, intlLocale, {
             maximumFractionDigits: 1,
             style: "percent",
+          }),
+        compactNumber: (value) =>
+          formatNumber(value, intlLocale, {
+            maximumFractionDigits: 1,
+            notation: "compact",
+          }),
+        shortDate: (iso) =>
+          formatDate(new Date(iso), intlLocale, {
+            day: "numeric",
+            month: "short",
           }),
       },
     };

@@ -1,5 +1,7 @@
 "use client";
-import { useBillingUiHost } from "./context";
+import { useBillingControls, useBillingUiHost } from "./context";
+import { useBillingCopy } from "./use-billing-copy";
+import { formatCopy, type BillingCopy } from "../messages";
 
 import * as React from "react";
 import Link from "next/link";
@@ -91,8 +93,8 @@ function getOrCreateIntent(input: {
   return next;
 }
 
-function labelForPlan(plan: PricingPlan | null) {
-  return plan === "team" ? "Team" : "Pro";
+function labelForPlan(plan: PricingPlan | null, copy: BillingCopy) {
+  return plan === "team" ? copy.checkout.planTeam : copy.checkout.planPro;
 }
 
 export function BillingCheckoutClient({
@@ -116,6 +118,8 @@ export function BillingCheckoutClient({
     billingClient,
     openCheckout,
   } = useBillingUiHost();
+  const { copy } = useBillingCopy();
+  const controls = useBillingControls();
 
   const [state, setState] = React.useState<CheckoutState>("preparing");
   const [error, setError] = React.useState<string | null>(null);
@@ -127,7 +131,7 @@ export function BillingCheckoutClient({
     }
 
     if (!isPricingPlan(plan) || !isBillingInterval(billingInterval)) {
-      setError("This checkout link is no longer valid.");
+      setError(copy.checkout.invalidLink);
       setState("error");
       return;
     }
@@ -139,7 +143,7 @@ export function BillingCheckoutClient({
     const normalizedTeamName = teamName?.trim() ?? "";
     const normalizedSeatCount = parseTeamSeatCount(seatCount);
     if (checkoutPlan === "team" && normalizedSeatCount === null) {
-      setError("This team checkout link has an invalid seat count.");
+      setError(copy.checkout.invalidSeatCount);
       setState("error");
       startedRef.current = false;
       return;
@@ -188,7 +192,7 @@ export function BillingCheckoutClient({
         setError(
           checkoutError instanceof Error
             ? checkoutError.message
-            : "Unable to start checkout.",
+            : controls.checkoutError,
         );
         setState("error");
         startedRef.current = false;
@@ -207,17 +211,21 @@ export function BillingCheckoutClient({
     openCheckout,
     trackBeginCheckout,
     trackCheckoutError,
+    copy,
+    controls,
   ]);
 
   const resolvedPlan = isPricingPlan(plan) ? plan : null;
   const title =
-    state === "error" ? "Checkout needs attention" : "Opening checkout";
+    state === "error" ? copy.checkout.needsAttention : copy.checkout.opening;
   const description =
     state === "error"
       ? error
       : state === "opening"
-        ? "Your provider checkout is opening now."
-        : `Preparing your ${labelForPlan(resolvedPlan)} checkout.`;
+        ? copy.checkout.openingDescription
+        : formatCopy(copy.checkout.preparingDescription, {
+            plan: labelForPlan(resolvedPlan, copy),
+          });
 
   return (
     <div className="flex min-h-0 flex-1 items-center justify-center p-6">
@@ -240,10 +248,10 @@ export function BillingCheckoutClient({
               size="sm"
               type="button"
             >
-              Try again
+              {copy.checkout.tryAgain}
             </Button>
             <Button asChild size="sm" variant="outline">
-              <Link href="/#pricing">Back to pricing</Link>
+              <Link href="/#pricing">{copy.checkout.backToPricing}</Link>
             </Button>
           </div>
         ) : null}

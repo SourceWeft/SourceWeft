@@ -52,8 +52,8 @@ function isPersonalOrganization(org: PricingOrg) {
   );
 }
 
-function formatPrice(cents: number): string {
-  if (cents === 0) return "Free";
+function formatPrice(cents: number, freeLabel: string): string {
+  if (cents === 0) return freeLabel;
   return `$${(cents / 100).toFixed(0)}`;
 }
 
@@ -358,7 +358,9 @@ function PricingToggleInner({
                 </p>
                 <div className="mt-2 flex items-end gap-1">
                   <span className="text-4xl font-bold tracking-tight text-zinc-900 dark:text-white">
-                    {price === 0 ? labels.free : formatPrice(price)}
+                    {price === 0
+                      ? labels.free
+                      : formatPrice(price, labels.free)}
                   </span>
                   {price > 0 && (
                     <span className="mb-1 text-sm text-zinc-400 dark:text-zinc-500">

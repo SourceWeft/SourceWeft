@@ -301,6 +301,13 @@
       "pendingDescription": "我们正在核实支付服务商的确认信息并应用您的账单状态。",
       "openDashboard": "打开控制台"
     },
+    "topup": {
+      "title": "购买积分或页数",
+      "description": "选择套餐并在付款前核对总额。",
+      "buyCredits": "购买积分",
+      "buyPages": "购买页数",
+      "error": "无法准备结账"
+    },
     "saveTwoMonths": "节省 2 个月",
     "enterTeamName": "请输入团队名称。",
     "seatsRange": "席位数量必须是 {min} 到 {max} 之间的整数。",

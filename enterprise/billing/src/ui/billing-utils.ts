@@ -61,26 +61,6 @@ export function openBillingPortalWindow(url: string) {
   window.open(url, "_blank", "noopener,noreferrer");
 }
 
-export function formatNumber(value: number) {
-  return new Intl.NumberFormat(undefined, {
-    maximumFractionDigits: 0,
-  }).format(value);
-}
-
-export function formatCurrencyCents(value: number, currency = "USD") {
-  return new Intl.NumberFormat(undefined, {
-    style: "currency",
-    currency: currency.toUpperCase(),
-  }).format(value / 100);
-}
-
-export function formatPercent(value: number) {
-  return new Intl.NumberFormat(undefined, {
-    maximumFractionDigits: 1,
-    style: "percent",
-  }).format(value);
-}
-
 export function formatPlanName(
   planFamily: string,
   personal: boolean,
@@ -101,18 +81,6 @@ export function formatFeatureName(feature: string) {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 
   return label || "Usage";
-}
-
-export function formatBillingDate(value: string | null | undefined) {
-  if (!value) {
-    return "--";
-  }
-
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "2-digit",
-    year: "numeric",
-  }).format(new Date(value));
 }
 
 export function formatBillingStatus(

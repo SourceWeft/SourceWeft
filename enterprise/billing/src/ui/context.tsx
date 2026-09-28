@@ -4,6 +4,7 @@ import {
   useState,
   useCallback,
   useContext,
+  useMemo,
   type ComponentType,
   type ReactNode,
 } from "react";
@@ -16,7 +17,8 @@ import {
   DialogDescription,
 } from "@sourceweft/ui-web/components/ui/dialog";
 import type { BillingClient } from "@sourceweft/sdk";
-import { getBillingControls } from "../messages";
+import { formatNumber, isLocale, type Locale } from "@sourceweft/i18n";
+import { formatCopy, getBillingControls, getBillingCopy } from "../messages";
 
 type Interval = "monthly" | "yearly";
 type Source = "landing" | "dashboard" | "settings";
@@ -84,6 +86,29 @@ export function BillingUiProvider({
     if (result.provider === "waffo") setCheckoutUrl(result);
     else window.location.assign(result.checkoutUrl);
   }, []);
+
+  // `BillingUiProvider` establishes the `Context.Provider` below, so it
+  // cannot read its own value back through `useBillingCopy()`/`useContext`
+  // (that would only see whatever *outer* provider is in scope, not this
+  // one) — it builds the catalogue/number-formatting directly from the
+  // `value.locale` prop it already has, the same way `useBillingControls()`
+  // (via `getBillingControls`) already does in this file.
+  const locale = value.locale ?? "en";
+  const copy = getBillingCopy(locale);
+  const intlLocale: Locale = isLocale(locale) ? locale : "en";
+  const formatCount = (count: number) =>
+    formatNumber(count, intlLocale, { maximumFractionDigits: 0 });
+
+  const waffoDescription = checkoutUrl?.grantedCredits
+    ? formatCopy(copy.checkout.waffoCreditsDescription, {
+        count: formatCount(checkoutUrl.grantedCredits),
+      })
+    : checkoutUrl?.grantedPages
+      ? formatCopy(copy.checkout.waffoPagesDescription, {
+          count: formatCount(checkoutUrl.grantedPages),
+        })
+      : copy.checkout.waffoGenericDescription;
+
   return (
     <Context.Provider value={{ ...value, openCheckout }}>
       {children}
@@ -95,16 +120,8 @@ export function BillingUiProvider({
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Secure payment</DialogTitle>
-            <DialogDescription>
-              {checkoutUrl?.grantedCredits
-                ? `${checkoutUrl.grantedCredits.toLocaleString()} credits. `
-                : checkoutUrl?.grantedPages
-                  ? `${checkoutUrl.grantedPages.toLocaleString()} pages. `
-                  : ""}
-              Open Waffo checkout in a new tab to review the total and pay. Your
-              current page stays open.
-            </DialogDescription>
+            <DialogTitle>{copy.checkout.securePaymentTitle}</DialogTitle>
+            <DialogDescription>{waffoDescription}</DialogDescription>
           </DialogHeader>
           <Button
             onClick={() => {
@@ -116,7 +133,7 @@ export function BillingUiProvider({
                 );
             }}
           >
-            Open checkout
+            {copy.checkout.openCheckout}
           </Button>
         </DialogContent>
       </Dialog>
@@ -135,6 +152,14 @@ export function useBillingLocale(): string {
   return locale;
 }
 
+/**
+ * Memoized so the returned object is referentially stable across renders for
+ * the same locale — callers that need `controls.*` inside a `useEffect`/
+ * `useCallback` dependency array (e.g. `billing-checkout-client.tsx`'s
+ * checkout-start effect) can depend on it without re-running every render,
+ * the same way `useBillingCopy()`'s `copy` is already memoized.
+ */
 export function useBillingControls() {
-  return getBillingControls(useBillingLocale());
+  const locale = useBillingLocale();
+  return useMemo(() => getBillingControls(locale), [locale]);
 }
