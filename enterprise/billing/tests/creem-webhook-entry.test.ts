@@ -1,18 +1,24 @@
 // Entry-point ordering for the Creem webhook handler: every POST to the
 // webhook path on a Creem deployment must be answered directly (never
 // `null`, which apps/backend/src/api/app.ts would otherwise hand to Better
-// Auth, which 404s). These tests exercise `createCreemWebhookHandler` in
-// isolation, ahead of signature verification, event-type dispatch, and the
-// refund/dispute manual-handling alert.
+// Auth, which 404s). These tests exercise `createCreemWebhookHandler`'s own
+// ordering — signature verification, then event-type dispatch, then the
+// refund/dispute manual-handling alert — in isolation from the rest of the
+// billing stack.
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import { createHmac } from "node:crypto";
 import { createCreemWebhookHandler } from "../src/server/providers/creem-webhook-bypass";
+import type { BillingAlertSink } from "../src/server/host";
 import { runtimeConfig } from "./test-fixtures";
 
 const WEBHOOK_URL = "http://localhost/api/auth/creem/webhook";
 
-function fixture(overrides: { webhookSecret?: string } = {}) {
+type RecordedAlert = Parameters<BillingAlertSink["trigger"]>[0];
+
+function fixture(
+  overrides: { webhookSecret?: string; alerts?: BillingAlertSink } = {},
+) {
   const config = {
     ...runtimeConfig,
     saasEnabled: true,
@@ -22,22 +28,23 @@ function fixture(overrides: { webhookSecret?: string } = {}) {
       webhookSecret: overrides.webhookSecret ?? "creem-fixture-signing-secret",
     },
   };
-  const alerts: Array<Record<string, unknown>> = [];
+  const recordedAlerts: RecordedAlert[] = [];
+  const alerts: BillingAlertSink = overrides.alerts ?? {
+    async trigger(input) {
+      recordedAlerts.push(input);
+    },
+    async resolve() {},
+  };
   const syncCalls: unknown[][] = [];
   const handler = createCreemWebhookHandler({
     config,
     logger: { info() {}, warn() {}, error() {} },
-    alerts: {
-      async trigger(input) {
-        alerts.push(input);
-      },
-      async resolve() {},
-    },
+    alerts,
     sync: async (...args: unknown[]) => {
       syncCalls.push(args);
     },
   });
-  return { config, handler, alerts, syncCalls };
+  return { config, handler, alerts: recordedAlerts, syncCalls };
 }
 
 function sign(raw: string, secret = "creem-fixture-signing-secret") {
@@ -74,6 +81,18 @@ test("unsigned or wrongly signed deliveries are rejected before the type is read
 
   const wronglySigned = await f.handler(post(raw, "invalid"));
   assert.equal(wronglySigned?.status, 400);
+
+  const refundRaw = JSON.stringify({
+    id: "evt_refund_0",
+    eventType: "refund.created",
+    object: { id: "ref_0", mode: "test", status: "succeeded" },
+  });
+
+  const unsignedRefund = await f.handler(post(refundRaw));
+  assert.equal(unsignedRefund?.status, 400);
+
+  const wronglySignedRefund = await f.handler(post(refundRaw, "invalid"));
+  assert.equal(wronglySignedRefund?.status, 400);
 
   assert.equal(f.syncCalls.length, 0);
   assert.equal(f.alerts.length, 0);
@@ -113,7 +132,15 @@ test("signed refund and dispute events are acknowledged and flagged for manual h
   const refundRaw = JSON.stringify({
     id: "evt_refund_1",
     eventType: "refund.created",
-    object: { id: "ref_1", mode: "test", status: "succeeded" },
+    object: {
+      id: "ref_1",
+      mode: "test",
+      status: "succeeded",
+      refund_amount: 500,
+      refund_currency: "usd",
+      transaction: "tran_123",
+      order: "ord_123",
+    },
   });
   const refundResponse = await f.handler(post(refundRaw, sign(refundRaw)));
   assert.equal(refundResponse?.status, 200);
@@ -121,7 +148,15 @@ test("signed refund and dispute events are acknowledged and flagged for manual h
   const disputeRaw = JSON.stringify({
     id: "evt_dispute_1",
     eventType: "dispute.created",
-    object: { id: "dis_1", mode: "test", status: "disputed" },
+    object: {
+      id: "dis_1",
+      mode: "test",
+      status: "disputed",
+      amount: 700,
+      currency: "usd",
+      transaction: "tran_456",
+      order: { id: "ord_456" },
+    },
   });
   const disputeResponse = await f.handler(post(disputeRaw, sign(disputeRaw)));
   assert.equal(disputeResponse?.status, 200);
@@ -130,39 +165,52 @@ test("signed refund and dispute events are acknowledged and flagged for manual h
   assert.equal(f.alerts[0]?.alertKey, "billing:creem-reversal-manual:ref_1");
   assert.equal(f.alerts[0]?.level, "error");
   assert.equal(f.alerts[0]?.source, "billing.creem");
+  assert.equal(f.alerts[0]?.metadata?.status, "succeeded");
+  assert.equal(f.alerts[0]?.metadata?.amount, 500);
+  assert.equal(f.alerts[0]?.metadata?.currency, "usd");
+  assert.equal(f.alerts[0]?.metadata?.transactionId, "tran_123");
+  assert.equal(f.alerts[0]?.metadata?.orderId, "ord_123");
+
   assert.equal(f.alerts[1]?.alertKey, "billing:creem-reversal-manual:dis_1");
   assert.equal(f.alerts[1]?.level, "error");
   assert.equal(f.alerts[1]?.source, "billing.creem");
+  assert.equal(f.alerts[1]?.metadata?.status, "disputed");
+  assert.equal(f.alerts[1]?.metadata?.amount, 700);
+  assert.equal(f.alerts[1]?.metadata?.currency, "usd");
+  assert.equal(f.alerts[1]?.metadata?.transactionId, "tran_456");
+  assert.equal(f.alerts[1]?.metadata?.orderId, "ord_456");
+
+  assert.equal(f.syncCalls.length, 0);
+});
+
+test("reversal events are checked against the deployment mode before alerting", async () => {
+  const f = fixture();
+  const raw = JSON.stringify({
+    id: "evt_refund_3",
+    eventType: "refund.created",
+    object: { id: "ref_3", mode: "prod", status: "succeeded" },
+  });
+  const response = await f.handler(post(raw, sign(raw)));
+  assert.equal(response?.status, 403);
+  assert.equal(f.alerts.length, 0);
   assert.equal(f.syncCalls.length, 0);
 });
 
 test("refund notice alert failure returns 500 so Creem redelivers", async () => {
-  const config = {
-    ...runtimeConfig,
-    saasEnabled: true,
-    provider: "creem" as const,
-    creem: {
-      ...runtimeConfig.creem,
-      webhookSecret: "creem-fixture-signing-secret",
-    },
-  };
-  const handler = createCreemWebhookHandler({
-    config,
-    logger: { info() {}, warn() {}, error() {} },
+  const f = fixture({
     alerts: {
       async trigger() {
         throw new Error("ops alert service unavailable");
       },
       async resolve() {},
     },
-    sync: async () => {},
   });
   const raw = JSON.stringify({
     id: "evt_refund_2",
     eventType: "refund.created",
     object: { id: "ref_2", mode: "test", status: "succeeded" },
   });
-  const response = await handler(post(raw, sign(raw)));
+  const response = await f.handler(post(raw, sign(raw)));
   assert.equal(response?.status, 500);
 });
 

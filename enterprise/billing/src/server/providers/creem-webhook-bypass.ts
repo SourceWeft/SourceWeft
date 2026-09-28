@@ -4,15 +4,72 @@ import type { BillingLogger, BillingAlertSink } from "../host";
 import type { createCreemSubscriptionSync } from "./creem-subscription-sync";
 import { toObjectRecord } from "../records";
 
-// Events Creem cannot self-service through the normal subscription/checkout
-// flow: money has already moved and a human needs to look at the Creem
-// dashboard. We acknowledge these (200) so Creem stops retrying, but raise an
-// alert instead of feeding them through the subscription sync.
+// Refund and dispute events are not processed automatically: money has
+// already moved and a human needs to look at the Creem dashboard. We
+// acknowledge these (200) so Creem stops retrying, but raise an alert
+// instead of feeding them through the subscription sync.
 const REVERSAL_EVENT_TYPES = new Set(["refund.created", "dispute.created"]);
 
 function readString(record: Record<string, unknown> | null, key: string) {
   const value = record?.[key];
   return typeof value === "string" && value.trim() ? value : null;
+}
+
+function readNumber(record: Record<string, unknown> | null, key: string) {
+  const value = record?.[key];
+  return typeof value === "number" ? value : null;
+}
+
+// Creem's `order` reference shows up as either a bare id or an embedded
+// object with its own `id`, depending on the event.
+function readOrderId(value: unknown): string | null {
+  if (typeof value === "string" && value.trim()) {
+    return value;
+  }
+  return readString(toObjectRecord(value), "id");
+}
+
+function collectReversalMetadata(
+  object: Record<string, unknown>,
+  identifiers: {
+    eventType: string;
+    webhookId: string | null;
+    objectId: string | null;
+  },
+): Record<string, unknown> {
+  const metadata: Record<string, unknown> = { ...identifiers };
+
+  const status = readString(object, "status");
+  if (status) metadata.status = status;
+
+  const amount =
+    readNumber(object, "refund_amount") ?? readNumber(object, "amount");
+  if (amount !== null) metadata.amount = amount;
+
+  const currency =
+    readString(object, "refund_currency") ?? readString(object, "currency");
+  if (currency) metadata.currency = currency;
+
+  const transactionId = readString(object, "transaction");
+  if (transactionId) metadata.transactionId = transactionId;
+
+  const orderId = readOrderId(object.order);
+  if (orderId) metadata.orderId = orderId;
+
+  return metadata;
+}
+
+function failure(
+  logger: BillingLogger,
+  message: string,
+  error: unknown,
+  context: Record<string, unknown> = {},
+) {
+  logger.error(message, {
+    ...context,
+    error: error instanceof Error ? error.message : String(error),
+  });
+  return Response.json({ error: "Failed to process webhook" }, { status: 500 });
 }
 
 function flattenCreemEvent(
@@ -104,25 +161,61 @@ export function createCreemWebhookHandler(deps: {
     }
 
     if (REVERSAL_EVENT_TYPES.has(eventType)) {
-      const objectId = readString(toObjectRecord(event.object), "id");
+      const object = toObjectRecord(event.object);
+      if (!object) {
+        return Response.json(
+          { error: "Invalid webhook payload" },
+          { status: 400 },
+        );
+      }
+
+      const objectId = readString(object, "id");
+      const webhookId = readString(event, "id");
+      if (!objectId && !webhookId) {
+        return Response.json(
+          { error: "Invalid webhook payload" },
+          { status: 400 },
+        );
+      }
+
+      if (object.mode !== (config.billing.creem.testMode ? "test" : "prod"))
+        return Response.json(
+          { error: "Webhook environment mismatch" },
+          { status: 403 },
+        );
+
+      const alertKey = `billing:creem-reversal-manual:${objectId ?? webhookId}`;
+      const metadata = collectReversalMetadata(object, {
+        eventType,
+        webhookId,
+        objectId,
+      });
+
+      // Leave a trace even if the alert sink is disabled or fails: an
+      // operator grepping logs for a specific refund/dispute id must be
+      // able to find it regardless of whether the alert itself landed.
+      logger.warn("Creem refund or dispute needs manual handling", {
+        eventType,
+        webhookId,
+        objectId,
+      });
+
       try {
         await alerts.trigger({
-          alertKey: `billing:creem-reversal-manual:${objectId ?? event.id}`,
+          alertKey,
           level: "error",
           source: "billing.creem",
           title: "Creem refund or dispute needs manual handling",
           message:
             "Creem sent a refund or dispute event; handle it manually in the Creem dashboard.",
-          metadata: { eventType, webhookId: event.id, objectId },
+          metadata,
         });
       } catch (error) {
-        logger.error("Failed to raise Creem reversal alert", {
-          error: error instanceof Error ? error.message : String(error),
+        return failure(logger, "Failed to raise Creem reversal alert", error, {
+          eventType,
+          webhookId,
+          objectId,
         });
-        return Response.json(
-          { error: "Failed to process webhook" },
-          { status: 500 },
-        );
       }
       return Response.json({ message: "Webhook received" });
     }
@@ -165,13 +258,7 @@ export function createCreemWebhookHandler(deps: {
       await syncCreemSubscriptionEvent(eventType, data, statuses[eventType]!);
       return Response.json({ message: "Webhook received" });
     } catch (error) {
-      logger.error("Failed to process Creem webhook", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return Response.json(
-        { error: "Failed to process webhook" },
-        { status: 500 },
-      );
+      return failure(logger, "Failed to process Creem webhook", error);
     }
   };
 }
