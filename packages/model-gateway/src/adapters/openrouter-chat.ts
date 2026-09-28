@@ -67,7 +67,9 @@ export class OpenRouterChatAdapter implements ChatAdapter {
           input.extraBody,
           target.providerRouting,
         ) ?? {}),
-        ...buildOpenAIReasoningModelKwargs(input),
+        ...buildOpenAIReasoningModelKwargs(input, {
+          unifiedReasoningOff: true,
+        }),
       },
       __includeRawResponse: true,
       maxTokens: input.maxTokens,

@@ -1,25 +1,45 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { afterEach, beforeEach, test, vi } from "vitest";
-import type { ThinkingConfig } from "@sourceweft/model-gateway";
 
 const mocks = vi.hoisted(() => ({
   loadRouted: vi.fn(),
-  thinking: vi.fn(),
   createModelGateway: vi.fn(),
 }));
 
-// Only the configuration source and the catalog lookup are replaced; the
-// builder, the endpoint policy, the capability rules and the SDK adapters
-// behind them are the real ones tenant calls use.
+// Only the configuration source and the model catalog's remote sources are
+// replaced; the catalog registry, the builder, the endpoint policy, the
+// capability rules and the SDK adapters behind them are the real ones tenant
+// and BYOK calls use.
 vi.mock("./runtime", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./runtime")>()),
   loadRoutedGatewayConfig: mocks.loadRouted,
 }));
-vi.mock("./thinking-defaults", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./thinking-defaults")>()),
-  resolveChatThinkingWithDefaults: mocks.thinking,
-}));
+// The configured model as models.dev lists it: "can reason" is a capability,
+// which the catalog spells `reasoning_effort`.
+vi.mock("./model-catalog/registry", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("./model-catalog/registry")>();
+  return {
+    ...actual,
+    modelCatalog: new actual.ModelCatalogRegistry({
+      litellm: async () => [],
+      modelsDev: async () => [
+        {
+          id: "deepseek/deepseek-v4.1-flash",
+          provider: "openrouter",
+          reasoning: true,
+          reasoningEfforts: [],
+          toolCall: true,
+          structuredOutput: true,
+          vision: false,
+          sources: ["models.dev"],
+        },
+      ],
+      overrides: () => new Map(),
+    }),
+  };
+});
 vi.mock("@sourceweft/model-gateway", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("@sourceweft/model-gateway")>();
@@ -127,6 +147,7 @@ function mockProvider(
     role: "assistant",
     content: "OUTPUT-MARKER",
   }),
+  usageDetails: Record<string, unknown> = {},
 ) {
   const seen: SeenRequest[] = [];
   const fetchSpy = vi
@@ -158,6 +179,7 @@ function mockProvider(
             completion_tokens: 7,
             total_tokens: 18,
             cost: 0.00042,
+            ...usageDetails,
           },
         }),
         { status: 200, headers: { "content-type": "application/json" } },
@@ -182,16 +204,6 @@ function systemCallLogs(spy: { mock: { calls: unknown[][] } }) {
 
 beforeEach(() => {
   mocks.loadRouted.mockReset();
-  mocks.thinking.mockReset();
-  mocks.thinking.mockImplementation(
-    async (input: { thinking?: ThinkingConfig }) =>
-      input.thinking
-        ? {
-            ...input.thinking,
-            supportedParameters: ["reasoning", "include_reasoning"],
-          }
-        : input.thinking,
-  );
   mocks.createModelGateway.mockClear();
   useSettings();
 });
@@ -478,13 +490,36 @@ test("capability rules shape the request exactly as they do for tenant calls", a
   assert.ok(Array.isArray(body.tools));
   assert.equal(body.tool_choice, undefined);
   assert.equal(body.response_format, undefined);
-  // Thinking "off" reached the wire, from the borrowed Provider's catalog facts.
+  // Thinking "off" reached the wire, from the model catalog's facts — the
+  // source BYOK models use — not from a global profile of the Provider.
   assert.deepEqual(body.reasoning, { effort: "none", exclude: true });
-  assert.deepEqual(mocks.thinking.mock.calls[0]?.[0], {
-    thinking: { mode: "off", enabled: false, includeReasoning: false },
-    modelAlias: MODEL,
-    gatewayConfigId: "gateway-openrouter",
-  });
+});
+
+test("a configured model the catalog does not list fails before any request", async () => {
+  useSettings({ model: "vendor/unlisted-model" });
+  mocks.loadRouted.mockResolvedValue(routedFixture());
+  const { fetchSpy } = mockProvider();
+  const info = vi.spyOn(logger, "info");
+  await assert.rejects(
+    withSystemModel(context(), (chat) =>
+      chat.complete({
+        messages,
+        thinking: { mode: "off", enabled: false, includeReasoning: false },
+      }),
+    ),
+    (error: { code?: string; message?: string }) =>
+      error.code === "CONFIGURATION" &&
+      /'vendor\/unlisted-model' is not in the model catalog/.test(
+        error.message ?? "",
+      ),
+  );
+  assert.equal(fetchSpy.mock.calls.length, 0);
+  const logs = systemCallLogs(info);
+  assert.equal(logs.length, 1);
+  assert.equal(
+    (logs[0]![1] as Record<string, unknown>).errorCode,
+    "CONFIGURATION",
+  );
 });
 
 test("the endpoint policy rejects an internal address before any request", async () => {
@@ -542,6 +577,7 @@ test("each call logs exactly one line, without the prompt, the output or the key
     durationMs: (logs[0]![1] as { durationMs: number }).durationMs,
     inputTokens: 11,
     outputTokens: 7,
+    reasoningTokens: null,
     costUsd: 0.00042,
   });
   const everything = JSON.stringify([...info.mock.calls, ...warn.mock.calls]);
@@ -553,6 +589,16 @@ test("each call logs exactly one line, without the prompt, the output or the key
   ]) {
     assert.doesNotMatch(everything, new RegExp(secret));
   }
+});
+
+test("the log line counts reasoning tokens when the Provider reports them", async () => {
+  mocks.loadRouted.mockResolvedValue(routedFixture());
+  mockProvider(undefined, { completion_tokens_details: { reasoning_tokens: 5 } });
+  const info = vi.spyOn(logger, "info");
+  await withSystemModel(context(), (chat) => chat.complete({ messages }));
+  const logs = systemCallLogs(info);
+  assert.equal(logs.length, 1);
+  assert.equal((logs[0]![1] as Record<string, unknown>).reasoningTokens, 5);
 });
 
 test("a failed call logs one error line and rethrows", async () => {

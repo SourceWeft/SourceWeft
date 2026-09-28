@@ -1,7 +1,18 @@
 import type { ChatCompleteInput } from "../types";
 import { resolveThinkingMode } from "../thinking";
 
-export function buildOpenAIReasoningModelKwargs(input: ChatCompleteInput) {
+export function buildOpenAIReasoningModelKwargs(
+  input: ChatCompleteInput,
+  options: {
+    /**
+     * The endpoint normalizes reasoning control behind OpenRouter's `reasoning`
+     * object, so a model declared with only `reasoning_effort` (the catalog's
+     * spelling of "can reason") can still be switched off with it. A generic
+     * OpenAI-compatible endpoint has no portable "off" for `reasoning_effort`.
+     */
+    unifiedReasoningOff?: boolean;
+  } = {},
+) {
   const thinking = input.thinking;
   if (!thinking) {
     return {};
@@ -20,7 +31,11 @@ export function buildOpenAIReasoningModelKwargs(input: ChatCompleteInput) {
   }
 
   if (mode === "off") {
-    if (supportedParameters.has("reasoning")) {
+    if (
+      supportedParameters.has("reasoning") ||
+      (options.unifiedReasoningOff &&
+        supportedParameters.has("reasoning_effort"))
+    ) {
       // effort "none" is OpenRouter's documented way to actually stop
       // reasoning; `exclude: true` alone only hides it — the tokens are still
       // generated and billed, and they still eat max_tokens (which is how a

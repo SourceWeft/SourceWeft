@@ -127,6 +127,83 @@ test("OpenAI-compatible chat adapter forwards timeout and disables supported rea
   });
 });
 
+// The normalized model catalog (models.dev/LiteLLM) and catalog-derived
+// profiles spell "can reason" as `reasoning_effort`.
+const CATALOG_REASONING_FACTS = [
+  "tools",
+  "tool_choice",
+  "response_format",
+  "reasoning_effort",
+];
+
+test("OpenRouter chat adapter disables reasoning when the facts spell it reasoning_effort", () => {
+  const adapter = new OpenRouterChatAdapter();
+  const model = adapter.createModel(
+    makeResolvedTarget({
+      provider: "openrouter",
+      providerKind: "openrouter",
+      providerModel: "deepseek/deepseek-v4.1-flash",
+    }),
+    {
+      ...input,
+      thinking: {
+        mode: "off",
+        enabled: false,
+        supportedParameters: CATALOG_REASONING_FACTS,
+      },
+    },
+  );
+
+  assert.deepEqual(modelKwargs(model), {
+    reasoning: {
+      effort: "none",
+      exclude: true,
+    },
+  });
+});
+
+test("OpenRouter chat adapter keeps reasoning_effort when enabling reasoning", () => {
+  const adapter = new OpenRouterChatAdapter();
+  const model = adapter.createModel(
+    makeResolvedTarget({
+      provider: "openrouter",
+      providerKind: "openrouter",
+      providerModel: "deepseek/deepseek-v4.1-flash",
+    }),
+    {
+      ...input,
+      thinking: {
+        mode: "effort",
+        effort: "low",
+        supportedParameters: CATALOG_REASONING_FACTS,
+        supportedEfforts: ["low"],
+      },
+    },
+  );
+
+  assert.deepEqual(modelKwargs(model), { reasoning_effort: "low" });
+});
+
+test("OpenAI-compatible chat adapter sends nothing to turn off reasoning spelled reasoning_effort", () => {
+  const adapter = new OpenAICompatibleChatAdapter();
+  const model = adapter.createModel(
+    makeResolvedTarget({
+      providerKind: "openai-compatible",
+      providerModel: "deepseek-v4-flash",
+    }),
+    {
+      ...input,
+      thinking: {
+        mode: "off",
+        enabled: false,
+        supportedParameters: CATALOG_REASONING_FACTS,
+      },
+    },
+  );
+
+  assert.deepEqual(modelKwargs(model), {});
+});
+
 test("OpenAI-compatible chat adapter keeps standard SDK auth without custom headers", () => {
   const adapter = new OpenAICompatibleChatAdapter();
   const model = adapter.createModel(
