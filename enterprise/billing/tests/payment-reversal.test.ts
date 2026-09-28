@@ -408,6 +408,56 @@ test("cumulative totals are idempotent and never go backwards", async () => {
   );
 });
 
+test("a zero-delta reversal writes its ledger key but raises no warn alert", async () => {
+  const { store, alerts, service } = await setupTopup();
+
+  await service.applyPaymentReversal(
+    reversal({ reversalId: "k500", amount: { refundedTotal: 500 } }),
+  );
+  const alertsAfterFirst = alerts.length;
+
+  const result = await service.applyPaymentReversal(
+    reversal({ reversalId: "k300", amount: { refundedTotal: 300 } }),
+  );
+
+  assert.ok(result.outcome === "applied");
+  assert.equal(result.deltaUnits, 0);
+  assert.equal(alerts.length, alertsAfterFirst);
+
+  const rows = reversalRows(store);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[1]?.delta, 0);
+  assert.equal(rows[1]?.activityVisible, false);
+  assert.equal(
+    rows[1]?.idempotencyKey,
+    "user_1:billing-order:order_1:reversal:k300",
+  );
+});
+
+test("a chargeback never lowers the recorded refunded amount", async () => {
+  const { store, service } = await setupTopup();
+
+  await service.applyPaymentReversal(
+    reversal({ reversalId: "refund_1", amount: { refundAmount: 800 } }),
+  );
+  assert.equal(store.order?.refundedAmount, 800);
+
+  const result = await service.applyPaymentReversal(
+    reversal({
+      reversalId: "dispute_1",
+      kind: "chargeback",
+      paidAmount: 200,
+      amount: { refundedTotal: 0 },
+    }),
+  );
+
+  assert.equal(result.outcome, "applied");
+  assert.equal(store.order?.refundedAmount, 800);
+  assert.equal(store.order?.reversalStatus, "charged_back");
+  assert.equal(store.order?.reversedUnits, 20_000);
+  assert.equal(store.account?.addOnCreditsBalance, 0);
+});
+
 test("spent credits leave a recorded shortfall without failing", async () => {
   const { store, alerts, service } = await setupTopup();
   store.account!.addOnCreditsBalance = 0;
