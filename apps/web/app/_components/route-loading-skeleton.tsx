@@ -5,6 +5,7 @@ import {
   CardContent,
   CardFooter,
 } from "@sourceweft/ui-web/components/ui/card";
+import { cn } from "@sourceweft/ui-web/lib/utils";
 import { ChatHeaderSkeleton } from "./chat-header-skeleton";
 import { CatalogRouteSkeleton } from "./catalog-loading-skeleton";
 import { TraceListSkeletonRows } from "../dashboard/observability/trace-loading-skeleton";
@@ -124,7 +125,7 @@ export function DashboardSidebarSkeleton({
   width = 280,
   collapsed = false,
 }: {
-  brand: ReactNode;
+  brand?: ReactNode;
   desktopTitlebar?: boolean;
   width?: number;
   collapsed?: boolean;
@@ -133,11 +134,22 @@ export function DashboardSidebarSkeleton({
     return (
       <aside
         style={{ width }}
-        className="flex h-svh shrink-0 flex-col items-center border-r border-sidebar-border bg-sidebar px-2 py-3"
+        className={cn(
+          "flex h-svh shrink-0 flex-col items-center gap-1 border-r border-sidebar-border bg-sidebar px-2 pb-3",
+          desktopTitlebar ? "pt-0" : "pt-3",
+        )}
       >
-        {brand}
-        <div className="space-y-2">
-          {Array.from({ length: 7 }, (_, index) => (
+        {desktopTitlebar ? (
+          <div data-desktop-drag-region="" className="h-10 w-full shrink-0" />
+        ) : (
+          brand
+        )}
+        {Array.from({ length: 2 }, (_, index) => (
+          <SkeletonBlock key={index} className="size-9 rounded-lg" />
+        ))}
+        <div className="my-2 h-px w-6 bg-sidebar-border" />
+        <div className="flex flex-col gap-1">
+          {Array.from({ length: 4 }, (_, index) => (
             <SkeletonBlock key={index} className="size-9 rounded-lg" />
           ))}
         </div>
@@ -146,41 +158,25 @@ export function DashboardSidebarSkeleton({
     );
   }
 
+  // The conversation column beside the rail: workspace, then the chats.
   return (
     <aside
       style={{ width }}
       className="flex h-svh shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground"
     >
       <div className="shrink-0 px-3">
-        {brand}
         {desktopTitlebar && (
           <div data-desktop-drag-region="" className="h-10 shrink-0" />
         )}
         <div className="flex h-12 items-center gap-2 sm:h-14">
           <SkeletonBlock className="h-8 flex-1 rounded-lg" />
-          <SkeletonBlock className="size-8" />
         </div>
-        <div className="flex h-9 items-center gap-2 px-3">
-          <SkeletonBlock className="size-4" />
-          <SkeletonLine className="w-24" />
-        </div>
-      </div>
-      <div className="shrink-0 border-b border-sidebar-border/60 px-3 pb-2">
-        {Array.from({ length: 4 }, (_, index) => (
-          <div key={index} className="flex h-9 items-center gap-2 px-3">
-            <SkeletonBlock className="size-4" />
-            <SkeletonLine className="w-24" />
-          </div>
-        ))}
       </div>
       <div className="min-h-0 flex-1 space-y-5 overflow-hidden px-3 py-4">
         <SkeletonLine className="w-16" />
-        {Array.from({ length: 6 }, (_, index) => (
+        {Array.from({ length: 8 }, (_, index) => (
           <SkeletonLine key={index} className="w-44" />
         ))}
-      </div>
-      <div className="shrink-0 border-t border-sidebar-border/60 p-3">
-        <SkeletonBlock className="h-10 rounded-lg" />
       </div>
     </aside>
   );

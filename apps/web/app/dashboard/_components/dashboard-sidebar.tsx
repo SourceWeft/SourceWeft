@@ -9,11 +9,10 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   Activity,
   LayoutDashboard,
+  MessageSquareText,
   MoreHorizontal,
   PanelLeftClose,
-  PanelLeftOpen,
   PenSquare,
-  Search,
 } from "lucide-react";
 import {
   Sheet,
@@ -37,13 +36,17 @@ import { WorkspaceMembersDialog } from "./workspace-members-dialog";
 import { copyStoredByokState } from "../chat/_components/byok-state";
 import { useWorkspaceLayout } from "./dashboard-workspace-layout";
 import { DashboardSidebarBrand } from "./dashboard-sidebar-brand";
-import { MarketAdminNavLink } from "./market-admin-nav-link";
+import { MARKET_ADMIN_HREF, MarketAdminNavLink } from "./market-admin-nav-link";
 
 type NavItem = {
   labelKey: string;
   href: string;
   icon: React.ComponentType<{ className?: string }>;
   match: (pathname: string) => boolean;
+  /** Secondary destinations live under "More" in the rail and the drawer. */
+  more?: boolean;
+  /** The drawer is the conversation list itself, so Chat is rail-only. */
+  railOnly?: boolean;
 };
 
 const navMain: NavItem[] = [
@@ -52,6 +55,13 @@ const navMain: NavItem[] = [
     href: "/dashboard",
     icon: LayoutDashboard,
     match: (p) => p === "/dashboard",
+  },
+  {
+    labelKey: "nav.chat",
+    href: "/dashboard/chat",
+    icon: MessageSquareText,
+    match: (p) => p.startsWith("/dashboard/chat"),
+    railOnly: true,
   },
   {
     labelKey: "nav.skills",
@@ -70,8 +80,12 @@ const navMain: NavItem[] = [
     href: "/dashboard/observability",
     icon: Activity,
     match: (p) => p.startsWith("/dashboard/observability"),
+    more: true,
   },
 ];
+const primaryNav = navMain.filter((item) => !item.more);
+const drawerNav = primaryNav.filter((item) => !item.railOnly);
+const moreNav = navMain.filter((item) => item.more);
 
 function NavigationLink({
   active,
@@ -108,13 +122,14 @@ export function DashboardSidebar() {
   const router = useRouter();
   const { openMobile, setOpenMobile } = useSidebar();
   const {
+    closeConversations,
+    conversationOverlayOpen,
     conversationsDocked,
     desktopTitlebar,
     conversationWidth,
-    canDockConversations,
     railWidth,
-    toggleConversations,
   } = useWorkspaceLayout();
+  const overlayRef = React.useRef<HTMLElement>(null);
   const [search, setSearch] = React.useState("");
   // Member management is per-workspace, not an account setting — it opens as
   // its own dialog rather than a settings-center tab.
@@ -230,7 +245,7 @@ export function DashboardSidebar() {
 
     query.set("draft", crypto.randomUUID());
     startNewChat();
-    setOpenMobile(false);
+    closeConversations();
     router.push(`/dashboard/chat${query.size ? `?${query.toString()}` : ""}`);
   };
 
@@ -245,7 +260,7 @@ export function DashboardSidebar() {
       throw new Error("Failed to create agent chat");
     }
 
-    setOpenMobile(false);
+    closeConversations();
     router.prefetch(`/dashboard/chat/${created.id}`);
     router.push(`/dashboard/chat/${created.id}`);
   };
@@ -258,7 +273,7 @@ export function DashboardSidebar() {
   // A nested conversation opens beside its parent: the parent's page with the
   // child named in the URL, which the thread page turns into the side panel.
   const handleOpenChatInPanel = (parentId: string, childId: string) => {
-    setOpenMobile(false);
+    closeConversations();
     router.push(
       `/dashboard/chat/${parentId}?agent=${encodeURIComponent(childId)}`,
     );
@@ -272,7 +287,7 @@ export function DashboardSidebar() {
   };
 
   const handleOpenChat = (id: string) => {
-    setOpenMobile(false);
+    closeConversations();
     router.prefetch(`/dashboard/chat/${id}`);
     router.push(`/dashboard/chat/${id}`);
   };
@@ -290,8 +305,8 @@ export function DashboardSidebar() {
     }
   }, [privateChats, router]);
 
-  const handleMobileWorkspaceChange = (nextId: string) => {
-    setOpenMobile(false);
+  const handleWorkspaceChange = (nextId: string) => {
+    closeConversations();
     void switchWorkspace(nextId).then((switched) => {
       if (switched) {
         router.push("/dashboard/chat");
@@ -299,20 +314,75 @@ export function DashboardSidebar() {
     });
   };
 
+  // Everything the conversation list needs, shared by the docked column, the
+  // overlay and the phone drawer.
+  const panelProps = {
+    search,
+    onSearchChange: setSearch,
+    archivedChats,
+    activeChatId: activeThreadId,
+    onArchiveChat: archiveChat,
+    onClearArchivedChats: handleClearArchivedChats,
+    onClearPrivateChats: handleClearPrivateChats,
+    onCreateAgentChat: handleCreateAgentChat,
+    onCreateChat: handleStartNewChat,
+    onCreateWorkspace: handleCreateWorkspace,
+    onDeleteChat: handleDeleteChat,
+    onSetChatVisibility: setChatVisibility,
+    onLoadMoreChats: () => void loadMorePrivateChats(),
+    onOpenMembers: () => setMembersOpen(true),
+    onOpenChat: handleOpenChat,
+    onOpenChatInNewWindow: handleOpenChatInNewWindow,
+    onOpenChatInPanel: handleOpenChatInPanel,
+    onPrefetchChat: handlePrefetchChat,
+    onRenameWorkspace: handleRenameWorkspace,
+    hasMorePrivateChats,
+    isLoadingPrivateChats,
+    privateChats,
+    sharedChats,
+    onWorkspaceChange: handleWorkspaceChange,
+    workspaceId,
+    workspaceName,
+    workspaces,
+  };
+
+  const moreActive =
+    moreNav.some((item) => item.match(pathname)) ||
+    pathname.startsWith(MARKET_ADMIN_HREF);
+  const renderMoreItems = () => (
+    <>
+      {moreNav.map((item) => (
+        <DropdownMenuItem key={item.href} asChild>
+          <Link
+            href={item.href}
+            onClick={closeConversations}
+            aria-current={item.match(pathname) ? "page" : undefined}
+          >
+            <item.icon className="size-4" />
+            {t(item.labelKey)}
+          </Link>
+        </DropdownMenuItem>
+      ))}
+      {/* Market admins only; renders nothing for anyone else. */}
+      <MarketAdminNavLink onNavigate={closeConversations} variant="menu-item" />
+    </>
+  );
+
+  // The drawer's destinations; the rail renders the same list plus Chat.
   const renderNavigation = () => (
     <nav
       aria-label={t("nav.mainNavigation")}
       className="shrink-0 border-b border-sidebar-border/60 px-3 pb-2"
     >
       <div className="space-y-0">
-        {navMain.slice(0, 3).map((item) => (
+        {drawerNav.map((item) => (
           <NavigationLink
             key={item.href}
             active={item.match(pathname)}
             href={item.href}
             icon={item.icon}
             label={t(item.labelKey)}
-            onNavigate={() => setOpenMobile(false)}
+            onNavigate={closeConversations}
           />
         ))}
       </div>
@@ -322,8 +392,7 @@ export function DashboardSidebar() {
             variant="ghost"
             className={cn(
               "h-9 w-full justify-start gap-2 rounded-lg px-3 text-sm font-medium text-sidebar-foreground/75",
-              pathname.startsWith("/dashboard/observability") &&
-                "bg-sidebar-accent text-sidebar-accent-foreground",
+              moreActive && "bg-sidebar-accent text-sidebar-accent-foreground",
             )}
           >
             <MoreHorizontal className="size-4 shrink-0" />
@@ -331,151 +400,151 @@ export function DashboardSidebar() {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-52">
-          {navMain.map((item, index) => (
-            <DropdownMenuItem
-              key={item.href}
-              asChild
-              className={index < 3 ? "hidden" : undefined}
-            >
-              <Link
-                href={item.href}
-                onClick={() => setOpenMobile(false)}
-                aria-current={item.match(pathname) ? "page" : undefined}
-              >
-                <item.icon className="size-4" />
-                {t(item.labelKey)}
-              </Link>
-            </DropdownMenuItem>
-          ))}
-          {/* Market admins only; renders nothing for anyone else. */}
-          <MarketAdminNavLink
-            onNavigate={() => setOpenMobile(false)}
-            variant="menu-item"
-          />
+          {renderMoreItems()}
         </DropdownMenuContent>
       </DropdownMenu>
     </nav>
   );
 
-  const renderPanel = (desktopTitlebar = false) => (
+  // On PC the rail carries New chat, navigation and the account, and the chat
+  // header the toggle, so the column holds only the workspace's conversations.
+  const renderColumn = (heading: React.ReactNode = null) => (
     <DashboardSidebarChatPanel
-      brand={<DashboardSidebarBrand />}
+      {...panelProps}
       desktopTitlebar={desktopTitlebar}
-      heading={
-        desktopTitlebar ||
-        (canDockConversations &&
-          pathname.startsWith("/dashboard/chat")) ? null : (
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            className="size-8 shrink-0 text-muted-foreground"
-            data-sidebar-collapse
-            aria-label={
-              canDockConversations
-                ? t("sidebar.collapseSidebar")
-                : t("sidebar.hideSidebar")
-            }
-            onClick={toggleConversations}
-          >
-            <PanelLeftClose className="size-4" />
-          </Button>
-        )
-      }
-      navigation={renderNavigation()}
-      footer={
-        <div className="shrink-0 border-t border-sidebar-border/60 p-3">
-          <DashboardAccountMenu expanded />
-        </div>
-      }
-      search={search}
-      onSearchChange={setSearch}
-      archivedChats={archivedChats}
-      activeChatId={activeThreadId}
-      onArchiveChat={archiveChat}
-      onClearArchivedChats={handleClearArchivedChats}
-      onClearPrivateChats={handleClearPrivateChats}
-      onCreateAgentChat={handleCreateAgentChat}
-      onCreateChat={handleStartNewChat}
-      onCreateWorkspace={handleCreateWorkspace}
-      onDeleteChat={handleDeleteChat}
-      onSetChatVisibility={setChatVisibility}
-      onLoadMoreChats={() => void loadMorePrivateChats()}
-      onOpenMembers={() => setMembersOpen(true)}
-      onOpenChat={handleOpenChat}
-      onOpenChatInNewWindow={handleOpenChatInNewWindow}
-      onOpenChatInPanel={handleOpenChatInPanel}
-      onPrefetchChat={handlePrefetchChat}
-      onRenameWorkspace={handleRenameWorkspace}
-      hasMorePrivateChats={hasMorePrivateChats}
-      isLoadingPrivateChats={isLoadingPrivateChats}
-      privateChats={privateChats}
-      sharedChats={sharedChats}
-      onWorkspaceChange={handleMobileWorkspaceChange}
-      workspaceId={workspaceId}
-      workspaceName={workspaceName}
-      workspaces={workspaces}
+      heading={heading}
+      navigation={null}
+      footer={null}
+      showCreateChat={false}
     />
   );
+
+  const railLinkClass = (active: boolean) =>
+    cn(
+      "flex size-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",
+      active && "bg-sidebar-accent text-foreground",
+    );
 
   const renderRail = () => (
     <aside
       data-testid="navigation-rail"
       style={{ width: railWidth }}
-      className="flex h-svh shrink-0 flex-col items-center border-r border-sidebar-border bg-sidebar px-2 py-3"
+      className={cn(
+        "flex h-svh shrink-0 flex-col items-center gap-1 border-r border-sidebar-border bg-sidebar px-2 pb-3",
+        desktopTitlebar ? "pt-0" : "pt-3",
+      )}
     >
-      <DashboardSidebarBrand collapsed />
-      {!pathname.startsWith("/dashboard/chat") && (
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          className="mb-3 size-9"
-          aria-label={t("sidebar.expandSidebar")}
-          onClick={toggleConversations}
-        >
-          <PanelLeftOpen className="size-4" />
-        </Button>
+      {desktopTitlebar ? (
+        // The traffic lights sit here; the strip drags the window.
+        <div
+          aria-hidden="true"
+          data-desktop-drag-region=""
+          className="h-10 w-full shrink-0 select-none"
+        />
+      ) : (
+        <DashboardSidebarBrand collapsed />
       )}
       <Button
         variant="ghost"
         size="icon-sm"
-        className="size-9"
+        className="size-9 text-muted-foreground"
         aria-label={t("sidebar.newChat")}
         title={t("sidebar.newChat")}
         onClick={handleStartNewChat}
       >
         <PenSquare className="size-4" />
       </Button>
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        className="mb-3 size-9"
-        aria-label={t("sidebar.showConversations")}
-        title={t("sidebar.showConversations")}
-        onClick={toggleConversations}
-      >
-        <Search className="size-4" />
-      </Button>
+      <div aria-hidden="true" className="my-2 h-px w-6 bg-sidebar-border" />
       <nav aria-label={t("nav.mainNavigation")} className="flex flex-col gap-1">
-        {navMain.map((item) => (
+        {primaryNav.map((item) => (
           <Link
             key={item.href}
             href={item.href}
             aria-label={t(item.labelKey)}
             title={t(item.labelKey)}
             aria-current={item.match(pathname) ? "page" : undefined}
-            className={cn(
-              "flex size-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",
-              item.match(pathname) && "bg-sidebar-accent text-foreground",
-            )}
+            onClick={closeConversations}
+            className={railLinkClass(item.match(pathname))}
           >
             <item.icon className="size-4" />
           </Link>
         ))}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className={cn(
+                "size-9 text-muted-foreground",
+                moreActive && "bg-sidebar-accent text-foreground",
+              )}
+              aria-label={t("nav.more")}
+              title={t("nav.more")}
+            >
+              <MoreHorizontal className="size-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent side="right" align="start" className="w-52">
+            {renderMoreItems()}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </nav>
       <div className="mt-auto">
         <DashboardAccountMenu />
       </div>
     </aside>
+  );
+
+  React.useEffect(() => {
+    if (conversationOverlayOpen) overlayRef.current?.focus();
+  }, [conversationOverlayOpen]);
+
+  const renderOverlay = () => (
+    <>
+      <div
+        aria-hidden="true"
+        data-testid="conversation-overlay-backdrop"
+        style={{ left: railWidth }}
+        className="absolute inset-y-0 right-0 z-30 bg-black/10 animate-in fade-in-0 duration-150"
+        onClick={closeConversations}
+      />
+      <aside
+        ref={overlayRef}
+        tabIndex={-1}
+        data-testid="conversation-overlay"
+        aria-label={t("chats.heading")}
+        style={{ left: railWidth, width: conversationWidth }}
+        className="absolute inset-y-0 z-40 flex flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground shadow-xl outline-none animate-in fade-in-0 slide-in-from-left-4 duration-150"
+        onKeyDown={(event) => {
+          // Menus and dialogs opened from the list portal outside the panel
+          // and close themselves on Escape.
+          if (
+            event.key !== "Escape" ||
+            !event.currentTarget.contains(event.target as Node)
+          )
+            return;
+          event.stopPropagation();
+          closeConversations();
+          document
+            .querySelector<HTMLButtonElement>("[data-conversations-toggle]")
+            ?.focus();
+        }}
+      >
+        {/* The overlay covers the chat header's toggle, so it closes here. */}
+        {renderColumn(
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            className="size-8 shrink-0 text-muted-foreground"
+            aria-label={t("sidebar.hideConversations")}
+            title={t("sidebar.hideConversations")}
+            onClick={closeConversations}
+          >
+            <PanelLeftClose className="size-4" />
+          </Button>,
+        )}
+      </aside>
+    </>
   );
 
   return (
@@ -487,9 +556,10 @@ export function DashboardSidebar() {
           style={{ width: conversationWidth }}
           className="flex h-svh shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground"
         >
-          {renderPanel(desktopTitlebar)}
+          {renderColumn()}
         </aside>
       )}
+      {conversationOverlayOpen && renderOverlay()}
 
       <Sheet open={openMobile} onOpenChange={setOpenMobile}>
         <SheetContent
@@ -505,10 +575,28 @@ export function DashboardSidebar() {
           className="gap-0 overflow-hidden bg-sidebar p-0 text-sidebar-foreground w-[min(320px,calc(100vw-2rem))] max-w-none [&>button]:hidden"
           side="left"
         >
-          <SheetTitle className="sr-only">
-            {t("sidebar.sheetTitle")}
-          </SheetTitle>
-          {renderPanel()}
+          <SheetTitle className="sr-only">{t("sidebar.sheetTitle")}</SheetTitle>
+          <DashboardSidebarChatPanel
+            {...panelProps}
+            brand={<DashboardSidebarBrand />}
+            heading={
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                className="size-8 shrink-0 text-muted-foreground"
+                aria-label={t("sidebar.hideSidebar")}
+                onClick={closeConversations}
+              >
+                <PanelLeftClose className="size-4" />
+              </Button>
+            }
+            navigation={renderNavigation()}
+            footer={
+              <div className="shrink-0 border-t border-sidebar-border/60 p-3">
+                <DashboardAccountMenu expanded />
+              </div>
+            }
+          />
         </SheetContent>
       </Sheet>
 

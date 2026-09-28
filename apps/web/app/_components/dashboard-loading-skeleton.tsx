@@ -42,6 +42,7 @@ function DashboardLoadingShellContent({
         <DashboardSidebarSkeleton
           width={railWidth}
           collapsed
+          desktopTitlebar={desktopTitlebar}
           brand={<DashboardSidebarBrand collapsed />}
         />
       )}
@@ -49,7 +50,6 @@ function DashboardLoadingShellContent({
         <DashboardSidebarSkeleton
           width={conversationWidth}
           desktopTitlebar={desktopTitlebar}
-          brand={<DashboardSidebarBrand />}
         />
       )}
       <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0">

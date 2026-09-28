@@ -497,9 +497,7 @@ function ChatListRow({
     if (!onSetVisibility) return;
     try {
       await onSetVisibility(item.id, shared ? "private" : "workspace");
-      toast.success(
-        shared ? t("chats.nowPrivate") : t("chats.nowVisible"),
-      );
+      toast.success(shared ? t("chats.nowPrivate") : t("chats.nowVisible"));
     } catch {
       toast.error(t("chats.visibilityError"));
     }
@@ -806,7 +804,9 @@ function ChatList({
                     type="button"
                     variant="destructive"
                   >
-                    {isClearing ? t("chats.clearing") : t("chats.clearAllButton")}
+                    {isClearing
+                      ? t("chats.clearing")
+                      : t("chats.clearAllButton")}
                   </Button>
                 </DialogClose>
               </DialogFooter>
@@ -983,6 +983,7 @@ export function DashboardSidebarChatPanel({
   heading,
   navigation,
   footer,
+  showCreateChat = true,
   search,
   onSearchChange,
   archivedChats,
@@ -1016,6 +1017,8 @@ export function DashboardSidebarChatPanel({
   desktopTitlebar?: boolean;
   navigation: ReactNode;
   footer: ReactNode;
+  /** The PC rail carries New chat, so its column leaves it out. */
+  showCreateChat?: boolean;
   search: string;
   onSearchChange: (value: string) => void;
   archivedChats: ChatItem[];
@@ -1094,21 +1097,23 @@ export function DashboardSidebarChatPanel({
           </div>
           {heading}
         </div>
-        <div className="flex items-center gap-1">
-          <Button
-            className="h-9 flex-1 justify-start gap-2 rounded-lg px-3 text-sm font-medium"
-            variant="ghost"
-            onClick={() => {
-              setChatListResetKey((value) => value + 1);
-              onCreateChat();
-            }}
-            size="xs"
-            type="button"
-          >
-            <PenSquare className="size-4 text-muted-foreground" />
-            {t("sidebar.newChat")}
-          </Button>
-        </div>
+        {showCreateChat ? (
+          <div className="flex items-center gap-1">
+            <Button
+              className="h-9 flex-1 justify-start gap-2 rounded-lg px-3 text-sm font-medium"
+              variant="ghost"
+              onClick={() => {
+                setChatListResetKey((value) => value + 1);
+                onCreateChat();
+              }}
+              size="xs"
+              type="button"
+            >
+              <PenSquare className="size-4 text-muted-foreground" />
+              {t("sidebar.newChat")}
+            </Button>
+          </div>
+        ) : null}
       </SidebarHeader>
       {navigation}
       <ChatList

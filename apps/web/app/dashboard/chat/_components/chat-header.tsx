@@ -95,9 +95,9 @@ export function ChatHeader({
   const { ref, width } = useElementSize<HTMLDivElement>();
   const {
     conversationsOpen,
-    conversationsDocked,
     desktopTitlebar,
-    canDockConversations,
+    railWidth,
+    titlebarInset,
     toggleConversations,
   } = useWorkspaceLayout();
   const hub = useChatHubContext();
@@ -110,13 +110,17 @@ export function ChatHeader({
           ? t("header.hideSources")
           : t("header.showSources")
         : t("header.openHub");
-  const conversationLabel = canDockConversations
-    ? conversationsOpen
-      ? t("header.collapseSidebar")
-      : t("header.expandSidebar")
-    : conversationsOpen
-      ? t("header.hideSidebar")
-      : t("header.showSidebar");
+  // The toggle sits at the list's edge: on PC it collapses the conversation
+  // list, on phones it opens the drawer.
+  const showConversationToggle = !embedMode;
+  const conversationLabel =
+    railWidth > 0
+      ? conversationsOpen
+        ? t("header.hideConversations")
+        : t("header.showConversations")
+      : conversationsOpen
+        ? t("header.hideSidebar")
+        : t("header.showSidebar");
   return (
     <header
       ref={ref}
@@ -130,12 +134,10 @@ export function ChatHeader({
       <div
         className={cn(
           "flex h-full min-w-0 items-center gap-2 pr-3 sm:pr-4",
-          desktopTitlebar && !conversationsDocked
-            ? "pl-[264px]"
-            : "pl-3 sm:pl-4",
+          titlebarInset ? "pl-6" : "pl-3 sm:pl-4",
         )}
       >
-        {embedMode ? null : (
+        {showConversationToggle ? (
           <Button
             data-conversations-toggle
             aria-label={conversationLabel}
@@ -152,7 +154,7 @@ export function ChatHeader({
               <PanelLeftOpen className="size-4" />
             )}
           </Button>
-        )}
+        ) : null}
         <div
           className={cn(
             "flex min-w-0 flex-1",

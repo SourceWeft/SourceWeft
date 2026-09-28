@@ -7,29 +7,26 @@ import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { useWorkspaceLayout } from "./dashboard-workspace-layout";
 
-/** Non-chat pages must remain navigable when the unified sidebar is hidden. */
+/**
+ * Phones reach the drawer from this strip on non-chat pages; on PC the rail
+ * owns navigation, and the macOS client keeps the strip only as its titlebar.
+ */
 export function DashboardPageNavigation() {
   const t = useTranslations("dashboardNav");
   const pathname = usePathname();
   const {
     desktopTitlebar,
-    conversationsDocked,
-    canDockConversations,
+    railWidth,
+    titlebarInset,
     conversationsOpen,
     toggleConversations,
   } = useWorkspaceLayout();
-  if (
-    pathname.startsWith("/dashboard/chat") ||
-    (!desktopTitlebar && canDockConversations)
-  )
+  const hasRail = railWidth > 0;
+  if (pathname.startsWith("/dashboard/chat") || (hasRail && !desktopTitlebar))
     return null;
-  const conversationLabel = canDockConversations
-    ? conversationsOpen
-      ? t("sidebar.collapseSidebar")
-      : t("sidebar.expandSidebar")
-    : conversationsOpen
-      ? t("sidebar.hideSidebar")
-      : t("sidebar.showSidebar");
+  const conversationLabel = conversationsOpen
+    ? t("sidebar.hideSidebar")
+    : t("sidebar.showSidebar");
   return (
     <div
       data-desktop-drag-region
@@ -38,25 +35,27 @@ export function DashboardPageNavigation() {
         desktopTitlebar
           ? "h-14 select-none"
           : "h-12 border-b border-border/70 sm:h-14",
-        desktopTitlebar && !conversationsDocked ? "pl-[264px]" : "pl-3 sm:pl-4",
+        titlebarInset ? "pl-6" : "pl-3 sm:pl-4",
       )}
     >
-      <Button
-        data-conversations-toggle
-        className="size-8"
-        size="icon-sm"
-        variant="ghost"
-        aria-label={conversationLabel}
-        title={conversationLabel}
-        aria-expanded={conversationsOpen}
-        onClick={toggleConversations}
-      >
-        {conversationsOpen ? (
-          <PanelLeftClose className="size-4" />
-        ) : (
-          <PanelLeftOpen className="size-4" />
-        )}
-      </Button>
+      {hasRail ? null : (
+        <Button
+          data-conversations-toggle
+          className="size-8"
+          size="icon-sm"
+          variant="ghost"
+          aria-label={conversationLabel}
+          title={conversationLabel}
+          aria-expanded={conversationsOpen}
+          onClick={toggleConversations}
+        >
+          {conversationsOpen ? (
+            <PanelLeftClose className="size-4" />
+          ) : (
+            <PanelLeftOpen className="size-4" />
+          )}
+        </Button>
+      )}
       <span className="text-sm font-semibold">SourceWeft</span>
     </div>
   );

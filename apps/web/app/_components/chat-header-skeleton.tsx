@@ -18,12 +18,12 @@ export function ChatHeaderSkeleton() {
       <div
         className={cn(
           "flex h-full min-w-0 items-center gap-2 pr-3 sm:pr-4",
-          desktopTitlebar && !layout?.conversationsDocked
-            ? "pl-[264px]"
-            : "pl-3 sm:pl-4",
+          layout?.titlebarInset ? "pl-6" : "pl-3 sm:pl-4",
         )}
       >
-        <div className="size-8 shrink-0 rounded-md bg-muted/60" />
+        {layout?.railWidth ? null : (
+          <div className="size-8 shrink-0 rounded-md bg-muted/60" />
+        )}
         <div className="min-w-0 flex-1">
           <div className="h-4 w-32 max-w-full rounded-full bg-muted/60" />
         </div>
