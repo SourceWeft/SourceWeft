@@ -965,6 +965,11 @@
       "retry": "重試",
       "memberFallback": "成員"
     },
+    "billing": {
+      "loadingFeatures": "正在載入可用功能…",
+      "disabled": "商業功能已停用。",
+      "loadingBilling": "正在載入帳單…"
+    },
     "nav": {
       "profile": "個人資料",
       "team": "團隊",

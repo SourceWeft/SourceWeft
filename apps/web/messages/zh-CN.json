@@ -956,6 +956,11 @@
       "retry": "重试",
       "memberFallback": "成员"
     },
+    "billing": {
+      "loadingFeatures": "正在加载可用功能…",
+      "disabled": "商业功能已停用。",
+      "loadingBilling": "正在加载账单…"
+    },
     "nav": {
       "profile": "个人资料",
       "team": "团队",
