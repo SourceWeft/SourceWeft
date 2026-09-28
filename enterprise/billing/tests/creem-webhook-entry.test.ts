@@ -30,9 +30,16 @@ function fixture(
   };
   const syncCalls: unknown[][] = [];
   const reversalCalls: unknown[][] = [];
+  const warnCalls: { message: string; fields?: Record<string, unknown> }[] = [];
   const handler = createCreemWebhookHandler({
     config,
-    logger: { info() {}, warn() {}, error() {} },
+    logger: {
+      info() {},
+      warn(message, fields) {
+        warnCalls.push({ message, fields });
+      },
+      error() {},
+    },
     sync: async (...args: unknown[]) => {
       syncCalls.push(args);
     },
@@ -42,7 +49,7 @@ function fixture(
         reversalCalls.push(args);
       }),
   });
-  return { config, handler, syncCalls, reversalCalls };
+  return { config, handler, syncCalls, reversalCalls, warnCalls };
 }
 
 function sign(raw: string, secret = "creem-fixture-signing-secret") {
@@ -216,6 +223,48 @@ test("mode mismatch on a handled event is rejected", async () => {
   const response = await f.handler(post(raw, sign(raw)));
   assert.equal(response?.status, 403);
   assert.equal(f.syncCalls.length, 0);
+});
+
+test("mode mismatch logs the received and expected mode", async () => {
+  const f = fixture();
+  const raw = JSON.stringify({
+    id: "evt_sandbox_1",
+    eventType: "subscription.active",
+    object: { mode: "sandbox" },
+  });
+  const response = await f.handler(post(raw, sign(raw)));
+  assert.equal(response?.status, 403);
+  assert.equal(f.syncCalls.length, 0);
+
+  assert.equal(f.warnCalls.length, 1);
+  assert.equal(f.warnCalls[0]?.message, "Creem webhook mode mismatch");
+  assert.deepEqual(f.warnCalls[0]?.fields, {
+    eventType: "subscription.active",
+    webhookId: "evt_sandbox_1",
+    receivedMode: "sandbox",
+    expectedMode: "test",
+  });
+});
+
+test("mode mismatch on a refund event logs the received and expected mode", async () => {
+  const f = fixture();
+  const raw = JSON.stringify({
+    id: "evt_refund_sandbox_1",
+    eventType: "refund.created",
+    object: { id: "ref_sandbox_1", mode: "sandbox", status: "succeeded" },
+  });
+  const response = await f.handler(post(raw, sign(raw)));
+  assert.equal(response?.status, 403);
+  assert.equal(f.reversalCalls.length, 0);
+
+  assert.equal(f.warnCalls.length, 1);
+  assert.equal(f.warnCalls[0]?.message, "Creem webhook mode mismatch");
+  assert.deepEqual(f.warnCalls[0]?.fields, {
+    eventType: "refund.created",
+    webhookId: "evt_refund_sandbox_1",
+    receivedMode: "sandbox",
+    expectedMode: "test",
+  });
 });
 
 test("missing webhook secret rejects signed deliveries", async () => {

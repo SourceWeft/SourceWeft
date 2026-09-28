@@ -135,11 +135,21 @@ export function createCreemWebhookHandler(deps: {
         );
       }
 
-      if (data.mode !== (config.billing.creem.testMode ? "test" : "prod"))
+      const expectedReversalMode = config.billing.creem.testMode
+        ? "test"
+        : "prod";
+      if (data.mode !== expectedReversalMode) {
+        logger.warn("Creem webhook mode mismatch", {
+          eventType,
+          webhookId,
+          receivedMode: data.mode,
+          expectedMode: expectedReversalMode,
+        });
         return Response.json(
           { error: "Webhook environment mismatch" },
           { status: 403 },
         );
+      }
 
       try {
         await syncCreemReversalEvent(
@@ -190,11 +200,19 @@ export function createCreemWebhookHandler(deps: {
       );
     }
 
-    if (data.mode !== (config.billing.creem.testMode ? "test" : "prod"))
+    const expectedMode = config.billing.creem.testMode ? "test" : "prod";
+    if (data.mode !== expectedMode) {
+      logger.warn("Creem webhook mode mismatch", {
+        eventType,
+        webhookId: readString(data, "webhookId"),
+        receivedMode: data.mode,
+        expectedMode,
+      });
       return Response.json(
         { error: "Webhook environment mismatch" },
         { status: 403 },
       );
+    }
     try {
       await syncCreemSubscriptionEvent(eventType, data, statuses[eventType]!);
       return Response.json({ message: "Webhook received" });
