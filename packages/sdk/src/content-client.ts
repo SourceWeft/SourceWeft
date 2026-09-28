@@ -1,5 +1,6 @@
 import type { ThreadSourceSelectionResponse, UpdateThreadSourceSelectionRequest } from "@sourceweft/contracts";
 import type { RegistryVersionsResponse, RegistryVersionDetail } from "@sourceweft/contracts";
+import type { MarketMcpLocale } from "@sourceweft/market-contracts";
 import type {
   ThreadRunFailureSummary,
   AddByokModelRequest,
@@ -986,6 +987,8 @@ export class ContentClient {
       category?: string;
       limit?: number;
       cursor?: string;
+      /** Language of each item's `aiSummary`; English when omitted. */
+      locale?: MarketMcpLocale;
     },
   ) {
     const search = new URLSearchParams();
@@ -997,6 +1000,7 @@ export class ContentClient {
     if (params?.category) search.set("category", params.category);
     if (params?.limit) search.set("limit", String(params.limit));
     if (params?.cursor) search.set("cursor", params.cursor);
+    if (params?.locale) search.set("locale", params.locale);
     const suffix = search.size > 0 ? `?${search.toString()}` : "";
     return this.http.get<ListWorkspaceMarketMcpResponse>(
       `/v1/workspaces/${encode(workspaceId)}/market/mcp${suffix}`,
@@ -1029,9 +1033,20 @@ export class ContentClient {
     );
   }
 
-  getWorkspaceMarketMcp(workspaceId: string, identifier: string) {
+  /**
+   * One market server for the workspace: the public detail (its AI overview
+   * in `locale`, English when omitted or missing) and the workspace's install.
+   */
+  getWorkspaceMarketMcp(
+    workspaceId: string,
+    identifier: string,
+    options: { locale?: MarketMcpLocale } = {},
+  ) {
+    const suffix = options.locale
+      ? `?${new URLSearchParams({ locale: options.locale }).toString()}`
+      : "";
     return this.http.get<GetWorkspaceMarketMcpResponse>(
-      `/v1/workspaces/${encode(workspaceId)}/market/mcp/${encode(identifier)}`,
+      `/v1/workspaces/${encode(workspaceId)}/market/mcp/${encode(identifier)}${suffix}`,
     );
   }
 

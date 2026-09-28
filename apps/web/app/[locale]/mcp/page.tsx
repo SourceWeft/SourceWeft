@@ -12,6 +12,10 @@ import { DEFAULT_LOCALE, isLocale } from "@sourceweft/i18n/locales";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { routing } from "../../../i18n/routing";
 import { buildAlternates } from "../../../lib/i18n/metadata";
+import {
+  mcpOverviewLocale,
+  type MarketMcpLocale,
+} from "../../../lib/mcp-ai-overview";
 
 import { resolveInitialLandingAuthState } from "../../_landing/auth-state-server";
 import { SourceWeftFooter } from "../../_landing/components/sourceweft-footer";
@@ -104,6 +108,8 @@ function uniqueItems(items: MarketItemSummary[]) {
 async function loadHomeSections(input: {
   categories: MarketCategory[];
   counts: Record<string, number>;
+  // Language of each card's AI summary.
+  locale: MarketMcpLocale;
 }) {
   const topCategories = [...input.categories]
     .filter((category) => (input.counts[category.slug] ?? 0) > 0)
@@ -117,19 +123,26 @@ async function loadHomeSections(input: {
     listPublicMcp({
       includeDesktopOnly: true,
       limit: HOME_SECTION_SIZE,
+      locale: input.locale,
       official: true,
     }),
     listPublicMcp({
       includeDesktopOnly: true,
       limit: HOME_SECTION_SIZE,
+      locale: input.locale,
       verified: true,
     }),
-    listPublicMcp({ includeDesktopOnly: true, limit: 100 }),
+    listPublicMcp({
+      includeDesktopOnly: true,
+      limit: 100,
+      locale: input.locale,
+    }),
     ...topCategories.map((category) =>
       listPublicMcp({
         category: category.slug,
         includeDesktopOnly: true,
         limit: HOME_SECTION_SIZE,
+        locale: input.locale,
       }),
     ),
   ]);
@@ -223,15 +236,23 @@ export default async function PublicMcpMarketPage({
   const categoryNames = mcpCategoryNames(categories);
   const state = parseMcpBrowseState(params);
   const listView = isMcpListView(state);
+  // Cards show AI summaries in the visitor's language, English otherwise.
+  const overviewLocale = mcpOverviewLocale(locale);
 
   const [facets, market] = await Promise.all([
     countPublicMcpByCategory(mcpCountRequest(state)),
-    listView ? listPublicMcp(mcpListRequest(state)) : null,
+    listView
+      ? listPublicMcp({ ...mcpListRequest(state), locale: overviewLocale })
+      : null,
   ]);
   // Home sections pick the busiest categories, so they wait on the facets.
   const home = listView
     ? null
-    : await loadHomeSections({ categories, counts: facets.counts });
+    : await loadHomeSections({
+        categories,
+        counts: facets.counts,
+        locale: overviewLocale,
+      });
 
   const pageItems = market?.items ?? [
     ...(home?.featured ?? []),

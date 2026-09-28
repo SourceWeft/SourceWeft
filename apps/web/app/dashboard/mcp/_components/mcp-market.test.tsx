@@ -126,6 +126,7 @@ describe("McpMarket ?mcp= deep link", { timeout: 30_000 }, () => {
     expect(api.getWorkspaceMarketMcp).toHaveBeenCalledWith(
       "ws-1",
       onPage.identifier,
+      { locale: "en" },
     );
     expect(tabLabels()).toEqual(["Overview", "README", "Tools (0)"]);
     expect(Element.prototype.scrollIntoView).toHaveBeenCalledWith({

@@ -11,6 +11,7 @@ import {
   marketCategoryCountsResponseSchema,
   type ListMarketMcpRequest,
   type ListMarketSkillsRequest,
+  type MarketMcpLocale,
   type MarketSkillLocale,
 } from "@sourceweft/market-contracts";
 
@@ -187,6 +188,9 @@ export class MarketClient {
     if (input.cursor) {
       params.set("cursor", input.cursor);
     }
+    if (input.locale) {
+      params.set("locale", input.locale);
+    }
     return this.request(
       appendQuery("/v1/mcp", params),
       { method: "GET" },
@@ -225,9 +229,17 @@ export class MarketClient {
     );
   }
 
-  getMcp(identifier: string) {
+  /**
+   * A public MCP server: listing, versions, README, and its AI overview in
+   * `locale` (English when omitted or missing).
+   */
+  getMcp(identifier: string, options: { locale?: MarketMcpLocale } = {}) {
+    const params = new URLSearchParams();
+    if (options.locale) {
+      params.set("locale", options.locale);
+    }
     return this.request(
-      `/v1/mcp/${encode(identifier)}`,
+      appendQuery(`/v1/mcp/${encode(identifier)}`, params),
       { method: "GET" },
       getMarketMcpResponseSchema,
     );

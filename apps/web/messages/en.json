@@ -502,6 +502,65 @@
       "source": "Source: <link>{path}</link>",
       "sourceAtCommit": "Source: <link>{path}</link> at commit <code>{commit}</code>",
       "viewInRepository": "Read the README in its repository"
+    },
+    "aiOverview": {
+      "title": "AI-generated overview",
+      "explainerLabel": "About this overview",
+      "explainer": "Written by an AI model from this server's registry description, manifest and README. It can be wrong or incomplete — check the server's own documentation before relying on it.",
+      "whatItDoes": "What it does",
+      "whenToUse": "When to use it",
+      "requirements": "Requirements",
+      "englishFallback": "Shown in English: no overview in your language yet.",
+      "cardSummaryTitle": "AI-generated summary",
+      "admin": {
+        "title": "AI overview",
+        "loading": "Loading overview…",
+        "failed": "Something went wrong. Try again.",
+        "analysisState": "Analysis status",
+        "analysisStatuses": {
+          "pending": "Pending",
+          "running": "Analyzing",
+          "ready": "Ready",
+          "failed": "Failed",
+          "needs-review": "Needs review",
+          "missing": "Not analyzed"
+        },
+        "categorySource": "Category source",
+        "categorySources": {
+          "auto": "Keyword rules",
+          "ai": "AI analysis",
+          "admin": "Administrator"
+        },
+        "rationale": "Classification rationale",
+        "evidence": "Evidence",
+        "retained": "Existing overviews stay visible until a new analysis succeeds.",
+        "systemModel": "System model",
+        "systemModelReady": "Ready",
+        "systemModelNotReady": "Not ready",
+        "noVersion": "This server has no published version.",
+        "skipReasons": {
+          "not-eligible": "Not generated for this server: only the latest published version of a public server gets one.",
+          "readme-pending": "Waiting for the README to be read; the overview is written once it is.",
+          "invalid-manifest": "Not generated: the stored manifest no longer parses.",
+          "no-content": "Not generated: there is no README, and the description is too short to say what the server does.",
+          "missing-version": "Not generated: the latest version could not be found."
+        },
+        "none": "No overview for the latest version yet.",
+        "locales": "Overview languages",
+        "hidden": "Hidden",
+        "visible": "Shown",
+        "missing": "Missing",
+        "stale": "Outdated",
+        "model": "Model",
+        "generatedAt": "Generated",
+        "regenerate": "Regenerate",
+        "regenerateQueued": "Queued. The new overview appears within a few minutes.",
+        "regenerateNotQueued": "Not queued: overviews are not written for this server.",
+        "hide": "Hide",
+        "show": "Show",
+        "hiddenDone": "Overview hidden.",
+        "shownDone": "Overview shown."
+      }
     }
   },
   "languageSwitcher": {
@@ -3988,6 +4047,11 @@
       "notInstalledFallback": "install it from the catalog.",
       "failed": "The import failed.",
       "retryFailed": "The import was not retried."
+    }
+  },
+  "market": {
+    "overview": {
+      "cautions": "Before you install"
     }
   },
   "dashboardSkillOverview": {

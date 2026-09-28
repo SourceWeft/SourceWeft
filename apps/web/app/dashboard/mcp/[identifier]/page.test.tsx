@@ -40,6 +40,10 @@ vi.mock("../../chat/_components/sources-hub/mcp/use-mcp", () => ({
 vi.mock("../_components/mcp-credentials-dialog", () => ({
   CredentialsDialog: () => null,
 }));
+// The overview admin panel has its own suite (page-ai-overview.test.tsx).
+vi.mock("../_components/mcp-overview-admin", () => ({
+  McpOverviewAdmin: () => null,
+}));
 
 const SHA = "0123456789abcdef0123456789abcdef01234567";
 
@@ -162,6 +166,7 @@ describe("dashboard MCP detail page", { timeout: 30_000 }, () => {
     expect(api.getWorkspaceMarketMcp).toHaveBeenCalledWith(
       "ws-1",
       route.identifier,
+      { locale: "en" },
     );
     expect(tabs().map((node) => node.textContent)).toEqual([
       "Overview",

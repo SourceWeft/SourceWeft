@@ -493,6 +493,65 @@
       "source": "来源：<link>{path}</link>",
       "sourceAtCommit": "来源：<link>{path}</link>，提交 <code>{commit}</code>",
       "viewInRepository": "在仓库中阅读 README"
+    },
+    "aiOverview": {
+      "title": "AI 生成的概览",
+      "explainerLabel": "关于此概览",
+      "explainer": "由 AI 模型根据该服务在注册中心的描述、清单和 README 撰写，可能有误或不完整。使用前请以服务自身的文档为准。",
+      "whatItDoes": "功能",
+      "whenToUse": "适用场景",
+      "requirements": "运行要求",
+      "englishFallback": "暂无中文概览，以下为英文版本。",
+      "cardSummaryTitle": "AI 生成的简介",
+      "admin": {
+        "title": "AI 概览",
+        "loading": "正在加载概览…",
+        "failed": "出了点问题，请重试。",
+        "analysisState": "分析状态",
+        "analysisStatuses": {
+          "pending": "等待分析",
+          "running": "正在分析",
+          "ready": "已完成",
+          "failed": "分析失败",
+          "needs-review": "待人工审核",
+          "missing": "尚未分析"
+        },
+        "categorySource": "分类来源",
+        "categorySources": {
+          "auto": "关键词规则",
+          "ai": "AI 分析",
+          "admin": "管理员"
+        },
+        "rationale": "分类理由",
+        "evidence": "依据",
+        "retained": "新分析成功前，现有概览会继续显示。",
+        "systemModel": "系统模型",
+        "systemModelReady": "已就绪",
+        "systemModelNotReady": "未就绪",
+        "noVersion": "此服务没有已发布的版本。",
+        "skipReasons": {
+          "not-eligible": "未为此服务生成：只有公开服务的最新发布版本才会生成概览。",
+          "readme-pending": "正在等待读取 README，读取完成后再生成概览。",
+          "invalid-manifest": "未生成：已存储的清单无法解析。",
+          "no-content": "未生成：没有 README，描述也太短，无法说明此服务的用途。",
+          "missing-version": "未生成：找不到最新版本。"
+        },
+        "none": "最新版本暂无概览。",
+        "locales": "概览语言",
+        "hidden": "已隐藏",
+        "visible": "已显示",
+        "missing": "缺失",
+        "stale": "已过时",
+        "model": "模型",
+        "generatedAt": "生成时间",
+        "regenerate": "重新生成",
+        "regenerateQueued": "已加入队列，新概览将在几分钟内出现。",
+        "regenerateNotQueued": "未加入队列：此服务不在生成概览的范围内。",
+        "hide": "隐藏",
+        "show": "显示",
+        "hiddenDone": "概览已隐藏。",
+        "shownDone": "概览已显示。"
+      }
     }
   },
   "languageSwitcher": {
@@ -3979,6 +4038,11 @@
       "notInstalledFallback": "请从技能库中安装。",
       "failed": "导入失败。",
       "retryFailed": "未能重试导入。"
+    }
+  },
+  "market": {
+    "overview": {
+      "cautions": "安装前请注意"
     }
   },
   "dashboardSkillOverview": {
