@@ -1153,6 +1153,31 @@ export class PostgresBillingStore implements BillingStore {
     return mapWebhookEvent(row);
   }
 
+  async listStrandedWebhookEvents(
+    input: {
+      provider: BillingWebhookEventState["provider"];
+      receivedBefore: Date;
+      limit: number;
+    },
+    client?: PoolClient,
+  ) {
+    const safeLimit = Math.min(200, Math.max(1, Math.floor(input.limit)));
+    const rows = await this.pickDb(client)
+      .select()
+      .from(billingWebhookEvents)
+      .where(
+        and(
+          eq(billingWebhookEvents.provider, input.provider),
+          eq(billingWebhookEvents.status, "failed"),
+          lt(billingWebhookEvents.receivedAt, input.receivedBefore),
+        ),
+      )
+      .orderBy(billingWebhookEvents.receivedAt)
+      .limit(safeLimit);
+
+    return rows.map(mapWebhookEvent);
+  }
+
   async listAccountSubscriptionStates(
     client?: PoolClient,
   ): ReturnType<BillingStore["listAccountSubscriptionStates"]> {
