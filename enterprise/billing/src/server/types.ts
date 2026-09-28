@@ -16,6 +16,10 @@ import type {
   BillingLedgerEntry,
   TopupUnitType,
 } from "@sourceweft/contracts";
+import type {
+  PaymentReversalInput,
+  PaymentReversalNotice,
+} from "./payment-reversal";
 
 export type BillingRuntimeConfig = {
   saasEnabled: boolean;
@@ -164,6 +168,8 @@ export type BillingWebhookProcessInput = {
     status?: BillingSubscriptionStatus;
     metadata?: Record<string, unknown>;
   } | null;
+  paymentReversal?: PaymentReversalInput | null;
+  reversalNotice?: PaymentReversalNotice | null;
 };
 
 export type BillingWebhookProcessOutcome =

@@ -6,6 +6,7 @@ import type {
 } from "./types";
 import { isBillingError } from "./errors";
 import { BillingOrderService } from "./order-service";
+import type { BillingPaymentReversalService } from "./payment-reversal";
 import { BillingSubscriptionService } from "./subscription-service";
 import {
   createFallbackWebhookEventId,
@@ -18,6 +19,7 @@ export class BillingWebhookService {
     private readonly runtimeConfig: BillingRuntimeConfig,
     private readonly subscriptionService: BillingSubscriptionService,
     private readonly orderService?: BillingOrderService,
+    private readonly reversals?: BillingPaymentReversalService,
   ) {}
 
   async processSubscriptionWebhookEvent(
@@ -84,7 +86,12 @@ export class BillingWebhookService {
       };
     }
 
-    if (!input.snapshot && !input.orderFulfillment) {
+    if (
+      !input.snapshot &&
+      !input.orderFulfillment &&
+      !input.paymentReversal &&
+      !input.reversalNotice
+    ) {
       const ignored = await this.store.updateWebhookEventState(
         webhookEvent.id,
         {
@@ -115,6 +122,44 @@ export class BillingWebhookService {
 
       if (input.snapshot) {
         await this.subscriptionService.syncSubscriptionSnapshot(input.snapshot);
+      }
+
+      if (input.paymentReversal) {
+        if (!this.reversals) {
+          throw new Error("Billing payment reversal service is not configured");
+        }
+
+        const reversal = await this.reversals.applyPaymentReversal(
+          input.paymentReversal,
+        );
+
+        if (reversal.outcome === "rejected") {
+          const ignored = await this.store.updateWebhookEventState(
+            webhookEvent.id,
+            {
+              status: "ignored",
+              teamId: input.teamId,
+              externalSubscriptionId: input.externalSubscriptionId,
+              processedAt: new Date().toISOString(),
+              errorCode: `PAYMENT_REVERSAL_${reversal.reason.toUpperCase()}`,
+              errorMessage: `Payment reversal rejected: ${reversal.reason}`,
+            },
+          );
+
+          return {
+            outcome: "ignored",
+            webhookEvent: ignored,
+            reason: "payment_reversal_rejected",
+          };
+        }
+      }
+
+      if (input.reversalNotice) {
+        if (!this.reversals) {
+          throw new Error("Billing payment reversal service is not configured");
+        }
+
+        await this.reversals.reportNotice(input.reversalNotice);
       }
 
       const processed = await this.store.updateWebhookEventState(
