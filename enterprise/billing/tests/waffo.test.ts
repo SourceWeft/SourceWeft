@@ -442,28 +442,7 @@ test("a refund missing its order reference is unmatched, not retried forever", a
 test("a Waffo renewal refund with no local order raises the subscription notice", async () => {
   const f = createWaffoFixture();
   await checkout(f);
-  const now = new Date().toISOString();
-  f.store.subscription = {
-    id: "sub_1",
-    teamId: "team_1",
-    provider: "waffo",
-    planFamily: "individual_pro",
-    status: "active",
-    billingInterval: "monthly",
-    currentPeriodStart: now,
-    currentPeriodEnd: now,
-    externalCustomerId: null,
-    // Matches `event().data.orderId`, which `refundEvent()` inherits.
-    externalSubscriptionId: "ORD_2aUyqjCzEIiEcYMKj7TZtw",
-    externalSubscriptionItemId: null,
-    externalProductId: productId,
-    billingOrderId: "order_sub_1",
-    cancelAtPeriodEnd: false,
-    metadata: {},
-    lastEventAt: now,
-    createdAt: now,
-    updatedAt: now,
-  };
+  f.store.subscription = renewalSubscriptionFixture();
   const before = f.store.account!.addOnCreditsBalance;
 
   const missingOrderId = "missing-order-id";
@@ -491,6 +470,85 @@ test("a Waffo renewal refund with no local order raises the subscription notice"
   assert.equal(alert?.teamId, "team_1");
   assert.equal(alert?.metadata?.reason, "subscription_payment");
   assert.equal(alert?.metadata?.orderId, "order_sub_1");
+  // M4: matches the core's own subscription notice (`applyLocked`'s
+  // `locked.kind === "subscription"` branch), which also carries an amount.
+  // `refundEvent()`'s default `refundedAmount` is "12.50".
+  assert.equal(alert?.metadata?.amount, 1250);
+});
+
+function renewalSubscriptionFixture() {
+  const now = new Date().toISOString();
+  return {
+    id: "sub_1",
+    teamId: "team_1",
+    provider: "waffo" as const,
+    planFamily: "individual_pro" as const,
+    status: "active" as const,
+    billingInterval: "monthly" as const,
+    currentPeriodStart: now,
+    currentPeriodEnd: now,
+    externalCustomerId: null,
+    // Matches `event().data.orderId`, which `refundEvent()` inherits.
+    externalSubscriptionId: "ORD_2aUyqjCzEIiEcYMKj7TZtw",
+    externalSubscriptionItemId: null,
+    externalProductId: productId,
+    billingOrderId: "order_sub_1",
+    cancelAtPeriodEnd: false,
+    metadata: {},
+    lastEventAt: now,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+// Bug: `isRefund` (the `process()` dispatch gate) is true for both
+// `refund.succeeded` and `refund.failed`, so a failed refund with no local
+// order used to reach `unmatchedRefund` and raise an error-level
+// "Subscription payment reversed" (or "unmatched") alert even though
+// nothing was actually refunded. Both call shapes below must end quietly
+// ignored, with no alert at all — matching `processRefund`'s own
+// `refund.failed` short-circuit for the known-order case.
+test("a failed Waffo refund with no local order is ignored quietly, even when a subscription matches", async () => {
+  const f = createWaffoFixture();
+  await checkout(f);
+  f.store.subscription = renewalSubscriptionFixture();
+
+  const missingOrderId = "missing-order-id";
+  const failed = signedEvent(
+    f.refundEvent({
+      eventType: "refund.failed",
+      data: {
+        orderMerchantExternalId: missingOrderId,
+        orderMetadata: { sourceweftOrderId: missingOrderId },
+      },
+    }),
+  );
+  await f.inbox.receive(failed.raw, failed.signature);
+  await f.inbox.drain();
+
+  assert.equal(f.store.webhook?.status, "ignored");
+  assert.equal(f.store.webhook?.errorCode, "WAFFO_REFUND_FAILED");
+  assert.equal(f.alerts.length, 0);
+});
+
+test("a failed Waffo refund with no order and no subscription is ignored quietly", async () => {
+  const f = createWaffoFixture();
+  await checkout(f);
+  // No subscription recorded at all: the older `unmatched` path must also
+  // stay quiet for a failed refund.
+
+  const failed = signedEvent(
+    f.refundEvent({
+      eventType: "refund.failed",
+      data: { orderMerchantExternalId: undefined },
+    }),
+  );
+  await f.inbox.receive(failed.raw, failed.signature);
+  await f.inbox.drain();
+
+  assert.equal(f.store.webhook?.status, "ignored");
+  assert.equal(f.store.webhook?.errorCode, "WAFFO_REFUND_FAILED");
+  assert.equal(f.alerts.length, 0);
 });
 
 test("a malformed refund amount raises an alert and changes nothing", async () => {

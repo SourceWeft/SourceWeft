@@ -1226,8 +1226,14 @@ test("a Creem renewal refund with no local order raises the subscription notice"
 
 test("a Creem refund with an unknown subscription id still ends unmatched", async () => {
   const f = await fixture();
-  // No subscription recorded at all: the lookup must fail closed, not
-  // silently treat the refund as matched.
+
+  // A subscription is recorded, but its external id is not the one the
+  // refund references — a near miss must fail closed too, not only the
+  // empty-store case.
+  f.store.subscription = {
+    ...activeSubscriptionFixture(),
+    externalSubscriptionId: "sub_other_id",
+  };
 
   await f.reversalSync("refund.created", {
     id: "ref_unknown_subscription",
@@ -1249,13 +1255,50 @@ test("a Creem refund with an unknown subscription id still ends unmatched", asyn
 
   assert.equal(f.store.account?.addOnPagesBalance, 1000);
   assert.equal(reversalRows(f).length, 0);
-  const alert = f.alerts.find(
+  const mismatchedIdAlert = f.alerts.find(
     (entry) =>
       entry.alertKey ===
       "billing:payment-reversal-unmatched:creem:ref_unknown_subscription",
   );
-  assert.ok(alert);
-  assert.equal(alert?.metadata?.reason, "unmatched");
+  assert.ok(mismatchedIdAlert);
+  assert.equal(mismatchedIdAlert?.metadata?.reason, "unmatched");
+
+  // Same external id the refund references, but recorded under a different
+  // provider — the store key is (provider, externalSubscriptionId)
+  // together, so this must not match either.
+  f.store.subscription = {
+    ...activeSubscriptionFixture(),
+    provider: "waffo",
+    externalSubscriptionId: "sub_does_not_exist",
+  };
+
+  await f.reversalSync("refund.created", {
+    id: "ref_unknown_subscription_other_provider",
+    status: "succeeded",
+    refund_amount: 500,
+    refund_currency: "USD",
+    subscription: "sub_does_not_exist",
+    transaction: {
+      id: "tran_other_2",
+      amount: 500,
+      amount_paid: 500,
+      currency: "USD",
+      refunded_amount: null,
+    },
+    webhookEventType: "refund.created",
+    webhookId: "evt_refund_unknown_subscription_other_provider",
+    webhookCreatedAt: Date.now(),
+  });
+
+  assert.equal(f.store.account?.addOnPagesBalance, 1000);
+  assert.equal(reversalRows(f).length, 0);
+  const otherProviderAlert = f.alerts.find(
+    (entry) =>
+      entry.alertKey ===
+      "billing:payment-reversal-unmatched:creem:ref_unknown_subscription_other_provider",
+  );
+  assert.ok(otherProviderAlert);
+  assert.equal(otherProviderAlert?.metadata?.reason, "unmatched");
 });
 
 test("a Creem dispute with no local order still resolves the team through the subscription", async () => {
@@ -1285,6 +1328,132 @@ test("a Creem dispute with no local order still resolves the team through the su
   assert.equal(f.store.account?.addOnPagesBalance, 1000);
   const alert = f.alerts.find(
     (entry) => entry.alertKey === "billing:dispute-opened:creem:dis_renewal",
+  );
+  assert.ok(alert);
+  assert.equal(alert?.teamId, "team_1");
+  assert.equal(alert?.metadata?.orderId, "order_sub_1");
+});
+
+test("a Creem renewal refund falls back to transaction.subscription when the event carries no top-level subscription", async () => {
+  const f = await fixture();
+  f.store.subscription = activeSubscriptionFixture();
+
+  await f.reversalSync("refund.created", {
+    id: "ref_renewal_tx_subscription",
+    status: "succeeded",
+    refund_amount: 1200,
+    refund_currency: "USD",
+    // No top-level `subscription` at all — only the transaction carries it.
+    transaction: {
+      id: "tran_renewal_fallback",
+      type: "payment",
+      amount: 1200,
+      amount_paid: 1200,
+      currency: "USD",
+      refunded_amount: null,
+      subscription: "sub_ext_1",
+    },
+    order: { type: "recurring" },
+    webhookEventType: "refund.created",
+    webhookId: "evt_refund_renewal_tx_subscription",
+    webhookCreatedAt: Date.now(),
+  });
+
+  assert.equal(f.store.account?.addOnPagesBalance, 1000);
+  assert.equal(reversalRows(f).length, 0);
+  const alert = f.alerts.find(
+    (entry) =>
+      entry.alertKey === "billing:subscription-payment-reversal:team_1",
+  );
+  assert.ok(alert);
+  assert.equal(alert?.teamId, "team_1");
+  assert.equal(alert?.metadata?.reason, "subscription_payment");
+  assert.equal(alert?.metadata?.orderId, "order_sub_1");
+  const receipt = f.store.webhooks.get(
+    "creem:evt_refund_renewal_tx_subscription",
+  );
+  assert.equal(receipt?.status, "processed");
+  // M3: the receipt's own externalSubscriptionId is the resolved id (the
+  // transaction fallback), not left null just because the top-level field
+  // was absent.
+  assert.equal(receipt?.externalSubscriptionId, "sub_ext_1");
+});
+
+test("a Creem renewal refund prefers the top-level subscription id over transaction.subscription", async () => {
+  const f = await fixture();
+  f.store.subscription = activeSubscriptionFixture();
+
+  await f.reversalSync("refund.created", {
+    id: "ref_renewal_prefers_top_level",
+    status: "succeeded",
+    refund_amount: 1200,
+    refund_currency: "USD",
+    // Top-level id matches the stored subscription; transaction.subscription
+    // deliberately does not — if the code preferred the fallback over the
+    // top-level id, this would resolve nothing and fall through to
+    // `unmatched` instead.
+    subscription: "sub_ext_1",
+    transaction: {
+      id: "tran_renewal_prefers_top_level",
+      type: "payment",
+      amount: 1200,
+      amount_paid: 1200,
+      currency: "USD",
+      refunded_amount: null,
+      subscription: "sub_ext_mismatch",
+    },
+    order: { type: "recurring" },
+    webhookEventType: "refund.created",
+    webhookId: "evt_refund_renewal_prefers_top_level",
+    webhookCreatedAt: Date.now(),
+  });
+
+  assert.equal(f.store.account?.addOnPagesBalance, 1000);
+  const alert = f.alerts.find(
+    (entry) =>
+      entry.alertKey === "billing:subscription-payment-reversal:team_1",
+  );
+  assert.ok(alert);
+  assert.equal(alert?.metadata?.reason, "subscription_payment");
+  assert.equal(
+    f.store.webhooks.get("creem:evt_refund_renewal_prefers_top_level")
+      ?.externalSubscriptionId,
+    "sub_ext_1",
+  );
+});
+
+// M2: the `refund_pending` branch reuses the same no-order subscription
+// fallback as the dispute and succeeded-refund branches.
+test("a Creem renewal refund that is still pending resolves the team through the subscription", async () => {
+  const f = await fixture();
+  f.store.subscription = activeSubscriptionFixture();
+
+  await f.reversalSync("refund.created", {
+    id: "ref_renewal_pending",
+    status: "pending",
+    refund_amount: 1200,
+    refund_currency: "USD",
+    subscription: "sub_ext_1",
+    transaction: {
+      id: "tran_renewal_pending",
+      type: "payment",
+      amount: 1200,
+      amount_paid: 1200,
+      currency: "USD",
+    },
+    order: { type: "recurring" },
+    webhookEventType: "refund.created",
+    webhookId: "evt_refund_renewal_pending",
+    webhookCreatedAt: Date.now(),
+  });
+
+  // A pending refund is never applied, subscription match or not.
+  assert.equal(f.store.account?.addOnPagesBalance, 1000);
+  assert.equal(reversalRows(f).length, 0);
+  const alert = f.alerts.find(
+    (entry) =>
+      entry.alertKey ===
+      "billing:payment-reversal-refund-pending:creem:ref_renewal_pending",
   );
   assert.ok(alert);
   assert.equal(alert?.teamId, "team_1");

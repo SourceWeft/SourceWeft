@@ -167,14 +167,18 @@ test("payment reversal columns, constraints and payment-id lookup", async () => 
 });
 
 /**
- * Resolves once `promise` settles or a backend named `applicationName` is
- * waiting on a lock, whichever comes first (capped at about two seconds).
+ * Waits until `promise` settles or a backend named `applicationName` starts
+ * waiting on a lock, whichever comes first (capped at about two seconds),
+ * and reports which one actually happened. A caller that means to prove two
+ * operations serialize on a row lock — not just "both eventually finish
+ * correctly" — needs the "waiting" outcome itself, not only the result of
+ * awaiting `promise` afterwards.
  */
 async function settledOrWaitingOnLock(
   promise: Promise<unknown>,
   pool: Pool,
   applicationName: string,
-) {
+): Promise<"settled" | "waiting" | "timeout"> {
   let settled = false;
   void promise.then(
     () => (settled = true),
@@ -186,10 +190,11 @@ async function settledOrWaitingOnLock(
       [applicationName],
     );
     if (waiting.rows.length > 0) {
-      return;
+      return "waiting";
     }
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
+  return settled ? "settled" : "timeout";
 }
 
 test("a refund committed while fulfillment fails survives the failure bookkeeping", async () => {
@@ -363,7 +368,7 @@ test("a refund committed while fulfillment fails survives the failure bookkeepin
   }
 });
 
-test("checkout recovery's locked write keeps a reversal committed in between", async () => {
+test("checkout recovery's locked write and a concurrent reversal serialise on the order row", async () => {
   const connectionString = requireBillingTestDatabase();
   const id = randomUUID();
   const teamId = `billing_test_${id}`;
@@ -420,9 +425,10 @@ test("checkout recovery's locked write keeps a reversal committed in between", a
       currency: "usd",
     });
   let racingReversal = null as ReturnType<typeof recordReversal> | null;
+  let raceOutcome: "settled" | "waiting" | "timeout" | null = null;
   onLockedRead = async () => {
     racingReversal = recordReversal();
-    await settledOrWaitingOnLock(racingReversal, pool, racerName);
+    raceOutcome = await settledOrWaitingOnLock(racingReversal, pool, racerName);
   };
 
   const now = new Date().toISOString();
@@ -479,6 +485,11 @@ test("checkout recovery's locked write keeps a reversal committed in between", a
     assert.equal(recovered?.externalCheckoutId, "cs_recovered");
 
     assert.ok(racingReversal, "the reversal raced the recovery write");
+    // Proves serialization itself, not just an eventually-correct result:
+    // the reversal connection must have actually queued behind the order
+    // row lock while the recovery transaction still held it, not merely
+    // finished fast on its own.
+    assert.equal(raceOutcome, "waiting");
     const reversalResult = await racingReversal;
     // The order was never fulfilled, so the reversal only records itself
     // on the order for fulfillment to apply later.

@@ -808,3 +808,44 @@ test("a reversal input without a configured reversal service fails the receipt",
     "Billing payment reversal service is not configured",
   );
 });
+
+test("a reversal notice input without a configured reversal service fails the receipt", async () => {
+  // Mirrors the `paymentReversal` guard test above, but for the separate
+  // `reversalNotice` guard (`webhook-service.ts`'s own `if
+  // (!this.reversals)` check ahead of `reportNotice`).
+  const store = new MemoryBillingStore();
+  const webhookService = new BillingWebhookService(
+    store,
+    { ...runtimeConfig, provider: "creem" },
+    {} as unknown as BillingSubscriptionService,
+  );
+
+  await assert.rejects(
+    () =>
+      webhookService.processSubscriptionWebhookEvent({
+        provider: "creem",
+        providerEventId: "evt_reversal_notice_unconfigured",
+        eventType: "dispute.created",
+        payload: {},
+        teamId: "team_1",
+        externalSubscriptionId: null,
+        snapshot: null,
+        reversalNotice: {
+          reason: "dispute_opened",
+          provider: "creem",
+          providerReference: "dp_unconfigured",
+          orderId: "order_1",
+          teamId: "team_1",
+          amount: 1000,
+          currency: "USD",
+        },
+      }),
+    /Billing payment reversal service is not configured/,
+  );
+
+  assert.equal(store.webhook?.status, "failed");
+  assert.equal(
+    store.webhook?.errorMessage,
+    "Billing payment reversal service is not configured",
+  );
+});
