@@ -12,6 +12,11 @@ import type {
 } from "./types";
 
 const mocks = vi.hoisted(() => ({
+  // Winning the approved → running claim is the default; a test that needs a
+  // lost claim overrides it.
+  claimApprovedActionRunRecord: vi.fn(
+    async (_input: unknown): Promise<unknown> => ({ status: "running" }),
+  ),
   createActionRunRecord: vi.fn(),
   createSyncRunRecord: vi.fn(),
   enqueueConnectorSyncJob: vi.fn(),
@@ -28,6 +33,7 @@ vi.mock("./permissions", () => ({
 }));
 
 vi.mock("./repository", () => ({
+  claimApprovedActionRunRecord: mocks.claimApprovedActionRunRecord,
   createActionRunRecord: mocks.createActionRunRecord,
   createSyncRunRecord: mocks.createSyncRunRecord,
   findActionRunRecord: mocks.findActionRunRecord,
@@ -449,6 +455,53 @@ test("ConnectorActionRunner accepts resumed args with undefined optional fields"
   assert.equal(result.action.status, "succeeded");
   assert.equal(adapter.executeAction.mock.calls.length, 1);
   vi.clearAllMocks();
+});
+
+test("ConnectorActionRunner returns the claimed record without calling the provider when another execution won", async () => {
+  const adapter = {
+    executeAction: vi.fn(),
+  } satisfies Partial<ConnectorAdapter>;
+  const testRegistry = registry();
+  testRegistry.getAdapter.mockReturnValue(
+    adapter as unknown as ConnectorAdapter,
+  );
+  const oauthService = { getRuntimeToken: vi.fn() };
+  const running = action({ status: "running", executedBy: "user_1" });
+
+  mocks.requireConnectorWorkspace.mockResolvedValue({
+    workspace: { id: "workspace_1", organizationId: "team_1" },
+  });
+  mocks.findActionRunRecord
+    .mockResolvedValueOnce(action())
+    .mockResolvedValueOnce(running);
+  mocks.findSourceConnectorRecord.mockResolvedValue(connector());
+  mocks.claimApprovedActionRunRecord.mockResolvedValueOnce(null);
+
+  try {
+    const result = await new ConnectorActionRunner(
+      testRegistry as never,
+      oauthService as never,
+    ).execute({
+      workspaceId: "workspace_1",
+      connectorId: "connector_1",
+      actionRunId: "action_1",
+      userId: "user_1",
+    });
+
+    assert.equal(result.action, running);
+    assert.deepEqual(mocks.claimApprovedActionRunRecord.mock.calls[0]?.[0], {
+      teamId: "team_1",
+      workspaceId: "workspace_1",
+      connectorId: "connector_1",
+      actionRunId: "action_1",
+      executedBy: "user_1",
+    });
+    assert.equal(oauthService.getRuntimeToken.mock.calls.length, 0);
+    assert.equal(adapter.executeAction.mock.calls.length, 0);
+    assert.equal(mocks.updateActionRunRecord.mock.calls.length, 0);
+  } finally {
+    vi.clearAllMocks();
+  }
 });
 
 test("ConnectorActionRunner propose reuses an existing proposed action", async () => {
