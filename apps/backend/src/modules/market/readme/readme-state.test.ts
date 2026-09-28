@@ -9,9 +9,9 @@ import {
   MCP_README_MAX_ATTEMPTS,
   MCP_README_REFRESH_MS,
   mcpReadmeErrorBackoffMs,
-  mcpReadmeEtagApplies,
   mcpReadmeSubfolder,
   mcpReadmeTransition,
+  mcpReadmeUnchanged,
   mcpReadmeView,
   submittedReadmeColumns,
   type McpReadmeCurrent,
@@ -34,9 +34,7 @@ describe("fetch outcome transitions", () => {
         path: "mcp/README.md",
         ref: COMMIT,
         sha256: "f".repeat(64),
-        etag: '"abc"',
         byteSize: 8,
-        tokenPresent: true,
       },
       NOW,
     );
@@ -46,7 +44,6 @@ describe("fetch outcome transitions", () => {
       readmePath: "mcp/README.md",
       readmeRef: COMMIT,
       readmeSha256: "f".repeat(64),
-      readmeEtag: '"abc"',
       readmeFetchedAt: NOW,
       readmeAttempts: 0,
       readmeError: null,
@@ -55,14 +52,14 @@ describe("fetch outcome transitions", () => {
   });
 
   test("not_modified only moves the fetch times, at the stored status's interval", () => {
-    const unchanged = { status: "not_modified" as const, tokenPresent: true };
+    const unchanged = { status: "not_modified" as const };
     assert.deepEqual(mcpReadmeTransition(ok, unchanged, NOW), {
       readmeFetchedAt: NOW,
       readmeAttempts: 0,
       readmeError: null,
       readmeNextFetchAt: at(MCP_README_REFRESH_MS),
     });
-    // A 304 confirming "not Markdown" or "too large" keeps that status's pace.
+    // Kept at the stored status's pace, whatever that status is.
     assert.deepEqual(
       mcpReadmeTransition(
         { readmeStatus: "not_found", readmeAttempts: 1 },
@@ -76,7 +73,7 @@ describe("fetch outcome transitions", () => {
   test("not_found clears a stale README, and keeps the file a non-Markdown README names", () => {
     const missing = mcpReadmeTransition(
       ok,
-      { status: "not_found", reason: "missing", tokenPresent: true },
+      { status: "not_found", reason: "missing" },
       NOW,
     );
     assert.deepEqual(missing, {
@@ -85,7 +82,6 @@ describe("fetch outcome transitions", () => {
       readmeSha256: null,
       readmeRef: null,
       readmePath: null,
-      readmeEtag: null,
       readmeFetchedAt: NOW,
       readmeAttempts: 0,
       readmeError: null,
@@ -97,15 +93,12 @@ describe("fetch outcome transitions", () => {
         status: "not_found",
         reason: "not_markdown",
         path: "README.rst",
-        etag: '"rst"',
-        tokenPresent: true,
       },
       NOW,
     );
     assert.equal(rst.readmeStatus, "not_found");
     assert.equal(rst.readmeMd, null);
     assert.equal(rst.readmePath, "README.rst");
-    assert.equal(rst.readmeEtag, '"rst"');
   });
 
   test("too_large points at the file and leaves stored text alone", () => {
@@ -115,15 +108,12 @@ describe("fetch outcome transitions", () => {
         status: "too_large",
         path: "README.md",
         byteSize: MAX_README_BYTES + 1,
-        etag: '"big"',
-        tokenPresent: true,
       },
       NOW,
     );
     assert.equal(columns.readmeStatus, "too_large");
     assert.equal(columns.readmePath, "README.md");
     assert.equal(columns.readmeRef, null);
-    assert.equal(columns.readmeEtag, '"big"');
     assert.equal(
       columns.readmeNextFetchAt?.getTime(),
       at(MCP_README_ABSENT_REFRESH_MS).getTime(),
@@ -156,7 +146,7 @@ describe("fetch outcome transitions", () => {
     assert.deepEqual(
       mcpReadmeTransition(
         { readmeStatus: "pending", readmeAttempts: 2 },
-        { status: "rate_limited", resetAt, tokenPresent: true },
+        { status: "rate_limited", resetAt },
         NOW,
       ),
       { readmeNextFetchAt: resetAt },
@@ -166,8 +156,7 @@ describe("fetch outcome transitions", () => {
   test("an error backs off exponentially and stops after the last attempt", () => {
     const failure = {
       status: "error" as const,
-      message: "GitHub README request failed 502",
-      tokenPresent: true,
+      message: "GitHub GraphQL request failed 502",
     };
     let current: McpReadmeCurrent = { ...pending };
     const delays: Array<number | null> = [];
@@ -208,13 +197,38 @@ describe("fetch outcome transitions", () => {
     assert.equal(mcpReadmeErrorBackoffMs(40), MCP_README_ERROR_BACKOFF_MAX_MS);
   });
 
-  test("a stored ETag is sent only for a settled answer", () => {
-    assert.equal(mcpReadmeEtagApplies("ok"), true);
-    assert.equal(mcpReadmeEtagApplies("not_found"), true);
-    assert.equal(mcpReadmeEtagApplies("too_large"), true);
-    assert.equal(mcpReadmeEtagApplies("pending"), false);
-    assert.equal(mcpReadmeEtagApplies("error"), false);
-    assert.equal(mcpReadmeEtagApplies("unsupported_host"), false);
+  test("a fresh read is unchanged only when it found the same file with the same bytes", () => {
+    const read = {
+      status: "ok" as const,
+      markdown: "# Server",
+      path: "README.md",
+      ref: COMMIT,
+      sha256: "f".repeat(64),
+      byteSize: 8,
+    };
+    const stored = {
+      readmeStatus: "ok" as const,
+      readmeSha256: "f".repeat(64),
+      readmePath: "README.md",
+    };
+    assert.equal(mcpReadmeUnchanged(stored, read), true);
+    assert.equal(
+      mcpReadmeUnchanged({ ...stored, readmeSha256: "e".repeat(64) }, read),
+      false,
+    );
+    assert.equal(
+      mcpReadmeUnchanged({ ...stored, readmePath: "readme.md" }, read),
+      false,
+    );
+    // Only a README that is shown can be confirmed; anything else is stored.
+    assert.equal(
+      mcpReadmeUnchanged({ ...stored, readmeStatus: "too_large" }, read),
+      false,
+    );
+    assert.equal(
+      mcpReadmeUnchanged(stored, { status: "not_found", reason: "missing" }),
+      false,
+    );
   });
 });
 
@@ -232,7 +246,6 @@ describe("the README a submission stores", () => {
         readmePath: "mcp/README.md",
         readmeRef: COMMIT,
         readmeSha256: createHash("sha256").update(bytes).digest("hex"),
-        readmeEtag: null,
         readmeFetchedAt: NOW,
         readmeAttempts: 0,
         readmeError: null,

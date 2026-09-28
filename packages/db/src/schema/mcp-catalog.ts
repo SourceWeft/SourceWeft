@@ -124,10 +124,11 @@ export const mcpServerVersions = pgTable(
       .$type<Record<string, unknown>>()
       .notNull()
       .default(sql`'{}'::jsonb`),
-    // The author's README for this version, as GitHub's README API (or the
-    // submission's own repository read) returned it. Written by the README
-    // fetch job and the submission path only: a federation re-sync never
-    // touches the `readme_*` columns or `readme_md`.
+    // The author's README for this version, as read from the repository's
+    // default branch on GitHub (or by the submission's own repository read).
+    // Written by the README fetch job and the submission path; a version not
+    // yet read is filled from the previous version's README. A federation
+    // re-sync never clears or rewrites a README either of them stored.
     readmeMd: text("readme_md"),
     // Where the README came from: its repository-relative path, the commit it
     // was pinned to, and the sha256 of its bytes.
@@ -140,7 +141,6 @@ export const mcpServerVersions = pgTable(
       .$type<McpServerReadmeStatus>()
       .notNull()
       .default("pending"),
-    readmeEtag: text("readme_etag"),
     readmeFetchedAt: timestamp("readme_fetched_at", {
       withTimezone: true,
       mode: "date",

@@ -9,6 +9,7 @@ import {
 } from "@sourceweft/db";
 import type { McpRepositoryIngestOptions } from "../types";
 import { getMcpCategoryDefinition } from "../parser/categories";
+import { carryOverMcpReadme } from "../readme/readme-repository";
 import { hashId, mcpServerId, mcpServerVersionId } from "./plan";
 
 function categoryName(slug: string) {
@@ -233,8 +234,10 @@ export async function upsertMarketMcp(input: {
 
   // The README columns (`readme_md`, `readme_*`) are deliberately absent from
   // both the insert and the conflict update: a new version starts `pending`
-  // and due by the column defaults, and a re-sync never clears or rewrites a
-  // README the fetch job (or a submission) stored.
+  // and due by the column defaults, and is then filled from the previous
+  // version's README when there is one (it stays due, so the next batch reads
+  // it fresh). A re-sync never clears or rewrites a README the fetch job (or
+  // a submission) stored.
   await db
     .insert(mcpServerVersions)
     .values({
@@ -260,6 +263,7 @@ export async function upsertMarketMcp(input: {
         publishedAt: sql`coalesce(${mcpServerVersions.publishedAt}, excluded.published_at)`,
       },
     });
+  await carryOverMcpReadme({ serverId: itemId, versionId });
 
   // Categories follow the manifest only while nobody has chosen them: once the
   // AI overview ('ai') or a market admin ('admin') owns them, a re-sync leaves

@@ -2,9 +2,9 @@
  * Which file counts as a catalog entry's README, and how big one may be.
  *
  * Shared by every catalog that shows an author's README next to its own
- * metadata — skills pick it from a stored bundle, MCP servers from GitHub's
- * README API — so both agree on what a README is and when it is too large to
- * be worth showing.
+ * metadata — skills pick it from a stored bundle, MCP servers from their
+ * GitHub repository — so both agree on what a README is and when it is too
+ * large to be worth showing.
  */
 
 /**

@@ -39,16 +39,19 @@ there is no user-task creation API or worker handler.
 
 ## MCP README fetch
 
-Every 10 minutes (`MCP_README_SCHEDULE_INTERVAL_MS`) the scheduler queues one
-`mcp-readme-fetch` batch of up to 800 MCP server versions whose README is due:
-the latest published version of each published, public server, installed
-servers first, then web-executable ones, then the rest. It only queues. The
-worker reads GitHub's README API, because `GITHUB_TOKEN` is given to the api
-and worker services and not to the scheduler. While a batch is queued or
-running, no second one is queued. A spent rate limit defers the rest of the
-batch to GitHub's reset. Refresh intervals, backoff and the attempt cap are
-constants in `modules/market/readme/readme-state.ts`; there is no env
-variable.
+Every 5 minutes (`MCP_README_SCHEDULE_INTERVAL_MS`) the scheduler queues one
+`mcp-readme-fetch` batch of up to 5,000 MCP server versions whose README is
+due: the latest published version of each published, public server, installed
+servers first, then versions never read, then the newest versions. It only
+queues. The worker reads GitHub's GraphQL API, 20 directories per query and
+three queries at a time, because `GITHUB_TOKEN` is given to the api and worker
+services and not to the scheduler. GraphQL has no anonymous access: without
+`GITHUB_TOKEN` the batch reads nothing and says so in the admin status. While a
+batch is queued or running, no second one is queued. A spent rate limit defers
+the rest of the batch to GitHub's reset. A new version of a server starts with
+the previous version's README and is read again at once. Refresh intervals,
+backoff and the attempt cap are constants in
+`modules/market/readme/readme-state.ts`; there is no env variable.
 
 ## MCP AI overviews
 

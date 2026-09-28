@@ -92,6 +92,18 @@ export type GitHubRequestOptions = {
   signal?: AbortSignal;
 };
 
+/** What `githubFetch` sends when it is not a plain GET. */
+export type GitHubFetchOptions = GitHubRequestOptions & {
+  method?: "GET" | "POST";
+  body?: string;
+  /**
+   * Whether a 429 or 5xx is asked again here, with backoff (the default). A
+   * caller that reacts to one itself passes false: a GraphQL query that timed
+   * out is asked again as smaller queries, not as the same one.
+   */
+  retryServerErrors?: boolean;
+};
+
 function stripGitSuffix(value: string) {
   return value.endsWith(".git") ? value.slice(0, -4) : value;
 }
@@ -314,7 +326,7 @@ export function githubTimeoutError(url: string, timeoutMs: number) {
 export async function githubFetch(
   url: string,
   headers: Record<string, string>,
-  options: GitHubRequestOptions = {},
+  options: GitHubFetchOptions = {},
 ): Promise<Response> {
   const timeoutMs = options.timeoutMs ?? GITHUB_REQUEST_TIMEOUTS.metadataMs;
   let totalWaited = 0;
@@ -324,6 +336,8 @@ export async function githubFetch(
     let response: Response;
     try {
       response = await fetch(url, {
+        ...(options.method ? { method: options.method } : {}),
+        ...(options.body === undefined ? {} : { body: options.body }),
         headers,
         signal: options.signal
           ? AbortSignal.any([deadline, options.signal])
@@ -339,6 +353,12 @@ export async function githubFetch(
       throw error;
     }
     if (response.ok || !isRetryableGitHubResponse(response)) {
+      return response;
+    }
+    if (
+      options.retryServerErrors === false &&
+      !isGitHubRateLimitResponse(response)
+    ) {
       return response;
     }
     const wanted = githubRetryDelayMs(response, attempt);
@@ -385,6 +405,131 @@ async function fetchJson<T>(
     }
     throw error;
   }
+}
+
+// ---------------------------------------------------------------------------
+// GraphQL
+// ---------------------------------------------------------------------------
+
+export const GITHUB_GRAPHQL_URL = "https://api.github.com/graphql";
+
+/** One entry of a GraphQL answer's `errors`. */
+export type GitHubGraphqlError = {
+  type?: string;
+  /** The field that failed, from the query's root: `["r3"]` for alias `r3`. */
+  path?: readonly (string | number)[];
+  message: string;
+};
+
+/**
+ * A GraphQL answer. `ok` can carry errors for single fields next to the rest
+ * of the data — a repository that does not exist fails only its own alias.
+ * `failed` is a query GitHub did not answer as a whole (a timeout, which
+ * GitHub reports as a 502 or 504, an outage, a refused query), and
+ * `unauthorized` a token GitHub does not accept, or none at all.
+ */
+export type GitHubGraphqlResult<T> =
+  | { status: "ok"; data: T; errors: GitHubGraphqlError[] }
+  | { status: "unauthorized"; message: string }
+  | { status: "failed"; message: string };
+
+function describeFetchError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return String(error);
+  }
+  // `fetch` reports every network failure as "fetch failed"; the cause says which.
+  const cause = error.cause instanceof Error ? error.cause.message : null;
+  return cause ? `${error.message} (${cause})` : error.message;
+}
+
+/**
+ * Ask GitHub's GraphQL API, with `GITHUB_TOKEN`. GraphQL has no anonymous
+ * access, so without a token this answers `unauthorized` and sends nothing.
+ *
+ * A spent rate limit throws `GitHubRateLimitedError`, as `githubFetch` does:
+ * a 403 or 429 that outlasts the wait `githubFetch` allows, or GraphQL's own
+ * `RATE_LIMITED` error on a 200. A 5xx is not asked again here — a query that
+ * timed out would only time out again — so the caller decides what to retry.
+ */
+export async function githubGraphql<T>(
+  query: string,
+  variables: Record<string, unknown>,
+  options: GitHubRequestOptions = {},
+): Promise<GitHubGraphqlResult<T>> {
+  if (!hasGitHubToken()) {
+    return {
+      status: "unauthorized",
+      message:
+        "GITHUB_TOKEN is not set, and GitHub's GraphQL API has no anonymous access",
+    };
+  }
+  let response: Response;
+  try {
+    response = await githubFetch(
+      GITHUB_GRAPHQL_URL,
+      { ...githubHeaders(), "Content-Type": "application/json" },
+      {
+        ...options,
+        method: "POST",
+        body: JSON.stringify({ query, variables }),
+        retryServerErrors: false,
+      },
+    );
+  } catch (error) {
+    if (options.signal?.aborted || error instanceof GitHubRateLimitedError) {
+      throw error;
+    }
+    return { status: "failed", message: describeFetchError(error) };
+  }
+
+  if (response.status === 401) {
+    void response.body?.cancel().catch(() => undefined);
+    return {
+      status: "unauthorized",
+      message: "GitHub did not accept GITHUB_TOKEN (401)",
+    };
+  }
+  if (!response.ok) {
+    void response.body?.cancel().catch(() => undefined);
+    return {
+      status: "failed",
+      message: `GitHub GraphQL request failed ${response.status}`,
+    };
+  }
+
+  let body: { data?: T | null; errors?: unknown };
+  try {
+    body = (await response.json()) as typeof body;
+  } catch (error) {
+    if (options.signal?.aborted) {
+      throw error;
+    }
+    return {
+      status: "failed",
+      message: isGitHubTimeoutError(error)
+        ? githubTimeoutError(
+            GITHUB_GRAPHQL_URL,
+            options.timeoutMs ?? GITHUB_REQUEST_TIMEOUTS.metadataMs,
+          ).message
+        : `GitHub GraphQL answer is not JSON: ${describeFetchError(error)}`,
+    };
+  }
+  const errors = Array.isArray(body.errors)
+    ? (body.errors as GitHubGraphqlError[])
+    : [];
+  if (errors.some((error) => error.type === "RATE_LIMITED")) {
+    throw new GitHubRateLimitedError(
+      githubRateLimitResetAt(response),
+      GITHUB_GRAPHQL_URL,
+    );
+  }
+  if (!body.data) {
+    return {
+      status: "failed",
+      message: `GitHub GraphQL query failed: ${errors[0]?.message ?? "no data"}`,
+    };
+  }
+  return { status: "ok", data: body.data, errors };
 }
 
 /**

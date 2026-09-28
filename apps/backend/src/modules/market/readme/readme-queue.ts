@@ -11,20 +11,20 @@ import {
  * services, not to the scheduler — and the worker reads GitHub
  * (`worker/processors/mcp-readme-fetch.ts`).
  *
- * One job is one batch of versions, fetched one after another, so a batch
- * holds one worker slot however large it is.
+ * One job is one batch of versions, read in a few concurrent GraphQL queries
+ * at a time, so a batch holds one worker slot however large it is.
  */
 
 export const MCP_README_FETCH_JOB = "mcp-readme-fetch";
 
 /**
- * Versions queued per scheduled batch. About two thirds of registry entries
- * name no repository and cost no GitHub request, so a full batch is roughly
- * 500–600 README API reads: with the 10-minute schedule, a few thousand an
- * hour, inside the token's 5,000 while leaving room for other GitHub reads. A
- * spent rate limit defers the rest of the batch rather than failing it.
+ * Versions queued per scheduled batch. Twenty GitHub directories cost one
+ * GraphQL point and a few seconds, so a full batch is about 250 points and a
+ * few minutes of reading: the catalog's backfill takes well under an hour,
+ * and later batches are only the new and the due-for-refresh. A spent rate
+ * limit defers the rest of the batch rather than failing it.
  */
-export const MCP_README_BATCH_SIZE = 800;
+export const MCP_README_BATCH_SIZE = 5000;
 
 export type McpReadmeFetchJobPayload = {
   versionIds: string[];
@@ -84,11 +84,16 @@ export type McpReadmeBatchSummary = {
   /** Outcomes by fetch status. */
   outcomes: Record<string, number>;
   /**
-   * Whether the worker's GitHub requests carried `GITHUB_TOKEN`; null when
-   * the batch made no request.
+   * Whether the worker has `GITHUB_TOKEN`. Without it nothing is read: GitHub's
+   * GraphQL API has no anonymous access.
    */
-  tokenPresent: boolean | null;
+  tokenPresent: boolean;
   rateLimitedUntil: string | null;
+  /** Why the batch stopped before its end, if it did. */
+  stoppedBy: "no_token" | "unauthorized" | "rate_limited" | null;
+  /** GraphQL points the batch cost, and what GitHub said was left after it. */
+  points: number;
+  pointsRemaining: number | null;
 };
 
 /** Keeps the worker's last batch where the api can show it to admins. */

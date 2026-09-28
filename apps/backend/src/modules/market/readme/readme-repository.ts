@@ -12,20 +12,23 @@ import type { McpReadmeColumns } from "./readme-state";
 /**
  * Database access for MCP server READMEs. Only the latest published version
  * of a published, public server is ever fetched — the version the catalog
- * shows (`latestPublishedVersionOf`) — so every query here scopes to it.
+ * shows (`latestPublishedVersionOf`) — so every fetch query here scopes to
+ * it.
  */
 
 export type DueMcpReadme = {
   versionId: string;
   identifier: string;
   installed: boolean;
-  webExecutable: boolean;
+  neverRead: boolean;
 };
 
 /**
  * Versions whose README is due, most wanted first: servers some workspace has
- * installed, then ones that run on the web (a remote transport), then the
- * rest; newest in the catalog first within each.
+ * installed, then versions never read, then the newest version first. A
+ * README is the default branch's, not the version's, so what matters is
+ * whether the catalog shows anything for the version yet and how new the
+ * version is.
  */
 export async function findDueMcpReadmes(input: {
   limit: number;
@@ -36,7 +39,7 @@ export async function findDueMcpReadmes(input: {
     versionId: string;
     identifier: string;
     installed: boolean;
-    webExecutable: boolean;
+    neverRead: boolean;
   }>(sql`
     with installed as (
       select distinct ${workspaceMcpInstalls.marketIdentifier} as identifier
@@ -47,7 +50,7 @@ export async function findDueMcpReadmes(input: {
       v.id as "versionId",
       s.identifier as "identifier",
       (i.identifier is not null) as "installed",
-      (s.transport is not null and s.transport <> 'stdio') as "webExecutable"
+      (v.readme_fetched_at is null) as "neverRead"
     from ${mcpServerVersions} v
     join ${mcpServers} s on s.id = v.server_id
     left join installed i on i.identifier = s.identifier
@@ -56,15 +59,15 @@ export async function findDueMcpReadmes(input: {
       and s.status = 'published'
       and s.visibility = 'public'
       and v.id = ${latestPublishedVersionOf(sql`v.server_id`)}
-    order by "installed" desc, "webExecutable" desc,
-      s.published_at desc nulls last, s.id desc
+    order by "installed" desc, "neverRead" desc,
+      v.created_at desc, v.id desc
     limit ${input.limit}
   `);
   return result.rows.map((row) => ({
     versionId: row.versionId,
     identifier: row.identifier,
     installed: row.installed === true,
-    webExecutable: row.webExecutable === true,
+    neverRead: row.neverRead === true,
   }));
 }
 
@@ -75,28 +78,33 @@ export type ClaimedMcpReadme = {
   provenanceJson: Record<string, unknown> | null;
   readmeStatus: McpReadmeStatus;
   readmeAttempts: number;
-  readmeEtag: string | null;
   readmePath: string | null;
+  readmeSha256: string | null;
 };
 
 /**
- * Take one due version for fetching: push its next fetch out to `leaseUntil`
- * so another batch (or a redelivered one) passes it over, and read what the
- * fetch needs. Null when it is no longer due or no longer fetched at all (not
- * published and public). A worker that dies mid-fetch leaves the lease to
- * expire, after which the version is due again.
+ * Take the due versions among `versionIds` for fetching, in one statement:
+ * push their next fetch out to `leaseUntil` so another batch (or a
+ * redelivered one) passes them over, and read what the fetch needs. A version
+ * no longer due or no longer fetched at all (not published and public) is
+ * left out. A worker that dies mid-fetch leaves the lease to expire, after
+ * which the version is due again. The rows come back in no particular order:
+ * the caller matches them to its versions by `versionId`.
  */
-export async function claimMcpReadme(input: {
-  versionId: string;
+export async function claimMcpReadmes(input: {
+  versionIds: string[];
   leaseUntil: Date;
   now?: Date;
-}): Promise<ClaimedMcpReadme | null> {
+}): Promise<ClaimedMcpReadme[]> {
+  if (input.versionIds.length === 0) {
+    return [];
+  }
   const now = input.now ?? new Date();
   const result = await db.execute<ClaimedMcpReadme>(sql`
     update ${mcpServerVersions} v
     set readme_next_fetch_at = ${input.leaseUntil}
     from ${mcpServers} s
-    where v.id = ${input.versionId}
+    where v.id = any(${sql.param(input.versionIds)}::text[])
       and s.id = v.server_id
       and v.readme_next_fetch_at <= ${now}
       and v.status = 'published'
@@ -109,10 +117,10 @@ export async function claimMcpReadme(input: {
       v.provenance_json as "provenanceJson",
       v.readme_status as "readmeStatus",
       v.readme_attempts as "readmeAttempts",
-      v.readme_etag as "readmeEtag",
-      v.readme_path as "readmePath"
+      v.readme_path as "readmePath",
+      v.readme_sha256 as "readmeSha256"
   `);
-  return result.rows[0] ?? null;
+  return result.rows;
 }
 
 /** Write the README columns a transition or a submission produced. */
@@ -124,6 +132,48 @@ export async function writeMcpReadmeColumns(
     .update(mcpServerVersions)
     .set(columns)
     .where(eq(mcpServerVersions.id, versionId));
+}
+
+/**
+ * Give version `versionId` of server `serverId`, while it has never been read
+ * (`pending`, no fetch yet), the README of the server's most recently read
+ * other version. The README is read from the repository's default branch, not
+ * from the version, so a new version shows the previous one's README until
+ * the next read confirms or replaces it, instead of showing nothing. Its next
+ * fetch is left as it is (a new version stays due at once, so the next batch
+ * reads it fresh), and so are its attempts. False when there is nothing to
+ * copy or the version was read already.
+ */
+export async function carryOverMcpReadme(input: {
+  serverId: string;
+  versionId: string;
+}): Promise<boolean> {
+  const result = await db.execute<{ id: string }>(sql`
+    update ${mcpServerVersions} v
+    set readme_status = p.readme_status,
+      readme_md = p.readme_md,
+      readme_path = p.readme_path,
+      readme_ref = p.readme_ref,
+      readme_sha256 = p.readme_sha256,
+      readme_fetched_at = p.readme_fetched_at,
+      readme_error = p.readme_error
+    from (
+      select readme_status, readme_md, readme_path, readme_ref,
+        readme_sha256, readme_fetched_at, readme_error
+      from ${mcpServerVersions}
+      where server_id = ${input.serverId}
+        and id <> ${input.versionId}
+        and readme_status in ('ok', 'not_found', 'too_large', 'unsupported_host')
+      order by readme_fetched_at desc nulls last, created_at desc
+      limit 1
+    ) p
+    where v.id = ${input.versionId}
+      and v.server_id = ${input.serverId}
+      and v.readme_status = 'pending'
+      and v.readme_fetched_at is null
+    returning v.id as "id"
+  `);
+  return result.rows.length > 0;
 }
 
 /**
@@ -154,9 +204,8 @@ export async function deferMcpReadmes(input: {
 
 /**
  * A market admin's "fetch this README again": the latest version of a
- * published, public server goes back to `pending`, due now, with no attempts
- * and no ETag (so the next fetch reads the file in full rather than accept a
- * 304). Null when there is no such server.
+ * published, public server goes back to `pending`, due now, with no attempts.
+ * Null when there is no such server.
  */
 export async function resetMcpReadme(input: {
   identifier: string;
@@ -168,8 +217,7 @@ export async function resetMcpReadme(input: {
     set readme_status = 'pending',
       readme_next_fetch_at = ${now},
       readme_attempts = 0,
-      readme_error = null,
-      readme_etag = null
+      readme_error = null
     from ${mcpServers} s
     where s.identifier = ${input.identifier}
       and s.status = 'published'
