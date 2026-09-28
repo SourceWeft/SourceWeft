@@ -792,9 +792,7 @@
     },
     "sidebar": {
       "newChat": "新建对话",
-      "showConversations": "显示对话",
-      "expandSidebar": "展开侧边栏",
-      "collapseSidebar": "收起侧边栏",
+      "hideConversations": "收起对话列表",
       "hideSidebar": "隐藏侧边栏",
       "showSidebar": "显示侧边栏",
       "sheetTitle": "导航与对话",
@@ -1572,10 +1570,10 @@
   },
   "dashboardChatCanvas": {
     "header": {
-      "collapseSidebar": "收起侧边栏",
-      "expandSidebar": "展开侧边栏",
       "hideSidebar": "隐藏侧边栏",
       "showSidebar": "显示侧边栏",
+      "showConversations": "展开对话列表",
+      "hideConversations": "收起对话列表",
       "showHubWindow": "显示来源窗口",
       "hideSources": "隐藏来源",
       "showSources": "显示来源",

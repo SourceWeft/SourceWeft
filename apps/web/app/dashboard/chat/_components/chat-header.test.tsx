@@ -7,9 +7,9 @@ import { withIntl } from "@/test/react";
 
 const layout = vi.hoisted(() => ({
   conversationsOpen: true,
-  conversationsDocked: true,
   desktopTitlebar: true,
-  canDockConversations: true,
+  railWidth: 56,
+  titlebarInset: false,
   toggleConversations: vi.fn(),
 }));
 
@@ -47,32 +47,52 @@ function renderHeader(extra: Partial<Parameters<typeof ChatHeader>[0]> = {}) {
 
 beforeEach(() => {
   layout.conversationsOpen = true;
-  layout.conversationsDocked = true;
   layout.desktopTitlebar = true;
+  layout.railWidth = 56;
+  layout.titlebarInset = false;
   layout.toggleConversations.mockReset();
 });
 
-test("desktop chat header places the conversation toggle before the title", () => {
-  const html = renderHeader();
-  const toggleIndex = html.indexOf('aria-label="Collapse sidebar"');
-  const titleIndex = html.indexOf("Conversation title");
+test("on PC the header's first control collapses and expands the conversation list", () => {
+  const open = renderHeader();
+  assert.match(open, /aria-label="Hide conversations"/);
+  assert.ok(open.includes("lucide-panel-left-close"));
+  assert.ok(
+    open.indexOf("data-conversations-toggle") <
+      open.indexOf("Conversation title"),
+  );
 
-  assert.notEqual(toggleIndex, -1);
-  assert.notEqual(titleIndex, -1);
-  assert.ok(toggleIndex < titleIndex);
+  layout.conversationsOpen = false;
+  const collapsed = renderHeader();
+  assert.match(collapsed, /aria-label="Show conversations"/);
+  assert.ok(collapsed.includes("lucide-panel-left-open"));
+  assert.ok(
+    !renderHeader({ embedMode: true }).includes("data-conversations-toggle"),
+  );
 });
 
-test("collapsed desktop chat header keeps the expand control beside the title", () => {
+test("phones open the drawer from the same place", () => {
+  layout.railWidth = 0;
+  layout.desktopTitlebar = false;
   layout.conversationsOpen = false;
-  layout.conversationsDocked = false;
-
-  const html = renderHeader();
-
-  assert.match(html, /aria-label="Expand sidebar"/);
+  const closed = renderHeader();
+  assert.match(closed, /aria-label="Show sidebar"/);
   assert.ok(
-    html.indexOf('aria-label="Expand sidebar"') <
-      html.indexOf("Conversation title"),
+    closed.indexOf('aria-label="Show sidebar"') <
+      closed.indexOf("Conversation title"),
   );
+  layout.conversationsOpen = true;
+  assert.match(renderHeader(), /aria-label="Hide sidebar"/);
+});
+
+test("the macOS header clears the traffic lights without the old 264px gap", () => {
+  layout.titlebarInset = true;
+  const inset = renderHeader();
+  assert.ok(inset.includes("pl-6"));
+  assert.ok(!inset.includes("pl-[264px]"));
+
+  layout.titlebarInset = false;
+  assert.ok(renderHeader().includes("pl-3 sm:pl-4"));
 });
 
 test("a sub-agent thread shows its parent as a breadcrumb on the title's line", () => {

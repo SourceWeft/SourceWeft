@@ -801,9 +801,7 @@
     },
     "sidebar": {
       "newChat": "新對話",
-      "showConversations": "顯示對話",
-      "expandSidebar": "展開側邊欄",
-      "collapseSidebar": "收起側邊欄",
+      "hideConversations": "收起對話列表",
       "hideSidebar": "隱藏側邊欄",
       "showSidebar": "顯示側邊欄",
       "sheetTitle": "導覽與對話",
@@ -1581,10 +1579,10 @@
   },
   "dashboardChatCanvas": {
     "header": {
-      "collapseSidebar": "收起側邊欄",
-      "expandSidebar": "展開側邊欄",
       "hideSidebar": "隱藏側邊欄",
       "showSidebar": "顯示側邊欄",
+      "showConversations": "展開對話列表",
+      "hideConversations": "收起對話列表",
       "showHubWindow": "顯示來源視窗",
       "hideSources": "隱藏來源",
       "showSources": "顯示來源",

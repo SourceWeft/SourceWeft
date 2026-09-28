@@ -45,6 +45,7 @@ function render(
   locale = "en",
   catalog = intlMessages,
   includeChild = false,
+  showCreateChat = true,
 ) {
   const noop = () => {};
   const asyncNoop = async () => {};
@@ -62,6 +63,7 @@ function render(
         null,
         createElement(DashboardSidebarChatPanel, {
           desktopTitlebar,
+          showCreateChat,
           heading: null,
           navigation: null,
           footer: null,
@@ -141,6 +143,12 @@ test("new chat aligns with navigation and search belongs to the chats header", (
   assert.ok(newChatIndex >= 0);
   assert.ok(chatsIndex > newChatIndex);
   assert.ok(searchIndex > chatsIndex);
+});
+
+test("the PC column leaves New chat to the navigation rail", () => {
+  const column = render("cloud", "", false, "en", intlMessages, false, false);
+  assert.ok(!column.includes("New chat"));
+  assert.ok(column.includes('aria-label="Search all chats"'));
 });
 
 // Catalog alignment misses keys absent in every language. Rendering invokes

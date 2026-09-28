@@ -801,9 +801,7 @@
     },
     "sidebar": {
       "newChat": "New chat",
-      "showConversations": "Show conversations",
-      "expandSidebar": "Expand sidebar",
-      "collapseSidebar": "Collapse sidebar",
+      "hideConversations": "Hide conversations",
       "hideSidebar": "Hide sidebar",
       "showSidebar": "Show sidebar",
       "sheetTitle": "Navigation and conversations",
@@ -1581,10 +1579,10 @@
   },
   "dashboardChatCanvas": {
     "header": {
-      "collapseSidebar": "Collapse sidebar",
-      "expandSidebar": "Expand sidebar",
       "hideSidebar": "Hide sidebar",
       "showSidebar": "Show sidebar",
+      "showConversations": "Show conversations",
+      "hideConversations": "Hide conversations",
       "showHubWindow": "Show Hub window",
       "hideSources": "Hide sources",
       "showSources": "Show sources",
