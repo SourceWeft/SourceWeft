@@ -766,4 +766,5 @@ test("a failing failure-bookkeeping step does not mask the fulfilment error", as
   assert.equal(logged[0]?.message, "Failed to record fulfillment failure");
   assert.equal(logged[0]?.fields?.orderId, checkout.orderId);
   assert.equal(logged[0]?.fields?.code, "BILLING_ORDER_INVALID_GRANT");
+  assert.equal(logged[0]?.fields?.bookkeepingError, "db down");
 });

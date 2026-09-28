@@ -1071,13 +1071,20 @@ export class BillingOrderService {
     } catch (error) {
       try {
         await this.markFulfillmentFailed(input.orderId, error, input);
-      } catch {
+      } catch (bookkeepingError) {
         // Bookkeeping itself failed (e.g. the DB is down for this write
         // too): log it, but the fulfilment error below is still the real
         // failure — it must reach the caller unmasked.
         this.host?.logger.error("Failed to record fulfillment failure", {
           orderId: input.orderId,
           code: fulfillmentErrorCode(error),
+          bookkeepingError:
+            bookkeepingError instanceof Error
+              ? bookkeepingError.message
+              : String(bookkeepingError),
+          ...(bookkeepingError instanceof BillingError
+            ? { bookkeepingCode: bookkeepingError.code }
+            : {}),
         });
       }
       throw error;
