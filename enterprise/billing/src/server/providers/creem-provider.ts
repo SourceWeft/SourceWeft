@@ -99,25 +99,6 @@ export class CreemBillingProvider implements BillingProviderAdapter {
     return productId;
   }
 
-  private resolveSubscriptionCustomerId(subscription: unknown) {
-    const record =
-      subscription && typeof subscription === "object"
-        ? (subscription as Record<string, unknown>)
-        : null;
-    const customer = record?.customer;
-
-    if (typeof customer === "string" && customer.trim()) {
-      return customer;
-    }
-
-    if (customer && typeof customer === "object") {
-      const id = (customer as Record<string, unknown>).id;
-      return typeof id === "string" && id.trim() ? id : null;
-    }
-
-    return null;
-  }
-
   async createCheckout(
     input: BillingProviderCheckoutInput,
   ): Promise<BillingProviderCheckoutResult> {
@@ -185,7 +166,9 @@ export class CreemBillingProvider implements BillingProviderAdapter {
       const subscription = await creemClient.subscriptions.get(
         input.externalSubscriptionId,
       );
-      externalCustomerId = this.resolveSubscriptionCustomerId(subscription);
+      externalCustomerId = readReferenceId(
+        toObjectRecord(subscription)?.customer,
+      );
     }
 
     if (!externalCustomerId) {

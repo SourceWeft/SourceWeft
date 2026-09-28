@@ -499,8 +499,25 @@ export class WaffoWebhookService {
    * one. Notice-and-ignore rather than throw either way, so it does not
    * retry forever. Runs before an `order` is even resolved, so only the
    * event itself is available for the notice.
+   *
+   * `isRefund` (the caller) covers both `refund.succeeded` and
+   * `refund.failed` — a failed refund with no local reference reaches here
+   * too, but nothing was actually refunded, so it must not raise either
+   * notice (an error-level "Subscription payment reversed" alert for a
+   * refund that never happened is worse than the noise it would save).
+   * Mirrors `processRefund`'s own `refund.failed` short-circuit for the
+   * known-order case, and Creem's early `status === "failed"` return, which
+   * both skip notice logic entirely for a non-final/failed event.
    */
   private async unmatchedRefund(event: WebhookEvent, receiptId: string) {
+    if (event.eventType === "refund.failed") {
+      this.input.logger.info("Waffo refund failed upstream; ignored", {
+        eventId: event.id,
+        refundTicketId: event.data.refundTicketMerchantExternalId,
+      });
+      return this.ignore(receiptId, "WAFFO_REFUND_FAILED");
+    }
+
     const subscription = await this.input.billing.findSubscriptionByProvider(
       "waffo",
       event.data.orderId,
@@ -513,6 +530,7 @@ export class WaffoWebhookService {
           event.data.refundTicketMerchantExternalId ?? event.eventId,
         orderId: subscription.billingOrderId,
         teamId: subscription.teamId,
+        amount: parseRefundAmount(event.data.refundedAmount),
         currency: event.data.currency,
       });
       return this.ignore(receiptId, "WAFFO_REFUND_SUBSCRIPTION_PAYMENT");

@@ -185,7 +185,11 @@ export function createCreemReversalSync(deps: {
         eventType,
         payload: data,
         teamId: order?.teamId ?? reversalNotice?.teamId ?? null,
-        externalSubscriptionId,
+        // The resolved id (top-level `subscription` falling back to
+        // `transaction.subscription`), not only the top-level one — the
+        // receipt should record the same subscription reference the notice
+        // logic itself resolved through.
+        externalSubscriptionId: subscriptionId,
         snapshot: null,
         paymentReversal,
         reversalNotice,
@@ -233,10 +237,16 @@ export function createCreemReversalSync(deps: {
       // Anything that isn't a terminal success or failure — "pending",
       // "requiresAction", an unrecognized value, or a missing status
       // entirely — is not final yet. Treat it the same way and carry the
-      // raw status along so an operator can tell them apart.
+      // raw status along so an operator can tell them apart. Same
+      // no-order-but-maybe-a-subscription fallback as the dispute and
+      // succeeded-refund branches, so a pending refund on a renewal
+      // payment still carries the team rather than losing it.
+      const subscriptionMatch = order
+        ? null
+        : await resolveSubscriptionTeam(billing, subscriptionId);
       logger.warn("Creem refund is not final; reporting a pending notice", {
         refundId: reversalId,
-        orderId: order?.id ?? null,
+        orderId: order?.id ?? subscriptionMatch?.orderId ?? null,
         webhookId,
         status,
       });
@@ -244,8 +254,8 @@ export function createCreemReversalSync(deps: {
         reason: "refund_pending",
         provider: "creem",
         providerReference: reversalId,
-        orderId: order?.id ?? null,
-        teamId: order?.teamId ?? null,
+        orderId: order?.id ?? subscriptionMatch?.orderId ?? null,
+        teamId: order?.teamId ?? subscriptionMatch?.teamId ?? null,
         amount: readNumber(data, "refund_amount"),
         currency: readString(data, "refund_currency"),
         metadata: { status },
