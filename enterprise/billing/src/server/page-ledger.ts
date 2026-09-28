@@ -154,6 +154,30 @@ export function clawbackMonthlyPages(
 }
 
 /**
+ * Recovers a payment-reversal delta from the buyer's own balance: add-on
+ * bucket first, then monthly, each clamped to its own balance so neither
+ * bucket goes negative. Unlike `clawbackMonthlyPages` (seat-downgrade,
+ * monthly-only), a reversal claws back purchased pages that may already have
+ * been drawn from either bucket, so both are eligible. Cycle counters and the
+ * legacy mirrors stay untouched — a caller that needs them refreshed calls
+ * `syncPageMirrorFields` itself. The caller compares `fromAddOn + fromMonthly`
+ * against the target delta to find the shortfall that could not be recovered.
+ */
+export function reclaimPages(account: BillingAccountState, units: number) {
+  let remaining = units;
+
+  const fromAddOn = Math.min(account.addOnPagesBalance, remaining);
+  account.addOnPagesBalance -= fromAddOn;
+  remaining -= fromAddOn;
+
+  const fromMonthly = Math.min(account.monthlyPagesBalance, remaining);
+  account.monthlyPagesBalance -= fromMonthly;
+  remaining -= fromMonthly;
+
+  return { fromAddOn, fromMonthly };
+}
+
+/**
  * Zeroes the expiring monthly bucket at a cycle boundary — add-on pages carry
  * over untouched. Returns the expired amount for the caller's expire ledger row.
  */
