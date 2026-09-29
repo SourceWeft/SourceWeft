@@ -152,25 +152,6 @@ export function mergeModelCallObservations(
   };
 }
 
-function mirrorCostForCompatibility(observation: ModelCallObservation) {
-  const costUsd = observation.cost?.effectiveUsd;
-  if (costUsd === undefined || !Number.isFinite(costUsd) || costUsd < 0) {
-    return observation;
-  }
-  observation.usage = {
-    ...(observation.usage ?? {}),
-    providerCostUsd: costUsd,
-    providerCostSource:
-      observation.cost?.source === "provider_estimated"
-        ? "provider_estimated"
-        : "provider_inline",
-    ...(observation.provenance.inlineCost
-      ? { providerCostSourcePath: observation.provenance.inlineCost }
-      : {}),
-  };
-  return observation;
-}
-
 export function normalizeModelCallObservation(input: {
   context: Omit<ProviderResponseContext, "rawUsage">;
   modelAlias: string;
@@ -230,5 +211,5 @@ export function normalizeModelCallObservation(input: {
     merged.cost = undefined;
   }
   merged.diagnostics = diagnostics.length > 0 ? diagnostics : undefined;
-  return mirrorCostForCompatibility(merged);
+  return merged;
 }

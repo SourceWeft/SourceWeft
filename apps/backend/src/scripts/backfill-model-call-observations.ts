@@ -53,6 +53,8 @@ function costClassification(input: {
   if (input.providerCostUsd === null) {
     return {};
   }
+  // Rows written before cost moved to the observation still carry the old
+  // usage mirror (`usage.providerCostSource`) in their stored JSON.
   const usage = record(input.usageJson);
   const metadata = record(input.metadataJson);
   const source = metadata?.costSource;

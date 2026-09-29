@@ -6,6 +6,14 @@ import { extractRawUsage } from "../src/normalize/extract";
 import { normalizeOpenAICompatibleUsage } from "../src/normalize/protocols/openai-compatible";
 import { makeResolvedTarget } from "./helpers";
 
+// Usage's defined fields: the protocol normalizer leaves unknown counts as
+// explicit undefined, which says nothing about what usage carries.
+function definedUsage(usage: object | undefined) {
+  return Object.fromEntries(
+    Object.entries(usage ?? {}).filter(([, value]) => value !== undefined),
+  );
+}
+
 function target(provider: string) {
   return makeResolvedTarget({
     provider,
@@ -109,13 +117,18 @@ test("OpenRouter provider adapter enriches protocol usage with cost", () => {
   });
 
   assert.equal(observation.cost?.inlineUsd, 0.012345678901);
+  assert.equal(observation.cost?.effectiveUsd, 0.012345678901);
   assert.equal(observation.cost?.source, "provider_inline");
-  assert.equal(observation.usage?.providerCostUsd, 0.012345678901);
-  assert.equal(observation.usage?.providerCostSource, "provider_inline");
   assert.equal(
-    observation.usage?.providerCostSourcePath,
+    observation.provenance.inlineCost,
     "provider:openrouter.usage.cost",
   );
+  // Usage carries token counts only; nothing mirrors the cost into it.
+  assert.deepEqual(definedUsage(observation.usage), {
+    inputTokens: 842,
+    outputTokens: 5012,
+    totalTokens: 5854,
+  });
 });
 
 function openRouterObservation(usage: Record<string, unknown>) {
@@ -256,10 +269,12 @@ test("DeepInfra provider adapter normalizes inference_status usage and cost", ()
     inputTokens: 89,
     outputTokens: 7,
     totalTokens: 96,
-    providerCostUsd: 0.000089,
-    providerCostSource: "provider_inline",
-    providerCostSourcePath: "provider:deepinfra.inference_status.cost",
   });
+  assert.equal(observation.cost?.effectiveUsd, 0.000089);
+  assert.equal(
+    observation.provenance.inlineCost,
+    "provider:deepinfra.inference_status.cost",
+  );
 });
 
 test("OrcaRouter provider adapter owns request headers, resolved model, and cost_usd", () => {
@@ -330,7 +345,11 @@ test("an unregistered provider cannot turn cost_usd into provider cost", () => {
   });
 
   assert.equal(observation.cost, undefined);
-  assert.equal(observation.usage?.providerCostUsd, undefined);
+  assert.deepEqual(definedUsage(observation.usage), {
+    inputTokens: 10,
+    outputTokens: 5,
+    totalTokens: 15,
+  });
 });
 
 test("OrcaRouter receipt adapter returns settled model, usage, and cost", async () => {

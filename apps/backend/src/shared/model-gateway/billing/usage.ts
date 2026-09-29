@@ -1,5 +1,7 @@
 /**
- * Summing of provider usage across calls.
+ * Summing of provider token usage across calls. Cost is not summed here: each
+ * call is costed on its own (see the turn's provider cost), because one call's
+ * reported cost cannot stand in for calls that reported none.
  *
  * Lives in the billing module rather than the agent turn because the billing
  * scope is now the thing that aggregates usage, and `shared/` must not depend
@@ -19,10 +21,6 @@ export function addUsage(
     left === undefined && right === undefined
       ? undefined
       : (left ?? 0) + (right ?? 0);
-  const costDetails = {
-    ...(current?.costDetails ?? {}),
-    ...(next.costDetails ?? {}),
-  };
 
   return {
     inputTokens: sum(current?.inputTokens, next.inputTokens),
@@ -37,8 +35,5 @@ export function addUsage(
     outputImageCount: sum(current?.outputImageCount, next.outputImageCount),
     inputAudioTokens: sum(current?.inputAudioTokens, next.inputAudioTokens),
     outputAudioTokens: sum(current?.outputAudioTokens, next.outputAudioTokens),
-    providerCostUsd: sum(current?.providerCostUsd, next.providerCostUsd),
-    providerCostSource: next.providerCostSource ?? current?.providerCostSource,
-    costDetails: Object.keys(costDetails).length > 0 ? costDetails : undefined,
   };
 }

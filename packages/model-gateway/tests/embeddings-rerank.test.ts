@@ -93,12 +93,14 @@ test("DeepInfra rerank preserves inference_status cost", async () => {
   });
 
   assert.equal(result.usage?.inputTokens, 89);
-  assert.equal(result.usage?.providerCostUsd, 0.000089);
-  assert.equal(result.usage?.providerCostSource, "provider_inline");
+  assert.equal(result.observation?.cost?.effectiveUsd, 0.000089);
+  assert.equal(result.observation?.cost?.source, "provider_inline");
   assert.equal(
-    result.usage?.providerCostSourcePath,
+    result.observation?.provenance.inlineCost,
     "provider:deepinfra.inference_status.cost",
   );
+  // Cost lives on the observation only; usage carries token counts.
+  assert.equal("providerCostUsd" in (result.usage ?? {}), false);
 });
 
 test("DeepInfra embeddings reject base64 encoding format", async () => {

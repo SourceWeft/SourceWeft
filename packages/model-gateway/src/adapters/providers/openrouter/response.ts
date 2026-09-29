@@ -36,7 +36,6 @@ function normalizeOpenRouterByokCost(
 ): ModelCallObservationPatch {
   const fee = finiteNumber(usage.cost);
   const upstream = costDetails?.upstream_inference_cost;
-  const details = costDetails ? { usage: { costDetails } } : {};
   if (upstream !== undefined) {
     const total = roundUsd((fee ?? 0) + upstream);
     return {
@@ -51,11 +50,10 @@ function normalizeOpenRouterByokCost(
         inlineCost:
           "provider:openrouter.usage.cost+usage.cost_details.upstream_inference_cost",
       },
-      ...details,
     };
   }
   if (fee === undefined) {
-    return details;
+    return {};
   }
   return {
     cost: {
@@ -66,7 +64,6 @@ function normalizeOpenRouterByokCost(
       status: "estimated",
     },
     provenance: { inlineCost: "provider:openrouter.usage.cost" },
-    ...details,
   };
 }
 
@@ -89,7 +86,7 @@ function normalizeOpenRouterResponse(
     costDetails?.inference_cost;
   const estimatedCost = finiteNumber(usage.estimated_cost);
   const costUsd = exactCost ?? estimatedCost;
-  if (costUsd === undefined && !costDetails) {
+  if (costUsd === undefined) {
     return undefined;
   }
 
@@ -109,22 +106,14 @@ function normalizeOpenRouterResponse(
       : ("provider_estimated" as const);
 
   return {
-    ...(costUsd !== undefined
-      ? {
-          cost: {
-            currency: "USD" as const,
-            inlineUsd: costUsd,
-            effectiveUsd: costUsd,
-            source,
-            status:
-              exactCost !== undefined
-                ? ("inline" as const)
-                : ("estimated" as const),
-          },
-          provenance: { inlineCost: `provider:openrouter.${sourcePath}` },
-        }
-      : {}),
-    ...(costDetails ? { usage: { costDetails } } : {}),
+    cost: {
+      currency: "USD",
+      inlineUsd: costUsd,
+      effectiveUsd: costUsd,
+      source,
+      status: exactCost !== undefined ? "inline" : "estimated",
+    },
+    provenance: { inlineCost: `provider:openrouter.${sourcePath}` },
   };
 }
 
