@@ -8,7 +8,7 @@ import {
   createCachedProviderCostLookups,
   type ProviderCostLookups,
 } from "../../content/provider-cost";
-import type { LlmExecutionConfig } from "../../content/model-gateway-audit";
+import { isByokObservedModelAlias } from "../../content/model-gateway-audit";
 import type { MeteredLlmCallTrace } from "./types";
 
 export {
@@ -29,9 +29,19 @@ export type TurnProviderCost = {
   pricingSnapshot: unknown;
 };
 
+// A call on the customer's own key costs the platform nothing. Its trace has
+// no profile (the observed identity is a `byok:` alias), and whether billing
+// costed it depends on the edition, so it is recognised from the call itself.
+function isByokCall(call: MeteredLlmCallTrace) {
+  return (
+    call.costSource === "byok" ||
+    call.skipReason === "byok" ||
+    isByokObservedModelAlias(call.modelAlias)
+  );
+}
+
 async function callCost(
   call: MeteredLlmCallTrace,
-  llm: LlmExecutionConfig | undefined,
   lookups: ProviderCostLookups,
 ) {
   // A billed call was costed with the uncached reads; keep that figure.
@@ -41,6 +51,14 @@ async function callCost(
       costSource: call.costSource,
       missingPriceComponents: call.missingPriceComponents ?? [],
       pricingSnapshot: call.pricingSnapshot ?? null,
+    };
+  }
+  if (isByokCall(call)) {
+    return {
+      providerCostUsd: 0,
+      costSource: "byok",
+      missingPriceComponents: [],
+      pricingSnapshot: null,
     };
   }
   if (!call.profileAlias) {
@@ -57,7 +75,6 @@ async function callCost(
     profileAlias: call.profileAlias,
     usage: call.usage,
     cost: call.observation?.cost,
-    llm,
     lookups,
   });
 }
@@ -75,7 +92,6 @@ function roundUsd(value: number) {
  */
 export async function computeTurnProviderCost(input: {
   calls: readonly MeteredLlmCallTrace[];
-  llm?: LlmExecutionConfig;
   lookups?: ProviderCostLookups;
 }): Promise<TurnProviderCost> {
   if (input.calls.length === 0) {
@@ -87,9 +103,7 @@ export async function computeTurnProviderCost(input: {
     };
   }
   const costs = await Promise.all(
-    input.calls.map((call) =>
-      callCost(call, input.llm, input.lookups ?? cachedLookups),
-    ),
+    input.calls.map((call) => callCost(call, input.lookups ?? cachedLookups)),
   );
   const known = costs.filter((cost) => cost.providerCostUsd !== null);
   const sources = new Set(costs.map((cost) => cost.costSource));

@@ -85,10 +85,7 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
     pricingSnapshot,
     costSource,
     missingPriceComponents,
-  } = await computeTurnProviderCost({
-    calls: meteredLlmCalls,
-    llm: input.llm,
-  });
+  } = await computeTurnProviderCost({ calls: meteredLlmCalls });
 
   await recordGatewayOperationEvent({
     teamId: prepared.workspace.organizationId,
@@ -305,7 +302,10 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
       sourceId: citation.sourceId,
       sourceTitle: citation.sourceTitle,
       documentId: citation.documentId,
-      chunkId: citation.externalUri || citation.fileReference ? null : citation.chunkId,
+      chunkId:
+        citation.externalUri || citation.fileReference
+          ? null
+          : citation.chunkId,
       fileReference: citation.fileReference,
       chunkNo: citation.chunkNo,
       excerpt: citation.excerpt,
