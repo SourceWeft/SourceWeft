@@ -22,6 +22,7 @@ import { SourceWeftFooter } from "../../_landing/components/sourceweft-footer";
 import { SourceWeftHeader } from "../../_landing/components/sourceweft-header";
 import { marketingContainerClassName } from "../../_landing/components/marketing-container";
 import { NO_INDEX_METADATA, OG_IMAGE, SITE_NAME, SITE_URL } from "../../seo";
+import { CopyButton } from "../mcp/_components/mcp-client";
 import {
   listPublicSkillCategories,
   listPublicSkillCollections,
@@ -141,7 +142,13 @@ async function GetStartedPanels({ signedIn }: { signedIn: boolean }) {
   const dashboardHref = signedIn
     ? "/dashboard/skills"
     : `/auth/sign-in?redirectTo=${encodeURIComponent("/dashboard/skills")}`;
+  // For an agent of one's own: the directory's SKILL.md teaches it to search
+  // and install from here with the CLI.
+  const agentPrompt = t("install.agentPrompt", {
+    url: `${SITE_URL}/skills/SKILL.md`,
+  });
   const panels = (["install", "publish"] as const).map((key) => ({
+    agentPrompt: key === "install" ? agentPrompt : null,
     cta: signedIn ? t(`${key}.ctaSignedIn`) : t(`${key}.ctaSignedOut`),
     description: t(`${key}.description`),
     icon: key === "install" ? Wrench : Upload,
@@ -176,6 +183,18 @@ async function GetStartedPanels({ signedIn }: { signedIn: boolean }) {
               </li>
             ))}
           </ol>
+          {panel.agentPrompt ? (
+            <div className="mt-3 flex items-start gap-2 pl-8">
+              <p className="min-w-0 flex-1 break-words rounded-lg bg-zinc-100 px-3 py-2 text-xs leading-5 text-zinc-800 dark:bg-white/10 dark:text-zinc-200">
+                {panel.agentPrompt}
+              </p>
+              <CopyButton
+                className="h-8 shrink-0 px-2"
+                label={t("install.copy")}
+                value={panel.agentPrompt}
+              />
+            </div>
+          ) : null}
           <LocaleLink
             className="group mt-5 inline-flex items-center gap-1.5 self-start text-sm font-medium text-zinc-950 dark:text-white"
             href={dashboardHref}

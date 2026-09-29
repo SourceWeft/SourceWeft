@@ -2,10 +2,7 @@ import type { Metadata } from "next";
 import { LocaleLink } from "../../_components/locale-link";
 import { notFound } from "next/navigation";
 import { AlertTriangle, ChevronRight } from "lucide-react";
-import type {
-  GetMarketSkillResponse,
-  MarketSkillSummary,
-} from "@sourceweft/market-sdk";
+import type { GetMarketSkillResponse } from "@sourceweft/market-sdk";
 import { hasLocale, useLocale, useTranslations } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { formatNumber } from "@sourceweft/i18n/format";
@@ -45,6 +42,7 @@ import {
   SkillFeaturedBadge,
   SkillVerifiedBadge,
 } from "../_components/skills-display";
+import { SkillInstallOptions } from "../_components/skill-install-options";
 import { SkillTile } from "../_components/skill-logo";
 import {
   commitUrl,
@@ -64,6 +62,7 @@ import {
   skillCategoryPath,
   skillClaimHref,
   skillCliInstallCommand,
+  skillInstallGuidePath,
   skillInstallHref,
   skillPath,
   skillTabHref,
@@ -156,7 +155,11 @@ export async function generateMetadata({
     );
     const url = alternates.canonical;
     return {
-      alternates,
+      alternates: {
+        ...alternates,
+        // For agents: this skill's install guide. Linked, never sniffed.
+        types: { "text/markdown": skillInstallGuidePath(skill.slug) },
+      },
       description,
       openGraph: {
         description,
@@ -183,12 +186,26 @@ export async function generateMetadata({
   }
 }
 
-/** A copyable shell command, as the install tab shows each one. */
-function CommandLine({ command }: { command: string }) {
+/**
+ * A copyable shell command, as the install tab shows each one — or, as
+ * `prose`, the agent prompt, which wraps at words rather than anywhere.
+ */
+function CommandLine({
+  command,
+  prose = false,
+}: {
+  command: string;
+  prose?: boolean;
+}) {
   const t = useTranslations("publicSkills.detail.install");
   return (
     <div className="mt-3 flex items-start gap-2">
-      <code className="min-w-0 flex-1 break-all rounded-lg bg-zinc-100 px-3 py-2 font-mono text-xs leading-5 text-zinc-800 dark:bg-white/10 dark:text-zinc-200">
+      <code
+        className={cn(
+          "min-w-0 flex-1 rounded-lg bg-zinc-100 px-3 py-2 text-xs leading-5 text-zinc-800 dark:bg-white/10 dark:text-zinc-200",
+          prose ? "break-words" : "break-all font-mono",
+        )}
+      >
         {command}
       </code>
       <CopyButton
@@ -267,34 +284,63 @@ function VersionChanges({
   );
 }
 
-function InstallCta({
+function InstallButton({
   className,
   installHref,
-  skill,
 }: {
   className?: string;
   installHref: string;
-  skill: MarketSkillSummary;
 }) {
   const t = useTranslations("publicSkills.detail.install");
-  const chatPrompt = t("chatPrompt", { slug: skill.slug });
   return (
-    <div className={className}>
-      <LocaleLink
-        className="inline-flex h-10 w-full items-center justify-center rounded-lg bg-zinc-950 px-4 text-sm font-medium text-white transition-colors hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-100"
-        href={installHref}
-        prefetch={false}
-        rel="nofollow"
-      >
-        {t("cta")}
-      </LocaleLink>
-      <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
-        <span>{t("chatLead")}</span>
-        <code className="min-w-0 break-all rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-zinc-800 dark:bg-white/10 dark:text-zinc-200">
-          {chatPrompt}
-        </code>
-        <CopyButton className="h-6 px-2" label={t("copy")} value={chatPrompt} />
-      </div>
+    <LocaleLink
+      className={cn(
+        "inline-flex h-10 w-full items-center justify-center rounded-lg bg-zinc-950 px-4 text-sm font-medium text-white transition-colors hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-100",
+        className,
+      )}
+      href={installHref}
+      prefetch={false}
+      rel="nofollow"
+    >
+      {t("cta")}
+    </LocaleLink>
+  );
+}
+
+/**
+ * The header's install box: SourceWeft first, then an agent of one's own —
+ * a prompt that works in any agent (SourceWeft chat included), or the CLI.
+ * A skill the CLI cannot install gets the SourceWeft button only: its install
+ * guide would have nothing to offer another agent.
+ */
+function InstallBox({
+  agentPrompt,
+  cliInstallCommand,
+  installHref,
+}: {
+  agentPrompt: string;
+  cliInstallCommand: string | null;
+  installHref: string;
+}) {
+  const t = useTranslations("publicSkills.detail.install");
+  return (
+    <div className="mt-5">
+      <InstallButton installHref={installHref} />
+      {cliInstallCommand ? (
+        <SkillInstallOptions
+          agentPrompt={agentPrompt}
+          cliCommand={cliInstallCommand}
+          labels={{
+            heading: t("options.heading"),
+            tabsLabel: t("options.tabsLabel"),
+            agent: t("options.agent"),
+            terminal: t("options.terminal"),
+            agentLead: t("options.agentLead"),
+            terminalLead: t("options.terminalLead"),
+            copy: t("copy"),
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -460,6 +506,11 @@ export default async function PublicSkillDetailPage({
   const scanFlagLabels = t.raw("scanFlags") as Record<string, string>;
   const primaryCategory = skill.categories[0];
   const pageUrl = `${SITE_URL}${skillPath(skill.slug)}`;
+  // Works in any agent: it reads the install guide and runs the CLI, or — in
+  // SourceWeft chat — hands the link to `install_skill`.
+  const agentPrompt = t("detail.install.agent.prompt", {
+    url: `${SITE_URL}${skillInstallGuidePath(skill.slug)}`,
+  });
 
   const tabs: [SkillDetailTab, string][] = [
     ["skill", t("detail.tabs.skill")],
@@ -685,10 +736,10 @@ export default async function PublicSkillDetailPage({
                   </div>
                 ))}
               </dl>
-              <InstallCta
-                className="mt-5"
+              <InstallBox
+                agentPrompt={agentPrompt}
+                cliInstallCommand={cliInstallCommand}
                 installHref={installHref}
-                skill={skill}
               />
               <div className="mt-4 flex flex-wrap gap-x-4 gap-y-2 text-sm">
                 {repoUrl ? (
@@ -796,10 +847,9 @@ export default async function PublicSkillDetailPage({
                     : t("detail.install.promptOnlyNote")}
                 </p>
               ) : null}
-              <InstallCta
+              <InstallButton
                 className="mt-5 max-w-sm"
                 installHref={installHref}
-                skill={skill}
               />
               {authState.isSignedIn ? null : (
                 <p className="mt-3 text-xs text-zinc-500">
@@ -807,23 +857,44 @@ export default async function PublicSkillDetailPage({
                 </p>
               )}
               {cliInstallCommand ? (
-                <div className="mt-8 border-t border-zinc-200 pt-6 dark:border-white/10">
-                  <h3 className="text-base font-semibold">
-                    {t("detail.install.cli.heading")}
-                  </h3>
-                  <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-                    {t("detail.install.cli.lead")}
-                  </p>
-                  <CommandLine command={cliInstallCommand} />
-                  <p className="mt-2 text-xs leading-5 text-zinc-500">
-                    {t("detail.install.cli.agentHint")}
-                  </p>
-                  {skill.capability === "executable" ? (
-                    <p className="mt-3 text-xs leading-5 text-amber-700 dark:text-amber-400">
-                      {t("detail.install.cli.executableNote")}
+                <>
+                  <div className="mt-8 border-t border-zinc-200 pt-6 dark:border-white/10">
+                    <h3 className="text-base font-semibold">
+                      {t("detail.install.agent.heading")}
+                    </h3>
+                    <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+                      {t("detail.install.agent.lead")}
                     </p>
-                  ) : null}
-                </div>
+                    <CommandLine command={agentPrompt} prose />
+                    <p className="mt-2 text-xs leading-5 text-zinc-500">
+                      {/* Not a LocaleLink: the guide is one English file, with no locale prefix. */}
+                      <a
+                        className="underline decoration-zinc-300 underline-offset-4 hover:text-zinc-950 hover:decoration-zinc-950 dark:decoration-white/20 dark:hover:text-white"
+                        href={skillInstallGuidePath(skill.slug)}
+                        rel="nofollow"
+                      >
+                        {t("detail.install.agent.guideLink")}
+                      </a>
+                    </p>
+                  </div>
+                  <div className="mt-8 border-t border-zinc-200 pt-6 dark:border-white/10">
+                    <h3 className="text-base font-semibold">
+                      {t("detail.install.cli.heading")}
+                    </h3>
+                    <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+                      {t("detail.install.cli.lead")}
+                    </p>
+                    <CommandLine command={cliInstallCommand} />
+                    <p className="mt-2 text-xs leading-5 text-zinc-500">
+                      {t("detail.install.cli.agentHint")}
+                    </p>
+                    {skill.capability === "executable" ? (
+                      <p className="mt-3 text-xs leading-5 text-amber-700 dark:text-amber-400">
+                        {t("detail.install.cli.executableNote")}
+                      </p>
+                    ) : null}
+                  </div>
+                </>
               ) : null}
               {localInstallCommand ? (
                 <div className="mt-8 border-t border-zinc-200 pt-6 dark:border-white/10">

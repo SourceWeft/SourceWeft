@@ -409,7 +409,7 @@ export function buildSkillAgentTools(
     {
       name: "install_skill",
       description:
-        "Install a skill into this workspace and switch it on, then use it in this same turn. `source` is a slug from search_skills, the author's short name for a skill, a link to this SourceWeft deployment's skill page, a GitHub URL (optionally deep-linked to one skill's directory) or `owner/repo`. When you already hold one of these, call this directly — do not search first. A GitHub repository not in the catalog yet is fetched, scanned and indexed first, in the background; every skill it ships is installed unless you pass `skill`. That usually finishes within this call; when it does not, the result says the import is in progress — it installs itself when done, so do not call again to wait for it. The result tells you which SKILL.md to read; anything the safety scan held for review is reported and not installed. Links to other sites are refused — ask for the GitHub repository instead.",
+        "Install a skill into this workspace and switch it on, then use it in this same turn. `source` is a slug from search_skills, the author's short name for a skill, a link to this SourceWeft deployment's skill page or its install.md guide, a GitHub URL (optionally deep-linked to one skill's directory) or `owner/repo`. When you already hold one of these, call this directly — do not search first. A GitHub repository not in the catalog yet is fetched, scanned and indexed first, in the background; every skill it ships is installed unless you pass `skill`. That usually finishes within this call; when it does not, the result says the import is in progress — it installs itself when done, so do not call again to wait for it. The result tells you which SKILL.md to read; anything the safety scan held for review is reported and not installed. Links to other sites are refused — ask for the GitHub repository instead.",
       schema: z.object({
         skill: z
           .string()
@@ -421,7 +421,7 @@ export function buildSkillAgentTools(
           .string()
           .min(1)
           .describe(
-            "A catalog slug or short name, a SourceWeft skill page link, a GitHub URL, or an `owner/repo` shorthand.",
+            "A catalog slug or short name, a SourceWeft skill page or install.md link, a GitHub URL, or an `owner/repo` shorthand.",
           ),
       }),
     },

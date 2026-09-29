@@ -35,6 +35,7 @@ import {
   validateCustomSkillFileInput,
 } from "./custom-validation";
 import { and, asc, eq, ilike, ne, or, sql } from "drizzle-orm";
+import { LOCALE_IDS } from "@sourceweft/i18n";
 import {
   SKILLS_CATALOG_DEFAULT_PAGE_SIZE,
   type SkillCatalogSort,
@@ -394,17 +395,24 @@ function describeInstallableRow(
 const SKILL_NAME_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
 const COMMIT_SHA_PATTERN = /^[0-9a-f]{40}$/i;
 // A skill's own page, in the dashboard or on the public market — whichever one
-// somebody copied the address of. `/skills/category/<slug>` is a listing, not a
-// skill: it has a second segment and so does not match.
-const OWN_SKILL_PAGE_PATTERN = /^\/(?:dashboard\/)?skills\/([^/]+)\/?$/;
+// somebody copied the address of, in any language (`/zh-CN/skills/<slug>`) —
+// or the market's install guide for agents (`/skills/<slug>/install.md`).
+// `/skills/category/<slug>` is a listing, not a skill: it has a second segment
+// and so does not match.
+const OWN_SKILL_PAGE_PATTERN = new RegExp(
+  `^/(?:dashboard/|(?:${LOCALE_IDS.join("|")})/)?skills/([^/]+)(?:/install\\.md|/)?$`,
+);
+// The directory's own guide for agents, which sits where a slug would.
+const DIRECTORY_GUIDE_SEGMENT = "SKILL.md";
 
 /**
  * What an `install_skill` source string refers to. A bare name is looked up in
  * the catalog; anything path- or URL-shaped is a GitHub reference, except a
- * link to this deployment's own skill page, which is just another way to name a
- * catalog entry. Other hosts are refused outright rather than handed to the
- * GitHub reader: a third-party directory page is not a source we can pin, scan
- * or attribute, and what such pages tell an agent to do is not ours to follow.
+ * link to this deployment's own skill page or its install guide, which is just
+ * another way to name a catalog entry. Other hosts are refused outright rather
+ * than handed to the GitHub reader: a third-party directory page is not a
+ * source we can pin, scan or attribute, and what such pages tell an agent to do
+ * is not ours to follow.
  */
 function parseSkillInstallSource(
   raw: string,
@@ -431,7 +439,7 @@ function parseSkillInstallSource(
       url.origin === new URL(config.auth.webBaseUrl).origin
         ? url.pathname.match(OWN_SKILL_PAGE_PATTERN)
         : null;
-    if (ownPage?.[1]) {
+    if (ownPage?.[1] && ownPage[1] !== DIRECTORY_GUIDE_SEGMENT) {
       return {
         kind: "name",
         name: decodeURIComponent(ownPage[1]).toLowerCase(),
@@ -984,8 +992,9 @@ export class ContentSkillsService {
    * names the skill by id (`ref.kind === "version"`); the agent's
    * `install_skill` names it by `source`, which accepts what a person would
    * naturally give: a catalog slug, the author's short name ("pdf"), a link to
-   * this deployment's own skill page, a GitHub URL (optionally deep-linked to
-   * one skill's directory), or the `owner/repo` shorthand.
+   * this deployment's own skill page or its install guide, a GitHub URL
+   * (optionally deep-linked to one skill's directory), or the `owner/repo`
+   * shorthand.
    *
    * Every form resolves to a catalog row through `installableSkillCondition`,
    * so a workspace can only install what its catalog shows it: builtins marked
