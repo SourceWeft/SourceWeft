@@ -20,6 +20,7 @@ import {
 import { resolveInitialLandingAuthState } from "../../_landing/auth-state-server";
 import { SourceWeftFooter } from "../../_landing/components/sourceweft-footer";
 import { SourceWeftHeader } from "../../_landing/components/sourceweft-header";
+import { marketingContainerClassName } from "../../_landing/components/marketing-container";
 import { JsonLd } from "../../_components/seo/json-ld";
 import { NO_INDEX_METADATA, OG_IMAGE, SITE_NAME, SITE_URL } from "../../seo";
 import {
@@ -38,7 +39,6 @@ import { McpListingView, McpSearchForm } from "./_components/mcp-listing";
 import {
   mcpCategoryNames,
   mcpCategoryPath,
-  mcpContainerClassName,
   McpDirectorySection,
   mcpFaqKeys,
   McpFaqSection,
@@ -285,10 +285,7 @@ export default async function PublicMcpMarketPage({
     <main className="min-h-svh bg-[#f7f4ed] text-zinc-950 dark:bg-zinc-950 dark:text-white">
       <JsonLd data={itemListJsonLd} />
       {listView ? null : <JsonLd data={faqJsonLd} />}
-      <SourceWeftHeader
-        authState={authState}
-        containerClassName={mcpContainerClassName}
-      />
+      <SourceWeftHeader authState={authState} />
 
       <section className="relative overflow-hidden border-b border-zinc-300 dark:border-white/10">
         <div
@@ -299,7 +296,7 @@ export default async function PublicMcpMarketPage({
           className={cn(
             "relative mx-auto",
             listView ? "pb-8 pt-24" : "pb-12 pt-28 lg:pb-16 lg:pt-32",
-            mcpContainerClassName,
+            marketingContainerClassName,
           )}
         >
           <div className="max-w-4xl">
@@ -347,7 +344,12 @@ export default async function PublicMcpMarketPage({
       ) : null}
 
       {home ? (
-        <div className={cn("mx-auto space-y-14 py-12", mcpContainerClassName)}>
+        <div
+          className={cn(
+            "mx-auto space-y-14 py-12",
+            marketingContainerClassName,
+          )}
+        >
           <McpDirectorySection
             categoryNames={categoryNames}
             description={t("directory.featuredDescription")}
@@ -416,10 +418,7 @@ export default async function PublicMcpMarketPage({
 
       {listView ? null : <McpFaqSection />}
 
-      <SourceWeftFooter
-        authState={authState}
-        containerClassName={mcpContainerClassName}
-      />
+      <SourceWeftFooter authState={authState} />
     </main>
   );
 }

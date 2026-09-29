@@ -16,6 +16,7 @@ import { DEFAULT_LOCALE, isLocale } from "@sourceweft/i18n/locales";
 import { addLocalePrefix } from "@sourceweft/i18n/resolve";
 import { useLocale, useTranslations } from "next-intl";
 
+import { marketingContainerClassName } from "./marketing-container";
 import styles from "./navigation.module.css";
 import { McpIcon, SkillIcon } from "../../_components/site-icons";
 import { LanguageSwitcher } from "../../_components/language-switcher";
@@ -67,10 +68,8 @@ function NavigationCard({
 
 export function SourceWeftHeader({
   authState,
-  containerClassName = "max-w-6xl px-4 sm:px-6",
 }: {
   authState: LandingAuthState;
-  containerClassName?: string;
 }) {
   const t = useTranslations("header");
   const activeLocale = useLocale();
@@ -171,7 +170,7 @@ export function SourceWeftHeader({
     >
       <nav
         aria-label={t("navigation")}
-        className={`mx-auto flex h-16 items-center justify-between gap-2 ${containerClassName}`}
+        className={`mx-auto flex h-16 items-center justify-between gap-2 ${marketingContainerClassName}`}
       >
         <SourceWeftBrandLockup size="nav" />
         <div className="hidden items-center gap-1 lg:flex">

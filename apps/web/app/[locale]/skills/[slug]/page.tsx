@@ -20,6 +20,7 @@ import { JsonLd } from "../../../_components/seo/json-ld";
 import { resolveInitialLandingAuthState } from "../../../_landing/auth-state-server";
 import { SourceWeftFooter } from "../../../_landing/components/sourceweft-footer";
 import { SourceWeftHeader } from "../../../_landing/components/sourceweft-header";
+import { marketingContainerClassName } from "../../../_landing/components/marketing-container";
 import { CopyButton } from "../../mcp/_components/mcp-client";
 import { NO_INDEX_METADATA, OG_IMAGE, SITE_NAME, SITE_URL } from "../../../seo";
 import {
@@ -65,7 +66,6 @@ import {
   skillCliInstallCommand,
   skillInstallHref,
   skillPath,
-  skillsContainerClassName,
   skillTabHref,
   skillTakedownMailto,
   stripSkillFrontmatter,
@@ -566,10 +566,7 @@ export default async function PublicSkillDetailPage({
     <main className="min-h-svh bg-[#f7f4ed] text-zinc-950 dark:bg-zinc-950 dark:text-white">
       <JsonLd data={sourceCodeJsonLd} />
       <JsonLd data={breadcrumbJsonLd} />
-      <SourceWeftHeader
-        authState={authState}
-        containerClassName={skillsContainerClassName}
-      />
+      <SourceWeftHeader authState={authState} />
 
       <section className="relative overflow-hidden border-b border-zinc-300 dark:border-white/10">
         <div
@@ -577,7 +574,7 @@ export default async function PublicSkillDetailPage({
           className="absolute inset-0 bg-[linear-gradient(rgba(24,24,27,0.055)_1px,transparent_1px),linear-gradient(90deg,rgba(24,24,27,0.055)_1px,transparent_1px)] bg-[size:42px_42px] dark:bg-[linear-gradient(rgba(255,255,255,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.045)_1px,transparent_1px)]"
         />
         <div
-          className={`relative mx-auto pb-8 pt-24 ${skillsContainerClassName}`}
+          className={`relative mx-auto pb-8 pt-24 ${marketingContainerClassName}`}
         >
           <nav
             aria-label={t("breadcrumb.label")}
@@ -727,7 +724,7 @@ export default async function PublicSkillDetailPage({
         className="sticky top-14 z-40 border-b border-zinc-300 bg-[#f7f4ed]/90 backdrop-blur-[12px] dark:border-white/10 dark:bg-zinc-950/90"
       >
         <div
-          className={`mx-auto flex gap-6 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${skillsContainerClassName}`}
+          className={`mx-auto flex gap-6 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${marketingContainerClassName}`}
         >
           {tabs.map(([id, label]) => (
             <LocaleLink
@@ -749,7 +746,7 @@ export default async function PublicSkillDetailPage({
       </nav>
 
       <div
-        className={`mx-auto grid gap-8 py-10 lg:grid-cols-[minmax(0,1fr)_320px] ${skillsContainerClassName}`}
+        className={`mx-auto grid gap-8 py-10 lg:grid-cols-[minmax(0,1fr)_320px] ${marketingContainerClassName}`}
       >
         <div className="min-w-0">
           {tab === "skill" ? (
@@ -892,7 +889,7 @@ export default async function PublicSkillDetailPage({
         slug={skill.slug}
       />
 
-      <section className={`mx-auto pb-12 ${skillsContainerClassName}`}>
+      <section className={`mx-auto pb-12 ${marketingContainerClassName}`}>
         <div className="border-t border-zinc-300 pt-8 text-sm leading-6 text-zinc-600 dark:border-white/10 dark:text-zinc-400">
           <h2 className="mb-3 text-base font-semibold text-zinc-950 dark:text-white">
             {t("detail.attribution.heading")}
@@ -954,7 +951,7 @@ export default async function PublicSkillDetailPage({
       </section>
 
       {related.sameRepository.length > 0 ? (
-        <section className={`mx-auto pb-16 ${skillsContainerClassName}`}>
+        <section className={`mx-auto pb-16 ${marketingContainerClassName}`}>
           <div className="border-t border-zinc-300 pt-10 dark:border-white/10">
             <h2 className="mb-6 text-2xl font-semibold tracking-tight">
               {t("detail.related.sameRepository", {
@@ -970,7 +967,7 @@ export default async function PublicSkillDetailPage({
       ) : null}
 
       {related.sameCategory.length > 0 && primaryCategory ? (
-        <section className={`mx-auto pb-16 ${skillsContainerClassName}`}>
+        <section className={`mx-auto pb-16 ${marketingContainerClassName}`}>
           <div className="border-t border-zinc-300 pt-10 dark:border-white/10">
             <h2 className="mb-6 text-2xl font-semibold tracking-tight">
               {t("detail.related.sameCategory", {
@@ -986,10 +983,7 @@ export default async function PublicSkillDetailPage({
         </section>
       ) : null}
 
-      <SourceWeftFooter
-        authState={authState}
-        containerClassName={skillsContainerClassName}
-      />
+      <SourceWeftFooter authState={authState} />
     </main>
   );
 }

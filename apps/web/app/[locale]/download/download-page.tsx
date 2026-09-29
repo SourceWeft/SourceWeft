@@ -16,6 +16,7 @@ import { useTranslations } from "next-intl";
 import { LocaleLink } from "../_components/locale-link";
 import { SourceWeftFooter } from "../../_landing/components/sourceweft-footer";
 import { SourceWeftHeader } from "../../_landing/components/sourceweft-header";
+import { marketingContainerClassName } from "../../_landing/components/marketing-container";
 import {
   useLandingAuthState,
   type LandingAuthState,
@@ -273,7 +274,9 @@ function HeroSection({
         }}
       />
 
-      <div className="relative mx-auto grid max-w-6xl gap-12 px-6 lg:grid-cols-[1.1fr_0.9fr] lg:items-stretch">
+      <div
+        className={`relative mx-auto grid gap-12 lg:grid-cols-[1.1fr_0.9fr] lg:items-stretch ${marketingContainerClassName}`}
+      >
         <div>
           <p className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-medium text-zinc-500 shadow-sm dark:border-white/10 dark:bg-zinc-900 dark:text-zinc-400">
             <Laptop className="size-3.5" />

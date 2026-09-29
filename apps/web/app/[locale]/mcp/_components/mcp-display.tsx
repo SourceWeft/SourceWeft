@@ -28,8 +28,7 @@ import { mcpCardText } from "../../../../lib/mcp-ai-overview";
 import { slugify } from "../../../../lib/slug";
 
 import { McpIcon } from "./mcp-client";
-
-export const mcpContainerClassName = "max-w-7xl px-5 sm:px-6 lg:px-8";
+import { marketingContainerClassName } from "../../../_landing/components/marketing-container";
 
 // FAQ copy lives in the `mcp.faq.items` catalog; these keys drive both the
 // rendered section and the FAQPage JSON-LD so structured data matches the
@@ -502,7 +501,7 @@ export function publicMcpDescription(input: {
 export async function McpFaqSection() {
   const t = await getTranslations("mcp.faq");
   return (
-    <section className={`mx-auto pb-16 ${mcpContainerClassName}`}>
+    <section className={`mx-auto pb-16 ${marketingContainerClassName}`}>
       <div className="border-t border-zinc-300 pt-10 dark:border-white/10">
         <div className="mb-7 max-w-2xl">
           <p className="text-xs font-semibold uppercase text-zinc-400">

@@ -23,8 +23,8 @@ import {
 import {
   McpCardGrid,
   mcpCategoryNames,
-  mcpContainerClassName,
 } from "./mcp-display";
+import { marketingContainerClassName } from "../../../_landing/components/marketing-container";
 
 export async function McpSearchForm({
   action,
@@ -190,7 +190,7 @@ export async function McpListingView({
     <section
       className={cn(
         "mx-auto grid grid-cols-[minmax(0,1fr)] gap-6 py-8 lg:grid-cols-[232px_minmax(0,1fr)] lg:gap-10",
-        mcpContainerClassName,
+        marketingContainerClassName,
       )}
     >
       <CategorySidebar

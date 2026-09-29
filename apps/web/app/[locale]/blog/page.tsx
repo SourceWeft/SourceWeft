@@ -10,12 +10,12 @@ import {
 } from "../../../lib/blog-db";
 import { SourceWeftFooter } from "../../_landing/components/sourceweft-footer";
 import { SourceWeftHeader } from "../../_landing/components/sourceweft-header";
+import { marketingContainerClassName } from "../../_landing/components/marketing-container";
 import { resolveInitialLandingAuthState } from "../../_landing/auth-state-server";
 import { OG_IMAGE, SITE_NAME } from "../../seo";
 import { routing } from "../../../i18n/routing";
 import { buildAlternates } from "../../../lib/i18n/metadata";
 import {
-  blogContainerClassName,
   EmptyBlogState,
   FeaturedArticle,
   PostCard,
@@ -76,16 +76,15 @@ export default async function BlogIndexPage({
 
   return (
     <main className="min-h-svh bg-[#f7f4ed] text-zinc-950 dark:bg-zinc-950 dark:text-white">
-      <SourceWeftHeader
-        authState={initialAuthState}
-        containerClassName={blogContainerClassName}
-      />
+      <SourceWeftHeader authState={initialAuthState} />
       <section className="relative overflow-hidden border-b border-zinc-300 dark:border-white/10">
         <div
           aria-hidden
           className="absolute inset-0 bg-[linear-gradient(rgba(24,24,27,0.055)_1px,transparent_1px),linear-gradient(90deg,rgba(24,24,27,0.055)_1px,transparent_1px)] bg-[size:42px_42px] dark:bg-[linear-gradient(rgba(255,255,255,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.045)_1px,transparent_1px)]"
         />
-        <div className="relative mx-auto max-w-7xl px-5 pb-12 pt-28 sm:px-6 lg:px-8 lg:pb-16 lg:pt-32">
+        <div
+          className={`relative mx-auto pb-12 pt-28 lg:pb-16 lg:pt-32 ${marketingContainerClassName}`}
+        >
           <div className="grid gap-10 lg:grid-cols-[0.9fr_1.1fr] lg:items-end">
             <div>
               <span className="mb-6 inline-flex items-center gap-2 rounded-full border border-zinc-300 bg-white/48 px-3 py-1 text-xs font-medium text-zinc-600 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-400">
@@ -112,7 +111,9 @@ export default async function BlogIndexPage({
       </section>
 
       {featuredPost ? (
-        <section className="mx-auto max-w-7xl px-5 py-10 sm:px-6 lg:px-8 lg:py-14">
+        <section
+          className={`mx-auto py-10 lg:py-14 ${marketingContainerClassName}`}
+        >
           <FeaturedArticle post={featuredPost} />
         </section>
       ) : (
@@ -121,7 +122,7 @@ export default async function BlogIndexPage({
 
       <section
         id="all-posts"
-        className="mx-auto max-w-7xl px-5 pb-16 sm:px-6 lg:px-8"
+        className={`mx-auto pb-16 ${marketingContainerClassName}`}
       >
         <div className="mb-8 flex flex-col justify-between gap-4 border-t border-zinc-300 pt-8 sm:flex-row sm:items-end dark:border-white/10">
           <div>
@@ -143,7 +144,7 @@ export default async function BlogIndexPage({
         </div>
       </section>
 
-      <SourceWeftFooter containerClassName={blogContainerClassName} />
+      <SourceWeftFooter />
     </main>
   );
 }

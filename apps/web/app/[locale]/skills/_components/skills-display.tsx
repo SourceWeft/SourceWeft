@@ -28,9 +28,9 @@ import {
   skillCategoryLabel,
   skillCollectionPath,
   skillPath,
-  skillsContainerClassName,
 } from "./skills-format";
 import { SkillTile } from "./skill-logo";
+import { marketingContainerClassName } from "../../../_landing/components/marketing-container";
 
 /**
  * What a card says about a skill: the AI summary in the visitor's language
@@ -421,7 +421,7 @@ export const skillsFaqKeys = [
 export function SkillsFaqSection() {
   const t = useTranslations("publicSkills.faq");
   return (
-    <section className={`mx-auto pb-16 ${skillsContainerClassName}`}>
+    <section className={`mx-auto pb-16 ${marketingContainerClassName}`}>
       <div className="border-t border-zinc-300 pt-10 dark:border-white/10">
         <div className="mb-7 max-w-2xl">
           <p className="text-xs font-semibold uppercase text-zinc-400">

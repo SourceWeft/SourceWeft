@@ -14,8 +14,7 @@ import { getLocale, getTranslations } from "next-intl/server";
 import type { BlogPostSummary } from "../../../../lib/blog-db";
 import { toUrlSlug } from "../../../../lib/slug";
 import { RawImage } from "../../../_components/raw-image";
-
-export const blogContainerClassName = "max-w-7xl px-5 sm:px-6 lg:px-8";
+import { marketingContainerClassName } from "../../../_landing/components/marketing-container";
 
 // Pure path (no locale prefix) — shared with sitemap.ts. UI links prefix it with
 // the active locale via `localizedTagPath`.
@@ -228,7 +227,7 @@ export async function PostCard({ post }: { post: BlogPostSummary }) {
 export async function EmptyBlogState() {
   const t = await getTranslations("blog");
   return (
-    <section className={`mx-auto py-16 ${blogContainerClassName}`}>
+    <section className={`mx-auto py-16 ${marketingContainerClassName}`}>
       <div className="rounded-lg border border-zinc-300 bg-white/54 p-10 text-center dark:border-white/10 dark:bg-white/[0.03]">
         <BookMarked className="mx-auto mb-4 size-8 text-zinc-400" />
         <h2 className="text-2xl font-semibold tracking-tight">{t("empty.title")}</h2>

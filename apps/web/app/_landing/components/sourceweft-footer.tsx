@@ -9,6 +9,7 @@ import { useCheckoutAvailable } from "../../../lib/billing-edition/capabilities"
 
 import { SourceWeftBrandLockup } from "./sourceweft-brand";
 import { GitHubLink } from "./github-link";
+import { marketingContainerClassName } from "./marketing-container";
 import type { LandingAuthState } from "./use-landing-auth-state";
 
 function FooterColumn({
@@ -41,10 +42,8 @@ function FooterColumn({
 
 export function SourceWeftFooter({
   authState,
-  containerClassName = "max-w-6xl px-6",
 }: {
   authState?: LandingAuthState;
-  containerClassName?: string;
 }) {
   const t = useTranslations("footer");
   const activeLocale = useLocale();
@@ -83,7 +82,7 @@ export function SourceWeftFooter({
 
   return (
     <footer className="border-t border-zinc-200 py-12 dark:border-white/[0.06]">
-      <div className={`mx-auto ${containerClassName}`}>
+      <div className={`mx-auto ${marketingContainerClassName}`}>
         <div className="grid gap-8 sm:grid-cols-2 md:grid-cols-4">
           <div>
             <SourceWeftBrandLockup size="footer" />

@@ -12,6 +12,7 @@ import { mcpOverviewLocale } from "../../../../../lib/mcp-ai-overview";
 import { resolveInitialLandingAuthState } from "../../../../_landing/auth-state-server";
 import { SourceWeftFooter } from "../../../../_landing/components/sourceweft-footer";
 import { SourceWeftHeader } from "../../../../_landing/components/sourceweft-header";
+import { marketingContainerClassName } from "../../../../_landing/components/marketing-container";
 import { JsonLd } from "../../../../_components/seo/json-ld";
 import {
   isIndexableListing,
@@ -34,7 +35,6 @@ import {
 import { McpListingView, McpSearchForm } from "../../_components/mcp-listing";
 import {
   mcpCategoryPath,
-  mcpContainerClassName,
   mcpPath,
 } from "../../_components/mcp-display";
 
@@ -188,17 +188,16 @@ export default async function PublicMcpCategoryPage({
     <main className="min-h-svh bg-[#f7f4ed] text-zinc-950 dark:bg-zinc-950 dark:text-white">
       <JsonLd data={breadcrumbJsonLd} />
       <JsonLd data={itemListJsonLd} />
-      <SourceWeftHeader
-        authState={authState}
-        containerClassName={mcpContainerClassName}
-      />
+      <SourceWeftHeader authState={authState} />
 
       <section className="relative overflow-hidden border-b border-zinc-300 dark:border-white/10">
         <div
           aria-hidden
           className="absolute inset-0 bg-[linear-gradient(rgba(24,24,27,0.055)_1px,transparent_1px),linear-gradient(90deg,rgba(24,24,27,0.055)_1px,transparent_1px)] bg-[size:42px_42px] dark:bg-[linear-gradient(rgba(255,255,255,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.045)_1px,transparent_1px)]"
         />
-        <div className={`relative mx-auto pb-8 pt-24 ${mcpContainerClassName}`}>
+        <div
+          className={`relative mx-auto pb-8 pt-24 ${marketingContainerClassName}`}
+        >
           <LocaleLink
             className="mb-8 inline-flex items-center gap-2 text-sm text-zinc-500 transition-colors hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-white"
             href="/mcp"
@@ -240,10 +239,7 @@ export default async function PublicMcpCategoryPage({
         total={facets.total}
       />
 
-      <SourceWeftFooter
-        authState={authState}
-        containerClassName={mcpContainerClassName}
-      />
+      <SourceWeftFooter authState={authState} />
     </main>
   );
 }

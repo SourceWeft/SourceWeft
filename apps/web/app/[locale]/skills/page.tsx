@@ -20,6 +20,7 @@ import { SkillIcon } from "../../_components/site-icons";
 import { resolveInitialLandingAuthState } from "../../_landing/auth-state-server";
 import { SourceWeftFooter } from "../../_landing/components/sourceweft-footer";
 import { SourceWeftHeader } from "../../_landing/components/sourceweft-header";
+import { marketingContainerClassName } from "../../_landing/components/marketing-container";
 import { NO_INDEX_METADATA, OG_IMAGE, SITE_NAME, SITE_URL } from "../../seo";
 import {
   listPublicSkillCategories,
@@ -42,11 +43,7 @@ import {
   skillsFaqKeys,
   SkillsFaqSection,
 } from "./_components/skills-display";
-import {
-  skillCategoryPath,
-  skillPath,
-  skillsContainerClassName,
-} from "./_components/skills-format";
+import { skillCategoryPath, skillPath } from "./_components/skills-format";
 import {
   SkillsListingView,
   SkillsSearchForm,
@@ -262,10 +259,7 @@ export default async function PublicSkillsMarketPage({
     <main className="min-h-svh bg-[#f7f4ed] text-zinc-950 dark:bg-zinc-950 dark:text-white">
       <JsonLd data={itemListJsonLd} />
       {listView ? null : <JsonLd data={faqJsonLd} />}
-      <SourceWeftHeader
-        authState={authState}
-        containerClassName={skillsContainerClassName}
-      />
+      <SourceWeftHeader authState={authState} />
 
       <section className="relative overflow-hidden border-b border-zinc-300 dark:border-white/10">
         <div
@@ -276,7 +270,7 @@ export default async function PublicSkillsMarketPage({
           className={cn(
             "relative mx-auto",
             listView ? "pb-8 pt-24" : "pb-12 pt-28 lg:pb-16 lg:pt-32",
-            skillsContainerClassName,
+            marketingContainerClassName,
           )}
         >
           <div className="max-w-4xl">
@@ -331,7 +325,10 @@ export default async function PublicSkillsMarketPage({
 
       {home ? (
         <div
-          className={cn("mx-auto space-y-14 py-12", skillsContainerClassName)}
+          className={cn(
+            "mx-auto space-y-14 py-12",
+            marketingContainerClassName,
+          )}
         >
           {directoryCategories.length > 0 ? (
             <section>
@@ -403,10 +400,7 @@ export default async function PublicSkillsMarketPage({
 
       {listView ? null : <SkillsFaqSection />}
 
-      <SourceWeftFooter
-        authState={authState}
-        containerClassName={skillsContainerClassName}
-      />
+      <SourceWeftFooter authState={authState} />
     </main>
   );
 }
