@@ -3404,7 +3404,7 @@
       "socialDescription": "公開的代理程式技能目錄，附帶完整的 SKILL.md、檔案、版本、授權條款和來源。",
       "heroWithCount": "探索 {count, number} 個代理程式技能",
       "heroWithoutCount": "探索代理程式技能",
-      "heroTail": "完整的說明、檔案、授權條款和來源一目瞭然，隨後即可新增到 SourceWeft 工作區。",
+      "heroTail": "完整的說明、檔案、授權條款和來源一目瞭然，隨後即可新增到 SourceWeft 工作區或你自己的代理程式。",
       "searchLabel": "搜尋技能",
       "searchPlaceholder": "依名稱、作者或技能用途搜尋",
       "searchSubmit": "搜尋",
@@ -3433,12 +3433,14 @@
       "getStarted": {
         "install": {
           "title": "安裝",
-          "description": "將任意已收錄的技能新增到 SourceWeft 工作區。",
+          "description": "將任意已收錄的技能新增到 SourceWeft 工作區，或新增到你自己的代理程式。",
           "steps": [
             "選擇一個技能，閱讀它的 SKILL.md、檔案和授權條款。",
-            "在儀表板的「技能」頁面將它新增到工作區。",
-            "在對話中使用它——或者貼上技能頁面連結，讓助理幫你安裝。"
+            "在儀表板的「技能」頁面將它新增到工作區——或者在 SourceWeft 對話中貼上技能頁面連結，讓助理幫你安裝。",
+            "在用 Claude Code、Codex、Cursor 或其他代理程式？把下面這段提示詞發給它，或者複製技能頁面上的提示詞。"
           ],
+          "agentPrompt": "閱讀 {url} 中的說明，用它幫我找到並安裝合適的代理程式技能。安裝任何一個之前，先告訴我它的來源、授權條款以及是否附帶腳本，等我確認。",
+          "copy": "複製",
           "ctaSignedIn": "在儀表板中開啟技能",
           "ctaSignedOut": "登入後安裝"
         },
@@ -3589,13 +3591,25 @@
           "為需要使用它的對話啟用該技能。"
         ],
         "signedOutNote": "系統會先要求你登入，然後直接帶你回到這個技能。",
-        "chatLead": "或者直接在對話中說：",
-        "chatPrompt": "安裝技能 {slug}",
         "copy": "複製",
         "executableNote": "該技能包含腳本。使用該技能時，腳本會在你的工作區沙箱中執行——新增前請先檢視檔案列表和原始碼。",
         "promptOnlyNote": "該技能僅含說明：不附帶任何可執行的腳本。",
+        "options": {
+          "heading": "在你自己的代理程式中使用",
+          "tabsLabel": "安裝到你自己的代理程式的方式",
+          "agent": "代理程式",
+          "terminal": "命令列",
+          "agentLead": "貼上到 Claude Code、Codex、Cursor 或其他代理程式中——在 SourceWeft 對話中也可以用。",
+          "terminalLead": "在命令列中執行。每個檔案都會根據此處記錄的雜湊值進行驗證。"
+        },
+        "agent": {
+          "heading": "讓你的代理程式來安裝",
+          "lead": "把這段提示詞貼上到 Claude Code、Codex、Cursor 或其他能執行命令的代理程式中，也可以貼上到 SourceWeft 對話裡。代理程式會閱讀這個技能的安裝說明，向你展示它的來源、授權條款和腳本情況，在你同意後用 SourceWeft CLI 安裝。",
+          "prompt": "閱讀 {url} 中的說明，按說明安裝這個技能。安裝前先告訴我它的來源、授權條款以及是否附帶腳本，等我確認。修改我電腦上的其他任何內容之前也要先問我。",
+          "guideLink": "檢視代理程式所遵循的安裝說明"
+        },
         "cli": {
-          "heading": "安裝到你自己的電腦——推薦",
+          "heading": "用命令列自行安裝",
           "lead": "適用於 Claude Code、Codex、Cursor 及其他本機代理程式。SourceWeft CLI 會從原始碼儲存庫中取得此處掃描過的那次提交，並根據掃描時記錄的雜湊值逐一驗證每個檔案。只要有任何不一致，就不會寫入任何內容。",
           "agentHint": "新增 --agent claude-code、codex、cursor 或 universal 來選擇安裝給哪個代理程式（預設為 Claude Code）。",
           "executableNote": "在本機安裝後，該技能的腳本會直接在你的電腦上執行，而不是在沙箱中。請先閱讀這些腳本——CLI 會在安裝前徵求你的確認。"
@@ -3650,7 +3664,7 @@
         },
         "standalone": {
           "question": "不使用 SourceWeft 也能安裝技能嗎？",
-          "answer": "可以。執行 npx @sourceweft/cli skills install 並在後面加上技能名稱，即可為 Claude Code、Codex、Cursor 或其他本機代理程式安裝。CLI 會根據掃描時記錄的雜湊值驗證每個檔案，只要有一個不一致就不會安裝任何內容。"
+          "answer": "可以。執行 npx @sourceweft/cli skills install 並在後面加上技能名稱，即可為 Claude Code、Codex、Cursor 或其他本機代理程式安裝；也可以把技能頁面上的代理程式提示詞發給你的代理程式，讓它替你執行。CLI 會根據掃描時記錄的雜湊值驗證每個檔案，只要有一個不一致就不會安裝任何內容。"
         },
         "origin": {
           "question": "這些技能從哪裡來？",

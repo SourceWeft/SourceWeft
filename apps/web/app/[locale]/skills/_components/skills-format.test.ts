@@ -17,6 +17,7 @@ import {
   skillCategoryLabel,
   skillCategoryPath,
   skillDashboardInstallPath,
+  skillInstallGuidePath,
   skillInstallHref,
   skillPath,
   skillTabHref,
@@ -37,6 +38,10 @@ describe("paths", () => {
     expect(skillCategoryPath("data-analysis")).toBe(
       "/skills/category/data-analysis",
     );
+    expect(skillInstallGuidePath("pdf-forms")).toBe(
+      "/skills/pdf-forms/install.md",
+    );
+    expect(skillInstallGuidePath("a/b c")).toBe("/skills/a%2Fb%20c/install.md");
   });
 
   it("labels a category from the taxonomy, else from its slug", () => {

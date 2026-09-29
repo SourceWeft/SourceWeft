@@ -166,6 +166,40 @@ test("the public market page of a skill names it just as well", async () => {
   assert.equal(state.submissions.length, 0);
 });
 
+test("a localized market page names the skill too", async () => {
+  state.byName = [row("gh-obra-superpowers-brainstorming")];
+  // The address bar of a Chinese-language visitor.
+  await installBySource(
+    "https://app.sourceweft.test/zh-CN/skills/gh-obra-superpowers-brainstorming",
+  );
+  assert.equal(state.upserts.length, 1);
+  assert.equal(state.submissions.length, 0);
+});
+
+test("the market's install guide for agents names the skill", async () => {
+  state.byName = [row("gh-obra-superpowers-brainstorming")];
+  // The link the page's agent prompt carries, pasted into SourceWeft chat.
+  await installBySource(
+    "https://app.sourceweft.test/skills/gh-obra-superpowers-brainstorming/install.md",
+  );
+  assert.equal(state.upserts.length, 1);
+  assert.equal(state.submissions.length, 0);
+});
+
+test("the directory's own guide and unknown prefixes are not skills", async () => {
+  for (const path of [
+    "/skills/SKILL.md",
+    "/fr/skills/gh-obra-superpowers-brainstorming",
+    "/skills/gh-obra-superpowers-brainstorming/SKILL.md",
+  ]) {
+    await assert.rejects(
+      installBySource(`https://app.sourceweft.test${path}`),
+      { code: "SKILL_SOURCE_UNSUPPORTED" },
+    );
+  }
+  assert.equal(state.upserts.length, 0);
+});
+
 test("a market listing page is not a skill", async () => {
   await assert.rejects(
     installBySource("https://app.sourceweft.test/skills/category/development"),

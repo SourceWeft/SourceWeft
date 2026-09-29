@@ -277,20 +277,38 @@ describe("public skill detail page", () => {
       'href="/auth/sign-in?redirectTo=%2Fdashboard%2Fskills%2Fpdf-forms%3Finstall%3D1"',
     );
     expect(html).toContain("Add to SourceWeft");
-    // The chat alternative names the skill by its unique slug, as a skill.
-    expect(html).toContain("Install the skill pdf-forms");
+    // No SourceWeft-only chat phrase: other agents cannot resolve a bare slug.
+    expect(html).not.toContain("Install the skill pdf-forms");
   });
 
-  it("offers the workspace, then the verified CLI, then the upstream installer", async () => {
+  it("gives the header an agent prompt and a terminal command beside SourceWeft", async () => {
+    const html = await render();
+    expect(html).toContain("Use it in your own agent");
+    expect(html).toMatch(/role="tab"[^>]*>Agent<\/button>/);
+    expect(html).toMatch(/role="tab"[^>]*>Terminal<\/button>/);
+    // The agent prompt is shown first and points at the install guide.
+    expect(html).toMatch(
+      /Read https?:\/\/[^ ]+\/skills\/pdf-forms\/install\.md and install the skill it describes\./,
+    );
+    expect(html).toContain(
+      "Paste into Claude Code, Codex, Cursor or another agent — SourceWeft chat works too.",
+    );
+  });
+
+  it("offers the workspace, then an agent, the verified CLI and the upstream installer", async () => {
     const html = await render("install");
     const workspace = html.indexOf("Add to a SourceWeft workspace");
-    const cli = html.indexOf("Install on your own machine — recommended");
+    const agent = html.indexOf("Ask your agent to install it");
+    const cli = html.indexOf("Install it yourself from a terminal");
     const upstream = html.indexOf(
       "Upstream installer — not verified by SourceWeft",
     );
     expect(workspace).toBeGreaterThan(-1);
-    expect(cli).toBeGreaterThan(workspace);
+    expect(agent).toBeGreaterThan(workspace);
+    expect(cli).toBeGreaterThan(agent);
     expect(upstream).toBeGreaterThan(cli);
+    expect(html).toContain('href="/skills/pdf-forms/install.md"');
+    expect(html).toContain("Read the install guide the agent follows");
     expect(html).toContain("npx @sourceweft/cli skills install pdf-forms");
     expect(html).toContain("--agent claude-code, codex, cursor or universal");
     expect(html).toContain("verifies every file against the hashes");
@@ -306,6 +324,10 @@ describe("public skill detail page", () => {
     const html = await render("install");
     expect(html).not.toContain("@sourceweft/cli");
     expect(html).toContain("Upstream installer");
+    // Its install guide has nothing for another agent, so no prompt either.
+    expect(html).not.toContain("install.md");
+    expect(html).not.toContain("Use it in your own agent");
+    expect(html).toContain("Add to SourceWeft");
   });
 
   it("shows stars, the repository's last push, and the author's claim", async () => {
@@ -499,6 +521,17 @@ describe("generateMetadata", () => {
     });
     expect(String(files.alternates?.canonical)).toMatch(/\/skills\/pdf-forms$/);
     expect(files.robots).toMatchObject({ index: false });
+  });
+
+  it("links the skill's install guide for agents", async () => {
+    const metadata = await generateMetadata({
+      params: Promise.resolve({ locale: "zh-CN", slug: "pdf-forms" }),
+      searchParams: Promise.resolve({}),
+    });
+    // One English guide for every locale: no locale prefix.
+    expect(metadata.alternates?.types).toEqual({
+      "text/markdown": "/skills/pdf-forms/install.md",
+    });
   });
 
   it("makes a locale its own page only where the skill has an overview in it", async () => {

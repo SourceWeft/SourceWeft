@@ -3404,7 +3404,7 @@
       "socialDescription": "A public directory of agent skills with their full SKILL.md, files, versions, license, and source.",
       "heroWithCount": "Explore {count, number} agent skills",
       "heroWithoutCount": "Explore agent skills",
-      "heroTail": "with the full instructions, files, license, and source up front, then add them to a SourceWeft workspace.",
+      "heroTail": "with the full instructions, files, license, and source up front, then add them to a SourceWeft workspace or your own agent.",
       "searchLabel": "Search skills",
       "searchPlaceholder": "Search by name, author, or what the skill does",
       "searchSubmit": "Search",
@@ -3433,12 +3433,14 @@
       "getStarted": {
         "install": {
           "title": "Install",
-          "description": "Add any listed skill to a SourceWeft workspace.",
+          "description": "Add any listed skill to a SourceWeft workspace or to your own agent.",
           "steps": [
             "Pick a skill and read its SKILL.md, files, and license.",
-            "Add it to a workspace from the Skills page in your dashboard.",
-            "Use it in chat — or paste the skill's page link and ask the assistant to install it."
+            "Add it to a workspace from the Skills page in your dashboard — or paste the skill's page link in SourceWeft chat and ask the assistant to install it.",
+            "Using Claude Code, Codex, Cursor or another agent? Give it the prompt below, or copy the one on a skill's page."
           ],
+          "agentPrompt": "Read {url} and use it to find and install agent skills for me. Before installing one, show me its source, license and whether it ships scripts, and wait for my OK.",
+          "copy": "Copy",
           "ctaSignedIn": "Open Skills in dashboard",
           "ctaSignedOut": "Sign in to install"
         },
@@ -3589,13 +3591,25 @@
           "Enable it for the chats that should use it."
         ],
         "signedOutNote": "You will be asked to sign in first, then taken straight to this skill.",
-        "chatLead": "or just ask in chat:",
-        "chatPrompt": "Install the skill {slug}",
         "copy": "Copy",
         "executableNote": "This skill includes scripts. They run in your workspace sandbox when the skill is used — review the file list and source before adding it.",
         "promptOnlyNote": "This skill is instructions only: it ships no scripts to execute.",
+        "options": {
+          "heading": "Use it in your own agent",
+          "tabsLabel": "Ways to install it in your own agent",
+          "agent": "Agent",
+          "terminal": "Terminal",
+          "agentLead": "Paste into Claude Code, Codex, Cursor or another agent — SourceWeft chat works too.",
+          "terminalLead": "Run it in a terminal. Every file is checked against the hashes recorded here."
+        },
+        "agent": {
+          "heading": "Ask your agent to install it",
+          "lead": "Paste this prompt into Claude Code, Codex, Cursor or another agent that can run commands — or into SourceWeft chat. The agent reads this skill's install guide, shows you its source, license and scripts, and installs it with the SourceWeft CLI once you agree.",
+          "prompt": "Read {url} and install the skill it describes. Before installing, show me its source, license and whether it ships scripts, and wait for my OK. Ask me before changing anything else on my machine.",
+          "guideLink": "Read the install guide the agent follows"
+        },
         "cli": {
-          "heading": "Install on your own machine — recommended",
+          "heading": "Install it yourself from a terminal",
           "lead": "For Claude Code, Codex, Cursor and other local agents. The SourceWeft CLI fetches the skill from its source repository at the commit scanned here, and verifies every file against the hashes recorded when the skill was scanned. If anything differs, nothing is written.",
           "agentHint": "Add --agent claude-code, codex, cursor or universal to choose which agent gets it (Claude Code by default).",
           "executableNote": "Installed locally, this skill's scripts run on your machine, not in a sandbox. Read them first — the CLI asks before installing."
@@ -3650,7 +3664,7 @@
         },
         "standalone": {
           "question": "Can I install a skill without SourceWeft?",
-          "answer": "Yes. Run npx @sourceweft/cli skills install followed by the skill's name to install it for Claude Code, Codex, Cursor or another local agent. The CLI checks every file against the hashes recorded when the skill was scanned and installs nothing if one differs."
+          "answer": "Yes. Run npx @sourceweft/cli skills install followed by the skill's name to install it for Claude Code, Codex, Cursor or another local agent — or paste the agent prompt from the skill's page into your agent and let it run that for you. The CLI checks every file against the hashes recorded when the skill was scanned and installs nothing if one differs."
         },
         "origin": {
           "question": "Where do these skills come from?",

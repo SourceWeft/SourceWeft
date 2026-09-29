@@ -4,6 +4,11 @@ export function skillPath(slug: string) {
   return `/skills/${encodeURIComponent(slug)}`;
 }
 
+/** The skill's install guide for AI agents: markdown, beside its page. */
+export function skillInstallGuidePath(slug: string) {
+  return `${skillPath(slug)}/install.md`;
+}
+
 export function skillCategoryPath(slug: string) {
   return `/skills/category/${encodeURIComponent(slug)}`;
 }
