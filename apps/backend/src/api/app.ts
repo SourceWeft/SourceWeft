@@ -10,8 +10,7 @@ import {
   getBillingDeploymentCapabilities,
 } from "../billing-host/bindings";
 import { config } from "../shared/config";
-import { logger } from "../shared/logger";
-import { describeError } from "./response/error-detail";
+import { logApiError } from "./response/log-api-error";
 import { ApiError, ApiResponse, toApiError } from "./response/api-response";
 import { performanceLoggingMiddleware } from "./middleware/performance-logging";
 import { workspaceRoleGuard } from "./middleware/workspace-role";
@@ -112,20 +111,12 @@ export function createApp() {
 
   app.onError((error, c) => {
     const apiError = toApiError(error);
-    const errorDetail = describeError(error);
-    logger.error("API request failed", {
+    logApiError({
       method: c.req.method,
       pathname: new URL(c.req.url).pathname,
-      code: apiError.code,
-      status: apiError.statusCode,
-      errorName: errorDetail.name,
-      error: errorDetail.message,
-      errorStack: errorDetail.stack,
-      errorResponseStatus: errorDetail.status,
-      errorBodyCode: errorDetail.bodyCode,
-      errorBodyMessage: errorDetail.bodyMessage,
-      errorResponseStatusText: errorDetail.statusText,
-      errorResponseUrl: errorDetail.url,
+      userAgent: c.req.header("user-agent"),
+      apiError,
+      error,
     });
     return ApiResponse.error(c, apiError);
   });
