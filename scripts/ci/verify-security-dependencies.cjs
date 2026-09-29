@@ -10,6 +10,10 @@ const sdk = createRequire(
 );
 const ajv = createRequire(sdk.resolve("ajv"));
 const express = createRequire(sdk.resolve("express"));
+const rateLimit = createRequire(sdk.resolve("express-rate-limit"));
+const ui = createRequire(path.join(root, "packages/ui/package.json"));
+const shadcn = createRequire(ui.resolve("shadcn"));
+const dotenvx = createRequire(shadcn.resolve("@dotenvx/dotenvx"));
 const publisher = createRequire(
   path.join(root, "packages/builtin-tool-publish-artifact/package.json"),
 );
@@ -41,7 +45,7 @@ function patchedDependency(parent, name, version) {
   throw new Error("Could not identify installed package " + name);
 }
 
-const uri = patchedDependency(ajv, "fast-uri", "3.1.6");
+const uri = patchedDependency(ajv, "fast-uri", "3.1.7");
 for (const value of [
   "http://[::not-valid]/private",
   "http://[fc00::not-hex]/private",
@@ -63,6 +67,60 @@ assert.equal(
   uri.resolve("https://safe.example/", "//bücher.example/"),
   "https://xn--bcher-kva.example/",
 );
+// GHSA-qw65-cvwx-89v3: a port that is not digits must not inject authority.
+let serialized;
+try {
+  serialized = uri.serialize({
+    scheme: "http",
+    host: "trusted.example",
+    port: "@127.0.0.1:8124",
+    path: "/app",
+  });
+} catch {
+  serialized = undefined;
+}
+assert.ok(
+  serialized === undefined ||
+    new URL(serialized).hostname === "trusted.example",
+  "A malformed port must not move the authority: " + serialized,
+);
+// GHSA-58mr-gqgx-xq4g: an unclosed bracket in the host is reported rather
+// than returned as a host that no HTTP client would reach, and a bracket that
+// parses cleanly names the host a client does reach.
+for (const value of [
+  "http://[127.0.0.1/app",
+  "http://[evil.example/",
+  "http://a@[127.0.0.1/",
+]) {
+  assert.ok(
+    uri.parse(value).error,
+    "An unclosed bracket in the host must be reported: " + value,
+  );
+}
+assert.equal(
+  uri.parse("http://[@127.0.0.1/").host,
+  new URL("http://[@127.0.0.1/").hostname,
+);
+
+const { Address6 } = patchedDependency(rateLimit, "ip-address", "10.5.1");
+// GHSA-rpw4-54j3-4h4q: link-local is the whole fe80::/10.
+for (const value of ["fe80::1", "fe81::1", "febf::1"]) {
+  assert.equal(new Address6(value).isLinkLocal(), true, value);
+}
+assert.equal(new Address6("fec0::1").isLinkLocal(), false);
+// GHSA-2vr4-cq9g-pvrc: the NAT64 local-use prefix 64:ff9b:1::/48 is private.
+for (const value of [
+  "64:ff9b:1:7f00:0:100::",
+  "64:ff9b:1:a9fe:a9:fe00::",
+]) {
+  assert.equal(new Address6(value).isPrivate(), true, value);
+}
+assert.equal(new Address6("2001:4860:4860::8888").isPrivate(), false);
+
+// GHSA-3wwx-pv8p-q78v: the WebSocket crash is not safely reproducible here, so
+// both undici lines are held to their reviewed patch releases.
+patchedDependency(backend, "undici", "6.28.1");
+patchedDependency(dotenvx, "undici", "7.29.1");
 
 const qs = patchedDependency(express, "qs", "6.16.0");
 assert.throws(
@@ -102,5 +160,5 @@ assert.throws(
 );
 
 console.log(
-  "Patched npm dependency versions and all seven advisory regressions passed.",
+  "Patched npm dependency versions and their advisory regressions passed.",
 );
