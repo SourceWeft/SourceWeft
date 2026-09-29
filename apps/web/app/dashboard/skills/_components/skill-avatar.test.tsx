@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act } from "react";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { SkillAvatar } from "./skill-avatar";
 import { mountWithIntl, unmountAll, withIntl } from "@/test/react";
 
@@ -8,7 +8,10 @@ import { mountWithIntl, unmountAll, withIntl } from "@/test/react";
 // catalog so the rendered accessibility text matches the English source.
 const intl = { timeZone: "UTC" };
 
-afterEach(unmountAll);
+afterEach(async () => {
+  await unmountAll();
+  vi.restoreAllMocks();
+});
 test("publisher attribution, image failure and version changes are visible and recoverable", async () => {
   const item = {
     displayName: "Report Writer",
@@ -74,4 +77,53 @@ test("builtins use capability icons and custom skills have name-based placeholde
     ),
   );
   expect(container.textContent).toBe("TW");
+});
+test("a loaded logo sits on a backdrop chosen from its artwork, not the theme", async () => {
+  vi.spyOn(HTMLImageElement.prototype, "naturalWidth", "get").mockReturnValue(
+    2,
+  );
+  vi.spyOn(HTMLImageElement.prototype, "naturalHeight", "get").mockReturnValue(
+    2,
+  );
+  // Two white pixels, two transparent ones.
+  const data = Uint8ClampedArray.from([
+    255, 255, 255, 255, 255, 255, 255, 255, 0, 0, 0, 0, 0, 0, 0, 0,
+  ]);
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+    drawImage: () => undefined,
+    getImageData: () => ({ data }),
+  } as unknown as CanvasRenderingContext2D);
+  const item = {
+    displayName: "Report Writer",
+    slug: "writer",
+    sourceType: "registry_github",
+    logo: {
+      url: "https://github.com/acme.png?size=128",
+      source: "publisher" as const,
+    },
+  };
+  const view = await mountWithIntl(<SkillAvatar item={item} />, intl);
+  const avatar = () => view.container.firstElementChild!;
+  expect(avatar().className).toContain("bg-muted/40");
+  act(() =>
+    view.container.querySelector("img")!.dispatchEvent(new Event("load")),
+  );
+  expect(avatar().className).toContain("bg-white");
+  expect(avatar().className).not.toContain("bg-muted/40");
+
+  await view.render(
+    withIntl(
+      <SkillAvatar
+        item={{
+          ...item,
+          logo: { url: "data:image/png;base64,iVBORw0KGgo=", source: "skill" },
+        }}
+      />,
+      intl,
+    ),
+  );
+  act(() =>
+    view.container.querySelector("img")!.dispatchEvent(new Event("load")),
+  );
+  expect(avatar().className).toContain("bg-zinc-900");
 });

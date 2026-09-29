@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import {
   BookOpen,
   Code2,
@@ -13,6 +12,7 @@ import type { SkillLogo } from "@sourceweft/contracts";
 import { useTranslations } from "next-intl";
 import { GlobalIcon } from "@sourceweft/ui-web/components/ui/global-icon";
 import { cn } from "@sourceweft/ui-web/lib/utils";
+import { useLogoImage } from "@/lib/use-logo-image";
 
 const builtinIcons = {
   feynman: BookOpen,
@@ -39,10 +39,10 @@ export function SkillAvatar({
   icon?: { iconName?: string; iconTone?: "brand" | "mono" };
 }) {
   const t = useTranslations("dashboardSkills");
-  const [failedUrl, setFailedUrl] = useState<string | null>(null);
-  const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
   const url = item.logo?.url;
-  const failed = Boolean(url && url === failedUrl);
+  const image = useLogoImage(url);
+  const failed = image.status === "failed";
+  const loaded = image.status === "loaded";
   const BuiltinIcon =
     item.sourceType === "builtin"
       ? builtinIcons[item.slug as keyof typeof builtinIcons]
@@ -63,13 +63,22 @@ export function SkillAvatar({
     <span
       title={label}
       className={cn(
-        "relative inline-flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border/60 bg-muted/40 text-primary",
+        "relative inline-flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border/60 text-primary",
+        // A loaded logo sits on the backdrop its own colors need, whatever the
+        // theme; the themed muted tile would hide dark artwork in dark mode.
+        // Clipped to the padding box so it does not tint the translucent border.
+        loaded
+          ? cn(
+              "bg-clip-padding",
+              image.backdrop === "dark" ? "bg-zinc-900" : "bg-white",
+            )
+          : "bg-muted/40",
         className,
       )}
     >
       {url && !failed ? (
         <>
-          {loadedUrl !== url ? (
+          {!loaded ? (
             <span aria-hidden="true" className="text-[0.65em] font-semibold">
               {initials || "S"}
             </span>
@@ -81,13 +90,12 @@ export function SkillAvatar({
             alt={label}
             className={cn(
               "absolute inset-0 size-full object-contain",
-              loadedUrl !== url && "opacity-0",
+              !loaded && "opacity-0",
             )}
             loading="lazy"
             decoding="async"
             referrerPolicy="no-referrer"
-            onError={() => setFailedUrl(url)}
-            onLoad={() => setLoadedUrl(url)}
+            {...image.imageProps}
           />
         </>
       ) : icon?.iconName && item.sourceType === "builtin" ? (
