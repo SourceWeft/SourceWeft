@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { beforeEach, expect, test, vi } from "vitest";
+import { beforeEach, expect, test, vi, type MockInstance } from "vitest";
 import type {
   CatalogOverviewJson,
   CatalogOverviewLocale,
@@ -14,6 +14,7 @@ vi.mock("../../shared/model-gateway/system-client", () => ({
   withSystemModel: mocks.withSystemModel,
 }));
 
+import { logger } from "../../shared/logger";
 import { generateOverview } from "./generate";
 import { overviewResultKey } from "./keys";
 import type {
@@ -107,9 +108,14 @@ function fakeStore() {
 let fake: ReturnType<typeof fakeStore>;
 let subjects: Map<string, Subject>;
 let adapter: OverviewSubjectAdapter<Subject, Prompt, Classification, "empty">;
+// Spies are restored after every test (src/test/setup.ts).
+let info: MockInstance<typeof logger.info>;
+const rejectionLogs = () =>
+  info.mock.calls.filter(([message]) => message.endsWith("output rejected"));
 
 beforeEach(() => {
   vi.clearAllMocks();
+  info = vi.spyOn(logger, "info").mockImplementation(() => undefined);
   mocks.readiness.mockResolvedValue({ ready: true });
   fake = fakeStore();
   subjects = new Map([
@@ -185,6 +191,94 @@ test("every locale and the classification are published in one call", async () =
   expect(input!.classification).toEqual({ status: "ready", slug: "tools" });
   expect(input!.subject.fingerprint).toBe("f1");
   expect(fake.rows.get("v1")?.status).toBe("ready");
+  // Accepted output: the generated line only.
+  expect(rejectionLogs()).toEqual([]);
+  expect(info).toHaveBeenCalledWith("Test overview generated", {
+    kind: "skill",
+    versionId: "v1",
+    model: "m",
+  });
+});
+
+test("output the kind refuses is logged once with the subject's fields and rethrown unchanged", async () => {
+  class RefusedOutputError extends Error {
+    readonly code = "evidence_not_in_input";
+  }
+  const refused = new RefusedOutputError(
+    "Evidence for tools does not appear in the input",
+  );
+  adapter.parseOutput = vi.fn(() => {
+    throw refused;
+  });
+  adapter.logFields = (subject, prompt) => ({
+    versionId: subject.versionId,
+    identifier: `io.example/${prompt.user}`,
+  });
+  await expect(
+    generateOverview(adapter, {
+      versionId: "v1",
+      scopeId: "s",
+      callModel: callModel(),
+    }),
+  ).rejects.toBe(refused);
+  expect(rejectionLogs()).toEqual([
+    [
+      "Test overview output rejected",
+      {
+        kind: "skill",
+        versionId: "v1",
+        identifier: "io.example/A",
+        model: "m",
+        error: "Evidence for tools does not appear in the input",
+        code: "evidence_not_in_input",
+      },
+    ],
+  ]);
+  // Nothing about the answer itself is logged.
+  expect(JSON.stringify(info.mock.calls)).not.toContain("fresh en");
+  expect(fake.store.publish).not.toHaveBeenCalled();
+  // Still the running request: the job records the failure and retries.
+  expect(fake.rows.get("v1")?.status).toBe("running");
+});
+
+test("a refusal without a code logs the message alone", async () => {
+  const refused = new Error("Overview output is not a JSON object");
+  adapter.parseOutput = vi.fn(() => {
+    throw refused;
+  });
+  await expect(
+    generateOverview(adapter, {
+      versionId: "v1",
+      scopeId: "s",
+      callModel: callModel(),
+    }),
+  ).rejects.toBe(refused);
+  expect(rejectionLogs()).toEqual([
+    [
+      "Test overview output rejected",
+      {
+        kind: "skill",
+        versionId: "v1",
+        model: "m",
+        error: "Overview output is not a JSON object",
+      },
+    ],
+  ]);
+});
+
+test("a failed model call is not an output rejection", async () => {
+  const failure = new Error("gateway timeout");
+  await expect(
+    generateOverview(adapter, {
+      versionId: "v1",
+      scopeId: "s",
+      callModel: vi.fn(async () => {
+        throw failure;
+      }),
+    }),
+  ).rejects.toBe(failure);
+  expect(adapter.parseOutput).not.toHaveBeenCalled();
+  expect(rejectionLogs()).toEqual([]);
 });
 
 test("an answer missing a locale publishes nothing", async () => {

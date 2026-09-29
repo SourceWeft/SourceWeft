@@ -10,10 +10,14 @@ import type { RegistryServerJson } from "../types";
 import { buildMcpOverviewInput, type McpOverviewInput } from "./input";
 import {
   MCP_OVERVIEW_CATEGORY_SLUGS,
+  MCP_OVERVIEW_EVIDENCE_MAX_CHARS,
+  MCP_OVERVIEW_EVIDENCE_MIN_CHARS,
   MCP_OVERVIEW_LIMITS,
+  MCP_OVERVIEW_MAX_CATEGORIES,
   MCP_OVERVIEW_OUTPUT_JSON_SCHEMA,
   MCP_OVERVIEW_OUTPUT_NAME,
   MCP_OVERVIEW_PROMPT_VERSION,
+  MCP_OVERVIEW_RATIONALE_MAX_CHARS,
   MCP_OVERVIEW_SYSTEM_PROMPT,
   MCP_OVERVIEW_TAXONOMY_VERSION,
   McpOverviewOutputError,
@@ -38,25 +42,31 @@ type CatalogOverviewJson = {
 const genesis = buildMcpOverviewInput(genesis402Source());
 const carrerlift = buildMcpOverviewInput(carrerliftSource());
 
+type Category = { slug: string; evidence: string };
 type Output = {
   en: Record<string, unknown>;
   "zh-CN": Record<string, unknown>;
   "zh-TW": Record<string, unknown>;
   classification: {
-    categories: Array<{ slug: string; evidence: string }>;
+    primary: Category;
+    secondary: Category[];
     rationale: string;
   };
 };
 
+const finance: Category = {
+  slug: "finance",
+  evidence: "DeFi yields from 15,000+ pools",
+};
+const webExtraction: Category = {
+  slug: "web-search-scraping",
+  evidence: "Any public web page as clean text, title, headings and links.",
+};
+
 /** A well-formed answer for the genesis402 fixture. */
 function output(
-  categories: Array<{ slug: string; evidence: string }> = [
-    { slug: "finance", evidence: "DeFi yields from 15,000+ pools" },
-    {
-      slug: "web-search-scraping",
-      evidence: "Any public web page as clean text, title, headings and links.",
-    },
-  ],
+  primary: Category = finance,
+  secondary: Category[] = [webExtraction],
 ): Output {
   return {
     en: {
@@ -90,7 +100,8 @@ function output(
       cautions: "GENESIS402_PAYER_KEY 是錢包私密金鑰，即時模式會花費 USDC。",
     },
     classification: {
-      categories,
+      primary,
+      secondary,
       rationale:
         "Paid financial and market data is the main purpose; web extraction is a second one.",
     },
@@ -115,7 +126,7 @@ function rejects(
 
 describe("prompt", () => {
   test("is versioned and uses the MCP taxonomy", () => {
-    assert.equal(MCP_OVERVIEW_PROMPT_VERSION, "1");
+    assert.equal(MCP_OVERVIEW_PROMPT_VERSION, "2");
     assert.equal(MCP_OVERVIEW_TAXONOMY_VERSION, mcpTaxonomyVersion);
     assert.deepEqual(
       MCP_OVERVIEW_CATEGORY_SLUGS,
@@ -139,17 +150,156 @@ describe("prompt", () => {
       "requirements",
       "cautions",
     ]);
-    const categories = properties.classification!.properties!.categories as {
-      minItems: number;
-      maxItems: number;
-      items: { properties: { slug: { enum: readonly string[] } } };
+    assert.equal(properties["zh-CN"], properties.en);
+    assert.equal(properties["zh-TW"], properties.en);
+  });
+
+  test("the classification is a primary, up to two secondaries and a rationale", () => {
+    const properties = MCP_OVERVIEW_OUTPUT_JSON_SCHEMA.properties as Record<
+      string,
+      unknown
+    >;
+    const evidence = {
+      type: "string",
+      minLength: 8,
+      maxLength: 300,
     };
-    assert.equal(categories.minItems, 1);
-    assert.equal(categories.maxItems, 3);
-    assert.deepEqual(
-      categories.items.properties.slug.enum,
-      MCP_OVERVIEW_CATEGORY_SLUGS,
+    const withOther = [...MCP_OVERVIEW_CATEGORY_SLUGS];
+    const withoutOther = withOther.filter((slug) => slug !== "other");
+    assert.ok(withOther.includes("other"));
+    assert.equal(withoutOther.length, withOther.length - 1);
+    assert.deepEqual(properties.classification, {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        primary: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            slug: { type: "string", enum: withOther },
+            evidence,
+          },
+          required: ["slug", "evidence"],
+        },
+        secondary: {
+          type: "array",
+          maxItems: 2,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              slug: { type: "string", enum: withoutOther },
+              evidence,
+            },
+            required: ["slug", "evidence"],
+          },
+        },
+        rationale: { type: "string", minLength: 1, maxLength: 500 },
+      },
+      required: ["primary", "secondary", "rationale"],
+    });
+    assert.equal(MCP_OVERVIEW_MAX_CATEGORIES - 1, 2);
+    assert.equal(MCP_OVERVIEW_EVIDENCE_MIN_CHARS, 8);
+    assert.equal(MCP_OVERVIEW_EVIDENCE_MAX_CHARS, 300);
+    assert.equal(MCP_OVERVIEW_RATIONALE_MAX_CHARS, 500);
+  });
+
+  test("the output schema is strict-compatible", () => {
+    // Strict structured output: every object closed and every property
+    // required; no combinators or conditionals anywhere.
+    const unsupported = [
+      "oneOf",
+      "anyOf",
+      "allOf",
+      "not",
+      "if",
+      "then",
+      "else",
+      "$ref",
+      "patternProperties",
+    ];
+    let objects = 0;
+    const walk = (node: unknown, path: string) => {
+      if (Array.isArray(node)) {
+        node.forEach((item, index) => walk(item, `${path}[${index}]`));
+        return;
+      }
+      if (!node || typeof node !== "object") return;
+      const schema = node as Record<string, unknown>;
+      for (const keyword of unsupported) {
+        assert.equal(keyword in schema, false, `${path} uses ${keyword}`);
+      }
+      if (schema.type === "object") {
+        objects++;
+        assert.equal(schema.additionalProperties, false, path);
+        const keys = Object.keys(
+          schema.properties as Record<string, unknown>,
+        ).sort();
+        assert.deepEqual([...(schema.required as string[])].sort(), keys, path);
+      }
+      for (const [key, value] of Object.entries(schema)) {
+        // An enum's values are data, not schema.
+        if (key !== "enum") walk(value, `${path}.${key}`);
+      }
+    };
+    walk(MCP_OVERVIEW_OUTPUT_JSON_SCHEMA, "$");
+    // The root, three locales, the classification and its two category
+    // objects (primary, and each secondary).
+    assert.equal(objects, 7);
+  });
+
+  test("the system prompt states every limit and the output's shape", () => {
+    const system = MCP_OVERVIEW_SYSTEM_PROMPT;
+    assert.match(
+      system,
+      /^Answer only with the JSON object the schema describes\. It has four top-level keys: en, zh-CN, zh-TW and classification\.$/m,
     );
+    assert.match(
+      system,
+      /^Each locale value is a JSON object \(never a string\) with exactly these five plain-text fields:$/m,
+    );
+    assert.match(system, /^- summary: one sentence, at most 160 characters, /m);
+    assert.match(
+      system,
+      /^- whatItDoes: two to four sentences, at most 700 characters, /m,
+    );
+    assert.match(
+      system,
+      /^- whenToUse: one to three sentences, at most 500 characters, /m,
+    );
+    assert.match(system, /^- requirements: at most 500 characters /m);
+    assert.match(system, /^- cautions: at most 500 characters /m);
+    for (const [field, limit] of Object.entries(MCP_OVERVIEW_LIMITS)) {
+      assert.match(
+        system,
+        new RegExp(`^- ${field}: [^\\n]*at most ${limit} characters`, "m"),
+        field,
+      );
+    }
+    assert.match(
+      system,
+      /^classification is a top-level key next to the locales, never inside a locale\. It has primary, secondary and a short English rationale of at most 500 characters\.$/m,
+    );
+    assert.match(
+      system,
+      /^primary: the one category that best matches the server's main purpose, with evidence\. Use other only when the main purpose clearly fits no category\.$/m,
+    );
+    assert.match(
+      system,
+      /^secondary: zero to two more categories that clearly also apply, each with evidence; never other and never the primary again\. Leave it empty rather than stretching\.$/m,
+    );
+    assert.match(
+      system,
+      /^evidence: one short quotation — a phrase or a single sentence, 8 to 300 characters — copied exactly from the registry description, the README, or a tool or variable description; never from the manifest's labels, names, or identifiers, and never a whole paragraph\.$/m,
+    );
+    assert.match(
+      system,
+      /^Classify by what the server lets an assistant do, not by incidental details/m,
+    );
+    // The v1 wording is gone.
+    assert.doesNotMatch(system, /^categories:/m);
+    assert.doesNotMatch(system, /never together with another category/);
+    assert.doesNotMatch(system, /Answer only through the structured output/);
   });
 
   test("the system prompt sets the reader, the trust boundary and the cautions", () => {
@@ -167,7 +317,6 @@ describe("prompt", () => {
     assert.match(system, /never convert zh-CN into zh-TW/);
     assert.match(system, /natural Taiwan Traditional Chinese/);
     assert.match(system, /copied exactly/);
-    assert.match(system, /never together with another category/);
   });
 
   test("quotes the facts, the description and the README (genesis402)", () => {
@@ -383,13 +532,42 @@ describe("output", () => {
     );
   });
 
+  test("the primary comes first, then the secondaries in order", () => {
+    const parsed = parseMcpOverviewOutput(
+      output(
+        { slug: "developer-tools", evidence: "360 pay-per-call endpoints" },
+        [webExtraction, finance],
+      ),
+      genesis,
+    );
+    assert.deepEqual(parsed.classification.categories, [
+      { slug: "developer-tools", evidence: "360 pay-per-call endpoints" },
+      webExtraction,
+      finance,
+    ]);
+    for (const locale of ["en", "zh-CN", "zh-TW"] as const) {
+      assert.deepEqual(parsed[locale].suggestedCategories, [
+        "developer-tools",
+        "web-search-scraping",
+        "finance",
+      ]);
+    }
+    // No secondary: the primary alone.
+    assert.deepEqual(
+      parseMcpOverviewOutput(output(finance, []), genesis).classification
+        .categories,
+      [finance],
+    );
+  });
+
   test("cautions are optional; empty ones are left out", () => {
-    const value = output([
+    const value = output(
       {
         slug: "web-search-scraping",
         evidence: "Searches live jobs and internships in India, newest first.",
       },
-    ]);
+      [],
+    );
     delete value.en.cautions;
     value["zh-CN"].cautions = "";
     value["zh-TW"].cautions = "  ";
@@ -433,6 +611,75 @@ describe("output", () => {
       },
       "invalid_shape",
     );
+    // The v1 shape is no longer an answer.
+    rejects(
+      {
+        ...output(),
+        classification: {
+          categories: [finance, webExtraction],
+          rationale: "Paid data.",
+        },
+      },
+      "invalid_shape",
+    );
+    const noSecondary = output() as unknown as {
+      classification: Record<string, unknown>;
+    };
+    delete noSecondary.classification.secondary;
+    rejects(noSecondary, "invalid_shape");
+    rejects(
+      {
+        ...output(),
+        classification: {
+          ...output().classification,
+          primary: "finance",
+        },
+      },
+      "invalid_shape",
+    );
+    rejects(
+      {
+        ...output(),
+        classification: {
+          ...output().classification,
+          secondary: webExtraction,
+        },
+      },
+      "invalid_shape",
+    );
+    rejects(
+      {
+        ...output(),
+        classification: {
+          ...output().classification,
+          primary: { ...finance, extra: true },
+        },
+      },
+      "invalid_shape",
+    );
+  });
+
+  test("malformed answers seen in production are refused, not repaired", () => {
+    // A locale sent as a JSON-encoded string.
+    rejects(
+      { ...output(), "zh-CN": JSON.stringify(output()["zh-CN"]) },
+      "invalid_shape",
+    );
+    // The classification nested inside a locale.
+    const nested = output() as unknown as Record<string, unknown> & {
+      en: Record<string, unknown>;
+    };
+    nested.en.classification = nested.classification;
+    delete nested.classification;
+    rejects(nested, "invalid_shape");
+    // Nested inside a locale as well as at the top.
+    rejects(
+      {
+        ...output(),
+        en: { ...output().en, classification: output().classification },
+      },
+      "invalid_shape",
+    );
   });
 
   test("a field slightly over its cap is cut; far over, the answer is refused", () => {
@@ -468,10 +715,20 @@ describe("output", () => {
     );
 
     rejects(
-      output([
+      output(
         {
           slug: "finance",
           evidence: `DeFi yields from 15,000+ pools ${"x".repeat(300)}`,
+        },
+        [],
+      ),
+      "too_long",
+    );
+    rejects(
+      output(finance, [
+        {
+          slug: "web-search-scraping",
+          evidence: `Any public web page as clean text ${"x".repeat(300)}`,
         },
       ]),
       "too_long",
@@ -505,9 +762,9 @@ describe("output", () => {
 
   test("category slugs are normalized; unknown ones are refused", () => {
     const parsed = parseMcpOverviewOutput(
-      output([
-        { slug: "FINANCE", evidence: "DeFi yields from 15,000+ pools" },
-        // An alias of the same category keeps the first quotation.
+      output({ slug: "FINANCE", evidence: "DeFi yields from 15,000+ pools" }, [
+        // The primary again (an alias of it) adds nothing: its quotation is
+        // checked, then the primary's is kept.
         { slug: "financial", evidence: "Pay only for the call you make" },
         {
           slug: "Developer Tools",
@@ -523,45 +780,88 @@ describe("output", () => {
         evidence: "Call any of the 360 endpoints by name.",
       },
     ]);
+    // Two secondaries naming one category keep the first quotation.
     assert.deepEqual(
       parseMcpOverviewOutput(
-        output([
-          { slug: "database", evidence: "DeFi yields from 15,000+ pools" },
+        output(finance, [
+          webExtraction,
+          { slug: "scraping", evidence: "Pay only for the call you make" },
         ]),
+        genesis,
+      ).classification.categories,
+      [finance, webExtraction],
+    );
+    assert.deepEqual(
+      parseMcpOverviewOutput(
+        output(
+          { slug: "database", evidence: "DeFi yields from 15,000+ pools" },
+          [],
+        ),
         genesis,
       ).en.suggestedCategories,
       ["databases"],
     );
+    // A duplicated primary is still checked like any other quotation.
+    rejects(
+      output(finance, [
+        { slug: "finance", evidence: "Trades stocks on the NYSE for you." },
+      ]),
+      "evidence_not_in_input",
+    );
     for (const slug of ["crypto-payments", "official", "featured", "", "   "]) {
       rejects(
-        output([{ slug, evidence: "DeFi yields from 15,000+ pools" }]),
+        output({ slug, evidence: "DeFi yields from 15,000+ pools" }, []),
+        "unknown_category",
+      );
+      rejects(
+        output(finance, [{ slug, evidence: "DeFi yields from 15,000+ pools" }]),
         "unknown_category",
       );
     }
   });
 
-  test("one to three categories, and other only alone", () => {
-    rejects(output([]), "category_count");
+  test("at most two secondaries, and other only alone", () => {
     const evidence = "DeFi yields from 15,000+ pools";
     rejects(
       output(
-        ["finance", "databases", "developer-tools", "ai-ml"].map((slug) => ({
+        finance,
+        ["databases", "developer-tools", "ai-ml"].map((slug) => ({
           slug,
           evidence,
         })),
       ),
       "category_count",
     );
+    // Two secondaries are the most: three categories in all.
+    assert.deepEqual(
+      parseMcpOverviewOutput(
+        output(finance, [
+          { slug: "databases", evidence },
+          { slug: "developer-tools", evidence },
+        ]),
+        genesis,
+      ).en.suggestedCategories,
+      ["finance", "databases", "developer-tools"],
+    );
+    // other as the primary, beside any secondary.
     rejects(
-      output([
-        { slug: "other", evidence },
-        { slug: "finance", evidence },
-      ]),
+      output({ slug: "other", evidence }, [{ slug: "finance", evidence }]),
+      "other_not_alone",
+    );
+    rejects(
+      output({ slug: "misc", evidence }, [{ slug: "finance", evidence }]),
+      "other_not_alone",
+    );
+    // other as a secondary, which the schema does not offer.
+    rejects(output(finance, [{ slug: "other", evidence }]), "other_not_alone");
+    rejects(output(finance, [{ slug: "misc", evidence }]), "other_not_alone");
+    rejects(
+      output({ slug: "other", evidence }, [{ slug: "other", evidence }]),
       "other_not_alone",
     );
     assert.deepEqual(
-      parseMcpOverviewOutput(output([{ slug: "other", evidence }]), genesis).en
-        .suggestedCategories,
+      parseMcpOverviewOutput(output({ slug: "other", evidence }, []), genesis)
+        .en.suggestedCategories,
       ["other"],
     );
   });
@@ -576,8 +876,10 @@ describe("output", () => {
       "179 x402 pay-per-call APIs: OpenAI-style chat",
     ]) {
       assert.equal(
-        parseMcpOverviewOutput(output([{ slug: "finance", evidence }]), genesis)
-          .classification.categories[0]!.evidence,
+        parseMcpOverviewOutput(
+          output({ slug: "finance", evidence }, []),
+          genesis,
+        ).classification.categories[0]!.evidence,
         evidence.trim(),
       );
     }
@@ -594,16 +896,94 @@ describe("output", () => {
       // A README the model was not shown: the licence notice was stripped.
       "Permission is hereby granted, free of charge",
     ]) {
-      rejects(output([{ slug: "finance", evidence }]), "evidence_not_in_input");
+      rejects(
+        output({ slug: "finance", evidence }, []),
+        "evidence_not_in_input",
+      );
+      // A secondary's quotation is held to the same rule.
+      rejects(
+        output(finance, [{ slug: "web-search-scraping", evidence }]),
+        "evidence_not_in_input",
+      );
     }
-    for (const evidence of ["x402", "   ", '"..."']) {
-      rejects(output([{ slug: "finance", evidence }]), "evidence_too_short");
+    for (const evidence of [
+      "x402",
+      "   ",
+      '"..."',
+      "  x402\n\n  ",
+      // Long enough as written, but nothing to match once quotation marks
+      // and ellipses are set aside.
+      '"......"',
+    ]) {
+      rejects(output({ slug: "finance", evidence }, []), "evidence_too_short");
     }
     // The same quotation is refused for a server whose input lacks it.
     rejects(
-      output([{ slug: "finance", evidence: "DeFi yields from 15,000+ pools" }]),
+      output(
+        { slug: "finance", evidence: "DeFi yields from 15,000+ pools" },
+        [],
+      ),
       "evidence_not_in_input",
       carrerlift,
+    );
+  });
+
+  test("evidence length is counted after whitespace is collapsed", () => {
+    // A registry description of two sentences: one of 290 characters and
+    // one of 301, single-spaced.
+    const sentence = (length: number, label: string) => {
+      const words = `${label} lets an assistant search, read and summarize shared team documents`;
+      let text = words;
+      while (text.length < length) text += ` ${words}`;
+      return `${text
+        .slice(0, length - 1)
+        .trimEnd()
+        .padEnd(length - 1, "s")}.`;
+    };
+    const fits = sentence(MCP_OVERVIEW_EVIDENCE_MAX_CHARS - 10, "Fits");
+    const over = sentence(MCP_OVERVIEW_EVIDENCE_MAX_CHARS + 1, "Over");
+    assert.equal(fits.length, 290);
+    assert.equal(over.length, 301);
+    assert.doesNotMatch(`${fits} ${over}`, /\s\s/);
+    const input = buildMcpOverviewInput({
+      ...genesis402Source(),
+      registryDescription: `${fits} ${over}`,
+    });
+    assert.equal(input.registryDescription, `${fits} ${over}`);
+
+    // As a model copies a wrapped paragraph: line breaks and indentation
+    // between the words, well over the limit before collapsing.
+    const wrapped = fits.replace(/ /g, "\n        ");
+    assert.ok(wrapped.length > MCP_OVERVIEW_EVIDENCE_MAX_CHARS + 100);
+    const parsed = parseMcpOverviewOutput(
+      output({ slug: "knowledge-memory", evidence: `\n  ${wrapped}\n` }, []),
+      input,
+    );
+    assert.deepEqual(parsed.classification.categories, [
+      { slug: "knowledge-memory", evidence: wrapped },
+    ]);
+    // Exactly the limit is accepted.
+    const atLimit = over.slice(0, MCP_OVERVIEW_EVIDENCE_MAX_CHARS);
+    assert.equal(
+      parseMcpOverviewOutput(
+        output({ slug: "knowledge-memory", evidence: atLimit }, []),
+        input,
+      ).classification.categories[0]!.evidence,
+      atLimit,
+    );
+    // One character over once collapsed is refused, wrapped or not.
+    rejects(
+      output({ slug: "knowledge-memory", evidence: over }, []),
+      "too_long",
+      input,
+    );
+    rejects(
+      output(
+        { slug: "knowledge-memory", evidence: over.replace(/ /g, "\n\t") },
+        [],
+      ),
+      "too_long",
+      input,
     );
   });
 });

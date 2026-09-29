@@ -146,13 +146,19 @@ export interface OverviewSubjectAdapter<
    * in it.
    */
   buildPrompt(subject: TSubject): TPrompt;
-  /** Throws on output that is not a usable overview; the job retries. */
+  /**
+   * Throws on output that is not a usable overview; the engine logs the
+   * refusal ("<label> overview output rejected") and the job retries.
+   */
   parseOutput(
     raw: unknown,
     subject: TSubject,
     prompt: TPrompt,
   ): ParsedOverview<TClassification>;
-  /** Extra fields for the "overview generated" log line. */
+  /**
+   * Extra fields for the "overview generated" and "output rejected" log
+   * lines: identifiers and flags, never prompt or answer text.
+   */
   logFields(subject: TSubject, prompt: TPrompt): Record<string, unknown>;
   store: OverviewStore<TSubject, TClassification>;
 }

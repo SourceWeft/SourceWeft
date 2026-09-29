@@ -38,9 +38,13 @@ import {
   mcpOverviewSkipReason,
 } from "./generate";
 import { buildMcpOverviewInput } from "./input";
+import { logger } from "../../../shared/logger";
 import {
   MCP_OVERVIEW_OUTPUT_JSON_SCHEMA,
   MCP_OVERVIEW_OUTPUT_NAME,
+  MCP_OVERVIEW_PROMPT_VERSION,
+  MCP_OVERVIEW_TAXONOMY_VERSION,
+  McpOverviewOutputError,
 } from "./prompt";
 import { genesis402ModelAnswer } from "./test-answer";
 import {
@@ -159,10 +163,13 @@ describe("the MCP adapter", () => {
       "finance",
       "web-search-scraping",
     ]);
+    // Stored as before: the primary, then the secondaries.
+    const { primary, secondary, rationale } =
+      genesis402ModelAnswer().classification;
     assert.deepEqual(parsed.classification, {
       status: "ready",
-      categories: genesis402ModelAnswer().classification.categories,
-      rationale: genesis402ModelAnswer().classification.rationale,
+      categories: [primary, ...secondary],
+      rationale,
     });
   });
 });
@@ -243,15 +250,16 @@ describe("generating one MCP overview", () => {
     assert.equal(mocks.store.publish.mock.calls.length, 0);
   });
 
-  test("an answer whose evidence is not in the input is refused, for the job to retry", async () => {
+  test("an answer whose evidence is not in the input is refused and logged, for the job to retry", async () => {
     mocks.findRow.mockResolvedValue(row());
     mocks.store.claim.mockResolvedValue({
       requestId: "r1",
       status: "running",
       force: false,
     });
+    const info = vi.spyOn(logger, "info").mockImplementation(() => undefined);
     const answer = genesis402ModelAnswer();
-    answer.classification.categories[0]!.evidence =
+    answer.classification.primary.evidence =
       "A sentence that is nowhere in the README.";
     await assert.rejects(
       generateMcpOverview({
@@ -261,8 +269,34 @@ describe("generating one MCP overview", () => {
         modelReady: async () => true,
         callModel: async () => ({ output: answer, model: "m" }),
       }),
-      /does not appear in the input/,
+      (error: unknown) => {
+        assert.ok(error instanceof McpOverviewOutputError);
+        assert.equal(error.reason, "evidence_not_in_input");
+        return true;
+      },
     );
     assert.equal(mocks.store.publish.mock.calls.length, 0);
+    // One line naming the server and the rule, without the answer's text.
+    const rejected = info.mock.calls.filter(
+      ([message]) => message === "MCP overview output rejected",
+    );
+    assert.equal(rejected.length, 1);
+    assert.deepEqual(rejected[0]![1], {
+      kind: "mcp",
+      mcpServerId: "mcp-genesis",
+      mcpServerVersionId: "mcpv-genesis",
+      identifier: "io.github.FTHTrading/genesis402-mcp",
+      readme: "ok",
+      truncated: false,
+      promptVersion: MCP_OVERVIEW_PROMPT_VERSION,
+      taxonomyVersion: MCP_OVERVIEW_TAXONOMY_VERSION,
+      model: "m",
+      error: "Evidence for finance does not appear in the input",
+      reason: "evidence_not_in_input",
+    });
+    assert.doesNotMatch(
+      JSON.stringify(rejected[0]),
+      /nowhere in the README|pay-per-call/,
+    );
   });
 });

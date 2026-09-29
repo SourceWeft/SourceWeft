@@ -435,7 +435,7 @@ describe("MCP AI overviews (real PostgreSQL)", () => {
     );
     expect(analysis).toMatchObject({
       status: "ready",
-      promptVersion: "1",
+      promptVersion: "2",
       classification: {
         status: "ready",
         categories: [
@@ -917,13 +917,12 @@ describe("MCP AI overviews (real PostgreSQL)", () => {
   function carrerliftAnswer() {
     const answer = genesis402ModelAnswer();
     answer.classification = {
-      categories: [
-        {
-          slug: "productivity-workflow",
-          evidence:
-            "Search fresh Indian jobs and internships, plus international intern and new-grad roles.",
-        },
-      ],
+      primary: {
+        slug: "productivity-workflow",
+        evidence:
+          "Search fresh Indian jobs and internships, plus international intern and new-grad roles.",
+      },
+      secondary: [],
       rationale: "Job search.",
     };
     return answer;
