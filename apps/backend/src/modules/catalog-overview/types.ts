@@ -24,10 +24,23 @@ export type OverviewSubject = {
   fingerprint: string;
 };
 
-/** The system and user messages of one overview request. */
-export type OverviewPrompt = { system: string; user: string };
+/**
+ * The system and user messages of one overview request. `outputSchema` is
+ * the JSON schema for this request's answer when it depends on the input
+ * (an MCP prompt's schema lists the passage IDs it numbered); without one,
+ * the kind's static `output.schema` is sent. Like the messages, it is part
+ * of the result key.
+ */
+export type OverviewPrompt = {
+  system: string;
+  user: string;
+  outputSchema?: Record<string, unknown>;
+};
 
-/** How the structured answer is requested: one call per version. */
+/**
+ * How the structured answer is requested: one call per version. `schema` is
+ * the kind's static schema, sent unless the prompt carries its own.
+ */
 export type OverviewOutputSpec = {
   name: string;
   description: string;

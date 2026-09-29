@@ -14,6 +14,15 @@ import type {
   McpOverviewInput,
   McpOverviewVariableFact,
 } from "./input";
+import {
+  MCP_OVERVIEW_EVIDENCE_MIN_CHARS,
+  evidenceKey,
+  numberMcpOverviewPassages,
+  type McpOverviewPassage,
+  type NumberedMcpOverviewSources,
+} from "./passages";
+
+export { MCP_OVERVIEW_EVIDENCE_MIN_CHARS };
 
 /**
  * The MCP overview's prompt and output (design §4.3), shaped like the skill
@@ -24,7 +33,12 @@ import type {
  * tools, a system prompt that says so, the text between tags it cannot
  * close, and a schema to answer in. The answer is then held to that schema
  * here: lengths capped, categories kept to the MCP taxonomy, every category's
- * evidence found in the text the model was shown, markup reduced to text.
+ * evidence a passage of the text the model was shown, markup reduced to text.
+ *
+ * Evidence is cited by ID (#152): the citable passages of the description,
+ * README and tool and variable descriptions are numbered in place
+ * (./passages.ts), and each input's schema lists exactly its IDs, so a
+ * provider that enforces the schema can only let the model cite one of them.
  *
  * The schema is strict-compatible (every object closed, every property
  * required, no combinators), so a provider that enforces JSON schemas
@@ -34,7 +48,8 @@ import type {
 // Bump when the prompt, the output contract, or what ./input.ts selects for
 // the same source changes; stored overviews are keyed by it.
 // 2: classification as primary + secondary; every limit stated in the prompt.
-export const MCP_OVERVIEW_PROMPT_VERSION = "2";
+// 3: evidence is the ID of a passage numbered in the prompt.
+export const MCP_OVERVIEW_PROMPT_VERSION = "3";
 export const MCP_OVERVIEW_TAXONOMY_VERSION = mcpTaxonomyVersion;
 
 // All three locales are written independently by the model from the input.
@@ -57,8 +72,9 @@ export const MCP_OVERVIEW_LENGTH_TOLERANCE = 1.5;
 // Categories in all: the primary, then up to MAX - 1 secondaries.
 export const MCP_OVERVIEW_MIN_CATEGORIES = 1;
 export const MCP_OVERVIEW_MAX_CATEGORIES = 3;
-// Evidence quotations, in characters after whitespace is collapsed.
-export const MCP_OVERVIEW_EVIDENCE_MIN_CHARS = 8;
+// Stored evidence, in characters after whitespace is collapsed: a longer
+// cited passage is cut at a word boundary. (The minimum is the shortest
+// passage numbered; see ./passages.ts.)
 export const MCP_OVERVIEW_EVIDENCE_MAX_CHARS = 300;
 export const MCP_OVERVIEW_RATIONALE_MAX_CHARS = 500;
 
@@ -106,6 +122,10 @@ export type McpOverviewPrompt = {
   system: string;
   user: string;
   inputSha256: string;
+  /** This input's output schema: evidence is one of `passages`' IDs. */
+  outputSchema: Record<string, unknown>;
+  /** The passages numbered in `user`, by ID, as the model sees them. */
+  passages: McpOverviewPassage[];
 };
 
 // ---------------------------------------------------------------------------
@@ -115,15 +135,19 @@ export type McpOverviewPrompt = {
 // Each kind of untrusted text sits between its own tags. Text that writes one
 // of these tags itself would end or restart a quotation, so every tag starting
 // with `mcp_` inside quoted text is defused — open or closing, any case or
-// spacing, with or without attributes.
+// spacing, with or without attributes, closed or not, nested or not.
 const MANIFEST_TAG = "mcp_manifest";
 const DESCRIPTION_TAG = "mcp_description";
 const README_TAG = "mcp_readme";
-const UNTRUSTED_TAG_RE = /<\s*\/?\s*mcp_[a-z0-9_]*[^>]*>/gi;
+const UNTRUSTED_TAG_START_RE = /<(?=\s*\/?\s*mcp_)/gi;
 
-/** Untrusted text with every `mcp_*` tag defused (`<` becomes `&lt;`). */
+/**
+ * Untrusted text with every `mcp_*` tag defused (`<` becomes `&lt;`). Each
+ * `<` that starts one is replaced, whatever follows it — a tag written
+ * inside another's attributes too — so quoting twice is quoting once.
+ */
 export function quoteUntrusted(text: string): string {
-  return text.replace(UNTRUSTED_TAG_RE, (tag) => tag.replace("<", "&lt;"));
+  return text.replace(UNTRUSTED_TAG_START_RE, "&lt;");
 }
 
 function quoted(tag: string, text: string): string {
@@ -154,41 +178,51 @@ export const MCP_OVERVIEW_SYSTEM_PROMPT = [
   // "two": MCP_OVERVIEW_MAX_CATEGORIES - 1, the schema's secondary maxItems.
   "secondary: zero to two more categories that clearly also apply, each with evidence; never other and never the primary again. Leave it empty rather than stretching.",
   "Classify by what the server lets an assistant do, not by incidental details such as its programming language, package registry, hosting, or the fact that it is an MCP server.",
-  `evidence: one short quotation — a phrase or a single sentence, ${MCP_OVERVIEW_EVIDENCE_MIN_CHARS} to ${MCP_OVERVIEW_EVIDENCE_MAX_CHARS} characters — copied exactly from the registry description, the README, or a tool or variable description; never from the manifest's labels, names, or identifiers, and never a whole paragraph.`,
+  "evidence: the ID of the one numbered passage that best shows the category, for example D1, R2 or T4.1. Passages are numbered with [ID] in the registry description, the README and the tool and variable descriptions; cite only an ID shown there, never the manifest's labels, names or identifiers.",
   "",
   "State only what the input supports. Do not guess; a short field is better than an invented one.",
 ].join("\n");
 
-/** The messages for one server. Third-party text is quoted, never bare. */
+/**
+ * The messages for one server. Third-party text is quoted, never bare, with
+ * its citable passages numbered in place; the schema lists their IDs.
+ *
+ * Throws when nothing in the input can be cited: a schema cannot list no
+ * IDs, and `shouldSkipMcpOverview` (./input.ts) skips such input first.
+ */
 export function buildMcpOverviewPrompt(
   input: McpOverviewInput,
 ): McpOverviewPrompt {
+  const numbered = numberMcpOverviewInput(input);
+  if (numbered.passages.length === 0) {
+    throw new Error(
+      "The MCP overview input has no numbered passage to cite as evidence",
+    );
+  }
   const categories = mcpCategoryDefinitions
     .map(
       (category) =>
         `- ${category.slug}: ${category.name}. ${category.description}`,
     )
     .join("\n");
-  const readme = input.readme?.segments.length
-    ? [
-        input.readme.truncated
-          ? `README (usage-related sections, excerpted; "[…]" marks omitted text):`
-          : "README (usage-related sections):",
-        quoted(README_TAG, input.readme.excerpt),
-      ]
-    : ["README: none available."];
+  const readme =
+    input.readme?.segments.length && numbered.readme !== null
+      ? [
+          input.readme.truncated
+            ? `README (usage-related sections, excerpted; "[…]" marks omitted text):`
+            : "README (usage-related sections):",
+          quoted(README_TAG, numbered.readme),
+        ]
+      : ["README: none available."];
   const user = [
     "Category slugs to choose from:",
     categories,
     "",
     "Manifest facts (names and descriptions are third-party data; no values are shown):",
-    quoted(MANIFEST_TAG, renderFacts(input.facts)),
+    quoted(MANIFEST_TAG, renderFacts(input.facts, numbered)),
     "",
-    ...(input.registryDescription
-      ? [
-          "Registry description:",
-          quoted(DESCRIPTION_TAG, input.registryDescription),
-        ]
+    ...(numbered.description !== null
+      ? ["Registry description:", quoted(DESCRIPTION_TAG, numbered.description)]
       : ["Registry description: none."]),
     "",
     ...readme,
@@ -199,10 +233,50 @@ export function buildMcpOverviewPrompt(
     system: MCP_OVERVIEW_SYSTEM_PROMPT,
     user,
     inputSha256: input.inputSha256,
+    outputSchema: buildMcpOverviewOutputSchema(
+      numbered.passages.map((passage) => passage.id),
+    ),
+    passages: numbered.passages,
   };
 }
 
-function renderFacts(facts: McpManifestFacts): string {
+/**
+ * The passages an input's prompt numbers, by ID; none when nothing in it can
+ * be cited.
+ */
+export function mcpOverviewPassages(
+  input: McpOverviewInput,
+): McpOverviewPassage[] {
+  return numberMcpOverviewInput(input).passages;
+}
+
+/**
+ * The description, README excerpt and tool and variable descriptions,
+ * quoted as the prompt shows them, with their passages numbered. Quoting the
+ * whole block again (`quoted`) leaves them — and so each passage's text — as
+ * they are here: quoting is idempotent, IDs add no `<`, and what the block
+ * writes after a description (a new "- " line or a label) cannot complete an
+ * `mcp_` tag begun at its end.
+ */
+function numberMcpOverviewInput(
+  input: McpOverviewInput,
+): NumberedMcpOverviewSources {
+  const quote = (text: string | null | undefined) =>
+    text ? quoteUntrusted(text) : null;
+  return numberMcpOverviewPassages({
+    description: quote(input.registryDescription),
+    readme: input.readme?.segments.length ? quote(input.readme.excerpt) : null,
+    tools: input.facts.tools.map((tool) => quote(tool.description)),
+    variables: [...input.facts.envVars, ...input.facts.headers].map(
+      (variable) => quote(variable.description),
+    ),
+  });
+}
+
+function renderFacts(
+  facts: McpManifestFacts,
+  numbered: NumberedMcpOverviewSources,
+): string {
   const yesNo = (value: boolean) => (value ? "yes" : "no");
   const runsAs = [
     facts.remote
@@ -244,8 +318,13 @@ function renderFacts(facts: McpManifestFacts): string {
     .filter((variable) => variable.secret)
     .map((variable) => variable.name);
   if (secrets.length) lines.push(`Secret names: ${secrets.join(", ")}`);
-  lines.push(...renderVariables("Environment variables", facts.envVars));
-  lines.push(...renderVariables("Headers", facts.headers));
+  // Descriptions as numbered: environment variables, then headers.
+  const envDescriptions = numbered.variables.slice(0, facts.envVars.length);
+  const headerDescriptions = numbered.variables.slice(facts.envVars.length);
+  lines.push(
+    ...renderVariables("Environment variables", facts.envVars, envDescriptions),
+  );
+  lines.push(...renderVariables("Headers", facts.headers, headerDescriptions));
   if (facts.tools.length === 0) {
     lines.push(
       facts.toolCount > 0
@@ -254,12 +333,13 @@ function renderFacts(facts: McpManifestFacts): string {
     );
   } else {
     lines.push(`Tools (${facts.tools.length} of ${facts.toolCount}):`);
-    for (const tool of facts.tools) {
+    facts.tools.forEach((tool, index) => {
       const risk = tool.risk ? ` [${tool.risk}]` : "";
+      const description = numbered.tools[index];
       lines.push(
-        `- ${tool.name}${risk}${tool.description ? `: ${tool.description}` : ""}`,
+        `- ${tool.name}${risk}${description ? `: ${description}` : ""}`,
       );
-    }
+    });
   }
   return lines.join("\n");
 }
@@ -267,17 +347,19 @@ function renderFacts(facts: McpManifestFacts): string {
 function renderVariables(
   label: string,
   variables: McpOverviewVariableFact[],
+  descriptions: Array<string | null>,
 ): string[] {
   if (variables.length === 0) return [`${label}: none declared`];
   return [
     `${label} (names only):`,
-    ...variables.map((variable) => {
+    ...variables.map((variable, index) => {
       const flags = [
         variable.secret ? "secret" : null,
         variable.required ? "required" : null,
       ].filter(Boolean);
+      const description = descriptions[index];
       return `- ${variable.name}${flags.length ? ` [${flags.join(", ")}]` : ""}${
-        variable.description ? `: ${variable.description}` : ""
+        description ? `: ${description}` : ""
       }`;
     }),
   ];
@@ -305,55 +387,75 @@ const localizedJsonSchema = {
   required: ["summary", "whatItDoes", "whenToUse", "requirements", "cautions"],
 } as const;
 
-/** One category with its quotation, from the given slugs. */
-function categoryJsonSchema(slugs: readonly string[]) {
+/**
+ * One category with its evidence, from the given slugs: the ID of a
+ * numbered passage, one of `passageIds` when given.
+ */
+function categoryJsonSchema(
+  slugs: readonly string[],
+  passageIds: readonly string[] | undefined,
+) {
   return {
     type: "object",
     additionalProperties: false,
     properties: {
       slug: { type: "string", enum: slugs },
-      evidence: {
-        type: "string",
-        minLength: MCP_OVERVIEW_EVIDENCE_MIN_CHARS,
-        maxLength: MCP_OVERVIEW_EVIDENCE_MAX_CHARS,
-      },
+      evidence: passageIds
+        ? { type: "string", enum: [...passageIds] }
+        : { type: "string" },
     },
     required: ["slug", "evidence"],
-  } as const;
+  };
 }
 
-/** What the model is asked to fill (JSON Schema, for the gateway). */
-export const MCP_OVERVIEW_OUTPUT_JSON_SCHEMA: Record<string, unknown> = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    en: localizedJsonSchema,
-    "zh-CN": localizedJsonSchema,
-    "zh-TW": localizedJsonSchema,
-    classification: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        // The main purpose; `other` only when no category fits.
-        primary: categoryJsonSchema(MCP_OVERVIEW_CATEGORY_SLUGS),
-        // What else clearly applies: never `other`. The parser also refuses
-        // the primary repeated, which a schema cannot express.
-        secondary: {
-          type: "array",
-          maxItems: MCP_OVERVIEW_MAX_CATEGORIES - 1,
-          items: categoryJsonSchema(SECONDARY_CATEGORY_SLUGS),
+/**
+ * What the model is asked to fill (JSON Schema, for the gateway). With the
+ * IDs of an input's numbered passages, every category's evidence must be one
+ * of them: the schema `buildMcpOverviewPrompt` sends for that input.
+ */
+export function buildMcpOverviewOutputSchema(
+  passageIds?: readonly string[],
+): Record<string, unknown> {
+  return {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      en: localizedJsonSchema,
+      "zh-CN": localizedJsonSchema,
+      "zh-TW": localizedJsonSchema,
+      classification: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          // The main purpose; `other` only when no category fits.
+          primary: categoryJsonSchema(MCP_OVERVIEW_CATEGORY_SLUGS, passageIds),
+          // What else clearly applies: never `other`. The parser also
+          // refuses the primary repeated, which a schema cannot express.
+          secondary: {
+            type: "array",
+            maxItems: MCP_OVERVIEW_MAX_CATEGORIES - 1,
+            items: categoryJsonSchema(SECONDARY_CATEGORY_SLUGS, passageIds),
+          },
+          rationale: {
+            type: "string",
+            minLength: 1,
+            maxLength: MCP_OVERVIEW_RATIONALE_MAX_CHARS,
+          },
         },
-        rationale: {
-          type: "string",
-          minLength: 1,
-          maxLength: MCP_OVERVIEW_RATIONALE_MAX_CHARS,
-        },
+        required: ["primary", "secondary", "rationale"],
       },
-      required: ["primary", "secondary", "rationale"],
     },
-  },
-  required: ["en", "zh-CN", "zh-TW", "classification"],
-};
+    required: ["en", "zh-CN", "zh-TW", "classification"],
+  };
+}
+
+/**
+ * The output's shape without an input: evidence is a passage ID, not one of
+ * a list. The adapter's static schema; every prompt carries its own, which
+ * the catalog overview engine sends instead.
+ */
+export const MCP_OVERVIEW_OUTPUT_JSON_SCHEMA: Record<string, unknown> =
+  buildMcpOverviewOutputSchema();
 export const MCP_OVERVIEW_OUTPUT_NAME = "mcp_overview";
 
 // Strict on shape; lengths and categories are checked afterwards so each
@@ -394,6 +496,7 @@ export type McpOverviewOutputErrorReason =
   | "category_count"
   | "unknown_category"
   | "other_not_alone"
+  | "evidence_unknown_passage"
   | "evidence_too_short"
   | "evidence_not_in_input";
 
@@ -411,20 +514,26 @@ export class McpOverviewOutputError extends Error {
  * The model's answer, checked and normalized. Accepts the structured result
  * or, from a model that answered in text, a JSON object in it.
  *
+ * Each category's evidence is the ID of one of `passages` (the prompt's,
+ * from `buildMcpOverviewPrompt`); what is stored is that passage's text,
+ * whitespace collapsed and cut at a word boundary to
+ * MCP_OVERVIEW_EVIDENCE_MAX_CHARS.
+ *
  * Throws `McpOverviewOutputError` with a reason for anything that is not an
  * overview of this input: any other shape (a locale sent as a string, the
  * classification inside a locale), a missing locale, a field far over its
  * cap, an empty summary or description, more than the allowed secondary
  * categories, a slug outside the MCP taxonomy (aliases such as "database"
- * are normalized), `other` beside another category, or evidence that does
- * not appear — case and whitespace aside — in the description, README or
- * tool and variable descriptions the model was shown. Nothing invalid is
- * repaired. All three locales receive the same categories: the primary, then
- * the secondaries.
+ * are normalized), `other` beside another category, evidence that names no
+ * numbered passage, or a cited passage that does not appear — case and
+ * whitespace aside — in the description, README or tool and variable
+ * descriptions the model was shown. Nothing invalid is repaired. All three
+ * locales receive the same categories: the primary, then the secondaries.
  */
 export function parseMcpOverviewOutput(
   raw: unknown,
   input: McpOverviewInput,
+  passages: readonly McpOverviewPassage[],
 ): ParsedMcpOverview {
   const value = typeof raw === "string" ? parseJsonObject(raw) : raw;
   if (!isRecord(value)) {
@@ -452,7 +561,11 @@ export function parseMcpOverviewOutput(
     );
   }
 
-  const classification = parseClassification(parsed.data.classification, input);
+  const classification = parseClassification(
+    parsed.data.classification,
+    input,
+    passages,
+  );
   const slugs = classification.categories.map((category) => category.slug);
   return {
     en: normalizeLocalized("en", parsed.data.en, slugs),
@@ -465,6 +578,7 @@ export function parseMcpOverviewOutput(
 function parseClassification(
   value: z.infer<typeof outputSchema>["classification"],
   input: McpOverviewInput,
+  passages: readonly McpOverviewPassage[],
 ): McpOverviewClassification {
   const count = 1 + value.secondary.length;
   if (
@@ -477,9 +591,10 @@ function parseClassification(
     );
   }
   const sources = evidenceSources(input);
-  const primary = parseCategory(value.primary, sources);
+  const byId = new Map(passages.map((passage) => [passage.id, passage.text]));
+  const primary = parseCategory(value.primary, byId, sources);
   const secondary = value.secondary.map((entry) =>
-    parseCategory(entry, sources),
+    parseCategory(entry, byId, sources),
   );
   // `other` says no category fits, so it stands alone: a primary `other`
   // takes no secondary, and a secondary is never `other`.
@@ -494,7 +609,7 @@ function parseClassification(
   }
   // Stored main purpose first. A secondary naming a category already listed
   // (the primary again, or an alias of an earlier one) adds nothing: the
-  // first quotation is kept.
+  // first evidence is kept.
   const categories: McpOverviewCategory[] = [primary];
   for (const category of secondary) {
     if (!categories.some((listed) => listed.slug === category.slug)) {
@@ -518,12 +633,13 @@ function parseClassification(
 }
 
 /**
- * One category: a slug in the MCP taxonomy and a quotation of the input,
- * its length counted after whitespace is collapsed — a quotation copied
- * across wrapped, indented lines is as long as it reads.
+ * One category: a slug in the MCP taxonomy and the ID of a numbered passage,
+ * stored as that passage's text — whitespace collapsed, so a passage wrapped
+ * over indented lines is as long as it reads, and cut to the evidence limit.
  */
 function parseCategory(
   entry: z.infer<typeof categoryOutputSchema>,
+  passages: ReadonlyMap<string, string>,
   sources: string[],
 ): McpOverviewCategory {
   const slug = normalizeMcpCategorySlug(entry.slug);
@@ -533,8 +649,16 @@ function parseCategory(
       `Unknown MCP category: ${entry.slug.slice(0, 60)}`,
     );
   }
-  const evidence = entry.evidence.trim();
-  const length = Array.from(evidence.replace(/\s+/g, " ")).length;
+  // Exactly an ID the prompt numbered: nothing else is looked up.
+  const passage = passages.get(entry.evidence);
+  if (passage === undefined) {
+    throw new McpOverviewOutputError(
+      "evidence_unknown_passage",
+      `Evidence for ${slug} is not a numbered passage: ${JSON.stringify(entry.evidence.slice(0, 20))}`,
+    );
+  }
+  const evidence = cutEvidence(passage.replace(/\s+/g, " ").trim());
+  const length = Array.from(evidence).length;
   if (length > MCP_OVERVIEW_EVIDENCE_MAX_CHARS) {
     throw new McpOverviewOutputError(
       "too_long",
@@ -563,9 +687,31 @@ function parseCategory(
 }
 
 /**
+ * Whitespace-collapsed text within MCP_OVERVIEW_EVIDENCE_MAX_CHARS: cut before
+ * the word that crosses the limit, or at the limit when that would leave less
+ * than MCP_OVERVIEW_EVIDENCE_MIN_CHARS (text without spaces, such as CJK).
+ * Counts code points.
+ */
+function cutEvidence(text: string): string {
+  const chars = Array.from(text);
+  if (chars.length <= MCP_OVERVIEW_EVIDENCE_MAX_CHARS) return text;
+  const head = chars.slice(0, MCP_OVERVIEW_EVIDENCE_MAX_CHARS);
+  // The next character is a space: the limit falls between two words.
+  if (chars[MCP_OVERVIEW_EVIDENCE_MAX_CHARS] === " ") {
+    return head.join("").trimEnd();
+  }
+  const space = head.lastIndexOf(" ");
+  return (
+    space >= MCP_OVERVIEW_EVIDENCE_MIN_CHARS ? head.slice(0, space) : head
+  )
+    .join("")
+    .trimEnd();
+}
+
+/**
  * The third-party text the model was shown, as it was shown (tags defused),
- * one entry per source so a quotation cannot straddle two. Our own labels
- * and the manifest's names and identifiers are not evidence.
+ * one entry per source so evidence cannot straddle two. Our own labels and
+ * the manifest's names and identifiers are not evidence.
  */
 function evidenceSources(input: McpOverviewInput): string[] {
   return [
@@ -577,24 +723,6 @@ function evidenceSources(input: McpOverviewInput): string[] {
   ]
     .filter((text): text is string => Boolean(text))
     .map((text) => evidenceKey(quoteUntrusted(text)));
-}
-
-/**
- * Text compared for evidence: Unicode-normalized, lowercased, whitespace
- * collapsed, typographic quotes and dashes made plain, emphasis and code
- * markers dropped, and surrounding quotation marks or ellipses trimmed.
- */
-function evidenceKey(text: string): string {
-  return text
-    .normalize("NFKC")
-    .replace(/[\u2018\u2019]/g, "'")
-    .replace(/[\u201c\u201d]/g, '"')
-    .replace(/[\u2010-\u2015]/g, "-")
-    .replace(/[*`]/g, "")
-    .replace(/\s+/g, " ")
-    .toLowerCase()
-    .trim()
-    .replace(/^["'.\s]+|["'.\s]+$/g, "");
 }
 
 function normalizeLocalized(

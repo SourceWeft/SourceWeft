@@ -1,8 +1,45 @@
+import { buildMcpOverviewInput } from "./input";
+import { buildMcpOverviewPrompt } from "./prompt";
+import { genesis402Source } from "./test-fixtures";
+
+/**
+ * The ID of the one passage of the genesis402 fixture's prompt whose text
+ * contains `fragment`, and that passage's text as the parser stores it
+ * (whitespace collapsed). Its README passages are the same however the
+ * version was stored, since they come from the README alone.
+ */
+export function genesis402Passage(fragment: string): {
+  id: string;
+  stored: string;
+} {
+  const prompt = buildMcpOverviewPrompt(
+    buildMcpOverviewInput(genesis402Source()),
+  );
+  const found = prompt.passages.filter((passage) =>
+    passage.text.includes(fragment),
+  );
+  if (found.length !== 1) {
+    throw new Error(
+      `${found.length} genesis402 passages contain ${JSON.stringify(fragment)}`,
+    );
+  }
+  return {
+    id: found[0]!.id,
+    stored: found[0]!.text.replace(/\s+/g, " ").trim(),
+  };
+}
+
+// The README passages the answer below cites.
+export const genesis402Evidence = {
+  finance: genesis402Passage("DeFi yields from 15,000+ pools"),
+  webExtraction: genesis402Passage("Any public web page as clean text"),
+};
+
 /**
  * A structured answer the system model could give for the genesis402 fixture
  * (`test-fixtures.ts`): three locales, and a primary and one secondary
- * category whose evidence is quoted from its README. For tests that stand in
- * for the model call.
+ * category whose evidence cites README passages by ID. For tests that stand
+ * in for the model call.
  */
 export function genesis402ModelAnswer(
   options: { summaryPrefix?: string } = {},
@@ -39,12 +76,11 @@ export function genesis402ModelAnswer(
       cautions: "",
     },
     classification: {
-      primary: { slug: "finance", evidence: "DeFi yields from 15,000+ pools" },
+      primary: { slug: "finance", evidence: genesis402Evidence.finance.id },
       secondary: [
         {
           slug: "web-search-scraping",
-          evidence:
-            "Any public web page as clean text, title, headings and links.",
+          evidence: genesis402Evidence.webExtraction.id,
         },
       ],
       rationale:

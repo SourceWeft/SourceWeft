@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { beforeEach, describe, test, vi } from "vitest";
 import type { McpOverviewSubjectRow } from "./repository";
 
@@ -45,8 +46,10 @@ import {
   MCP_OVERVIEW_PROMPT_VERSION,
   MCP_OVERVIEW_TAXONOMY_VERSION,
   McpOverviewOutputError,
+  buildMcpOverviewOutputSchema,
+  buildMcpOverviewPrompt,
 } from "./prompt";
-import { genesis402ModelAnswer } from "./test-answer";
+import { genesis402Evidence, genesis402ModelAnswer } from "./test-answer";
 import {
   federatedManifest,
   genesis402RegistryServer,
@@ -131,6 +134,26 @@ describe("the MCP subject", () => {
     assert.equal(mcpOverviewSkipReason(described!), null);
     assert.equal(described!.input?.readme, null);
   });
+
+  test("gets no overview when nothing in its input can be cited as evidence", async () => {
+    // A README of code alone, a short description and no variables: nothing
+    // is numbered, so there is no ID for the schema to list.
+    const codeOnly = "# mcp\n\n```bash\nnpx -y widgets-mcp\n```\n";
+    mocks.findRow.mockResolvedValue(
+      row({
+        readmeMd: codeOnly,
+        readmeSha256: createHash("sha256").update(codeOnly).digest("hex"),
+        provenanceJson: {},
+        manifestJson: {
+          ...federatedManifest(genesis402RegistryServer),
+          description: "Widgets.",
+        },
+      }),
+    );
+    const subject = await loadMcpOverviewSubject("mcpv-genesis");
+    assert.equal(subject!.input?.readme?.segments.length, 1);
+    assert.equal(mcpOverviewSkipReason(subject!), "no-content");
+  });
 });
 
 describe("the MCP adapter", () => {
@@ -163,14 +186,45 @@ describe("the MCP adapter", () => {
       "finance",
       "web-search-scraping",
     ]);
-    // Stored as before: the primary, then the secondaries.
-    const { primary, secondary, rationale } =
-      genesis402ModelAnswer().classification;
+    // Stored as before: the primary, then the secondaries, each with the
+    // text of the passage it cites.
     assert.deepEqual(parsed.classification, {
       status: "ready",
-      categories: [primary, ...secondary],
-      rationale,
+      categories: [
+        { slug: "finance", evidence: genesis402Evidence.finance.stored },
+        {
+          slug: "web-search-scraping",
+          evidence: genesis402Evidence.webExtraction.stored,
+        },
+      ],
+      rationale: genesis402ModelAnswer().classification.rationale,
     });
+    // Resolved against the passages of the prompt it is given.
+    assert.throws(
+      () =>
+        mcpOverviewAdapter.parseOutput(genesis402ModelAnswer(), subject, {
+          ...prompt,
+          passages: prompt.passages.filter(
+            (passage) => passage.id !== genesis402Evidence.finance.id,
+          ),
+        }),
+      (error: unknown) =>
+        error instanceof McpOverviewOutputError &&
+        error.reason === "evidence_unknown_passage",
+    );
+  });
+
+  test("builds each version's prompt with its own schema", async () => {
+    mocks.findRow.mockResolvedValue(row());
+    const subject = (await loadMcpOverviewSubject("mcpv-genesis"))!;
+    const prompt = mcpOverviewAdapter.buildPrompt(subject);
+    assert.deepEqual(prompt, buildMcpOverviewPrompt(subject.input!));
+    assert.deepEqual(
+      prompt.outputSchema,
+      buildMcpOverviewOutputSchema(
+        prompt.passages.map((passage) => passage.id),
+      ),
+    );
   });
 });
 
@@ -183,19 +237,17 @@ describe("generating one MCP overview", () => {
       force: false,
     });
     mocks.store.publish.mockResolvedValue(true);
+    const complete = vi.fn(async (_input: unknown) => ({
+      model: "deepseek/deepseek-v4.1-flash",
+      providerModel: "deepseek/deepseek-v4.1-flash",
+      structuredOutput: genesis402ModelAnswer(),
+      raw: { content: "" },
+    }));
     mocks.withSystemModel.mockImplementation(
       async (
         _context: unknown,
-        run: (chat: { complete: () => Promise<unknown> }) => Promise<unknown>,
-      ) =>
-        run({
-          complete: async () => ({
-            model: "deepseek/deepseek-v4.1-flash",
-            providerModel: "deepseek/deepseek-v4.1-flash",
-            structuredOutput: genesis402ModelAnswer(),
-            raw: { content: "" },
-          }),
-        }),
+        run: (chat: { complete: typeof complete }) => Promise<unknown>,
+      ) => run({ complete }),
     );
 
     const result = await generateMcpOverview({
@@ -215,6 +267,24 @@ describe("generating one MCP overview", () => {
       subjectRef: "mcp-server-version:mcpv-genesis",
       scopeId: "mcp-overview:job:1",
     });
+    // The schema sent is this version's: evidence is one of its passage IDs,
+    // not the adapter's static shape.
+    const prompt = buildMcpOverviewPrompt(
+      buildMcpOverviewInput(genesis402Source()),
+    );
+    const request = complete.mock.calls[0]![0] as {
+      structuredOutput: { name: string; schema: unknown };
+    };
+    assert.equal(request.structuredOutput.name, MCP_OVERVIEW_OUTPUT_NAME);
+    assert.deepEqual(request.structuredOutput.schema, prompt.outputSchema);
+    assert.notDeepEqual(
+      request.structuredOutput.schema,
+      MCP_OVERVIEW_OUTPUT_JSON_SCHEMA,
+    );
+    assert.match(
+      JSON.stringify(request.structuredOutput.schema),
+      new RegExp(`"enum":\\["D1","R1",.*"${genesis402Evidence.finance.id}"`),
+    );
     const published = mocks.store.publish.mock.calls[0]![0];
     assert.equal(published.subject.serverId, "mcp-genesis");
     assert.equal(
@@ -250,7 +320,7 @@ describe("generating one MCP overview", () => {
     assert.equal(mocks.store.publish.mock.calls.length, 0);
   });
 
-  test("an answer whose evidence is not in the input is refused and logged, for the job to retry", async () => {
+  test("an answer citing a passage the prompt did not number is refused and logged, for the job to retry", async () => {
     mocks.findRow.mockResolvedValue(row());
     mocks.store.claim.mockResolvedValue({
       requestId: "r1",
@@ -259,8 +329,8 @@ describe("generating one MCP overview", () => {
     });
     const info = vi.spyOn(logger, "info").mockImplementation(() => undefined);
     const answer = genesis402ModelAnswer();
-    answer.classification.primary.evidence =
-      "A sentence that is nowhere in the README.";
+    answer.classification.primary.evidence = "R999";
+    answer.en.summary = "A summary that is nowhere in the log.";
     await assert.rejects(
       generateMcpOverview({
         versionId: "mcpv-genesis",
@@ -271,7 +341,7 @@ describe("generating one MCP overview", () => {
       }),
       (error: unknown) => {
         assert.ok(error instanceof McpOverviewOutputError);
-        assert.equal(error.reason, "evidence_not_in_input");
+        assert.equal(error.reason, "evidence_unknown_passage");
         return true;
       },
     );
@@ -291,12 +361,12 @@ describe("generating one MCP overview", () => {
       promptVersion: MCP_OVERVIEW_PROMPT_VERSION,
       taxonomyVersion: MCP_OVERVIEW_TAXONOMY_VERSION,
       model: "m",
-      error: "Evidence for finance does not appear in the input",
-      reason: "evidence_not_in_input",
+      error: 'Evidence for finance is not a numbered passage: "R999"',
+      reason: "evidence_unknown_passage",
     });
     assert.doesNotMatch(
       JSON.stringify(rejected[0]),
-      /nowhere in the README|pay-per-call/,
+      /nowhere in the log|pay-per-call/,
     );
   });
 });

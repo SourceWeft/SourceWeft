@@ -781,4 +781,38 @@ describe("skip rule", () => {
     assert.equal(skip("Short.", badgesOnly), true);
     assert.equal(skip(exactly(40), badgesOnly), false);
   });
+
+  test("skips when nothing in the input can be cited as evidence", () => {
+    // A README of code alone has text, but no passage to number.
+    const codeOnly = "# mcp\n\n```bash\nnpx -y widgets-mcp\n```";
+    assert.equal(skip("Short.", codeOnly), true);
+    assert.equal(skip("Lists and edits widgets.", codeOnly), false);
+    // A description long enough, with no word in it.
+    assert.equal(skip("-".repeat(40)), true);
+    // A variable's description is a passage too.
+    const input = buildMcpOverviewInput(
+      source({ registryDescription: "Short.", readme: null }),
+    );
+    assert.equal(shouldSkipMcpOverview(input), true);
+    assert.equal(
+      shouldSkipMcpOverview({
+        ...input,
+        readme: buildMcpOverviewInput(
+          source({ readme: { markdown: codeOnly, sha256: sha(codeOnly) } }),
+        ).readme,
+        facts: {
+          ...input.facts,
+          envVars: [
+            {
+              name: "WIDGETS_KEY",
+              secret: true,
+              required: true,
+              description: "The key widgets are listed with.",
+            },
+          ],
+        },
+      }),
+      false,
+    );
+  });
 });

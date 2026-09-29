@@ -36,7 +36,11 @@ type Subject = {
   fingerprint: string;
   text: string;
 };
-type Prompt = { system: string; user: string };
+type Prompt = {
+  system: string;
+  user: string;
+  outputSchema?: Record<string, unknown>;
+};
 type Classification = { status: "ready" | "needs-review"; slug: string | null };
 
 const overview = (summary: string): CatalogOverviewJson => ({
@@ -456,6 +460,65 @@ test("the result key is the frozen hash of fingerprint, prompt and model", () =>
   ).not.toBe(key);
   expect(overviewResultKey({ fingerprint: "f1", prompt, model: "n" })).not.toBe(
     key,
+  );
+  // A prompt's own schema is part of the prompt, and so of the key.
+  const withSchema = {
+    ...prompt,
+    outputSchema: { type: "object", properties: { a: { enum: ["D1"] } } },
+  };
+  const schemaKey = overviewResultKey({
+    fingerprint: "f1",
+    prompt: withSchema,
+    model: "m",
+  });
+  expect(schemaKey).not.toBe(key);
+  expect(
+    overviewResultKey({
+      fingerprint: "f1",
+      prompt: {
+        ...withSchema,
+        outputSchema: { type: "object", properties: { a: { enum: ["D2"] } } },
+      },
+      model: "m",
+    }),
+  ).not.toBe(schemaKey);
+});
+
+test("the prompt's own schema is sent and keyed; the adapter's static one otherwise", async () => {
+  const complete = vi.fn(async (_input: unknown) => ({
+    structuredOutput: allLocales("system"),
+    providerModel: "vendor/model",
+    model: "system:market",
+  }));
+  mocks.withSystemModel.mockImplementation(
+    async (_context: unknown, run: (chat: unknown) => Promise<unknown>) =>
+      run({ complete }),
+  );
+  const outputSchema = { type: "object", title: "per input" };
+  adapter.buildPrompt = (subject) => ({
+    system: "sys",
+    user: subject.text,
+    outputSchema,
+  });
+  await generateOverview(adapter, {
+    versionId: "v1",
+    scopeId: "s",
+    modelConfigurationKey: "cfg",
+  });
+  expect(complete.mock.calls[0]![0]).toMatchObject({
+    structuredOutput: { name: "t", description: "t", schema: outputSchema },
+  });
+  expect(fake.published[0]?.resultKey).toBe(
+    overviewResultKey({
+      fingerprint: "f1",
+      prompt: { system: "sys", user: "A", outputSchema },
+      model: "cfg",
+    }),
+  );
+  // The cache is looked up under the same key.
+  expect(fake.store.findCached).toHaveBeenCalledWith(
+    fake.published[0]?.resultKey,
+    "v1",
   );
 });
 

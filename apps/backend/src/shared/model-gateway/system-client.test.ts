@@ -59,6 +59,12 @@ import {
 } from "@sourceweft/model-gateway";
 import { createOverviewModelCall } from "../../modules/catalog-overview/model";
 import { mcpOverviewAdapter } from "../../modules/market/overview/generate";
+import { buildMcpOverviewInput } from "../../modules/market/overview/input";
+import {
+  buildMcpOverviewPrompt,
+  type McpOverviewPrompt,
+} from "../../modules/market/overview/prompt";
+import { genesis402Source } from "../../modules/market/overview/test-fixtures";
 import { SKILL_OVERVIEW_OUTPUT_JSON_SCHEMA } from "../../modules/skills/market/overview-prompt";
 import {
   SYSTEM_MODEL_MAX_RETRIES,
@@ -571,6 +577,55 @@ test("an overview through an OpenRouter definition declaring json_schema_strict 
   assert.equal(line.structuredOutputMechanism, "json_schema_strict");
   assert.equal(line.structuredOutputFallbackReason, undefined);
   assert.doesNotMatch(JSON.stringify(info.mock.calls), /OUTPUT-MARKER|PROMPT-MARKER/);
+});
+
+test("an MCP overview's per-input schema goes out as strict json_schema with its passage IDs", async () => {
+  const prompt = buildMcpOverviewPrompt(
+    buildMcpOverviewInput(genesis402Source()),
+  );
+  const ids = prompt.passages.map((passage) => passage.id);
+  assert.ok(ids.length > 0);
+  // The schema the prompt carries stays strict-compatible with its enum.
+  assert.equal(isStrictJsonSchemaCompatible(prompt.outputSchema), true);
+  mocks.loadRouted.mockResolvedValue(
+    routedFixture({
+      supports: ["chat", "tool_calling", "json_schema", "json_schema_strict"],
+    }),
+  );
+  const { seen } = mockProvider(() => ({
+    role: "assistant",
+    content: JSON.stringify({ marker: "OUTPUT-MARKER" }),
+  }));
+  isolateStrictJsonSchemaSupport();
+  const call = createOverviewModelCall<McpOverviewPrompt>(mcpOverviewAdapter);
+  await call({
+    prompt,
+    versionId: "v1",
+    scopeId: `scope-${randomUUID()}`,
+  });
+  assert.equal(seen.length, 1);
+  const responseFormat = seen[0]!.body.response_format as {
+    type?: string;
+    json_schema?: { strict?: boolean; schema?: Record<string, unknown> };
+  };
+  assert.equal(responseFormat.type, "json_schema");
+  assert.equal(responseFormat.json_schema?.strict, true);
+  const sent = responseFormat.json_schema?.schema ?? {};
+  const classification = (
+    sent.properties as Record<
+      string,
+      { properties: Record<string, { properties: Record<string, unknown> }> }
+    >
+  ).classification!.properties;
+  assert.deepEqual(classification.primary!.properties.evidence, {
+    type: "string",
+    enum: ids,
+  });
+  // The prompt's schema, with the output's description on its root.
+  assert.deepEqual(sent, {
+    ...prompt.outputSchema,
+    description: mcpOverviewAdapter.output.description,
+  });
 });
 
 test("a strict overview refused by OpenRouter falls back once and logs why", async () => {
