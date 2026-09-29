@@ -35,13 +35,13 @@ import { mcpOverviewInputOf } from "./source";
  * this is the MCP kind's adapter to it.
  */
 
-// Three locales of five short fields plus up to three quoted categories: a
+// Three locales of five short fields plus up to three cited categories: a
 // quarter more than a skill's overview (skills/market/overview-generate.ts),
 // and nothing hidden is spent first, since thinking is off.
 export const MCP_OVERVIEW_MAX_OUTPUT_TOKENS = 6_000;
 
 const MCP_OVERVIEW_OUTPUT_DESCRIPTION =
-  "A catalog overview of the MCP server in English, Simplified Chinese and Taiwan Traditional Chinese, plus one classification with quoted evidence.";
+  "A catalog overview of the MCP server in English, Simplified Chinese and Taiwan Traditional Chinese, plus one classification citing numbered passages as evidence.";
 
 /** Why a claimed version gets no overview, besides the engine's reasons. */
 export type McpOverviewSkipReason =
@@ -51,7 +51,8 @@ export type McpOverviewSkipReason =
   | "readme-pending"
   // The stored manifest no longer parses.
   | "invalid-manifest"
-  // No usable README and a description too short to say what it does.
+  // No usable README and a description too short to say what it does, or
+  // no passage in the input to cite as evidence.
   | "no-content";
 
 export type McpOverviewSubject = OverviewSubject & {
@@ -123,8 +124,9 @@ export const mcpOverviewAdapter: OverviewSubjectAdapter<
     // skipReason ran first: the input is there.
     return buildMcpOverviewPrompt(subject.input!);
   },
-  parseOutput(raw, subject) {
-    const parsed = parseMcpOverviewOutput(raw, subject.input!);
+  parseOutput(raw, subject, prompt) {
+    // Evidence IDs resolve against the passages this prompt numbered.
+    const parsed = parseMcpOverviewOutput(raw, subject.input!, prompt.passages);
     return {
       overviews: {
         en: catalogOverview(parsed.en),
@@ -132,7 +134,8 @@ export const mcpOverviewAdapter: OverviewSubjectAdapter<
         "zh-TW": catalogOverview(parsed["zh-TW"]),
       },
       // The parser only returns a classification whose every category is in
-      // the taxonomy and quotes the input, so it is ready to apply.
+      // the taxonomy and cites a passage of the input, so it is ready to
+      // apply.
       classification: {
         status: "ready",
         categories: parsed.classification.categories,

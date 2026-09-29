@@ -67,6 +67,41 @@ test("the call goes through the system model under the kind's purpose and output
   });
 });
 
+test("a prompt that carries its own schema is answered in that schema", async () => {
+  const complete = vi.fn(async (_input: unknown) => ({
+    structuredOutput: { ok: true },
+    model: "system:market",
+  }));
+  mocks.withSystemModel.mockImplementation(
+    async (_context: unknown, run: (chat: unknown) => Promise<unknown>) =>
+      run({ complete }),
+  );
+  const outputSchema = {
+    type: "object",
+    additionalProperties: false,
+    properties: { evidence: { type: "string", enum: ["D1", "R2"] } },
+    required: ["evidence"],
+  };
+  await createOverviewModelCall(spec)({
+    prompt: { system: "s", user: "u", outputSchema },
+    versionId: "v",
+    scopeId: "scope",
+  });
+  expect(complete.mock.calls[0]![0]).toMatchObject({
+    // The prompt's messages only: the schema is not a message.
+    messages: [
+      { role: "system", content: "s" },
+      { role: "user", content: "u" },
+    ],
+    structuredOutput: {
+      name: "thing_overview",
+      description: "A thing.",
+      schema: outputSchema,
+    },
+    maxTokens: 123,
+  });
+});
+
 test("a text answer is handed to the kind's parser as text", async () => {
   mocks.withSystemModel.mockImplementation(
     async (_context: unknown, run: (chat: unknown) => Promise<unknown>) =>

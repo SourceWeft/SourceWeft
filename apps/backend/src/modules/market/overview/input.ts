@@ -8,6 +8,7 @@ import type { RegistryInput, RegistryServerJson } from "../types";
 import {
   MCP_OVERVIEW_PROMPT_VERSION,
   MCP_OVERVIEW_TAXONOMY_VERSION,
+  mcpOverviewPassages,
 } from "./prompt";
 
 /**
@@ -167,18 +168,22 @@ export function buildMcpOverviewInput(
 /**
  * Nothing worth describing: no usable README (none stored, or nothing left
  * once badges, markup and boilerplate sections are removed) and a description
- * too short to say what the server does.
+ * too short to say what the server does — or nothing in the input the
+ * overview's categories could cite as evidence (no numbered passage; see
+ * ./passages.ts).
  */
-export function shouldSkipMcpOverview(
-  input: Pick<McpOverviewInput, "readme" | "registryDescription">,
-): boolean {
+export function shouldSkipMcpOverview(input: McpOverviewInput): boolean {
   const hasReadme = (input.readme?.segments.length ?? 0) > 0;
   const descriptionChars = Array.from(
     (input.registryDescription ?? "").trim(),
   ).length;
-  return (
-    !hasReadme && descriptionChars < MCP_OVERVIEW_SKIP_MIN_DESCRIPTION_CHARS
-  );
+  if (
+    !hasReadme &&
+    descriptionChars < MCP_OVERVIEW_SKIP_MIN_DESCRIPTION_CHARS
+  ) {
+    return true;
+  }
+  return mcpOverviewPassages(input).length === 0;
 }
 
 /**

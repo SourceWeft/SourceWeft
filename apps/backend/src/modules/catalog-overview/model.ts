@@ -16,7 +16,8 @@ import type {
 
 /**
  * The model call through the system model: no tools, a JSON schema to answer
- * in, thinking pinned off (DeepSeek thinks by default, and a forced
+ * in (the prompt's own when it carries one, else the kind's static one),
+ * thinking pinned off (DeepSeek thinks by default, and a forced
  * structured-output tool choice is refused while it does), output capped.
  * `spec` is usually the kind's adapter.
  */
@@ -39,7 +40,7 @@ export function createOverviewModelCall<TPrompt extends OverviewPrompt>(
           structuredOutput: {
             name: spec.output.name,
             description: spec.output.description,
-            schema: spec.output.schema,
+            schema: prompt.outputSchema ?? spec.output.schema,
           },
           thinking: { mode: "off", enabled: false, includeReasoning: false },
           maxTokens: spec.output.maxTokens,

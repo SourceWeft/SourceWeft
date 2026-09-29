@@ -14,7 +14,7 @@ import {
 import type { RegistryServerJson } from "../types";
 import { createRouteTestApp } from "../../../test/hono";
 import { createIsolatedTestDatabase } from "../../../test/isolated-database";
-import { genesis402ModelAnswer } from "./test-answer";
+import { genesis402Evidence, genesis402ModelAnswer } from "./test-answer";
 import {
   carrerliftRegistryServer,
   federatedManifest,
@@ -433,21 +433,24 @@ describe("MCP AI overviews (real PostgreSQL)", () => {
     const analysis = await repository.mcpOverviewRepository.read(
       genesis.versionId,
     );
+    // Evidence cited by passage ID is stored as the passage's text.
     expect(analysis).toMatchObject({
       status: "ready",
-      promptVersion: "2",
+      promptVersion: "3",
       classification: {
         status: "ready",
         categories: [
-          { slug: "finance", evidence: "DeFi yields from 15,000+ pools" },
+          { slug: "finance", evidence: genesis402Evidence.finance.stored },
           {
             slug: "web-search-scraping",
-            evidence:
-              "Any public web page as clean text, title, headings and links.",
+            evidence: genesis402Evidence.webExtraction.stored,
           },
         ],
       },
     });
+    expect(genesis402Evidence.finance.stored).toContain(
+      "DeFi yields from 15,000+ pools",
+    );
     expect(state.calls.at(-1)).toEqual({
       purpose: "mcp_market.overview",
       subjectRef: `mcp-server-version:${genesis.versionId}`,
@@ -919,8 +922,9 @@ describe("MCP AI overviews (real PostgreSQL)", () => {
     answer.classification = {
       primary: {
         slug: "productivity-workflow",
-        evidence:
-          "Search fresh Indian jobs and internships, plus international intern and new-grad roles.",
+        // Its registry description: "Search fresh Indian jobs and
+        // internships, plus international intern and new-grad roles."
+        evidence: "D1",
       },
       secondary: [],
       rationale: "Job search.",
