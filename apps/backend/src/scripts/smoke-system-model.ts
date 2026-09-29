@@ -84,8 +84,12 @@ async function main() {
     inputTokens: usage?.inputTokens ?? null,
     outputTokens: usage?.outputTokens ?? null,
     totalTokens: usage?.totalTokens ?? null,
-    costUsd: cost?.inlineUsd ?? null,
+    // The total the provider reported, and what it charged inline — they
+    // differ on an OpenRouter BYOK call that reported only its fee.
+    costUsd: cost?.effectiveUsd ?? null,
+    chargedUsd: cost?.inlineUsd ?? null,
     costSource: cost?.source ?? null,
+    costStatus: cost?.status ?? null,
     structuredOutput: result.structuredOutput ?? null,
   });
   if (!result.structuredOutput) {

@@ -211,10 +211,10 @@ test("images.generate preserves OpenRouter provider cost from usage", async () =
   assert.equal(result.usage?.inputTokens, 200);
   assert.equal(result.usage?.outputTokens, 1120);
   assert.equal(result.usage?.outputImageTokens, 1120);
-  assert.equal(result.usage?.providerCostUsd, 0.0673);
-  assert.equal(result.usage?.providerCostSource, "provider_inline");
+  assert.equal(result.observation?.cost?.effectiveUsd, 0.0673);
+  assert.equal(result.observation?.cost?.source, "provider_inline");
   assert.equal(
-    result.usage?.providerCostSourcePath,
+    result.observation?.provenance.inlineCost,
     "provider:openrouter.usage.cost",
   );
 });

@@ -133,15 +133,6 @@ export interface UsageInfo {
   imageQuality?: string;
   inputAudioTokens?: number;
   outputAudioTokens?: number;
-  /** @deprecated Use ModelCallObservation.cost. Kept during the dual-write migration. */
-  providerCostUsd?: number;
-  /** @deprecated Use ModelCallObservation.cost.source. */
-  providerCostSource?:
-    "provider_inline" | "provider_estimated" | "provider_receipt";
-  /** @deprecated Provider wire provenance now belongs to ModelCallObservation.provenance. */
-  providerCostSourcePath?: string;
-  /** @deprecated Provider cost details remain for compatibility during migration. */
-  costDetails?: Record<string, number>;
 }
 
 export interface ObserveSpan {

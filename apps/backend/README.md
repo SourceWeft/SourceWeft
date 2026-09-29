@@ -156,9 +156,14 @@ user's team.
   later, except where a market admin chose the categories.
 - Nothing is billed or stored: no usage ledger, no generation records. Each
   call writes one `system_model.call` log line with the purpose, subject,
-  Provider, model, status, duration, input, output and reasoning token counts
-  and, when the Provider reports it, `costUsd`, but never the prompt, the
-  output or the key. Set a
+  Provider, model, status, duration, input, output and reasoning token counts,
+  `costUsd` and `costSource`, but never the prompt, the output or the key.
+  The cost follows the same per-call rule as tenant billing: the total the
+  Provider reports (`provider_actual`; an OpenRouter BYOK call counts
+  OpenRouter's fee plus the upstream charge on our own key), otherwise the
+  model catalog's price for the token counts plus anything already charged
+  (`price_book`); a missing price leaves `costUsd` out and says so in
+  `costSource`. Set a
   spending limit on the dedicated key at the Provider (for OpenRouter, on the
   key itself) and read its usage there.
 - Changing the key takes an environment change and a restart. A synchronized
