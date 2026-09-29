@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import type {
-  ModelCapabilityRule,
-  ProviderRoutingConfig,
-  ProviderRoutingSort,
+import { logger } from "../logger";
+import {
+  STRICT_JSON_SCHEMA_SUPPORT,
+  type ModelCapabilityRule,
+  type ProviderRoutingConfig,
+  type ProviderRoutingSort,
 } from "@sourceweft/model-gateway";
 import type {
   ModelGatewayProviderKind,
@@ -512,6 +514,49 @@ function asStringArray(value: unknown, fieldName: string): string[] {
   );
 }
 
+/**
+ * The capabilities a gateway may declare in `supports`. Catalog discovery
+ * reads the modality values (`chat` + `tool_calling` for chat and vision,
+ * `embeddings`, `rerank`, `asr`, `tts`, `image`, `video`), the system model
+ * requires `chat` + `json_schema`, and `json_schema_strict` switches structured
+ * output to a strict `json_schema` response format.
+ *
+ * A value outside this list is kept and logged as a warning, not refused:
+ * deployed custom configs already carry descriptive values the gateway does
+ * not read (for example `vision` and `json_object` on a Cloudflare AI Gateway
+ * entry), and refusing them would stop API, worker and scheduler at startup.
+ * The warning still surfaces a typo such as `json_schema_stric`.
+ */
+const GATEWAY_SUPPORTS = [
+  "chat",
+  "tool_calling",
+  "json_schema",
+  STRICT_JSON_SCHEMA_SUPPORT,
+  "embeddings",
+  "rerank",
+  "asr",
+  "tts",
+  "image",
+  "video",
+] as const;
+
+function asGatewaySupports(value: unknown, fieldName: string): string[] {
+  const supports = asStringArray(value, fieldName);
+  supports.forEach((capability, index) => {
+    if (!(GATEWAY_SUPPORTS as readonly string[]).includes(capability)) {
+      logger.warn(
+        "Unknown model gateway capability in supports; it has no effect",
+        {
+          field: `${fieldName}[${index}]`,
+          capability,
+          known: GATEWAY_SUPPORTS,
+        },
+      );
+    }
+  });
+  return supports;
+}
+
 function asOptionalStringArray(value: unknown, fieldName: string) {
   if (value === undefined || value === null) {
     return undefined;
@@ -933,7 +978,7 @@ function parseGatewayEntry(
       entry.providerKind ?? "openai-compatible",
       `gateways[${index}].providerKind`,
     ),
-    supports: asStringArray(entry.supports, `gateways[${index}].supports`),
+    supports: asGatewaySupports(entry.supports, `gateways[${index}].supports`),
     timeoutMs: asOptionalPositiveNumber(
       entry.timeoutMs,
       `gateways[${index}].timeoutMs`,

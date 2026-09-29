@@ -95,6 +95,32 @@ Model gateway catalog sync:
   }
   ```
 
+- A gateway's `supports` lists what its Provider serves. The accepted values
+  are `chat`, `tool_calling`, `json_schema`, `json_schema_strict`,
+  `embeddings`, `rerank`, `asr`, `tts`, `image` and `video`. Any other value
+  has no effect and is logged as a warning when the configuration loads (it
+  is not refused, so existing configs keep starting). Chat and vision catalog
+  discovery need `chat`
+  and `tool_calling`, and the system model needs `chat` and `json_schema`.
+- Declare `json_schema_strict` only for a Provider that enforces a strict
+  `response_format: { type: "json_schema", json_schema: { strict: true } }`.
+  Structured calls that pin no method then send a strict JSON schema whenever
+  the schema allows it: every object closed with `additionalProperties: false`
+  and every property listed in `required`, with no `oneOf`, `allOf`, `not`,
+  conditionals, pattern-keyed properties or `$ref`/`$defs`. On OpenRouter such
+  a request also sends `provider.require_parameters: true`, merged with the
+  route's `only`/`sort`, so only endpoints that honour the schema serve it; a
+  non-strict `json_schema` request keeps OpenRouter's normal routing.
+  Per-model exceptions are handled automatically: when the Provider refuses
+  the request (OpenRouter's 404 "No endpoints found that can handle the
+  requested parameters", a 400 saying the response format is unavailable or
+  not supported, or a 400 "Invalid schema for response_format"), the call is
+  retried once the way it would run without the flag (for DeepSeek, the schema
+  as an available tool), the warning `model-gateway.structured-output-fallback`
+  records the reason, and that Provider and model skip strict output for an
+  hour in that process. Other errors are not retried. The shipped OpenRouter
+  gateway declares it; OrcaRouter does not until it is verified. BYOK requests
+  that reuse a Provider definition inherit it with the rest of `supports`.
 - For Docker, bind-mount the complete custom JSON into the container and set
   `MODEL_GATEWAY_GLOBAL_CONFIG_PATH` to that container path. Changing the path
   variable alone does not mount a host file.
@@ -154,6 +180,9 @@ user's team.
   MCP servers are filed by keyword rules when they enter the catalog, whether
   the system model is ready or not; their AI overview brings AI categories
   later, except where a market admin chose the categories.
+- Structured calls use strict JSON-schema output when the borrowed Provider
+  declares `json_schema_strict` (the shipped OpenRouter definition does), with
+  the automatic fallback described above.
 - Nothing is billed or stored: no usage ledger, no generation records. Each
   call writes one `system_model.call` log line with the purpose, subject,
   Provider, model, status, duration, input, output and reasoning token counts,
@@ -163,7 +192,9 @@ user's team.
   OpenRouter's fee plus the upstream charge on our own key), otherwise the
   model catalog's price for the token counts plus anything already charged
   (`price_book`); a missing price leaves `costUsd` out and says so in
-  `costSource`. Set a
+  `costSource`. A structured call adds `structuredOutputMechanism`
+  (`json_schema_strict`, `available_tool` or `native:<method>`) and, after a
+  fallback, `structuredOutputFallbackReason`. Set a
   spending limit on the dedicated key at the Provider (for OpenRouter, on the
   key itself) and read its usage there.
 - Changing the key takes an environment change and a restart. A synchronized
@@ -199,7 +230,8 @@ example AtlasCloud:
 }
 ```
 
-Then set `SYSTEM_MODEL_PROVIDER=atlascloud`, the site's model id in
+Add `json_schema_strict` to its `supports` only if the site enforces strict
+JSON schemas. Then set `SYSTEM_MODEL_PROVIDER=atlascloud`, the site's model id in
 `SYSTEM_MODEL_NAME` and the site's key in `SYSTEM_MODEL_API_KEY`. Leave
 `ATLASCLOUD_ENABLED` unset: `ATLASCLOUD_API_KEY` and `ATLASCLOUD_ENABLED` belong
 to the gateway entry and take effect only if you also want the site for tenant

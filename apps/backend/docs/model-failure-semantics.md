@@ -80,6 +80,10 @@ options. Raw transports previously ignored `maxRetries`; they now execute the
 configured retry budget using the SDK's existing status/quota error rules.
 Injected rerank implementations are guarded for timeout/cancellation without
 adding a second retry layer. Network policy refusals are never retryable.
+A `json_schema` answer the SDK received but could not parse (invalid JSON, or
+cut off at the token limit or by a content filter) is not requested again by
+the transport retry: it surfaces once as a retryable `STRUCTURED_OUTPUT` error
+with its finish reason, and the caller's own retry decides.
 
 LangChain calls obtain fresh execution options per invocation, including
 `invoke`, `stream`, SDK `batch`, and the supported `withConfig`, `bindTools` and

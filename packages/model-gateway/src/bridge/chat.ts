@@ -33,6 +33,7 @@ import type {
   ResolvedModelGatewayConfig,
   ResolvedRequestTarget,
   RequestOptions,
+  StructuredOutputDiagnostics,
 } from "../types";
 
 export function extractResponseMetadata(raw: { response_metadata?: unknown }) {
@@ -239,6 +240,7 @@ export async function runBridgeChatComplete(input: {
     const responseCapture = createProviderResponseCapture();
     let rawMessage: AIMessage;
     let structuredOutput: Record<string, unknown> | undefined;
+    let structuredOutputDiagnostics: StructuredOutputDiagnostics | undefined;
 
     if (payload.structuredOutput) {
       const config = payload.structuredOutput;
@@ -250,12 +252,13 @@ export async function runBridgeChatComplete(input: {
         input.target.providerModel,
         input.config.modelCapabilities,
       );
-      // The shared executor applies the disabled_params mirror: when a model
-      // disables `tool_choice` (DeepSeek) the schema is bound as an available
-      // tool; otherwise the native withStructuredOutput path is used.
-      // `method`/`strict` come from the caller only (capability plays no part in
-      // the dispatch — chat.complete pins no fallback method, preserving its
-      // long-standing behavior).
+      // The shared executor uses strict `json_schema` output when the target's
+      // Provider declares `json_schema_strict` and the schema allows it (with
+      // one automatic fallback); otherwise it applies the disabled_params
+      // mirror: when a model disables `tool_choice` (DeepSeek) the schema is
+      // bound as an available tool, else the native withStructuredOutput path
+      // is used. `method`/`strict` come from the caller only (chat.complete
+      // pins no fallback method, preserving its long-standing behavior).
       const executed = await awaitWithSignal(input.options?.signal, () =>
         runWithProviderResponseCapture(responseCapture, () =>
           executeStructuredOutput({
@@ -270,11 +273,13 @@ export async function runBridgeChatComplete(input: {
             allowJsonRepair: capabilities.toolCallArgumentJsonRepair,
             ...(input.options !== undefined ? { options: input.options } : {}),
             logger: input.config.logger,
+            strictJsonSchemaSupport: input.config.strictJsonSchemaSupport,
           }),
         ),
       );
       rawMessage = executed.rawMessage;
       structuredOutput = executed.parsed;
+      structuredOutputDiagnostics = executed.diagnostics;
     } else {
       rawMessage = (await awaitWithSignal(input.options?.signal, () =>
         runWithProviderResponseCapture(responseCapture, () =>
@@ -317,6 +322,7 @@ export async function runBridgeChatComplete(input: {
       routeDecision: input.target.routeDecision,
       traceId: input.options?.traceId,
       ...(structuredOutput ? { structuredOutput } : {}),
+      ...(structuredOutputDiagnostics ? { structuredOutputDiagnostics } : {}),
       raw: rawMessage,
     };
   } catch (error) {

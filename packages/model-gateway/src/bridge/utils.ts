@@ -36,6 +36,7 @@ import type {
   ResolvedModelGatewayConfig,
   ResolvedRequestTarget,
   RequestOptions,
+  StructuredOutputDiagnostics,
   ToolBindingOptions,
   ToolCall,
 } from "../types";
@@ -388,10 +389,12 @@ function createObservedLangChainChatModel(input: {
    * object's `invoke` is wrapped directly. Rather than blindly forwarding to the
    * model's own `withStructuredOutput`, it routes through the SAME
    * {@link executeStructuredOutput} the chat.complete path uses, so a dedicated
-   * `model.withStructuredOutput(schema).invoke(messages)` becomes DeepSeek-safe:
-   * the JS mirror of langchain-python's `disabled_params`. For a model whose
-   * effective capabilities disable a forced `tool_choice` it binds the schema as
-   * an *available* tool (drop-forced); otherwise it uses native
+   * `model.withStructuredOutput(schema).invoke(messages)` gets strict
+   * `json_schema` output where the Provider declares `json_schema_strict` (with
+   * the same automatic fallback), and is otherwise DeepSeek-safe: the JS mirror
+   * of langchain-python's `disabled_params`. For a model whose effective
+   * capabilities disable a forced `tool_choice` it binds the schema as an
+   * *available* tool (drop-forced); otherwise it uses native
    * `withStructuredOutput` with the caller-pinned method, falling back to the
    * capability's method (DeepSeek → function_calling).
    *
@@ -423,30 +426,38 @@ function createObservedLangChainChatModel(input: {
     return {
       invoke: async (structuredInput, structuredOptions) => {
         let shaped: unknown;
-        await observeInvocation(async () => {
-          const { parsed, rawMessage } = await executeStructuredOutput({
-            model: input.model,
-            schema: schema as Record<string, unknown>,
-            name,
-            messages: structuredInput,
-            target: input.target,
-            supportsForcedToolChoice: requestForcedToolChoiceSupport(input),
-            ...(pinnedMethod !== undefined ? { method: pinnedMethod } : {}),
-            ...(capabilities.structuredOutputMethod !== undefined
-              ? { fallbackMethod: capabilities.structuredOutputMethod }
-              : {}),
-            ...(strict !== undefined ? { strict } : {}),
-            allowJsonRepair: capabilities.toolCallArgumentJsonRepair,
-            ...(structuredRequestOptions(structuredOptions) !== undefined
-              ? { options: structuredRequestOptions(structuredOptions) }
-              : {}),
-            logger: input.config.logger,
-          });
-          shaped = includeRaw ? { raw: rawMessage, parsed } : parsed;
-          // Observe against the raw model response so usage/billing and
-          // finish-reason extraction see the real message, not the parsed shape.
-          return rawMessage;
-        }, structuredInput);
+        let diagnostics: StructuredOutputDiagnostics | undefined;
+        await observeInvocation(
+          async () => {
+            const { parsed, rawMessage, ...executed } =
+              await executeStructuredOutput({
+                model: input.model,
+                schema: schema as Record<string, unknown>,
+                name,
+                messages: structuredInput,
+                target: input.target,
+                supportsForcedToolChoice: requestForcedToolChoiceSupport(input),
+                ...(pinnedMethod !== undefined ? { method: pinnedMethod } : {}),
+                ...(capabilities.structuredOutputMethod !== undefined
+                  ? { fallbackMethod: capabilities.structuredOutputMethod }
+                  : {}),
+                ...(strict !== undefined ? { strict } : {}),
+                allowJsonRepair: capabilities.toolCallArgumentJsonRepair,
+                ...(structuredRequestOptions(structuredOptions) !== undefined
+                  ? { options: structuredRequestOptions(structuredOptions) }
+                  : {}),
+                logger: input.config.logger,
+                strictJsonSchemaSupport: input.config.strictJsonSchemaSupport,
+              });
+            diagnostics = executed.diagnostics;
+            shaped = includeRaw ? { raw: rawMessage, parsed } : parsed;
+            // Observe against the raw model response so usage/billing and
+            // finish-reason extraction see the real message, not the parsed shape.
+            return rawMessage;
+          },
+          structuredInput,
+          () => (diagnostics ? { structuredOutput: diagnostics } : undefined),
+        );
         return shaped;
       },
     };
@@ -455,6 +466,8 @@ function createObservedLangChainChatModel(input: {
   async function observeInvocation(
     run: () => Promise<unknown>,
     messages: unknown,
+    /** Extra non-content fields for the generation's output record. */
+    extraOutput?: () => Record<string, unknown> | undefined,
   ): Promise<unknown> {
     const generation = createGenerationObservation({
       operation: "chat.complete",
@@ -504,6 +517,7 @@ function createObservedLangChainChatModel(input: {
           finishReason: extractFinishReason(responseMetadata),
           reasoning,
           routeDecision: input.target.routeDecision,
+          ...(extraOutput?.() ?? {}),
         },
         outputText:
           typeof (result as { content?: unknown }).content === "string"

@@ -96,3 +96,39 @@ test("plan: a caller-pinned method is authoritative, capability ignored", () => 
   );
 });
 
+test("plan: strict JSON schema, when eligible, takes precedence over the tool paths", () => {
+  assert.deepEqual(
+    planStructuredOutput({
+      supportsForcedToolChoice: false,
+      strictJsonSchema: true,
+    }),
+    { strategy: "strictJsonSchema" },
+  );
+  assert.deepEqual(
+    planStructuredOutput({
+      supportsForcedToolChoice: true,
+      strictJsonSchema: true,
+    }),
+    { strategy: "strictJsonSchema" },
+  );
+  // Not eligible → exactly today's plan.
+  assert.deepEqual(
+    planStructuredOutput({
+      supportsForcedToolChoice: false,
+      strictJsonSchema: false,
+    }),
+    { strategy: "availableTool" },
+  );
+});
+
+test("plan: a pinned method stays authoritative even when strict is eligible", () => {
+  assert.deepEqual(
+    planStructuredOutput({
+      method: "function_calling",
+      supportsForcedToolChoice: true,
+      strictJsonSchema: true,
+    }),
+    { strategy: "structured", method: "function_calling" },
+  );
+});
+

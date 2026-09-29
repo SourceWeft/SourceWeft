@@ -52,7 +52,14 @@ vi.mock("@sourceweft/model-gateway", async (importOriginal) => {
 import { config } from "../config";
 import { logger } from "../logger";
 import { buildRoutedModelGatewayConfig } from "./runtime";
-import { defaultTargetHealthRegistry } from "@sourceweft/model-gateway";
+import {
+  StrictJsonSchemaSupportCache,
+  defaultTargetHealthRegistry,
+  isStrictJsonSchemaCompatible,
+} from "@sourceweft/model-gateway";
+import { createOverviewModelCall } from "../../modules/catalog-overview/model";
+import { mcpOverviewAdapter } from "../../modules/market/overview/generate";
+import { SKILL_OVERVIEW_OUTPUT_JSON_SCHEMA } from "../../modules/skills/market/overview-prompt";
 import {
   SYSTEM_MODEL_MAX_RETRIES,
   SYSTEM_MODEL_ROUTE,
@@ -202,6 +209,21 @@ const messages = [
 
 function systemCallLogs(spy: { mock: { calls: unknown[][] } }) {
   return spy.mock.calls.filter(([message]) => message === "system_model.call");
+}
+
+/**
+ * The next system client gets its own memory of strict-output refusals, so a
+ * refusal recorded by one test cannot change the path another test takes.
+ */
+function isolateStrictJsonSchemaSupport() {
+  const real = mocks.createModelGateway.getMockImplementation()!;
+  mocks.createModelGateway.mockImplementationOnce(
+    (gatewayConfig: Record<string, unknown>) =>
+      real({
+        ...gatewayConfig,
+        strictJsonSchemaSupport: new StrictJsonSchemaSupportCache(),
+      }),
+  );
 }
 
 beforeEach(() => {
@@ -495,6 +517,140 @@ test("capability rules shape the request exactly as they do for tenant calls", a
   // Thinking "off" reached the wire, from the model catalog's facts — the
   // source BYOK models use — not from a global profile of the Provider.
   assert.deepEqual(body.reasoning, { effort: "none", exclude: true });
+});
+
+test("an overview through an OpenRouter definition declaring json_schema_strict uses strict json_schema", async () => {
+  // Both overview schemas stay strict-compatible, so neither silently loses
+  // the strict path.
+  assert.equal(
+    isStrictJsonSchemaCompatible(mcpOverviewAdapter.output.schema),
+    true,
+  );
+  assert.equal(
+    isStrictJsonSchemaCompatible(SKILL_OVERVIEW_OUTPUT_JSON_SCHEMA),
+    true,
+  );
+  mocks.loadRouted.mockResolvedValue(
+    routedFixture({
+      supports: ["chat", "tool_calling", "json_schema", "json_schema_strict"],
+    }),
+  );
+  const { seen } = mockProvider(() => ({
+    role: "assistant",
+    content: JSON.stringify({ marker: "OUTPUT-MARKER" }),
+  }));
+  const info = vi.spyOn(logger, "info");
+  isolateStrictJsonSchemaSupport();
+  const call = createOverviewModelCall(mcpOverviewAdapter);
+  const result = await call({
+    prompt: { system: "system", user: "PROMPT-MARKER" },
+    versionId: "v1",
+    scopeId: `scope-${randomUUID()}`,
+  });
+  assert.deepEqual(result.output, { marker: "OUTPUT-MARKER" });
+  assert.equal(seen.length, 1);
+  const body = seen[0]!.body;
+  const responseFormat = body.response_format as {
+    type?: string;
+    json_schema?: { name?: string; strict?: boolean };
+  };
+  assert.equal(responseFormat.type, "json_schema");
+  assert.equal(responseFormat.json_schema?.name, mcpOverviewAdapter.output.name);
+  assert.equal(responseFormat.json_schema?.strict, true);
+  // No schema tool rides along, and OpenRouter must route to an endpoint that
+  // honours the response format.
+  assert.equal(body.tools, undefined);
+  assert.equal(body.tool_choice, undefined);
+  assert.deepEqual(body.provider, { require_parameters: true });
+  // Thinking "off" still reaches the wire.
+  assert.deepEqual(body.reasoning, { effort: "none", exclude: true });
+
+  const logs = systemCallLogs(info);
+  assert.equal(logs.length, 1);
+  const line = logs[0]![1] as Record<string, unknown>;
+  assert.equal(line.structuredOutputMechanism, "json_schema_strict");
+  assert.equal(line.structuredOutputFallbackReason, undefined);
+  assert.doesNotMatch(JSON.stringify(info.mock.calls), /OUTPUT-MARKER|PROMPT-MARKER/);
+});
+
+test("a strict overview refused by OpenRouter falls back once and logs why", async () => {
+  mocks.loadRouted.mockResolvedValue(
+    routedFixture({
+      supports: ["chat", "tool_calling", "json_schema", "json_schema_strict"],
+    }),
+  );
+  const bodies: Record<string, unknown>[] = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const body = JSON.parse(await (input as Request).text()) as Record<
+      string,
+      unknown
+    >;
+    bodies.push(body);
+    if (body.response_format) {
+      return new Response(
+        JSON.stringify({
+          error: {
+            message:
+              "No endpoints found that can handle the requested parameters. To learn more about provider routing, visit: https://openrouter.ai/docs/guides/routing/provider-selection",
+            code: 404,
+            metadata: {
+              routing_funnel: [{ step: "Initial Endpoints", endpoint_count: 1 }],
+              failed_routing_step: "Filter by Parameters",
+            },
+          },
+        }),
+        { status: 404, headers: { "content-type": "application/json" } },
+      );
+    }
+    const tools = body.tools as Array<{ function: { name: string } }>;
+    return new Response(
+      JSON.stringify({
+        id: "gen-system-test",
+        object: "chat.completion",
+        created: 1,
+        model: MODEL,
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: "assistant",
+              content: null,
+              tool_calls: [
+                {
+                  id: "call_1",
+                  type: "function",
+                  function: {
+                    name: tools[0]!.function.name,
+                    arguments: JSON.stringify({ marker: "OUTPUT-MARKER" }),
+                  },
+                },
+              ],
+            },
+            finish_reason: "tool_calls",
+          },
+        ],
+        usage: { prompt_tokens: 11, completion_tokens: 7, total_tokens: 18 },
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  });
+  const info = vi.spyOn(logger, "info");
+  isolateStrictJsonSchemaSupport();
+  const result = await createOverviewModelCall(mcpOverviewAdapter)({
+    prompt: { system: "system", user: "PROMPT-MARKER" },
+    versionId: "v1",
+    scopeId: `scope-${randomUUID()}`,
+  });
+  assert.deepEqual(result.output, { marker: "OUTPUT-MARKER" });
+  assert.equal(bodies.length, 2);
+  assert.equal(bodies[1]!.response_format, undefined);
+  assert.ok(Array.isArray(bodies[1]!.tools));
+  const line = systemCallLogs(info)[0]![1] as Record<string, unknown>;
+  assert.equal(line.structuredOutputMechanism, "available_tool");
+  assert.equal(
+    line.structuredOutputFallbackReason,
+    "no_endpoint_for_parameters",
+  );
 });
 
 test("a configured model the catalog does not list fails before any request", async () => {

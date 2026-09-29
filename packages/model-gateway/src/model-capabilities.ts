@@ -49,6 +49,12 @@ export function resolveModelCapabilities(
  * The structured-output strategy for a request, resolved from capabilities ahead
  * of execution so the bridge follows a plan instead of judging inline.
  *
+ * - `strictJsonSchema`: a strict `json_schema` response format — chosen when no
+ *   method is pinned and the request is eligible (the target's Provider
+ *   declares `json_schema_strict`, the schema is strict-compatible and the
+ *   (Provider, model) has not recently refused it). It takes precedence over
+ *   the two tool paths below; if the Provider refuses it, the executor retries
+ *   once with the plan this function returns for `strictJsonSchema: false`.
  * - `structured`: LangChain's `withStructuredOutput`. `method` undefined lets
  *   LangChain pick per model; a caller-pinned method is passed through.
  * - `availableTool`: bind the schema as an *available* tool — for models that
@@ -58,6 +64,7 @@ export function resolveModelCapabilities(
  *   with `parallel_tool_calls: false` and *no* `tool_choice` (API default auto).
  */
 export type StructuredOutputPlan =
+  | { strategy: "strictJsonSchema" }
   | { strategy: "structured"; method?: StructuredOutputMethod; strict?: boolean }
   | { strategy: "availableTool"; strict?: boolean };
 
@@ -66,6 +73,8 @@ export function planStructuredOutput(input: {
   method?: StructuredOutputMethod;
   strict?: boolean;
   supportsForcedToolChoice: boolean;
+  /** Strict JSON-schema output is eligible for this request (see strictJsonSchemaEligibility). */
+  strictJsonSchema?: boolean;
 }): StructuredOutputPlan {
   if (input.method) {
     return {
@@ -73,6 +82,9 @@ export function planStructuredOutput(input: {
       method: input.method,
       ...(input.strict !== undefined ? { strict: input.strict } : {}),
     };
+  }
+  if (input.strictJsonSchema) {
+    return { strategy: "strictJsonSchema" };
   }
   if (!input.supportsForcedToolChoice) {
     return {

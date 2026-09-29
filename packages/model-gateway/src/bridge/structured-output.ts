@@ -2,13 +2,24 @@ import { createHash } from "node:crypto";
 import { jsonrepair } from "jsonrepair";
 import type { AIMessage } from "@langchain/core/messages";
 import { ModelGatewayError } from "../errors";
-import { planStructuredOutput } from "../model-capabilities";
+import {
+  planStructuredOutput,
+  type StructuredOutputPlan,
+} from "../model-capabilities";
+import {
+  defaultStrictJsonSchemaSupport,
+  type StrictJsonSchemaSupportCache,
+} from "../strict-json-schema-support";
+import { unparsedFinishReason } from "../structured-output-errors";
 import type {
   LangChainChatModelLike,
   ResolvedModelGatewayConfig,
   ResolvedRequestTarget,
   RequestOptions,
+  StrictJsonSchemaFallbackReason,
   StructuredOutputConfig,
+  StructuredOutputDiagnostics,
+  StructuredOutputMechanism,
 } from "../types";
 import {
   extractFinishReason,
@@ -17,6 +28,10 @@ import {
   extractResponseMetadata,
   langChainInvokeOptions,
 } from "./chat";
+import {
+  classifyStrictJsonSchemaRejection,
+  strictJsonSchemaEligibility,
+} from "./strict-json-schema";
 
 const STRUCTURED_OUTPUT_PREVIEW_LENGTH = 500;
 
@@ -242,7 +257,10 @@ function salvageStructuredToolCall(input: {
   return undefined;
 }
 
-function invalidStructuredOutputError(rawMessage: unknown) {
+function invalidStructuredOutputError(
+  rawMessage: unknown,
+  diagnostics: StructuredOutputDiagnostics,
+) {
   const content = responseTextForDiagnostics(rawMessage);
   if (content === undefined) {
     return new ModelGatewayError({
@@ -253,6 +271,7 @@ function invalidStructuredOutputError(rawMessage: unknown) {
         structuredOutputDiagnostics: {
           contentAvailable: false,
           ...structuredOutputResponseDiagnostics(rawMessage),
+          ...diagnostics,
         },
       },
     });
@@ -273,6 +292,7 @@ function invalidStructuredOutputError(rawMessage: unknown) {
         contentSha256,
         ...(contentPreview ? { contentPreview } : {}),
         ...structuredOutputResponseDiagnostics(rawMessage),
+        ...diagnostics,
       },
     },
   });
@@ -283,6 +303,41 @@ function isStructuredOutputParseError(error: unknown) {
     error instanceof SyntaxError ||
     extractObjectRecord(error)?.name === "SyntaxError"
   );
+}
+
+/**
+ * A native structured call's failure, classified: an unparseable answer, or
+ * one the Provider cut off, is a retryable STRUCTURED_OUTPUT failure (the model
+ * answered; the caller's retry loop applies) rather than an opaque upstream
+ * error that would fail over to another channel of the same model. With a
+ * `json_schema` response format the OpenAI SDK parses the answer itself and
+ * throws before the raw message reaches the gateway, so no salvage or JSON
+ * repair is possible on this path; strict mode's constrained decoding is what
+ * keeps the answer valid JSON.
+ */
+function classifyNativeStructuredOutputError(
+  error: unknown,
+  diagnostics: StructuredOutputDiagnostics,
+): unknown {
+  if (isStructuredOutputParseError(error)) {
+    return invalidStructuredOutputError(undefined, diagnostics);
+  }
+  const finishReason = unparsedFinishReason(error);
+  if (finishReason) {
+    return new ModelGatewayError({
+      code: "STRUCTURED_OUTPUT",
+      message: `Provider returned incomplete structured output (finish_reason=${finishReason})`,
+      retryable: true,
+      metadata: {
+        structuredOutputDiagnostics: {
+          contentAvailable: false,
+          finishReason,
+          ...diagnostics,
+        },
+      },
+    });
+  }
+  return error;
 }
 
 /**
@@ -310,6 +365,7 @@ async function invokeStructuredViaAvailableTool(input: {
   options?: RequestOptions;
   strict?: boolean;
   allowJsonRepair: boolean;
+  diagnostics: StructuredOutputDiagnostics;
   logger?: ResolvedModelGatewayConfig["logger"];
 }): Promise<{ rawMessage: AIMessage; structuredOutput: Record<string, unknown> }> {
   if (typeof input.model.bindTools !== "function") {
@@ -362,10 +418,11 @@ async function invokeStructuredViaAvailableTool(input: {
         providerModel: input.target.providerModel,
         source: salvaged.source,
         repaired: salvaged.repaired,
+        mechanism: input.diagnostics.mechanism,
       });
       return { rawMessage, structuredOutput: salvaged.args };
     }
-    throw invalidStructuredOutputError(rawMessage);
+    throw invalidStructuredOutputError(rawMessage, input.diagnostics);
   }
   return { rawMessage, structuredOutput: call.args as Record<string, unknown> };
 }
@@ -395,38 +452,126 @@ export interface ExecuteStructuredOutputInput {
    * Native-branch fallback method used only when no method is pinned AND the
    * plan chose the native path — the model capability's `structuredOutputMethod`
    * (DeepSeek → function_calling), mirroring its first-party class. Never
-   * influences the availableTool-vs-native decision.
+   * influences the availableTool-vs-native decision, and never replaces a
+   * strict JSON-schema plan.
    */
   fallbackMethod?: StructuredOutputMethod;
   strict?: boolean;
   allowJsonRepair: boolean;
   options?: RequestOptions;
   logger?: ResolvedModelGatewayConfig["logger"];
+  /** Memory of (Provider, model) pairs that refused strict output; process-wide by default. */
+  strictJsonSchemaSupport?: StrictJsonSchemaSupportCache;
+}
+
+export interface ExecuteStructuredOutputResult {
+  parsed: Record<string, unknown>;
+  rawMessage: AIMessage;
+  diagnostics: StructuredOutputDiagnostics;
+}
+
+/** The mechanism a plan resolves to, for logs and observation. */
+function mechanismForPlan(
+  plan: StructuredOutputPlan,
+  fallbackMethod: StructuredOutputMethod | undefined,
+): StructuredOutputMechanism {
+  if (plan.strategy === "strictJsonSchema") return "json_schema_strict";
+  if (plan.strategy === "availableTool") return "available_tool";
+  return `native:${plan.method ?? fallbackMethod ?? "auto"}`;
 }
 
 /**
  * The single structured-output executor shared by `chat.complete`
  * (runBridgeChatComplete) and the observed model's `withStructuredOutput`.
  *
- * It applies the JS mirror of langchain-python's `disabled_params`: for a model
- * whose effective capabilities disable a forced `tool_choice`, it binds the
- * schema as an *available* tool (drop-forced) with salvage; otherwise it uses
- * native `withStructuredOutput` with the caller-pinned method, falling back to
- * the capability's method (DeepSeek → function_calling). Always requests the raw
- * message so callers get both the parsed object and the underlying response
- * (for billing/observation, salvage, and diagnostics).
+ * Without a pinned method it first asks for a strict `json_schema` response
+ * format when the target's Provider declares `json_schema_strict`, the schema
+ * is strict-compatible and the (Provider, model) has not refused it recently.
+ * If the Provider refuses it (see `classifyStrictJsonSchemaRejection`), the
+ * pair is remembered as unsupported and the same call is retried exactly once
+ * through the path below; any other error propagates unchanged.
+ *
+ * Otherwise it applies the JS mirror of langchain-python's `disabled_params`:
+ * for a model whose effective capabilities disable a forced `tool_choice`, it
+ * binds the schema as an *available* tool (drop-forced) with salvage; otherwise
+ * it uses native `withStructuredOutput` with the caller-pinned method, falling
+ * back to the capability's method (DeepSeek → function_calling). Always
+ * requests the raw message so callers get both the parsed object and the
+ * underlying response (for billing/observation, salvage, and diagnostics), and
+ * reports the mechanism it used — never prompts or outputs.
  */
 export async function executeStructuredOutput(
   input: ExecuteStructuredOutputInput,
-): Promise<{ parsed: Record<string, unknown>; rawMessage: AIMessage }> {
+): Promise<ExecuteStructuredOutputResult> {
+  const support =
+    input.strictJsonSchemaSupport ?? defaultStrictJsonSchemaSupport;
+  const eligibility = strictJsonSchemaEligibility({
+    ...(input.method !== undefined ? { method: input.method } : {}),
+    ...(input.strict !== undefined ? { strict: input.strict } : {}),
+    supports: input.target.supports,
+    schema: input.schema,
+    knownUnsupported: support.isUnsupported(input.target),
+  });
   // Resolve the strategy ahead of execution so the branch follows a plan
-  // instead of judging inline. The pinned `method` is authoritative; capability
-  // plays no part in the dispatch (only in the native branch's fallback below).
-  const plan = planStructuredOutput({
+  // instead of judging inline. The pinned `method` is authoritative.
+  const planInput = {
     ...(input.method !== undefined ? { method: input.method } : {}),
     ...(input.strict !== undefined ? { strict: input.strict } : {}),
     supportsForcedToolChoice: input.supportsForcedToolChoice,
+  };
+  const plan = planStructuredOutput({
+    ...planInput,
+    strictJsonSchema: eligibility.eligible,
   });
+
+  let result: ExecuteStructuredOutputResult;
+  if (plan.strategy !== "strictJsonSchema") {
+    result = await runStructuredOutputPlan(input, plan);
+  } else {
+    try {
+      result = await runStructuredOutputPlan(input, plan);
+    } catch (error) {
+      const reason = classifyStrictJsonSchemaRejection(error);
+      if (!reason) {
+        throw error;
+      }
+      support.markUnsupported(input.target);
+      // Today's path for this request; never strict, so this retries once.
+      const fallbackPlan = planStructuredOutput({
+        ...planInput,
+        strictJsonSchema: false,
+      });
+      input.logger?.warn?.("model-gateway.structured-output-fallback", {
+        provider: input.target.provider,
+        providerModel: input.target.providerModel,
+        reason,
+        fallbackMechanism: mechanismForPlan(fallbackPlan, input.fallbackMethod),
+      });
+      result = await runStructuredOutputPlan(input, fallbackPlan, reason);
+    }
+  }
+  input.logger?.debug?.("model-gateway.structured-output", {
+    toolName: input.name,
+    provider: input.target.provider,
+    providerModel: input.target.providerModel,
+    ...result.diagnostics,
+    ...(eligibility.eligible
+      ? {}
+      : { strictIneligibleReason: eligibility.reason }),
+  });
+  return result;
+}
+
+/** Runs one resolved plan, once. */
+async function runStructuredOutputPlan(
+  input: ExecuteStructuredOutputInput,
+  plan: StructuredOutputPlan,
+  fallbackReason?: StrictJsonSchemaFallbackReason,
+): Promise<ExecuteStructuredOutputResult> {
+  const diagnostics: StructuredOutputDiagnostics = {
+    mechanism: mechanismForPlan(plan, input.fallbackMethod),
+    ...(fallbackReason ? { fallbackReason } : {}),
+  };
 
   if (plan.strategy === "availableTool") {
     const structured = await invokeStructuredViaAvailableTool({
@@ -436,6 +581,7 @@ export async function executeStructuredOutput(
       messages: input.messages,
       target: input.target,
       allowJsonRepair: input.allowJsonRepair,
+      diagnostics,
       ...(input.options !== undefined ? { options: input.options } : {}),
       ...(input.logger !== undefined ? { logger: input.logger } : {}),
       ...(plan.strict !== undefined ? { strict: plan.strict } : {}),
@@ -443,6 +589,7 @@ export async function executeStructuredOutput(
     return {
       parsed: structured.structuredOutput,
       rawMessage: structured.rawMessage,
+      diagnostics,
     };
   }
 
@@ -453,17 +600,26 @@ export async function executeStructuredOutput(
     target: input.target,
   });
 
-  // Pinned method drives the plan and is used verbatim; when none is pinned the
-  // native call falls back to the capability method (DeepSeek → function_calling).
-  // `strict` only travels alongside a method. `method` undefined lets LangChain
-  // select per model.
-  const nativeMethod = plan.method ?? input.fallbackMethod;
-  const nativeStrict =
-    plan.method !== undefined
-      ? plan.strict
-      : nativeMethod !== undefined
-        ? input.strict
-        : undefined;
+  // A strict plan sends `json_schema` with `strict: true`; the answer arrives
+  // as message content JSON, which the SDK/LangChain jsonSchema path parses.
+  // Otherwise the pinned method drives the plan and is used verbatim; when
+  // none is pinned the native call falls back to the capability method
+  // (DeepSeek → function_calling). `strict` only travels alongside a method.
+  // `method` undefined lets LangChain select per model.
+  let nativeMethod: StructuredOutputMethod | undefined;
+  let nativeStrict: boolean | undefined;
+  if (plan.strategy === "strictJsonSchema") {
+    nativeMethod = "json_schema";
+    nativeStrict = true;
+  } else {
+    nativeMethod = plan.method ?? input.fallbackMethod;
+    nativeStrict =
+      plan.method !== undefined
+        ? plan.strict
+        : nativeMethod !== undefined
+          ? input.strict
+          : undefined;
+  }
   const structuredModel = input.model.withStructuredOutput!(input.schema, {
     includeRaw: true,
     name: input.name,
@@ -482,10 +638,7 @@ export async function executeStructuredOutput(
       langChainInvokeOptions(input.options),
     );
   } catch (error) {
-    if (isStructuredOutputParseError(error)) {
-      throw invalidStructuredOutputError(undefined);
-    }
-    throw error;
+    throw classifyNativeStructuredOutputError(error, diagnostics);
   }
   const result = extractObjectRecord(structuredResult);
   const rawMessage = result?.raw as AIMessage;
@@ -506,7 +659,7 @@ export async function executeStructuredOutput(
         })
       : undefined;
     if (!salvaged || !rawMessage) {
-      throw invalidStructuredOutputError(result?.raw);
+      throw invalidStructuredOutputError(result?.raw, diagnostics);
     }
     input.logger?.warn?.("model-gateway.structured-output-repaired", {
       toolName: input.name,
@@ -514,8 +667,9 @@ export async function executeStructuredOutput(
       providerModel: input.target.providerModel,
       source: salvaged.source,
       repaired: salvaged.repaired,
+      mechanism: diagnostics.mechanism,
     });
-    return { parsed: salvaged.args, rawMessage };
+    return { parsed: salvaged.args, rawMessage, diagnostics };
   }
-  return { parsed: parsed as Record<string, unknown>, rawMessage };
+  return { parsed: parsed as Record<string, unknown>, rawMessage, diagnostics };
 }

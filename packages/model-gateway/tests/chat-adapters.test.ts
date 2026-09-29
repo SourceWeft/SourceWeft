@@ -320,3 +320,149 @@ test("OpenRouter chat adapter does not treat an Authorization header as the SDK 
       error instanceof ModelGatewayError && error.code === "AUTH",
   );
 });
+
+const JSON_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: { title: { type: "string" } },
+  required: ["title"],
+};
+
+/** Runs requests through an adapter's model, recording every request body. */
+function recordingFetch(content = '{"title":"ok"}') {
+  const bodies: Record<string, unknown>[] = [];
+  const fetch: typeof globalThis.fetch = async (_url, init) => {
+    bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+    return new Response(
+      JSON.stringify({
+        id: "gen-1",
+        object: "chat.completion",
+        created: 1,
+        model: "vendor/model",
+        choices: [
+          {
+            index: 0,
+            message: { role: "assistant", content },
+            finish_reason: "stop",
+          },
+        ],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  };
+  return { bodies, fetch };
+}
+
+test("OpenRouter chat adapter adds require_parameters to json_schema requests, merged with routing", async () => {
+  const { bodies, fetch } = recordingFetch();
+  const model = new OpenRouterChatAdapter().createModel(
+    makeResolvedTarget({
+      provider: "openrouter",
+      providerKind: "openrouter",
+      providerRouting: { only: ["novita"], sort: "latency" },
+    }),
+    { ...input, extraBody: { provider: { allow_fallbacks: false } } },
+    { fetch, maxRetries: 0 },
+  );
+
+  const structured = await model
+    .withStructuredOutput(JSON_SCHEMA, {
+      includeRaw: true,
+      name: "extract",
+      method: "jsonSchema",
+      strict: true,
+    })
+    .invoke("hello");
+  assert.deepEqual((structured as { parsed: unknown }).parsed, { title: "ok" });
+  assert.deepEqual(bodies[0]!.provider, {
+    allow_fallbacks: false,
+    only: ["novita"],
+    sort: "latency",
+    require_parameters: true,
+  });
+  assert.equal(
+    (bodies[0]!.response_format as { type?: string }).type,
+    "json_schema",
+  );
+
+  // A plain chat request on the same model is unchanged.
+  await model.invoke("hello");
+  assert.deepEqual(bodies[1]!.provider, {
+    allow_fallbacks: false,
+    only: ["novita"],
+    sort: "latency",
+  });
+  assert.equal(bodies[1]!.response_format, undefined);
+});
+
+test("OpenRouter chat adapter adds a provider object only for strict json_schema requests", async () => {
+  const { bodies, fetch } = recordingFetch();
+  const model = new OpenRouterChatAdapter().createModel(
+    makeResolvedTarget({ provider: "openrouter", providerKind: "openrouter" }),
+    input,
+    { fetch, maxRetries: 0 },
+  );
+  await model.invoke("hello");
+  assert.equal(bodies[0]!.provider, undefined);
+
+  await model
+    .withStructuredOutput(JSON_SCHEMA, {
+      includeRaw: true,
+      name: "extract",
+      method: "jsonSchema",
+      strict: true,
+    })
+    .invoke("hello");
+  assert.deepEqual(bodies[1]!.provider, { require_parameters: true });
+
+  // Tool-based structured output carries no response_format.
+  await model
+    .withStructuredOutput(JSON_SCHEMA, {
+      includeRaw: true,
+      name: "extract",
+      method: "functionCalling",
+    })
+    .invoke("hello");
+  assert.equal(bodies[2]!.provider, undefined);
+
+  // A non-strict json_schema (LangChain's default method) keeps today's
+  // routing: requiring parameters there would 404 with no fallback.
+  await model
+    .withStructuredOutput(JSON_SCHEMA, {
+      includeRaw: true,
+      name: "extract",
+      method: "jsonSchema",
+    })
+    .invoke("hello");
+  assert.equal(
+    (bodies[3]!.response_format as { type?: string }).type,
+    "json_schema",
+  );
+  assert.equal(bodies[3]!.provider, undefined);
+});
+
+test("other adapters send a json_schema response format as-is", async () => {
+  const { bodies, fetch } = recordingFetch();
+  const model = new OpenAICompatibleChatAdapter().createModel(
+    makeResolvedTarget({
+      provider: "local",
+      providerKind: "openai-compatible",
+    }),
+    input,
+    { fetch, maxRetries: 0 },
+  );
+  await model
+    .withStructuredOutput(JSON_SCHEMA, {
+      includeRaw: true,
+      name: "extract",
+      method: "jsonSchema",
+      strict: true,
+    })
+    .invoke("hello");
+  assert.equal(bodies[0]!.provider, undefined);
+  assert.equal(
+    (bodies[0]!.response_format as { type?: string }).type,
+    "json_schema",
+  );
+});

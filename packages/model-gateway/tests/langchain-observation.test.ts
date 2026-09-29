@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createLangChainChatModel } from "../src/bridge/utils";
+import { StrictJsonSchemaSupportCache } from "../src/strict-json-schema-support";
 import type {
   LangChainChatModelLike,
   ModelGatewayConfig,
@@ -68,7 +69,11 @@ function createFakeModel(calls: string[]): LangChainChatModelLike {
   return model;
 }
 
-async function buildModel(calls: string[], captured: Captured) {
+async function buildModel(
+  calls: string[],
+  captured: Captured,
+  supports?: string[],
+) {
   const observeSink: ObserveSink = {
     onGenerationStart: (g) => {
       captured.starts.push(g);
@@ -84,8 +89,12 @@ async function buildModel(calls: string[], captured: Captured) {
         kind: "openai-compatible",
         baseUrl: "https://example.invalid/v1",
         apiKey: "test",
+        ...(supports ? { supports } : {}),
       },
     },
+    ...(supports
+      ? { strictJsonSchemaSupport: new StrictJsonSchemaSupportCache() }
+      : {}),
     modelRoutes: {
       "test-model": {
         strategy: "priority",
@@ -133,6 +142,39 @@ test("withStructuredOutput emits a generation", async () => {
   assert.equal(captured.ends.length, 1);
   assert.equal(captured.ends[0]?.usage?.inputTokens, 7);
   assert.equal(captured.ends[0]?.usage?.outputTokens, 3);
+});
+
+test("withStructuredOutput records the structured-output mechanism on the generation", async () => {
+  const calls: string[] = [];
+  const captured: Captured = { ends: [], starts: [] };
+  const model = await buildModel(calls, captured);
+  await model
+    .withStructuredOutput!({ type: "object" }, { includeRaw: true, name: "Result" })
+    .invoke([{ role: "user", content: "hi" }]);
+  assert.deepEqual(captured.ends[0]?.output?.structuredOutput, {
+    mechanism: "native:auto",
+  });
+
+  const strictCaptured: Captured = { ends: [], starts: [] };
+  const strictModel = await buildModel([], strictCaptured, [
+    "chat",
+    "json_schema",
+    "json_schema_strict",
+  ]);
+  await strictModel
+    .withStructuredOutput!(
+      {
+        type: "object",
+        additionalProperties: false,
+        properties: { ok: { type: "boolean" } },
+        required: ["ok"],
+      },
+      { includeRaw: true, name: "Result" },
+    )
+    .invoke([{ role: "user", content: "hi" }]);
+  assert.deepEqual(strictCaptured.ends[0]?.output?.structuredOutput, {
+    mechanism: "json_schema_strict",
+  });
 });
 
 test("withStructuredOutput emits exactly one generation, not one per layer", async () => {

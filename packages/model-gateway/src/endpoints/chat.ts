@@ -108,6 +108,10 @@ export class ModelGatewayChatEndpoint {
               reasoning: result.reasoning,
               provider: result.provider,
               routeDecision: result.routeDecision,
+              // The mechanism used and any fallback reason; never content.
+              ...(result.structuredOutputDiagnostics
+                ? { structuredOutput: result.structuredOutputDiagnostics }
+                : {}),
             },
             outputText:
               typeof result.raw.content === "string"
