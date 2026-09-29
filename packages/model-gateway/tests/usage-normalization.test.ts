@@ -118,6 +118,69 @@ test("OpenRouter provider adapter enriches protocol usage with cost", () => {
   );
 });
 
+function openRouterObservation(usage: Record<string, unknown>) {
+  return normalizeModelCallObservation({
+    modelAlias: "chat-default",
+    context: {
+      target: target("openrouter"),
+      modality: "chat",
+      rawResponse: {
+        usage: { prompt_tokens: 100, completion_tokens: 20, ...usage },
+      },
+    },
+  });
+}
+
+test("OpenRouter BYOK costs the router fee plus the upstream charge on our own key", () => {
+  const free = openRouterObservation({
+    is_byok: true,
+    cost: 0,
+    cost_details: { upstream_inference_cost: 0.0009 },
+  });
+  assert.equal(free.cost?.effectiveUsd, 0.0009);
+  assert.equal(free.cost?.inlineUsd, 0.0009);
+  assert.equal(free.cost?.source, "provider_inline");
+  assert.equal(free.cost?.status, "inline");
+  assert.equal(
+    free.provenance.inlineCost,
+    "provider:openrouter.usage.cost+usage.cost_details.upstream_inference_cost",
+  );
+
+  const withFee = openRouterObservation({
+    is_byok: true,
+    cost: 0.00005,
+    cost_details: { upstream_inference_cost: 0.0009 },
+  });
+  assert.equal(withFee.cost?.effectiveUsd, 0.00095);
+});
+
+test("OpenRouter BYOK without an upstream figure keeps the fee and leaves the total open", () => {
+  const observation = openRouterObservation({ is_byok: true, cost: 0.00005 });
+  assert.equal(observation.cost?.inlineUsd, 0.00005);
+  assert.equal(observation.cost?.effectiveUsd, undefined);
+  assert.equal(observation.cost?.source, "provider_inline");
+  assert.equal(observation.cost?.status, "estimated");
+  assert.equal(
+    observation.provenance.inlineCost,
+    "provider:openrouter.usage.cost",
+  );
+
+  assert.equal(openRouterObservation({ is_byok: true }).cost, undefined);
+});
+
+test("OpenRouter without BYOK never adds the upstream figure to the charged cost", () => {
+  const observation = openRouterObservation({
+    is_byok: false,
+    cost: 0.0012,
+    cost_details: { upstream_inference_cost: 0.001 },
+  });
+  assert.equal(observation.cost?.effectiveUsd, 0.0012);
+  assert.equal(
+    observation.provenance.inlineCost,
+    "provider:openrouter.usage.cost",
+  );
+});
+
 test("prefers raw response usage over LangChain usage metadata", () => {
   assert.deepEqual(
     normalizeOpenAICompatibleUsage(

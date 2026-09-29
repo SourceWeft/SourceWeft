@@ -11,7 +11,7 @@ import {
   findMessageRecord,
   updateMessageRecord,
 } from "../message-repository";
-import { computeProviderCost } from "./cost";
+import { computeTurnProviderCost } from "./cost";
 import { summarizeRetrievalCalls } from "./retrieval-summary";
 import { preserveTraceMetadata } from "./trace-metadata";
 import { projectReasoning } from "./reasoning-state";
@@ -85,11 +85,8 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
     pricingSnapshot,
     costSource,
     missingPriceComponents,
-  } = await computeProviderCost({
-    gatewayConfigId: prepared.chatProfile.gatewayConfigId,
-    modelKind: "chat",
-    profileAlias: prepared.profileAlias,
-    usage: input.usage,
+  } = await computeTurnProviderCost({
+    calls: meteredLlmCalls,
     llm: input.llm,
   });
 

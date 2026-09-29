@@ -46,6 +46,7 @@ export const resolveObservedGenerationCost: GenerationCostResolver = async (
     modelKind,
     profileAlias: input.profileAlias,
     usage: input.usage,
+    cost: input.cost,
     llm: input.executionMode
       ? { executionMode: input.executionMode as "GLOBAL" | "BYOK" }
       : undefined,

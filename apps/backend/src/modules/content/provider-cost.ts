@@ -1,4 +1,4 @@
-import type { UsageInfo } from "@sourceweft/model-gateway";
+import type { ModelCallCost, UsageInfo } from "@sourceweft/model-gateway";
 import { and, eq } from "drizzle-orm";
 import { logger } from "../../shared/logger";
 import {
@@ -247,13 +247,70 @@ function roundUsd(value: number) {
   return Number(value.toFixed(12));
 }
 
+// No price entry: every component that the usage needs is reported missing.
+const UNPRICED: ModelPricing = {
+  input_cost_per_token: null,
+  output_cost_per_token: null,
+  cache_read_input_token_cost: null,
+  cache_creation_input_token_cost: null,
+  output_cost_per_reasoning_token: null,
+  input_cost_per_image_token: null,
+  output_cost_per_image_token: null,
+  input_cost_per_audio_token: null,
+  output_cost_per_audio_token: null,
+  input_cost_per_image: null,
+  output_cost_per_image: null,
+  price_source: "unknown",
+  litellm_key: null,
+  price_updated_at: null,
+};
+
+function usableUsd(value: number | undefined) {
+  return value !== undefined && Number.isFinite(value) && value >= 0
+    ? value
+    : undefined;
+}
+
+/** The call's whole cost as the provider reported it, if it did. */
+export function reportedProviderCostUsd(cost: ModelCallCost | undefined) {
+  return usableUsd(cost?.effectiveUsd);
+}
+
+/**
+ * What the provider already charged for a call whose total it left open — the
+ * OpenRouter fee on a BYOK call that reported no upstream figure. It is part of
+ * the call's cost on top of the price-book estimate.
+ */
+function chargedWithoutTotalUsd(cost: ModelCallCost | undefined) {
+  return reportedProviderCostUsd(cost) === undefined
+    ? (usableUsd(cost?.inlineUsd) ?? 0)
+    : 0;
+}
+
+/**
+ * One call's platform cost: the total the provider reported; otherwise the
+ * price-book estimate plus anything already charged inline. A missing price
+ * leaves the cost unknown (null) — never a partial figure billed as the total.
+ */
 export function computeProviderCostFromPricing(input: {
   usage?: UsageInfo;
-  pricing: ModelPricing;
+  /** The call's observed cost (`ModelCallObservation.cost`). */
+  cost?: ModelCallCost;
+  /** The model's price entry; null when it has none. */
+  pricing: ModelPricing | null;
 }): Pick<
   ProviderCostResult,
   "providerCostUsd" | "costSource" | "missingPriceComponents"
 > {
+  const reported = reportedProviderCostUsd(input.cost);
+  if (reported !== undefined) {
+    return {
+      providerCostUsd: roundUsd(reported),
+      costSource: "provider_actual",
+      missingPriceComponents: [],
+    };
+  }
+
   const usage = input.usage;
   if (!usage) {
     return {
@@ -262,18 +319,7 @@ export function computeProviderCostFromPricing(input: {
       missingPriceComponents: [],
     };
   }
-
-  if (
-    usage.providerCostUsd !== undefined &&
-    Number.isFinite(usage.providerCostUsd) &&
-    usage.providerCostUsd >= 0
-  ) {
-    return {
-      providerCostUsd: roundUsd(usage.providerCostUsd),
-      costSource: "provider_actual",
-      missingPriceComponents: [],
-    };
-  }
+  const pricing = input.pricing ?? UNPRICED;
 
   const inputTokens = clampCount(usage.inputTokens);
   const outputTokens = clampCount(usage.outputTokens);
@@ -345,8 +391,8 @@ export function computeProviderCostFromPricing(input: {
   // DALL·E-style per-image/per-pixel models price the output by request
   // quality + size (LiteLLM's `{quality}/{WxH}` tiers). Resolve the tier once;
   // gpt-image bills by tokens above and leaves outputImageCount at 0 here.
-  const imageTiers = Array.isArray(input.pricing.image_pricing_tiers)
-    ? input.pricing.image_pricing_tiers
+  const imageTiers = Array.isArray(pricing.image_pricing_tiers)
+    ? pricing.image_pricing_tiers
     : [];
   const outputTier =
     pricedOutputImageCount > 0 && imageTiers.length > 0
@@ -358,7 +404,7 @@ export function computeProviderCostFromPricing(input: {
   const hasOutputImageCountPrice =
     pricedOutputImageCount > 0 &&
     (outputTierCost !== null ||
-      priceValue(input.pricing, "output_cost_per_image") !== null);
+      priceValue(pricing, "output_cost_per_image") !== null);
   const textInputTokens =
     hasOutputImageCountPrice && inputImageTokens === 0 ? 0 : normalInputTokens;
   const textOutputTokens =
@@ -369,58 +415,58 @@ export function computeProviderCostFromPricing(input: {
   let providerCostUsd = 0;
   providerCostUsd += addComponent({
     amount: textInputTokens,
-    pricing: input.pricing,
+    pricing: pricing,
     key: "input_cost_per_token",
     component: "input_text_tokens",
     missing,
   });
   providerCostUsd += addComponent({
     amount: cacheReadTokens,
-    pricing: input.pricing,
+    pricing: pricing,
     key: "cache_read_input_token_cost",
     component: "cache_read_tokens",
     missing,
   });
   providerCostUsd += addComponent({
     amount: cacheWriteTokens,
-    pricing: input.pricing,
+    pricing: pricing,
     key: "cache_creation_input_token_cost",
     component: "cache_write_tokens",
     missing,
   });
   providerCostUsd += addComponent({
     amount: inputImageTokens,
-    pricing: input.pricing,
+    pricing: pricing,
     key: "input_cost_per_image_token",
     component: "input_image_tokens",
     missing,
   });
   providerCostUsd += addComponent({
     amount: pricedInputImageCount,
-    pricing: input.pricing,
+    pricing: pricing,
     key: "input_cost_per_image",
     component: "input_images",
     missing,
   });
   providerCostUsd += addComponent({
     amount: inputAudioTokens,
-    pricing: input.pricing,
+    pricing: pricing,
     key: "input_cost_per_audio_token",
     component: "input_audio_tokens",
     missing,
   });
   providerCostUsd += addComponent({
     amount: textOutputTokens,
-    pricing: input.pricing,
+    pricing: pricing,
     key: "output_cost_per_token",
     component: "output_text_tokens",
     missing,
   });
   providerCostUsd += addComponent({
     amount: reasoningTokens,
-    pricing: input.pricing,
+    pricing: pricing,
     key:
-      priceValue(input.pricing, "output_cost_per_reasoning_token") === null
+      priceValue(pricing, "output_cost_per_reasoning_token") === null
         ? "output_cost_per_token"
         : "output_cost_per_reasoning_token",
     component: "reasoning_tokens",
@@ -428,7 +474,7 @@ export function computeProviderCostFromPricing(input: {
   });
   providerCostUsd += addComponent({
     amount: outputImageTokens,
-    pricing: input.pricing,
+    pricing: pricing,
     key: "output_cost_per_image_token",
     component: "output_image_tokens",
     missing,
@@ -438,7 +484,7 @@ export function computeProviderCostFromPricing(input: {
   } else {
     providerCostUsd += addComponent({
       amount: pricedOutputImageCount,
-      pricing: input.pricing,
+      pricing: pricing,
       key: "output_cost_per_image",
       component: "output_images",
       missing,
@@ -446,7 +492,7 @@ export function computeProviderCostFromPricing(input: {
   }
   providerCostUsd += addComponent({
     amount: outputAudioTokens,
-    pricing: input.pricing,
+    pricing: pricing,
     key: "output_cost_per_audio_token",
     component: "output_audio_tokens",
     missing,
@@ -461,7 +507,7 @@ export function computeProviderCostFromPricing(input: {
     };
   }
 
-  const rounded = roundUsd(providerCostUsd);
+  const rounded = roundUsd(providerCostUsd + chargedWithoutTotalUsd(input.cost));
   return {
     providerCostUsd: rounded,
     costSource: rounded > 0 ? "price_book" : "missing_or_zero_price",
@@ -474,6 +520,8 @@ export async function computeProviderCost(input: {
   modelKind: ModelProfileKind;
   profileAlias: string;
   usage?: UsageInfo;
+  /** The call's observed cost (`ModelCallObservation.cost`). */
+  cost?: ModelCallCost;
   llm?: LlmExecutionConfig;
   allowPriceBookFallback?: boolean;
   /** Defaults to exact, uncached reads. Billing must not override this. */
@@ -501,11 +549,7 @@ export async function computeProviderCost(input: {
 
   if (
     input.allowPriceBookFallback === false &&
-    !(
-      input.usage?.providerCostUsd !== undefined &&
-      Number.isFinite(input.usage.providerCostUsd) &&
-      input.usage.providerCostUsd >= 0
-    )
+    reportedProviderCostUsd(input.cost) === undefined
   ) {
     return {
       providerCostUsd: null,
@@ -522,22 +566,8 @@ export async function computeProviderCost(input: {
   if (!pricing || pricing.price_source === "unknown") {
     const cost = computeProviderCostFromPricing({
       usage: input.usage,
-      pricing: {
-        input_cost_per_token: null,
-        output_cost_per_token: null,
-        cache_read_input_token_cost: null,
-        cache_creation_input_token_cost: null,
-        output_cost_per_reasoning_token: null,
-        input_cost_per_image_token: null,
-        output_cost_per_image_token: null,
-        input_cost_per_audio_token: null,
-        output_cost_per_audio_token: null,
-        input_cost_per_image: null,
-        output_cost_per_image: null,
-        price_source: "unknown",
-        litellm_key: null,
-        price_updated_at: null,
-      },
+      cost: input.cost,
+      pricing: null,
     });
     if (cost.missingPriceComponents.length > 0) {
       logger.warn("Model usage has missing price components", {
@@ -558,6 +588,7 @@ export async function computeProviderCost(input: {
   const pricingSnapshot = buildPricingSnapshot(pricing);
   const cost = computeProviderCostFromPricing({
     usage: input.usage,
+    cost: input.cost,
     pricing,
   });
   if (cost.missingPriceComponents.length > 0) {

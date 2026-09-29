@@ -1,7 +1,11 @@
-import type { UsageInfo } from "@sourceweft/model-gateway";
+import type { ModelCallCost, UsageInfo } from "@sourceweft/model-gateway";
 import type { ContentBillingPort } from "./billing-port";
 import type { LlmExecutionConfig } from "./model-gateway-audit";
-import { computeProviderCost, type ProviderCostResult } from "./provider-cost";
+import {
+  computeProviderCost,
+  reportedProviderCostUsd,
+  type ProviderCostResult,
+} from "./provider-cost";
 import type { ModelProfileKind } from "./types";
 
 export type MeterBillableModelUsageResult = {
@@ -25,6 +29,8 @@ export async function meterBillableModelUsage(input: {
   referenceId?: string;
   idempotencyKey?: string;
   usage?: UsageInfo;
+  /** The call's observed cost (`ModelCallObservation.cost`). */
+  cost?: ModelCallCost;
   llm?: LlmExecutionConfig;
   allowPriceBookFallback?: boolean;
   metadata?: Record<string, unknown>;
@@ -41,6 +47,7 @@ export async function meterBillableModelUsage(input: {
       modelKind: input.modelKind,
       profileAlias: input.profileAlias,
       usage: input.usage,
+      cost: input.cost,
       llm: input.llm,
       allowPriceBookFallback: input.allowPriceBookFallback,
     });
@@ -60,9 +67,8 @@ export async function meterBillableModelUsage(input: {
     idempotencyKey: input.idempotencyKey,
     executionMode: input.llm?.executionMode,
     cost: resolveCost,
-    providerActualCostUsd: input.usage?.providerCostUsd,
-    providerCostSource: input.usage?.providerCostSource,
-    providerCostDetails: input.usage?.costDetails,
+    providerActualCostUsd: reportedProviderCostUsd(input.cost),
+    providerCostSource: input.cost?.source,
     metadata: input.metadata,
   });
   return result.status === "settled"

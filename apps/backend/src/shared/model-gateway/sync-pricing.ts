@@ -497,6 +497,21 @@ export async function syncModelPricing(): Promise<void> {
  * (models.dev-primary). Kept litellm-shaped field names for existing consumers
  * (BYOK), but the data now comes from the single registry, not a direct fetch.
  */
+/**
+ * The normalized catalog's price entry for a model, shaped like a profile's
+ * pricing — for callers that price a model without a gateway profile (the
+ * system model). Null when the catalog does not list the model.
+ */
+export async function resolveModelPricingFromCatalog(
+  modelName: string,
+): Promise<ModelPricing | null> {
+  await modelCatalog.ensureReady();
+  const info = modelCatalog.resolve(modelName);
+  return info
+    ? (pricingConfigFromInfo(info, new Date()) as unknown as ModelPricing)
+    : null;
+}
+
 export async function resolveModelCapabilitiesFromLitellm(modelName: string) {
   await modelCatalog.ensureReady();
   const info = modelCatalog.resolve(modelName);

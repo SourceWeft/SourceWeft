@@ -1,5 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import type {
+  ModelCallCost,
   ObserveGenerationEnd,
   ObserveGenerationError,
   ObserveGenerationStart,
@@ -182,6 +183,8 @@ export type GenerationCostResolver = (input: {
   modelKind: string;
   profileAlias: string;
   usage?: ObserveGenerationEnd["usage"];
+  /** The call's observed cost; an amount charged without a total adds to the estimate. */
+  cost?: ModelCallCost;
   executionMode?: string | null;
 }) => Promise<{
   providerCostUsd: number | null;
@@ -229,6 +232,7 @@ async function resolveGenerationCost(
       modelKind,
       profileAlias,
       usage: generation.usage ?? generation.observation?.usage,
+      cost: observedCost,
       executionMode: readAttributeString(attributes, "executionMode"),
     });
   } catch (error) {

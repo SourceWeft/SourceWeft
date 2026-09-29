@@ -181,6 +181,7 @@ export async function settleModelCall(
       referenceId: input.referenceId,
       idempotencyKey: input.idempotencyKey,
       usage: input.usage,
+      cost: input.observation?.cost,
       llm: options.llm,
       allowPriceBookFallback:
         providerAdapter?.costCapabilities?.allowPriceBookFallback,
