@@ -21,7 +21,7 @@ import {
 } from "./skills-browse";
 import { SkillCardGrid, skillCategoryNames } from "./skills-display";
 import { localeHref } from "../../../../lib/i18n/locale-href";
-import { skillsContainerClassName } from "./skills-format";
+import { marketingContainerClassName } from "../../../_landing/components/marketing-container";
 
 export function SkillsSearchForm({
   action,
@@ -199,7 +199,7 @@ export function SkillsListingView({
     <section
       className={cn(
         "mx-auto grid grid-cols-[minmax(0,1fr)] gap-6 py-8 lg:grid-cols-[232px_minmax(0,1fr)] lg:gap-10",
-        skillsContainerClassName,
+        marketingContainerClassName,
       )}
     >
       <CategorySidebar categories={categories} state={state} total={total} />

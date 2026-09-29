@@ -16,6 +16,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { SHORT_BUILD_SHA } from "../../../lib/app-version";
 import { SourceWeftFooter } from "../../_landing/components/sourceweft-footer";
 import { SourceWeftHeader } from "../../_landing/components/sourceweft-header";
+import { marketingContainerClassName } from "../../_landing/components/marketing-container";
 import { useLandingAuthState } from "../../_landing/components/use-landing-auth-state";
 
 const PRINCIPLE_ICONS = { grounded: Quote, workspace: Network, artifacts: Files };
@@ -62,7 +63,9 @@ export function AboutPage() {
             }}
           />
 
-          <div className="relative mx-auto grid max-w-6xl gap-12 px-6 lg:grid-cols-[1.1fr_0.9fr] lg:items-stretch">
+          <div
+            className={`relative mx-auto grid gap-12 lg:grid-cols-[1.1fr_0.9fr] lg:items-stretch ${marketingContainerClassName}`}
+          >
             <div>
               <p className="text-xs font-medium uppercase tracking-widest text-zinc-400 dark:text-zinc-600">
                 {t("hero.eyebrow")}
@@ -125,7 +128,7 @@ export function AboutPage() {
         </section>
 
         <section className="py-20">
-          <div className="mx-auto max-w-6xl px-6">
+          <div className={`mx-auto ${marketingContainerClassName}`}>
             <div className="mb-10 max-w-2xl">
               <p className="mb-3 text-xs font-medium uppercase tracking-widest text-zinc-400 dark:text-zinc-600">
                 {t("principles.eyebrow")}
@@ -159,7 +162,9 @@ export function AboutPage() {
         </section>
 
         <section className="border-t border-zinc-200 py-20 dark:border-white/[0.06]">
-          <div className="mx-auto grid max-w-6xl gap-10 px-6 lg:grid-cols-2">
+          <div
+            className={`mx-auto grid gap-10 lg:grid-cols-2 ${marketingContainerClassName}`}
+          >
             <div>
               <p className="mb-3 text-xs font-medium uppercase tracking-widest text-zinc-400 dark:text-zinc-600">
                 {t("audiences.eyebrow")}
@@ -200,7 +205,7 @@ export function AboutPage() {
           </div>
         </section>
 
-        <div className="mx-auto max-w-6xl px-6 pb-16">
+        <div className={`mx-auto pb-16 ${marketingContainerClassName}`}>
           <Link
             className="inline-flex items-center gap-2 rounded-full border border-zinc-200 px-3 py-1 font-mono text-xs text-zinc-500 transition-colors hover:border-zinc-300 hover:text-zinc-700 dark:border-white/[0.08] dark:text-zinc-500 dark:hover:border-white/20 dark:hover:text-zinc-300"
             href={changelogHref}

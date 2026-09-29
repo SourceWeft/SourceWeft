@@ -37,6 +37,7 @@ import {
   STORE_LINKS,
   type PlatformDisplay,
 } from "./download-content";
+import { marketingContainerClassName } from "../../_landing/components/marketing-container";
 
 export const PLATFORM_ICONS: Record<
   DownloadPlatform,
@@ -211,7 +212,7 @@ export function AllDownloadsSection({
   const t = useTranslations("download");
   return (
     <section id="all-downloads" className="scroll-mt-20 py-20">
-      <div className="mx-auto max-w-6xl px-6">
+      <div className={`mx-auto ${marketingContainerClassName}`}>
         <SectionHeading
           eyebrow={t("allDownloads.eyebrow")}
           title={t("allDownloads.title")}
@@ -336,7 +337,7 @@ export function MobileSection({
       id="mobile"
       className="scroll-mt-20 border-t border-zinc-200 py-20 dark:border-white/[0.06]"
     >
-      <div className="mx-auto max-w-6xl px-6">
+      <div className={`mx-auto ${marketingContainerClassName}`}>
         <SectionHeading
           eyebrow={t("mobile.eyebrow")}
           title={t("mobile.title")}
@@ -417,7 +418,7 @@ export function EverywhereSection({
   const t = useTranslations("download.everywhere");
   return (
     <section className="border-t border-zinc-200 py-20 dark:border-white/[0.06]">
-      <div className="mx-auto max-w-6xl px-6">
+      <div className={`mx-auto ${marketingContainerClassName}`}>
         <SectionHeading
           eyebrow={t("eyebrow")}
           title={t("title")}
@@ -481,7 +482,9 @@ export function BeforeInstallSection({
 
   return (
     <section className="border-t border-zinc-200 py-20 dark:border-white/[0.06]">
-      <div className="mx-auto grid max-w-6xl gap-10 px-6 lg:grid-cols-2">
+      <div
+        className={`mx-auto grid gap-10 lg:grid-cols-2 ${marketingContainerClassName}`}
+      >
         <div>
           <p className="mb-3 text-xs font-medium uppercase tracking-widest text-zinc-400 dark:text-zinc-600">
             {t("beforeInstall.eyebrow")}
@@ -583,7 +586,7 @@ export function DesktopScreensSection() {
   const t = useTranslations("download.screens");
   return (
     <section className="border-t border-zinc-200 py-20 dark:border-white/[0.06]">
-      <div className="mx-auto max-w-6xl px-6">
+      <div className={`mx-auto ${marketingContainerClassName}`}>
         <SectionHeading
           eyebrow={t("eyebrow")}
           title={t("title")}
@@ -633,7 +636,7 @@ export function DownloadFaqSection() {
   const t = useTranslations("download.faq");
   return (
     <section className="border-t border-zinc-200 py-20 dark:border-white/[0.06]">
-      <div className="mx-auto max-w-6xl px-6">
+      <div className={`mx-auto ${marketingContainerClassName}`}>
         <SectionHeading eyebrow={t("eyebrow")} title={t("title")} />
         <div className="grid gap-4 md:grid-cols-2">
           {DOWNLOAD_FAQ_KEYS.map((key) => (

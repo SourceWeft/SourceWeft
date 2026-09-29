@@ -24,13 +24,12 @@ import {
 import { CopyShareUrlButton } from "./copy-share-url-button";
 import { SourceWeftFooter } from "../../_landing/components/sourceweft-footer";
 import { SourceWeftHeader } from "../../_landing/components/sourceweft-header";
+import { marketingContainerClassName } from "../../_landing/components/marketing-container";
 import { resolveInitialLandingAuthState } from "../../_landing/auth-state-server";
 import { RawImage } from "../../_components/raw-image";
 import { JsonLd } from "../../_components/seo/json-ld";
 import { blogTagPath } from "./_components/blog-list";
 import { NO_INDEX_METADATA, OG_IMAGE, SITE_NAME, SITE_URL } from "../../seo";
-
-const blogContainerClassName = "max-w-7xl px-5 sm:px-6 lg:px-8";
 
 function uiLocale(value: string): Locale {
   return isLocale(value) ? value : DEFAULT_LOCALE;
@@ -252,7 +251,7 @@ async function ArticleFooter({
 
   return (
     <section className="border-t border-zinc-300 py-14 dark:border-white/10">
-      <div className="mx-auto max-w-7xl px-5 sm:px-6 lg:px-8">
+      <div className={`mx-auto ${marketingContainerClassName}`}>
         <div className="mb-8 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
           <div>
             <p className="text-xs font-semibold uppercase text-zinc-400">
@@ -333,12 +332,11 @@ export async function BlogArticlePageContent(input: {
   return (
     <main className="min-h-svh bg-[#f7f4ed] text-zinc-950 dark:bg-zinc-950 dark:text-white">
       <BlogPostingJsonLd post={post} />
-      <SourceWeftHeader
-        authState={initialAuthState}
-        containerClassName={blogContainerClassName}
-      />
+      <SourceWeftHeader authState={initialAuthState} />
       <section className="border-b border-zinc-300 dark:border-white/10">
-        <div className="mx-auto max-w-7xl px-5 pb-10 pt-24 sm:px-6 lg:px-8 lg:pb-14 lg:pt-28">
+        <div
+          className={`mx-auto pb-10 pt-24 lg:pb-14 lg:pt-28 ${marketingContainerClassName}`}
+        >
           <Link
             href={backHref}
             className="mb-9 inline-flex items-center gap-2 text-sm text-zinc-500 transition-colors hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-white"
@@ -378,7 +376,7 @@ export async function BlogArticlePageContent(input: {
       </section>
 
       <ArticleFooter relatedPosts={relatedPosts} />
-      <SourceWeftFooter containerClassName={blogContainerClassName} />
+      <SourceWeftFooter />
     </main>
   );
 }

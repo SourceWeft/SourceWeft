@@ -19,6 +19,7 @@ import { LocaleLink } from "../../[locale]/_components/locale-link";
 import { useTranslations } from "next-intl";
 import { SourceWeftFooter } from "../components/sourceweft-footer";
 import { SourceWeftHeader } from "../components/sourceweft-header";
+import { marketingContainerClassName } from "../components/marketing-container";
 import { SourceWeftBrandMark } from "../components/sourceweft-brand";
 import {
   type LandingAuthState,
@@ -73,7 +74,7 @@ function HeroSection({
         }}
       />
 
-      <div className="relative mx-auto max-w-6xl px-6">
+      <div className={`relative mx-auto ${marketingContainerClassName}`}>
         <div className="grid items-center gap-12 lg:grid-cols-2">
           {/* Left — copy */}
           <div className={styles.entrance}>
@@ -247,7 +248,7 @@ function SocialProof() {
   ] as const;
   return (
     <section className="border-y border-zinc-200 py-10 dark:border-white/[0.06]">
-      <div className="mx-auto max-w-6xl px-6">
+      <div className={`mx-auto ${marketingContainerClassName}`}>
         <p className="mb-8 text-center text-xs font-medium uppercase tracking-widest text-zinc-400 dark:text-zinc-600">
           {t("heading")}
         </p>
@@ -289,7 +290,7 @@ function FeaturesSection() {
 
   return (
     <section id="features" className="py-24">
-      <div className="mx-auto max-w-6xl px-6">
+      <div className={`mx-auto ${marketingContainerClassName}`}>
         <div className="mb-14 max-w-xl">
           <p className="mb-3 text-xs font-medium uppercase tracking-widest text-zinc-400 dark:text-zinc-600">
             {t("eyebrow")}
@@ -411,7 +412,7 @@ function HowItWorks() {
       id="how-it-works"
       className="border-t border-zinc-200 py-24 dark:border-white/[0.06]"
     >
-      <div className="mx-auto max-w-6xl px-6">
+      <div className={`mx-auto ${marketingContainerClassName}`}>
         <div className="mb-14 max-w-xl">
           <p className="mb-3 text-xs font-medium uppercase tracking-widest text-zinc-400 dark:text-zinc-600">
             {t("eyebrow")}
@@ -473,7 +474,7 @@ function PricingSection({ authState }: { authState: LandingAuthState }) {
       id="pricing"
       className="border-t border-zinc-200 py-24 dark:border-white/[0.06]"
     >
-      <div className="mx-auto max-w-6xl px-6">
+      <div className={`mx-auto ${marketingContainerClassName}`}>
         <div className="mb-12 max-w-xl">
           <p className="mb-3 text-xs font-medium uppercase tracking-widest text-zinc-400 dark:text-zinc-600">
             {t("eyebrow")}

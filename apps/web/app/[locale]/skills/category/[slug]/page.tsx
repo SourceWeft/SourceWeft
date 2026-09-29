@@ -12,6 +12,7 @@ import { SkillIcon } from "../../../../_components/site-icons";
 import { resolveInitialLandingAuthState } from "../../../../_landing/auth-state-server";
 import { SourceWeftFooter } from "../../../../_landing/components/sourceweft-footer";
 import { SourceWeftHeader } from "../../../../_landing/components/sourceweft-header";
+import { marketingContainerClassName } from "../../../../_landing/components/marketing-container";
 import {
   isIndexableListing,
   NO_INDEX_METADATA,
@@ -33,7 +34,6 @@ import {
 import {
   skillCategoryPath,
   skillPath,
-  skillsContainerClassName,
 } from "../../_components/skills-format";
 import {
   SkillsListingView,
@@ -194,10 +194,7 @@ export default async function PublicSkillCategoryPage({
     <main className="min-h-svh bg-[#f7f4ed] text-zinc-950 dark:bg-zinc-950 dark:text-white">
       <JsonLd data={breadcrumbJsonLd} />
       <JsonLd data={itemListJsonLd} />
-      <SourceWeftHeader
-        authState={authState}
-        containerClassName={skillsContainerClassName}
-      />
+      <SourceWeftHeader authState={authState} />
 
       <section className="relative overflow-hidden border-b border-zinc-300 dark:border-white/10">
         <div
@@ -205,7 +202,7 @@ export default async function PublicSkillCategoryPage({
           className="absolute inset-0 bg-[linear-gradient(rgba(24,24,27,0.055)_1px,transparent_1px),linear-gradient(90deg,rgba(24,24,27,0.055)_1px,transparent_1px)] bg-[size:42px_42px] dark:bg-[linear-gradient(rgba(255,255,255,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.045)_1px,transparent_1px)]"
         />
         <div
-          className={`relative mx-auto pb-8 pt-24 ${skillsContainerClassName}`}
+          className={`relative mx-auto pb-8 pt-24 ${marketingContainerClassName}`}
         >
           <LocaleLink
             className="mb-8 inline-flex items-center gap-2 text-sm text-zinc-500 transition-colors hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-white"
@@ -250,10 +247,7 @@ export default async function PublicSkillCategoryPage({
         total={categoriesResponse.total}
       />
 
-      <SourceWeftFooter
-        authState={authState}
-        containerClassName={skillsContainerClassName}
-      />
+      <SourceWeftFooter authState={authState} />
     </main>
   );
 }

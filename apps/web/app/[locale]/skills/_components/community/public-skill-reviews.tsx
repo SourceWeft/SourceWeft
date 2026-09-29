@@ -7,11 +7,11 @@ import {
 } from "../../../../../lib/public-skill-reviews";
 import { SkillReviewItem } from "../../../../dashboard/skills/_components/community/skill-review-item";
 import { SkillReviewSummary } from "../../../../dashboard/skills/_components/community/skill-review-summary";
-import { skillsContainerClassName } from "../skills-format";
 import { SkillReviewReportLink } from "../../../../dashboard/skills/_components/community/skill-review-report-link";
 import { skillReviewHref } from "./public-reviews-format";
 import { PublicSkillReviewsMore } from "./public-skill-reviews-more";
 import type { PublicSkillSlotProps } from "./slot-props";
+import { marketingContainerClassName } from "../../../../_landing/components/marketing-container";
 
 /**
  * Ratings and reviews below the page body (§17.3). Rendered on the server
@@ -37,7 +37,7 @@ export async function PublicSkillReviews({
       id="reviews"
       data-testid="public-skill-reviews"
       aria-labelledby="public-skill-reviews-heading"
-      className={`mx-auto pb-12 ${skillsContainerClassName}`}
+      className={`mx-auto pb-12 ${marketingContainerClassName}`}
     >
       <div className="rounded-2xl border border-zinc-300 bg-white/70 p-5 dark:border-white/10 dark:bg-white/5">
         <div className="flex flex-wrap items-center justify-between gap-3">

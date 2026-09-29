@@ -8,6 +8,7 @@ import { useLocale, useTranslations } from "next-intl";
 
 import { SourceWeftFooter } from "../../_landing/components/sourceweft-footer";
 import { SourceWeftHeader } from "../../_landing/components/sourceweft-header";
+import { marketingContainerClassName } from "../../_landing/components/marketing-container";
 import { useLandingAuthState } from "../../_landing/components/use-landing-auth-state";
 import {
   formatReleaseDate,
@@ -50,7 +51,7 @@ export function ChangelogPage({ entries }: { entries: ChangelogEntry[] }) {
               backgroundSize: "100% 100%, 56px 56px, 56px 56px",
             }}
           />
-          <div className="relative mx-auto max-w-6xl px-6">
+          <div className={`relative mx-auto ${marketingContainerClassName}`}>
             <div className="max-w-3xl">
               <p className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-medium text-zinc-500 shadow-sm dark:border-white/10 dark:bg-zinc-900 dark:text-zinc-400">
                 <Sparkles className="size-3.5" />

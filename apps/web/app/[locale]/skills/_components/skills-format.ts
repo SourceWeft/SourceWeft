@@ -1,7 +1,5 @@
 import { SUPPORT_EMAIL } from "./skills-constants";
 
-export const skillsContainerClassName = "max-w-7xl px-5 sm:px-6 lg:px-8";
-
 export function skillPath(slug: string) {
   return `/skills/${encodeURIComponent(slug)}`;
 }

@@ -14,6 +14,7 @@ import {
 import { toUrlSlug } from "../../../../../lib/slug";
 import { SourceWeftFooter } from "../../../../_landing/components/sourceweft-footer";
 import { SourceWeftHeader } from "../../../../_landing/components/sourceweft-header";
+import { marketingContainerClassName } from "../../../../_landing/components/marketing-container";
 import { resolveInitialLandingAuthState } from "../../../../_landing/auth-state-server";
 import {
   isIndexableListing,
@@ -23,12 +24,7 @@ import {
   SITE_URL,
 } from "../../../../seo";
 import { routing } from "../../../../../i18n/routing";
-import {
-  blogContainerClassName,
-  blogTagPath,
-  PostCard,
-  TagRail,
-} from "../../_components/blog-list";
+import { blogTagPath, PostCard, TagRail } from "../../_components/blog-list";
 
 export const dynamic = "force-dynamic";
 
@@ -110,17 +106,14 @@ export default async function BlogTagPage({ params }: PageProps) {
 
   return (
     <main className="min-h-svh bg-[#f7f4ed] text-zinc-950 dark:bg-zinc-950 dark:text-white">
-      <SourceWeftHeader
-        authState={initialAuthState}
-        containerClassName={blogContainerClassName}
-      />
+      <SourceWeftHeader authState={initialAuthState} />
       <section className="relative overflow-hidden border-b border-zinc-300 dark:border-white/10">
         <div
           aria-hidden
           className="absolute inset-0 bg-[linear-gradient(rgba(24,24,27,0.055)_1px,transparent_1px),linear-gradient(90deg,rgba(24,24,27,0.055)_1px,transparent_1px)] bg-[size:42px_42px] dark:bg-[linear-gradient(rgba(255,255,255,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.045)_1px,transparent_1px)]"
         />
         <div
-          className={`relative mx-auto pb-12 pt-24 sm:px-6 lg:pb-16 lg:pt-28 ${blogContainerClassName}`}
+          className={`relative mx-auto pb-12 pt-24 sm:px-6 lg:pb-16 lg:pt-28 ${marketingContainerClassName}`}
         >
           <Link
             className="mb-8 inline-flex items-center gap-2 text-sm text-zinc-500 transition-colors hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-white"
@@ -147,7 +140,7 @@ export default async function BlogTagPage({ params }: PageProps) {
         </div>
       </section>
 
-      <section className={`mx-auto py-12 ${blogContainerClassName}`}>
+      <section className={`mx-auto py-12 ${marketingContainerClassName}`}>
         {posts.length === 0 ? (
           <p className="text-sm text-zinc-500 dark:text-zinc-400">
             {t("emptyText")}{" "}
@@ -165,10 +158,7 @@ export default async function BlogTagPage({ params }: PageProps) {
         )}
       </section>
 
-      <SourceWeftFooter
-        authState={initialAuthState}
-        containerClassName={blogContainerClassName}
-      />
+      <SourceWeftFooter authState={initialAuthState} />
     </main>
   );
 }

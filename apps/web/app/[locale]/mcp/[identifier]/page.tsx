@@ -21,6 +21,7 @@ import { mcpOverviewLocale } from "../../../../lib/mcp-ai-overview";
 import { resolveInitialLandingAuthState } from "../../../_landing/auth-state-server";
 import { SourceWeftFooter } from "../../../_landing/components/sourceweft-footer";
 import { SourceWeftHeader } from "../../../_landing/components/sourceweft-header";
+import { marketingContainerClassName } from "../../../_landing/components/marketing-container";
 import { McpAiOverviewView } from "../../../_components/market/mcp-ai-overview-view";
 import {
   McpReadmeRepositoryLink,
@@ -47,7 +48,6 @@ import {
   McpCardGrid,
   mcpCategoryLabel,
   mcpCategoryNames,
-  mcpContainerClassName,
   mcpDetailSeoDescription,
   mcpPath,
   McpRuntimeBadge,
@@ -304,17 +304,16 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
     <main className="min-h-svh bg-[#f7f4ed] text-zinc-950 dark:bg-zinc-950 dark:text-white">
       <JsonLd data={softwareJsonLd} />
       <JsonLd data={breadcrumbJsonLd} />
-      <SourceWeftHeader
-        authState={authState}
-        containerClassName={mcpContainerClassName}
-      />
+      <SourceWeftHeader authState={authState} />
 
       <section className="relative overflow-hidden border-b border-zinc-300 dark:border-white/10">
         <div
           aria-hidden
           className="absolute inset-0 bg-[linear-gradient(rgba(24,24,27,0.055)_1px,transparent_1px),linear-gradient(90deg,rgba(24,24,27,0.055)_1px,transparent_1px)] bg-[size:42px_42px] dark:bg-[linear-gradient(rgba(255,255,255,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.045)_1px,transparent_1px)]"
         />
-        <div className={`relative mx-auto pb-8 pt-24 ${mcpContainerClassName}`}>
+        <div
+          className={`relative mx-auto pb-8 pt-24 ${marketingContainerClassName}`}
+        >
           <nav
             aria-label={t("breadcrumb")}
             className="mb-8 flex min-w-0 items-center gap-1.5 text-sm text-zinc-500 dark:text-zinc-400"
@@ -434,7 +433,7 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
         className="sticky top-14 z-40 border-b border-zinc-300 bg-[#f7f4ed]/90 backdrop-blur-[12px] dark:border-white/10 dark:bg-zinc-950/90"
       >
         <div
-          className={`mx-auto flex gap-6 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${mcpContainerClassName}`}
+          className={`mx-auto flex gap-6 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${marketingContainerClassName}`}
         >
           {sectionLinks.map(([id, label]) => (
             <a
@@ -449,7 +448,7 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
       </nav>
 
       <div
-        className={`mx-auto grid gap-8 py-10 lg:grid-cols-[minmax(0,1fr)_320px] ${mcpContainerClassName}`}
+        className={`mx-auto grid gap-8 py-10 lg:grid-cols-[minmax(0,1fr)_320px] ${marketingContainerClassName}`}
       >
         <div className="min-w-0 space-y-12">
           {hasOverview ? (
@@ -671,7 +670,7 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
 
       {relatedItems.length > 0 ? (
         <section
-          className={`mx-auto scroll-mt-32 pb-16 ${mcpContainerClassName}`}
+          className={`mx-auto scroll-mt-32 pb-16 ${marketingContainerClassName}`}
           id="related"
         >
           <div className="border-t border-zinc-300 pt-10 dark:border-white/10">
@@ -683,10 +682,7 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
         </section>
       ) : null}
 
-      <SourceWeftFooter
-        authState={authState}
-        containerClassName={mcpContainerClassName}
-      />
+      <SourceWeftFooter authState={authState} />
     </main>
   );
 }
