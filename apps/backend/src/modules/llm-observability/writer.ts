@@ -458,6 +458,15 @@ function generationMeasurementColumns(
   const observation = input.observation ?? undefined;
   const observationUsage = observation?.usage;
   const observationCost = observation?.cost;
+  // The provider's classification describes the row when it reported the
+  // total, or when a receipt will settle it (`pending`). Otherwise — an
+  // OpenRouter BYOK call that reported only its fee — the recorded total is
+  // the host's estimate, so the host's classification describes it.
+  const reportedCost =
+    observationCost?.effectiveUsd !== undefined ||
+    observationCost?.status === "pending"
+      ? observationCost
+      : undefined;
   const usage = serializeUsage(observationUsage ?? input.usage);
   const hostCostSource =
     typeof input.metadata?.costSource === "string"
@@ -498,14 +507,20 @@ function generationMeasurementColumns(
       null,
     resolvedProviderModel: observation?.identity.resolvedProviderModel ?? null,
     providerCostUsd: toNumeric(
-      observationCost?.effectiveUsd ?? input.providerCostUsd,
+      reportedCost?.effectiveUsd ?? input.providerCostUsd,
     ),
     providerCostInlineUsd: toNumeric(observationCost?.inlineUsd),
     providerCostSettledUsd: toNumeric(observationCost?.settledUsd),
     providerCostSource:
-      observationCost?.source ?? fallbackCostClassification?.source ?? null,
+      reportedCost?.source ??
+      fallbackCostClassification?.source ??
+      observationCost?.source ??
+      null,
     providerCostStatus:
-      observationCost?.status ?? fallbackCostClassification?.status ?? null,
+      reportedCost?.status ??
+      fallbackCostClassification?.status ??
+      observationCost?.status ??
+      null,
     costCurrency:
       observationCost?.currency ??
       (input.providerCostUsd !== null && input.providerCostUsd !== undefined

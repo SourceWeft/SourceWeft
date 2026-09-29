@@ -288,3 +288,94 @@ test("explicit zero usage and zero provider cost remain distinct from unknown, a
   assert.equal(JSON.stringify(actual).includes("secret-field"), false);
   assert.equal(JSON.stringify(actual).includes("field-key"), false);
 });
+
+const pricedAttributes = () => ({
+  gatewayConfigId: randomUUID(),
+  profileAlias: "chat",
+  modelKind: "chat",
+  executionMode: "GLOBAL",
+});
+// An OpenRouter BYOK call that reported only OpenRouter's fee: the upstream
+// provider billed our own key and sent no figure.
+const feeOnlyCost = {
+  currency: "USD" as const,
+  inlineUsd: 0.00001,
+  source: "provider_inline" as const,
+  status: "estimated" as const,
+};
+
+test("a fee reported without a total is kept inline while the row records the host's estimate", async () => {
+  const scope = await start();
+  const resolveCost = vi.fn<GenerationCostResolver>(async () => ({
+    providerCostUsd: 0.0000217,
+    costSource: "price_book",
+  }));
+  const sink = sinkModule.createLlmObservabilitySink({ resolveCost });
+  await sink.onGenerationEnd!({
+    traceId: scope.traceId,
+    spanId: scope.spanId,
+    endedAt: new Date().toISOString(),
+    observation: observation({
+      usage: { inputTokens: 11, outputTokens: 7, totalTokens: 18 },
+      cost: feeOnlyCost,
+    }),
+    attributes: pricedAttributes(),
+  });
+  // The resolver sees the fee, so its estimate can include it.
+  assert.deepEqual(resolveCost.mock.calls[0]![0].cost, feeOnlyCost);
+  const actual = await row(scope);
+  assert.equal(Number(actual.providerCostUsd), 0.0000217);
+  assert.equal(Number(actual.providerCostInlineUsd), 0.00001);
+  assert.equal(actual.providerCostSource, "price_book");
+  assert.equal(actual.providerCostStatus, "estimated");
+});
+
+test("a fee reported without a total and without a price keeps the fee and records no total", async () => {
+  const scope = await start();
+  const sink = sinkModule.createLlmObservabilitySink({
+    resolveCost: async () => ({
+      providerCostUsd: null,
+      costSource: "missing_price_components",
+    }),
+  });
+  await sink.onGenerationEnd!({
+    traceId: scope.traceId,
+    spanId: scope.spanId,
+    endedAt: new Date().toISOString(),
+    observation: observation({
+      usage: { inputTokens: 11, outputTokens: 7, totalTokens: 18 },
+      cost: feeOnlyCost,
+    }),
+    attributes: pricedAttributes(),
+  });
+  const actual = await row(scope);
+  assert.equal(actual.providerCostUsd, null);
+  assert.equal(Number(actual.providerCostInlineUsd), 0.00001);
+  assert.equal(actual.providerCostSource, "missing");
+  assert.equal(actual.providerCostStatus, "missing");
+});
+
+test("a call awaiting a provider receipt keeps its pending classification beside the estimate", async () => {
+  const scope = await start();
+  const sink = sinkModule.createLlmObservabilitySink({
+    resolveCost: async () => ({
+      providerCostUsd: 0.0015,
+      costSource: "price_book",
+    }),
+  });
+  await sink.onGenerationEnd!({
+    traceId: scope.traceId,
+    spanId: scope.spanId,
+    endedAt: new Date().toISOString(),
+    observation: observation({
+      usage: { inputTokens: 11, outputTokens: 7, totalTokens: 18 },
+      cost: { currency: "USD", source: "missing", status: "pending" },
+    }),
+    attributes: pricedAttributes(),
+  });
+  const actual = await row(scope);
+  assert.equal(Number(actual.providerCostUsd), 0.0015);
+  assert.equal(actual.providerCostSource, "missing");
+  assert.equal(actual.providerCostStatus, "pending");
+  assert.equal(actual.providerRequestId, "request-for-reconciliation");
+});

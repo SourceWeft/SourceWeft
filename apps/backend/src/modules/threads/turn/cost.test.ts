@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import type { ModelPricing } from "@sourceweft/db";
-import { testExports } from "./cost";
+import type { MeteredLlmCallTrace } from "./types";
+import { computeTurnProviderCost, testExports } from "./cost";
 
 const basePricing: ModelPricing = {
   input_cost_per_token: 0.0000005,
@@ -27,9 +28,13 @@ test("computeProviderCostFromPricing prefers provider actual cost", () => {
       inputTokens: 200,
       outputTokens: 1120,
       outputImageTokens: 1120,
-      providerCostUsd: 0.0673,
-      providerCostSource: "provider_inline",
-      providerCostSourcePath: "provider:openrouter.usage.cost",
+    },
+    cost: {
+      currency: "USD",
+      inlineUsd: 0.0673,
+      effectiveUsd: 0.0673,
+      source: "provider_inline",
+      status: "inline",
     },
   });
 
@@ -236,4 +241,88 @@ test("computeProviderCostFromPricing ignores image tiers for token-billed gpt-im
 
   assert.equal(result.providerCostUsd, 0.166405);
   assert.equal(result.costSource, "price_book");
+});
+
+function trace(overrides: Partial<MeteredLlmCallTrace>): MeteredLlmCallTrace {
+  return {
+    id: "call",
+    operation: "chat",
+    modelKind: "chat",
+    modelAlias: "chat-default",
+    profileAlias: "chat-default",
+    gatewayConfigId: "gateway",
+    billingStatus: "metered",
+    consumedCredits: 0,
+    idempotencyKey: "key",
+    referenceId: "ref",
+    ...overrides,
+  };
+}
+
+const lookups = {
+  isGatewayByok: async () => false,
+  getProfilePricing: async () => basePricing,
+};
+
+test("a turn's provider cost is the sum of its calls, each costed on its own", async () => {
+  const result = await computeTurnProviderCost({
+    lookups,
+    calls: [
+      // Billed with a total the provider reported.
+      trace({ providerCostUsd: 0.01, costSource: "provider_actual" }),
+      // Covered, so never billed: costed from the price book here.
+      // 200·0.0000005 + 100·0.000003 = 0.0001 + 0.0003 = 0.0004
+      trace({
+        billingStatus: "covered",
+        usage: { inputTokens: 200, outputTokens: 100 },
+      }),
+    ],
+  });
+  assert.equal(result.providerCostUsd, 0.0104);
+  assert.equal(result.costSource, "mixed");
+  assert.deepEqual(result.missingPriceComponents, []);
+});
+
+test("an uncostable call is listed rather than priced as the turn's chat model", async () => {
+  const result = await computeTurnProviderCost({
+    lookups: {
+      isGatewayByok: async () => false,
+      getProfilePricing: async () => ({
+        ...basePricing,
+        output_cost_per_token: null,
+      }),
+    },
+    calls: [
+      trace({ providerCostUsd: 0.002, costSource: "price_book" }),
+      trace({
+        billingStatus: "skipped",
+        usage: { inputTokens: 10, outputTokens: 10 },
+      }),
+    ],
+  });
+  assert.equal(result.providerCostUsd, 0.002);
+  assert.equal(result.costSource, "mixed");
+  assert.deepEqual(result.missingPriceComponents, ["output_text_tokens"]);
+});
+
+test("a turn without model calls has no provider cost", async () => {
+  const result = await computeTurnProviderCost({ lookups, calls: [] });
+  assert.equal(result.providerCostUsd, null);
+  assert.equal(result.costSource, "missing_usage");
+});
+
+test("a single billed call keeps its own source and price snapshot", async () => {
+  const result = await computeTurnProviderCost({
+    lookups,
+    calls: [
+      trace({
+        providerCostUsd: 0.003,
+        costSource: "price_book",
+        pricingSnapshot: { input_cost_per_token: 0.0000005 },
+      }),
+    ],
+  });
+  assert.equal(result.providerCostUsd, 0.003);
+  assert.equal(result.costSource, "price_book");
+  assert.deepEqual(result.pricingSnapshot, { input_cost_per_token: 0.0000005 });
 });

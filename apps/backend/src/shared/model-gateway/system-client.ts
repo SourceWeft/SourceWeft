@@ -14,7 +14,12 @@ import {
   buildRoutedModelGatewayConfig,
   loadRoutedGatewayConfig,
 } from "./runtime";
-import { resolveModelCapabilitiesFromLitellm } from "./sync-pricing";
+import type { ModelPricing } from "@sourceweft/db";
+import { computeProviderCostFromPricing } from "../../modules/content/provider-cost";
+import {
+  resolveModelCapabilitiesFromLitellm,
+  resolveModelPricingFromCatalog,
+} from "./sync-pricing";
 import { applyThinkingSupportDefaults } from "./thinking-defaults";
 import type { RoutedGatewayConfig } from "./types";
 
@@ -365,16 +370,20 @@ function logCall(input: {
   settings: SystemModelSettings;
   startedAt: number;
   result?: ChatCompleteResult;
+  /** The model's catalog price entry, for a call whose Provider reports no cost. */
+  pricing?: ModelPricing | null;
   error?: unknown;
 }) {
   const usage = input.result?.observation?.usage ?? input.result?.usage;
-  const cost = input.result?.observation?.cost;
-  const reportedCost =
-    cost?.source === "provider_inline" &&
-    typeof cost.inlineUsd === "number" &&
-    Number.isFinite(cost.inlineUsd)
-      ? cost.inlineUsd
-      : undefined;
+  // The same per-call rule tenant billing uses: the Provider's reported total,
+  // else the price book plus anything already charged, else no figure.
+  const cost = input.result
+    ? computeProviderCostFromPricing({
+        usage,
+        cost: input.result.observation?.cost,
+        pricing: input.pricing ?? null,
+      })
+    : undefined;
   logger.info("system_model.call", {
     purpose: input.context.purpose,
     subjectRef: input.context.subjectRef,
@@ -387,8 +396,18 @@ function logCall(input: {
     inputTokens: tokenCount(usage?.inputTokens),
     outputTokens: tokenCount(usage?.outputTokens),
     reasoningTokens: tokenCount(usage?.reasoningTokens),
-    ...(reportedCost !== undefined ? { costUsd: reportedCost } : {}),
+    ...(cost?.providerCostUsd != null ? { costUsd: cost.providerCostUsd } : {}),
+    ...(cost ? { costSource: cost.costSource } : {}),
   });
+}
+
+async function catalogPricing(model: string) {
+  try {
+    return await resolveModelPricingFromCatalog(model);
+  } catch {
+    // Cost is reporting: an unreadable catalog leaves the figure missing.
+    return null;
+  }
 }
 
 /**
@@ -467,7 +486,13 @@ export async function withSystemModel<T>(
         logCall({ context, settings, startedAt, error });
         throw error;
       }
-      logCall({ context, settings, startedAt, result });
+      logCall({
+        context,
+        settings,
+        startedAt,
+        result,
+        pricing: await catalogPricing(settings.model),
+      });
       return result;
     },
   };

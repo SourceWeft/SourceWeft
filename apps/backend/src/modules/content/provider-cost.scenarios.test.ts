@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import type { ModelPricing } from "@sourceweft/db";
-import type { UsageInfo } from "@sourceweft/model-gateway";
+import type { ModelCallCost, UsageInfo } from "@sourceweft/model-gateway";
 import {
   computeProviderCost,
   computeProviderCostFromPricing,
@@ -30,9 +30,25 @@ function price(overrides: Partial<ModelPricing>): ModelPricing {
   };
 }
 
-function cost(pricing: ModelPricing, usage: UsageInfo) {
-  return computeProviderCostFromPricing({ pricing, usage });
+function cost(pricing: ModelPricing, usage: UsageInfo, observed?: ModelCallCost) {
+  return computeProviderCostFromPricing({ pricing, usage, cost: observed });
 }
+
+// What the gateway observed for a call with a reported total, and for an
+// OpenRouter BYOK call where only the router fee is known.
+const reported = (usd: number): ModelCallCost => ({
+  currency: "USD",
+  inlineUsd: usd,
+  effectiveUsd: usd,
+  source: "provider_inline",
+  status: "inline",
+});
+const feeOnly = (usd: number): ModelCallCost => ({
+  currency: "USD",
+  inlineUsd: usd,
+  source: "provider_inline",
+  status: "estimated",
+});
 
 // 1) Plain chat. 1000 in @ $2.5/1M + 500 out @ $10/1M.
 //    1000·2.5e-6 + 500·10e-6 = 0.0025 + 0.005 = 0.0075
@@ -65,6 +81,56 @@ test("provider actual-cost policy bypasses the price book when inline cost is ab
   assert.equal(pricingReads, 0);
   assert.equal(result.providerCostUsd, null);
   assert.equal(result.costSource, "missing_provider_actual");
+});
+
+test("provider actual-cost policy does not accept a fee alone as the actual cost", async () => {
+  const result = await computeProviderCost({
+    gatewayConfigId: "gateway-orca",
+    modelKind: "chat",
+    profileAlias: "chat-default",
+    usage: { inputTokens: 842, outputTokens: 5012 },
+    cost: feeOnly(0.00005),
+    allowPriceBookFallback: false,
+    lookups: {
+      isGatewayByok: async () => false,
+      getProfilePricing: async () => undefined,
+    },
+  });
+  assert.equal(result.providerCostUsd, null);
+  assert.equal(result.costSource, "missing_provider_actual");
+});
+
+test("provider actual-cost policy uses the reported total from the call's cost", async () => {
+  const result = await computeProviderCost({
+    gatewayConfigId: "gateway-orca",
+    modelKind: "chat",
+    profileAlias: "chat-default",
+    usage: { inputTokens: 842, outputTokens: 5012 },
+    cost: reported(0.0042),
+    allowPriceBookFallback: false,
+    lookups: {
+      isGatewayByok: async () => false,
+      getProfilePricing: async () => undefined,
+    },
+  });
+  assert.equal(result.providerCostUsd, 0.0042);
+  assert.equal(result.costSource, "provider_actual");
+});
+
+test("our BYOK stays free whatever the provider reported", async () => {
+  const result = await computeProviderCost({
+    gatewayConfigId: "gateway-byok",
+    modelKind: "chat",
+    profileAlias: "chat-default",
+    usage: { inputTokens: 842, outputTokens: 5012 },
+    cost: reported(0.0042),
+    lookups: {
+      isGatewayByok: async () => true,
+      getProfilePricing: async () => undefined,
+    },
+  });
+  assert.equal(result.providerCostUsd, 0);
+  assert.equal(result.costSource, "byok");
 });
 
 // 2) Prompt caching. inputTokens=1000 splits into cacheRead 800, cacheWrite 100,
@@ -195,14 +261,48 @@ test("image per-image tier: perImage × count", () => {
   assert.equal(r.providerCostUsd, 0.08);
 });
 
-// 10) Aggregator inline cost (OpenRouter) short-circuits everything.
-test("provider_actual: usage.cost wins and ignores tokens/prices", () => {
+// 10) A total the provider reported short-circuits everything.
+test("provider_actual: the reported total wins and ignores tokens/prices", () => {
   const r = cost(
     price({ input_cost_per_token: 999, output_cost_per_token: 999 }),
-    { providerCostUsd: 0.0123, inputTokens: 99999, outputTokens: 99999 },
+    { inputTokens: 99999, outputTokens: 99999 },
+    reported(0.0123),
   );
   assert.equal(r.providerCostUsd, 0.0123);
   assert.equal(r.costSource, "provider_actual");
+});
+
+test("a reported total needs no token usage", () => {
+  const r = computeProviderCostFromPricing({
+    pricing: price({}),
+    usage: undefined,
+    cost: reported(0.02),
+  });
+  assert.equal(r.providerCostUsd, 0.02);
+  assert.equal(r.costSource, "provider_actual");
+});
+
+// 10b) OpenRouter BYOK without an upstream figure: the fee OpenRouter already
+//      charged plus the price-book estimate of the upstream call.
+//      0.00005 + (1000·2.5e-6 + 500·10e-6 = 0.0075) = 0.00755
+test("an amount already charged inline is added to the price-book estimate", () => {
+  const r = cost(
+    price({ input_cost_per_token: 2.5e-6, output_cost_per_token: 10e-6 }),
+    { inputTokens: 1000, outputTokens: 500 },
+    feeOnly(0.00005),
+  );
+  assert.equal(r.providerCostUsd, 0.00755);
+  assert.equal(r.costSource, "price_book");
+});
+
+test("a fee without a priceable remainder stays unknown rather than billing the fee as the total", () => {
+  const r = cost(
+    price({ input_cost_per_token: 2.5e-6 }),
+    { inputTokens: 1000, outputTokens: 500 },
+    feeOnly(0.00005),
+  );
+  assert.equal(r.providerCostUsd, null);
+  assert.equal(r.costSource, "missing_price_components");
 });
 
 // 11) A missing component blocks the whole bill (no silent under-charge).

@@ -33,6 +33,8 @@ vi.mock("./model-catalog/registry", async (importOriginal) => {
           toolCall: true,
           structuredOutput: true,
           vision: false,
+          // The price book for calls whose Provider reports no cost.
+          pricing: { inputPerToken: 0.0000003, outputPerToken: 0.0000012 },
           sources: ["models.dev"],
         },
       ],
@@ -579,6 +581,7 @@ test("each call logs exactly one line, without the prompt, the output or the key
     outputTokens: 7,
     reasoningTokens: null,
     costUsd: 0.00042,
+    costSource: "provider_actual",
   });
   const everything = JSON.stringify([...info.mock.calls, ...warn.mock.calls]);
   for (const secret of [
@@ -599,6 +602,42 @@ test("the log line counts reasoning tokens when the Provider reports them", asyn
   const logs = systemCallLogs(info);
   assert.equal(logs.length, 1);
   assert.equal((logs[0]![1] as Record<string, unknown>).reasoningTokens, 5);
+});
+
+test("a Provider that reports no cost is costed from the catalog's price book", async () => {
+  mocks.loadRouted.mockResolvedValue(routedFixture());
+  mockProvider(undefined, { cost: undefined });
+  const info = vi.spyOn(logger, "info");
+  await withSystemModel(context(), (chat) => chat.complete({ messages }));
+  const line = systemCallLogs(info)[0]![1] as Record<string, unknown>;
+  // 11·0.0000003 + 7·0.0000012 = 0.0000033 + 0.0000084
+  assert.equal(line.costUsd, 0.0000117);
+  assert.equal(line.costSource, "price_book");
+});
+
+test("an OpenRouter BYOK call costs the fee plus the upstream charge, not $0", async () => {
+  mocks.loadRouted.mockResolvedValue(routedFixture());
+  mockProvider(undefined, {
+    is_byok: true,
+    cost: 0,
+    cost_details: { upstream_inference_cost: 0.0009 },
+  });
+  const info = vi.spyOn(logger, "info");
+  await withSystemModel(context(), (chat) => chat.complete({ messages }));
+  const line = systemCallLogs(info)[0]![1] as Record<string, unknown>;
+  assert.equal(line.costUsd, 0.0009);
+  assert.equal(line.costSource, "provider_actual");
+});
+
+test("an OpenRouter BYOK call without an upstream figure keeps the fee on top of the estimate", async () => {
+  mocks.loadRouted.mockResolvedValue(routedFixture());
+  mockProvider(undefined, { is_byok: true, cost: 0.00001 });
+  const info = vi.spyOn(logger, "info");
+  await withSystemModel(context(), (chat) => chat.complete({ messages }));
+  const line = systemCallLogs(info)[0]![1] as Record<string, unknown>;
+  // 0.00001 fee + 0.0000117 estimate
+  assert.equal(line.costUsd, 0.0000217);
+  assert.equal(line.costSource, "price_book");
 });
 
 test("a failed call logs one error line and rethrows", async () => {
