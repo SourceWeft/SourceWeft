@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { test } from "vitest";
+import { test, vi } from "vitest";
+import { logger } from "../logger";
 import { loadGlobalModelGatewayConfig } from "./global-config";
 
 function baseConfig(): Record<string, unknown> & {
@@ -18,7 +19,7 @@ function baseConfig(): Record<string, unknown> & {
         baseUrl: "https://example.test/v1",
         providerName: "Test",
         providerKind: "openai-compatible",
-        supports: ["chat", "rerank", "embedding"],
+        supports: ["chat", "rerank", "embeddings"],
         isDefault: true,
         activation: {
           env: "SOURCEWEFT_TEST_GATEWAY_ENABLED",
@@ -133,6 +134,52 @@ test("rejects invalid configured display names", async () => {
   delete config.gateways[0]!.modelCatalog;
   config.chatProfiles[0]!.displayName = " ";
   await assert.rejects(loadConfig(config), /chatProfiles\[0\]\.displayName/);
+});
+
+test("gateway supports accepts every known capability, including json_schema_strict", async () => {
+  const config = baseConfig();
+  const known = [
+    "chat",
+    "tool_calling",
+    "json_schema",
+    "json_schema_strict",
+    "embeddings",
+    "rerank",
+    "asr",
+    "tts",
+    "image",
+    "video",
+  ];
+  config.gateways[0]!.supports = known;
+  const loaded = await loadConfig(config);
+  assert.deepEqual(loaded?.gateways[0]?.supports, known);
+});
+
+test("gateway supports keeps an unknown capability and warns instead of refusing the config", async () => {
+  // Deployed configs carry descriptive values the gateway does not read
+  // (`vision`, `json_object` on a Cloudflare AI Gateway entry); refusing them
+  // would stop every backend service at startup.
+  const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+  try {
+    for (const unknown of ["vision", "json_object", "json_schema_stric"]) {
+      warn.mockClear();
+      const config = baseConfig();
+      config.gateways[0]!.supports = ["chat", unknown];
+      const loaded = await loadConfig(config);
+      assert.deepEqual(loaded?.gateways[0]?.supports, ["chat", unknown]);
+      assert.equal(warn.mock.calls.length, 1, unknown);
+      assert.deepEqual(
+        (warn.mock.calls[0]![1] as { field: string; capability: string }).field,
+        "gateways[0].supports[1]",
+      );
+      assert.equal(
+        (warn.mock.calls[0]![1] as { capability: string }).capability,
+        unknown,
+      );
+    }
+  } finally {
+    warn.mockRestore();
+  }
 });
 
 test("parses deployment modelCapabilities rules (override layer)", async () => {
@@ -828,12 +875,23 @@ test("default global config routes through OpenRouter with a dormant OrcaRouter 
   assert.equal(openRouterGateway?.activation.globalReady, false);
   assert.equal(openRouterGateway?.activation.env, "OPENROUTER_ENABLED");
   assert.equal(openRouterGateway?.baseUrlEnv, "OPENROUTER_API_BASE");
+  // OpenRouter enforces strict json_schema (with require_parameters); OrcaRouter
+  // is not verified yet, so it declares only json_schema.
   assert.deepEqual(openRouterGateway?.supports, [
     "chat",
     "embeddings",
     "rerank",
     "tts",
     "image",
+    "tool_calling",
+    "json_schema",
+    "json_schema_strict",
+  ]);
+  assert.deepEqual(orcaRouterGateway?.supports, [
+    "chat",
+    "embeddings",
+    "image",
+    "tts",
     "tool_calling",
     "json_schema",
   ]);

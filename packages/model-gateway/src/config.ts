@@ -7,6 +7,7 @@ import {
   defaultTargetHealthRegistry,
   orderByTargetHealth,
 } from "./target-health";
+import { defaultStrictJsonSchemaSupport } from "./strict-json-schema-support";
 import type {
   CustomByokProviderConfig,
   GatewayExecutionInput,
@@ -252,6 +253,8 @@ export function resolveModelGatewayConfig(
     observeSink: config.observeSink,
     langchainFactories: config.langchainFactories,
     targetHealth: config.targetHealth ?? defaultTargetHealthRegistry,
+    strictJsonSchemaSupport:
+      config.strictJsonSchemaSupport ?? defaultStrictJsonSchemaSupport,
   };
 }
 

@@ -27,6 +27,17 @@ export {
   targetHealthKey,
 } from "./target-health";
 
+export {
+  STRICT_JSON_SCHEMA_SUPPORT,
+  STRICT_JSON_SCHEMA_UNSUPPORTED_TTL_MS,
+  StrictJsonSchemaSupportCache,
+  defaultStrictJsonSchemaSupport,
+} from "./strict-json-schema-support";
+export {
+  classifyStrictJsonSchemaRejection,
+  isStrictJsonSchemaCompatible,
+} from "./bridge/strict-json-schema";
+
 export { hasConfiguredCredentialHeaders } from "./auth-headers";
 
 export { createLangChainChatModel } from "./bridge/utils";
@@ -116,7 +127,10 @@ export type {
   ReasoningEffort,
   RouteDecision,
   RoutingStrategy,
+  StrictJsonSchemaFallbackReason,
   StructuredOutputConfig,
+  StructuredOutputDiagnostics,
+  StructuredOutputMechanism,
   ThinkingConfig,
   ToolBindingOptions,
   ToolCall,

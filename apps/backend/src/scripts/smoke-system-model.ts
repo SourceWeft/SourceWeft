@@ -10,7 +10,8 @@ import {
  * Manual smoke test of the system model: one real structured-output call
  * through `withSystemModel`, against the gateway configuration in
  * DATABASE_URL and the SYSTEM_MODEL_* settings. Prints the readiness, what
- * the provider reported (model, tokens, cost) and the answer; the
+ * the provider reported (model, tokens, cost), the structured-output
+ * mechanism used (and any fallback reason) and the answer; the
  * `system_model.call` line is printed by the logger as for any call. The key
  * is never printed.
  *
@@ -90,6 +91,11 @@ async function main() {
     chargedUsd: cost?.inlineUsd ?? null,
     costSource: cost?.source ?? null,
     costStatus: cost?.status ?? null,
+    // json_schema_strict when the Provider declares it and honoured it.
+    structuredOutputMechanism:
+      result.structuredOutputDiagnostics?.mechanism ?? null,
+    structuredOutputFallbackReason:
+      result.structuredOutputDiagnostics?.fallbackReason ?? null,
     structuredOutput: result.structuredOutput ?? null,
   });
   if (!result.structuredOutput) {

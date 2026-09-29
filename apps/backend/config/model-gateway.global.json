@@ -1,5 +1,5 @@
 {
-  "_comment": "OSS defaults route through OpenRouter. Provider activation and credentials are separate: *_ENABLED controls deployment intent and *_API_KEY supplies credentials. OrcaRouter ships disabled by default. Model-capability defaults ship in code (model-capability-db.ts); override them with a top-level modelCapabilities array.",
+  "_comment": "OSS defaults route through OpenRouter. Provider activation and credentials are separate: *_ENABLED controls deployment intent and *_API_KEY supplies credentials. OrcaRouter ships disabled by default. Model-capability defaults ship in code (model-capability-db.ts); override them with a top-level modelCapabilities array. Declare json_schema_strict in supports only for a gateway that enforces a strict response_format json_schema (OpenRouter does, with require_parameters); models that cannot are detected per request and fall back automatically.",
   "gateways": [
     {
       "slug": "openrouter-default",
@@ -21,7 +21,8 @@
         "tts",
         "image",
         "tool_calling",
-        "json_schema"
+        "json_schema",
+        "json_schema_strict"
       ],
       "modelCatalog": {
         "enabled": true,

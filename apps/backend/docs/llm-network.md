@@ -106,7 +106,8 @@ Add an entry to your custom global gateway configuration, for example:
 Set `LOCAL_LLM_ENABLED=true` in the backend environment (or `docker/.env` with
 Compose), and configure your chat/embedding profiles to use this gateway and the
 actual model IDs served by that endpoint. Declare only capabilities the service
-supports. Point `MODEL_GATEWAY_GLOBAL_CONFIG_PATH` to the complete custom config
+supports (the accepted `supports` values are listed in the backend README;
+add `json_schema_strict` only if the service enforces strict JSON schemas). Point `MODEL_GATEWAY_GLOBAL_CONFIG_PATH` to the complete custom config
 file; API, worker and scheduler need the same file and environment.
 
 **Omit `apiKeyEnv` for a service that has no authentication.** There is no separate

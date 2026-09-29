@@ -1,6 +1,7 @@
 import type { AIMessage, AIMessageChunk } from "@langchain/core/messages";
 import type { ModelCallObservation } from "./observation/types";
 import type { TargetHealthRegistry } from "./target-health";
+import type { StrictJsonSchemaSupportCache } from "./strict-json-schema-support";
 
 export type ModelKind =
   | "chat"
@@ -282,15 +283,51 @@ export interface ToolBindingOptions {
 
 export interface StructuredOutputConfig {
   /**
-   * Structured-output method. When omitted, LangChain selects a default per
-   * model. Callers should normally omit this.
+   * Structured-output method. Callers should normally omit this and declare
+   * only the schema: the gateway then uses a strict `json_schema` response
+   * format when the target's Provider declares `json_schema_strict` and the
+   * schema is strict-compatible, and otherwise the model's capability path
+   * (an available tool, the capability method, or LangChain's default). A
+   * pinned method is authoritative.
    */
   method?: "json_schema" | "json_mode" | "function_calling";
   name: string;
   description?: string;
   schema: Record<string, unknown>;
-  /** Only forwarded when {@link method} is set explicitly. */
+  /**
+   * Forwarded when {@link method} is set explicitly. Without a method,
+   * `false` opts out of automatic strict output.
+   */
   strict?: boolean;
+}
+
+/** Why a strict `json_schema` attempt fell back to the non-strict path. */
+export type StrictJsonSchemaFallbackReason =
+  /** OpenRouter 404: no endpoint of the model supports the parameters. */
+  | "no_endpoint_for_parameters"
+  /** 400: the response format / json_schema is unavailable or unsupported. */
+  | "response_format_unsupported"
+  /** 400: "Invalid schema for response_format". */
+  | "invalid_schema";
+
+/**
+ * How a structured answer was requested: a strict `json_schema` response
+ * format, the schema bound as an available tool, or LangChain's
+ * `withStructuredOutput` with a method (`auto` when LangChain picked).
+ */
+export type StructuredOutputMechanism =
+  | "json_schema_strict"
+  | "available_tool"
+  | "native:json_schema"
+  | "native:json_mode"
+  | "native:function_calling"
+  | "native:auto";
+
+/** Non-content facts about a structured call, for logs and observation. */
+export interface StructuredOutputDiagnostics {
+  mechanism: StructuredOutputMechanism;
+  /** Set when a strict attempt was refused and this answer came from the fallback. */
+  fallbackReason?: StrictJsonSchemaFallbackReason;
 }
 
 export interface GatewayProviderConfig {
@@ -500,6 +537,8 @@ export interface ChatCompleteResult {
   routeDecision?: RouteDecision;
   traceId?: string;
   structuredOutput?: Record<string, unknown>;
+  /** Present when the request asked for structured output. */
+  structuredOutputDiagnostics?: StructuredOutputDiagnostics;
   raw: AIMessage;
 }
 
@@ -807,6 +846,11 @@ export interface ModelGatewayConfig {
    * to isolate health state (tests) or share one across configs deliberately.
    */
   targetHealth?: TargetHealthRegistry;
+  /**
+   * Overrides the process-wide memory of (Provider, model) pairs that refused
+   * strict JSON-schema output — pass a fresh instance to isolate it (tests).
+   */
+  strictJsonSchemaSupport?: StrictJsonSchemaSupportCache;
   logger?: GatewayLogger;
   requestMetadata?: Record<string, unknown>;
   observeSink?: ObserveSink;
@@ -885,6 +929,7 @@ export interface ResolvedModelGatewayConfig {
   observeSink?: ObserveSink;
   langchainFactories?: LangChainFactories;
   targetHealth: TargetHealthRegistry;
+  strictJsonSchemaSupport: StrictJsonSchemaSupportCache;
 }
 
 export interface ResolvedRequestTarget {

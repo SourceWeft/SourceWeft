@@ -472,6 +472,7 @@ test("chat.complete sanitizes invalid JSON errors from the real OpenAI-compatibl
         assert.doesNotMatch(error.stack ?? "", /LEAKME/u);
         assert.deepEqual(error.metadata?.structuredOutputDiagnostics, {
           contentAvailable: false,
+          mechanism: "native:json_schema",
         });
         return true;
       },

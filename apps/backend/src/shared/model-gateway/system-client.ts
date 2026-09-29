@@ -384,6 +384,9 @@ function logCall(input: {
         pricing: input.pricing ?? null,
       })
     : undefined;
+  // How a structured answer was requested (strict json_schema, an available
+  // tool, a native method) and why a strict request fell back, if it did.
+  const structured = input.result?.structuredOutputDiagnostics;
   logger.info("system_model.call", {
     purpose: input.context.purpose,
     subjectRef: input.context.subjectRef,
@@ -398,6 +401,14 @@ function logCall(input: {
     reasoningTokens: tokenCount(usage?.reasoningTokens),
     ...(cost?.providerCostUsd != null ? { costUsd: cost.providerCostUsd } : {}),
     ...(cost ? { costSource: cost.costSource } : {}),
+    ...(structured
+      ? {
+          structuredOutputMechanism: structured.mechanism,
+          ...(structured.fallbackReason
+            ? { structuredOutputFallbackReason: structured.fallbackReason }
+            : {}),
+        }
+      : {}),
   });
 }
 

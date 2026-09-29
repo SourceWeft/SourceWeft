@@ -1,5 +1,6 @@
 import { AsyncCaller } from "@langchain/core/utils/async_caller";
 import { ModelGatewayError, normalizeGatewayError } from "../errors";
+import { isUnparsedStructuredAnswer } from "../structured-output-errors";
 import type { AdapterRequestOptions } from "./types";
 
 /** Preserve LangChain's status/quota rules, adding host policy and cancellation. */
@@ -14,7 +15,11 @@ export class GatewayCaller extends AsyncCaller {
       if (
         (ModelGatewayError.isInstance(error) && !error.retryable) ||
         (error instanceof Error &&
-          error.name === "GoogleGenerativeAIAbortError")
+          error.name === "GoogleGenerativeAIAbortError") ||
+        // The SDK parses a json_schema answer inside this retried call; an
+        // answer it rejects was received (and billed), so it goes to the
+        // caller instead of being requested again here.
+        isUnparsedStructuredAnswer(error)
       )
         throw error;
       return defaultHandler?.(error);
