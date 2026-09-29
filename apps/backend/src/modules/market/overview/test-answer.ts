@@ -1,7 +1,8 @@
 /**
  * A structured answer the system model could give for the genesis402 fixture
- * (`test-fixtures.ts`): three locales and two categories whose evidence is
- * quoted from its README. For tests that stand in for the model call.
+ * (`test-fixtures.ts`): three locales, and a primary and one secondary
+ * category whose evidence is quoted from its README. For tests that stand in
+ * for the model call.
  */
 export function genesis402ModelAnswer(
   options: { summaryPrefix?: string } = {},
@@ -38,8 +39,8 @@ export function genesis402ModelAnswer(
       cautions: "",
     },
     classification: {
-      categories: [
-        { slug: "finance", evidence: "DeFi yields from 15,000+ pools" },
+      primary: { slug: "finance", evidence: "DeFi yields from 15,000+ pools" },
+      secondary: [
         {
           slug: "web-search-scraping",
           evidence:

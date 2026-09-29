@@ -14,6 +14,7 @@ import type {
   OverviewPrompt,
   OverviewSubject,
   OverviewSubjectAdapter,
+  ParsedOverview,
 } from "./types";
 
 export type GenerateOverviewInput<TPrompt extends OverviewPrompt> = {
@@ -100,7 +101,21 @@ export async function generateOverview<
     versionId: subject.versionId,
     scopeId: input.scopeId,
   });
-  const parsed = adapter.parseOutput(output, subject, prompt);
+  let parsed: ParsedOverview<TClassification>;
+  try {
+    parsed = adapter.parseOutput(output, subject, prompt);
+  } catch (error) {
+    // Which subject's answer was refused and by which rule; the job's own
+    // failure line names only the version. Nothing of the answer or the
+    // prompt is logged. Rethrown as is: the job retries as before.
+    logger.info(`${adapter.label} overview output rejected`, {
+      kind: adapter.kind,
+      ...adapter.logFields(subject, prompt),
+      model,
+      ...rejectionFields(error),
+    });
+    throw error;
+  }
   const published = await store.publish({
     subject,
     requestId: state.requestId,
@@ -117,6 +132,23 @@ export async function generateOverview<
     model,
   });
   return { status: "generated", model };
+}
+
+/**
+ * A refused answer's error for the log: its message, plus the rule it broke
+ * when the kind's error names one (`code`, or the MCP parser's `reason`).
+ */
+function rejectionFields(error: unknown): Record<string, unknown> {
+  if (!(error instanceof Error)) return { error: String(error) };
+  const { code, reason } = error as Error & {
+    code?: unknown;
+    reason?: unknown;
+  };
+  return {
+    error: error.message,
+    ...(code === undefined ? {} : { code }),
+    ...(reason === undefined ? {} : { reason }),
+  };
 }
 
 /** Exactly the catalog locales, all of them: one is never published alone. */
