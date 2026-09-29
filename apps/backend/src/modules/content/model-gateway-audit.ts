@@ -47,6 +47,13 @@ function normalizeIdentityPart(value: string | undefined) {
   return trimmed && trimmed.length > 0 ? trimmed : null;
 }
 
+const BYOK_OBSERVED_ALIAS_PREFIX = "byok:";
+
+/** Whether an observed model alias names a BYOK call (see below). */
+export function isByokObservedModelAlias(alias: string | null | undefined) {
+  return alias?.startsWith(BYOK_OBSERVED_ALIAS_PREFIX) ?? false;
+}
+
 export function resolveGatewayObservedIdentity(input: {
   llm?: LlmExecutionConfig;
   modelAlias?: string | null;
@@ -70,7 +77,7 @@ export function resolveGatewayObservedIdentity(input: {
     normalizeIdentityPart(input.llm.modelAlias) ??
     normalizeIdentityPart(input.modelAlias ?? undefined) ??
     "model";
-  const observedAlias = `byok:${provider}:${model}`;
+  const observedAlias = `${BYOK_OBSERVED_ALIAS_PREFIX}${provider}:${model}`;
 
   return {
     modelAlias: observedAlias,
@@ -108,7 +115,7 @@ export function buildGatewayAuditMetadata(input: {
   return {
     executionMode,
     providerHint: input.llm?.providerHint ?? null,
-    byokProvider: isByok ? input.llm?.byok?.provider ?? null : null,
+    byokProvider: isByok ? (input.llm?.byok?.provider ?? null) : null,
     ...(isByok ? { byokModelId: input.llm?.byokModelId ?? null } : {}),
     ...(isByok ? { credentialId: input.llm?.credentialId ?? null } : {}),
     thinkingMode: input.llm?.thinking?.mode ?? null,
@@ -133,13 +140,7 @@ export async function recordGatewayOperationEvent(input: {
   feature: string;
   operation: string;
   modelKind?:
-    | "chat"
-    | "rerank"
-    | "embedding"
-    | "asr"
-    | "tts"
-    | "vision"
-    | "video";
+    "chat" | "rerank" | "embedding" | "asr" | "tts" | "vision" | "video";
   modelAlias?: string | null;
   profileAlias?: string | null;
   llm?: LlmExecutionConfig;
@@ -166,9 +167,8 @@ export async function recordGatewayOperationEvent(input: {
   });
 
   try {
-    const { recordCompletedGeneration } = await import(
-      "../llm-observability/writer"
-    );
+    const { recordCompletedGeneration } =
+      await import("../llm-observability/writer");
 
     const now = new Date();
     const latencyMs = input.latencyMs ?? 0;
@@ -184,8 +184,7 @@ export async function recordGatewayOperationEvent(input: {
       feature: input.feature,
       operation: input.operation,
       modelAlias: observedIdentity.modelAlias,
-      provider:
-        typeof gateway.provider === "string" ? gateway.provider : null,
+      provider: typeof gateway.provider === "string" ? gateway.provider : null,
       providerModel: input.llm?.providerModel ?? null,
       executionMode:
         typeof gateway.executionMode === "string"
@@ -241,13 +240,7 @@ export function buildGatewayRequestMetadata(input: {
   feature: string;
   operation: string;
   modelKind?:
-    | "chat"
-    | "rerank"
-    | "embedding"
-    | "asr"
-    | "tts"
-    | "vision"
-    | "video";
+    "chat" | "rerank" | "embedding" | "asr" | "tts" | "vision" | "video";
   modelAlias?: string | null;
   profileAlias?: string | null;
   /**
