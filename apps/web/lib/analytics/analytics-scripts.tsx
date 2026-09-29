@@ -24,8 +24,10 @@ export function AnalyticsScripts({
     <>
       {config.gtmId ? <GoogleTagManager gtmId={config.gtmId} /> : null}
       {config.umami ? (
+        // Not id="umami": the id would become window.umami, and the tracker
+        // then skips installing track/identify, dropping every custom event.
         <Script
-          id="umami"
+          id="umami-script"
           src={config.umami.scriptUrl}
           data-website-id={config.umami.websiteId}
           strategy="afterInteractive"
