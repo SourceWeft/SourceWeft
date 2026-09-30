@@ -18,6 +18,7 @@ import {
 import type { MessageRenderBlock, PreparedThreadTurn } from "../turn/types";
 import { createThreadStreamErrorMessage } from "../stream/error";
 import { toSseData } from "../stream/helpers";
+import { createDeltaCoalescer } from "./sse-coalescer";
 import { ContentThreadStreamService } from "../stream/service";
 import { ContentThreadTurnService } from "../turn/service";
 import {
@@ -73,7 +74,6 @@ type DurableChatRunServiceAppendRunEvent =
   typeof durableChatRunService.appendRunEvent;
 type DurableChatRunServiceFinishRun = typeof durableChatRunService.finishRun;
 
-const STREAM_APPEND_TEXT_DELTA_FLUSH_MS = 80;
 const ASSISTANT_SNAPSHOT_FLUSH_MS = 500;
 const TOOL_CONFIRMATION_FINISH_REASON = "tool_confirmation_requested";
 // Fallback cadence for detecting a cancel the pub/sub delivery may have missed
@@ -257,12 +257,6 @@ function serializeSsePayload(payload: Record<string, unknown>) {
 
 function isClientCancelledRun(run: ChatThreadRunRecord | null) {
   return run?.status === "cancel_requested" || run?.status === "cancelled";
-}
-
-function isTextDeltaPayload(
-  payload: Record<string, unknown> | null,
-): payload is Record<string, unknown> & { type: "text-delta"; delta: string } {
-  return payload?.type === "text-delta" && typeof payload.delta === "string";
 }
 
 function mergeToolCall(existing: unknown[], next: unknown) {
@@ -1596,8 +1590,6 @@ export async function processThreadChatRunJob(
   let terminalErrorMessage: string | null = null;
   let assistantMessagePersisted = false;
   let lastAssistantSnapshotFlushAt = 0;
-  let pendingTextDeltaPayload: Record<string, unknown> | null = null;
-  let pendingTextDeltaStartedAt = 0;
 
   const maybeFlushAssistantSnapshot = async (force = false) => {
     if (
@@ -1642,46 +1634,28 @@ export async function processThreadChatRunJob(
   const heartbeat = async () =>
     applyRunProgress(await durableChatRunService.heartbeat(run));
 
-  const flushPendingTextDelta = async () => {
-    if (!pendingTextDeltaPayload) {
-      return;
-    }
+  // Streamed text and reasoning deltas are persisted in windows, not one round
+  // trip per token: every appended event rewrites the run snapshot, and a
+  // reasoning model emits over a thousand deltas in seconds.
+  const deltaCoalescer = createDeltaCoalescer({
+    flush: async (payload) => {
+      await heartbeat();
+      await durableChatRunService.appendRunEvent({
+        run,
+        payload: serializeSsePayload(payload),
+        snapshot,
+      });
+    },
+  });
+  const flushPendingDelta = () => deltaCoalescer.flush();
 
-    await heartbeat();
-    await durableChatRunService.appendRunEvent({
-      run,
-      payload: serializeSsePayload(pendingTextDeltaPayload),
-      snapshot,
-    });
-    pendingTextDeltaPayload = null;
-    pendingTextDeltaStartedAt = 0;
-  };
-
-  const appendEventWithTextDeltaCoalescing = async (
+  const appendEventWithDeltaCoalescing = async (
     event: string,
     payload: Record<string, unknown> | null,
   ) => {
-    if (isTextDeltaPayload(payload)) {
-      const now = Date.now();
-      const delta = payload.delta;
-      if (!pendingTextDeltaPayload) {
-        pendingTextDeltaPayload = { ...payload };
-        pendingTextDeltaStartedAt = now;
-        return;
-      }
-
-      pendingTextDeltaPayload = {
-        ...pendingTextDeltaPayload,
-        delta: `${pendingTextDeltaPayload.delta ?? ""}${delta}`,
-      };
-      if (now - pendingTextDeltaStartedAt < STREAM_APPEND_TEXT_DELTA_FLUSH_MS) {
-        return;
-      }
-      await flushPendingTextDelta();
+    if (await deltaCoalescer.push(payload)) {
       return;
     }
-
-    await flushPendingTextDelta();
     await heartbeat();
     await durableChatRunService.appendRunEvent({
       run,
@@ -1889,10 +1863,10 @@ export async function processThreadChatRunJob(
       // SSE terminal events describe a committed durable outcome. Hold them
       // until the terminal CAS below; a concurrent cancellation may win it.
       if (payload?.type === "finish" || payload?.type === "error") continue;
-      await appendEventWithTextDeltaCoalescing(event, payload);
+      await appendEventWithDeltaCoalescing(event, payload);
       await maybeFlushAssistantSnapshot(false);
     }
-    await flushPendingTextDelta();
+    await flushPendingDelta();
     await maybeFlushAssistantSnapshot(true);
 
     const thread =
@@ -2138,8 +2112,8 @@ export async function processThreadChatRunJob(
         assistantMessageId: current?.assistantMessageId ?? assistantMessageId,
       };
     }
-    await flushPendingTextDelta().catch((flushError: unknown) => {
-      logger.warn("Failed to flush pending thread run text delta after error", {
+    await flushPendingDelta().catch((flushError: unknown) => {
+      logger.warn("Failed to flush pending thread run delta after error", {
         runId: run.id,
         workspaceId: run.workspaceId,
         threadId: run.threadId,
