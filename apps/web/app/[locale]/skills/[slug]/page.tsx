@@ -657,8 +657,8 @@ export default async function PublicSkillDetailPage({
             four cells stack in DOM order: title, install, tabs and content,
             details.
           */}
-        <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_320px] lg:grid-rows-[max-content_auto_1fr] lg:items-start">
-          <div className="min-w-0 lg:col-start-1 lg:row-start-1">
+        <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_320px] lg:grid-rows-[max-content_1fr] lg:items-start">
+          <div className="order-1 min-w-0 lg:order-none lg:col-start-1 lg:row-start-1">
             <div className="flex items-start gap-4">
               <SkillTile
                 logo={skill.logo}
@@ -728,47 +728,97 @@ export default async function PublicSkillDetailPage({
             </div>
           </div>
 
-          <aside className="rounded-xl border border-zinc-300 bg-white/70 p-5 lg:col-start-2 lg:row-span-2 lg:row-start-1 dark:border-white/10 dark:bg-white/[0.04]">
-            <dl className="grid grid-cols-2 gap-4 text-sm">
-              {facts.map(([label, value]) => (
-                <div className="min-w-0" key={label}>
-                  <dt className="text-xs text-zinc-500">{label}</dt>
-                  <dd className="mt-1 truncate font-medium">{value}</dd>
-                </div>
-              ))}
-            </dl>
-            <InstallBox
-              agentPrompt={agentPrompt}
-              cliInstallCommand={cliInstallCommand}
-              installHref={installHref}
-            />
-            <div className="mt-4 flex flex-wrap gap-x-4 gap-y-2 text-sm">
-              {repoUrl ? (
-                <SkillExternalLink href={repoUrl}>
-                  {t("detail.repository")}
-                </SkillExternalLink>
+          {/*
+            The right column is one element from `lg` up, so the details rail
+            follows the install card whatever their heights. On phones the
+            wrapper dissolves (`contents`) and `order` puts the tabs and
+            content between the card and the details, as before.
+          */}
+          <div className="contents lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:block lg:space-y-8 lg:self-stretch">
+            <aside className="order-2 rounded-xl border border-zinc-300 bg-white/70 p-5 lg:order-none dark:border-white/10 dark:bg-white/[0.04]">
+              <dl className="grid grid-cols-2 gap-4 text-sm">
+                {facts.map(([label, value]) => (
+                  <div className="min-w-0" key={label}>
+                    <dt className="text-xs text-zinc-500">{label}</dt>
+                    <dd className="mt-1 truncate font-medium">{value}</dd>
+                  </div>
+                ))}
+              </dl>
+              <InstallBox
+                agentPrompt={agentPrompt}
+                cliInstallCommand={cliInstallCommand}
+                installHref={installHref}
+              />
+              <div className="mt-4 flex flex-wrap gap-x-4 gap-y-2 text-sm">
+                {repoUrl ? (
+                  <SkillExternalLink href={repoUrl}>
+                    {t("detail.repository")}
+                  </SkillExternalLink>
+                ) : null}
+                {sourceUrl ? (
+                  <SkillExternalLink href={sourceUrl}>
+                    {t("detail.source")}
+                  </SkillExternalLink>
+                ) : null}
+              </div>
+              {claimHref ? (
+                <p className="mt-4 border-t border-zinc-200 pt-3 text-xs dark:border-white/10">
+                  <LocaleLink
+                    className="text-zinc-500 underline decoration-zinc-300 underline-offset-4 hover:text-zinc-950 hover:decoration-zinc-950 dark:decoration-white/20 dark:hover:text-white"
+                    href={claimHref}
+                    prefetch={false}
+                    rel="nofollow"
+                  >
+                    {t("detail.claimLink")}
+                  </LocaleLink>
+                </p>
               ) : null}
-              {sourceUrl ? (
-                <SkillExternalLink href={sourceUrl}>
-                  {t("detail.source")}
-                </SkillExternalLink>
-              ) : null}
-            </div>
-            {claimHref ? (
-              <p className="mt-4 border-t border-zinc-200 pt-3 text-xs dark:border-white/10">
-                <LocaleLink
-                  className="text-zinc-500 underline decoration-zinc-300 underline-offset-4 hover:text-zinc-950 hover:decoration-zinc-950 dark:decoration-white/20 dark:hover:text-white"
-                  href={claimHref}
-                  prefetch={false}
-                  rel="nofollow"
-                >
-                  {t("detail.claimLink")}
-                </LocaleLink>
-              </p>
-            ) : null}
-          </aside>
+            </aside>
 
-          <div className="min-w-0 lg:col-start-1 lg:row-span-2 lg:row-start-2">
+            <aside className="order-4 space-y-5 lg:order-none lg:sticky lg:top-20">
+              <section className={panelClassName}>
+                <h2 className="mb-4 text-base font-semibold">
+                  {t("detail.details.heading")}
+                </h2>
+                <dl className="space-y-3 text-sm">
+                  {details.map(([label, value]) => (
+                    <div
+                      className="flex items-start justify-between gap-4 border-b border-zinc-200 pb-3 last:border-0 last:pb-0 dark:border-white/10"
+                      key={label}
+                    >
+                      <dt className="shrink-0 text-zinc-500">{label}</dt>
+                      <dd className="min-w-0 break-all text-right font-medium">
+                        {value}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              </section>
+
+              {scanFlags.length > 0 ? (
+                <section className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm leading-6 text-amber-800 dark:border-amber-300/20 dark:bg-amber-300/10 dark:text-amber-100">
+                  <div className="mb-2 flex items-center gap-2 font-semibold">
+                    <AlertTriangle className="size-4" />
+                    {t("detail.scan.heading")}
+                  </div>
+                  <p>{t("detail.scan.body")}</p>
+                  <ul className="mt-3 list-disc space-y-1 pl-5">
+                    {scanFlags.map((flag) => (
+                      <li key={flag}>{scanFlagLabel(flag, scanFlagLabels)}</li>
+                    ))}
+                  </ul>
+                </section>
+              ) : null}
+
+              <PublicSkillRunStats
+                locale={uiLocale}
+                signedIn={authState.isSignedIn}
+                slug={skill.slug}
+              />
+            </aside>
+          </div>
+
+          <div className="order-3 min-w-0 lg:order-none lg:col-start-1 lg:row-start-2">
             <nav
               aria-label={t("detail.tabsLabel")}
               className="sticky top-14 z-40 border-b border-zinc-300 bg-[#f7f4ed]/90 backdrop-blur-[12px] dark:border-white/10 dark:bg-zinc-950/90"
@@ -905,48 +955,6 @@ export default async function PublicSkillDetailPage({
               ) : null}
             </div>
           </div>
-
-          <aside className="space-y-5 lg:sticky lg:top-20 lg:col-start-2 lg:row-start-3 lg:self-start">
-            <section className={panelClassName}>
-              <h2 className="mb-4 text-base font-semibold">
-                {t("detail.details.heading")}
-              </h2>
-              <dl className="space-y-3 text-sm">
-                {details.map(([label, value]) => (
-                  <div
-                    className="flex items-start justify-between gap-4 border-b border-zinc-200 pb-3 last:border-0 last:pb-0 dark:border-white/10"
-                    key={label}
-                  >
-                    <dt className="shrink-0 text-zinc-500">{label}</dt>
-                    <dd className="min-w-0 break-all text-right font-medium">
-                      {value}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-            </section>
-
-            {scanFlags.length > 0 ? (
-              <section className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm leading-6 text-amber-800 dark:border-amber-300/20 dark:bg-amber-300/10 dark:text-amber-100">
-                <div className="mb-2 flex items-center gap-2 font-semibold">
-                  <AlertTriangle className="size-4" />
-                  {t("detail.scan.heading")}
-                </div>
-                <p>{t("detail.scan.body")}</p>
-                <ul className="mt-3 list-disc space-y-1 pl-5">
-                  {scanFlags.map((flag) => (
-                    <li key={flag}>{scanFlagLabel(flag, scanFlagLabels)}</li>
-                  ))}
-                </ul>
-              </section>
-            ) : null}
-
-            <PublicSkillRunStats
-              locale={uiLocale}
-              signedIn={authState.isSignedIn}
-              slug={skill.slug}
-            />
-          </aside>
         </div>
       </div>
 
