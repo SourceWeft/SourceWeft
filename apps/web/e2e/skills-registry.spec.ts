@@ -1510,6 +1510,112 @@ test("E13 a many-skill repository indexes every skill, and chat installs just th
     .toEqual(["gh-obra-superpowers-test-driven-development"]);
 });
 
+// A skill anyone can see on the public market — imported, published, listed —
+// and not installed in the owner's workspace, whatever the import did.
+async function listedSkill(page: Page) {
+  const ws = await login(page);
+  const item = (await submit(page)).skills[0]!;
+  await publish(item);
+  const skill = await skillIdOf(page, ws, item.slug!);
+  const listed = await admin.post(
+    `/v1/skills/registry/admin/skills/${skill.skillId}/list`,
+    { data: {} },
+  );
+  expect(listed.status(), await listed.text()).toBe(200);
+  await uninstall(page, ws, (s) => s.slug === item.slug);
+  return { ws, slug: item.slug! };
+}
+// A chat turn runs while the composer shows its Stop button. A real model's
+// answer has taken over four minutes here, so the wait is generous.
+async function turnFinished(page: Page) {
+  const stop = page.getByTitle("Stop", { exact: true });
+  await expect(stop).toBeVisible({ timeout: 60_000 });
+  await expect(stop).toBeHidden({ timeout: 420_000 });
+}
+
+// What a visitor copies from a skill's public page, pasted into SourceWeft's
+// own chat: the prompt that also works in Claude Code or Codex. It asks the
+// agent to show the facts and wait for an OK, so the install comes on the
+// second turn, by the agent, and lands switched on.
+test("E24 the skill page's agent prompt, pasted into chat, installs that skill after the user's OK", async ({
+  page,
+  browser,
+}) => {
+  test.setTimeout(1_200_000);
+  test.skip(!chatModelConfigured(), CHAT_BLOCKED);
+  const { ws, slug } = await listedSkill(page);
+  const installed = async () =>
+    (await installedSkills(page, ws)).find((item) => item.slug === slug);
+
+  const visitor = await browser.newContext({ baseURL: web });
+  let prompt: string;
+  try {
+    const publicPage = await visitor.newPage();
+    await publicPage.goto(`/skills/${slug}`);
+    const panel = publicPage.getByRole("tabpanel");
+    await expect(panel).toContainText(`/skills/${slug}/install.md`, {
+      timeout: 45_000,
+    });
+    prompt = (await panel.locator("p").first().innerText()).trim();
+  } finally {
+    await visitor.close();
+  }
+  expect(prompt).toContain(`${web}/skills/${slug}/install.md`);
+
+  await say(page, prompt);
+  await turnFinished(page);
+  expect(
+    await installed(),
+    "the prompt asks the agent to wait for the user's OK before installing",
+  ).toBeUndefined();
+
+  const editor = page
+    .getByRole("textbox", {
+      name: "Message your documents, links, or connected tools...",
+    })
+    .filter({ visible: true });
+  await editor.fill("OK, go ahead and install it.");
+  await editor.press("Enter");
+  await expect
+    .poll(async () => (await installed())?.installedVia, {
+      timeout: 420_000,
+      intervals: [2000],
+    })
+    .toBe("agent");
+  expect((await installed())?.enabled).toBe(true);
+  await expect(page.getByText("Install Skill", { exact: true })).toBeVisible({
+    timeout: 120_000,
+  });
+});
+
+// The page's main button: sign in (already done here), land on the skill in
+// the dashboard, confirm once, installed.
+test("E25 Add to SourceWeft on the public page installs the skill after one confirmation", async ({
+  page,
+}) => {
+  const { ws, slug } = await listedSkill(page);
+  await page.goto(`/skills/${slug}`);
+  await page.getByRole("link", { name: "Add to SourceWeft" }).first().click();
+  await expect(page).toHaveURL(new RegExp(`/dashboard/skills/${slug}`), {
+    timeout: 45_000,
+  });
+  const confirm = page.getByRole("region", { name: "Confirm install" });
+  await expect(confirm).toBeVisible({ timeout: 45_000 });
+  // It asks; it never installs by itself.
+  expect(
+    (await installedSkills(page, ws)).some((item) => item.slug === slug),
+  ).toBe(false);
+  await confirm.getByRole("button", { name: "Install", exact: true }).click();
+  await expect
+    .poll(
+      async () =>
+        (await installedSkills(page, ws)).find((item) => item.slug === slug)
+          ?.enabled,
+      { timeout: 60_000, intervals: [1000] },
+    )
+    .toBe(true);
+});
+
 // A skill's own files, really inside the cloud sandbox. The model is asked for
 // the sha256 of the skill's script as computed IN the sandbox; it cannot guess
 // a digest, so a match with the hash recorded at ingest proves both that the
