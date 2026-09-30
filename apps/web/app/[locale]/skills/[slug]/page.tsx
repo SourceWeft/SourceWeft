@@ -335,9 +335,9 @@ function InstallBox({
             tabsLabel: t("options.tabsLabel"),
             agent: t("options.agent"),
             terminal: t("options.terminal"),
-            agentLead: t("options.agentLead"),
-            terminalLead: t("options.terminalLead"),
             copy: t("copy"),
+            expand: t("options.expand"),
+            collapse: t("options.collapse"),
           }}
         />
       ) : null}
@@ -619,115 +619,123 @@ export default async function PublicSkillDetailPage({
       <JsonLd data={breadcrumbJsonLd} />
       <SourceWeftHeader authState={authState} />
 
-      <section className="relative overflow-hidden border-b border-zinc-300 dark:border-white/10">
-        <div
-          aria-hidden
-          className="absolute inset-0 bg-[linear-gradient(rgba(24,24,27,0.055)_1px,transparent_1px),linear-gradient(90deg,rgba(24,24,27,0.055)_1px,transparent_1px)] bg-[size:42px_42px] dark:bg-[linear-gradient(rgba(255,255,255,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.045)_1px,transparent_1px)]"
-        />
-        <div
-          className={`relative mx-auto pb-8 pt-24 ${marketingContainerClassName}`}
+      <div className={`mx-auto pb-10 pt-24 ${marketingContainerClassName}`}>
+        <nav
+          aria-label={t("breadcrumb.label")}
+          className="mb-8 flex min-w-0 items-center gap-1.5 text-sm text-zinc-500 dark:text-zinc-400"
         >
-          <nav
-            aria-label={t("breadcrumb.label")}
-            className="mb-8 flex min-w-0 items-center gap-1.5 text-sm text-zinc-500 dark:text-zinc-400"
+          <LocaleLink
+            className="shrink-0 hover:text-zinc-950 dark:hover:text-white"
+            href="/skills"
           >
-            <LocaleLink
-              className="shrink-0 hover:text-zinc-950 dark:hover:text-white"
-              href="/skills"
-            >
-              {t("breadcrumb.skills")}
-            </LocaleLink>
-            {primaryCategory ? (
-              <>
-                <ChevronRight className="size-3.5 shrink-0" />
-                <LocaleLink
-                  className="shrink-0 hover:text-zinc-950 dark:hover:text-white"
-                  href={skillCategoryPath(primaryCategory)}
-                >
-                  {skillCategoryLabel(primaryCategory, categoryNames)}
-                </LocaleLink>
-              </>
-            ) : null}
-            <ChevronRight className="size-3.5 shrink-0" />
-            <span className="truncate text-zinc-950 dark:text-white">
-              {skill.slug}
-            </span>
-          </nav>
+            {t("breadcrumb.skills")}
+          </LocaleLink>
+          {primaryCategory ? (
+            <>
+              <ChevronRight className="size-3.5 shrink-0" />
+              <LocaleLink
+                className="shrink-0 hover:text-zinc-950 dark:hover:text-white"
+                href={skillCategoryPath(primaryCategory)}
+              >
+                {skillCategoryLabel(primaryCategory, categoryNames)}
+              </LocaleLink>
+            </>
+          ) : null}
+          <ChevronRight className="size-3.5 shrink-0" />
+          <span className="truncate text-zinc-950 dark:text-white">
+            {skill.slug}
+          </span>
+        </nav>
 
-          <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
-            <div className="min-w-0">
-              <div className="flex items-start gap-4">
-                <SkillTile
-                  logo={skill.logo}
-                  size="lg"
-                  verified={skill.verified}
-                />
-                <div className="min-w-0">
-                  <h1 className="break-words text-4xl font-semibold leading-tight tracking-tight sm:text-5xl">
-                    {skill.displayName}
-                  </h1>
-                  <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-zinc-500 dark:text-zinc-400">
-                    {skill.author ? (
-                      <span>
-                        {t("detail.by")}{" "}
-                        <span className="font-medium text-zinc-700 dark:text-zinc-300">
-                          {skill.author}
-                        </span>
+        {/*
+            One grid for the head and the body, so the right column is one
+            rail. The first row is sized by the title alone (`max-content`):
+            the install card spans two rows, and whatever it needs beyond the
+            title flows into the second row, where the tabs and content already
+            run, instead of stretching the title row and leaving it empty. The
+            details rail follows the card in the third row. Below `lg` the
+            four cells stack in DOM order: title, install, tabs and content,
+            details.
+          */}
+        <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_320px] lg:grid-rows-[max-content_1fr] lg:items-start">
+          <div className="order-1 min-w-0 lg:order-none lg:col-start-1 lg:row-start-1">
+            <div className="flex items-start gap-4">
+              <SkillTile
+                logo={skill.logo}
+                size="lg"
+                verified={skill.verified}
+              />
+              <div className="min-w-0">
+                <h1 className="break-words text-4xl font-semibold leading-tight tracking-tight sm:text-5xl">
+                  {skill.displayName}
+                </h1>
+                <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-zinc-500 dark:text-zinc-400">
+                  {skill.author ? (
+                    <span>
+                      {t("detail.by")}{" "}
+                      <span className="font-medium text-zinc-700 dark:text-zinc-300">
+                        {skill.author}
                       </span>
-                    ) : null}
-                    <span>{formatSkillVersion(skill.version)}</span>
-                    <span>{license}</span>
-                    {skill.installCount > 0 ? (
-                      <span>
-                        {t("detail.workspaces", {
-                          compact: formatCompactCount(skill.installCount),
-                          count: skill.installCount,
-                        })}
-                      </span>
-                    ) : null}
-                    {stars > 0 ? (
-                      <span>
-                        {t("detail.stars", {
-                          count: formatCompactCount(stars),
-                        })}
-                      </span>
-                    ) : null}
-                    {listed ? (
-                      <span>{t("detail.listed", { date: listed })}</span>
-                    ) : null}
-                    {updated ? (
-                      <span>{t("detail.updated", { date: updated })}</span>
-                    ) : null}
-                    {pushed ? (
-                      <span>
-                        {t("detail.repoPushed", { relative: pushed })}
-                      </span>
-                    ) : null}
-                  </p>
-                </div>
-              </div>
-              <p className="mt-6 max-w-3xl text-lg leading-8 text-zinc-600 dark:text-zinc-300">
-                {skill.description}
-              </p>
-              <div className="mt-6 flex flex-wrap gap-2">
-                {skill.featured ? <SkillFeaturedBadge /> : null}
-                {skill.verified ? <SkillVerifiedBadge /> : null}
-                {skill.claimed ? <SkillClaimedBadge /> : null}
-                {skill.repoArchived ? <SkillArchivedBadge /> : null}
-                <SkillCapabilityBadge capability={skill.capability} />
-                {skill.categories.map((category) => (
-                  <LocaleLink
-                    className="inline-flex h-6 items-center rounded-full border border-zinc-300 bg-white/70 px-2.5 text-xs font-medium text-zinc-600 transition-colors hover:border-zinc-950 hover:text-zinc-950 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-300 dark:hover:border-white/40 dark:hover:text-white"
-                    href={skillCategoryPath(category)}
-                    key={category}
-                  >
-                    {skillCategoryLabel(category, categoryNames)}
-                  </LocaleLink>
-                ))}
+                    </span>
+                  ) : null}
+                  <span>{formatSkillVersion(skill.version)}</span>
+                  <span>{license}</span>
+                  {skill.installCount > 0 ? (
+                    <span>
+                      {t("detail.workspaces", {
+                        compact: formatCompactCount(skill.installCount),
+                        count: skill.installCount,
+                      })}
+                    </span>
+                  ) : null}
+                  {stars > 0 ? (
+                    <span>
+                      {t("detail.stars", {
+                        count: formatCompactCount(stars),
+                      })}
+                    </span>
+                  ) : null}
+                  {listed ? (
+                    <span>{t("detail.listed", { date: listed })}</span>
+                  ) : null}
+                  {updated ? (
+                    <span>{t("detail.updated", { date: updated })}</span>
+                  ) : null}
+                  {pushed ? (
+                    <span>{t("detail.repoPushed", { relative: pushed })}</span>
+                  ) : null}
+                </p>
               </div>
             </div>
+            <p className="mt-6 max-w-3xl text-lg leading-8 text-zinc-600 dark:text-zinc-300">
+              {skill.description}
+            </p>
+            <div className="mt-6 flex flex-wrap gap-2">
+              {skill.featured ? <SkillFeaturedBadge /> : null}
+              {skill.verified ? <SkillVerifiedBadge /> : null}
+              {skill.claimed ? <SkillClaimedBadge /> : null}
+              {skill.repoArchived ? <SkillArchivedBadge /> : null}
+              <SkillCapabilityBadge capability={skill.capability} />
+              {skill.categories.map((category) => (
+                <LocaleLink
+                  className="inline-flex h-6 items-center rounded-full border border-zinc-300 bg-white/70 px-2.5 text-xs font-medium text-zinc-600 transition-colors hover:border-zinc-950 hover:text-zinc-950 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-300 dark:hover:border-white/40 dark:hover:text-white"
+                  href={skillCategoryPath(category)}
+                  key={category}
+                >
+                  {skillCategoryLabel(category, categoryNames)}
+                </LocaleLink>
+              ))}
+            </div>
+          </div>
 
-            <aside className="rounded-xl border border-zinc-300 bg-white/70 p-5 dark:border-white/10 dark:bg-white/[0.04]">
+          {/*
+            The right column is one element from `lg` up, so the details rail
+            follows the install card whatever their heights. On phones the
+            wrapper dissolves (`contents`) and `order` puts the tabs and
+            content between the card and the details, as before.
+          */}
+          <div className="contents lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:block lg:space-y-8 lg:self-stretch">
+            <aside className="order-2 rounded-xl border border-zinc-300 bg-white/70 p-5 lg:order-none dark:border-white/10 dark:bg-white/[0.04]">
               <dl className="grid grid-cols-2 gap-4 text-sm">
                 {facts.map(([label, value]) => (
                   <div className="min-w-0" key={label}>
@@ -766,192 +774,188 @@ export default async function PublicSkillDetailPage({
                 </p>
               ) : null}
             </aside>
-          </div>
-        </div>
-      </section>
 
-      <nav
-        aria-label={t("detail.tabsLabel")}
-        className="sticky top-14 z-40 border-b border-zinc-300 bg-[#f7f4ed]/90 backdrop-blur-[12px] dark:border-white/10 dark:bg-zinc-950/90"
-      >
-        <div
-          className={`mx-auto flex gap-6 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${marketingContainerClassName}`}
-        >
-          {tabs.map(([id, label]) => (
-            <LocaleLink
-              aria-current={tab === id ? "page" : undefined}
-              className={cn(
-                "shrink-0 border-b-2 py-3 text-sm transition-colors",
-                tab === id
-                  ? "border-zinc-950 font-medium text-zinc-950 dark:border-white dark:text-white"
-                  : "border-transparent text-zinc-500 hover:border-zinc-950 hover:text-zinc-950 dark:hover:border-white dark:hover:text-white",
-              )}
-              href={skillTabHref(skill.slug, id)}
-              key={id}
-              scroll={false}
-            >
-              {label}
-            </LocaleLink>
-          ))}
-        </div>
-      </nav>
+            <aside className="order-4 space-y-5 lg:order-none lg:sticky lg:top-20">
+              <section className={panelClassName}>
+                <h2 className="mb-4 text-base font-semibold">
+                  {t("detail.details.heading")}
+                </h2>
+                <dl className="space-y-3 text-sm">
+                  {details.map(([label, value]) => (
+                    <div
+                      className="flex items-start justify-between gap-4 border-b border-zinc-200 pb-3 last:border-0 last:pb-0 dark:border-white/10"
+                      key={label}
+                    >
+                      <dt className="shrink-0 text-zinc-500">{label}</dt>
+                      <dd className="min-w-0 break-all text-right font-medium">
+                        {value}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              </section>
 
-      <div
-        className={`mx-auto grid gap-8 py-10 lg:grid-cols-[minmax(0,1fr)_320px] ${marketingContainerClassName}`}
-      >
-        <div className="min-w-0">
-          {tab === "skill" ? (
-            <PublicSkillOverview
-              locale={uiLocale}
-              signedIn={authState.isSignedIn}
-              slug={skill.slug}
-            />
-          ) : null}
-          {tab === "skill" ? (
-            skillMd ? (
-              <article className={`${panelClassName} min-w-0 sm:p-7`}>
-                <UntrustedMarkdown
-                  imagePlaceholder={t("detail.imagePlaceholder")}
-                  mode="skill"
-                >
-                  {skillMd}
-                </UntrustedMarkdown>
-              </article>
-            ) : (
-              <p className={`${panelClassName} text-sm text-zinc-500`}>
-                {t("detail.skillMdMissing")}
-              </p>
-            )
-          ) : null}
-
-          {tab === "files" ? <FilesTab files={files} /> : null}
-
-          {tab === "versions" ? (
-            <VersionsTab repoUrl={repoUrl} versions={versions} />
-          ) : null}
-
-          {tab === "install" ? (
-            <div className={panelClassName}>
-              <h2 className="text-lg font-semibold">
-                {t("detail.install.heading")}
-              </h2>
-              <ol className="mt-3 list-decimal space-y-1.5 pl-5 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-                {(t.raw("detail.install.steps") as string[]).map((step) => (
-                  <li key={step}>{step}</li>
-                ))}
-              </ol>
-              {skill.capability ? (
-                <p className="mt-4 rounded-lg bg-zinc-100 p-3 text-xs leading-5 text-zinc-600 dark:bg-white/[0.04] dark:text-zinc-400">
-                  {skill.capability === "executable"
-                    ? t("detail.install.executableNote")
-                    : t("detail.install.promptOnlyNote")}
-                </p>
+              {scanFlags.length > 0 ? (
+                <section className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm leading-6 text-amber-800 dark:border-amber-300/20 dark:bg-amber-300/10 dark:text-amber-100">
+                  <div className="mb-2 flex items-center gap-2 font-semibold">
+                    <AlertTriangle className="size-4" />
+                    {t("detail.scan.heading")}
+                  </div>
+                  <p>{t("detail.scan.body")}</p>
+                  <ul className="mt-3 list-disc space-y-1 pl-5">
+                    {scanFlags.map((flag) => (
+                      <li key={flag}>{scanFlagLabel(flag, scanFlagLabels)}</li>
+                    ))}
+                  </ul>
+                </section>
               ) : null}
-              <InstallButton
-                className="mt-5 max-w-sm"
-                installHref={installHref}
+
+              <PublicSkillRunStats
+                locale={uiLocale}
+                signedIn={authState.isSignedIn}
+                slug={skill.slug}
               />
-              {authState.isSignedIn ? null : (
-                <p className="mt-3 text-xs text-zinc-500">
-                  {t("detail.install.signedOutNote")}
-                </p>
-              )}
-              {cliInstallCommand ? (
-                <>
-                  <div className="mt-8 border-t border-zinc-200 pt-6 dark:border-white/10">
-                    <h3 className="text-base font-semibold">
-                      {t("detail.install.agent.heading")}
-                    </h3>
-                    <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-                      {t("detail.install.agent.lead")}
-                    </p>
-                    <CommandLine command={agentPrompt} prose />
-                    <p className="mt-2 text-xs leading-5 text-zinc-500">
-                      {/* Not a LocaleLink: the guide is one English file, with no locale prefix. */}
-                      <a
-                        className="underline decoration-zinc-300 underline-offset-4 hover:text-zinc-950 hover:decoration-zinc-950 dark:decoration-white/20 dark:hover:text-white"
-                        href={skillInstallGuidePath(skill.slug)}
-                        rel="nofollow"
-                      >
-                        {t("detail.install.agent.guideLink")}
-                      </a>
-                    </p>
-                  </div>
-                  <div className="mt-8 border-t border-zinc-200 pt-6 dark:border-white/10">
-                    <h3 className="text-base font-semibold">
-                      {t("detail.install.cli.heading")}
-                    </h3>
-                    <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-                      {t("detail.install.cli.lead")}
-                    </p>
-                    <CommandLine command={cliInstallCommand} />
-                    <p className="mt-2 text-xs leading-5 text-zinc-500">
-                      {t("detail.install.cli.agentHint")}
-                    </p>
-                    {skill.capability === "executable" ? (
-                      <p className="mt-3 text-xs leading-5 text-amber-700 dark:text-amber-400">
-                        {t("detail.install.cli.executableNote")}
-                      </p>
-                    ) : null}
-                  </div>
-                </>
+            </aside>
+          </div>
+
+          <div className="order-3 min-w-0 lg:order-none lg:col-start-1 lg:row-start-2">
+            <nav
+              aria-label={t("detail.tabsLabel")}
+              className="sticky top-14 z-40 border-b border-zinc-300 bg-[#f7f4ed]/90 backdrop-blur-[12px] dark:border-white/10 dark:bg-zinc-950/90"
+            >
+              <div className="flex gap-6 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                {tabs.map(([id, label]) => (
+                  <LocaleLink
+                    aria-current={tab === id ? "page" : undefined}
+                    className={cn(
+                      "shrink-0 border-b-2 py-3 text-sm transition-colors",
+                      tab === id
+                        ? "border-zinc-950 font-medium text-zinc-950 dark:border-white dark:text-white"
+                        : "border-transparent text-zinc-500 hover:border-zinc-950 hover:text-zinc-950 dark:hover:border-white dark:hover:text-white",
+                    )}
+                    href={skillTabHref(skill.slug, id)}
+                    key={id}
+                    scroll={false}
+                  >
+                    {label}
+                  </LocaleLink>
+                ))}
+              </div>
+            </nav>
+
+            <div className="min-w-0 pt-8">
+              {tab === "skill" ? (
+                <PublicSkillOverview
+                  locale={uiLocale}
+                  signedIn={authState.isSignedIn}
+                  slug={skill.slug}
+                />
               ) : null}
-              {localInstallCommand ? (
-                <div className="mt-8 border-t border-zinc-200 pt-6 dark:border-white/10">
-                  <h3 className="text-base font-semibold">
-                    {t("detail.install.upstream.heading")}
-                  </h3>
-                  <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-                    {t("detail.install.upstream.lead")}
+              {tab === "skill" ? (
+                skillMd ? (
+                  <article className={`${panelClassName} min-w-0 sm:p-7`}>
+                    <UntrustedMarkdown
+                      imagePlaceholder={t("detail.imagePlaceholder")}
+                      mode="skill"
+                    >
+                      {skillMd}
+                    </UntrustedMarkdown>
+                  </article>
+                ) : (
+                  <p className={`${panelClassName} text-sm text-zinc-500`}>
+                    {t("detail.skillMdMissing")}
                   </p>
-                  <CommandLine command={localInstallCommand} />
+                )
+              ) : null}
+
+              {tab === "files" ? <FilesTab files={files} /> : null}
+
+              {tab === "versions" ? (
+                <VersionsTab repoUrl={repoUrl} versions={versions} />
+              ) : null}
+
+              {tab === "install" ? (
+                <div className={panelClassName}>
+                  <h2 className="text-lg font-semibold">
+                    {t("detail.install.heading")}
+                  </h2>
+                  <ol className="mt-3 list-decimal space-y-1.5 pl-5 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+                    {(t.raw("detail.install.steps") as string[]).map((step) => (
+                      <li key={step}>{step}</li>
+                    ))}
+                  </ol>
+                  {skill.capability ? (
+                    <p className="mt-4 rounded-lg bg-zinc-100 p-3 text-xs leading-5 text-zinc-600 dark:bg-white/[0.04] dark:text-zinc-400">
+                      {skill.capability === "executable"
+                        ? t("detail.install.executableNote")
+                        : t("detail.install.promptOnlyNote")}
+                    </p>
+                  ) : null}
+                  <InstallButton
+                    className="mt-5 max-w-sm"
+                    installHref={installHref}
+                  />
+                  {authState.isSignedIn ? null : (
+                    <p className="mt-3 text-xs text-zinc-500">
+                      {t("detail.install.signedOutNote")}
+                    </p>
+                  )}
+                  {cliInstallCommand ? (
+                    <>
+                      <div className="mt-8 border-t border-zinc-200 pt-6 dark:border-white/10">
+                        <h3 className="text-base font-semibold">
+                          {t("detail.install.agent.heading")}
+                        </h3>
+                        <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+                          {t("detail.install.agent.lead")}
+                        </p>
+                        <CommandLine command={agentPrompt} prose />
+                        <p className="mt-2 text-xs leading-5 text-zinc-500">
+                          {/* Not a LocaleLink: the guide is one English file, with no locale prefix. */}
+                          <a
+                            className="underline decoration-zinc-300 underline-offset-4 hover:text-zinc-950 hover:decoration-zinc-950 dark:decoration-white/20 dark:hover:text-white"
+                            href={skillInstallGuidePath(skill.slug)}
+                            rel="nofollow"
+                          >
+                            {t("detail.install.agent.guideLink")}
+                          </a>
+                        </p>
+                      </div>
+                      <div className="mt-8 border-t border-zinc-200 pt-6 dark:border-white/10">
+                        <h3 className="text-base font-semibold">
+                          {t("detail.install.cli.heading")}
+                        </h3>
+                        <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+                          {t("detail.install.cli.lead")}
+                        </p>
+                        <CommandLine command={cliInstallCommand} />
+                        <p className="mt-2 text-xs leading-5 text-zinc-500">
+                          {t("detail.install.cli.agentHint")}
+                        </p>
+                        {skill.capability === "executable" ? (
+                          <p className="mt-3 text-xs leading-5 text-amber-700 dark:text-amber-400">
+                            {t("detail.install.cli.executableNote")}
+                          </p>
+                        ) : null}
+                      </div>
+                    </>
+                  ) : null}
+                  {localInstallCommand ? (
+                    <div className="mt-8 border-t border-zinc-200 pt-6 dark:border-white/10">
+                      <h3 className="text-base font-semibold">
+                        {t("detail.install.upstream.heading")}
+                      </h3>
+                      <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+                        {t("detail.install.upstream.lead")}
+                      </p>
+                      <CommandLine command={localInstallCommand} />
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
             </div>
-          ) : null}
+          </div>
         </div>
-
-        <aside className="space-y-5 lg:sticky lg:top-32 lg:self-start">
-          <section className={panelClassName}>
-            <h2 className="mb-4 text-base font-semibold">
-              {t("detail.details.heading")}
-            </h2>
-            <dl className="space-y-3 text-sm">
-              {details.map(([label, value]) => (
-                <div
-                  className="flex items-start justify-between gap-4 border-b border-zinc-200 pb-3 last:border-0 last:pb-0 dark:border-white/10"
-                  key={label}
-                >
-                  <dt className="shrink-0 text-zinc-500">{label}</dt>
-                  <dd className="min-w-0 break-all text-right font-medium">
-                    {value}
-                  </dd>
-                </div>
-              ))}
-            </dl>
-          </section>
-
-          {scanFlags.length > 0 ? (
-            <section className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm leading-6 text-amber-800 dark:border-amber-300/20 dark:bg-amber-300/10 dark:text-amber-100">
-              <div className="mb-2 flex items-center gap-2 font-semibold">
-                <AlertTriangle className="size-4" />
-                {t("detail.scan.heading")}
-              </div>
-              <p>{t("detail.scan.body")}</p>
-              <ul className="mt-3 list-disc space-y-1 pl-5">
-                {scanFlags.map((flag) => (
-                  <li key={flag}>{scanFlagLabel(flag, scanFlagLabels)}</li>
-                ))}
-              </ul>
-            </section>
-          ) : null}
-
-          <PublicSkillRunStats
-            locale={uiLocale}
-            signedIn={authState.isSignedIn}
-            slug={skill.slug}
-          />
-        </aside>
       </div>
 
       <PublicSkillReviews

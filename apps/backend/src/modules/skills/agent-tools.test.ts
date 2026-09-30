@@ -201,8 +201,12 @@ test("search results carry the signals a choice needs", async () => {
   state.search = {
     total: 40,
     items: [
-      item("feynman", { sourceType: "builtin", installCount: 12 }),
-      item("gh-o-r-pdf", { enabled: true }),
+      item("feynman", {
+        sourceType: "builtin",
+        installCount: 12,
+        capability: "prompt-only",
+      }),
+      item("gh-o-r-pdf", { enabled: true, capability: "executable" }),
       item("gh-o-r-held", { installable: false }),
     ],
   };
@@ -210,10 +214,16 @@ test("search results carry the signals a choice needs", async () => {
   assert.match(result, /40 skills match .* the best 3/);
   assert.match(
     result,
-    /1\. feynman .*\n.*built-in, first-party.*on in 12 workspace/,
+    /1\. feynman .*\n.*built-in, first-party.*instructions only, no scripts.*on in 12 workspace/,
   );
-  assert.match(result, /gh-o-r-pdf[\s\S]*ALREADY installed and on here/);
+  // Asked "does it ship scripts?" before an install, the model must be able to
+  // answer from the search result instead of installing to find out.
+  assert.match(
+    result,
+    /gh-o-r-pdf[\s\S]*ships scripts \(they run in the sandbox when used\)[\s\S]*ALREADY installed and on here/,
+  );
   assert.match(result, /gh-o-r-held[\s\S]*HELD for review/);
+  assert.doesNotMatch(result, /gh-o-r-held[^\n]*\n[^\n]*scripts/);
 });
 
 test("re-installing something already on reports that nothing changed", async () => {

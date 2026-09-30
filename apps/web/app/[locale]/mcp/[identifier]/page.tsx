@@ -306,82 +306,83 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
       <JsonLd data={breadcrumbJsonLd} />
       <SourceWeftHeader authState={authState} />
 
-      <section className="relative overflow-hidden border-b border-zinc-300 dark:border-white/10">
-        <div
-          aria-hidden
-          className="absolute inset-0 bg-[linear-gradient(rgba(24,24,27,0.055)_1px,transparent_1px),linear-gradient(90deg,rgba(24,24,27,0.055)_1px,transparent_1px)] bg-[size:42px_42px] dark:bg-[linear-gradient(rgba(255,255,255,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.045)_1px,transparent_1px)]"
-        />
-        <div
-          className={`relative mx-auto pb-8 pt-24 ${marketingContainerClassName}`}
+      <div className={`mx-auto pb-10 pt-24 ${marketingContainerClassName}`}>
+        <nav
+          aria-label={t("breadcrumb")}
+          className="mb-8 flex min-w-0 items-center gap-1.5 text-sm text-zinc-500 dark:text-zinc-400"
         >
-          <nav
-            aria-label={t("breadcrumb")}
-            className="mb-8 flex min-w-0 items-center gap-1.5 text-sm text-zinc-500 dark:text-zinc-400"
+          <LocaleLink
+            className="shrink-0 hover:text-zinc-950 dark:hover:text-white"
+            href="/mcp"
           >
-            <LocaleLink
-              className="shrink-0 hover:text-zinc-950 dark:hover:text-white"
-              href="/mcp"
-            >
-              {t("breadcrumbServers")}
-            </LocaleLink>
-            {primaryCategory ? (
-              <>
-                <ChevronRight className="size-3.5 shrink-0" />
-                <LocaleLink
-                  className="shrink-0 hover:text-zinc-950 dark:hover:text-white"
-                  href={`/mcp?category=${encodeURIComponent(primaryCategory)}`}
-                >
-                  {mcpCategoryLabel(primaryCategory, categoryNames)}
-                </LocaleLink>
-              </>
-            ) : null}
-            <ChevronRight className="size-3.5 shrink-0" />
-            <span className="truncate text-zinc-950 dark:text-white">
-              {item.identifier}
-            </span>
-          </nav>
+            {t("breadcrumbServers")}
+          </LocaleLink>
+          {primaryCategory ? (
+            <>
+              <ChevronRight className="size-3.5 shrink-0" />
+              <LocaleLink
+                className="shrink-0 hover:text-zinc-950 dark:hover:text-white"
+                href={`/mcp?category=${encodeURIComponent(primaryCategory)}`}
+              >
+                {mcpCategoryLabel(primaryCategory, categoryNames)}
+              </LocaleLink>
+            </>
+          ) : null}
+          <ChevronRight className="size-3.5 shrink-0" />
+          <span className="truncate text-zinc-950 dark:text-white">
+            {item.identifier}
+          </span>
+        </nav>
 
-          <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
-            <div className="min-w-0">
-              <div className="flex items-start gap-4">
-                <McpIcon iconUrl={item.iconUrl} size="lg" trusted={trusted} />
-                <div className="min-w-0">
-                  <h1 className="text-4xl font-semibold leading-tight tracking-tight sm:text-5xl">
-                    {item.name}
-                  </h1>
-                  <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-zinc-500 dark:text-zinc-400">
-                    {providerName ? (
-                      <span className="font-medium text-zinc-700 dark:text-zinc-300">
-                        {providerName}
-                      </span>
-                    ) : null}
-                    <span>v{version.version}</span>
-                    <span>
-                      {t("updated", { date: formatDate(item.updatedAt) })}
+        {/*
+            The same shell as the skill page: one grid for head and body, the
+            first row sized by the title alone, the facts card spanning two
+            rows so its height flows into the content row, and the details
+            rail following it. Below `lg` the cells stack in DOM order.
+          */}
+        <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_320px] lg:grid-rows-[max-content_1fr] lg:items-start">
+          <div className="order-1 min-w-0 lg:order-none lg:col-start-1 lg:row-start-1">
+            <div className="flex items-start gap-4">
+              <McpIcon iconUrl={item.iconUrl} size="lg" trusted={trusted} />
+              <div className="min-w-0">
+                <h1 className="text-4xl font-semibold leading-tight tracking-tight sm:text-5xl">
+                  {item.name}
+                </h1>
+                <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-zinc-500 dark:text-zinc-400">
+                  {providerName ? (
+                    <span className="font-medium text-zinc-700 dark:text-zinc-300">
+                      {providerName}
                     </span>
-                  </p>
-                </div>
-              </div>
-              <p className="mt-6 max-w-3xl text-lg leading-8 text-zinc-600 dark:text-zinc-300">
-                {item.summary || description}
-              </p>
-              <div className="mt-6 flex flex-wrap gap-2">
-                <McpVerificationBadge item={item} />
-                <McpTransportBadge transport={manifest.transport} />
-                <McpRuntimeBadge item={item} />
-                {item.categories.map((category) => (
-                  <LocaleLink
-                    className="inline-flex h-6 items-center rounded-full border border-zinc-300 bg-white/70 px-2.5 text-xs font-medium text-zinc-600 transition-colors hover:border-zinc-950 hover:text-zinc-950 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-300 dark:hover:border-white/40 dark:hover:text-white"
-                    href={`/mcp?category=${encodeURIComponent(category)}`}
-                    key={category}
-                  >
-                    {mcpCategoryLabel(category, categoryNames)}
-                  </LocaleLink>
-                ))}
+                  ) : null}
+                  <span>v{version.version}</span>
+                  <span>
+                    {t("updated", { date: formatDate(item.updatedAt) })}
+                  </span>
+                </p>
               </div>
             </div>
+            <p className="mt-6 max-w-3xl text-lg leading-8 text-zinc-600 dark:text-zinc-300">
+              {item.summary || description}
+            </p>
+            <div className="mt-6 flex flex-wrap gap-2">
+              <McpVerificationBadge item={item} />
+              <McpTransportBadge transport={manifest.transport} />
+              <McpRuntimeBadge item={item} />
+              {item.categories.map((category) => (
+                <LocaleLink
+                  className="inline-flex h-6 items-center rounded-full border border-zinc-300 bg-white/70 px-2.5 text-xs font-medium text-zinc-600 transition-colors hover:border-zinc-950 hover:text-zinc-950 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-300 dark:hover:border-white/40 dark:hover:text-white"
+                  href={`/mcp?category=${encodeURIComponent(category)}`}
+                  key={category}
+                >
+                  {mcpCategoryLabel(category, categoryNames)}
+                </LocaleLink>
+              ))}
+            </div>
+          </div>
 
-            <aside className="rounded-xl border border-zinc-300 bg-white/70 p-5 dark:border-white/10 dark:bg-white/[0.04]">
+          {/* One right-column element from `lg` up; see the skill page. */}
+          <div className="contents lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:block lg:space-y-8 lg:self-stretch">
+            <aside className="order-2 rounded-xl border border-zinc-300 bg-white/70 p-5 lg:order-none dark:border-white/10 dark:bg-white/[0.04]">
               <dl className="grid grid-cols-2 gap-4 text-sm">
                 {[
                   [t("tools"), String(manifest.tools.length)],
@@ -424,248 +425,247 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
                 </ExternalTextLink>
               </div>
             </aside>
-          </div>
-        </div>
-      </section>
 
-      <nav
-        aria-label={t("sections")}
-        className="sticky top-14 z-40 border-b border-zinc-300 bg-[#f7f4ed]/90 backdrop-blur-[12px] dark:border-white/10 dark:bg-zinc-950/90"
-      >
-        <div
-          className={`mx-auto flex gap-6 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${marketingContainerClassName}`}
-        >
-          {sectionLinks.map(([id, label]) => (
-            <a
-              className="shrink-0 border-b-2 border-transparent py-3 text-sm text-zinc-500 transition-colors hover:border-zinc-950 hover:text-zinc-950 dark:hover:border-white dark:hover:text-white"
-              href={`#${id}`}
-              key={id}
-            >
-              {label}
-            </a>
-          ))}
-        </div>
-      </nav>
+            <aside className="order-4 space-y-5 lg:order-none lg:sticky lg:top-20">
+              <section className={panelClassName}>
+                <h2 className="mb-4 text-base font-semibold">
+                  {t("serverDetails")}
+                </h2>
+                <dl className="space-y-3 text-sm">
+                  {[
+                    [t("identifier"), item.identifier],
+                    [t("transport"), transportLabel(manifest.transport)],
+                    [t("runtime"), runtimeLabel(item)],
+                    [t("trust"), verificationLabel(item)],
+                    [
+                      t("published"),
+                      formatDate(item.publishedAt ?? item.createdAt),
+                    ],
+                  ].map(([label, value]) => (
+                    <div
+                      className="flex items-start justify-between gap-4 border-b border-zinc-200 pb-3 last:border-0 last:pb-0 dark:border-white/10"
+                      key={label}
+                    >
+                      <dt className="shrink-0 text-zinc-500">{label}</dt>
+                      <dd className="min-w-0 break-all text-right font-medium">
+                        {value}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              </section>
 
-      <div
-        className={`mx-auto grid gap-8 py-10 lg:grid-cols-[minmax(0,1fr)_320px] ${marketingContainerClassName}`}
-      >
-        <div className="min-w-0 space-y-12">
-          {hasOverview ? (
-            <section className="scroll-mt-32" id="overview">
-              <SectionHeading icon={McpBrandIcon}>
-                {t("overviewHeading")}
-              </SectionHeading>
-              {aiOverview ? (
-                <McpAiOverviewView
-                  className="last:mb-0"
-                  overview={aiOverview}
-                  requestedLocale={overviewLocale}
-                />
-              ) : null}
-              {overviewText || manifest.riskSummary ? (
-                <div
-                  className={`${panelClassName} space-y-4 divide-y divide-zinc-200 dark:divide-white/10 [&>*:not(:first-child)]:pt-4`}
-                >
-                  {overviewText ? (
-                    <p className="whitespace-pre-line text-sm leading-7 text-zinc-600 dark:text-zinc-300">
-                      {overviewText}
-                    </p>
-                  ) : null}
-                  {manifest.riskSummary ? (
-                    <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-                      <span className="font-medium text-zinc-950 dark:text-white">
-                        {t("riskSummary")}
-                      </span>
-                      {manifest.riskSummary}
-                    </p>
-                  ) : null}
+              <section className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm leading-6 text-amber-800 dark:border-amber-300/20 dark:bg-amber-300/10 dark:text-amber-100">
+                <div className="mb-2 flex items-center gap-2 font-semibold">
+                  {trusted ? (
+                    <LockKeyhole className="size-4" />
+                  ) : (
+                    <AlertTriangle className="size-4" />
+                  )}
+                  {t("securityHeading")}
                 </div>
-              ) : null}
-            </section>
-          ) : null}
+                <p>{t("securityBody")}</p>
+              </section>
+            </aside>
+          </div>
 
-          <section className="scroll-mt-32" id="installation">
-            <SectionHeading icon={KeyRound}>
-              {t("installationHeading")}
-            </SectionHeading>
-            <div className="space-y-4">
-              <div className={panelClassName}>
-                <h3 className="font-semibold">{t("inSourceWeft")}</h3>
-                <ol className="mt-3 list-decimal space-y-1.5 pl-5 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-                  <li>
-                    {t.rich("step1", {
-                      name: item.name,
-                      link: (chunks) => (
-                        <LocaleLink
-                          className="font-medium text-zinc-950 underline underline-offset-4 dark:text-white"
-                          href={installHref}
-                        >
-                          {chunks}
-                        </LocaleLink>
-                      ),
-                    })}
-                  </li>
-                  {manifest.auth.required ? (
-                    <li>
-                      {t("step2", {
-                        name: manifest.auth.displayName ?? t("step2Fallback"),
-                      })}
-                    </li>
-                  ) : null}
-                  <li>{t("step3")}</li>
-                </ol>
-                <p className="mt-4 rounded-lg bg-zinc-100 p-3 text-xs leading-5 text-zinc-600 dark:bg-white/[0.04] dark:text-zinc-400">
-                  {t("runtimeVia", {
-                    runtime: runtimeLabel(item),
-                    transport: transportLabel(manifest.transport),
-                  })}
-                  {manifest.transport === "stdio"
-                    ? t("stdioNote")
-                    : t("remoteNote")}
-                </p>
-                {manifest.auth.instructions ? (
-                  <p className="mt-3 text-xs leading-5 text-zinc-500">
-                    {manifest.auth.instructions}
-                  </p>
-                ) : null}
+          <div className="order-3 min-w-0 lg:order-none lg:col-start-1 lg:row-start-2">
+            <nav
+              aria-label={t("sections")}
+              className="sticky top-14 z-40 border-b border-zinc-300 bg-[#f7f4ed]/90 backdrop-blur-[12px] dark:border-white/10 dark:bg-zinc-950/90"
+            >
+              <div className="flex gap-6 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                {sectionLinks.map(([id, label]) => (
+                  <a
+                    className="shrink-0 border-b-2 border-transparent py-3 text-sm text-zinc-500 transition-colors hover:border-zinc-950 hover:text-zinc-950 dark:hover:border-white dark:hover:text-white"
+                    href={`#${id}`}
+                    key={id}
+                  >
+                    {label}
+                  </a>
+                ))}
               </div>
+            </nav>
 
-              {clientConfig ? (
-                <div className={panelClassName}>
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <h3 className="font-semibold">{t("otherClients")}</h3>
-                      <p className="mt-1 text-xs text-zinc-500">
-                        {t.rich("otherClientsConfig", {
-                          code: (chunks) => <code>{chunks}</code>,
+            <div className="min-w-0 space-y-12 pt-8">
+              {hasOverview ? (
+                <section className="scroll-mt-32" id="overview">
+                  <SectionHeading icon={McpBrandIcon}>
+                    {t("overviewHeading")}
+                  </SectionHeading>
+                  {aiOverview ? (
+                    <McpAiOverviewView
+                      className="last:mb-0"
+                      overview={aiOverview}
+                      requestedLocale={overviewLocale}
+                    />
+                  ) : null}
+                  {overviewText || manifest.riskSummary ? (
+                    <div
+                      className={`${panelClassName} space-y-4 divide-y divide-zinc-200 dark:divide-white/10 [&>*:not(:first-child)]:pt-4`}
+                    >
+                      {overviewText ? (
+                        <p className="whitespace-pre-line text-sm leading-7 text-zinc-600 dark:text-zinc-300">
+                          {overviewText}
+                        </p>
+                      ) : null}
+                      {manifest.riskSummary ? (
+                        <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+                          <span className="font-medium text-zinc-950 dark:text-white">
+                            {t("riskSummary")}
+                          </span>
+                          {manifest.riskSummary}
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </section>
+              ) : null}
+
+              <section className="scroll-mt-32" id="installation">
+                <SectionHeading icon={KeyRound}>
+                  {t("installationHeading")}
+                </SectionHeading>
+                <div className="space-y-4">
+                  <div className={panelClassName}>
+                    <h3 className="font-semibold">{t("inSourceWeft")}</h3>
+                    <ol className="mt-3 list-decimal space-y-1.5 pl-5 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+                      <li>
+                        {t.rich("step1", {
+                          name: item.name,
+                          link: (chunks) => (
+                            <LocaleLink
+                              className="font-medium text-zinc-950 underline underline-offset-4 dark:text-white"
+                              href={installHref}
+                            >
+                              {chunks}
+                            </LocaleLink>
+                          ),
                         })}
-                        {manifest.auth.type === "oauth" ? t("oauthNote") : ""}
+                      </li>
+                      {manifest.auth.required ? (
+                        <li>
+                          {t("step2", {
+                            name:
+                              manifest.auth.displayName ?? t("step2Fallback"),
+                          })}
+                        </li>
+                      ) : null}
+                      <li>{t("step3")}</li>
+                    </ol>
+                    <p className="mt-4 rounded-lg bg-zinc-100 p-3 text-xs leading-5 text-zinc-600 dark:bg-white/[0.04] dark:text-zinc-400">
+                      {t("runtimeVia", {
+                        runtime: runtimeLabel(item),
+                        transport: transportLabel(manifest.transport),
+                      })}
+                      {manifest.transport === "stdio"
+                        ? t("stdioNote")
+                        : t("remoteNote")}
+                    </p>
+                    {manifest.auth.instructions ? (
+                      <p className="mt-3 text-xs leading-5 text-zinc-500">
+                        {manifest.auth.instructions}
+                      </p>
+                    ) : null}
+                  </div>
+
+                  {clientConfig ? (
+                    <div className={panelClassName}>
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <h3 className="font-semibold">{t("otherClients")}</h3>
+                          <p className="mt-1 text-xs text-zinc-500">
+                            {t.rich("otherClientsConfig", {
+                              code: (chunks) => <code>{chunks}</code>,
+                            })}
+                            {manifest.auth.type === "oauth"
+                              ? t("oauthNote")
+                              : ""}
+                          </p>
+                        </div>
+                        <CopyButton value={clientConfig} />
+                      </div>
+                      <pre className="mt-4 overflow-x-auto rounded-lg bg-zinc-950 p-4 font-mono text-xs leading-5 text-zinc-100">
+                        {clientConfig}
+                      </pre>
+                    </div>
+                  ) : repoUrl ? (
+                    <div
+                      className={`${panelClassName} text-sm text-zinc-600 dark:text-zinc-400`}
+                    >
+                      <h3 className="font-semibold text-zinc-950 dark:text-white">
+                        {t("otherClients")}
+                      </h3>
+                      <p className="mt-2">
+                        {t.rich("followRepo", {
+                          link: (chunks) => (
+                            <ExternalTextLink href={repoUrl}>
+                              {chunks}
+                            </ExternalTextLink>
+                          ),
+                        })}
                       </p>
                     </div>
-                    <CopyButton value={clientConfig} />
+                  ) : null}
+                </div>
+              </section>
+
+              {shownReadme ? (
+                <section className="scroll-mt-32" id="readme">
+                  <SectionHeading icon={FileText}>
+                    {t("readmeHeading")}
+                  </SectionHeading>
+                  <div className={`${panelClassName} space-y-4`}>
+                    <McpReadmeCollapse
+                      collapsible={isLongMcpReadme(shownReadme.markdown)}
+                    >
+                      <McpReadmeSection {...shownReadme} />
+                    </McpReadmeCollapse>
+                    <McpReadmeSourceLine readme={shownReadme} />
+                    <McpReadmeRepositoryLink readme={shownReadme} />
                   </div>
-                  <pre className="mt-4 overflow-x-auto rounded-lg bg-zinc-950 p-4 font-mono text-xs leading-5 text-zinc-100">
-                    {clientConfig}
-                  </pre>
-                </div>
-              ) : repoUrl ? (
-                <div
-                  className={`${panelClassName} text-sm text-zinc-600 dark:text-zinc-400`}
-                >
-                  <h3 className="font-semibold text-zinc-950 dark:text-white">
-                    {t("otherClients")}
-                  </h3>
-                  <p className="mt-2">
-                    {t.rich("followRepo", {
-                      link: (chunks) => (
-                        <ExternalTextLink href={repoUrl}>
-                          {chunks}
-                        </ExternalTextLink>
-                      ),
-                    })}
-                  </p>
-                </div>
+                </section>
+              ) : null}
+
+              <section className="scroll-mt-32" id="tools">
+                <SectionHeading count={manifest.tools.length} icon={Code2}>
+                  {t("toolsHeading")}
+                </SectionHeading>
+                <McpToolRows tools={manifest.tools} />
+              </section>
+
+              {versions.length > 0 ? (
+                <section className="scroll-mt-32" id="versions">
+                  <SectionHeading count={versions.length} icon={History}>
+                    {t("versionsHeading")}
+                  </SectionHeading>
+                  <ol className="divide-y divide-zinc-200 overflow-hidden rounded-xl border border-zinc-300 bg-white/58 dark:divide-white/10 dark:border-white/10 dark:bg-white/[0.03]">
+                    {versions.map((entry) => (
+                      <li
+                        className="flex items-center justify-between gap-4 px-5 py-3 text-sm"
+                        key={entry.version}
+                      >
+                        <span className="font-mono font-medium">
+                          v{entry.version}
+                          {entry.version === version.version ? (
+                            <span className="ml-2 rounded-full bg-zinc-950 px-2 py-0.5 font-sans text-[11px] text-white dark:bg-white dark:text-zinc-950">
+                              {t("latest")}
+                            </span>
+                          ) : null}
+                        </span>
+                        <span className="text-zinc-500">
+                          {entry.publishedAt
+                            ? formatDate(entry.publishedAt)
+                            : entry.status}
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                </section>
               ) : null}
             </div>
-          </section>
-
-          {shownReadme ? (
-            <section className="scroll-mt-32" id="readme">
-              <SectionHeading icon={FileText}>
-                {t("readmeHeading")}
-              </SectionHeading>
-              <div className={`${panelClassName} space-y-4`}>
-                <McpReadmeCollapse
-                  collapsible={isLongMcpReadme(shownReadme.markdown)}
-                >
-                  <McpReadmeSection {...shownReadme} />
-                </McpReadmeCollapse>
-                <McpReadmeSourceLine readme={shownReadme} />
-                <McpReadmeRepositoryLink readme={shownReadme} />
-              </div>
-            </section>
-          ) : null}
-
-          <section className="scroll-mt-32" id="tools">
-            <SectionHeading count={manifest.tools.length} icon={Code2}>
-              {t("toolsHeading")}
-            </SectionHeading>
-            <McpToolRows tools={manifest.tools} />
-          </section>
-
-          {versions.length > 0 ? (
-            <section className="scroll-mt-32" id="versions">
-              <SectionHeading count={versions.length} icon={History}>
-                {t("versionsHeading")}
-              </SectionHeading>
-              <ol className="divide-y divide-zinc-200 overflow-hidden rounded-xl border border-zinc-300 bg-white/58 dark:divide-white/10 dark:border-white/10 dark:bg-white/[0.03]">
-                {versions.map((entry) => (
-                  <li
-                    className="flex items-center justify-between gap-4 px-5 py-3 text-sm"
-                    key={entry.version}
-                  >
-                    <span className="font-mono font-medium">
-                      v{entry.version}
-                      {entry.version === version.version ? (
-                        <span className="ml-2 rounded-full bg-zinc-950 px-2 py-0.5 font-sans text-[11px] text-white dark:bg-white dark:text-zinc-950">
-                          {t("latest")}
-                        </span>
-                      ) : null}
-                    </span>
-                    <span className="text-zinc-500">
-                      {entry.publishedAt
-                        ? formatDate(entry.publishedAt)
-                        : entry.status}
-                    </span>
-                  </li>
-                ))}
-              </ol>
-            </section>
-          ) : null}
+          </div>
         </div>
-
-        <aside className="space-y-5 lg:sticky lg:top-32 lg:self-start">
-          <section className={panelClassName}>
-            <h2 className="mb-4 text-base font-semibold">
-              {t("serverDetails")}
-            </h2>
-            <dl className="space-y-3 text-sm">
-              {[
-                [t("identifier"), item.identifier],
-                [t("transport"), transportLabel(manifest.transport)],
-                [t("runtime"), runtimeLabel(item)],
-                [t("trust"), verificationLabel(item)],
-                [
-                  t("published"),
-                  formatDate(item.publishedAt ?? item.createdAt),
-                ],
-              ].map(([label, value]) => (
-                <div
-                  className="flex items-start justify-between gap-4 border-b border-zinc-200 pb-3 last:border-0 last:pb-0 dark:border-white/10"
-                  key={label}
-                >
-                  <dt className="shrink-0 text-zinc-500">{label}</dt>
-                  <dd className="min-w-0 break-all text-right font-medium">
-                    {value}
-                  </dd>
-                </div>
-              ))}
-            </dl>
-          </section>
-
-          <section className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm leading-6 text-amber-800 dark:border-amber-300/20 dark:bg-amber-300/10 dark:text-amber-100">
-            <div className="mb-2 flex items-center gap-2 font-semibold">
-              {trusted ? (
-                <LockKeyhole className="size-4" />
-              ) : (
-                <AlertTriangle className="size-4" />
-              )}
-              {t("securityHeading")}
-            </div>
-            <p>{t("securityBody")}</p>
-          </section>
-        </aside>
       </div>
 
       {relatedItems.length > 0 ? (

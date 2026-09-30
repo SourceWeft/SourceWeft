@@ -3599,8 +3599,8 @@
           "tabsLabel": "Ways to install it in your own agent",
           "agent": "Agent",
           "terminal": "Terminal",
-          "agentLead": "Paste into Claude Code, Codex, Cursor or another agent — SourceWeft chat works too.",
-          "terminalLead": "Run it in a terminal. Every file is checked against the hashes recorded here."
+          "expand": "Show the whole prompt",
+          "collapse": "Show less"
         },
         "agent": {
           "heading": "Ask your agent to install it",

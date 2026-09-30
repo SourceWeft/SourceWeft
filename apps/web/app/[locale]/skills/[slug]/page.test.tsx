@@ -290,8 +290,11 @@ describe("public skill detail page", () => {
     expect(html).toMatch(
       /Read https?:\/\/[^ ]+\/skills\/pdf-forms\/install\.md and install the skill it describes\./,
     );
-    expect(html).toContain(
-      "Paste into Claude Code, Codex, Cursor or another agent — SourceWeft chat works too.",
+    // Clamped to three lines in the narrow column, with the toggle to read
+    // it all; the Install tab shows it in full.
+    expect(html).toMatch(/<span [^>]*line-clamp-3[^>]*>Read http/);
+    expect(html).toMatch(
+      /<button [^>]*aria-expanded="false"[^>]*>Show the whole prompt<\/button>/,
     );
   });
 
