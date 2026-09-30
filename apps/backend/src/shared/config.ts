@@ -648,6 +648,25 @@ export const config = {
     // allowlist; the gate is abstracted (requireMarketAdmin) so this can later
     // become a DB-backed role without touching the endpoints.
     adminUserIds: parseCsv(process.env.MARKET_ADMIN_USER_IDS),
+    // The MCP AI overview backfill pace, read by the scheduler: one batch of
+    // `overviewBatchSize` versions is queued every `overviewIntervalMs` while
+    // the system model is ready (scheduler/schedules/mcp-overview.ts). The
+    // defaults work a large catalog through at about 260 overviews an hour;
+    // raise them for a while to get through a backlog, then put them back.
+    // The jobs run behind tenant work on the worker either way. A value that
+    // is not an integer or is out of range fails configuration loading.
+    overviewBatchSize: parseBoundedIntegerEnv({
+      name: "MCP_OVERVIEW_BATCH_SIZE",
+      fallback: 20,
+      min: 1,
+      max: 1000,
+    }),
+    overviewIntervalMs: parseBoundedIntegerEnv({
+      name: "MCP_OVERVIEW_INTERVAL_MS",
+      fallback: 5 * 60 * 1000,
+      min: 10_000,
+      max: 24 * 60 * 60 * 1000,
+    }),
   },
   // Only the explicit local development mode relaxes endpoint address policy.
   // Test, production and an omitted NODE_ENV retain the same strict checks.

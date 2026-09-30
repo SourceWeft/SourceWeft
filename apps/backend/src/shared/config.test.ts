@@ -172,3 +172,42 @@ test("agent tool call limits are configurable via environment", async () => {
   assert.equal(config.chat.agent.toolCallRunLimit, 7);
   assert.equal(config.chat.agent.toolCallThreadLimit, 11);
 });
+
+test("MCP overview pace defaults to 20 versions every 5 minutes", async () => {
+  vi.resetModules();
+
+  const { config } = await import("./config");
+
+  assert.equal(config.market.overviewBatchSize, 20);
+  assert.equal(config.market.overviewIntervalMs, 300_000);
+});
+
+test("MCP overview pace is configurable via environment", async () => {
+  vi.stubEnv("MCP_OVERVIEW_BATCH_SIZE", "60");
+  vi.stubEnv("MCP_OVERVIEW_INTERVAL_MS", "120000");
+  vi.resetModules();
+
+  const { config } = await import("./config");
+
+  assert.equal(config.market.overviewBatchSize, 60);
+  assert.equal(config.market.overviewIntervalMs, 120_000);
+});
+
+for (const [name, value] of [
+  ["MCP_OVERVIEW_BATCH_SIZE", "0"],
+  ["MCP_OVERVIEW_BATCH_SIZE", "1001"],
+  ["MCP_OVERVIEW_BATCH_SIZE", "2.5"],
+  ["MCP_OVERVIEW_BATCH_SIZE", "many"],
+  ["MCP_OVERVIEW_INTERVAL_MS", "5000"],
+  ["MCP_OVERVIEW_INTERVAL_MS", "86400001"],
+] as const) {
+  test(`MCP overview pace rejects ${name}=${value} at startup`, async () => {
+    vi.stubEnv(name, value);
+    vi.resetModules();
+
+    await assert.rejects(
+      import("./config"),
+      new RegExp(`${name} must be an integer between`),
+    );
+  });
+}

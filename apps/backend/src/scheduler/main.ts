@@ -12,10 +12,7 @@ import { agentSandboxService } from "../modules/threads";
 import { contentSourceService } from "../modules/sources";
 import { scheduleConnectorSyncs } from "./schedules/connectors";
 import { scheduleMarketFederation } from "./schedules/market-federation";
-import {
-  MCP_OVERVIEW_SCHEDULE_INTERVAL_MS,
-  scheduleMcpOverviews,
-} from "./schedules/mcp-overview";
+import { scheduleMcpOverviews } from "./schedules/mcp-overview";
 import {
   MCP_README_SCHEDULE_INTERVAL_MS,
   scheduleMcpReadmeFetches,
@@ -192,7 +189,7 @@ const mcpReadmeTimer = setInterval(() => {
 void mcpOverviewTick();
 const mcpOverviewTimer = setInterval(() => {
   void mcpOverviewTick();
-}, MCP_OVERVIEW_SCHEDULE_INTERVAL_MS);
+}, config.market.overviewIntervalMs);
 
 void skillMarketTick();
 const skillMarketTimer = setInterval(() => {

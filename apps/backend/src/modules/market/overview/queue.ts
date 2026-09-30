@@ -33,10 +33,12 @@ export const MCP_OVERVIEW_GENERATE_JOB = "mcp-overview-generate";
 export const MCP_OVERVIEW_JOB_ATTEMPTS = 3;
 const MCP_OVERVIEW_BACKOFF_MS = 60_000;
 
-// Jobs queued per tick: a large catalog is worked through over time rather
-// than in one burst on the system model.
+// Jobs queued per tick unless the tick says otherwise (the scheduler passes
+// `MCP_OVERVIEW_BATCH_SIZE`): a large catalog is worked through over time
+// rather than in one burst on the system model.
 export const MCP_OVERVIEW_BATCH_SIZE = 20;
-// Never-analysed versions looked at per tick, most wanted first.
+// Never-analysed versions looked at per tick, most wanted first; at least a
+// batch, so a larger batch is never short of candidates.
 const MCP_OVERVIEW_SCAN_LIMIT = 200;
 // Analysed versions checked per tick for a stale overview or a failure worth
 // another try: a window that moves through the catalog by version id, so the
@@ -156,6 +158,7 @@ export type EnqueueMcpOverviewsDeps = {
   findCandidates: (input: {
     limit: number;
     after: string;
+    batchSize: number;
   }) => Promise<McpOverviewCandidateScan>;
   jobExists: (jobId: string) => Promise<boolean>;
   recover?: () => Promise<number>;
@@ -176,19 +179,26 @@ const rotation = { after: "" };
 
 /**
  * One scheduler tick: nothing while the system model is not ready; else up
- * to `MCP_OVERVIEW_BATCH_SIZE` versions from `findMcpOverviewCandidates` are
- * queued, through the engine's `enqueueOverviewBatch`.
+ * to a batch (`pace.batchSize`, `MCP_OVERVIEW_BATCH_SIZE` when not given) of
+ * versions from `findMcpOverviewCandidates` are queued, through the engine's
+ * `enqueueOverviewBatch`. The candidate scan reads at least a batch.
  */
 export async function enqueueMcpOverviews(
   deps: EnqueueMcpOverviewsDeps = defaultDeps,
   state: { after: string } = rotation,
+  pace: { batchSize?: number } = {},
 ): Promise<{ queued: number; skipped: number }> {
+  const batchSize = pace.batchSize ?? MCP_OVERVIEW_BATCH_SIZE;
   return enqueueOverviewBatch(
     {
       readModelReadiness: deps.readModelReadiness,
       recover: deps.recover,
       findCandidates: async (limit) => {
-        const scan = await deps.findCandidates({ limit, after: state.after });
+        const scan = await deps.findCandidates({
+          limit,
+          after: state.after,
+          batchSize,
+        });
         state.after = scan.next;
         return scan.candidates.map((candidate) => ({
           versionId: candidate.versionId,
@@ -206,8 +216,8 @@ export async function enqueueMcpOverviews(
     },
     {
       jobId: (versionId) => mcpOverviewJobs.jobId(versionId),
-      batchSize: MCP_OVERVIEW_BATCH_SIZE,
-      scanLimit: MCP_OVERVIEW_SCAN_LIMIT,
+      batchSize,
+      scanLimit: Math.max(MCP_OVERVIEW_SCAN_LIMIT, batchSize),
       label: "MCP",
     },
   );
