@@ -292,7 +292,7 @@ describe("public skill detail page", () => {
     );
     // Clamped to three lines in the narrow column, with the toggle to read
     // it all; the Install tab shows it in full.
-    expect(html).toMatch(/<p [^>]*line-clamp-3[^>]*>Read http/);
+    expect(html).toMatch(/<span [^>]*line-clamp-3[^>]*>Read http/);
     expect(html).toMatch(
       /<button [^>]*aria-expanded="false"[^>]*>Show the whole prompt<\/button>/,
     );

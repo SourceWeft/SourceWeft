@@ -93,10 +93,18 @@ export function SkillInstallOptions({
           className={cn(
             "rounded-lg bg-zinc-100 px-3 py-2 text-xs leading-5 text-zinc-800 dark:bg-white/10 dark:text-zinc-200",
             selected === "agent" ? "break-words" : "break-all font-mono",
-            selected === "agent" && !expanded && "line-clamp-3",
           )}
         >
-          {value}
+          {/* Clamped on an inner block: clamping the padded box itself lets a
+              fourth line show through its bottom padding. */}
+          <span
+            className={cn(
+              "block",
+              selected === "agent" && !expanded && "line-clamp-3",
+            )}
+          >
+            {value}
+          </span>
         </p>
         {selected === "agent" ? (
           <button
