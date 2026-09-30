@@ -335,9 +335,9 @@ function InstallBox({
             tabsLabel: t("options.tabsLabel"),
             agent: t("options.agent"),
             terminal: t("options.terminal"),
-            agentLead: t("options.agentLead"),
-            terminalLead: t("options.terminalLead"),
             copy: t("copy"),
+            expand: t("options.expand"),
+            collapse: t("options.collapse"),
           }}
         />
       ) : null}

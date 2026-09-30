@@ -3590,8 +3590,8 @@
           "tabsLabel": "安装到你自己的智能体的方式",
           "agent": "智能体",
           "terminal": "命令行",
-          "agentLead": "粘贴到 Claude Code、Codex、Cursor 或其他智能体中——在 SourceWeft 对话中也可以用。",
-          "terminalLead": "在命令行中运行。每个文件都会根据此处记录的哈希值进行校验。"
+          "expand": "显示完整提示词",
+          "collapse": "收起"
         },
         "agent": {
           "heading": "让你的智能体来安装",

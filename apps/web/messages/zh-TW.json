@@ -3599,8 +3599,8 @@
           "tabsLabel": "安裝到你自己的代理程式的方式",
           "agent": "代理程式",
           "terminal": "命令列",
-          "agentLead": "貼上到 Claude Code、Codex、Cursor 或其他代理程式中——在 SourceWeft 對話中也可以用。",
-          "terminalLead": "在命令列中執行。每個檔案都會根據此處記錄的雜湊值進行驗證。"
+          "expand": "顯示完整提示詞",
+          "collapse": "收起"
         },
         "agent": {
           "heading": "讓你的代理程式來安裝",
