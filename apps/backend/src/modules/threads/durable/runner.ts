@@ -491,26 +491,6 @@ function mergeThinkingStep(existing: unknown[], next: unknown) {
   ];
 }
 
-function isSameReasoningSegment(existing: unknown, next: unknown) {
-  const existingRecord =
-    existing && typeof existing === "object" && !Array.isArray(existing)
-      ? (existing as Record<string, unknown>)
-      : null;
-  const nextRecord =
-    next && typeof next === "object" && !Array.isArray(next)
-      ? (next as Record<string, unknown>)
-      : null;
-  if (!existingRecord || !nextRecord) {
-    return false;
-  }
-
-  return (
-    existingRecord.id === nextRecord.id &&
-    typeof existingRecord.text === "string" &&
-    typeof nextRecord.text === "string"
-  );
-}
-
 function mergeReasoningSegment(existing: unknown[], next: unknown) {
   const record =
     next && typeof next === "object" && !Array.isArray(next)
@@ -529,10 +509,10 @@ function mergeReasoningSegment(existing: unknown[], next: unknown) {
     return itemRecord?.id === id;
   });
 
-  if (
-    existingIndex >= 0 &&
-    isSameReasoningSegment(existing[existingIndex], record)
-  ) {
+  // One record per segment id, updated in place: the SSE segment carries no
+  // `text` (only id, sequence, duration, phase), so any check beyond the id
+  // never matched and every streamed delta appended a duplicate record.
+  if (existingIndex >= 0) {
     return existing.map((item, index) =>
       index === existingIndex
         ? {
