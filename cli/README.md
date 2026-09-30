@@ -85,8 +85,10 @@ lacks it.
 - **Protects your edits.** If you edited, deleted or added files inside an
   installed skill, `update` and `remove` refuse unless you pass `--force`.
 - **Asks before running someone else's code.** Installing or updating prints the
-  source, license, and whether the skill ships scripts, and asks to confirm.
-  Without a terminal it exits with code 4 unless you pass `--yes`.
+  source, license, trust (whether a SourceWeft admin reviewed it — separate from
+  the hash check, which every install gets) and whether the skill ships
+  scripts, and asks to confirm. Without a terminal it exits with code 4 unless
+  you pass `--yes`.
 - Sends no telemetry.
 
 ## Exit codes

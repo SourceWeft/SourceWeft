@@ -11,6 +11,7 @@ import type { SkillResponse } from "../src/registry/schema";
 import { sha256 } from "@sourceweft/skill-format";
 import { strToU8, zipSync } from "fflate";
 import {
+  describeSkill,
   installCommand,
   searchCommand,
   type CommandContext,
@@ -314,6 +315,40 @@ describe("registry and GitHub, against local servers", () => {
     const json: string[] = [];
     await searchCommand({ ...context(json), json: true }, { query: "pdf" });
     assert.equal(JSON.parse(json.join("\n")).items[0].slug, "pdf");
+  });
+});
+
+describe("describeSkill", () => {
+  function trust(over: { verified: boolean; featured?: boolean }) {
+    const response = skillResponse();
+    Object.assign(response.skill, over);
+    return describeSkill(response).find((line) => line.startsWith("Trust:"));
+  }
+
+  it("names review as trust, in the website's words", () => {
+    assert.equal(
+      trust({ verified: true }),
+      "Trust:      Verified — reviewed by a SourceWeft admin",
+    );
+    assert.equal(
+      trust({ verified: true, featured: true }),
+      "Trust:      Featured, Verified — a featured publisher, reviewed by a SourceWeft admin",
+    );
+    assert.equal(
+      trust({ verified: false, featured: true }),
+      "Trust:      Featured — a featured publisher, not reviewed by a SourceWeft admin (files are still hash-checked)",
+    );
+  });
+
+  it("never prints 'Verified: no' for an unreviewed skill", () => {
+    const community = skillResponse();
+    community.skill.verified = false;
+    const lines = describeSkill(community).join("\n");
+    assert.match(
+      lines,
+      /^Trust: {6}Community — not reviewed by SourceWeft \(files are still hash-checked\)$/mu,
+    );
+    assert.doesNotMatch(lines, /Verified/u);
   });
 });
 
