@@ -15,21 +15,30 @@ scheduler). Its main directories are:
 - `src/modules`: business modules
 - `src/shared`: shared backend utilities
 
-BullMQ + Redis power background jobs including source parsing, connector sync,
-model pricing sync, and durable chat runs. Durable chat runs manage queueing,
-heartbeats, cancellation, approval pauses, and buffered events that clients can
-re-attach to over SSE. See the [threads module](src/modules/threads/README.md)
-for the run lifecycle and the distinction between durable and direct streaming.
-
 Use `pnpm run dev` in this directory to start all three processes.
 
+BullMQ + Redis power background jobs on three queues. The primary queue runs
+jobs including source parsing, connector sync, model pricing sync, and durable
+chat runs. Durable chat runs manage queueing, heartbeats, cancellation, approval
+pauses, and buffered events that clients can re-attach to over SSE. See the
+[threads module](src/modules/threads/README.md) for the run lifecycle and the
+distinction between durable and direct streaming. Deliverable pipelines run on
+their own queue through the worker's deliverable host (see the
+[worker guide](src/worker/README.md)), and skill registry imports run on the
+third.
+
 Commercial billing is optional and disabled by default
-(`SOURCEWEFT_COMMERCIAL_ENABLED=false`). Core runs without credit/page billing,
-while retaining authorization, resource limits, and provider usage/cost
-observations. Enabling checkout additionally requires the commercial module,
-`SOURCEWEFT_SAAS_ENABLED=true`, and a configured payment provider.
-See the [billing module guide](../../enterprise/billing/README.md) for activation,
-usage accounting, checkout, and subscription configuration.
+(`SOURCEWEFT_COMMERCIAL_ENABLED=false`); without it, credits and pages are
+neither metered nor enforced. Payment checkout additionally needs
+`SOURCEWEFT_SAAS_ENABLED=true` and a payment provider. The
+[billing module guide](../../enterprise/billing/README.md) covers what core
+retains without the module, activation, usage accounting, checkout, and
+subscription configuration.
+
+Ops alerts from the scheduler, billing, and provider cost reconciliation are
+recorded in `ops_alerts` and logged by the [ops module](src/modules/ops/README.md).
+They are on by default; email goes out only when `OPS_ALERT_EMAILS` is set, and
+`BACKEND_ALERTS_ENABLED=false` turns alerts off.
 
 Auth and workspace MVP notes:
 
