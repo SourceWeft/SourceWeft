@@ -735,7 +735,8 @@ test("E16 a listed skill is public for anyone; only its claimed author controls 
   const standing = await listed.json();
   expect(standing).toMatchObject({ visibility: "public", listingHold: false });
   expect(standing.listedAt).toBeTruthy();
-  expect(standing.categorySlugs.length).toBeGreaterThan(0);
+  // Categories are no longer inferred at listing time: they arrive with the
+  // asynchronous AI analysis, so a fresh listing has none to assert on.
 
   // The public API, with no session at all.
   const list = await anonymous.get(`/v1/skills?query=${skillName}`);
