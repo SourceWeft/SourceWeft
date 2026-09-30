@@ -162,6 +162,34 @@ describe("one skill's install guide", () => {
     );
   });
 
+  it("names review as trust, in the page's words, and keeps it apart from the hash check", () => {
+    const trust = (over: Partial<Detail["skill"]>) =>
+      guide({ detail: detail(over) })
+        .split("\n")
+        .find((line) => line.startsWith("- Trust: "));
+    expect(trust({})).toBe("- Trust: Community — not reviewed by SourceWeft");
+    expect(trust({ verified: true })).toBe(
+      "- Trust: Verified — reviewed by a SourceWeft admin",
+    );
+    expect(trust({ featured: true })).toBe(
+      "- Trust: Featured — a featured publisher, not reviewed by a SourceWeft admin",
+    );
+    expect(trust({ featured: true, verified: true })).toBe(
+      "- Trust: Featured, Verified — a featured publisher, reviewed by a SourceWeft admin",
+    );
+    const markdown = guide();
+    expect(markdown).toContain(
+      "It is not about\nintegrity: every install is checked against the recorded hashes either way.",
+    );
+    // What agents still see from a CLI released before the rename.
+    expect(markdown).toContain(
+      'Older versions of the CLI label it `Verified`, where "no" means only that\nnobody reviewed it.',
+    );
+    expect(markdown).toContain(
+      "source, license, trust, scripts and scan\n   flags",
+    );
+  });
+
   it("gives the CLI command with --yes tied to the user's OK", () => {
     const markdown = guide();
     expect(markdown).toContain(

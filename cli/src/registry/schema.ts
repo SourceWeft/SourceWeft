@@ -23,6 +23,8 @@ const skillSummary = z.looseObject({
   displayName: z.string(),
   description: z.string(),
   verified: z.boolean(),
+  // A publisher the platform highlights. Optional: older servers do not send it.
+  featured: z.boolean().optional(),
   // A string rather than an enum: a capability a newer server invents must not
   // make an older CLI refuse the whole response.
   capability: z.string().nullable(),

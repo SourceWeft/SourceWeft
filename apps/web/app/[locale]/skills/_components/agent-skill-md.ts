@@ -75,9 +75,12 @@ ${cli} info <slug>${flag}
 \`\`\`
 
 Show the user what it prints: the source repository and commit, the license,
-whether the skill ships scripts, and any scan flags. Scan flags are advisory
-notes from an automated scan (for example "makes outbound network calls");
-say them out loud rather than deciding for the user.
+its trust, whether the skill ships scripts, and any scan flags. Trust says
+whether a SourceWeft admin reviewed the skill ("Community" means nobody did);
+it is not the hash check, which every install gets. Older CLI versions label
+it \`Verified\`. Scan flags are advisory notes from an automated scan (for
+example "makes outbound network calls"); say them out loud rather than
+deciding for the user.
 
 ## Install
 
@@ -183,6 +186,16 @@ export function skillInstallMarkdown(input: {
       : skill.capability === "executable"
         ? "yes — they run on the user's machine whenever the skill is used"
         : "not recorded — treat it as shipping scripts";
+  // The page's "Trust" row, spelled out: it is about review, not integrity.
+  // The CLI prints the same words (`trustLine` in cli/src/commands/skills.ts).
+  const trust =
+    skill.featured && skill.verified
+      ? "Featured, Verified — a featured publisher, reviewed by a SourceWeft admin"
+      : skill.featured
+        ? "Featured — a featured publisher, not reviewed by a SourceWeft admin"
+        : skill.verified
+          ? "Verified — reviewed by a SourceWeft admin"
+          : "Community — not reviewed by SourceWeft";
   const flags = scanFlags.map((flag) =>
     untrustedLine(scanFlagLabel(flag, input.scanFlagLabels), 160),
   );
@@ -196,6 +209,7 @@ export function skillInstallMarkdown(input: {
     ...(repoUrl ? [`- Repository: ${repoUrl}`] : []),
     ...(commit ? [`- Commit: ${commit}`] : []),
     `- License: ${skill.license ? untrustedLine(skill.license, 160) : "none stated"}`,
+    `- Trust: ${trust}`,
     `- Scripts: ${scripts}`,
     `- Scan flags: ${flags.length > 0 ? flags.join("; ") : "none"}`,
     `- Page for people: ${pageUrl}`,
@@ -206,8 +220,8 @@ export function skillInstallMarkdown(input: {
 
 For Claude Code, Codex, Cursor and other agents that can run commands.
 
-1. Show the user the facts above — source, license, scripts and scan flags —
-   and wait for their OK.${
+1. Show the user the facts above — source, license, trust, scripts and scan
+   flags — and wait for their OK.${
      skill.capability === "prompt-only"
        ? ""
        : " Say plainly that the skill's scripts will run on their\n   machine when it is used."
@@ -247,6 +261,11 @@ skills directory. It is not a skill itself — do not save it as one.
 ## The skill
 
 ${facts}
+
+Trust says whether a person at SourceWeft reviewed the skill. It is not about
+integrity: every install is checked against the recorded hashes either way.
+Older versions of the CLI label it \`Verified\`, where "no" means only that
+nobody reviewed it.
 ${
   description
     ? `

@@ -64,6 +64,27 @@ export async function searchCommand(
   );
 }
 
+/**
+ * Whether a person at SourceWeft reviewed the skill, in the website's words
+ * (its "Trust" row). Never "Verified: no": next to talk of hash-checked files,
+ * agents read that as a failed integrity check, when it only means nobody
+ * reviewed it.
+ */
+export function trustLine(listing: {
+  verified: boolean;
+  featured?: boolean;
+}): string {
+  if (listing.featured && listing.verified) {
+    return "Featured, Verified — a featured publisher, reviewed by a SourceWeft admin";
+  }
+  if (listing.featured) {
+    return "Featured — a featured publisher, not reviewed by a SourceWeft admin (files are still hash-checked)";
+  }
+  return listing.verified
+    ? "Verified — reviewed by a SourceWeft admin"
+    : "Community — not reviewed by SourceWeft (files are still hash-checked)";
+}
+
 /** What a person should know before running this skill's contents. */
 export function describeSkill(skill: SkillResponse): string[] {
   const { skill: listing, source } = skill;
@@ -74,7 +95,7 @@ export function describeSkill(skill: SkillResponse): string[] {
     `Version:    ${listing.version}`,
     `License:    ${listing.license ?? "not stated"}`,
     `Source:     ${source.sourceUrl ?? source.repoUrl ?? "unknown"}`,
-    `Verified:   ${listing.verified ? "yes, by a SourceWeft admin" : "no"}`,
+    `Trust:      ${trustLine(listing)}`,
     `Files:      ${skill.files.length}`,
   ];
   if (listing.capability === "executable") {
