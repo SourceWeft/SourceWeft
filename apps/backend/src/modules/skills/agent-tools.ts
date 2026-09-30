@@ -246,7 +246,16 @@ export function buildSkillAgentTools(
               flagged: item.flagged,
               verified: item.verified,
               sourceUrl: item.sourceUrl,
-            })}${item.installCount > 0 ? ` · on in ${item.installCount} workspace(s)` : ""}${item.enabled ? " · ALREADY installed and on here" : ""}${item.installable === false ? " · HELD for review — cannot be installed yet" : ""}`,
+            })}${
+              // Whether it ships scripts is the fact a user asks about before
+              // saying yes; without it here the model's only way to find out
+              // was to install first.
+              item.capability === "executable"
+                ? " · ships scripts (they run in the sandbox when used)"
+                : item.capability === "prompt-only"
+                  ? " · instructions only, no scripts"
+                  : ""
+            }${item.installCount > 0 ? ` · on in ${item.installCount} workspace(s)` : ""}${item.enabled ? " · ALREADY installed and on here" : ""}${item.installable === false ? " · HELD for review — cannot be installed yet" : ""}`,
           ].join("\n"),
         ),
         "",
@@ -256,7 +265,7 @@ export function buildSkillAgentTools(
     {
       name: "search_skills",
       description:
-        "Search this workspace's skill catalog — its own and its team's skills, the opt-in built-ins, and public community skills. Each result gives the slug to install, what the skill does, where it comes from (for a community skill: publisher, license, scan state, source URL) and how many workspaces keep it on. It searches this catalog only, never GitHub or the web.",
+        "Search this workspace's skill catalog — its own and its team's skills, the opt-in built-ins, and public community skills. Each result gives the slug to install, what the skill does, where it comes from (for a community skill: publisher, license, scan state, source URL), whether it ships scripts, and how many workspaces keep it on. When the user wants to review a skill before installing, this is where the facts come from — do not install to find them out. It searches this catalog only, never GitHub or the web.",
       schema: z.object({
         query: z
           .string()
