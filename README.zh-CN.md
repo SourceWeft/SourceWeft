@@ -29,7 +29,7 @@
 
 ---
 
-**SourceWeft** 将对话、知识、工作文件与任务执行连接在同一个工作站中。交代你要完成的工作，让 Agent 拆解任务、调用工具，再检查并持续完善成果。对话与文件保存在一起，让每一项成果成为下一步工作的起点。
+**SourceWeft** 是 ChatGPT、NotebookLM 与 WorkBuddy 的开源替代方案，可以自托管在你自己的电脑或团队的服务器上，使用你自己的模型和密钥。它将对话、知识、工作文件与任务执行连接在同一个工作站中。交代你要完成的工作，让 Agent 拆解任务、调用工具，再检查并持续完善成果。对话与文件保存在一起，让每一项成果成为下一步工作的起点。
 
 <p align="center"><img src="assets/chat-page.png" alt="SourceWeft interface" width="800" /></p>
 

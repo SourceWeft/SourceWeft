@@ -28,7 +28,7 @@ Multi-agent & Sub-agents · Skills & MCP · Sandbox · Cross-platform · Self-ho
 
 ---
 
-**SourceWeft** connects conversations, knowledge, working files, and task execution in one workstation. Describe the work, let agents break it down and use the right tools, then review and refine what they produce. Your conversations and files stay together so each result becomes the starting point for the next task.
+**SourceWeft** is an open-source alternative to ChatGPT and NotebookLM that you can self-host on your own machine or your team's server, with your own models and keys. It connects conversations, knowledge, working files, and task execution in one workstation. Describe the work, let agents break it down and use the right tools, then review and refine what they produce. Your conversations and files stay together so each result becomes the starting point for the next task.
 
 <p align="center"><img src="assets/chat-page.png" alt="SourceWeft interface" width="800" /></p>
 
