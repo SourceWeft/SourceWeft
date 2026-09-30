@@ -6,18 +6,8 @@ The default development and Docker runtime is Node **22.23.2**; Node **24** is
 also supported. Root/backend engines accept `^22.13.0 || ^24.0.0`, and CI tests
 22.23.2 and 24.18.0. See [Node runtime policy](docs/node-runtime.md).
 
-Queue backend: BullMQ + Redis (skeleton only, minimal implementation).
-
-Billing MVP (`pages + credits`) is backed by PostgreSQL tables managed by Drizzle.
-OSS defaults enforce the configured free quota while keeping payment checkout
-disabled unless `SOURCEWEFT_SAAS_ENABLED=true` and a billing provider are set.
-
-Team subscription notes (current phase):
-
-- Creem-backed `team_standard` subscription flow with webhook sync.
-- Webhook audit trail stored in `billing_webhook_events`.
-- Reconcile task auto-realigns team plans from subscription state.
-- Ops alerts stored in `ops_alerts` and optionally delivered by email.
+The backend is one codebase with three runtime entry points (API, worker, and
+scheduler). Its main directories are:
 
 - `src/api`: HTTP API process
 - `src/worker`: async job consumer process
@@ -25,9 +15,21 @@ Team subscription notes (current phase):
 - `src/modules`: business modules
 - `src/shared`: shared backend utilities
 
-The backend is one codebase with three runtime entry points.
+BullMQ + Redis power background jobs including source parsing, connector sync,
+model pricing sync, and durable chat runs. Durable chat runs manage queueing,
+heartbeats, cancellation, approval pauses, and buffered events that clients can
+re-attach to over SSE. See the [threads module](src/modules/threads/README.md)
+for the run lifecycle and the distinction between durable and direct streaming.
 
 Use `pnpm run dev` in this directory to start all three processes.
+
+Commercial billing is optional and disabled by default
+(`SOURCEWEFT_COMMERCIAL_ENABLED=false`). Core runs without credit/page billing,
+while retaining authorization, resource limits, and provider usage/cost
+observations. Enabling checkout additionally requires the commercial module,
+`SOURCEWEFT_SAAS_ENABLED=true`, and a configured payment provider.
+See the [billing module guide](../../enterprise/billing/README.md) for activation,
+usage accounting, checkout, and subscription configuration.
 
 Auth and workspace MVP notes:
 
@@ -61,10 +63,14 @@ Artifact reuse, conflicts and object cleanup follow
 Catalog refresh, retrieval failures and model request limits follow
 [failure and request-option semantics](docs/model-failure-semantics.md).
 
-Sandbox developer notes live in
-`src/modules/content/agent/sandbox/README.md`. They describe the provider-neutral
-runtime model, Daytona adapter boundary, backend-provided `execute`, prepare and
-collect bridge semantics, audit states, and current idempotency limitations.
+The Agent runtime lives in [src/modules/threads/agent/](src/modules/threads/agent/).
+Sandbox orchestration is implemented in
+[sandbox-service/service.ts](src/modules/threads/agent/sandbox-service/service.ts),
+with capability-contributed providers discovered by the
+[provider registry](src/modules/threads/agent/sandbox-service/provider-registry.ts).
+See [Sandbox Execution (Alpha)](../../docker/sandbox-execution.md) for deployment
+requirements, command approval, and the boundary between temporary sandbox files
+and durable working files.
 
 Model gateway catalog sync:
 
