@@ -36,10 +36,9 @@ retains without the module, activation, usage accounting, checkout, and
 subscription configuration.
 
 Ops alerts from the scheduler, billing, and provider cost reconciliation are
-recorded in `ops_alerts` by the [ops module](src/modules/ops/README.md) and
-emailed to `OPS_ALERT_EMAILS` through the configured mail provider.
-`BACKEND_ALERTS_ENABLED=false` turns them off. The backend env template sets
-it to `false`; when it is unset, as in the Docker template, alerts are on.
+recorded in `ops_alerts` and logged by the [ops module](src/modules/ops/README.md).
+They are on by default; email goes out only when `OPS_ALERT_EMAILS` is set, and
+`BACKEND_ALERTS_ENABLED=false` turns alerts off.
 
 Auth and workspace MVP notes:
 
