@@ -825,6 +825,36 @@ test("run snapshots keep separate tool trace events for start event result and e
   );
 });
 
+test("run snapshots keep one reasoning segment record per id as its deltas stream", () => {
+  const reasoning = (id: string, chunk: string, durationMs: number) => ({
+    type: "reasoning",
+    reasoning: chunk,
+    // What the SSE event carries: the segment without its text.
+    segment: { id, sequence: 1, durationMs, phase: "initial" },
+  });
+  let snapshot = testExports.updateSnapshotFromPayload(
+    {},
+    reasoning("seg-1", "Let", 5),
+  );
+  snapshot = testExports.updateSnapshotFromPayload(
+    snapshot,
+    reasoning("seg-1", " me think", 45),
+  );
+  assert.equal(snapshot.reasoning, "Let me think");
+  assert.deepEqual(snapshot.reasoningSegments, [
+    { id: "seg-1", sequence: 1, durationMs: 45, phase: "initial" },
+  ]);
+
+  snapshot = testExports.updateSnapshotFromPayload(
+    snapshot,
+    reasoning("seg-2", "Then", 3),
+  );
+  assert.deepEqual(
+    (snapshot.reasoningSegments as Array<{ id: string }>).map((s) => s.id),
+    ["seg-1", "seg-2"],
+  );
+});
+
 test("run snapshots preserve streamed text render blocks", () => {
   const deltaSnapshot = testExports.updateSnapshotFromPayload(
     {},
