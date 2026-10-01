@@ -94,7 +94,7 @@
     "drizzle-orm": "^0.45.2",
     "fast-xml-parser": "5.7.3",
     "fflate": "^0.8.3",
-    "hono": "^4.13.5",
+    "hono": "^4.13.7",
     "html-to-text": "^9.0.5",
     "ioredis": "^5.11.1",
     "langchain": "^1.5.10",

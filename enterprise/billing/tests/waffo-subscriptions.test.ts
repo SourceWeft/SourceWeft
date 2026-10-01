@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { test, vi } from "vitest";
 import type { WebhookEvent } from "@waffo/pancake-ts";
-import { createWaffoFixture, signedEvent } from "./waffo-fixtures";
+import {
+  createWaffoFixture,
+  openMonthlyPeriod,
+  signedEvent,
+} from "./waffo-fixtures";
 
 async function deliver(
   f: ReturnType<typeof createWaffoFixture>,
@@ -152,8 +156,7 @@ test("subscription status events verify the plan price, not the deprecated total
       paymentId: undefined,
       paymentStatus: undefined,
       billingPeriod: "monthly",
-      currentPeriodStart: "2026-09-01T00:00:00Z",
-      currentPeriodEnd: "2026-10-01T00:00:00Z",
+      ...openMonthlyPeriod(),
       productMetadata: { sourceweftProductKey: "individual_pro:monthly" },
     });
     delete event.data.listPrice;
@@ -184,8 +187,7 @@ test("a subscription status event without a plan price fails without falling bac
     paymentId: undefined,
     paymentStatus: undefined,
     billingPeriod: "monthly",
-    currentPeriodStart: "2026-09-01T00:00:00Z",
-    currentPeriodEnd: "2026-10-01T00:00:00Z",
+    ...openMonthlyPeriod(),
     productMetadata: { sourceweftProductKey: "individual_pro:monthly" },
   });
   delete event.data.listPrice;
@@ -211,8 +213,7 @@ test("canceling delivered before activation establishes the paid order and keeps
     planPrice: { total: "12.00", subtotal: "12.00", taxAmount: "0.00" },
     orderStatus: "canceling",
     billingPeriod: "monthly",
-    currentPeriodStart: new Date(Date.now() - 60_000).toISOString(),
-    currentPeriodEnd: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+    ...openMonthlyPeriod(),
     productMetadata: { sourceweftProductKey: "individual_pro:monthly" },
   });
   await deliver(f, event);
@@ -246,8 +247,7 @@ test("a subscription event's metadata write keeps reversal fields committed unde
     planPrice: { total: "12.00", subtotal: "12.00", taxAmount: "0.00" },
     orderStatus: "active",
     billingPeriod: "monthly",
-    currentPeriodStart: "2026-09-01T00:00:00Z",
-    currentPeriodEnd: "2026-10-01T00:00:00Z",
+    ...openMonthlyPeriod(),
     productMetadata: { sourceweftProductKey: "individual_pro:monthly" },
   });
   await deliver(f, active);
