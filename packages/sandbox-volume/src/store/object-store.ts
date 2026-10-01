@@ -41,7 +41,9 @@ export function createS3ObjectStore(config: S3ObjectStoreConfig): ObjectStore {
   const clientConfig: S3ClientConfig = {
     region: config.region,
     ...(config.endpoint ? { endpoint: config.endpoint } : {}),
-    ...(config.forcePathStyle !== undefined ? { forcePathStyle: config.forcePathStyle } : {}),
+    ...(config.forcePathStyle !== undefined
+      ? { forcePathStyle: config.forcePathStyle }
+      : {}),
     ...(config.credentials ? { credentials: config.credentials } : {}),
   };
   const client = new S3Client(clientConfig);
@@ -50,15 +52,28 @@ export function createS3ObjectStore(config: S3ObjectStoreConfig): ObjectStore {
     async presignWriteOnce(key, ttlSeconds = PRESIGN_TTL_SECONDS) {
       // The conditional header is signed, so a client that omits it gets 403 and one that
       // sends it against an existing object gets 412: a slot can be written exactly once.
-      const command = new PutObjectCommand({ Bucket: bucket, Key: key, IfNoneMatch: "*" });
-      return getSignedUrl(client, command, { expiresIn: ttlSeconds, signableHeaders: new Set(["host", "if-none-match"]) });
+      const command = new PutObjectCommand({
+        Bucket: bucket,
+        Key: key,
+        IfNoneMatch: "*",
+      });
+      return getSignedUrl(client, command, {
+        expiresIn: ttlSeconds,
+        signableHeaders: new Set(["host", "if-none-match"]),
+      });
     },
     async presignGet(key, ttlSeconds = PRESIGN_TTL_SECONDS) {
-      return getSignedUrl(client, new GetObjectCommand({ Bucket: bucket, Key: key }), { expiresIn: ttlSeconds });
+      return getSignedUrl(
+        client,
+        new GetObjectCommand({ Bucket: bucket, Key: key }),
+        { expiresIn: ttlSeconds },
+      );
     },
     async get(key) {
       try {
-        const response = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+        const response = await client.send(
+          new GetObjectCommand({ Bucket: bucket, Key: key }),
+        );
         if (!response.Body) return null;
         return await response.Body.transformToByteArray();
       } catch (error) {
@@ -67,11 +82,20 @@ export function createS3ObjectStore(config: S3ObjectStoreConfig): ObjectStore {
       }
     },
     async put(key, body, contentType = "application/octet-stream") {
-      await client.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, ContentType: contentType }));
+      await client.send(
+        new PutObjectCommand({
+          Bucket: bucket,
+          Key: key,
+          Body: body,
+          ContentType: contentType,
+        }),
+      );
     },
     async size(key) {
       try {
-        const response = await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+        const response = await client.send(
+          new HeadObjectCommand({ Bucket: bucket, Key: key }),
+        );
         return response.ContentLength ?? null;
       } catch (error) {
         if (isNotFound(error)) return null;
@@ -82,10 +106,21 @@ export function createS3ObjectStore(config: S3ObjectStoreConfig): ObjectStore {
       let deleted = 0;
       let token: string | undefined;
       do {
-        const page = await client.send(new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: token }));
+        const page = await client.send(
+          new ListObjectsV2Command({
+            Bucket: bucket,
+            Prefix: prefix,
+            ContinuationToken: token,
+          }),
+        );
         const keys = (page.Contents ?? []).map((o) => ({ Key: o.Key! }));
         if (keys.length) {
-          await client.send(new DeleteObjectsCommand({ Bucket: bucket, Delete: { Objects: keys, Quiet: true } }));
+          await client.send(
+            new DeleteObjectsCommand({
+              Bucket: bucket,
+              Delete: { Objects: keys, Quiet: true },
+            }),
+          );
           deleted += keys.length;
         }
         token = page.IsTruncated ? page.NextContinuationToken : undefined;
@@ -93,13 +128,20 @@ export function createS3ObjectStore(config: S3ObjectStoreConfig): ObjectStore {
       return deleted;
     },
     async copy(fromKey, toKey) {
-      await client.send(new CopyObjectCommand({ Bucket: bucket, Key: toKey, CopySource: `/${bucket}/${encodeURIComponent(fromKey).replace(/%2F/g, "/")}` }));
+      await client.send(
+        new CopyObjectCommand({
+          Bucket: bucket,
+          Key: toKey,
+          CopySource: `/${bucket}/${encodeURIComponent(fromKey).replace(/%2F/g, "/")}`,
+        }),
+      );
     },
   };
 }
 
 function isNotFound(error: unknown): boolean {
   const name = (error as { name?: string })?.name;
-  const status = (error as { $metadata?: { httpStatusCode?: number } })?.$metadata?.httpStatusCode;
+  const status = (error as { $metadata?: { httpStatusCode?: number } })
+    ?.$metadata?.httpStatusCode;
   return name === "NoSuchKey" || name === "NotFound" || status === 404;
 }

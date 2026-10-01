@@ -8,7 +8,8 @@ import { MAX_PATH_BYTES } from "./constants";
 export function isValidVolumePath(path: unknown): path is string {
   if (typeof path !== "string" || path.length === 0) return false;
   if (Buffer.byteLength(path, "utf8") > MAX_PATH_BYTES) return false;
-  if (path.startsWith("/") || path.endsWith("/") || path.includes("\\")) return false;
+  if (path.startsWith("/") || path.endsWith("/") || path.includes("\\"))
+    return false;
   for (let i = 0; i < path.length; i++) {
     const code = path.charCodeAt(i);
     if (code <= 0x1f || code === 0x7f) return false;

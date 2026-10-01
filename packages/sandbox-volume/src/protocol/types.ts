@@ -19,7 +19,12 @@ export type ManifestEntry = {
 };
 
 /** Where a chunk lives: pack key relative to the volume prefix, offset, compressed length, raw length. */
-export type ChunkLocation = [pack: string, off: number, clen: number, rlen: number];
+export type ChunkLocation = [
+  pack: string,
+  off: number,
+  clen: number,
+  rlen: number,
+];
 
 export type Manifest = {
   v: number;
