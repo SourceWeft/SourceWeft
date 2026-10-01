@@ -1288,24 +1288,38 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
           modelExecutionCancellationReason(options.signal),
         ).catch(() => undefined);
       });
-      const execution = this.input.manager
-        .providerForSandbox()
-        .execute({
-          providerSandboxId: sandbox.providerSandboxId,
-          executionId,
-          command,
-          cwd: assertExecuteCwd(
-            undefined,
-            this.input.manager.providerForSandbox().pathPolicy,
-          ),
-          timeoutMs: this.input.commandTimeoutMs,
-          maxOutputChars: this.input.limits.maxOutputChars,
-          ...(options.signal ? { signal: options.signal } : {}),
-        })
-        .then(
-          (result) => ({ kind: "result" as const, result }),
-          (error: unknown) => ({ kind: "error" as const, error }),
-        );
+      const hostExecutionId = executionId;
+      const runOnce = () =>
+        this.input.manager
+          .providerForSandbox()
+          .execute({
+            providerSandboxId: sandbox.providerSandboxId,
+            executionId: hostExecutionId,
+            command: this.input.manager.volumeWrapCommand(sandbox, command),
+            cwd: assertExecuteCwd(
+              undefined,
+              this.input.manager.providerForSandbox().pathPolicy,
+            ),
+            timeoutMs: this.input.commandTimeoutMs,
+            maxOutputChars: this.input.limits.maxOutputChars,
+            ...(options.signal ? { signal: options.signal } : {}),
+          });
+      // With a volume attached the wrapper refuses to run in a replaced container; the volume is
+      // re-attached and the command is run once more (it never executed the first time).
+      const execution = (async () => {
+        let result = await runOnce();
+        let parsed = await this.input.manager.volumeParseResult(sandbox, result);
+        if (parsed === null) {
+          await this.input.manager.reattachVolume(sandbox, this.input.context);
+          result = await runOnce();
+          parsed = await this.input.manager.volumeParseResult(sandbox, result);
+          if (parsed === null) throw new SandboxInstanceChangedError();
+        }
+        return parsed;
+      })().then(
+        (result) => ({ kind: "result" as const, result }),
+        (error: unknown) => ({ kind: "error" as const, error }),
+      );
       try {
         const outcome = await Promise.race([
           execution,

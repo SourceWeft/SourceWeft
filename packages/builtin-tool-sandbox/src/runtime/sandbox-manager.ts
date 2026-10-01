@@ -10,6 +10,7 @@ import type {
   SandboxBridgeOperationType,
   SandboxCancellationReason,
   SandboxCancellationResult,
+  SandboxExecuteResult,
   SandboxOperationStatus,
   SandboxOperationStore,
   SandboxOperationType,
@@ -17,6 +18,9 @@ import type {
   SandboxRef,
   SandboxRuntimeContext,
   SandboxStore,
+  SandboxVolumeExecutor,
+  SandboxVolumeHooks,
+  SandboxVolumeScope,
 } from "./types";
 import {
   redactSandboxOperationRequest,
@@ -243,8 +247,98 @@ export class SandboxManager {
       logWarn?: (message: string, meta: Record<string, unknown>) => void;
       skillStaging?: SandboxSkillStaging;
       requiredAssetStaging?: SandboxRuntimeAssetStaging;
+      /** Persistent /workspace volume; absent → ephemeral sandboxes as before. */
+      volume?: SandboxVolumeHooks | null;
     },
   ) {}
+
+  /** provider sandbox id -> volume attachment id, for the sandboxes this manager attached. */
+  private readonly volumeAttachments = new Map<string, string>();
+  private readonly volumeAttachRuns = new Map<string, Promise<void>>();
+
+  private volumeExecutor(sandbox: SandboxRef): SandboxVolumeExecutor {
+    const provider = this.input.provider;
+    const execute = provider.executeSystem
+      ? provider.executeSystem.bind(provider)
+      : provider.execute.bind(provider);
+    return {
+      execute: async (command, options) => {
+        const result = await execute({
+          providerSandboxId: sandbox.providerSandboxId,
+          command,
+          timeoutMs: options.timeoutMs,
+          maxOutputChars: 4 * 1024 * 1024,
+        });
+        return { output: result.output, exitCode: result.exitCode };
+      },
+    };
+  }
+
+  private volumeScope(context: SandboxRuntimeContext): SandboxVolumeScope {
+    return { teamId: context.teamId, workspaceId: context.workspaceId, threadId: context.threadId };
+  }
+
+  /** Attach the thread's volume to a (new or reused) sandbox once per manager. */
+  private async ensureVolumeAttached(sandbox: SandboxRef, context: SandboxRuntimeContext): Promise<void> {
+    const volume = this.input.volume;
+    if (!volume || this.volumeAttachments.has(sandbox.providerSandboxId)) return;
+    let run = this.volumeAttachRuns.get(sandbox.providerSandboxId);
+    if (!run) {
+      run = volume
+        .attach({ scope: this.volumeScope(context), sandboxId: sandbox.providerSandboxId, executor: this.volumeExecutor(sandbox) })
+        .then((attached) => {
+          this.volumeAttachments.set(sandbox.providerSandboxId, attached.attachmentId);
+        })
+        .finally(() => this.volumeAttachRuns.delete(sandbox.providerSandboxId));
+      this.volumeAttachRuns.set(sandbox.providerSandboxId, run);
+    }
+    await run;
+  }
+
+  /** The command to hand to the provider: wrapped with the volume's identity check and sync barrier when a volume is attached. */
+  volumeWrapCommand(sandbox: SandboxRef, command: string): string {
+    if (!this.input.volume || !this.volumeAttachments.has(sandbox.providerSandboxId)) return command;
+    return this.input.volume.wrapCommand(command);
+  }
+
+  /**
+   * Strip the volume marker from a result and apply the sync. Returns null when the container was
+   * replaced underneath us: the caller must re-attach (`reattachVolume`) and run the command again,
+   * which is safe because the wrapper never ran it.
+   */
+  async volumeParseResult(sandbox: SandboxRef, result: SandboxExecuteResult): Promise<SandboxExecuteResult | null> {
+    const volume = this.input.volume;
+    const attachmentId = this.volumeAttachments.get(sandbox.providerSandboxId);
+    if (!volume || !attachmentId) return result;
+    try {
+      const parsed = await volume.parseResult({ attachmentId, output: result.output, exitCode: result.exitCode, executor: this.volumeExecutor(sandbox) });
+      if (!parsed.sync.persisted) {
+        this.input.logWarn?.("sandbox.volume.sync_pending", { provider: this.input.provider.id, sandboxId: sandbox.id, attachmentId });
+      }
+      return { ...result, output: parsed.output, exitCode: parsed.exitCode };
+    } catch (error) {
+      if (volume.isContainerReplacedError(error)) {
+        this.input.logWarn?.("sandbox.volume.container_replaced", { provider: this.input.provider.id, sandboxId: sandbox.id, attachmentId });
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  async reattachVolume(sandbox: SandboxRef, context: SandboxRuntimeContext): Promise<void> {
+    const volume = this.input.volume;
+    if (!volume) return;
+    const attached = await volume.onContainerReplaced({ scope: this.volumeScope(context), sandboxId: sandbox.providerSandboxId, executor: this.volumeExecutor(sandbox) });
+    this.volumeAttachments.set(sandbox.providerSandboxId, attached.attachmentId);
+  }
+
+  /** Full-scan barrier before a sandbox goes away; a no-op without a volume. */
+  async volumeCheckpoint(sandbox: SandboxRef): Promise<void> {
+    const volume = this.input.volume;
+    const attachmentId = this.volumeAttachments.get(sandbox.providerSandboxId);
+    if (!volume || !attachmentId) return;
+    await volume.checkpoint({ attachmentId, executor: this.volumeExecutor(sandbox) });
+  }
 
   // A failed acquisition is shared too: siblings must not each start a new
   // sandbox after the same failure. A new run has its own initialization.
@@ -343,6 +437,7 @@ export class SandboxManager {
           async () => {
             await this.ensureRequiredAssetsOnce(sandbox);
             await this.ensureSkillAssetsStaged(sandbox);
+            await this.ensureVolumeAttached(sandbox, context);
           },
           sandbox.id,
         );

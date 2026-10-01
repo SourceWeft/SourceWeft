@@ -53,6 +53,15 @@ export class VolumeRepository {
     return created[0]!;
   }
 
+  async findVolume(scope: VolumeScope): Promise<VolumeRow | null> {
+    const rows = await this.db
+      .select()
+      .from(sandboxVolumes)
+      .where(and(eq(sandboxVolumes.teamId, scope.teamId), eq(sandboxVolumes.workspaceId, scope.workspaceId), eq(sandboxVolumes.threadId, scope.threadId)))
+      .limit(1);
+    return rows[0] ?? null;
+  }
+
   async getVolume(id: string): Promise<VolumeRow | null> {
     const rows = await this.db.select().from(sandboxVolumes).where(eq(sandboxVolumes.id, id)).limit(1);
     return rows[0] ?? null;

@@ -210,10 +210,34 @@ export function createVolumeHooks(config: VolumeHooksConfig) {
       };
     },
 
+    /**
+     * Checkpoint by scope, for processes that did not attach the sandbox themselves (the cleanup
+     * worker). Applies whatever the sandbox uploaded even when the container is already gone.
+     */
+    async checkpointScope(input: { scope: VolumeScope; executor: SandboxExecutor }): Promise<ParsedExecuteResult | null> {
+      const volume = await service.repo.findVolume(input.scope);
+      if (!volume) return null;
+      const attachment = await service.repo.activeAttachment(volume.id);
+      if (!attachment) return null;
+      try {
+        return await this.checkpoint({ attachmentId: attachment.id, executor: input.executor });
+      } catch (error) {
+        if (error instanceof ContainerReplacedError) {
+          await service.applyWal(attachment.id);
+          return null;
+        }
+        throw error;
+      }
+    },
+
     /** Full-scan barrier + WAL application; run before a sandbox is deleted or a run ends. */
     async checkpoint(input: { attachmentId: string; executor: SandboxExecutor }): Promise<ParsedExecuteResult> {
       const result = await input.executor.execute(this.wrapCommand("true", { full: true }), { timeoutMs: 600_000 });
       return this.parseResult({ attachmentId: input.attachmentId, output: result.output, exitCode: result.exitCode, executor: input.executor });
+    },
+
+    isContainerReplacedError(error: unknown): boolean {
+      return error instanceof ContainerReplacedError;
     },
 
     /** The container behind a sandbox id was replaced: apply what the old one uploaded and attach the new one. */

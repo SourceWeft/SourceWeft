@@ -86,6 +86,9 @@ import type {
   SandboxRecord,
   SandboxRef,
   SandboxRuntimeContext,
+  SandboxVolumeExecutor,
+  SandboxVolumeHooks,
+  SandboxVolumeScope,
   SandboxRuntimeLimits,
   SandboxStatus,
   SandboxStore,
@@ -165,6 +168,9 @@ export type {
   SandboxRuntimeLimits,
   SandboxStatus,
   SandboxStore,
+  SandboxVolumeExecutor,
+  SandboxVolumeHooks,
+  SandboxVolumeScope,
 };
 export {
   SOURCEWEFT_KB_ROOT,

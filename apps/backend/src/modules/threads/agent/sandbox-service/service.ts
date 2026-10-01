@@ -21,6 +21,7 @@ import {
   initializeSandboxProviderRegistry,
 } from "./provider-registry";
 import { DrizzleSandboxOperationStore, DrizzleSandboxStore } from "./stores";
+import { sandboxVolumeHooks } from "./volume";
 import { localProviderForTurn } from "../../../devices/provider";
 import { ContentError } from "../../../content/errors";
 
@@ -52,6 +53,9 @@ const sandboxService = new AgentSandboxService({
   getConfig: currentSandboxServiceConfig,
   getProviderFactory: getSandboxProviderFactory,
   logWarn: (message, meta) => logger.warn(message, meta),
+  // Only off-host providers carry a volume; the local provider persists natively.
+  getVolumeHooks: (providerId) =>
+    providerId === "local" ? null : sandboxVolumeHooks(),
 });
 
 /**
@@ -206,6 +210,35 @@ Commands execute on the user's bound PC inside its authorized working folder. In
       }
 
       try {
+        // Persist whatever the sandbox still holds before it is destroyed. A failure here is
+        // logged, not fatal: the volume already has everything the barrier acknowledged.
+        const volume = sandboxVolumeHooks();
+        if (volume) {
+          const execute = provider.executeSystem
+            ? provider.executeSystem.bind(provider)
+            : provider.execute.bind(provider);
+          await volume
+            .checkpointScope({
+              scope: { teamId: sandbox.teamId, workspaceId: sandbox.workspaceId, threadId: sandbox.threadId },
+              executor: {
+                execute: async (command, options) => {
+                  const result = await execute({
+                    providerSandboxId: sandbox.providerSandboxId,
+                    command,
+                    timeoutMs: options.timeoutMs,
+                    maxOutputChars: 4 * 1024 * 1024,
+                  });
+                  return { output: result.output, exitCode: result.exitCode };
+                },
+              },
+            })
+            .catch((error: unknown) => {
+              logger.warn("sandbox.volume.checkpoint_failed", {
+                sandboxId: sandbox.id,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            });
+        }
         await provider.deleteSandbox(sandbox.providerSandboxId);
         await db
           .update(agentSandboxes)

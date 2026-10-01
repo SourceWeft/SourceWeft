@@ -212,6 +212,9 @@ importers:
       '@sourceweft/model-gateway':
         specifier: workspace:*
         version: link:../../packages/model-gateway
+      '@sourceweft/sandbox-volume':
+        specifier: workspace:*
+        version: link:../../packages/sandbox-volume
       '@sourceweft/skill-format':
         specifier: workspace:*
         version: link:../../packages/skill-format
