@@ -78,6 +78,8 @@ test("each request gets its own deduplicating job id with bounded retries", asyn
   expect(queue.enqueue.mock.calls[0]![2]).toMatchObject({
     attempts: 3,
     backoff: { type: "exponential", delay: 1_000 },
+    // Behind tenant work: jobs with no priority are taken first.
+    priority: 10,
     removeOnComplete: true,
   });
   expect(jobs.jobId("v")).toBe("thing-overview_v");

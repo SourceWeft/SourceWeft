@@ -10,12 +10,21 @@ import type {
 
 /**
  * The durable side of overview generation: one BullMQ job per version on the
- * primary queue, reserved in the database before it is queued, retried a
- * bounded number of times, and recovered when a process dies between the
- * reservation and the queue.
+ * primary queue, reserved in the database before it is queued, queued behind
+ * tenant work, retried a bounded number of times, and recovered when a
+ * process dies between the reservation and the queue.
  */
 
 export type OverviewJobReason = "scheduled" | "regenerate";
+
+/**
+ * Every overview job's queue priority. BullMQ takes jobs with no priority
+ * (chat turns, titles, syncs, parses) before any prioritized job, so however
+ * large the scheduler's batch, it never delays tenant work; a forced
+ * regeneration from administration waits the same way. All overview kinds
+ * share the value: the batch itself is their order.
+ */
+export const OVERVIEW_JOB_PRIORITY = 10;
 
 /**
  * One kind's job. The payload carries the version (the only field the
@@ -105,6 +114,7 @@ export function createOverviewJobs<
           jobId: options.jobId ?? `${jobId(versionId)}_${state.requestId}`,
           attempts: spec.attempts,
           backoff: { type: "exponential", delay: spec.backoffMs },
+          priority: OVERVIEW_JOB_PRIORITY,
           removeOnComplete: true,
           removeOnFail: { count: 5_000 },
         },

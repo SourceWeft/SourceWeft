@@ -188,6 +188,44 @@ describe("the MCP overview tick", () => {
     assert.equal(tick.enqueued.length, MCP_OVERVIEW_BATCH_SIZE);
   });
 
+  test("the tick's batch size is the scheduler's, and the scan reads at least a batch", async () => {
+    function ticking() {
+      const scans: unknown[] = [];
+      const tick = deps({
+        findCandidates: async (input) => {
+          scans.push(input);
+          return {
+            candidates: Array.from({ length: 4 }, (_, index) => ({
+              ...fresh(`n${index}`),
+              attempted: false,
+            })),
+            next: "",
+          };
+        },
+      });
+      return { tick, scans };
+    }
+
+    const small = ticking();
+    const fewer = await enqueueMcpOverviews(
+      small.tick,
+      { after: "" },
+      { batchSize: 2 },
+    );
+    assert.equal(fewer.queued, 2);
+    assert.equal(small.tick.enqueued.length, 2);
+    assert.deepEqual(small.scans, [{ limit: 200, after: "", batchSize: 2 }]);
+
+    const large = ticking();
+    const all = await enqueueMcpOverviews(
+      large.tick,
+      { after: "" },
+      { batchSize: 500 },
+    );
+    assert.equal(all.queued, 4);
+    assert.deepEqual(large.scans, [{ limit: 500, after: "", batchSize: 500 }]);
+  });
+
   test("the job is named and bounded like the skill kind's", () => {
     assert.equal(mcpOverviewJobs.spec.name, MCP_OVERVIEW_GENERATE_JOB);
     assert.equal(MCP_OVERVIEW_GENERATE_JOB, "mcp-overview-generate");

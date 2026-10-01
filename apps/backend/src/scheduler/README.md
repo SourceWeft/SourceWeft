@@ -55,10 +55,10 @@ backoff and the attempt cap are constants in
 
 ## MCP AI overviews
 
-Every 5 minutes (`MCP_OVERVIEW_SCHEDULE_INTERVAL_MS`), while the system model
-is ready, the scheduler queues up to 20 `mcp-overview-generate` jobs
-(`modules/market/overview/queue.ts`, through the catalog overview engine's
-batch). A candidate is the latest published version of a published, public
+Every `MCP_OVERVIEW_INTERVAL_MS` (5 minutes by default), while the system
+model is ready, the scheduler queues up to `MCP_OVERVIEW_BATCH_SIZE` (20 by
+default) `mcp-overview-generate` jobs (`modules/market/overview/queue.ts`,
+through the catalog overview engine's batch). A candidate is the latest published version of a published, public
 server whose README is no longer `pending`: first those never analysed,
 installed servers first, then web-executable ones, then the rest; then, from a
 window of 500 analysed versions that moves through the catalog, those whose
@@ -67,7 +67,16 @@ manifest, packages, description, prompt or taxonomy changed) and failures worth
 another try. A failure that keeps failing is tried again only after the README
 is read again. The README fetch settling a version is what makes it a
 candidate; there is no other coupling. It only queues; the worker calls the
-system model. There is no env variable.
+system model.
+
+The pace is the two variables above, read by the scheduler (`config.market`):
+the batch is 1 to 1000 versions and the interval 10 seconds to 24 hours, and a
+value outside that or not an integer fails startup. The defaults work a large
+catalog through at about 260 overviews an hour; raise them for a while to get
+through a backlog, then put them back. Overview jobs carry a low queue
+priority (`OVERVIEW_JOB_PRIORITY` in `modules/catalog-overview/jobs.ts`), so
+the worker takes jobs with no priority — chat turns, titles, syncs, parses —
+first however large the batch.
 
 Current phase note:
 
