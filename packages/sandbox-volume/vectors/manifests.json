@@ -1,0 +1,1008 @@
+{
+  "accepted": {
+    "context": {
+      "volume": "vol0123456789",
+      "attachment": "att0123456789",
+      "head": 0,
+      "packPrefix": "att/att0123456789/p/",
+      "ownKey": "att/att0123456789/m/0/1",
+      "knownChunks": [
+        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      ],
+      "packs": {
+        "att/att0123456789/p/000000": 2048
+      }
+    },
+    "manifest": {
+      "v": 1,
+      "volume": "vol0123456789",
+      "attachment": "att0123456789",
+      "seq": 1,
+      "base": 0,
+      "trigger": "flush",
+      "upserts": [
+        {
+          "p": "src/app.ts",
+          "k": "f",
+          "m": 420,
+          "t": 1700000000000000000,
+          "s": 1234,
+          "c": [
+            [
+              "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              1234
+            ]
+          ]
+        },
+        {
+          "p": "src",
+          "k": "d",
+          "m": 493
+        },
+        {
+          "p": "link",
+          "k": "l",
+          "m": 511,
+          "l": "src/app.ts"
+        }
+      ],
+      "deletes": [
+        "old/file.txt"
+      ],
+      "chunks": {
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": [
+          "att/att0123456789/p/000000",
+          0,
+          812,
+          1234
+        ]
+      },
+      "packs": [
+        [
+          "att/att0123456789/p/000000",
+          2048
+        ]
+      ]
+    }
+  },
+  "rejected": [
+    {
+      "name": "wrong protocol version",
+      "manifest": {
+        "v": 2,
+        "volume": "vol0123456789",
+        "attachment": "att0123456789",
+        "seq": 1,
+        "base": 0,
+        "trigger": "flush",
+        "upserts": [
+          {
+            "p": "src/app.ts",
+            "k": "f",
+            "m": 420,
+            "t": 1700000000000000000,
+            "s": 1234,
+            "c": [
+              [
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                1234
+              ]
+            ]
+          },
+          {
+            "p": "src",
+            "k": "d",
+            "m": 493
+          },
+          {
+            "p": "link",
+            "k": "l",
+            "m": 511,
+            "l": "src/app.ts"
+          }
+        ],
+        "deletes": [
+          "old/file.txt"
+        ],
+        "chunks": {
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": [
+            "att/att0123456789/p/000000",
+            0,
+            812,
+            1234
+          ]
+        },
+        "packs": [
+          [
+            "att/att0123456789/p/000000",
+            2048
+          ]
+        ]
+      },
+      "reason": "identity mismatch"
+    },
+    {
+      "name": "wrong volume",
+      "manifest": {
+        "v": 1,
+        "volume": "other",
+        "attachment": "att0123456789",
+        "seq": 1,
+        "base": 0,
+        "trigger": "flush",
+        "upserts": [
+          {
+            "p": "src/app.ts",
+            "k": "f",
+            "m": 420,
+            "t": 1700000000000000000,
+            "s": 1234,
+            "c": [
+              [
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                1234
+              ]
+            ]
+          },
+          {
+            "p": "src",
+            "k": "d",
+            "m": 493
+          },
+          {
+            "p": "link",
+            "k": "l",
+            "m": 511,
+            "l": "src/app.ts"
+          }
+        ],
+        "deletes": [
+          "old/file.txt"
+        ],
+        "chunks": {
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": [
+            "att/att0123456789/p/000000",
+            0,
+            812,
+            1234
+          ]
+        },
+        "packs": [
+          [
+            "att/att0123456789/p/000000",
+            2048
+          ]
+        ]
+      },
+      "reason": "identity mismatch"
+    },
+    {
+      "name": "wrong attachment",
+      "manifest": {
+        "v": 1,
+        "volume": "vol0123456789",
+        "attachment": "other",
+        "seq": 1,
+        "base": 0,
+        "trigger": "flush",
+        "upserts": [
+          {
+            "p": "src/app.ts",
+            "k": "f",
+            "m": 420,
+            "t": 1700000000000000000,
+            "s": 1234,
+            "c": [
+              [
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                1234
+              ]
+            ]
+          },
+          {
+            "p": "src",
+            "k": "d",
+            "m": 493
+          },
+          {
+            "p": "link",
+            "k": "l",
+            "m": 511,
+            "l": "src/app.ts"
+          }
+        ],
+        "deletes": [
+          "old/file.txt"
+        ],
+        "chunks": {
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": [
+            "att/att0123456789/p/000000",
+            0,
+            812,
+            1234
+          ]
+        },
+        "packs": [
+          [
+            "att/att0123456789/p/000000",
+            2048
+          ]
+        ]
+      },
+      "reason": "identity mismatch"
+    },
+    {
+      "name": "seq skips ahead",
+      "manifest": {
+        "v": 1,
+        "volume": "vol0123456789",
+        "attachment": "att0123456789",
+        "seq": 3,
+        "base": 2,
+        "trigger": "flush",
+        "upserts": [
+          {
+            "p": "src/app.ts",
+            "k": "f",
+            "m": 420,
+            "t": 1700000000000000000,
+            "s": 1234,
+            "c": [
+              [
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                1234
+              ]
+            ]
+          },
+          {
+            "p": "src",
+            "k": "d",
+            "m": 493
+          },
+          {
+            "p": "link",
+            "k": "l",
+            "m": 511,
+            "l": "src/app.ts"
+          }
+        ],
+        "deletes": [
+          "old/file.txt"
+        ],
+        "chunks": {
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": [
+            "att/att0123456789/p/000000",
+            0,
+            812,
+            1234
+          ]
+        },
+        "packs": [
+          [
+            "att/att0123456789/p/000000",
+            2048
+          ]
+        ]
+      },
+      "reason": "sequence gap"
+    },
+    {
+      "name": "base does not match head",
+      "manifest": {
+        "v": 1,
+        "volume": "vol0123456789",
+        "attachment": "att0123456789",
+        "seq": 1,
+        "base": 5,
+        "trigger": "flush",
+        "upserts": [
+          {
+            "p": "src/app.ts",
+            "k": "f",
+            "m": 420,
+            "t": 1700000000000000000,
+            "s": 1234,
+            "c": [
+              [
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                1234
+              ]
+            ]
+          },
+          {
+            "p": "src",
+            "k": "d",
+            "m": 493
+          },
+          {
+            "p": "link",
+            "k": "l",
+            "m": 511,
+            "l": "src/app.ts"
+          }
+        ],
+        "deletes": [
+          "old/file.txt"
+        ],
+        "chunks": {
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": [
+            "att/att0123456789/p/000000",
+            0,
+            812,
+            1234
+          ]
+        },
+        "packs": [
+          [
+            "att/att0123456789/p/000000",
+            2048
+          ]
+        ]
+      },
+      "reason": "sequence gap"
+    },
+    {
+      "name": "path traversal",
+      "manifest": {
+        "v": 1,
+        "volume": "vol0123456789",
+        "attachment": "att0123456789",
+        "seq": 1,
+        "base": 0,
+        "trigger": "flush",
+        "upserts": [
+          {
+            "p": "../etc/passwd",
+            "k": "f",
+            "m": 420,
+            "s": 0,
+            "c": []
+          }
+        ],
+        "deletes": [
+          "old/file.txt"
+        ],
+        "chunks": {
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": [
+            "att/att0123456789/p/000000",
+            0,
+            812,
+            1234
+          ]
+        },
+        "packs": [
+          [
+            "att/att0123456789/p/000000",
+            2048
+          ]
+        ]
+      },
+      "reason": "invalid path"
+    },
+    {
+      "name": "absolute path",
+      "manifest": {
+        "v": 1,
+        "volume": "vol0123456789",
+        "attachment": "att0123456789",
+        "seq": 1,
+        "base": 0,
+        "trigger": "flush",
+        "upserts": [
+          {
+            "p": "/etc/passwd",
+            "k": "f",
+            "m": 420,
+            "s": 0,
+            "c": []
+          }
+        ],
+        "deletes": [
+          "old/file.txt"
+        ],
+        "chunks": {
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": [
+            "att/att0123456789/p/000000",
+            0,
+            812,
+            1234
+          ]
+        },
+        "packs": [
+          [
+            "att/att0123456789/p/000000",
+            2048
+          ]
+        ]
+      },
+      "reason": "invalid path"
+    },
+    {
+      "name": "helper state path",
+      "manifest": {
+        "v": 1,
+        "volume": "vol0123456789",
+        "attachment": "att0123456789",
+        "seq": 1,
+        "base": 0,
+        "trigger": "flush",
+        "upserts": [
+          {
+            "p": ".sourceweft/identity",
+            "k": "f",
+            "m": 420,
+            "s": 0,
+            "c": []
+          }
+        ],
+        "deletes": [
+          "old/file.txt"
+        ],
+        "chunks": {
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": [
+            "att/att0123456789/p/000000",
+            0,
+            812,
+            1234
+          ]
+        },
+        "packs": [
+          [
+            "att/att0123456789/p/000000",
+            2048
+          ]
+        ]
+      },
+      "reason": "invalid path"
+    },
+    {
+      "name": "control character in path",
+      "manifest": {
+        "v": 1,
+        "volume": "vol0123456789",
+        "attachment": "att0123456789",
+        "seq": 1,
+        "base": 0,
+        "trigger": "flush",
+        "upserts": [
+          {
+            "p": "a\u0001b",
+            "k": "d",
+            "m": 493
+          }
+        ],
+        "deletes": [
+          "old/file.txt"
+        ],
+        "chunks": {
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": [
+            "att/att0123456789/p/000000",
+            0,
+            812,
+            1234
+          ]
+        },
+        "packs": [
+          [
+            "att/att0123456789/p/000000",
+            2048
+          ]
+        ]
+      },
+      "reason": "invalid path"
+    },
+    {
+      "name": "unknown kind",
+      "manifest": {
+        "v": 1,
+        "volume": "vol0123456789",
+        "attachment": "att0123456789",
+        "seq": 1,
+        "base": 0,
+        "trigger": "flush",
+        "upserts": [
+          {
+            "p": "x",
+            "k": "s",
+            "m": 420
+          }
+        ],
+        "deletes": [
+          "old/file.txt"
+        ],
+        "chunks": {
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": [
+            "att/att0123456789/p/000000",
+            0,
+            812,
+            1234
+          ]
+        },
+        "packs": [
+          [
+            "att/att0123456789/p/000000",
+            2048
+          ]
+        ]
+      },
+      "reason": "invalid kind"
+    },
+    {
+      "name": "mode out of range",
+      "manifest": {
+        "v": 1,
+        "volume": "vol0123456789",
+        "attachment": "att0123456789",
+        "seq": 1,
+        "base": 0,
+        "trigger": "flush",
+        "upserts": [
+          {
+            "p": "x",
+            "k": "d",
+            "m": 4096
+          }
+        ],
+        "deletes": [
+          "old/file.txt"
+        ],
+        "chunks": {
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": [
+            "att/att0123456789/p/000000",
+            0,
+            812,
+            1234
+          ]
+        },
+        "packs": [
+          [
+            "att/att0123456789/p/000000",
+            2048
+          ]
+        ]
+      },
+      "reason": "invalid mode"
+    },
+    {
+      "name": "symlink target with NUL",
+      "manifest": {
+        "v": 1,
+        "volume": "vol0123456789",
+        "attachment": "att0123456789",
+        "seq": 1,
+        "base": 0,
+        "trigger": "flush",
+        "upserts": [
+          {
+            "p": "l",
+            "k": "l",
+            "m": 511,
+            "l": "a\u0000b"
+          }
+        ],
+        "deletes": [
+          "old/file.txt"
+        ],
+        "chunks": {
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": [
+            "att/att0123456789/p/000000",
+            0,
+            812,
+            1234
+          ]
+        },
+        "packs": [
+          [
+            "att/att0123456789/p/000000",
+            2048
+          ]
+        ]
+      },
+      "reason": "invalid symlink target"
+    },
+    {
+      "name": "negative size",
+      "manifest": {
+        "v": 1,
+        "volume": "vol0123456789",
+        "attachment": "att0123456789",
+        "seq": 1,
+        "base": 0,
+        "trigger": "flush",
+        "upserts": [
+          {
+            "p": "x",
+            "k": "f",
+            "m": 420,
+            "s": -1,
+            "c": []
+          }
+        ],
+        "deletes": [
+          "old/file.txt"
+        ],
+        "chunks": {
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": [
+            "att/att0123456789/p/000000",
+            0,
+            812,
+            1234
+          ]
+        },
+        "packs": [
+          [
+            "att/att0123456789/p/000000",
+            2048
+          ]
+        ]
+      },
+      "reason": "invalid size"
+    },
+    {
+      "name": "unknown chunk referenced",
+      "manifest": {
+        "v": 1,
+        "volume": "vol0123456789",
+        "attachment": "att0123456789",
+        "seq": 1,
+        "base": 0,
+        "trigger": "flush",
+        "upserts": [
+          {
+            "p": "x",
+            "k": "f",
+            "m": 420,
+            "s": 5,
+            "c": [
+              [
+                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                5
+              ]
+            ]
+          }
+        ],
+        "deletes": [
+          "old/file.txt"
+        ],
+        "chunks": {
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": [
+            "att/att0123456789/p/000000",
+            0,
+            812,
+            1234
+          ]
+        },
+        "packs": [
+          [
+            "att/att0123456789/p/000000",
+            2048
+          ]
+        ]
+      },
+      "reason": "unknown chunk"
+    },
+    {
+      "name": "chunk lengths do not add up",
+      "manifest": {
+        "v": 1,
+        "volume": "vol0123456789",
+        "attachment": "att0123456789",
+        "seq": 1,
+        "base": 0,
+        "trigger": "flush",
+        "upserts": [
+          {
+            "p": "x",
+            "k": "f",
+            "m": 420,
+            "s": 9,
+            "c": [
+              [
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                1234
+              ]
+            ]
+          }
+        ],
+        "deletes": [
+          "old/file.txt"
+        ],
+        "chunks": {
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": [
+            "att/att0123456789/p/000000",
+            0,
+            812,
+            1234
+          ]
+        },
+        "packs": [
+          [
+            "att/att0123456789/p/000000",
+            2048
+          ]
+        ]
+      },
+      "reason": "do not add up"
+    },
+    {
+      "name": "chunk in another attachment's pack",
+      "manifest": {
+        "v": 1,
+        "volume": "vol0123456789",
+        "attachment": "att0123456789",
+        "seq": 1,
+        "base": 0,
+        "trigger": "flush",
+        "upserts": [
+          {
+            "p": "src/app.ts",
+            "k": "f",
+            "m": 420,
+            "t": 1700000000000000000,
+            "s": 1234,
+            "c": [
+              [
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                1234
+              ]
+            ]
+          },
+          {
+            "p": "src",
+            "k": "d",
+            "m": 493
+          },
+          {
+            "p": "link",
+            "k": "l",
+            "m": 511,
+            "l": "src/app.ts"
+          }
+        ],
+        "deletes": [
+          "old/file.txt"
+        ],
+        "chunks": {
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": [
+            "att/other/p/000000",
+            0,
+            812,
+            1234
+          ]
+        },
+        "packs": [
+          [
+            "att/att0123456789/p/000000",
+            2048
+          ]
+        ]
+      },
+      "reason": "outside this attachment's packs"
+    },
+    {
+      "name": "pack missing from the bucket",
+      "manifest": {
+        "v": 1,
+        "volume": "vol0123456789",
+        "attachment": "att0123456789",
+        "seq": 1,
+        "base": 0,
+        "trigger": "flush",
+        "upserts": [
+          {
+            "p": "src/app.ts",
+            "k": "f",
+            "m": 420,
+            "t": 1700000000000000000,
+            "s": 1234,
+            "c": [
+              [
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                1234
+              ]
+            ]
+          },
+          {
+            "p": "src",
+            "k": "d",
+            "m": 493
+          },
+          {
+            "p": "link",
+            "k": "l",
+            "m": 511,
+            "l": "src/app.ts"
+          }
+        ],
+        "deletes": [
+          "old/file.txt"
+        ],
+        "chunks": {
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": [
+            "att/att0123456789/p/000001",
+            0,
+            812,
+            1234
+          ]
+        },
+        "packs": [
+          [
+            "att/att0123456789/p/000000",
+            2048
+          ]
+        ]
+      },
+      "reason": "not in the bucket"
+    },
+    {
+      "name": "chunk past the end of its pack",
+      "manifest": {
+        "v": 1,
+        "volume": "vol0123456789",
+        "attachment": "att0123456789",
+        "seq": 1,
+        "base": 0,
+        "trigger": "flush",
+        "upserts": [
+          {
+            "p": "src/app.ts",
+            "k": "f",
+            "m": 420,
+            "t": 1700000000000000000,
+            "s": 1234,
+            "c": [
+              [
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                1234
+              ]
+            ]
+          },
+          {
+            "p": "src",
+            "k": "d",
+            "m": 493
+          },
+          {
+            "p": "link",
+            "k": "l",
+            "m": 511,
+            "l": "src/app.ts"
+          }
+        ],
+        "deletes": [
+          "old/file.txt"
+        ],
+        "chunks": {
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": [
+            "att/att0123456789/p/000000",
+            2000,
+            812,
+            1234
+          ]
+        },
+        "packs": [
+          [
+            "att/att0123456789/p/000000",
+            2048
+          ]
+        ]
+      },
+      "reason": "past the end of its pack"
+    },
+    {
+      "name": "malformed chunk id",
+      "manifest": {
+        "v": 1,
+        "volume": "vol0123456789",
+        "attachment": "att0123456789",
+        "seq": 1,
+        "base": 0,
+        "trigger": "flush",
+        "upserts": [],
+        "deletes": [
+          "old/file.txt"
+        ],
+        "chunks": {
+          "zz": [
+            "att/att0123456789/p/000000",
+            0,
+            812,
+            1234
+          ]
+        },
+        "packs": [
+          [
+            "att/att0123456789/p/000000",
+            2048
+          ]
+        ]
+      },
+      "reason": "malformed chunk record"
+    },
+    {
+      "name": "chunk raw length over the limit",
+      "manifest": {
+        "v": 1,
+        "volume": "vol0123456789",
+        "attachment": "att0123456789",
+        "seq": 1,
+        "base": 0,
+        "trigger": "flush",
+        "upserts": [],
+        "deletes": [
+          "old/file.txt"
+        ],
+        "chunks": {
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": [
+            "att/att0123456789/p/000000",
+            0,
+            812,
+            68157440
+          ]
+        },
+        "packs": [
+          [
+            "att/att0123456789/p/000000",
+            2048
+          ]
+        ]
+      },
+      "reason": "chunk bounds"
+    },
+    {
+      "name": "invalid delete path",
+      "manifest": {
+        "v": 1,
+        "volume": "vol0123456789",
+        "attachment": "att0123456789",
+        "seq": 1,
+        "base": 0,
+        "trigger": "flush",
+        "upserts": [
+          {
+            "p": "src/app.ts",
+            "k": "f",
+            "m": 420,
+            "t": 1700000000000000000,
+            "s": 1234,
+            "c": [
+              [
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                1234
+              ]
+            ]
+          },
+          {
+            "p": "src",
+            "k": "d",
+            "m": 493
+          },
+          {
+            "p": "link",
+            "k": "l",
+            "m": 511,
+            "l": "src/app.ts"
+          }
+        ],
+        "deletes": [
+          "a/../b"
+        ],
+        "chunks": {
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": [
+            "att/att0123456789/p/000000",
+            0,
+            812,
+            1234
+          ]
+        },
+        "packs": [
+          [
+            "att/att0123456789/p/000000",
+            2048
+          ]
+        ]
+      },
+      "reason": "invalid delete path"
+    }
+  ]
+}
