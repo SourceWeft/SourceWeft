@@ -275,19 +275,34 @@ export class SandboxManager {
   }
 
   private volumeScope(context: SandboxRuntimeContext): SandboxVolumeScope {
-    return { teamId: context.teamId, workspaceId: context.workspaceId, threadId: context.threadId };
+    return {
+      teamId: context.teamId,
+      workspaceId: context.workspaceId,
+      threadId: context.threadId,
+    };
   }
 
   /** Attach the thread's volume to a (new or reused) sandbox once per manager. */
-  private async ensureVolumeAttached(sandbox: SandboxRef, context: SandboxRuntimeContext): Promise<void> {
+  private async ensureVolumeAttached(
+    sandbox: SandboxRef,
+    context: SandboxRuntimeContext,
+  ): Promise<void> {
     const volume = this.input.volume;
-    if (!volume || this.volumeAttachments.has(sandbox.providerSandboxId)) return;
+    if (!volume || this.volumeAttachments.has(sandbox.providerSandboxId))
+      return;
     let run = this.volumeAttachRuns.get(sandbox.providerSandboxId);
     if (!run) {
       run = volume
-        .attach({ scope: this.volumeScope(context), sandboxId: sandbox.providerSandboxId, executor: this.volumeExecutor(sandbox) })
+        .attach({
+          scope: this.volumeScope(context),
+          sandboxId: sandbox.providerSandboxId,
+          executor: this.volumeExecutor(sandbox),
+        })
         .then((attached) => {
-          this.volumeAttachments.set(sandbox.providerSandboxId, attached.attachmentId);
+          this.volumeAttachments.set(
+            sandbox.providerSandboxId,
+            attached.attachmentId,
+          );
         })
         .finally(() => this.volumeAttachRuns.delete(sandbox.providerSandboxId));
       this.volumeAttachRuns.set(sandbox.providerSandboxId, run);
@@ -297,7 +312,11 @@ export class SandboxManager {
 
   /** The command to hand to the provider: wrapped with the volume's identity check and sync barrier when a volume is attached. */
   volumeWrapCommand(sandbox: SandboxRef, command: string): string {
-    if (!this.input.volume || !this.volumeAttachments.has(sandbox.providerSandboxId)) return command;
+    if (
+      !this.input.volume ||
+      !this.volumeAttachments.has(sandbox.providerSandboxId)
+    )
+      return command;
     return this.input.volume.wrapCommand(command);
   }
 
@@ -306,30 +325,56 @@ export class SandboxManager {
    * replaced underneath us: the caller must re-attach (`reattachVolume`) and run the command again,
    * which is safe because the wrapper never ran it.
    */
-  async volumeParseResult(sandbox: SandboxRef, result: SandboxExecuteResult): Promise<SandboxExecuteResult | null> {
+  async volumeParseResult(
+    sandbox: SandboxRef,
+    result: SandboxExecuteResult,
+  ): Promise<SandboxExecuteResult | null> {
     const volume = this.input.volume;
     const attachmentId = this.volumeAttachments.get(sandbox.providerSandboxId);
     if (!volume || !attachmentId) return result;
     try {
-      const parsed = await volume.parseResult({ attachmentId, output: result.output, exitCode: result.exitCode, executor: this.volumeExecutor(sandbox) });
+      const parsed = await volume.parseResult({
+        attachmentId,
+        output: result.output,
+        exitCode: result.exitCode,
+        executor: this.volumeExecutor(sandbox),
+      });
       if (!parsed.sync.persisted) {
-        this.input.logWarn?.("sandbox.volume.sync_pending", { provider: this.input.provider.id, sandboxId: sandbox.id, attachmentId });
+        this.input.logWarn?.("sandbox.volume.sync_pending", {
+          provider: this.input.provider.id,
+          sandboxId: sandbox.id,
+          attachmentId,
+        });
       }
       return { ...result, output: parsed.output, exitCode: parsed.exitCode };
     } catch (error) {
       if (volume.isContainerReplacedError(error)) {
-        this.input.logWarn?.("sandbox.volume.container_replaced", { provider: this.input.provider.id, sandboxId: sandbox.id, attachmentId });
+        this.input.logWarn?.("sandbox.volume.container_replaced", {
+          provider: this.input.provider.id,
+          sandboxId: sandbox.id,
+          attachmentId,
+        });
         return null;
       }
       throw error;
     }
   }
 
-  async reattachVolume(sandbox: SandboxRef, context: SandboxRuntimeContext): Promise<void> {
+  async reattachVolume(
+    sandbox: SandboxRef,
+    context: SandboxRuntimeContext,
+  ): Promise<void> {
     const volume = this.input.volume;
     if (!volume) return;
-    const attached = await volume.onContainerReplaced({ scope: this.volumeScope(context), sandboxId: sandbox.providerSandboxId, executor: this.volumeExecutor(sandbox) });
-    this.volumeAttachments.set(sandbox.providerSandboxId, attached.attachmentId);
+    const attached = await volume.onContainerReplaced({
+      scope: this.volumeScope(context),
+      sandboxId: sandbox.providerSandboxId,
+      executor: this.volumeExecutor(sandbox),
+    });
+    this.volumeAttachments.set(
+      sandbox.providerSandboxId,
+      attached.attachmentId,
+    );
   }
 
   /** Full-scan barrier before a sandbox goes away; a no-op without a volume. */
@@ -337,7 +382,10 @@ export class SandboxManager {
     const volume = this.input.volume;
     const attachmentId = this.volumeAttachments.get(sandbox.providerSandboxId);
     if (!volume || !attachmentId) return;
-    await volume.checkpoint({ attachmentId, executor: this.volumeExecutor(sandbox) });
+    await volume.checkpoint({
+      attachmentId,
+      executor: this.volumeExecutor(sandbox),
+    });
   }
 
   // A failed acquisition is shared too: siblings must not each start a new
@@ -655,7 +703,10 @@ export class SandboxManager {
         });
       } catch (error) {
         const delayMs = SANDBOX_CREATE_RETRY_DELAYS_MS[attempt];
-        if (delayMs === undefined || !isSandboxProviderUnavailableError(error)) {
+        if (
+          delayMs === undefined ||
+          !isSandboxProviderUnavailableError(error)
+        ) {
           throw error;
         }
         this.input.logWarn?.("sandbox.create.retry", {

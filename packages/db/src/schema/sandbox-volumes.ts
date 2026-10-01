@@ -47,8 +47,12 @@ export const sandboxVolumes = pgTable(
     /** Monotonic version: every applied manifest and every rollback advances it by one. */
     headSeq: bigint("head_seq", { mode: "number" }).notNull().default(0),
     fileCount: integer("file_count").notNull().default(0),
-    logicalBytes: bigint("logical_bytes", { mode: "number" }).notNull().default(0),
-    storedBytes: bigint("stored_bytes", { mode: "number" }).notNull().default(0),
+    logicalBytes: bigint("logical_bytes", { mode: "number" })
+      .notNull()
+      .default(0),
+    storedBytes: bigint("stored_bytes", { mode: "number" })
+      .notNull()
+      .default(0),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .defaultNow(),
@@ -79,10 +83,15 @@ export const sandboxVolumeEntries = pgTable(
     path: text("path").notNull(),
     kind: text("kind").$type<EntryKind>().notNull(),
     mode: integer("mode").notNull(),
-    mtimeNs: bigint("mtime_ns", { mode: "bigint" }).notNull().default(sql`0`),
+    mtimeNs: bigint("mtime_ns", { mode: "bigint" })
+      .notNull()
+      .default(sql`0`),
     sizeBytes: bigint("size_bytes", { mode: "number" }).notNull().default(0),
     linkTarget: text("link_target"),
-    chunks: jsonb("chunks").$type<ChunkList>().notNull().default(sql`'[]'::jsonb`),
+    chunks: jsonb("chunks")
+      .$type<ChunkList>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     /** Sequence number of the manifest that produced this version of the entry. */
     seq: bigint("seq", { mode: "number" }).notNull(),
   },
@@ -150,11 +159,19 @@ export const sandboxVolumeAttachments = pgTable(
     bootId: text("boot_id"),
     /** A rejected chain starts a new epoch: new manifest slots, same attachment. */
     epoch: integer("epoch").notNull().default(0),
-    status: text("status").$type<AttachmentStatus>().notNull().default("active"),
+    status: text("status")
+      .$type<AttachmentStatus>()
+      .notNull()
+      .default("active"),
     /** Highest pack index and manifest seq for which slots were issued, and when they expire. */
     slotsUntilPack: integer("slots_until_pack").notNull().default(0),
-    slotsUntilSeq: bigint("slots_until_seq", { mode: "number" }).notNull().default(0),
-    slotsExpireAt: timestamp("slots_expire_at", { withTimezone: true, mode: "date" }),
+    slotsUntilSeq: bigint("slots_until_seq", { mode: "number" })
+      .notNull()
+      .default(0),
+    slotsExpireAt: timestamp("slots_expire_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .defaultNow(),
@@ -164,7 +181,10 @@ export const sandboxVolumeAttachments = pgTable(
       "sandbox_volume_attachments_status_check",
       sql`${table.status} in ('active', 'superseded', 'rejected')`,
     ),
-    index("sandbox_volume_attachments_volume_idx").on(table.volumeId, table.status),
+    index("sandbox_volume_attachments_volume_idx").on(
+      table.volumeId,
+      table.status,
+    ),
   ],
 );
 
@@ -187,8 +207,14 @@ export const sandboxVolumeEntryVersions = pgTable(
     toSeq: bigint("to_seq", { mode: "number" }).notNull(),
   },
   (table) => [
-    index("sandbox_volume_entry_versions_to_seq_idx").on(table.volumeId, table.toSeq),
-    index("sandbox_volume_entry_versions_path_idx").on(table.volumeId, table.path),
+    index("sandbox_volume_entry_versions_to_seq_idx").on(
+      table.volumeId,
+      table.toSeq,
+    ),
+    index("sandbox_volume_entry_versions_path_idx").on(
+      table.volumeId,
+      table.path,
+    ),
   ],
 );
 
@@ -206,5 +232,10 @@ export const sandboxVolumeRejects = pgTable(
       .notNull()
       .defaultNow(),
   },
-  (table) => [index("sandbox_volume_rejects_volume_idx").on(table.volumeId, table.createdAt)],
+  (table) => [
+    index("sandbox_volume_rejects_volume_idx").on(
+      table.volumeId,
+      table.createdAt,
+    ),
+  ],
 );

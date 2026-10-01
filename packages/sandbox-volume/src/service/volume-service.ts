@@ -9,7 +9,13 @@ import { ManifestRejected, parseManifestObject } from "../protocol/manifest";
 import type { ChunkLocation, RestorePlan, SlotSet } from "../protocol/types";
 import { validateManifest } from "../protocol/validate";
 import type { ObjectStore } from "../store/object-store";
-import { VolumeRepository, type AttachmentRow, type VolumeDatabase, type VolumeRow, type VolumeScope } from "./repository";
+import {
+  VolumeRepository,
+  type AttachmentRow,
+  type VolumeDatabase,
+  type VolumeRow,
+  type VolumeScope,
+} from "./repository";
 
 export type VolumeServiceConfig = {
   db: VolumeDatabase;
@@ -21,10 +27,28 @@ export type VolumeServiceConfig = {
   now?: () => Date;
 };
 
-export type WalEntry = { seq: number; trigger?: string; upserts: number; deletes: number; tsMs?: number; unstable: number } | { seq: number; rejected: string };
-export type ApplyWalResult = { applied: number; entries: WalEntry[]; rejected: string | null };
+export type WalEntry =
+  | {
+      seq: number;
+      trigger?: string;
+      upserts: number;
+      deletes: number;
+      tsMs?: number;
+      unstable: number;
+    }
+  | { seq: number; rejected: string };
+export type ApplyWalResult = {
+  applied: number;
+  entries: WalEntry[];
+  rejected: string | null;
+};
 
-export type AttachFiles = { planUrl: string; slotsUrl: string; planBytes: number; planSeq: number };
+export type AttachFiles = {
+  planUrl: string;
+  slotsUrl: string;
+  planBytes: number;
+  planSeq: number;
+};
 
 function id(bytes = 6): string {
   return randomBytes(bytes).toString("hex");
@@ -59,11 +83,19 @@ export class VolumeService {
    * Bind a sandbox instance to the volume. Whatever the previous attachment uploaded is applied
    * first, so nothing a dead sandbox managed to persist is lost.
    */
-  async attach(volumeId: string, sandboxId: string | null): Promise<AttachmentRow> {
+  async attach(
+    volumeId: string,
+    sandboxId: string | null,
+  ): Promise<AttachmentRow> {
     const previous = await this.repo.activeAttachment(volumeId);
     if (previous) await this.applyWal(previous.id);
     const head = await this.repo.head(volumeId);
-    return this.repo.createAttachment({ id: `a${id(6)}`, volumeId, sandboxId, baseSeq: head });
+    return this.repo.createAttachment({
+      id: `a${id(6)}`,
+      volumeId,
+      sandboxId,
+      baseSeq: head,
+    });
   }
 
   async recordBootId(attachmentId: string, bootId: string): Promise<void> {
@@ -86,30 +118,59 @@ export class VolumeService {
     const manifests: Record<string, string> = {};
     const firstPack = attachment.slotsUntilPack;
     for (let n = firstPack; n < firstPack + PACK_SLOTS_PER_ISSUE; n++) {
-      packs[String(n)] = await this.config.store.presignWriteOnce(`${prefix}${this.packPrefix(attachment)}${String(n).padStart(6, "0")}`, this.ttl);
+      packs[String(n)] = await this.config.store.presignWriteOnce(
+        `${prefix}${this.packPrefix(attachment)}${String(n).padStart(6, "0")}`,
+        this.ttl,
+      );
     }
     for (let s = head + 1; s <= head + MANIFEST_SLOTS_PER_ISSUE; s++) {
-      manifests[String(s)] = await this.config.store.presignWriteOnce(`${prefix}${this.manifestPrefix(attachment)}${s}`, this.ttl);
+      manifests[String(s)] = await this.config.store.presignWriteOnce(
+        `${prefix}${this.manifestPrefix(attachment)}${s}`,
+        this.ttl,
+      );
     }
     await this.repo.updateAttachment(attachment.id, {
       slotsUntilPack: firstPack + PACK_SLOTS_PER_ISSUE,
       slotsUntilSeq: head + MANIFEST_SLOTS_PER_ISSUE,
       slotsExpireAt: new Date(this.now().getTime() + this.ttl * 1000),
     });
-    return { volume: attachment.volumeId, attachment: attachment.id, pack_prefix: this.packPrefix(attachment), manifest_prefix: this.manifestPrefix(attachment), packs, manifests };
+    return {
+      volume: attachment.volumeId,
+      attachment: attachment.id,
+      pack_prefix: this.packPrefix(attachment),
+      manifest_prefix: this.manifestPrefix(attachment),
+      packs,
+      manifests,
+    };
   }
 
   /** The restore plan: every entry, every needed chunk location, one GET URL per pack. */
   async plan(attachment: AttachmentRow): Promise<RestorePlan> {
     const prefix = this.volumePrefix(attachment.volumeId);
-    const { entries, chunkIds } = await this.repo.planEntries(attachment.volumeId);
-    const chunks = await this.repo.chunkLocations(attachment.volumeId, chunkIds);
+    const { entries, chunkIds } = await this.repo.planEntries(
+      attachment.volumeId,
+    );
+    const chunks = await this.repo.chunkLocations(
+      attachment.volumeId,
+      chunkIds,
+    );
     const packs: Record<string, string> = {};
     for (const location of Object.values(chunks)) {
       const key = location[0];
-      if (!(key in packs)) packs[key] = await this.config.store.presignGet(`${prefix}${key}`, this.ttl);
+      if (!(key in packs))
+        packs[key] = await this.config.store.presignGet(
+          `${prefix}${key}`,
+          this.ttl,
+        );
     }
-    return { volume: attachment.volumeId, attachment: attachment.id, seq: await this.repo.head(attachment.volumeId), entries, chunks, packs };
+    return {
+      volume: attachment.volumeId,
+      attachment: attachment.id,
+      seq: await this.repo.head(attachment.volumeId),
+      entries,
+      chunks,
+      packs,
+    };
   }
 
   /** Put the plan and the slots in the bucket and hand back one GET URL for each (what the sandbox-side attach command downloads). */
@@ -118,27 +179,45 @@ export class VolumeService {
     const plan = await this.plan(attachment);
     const planJson = Buffer.from(JSON.stringify(plan), "utf8");
     const planKey = `${prefix}att/${attachment.id}/plan-${id(4)}`;
-    await this.config.store.put(planKey, zstdCompressSync(planJson), "application/zstd");
+    await this.config.store.put(
+      planKey,
+      zstdCompressSync(planJson),
+      "application/zstd",
+    );
     const slotsUrl = await this.publishSlots(attachment);
-    return { planUrl: await this.config.store.presignGet(planKey, 900), slotsUrl, planBytes: planJson.length, planSeq: plan.seq };
+    return {
+      planUrl: await this.config.store.presignGet(planKey, 900),
+      slotsUrl,
+      planBytes: planJson.length,
+      planSeq: plan.seq,
+    };
   }
 
   async publishSlots(attachment: AttachmentRow): Promise<string> {
     const fresh = (await this.repo.getAttachment(attachment.id)) ?? attachment;
     const slots = await this.issueSlots(fresh);
     const key = `${this.volumePrefix(attachment.volumeId)}att/${attachment.id}/slots-${fresh.epoch}-${id(4)}`;
-    await this.config.store.put(key, Buffer.from(JSON.stringify(slots), "utf8"), "application/json");
+    await this.config.store.put(
+      key,
+      Buffer.from(JSON.stringify(slots), "utf8"),
+      "application/json",
+    );
     return this.config.store.presignGet(key, 900);
   }
 
   /** Apply every manifest the sandbox has uploaded past the current head, in order. Stops at the first gap or rejection. */
   async applyWal(attachmentId: string): Promise<ApplyWalResult> {
     const attachment = await this.repo.getAttachment(attachmentId);
-    if (!attachment) throw new Error(`attachment ${attachmentId} does not exist`);
-    return this.withLock(attachment.volumeId, () => this.applyWalLocked(attachment));
+    if (!attachment)
+      throw new Error(`attachment ${attachmentId} does not exist`);
+    return this.withLock(attachment.volumeId, () =>
+      this.applyWalLocked(attachment),
+    );
   }
 
-  private async applyWalLocked(attachment: AttachmentRow): Promise<ApplyWalResult> {
+  private async applyWalLocked(
+    attachment: AttachmentRow,
+  ): Promise<ApplyWalResult> {
     const prefix = this.volumePrefix(attachment.volumeId);
     const result: ApplyWalResult = { applied: 0, entries: [], rejected: null };
     for (;;) {
@@ -157,16 +236,38 @@ export class VolumeService {
           ownKey,
           rawLength: parsed.rawLength,
           inlineRange: parsed.inlineRange,
-          chunkKnown: (chunkId) => this.repo.chunkKnown(attachment.volumeId, chunkId),
+          chunkKnown: (chunkId) =>
+            this.repo.chunkKnown(attachment.volumeId, chunkId),
           packSize: (key) => this.config.store.size(`${prefix}${key}`),
         });
-        await this.repo.applyManifest(attachment.volumeId, validated.manifest, validated.newChunks, validated.packSizes);
+        await this.repo.applyManifest(
+          attachment.volumeId,
+          validated.manifest,
+          validated.newChunks,
+          validated.packSizes,
+        );
         result.applied += 1;
         const m = validated.manifest;
-        result.entries.push({ seq, trigger: m.trigger, upserts: m.upserts?.length ?? 0, deletes: m.deletes?.length ?? 0, tsMs: m.ts_ms, unstable: m.unstable?.length ?? 0 });
+        result.entries.push({
+          seq,
+          trigger: m.trigger,
+          upserts: m.upserts?.length ?? 0,
+          deletes: m.deletes?.length ?? 0,
+          tsMs: m.ts_ms,
+          unstable: m.unstable?.length ?? 0,
+        });
       } catch (error) {
-        const reason = error instanceof ManifestRejected ? error.message : `unparseable: ${String((error as Error)?.message ?? error).slice(0, 120)}`;
-        await this.repo.recordReject({ id: `r${id(6)}`, volumeId: attachment.volumeId, attachmentId: attachment.id, seq, reason });
+        const reason =
+          error instanceof ManifestRejected
+            ? error.message
+            : `unparseable: ${String((error as Error)?.message ?? error).slice(0, 120)}`;
+        await this.repo.recordReject({
+          id: `r${id(6)}`,
+          volumeId: attachment.volumeId,
+          attachmentId: attachment.id,
+          seq,
+          reason,
+        });
         result.entries.push({ seq, rejected: reason });
         result.rejected = reason;
         break; // the chain stops here; the attachment must rebase onto a new epoch
@@ -179,13 +280,22 @@ export class VolumeService {
    * After a rejection the write-once slots of the refused chain can never be reused: start a new
    * epoch and hand out fresh slots. The helper then commits a self-contained snapshot based on head.
    */
-  async beginRebase(attachmentId: string): Promise<{ attachment: AttachmentRow; slotsUrl: string; head: number }> {
+  async beginRebase(
+    attachmentId: string,
+  ): Promise<{ attachment: AttachmentRow; slotsUrl: string; head: number }> {
     const attachment = await this.repo.getAttachment(attachmentId);
-    if (!attachment) throw new Error(`attachment ${attachmentId} does not exist`);
-    await this.repo.updateAttachment(attachment.id, { epoch: attachment.epoch + 1 });
+    if (!attachment)
+      throw new Error(`attachment ${attachmentId} does not exist`);
+    await this.repo.updateAttachment(attachment.id, {
+      epoch: attachment.epoch + 1,
+    });
     const fresh = (await this.repo.getAttachment(attachment.id))!;
     const slotsUrl = await this.publishSlots(fresh);
-    return { attachment: fresh, slotsUrl, head: await this.repo.head(attachment.volumeId) };
+    return {
+      attachment: fresh,
+      slotsUrl,
+      head: await this.repo.head(attachment.volumeId),
+    };
   }
 
   /** A pack that will not download from the sandbox is copied server-side to a new key and repointed. */
@@ -202,11 +312,17 @@ export class VolumeService {
     return this.withLock(volumeId, () => this.repo.rollback(volumeId, seq));
   }
 
-  async chunkLocations(volumeId: string, ids: Iterable<string>): Promise<Record<string, ChunkLocation>> {
+  async chunkLocations(
+    volumeId: string,
+    ids: Iterable<string>,
+  ): Promise<Record<string, ChunkLocation>> {
     return this.repo.chunkLocations(volumeId, ids);
   }
 
-  private async withLock<T>(volumeId: string, fn: () => Promise<T>): Promise<T> {
+  private async withLock<T>(
+    volumeId: string,
+    fn: () => Promise<T>,
+  ): Promise<T> {
     const previous = this.locks.get(volumeId) ?? Promise.resolve();
     const run = previous.then(fn, fn);
     const settled = run.then(

@@ -1290,25 +1290,26 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
       });
       const hostExecutionId = executionId;
       const runOnce = () =>
-        this.input.manager
-          .providerForSandbox()
-          .execute({
-            providerSandboxId: sandbox.providerSandboxId,
-            executionId: hostExecutionId,
-            command: this.input.manager.volumeWrapCommand(sandbox, command),
-            cwd: assertExecuteCwd(
-              undefined,
-              this.input.manager.providerForSandbox().pathPolicy,
-            ),
-            timeoutMs: this.input.commandTimeoutMs,
-            maxOutputChars: this.input.limits.maxOutputChars,
-            ...(options.signal ? { signal: options.signal } : {}),
-          });
+        this.input.manager.providerForSandbox().execute({
+          providerSandboxId: sandbox.providerSandboxId,
+          executionId: hostExecutionId,
+          command: this.input.manager.volumeWrapCommand(sandbox, command),
+          cwd: assertExecuteCwd(
+            undefined,
+            this.input.manager.providerForSandbox().pathPolicy,
+          ),
+          timeoutMs: this.input.commandTimeoutMs,
+          maxOutputChars: this.input.limits.maxOutputChars,
+          ...(options.signal ? { signal: options.signal } : {}),
+        });
       // With a volume attached the wrapper refuses to run in a replaced container; the volume is
       // re-attached and the command is run once more (it never executed the first time).
       const execution = (async () => {
         let result = await runOnce();
-        let parsed = await this.input.manager.volumeParseResult(sandbox, result);
+        let parsed = await this.input.manager.volumeParseResult(
+          sandbox,
+          result,
+        );
         if (parsed === null) {
           await this.input.manager.reattachVolume(sandbox, this.input.context);
           result = await runOnce();

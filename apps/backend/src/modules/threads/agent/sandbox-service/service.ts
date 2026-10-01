@@ -219,7 +219,11 @@ Commands execute on the user's bound PC inside its authorized working folder. In
             : provider.execute.bind(provider);
           await volume
             .checkpointScope({
-              scope: { teamId: sandbox.teamId, workspaceId: sandbox.workspaceId, threadId: sandbox.threadId },
+              scope: {
+                teamId: sandbox.teamId,
+                workspaceId: sandbox.workspaceId,
+                threadId: sandbox.threadId,
+              },
               executor: {
                 execute: async (command, options) => {
                   const result = await execute({

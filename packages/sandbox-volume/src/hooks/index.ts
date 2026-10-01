@@ -1,4 +1,8 @@
-import { EXIT_INSTANCE_CHANGED, EXIT_PACK_UNREADABLE, TAIL_MARKER } from "../protocol/constants";
+import {
+  EXIT_INSTANCE_CHANGED,
+  EXIT_PACK_UNREADABLE,
+  TAIL_MARKER,
+} from "../protocol/constants";
 import { parseCommandOutput } from "../protocol/marker";
 import type { FlushReport } from "../protocol/types";
 import type { AttachmentRow, VolumeScope } from "../service/repository";
@@ -6,7 +10,10 @@ import type { ApplyWalResult, VolumeService } from "../service/volume-service";
 
 /** The one thing the hooks need from a sandbox: run a shell command and get its combined output and exit code. */
 export type SandboxExecutor = {
-  execute(command: string, options: { timeoutMs: number }): Promise<{ output: string; exitCode: number | null }>;
+  execute(
+    command: string,
+    options: { timeoutMs: number },
+  ): Promise<{ output: string; exitCode: number | null }>;
 };
 
 export type HelperSource = {
@@ -58,7 +65,9 @@ export type ParsedExecuteResult = {
 export class ContainerReplacedError extends Error {
   override readonly name = "ContainerReplacedError";
   constructor(readonly attachmentId: string) {
-    super("the sandbox container was replaced; the volume must be re-attached before running commands");
+    super(
+      "the sandbox container was replaced; the volume must be re-attached before running commands",
+    );
   }
 }
 
@@ -80,13 +89,19 @@ export function createVolumeHooks(config: VolumeHooksConfig) {
   const log = config.log ?? (() => undefined);
 
   async function bootstrapCommand(): Promise<string> {
-    if (config.helper.imagePath) return `[ -x ${shellQuote(config.helper.imagePath)} ] || exit 90`;
-    if (!config.helper.downloadUrl) throw new Error("no helper source configured");
+    if (config.helper.imagePath)
+      return `[ -x ${shellQuote(config.helper.imagePath)} ] || exit 90`;
+    if (!config.helper.downloadUrl)
+      throw new Error("no helper source configured");
     const url = await config.helper.downloadUrl();
     return `mkdir -p ${shellQuote(`${meta}/bin`)} && { [ -x ${shellQuote(helperPath)} ] || { curl -fsS --speed-limit 100000 --speed-time 5 --max-time 120 --retry 2 -o ${shellQuote(`${helperPath}.tmp`)} ${shellQuote(url)} && chmod 755 ${shellQuote(`${helperPath}.tmp`)} && mv ${shellQuote(`${helperPath}.tmp`)} ${shellQuote(helperPath)}; }; } || exit 90`;
   }
 
-  async function attachOnce(attachment: AttachmentRow, executor: SandboxExecutor, repairs: Array<Record<string, unknown>>): Promise<AttachResult> {
+  async function attachOnce(
+    attachment: AttachmentRow,
+    executor: SandboxExecutor,
+    repairs: Array<Record<string, unknown>>,
+  ): Promise<AttachResult> {
     const started = Date.now();
     const files = await service.publishAttachFiles(attachment);
     const restore = config.shadow
@@ -116,21 +131,39 @@ export function createVolumeHooks(config: VolumeHooksConfig) {
         }
       }
     }
-    if ((result.exitCode === 90 || result.exitCode === 91) && repairs.length < 3) {
+    if (
+      (result.exitCode === 90 || result.exitCode === 91) &&
+      repairs.length < 3
+    ) {
       repairs.push({ bootstrapDownloadFailed: result.exitCode });
-      log("volume.attach.bootstrap_retry", { attachmentId: attachment.id, exitCode: result.exitCode });
+      log("volume.attach.bootstrap_retry", {
+        attachmentId: attachment.id,
+        exitCode: result.exitCode,
+      });
       return attachOnce(attachment, executor, repairs);
     }
-    const unreadable = Array.isArray(info?.unreadable) ? (info!.unreadable as string[]) : [];
-    if (result.exitCode === EXIT_PACK_UNREADABLE && unreadable.length && repairs.length < 3) {
+    const unreadable = Array.isArray(info?.unreadable)
+      ? (info!.unreadable as string[])
+      : [];
+    if (
+      result.exitCode === EXIT_PACK_UNREADABLE &&
+      unreadable.length &&
+      repairs.length < 3
+    ) {
       const repointed: string[] = [];
-      for (const key of unreadable) repointed.push(await service.repairPack(attachment.volumeId, key));
+      for (const key of unreadable)
+        repointed.push(await service.repairPack(attachment.volumeId, key));
       repairs.push({ unreadable, repointed });
-      log("volume.attach.pack_repaired", { attachmentId: attachment.id, unreadable });
+      log("volume.attach.pack_repaired", {
+        attachmentId: attachment.id,
+        unreadable,
+      });
       return attachOnce(attachment, executor, repairs);
     }
     if (result.exitCode !== 0) {
-      throw new Error(`volume attach failed (exit ${result.exitCode}): ${output.slice(-600)}`);
+      throw new Error(
+        `volume attach failed (exit ${result.exitCode}): ${output.slice(-600)}`,
+      );
     }
     const bootId = typeof info?.boot_id === "string" ? info.boot_id : null;
     if (bootId) await service.recordBootId(attachment.id, bootId);
@@ -147,11 +180,21 @@ export function createVolumeHooks(config: VolumeHooksConfig) {
 
   return {
     /** Bind a (new or replaced) sandbox container to the thread's volume and restore it. */
-    async attach(input: { scope: VolumeScope; sandboxId: string; executor: SandboxExecutor }): Promise<AttachResult> {
+    async attach(input: {
+      scope: VolumeScope;
+      sandboxId: string;
+      executor: SandboxExecutor;
+    }): Promise<AttachResult> {
       const volume = await service.getOrCreateVolume(input.scope);
       const attachment = await service.attach(volume.id, input.sandboxId);
       const result = await attachOnce(attachment, input.executor, []);
-      log("volume.attach", { volumeId: volume.id, attachmentId: attachment.id, durationMs: result.durationMs, daemon: result.daemon, repairs: result.repairs.length });
+      log("volume.attach", {
+        volumeId: volume.id,
+        attachmentId: attachment.id,
+        durationMs: result.durationMs,
+        daemon: result.daemon,
+        repairs: result.repairs.length,
+      });
       return result;
     },
 
@@ -176,7 +219,12 @@ export function createVolumeHooks(config: VolumeHooksConfig) {
      * Strip the marker, apply the WAL, handle a rejected chain (rebase) and unreadable packs.
      * Throws ContainerReplacedError when the wrapper refused to run the command.
      */
-    async parseResult(input: { attachmentId: string; output: string; exitCode: number | null; executor: SandboxExecutor }): Promise<ParsedExecuteResult> {
+    async parseResult(input: {
+      attachmentId: string;
+      output: string;
+      exitCode: number | null;
+      executor: SandboxExecutor;
+    }): Promise<ParsedExecuteResult> {
       const parsed = parseCommandOutput(input.output);
       if (parsed.instanceChanged) {
         log("volume.instance_changed", { attachmentId: input.attachmentId });
@@ -184,29 +232,55 @@ export function createVolumeHooks(config: VolumeHooksConfig) {
       }
       const wal = await service.applyWal(input.attachmentId);
       let rebase: ParsedExecuteResult["sync"]["rebase"] = null;
-      const slotTaken = parsed.flush ? JSON.stringify(parsed.flush).includes("MANIFEST_SLOT_TAKEN") : false;
+      const slotTaken = parsed.flush
+        ? JSON.stringify(parsed.flush).includes("MANIFEST_SLOT_TAKEN")
+        : false;
       if (wal.rejected || slotTaken) {
-        const { slotsUrl, head } = await service.beginRebase(input.attachmentId);
+        const { slotsUrl, head } = await service.beginRebase(
+          input.attachmentId,
+        );
         const rb = await input.executor.execute(
           `curl -fsS --max-time 60 -o ${shellQuote(`${meta}/slots.json`)} ${shellQuote(slotsUrl)} && ${shellQuote(helperPath)} flush --root ${shellQuote(root)} --rebase ${head}`,
           { timeoutMs: 600_000 },
         );
         const wal2 = await service.applyWal(input.attachmentId);
-        rebase = { applied: wal2.applied, stillRejected: wal2.rejected !== null };
-        log("volume.rebase", { attachmentId: input.attachmentId, reason: wal.rejected ?? "slot taken", exitCode: rb.exitCode, applied: wal2.applied, stillRejected: rebase.stillRejected });
+        rebase = {
+          applied: wal2.applied,
+          stillRejected: wal2.rejected !== null,
+        };
+        log("volume.rebase", {
+          attachmentId: input.attachmentId,
+          reason: wal.rejected ?? "slot taken",
+          exitCode: rb.exitCode,
+          applied: wal2.applied,
+          stillRejected: rebase.stillRejected,
+        });
       }
       const repaired: string[] = [];
-      const unreadable = Array.isArray(parsed.flush?.unreadable) ? parsed.flush!.unreadable! : [];
+      const unreadable = Array.isArray(parsed.flush?.unreadable)
+        ? parsed.flush!.unreadable!
+        : [];
       if (unreadable.length) {
         const attachment = await service.repo.getAttachment(input.attachmentId);
-        if (attachment) for (const key of unreadable) repaired.push(await service.repairPack(attachment.volumeId, key));
+        if (attachment)
+          for (const key of unreadable)
+            repaired.push(await service.repairPack(attachment.volumeId, key));
       }
-      const flushOk = parsed.flushExitCode === 0 && (parsed.flush?.ok ?? true) !== false;
-      const persisted = flushOk && !wal.rejected && (rebase === null || !rebase.stillRejected);
+      const flushOk =
+        parsed.flushExitCode === 0 && (parsed.flush?.ok ?? true) !== false;
+      const persisted =
+        flushOk && !wal.rejected && (rebase === null || !rebase.stillRejected);
       return {
         output: parsed.output,
         exitCode: input.exitCode,
-        sync: { persisted, flushExitCode: parsed.flushExitCode, flush: parsed.flush, wal, rebase, repaired },
+        sync: {
+          persisted,
+          flushExitCode: parsed.flushExitCode,
+          flush: parsed.flush,
+          wal,
+          rebase,
+          repaired,
+        },
       };
     },
 
@@ -214,13 +288,19 @@ export function createVolumeHooks(config: VolumeHooksConfig) {
      * Checkpoint by scope, for processes that did not attach the sandbox themselves (the cleanup
      * worker). Applies whatever the sandbox uploaded even when the container is already gone.
      */
-    async checkpointScope(input: { scope: VolumeScope; executor: SandboxExecutor }): Promise<ParsedExecuteResult | null> {
+    async checkpointScope(input: {
+      scope: VolumeScope;
+      executor: SandboxExecutor;
+    }): Promise<ParsedExecuteResult | null> {
       const volume = await service.repo.findVolume(input.scope);
       if (!volume) return null;
       const attachment = await service.repo.activeAttachment(volume.id);
       if (!attachment) return null;
       try {
-        return await this.checkpoint({ attachmentId: attachment.id, executor: input.executor });
+        return await this.checkpoint({
+          attachmentId: attachment.id,
+          executor: input.executor,
+        });
       } catch (error) {
         if (error instanceof ContainerReplacedError) {
           await service.applyWal(attachment.id);
@@ -231,9 +311,20 @@ export function createVolumeHooks(config: VolumeHooksConfig) {
     },
 
     /** Full-scan barrier + WAL application; run before a sandbox is deleted or a run ends. */
-    async checkpoint(input: { attachmentId: string; executor: SandboxExecutor }): Promise<ParsedExecuteResult> {
-      const result = await input.executor.execute(this.wrapCommand("true", { full: true }), { timeoutMs: 600_000 });
-      return this.parseResult({ attachmentId: input.attachmentId, output: result.output, exitCode: result.exitCode, executor: input.executor });
+    async checkpoint(input: {
+      attachmentId: string;
+      executor: SandboxExecutor;
+    }): Promise<ParsedExecuteResult> {
+      const result = await input.executor.execute(
+        this.wrapCommand("true", { full: true }),
+        { timeoutMs: 600_000 },
+      );
+      return this.parseResult({
+        attachmentId: input.attachmentId,
+        output: result.output,
+        exitCode: result.exitCode,
+        executor: input.executor,
+      });
     },
 
     isContainerReplacedError(error: unknown): boolean {
@@ -241,7 +332,11 @@ export function createVolumeHooks(config: VolumeHooksConfig) {
     },
 
     /** The container behind a sandbox id was replaced: apply what the old one uploaded and attach the new one. */
-    async onContainerReplaced(input: { scope: VolumeScope; sandboxId: string; executor: SandboxExecutor }): Promise<AttachResult> {
+    async onContainerReplaced(input: {
+      scope: VolumeScope;
+      sandboxId: string;
+      executor: SandboxExecutor;
+    }): Promise<AttachResult> {
       return this.attach(input);
     },
   };

@@ -1,9 +1,6 @@
 import "dotenv/config";
 
-import {
-  parseBooleanEnv as parseBoolean,
-  parseStrictBooleanEnv,
-} from "./env";
+import { parseBooleanEnv as parseBoolean, parseStrictBooleanEnv } from "./env";
 import { parseAllowedInternalOrigins } from "./security/endpoint-policy";
 
 type AlertLevel = "warn" | "error" | "critical";
@@ -536,13 +533,20 @@ export const config = {
     // Persistent /workspace volume (packages/sandbox-volume). `shadow` syncs without
     // restoring (staged rollout); `full` restores the volume into every new sandbox.
     volume: {
-      enabled: parseBoolean(process.env.SOURCEWEFT_SANDBOX_VOLUME_ENABLED, false),
+      enabled: parseBoolean(
+        process.env.SOURCEWEFT_SANDBOX_VOLUME_ENABLED,
+        false,
+      ),
       mode:
-        process.env.SOURCEWEFT_SANDBOX_VOLUME_MODE === "full" ? "full" : "shadow",
-      keyPrefix: process.env.SOURCEWEFT_SANDBOX_VOLUME_KEY_PREFIX || "sandbox-volumes/",
+        process.env.SOURCEWEFT_SANDBOX_VOLUME_MODE === "full"
+          ? "full"
+          : "shadow",
+      keyPrefix:
+        process.env.SOURCEWEFT_SANDBOX_VOLUME_KEY_PREFIX || "sandbox-volumes/",
       // Where the sandbox image ships the helper; empty → downloaded from the bucket
       // (uploaded once from SOURCEWEFT_SANDBOX_VOLUME_HELPER_PATH at startup).
-      helperImagePath: process.env.SOURCEWEFT_SANDBOX_VOLUME_HELPER_IMAGE_PATH || "",
+      helperImagePath:
+        process.env.SOURCEWEFT_SANDBOX_VOLUME_HELPER_IMAGE_PATH || "",
       helperPath: process.env.SOURCEWEFT_SANDBOX_VOLUME_HELPER_PATH || "",
     },
     // No per-provider block lives here. Which provider a deployment runs on is

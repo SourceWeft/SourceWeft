@@ -112,7 +112,9 @@ function createOperationStore(): SandboxOperationStore {
   };
 }
 
-function createProvider(responses: Array<{ output: string; exitCode: number }>) {
+function createProvider(
+  responses: Array<{ output: string; exitCode: number }>,
+) {
   const executed: string[] = [];
   const provider: SandboxProvider = {
     id: "fake",
@@ -133,6 +135,7 @@ function createProvider(responses: Array<{ output: string; exitCode: number }>) 
     async downloadFile() {
       return Buffer.alloc(0);
     },
+    async ensureDirectory() {},
   };
   return { provider, executed };
 }
@@ -153,7 +156,11 @@ function createHooks() {
     async parseResult(input) {
       calls.push(`parse:${input.attachmentId}`);
       if (input.output.includes("__REPLACED__")) throw new Replaced("replaced");
-      return { output: input.output.replace(/ \+marker$/, ""), exitCode: input.exitCode, sync: { persisted: true } };
+      return {
+        output: input.output.replace(/ \+marker$/, ""),
+        exitCode: input.exitCode,
+        sync: { persisted: true },
+      };
     },
     async checkpoint(input) {
       calls.push(`checkpoint:${input.attachmentId}`);
@@ -173,7 +180,10 @@ function createHooks() {
   return { hooks, calls };
 }
 
-function createBackend(responses: Array<{ output: string; exitCode: number }>, volume: SandboxVolumeHooks | null) {
+function createBackend(
+  responses: Array<{ output: string; exitCode: number }>,
+  volume: SandboxVolumeHooks | null,
+) {
   const { provider, executed } = createProvider(responses);
   const manager = new SandboxManager({
     provider,
@@ -194,7 +204,10 @@ function createBackend(responses: Array<{ output: string; exitCode: number }>, v
 }
 
 test("without a volume the backend behaves exactly as before", async () => {
-  const { backend, executed } = createBackend([{ output: "hello", exitCode: 0 }], null);
+  const { backend, executed } = createBackend(
+    [{ output: "hello", exitCode: 0 }],
+    null,
+  );
   const result = await backend.execute("echo hello");
   assert.equal(result.output, "hello");
   assert.deepEqual(executed, ["echo hello"]);
@@ -242,12 +255,17 @@ test("a container replaced twice in one command surfaces as an instance change",
     ],
     hooks,
   );
-  await assert.rejects(backend.execute("echo never"), (error: unknown) => /instance|replaced/i.test(String((error as Error)?.message ?? error)));
+  await assert.rejects(backend.execute("echo never"), (error: unknown) =>
+    /instance|replaced/i.test(String((error as Error)?.message ?? error)),
+  );
 });
 
 test("the checkpoint goes to the attachment the manager made", async () => {
   const { hooks, calls } = createHooks();
-  const { backend, manager } = createBackend([{ output: "x +marker", exitCode: 0 }], hooks);
+  const { backend, manager } = createBackend(
+    [{ output: "x +marker", exitCode: 0 }],
+    hooks,
+  );
   await backend.execute("true");
   const sandbox = await manager.getOrCreateThreadSandbox(context);
   await manager.volumeCheckpoint(sandbox);
