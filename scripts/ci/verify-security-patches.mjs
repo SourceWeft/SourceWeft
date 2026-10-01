@@ -45,7 +45,7 @@ for (const app of [backend, web]) {
   const vitest = createRequire(app.resolve("vitest/package.json"));
   verifyVersion(vitest, "@vitest/mocker", "4.1.11");
 }
-verifyVersion(backend, "hono", "4.13.5");
+verifyVersion(backend, "hono", "4.13.7");
 
 // Resolve YAML through an actual affected consumer, not an extra test dependency.
 const eslint = createRequire(web.resolve("eslint"));
