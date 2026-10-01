@@ -7,6 +7,7 @@ export * from "./schema/misc";
 export * from "./schema/sources";
 export * from "./schema/threads";
 export * from "./schema/agent-sandboxes";
+export * from "./schema/sandbox-volumes";
 export * from "./schema/retrieval";
 export * from "./schema/skills-market";
 export * from "./schema/mcp-catalog";

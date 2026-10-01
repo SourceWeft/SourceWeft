@@ -421,6 +421,13 @@
       "when": 1790605083450,
       "tag": "0059_drop_mcp_readme_etag",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1790855800633,
+      "tag": "0060_sandbox_volumes",
+      "breakpoints": true
     }
   ]
 }
