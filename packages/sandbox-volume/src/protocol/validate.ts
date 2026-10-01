@@ -122,7 +122,7 @@ function validateEntryShape(entry: ManifestEntry) {
   if (!isValidVolumePath(entry.p)) reject(`invalid path ${JSON.stringify(entry.p).slice(0, 80)}`);
   if (entry.k !== "f" && entry.k !== "d" && entry.k !== "l") reject("invalid kind");
   if (!isInt(entry.m) || entry.m < 0 || entry.m > 0o7777) reject("invalid mode");
-  if (entry.t !== undefined && (!isInt(entry.t) || entry.t < 0)) reject("invalid mtime");
+  if (entry.t !== undefined && !(typeof entry.t === "string" && /^\d{1,20}$/.test(entry.t))) reject("invalid mtime");
   if (entry.k === "l") {
     const target = entry.l;
     if (typeof target !== "string" || Buffer.byteLength(target, "utf8") > MAX_SYMLINK_TARGET_BYTES || target.includes("\0")) {

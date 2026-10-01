@@ -8,8 +8,8 @@ export type ManifestEntry = {
   k: EntryKind;
   /** Permission bits (0..0o7777). */
   m: number;
-  /** mtime in nanoseconds since the epoch. */
-  t?: number;
+  /** mtime in nanoseconds since the epoch, as a decimal string (exceeds 2^53). */
+  t?: string;
   /** File size in bytes (files only). */
   s?: number;
   /** Symlink target (links only). */
@@ -46,7 +46,8 @@ export type PlanEntry = {
   p: string;
   k: EntryKind;
   m: number;
-  t: number;
+  /** nanoseconds, decimal string */
+  t: string;
   s: number;
   l: string | null;
   c: Array<[string, number]>;

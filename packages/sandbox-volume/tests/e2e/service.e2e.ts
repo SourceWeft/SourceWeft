@@ -61,8 +61,8 @@ test("write-once slots, WAL application, snapshot, rejection, rebase, rollback a
     v: 1, volume: volume.id, attachment: attachment.id, seq: 1, base: 0, trigger: "flush",
     upserts: [
       { p: "src", k: "d", m: 0o755 },
-      { p: "src/a.txt", k: "f", m: 0o644, t: 1_700_000_000_000_000_000, s: chunkA.length, c: [[idA, chunkA.length]] },
-      { p: "src/b.txt", k: "f", m: 0o600, t: 1_700_000_000_000_000_001, s: chunkB.length, c: [[idB, chunkB.length]] },
+      { p: "src/a.txt", k: "f", m: 0o644, t: "1700000000000000000", s: chunkA.length, c: [[idA, chunkA.length]] },
+      { p: "src/b.txt", k: "f", m: 0o600, t: "1700000000000000001", s: chunkB.length, c: [[idB, chunkB.length]] },
       { p: "link", k: "l", m: 0o777, l: "src/a.txt" },
     ],
     deletes: [],
@@ -83,7 +83,7 @@ test("write-once slots, WAL application, snapshot, rejection, rebase, rollback a
   const ownKey = `${slots.manifest_prefix}2`;
   const m2: Manifest = {
     v: 1, volume: volume.id, attachment: attachment.id, seq: 2, base: 1, trigger: "debounce",
-    upserts: [{ p: "src/a.txt", k: "f", m: 0o644, t: 1_700_000_000_000_000_002, s: chunkC.length, c: [[idC, chunkC.length]] }],
+    upserts: [{ p: "src/a.txt", k: "f", m: 0o644, t: "1700000000000000002", s: chunkC.length, c: [[idC, chunkC.length]] }],
     deletes: ["src/b.txt"],
     chunks: { [idC]: [ownKey, 16, packedC.length, chunkC.length] },
   };
@@ -120,8 +120,8 @@ test("write-once slots, WAL application, snapshot, rejection, rebase, rollback a
     v: 1, volume: volume.id, attachment: attachment.id, seq: 3, base: 2, trigger: "rebase", full: true,
     upserts: [
       { p: "src", k: "d", m: 0o755 },
-      { p: "src/a.txt", k: "f", m: 0o644, t: 1_700_000_000_000_000_002, s: chunkC.length, c: [[idC, chunkC.length]] },
-      { p: "new.txt", k: "f", m: 0o644, t: 1_700_000_000_000_000_003, s: chunkA.length, c: [[idA, chunkA.length]] },
+      { p: "src/a.txt", k: "f", m: 0o644, t: "1700000000000000002", s: chunkC.length, c: [[idC, chunkC.length]] },
+      { p: "new.txt", k: "f", m: 0o644, t: "1700000000000000003", s: chunkA.length, c: [[idA, chunkA.length]] },
     ],
     deletes: [],
     chunks: { [idC]: [ownKey, 16, packedC.length, chunkC.length], [idA]: [packKey, 0, packedA.length, chunkA.length] },
