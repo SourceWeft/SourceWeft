@@ -37,7 +37,7 @@ function verifyVersion(parent, name, version) {
   throw new Error(`Cannot identify installed package ${name}`);
 }
 
-for (const app of [web, docs]) verifyVersion(app, "next", "16.3.3");
+for (const app of [web, docs]) verifyVersion(app, "next", "16.3.8");
 for (const app of [backend, web]) {
   verifyVersion(app, "sharp", "0.35.4");
   verifyVersion(app, "vitest", "4.1.11");
@@ -89,8 +89,9 @@ for (const parent of [backend, next]) {
   assert.equal(metadata.height, 6);
 }
 
-// Next 16.3.3 bypasses AVIF decoding as its security mitigation.
-// Ordinary images must still resize through the patched optimizer.
+// Next 16.3.3 bypassed AVIF decoding as its security mitigation; 16.3.8
+// decodes it again, through the sharp whose native decoder is pinned above.
+// Both AVIF and ordinary images must resize through the patched optimizer.
 const sharp = next("sharp");
 const { imageOptimizer } = web("next/dist/server/image-optimizer");
 const { defaultConfig } = web("next/dist/server/config-shared");
@@ -106,8 +107,8 @@ const optimized = await imageOptimizer(
   { isDev: false, silent: true },
 );
 assert.equal(optimized.error, undefined);
-assert.equal(optimized.contentType, "image/avif");
-assert.deepEqual(optimized.buffer, avif);
+assert.equal(optimized.contentType, "image/webp");
+assert.equal((await sharp(optimized.buffer).metadata()).width, 4);
 const pngInput = await sharp(avif).png().toBuffer();
 const resized = await imageOptimizer(
   { buffer: pngInput, etag: "test-png", cacheControl: "max-age=60" },
