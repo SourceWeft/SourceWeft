@@ -47,7 +47,7 @@ function manifest(overrides: Partial<Manifest> = {}): Manifest {
     base: 0,
     trigger: "flush",
     upserts: [
-      { p: "src/app.ts", k: "f", m: 0o644, t: 1_700_000_000_000_000_000, s: 1234, c: [[CHUNK_A, 1234]] },
+      { p: "src/app.ts", k: "f", m: 0o644, t: "1700000000000000000", s: 1234, c: [[CHUNK_A, 1234]] },
       { p: "src", k: "d", m: 0o755 },
       { p: "link", k: "l", m: 0o777, l: "src/app.ts" },
     ],

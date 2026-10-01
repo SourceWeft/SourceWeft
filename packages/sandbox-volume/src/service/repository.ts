@@ -24,7 +24,7 @@ export type EntryRow = {
   path: string;
   kind: EntryKind;
   mode: number;
-  mtimeNs: number;
+  mtimeNs: bigint;
   sizeBytes: number;
   linkTarget: string | null;
   chunks: Array<[string, number]>;
@@ -219,7 +219,7 @@ export class VolumeRepository {
           .limit(1);
         const previous = old[0];
         if (previous && previous.kind === "d" && entry.k !== "d") await dropChildren(entry.p); // a directory replaced by a file or link loses its children
-        const next = { kind: entry.k, mode: entry.m, mtimeNs: entry.t ?? 0, sizeBytes: entry.s ?? 0, linkTarget: entry.l ?? null, chunks: entry.c ?? [] };
+        const next = { kind: entry.k, mode: entry.m, mtimeNs: BigInt(entry.t ?? "0"), sizeBytes: entry.s ?? 0, linkTarget: entry.l ?? null, chunks: entry.c ?? [] };
         if (previous && previous.kind === next.kind && previous.mode === next.mode && previous.mtimeNs === next.mtimeNs && previous.sizeBytes === next.sizeBytes && previous.linkTarget === next.linkTarget && JSON.stringify(previous.chunks) === JSON.stringify(next.chunks)) {
           continue; // identical (snapshots repeat unchanged entries)
         }
@@ -275,7 +275,7 @@ export class VolumeRepository {
     const chunkIds = new Set<string>();
     const entries: PlanEntry[] = rows.map((r) => {
       for (const [id] of r.chunks) chunkIds.add(id);
-      return { p: r.path, k: r.kind, m: r.mode, t: r.mtimeNs, s: r.sizeBytes, l: r.linkTarget, c: r.chunks };
+      return { p: r.path, k: r.kind, m: r.mode, t: r.mtimeNs.toString(), s: r.sizeBytes, l: r.linkTarget, c: r.chunks };
     });
     return { entries, chunkIds };
   }

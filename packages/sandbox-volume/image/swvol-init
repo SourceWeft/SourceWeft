@@ -1,0 +1,32 @@
+#!/bin/sh
+# Image boot step (root, idempotent, no runtime input): FUSE lower mounted by the `swvol` user,
+# local overlay upper at /workspace. Re-run on every start (Daytona stop/start drops mounts).
+
+B=/var/lib/swvol; U=${SANDBOX_USER:-sandbox}; UID_=$(id -u $U); GID_=$(id -g $U)
+t0=$(date +%s%N)
+id swvol >/dev/null 2>&1 || useradd -r -M -s /usr/sbin/nologin swvol
+chmod 0666 /dev/fuse 2>/dev/null
+grep -q '^user_allow_other' /etc/fuse.conf 2>/dev/null || echo user_allow_other >> /etc/fuse.conf
+mkdir -p $B/lower $B/upper $B/work $B/cache /run/swvol /workspace
+chown swvol:swvol $B $B/lower $B/cache; chown $U:$U $B/upper; chmod 755 $B $B/lower $B/upper
+[ -f $B/plan.json ] || gzip -dcf /usr/local/share/swvol/plan.json.gz > $B/plan.json; chown swvol:swvol $B/plan.json
+if ! mountpoint -q $B/lower; then
+  setpriv --reuid=swvol --regid=swvol --init-groups env SWLAZY_UID=$UID_ SWLAZY_GID=$GID_ \
+    setsid /usr/local/sbin/swlazy mount $B/plan.json $B/cache $B/lower --allow-other --cap-mb 1024 >$B/fuse.log 2>&1 < /dev/null &
+  for i in $(seq 1 200); do mountpoint -q $B/lower && break; sleep 0.05; done
+fi
+t1=$(date +%s%N)
+UP=$B
+if ! mountpoint -q /workspace; then
+  # Prefer a persistent non-overlay filesystem for the upper (SWVOL_UPPER_BASE, e.g. the xfs bind mount
+  # Sysbox gives at /var/lib/docker); the root filesystem itself is overlayfs here and cannot host an upper.
+  if [ -n "$SWVOL_UPPER_BASE" ]; then UP=$SWVOL_UPPER_BASE/swvol; mkdir -p $UP/upper $UP/work; chown $U:$U $UP/upper; chmod 700 $UP; fi
+  if ! mount -t overlay overlay -o lowerdir=$B/lower,upperdir=$UP/upper,workdir=$UP/work /workspace 2>$B/overlay.err; then
+    mkdir -p $B/rw && mount -t tmpfs -o size=2g tmpfs $B/rw && mkdir -p $B/rw/upper $B/rw/work && chown $U:$U $B/rw/upper && UP=$B/rw \
+      && mount -t overlay overlay -o lowerdir=$B/lower,upperdir=$B/rw/upper,workdir=$B/rw/work /workspace 2>>$B/overlay.err
+  fi
+fi
+t2=$(date +%s%N)
+chmod 700 $B; chmod 600 $B/plan.json
+echo "boot=$(date +%T) boot_id=$(cat /proc/sys/kernel/random/boot_id) fuse_mode=$(stat -c %a /dev/fuse 2>&1) lower=$(mountpoint -q $B/lower && echo mounted || echo not-mounted) workspace=$(mountpoint -q /workspace && echo mounted || echo not-mounted) fuse_ms=$(( (t1-t0)/1000000 )) overlay_ms=$(( (t2-t1)/1000000 )) upper=$UP rootfs=$(stat -f -c %T /) overlay_err=$(tr '\n' ' ' < $B/overlay.err 2>/dev/null)" > /run/swvol/boot.log
+chmod 644 /run/swvol/boot.log; chmod 755 /run/swvol; cat /run/swvol/boot.log
