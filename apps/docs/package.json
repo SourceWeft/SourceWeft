@@ -13,12 +13,12 @@
   },
   "dependencies": {
     "@sourceweft/ui-web": "workspace:*",
-    "next": "16.3.3",
+    "next": "16.3.8",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },
   "devDependencies": {
-    "@next/eslint-plugin-next": "16.3.3",
+    "@next/eslint-plugin-next": "16.3.8",
     "@sourceweft/eslint-config": "workspace:*",
     "@sourceweft/tailwind-config": "workspace:*",
     "@sourceweft/typescript-config": "workspace:*",
