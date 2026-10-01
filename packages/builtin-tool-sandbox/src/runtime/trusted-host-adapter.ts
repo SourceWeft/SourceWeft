@@ -862,15 +862,41 @@ export function createTrustedSandboxHostAdapter(input: {
         });
       };
       const abortWait = waitForAbort(executeInput.signal, beginCancellation);
-      const execution = providerExecuteSystem(current.provider)({
-        providerSandboxId: current.sandbox.providerSandboxId,
-        executionId,
-        command: executeInput.command,
-        cwd: assertExecuteCwd(undefined, current.provider.pathPolicy),
-        timeoutMs,
-        maxOutputChars,
-        ...(executeInput.signal ? { signal: executeInput.signal } : {}),
-      }).then(
+      const runOnce = () =>
+        providerExecuteSystem(current.provider)({
+          providerSandboxId: current.sandbox.providerSandboxId,
+          executionId,
+          command: input.manager.volumeWrapCommand(
+            current.sandbox,
+            executeInput.command,
+          ),
+          cwd: assertExecuteCwd(undefined, current.provider.pathPolicy),
+          timeoutMs,
+          maxOutputChars,
+          ...(executeInput.signal ? { signal: executeInput.signal } : {}),
+        });
+      // Same volume handling as the model execute path: a replaced container
+      // is re-attached and the command (which never ran) is issued once more.
+      const execution = (async () => {
+        let result = await runOnce();
+        let parsed = await input.manager.volumeParseResult(
+          current.sandbox,
+          result,
+        );
+        if (parsed === null) {
+          await input.manager.reattachVolume(current.sandbox, input.context);
+          result = await runOnce();
+          parsed = await input.manager.volumeParseResult(
+            current.sandbox,
+            result,
+          );
+          if (parsed === null)
+            throw new Error(
+              "SANDBOX_INSTANCE_CHANGED: the sandbox container was replaced twice during one command.",
+            );
+        }
+        return parsed;
+      })().then(
         (result) => ({ kind: "result" as const, result }),
         (error: unknown) => ({ kind: "error" as const, error }),
       );

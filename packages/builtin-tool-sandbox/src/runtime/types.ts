@@ -51,6 +51,33 @@ export type SandboxRef = {
 
 export type SandboxExecuteResult = ExecuteResponse;
 
+/**
+ * Persistent-volume integration (packages/sandbox-volume). The manager calls these at five
+ * points of the sandbox lifecycle; everything else about volumes stays behind this interface.
+ * Absent → sandboxes behave exactly as before.
+ */
+export type SandboxVolumeExecutor = {
+  execute(command: string, options: { timeoutMs: number }): Promise<{ output: string; exitCode: number | null }>;
+};
+
+export type SandboxVolumeScope = { teamId: string; workspaceId: string; threadId: string };
+
+export type SandboxVolumeHooks = {
+  attach(input: { scope: SandboxVolumeScope; sandboxId: string; executor: SandboxVolumeExecutor }): Promise<{ attachmentId: string }>;
+  wrapCommand(command: string, options?: { full?: boolean }): string;
+  parseResult(input: { attachmentId: string; output: string; exitCode: number | null; executor: SandboxVolumeExecutor }): Promise<{
+    output: string;
+    exitCode: number | null;
+    sync: { persisted: boolean };
+  }>;
+  checkpoint(input: { attachmentId: string; executor: SandboxVolumeExecutor }): Promise<unknown>;
+  /** Checkpoint for a sandbox this process did not attach (cleanup workers); null when the thread has no volume. */
+  checkpointScope(input: { scope: SandboxVolumeScope; executor: SandboxVolumeExecutor }): Promise<unknown>;
+  onContainerReplaced(input: { scope: SandboxVolumeScope; sandboxId: string; executor: SandboxVolumeExecutor }): Promise<{ attachmentId: string }>;
+  isContainerReplacedError(error: unknown): boolean;
+};
+
+
 export type SandboxCancellationReason = "user_cancelled" | "timed_out";
 
 /**

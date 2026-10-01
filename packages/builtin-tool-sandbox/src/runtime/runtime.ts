@@ -7,6 +7,7 @@ import type {
   SandboxRuntimeContext,
   SandboxRuntimeLimits,
   SandboxStore,
+  SandboxVolumeHooks,
 } from "./types";
 import type { SandboxCommandBudget } from "./command-budgets";
 import {
@@ -67,6 +68,8 @@ export function createSandboxRuntimeForTurn(input: {
   skillAssets?: Pick<SandboxSkillStaging, "plans" | "hasPlans" | "unstageable" | "logger">;
   /** Required capability binaries; failure aborts sandbox acquisition. */
   runtimeAssets?: Pick<SandboxRuntimeAssetStaging, "plans" | "logger">;
+  /** Persistent /workspace volume hooks (packages/sandbox-volume); absent → ephemeral sandboxes. */
+  volume?: SandboxVolumeHooks | null;
 }): SandboxRuntimeForTurn {
   const commandTimeoutMs = resolveSandboxCommandTimeoutMs({
     limits: input.limits,
@@ -82,6 +85,7 @@ export function createSandboxRuntimeForTurn(input: {
     maxCommandTimeoutMs: maxSandboxCommandTimeoutMs(input.limits),
     environment: input.environment,
     logWarn: input.logWarn,
+    volume: input.volume ?? null,
     ...(input.skillAssets
       ? {
           skillStaging: {

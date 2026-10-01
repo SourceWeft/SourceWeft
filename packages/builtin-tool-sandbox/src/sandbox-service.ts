@@ -18,6 +18,7 @@ import type {
   SandboxRuntimeContext,
   SandboxServiceConfig,
   SandboxStore,
+  SandboxVolumeHooks,
 } from "./runtime/types";
 
 export type SandboxRuntimeName = "api" | "worker" | "scheduler";
@@ -78,6 +79,8 @@ export type AgentSandboxServiceDeps = {
   getConfig: () => SandboxServiceConfig;
   getProviderFactory: (providerId: string) => SandboxProviderFactory | null;
   logWarn: (message: string, meta: Record<string, unknown>) => void;
+  /** Persistent /workspace volume hooks for the given provider, or null to keep sandboxes ephemeral. */
+  getVolumeHooks?: (providerId: string) => SandboxVolumeHooks | null;
 };
 
 export class AgentSandboxService {
@@ -132,6 +135,7 @@ export class AgentSandboxService {
       ...(input.artifacts ? { artifacts: input.artifacts } : {}),
       ...(input.skillAssets ? { skillAssets: input.skillAssets } : {}),
       ...(input.runtimeAssets ? { runtimeAssets: input.runtimeAssets } : {}),
+      volume: this.deps.getVolumeHooks?.(factory.id) ?? null,
     });
 
     const agentRuntime: AgentSandboxRuntimeForTurn = {

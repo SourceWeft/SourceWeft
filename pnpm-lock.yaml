@@ -220,6 +220,9 @@ importers:
       '@sourceweft/model-gateway':
         specifier: workspace:*
         version: link:../../packages/model-gateway
+      '@sourceweft/sandbox-volume':
+        specifier: workspace:*
+        version: link:../../packages/sandbox-volume
       '@sourceweft/security-braces':
         specifier: workspace:*
         version: link:../../packages/security-braces
