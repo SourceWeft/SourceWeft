@@ -242,3 +242,13 @@ export function signedEvent(event: WebhookEvent, timestamp = Date.now()) {
     signature: `t=${timestamp},v1=${sign("sha256", Buffer.from(`${timestamp}.${raw}`), signingKey.privateKey).toString("base64")}`,
   };
 }
+
+// A monthly period that is open at the real clock. The subscription handlers
+// compare the event's period with the current time, so a literal period goes
+// stale the day it ends and fails every test that confirms through it.
+export function openMonthlyPeriod(now = Date.now()) {
+  return {
+    currentPeriodStart: new Date(now - 60_000).toISOString(),
+    currentPeriodEnd: new Date(now + 30 * 86_400_000).toISOString(),
+  };
+}

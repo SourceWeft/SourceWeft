@@ -20,6 +20,7 @@ import {
   signedEvent,
   storeId,
   waffoConfig,
+  openMonthlyPeriod,
 } from "./waffo-fixtures";
 
 const checkout = async (f: ReturnType<typeof createWaffoFixture>) => {
@@ -660,8 +661,7 @@ test("a refund after subscription.canceled is not dropped as stale", async () =>
     paymentId: undefined,
     paymentStatus: undefined,
     billingPeriod: "monthly",
-    currentPeriodStart: "2026-09-01T00:00:00Z",
-    currentPeriodEnd: "2026-10-01T00:00:00Z",
+    ...openMonthlyPeriod(),
     productMetadata: { sourceweftProductKey: "individual_pro:monthly" },
   });
   const activated = signedEvent(active);
