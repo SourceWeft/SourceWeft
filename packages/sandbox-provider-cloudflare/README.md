@@ -7,8 +7,9 @@ provider exists (Daytona Tier 1/2 enforces an allowlist that cannot be
 overridden per sandbox).
 
 Design doc: `docs/architecture/cloudflare-sandbox-provider.md` (minimal-ops
-variant: no bridge fork, no custom worker code, no custom Dockerfile —
-everything SourceWeft-specific lives client-side in this package).
+variant: no bridge fork — the deploy lays only our Dockerfile and a Worker
+entry with one warm-pool fix over the stock scaffold, see `bridge/README.md`;
+everything else SourceWeft-specific lives client-side in this package).
 
 ## Enabling the provider
 

@@ -6,7 +6,10 @@ is imported by business code — `src/` never references this directory, and it
 is excluded from the package's TypeScript project.
 
 Design: docs/architecture/cloudflare-sandbox-provider.md (minimal-ops variant —
-no fork, no custom worker code, no custom Dockerfile).
+no fork). Two files are laid over the stock scaffold on every deploy: our
+`Dockerfile` (the shared sandbox base image) and `worker-index.ts` (the
+template's Worker entry plus the warm-pool ceiling fix described under
+Capacity).
 
 Prerequisites: Node.js + npm, Docker running, a Cloudflare account with
 Workers Paid ($5/mo).
@@ -56,6 +59,20 @@ Cloudflare account ceiling is far above this (6 TiB memory / 1,500 vCPU
 concurrently, i.e. 1,500+ `standard-1` instances), and billing is for container
 running time, not for the configured maximum.
 
+`max_instances` alone does not lift the limit. Every request goes through the
+bridge's `WarmPool` Durable Object, which persists the ceiling it plans
+against. The stock `configure()` keeps `min(stored, WARM_POOL_MAX_INSTANCES)`,
+and only the probe that runs while `WARM_POOL_TARGET > 0` ever clears it, so a
+pool that once stored 3 stays at 3 after `max_instances` is raised.
+`worker-index.ts` overrides `configure()` to replace the stored ceiling with
+`WARM_POOL_MAX_INSTANCES`. Check what the pool actually uses — not only
+`wrangler containers info`:
+
+```sh
+curl "$CF_SANDBOX_BRIDGE_URL/v1/pool/stats" -H "Authorization: Bearer $CF_SANDBOX_API_KEY"
+# "config":{"maxInstances":50,…},"maxInstances":50   ← the second one is the ceiling in force
+```
+
 ### When the image cannot be built
 
 `bridge:deploy` builds the container image with the local Docker daemon, which
@@ -64,19 +81,17 @@ Docker VM is the usual cause), the run fails at "Building image" — AFTER the
 Worker script has already been uploaded, so the Worker is on the new SDK while
 the container stays as it was. Fix the network and run it again.
 
-Capacity alone does not need a build. Point `image` at the image that is
-already live and deploy that config; only `max_instances` changes:
+Capacity or Worker-code changes alone do not need a build. Point `image` at the
+image that is already live and deploy that config; the container is untouched:
 
 ```sh
 cd bridge/sandbox-bridge
+cp ../worker-index.ts src/index.ts           # if the Worker entry changed
 npx wrangler containers list                 # application id
 npx wrangler containers info <id>            # its "image": registry.cloudflare.com/…@sha256:…
 # copy wrangler.jsonc, replace "image": "./Dockerfile" with that reference, then:
 npx wrangler deploy --config <the copy>      # --dry-run first
 ```
-
-A new ceiling took a few minutes to be honoured after such a deploy; until
-then the bridge still answered "instance limit reached (3/3)".
 
 ## Rollback to Daytona
 

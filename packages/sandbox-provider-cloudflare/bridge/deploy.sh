@@ -3,10 +3,10 @@
 # `cloudflare` sandbox provider talks to.
 #
 # Ops-only: this script is not imported by any business code. It scaffolds the
-# unmodified `cloudflare/sandbox-sdk/bridge/worker` template into a local
-# working directory (default: ./sandbox-bridge, git-ignored), generates the
-# API key on first run, and deploys to the Cloudflare account you are logged
-# into with wrangler.
+# `cloudflare/sandbox-sdk/bridge/worker` template into a local working
+# directory (default: ./sandbox-bridge, git-ignored), overlays our Dockerfile
+# and Worker entry, generates the API key on first run, and deploys to the
+# Cloudflare account you are logged into with wrangler.
 #
 # Prerequisites: Node.js + npm, Docker running (the template builds a container
 # image on deploy), a Cloudflare account with Workers Paid.
@@ -89,13 +89,20 @@ if [ -f "$BRIDGE_DIR/.dockerignore" ]; then
   printf '\n!html-runtime/\n!html-runtime/**\n' >> "$BRIDGE_DIR/.dockerignore"
 fi
 
+# ── Worker entry ────────────────────────────────────────────────────────────
+# The template's src/index.ts, except that the warm pool's ceiling follows
+# WARM_POOL_MAX_INSTANCES instead of the lowest value the pool ever stored.
+echo "==> Injecting SourceWeft Worker entry (worker-index.ts)"
+cp "$SCRIPT_DIR/worker-index.ts" "$BRIDGE_DIR/src/index.ts"
+
 # ── Capacity ────────────────────────────────────────────────────────────────
 # The stock template ships max_instances: 3. Each chat thread that uses the
 # sandbox holds one container for up to an hour, so 3 means the fourth such
 # conversation is told the sandbox is unavailable. The account ceiling is far
 # higher (1,500+ standard-1 instances) and billing is for running time, not for
 # this number. The warm pool is told the same ceiling so it plans against it
-# instead of learning it from capacity errors.
+# instead of learning it from capacity errors; worker-index.ts makes that value
+# replace whatever ceiling the pool stored before.
 MAX_INSTANCES=50
 echo "==> Setting container capacity (max_instances=$MAX_INSTANCES)"
 perl -0pi -e 's/("max_instances"\s*:\s*)\d+/${1}'"$MAX_INSTANCES"'/; s/("WARM_POOL_MAX_INSTANCES"\s*:\s*")\d+(")/${1}'"$MAX_INSTANCES"'${2}/' wrangler.jsonc
