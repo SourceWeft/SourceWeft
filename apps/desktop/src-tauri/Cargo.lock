@@ -3879,7 +3879,7 @@ dependencies = [
 
 [[package]]
 name = "sourceweft-desktop"
-version = "0.3.0-rc.3"
+version = "0.3.0-rc.4"
 dependencies = [
  "base64 0.22.1",
  "futures-util",
