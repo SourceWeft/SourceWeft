@@ -10,3 +10,5 @@ packages/anydoc/anydoc.js -text
 packages/anydoc/anydoc.d.ts -text
 packages/anydoc/index.d.ts -text
 packages/anydoc/THIRD_PARTY_NOTICES.txt -text
+# Compare identical CSV fixture bytes on every platform, not autocrlf rewrites.
+packages/anydoc/tests/fixtures/sample.csv -text
