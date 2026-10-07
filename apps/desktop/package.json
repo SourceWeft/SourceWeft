@@ -1,7 +1,7 @@
 {
   "name": "@sourceweft/desktop",
   "license": "Apache-2.0",
-  "version": "0.3.0-rc.5",
+  "version": "0.3.0-rc.6",
   "private": true,
   "type": "module",
   "scripts": {

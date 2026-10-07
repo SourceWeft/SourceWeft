@@ -1,0 +1,15 @@
+{
+  "tag": "v0.3.0-rc.6",
+  "releasedAt": "2026-10-08",
+  "category": "Release",
+  "commit": "3c13b71b5428cf1a6fb91fa7d64b5d71c947e5ab",
+  "title": "Readable live MCP activity",
+  "summary": "This release candidate keeps MCP server and tool names readable while approved actions stream into a conversation, as well as after page refresh. Desktop installers remain unsigned manual downloads; automatic application updates are not published for this version.",
+  "items": [
+    "Preserved recorded MCP display names when live tool events are first received or merged with later updates, including thin events that do not repeat display metadata.",
+    "Included MCP display names in the early tool events promoted from model messages. Execution aliases, approval behavior and model routing remain unchanged.",
+    "Added regressions for first, late and partial display events, including checks that metadata from different tool calls is not mixed."
+  ],
+  "githubPrerelease": false,
+  "desktopPublicationPolicy": "candidate"
+}
