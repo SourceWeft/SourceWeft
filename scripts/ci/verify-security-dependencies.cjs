@@ -255,3 +255,7 @@ assert.throws(
 console.log(
   "Patched npm dependency versions and their advisory regressions passed.",
 );
+
+// The formerly vulnerable braces implementation must resolve through the
+// actual SDK consumer chain, including its normal glob behavior.
+require("./verify-security-braces.cjs");

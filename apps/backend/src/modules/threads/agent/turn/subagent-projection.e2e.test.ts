@@ -156,6 +156,8 @@ test("a task delegate's run is projected into a child thread the persona can con
     prepared,
     toolTraces: new Map(),
     seedCheckpoint: seedChildCheckpointWith(parentAgent),
+    // A fresh task has no persisted child; keep this graph test database-free.
+    findChildThread: async () => null,
     createChildThread: async () =>
       ({ id: "thread_child", parentThreadId: "thread_parent" }) as never,
     // Persist without a database: seed the checkpoint exactly as the real
