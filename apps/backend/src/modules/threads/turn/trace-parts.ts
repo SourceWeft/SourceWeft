@@ -34,6 +34,7 @@ export type ToolTracePart = TracePartBase & {
   title?: string;
   approvalState?: ToolCallTrace["approvalState"];
   approvalConfirmationId?: string;
+  mcpDisplay?: ToolCallTrace["mcpDisplay"];
 };
 
 export type StepTracePart = TracePartBase & {
@@ -142,6 +143,9 @@ export function normalizeTraceParts(value: unknown): TracePart[] {
             ? { latencyMs: record.latencyMs }
             : {}),
           ...(typeof record.title === "string" ? { title: record.title } : {}),
+          ...(normalizeMcpDisplay(record.mcpDisplay)
+            ? { mcpDisplay: normalizeMcpDisplay(record.mcpDisplay) }
+            : {}),
           ...(record.approvalState === "approved" ||
           record.approvalState === "rejected"
             ? { approvalState: record.approvalState }
@@ -238,6 +242,17 @@ export function tracePartFromReasoningSegment(
   };
 }
 
+export function normalizeMcpDisplay(
+  value: unknown,
+): ToolCallTrace["mcpDisplay"] {
+  const record = toObjectRecord(value);
+  const serverName =
+    typeof record?.serverName === "string" ? record.serverName.trim() : "";
+  const toolName =
+    typeof record?.toolName === "string" ? record.toolName.trim() : "";
+  return serverName && toolName ? { serverName, toolName } : undefined;
+}
+
 export function tracePartFromToolCall(
   toolCall: ToolCallTrace,
 ): TracePartCandidate {
@@ -246,6 +261,9 @@ export function tracePartFromToolCall(
     id: toolCall.id,
     toolCallId: toolCall.id,
     tool: toolCall.tool,
+    ...(normalizeMcpDisplay(toolCall.mcpDisplay)
+      ? { mcpDisplay: normalizeMcpDisplay(toolCall.mcpDisplay) }
+      : {}),
     status: toolCall.status,
     input: toolCall.input,
     ...(toolCall.output !== undefined ? { output: toolCall.output } : {}),

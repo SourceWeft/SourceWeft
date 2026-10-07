@@ -183,6 +183,10 @@ test("HITL stream handler emits confirmation event sequence and interrupted fina
       thread: { id: "thread" },
     } as never,
   });
+  runtime.mcpDisplayByToolName.set("mcp__github__create_issue", {
+    serverName: "GitHub",
+    toolName: "create_issue",
+  });
   runtime.assistantContent = "I need approval";
   runtime.hasTextSinceLastToolBoundary = true;
   runtime.renderBlocks.appendText("I need approval");
@@ -319,6 +323,12 @@ test("HITL stream handler emits confirmation event sequence and interrupted fina
     );
     assert.deepEqual(result, { kind: "done" });
     assert.equal(events[2]?.type, "tool-call-start");
+    assert.deepEqual(
+      events[2]?.type === "tool-call-start"
+        ? events[2].toolCall.mcpDisplay
+        : undefined,
+      { serverName: "GitHub", toolName: "create_issue" },
+    );
     assert.equal(
       events[2]?.type === "tool-call-start" ? events[2].toolCall.status : null,
       "running",

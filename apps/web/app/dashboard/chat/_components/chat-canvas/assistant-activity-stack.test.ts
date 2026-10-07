@@ -607,3 +607,30 @@ describe("assistant-activity-items.test.ts", () => {
     );
   });
 });
+
+test("trace-only MCP activity retains explicit server and raw tool names", () => {
+  const mcpDisplay = {
+    serverName: "Microsoft Learn MCP",
+    toolName: "microsoft_docs_fetch",
+  };
+  const [item] = buildAssistantActivityItems({
+    traceParts: [
+      {
+        id: "fetch",
+        kind: "tool",
+        toolCallId: "fetch-call",
+        tool: "mcp__com_microsoft_microsoft-learn-mc_371294fd__microso_69f82065",
+        input: {},
+        status: "completed",
+        order: 1,
+        createdAt: "2026-10-07T00:00:00Z",
+        updatedAt: "2026-10-07T00:00:00Z",
+        mcpDisplay,
+      },
+    ],
+  });
+  assert.deepEqual(
+    item?.type === "tool" ? item.toolCall.mcpDisplay : undefined,
+    mcpDisplay,
+  );
+});

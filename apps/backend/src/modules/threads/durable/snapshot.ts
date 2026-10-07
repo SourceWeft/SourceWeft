@@ -4,6 +4,7 @@ import type { ToolCallTrace } from "../turn/types";
 import type { ThinkingStepTrace } from "../turn/types";
 import {
   normalizeTraceParts,
+  normalizeMcpDisplay,
   tracePartFromToolCall,
   upsertTracePart,
   type TracePart,
@@ -247,6 +248,7 @@ export function mergeToolCallTraceState(
   return {
     ...(existing ?? {}),
     ...next,
+    mcpDisplay: next.mcpDisplay ?? existing?.mcpDisplay,
     approvalState: next.approvalState ?? existing?.approvalState,
     approvalConfirmationId:
       next.approvalConfirmationId ?? existing?.approvalConfirmationId,
@@ -286,6 +288,9 @@ export function toToolCallTrace(value: unknown): ToolCallTrace | null {
         ? record.error
         : null,
     sequence: typeof record.sequence === "number" ? record.sequence : 0,
+    ...(normalizeMcpDisplay(record.mcpDisplay)
+      ? { mcpDisplay: normalizeMcpDisplay(record.mcpDisplay) }
+      : {}),
     approvalState:
       record.approvalState === "approved" || record.approvalState === "rejected"
         ? record.approvalState
@@ -328,6 +333,7 @@ export function updateExistingTracePartsFromToolCalls(
             latencyMs: existingToolPart.latencyMs ?? null,
             error: existingToolPart.error ?? null,
             sequence: existingToolPart.order,
+            mcpDisplay: existingToolPart.mcpDisplay,
             approvalState: existingToolPart.approvalState,
             approvalConfirmationId: existingToolPart.approvalConfirmationId,
           }

@@ -10,6 +10,8 @@ import {
   buildAssistantMessageConfirmationMetadata,
   buildAssistantMessageSnapshotMetadata,
 } from "./assistant-message-metadata";
+import { toToolCallTrace } from "./snapshot";
+import { normalizeTraceParts } from "../turn/trace-parts";
 import { parseSseData } from "../../../test/thread-stream-fixtures";
 
 function createRun(
@@ -1174,5 +1176,50 @@ test("early durable preparation preserves safe configuration failures", async ()
     testExports.toDurableRunContentError(new Error("Failed query: unavailable"))
       .code,
     "CHAT_RUN_FAILED",
+  );
+});
+
+test("MCP display identity survives durable events, trace parts, and persisted snapshots", () => {
+  const tool =
+    "mcp__com_microsoft_microsoft-learn-mc_371294fd__microso_9eda69db";
+  const mcpDisplay = {
+    serverName: "Microsoft Learn MCP",
+    toolName: "microsoft_docs_search",
+  };
+  let snapshot: ChatRunSnapshot = {};
+  for (const type of ["tool-call-start", "tool-call-result", "tool-call-end"]) {
+    snapshot = testExports.updateSnapshotFromPayload(snapshot, {
+      type,
+      toolCall: {
+        id: "search-call",
+        tool,
+        input: {},
+        status: type === "tool-call-start" ? "running" : "completed",
+        mcpDisplay,
+      },
+      output: {
+        name: "mcp__com_microsoft_microsoft-learn-mc_371294fd__microsoft_docs_search",
+      },
+    });
+    assert.deepEqual(
+      toToolCallTrace(snapshot.toolCalls?.[0])?.mcpDisplay,
+      mcpDisplay,
+    );
+    const part = normalizeTraceParts(snapshot.traceParts).find(
+      (part) => part.kind === "tool",
+    );
+    assert.deepEqual(
+      part?.kind === "tool" ? part.mcpDisplay : undefined,
+      mcpDisplay,
+    );
+  }
+  const metadata = testExports.buildSnapshotMetadata({
+    currentMetadata: {},
+    run: createRun(),
+    snapshot: JSON.parse(JSON.stringify(snapshot)),
+  });
+  assert.deepEqual(
+    (metadata.toolCalls as Array<{ mcpDisplay: unknown }>)[0]?.mcpDisplay,
+    mcpDisplay,
   );
 });

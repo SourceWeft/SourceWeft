@@ -10,6 +10,7 @@ import {
   isCompletedArtifactToolCall,
   normalizeToolCallRecord,
   resolveRenderBlocksFromMetadata,
+  resolveToolCallsFromMetadata,
   resolveToolCallFromStreamEvent,
   sanitizeClientErrorMessage,
   STREAM_TEXT_INTERRUPTED_KEY,
@@ -1019,4 +1020,94 @@ test("normalization preserves persisted MCP display names without altering execu
     serverName: "AnyCrawl",
     toolName: "Search full articles",
   });
+});
+
+test("production MCP approval and legacy completed records recover reliable labels on refresh", () => {
+  const tool =
+    "mcp__com_microsoft_microsoft-learn-mc_371294fd__microso_9eda69db";
+  const mcpDisplay = {
+    serverName: "Microsoft Learn MCP",
+    toolName: "microsoft_docs_search",
+  };
+  const approval = normalizeToolCallRecord({
+    id: "approval",
+    tool,
+    input: {},
+    status: "completed",
+    output: {
+      type: "tool_confirmation_request",
+      subject: { provider: "mcp", label: mcpDisplay.serverName },
+      action: { toolName: tool, label: mcpDisplay.toolName },
+    },
+  });
+  assert.deepEqual(approval?.mcpDisplay, mcpDisplay);
+  const metadata = JSON.parse(
+    JSON.stringify({
+      toolCalls: [
+        {
+          id: "search",
+          tool,
+          input: {},
+          status: "completed",
+          output: {
+            name: "mcp__com_microsoft_microsoft-learn-mc_371294fd__microsoft_docs_search",
+          },
+        },
+      ],
+      traceEvents: [
+        { payload: { toolCall: { id: "search", tool, mcpDisplay } } },
+      ],
+    }),
+  );
+  const restored = resolveToolCallsFromMetadata(metadata);
+  assert.deepEqual(restored[0]?.mcpDisplay, mcpDisplay);
+  assert.equal(restored[0]?.tool, tool);
+  metadata.traceEvents[0].payload.toolCall.tool = "different-execution-alias";
+  assert.equal(
+    resolveToolCallsFromMetadata(metadata)[0]?.mcpDisplay,
+    undefined,
+  );
+});
+
+test("canonical runtime MCP identity takes priority over legacy approval output labels", () => {
+  const tool = "mcp__server_hash__tool_hash";
+  const canonical = {
+    serverName: "Canonical server",
+    toolName: "canonical_search",
+  };
+  const approval = {
+    type: "tool_confirmation_request",
+    subject: { provider: "mcp", label: "Old server" },
+    action: { toolName: tool, label: "Old search" },
+  };
+  const record = {
+    id: "same-call",
+    tool,
+    status: "completed",
+    input: {},
+    output: approval,
+  };
+  const metadata = {
+    toolCalls: [record],
+    traceEvents: [{ toolCall: { id: record.id, tool, mcpDisplay: canonical } }],
+  };
+  assert.deepEqual(
+    resolveToolCallsFromMetadata(metadata)[0]?.mcpDisplay,
+    canonical,
+  );
+  const explicit = {
+    serverName: "Explicit server",
+    toolName: "explicit_search",
+  };
+  assert.deepEqual(
+    resolveToolCallsFromMetadata({
+      ...metadata,
+      toolCalls: [{ ...record, mcpDisplay: explicit }],
+    })[0]?.mcpDisplay,
+    explicit,
+  );
+  assert.deepEqual(
+    resolveToolCallsFromMetadata({ toolCalls: [record] })[0]?.mcpDisplay,
+    { serverName: "Old server", toolName: "Old search" },
+  );
 });

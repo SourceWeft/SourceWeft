@@ -422,15 +422,40 @@ test("continuation metadata does not rewrite duplicate reasoning ids with new se
     (metadata.traceEvents as Array<{ id: string; sequence: number }>).map(
       (item) => `${item.sequence}:${item.id}`,
     ),
-    [
-      "1:reasoning:model-reasoning-1:1",
-      "5:reasoning:model-reasoning-1:5",
-    ],
+    ["1:reasoning:model-reasoning-1:1", "5:reasoning:model-reasoning-1:5"],
   );
   assert.deepEqual(
     (metadata.reasoningSegments as Array<{ id: string; sequence: number }>).map(
       (item) => `${item.sequence}:${item.id}`,
     ),
     ["1:model-reasoning-1", "5:model-reasoning-1:5"],
+  );
+});
+
+test("finalized MCP calls retain explicit display metadata and the execution alias", () => {
+  const tool =
+    "mcp__com_microsoft_microsoft-learn-mc_371294fd__microso_9eda69db";
+  const mcpDisplay = {
+    serverName: "Microsoft Learn MCP",
+    toolName: "microsoft_docs_search",
+  };
+  const persisted = testExports.serializeToolCallForMessage({
+    id: "search-call",
+    tool,
+    input: { query: "Azure Blob" },
+    output: {
+      name: "mcp__com_microsoft_microsoft-learn-mc_371294fd__microsoft_docs_search",
+    },
+    status: "completed",
+    latencyMs: 862,
+    error: null,
+    sequence: 1,
+    mcpDisplay,
+  });
+  assert.equal(persisted.tool, tool);
+  assert.deepEqual(persisted.mcpDisplay, mcpDisplay);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(persisted)).mcpDisplay,
+    mcpDisplay,
   );
 });

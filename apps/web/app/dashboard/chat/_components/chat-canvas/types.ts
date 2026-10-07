@@ -367,6 +367,7 @@ export type TracePartRecord =
       title?: string;
       approvalState?: ToolCallRecord["approvalState"];
       approvalConfirmationId?: string;
+      mcpDisplay?: ToolCallRecord["mcpDisplay"];
       producer?: ToolProducer;
     }
   | {

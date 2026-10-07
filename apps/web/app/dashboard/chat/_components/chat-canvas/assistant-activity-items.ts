@@ -73,8 +73,8 @@ function buildToolCallFromPart(input: {
     status: part.status,
     error: part.error ?? matchedToolCall?.error ?? null,
     sequence: part.order,
-    ...(matchedToolCall?.mcpDisplay
-      ? { mcpDisplay: matchedToolCall.mcpDisplay }
+    ...((part.mcpDisplay ?? matchedToolCall?.mcpDisplay)
+      ? { mcpDisplay: part.mcpDisplay ?? matchedToolCall?.mcpDisplay }
       : {}),
     ...((part.approvalState ?? matchedToolCall?.approvalState)
       ? { approvalState: part.approvalState ?? matchedToolCall?.approvalState }
