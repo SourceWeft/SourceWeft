@@ -1,4 +1,4 @@
-import type { Format, NeedsOcrError } from "@firecrawl/anydoc";
+import type { Format, NeedsOcrError } from "@sourceweft/anydoc";
 import { buildParsedDocument } from "./build-parsed-document";
 import { ParserContentError } from "./errors";
 import { readPdfPageCount } from "./pdf-page-count";
@@ -33,7 +33,7 @@ export async function parseWithAnydoc(
   // Only conversion loads native code. Catalog and non-document parser
   // consumers do not require the binary merely by importing this package.
   const { formatFromBytes, toMarkdownBytes } =
-    await import("@firecrawl/anydoc");
+    await import("@sourceweft/anydoc");
   const detectedFormat = formatFromBytes(input.content);
   if (detectedFormat !== null && detectedFormat !== expectedFormat) {
     throw new ParserContentError(
@@ -70,6 +70,8 @@ export async function parseWithAnydoc(
       documentParseBackend: "anydoc",
       parserEngine: "anydoc",
       parserEngineVersion: "0.2.4",
+      parserPolicy: "numeric-preserving",
+      pageNumbersRetained: true,
       detectedFormat: detectedFormat ?? expectedFormat,
       pageLocationAvailable: false,
       pageCount,

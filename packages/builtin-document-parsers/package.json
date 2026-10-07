@@ -14,10 +14,10 @@
     "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
-    "@firecrawl/anydoc": "0.2.4",
     "@langchain/classic": "^1.0.42",
     "@langchain/core": "^1.2.9",
     "@langchain/textsplitters": "^1.0.1",
+    "@sourceweft/anydoc": "workspace:*",
     "@sourceweft/capability-contracts": "workspace:*",
     "pdfjs-dist": "^6.2.108",
     "srt-parser-2": "1.2.3",

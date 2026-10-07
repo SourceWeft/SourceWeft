@@ -46,11 +46,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24.18.0
+      - uses: dtolnay/rust-toolchain@1.94.1
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/anydoc/upstream
       - name: Verify source boundary and locked installation
         run: |
           node scripts/editions/check-boundaries.mjs ${{ matrix.edition }}
           pnpm install --frozen-lockfile
           pnpm audit --audit-level=moderate
+          pnpm --filter @sourceweft/anydoc native:build
           node scripts/ci/verify-security-dependencies.cjs
           node scripts/ci/verify-security-patches.mjs
           pnpm --filter @sourceweft/market-contracts build

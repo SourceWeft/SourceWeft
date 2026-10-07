@@ -597,7 +597,7 @@ export const config = {
     // change to become the default for newly ingested sources.
     defaultParserVersion:
       process.env.DOCUMENT_PARSE_DEFAULT_PARSER_VERSION?.trim() ||
-      "v4-anydoc-unified-0.2.4",
+      "v5-anydoc-numeric-preserving-0.2.4",
     defaultChunkSize: parsePositiveInteger(
       process.env.DOCUMENT_PARSE_DEFAULT_CHUNK_SIZE,
       1000,
