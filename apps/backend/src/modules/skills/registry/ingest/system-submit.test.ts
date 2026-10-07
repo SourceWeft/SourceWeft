@@ -7,6 +7,12 @@ import { beforeEach, test, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   create: vi.fn(),
   get: vi.fn(),
+  capacity: vi.fn(),
+}));
+
+vi.mock("@sourceweft/db", () => ({
+  db: { select: () => ({ from: () => ({ where: mocks.capacity }) }) },
+  skillRegistrySubmissions: { status: "status" },
 }));
 
 vi.mock("./service", () => ({
@@ -17,6 +23,7 @@ vi.mock("./service", () => ({
 import {
   parseSystemSubmitSources,
   readSystemSubmissions,
+  readSkillImportCapacity,
   submitSkillSourcesAsSystem,
 } from "./system-submit";
 
@@ -111,4 +118,10 @@ test("stdin sources are strings or {source, featured}; anything else is refused 
   ]) {
     assert.throws(() => parseSystemSubmitSources(bad));
   }
+});
+
+test("capacity reports queued/running imports across scopes", async () => {
+  mocks.capacity.mockResolvedValue([{ inFlight: 12 }]);
+  assert.deepEqual(await readSkillImportCapacity(), { inFlight: 12 });
+  assert.equal(mocks.capacity.mock.calls.length, 1);
 });

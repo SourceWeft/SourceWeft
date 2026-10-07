@@ -1,3 +1,4 @@
+import { config } from "../../../shared/config";
 /**
  * AI-written overviews of public skills (skill-marketplace-plan §17.4).
  *
@@ -27,7 +28,7 @@ import {
 } from "./overview-repository";
 
 // Jobs queued per tick.
-export const SKILL_OVERVIEW_BATCH_SIZE = 20;
+export const SKILL_OVERVIEW_BATCH_SIZE = config.market.skillOverviewBatchSize;
 // Candidates looked at per tick. More than the batch: some already have a job
 // (queued, retrying, or failed for good) and are passed over.
 const SKILL_OVERVIEW_SCAN_LIMIT = 1_000;

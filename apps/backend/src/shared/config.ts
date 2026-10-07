@@ -1,9 +1,6 @@
 import "dotenv/config";
 
-import {
-  parseBooleanEnv as parseBoolean,
-  parseStrictBooleanEnv,
-} from "./env";
+import { parseBooleanEnv as parseBoolean, parseStrictBooleanEnv } from "./env";
 import { parseAllowedInternalOrigins } from "./security/endpoint-policy";
 
 type AlertLevel = "warn" | "error" | "critical";
@@ -655,6 +652,12 @@ export const config = {
     // raise them for a while to get through a backlog, then put them back.
     // The jobs run behind tenant work on the worker either way. A value that
     // is not an integer or is out of range fails configuration loading.
+    skillOverviewBatchSize: parseBoundedIntegerEnv({
+      name: "SKILL_OVERVIEW_BATCH_SIZE",
+      fallback: 20,
+      min: 1,
+      max: 1000,
+    }),
     overviewBatchSize: parseBoundedIntegerEnv({
       name: "MCP_OVERVIEW_BATCH_SIZE",
       fallback: 20,
