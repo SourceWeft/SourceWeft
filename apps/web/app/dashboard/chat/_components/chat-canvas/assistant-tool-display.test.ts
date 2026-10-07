@@ -16,7 +16,11 @@ function skillRead(path: string): ToolCallRecord {
     id: `call-${path}`,
     tool: "read_file",
     status: "completed",
-    input: { path, filesystemScope: "skills", visibility: "internal_instruction" },
+    input: {
+      path,
+      filesystemScope: "skills",
+      visibility: "internal_instruction",
+    },
   } as unknown as ToolCallRecord;
 }
 
@@ -46,6 +50,23 @@ describe("getAssistantToolTitle — skill instruction reads", () => {
   it("falls back to the plain label when the skill cannot be named", () => {
     expect(getAssistantToolTitle(skillRead("/skills"), t)).toBe(
       "Load skill instructions",
+    );
+  });
+});
+
+describe("MCP tool titles", () => {
+  it("keeps the full metadata name and excludes execution hashes", () => {
+    const toolCall = {
+      tool: "mcp__io_github_anycrawl_abc12345__sca_12345678",
+      status: "completed",
+      input: {},
+      mcpDisplay: {
+        serverName: "AnyCrawl",
+        toolName: "Search full articles failed",
+      },
+    } as ToolCallRecord;
+    expect(getAssistantToolTitle(toolCall, t)).toBe(
+      "AnyCrawl · Search full articles failed",
     );
   });
 });

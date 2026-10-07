@@ -67,7 +67,7 @@ function toolSignature(toolCalls: MessageVersion["toolCalls"]) {
   return (toolCalls ?? [])
     .map(
       (toolCall) =>
-        `${toolCall.id}:${toolCall.tool}:${toolCall.status}:${toolCall.error ?? ""}:${toolCall.latencyMs ?? ""}:${toolCall.approvalState ?? ""}`,
+        `${toolCall.id}:${toolCall.tool}:${toolCall.status}:${toolCall.error ?? ""}:${toolCall.latencyMs ?? ""}:${toolCall.approvalState ?? ""}:${toolCall.mcpDisplay?.serverName ?? ""}:${toolCall.mcpDisplay?.toolName ?? ""}`,
     )
     .join("|");
 }
@@ -76,7 +76,7 @@ function activitySignature(items: MessageRenderState["activityItems"]) {
   return items
     .map((item) => {
       if (item.type === "tool") {
-        return `${item.key}:tool:${item.toolCall.id}:${item.toolCall.status}:${item.toolCall.error ?? ""}:${item.toolCall.approvalState ?? ""}`;
+        return `${item.key}:tool:${item.toolCall.id}:${item.toolCall.status}:${item.toolCall.error ?? ""}:${item.toolCall.approvalState ?? ""}:${item.toolCall.mcpDisplay?.serverName ?? ""}:${item.toolCall.mcpDisplay?.toolName ?? ""}`;
       }
       if (item.type === "step") {
         return `${item.key}:step:${item.status}:${item.title}:${item.items.join("\n")}`;

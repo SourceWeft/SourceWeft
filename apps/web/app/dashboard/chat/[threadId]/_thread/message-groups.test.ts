@@ -1004,3 +1004,19 @@ test("explicit prompt association is respected before its later server timestamp
     ["turn:user-1", "turn:user-1", "turn:user-2", "turn:user-2"],
   );
 });
+
+test("normalization preserves persisted MCP display names without altering execution names", () => {
+  const tool = "mcp__anycrawl_abcd1234__sea_7890abcd";
+  const record = normalizeToolCallRecord({
+    id: "mcp",
+    tool,
+    input: {},
+    status: "completed",
+    mcpDisplay: { serverName: "AnyCrawl", toolName: "Search full articles" },
+  });
+  assert.equal(record?.tool, tool);
+  assert.deepEqual(record?.mcpDisplay, {
+    serverName: "AnyCrawl",
+    toolName: "Search full articles",
+  });
+});

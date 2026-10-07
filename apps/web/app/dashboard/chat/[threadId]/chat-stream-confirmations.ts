@@ -1,3 +1,4 @@
+import { normalizeMcpDisplay } from "./_thread/message-normalizers";
 import {
   isPendingToolConfirmation,
   toolConfirmationRequestSchema,
@@ -66,6 +67,9 @@ function parseFinishToolCall(value: unknown): ToolCallRecord {
     tool,
     input,
     output: record.output,
+    ...(normalizeMcpDisplay(record.mcpDisplay)
+      ? { mcpDisplay: normalizeMcpDisplay(record.mcpDisplay) }
+      : {}),
     latencyMs,
     status,
     error,

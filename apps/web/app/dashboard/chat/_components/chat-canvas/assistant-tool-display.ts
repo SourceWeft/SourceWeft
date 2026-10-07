@@ -24,6 +24,13 @@ function formatToolName(toolName: string) {
     .replace(/\b\w/g, (match) => match.toUpperCase());
 }
 
+export function getMcpToolDisplayName(toolCall: ToolCallRecord) {
+  if (!toolCall.tool.startsWith("mcp__")) return null;
+  const server = toolCall.mcpDisplay?.serverName.trim();
+  const tool = toolCall.mcpDisplay?.toolName.trim();
+  return server && tool ? `${server} · ${tool}` : null;
+}
+
 export function getToolDisplayName(toolName: string) {
   return (
     getAgentToolSlashCommand(toolName)?.displayName ?? formatToolName(toolName)
@@ -191,6 +198,9 @@ export function getAssistantToolTitle(
   if (workfileMutationTitle) {
     return workfileMutationTitle;
   }
+
+  const mcpTitle = getMcpToolDisplayName(toolCall);
+  if (mcpTitle) return mcpTitle;
 
   const stepTitle = getStepDisplayTitle(toolStep);
   if (stepTitle) {

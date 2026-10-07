@@ -342,6 +342,7 @@ export type ToolProducer = {
 };
 
 export type ToolCallTrace = {
+  mcpDisplay?: { serverName: string; toolName: string };
   id: string;
   tool: string;
   input: Record<string, unknown>;
