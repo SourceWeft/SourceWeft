@@ -1513,7 +1513,13 @@ export class McpService {
       name: input.boundToolName,
       description: input.originalTool.description,
       schema: input.originalTool.schema,
-      metadata: input.originalTool.metadata,
+      metadata: {
+        ...input.originalTool.metadata,
+        sourceweftMcpDisplay: {
+          serverName: input.install.name,
+          toolName: toolRecord.title?.trim() || toolRecord.serverToolName,
+        },
+      },
       func: async (args, _runManager, configValue) => {
         const requestJson = redactMcpSecrets(toObject(args)) as Record<
           string,

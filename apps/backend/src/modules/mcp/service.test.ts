@@ -1,3 +1,4 @@
+import { langChainMcpToolName } from "./langchain-client";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -496,6 +497,43 @@ test("buildLangChainToolsForTurn does not bind tools disabled per-tool", async (
 
   // Only the enabled tool is bound even though the server exposes both.
   assert.equal(runtime.tools.length, 1);
+  await runtime.close();
+});
+
+test("MCP binding keeps readable metadata separate from provider-safe execution names", async () => {
+  resetMcpServiceMocks();
+  const install = mcpInstall({
+    id: "mcp_display",
+    name: "AnyCrawl",
+    tools: [
+      mcpTool({
+        id: "tool_display",
+        serverToolName: "search_full_articles",
+        title: "搜索完整文章 Search full articles",
+      }),
+    ],
+  });
+  mocks.listWorkspaceMcpInstalls.mockResolvedValue([install]);
+  toolsByInstallId.set(install.id, [
+    originalTool({
+      name: "mcp__github__search_full_articles",
+      metadata: { annotations: { readOnlyHint: true } },
+    }),
+  ]);
+  const runtime = await new McpService().buildLangChainToolsForTurn(
+    serviceInput({ installIds: [install.id] }),
+  );
+  assert.equal(
+    runtime.tools[0]?.name,
+    langChainMcpToolName({ install, serverToolName: "search_full_articles" }),
+  );
+  assert.deepEqual(runtime.tools[0]?.metadata?.sourceweftMcpDisplay, {
+    serverName: "AnyCrawl",
+    toolName: "搜索完整文章 Search full articles",
+  });
+  assert.deepEqual(runtime.tools[0]?.metadata?.annotations, {
+    readOnlyHint: true,
+  });
   await runtime.close();
 });
 

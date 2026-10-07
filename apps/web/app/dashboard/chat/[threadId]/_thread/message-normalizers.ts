@@ -536,7 +536,10 @@ function normalizeCitationRecords(value: unknown): CitationRecord[] {
       const excerpt = toNullableString(record.excerpt);
       const content = toNullableString(record.content) ?? undefined;
       const externalUri = toNullableString(record.externalUri) ?? undefined;
-      const parsedFile = record.fileReference === undefined ? null : fileReferenceSchema.safeParse(record.fileReference);
+      const parsedFile =
+        record.fileReference === undefined
+          ? null
+          : fileReferenceSchema.safeParse(record.fileReference);
       if (parsedFile && !parsedFile.success) return null;
       const fileReference = parsedFile?.success ? parsedFile.data : undefined;
 
@@ -639,10 +642,22 @@ function normalizeToolCallRecord(
     approvalState: normalizeApprovalState(record.approvalState),
     approvalConfirmationId:
       toNullableString(record.approvalConfirmationId) ?? undefined,
+    ...(normalizeMcpDisplay(record.mcpDisplay)
+      ? { mcpDisplay: normalizeMcpDisplay(record.mcpDisplay) }
+      : {}),
     ...(normalizeToolProducer(record.producer)
       ? { producer: normalizeToolProducer(record.producer) }
       : {}),
   };
+}
+
+export function normalizeMcpDisplay(
+  value: unknown,
+): ToolCallRecord["mcpDisplay"] {
+  const record = toObjectRecord(value);
+  const serverName = toNullableString(record?.serverName)?.trim();
+  const toolName = toNullableString(record?.toolName)?.trim();
+  return serverName && toolName ? { serverName, toolName } : undefined;
 }
 
 function normalizeToolProducer(value: unknown): ToolProducer | undefined {

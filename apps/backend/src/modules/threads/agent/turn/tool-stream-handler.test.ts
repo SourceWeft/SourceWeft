@@ -427,3 +427,46 @@ test("file completion keeps its tracked physical scope when the end event omits 
     "Read file",
   );
 });
+
+test("MCP display names survive start, completion and collected trace without changing tool keys", async () => {
+  const prepared = createToolLoggingPreparedTurn();
+  const runtime = createTurnRuntime({ prepared });
+  const tool = "mcp__anycrawl_abcd1234__sea_7890abcd";
+  const display = { serverName: "AnyCrawl", toolName: "Search full articles" };
+  runtime.mcpDisplayByToolName.set(tool, display);
+  const snapshot = resolveToolsStreamToolCall({
+    payload: {
+      event: "on_tool_start",
+      name: tool,
+      tool_call_id: "mcp-display",
+      data: { input: { query: "test" } },
+    },
+    resolveToolCallSequence: runtime.resolveToolCallSequence,
+    toolCallOrder: runtime.toolCallOrder,
+    toolCallsById: runtime.toolCallsById,
+  });
+  assert.ok(snapshot);
+  const events = await collectToolStreamEvents(
+    handleToolStartStreamChunk({ prepared, runtime, snapshot }),
+  );
+  const start = events.find((event) => event.type === "tool-call-start");
+  assert.ok(start && start.type === "tool-call-start");
+  assert.equal(start.toolCall.tool, tool);
+  assert.deepEqual(start.toolCall.mcpDisplay, display);
+  const finish = resolveToolsStreamToolCall({
+    payload: {
+      event: "on_tool_end",
+      name: tool,
+      tool_call_id: "mcp-display",
+      data: { output: "ok" },
+    },
+    resolveToolCallSequence: runtime.resolveToolCallSequence,
+    toolCallOrder: runtime.toolCallOrder,
+    toolCallsById: runtime.toolCallsById,
+  });
+  assert.ok(finish);
+  await collectToolStreamEvents(
+    handleToolEndStreamChunk({ prepared, runtime, snapshot: finish }),
+  );
+  assert.deepEqual(runtime.collectToolCalls()[0]?.mcpDisplay, display);
+});

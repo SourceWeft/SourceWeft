@@ -150,3 +150,24 @@ test("summaries are localized", () => {
     "搜索了网页、检索了资料源、运行了 1 条命令和其他 1 项",
   );
 });
+
+test("MCP summaries retain full display metadata in all locales and after reload", () => {
+  const toolCall = {
+    ...call("mcp__anycrawl_abcd1234__sea_7890abcd"),
+    mcpDisplay: {
+      serverName: "AnyCrawl",
+      toolName: "搜索网页与完整文章 Search full articles",
+    },
+  };
+  for (const locale of ["en", "zh-CN", "zh-TW"] as const) {
+    const summary = summarizeToolGroup({
+      locale,
+      t: translator(locale),
+      toolCalls: [JSON.parse(JSON.stringify(toolCall))],
+    });
+    assert.ok(
+      summary.includes("AnyCrawl · 搜索网页与完整文章 Search full articles"),
+    );
+    assert.ok(!summary.includes("7890abcd"));
+  }
+});

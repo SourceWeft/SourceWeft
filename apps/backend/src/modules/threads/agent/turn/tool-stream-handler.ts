@@ -79,6 +79,8 @@ export async function* handleToolStartStreamChunk(input: {
   const { runtime, snapshot } = input;
   const skillDisplayOptions = getSkillInstructionDisplayOptions(input.prepared);
   const { currentToolCall, normalizedInput, toolCallId, toolName } = snapshot;
+  const mcpDisplay = runtime.mcpDisplayByToolName.get(toolName);
+  if (mcpDisplay) currentToolCall.mcpDisplay = mcpDisplay;
   const clientInput = sanitizeFilesystemToolInputForClient(
     toolName,
     normalizedInput,
@@ -348,6 +350,8 @@ export async function* handleToolEndStreamChunk(input: {
     toolName,
     toolPayload,
   } = snapshot;
+  const mcpDisplay = runtime.mcpDisplayByToolName.get(toolName);
+  if (mcpDisplay) currentToolCall.mcpDisplay = mcpDisplay;
 
   runtime.resetReasoningBoundary();
   runtime.nextReasoningContext = {
@@ -616,6 +620,8 @@ export async function* handleToolErrorStreamChunk(input: {
     toolName,
     toolPayload,
   } = snapshot;
+  const mcpDisplay = runtime.mcpDisplayByToolName.get(toolName);
+  if (mcpDisplay) currentToolCall.mcpDisplay = mcpDisplay;
 
   runtime.resetReasoningBoundary();
   runtime.nextReasoningContext = {

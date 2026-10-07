@@ -1,3 +1,4 @@
+import { toObjectRecord } from "../../../../shared/records";
 import { Command } from "@langchain/langgraph";
 import {
   AGENT_TOOL_NAMES,
@@ -217,6 +218,19 @@ export async function* invokeDeepAgentTurn(input: {
     });
     const { connectorToolContext, mcpToolRuntime: mcpRuntime } = toolCollection;
     mcpToolRuntime = mcpRuntime;
+    for (const tool of toolCollection.mcpTools) {
+      const display = toObjectRecord(tool.metadata?.sourceweftMcpDisplay);
+      if (
+        display &&
+        typeof display.serverName === "string" &&
+        typeof display.toolName === "string"
+      ) {
+        runtime.mcpDisplayByToolName.set(tool.name, {
+          serverName: display.serverName,
+          toolName: display.toolName,
+        });
+      }
+    }
     const runtimePromptContext = await buildRuntimePromptContext({
       prepared: input.prepared,
       toolCollection,

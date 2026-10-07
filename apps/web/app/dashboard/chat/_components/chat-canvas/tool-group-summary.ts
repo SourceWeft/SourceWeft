@@ -6,6 +6,7 @@ import {
 import { connectorCatalog } from "../sources-hub/connectors/catalog";
 import {
   getToolDisplayName,
+  getMcpToolDisplayName,
   isRedactedSkillInstructionRead,
 } from "./assistant-tool-display";
 import { getRecordValue } from "../../../../../lib/records";
@@ -96,7 +97,8 @@ export function getToolActivityCategory(
   // MCP server keys are sanitized install ids, not display names, so name the
   // tool itself rather than guessing a server label.
   const mcpToolName = getMcpToolName(tool);
-  const name = getToolDisplayName(mcpToolName ?? tool);
+  const name =
+    getMcpToolDisplayName(toolCall) ?? getToolDisplayName(mcpToolName ?? tool);
   return { key: `tool:${name}`, kind: "tool", name };
 }
 

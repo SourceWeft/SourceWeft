@@ -70,6 +70,10 @@ export function createTurnRuntime(input: { prepared: PreparedThreadTurn }) {
     retrievalsByToolCallId,
     retrievalCallOrder,
     toolCallsById,
+    mcpDisplayByToolName: new Map<
+      string,
+      NonNullable<ToolCallTrace["mcpDisplay"]>
+    >(),
     toolCallOrder,
     toolStartedAtById,
     pendingToolStreamsByRunId,
