@@ -39,7 +39,7 @@ function verifyVersion(parent, name, version) {
 
 for (const app of [web, docs]) verifyVersion(app, "next", "16.3.8");
 for (const app of [backend, web]) {
-  verifyVersion(app, "sharp", "0.35.4");
+  verifyVersion(app, "sharp", "0.35.5");
   verifyVersion(app, "vitest", "4.1.11");
   verifyVersion(app, "@vitest/coverage-v8", "4.1.11");
   const vitest = createRequire(app.resolve("vitest/package.json"));
@@ -69,14 +69,24 @@ assert.deepEqual(
 
 // Check the native library actually loaded by both Next and the upload backend.
 const next = createRequire(web.resolve("next/package.json"));
-verifyVersion(next, "sharp", "0.35.4");
+verifyVersion(next, "sharp", "0.35.5");
 for (const parent of [backend, next]) {
   const sharp = parent("sharp");
   assert.equal(
     sharp.versions.heif,
-    "1.23.2",
+    "1.23.5",
     "the loaded native decoder must be patched",
   );
+  // GHSA-wq5f-xc86-pv6w: exercise the actual librsvg decoder shipped
+  // by the patched sharp binary, in addition to the existing AVIF path.
+  const svg = Buffer.from(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="6"><rect width="8" height="6" fill="red"/></svg>',
+  );
+  const svgPng = await sharp(svg).png().toBuffer();
+  const svgMetadata = await sharp(svgPng).metadata();
+  assert.equal(svgMetadata.format, "png");
+  assert.equal(svgMetadata.width, 8);
+  assert.equal(svgMetadata.height, 6);
   const avif = await sharp({
     create: { width: 8, height: 6, channels: 3, background: "white" },
   })
