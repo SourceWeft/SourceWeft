@@ -2,7 +2,7 @@
   "tag": "v0.3.0-rc.4",
   "releasedAt": "2026-10-07",
   "category": "Release",
-  "commit": "61830924f8ebe52044fe7f08a82b68162c1b9c9f",
+  "commit": "14e9f83e43bfd381fe570175a70b31526388f893",
   "title": "MCP overviews, skill installation and more reliable billing",
   "summary": "This release candidate adds evidence-backed MCP overviews and README browsing, makes skills easier to install from third-party agents, and improves billing reversals, approvals and streamed reasoning. Desktop installers remain unsigned manual downloads; automatic application updates are not published for this version.",
   "items": [
@@ -16,7 +16,10 @@
     "Fixed Cloudflare sandbox commands with long execution budgets returning late after completion by releasing heartbeat output pipes promptly, while preserving heartbeat visibility and filtering.",
     "Patched MCP compatibility, native and transitive dependencies for current security advisories, maintained the local braces stack with a cycle guard, and corrected an isolated subagent test fixture.",
     "Made MCP tool activity summaries readable by presenting tool names instead of truncated internal identifiers.",
-    "Made Skill overview batch size configurable and exposed queued and running import capacity to pace backlog ingestion, while retaining the existing default and classification pipeline."
+    "Made Skill overview batch size configurable and exposed queued and running import capacity to pace backlog ingestion, while retaining the existing default and classification pipeline.",
+    "Updated native Rust TLS dependencies to compatible security-patched versions across both lockfiles.",
+    "Raised Skill batch import limits and made ingest concurrency configurable while retaining the default of two concurrent jobs.",
+    "Excluded the security oracle before copying pruned dependencies into the runtime image, so build-only oracle contents are absent from published image layers."
   ],
   "githubPrerelease": false,
   "desktopPublicationPolicy": "candidate"
