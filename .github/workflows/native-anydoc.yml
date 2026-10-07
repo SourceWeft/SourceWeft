@@ -6,21 +6,6 @@ on:
       commit:
         required: true
         type: string
-  pull_request:
-    paths:
-      - "packages/anydoc/**"
-      - "packages/builtin-document-parsers/**"
-      - "Dockerfile"
-      - ".dockerignore"
-      - ".github/workflows/native-anydoc.yml"
-  push:
-    branches: [main]
-    paths:
-      - "packages/anydoc/**"
-      - "packages/builtin-document-parsers/**"
-      - "Dockerfile"
-      - ".dockerignore"
-      - ".github/workflows/native-anydoc.yml"
   workflow_dispatch:
 
 permissions:

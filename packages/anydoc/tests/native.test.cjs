@@ -61,3 +61,85 @@ test("runtime without its maintained binding fails without loading a different p
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("real CSV and DOCX conversion matches the official AnyDoc 0.2.4 native baseline", async () => {
+  const { createHash } = require("node:crypto");
+  const baseline = JSON.parse(
+    readFileSync(
+      join(__dirname, "fixtures/non-pdf-upstream-baselines.json"),
+      "utf8",
+    ),
+  );
+  assert.equal(baseline.upstreamVersion, "0.2.4");
+  for (const record of baseline.records) {
+    const bytes = readFileSync(join(__dirname, "fixtures", record.file));
+    assert.equal(
+      createHash("sha256").update(bytes).digest("hex"),
+      record.fixtureSha256,
+    );
+    const markdown = await native.toMarkdownBytes(bytes, record.format, {
+      ocr: "reject",
+    });
+    assert.equal(markdown, record.markdown);
+    assert.equal(
+      createHash("sha256").update(markdown).digest("hex"),
+      record.markdownSha256,
+    );
+  }
+});
+
+test("the build receipt binds the actual binary and maintained license notices", () => {
+  const { createHash } = require("node:crypto");
+  const receipt = JSON.parse(
+    readFileSync(join(__dirname, "../native/build.json"), "utf8"),
+  );
+  assert.equal(
+    receipt.upstreamCommit,
+    "42bf1c5ecdde9eb0d96d6bd75a9e6698cf93b14c",
+  );
+  assert.equal(receipt.pdfInspectorVersion, "1.14.2");
+  assert.equal(
+    receipt.sha256,
+    createHash("sha256")
+      .update(readFileSync(join(__dirname, "../native/bindings.node")))
+      .digest("hex"),
+  );
+  assert.equal(
+    receipt.licenseNoticesSha256,
+    createHash("sha256")
+      .update(readFileSync(join(__dirname, "../THIRD_PARTY_NOTICES.txt")))
+      .digest("hex"),
+  );
+});
+
+test("tampered pinned source fails before any Rust build is invoked", () => {
+  const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = require("node:fs");
+  const { tmpdir } = require("node:os");
+  const { spawnSync } = require("node:child_process");
+  const directory = mkdtempSync(
+    join(tmpdir(), "sourceweft-anydoc-source-check-"),
+  );
+  try {
+    mkdirSync(join(directory, "scripts"));
+    writeFileSync(
+      join(directory, "scripts/build-native.cjs"),
+      readFileSync(join(__dirname, "../scripts/build-native.cjs")),
+    );
+    const manifest = JSON.parse(
+      readFileSync(join(__dirname, "../UPSTREAM.json"), "utf8"),
+    );
+    writeFileSync(join(directory, "UPSTREAM.json"), JSON.stringify(manifest));
+    const file = join(directory, "upstream", manifest.files[0].path);
+    mkdirSync(require("node:path").dirname(file), { recursive: true });
+    writeFileSync(file, "tampered source");
+    const result = spawnSync(
+      process.execPath,
+      [join(directory, "scripts/build-native.cjs")],
+      { encoding: "utf8", env: { ...process.env, PATH: "" } },
+    );
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Pinned AnyDoc source checksum mismatch/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
