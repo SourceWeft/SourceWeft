@@ -198,7 +198,7 @@ test("importing legacy parser entry does not load AnyDoc or its native bindings"
     const { textSourceParser } = await import("./src/index.ts");
     const parsed = await textSourceParser.parse({ fileName: "legacy.txt", mimeType: "text/plain", fileSize: 6, content: Buffer.from("legacy"), config: { chunkSize: 512, parserVersion: "legacy" } });
     if (parsed.content !== "legacy") throw new Error("Legacy parser failed");
-    if (Object.keys(require.cache).some(path => path.includes("@firecrawl/anydoc") || path.includes("@firecrawl+anydoc"))) throw new Error("AnyDoc loaded eagerly");
+    if (Object.keys(require.cache).some(path => path.includes("/packages/anydoc/anydoc.js") || path.includes("/packages/anydoc/index.js"))) throw new Error("AnyDoc loaded eagerly");
     console.log("legacy-without-anydoc");
   `,
     ],
@@ -293,7 +293,7 @@ describe("anydoc-formats", () => {
   };
 
   test("shared capability catalog matches every official native extension", async () => {
-    const { formatFromExtension } = await import("@firecrawl/anydoc");
+    const { formatFromExtension } = await import("@sourceweft/anydoc");
     assert.equal(anydocExtensions.length, 21);
     assert.equal(new Set(anydocExtensions).size, anydocExtensions.length);
     assert.equal(new Set(anydocMimeTypes).size, anydocMimeTypes.length);
@@ -339,4 +339,29 @@ describe("anydoc-formats", () => {
       assert.equal(parsed.metadata.billingPageCount, undefined);
     });
   }
+});
+
+// The exact production acceptance fixture is preserved; no alternate extractor/OCR.
+test("AnyDoc PDF standalone quantity survives parsed content and indexed chunk inputs", async () => {
+  const content = await readFile(
+    new URL(
+      "../../anydoc/tests/fixtures/standalone-quantity.pdf",
+      import.meta.url,
+    ),
+  );
+  const parsed = await parseWithAnydoc({
+    fileName: "standalone-quantity.pdf",
+    mimeType: "application/pdf",
+    fileSize: content.length,
+    content,
+    config: { chunkSize: 512, parserVersion: "anydoc-numeric-preservation" },
+  });
+  assert.match(parsed.content, /Number of boxes\s+39(?:\s|$)/);
+  assert.ok(
+    parsed.chunks.some((chunk) =>
+      /Number of boxes\s+39(?:\s|$)/.test(chunk.text),
+    ),
+  );
+  assert.equal(parsed.metadata.documentParseBackend, "anydoc");
+  assert.equal(parsed.metadata.pageNumbersRetained, true);
 });

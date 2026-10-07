@@ -73,3 +73,7 @@ opencode
 .working_plan
 .superpowers
 .playwright-mcp
+
+# Native bindings are rebuilt for the image platform, never copied from a developer host.
+packages/anydoc/native
+packages/anydoc/upstream/target

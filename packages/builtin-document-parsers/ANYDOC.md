@@ -27,7 +27,7 @@ Macro and slideshow MIME variants are explicit catalog entries. Existing CSV, PD
 - Only native `needsOcr` enters the declared OCR branch. Scanned/mixed PDFs send the whole original document to the configured backend; no partial local extraction is accepted.
 - Encrypted, malformed, unsupported, resource-limit, metadata, chunking and remote errors fail without replacement providers.
 
-Old `DOCUMENT_PARSE_PROVIDER` and `DOCUMENT_PARSE_STRATEGY` selectors are retired. New ingestion uses `v4-anydoc-unified-0.2.4`. Existing indexed revisions are not automatically reprocessed. Rollback requires reverting the deployment; there is no per-file legacy parser fallback. Image deployments previously relying on automatic vision-to-OCR switching must choose an explicit policy.
+Old `DOCUMENT_PARSE_PROVIDER` and `DOCUMENT_PARSE_STRATEGY` selectors are retired. New ingestion uses `v5-anydoc-numeric-preserving-0.2.4`. Existing indexed revisions are not automatically reprocessed. Rollback requires reverting the deployment; there is no per-file legacy parser fallback. Image deployments previously relying on automatic vision-to-OCR switching must choose an explicit policy.
 
 ## Asynchronous state
 
@@ -54,3 +54,9 @@ Real application E2E verification must use an isolated database/queue/ports: aut
 ## Deferred
 
 Structure-aware chunking, embedded Office image OCR and full document blocks/assets persistence remain separate changes. Page-level PDF provenance needs an upstream structured-output capability or an explicitly designed enhancement; Markdown headings are insufficient.
+
+## Numeric-preserving PDF policy
+
+The maintained `@sourceweft/anydoc` binding keeps upstream AnyDoc 0.2.4 and pdf-inspector 1.14.2. Its PDF frontend explicitly disables isolated-line page-number removal: that heuristic deletes legitimate standalone values such as shipping quantities. Genuine page-number text is retained as a deliberate content-preservation tradeoff. Other formats and the explicit OCR rejection policy are unchanged. Runtime uses a built, checksum-recorded native binding and fails if it is missing; it does not download or compile one, or fall back to the upstream binary.
+
+Previously indexed revisions remain as they were until explicitly reprocessed; this deployment does not rewrite existing Source content. `parserPolicy: numeric-preserving` and `pageNumbersRetained: true` identify the new non-secret parsing policy.

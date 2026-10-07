@@ -27,6 +27,29 @@ test("every quality and publication checkout uses the one resolved commit", () =
   for (const [name, job] of Object.entries(workflow.jobs)) {
     if (name === "revision") continue;
     assert.ok([job.needs].flat().includes("revision"), name);
+    if (job.uses) {
+      assert.equal(job.uses, "./.github/workflows/native-anydoc.yml", name);
+      assert.equal(job.with.commit, "${{ needs.revision.outputs.sha }}", name);
+      const child = parse(
+        readFileSync(
+          new URL(`../../${job.uses.slice(2)}`, import.meta.url),
+          "utf8",
+        ),
+      );
+      assert.equal(child.on.workflow_call.inputs.commit.required, true);
+      assert.equal(child.on.workflow_call.inputs.commit.type, "string");
+      for (const [childName, childJob] of Object.entries(child.jobs)) {
+        const checkout = childJob.steps.find(
+          (step) => step.uses === "actions/checkout@v4",
+        );
+        assert.equal(
+          checkout.with.ref,
+          "${{ inputs.commit || github.sha }}",
+          `${name}/${childName}`,
+        );
+      }
+      continue;
+    }
     const checkout = job.steps.find(
       (step) => step.uses === "actions/checkout@v4",
     );
@@ -120,7 +143,9 @@ test("PRs skip Docker validation while releases and manual publication retain it
   assert.deepEqual(release.on.push.tags, ["v*"]);
   assert.equal(release.jobs.quality.uses, "./.github/workflows/ci.yml");
   assert.ok(Object.hasOwn(workflow.on, "workflow_dispatch"));
-  assert.ok(workflow.jobs["docker-image-platform"].needs.includes("docker-build"));
+  assert.ok(
+    workflow.jobs["docker-image-platform"].needs.includes("docker-build"),
+  );
   assert.ok(workflow.jobs["docker-image"].needs.includes("docker-build"));
 });
 

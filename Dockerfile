@@ -18,6 +18,26 @@ RUN apk add --no-cache libc6-compat libstdc++ \
   && corepack prepare pnpm@10.19.0 --activate \
   && chmod -R a+rX "${COREPACK_HOME}"
 
+# Build the maintained AnyDoc binding for the actual container architecture.
+# Rust is confined to this build stage; runtime never downloads or compiles it.
+FROM rust:1.94.1-alpine AS rust-toolchain
+FROM base AS anydoc-native
+ENV RUSTUP_HOME=/usr/local/rustup \
+  CARGO_HOME=/usr/local/cargo \
+  RUSTUP_TOOLCHAIN=1.94.1
+# Node loads a shared NAPI module; musl must not use Rust default static CRT.
+ENV RUSTFLAGS="-C target-feature=-crt-static"
+ENV PATH="/usr/local/cargo/bin:${PATH}"
+RUN apk add --no-cache build-base
+COPY --from=rust-toolchain /usr/local/cargo /usr/local/cargo
+COPY --from=rust-toolchain /usr/local/rustup /usr/local/rustup
+COPY packages/anydoc /app/packages/anydoc
+ARG TARGETARCH
+RUN --mount=type=cache,id=sourceweft-anydoc-registry,target=/usr/local/cargo/registry,sharing=locked \
+  --mount=type=cache,id=sourceweft-anydoc-git,target=/usr/local/cargo/git,sharing=locked \
+  --mount=type=cache,id=sourceweft-anydoc-target-${TARGETARCH},target=/app/anydoc-target,sharing=locked \
+  CARGO_TARGET_DIR=/app/anydoc-target node /app/packages/anydoc/scripts/build-native.cjs
+
 # ── Prune ────────────────────────────────────────────────────────────
 # turbo prune generates out/json/ (package.json manifests) and
 # out/full/ (complete source tree for only the target packages and
@@ -27,6 +47,7 @@ COPY . .
 # Exclude the test-only pristine oracle before source reaches runtime COPY layers.
 RUN pnpm dlx turbo@2.10.9 prune @sourceweft/backend web --docker \
   && rm -rf out/full/packages/security-braces/tests out/full/packages/security-braces/upstream-test \
+    out/full/packages/anydoc/upstream out/full/packages/anydoc/tests out/full/packages/anydoc/scripts \
   && node scripts/editions/copy-licenses.mjs /app/out/full
 
 # ── Deps ─────────────────────────────────────────────────────────────
@@ -43,6 +64,7 @@ RUN pnpm install --frozen-lockfile
 FROM deps AS builder
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=pruner /app/out/full/ .
+COPY --from=anydoc-native /app/packages/anydoc/native /app/packages/anydoc/native
 RUN pnpm --filter @sourceweft/market-contracts build
 RUN pnpm --filter @sourceweft/ui-web build
 # Declared after the package builds so a new commit does not invalidate their cache.
@@ -79,6 +101,7 @@ RUN addgroup -S sourceweft \
 # Pruned workspace source tree (packages needed at runtime for pnpm workspace resolution).
 # turbo prune already limits this to @sourceweft/backend, web, and their dependencies.
 COPY --chown=sourceweft:sourceweft --from=pruner /app/out/full/ .
+COPY --chown=sourceweft:sourceweft --from=anydoc-native /app/packages/anydoc/native packages/anydoc/native
 # The pristine upstream oracle is test-only and must not ship as runtime code.
 RUN rm -rf packages/security-braces/tests packages/security-braces/upstream-test
 

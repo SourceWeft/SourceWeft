@@ -1,0 +1,5 @@
+# Exact upstream AnyDoc wrappers and vendored sources are checksum-pinned.
+packages/anydoc/anydoc.js
+packages/anydoc/anydoc.d.ts
+packages/anydoc/index.d.ts
+packages/anydoc/upstream/

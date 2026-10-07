@@ -1,0 +1,23 @@
+{
+  "name": "@sourceweft/anydoc",
+  "version": "0.2.4-sourceweft.1",
+  "private": true,
+  "license": "MIT",
+  "type": "commonjs",
+  "main": "anydoc.js",
+  "types": "anydoc.d.ts",
+  "scripts": {
+    "native:build": "node scripts/build-native.cjs",
+    "test": "node --test tests/*.test.cjs"
+  },
+  "files": [
+    "anydoc.js",
+    "anydoc.d.ts",
+    "index.js",
+    "index.d.ts",
+    "native",
+    "LICENSE",
+    "UPSTREAM.json",
+    "THIRD_PARTY_NOTICES.txt"
+  ]
+}

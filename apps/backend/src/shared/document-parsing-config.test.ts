@@ -36,7 +36,7 @@ test("AnyDoc is the sole document engine and an OCR credential never enables its
   assert.equal("strategy" in config.documentParsing, false);
   assert.equal(
     config.documentParsing.defaultParserVersion,
-    "v4-anydoc-unified-0.2.4",
+    "v5-anydoc-numeric-preserving-0.2.4",
   );
   assert.equal(config.documentParsing.ocrEnabled, false);
   assert.equal(config.documentParsing.ocrProvider, "pdf2markdown");

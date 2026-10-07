@@ -1,0 +1,118 @@
+name: Maintained AnyDoc native bindings
+
+on:
+  workflow_call:
+    inputs:
+      commit:
+        required: true
+        type: string
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: AnyDoc (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            container: false
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            container: false
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+            container: true
+            platform: linux/amd64
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            container: true
+            platform: linux/arm64
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            container: false
+          - runner: macos-14
+            target: aarch64-apple-darwin
+            container: false
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            container: false
+    env:
+      CARGO_BUILD_TARGET: ${{ matrix.target }}
+      RUSTUP_TOOLCHAIN: 1.94.1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.2
+      - uses: dtolnay/rust-toolchain@1.94.1
+        if: ${{ !matrix.container && hashFiles('packages/anydoc/package.json') != '' }}
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        if: ${{ !matrix.container && hashFiles('packages/anydoc/package.json') != '' }}
+        with:
+          workspaces: packages/anydoc/upstream
+          key: anydoc-${{ matrix.target }}
+      - name: Build locked native binding
+        if: ${{ !matrix.container && hashFiles('packages/anydoc/package.json') != '' }}
+        run: node packages/anydoc/scripts/build-native.cjs
+      - name: Verify the actual NAPI API and PDF numeric preservation
+        if: ${{ !matrix.container && hashFiles('packages/anydoc/package.json') != '' }}
+        run: node --test packages/anydoc/tests/*.test.cjs
+      - uses: docker/setup-buildx-action@v3
+        if: matrix.container && hashFiles('packages/anydoc/package.json') != ''
+      - name: Build native musl binding in the production Node base
+        if: matrix.container && hashFiles('packages/anydoc/package.json') != ''
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: anydoc-native
+          platforms: ${{ matrix.platform }}
+          load: true
+          push: false
+          tags: sourceweft-anydoc:ci
+          cache-from: type=gha,scope=anydoc-${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=anydoc-${{ matrix.target }}
+      - name: Verify actual musl NAPI API and collect its receipt
+        if: matrix.container && hashFiles('packages/anydoc/package.json') != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --network none sourceweft-anydoc:ci sh -c 'cd /app/packages/anydoc && node --test tests/*.test.cjs'
+          docker create --name anydoc-receipt sourceweft-anydoc:ci
+          docker cp anydoc-receipt:/app/packages/anydoc/native ./packages/anydoc/native
+          docker rm anydoc-receipt
+      - uses: actions/upload-artifact@v4
+        if: hashFiles('packages/anydoc/package.json') != ''
+        with:
+          name: anydoc-native-${{ matrix.target }}-${{ github.run_id }}
+          path: packages/anydoc/native/
+          if-no-files-found: error
+          retention-days: 7
+
+  audit:
+    name: AnyDoc Rust dependency audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit || github.sha }}
+      - uses: dtolnay/rust-toolchain@1.94.1
+        if: hashFiles('packages/anydoc/package.json') != ''
+      - uses: taiki-e/install-action@v2
+        if: hashFiles('packages/anydoc/package.json') != ''
+        with:
+          tool: cargo-audit@0.22.2
+      - name: Audit the locked maintained native dependency graph
+        if: hashFiles('packages/anydoc/package.json') != ''
+        run: cargo audit --file packages/anydoc/upstream/Cargo.lock

@@ -2,7 +2,7 @@
 
 This supplements the historical [initial runbook](anydoc.md). The unified
 implementation has no local parser selector. Use parser version
-`v4-anydoc-unified-0.2.4`; remove `DOCUMENT_PARSE_PROVIDER` and
+`v5-anydoc-numeric-preserving-0.2.4`; remove `DOCUMENT_PARSE_PROVIDER` and
 `DOCUMENT_PARSE_STRATEGY` from the isolated environment. Keep the deployment's
 existing model gateway configuration unchanged.
 
@@ -41,7 +41,7 @@ by the actual UI upload. For example:
 ```json
 {
   "workspaceId": "00000000-0000-0000-0000-000000000001",
-  "parserVersion": "v4-anydoc-unified-0.2.4",
+  "parserVersion": "v5-anydoc-numeric-preserving-0.2.4",
   "cases": [
     {
       "sourceId": "00000000-0000-0000-0000-000000000002",

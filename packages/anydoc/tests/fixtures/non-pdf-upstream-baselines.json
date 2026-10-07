@@ -1,0 +1,20 @@
+{
+  "upstreamPackage": "@firecrawl/anydoc",
+  "upstreamVersion": "0.2.4",
+  "records": [
+    {
+      "file": "sample.csv",
+      "format": "csv",
+      "fixtureSha256": "8edef733470a6cba3b3250bf82597322f6fee47c461db0d5b48efe638210b401",
+      "markdownSha256": "a4a28880d0ecaaf0d6a31f0d12951dba5ce9e9f2c6f63d39447b69f6cfb3001e",
+      "markdown": "| name | value |\n| --- | --- |\n| 中文 | 1234.56 |\n| SourceWeft | 42 |\n"
+    },
+    {
+      "file": "sample.docx",
+      "format": "docx",
+      "fixtureSha256": "b592ff7d0c03df83342d0915bcab94cac3375eee87f097f790fdca47735aa4e8",
+      "markdownSha256": "02de2f5e159417801f4935399cd9ab714813f844affbe2bd6f098dfee56e07f1",
+      "markdown": "SourceWeft 中文测试\n\n|  |  |\n| --- | --- |\n| Revenue | 1234.56 |\n"
+    }
+  ]
+}

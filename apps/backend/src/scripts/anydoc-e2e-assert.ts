@@ -91,7 +91,7 @@ if (mode === "cleanup") {
     assert.equal(metadata.documentParseEntryEngine, "anydoc");
     assert.equal(
       source.parserVersion,
-      process.env.E2E_PARSER_VERSION || "v4-anydoc-unified-0.2.4",
+      process.env.E2E_PARSER_VERSION || "v5-anydoc-numeric-preserving-0.2.4",
     );
     if (kind === "ocrPdf") {
       assert.equal(metadata.documentParseProviderResolved, "pdf2markdown");
