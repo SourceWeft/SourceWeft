@@ -1,8 +1,8 @@
 {
   "tag": "v0.3.0-rc.4",
-  "releasedAt": "2026-10-01",
+  "releasedAt": "2026-10-07",
   "category": "Release",
-  "commit": "7b4bf450",
+  "commit": "61830924f8ebe52044fe7f08a82b68162c1b9c9f",
   "title": "MCP overviews, skill installation and more reliable billing",
   "summary": "This release candidate adds evidence-backed MCP overviews and README browsing, makes skills easier to install from third-party agents, and improves billing reversals, approvals and streamed reasoning. Desktop installers remain unsigned manual downloads; automatic application updates are not published for this version.",
   "items": [
@@ -12,7 +12,11 @@
     "Improved payment webhook authentication, atomic order writes and draining, and refund and dispute reversals for Stripe, Creem and Waffo. Billing uses observed model-call costs and records BYOK calls at zero cost; billing screens support English, Simplified Chinese and Traditional Chinese.",
     "Approved connector actions are claimed atomically before provider execution. Streamed reasoning is persisted in bounded windows and merged by segment ID. Desktop sign-in returns through its deep link, and Gmail access supports per-user preview settings.",
     "Restored a two-column desktop navigation menu and consistent public-page widths, fixed Umami analytics initialization, and refreshed self-hosting and runtime configuration guidance.",
-    "Fixed sandbox warm-pool sizing to honor its configured ceiling and patched dependency advisories, including Next.js, Axios, gRPC, js-yaml, undici, fast-uri, ip-address and brace-expansion."
+    "Fixed sandbox warm-pool sizing to honor its configured ceiling and patched dependency advisories, including Next.js, Axios, gRPC, js-yaml, undici, fast-uri, ip-address and brace-expansion.",
+    "Fixed Cloudflare sandbox commands with long execution budgets returning late after completion by releasing heartbeat output pipes promptly, while preserving heartbeat visibility and filtering.",
+    "Patched MCP compatibility, native and transitive dependencies for current security advisories, maintained the local braces stack with a cycle guard, and corrected an isolated subagent test fixture.",
+    "Made MCP tool activity summaries readable by presenting tool names instead of truncated internal identifiers.",
+    "Made Skill overview batch size configurable and exposed queued and running import capacity to pace backlog ingestion, while retaining the existing default and classification pipeline."
   ],
   "githubPrerelease": false,
   "desktopPublicationPolicy": "candidate"
