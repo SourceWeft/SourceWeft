@@ -27,6 +27,8 @@ const receipt = JSON.parse(readFileSync('/app/packages/anydoc/native/build.json'
 assert.equal(receipt.upstreamVersion, '0.2.4');
 assert.equal(receipt.architecture, process.arch);
 assert.equal(receipt.platform, process.platform);
+assert.equal(receipt.licenseNoticesSha256, createHash('sha256').update(readFileSync('/app/packages/anydoc/THIRD_PARTY_NOTICES.txt')).digest('hex'));
+assert.ok(readFileSync('/app/packages/anydoc/LICENSE', 'utf8').includes('MIT License'));
 assert.equal(receipt.sha256, createHash('sha256').update(readFileSync('/app/packages/anydoc/native/bindings.node')).digest('hex'));
 for (const path of ['upstream', 'tests', 'scripts']) {
   assert.equal(existsSync('/app/packages/anydoc/' + path), false, path + ' must not ship in runtime');
