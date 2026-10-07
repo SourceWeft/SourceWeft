@@ -1546,7 +1546,9 @@ function resolveToolCallsFromMetadata(metadata: Record<string, unknown>) {
     .map((item) => {
       const call = normalizeToolCallRecord(item);
       const known = call ? displays.get(call.id) : undefined;
-      return call && !call.mcpDisplay && known?.tool === call.tool
+      return call &&
+        !normalizeMcpDisplay(toObjectRecord(item)?.mcpDisplay) &&
+        known?.tool === call.tool
         ? { ...call, mcpDisplay: known.display }
         : call;
     })

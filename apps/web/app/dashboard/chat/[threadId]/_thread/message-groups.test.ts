@@ -1068,3 +1068,46 @@ test("production MCP approval and legacy completed records recover reliable labe
     undefined,
   );
 });
+
+test("canonical runtime MCP identity takes priority over legacy approval output labels", () => {
+  const tool = "mcp__server_hash__tool_hash";
+  const canonical = {
+    serverName: "Canonical server",
+    toolName: "canonical_search",
+  };
+  const approval = {
+    type: "tool_confirmation_request",
+    subject: { provider: "mcp", label: "Old server" },
+    action: { toolName: tool, label: "Old search" },
+  };
+  const record = {
+    id: "same-call",
+    tool,
+    status: "completed",
+    input: {},
+    output: approval,
+  };
+  const metadata = {
+    toolCalls: [record],
+    traceEvents: [{ toolCall: { id: record.id, tool, mcpDisplay: canonical } }],
+  };
+  assert.deepEqual(
+    resolveToolCallsFromMetadata(metadata)[0]?.mcpDisplay,
+    canonical,
+  );
+  const explicit = {
+    serverName: "Explicit server",
+    toolName: "explicit_search",
+  };
+  assert.deepEqual(
+    resolveToolCallsFromMetadata({
+      ...metadata,
+      toolCalls: [{ ...record, mcpDisplay: explicit }],
+    })[0]?.mcpDisplay,
+    explicit,
+  );
+  assert.deepEqual(
+    resolveToolCallsFromMetadata({ toolCalls: [record] })[0]?.mcpDisplay,
+    { serverName: "Old server", toolName: "Old search" },
+  );
+});
