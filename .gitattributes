@@ -4,3 +4,9 @@ packages/anydoc/tests/fixtures/*.pdf binary
 packages/anydoc/THIRD_PARTY_NOTICES.txt -whitespace
 # Checksum-pinned upstream Rust includes intentional whitespace in string test vectors.
 packages/anydoc/upstream/src/render/markdown/tests.rs -whitespace
+# Pinned bytes must not be rewritten by Windows autocrlf; product diffs stay checked.
+packages/anydoc/upstream/** -text
+packages/anydoc/anydoc.js -text
+packages/anydoc/anydoc.d.ts -text
+packages/anydoc/index.d.ts -text
+packages/anydoc/THIRD_PARTY_NOTICES.txt -text

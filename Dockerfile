@@ -25,6 +25,8 @@ FROM base AS anydoc-native
 ENV RUSTUP_HOME=/usr/local/rustup \
   CARGO_HOME=/usr/local/cargo \
   RUSTUP_TOOLCHAIN=1.94.1
+# Node loads a shared NAPI module; musl must not use Rust default static CRT.
+ENV RUSTFLAGS="-C target-feature=-crt-static"
 ENV PATH="/usr/local/cargo/bin:${PATH}"
 RUN apk add --no-cache build-base
 COPY --from=rust-toolchain /usr/local/cargo /usr/local/cargo

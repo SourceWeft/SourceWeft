@@ -30,7 +30,33 @@ const licenseHash = createHash("sha256")
   .digest("hex");
 if (licenseHash !== manifest.licenseNoticesSha256)
   throw new Error("Native license notices checksum mismatch");
+const rustc = spawnSync("rustc", ["-vV"], { encoding: "utf8" });
+if (rustc.error) throw rustc.error;
+if (rustc.status !== 0)
+  throw new Error("Unable to inspect the native Rust toolchain");
+const host = /^host: (.+)$/m.exec(rustc.stdout)?.[1];
+if (!host) throw new Error("Rust toolchain did not declare its host target");
 const target = process.env.CARGO_BUILD_TARGET;
+const effectiveTarget = target || host;
+const supportedTargets = new Set([
+  "x86_64-unknown-linux-gnu",
+  "aarch64-unknown-linux-gnu",
+  "x86_64-unknown-linux-musl",
+  "aarch64-unknown-linux-musl",
+  "x86_64-apple-darwin",
+  "aarch64-apple-darwin",
+  "x86_64-pc-windows-msvc",
+]);
+if (!supportedTargets.has(effectiveTarget))
+  throw new Error(
+    `Unsupported maintained AnyDoc native target: ${effectiveTarget}`,
+  );
+// Node loads a shared library: musl's default static CRT disallows this cdylib.
+const musl = effectiveTarget.endsWith("-musl");
+const rustflags = musl
+  ? `${process.env.RUSTFLAGS || ""} -C target-feature=-crt-static`.trim()
+  : process.env.RUSTFLAGS;
+
 const args = [
   "build",
   "--locked",
@@ -39,7 +65,10 @@ const args = [
   join(root, "upstream/node/Cargo.toml"),
 ];
 if (target) args.push("--target", target);
-const result = spawnSync("cargo", args, { stdio: "inherit" });
+const result = spawnSync("cargo", args, {
+  stdio: "inherit",
+  env: { ...process.env, ...(rustflags ? { RUSTFLAGS: rustflags } : {}) },
+});
 if (result.error) throw result.error;
 if (result.status !== 0) process.exit(result.status || 1);
 const directory = resolve(
@@ -47,12 +76,11 @@ const directory = resolve(
   ...(target ? [target] : []),
   "release",
 );
-const filename =
-  process.platform === "darwin"
-    ? "libanydoc_node.dylib"
-    : process.platform === "win32"
-      ? "anydoc_node.dll"
-      : "libanydoc_node.so";
+const filename = effectiveTarget.includes("apple-darwin")
+  ? "libanydoc_node.dylib"
+  : effectiveTarget.includes("windows")
+    ? "anydoc_node.dll"
+    : "libanydoc_node.so";
 const binary = join(directory, filename);
 if (!existsSync(binary))
   throw new Error("Native build did not produce the expected binding");
@@ -67,9 +95,15 @@ writeFileSync(
       upstreamCommit: "42bf1c5ecdde9eb0d96d6bd75a9e6698cf93b14c",
       pdfInspectorVersion: "1.14.2",
       licenseNoticesSha256: licenseHash,
-      platform: process.platform,
-      architecture: process.arch,
-      target: target || null,
+      platform: effectiveTarget.includes("apple-darwin")
+        ? "darwin"
+        : effectiveTarget.includes("windows")
+          ? "win32"
+          : "linux",
+      architecture: effectiveTarget.startsWith("aarch64") ? "arm64" : "x64",
+      target: effectiveTarget,
+      muslDynamicCrt: musl,
+      rustcVersion: rustc.stdout.split("\n")[0],
       sha256,
     },
     null,
