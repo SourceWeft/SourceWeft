@@ -2,3 +2,5 @@
 packages/anydoc/tests/fixtures/*.pdf binary
 # Upstream license text is reproduced exactly, including original whitespace.
 packages/anydoc/THIRD_PARTY_NOTICES.txt -whitespace
+# Checksum-pinned upstream Rust includes intentional whitespace in string test vectors.
+packages/anydoc/upstream/** -whitespace
