@@ -235,3 +235,28 @@ for (const value of ["0", "1001", "2.5", "many"]) {
     );
   });
 }
+
+test("skill import concurrency defaults to two and accepts eight", async () => {
+  vi.stubEnv("SKILL_INGEST_WORKER_CONCURRENCY", "2");
+  vi.resetModules();
+  assert.equal(
+    (await import("./config")).config.skillIngestWorkerConcurrency,
+    2,
+  );
+  vi.stubEnv("SKILL_INGEST_WORKER_CONCURRENCY", "8");
+  vi.resetModules();
+  assert.equal(
+    (await import("./config")).config.skillIngestWorkerConcurrency,
+    8,
+  );
+});
+for (const value of ["0", "33", "2.5", "many"]) {
+  test(`skill import concurrency rejects ${value}`, async () => {
+    vi.stubEnv("SKILL_INGEST_WORKER_CONCURRENCY", value);
+    vi.resetModules();
+    await assert.rejects(
+      import("./config"),
+      /SKILL_INGEST_WORKER_CONCURRENCY must be an integer between/,
+    );
+  });
+}

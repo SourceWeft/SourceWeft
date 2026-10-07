@@ -431,6 +431,12 @@ export const config = {
   deliverablesQueueName: `${queueName}-deliverables`,
   // Community-skill ingest runs on its own queue so a large repository import
   // never competes with chat turns or deliverable renders for a worker slot.
+  skillIngestWorkerConcurrency: parseBoundedIntegerEnv({
+    name: "SKILL_INGEST_WORKER_CONCURRENCY",
+    fallback: 2,
+    min: 1,
+    max: 32,
+  }),
   skillIngestQueueName: `${queueName}-skill-ingest`,
   deliverablesWorkerConcurrency: parsePositiveInteger(
     process.env.DELIVERABLE_WORKER_CONCURRENCY,

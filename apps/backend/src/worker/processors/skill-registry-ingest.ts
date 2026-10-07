@@ -1,3 +1,4 @@
+import { config } from "../../shared/config";
 import { UnrecoverableError, type Job } from "bullmq";
 import { logger } from "../../shared/logger";
 import {
@@ -13,8 +14,9 @@ import { enqueueSkillIngestJob } from "../../modules/skills/registry/ingest/queu
 import { failSubmissionIfInFlight } from "../../modules/skills/registry/ingest/repository";
 import type { IngestDeps } from "../../modules/skills/registry/ingest/stages";
 
-/** How many ingests one worker process runs at once. Not configurable. */
-export const SKILL_INGEST_WORKER_CONCURRENCY = 2;
+/** Dedicated import queue concurrency; bounded separately from chat work. */
+export const SKILL_INGEST_WORKER_CONCURRENCY =
+  config.skillIngestWorkerConcurrency;
 
 /**
  * Wall-clock budget of one attempt. Delivered as an AbortSignal, so it cuts a
@@ -36,7 +38,9 @@ export async function processSkillRegistryIngestJob(
 ): Promise<IngestRunOutcome> {
   const submissionId = submissionIdOf(job.data);
   if (!submissionId) {
-    throw new UnrecoverableError("skill-registry-ingest job has no submissionId");
+    throw new UnrecoverableError(
+      "skill-registry-ingest job has no submissionId",
+    );
   }
   const maxAttempts = job.opts?.attempts ?? 1;
   let outcome: IngestRunOutcome;

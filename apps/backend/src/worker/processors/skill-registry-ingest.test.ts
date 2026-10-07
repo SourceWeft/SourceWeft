@@ -48,7 +48,7 @@ beforeEach(() => {
   mocks.failIfInFlight.mockResolvedValue(true);
 });
 
-test("the budget is fixed in code: two at a time, ten minutes each", () => {
+test("default import concurrency is two and attempt budget remains ten minutes", () => {
   assert.equal(SKILL_INGEST_WORKER_CONCURRENCY, 2);
   assert.equal(SKILL_INGEST_JOB_DEADLINE_MS, 600_000);
 });
@@ -73,7 +73,10 @@ test("deterministic failures end the job at once", async () => {
     new RegistrySubmissionError("REGISTRY_SUBMISSION_UNPINNED", "unpinned"),
     new RegistrySubmissionError("REGISTRY_SUBMISSION_CONFLICT", "conflict"),
     new RegistrySubmissionError("REGISTRY_SUBMISSION_DEADLINE", "deadline"),
-    new GitHubArchiveError("ARCHIVE_UNAVAILABLE", "GitHub zipball download failed 404"),
+    new GitHubArchiveError(
+      "ARCHIVE_UNAVAILABLE",
+      "GitHub zipball download failed 404",
+    ),
     new ContentError(404, "SKILL_NOT_FOUND", "nope"),
   ];
   for (const error of deterministic) {
@@ -92,8 +95,14 @@ test("transient failures are rethrown untouched so the queue backs off and retri
   const transient = [
     new TypeError("fetch failed"),
     new GitHubArchiveError("ARCHIVE_TIMEOUT", "GitHub did not respond"),
-    new GitHubArchiveError("ARCHIVE_UNAVAILABLE", "GitHub zipball download failed 502"),
-    new GitHubArchiveError("ARCHIVE_UNAVAILABLE", "GitHub zipball download failed 429"),
+    new GitHubArchiveError(
+      "ARCHIVE_UNAVAILABLE",
+      "GitHub zipball download failed 502",
+    ),
+    new GitHubArchiveError(
+      "ARCHIVE_UNAVAILABLE",
+      "GitHub zipball download failed 429",
+    ),
     new RegistrySubmissionError("REGISTRY_SUBMISSION_TIMEOUT", "slow"),
     new Error("connection terminated unexpectedly"),
   ];
