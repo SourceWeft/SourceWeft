@@ -24,7 +24,9 @@ RUN apk add --no-cache libc6-compat libstdc++ \
 # their workspace dependencies). No manual package list required.
 FROM base AS pruner
 COPY . .
+# Exclude the test-only pristine oracle before source reaches runtime COPY layers.
 RUN pnpm dlx turbo@2.10.9 prune @sourceweft/backend web --docker \
+  && rm -rf out/full/packages/security-braces/tests out/full/packages/security-braces/upstream-test \
   && node scripts/editions/copy-licenses.mjs /app/out/full
 
 # ── Deps ─────────────────────────────────────────────────────────────
