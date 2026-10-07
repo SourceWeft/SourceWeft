@@ -425,7 +425,10 @@ export class CloudflareSandboxProvider implements SandboxProvider {
         : input.command;
       const command =
         input.timeoutMs > HEARTBEAT_THRESHOLD_MS
-          ? `( while true; do sleep ${HEARTBEAT_INTERVAL_SECONDS}; printf '%s\\n' ${shellQuote(EXEC_HEARTBEAT_MARKER)} >&2; done ) & __sw_hb=$!; ( ${base} ); __sw_rc=$?; kill "$__sw_hb" 2>/dev/null; exit "$__sw_rc"`
+          ? // The loop writes the marker through fd 3 (a copy of stderr) while its `sleep` children
+            // hold no exec pipes at all: once the loop is killed the orphaned sleep must not keep the
+            // bridge's output stream open, which used to cost up to one heartbeat interval per command.
+            `( while true; do sleep ${HEARTBEAT_INTERVAL_SECONDS} 3>&-; printf '%s\\n' ${shellQuote(EXEC_HEARTBEAT_MARKER)} >&3; done ) 3>&2 >/dev/null 2>&1 </dev/null & __sw_hb=$!; ( ${base} ); __sw_rc=$?; kill "$__sw_hb" 2>/dev/null; exit "$__sw_rc"`
           : base;
       const controller = new AbortController();
       const forwardAbort = () => controller.abort(input.signal?.reason);
