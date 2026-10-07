@@ -26,7 +26,7 @@ ENV RUSTUP_HOME=/usr/local/rustup \
   CARGO_HOME=/usr/local/cargo \
   RUSTUP_TOOLCHAIN=1.94.1
 ENV PATH="/usr/local/cargo/bin:${PATH}"
-RUN apk add --no-cache build-base clang cmake pkgconf perl
+RUN apk add --no-cache build-base
 COPY --from=rust-toolchain /usr/local/cargo /usr/local/cargo
 COPY --from=rust-toolchain /usr/local/rustup /usr/local/rustup
 COPY packages/anydoc /app/packages/anydoc
