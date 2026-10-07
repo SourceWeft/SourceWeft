@@ -20,6 +20,7 @@ exports.assertAst = (ast) => {
   const frames = [{ node: ast, depth: 0 }];
   while (frames.length) {
     const { node, depth, exit } = frames.pop();
+    if (typeof node === "function") reject();
     if (!node || typeof node !== "object") continue;
     if (exit) {
       active.delete(node);
@@ -36,6 +37,7 @@ exports.assertAst = (ast) => {
       if (parents.has(parent) || parents.size > MAX_DEPTH + 1) reject();
       parents.add(parent);
       parent = parent.parent;
+      if (typeof parent === "function") reject();
     }
     active.add(node);
     frames.push({ node, exit: true });

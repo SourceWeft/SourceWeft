@@ -182,3 +182,16 @@ test("hostile structures reject in a bounded low-stack subprocess", () => {
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout, "guarded");
 });
+
+test("function-valued AST nodes and parent links cannot bypass cycle validation", () => {
+  const callable = () => {};
+  callable.nodes = [callable];
+  const parent = () => {};
+  parent.parent = parent;
+  for (const name of implementations) {
+    const direct = require("../lib/" + name);
+    assert.throws(() => direct(callable), hostile);
+    assert.throws(() => direct({ type: "root", nodes: [callable] }), hostile);
+    assert.throws(() => direct({ type: "paren", nodes: [], parent }), hostile);
+  }
+});
