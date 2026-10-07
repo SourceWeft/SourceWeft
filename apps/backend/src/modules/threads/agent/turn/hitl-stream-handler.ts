@@ -350,6 +350,9 @@ export async function* handleHitlStreamChunk(input: {
       const nextToolCall: ToolCallTrace = {
         id: toolCallId,
         tool: action.name,
+        ...(runtime.mcpDisplayByToolName.get(action.name)
+          ? { mcpDisplay: runtime.mcpDisplayByToolName.get(action.name) }
+          : {}),
         input: action.args,
         output: confirmation,
         status: "approval_requested",

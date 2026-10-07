@@ -623,6 +623,9 @@ function normalizeToolCallRecord(
     normalizeToolOutput(record.output),
   );
   const confirmation = getToolConfirmationRecord(output);
+  const mcpDisplay =
+    normalizeMcpDisplay(record.mcpDisplay) ??
+    mcpDisplayFromApproval(tool, output);
   const normalizedStatus =
     status === "completed" && isPendingToolConfirmation(confirmation)
       ? "approval_requested"
@@ -642,9 +645,7 @@ function normalizeToolCallRecord(
     approvalState: normalizeApprovalState(record.approvalState),
     approvalConfirmationId:
       toNullableString(record.approvalConfirmationId) ?? undefined,
-    ...(normalizeMcpDisplay(record.mcpDisplay)
-      ? { mcpDisplay: normalizeMcpDisplay(record.mcpDisplay) }
-      : {}),
+    ...(mcpDisplay ? { mcpDisplay } : {}),
     ...(normalizeToolProducer(record.producer)
       ? { producer: normalizeToolProducer(record.producer) }
       : {}),
@@ -658,6 +659,27 @@ export function normalizeMcpDisplay(
   const serverName = toNullableString(record?.serverName)?.trim();
   const toolName = toNullableString(record?.toolName)?.trim();
   return serverName && toolName ? { serverName, toolName } : undefined;
+}
+
+// Legacy approval records already carry runtime-owned public labels. Do not
+// derive labels from the lossy execution alias or trust a different action.
+function mcpDisplayFromApproval(
+  tool: string,
+  output: unknown,
+): ToolCallRecord["mcpDisplay"] {
+  const record = toObjectRecord(output);
+  const subject = toObjectRecord(record?.subject);
+  const action = toObjectRecord(record?.action);
+  if (
+    record?.type !== "tool_confirmation_request" ||
+    subject?.provider !== "mcp" ||
+    action?.toolName !== tool
+  )
+    return undefined;
+  return normalizeMcpDisplay({
+    serverName: subject.label,
+    toolName: action.label,
+  });
 }
 
 function normalizeToolProducer(value: unknown): ToolProducer | undefined {
@@ -1150,6 +1172,9 @@ function normalizeTracePartRecord(value: unknown): TracePartRecord | null {
           ? null
           : (toNullableNumber(record.latencyMs) ?? undefined),
       title: toNullableString(record.title) ?? undefined,
+      ...(normalizeMcpDisplay(record.mcpDisplay)
+        ? { mcpDisplay: normalizeMcpDisplay(record.mcpDisplay) }
+        : {}),
       approvalState: normalizeApprovalState(record.approvalState),
       approvalConfirmationId:
         toNullableString(record.approvalConfirmationId) ?? undefined,
@@ -1495,8 +1520,36 @@ function resolveToolCallsFromMetadata(metadata: Record<string, unknown>) {
     return [] as ToolCallRecord[];
   }
 
+  // Older finalized records dropped display data while retaining it in the
+  // explicit event toolCall. Recover by exact call identity, never by hash.
+  const displays = new Map<
+    string,
+    { tool: string; display: NonNullable<ToolCallRecord["mcpDisplay"]> }
+  >();
+  for (const event of Array.isArray(metadata.traceEvents)
+    ? metadata.traceEvents
+    : []) {
+    const record = toObjectRecord(event);
+    const payload = toObjectRecord(record?.payload);
+    const call =
+      toObjectRecord(record?.toolCall) ?? toObjectRecord(payload?.toolCall);
+    const display = normalizeMcpDisplay(call?.mcpDisplay);
+    if (
+      call &&
+      typeof call.id === "string" &&
+      typeof call.tool === "string" &&
+      display
+    )
+      displays.set(call.id, { tool: call.tool, display });
+  }
   return metadata.toolCalls
-    .map((item) => normalizeToolCallRecord(item))
+    .map((item) => {
+      const call = normalizeToolCallRecord(item);
+      const known = call ? displays.get(call.id) : undefined;
+      return call && !call.mcpDisplay && known?.tool === call.tool
+        ? { ...call, mcpDisplay: known.display }
+        : call;
+    })
     .filter((item): item is ToolCallRecord => item !== null)
     .filter((item) =>
       shouldRenderToolCall(item, resolveThinkingStepsFromMetadata(metadata)),

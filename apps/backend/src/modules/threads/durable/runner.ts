@@ -1,3 +1,4 @@
+import { normalizeMcpDisplay } from "../turn/trace-parts";
 import { approvalFinishPayload } from "./approval-finish";
 import {
   beginReasoningRun,
@@ -414,6 +415,9 @@ function toolCallTraceFromPayload(input: {
     input.snapshot.toolCalls,
     id,
   );
+  const mcpDisplay =
+    normalizeMcpDisplay(payloadToolCall?.mcpDisplay) ??
+    normalizeMcpDisplay(snapshotToolCall?.mcpDisplay);
   const output =
     input.payload.type === "tool-call-event"
       ? input.payload.data
@@ -425,6 +429,7 @@ function toolCallTraceFromPayload(input: {
   return {
     id,
     tool,
+    ...(mcpDisplay ? { mcpDisplay } : {}),
     input: {
       ...(toObjectRecord(snapshotToolCall?.input) ?? {}),
       ...(toObjectRecord(input.payload.input) ?? {}),

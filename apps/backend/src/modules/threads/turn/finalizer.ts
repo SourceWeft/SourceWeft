@@ -223,20 +223,7 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
       provider: input.provider ?? undefined,
       routeDecision: input.routeDecision,
     }),
-    toolCalls: input.toolCalls.map((call) => ({
-      id: call.id,
-      tool: call.tool,
-      input: call.input,
-      output: call.output,
-      status: call.status,
-      latencyMs: call.latencyMs,
-      error: call.error,
-      sequence: call.sequence,
-      ...(call.approvalState ? { approvalState: call.approvalState } : {}),
-      ...(call.approvalConfirmationId
-        ? { approvalConfirmationId: call.approvalConfirmationId }
-        : {}),
-    })),
+    toolCalls: input.toolCalls.map(serializeToolCallForMessage),
     ...(input.renderBlocks && input.renderBlocks.length > 0
       ? { renderBlocks: input.renderBlocks }
       : {}),
@@ -323,7 +310,28 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
   };
 }
 
+function serializeToolCallForMessage(
+  call: FinalizeThreadTurnInput["toolCalls"][number],
+) {
+  return {
+    id: call.id,
+    tool: call.tool,
+    ...(call.mcpDisplay ? { mcpDisplay: call.mcpDisplay } : {}),
+    input: call.input,
+    output: call.output,
+    status: call.status,
+    latencyMs: call.latencyMs,
+    error: call.error,
+    sequence: call.sequence,
+    ...(call.approvalState ? { approvalState: call.approvalState } : {}),
+    ...(call.approvalConfirmationId
+      ? { approvalConfirmationId: call.approvalConfirmationId }
+      : {}),
+  };
+}
+
 export const testExports = {
+  serializeToolCallForMessage,
   appendAssistantContinuationContent,
   preserveAssistantMetadataForContinuation,
 };

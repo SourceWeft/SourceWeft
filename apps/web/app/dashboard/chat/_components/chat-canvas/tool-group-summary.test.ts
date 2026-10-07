@@ -9,6 +9,7 @@ import {
   getToolActivityCategory,
   summarizeToolGroup,
 } from "./tool-group-summary";
+import { resolveToolCallsFromMetadata } from "../../[threadId]/_thread/message-normalizers";
 import type { ToolCallRecord } from "./types";
 
 type Translate = ReturnType<typeof useTranslations>;
@@ -24,7 +25,10 @@ function translator(locale: keyof typeof catalogs) {
 }
 
 let nextId = 0;
-function call(tool: string, input: Record<string, unknown> = {}): ToolCallRecord {
+function call(
+  tool: string,
+  input: Record<string, unknown> = {},
+): ToolCallRecord {
   nextId += 1;
   return {
     error: null,
@@ -78,7 +82,10 @@ test("files are counted by distinct path", () => {
     ]),
     "Read a file and edited 2 files",
   );
-  assert.equal(summarize([call("read_file"), call("ls")]), "Read files and searched files");
+  assert.equal(
+    summarize([call("read_file"), call("ls")]),
+    "Read files and searched files",
+  );
 });
 
 test("more than three categories collapse into a count", () => {
@@ -106,11 +113,14 @@ test("connectors of the same type merge, different types stay apart", () => {
 });
 
 test("unknown and MCP tools are named by the tool itself", () => {
-  assert.deepEqual(getToolActivityCategory(call("mcp__io_github_x_1a2b__list_issues")), {
-    key: "tool:List Issues",
-    kind: "tool",
-    name: "List Issues",
-  });
+  assert.deepEqual(
+    getToolActivityCategory(call("mcp__io_github_x_1a2b__list_issues")),
+    {
+      key: "tool:List Issues",
+      kind: "tool",
+      name: "List Issues",
+    },
+  );
   assert.equal(
     summarize([call("custom_thing"), call("custom_thing")]),
     "Used Custom Thing",
@@ -139,12 +149,7 @@ test("summaries are localized", () => {
   );
   assert.equal(
     summarize(
-      [
-        call("web_search"),
-        call("search_sources"),
-        call("execute"),
-        call("ls"),
-      ],
+      [call("web_search"), call("search_sources"), call("execute"), call("ls")],
       "zh-CN",
     ),
     "搜索了网页、检索了资料源、运行了 1 条命令和其他 1 项",
@@ -169,5 +174,43 @@ test("MCP summaries retain full display metadata in all locales and after reload
       summary.includes("AnyCrawl · 搜索网页与完整文章 Search full articles"),
     );
     assert.ok(!summary.includes("7890abcd"));
+  }
+});
+
+test("actual Microsoft Learn persisted search and fetch summaries exclude execution aliases in every locale", () => {
+  const entries = [
+    ["search", "9eda69db"],
+    ["fetch", "69f82065"],
+  ];
+  const toolCalls = entries.map(([name, hash]) => ({
+    ...call(`mcp__com_microsoft_microsoft-learn-mc_371294fd__microso_${hash}`),
+    id: name,
+    status: "completed",
+  }));
+  const metadata = JSON.parse(
+    JSON.stringify({
+      toolCalls,
+      traceEvents: entries.map(([name], index) => ({
+        toolCall: {
+          id: name,
+          tool: toolCalls[index]?.tool,
+          mcpDisplay: {
+            serverName: "Microsoft Learn MCP",
+            toolName: `microsoft_docs_${name}`,
+          },
+        },
+      })),
+    }),
+  );
+  for (const locale of ["en", "zh-CN", "zh-TW"] as const) {
+    const summary = summarizeToolGroup({
+      locale,
+      t: translator(locale),
+      toolCalls: resolveToolCallsFromMetadata(metadata),
+    });
+    assert.ok(summary.includes("Microsoft Learn MCP · microsoft_docs_search"));
+    assert.ok(summary.includes("Microsoft Learn MCP · microsoft_docs_fetch"));
+    assert.ok(!summary.includes("9eda69db"));
+    assert.ok(!summary.includes("69f82065"));
   }
 });
