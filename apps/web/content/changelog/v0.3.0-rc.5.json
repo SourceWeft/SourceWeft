@@ -1,0 +1,15 @@
+{
+  "tag": "v0.3.0-rc.5",
+  "releasedAt": "2026-10-08",
+  "category": "Release",
+  "commit": "8f4679d333248f510589dfa92a2a178a6ed37560",
+  "title": "Accurate PDF numbers and readable MCP activity",
+  "summary": "This release candidate preserves standalone numeric text in PDF sources and keeps MCP server and tool names readable through approvals, saved conversations and page refreshes. Desktop installers remain unsigned manual downloads; automatic application updates are not published for this version.",
+  "items": [
+    "Preserved numeric PDF text that was previously mistaken for page numbers. Page-number text is retained to protect document data. Upload existing PDF sources again to regenerate their indexed text with the updated parser.",
+    "Kept readable MCP server and tool names through approvals, streamed activity, durable execution records and saved conversations. Older calls use their recorded display metadata when available.",
+    "Verified the maintained document parser on all seven supported native platforms and added an actual production-image regression for PDF data preservation."
+  ],
+  "githubPrerelease": false,
+  "desktopPublicationPolicy": "candidate"
+}
