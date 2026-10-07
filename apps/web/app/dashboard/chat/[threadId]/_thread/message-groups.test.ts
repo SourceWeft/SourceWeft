@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
+import type { ToolCallRecord } from "../../_components/chat-canvas/types";
 import type { ChatMessageItem } from "../streaming-assistant-state";
 import { buildVersionedMessageGroups } from "./message-groups";
 import {
@@ -1110,4 +1111,102 @@ test("canonical runtime MCP identity takes priority over legacy approval output 
     resolveToolCallsFromMetadata({ toolCalls: [record] })[0]?.mcpDisplay,
     { serverName: "Old server", toolName: "Old search" },
   );
+});
+
+test("live MCP start preserves canonical display identity without altering execution aliases", () => {
+  const tool =
+    "mcp__com_microsoft_microsoft-learn-mc_371294fd__microso_9eda69db";
+  const mcpDisplay = {
+    serverName: "Microsoft Learn MCP",
+    toolName: "microsoft_docs_search",
+  };
+  const call = resolveToolCallFromStreamEvent({
+    event: {
+      type: "tool-call-start",
+      toolCall: {
+        id: "call-search",
+        tool,
+        input: {},
+        status: "running",
+        mcpDisplay,
+      },
+    },
+    streamToolCallsById: new Map(),
+  });
+  assert.deepEqual(call.mcpDisplay, mcpDisplay);
+  assert.equal(call.tool, tool);
+});
+
+test("live MCP result supplies late identity and thin end retains it for the same call", () => {
+  const tool =
+    "mcp__com_microsoft_microsoft-learn-mc_371294fd__microso_69f82065";
+  const mcpDisplay = {
+    serverName: "Microsoft Learn MCP",
+    toolName: "microsoft_docs_fetch",
+  };
+  const calls = new Map<string, ToolCallRecord>();
+  const start = resolveToolCallFromStreamEvent({
+    event: { type: "tool-call-start", id: "call-fetch", tool, input: {} },
+    streamToolCallsById: calls,
+  });
+  assert.equal(start.mcpDisplay, undefined);
+  calls.set(start.id, start);
+  const result = resolveToolCallFromStreamEvent({
+    event: {
+      type: "tool-call-result",
+      toolCall: {
+        id: start.id,
+        tool,
+        input: {},
+        status: "completed",
+        mcpDisplay,
+      },
+      output: { text: "Introduction to Azure Blob Storage" },
+    },
+    streamToolCallsById: calls,
+  });
+  assert.deepEqual(result.mcpDisplay, mcpDisplay);
+  calls.set(result.id, result);
+  const end = resolveToolCallFromStreamEvent({
+    event: { type: "tool-call-end", id: start.id, tool, status: "completed" },
+    streamToolCallsById: calls,
+  });
+  assert.deepEqual(end.mcpDisplay, mcpDisplay);
+  assert.equal(end.status, "completed");
+  assert.equal(end.tool, tool);
+});
+
+test("live MCP identity is never inherited across a different tool or call id", () => {
+  const tool = "mcp__server__search_hash";
+  const previous: ToolCallRecord = {
+    id: "old-call",
+    tool,
+    input: {},
+    output: null,
+    status: "running",
+    error: null,
+    latencyMs: null,
+    mcpDisplay: { serverName: "Server", toolName: "search" },
+  };
+  const calls = new Map([[previous.id, previous]]);
+  const otherTool = resolveToolCallFromStreamEvent({
+    event: {
+      type: "tool-call-end",
+      id: previous.id,
+      tool: "mcp__server__fetch_hash",
+      status: "completed",
+    },
+    streamToolCallsById: calls,
+  });
+  assert.equal(otherTool.mcpDisplay, undefined);
+  const otherId = resolveToolCallFromStreamEvent({
+    event: {
+      type: "tool-call-start",
+      id: previous.id,
+      toolCall: { id: "new-call", tool, input: {}, status: "running" },
+    },
+    streamToolCallsById: calls,
+  });
+  assert.equal(otherId.id, "new-call");
+  assert.equal(otherId.mcpDisplay, undefined);
 });

@@ -264,3 +264,59 @@ test("messages stream handler clears streamed text when leaked artifact specs ap
   assert.equal(runtime.hasStreamedText, false);
   assert.equal(runtime.hasTextSinceLastToolBoundary, false);
 });
+
+test("promoted MCP start emits canonical metadata before later callbacks can mutate the trace", async () => {
+  const tool =
+    "mcp__com_microsoft_microsoft-learn-mc_371294fd__microso_9eda69db";
+  const mcpDisplay = {
+    serverName: "Microsoft Learn MCP",
+    toolName: "microsoft_docs_search",
+  };
+  const runtime = createTurnRuntime({
+    prepared: {
+      runTraceId: "trace-mcp-promote",
+      workspace: { id: "workspace" },
+      thread: { id: "thread" },
+    } as never,
+  });
+  runtime.mcpDisplayByToolName.set(tool, mcpDisplay);
+  runtime.pendingToolStreamsByRunId.set("run-mcp-search", {
+    normalizedInput: { query: "Azure Blob Storage" },
+    startedAt: Date.now(),
+    streamRunId: "run-mcp-search",
+    toolName: tool,
+  });
+  const events = await collectMessageStreamEvents({
+    payload: [
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [
+          {
+            id: "call-mcp-search",
+            name: tool,
+            args: { query: "Azure Blob Storage" },
+          },
+        ],
+      },
+    ],
+    commandSuccessCriteria: { kind: "none" },
+    runtime,
+    suppressModelReasoning: false,
+  });
+  const start = events.find((event) => event.type === "tool-call-start");
+  assert.deepEqual(
+    start?.type === "tool-call-start"
+      ? JSON.parse(JSON.stringify(start)).toolCall.mcpDisplay
+      : undefined,
+    mcpDisplay,
+  );
+  assert.deepEqual(
+    runtime.toolCallsById.get("call-mcp-search")?.mcpDisplay,
+    mcpDisplay,
+  );
+  assert.equal(
+    start?.type === "tool-call-start" ? start.tool : undefined,
+    tool,
+  );
+});

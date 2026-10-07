@@ -1399,9 +1399,16 @@ function resolveToolCallFromStreamEvent(input: {
           "Tool execution failed.")
         : null);
 
+  const mcpDisplay =
+    normalizedToolCall?.mcpDisplay ??
+    (existing?.id === resolvedId && existing.tool === tool
+      ? existing.mcpDisplay
+      : undefined);
+
   return {
     id: resolvedId,
     tool,
+    ...(mcpDisplay ? { mcpDisplay } : {}),
     input: normalizedInput,
     output: normalizedOutput,
     latencyMs: normalizedLatencyMs,

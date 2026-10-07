@@ -53,6 +53,10 @@ export async function* handleMessagesStreamChunk(input: {
     toolCallsById: runtime.toolCallsById,
   });
   for (const promoted of promotedToolStreams) {
+    // This start can precede ordinary tool callbacks; send the same bound
+    // public identity immediately rather than relying on a later mutation.
+    const mcpDisplay = runtime.mcpDisplayByToolName.get(promoted.toolName);
+    if (mcpDisplay) promoted.currentToolCall.mcpDisplay = mcpDisplay;
     runtime.toolStartedAtById.set(
       promoted.toolCallId,
       promoted.pendingStartedAt ?? Date.now(),
