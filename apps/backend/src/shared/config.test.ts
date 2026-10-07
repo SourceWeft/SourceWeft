@@ -211,3 +211,27 @@ for (const [name, value] of [
     );
   });
 }
+
+test("skill overview batch defaults to 20 and accepts a bounded override", async () => {
+  vi.resetModules();
+  assert.equal(
+    (await import("./config")).config.market.skillOverviewBatchSize,
+    20,
+  );
+  vi.stubEnv("SKILL_OVERVIEW_BATCH_SIZE", "200");
+  vi.resetModules();
+  assert.equal(
+    (await import("./config")).config.market.skillOverviewBatchSize,
+    200,
+  );
+});
+for (const value of ["0", "1001", "2.5", "many"]) {
+  test(`skill overview batch rejects ${value}`, async () => {
+    vi.stubEnv("SKILL_OVERVIEW_BATCH_SIZE", value);
+    vi.resetModules();
+    await assert.rejects(
+      import("./config"),
+      /SKILL_OVERVIEW_BATCH_SIZE must be an integer between/,
+    );
+  });
+}

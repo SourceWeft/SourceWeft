@@ -1,3 +1,5 @@
+import { db, skillRegistrySubmissions } from "@sourceweft/db";
+import { count, inArray } from "drizzle-orm";
 import { assertSystemSubmissionStorage } from "./repository";
 import {
   createSystemSkillSubmission,
@@ -103,4 +105,13 @@ export async function readSystemSubmissions(
     }
   }
   return results;
+}
+
+/** Total queued/running imports, including tenant work, for crawler backpressure. */
+export async function readSkillImportCapacity() {
+  const [row] = await db
+    .select({ inFlight: count() })
+    .from(skillRegistrySubmissions)
+    .where(inArray(skillRegistrySubmissions.status, ["queued", "running"]));
+  return { inFlight: row?.inFlight ?? 0 };
 }

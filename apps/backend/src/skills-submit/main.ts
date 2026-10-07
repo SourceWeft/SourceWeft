@@ -6,6 +6,7 @@ import { closeQueue } from "../shared/queue";
 import {
   parseSystemSubmitSources,
   readSystemSubmissions,
+  readSkillImportCapacity,
   submitSkillSourcesAsSystem,
 } from "../modules/skills/registry/ingest/system-submit";
 
@@ -58,6 +59,7 @@ async function run() {
       }
     : {
         submissions: await readSystemSubmissions(stringList(input.ids, "ids")),
+        capacity: await readSkillImportCapacity(),
       };
 }
 
