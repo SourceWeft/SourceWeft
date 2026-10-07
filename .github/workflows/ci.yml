@@ -96,11 +96,14 @@ jobs:
             turbo-${{ runner.os }}-node22.23.2-${{ hashFiles('pnpm-lock.yaml') }}-
             turbo-${{ runner.os }}-node22.23.2-
       - uses: dtolnay/rust-toolchain@1.94.1
+        if: hashFiles('packages/anydoc/package.json') != ''
       - uses: Swatinem/rust-cache@v2
+        if: hashFiles('packages/anydoc/package.json') != ''
         with:
           workspaces: packages/anydoc/upstream
       - run: pnpm install --frozen-lockfile
       - name: Build maintained AnyDoc binding
+        if: hashFiles('packages/anydoc/package.json') != ''
         run: pnpm --filter @sourceweft/anydoc native:build
       - run: pnpm audit --audit-level=moderate
       - name: Verify manual image workflow when present in selected revision
@@ -163,11 +166,14 @@ jobs:
             turbo-${{ runner.os }}-node${{ matrix.node }}-${{ hashFiles('pnpm-lock.yaml') }}-
             turbo-${{ runner.os }}-node${{ matrix.node }}-
       - uses: dtolnay/rust-toolchain@1.94.1
+        if: hashFiles('packages/anydoc/package.json') != ''
       - uses: Swatinem/rust-cache@v2
+        if: hashFiles('packages/anydoc/package.json') != ''
         with:
           workspaces: packages/anydoc/upstream
       - run: pnpm install --frozen-lockfile
       - name: Build maintained AnyDoc binding
+        if: hashFiles('packages/anydoc/package.json') != ''
         run: pnpm --filter @sourceweft/anydoc native:build
       # DB-backed suites query real tables; the service container starts from
       # a bare image, so the schema has to be applied first.
@@ -312,6 +318,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter web exec playwright install --with-deps chromium
       - name: Verify maintained PDF parser in the actual production image
+        if: hashFiles('packages/anydoc/package.json') != ''
         run: node scripts/ci/verify-anydoc-image.cjs sourceweft:pr-test
       - name: Verify documented Compose installation and restart
         run: node scripts/ci/verify-selfhost-compose.mjs sourceweft:pr-test
