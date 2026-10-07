@@ -1,0 +1,4 @@
+# Preserve the exact production PDF fixture bytes and native regression PDFs.
+packages/anydoc/tests/fixtures/*.pdf binary
+# Upstream license text is reproduced exactly, including original whitespace.
+packages/anydoc/THIRD_PARTY_NOTICES.txt -whitespace
