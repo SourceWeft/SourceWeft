@@ -77,6 +77,8 @@ RUN addgroup -S sourceweft \
 # Pruned workspace source tree (packages needed at runtime for pnpm workspace resolution).
 # turbo prune already limits this to @sourceweft/backend, web, and their dependencies.
 COPY --chown=sourceweft:sourceweft --from=pruner /app/out/full/ .
+# The pristine upstream oracle is test-only and must not ship as runtime code.
+RUN rm -rf packages/security-braces/tests packages/security-braces/upstream-test
 
 # Overlay built artifacts from builder (supersedes source files where applicable)
 COPY --chown=sourceweft:sourceweft --from=builder /app/apps/web/.next/standalone web-standalone

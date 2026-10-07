@@ -1,0 +1,24 @@
+{
+  "name": "@sourceweft/security-braces",
+  "version": "3.0.3-sourceweft.1",
+  "description": "SourceWeft-maintained bounded-structure security fork of braces 3.0.3",
+  "license": "MIT",
+  "main": "index.js",
+  "files": [
+    "index.js",
+    "lib",
+    "LICENSE",
+    "README.md",
+    "UPSTREAM.json"
+  ],
+  "scripts": {
+    "test": "mocha upstream-test/*.js && node --test tests/*.test.cjs"
+  },
+  "dependencies": {
+    "fill-range": "^7.1.1"
+  },
+  "devDependencies": {
+    "mocha": "^11.7.5",
+    "bash-path": "^2.0.1"
+  }
+}
