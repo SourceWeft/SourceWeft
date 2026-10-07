@@ -70,12 +70,16 @@ export async function parseWithAnydoc(
       documentParseBackend: "anydoc",
       parserEngine: "anydoc",
       parserEngineVersion: "0.2.4",
-      parserPolicy: "numeric-preserving",
-      pageNumbersRetained: true,
       detectedFormat: detectedFormat ?? expectedFormat,
       pageLocationAvailable: false,
       pageCount,
-      ...(expectedFormat === "pdf" ? { pageCountSource: "pdfjs" } : {}),
+      ...(expectedFormat === "pdf"
+        ? {
+            pageCountSource: "pdfjs",
+            parserPolicy: "numeric-preserving",
+            pageNumbersRetained: true,
+          }
+        : {}),
     },
   });
 }
