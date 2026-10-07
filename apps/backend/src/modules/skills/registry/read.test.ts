@@ -195,6 +195,25 @@ describe("read-limits", () => {
     });
   });
 
+  test("1000 skills fit one import; 1001 requires subtree submissions", async () => {
+    const files = (count: number) =>
+      Object.fromEntries(
+        Array.from({ length: count }, (_, i) => [
+          `skills/s${i}/SKILL.md`,
+          SKILL_MD,
+        ]),
+      );
+    assert.equal(
+      (await readRegistrySkillsFromArchive(zipball(files(1000)), source)).skills
+        .length,
+      1000,
+    );
+    await assert.rejects(
+      readRegistrySkillsFromArchive(zipball(files(1001)), source),
+      /1001 skills.*1000-skill limit/,
+    );
+  });
+
   test("200 files are a skill, 201 are not", async () => {
     const references = (count: number) =>
       Object.fromEntries(

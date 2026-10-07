@@ -44,13 +44,13 @@ export const REGISTRY_READ_LIMITS = Object.freeze({
    * submission of thousands of tiny SKILL.md files would flood the catalog for
    * everyone while sailing past every byte ceiling.
    *
-   * Observed real repositories run 1, 13, 14, 17, 20, 25, 90 skills, so 200
-   * leaves room for the largest curated sets. Crossing it is not a dead end:
+   * Observed real repositories run 1, 13, 14, 17, 20, 25, 90 skills, so 1000
+   * also accommodates larger catalog backfills. Crossing it is not a dead end:
    * the error points at the `/tree/<ref>/<subpath>` deep link, which narrows a
    * submission to one subtree — the same one-skill-per-submission shape LobeHub
    * and Dify use as their ONLY intake, kept here as the fallback.
    */
-  maxSkillsPerRepo: 200,
+  maxSkillsPerRepo: 1000,
 });
 
 /** Directories that are never skill content (mirrors builtin.ts denylist). */
