@@ -64,9 +64,7 @@ function date(value: unknown): Date | null {
 }
 
 const idText = (value: unknown) =>
-  typeof value === "number" || typeof value === "string"
-    ? String(value)
-    : null;
+  typeof value === "number" || typeof value === "string" ? String(value) : null;
 
 export async function refreshSkillRepositoryMetadata(
   options: { batchSize?: number; deps?: RepoMetadataDeps } = {},
@@ -211,6 +209,14 @@ export async function refreshSkillRepositoryMetadata(
       .where(key);
     result.refreshed += 1;
   }
+
+  // Backfill stable source identity without overwriting a previously bound ID.
+  await db.execute(sql`
+    update ${skillDefinitions} d set github_repository_id = r.github_id
+    from ${skillRepositories} r
+    where d.source_type = 'registry_github' and d.repo_owner = r.repo_owner and d.repo_name = r.repo_name
+      and d.github_repository_id is null and r.github_id is not null
+  `);
 
   // Onto the skills, so sorting by stars needs no join.
   await db.execute(sql`

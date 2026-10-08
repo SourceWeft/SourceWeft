@@ -6,7 +6,11 @@ import type { GetMarketSkillResponse } from "@sourceweft/market-sdk";
 import { hasLocale, useLocale, useTranslations } from "next-intl";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { formatNumber } from "@sourceweft/i18n/format";
-import { DEFAULT_LOCALE, isLocale, type Locale } from "@sourceweft/i18n/locales";
+import {
+  DEFAULT_LOCALE,
+  isLocale,
+  type Locale,
+} from "@sourceweft/i18n/locales";
 
 import { cn } from "@sourceweft/ui-web/lib/utils";
 
@@ -106,7 +110,9 @@ async function loadSkill(slug: string, locale?: string) {
  * only an answer in the asked-for locale counts. A failed read counts as none.
  */
 async function overviewLocales(slug: string): Promise<Locale[]> {
-  const candidates = routing.locales.filter((id) => id !== routing.defaultLocale);
+  const candidates = routing.locales.filter(
+    (id) => id !== routing.defaultLocale,
+  );
   const found = await Promise.all(
     candidates.map(async (id) => {
       try {
@@ -136,8 +142,12 @@ export async function generateMetadata({
   }
   const t = await getTranslations({ locale, namespace: "publicSkills.detail" });
   try {
-    const { skill } = await loadSkill(decodeURIComponent(slug));
-    const title = t("metaTitle", { name: skill.displayName });
+    const { skill, source } = await loadSkill(decodeURIComponent(slug));
+    const title = t("metaTitle", {
+      name: source.repoSubpath
+        ? `${skill.displayName} · ${source.repoSubpath}`
+        : skill.displayName,
+    });
     const description = shortSeoText(
       t("metaDescription", {
         description: skill.description,
@@ -669,6 +679,17 @@ export default async function PublicSkillDetailPage({
                 <h1 className="break-words text-4xl font-semibold leading-tight tracking-tight sm:text-5xl">
                   {skill.displayName}
                 </h1>
+                {source.repoSubpath && sourceUrl ? (
+                  <a
+                    href={sourceUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-2 block break-all font-mono text-xs text-zinc-500 hover:underline dark:text-zinc-400"
+                  >
+                    {repository ? `${repository}/` : ""}
+                    {source.repoSubpath}
+                  </a>
+                ) : null}
                 <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-zinc-500 dark:text-zinc-400">
                   {skill.author ? (
                     <span>

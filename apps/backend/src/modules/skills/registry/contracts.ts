@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { z } from "zod";
 
 /**
@@ -42,31 +43,21 @@ function sanitizeSlugSegment(value: string): string {
     .replace(/^-+|-+$/g, ""); // no leading/trailing hyphens
 }
 
-/**
- * Derive the global-unique `skill_definitions.slug` from a GitHub identifier
- * plus the skill's own frontmatter `name` (§2): `gh-<owner>-<repo>-<name>`,
- * always within `[a-z0-9-]`.
- *
- * The slug is not just a database key: it becomes the skill's `name` in the
- * runtime descriptor, the `/skills/<name>/` mount segment, and the label the
- * model sees in its available-skills list. So it is built to be READ, from the
- * three parts a person would use to identify the skill — which is also how the
- * rest of the ecosystem addresses skills (LobeHub's `owner-repo`). An opaque
- * digest would satisfy uniqueness while telling the model nothing.
- *
- * A repo may ship many skills, and `name` is what the agentskills.io spec makes
- * the skill's identity, so `name` is what disambiguates them here. Two skills in
- * one repo declaring the same `name` therefore collide — that repo is malformed
- * by the spec, and the submit loop skips the duplicate with an explicit reason
- * rather than silently overwriting the first. `skill_definitions_slug_uq` is the
- * final backstop.
- */
+/** Legacy slug retained for existing pages; source identity is repository + root. */
 export function deriveRegistrySlug(
   owner: string,
   repo: string,
   name: string,
+  sourceRoot?: string,
+  repositoryId?: string,
 ): string {
   const base = `gh-${sanitizeSlugSegment(owner)}-${sanitizeSlugSegment(repo)}`;
   const skill = sanitizeSlugSegment(name);
-  return skill.length > 0 ? `${base}-${skill}` : base;
+  const legacy = skill.length > 0 ? `${base}-${skill}` : base;
+  if (sourceRoot === undefined) return legacy;
+  const path = sanitizeSlugSegment(sourceRoot).slice(0, 80) || "root";
+  return `${legacy}-${path}-${createHash("sha256")
+    .update(repositoryId ? `${repositoryId}\0${sourceRoot}` : sourceRoot)
+    .digest("hex")
+    .slice(0, 16)}`;
 }

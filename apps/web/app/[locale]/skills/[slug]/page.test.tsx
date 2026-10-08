@@ -514,7 +514,7 @@ describe("generateMetadata", () => {
       params: Promise.resolve({ locale: "en", slug: "pdf-forms" }),
       searchParams: Promise.resolve({}),
     });
-    expect(base.title).toBe("PDF Forms Agent Skill");
+    expect(base.title).toBe("PDF Forms · pdf Agent Skill");
     expect(String(base.alternates?.canonical)).toMatch(/\/skills\/pdf-forms$/);
     expect(base.robots).toBeUndefined();
 

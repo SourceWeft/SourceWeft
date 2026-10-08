@@ -45,7 +45,6 @@ import { recordSkillMarketEvent } from "../market/events";
 
 // The `version` label is derived from the pinned commit so each distinct commit
 // is its own version. A repeated source returns the immutable existing version.
-const VERSION_SHA_PREFIX_LENGTH = 12;
 
 /** Blob writes in flight at once: each is an existence check plus an upload. */
 const BLOB_WRITE_CONCURRENCY = 8;
@@ -294,10 +293,37 @@ export function registryVersionTakesCurrent(input: {
   return current === null || candidate >= current;
 }
 
-/**
- * Existing registry entry for a slug (or null) — the ownership/sticky inputs
- * Stage 4 needs. `currentVersionStatus` is the status of the `isCurrent` version.
- */
+/** Resolve source identity to its permanent public/runtime slug. */
+export async function getRegistrySlugForSource(input: {
+  owner: string;
+  repo: string;
+  repositoryId?: string;
+  sourceRoot: string;
+  proposedSlug: string;
+}) {
+  const [row] = await db
+    .select({
+      slug: skillDefinitions.slug,
+      repositoryId: skillDefinitions.githubRepositoryId,
+    })
+    .from(skillDefinitions)
+    .where(
+      and(
+        eq(skillDefinitions.sourceType, "registry_github"),
+        eq(skillDefinitions.sourceRoot, input.sourceRoot),
+        input.repositoryId
+          ? sql`(${skillDefinitions.githubRepositoryId} = ${input.repositoryId} or (${skillDefinitions.githubRepositoryId} is null and ${skillDefinitions.repoOwner} = ${input.owner.toLowerCase()} and ${skillDefinitions.repoName} = ${input.repo.toLowerCase()}))`
+          : and(
+              eq(skillDefinitions.repoOwner, input.owner.toLowerCase()),
+              eq(skillDefinitions.repoName, input.repo.toLowerCase()),
+            ),
+      ),
+    )
+    .limit(1);
+  return row?.slug ?? input.proposedSlug;
+}
+
+/** Existing source ownership and current-version state for submission triage. */
 export async function getRegistrySkillForSubmission(slug: string): Promise<
   | (NonNullable<RegistryExistingEntry> & {
       skillId: string;
@@ -378,7 +404,13 @@ export async function getRegistrySkillBySlug(slug: string) {
 export async function upsertRegistrySkillIndex(
   input: UpsertRegistrySkillInput,
 ): Promise<UpsertRegistrySkillResult> {
-  const version = input.commitSha.slice(0, VERSION_SHA_PREFIX_LENGTH);
+  const version = input.commitSha;
+  const source = parseGithubStoragePointer(input.storagePointer);
+  if (!source || source.commitSha !== input.commitSha)
+    throw new RegistrySubmissionError(
+      "REGISTRY_SUBMISSION_CONFLICT",
+      "Invalid source identity",
+    );
   if (committedAtMs(input.manifestJson.registry?.committedAt) === null) {
     throw new RegistrySubmissionError(
       "REGISTRY_SUBMISSION_UNDATED",
@@ -392,13 +424,67 @@ export async function upsertRegistrySkillIndex(
   return db.transaction(async (tx) => {
     // Also serializes first insertion, where no definition row exists to lock.
     await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtext(${"registry:" + input.slug}))`,
+      sql`select pg_advisory_xact_lock(hashtext(${"registry-repo:" + (input.manifestJson.registry?.repositoryId ?? `${source.owner.toLowerCase()}/${source.repo.toLowerCase()}`)}))`,
     );
+    const repositoryId = input.manifestJson.registry?.repositoryId;
+    const [bySource] = await tx
+      .select()
+      .from(skillDefinitions)
+      .where(
+        and(
+          eq(skillDefinitions.sourceType, "registry_github"),
+          eq(skillDefinitions.sourceRoot, source.repoSubpath),
+          repositoryId
+            ? sql`(${skillDefinitions.githubRepositoryId} = ${repositoryId} or (${skillDefinitions.githubRepositoryId} is null and ${skillDefinitions.repoOwner} = ${source.owner.toLowerCase()} and ${skillDefinitions.repoName} = ${source.repo.toLowerCase()}))`
+            : and(
+                eq(skillDefinitions.repoOwner, source.owner.toLowerCase()),
+                eq(skillDefinitions.repoName, source.repo.toLowerCase()),
+              ),
+        ),
+      )
+      .limit(1);
+    if (bySource) input = { ...input, slug: bySource.slug };
     const [existing] = await tx
       .select()
       .from(skillDefinitions)
       .where(eq(skillDefinitions.slug, input.slug))
       .limit(1);
+    if (
+      existing &&
+      existing.sourceRoot !== null &&
+      existing.sourceRoot !== source.repoSubpath
+    ) {
+      throw new RegistrySubmissionError(
+        "REGISTRY_SUBMISSION_CONFLICT",
+        "Slug belongs to another source root",
+      );
+    }
+    if (
+      existing?.githubRepositoryId &&
+      repositoryId &&
+      existing.githubRepositoryId !== repositoryId
+    ) {
+      throw new RegistrySubmissionError(
+        "REGISTRY_SUBMISSION_CONFLICT",
+        "Repository identity changed",
+      );
+    }
+    const backfillSource = async () => {
+      if (
+        existing &&
+        (existing.sourceRoot === null ||
+          (repositoryId && !existing.githubRepositoryId))
+      ) {
+        await tx
+          .update(skillDefinitions)
+          .set({
+            sourceRoot: source.repoSubpath,
+            ...(repositoryId ? { githubRepositoryId: repositoryId } : {}),
+          })
+          .where(eq(skillDefinitions.id, existing.id));
+      }
+    };
+    input.manifestJson = { ...input.manifestJson, slug: input.slug };
     // Another kind of skill holding this slug is a real conflict. Another
     // submitter of the same repository is not: see `triageRegistrySubmission`.
     if (existing && existing.sourceType !== "registry_github") {
@@ -414,7 +500,7 @@ export async function upsertRegistrySkillIndex(
       .where(
         and(
           eq(skillVersions.skillId, skillId),
-          eq(skillVersions.version, version),
+          sql`(${skillVersions.version} = ${version} or ${skillVersions.storagePointer} = ${input.storagePointer})`,
         ),
       )
       .limit(1);
@@ -460,11 +546,12 @@ export async function upsertRegistrySkillIndex(
           "This version was revoked or disabled; resubmitting cannot restore it",
         );
       }
+      await backfillSource();
       return {
         slug: input.slug,
         skillId,
         skillVersionId: existingVersion.id,
-        version,
+        version: existingVersion.version,
         status: existingVersion.status === "published" ? "indexed" : "queued",
         flags: existingVersion.manifestJson.registry?.scan.flags ?? [],
         diagnostics:
@@ -476,6 +563,7 @@ export async function upsertRegistrySkillIndex(
         "REGISTRY_VERSION_UNAVAILABLE",
         "This skill is archived",
       );
+    await backfillSource();
     if (
       existing &&
       input.featured !== undefined &&
@@ -619,6 +707,8 @@ export async function upsertRegistrySkillIndex(
         ownerUserId: claim?.userId ?? input.submitterId,
         repoOwner,
         repoName,
+        githubRepositoryId: repositoryId ?? null,
+        sourceRoot: source.repoSubpath,
         featured: input.featured ?? false,
         featuredSetBy: input.featured === undefined ? null : "sync",
         claimedAt: claim ? (claim.verifiedAt ?? now) : null,
@@ -636,8 +726,8 @@ export async function upsertRegistrySkillIndex(
           // `verified` vouches for content: new content is not vouched for
           // until an admin looks again.
           verified: false,
-          repoOwner: existing.repoOwner ?? repoOwner,
-          repoName: existing.repoName ?? repoName,
+          repoOwner,
+          repoName,
           updatedAt: now,
         })
         .where(eq(skillDefinitions.id, skillId));

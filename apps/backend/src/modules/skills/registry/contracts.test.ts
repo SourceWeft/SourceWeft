@@ -37,7 +37,10 @@ test("submit response constrains status and keeps slug optional", () => {
     }).success,
   );
   assert.ok(
-    submitRegistrySkillResponseSchema.safeParse({ status: "queued", skills: [] }).success,
+    submitRegistrySkillResponseSchema.safeParse({
+      status: "queued",
+      skills: [],
+    }).success,
   );
   assert.equal(
     submitRegistrySkillResponseSchema.safeParse({ status: "active" }).success,
@@ -69,9 +72,7 @@ test("slug: distinct skills in one repo never collide, and stay readable", () =>
   // Deterministic.
   assert.equal(a, deriveRegistrySlug("acme", "skills", "brand-guidelines"));
 
-  // The skill name is what disambiguates, not the directory it sits in: two
-  // different directories declaring the same frontmatter name collide by
-  // design (the submit loop skips the duplicate).
+  // Three-argument derivation remains available for legacy URL lookup.
   assert.equal(
     deriveRegistrySlug("acme", "skills", "shared"),
     deriveRegistrySlug("acme", "skills", "shared"),
@@ -79,6 +80,34 @@ test("slug: distinct skills in one repo never collide, and stay readable", () =>
 });
 
 test("submit response retains per-item failure diagnostics", () => {
-  const skills = [{sourcePath:"broken",status:"failed",flags:[],diagnostics:[{code:"SKILL_YAML_INVALID",severity:"error",message:"Invalid YAML",file:"SKILL.md",line:3}]}];
-  assert.deepEqual(submitRegistrySkillResponseSchema.parse({status:"queued",skills}).skills,skills);
+  const skills = [
+    {
+      sourcePath: "broken",
+      status: "failed",
+      flags: [],
+      diagnostics: [
+        {
+          code: "SKILL_YAML_INVALID",
+          severity: "error",
+          message: "Invalid YAML",
+          file: "SKILL.md",
+          line: 3,
+        },
+      ],
+    },
+  ];
+  assert.deepEqual(
+    submitRegistrySkillResponseSchema.parse({ status: "queued", skills })
+      .skills,
+    skills,
+  );
+});
+
+test("different roots retain separate identity even with the same name", () => {
+  const slug = (path: string) =>
+    deriveRegistrySlug("figma", "mcp-server-guide", "figma-use", path);
+  assert.notEqual(slug("skills/figma-use"), slug("skills-figquery/figma-use"));
+  assert.notEqual(slug("Skills/figma-use"), slug("skills/figma-use"));
+  assert.notEqual(slug("skills/a_b"), slug("skills/a-b"));
+  assert.equal(slug("skills/figma-use"), slug("skills/figma-use"));
 });

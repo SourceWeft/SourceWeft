@@ -358,7 +358,7 @@ export function analyzeRegistrySkill(input: {
 
   const finalFlags = [...flags].sort();
   return {
-    slug: deriveRegistrySlug(input.owner, input.repo, name),
+    slug: deriveRegistrySlug(input.owner, input.repo, name, discovered.repoSubpath),
     name,
     displayName:
       firstString(frontmatter.displayName, frontmatter.title) ??

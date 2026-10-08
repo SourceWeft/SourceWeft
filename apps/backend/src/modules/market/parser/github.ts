@@ -536,6 +536,35 @@ export async function githubGraphql<T>(
  * The URL/API half of GitHub source resolution — no archive bytes are touched
  * here, only a repo URL string and JSON metadata.
  */
+export async function resolveRepositoryMetadata(
+  source: NormalizedGitHubSource,
+  options?: GitHubRequestOptions,
+) {
+  const data = await fetchJson<{
+    id?: number;
+    default_branch?: string;
+    full_name?: string;
+  }>(`https://api.github.com/repos/${source.owner}/${source.repo}`, options);
+  if (
+    !Number.isSafeInteger(data.id) ||
+    Number(data.id) <= 0 ||
+    !data.default_branch ||
+    !data.full_name?.match(/^[^/]+\/[^/]+$/)
+  ) {
+    throw new GitHubArchiveError(
+      "ARCHIVE_UNAVAILABLE",
+      "GitHub did not return a complete repository identity",
+    );
+  }
+  const [owner, repo] = data.full_name.split("/") as [string, string];
+  return {
+    repositoryId: String(data.id),
+    defaultBranch: data.default_branch,
+    owner,
+    repo,
+  };
+}
+
 export async function resolveDefaultBranch(
   source: NormalizedGitHubSource,
   options?: GitHubRequestOptions,

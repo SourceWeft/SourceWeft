@@ -170,9 +170,15 @@ describe("GitHub requests are bounded in time", () => {
             sha: "B".repeat(40),
             commit: { committer: { date: "2026-02-01T10:00:00Z" } },
           })
-        : Response.json({ default_branch: "trunk" }),
+        : Response.json({
+            id: 123,
+            full_name: "acme/repo",
+            default_branch: "trunk",
+          }),
     );
     const source = await resolvePinnedGitHubSource("acme/skills");
+    assert.equal(source.repositoryId, "123");
+    assert.equal(source.repoUrl, "https://github.com/acme/repo");
     assert.equal(source.commitSha, "b".repeat(40));
     assert.equal(source.committedAt, "2026-02-01T10:00:00.000Z");
 
