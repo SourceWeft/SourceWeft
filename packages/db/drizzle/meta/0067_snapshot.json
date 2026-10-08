@@ -1,6 +1,6 @@
 {
-  "id": "767fc36a-798b-4f79-906d-8056f67564af",
-  "prevId": "24831ef5-3090-4932-b305-f6773b42946c",
+  "id": "8ef67b16-f268-4cf5-9694-4534697d16f7",
+  "prevId": "560885a0-6f2b-4ff3-9c8a-f5662176f2c5",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -19876,6 +19876,1547 @@
           "value": "(\"local_tool_invocations\".\"thread_id\" IS NOT NULL AND \"local_tool_invocations\".\"action\" NOT IN ('folder.list', 'folder.read')) OR (\"local_tool_invocations\".\"thread_id\" IS NULL AND \"local_tool_invocations\".\"action\" IN ('folder.list', 'folder.read') AND \"local_tool_invocations\".\"payload\" ? 'folderId' AND jsonb_typeof(\"local_tool_invocations\".\"payload\"->'folderId') = 'string' AND length(\"local_tool_invocations\".\"payload\"->>'folderId') > 0)"
         }
       },
+      "isRLSEnabled": false
+    },
+    "public.sandbox_volume_attachments": {
+      "name": "sandbox_volume_attachments",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "volume_id": {
+          "name": "volume_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sandbox_id": {
+          "name": "sandbox_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "base_seq": {
+          "name": "base_seq",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "last_applied_seq": {
+          "name": "last_applied_seq",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "boot_id": {
+          "name": "boot_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "epoch": {
+          "name": "epoch",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'active'"
+        },
+        "quarantine_reason": {
+          "name": "quarantine_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "supervisor_nonce": {
+          "name": "supervisor_nonce",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "drain_id": {
+          "name": "drain_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "control_token_hash": {
+          "name": "control_token_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "control_expires_at": {
+          "name": "control_expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "slots_until_pack": {
+          "name": "slots_until_pack",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "slots_until_seq": {
+          "name": "slots_until_seq",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "slots_expire_at": {
+          "name": "slots_expire_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "sandbox_volume_attachments_one_writer_uq": {
+          "name": "sandbox_volume_attachments_one_writer_uq",
+          "columns": [
+            {
+              "expression": "volume_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"sandbox_volume_attachments\".\"status\" in ('active', 'draining', 'quarantined')",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "sandbox_volume_attachments_volume_idx": {
+          "name": "sandbox_volume_attachments_volume_idx",
+          "columns": [
+            {
+              "expression": "volume_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "sandbox_volume_attachments_volume_id_sandbox_volumes_id_fk": {
+          "name": "sandbox_volume_attachments_volume_id_sandbox_volumes_id_fk",
+          "tableFrom": "sandbox_volume_attachments",
+          "tableTo": "sandbox_volumes",
+          "columnsFrom": [
+            "volume_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "sandbox_volume_attachments_status_check": {
+          "name": "sandbox_volume_attachments_status_check",
+          "value": "\"sandbox_volume_attachments\".\"status\" in ('active', 'superseded', 'rejected', 'quarantined', 'draining', 'retired')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.sandbox_volume_chunks": {
+      "name": "sandbox_volume_chunks",
+      "schema": "",
+      "columns": {
+        "volume_id": {
+          "name": "volume_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "chunk_id": {
+          "name": "chunk_id",
+          "type": "bytea",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pack_key": {
+          "name": "pack_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "off": {
+          "name": "off",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "compressed_length": {
+          "name": "compressed_length",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "raw_length": {
+          "name": "raw_length",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "sandbox_volume_chunks_pack_idx": {
+          "name": "sandbox_volume_chunks_pack_idx",
+          "columns": [
+            {
+              "expression": "volume_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "pack_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "sandbox_volume_chunks_volume_id_sandbox_volumes_id_fk": {
+          "name": "sandbox_volume_chunks_volume_id_sandbox_volumes_id_fk",
+          "tableFrom": "sandbox_volume_chunks",
+          "tableTo": "sandbox_volumes",
+          "columnsFrom": [
+            "volume_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "sandbox_volume_chunks_volume_id_chunk_id_pk": {
+          "name": "sandbox_volume_chunks_volume_id_chunk_id_pk",
+          "columns": [
+            "volume_id",
+            "chunk_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.sandbox_volume_commits": {
+      "name": "sandbox_volume_commits",
+      "schema": "",
+      "columns": {
+        "volume_id": {
+          "name": "volume_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "seq": {
+          "name": "seq",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "attachment_id": {
+          "name": "attachment_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "epoch": {
+          "name": "epoch",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "manifest_key": {
+          "name": "manifest_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "manifest_hash": {
+          "name": "manifest_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "applied_at": {
+          "name": "applied_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "sandbox_volume_commits_volume_id_sandbox_volumes_id_fk": {
+          "name": "sandbox_volume_commits_volume_id_sandbox_volumes_id_fk",
+          "tableFrom": "sandbox_volume_commits",
+          "tableTo": "sandbox_volumes",
+          "columnsFrom": [
+            "volume_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "sandbox_volume_commits_volume_id_seq_pk": {
+          "name": "sandbox_volume_commits_volume_id_seq_pk",
+          "columns": [
+            "volume_id",
+            "seq"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.sandbox_volume_drains": {
+      "name": "sandbox_volume_drains",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "volume_id": {
+          "name": "volume_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "attachment_id": {
+          "name": "attachment_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "operation_id": {
+          "name": "operation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sandbox_id": {
+          "name": "sandbox_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "boot_id": {
+          "name": "boot_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "supervisor_nonce": {
+          "name": "supervisor_nonce",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "recovery_controller_nonce": {
+          "name": "recovery_controller_nonce",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'draining'"
+        },
+        "stopped_at": {
+          "name": "stopped_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "confirmed_seq": {
+          "name": "confirmed_seq",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "retired_at": {
+          "name": "retired_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "sandbox_volume_drains_attachment_uq": {
+          "name": "sandbox_volume_drains_attachment_uq",
+          "columns": [
+            {
+              "expression": "attachment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "sandbox_volume_drains_volume_id_sandbox_volumes_id_fk": {
+          "name": "sandbox_volume_drains_volume_id_sandbox_volumes_id_fk",
+          "tableFrom": "sandbox_volume_drains",
+          "tableTo": "sandbox_volumes",
+          "columnsFrom": [
+            "volume_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "sandbox_volume_drains_attachment_id_sandbox_volume_attachments_id_fk": {
+          "name": "sandbox_volume_drains_attachment_id_sandbox_volume_attachments_id_fk",
+          "tableFrom": "sandbox_volume_drains",
+          "tableTo": "sandbox_volume_attachments",
+          "columnsFrom": [
+            "attachment_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "sandbox_volume_drains_status_check": {
+          "name": "sandbox_volume_drains_status_check",
+          "value": "\"sandbox_volume_drains\".\"status\" in ('draining','retired')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.sandbox_volume_entries": {
+      "name": "sandbox_volume_entries",
+      "schema": "",
+      "columns": {
+        "volume_id": {
+          "name": "volume_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "path": {
+          "name": "path",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mode": {
+          "name": "mode",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mtime_ns": {
+          "name": "mtime_ns",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "0"
+        },
+        "size_bytes": {
+          "name": "size_bytes",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "link_target": {
+          "name": "link_target",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "chunks": {
+          "name": "chunks",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "seq": {
+          "name": "seq",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "sandbox_volume_entries_path_idx": {
+          "name": "sandbox_volume_entries_path_idx",
+          "columns": [
+            {
+              "expression": "volume_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "\"path\" text_pattern_ops",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "sandbox_volume_entries_volume_id_sandbox_volumes_id_fk": {
+          "name": "sandbox_volume_entries_volume_id_sandbox_volumes_id_fk",
+          "tableFrom": "sandbox_volume_entries",
+          "tableTo": "sandbox_volumes",
+          "columnsFrom": [
+            "volume_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "sandbox_volume_entries_volume_id_path_pk": {
+          "name": "sandbox_volume_entries_volume_id_path_pk",
+          "columns": [
+            "volume_id",
+            "path"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "sandbox_volume_entries_kind_check": {
+          "name": "sandbox_volume_entries_kind_check",
+          "value": "\"sandbox_volume_entries\".\"kind\" in ('f', 'd', 'l')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.sandbox_volume_entry_versions": {
+      "name": "sandbox_volume_entry_versions",
+      "schema": "",
+      "columns": {
+        "volume_id": {
+          "name": "volume_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "path": {
+          "name": "path",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mode": {
+          "name": "mode",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mtime_ns": {
+          "name": "mtime_ns",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "size_bytes": {
+          "name": "size_bytes",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "link_target": {
+          "name": "link_target",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "chunks": {
+          "name": "chunks",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "from_seq": {
+          "name": "from_seq",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "to_seq": {
+          "name": "to_seq",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "sandbox_volume_entry_versions_to_seq_idx": {
+          "name": "sandbox_volume_entry_versions_to_seq_idx",
+          "columns": [
+            {
+              "expression": "volume_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "to_seq",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "sandbox_volume_entry_versions_path_idx": {
+          "name": "sandbox_volume_entry_versions_path_idx",
+          "columns": [
+            {
+              "expression": "volume_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "path",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "sandbox_volume_entry_versions_volume_id_sandbox_volumes_id_fk": {
+          "name": "sandbox_volume_entry_versions_volume_id_sandbox_volumes_id_fk",
+          "tableFrom": "sandbox_volume_entry_versions",
+          "tableTo": "sandbox_volumes",
+          "columnsFrom": [
+            "volume_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.sandbox_volume_execution_permits": {
+      "name": "sandbox_volume_execution_permits",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "volume_id": {
+          "name": "volume_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "attachment_id": {
+          "name": "attachment_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "operation_id": {
+          "name": "operation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "writer_kind": {
+          "name": "writer_kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'external'"
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'active'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "released_at": {
+          "name": "released_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "sandbox_volume_execution_permits_one_active_uq": {
+          "name": "sandbox_volume_execution_permits_one_active_uq",
+          "columns": [
+            {
+              "expression": "volume_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"sandbox_volume_execution_permits\".\"status\" = 'active'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "sandbox_volume_execution_permits_operation_uq": {
+          "name": "sandbox_volume_execution_permits_operation_uq",
+          "columns": [
+            {
+              "expression": "attachment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "operation_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "sandbox_volume_execution_permits_active_idx": {
+          "name": "sandbox_volume_execution_permits_active_idx",
+          "columns": [
+            {
+              "expression": "attachment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "sandbox_volume_execution_permits_volume_id_sandbox_volumes_id_fk": {
+          "name": "sandbox_volume_execution_permits_volume_id_sandbox_volumes_id_fk",
+          "tableFrom": "sandbox_volume_execution_permits",
+          "tableTo": "sandbox_volumes",
+          "columnsFrom": [
+            "volume_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "sandbox_volume_execution_permits_attachment_id_sandbox_volume_attachments_id_fk": {
+          "name": "sandbox_volume_execution_permits_attachment_id_sandbox_volume_attachments_id_fk",
+          "tableFrom": "sandbox_volume_execution_permits",
+          "tableTo": "sandbox_volume_attachments",
+          "columnsFrom": [
+            "attachment_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "sandbox_volume_execution_permits_writer_kind_check": {
+          "name": "sandbox_volume_execution_permits_writer_kind_check",
+          "value": "\"sandbox_volume_execution_permits\".\"writer_kind\" in ('external','supervised')"
+        },
+        "sandbox_volume_execution_permits_status_check": {
+          "name": "sandbox_volume_execution_permits_status_check",
+          "value": "\"sandbox_volume_execution_permits\".\"status\" in ('active','released')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.sandbox_volume_gc_candidates": {
+      "name": "sandbox_volume_gc_candidates",
+      "schema": "",
+      "columns": {
+        "volume_id": {
+          "name": "volume_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pack_key": {
+          "name": "pack_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "not_before": {
+          "name": "not_before",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "attempts": {
+          "name": "attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "last_error": {
+          "name": "last_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "sandbox_volume_gc_due_idx": {
+          "name": "sandbox_volume_gc_due_idx",
+          "columns": [
+            {
+              "expression": "state",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "not_before",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "sandbox_volume_gc_candidates_volume_id_sandbox_volumes_id_fk": {
+          "name": "sandbox_volume_gc_candidates_volume_id_sandbox_volumes_id_fk",
+          "tableFrom": "sandbox_volume_gc_candidates",
+          "tableTo": "sandbox_volumes",
+          "columnsFrom": [
+            "volume_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "sandbox_volume_gc_candidates_volume_id_pack_key_pk": {
+          "name": "sandbox_volume_gc_candidates_volume_id_pack_key_pk",
+          "columns": [
+            "volume_id",
+            "pack_key"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "sandbox_volume_gc_state_check": {
+          "name": "sandbox_volume_gc_state_check",
+          "value": "\"sandbox_volume_gc_candidates\".\"state\" in ('pending','deleting','deleted')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.sandbox_volume_packs": {
+      "name": "sandbox_volume_packs",
+      "schema": "",
+      "columns": {
+        "volume_id": {
+          "name": "volume_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pack_key": {
+          "name": "pack_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "size_bytes": {
+          "name": "size_bytes",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "sandbox_volume_packs_volume_id_sandbox_volumes_id_fk": {
+          "name": "sandbox_volume_packs_volume_id_sandbox_volumes_id_fk",
+          "tableFrom": "sandbox_volume_packs",
+          "tableTo": "sandbox_volumes",
+          "columnsFrom": [
+            "volume_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "sandbox_volume_packs_volume_id_pack_key_pk": {
+          "name": "sandbox_volume_packs_volume_id_pack_key_pk",
+          "columns": [
+            "volume_id",
+            "pack_key"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.sandbox_volume_recoveries": {
+      "name": "sandbox_volume_recoveries",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "volume_id": {
+          "name": "volume_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "attachment_id": {
+          "name": "attachment_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "drain_id": {
+          "name": "drain_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "operation_id": {
+          "name": "operation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "previous_supervisor_nonce": {
+          "name": "previous_supervisor_nonce",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "supervisor_nonce": {
+          "name": "supervisor_nonce",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "journal_digest": {
+          "name": "journal_digest",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "confirmed_seq": {
+          "name": "confirmed_seq",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "unresolved_operations": {
+          "name": "unresolved_operations",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "evidence": {
+          "name": "evidence",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "sandbox_volume_recoveries_controller_uq": {
+          "name": "sandbox_volume_recoveries_controller_uq",
+          "columns": [
+            {
+              "expression": "attachment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "supervisor_nonce",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"sandbox_volume_recoveries\".\"kind\" = 'supervisor'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "sandbox_volume_recoveries_predecessor_uq": {
+          "name": "sandbox_volume_recoveries_predecessor_uq",
+          "columns": [
+            {
+              "expression": "attachment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "previous_supervisor_nonce",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"sandbox_volume_recoveries\".\"kind\" = 'supervisor'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "sandbox_volume_recoveries_operation_uq": {
+          "name": "sandbox_volume_recoveries_operation_uq",
+          "columns": [
+            {
+              "expression": "attachment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "kind",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "operation_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "sandbox_volume_recoveries_volume_id_sandbox_volumes_id_fk": {
+          "name": "sandbox_volume_recoveries_volume_id_sandbox_volumes_id_fk",
+          "tableFrom": "sandbox_volume_recoveries",
+          "tableTo": "sandbox_volumes",
+          "columnsFrom": [
+            "volume_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "sandbox_volume_recoveries_attachment_id_sandbox_volume_attachments_id_fk": {
+          "name": "sandbox_volume_recoveries_attachment_id_sandbox_volume_attachments_id_fk",
+          "tableFrom": "sandbox_volume_recoveries",
+          "tableTo": "sandbox_volume_attachments",
+          "columnsFrom": [
+            "attachment_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "sandbox_volume_recoveries_drain_id_sandbox_volume_drains_id_fk": {
+          "name": "sandbox_volume_recoveries_drain_id_sandbox_volume_drains_id_fk",
+          "tableFrom": "sandbox_volume_recoveries",
+          "tableTo": "sandbox_volume_drains",
+          "columnsFrom": [
+            "drain_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "sandbox_volume_recoveries_kind_check": {
+          "name": "sandbox_volume_recoveries_kind_check",
+          "value": "\"sandbox_volume_recoveries\".\"kind\" in ('supervisor','provider_absent')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.sandbox_volume_rejects": {
+      "name": "sandbox_volume_rejects",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "volume_id": {
+          "name": "volume_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "attachment_id": {
+          "name": "attachment_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "seq": {
+          "name": "seq",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "sandbox_volume_rejects_volume_idx": {
+          "name": "sandbox_volume_rejects_volume_idx",
+          "columns": [
+            {
+              "expression": "volume_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "sandbox_volume_rejects_volume_id_sandbox_volumes_id_fk": {
+          "name": "sandbox_volume_rejects_volume_id_sandbox_volumes_id_fk",
+          "tableFrom": "sandbox_volume_rejects",
+          "tableTo": "sandbox_volumes",
+          "columnsFrom": [
+            "volume_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.sandbox_volumes": {
+      "name": "sandbox_volumes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "team_id": {
+          "name": "team_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "workspace_id": {
+          "name": "workspace_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "thread_id": {
+          "name": "thread_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "namespace": {
+          "name": "namespace",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'primary'"
+        },
+        "head_seq": {
+          "name": "head_seq",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "file_count": {
+          "name": "file_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "logical_bytes": {
+          "name": "logical_bytes",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "stored_bytes": {
+          "name": "stored_bytes",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "sandbox_volumes_thread_uq": {
+          "name": "sandbox_volumes_thread_uq",
+          "columns": [
+            {
+              "expression": "team_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "workspace_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "thread_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "namespace",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "sandbox_volumes_workspace_id_workspaces_id_fk": {
+          "name": "sandbox_volumes_workspace_id_workspaces_id_fk",
+          "tableFrom": "sandbox_volumes",
+          "tableTo": "workspaces",
+          "columnsFrom": [
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "sandbox_volumes_thread_id_threads_id_fk": {
+          "name": "sandbox_volumes_thread_id_threads_id_fk",
+          "tableFrom": "sandbox_volumes",
+          "tableTo": "threads",
+          "columnsFrom": [
+            "thread_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "sandbox_volumes_thread_workspace_team_fk": {
+          "name": "sandbox_volumes_thread_workspace_team_fk",
+          "tableFrom": "sandbox_volumes",
+          "tableTo": "threads",
+          "columnsFrom": [
+            "thread_id",
+            "workspace_id",
+            "team_id"
+          ],
+          "columnsTo": [
+            "id",
+            "workspace_id",
+            "team_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
       "isRLSEnabled": false
     }
   },

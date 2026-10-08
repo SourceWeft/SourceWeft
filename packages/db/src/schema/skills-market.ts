@@ -213,6 +213,7 @@ export const skillDefinitions = pgTable(
       .$type<SkillDefinitionSourceType>()
       .notNull(),
     slug: text("slug").notNull(),
+    installRef: text("install_ref"),
     githubRepositoryId: text("github_repository_id"),
     sourceRoot: text("source_root"),
     displayName: text("display_name").notNull(),
@@ -300,6 +301,7 @@ export const skillDefinitions = pgTable(
       sql`(${table.sourceType} = 'builtin' and ${table.teamId} is null and ${table.workspaceId} is null and ${table.visibility} in ('public', 'restricted')) or (${table.sourceType} = 'workspace_custom' and ${table.teamId} is not null and ${table.workspaceId} is not null and ${table.visibility} = 'workspace') or (${table.sourceType} = 'team_custom' and ${table.teamId} is not null and ${table.workspaceId} is null and ${table.visibility} = 'team') or (${table.sourceType} = 'registry_github' and ${table.teamId} is null and ${table.workspaceId} is null and ${table.visibility} in ('public', 'restricted'))`,
     ),
     uniqueIndex("skill_definitions_slug_uq").on(table.slug),
+    uniqueIndex("skill_definitions_install_ref_uq").on(table.installRef),
     uniqueIndex("skill_definitions_github_source_uq")
       .on(table.githubRepositoryId, table.sourceRoot)
       .where(

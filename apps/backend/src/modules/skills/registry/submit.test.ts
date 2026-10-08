@@ -60,6 +60,9 @@ function readResult(skillCount = 1) {
       owner: "acme",
       repo: "skills",
       repoUrl: "https://github.com/acme/skills",
+      sourceUrl: "https://github.com/acme/skills",
+      subpath: "",
+      commitSha: "a".repeat(40),
     },
     commitSha: "a".repeat(40),
     committedAt: "2026-02-01T10:00:00.000Z",
@@ -315,4 +318,22 @@ test("submission persists the detected logo and hands the index every file as by
   ]);
   // The content hash is the bundle's digest, which only the index can know.
   assert.equal("contentHash" in saved, false);
+});
+
+test("source links encode reserved characters while identity keeps the exact root", async () => {
+  const read = readResult();
+  await writeSubmittedSkill({
+    read,
+    userId: "user_1",
+    skill: {
+      discovered: read.skills[0]!,
+      analyzed: analyzed({ repoSubpath: "skills#figquery/figma-use" }) as never,
+    },
+  });
+  const manifest = mocks.upsert.mock.calls[0]![0].manifestJson;
+  assert.equal(manifest.registry.sourceRoot, "skills#figquery/figma-use");
+  assert.equal(
+    manifest.registry.sourceUrl,
+    `https://github.com/acme/skills/tree/${"a".repeat(40)}/skills%23figquery/figma-use`,
+  );
 });

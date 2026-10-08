@@ -309,6 +309,7 @@ export const marketSkillCapabilitySchema = z.enum([
 ]);
 
 export const marketSkillSummarySchema = z.object({
+  installRef: z.string().nullable().optional(),
   slug: z.string(),
   // The author's own short name for the skill (SKILL.md frontmatter `name`).
   name: z.string(),

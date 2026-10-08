@@ -27,8 +27,8 @@ Usage: sourceweft skills <command> [options]
 
 Commands:
   skills search [query]     Search the marketplace
-  skills info <slug>        Show a skill and where it comes from
-  skills install <slug>     Install a skill for a coding agent
+  skills info <reference>        Show a skill and where it comes from
+  skills install <reference>     Install a skill for a coding agent
   skills agents             List supported agents and where they keep skills
   skills list               List skills installed by sourceweft
   skills update [slug]      Update installed skills to the registry's version
@@ -36,6 +36,8 @@ Commands:
   skills doctor             Check installed skills for problems
 
 Options:
+  --skill <name>     Select a skill within owner/repo
+  --path <path>      Select its exact repository root
   --registry <url>   Marketplace API address
   --agent <ids>      Comma-separated agents to install for (default: claude-code)
   --scope <scope>    user or project (install default: user; other commands: both)
@@ -59,6 +61,8 @@ async function run(argv: string[]): Promise<number> {
       allowPositionals: true,
       options: {
         registry: { type: "string" },
+        skill: { type: "string" },
+        path: { type: "string" },
         agent: { type: "string" },
         scope: { type: "string" },
         dir: { type: "string" },
@@ -95,6 +99,19 @@ async function run(argv: string[]): Promise<number> {
     );
   }
 
+  if (
+    (values.skill !== undefined || values.path !== undefined) &&
+    (!["info", "install", "update", "remove"].includes(command) || !args[0])
+  )
+    throw new UsageError(
+      "--skill/--path requires an info, install, update or remove reference.",
+    );
+  if (
+    values.skill !== undefined &&
+    (args[0]?.startsWith("@") || !args[0]?.includes("/"))
+  )
+    throw new UsageError("--skill requires an owner/repo reference.");
+
   const out = (line: string) => console.log(line);
   const registryContext = (): CommandContext => {
     const registry = normalizeRegistry(values.registry);
@@ -118,6 +135,11 @@ async function run(argv: string[]): Promise<number> {
   // Commands over what is already installed look in every agent's directory
   // unless told otherwise, and need no registry until an update asks for one.
   const selection = {
+    ...(values.registry !== undefined
+      ? { registry: normalizeRegistry(values.registry) }
+      : {}),
+    ...(values.skill !== undefined ? { skill: values.skill } : {}),
+    ...(values.path !== undefined ? { path: values.path } : {}),
     ...(values.agent
       ? {
           agents: values.agent.split(",").map((id) => {
@@ -197,22 +219,28 @@ async function run(argv: string[]): Promise<number> {
       const ctx = registryContext();
       const [slug] = args;
       if (!slug || args.length > 1) {
-        throw new UsageError("Usage: sourceweft skills info <slug>");
+        throw new UsageError("Usage: sourceweft skills info <reference>");
       }
-      await infoCommand(ctx, { slug });
+      await infoCommand(ctx, {
+        slug,
+        ...(values.skill !== undefined ? { skill: values.skill } : {}),
+        ...(values.path !== undefined ? { path: values.path } : {}),
+      });
       return EXIT.ok;
     }
     case "install": {
       const ctx = registryContext();
       const [slug] = args;
       if (!slug || args.length > 1) {
-        throw new UsageError("Usage: sourceweft skills install <slug>");
+        throw new UsageError("Usage: sourceweft skills install <reference>");
       }
       if (scope === "all") {
         throw new UsageError("--scope must be 'user' or 'project' for install");
       }
       await installCommand(ctx, {
         slug,
+        ...(values.skill !== undefined ? { skill: values.skill } : {}),
+        ...(values.path !== undefined ? { path: values.path } : {}),
         agents: (values.agent ?? "claude-code")
           .split(",")
           .map((id) => id.trim())

@@ -80,7 +80,11 @@ export const skillOverviewAdapter: OverviewSubjectAdapter<
   buildPrompt(subject) {
     const registry = subject.manifest.registry;
     return buildSkillOverviewPrompt({
-      name: marketSkillName({ slug: subject.slug, manifest: subject.manifest }),
+      name: marketSkillName({
+        slug: subject.slug,
+        manifest: subject.manifest,
+        skillMd: subject.skillMd,
+      }),
       capability: registry?.capability ?? null,
       skillMd: subject.skillMd ?? "",
       files: (registry?.fileManifest ?? [])

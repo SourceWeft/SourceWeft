@@ -15,11 +15,12 @@ Asynchronous capture cannot recover those writes after permanent loss of their o
 | `image/`       | Image layer: `install-swvol.sh` + `swvol-init` (root boot step)                                                                         |
 | `vectors/`     | Protocol test vectors shared by the TypeScript and Rust test-suites                                                                     |
 
-Tables are in `@sourceweft/db` (`sandbox_volume*`). Apply volume migrations **0061–0066**
-after main's skill-source migration 0060. Migration 0062 upgrades existing volume rows
-conservatively instead of inventing confirmations. A developer database that manually applied
-the earlier unpublished 0060–0065 volume series needs explicit ledger reconciliation; do not
-blindly rerun the renamed create-table migrations.
+Tables are in `@sourceweft/db` (`sandbox_volume*`). Apply volume migrations **0062–0067**
+after main's skill-source migration 0060 and skill-install-reference migration 0061.
+Migration 0063 upgrades existing volume rows conservatively instead of inventing confirmations.
+A developer database that manually applied either earlier unpublished volume series
+(0060–0065 or 0061–0066) needs explicit ledger reconciliation; do not blindly rerun the
+renamed create-table migrations.
 
 ## Current integration status
 

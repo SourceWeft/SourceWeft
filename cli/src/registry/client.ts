@@ -1,6 +1,8 @@
 import type { z } from "zod";
 import {
   searchResponseSchema,
+  referenceResponseSchema,
+  type ReferenceResponse,
   skillResponseSchema,
   type SearchResponse,
   type SkillResponse,
@@ -149,6 +151,16 @@ export class RegistryClient {
       `/v1/skills/${encodeURIComponent(slug)}`,
       skillResponseSchema,
     );
+  }
+
+  resolveSkills(
+    reference: string,
+    options: { skill?: string; path?: string } = {},
+  ): Promise<ReferenceResponse> {
+    const query = new URLSearchParams({ reference });
+    if (options.skill !== undefined) query.set("skill", options.skill);
+    if (options.path !== undefined) query.set("path", options.path);
+    return this.get(`/v1/skills/resolve?${query}`, referenceResponseSchema);
   }
 
   listSkills(params: SearchParams = {}): Promise<SearchResponse> {

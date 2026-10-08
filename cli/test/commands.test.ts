@@ -424,7 +424,7 @@ describe("the built binary's exit codes", () => {
     assert.match(run(["--version"]).stdout.trim(), /^\d+\.\d+\.\d+/u);
     const help = run(["--help"]);
     assert.equal(help.status, EXIT.ok);
-    assert.match(help.stdout, /skills install <slug>/u);
+    assert.match(help.stdout, /skills install <reference>/u);
   });
 
   it("exits 2 on bad usage", () => {

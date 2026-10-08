@@ -1,6 +1,6 @@
 {
-  "id": "2869f52d-1ab4-4a74-a111-67ea9bc9fa71",
-  "prevId": "d226f6e1-c273-4957-84f6-f11fda3afb93",
+  "id": "5fbafb50-7a06-47f9-9620-1e623a36cfed",
+  "prevId": "767fc36a-798b-4f79-906d-8056f67564af",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -14681,6 +14681,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "install_ref": {
+          "name": "install_ref",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "github_repository_id": {
           "name": "github_repository_id",
           "type": "text",
@@ -14842,6 +14848,21 @@
           "columns": [
             {
               "expression": "slug",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "skill_definitions_install_ref_uq": {
+          "name": "skill_definitions_install_ref_uq",
+          "columns": [
+            {
+              "expression": "install_ref",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -19885,12 +19906,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "last_applied_seq": {
-          "name": "last_applied_seq",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
         "boot_id": {
           "name": "boot_id",
           "type": "text",
@@ -19910,12 +19925,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'active'"
-        },
-        "quarantine_reason": {
-          "name": "quarantine_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         },
         "slots_until_pack": {
           "name": "slots_until_pack",
@@ -19946,22 +19955,6 @@
         }
       },
       "indexes": {
-        "sandbox_volume_attachments_one_active_uq": {
-          "name": "sandbox_volume_attachments_one_active_uq",
-          "columns": [
-            {
-              "expression": "volume_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"sandbox_volume_attachments\".\"status\" = 'active'",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "sandbox_volume_attachments_volume_idx": {
           "name": "sandbox_volume_attachments_volume_idx",
           "columns": [
@@ -20005,7 +19998,7 @@
       "checkConstraints": {
         "sandbox_volume_attachments_status_check": {
           "name": "sandbox_volume_attachments_status_check",
-          "value": "\"sandbox_volume_attachments\".\"status\" in ('active', 'superseded', 'rejected', 'quarantined')"
+          "value": "\"sandbox_volume_attachments\".\"status\" in ('active', 'superseded', 'rejected')"
         }
       },
       "isRLSEnabled": false
@@ -20095,84 +20088,6 @@
           "columns": [
             "volume_id",
             "chunk_id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.sandbox_volume_commits": {
-      "name": "sandbox_volume_commits",
-      "schema": "",
-      "columns": {
-        "volume_id": {
-          "name": "volume_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "seq": {
-          "name": "seq",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "attachment_id": {
-          "name": "attachment_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "epoch": {
-          "name": "epoch",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "manifest_key": {
-          "name": "manifest_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "manifest_hash": {
-          "name": "manifest_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "applied_at": {
-          "name": "applied_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "sandbox_volume_commits_volume_id_sandbox_volumes_id_fk": {
-          "name": "sandbox_volume_commits_volume_id_sandbox_volumes_id_fk",
-          "tableFrom": "sandbox_volume_commits",
-          "tableTo": "sandbox_volumes",
-          "columnsFrom": [
-            "volume_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "sandbox_volume_commits_volume_id_seq_pk": {
-          "name": "sandbox_volume_commits_volume_id_seq_pk",
-          "columns": [
-            "volume_id",
-            "seq"
           ]
         }
       },
@@ -20604,13 +20519,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "namespace": {
-          "name": "namespace",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'primary'"
-        },
         "head_seq": {
           "name": "head_seq",
           "type": "bigint",
@@ -20672,12 +20580,6 @@
             },
             {
               "expression": "thread_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "namespace",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

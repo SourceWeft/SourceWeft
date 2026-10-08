@@ -11,16 +11,30 @@ END $$;
 --> statement-breakpoint
 CREATE TEMP TABLE registry_source_mapping ON COMMIT DROP AS
 WITH roots AS (
- SELECT DISTINCT d.id old_id, split_part(v.storage_pointer, '#', 2) source_root
+ SELECT DISTINCT d.id old_id, coalesce(substring(v.storage_pointer from '#(.*)$'),'') source_root
  FROM skill_definitions d JOIN skill_versions v ON v.skill_id=d.id WHERE d.source_type='registry_github'
 ), primary_roots AS (
- SELECT DISTINCT ON (d.id) d.id, split_part(v.storage_pointer, '#', 2) source_root
+ SELECT DISTINCT ON (d.id) d.id, coalesce(substring(v.storage_pointer from '#(.*)$'),'') source_root
  FROM skill_definitions d JOIN skill_versions v ON v.skill_id=d.id WHERE d.source_type='registry_github'
  ORDER BY d.id, v.is_current DESC, v.created_at DESC, v.id DESC
 )
 SELECT roots.old_id, roots.source_root,
  CASE WHEN roots.source_root=primary_roots.source_root THEN roots.old_id ELSE gen_random_uuid()::text END new_id
 FROM roots JOIN primary_roots ON primary_roots.id=roots.old_id;
+--> statement-breakpoint
+-- Encode path bytes using the same unreserved characters as encodeURIComponent;
+-- slash remains a directory separator. Temporary function leaves no schema API.
+CREATE OR REPLACE FUNCTION pg_temp.registry_source_path(value text) RETURNS text
+LANGUAGE SQL IMMUTABLE STRICT AS $$
+ SELECT coalesce(string_agg(
+  CASE WHEN get_byte(convert_to(value,'UTF8'),i) BETWEEN 48 AND 57
+    OR get_byte(convert_to(value,'UTF8'),i) BETWEEN 65 AND 90
+    OR get_byte(convert_to(value,'UTF8'),i) BETWEEN 97 AND 122
+    OR get_byte(convert_to(value,'UTF8'),i) IN (33,39,40,41,42,45,46,47,95,126)
+   THEN chr(get_byte(convert_to(value,'UTF8'),i))
+   ELSE '%'||upper(lpad(to_hex(get_byte(convert_to(value,'UTF8'),i)),2,'0')) END,
+  '' ORDER BY i),'') FROM generate_series(0,octet_length(convert_to(value,'UTF8'))-1) i;
+$$;
 --> statement-breakpoint
 UPDATE skill_definitions d SET source_root=m.source_root,
  github_repository_id=r.github_id
@@ -31,19 +45,20 @@ WHERE d.id=m.old_id AND m.new_id=m.old_id;
 INSERT INTO skill_definitions
 SELECT (jsonb_populate_record(NULL::skill_definitions,
  to_jsonb(d) || jsonb_build_object(
-  'id',m.new_id,'slug',d.slug||'-'||coalesce(nullif(left(trim(both '-' from regexp_replace(lower(m.source_root),'[^a-z0-9]+','-','g')),80),''),'root')||'-'||left(md5(m.source_root),16),
+  'id',m.new_id,'slug',left(d.slug,160)||'-'||coalesce(nullif(left(trim(both '-' from regexp_replace(lower(m.source_root),'[^a-z0-9]+','-','g')),64),''),'root')||'-'||left(md5(m.source_root),16),
   'source_root',m.source_root,'verified',false,'install_count',0,'rating_count',0,'rating_avg',NULL,'rank_score',0,'categories_set_by',NULL,
   'display_name',v.manifest_json->>'displayName','description',v.manifest_json->>'description'
  ))).* FROM registry_source_mapping m JOIN skill_definitions d ON d.id=m.old_id
- JOIN LATERAL (SELECT manifest_json FROM skill_versions WHERE skill_id=m.old_id AND split_part(storage_pointer,'#',2)=m.source_root ORDER BY is_current DESC,created_at DESC,id DESC LIMIT 1) v ON true
+ JOIN LATERAL (SELECT manifest_json FROM skill_versions WHERE skill_id=m.old_id AND coalesce(substring(storage_pointer from '#(.*)$'),'')=m.source_root ORDER BY is_current DESC,created_at DESC,id DESC LIMIT 1) v ON true
 WHERE m.new_id<>m.old_id;
 --> statement-breakpoint
 ALTER TABLE workspace_skills ALTER CONSTRAINT workspace_skills_skill_version_skill_fk DEFERRABLE INITIALLY DEFERRED;
 --> statement-breakpoint
 UPDATE skill_versions v SET skill_id=m.new_id,
- manifest_json=jsonb_set(jsonb_set(v.manifest_json,'{slug}',to_jsonb(d.slug)),'{registry,sourceRoot}',to_jsonb(m.source_root))
+ manifest_json=jsonb_set(jsonb_set(jsonb_set(v.manifest_json,'{slug}',to_jsonb(d.slug)),'{registry,sourceRoot}',to_jsonb(m.source_root)),
+ '{registry,sourceUrl}',to_jsonb('https://github.com/'||substring(v.storage_pointer from '^github:([^@]+)@')||'/tree/'||substring(v.storage_pointer from '@([a-fA-F0-9]{40})')||CASE WHEN m.source_root='' THEN '' ELSE '/'||pg_temp.registry_source_path(m.source_root) END))
 FROM registry_source_mapping m JOIN skill_definitions d ON d.id=m.new_id
-WHERE v.skill_id=m.old_id AND split_part(v.storage_pointer,'#',2)=m.source_root;
+WHERE v.skill_id=m.old_id AND coalesce(substring(v.storage_pointer from '#(.*)$'),'')=m.source_root;
 --> statement-breakpoint
 UPDATE workspace_skills w SET skill_id=v.skill_id FROM skill_versions v
 WHERE w.skill_version_id=v.id AND w.skill_id<>v.skill_id;

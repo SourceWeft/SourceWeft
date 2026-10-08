@@ -99,14 +99,15 @@ test("merged feature migrations have unique numbers and increasing ledger timest
     assert.equal(entries[index].idx, index);
     assert.ok(files.includes(`${entries[index].tag}.sql`));
     // Preserve published historical timestamps; only this merged sequence is newly ordered.
-    if (index >= 61)
+    if (index >= 62)
       assert.ok(
         entries[index].when > entries[index - 1].when,
         `migration ${entries[index].tag} must run after ${entries[index - 1].tag}`,
       );
   }
   assert.equal(entries[60].tag, "0060_skill_source_identity");
-  for (let index = 60; index <= 66; index++) {
+  assert.equal(entries[61].tag, "0061_skill_install_references");
+  for (let index = 60; index <= 67; index++) {
     const prefix = String(index).padStart(4, "0") + "_";
     assert.equal(
       files.filter((name) => name.startsWith(prefix)).length,
@@ -127,7 +128,7 @@ test("each volume snapshot retains main skill identity and links to its immediat
         "utf8",
       ),
     );
-  const main = snapshot(60);
+  const main = snapshot(61);
   const nonVolume = (tables) =>
     Object.fromEntries(
       Object.entries(tables).filter(
@@ -142,10 +143,15 @@ test("each volume snapshot retains main skill identity and links to its immediat
     main.tables["public.skill_definitions"].indexes
       .skill_definitions_github_source_uq,
   );
+  assert.ok(main.tables["public.skill_definitions"].columns.install_ref);
+  assert.ok(
+    main.tables["public.skill_definitions"].indexes
+      .skill_definitions_install_ref_uq,
+  );
   const expectedVolumes = [7, 8, 9, 9, 11, 12];
   const ids = new Set([main.id]);
   let previous = main;
-  for (let index = 61; index <= 66; index++) {
+  for (let index = 62; index <= 67; index++) {
     const current = snapshot(index);
     assert.equal(
       current.prevId,
@@ -167,7 +173,7 @@ test("each volume snapshot retains main skill identity and links to its immediat
       Object.keys(current.tables).filter((name) =>
         name.startsWith("public.sandbox_volume"),
       ).length,
-      expectedVolumes[index - 61],
+      expectedVolumes[index - 62],
     );
     for (const key of [
       "enums",

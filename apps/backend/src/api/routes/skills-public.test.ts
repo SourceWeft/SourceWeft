@@ -10,7 +10,12 @@ const mocks = vi.hoisted(() => ({
   listMarketSkills: vi.fn(),
   listPublicSkillCollections: vi.fn(),
   findPublicSkillCollection: vi.fn(),
+  resolveReferences: vi.fn(),
   requireSession: vi.fn(),
+}));
+
+vi.mock("../../modules/skills/registry/install-references", () => ({
+  resolveSkillInstallReferences: mocks.resolveReferences,
 }));
 
 vi.mock("../../modules/skills/market/read-repository", () => ({
@@ -293,6 +298,7 @@ test("reserved path segments are a 404 without a lookup", async () => {
     "category-counts",
     "collections",
     "registry",
+    "resolve",
   ]);
   const app = createTestApp();
   for (const slug of ["registry", "category-counts"]) {
@@ -542,4 +548,28 @@ test("a collection is read in the locale asked for; an unknown one is a 400", as
     (await app.request("/v1/skills/collections/starter?locale=xx")).status,
     400,
   );
+});
+
+test("source-aware resolution is public, validates paths and never falls through to slug lookup", async () => {
+  mocks.resolveReferences.mockResolvedValue({ items: [] });
+  const app = createTestApp();
+  const result = await app.request(
+    "/v1/skills/resolve?reference=figma%2Fguide&skill=figma-use&path=skills-figquery%2Ffigma-use",
+  );
+  assert.equal(result.status, 200);
+  assert.deepEqual(mocks.resolveReferences.mock.calls[0]?.[0], {
+    reference: "figma/guide",
+    skill: "figma-use",
+    path: "skills-figquery/figma-use",
+  });
+  assert.equal(
+    (
+      await app.request(
+        "/v1/skills/resolve?reference=%40figma%2Ffigma-use&path=..%2Foutside",
+      )
+    ).status,
+    400,
+  );
+  assert.equal(mocks.findMarketSkill.mock.calls.length, 0);
+  assert.equal(mocks.requireSession.mock.calls.length, 0);
 });

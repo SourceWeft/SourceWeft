@@ -1,3 +1,4 @@
+import { resolveInstallReference, type ReferenceOptions } from "./resolve";
 import { RegistryError, type RegistryClient } from "../registry/client";
 import type { SkillResponse } from "../registry/schema";
 import {
@@ -55,7 +56,7 @@ export async function searchCommand(
   ctx.out(
     table(
       page.items.map((item) => [
-        item.slug,
+        item.installRef ?? item.slug,
         item.verified ? "verified" : "",
         item.capability === "executable" ? "scripts" : "",
         truncate(item.description, 70),
@@ -89,7 +90,7 @@ export function trustLine(listing: {
 export function describeSkill(skill: SkillResponse): string[] {
   const { skill: listing, source } = skill;
   const lines = [
-    `${listing.slug}  (${listing.displayName})`,
+    `${listing.installRef ?? listing.slug}  (${listing.displayName})`,
     truncate(listing.description, 200),
     "",
     `Version:    ${listing.version}`,
@@ -109,9 +110,14 @@ export function describeSkill(skill: SkillResponse): string[] {
 
 export async function infoCommand(
   ctx: CommandContext,
-  input: { slug: string },
+  input: { slug: string } & ReferenceOptions,
 ): Promise<void> {
-  const skill = await ctx.client.getSkill(input.slug);
+  const skill = await resolveInstallReference(
+    ctx.client,
+    input.slug,
+    input,
+    !ctx.json,
+  );
   if (ctx.json) {
     ctx.out(JSON.stringify(skill, null, 2));
     return;
@@ -121,7 +127,7 @@ export async function infoCommand(
   }
 }
 
-export type InstallCommandInput = {
+export type InstallCommandInput = ReferenceOptions & {
   slug: string;
   agents: string[];
   scope: InstallScope;
@@ -149,7 +155,12 @@ export async function installCommand(
     );
   }
 
-  const skill = await ctx.client.getSkill(input.slug);
+  const skill = await resolveInstallReference(
+    ctx.client,
+    input.slug,
+    input,
+    !ctx.json && !input.yes,
+  );
   // Fail on an unsupported source before asking anyone to confirm anything.
   resolveSource(skill);
 
@@ -198,7 +209,7 @@ export async function installCommand(
           ? "Updated"
           : "Installed";
       ctx.out(
-        `${verb} ${skill.skill.slug} → ${result.dir} (${agents.join(", ")})`,
+        `${verb} ${skill.skill.installRef ?? skill.skill.slug} → ${result.dir} (${agents.join(", ")})`,
       );
     }
   }

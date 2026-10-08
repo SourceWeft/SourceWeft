@@ -1,6 +1,6 @@
 {
-  "id": "5513b7b6-f604-4086-87ea-044b83f54b23",
-  "prevId": "2869f52d-1ab4-4a74-a111-67ea9bc9fa71",
+  "id": "29b95c0a-d1da-475b-876e-4a9659affa85",
+  "prevId": "5fbafb50-7a06-47f9-9620-1e623a36cfed",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -14681,6 +14681,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "install_ref": {
+          "name": "install_ref",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "github_repository_id": {
           "name": "github_repository_id",
           "type": "text",
@@ -14842,6 +14848,21 @@
           "columns": [
             {
               "expression": "slug",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "skill_definitions_install_ref_uq": {
+          "name": "skill_definitions_install_ref_uq",
+          "columns": [
+            {
+              "expression": "install_ref",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -20428,119 +20449,6 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.sandbox_volume_gc_candidates": {
-      "name": "sandbox_volume_gc_candidates",
-      "schema": "",
-      "columns": {
-        "volume_id": {
-          "name": "volume_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "pack_key": {
-          "name": "pack_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "state": {
-          "name": "state",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'pending'"
-        },
-        "not_before": {
-          "name": "not_before",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "deleted_at": {
-          "name": "deleted_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "attempts": {
-          "name": "attempts",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "last_error": {
-          "name": "last_error",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "sandbox_volume_gc_due_idx": {
-          "name": "sandbox_volume_gc_due_idx",
-          "columns": [
-            {
-              "expression": "state",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "not_before",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "sandbox_volume_gc_candidates_volume_id_sandbox_volumes_id_fk": {
-          "name": "sandbox_volume_gc_candidates_volume_id_sandbox_volumes_id_fk",
-          "tableFrom": "sandbox_volume_gc_candidates",
-          "tableTo": "sandbox_volumes",
-          "columnsFrom": [
-            "volume_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "sandbox_volume_gc_candidates_volume_id_pack_key_pk": {
-          "name": "sandbox_volume_gc_candidates_volume_id_pack_key_pk",
-          "columns": [
-            "volume_id",
-            "pack_key"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "sandbox_volume_gc_state_check": {
-          "name": "sandbox_volume_gc_state_check",
-          "value": "\"sandbox_volume_gc_candidates\".\"state\" in ('pending','deleting','deleted')"
-        }
-      },
       "isRLSEnabled": false
     },
     "public.sandbox_volume_packs": {

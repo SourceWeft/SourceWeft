@@ -55,8 +55,10 @@ export function deriveRegistrySlug(
   const skill = sanitizeSlugSegment(name);
   const legacy = skill.length > 0 ? `${base}-${skill}` : base;
   if (sourceRoot === undefined) return legacy;
-  const path = sanitizeSlugSegment(sourceRoot).slice(0, 80) || "root";
-  return `${legacy}-${path}-${createHash("sha256")
+  // Keep new addresses inside the public route's 256-character budget.
+  const readable = legacy.slice(0, 160);
+  const path = sanitizeSlugSegment(sourceRoot).slice(0, 64) || "root";
+  return `${readable}-${path}-${createHash("sha256")
     .update(repositoryId ? `${repositoryId}\0${sourceRoot}` : sourceRoot)
     .digest("hex")
     .slice(0, 16)}`;

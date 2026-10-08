@@ -1,6 +1,6 @@
 {
-  "id": "7d3e51d6-a84f-4728-a574-a39953884e4d",
-  "prevId": "5513b7b6-f604-4086-87ea-044b83f54b23",
+  "id": "4c6a3e76-15b4-4cae-a113-f90428646fea",
+  "prevId": "29b95c0a-d1da-475b-876e-4a9659affa85",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -14681,6 +14681,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "install_ref": {
+          "name": "install_ref",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "github_repository_id": {
           "name": "github_repository_id",
           "type": "text",
@@ -14842,6 +14848,21 @@
           "columns": [
             {
               "expression": "slug",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "skill_definitions_install_ref_uq": {
+          "name": "skill_definitions_install_ref_uq",
+          "columns": [
+            {
+              "expression": "install_ref",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -19914,18 +19935,6 @@
         "quarantine_reason": {
           "name": "quarantine_reason",
           "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "control_token_hash": {
-          "name": "control_token_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "control_expires_at": {
-          "name": "control_expires_at",
-          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },
