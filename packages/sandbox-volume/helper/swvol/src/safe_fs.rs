@@ -10,6 +10,9 @@ use std::os::unix::fs::MetadataExt;
 use std::path::{Component, Path};
 
 pub struct Directory(File);
+// Stock Cloudflare images create these placeholders before bootstrap. Names alone
+// do not grant permission to overwrite: every accepted entry must be a real empty directory.
+const IMAGE_DIRECTORIES: &[&str] = &["input", "output", "work"];
 fn name(value: &OsStr) -> Result<CString> { Ok(CString::new(value.as_bytes())?) }
 fn fd_file(fd: i32) -> std::io::Result<File> { if fd < 0 { Err(std::io::Error::last_os_error()) } else { Ok(unsafe { File::from_raw_fd(fd) }) } }
 impl Directory {
@@ -95,8 +98,33 @@ impl Directory {
             entry?.file_name().into_string().map_err(|_| anyhow::anyhow!("non-UTF-8 entry in restore target"))
         }).collect()
     }
+    fn empty_image_directory(&self, leaf: &str) -> Result<Self> {
+        if !IMAGE_DIRECTORIES.contains(&leaf) { bail!("RESTORE_TARGET_NOT_EMPTY: refusing to overwrite existing workspace content"); }
+        let directory = self.child(OsStr::new(leaf), false)
+            .with_context(|| format!("RESTORE_TARGET_NOT_EMPTY: platform entry {leaf} is not a real accessible directory"))?;
+        if !directory.names()?.is_empty() { bail!("RESTORE_TARGET_NOT_EMPTY: platform directory {leaf} contains existing content"); }
+        Ok(directory)
+    }
+    fn remove_verified_image_directory(&self, leaf: &str, verified: &Self) -> Result<()> {
+        if !IMAGE_DIRECTORIES.contains(&leaf) { bail!("refusing to remove an unknown platform directory"); }
+        let expected = verified.0.metadata()?;
+        let current = self.metadata(leaf)?;
+        if !current.is_dir() || (current.dev(), current.ino()) != (expected.dev(), expected.ino()) {
+            bail!("restore publish conflict: platform directory changed after validation");
+        }
+        let name = CString::new(leaf)?;
+        // AT_REMOVEDIR atomically refuses nonempty directories, files and links.
+        // Restore still requires a quiescent target; this is not an inode-CAS unlink.
+        if unsafe { libc::unlinkat(self.0.as_raw_fd(), name.as_ptr(), libc::AT_REMOVEDIR) } != 0 {
+            return Err(std::io::Error::last_os_error()).context("restore publish conflict: platform directory could not be removed as an empty directory");
+        }
+        Ok(())
+    }
     pub fn require_empty_content(&self) -> Result<()> {
-        if self.names()?.iter().any(|name| !name.starts_with(super::META_DIR)) { bail!("RESTORE_TARGET_NOT_EMPTY: refusing to overwrite existing workspace content"); }
+        for leaf in self.names()? {
+            if leaf.starts_with(super::META_DIR) { continue; }
+            self.empty_image_directory(&leaf)?;
+        }
         Ok(())
     }
     pub fn remove(&self, relative: &str, directory: bool) -> Result<()> {
@@ -108,9 +136,19 @@ impl Directory {
     }
     pub fn publish_into(&self, destination: &Self) -> Result<()> {
         for leaf in self.names()? {
-            let name = CString::new(leaf)?;
-            if unsafe { libc::syscall(libc::SYS_renameat2, self.0.as_raw_fd(), name.as_ptr(), destination.0.as_raw_fd(), name.as_ptr(), libc::RENAME_NOREPLACE) } != 0 {
-                return Err(std::io::Error::last_os_error()).context("restore publish conflict; staged and published data retained, attachment is not ready");
+            let name = CString::new(leaf.as_str())?;
+            let publish = || unsafe { libc::syscall(libc::SYS_renameat2, self.0.as_raw_fd(), name.as_ptr(), destination.0.as_raw_fd(), name.as_ptr(), libc::RENAME_NOREPLACE) };
+            if publish() != 0 {
+                let error = std::io::Error::last_os_error();
+                if error.kind() != std::io::ErrorKind::AlreadyExists || !IMAGE_DIRECTORIES.contains(&leaf.as_str()) {
+                    return Err(error).context("restore publish conflict; staged and published data retained, attachment is not ready");
+                }
+                let verified = destination.empty_image_directory(&leaf)?;
+                destination.remove_verified_image_directory(&leaf, &verified)?;
+                // A new file, link or directory appearing after unlink is never replaced.
+                if publish() != 0 {
+                    return Err(std::io::Error::last_os_error()).context("restore publish conflict after platform placeholder removal; staged data retained");
+                }
             }
         }
         destination.0.sync_all()?;
@@ -178,4 +216,38 @@ mod tests {
         assert_eq!(fs::read_link(f.0.join("root/link")).unwrap(), Path::new("../../outside/sentinel"));
         assert_eq!(fs::read_to_string(f.0.join("outside/sentinel")).unwrap(), "do not overwrite");
     }
+    #[test]
+    fn platform_directory_populated_after_validation_is_never_removed() {
+        let f = Fixture::new(); let root = Directory::open_root(&f.0.join("root")).unwrap();
+        root.directory("input", true).unwrap();
+        let verified = root.empty_image_directory("input").unwrap();
+        fs::write(f.0.join("root/input/new-user-file"), "preserve").unwrap();
+        assert!(root.remove_verified_image_directory("input", &verified).is_err());
+        assert_eq!(fs::read_to_string(f.0.join("root/input/new-user-file")).unwrap(), "preserve");
+    }
+    #[test]
+    fn platform_directory_replaced_by_symlink_after_validation_is_preserved() {
+        let f = Fixture::new(); let root = Directory::open_root(&f.0.join("root")).unwrap();
+        root.directory("input", true).unwrap();
+        let verified = root.empty_image_directory("input").unwrap();
+        fs::rename(f.0.join("root/input"), f.0.join("original-input")).unwrap();
+        std::os::unix::fs::symlink(f.0.join("outside"), f.0.join("root/input")).unwrap();
+        assert!(root.remove_verified_image_directory("input", &verified).is_err());
+        assert!(fs::symlink_metadata(f.0.join("root/input")).unwrap().file_type().is_symlink());
+        assert_eq!(fs::read_to_string(f.0.join("outside/sentinel")).unwrap(), "do not overwrite");
+    }
+    #[test]
+    fn new_platform_name_conflict_after_empty_directory_removal_is_preserved() {
+        let f = Fixture::new(); let root = Directory::open_root(&f.0.join("root")).unwrap();
+        let staging = Directory::open_root(&f.0.join("stage")).unwrap();
+        staging.directory("input", true).unwrap(); staging.create_file("input/restored").unwrap();
+        root.directory("input", true).unwrap();
+        let verified = root.empty_image_directory("input").unwrap();
+        root.remove_verified_image_directory("input", &verified).unwrap();
+        fs::write(f.0.join("root/input"), "concurrent user change").unwrap();
+        assert!(staging.publish_into(&root).is_err());
+        assert_eq!(fs::read_to_string(f.0.join("root/input")).unwrap(), "concurrent user change");
+        assert!(f.0.join("stage/input/restored").is_file());
+    }
+
 }

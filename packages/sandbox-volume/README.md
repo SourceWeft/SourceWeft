@@ -86,7 +86,10 @@ pending journal.
 Eager restore requires a quiescent target without existing user content. It returns
 `RESTORE_TARGET_NOT_EMPTY` before altering the old attachment identity when content is present;
 it does not overlay a restored tree onto a live or dirty workspace. Fresh-instance recovery
-continues to work. Files are built in a private staging directory using descriptor-relative
+continues to work. Only the known empty platform directories `input`, `output` and `work`
+may already exist; nonempty or symlinked entries are rejected. Unused empty platform directories
+are retained, and matching placeholders are removed only with an empty-directory syscall before
+exclusive publication. Files are built in a private staging directory using descriptor-relative
 `openat` operations with `O_NOFOLLOW`, exclusive creation, and inode checks on reopened files.
 Symlink target strings are preserved, but parent symlinks are never traversed. Top-level entries
 are published with Linux `renameat2(RENAME_NOREPLACE)`. A competing entry is retained and causes

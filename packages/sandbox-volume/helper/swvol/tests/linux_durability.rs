@@ -213,3 +213,48 @@ fn restore_refuses_dirty_target_before_touching_identity_or_following_symlinks()
     assert_eq!(fs::read(f.root.join(".sourceweft/identity")).unwrap(), identity);
     fs::remove_dir_all(outside).unwrap();
 }
+
+#[test]
+fn empty_restore_preserves_stock_platform_empty_directories() {
+    let f = Fixture::new();
+    for name in ["input", "output", "work"] { fs::create_dir(f.root.join(name)).unwrap(); }
+    let output = f.run(&["restore", "--plan", f.root.join(".sourceweft-plan").to_str().unwrap()]);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stdout));
+    for name in ["input", "output", "work"] {
+        assert!(fs::symlink_metadata(f.root.join(name)).unwrap().file_type().is_dir());
+        assert_eq!(fs::read_dir(f.root.join(name)).unwrap().count(), 0);
+    }
+}
+
+#[test]
+fn restore_replaces_only_matching_empty_platform_directory() {
+    let f = Fixture::new();
+    for name in ["input", "output", "work"] { fs::create_dir(f.root.join(name)).unwrap(); }
+    let plan = f.root.join(".sourceweft-stock-plan");
+    fs::write(&plan, serde_json::to_vec(&json!({"volume":"v","attachment":"b","seq":0,"entries":[{"p":"input","k":"d","m":493,"t":"0","s":0},{"p":"input/restored.txt","k":"f","m":384,"t":"0","s":0}],"chunks":{},"packs":{}})).unwrap()).unwrap();
+    let output = f.run(&["restore", "--plan", plan.to_str().unwrap()]);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stdout));
+    assert!(f.root.join("input/restored.txt").is_file());
+    for name in ["output", "work"] { assert_eq!(fs::read_dir(f.root.join(name)).unwrap().count(), 0); }
+}
+
+#[test]
+fn restore_preserves_nonempty_or_linked_platform_entries_and_unknown_empty_dirs() {
+    let f = Fixture::new();
+    let plan = f.root.join(".sourceweft-plan");
+    let identity = fs::read(f.root.join(".sourceweft/identity")).unwrap();
+    fs::create_dir(f.root.join("input")).unwrap(); fs::write(f.root.join("input/user.txt"), "preserve me").unwrap();
+    let output = f.run(&["restore", "--plan", plan.to_str().unwrap()]);
+    assert!(!output.status.success());
+    assert_eq!(fs::read_to_string(f.root.join("input/user.txt")).unwrap(), "preserve me");
+    assert_eq!(fs::read(f.root.join(".sourceweft/identity")).unwrap(), identity);
+    fs::remove_file(f.root.join("input/user.txt")).unwrap(); fs::remove_dir(f.root.join("input")).unwrap();
+    std::os::unix::fs::symlink(".sourceweft", f.root.join("input")).unwrap();
+    let output = f.run(&["restore", "--plan", plan.to_str().unwrap()]);
+    assert!(!output.status.success()); assert!(fs::symlink_metadata(f.root.join("input")).unwrap().file_type().is_symlink());
+    assert_eq!(fs::read(f.root.join(".sourceweft/identity")).unwrap(), identity);
+    fs::remove_file(f.root.join("input")).unwrap(); fs::create_dir(f.root.join("user-empty-directory")).unwrap();
+    let output = f.run(&["restore", "--plan", plan.to_str().unwrap()]);
+    assert!(!output.status.success()); assert!(f.root.join("user-empty-directory").is_dir());
+    assert_eq!(fs::read(f.root.join(".sourceweft/identity")).unwrap(), identity);
+}
