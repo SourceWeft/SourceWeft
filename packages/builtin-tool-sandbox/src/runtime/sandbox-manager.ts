@@ -1,3 +1,4 @@
+import { SandboxVolumePersistenceError } from "./volume-durability";
 import { randomUUID } from "node:crypto";
 import {
   isSandboxInstanceMissingError,
@@ -255,6 +256,16 @@ export class SandboxManager {
   /** provider sandbox id -> volume attachment id, for the sandboxes this manager attached. */
   private readonly volumeAttachments = new Map<string, string>();
   private readonly volumeAttachRuns = new Map<string, Promise<void>>();
+  private readonly missingVolumeInstances = new Map<string, string>();
+
+  private volumeScopeKey(context: SandboxRuntimeContext): string {
+    return JSON.stringify([
+      this.input.provider.id,
+      context.teamId,
+      context.workspaceId,
+      context.threadId,
+    ]);
+  }
 
   private volumeExecutor(sandbox: SandboxRef): SandboxVolumeExecutor {
     const provider = this.input.provider;
@@ -292,13 +303,20 @@ export class SandboxManager {
       return;
     let run = this.volumeAttachRuns.get(sandbox.providerSandboxId);
     if (!run) {
-      run = volume
-        .attach({
-          scope: this.volumeScope(context),
-          sandboxId: sandbox.providerSandboxId,
-          executor: this.volumeExecutor(sandbox),
-        })
+      const scopeKey = this.volumeScopeKey(context);
+      const previousSandboxId = this.missingVolumeInstances.get(scopeKey);
+      const attachInput = {
+        scope: this.volumeScope(context),
+        sandboxId: sandbox.providerSandboxId,
+        executor: this.volumeExecutor(sandbox),
+      };
+      run = (
+        previousSandboxId
+          ? volume.onContainerReplaced({ ...attachInput, previousSandboxId })
+          : volume.attach(attachInput)
+      )
         .then((attached) => {
+          this.missingVolumeInstances.delete(scopeKey);
           this.volumeAttachments.set(
             sandbox.providerSandboxId,
             attached.attachmentId,
@@ -308,6 +326,39 @@ export class SandboxManager {
       this.volumeAttachRuns.set(sandbox.providerSandboxId, run);
     }
     await run;
+  }
+
+  /** Revalidate the database fence even when this manager cached its attachment. */
+  async volumeAssertActive(
+    sandbox: SandboxRef,
+    context: SandboxRuntimeContext,
+  ): Promise<void> {
+    const volume = this.input.volume;
+    const attachmentId = this.volumeAttachments.get(sandbox.providerSandboxId);
+    if (this.invalidatedSandboxes.has(sandbox.providerSandboxId)) {
+      throw new SandboxInstanceChangedError();
+    }
+    if (!volume || !attachmentId) return;
+    const executor = this.volumeExecutor(sandbox);
+    try {
+      await volume.assertActive({ attachmentId, executor });
+    } catch (error) {
+      if (
+        !volume.isContainerReplacedError(error) ||
+        error === null ||
+        typeof error !== "object" ||
+        !("commandStarted" in error) ||
+        error.commandStarted !== false
+      )
+        throw error;
+      // Only this host-owned preflight runs before the user command. Its
+      // identity observation may authorize restoration; stdout never can.
+      await this.reattachVolume(sandbox, context);
+      const replacementId = this.volumeAttachments.get(
+        sandbox.providerSandboxId,
+      )!;
+      await volume.assertActive({ attachmentId: replacementId, executor });
+    }
   }
 
   /** The command to hand to the provider: wrapped with the volume's identity check and sync barrier when a volume is attached. */
@@ -321,14 +372,13 @@ export class SandboxManager {
   }
 
   /**
-   * Strip the volume marker from a result and apply the sync. Returns null when the container was
-   * replaced underneath us: the caller must re-attach (`reattachVolume`) and run the command again,
-   * which is safe because the wrapper never ran it.
+   * Parse the completed command's report. No error here authorizes replay:
+   * the command may have run, and stdout is not trusted preflight evidence.
    */
   async volumeParseResult(
     sandbox: SandboxRef,
     result: SandboxExecuteResult,
-  ): Promise<SandboxExecuteResult | null> {
+  ): Promise<SandboxExecuteResult> {
     const volume = this.input.volume;
     const attachmentId = this.volumeAttachments.get(sandbox.providerSandboxId);
     if (!volume || !attachmentId) return result;
@@ -339,24 +389,55 @@ export class SandboxManager {
         exitCode: result.exitCode,
         executor: this.volumeExecutor(sandbox),
       });
-      if (!parsed.sync.persisted) {
-        this.input.logWarn?.("sandbox.volume.sync_pending", {
-          provider: this.input.provider.id,
-          sandboxId: sandbox.id,
-          attachmentId,
-        });
+      if (parsed?.sync?.persisted !== true) {
+        throw Object.assign(
+          new Error(
+            "SANDBOX_VOLUME_PERSISTENCE_UNCONFIRMED: the command ran, but its changes were not confirmed durable. Do not execute the command again.",
+          ),
+          {
+            code: "SANDBOX_VOLUME_PERSISTENCE_UNCONFIRMED",
+            commandOutput: parsed?.output,
+            commandExitCode: parsed?.exitCode,
+          },
+        );
       }
-      return { ...result, output: parsed.output, exitCode: parsed.exitCode };
+      return {
+        ...result,
+        output:
+          parsed.sync.mode === "shadow"
+            ? `${parsed.output}\nSandbox volume shadow observation completed; production persistence is not confirmed.`
+            : parsed.output,
+        exitCode: parsed.exitCode,
+        durability: {
+          status: parsed.sync.mode === "shadow" ? "pending" : "confirmed",
+          attachmentId,
+          ...(Number.isSafeInteger(parsed.sync.confirmedSeq) &&
+          parsed.sync.confirmedSeq! >= 0
+            ? { confirmedSeq: parsed.sync.confirmedSeq }
+            : {}),
+        },
+      };
     } catch (error) {
-      if (volume.isContainerReplacedError(error)) {
-        this.input.logWarn?.("sandbox.volume.container_replaced", {
-          provider: this.input.provider.id,
-          sandboxId: sandbox.id,
-          attachmentId,
-        });
-        return null;
-      }
-      throw error;
+      const detail =
+        error !== null && typeof error === "object"
+          ? (error as {
+              commandOutput?: unknown;
+              commandExitCode?: unknown;
+              durabilityStatus?: unknown;
+            })
+          : {};
+      throw new SandboxVolumePersistenceError({
+        attachmentId,
+        exitCode:
+          typeof detail.commandExitCode === "number"
+            ? detail.commandExitCode
+            : result.exitCode,
+        ...(typeof detail.commandOutput === "string"
+          ? { output: detail.commandOutput }
+          : {}),
+        status: detail.durabilityStatus === "failed" ? "failed" : "unknown",
+        cause: error,
+      });
     }
   }
 
@@ -369,6 +450,7 @@ export class SandboxManager {
     const attached = await volume.onContainerReplaced({
       scope: this.volumeScope(context),
       sandboxId: sandbox.providerSandboxId,
+      previousSandboxId: sandbox.providerSandboxId,
       executor: this.volumeExecutor(sandbox),
     });
     this.volumeAttachments.set(
@@ -382,10 +464,18 @@ export class SandboxManager {
     const volume = this.input.volume;
     const attachmentId = this.volumeAttachments.get(sandbox.providerSandboxId);
     if (!volume || !attachmentId) return;
-    await volume.checkpoint({
+    const checkpoint = await volume.checkpoint({
       attachmentId,
       executor: this.volumeExecutor(sandbox),
     });
+    if (checkpoint?.sync?.persisted !== true) {
+      throw Object.assign(
+        new Error(
+          "SANDBOX_VOLUME_PERSISTENCE_UNCONFIRMED: sandbox checkpoint was not confirmed durable.",
+        ),
+        { code: "SANDBOX_VOLUME_PERSISTENCE_UNCONFIRMED" },
+      );
+    }
   }
 
   // A failed acquisition is shared too: siblings must not each start a new
@@ -483,9 +573,9 @@ export class SandboxManager {
           "prepare",
           context,
           async () => {
+            await this.ensureVolumeAttached(sandbox, context);
             await this.ensureRequiredAssetsOnce(sandbox);
             await this.ensureSkillAssetsStaged(sandbox);
-            await this.ensureVolumeAttached(sandbox, context);
           },
           sandbox.id,
         );
@@ -569,6 +659,12 @@ export class SandboxManager {
               expectedStatus: "ready",
               expectedUpdatedAt: existing.updatedAtToken ?? existing.updatedAt,
             });
+            if (expired) {
+              this.missingVolumeInstances.set(
+                this.volumeScopeKey(context),
+                existing.providerSandboxId,
+              );
+            }
             // A concurrent renewal/transition won. Re-read rather than
             // creating from a stale observation of the previous generation.
             if (!expired && Date.now() - waitStartedAt >= waitTimeoutMs) {
@@ -1320,6 +1416,40 @@ export class SandboxManager {
       input.forceSandbox === true ||
       !this.input.provider.cancelExecution ||
       this.input.provider.cancellationScope !== "command";
+    if (sandboxScoped && this.input.volume) {
+      // A live writer cannot be safely checkpointed and deleted. Keep its disk,
+      // fence this generation in the volume database, and expose unknown termination.
+      this.invalidatedSandboxes.set(
+        input.sandbox.providerSandboxId,
+        "termination_unknown",
+      );
+      const attachmentId = this.volumeAttachments.get(
+        input.sandbox.providerSandboxId,
+      );
+      try {
+        if (!attachmentId)
+          throw new Error("volume attachment is unavailable for quarantine");
+        await this.input.volume.quarantine({
+          attachmentId,
+          reason: input.reason,
+        });
+      } catch (error) {
+        this.input.logWarn?.("sandbox.volume.quarantine_failed", {
+          sandboxId: input.sandbox.id,
+          attachmentId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      this.input.logWarn?.(
+        "sandbox.volume.cancellation_requires_command_scope",
+        {
+          sandboxId: input.sandbox.id,
+          provider: this.input.provider.id,
+          attachmentId,
+        },
+      );
+      return { confirmed: false, mode: "unknown" };
+    }
     let persistentFenceConfirmed = true;
     if (sandboxScoped) {
       // Persist the generation fence before asking the provider to terminate.

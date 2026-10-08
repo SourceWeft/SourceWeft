@@ -3,12 +3,19 @@ import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import {
   sandboxVolumeAttachments,
   sandboxVolumeChunks,
+  sandboxVolumeCommits,
   sandboxVolumeEntries,
   sandboxVolumeEntryVersions,
   sandboxVolumePacks,
   sandboxVolumeRejects,
   sandboxVolumes,
 } from "@sourceweft/db/schema";
+import {
+  enforceVolumeLimits,
+  resolveVolumeLimits,
+  type VolumeLimits,
+} from "./quota";
+import { ManifestRejected } from "../protocol/manifest";
 import { descendantRange } from "../protocol/paths";
 import type {
   ChunkLocation,
@@ -25,6 +32,7 @@ export type VolumeScope = {
   teamId: string;
   workspaceId: string;
   threadId: string;
+  namespace?: string;
 };
 
 export type VolumeRow = typeof sandboxVolumes.$inferSelect;
@@ -43,8 +51,21 @@ function chunkIdBytes(hex: string): Buffer {
   return Buffer.from(hex, "hex");
 }
 
+export class VolumeConflict extends Error {
+  override readonly name = "VolumeConflict";
+}
+
+export type CommitIdentity = {
+  epoch: number;
+  manifestKey: string;
+  manifestHash: string;
+};
+
 export class VolumeRepository {
-  constructor(private readonly db: VolumeDatabase) {}
+  constructor(
+    private readonly db: VolumeDatabase,
+    private readonly limits: VolumeLimits = resolveVolumeLimits(),
+  ) {}
 
   async getOrCreateVolume(id: string, scope: VolumeScope): Promise<VolumeRow> {
     const existing = await this.db
@@ -55,6 +76,7 @@ export class VolumeRepository {
           eq(sandboxVolumes.teamId, scope.teamId),
           eq(sandboxVolumes.workspaceId, scope.workspaceId),
           eq(sandboxVolumes.threadId, scope.threadId),
+          eq(sandboxVolumes.namespace, scope.namespace ?? "primary"),
         ),
       )
       .limit(1);
@@ -71,6 +93,7 @@ export class VolumeRepository {
           eq(sandboxVolumes.teamId, scope.teamId),
           eq(sandboxVolumes.workspaceId, scope.workspaceId),
           eq(sandboxVolumes.threadId, scope.threadId),
+          eq(sandboxVolumes.namespace, scope.namespace ?? "primary"),
         ),
       )
       .limit(1);
@@ -86,6 +109,7 @@ export class VolumeRepository {
           eq(sandboxVolumes.teamId, scope.teamId),
           eq(sandboxVolumes.workspaceId, scope.workspaceId),
           eq(sandboxVolumes.threadId, scope.threadId),
+          eq(sandboxVolumes.namespace, scope.namespace ?? "primary"),
         ),
       )
       .limit(1);
@@ -141,47 +165,233 @@ export class VolumeRepository {
     sandboxId: string | null;
     baseSeq: number;
     bootId?: string | null;
+    expectedAttachmentId?: string | null;
   }): Promise<AttachmentRow> {
-    await this.db
-      .update(sandboxVolumeAttachments)
-      .set({ status: "superseded" })
-      .where(
-        and(
-          eq(sandboxVolumeAttachments.volumeId, input.volumeId),
-          eq(sandboxVolumeAttachments.status, "active"),
-        ),
-      );
-    const rows = await this.db
-      .insert(sandboxVolumeAttachments)
-      .values({
-        id: input.id,
-        volumeId: input.volumeId,
-        sandboxId: input.sandboxId,
-        baseSeq: input.baseSeq,
-        bootId: input.bootId ?? null,
-      })
-      .returning();
-    return rows[0]!;
+    return this.db.transaction(async (tx) => {
+      const head = await this.lockVolume(tx, input.volumeId);
+      const quarantined = await tx
+        .select()
+        .from(sandboxVolumeAttachments)
+        .where(
+          and(
+            eq(sandboxVolumeAttachments.volumeId, input.volumeId),
+            eq(sandboxVolumeAttachments.status, "quarantined"),
+          ),
+        )
+        .limit(1);
+      if (quarantined.length)
+        throw new VolumeConflict(
+          "volume has quarantined attachment; recovery required",
+        );
+      const current = await tx
+        .select()
+        .from(sandboxVolumeAttachments)
+        .where(
+          and(
+            eq(sandboxVolumeAttachments.volumeId, input.volumeId),
+            eq(sandboxVolumeAttachments.status, "active"),
+          ),
+        );
+      if (
+        input.expectedAttachmentId !== undefined &&
+        (current[0]?.id ?? null) !== input.expectedAttachmentId
+      )
+        throw new VolumeConflict(
+          "attachment changed while preparing replacement",
+        );
+      await tx
+        .update(sandboxVolumeAttachments)
+        .set({ status: "superseded" })
+        .where(
+          and(
+            eq(sandboxVolumeAttachments.volumeId, input.volumeId),
+            eq(sandboxVolumeAttachments.status, "active"),
+          ),
+        );
+      const rows = await tx
+        .insert(sandboxVolumeAttachments)
+        .values({
+          id: input.id,
+          volumeId: input.volumeId,
+          sandboxId: input.sandboxId,
+          baseSeq: head,
+          lastAppliedSeq: head,
+          bootId: input.bootId ?? null,
+        })
+        .returning();
+      return rows[0]!;
+    });
   }
 
-  async updateAttachment(
-    id: string,
-    patch: Partial<
-      Pick<
-        AttachmentRow,
-        | "epoch"
-        | "status"
-        | "bootId"
-        | "slotsUntilPack"
-        | "slotsUntilSeq"
-        | "slotsExpireAt"
-      >
-    >,
-  ): Promise<void> {
-    await this.db
-      .update(sandboxVolumeAttachments)
-      .set(patch)
-      .where(eq(sandboxVolumeAttachments.id, id));
+  private async lockVolume(tx: Tx, volumeId: string): Promise<number> {
+    const rows = await tx
+      .select({ head: sandboxVolumes.headSeq })
+      .from(sandboxVolumes)
+      .where(eq(sandboxVolumes.id, volumeId))
+      .for("update");
+    if (!rows[0]) throw new Error(`volume ${volumeId} does not exist`);
+    return rows[0].head;
+  }
+
+  /** An attachment's receipt, not another writer's global head, proves durability. */
+  async confirmPersistence(
+    attachmentId: string,
+    seq: number,
+  ): Promise<boolean> {
+    if (!Number.isSafeInteger(seq) || seq < 0) return false;
+    const attachment = await this.getAttachment(attachmentId);
+    if (!attachment) return false;
+    return this.db.transaction(async (tx) => {
+      await this.lockVolume(tx, attachment.volumeId);
+      const rows = await tx
+        .select()
+        .from(sandboxVolumeAttachments)
+        .where(
+          and(
+            eq(sandboxVolumeAttachments.id, attachmentId),
+            eq(sandboxVolumeAttachments.volumeId, attachment.volumeId),
+            eq(sandboxVolumeAttachments.status, "active"),
+          ),
+        );
+      return Boolean(
+        rows[0] && seq >= rows[0].baseSeq && rows[0].lastAppliedSeq >= seq,
+      );
+    });
+  }
+
+  /** Rebase changes an active actor's epoch, never revives a superseded actor. */
+  async advanceAttachmentEpoch(attachmentId: string): Promise<AttachmentRow> {
+    const attachment = await this.getAttachment(attachmentId);
+    if (!attachment)
+      throw new Error(`attachment ${attachmentId} does not exist`);
+    return this.db.transaction(async (tx) => {
+      await this.lockVolume(tx, attachment.volumeId);
+      const rows = await tx
+        .update(sandboxVolumeAttachments)
+        .set({
+          epoch: sql`${sandboxVolumeAttachments.epoch} + 1`,
+          slotsUntilSeq: 0,
+        })
+        .where(
+          and(
+            eq(sandboxVolumeAttachments.id, attachmentId),
+            eq(sandboxVolumeAttachments.volumeId, attachment.volumeId),
+            eq(sandboxVolumeAttachments.status, "active"),
+          ),
+        )
+        .returning();
+      if (!rows[0])
+        throw new Error(
+          `attachment ${attachmentId} is not active (superseded or rejected)`,
+        );
+      return rows[0];
+    });
+  }
+
+  async quarantineAttachment(id: string, reason: string): Promise<void> {
+    const actor = await this.getAttachment(id);
+    if (!actor) throw new VolumeConflict("attachment does not exist");
+    await this.db.transaction(async (tx) => {
+      await this.lockVolume(tx, actor.volumeId);
+      const rows = await tx
+        .update(sandboxVolumeAttachments)
+        .set({ status: "quarantined", quarantineReason: reason.slice(0, 512) })
+        .where(
+          and(
+            eq(sandboxVolumeAttachments.id, id),
+            sql`${sandboxVolumeAttachments.status} in ('active', 'quarantined')`,
+          ),
+        )
+        .returning();
+      if (!rows.length)
+        throw new VolumeConflict("cannot quarantine an inactive attachment");
+    });
+  }
+
+  /** Identity binds once; changing a live daemon requires a new attachment. */
+  async recordBootId(id: string, bootId: string): Promise<void> {
+    if (!bootId.trim() || bootId.length > 256)
+      throw new Error("invalid boot identity");
+    const attachment = await this.getAttachment(id);
+    if (!attachment) throw new VolumeConflict("attachment does not exist");
+    await this.db.transaction(async (tx) => {
+      await this.lockVolume(tx, attachment.volumeId);
+      const rows = await tx
+        .update(sandboxVolumeAttachments)
+        .set({ bootId })
+        .where(
+          and(
+            eq(sandboxVolumeAttachments.id, id),
+            eq(sandboxVolumeAttachments.status, "active"),
+            sql`(${sandboxVolumeAttachments.bootId} is null or ${sandboxVolumeAttachments.bootId} = ${bootId})`,
+          ),
+        )
+        .returning();
+      if (!rows.length)
+        throw new VolumeConflict(
+          "attachment is inactive or boot identity changed",
+        );
+    });
+  }
+
+  /** Reserve before signing; concurrent hosts never grant the same new pack range. */
+  async reserveSlots(
+    expected: AttachmentRow,
+    packCount: number,
+    seqCount: number,
+    ttlSeconds: number,
+  ) {
+    return this.db.transaction(async (tx) => {
+      const head = await this.lockVolume(tx, expected.volumeId);
+      const rows = await tx
+        .select()
+        .from(sandboxVolumeAttachments)
+        .where(eq(sandboxVolumeAttachments.id, expected.id));
+      const actor = rows[0];
+      if (!actor || actor.status !== "active" || actor.epoch !== expected.epoch)
+        throw new VolumeConflict(
+          "attachment is inactive or epoch changed during slot issuance",
+        );
+      const firstPack = actor.slotsUntilPack;
+      // Re-sign the outstanding sequence window as well: helpers must never skip head + 1.
+      const lastSeq = Math.max(actor.slotsUntilSeq, head + seqCount);
+      const registered = await tx.execute<{ next_pack: number }>(sql`
+        select coalesce(max(substring(pack_key from ${`^att/${actor.id}/p/([0-9]{6})(?:\\.r[0-9a-f]+)*$`})::int) + 1, 0)::int as next_pack
+        from sandbox_volume_packs where volume_id = ${actor.volumeId}`);
+      const renewFromPack = registered.rows[0]?.next_pack ?? 0;
+      if (firstPack + packCount > 1_000_000)
+        throw new Error("attachment pack slot namespace exhausted");
+      const updated = await tx
+        .update(sandboxVolumeAttachments)
+        .set({
+          slotsUntilPack: firstPack + packCount,
+          slotsUntilSeq: lastSeq,
+          slotsExpireAt: sql`now() + (${ttlSeconds} * interval '1 second')`,
+        })
+        .where(eq(sandboxVolumeAttachments.id, actor.id))
+        .returning();
+      return {
+        attachment: updated[0]!,
+        firstPack,
+        renewFromPack,
+        firstSeq: head + 1,
+        lastSeq,
+      };
+    });
+  }
+
+  async chunkLength(volumeId: string, chunkId: string): Promise<number | null> {
+    const rows = await this.db
+      .select({ length: sandboxVolumeChunks.rawLength })
+      .from(sandboxVolumeChunks)
+      .where(
+        and(
+          eq(sandboxVolumeChunks.volumeId, volumeId),
+          eq(sandboxVolumeChunks.chunkId, chunkIdBytes(chunkId)),
+        ),
+      )
+      .limit(1);
+    return rows[0]?.length ?? null;
   }
 
   async chunkKnown(volumeId: string, chunkId: string): Promise<boolean> {
@@ -316,9 +526,62 @@ export class VolumeRepository {
     manifest: Manifest,
     newChunks: Record<string, ChunkLocation>,
     packSizes: Map<string, number>,
-  ): Promise<void> {
+    identity?: CommitIdentity,
+  ): Promise<boolean> {
     const seq = manifest.seq;
-    await this.db.transaction(async (tx) => {
+    return this.db.transaction(async (tx) => {
+      const head = await this.lockVolume(tx, volumeId);
+      if (identity && manifest.seq <= head) {
+        const receipts = await tx
+          .select()
+          .from(sandboxVolumeCommits)
+          .where(
+            and(
+              eq(sandboxVolumeCommits.volumeId, volumeId),
+              eq(sandboxVolumeCommits.seq, manifest.seq),
+            ),
+          );
+        const receipt = receipts[0];
+        if (
+          receipt?.attachmentId === manifest.attachment &&
+          receipt.epoch === identity.epoch &&
+          receipt.manifestHash === identity.manifestHash &&
+          receipt.manifestKey === identity.manifestKey
+        )
+          return false;
+      }
+      if (
+        manifest.volume !== volumeId ||
+        manifest.base !== head ||
+        manifest.seq !== head + 1
+      ) {
+        throw new VolumeConflict(
+          "manifest base/sequence does not match locked volume head",
+        );
+      }
+      const actors = await tx
+        .select()
+        .from(sandboxVolumeAttachments)
+        .where(
+          and(
+            eq(sandboxVolumeAttachments.id, manifest.attachment),
+            eq(sandboxVolumeAttachments.volumeId, volumeId),
+            eq(sandboxVolumeAttachments.status, "active"),
+          ),
+        );
+      if (!actors[0])
+        throw new VolumeConflict(
+          "manifest attachment is not active (superseded or rejected)",
+        );
+      const actor = actors[0]!;
+      if (identity && actor.epoch !== identity.epoch)
+        throw new VolumeConflict("manifest epoch changed while validating");
+      if (actor.bootId !== null && manifest.boot_id !== actor.bootId)
+        throw new VolumeConflict(
+          "manifest boot identity changed while validating",
+        );
+      if (identity && seq > actor.slotsUntilSeq)
+        throw new VolumeConflict("manifest sequence has no issued slot");
       const keepVersion = async (where: ReturnType<typeof sql>) => {
         await tx.execute(sql`
           insert into sandbox_volume_entry_versions (volume_id, path, kind, mode, mtime_ns, size_bytes, link_target, chunks, from_seq, to_seq)
@@ -404,6 +667,38 @@ export class VolumeRepository {
             set: { ...next, seq },
           });
       }
+      // Validate the resulting tree, including ancestors not mentioned by this delta.
+      const parents = new Set<string>();
+      for (const entry of manifest.upserts ?? []) {
+        let path = entry.p;
+        while (path.includes("/")) {
+          path = path.slice(0, path.lastIndexOf("/"));
+          parents.add(path);
+        }
+      }
+      const parentPaths = [...parents];
+      for (let start = 0; start < parentPaths.length; start += 5000) {
+        const paths = parentPaths.slice(start, start + 5000);
+        const rows = await tx
+          .select({
+            path: sandboxVolumeEntries.path,
+            kind: sandboxVolumeEntries.kind,
+          })
+          .from(sandboxVolumeEntries)
+          .where(
+            and(
+              eq(sandboxVolumeEntries.volumeId, volumeId),
+              sql`${sandboxVolumeEntries.path} = any(${sql.param(paths)}::text[])`,
+            ),
+          );
+        if (
+          rows.length !== paths.length ||
+          rows.some((row) => row.kind !== "d")
+        )
+          throw new ManifestRejected(
+            "entry parent is missing or is not a directory",
+          );
+      }
       await insertChunks(tx, volumeId, newChunks);
       for (const [packKey, sizeBytes] of packSizes) {
         await tx
@@ -414,26 +709,71 @@ export class VolumeRepository {
             set: { sizeBytes },
           });
       }
+      await this.checkLimits(tx, volumeId);
       await tx.execute(sql`
         update sandbox_volumes set head_seq = ${seq}, updated_at = now(),
           file_count = (select count(*) from sandbox_volume_entries where volume_id = ${volumeId} and kind = 'f'),
           logical_bytes = (select coalesce(sum(size_bytes), 0) from sandbox_volume_entries where volume_id = ${volumeId} and kind = 'f'),
           stored_bytes = (select coalesce(sum(size_bytes), 0) from sandbox_volume_packs where volume_id = ${volumeId})
         where id = ${volumeId}`);
+      await tx
+        .update(sandboxVolumeAttachments)
+        .set({ lastAppliedSeq: seq })
+        .where(eq(sandboxVolumeAttachments.id, manifest.attachment));
+      if (identity)
+        await tx.insert(sandboxVolumeCommits).values({
+          volumeId,
+          seq,
+          attachmentId: manifest.attachment,
+          ...identity,
+        });
+      return true;
+    });
+  }
+
+  private async checkLimits(tx: Tx, volumeId: string): Promise<void> {
+    const usage = await tx.execute<{
+      entries: string;
+      logical: string;
+      file: string;
+      objects: string;
+    }>(sql`
+        select count(*)::text as entries,
+          coalesce(sum(case when kind = 'f' then size_bytes else 0 end),0)::text as logical,
+          coalesce(max(case when kind = 'f' then size_bytes else 0 end),0)::text as file,
+          (select coalesce(sum(size_bytes),0)::text from sandbox_volume_packs where volume_id = ${volumeId}) as objects
+        from sandbox_volume_entries where volume_id = ${volumeId}`);
+    const totals = usage.rows[0]!;
+    enforceVolumeLimits(this.limits, {
+      maxEntries: Number(totals.entries),
+      maxLogicalBytes: Number(totals.logical),
+      maxFileBytes: Number(totals.file),
+      maxObjectBytes: Number(totals.objects),
     });
   }
 
   /** Make the state at `seq` the new head. History stays linear: a rollback is itself a commit. */
   async rollback(volumeId: string, seq: number): Promise<number> {
-    const rows = await this.entriesAt(volumeId, seq);
+    if (!Number.isSafeInteger(seq) || seq < 0)
+      throw new Error("invalid rollback sequence");
     return this.db.transaction(async (tx) => {
-      const head = (
-        await tx
-          .select({ head: sandboxVolumes.headSeq })
-          .from(sandboxVolumes)
-          .where(eq(sandboxVolumes.id, volumeId))
-          .for("update")
-      )[0]!.head;
+      const head = await this.lockVolume(tx, volumeId);
+      if (seq > head)
+        throw new Error("rollback sequence is beyond current head");
+      const rows = await new VolumeRepository(
+        tx as unknown as VolumeDatabase,
+      ).entriesAt(volumeId, seq);
+      // The old filesystem reflects the pre-rollback tree. Revoke its actor under
+      // the same volume lock so it cannot acknowledge or rebase that tree over the rollback.
+      await tx
+        .update(sandboxVolumeAttachments)
+        .set({ status: "superseded" })
+        .where(
+          and(
+            eq(sandboxVolumeAttachments.volumeId, volumeId),
+            eq(sandboxVolumeAttachments.status, "active"),
+          ),
+        );
       const next = head + 1;
       await tx.execute(sql`
         insert into sandbox_volume_entry_versions (volume_id, path, kind, mode, mtime_ns, size_bytes, link_target, chunks, from_seq, to_seq)
@@ -443,26 +783,46 @@ export class VolumeRepository {
         sql`delete from sandbox_volume_entries where volume_id = ${volumeId}`,
       );
       for (let i = 0; i < rows.length; i += 1000) {
-        const batch = rows
-          .slice(i, i + 1000)
-          .map((r) => ({
-            volumeId,
-            path: r.path,
-            kind: r.kind,
-            mode: r.mode,
-            mtimeNs: r.mtimeNs,
-            sizeBytes: r.sizeBytes,
-            linkTarget: r.linkTarget,
-            chunks: r.chunks,
-            seq: next,
-          }));
+        const batch = rows.slice(i, i + 1000).map((r) => ({
+          volumeId,
+          path: r.path,
+          kind: r.kind,
+          mode: r.mode,
+          mtimeNs: r.mtimeNs,
+          sizeBytes: r.sizeBytes,
+          linkTarget: r.linkTarget,
+          chunks: r.chunks,
+          seq: next,
+        }));
         if (batch.length) await tx.insert(sandboxVolumeEntries).values(batch);
       }
+      await this.checkLimits(tx, volumeId);
       await tx.execute(
-        sql`update sandbox_volumes set head_seq = ${next}, updated_at = now() where id = ${volumeId}`,
+        sql`update sandbox_volumes set head_seq = ${next}, updated_at = now(),
+          file_count = (select count(*) from sandbox_volume_entries where volume_id = ${volumeId} and kind = 'f'),
+          logical_bytes = (select coalesce(sum(size_bytes), 0) from sandbox_volume_entries where volume_id = ${volumeId} and kind = 'f')
+          where id = ${volumeId}`,
       );
       return next;
     });
+  }
+
+  async registeredPackSize(
+    volumeId: string,
+    packKey: string,
+  ): Promise<number | null> {
+    const rows = await this.db
+      .select({ size: sandboxVolumePacks.sizeBytes })
+      .from(sandboxVolumePacks)
+      .where(
+        and(
+          eq(sandboxVolumePacks.volumeId, volumeId),
+          eq(sandboxVolumePacks.packKey, packKey),
+          sql`not exists(select 1 from sandbox_volume_gc_candidates g where g.volume_id=${volumeId} and g.pack_key=${packKey} and g.state in ('deleting','deleted'))`,
+        ),
+      )
+      .limit(1);
+    return rows[0]?.size ?? null;
   }
 
   /** Repoint every chunk of `packKey` to `newKey` (after a server-side copy). */
@@ -479,6 +839,22 @@ export class VolumeRepository {
         sql`update sandbox_volume_packs set pack_key = ${newKey} where volume_id = ${volumeId} and pack_key = ${packKey}`,
       );
     });
+  }
+
+  /** A repeatable-read snapshot keeps tree, locations and head from different commits apart. */
+  async planSnapshot(volumeId: string) {
+    return this.db.transaction(
+      async (tx) => {
+        const view = new VolumeRepository(tx as unknown as VolumeDatabase);
+        const seq = await view.head(volumeId);
+        const { entries, chunkIds } = await view.planEntries(volumeId);
+        const chunks = await view.chunkLocations(volumeId, chunkIds);
+        if (Object.keys(chunks).length !== chunkIds.size)
+          throw new Error("volume index has missing chunks");
+        return { seq, entries, chunks };
+      },
+      { isolationLevel: "repeatable read", accessMode: "read only" },
+    );
   }
 
   async planEntries(

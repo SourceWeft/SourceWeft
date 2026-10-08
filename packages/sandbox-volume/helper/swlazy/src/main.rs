@@ -4,6 +4,7 @@ mod hydrate;
 mod notify;
 mod plan;
 mod store;
+mod volume;
 
 use anyhow::{bail, Result};
 use std::ffi::CString;
@@ -30,6 +31,16 @@ fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let cmd = args.get(1).map(|s| s.as_str()).unwrap_or("");
     match cmd {
+        // Explicit formal protocol; never auto-detect or fall back to experiment data.
+        "mount-volume" => {
+            if args.len() < 5 { bail!("usage: swlazy mount-volume <plan> <cache-dir> <mountpoint> [--cap-mb N]"); }
+            let plan: swvol_core::RestorePlan = serde_json::from_slice(&std::fs::read(&args[2])?)?;
+            plan.validate()?;
+            let cap: usize = opt(&args, "--cap-mb").map(|v| v.parse()).transpose()?.unwrap_or(64);
+            let cap = cap.checked_mul(1024 * 1024).ok_or_else(|| anyhow::anyhow!("cache capacity overflow"))?;
+            let store = volume::VolumeStore::new(&plan, Path::new(&args[3]), cap)?;
+            fuse::mount_volume(&plan, store, &args[4], flag(&args, "--allow-other"))?;
+        }
         // swlazy mount <plan> <cache-dir> <mountpoint> [--allow-other] [--cap-mb N]
         "mount" => {
             let t = Instant::now();

@@ -189,7 +189,7 @@ after(async () => {
 });
 
 test(
-  "the agent execute path attaches, syncs, and re-attaches a replaced container transparently",
+  "the agent execute path syncs and preserves unconfirmed files when helper state is damaged",
   { skip: !e2eEnabled, timeout: 1_200_000 },
   async () => {
     const context: SandboxRuntimeContext = {
@@ -218,21 +218,25 @@ test(
     );
     assert.ok(paths.includes("app/index.js"), paths.join(","));
 
-    // Simulate the provider silently handing back an empty container under the same id.
+    // Missing helper state in the same boot is not proof of container replacement.
     await provider.execute({
       providerSandboxId: sandboxId,
       command:
-        "kill $(cat /workspace/.sourceweft/daemon.pid) 2>/dev/null; rm -rf /workspace/.sourceweft /workspace/app",
+        "kill $(cat /workspace/.sourceweft/daemon.pid) 2>/dev/null; rm -f /workspace/.sourceweft/identity; echo unsaved > /workspace/preserve-unsaved.txt",
       timeoutMs: 30_000,
       maxOutputChars: 1000,
     });
-    const second = await backend.execute("cd /workspace && cat app/index.js");
-    assert.equal(second.exitCode, 0, second.output);
-    assert.equal(
-      second.output.trim(),
-      "console.log(1)",
-      "the volume was restored before the command ran",
+    await assert.rejects(
+      backend.execute("cd /workspace && rm preserve-unsaved.txt"),
+      /persistence|helper|unconfirmed/i,
     );
+    const remaining = await provider.execute({
+      providerSandboxId: sandboxId,
+      command: "cat /workspace/preserve-unsaved.txt /workspace/app/index.js",
+      timeoutMs: 30_000,
+      maxOutputChars: 1000,
+    });
+    assert.equal(remaining.output.trim(), "unsaved\nconsole.log(1)");
   },
 );
 
@@ -240,17 +244,8 @@ test(
   "shadow mode syncs the sandbox into the volume but never restores",
   { skip: !e2eEnabled, timeout: 1_200_000 },
   async () => {
-    // A second thread scope so the shadow volume is independent.
-    const scope = {
-      ...ctx.scope,
-      threadId:
-        (
-          await ctx.pool.query(
-            "select id from threads where id <> $1 limit 1",
-            [ctx.scope.threadId],
-          )
-        ).rows[0]?.id ?? ctx.scope.threadId,
-    };
+    const scope = ctx.scope;
+    const primaryBefore = await ctx.service.repo.findVolume(scope);
     const context: SandboxRuntimeContext = {
       ...scope,
       userId: "user-e2e",
@@ -270,8 +265,14 @@ test(
     const result = await backend.execute(
       "cd /workspace && echo new > created.txt && echo ok",
     );
-    assert.equal(result.output.trim(), "ok");
-    const volume = await ctx.service.repo.findVolume(scope);
+    assert.match(result.output, /^ok/);
+    assert.equal(result.durability?.status, "pending");
+    const observed = await ctx.pool.query(
+      "select v.id from sandbox_volumes v join sandbox_volume_attachments a on a.volume_id = v.id where v.thread_id = $1 and v.namespace like 'shadow:%' and a.sandbox_id = $2",
+      [scope.threadId, sandboxId],
+    );
+    assert.equal(observed.rowCount, 1);
+    const volume = await ctx.service.repo.getVolume(observed.rows[0].id);
     assert.ok(volume);
     volumes.push(volume.id);
     const paths = (await ctx.service.repo.entries(volume.id)).map(
@@ -283,7 +284,8 @@ test(
     );
     const headBefore = await ctx.service.repo.head(volume.id);
 
-    // A fresh sandbox in shadow mode gets nothing back; the volume then mirrors the empty tree.
+    // A fresh sandbox starts a distinct observation; neither the primary volume nor
+    // the earlier observation can receive deletions inferred from this empty tree.
     const fresh = await newSandbox();
     const { backend: shadowBackend } = backendFor(fresh, context, true);
     const probe = await shadowBackend.execute(
@@ -294,8 +296,8 @@ test(
       (e) => e.path,
     );
     assert.ok(
-      !after.includes("created.txt"),
-      `the volume follows the sandbox in shadow mode: ${after.join(",")}`,
+      after.includes("created.txt"),
+      `the previous observation stays intact: ${after.join(",")}`,
     );
     assert.ok(
       (await ctx.service.repo.entriesAt(volume.id, headBefore)).some(
@@ -303,5 +305,11 @@ test(
       ),
       "history keeps what the first sandbox had",
     );
+    assert.deepEqual(await ctx.service.repo.findVolume(scope), primaryBefore);
+    const observations = await ctx.pool.query(
+      "select id from sandbox_volumes where thread_id = $1 and namespace like 'shadow:%'",
+      [scope.threadId],
+    );
+    assert.equal(observations.rowCount, 2);
   },
 );

@@ -1,3 +1,4 @@
+import { volumeFailureResult } from "./volume-durability";
 import { SandboxInstanceChangedError } from "./errors";
 import { randomUUID } from "node:crypto";
 import {
@@ -862,8 +863,9 @@ export function createTrustedSandboxHostAdapter(input: {
         });
       };
       const abortWait = waitForAbort(executeInput.signal, beginCancellation);
-      const runOnce = () =>
-        providerExecuteSystem(current.provider)({
+      const runOnce = async () => {
+        await input.manager.volumeAssertActive(current.sandbox, input.context);
+        return providerExecuteSystem(current.provider)({
           providerSandboxId: current.sandbox.providerSandboxId,
           executionId,
           command: input.manager.volumeWrapCommand(
@@ -875,27 +877,10 @@ export function createTrustedSandboxHostAdapter(input: {
           maxOutputChars,
           ...(executeInput.signal ? { signal: executeInput.signal } : {}),
         });
-      // Same volume handling as the model execute path: a replaced container
-      // is re-attached and the command (which never ran) is issued once more.
+      };
       const execution = (async () => {
-        let result = await runOnce();
-        let parsed = await input.manager.volumeParseResult(
-          current.sandbox,
-          result,
-        );
-        if (parsed === null) {
-          await input.manager.reattachVolume(current.sandbox, input.context);
-          result = await runOnce();
-          parsed = await input.manager.volumeParseResult(
-            current.sandbox,
-            result,
-          );
-          if (parsed === null)
-            throw new Error(
-              "SANDBOX_INSTANCE_CHANGED: the sandbox container was replaced twice during one command.",
-            );
-        }
-        return parsed;
+        const result = await runOnce();
+        return input.manager.volumeParseResult(current.sandbox, result);
       })().then(
         (result) => ({ kind: "result" as const, result }),
         (error: unknown) => ({ kind: "error" as const, error }),
@@ -990,6 +975,7 @@ export function createTrustedSandboxHostAdapter(input: {
           output: redactSandboxText(result.output),
           exitCode: result.exitCode,
           truncated: result.truncated === true,
+          ...(result.durability ? { durability: result.durability } : {}),
         };
         await input.manager.recordOperation({
           context: input.context,
@@ -1001,6 +987,9 @@ export function createTrustedSandboxHostAdapter(input: {
             exitCode: normalized.exitCode,
             truncated: normalized.truncated,
             outputChars: normalized.output.length,
+            ...(normalized.durability
+              ? { durability: normalized.durability }
+              : {}),
           },
           durationMs: Date.now() - startedAt,
         });
@@ -1022,6 +1011,7 @@ export function createTrustedSandboxHostAdapter(input: {
             error: redactSandboxText(
               error instanceof Error ? error.message : String(error),
             ),
+            ...volumeFailureResult(error),
           },
           durationMs: Date.now() - startedAt,
         });

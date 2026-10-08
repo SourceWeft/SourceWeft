@@ -1,10 +1,11 @@
 [package]
 name = "swlazy"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Experiment: on-demand loading of a sandbox volume (FUSE read-through fs, and seccomp-notify placeholder hydration)"
 
 [dependencies]
+swvol-core = { path = "../swvol-core" }
 anyhow = "1"
 libc = "0.2"
 serde = { version = "1", features = ["derive"] }

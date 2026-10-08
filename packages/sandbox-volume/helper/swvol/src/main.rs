@@ -12,13 +12,16 @@
 //!   flush    --root R [--full]            sync barrier: via the daemon socket, or directly
 //!   treehash --root R                     deterministic digest of the tree (verification)
 
+mod safe_fs;
+
 use anyhow::{anyhow, bail, Context, Result};
+use swvol_core::{ChunkRef, ChunkLoc, WireEntry, Manifest, RestorePlan as Plan};
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
-use std::os::unix::fs::{FileExt as UnixFileExt, MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{FileExt as UnixFileExt, MetadataExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
@@ -45,17 +48,27 @@ const FULL_SCAN_INTERVAL: Duration = Duration::from_secs(300); // inotify is a h
 
 const EXIT_INSTANCE_CHANGED: i32 = 75; // not attached / container replaced: host must re-attach
 const EXIT_NEED_SLOTS: i32 = 76; // ran out of pre-signed slots: host must refresh
+const EXIT_NO_SPACE: i32 = 78; // retry after local storage is available
 const EXIT_PACK_UNREADABLE: i32 = 77; // a pack would not download: host must repair it and re-plan
 const READ_STALL_SECS: u64 = 3; // a download slower than MIN_BYTES_PER_WINDOW per window is cut off and resumed
 const MIN_BYTES_PER_WINDOW: usize = 2 * 1024 * 1024; // the sandbox link does ~47 MB/s: under 0.7 MB/s is a stall
 
+#[derive(Debug)]
+struct NeedSlots(String);
+impl std::fmt::Display for NeedSlots {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "NEED_SLOTS: {}", self.0) }
+}
+impl std::error::Error for NeedSlots {}
+
+fn error_exit_code(error: &anyhow::Error) -> i32 {
+    if error.downcast_ref::<NeedSlots>().is_some() { return EXIT_NEED_SLOTS; }
+    if error.chain().any(|cause| cause.downcast_ref::<std::io::Error>().map(|e| e.raw_os_error() == Some(28)).unwrap_or(false)) {
+        return EXIT_NO_SPACE;
+    }
+    1
+}
+
 // ---------- on-disk / wire types ----------
-
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
-struct ChunkRef(String, u32); // (blake3 hex, raw length)
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-struct ChunkLoc(String, u64, u32, u32); // (volume-relative pack key, offset, compressed len, raw len)
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 struct Entry {
@@ -81,41 +94,6 @@ struct State {
     have: HashMap<String, ChunkLoc>,
 }
 
-#[derive(Serialize, Deserialize)]
-struct WireEntry {
-    p: String,
-    k: char,
-    m: u32,
-    #[serde(with = "ns_string")]
-    t: i64,
-    s: u64,
-    #[serde(default)]
-    l: Option<String>,
-    #[serde(default)]
-    c: Vec<ChunkRef>,
-}
-
-#[derive(Serialize, Deserialize)]
-struct Manifest {
-    v: u32,
-    volume: String,
-    attachment: String,
-    boot_id: String,
-    seq: u64,
-    base: u64,
-    /// A full manifest is a self-contained snapshot: paths it does not list no longer exist.
-    #[serde(default)]
-    full: bool,
-    trigger: String,
-    upserts: Vec<WireEntry>,
-    deletes: Vec<String>,
-    chunks: BTreeMap<String, ChunkLoc>,
-    packs: Vec<(String, u64)>,
-    unstable: Vec<String>,
-    skipped: Vec<String>,
-    ts_ms: u64,
-}
-
 #[derive(Deserialize)]
 struct Slots {
     volume: String,
@@ -125,16 +103,6 @@ struct Slots {
     manifest_prefix: String,
     packs: HashMap<String, String>,
     manifests: HashMap<String, String>,
-}
-
-#[derive(Deserialize)]
-struct Plan {
-    volume: String,
-    attachment: String,
-    seq: u64,
-    entries: Vec<WireEntry>,
-    chunks: HashMap<String, ChunkLoc>,
-    packs: HashMap<String, String>,
 }
 
 // ---------- small helpers ----------
@@ -269,9 +237,7 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
     }
     fs::rename(&tmp, path)?;
     if let Some(dir) = path.parent() {
-        if let Ok(d) = File::open(dir) {
-            let _ = d.sync_all();
-        }
+        File::open(dir)?.sync_all()?;
     }
     Ok(())
 }
@@ -298,6 +264,8 @@ fn load_state(root: &Path) -> Result<Option<State>> {
 }
 
 fn save_state(root: &Path, st: &State) -> Result<()> {
+    #[cfg(test)]
+    if FAIL_STATE_SAVE.with(|fault| fault.get()) { return Err(std::io::Error::from_raw_os_error(28).into()); }
     atomic_write(&state_path(root), &bincode::serialize(st)?)
 }
 
@@ -346,40 +314,32 @@ fn excluded_at_root(name: &std::ffi::OsStr) -> bool {
 const SENTINEL_PREFIX: &str = ".sourceweft-sync-";
 
 /// Collect candidates under `start`. `recursive=false` lists direct children only.
-fn walk(root: &Path, start: &Path, recursive: bool, out: &mut Vec<Cand>, skipped: &mut Vec<String>) {
+fn walk(root: &Path, start: &Path, recursive: bool, out: &mut Vec<Cand>, skipped: &mut Vec<String>) -> Result<()> {
     let mut stack = vec![start.to_path_buf()];
     while let Some(dir) = stack.pop() {
-        let rd = match fs::read_dir(&dir) {
-            Ok(r) => r,
-            Err(_) => continue,
-        };
-        for ent in rd.flatten() {
+        let rd = fs::read_dir(&dir).with_context(|| format!("cannot read volume directory: {}", dir.display()))?;
+        for entry in rd {
+            let ent = entry.context("cannot enumerate a volume directory entry")?;
             let name = ent.file_name();
-            if dir == root && excluded_at_root(&name) {
-                continue;
-            }
+            if dir == root && excluded_at_root(&name) { continue; }
             let abs = ent.path();
-            let md = match fs::symlink_metadata(&abs) {
-                Ok(m) => m,
-                Err(_) => continue,
-            };
+            let md = fs::symlink_metadata(&abs).with_context(|| format!("cannot stat volume entry: {}", abs.display()))?;
             let ft = md.file_type();
             if !(ft.is_file() || ft.is_dir() || ft.is_symlink()) {
-                continue; // sockets, fifos, devices are not volume content
+                bail!("unsupported volume entry type: {}", abs.display());
             }
             let rel = match rel_of(root, &abs) {
                 Some(r) => r,
                 None => {
                     skipped.push(abs.to_string_lossy().to_string());
-                    continue;
+                    bail!("non-UTF-8 volume paths are unsupported; refusing an incomplete snapshot");
                 }
             };
-            if ft.is_dir() && recursive {
-                stack.push(abs.clone());
-            }
+            if ft.is_dir() && recursive { stack.push(abs.clone()); }
             out.push(Cand { rel, abs, md });
         }
     }
+    Ok(())
 }
 
 fn unchanged(e: &Entry, md: &fs::Metadata) -> bool {
@@ -422,8 +382,16 @@ impl<'a> PackWriter<'a> {
     /// Reserve the next pack slot. The reservation is durable BEFORE the slot is used,
     /// so a crash can never lead to the same write-once slot being chosen twice.
     fn reserve(&mut self) -> Result<u32> {
-        let n: u32 = fs::read_to_string(&self.counter).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
-        atomic_write(&self.counter, (n + 1).to_string().as_bytes())?;
+        let n: u32 = match fs::read_to_string(&self.counter) {
+            Ok(value) => value.trim().parse().context("pack counter is corrupt")?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
+            Err(error) => return Err(error.into()),
+        };
+        if !self.slots.packs.contains_key(&n.to_string()) {
+            return Err(NeedSlots(format!("no pack slot {n}")).into());
+        }
+        let next = n.checked_add(1).context("pack counter exhausted")?;
+        atomic_write(&self.counter, next.to_string().as_bytes())?;
         Ok(n)
     }
 
@@ -458,11 +426,6 @@ impl<'a> PackWriter<'a> {
     fn add(&mut self, id: &str, data: &[u8]) -> Result<()> {
         if self.cur_key.is_none() {
             self.next_pack = self.reserve()?;
-            let n = self.next_pack.to_string();
-            if !self.slots.packs.contains_key(&n) {
-                eprintln!("swvol: NEED_SLOTS: no pack slot {n}");
-                std::process::exit(EXIT_NEED_SLOTS);
-            }
             self.cur_key = Some(format!("{}{:06}", self.slots.pack_prefix, self.next_pack));
         }
         let comp = zstd::bulk::compress(data, ZSTD_LEVEL)?;
@@ -513,9 +476,21 @@ impl<'a> PackWriter<'a> {
     }
 }
 
+#[cfg(test)]
+thread_local! { static FAIL_CHUNK_READ: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
+
+impl Drop for PackWriter<'_> {
+    fn drop(&mut self) {
+        self.tx.take();
+        for worker in self.uploaders.drain(..) { let _ = worker.join(); }
+    }
+}
+
 /// Read a file as content-defined chunks. Returns (refs, stable): `stable=false`
 /// means it changed while being read and must be captured again next time.
 fn chunk_file(abs: &Path, md: &fs::Metadata, have: &HashMap<String, ChunkLoc>, pw: &mut PackWriter) -> Result<(Vec<ChunkRef>, bool, u64)> {
+    #[cfg(test)]
+    if FAIL_CHUNK_READ.with(|fault| fault.get()) { bail!("injected file read failure"); }
     let mut refs = Vec::new();
     let mut push = |data: &[u8], pw: &mut PackWriter| -> Result<()> {
         let id = blake3::hash(data).to_hex().to_string();
@@ -542,7 +517,10 @@ fn chunk_file(abs: &Path, md: &fs::Metadata, have: &HashMap<String, ChunkLoc>, p
     // a file that is still being written must not produce an entry whose chunks disagree with its size.
     let read: u64 = refs.iter().map(|r| r.1 as u64).sum();
     let after = fs::symlink_metadata(abs)?;
-    let stable = read == md.len() && after.len() == md.len() && after.mtime() == md.mtime() && after.mtime_nsec() == md.mtime_nsec();
+    let stable = read == md.len() && after.is_file() && after.len() == md.len()
+        && after.ino() == md.ino() && after.dev() == md.dev() && after.mode() == md.mode()
+        && after.mtime() == md.mtime() && after.mtime_nsec() == md.mtime_nsec()
+        && after.ctime() == md.ctime() && after.ctime_nsec() == md.ctime_nsec();
     Ok((refs, stable, read))
 }
 
@@ -590,7 +568,16 @@ fn sync_once(root: &Path, st: &mut State, scope: Scope, trigger: &str, rebase: O
         bail!("slots belong to a different attachment");
     }
     // Finish a commit that was interrupted between "manifest uploaded" and "state saved".
-    recover_pending(root, st, &slots)?;
+    if rebase.is_some() {
+        // The host explicitly rejected the old chain and issued a new epoch.
+        // Keep every old byte for recovery; never replay it into a new slot.
+        quarantine_pending(root)?;
+    } else {
+        recover_pending(root, st, &slots)?;
+    }
+    let old_seq = st.seq;
+    let mut removed_locs = HashMap::new();
+    let mut changed_ctimes = Vec::new();
     let scope = if let Some(head) = rebase {
         // The host refused part of our chain and is at `head`. Restart from there with a
         // self-contained snapshot. Chunk data that lived inside manifests the host never
@@ -603,10 +590,11 @@ fn sync_once(root: &Path, st: &mut State, scope: Scope, trigger: &str, rebase: O
             .map(|(id, _)| id.clone())
             .collect();
         for id in &dropped {
-            st.have.remove(id);
+            if let Some(loc) = st.have.remove(id) { removed_locs.insert(id.clone(), loc); }
         }
-        for e in st.entries.values_mut() {
+        for (path, e) in &mut st.entries {
             if e.chunks.iter().any(|c| dropped.contains(&c.0)) {
+                changed_ctimes.push((path.clone(), e.ctime_ns));
                 e.ctime_ns = -1;
             }
         }
@@ -616,6 +604,16 @@ fn sync_once(root: &Path, st: &mut State, scope: Scope, trigger: &str, rebase: O
         scope
     };
 
+    let result = sync_scoped(root, st, scope, trigger, rebase, &slots, t0);
+    if result.is_err() && rebase.is_some() {
+        st.seq = old_seq;
+        st.have.extend(removed_locs);
+        for (path, ctime) in changed_ctimes { if let Some(entry) = st.entries.get_mut(&path) { entry.ctime_ns = ctime; } }
+    }
+    result
+}
+
+fn sync_scoped(root: &Path, st: &mut State, scope: Scope, trigger: &str, rebase: Option<u64>, slots: &Slots, t0: Instant) -> Result<SyncReport> {
     let mut cands = Vec::new();
     let mut skipped = Vec::new();
     let mut deletes: BTreeSet<String> = BTreeSet::new();
@@ -623,7 +621,7 @@ fn sync_once(root: &Path, st: &mut State, scope: Scope, trigger: &str, rebase: O
     match &scope {
         Scope::Full => {
             scope_name = "full".to_string();
-            walk(root, root, true, &mut cands, &mut skipped);
+            walk(root, root, true, &mut cands, &mut skipped)?;
             let seen: HashSet<&str> = cands.iter().map(|c| c.rel.as_str()).collect();
             for k in st.entries.keys() {
                 if !seen.contains(k.as_str()) {
@@ -644,7 +642,7 @@ fn sync_once(root: &Path, st: &mut State, scope: Scope, trigger: &str, rebase: O
                         if !rel.is_empty() {
                             cands.push(Cand { rel: rel.clone(), abs: t.clone(), md });
                         }
-                        walk(root, t, true, &mut cands, &mut skipped);
+                        walk(root, t, true, &mut cands, &mut skipped)?;
                         let seen: HashSet<&str> = cands[before..].iter().map(|c| c.rel.as_str()).collect();
                         let prefix = if rel.is_empty() { String::new() } else { format!("{rel}/") };
                         for (k, _) in st.entries.range(prefix.clone()..) {
@@ -656,7 +654,9 @@ fn sync_once(root: &Path, st: &mut State, scope: Scope, trigger: &str, rebase: O
                             }
                         }
                     }
-                    _ => delete_prefix(&st.entries, &rel, &mut deletes),
+                    Ok(_) => delete_prefix(&st.entries, &rel, &mut deletes),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => delete_prefix(&st.entries, &rel, &mut deletes),
+                    Err(error) => return Err(error).with_context(|| format!("cannot stat volume path: {}", rel)),
                 }
             }
             for d in dirs {
@@ -670,7 +670,7 @@ fn sync_once(root: &Path, st: &mut State, scope: Scope, trigger: &str, rebase: O
                 match fs::symlink_metadata(d) {
                     Ok(md) if md.is_dir() => {
                         let before = cands.len();
-                        walk(root, d, false, &mut cands, &mut skipped);
+                        walk(root, d, false, &mut cands, &mut skipped)?;
                         let seen: HashSet<&str> = cands[before..].iter().map(|c| c.rel.as_str()).collect();
                         let prefix = if rel.is_empty() { String::new() } else { format!("{rel}/") };
                         let mut gone = Vec::new();
@@ -689,15 +689,20 @@ fn sync_once(root: &Path, st: &mut State, scope: Scope, trigger: &str, rebase: O
                             delete_prefix(&st.entries, &g, &mut deletes);
                         }
                     }
-                    _ => delete_prefix(&st.entries, &rel, &mut deletes),
+                    Ok(_) => delete_prefix(&st.entries, &rel, &mut deletes),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => delete_prefix(&st.entries, &rel, &mut deletes),
+                    Err(error) => return Err(error).with_context(|| format!("cannot stat volume path: {}", rel)),
                 }
             }
         }
     }
 
+    // Watch scopes can overlap (for example a new parent and its heavy subtree).
+    cands.sort_by(|a, b| a.rel.cmp(&b.rel));
+    cands.dedup_by(|a, b| a.rel == b.rel);
     let mut pw = PackWriter::new(&slots, root);
     let mut upserts: Vec<(String, Entry)> = Vec::new();
-    let mut unstable = Vec::new();
+    let unstable = Vec::new();
     let mut bytes_read = 0u64;
     let scanned = cands.len();
     for c in &cands {
@@ -721,7 +726,7 @@ fn sync_once(root: &Path, st: &mut State, scope: Scope, trigger: &str, rebase: O
             e.kind = 'l';
             match fs::read_link(&c.abs).ok().and_then(|t| t.to_str().map(|s| s.to_string())) {
                 Some(t) => e.link = Some(t),
-                None => continue,
+                None => bail!("cannot persist unreadable or non-UTF-8 symlink target: {}", c.rel),
             }
         } else if ft.is_file() {
             e.kind = 'f';
@@ -733,10 +738,10 @@ fn sync_once(root: &Path, st: &mut State, scope: Scope, trigger: &str, rebase: O
                     e.chunks = refs;
                     if !stable {
                         // Keep the pre-read stat so the next scan sees a difference and re-captures.
-                        unstable.push(c.rel.clone());
+                        bail!("UNSTABLE_FILE: changed while capturing {}", c.rel);
                     }
                 }
-                Err(_) => continue, // vanished or unreadable mid-scan: next scan decides
+                Err(error) => return Err(error).with_context(|| format!("cannot persist file read: {}", c.rel)),
             }
         } else {
             e.mtime_ns = 0; // directory mtimes are not content
@@ -773,10 +778,7 @@ fn sync_once(root: &Path, st: &mut State, scope: Scope, trigger: &str, rebase: O
     let inline = pw.finish(&manifest_key)?; // every referenced pack is in the bucket before the manifest exists
     let url = match slots.manifests.get(&seq.to_string()) {
         Some(u) => u.clone(),
-        None => {
-            eprintln!("swvol: NEED_SLOTS: no manifest slot {seq}");
-            std::process::exit(EXIT_NEED_SLOTS);
-        }
+        None => return Err(NeedSlots(format!("no manifest slot {seq}")).into()),
     };
     let wire = |p: &String, e: &Entry| WireEntry { p: p.clone(), k: e.kind, m: e.mode, t: e.mtime_ns, s: e.size, l: e.link.clone(), c: e.chunks.clone() };
     let (m_upserts, m_deletes, m_chunks) = if rebase.is_some() {
@@ -830,17 +832,18 @@ fn sync_once(root: &Path, st: &mut State, scope: Scope, trigger: &str, rebase: O
     // are uploaded, so a crash after the upload replays the SAME manifest for this seq.
     let pending = meta_dir(root).join("pending.manifest");
     let apply = PendingApply { seq, rebase: rebase.is_some(), next_pack: pw.next_pack, upserts, deletes: deletes.into_iter().collect(), new_locs: pw.new_locs.clone(), unstable };
-    atomic_write(&pending, &bincode::serialize(&(body.clone(), &apply))?)?;
+    let journal = PendingJournal { manifest_key: manifest_key.clone(), body: body.clone(), apply };
+    atomic_write(&pending, &encode_pending(&journal)?)?;
     fault("before_manifest_put");
     if !http_put(&agent(), &url, &body)? {
         // Our state says this seq is free, the bucket says it is taken: never guess, let the host rebase us.
-        let _ = fs::remove_file(&pending);
         bail!("MANIFEST_SLOT_TAKEN: seq {seq} already exists in this epoch");
     }
     fault("after_manifest_put");
-    apply_pending(st, apply);
-    save_state(root, st)?;
-    let _ = fs::remove_file(&pending);
+    commit_pending(root, st, journal.apply)?;
+    // A durable commit does not become uncommitted if journal housekeeping fails.
+    // Recovery recognizes this seq as already applied and retries cleanup.
+    if let Err(error) = fs::remove_file(&pending) { eprintln!("swvol: committed journal cleanup pending: {error}"); }
 
     rep.committed = true;
     rep.seq = seq;
@@ -868,43 +871,107 @@ struct PendingApply {
     unstable: Vec<String>,
 }
 
-fn apply_pending(st: &mut State, p: PendingApply) {
+/// Publish the new local index only if its durable write succeeds. The undo log
+/// owns only affected entries/chunks, rather than cloning the whole volume index.
+fn commit_pending(root: &Path, st: &mut State, p: PendingApply) -> Result<()> {
+    let old_seq = st.seq;
+    let old_pack = st.next_pack;
+    let mut entries = BTreeMap::<String, Option<Entry>>::new();
+    let mut chunks = HashMap::<String, Option<ChunkLoc>>::new();
     let unstable: HashSet<String> = p.unstable.into_iter().collect();
-    for d in p.deletes {
-        st.entries.remove(&d);
+    for path in p.deletes {
+        let old = st.entries.remove(&path);
+        entries.entry(path).or_insert(old);
     }
-    for (path, mut e) in p.upserts {
-        if unstable.contains(&path) {
-            e.ctime_ns = -1; // never equal: forces a re-read on the next scan
-        }
-        st.entries.insert(path, e);
+    for (path, mut entry) in p.upserts {
+        if unstable.contains(&path) { entry.ctime_ns = -1; }
+        let old = st.entries.insert(path.clone(), entry);
+        entries.entry(path).or_insert(old);
     }
-    st.have.extend(p.new_locs);
+    for (id, loc) in p.new_locs {
+        let old = st.have.insert(id.clone(), loc);
+        chunks.insert(id, old);
+    }
     st.seq = p.seq;
     st.next_pack = p.next_pack;
+    if let Err(error) = save_state(root, st) {
+        for (path, old) in entries {
+            match old { Some(entry) => { st.entries.insert(path, entry); }, None => { st.entries.remove(&path); } }
+        }
+        for (id, old) in chunks {
+            match old { Some(loc) => { st.have.insert(id, loc); }, None => { st.have.remove(&id); } }
+        }
+        st.seq = old_seq;
+        st.next_pack = old_pack;
+        return Err(error);
+    }
+    Ok(())
 }
 
+const PENDING_MAGIC: &[u8] = b"SWVPEND2\n";
+#[derive(Serialize, Deserialize)]
+struct PendingJournal {
+    manifest_key: String,
+    body: Vec<u8>,
+    apply: PendingApply,
+}
+fn encode_pending(journal: &PendingJournal) -> Result<Vec<u8>> {
+    let mut bytes = PENDING_MAGIC.to_vec();
+    bytes.extend(bincode::serialize(journal)?);
+    Ok(bytes)
+}
+fn decode_pending(bytes: &[u8]) -> Result<PendingJournal> {
+    let payload = bytes.strip_prefix(PENDING_MAGIC).context("unsupported or corrupt pending journal; preserve it and request explicit rebase recovery")?;
+    bincode::deserialize(payload).context("pending journal is corrupt; preserving it for recovery")
+}
+fn quarantine_pending(root: &Path) -> Result<()> {
+    let pending = meta_dir(root).join("pending.manifest");
+    match fs::symlink_metadata(&pending) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+        Ok(metadata) if !metadata.is_file() => bail!("pending journal is not a regular file"),
+        Ok(_) => {},
+    }
+    let directory = meta_dir(root).join("recovery");
+    fs::create_dir_all(&directory)?;
+    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))?;
+    for attempt in 0..100 {
+        let archive = directory.join(format!("pending-{}-{}-{attempt}.bin", now_ms(), std::process::id()));
+        match fs::hard_link(&pending, &archive) {
+            Ok(()) => {
+                File::open(&directory)?.sync_all()?;
+                fs::remove_file(&pending)?;
+                File::open(meta_dir(root))?.sync_all()?;
+                return Ok(());
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error).context("cannot preserve rejected pending journal"),
+        }
+    }
+    bail!("cannot reserve pending recovery archive")
+}
 fn recover_pending(root: &Path, st: &mut State, slots: &Slots) -> Result<()> {
     let pending = meta_dir(root).join("pending.manifest");
     let bytes = match fs::read(&pending) {
-        Ok(b) => b,
-        Err(_) => return Ok(()),
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error).context("cannot read pending manifest"),
     };
-    let (body, apply): (Vec<u8>, PendingApply) = match bincode::deserialize(&bytes) {
-        Ok(v) => v,
-        Err(_) => {
-            let _ = fs::remove_file(&pending); // torn write: nothing was uploaded under this seq
-            return Ok(());
-        }
-    };
-    if apply.seq == st.seq + 1 || apply.rebase {
-        let url = slots.manifests.get(&apply.seq.to_string()).ok_or_else(|| anyhow!("no slot to replay pending manifest"))?;
-        // Either it is written now, or it was already there (412) from before the crash: same bytes either way.
-        http_put(&agent(), url, &body)?;
-        apply_pending(st, apply);
-        save_state(root, st)?;
+    let journal = decode_pending(&bytes)?;
+    let PendingJournal { manifest_key, body, apply } = journal;
+    if manifest_key != format!("{}{}", slots.manifest_prefix, apply.seq) {
+        bail!("PENDING_EPOCH_MISMATCH: old bytes retained; explicit rebase recovery required");
     }
-    let _ = fs::remove_file(&pending);
+    if apply.seq == st.seq + 1 || apply.rebase {
+        let url = slots.manifests.get(&apply.seq.to_string()).ok_or_else(|| NeedSlots(format!("no manifest slot {} to replay", apply.seq)))?;
+        // An already-written immutable slot is safe only for the exact key and
+        // bytes reserved in this durable journal before the first upload.
+        http_put(&agent(), url, &body)?;
+        commit_pending(root, st, apply)?;
+    } else if apply.seq != st.seq {
+        bail!("pending manifest sequence disagrees with local state; preserving it for recovery");
+    }
+    fs::remove_file(&pending)?;
     Ok(())
 }
 
@@ -912,17 +979,22 @@ fn recover_pending(root: &Path, st: &mut State, slots: &Slots) -> Result<()> {
 
 fn cmd_restore(root: &Path, plan_src: &str, index_only: bool) -> Result<()> {
     let t0 = Instant::now();
-    fs::create_dir_all(meta_dir(root))?;
-    let lock = OpenOptions::new().create(true).write(true).open(meta_dir(root).join("lock"))?;
-    lock.try_lock_exclusive().map_err(|_| anyhow!("another swvol (restore or daemon) is running in this workspace"))?;
     let raw = if plan_src.starts_with("http://") || plan_src.starts_with("https://") { http_get(plan_src)? } else { fs::read(plan_src)? };
     let raw = if raw.starts_with(&[0x28, 0xb5, 0x2f, 0xfd]) { zstd::stream::decode_all(&raw[..])? } else { raw };
     let plan: Plan = serde_json::from_slice(&raw).context("plan is not valid JSON")?;
-    fs::create_dir_all(meta_dir(root))?;
-    // A restore that does not finish must never look attached.
-    let _ = fs::remove_file(meta_dir(root).join("identity"));
-    let _ = fs::remove_file(state_path(root));
-    let _ = fs::remove_file(meta_dir(root).join("pending.manifest"));
+    plan.validate()?;
+    let root_dir = safe_fs::Directory::open_root(root)?;
+    if !index_only { root_dir.require_empty_content()?; }
+    let metadata = root_dir.directory(META_DIR, true)?;
+    metadata.chmod("", 0o700)?;
+    let lock = metadata.lock_file()?;
+    lock.try_lock_exclusive().map_err(|_| anyhow!("another swvol (restore or daemon) is running in this workspace"))?;
+    if metadata.names()?.iter().any(|name| name == "pending.manifest") {
+        bail!("PENDING_RESTORE_CONFLICT: preserve or explicitly recover pending journal before restoring");
+    }
+    // Existing user content and pending commits are checked before touching identity.
+    metadata.remove("identity", false)?;
+    metadata.remove("state.bin", false)?;
 
     if index_only {
         // Shadow mode: nothing is written to the tree. The local index is seeded from the plan with
@@ -933,16 +1005,21 @@ fn cmd_restore(root: &Path, plan_src: &str, index_only: bool) -> Result<()> {
             st.entries.insert(e.p.clone(), Entry { kind: e.k, mode: e.m, mtime_ns: e.t, size: e.s, link: e.l.clone(), chunks: e.c.clone(), ino: 0, ctime_ns: 0 });
         }
         st.have = plan.chunks.clone();
-        save_state(root, &st)?;
-        atomic_write(&meta_dir(root).join("identity"), format!("{}\n{}\n", st.attachment, st.boot_id).as_bytes())?;
+        metadata.atomic_write("state.bin", &bincode::serialize(&st)?)?;
+        metadata.atomic_write("identity", format!("{}\n{}\n", st.attachment, st.boot_id).as_bytes())?;
         println!("{}", serde_json::json!({"ok": true, "shadow": true, "seq": plan.seq, "entries": plan.entries.len(), "boot_id": st.boot_id, "ms": t0.elapsed().as_millis() as u64}));
         return Ok(());
     }
 
+    // Build only in a newly created protected directory. Failed downloads leave
+    // an inspectable staging tree and never replace existing workspace files.
+    let staging_name = format!("restore-{}-{}", now_ms(), std::process::id());
+    if metadata.names()?.contains(&staging_name) { bail!("restore staging name collision"); }
+    let staging = metadata.new_directory(&staging_name)?;
     let mut dirs: Vec<&WireEntry> = plan.entries.iter().filter(|e| e.k == 'd').collect();
     dirs.sort_by(|a, b| a.p.cmp(&b.p));
     for d in &dirs {
-        fs::create_dir_all(root.join(&d.p))?;
+        staging.directory(&d.p, true)?;
     }
     // chunk id -> [(file index, offset)]
     let files: Vec<&WireEntry> = plan.entries.iter().filter(|e| e.k == 'f').collect();
@@ -952,22 +1029,13 @@ fn cmd_restore(root: &Path, plan_src: &str, index_only: bool) -> Result<()> {
     // single open: create, write, set mode and mtime, fstat, close. No second pass over them.
     let single: Vec<bool> = files.iter().map(|f| f.c.len() == 1).collect();
     let stats: Mutex<Vec<Option<(u64, i64, i64, u64, u32)>>> = Mutex::new(vec![None; files.len()]);
-    let create = |path: &Path, mode: u32| -> std::io::Result<File> {
-        let open = || OpenOptions::new().write(true).create(true).truncate(true).mode(mode).open(path);
-        match open() {
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                if let Some(parent) = path.parent() {
-                    fs::create_dir_all(parent)?;
-                }
-                open()
-            }
-            r => r,
-        }
-    };
+    let mut identities = vec![(0u64, 0u64); files.len()];
     for (i, f) in files.iter().enumerate() {
         if !single[i] {
-            let fh = create(&root.join(&f.p), 0o600)?;
+            let fh = staging.create_file(&f.p)?;
             fh.set_len(f.s)?;
+            let md = fh.metadata()?;
+            identities[i] = (md.dev(), md.ino());
         }
         let mut off = 0u64;
         for ChunkRef(id, len) in &f.c {
@@ -1021,22 +1089,18 @@ fn cmd_restore(root: &Path, plan_src: &str, index_only: bool) -> Result<()> {
                             if end > body.len() {
                                 bail!("pack {pack} is shorter than the plan says");
                             }
-                            let data = zstd::bulk::decompress(&body[loc.1 as usize..end], loc.3 as usize)?;
-                            if blake3::hash(&data).to_hex().as_str() != *id {
-                                bail!("chunk {id} failed verification");
-                            }
+                            let data = swvol_core::decode_chunk(id, loc, &body[loc.1 as usize..end])?;
                             for (fi, off) in &targets[*id] {
                                 let f = files[*fi];
-                                let path = root.join(&f.p);
                                 if single[*fi] {
-                                    let fh = create(&path, f.m)?;
+                                    let fh = staging.create_file(&f.p)?;
                                     (&fh).write_all(&data)?;
                                     fh.set_permissions(fs::Permissions::from_mode(f.m))?;
                                     filetime::set_file_handle_times(&fh, None, Some(filetime::FileTime::from_unix_time(f.t.div_euclid(1_000_000_000), f.t.rem_euclid(1_000_000_000) as u32)))?;
                                     let md = fh.metadata()?;
                                     stats.lock().unwrap()[*fi] = Some((md.ino(), md.ctime() * 1_000_000_000 + md.ctime_nsec(), md.mtime() * 1_000_000_000 + md.mtime_nsec(), md.len(), md.mode() & 0o7777));
                                 } else {
-                                    let fh = OpenOptions::new().write(true).open(&path)?;
+                                    let fh = staging.open_created_file(&f.p, identities[*fi])?;
                                     fh.write_all_at(&data, *off)?;
                                 }
                             }
@@ -1060,26 +1124,18 @@ fn cmd_restore(root: &Path, plan_src: &str, index_only: bool) -> Result<()> {
         std::process::exit(EXIT_PACK_UNREADABLE);
     }
     for l in plan.entries.iter().filter(|e| e.k == 'l') {
-        let path = root.join(&l.p);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let _ = fs::remove_file(&path);
-        std::os::unix::fs::symlink(l.l.as_deref().unwrap_or(""), &path)?;
+        staging.symlink(&l.p, l.l.as_deref().unwrap_or(""))?;
     }
     for (i, f) in files.iter().enumerate() {
         if single[i] {
             continue;
         }
-        let path = root.join(&f.p);
-        fs::set_permissions(&path, fs::Permissions::from_mode(f.m))?;
-        filetime::set_file_mtime(&path, filetime::FileTime::from_unix_time(f.t.div_euclid(1_000_000_000), f.t.rem_euclid(1_000_000_000) as u32))?;
+        let fh = staging.open_created_file(&f.p, identities[i])?;
+        fh.set_permissions(fs::Permissions::from_mode(f.m))?;
+        filetime::set_file_handle_times(&fh, None, Some(filetime::FileTime::from_unix_time(f.t.div_euclid(1_000_000_000), f.t.rem_euclid(1_000_000_000) as u32)))?;
     }
     let stats = stats.into_inner().unwrap();
     let file_index: HashMap<&str, usize> = files.iter().enumerate().map(|(i, f)| (f.p.as_str(), i)).collect();
-    for d in dirs.iter().rev() {
-        fs::set_permissions(root.join(&d.p), fs::Permissions::from_mode(d.m))?;
-    }
     // Local state comes from the plan: nothing restored is ever re-uploaded.
     let mut st = State { volume: plan.volume.clone(), attachment: plan.attachment.clone(), boot_id: boot_id(), seq: plan.seq, next_pack: 0, ..Default::default() };
     for e in &plan.entries {
@@ -1087,12 +1143,12 @@ fn cmd_restore(root: &Path, plan_src: &str, index_only: bool) -> Result<()> {
             st.entries.insert(e.p.clone(), Entry { kind: 'f', mode, mtime_ns, size, link: None, chunks: e.c.clone(), ino, ctime_ns });
             continue;
         }
-        let md = fs::symlink_metadata(root.join(&e.p))?;
+        let md = staging.metadata(&e.p)?;
         st.entries.insert(
             e.p.clone(),
             Entry {
                 kind: e.k,
-                mode: md.mode() & 0o7777,
+                mode: if e.k == 'd' { e.m } else { md.mode() & 0o7777 },
                 mtime_ns: if e.k == 'd' { 0 } else { md.mtime() * 1_000_000_000 + md.mtime_nsec() },
                 size: if e.k == 'f' { md.len() } else { 0 },
                 link: e.l.clone(),
@@ -1103,35 +1159,21 @@ fn cmd_restore(root: &Path, plan_src: &str, index_only: bool) -> Result<()> {
         );
     }
     st.have = plan.chunks.clone();
-    save_state(root, &st)?;
+    for d in dirs.iter().rev() {
+        staging.chmod(&d.p, d.m)?;
+    }
+    root_dir.require_empty_content()?;
+    staging.publish_into(&root_dir)?;
+    metadata.remove(&staging_name, true)?;
+    metadata.atomic_write("state.bin", &bincode::serialize(&st)?)?;
     // Written last: its presence means "this boot of this container holds a complete restore".
-    atomic_write(&meta_dir(root).join("identity"), format!("{}\n{}\n", st.attachment, st.boot_id).as_bytes())?;
+    metadata.atomic_write("identity", format!("{}\n{}\n", st.attachment, st.boot_id).as_bytes())?;
     println!(
         "{}",
         serde_json::json!({"ok": true, "seq": plan.seq, "entries": plan.entries.len(), "files": files.len(), "bytes": total,
             "packs": work.len(), "downloaded": *downloaded.lock().unwrap(), "boot_id": st.boot_id, "ms": t0.elapsed().as_millis() as u64})
     );
     Ok(())
-}
-
-/// Nanosecond timestamps travel as decimal strings: JSON numbers above 2^53 are not exact for JavaScript hosts.
-mod ns_string {
-    use serde::{Deserialize, Deserializer, Serializer};
-    pub fn serialize<S: Serializer>(v: &i64, s: S) -> Result<S::Ok, S::Error> {
-        s.serialize_str(&v.to_string())
-    }
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<i64, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(untagged)]
-        enum Raw {
-            S(String),
-            N(i64),
-        }
-        match Raw::deserialize(d)? {
-            Raw::S(x) => x.parse().map_err(serde::de::Error::custom),
-            Raw::N(n) => Ok(n),
-        }
-    }
 }
 
 // ---------- daemon: inotify + triggers ----------
@@ -1147,13 +1189,15 @@ struct Dirty {
     /// Highest flush sentinel the watcher has seen. inotify delivers events in
     /// order, so once sentinel N is seen every earlier event has been recorded.
     sentinel: u64,
+    /// Subtrees whose contents cannot be observed recursively by inotify.
+    must_scan: HashSet<PathBuf>,
 }
 
 fn is_heavy(name: &std::ffi::OsStr) -> bool {
     HEAVY_DIRS.iter().any(|h| name == *h)
 }
 
-fn add_watches(watches: &mut inotify::Watches, map: &mut HashMap<inotify::WatchDescriptor, (PathBuf, bool)>, root: &Path, start: &Path, overflow: &mut bool) {
+fn add_watches(watches: &mut inotify::Watches, map: &mut HashMap<inotify::WatchDescriptor, (PathBuf, bool)>, root: &Path, start: &Path, overflow: &mut bool, must_scan: &mut HashSet<PathBuf>) {
     use inotify::WatchMask as M;
     let mask = M::CREATE | M::MODIFY | M::CLOSE_WRITE | M::DELETE | M::MOVED_FROM | M::MOVED_TO | M::ATTRIB | M::DELETE_SELF | M::DONT_FOLLOW;
     let mut stack = vec![start.to_path_buf()];
@@ -1164,22 +1208,30 @@ fn add_watches(watches: &mut inotify::Watches, map: &mut HashMap<inotify::WatchD
                 map.insert(wd, (dir.clone(), heavy));
             }
             Err(_) => {
-                *overflow = true; // watch limit: correctness falls back to full scans
+                *overflow = true;
+                must_scan.insert(dir.clone());
                 continue;
             }
         }
         if heavy {
-            continue; // one watch at the top; any event rescans the whole subtree
+            must_scan.insert(dir.clone());
+            continue; // nested writes do not emit events at this directory
         }
-        if let Ok(rd) = fs::read_dir(&dir) {
-            for ent in rd.flatten() {
-                if dir == root && excluded_at_root(&ent.file_name()) {
-                    continue;
+        match fs::read_dir(&dir) {
+            Ok(rd) => for ent in rd {
+                match ent {
+                    Ok(ent) => {
+                        if dir == root && excluded_at_root(&ent.file_name()) { continue; }
+                        match ent.file_type() {
+                            Ok(kind) if kind.is_dir() => stack.push(ent.path()),
+                            Ok(_) => {},
+                            Err(_) => { must_scan.insert(dir.clone()); }
+                        }
+                    }
+                    Err(_) => { must_scan.insert(dir.clone()); }
                 }
-                if ent.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                    stack.push(ent.path());
-                }
-            }
+            },
+            Err(_) => { must_scan.insert(dir.clone()); }
         }
     }
 }
@@ -1190,9 +1242,12 @@ fn watcher_thread(root: PathBuf, dirty: Arc<Mutex<Dirty>>) -> Result<()> {
     let mut watches = ino.watches();
     let mut map: HashMap<inotify::WatchDescriptor, (PathBuf, bool)> = HashMap::new();
     let mut overflow = false;
-    add_watches(&mut watches, &mut map, &root, &root, &mut overflow);
-    if overflow {
-        dirty.lock().unwrap().need_full = true;
+    let mut must_scan = HashSet::new();
+    add_watches(&mut watches, &mut map, &root, &root, &mut overflow, &mut must_scan);
+    {
+        let mut d = dirty.lock().unwrap();
+        d.need_full |= overflow;
+        d.must_scan.extend(must_scan);
     }
     let mut buf = vec![0u8; 256 * 1024];
     loop {
@@ -1203,6 +1258,8 @@ fn watcher_thread(root: PathBuf, dirty: Arc<Mutex<Dirty>>) -> Result<()> {
             for ev in events {
                 if ev.mask.contains(E::Q_OVERFLOW) {
                     d.need_full = true;
+                    // Lost CREATE events may also mean lost watch coverage.
+                    d.must_scan.insert(root.clone());
                     d.first.get_or_insert_with(Instant::now);
                     d.last = Some(Instant::now());
                     continue;
@@ -1245,10 +1302,11 @@ fn watcher_thread(root: PathBuf, dirty: Arc<Mutex<Dirty>>) -> Result<()> {
         }
         for p in new_dirs {
             let mut of = false;
-            add_watches(&mut watches, &mut map, &root, &p, &mut of);
-            if of {
-                dirty.lock().unwrap().need_full = true;
-            }
+            let mut must_scan = HashSet::new();
+            add_watches(&mut watches, &mut map, &root, &p, &mut of, &mut must_scan);
+            let mut d = dirty.lock().unwrap();
+            d.need_full |= of;
+            d.must_scan.extend(must_scan);
         }
     }
 }
@@ -1261,9 +1319,11 @@ fn cmd_daemon(root: &Path) -> Result<()> {
     {
         let (r, d) = (root.to_path_buf(), dirty.clone());
         std::thread::spawn(move || {
-            if let Err(e) = watcher_thread(r, d.clone()) {
+            if let Err(e) = watcher_thread(r.clone(), d.clone()) {
                 eprintln!("swvol: watcher stopped: {e}");
-                d.lock().unwrap().need_full = true;
+                let mut dirty = d.lock().unwrap();
+                dirty.need_full = true;
+                dirty.must_scan.insert(r);
             }
         });
     }
@@ -1282,6 +1342,7 @@ fn cmd_daemon(root: &Path) -> Result<()> {
     });
     let _ = fs::write(meta_dir(root).join("daemon.pid"), std::process::id().to_string());
     let mut last_full = Instant::now();
+    let mut last_coverage_scan = Instant::now();
     let mut backoff_until = Instant::now();
     // The first pass after start is a full scan: it covers anything written between restore and watch setup.
     let mut force_full = true;
@@ -1293,7 +1354,7 @@ fn cmd_daemon(root: &Path) -> Result<()> {
         }
         let rebase = req.as_ref().and_then(|(line, _)| line.split("rebase=").nth(1)).and_then(|n| n.trim().parse::<u64>().ok());
         let (trigger, want_full) = match &req {
-            Some((line, _)) => (if rebase.is_some() { "rebase" } else { "flush" }, line.contains("full")),
+            Some((_, _)) => (if rebase.is_some() { "rebase" } else { "flush" }, true),
             None => {
                 let d = dirty.lock().unwrap();
                 let quiet = d.last.map(|t| t.elapsed() >= Duration::from_millis(QUIET_MS)).unwrap_or(false);
@@ -1304,6 +1365,8 @@ fn cmd_daemon(root: &Path) -> Result<()> {
                     ("debounce", false)
                 } else if d.first.is_some() && overdue {
                     ("max-delay", false)
+                } else if !d.must_scan.is_empty() && last_coverage_scan.elapsed() >= Duration::from_millis(MAX_DELAY_MS) {
+                    ("coverage-scan", false)
                 } else if force_full || last_full.elapsed() >= FULL_SCAN_INTERVAL {
                     ("periodic-full", true)
                 } else {
@@ -1332,13 +1395,17 @@ fn cmd_daemon(root: &Path) -> Result<()> {
             let s = d.sentinel;
             let t = std::mem::take(&mut *d);
             d.sentinel = s;
+            d.must_scan = t.must_scan.clone();
             t
         };
         let full = want_full || force_full || taken.need_full || !drained || trigger == "periodic-full";
-        let scope = if full { Scope::Full } else { Scope::Partial { dirs: taken.dirs.clone(), subtrees: taken.subtrees.clone() } };
+        let mut subtrees = taken.subtrees.clone();
+        subtrees.extend(taken.must_scan.iter().cloned());
+        let scope = if full { Scope::Full } else { Scope::Partial { dirs: taken.dirs.clone(), subtrees } };
         let result = sync_once(root, &mut st, scope, trigger, rebase);
         let reply = match &result {
             Ok(rep) => {
+                last_coverage_scan = Instant::now();
                 if full {
                     last_full = Instant::now();
                     force_full = false;
@@ -1357,7 +1424,7 @@ fn cmd_daemon(root: &Path) -> Result<()> {
                 d.first.get_or_insert_with(Instant::now);
                 d.last.get_or_insert_with(Instant::now);
                 backoff_until = Instant::now() + Duration::from_secs(3);
-                serde_json::json!({"ok": false, "error": e.to_string(), "mode": "daemon"}).to_string()
+                serde_json::json!({"ok": false, "error": format!("{e:#}"), "exit_code": error_exit_code(e), "mode": "daemon"}).to_string()
             }
         };
         if let Some((_, mut conn)) = req {
@@ -1380,7 +1447,9 @@ fn cmd_flush(root: &Path, full: bool, rebase: Option<u64>) -> Result<i32> {
         BufReader::new(&conn).read_line(&mut line)?;
         if !line.trim().is_empty() {
             println!("{}", line.trim());
-            return Ok(if line.contains("\"ok\":true") { 0 } else { 1 });
+            let report: serde_json::Value = serde_json::from_str(&line).context("invalid daemon report")?;
+            return Ok(if report.get("ok") == Some(&serde_json::Value::Bool(true)) { 0 }
+                else { report.get("exit_code").and_then(|value| value.as_i64()).filter(|code| matches!(code, 1 | 76 | 78)).unwrap_or(1) as i32 });
         }
     }
     // No daemon: do the work here. Correctness never depends on the daemon being alive.
@@ -1407,7 +1476,7 @@ fn cmd_check(root: &Path) -> i32 {
 fn cmd_treehash(root: &Path) -> Result<()> {
     let mut cands = Vec::new();
     let mut skipped = Vec::new();
-    walk(root, root, true, &mut cands, &mut skipped);
+    walk(root, root, true, &mut cands, &mut skipped)?;
     cands.sort_by(|a, b| a.rel.cmp(&b.rel));
     let mut h = blake3::Hasher::new();
     let (mut files, mut bytes) = (0u64, 0u64);
@@ -1458,8 +1527,54 @@ fn main() {
     match res {
         Ok(code) => std::process::exit(code),
         Err(e) => {
-            println!("{}", serde_json::json!({"ok": false, "error": format!("{e:#}")}));
-            std::process::exit(1);
+            let code = error_exit_code(&e);
+            println!("{}", serde_json::json!({"ok": false, "error": format!("{e:#}"), "exit_code": code}));
+            std::process::exit(code);
         }
     }
 }
+
+#[cfg(test)]
+thread_local! { static FAIL_STATE_SAVE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
+
+#[cfg(test)]
+mod durability_tests {
+    use super::*;
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+    use std::os::unix::fs::symlink;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static NEXT_FIXTURE: AtomicUsize = AtomicUsize::new(0);
+
+    struct Fixture { root: PathBuf }
+    impl Fixture {
+        fn new() -> Self {
+            let root = std::env::temp_dir().join(format!("swvol-read-{}-{}-{}", std::process::id(), now_ms(), NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed)));
+            fs::create_dir_all(meta_dir(&root)).unwrap();
+            fs::write(meta_dir(&root).join("slots.json"), r#"{"volume":"v","attachment":"a","pack_prefix":"att/a/p/","manifest_prefix":"att/a/m/","packs":{},"manifests":{}}"#).unwrap();
+            Self { root }
+        }
+        fn sync(&self) -> Result<SyncReport> {
+            sync_once(&self.root, &mut State { volume: "v".into(), attachment: "a".into(), ..State::default() }, Scope::Full, "test", None)
+        }
+    }
+    impl Drop for Fixture { fn drop(&mut self) { let _ = fs::remove_dir_all(&self.root); } }
+
+    #[test]
+    fn failed_file_read_does_not_report_an_unchanged_success() {
+        let f = Fixture::new(); fs::write(f.root.join("data"), b"new data").unwrap();
+        FAIL_CHUNK_READ.with(|fault| fault.set(true));
+        let result = f.sync();
+        FAIL_CHUNK_READ.with(|fault| fault.set(false));
+        assert!(result.is_err(), "a read failure must not acknowledge omitted content");
+    }
+    #[test]
+    fn non_utf8_symlink_target_cannot_disappear_from_a_successful_flush() {
+        let f = Fixture::new();
+        symlink(OsString::from_vec(vec![0xff]), f.root.join("link")).unwrap();
+        assert!(f.sync().is_err(), "unsupported link target must explicitly fail");
+    }
+}
+
+#[cfg(test)]
+mod reliability_tests;

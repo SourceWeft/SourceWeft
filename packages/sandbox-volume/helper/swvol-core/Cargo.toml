@@ -1,0 +1,13 @@
+[package]
+name = "swvol-core"
+version = "0.2.0"
+edition = "2021"
+description = "Shared SourceWeft volume protocol and verified chunk reads"
+
+[dependencies]
+anyhow = "1"
+blake3 = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ureq = { version = "2", default-features = false, features = ["tls"] }
+zstd = "0.13"

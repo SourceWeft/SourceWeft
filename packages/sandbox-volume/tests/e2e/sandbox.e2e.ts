@@ -5,7 +5,7 @@ import { after, before, test } from "node:test";
 import { createCloudflareSandboxProviderFactory } from "@sourceweft/sandbox-provider-cloudflare";
 import type { SandboxProvider } from "@sourceweft/builtin-tool-sandbox";
 import {
-  ContainerReplacedError,
+  VolumePersistenceError,
   createVolumeHooks,
   type SandboxExecutor,
   type VolumeHooks,
@@ -210,9 +210,10 @@ test(
     // T7: destroy the sandbox, attach a fresh one, the tree comes back identical.
     await provider.deleteSandbox(first);
     const second = await newSandbox();
-    const reattached = await hooks.attach({
+    const reattached = await hooks.onContainerReplaced({
       scope: ctx.scope,
       sandboxId: second,
+      previousSandboxId: first,
       executor: executorFor(second),
     });
     assert.equal(reattached.volumeId, volumeId);
@@ -247,49 +248,53 @@ test(
         reattached.attachmentId,
         "cd /workspace && rm -rf moved && echo should-not-run",
       ),
-      ContainerReplacedError,
+      VolumePersistenceError,
     );
     assert.equal(
       await ctx.service.repo.head(volumeId),
       headBeforeDelete,
       "nothing was synced from the unattached container",
     );
+    // This test explicitly destroys the damaged instance before requesting recovery.
+    await provider.deleteSandbox(second);
+    const third = await newSandbox();
     const recovered = await hooks.onContainerReplaced({
       scope: ctx.scope,
-      sandboxId: second,
-      executor: executorFor(second),
+      sandboxId: third,
+      previousSandboxId: second,
+      executor: executorFor(third),
     });
     const fpC = fingerprint(
-      (await run(second, recovered.attachmentId, FINGERPRINT)).output,
+      (await run(third, recovered.attachmentId, FINGERPRINT)).output,
     );
     assert.equal(fpC, fpA);
 
     // Checkpoint with nothing changed uploads nothing.
     const cp = await hooks.checkpoint({
       attachmentId: recovered.attachmentId,
-      executor: executorFor(second),
+      executor: executorFor(third),
     });
     assert.equal(cp.sync.persisted, true);
     assert.equal(cp.sync.flush?.upserts ?? 0, 0);
 
     // Acknowledged deletion, then point-in-time rollback and a rebuild that brings the files back.
     const r4 = await run(
-      second,
+      third,
       recovered.attachmentId,
       "cd /workspace && rm -rf moved 'dir with space' empty link dangling && echo gone",
     );
     assert.equal(r4.sync.persisted, true);
     assert.deepEqual(paths(await ctx.service.repo.entries(volumeId)), []);
     await ctx.service.rollback(volumeId, headBeforeDelete);
-    await provider.deleteSandbox(second);
-    const third = await newSandbox();
+    await provider.deleteSandbox(third);
+    const fourth = await newSandbox();
     const rolled = await hooks.attach({
       scope: ctx.scope,
-      sandboxId: third,
-      executor: executorFor(third),
+      sandboxId: fourth,
+      executor: executorFor(fourth),
     });
     const fpD = fingerprint(
-      (await run(third, rolled.attachmentId, FINGERPRINT)).output,
+      (await run(fourth, rolled.attachmentId, FINGERPRINT)).output,
     );
     assert.equal(fpD, fpA, "rollback restores the exact tree");
     assert.equal(await ctx.service.repo.rejectCount(volumeId), 0);

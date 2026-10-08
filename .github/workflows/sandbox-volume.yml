@@ -1,0 +1,84 @@
+name: Sandbox Volume Reliability
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "packages/sandbox-volume/**"
+      - "packages/builtin-tool-sandbox/**"
+      - "packages/db/**"
+      - "apps/backend/src/modules/threads/agent/sandbox-service/**"
+      - "apps/backend/src/scheduler/schedules/sandbox-volumes*"
+      - ".github/workflows/sandbox-volume.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sandbox-volume-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  host-and-database:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: volume_test
+          POSTGRES_PASSWORD: volume_test
+          POSTGRES_DB: volume_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd 'pg_isready -U volume_test -d volume_test'
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      SANDBOX_VOLUME_TEST_DATABASE_URL: postgresql://volume_test:volume_test@127.0.0.1:5432/volume_test
+      MODEL_GATEWAY_ENCRYPTION_SECRET: ci-test-model-secret-at-least-32-characters
+      BETTER_AUTH_SECRET: ci-test-auth-secret-at-least-32-characters
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.19.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @sourceweft/market-contracts build
+      - run: pnpm --filter @sourceweft/sandbox-volume check-types
+      - run: pnpm --filter @sourceweft/builtin-tool-sandbox check-types
+      - run: pnpm --filter @sourceweft/db check-types
+      - run: pnpm --filter @sourceweft/sandbox-volume test
+      - run: pnpm --filter @sourceweft/builtin-tool-sandbox test
+      - run: pnpm --filter backend exec vitest run src/modules/threads/agent/sandbox-service/cleanup-volume.test.ts src/shared/sandbox-volume-config.test.ts src/scheduler/schedules/sandbox-volumes.test.ts
+      - run: python3 packages/sandbox-volume/tests/scripts/reliability.test.py
+
+  linux-filesystem:
+    # The verified builder digest is arm64 and cross-compiles the x86_64 helper.
+    # Use an explicit matching host and register x86_64 execution for its tests.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: amd64
+      - name: Require the real FUSE device
+        run: |
+          sudo modprobe fuse
+          test -c /dev/fuse
+      - name: Fetch the locked Rust dependency sets
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "$PWD/packages/sandbox-volume/helper:/home/rust/src:ro" \
+            -v swvol-cargo-registry:/root/.cargo/registry \
+            -w /home/rust/src \
+            messense/rust-musl-cross@sha256:ce75e9174325d4fbb3de85c309e2d7ca29f7500169bc4b5d2c611ff7e86d549a \
+            bash -c 'set -euo pipefail; for crate in swvol-core swvol swlazy; do cargo fetch --locked --manifest-path "$crate/Cargo.toml"; done'
+      - name: Real Linux durability, ENOSPC and FUSE/overlay acceptance
+        run: packages/sandbox-volume/helper/test-linux.sh --with-fuse

@@ -20,6 +20,7 @@ struct Node {
     off: u64,
     link: Vec<u8>,
     children: Vec<(Vec<u8>, u64)>,
+    chunks: Arc<Vec<swvol_core::ChunkRef>>,
 }
 
 pub struct LazyFs {
@@ -32,6 +33,13 @@ pub struct LazyFs {
     /// The kernel accepts "no open handler": after one ENOSYS it stops asking us on every open.
     no_open: bool,
     no_opendir: bool,
+    volume_jobs: Option<std::sync::mpsc::SyncSender<VolumeRead>>,
+}
+struct VolumeRead {
+    chunks: Arc<Vec<swvol_core::ChunkRef>>,
+    offset: u64,
+    size: usize,
+    reply: ReplyData,
 }
 
 fn ts(ns: i64) -> SystemTime {
@@ -50,8 +58,9 @@ impl LazyFs {
             total: plan.total,
             no_open: false,
             no_opendir: false,
+            volume_jobs: None,
         };
-        let dir = |parent| Node { parent, kind: FileType::Directory, perm: 0o755, mtime: UNIX_EPOCH, size: 0, off: 0, link: vec![], children: vec![] };
+        let dir = |parent| Node { parent, kind: FileType::Directory, perm: 0o755, mtime: UNIX_EPOCH, size: 0, off: 0, link: vec![], children: vec![], chunks: Arc::new(vec![]) };
         fs.nodes.push(dir(0)); // ino 0 unused
         fs.nodes.push(dir(1)); // root
         for e in &plan.entries {
@@ -175,6 +184,17 @@ impl Filesystem for LazyFs {
             return reply.data(&[]);
         }
         let len = (size as u64).min(n.size - off) as usize;
+        if let Some(jobs) = &self.volume_jobs {
+            if len > 8 * 1024 * 1024 { return reply.error(libc::EINVAL); }
+            let job = VolumeRead { chunks: n.chunks.clone(), offset: off, size: len, reply };
+            if let Err(error) = jobs.try_send(job) {
+                match error {
+                    std::sync::mpsc::TrySendError::Full(job) => job.reply.error(libc::EAGAIN),
+                    std::sync::mpsc::TrySendError::Disconnected(job) => job.reply.error(libc::EIO),
+                }
+            }
+            return;
+        }
         let Some(store) = self.store.clone() else { return reply.error(libc::EIO) };
         let pos = n.off + off;
         let mut buf = vec![0u8; len];
@@ -264,4 +284,37 @@ pub fn mount(plan: &Plan, store: Option<Arc<Store>>, mountpoint: &str, allow_oth
     }
     std::mem::forget(session);
     Ok(())
+}
+
+/// Mount the production chunk format with bounded network workers. No active
+/// tree or inode map is changed during this mount's lifetime.
+pub fn mount_volume(plan: &swvol_core::RestorePlan, store: Arc<crate::volume::VolumeStore>, mountpoint: &str, allow_other: bool) -> std::io::Result<()> {
+    let view = Plan {
+        pack_size: 0, total: plan.entries.iter().map(|entry| entry.s).sum(), packs: vec![],
+        entries: plan.entries.iter().map(|entry| crate::plan::Entry { p: entry.p.clone(), k: entry.k.to_string(), m: entry.m, t: entry.t, s: entry.s, o: 0, l: entry.l.clone() }).collect(),
+    };
+    let mut fs = LazyFs::new(&view, None);
+    for entry in &plan.entries {
+        let mut ino = 1;
+        for component in entry.p.split('/') { ino = fs.names[&(ino, component.as_bytes().to_vec())]; }
+        fs.nodes[ino as usize].chunks = Arc::new(entry.c.clone());
+    }
+    let (tx, rx) = std::sync::mpsc::sync_channel::<VolumeRead>(32);
+    let rx = Arc::new(std::sync::Mutex::new(rx));
+    for _ in 0..4 {
+        let (rx, store) = (rx.clone(), store.clone());
+        std::thread::spawn(move || loop {
+            let job = rx.lock().unwrap().recv();
+            let Ok(job) = job else { break; };
+            let mut data = vec![0; job.size];
+            match store.read(&job.chunks, job.offset, &mut data) {
+                Ok(()) => job.reply.data(&data),
+                Err(error) => { eprintln!("volume read failed: {error:#}"); job.reply.error(libc::EIO); }
+            }
+        });
+    }
+    fs.volume_jobs = Some(tx);
+    let mut opts = vec![MountOption::RO, MountOption::FSName("swvol".into()), MountOption::Subtype("swvol".into()), MountOption::DefaultPermissions, MountOption::NoAtime];
+    if allow_other { opts.push(MountOption::AllowOther); }
+    fuser::mount2(fs, mountpoint, &opts)
 }

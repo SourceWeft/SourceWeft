@@ -1,4 +1,6 @@
 import type { ExecuteResponse } from "deepagents";
+import type { SandboxCommandDurability } from "@sourceweft/contracts/agent-tools";
+export type { SandboxCommandDurability } from "@sourceweft/contracts/agent-tools";
 import type { SandboxCommandBudget } from "./command-budgets";
 
 export const SOURCEWEFT_WORK_ROOT = "/files";
@@ -49,7 +51,9 @@ export type SandboxRef = {
   providerSandboxId: string;
 };
 
-export type SandboxExecuteResult = ExecuteResponse;
+export type SandboxExecuteResult = ExecuteResponse & {
+  durability?: SandboxCommandDurability;
+};
 
 /**
  * Persistent-volume integration (packages/sandbox-volume). The manager calls these at five
@@ -70,6 +74,11 @@ export type SandboxVolumeScope = {
 };
 
 export type SandboxVolumeHooks = {
+  assertActive(input: {
+    attachmentId: string;
+    executor: SandboxVolumeExecutor;
+  }): Promise<void>;
+  quarantine(input: { attachmentId: string; reason: string }): Promise<void>;
   attach(input: {
     scope: SandboxVolumeScope;
     sandboxId: string;
@@ -84,20 +93,27 @@ export type SandboxVolumeHooks = {
   }): Promise<{
     output: string;
     exitCode: number | null;
-    sync: { persisted: boolean };
+    sync: {
+      persisted: boolean;
+      confirmedSeq?: number;
+      mode?: "shadow" | "full";
+    };
   }>;
   checkpoint(input: {
     attachmentId: string;
     executor: SandboxVolumeExecutor;
-  }): Promise<unknown>;
+  }): Promise<{ sync: { persisted: boolean } }>;
   /** Checkpoint for a sandbox this process did not attach (cleanup workers); null when the thread has no volume. */
   checkpointScope(input: {
     scope: SandboxVolumeScope;
+    sandboxId: string;
     executor: SandboxVolumeExecutor;
-  }): Promise<unknown>;
+  }): Promise<{ sync: { persisted: boolean } } | null>;
   onContainerReplaced(input: {
     scope: SandboxVolumeScope;
     sandboxId: string;
+    /** Provider-confirmed missing old instance, or the refused command's same instance ID. */
+    previousSandboxId?: string;
     executor: SandboxVolumeExecutor;
   }): Promise<{ attachmentId: string }>;
   isContainerReplacedError(error: unknown): boolean;

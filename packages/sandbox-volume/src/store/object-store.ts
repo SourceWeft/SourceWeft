@@ -1,6 +1,7 @@
 import {
   CopyObjectCommand,
   DeleteObjectsCommand,
+  DeleteObjectCommand,
   GetObjectCommand,
   ListObjectsV2Command,
   HeadObjectCommand,
@@ -27,6 +28,8 @@ export type ObjectStore = {
   copy(fromKey: string, toKey: string): Promise<void>;
   /** Delete every object under a prefix; returns the number deleted (GC and test cleanup). */
   deletePrefix(prefix: string): Promise<number>;
+  /** Delete one explicitly authorized object; used only after maintenance claims it. */
+  deleteObject?(key: string): Promise<void>;
 };
 
 export type S3ObjectStoreConfig = {
@@ -34,6 +37,8 @@ export type S3ObjectStoreConfig = {
   region: string;
   endpoint?: string;
   forcePathStyle?: boolean;
+  /** End-to-end deadline for each object operation, including response streaming and SDK retries. */
+  requestTimeoutMs?: number;
   credentials?: { accessKeyId: string; secretAccessKey: string };
 };
 
@@ -46,6 +51,16 @@ export function createS3ObjectStore(config: S3ObjectStoreConfig): ObjectStore {
       : {}),
     ...(config.credentials ? { credentials: config.credentials } : {}),
   };
+  const requestTimeoutMs = config.requestTimeoutMs ?? 60_000;
+  if (
+    !Number.isSafeInteger(requestTimeoutMs) ||
+    requestTimeoutMs < 1 ||
+    requestTimeoutMs > 2_147_483_647
+  )
+    throw new Error("invalid object-store request timeout");
+  const requestOptions = () => ({
+    abortSignal: AbortSignal.timeout(requestTimeoutMs),
+  });
   const client = new S3Client(clientConfig);
   const bucket = config.bucket;
   return {
@@ -73,6 +88,7 @@ export function createS3ObjectStore(config: S3ObjectStoreConfig): ObjectStore {
       try {
         const response = await client.send(
           new GetObjectCommand({ Bucket: bucket, Key: key }),
+          requestOptions(),
         );
         if (!response.Body) return null;
         return await response.Body.transformToByteArray();
@@ -89,18 +105,26 @@ export function createS3ObjectStore(config: S3ObjectStoreConfig): ObjectStore {
           Body: body,
           ContentType: contentType,
         }),
+        requestOptions(),
       );
     },
     async size(key) {
       try {
         const response = await client.send(
           new HeadObjectCommand({ Bucket: bucket, Key: key }),
+          requestOptions(),
         );
         return response.ContentLength ?? null;
       } catch (error) {
         if (isNotFound(error)) return null;
         throw error;
       }
+    },
+    async deleteObject(key) {
+      await client.send(
+        new DeleteObjectCommand({ Bucket: bucket, Key: key }),
+        requestOptions(),
+      );
     },
     async deletePrefix(prefix) {
       let deleted = 0;
@@ -112,6 +136,7 @@ export function createS3ObjectStore(config: S3ObjectStoreConfig): ObjectStore {
             Prefix: prefix,
             ContinuationToken: token,
           }),
+          requestOptions(),
         );
         const keys = (page.Contents ?? []).map((o) => ({ Key: o.Key! }));
         if (keys.length) {
@@ -120,6 +145,7 @@ export function createS3ObjectStore(config: S3ObjectStoreConfig): ObjectStore {
               Bucket: bucket,
               Delete: { Objects: keys, Quiet: true },
             }),
+            requestOptions(),
           );
           deleted += keys.length;
         }
@@ -134,6 +160,7 @@ export function createS3ObjectStore(config: S3ObjectStoreConfig): ObjectStore {
           Key: toKey,
           CopySource: `/${bucket}/${encodeURIComponent(fromKey).replace(/%2F/g, "/")}`,
         }),
+        requestOptions(),
       );
     },
   };

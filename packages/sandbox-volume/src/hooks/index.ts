@@ -1,5 +1,6 @@
+import { randomUUID } from "node:crypto";
 import {
-  EXIT_INSTANCE_CHANGED,
+  EXIT_NEED_SLOTS,
   EXIT_PACK_UNREADABLE,
   TAIL_MARKER,
 } from "../protocol/constants";
@@ -53,6 +54,8 @@ export type ParsedExecuteResult = {
   sync: {
     /** True when the barrier reported a successful commit (or there was nothing to commit). */
     persisted: boolean;
+    confirmedSeq: number;
+    mode: "shadow" | "full";
     flushExitCode: number | null;
     flush: FlushReport | null;
     wal: ApplyWalResult | null;
@@ -64,6 +67,7 @@ export type ParsedExecuteResult = {
 
 export class ContainerReplacedError extends Error {
   override readonly name = "ContainerReplacedError";
+  readonly commandStarted = false;
   constructor(readonly attachmentId: string) {
     super(
       "the sandbox container was replaced; the volume must be re-attached before running commands",
@@ -71,7 +75,43 @@ export class ContainerReplacedError extends Error {
   }
 }
 
+export class VolumePersistenceError extends Error {
+  override readonly name = "VolumePersistenceError";
+  readonly code = "SANDBOX_VOLUME_PERSISTENCE_UNCONFIRMED";
+  commandOutput?: string;
+  commandExitCode?: number | null;
+  durabilityStatus: "unknown" | "failed" = "unknown";
+  constructor(
+    readonly attachmentId: string,
+    reason: string,
+  ) {
+    super(
+      `Sandbox volume persistence is unconfirmed: ${reason}. The user command may already have run; do not execute it again automatically.`,
+    );
+  }
+}
+
+function confirmedFlush(
+  report: FlushReport | null,
+): report is FlushReport & { ok: true; seq: number } {
+  return (
+    report !== null &&
+    !Array.isArray(report) &&
+    report.ok === true &&
+    typeof report.seq === "number" &&
+    Number.isSafeInteger(report.seq) &&
+    report.seq >= 0 &&
+    (report.unstable === undefined || report.unstable === 0) &&
+    (report.unreadable === undefined ||
+      (Array.isArray(report.unreadable) && report.unreadable.length === 0)) &&
+    (report.skipped === undefined ||
+      (Array.isArray(report.skipped) && report.skipped.length === 0)) &&
+    !report.error
+  );
+}
+
 const DEFAULT_ROOT = "/workspace";
+export const REQUIRED_HELPER_VERSION = "0.2.0";
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
@@ -87,14 +127,22 @@ export function createVolumeHooks(config: VolumeHooksConfig) {
   const meta = config.stateDir ?? `${root}/.sourceweft`;
   const helperPath = config.helper.imagePath ?? `${meta}/bin/swvol`;
   const log = config.log ?? (() => undefined);
+  const shadowScopes = new Map<string, VolumeScope>();
+  const scopeKey = (scope: VolumeScope) =>
+    JSON.stringify([scope.teamId, scope.workspaceId, scope.threadId]);
+
+  function replaceSlots(url: string): string {
+    return `__swvol_slots=$(mktemp ${shellQuote(`${meta}/slots.XXXXXX`)}) && curl -fsS --speed-limit 20000 --speed-time 5 --max-time 60 --retry 2 -o "$__swvol_slots" ${shellQuote(url)} && mv "$__swvol_slots" ${shellQuote(`${meta}/slots.json`)}`;
+  }
 
   async function bootstrapCommand(): Promise<string> {
+    const checkVersion = `[ "$(${shellQuote(helperPath)} version)" = ${shellQuote(`swvol ${REQUIRED_HELPER_VERSION}`)} ] || { echo 'swvol: incompatible helper version' >&2; exit 90; }`;
     if (config.helper.imagePath)
-      return `[ -x ${shellQuote(config.helper.imagePath)} ] || exit 90`;
+      return `[ -x ${shellQuote(config.helper.imagePath)} ] || exit 90\n${checkVersion}`;
     if (!config.helper.downloadUrl)
       throw new Error("no helper source configured");
     const url = await config.helper.downloadUrl();
-    return `mkdir -p ${shellQuote(`${meta}/bin`)} && { [ -x ${shellQuote(helperPath)} ] || { curl -fsS --speed-limit 100000 --speed-time 5 --max-time 120 --retry 2 -o ${shellQuote(`${helperPath}.tmp`)} ${shellQuote(url)} && chmod 755 ${shellQuote(`${helperPath}.tmp`)} && mv ${shellQuote(`${helperPath}.tmp`)} ${shellQuote(helperPath)}; }; } || exit 90`;
+    return `mkdir -p ${shellQuote(`${meta}/bin`)} && { [ -x ${shellQuote(helperPath)} ] || { curl -fsS --speed-limit 100000 --speed-time 5 --max-time 120 --retry 2 -o ${shellQuote(`${helperPath}.tmp`)} ${shellQuote(url)} && chmod 755 ${shellQuote(`${helperPath}.tmp`)} && mv ${shellQuote(`${helperPath}.tmp`)} ${shellQuote(helperPath)}; }; } || exit 90\n${checkVersion}`;
   }
 
   async function attachOnce(
@@ -111,13 +159,14 @@ export function createVolumeHooks(config: VolumeHooksConfig) {
       await bootstrapCommand(),
       `mkdir -p ${shellQuote(meta)}`,
       `if [ -f ${shellQuote(`${meta}/daemon.pid`)} ]; then kill "$(cat ${shellQuote(`${meta}/daemon.pid`)})" 2>/dev/null; sleep 0.2; fi`,
-      `curl -fsS --speed-limit 20000 --speed-time 5 --max-time 60 --retry 2 -o ${shellQuote(`${meta}/slots.json`)} ${shellQuote(files.slotsUrl)} || exit 91`,
+      `${replaceSlots(files.slotsUrl)} || exit 91`,
       restore,
       `[ "$rc" -eq 0 ] || exit "$rc"`,
       // stdin must not stay attached to the exec stream: the bridge would wait for the daemon to close it.
       `nohup setsid ${shellQuote(helperPath)} daemon --root ${shellQuote(root)} > ${shellQuote(`${meta}/daemon.log`)} 2>&1 < /dev/null &`,
       `for i in $(seq 1 50); do [ -S ${shellQuote(`${meta}/sock`)} ] && break; sleep 0.05; done`,
-      `[ -S ${shellQuote(`${meta}/sock`)} ] && echo DAEMON_UP || echo DAEMON_DOWN`,
+      `[ -S ${shellQuote(`${meta}/sock`)} ] || { echo DAEMON_DOWN; exit 92; }`,
+      `echo DAEMON_UP`,
     ].join("\n");
     const result = await executor.execute(command, { timeoutMs: 900_000 });
     const output = result.output ?? "";
@@ -131,10 +180,7 @@ export function createVolumeHooks(config: VolumeHooksConfig) {
         }
       }
     }
-    if (
-      (result.exitCode === 90 || result.exitCode === 91) &&
-      repairs.length < 3
-    ) {
+    if (result.exitCode === 91 && repairs.length < 3) {
       repairs.push({ bootstrapDownloadFailed: result.exitCode });
       log("volume.attach.bootstrap_retry", {
         attachmentId: attachment.id,
@@ -166,7 +212,17 @@ export function createVolumeHooks(config: VolumeHooksConfig) {
       );
     }
     const bootId = typeof info?.boot_id === "string" ? info.boot_id : null;
-    if (bootId) await service.recordBootId(attachment.id, bootId);
+    if (
+      !bootId ||
+      info?.ok !== true ||
+      !output.split("\n").includes("DAEMON_UP")
+    ) {
+      throw new VolumePersistenceError(
+        attachment.id,
+        "attach did not prove a restored identity and running daemon",
+      );
+    }
+    await service.recordBootId(attachment.id, bootId);
     return {
       volumeId: attachment.volumeId,
       attachmentId: attachment.id,
@@ -185,9 +241,43 @@ export function createVolumeHooks(config: VolumeHooksConfig) {
       sandboxId: string;
       executor: SandboxExecutor;
     }): Promise<AttachResult> {
-      const volume = await service.getOrCreateVolume(input.scope);
+      const scope = config.shadow
+        ? { ...input.scope, namespace: `shadow:${randomUUID()}` }
+        : input.scope;
+      const volume = await service.getOrCreateVolume(scope);
+      const previous = await service.repo.activeAttachment(volume.id);
+      if (previous) {
+        // Another backend process may already own a healthy daemon. Resume only
+        // that same instance; restoring here would discard its unflushed writes.
+        if (previous.sandboxId !== input.sandboxId || !previous.bootId)
+          throw new VolumePersistenceError(
+            previous.id,
+            "an existing attachment requires explicit recovery before replacement",
+          );
+        const probe = await input.executor.execute(
+          `[ -x ${shellQuote(helperPath)} ] && [ "$(${shellQuote(helperPath)} version)" = ${shellQuote(`swvol ${REQUIRED_HELPER_VERSION}`)} ] && ${shellQuote(helperPath)} check --root ${shellQuote(root)} && [ "$(sed -n '1p' ${shellQuote(`${meta}/identity`)})" = ${shellQuote(previous.id)} ] && [ "$(sed -n '2p' ${shellQuote(`${meta}/identity`)})" = ${shellQuote(previous.bootId)} ] && [ -S ${shellQuote(`${meta}/sock`)} ]`,
+          { timeoutMs: 10_000 },
+        );
+        if (probe.exitCode !== 0)
+          throw new VolumePersistenceError(
+            previous.id,
+            "existing attachment identity or daemon could not be resumed",
+          );
+        await service.assertAttachmentActive(previous.id);
+        await service.applyWal(previous.id);
+        return {
+          volumeId: volume.id,
+          attachmentId: previous.id,
+          restore: { resumed: true },
+          daemon: true,
+          repairs: [],
+          durationMs: 0,
+          output: "ATTACHMENT_RESUMED",
+        };
+      }
       const attachment = await service.attach(volume.id, input.sandboxId);
       const result = await attachOnce(attachment, input.executor, []);
+      if (config.shadow) shadowScopes.set(scopeKey(input.scope), scope);
       log("volume.attach", {
         volumeId: volume.id,
         attachmentId: attachment.id,
@@ -204,14 +294,18 @@ export function createVolumeHooks(config: VolumeHooksConfig) {
      */
     wrapCommand(command: string, options: { full?: boolean } = {}): string {
       const check = `[ -x ${shellQuote(helperPath)} ] && ${shellQuote(helperPath)} check --root ${shellQuote(root)}`;
-      const flush = `${shellQuote(helperPath)} flush --root ${shellQuote(root)}${options.full ? " --full" : ""} > ${shellQuote(`${meta}/last-flush.json`)} 2> ${shellQuote(`${meta}/last-flush.err`)}; __swvol_frc=$?`;
+      const flush = `${shellQuote(helperPath)} flush --root ${shellQuote(root)}${options.full ? " --full" : ""} > "$__swvol_report" 2> "$__swvol_report.err"; __swvol_frc=$?`;
       return [
         `if ${check}; then`,
-        `( ${command}\n); __swvol_rc=$?`,
+        `__swvol_report=$(mktemp ${shellQuote(`${meta}/flush.XXXXXX`)}) || { printf '\\n${TAIL_MARKER} 78 {"ok":false,"reason":"report_allocation_failed"}\\n'; exit 78; }`,
+        `trap 'rm -f "$__swvol_report" "$__swvol_report.err"' EXIT`,
+        `( eval ${shellQuote(command)} ); __swvol_rc=$?`,
         flush,
-        `printf '\\n${TAIL_MARKER} %s %s\\n' "$__swvol_frc" "$(head -c 4000 ${shellQuote(`${meta}/last-flush.json`)})"`,
+        `printf '\\n${TAIL_MARKER} %s %s\\n' "$__swvol_frc" "$(head -c 4000 "$__swvol_report")"`,
         `exit "$__swvol_rc"`,
-        `else printf '\\n${TAIL_MARKER} ${EXIT_INSTANCE_CHANGED} {}\\n'; exit ${EXIT_INSTANCE_CHANGED}; fi`,
+        // A failed check does not prove replacement: the helper or identity may
+        // be damaged while unsaved files still exist. Never authorize replay here.
+        `else printf '\\n${TAIL_MARKER} 79 {"ok":false,"reason":"instance_check_unavailable"}\\n'; exit 79; fi`,
       ].join("\n");
     },
 
@@ -226,62 +320,194 @@ export function createVolumeHooks(config: VolumeHooksConfig) {
       executor: SandboxExecutor;
     }): Promise<ParsedExecuteResult> {
       const parsed = parseCommandOutput(input.output);
-      if (parsed.instanceChanged) {
-        log("volume.instance_changed", { attachmentId: input.attachmentId });
-        throw new ContainerReplacedError(input.attachmentId);
-      }
-      const wal = await service.applyWal(input.attachmentId);
-      let rebase: ParsedExecuteResult["sync"]["rebase"] = null;
-      const slotTaken = parsed.flush
-        ? JSON.stringify(parsed.flush).includes("MANIFEST_SLOT_TAKEN")
-        : false;
-      if (wal.rejected || slotTaken) {
-        const { slotsUrl, head } = await service.beginRebase(
-          input.attachmentId,
-        );
-        const rb = await input.executor.execute(
-          `curl -fsS --max-time 60 -o ${shellQuote(`${meta}/slots.json`)} ${shellQuote(slotsUrl)} && ${shellQuote(helperPath)} flush --root ${shellQuote(root)} --rebase ${head}`,
-          { timeoutMs: 600_000 },
-        );
-        const wal2 = await service.applyWal(input.attachmentId);
-        rebase = {
-          applied: wal2.applied,
-          stillRejected: wal2.rejected !== null,
+      try {
+        if (!parsed.markerFound || input.exitCode === null) {
+          throw new VolumePersistenceError(
+            input.attachmentId,
+            "missing completion or flush marker",
+          );
+        }
+        if (parsed.instanceChanged) {
+          throw new VolumePersistenceError(
+            input.attachmentId,
+            "command output cannot prove that an instance changed before execution",
+          );
+        }
+        const wal = await service.applyWal(input.attachmentId);
+        let verifiedWal = wal;
+        let verifiedFlush = parsed.flush;
+        let verifiedFlushExit = parsed.flushExitCode;
+        // Only retry the barrier: the user command has already run. A bounded renewal
+        // handles exhausted slots without ever replaying that command.
+        for (
+          let attempt = 0;
+          attempt < 3 &&
+          (verifiedFlushExit === EXIT_NEED_SLOTS ||
+            verifiedFlush?.exit_code === EXIT_NEED_SLOTS);
+          attempt++
+        ) {
+          const attachment = await service.repo.getAttachment(
+            input.attachmentId,
+          );
+          if (!attachment || attachment.status !== "active")
+            throw new VolumePersistenceError(
+              input.attachmentId,
+              "slot renewal requires an active attachment",
+            );
+          const slotsUrl = await service.publishSlots(attachment);
+          const retry = await input.executor.execute(
+            `${replaceSlots(slotsUrl)} && ${shellQuote(helperPath)} flush --root ${shellQuote(root)} --full`,
+            { timeoutMs: 600_000 },
+          );
+          verifiedFlushExit = retry.exitCode;
+          try {
+            verifiedFlush = JSON.parse(retry.output) as FlushReport;
+          } catch {
+            verifiedFlush = null;
+          }
+          verifiedWal = await service.applyWal(input.attachmentId);
+        }
+        let rebase: ParsedExecuteResult["sync"]["rebase"] = null;
+        const slotTaken =
+          typeof verifiedFlush?.error === "string" &&
+          verifiedFlush.error.startsWith("MANIFEST_SLOT_TAKEN");
+        if (verifiedWal.rejected || slotTaken) {
+          const { slotsUrl, head } = await service.beginRebase(
+            input.attachmentId,
+          );
+          const rb = await input.executor.execute(
+            `${replaceSlots(slotsUrl)} && ${shellQuote(helperPath)} flush --root ${shellQuote(root)} --rebase ${head}`,
+            { timeoutMs: 600_000 },
+          );
+          const wal2 = await service.applyWal(input.attachmentId);
+          verifiedWal = wal2;
+          verifiedFlushExit = rb.exitCode;
+          try {
+            verifiedFlush = JSON.parse(rb.output) as FlushReport;
+          } catch {
+            verifiedFlush = null;
+          }
+          rebase = {
+            applied: wal2.applied,
+            stillRejected: wal2.rejected !== null,
+          };
+          log("volume.rebase", {
+            attachmentId: input.attachmentId,
+            reason: wal.rejected ?? "slot taken",
+            exitCode: rb.exitCode,
+            applied: wal2.applied,
+            stillRejected: rebase.stillRejected,
+          });
+        }
+        const repaired: string[] = [];
+        const unreadable = Array.isArray(parsed.flush?.unreadable)
+          ? parsed.flush!.unreadable!
+          : [];
+        if (unreadable.length) {
+          const attachment = await service.repo.getAttachment(
+            input.attachmentId,
+          );
+          if (attachment)
+            for (const key of unreadable)
+              repaired.push(await service.repairPack(attachment.volumeId, key));
+        }
+        if (
+          verifiedFlushExit !== 0 ||
+          !confirmedFlush(verifiedFlush) ||
+          verifiedWal.rejected ||
+          (rebase !== null && rebase.stillRejected)
+        ) {
+          const error = new VolumePersistenceError(
+            input.attachmentId,
+            "flush or WAL application failed",
+          );
+          error.durabilityStatus = "failed";
+          throw error;
+        }
+        if (
+          !(await service.confirmPersistence(
+            input.attachmentId,
+            verifiedFlush.seq,
+          ))
+        ) {
+          throw new VolumePersistenceError(
+            input.attachmentId,
+            "database has not confirmed this active attachment's sequence",
+          );
+        }
+        const persisted = true;
+        return {
+          output: parsed.output,
+          exitCode: input.exitCode,
+          sync: {
+            persisted,
+            confirmedSeq: verifiedFlush.seq,
+            mode: config.shadow ? "shadow" : "full",
+            flushExitCode: verifiedFlushExit,
+            flush: verifiedFlush,
+            wal: verifiedWal,
+            rebase,
+            repaired,
+          },
         };
-        log("volume.rebase", {
-          attachmentId: input.attachmentId,
-          reason: wal.rejected ?? "slot taken",
-          exitCode: rb.exitCode,
-          applied: wal2.applied,
-          stillRejected: rebase.stillRejected,
-        });
+      } catch (error) {
+        if (error instanceof ContainerReplacedError) throw error;
+        const failure =
+          error instanceof VolumePersistenceError
+            ? error
+            : new VolumePersistenceError(
+                input.attachmentId,
+                "the host could not verify the persistence result",
+              );
+        failure.commandOutput = parsed.output;
+        failure.commandExitCode = input.exitCode;
+        throw failure;
       }
-      const repaired: string[] = [];
-      const unreadable = Array.isArray(parsed.flush?.unreadable)
-        ? parsed.flush!.unreadable!
-        : [];
-      if (unreadable.length) {
-        const attachment = await service.repo.getAttachment(input.attachmentId);
-        if (attachment)
-          for (const key of unreadable)
-            repaired.push(await service.repairPack(attachment.volumeId, key));
-      }
-      const flushOk =
-        parsed.flushExitCode === 0 && (parsed.flush?.ok ?? true) !== false;
-      const persisted =
-        flushOk && !wal.rejected && (rebase === null || !rebase.stillRejected);
-      return {
-        output: parsed.output,
-        exitCode: input.exitCode,
-        sync: {
-          persisted,
-          flushExitCode: parsed.flushExitCode,
-          flush: parsed.flush,
-          wal,
-          rebase,
-          repaired,
-        },
-      };
+    },
+
+    async assertActive(input: {
+      attachmentId: string;
+      executor: SandboxExecutor;
+    }): Promise<void> {
+      await service.assertAttachmentActive(input.attachmentId);
+      const actor = await service.repo.getAttachment(input.attachmentId);
+      if (!actor?.bootId)
+        throw new VolumePersistenceError(
+          input.attachmentId,
+          "attachment has no confirmed instance identity",
+        );
+      // This is a separate host execution before the user command is submitted.
+      // Missing/corrupt identity is not replacement. A changed boot may still have
+      // a persistent upper with dirty files, so it also requires explicit recovery.
+      const probe = await input.executor.execute(
+        `__swvol_boot=$(/bin/cat /proc/sys/kernel/random/boot_id) || exit 79; printf '__SWVOL_BOOT__ %s\\n' "$__swvol_boot"; [ -x ${shellQuote(helperPath)} ] || exit 79; [ "$(${shellQuote(helperPath)} version)" = ${shellQuote(`swvol ${REQUIRED_HELPER_VERSION}`)} ] || exit 79; ${shellQuote(helperPath)} check --root ${shellQuote(root)}`,
+        { timeoutMs: 10_000 },
+      );
+      const boot = /^__SWVOL_BOOT__ ([0-9a-f-]{36})\r?\n/.exec(
+        probe.output,
+      )?.[1];
+      if (!boot)
+        throw new VolumePersistenceError(
+          input.attachmentId,
+          "instance identity probe did not complete",
+        );
+      if (boot !== actor.bootId)
+        throw new VolumePersistenceError(
+          input.attachmentId,
+          "instance boot changed; preserve its writable files until explicit recovery",
+        );
+      if (probe.exitCode !== 0)
+        throw new VolumePersistenceError(
+          input.attachmentId,
+          "helper state is unavailable in the existing instance; preserving its files",
+        );
+    },
+
+    async quarantine(input: {
+      attachmentId: string;
+      reason: string;
+    }): Promise<void> {
+      await service.quarantineAttachment(input.attachmentId, input.reason);
     },
 
     /**
@@ -290,12 +516,27 @@ export function createVolumeHooks(config: VolumeHooksConfig) {
      */
     async checkpointScope(input: {
       scope: VolumeScope;
+      sandboxId: string;
       executor: SandboxExecutor;
     }): Promise<ParsedExecuteResult | null> {
-      const volume = await service.repo.findVolume(input.scope);
+      const scope = config.shadow
+        ? shadowScopes.get(scopeKey(input.scope))
+        : input.scope;
+      // A new cleanup process must never checkpoint the primary volume with shadow hooks.
+      if (!scope) return null;
+      const volume = await service.repo.findVolume(scope);
       if (!volume) return null;
       const attachment = await service.repo.activeAttachment(volume.id);
-      if (!attachment) return null;
+      if (!attachment)
+        throw new VolumePersistenceError(
+          volume.id,
+          "volume has no active attachment for checkpoint",
+        );
+      if (attachment.sandboxId !== input.sandboxId)
+        throw new VolumePersistenceError(
+          attachment.id,
+          "checkpoint executor belongs to a different sandbox instance",
+        );
       try {
         return await this.checkpoint({
           attachmentId: attachment.id,
@@ -304,7 +545,10 @@ export function createVolumeHooks(config: VolumeHooksConfig) {
       } catch (error) {
         if (error instanceof ContainerReplacedError) {
           await service.applyWal(attachment.id);
-          return null;
+          throw new VolumePersistenceError(
+            attachment.id,
+            "container replacement prevented a full checkpoint",
+          );
         }
         throw error;
       }
@@ -335,9 +579,25 @@ export function createVolumeHooks(config: VolumeHooksConfig) {
     async onContainerReplaced(input: {
       scope: VolumeScope;
       sandboxId: string;
+      previousSandboxId?: string;
       executor: SandboxExecutor;
     }): Promise<AttachResult> {
-      return this.attach(input);
+      if (config.shadow) return this.attach(input);
+      const volume = await service.repo.findVolume(input.scope);
+      if (!volume) return this.attach(input);
+      const previous = await service.repo.activeAttachment(volume.id);
+      if (
+        !previous ||
+        previous.sandboxId !== (input.previousSandboxId ?? input.sandboxId)
+      )
+        throw new VolumePersistenceError(
+          volume.id,
+          "replacement does not match the previous active sandbox",
+        );
+      const attachment = await service.attach(volume.id, input.sandboxId, {
+        expectedAttachmentId: previous.id,
+      });
+      return attachOnce(attachment, input.executor, []);
     },
   };
 }

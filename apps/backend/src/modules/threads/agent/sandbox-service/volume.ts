@@ -70,6 +70,7 @@ export function sandboxVolumeHooks(): SandboxVolumeHooks | null {
       db,
       store,
       keyPrefix: settings.keyPrefix,
+      limits: settings.limits,
     });
     const hooks = createVolumeHooks({
       service,

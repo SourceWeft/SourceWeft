@@ -23,7 +23,7 @@ import { threads } from "./threads";
  */
 
 type EntryKind = "f" | "d" | "l";
-type AttachmentStatus = "active" | "superseded" | "rejected";
+type AttachmentStatus = "active" | "superseded" | "rejected" | "quarantined";
 /** [blake3 hex, raw length] pairs in file order. */
 type ChunkList = Array<[string, number]>;
 
@@ -44,6 +44,7 @@ export const sandboxVolumes = pgTable(
     threadId: text("thread_id")
       .notNull()
       .references(() => threads.id, { onDelete: "cascade" }),
+    namespace: text("namespace").notNull().default("primary"),
     /** Monotonic version: every applied manifest and every rollback advances it by one. */
     headSeq: bigint("head_seq", { mode: "number" }).notNull().default(0),
     fileCount: integer("file_count").notNull().default(0),
@@ -70,6 +71,7 @@ export const sandboxVolumes = pgTable(
       table.teamId,
       table.workspaceId,
       table.threadId,
+      table.namespace,
     ),
   ],
 );
@@ -155,6 +157,8 @@ export const sandboxVolumeAttachments = pgTable(
     sandboxId: text("sandbox_id"),
     /** Head of the volume when the attachment was created. */
     baseSeq: bigint("base_seq", { mode: "number" }).notNull(),
+    /** Last sequence this actor durably committed; initialized to its restore base. */
+    lastAppliedSeq: bigint("last_applied_seq", { mode: "number" }).notNull(),
     /** Container identity observed at attach time; manifests must carry the same. */
     bootId: text("boot_id"),
     /** A rejected chain starts a new epoch: new manifest slots, same attachment. */
@@ -163,6 +167,7 @@ export const sandboxVolumeAttachments = pgTable(
       .$type<AttachmentStatus>()
       .notNull()
       .default("active"),
+    quarantineReason: text("quarantine_reason"),
     /** Highest pack index and manifest seq for which slots were issued, and when they expire. */
     slotsUntilPack: integer("slots_until_pack").notNull().default(0),
     slotsUntilSeq: bigint("slots_until_seq", { mode: "number" })
@@ -179,8 +184,11 @@ export const sandboxVolumeAttachments = pgTable(
   (table) => [
     check(
       "sandbox_volume_attachments_status_check",
-      sql`${table.status} in ('active', 'superseded', 'rejected')`,
+      sql`${table.status} in ('active', 'superseded', 'rejected', 'quarantined')`,
     ),
+    uniqueIndex("sandbox_volume_attachments_one_active_uq")
+      .on(table.volumeId)
+      .where(sql`${table.status} = 'active'`),
     index("sandbox_volume_attachments_volume_idx").on(
       table.volumeId,
       table.status,
@@ -236,6 +244,58 @@ export const sandboxVolumeRejects = pgTable(
     index("sandbox_volume_rejects_volume_idx").on(
       table.volumeId,
       table.createdAt,
+    ),
+  ],
+);
+
+/** Durable provenance for idempotent application across hosts and response loss. */
+export const sandboxVolumeCommits = pgTable(
+  "sandbox_volume_commits",
+  {
+    volumeId: text("volume_id")
+      .notNull()
+      .references(() => sandboxVolumes.id, { onDelete: "cascade" }),
+    seq: bigint("seq", { mode: "number" }).notNull(),
+    attachmentId: text("attachment_id").notNull(),
+    epoch: integer("epoch").notNull(),
+    manifestKey: text("manifest_key").notNull(),
+    manifestHash: text("manifest_hash").notNull(),
+    appliedAt: timestamp("applied_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.volumeId, table.seq] })],
+);
+
+/** Conservative two-phase object deletion. Rows survive failed network deletes for retry. */
+export const sandboxVolumeGcCandidates = pgTable(
+  "sandbox_volume_gc_candidates",
+  {
+    volumeId: text("volume_id")
+      .notNull()
+      .references(() => sandboxVolumes.id, { onDelete: "cascade" }),
+    packKey: text("pack_key").notNull(),
+    state: text("state")
+      .$type<"pending" | "deleting" | "deleted">()
+      .notNull()
+      .default("pending"),
+    notBefore: timestamp("not_before", {
+      withTimezone: true,
+      mode: "date",
+    }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true, mode: "date" }),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.volumeId, table.packKey] }),
+    index("sandbox_volume_gc_due_idx").on(table.state, table.notBefore),
+    check(
+      "sandbox_volume_gc_state_check",
+      sql`${table.state} in ('pending','deleting','deleted')`,
     ),
   ],
 );

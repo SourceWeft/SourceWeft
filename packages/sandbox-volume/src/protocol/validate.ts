@@ -18,6 +18,11 @@ export type ValidationContext = {
   attachmentId: string;
   /** Current head sequence number of the volume. */
   head: number;
+  bootId?: string | null;
+  slotsUntilPack?: number;
+  slotsUntilSeq?: number;
+  /** Authoritative raw chunk length, used to reject inconsistent file extents. */
+  chunkLength?(id: string): Promise<number | null>;
   /** Key prefix of this attachment's packs, relative to the volume prefix: `att/<id>/p/`. */
   packPrefix: string;
   /** Key of the manifest object being validated (inline chunks point at it). */
@@ -43,7 +48,7 @@ function reject(message: string): never {
 }
 
 function isInt(value: unknown): value is number {
-  return typeof value === "number" && Number.isInteger(value);
+  return typeof value === "number" && Number.isSafeInteger(value);
 }
 
 /**
@@ -61,11 +66,33 @@ export async function validateManifest(
   ) {
     reject("identity mismatch");
   }
-  if (manifest.seq !== ctx.head + 1 || manifest.base !== ctx.head) {
+  if (ctx.bootId != null && manifest.boot_id !== ctx.bootId)
+    reject("boot identity mismatch");
+  if (
+    !isInt(manifest.seq) ||
+    !isInt(manifest.base) ||
+    manifest.seq !== ctx.head + 1 ||
+    manifest.base !== ctx.head
+  ) {
     reject(
       `sequence gap: head=${ctx.head} seq=${manifest.seq} base=${manifest.base}`,
     );
   }
+  if (ctx.slotsUntilSeq !== undefined && manifest.seq > ctx.slotsUntilSeq)
+    reject("manifest sequence has no issued slot");
+  if (manifest.full !== undefined && typeof manifest.full !== "boolean")
+    reject("invalid full flag");
+  for (const field of ["upserts", "deletes", "unstable", "skipped"] as const) {
+    if (manifest[field] !== undefined && !Array.isArray(manifest[field]))
+      reject(`invalid ${field} array`);
+  }
+  if (
+    manifest.chunks !== undefined &&
+    (!manifest.chunks ||
+      typeof manifest.chunks !== "object" ||
+      Array.isArray(manifest.chunks))
+  )
+    reject("invalid chunks object");
   const upserts = Array.isArray(manifest.upserts) ? manifest.upserts : [];
   const deletes = Array.isArray(manifest.deletes) ? manifest.deletes : [];
   if (upserts.length + deletes.length > MAX_MANIFEST_ENTRIES) {
@@ -79,7 +106,8 @@ export async function validateManifest(
       : {};
   const newChunks: Record<string, ChunkLocation> = {};
   for (const [id, location] of Object.entries(declared)) {
-    if (manifest.full && (await ctx.chunkKnown(id))) continue; // the host's own record stands
+    if (manifest.full && CHUNK_ID.test(id) && (await ctx.chunkKnown(id)))
+      continue; // the host's own record stands
     newChunks[id] = location;
   }
   const packSizes = new Map<string, number>();
@@ -97,7 +125,8 @@ export async function validateManifest(
       !isInt(clen) ||
       !isInt(rlen) ||
       Math.min(off, clen, rlen) < 0 ||
-      rlen > MAX_CHUNK_RAW_BYTES
+      rlen > MAX_CHUNK_RAW_BYTES ||
+      !Number.isSafeInteger(off + clen)
     ) {
       reject("chunk bounds");
     }
@@ -117,6 +146,11 @@ export async function validateManifest(
         `chunk points outside this attachment's packs: ${String(pack).slice(0, 80)}`,
       );
     }
+    if (
+      ctx.slotsUntilPack !== undefined &&
+      Number(pack.slice(ctx.packPrefix.length)) >= ctx.slotsUntilPack
+    )
+      reject("pack has no issued slot");
     let size = packSizes.get(pack);
     if (size === undefined) {
       const found = await ctx.packSize(pack);
@@ -129,8 +163,19 @@ export async function validateManifest(
   }
   const known = async (id: string) =>
     id in newChunks || (await ctx.chunkKnown(id));
+  const paths = new Map<string, ManifestEntry>();
   for (const entry of upserts) {
     validateEntryShape(entry);
+    if (paths.has(entry.p)) reject("duplicate upsert path");
+    paths.set(entry.p, entry);
+  }
+  for (const entry of upserts) {
+    let parent = entry.p;
+    while (parent.includes("/")) {
+      parent = parent.slice(0, parent.lastIndexOf("/"));
+      if (paths.has(parent) && paths.get(parent)!.k !== "d")
+        reject("entry parent is not a directory");
+    }
     if (entry.k === "f") {
       const size = entry.s;
       if (!isInt(size) || size < 0 || size > MAX_FILE_BYTES)
@@ -142,11 +187,20 @@ export async function validateManifest(
           chunk.length !== 2 ||
           typeof chunk[0] !== "string" ||
           !isInt(chunk[1]) ||
+          chunk[1] < 0 ||
+          chunk[1] > MAX_CHUNK_RAW_BYTES ||
+          !CHUNK_ID.test(chunk[0]) ||
           !(await known(chunk[0]))
         ) {
           reject(`file ${JSON.stringify(entry.p)} references an unknown chunk`);
         }
+        const authoritative =
+          (ctx.chunkLength ? await ctx.chunkLength(chunk[0]) : undefined) ??
+          newChunks[chunk[0]]?.[3];
+        if (authoritative !== undefined && authoritative !== chunk[1])
+          reject("file chunk length differs from recorded chunk");
         total += chunk[1];
+        if (!Number.isSafeInteger(total)) reject("file chunk length overflow");
       }
       if (total !== size)
         reject(
@@ -154,7 +208,10 @@ export async function validateManifest(
         );
     }
   }
+  const deleted = new Set<string>();
   for (const path of deletes) {
+    if (deleted.has(path)) reject("duplicate delete path");
+    deleted.add(path);
     if (!isValidVolumePath(path))
       reject(`invalid delete path ${JSON.stringify(path).slice(0, 80)}`);
   }
@@ -178,6 +235,10 @@ function validateEntryShape(entry: ManifestEntry) {
     !(typeof entry.t === "string" && /^\d{1,20}$/.test(entry.t))
   )
     reject("invalid mtime");
+  if (entry.c !== undefined && !Array.isArray(entry.c))
+    reject("invalid file chunks array");
+  if (entry.t !== undefined && BigInt(entry.t) > 9223372036854775807n)
+    reject("mtime exceeds database range");
   if (entry.k === "l") {
     const target = entry.l;
     if (

@@ -428,6 +428,20 @@
       "when": 1790857708692,
       "tag": "0060_sandbox_volumes",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1791464765593,
+      "tag": "0061_sandbox_volume_integrity",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1791465609878,
+      "tag": "0062_sandbox_volume_gc",
+      "breakpoints": true
     }
   ]
 }

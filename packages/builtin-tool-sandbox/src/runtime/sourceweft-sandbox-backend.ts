@@ -1,3 +1,7 @@
+import {
+  readSandboxDurability,
+  volumeFailureResult,
+} from "./volume-durability";
 import { SandboxInstanceChangedError } from "./errors";
 import { randomUUID } from "node:crypto";
 import type {
@@ -23,6 +27,7 @@ import {
 } from "./paths";
 import type {
   SandboxProvider,
+  SandboxExecuteResult,
   SandboxCancellationReason,
   SandboxCancellationResult,
   SandboxProviderPathPolicy,
@@ -228,19 +233,22 @@ function normalizeFileDataContent(
   return Array.isArray(content) ? content.join("\n") : content;
 }
 
-function replayExecuteResult(result: Record<string, unknown>) {
+function replayExecuteResult(
+  result: Record<string, unknown>,
+): SandboxExecuteResult {
+  const durability = readSandboxDurability(result.durability);
   return {
+    ...(durability ? { durability } : {}),
     output: typeof result.output === "string" ? result.output : "",
-    exitCode: typeof result.exitCode === "number" ? result.exitCode : 1,
+    exitCode:
+      result.exitCode === null || typeof result.exitCode === "number"
+        ? result.exitCode
+        : 1,
     truncated: result.truncated === true,
   };
 }
 
-function redactExecuteResult(result: {
-  output: string;
-  exitCode: number | null;
-  truncated: boolean;
-}) {
+function redactExecuteResult(result: SandboxExecuteResult) {
   return {
     ...result,
     output: redactSandboxText(result.output),
@@ -1204,7 +1212,7 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
       signal?: AbortSignal;
       toolCallId?: string | null;
     } = {},
-  ) {
+  ): Promise<SandboxExecuteResult> {
     if (options.signal?.aborted) {
       throw (
         options.signal.reason ??
@@ -1289,8 +1297,12 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
         ).catch(() => undefined);
       });
       const hostExecutionId = executionId;
-      const runOnce = () =>
-        this.input.manager.providerForSandbox().execute({
+      const runOnce = async () => {
+        await this.input.manager.volumeAssertActive(
+          sandbox,
+          this.input.context,
+        );
+        return this.input.manager.providerForSandbox().execute({
           providerSandboxId: sandbox.providerSandboxId,
           executionId: hostExecutionId,
           command: this.input.manager.volumeWrapCommand(sandbox, command),
@@ -1302,21 +1314,10 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
           maxOutputChars: this.input.limits.maxOutputChars,
           ...(options.signal ? { signal: options.signal } : {}),
         });
-      // With a volume attached the wrapper refuses to run in a replaced container; the volume is
-      // re-attached and the command is run once more (it never executed the first time).
+      };
       const execution = (async () => {
-        let result = await runOnce();
-        let parsed = await this.input.manager.volumeParseResult(
-          sandbox,
-          result,
-        );
-        if (parsed === null) {
-          await this.input.manager.reattachVolume(sandbox, this.input.context);
-          result = await runOnce();
-          parsed = await this.input.manager.volumeParseResult(sandbox, result);
-          if (parsed === null) throw new SandboxInstanceChangedError();
-        }
-        return parsed;
+        const result = await runOnce();
+        return this.input.manager.volumeParseResult(sandbox, result);
       })().then(
         (result) => ({ kind: "result" as const, result }),
         (error: unknown) => ({ kind: "error" as const, error }),
@@ -1390,6 +1391,9 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
             truncated: redactedResult.truncated,
             outputChars: redactedResult.output.length,
             executionId,
+            ...(redactedResult.durability
+              ? { durability: redactedResult.durability }
+              : {}),
           },
           durationMs: Date.now() - startedAt,
         });
@@ -1426,6 +1430,7 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
           error: compactRecoverableToolOutput(
             redactSandboxText(compactError(error)),
           ),
+          ...volumeFailureResult(error),
           ...(errorCode ? { errorCode, failureCode: errorCode } : {}),
           ...(executionId ? { executionId } : {}),
           ...(cancellation

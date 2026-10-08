@@ -209,40 +209,60 @@ Commands execute on the user's bound PC inside its authorized working folder. In
         continue;
       }
 
+      let persistenceConfirmed = false;
       try {
-        // Persist whatever the sandbox still holds before it is destroyed. A failure here is
-        // logged, not fatal: the volume already has everything the barrier acknowledged.
+        // Do not delete the only remaining copy when the checkpoint is unconfirmed.
         const volume = sandboxVolumeHooks();
         if (volume) {
           const execute = provider.executeSystem
             ? provider.executeSystem.bind(provider)
             : provider.execute.bind(provider);
-          await volume
-            .checkpointScope({
-              scope: {
-                teamId: sandbox.teamId,
-                workspaceId: sandbox.workspaceId,
-                threadId: sandbox.threadId,
+          const checkpoint = await volume.checkpointScope({
+            sandboxId: sandbox.providerSandboxId,
+            scope: {
+              teamId: sandbox.teamId,
+              workspaceId: sandbox.workspaceId,
+              threadId: sandbox.threadId,
+            },
+            executor: {
+              execute: async (command, options) => {
+                const result = await execute({
+                  providerSandboxId: sandbox.providerSandboxId,
+                  command,
+                  timeoutMs: options.timeoutMs,
+                  maxOutputChars: 4 * 1024 * 1024,
+                });
+                return { output: result.output, exitCode: result.exitCode };
               },
-              executor: {
-                execute: async (command, options) => {
-                  const result = await execute({
-                    providerSandboxId: sandbox.providerSandboxId,
-                    command,
-                    timeoutMs: options.timeoutMs,
-                    maxOutputChars: 4 * 1024 * 1024,
-                  });
-                  return { output: result.output, exitCode: result.exitCode };
-                },
-              },
-            })
-            .catch((error: unknown) => {
-              logger.warn("sandbox.volume.checkpoint_failed", {
-                sandboxId: sandbox.id,
-                error: error instanceof Error ? error.message : String(error),
-              });
+            },
+          });
+          // Null means this thread has no volume; an existing volume must return
+          // an explicit successful acknowledgement or throw.
+          if (checkpoint !== null && checkpoint?.sync?.persisted !== true) {
+            throw Object.assign(
+              new Error(
+                "SANDBOX_VOLUME_PERSISTENCE_UNCONFIRMED: cleanup checkpoint was not confirmed durable; the sandbox was retained.",
+              ),
+              { code: "SANDBOX_VOLUME_PERSISTENCE_UNCONFIRMED" },
+            );
+          }
+          if (checkpoint !== null) {
+            logger.warn("sandbox.volume.cleanup_deferred", {
+              sandboxId: sandbox.id,
+              provider: factory.id,
+              providerSandboxId: sandbox.providerSandboxId,
+              reason: "background_writers_not_drained",
+              checkpointConfirmed: true,
             });
+            throw Object.assign(
+              new Error(
+                "SANDBOX_VOLUME_CLEANUP_REQUIRES_DRAIN: checkpoint completed, but background writers can still create unconfirmed changes. The sandbox was retained until execution and cleanup share a draining fence.",
+              ),
+              { code: "SANDBOX_VOLUME_CLEANUP_REQUIRES_DRAIN" },
+            );
+          }
         }
+        persistenceConfirmed = true;
         await provider.deleteSandbox(sandbox.providerSandboxId);
         await db
           .update(agentSandboxes)
@@ -263,7 +283,7 @@ Commands execute on the user's bound PC inside its authorized working folder. In
         cleaned += 1;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        if (isSandboxInstanceMissingError(error)) {
+        if (persistenceConfirmed && isSandboxInstanceMissingError(error)) {
           await db
             .update(agentSandboxes)
             .set({ status: "expired", updatedAt: new Date() })

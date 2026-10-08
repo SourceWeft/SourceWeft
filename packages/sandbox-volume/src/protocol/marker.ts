@@ -6,7 +6,14 @@ import type { FlushReport, ParsedCommandOutput } from "./types";
  * The marker is always the last occurrence; anything the user command printed stays untouched.
  */
 export function parseCommandOutput(output: string): ParsedCommandOutput {
-  const at = output.lastIndexOf(TAIL_MARKER);
+  // A marker embedded in user text or followed by more output is not a completion
+  // receipt. Keep the whole output in that case so callers can report unknown.
+  const match = new RegExp(
+    `(?:^|\\n)${TAIL_MARKER} (-?\\d+) ([^\\r\\n]*)\\r?\\n?$`,
+  ).exec(output);
+  const at = match
+    ? output.length - match[0].length + (match[0].startsWith("\n") ? 1 : 0)
+    : -1;
   if (at < 0) {
     return {
       output,

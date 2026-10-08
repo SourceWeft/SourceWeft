@@ -1,11 +1,13 @@
 [package]
 name = "swvol"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "SourceWeft sandbox volume helper (prototype): change detection, chunked incremental sync, restore"
 
 [dependencies]
+swvol-core = { path = "../swvol-core" }
 anyhow = "1"
+libc = "0.2"
 bincode = "1"
 blake3 = "1"
 fastcdc = "3"

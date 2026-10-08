@@ -22,6 +22,31 @@ function parseBoundedIntegerEnv(input: {
   return parsed;
 }
 
+function parseSandboxVolumeMode(): "shadow" | "full" {
+  const value = process.env.SOURCEWEFT_SANDBOX_VOLUME_MODE;
+  if (value === undefined) return "shadow";
+  if (value === "shadow" || value === "full") return value;
+  throw new Error("SOURCEWEFT_SANDBOX_VOLUME_MODE must be shadow or full.");
+}
+
+function parseSandboxVolumeLimit(
+  name: string,
+  fallback: number,
+  maximum = Number.MAX_SAFE_INTEGER,
+) {
+  const value = process.env[name];
+  if (value === undefined) return fallback;
+  if (
+    !/^\d+$/.test(value) ||
+    !Number.isSafeInteger(Number(value)) ||
+    Number(value) > maximum
+  )
+    throw new Error(
+      `${name} must be a non-negative integer no greater than ${maximum}.`,
+    );
+  return Number(value);
+}
+
 function parsePositiveNumber(value: string | undefined, fallback: number) {
   if (value === undefined) {
     return fallback;
@@ -539,14 +564,11 @@ export const config = {
     // Persistent /workspace volume (packages/sandbox-volume). `shadow` syncs without
     // restoring (staged rollout); `full` restores the volume into every new sandbox.
     volume: {
-      enabled: parseBoolean(
-        process.env.SOURCEWEFT_SANDBOX_VOLUME_ENABLED,
+      enabled: parseStrictBooleanEnv(
+        "SOURCEWEFT_SANDBOX_VOLUME_ENABLED",
         false,
       ),
-      mode:
-        process.env.SOURCEWEFT_SANDBOX_VOLUME_MODE === "full"
-          ? "full"
-          : "shadow",
+      mode: parseSandboxVolumeMode(),
       keyPrefix:
         process.env.SOURCEWEFT_SANDBOX_VOLUME_KEY_PREFIX || "sandbox-volumes/",
       // Where the sandbox image ships the helper; empty → downloaded from the bucket
@@ -554,6 +576,25 @@ export const config = {
       helperImagePath:
         process.env.SOURCEWEFT_SANDBOX_VOLUME_HELPER_IMAGE_PATH || "",
       helperPath: process.env.SOURCEWEFT_SANDBOX_VOLUME_HELPER_PATH || "",
+      limits: {
+        maxLogicalBytes: parseSandboxVolumeLimit(
+          "SOURCEWEFT_SANDBOX_VOLUME_MAX_LOGICAL_BYTES",
+          32 * 1024 ** 3,
+        ),
+        maxFileBytes: parseSandboxVolumeLimit(
+          "SOURCEWEFT_SANDBOX_VOLUME_MAX_FILE_BYTES",
+          8 * 1024 ** 3,
+          8 * 1024 ** 3,
+        ),
+        maxEntries: parseSandboxVolumeLimit(
+          "SOURCEWEFT_SANDBOX_VOLUME_MAX_ENTRIES",
+          500_000,
+        ),
+        maxObjectBytes: parseSandboxVolumeLimit(
+          "SOURCEWEFT_SANDBOX_VOLUME_MAX_OBJECT_BYTES",
+          64 * 1024 ** 3,
+        ),
+      },
     },
     // No per-provider block lives here. Which provider a deployment runs on is
     // `provider` above — an opaque id the host matches against whatever
