@@ -57,10 +57,12 @@ fn malformed_and_unreadable_pending_are_preserved() {
 fn missing_pack_slot_does_not_advance_counter_and_refresh_recovers() {
     let f = Fixture::new();
     let mut grant = slots();
+    fs::write(meta_dir(&f.0).join("slots.json"), serde_json::to_vec(&grant).unwrap()).unwrap();
     let error = PackWriter::new(&grant, &f.0).reserve().unwrap_err();
     assert_eq!(error_exit_code(&error), 76);
     assert!(!meta_dir(&f.0).join("pack.next").exists());
     grant.packs.insert("0".into(), "unused".into());
+    fs::write(meta_dir(&f.0).join("slots.json"), serde_json::to_vec(&grant).unwrap()).unwrap();
     assert_eq!(PackWriter::new(&grant, &f.0).reserve().unwrap(), 0);
     assert_eq!(fs::read_to_string(meta_dir(&f.0).join("pack.next")).unwrap(), "1");
     fs::write(meta_dir(&f.0).join("pack.next"), "broken").unwrap();

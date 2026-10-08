@@ -1,19 +1,23 @@
 # Helper image reliability contract
 
-The existing Rust implementation is unchanged. `helper/build.sh` pins the original
+`helper/build.sh` builds `swvol`, `swlazy`, and `swvol-supervisor` with the original
 musl-cross builder images and strictly checks their original toolchains: x86_64 uses
 Rust 1.96.1 and aarch64 uses Rust 1.95.0. The versions differ in the original pinned
 images; builds retain native-host image selection without installing another toolchain
 or switching execution platform. Receipts record the exact per-architecture version.
-The build uses `cargo build --locked`, removes
-old selected output before compilation, and propagates compilation failures. A successful
+Fetch the locked dependencies explicitly before building (the reliability CI does this).
+The build uses `cargo build --locked --offline`, removes
+old selected output before compilation, checks that sources do not change during the build,
+and propagates compilation failures. A successful
 artifact has an architecture/target/source/builder/binary receipt and a SHA-256 sidecar.
 `VERSION` is emitted only after all selected helpers succeed. Select `SWVOL_ARCHES` as
 `x86_64`, `aarch64`, or `x86_64,aarch64`; no other value implicitly selects a target.
+`SWVOL_HELPERS` optionally selects a comma-separated subset of those three helpers for
+an explicit partial rebuild. Such a subset is not a complete installable bundle.
 
-The image packaging step must stage both helpers, their `.receipt.json` and `.sha256`
+The image packaging step must stage all three helpers, their `.receipt.json` and `.sha256`
 files, `VERSION`, and `swvol-init` next to `install-swvol.sh`. The installer validates
-architecture and actual binary hash against the receipt before changing the image.
+crate, architecture, target, binary hash, and reported bundle version before changing the image.
 It retains receipts in `/usr/local/share/swvol`. These scripts are not yet an integrated
 provider image publication pipeline or proof of protected daemon supervision.
 

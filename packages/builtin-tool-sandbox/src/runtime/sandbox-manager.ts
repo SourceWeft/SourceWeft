@@ -1,7 +1,9 @@
+import { setTimeout as waitForPermit } from "node:timers/promises";
 import { SandboxVolumePersistenceError } from "./volume-durability";
 import { randomUUID } from "node:crypto";
 import {
   isSandboxInstanceMissingError,
+  hasSandboxPhysicalAbsenceEvidence,
   isSandboxProviderUnavailableError,
   SandboxInstanceChangedError,
   sandboxErrorDiagnostic,
@@ -22,6 +24,7 @@ import type {
   SandboxVolumeExecutor,
   SandboxVolumeHooks,
   SandboxVolumeScope,
+  SandboxSupervisorIdentity,
 } from "./types";
 import {
   redactSandboxOperationRequest,
@@ -256,6 +259,11 @@ export class SandboxManager {
   /** provider sandbox id -> volume attachment id, for the sandboxes this manager attached. */
   private readonly volumeAttachments = new Map<string, string>();
   private readonly volumeAttachRuns = new Map<string, Promise<void>>();
+  private readonly volumeConfirmedModes = new Map<string, "shadow" | "full">();
+  private readonly volumeOperationIdentities = new Map<
+    string,
+    SandboxSupervisorIdentity
+  >();
   private readonly missingVolumeInstances = new Map<string, string>();
 
   private volumeScopeKey(context: SandboxRuntimeContext): string {
@@ -310,11 +318,35 @@ export class SandboxManager {
         sandboxId: sandbox.providerSandboxId,
         executor: this.volumeExecutor(sandbox),
       };
-      run = (
-        previousSandboxId
+      run = (async () => {
+        const control = this.input.provider.volumeControl;
+        if (
+          !control ||
+          !this.input.provider.executeSupervised ||
+          volume.protectedBootstrap !== true
+        ) {
+          throw new Error(
+            "SANDBOX_VOLUME_PROTECTED_BOOTSTRAP_REQUIRED: verify the protected provider and bootstrap contracts before creating a volume attachment.",
+          );
+        }
+        const identity = await control.identity({
+          providerSandboxId: sandbox.providerSandboxId,
+        });
+        if (
+          identity.protocolVersion !== 1 ||
+          identity.boundary !== "pid-namespace" ||
+          identity.protectedControl !== true ||
+          !identity.bootId ||
+          !identity.supervisorNonce
+        ) {
+          throw new Error(
+            "SANDBOX_VOLUME_SUPERVISOR_UNVERIFIED: attachment requires protected instance identity.",
+          );
+        }
+        return previousSandboxId
           ? volume.onContainerReplaced({ ...attachInput, previousSandboxId })
-          : volume.attach(attachInput)
-      )
+          : volume.attach(attachInput);
+      })()
         .then((attached) => {
           this.missingVolumeInstances.delete(scopeKey);
           this.volumeAttachments.set(
@@ -359,6 +391,203 @@ export class SandboxManager {
       )!;
       await volume.assertActive({ attachmentId: replacementId, executor });
     }
+  }
+
+  /** Serialize mutations through a database permit and a supervisor-frozen durable barrier. */
+  async withVolumeOperation<T>(input: {
+    sandbox: SandboxRef;
+    context: SandboxRuntimeContext;
+    operationId: string;
+    writerKind?: "external" | "supervised";
+    signal?: AbortSignal;
+    run: (executionId: string) => Promise<T>;
+    checkpoint?: (
+      result: T,
+      barrier: { freezeId: string; supervisorNonce: string },
+    ) => Promise<number>;
+  }): Promise<T> {
+    const volume = this.input.volume;
+    const attachmentId = this.volumeAttachments.get(
+      input.sandbox.providerSandboxId,
+    );
+    if (!volume || !attachmentId) return input.run(input.operationId);
+    const control = this.input.provider.volumeControl;
+    if (
+      !control ||
+      !this.input.provider.executeSupervised ||
+      !volume.acquireOperation ||
+      !volume.markOperationStarted ||
+      !volume.releaseOperation
+    ) {
+      throw new Error(
+        "SANDBOX_VOLUME_SUPERVISOR_REQUIRED: protected workload control and database admission must be available before durable mutations are enabled.",
+      );
+    }
+    input.signal?.throwIfAborted();
+    const identity = await control.identity({
+      providerSandboxId: input.sandbox.providerSandboxId,
+    });
+    if (
+      identity.protocolVersion !== 1 ||
+      identity.boundary !== "pid-namespace" ||
+      identity.protectedControl !== true ||
+      !identity.supervisorNonce ||
+      !identity.bootId
+    ) {
+      throw new Error(
+        "SANDBOX_VOLUME_SUPERVISOR_UNVERIFIED: protected workload identity was not confirmed.",
+      );
+    }
+    let permit: { permitId: string; reused: boolean };
+    for (;;) {
+      input.signal?.throwIfAborted();
+      try {
+        permit = await volume.acquireOperation({
+          attachmentId,
+          operationId: input.operationId,
+          sandboxId: input.sandbox.providerSandboxId,
+          bootId: identity.bootId,
+          supervisorNonce: identity.supervisorNonce,
+          writerKind: input.writerKind ?? "external",
+        });
+        break;
+      } catch (error) {
+        if (
+          !error ||
+          typeof error !== "object" ||
+          !("code" in error) ||
+          error.code !== "VOLUME_EXECUTION_QUEUED"
+        )
+          throw error;
+        await waitForPermit(100, undefined, { signal: input.signal });
+      }
+    }
+    this.volumeOperationIdentities.set(permit.permitId, identity);
+    let started = false;
+    let completedResult: T | undefined;
+    try {
+      input.signal?.throwIfAborted();
+      await volume.assertActive({
+        attachmentId,
+        executor: this.volumeExecutor(input.sandbox),
+      });
+      input.signal?.throwIfAborted();
+      // This durable transition precedes any provider request. A previous worker's
+      // started operation is never dispatched again just because its result was lost.
+      if (
+        !(await volume.markOperationStarted({
+          attachmentId,
+          permitId: permit.permitId,
+        }))
+      ) {
+        started = true;
+        throw new Error(
+          "SANDBOX_VOLUME_OPERATION_RECOVERY_REQUIRED: this operation was already dispatched; recover its supervisor result before continuing.",
+        );
+      }
+      started = true;
+      const result = await input.run(permit.permitId);
+      completedResult = result;
+      input.signal?.throwIfAborted();
+      const freezeId = `barrier-${permit.permitId}`;
+      const proof = await control.freeze({
+        providerSandboxId: input.sandbox.providerSandboxId,
+        expectedNonce: identity.supervisorNonce,
+        freezeId,
+      });
+      if (
+        proof.freezeId !== freezeId ||
+        proof.supervisorNonce !== identity.supervisorNonce ||
+        proof.allWritersStopped !== true
+      ) {
+        throw new Error(
+          "SANDBOX_VOLUME_FREEZE_UNCONFIRMED: workspace writers were not confirmed stopped; retain the operation for recovery.",
+        );
+      }
+      const barrier = { freezeId, supervisorNonce: identity.supervisorNonce };
+      const confirmedSeq = input.checkpoint
+        ? await input.checkpoint(result, barrier)
+        : await this.volumeCheckpoint(input.sandbox, barrier);
+      if (!Number.isSafeInteger(confirmedSeq) || confirmedSeq < 0) {
+        throw new Error(
+          "SANDBOX_VOLUME_PERSISTENCE_UNCONFIRMED: the frozen workspace checkpoint has no confirmed sequence.",
+        );
+      }
+      await control.resume({
+        providerSandboxId: input.sandbox.providerSandboxId,
+        expectedNonce: identity.supervisorNonce,
+        freezeId,
+      });
+      await volume.releaseOperation({
+        attachmentId,
+        permitId: permit.permitId,
+        outcome: "persisted",
+        confirmedSeq,
+      });
+      this.volumeOperationIdentities.delete(permit.permitId);
+      return result;
+    } catch (error) {
+      if (!started)
+        await volume.releaseOperation({
+          attachmentId,
+          permitId: permit.permitId,
+          outcome: "not_started",
+        });
+      // After dispatch, neither an exception nor a timeout proves the absence of
+      // writes. Retain the permit and any freeze until the recovery worker resolves it.
+      if (
+        completedResult &&
+        typeof completedResult === "object" &&
+        "output" in completedResult &&
+        "exitCode" in completedResult &&
+        typeof completedResult.output === "string" &&
+        (completedResult.exitCode === null ||
+          typeof completedResult.exitCode === "number")
+      ) {
+        throw new SandboxVolumePersistenceError({
+          attachmentId,
+          output: completedResult.output,
+          exitCode: completedResult.exitCode,
+          status:
+            error &&
+            typeof error === "object" &&
+            "durabilityStatus" in error &&
+            error.durabilityStatus === "failed"
+              ? "failed"
+              : "unknown",
+          cause: error,
+        });
+      }
+      throw error;
+    }
+  }
+
+  async executeUserCommand(
+    sandbox: SandboxRef,
+    input: Parameters<SandboxProvider["execute"]>[0],
+    trusted = false,
+  ): Promise<SandboxExecuteResult> {
+    const provider = this.input.provider;
+    if (
+      this.input.volume &&
+      this.volumeAttachments.has(sandbox.providerSandboxId)
+    ) {
+      const identity = input.executionId
+        ? this.volumeOperationIdentities.get(input.executionId)
+        : undefined;
+      if (!provider.executeSupervised || !identity) {
+        throw new Error(
+          "SANDBOX_VOLUME_WORKLOAD_RPC_REQUIRED: durable commands require their admitted, protected workload execution RPC.",
+        );
+      }
+      return provider.executeSupervised({
+        ...input,
+        expectedNonce: identity.supervisorNonce,
+      });
+    }
+    return trusted && provider.executeSystem
+      ? provider.executeSystem(input)
+      : provider.execute(input);
   }
 
   /** The command to hand to the provider: wrapped with the volume's identity check and sync barrier when a volume is attached. */
@@ -460,22 +689,103 @@ export class SandboxManager {
   }
 
   /** Full-scan barrier before a sandbox goes away; a no-op without a volume. */
-  async volumeCheckpoint(sandbox: SandboxRef): Promise<void> {
+  async volumeCheckpoint(
+    sandbox: SandboxRef,
+    barrier: {
+      freezeId?: string;
+      drainId?: string;
+      supervisorNonce?: string;
+    } = {},
+  ): Promise<number> {
     const volume = this.input.volume;
     const attachmentId = this.volumeAttachments.get(sandbox.providerSandboxId);
-    if (!volume || !attachmentId) return;
+    if (!volume || !attachmentId) return 0;
+    const control = this.input.provider.volumeControl;
+    if (
+      !control ||
+      !barrier.supervisorNonce ||
+      (!barrier.freezeId && !barrier.drainId)
+    ) {
+      throw new SandboxVolumePersistenceError({
+        attachmentId,
+        exitCode: null,
+        cause: new Error(
+          "protected persistence checkpoint requires a supervisor freeze or drain fence",
+        ),
+      });
+    }
     const checkpoint = await volume.checkpoint({
       attachmentId,
       executor: this.volumeExecutor(sandbox),
+      ...(barrier.freezeId ? { freezeId: barrier.freezeId } : {}),
+      ...(barrier.drainId ? { drainId: barrier.drainId } : {}),
+      supervisorNonce: barrier.supervisorNonce,
+      ...(control && barrier.supervisorNonce
+        ? {
+            trustedFlush: async (input: {
+              attachmentId: string;
+              freezeId?: string;
+              drainId?: string;
+            }) =>
+              control.flush({
+                providerSandboxId: sandbox.providerSandboxId,
+                expectedNonce: barrier.supervisorNonce!,
+                attachmentId: input.attachmentId,
+                freezeId: input.freezeId,
+                drainId: input.drainId,
+                full: true,
+              }),
+          }
+        : {}),
     });
-    if (checkpoint?.sync?.persisted !== true) {
-      throw Object.assign(
-        new Error(
-          "SANDBOX_VOLUME_PERSISTENCE_UNCONFIRMED: sandbox checkpoint was not confirmed durable.",
+    if (
+      checkpoint?.sync?.persisted !== true ||
+      !Number.isSafeInteger(checkpoint.sync.confirmedSeq) ||
+      checkpoint.sync.confirmedSeq! < 0
+    ) {
+      throw new SandboxVolumePersistenceError({
+        attachmentId,
+        exitCode: null,
+        cause: new Error(
+          "sandbox checkpoint has no confirmed persistence sequence",
         ),
-        { code: "SANDBOX_VOLUME_PERSISTENCE_UNCONFIRMED" },
-      );
+      });
     }
+    this.volumeConfirmedModes.set(
+      sandbox.providerSandboxId,
+      checkpoint.sync.mode ?? "full",
+    );
+    return checkpoint.sync.confirmedSeq!;
+  }
+
+  volumeConfirmedResult(
+    sandbox: SandboxRef,
+    result: SandboxExecuteResult,
+    confirmedSeq?: number,
+  ): SandboxExecuteResult {
+    const attachmentId = this.volumeAttachments.get(sandbox.providerSandboxId);
+    if (!this.input.volume || !attachmentId) return result;
+    if (!Number.isSafeInteger(confirmedSeq) || confirmedSeq! < 0) {
+      throw new SandboxVolumePersistenceError({
+        attachmentId,
+        exitCode: result.exitCode,
+        output: result.output,
+        cause: new Error("no frozen workspace checkpoint was confirmed"),
+      });
+    }
+    const shadow =
+      this.volumeConfirmedModes.get(sandbox.providerSandboxId) === "shadow";
+    return {
+      ...result,
+      output: shadow
+        ? `${result.output}\nSandbox volume shadow observation completed; production persistence is not confirmed.`
+        : result.output,
+      durability: {
+        status: shadow ? "pending" : "confirmed",
+        attachmentId,
+        confirmedSeq,
+      },
+    };
   }
 
   // A failed acquisition is shared too: siblings must not each start a new
@@ -653,6 +963,36 @@ export class SandboxManager {
             );
           } catch (error) {
             if (!isSandboxInstanceMissingError(error)) throw error;
+            if (
+              this.input.volume &&
+              !hasSandboxPhysicalAbsenceEvidence(error, {
+                provider: this.input.provider.id,
+                providerSandboxId: existing.providerSandboxId,
+              })
+            ) {
+              const control = this.input.provider.volumeControl;
+              if (control) {
+                const identity = await control.identity({
+                  providerSandboxId: existing.providerSandboxId,
+                });
+                if (
+                  identity.protocolVersion === 1 &&
+                  identity.protectedControl === true &&
+                  identity.boundary === "pid-namespace"
+                ) {
+                  // A missing user-writable stamp is not a missing instance. Keep
+                  // the same disk and let attachment recovery verify its identity.
+                  return {
+                    id: existing.id,
+                    provider: this.input.provider.id,
+                    providerSandboxId: existing.providerSandboxId,
+                  };
+                }
+              }
+              throw new Error(
+                "SANDBOX_VOLUME_INSTANCE_UNVERIFIED: a missing or altered stamp does not prove instance loss; preserve the existing writable volume for protected identity recovery.",
+              );
+            }
             const expired = await this.input.sandboxStore.markSandboxExpired({
               sandboxId: existing.id,
               providerSandboxId: existing.providerSandboxId,

@@ -1,5 +1,7 @@
 export {
   VolumeService,
+  VolumeControlUnauthorized,
+  type ControlRequest,
   type VolumeServiceConfig,
   type ApplyWalResult,
   type AttachFiles,
@@ -20,3 +22,16 @@ export {
   DEFAULT_VOLUME_LIMITS,
   type VolumeLimits,
 } from "./quota";
+
+export {
+  VolumeLifecycle,
+  VolumeExecutionQueued,
+  type DrainRequest,
+  type InstanceIdentity,
+  type SupervisorStopProof,
+  type PermitRelease,
+  type VolumeWriterKind,
+  type SupervisorRecoveryProof,
+  type ProviderAbsenceEvidence,
+  type RecoveryCandidatesOptions,
+} from "./lifecycle";

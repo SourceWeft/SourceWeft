@@ -288,7 +288,7 @@ pub fn mount(plan: &Plan, store: Option<Arc<Store>>, mountpoint: &str, allow_oth
 
 /// Mount the production chunk format with bounded network workers. No active
 /// tree or inode map is changed during this mount's lifetime.
-pub fn mount_volume(plan: &swvol_core::RestorePlan, store: Arc<crate::volume::VolumeStore>, mountpoint: &str, allow_other: bool) -> std::io::Result<()> {
+pub fn mount_volume(plan: &swvol_core::RestorePlan, store: Arc<crate::volume::VolumeStore>, mountpoint: &str, allow_other: bool, initial_fd: Option<std::os::fd::OwnedFd>) -> std::io::Result<()> {
     let view = Plan {
         pack_size: 0, total: plan.entries.iter().map(|entry| entry.s).sum(), packs: vec![],
         entries: plan.entries.iter().map(|entry| crate::plan::Entry { p: entry.p.clone(), k: entry.k.to_string(), m: entry.m, t: entry.t, s: entry.s, o: 0, l: entry.l.clone() }).collect(),
@@ -316,5 +316,11 @@ pub fn mount_volume(plan: &swvol_core::RestorePlan, store: Arc<crate::volume::Vo
     fs.volume_jobs = Some(tx);
     let mut opts = vec![MountOption::RO, MountOption::FSName("swvol".into()), MountOption::Subtype("swvol".into()), MountOption::DefaultPermissions, MountOption::NoAtime];
     if allow_other { opts.push(MountOption::AllowOther); }
-    fuser::mount2(fs, mountpoint, &opts)
+    if let Some(fd) = initial_fd {
+        // Trusted root bootstrap mounted this fresh connection but did not
+        // consume INIT. This is never used to resume an initialized dead session.
+        fuser::Session::from_fd(fs, fd, fuser::SessionACL::All).run()
+    } else {
+        fuser::mount2(fs, mountpoint, &opts)
+    }
 }

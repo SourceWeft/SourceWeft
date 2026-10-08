@@ -5,6 +5,7 @@ import {
   redactSandboxText,
 } from "@sourceweft/builtin-tool-sandbox";
 import type { ExecuteResponse } from "deepagents";
+import { fetchAfterConnectRetry } from "./connect-retry";
 import type {
   SandboxProvider,
   SandboxProviderPathPolicy,
@@ -628,7 +629,7 @@ export class CloudflareSandboxProvider implements SandboxProvider {
     if (init.contentType) {
       headers["Content-Type"] = init.contentType;
     }
-    const response = await this.fetchImpl(`${this.options.bridgeUrl}${path}`, {
+    const response = await fetchAfterConnectRetry(this.fetchImpl, `${this.options.bridgeUrl}${path}`, {
       method,
       headers,
       // TS 5.9 types Uint8Array over ArrayBufferLike, which no longer

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Reproducible Linux acceptance using the same pinned builder as helper/build.sh.
-# --with-fuse explicitly grants an isolated container FUSE/mount capabilities.
+# --with-fuse explicitly enables both FUSE and supervisor namespace acceptance.
 set -euo pipefail
 cd "$(dirname "$0")"
 with_fuse=0
@@ -14,7 +14,7 @@ capabilities=()
 if [ "$with_fuse" = 1 ]; then
   capabilities+=(--privileged --tmpfs /test:rw,size=512m)
 fi
-docker run --rm "${capabilities[@]}" --tmpfs /enospc:rw,size=8m \
+docker run --rm --network none "${capabilities[@]}" --tmpfs /enospc:rw,size=8m \
   -v "$PWD":/home/rust/src:ro \
   -v swvol-cargo-registry:/root/.cargo/registry \
   -v swvol-target-swvol-x86_64:/target \
@@ -26,13 +26,16 @@ docker run --rm "${capabilities[@]}" --tmpfs /enospc:rw,size=8m \
     cargo test --locked --offline --manifest-path swvol-core/Cargo.toml --target x86_64-unknown-linux-musl
     cargo test --locked --offline --manifest-path swvol/Cargo.toml --target x86_64-unknown-linux-musl
     cargo test --locked --offline --manifest-path swlazy/Cargo.toml --target x86_64-unknown-linux-musl
+    cargo test --locked --offline --manifest-path swvol-supervisor/Cargo.toml --target x86_64-unknown-linux-musl
     SWVOL_TEST_ROOT=/enospc cargo test --locked --offline --manifest-path swvol/Cargo.toml \
       --target x86_64-unknown-linux-musl --test linux_durability real_enospc -- --ignored --nocapture
     if [ "$SWVOL_RUN_FUSE" = 1 ]; then
       test -c /dev/fuse
       cargo test --locked --offline --manifest-path swlazy/Cargo.toml --target x86_64-unknown-linux-musl \
         --test formal_fuse -- --ignored --nocapture
+      cargo test --locked --offline --manifest-path swvol-supervisor/Cargo.toml --target x86_64-unknown-linux-musl \
+        --test linux_supervisor -- --ignored --nocapture
     else
-      echo "FUSE mount acceptance NOT RUN; rerun test-linux.sh --with-fuse on a FUSE-capable Docker host."
+      echo "FUSE and supervisor namespace acceptance NOT RUN; rerun test-linux.sh --with-fuse on a capable Docker host."
     fi
   '

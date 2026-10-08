@@ -1,0 +1,8 @@
+# Administrative capability probe only. Never use this root image for agent work.
+# BASE_IMAGE must be the exact image reference backing the configured snapshot;
+# the caller records the resulting image digest and creates a new disposable snapshot.
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+USER root
+LABEL org.sourceweft.purpose="sandbox-volume-supervisor-capability-probe" \
+      org.sourceweft.production-ready="false"

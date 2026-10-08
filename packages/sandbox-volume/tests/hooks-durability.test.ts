@@ -63,6 +63,41 @@ function fixture(
 const unconfirmed = (error: unknown) =>
   (error as { code?: string })?.code ===
   "SANDBOX_VOLUME_PERSISTENCE_UNCONFIRMED";
+
+test("recovery checkpoint confirms only its current controller and never invokes shell recovery", async () => {
+  const service = {
+    applyWal: async (_id: string, input: { drainId?: string }) => {
+      assert.equal(input.drainId, "drain-test");
+      return { applied: 1, entries: [], rejected: null };
+    },
+    confirmPersistence: async (
+      _id: string,
+      seq: number,
+      input: { drainId?: string; supervisorNonce?: string },
+    ) =>
+      seq === 8 &&
+      input.drainId === "drain-test" &&
+      input.supervisorNonce === "current-controller",
+  } as unknown as VolumeService;
+  const hooks = createVolumeHooks({ service, helper: { imagePath: "/swvol" } });
+  const checkpoint = (supervisorNonce: string) =>
+    hooks.checkpoint({
+      attachmentId: "att-test",
+      drainId: "drain-test",
+      supervisorNonce,
+      executor: {
+        execute: async () => {
+          throw new Error("protected checkpoint must not execute a shell");
+        },
+      },
+      trustedFlush: async () => ({
+        output: '{"ok":true,"seq":8}',
+        exitCode: 0,
+      }),
+    });
+  assert.equal((await checkpoint("current-controller")).sync.confirmedSeq, 8);
+  await assert.rejects(checkpoint("previous-controller"), unconfirmed);
+});
 for (const [name, output] of [
   ["missing marker", "user output"],
   ["malformed JSON", "user output\n__SWVOL__ 0 broken\n"],

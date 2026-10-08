@@ -735,7 +735,12 @@ export function createTrustedSandboxHostAdapter(input: {
         current,
         signal: options?.signal,
         timeoutMs: options?.timeoutMs,
-        operation: async (systemOptions) => {
+        operation: async (systemOptions) => input.manager.withVolumeOperation({
+          sandbox: current.sandbox,
+          context: input.context,
+          operationId: systemOptions.executionId,
+          signal: systemOptions.signal,
+          run: async () => {
           await assertPinnedGeneration(current);
           const canonicalFiles = await Promise.all(
             files.map(async (file) => ({
@@ -784,7 +789,8 @@ export function createTrustedSandboxHostAdapter(input: {
             });
             await assertPinnedGeneration(current);
           }
-        },
+          },
+        }),
       });
     },
 
@@ -843,7 +849,8 @@ export function createTrustedSandboxHostAdapter(input: {
         input.commandTimeoutMs,
         input.limits.maxCommandTimeoutMs,
       );
-      const executionId = randomUUID();
+      let executionId: string = randomUUID();
+      const operationId = executionId;
       const startedAt = Date.now();
       const request = {
         command: executeInput.command,
@@ -855,7 +862,9 @@ export function createTrustedSandboxHostAdapter(input: {
         executionId,
       };
       let cancellationRun: Promise<SandboxCancellationResult> | undefined;
+      let commandSubmitted = false;
       const beginCancellation = () => {
+        if (!commandSubmitted) { cancellationRun = Promise.resolve({ confirmed: true, mode: "command" }); return; }
         cancellationRun ??= input.manager.cancelExecution({
           sandbox: current.sandbox,
           executionId,
@@ -863,24 +872,32 @@ export function createTrustedSandboxHostAdapter(input: {
         });
       };
       const abortWait = waitForAbort(executeInput.signal, beginCancellation);
-      const runOnce = async () => {
-        await input.manager.volumeAssertActive(current.sandbox, input.context);
-        return providerExecuteSystem(current.provider)({
+      const runOnce = async (permitId: string) => {
+        executeInput.signal?.throwIfAborted();
+        executionId = permitId;
+        request.executionId = permitId;
+        commandSubmitted = true;
+        return input.manager.executeUserCommand(current.sandbox, {
           providerSandboxId: current.sandbox.providerSandboxId,
           executionId,
-          command: input.manager.volumeWrapCommand(
-            current.sandbox,
-            executeInput.command,
-          ),
+          command: executeInput.command,
           cwd: assertExecuteCwd(undefined, current.provider.pathPolicy),
           timeoutMs,
           maxOutputChars,
           ...(executeInput.signal ? { signal: executeInput.signal } : {}),
-        });
+        }, true);
       };
       const execution = (async () => {
-        const result = await runOnce();
-        return input.manager.volumeParseResult(current.sandbox, result);
+        let confirmedSeq: number | undefined;
+        const result = await input.manager.withVolumeOperation({
+          sandbox: current.sandbox, context: input.context, operationId, writerKind: "supervised",
+          signal: executeInput.signal, run: runOnce,
+          checkpoint: async (_result, barrier) => {
+            confirmedSeq = await input.manager.volumeCheckpoint(current.sandbox, barrier);
+            return confirmedSeq;
+          },
+        });
+        return input.manager.volumeConfirmedResult(current.sandbox, result, confirmedSeq);
       })().then(
         (result) => ({ kind: "result" as const, result }),
         (error: unknown) => ({ kind: "error" as const, error }),

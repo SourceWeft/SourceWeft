@@ -258,3 +258,30 @@ fn restore_preserves_nonempty_or_linked_platform_entries_and_unknown_empty_dirs(
     assert!(!output.status.success()); assert!(f.root.join("user-empty-directory").is_dir());
     assert_eq!(fs::read(f.root.join(".sourceweft/identity")).unwrap(), identity);
 }
+
+#[test]
+fn restored_publication_metadata_and_symlink_time_do_not_create_a_spurious_commit() {
+    use std::os::unix::fs::MetadataExt;
+    let storage = Storage::new(); let f = Fixture::new(); storage.grant(&f.root, true);
+    fs::write(f.root.join("file"), "published content").unwrap(); fs::create_dir(f.root.join("nested")).unwrap(); fs::write(f.root.join("nested/file"), "nested content").unwrap();
+    std::os::unix::fs::symlink("file", f.root.join("link")).unwrap();
+    let timestamp = filetime::FileTime::from_unix_time(1_600_000_000, 123_456_789);
+    filetime::set_symlink_file_times(f.root.join("link"), timestamp, timestamp).unwrap();
+    f.flush();
+    let manifest = storage.manifests().into_iter().max_by_key(|manifest| manifest["seq"].as_u64().unwrap()).unwrap();
+    let head = manifest["seq"].as_u64().unwrap();
+    let packs: BTreeMap<_, _> = storage.objects.lock().unwrap().keys().map(|key| (key.trim_start_matches('/').to_owned(), format!("{}{key}", storage.url))).collect();
+    let plan = f.root.join(".sourceweft-publication-plan");
+    fs::write(&plan, serde_json::to_vec(&json!({"volume":"v","attachment":"b","seq":head,"entries":manifest["upserts"],"chunks":manifest["chunks"],"packs":packs})).unwrap()).unwrap();
+    let restored = Command::new(env!("CARGO_BIN_EXE_swvol")).arg("restore").arg("--root").arg(&f.restored).arg("--plan").arg(&plan).output().unwrap();
+    assert!(restored.status.success(), "{}", String::from_utf8_lossy(&restored.stdout));
+    let link = fs::symlink_metadata(f.restored.join("link")).unwrap();
+    assert_eq!(link.mtime() * 1_000_000_000 + link.mtime_nsec(), 1_600_000_000_123_456_789);
+    // No slots are available: a correct unchanged flush needs no new object.
+    fs::write(f.restored.join(".sourceweft/slots.json"), serde_json::to_vec(&json!({"volume":"v","attachment":"b","pack_prefix":"att/b/p/","manifest_prefix":"att/b/m/1/","packs":{},"manifests":{}})).unwrap()).unwrap();
+    let flushed = Command::new(env!("CARGO_BIN_EXE_swvol")).args(["flush", "--full", "--root"]).arg(&f.restored).output().unwrap();
+    assert!(flushed.status.success(), "{}", String::from_utf8_lossy(&flushed.stdout));
+    let report: Value = serde_json::from_slice(&flushed.stdout).unwrap();
+    assert_eq!(report["seq"], head); assert_eq!(report["upserts"], 0); assert_eq!(report["deletes"], 0); assert_eq!(report["committed"], false);
+    assert_eq!(storage.manifests().len(), 1);
+}

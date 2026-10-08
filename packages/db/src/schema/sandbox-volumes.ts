@@ -23,7 +23,8 @@ import { threads } from "./threads";
  */
 
 type EntryKind = "f" | "d" | "l";
-type AttachmentStatus = "active" | "superseded" | "rejected" | "quarantined";
+type AttachmentStatus =
+  "active" | "superseded" | "rejected" | "quarantined" | "draining" | "retired";
 /** [blake3 hex, raw length] pairs in file order. */
 type ChunkList = Array<[string, number]>;
 
@@ -103,7 +104,7 @@ export const sandboxVolumeEntries = pgTable(
       "sandbox_volume_entries_kind_check",
       sql`${table.kind} in ('f', 'd', 'l')`,
     ),
-    // text_pattern_ops makes `path > 'p/' and path < 'p0'` (every descendant of p) an index range scan.
+    // Bytewise ~>~/~<~ range predicates use text_pattern_ops without locale-sensitive sibling matching.
     index("sandbox_volume_entries_path_idx").on(
       table.volumeId,
       sql`${table.path} text_pattern_ops`,
@@ -168,6 +169,14 @@ export const sandboxVolumeAttachments = pgTable(
       .notNull()
       .default("active"),
     quarantineReason: text("quarantine_reason"),
+    supervisorNonce: text("supervisor_nonce"),
+    drainId: text("drain_id"),
+    /** Only the SHA-256 digest is stored; the scoped bearer token is returned once to the bootstrap caller. */
+    controlTokenHash: text("control_token_hash"),
+    controlExpiresAt: timestamp("control_expires_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
     /** Highest pack index and manifest seq for which slots were issued, and when they expire. */
     slotsUntilPack: integer("slots_until_pack").notNull().default(0),
     slotsUntilSeq: bigint("slots_until_seq", { mode: "number" })
@@ -184,11 +193,11 @@ export const sandboxVolumeAttachments = pgTable(
   (table) => [
     check(
       "sandbox_volume_attachments_status_check",
-      sql`${table.status} in ('active', 'superseded', 'rejected', 'quarantined')`,
+      sql`${table.status} in ('active', 'superseded', 'rejected', 'quarantined', 'draining', 'retired')`,
     ),
-    uniqueIndex("sandbox_volume_attachments_one_active_uq")
+    uniqueIndex("sandbox_volume_attachments_one_writer_uq")
       .on(table.volumeId)
-      .where(sql`${table.status} = 'active'`),
+      .where(sql`${table.status} in ('active', 'draining', 'quarantined')`),
     index("sandbox_volume_attachments_volume_idx").on(
       table.volumeId,
       table.status,
@@ -296,6 +305,147 @@ export const sandboxVolumeGcCandidates = pgTable(
     check(
       "sandbox_volume_gc_state_check",
       sql`${table.state} in ('pending','deleting','deleted')`,
+    ),
+  ],
+);
+
+/** Durable internal drain fence. Only trusted host lifecycle code may submit the stop proof. */
+export const sandboxVolumeDrains = pgTable(
+  "sandbox_volume_drains",
+  {
+    id: text("id").primaryKey(),
+    volumeId: text("volume_id")
+      .notNull()
+      .references(() => sandboxVolumes.id, { onDelete: "cascade" }),
+    attachmentId: text("attachment_id")
+      .notNull()
+      .references(() => sandboxVolumeAttachments.id, { onDelete: "cascade" }),
+    operationId: text("operation_id").notNull(),
+    sandboxId: text("sandbox_id").notNull(),
+    bootId: text("boot_id").notNull(),
+    supervisorNonce: text("supervisor_nonce").notNull(),
+    recoveryControllerNonce: text("recovery_controller_nonce"),
+    reason: text("reason").notNull(),
+    status: text("status")
+      .$type<"draining" | "retired">()
+      .notNull()
+      .default("draining"),
+    stoppedAt: timestamp("stopped_at", { withTimezone: true, mode: "date" }),
+    confirmedSeq: bigint("confirmed_seq", { mode: "number" }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    retiredAt: timestamp("retired_at", { withTimezone: true, mode: "date" }),
+  },
+  (table) => [
+    uniqueIndex("sandbox_volume_drains_attachment_uq").on(table.attachmentId),
+    check(
+      "sandbox_volume_drains_status_check",
+      sql`${table.status} in ('draining','retired')`,
+    ),
+  ],
+);
+
+export const sandboxVolumeExecutionPermits = pgTable(
+  "sandbox_volume_execution_permits",
+  {
+    id: text("id").primaryKey(),
+    volumeId: text("volume_id")
+      .notNull()
+      .references(() => sandboxVolumes.id, { onDelete: "cascade" }),
+    attachmentId: text("attachment_id")
+      .notNull()
+      .references(() => sandboxVolumeAttachments.id, { onDelete: "cascade" }),
+    operationId: text("operation_id").notNull(),
+    writerKind: text("writer_kind")
+      .$type<"external" | "supervised">()
+      .notNull()
+      .default("external"),
+    status: text("status")
+      .$type<"active" | "released">()
+      .notNull()
+      .default("active"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    startedAt: timestamp("started_at", { withTimezone: true, mode: "date" }),
+    releasedAt: timestamp("released_at", { withTimezone: true, mode: "date" }),
+  },
+  (table) => [
+    uniqueIndex("sandbox_volume_execution_permits_one_active_uq")
+      .on(table.volumeId)
+      .where(sql`${table.status} = 'active'`),
+    uniqueIndex("sandbox_volume_execution_permits_operation_uq").on(
+      table.attachmentId,
+      table.operationId,
+    ),
+    index("sandbox_volume_execution_permits_active_idx").on(
+      table.attachmentId,
+      table.status,
+    ),
+    check(
+      "sandbox_volume_execution_permits_writer_kind_check",
+      sql`${table.writerKind} in ('external','supervised')`,
+    ),
+    check(
+      "sandbox_volume_execution_permits_status_check",
+      sql`${table.status} in ('active','released')`,
+    ),
+  ],
+);
+
+/** Immutable recovery evidence and unknown-operation audit; never an execution-success receipt. */
+export const sandboxVolumeRecoveries = pgTable(
+  "sandbox_volume_recoveries",
+  {
+    id: text("id").primaryKey(),
+    volumeId: text("volume_id")
+      .notNull()
+      .references(() => sandboxVolumes.id, { onDelete: "cascade" }),
+    attachmentId: text("attachment_id")
+      .notNull()
+      .references(() => sandboxVolumeAttachments.id, { onDelete: "cascade" }),
+    drainId: text("drain_id").references(() => sandboxVolumeDrains.id, {
+      onDelete: "cascade",
+    }),
+    kind: text("kind").$type<"supervisor" | "provider_absent">().notNull(),
+    operationId: text("operation_id").notNull(),
+    previousSupervisorNonce: text("previous_supervisor_nonce"),
+    supervisorNonce: text("supervisor_nonce"),
+    journalDigest: text("journal_digest"),
+    confirmedSeq: bigint("confirmed_seq", { mode: "number" }).notNull(),
+    unresolvedOperations: jsonb("unresolved_operations")
+      .$type<
+        Array<{
+          permitId: string;
+          operationId: string;
+          writerKind: "external" | "supervised";
+          outcome: "unknown" | "not_started";
+        }>
+      >()
+      .notNull(),
+    evidence: jsonb("evidence")
+      .$type<Record<string, string | boolean>>()
+      .notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("sandbox_volume_recoveries_controller_uq")
+      .on(table.attachmentId, table.supervisorNonce)
+      .where(sql`${table.kind} = 'supervisor'`),
+    uniqueIndex("sandbox_volume_recoveries_predecessor_uq")
+      .on(table.attachmentId, table.previousSupervisorNonce)
+      .where(sql`${table.kind} = 'supervisor'`),
+    uniqueIndex("sandbox_volume_recoveries_operation_uq").on(
+      table.attachmentId,
+      table.kind,
+      table.operationId,
+    ),
+    check(
+      "sandbox_volume_recoveries_kind_check",
+      sql`${table.kind} in ('supervisor','provider_absent')`,
     ),
   ],
 );

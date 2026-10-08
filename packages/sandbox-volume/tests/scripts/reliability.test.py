@@ -112,6 +112,7 @@ class Reliability(unittest.TestCase):
         (target / "x86_64-unknown-linux-musl/release").mkdir(parents=True)
         (target / "x86_64-unknown-linux-musl/release/swvol").write_text("stale")
         (target / "x86_64-unknown-linux-musl/release/swvol").chmod(0o755)
+        self.mock("sha256sum", 'exec shasum -a 256 "$@"')
         self.mock("cargo", f'printf "%s\\n" "$*" > "{self.base}/cargo-args"; exit 17')
         self.mock("rustc", f'echo "rustc {rust_version} (test)"')
         self.mock(
@@ -165,13 +166,15 @@ cd "{helper}/swvol"
 
         stage = self.base / "image"
         stage.mkdir()
-        for crate in ["swvol", "swlazy"]:
+        for crate in ["swvol", "swlazy", "swvol-supervisor"]:
             content = b"tampered"
             (stage / (crate + "-x86_64")).write_bytes(content)
             (stage / (crate + "-x86_64.receipt.json")).write_text(
                 json.dumps(
                     {
                         "architecture": "x86_64",
+                        "crate": crate,
+                        "target": "x86_64-unknown-linux-musl",
                         "binarySha256": hashlib.sha256(b"original").hexdigest(),
                     },
                     separators=(",", ":"),

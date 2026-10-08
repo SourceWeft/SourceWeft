@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { Pool } from "pg";
+import { isSandboxInstanceMissingError } from "@sourceweft/builtin-tool-sandbox";
 import { drizzle } from "drizzle-orm/node-postgres";
 import {
   createS3ObjectStore,
@@ -126,12 +127,28 @@ export async function createE2EContext(): Promise<E2EContext> {
     keyPrefix,
     scope,
     async close() {
-      await pool.end();
+      const failures: unknown[] = [];
+      try {
+        await pool.end();
+      } catch (error) {
+        failures.push(error);
+      }
       try {
         await admin.query(`drop schema ${schema} cascade`);
+      } catch (error) {
+        failures.push(error);
       } finally {
-        await admin.end();
+        try {
+          await admin.end();
+        } catch (error) {
+          failures.push(error);
+        }
       }
+      if (failures.length)
+        throw new AggregateError(
+          failures,
+          "E2E database cleanup was incomplete",
+        );
     },
   };
 }
@@ -142,6 +159,47 @@ export async function cleanupVolume(ctx: E2EContext, volumeId: string) {
     "delete from sandbox_volumes where id = $1 and thread_id = $2 and workspace_id = $3 and team_id = $4",
     [volumeId, ctx.scope.threadId, ctx.scope.workspaceId, ctx.scope.teamId],
   );
+}
+
+/** Always close the isolated database, and report every cleanup failure. Only typed provider-missing is idempotent success. */
+export async function cleanupE2EContext(
+  ctx: E2EContext,
+  options: {
+    provider?: { deleteSandbox(id: string): Promise<unknown> };
+    sandboxIds?: Iterable<string>;
+    volumeIds?: Iterable<string>;
+  } = {},
+): Promise<void> {
+  const failures: unknown[] = [];
+  try {
+    if (options.provider)
+      for (const id of new Set(options.sandboxIds ?? [])) {
+        try {
+          await options.provider.deleteSandbox(id);
+        } catch (error) {
+          if (!isSandboxInstanceMissingError(error)) failures.push(error);
+        }
+      }
+    for (const id of new Set(options.volumeIds ?? []))
+      try {
+        await cleanupVolume(ctx, id);
+      } catch (error) {
+        failures.push(error);
+      }
+    try {
+      await ctx.store.deletePrefix(ctx.keyPrefix);
+    } catch (error) {
+      failures.push(error);
+    }
+  } finally {
+    try {
+      await ctx.close();
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (failures.length)
+    throw new AggregateError(failures, "E2E resource cleanup was incomplete");
 }
 
 /** Upload through a pre-signed write-once URL exactly like the helper does. */

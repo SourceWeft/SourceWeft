@@ -9,6 +9,8 @@ export {
   SANDBOX_PROVIDER_ERROR_CODES,
   isSandboxInstanceMissingError,
   SandboxInstanceChangedError,
+  hasSandboxPhysicalAbsenceEvidence,
+  type SandboxPhysicalAbsenceEvidence,
 } from "./runtime/errors";
 
 import { builtinSandboxCapabilityManifest } from "./manifest";
@@ -88,6 +90,8 @@ import type {
   SandboxRef,
   SandboxRuntimeContext,
   SandboxVolumeExecutor,
+  SandboxVolumeControl,
+  SandboxSupervisorIdentity,
   SandboxVolumeHooks,
   SandboxVolumeScope,
   SandboxRuntimeLimits,
@@ -171,6 +175,8 @@ export type {
   SandboxStatus,
   SandboxStore,
   SandboxVolumeExecutor,
+  SandboxVolumeControl,
+  SandboxSupervisorIdentity,
   SandboxVolumeHooks,
   SandboxVolumeScope,
 };

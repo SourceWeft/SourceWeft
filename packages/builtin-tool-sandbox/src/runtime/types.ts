@@ -73,7 +73,75 @@ export type SandboxVolumeScope = {
   threadId: string;
 };
 
+export type SandboxSupervisorIdentity = {
+  protocolVersion: 1;
+  boundary: "pid-namespace";
+  protectedControl: true;
+  bootId: string;
+  supervisorNonce: string;
+};
+
+/** Narrow host-only RPC; this surface never accepts shell commands or arbitrary paths. */
+export type SandboxVolumeControl = {
+  identity(input: {
+    providerSandboxId: string;
+  }): Promise<SandboxSupervisorIdentity>;
+  freeze(input: {
+    providerSandboxId: string;
+    expectedNonce: string;
+    freezeId: string;
+  }): Promise<{
+    freezeId: string;
+    supervisorNonce: string;
+    allWritersStopped: true;
+  }>;
+  resume(input: {
+    providerSandboxId: string;
+    expectedNonce: string;
+    freezeId: string;
+  }): Promise<void>;
+  flush(input: {
+    providerSandboxId: string;
+    expectedNonce: string;
+    attachmentId: string;
+    freezeId?: string;
+    drainId?: string;
+    full: true;
+  }): Promise<{ output: string; exitCode: number | null }>;
+  drain(input: {
+    providerSandboxId: string;
+    expectedNonce: string;
+    drainId: string;
+  }): Promise<{
+    drainId: string;
+    bootId: string;
+    supervisorNonce: string;
+    launchGateClosed: true;
+    allNamespacesExited: true;
+  }>;
+};
+
 export type SandboxVolumeHooks = {
+  /** Set only by the typed protected bootstrap implementation, never legacy workspace metadata hooks. */
+  protectedBootstrap?: true;
+  acquireOperation?(input: {
+    attachmentId: string;
+    operationId: string;
+    sandboxId: string;
+    bootId: string;
+    supervisorNonce: string;
+    writerKind?: "external" | "supervised";
+  }): Promise<{ permitId: string; reused: boolean }>;
+  markOperationStarted?(input: {
+    attachmentId: string;
+    permitId: string;
+  }): Promise<boolean>;
+  releaseOperation?(
+    input: { attachmentId: string; permitId: string } & (
+      | { outcome: "not_started" }
+      | { outcome: "persisted"; confirmedSeq: number }
+    ),
+  ): Promise<void>;
   assertActive(input: {
     attachmentId: string;
     executor: SandboxVolumeExecutor;
@@ -102,7 +170,21 @@ export type SandboxVolumeHooks = {
   checkpoint(input: {
     attachmentId: string;
     executor: SandboxVolumeExecutor;
-  }): Promise<{ sync: { persisted: boolean } }>;
+    freezeId?: string;
+    drainId?: string;
+    supervisorNonce?: string;
+    trustedFlush?: (input: {
+      attachmentId: string;
+      freezeId?: string;
+      drainId?: string;
+    }) => Promise<{ output: string; exitCode: number | null }>;
+  }): Promise<{
+    sync: {
+      persisted: boolean;
+      confirmedSeq?: number;
+      mode?: "shadow" | "full";
+    };
+  }>;
   /** Checkpoint for a sandbox this process did not attach (cleanup workers); null when the thread has no volume. */
   checkpointScope(input: {
     scope: SandboxVolumeScope;
@@ -215,6 +297,14 @@ export type SandboxProvider = {
    * explicitly so the durable generation fence does not quarantine siblings.
    */
   cancellationScope?: "command" | "sandbox";
+  /** Separately authenticated privileged volume control, never exposed through generic execution/file APIs. */
+  volumeControl?: SandboxVolumeControl;
+  /** Executes only inside the registered workload namespace/UID; never an arbitrary privileged shell. */
+  executeSupervised?(
+    input: Parameters<SandboxProvider["execute"]>[0] & {
+      expectedNonce: string;
+    },
+  ): Promise<SandboxExecuteResult>;
   createSandbox(input: CreateSandboxInput): Promise<{ id: string }>;
   /** Must verify reusability when no stronger health check is declared. */
   getSandbox(providerSandboxId: string): Promise<unknown>;

@@ -4,6 +4,7 @@ import {
   sandboxVolumeAttachments,
   sandboxVolumeChunks,
   sandboxVolumeCommits,
+  sandboxVolumeDrains,
   sandboxVolumeEntries,
   sandboxVolumeEntryVersions,
   sandboxVolumePacks,
@@ -59,7 +60,17 @@ export type CommitIdentity = {
   epoch: number;
   manifestKey: string;
   manifestHash: string;
+  drainId?: string;
 };
+
+export function attachmentCanWrite(
+  actor: AttachmentRow,
+  drainId?: string,
+): boolean {
+  return drainId === undefined
+    ? actor.status === "active"
+    : actor.status === "draining" && actor.drainId === drainId;
+}
 
 export class VolumeRepository {
   constructor(
@@ -169,19 +180,26 @@ export class VolumeRepository {
   }): Promise<AttachmentRow> {
     return this.db.transaction(async (tx) => {
       const head = await this.lockVolume(tx, input.volumeId);
+      const executing = await tx.execute(
+        sql`select 1 from sandbox_volume_execution_permits where volume_id=${input.volumeId} and status='active' limit 1`,
+      );
+      if (executing.rows.length)
+        throw new VolumeConflict(
+          "volume has an unfinished execution permit; stop and checkpoint before replacement",
+        );
       const quarantined = await tx
         .select()
         .from(sandboxVolumeAttachments)
         .where(
           and(
             eq(sandboxVolumeAttachments.volumeId, input.volumeId),
-            eq(sandboxVolumeAttachments.status, "quarantined"),
+            sql`${sandboxVolumeAttachments.status} in ('quarantined','draining')`,
           ),
         )
         .limit(1);
       if (quarantined.length)
         throw new VolumeConflict(
-          "volume has quarantined attachment; recovery required",
+          "volume has quarantined or draining attachment; recovery required",
         );
       const current = await tx
         .select()
@@ -237,30 +255,63 @@ export class VolumeRepository {
   async confirmPersistence(
     attachmentId: string,
     seq: number,
+    options: { drainId?: string; supervisorNonce?: string } = {},
   ): Promise<boolean> {
     if (!Number.isSafeInteger(seq) || seq < 0) return false;
     const attachment = await this.getAttachment(attachmentId);
     if (!attachment) return false;
     return this.db.transaction(async (tx) => {
-      await this.lockVolume(tx, attachment.volumeId);
-      const rows = await tx
-        .select()
-        .from(sandboxVolumeAttachments)
-        .where(
-          and(
-            eq(sandboxVolumeAttachments.id, attachmentId),
-            eq(sandboxVolumeAttachments.volumeId, attachment.volumeId),
-            eq(sandboxVolumeAttachments.status, "active"),
-          ),
+      const head = await this.lockVolume(tx, attachment.volumeId);
+      const actor = (
+        await tx
+          .select()
+          .from(sandboxVolumeAttachments)
+          .where(eq(sandboxVolumeAttachments.id, attachmentId))
+      )[0];
+      if (
+        !actor ||
+        !attachmentCanWrite(actor, options.drainId) ||
+        seq < actor.baseSeq ||
+        actor.lastAppliedSeq < seq
+      )
+        return false;
+      if (options.drainId) {
+        if (seq !== head || seq !== actor.lastAppliedSeq) return false;
+        const drain = (
+          await tx
+            .select()
+            .from(sandboxVolumeDrains)
+            .where(eq(sandboxVolumeDrains.id, options.drainId))
+        )[0];
+        if (!drain?.stoppedAt) return false;
+        if (
+          drain.recoveryControllerNonce &&
+          options.supervisorNonce !== drain.recoveryControllerNonce
+        )
+          return false;
+        const external = await tx.execute(
+          sql`select 1 from sandbox_volume_execution_permits where attachment_id=${attachmentId} and status='active' and writer_kind='external' limit 1`,
         );
-      return Boolean(
-        rows[0] && seq >= rows[0].baseSeq && rows[0].lastAppliedSeq >= seq,
-      );
+        if (external.rows.length) return false;
+        await tx
+          .update(sandboxVolumeDrains)
+          .set({ confirmedSeq: seq })
+          .where(
+            and(
+              eq(sandboxVolumeDrains.id, options.drainId),
+              eq(sandboxVolumeDrains.status, "draining"),
+            ),
+          );
+      }
+      return true;
     });
   }
 
   /** Rebase changes an active actor's epoch, never revives a superseded actor. */
-  async advanceAttachmentEpoch(attachmentId: string): Promise<AttachmentRow> {
+  async advanceAttachmentEpoch(
+    attachmentId: string,
+    options: { drainId?: string } = {},
+  ): Promise<AttachmentRow> {
     const attachment = await this.getAttachment(attachmentId);
     if (!attachment)
       throw new Error(`attachment ${attachmentId} does not exist`);
@@ -276,7 +327,12 @@ export class VolumeRepository {
           and(
             eq(sandboxVolumeAttachments.id, attachmentId),
             eq(sandboxVolumeAttachments.volumeId, attachment.volumeId),
-            eq(sandboxVolumeAttachments.status, "active"),
+            options.drainId
+              ? and(
+                  eq(sandboxVolumeAttachments.status, "draining"),
+                  eq(sandboxVolumeAttachments.drainId, options.drainId),
+                )
+              : eq(sandboxVolumeAttachments.status, "active"),
           ),
         )
         .returning();
@@ -306,6 +362,93 @@ export class VolumeRepository {
       if (!rows.length)
         throw new VolumeConflict("cannot quarantine an inactive attachment");
     });
+  }
+
+  async issueControlToken(
+    id: string,
+    tokenHash: string,
+    ttlSeconds: number,
+    expectedHash?: string,
+  ): Promise<AttachmentRow> {
+    const actor = await this.getAttachment(id);
+    if (!actor) throw new VolumeConflict("attachment does not exist");
+    return this.db.transaction(async (tx) => {
+      await this.lockVolume(tx, actor.volumeId);
+      const rows = await tx
+        .update(sandboxVolumeAttachments)
+        .set({
+          controlTokenHash: tokenHash,
+          controlExpiresAt: sql`now() + (${ttlSeconds} * interval '1 second')`,
+        })
+        .where(
+          and(
+            eq(sandboxVolumeAttachments.id, id),
+            eq(sandboxVolumeAttachments.status, "active"),
+            expectedHash
+              ? and(
+                  eq(sandboxVolumeAttachments.controlTokenHash, expectedHash),
+                  sql`${sandboxVolumeAttachments.controlExpiresAt} > now()`,
+                )
+              : undefined,
+          ),
+        )
+        .returning();
+      if (!rows[0])
+        throw new VolumeConflict(
+          "attachment is inactive or control credential changed",
+        );
+      return rows[0];
+    });
+  }
+
+  /** Renew the same live credential only after a successful identity-bound control poll. */
+  async renewControlToken(
+    id: string,
+    tokenHash: string,
+    identity: { bootId: string; epoch: number },
+    ttlSeconds: number,
+  ): Promise<AttachmentRow | null> {
+    const actor = await this.getAttachment(id);
+    if (!actor) return null;
+    return this.db.transaction(async (tx) => {
+      await this.lockVolume(tx, actor.volumeId);
+      const rows = await tx
+        .update(sandboxVolumeAttachments)
+        .set({
+          controlExpiresAt: sql`greatest(${sandboxVolumeAttachments.controlExpiresAt},now()+(${ttlSeconds}*interval '1 second'))`,
+        })
+        .where(
+          and(
+            eq(sandboxVolumeAttachments.id, id),
+            eq(sandboxVolumeAttachments.status, "active"),
+            eq(sandboxVolumeAttachments.controlTokenHash, tokenHash),
+            eq(sandboxVolumeAttachments.bootId, identity.bootId),
+            eq(sandboxVolumeAttachments.epoch, identity.epoch),
+            sql`${sandboxVolumeAttachments.controlExpiresAt} > now()`,
+          ),
+        )
+        .returning();
+      return rows[0] ?? null;
+    });
+  }
+
+  async verifyControlToken(
+    id: string,
+    tokenHash: string,
+  ): Promise<AttachmentRow | null> {
+    const rows = await this.db
+      .select()
+      .from(sandboxVolumeAttachments)
+      .where(
+        and(
+          eq(sandboxVolumeAttachments.id, id),
+          eq(sandboxVolumeAttachments.status, "active"),
+          eq(sandboxVolumeAttachments.controlTokenHash, tokenHash),
+          sql`${sandboxVolumeAttachments.controlExpiresAt} > now()`,
+        ),
+      )
+      .limit(1);
+    return rows[0] ?? null;
   }
 
   /** Identity binds once; changing a live daemon requires a new attachment. */
@@ -340,7 +483,18 @@ export class VolumeRepository {
     packCount: number,
     seqCount: number,
     ttlSeconds: number,
+    renewal?: { nextPack: number; lowWaterMark: number },
+    drainId?: string,
   ) {
+    if (
+      renewal &&
+      (!Number.isSafeInteger(renewal.nextPack) ||
+        renewal.nextPack < 0 ||
+        !Number.isSafeInteger(renewal.lowWaterMark) ||
+        renewal.lowWaterMark < 1 ||
+        renewal.lowWaterMark > packCount)
+    )
+      throw new Error("invalid slot renewal cursor");
     return this.db.transaction(async (tx) => {
       const head = await this.lockVolume(tx, expected.volumeId);
       const rows = await tx
@@ -348,23 +502,35 @@ export class VolumeRepository {
         .from(sandboxVolumeAttachments)
         .where(eq(sandboxVolumeAttachments.id, expected.id));
       const actor = rows[0];
-      if (!actor || actor.status !== "active" || actor.epoch !== expected.epoch)
+      if (
+        !actor ||
+        !attachmentCanWrite(actor, drainId) ||
+        actor.epoch !== expected.epoch
+      )
         throw new VolumeConflict(
           "attachment is inactive or epoch changed during slot issuance",
         );
       const firstPack = actor.slotsUntilPack;
+      if (renewal && renewal.nextPack > firstPack)
+        throw new VolumeConflict(
+          "slot renewal cursor exceeds the issued pack range",
+        );
+      const allocatePacks =
+        !renewal || firstPack - renewal.nextPack < renewal.lowWaterMark
+          ? packCount
+          : 0;
       // Re-sign the outstanding sequence window as well: helpers must never skip head + 1.
       const lastSeq = Math.max(actor.slotsUntilSeq, head + seqCount);
       const registered = await tx.execute<{ next_pack: number }>(sql`
         select coalesce(max(substring(pack_key from ${`^att/${actor.id}/p/([0-9]{6})(?:\\.r[0-9a-f]+)*$`})::int) + 1, 0)::int as next_pack
         from sandbox_volume_packs where volume_id = ${actor.volumeId}`);
       const renewFromPack = registered.rows[0]?.next_pack ?? 0;
-      if (firstPack + packCount > 1_000_000)
+      if (firstPack + allocatePacks > 1_000_000)
         throw new Error("attachment pack slot namespace exhausted");
       const updated = await tx
         .update(sandboxVolumeAttachments)
         .set({
-          slotsUntilPack: firstPack + packCount,
+          slotsUntilPack: firstPack + allocatePacks,
           slotsUntilSeq: lastSeq,
           slotsExpireAt: sql`now() + (${ttlSeconds} * interval '1 second')`,
         })
@@ -566,7 +732,12 @@ export class VolumeRepository {
           and(
             eq(sandboxVolumeAttachments.id, manifest.attachment),
             eq(sandboxVolumeAttachments.volumeId, volumeId),
-            eq(sandboxVolumeAttachments.status, "active"),
+            identity?.drainId
+              ? and(
+                  eq(sandboxVolumeAttachments.status, "draining"),
+                  eq(sandboxVolumeAttachments.drainId, identity.drainId),
+                )
+              : eq(sandboxVolumeAttachments.status, "active"),
           ),
         );
       if (!actors[0])
@@ -590,7 +761,9 @@ export class VolumeRepository {
       };
       const dropChildren = async (path: string) => {
         const { from, to } = descendantRange(path);
-        const under = sql`path > ${from} and path < ${to}`;
+        // text_pattern_ops compares bytes. Locale-aware >/< can include sibling
+        // directories such as a/ and Á/ in A/'s range under en_US/ICU collations.
+        const under = sql`path ~>~ ${from} and path ~<~ ${to}`;
         await keepVersion(under);
         await tx.execute(
           sql`delete from sandbox_volume_entries where volume_id = ${volumeId} and ${under}`,
@@ -725,7 +898,9 @@ export class VolumeRepository {
           volumeId,
           seq,
           attachmentId: manifest.attachment,
-          ...identity,
+          epoch: identity.epoch,
+          manifestKey: identity.manifestKey,
+          manifestHash: identity.manifestHash,
         });
       return true;
     });
@@ -758,6 +933,13 @@ export class VolumeRepository {
       throw new Error("invalid rollback sequence");
     return this.db.transaction(async (tx) => {
       const head = await this.lockVolume(tx, volumeId);
+      const busy =
+        await tx.execute(sql`select 1 from sandbox_volume_attachments where volume_id=${volumeId} and status='draining'
+        union all select 1 from sandbox_volume_execution_permits where volume_id=${volumeId} and status='active' limit 1`);
+      if (busy.rows.length)
+        throw new VolumeConflict(
+          "volume has an unfinished drain or execution permit",
+        );
       if (seq > head)
         throw new Error("rollback sequence is beyond current head");
       const rows = await new VolumeRepository(

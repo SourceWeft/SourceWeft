@@ -83,6 +83,17 @@ impl Directory {
         if unsafe { libc::symlinkat(target.as_ptr(), dir.0.as_raw_fd(), leaf.as_ptr()) } != 0 { return Err(std::io::Error::last_os_error().into()); }
         Ok(())
     }
+    pub fn set_symlink_mtime(&self, relative: &str, nanoseconds: i64) -> Result<()> {
+        let (dir, leaf) = self.parent(relative)?;
+        let times = [
+            libc::timespec { tv_sec: 0, tv_nsec: libc::UTIME_OMIT as _ },
+            libc::timespec { tv_sec: nanoseconds.div_euclid(1_000_000_000) as _, tv_nsec: nanoseconds.rem_euclid(1_000_000_000) as _ },
+        ];
+        if unsafe { libc::utimensat(dir.0.as_raw_fd(), leaf.as_ptr(), times.as_ptr(), libc::AT_SYMLINK_NOFOLLOW) } != 0 {
+            return Err(std::io::Error::last_os_error()).context("cannot restore symlink timestamp without following its target");
+        }
+        Ok(())
+    }
     pub fn metadata(&self, relative: &str) -> Result<fs::Metadata> {
         let (dir, leaf) = self.parent(relative)?;
         let fd = unsafe { libc::openat(dir.0.as_raw_fd(), leaf.as_ptr(), libc::O_PATH | libc::O_NOFOLLOW | libc::O_CLOEXEC) };
@@ -248,6 +259,20 @@ mod tests {
         assert!(staging.publish_into(&root).is_err());
         assert_eq!(fs::read_to_string(f.0.join("root/input")).unwrap(), "concurrent user change");
         assert!(f.0.join("stage/input/restored").is_file());
+    }
+
+    #[test]
+    fn symlink_timestamp_is_restored_without_touching_target_timestamp() {
+        let f = Fixture::new(); let root = Directory::open_root(&f.0.join("root")).unwrap();
+        let before = fs::metadata(f.0.join("outside/sentinel")).unwrap();
+        root.symlink("link", "../outside/sentinel").unwrap();
+        let timestamp = 1_600_000_000_123_456_789i64;
+        root.set_symlink_mtime("link", timestamp).unwrap();
+        let link = root.metadata("link").unwrap();
+        assert_eq!(link.mtime() * 1_000_000_000 + link.mtime_nsec(), timestamp);
+        let after = fs::metadata(f.0.join("outside/sentinel")).unwrap();
+        assert_eq!((before.mtime(), before.mtime_nsec()), (after.mtime(), after.mtime_nsec()));
+        assert_eq!(fs::read_to_string(f.0.join("outside/sentinel")).unwrap(), "do not overwrite");
     }
 
 }

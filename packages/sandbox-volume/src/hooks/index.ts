@@ -7,6 +7,11 @@ import {
 import { parseCommandOutput } from "../protocol/marker";
 import type { FlushReport } from "../protocol/types";
 import type { AttachmentRow, VolumeScope } from "../service/repository";
+import type {
+  DrainRequest,
+  SupervisorRecoveryProof,
+  SupervisorStopProof,
+} from "../service/lifecycle";
 import type { ApplyWalResult, VolumeService } from "../service/volume-service";
 
 /** The one thing the hooks need from a sandbox: run a shell command and get its combined output and exit code. */
@@ -126,13 +131,14 @@ export function createVolumeHooks(config: VolumeHooksConfig) {
   const root = config.root ?? DEFAULT_ROOT;
   const meta = config.stateDir ?? `${root}/.sourceweft`;
   const helperPath = config.helper.imagePath ?? `${meta}/bin/swvol`;
+  const helperRootArgs = `--root ${shellQuote(root)}${meta === `${root}/.sourceweft` ? "" : ` --state-dir ${shellQuote(meta)}`}`;
   const log = config.log ?? (() => undefined);
   const shadowScopes = new Map<string, VolumeScope>();
   const scopeKey = (scope: VolumeScope) =>
     JSON.stringify([scope.teamId, scope.workspaceId, scope.threadId]);
 
   function replaceSlots(url: string): string {
-    return `__swvol_slots=$(mktemp ${shellQuote(`${meta}/slots.XXXXXX`)}) && curl -fsS --speed-limit 20000 --speed-time 5 --max-time 60 --retry 2 -o "$__swvol_slots" ${shellQuote(url)} && mv "$__swvol_slots" ${shellQuote(`${meta}/slots.json`)}`;
+    return `__swvol_slots=$(mktemp ${shellQuote(`${meta}/slots.XXXXXX`)}) && curl -fsS --speed-limit 20000 --speed-time 5 --max-time 60 --retry 2 -o "$__swvol_slots" ${shellQuote(url)} && flock -x ${shellQuote(`${meta}/slots.lock`)} mv "$__swvol_slots" ${shellQuote(`${meta}/slots.json`)}`;
   }
 
   async function bootstrapCommand(): Promise<string> {
@@ -153,8 +159,8 @@ export function createVolumeHooks(config: VolumeHooksConfig) {
     const started = Date.now();
     const files = await service.publishAttachFiles(attachment);
     const restore = config.shadow
-      ? `${shellQuote(helperPath)} restore --root ${shellQuote(root)} --plan ${shellQuote(files.planUrl)} --index-only; rc=$?`
-      : `${shellQuote(helperPath)} restore --root ${shellQuote(root)} --plan ${shellQuote(files.planUrl)}; rc=$?`;
+      ? `${shellQuote(helperPath)} restore ${helperRootArgs} --plan ${shellQuote(files.planUrl)} --index-only; rc=$?`
+      : `${shellQuote(helperPath)} restore ${helperRootArgs} --plan ${shellQuote(files.planUrl)}; rc=$?`;
     const command = [
       await bootstrapCommand(),
       `mkdir -p ${shellQuote(meta)}`,
@@ -163,7 +169,7 @@ export function createVolumeHooks(config: VolumeHooksConfig) {
       restore,
       `[ "$rc" -eq 0 ] || exit "$rc"`,
       // stdin must not stay attached to the exec stream: the bridge would wait for the daemon to close it.
-      `nohup setsid ${shellQuote(helperPath)} daemon --root ${shellQuote(root)} > ${shellQuote(`${meta}/daemon.log`)} 2>&1 < /dev/null &`,
+      `nohup setsid ${shellQuote(helperPath)} daemon ${helperRootArgs} > ${shellQuote(`${meta}/daemon.log`)} 2>&1 < /dev/null &`,
       `for i in $(seq 1 50); do [ -S ${shellQuote(`${meta}/sock`)} ] && break; sleep 0.05; done`,
       `[ -S ${shellQuote(`${meta}/sock`)} ] || { echo DAEMON_DOWN; exit 92; }`,
       `echo DAEMON_UP`,
@@ -235,6 +241,91 @@ export function createVolumeHooks(config: VolumeHooksConfig) {
   }
 
   return {
+    async beginDrain(input: { attachmentId: string } & DrainRequest) {
+      const { attachmentId, ...request } = input;
+      return service.beginDrain(attachmentId, request);
+    },
+
+    async recordSupervisorStop(
+      input: { attachmentId: string } & SupervisorStopProof,
+    ): Promise<void> {
+      const { attachmentId, ...proof } = input;
+      await service.recordSupervisorStop(attachmentId, proof);
+    },
+
+    async finishDrain(input: {
+      attachmentId: string;
+      drainId: string;
+      confirmedSeq: number;
+      stopProof: SupervisorStopProof;
+    }): Promise<void> {
+      const { attachmentId, ...request } = input;
+      await service.finishDrain(attachmentId, request);
+    },
+
+    async recoverSupervisor(input: {
+      attachmentId: string;
+      operationId: string;
+      proof: SupervisorRecoveryProof;
+    }) {
+      return service.recoverSupervisor(input.attachmentId, {
+        operationId: input.operationId,
+        proof: input.proof,
+      });
+    },
+
+    async acquireOperation(input: {
+      attachmentId: string;
+      operationId: string;
+      sandboxId: string;
+      bootId: string;
+      supervisorNonce: string;
+      writerKind?: "external" | "supervised";
+    }): Promise<{ permitId: string; reused: boolean }> {
+      const actor = await service.repo.getAttachment(input.attachmentId);
+      if (
+        !actor ||
+        actor.bootId !== input.bootId ||
+        actor.sandboxId !== input.sandboxId
+      )
+        throw new VolumePersistenceError(
+          input.attachmentId,
+          "supervisor identity does not match the attached instance",
+        );
+      await service.bindSupervisorIdentity(
+        input.attachmentId,
+        input.supervisorNonce,
+      );
+      const permit = await service.acquireExecutionPermit(input.attachmentId, {
+        operationId: input.operationId,
+        sandboxId: input.sandboxId,
+        bootId: input.bootId,
+        supervisorNonce: input.supervisorNonce,
+        writerKind: input.writerKind,
+      });
+      return { permitId: permit.id, reused: permit.reused };
+    },
+
+    async markOperationStarted(input: {
+      attachmentId: string;
+      permitId: string;
+    }): Promise<boolean> {
+      return service.markExecutionStarted(input.attachmentId, input.permitId);
+    },
+
+    async releaseOperation(
+      input: { attachmentId: string; permitId: string } & (
+        | { outcome: "not_started" }
+        | { outcome: "persisted"; confirmedSeq: number }
+      ),
+    ): Promise<void> {
+      await service.releaseExecutionPermit(
+        input.attachmentId,
+        input.permitId,
+        input,
+      );
+    },
+
     /** Bind a (new or replaced) sandbox container to the thread's volume and restore it. */
     async attach(input: {
       scope: VolumeScope;
@@ -255,7 +346,7 @@ export function createVolumeHooks(config: VolumeHooksConfig) {
             "an existing attachment requires explicit recovery before replacement",
           );
         const probe = await input.executor.execute(
-          `[ -x ${shellQuote(helperPath)} ] && [ "$(${shellQuote(helperPath)} version)" = ${shellQuote(`swvol ${REQUIRED_HELPER_VERSION}`)} ] && ${shellQuote(helperPath)} check --root ${shellQuote(root)} && [ "$(sed -n '1p' ${shellQuote(`${meta}/identity`)})" = ${shellQuote(previous.id)} ] && [ "$(sed -n '2p' ${shellQuote(`${meta}/identity`)})" = ${shellQuote(previous.bootId)} ] && [ -S ${shellQuote(`${meta}/sock`)} ]`,
+          `[ -x ${shellQuote(helperPath)} ] && [ "$(${shellQuote(helperPath)} version)" = ${shellQuote(`swvol ${REQUIRED_HELPER_VERSION}`)} ] && ${shellQuote(helperPath)} check ${helperRootArgs} && [ "$(sed -n '1p' ${shellQuote(`${meta}/identity`)})" = ${shellQuote(previous.id)} ] && [ "$(sed -n '2p' ${shellQuote(`${meta}/identity`)})" = ${shellQuote(previous.bootId)} ] && [ -S ${shellQuote(`${meta}/sock`)} ]`,
           { timeoutMs: 10_000 },
         );
         if (probe.exitCode !== 0)
@@ -293,8 +384,8 @@ export function createVolumeHooks(config: VolumeHooksConfig) {
      * The user command never runs in a replaced container (exit 75 instead).
      */
     wrapCommand(command: string, options: { full?: boolean } = {}): string {
-      const check = `[ -x ${shellQuote(helperPath)} ] && ${shellQuote(helperPath)} check --root ${shellQuote(root)}`;
-      const flush = `${shellQuote(helperPath)} flush --root ${shellQuote(root)}${options.full ? " --full" : ""} > "$__swvol_report" 2> "$__swvol_report.err"; __swvol_frc=$?`;
+      const check = `[ -x ${shellQuote(helperPath)} ] && ${shellQuote(helperPath)} check ${helperRootArgs}`;
+      const flush = `${shellQuote(helperPath)} flush ${helperRootArgs}${options.full ? " --full" : ""} > "$__swvol_report" 2> "$__swvol_report.err"; __swvol_frc=$?`;
       return [
         `if ${check}; then`,
         `__swvol_report=$(mktemp ${shellQuote(`${meta}/flush.XXXXXX`)}) || { printf '\\n${TAIL_MARKER} 78 {"ok":false,"reason":"report_allocation_failed"}\\n'; exit 78; }`,
@@ -318,6 +409,9 @@ export function createVolumeHooks(config: VolumeHooksConfig) {
       output: string;
       exitCode: number | null;
       executor: SandboxExecutor;
+      drainId?: string;
+      supervisorNonce?: string;
+      allowShellRecovery?: boolean;
     }): Promise<ParsedExecuteResult> {
       const parsed = parseCommandOutput(input.output);
       try {
@@ -333,7 +427,9 @@ export function createVolumeHooks(config: VolumeHooksConfig) {
             "command output cannot prove that an instance changed before execution",
           );
         }
-        const wal = await service.applyWal(input.attachmentId);
+        const wal = await service.applyWal(input.attachmentId, {
+          drainId: input.drainId,
+        });
         let verifiedWal = wal;
         let verifiedFlush = parsed.flush;
         let verifiedFlushExit = parsed.flushExitCode;
@@ -341,6 +437,7 @@ export function createVolumeHooks(config: VolumeHooksConfig) {
         // handles exhausted slots without ever replaying that command.
         for (
           let attempt = 0;
+          input.allowShellRecovery !== false &&
           attempt < 3 &&
           (verifiedFlushExit === EXIT_NEED_SLOTS ||
             verifiedFlush?.exit_code === EXIT_NEED_SLOTS);
@@ -356,7 +453,7 @@ export function createVolumeHooks(config: VolumeHooksConfig) {
             );
           const slotsUrl = await service.publishSlots(attachment);
           const retry = await input.executor.execute(
-            `${replaceSlots(slotsUrl)} && ${shellQuote(helperPath)} flush --root ${shellQuote(root)} --full`,
+            `${replaceSlots(slotsUrl)} && ${shellQuote(helperPath)} flush ${helperRootArgs} --full`,
             { timeoutMs: 600_000 },
           );
           verifiedFlushExit = retry.exitCode;
@@ -365,18 +462,23 @@ export function createVolumeHooks(config: VolumeHooksConfig) {
           } catch {
             verifiedFlush = null;
           }
-          verifiedWal = await service.applyWal(input.attachmentId);
+          verifiedWal = await service.applyWal(input.attachmentId, {
+            drainId: input.drainId,
+          });
         }
         let rebase: ParsedExecuteResult["sync"]["rebase"] = null;
         const slotTaken =
           typeof verifiedFlush?.error === "string" &&
           verifiedFlush.error.startsWith("MANIFEST_SLOT_TAKEN");
-        if (verifiedWal.rejected || slotTaken) {
+        if (
+          input.allowShellRecovery !== false &&
+          (verifiedWal.rejected || slotTaken)
+        ) {
           const { slotsUrl, head } = await service.beginRebase(
             input.attachmentId,
           );
           const rb = await input.executor.execute(
-            `${replaceSlots(slotsUrl)} && ${shellQuote(helperPath)} flush --root ${shellQuote(root)} --rebase ${head}`,
+            `${replaceSlots(slotsUrl)} && ${shellQuote(helperPath)} flush ${helperRootArgs} --rebase ${head}`,
             { timeoutMs: 600_000 },
           );
           const wal2 = await service.applyWal(input.attachmentId);
@@ -428,6 +530,7 @@ export function createVolumeHooks(config: VolumeHooksConfig) {
           !(await service.confirmPersistence(
             input.attachmentId,
             verifiedFlush.seq,
+            { drainId: input.drainId, supervisorNonce: input.supervisorNonce },
           ))
         ) {
           throw new VolumePersistenceError(
@@ -480,7 +583,7 @@ export function createVolumeHooks(config: VolumeHooksConfig) {
       // Missing/corrupt identity is not replacement. A changed boot may still have
       // a persistent upper with dirty files, so it also requires explicit recovery.
       const probe = await input.executor.execute(
-        `__swvol_boot=$(/bin/cat /proc/sys/kernel/random/boot_id) || exit 79; printf '__SWVOL_BOOT__ %s\\n' "$__swvol_boot"; [ -x ${shellQuote(helperPath)} ] || exit 79; [ "$(${shellQuote(helperPath)} version)" = ${shellQuote(`swvol ${REQUIRED_HELPER_VERSION}`)} ] || exit 79; ${shellQuote(helperPath)} check --root ${shellQuote(root)}`,
+        `__swvol_boot=$(/bin/cat /proc/sys/kernel/random/boot_id) || exit 79; printf '__SWVOL_BOOT__ %s\\n' "$__swvol_boot"; [ -x ${shellQuote(helperPath)} ] || exit 79; [ "$(${shellQuote(helperPath)} version)" = ${shellQuote(`swvol ${REQUIRED_HELPER_VERSION}`)} ] || exit 79; ${shellQuote(helperPath)} check ${helperRootArgs}`,
         { timeoutMs: 10_000 },
       );
       const boot = /^__SWVOL_BOOT__ ([0-9a-f-]{36})\r?\n/.exec(
@@ -558,7 +661,31 @@ export function createVolumeHooks(config: VolumeHooksConfig) {
     async checkpoint(input: {
       attachmentId: string;
       executor: SandboxExecutor;
+      freezeId?: string;
+      drainId?: string;
+      supervisorNonce?: string;
+      trustedFlush?: (input: {
+        attachmentId: string;
+        freezeId?: string;
+        drainId?: string;
+      }) => Promise<{ output: string; exitCode: number | null }>;
     }): Promise<ParsedExecuteResult> {
+      if (input.trustedFlush) {
+        const flushed = await input.trustedFlush({
+          attachmentId: input.attachmentId,
+          freezeId: input.freezeId,
+          drainId: input.drainId,
+        });
+        return this.parseResult({
+          attachmentId: input.attachmentId,
+          output: `${TAIL_MARKER} ${flushed.exitCode} ${flushed.output.trim()}\n`,
+          exitCode: flushed.exitCode,
+          executor: input.executor,
+          drainId: input.drainId,
+          supervisorNonce: input.supervisorNonce,
+          allowShellRecovery: false,
+        });
+      }
       const result = await input.executor.execute(
         this.wrapCommand("true", { full: true }),
         { timeoutMs: 600_000 },

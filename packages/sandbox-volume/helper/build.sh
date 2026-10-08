@@ -12,6 +12,10 @@ case "${SWVOL_ARCHES:-x86_64}" in
   x86_64,aarch64) arches='x86_64 aarch64' ;;
   *) echo 'SWVOL_ARCHES must be x86_64, aarch64 or x86_64,aarch64' >&2; exit 2 ;;
 esac
+IFS=, read -r -a helpers <<< "${SWVOL_HELPERS:-swvol,swlazy,swvol-supervisor}"
+for helper in "${helpers[@]}"; do
+  case "$helper" in swvol|swlazy|swvol-supervisor) ;; *) echo 'SWVOL_HELPERS contains an unsupported helper' >&2; exit 2 ;; esac
+done
 build() {
   local crate="$1" image="$2" triple="$3" arch="$4" rust_version="$5"
   # Never leave an earlier successful artifact looking like this build's output.
@@ -30,9 +34,21 @@ build() {
       fi
       binary="/target/$SWVOL_TARGET/release/$SWVOL_CRATE"
       rm -f "$binary"
-      cargo build --locked --release --target "$SWVOL_TARGET"
+      source_hash() {
+        { printf "%s\n" Cargo.toml Cargo.lock; find src -type f;
+          test ! -d tests || find tests -type f
+          test ! -f README.md || printf "%s\n" README.md
+          if [ "$SWVOL_CRATE" != swvol-supervisor ]; then printf "%s\n" ../swvol-core/Cargo.toml; find ../swvol-core/src -type f; fi
+        } | LC_ALL=C sort | xargs sha256sum | sha256sum | cut -d " " -f 1
+      }
+      before=$(source_hash)
+      cargo build --locked --offline --release --target "$SWVOL_TARGET"
       test -x "$binary"
-      source_hash=$( { printf "%s\n" Cargo.toml Cargo.lock ../swvol-core/Cargo.toml; find src ../swvol-core/src -type f; } | LC_ALL=C sort | xargs sha256sum | sha256sum | cut -d " " -f 1)
+      source_hash=$(source_hash)
+      if [ "$source_hash" != "$before" ]; then
+        echo "helper source changed during build; refusing to publish an unverifiable artifact" >&2
+        exit 1
+      fi
       name="$SWVOL_CRATE-$SWVOL_ARCH"
       cp "$binary" "/dist/$name.tmp"
       hash=$(sha256sum "/dist/$name.tmp" | cut -d " " -f 1)
@@ -45,6 +61,6 @@ build() {
 }
 for arch in $arches; do
   case "$arch" in x86_64) image="$x86_image"; triple=x86_64-unknown-linux-musl; rust_version=1.96.1 ;; aarch64) image="$arm_image"; triple=aarch64-unknown-linux-musl; rust_version=1.95.0 ;; esac
-  for crate in swvol swlazy; do build "$crate" "$image" "$triple" "$arch" "$rust_version"; done
+  for crate in "${helpers[@]}"; do build "$crate" "$image" "$triple" "$arch" "$rust_version"; done
 done
 cp VERSION dist/VERSION

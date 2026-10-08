@@ -46,7 +46,7 @@ export class VolumeMaintenance {
       );
       if (!locked.rows.length) throw new Error("volume does not exist");
       const pinned = await tx.execute(
-        sql`select 1 from sandbox_volume_attachments where volume_id=${volumeId} and status in ('active','quarantined') limit 1`,
+        sql`select 1 from sandbox_volume_attachments where volume_id=${volumeId} and status in ('active','quarantined','draining') limit 1`,
       );
       if (pinned.rows.length) {
         result.pinned = true;
@@ -79,7 +79,7 @@ export class VolumeMaintenance {
           sql`select id from sandbox_volumes where id=${volumeId} for update`,
         );
         const pinned = await tx.execute(
-          sql`select 1 from sandbox_volume_attachments where volume_id=${volumeId} and status in ('active','quarantined') limit 1`,
+          sql`select 1 from sandbox_volume_attachments where volume_id=${volumeId} and status in ('active','quarantined','draining') limit 1`,
         );
         if (pinned.rows.length) return false;
         const eligible = await tx.execute(sql`

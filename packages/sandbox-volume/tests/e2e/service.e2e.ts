@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { after, before, test } from "node:test";
-import { zstdCompressSync } from "node:zlib";
+import { zstdCompressSync, zstdDecompressSync } from "node:zlib";
 import {
   encodeManifestObject,
   type Manifest,
   type SlotSet,
 } from "../../src/protocol/index";
 import {
-  cleanupVolume,
+  cleanupE2EContext,
   createE2EContext,
   e2eEnabled,
   putWriteOnce,
@@ -28,10 +28,8 @@ before(async () => {
   ctx = await createE2EContext();
 });
 after(async () => {
-  if (!ctx) return;
-  if (volumeId) await cleanupVolume(ctx, volumeId);
-  await ctx.store.deletePrefix(ctx.keyPrefix);
-  await ctx.close();
+  if (ctx)
+    await cleanupE2EContext(ctx, { volumeIds: volumeId ? [volumeId] : [] });
 });
 
 function blake3ish(content: Buffer): string {
@@ -53,6 +51,8 @@ test(
     const volume = await service.getOrCreateVolume(ctx.scope);
     volumeId = volume.id;
     const attachment = await service.attach(volume.id, "sandbox-e2e");
+    const bootId = "service-e2e-boot";
+    await service.recordBootId(attachment.id, bootId);
     const files = await service.publishAttachFiles(attachment);
     assert.equal(files.planSeq, 0);
     const slots = await fetchJson<SlotSet>(files.slotsUrl);
@@ -82,6 +82,7 @@ test(
       v: 1,
       volume: volume.id,
       attachment: attachment.id,
+      boot_id: bootId,
       seq: 1,
       base: 0,
       trigger: "flush",
@@ -119,6 +120,8 @@ test(
     let wal = await service.applyWal(attachment.id);
     assert.equal(wal.applied, 1);
     assert.equal(await service.repo.head(volume.id), 1);
+    assert.equal(await service.confirmPersistence(attachment.id, 1), true);
+    assert.equal(await service.confirmPersistence(attachment.id, 2), false);
     let entries = await service.repo.entries(volume.id);
     assert.deepEqual(
       entries.map((e) => e.path),
@@ -134,6 +137,7 @@ test(
       v: 1,
       volume: volume.id,
       attachment: attachment.id,
+      boot_id: bootId,
       seq: 2,
       base: 1,
       trigger: "debounce",
@@ -181,6 +185,10 @@ test(
       headers: { Range: "bytes=16-" + (16 + packedC.length - 1) },
     });
     assert.equal(planAsSeen.status, 206);
+    assert.deepEqual(
+      zstdDecompressSync(Buffer.from(await planAsSeen.arrayBuffer())),
+      chunkC,
+    );
 
     // seq 3: a hostile manifest (chunk in another attachment's pack) is rejected and the chain stops there.
     const m3: Manifest = {
@@ -210,6 +218,7 @@ test(
       v: 1,
       volume: volume.id,
       attachment: attachment.id,
+      boot_id: bootId,
       seq: 3,
       base: 2,
       trigger: "rebase",
@@ -285,6 +294,31 @@ test(
     // A second attachment applies the first one's leftovers before starting and starts at the new head.
     const attachment2 = await service.attach(volume.id, "sandbox-e2e-2");
     assert.equal(attachment2.baseSeq, 4);
+    assert.equal(await service.confirmPersistence(attachment.id, 3), false);
+    assert.equal(await service.confirmPersistence(attachment2.id, 4), true);
+    const restored = await service.plan(attachment2);
+    for (const [path, expected] of [
+      ["src/a.txt", chunkA],
+      ["src/b.txt", chunkB],
+    ] as const) {
+      const entry = restored.entries.find((entry) => entry.p === path)!;
+      const buffers: Buffer[] = [];
+      for (const [chunkId] of entry.c) {
+        const [pack, offset, length] = restored.chunks[chunkId]!;
+        const downloaded = await fetch(restored.packs[pack]!, {
+          headers: { Range: `bytes=${offset}-${offset + length - 1}` },
+        });
+        assert.equal(downloaded.status, 206);
+        buffers.push(
+          zstdDecompressSync(Buffer.from(await downloaded.arrayBuffer())),
+        );
+      }
+      assert.deepEqual(
+        Buffer.concat(buffers),
+        expected,
+        `restored bytes for ${path}`,
+      );
+    }
     assert.equal(
       (await service.repo.getAttachment(attachment.id))!.status,
       "superseded",

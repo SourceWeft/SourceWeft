@@ -11,7 +11,7 @@ import {
   type VolumeHooks,
 } from "../../src/hooks/index";
 import {
-  cleanupVolume,
+  cleanupE2EContext,
   createE2EContext,
   e2eEnabled,
   type E2EContext,
@@ -132,12 +132,12 @@ before(async () => {
 });
 
 after(async () => {
-  if (!ctx) return;
-  for (const id of sandboxes)
-    await provider.deleteSandbox(id).catch(() => undefined);
-  if (volumeId) await cleanupVolume(ctx, volumeId);
-  await ctx.store.deletePrefix(ctx.keyPrefix);
-  await ctx.close();
+  if (ctx)
+    await cleanupE2EContext(ctx, {
+      provider,
+      sandboxIds: sandboxes,
+      volumeIds: volumeId ? [volumeId] : [],
+    });
 });
 
 test(
@@ -237,6 +237,9 @@ test(
     );
     assert.equal(r3.output.trim(), "hello\nmore\nsrc/a.txt");
 
+    const guardedHead = await ctx.service.repo.head(volumeId);
+    const guardedTree = await ctx.service.repo.entries(volumeId);
+
     // T9: a container that was not restored in this boot cannot run commands or write the volume.
     await executorFor(second).execute(
       "rm -f /workspace/.sourceweft/identity; kill $(cat /workspace/.sourceweft/daemon.pid) 2>/dev/null; true",
@@ -246,14 +249,24 @@ test(
       run(
         second,
         reattached.attachmentId,
-        "cd /workspace && rm -rf moved && echo should-not-run",
+        "cd /workspace && rm -rf moved && echo should-not-run > forbidden-ran.txt",
       ),
       VolumePersistenceError,
     );
     assert.equal(
       await ctx.service.repo.head(volumeId),
-      headBeforeDelete,
+      guardedHead,
       "nothing was synced from the unattached container",
+    );
+    assert.deepEqual(await ctx.service.repo.entries(volumeId), guardedTree);
+    const untouched = await executorFor(second).execute(
+      "test -d /workspace/moved && test ! -e /workspace/forbidden-ran.txt",
+      { timeoutMs: 30_000 },
+    );
+    assert.equal(
+      untouched.exitCode,
+      0,
+      "the rejected command did not execute or delete local data",
     );
     // This test explicitly destroys the damaged instance before requesting recovery.
     await provider.deleteSandbox(second);

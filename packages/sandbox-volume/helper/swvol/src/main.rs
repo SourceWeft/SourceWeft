@@ -13,6 +13,7 @@
 //!   treehash --root R                     deterministic digest of the tree (verification)
 
 mod safe_fs;
+mod control_client;
 
 use anyhow::{anyhow, bail, Context, Result};
 use swvol_core::{ChunkRef, ChunkLoc, WireEntry, Manifest, RestorePlan as Plan};
@@ -29,6 +30,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const META_DIR: &str = ".sourceweft";
+static STATE_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+static CONTROL_ALLOW_HTTP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// Subtrees with very many directories: watched only at their top, rescanned as a whole.
 const HEAVY_DIRS: &[&str] = &["node_modules", ".venv", "__pycache__", ".git"];
 const CDC_MIN: u32 = 256 * 1024;
@@ -94,7 +97,7 @@ struct State {
     have: HashMap<String, ChunkLoc>,
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 struct Slots {
     volume: String,
     attachment: String,
@@ -116,7 +119,7 @@ fn boot_id() -> String {
 }
 
 fn meta_dir(root: &Path) -> PathBuf {
-    root.join(META_DIR)
+    STATE_DIR.get().cloned().unwrap_or_else(|| root.join(META_DIR))
 }
 
 /// Shared agents: connections to the bucket are kept alive across syncs.
@@ -266,7 +269,9 @@ fn load_state(root: &Path) -> Result<Option<State>> {
 fn save_state(root: &Path, st: &State) -> Result<()> {
     #[cfg(test)]
     if FAIL_STATE_SAVE.with(|fault| fault.get()) { return Err(std::io::Error::from_raw_os_error(28).into()); }
-    atomic_write(&state_path(root), &bincode::serialize(st)?)
+    atomic_write(&state_path(root), &bincode::serialize(st)?)?;
+    control_client::record_commit(st.seq);
+    Ok(())
 }
 
 /// The guard against "an empty replacement container syncs the volume to empty":
@@ -361,8 +366,9 @@ fn unchanged(e: &Entry, md: &fs::Metadata) -> bool {
 
 // ---------- pack writer (chunks -> compressed packs -> pre-signed slots) ----------
 
-struct PackWriter<'a> {
-    slots: &'a Slots,
+struct PackWriter {
+    slots: Slots,
+    root: PathBuf,
     next_pack: u32,
     counter: PathBuf,
     buf: Vec<u8>,
@@ -374,9 +380,9 @@ struct PackWriter<'a> {
     uploaded_bytes: u64,
 }
 
-impl<'a> PackWriter<'a> {
-    fn new(slots: &'a Slots, root: &Path) -> Self {
-        PackWriter { slots, next_pack: 0, counter: meta_dir(root).join("pack.next"), buf: Vec::new(), cur_key: None, new_locs: BTreeMap::new(), packs: Vec::new(), tx: None, uploaders: Vec::new(), uploaded_bytes: 0 }
+impl PackWriter {
+    fn new(slots: &Slots, root: &Path) -> Self {
+        PackWriter { slots: slots.clone(), root: root.to_owned(), next_pack: 0, counter: meta_dir(root).join("pack.next"), buf: Vec::new(), cur_key: None, new_locs: BTreeMap::new(), packs: Vec::new(), tx: None, uploaders: Vec::new(), uploaded_bytes: 0 }
     }
 
     /// Reserve the next pack slot. The reservation is durable BEFORE the slot is used,
@@ -387,8 +393,15 @@ impl<'a> PackWriter<'a> {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
             Err(error) => return Err(error.into()),
         };
-        if !self.slots.packs.contains_key(&n.to_string()) {
-            return Err(NeedSlots(format!("no pack slot {n}")).into());
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let fresh = load_slots(&self.root)?;
+            if fresh.volume != self.slots.volume || fresh.attachment != self.slots.attachment || fresh.pack_prefix != self.slots.pack_prefix || fresh.manifest_prefix != self.slots.manifest_prefix { bail!("pack grant changed during capture"); }
+            self.slots = fresh;
+            if self.slots.packs.contains_key(&n.to_string()) { break; }
+            if !control_client::active() || Instant::now() >= deadline { return Err(NeedSlots(format!("no pack slot {n}")).into()); }
+            control_client::WAKE.store(true, std::sync::atomic::Ordering::Relaxed);
+            std::thread::sleep(Duration::from_millis(100));
         }
         let next = n.checked_add(1).context("pack counter exhausted")?;
         atomic_write(&self.counter, next.to_string().as_bytes())?;
@@ -479,7 +492,7 @@ impl<'a> PackWriter<'a> {
 #[cfg(test)]
 thread_local! { static FAIL_CHUNK_READ: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
 
-impl Drop for PackWriter<'_> {
+impl Drop for PackWriter {
     fn drop(&mut self) {
         self.tx.take();
         for worker in self.uploaders.drain(..) { let _ = worker.join(); }
@@ -776,7 +789,9 @@ fn sync_scoped(root: &Path, st: &mut State, scope: Scope, trigger: &str, rebase:
     let seq = st.seq + 1;
     let manifest_key = format!("{}{}", slots.manifest_prefix, seq);
     let inline = pw.finish(&manifest_key)?; // every referenced pack is in the bucket before the manifest exists
-    let url = match slots.manifests.get(&seq.to_string()) {
+    let fresh_slots = load_slots(root)?;
+    if fresh_slots.attachment != slots.attachment || fresh_slots.manifest_prefix != slots.manifest_prefix { bail!("manifest grant changed during capture"); }
+    let url = match fresh_slots.manifests.get(&seq.to_string()) {
         Some(u) => u.clone(),
         None => return Err(NeedSlots(format!("no manifest slot {seq}")).into()),
     };
@@ -985,7 +1000,7 @@ fn cmd_restore(root: &Path, plan_src: &str, index_only: bool) -> Result<()> {
     plan.validate()?;
     let root_dir = safe_fs::Directory::open_root(root)?;
     if !index_only { root_dir.require_empty_content()?; }
-    let metadata = root_dir.directory(META_DIR, true)?;
+    let metadata = match STATE_DIR.get() { Some(directory) => safe_fs::Directory::open_root(directory)?, None => root_dir.directory(META_DIR, true)? };
     metadata.chmod("", 0o700)?;
     let lock = metadata.lock_file()?;
     lock.try_lock_exclusive().map_err(|_| anyhow!("another swvol (restore or daemon) is running in this workspace"))?;
@@ -1026,9 +1041,9 @@ fn cmd_restore(root: &Path, plan_src: &str, index_only: bool) -> Result<()> {
     let mut targets: HashMap<&str, Vec<(usize, u64)>> = HashMap::new();
     let mut total = 0u64;
     // Files made of exactly one chunk (the vast majority in dependency trees) are written in a
-    // single open: create, write, set mode and mtime, fstat, close. No second pass over them.
+    // single write-open: create, write, set mode and mtime, close. A final
+    // descriptor-relative stat after publication records rename's actual ctime.
     let single: Vec<bool> = files.iter().map(|f| f.c.len() == 1).collect();
-    let stats: Mutex<Vec<Option<(u64, i64, i64, u64, u32)>>> = Mutex::new(vec![None; files.len()]);
     let mut identities = vec![(0u64, 0u64); files.len()];
     for (i, f) in files.iter().enumerate() {
         if !single[i] {
@@ -1097,8 +1112,6 @@ fn cmd_restore(root: &Path, plan_src: &str, index_only: bool) -> Result<()> {
                                     (&fh).write_all(&data)?;
                                     fh.set_permissions(fs::Permissions::from_mode(f.m))?;
                                     filetime::set_file_handle_times(&fh, None, Some(filetime::FileTime::from_unix_time(f.t.div_euclid(1_000_000_000), f.t.rem_euclid(1_000_000_000) as u32)))?;
-                                    let md = fh.metadata()?;
-                                    stats.lock().unwrap()[*fi] = Some((md.ino(), md.ctime() * 1_000_000_000 + md.ctime_nsec(), md.mtime() * 1_000_000_000 + md.mtime_nsec(), md.len(), md.mode() & 0o7777));
                                 } else {
                                     let fh = staging.open_created_file(&f.p, identities[*fi])?;
                                     fh.write_all_at(&data, *off)?;
@@ -1125,6 +1138,7 @@ fn cmd_restore(root: &Path, plan_src: &str, index_only: bool) -> Result<()> {
     }
     for l in plan.entries.iter().filter(|e| e.k == 'l') {
         staging.symlink(&l.p, l.l.as_deref().unwrap_or(""))?;
+        staging.set_symlink_mtime(&l.p, l.t)?;
     }
     for (i, f) in files.iter().enumerate() {
         if single[i] {
@@ -1134,16 +1148,14 @@ fn cmd_restore(root: &Path, plan_src: &str, index_only: bool) -> Result<()> {
         fh.set_permissions(fs::Permissions::from_mode(f.m))?;
         filetime::set_file_handle_times(&fh, None, Some(filetime::FileTime::from_unix_time(f.t.div_euclid(1_000_000_000), f.t.rem_euclid(1_000_000_000) as u32)))?;
     }
-    let stats = stats.into_inner().unwrap();
-    let file_index: HashMap<&str, usize> = files.iter().enumerate().map(|(i, f)| (f.p.as_str(), i)).collect();
-    // Local state comes from the plan: nothing restored is ever re-uploaded.
+    root_dir.require_empty_content()?;
+    staging.publish_into(&root_dir)?;
+    metadata.remove(&staging_name, true)?;
+    // Publication changes ctime on moved top-level entries. Index the published
+    // tree, never pre-rename staging metadata, so a no-change barrier stays empty.
     let mut st = State { volume: plan.volume.clone(), attachment: plan.attachment.clone(), boot_id: boot_id(), seq: plan.seq, next_pack: 0, ..Default::default() };
     for e in &plan.entries {
-        if let Some((ino, ctime_ns, mtime_ns, size, mode)) = file_index.get(e.p.as_str()).and_then(|i| stats[*i]) {
-            st.entries.insert(e.p.clone(), Entry { kind: 'f', mode, mtime_ns, size, link: None, chunks: e.c.clone(), ino, ctime_ns });
-            continue;
-        }
-        let md = staging.metadata(&e.p)?;
+        let md = root_dir.metadata(&e.p)?;
         st.entries.insert(
             e.p.clone(),
             Entry {
@@ -1160,11 +1172,8 @@ fn cmd_restore(root: &Path, plan_src: &str, index_only: bool) -> Result<()> {
     }
     st.have = plan.chunks.clone();
     for d in dirs.iter().rev() {
-        staging.chmod(&d.p, d.m)?;
+        root_dir.chmod(&d.p, d.m)?;
     }
-    root_dir.require_empty_content()?;
-    staging.publish_into(&root_dir)?;
-    metadata.remove(&staging_name, true)?;
     metadata.atomic_write("state.bin", &bincode::serialize(&st)?)?;
     // Written last: its presence means "this boot of this container holds a complete restore".
     metadata.atomic_write("identity", format!("{}\n{}\n", st.attachment, st.boot_id).as_bytes())?;
@@ -1315,6 +1324,7 @@ fn cmd_daemon(root: &Path) -> Result<()> {
     let lock = OpenOptions::new().create(true).write(true).open(meta_dir(root).join("lock"))?;
     lock.try_lock_exclusive().map_err(|_| anyhow!("another swvol holds the lock"))?;
     let mut st = load_attached_state(root)?;
+    control_client::start(root, &st, CONTROL_ALLOW_HTTP.load(std::sync::atomic::Ordering::Relaxed))?;
     let dirty = Arc::new(Mutex::new(Dirty::default()));
     {
         let (r, d) = (root.to_path_buf(), dirty.clone());
@@ -1512,6 +1522,14 @@ fn main() {
     let get = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
     let root = PathBuf::from(get("--root").unwrap_or_else(|| "/workspace".into()));
     let cmd = args.get(1).map(|s| s.as_str()).unwrap_or("");
+    if let Some(directory) = get("--state-dir") {
+        let directory = PathBuf::from(directory);
+        if !directory.is_absolute() || directory.starts_with(&root) {
+            eprintln!("swvol: protected state directory must be absolute and outside workspace"); std::process::exit(1);
+        }
+        let _ = STATE_DIR.set(directory);
+    }
+    CONTROL_ALLOW_HTTP.store(args.iter().any(|arg| arg == "--control-allow-http"), std::sync::atomic::Ordering::Relaxed);
     let res: Result<i32> = match cmd {
         "restore" => get("--plan").ok_or_else(|| anyhow!("--plan required")).and_then(|p| cmd_restore(&root, &p, args.iter().any(|a| a == "--index-only"))).map(|_| 0),
         "daemon" => cmd_daemon(&root).map(|_| 0),

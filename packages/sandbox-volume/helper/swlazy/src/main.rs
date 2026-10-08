@@ -5,6 +5,7 @@ mod notify;
 mod plan;
 mod store;
 mod volume;
+mod workers;
 
 use anyhow::{bail, Result};
 use std::ffi::CString;
@@ -31,6 +32,11 @@ fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let cmd = args.get(1).map(|s| s.as_str()).unwrap_or("");
     match cmd {
+        "version" => println!("swlazy {}", env!("CARGO_PKG_VERSION")),
+        "chunk-worker" => {
+            let fd = opt(&args, "--fd").ok_or_else(|| anyhow::anyhow!("inherited worker socket required"))?.parse()?;
+            workers::serve(fd)?;
+        }
         // Explicit formal protocol; never auto-detect or fall back to experiment data.
         "mount-volume" => {
             if args.len() < 5 { bail!("usage: swlazy mount-volume <plan> <cache-dir> <mountpoint> [--cap-mb N]"); }
@@ -38,8 +44,21 @@ fn main() -> Result<()> {
             plan.validate()?;
             let cap: usize = opt(&args, "--cap-mb").map(|v| v.parse()).transpose()?.unwrap_or(64);
             let cap = cap.checked_mul(1024 * 1024).ok_or_else(|| anyhow::anyhow!("cache capacity overflow"))?;
+            let initial_fd = if let Some(raw) = opt(&args, "--initial-fuse-fd") {
+                use std::os::fd::{FromRawFd, AsRawFd};
+                use std::os::unix::fs::{FileTypeExt, MetadataExt};
+                let fd: i32 = raw.parse()?;
+                if fd < 3 { bail!("initial FUSE descriptor must be a private inherited descriptor"); }
+                let owned = unsafe { std::os::fd::OwnedFd::from_raw_fd(fd) };
+                let metadata = std::fs::File::from(owned.try_clone()?).metadata()?;
+                let device = std::fs::metadata("/dev/fuse")?;
+                if !metadata.file_type().is_char_device() || metadata.rdev() != device.rdev() { bail!("initial descriptor is not the FUSE device"); }
+                if unsafe { libc::fcntl(owned.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) } < 0 { return Err(std::io::Error::last_os_error().into()); }
+                Some(owned)
+            } else { None };
             let store = volume::VolumeStore::new(&plan, Path::new(&args[3]), cap)?;
-            fuse::mount_volume(&plan, store, &args[4], flag(&args, "--allow-other"))?;
+            if let Some(directory) = opt(&args, "--state-dir") { store.start_control_view(Path::new(&directory))?; }
+            fuse::mount_volume(&plan, store, &args[4], flag(&args, "--allow-other"), initial_fd)?;
         }
         // swlazy mount <plan> <cache-dir> <mountpoint> [--allow-other] [--cap-mb N]
         "mount" => {

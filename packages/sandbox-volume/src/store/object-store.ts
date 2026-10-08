@@ -140,13 +140,21 @@ export function createS3ObjectStore(config: S3ObjectStoreConfig): ObjectStore {
         );
         const keys = (page.Contents ?? []).map((o) => ({ Key: o.Key! }));
         if (keys.length) {
-          await client.send(
+          const result = await client.send(
             new DeleteObjectsCommand({
               Bucket: bucket,
               Delete: { Objects: keys, Quiet: true },
             }),
             requestOptions(),
           );
+          if (result.Errors?.length) {
+            const codes = [
+              ...new Set(result.Errors.map((error) => error.Code ?? "Unknown")),
+            ];
+            throw new Error(
+              `object cleanup was incomplete: ${result.Errors.length} objects failed (${codes.join(",")})`,
+            );
+          }
           deleted += keys.length;
         }
         token = page.IsTruncated ? page.NextContinuationToken : undefined;
@@ -168,7 +176,6 @@ export function createS3ObjectStore(config: S3ObjectStoreConfig): ObjectStore {
 
 function isNotFound(error: unknown): boolean {
   const name = (error as { name?: string })?.name;
-  const status = (error as { $metadata?: { httpStatusCode?: number } })
-    ?.$metadata?.httpStatusCode;
-  return name === "NoSuchKey" || name === "NotFound" || status === 404;
+  // A missing bucket or a gateway's unrelated 404 is a storage failure, not an empty WAL.
+  return name === "NoSuchKey" || name === "NotFound";
 }

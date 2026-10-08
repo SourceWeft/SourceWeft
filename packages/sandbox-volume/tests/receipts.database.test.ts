@@ -53,6 +53,33 @@ before(async () => {
       "utf8",
     ).replaceAll('"public".', `"${testSchema}".`),
   );
+  await pool.query(
+    readFileSync(
+      new URL(
+        "../../db/drizzle/0063_sandbox_volume_control.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    ).replaceAll('"public".', `"${testSchema}".`),
+  );
+  await pool.query(
+    readFileSync(
+      new URL(
+        "../../db/drizzle/0064_sandbox_volume_drain.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    ).replaceAll('"public".', `"${testSchema}".`),
+  );
+  await pool.query(
+    readFileSync(
+      new URL(
+        "../../db/drizzle/0065_sandbox_volume_recovery.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    ).replaceAll('"public".', `"${testSchema}".`),
+  );
   const db = drizzle(pool);
   repo = new VolumeRepository(db);
   service = new VolumeService({
@@ -779,6 +806,18 @@ test(
           "utf8",
         ).replaceAll('"public".', `"${schema}".`),
       );
+      for (const migration of [
+        "0062_sandbox_volume_gc.sql",
+        "0063_sandbox_volume_control.sql",
+        "0064_sandbox_volume_drain.sql",
+        "0065_sandbox_volume_recovery.sql",
+      ])
+        await legacy.query(
+          readFileSync(
+            new URL(`../../db/drizzle/${migration}`, import.meta.url),
+            "utf8",
+          ).replaceAll('"public".', `"${schema}".`),
+        );
       const migrated = new VolumeRepository(drizzle(legacy));
       assert.equal((await migrated.getAttachment("a"))?.lastAppliedSeq, 5);
       assert.equal((await migrated.getVolume("v"))?.namespace, "primary");
@@ -1124,5 +1163,1004 @@ test(
       bounded.applyWal(a.id, { maxCommits: 0 }),
       /positive safe integer/,
     );
+  },
+);
+
+test(
+  "control renewals reuse current slots until helper reaches the low water mark",
+  { skip: !enabled },
+  async () => {
+    const v = await volume();
+    const a = await service.attach(v.id, "control-slots");
+    const signer = new VolumeService({
+      db: drizzle(pool),
+      keyPrefix: "test/",
+      store: {
+        presignWriteOnce: async (key: string) => key,
+      } as unknown as ObjectStore,
+    });
+    await signer.issueSlots(a);
+    for (let n = 0; n < 70; n++) await signer.issueSlots(a, { nextPack: 0 });
+    assert.equal((await repo.getAttachment(a.id))?.slotsUntilPack, 64);
+    const renewal = await signer.issueSlots(a, { nextPack: 50 });
+    assert.equal((await repo.getAttachment(a.id))?.slotsUntilPack, 128);
+    assert.ok(renewal.packs["0"]);
+    assert.ok(renewal.packs["127"]);
+    assert.ok(renewal.manifests["1"]);
+    await assert.rejects(
+      signer.issueSlots(a, { nextPack: 129 }),
+      /exceeds.*issued/,
+    );
+    await assert.rejects(
+      signer.issueSlots(a, { nextPack: -1 }),
+      /invalid slot renewal/,
+    );
+  },
+);
+
+test(
+  "control credentials are hashed, attachment-scoped, expiring and revoked by rotation or quarantine",
+  { skip: !enabled },
+  async () => {
+    const v = await volume(),
+      other = await volume();
+    const a = await service.attach(v.id, "control-auth"),
+      b = await service.attach(other.id, "other");
+    const issued = await service.issueControlToken(a.id);
+    const row = await repo.getAttachment(a.id);
+    assert.notEqual(row?.controlTokenHash, issued.token);
+    assert.match(row?.controlTokenHash ?? "", /^[0-9a-f]{64}$/);
+    assert.equal(
+      (await service.verifyControlToken(a.id, issued.token)).id,
+      a.id,
+    );
+    await assert.rejects(
+      service.verifyControlToken(b.id, issued.token),
+      /invalid, expired, or fenced/,
+    );
+    const replacement = await service.rotateControlToken(a.id, issued.token);
+    await assert.rejects(
+      service.verifyControlToken(a.id, issued.token),
+      /invalid, expired, or fenced/,
+    );
+    assert.equal(
+      (await service.verifyControlToken(a.id, replacement.token)).id,
+      a.id,
+    );
+    await pool.query(
+      "update sandbox_volume_attachments set control_expires_at=now()-interval '1 second' where id=$1",
+      [a.id],
+    );
+    await assert.rejects(
+      service.verifyControlToken(a.id, replacement.token),
+      /invalid, expired, or fenced/,
+    );
+    const renewed = await service.issueControlToken(a.id);
+    await service.quarantineAttachment(a.id, "control stop");
+    await assert.rejects(
+      service.verifyControlToken(a.id, renewed.token),
+      /invalid, expired, or fenced/,
+    );
+    await assert.rejects(service.issueControlToken(a.id), /inactive/);
+  },
+);
+
+test(
+  "authenticated control polls confirm WAL, reuse slots and only refresh requested owned locators",
+  { skip: !enabled },
+  async () => {
+    const v = await volume();
+    const a = await service.attach(v.id, "control");
+    await service.recordBootId(a.id, "boot");
+    await repo.reserveSlots(a, 64, 64, 3600);
+    const raw = encodeManifestObject(manifest(v.id, a.id, 0, "polled"));
+    const control = new VolumeService({
+      db: drizzle(pool),
+      keyPrefix: "control/",
+      store: {
+        get: async (key: string) => (key.endsWith("/m/0/1") ? raw : null),
+        presignWriteOnce: async (key: string) => key,
+        presignGet: async (key: string) => key,
+      } as unknown as ObjectStore,
+    });
+    const credential = await control.issueControlToken(a.id);
+    const request = { bootId: "boot", epoch: 0, nextPack: 0, seq: 1 };
+    await assert.rejects(
+      control.refreshControl(a.id, credential.token, {
+        ...request,
+        bootId: "wrong",
+      }),
+      /identity or cursor/,
+    );
+    await assert.rejects(
+      control.refreshControl(a.id, credential.token, { ...request, epoch: 1 }),
+      /identity or cursor/,
+    );
+    await assert.rejects(
+      control.refreshControl(a.id, credential.token, { ...request, seq: 65 }),
+      /identity or cursor/,
+    );
+    const response = await control.refreshControl(
+      a.id,
+      credential.token,
+      request,
+    );
+    assert.equal(response.head, 1);
+    assert.equal(response.confirmedSeq, 1);
+    assert.deepEqual(response.locators, { chunks: {}, packs: {} });
+    assert.ok(response.slots.packs["0"]);
+    assert.ok(response.slots.manifests["2"]);
+    assert.equal((await repo.getAttachment(a.id))?.slotsUntilPack, 64);
+    await assert.rejects(
+      control.refreshControl(a.id, credential.token, {
+        ...request,
+        locatorChunkIds: ["a".repeat(64)],
+      }),
+      /not registered/,
+    );
+    const rotated = await Promise.allSettled([
+      control.rotateControlToken(a.id, credential.token),
+      control.rotateControlToken(a.id, credential.token),
+    ]);
+    assert.equal(rotated.filter((r) => r.status === "fulfilled").length, 1);
+    assert.equal(rotated.filter((r) => r.status === "rejected").length, 1);
+    await assert.rejects(
+      control.refreshControl(a.id, credential.token, request),
+      /invalid, expired, or fenced/,
+    );
+  },
+);
+
+async function supervisedActor() {
+  const v = await volume();
+  const a = await service.attach(v.id, "supervised");
+  const identity = {
+    sandboxId: "supervised",
+    bootId: "boot",
+    supervisorNonce: randomUUID(),
+  };
+  await service.recordBootId(a.id, identity.bootId);
+  await service.bindSupervisorIdentity(a.id, identity.supervisorNonce);
+  await repo.reserveSlots(a, 64, 64, 3600);
+  return { v, a, identity };
+}
+
+test(
+  "mutating permits serialize independent hosts and preserve unknown dispatched operations",
+  { skip: !enabled },
+  async () => {
+    const { a, identity } = await supervisedActor();
+    const other = new VolumeService({
+      db: drizzle(pool),
+      keyPrefix: "permits/",
+      store: {} as ObjectStore,
+    });
+    const acquired = await Promise.allSettled([
+      service.acquireExecutionPermit(a.id, { ...identity, operationId: "one" }),
+      other.acquireExecutionPermit(a.id, { ...identity, operationId: "two" }),
+    ]);
+    assert.equal(acquired.filter((x) => x.status === "fulfilled").length, 1);
+    const winner = acquired.find((x) => x.status === "fulfilled")!;
+    assert.equal(winner.status, "fulfilled");
+    if (winner.status !== "fulfilled") throw new Error("no permit");
+    const permit = winner.value;
+    await assert.rejects(
+      repo.createAttachment({
+        id: randomUUID(),
+        volumeId: permit.volumeId,
+        sandboxId: "replacement",
+        baseSeq: 0,
+        expectedAttachmentId: a.id,
+      }),
+      /unfinished execution permit/,
+    );
+    const repeated = await other.acquireExecutionPermit(a.id, {
+      ...identity,
+      operationId: permit.operationId,
+    });
+    assert.equal(repeated.id, permit.id);
+    assert.equal(repeated.reused, true);
+    assert.equal(await service.markExecutionStarted(a.id, permit.id), true);
+    assert.equal(await other.markExecutionStarted(a.id, permit.id), false);
+    await assert.rejects(
+      service.releaseExecutionPermit(a.id, permit.id, {
+        outcome: "not_started",
+      }),
+      /dispatched/,
+    );
+    await assert.rejects(
+      other.acquireExecutionPermit(a.id, { ...identity, operationId: "three" }),
+      /awaiting.*barrier/,
+    );
+    await assert.rejects(
+      service.releaseExecutionPermit(a.id, permit.id, {
+        outcome: "persisted",
+        confirmedSeq: 1,
+      }),
+      /confirmed persistence/,
+    );
+    await service.releaseExecutionPermit(a.id, permit.id, {
+      outcome: "persisted",
+      confirmedSeq: 0,
+    });
+    const next = await other.acquireExecutionPermit(a.id, {
+      ...identity,
+      operationId: "three",
+    });
+    await service.releaseExecutionPermit(a.id, next.id, {
+      outcome: "not_started",
+    });
+    await assert.rejects(
+      service.acquireExecutionPermit(a.id, {
+        ...identity,
+        operationId: "three",
+      }),
+      /do not replay/,
+    );
+  },
+);
+
+test(
+  "drain closes admission, privileges checkpoint WAL, and requires stop-before-confirm-before-retire",
+  { skip: !enabled },
+  async () => {
+    const { v, a, identity } = await supervisedActor();
+    const permit = await service.acquireExecutionPermit(a.id, {
+      ...identity,
+      operationId: "working",
+      writerKind: "supervised",
+    });
+    await service.markExecutionStarted(a.id, permit.id);
+    const token = await service.issueControlToken(a.id);
+    const drain = await service.beginDrain(a.id, {
+      ...identity,
+      operationId: "cleanup",
+      reason: "ttl",
+    });
+    assert.equal(drain.activePermits.length, 1);
+    assert.equal(drain.status, "draining");
+    const resumed = await new VolumeService({
+      db: drizzle(pool),
+      keyPrefix: "other/",
+      store: {} as ObjectStore,
+    }).beginDrain(a.id, {
+      ...identity,
+      operationId: "restart",
+      reason: "recovery",
+    });
+    assert.equal(resumed.drainId, drain.drainId);
+    assert.equal(resumed.operationId, "cleanup");
+    await assert.rejects(
+      service.acquireExecutionPermit(a.id, {
+        ...identity,
+        operationId: "late",
+      }),
+      /admission is closed/,
+    );
+    await assert.rejects(service.assertAttachmentActive(a.id), /not active/);
+    await assert.rejects(
+      service.verifyControlToken(a.id, token.token),
+      /invalid, expired, or fenced/,
+    );
+    await assert.rejects(service.applyWal(a.id), /not active/);
+    await assert.rejects(
+      service.attach(v.id, "replacement"),
+      /draining|unfinished execution permit/,
+    );
+    await assert.rejects(repo.rollback(v.id, 0), /unfinished drain/);
+    assert.equal((await service.maintenance.collect(v.id)).pinned, true);
+    assert.equal(
+      await service.confirmPersistence(a.id, 0, { drainId: drain.drainId }),
+      false,
+    );
+    const proof = {
+      ...identity,
+      drainId: drain.drainId,
+      stopped: true as const,
+    };
+    await assert.rejects(
+      service.finishDrain(a.id, {
+        drainId: drain.drainId,
+        confirmedSeq: 0,
+        stopProof: proof,
+      }),
+      /matching confirmed checkpoint/,
+    );
+    await assert.rejects(
+      service.recordSupervisorStop(a.id, {
+        ...proof,
+        supervisorNonce: randomUUID(),
+      }),
+      /identity changed/,
+    );
+    await service.recordSupervisorStop(a.id, proof);
+    const raw = encodeManifestObject(manifest(v.id, a.id, 0, "preserved"));
+    const privileged = new VolumeService({
+      db: drizzle(pool),
+      keyPrefix: "drain/",
+      store: {
+        get: async (key: string) => (key.endsWith("/m/0/1") ? raw : null),
+        presignWriteOnce: async (key: string) => key,
+      } as unknown as ObjectStore,
+    });
+    await assert.rejects(
+      privileged.applyWal(a.id, { drainId: "wrong" }),
+      /not active/,
+    );
+    const wal = await privileged.applyWal(a.id, { drainId: drain.drainId });
+    assert.equal(wal.applied, 1);
+    const actor = (await repo.getAttachment(a.id))!;
+    await assert.rejects(privileged.issueSlots(actor), /inactive/);
+    await privileged.issueSlots(actor, { drainId: drain.drainId, nextPack: 0 });
+    assert.equal(await service.confirmPersistence(a.id, 1), false);
+    assert.equal(
+      await service.confirmPersistence(a.id, 1, { drainId: drain.drainId }),
+      true,
+    );
+    const retired = await service.finishDrain(a.id, {
+      drainId: drain.drainId,
+      confirmedSeq: 1,
+      stopProof: proof,
+    });
+    assert.equal(retired.status, "retired");
+    assert.equal((await repo.getAttachment(a.id))?.status, "retired");
+    const next = await service.attach(v.id, "new");
+    assert.equal(next.baseSeq, 1);
+    assert.equal((await repo.entries(v.id))[0]?.path, "preserved");
+    const repeat = await service.finishDrain(a.id, {
+      drainId: drain.drainId,
+      confirmedSeq: 1,
+      stopProof: proof,
+    });
+    assert.equal(repeat.drainId, retired.drainId);
+    assert.equal((await repo.activeAttachment(v.id))?.id, next.id);
+    assert.equal(
+      (
+        await pool.query(
+          "select count(*)::int n from sandbox_volume_execution_permits where volume_id=$1 and status='active'",
+          [v.id],
+        )
+      ).rows[0].n,
+      0,
+    );
+  },
+);
+
+test(
+  "permit-versus-drain race never admits a new execution after drain wins",
+  { skip: !enabled },
+  async () => {
+    for (let i = 0; i < 8; i++) {
+      const { v, a, identity } = await supervisedActor();
+      const second = new VolumeService({
+        db: drizzle(pool),
+        keyPrefix: "race/",
+        store: {} as ObjectStore,
+      });
+      const [execution, cleanup] = await Promise.allSettled([
+        service.acquireExecutionPermit(a.id, {
+          ...identity,
+          operationId: "execute",
+        }),
+        second.beginDrain(a.id, {
+          ...identity,
+          operationId: "cleanup",
+          reason: "ttl",
+        }),
+      ]);
+      assert.equal(cleanup.status, "fulfilled");
+      if (cleanup.status !== "fulfilled") throw new Error("no drain");
+      if (execution.status === "fulfilled") {
+        assert.equal(
+          cleanup.value.activePermits.some((p) => p.id === execution.value.id),
+          true,
+        );
+        await assert.rejects(
+          service.markExecutionStarted(a.id, execution.value.id),
+          /admission is closed/,
+        );
+        await service.releaseExecutionPermit(a.id, execution.value.id, {
+          outcome: "not_started",
+        });
+      } else assert.match(String(execution.reason), /admission is closed/);
+      await assert.rejects(
+        second.acquireExecutionPermit(a.id, {
+          ...identity,
+          operationId: "late",
+        }),
+        /admission is closed/,
+      );
+      assert.equal(await repo.head(v.id), 0);
+    }
+  },
+);
+
+test(
+  "successful control polls extend the same credential past its original expiry without reviving invalid tokens",
+  { skip: !enabled },
+  async () => {
+    const { a, identity } = await supervisedActor();
+    const control = new VolumeService({
+      db: drizzle(pool),
+      keyPrefix: "sliding/",
+      store: {
+        get: async () => null,
+        presignWriteOnce: async (key: string) => key,
+      } as unknown as ObjectStore,
+    });
+    const issued = await control.issueControlToken(a.id, { ttlSeconds: 60 });
+    const hash = (await repo.getAttachment(a.id))!.controlTokenHash;
+    const original = (
+      await pool.query(
+        "update sandbox_volume_attachments set control_expires_at=now()+interval '1 second' where id=$1 returning control_expires_at",
+        [a.id],
+      )
+    ).rows[0].control_expires_at as Date;
+    const request = { bootId: identity.bootId, epoch: 0, nextPack: 0, seq: 0 };
+    await assert.rejects(
+      control.refreshControl(a.id, issued.token, {
+        ...request,
+        bootId: "wrong",
+      }),
+      /identity or cursor/,
+    );
+    assert.equal(
+      (await repo.getAttachment(a.id))!.controlExpiresAt!.getTime(),
+      original.getTime(),
+    );
+    const refreshed = await control.refreshControl(a.id, issued.token, request);
+    assert.ok(
+      new Date(refreshed.controlExpiresAt).getTime() >
+        original.getTime() + 23 * 60 * 60 * 1000,
+    );
+    assert.equal((await repo.getAttachment(a.id))!.controlTokenHash, hash);
+    await new Promise((resolve) =>
+      setTimeout(resolve, Math.max(0, original.getTime() - Date.now() + 30)),
+    );
+    assert.equal(
+      (await control.verifyControlToken(a.id, issued.token)).id,
+      a.id,
+    );
+    await pool.query(
+      "update sandbox_volume_attachments set control_expires_at=now()-interval '1 second' where id=$1",
+      [a.id],
+    );
+    await assert.rejects(
+      control.refreshControl(a.id, issued.token, request),
+      /invalid, expired, or fenced/,
+    );
+    assert.ok(
+      (await repo.getAttachment(a.id))!.controlExpiresAt!.getTime() <
+        Date.now(),
+    );
+    const current = await control.issueControlToken(a.id);
+    const drain = await control.beginDrain(a.id, {
+      ...identity,
+      operationId: "stop-sliding",
+      reason: "cleanup",
+    });
+    await assert.rejects(
+      control.refreshControl(a.id, current.token, request),
+      /invalid, expired, or fenced/,
+    );
+    assert.equal(drain.status, "draining");
+  },
+);
+
+test(
+  "namespace shutdown never retires an external writer still in flight",
+  { skip: !enabled },
+  async () => {
+    const { a, identity } = await supervisedActor();
+    const external = await service.acquireExecutionPermit(a.id, {
+      ...identity,
+      operationId: "provider-upload",
+    });
+    assert.equal(external.writerKind, "external");
+    await service.markExecutionStarted(a.id, external.id);
+    const drain = await service.beginDrain(a.id, {
+      ...identity,
+      operationId: "drain-upload",
+      reason: "cleanup",
+    });
+    assert.equal(drain.activePermits[0]?.writerKind, "external");
+    const proof = {
+      ...identity,
+      drainId: drain.drainId,
+      stopped: true as const,
+    };
+    await service.recordSupervisorStop(a.id, proof);
+    assert.equal(
+      await service.confirmPersistence(a.id, 0, { drainId: drain.drainId }),
+      false,
+    );
+    await assert.rejects(
+      service.releaseExecutionPermit(a.id, external.id, {
+        outcome: "stopped",
+        drainId: drain.drainId,
+      }),
+      /cannot release an external writer/,
+    );
+    await assert.rejects(
+      service.finishDrain(a.id, {
+        drainId: drain.drainId,
+        confirmedSeq: 0,
+        stopProof: proof,
+      }),
+      /confirmed checkpoint|external writer/,
+    );
+    assert.equal((await repo.getAttachment(a.id))?.status, "draining");
+    await service.releaseExecutionPermit(a.id, external.id, {
+      outcome: "external_settled",
+      drainId: drain.drainId,
+      settled: true,
+    });
+    await assert.rejects(
+      service.finishDrain(a.id, {
+        drainId: drain.drainId,
+        confirmedSeq: 0,
+        stopProof: proof,
+      }),
+      /confirmed checkpoint/,
+    );
+    assert.equal(
+      await service.confirmPersistence(a.id, 0, { drainId: drain.drainId }),
+      true,
+    );
+    assert.equal(
+      (
+        await service.finishDrain(a.id, {
+          drainId: drain.drainId,
+          confirmedSeq: 0,
+          stopProof: proof,
+        })
+      ).status,
+      "retired",
+    );
+  },
+);
+
+test(
+  "same-boot supervisor recovery records unknown work, preserves dirty authority and fences old controllers",
+  { skip: !enabled },
+  async () => {
+    const { v, a, identity } = await supervisedActor();
+    const permit = await service.acquireExecutionPermit(a.id, {
+      ...identity,
+      operationId: "unknown-command",
+      writerKind: "supervised",
+    });
+    await service.markExecutionStarted(a.id, permit.id);
+    const nextNonce = randomUUID();
+    const proof = {
+      ...identity,
+      previousSupervisorNonce: identity.supervisorNonce,
+      supervisorNonce: nextNonce,
+      journalDigest: "a".repeat(64),
+      allOldNamespacesExited: true as const,
+      launchGateClosed: true as const,
+    };
+    await assert.rejects(
+      service.recoverSupervisor(a.id, {
+        operationId: "wrong-boot",
+        proof: { ...proof, bootId: "different" },
+      }),
+      /same sandbox and boot/,
+    );
+    await assert.rejects(
+      service.recoverSupervisor(a.id, {
+        operationId: "open-gate",
+        proof: { ...proof, launchGateClosed: false as never },
+      }),
+      /invalid supervisor recovery proof/,
+    );
+    const recovery = await service.recoverSupervisor(a.id, {
+      operationId: "recover-controller-2",
+      proof,
+    });
+    assert.equal(recovery.recoveryControllerNonce, nextNonce);
+    assert.equal(
+      (await repo.getAttachment(a.id))?.supervisorNonce,
+      identity.supervisorNonce,
+    );
+    assert.deepEqual(recovery.unresolvedOperations, [
+      {
+        permitId: permit.id,
+        operationId: "unknown-command",
+        writerKind: "supervised",
+        outcome: "unknown",
+      },
+    ]);
+    const replay = await service.recoverSupervisor(a.id, {
+      operationId: "worker-retry",
+      proof,
+    });
+    assert.equal(replay.recoveryId, recovery.recoveryId);
+    assert.equal(
+      (
+        await pool.query(
+          "select count(*)::int n from sandbox_volume_recoveries where attachment_id=$1",
+          [a.id],
+        )
+      ).rows[0].n,
+      1,
+    );
+    await assert.rejects(
+      service.bindSupervisorIdentity(a.id, nextNonce),
+      /without recovery/,
+    );
+    assert.equal(
+      await service.confirmPersistence(a.id, 0, { drainId: recovery.drainId }),
+      false,
+    );
+    assert.equal(
+      await service.confirmPersistence(a.id, 0, {
+        drainId: recovery.drainId,
+        supervisorNonce: identity.supervisorNonce,
+      }),
+      false,
+    );
+    assert.equal(
+      await service.confirmPersistence(a.id, 0, {
+        drainId: recovery.drainId,
+        supervisorNonce: nextNonce,
+      }),
+      true,
+    );
+    const newestNonce = randomUUID();
+    const newestProof = {
+      ...proof,
+      previousSupervisorNonce: nextNonce,
+      supervisorNonce: newestNonce,
+      journalDigest: "b".repeat(64),
+    };
+    const newest = await service.recoverSupervisor(a.id, {
+      operationId: "recover-controller-3",
+      proof: newestProof,
+    });
+    assert.equal(newest.drainId, recovery.drainId);
+    assert.equal(newest.confirmedSeq, null);
+    await assert.rejects(
+      service.recoverSupervisor(a.id, { operationId: "stale-worker", proof }),
+      /stale or conflicts/,
+    );
+    assert.equal(
+      await service.confirmPersistence(a.id, 0, {
+        drainId: recovery.drainId,
+        supervisorNonce: nextNonce,
+      }),
+      false,
+    );
+    // The replacement controller flushes the preserved local dirty tree using the original attachment and drain capability.
+    await repo.applyManifest(
+      v.id,
+      manifest(v.id, a.id, 0, "recovered-dirty"),
+      {},
+      new Map(),
+      {
+        epoch: 0,
+        manifestKey: `att/${a.id}/m/0/1`,
+        manifestHash: "c".repeat(64),
+        drainId: newest.drainId,
+      },
+    );
+    assert.equal(
+      await service.confirmPersistence(a.id, 1, {
+        drainId: newest.drainId,
+        supervisorNonce: newestNonce,
+      }),
+      true,
+    );
+    const stopProof = {
+      sandboxId: identity.sandboxId,
+      bootId: identity.bootId,
+      supervisorNonce: newestNonce,
+      drainId: newest.drainId,
+      stopped: true as const,
+    };
+    await assert.rejects(
+      service.finishDrain(a.id, {
+        drainId: newest.drainId,
+        confirmedSeq: 1,
+        stopProof: { ...stopProof, supervisorNonce: nextNonce },
+      }),
+      /controller identity changed/,
+    );
+    await service.recordSupervisorStop(a.id, stopProof);
+    await service.finishDrain(a.id, {
+      drainId: newest.drainId,
+      confirmedSeq: 1,
+      stopProof,
+    });
+    const replacement = await service.attach(v.id, "recovered-instance");
+    assert.equal(replacement.baseSeq, 1);
+    assert.deepEqual(
+      (await repo.entries(v.id)).map((row) => row.path),
+      ["recovered-dirty"],
+    );
+    assert.equal(
+      (
+        await pool.query(
+          "select unresolved_operations->0->>'outcome' outcome from sandbox_volume_recoveries where id=$1",
+          [recovery.recoveryId],
+        )
+      ).rows[0].outcome,
+      "unknown",
+    );
+  },
+);
+
+test(
+  "concurrent recovery proofs have one controller winner and never bypass external writers",
+  { skip: !enabled },
+  async () => {
+    const { a, identity } = await supervisedActor();
+    const external = await service.acquireExecutionPermit(a.id, {
+      ...identity,
+      operationId: "unknown-upload",
+    });
+    await service.markExecutionStarted(a.id, external.id);
+    const other = new VolumeService({
+      db: drizzle(pool),
+      keyPrefix: "other/",
+      store: {} as ObjectStore,
+    });
+    const proofs = [randomUUID(), randomUUID()].map((supervisorNonce) => ({
+      ...identity,
+      previousSupervisorNonce: identity.supervisorNonce,
+      supervisorNonce,
+      journalDigest: "d".repeat(64),
+      allOldNamespacesExited: true as const,
+      launchGateClosed: true as const,
+    }));
+    const results = await Promise.allSettled([
+      service.recoverSupervisor(a.id, {
+        operationId: "worker-one",
+        proof: proofs[0]!,
+      }),
+      other.recoverSupervisor(a.id, {
+        operationId: "worker-two",
+        proof: proofs[1]!,
+      }),
+    ]);
+    assert.equal(
+      results.filter((result) => result.status === "fulfilled").length,
+      1,
+    );
+    const winner = results.find((result) => result.status === "fulfilled")!;
+    if (winner.status !== "fulfilled") throw new Error("no winner");
+    assert.equal(
+      await service.confirmPersistence(a.id, 0, {
+        drainId: winner.value.drainId,
+        supervisorNonce: winner.value.recoveryControllerNonce!,
+      }),
+      false,
+    );
+    assert.equal(
+      (
+        await pool.query(
+          "select status from sandbox_volume_execution_permits where id=$1",
+          [external.id],
+        )
+      ).rows[0].status,
+      "active",
+    );
+  },
+);
+
+test(
+  "recovery candidates are bounded read-only probes; provider absence audit does not claim data recovery",
+  { skip: !enabled },
+  async () => {
+    const { a, identity } = await supervisedActor();
+    const permit = await service.acquireExecutionPermit(a.id, {
+      ...identity,
+      operationId: "unknown-absent",
+    });
+    await service.markExecutionStarted(a.id, permit.id);
+    const candidates = await service.listRecoveryCandidates({
+      staleAfterMs: 0,
+      limit: 200,
+    });
+    const candidate = candidates.find((row) => row.attachmentId === a.id);
+    assert.ok(candidate);
+    assert.equal(candidate.activePermits, 1);
+    assert.equal(candidate.status, "active");
+    assert.equal("controlTokenHash" in candidate, false);
+    const evidence = {
+      sandboxId: identity.sandboxId,
+      provider: "cloudflare",
+      providerScopeFingerprint: "f".repeat(64),
+      requestId: "provider-request-1",
+      observedAt: new Date().toISOString(),
+      authoritativeMissing: true as const,
+    };
+    const audit = await service.auditProviderAbsence(a.id, {
+      operationId: "absence-observed",
+      evidence,
+    });
+    assert.equal(audit.kind, "provider_absent");
+    assert.equal(audit.confirmedSeq, 0);
+    assert.equal(audit.unresolvedOperations[0]?.outcome, "unknown");
+    assert.equal(
+      (
+        await service.auditProviderAbsence(a.id, {
+          operationId: "absence-observed",
+          evidence,
+        })
+      ).id,
+      audit.id,
+    );
+    assert.equal((await repo.getAttachment(a.id))?.status, "active");
+    assert.equal(
+      (
+        await pool.query(
+          "select status from sandbox_volume_execution_permits where id=$1",
+          [permit.id],
+        )
+      ).rows[0].status,
+      "active",
+    );
+    await assert.rejects(
+      service.listRecoveryCandidates({ limit: 201 }),
+      /invalid recovery candidate/,
+    );
+    await assert.rejects(
+      service.auditProviderAbsence(a.id, {
+        operationId: "wrong-instance",
+        evidence: { ...evidence, sandboxId: "other" },
+      }),
+      /different sandbox/,
+    );
+  },
+);
+
+test(
+  "non-C path collations cannot delete case/accent siblings during directory deletion, replacement or rollback",
+  { skip: !enabled },
+  async (t) => {
+    // libc names differ by platform (macOS: en_US.UTF-8; Linux: en_US.utf8).
+    // Select only equivalent UTF-8 en_US locales, never another locale or provider.
+    const libc = await pool.query<{ collname: string; collcollate: string }>(
+      `select c.collname,c.collcollate from pg_collation c join pg_namespace n on n.oid=c.collnamespace
+       where n.nspname='pg_catalog' and c.collprovider='c' and c.collisdeterministic
+         and c.collencoding in (-1,pg_char_to_encoding('UTF8')) and c.collctype=c.collcollate
+         and c.collcollate=any($1::text[]) order by c.collname limit 1`,
+      [["en_US.UTF-8", "en_US.utf8", "en_US.UTF8"]],
+    );
+    assert.ok(
+      libc.rows[0],
+      "test PostgreSQL requires libc en_US UTF-8 (en_US.UTF-8/en_US.utf8/en_US.UTF8); no C-locale substitution or skip is permitted",
+    );
+    const icu = await pool.query<{ collname: string }>(
+      `select c.collname from pg_collation c join pg_namespace n on n.oid=c.collnamespace
+       where n.nspname='pg_catalog' and c.collprovider='i' and c.collisdeterministic
+         and c.collname='en-US-x-icu'`,
+    );
+    assert.ok(
+      icu.rows[0],
+      "test PostgreSQL requires ICU en-US-x-icu; no locale/provider substitution or skip is permitted",
+    );
+    const quoteIdentifier = (value: string) =>
+      `"${value.replaceAll('"', '""')}"`;
+    const variants = [
+      {
+        name: "regression_en_us_libc",
+        source: libc.rows[0].collname,
+        description: `libc ${libc.rows[0].collcollate}`,
+      },
+      {
+        name: "regression_en_us_icu",
+        source: icu.rows[0].collname,
+        description: "ICU en-US",
+      },
+    ];
+    for (const variant of variants) {
+      const collation = `${testSchema}.${variant.name}`;
+      const collationSql = `${quoteIdentifier(testSchema)}.${quoteIdentifier(variant.name)}`;
+      await pool.query(
+        `create collation ${collationSql} from "pg_catalog".${quoteIdentifier(variant.source)}`,
+      );
+      t.diagnostic(
+        `non-C regression uses ${variant.description}: pg_catalog.${variant.source} -> ${collation}`,
+      );
+      // Explicit database column collations reproduce production non-C comparison semantics.
+      await pool.query(
+        `alter table sandbox_volume_entries alter column path type text collate ${collationSql}`,
+      );
+      await pool.query(
+        `alter table sandbox_volume_entry_versions alter column path type text collate ${collationSql}`,
+      );
+      try {
+        const legacy = await pool.query(
+          `select ('a/child' collate ${collationSql} > 'A/' and 'a/child' collate ${collationSql} < 'A0') wrongly_selected`,
+        );
+        assert.equal(
+          legacy.rows[0].wrongly_selected,
+          true,
+          "fixture must reproduce the pre-fix corruption predicate",
+        );
+        const v = await volume();
+        const a = await service.attach(v.id, "non-c");
+        const pack = `att/${a.id}/p/000000`;
+        const directories = ["A", "a", "Á", "A0"];
+        const chunks = Object.fromEntries(
+          directories.map((_, i) => [
+            String(i + 1).repeat(64),
+            [pack, i * 4, 4, 4] as [string, number, number, number],
+          ]),
+        );
+        const entries = directories.flatMap((p, i) => [
+          { p, k: "d" as const, m: 493 },
+          {
+            p: `${p}/child`,
+            k: "f" as const,
+            m: 420,
+            s: 4,
+            c: [[String(i + 1).repeat(64), 4] as [string, number]],
+          },
+        ]);
+        await repo.applyManifest(
+          v.id,
+          { ...manifest(v.id, a.id, 0, "unused"), upserts: entries },
+          chunks,
+          new Map([[pack, 16]]),
+        );
+        assert.equal(await service.confirmPersistence(a.id, 1), true);
+        await repo.applyManifest(
+          v.id,
+          { ...manifest(v.id, a.id, 1, "unused"), upserts: [], deletes: ["A"] },
+          {},
+          new Map(),
+        );
+        const kept = entries
+          .filter((entry) => entry.p !== "A" && !entry.p.startsWith("A/"))
+          .map((entry) => entry.p)
+          .sort();
+        assert.deepEqual(
+          (await repo.entries(v.id)).map((entry) => entry.path).sort(),
+          kept,
+          `${collation}: deleting A must retain a, Á and A0`,
+        );
+        assert.deepEqual(
+          (await repo.entriesAt(v.id, 1)).map((entry) => entry.path).sort(),
+          entries.map((entry) => entry.p).sort(),
+        );
+        const restored = await repo.rollback(v.id, 1);
+        assert.equal(restored, 3);
+        const b = await service.attach(v.id, "non-c-restored");
+        await repo.applyManifest(
+          v.id,
+          {
+            ...manifest(v.id, b.id, 3, "unused"),
+            upserts: [{ p: "A", k: "f", m: 420, s: 0, c: [] }],
+          },
+          {},
+          new Map(),
+        );
+        assert.deepEqual(
+          (await repo.entries(v.id)).map((entry) => entry.path).sort(),
+          [...kept, "A"].sort(),
+          `${collation}: replacing A must retain sibling contents`,
+        );
+        const plan = await repo.planSnapshot(v.id);
+        for (const dir of ["a", "Á", "A0"])
+          assert.equal(
+            plan.entries.find((entry) => entry.p === `${dir}/child`)?.s,
+            4,
+          );
+        assert.deepEqual(
+          (await repo.entriesAt(v.id, 2)).map((entry) => entry.path).sort(),
+          kept,
+        );
+      } finally {
+        await pool.query(
+          'alter table sandbox_volume_entries alter column path type text collate "C"',
+        );
+        await pool.query(
+          'alter table sandbox_volume_entry_versions alter column path type text collate "C"',
+        );
+      }
+    }
   },
 );

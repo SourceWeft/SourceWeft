@@ -22,7 +22,10 @@ export function isValidVolumePath(path: unknown): path is string {
   return true;
 }
 
-/** Key range covering every descendant of `path`: `path/` <= key < `path0` ('0' is the character after '/'). */
+/** Byte-ordered range covering every descendant of `path`: `path/` <= key < `path0`.
+ * SQL callers must use PostgreSQL text-pattern operators (~>~/~<~) or C collation,
+ * never locale-aware comparison, which can include case/accent sibling paths.
+ */
 export function descendantRange(path: string): { from: string; to: string } {
   return { from: `${path}/`, to: `${path}0` };
 }

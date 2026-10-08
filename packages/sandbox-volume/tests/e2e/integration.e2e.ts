@@ -16,7 +16,7 @@ import {
 import { createCloudflareSandboxProviderFactory } from "@sourceweft/sandbox-provider-cloudflare";
 import { createVolumeHooks } from "../../src/hooks/index";
 import {
-  cleanupVolume,
+  cleanupE2EContext,
   createE2EContext,
   e2eEnabled,
   type E2EContext,
@@ -180,12 +180,12 @@ before(async () => {
 });
 
 after(async () => {
-  if (!ctx) return;
-  for (const id of sandboxes)
-    await provider.deleteSandbox(id).catch(() => undefined);
-  for (const id of volumes) await cleanupVolume(ctx, id);
-  await ctx.store.deletePrefix(ctx.keyPrefix);
-  await ctx.close();
+  if (ctx)
+    await cleanupE2EContext(ctx, {
+      provider,
+      sandboxIds: sandboxes,
+      volumeIds: volumes,
+    });
 });
 
 test(

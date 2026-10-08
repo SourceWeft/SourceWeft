@@ -1,4 +1,15 @@
 import { resolveVolumeLimits, type VolumeLimits } from "./quota";
+import {
+  VolumeLifecycle,
+  type DrainRequest,
+  type InstanceIdentity,
+  type SupervisorStopProof,
+  type PermitRelease,
+  type VolumeWriterKind,
+  type SupervisorRecoveryProof,
+  type ProviderAbsenceEvidence,
+  type RecoveryCandidatesOptions,
+} from "./lifecycle";
 import { VolumeMaintenance } from "./maintenance";
 import { createHash, randomBytes } from "node:crypto";
 import { zstdCompressSync } from "node:zlib";
@@ -13,6 +24,7 @@ import { validateManifest } from "../protocol/validate";
 import type { ObjectStore } from "../store/object-store";
 import {
   VolumeRepository,
+  attachmentCanWrite,
   VolumeConflict,
   type AttachmentRow,
   type VolumeDatabase,
@@ -31,6 +43,23 @@ export type VolumeServiceConfig = {
   limits?: Partial<VolumeLimits>;
   gcGraceMs?: number;
 };
+
+export type ControlRequest = {
+  nextPack: number;
+  epoch: number;
+  bootId: string;
+  seq: number;
+  locatorChunkIds?: string[];
+};
+export class VolumeControlUnauthorized extends Error {
+  override readonly name = "VolumeControlUnauthorized";
+  constructor() {
+    super("attachment control credential is invalid, expired, or fenced");
+  }
+}
+function controlHash(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
 
 export type WalEntry =
   | {
@@ -68,6 +97,7 @@ function id(bytes = 6): string {
 export class VolumeService {
   readonly repo: VolumeRepository;
   readonly maintenance: VolumeMaintenance;
+  readonly lifecycle: VolumeLifecycle;
   private readonly ttl: number;
   private readonly now: () => Date;
   /** Serialises WAL application per volume: two appliers would both try to take `head + 1`. */
@@ -78,6 +108,7 @@ export class VolumeService {
       config.db,
       resolveVolumeLimits(config.limits),
     );
+    this.lifecycle = new VolumeLifecycle(config.db);
     this.maintenance = new VolumeMaintenance({
       db: config.db,
       store: config.store,
@@ -132,8 +163,60 @@ export class VolumeService {
   async confirmPersistence(
     attachmentId: string,
     seq: number,
+    options: { drainId?: string; supervisorNonce?: string } = {},
   ): Promise<boolean> {
-    return this.repo.confirmPersistence(attachmentId, seq);
+    return this.repo.confirmPersistence(attachmentId, seq, options);
+  }
+
+  recoverSupervisor(
+    id: string,
+    input: { operationId: string; proof: SupervisorRecoveryProof },
+  ) {
+    return this.lifecycle.recoverSupervisor(id, input);
+  }
+  auditProviderAbsence(
+    id: string,
+    input: { operationId: string; evidence: ProviderAbsenceEvidence },
+  ) {
+    return this.lifecycle.auditProviderAbsence(id, input);
+  }
+  listRecoveryCandidates(options: RecoveryCandidatesOptions = {}) {
+    return this.lifecycle.listRecoveryCandidates(options);
+  }
+
+  bindSupervisorIdentity(id: string, nonce: string) {
+    return this.lifecycle.bindSupervisorIdentity(id, nonce);
+  }
+  acquireExecutionPermit(
+    id: string,
+    input: InstanceIdentity & {
+      operationId: string;
+      writerKind?: VolumeWriterKind;
+    },
+  ) {
+    return this.lifecycle.acquireExecutionPermit(id, input);
+  }
+  markExecutionStarted(id: string, permitId: string) {
+    return this.lifecycle.markExecutionStarted(id, permitId);
+  }
+  releaseExecutionPermit(id: string, permitId: string, result: PermitRelease) {
+    return this.lifecycle.releaseExecutionPermit(id, permitId, result);
+  }
+  beginDrain(id: string, input: DrainRequest) {
+    return this.lifecycle.beginDrain(id, input);
+  }
+  recordSupervisorStop(id: string, proof: SupervisorStopProof) {
+    return this.lifecycle.recordSupervisorStop(id, proof);
+  }
+  finishDrain(
+    id: string,
+    input: {
+      drainId: string;
+      confirmedSeq: number;
+      stopProof: SupervisorStopProof;
+    },
+  ) {
+    return this.lifecycle.finishDrain(id, input);
   }
 
   async quarantineAttachment(
@@ -149,6 +232,149 @@ export class VolumeService {
       throw new Error("attachment is not active; recovery required");
   }
 
+  /** Host-only bootstrap operation. New issuance immediately revokes the previous credential. */
+  async issueControlToken(
+    attachmentId: string,
+    options: { ttlSeconds?: number } = {},
+  ) {
+    return this.writeControlToken(
+      attachmentId,
+      options.ttlSeconds ?? 24 * 60 * 60,
+    );
+  }
+
+  async verifyControlToken(
+    attachmentId: string,
+    token: string,
+  ): Promise<AttachmentRow> {
+    if (!/^svctl_[A-Za-z0-9_-]{43}$/.test(token))
+      throw new VolumeControlUnauthorized();
+    const actor = await this.repo.verifyControlToken(
+      attachmentId,
+      controlHash(token),
+    );
+    if (!actor) throw new VolumeControlUnauthorized();
+    return actor;
+  }
+
+  /** Explicit credential rotation. Callers persist the replacement before using it; no command is replayed. */
+  async rotateControlToken(
+    attachmentId: string,
+    token: string,
+    options: { ttlSeconds?: number } = {},
+  ) {
+    await this.verifyControlToken(attachmentId, token);
+    return this.writeControlToken(
+      attachmentId,
+      options.ttlSeconds ?? 24 * 60 * 60,
+      controlHash(token),
+    );
+  }
+
+  private async writeControlToken(
+    attachmentId: string,
+    ttlSeconds: number,
+    expectedHash?: string,
+  ) {
+    if (
+      !Number.isSafeInteger(ttlSeconds) ||
+      ttlSeconds < 60 ||
+      ttlSeconds > 7 * 24 * 60 * 60
+    )
+      throw new Error("invalid control credential lifetime");
+    const token = `svctl_${randomBytes(32).toString("base64url")}`;
+    const actor = await this.repo.issueControlToken(
+      attachmentId,
+      controlHash(token),
+      ttlSeconds,
+      expectedHash,
+    );
+    return { token, expiresAt: actor.controlExpiresAt!.toISOString() };
+  }
+
+  /** One authenticated daemon poll: acknowledge uploaded WAL and renew only this attachment's capabilities. */
+  async refreshControl(
+    attachmentId: string,
+    token: string,
+    request: ControlRequest,
+  ) {
+    if (
+      !request ||
+      !Number.isSafeInteger(request.nextPack) ||
+      request.nextPack < 0 ||
+      !Number.isSafeInteger(request.epoch) ||
+      request.epoch < 0 ||
+      !Number.isSafeInteger(request.seq) ||
+      request.seq < 0 ||
+      typeof request.bootId !== "string" ||
+      !request.bootId ||
+      request.bootId.length > 256
+    )
+      throw new Error("invalid attachment control request");
+    const actor = await this.verifyControlToken(attachmentId, token);
+    if (
+      actor.bootId !== request.bootId ||
+      actor.epoch !== request.epoch ||
+      request.seq < actor.baseSeq ||
+      request.seq > actor.slotsUntilSeq ||
+      request.nextPack > actor.slotsUntilPack
+    )
+      throw new VolumeConflict(
+        "attachment control identity or cursor does not match current grant",
+      );
+    if (
+      request.locatorChunkIds !== undefined &&
+      (!Array.isArray(request.locatorChunkIds) ||
+        request.locatorChunkIds.length > 256 ||
+        request.locatorChunkIds.some(
+          (id) => typeof id !== "string" || !/^[0-9a-f]{64}$/.test(id),
+        ))
+    )
+      throw new Error("invalid locator request");
+    const wal = await this.applyWal(attachmentId, { maxCommits: 16 });
+    if (wal.rejected)
+      throw new VolumeConflict("attachment WAL requires explicit recovery");
+    const fresh = await this.verifyControlToken(attachmentId, token);
+    if (fresh.epoch !== request.epoch || fresh.bootId !== request.bootId)
+      throw new VolumeConflict("attachment changed during control refresh");
+    const slots = await this.issueSlots(fresh, { nextPack: request.nextPack });
+    const chunks = await this.repo.chunkLocations(
+      fresh.volumeId,
+      request.locatorChunkIds ?? [],
+    );
+    if (
+      Object.keys(chunks).length !== new Set(request.locatorChunkIds ?? []).size
+    )
+      throw new VolumeConflict(
+        "requested locator is not registered to this volume",
+      );
+    const packs: Record<string, string> = {};
+    for (const [key] of Object.values(chunks))
+      if (!Object.hasOwn(packs, key))
+        packs[key] = await this.config.store.presignGet(
+          `${this.volumePrefix(fresh.volumeId)}${key}`,
+          this.ttl,
+        );
+    const head = await this.repo.head(fresh.volumeId);
+    const final = await this.repo.renewControlToken(
+      attachmentId,
+      controlHash(token),
+      { bootId: request.bootId, epoch: request.epoch },
+      24 * 60 * 60,
+    );
+    if (!final) throw new VolumeControlUnauthorized();
+    return {
+      head,
+      confirmedSeq: Math.min(final.lastAppliedSeq, request.seq),
+      epoch: final.epoch,
+      hasMore: wal.hasMore ?? false,
+      slots,
+      slotsExpiresAt: final.slotsExpireAt!.toISOString(),
+      controlExpiresAt: final.controlExpiresAt!.toISOString(),
+      locators: { chunks, packs },
+    };
+  }
+
   async recordBootId(attachmentId: string, bootId: string): Promise<void> {
     await this.repo.recordBootId(attachmentId, bootId);
   }
@@ -162,21 +388,30 @@ export class VolumeService {
   }
 
   /** Write-once slots for the next packs and manifests of this attachment's epoch. */
-  async issueSlots(attachment: AttachmentRow): Promise<SlotSet> {
+  async issueSlots(
+    attachment: AttachmentRow,
+    renewal?: { nextPack?: number; drainId?: string },
+  ): Promise<SlotSet> {
     const prefix = this.volumePrefix(attachment.volumeId);
     const reservation = await this.repo.reserveSlots(
       attachment,
       PACK_SLOTS_PER_ISSUE,
       MANIFEST_SLOTS_PER_ISSUE,
       this.ttl,
+      renewal?.nextPack !== undefined
+        ? {
+            nextPack: renewal.nextPack,
+            lowWaterMark: Math.min(16, PACK_SLOTS_PER_ISSUE),
+          }
+        : undefined,
+      renewal?.drainId,
     );
     attachment = reservation.attachment;
     const packs: Record<string, string> = {};
     const manifests: Record<string, string> = {};
-    const firstPack = reservation.firstPack;
     for (
       let n = reservation.renewFromPack;
-      n < firstPack + PACK_SLOTS_PER_ISSUE;
+      n < attachment.slotsUntilPack;
       n++
     ) {
       packs[String(n)] = await this.config.store.presignWriteOnce(
@@ -245,9 +480,12 @@ export class VolumeService {
     };
   }
 
-  async publishSlots(attachment: AttachmentRow): Promise<string> {
+  async publishSlots(
+    attachment: AttachmentRow,
+    options: { nextPack?: number; drainId?: string } = {},
+  ): Promise<string> {
     const fresh = (await this.repo.getAttachment(attachment.id)) ?? attachment;
-    const slots = await this.issueSlots(fresh);
+    const slots = await this.issueSlots(fresh, options);
     const key = `${this.volumePrefix(attachment.volumeId)}att/${attachment.id}/slots-${fresh.epoch}-${id(4)}`;
     await this.config.store.put(
       key,
@@ -260,7 +498,7 @@ export class VolumeService {
   /** Apply every manifest the sandbox has uploaded past the current head, in order. Stops at the first gap or rejection. */
   async applyWal(
     attachmentId: string,
-    options: { maxCommits?: number } = {},
+    options: { maxCommits?: number; drainId?: string } = {},
   ): Promise<ApplyWalResult> {
     if (
       options.maxCommits !== undefined &&
@@ -270,18 +508,19 @@ export class VolumeService {
     const attachment = await this.repo.getAttachment(attachmentId);
     if (!attachment)
       throw new Error(`attachment ${attachmentId} does not exist`);
-    if (attachment.status !== "active")
+    if (!attachmentCanWrite(attachment, options.drainId))
       throw new Error(
         `attachment ${attachmentId} is not active (superseded or rejected)`,
       );
     return this.withLock(attachment.volumeId, () =>
-      this.applyWalLocked(attachment, options.maxCommits),
+      this.applyWalLocked(attachment, options.maxCommits, options.drainId),
     );
   }
 
   private async applyWalLocked(
     attachment: AttachmentRow,
     maxCommits = Number.POSITIVE_INFINITY,
+    drainId?: string,
   ): Promise<ApplyWalResult> {
     const prefix = this.volumePrefix(attachment.volumeId);
     const result: ApplyWalResult = {
@@ -344,6 +583,7 @@ export class VolumeService {
             epoch: attachment.epoch,
             manifestKey: ownKey,
             manifestHash: createHash("sha256").update(raw).digest("hex"),
+            drainId,
           },
         );
         if (!applied) continue;
@@ -382,9 +622,10 @@ export class VolumeService {
    */
   async beginRebase(
     attachmentId: string,
+    options: { drainId?: string } = {},
   ): Promise<{ attachment: AttachmentRow; slotsUrl: string; head: number }> {
-    const fresh = await this.repo.advanceAttachmentEpoch(attachmentId);
-    const slotsUrl = await this.publishSlots(fresh);
+    const fresh = await this.repo.advanceAttachmentEpoch(attachmentId, options);
+    const slotsUrl = await this.publishSlots(fresh, options);
     return {
       attachment: fresh,
       slotsUrl,

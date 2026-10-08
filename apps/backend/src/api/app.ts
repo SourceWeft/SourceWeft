@@ -21,6 +21,7 @@ import { registerConnectorOAuthRoutes } from "./routes/connectors-oauth";
 import { registerConnectorWebhookRoutes } from "./routes/connectors-webhooks";
 import { registerDashboardRoutes } from "./routes/dashboard";
 import { registerLocalDeviceRoutes } from "./routes/local-devices";
+import { registerSandboxVolumeRoutes } from "./routes/sandbox-volumes";
 import { healthResponse } from "./routes/health";
 import { registerJobRoutes } from "./routes/jobs";
 import { registerPublicShareRoutes } from "./routes/public-shares";
@@ -81,6 +82,7 @@ export function createApp() {
 
   registerAuthMetaRoutes(app);
   registerLocalDeviceRoutes(app);
+  registerSandboxVolumeRoutes(app);
   registerConnectorOAuthRoutes(app);
   registerConnectorWebhookRoutes(app);
   registerWorkspaceRoutes(app);

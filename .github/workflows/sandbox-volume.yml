@@ -6,6 +6,8 @@ on:
     paths:
       - "packages/sandbox-volume/**"
       - "packages/builtin-tool-sandbox/**"
+      - "packages/sandbox-provider-cloudflare/**"
+      - "apps/backend/src/api/routes/sandbox-volumes*"
       - "packages/db/**"
       - "apps/backend/src/modules/threads/agent/sandbox-service/**"
       - "apps/backend/src/scheduler/schedules/sandbox-volumes*"
@@ -54,7 +56,8 @@ jobs:
       - run: pnpm --filter @sourceweft/db check-types
       - run: pnpm --filter @sourceweft/sandbox-volume test
       - run: pnpm --filter @sourceweft/builtin-tool-sandbox test
-      - run: pnpm --filter backend exec vitest run src/modules/threads/agent/sandbox-service/cleanup-volume.test.ts src/shared/sandbox-volume-config.test.ts src/scheduler/schedules/sandbox-volumes.test.ts
+      - run: pnpm --filter @sourceweft/sandbox-provider-cloudflare test
+      - run: pnpm --filter backend exec vitest run src/modules/threads/agent/sandbox-service/cleanup-volume.test.ts src/shared/sandbox-volume-config.test.ts src/scheduler/schedules/sandbox-volumes.test.ts src/api/routes/sandbox-volumes.test.ts
       - run: python3 packages/sandbox-volume/tests/scripts/reliability.test.py
 
   linux-filesystem:
@@ -79,6 +82,15 @@ jobs:
             -v swvol-cargo-registry:/root/.cargo/registry \
             -w /home/rust/src \
             messense/rust-musl-cross@sha256:ce75e9174325d4fbb3de85c309e2d7ca29f7500169bc4b5d2c611ff7e86d549a \
-            bash -c 'set -euo pipefail; for crate in swvol-core swvol swlazy; do cargo fetch --locked --manifest-path "$crate/Cargo.toml"; done'
-      - name: Real Linux durability, ENOSPC and FUSE/overlay acceptance
+            bash -c 'set -euo pipefail; for crate in swvol-core swvol swlazy swvol-supervisor; do cargo fetch --locked --manifest-path "$crate/Cargo.toml"; done'
+      - name: Real Linux durability, ENOSPC, FUSE and supervisor namespace acceptance
         run: packages/sandbox-volume/helper/test-linux.sh --with-fuse
+      - name: Build verified release helpers for both architectures
+        env:
+          SWVOL_ARCHES: x86_64,aarch64
+        run: packages/sandbox-volume/helper/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sandbox-volume-helpers
+          path: packages/sandbox-volume/helper/dist/
+          if-no-files-found: error

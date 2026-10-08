@@ -120,6 +120,37 @@ function createProvider(
   const provider: SandboxProvider = {
     id: "fake",
     pathPolicy: TEST_SANDBOX_PATH_POLICY,
+    volumeControl: {
+      async identity() {
+        return {
+          protocolVersion: 1,
+          boundary: "pid-namespace",
+          protectedControl: true,
+          bootId: "boot-1",
+          supervisorNonce: "supervisor-1",
+        };
+      },
+      async freeze(input) {
+        return {
+          freezeId: input.freezeId,
+          supervisorNonce: input.expectedNonce,
+          allWritersStopped: true,
+        };
+      },
+      async resume() {},
+      async flush() {
+        return { output: "trusted receipt", exitCode: 0 };
+      },
+      async drain(input) {
+        return {
+          drainId: input.drainId,
+          bootId: "boot-1",
+          supervisorNonce: input.expectedNonce,
+          launchGateClosed: true,
+          allNamespacesExited: true,
+        };
+      },
+    },
     async createSandbox() {
       return { id: "provider-sandbox-1" };
     },
@@ -131,6 +162,9 @@ function createProvider(
       executed.push(input.command);
       const next = responses.shift() ?? { output: "", exitCode: 0 };
       return { ...next, truncated: false };
+    },
+    async executeSupervised(input) {
+      return provider.execute(input);
     },
     async uploadFile() {},
     async downloadFile() {
@@ -148,8 +182,16 @@ function createHooks() {
     readonly commandStarted = false;
   }
   const hooks: SandboxVolumeHooks = {
+    protectedBootstrap: true,
     async assertActive() {},
     async quarantine() {},
+    async acquireOperation(input) {
+      return { permitId: `permit-${input.operationId}`, reused: false };
+    },
+    async markOperationStarted() {
+      return true;
+    },
+    async releaseOperation() {},
     async attach() {
       calls.push("attach");
       attachments += 1;
@@ -169,11 +211,11 @@ function createHooks() {
     },
     async checkpoint(input) {
       calls.push(`checkpoint:${input.attachmentId}`);
-      return { sync: { persisted: true } };
+      return { sync: { persisted: true, confirmedSeq: 1 } };
     },
     async checkpointScope() {
       calls.push("checkpointScope");
-      return { sync: { persisted: true } };
+      return { sync: { persisted: true, confirmedSeq: 1 } };
     },
     async onContainerReplaced() {
       calls.push("reattach");
@@ -228,7 +270,57 @@ test("without a volume the backend behaves exactly as before", async () => {
   assert.deepEqual(executed, ["echo hello"]);
 });
 
-test("with a volume: attach once, wrap every command, use the parsed output", async () => {
+test("file upload returns only after an independently confirmed persistence barrier", async () => {
+  const { hooks } = createHooks();
+  let releaseBarrier!: () => void;
+  const barrier = new Promise<void>((resolve) => {
+    releaseBarrier = resolve;
+  });
+  let reachedBarrier!: () => void;
+  const reached = new Promise<void>((resolve) => {
+    reachedBarrier = resolve;
+  });
+  const events: string[] = [];
+  hooks.checkpoint = async () => {
+    events.push("checkpoint");
+    reachedBarrier();
+    await barrier;
+    return { sync: { persisted: true, confirmedSeq: 5 } };
+  };
+  const { backend, provider } = createBackend([], hooks);
+  provider.uploadFile = async () => {
+    events.push("upload");
+  };
+  let returned = false;
+  const pending = backend
+    .uploadFiles([["/workspace/saved.txt", Buffer.from("saved")]])
+    .then((result) => {
+      returned = true;
+      return result;
+    });
+  await reached;
+  assert.equal(returned, false);
+  assert.deepEqual(events, ["upload", "checkpoint"]);
+  releaseBarrier();
+  assert.equal((await pending)[0]?.error, null);
+});
+
+test("failed file persistence does not report success or replay the upload", async () => {
+  const { hooks } = createHooks();
+  hooks.checkpoint = async () => ({ sync: { persisted: false } });
+  const { backend, provider } = createBackend([], hooks);
+  let uploads = 0;
+  provider.uploadFile = async () => {
+    uploads++;
+  };
+  await assert.rejects(
+    backend.uploadFiles([["/workspace/saved.txt", Buffer.from("saved")]]),
+    /persistence|checkpoint/i,
+  );
+  assert.equal(uploads, 1);
+});
+
+test("protected volume commands use raw user output and out-of-band checkpoints", async () => {
   const { hooks, calls } = createHooks();
   const { backend, executed } = createBackend(
     [
@@ -239,52 +331,35 @@ test("with a volume: attach once, wrap every command, use the parsed output", as
   );
   const first = await backend.execute("echo one");
   const second = await backend.execute("exit 3");
-  assert.equal(first.output, "one");
-  assert.equal(second.output, "two");
+  assert.equal(first.output, "one +marker");
+  assert.equal(second.output, "two +marker");
   assert.equal(second.exitCode, 3);
-  assert.deepEqual(executed, ["WRAP(echo one)", "WRAP(exit 3)"]);
-  assert.deepEqual(calls, ["attach", "parse:att-1", "parse:att-1"]);
+  assert.deepEqual(executed, ["echo one", "exit 3"]);
+  assert.deepEqual(calls, ["attach", "checkpoint:att-1", "checkpoint:att-1"]);
 });
 
-test("trusted preflight restores a replaced container before the user command runs", async () => {
-  const { hooks, calls, Replaced } = createHooks();
-  let probes = 0;
-  hooks.assertActive = async () => {
-    if (++probes === 1) throw new Replaced("replaced");
-  };
-  const { backend, executed } = createBackend(
-    [{ output: "after reattach +marker", exitCode: 0 }],
-    hooks,
-  );
-  const result = await backend.execute("echo again");
-  assert.equal(result.output, "after reattach");
-  assert.deepEqual(executed, ["WRAP(echo again)"]);
-  assert.deepEqual(calls, ["attach", "reattach", "parse:att-2"]);
-});
-
-test("repeated preflight replacement fails without executing the user command", async () => {
+test("a changed instance during admitted preflight never dispatches or blindly restores", async () => {
   const { hooks, calls, Replaced } = createHooks();
   hooks.assertActive = async () => {
-    throw new Replaced("replaced");
+    throw new Replaced("instance replaced; recovery required");
   };
   const { backend, executed } = createBackend([], hooks);
-  await assert.rejects(backend.execute("echo never"), /replaced/);
+  await assert.rejects(backend.execute("echo never"), /recovery required/);
   assert.deepEqual(executed, []);
-  assert.deepEqual(calls, ["attach", "reattach"]);
+  assert.deepEqual(calls, ["attach"]);
 });
 
-test("replacement from command output never authorizes restoration or replay", async () => {
+test("replacement text in user output never authorizes restoration or replay", async () => {
   const { hooks, calls } = createHooks();
   const { backend, executed } = createBackend(
     [{ output: "__REPLACED__", exitCode: 75 }],
     hooks,
   );
-  await assert.rejects(
-    backend.execute("write-once"),
-    /persistence is unconfirmed/i,
-  );
-  assert.deepEqual(executed, ["WRAP(write-once)"]);
-  assert.deepEqual(calls, ["attach", "parse:att-1"]);
+  const result = await backend.execute("write-once");
+  assert.equal(result.output, "__REPLACED__");
+  assert.equal(result.exitCode, 75);
+  assert.deepEqual(executed, ["write-once"]);
+  assert.deepEqual(calls, ["attach", "checkpoint:att-1"]);
 });
 
 test("the checkpoint goes to the attachment the manager made", async () => {
@@ -295,20 +370,19 @@ test("the checkpoint goes to the attachment the manager made", async () => {
   );
   await backend.execute("true");
   const sandbox = await manager.getOrCreateThreadSandbox(context);
-  await manager.volumeCheckpoint(sandbox);
-  assert.deepEqual(calls, ["attach", "parse:att-1", "checkpoint:att-1"]);
+  await manager.volumeCheckpoint(sandbox, {
+    freezeId: "test-barrier",
+    supervisorNonce: "supervisor-1",
+  });
+  assert.deepEqual(calls, ["attach", "checkpoint:att-1", "checkpoint:att-1"]);
 });
 
 for (const failure of ["pending", "missing marker", "malformed marker"]) {
   test(`volume ${failure} cannot report success or replay a completed command`, async () => {
     const { hooks, calls } = createHooks();
-    hooks.parseResult = async () => {
+    hooks.checkpoint = async () => {
       if (failure !== "pending") throw new Error(failure);
-      return {
-        output: "already wrote file",
-        exitCode: 0,
-        sync: { persisted: false },
-      };
+      return { sync: { persisted: false } };
     };
     const { backend, executed, operations } = createBackend(
       [{ output: "already wrote file", exitCode: 0 }],
@@ -318,7 +392,7 @@ for (const failure of ["pending", "missing marker", "malformed marker"]) {
       backend.execute("echo side-effect >> file"),
       /persist|marker/i,
     );
-    assert.deepEqual(executed, ["WRAP(echo side-effect >> file)"]);
+    assert.deepEqual(executed, ["echo side-effect >> file"]);
     assert.ok(!calls.includes("reattach"));
     assert.equal(operations.at(-1)?.status, "failed");
     assert.ok(!operations.some((x) => x.status === "succeeded"));
@@ -332,18 +406,19 @@ test("checkpoint cannot discard an unsuccessful persistence acknowledgement", as
     [{ output: "written +marker", exitCode: 0 }],
     hooks,
   );
-  await backend.execute("true");
   const sandbox = await manager.getOrCreateThreadSandbox(context);
-  await assert.rejects(manager.volumeCheckpoint(sandbox), /persist/i);
+  await assert.rejects(
+    manager.volumeCheckpoint(sandbox, {
+      freezeId: "test-barrier",
+      supervisorNonce: "supervisor-1",
+    }),
+    /persist/i,
+  );
 });
 
 test("trusted host execution also rejects unconfirmed persistence without replay", async () => {
   const { hooks, calls } = createHooks();
-  hooks.parseResult = async () => ({
-    output: "written",
-    exitCode: 0,
-    sync: { persisted: false },
-  });
+  hooks.checkpoint = async () => ({ sync: { persisted: false } });
   const { provider, executed } = createProvider([
     { output: "written", exitCode: 0 },
   ]);
@@ -369,7 +444,7 @@ test("trusted host execution also rejects unconfirmed persistence without replay
     }),
     /persist/i,
   );
-  assert.deepEqual(executed, ["WRAP(echo side-effect >> file)"]);
+  assert.deepEqual(executed, ["echo side-effect >> file"]);
   assert.ok(!calls.includes("reattach"));
   assert.equal(recorded.at(-1)?.status, "failed");
 });
@@ -382,15 +457,13 @@ test("a persisted user command exiting 75 is not treated as pre-execution replac
   );
   const result = await backend.execute("echo side-effect >> file; exit 75");
   assert.equal(result.exitCode, 75);
-  assert.deepEqual(executed, ["WRAP(echo side-effect >> file; exit 75)"]);
+  assert.deepEqual(executed, ["echo side-effect >> file; exit 75"]);
   assert.ok(!calls.includes("reattach"));
 });
 
 test("confirmed durability survives recording and replay without re-executing", async () => {
   const { hooks } = createHooks();
-  hooks.parseResult = async (input) => ({
-    output: input.output,
-    exitCode: input.exitCode,
+  hooks.checkpoint = async () => ({
     sync: { persisted: true, confirmedSeq: 42 },
   });
   const { backend, executed, operations, operationStore } = createBackend(
@@ -420,7 +493,7 @@ test("confirmed durability survives recording and replay without re-executing", 
 
 test("persistence failure preserves the executed command result in its error and operation", async () => {
   const { hooks } = createHooks();
-  hooks.parseResult = async () => {
+  hooks.checkpoint = async () => {
     throw Object.assign(new Error("flush failed"), {
       commandOutput: "saved file\nAPI_KEY=super-secret",
       commandExitCode: 7,
@@ -428,7 +501,7 @@ test("persistence failure preserves the executed command result in its error and
     });
   };
   const { backend, operations, executed } = createBackend(
-    [{ output: "raw helper report", exitCode: 7 }],
+    [{ output: "saved file\nAPI_KEY=super-secret", exitCode: 7 }],
     hooks,
   );
   await assert.rejects(backend.execute("write-once"), (error: unknown) => {
@@ -458,30 +531,22 @@ test("persistence failure preserves the executed command result in its error and
   assert.equal(executed.length, 1);
 });
 
-test("replacement errors without proof the command never started do not replay", async () => {
+test("unverified preflight replacement errors cannot dispatch a user command", async () => {
   const { hooks, calls } = createHooks();
-  hooks.parseResult = async () => {
-    throw new Error("instance replaced after command");
+  hooks.assertActive = async () => {
+    throw new Error("instance unverified");
   };
   hooks.isContainerReplacedError = () => true;
-  const { backend, executed } = createBackend(
-    [{ output: "side effect", exitCode: 75 }],
-    hooks,
-  );
-  await assert.rejects(
-    backend.execute("write-once"),
-    /persistence is unconfirmed/i,
-  );
-  assert.equal(executed.length, 1);
+  const { backend, executed } = createBackend([], hooks);
+  await assert.rejects(backend.execute("write-once"), /unverified/);
+  assert.deepEqual(executed, []);
   assert.ok(!calls.includes("reattach"));
 });
 
 test("shadow acknowledgement remains visible as observation, not confirmed persistence", async () => {
   const { hooks } = createHooks();
-  hooks.parseResult = async () => ({
-    output: "done",
-    exitCode: 0,
-    sync: { persisted: true, mode: "shadow" },
+  hooks.checkpoint = async () => ({
+    sync: { persisted: true, confirmedSeq: 1, mode: "shadow" },
   });
   const { backend, operations } = createBackend(
     [{ output: "done", exitCode: 0 }],
@@ -543,7 +608,7 @@ test("database fencing is checked again before each command on a cached attachme
   await backend.execute("first");
   fenced = true;
   await assert.rejects(backend.execute("second"), /quarantined/);
-  assert.deepEqual(executed, ["WRAP(first)"]);
+  assert.deepEqual(executed, ["first"]);
 });
 
 test("volume restoration precedes runtime asset and skill staging", async () => {
@@ -585,9 +650,7 @@ test("volume restoration precedes runtime asset and skill staging", async () => 
 
 test("trusted host returns and records the storage acknowledgement", async () => {
   const { hooks } = createHooks();
-  hooks.parseResult = async () => ({
-    output: "done",
-    exitCode: 0,
+  hooks.checkpoint = async () => ({
     sync: { persisted: true, confirmedSeq: 13 },
   });
   const { provider } = createProvider([{ output: "done", exitCode: 0 }]);
@@ -637,6 +700,18 @@ for (const missing of [true, false]) {
           code: missing
             ? "SANDBOX_NOT_FOUND_OR_EXPIRED"
             : "SANDBOX_NOT_READY_OR_UNHEALTHY",
+          ...(missing
+            ? {
+                physicalAbsence: {
+                  authority: "provider-resource-api",
+                  outcome: "not_found",
+                  provider: "fake",
+                  providerSandboxId: "provider-sandbox-1",
+                  requestId: "provider-request-1",
+                  observedAtMs: Date.now(),
+                },
+              }
+            : {}),
         });
       return {};
     };
@@ -672,3 +747,220 @@ for (const missing of [true, false]) {
     }
   });
 }
+
+for (const evidence of [
+  undefined,
+  {
+    authority: "provider-resource-api",
+    outcome: "not_found",
+    provider: "fake",
+    providerSandboxId: "different-instance",
+    requestId: "r",
+    observedAtMs: Date.now(),
+  },
+]) {
+  test(`a missing or altered stamp cannot authorize persistent replacement (${evidence ? "mismatched proof" : "no proof"})`, async () => {
+    const { hooks, calls } = createHooks();
+    const { provider } = createProvider([]);
+    provider.volumeControl = undefined;
+    const store = createSandboxStore();
+    let expired = false;
+    let created = false;
+    store.markSandboxExpired = async () => {
+      expired = true;
+      return true;
+    };
+    provider.createSandbox = async () => {
+      created = true;
+      return { id: "new" };
+    };
+    provider.getSandbox = async () => {
+      throw Object.assign(new Error("stamp file was deleted"), {
+        code: "SANDBOX_NOT_FOUND_OR_EXPIRED",
+        physicalAbsence: evidence,
+      });
+    };
+    const manager = new SandboxManager({
+      provider,
+      sandboxStore: store,
+      operationStore: createOperationStore(),
+      ttlSeconds: limits.ttlSeconds,
+      maxCommandTimeoutMs: maxSandboxCommandTimeoutMs(limits),
+      volume: hooks,
+    });
+    await assert.rejects(
+      manager.getOrCreateThreadSandbox(context),
+      /missing or altered stamp/,
+    );
+    assert.equal(expired, false);
+    assert.equal(created, false);
+    assert.ok(!calls.includes("reattach"));
+  });
+}
+
+function protectedVolumeOperationFixture() {
+  const { hooks } = createHooks();
+  const state = createBackend([], hooks);
+  const calls: string[] = [];
+  state.provider.volumeControl = {
+    async identity() {
+      return {
+        protocolVersion: 1,
+        boundary: "pid-namespace",
+        protectedControl: true,
+        bootId: "boot-1",
+        supervisorNonce: "supervisor-1",
+      };
+    },
+    async freeze(input) {
+      calls.push("freeze");
+      return {
+        freezeId: input.freezeId,
+        supervisorNonce: input.expectedNonce,
+        allWritersStopped: true,
+      };
+    },
+    async resume() {
+      calls.push("resume");
+    },
+    async flush() {
+      return { output: "trusted receipt", exitCode: 0 };
+    },
+    async drain(input) {
+      return {
+        drainId: input.drainId,
+        bootId: "boot-1",
+        supervisorNonce: input.expectedNonce,
+        launchGateClosed: true,
+        allNamespacesExited: true,
+      };
+    },
+  };
+  hooks.acquireOperation = async () => ({
+    permitId: "permit-1",
+    reused: false,
+  });
+  hooks.markOperationStarted = async () => {
+    calls.push("started");
+    return true;
+  };
+  hooks.releaseOperation = async (input) => {
+    calls.push(`release:${input.outcome}`);
+  };
+  return { ...state, hooks, calls };
+}
+
+test("volume mutation waits for its database permit and checkpoints while all writers are frozen", async () => {
+  const { manager, hooks, calls } = protectedVolumeOperationFixture();
+  const sandbox = await manager.getOrCreateThreadSandbox(context);
+  let acquired = 0;
+  hooks.acquireOperation = async () => {
+    if (++acquired < 3)
+      throw Object.assign(new Error("queued"), {
+        code: "VOLUME_EXECUTION_QUEUED",
+      });
+    return { permitId: "permit-1", reused: false };
+  };
+  const result = await manager.withVolumeOperation({
+    sandbox,
+    context,
+    operationId: "op",
+    run: async (id) => {
+      calls.push(`run:${id}`);
+      return "written";
+    },
+    checkpoint: async () => {
+      calls.push("checkpoint");
+      return 21;
+    },
+  });
+  assert.equal(result, "written");
+  assert.equal(acquired, 3);
+  assert.deepEqual(calls, [
+    "started",
+    "run:permit-1",
+    "freeze",
+    "checkpoint",
+    "resume",
+    "release:persisted",
+  ]);
+});
+
+test("failed frozen checkpoint retains the permit and freeze for recovery", async () => {
+  const { manager, calls } = protectedVolumeOperationFixture();
+  const sandbox = await manager.getOrCreateThreadSandbox(context);
+  await assert.rejects(
+    manager.withVolumeOperation({
+      sandbox,
+      context,
+      operationId: "op",
+      run: async () => {
+        calls.push("run");
+        return null;
+      },
+      checkpoint: async () => {
+        calls.push("checkpoint");
+        throw new Error("storage unavailable");
+      },
+    }),
+    /storage unavailable/,
+  );
+  assert.deepEqual(calls, ["started", "run", "freeze", "checkpoint"]);
+});
+
+test("a previously dispatched permit never automatically reruns its mutation", async () => {
+  const { manager, hooks, calls } = protectedVolumeOperationFixture();
+  const sandbox = await manager.getOrCreateThreadSandbox(context);
+  hooks.acquireOperation = async () => ({ permitId: "permit-1", reused: true });
+  hooks.markOperationStarted = async () => false;
+  await assert.rejects(
+    manager.withVolumeOperation({
+      sandbox,
+      context,
+      operationId: "op",
+      run: async () => {
+        calls.push("replayed");
+      },
+      checkpoint: async () => 22,
+    }),
+    /already dispatched/,
+  );
+  assert.deepEqual(calls, []);
+});
+
+test("canceling an operation still queued for admission does not cancel somebody else's workload", async () => {
+  const { manager, hooks, calls } = protectedVolumeOperationFixture();
+  const sandbox = await manager.getOrCreateThreadSandbox(context);
+  const controller = new AbortController();
+  hooks.acquireOperation = async () => {
+    controller.abort();
+    throw Object.assign(new Error("queued"), {
+      code: "VOLUME_EXECUTION_QUEUED",
+    });
+  };
+  await assert.rejects(
+    manager.withVolumeOperation({
+      sandbox,
+      context,
+      operationId: "op",
+      signal: controller.signal,
+      run: async () => {
+        calls.push("run");
+      },
+      checkpoint: async () => 22,
+    }),
+    /abort/i,
+  );
+  assert.deepEqual(calls, []);
+});
+
+test("legacy bootstrap is rejected before it creates an attachment", async () => {
+  const { hooks, calls } = createHooks();
+  hooks.protectedBootstrap = undefined;
+  const { manager } = createBackend([], hooks);
+  await assert.rejects(
+    manager.getOrCreateThreadSandbox(context),
+    /PROTECTED_BOOTSTRAP_REQUIRED/,
+  );
+  assert.deepEqual(calls, []);
+});

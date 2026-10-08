@@ -1,4 +1,5 @@
 //! The same chunk addresses and plan schema are consumed by sync restore and FUSE.
+pub mod control;
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, BTreeMap};
@@ -71,7 +72,7 @@ impl RestorePlan {
     }
 }
 fn valid_hash(id: &str) -> bool { id.len() == 64 && id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) }
-fn validate_location(loc: &ChunkLoc) -> Result<()> {
+pub fn validate_location(loc: &ChunkLoc) -> Result<()> {
     if loc.0.is_empty() || loc.2 == 0 || loc.2 > MAX_COMPRESSED_BYTES || loc.3 == 0 || loc.3 > MAX_CHUNK_BYTES
         || loc.1.checked_add(loc.2 as u64).filter(|end| *end <= SAFE_INTEGER).is_none() { bail!("invalid chunk locator bounds"); }
     Ok(())
@@ -92,6 +93,9 @@ impl Default for Fetcher {
 }
 impl Fetcher {
     pub fn chunk(&self, id: &str, loc: &ChunkLoc, url: &str) -> Result<Vec<u8>> {
+        decode_chunk(id, loc, &self.compressed(loc, url)?)
+    }
+    pub fn compressed(&self, loc: &ChunkLoc, url: &str) -> Result<Vec<u8>> {
         validate_location(loc)?;
         if !url.starts_with("https://") && !url.starts_with("http://") { bail!("unsupported chunk URL scheme"); }
         let end = loc.1 + loc.2 as u64 - 1;
@@ -105,7 +109,8 @@ impl Fetcher {
         if total <= end { bail!("chunk Content-Range exceeds object length"); }
         let mut compressed = Vec::with_capacity(loc.2 as usize);
         response.into_reader().take(loc.2 as u64 + 1).read_to_end(&mut compressed).context("chunk body read failed")?;
-        decode_chunk(id, loc, &compressed)
+        if compressed.len() != loc.2 as usize { bail!("compressed chunk length mismatch"); }
+        Ok(compressed)
     }
 }
 pub mod ns_string {
