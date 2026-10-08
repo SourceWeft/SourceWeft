@@ -265,9 +265,13 @@ export function skillLocalInstallCommand(source: {
  * for a slug that is not plain path characters: it goes into a shell command
  * someone pastes, and quoting it would be a guess about their shell.
  */
-export function skillCliInstallCommand(slug: string) {
-  return /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(slug)
-    ? `npx @sourceweft/cli skills install ${slug}`
+export function skillCliInstallCommand(
+  slug: string,
+  installRef?: string | null,
+) {
+  const reference = installRef ?? slug;
+  return /^(?:@[A-Za-z0-9_.-]+\/)?[A-Za-z0-9][A-Za-z0-9._-]*$/.test(reference)
+    ? `npx @sourceweft/cli skills install ${reference}`
     : null;
 }
 

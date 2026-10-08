@@ -130,6 +130,7 @@ export async function installFromRegistry(
     schema: 1,
     registry: input.registry,
     slug: skill.skill.slug,
+    ...(skill.skill.installRef ? { installRef: skill.skill.installRef } : {}),
     version: skill.skill.version,
     source: {
       repoUrl: source.repoUrl,

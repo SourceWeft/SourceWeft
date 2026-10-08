@@ -51,9 +51,14 @@ export type IngestDeps = {
   installSkill: InstallSkillFn;
   /** GitHub's ancestry answer between two commits; defaults to the real API. */
   compareCommits?: typeof compareCommits;
+  reconcileReferences?: (owner: string) => Promise<unknown>;
 };
 
 export const defaultIngestDeps: IngestDeps = {
+  reconcileReferences: async (owner) =>
+    (await import("../install-references")).reconcileSkillInstallReferences(
+      owner,
+    ),
   resolveSource: resolvePinnedGitHubSource,
   downloadArchive: downloadRepoZip,
   // Loaded on first use: the skills service imports half the content plane,
@@ -217,6 +222,7 @@ const onCompleteStage: IngestStage = {
   name: "on-complete",
   optional: true,
   async run(ctx) {
+    await ctx.deps.reconcileReferences?.(need(ctx.read, "read").source.owner);
     const install = ctx.submission.onComplete?.install;
     if (!install) {
       return;

@@ -1,3 +1,4 @@
+import { reconcileSkillInstallReferences } from "../../modules/skills/registry/install-references";
 import { runSkillAutoListing } from "../../modules/skills/market/auto-list";
 import { refreshSkillInstallCounts } from "../../modules/skills/market/install-counts";
 import { enqueueSkillOverviews } from "../../modules/skills/market/overviews";
@@ -42,6 +43,7 @@ export async function scheduleSkillMarketUpkeep(): Promise<void> {
   await refreshSkillInstallCounts();
   // Each independent of the others: one failing costs only its own numbers.
   for (const [name, step] of [
+    ["install references", reconcileSkillInstallReferences],
     ["run stats", refreshSkillRunStats],
     ["overview queue", enqueueSkillOverviews],
   ] as const) {

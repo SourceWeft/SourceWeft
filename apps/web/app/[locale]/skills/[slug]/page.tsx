@@ -504,7 +504,9 @@ export default async function PublicSkillDetailPage({
   // Only when the CLI would install it: it refuses a name it cannot use as a
   // directory.
   const cliInstallCommand =
-    skill.cliInstallable === false ? null : skillCliInstallCommand(skill.slug);
+    skill.cliInstallable === false
+      ? null
+      : skillCliInstallCommand(skill.slug, skill.installRef);
   const repository = githubRepository(repoUrl);
   // The author's way in, for a repository nobody has claimed yet.
   const claimHref = skill.claimed ? null : skillClaimHref(repoUrl);

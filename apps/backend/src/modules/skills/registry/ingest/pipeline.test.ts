@@ -97,6 +97,7 @@ function analyzed(name: string, flags: string[] = []) {
 
 function deps(overrides: Partial<IngestDeps> = {}): IngestDeps {
   return {
+    reconcileReferences: vi.fn(async () => ({ created: 0 })),
     resolveSource: vi.fn(async () => source),
     downloadArchive: vi.fn(async () => Buffer.alloc(0)),
     installSkill: vi.fn(async () => ({ skills: [{ status: "installed" }] })),

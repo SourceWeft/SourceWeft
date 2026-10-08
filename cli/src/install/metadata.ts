@@ -15,6 +15,7 @@ export type InstalledMetadata = {
   /** The registry the skill was resolved from. */
   registry: string;
   slug: string;
+  installRef?: string;
   /** The registry's version id — a commit sha prefix for a GitHub skill. */
   version: string;
   source: {
@@ -66,6 +67,9 @@ export function parseMetadata(raw: string): InstalledMetadata | null {
     schema: 1,
     registry: value.registry,
     slug: value.slug,
+    ...(typeof value.installRef === "string"
+      ? { installRef: value.installRef }
+      : {}),
     version: value.version,
     source: {
       repoUrl: source.repoUrl,

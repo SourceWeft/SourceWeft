@@ -8,7 +8,8 @@ import {
   listMarketSkillsResponseSchema,
   marketSkillLocaleSchema,
 } from "@sourceweft/market-contracts";
-import type { z } from "zod";
+import { z } from "zod";
+import { resolveSkillInstallReferences } from "../../modules/skills/registry/install-references";
 import {
   findMarketSkill,
   listMarketSkillCategories,
@@ -39,6 +40,7 @@ export const RESERVED_MARKET_SKILL_SLUGS: ReadonlySet<string> = new Set([
   "category-counts",
   "collections",
   "registry",
+  "resolve",
 ]);
 
 // Longer than any slug the registry derives; past it there is nothing to find.
@@ -92,6 +94,47 @@ function publicJson(c: Context, body: unknown) {
 }
 
 export function registerSkillPublicRoutes(app: Hono) {
+  app.get("/v1/skills/resolve", async (c) => {
+    const parsed = z
+      .object({
+        reference: z.string().min(1).max(256),
+        skill: z.string().min(1).max(128).optional(),
+        path: z
+          .string()
+          .max(4096)
+          .refine(
+            (p) =>
+              !p.startsWith("/") &&
+              !p.includes("\\") &&
+              !p.split("/").some((s) => s === ".." || s === "."),
+          )
+          .optional(),
+      })
+      .safeParse({
+        reference: c.req.query("reference"),
+        skill: c.req.query("skill"),
+        path: c.req.query("path"),
+      });
+    if (!parsed.success)
+      throw ApiError.validation(
+        parsed.error.flatten() as Record<string, unknown>,
+      );
+    if (
+      !/^@[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(parsed.data.reference) &&
+      (!/^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(parsed.data.reference) ||
+        !parsed.data.skill)
+    )
+      throw ApiError.validation({
+        reference: "Use @owner/skill or owner/repo with --skill",
+      });
+    if (
+      parsed.data.reference.startsWith("@") &&
+      parsed.data.skill !== undefined
+    )
+      throw ApiError.validation({ skill: "--skill requires owner/repo" });
+    return publicJson(c, await resolveSkillInstallReferences(parsed.data));
+  });
+
   app.get("/v1/skills", async (c) => {
     // The language of each `aiSummary`; English when not given.
     const locale = given(c.req.query("locale"));

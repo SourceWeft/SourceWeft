@@ -309,6 +309,10 @@ describe("safeSkillLogoUrl", () => {
 });
 
 describe("skillCliInstallCommand", () => {
+  it("uses a persisted reference while keeping the legacy slug compatible",()=>{
+    expect(skillCliInstallCommand("old-slug","@aws/aws-serverless")).toBe("npx @sourceweft/cli skills install @aws/aws-serverless");
+    expect(skillCliInstallCommand("old-slug","@aws/bad;command")).toBeNull();
+  });
   it("installs by slug with the SourceWeft CLI", () => {
     expect(skillCliInstallCommand("gh-anthropics-skills-pdf")).toBe(
       "npx @sourceweft/cli skills install gh-anthropics-skills-pdf",
