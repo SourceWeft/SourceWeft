@@ -111,3 +111,18 @@ test("different roots retain separate identity even with the same name", () => {
   assert.notEqual(slug("skills/a_b"), slug("skills/a-b"));
   assert.equal(slug("skills/figma-use"), slug("skills/figma-use"));
 });
+
+test("long source roots produce routable URLs without collapsing identity", () => {
+  const derive = (root: string) =>
+    deriveRegistrySlug(
+      "o".repeat(39),
+      "r".repeat(100),
+      "n".repeat(64),
+      root,
+      "100",
+    );
+  const first = derive("skills/" + "a".repeat(300) + "/writer");
+  const second = derive("skills/" + "a".repeat(300) + "/other");
+  assert.ok(first.length <= 256);
+  assert.notEqual(first, second);
+});

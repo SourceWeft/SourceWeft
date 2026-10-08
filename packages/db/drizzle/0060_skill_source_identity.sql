@@ -31,7 +31,7 @@ WHERE d.id=m.old_id AND m.new_id=m.old_id;
 INSERT INTO skill_definitions
 SELECT (jsonb_populate_record(NULL::skill_definitions,
  to_jsonb(d) || jsonb_build_object(
-  'id',m.new_id,'slug',d.slug||'-'||coalesce(nullif(left(trim(both '-' from regexp_replace(lower(m.source_root),'[^a-z0-9]+','-','g')),80),''),'root')||'-'||left(md5(m.source_root),16),
+  'id',m.new_id,'slug',left(d.slug,160)||'-'||coalesce(nullif(left(trim(both '-' from regexp_replace(lower(m.source_root),'[^a-z0-9]+','-','g')),64),''),'root')||'-'||left(md5(m.source_root),16),
   'source_root',m.source_root,'verified',false,'install_count',0,'rating_count',0,'rating_avg',NULL,'rank_score',0,'categories_set_by',NULL,
   'display_name',v.manifest_json->>'displayName','description',v.manifest_json->>'description'
  ))).* FROM registry_source_mapping m JOIN skill_definitions d ON d.id=m.old_id
