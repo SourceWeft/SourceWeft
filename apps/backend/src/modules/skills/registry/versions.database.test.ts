@@ -72,7 +72,7 @@ describe.skipIf(!skillDatabaseEnabled)(
         displayName: "Writer",
         description: `Version ${marker}`,
         commitSha,
-        storagePointer: `github:fixture/skills@${commitSha}#writer`,
+        storagePointer: `github:fixture/skills@${commitSha}#${slug}/writer`,
         versionStatus: flagged ? ("draft" as const) : ("published" as const),
         outcome: flagged ? ("queued" as const) : ("indexed" as const),
         files: [
@@ -90,8 +90,8 @@ describe.skipIf(!skillDatabaseEnabled)(
           visibility: "restricted" as const,
           categories: [],
           registry: {
-            identifier: "gh:fixture/skills/writer",
-            sourceUrl: `https://github.com/fixture/skills/tree/${commitSha}/writer`,
+            identifier: `gh:fixture/skills/${slug}/writer`,
+            sourceUrl: `https://github.com/fixture/skills/tree/${commitSha}/${slug}/writer`,
             repoUrl: "https://github.com/fixture/skills",
             submittedBy: viewer.userId,
             // Currency follows commit age: later markers are later commits.
@@ -189,7 +189,7 @@ describe.skipIf(!skillDatabaseEnabled)(
         skillIds: [installed.id],
       });
       expect(resolved[0]).toMatchObject({
-        version: "b".repeat(12),
+        version: "b".repeat(40),
         skillVersionId: b.skillVersionId,
         description: "Version b",
       });

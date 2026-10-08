@@ -129,6 +129,9 @@ export type SkillManifestJson = {
   registry?: {
     /** Real upstream identifier, e.g. "gh:owner/repo". */
     identifier: string;
+    repositoryId?: string;
+    sourceRoot?: string;
+    originalName?: string;
     sourceUrl: string;
     repoUrl: string;
     submittedBy: string;
@@ -157,8 +160,19 @@ export type SkillManifestJson = {
     capability: "prompt-only" | "executable";
     scan: { reviewRequired: boolean; flags: string[] };
     ingestion?: {
-      formatVersion: 1; analyzedAt: string; parserVersion: string; scanRuleVersion: string;
-      diagnostics: Array<{ code: string; severity: "error" | "warning"; message: string; file?: string; field?: string; line?: number; column?: number }>;
+      formatVersion: 1;
+      analyzedAt: string;
+      parserVersion: string;
+      scanRuleVersion: string;
+      diagnostics: Array<{
+        code: string;
+        severity: "error" | "warning";
+        message: string;
+        file?: string;
+        field?: string;
+        line?: number;
+        column?: number;
+      }>;
       findings: Array<{ ruleId: string; file?: string; line?: number }>;
     };
     moderation?: {
@@ -169,7 +183,11 @@ export type SkillManifestJson = {
       /** Revoking the current version: the published version that took over. */
       promotedSkillVersionId?: string;
     };
-    visibilityChange?: { actorUserId: string; at: string; visibility: "public" | "restricted" };
+    visibilityChange?: {
+      actorUserId: string;
+      at: string;
+      visibility: "public" | "restricted";
+    };
     /** Declared license name (e.g. "MIT") — display-only. */
     license?: string;
     fileManifest: {
@@ -195,6 +213,8 @@ export const skillDefinitions = pgTable(
       .$type<SkillDefinitionSourceType>()
       .notNull(),
     slug: text("slug").notNull(),
+    githubRepositoryId: text("github_repository_id"),
+    sourceRoot: text("source_root"),
     displayName: text("display_name").notNull(),
     description: text("description").notNull(),
     visibility: text("visibility").$type<SkillManifestVisibility>().notNull(),
@@ -280,6 +300,16 @@ export const skillDefinitions = pgTable(
       sql`(${table.sourceType} = 'builtin' and ${table.teamId} is null and ${table.workspaceId} is null and ${table.visibility} in ('public', 'restricted')) or (${table.sourceType} = 'workspace_custom' and ${table.teamId} is not null and ${table.workspaceId} is not null and ${table.visibility} = 'workspace') or (${table.sourceType} = 'team_custom' and ${table.teamId} is not null and ${table.workspaceId} is null and ${table.visibility} = 'team') or (${table.sourceType} = 'registry_github' and ${table.teamId} is null and ${table.workspaceId} is null and ${table.visibility} in ('public', 'restricted'))`,
     ),
     uniqueIndex("skill_definitions_slug_uq").on(table.slug),
+    uniqueIndex("skill_definitions_github_source_uq")
+      .on(table.githubRepositoryId, table.sourceRoot)
+      .where(
+        sql`${table.sourceType} = 'registry_github' and ${table.githubRepositoryId} is not null`,
+      ),
+    uniqueIndex("skill_definitions_github_path_uq")
+      .on(table.repoOwner, table.repoName, table.sourceRoot)
+      .where(
+        sql`${table.sourceType} = 'registry_github' and ${table.sourceRoot} is not null and ${table.githubRepositoryId} is null`,
+      ),
     index("skill_definitions_team_workspace_status_idx").on(
       table.teamId,
       table.workspaceId,
@@ -908,10 +938,7 @@ export const skillReviews = pgTable(
       .defaultNow(),
   },
   (table) => [
-    check(
-      "skill_reviews_rating_check",
-      sql`${table.rating} between 1 and 5`,
-    ),
+    check("skill_reviews_rating_check", sql`${table.rating} between 1 and 5`),
     check(
       "skill_reviews_status_check",
       sql`${table.status} in ('visible', 'hidden')`,
@@ -926,12 +953,7 @@ export const skillReviews = pgTable(
 );
 
 export type SkillReportReason =
-  | "copyright"
-  | "malicious"
-  | "impersonation"
-  | "spam"
-  | "broken"
-  | "other";
+  "copyright" | "malicious" | "impersonation" | "spam" | "broken" | "other";
 export type SkillReportStatus = "open" | "actioned" | "dismissed";
 
 // Someone telling the market admins a skill (or a review of it) is wrong.
@@ -954,10 +976,7 @@ export const skillReports = pgTable(
     reporterUserId: text("reporter_user_id"),
     // sha256 of the reporter's IP with a server-side salt: rate limiting only.
     ipHash: text("ip_hash"),
-    status: text("status")
-      .$type<SkillReportStatus>()
-      .notNull()
-      .default("open"),
+    status: text("status").$type<SkillReportStatus>().notNull().default("open"),
     resolution: text("resolution"),
     resolvedBy: text("resolved_by"),
     resolvedAt: timestamp("resolved_at", { withTimezone: true, mode: "date" }),
@@ -1038,10 +1057,7 @@ export const skillVersionAnalysis = pgTable(
 );
 
 export type SkillRunErrorClass =
-  | "missing_dependency"
-  | "timeout"
-  | "permission"
-  | "other";
+  "missing_dependency" | "timeout" | "permission" | "other";
 
 // One sandbox command that touched a mounted skill's files. Deliberately
 // nothing about what ran: no command, no output, and the workspace only as a

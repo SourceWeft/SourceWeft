@@ -4,13 +4,14 @@ import {
   GITHUB_REQUEST_TIMEOUTS,
   assertCommitOnDefaultBranch,
   GitHubArchiveError,
+  GitHubRateLimitedError,
   githubDownloadHeaders,
   githubFetch,
   githubTimeoutError,
   isGitHubTimeoutError,
   normalizeGitHubSource,
   resolveCommit,
-  resolveDefaultBranch,
+  resolveRepositoryMetadata,
   type GitHubRequestOptions,
 } from "./github";
 import type { NormalizedGitHubSource } from "../types";
@@ -61,6 +62,7 @@ const COMMIT_SHA_PATTERN = /^[a-f0-9]{40}$/;
 export type PinnedGitHubSource = NormalizedGitHubSource & {
   /** Immutable 40-hex commit every read and every stored pointer is pinned to. */
   commitSha: string;
+  repositoryId?: string;
   /**
    * Committer date of `commitSha` (ISO 8601). Undefined when the source named a
    * full sha and GitHub's commit metadata could not be read.
@@ -92,25 +94,29 @@ export async function resolvePinnedGitHubSource(
     );
   }
 
-  let ref = source.ref;
-  let defaultBranch: string | undefined;
-  if (!ref) {
-    try {
-      ref = defaultBranch = await resolveDefaultBranch(source, options);
-    } catch (error) {
-      // A missing or private repository fails here first, with a plain Error
-      // that no caller maps — it used to surface as an HTTP 500 instead of
-      // "this repository is not available". Timeouts and caller aborts keep
-      // their own error.
-      if (error instanceof GitHubArchiveError || options?.signal?.aborted) {
-        throw error;
-      }
-      throw new GitHubArchiveError(
-        "ARCHIVE_UNAVAILABLE",
-        `Could not read ${source.repoUrl}: it does not exist, is private, or GitHub is unreachable`,
-      );
-    }
+  let metadata: Awaited<ReturnType<typeof resolveRepositoryMetadata>>;
+  try {
+    metadata = await resolveRepositoryMetadata(source, options);
+  } catch (error) {
+    if (
+      error instanceof GitHubArchiveError ||
+      error instanceof GitHubRateLimitedError ||
+      options?.signal?.aborted
+    )
+      throw error;
+    throw new GitHubArchiveError(
+      "ARCHIVE_UNAVAILABLE",
+      `Could not read ${source.repoUrl}: it does not exist, is private, or GitHub is unreachable`,
+    );
   }
+  source = {
+    ...source,
+    owner: metadata.owner,
+    repo: metadata.repo,
+    repoUrl: `https://github.com/${metadata.owner}/${metadata.repo}`,
+  };
+  const defaultBranch = metadata.defaultBranch;
+  const ref = source.ref || defaultBranch;
   const commit = await resolveCommit(source, ref, options);
   const commitSha = commit?.sha.toLowerCase();
   if (!commitSha || !COMMIT_SHA_PATTERN.test(commitSha)) {
@@ -123,7 +129,6 @@ export async function resolvePinnedGitHubSource(
   // reachable under the upstream's URLs too. The default branch's own head
   // needs no check.
   if (source.ref) {
-    defaultBranch = await resolveDefaultBranch(source, options);
     await assertCommitOnDefaultBranch(
       source,
       commitSha,
@@ -134,6 +139,7 @@ export async function resolvePinnedGitHubSource(
 
   return {
     ...source,
+    repositoryId: metadata.repositoryId,
     commitSha,
     ...(defaultBranch ? { defaultBranch } : {}),
     ...(commit?.committedAt ? { committedAt: commit.committedAt } : {}),

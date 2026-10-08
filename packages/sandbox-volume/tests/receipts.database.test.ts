@@ -34,14 +34,14 @@ before(async () => {
     create table threads(id text primary key, workspace_id text not null, team_id text not null, unique(id,workspace_id,team_id));`);
   await pool.query(
     readFileSync(
-      new URL("../../db/drizzle/0060_sandbox_volumes.sql", import.meta.url),
+      new URL("../../db/drizzle/0061_sandbox_volumes.sql", import.meta.url),
       "utf8",
     ).replaceAll('"public".', `"${testSchema}".`),
   );
   await pool.query(
     readFileSync(
       new URL(
-        "../../db/drizzle/0061_sandbox_volume_integrity.sql",
+        "../../db/drizzle/0062_sandbox_volume_integrity.sql",
         import.meta.url,
       ),
       "utf8",
@@ -49,23 +49,14 @@ before(async () => {
   );
   await pool.query(
     readFileSync(
-      new URL("../../db/drizzle/0062_sandbox_volume_gc.sql", import.meta.url),
+      new URL("../../db/drizzle/0063_sandbox_volume_gc.sql", import.meta.url),
       "utf8",
     ).replaceAll('"public".', `"${testSchema}".`),
   );
   await pool.query(
     readFileSync(
       new URL(
-        "../../db/drizzle/0063_sandbox_volume_control.sql",
-        import.meta.url,
-      ),
-      "utf8",
-    ).replaceAll('"public".', `"${testSchema}".`),
-  );
-  await pool.query(
-    readFileSync(
-      new URL(
-        "../../db/drizzle/0064_sandbox_volume_drain.sql",
+        "../../db/drizzle/0064_sandbox_volume_control.sql",
         import.meta.url,
       ),
       "utf8",
@@ -74,7 +65,16 @@ before(async () => {
   await pool.query(
     readFileSync(
       new URL(
-        "../../db/drizzle/0065_sandbox_volume_recovery.sql",
+        "../../db/drizzle/0065_sandbox_volume_drain.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    ).replaceAll('"public".', `"${testSchema}".`),
+  );
+  await pool.query(
+    readFileSync(
+      new URL(
+        "../../db/drizzle/0066_sandbox_volume_recovery.sql",
         import.meta.url,
       ),
       "utf8",
@@ -775,7 +775,7 @@ test(
 );
 
 test(
-  "0061 upgrades populated 0060 without inventing historical receipts",
+  "0062 upgrades populated 0061 without inventing historical receipts",
   { skip: !enabled },
   async () => {
     const schema = `migration_${randomUUID().replaceAll("-", "")}`;
@@ -790,7 +790,7 @@ test(
       );
       await legacy.query(
         readFileSync(
-          new URL("../../db/drizzle/0060_sandbox_volumes.sql", import.meta.url),
+          new URL("../../db/drizzle/0061_sandbox_volumes.sql", import.meta.url),
           "utf8",
         ).replaceAll('"public".', `"${schema}".`),
       );
@@ -800,17 +800,17 @@ test(
       await legacy.query(
         readFileSync(
           new URL(
-            "../../db/drizzle/0061_sandbox_volume_integrity.sql",
+            "../../db/drizzle/0062_sandbox_volume_integrity.sql",
             import.meta.url,
           ),
           "utf8",
         ).replaceAll('"public".', `"${schema}".`),
       );
       for (const migration of [
-        "0062_sandbox_volume_gc.sql",
-        "0063_sandbox_volume_control.sql",
-        "0064_sandbox_volume_drain.sql",
-        "0065_sandbox_volume_recovery.sql",
+        "0063_sandbox_volume_gc.sql",
+        "0064_sandbox_volume_control.sql",
+        "0065_sandbox_volume_drain.sql",
+        "0066_sandbox_volume_recovery.sql",
       ])
         await legacy.query(
           readFileSync(
