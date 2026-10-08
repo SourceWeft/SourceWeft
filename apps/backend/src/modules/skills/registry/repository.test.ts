@@ -277,7 +277,7 @@ test("buildRegistryUpsertValues describes an object-stored version", () => {
 test("a new submission stores every file and the bundle, then writes rows that point at them", async () => {
   const result = await upsertRegistrySkillIndex(upsertInput());
   assert.equal(result.status, "indexed");
-  assert.equal(result.version, "a".repeat(12));
+  assert.equal(result.version, "a".repeat(40));
 
   // Objects first: not one row is written before the last upload.
   const kinds = dbState.ops

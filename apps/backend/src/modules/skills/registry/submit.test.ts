@@ -17,6 +17,8 @@ const mocks = vi.hoisted(() => ({
 vi.mock("./read", () => ({ readRegistrySkillsFromGitHub: mocks.read }));
 vi.mock("./analyze", () => ({ analyzeRegistrySkill: mocks.analyze }));
 vi.mock("./repository", () => ({
+  getRegistrySlugForSource: async (input: { proposedSlug: string }) =>
+    input.proposedSlug,
   getRegistrySkillForSubmission: mocks.getExisting,
   upsertRegistrySkillIndex: mocks.upsert,
 }));

@@ -187,6 +187,8 @@ test("resolveSelectedSkills includes Hub-enabled workspace skills without reques
         teamId: "team-1",
         workspaceId: "workspace-1",
         sourceType: "workspace_custom",
+        githubRepositoryId: null,
+        sourceRoot: null,
         slug: "custom-review",
         displayName: "Custom Review",
         description: "Review custom material.",
@@ -309,6 +311,8 @@ function registryBundle(input: {
       teamId: null,
       workspaceId: null,
       sourceType: "registry_github" as const,
+      githubRepositoryId: null,
+      sourceRoot: null,
       slug: "gh-acme-skill",
       displayName: "Community Skill",
       description: "A community-submitted skill.",
@@ -504,7 +508,11 @@ test("a blob labelled text that is not valid UTF-8 is reported as binary, not de
       }),
       files: [
         objectFileRow("SKILL.md", "text/markdown", Buffer.from("# s")),
-        objectFileRow("data.txt", "text/plain", new Uint8Array([0xff, 0xfe, 0])),
+        objectFileRow(
+          "data.txt",
+          "text/plain",
+          new Uint8Array([0xff, 0xfe, 0]),
+        ),
       ],
     }),
   });

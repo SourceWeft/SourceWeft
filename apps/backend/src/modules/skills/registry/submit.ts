@@ -1,5 +1,6 @@
 import type { SkillManifestJson } from "@sourceweft/db";
 import { SkillParseError } from "../frontmatter";
+import { deriveRegistrySlug } from "./contracts";
 import { SCAN_RULE_VERSION } from "./scan";
 import { analyzeRegistrySkill, type AnalyzedRegistrySkill } from "./analyze";
 import { extractRegistryLogo } from "./logo";
@@ -9,6 +10,7 @@ import { parseGithubStoragePointer } from "../storage/source-pointer";
 import { RegistrySubmissionError } from "./errors";
 import { triageRegistrySubmission } from "./guard";
 import {
+  getRegistrySlugForSource,
   getRegistrySkillForSubmission,
   upsertRegistrySkillIndex,
 } from "./repository";
@@ -23,8 +25,6 @@ import type { DiscoveredSkill, ReadRegistryResult } from "./read";
  * the only way a submission is processed — so every skill is analyzed, triaged
  * and stored the same way whether it arrived as a GitHub link or a zip.
  */
-
-const VERSION_SHA_PREFIX_LENGTH = 12;
 
 export type RegistrySkillSubmissionResult =
   import("@sourceweft/contracts").RegistrySkillResult;
@@ -90,10 +90,7 @@ export async function analyzeSubmittedSkills(input: {
 }): Promise<AnalyzedSubmissionSkill[]> {
   const { owner, repo } = input;
   const items: AnalyzedSubmissionSkill[] = [];
-  // The slug is derived from the frontmatter `name`, so two skills in one repo
-  // declaring the same name would upsert onto each other. That repo is
-  // malformed by the agentskills.io spec (`name` is the skill's identity); skip
-  // the later one rather than let it silently overwrite the first.
+  // Each source root is independent, even when frontmatter names match.
   const seenSlugs = new Set<string>();
   for (const discovered of input.skills) {
     try {
@@ -154,6 +151,21 @@ export async function writeSubmittedSkill(input: {
   const { commitSha, committedAt } = input.read;
   const { owner, repo, repoUrl } = input.read.source;
   try {
+    analyzed.slug = await getRegistrySlugForSource({
+      owner,
+      repo,
+      repositoryId: input.read.source.repositoryId,
+      sourceRoot: analyzed.repoSubpath,
+      proposedSlug: input.read.source.repositoryId
+        ? deriveRegistrySlug(
+            owner,
+            repo,
+            analyzed.name,
+            analyzed.repoSubpath,
+            input.read.source.repositoryId,
+          )
+        : analyzed.slug,
+    });
     const existing = await getRegistrySkillForSubmission(analyzed.slug);
     const decision = triageRegistrySubmission({
       existing,
@@ -169,7 +181,7 @@ export async function writeSubmittedSkill(input: {
       ...(logo ? { logo } : {}),
       slug: analyzed.slug,
       displayName: analyzed.displayName,
-      version: commitSha.slice(0, VERSION_SHA_PREFIX_LENGTH),
+      version: commitSha,
       description: analyzed.description,
       // Trust firewall (§0/§3): registry entries are never first-party. The
       // definition starts `restricted`; the catalog tags them Community +
@@ -177,6 +189,9 @@ export async function writeSubmittedSkill(input: {
       visibility: "restricted",
       categories: [],
       registry: {
+        repositoryId: input.read.source.repositoryId,
+        sourceRoot: analyzed.repoSubpath,
+        originalName: analyzed.name,
         identifier: `gh:${owner}/${repo}${
           analyzed.repoSubpath ? `/${analyzed.repoSubpath}` : ""
         }`,

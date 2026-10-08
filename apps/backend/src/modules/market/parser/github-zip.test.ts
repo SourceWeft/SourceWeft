@@ -170,9 +170,15 @@ describe("GitHub requests are bounded in time", () => {
             sha: "B".repeat(40),
             commit: { committer: { date: "2026-02-01T10:00:00Z" } },
           })
-        : Response.json({ default_branch: "trunk" }),
+        : Response.json({
+            id: 123,
+            full_name: "acme/repo",
+            default_branch: "trunk",
+          }),
     );
     const source = await resolvePinnedGitHubSource("acme/skills");
+    assert.equal(source.repositoryId, "123");
+    assert.equal(source.repoUrl, "https://github.com/acme/repo");
     assert.equal(source.commitSha, "b".repeat(40));
     assert.equal(source.committedAt, "2026-02-01T10:00:00.000Z");
 
@@ -201,6 +207,25 @@ test("an unreadable repository is reported as unavailable, not thrown raw", asyn
   try {
     await assert.rejects(
       resolvePinnedGitHubSource("ghost-owner/ghost-repo"),
+      (error: unknown) =>
+        error instanceof GitHubArchiveError &&
+        error.code === "ARCHIVE_UNAVAILABLE",
+    );
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("missing GitHub repository identity fails instead of inventing one", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    Response.json({
+      default_branch: "main",
+      full_name: "acme/skills",
+    })) as typeof fetch;
+  try {
+    await assert.rejects(
+      resolvePinnedGitHubSource("acme/skills"),
       (error: unknown) =>
         error instanceof GitHubArchiveError &&
         error.code === "ARCHIVE_UNAVAILABLE",

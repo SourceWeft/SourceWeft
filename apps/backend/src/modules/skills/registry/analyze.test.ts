@@ -424,6 +424,10 @@ test("frontmatter name wins over the directory it sits in", () => {
   });
 
   assert.equal(analyzed.name, "different");
-  assert.equal(analyzed.slug, `gh-${OWNER}-${REPO}-different`);
+  assert.ok(
+    analyzed.slug.startsWith(
+      `gh-${OWNER}-${REPO}-different-skills-writer-skill-`,
+    ),
+  );
   assert.equal(analyzed.repoSubpath, "skills/writer-skill");
 });
