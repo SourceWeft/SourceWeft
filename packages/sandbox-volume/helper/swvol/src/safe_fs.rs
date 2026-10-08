@@ -61,6 +61,7 @@ impl Directory {
         let fd = unsafe { libc::openat(dir.0.as_raw_fd(), leaf.as_ptr(), libc::O_RDWR | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC, 0o600) };
         Ok(fd_file(fd).context("restore refuses to replace an existing entry")?)
     }
+    #[cfg(test)]
     pub fn open_created_file(&self, relative: &str, identity: (u64, u64)) -> Result<File> {
         let (dir, leaf) = self.parent(relative)?;
         let fd = unsafe { libc::openat(dir.0.as_raw_fd(), leaf.as_ptr(), libc::O_RDWR | libc::O_NOFOLLOW | libc::O_CLOEXEC) };
@@ -275,4 +276,108 @@ mod tests {
         assert_eq!(fs::read_to_string(f.0.join("outside/sentinel")).unwrap(), "do not overwrite");
     }
 
+    #[test]
+    fn stable_restore_cache_is_bounded_and_keeps_nofollow_and_file_identity_checks() {
+        let f = Fixture::new(); let root = Directory::open_root(&f.0.join("root")).unwrap();
+        let cache = RestoreDirectoryCache::new(&root, 4).unwrap();
+        for index in 0..20 { cache.directory(&format!("d{index}"), true).unwrap(); cache.create_file(&format!("d{index}/data")).unwrap(); }
+        assert!(cache.entries.lock().unwrap().1.len() <= cache.limit); assert!(cache.limit <= 4);
+        let file = cache.create_file("d19/pinned").unwrap(); let md = file.metadata().unwrap(); drop(file);
+        fs::remove_file(f.0.join("root/d19/pinned")).unwrap(); fs::hard_link(f.0.join("outside/sentinel"), f.0.join("root/d19/pinned")).unwrap();
+        assert!(cache.open_created_file("d19/pinned", (md.dev(), md.ino())).is_err());
+        root.symlink("redirect", "../outside").unwrap();
+        assert!(cache.create_file("redirect/sentinel").is_err());
+        assert_eq!(fs::read_to_string(f.0.join("outside/sentinel")).unwrap(), "do not overwrite");
+    }
+    #[test]
+    fn probe_linux_symlink_target_byte_limit() {
+        let f = Fixture::new(); let root = Directory::open_root(&f.0.join("root")).unwrap();
+        let accepted = root.symlink("target-4095", &"a".repeat(4095));
+        let rejected = root.symlink("target-4096", &"a".repeat(4096));
+        let error = rejected.as_ref().err().and_then(|e| e.downcast_ref::<std::io::Error>()).and_then(|e| e.raw_os_error());
+        eprintln!("SYMLINK_LIMIT_PROBE target4095_ok={} target4096_ok={} target4096_errno={error:?}", accepted.is_ok(), rejected.is_ok());
+        assert!(accepted.is_ok()); assert_eq!(error, Some(libc::ENAMETOOLONG));
+        assert_eq!(fs::read_link(f.0.join("root/target-4095")).unwrap().as_os_str().as_bytes().len(), 4095);
+        assert!(!f.0.join("root/target-4096").symlink_metadata().is_ok());
+    }
+
+}
+
+/// A bounded capability cache used only while restore exclusively owns its
+/// staging/published tree and workload admission is closed. Mutable-target
+/// validation and exclusive publication continue to use uncached Directory APIs.
+pub struct RestoreDirectoryCache<'a> {
+    root: &'a Directory,
+    limit: usize,
+    entries: std::sync::Mutex<(u64, std::collections::HashMap<String, (Directory, u64)>)>,
+}
+impl<'a> RestoreDirectoryCache<'a> {
+    pub fn new(root: &'a Directory, requested: usize) -> Result<Self> {
+        let mut rlimit = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+        if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut rlimit) } != 0 { return Err(std::io::Error::last_os_error().into()); }
+        let limit = requested.min((rlimit.rlim_cur as usize).saturating_sub(64) / 2);
+        Ok(Self { root, limit, entries: std::sync::Mutex::new((0, std::collections::HashMap::new())) })
+    }
+    pub fn clear(&self) { self.entries.lock().unwrap().1.clear(); }
+    pub fn directory(&self, relative: &str, create: bool) -> Result<Directory> {
+        // An exact hit already passed component validation and was opened with
+        // O_NOFOLLOW in this restore-owned tree. Do not reopen or replace it.
+        {
+            let mut state = self.entries.lock().unwrap(); state.0 += 1; let tick = state.0;
+            if let Some((directory, used)) = state.1.get_mut(relative) {
+                *used = tick; return Ok(Directory(directory.0.try_clone()?));
+            }
+        }
+        let components: Vec<_> = Path::new(relative).components().map(|part| match part { Component::Normal(part) => Ok(part), _ => Err(anyhow::anyhow!("invalid cached restore path")) }).collect::<Result<_>>()?;
+        let (mut directory, consumed) = {
+            let mut state = self.entries.lock().unwrap(); state.0 += 1; let tick = state.0;
+            let mut prefix = relative;
+            let mut found = None;
+            while !prefix.is_empty() {
+                if let Some((directory, used)) = state.1.get_mut(prefix) {
+                    *used = tick; found = Some((Directory(directory.0.try_clone()?), prefix.split('/').count())); break;
+                }
+                prefix = prefix.rsplit_once('/').map(|(parent, _)| parent).unwrap_or("");
+            }
+            match found { Some(found) => found, None => (Directory(self.root.0.try_clone()?), 0) }
+        };
+        for part in &components[consumed..] { directory = directory.child(part, create)?; }
+        if self.limit > 0 && !relative.is_empty() {
+            let mut state = self.entries.lock().unwrap(); state.0 += 1; let tick = state.0;
+            if !state.1.contains_key(relative) && state.1.len() >= self.limit {
+                let victim = state.1.iter().min_by_key(|(_, (_, used))| *used).map(|(path, _)| path.clone()).unwrap(); state.1.remove(&victim);
+            }
+            state.1.insert(relative.into(), (Directory(directory.0.try_clone()?), tick));
+        }
+        Ok(directory)
+    }
+    fn parent(&self, relative: &str) -> Result<(Directory, CString)> {
+        let (parent, leaf) = relative.rsplit_once('/').unwrap_or(("", relative));
+        if leaf.is_empty() || leaf == "." || leaf == ".." { bail!("invalid restore leaf"); }
+        Ok((self.directory(parent, false)?, CString::new(leaf)?))
+    }
+    pub fn create_file(&self, relative: &str) -> Result<File> {
+        let (parent, leaf) = self.parent(relative)?;
+        let fd = unsafe { libc::openat(parent.0.as_raw_fd(), leaf.as_ptr(), libc::O_RDWR | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC, 0o600) };
+        Ok(fd_file(fd).context("restore refuses to replace an existing entry")?)
+    }
+    pub fn open_created_file(&self, relative: &str, identity: (u64, u64)) -> Result<File> {
+        let (parent, leaf) = self.parent(relative)?;
+        let fd = unsafe { libc::openat(parent.0.as_raw_fd(), leaf.as_ptr(), libc::O_RDWR | libc::O_NOFOLLOW | libc::O_CLOEXEC) };
+        let file = fd_file(fd)?; let md = file.metadata()?;
+        if !md.is_file() || md.nlink() != 1 || (md.dev(), md.ino()) != identity { bail!("restore file identity changed during capture"); }
+        Ok(file)
+    }
+    pub fn metadata(&self, relative: &str) -> Result<fs::Metadata> {
+        let (parent, leaf) = self.parent(relative)?;
+        let fd = unsafe { libc::openat(parent.0.as_raw_fd(), leaf.as_ptr(), libc::O_PATH | libc::O_NOFOLLOW | libc::O_CLOEXEC) };
+        Ok(fd_file(fd)?.metadata()?)
+    }
+    pub fn set_metadata(&self, relative: &str, mode: u32, mtime_ns: i64) -> Result<fs::Metadata> {
+        let directory = self.directory(relative, false)?;
+        if unsafe { libc::fchmod(directory.0.as_raw_fd(), mode) } != 0 { return Err(std::io::Error::last_os_error().into()); }
+        let mtime = filetime::FileTime::from_unix_time(mtime_ns.div_euclid(1_000_000_000), mtime_ns.rem_euclid(1_000_000_000) as u32);
+        filetime::set_file_handle_times(&directory.0, None, Some(mtime))?;
+        Ok(directory.0.metadata()?)
+    }
 }

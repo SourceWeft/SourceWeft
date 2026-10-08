@@ -20,7 +20,7 @@ export type ObjectStore = {
   /** Pre-signed PUT that succeeds only if the key does not exist yet (`If-None-Match: *` is part of the signature). */
   presignWriteOnce(key: string, ttlSeconds?: number): Promise<string>;
   presignGet(key: string, ttlSeconds?: number): Promise<string>;
-  get(key: string): Promise<Uint8Array | null>;
+  get(key: string, options?: { maxBytes: number }): Promise<Uint8Array | null>;
   put(key: string, body: Uint8Array, contentType?: string): Promise<void>;
   /** Size in bytes, or null when the key does not exist. */
   size(key: string): Promise<number | null>;
@@ -41,6 +41,14 @@ export type S3ObjectStoreConfig = {
   requestTimeoutMs?: number;
   credentials?: { accessKeyId: string; secretAccessKey: string };
 };
+
+/** An object is present but exceeds the caller's resource budget; never "not found". */
+export class ObjectReadLimitExceeded extends Error {
+  override readonly name = "ObjectReadLimitExceeded";
+  constructor(readonly maxBytes: number) {
+    super(`object exceeds the read size limit (${maxBytes} bytes)`);
+  }
+}
 
 export function createS3ObjectStore(config: S3ObjectStoreConfig): ObjectStore {
   const clientConfig: S3ClientConfig = {
@@ -84,16 +92,62 @@ export function createS3ObjectStore(config: S3ObjectStoreConfig): ObjectStore {
         { expiresIn: ttlSeconds },
       );
     },
-    async get(key) {
+    async get(key, options) {
+      const maxBytes = options?.maxBytes;
+      if (
+        maxBytes !== undefined &&
+        (!Number.isSafeInteger(maxBytes) || maxBytes < 0)
+      )
+        throw new Error("invalid object read size limit");
+      const controller = new AbortController();
       try {
         const response = await client.send(
           new GetObjectCommand({ Bucket: bucket, Key: key }),
-          requestOptions(),
+          {
+            abortSignal: AbortSignal.any([
+              controller.signal,
+              AbortSignal.timeout(requestTimeoutMs),
+            ]),
+          },
         );
-        if (!response.Body) return null;
-        return await response.Body.transformToByteArray();
+        if (!response.Body) throw new Error("object response has no body");
+        if (maxBytes === undefined)
+          return await response.Body.transformToByteArray();
+        const reader = response.Body.transformToWebStream().getReader();
+        const chunks: Uint8Array[] = [];
+        let size = 0;
+        try {
+          if (
+            response.ContentLength !== undefined &&
+            response.ContentLength > maxBytes
+          )
+            throw new ObjectReadLimitExceeded(maxBytes);
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (value.byteLength > maxBytes - size)
+              throw new ObjectReadLimitExceeded(maxBytes);
+            size += value.byteLength;
+            chunks.push(value);
+          }
+          if (
+            response.ContentLength !== undefined &&
+            size !== response.ContentLength
+          )
+            throw new Error(
+              "object response length does not match its declaration",
+            );
+          return Buffer.concat(chunks, size);
+        } finally {
+          // Cancelling the stream releases its connection even when a peer keeps sending.
+          await reader.cancel().catch(() => undefined);
+          reader.releaseLock();
+        }
       } catch (error) {
-        if (isNotFound(error)) return null;
+        controller.abort();
+        // GET has a structured NoSuchKey error. Generic NotFound may be an HTML
+        // gateway response and must not silently terminate the WAL chain.
+        if (isNotFound(error, "get")) return null;
         throw error;
       }
     },
@@ -116,7 +170,7 @@ export function createS3ObjectStore(config: S3ObjectStoreConfig): ObjectStore {
         );
         return response.ContentLength ?? null;
       } catch (error) {
-        if (isNotFound(error)) return null;
+        if (isNotFound(error, "head")) return null;
         throw error;
       }
     },
@@ -174,8 +228,9 @@ export function createS3ObjectStore(config: S3ObjectStoreConfig): ObjectStore {
   };
 }
 
-function isNotFound(error: unknown): boolean {
+function isNotFound(error: unknown, operation: "get" | "head"): boolean {
   const name = (error as { name?: string })?.name;
   // A missing bucket or a gateway's unrelated 404 is a storage failure, not an empty WAL.
-  return name === "NoSuchKey" || name === "NotFound";
+  // HEAD cannot carry an XML error body; retain its existing missing-key contract.
+  return name === "NoSuchKey" || (operation === "head" && name === "NotFound");
 }

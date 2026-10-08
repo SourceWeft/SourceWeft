@@ -1,12 +1,13 @@
 import {
   MAX_CHUNK_RAW_BYTES,
+  MAX_CHUNK_COMPRESSED_BYTES,
   MAX_FILE_BYTES,
   MAX_MANIFEST_ENTRIES,
   MAX_SYMLINK_TARGET_BYTES,
   PROTOCOL_VERSION,
 } from "./constants";
 import { ManifestRejected } from "./manifest";
-import { isValidVolumePath } from "./paths";
+import { isValidVolumePath, isWellFormedUnicode } from "./paths";
 import type { ChunkLocation, Manifest, ManifestEntry } from "./types";
 
 const CHUNK_ID = /^[0-9a-f]{64}$/;
@@ -124,8 +125,11 @@ export async function validateManifest(
       !isInt(off) ||
       !isInt(clen) ||
       !isInt(rlen) ||
-      Math.min(off, clen, rlen) < 0 ||
+      off < 0 ||
+      clen <= 0 ||
+      rlen <= 0 ||
       rlen > MAX_CHUNK_RAW_BYTES ||
+      clen > MAX_CHUNK_COMPRESSED_BYTES ||
       !Number.isSafeInteger(off + clen)
     ) {
       reject("chunk bounds");
@@ -187,7 +191,7 @@ export async function validateManifest(
           chunk.length !== 2 ||
           typeof chunk[0] !== "string" ||
           !isInt(chunk[1]) ||
-          chunk[1] < 0 ||
+          chunk[1] <= 0 ||
           chunk[1] > MAX_CHUNK_RAW_BYTES ||
           !CHUNK_ID.test(chunk[0]) ||
           !(await known(chunk[0]))
@@ -232,17 +236,31 @@ function validateEntryShape(entry: ManifestEntry) {
     reject("invalid mode");
   if (
     entry.t !== undefined &&
-    !(typeof entry.t === "string" && /^\d{1,20}$/.test(entry.t))
+    !(typeof entry.t === "string" && /^-?\d{1,20}$/.test(entry.t))
   )
     reject("invalid mtime");
   if (entry.c !== undefined && !Array.isArray(entry.c))
     reject("invalid file chunks array");
-  if (entry.t !== undefined && BigInt(entry.t) > 9223372036854775807n)
+  if (
+    entry.k !== "f" &&
+    ((entry.s !== undefined && entry.s !== 0) ||
+      (entry.c !== undefined && entry.c.length !== 0))
+  )
+    reject("invalid entry shape for non-file");
+  if (entry.k !== "l" && entry.l !== undefined && entry.l !== null)
+    reject("invalid symlink target for non-symlink entry");
+  if (
+    entry.t !== undefined &&
+    (BigInt(entry.t) > 9223372036854775807n ||
+      BigInt(entry.t) < -9223372036854775808n)
+  )
     reject("mtime exceeds database range");
   if (entry.k === "l") {
     const target = entry.l;
     if (
       typeof target !== "string" ||
+      target.length === 0 ||
+      !isWellFormedUnicode(target) ||
       Buffer.byteLength(target, "utf8") > MAX_SYMLINK_TARGET_BYTES ||
       target.includes("\0")
     ) {

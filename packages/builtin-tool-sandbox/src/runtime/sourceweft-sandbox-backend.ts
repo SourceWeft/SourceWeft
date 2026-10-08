@@ -378,9 +378,7 @@ function modelExecutionCancellationReason(
 }
 
 function isProviderCommandTimeout(error: unknown) {
-  return (
-    error instanceof Error && error.message.includes("SANDBOX_COMMAND_TIMEOUT")
-  );
+  return isPinnedOperationProviderTimeout(error);
 }
 
 function waitForModelExecutionAbort(

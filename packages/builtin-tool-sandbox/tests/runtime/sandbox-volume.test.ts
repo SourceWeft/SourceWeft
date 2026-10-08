@@ -126,6 +126,12 @@ function createProvider(
           protocolVersion: 1,
           boundary: "pid-namespace",
           protectedControl: true,
+          // Idealized contract fixture only; no real provider supplies this capability.
+          stableFreeze: {
+            available: true,
+            mechanism: "cgroup-v2-freezer",
+            kernelEnforced: true,
+          },
           bootId: "boot-1",
           supervisorNonce: "supervisor-1",
         };
@@ -135,6 +141,8 @@ function createProvider(
           freezeId: input.freezeId,
           supervisorNonce: input.expectedNonce,
           allWritersStopped: true,
+          mechanism: "cgroup-v2-freezer",
+          kernelEnforced: true,
         };
       },
       async resume() {},
@@ -370,9 +378,11 @@ test("the checkpoint goes to the attachment the manager made", async () => {
   );
   await backend.execute("true");
   const sandbox = await manager.getOrCreateThreadSandbox(context);
-  await manager.volumeCheckpoint(sandbox, {
-    freezeId: "test-barrier",
-    supervisorNonce: "supervisor-1",
+  await manager.withVolumeOperation({
+    sandbox,
+    context,
+    operationId: "second-checkpoint",
+    run: async () => undefined,
   });
   assert.deepEqual(calls, ["attach", "checkpoint:att-1", "checkpoint:att-1"]);
 });
@@ -408,9 +418,11 @@ test("checkpoint cannot discard an unsuccessful persistence acknowledgement", as
   );
   const sandbox = await manager.getOrCreateThreadSandbox(context);
   await assert.rejects(
-    manager.volumeCheckpoint(sandbox, {
-      freezeId: "test-barrier",
-      supervisorNonce: "supervisor-1",
+    manager.withVolumeOperation({
+      sandbox,
+      context,
+      operationId: "bad-checkpoint",
+      run: async () => undefined,
     }),
     /persist/i,
   );
@@ -808,6 +820,12 @@ function protectedVolumeOperationFixture() {
         protocolVersion: 1,
         boundary: "pid-namespace",
         protectedControl: true,
+        // Idealized contract fixture only; no real provider supplies this capability.
+        stableFreeze: {
+          available: true,
+          mechanism: "cgroup-v2-freezer",
+          kernelEnforced: true,
+        },
         bootId: "boot-1",
         supervisorNonce: "supervisor-1",
       };
@@ -818,6 +836,8 @@ function protectedVolumeOperationFixture() {
         freezeId: input.freezeId,
         supervisorNonce: input.expectedNonce,
         allWritersStopped: true,
+        mechanism: "cgroup-v2-freezer",
+        kernelEnforced: true,
       };
     },
     async resume() {
@@ -963,4 +983,358 @@ test("legacy bootstrap is rejected before it creates an attachment", async () =>
     /PROTECTED_BOOTSTRAP_REQUIRED/,
   );
   assert.deepEqual(calls, []);
+});
+
+test("a released preflight permit cannot authorize a later command through cached identity", async () => {
+  const { manager, hooks, calls, executed } = protectedVolumeOperationFixture();
+  const sandbox = await manager.getOrCreateThreadSandbox(context);
+  hooks.assertActive = async () => {
+    throw new Error("preflight failed");
+  };
+  await assert.rejects(
+    manager.withVolumeOperation({
+      sandbox,
+      context,
+      operationId: "op",
+      run: async () => undefined,
+    }),
+    /preflight failed/,
+  );
+  assert.deepEqual(calls, ["release:not_started"]);
+  await assert.rejects(
+    manager.executeUserCommand(sandbox, {
+      providerSandboxId: sandbox.providerSandboxId,
+      executionId: "permit-1",
+      command: "must-not-run",
+      timeoutMs: 1000,
+      maxOutputChars: 1000,
+    }),
+    /WORKLOAD_RPC_REQUIRED/,
+  );
+  assert.deepEqual(executed, []);
+});
+
+test("an aborted external write retains admission until the underlying writer is known settled", async () => {
+  const { manager, calls } = protectedVolumeOperationFixture();
+  const sandbox = await manager.getOrCreateThreadSandbox(context);
+  const controller = new AbortController();
+  let complete!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    complete = resolve;
+  });
+  let entered!: () => void;
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const run = manager.withVolumeOperation({
+    sandbox,
+    context,
+    operationId: "external",
+    writerKind: "external",
+    signal: controller.signal,
+    run: async () => {
+      entered();
+      await pending;
+      calls.push("writer-settled");
+    },
+    checkpoint: async () => {
+      calls.push("checkpoint");
+      return 1;
+    },
+  });
+  await started;
+  controller.abort();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.deepEqual(calls, ["started"]);
+  complete();
+  await assert.rejects(run, /abort/i);
+  assert.deepEqual(calls, ["started", "writer-settled"]);
+});
+
+for (const stage of ["resume", "release"] as const) {
+  test(`confirmed durability survives a lost ${stage} acknowledgement without enabling command replay`, async () => {
+    const { manager, hooks, provider, executed } =
+      protectedVolumeOperationFixture();
+    const sandbox = await manager.getOrCreateThreadSandbox(context);
+    if (stage === "resume")
+      provider.volumeControl!.resume = async () => {
+        throw new Error("resume response lost");
+      };
+    else
+      hooks.releaseOperation = async () => {
+        throw new Error("release response lost");
+      };
+    await assert.rejects(
+      manager.withVolumeOperation({
+        sandbox,
+        context,
+        operationId: "op",
+        run: async () => ({
+          output: "already wrote file",
+          exitCode: 0,
+          truncated: false,
+        }),
+        checkpoint: async () => 41,
+      }),
+      (error: unknown) => {
+        const value = error as {
+          durability: { status: string; confirmedSeq: number };
+          message: string;
+        };
+        assert.equal(value.durability.status, "confirmed");
+        assert.equal(value.durability.confirmedSeq, 41);
+        assert.match(value.message, /Do not execute the command again/);
+        return true;
+      },
+    );
+    await assert.rejects(
+      manager.executeUserCommand(sandbox, {
+        providerSandboxId: sandbox.providerSandboxId,
+        executionId: "permit-1",
+        command: "must-not-replay",
+        timeoutMs: 1000,
+        maxOutputChars: 1000,
+      }),
+      /WORKLOAD_RPC_REQUIRED/,
+    );
+    assert.deepEqual(executed, []);
+  });
+}
+
+test("a duplicate local permit cannot replace the grant of a still-running operation", async () => {
+  const { manager, hooks, executed } = protectedVolumeOperationFixture();
+  const sandbox = await manager.getOrCreateThreadSandbox(context);
+  let started = 0;
+  hooks.markOperationStarted = async () => ++started === 1;
+  let enter!: () => void, continueRun!: () => void;
+  const entered = new Promise<void>((resolve) => {
+    enter = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    continueRun = resolve;
+  });
+  const first = manager.withVolumeOperation({
+    sandbox,
+    context,
+    operationId: "same",
+    run: async (id) => {
+      enter();
+      await gate;
+      return manager.executeUserCommand(sandbox, {
+        providerSandboxId: sandbox.providerSandboxId,
+        executionId: id,
+        command: "only-original",
+        timeoutMs: 1000,
+        maxOutputChars: 1000,
+      });
+    },
+    checkpoint: async () => 1,
+  });
+  await entered;
+  await assert.rejects(
+    manager.withVolumeOperation({
+      sandbox,
+      context,
+      operationId: "same",
+      run: async () => {
+        throw new Error("duplicate callback ran");
+      },
+      checkpoint: async () => 1,
+    }),
+    /already in flight|already dispatched/,
+  );
+  continueRun();
+  await first;
+  assert.deepEqual(executed, ["only-original"]);
+});
+
+test("a control timeout after confirmed persistence is not treated as a user-command timeout", async () => {
+  const { backend, provider, hooks, calls, operations, executed } =
+    protectedVolumeOperationFixture();
+  let quarantined = false;
+  hooks.quarantine = async () => {
+    quarantined = true;
+  };
+  provider.volumeControl!.resume = async () => {
+    throw Object.assign(
+      new Error("SANDBOX_COMMAND_TIMEOUT: control resume response lost"),
+      { code: "SANDBOX_COMMAND_TIMEOUT" },
+    );
+  };
+  await assert.rejects(backend.execute("write-once"), (error: unknown) => {
+    assert.equal(
+      (error as { code: string }).code,
+      "SANDBOX_VOLUME_RECOVERY_PENDING",
+    );
+    return true;
+  });
+  assert.equal(quarantined, false);
+  assert.deepEqual(executed, ["write-once"]);
+  assert.equal(
+    (operations.at(-1)?.result?.durability as { status: string }).status,
+    "confirmed",
+  );
+});
+
+test("a shadow checkpoint is not promoted to confirmed by coordination recovery", async () => {
+  const { backend, provider, hooks } = protectedVolumeOperationFixture();
+  hooks.checkpoint = async () => ({
+    sync: { persisted: true, confirmedSeq: 9, mode: "shadow" },
+  });
+  provider.volumeControl!.resume = async () => {
+    throw new Error("resume acknowledgement lost");
+  };
+  await assert.rejects(backend.execute("observe"), (error: unknown) => {
+    assert.equal(
+      (error as { durability: { status: string } }).durability.status,
+      "pending",
+    );
+    assert.match(
+      (error as Error).message,
+      /production persistence is not confirmed/,
+    );
+    return true;
+  });
+});
+
+for (const capability of [
+  undefined,
+  { available: false, mechanism: "signal-pause" },
+  { available: true, mechanism: "signal-pause", kernelEnforced: true },
+  { available: true, mechanism: "cgroup-v2-freezer", kernelEnforced: false },
+]) {
+  test(`unverified stable freeze capability blocks attachment and dispatch: ${JSON.stringify(capability)}`, async () => {
+    const { hooks, calls } = createHooks();
+    const { backend, provider, executed } = createBackend([], hooks);
+    const identity = await provider.volumeControl!.identity({
+      providerSandboxId: "provider-sandbox-1",
+    });
+    provider.volumeControl!.identity = async () =>
+      Object.assign({}, identity, { stableFreeze: capability });
+    await assert.rejects(
+      backend.execute("echo must-not-write"),
+      /STABLE_FREEZE_UNAVAILABLE/,
+    );
+    assert.deepEqual(executed, []);
+    assert.deepEqual(
+      calls,
+      [],
+      "no attach or checkpoint before verified capability",
+    );
+  });
+}
+
+test("cached attachment cannot bypass a downgraded stable freeze capability", async () => {
+  const { manager, provider, hooks, calls } = protectedVolumeOperationFixture();
+  const sandbox = await manager.getOrCreateThreadSandbox(context);
+  const identity = await provider.volumeControl!.identity({
+    providerSandboxId: sandbox.providerSandboxId,
+  });
+  provider.volumeControl!.identity = async () => ({
+    ...identity,
+    stableFreeze: { available: false, mechanism: "signal-pause" },
+  });
+  hooks.acquireOperation = async () => {
+    calls.push("acquire");
+    return { permitId: "unexpected", reused: false };
+  };
+  await assert.rejects(
+    manager.withVolumeOperation({
+      sandbox,
+      context,
+      operationId: "blocked",
+      run: async () => {
+        calls.push("dispatch");
+      },
+      checkpoint: async () => {
+        calls.push("checkpoint");
+        return 1;
+      },
+    }),
+    /STABLE_FREEZE_UNAVAILABLE/,
+  );
+  assert.deepEqual(calls, []);
+});
+
+test("a signal pause proof cannot authorize checkpoint or persistence confirmation", async () => {
+  const { manager, provider, hooks, calls } = protectedVolumeOperationFixture();
+  const sandbox = await manager.getOrCreateThreadSandbox(context);
+  const freeze = provider.volumeControl!.freeze;
+  provider.volumeControl!.freeze = async (input) =>
+    Object.assign({}, await freeze(input), {
+      mechanism: "signal-pause",
+    }) as Awaited<ReturnType<typeof freeze>>;
+  hooks.checkpoint = async () => {
+    calls.push("confirmation");
+    return { sync: { persisted: true, confirmedSeq: 1 } };
+  };
+  await assert.rejects(
+    manager.withVolumeOperation({
+      sandbox,
+      context,
+      operationId: "bad-proof",
+      run: async () => {
+        calls.push("dispatch");
+      },
+    }),
+    /FREEZE_UNCONFIRMED/,
+  );
+  assert.deepEqual(calls, ["started", "dispatch", "freeze"]);
+  await assert.rejects(
+    manager.volumeCheckpoint(sandbox, {
+      freezeId: "barrier-permit-1",
+      supervisorNonce: "supervisor-1",
+    }),
+    /no validated kernel freeze proof/,
+  );
+  assert.ok(!calls.includes("confirmation"));
+});
+
+test("a caller-supplied freeze ID cannot fabricate a validated persistence barrier", async () => {
+  const { manager, hooks, calls } = protectedVolumeOperationFixture();
+  const sandbox = await manager.getOrCreateThreadSandbox(context);
+  hooks.checkpoint = async () => {
+    calls.push("confirmation");
+    return { sync: { persisted: true, confirmedSeq: 1 } };
+  };
+  await assert.rejects(
+    manager.volumeCheckpoint(sandbox, {
+      freezeId: "fabricated",
+      supervisorNonce: "supervisor-1",
+    }),
+    /no validated kernel freeze proof/,
+  );
+  assert.deepEqual(calls, []);
+});
+
+test("a verified freeze grant expires before resume can reopen writers", async () => {
+  const { manager, provider, hooks, calls } = protectedVolumeOperationFixture();
+  const sandbox = await manager.getOrCreateThreadSandbox(context);
+  hooks.checkpoint = async () => {
+    calls.push("confirmation");
+    return { sync: { persisted: true, confirmedSeq: 1 } };
+  };
+  provider.volumeControl!.resume = async (input) => {
+    await assert.rejects(
+      manager.volumeCheckpoint(sandbox, {
+        freezeId: input.freezeId,
+        supervisorNonce: input.expectedNonce,
+      }),
+      /no validated kernel freeze proof/,
+    );
+    calls.push("resume");
+  };
+  await manager.withVolumeOperation({
+    sandbox,
+    context,
+    operationId: "grant-lifetime",
+    run: async () => undefined,
+  });
+  assert.deepEqual(calls, [
+    "started",
+    "freeze",
+    "confirmation",
+    "resume",
+    "release:persisted",
+  ]);
 });

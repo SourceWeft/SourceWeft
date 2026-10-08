@@ -611,7 +611,7 @@ export class VolumeRepository {
 
   /** The tree as it was at `seq`, built from current entries and retained versions. */
   async entriesAt(volumeId: string, seq: number): Promise<EntryRow[]> {
-    const current = await this.db
+    const current = this.db
       .select({
         path: sandboxVolumeEntries.path,
         kind: sandboxVolumeEntries.kind,
@@ -628,7 +628,7 @@ export class VolumeRepository {
           lte(sandboxVolumeEntries.seq, seq),
         ),
       );
-    const old = await this.db
+    const old = this.db
       .select({
         path: sandboxVolumeEntryVersions.path,
         kind: sandboxVolumeEntryVersions.kind,
@@ -646,7 +646,10 @@ export class VolumeRepository {
           gt(sandboxVolumeEntryVersions.toSeq, seq),
         ),
       );
-    return [...current, ...old].sort((a, b) =>
+    // A writer may archive current rows at any moment. One statement gives both
+    // sources the same MVCC snapshot; two SELECTs can duplicate or omit history.
+    const rows = await current.unionAll(old);
+    return rows.sort((a, b) =>
       a.path < b.path ? -1 : a.path > b.path ? 1 : 0,
     );
   }

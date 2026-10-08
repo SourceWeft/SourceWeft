@@ -12,7 +12,11 @@ import { resolveVolumeLimits, VolumeQuotaExceeded } from "../src/service/quota";
 import { VolumeService } from "../src/service/volume-service";
 import { encodeManifestObject } from "../src/protocol/manifest";
 import type { Manifest } from "../src/protocol/types";
-import type { ObjectStore } from "../src/store/object-store";
+import {
+  ObjectReadLimitExceeded,
+  type ObjectStore,
+} from "../src/store/object-store";
+import { MAX_MANIFEST_OBJECT_BYTES } from "../src/protocol/constants";
 
 // Explicit disposable database only. This suite never reads backend .env or production credentials.
 const url = process.env.SANDBOX_VOLUME_TEST_DATABASE_URL;
@@ -2016,6 +2020,50 @@ test(
 );
 
 test(
+  "an oversized WAL transport read preserves the confirmed tree and never looks like an empty chain",
+  { skip: !enabled },
+  async () => {
+    const v = await volume();
+    const a = await service.attach(v.id, "bounded-wal");
+    await repo.reserveSlots(a, 64, 64, 3600);
+    await repo.applyManifest(
+      v.id,
+      manifest(v.id, a.id, 0, "already-confirmed"),
+      {},
+      new Map(),
+    );
+    const before = await repo.entries(v.id);
+    const unexpected = async () => {
+      throw new Error("unexpected object-store method in bounded WAL fixture");
+    };
+    const limited = new VolumeService({
+      db: drizzle(pool),
+      keyPrefix: "limit/",
+      store: {
+        presignWriteOnce: unexpected,
+        presignGet: unexpected,
+        put: unexpected,
+        size: unexpected,
+        copy: unexpected,
+        deletePrefix: unexpected,
+        deleteObject: unexpected,
+        get: async (_key: string, options?: { maxBytes: number }) => {
+          assert.equal(options?.maxBytes, MAX_MANIFEST_OBJECT_BYTES);
+          throw new ObjectReadLimitExceeded(options!.maxBytes);
+        },
+      },
+    });
+    await assert.rejects(limited.applyWal(a.id), ObjectReadLimitExceeded);
+    assert.equal(await repo.head(v.id), 1);
+    assert.deepEqual(await repo.entries(v.id), before);
+    assert.equal((await repo.getAttachment(a.id))?.lastAppliedSeq, 1);
+    assert.equal(await repo.rejectCount(v.id), 0);
+    assert.equal(await service.confirmPersistence(a.id, 1), true);
+    assert.equal(await service.confirmPersistence(a.id, 2), false);
+  },
+);
+
+test(
   "non-C path collations cannot delete case/accent siblings during directory deletion, replacement or rollback",
   { skip: !enabled },
   async (t) => {
@@ -2055,6 +2103,7 @@ test(
         description: "ICU en-US",
       },
     ];
+    let legacyMismatches = 0;
     for (const variant of variants) {
       const collation = `${testSchema}.${variant.name}`;
       const collationSql = `${quoteIdentifier(testSchema)}.${quoteIdentifier(variant.name)}`;
@@ -2072,13 +2121,39 @@ test(
         `alter table sandbox_volume_entry_versions alter column path type text collate ${collationSql}`,
       );
       try {
-        const legacy = await pool.query(
-          `select ('a/child' collate ${collationSql} > 'A/' and 'a/child' collate ${collationSql} < 'A0') wrongly_selected`,
+        // Darwin libc, glibc and ICU disagree on which particular case/accent
+        // spelling exposes the old predicate. Probe both directions and also
+        // missed descendants; keep every production tree assertion below.
+        const spellings = [
+          "A",
+          "a",
+          "Á",
+          "á",
+          "A0",
+          "E",
+          "e",
+          "É",
+          "é",
+          "ß",
+          "ss",
+          "Z",
+          "z",
+        ];
+        const legacy = await pool.query<{
+          parent: string;
+          path: string;
+          selected: boolean;
+        }>(
+          `select p.parent,c.path,(c.path collate ${collationSql} > p.parent || '/' and c.path collate ${collationSql} < p.parent || '0') selected
+           from unnest($1::text[]) p(parent) cross join unnest($2::text[]) c(path)`,
+          [spellings, spellings.map((parent) => `${parent}/child`)],
         );
-        assert.equal(
-          legacy.rows[0].wrongly_selected,
-          true,
-          "fixture must reproduce the pre-fix corruption predicate",
+        const mismatches = legacy.rows.filter(
+          (row) => row.selected !== row.path.startsWith(`${row.parent}/`),
+        );
+        legacyMismatches += mismatches.length;
+        t.diagnostic(
+          `${variant.description}: old predicate differs from byte-prefix membership for ${mismatches.length} pairs; witnesses=${JSON.stringify(mismatches.slice(0, 3))}`,
         );
         const v = await volume();
         const a = await service.attach(v.id, "non-c");
@@ -2161,6 +2236,72 @@ test(
           'alter table sandbox_volume_entry_versions alter column path type text collate "C"',
         );
       }
+    }
+    assert.ok(
+      legacyMismatches > 0,
+      "the non-C provider matrix must expose at least one pre-fix prefix corruption witness",
+    );
+  },
+);
+
+test(
+  "historical tree reads remain a single snapshot while a writer archives the current entries",
+  { skip: !enabled },
+  async () => {
+    const v = await volume();
+    const a = await service.attach(v.id, "history-reader");
+    await repo.applyManifest(
+      v.id,
+      manifest(v.id, a.id, 0, "before"),
+      {},
+      new Map(),
+    );
+    assert.equal(await service.confirmPersistence(a.id, 1), true);
+    const expected = await repo.entriesAt(v.id, 1);
+    const client = await pool.connect();
+    const original = client.query;
+    let interleaved = false;
+    // Only synchronize the interleaving; both reads and the competing commit are
+    // real PostgreSQL operations, with no fake database results.
+    client.query = new Proxy(original, {
+      apply(target, thisArg, args) {
+        const query =
+          typeof args[0] === "string"
+            ? args[0]
+            : (args[0] as { text?: string })?.text;
+        if (
+          !interleaved &&
+          query?.includes('from "sandbox_volume_entry_versions"')
+        ) {
+          interleaved = true;
+          return repo
+            .applyManifest(
+              v.id,
+              { ...manifest(v.id, a.id, 1, "after"), deletes: ["before"] },
+              {},
+              new Map(),
+            )
+            .then(() => Reflect.apply(target, thisArg, args));
+        }
+        return Reflect.apply(target, thisArg, args);
+      },
+    });
+    try {
+      const reader = new VolumeRepository(drizzle(client));
+      const observed = await reader.entriesAt(v.id, 1);
+      assert.equal(
+        interleaved,
+        true,
+        "the competing writer must actually commit",
+      );
+      assert.deepEqual(
+        observed,
+        expected,
+        "a previously confirmed version must not contain duplicate/mixed-generation entries",
+      );
+    } finally {
+      client.query = original;
+      client.release();
     }
   },
 );

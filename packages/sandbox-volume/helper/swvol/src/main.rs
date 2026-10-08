@@ -347,21 +347,25 @@ fn walk(root: &Path, start: &Path, recursive: bool, out: &mut Vec<Cand>, skipped
     Ok(())
 }
 
-fn unchanged(e: &Entry, md: &fs::Metadata) -> bool {
+fn timestamp_ns(seconds: i64, nanoseconds: i64) -> Result<i64> {
+    if !(0..1_000_000_000).contains(&nanoseconds) { bail!("invalid filesystem timestamp nanoseconds"); }
+    // i64::MIN uses seconds=-9223372037 and positive subsecond nanoseconds;
+    // checking the seconds multiplication in i64 would reject a valid boundary.
+    (seconds as i128 * 1_000_000_000 + nanoseconds as i128)
+        .try_into().map_err(|_| anyhow!("timestamp outside signed-i64 nanosecond range"))
+}
+
+fn unchanged(e: &Entry, md: &fs::Metadata) -> Result<bool> {
     let ft = md.file_type();
-    match e.kind {
-        'd' => ft.is_dir() && e.mode == (md.mode() & 0o7777),
-        'f' => {
-            ft.is_file()
-                && e.size == md.len()
-                && e.mtime_ns == md.mtime() * 1_000_000_000 + md.mtime_nsec()
-                && e.ctime_ns == md.ctime() * 1_000_000_000 + md.ctime_nsec()
-                && e.ino == md.ino()
-                && e.mode == (md.mode() & 0o7777)
-        }
-        'l' => ft.is_symlink() && e.ino == md.ino() && e.ctime_ns == md.ctime() * 1_000_000_000 + md.ctime_nsec(),
+    let mtime = timestamp_ns(md.mtime(), md.mtime_nsec())?;
+    let ctime = timestamp_ns(md.ctime(), md.ctime_nsec())?;
+    Ok(match e.kind {
+        'd' => ft.is_dir() && e.mode == (md.mode() & 0o7777) && e.mtime_ns == mtime,
+        'f' => ft.is_file() && e.size == md.len() && e.mtime_ns == mtime
+            && e.ctime_ns == ctime && e.ino == md.ino() && e.mode == (md.mode() & 0o7777),
+        'l' => ft.is_symlink() && e.ino == md.ino() && e.ctime_ns == ctime,
         _ => false,
-    }
+    })
 }
 
 // ---------- pack writer (chunks -> compressed packs -> pre-signed slots) ----------
@@ -720,7 +724,7 @@ fn sync_scoped(root: &Path, st: &mut State, scope: Scope, trigger: &str, rebase:
     let scanned = cands.len();
     for c in &cands {
         if let Some(e) = st.entries.get(&c.rel) {
-            if unchanged(e, &c.md) {
+            if unchanged(e, &c.md).with_context(|| format!("cannot persist timestamps: {}", c.rel))? {
                 continue;
             }
         }
@@ -728,12 +732,12 @@ fn sync_scoped(root: &Path, st: &mut State, scope: Scope, trigger: &str, rebase:
         let mut e = Entry {
             kind: 'd',
             mode: c.md.mode() & 0o7777,
-            mtime_ns: c.md.mtime() * 1_000_000_000 + c.md.mtime_nsec(),
+            mtime_ns: timestamp_ns(c.md.mtime(), c.md.mtime_nsec()).with_context(|| format!("cannot persist mtime: {}", c.rel))?,
             size: 0,
             link: None,
             chunks: vec![],
             ino: c.md.ino(),
-            ctime_ns: c.md.ctime() * 1_000_000_000 + c.md.ctime_nsec(),
+            ctime_ns: timestamp_ns(c.md.ctime(), c.md.ctime_nsec()).with_context(|| format!("cannot persist ctime: {}", c.rel))?,
         };
         if ft.is_symlink() {
             e.kind = 'l';
@@ -756,8 +760,6 @@ fn sync_scoped(root: &Path, st: &mut State, scope: Scope, trigger: &str, rebase:
                 }
                 Err(error) => return Err(error).with_context(|| format!("cannot persist file read: {}", c.rel)),
             }
-        } else {
-            e.mtime_ns = 0; // directory mtimes are not content
         }
         upserts.push((c.rel.clone(), e));
     }
@@ -1031,11 +1033,14 @@ fn cmd_restore(root: &Path, plan_src: &str, index_only: bool) -> Result<()> {
     let staging_name = format!("restore-{}-{}", now_ms(), std::process::id());
     if metadata.names()?.contains(&staging_name) { bail!("restore staging name collision"); }
     let staging = metadata.new_directory(&staging_name)?;
+    let staged_directories = safe_fs::RestoreDirectoryCache::new(&staging, 128)?;
     let mut dirs: Vec<&WireEntry> = plan.entries.iter().filter(|e| e.k == 'd').collect();
     dirs.sort_by(|a, b| a.p.cmp(&b.p));
     for d in &dirs {
-        staging.directory(&d.p, true)?;
+        staged_directories.directory(&d.p, true)?;
     }
+    // Data workers need leaf parents, not every ancestor from mkdir traversal.
+    staged_directories.clear();
     // chunk id -> [(file index, offset)]
     let files: Vec<&WireEntry> = plan.entries.iter().filter(|e| e.k == 'f').collect();
     let mut targets: HashMap<&str, Vec<(usize, u64)>> = HashMap::new();
@@ -1047,7 +1052,7 @@ fn cmd_restore(root: &Path, plan_src: &str, index_only: bool) -> Result<()> {
     let mut identities = vec![(0u64, 0u64); files.len()];
     for (i, f) in files.iter().enumerate() {
         if !single[i] {
-            let fh = staging.create_file(&f.p)?;
+            let fh = staged_directories.create_file(&f.p)?;
             fh.set_len(f.s)?;
             let md = fh.metadata()?;
             identities[i] = (md.dev(), md.ino());
@@ -1108,12 +1113,12 @@ fn cmd_restore(root: &Path, plan_src: &str, index_only: bool) -> Result<()> {
                             for (fi, off) in &targets[*id] {
                                 let f = files[*fi];
                                 if single[*fi] {
-                                    let fh = staging.create_file(&f.p)?;
+                                    let fh = staged_directories.create_file(&f.p)?;
                                     (&fh).write_all(&data)?;
                                     fh.set_permissions(fs::Permissions::from_mode(f.m))?;
                                     filetime::set_file_handle_times(&fh, None, Some(filetime::FileTime::from_unix_time(f.t.div_euclid(1_000_000_000), f.t.rem_euclid(1_000_000_000) as u32)))?;
                                 } else {
-                                    let fh = staging.open_created_file(&f.p, identities[*fi])?;
+                                    let fh = staged_directories.open_created_file(&f.p, identities[*fi])?;
                                     fh.write_all_at(&data, *off)?;
                                 }
                             }
@@ -1144,35 +1149,56 @@ fn cmd_restore(root: &Path, plan_src: &str, index_only: bool) -> Result<()> {
         if single[i] {
             continue;
         }
-        let fh = staging.open_created_file(&f.p, identities[i])?;
+        let fh = staged_directories.open_created_file(&f.p, identities[i])?;
         fh.set_permissions(fs::Permissions::from_mode(f.m))?;
         filetime::set_file_handle_times(&fh, None, Some(filetime::FileTime::from_unix_time(f.t.div_euclid(1_000_000_000), f.t.rem_euclid(1_000_000_000) as u32)))?;
     }
+    drop(staged_directories);
     root_dir.require_empty_content()?;
     staging.publish_into(&root_dir)?;
     metadata.remove(&staging_name, true)?;
     // Publication changes ctime on moved top-level entries. Index the published
     // tree, never pre-rename staging metadata, so a no-change barrier stays empty.
     let mut st = State { volume: plan.volume.clone(), attachment: plan.attachment.clone(), boot_id: boot_id(), seq: plan.seq, next_pack: 0, ..Default::default() };
-    for e in &plan.entries {
-        let md = root_dir.metadata(&e.p)?;
+    let published_directories = safe_fs::RestoreDirectoryCache::new(&root_dir, 128)?;
+    let mut published_entries: Vec<_> = plan.entries.iter().collect();
+    published_entries.sort_by(|a, b| a.p.cmp(&b.p));
+    for e in published_entries {
+        let md = published_directories.metadata(&e.p)?;
+        let restored_mtime = timestamp_ns(md.mtime(), md.mtime_nsec())?;
+        if e.k != 'd' && restored_mtime != e.t {
+            bail!("filesystem cannot preserve requested mtime: {}", e.p);
+        }
+        if e.k != 'd' && (md.mode() & 0o7777) != e.m {
+            bail!("filesystem cannot preserve requested mode: {}", e.p);
+        }
         st.entries.insert(
             e.p.clone(),
             Entry {
                 kind: e.k,
                 mode: if e.k == 'd' { e.m } else { md.mode() & 0o7777 },
-                mtime_ns: if e.k == 'd' { 0 } else { md.mtime() * 1_000_000_000 + md.mtime_nsec() },
+                mtime_ns: restored_mtime,
                 size: if e.k == 'f' { md.len() } else { 0 },
                 link: e.l.clone(),
                 chunks: e.c.clone(),
                 ino: md.ino(),
-                ctime_ns: md.ctime() * 1_000_000_000 + md.ctime_nsec(),
+                ctime_ns: timestamp_ns(md.ctime(), md.ctime_nsec())?,
             },
         );
     }
     st.have = plan.chunks.clone();
     for d in dirs.iter().rev() {
-        root_dir.chmod(&d.p, d.m)?;
+        // Restore children before restricting parent modes or setting parent
+        // timestamps. Read final identity from the same no-follow directory FD.
+        let md = published_directories.set_metadata(&d.p, d.m, d.t)?;
+        let restored_mtime = timestamp_ns(md.mtime(), md.mtime_nsec())?;
+        if restored_mtime != d.t { bail!("filesystem cannot preserve requested mtime: {}", d.p); }
+        if (md.mode() & 0o7777) != d.m { bail!("filesystem cannot preserve requested mode: {}", d.p); }
+        let entry = st.entries.get_mut(&d.p).expect("indexed restored directory");
+        entry.mode = md.mode() & 0o7777;
+        entry.mtime_ns = restored_mtime;
+        entry.ino = md.ino();
+        entry.ctime_ns = timestamp_ns(md.ctime(), md.ctime_nsec())?;
     }
     metadata.atomic_write("state.bin", &bincode::serialize(&st)?)?;
     // Written last: its presence means "this boot of this container holds a complete restore".
@@ -1444,9 +1470,15 @@ fn cmd_daemon(root: &Path) -> Result<()> {
 }
 
 fn cmd_flush(root: &Path, full: bool, rebase: Option<u64>) -> Result<i32> {
-    // Identity first: a replaced container must be reported, never synced.
-    let st = load_attached_state(root)?;
-    drop(st);
+    // The daemon already owns a validated index; avoid decoding a second full
+    // copy in every client. Direct mode loads and validates it once under lock.
+    if cmd_check(root) != 0 { return Ok(EXIT_INSTANCE_CHANGED); }
+    match fs::metadata(state_path(root)) {
+        Ok(metadata) if metadata.is_file() => {},
+        Ok(_) => bail!("state index is not a regular file"),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(EXIT_INSTANCE_CHANGED),
+        Err(error) => return Err(error.into()),
+    }
     if let Ok(mut conn) = UnixStream::connect(meta_dir(root).join("sock")) {
         conn.set_read_timeout(Some(Duration::from_secs(600)))?;
         match rebase {
@@ -1489,13 +1521,16 @@ fn cmd_treehash(root: &Path) -> Result<()> {
     walk(root, root, true, &mut cands, &mut skipped)?;
     cands.sort_by(|a, b| a.rel.cmp(&b.rel));
     let mut h = blake3::Hasher::new();
+    h.update(b"SWVOL_TREEHASH_V2\0");
     let (mut files, mut bytes) = (0u64, 0u64);
     for c in &cands {
         let ft = c.md.file_type();
-        let line = if ft.is_dir() {
-            format!("d {:o} {}\n", c.md.mode() & 0o7777, c.rel)
+        timestamp_ns(c.md.mtime(), c.md.mtime_nsec()).with_context(|| format!("cannot hash unsupported mtime: {}", c.rel))?;
+        let record = if ft.is_dir() {
+            serde_json::json!(["d", c.md.mode() & 0o7777, c.md.mtime().to_string(), c.md.mtime_nsec(), c.rel])
         } else if ft.is_symlink() {
-            format!("l {} -> {}\n", c.rel, fs::read_link(&c.abs)?.to_string_lossy())
+            let target = fs::read_link(&c.abs)?.into_os_string().into_string().map_err(|_| anyhow!("non-UTF-8 symlink targets are unsupported; refusing an incomplete tree hash"))?;
+            serde_json::json!(["l", c.md.mode() & 0o7777, c.md.mtime().to_string(), c.md.mtime_nsec(), c.rel, target])
         } else {
             let mut fh = blake3::Hasher::new();
             let mut f = File::open(&c.abs)?;
@@ -1509,11 +1544,13 @@ fn cmd_treehash(root: &Path) -> Result<()> {
             }
             files += 1;
             bytes += c.md.len();
-            format!("f {:o} {} {} {} {}\n", c.md.mode() & 0o7777, c.md.len(), c.md.mtime() * 1_000_000_000 + c.md.mtime_nsec(), fh.finalize().to_hex(), c.rel)
+            serde_json::json!(["f", c.md.mode() & 0o7777, c.md.len(), c.md.mtime().to_string(), c.md.mtime_nsec(), fh.finalize().to_hex().to_string(), c.rel])
         };
-        h.update(line.as_bytes());
+        let bytes = serde_json::to_vec(&record)?;
+        h.update(&(bytes.len() as u64).to_le_bytes());
+        h.update(&bytes);
     }
-    println!("{}", serde_json::json!({"treehash": h.finalize().to_hex().to_string(), "entries": cands.len(), "files": files, "bytes": bytes}));
+    println!("{}", serde_json::json!({"treehash_version": 2, "algorithm": "blake3-framed-json-v2", "treehash": h.finalize().to_hex().to_string(), "entries": cands.len(), "files": files, "bytes": bytes}));
     Ok(())
 }
 
@@ -1596,3 +1633,18 @@ mod durability_tests {
 
 #[cfg(test)]
 mod reliability_tests;
+
+#[cfg(test)]
+mod timestamp_tests {
+    use super::timestamp_ns;
+    #[test]
+    fn signed_nanosecond_bounds_use_wide_intermediates() {
+        for ns in [i64::MIN, -1, 0, 1, i64::MAX] {
+            assert_eq!(timestamp_ns(ns.div_euclid(1_000_000_000), ns.rem_euclid(1_000_000_000)).unwrap(), ns);
+        }
+        for ns in [i64::MIN as i128 - 1, i64::MAX as i128 + 1] {
+            assert!(timestamp_ns(ns.div_euclid(1_000_000_000) as i64, ns.rem_euclid(1_000_000_000) as i64).is_err());
+        }
+        assert!(timestamp_ns(0, -1).is_err()); assert!(timestamp_ns(0, 1_000_000_000).is_err());
+    }
+}

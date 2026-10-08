@@ -14,7 +14,7 @@ capabilities=()
 if [ "$with_fuse" = 1 ]; then
   capabilities+=(--privileged --tmpfs /test:rw,size=512m)
 fi
-docker run --rm --network none "${capabilities[@]}" --tmpfs /enospc:rw,size=8m \
+docker run --rm --network none --pids-limit 512 "${capabilities[@]}" --tmpfs /enospc:rw,size=8m \
   -v "$PWD":/home/rust/src:ro \
   -v swvol-cargo-registry:/root/.cargo/registry \
   -v swvol-target-swvol-x86_64:/target \
@@ -31,6 +31,8 @@ docker run --rm --network none "${capabilities[@]}" --tmpfs /enospc:rw,size=8m \
       --target x86_64-unknown-linux-musl --test linux_durability real_enospc -- --ignored --nocapture
     if [ "$SWVOL_RUN_FUSE" = 1 ]; then
       test -c /dev/fuse
+      SWVOL_TEST_ROOT=/test cargo test --locked --offline --manifest-path swvol/Cargo.toml \
+        --target x86_64-unknown-linux-musl --test linux_durability signed_timestamp_boundaries_roundtrip_and_out_of_range_never_confirm -- --ignored --nocapture
       cargo test --locked --offline --manifest-path swlazy/Cargo.toml --target x86_64-unknown-linux-musl \
         --test formal_fuse -- --ignored --nocapture
       cargo test --locked --offline --manifest-path swvol-supervisor/Cargo.toml --target x86_64-unknown-linux-musl \

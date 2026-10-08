@@ -10,10 +10,15 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, RwLock};
 use serde::Deserialize;
 use swvol_core::{ChunkLoc, ChunkRef, RestorePlan};
+use std::time::{Duration, Instant};
 
+struct ReadFailure { expires: Instant, message: String }
+const MAX_FAILED_CHUNKS: usize = 256;
+const FAILURE_COOLDOWN: Duration = Duration::from_secs(5);
 struct Cache {
     chunks: HashMap<String, (usize, u64)>,
     fetching: HashSet<String>,
+    failures: HashMap<String, ReadFailure>,
     bytes: usize,
     tick: u64,
 }
@@ -66,7 +71,7 @@ impl VolumeStore {
         if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
             return Err(std::io::Error::last_os_error()).context("chunk cache is already owned by another mount");
         }
-        let mut cache = Cache { chunks: HashMap::new(), fetching: HashSet::new(), bytes: 0, tick: 0 };
+        let mut cache = Cache { chunks: HashMap::new(), fetching: HashSet::new(), failures: HashMap::new(), bytes: 0, tick: 0 };
         for item in fs::read_dir(directory)? {
             let item = item?;
             let name = item.file_name().into_string().map_err(|_| anyhow::anyhow!("invalid cache entry name"))?;
@@ -165,12 +170,13 @@ impl VolumeStore {
         }
         current.packs.extend(update.packs);
         drop(current);
+        { let mut cache = self.cache.lock().unwrap(); for id in &ids { cache.failures.remove(id); } }
+        self.wake.notify_all();
         { let mut priorities = self.priorities.lock().unwrap(); for id in ids { priorities.remove(&id); } }
         self.publish_priorities()?;
         Ok(())
     }
-    fn fetch_with_refresh(&self, id: &str, mut loc: ChunkLoc, mut url: String) -> Result<Vec<u8>> {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    fn fetch_with_refresh(&self, id: &str, mut loc: ChunkLoc, mut url: String, deadline: Instant) -> Result<Vec<u8>> {
         for _ in 0..3 {
             match self.workers.chunk(id, &loc, &url, deadline) {
                 Ok(bytes) => return Ok(bytes),
@@ -201,7 +207,7 @@ impl VolumeStore {
         }
         Ok(())
     }
-    fn chunk(&self, id: &str) -> Result<Vec<u8>> {
+    fn chunk(&self, id: &str, deadline: Instant) -> Result<Vec<u8>> {
         let (loc, url) = {
             let locations = self.locators.read().unwrap();
             let loc = locations.chunks.get(id).context("chunk location missing")?;
@@ -209,6 +215,10 @@ impl VolumeStore {
         };
         let mut cache = self.cache.lock().unwrap();
         loop {
+            let now = Instant::now();
+            if now >= deadline { bail!("FUSE read request budget expired while waiting for a shared chunk"); }
+            cache.failures.retain(|_, failure| failure.expires > now);
+            if let Some(failure) = cache.failures.get(id) { bail!("recent shared chunk read failed: {}", failure.message); }
             cache.tick += 1;
             let tick = cache.tick;
             if let Some((size, used)) = cache.chunks.get_mut(id) {
@@ -222,10 +232,12 @@ impl VolumeStore {
                 return Ok(data);
             }
             if cache.fetching.insert(id.to_owned()) { break; }
-            cache = self.wake.wait(cache).unwrap();
+            let remaining = deadline.checked_duration_since(Instant::now()).context("FUSE read request budget expired while waiting for a shared chunk")?;
+            cache = self.wake.wait_timeout(cache, remaining).unwrap().0;
         }
         drop(cache);
-        let result = self.fetch_with_refresh(id, loc.clone(), url);
+        let result = self.fetch_with_refresh(id, loc.clone(), url, deadline);
+        let fetch_failed = result.is_err();
         let mut cache = self.cache.lock().unwrap();
         let result = result.and_then(|data| {
             self.evict(&mut cache, data.len())?;
@@ -244,18 +256,28 @@ impl VolumeStore {
             Ok(data)
         });
         cache.fetching.remove(id);
+        if fetch_failed {
+            // All waiters observe this failure instead of starting serialized
+            // minute-long attempts. A valid locator patch clears it immediately.
+            cache.failures.retain(|_, failure| failure.expires > Instant::now());
+            if cache.failures.len() >= MAX_FAILED_CHUNKS {
+                let oldest = cache.failures.iter().min_by_key(|(_, failure)| failure.expires).map(|(id, _)| id.clone());
+                if let Some(oldest) = oldest { cache.failures.remove(&oldest); }
+            }
+            cache.failures.insert(id.to_owned(), ReadFailure { expires: Instant::now() + FAILURE_COOLDOWN, message: result.as_ref().err().unwrap().to_string().chars().take(512).collect() });
+        } else if result.is_ok() { cache.failures.remove(id); }
         drop(cache);
         self.wake.notify_all();
         result
     }
-    pub fn read(&self, chunks: &[ChunkRef], offset: u64, out: &mut [u8]) -> Result<()> {
+    pub fn read(&self, chunks: &[ChunkRef], offset: u64, out: &mut [u8], deadline: Instant) -> Result<()> {
         let end = offset.checked_add(out.len() as u64).context("file read overflow")?;
         let mut position = 0u64;
         let mut filled = 0;
         for ChunkRef(id, raw) in chunks {
             let next = position + *raw as u64;
             if next > offset && position < end {
-                let data = self.chunk(id)?;
+                let data = self.chunk(id, deadline)?;
                 if data.len() != *raw as usize { bail!("file chunk length mismatch"); }
                 let from = offset.saturating_sub(position) as usize;
                 let to = ((end - position).min(*raw as u64)) as usize;

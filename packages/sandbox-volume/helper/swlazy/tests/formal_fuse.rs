@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use serde_json::json;
 type Objects = Arc<Mutex<BTreeMap<String, Vec<u8>>>>;
-struct ControlPolicy { token: String, url: String, chunks: std::collections::HashMap<String, swvol_core::ChunkLoc>, packs: std::collections::HashMap<String, String>, requests: Arc<Mutex<Vec<Vec<String>>>> }
+struct ControlPolicy { token: String, url: String, chunks: std::collections::HashMap<String, swvol_core::ChunkLoc>, packs: std::collections::HashMap<String, String>, requests: Arc<Mutex<Vec<Vec<String>>>>, failure_status: u16 }
 struct Storage { url: String, objects: Objects, stop: Arc<AtomicBool>, worker: Option<std::thread::JoinHandle<()>>, control: Arc<Mutex<Option<ControlPolicy>>> }
 impl Storage {
     fn new() -> Self {
@@ -67,6 +67,7 @@ fn serve(mut stream: TcpStream, objects: &Objects, policy: &Arc<Mutex<Option<Con
         assert!(authorization == format!("Bearer {}", control.token), "incorrect fixture control credential");
         let request: serde_json::Value = serde_json::from_slice(&body).unwrap();
         control.requests.lock().unwrap().push(request["locatorChunkIds"].as_array().unwrap().iter().map(|id| id.as_str().unwrap().to_owned()).collect());
+        if control.failure_status != 0 { (control.failure_status, b"control unavailable".to_vec()) } else {
         let chunks: std::collections::HashMap<_, _> = request["locatorChunkIds"].as_array().unwrap().iter().map(|id| {
             let id = id.as_str().unwrap(); (id.to_owned(), control.chunks[id].clone())
         }).collect();
@@ -77,6 +78,7 @@ fn serve(mut stream: TcpStream, objects: &Objects, policy: &Arc<Mutex<Option<Con
         (200, serde_json::to_vec(&json!({"head":head,"confirmedSeq":head.min(request["seq"].as_u64().unwrap()),"epoch":1,"hasMore":false,
             "slots":{"volume":"v","attachment":"a","pack_prefix":"att/a/p/","manifest_prefix":"att/a/m/1/","packs":pack_slots,"manifests":manifests},
             "slotsExpiresAt":"2030-01-01T00:00:00Z","controlExpiresAt":"2030-01-01T00:00:00Z","locators":{"chunks":chunks,"packs":packs}})).unwrap())
+        }
     } else if method == "PUT" {
         if map.contains_key(&path) { (412, Vec::new()) }
         else { map.insert(path, body); (201, Vec::new()) }
@@ -312,7 +314,7 @@ fn independent_control_refreshes_expired_lower_urls_without_changing_inodes() {
     assert!(prepared.status.success(), "{}", String::from_utf8_lossy(&prepared.stdout));
     fs::copy(source.join(".sourceweft/slots.json"), state.join("slots.json")).unwrap();
     let token = format!("svctl_{}", "t".repeat(43));
-    *storage.control.lock().unwrap() = Some(ControlPolicy { token: token.clone(), url: storage.url.clone(), chunks: plan.chunks.clone(), packs: plan.packs.clone(), requests: Arc::new(Mutex::new(Vec::new())) });
+    *storage.control.lock().unwrap() = Some(ControlPolicy { token: token.clone(), url: storage.url.clone(), chunks: plan.chunks.clone(), packs: plan.packs.clone(), requests: Arc::new(Mutex::new(Vec::new())), failure_status: 0 });
     fs::write(state.join("control.json"), serde_json::to_vec(&json!({"url":format!("{}/v1/sandbox-volumes/a/control",storage.url),"token":token,"attachment":"a","bootId":fs::read_to_string("/proc/sys/kernel/random/boot_id").unwrap().trim()})).unwrap()).unwrap();
     fs::set_permissions(state.join("control.json"), fs::Permissions::from_mode(0o600)).unwrap();
     for (key, url) in &mut plan.packs { *url = format!("{}/expired/{key}", storage.url); }
@@ -370,7 +372,7 @@ fn six_hundred_chunk_patches_publish_incrementally_and_prioritize_blocked_cold_r
     let prepared = Command::new(&sync_binary).args(["restore", "--index-only", "--root"]).arg(&source).arg("--state-dir").arg(&state).arg("--plan").arg(&plan_path).output().unwrap(); assert!(prepared.status.success());
     fs::copy(source.join(".sourceweft/slots.json"), state.join("slots.json")).unwrap();
     let calls = Arc::new(Mutex::new(Vec::new())); let token = format!("svctl_{}", "u".repeat(43));
-    *storage.control.lock().unwrap() = Some(ControlPolicy { token: token.clone(), url: storage.url.clone(), chunks: repaired, packs: repaired_urls, requests: calls.clone() });
+    *storage.control.lock().unwrap() = Some(ControlPolicy { token: token.clone(), url: storage.url.clone(), chunks: repaired, packs: repaired_urls, requests: calls.clone(), failure_status: 0 });
     fs::write(state.join("control.json"), serde_json::to_vec(&json!({"url":format!("{}/v1/sandbox-volumes/a/control",storage.url),"token":token,"attachment":"a","bootId":fs::read_to_string("/proc/sys/kernel/random/boot_id").unwrap().trim()})).unwrap()).unwrap(); fs::set_permissions(state.join("control.json"), fs::Permissions::from_mode(0o600)).unwrap();
     for (key, url) in &mut plan.packs { *url = format!("{}/expired/{key}", storage.url); }
     fs::write(&plan_path, serde_json::to_vec(&plan).unwrap()).unwrap();
@@ -405,4 +407,100 @@ fn six_hundred_chunk_patches_publish_incrementally_and_prioritize_blocked_cold_r
     assert_eq!(fs::metadata(base.join("lower").join(&cold)).unwrap().ino(), inode);
     assert!(running.0.try_wait().unwrap().is_none());
     eprintln!("LOCATOR_BATCH_RECOVERY_OK chunks=600 first_patch_before_complete=true cold_read_priority=true inode_unchanged=true command_running=true elapsed_ms={}", started.elapsed().as_millis());
+}
+
+#[test]
+#[ignore = "real 60-second control outage; checks shared-chunk waiters and queued reads against one request budget"]
+fn control_outage_does_not_multiply_read_budget_for_shared_chunks() {
+    use std::os::unix::fs::PermissionsExt;
+    const SEED: u32 = 0x5eed_f00d;
+    const READERS: usize = 8;
+    struct Cleanup { base: PathBuf, fuse: Option<Child>, daemon: Option<Child>, readers: Vec<Child> }
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            for child in &mut self.readers { let _ = child.kill(); }
+            for child in [&mut self.fuse, &mut self.daemon] { if let Some(child) = child { let _ = child.kill(); let _ = child.wait(); } }
+            for child in &mut self.readers { let _ = child.wait(); }
+            let lower = self.base.join("lower");
+            if fs::read_to_string("/proc/self/mountinfo").unwrap().contains(&format!(" {} ", lower.display())) { let _ = Command::new("umount").arg(&lower).status(); }
+            let _ = fs::remove_dir_all(&self.base);
+        }
+    }
+    let storage = Storage::new();
+    let base = PathBuf::from(format!("/test/swvol-control-outage-{}", std::process::id()));
+    let mut cleanup = Cleanup { base: base.clone(), fuse: None, daemon: None, readers: vec![] };
+    for dir in ["source", "state", "cache", "lower"] { fs::create_dir_all(base.join(dir)).unwrap(); }
+    let source = base.join("source"); let state = base.join("state"); fs::set_permissions(&state, fs::Permissions::from_mode(0o700)).unwrap();
+    let empty = base.join("empty.json"); fs::write(&empty, serde_json::to_vec(&json!({"volume":"v","attachment":"a","seq":0,"entries":[],"chunks":{},"packs":{}})).unwrap()).unwrap();
+    swvol(&source, &["restore", "--plan", empty.to_str().unwrap()]); storage.grant(&source, true);
+    let bytes = random_bytes(SEED, 64 * 1024); for index in 0..READERS { fs::write(source.join(format!("same-{index}")), &bytes).unwrap(); }
+    swvol(&source, &["flush"]);
+    let objects = storage.objects.lock().unwrap(); let manifest = swvol_core::decode_manifest(objects.get("/att/a/m/1/1").unwrap(), 1024 * 1024).unwrap();
+    let urls = objects.keys().map(|key| (key.trim_start_matches('/').to_owned(), format!("{}{key}", storage.url))).collect(); drop(objects);
+    let mut plan = swvol_core::RestorePlan { volume: "v".into(), attachment: "a".into(), seq: manifest.seq, entries: manifest.upserts, chunks: manifest.chunks.into_iter().collect(), packs: urls };
+    assert_eq!(plan.chunks.len(), 1, "all readers must share one uncached content chunk");
+    let plan_path = base.join("plan.json"); fs::write(&plan_path, serde_json::to_vec(&plan).unwrap()).unwrap();
+    let binary = std::env::var("SWVOL_SYNC_BIN").unwrap();
+    let prepared = Command::new(&binary).args(["restore", "--index-only", "--root"]).arg(&source).arg("--state-dir").arg(&state).arg("--plan").arg(&plan_path).output().unwrap(); assert!(prepared.status.success());
+    fs::copy(source.join(".sourceweft/slots.json"), state.join("slots.json")).unwrap();
+    let token = format!("svctl_{}", "z".repeat(43)); let calls = Arc::new(Mutex::new(Vec::new()));
+    *storage.control.lock().unwrap() = Some(ControlPolicy { token: token.clone(), url: storage.url.clone(), chunks: plan.chunks.clone(), packs: plan.packs.clone(), requests: calls.clone(), failure_status: 503 });
+    fs::write(state.join("control.json"), serde_json::to_vec(&json!({"url":format!("{}/v1/sandbox-volumes/a/control",storage.url),"token":token,"attachment":"a","bootId":fs::read_to_string("/proc/sys/kernel/random/boot_id").unwrap().trim()})).unwrap()).unwrap(); fs::set_permissions(state.join("control.json"), fs::Permissions::from_mode(0o600)).unwrap();
+    for (key, url) in &mut plan.packs { *url = format!("{}/expired/{key}", storage.url); }
+    fs::write(&plan_path, serde_json::to_vec(&plan).unwrap()).unwrap();
+    cleanup.fuse = Some(Command::new(env!("CARGO_BIN_EXE_swlazy")).arg("mount-volume").arg(&plan_path).arg(base.join("cache")).arg(base.join("lower")).args(["--cap-mb", "4"]).arg("--state-dir").arg(&state).stdout(Stdio::null()).stderr(Stdio::inherit()).spawn().unwrap());
+    let ready_deadline = Instant::now() + Duration::from_secs(10);
+    while !fs::read_to_string("/proc/self/mountinfo").unwrap().contains(&format!(" {} ", base.join("lower").display())) { assert!(Instant::now() < ready_deadline); std::thread::sleep(Duration::from_millis(10)); }
+    cleanup.daemon = Some(Command::new(&binary).args(["daemon", "--control-allow-http", "--root"]).arg(&source).arg("--state-dir").arg(&state).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap());
+    let started = Instant::now();
+    for index in 0..READERS { cleanup.readers.push(Command::new("cat").arg(base.join("lower").join(format!("same-{index}"))).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap()); }
+    let mut statuses = vec![None; READERS];
+    while started.elapsed() < Duration::from_secs(70) {
+        for (index, child) in cleanup.readers.iter_mut().enumerate() { if statuses[index].is_none() { statuses[index] = child.try_wait().unwrap(); } }
+        if statuses.iter().all(Option::is_some) { break; }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let completed = statuses.iter().filter(|status| status.is_some()).count();
+    eprintln!("CONTROL_OUTAGE_RESULT seed={SEED:#x} readers={READERS} unique_chunks=1 chunk_bytes=65536 worker_count=4 cache_mib=4 observation_seconds=70 completed={completed} elapsed_ms={}", started.elapsed().as_millis());
+    assert!(calls.lock().unwrap().len() >= 2, "real independent control polling must have failed during the read");
+    assert_eq!(completed, READERS, "shared cache waits and queueing multiplied the 60-second request budget");
+    assert!(statuses.iter().all(|status| !status.unwrap().success()), "no expired-URL read may return invented content");
+    assert_eq!(fs::read_dir(base.join("cache")).unwrap().filter(|entry| entry.as_ref().unwrap().file_name() != ".lock").count(), 0, "failed reads must never publish cache bytes");
+}
+
+#[test]
+#[ignore = "requires real /dev/fuse; negative metadata must be rejected before mount because pinned fuser cannot encode it faithfully"]
+fn formal_fuse_refuses_negative_mtime_without_clamping_or_mutating_plan() {
+    use std::os::unix::fs::MetadataExt;
+    assert!(Path::new("/dev/fuse").exists());
+    for ns in [-1i64, -1_000_000_000, i64::MIN, i64::MAX] {
+        for kind in ['f', 'd', 'l'] {
+            let base = PathBuf::from(format!("/test/swvol-fuse-time-{}-{ns}-{kind}", std::process::id()));
+            let mut mounts = Mounts { base: base.clone(), child: None, overlay: false };
+            for dir in ["cache", "lower"] { fs::create_dir_all(base.join(dir)).unwrap(); }
+            let bytes = serde_json::to_vec(&json!({"volume":"v","attachment":"a","seq":1,"entries":[{"p":"entry","k":kind,"m":if kind=='l' {0o777} else {0o700},"t":ns.to_string(),"s":0,"l":if kind=='l' {Some("unchanged-target")} else {None},"c":[]}],"chunks":{},"packs":{}})).unwrap();
+            let plan = base.join("plan.json"); fs::write(&plan, &bytes).unwrap();
+            mounts.child = Some(Command::new(env!("CARGO_BIN_EXE_swlazy")).arg("mount-volume").arg(&plan).arg(base.join("cache")).arg(base.join("lower")).stdout(Stdio::null()).stderr(Stdio::piped()).spawn().unwrap());
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                if let Some(status) = mounts.child.as_mut().unwrap().try_wait().unwrap() {
+                    let mut error = String::new(); mounts.child.as_mut().unwrap().stderr.as_mut().unwrap().read_to_string(&mut error).unwrap();
+                    assert!(ns < 0 && !status.success(), "unexpected mount exit {status}: {error}");
+                    assert!(error.contains("NEGATIVE_MTIME_UNSUPPORTED"), "must diagnose pinned dependency limit: {error}");
+                    assert_eq!(fs::read_dir(base.join("cache")).unwrap().count(), 0, "rejected plan must not start cache/workers");
+                    break;
+                }
+                if fs::read_to_string("/proc/self/mountinfo").unwrap().contains(&format!(" {} ", base.join("lower").display())) {
+                    let md = fs::symlink_metadata(base.join("lower/entry")).unwrap();
+                    let actual = md.mtime() as i128 * 1_000_000_000 + md.mtime_nsec() as i128;
+                    assert!(ns >= 0, "negative plan incorrectly mounted: requested={ns}, actual={actual}, kind={kind}");
+                    assert_eq!(actual, ns as i128, "supported positive boundary must be exact");
+                    break;
+                }
+                assert!(Instant::now() < deadline, "mount did not reject or become ready"); std::thread::sleep(Duration::from_millis(10));
+            }
+            assert_eq!(fs::read(&plan).unwrap(), bytes);
+        }
+    }
+    eprintln!("FUSE_TIME_CONTRACT_OK negative_minus_one_min_and_whole_second_rejected=true positive_max_exact=true kinds=file_directory_symlink original_plan_preserved=true");
 }

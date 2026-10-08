@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const TTL: Duration = Duration::from_secs(86400);
 
@@ -36,14 +36,26 @@ pub struct LazyFs {
     volume_jobs: Option<std::sync::mpsc::SyncSender<VolumeRead>>,
 }
 struct VolumeRead {
+    deadline: Instant,
     chunks: Arc<Vec<swvol_core::ChunkRef>>,
     offset: u64,
     size: usize,
     reply: ReplyData,
 }
 
+pub fn validate_mtimes(mtimes: impl IntoIterator<Item = i64>) -> std::io::Result<()> {
+    // Pinned fuser 0.15.1 time_from_system_time does not normalize fractional
+    // pre-epoch values: -1ns becomes (0s, 1ns). Preserve the plan and fail before
+    // mounting instead of changing its metadata or replacing the dependency.
+    if mtimes.into_iter().any(|ns| ns < 0) {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput,
+            "NEGATIVE_MTIME_UNSUPPORTED: pinned fuser 0.15.1 cannot faithfully encode pre-epoch timestamps"));
+    }
+    Ok(())
+}
 fn ts(ns: i64) -> SystemTime {
-    if ns >= 0 { UNIX_EPOCH + Duration::from_nanos(ns as u64) } else { UNIX_EPOCH }
+    assert!(ns >= 0, "negative FUSE mtime must be rejected before constructing nodes");
+    UNIX_EPOCH + Duration::from_nanos(ns as u64)
 }
 
 impl LazyFs {
@@ -186,7 +198,7 @@ impl Filesystem for LazyFs {
         let len = (size as u64).min(n.size - off) as usize;
         if let Some(jobs) = &self.volume_jobs {
             if len > 8 * 1024 * 1024 { return reply.error(libc::EINVAL); }
-            let job = VolumeRead { chunks: n.chunks.clone(), offset: off, size: len, reply };
+            let job = VolumeRead { deadline: Instant::now() + Duration::from_secs(60), chunks: n.chunks.clone(), offset: off, size: len, reply };
             if let Err(error) = jobs.try_send(job) {
                 match error {
                     std::sync::mpsc::TrySendError::Full(job) => job.reply.error(libc::EAGAIN),
@@ -270,6 +282,7 @@ impl Filesystem for LazyFs {
 }
 
 pub fn mount(plan: &Plan, store: Option<Arc<Store>>, mountpoint: &str, allow_other: bool) -> std::io::Result<()> {
+    validate_mtimes(plan.entries.iter().map(|entry| entry.t))?;
     let fs = LazyFs::new(plan, store);
     let mut opts = vec![MountOption::RO, MountOption::FSName("swlazy".into()), MountOption::Subtype("swlazy".into()), MountOption::DefaultPermissions, MountOption::NoAtime];
     if allow_other {
@@ -289,6 +302,7 @@ pub fn mount(plan: &Plan, store: Option<Arc<Store>>, mountpoint: &str, allow_oth
 /// Mount the production chunk format with bounded network workers. No active
 /// tree or inode map is changed during this mount's lifetime.
 pub fn mount_volume(plan: &swvol_core::RestorePlan, store: Arc<crate::volume::VolumeStore>, mountpoint: &str, allow_other: bool, initial_fd: Option<std::os::fd::OwnedFd>) -> std::io::Result<()> {
+    validate_mtimes(plan.entries.iter().map(|entry| entry.t))?;
     let view = Plan {
         pack_size: 0, total: plan.entries.iter().map(|entry| entry.s).sum(), packs: vec![],
         entries: plan.entries.iter().map(|entry| crate::plan::Entry { p: entry.p.clone(), k: entry.k.to_string(), m: entry.m, t: entry.t, s: entry.s, o: 0, l: entry.l.clone() }).collect(),
@@ -307,7 +321,7 @@ pub fn mount_volume(plan: &swvol_core::RestorePlan, store: Arc<crate::volume::Vo
             let job = rx.lock().unwrap().recv();
             let Ok(job) = job else { break; };
             let mut data = vec![0; job.size];
-            match store.read(&job.chunks, job.offset, &mut data) {
+            match store.read(&job.chunks, job.offset, &mut data, job.deadline) {
                 Ok(()) => job.reply.data(&data),
                 Err(error) => { eprintln!("volume read failed: {error:#}"); job.reply.error(libc::EIO); }
             }

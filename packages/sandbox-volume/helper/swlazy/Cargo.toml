@@ -1,6 +1,6 @@
 [package]
 name = "swlazy"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "Experiment: on-demand loading of a sandbox volume (FUSE read-through fs, and seccomp-notify placeholder hydration)"
 

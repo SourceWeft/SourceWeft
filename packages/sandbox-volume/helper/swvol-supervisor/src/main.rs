@@ -1,7 +1,7 @@
 #![cfg(target_os = "linux")]
 use anyhow::{bail, ensure, Context, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
@@ -32,6 +32,10 @@ extern "C" fn lifecycle_signal(signal: i32) {
 struct Identity {
     boot_id: String,
     supervisor_nonce: String,
+    #[serde(default)]
+    stable_freeze: bool,
+    #[serde(default)]
+    freeze_mechanism: String,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -45,6 +49,8 @@ struct Gate {
     recovered_journal_digest: Option<String>,
     #[serde(default)]
     recovery_ancestry: Vec<Identity>,
+    #[serde(default)]
+    last_resumed_freeze: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -70,6 +76,7 @@ enum Request {
     Status {
         expected_nonce: String,
         execution_id: String,
+        max_output_bytes: Option<usize>,
     },
     Cancel {
         expected_nonce: String,
@@ -79,9 +86,13 @@ enum Request {
         expected_nonce: String,
         freeze_id: String,
     },
+    Pause {
+        expected_nonce: String,
+        pause_id: String,
+    },
     Resume {
         expected_nonce: String,
-        freeze_id: String,
+        pause_id: String,
     },
     Drain {
         expected_nonce: String,
@@ -92,6 +103,12 @@ enum Request {
 #[derive(Serialize, Deserialize)]
 struct Completion {
     exit_code: i32,
+    #[serde(default)]
+    stdout_bytes: Option<u64>,
+    #[serde(default)]
+    stderr_bytes: Option<u64>,
+    #[serde(default)]
+    truncated: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -117,6 +134,8 @@ struct Supervisor {
     workload_uid: u32,
     control_uid: u32,
     workloads: HashMap<String, Workload>,
+    recovered_executions: HashSet<String>,
+    finished_executions: HashSet<String>,
     _lease: File,
 }
 
@@ -271,6 +290,10 @@ fn recover_namespaces(state_dir: &Path, boot_id: &str) -> Result<String> {
         private_dir(&entry.path())?;
         let path = entry.path().join("namespace.json");
         if !path.exists() {
+            ensure!(
+                !entry.path().join("go.json").exists(),
+                "started execution lacks a namespace journal; recovery cannot prove it stopped"
+            );
             continue;
         }
         let journal: NamespaceJournal = serde_json::from_slice(&fs::read(path)?)?;
@@ -340,6 +363,8 @@ impl Supervisor {
             "another supervisor owns this state directory"
         );
         let identity = Identity {
+            stable_freeze: false,
+            freeze_mechanism: "signal-pause".into(),
             boot_id: fs::read_to_string("/proc/sys/kernel/random/boot_id")?
                 .trim()
                 .into(),
@@ -373,6 +398,17 @@ impl Supervisor {
             (None, Vec::new())
         };
         let recovered_journal_digest = Some(recover_namespaces(&state_dir, &identity.boot_id)?);
+        let recovered_executions = fs::read_dir(&state_dir)?
+            .collect::<std::io::Result<Vec<_>>>()?
+            .into_iter()
+            .filter_map(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .strip_prefix("exec-")
+                    .map(str::to_owned)
+            })
+            .collect();
         // Every restart begins closed. Neither daemon startup nor credential presence
         // authorizes restoring admission to a volume with unconfirmed dirty files.
         let gate = Gate {
@@ -383,6 +419,7 @@ impl Supervisor {
             recovered_from,
             recovered_journal_digest,
             recovery_ancestry,
+            last_resumed_freeze: None,
         };
         atomic_json(&state_dir.join("gate.json"), &gate)?;
         Ok(Self {
@@ -392,6 +429,8 @@ impl Supervisor {
             workload_uid,
             control_uid,
             workloads: HashMap::new(),
+            recovered_executions,
+            finished_executions: HashSet::new(),
             _lease: lease,
         })
     }
@@ -442,6 +481,7 @@ impl Supervisor {
             .arg("init-child")
             .arg(&directory)
             .arg(self.workload_uid.to_string())
+            .arg(&self.workspace)
             .stdin(Stdio::null())
             .stdout(Stdio::from(log.try_clone()?))
             .stderr(Stdio::from(log));
@@ -502,6 +542,18 @@ impl Supervisor {
                 return Err(error);
             }
         };
+        // Register ownership before publishing go. If persistence or stop fails,
+        // the namespace must remain tracked for a later drain, never disappear
+        // from the set on which an all-namespaces-exited proof is based.
+        self.workloads.insert(
+            launch.execution_id.clone(),
+            Workload {
+                child,
+                init_fd,
+                directory: directory.clone(),
+                stopped: false,
+            },
+        );
         let authorize = atomic_json(&directory.join("namespace.json"), &journal).and_then(|_| {
             atomic_json(
                 &directory.join("go.json"),
@@ -509,27 +561,41 @@ impl Supervisor {
             )
         });
         if let Err(error) = authorize {
-            signal_pidfd(&init_fd, libc::SIGKILL)?;
-            ensure!(
-                exited(&init_fd, Duration::from_secs(30))?,
-                "failed start still has a namespace"
-            );
-            child.wait()?;
+            self.gate.open = false;
+            let gate_error = self.persist_gate().err();
+            self.workloads.get_mut(&launch.execution_id).context("missing tracked namespace")?.stop()
+                .context("failed authorization left a namespace pending termination; admission remains closed")?;
+            if let Some(gate_error) = gate_error {
+                return Err(error.context(format!(
+                    "closed admission could not be persisted: {gate_error}"
+                )));
+            }
             return Err(error);
         }
-        self.workloads.insert(
-            launch.execution_id.clone(),
-            Workload {
-                child,
-                init_fd,
-                directory,
-                stopped: false,
-            },
-        );
         Ok(serde_json::json!({"execution_id": launch.execution_id, "started": true}))
     }
 
+    fn reap_finished(&mut self) -> Result<()> {
+        let mut finished = Vec::new();
+        for (execution_id, work) in &mut self.workloads {
+            // Main-command completion alone is insufficient: background writers
+            // keep their PID namespace alive. Drop its kernel handles only once
+            // the pidfd confirms teardown and the launcher has been reaped.
+            if exited(&work.init_fd, Duration::ZERO)? && work.child.try_wait()?.is_some() {
+                finished.push(execution_id.clone());
+            }
+        }
+        for execution_id in finished {
+            self.workloads.remove(&execution_id);
+            self.finished_executions.insert(execution_id);
+        }
+        Ok(())
+    }
+
     fn handle(&mut self, request: Request) -> Result<serde_json::Value> {
+        // Every control request collects completed launchers, including new
+        // launches when the host never asked for the previous command's result.
+        self.reap_finished()?;
         match request {
             Request::Identity => Ok(serde_json::to_value(&self.gate)?),
             Request::Open {
@@ -557,6 +623,7 @@ impl Supervisor {
                 opened.recovered_from = None;
                 opened.recovered_journal_digest = None;
                 opened.recovery_ancestry.clear();
+                opened.last_resumed_freeze = None;
                 atomic_json(&self.state_dir.join("gate.json"), &opened)?;
                 self.gate = opened;
                 Ok(serde_json::json!({"open":true}))
@@ -571,13 +638,51 @@ impl Supervisor {
             Request::Status {
                 expected_nonce,
                 execution_id,
+                max_output_bytes,
             } => {
                 self.expected(&expected_nonce)?;
-                let work = self
-                    .workloads
-                    .get(&execution_id)
-                    .context("unknown execution id")?;
-                let completion = work.directory.join("completion.json");
+                ensure!(token(&execution_id), "invalid execution id");
+                let output_limit = max_output_bytes.unwrap_or(64 * 1024);
+                ensure!(
+                    (1..=1024 * 1024).contains(&output_limit),
+                    "status output limit must be 1..1048576 bytes per stream"
+                );
+                let (directory, namespace_exited, recovered) =
+                    match self.workloads.get(&execution_id) {
+                        Some(work) => (
+                            work.directory.clone(),
+                            exited(&work.init_fd, Duration::ZERO)?,
+                            false,
+                        ),
+                        None => {
+                            ensure!(
+                                self.recovered_executions.contains(&execution_id)
+                                    || self.finished_executions.contains(&execution_id),
+                                "unknown execution id has no confirmed namespace teardown proof"
+                            );
+                            let directory = self.state_dir.join(format!("exec-{execution_id}"));
+                            let metadata =
+                                fs::symlink_metadata(&directory).context("unknown execution id")?;
+                            ensure!(
+                                metadata.is_dir()
+                                    && metadata.uid() == 0
+                                    && metadata.mode() & 0o077 == 0,
+                                "untrusted execution ledger"
+                            );
+                            let launch: Launch =
+                                serde_json::from_slice(&fs::read(directory.join("launch.json"))?)?;
+                            ensure!(
+                                launch.execution_id == execution_id,
+                                "execution ledger identity mismatch"
+                            );
+                            (
+                                directory,
+                                true,
+                                self.recovered_executions.contains(&execution_id),
+                            )
+                        }
+                    };
+                let completion = directory.join("completion.json");
                 let completed = if completion.exists() {
                     Some(serde_json::from_slice::<Completion>(&fs::read(
                         completion,
@@ -585,21 +690,39 @@ impl Supervisor {
                 } else {
                     None
                 };
-                let bounded_output = |name: &str| -> Result<String> {
-                    let path = work.directory.join(name);
+                let bounded_output = |name: &str, end: Option<u64>| -> Result<String> {
+                    let path = directory.join(name);
                     if !path.exists() {
                         return Ok(String::new());
                     }
                     let mut bytes = Vec::new();
                     File::open(path)?
-                        .take(8 * 1024 * 1024)
+                        .take(end.unwrap_or(8 * 1024 * 1024).min(output_limit as u64))
                         .read_to_end(&mut bytes)?;
                     Ok(String::from_utf8_lossy(&bytes).into_owned())
                 };
-                let stdout = bounded_output("stdout")?;
-                let stderr = bounded_output("stderr")?;
+                let stdout = bounded_output(
+                    "stdout",
+                    completed.as_ref().and_then(|value| value.stdout_bytes),
+                )?;
+                let stderr = bounded_output(
+                    "stderr",
+                    completed.as_ref().and_then(|value| value.stderr_bytes),
+                )?;
+                let truncated = completed
+                    .as_ref()
+                    .and_then(|value| value.truncated)
+                    .unwrap_or(true)
+                    || completed
+                        .as_ref()
+                        .and_then(|value| value.stdout_bytes)
+                        .is_some_and(|count| count > output_limit as u64)
+                    || completed
+                        .as_ref()
+                        .and_then(|value| value.stderr_bytes)
+                        .is_some_and(|count| count > output_limit as u64);
                 Ok(
-                    serde_json::json!({"completion":completed,"namespace_exited":exited(&work.init_fd,Duration::ZERO)?,"stdout":stdout,"stderr":stderr}),
+                    serde_json::json!({"completion":completed,"namespace_exited":namespace_exited,"recovered":recovered,"command_started":directory.join("go.json").exists(),"stdout":stdout,"stderr":stderr,"truncated":truncated}),
                 )
             }
             Request::Cancel {
@@ -607,10 +730,15 @@ impl Supervisor {
                 execution_id,
             } => {
                 self.expected(&expected_nonce)?;
-                self.workloads
-                    .get_mut(&execution_id)
-                    .context("unknown execution id")?
-                    .stop()?;
+                if let Some(work) = self.workloads.get_mut(&execution_id) {
+                    work.stop()?;
+                } else {
+                    ensure!(
+                        self.finished_executions.contains(&execution_id)
+                            || self.recovered_executions.contains(&execution_id),
+                        "unknown execution id"
+                    );
+                }
                 Ok(
                     serde_json::json!({"execution_id":execution_id,"stopped":true,"boundary":"pid-namespace"}),
                 )
@@ -621,6 +749,18 @@ impl Supervisor {
             } => {
                 self.expected(&expected_nonce)?;
                 ensure!(token(&freeze_id), "invalid freeze id");
+                bail!("STABLE_FREEZE_UNAVAILABLE: signal pause cannot prevent kernel SIGCONT; no persistence barrier was established")
+            }
+            Request::Pause {
+                expected_nonce,
+                pause_id: freeze_id,
+            } => {
+                self.expected(&expected_nonce)?;
+                ensure!(token(&freeze_id), "invalid pause id");
+                ensure!(
+                    self.gate.last_resumed_freeze.as_ref() != Some(&freeze_id),
+                    "completed freeze identity cannot be reused"
+                );
                 ensure!(self.gate.drain_id.is_none(), "volume is draining");
                 ensure!(
                     self.gate
@@ -646,14 +786,23 @@ impl Supervisor {
                     work.await_receipt("frozen.json", &freeze_id)?;
                 }
                 Ok(
-                    serde_json::json!({"freeze_id":freeze_id,"supervisor_nonce":self.gate.identity.supervisor_nonce,"all_writers_stopped":true}),
+                    serde_json::json!({"pause_id":freeze_id,"supervisor_nonce":self.gate.identity.supervisor_nonce,"observed_stopped":true,"signal_pause":true,"stable_freeze":false}),
                 )
             }
             Request::Resume {
                 expected_nonce,
-                freeze_id,
+                pause_id: freeze_id,
             } => {
                 self.expected(&expected_nonce)?;
+                if self.gate.open
+                    && self.gate.freeze_id.is_none()
+                    && self.gate.drain_id.is_none()
+                    && self.gate.last_resumed_freeze.as_ref() == Some(&freeze_id)
+                {
+                    return Ok(
+                        serde_json::json!({"pause_id":freeze_id,"resumed":true,"signal_pause":true}),
+                    );
+                }
                 ensure!(
                     self.gate.freeze_id.as_ref() == Some(&freeze_id),
                     "freeze fence does not match"
@@ -675,9 +824,10 @@ impl Supervisor {
                 let mut opened = self.gate.clone();
                 opened.open = true;
                 opened.freeze_id = None;
+                opened.last_resumed_freeze = Some(freeze_id.clone());
                 atomic_json(&self.state_dir.join("gate.json"), &opened)?;
                 self.gate = opened;
-                Ok(serde_json::json!({"freeze_id":freeze_id,"resumed":true}))
+                Ok(serde_json::json!({"pause_id":freeze_id,"resumed":true,"signal_pause":true}))
             }
             Request::Drain {
                 expected_nonce,
@@ -803,7 +953,7 @@ fn capture_output(reader: &mut impl Read, writer: &mut File, total: &mut usize) 
     Ok(())
 }
 
-fn init_child(directory: &Path, uid: u32) -> Result<()> {
+fn init_child(directory: &Path, uid: u32, workspace: &Path) -> Result<()> {
     ensure!(
         unsafe { libc::getpid() } == 1 && unsafe { libc::geteuid() } == 0,
         "init-child requires root PID namespace init"
@@ -843,7 +993,28 @@ fn init_child(directory: &Path, uid: u32) -> Result<()> {
             .mode(0o600)
             .open(directory.join(name))?)
     };
+    let safe_environment = [
+        "PATH",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "TZ",
+        "VIRTUAL_ENV",
+        "NODE_PATH",
+        "PNPM_HOME",
+        "PLAYWRIGHT_BROWSERS_PATH",
+        "SOURCEWEFT_REMOTION_BROWSER",
+        "SOURCEWEFT_HTML_RUNTIME",
+        "SOURCEWEFT_HTML_FONTS",
+        "SOURCEWEFT_PNPM_STORE",
+    ]
+    .into_iter()
+    .filter_map(|name| std::env::var_os(name).map(|value| (name, value)))
+    .collect::<Vec<_>>();
     let mut child = Command::new("/usr/bin/setpriv")
+        .env_clear()
+        .envs(safe_environment)
+        .env("HOME", workspace)
         .args([
             "--reuid",
             &uid.to_string(),
@@ -893,6 +1064,11 @@ fn init_child(directory: &Path, uid: u32) -> Result<()> {
                     &directory.join("completion.json"),
                     &Completion {
                         exit_code: status.code().unwrap_or(128 + status.signal().unwrap_or(0)),
+                        stdout_bytes: Some(stdout_size.min(8 * 1024 * 1024) as u64),
+                        stderr_bytes: Some(stderr_size.min(8 * 1024 * 1024) as u64),
+                        truncated: Some(
+                            stdout_size > 8 * 1024 * 1024 || stderr_size > 8 * 1024 * 1024,
+                        ),
                     },
                 )?;
                 completed = true;
@@ -935,6 +1111,93 @@ fn peer_uid(stream: &UnixStream) -> Result<u32> {
     Ok(credentials.uid)
 }
 
+fn read_control_request(stream: &mut UnixStream, deadline: Instant) -> Result<Vec<u8>> {
+    let mut line = Vec::new();
+    let mut buffer = [0u8; 8192];
+    loop {
+        let remaining = deadline
+            .checked_duration_since(Instant::now())
+            .context("control request total read budget exceeded")?;
+        ensure!(
+            !remaining.is_zero(),
+            "control request total read budget exceeded"
+        );
+        stream.set_read_timeout(Some(remaining))?;
+        let capacity = buffer.len().min(MAX_REQUEST + 1 - line.len());
+        let count = match stream.read(&mut buffer[..capacity]) {
+            Ok(count) => count,
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error.into()),
+        };
+        if count == 0 {
+            break;
+        }
+        let newline = buffer[..count].iter().position(|byte| *byte == b'\n');
+        line.extend_from_slice(&buffer[..newline.map_or(count, |position| position + 1)]);
+        if newline.is_some() || line.len() > MAX_REQUEST {
+            break;
+        }
+    }
+    Ok(line)
+}
+
+fn write_control_response(stream: &mut UnixStream, response: &[u8]) -> Result<()> {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut written = 0;
+    while written < response.len() {
+        let remaining = deadline
+            .checked_duration_since(Instant::now())
+            .context("control response total write budget exceeded")?;
+        ensure!(
+            !remaining.is_zero(),
+            "control response total write budget exceeded"
+        );
+        stream.set_write_timeout(Some(remaining))?;
+        match stream.write(&response[written..]) {
+            Ok(0) => bail!("control client closed before response completion"),
+            Ok(count) => written += count,
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(())
+}
+
+fn handle_control_client(
+    stream: &mut UnixStream,
+    supervisor: &Arc<Mutex<Supervisor>>,
+    read_deadline: Instant,
+) -> Result<()> {
+    let line = read_control_request(stream, read_deadline)?;
+    ensure!(
+        Instant::now() < read_deadline,
+        "control request expired before parsing"
+    );
+    let result = if line.len() > MAX_REQUEST {
+        Err(anyhow::anyhow!("control request exceeds limit"))
+    } else {
+        serde_json::from_slice::<Request>(&line)
+            .map_err(Into::into)
+            .and_then(|request| {
+                let mut state = supervisor
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("supervisor state poisoned"))?;
+                ensure!(
+                    Instant::now() < read_deadline,
+                    "control request expired before dispatch"
+                );
+                state.handle(request)
+            })
+    };
+    let response = match result {
+        Ok(value) => serde_json::json!({"ok":true,"result":value}),
+        Err(error) => serde_json::json!({"ok":false,"error":error.to_string()}),
+    };
+    let mut encoded = serde_json::to_vec(&response)?;
+    encoded.push(b'\n');
+    write_control_response(stream, &encoded)
+}
+
 fn serve(socket: &Path, supervisor: Supervisor) -> Result<()> {
     let parent = socket.parent().context("socket needs a parent directory")?;
     let metadata = fs::symlink_metadata(parent)?;
@@ -964,48 +1227,36 @@ fn serve(socket: &Path, supervisor: Supervisor) -> Result<()> {
         unsafe { libc::chown(path.as_ptr(), supervisor.control_uid, u32::MAX) } == 0,
         "cannot assign control socket owner"
     );
+    let owner = supervisor.control_uid;
     let supervisor = Arc::new(Mutex::new(supervisor));
+    // Pre-create a bounded control pool before workloads run. A partial request
+    // or a fork storm cannot force the listener to spawn unbounded threads.
+    let (send, receive) = std::sync::mpsc::sync_channel::<(UnixStream, Instant)>(4);
+    let receive = Arc::new(Mutex::new(receive));
+    for index in 0..4 {
+        let receive = receive.clone();
+        let supervisor = supervisor.clone();
+        std::thread::Builder::new().name(format!("swvol-control-{index}")).spawn(move || {
+            loop {
+                let stream=match receive.lock() {Ok(queue)=>queue.recv(),Err(_)=>return};
+                let Ok((mut stream,deadline))=stream else {return};
+                if handle_control_client(&mut stream,&supervisor,deadline).is_err() {
+                    eprintln!("control client disconnected or sent an invalid request; supervisor retained");
+                }
+            }
+        })?;
+    }
     for connection in listener.incoming() {
-        let Ok(mut stream) = connection else { continue };
-        let handled = (|| -> Result<()> {
-            stream.set_read_timeout(Some(Duration::from_secs(10)))?;
-            stream.set_write_timeout(Some(Duration::from_secs(10)))?;
-            let owner = supervisor
-                .lock()
-                .map_err(|_| anyhow::anyhow!("supervisor state poisoned"))?
-                .control_uid;
-            ensure!(
-                [0, owner].contains(&peer_uid(&stream)?),
-                "unauthorized control peer"
-            );
-            let mut line = Vec::new();
-            BufReader::new(&stream)
-                .take((MAX_REQUEST + 1) as u64)
-                .read_until(b'\n', &mut line)?;
-            let result = if line.len() > MAX_REQUEST {
-                Err(anyhow::anyhow!("control request exceeds limit"))
-            } else {
-                serde_json::from_slice::<Request>(&line)
-                    .map_err(Into::into)
-                    .and_then(|request| {
-                        supervisor
-                            .lock()
-                            .map_err(|_| anyhow::anyhow!("supervisor state poisoned"))?
-                            .handle(request)
-                    })
-            };
-            let response = match result {
-                Ok(value) => serde_json::json!({"ok":true,"result":value}),
-                Err(error) => serde_json::json!({"ok":false,"error":error.to_string()}),
-            };
-            writeln!(stream, "{}", serde_json::to_string(&response)?)?;
-            Ok(())
-        })();
-        if handled.is_err() {
-            eprintln!(
-                "control client disconnected or sent an invalid request; supervisor retained"
-            );
+        let Ok(stream) = connection else {
+            std::thread::sleep(Duration::from_millis(10));
+            continue;
+        };
+        let read_deadline = Instant::now() + Duration::from_secs(10);
+        if !peer_uid(&stream).is_ok_and(|uid| [0, owner].contains(&uid)) {
+            continue;
         }
+        // Overloaded local clients receive EOF rather than retaining an unbounded queue.
+        let _ = send.try_send((stream, read_deadline));
     }
     Ok(())
 }
@@ -1018,7 +1269,7 @@ fn main() -> Result<()> {
     match args.get(1).map(String::as_str) {
         Some("version") => println!("swvol-supervisor {VERSION}"),
         Some("serve") if args.len()==7 => serve(Path::new(&args[2]), Supervisor::new(PathBuf::from(&args[3]), PathBuf::from(&args[4]), args[5].parse()?, args[6].parse()?)?)?,
-        Some("init-child") if args.len()==4 => init_child(Path::new(&args[2]), args[3].parse()?)?,
+        Some("init-child") if args.len()==5 => init_child(Path::new(&args[2]), args[3].parse()?, Path::new(&args[4]))?,
         Some("request") if args.len()==3 => {
             let mut request = Vec::new();
             std::io::stdin().take(MAX_REQUEST as u64+1).read_to_end(&mut request)?;
@@ -1031,7 +1282,7 @@ fn main() -> Result<()> {
             ensure!(!response.is_empty(),"supervisor closed the control channel without a result");
             print!("{response}");
         }
-        _ => bail!("usage: swvol-supervisor version | serve SOCKET STATE_DIR WORKSPACE WORKLOAD_UID CONTROL_UID | request SOCKET | init-child STATE_DIR UID"),
+        _ => bail!("usage: swvol-supervisor version | serve SOCKET STATE_DIR WORKSPACE WORKLOAD_UID CONTROL_UID | request SOCKET | init-child STATE_DIR UID WORKSPACE"),
     }
     Ok(())
 }

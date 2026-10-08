@@ -1,5 +1,8 @@
 import { setTimeout as waitForPermit } from "node:timers/promises";
-import { SandboxVolumePersistenceError } from "./volume-durability";
+import {
+  SandboxVolumePersistenceError,
+  SandboxVolumeRecoveryPendingError,
+} from "./volume-durability";
 import { randomUUID } from "node:crypto";
 import {
   isSandboxInstanceMissingError,
@@ -264,6 +267,10 @@ export class SandboxManager {
     string,
     SandboxSupervisorIdentity
   >();
+  private readonly verifiedFreezeBarriers = new Map<
+    string,
+    { freezeId: string; supervisorNonce: string }
+  >();
   private readonly missingVolumeInstances = new Map<string, string>();
 
   private volumeScopeKey(context: SandboxRuntimeContext): string {
@@ -343,6 +350,7 @@ export class SandboxManager {
             "SANDBOX_VOLUME_SUPERVISOR_UNVERIFIED: attachment requires protected instance identity.",
           );
         }
+        this.assertStableFreeze(identity);
         return previousSandboxId
           ? volume.onContainerReplaced({ ...attachInput, previousSandboxId })
           : volume.attach(attachInput);
@@ -410,7 +418,11 @@ export class SandboxManager {
     const attachmentId = this.volumeAttachments.get(
       input.sandbox.providerSandboxId,
     );
-    if (!volume || !attachmentId) return input.run(input.operationId);
+    if (!volume) return input.run(input.operationId);
+    if (!attachmentId)
+      throw new Error(
+        "SANDBOX_VOLUME_ATTACHMENT_REQUIRED: durable operations require a verified attachment before dispatch.",
+      );
     const control = this.input.provider.volumeControl;
     if (
       !control ||
@@ -438,6 +450,7 @@ export class SandboxManager {
         "SANDBOX_VOLUME_SUPERVISOR_UNVERIFIED: protected workload identity was not confirmed.",
       );
     }
+    this.assertStableFreeze(identity);
     let permit: { permitId: string; reused: boolean };
     for (;;) {
       input.signal?.throwIfAborted();
@@ -462,7 +475,13 @@ export class SandboxManager {
         await waitForPermit(100, undefined, { signal: input.signal });
       }
     }
+    if (this.volumeOperationIdentities.has(permit.permitId)) {
+      throw new Error(
+        "SANDBOX_VOLUME_OPERATION_IN_PROGRESS: this permit is already in flight in this manager; do not dispatch it again.",
+      );
+    }
     this.volumeOperationIdentities.set(permit.permitId, identity);
+    let confirmedSequence: number | undefined;
     let started = false;
     let completedResult: T | undefined;
     try {
@@ -498,13 +517,16 @@ export class SandboxManager {
       if (
         proof.freezeId !== freezeId ||
         proof.supervisorNonce !== identity.supervisorNonce ||
-        proof.allWritersStopped !== true
+        proof.allWritersStopped !== true ||
+        proof.kernelEnforced !== true ||
+        proof.mechanism !== identity.stableFreeze.mechanism
       ) {
         throw new Error(
           "SANDBOX_VOLUME_FREEZE_UNCONFIRMED: workspace writers were not confirmed stopped; retain the operation for recovery.",
         );
       }
       const barrier = { freezeId, supervisorNonce: identity.supervisorNonce };
+      this.verifiedFreezeBarriers.set(input.sandbox.providerSandboxId, barrier);
       const confirmedSeq = input.checkpoint
         ? await input.checkpoint(result, barrier)
         : await this.volumeCheckpoint(input.sandbox, barrier);
@@ -513,6 +535,9 @@ export class SandboxManager {
           "SANDBOX_VOLUME_PERSISTENCE_UNCONFIRMED: the frozen workspace checkpoint has no confirmed sequence.",
         );
       }
+      confirmedSequence = confirmedSeq;
+      // Reopening writers invalidates this proof even if its acknowledgement is lost.
+      this.verifiedFreezeBarriers.delete(input.sandbox.providerSandboxId);
       await control.resume({
         providerSandboxId: input.sandbox.providerSandboxId,
         expectedNonce: identity.supervisorNonce,
@@ -533,6 +558,24 @@ export class SandboxManager {
           permitId: permit.permitId,
           outcome: "not_started",
         });
+      if (confirmedSequence !== undefined) {
+        const value =
+          completedResult && typeof completedResult === "object"
+            ? (completedResult as { output?: unknown; exitCode?: unknown })
+            : {};
+        throw new SandboxVolumeRecoveryPendingError({
+          attachmentId,
+          confirmedSeq: confirmedSequence,
+          status:
+            this.volumeConfirmedModes.get(input.sandbox.providerSandboxId) ===
+            "shadow"
+              ? "pending"
+              : "confirmed",
+          exitCode: typeof value.exitCode === "number" ? value.exitCode : null,
+          output: typeof value.output === "string" ? value.output : undefined,
+          cause: error,
+        });
+      }
       // After dispatch, neither an exception nor a timeout proves the absence of
       // writes. Retain the permit and any freeze until the recovery worker resolves it.
       if (
@@ -559,6 +602,11 @@ export class SandboxManager {
         });
       }
       throw error;
+    } finally {
+      this.verifiedFreezeBarriers.delete(input.sandbox.providerSandboxId);
+      // The database may intentionally retain an uncertain permit, but this
+      // finished invocation must not leave a reusable local dispatch grant.
+      this.volumeOperationIdentities.delete(permit.permitId);
     }
   }
 
@@ -689,6 +737,18 @@ export class SandboxManager {
   }
 
   /** Full-scan barrier before a sandbox goes away; a no-op without a volume. */
+  private assertStableFreeze(identity: SandboxSupervisorIdentity): void {
+    if (
+      identity.stableFreeze?.available !== true ||
+      identity.stableFreeze.mechanism !== "cgroup-v2-freezer" ||
+      identity.stableFreeze.kernelEnforced !== true
+    ) {
+      throw new Error(
+        "SANDBOX_VOLUME_STABLE_FREEZE_UNAVAILABLE: a verified kernel-enforced freeze is required before attachment or durable execution; signal pause is diagnostic only.",
+      );
+    }
+  }
+
   async volumeCheckpoint(
     sandbox: SandboxRef,
     barrier: {
@@ -713,6 +773,24 @@ export class SandboxManager {
           "protected persistence checkpoint requires a supervisor freeze or drain fence",
         ),
       });
+    }
+    if (barrier.freezeId) {
+      const verified = this.verifiedFreezeBarriers.get(
+        sandbox.providerSandboxId,
+      );
+      if (
+        !verified ||
+        verified.freezeId !== barrier.freezeId ||
+        verified.supervisorNonce !== barrier.supervisorNonce
+      ) {
+        throw new SandboxVolumePersistenceError({
+          attachmentId,
+          exitCode: null,
+          cause: new Error(
+            "STABLE_FREEZE_UNAVAILABLE: checkpoint has no validated kernel freeze proof for this operation",
+          ),
+        });
+      }
     }
     const checkpoint = await volume.checkpoint({
       attachmentId,

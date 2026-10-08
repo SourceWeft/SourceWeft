@@ -15,6 +15,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { zstdCompressSync } from "node:zlib";
 import {
   MANIFEST_SLOTS_PER_ISSUE,
+  MAX_MANIFEST_OBJECT_BYTES,
   PACK_SLOTS_PER_ISSUE,
   PRESIGN_TTL_SECONDS,
 } from "../protocol/constants";
@@ -539,7 +540,9 @@ export class VolumeService {
       const head = await this.repo.head(attachment.volumeId);
       const seq = head + 1;
       const ownKey = `${this.manifestPrefix(attachment)}${seq}`;
-      const raw = await this.config.store.get(`${prefix}${ownKey}`);
+      const raw = await this.config.store.get(`${prefix}${ownKey}`, {
+        maxBytes: MAX_MANIFEST_OBJECT_BYTES,
+      });
       if (raw === null) break;
       processed++;
       try {

@@ -10,7 +10,12 @@ volume support.
 The daemon runs as root. Its state directory is root-owned mode 0700; its Unix
 socket is owned by a separate control UID, mode 0600, under a root-owned directory.
 The daemon checks `SO_PEERCRED` for every connection. The workload UID must differ
-from root and the control UID.
+from root and the control UID. A fixed four-worker control pool and bounded pending
+queue prevent a partial request from blocking all control traffic or spawning
+unbounded threads. Each request has a fixed ten-second read deadline measured
+from acceptance, including queue time; received bytes do not renew it. Responses
+also use a fixed ten-second write budget. Workloads inherit only explicit non-secret toolchain/locale
+variables; daemon credentials are cleared, and HOME points into the volume.
 
 Each execution starts a dedicated PID namespace. The controller obtains a pidfd
 for its own `unshare` process's direct child before authorizing any user work.
@@ -20,12 +25,19 @@ background descendants exist. Normal command completion therefore preserves
 background services; explicit cancellation terminates namespace PID 1 and waits
 for kernel-confirmed exit, including detached descendants.
 
-`freeze` closes admission, asks each namespace init to stop its descendants, and
-requires every observed workload thread to be stopped or exited. A timeout or
-uninterruptible writer produces no freeze acknowledgement. `resume` requires the
-same freeze identity. A durable barrier must run after the freeze acknowledgement
-and before resume. The backend releases its database permit only after the new
-barrier is confirmed and resume succeeds.
+`freeze` always returns `STABLE_FREEZE_UNAVAILABLE`. Identity declares
+`stable_freeze: false` and `freeze_mechanism: "signal-pause"`. This release has no
+kernel-enforced stable freeze capability and must not enable production volume
+attachment or durable operations.
+
+`pause` is an explicit diagnostic signal operation. It reports only
+`observed_stopped: true`, `signal_pause: true`, and `stable_freeze: false`;
+`resume` takes its `pause_id`. A workload can arm a POSIX
+`timer_create(CLOCK_MONOTONIC, SIGEV_SIGNAL, SIGCONT)` timer before pausing. The
+kernel then resumes the workload without a user-space handler, and writes continue
+after a successful pause response. Observing all threads in T state is therefore
+not a persistence barrier. Earlier SIGSTOP-based freeze safety claims and pre-fix
+local bundles are invalid. Do not use pause for checkpoint or durability confirmation.
 
 `drain` closes admission and terminates every managed namespace. It is a proof
 about managed workloads, not about ordinary provider SDK uploads or other external
@@ -44,7 +56,7 @@ owner and authorizing a new admission generation. Unknown commands are never
 replayed automatically.
 
 The supervisor preserves local files; it does not upload them or acknowledge S3
-persistence. A stop/freeze response is not a persistence receipt. Physical provider
+persistence. A stop or diagnostic pause response is not a persistence receipt. Physical provider
 loss before a confirmed volume barrier remains an unconfirmed-data failure.
 
 ## Host control
@@ -54,13 +66,25 @@ swvol-supervisor serve SOCKET STATE_DIR WORKSPACE WORKLOAD_UID CONTROL_UID
 swvol-supervisor request SOCKET < request.json
 ```
 
-Requests are bounded, newline-delimited JSON. Operations are `identity`, `open`,
-`start`, `status`, `cancel`, `freeze`, `resume`, and `drain`. Mutating requests require
+Requests are bounded, newline-delimited JSON. Captured stdout/stderr are capped at
+8 MiB each. Status defaults to 64 KiB per stream, accepts `max_output_bytes` up to
+1 MiB per stream, and explicitly reports truncation. Completed receipts preserve
+exit code and final output boundaries and remain readable after daemon restart;
+reading them never starts a command. Retrying the last successful resume is
+idempotent, while reusing a completed pause identity is rejected.
+
+Operations are `identity`, `open`,
+`start`, `status`, `cancel`, `freeze` (unavailable), `pause`, `resume`, and `drain`. Mutating requests require
 the current supervisor nonce. `start` requires a host-issued execution ID and never
 replays an existing ID. Control operations are not model tools and must never be
 exposed through an unauthenticated container endpoint.
 
 ## Deployment gates
+
+- A stable kernel-enforced freeze mechanism and matching live barrier proof are
+  required before attachment/execution. No shipped provider currently supplies
+  them. TypeScript contract tests use explicitly idealized capabilities; those
+  mocks are not provider or kernel verification. Signal pause cannot satisfy this gate.
 
 - The provider must launch every ordinary command through the workload UID/PID
   namespace. Generic `executeSystem`, file reads, writes, and uploads must not become
@@ -87,4 +111,10 @@ cargo test --locked --offline --target x86_64-unknown-linux-musl \
 ```
 
 The suite runs real namespace and UID transitions, background/detached writers,
-freeze/resume, cancellation, closed-admission checks, and daemon crash recovery.
+diagnostic pause/resume, the POSIX SIGCONT counterexample, cancellation, closed-admission checks, repeated daemon crashes,
+lost acknowledgements, synthetic-secret isolation, output floods, and hostile
+control requests. Run these with a process limit of 512 and a memory limit; the
+fork/thread fixture itself is capped at four child processes, three writer threads
+per child, and ten seconds. It uses the pinned builder's matching musl cross-linker.
+
+Completed PID namespaces are collected on control requests: the controller waits for pidfd-confirmed namespace teardown, reaps the launcher, and releases kernel handles. Main-command completion with live background writers does not permit collection. Root-owned result journals and execution-ID replay fences remain intact. Linux regression coverage runs 600 sequential commands under a 256-FD supervisor limit and a 512-process container limit.

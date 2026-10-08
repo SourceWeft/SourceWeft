@@ -79,6 +79,10 @@ export type SandboxSupervisorIdentity = {
   protectedControl: true;
   bootId: string;
   supervisorNonce: string;
+  /** Signal-based pauses do not establish a persistence barrier. No shipped provider implements this capability. */
+  stableFreeze:
+    | { available: false; mechanism: "none" | "signal-pause" }
+    | { available: true; mechanism: "cgroup-v2-freezer"; kernelEnforced: true };
 };
 
 /** Narrow host-only RPC; this surface never accepts shell commands or arbitrary paths. */
@@ -94,6 +98,8 @@ export type SandboxVolumeControl = {
     freezeId: string;
     supervisorNonce: string;
     allWritersStopped: true;
+    mechanism: "cgroup-v2-freezer";
+    kernelEnforced: true;
   }>;
   resume(input: {
     providerSandboxId: string;

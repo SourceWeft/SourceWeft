@@ -45,6 +45,9 @@ export function registerSandboxVolumeRoutes(
 ) {
   const inFlight = new Set<string>();
   const nextPoll = new Map<string, number>();
+  let activeRequests = 0;
+  const capacity = 32;
+  const maxTrackedAttachments = 10_000;
   const path = "/v1/sandbox-volumes/:attachmentId/control";
   app.post(
     path,
@@ -62,52 +65,70 @@ export function registerSandboxVolumeRoutes(
       )?.[1];
       if (!credential || !/^[A-Za-z0-9_-]{1,128}$/.test(id))
         return c.json({ error: "unauthorized" }, 401);
-      try {
-        await service.verifyControlToken(id, credential);
-      } catch (error) {
-        if (error instanceof VolumeControlUnauthorized)
-          return c.json({ error: "unauthorized" }, 401);
-        dependencies.log("sandbox.volume.control_auth_unavailable", {
-          attachmentId: id,
-        });
-        return c.json({ error: "control_unavailable" }, 503);
-      }
-      let body: unknown;
-      try {
-        body = await c.req.json();
-      } catch {
-        return c.json({ error: "invalid_control_request" }, 400);
-      }
-      const parsed = requestSchema.safeParse(body);
-      if (!parsed.success)
-        return c.json({ error: "invalid_control_request" }, 400);
-      const now = Date.now();
-      if (inFlight.has(id) || (nextPoll.get(id) ?? 0) > now) {
+      // Bound even authentication lookups; arbitrary valid-shaped credentials
+      // must not enqueue unlimited database work during storage degradation.
+      if (activeRequests >= capacity) {
         c.header("Retry-After", "1");
-        return c.json({ error: "control_poll_in_progress" }, 429);
+        return c.json({ error: "control_capacity_exhausted" }, 503);
       }
-      if (nextPoll.size > 10_000)
-        for (const [key, until] of nextPoll)
-          if (until <= now && !inFlight.has(key)) nextPoll.delete(key);
-      inFlight.add(id);
+      activeRequests++;
       try {
-        return c.json(
-          await service.refreshControl(id, credential, parsed.data),
-        );
-      } catch (error) {
-        if (error instanceof VolumeControlUnauthorized)
-          return c.json({ error: "unauthorized" }, 401);
-        if (error instanceof Error && error.name === "VolumeConflict")
-          return c.json({ error: "attachment_state_changed" }, 409);
-        // Exceptions can contain signed URLs. Never return or log their raw messages.
-        dependencies.log("sandbox.volume.control_refresh_failed", {
-          attachmentId: id,
-          errorType: error instanceof Error ? error.name : "unknown",
-        });
-        return c.json({ error: "control_unavailable" }, 503);
+        try {
+          await service.verifyControlToken(id, credential);
+        } catch (error) {
+          if (error instanceof VolumeControlUnauthorized)
+            return c.json({ error: "unauthorized" }, 401);
+          dependencies.log("sandbox.volume.control_auth_unavailable", {
+            attachmentId: id,
+          });
+          return c.json({ error: "control_unavailable" }, 503);
+        }
+        let body: unknown;
+        try {
+          body = await c.req.json();
+        } catch {
+          return c.json({ error: "invalid_control_request" }, 400);
+        }
+        const parsed = requestSchema.safeParse(body);
+        if (!parsed.success)
+          return c.json({ error: "invalid_control_request" }, 400);
+        const now = performance.now();
+        if (inFlight.has(id) || (nextPoll.get(id) ?? 0) > now) {
+          c.header("Retry-After", "1");
+          return c.json({ error: "control_poll_in_progress" }, 429);
+        }
+        if (nextPoll.size >= maxTrackedAttachments)
+          for (const [key, until] of nextPoll)
+            if (until <= now && !inFlight.has(key)) nextPoll.delete(key);
+        if (!nextPoll.has(id) && nextPoll.size >= maxTrackedAttachments) {
+          c.header("Retry-After", "1");
+          return c.json({ error: "control_capacity_exhausted" }, 503);
+        }
+        // Reserve the cooldown entry before awaiting remote work so parallel
+        // completions cannot grow the tracking map beyond its capacity.
+        nextPoll.set(id, Number.POSITIVE_INFINITY);
+        inFlight.add(id);
+        try {
+          return c.json(
+            await service.refreshControl(id, credential, parsed.data),
+          );
+        } catch (error) {
+          if (error instanceof VolumeControlUnauthorized)
+            return c.json({ error: "unauthorized" }, 401);
+          if (error instanceof Error && error.name === "VolumeConflict")
+            return c.json({ error: "attachment_state_changed" }, 409);
+          // Exceptions can contain signed URLs. Never return or log their raw messages.
+          dependencies.log("sandbox.volume.control_refresh_failed", {
+            attachmentId: id,
+            errorType: error instanceof Error ? error.name : "unknown",
+          });
+          return c.json({ error: "control_unavailable" }, 503);
+        } finally {
+          inFlight.delete(id);
+          nextPoll.set(id, performance.now() + 1000);
+        }
       } finally {
-        inFlight.delete(id);
-        nextPoll.set(id, Date.now() + 1000);
+        activeRequests--;
       }
     },
   );

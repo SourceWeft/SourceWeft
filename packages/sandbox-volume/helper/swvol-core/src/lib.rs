@@ -8,6 +8,7 @@ use std::time::Duration;
 
 pub const MAX_CHUNK_BYTES: u32 = 4 * 1024 * 1024;
 pub const MAX_COMPRESSED_BYTES: u32 = 8 * 1024 * 1024;
+pub const MAX_SYMLINK_TARGET_BYTES: usize = 4095;
 const SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub struct ChunkRef(pub String, pub u32);
@@ -57,7 +58,7 @@ impl RestorePlan {
                     if size != entry.s { bail!("file length disagrees with chunks"); }
                 }
                 'd' if entry.s == 0 && entry.c.is_empty() && entry.l.is_none() => {},
-                'l' if entry.s == 0 && entry.c.is_empty() && entry.l.as_ref().map(|link| !link.contains('\0')).unwrap_or(false) => {},
+                'l' if entry.s == 0 && entry.c.is_empty() && entry.l.as_ref().map(|link| !link.is_empty() && link.len() <= MAX_SYMLINK_TARGET_BYTES && !link.contains('\0')).unwrap_or(false) => {},
                 _ => bail!("invalid entry kind or shape"),
             }
         }
@@ -223,5 +224,61 @@ mod ranged_read_tests {
         assert!(serde_json::from_str::<RestorePlan>(raw).unwrap().validate().is_err());
         let raw = r#"{"volume":"v","attachment":"a","seq":1,"entries":[{"p":"a","k":"f","m":384,"t":"1","s":1}],"chunks":{},"packs":{}}"#;
         assert!(serde_json::from_str::<RestorePlan>(raw).unwrap().validate().is_err());
+    }
+}
+
+#[cfg(test)]
+mod hostile_transport_tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    fn response(status: u16, range: String, declared: usize, bytes: Vec<u8>) -> (String, std::thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let thread = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap(); let mut request = [0u8; 4096]; stream.read(&mut request).unwrap();
+            let _ = write!(stream, "HTTP/1.1 {status} Fault\r\nContent-Range: {range}\r\nContent-Length: {declared}\r\nConnection: close\r\n\r\n");
+            let _ = stream.write_all(&bytes);
+        });
+        (url, thread)
+    }
+    #[test]
+    fn wrong_ranges_short_bodies_corrupt_frames_and_wrong_hashes_never_return_bytes() {
+        const SEED: u32 = 0x71ad_0042;
+        let mut seed = SEED;
+        let raw: Vec<u8> = (0..65536).map(|_| { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5; seed as u8 }).collect();
+        let compressed = zstd::bulk::compress(&raw, 3).unwrap(); let id = raw_chunk_hash(&raw);
+        let loc = ChunkLoc("immutable-pack".into(), 17, compressed.len() as u32, raw.len() as u32);
+        let end = 17 + compressed.len() - 1; let correct_range = format!("bytes 17-{end}/{}", end + 100);
+        let mut corrupt_frame = compressed.clone(); corrupt_frame[0] ^= 0xff;
+        let wrong_raw: Vec<u8> = raw.iter().map(|byte| byte ^ 0x80).collect(); let wrong_hash_frame = zstd::bulk::compress(&wrong_raw, 3).unwrap();
+        let cases = vec![
+            ("wrong-start", 206, format!("bytes 16-{end}/{}", end + 100), compressed.len(), compressed.clone(), loc.clone()),
+            ("ignored-range", 200, correct_range.clone(), compressed.len(), compressed.clone(), loc.clone()),
+            ("short-declared-body", 206, correct_range.clone(), compressed.len(), compressed[..compressed.len()/2].to_vec(), loc.clone()),
+            ("short-complete-body", 206, correct_range.clone(), compressed.len()/2, compressed[..compressed.len()/2].to_vec(), loc.clone()),
+            ("corrupt-zstd", 206, correct_range.clone(), corrupt_frame.len(), corrupt_frame, loc.clone()),
+            ("wrong-hash", 206, format!("bytes 17-{}/{}", 17+wrong_hash_frame.len()-1, 17+wrong_hash_frame.len()+100), wrong_hash_frame.len(), wrong_hash_frame.clone(), ChunkLoc("immutable-pack".into(),17,wrong_hash_frame.len() as u32,raw.len() as u32)),
+        ];
+        let started = std::time::Instant::now();
+        for (name, status, range, declared, body, loc) in cases {
+            let (url, thread) = response(status, range, declared, body);
+            assert!(Fetcher::default().chunk(&id, &loc, &url).is_err(), "fault {name} returned unverified bytes"); thread.join().unwrap();
+        }
+        assert!(started.elapsed() < Duration::from_secs(10), "fault rejection exceeded its bounded local transport budget");
+        eprintln!("HOSTILE_TRANSPORT_OK seed={SEED:#x} raw_bytes=65536 cases=6 elapsed_ms={}", started.elapsed().as_millis());
+    }
+}
+
+#[cfg(test)]
+mod symlink_contract_tests {
+    use super::*;
+    #[test]
+    fn target_must_be_nonempty_and_fit_the_probed_linux_byte_limit() {
+        for (target, accepted) in [(String::new(), false), ("a".repeat(4095), true), ("a".repeat(4096), false), ("好".repeat(1365), true), ("好".repeat(1366), false)] {
+            let plan = RestorePlan { volume: "v".into(), attachment: "a".into(), seq: 0,
+                entries: vec![WireEntry { p: "link".into(), k: 'l', m: 0o777, t: 0, s: 0, l: Some(target), c: vec![] }], chunks: HashMap::new(), packs: HashMap::new() };
+            assert_eq!(plan.validate().is_ok(), accepted);
+        }
     }
 }

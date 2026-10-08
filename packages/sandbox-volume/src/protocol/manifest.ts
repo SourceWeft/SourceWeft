@@ -4,6 +4,8 @@ import {
   MANIFEST_JSON_LIMIT_ERROR,
   MANIFEST_MAGIC,
   MAX_MANIFEST_JSON_BYTES,
+  MAX_MANIFEST_INLINE_BYTES,
+  MAX_MANIFEST_OBJECT_BYTES,
 } from "./constants";
 import type { Manifest } from "./types";
 
@@ -23,6 +25,8 @@ export type ParsedManifest = {
  * Anything that does not parse is a rejection, never an exception: the sandbox is untrusted.
  */
 export function parseManifestObject(raw: Uint8Array): ParsedManifest {
+  if (raw.byteLength > MAX_MANIFEST_OBJECT_BYTES)
+    throw new ManifestRejected("manifest object exceeds the size limit");
   const buf = Buffer.from(raw.buffer, raw.byteOffset, raw.byteLength);
   if (
     buf.length < MANIFEST_HEADER_BYTES ||
@@ -38,12 +42,16 @@ export function parseManifestObject(raw: Uint8Array): ParsedManifest {
     throw new ManifestRejected("inline section longer than the object");
   }
   const bodyStart = MANIFEST_HEADER_BYTES + inlineLength;
+  if (inlineLength > MAX_MANIFEST_INLINE_BYTES)
+    throw new ManifestRejected("inline section exceeds the helper size limit");
   let json: unknown;
   try {
     const body = zstdDecompressSync(buf.subarray(bodyStart), {
       maxOutputLength: MAX_MANIFEST_JSON_BYTES,
     });
-    json = JSON.parse(body.toString("utf8"));
+    json = JSON.parse(
+      new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(body),
+    );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (

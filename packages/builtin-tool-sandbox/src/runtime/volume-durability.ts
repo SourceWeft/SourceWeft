@@ -56,8 +56,48 @@ export class SandboxVolumePersistenceError extends Error {
   }
 }
 
+/** Data is already acknowledged; only reopening admission or releasing the permit remains uncertain. */
+export class SandboxVolumeRecoveryPendingError extends Error {
+  readonly code = "SANDBOX_VOLUME_RECOVERY_PENDING";
+  readonly commandExitCode: number | null;
+  readonly commandOutput: string;
+  readonly durability: SandboxCommandDurability;
+
+  constructor(input: {
+    attachmentId: string;
+    confirmedSeq: number;
+    status: "confirmed" | "pending";
+    exitCode: number | null;
+    output?: string;
+    cause: unknown;
+  }) {
+    const reason =
+      input.cause instanceof Error ? input.cause.message : String(input.cause);
+    const acknowledgement =
+      input.status === "confirmed"
+        ? `Changes were confirmed durable at sequence ${input.confirmedSeq}.`
+        : "The shadow checkpoint completed; production persistence is not confirmed.";
+    super(
+      `SANDBOX_VOLUME_RECOVERY_PENDING: ${acknowledgement} Environment coordination is still pending. Do not execute the command again. ${redactSandboxText(reason)}`,
+      { cause: input.cause },
+    );
+    this.name = "SandboxVolumeRecoveryPendingError";
+    this.commandExitCode = input.exitCode;
+    this.commandOutput = redactSandboxText(input.output ?? "");
+    this.durability = {
+      status: input.status,
+      attachmentId: input.attachmentId,
+      confirmedSeq: input.confirmedSeq,
+    };
+  }
+}
+
 export function volumeFailureResult(error: unknown): Record<string, unknown> {
-  if (!(error instanceof SandboxVolumePersistenceError)) return {};
+  if (
+    !(error instanceof SandboxVolumePersistenceError) &&
+    !(error instanceof SandboxVolumeRecoveryPendingError)
+  )
+    return {};
   return {
     commandExitCode: error.commandExitCode,
     output: error.commandOutput,

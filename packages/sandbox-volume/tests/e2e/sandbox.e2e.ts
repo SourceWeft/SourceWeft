@@ -31,8 +31,30 @@ let hooks: VolumeHooks;
 const sandboxes: string[] = [];
 let volumeId: string | null = null;
 
-const FINGERPRINT = `cd /workspace && F() { find . -mindepth 1 \\( -path ./.sourceweft -o -name '.sourceweft*' \\) -prune -o "$@"; }
-echo "FP content=$(F -type f -print0 | sort -z | xargs -0 -r sha256sum | sha256sum | cut -c1-16) meta=$( { F -type f -printf 'f %m %s %T@ %p\\n'; F -type d -printf 'd %m %p\\n'; F -type l -printf 'l %l %p\\n'; } | sort | sha256sum | cut -c1-16) files=$(F -type f | wc -l)"`;
+const shellQuote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`;
+// Independent oracle: escaped structured records avoid delimiter collisions and
+// include directory/symlink times, not only regular-file metadata.
+const fingerprintScript = `import os,stat,json,hashlib
+root='/workspace'; records=[]; files=0
+for parent,dirs,names in os.walk(root,followlinks=False):
+ if parent==root:
+  dirs[:]=[x for x in dirs if not x.startswith('.sourceweft')]
+  names=[x for x in names if not x.startswith('.sourceweft')]
+ for name in sorted(dirs+names):
+  path=os.path.join(parent,name); rel=os.path.relpath(path,root); rel.encode('utf-8')
+  m=os.lstat(path); mode=stat.S_IMODE(m.st_mode)
+  if stat.S_ISREG(m.st_mode):
+   h=hashlib.sha256()
+   with open(path,'rb') as f:
+    for data in iter(lambda:f.read(1048576),b''): h.update(data)
+   records.append(['f',rel,mode,m.st_mtime_ns,m.st_size,h.hexdigest()]); files+=1
+  elif stat.S_ISDIR(m.st_mode): records.append(['d',rel,mode,m.st_mtime_ns])
+  elif stat.S_ISLNK(m.st_mode):
+   target=os.readlink(path); target.encode('utf-8'); records.append(['l',rel,mode,m.st_mtime_ns,target])
+  else: raise RuntimeError('unsupported fingerprint entry')
+raw=json.dumps(sorted(records,key=lambda x:x[1]),ensure_ascii=True,separators=(',',':')).encode()
+print('FP v=2 sha256='+hashlib.sha256(raw).hexdigest()+' entries='+str(len(records))+' files='+str(files))`;
+const FINGERPRINT = `python3 -c ${shellQuote(fingerprintScript)}`;
 
 function executorFor(sandboxId: string): SandboxExecutor {
   return {
@@ -158,7 +180,7 @@ test(
     const r1 = await run(
       first,
       attached.attachmentId,
-      `cd /workspace && mkdir -p src/deep "dir with space" empty && printf 'hello\\n' > src/a.txt && head -c 3000000 /dev/urandom > src/deep/blob.bin && printf 'x' > "dir with space/中文.md" && : > zero.txt && ln -s src/a.txt link && ln -s nowhere dangling && chmod 600 src/a.txt && chmod 755 src/deep/blob.bin && touch -d '2024-01-02T03:04:05Z' src/a.txt && echo done`,
+      `cd /workspace && mkdir -p src/deep "dir with space" empty && printf 'hello\\n' > src/a.txt && head -c 3000000 /dev/urandom > src/deep/blob.bin && printf 'x' > "dir with space/中文.md" && : > zero.txt && ln -s src/a.txt link && ln -s nowhere dangling && chmod 600 src/a.txt && chmod 755 src/deep/blob.bin && touch -d '2024-01-02T03:04:05Z' src/a.txt && python3 -c ${shellQuote("import os; [os.utime(p,ns=(-1,-1),follow_symlinks=False) for p in ['dir with space/中文.md','dir with space','link']]")} && echo done`,
     );
     assert.equal(r1.exitCode, 0, r1.output);
     assert.equal(r1.sync.persisted, true, JSON.stringify(r1.sync));
@@ -177,6 +199,12 @@ test(
       "zero.txt",
     ]);
     assert.equal(entries.find((e) => e.path === "src/a.txt")!.mode, 0o600);
+    for (const path of ["dir with space/中文.md", "dir with space", "link"])
+      assert.equal(
+        entries.find((entry) => entry.path === path)!.mtimeNs,
+        -1n,
+        `${path}: source must actually retain the negative nanosecond time`,
+      );
     assert.equal(
       entries.find((e) => e.path === "dangling")!.linkTarget,
       "nowhere",

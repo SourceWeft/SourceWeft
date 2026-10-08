@@ -42,6 +42,7 @@ fn main() -> Result<()> {
             if args.len() < 5 { bail!("usage: swlazy mount-volume <plan> <cache-dir> <mountpoint> [--cap-mb N]"); }
             let plan: swvol_core::RestorePlan = serde_json::from_slice(&std::fs::read(&args[2])?)?;
             plan.validate()?;
+            fuse::validate_mtimes(plan.entries.iter().map(|entry| entry.t))?;
             let cap: usize = opt(&args, "--cap-mb").map(|v| v.parse()).transpose()?.unwrap_or(64);
             let cap = cap.checked_mul(1024 * 1024).ok_or_else(|| anyhow::anyhow!("cache capacity overflow"))?;
             let initial_fd = if let Some(raw) = opt(&args, "--initial-fuse-fd") {
@@ -64,6 +65,7 @@ fn main() -> Result<()> {
         "mount" => {
             let t = Instant::now();
             let plan = plan::Plan::load(&args[2])?;
+            fuse::validate_mtimes(plan.entries.iter().map(|entry| entry.t))?;
             let store = if plan.packs.is_empty() { None } else { Some(open_store(&plan, &args[3], &args)?) };
             eprintln!("plan loaded: {} entries in {} ms", plan.entries.len(), t.elapsed().as_millis());
             if let Err(e) = fuse::mount(&plan, store, &args[4], flag(&args, "--allow-other")) {

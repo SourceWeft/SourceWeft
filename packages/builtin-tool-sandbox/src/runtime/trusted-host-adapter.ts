@@ -15,7 +15,10 @@ import {
   shellQuote,
 } from "./paths";
 import { redactSandboxText, sandboxRequestFingerprint } from "./redaction";
-import { runPinnedSandboxOperation } from "./pinned-sandbox-operation";
+import {
+  runPinnedSandboxOperation,
+  isPinnedOperationProviderTimeout,
+} from "./pinned-sandbox-operation";
 import type { SandboxManager } from "./sandbox-manager";
 import type {
   SandboxCancellationReason,
@@ -105,9 +108,7 @@ function cancellationReason(signal?: AbortSignal): SandboxCancellationReason {
 }
 
 function isProviderCommandTimeout(error: unknown) {
-  return (
-    error instanceof Error && error.message.includes("SANDBOX_COMMAND_TIMEOUT")
-  );
+  return isPinnedOperationProviderTimeout(error);
 }
 
 function throwIfAborted(signal?: AbortSignal) {
@@ -735,62 +736,63 @@ export function createTrustedSandboxHostAdapter(input: {
         current,
         signal: options?.signal,
         timeoutMs: options?.timeoutMs,
-        operation: async (systemOptions) => input.manager.withVolumeOperation({
-          sandbox: current.sandbox,
-          context: input.context,
-          operationId: systemOptions.executionId,
-          signal: systemOptions.signal,
-          run: async () => {
-          await assertPinnedGeneration(current);
-          const canonicalFiles = await Promise.all(
-            files.map(async (file) => ({
-              path: await canonicalPath(file.path, "write", systemOptions),
-              bytes: file.bytes,
-            })),
-          );
-          await assertPinnedGeneration(current);
-          if (
-            new Set(canonicalFiles.map((file) => file.path)).size !==
-            files.length
-          ) {
-            throw new Error(
-              "SANDBOX_HOST_UPLOAD_PATH_CONFLICT: upload paths resolve to the same canonical target.",
-            );
-          }
-          const directories = new Set(
-            canonicalFiles.map((file) => dirname(file.path)),
-          );
-          for (const directory of directories) {
-            throwIfAborted(systemOptions.signal);
-            await assertPinnedGeneration(current);
-            await current.provider.ensureDirectory({
-              providerSandboxId: current.sandbox.providerSandboxId,
-              directory,
-            });
-            await assertPinnedGeneration(current);
-          }
-          for (const file of canonicalFiles) {
-            throwIfAborted(systemOptions.signal);
-            const checkedPath = await canonicalPath(
-              file.path,
-              "write",
-              systemOptions,
-            );
-            await assertPinnedGeneration(current);
-            if (checkedPath !== file.path) {
-              throw new Error(
-                `SANDBOX_HOST_UPLOAD_PATH_CHANGED: ${file.path} changed after directory preparation.`,
+        operation: async (systemOptions) =>
+          input.manager.withVolumeOperation({
+            sandbox: current.sandbox,
+            context: input.context,
+            operationId: systemOptions.executionId,
+            signal: systemOptions.signal,
+            run: async () => {
+              await assertPinnedGeneration(current);
+              const canonicalFiles = await Promise.all(
+                files.map(async (file) => ({
+                  path: await canonicalPath(file.path, "write", systemOptions),
+                  bytes: file.bytes,
+                })),
               );
-            }
-            await current.provider.uploadFile({
-              providerSandboxId: current.sandbox.providerSandboxId,
-              sandboxPath: file.path,
-              content: file.bytes,
-            });
-            await assertPinnedGeneration(current);
-          }
-          },
-        }),
+              await assertPinnedGeneration(current);
+              if (
+                new Set(canonicalFiles.map((file) => file.path)).size !==
+                files.length
+              ) {
+                throw new Error(
+                  "SANDBOX_HOST_UPLOAD_PATH_CONFLICT: upload paths resolve to the same canonical target.",
+                );
+              }
+              const directories = new Set(
+                canonicalFiles.map((file) => dirname(file.path)),
+              );
+              for (const directory of directories) {
+                throwIfAborted(systemOptions.signal);
+                await assertPinnedGeneration(current);
+                await current.provider.ensureDirectory({
+                  providerSandboxId: current.sandbox.providerSandboxId,
+                  directory,
+                });
+                await assertPinnedGeneration(current);
+              }
+              for (const file of canonicalFiles) {
+                throwIfAborted(systemOptions.signal);
+                const checkedPath = await canonicalPath(
+                  file.path,
+                  "write",
+                  systemOptions,
+                );
+                await assertPinnedGeneration(current);
+                if (checkedPath !== file.path) {
+                  throw new Error(
+                    `SANDBOX_HOST_UPLOAD_PATH_CHANGED: ${file.path} changed after directory preparation.`,
+                  );
+                }
+                await current.provider.uploadFile({
+                  providerSandboxId: current.sandbox.providerSandboxId,
+                  sandboxPath: file.path,
+                  content: file.bytes,
+                });
+                await assertPinnedGeneration(current);
+              }
+            },
+          }),
       });
     },
 
@@ -864,7 +866,13 @@ export function createTrustedSandboxHostAdapter(input: {
       let cancellationRun: Promise<SandboxCancellationResult> | undefined;
       let commandSubmitted = false;
       const beginCancellation = () => {
-        if (!commandSubmitted) { cancellationRun = Promise.resolve({ confirmed: true, mode: "command" }); return; }
+        if (!commandSubmitted) {
+          cancellationRun = Promise.resolve({
+            confirmed: true,
+            mode: "command",
+          });
+          return;
+        }
         cancellationRun ??= input.manager.cancelExecution({
           sandbox: current.sandbox,
           executionId,
@@ -877,27 +885,42 @@ export function createTrustedSandboxHostAdapter(input: {
         executionId = permitId;
         request.executionId = permitId;
         commandSubmitted = true;
-        return input.manager.executeUserCommand(current.sandbox, {
-          providerSandboxId: current.sandbox.providerSandboxId,
-          executionId,
-          command: executeInput.command,
-          cwd: assertExecuteCwd(undefined, current.provider.pathPolicy),
-          timeoutMs,
-          maxOutputChars,
-          ...(executeInput.signal ? { signal: executeInput.signal } : {}),
-        }, true);
+        return input.manager.executeUserCommand(
+          current.sandbox,
+          {
+            providerSandboxId: current.sandbox.providerSandboxId,
+            executionId,
+            command: executeInput.command,
+            cwd: assertExecuteCwd(undefined, current.provider.pathPolicy),
+            timeoutMs,
+            maxOutputChars,
+            ...(executeInput.signal ? { signal: executeInput.signal } : {}),
+          },
+          true,
+        );
       };
       const execution = (async () => {
         let confirmedSeq: number | undefined;
         const result = await input.manager.withVolumeOperation({
-          sandbox: current.sandbox, context: input.context, operationId, writerKind: "supervised",
-          signal: executeInput.signal, run: runOnce,
+          sandbox: current.sandbox,
+          context: input.context,
+          operationId,
+          writerKind: "supervised",
+          signal: executeInput.signal,
+          run: runOnce,
           checkpoint: async (_result, barrier) => {
-            confirmedSeq = await input.manager.volumeCheckpoint(current.sandbox, barrier);
+            confirmedSeq = await input.manager.volumeCheckpoint(
+              current.sandbox,
+              barrier,
+            );
             return confirmedSeq;
           },
         });
-        return input.manager.volumeConfirmedResult(current.sandbox, result, confirmedSeq);
+        return input.manager.volumeConfirmedResult(
+          current.sandbox,
+          result,
+          confirmedSeq,
+        );
       })().then(
         (result) => ({ kind: "result" as const, result }),
         (error: unknown) => ({ kind: "error" as const, error }),

@@ -116,7 +116,7 @@ function confirmedFlush(
 }
 
 const DEFAULT_ROOT = "/workspace";
-export const REQUIRED_HELPER_VERSION = "0.2.0";
+export const REQUIRED_HELPER_VERSION = "0.3.0";
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
@@ -384,7 +384,7 @@ export function createVolumeHooks(config: VolumeHooksConfig) {
      * The user command never runs in a replaced container (exit 75 instead).
      */
     wrapCommand(command: string, options: { full?: boolean } = {}): string {
-      const check = `[ -x ${shellQuote(helperPath)} ] && ${shellQuote(helperPath)} check ${helperRootArgs}`;
+      const check = `[ -x ${shellQuote(helperPath)} ] && [ "$(${shellQuote(helperPath)} version)" = ${shellQuote(`swvol ${REQUIRED_HELPER_VERSION}`)} ] && ${shellQuote(helperPath)} check ${helperRootArgs}`;
       const flush = `${shellQuote(helperPath)} flush ${helperRootArgs}${options.full ? " --full" : ""} > "$__swvol_report" 2> "$__swvol_report.err"; __swvol_frc=$?`;
       return [
         `if ${check}; then`,

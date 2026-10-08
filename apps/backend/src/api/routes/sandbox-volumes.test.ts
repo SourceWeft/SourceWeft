@@ -10,14 +10,12 @@ import { registerSandboxVolumeRoutes } from "./sandbox-volumes";
 const token = `svctl_${"a".repeat(43)}`;
 const body = { bootId: "boot", epoch: 0, seq: 1, nextPack: 2 };
 function fixture() {
-  const refreshControl = vi
-    .fn()
-    .mockResolvedValue({
-      head: 1,
-      confirmedSeq: 1,
-      slots: {},
-      locators: { chunks: {}, packs: {} },
-    });
+  const refreshControl = vi.fn().mockResolvedValue({
+    head: 1,
+    confirmedSeq: 1,
+    slots: {},
+    locators: { chunks: {}, packs: {} },
+  });
   const verifyControlToken = vi.fn().mockResolvedValue({ id: "a" });
   const log = vi.fn();
   const app = new Hono();
@@ -25,8 +23,12 @@ function fixture() {
     service: () => ({ refreshControl, verifyControlToken }),
     log,
   });
-  const request = (value: unknown = body, auth = `Bearer ${token}`) =>
-    app.request("/v1/sandbox-volumes/a/control", {
+  const request = (
+    value: unknown = body,
+    auth = `Bearer ${token}`,
+    attachment = "a",
+  ) =>
+    app.request(`/v1/sandbox-volumes/${attachment}/control`, {
       method: "POST",
       headers: { authorization: auth, "content-type": "application/json" },
       body: JSON.stringify(value),
@@ -75,5 +77,114 @@ describe("attachment control endpoint", () => {
     expect(response.status).toBe(503);
     expect(await response.text()).not.toContain("Signature");
     expect(JSON.stringify(f.log.mock.calls)).not.toContain(token);
+  });
+  test("an authenticated burst has bounded in-flight work and recovers after completion", async () => {
+    const f = fixture();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    f.refreshControl.mockImplementation(async () => {
+      await gate;
+      return {
+        head: 1,
+        confirmedSeq: 1,
+        slots: {},
+        locators: { chunks: {}, packs: {} },
+      };
+    });
+    const admitted = Array.from({ length: 32 }, (_, i) =>
+      f.request(body, `Bearer ${token}`, `actor-${i}`),
+    );
+    try {
+      await vi.waitFor(() =>
+        expect(f.refreshControl).toHaveBeenCalledTimes(32),
+      );
+      const overload = await f.request(
+        body,
+        `Bearer ${token}`,
+        "actor-overload",
+      );
+      expect(overload.status).toBe(503);
+      expect(overload.headers.get("retry-after")).toBe("1");
+      expect(f.refreshControl).toHaveBeenCalledTimes(32);
+    } finally {
+      release();
+      await Promise.all(admitted);
+    }
+    expect(
+      (await f.request(body, `Bearer ${token}`, "actor-recovered")).status,
+    ).toBe(200);
+  });
+
+  test("slow authentication is bounded and rejection releases every capacity slot", async () => {
+    const f = fixture();
+    let reject!: (error: Error) => void;
+    const gate = new Promise<never>((_resolve, fail) => {
+      reject = fail;
+    });
+    f.verifyControlToken.mockImplementation(() => gate);
+    const requests = Array.from({ length: 32 }, (_, i) =>
+      f.request(body, `Bearer ${token}`, `invalid-${i}`),
+    );
+    try {
+      await vi.waitFor(() =>
+        expect(f.verifyControlToken).toHaveBeenCalledTimes(32),
+      );
+      expect(
+        (await f.request(body, `Bearer ${token}`, "overload")).status,
+      ).toBe(503);
+      expect(f.verifyControlToken).toHaveBeenCalledTimes(32);
+    } finally {
+      reject(new VolumeControlUnauthorized());
+    }
+    expect(
+      (await Promise.all(requests)).every(
+        (response) => response.status === 401,
+      ),
+    ).toBe(true);
+    expect(f.refreshControl).not.toHaveBeenCalled();
+    f.verifyControlToken.mockResolvedValue({ id: "next" });
+    expect((await f.request(body, `Bearer ${token}`, "next")).status).toBe(200);
+  });
+
+  test("ten thousand distinct attachments cannot grow cooldown tracking without a bound", async () => {
+    const f = fixture();
+    const started = performance.now();
+    const clock = vi.spyOn(performance, "now").mockReturnValue(started);
+    try {
+      for (let i = 0; i < 10_000; i++) {
+        expect(
+          (await f.request(body, `Bearer ${token}`, `burst-${i}`)).status,
+        ).toBe(200);
+      }
+      expect((await f.request(body, `Bearer ${token}`, "extra")).status).toBe(
+        503,
+      );
+      expect(f.refreshControl).toHaveBeenCalledTimes(10_000);
+      clock.mockReturnValue(started + 1001);
+      expect((await f.request(body, `Bearer ${token}`, "extra")).status).toBe(
+        200,
+      );
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  test("wall clock rollback cannot extend a one-second renewal cooldown indefinitely", async () => {
+    const f = fixture();
+    const wall = Date.now();
+    const monotonic = performance.now();
+    const wallClock = vi.spyOn(Date, "now").mockReturnValue(wall);
+    const steadyClock = vi.spyOn(performance, "now").mockReturnValue(monotonic);
+    try {
+      expect((await f.request()).status).toBe(200);
+      wallClock.mockReturnValue(wall - 86_400_000);
+      steadyClock.mockReturnValue(monotonic + 1001);
+      expect((await f.request()).status).toBe(200);
+    } finally {
+      wallClock.mockRestore();
+      steadyClock.mockRestore();
+    }
   });
 });
