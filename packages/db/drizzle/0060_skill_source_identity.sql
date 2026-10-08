@@ -22,6 +22,20 @@ SELECT roots.old_id, roots.source_root,
  CASE WHEN roots.source_root=primary_roots.source_root THEN roots.old_id ELSE gen_random_uuid()::text END new_id
 FROM roots JOIN primary_roots ON primary_roots.id=roots.old_id;
 --> statement-breakpoint
+-- Encode path bytes using the same unreserved characters as encodeURIComponent;
+-- slash remains a directory separator. Temporary function leaves no schema API.
+CREATE OR REPLACE FUNCTION pg_temp.registry_source_path(value text) RETURNS text
+LANGUAGE SQL IMMUTABLE STRICT AS $$
+ SELECT coalesce(string_agg(
+  CASE WHEN get_byte(convert_to(value,'UTF8'),i) BETWEEN 48 AND 57
+    OR get_byte(convert_to(value,'UTF8'),i) BETWEEN 65 AND 90
+    OR get_byte(convert_to(value,'UTF8'),i) BETWEEN 97 AND 122
+    OR get_byte(convert_to(value,'UTF8'),i) IN (33,39,40,41,42,45,46,47,95,126)
+   THEN chr(get_byte(convert_to(value,'UTF8'),i))
+   ELSE '%'||upper(lpad(to_hex(get_byte(convert_to(value,'UTF8'),i)),2,'0')) END,
+  '' ORDER BY i),'') FROM generate_series(0,octet_length(convert_to(value,'UTF8'))-1) i;
+$$;
+--> statement-breakpoint
 UPDATE skill_definitions d SET source_root=m.source_root,
  github_repository_id=r.github_id
 FROM registry_source_mapping m LEFT JOIN skill_definitions original ON original.id=m.old_id
@@ -41,7 +55,8 @@ WHERE m.new_id<>m.old_id;
 ALTER TABLE workspace_skills ALTER CONSTRAINT workspace_skills_skill_version_skill_fk DEFERRABLE INITIALLY DEFERRED;
 --> statement-breakpoint
 UPDATE skill_versions v SET skill_id=m.new_id,
- manifest_json=jsonb_set(jsonb_set(v.manifest_json,'{slug}',to_jsonb(d.slug)),'{registry,sourceRoot}',to_jsonb(m.source_root))
+ manifest_json=jsonb_set(jsonb_set(jsonb_set(v.manifest_json,'{slug}',to_jsonb(d.slug)),'{registry,sourceRoot}',to_jsonb(m.source_root)),
+ '{registry,sourceUrl}',to_jsonb('https://github.com/'||substring(v.storage_pointer from '^github:([^@]+)@')||'/tree/'||substring(v.storage_pointer from '@([a-fA-F0-9]{40})')||CASE WHEN m.source_root='' THEN '' ELSE '/'||pg_temp.registry_source_path(m.source_root) END))
 FROM registry_source_mapping m JOIN skill_definitions d ON d.id=m.new_id
 WHERE v.skill_id=m.old_id AND coalesce(substring(v.storage_pointer from '#(.*)$'),'')=m.source_root;
 --> statement-breakpoint

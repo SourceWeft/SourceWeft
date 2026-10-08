@@ -205,6 +205,15 @@ test("historical split preserves old URL, exact version IDs, disabled configurat
   ).rows[0];
   assert.equal(installed.skill_version_id, "legacy-b");
   assert.equal(installed.skill_id, versions[1].skill_id);
+  const migratedUrl = (
+    await data.database.query(
+      `select manifest_json->'registry'->>'sourceUrl' url from skill_versions where id='legacy-b'`,
+    )
+  ).rows[0].url;
+  assert.equal(
+    migratedUrl,
+    `https://github.com/legacy/guide/tree/${"d".repeat(40)}/skills%23figquery/figma-use`,
+  );
   assert.equal(installed.enabled, false);
   assert.deepEqual(installed.config_json, { keep: "configuration" });
   const legacy = (
