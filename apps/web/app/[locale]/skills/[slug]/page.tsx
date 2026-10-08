@@ -653,7 +653,7 @@ export default async function PublicSkillDetailPage({
             the install card spans two rows, and whatever it needs beyond the
             title flows into the second row, where the tabs and content already
             run, instead of stretching the title row and leaving it empty. The
-            details rail follows the card in the third row. Below `lg` the
+            details rail follows the card and sticks with it. Below `lg` the
             four cells stack in DOM order: title, install, tabs and content,
             details.
           */}
@@ -730,11 +730,11 @@ export default async function PublicSkillDetailPage({
 
           {/*
             The right column is one element from `lg` up, so the details rail
-            follows the install card whatever their heights. On phones the
+            sticks with the install card whatever their heights. On phones the
             wrapper dissolves (`contents`) and `order` puts the tabs and
             content between the card and the details, as before.
           */}
-          <div className="contents lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:block lg:space-y-8 lg:self-stretch">
+          <div className="contents lg:sticky lg:top-20 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:block lg:space-y-8 lg:self-start">
             <aside className="order-2 rounded-xl border border-zinc-300 bg-white/70 p-5 lg:order-none dark:border-white/10 dark:bg-white/[0.04]">
               <dl className="grid grid-cols-2 gap-4 text-sm">
                 {facts.map(([label, value]) => (
@@ -775,7 +775,7 @@ export default async function PublicSkillDetailPage({
               ) : null}
             </aside>
 
-            <aside className="order-4 space-y-5 lg:order-none lg:sticky lg:top-20">
+            <aside className="order-4 space-y-5 lg:order-none">
               <section className={panelClassName}>
                 <h2 className="mb-4 text-base font-semibold">
                   {t("detail.details.heading")}
