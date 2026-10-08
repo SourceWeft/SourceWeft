@@ -121,6 +121,11 @@ test("same-name roots coexist, concurrent repeated sources are idempotent, renam
   const legacyRepeat = await repo.upsertRegistrySkillIndex(a);
   assert.equal(legacyRepeat.skillVersionId, first.skillVersionId);
   assert.equal(legacyRepeat.version, a.commitSha.slice(0, 12));
+  const renameRetry = await repo.upsertRegistrySkillIndex(
+    input("skills/figma-use", a.commitSha, "renamed"),
+  );
+  assert.equal(renameRetry.skillVersionId, first.skillVersionId);
+  assert.equal(renameRetry.slug, first.slug);
   const renamed = await repo.upsertRegistrySkillIndex(
     input("skills/figma-use", "b".repeat(40), "renamed"),
   );

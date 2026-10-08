@@ -505,7 +505,17 @@ export async function upsertRegistrySkillIndex(
       )
       .limit(1);
     if (existingVersion) {
-      if (existingVersion.storagePointer !== input.storagePointer) {
+      const storedSource = parseGithubStoragePointer(
+        existingVersion.storagePointer,
+      );
+      const sameVersionSource =
+        storedSource &&
+        storedSource.commitSha === source.commitSha &&
+        storedSource.repoSubpath === source.repoSubpath &&
+        ((storedSource.owner.toLowerCase() === source.owner.toLowerCase() &&
+          storedSource.repo.toLowerCase() === source.repo.toLowerCase()) ||
+          (repositoryId && existing?.githubRepositoryId === repositoryId));
+      if (!sameVersionSource) {
         throw new RegistrySubmissionError(
           "REGISTRY_VERSION_CONFLICT",
           "Version label refers to a different full source commit or path",

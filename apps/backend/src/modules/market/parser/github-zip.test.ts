@@ -215,3 +215,22 @@ test("an unreadable repository is reported as unavailable, not thrown raw", asyn
     globalThis.fetch = original;
   }
 });
+
+test("missing GitHub repository identity fails instead of inventing one", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    Response.json({
+      default_branch: "main",
+      full_name: "acme/skills",
+    })) as typeof fetch;
+  try {
+    await assert.rejects(
+      resolvePinnedGitHubSource("acme/skills"),
+      (error: unknown) =>
+        error instanceof GitHubArchiveError &&
+        error.code === "ARCHIVE_UNAVAILABLE",
+    );
+  } finally {
+    globalThis.fetch = original;
+  }
+});
