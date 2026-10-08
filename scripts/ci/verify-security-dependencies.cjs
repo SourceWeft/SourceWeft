@@ -259,3 +259,63 @@ console.log(
 // The formerly vulnerable braces implementation must resolve through the
 // actual SDK consumer chain, including its normal glob behavior.
 require("./verify-security-braces.cjs");
+
+// Handlebars 4.7.10 fixes the AST validation bypass in GHSA-8r5x-fm3f-whwj.
+const parsers = createRequire(
+  path.join(root, "packages/builtin-document-parsers/package.json"),
+);
+const classic = createRequire(
+  parsers.resolve("@langchain/classic/package.json"),
+);
+const handlebars = patchedDependency(classic, "handlebars", "4.7.10");
+assert.equal(
+  handlebars.compile("Hello {{name}}")({ name: "<world>" }),
+  "Hello &lt;world&gt;",
+);
+const invalidAst = {
+  type: "Program",
+  body: [
+    {
+      type: "BlockStatement",
+      path: {
+        type: "PathExpression",
+        data: false,
+        depth: 0,
+        parts: ["missingHelper"],
+        original: "missingHelper",
+      },
+      params: [],
+      program: {
+        type: "Program",
+        blockParams: {
+          length: "(globalThis.__swHandlebarsInjected = true, 0)",
+        },
+        body: [],
+      },
+      openStrip: { open: false, close: false },
+      inverseStrip: { open: false, close: false },
+      closeStrip: { open: false, close: false },
+    },
+  ],
+};
+const astLocation = {
+  start: { line: 1, column: 0 },
+  end: { line: 1, column: 20 },
+};
+invalidAst.loc = astLocation;
+invalidAst.body[0].loc = astLocation;
+invalidAst.body[0].path.loc = astLocation;
+invalidAst.body[0].program.loc = astLocation;
+globalThis.__swHandlebarsInjected = false;
+try {
+  assert.throws(() => handlebars.compile(invalidAst)({}));
+  assert.equal(
+    globalThis.__swHandlebarsInjected,
+    false,
+    "Invalid AST must never execute JavaScript",
+  );
+} finally {
+  delete globalThis.__swHandlebarsInjected;
+}
+
+console.log("Handlebars patch and normal template behavior verified.");
