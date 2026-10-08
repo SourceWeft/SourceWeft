@@ -55,55 +55,87 @@ export function planSkillInstallReferences(
   }
   const taken = new Set(reserved);
   const planned: Array<{ id: string; installRef: string }> = [];
-  for (const row of [...rows].sort((a, b) => a.id.localeCompare(b.id))) {
-    if (row.installRef) continue;
-    const name = names.get(row.id)!;
-    const peers = groups.get(groupKey(row))!;
-    const base = `@${row.owner.toLowerCase()}/${segment(name)}`;
-    if (!segment(name))
-      throw new Error(`Skill ${row.id} has no usable original name`);
-    let reference = base;
+  const assigned = new Set<string>();
+  const baseFor = (row: SourceRow) => {
+    const name = segment(names.get(row.id)!);
+    if (!name) throw new Error(`Skill ${row.id} has no usable original name`);
+    return `@${row.owner.toLowerCase()}/${name}`;
+  };
+  // Reserve every unambiguous natural name before assigning generated qualifiers.
+  for (const peers of groups.values()) {
     const prior = peers.filter((peer) => peer.legacyPrimary);
-    const legacyCanonical =
-      new Set(peers.map((peer) => peer.repo.toLowerCase())).size === 1 &&
-      prior.length === 1
-        ? prior[0]
-        : undefined;
-    if (
-      (peers.length > 1 && legacyCanonical?.id !== row.id) ||
-      taken.has(reference)
-    ) {
-      const differentRepos =
-        new Set(peers.map((other) => other.repo.toLowerCase())).size > 1;
-      const hintFor = (source: SourceRow) => {
-        const parents = source.root.split("/").slice(0, -1).filter(Boolean);
-        if (
-          parents.length > 1 &&
-          ["skills", ".agents", ".claude"].includes(parents[0]!)
-        )
-          parents.shift();
-        return (
-          segment(
-            differentRepos
-              ? source.repo
-              : (parents.join("-") || "root").replace(/^skills-/, ""),
-          ).slice(0, 64) || "root"
-        );
-      };
-      const hint = hintFor(row);
-      reference = `${base}-${hint}`;
-      if (
-        taken.has(reference) ||
-        peers.some((other) => other.id !== row.id && hintFor(other) === hint)
-      ) {
-        reference += `-${createHash("sha256").update(`${row.repo}\0${row.root}`).digest("hex").slice(0, 12)}`;
-      }
-    }
-    if (taken.has(reference))
-      throw new Error("Skill install reference collision");
-    taken.add(reference);
-    planned.push({ id: row.id, installRef: reference });
+    const canonical =
+      peers.length === 1
+        ? peers[0]
+        : new Set(peers.map((peer) => peer.repo.toLowerCase())).size === 1 &&
+            prior.length === 1
+          ? prior[0]
+          : undefined;
+    if (!canonical || canonical.installRef) continue;
+    const base = baseFor(canonical);
+    if (taken.has(base)) continue;
+    taken.add(base);
+    assigned.add(canonical.id);
+    planned.push({ id: canonical.id, installRef: base });
   }
+  const qualified = rows
+    .filter((row) => !row.installRef && !assigned.has(row.id))
+    .map((row) => {
+      const peers = groups.get(groupKey(row))!;
+      const differentRepos =
+        new Set(peers.map((peer) => peer.repo.toLowerCase())).size > 1;
+      const parents = row.root.split("/").slice(0, -1).filter(Boolean);
+      if (
+        parents.length > 1 &&
+        ["skills", ".agents", ".claude"].includes(parents[0]!)
+      )
+        parents.shift();
+      const hint =
+        segment(
+          differentRepos
+            ? row.repo
+            : (parents.join("-") || "root").replace(/^skills-/, ""),
+        ).slice(0, 64) || "root";
+      return { row, reference: `${baseFor(row)}-${hint}` };
+    });
+  const counts = new Map<string, number>();
+  for (const item of qualified)
+    counts.set(item.reference, (counts.get(item.reference) ?? 0) + 1);
+  // Reserve readable qualifiers together, then use a delimiter that cannot occur
+  // in normalized names. This prevents generated hashes from taking a real name.
+  for (const { row, reference } of qualified) {
+    if (!taken.has(reference) && counts.get(reference) === 1) {
+      taken.add(reference);
+      assigned.add(row.id);
+      planned.push({ id: row.id, installRef: reference });
+    }
+  }
+  const hashed = qualified
+    .filter((item) => !assigned.has(item.row.id))
+    .map((item) => {
+      const digest = createHash("sha256")
+        .update(`${item.row.id}\0${item.row.root}`)
+        .digest("hex");
+      return {
+        ...item,
+        digest,
+        short: `${item.reference}--${digest.slice(0, 12)}`,
+      };
+    });
+  const hashCounts = new Map<string, number>();
+  for (const item of hashed)
+    hashCounts.set(item.short, (hashCounts.get(item.short) ?? 0) + 1);
+  for (const item of hashed) {
+    const reference =
+      taken.has(item.short) || (hashCounts.get(item.short) ?? 0) > 1
+        ? `${item.reference}--${item.digest}`
+        : item.short;
+    if (taken.has(reference) || reference.length > 256)
+      throw new Error("Skill install reference collision or length limit");
+    taken.add(reference);
+    planned.push({ id: item.row.id, installRef: reference });
+  }
+
   return planned;
 }
 

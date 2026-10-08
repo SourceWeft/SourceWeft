@@ -163,6 +163,8 @@ export function marketSkillName(input: {
     const name = parseSkillFrontmatter(input.skillMd)?.name;
     if (typeof name === "string" && name.trim()) return name.trim();
   }
+  if (input.manifest.registry?.sourceRoot !== undefined)
+    throw new Error("Original skill name is unavailable in source metadata");
   const repo = repositoryFromUrl(input.manifest.registry?.repoUrl);
   if (repo) {
     const prefix = `gh-${slugSegment(repo.owner)}-${slugSegment(repo.repo)}-`;

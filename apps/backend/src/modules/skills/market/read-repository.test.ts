@@ -505,3 +505,14 @@ test("source-path slugs never become the original skill name", () => {
     "figma-use",
   );
 });
+
+test("a source-aware record with missing original metadata fails instead of deriving a hashed name", () => {
+  assert.throws(
+    () =>
+      marketSkillName({
+        slug: "gh-owner-repo-writer-skills-abcdef",
+        manifest: manifest({ sourceRoot: "skills/writer" }),
+      }),
+    /Original skill name/,
+  );
+});

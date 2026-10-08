@@ -184,3 +184,23 @@ test("the retained historical page keeps its short reference when old paths spli
   });
   assert.notEqual(other.items[0]?.installRef, "@aws/deploy");
 });
+
+test("generated variant labels cannot take another skill's natural name", async () => {
+  await seed("a-variant", "collision", "tools", "extra/deploy");
+  await seed("b-variant", "collision", "tools", "skills/deploy");
+  const literal = await seed(
+    "z-literal",
+    "collision",
+    "tools",
+    "skills/deploy-extra",
+  );
+  await data.database.query(
+    `update skill_versions set skill_md=replace(skill_md,'name: deploy','name: deploy-extra') where id='z-literal-v'`,
+  );
+  await references.reconcileSkillInstallReferences("collision");
+  const resolved = await references.resolveSkillInstallReferences({
+    reference: "@collision/deploy-extra",
+  });
+  assert.equal(resolved.exact, true);
+  assert.equal(resolved.items[0]?.slug, literal);
+});
