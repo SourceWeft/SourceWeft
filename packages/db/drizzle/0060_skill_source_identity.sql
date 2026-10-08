@@ -11,10 +11,10 @@ END $$;
 --> statement-breakpoint
 CREATE TEMP TABLE registry_source_mapping ON COMMIT DROP AS
 WITH roots AS (
- SELECT DISTINCT d.id old_id, split_part(v.storage_pointer, '#', 2) source_root
+ SELECT DISTINCT d.id old_id, coalesce(substring(v.storage_pointer from '#(.*)$'),'') source_root
  FROM skill_definitions d JOIN skill_versions v ON v.skill_id=d.id WHERE d.source_type='registry_github'
 ), primary_roots AS (
- SELECT DISTINCT ON (d.id) d.id, split_part(v.storage_pointer, '#', 2) source_root
+ SELECT DISTINCT ON (d.id) d.id, coalesce(substring(v.storage_pointer from '#(.*)$'),'') source_root
  FROM skill_definitions d JOIN skill_versions v ON v.skill_id=d.id WHERE d.source_type='registry_github'
  ORDER BY d.id, v.is_current DESC, v.created_at DESC, v.id DESC
 )
@@ -35,7 +35,7 @@ SELECT (jsonb_populate_record(NULL::skill_definitions,
   'source_root',m.source_root,'verified',false,'install_count',0,'rating_count',0,'rating_avg',NULL,'rank_score',0,'categories_set_by',NULL,
   'display_name',v.manifest_json->>'displayName','description',v.manifest_json->>'description'
  ))).* FROM registry_source_mapping m JOIN skill_definitions d ON d.id=m.old_id
- JOIN LATERAL (SELECT manifest_json FROM skill_versions WHERE skill_id=m.old_id AND split_part(storage_pointer,'#',2)=m.source_root ORDER BY is_current DESC,created_at DESC,id DESC LIMIT 1) v ON true
+ JOIN LATERAL (SELECT manifest_json FROM skill_versions WHERE skill_id=m.old_id AND coalesce(substring(storage_pointer from '#(.*)$'),'')=m.source_root ORDER BY is_current DESC,created_at DESC,id DESC LIMIT 1) v ON true
 WHERE m.new_id<>m.old_id;
 --> statement-breakpoint
 ALTER TABLE workspace_skills ALTER CONSTRAINT workspace_skills_skill_version_skill_fk DEFERRABLE INITIALLY DEFERRED;
@@ -43,7 +43,7 @@ ALTER TABLE workspace_skills ALTER CONSTRAINT workspace_skills_skill_version_ski
 UPDATE skill_versions v SET skill_id=m.new_id,
  manifest_json=jsonb_set(jsonb_set(v.manifest_json,'{slug}',to_jsonb(d.slug)),'{registry,sourceRoot}',to_jsonb(m.source_root))
 FROM registry_source_mapping m JOIN skill_definitions d ON d.id=m.new_id
-WHERE v.skill_id=m.old_id AND split_part(v.storage_pointer,'#',2)=m.source_root;
+WHERE v.skill_id=m.old_id AND coalesce(substring(v.storage_pointer from '#(.*)$'),'')=m.source_root;
 --> statement-breakpoint
 UPDATE workspace_skills w SET skill_id=v.skill_id FROM skill_versions v
 WHERE w.skill_version_id=v.id AND w.skill_id<>v.skill_id;

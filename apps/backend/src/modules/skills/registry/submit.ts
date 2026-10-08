@@ -37,7 +37,7 @@ function skillSourceUrl(
   repoSubpath: string,
 ): string {
   return repoSubpath
-    ? `${repoUrl}/tree/${sha}/${repoSubpath}`
+    ? `${repoUrl}/tree/${sha}/${repoSubpath.split("/").map(encodeURIComponent).join("/")}`
     : `${repoUrl}/tree/${sha}`;
 }
 

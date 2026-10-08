@@ -87,7 +87,7 @@ function input(
 }
 test("same-name roots coexist, concurrent repeated sources are idempotent, rename preserves URL", async () => {
   const a = input("skills/figma-use"),
-    b = input("skills-figquery/figma-use");
+    b = input("skills#figquery/figma-use");
   const [first, second] = await Promise.all([
     repo.upsertRegistrySkillIndex(a),
     repo.upsertRegistrySkillIndex(b),
@@ -145,7 +145,7 @@ test("historical split preserves old URL, exact version IDs, disabled configurat
     JSON.stringify({ ...input(root).manifestJson, slug: "legacy-url" });
   for (const [id, root, sha, current] of [
     ["legacy-a", "skills/figma-use", "c", true],
-    ["legacy-b", "skills-figquery/figma-use", "d", false],
+    ["legacy-b", "skills#figquery/figma-use", "d", false],
   ] as const) {
     await data.database.query(
       `insert into skill_versions(id,skill_id,version,status,storage_type,storage_pointer,is_current,content_hash,manifest_json) values($1,'legacy',$2,'published','db_text',$3,$4,'fixture',$5)`,
