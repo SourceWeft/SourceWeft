@@ -364,6 +364,7 @@ test("a summary carries the market's facts, not the author's own claims", () => 
     ["documents-office"],
   );
   assert.deepEqual(summary, {
+    installRef: null,
     slug: "gh-anthropics-skills-pdf",
     name: "pdf",
     displayName: "PDF",
@@ -484,4 +485,23 @@ test("a public skill with no registry block and no listing date still fits the c
     assert.equal(summary[field], null, field);
   }
   assert.ok(marketSkillSummarySchema.safeParse(summary).success);
+});
+
+test("source-path slugs never become the original skill name", () => {
+  const slug = "gh-figma-guide-figma-use-skills-figquery-1234567890abcdef";
+  assert.equal(
+    marketSkillName({
+      slug,
+      manifest: manifest({ originalName: "figma-use" }),
+    }),
+    "figma-use",
+  );
+  assert.equal(
+    marketSkillName({
+      slug,
+      manifest: manifest(),
+      skillMd: "---\nname: figma-use\ndescription: Figma\n---\nUse Figma",
+    }),
+    "figma-use",
+  );
 });

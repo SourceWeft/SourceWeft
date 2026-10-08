@@ -201,7 +201,9 @@ export function skillInstallMarkdown(input: {
   );
   // The same rule as the page: no command for a name the CLI would refuse.
   const command =
-    skill.cliInstallable === false ? null : skillCliInstallCommand(skill.slug);
+    skill.cliInstallable === false
+      ? null
+      : skillCliInstallCommand(skill.slug, skill.installRef);
 
   const facts = [
     `- Slug: \`${slug}\``,

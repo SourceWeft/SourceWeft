@@ -20,13 +20,76 @@ export type ManageContext = {
   download?: typeof fetchSkillFiles;
 };
 
-export type SkillFilter = RootSelection & { slug?: string };
+export type SkillFilter = RootSelection & {
+  slug?: string;
+  registry?: string;
+  skill?: string;
+  path?: string;
+};
 
-async function findInstalled(filter: SkillFilter): Promise<InstalledSkill[]> {
-  const { skills } = await scanRoots(selectRoots(filter));
-  return filter.slug
-    ? skills.filter((skill) => skill.metadata.slug === filter.slug)
-    : skills;
+async function findInstalled(
+  filter: SkillFilter,
+  ctx: ManageContext,
+): Promise<InstalledSkill[]> {
+  const { skills: found } = await scanRoots(selectRoots(filter));
+  const skills = filter.registry
+    ? found.filter((skill) => skill.metadata.registry === filter.registry)
+    : found;
+  if (!filter.slug) return skills;
+  const exact = skills.filter(
+    (skill) =>
+      skill.metadata.slug === filter.slug ||
+      skill.metadata.installRef === filter.slug,
+  );
+  if (
+    exact.length &&
+    filter.slug.startsWith("@") &&
+    new Set(
+      exact.map(
+        (skill) => `${skill.metadata.registry}\0${skill.metadata.slug}`,
+      ),
+    ).size > 1
+  )
+    throw new UsageError(
+      "Multiple installed registry sources match. Select --registry or --dir.",
+    );
+  if (exact.length)
+    return exact.filter(
+      (skill) =>
+        filter.path === undefined ||
+        skill.metadata.source.subpath === filter.path,
+    );
+  if (!filter.slug.includes("/")) return [];
+  const matches: InstalledSkill[] = [];
+  for (const registry of new Set(
+    skills.map((skill) => skill.metadata.registry),
+  )) {
+    const result = await ctx.clientFor(registry).resolveSkills(filter.slug, {
+      ...(filter.skill !== undefined ? { skill: filter.skill } : {}),
+      ...(filter.path !== undefined ? { path: filter.path } : {}),
+    });
+    const selected = skills.filter(
+      (skill) =>
+        skill.metadata.registry === registry &&
+        result.items.some((item) => item.slug === skill.metadata.slug),
+    );
+    if (new Set(selected.map((skill) => skill.metadata.slug)).size > 1)
+      throw new UsageError(
+        "Multiple installed sources match. Use an exact install reference or --path.",
+      );
+    matches.push(...selected);
+  }
+  if (
+    new Set(
+      matches.map(
+        (skill) => `${skill.metadata.registry}\0${skill.metadata.slug}`,
+      ),
+    ).size > 1
+  )
+    throw new UsageError(
+      "Multiple installed registry sources match. Select --registry or --dir.",
+    );
+  return matches;
 }
 
 function statusOf(skill: InstalledSkill): string {
@@ -41,12 +104,13 @@ export async function listCommand(
   ctx: ManageContext,
   filter: SkillFilter,
 ): Promise<void> {
-  const skills = await findInstalled(filter);
+  const skills = await findInstalled(filter, ctx);
   if (ctx.json) {
     ctx.out(
       JSON.stringify(
         skills.map((s) => ({
           slug: s.metadata.slug,
+          installRef: s.metadata.installRef ?? null,
           version: s.metadata.version,
           agent: s.agent,
           scope: s.scope,
@@ -67,7 +131,7 @@ export async function listCommand(
   ctx.out(
     table(
       skills.map((s) => [
-        s.metadata.slug,
+        s.metadata.installRef ?? s.metadata.slug,
         s.metadata.version,
         `${s.agent}/${s.scope}`,
         statusOf(s),
@@ -82,14 +146,16 @@ export async function removeCommand(
   filter: SkillFilter & { slug: string },
   options: { force: boolean; yes: boolean },
 ): Promise<void> {
-  const skills = await findInstalled(filter);
+  const skills = await findInstalled(filter, ctx);
   if (skills.length === 0) {
     throw new UsageError(
       `'${filter.slug}' is not installed by sourceweft here.`,
     );
   }
   for (const skill of skills) {
-    ctx.out(`${skill.metadata.slug} → ${skill.dir}`);
+    ctx.out(
+      `${skill.metadata.installRef ?? skill.metadata.slug} → ${skill.dir}`,
+    );
   }
   if (
     !(await confirm(`Remove ${skills.length} install(s)?`, {
@@ -117,7 +183,7 @@ export async function updateCommand(
   filter: SkillFilter,
   options: { dryRun: boolean; force: boolean; yes: boolean },
 ): Promise<void> {
-  const installed = await findInstalled(filter);
+  const installed = await findInstalled(filter, ctx);
   if (installed.length === 0) {
     ctx.out(
       filter.slug

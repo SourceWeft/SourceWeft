@@ -48,3 +48,29 @@ export async function confirm(
     rl.close();
   }
 }
+
+/** Selection is independent of installation consent: --yes never picks a source. */
+export async function chooseItem(labels: readonly string[]): Promise<number> {
+  if (!process.stdin.isTTY || !process.stdout.isTTY)
+    throw new Error(
+      "Multiple sources match. Specify an exact install reference or --path.",
+    );
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer = await rl.question(
+      labels.map((label, i) => `${i + 1}. ${label}`).join("\n") +
+        "\nChoose a source number (Enter to cancel): ",
+    );
+    const index = Number(answer) - 1;
+    if (
+      !answer.trim() ||
+      !Number.isInteger(index) ||
+      index < 0 ||
+      index >= labels.length
+    )
+      throw new Error("No source selected; nothing installed.");
+    return index;
+  } finally {
+    rl.close();
+  }
+}

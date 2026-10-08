@@ -20,6 +20,7 @@ import {
 import type { SkillManifestJson } from "@sourceweft/db";
 import { isSafeSkillDirName } from "@sourceweft/skill-format";
 import { ContentError } from "../../content/errors";
+import { parseSkillFrontmatter } from "../frontmatter";
 import { getSkillLogo } from "../logo";
 import { parseGithubStoragePointer } from "../storage/source-pointer";
 import {
@@ -152,9 +153,16 @@ export function repositoryOwnerFromUrl(
 export function marketSkillName(input: {
   slug: string;
   manifest: SkillManifestJson;
+  skillMd?: string | null;
 }): string {
-  const recorded = (input.manifest as { name?: unknown }).name;
+  const recorded =
+    input.manifest.registry?.originalName ??
+    (input.manifest as { name?: unknown }).name;
   if (typeof recorded === "string" && recorded.trim()) return recorded.trim();
+  if (input.skillMd) {
+    const name = parseSkillFrontmatter(input.skillMd)?.name;
+    if (typeof name === "string" && name.trim()) return name.trim();
+  }
   const repo = repositoryFromUrl(input.manifest.registry?.repoUrl);
   if (repo) {
     const prefix = `gh-${slugSegment(repo.owner)}-${slugSegment(repo.repo)}-`;
@@ -178,6 +186,7 @@ type MarketSkillRow = {
   definition: {
     id: string;
     slug: string;
+    installRef?: string | null;
     verified: boolean;
     featured?: boolean;
     installCount: number;
@@ -190,6 +199,7 @@ type MarketSkillRow = {
     version: string;
     publishedAt: Date | null;
     manifestJson: SkillManifestJson;
+    skillMd?: string | null;
   };
   /** Null until the scheduler has read the repository from GitHub. */
   repository?: { pushedAt: Date | null; archived: boolean | null } | null;
@@ -209,9 +219,14 @@ export function mapMarketSkillSummary(
 ): MarketSkillSummary {
   const manifest = row.version.manifestJson;
   const registry = manifest.registry;
-  const name = marketSkillName({ slug: row.definition.slug, manifest });
+  const name = marketSkillName({
+    slug: row.definition.slug,
+    manifest,
+    skillMd: row.version.skillMd,
+  });
   return {
     slug: row.definition.slug,
+    installRef: row.definition.installRef ?? null,
     name,
     // As the catalog does for a community skill: the version on show speaks
     // for itself, the definition row being only the last one indexed.
@@ -287,6 +302,7 @@ const summaryColumns = {
   definition: {
     id: skillDefinitions.id,
     slug: skillDefinitions.slug,
+    installRef: skillDefinitions.installRef,
     displayName: skillDefinitions.displayName,
     verified: skillDefinitions.verified,
     featured: skillDefinitions.featured,
@@ -300,14 +316,16 @@ const summaryColumns = {
     repoOwner: skillDefinitions.repoOwner,
     repoName: skillDefinitions.repoName,
   },
-  // Not the whole row: `skill_md` is the full document and a list has no use
-  // for it.
+  // Legacy records need frontmatter once until originalName is backfilled.
   version: {
     id: skillVersions.id,
     version: skillVersions.version,
     publishedAt: skillVersions.publishedAt,
     storagePointer: skillVersions.storagePointer,
     manifestJson: skillVersions.manifestJson,
+    skillMd: sql<
+      string | null
+    >`case when coalesce(${skillVersions.manifestJson}->'registry'->>'originalName',${skillVersions.manifestJson}->>'name') is null then coalesce(${skillVersions.skillMd},(select content_text from skill_version_files where skill_version_id=${skillVersions.id} and path='SKILL.md')) else null end`,
   },
   repository: {
     pushedAt: skillRepositories.pushedAt,

@@ -428,6 +428,13 @@
       "when": 1791485406009,
       "tag": "0060_skill_source_identity",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1791491974506,
+      "tag": "0061_skill_install_references",
+      "breakpoints": true
     }
   ]
 }

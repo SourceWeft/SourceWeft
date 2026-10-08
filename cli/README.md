@@ -20,8 +20,8 @@ account and no token.
 
 ```
 sourceweft skills search [query]   Search the marketplace
-sourceweft skills info <slug>      Show a skill and where it comes from
-sourceweft skills install <slug>   Install a skill for a coding agent
+sourceweft skills info <reference>      Show a skill and where it comes from
+sourceweft skills install <reference>   Install a skill for a coding agent
 sourceweft skills agents           List supported agents and where they keep skills
 sourceweft skills list             List skills installed by sourceweft
 sourceweft skills update [slug]    Update installed skills to the registry's version
@@ -34,7 +34,7 @@ Options: `--registry <url>`, `--agent <ids>`, `--scope user|project|all`,
 `--limit`, `--json`.
 
 The registry defaults to `https://api.sourceweft.com`; `--registry` points the
-command at another one. `list`, `remove` and `doctor` are purely local; `update`
+command at another one. `list` and `doctor` are local. `remove` uses stored references locally; resolving a new alias for an older installation can query its original registry. `update`
 talks to the registry each skill was installed from.
 
 ## Where skills go
@@ -113,3 +113,19 @@ pnpm --filter @sourceweft/cli build
 The parts shared with the backend — the content-hash definition, path and name
 rules, size limits, and the in-memory zip reader — live in
 `packages/skill-format` so both sides agree on them.
+
+
+## Readable install references
+
+```sh
+npx @sourceweft/cli skills install @aws/aws-serverless
+npx @sourceweft/cli skills install aws/agent-toolkit-for-aws --skill aws-serverless
+npx @sourceweft/cli skills install figma/mcp-server-guide --skill figma-use --path skills-figquery/figma-use
+npx @sourceweft/cli skills info @aws/aws-serverless
+npx @sourceweft/cli skills update @aws/aws-serverless
+npx @sourceweft/cli skills remove @aws/aws-serverless
+```
+
+Use the exact reference shown by the marketplace. When an owner has multiple sources with the same name, the catalog assigns source-qualified references. Interactive install/info can ask you to choose; `--yes` and `--json` never choose an ambiguous source. Use the listed exact reference or `--path` in scripts. Repository selectors resolve through the selected SourceWeft registry and retain pinned-commit and file-hash checks.
+
+Existing URL slugs and `.sourceweft.json` records remain supported. Aliases remain bound to their source when upstream names change. Local directories retain the original skill name; another source with the same local name is rejected even with `--force`. Use a different installation root for a different environment.

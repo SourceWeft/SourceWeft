@@ -18,6 +18,7 @@ const contentHash = z.string().regex(/^[0-9a-f]{64}$/u);
 
 const skillSummary = z.looseObject({
   slug: z.string(),
+  installRef: z.string().nullable().optional(),
   // The skill's own short name; it becomes the directory name.
   name: z.string(),
   displayName: z.string(),
@@ -54,6 +55,7 @@ export const searchResponseSchema = z.looseObject({
   items: z.array(
     z.looseObject({
       slug: z.string(),
+      installRef: z.string().nullable().optional(),
       description: z.string(),
       verified: z.boolean(),
       capability: z.string().nullable(),
@@ -64,3 +66,18 @@ export const searchResponseSchema = z.looseObject({
 
 export type SkillResponse = z.infer<typeof skillResponseSchema>;
 export type SearchResponse = z.infer<typeof searchResponseSchema>;
+
+export const referenceResponseSchema = z.object({
+  exact: z.boolean(),
+  items: z.array(
+    z.object({
+      slug: z.string(),
+      installRef: z.string().nullable(),
+      name: z.string(),
+      repoUrl: z.string().nullable(),
+      repoSubpath: z.string().nullable(),
+      description: z.string(),
+    }),
+  ),
+});
+export type ReferenceResponse = z.infer<typeof referenceResponseSchema>;
