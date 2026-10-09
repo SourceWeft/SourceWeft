@@ -13,6 +13,7 @@ Purpose of this directory:
 | `billing.ts` | `billing` | Checkout sessions, webhooks, subscription queries |
 | `dashboard.ts` | `workspace` | Dashboard workspace listing |
 | `health.ts` | — | Readiness / liveness check |
+| `sitemaps.ts` | `catalog-sitemap` | Public lightweight catalog shard index and entries |
 | `jobs.ts` | — (shared) | Job polling (source parse, sync, etc.) |
 | `workspace.ts` | `workspace` | Workspace CRUD |
 | `llm-observability.ts` | `llm-observability` | LLM span / trace / generation queries |

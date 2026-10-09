@@ -1,97 +1,91 @@
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
-
-vi.mock("../lib/blog-db", () => ({
-  listPublishedBlogPosts: async () => [],
-  listPublishedBlogSitemapEntries: async () => [],
+import { beforeEach, expect, it, vi } from "vitest";
+const mocks = vi.hoisted(() => ({
+  index: vi.fn(),
+  shard: vi.fn(),
+  static: vi.fn(),
 }));
-const mocks = vi.hoisted(() => ({ list: vi.fn(), listMcp: vi.fn() }));
-vi.mock("../lib/market-mcp", () => ({
-  listPublicMcp: mocks.listMcp,
-  listPublicMcpCategories: async () => ({ items: [] }),
+vi.mock("../lib/sitemap-catalog", () => ({
+  getPublicSitemapIndex: mocks.index,
+  getPublicSitemapShard: mocks.shard,
 }));
-vi.mock("../lib/market-skills", () => ({
-  listPublicSkills: mocks.list,
-  listPublicSkillCategories: async () => ({ items: [] }),
-  listPublicSkillCollections: async () => ({ items: [] }),
-}));
-import sitemap from "./sitemap";
+vi.mock("../lib/sitemap-static", () => ({ buildStaticSitemap: mocks.static }));
+import { GET as index } from "./sitemap.xml/route";
+import { GET as shard } from "./sitemap/[kind]/[file]/route";
 import { SITE_URL } from "./seo";
-
+import { catalogSitemapEntries } from "../lib/sitemap-entries";
 beforeEach(() => {
-  mocks.listMcp.mockResolvedValue({ items: [], nextCursor: null });
-  mocks.list.mockResolvedValue({ items: [], nextCursor: null });
-});
-afterEach(() => {
   vi.resetAllMocks();
+  mocks.index.mockResolvedValue({ shards: [] });
+  mocks.static.mockResolvedValue([{ url: SITE_URL + "/" }]);
 });
-
-it("uses actual overview languages on every catalog page, without requesting individual details", async () => {
-  const skill = (slug: string, overviewLocales?: string[]) => ({
-    slug,
-    overviewLocales,
-    listedAt: "2026-09-22",
-    updatedAt: null,
+it("uses an index with bounded shards beyond the former total cap", async () => {
+  mocks.index.mockResolvedValue({
+    shards: Array.from({ length: 16 }, (_, i) => ({
+      kind: "skills",
+      prefix: i.toString(16),
+      count: 5000,
+    })),
   });
-  mocks.list
-    .mockResolvedValueOnce({
-      items: [skill("translated", ["en", "zh-CN"])],
-      nextCursor: "page2",
-    })
-    .mockResolvedValueOnce({
-      items: [skill("english", ["en"]), skill("hidden", []), skill("legacy")],
-      nextCursor: null,
-    });
-  const entries = await sitemap();
-  expect(mocks.list).toHaveBeenCalledTimes(2);
-  expect(mocks.list.mock.calls[1]?.[0]).toMatchObject({
-    cursor: "page2",
-    sort: "new",
-  });
-  const translated = entries.find(
-    (e) => e.url === `${SITE_URL}/skills/translated`,
-  )!;
-  expect(translated.alternates?.languages).toEqual({
-    en: `${SITE_URL}/skills/translated`,
-    "zh-CN": `${SITE_URL}/zh-CN/skills/translated`,
-    "x-default": `${SITE_URL}/skills/translated`,
-  });
-  for (const slug of ["english", "hidden", "legacy"])
-    expect(
-      entries.find((e) => e.url === `${SITE_URL}/skills/${slug}`)?.alternates,
-    ).toBeUndefined();
+  const response = await index();
+  const xml = await response.text();
+  expect(response.status).toBe(200);
+  expect(response.headers.get("content-type")).toContain("application/xml");
+  expect(xml).toContain("<sitemapindex");
+  expect(xml.match(/<sitemap>/g)).toHaveLength(17);
+  expect(xml).toContain(`${SITE_URL}/sitemap-skills-f.xml`);
 });
-
-it("lists an MCP server's other languages only where it has a visible overview in them", async () => {
-  const server = (identifier: string, overviewLocales?: string[]) => ({
-    categories: [],
-    identifier,
-    // Absent in answers from before it existed.
-    ...(overviewLocales ? { overviewLocales } : {}),
-    updatedAt: "2026-09-22T00:00:00.000Z",
-  });
-  mocks.listMcp.mockResolvedValue({
+it("serves retained canonical slugs with actual overview languages only", async () => {
+  mocks.shard.mockResolvedValue({
     items: [
-      server("io.github.o/translated", ["en", "zh-TW"]),
-      server("io.github.o/english", ["en"]),
-      server("io.github.o/legacy"),
+      { key: "old-slug", updatedAt: null, overviewLocales: ["en", "zh-CN"] },
+      { key: "english", updatedAt: null, overviewLocales: ["en"] },
     ],
-    nextCursor: null,
   });
-  const entries = await sitemap();
-  const path = (identifier: string) => `/mcp/${encodeURIComponent(identifier)}`;
-  const translated = entries.find(
-    (e) => e.url === `${SITE_URL}${path("io.github.o/translated")}`,
-  )!;
-  expect(translated.alternates?.languages).toEqual({
-    en: `${SITE_URL}${path("io.github.o/translated")}`,
-    "zh-TW": `${SITE_URL}/zh-TW${path("io.github.o/translated")}`,
-    "x-default": `${SITE_URL}${path("io.github.o/translated")}`,
+  const response = await shard(new Request("https://test"), {
+    params: Promise.resolve({ kind: "skills", file: "a.xml" }),
   });
-  for (const identifier of ["io.github.o/english", "io.github.o/legacy"]) {
-    const entry = entries.find(
-      (e) => e.url === `${SITE_URL}${path(identifier)}`,
-    );
-    expect(entry).toBeDefined();
-    expect(entry?.alternates).toBeUndefined();
-  }
+  const xml = await response.text();
+  expect(xml).toContain(`${SITE_URL}/skills/old-slug`);
+  expect(xml).toContain(`${SITE_URL}/zh-CN/skills/old-slug`);
+  expect(xml).not.toContain("zh-CN/skills/english");
+  expect(mocks.shard).toHaveBeenCalledWith("skills", "a");
+  const mcp = catalogSitemapEntries("mcp", [
+    {
+      key: "io.github.o/tool",
+      updatedAt: null,
+      overviewLocales: ["en", "zh-TW"],
+    },
+  ]);
+  expect(mcp[0]?.url).toBe(`${SITE_URL}/mcp/io.github.o%2Ftool`);
+  expect(mcp[0]?.alternates?.languages?.["zh-TW"]).toContain("/zh-TW/mcp/");
+});
+it("returns no-store 503 on index or shard failure, never a partial sitemap", async () => {
+  const log = vi.spyOn(console, "error").mockImplementation(() => {});
+  mocks.index.mockRejectedValue(new Error("offline"));
+  const root = await index();
+  expect(root.status).toBe(503);
+  expect(root.headers.get("cache-control")).toBe("no-store");
+  mocks.shard.mockRejectedValue(new Error("offline"));
+  const child = await shard(new Request("https://test"), {
+    params: Promise.resolve({ kind: "skills", file: "a.xml" }),
+  });
+  expect(child.status).toBe(503);
+  log.mockRestore();
+});
+it("rejects invalid paths and missing static shards without a catalog query", async () => {
+  for (const [kind, file] of [
+    ["private", "a.xml"],
+    ["skills", "a.json"],
+    ["skills", "AA.xml"],
+    ["static", "01.xml"],
+    ["static", "9.xml"],
+  ] as const)
+    expect(
+      (
+        await shard(new Request("https://test"), {
+          params: Promise.resolve({ kind, file }),
+        })
+      ).status,
+    ).toBe(404);
+  expect(mocks.shard).not.toHaveBeenCalled();
 });

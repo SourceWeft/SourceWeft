@@ -14,12 +14,12 @@ import {
   type MarketSkillLocale,
 } from "@sourceweft/market-sdk";
 
-import { apiBaseUrl } from "./api-base-url";
+import { internalApiBaseUrl } from "./internal-api-base-url";
 
 function marketClient() {
   // The public skill market is served by the backend at {backend}/v1/skills —
   // anonymous, so no service token.
-  return new MarketClient({ baseUrl: apiBaseUrl });
+  return new MarketClient({ baseUrl: internalApiBaseUrl() });
 }
 
 export function isMarketNotFound(error: unknown) {
@@ -116,6 +116,11 @@ const cachedListSkillCollections = unstable_cache(
   ["public-skills-collections"],
   { revalidate: SKILL_REVALIDATE_SECONDS },
 );
+
+/** A sitemap must not mistake an outage for an empty collection catalog. */
+export function requirePublicSkillCollections(): Promise<ListMarketSkillCollectionsResponse> {
+  return cachedListSkillCollections();
+}
 
 /** Published collections; none on an outage, so the directory still renders. */
 export async function listPublicSkillCollections(): Promise<ListMarketSkillCollectionsResponse> {

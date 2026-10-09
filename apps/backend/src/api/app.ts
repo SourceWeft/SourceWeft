@@ -24,6 +24,7 @@ import { registerLocalDeviceRoutes } from "./routes/local-devices";
 import { healthResponse } from "./routes/health";
 import { registerJobRoutes } from "./routes/jobs";
 import { registerPublicShareRoutes } from "./routes/public-shares";
+import { registerSitemapRoutes } from "./routes/sitemaps";
 import { registerMarketRoutes } from "./routes/market";
 import { registerSkillPublicRoutes } from "./routes/skills-public";
 import { registerSkillRegistryAdminRoutes } from "./routes/skills-registry";
@@ -93,6 +94,7 @@ export function createApp() {
   registerBillingRoutes(app);
   registerContentRoutes(app);
   registerMarketRoutes(app);
+  registerSitemapRoutes(app);
   registerSkillRegistryAdminRoutes(app);
   registerSkillMarketAdminRoutes(app);
   registerSkillCollectionAdminRoutes(app);
