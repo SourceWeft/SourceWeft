@@ -1,3 +1,4 @@
+import { parseSkillOverviewModelOutput } from "./overview-prompt";
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import {
@@ -57,7 +58,7 @@ function prompt(skillMd = source) {
 }
 
 test("versioned prompt demands three independent locales and purpose-based taxonomy", () => {
-  assert.equal(SKILL_ANALYSIS_PROMPT_VERSION, "2");
+  assert.equal(SKILL_ANALYSIS_PROMPT_VERSION, "3");
   assert.equal(SKILL_ANALYSIS_TAXONOMY_VERSION, "1");
   assert.deepEqual(Object.keys(skillAnalysisTaxonomy), [
     ...SKILL_ANALYSIS_CATEGORY_SLUGS,
@@ -243,4 +244,77 @@ test("evidence requires original source and cannot cite synthesized provenance",
       ),
     SkillOverviewOutputError,
   );
+});
+
+function modelOutput(built = prompt()) {
+  const value = output();
+  const { evidence, ...classification } = value.classification;
+  return {
+    ...value,
+    classification: {
+      ...classification,
+      evidenceIds: Object.keys(built.evidenceSources).slice(0, 1),
+    },
+  };
+}
+test("model selects source IDs and storage receives exact original quotations", () => {
+  const built = prompt("Use **charts** with `data`.");
+  const result = parseSkillOverviewModelOutput(
+    modelOutput(built),
+    SKILL_ANALYSIS_CATEGORY_SLUGS,
+    built.sourceText,
+    built,
+  );
+  assert.deepEqual(result.classification.evidence, [built.sourceText]);
+  assert.ok(!("evidenceIds" in result.classification));
+});
+test("unknown, duplicate, cross-source and unquoted model evidence fails closed", () => {
+  const built = prompt();
+  for (const ids of [
+    ["e_" + "0".repeat(24)],
+    [
+      ...Object.keys(built.evidenceSources),
+      ...Object.keys(built.evidenceSources),
+    ],
+    Object.keys(prompt("Different source").evidenceSources),
+  ]) {
+    const value = modelOutput(built);
+    value.classification.evidenceIds = ids;
+    assert.throws(() =>
+      parseSkillOverviewModelOutput(
+        value,
+        SKILL_ANALYSIS_CATEGORY_SLUGS,
+        source,
+        built,
+      ),
+    );
+  }
+  assert.throws(() =>
+    parseSkillOverviewModelOutput(
+      output(),
+      SKILL_ANALYSIS_CATEGORY_SLUGS,
+      source,
+      built,
+    ),
+  );
+  assert.throws(() =>
+    parseSkillOverviewModelOutput(
+      modelOutput(built),
+      SKILL_ANALYSIS_CATEGORY_SLUGS,
+      "different",
+      built,
+    ),
+  );
+});
+test("long source evidence omits synthetic excerpt labels and preserves source bytes", () => {
+  const full = "# Overview\n" + "Purpose with **markup**.\n".repeat(2000);
+  const built = prompt(full);
+  assert.ok(built.truncated);
+  assert.ok(Object.keys(built.evidenceSources).length);
+  for (const quote of Object.values(built.evidenceSources)) {
+    assert.ok(full.includes(quote));
+    assert.ok(built.sourceText.includes(quote));
+    assert.ok(quote.length <= 900);
+    assert.ok(!quote.startsWith("[SKILL.md chars"));
+  }
 });

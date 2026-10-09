@@ -1,3 +1,4 @@
+import { buildSkillEvidenceSources } from "./overview-prompt";
 import { beforeEach, expect, test, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   find: vi.fn(),
@@ -56,7 +57,21 @@ const input = () => ({
   scopeId: "scope",
   modelConfigurationKey: "model-config",
   modelReady: async () => true,
-  callModel: vi.fn(async () => ({ output, model: "test" })),
+  callModel: vi.fn(async (): Promise<{ output: unknown; model: string }> => ({
+    output: {
+      ...output,
+      classification: {
+        status: output.classification.status,
+        primary: output.classification.primary,
+        secondary: output.classification.secondary,
+        rationale: output.classification.rationale,
+        evidenceIds: Object.keys(
+          buildSkillEvidenceSources("Makes charts.", "Makes charts."),
+        ),
+      },
+    },
+    model: "test",
+  })),
 });
 beforeEach(() => {
   vi.clearAllMocks();
@@ -163,6 +178,7 @@ test("the model call goes through the system model with the overview request", a
     system: "system prompt",
     user: "user prompt",
     sourceText: "source",
+    evidenceSources: {},
     truncated: false,
     inputFingerprint: "fingerprint",
   };

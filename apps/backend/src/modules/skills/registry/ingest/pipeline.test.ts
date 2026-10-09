@@ -631,3 +631,33 @@ test("system ingestion indexes globally without granting or installing into any 
   assert.equal(mocks.grant.mock.calls.length, 0);
   assert.equal(vi.mocked(io.installSkill).mock.calls.length, 0);
 });
+
+test("explicit roots use the scoped reader and retain the normal scan/write stages", async () => {
+  skillsRead(["writer"]);
+  const value = await mocks.readArchive();
+  mocks.readArchive.mockClear();
+  const readSubtree = vi.fn(async () => value);
+  const injected = deps({
+    resolveSource: vi.fn(async () => ({ ...source, subpath: "skills/writer" })),
+    readSubtree,
+  });
+  await run({ deps: injected });
+  assert.equal(readSubtree.mock.calls.length, 1);
+  assert.equal(vi.mocked(injected.downloadArchive).mock.calls.length, 0);
+  assert.equal(mocks.readArchive.mock.calls.length, 0);
+  assert.equal(mocks.analyze.mock.calls.length, 1);
+  assert.equal(mocks.upsert.mock.calls.length, 1);
+  assert.equal(state.row!.status, "succeeded");
+});
+
+test("a scoped reader failure never downloads the whole archive or writes a partial skill", async () => {
+  const injected = deps({
+    resolveSource: vi.fn(async () => ({ ...source, subpath: "skills/writer" })),
+    readSubtree: vi.fn(async () => {
+      throw new GitHubArchiveError("ARCHIVE_UNAVAILABLE", "integrity mismatch");
+    }),
+  });
+  await assert.rejects(run({ deps: injected }), /integrity mismatch/);
+  assert.equal(vi.mocked(injected.downloadArchive).mock.calls.length, 0);
+  assert.equal(mocks.upsert.mock.calls.length, 0);
+});

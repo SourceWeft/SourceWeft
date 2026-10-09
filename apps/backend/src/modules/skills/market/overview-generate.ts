@@ -12,7 +12,7 @@ import {
   SKILL_OVERVIEW_OUTPUT_JSON_SCHEMA,
   SKILL_OVERVIEW_OUTPUT_NAME,
   buildSkillOverviewPrompt,
-  parseSkillOverviewOutput,
+  parseSkillOverviewModelOutput,
   type SkillOverviewPrompt,
 } from "./overview-prompt";
 import {
@@ -94,11 +94,11 @@ export const skillOverviewAdapter: OverviewSubjectAdapter<
     });
   },
   parseOutput(raw, subject, prompt) {
-    const parsed = parseSkillOverviewOutput(
+    const parsed = parseSkillOverviewModelOutput(
       raw,
       skillCategoryDefinitions.map((category) => category.slug),
       subject.skillMd ?? "",
-      prompt.sourceText,
+      prompt,
     );
     return {
       overviews: {
