@@ -63,6 +63,9 @@ jobs:
       - name: Build
         run: pnpm --filter @sourceweft/cli build
 
+      - name: Smoke test bundled CLI
+        run: node cli/dist/main.js --version
+
       - name: Publish
         working-directory: cli
         run: npm publish --access public
