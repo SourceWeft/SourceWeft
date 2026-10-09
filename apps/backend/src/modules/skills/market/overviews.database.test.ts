@@ -210,7 +210,9 @@ describe.skipIf(!skillDatabaseEnabled)(
                 primary: "data-analytics",
                 secondary: null,
                 rationale: "Creates charts",
-                evidence: ["Makes charts."],
+                evidenceIds: Object.entries(prompt.evidenceSources)
+                  .filter(([, quote]) => quote.includes("Makes charts."))
+                  .map(([id]) => id),
               },
             },
           };

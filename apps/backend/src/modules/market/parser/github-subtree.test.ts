@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { afterEach, expect, test, vi } from "vitest";
-import { readGitHubSubtree } from "./github-subtree";
+import { readGitHubSubtree, clearGitHubSubtreeCache } from "./github-subtree";
 import type { PinnedGitHubSource } from "./github-zip";
 const commit = "a".repeat(40),
   root = "b".repeat(40),
@@ -30,6 +30,7 @@ function mock(
   entries: unknown[] = [file],
   opts: { truncated?: boolean; raw?: Buffer; wrongCommit?: boolean } = {},
 ) {
+  clearGitHubSubtreeCache();
   return vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string) => {
@@ -51,12 +52,15 @@ function mock(
           tree: entries,
         });
       if (url.startsWith("https://raw.githubusercontent.com/"))
-        return new Response(opts.raw ?? body);
+        return new Response(Uint8Array.from(opts.raw ?? body));
       throw Error("Unexpected fetch: " + url);
     }),
   );
 }
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  clearGitHubSubtreeCache();
+});
 test("reads only selected subtree at pinned SHA and verifies exact blob bytes", async () => {
   mock();
   const tree = await readGitHubSubtree(source);
@@ -119,4 +123,14 @@ test("untrusted subpaths and unpinned refs never reach network", async () => {
     readGitHubSubtree({ ...source, commitSha: "main" }),
   ).rejects.toThrow(/full commit/);
   expect(fetch).not.toHaveBeenCalled();
+});
+
+test("immutable directory metadata is reused while blob bytes are still verified", async () => {
+  mock();
+  await readGitHubSubtree(source);
+  const initial = vi.mocked(fetch).mock.calls.length;
+  const second = await readGitHubSubtree(source);
+  expect(vi.mocked(fetch).mock.calls.length).toBe(initial);
+  await second.readFiles(new Set(["skills/SKILL.md"]), 1024);
+  expect(vi.mocked(fetch).mock.calls.length).toBe(initial + 1);
 });

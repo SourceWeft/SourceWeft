@@ -12,6 +12,54 @@ import {
 } from "./github";
 import { GITHUB_ZIP_LIMITS, type PinnedGitHubSource } from "./github-zip";
 
+// Immutable commit/tree responses only. Bounded raw JSON avoids retaining unbounded object graphs.
+const metadataCache = new Map<string, { body: Buffer; expires: number }>();
+const METADATA_CACHE_BYTES = 16 * 1024 * 1024;
+let metadataCacheBytes = 0;
+export function clearGitHubSubtreeCache() {
+  metadataCache.clear();
+  metadataCacheBytes = 0;
+}
+async function metadataJson(url: string, options?: GitHubRequestOptions) {
+  options?.signal?.throwIfAborted();
+  const cached = metadataCache.get(url);
+  if (cached && cached.expires > Date.now()) {
+    metadataCache.delete(url);
+    metadataCache.set(url, cached);
+    return JSON.parse(cached.body.toString("utf8"));
+  }
+  if (cached) {
+    metadataCache.delete(url);
+    metadataCacheBytes -= cached.body.length;
+  }
+  const body = await bytes(url, githubHeaders(), 8 * 1024 * 1024, options);
+  const value = JSON.parse(body.toString("utf8"));
+  // Invalid/truncated replies must remain observable on the next request.
+  const valid = url.includes("/trees/")
+    ? treeSchema.safeParse(value).success && value.truncated === false
+    : z.object({ sha, tree: z.object({ sha }) }).safeParse(value).success;
+  if (valid && value.sha === url.split("/").at(-1)?.split("?")[0]) {
+    // Concurrent callers may have populated the same entry while this fetch ran.
+    const previous = metadataCache.get(url);
+    if (previous) {
+      metadataCache.delete(url);
+      metadataCacheBytes -= previous.body.length;
+    }
+    while (
+      (metadataCacheBytes + body.length > METADATA_CACHE_BYTES ||
+        metadataCache.size >= 512) &&
+      metadataCache.size
+    ) {
+      const oldest = metadataCache.keys().next().value!;
+      metadataCacheBytes -= metadataCache.get(oldest)!.body.length;
+      metadataCache.delete(oldest);
+    }
+    metadataCache.set(url, { body, expires: Date.now() + 15 * 60 * 1000 });
+    metadataCacheBytes += body.length;
+  }
+  return value;
+}
+
 const sha = z.string().regex(/^[a-f0-9]{40}$/);
 const entrySchema = z.object({
   path: z.string(),
@@ -100,12 +148,7 @@ export async function readGitHubSubtree(
   if (!safePath(source.subpath) || source.subpath.split("/").length > 64)
     fail("Invalid GitHub subtree path");
   const api = `https://api.github.com/repos/${encodeURIComponent(source.owner)}/${encodeURIComponent(source.repo)}/git`;
-  const json = async (url: string) =>
-    JSON.parse(
-      (await bytes(url, githubHeaders(), 8 * 1024 * 1024, options)).toString(
-        "utf8",
-      ),
-    );
+  const json = (url: string) => metadataJson(url, options);
   const commit = z
     .object({ sha, tree: z.object({ sha }) })
     .parse(await json(`${api}/commits/${source.commitSha}`));
