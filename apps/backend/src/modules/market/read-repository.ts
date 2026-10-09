@@ -270,11 +270,17 @@ function verificationStatusFor(input: {
 // (io.github.<owner>/<repo>), so derive the owner's avatar as a real logo when no
 // upstream icon exists. The <img> follows github.com's redirect to the avatar CDN
 // and the client falls back to the glyph on load error, so a wrong guess is safe.
-function githubOwner(repoUrl: string | null, identifier: string): string | null {
+function githubOwner(
+  repoUrl: string | null,
+  identifier: string,
+): string | null {
   if (repoUrl) {
     try {
       const url = new URL(repoUrl);
-      if (url.hostname === "github.com" || url.hostname.endsWith(".github.com")) {
+      if (
+        url.hostname === "github.com" ||
+        url.hostname.endsWith(".github.com")
+      ) {
         const owner = url.pathname.split("/").filter(Boolean)[0];
         if (owner) {
           return owner;
@@ -446,6 +452,14 @@ async function overviewFieldsByVersionIds(
   });
 }
 
+/** Shared by catalog reads and sitemap export, including desktop-only details. */
+export function publicMarketMcpCondition() {
+  return and(
+    eq(mcpServers.status, "published"),
+    eq(mcpServers.visibility, "public"),
+  )!;
+}
+
 // Keyset cursor over the (publishedAt desc, id desc) ordering. Opaque to
 // callers; encodes the last row of the previous page so the next page is a plain
 // indexed range scan rather than an offset that grows with the catalog.
@@ -501,10 +515,7 @@ export async function listMcp(input: {
   // Everything is pushed into SQL — facets are real columns and categories join
   // — so the whole catalog is filtered/ordered/paginated in the database. No
   // in-memory scan cap, so results are complete at any catalog size.
-  const conditions = [
-    eq(mcpServers.status, "published" as const),
-    eq(mcpServers.visibility, "public" as const),
-  ];
+  const conditions = [publicMarketMcpCondition()];
   if (query) {
     conditions.push(marketSearchCondition(query));
   }
@@ -607,10 +618,7 @@ export async function countMcpByCategory(input: {
   desktopOnly?: boolean;
 }): Promise<{ counts: Record<string, number>; total: number }> {
   const query = input.query?.trim().toLowerCase();
-  const conditions = [
-    eq(mcpServers.status, "published" as const),
-    eq(mcpServers.visibility, "public" as const),
-  ];
+  const conditions = [publicMarketMcpCondition()];
   if (query) {
     conditions.push(marketSearchCondition(query));
   }
@@ -671,11 +679,7 @@ export async function findMcp(
       .select()
       .from(mcpServers)
       .where(
-        and(
-          eq(mcpServers.identifier, identifier),
-          eq(mcpServers.status, "published"),
-          eq(mcpServers.visibility, "public"),
-        ),
+        and(eq(mcpServers.identifier, identifier), publicMarketMcpCondition()),
       )
       .limit(1);
   } catch (error) {

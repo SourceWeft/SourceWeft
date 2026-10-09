@@ -1,116 +1,47 @@
-import { buildTranslatedAlternates } from "../lib/i18n/metadata";
 import type { MetadataRoute } from "next";
 
 import {
   listPublishedBlogPosts,
   listPublishedBlogSitemapEntries,
-} from "../lib/blog-db";
-import { listPublicMcp, listPublicMcpCategories } from "../lib/market-mcp";
+} from "./blog-db";
 import {
-  listPublicSkillCategories,
-  listPublicSkillCollections,
-  listPublicSkills,
-} from "../lib/market-skills";
-import { blogTagPath } from "./[locale]/blog/_components/blog-list";
+  requirePublicMcpCounts,
+  requirePublicMcpCategories,
+} from "./market-mcp";
 import {
-  mcpCategoryPath,
-  mcpPath,
-} from "./[locale]/mcp/_components/mcp-display";
-import { isIndexableListing, SITE_URL } from "./seo";
+  requirePublicSkillCategories,
+  requirePublicSkillCollections,
+} from "./market-skills";
+import { blogTagPath } from "../app/[locale]/blog/_components/blog-list";
+import { mcpCategoryPath } from "../app/[locale]/mcp/_components/mcp-display";
+import { isIndexableListing, SITE_URL } from "../app/seo";
 import {
   skillCategoryPath,
   skillCollectionPath,
-  skillPath,
-} from "./[locale]/skills/_components/skills-format";
-import { sitemapLocaleAlternates } from "../lib/i18n/metadata";
+} from "../app/[locale]/skills/_components/skills-format";
+import { sitemapLocaleAlternates } from "./i18n/metadata";
 
-export const dynamic = "force-dynamic";
-
-const MCP_SITEMAP_PAGE_LIMIT = 100;
-const MCP_SITEMAP_MAX_PAGES = 50;
-
-// The market is cursor-paginated, so one page would silently cap the sitemap at
-// the first 100 servers and leave the rest undiscoverable.
-async function listAllPublicMcpItems() {
-  const items: Awaited<ReturnType<typeof listPublicMcp>>["items"] = [];
-  let cursor: string | null = null;
-
-  for (let page = 0; page < MCP_SITEMAP_MAX_PAGES; page += 1) {
-    const response: Awaited<ReturnType<typeof listPublicMcp>> =
-      await listPublicMcp({
-        cursor: cursor ?? undefined,
-        includeDesktopOnly: true,
-        limit: MCP_SITEMAP_PAGE_LIMIT,
-      });
-    items.push(...response.items);
-    cursor = response.nextCursor;
-    if (!cursor) {
-      break;
-    }
-  }
-
-  return items;
-}
-
-const SKILL_SITEMAP_PAGE_LIMIT = 100;
-const SKILL_SITEMAP_MAX_PAGES = 50;
-
-// Same cursor walk as the MCP market. `new` sorts on the immutable listing
-// date, so a skill cannot move between pages while the walk is in progress. A
-// market outage yields an empty page from the swallowing wrapper, which ends
-// the walk and leaves the rest of the sitemap intact.
-async function listAllPublicSkills() {
-  const items: Awaited<ReturnType<typeof listPublicSkills>>["items"] = [];
-  let cursor: string | null = null;
-
-  for (let page = 0; page < SKILL_SITEMAP_MAX_PAGES; page += 1) {
-    const response: Awaited<ReturnType<typeof listPublicSkills>> =
-      await listPublicSkills({
-        cursor: cursor ?? undefined,
-        limit: SKILL_SITEMAP_PAGE_LIMIT,
-        sort: "new",
-      });
-    items.push(...response.items);
-    cursor = response.nextCursor;
-    if (!cursor) {
-      break;
-    }
-  }
-
-  return items;
-}
-
-export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
+export async function buildStaticSitemap(): Promise<MetadataRoute.Sitemap> {
   // Static marketing routes have no real edit timestamp; claiming "now" on every
   // request tells crawlers they change constantly, so they carry no lastModified.
   const [
     blogPosts,
     blogPostSummaries,
-    mcpItems,
+    mcpCounts,
     mcpCategories,
-    skills,
     skillCategories,
     skillCollections,
   ] = await Promise.all([
     listPublishedBlogSitemapEntries(),
     listPublishedBlogPosts(),
-    listAllPublicMcpItems(),
-    listPublicMcpCategories(),
-    listAllPublicSkills(),
-    listPublicSkillCategories(),
-    listPublicSkillCollections(),
+    requirePublicMcpCounts({ includeDesktopOnly: true }),
+    requirePublicMcpCategories(),
+    requirePublicSkillCategories(),
+    requirePublicSkillCollections(),
   ]);
 
   // Listing pages below the threshold render with noindex, so submitting them
   // here would contradict that signal.
-  const countByCategory = new Map<string, number>();
-  for (const item of mcpItems) {
-    for (const category of item.categories) {
-      const slug = category.toLowerCase();
-      countByCategory.set(slug, (countByCategory.get(slug) ?? 0) + 1);
-    }
-  }
-
   const countByTag = new Map<string, number>();
   for (const post of blogPostSummaries) {
     for (const tag of post.tags) {
@@ -119,7 +50,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   }
 
   const indexableCategories = mcpCategories.items.filter((category) =>
-    isIndexableListing(countByCategory.get(category.slug.toLowerCase()) ?? 0),
+    isIndexableListing(mcpCounts.counts[category.slug.toLowerCase()] ?? 0),
   );
   // The skill categories endpoint carries its own public counts, and the
   // category page reads the same number for its noindex decision.
@@ -220,22 +151,6 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       priority: 0.45,
       url: `${SITE_URL}${blogTagPath(tag)}`,
     })),
-    ...mcpItems.map((item) => {
-      // Like a skill: another language is its own page only where the server
-      // has a visible AI overview written in it.
-      const { languages } = buildTranslatedAlternates(
-        mcpPath(item.identifier),
-        "en",
-        item.overviewLocales ?? [],
-      );
-      return {
-        changeFrequency: "weekly" as const,
-        lastModified: item.updatedAt ? new Date(item.updatedAt) : undefined,
-        priority: 0.55,
-        url: `${SITE_URL}/mcp/${encodeURIComponent(item.identifier)}`,
-        ...(languages ? { alternates: { languages } } : {}),
-      };
-    }),
     ...indexableSkillCategories.map((category) => ({
       alternates: sitemapLocaleAlternates(skillCategoryPath(category.slug)),
       changeFrequency: "weekly" as const,
@@ -252,22 +167,6 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
         lastModified: Number.isNaN(modified.getTime()) ? undefined : modified,
         priority: 0.5,
         url: `${SITE_URL}${skillCollectionPath(collection.slug)}`,
-      };
-    }),
-    ...skills.map((skill) => {
-      const { languages } = buildTranslatedAlternates(
-        skillPath(skill.slug),
-        "en",
-        skill.overviewLocales ?? [],
-      );
-      const modified = new Date(skill.updatedAt ?? skill.listedAt);
-      return {
-        changeFrequency: "weekly" as const,
-        // One unparseable date must not throw away the whole sitemap.
-        lastModified: Number.isNaN(modified.getTime()) ? undefined : modified,
-        priority: 0.55,
-        url: `${SITE_URL}${skillPath(skill.slug)}`,
-        ...(languages ? { alternates: { languages } } : {}),
       };
     }),
   ];

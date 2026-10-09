@@ -89,8 +89,10 @@ const cachedMcpCategoryCounts = unstable_cache(
 );
 
 /** Strict count read for surfaces that distinguish an outage from an empty catalog. */
-export function requirePublicMcpCounts(): Promise<MarketCategoryCountsResponse> {
-  return cachedMcpCategoryCounts({});
+export function requirePublicMcpCounts(
+  input: Parameters<MarketClient["countMcpByCategory"]>[0] = {},
+): Promise<MarketCategoryCountsResponse> {
+  return cachedMcpCategoryCounts(input);
 }
 
 export async function countPublicMcpByCategory(

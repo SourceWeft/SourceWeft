@@ -117,6 +117,11 @@ const cachedListSkillCollections = unstable_cache(
   { revalidate: SKILL_REVALIDATE_SECONDS },
 );
 
+/** A sitemap must not mistake an outage for an empty collection catalog. */
+export function requirePublicSkillCollections(): Promise<ListMarketSkillCollectionsResponse> {
+  return cachedListSkillCollections();
+}
+
 /** Published collections; none on an outage, so the directory still renders. */
 export async function listPublicSkillCollections(): Promise<ListMarketSkillCollectionsResponse> {
   try {

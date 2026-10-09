@@ -59,6 +59,16 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     "/changelog": ["./content/changelog/**"],
   },
+  async rewrites() {
+    // Keep public sitemap files at the site root; the shared implementation
+    // lives below /sitemap and is excluded from locale negotiation.
+    return [
+      {
+        source: "/sitemap-:kind(mcp|skills|static)-:file",
+        destination: "/sitemap/:kind/:file",
+      },
+    ];
+  },
   async redirects() {
     return [
       // Public shares moved from `/s/:token` to the canonical `/artifact/:token`

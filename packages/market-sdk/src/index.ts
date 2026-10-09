@@ -1,4 +1,7 @@
 import {
+  catalogSitemapIndexSchema,
+  catalogSitemapShardSchema,
+  type CatalogSitemapKind,
   getMarketMcpManifestResponseSchema,
   getMarketMcpResponseSchema,
   getMarketSkillCollectionResponseSchema,
@@ -64,6 +67,22 @@ export class MarketClient {
     this.baseUrl = options.baseUrl.replace(/\/+$/, "");
     this.getToken = options.getToken;
     this.fetchImpl = options.fetch ?? fetch;
+  }
+
+  getSitemapIndex() {
+    return this.request(
+      "/v1/sitemaps",
+      { method: "GET" },
+      catalogSitemapIndexSchema,
+    );
+  }
+
+  getSitemapShard(kind: CatalogSitemapKind, prefix: string) {
+    return this.request(
+      `/v1/sitemaps/${kind}/${encode(prefix)}`,
+      { method: "GET" },
+      catalogSitemapShardSchema,
+    );
   }
 
   /** One page of the public skill market. */
