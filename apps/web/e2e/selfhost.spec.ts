@@ -131,7 +131,9 @@ test("README installation: authentication, private upload, streaming, persistenc
     await expect(
       page.getByRole("button", { name: "Submit", exact: true }),
     ).toBeVisible({ timeout: 15_000 });
-    console.log(`Composer ready after stop in ${Date.now() - stopStartedAt} ms`);
+    console.log(
+      `Composer ready after stop in ${Date.now() - stopStartedAt} ms`,
+    );
     writeFileSync(stateFile, JSON.stringify(state), { mode: 0o600 });
   }
   const detail = await page.request.get(
@@ -155,4 +157,39 @@ test("README installation: authentication, private upload, streaming, persistenc
     await anonymous.close();
   }
   expect(badOrigins).toEqual([]);
+});
+
+test("public sitemap index and root-level shard files survive a real image restart", async ({
+  request,
+}) => {
+  const index = await request.get("/sitemap.xml");
+  expect(index.ok(), await index.text()).toBe(true);
+  expect(index.headers()["content-type"]).toContain("application/xml");
+  const xml = await index.text();
+  expect(xml).toContain("<sitemapindex");
+  const urls = Array.from(
+    xml.matchAll(/<loc>([^<]+)<\/loc>/g),
+    (m) => new URL(m[1]!),
+  );
+  expect(urls.length).toBeGreaterThan(0);
+  for (const url of urls) {
+    expect(url.pathname).toMatch(
+      /^\/sitemap-(static|skills|mcp)-[0-9a-f]+\.xml$/,
+    );
+    if (process.env.SELFHOST_PHASE === "restart") expect(url.origin).toBe(base);
+  }
+  // Even an empty fresh catalog must route both catalog kinds correctly.
+  const paths = new Set([
+    ...urls.map((url) => url.pathname),
+    "/sitemap-mcp-0.xml",
+    "/sitemap-skills-0.xml",
+  ]);
+  for (const path of paths) {
+    const response = await request.get(path);
+    expect(response.ok(), await response.text()).toBe(true);
+    expect(response.headers()["content-type"]).toContain("application/xml");
+    expect(await response.text()).toContain("<urlset");
+  }
+  const robots = await request.get("/robots.txt");
+  expect(await robots.text()).toContain("/sitemap.xml");
 });
