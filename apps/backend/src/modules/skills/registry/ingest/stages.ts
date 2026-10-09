@@ -13,6 +13,7 @@ import { RegistrySubmissionError } from "../errors";
 import { isSkillRepositoryRemoved } from "../repository";
 import {
   readRegistrySkillsFromArchive,
+  readRegistrySkillsFromSubtree,
   requireCommittedAt,
   type ReadRegistryResult,
 } from "../read";
@@ -48,6 +49,7 @@ export type InstallSkillFn = (input: {
 export type IngestDeps = {
   resolveSource: typeof resolvePinnedGitHubSource;
   downloadArchive: typeof downloadRepoZip;
+  readSubtree?: typeof readRegistrySkillsFromSubtree;
   installSkill: InstallSkillFn;
   /** GitHub's ancestry answer between two commits; defaults to the real API. */
   compareCommits?: typeof compareCommits;
@@ -61,6 +63,7 @@ export const defaultIngestDeps: IngestDeps = {
     ),
   resolveSource: resolvePinnedGitHubSource,
   downloadArchive: downloadRepoZip,
+  readSubtree: readRegistrySkillsFromSubtree,
   // Loaded on first use: the skills service imports half the content plane,
   // and most ingests never install anything.
   installSkill: async (input) =>
@@ -132,6 +135,10 @@ const resolveStage: IngestStage = {
 const downloadStage: IngestStage = {
   name: "download",
   async run(ctx) {
+    if (ctx.source?.subpath && ctx.deps.readSubtree) {
+      ctx.read = await ctx.deps.readSubtree(ctx.source, { signal: ctx.signal });
+      return;
+    }
     // Held on the context, so later stages of this run never fetch it again.
     ctx.archive = await ctx.deps.downloadArchive(need(ctx.source, "source"), {
       signal: ctx.signal,
@@ -142,6 +149,7 @@ const downloadStage: IngestStage = {
 const discoverStage: IngestStage = {
   name: "discover",
   async run(ctx) {
+    if (ctx.read) return;
     ctx.read = await readRegistrySkillsFromArchive(
       need(ctx.archive, "archive"),
       need(ctx.source, "source"),

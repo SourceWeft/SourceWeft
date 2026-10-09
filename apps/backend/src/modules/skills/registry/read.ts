@@ -1,3 +1,4 @@
+import { readGitHubSubtree } from "../../market/parser/github-subtree";
 import { sha256 } from "../hash";
 import { SKILL_STORAGE_LIMITS } from "../storage";
 import { RegistrySubmissionError } from "./errors";
@@ -314,6 +315,8 @@ export async function readRegistrySkillsFromGitHub(
     const source = await resolvePinnedGitHubSource(repoUrl, options);
     // Before the download: an undated commit is refused whatever it contains.
     requireCommittedAt(source);
+    if (source.subpath)
+      return await readRegistrySkillsFromSubtree(source, options);
     const zip = await downloadRepoZip(source, options);
     return await readRegistrySkillsFromArchive(zip, source);
   } catch (error) {
@@ -326,8 +329,30 @@ export async function readRegistrySkillsFromArchive(
   zip: Buffer,
   source: PinnedGitHubSource,
 ): Promise<ReadRegistryResult> {
+  return readRegistrySkillEntries(source, await listZipEntries(zip), (wanted) =>
+    readZipEntries(zip, (path) => wanted.has(path), {
+      maxFileBytes: SKILL_STORAGE_LIMITS.maxFileBytes,
+    }),
+  );
+}
+
+export async function readRegistrySkillsFromSubtree(
+  source: PinnedGitHubSource,
+  options?: GitHubRequestOptions,
+): Promise<ReadRegistryResult> {
+  const tree = await readGitHubSubtree(source, options);
+  return readRegistrySkillEntries(source, tree.entries, (wanted) =>
+    tree.readFiles(wanted, SKILL_STORAGE_LIMITS.maxFileBytes),
+  );
+}
+
+/** Both transports share discovery, nested ownership, declared/actual limits and byte hashing. */
+async function readRegistrySkillEntries(
+  source: PinnedGitHubSource,
+  entries: Array<{ path: string; declaredSize: number }>,
+  readFiles: (wanted: ReadonlySet<string>) => Promise<Map<string, Buffer>>,
+): Promise<ReadRegistryResult> {
   const committedAt = requireCommittedAt(source);
-  const entries = await listZipEntries(zip);
   const entryPaths = entries.map((entry) => entry.path);
   const skillDirs = discoverSkillDirectories(entryPaths, source.subpath);
 
@@ -416,13 +441,7 @@ export async function readRegistrySkillsFromArchive(
     );
   }
 
-  const files = await readZipEntries(
-    zip,
-    (entryPath) => wanted.has(entryPath),
-    // Fonts, images and templates are bundle content: the per-file ceiling for
-    // a skill is the storage limit, not the reader's manifest-sized default.
-    { maxFileBytes: SKILL_STORAGE_LIMITS.maxFileBytes },
-  );
+  const files = await readFiles(new Set(wanted.keys()));
 
   for (const [entryPath, skillDir] of wanted) {
     const bytes = files.get(entryPath);
