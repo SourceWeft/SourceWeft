@@ -153,6 +153,7 @@ const discoverStage: IngestStage = {
     ctx.read = await readRegistrySkillsFromArchive(
       need(ctx.archive, "archive"),
       need(ctx.source, "source"),
+      { signal: ctx.signal },
     );
     // The zipball is the run's largest allocation and nothing reads it again.
     ctx.archive = undefined;

@@ -313,6 +313,7 @@ export const marketSkillSummarySchema = z.object({
   slug: z.string(),
   // The author's own short name for the skill (SKILL.md frontmatter `name`).
   name: z.string(),
+  installName: z.string().optional(),
   displayName: z.string(),
   description: z.string(),
   // The skill's own logo (a small PNG thumbnail made at ingest, as a data: URL)

@@ -244,3 +244,73 @@ test("historical split preserves old URL, exact version IDs, disabled configurat
     versions[1].skill_id,
   );
 });
+
+test("same-commit helper repair creates an immutable package revision and is idempotent", async () => {
+  const root = "skills/helper-repair",
+    base = input(root, "e".repeat(40), "repair", "500");
+  const first = await repo.upsertRegistrySkillIndex(base);
+  const before = (
+    await data.database.query("select * from skill_versions where id=$1", [
+      first.skillVersionId,
+    ])
+  ).rows[0];
+  const extra = [
+    {
+      path: "deploy/SKILL.md",
+      bytes: Buffer.from("# Deploy\n\nCalled by parent."),
+      mimeType: "text/markdown",
+    },
+    {
+      path: "deploy/run.py",
+      bytes: Buffer.from("print(1)"),
+      mimeType: "text/x-python",
+    },
+  ];
+  const next = {
+    ...base,
+    files: [...base.files, ...extra],
+    manifestJson: {
+      ...base.manifestJson,
+      registry: {
+        ...base.manifestJson.registry,
+        ingestion: {
+          formatVersion: 1 as const,
+          analyzedAt: new Date().toISOString(),
+          parserVersion: "2",
+          scanRuleVersion: "test",
+          diagnostics: [
+            {
+              code: "SUPPORTING_SKILL_DOCUMENT",
+              severity: "warning" as const,
+              message: "Included",
+              file: "deploy/SKILL.md",
+            },
+          ],
+          findings: [],
+        },
+      },
+    },
+  };
+  const second = await repo.upsertRegistrySkillIndex(next);
+  assert.equal(second.skillId, first.skillId);
+  assert.equal(second.slug, first.slug);
+  assert.notEqual(second.skillVersionId, first.skillVersionId);
+  assert.match(second.version, /^[a-f0-9]{40}-b2-[a-f0-9]{12}$/);
+  const after = (
+    await data.database.query("select * from skill_versions where id=$1", [
+      first.skillVersionId,
+    ])
+  ).rows[0];
+  assert.equal(after.bundle_sha256, before.bundle_sha256);
+  assert.deepEqual(after.manifest_json, before.manifest_json);
+  assert.equal(after.storage_pointer, before.storage_pointer);
+  const repeated = await repo.upsertRegistrySkillIndex(next);
+  assert.equal(repeated.skillVersionId, second.skillVersionId);
+  await assert.rejects(
+    repo.upsertRegistrySkillIndex({
+      ...next,
+      files: [{ ...base.files[0]!, bytes: Buffer.from("changed") }, ...extra],
+    }),
+    /different files/,
+  );
+});

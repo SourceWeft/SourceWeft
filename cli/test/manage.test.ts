@@ -35,8 +35,14 @@ import { linkOrSkip } from "./links";
 
 const SHA_A = "a".repeat(40);
 const SHA_B = "b".repeat(40);
-const V1 = { "SKILL.md": "# pdf v1\n", "scripts/run.sh": "echo 1\n" };
-const V2 = { "SKILL.md": "# pdf v2\n", "scripts/run.sh": "echo 2\n" };
+const V1 = {
+  "SKILL.md": "---\nname: pdf\ndescription: PDF instructions\n---\n# pdf v1\n",
+  "scripts/run.sh": "echo 1\n",
+};
+const V2 = {
+  "SKILL.md": "---\nname: pdf\ndescription: PDF instructions\n---\n# pdf v2\n",
+  "scripts/run.sh": "echo 2\n",
+};
 
 const archiveFor = (sha: string, files: Record<string, string>) =>
   zipSync(
@@ -116,6 +122,20 @@ describe("managing installed skills", () => {
       res.end(JSON.stringify(latest));
     });
     githubServer = createServer((req, res) => {
+      const parts = (req.url ?? "").split("/").filter(Boolean);
+      if (parts[2] && [SHA_A, SHA_B].includes(parts[2]) && parts.length > 3) {
+        const path = parts.slice(5).join("/");
+        const value = (
+          (parts[2] === SHA_A ? V1 : V2) as Record<string, string>
+        )[path];
+        if (value === undefined) {
+          res.statusCode = 404;
+          res.end();
+          return;
+        }
+        res.end(value);
+        return;
+      }
       const sha = req.url?.split("/").pop() ?? "";
       const body = ARCHIVES[sha];
       if (!body) {
@@ -215,6 +235,34 @@ describe("managing installed skills", () => {
         { dryRun: false, force: false, yes: true },
       );
       assert.match(out(), /pdf: up to date/u);
+    });
+
+    it("upgrades an older installation receipt at the same source version", async () => {
+      const path = join(skillDir(), ".sourceweft.json");
+      const receipt = JSON.parse(await readFile(path, "utf8"));
+      delete receipt.installFormatVersion;
+      await writeFile(path, JSON.stringify(receipt));
+      await updateCommand(
+        ctx(),
+        { dir: root },
+        { dryRun: false, force: false, yes: true },
+      );
+      const current = JSON.parse(await readFile(path, "utf8"));
+      assert.equal(current.installFormatVersion, 1);
+      assert.equal(current.source.commitSha, SHA_A);
+    });
+
+    it("updates a new package revision at the same source commit", async () => {
+      latest = response(SHA_A, V1);
+      latest.skill.version = `${SHA_A}-b2-123456789abc`;
+      await updateCommand(
+        ctx(),
+        { dir: root },
+        { dryRun: false, force: false, yes: true },
+      );
+      const { skills: installed } = await scanRoots(selectRoots({ dir: root }));
+      assert.equal(installed[0]?.metadata.version, latest.skill.version);
+      assert.equal(installed[0]?.metadata.source.commitSha, SHA_A);
     });
 
     it("--dry-run reports the update and changes nothing", async () => {

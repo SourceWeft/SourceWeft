@@ -1,7 +1,9 @@
 import { defineConfig } from "tsup";
 
 export default defineConfig({
-  banner: { js: "#!/usr/bin/env node" },
+  banner: {
+    js: "#!/usr/bin/env node\nimport { createRequire as sourceweftCreateRequire } from 'node:module';\nconst require = sourceweftCreateRequire(import.meta.url);",
+  },
   clean: true,
   entry: ["src/main.ts"],
   format: ["esm"],

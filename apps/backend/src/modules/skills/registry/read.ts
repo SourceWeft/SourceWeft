@@ -1,4 +1,6 @@
 import { readGitHubSubtree } from "../../market/parser/github-subtree";
+import { reserveSkillReadBytes } from "./read-budget";
+import { hasRegistryFrontmatter } from "./metadata";
 import { sha256 } from "../hash";
 import { SKILL_STORAGE_LIMITS } from "../storage";
 import { RegistrySubmissionError } from "./errors";
@@ -109,6 +111,8 @@ export type DiscoveredSkill = {
   /** Last path segment of the skill dir. */
   dirName: string;
   files: DiscoveredSkillFile[];
+  /** Nested helper documents retained in this complete parent bundle. */
+  supportingDocuments?: string[];
   /**
    * Set when the bundle is over a storage limit. None of its files were read,
    * and analysis reports this as the skill's own failure — so one oversized
@@ -119,6 +123,8 @@ export type DiscoveredSkill = {
 };
 
 export type ReadRegistryResult = {
+  /** Ingestion releases retained-byte capacity after scan/write, including failure. */
+  release?: () => void;
   source: PinnedGitHubSource;
   /** Immutable 40-hex commit the submission is pinned to. */
   commitSha: string;
@@ -325,14 +331,41 @@ export async function readRegistrySkillsFromGitHub(
 }
 
 /** Locate and read every skill bundle in an already-downloaded zipball. */
+async function budgetedRead(
+  source: PinnedGitHubSource,
+  entries: Array<{ path: string; declaredSize: number }>,
+  readFiles: (wanted: ReadonlySet<string>) => Promise<Map<string, Buffer>>,
+  signal?: AbortSignal,
+): Promise<ReadRegistryResult> {
+  const weight = Math.min(
+    SKILL_STORAGE_LIMITS.maxBundleBytes,
+    entries.reduce((total, entry) => total + entry.declaredSize, 0),
+  );
+  const release = signal
+    ? await reserveSkillReadBytes(weight, signal)
+    : undefined;
+  try {
+    const result = await readRegistrySkillEntries(source, entries, readFiles);
+    return { ...result, ...(release ? { release } : {}) };
+  } catch (error) {
+    release?.();
+    throw error;
+  }
+}
 export async function readRegistrySkillsFromArchive(
   zip: Buffer,
   source: PinnedGitHubSource,
+  options?: Pick<GitHubRequestOptions, "signal">,
 ): Promise<ReadRegistryResult> {
-  return readRegistrySkillEntries(source, await listZipEntries(zip), (wanted) =>
-    readZipEntries(zip, (path) => wanted.has(path), {
-      maxFileBytes: SKILL_STORAGE_LIMITS.maxFileBytes,
-    }),
+  return budgetedRead(
+    source,
+    await listZipEntries(zip),
+    (wanted) =>
+      readZipEntries(zip, (path) => wanted.has(path), {
+        maxFileBytes: SKILL_STORAGE_LIMITS.maxFileBytes,
+        maxTotalBytes: SKILL_STORAGE_LIMITS.maxBundleBytes,
+      }),
+    options?.signal,
   );
 }
 
@@ -341,8 +374,16 @@ export async function readRegistrySkillsFromSubtree(
   options?: GitHubRequestOptions,
 ): Promise<ReadRegistryResult> {
   const tree = await readGitHubSubtree(source, options);
-  return readRegistrySkillEntries(source, tree.entries, (wanted) =>
-    tree.readFiles(wanted, SKILL_STORAGE_LIMITS.maxFileBytes),
+  return budgetedRead(
+    source,
+    tree.entries,
+    (wanted) =>
+      tree.readFiles(
+        wanted,
+        SKILL_STORAGE_LIMITS.maxFileBytes,
+        SKILL_STORAGE_LIMITS.maxBundleBytes,
+      ),
+    options?.signal,
   );
 }
 
@@ -354,7 +395,34 @@ async function readRegistrySkillEntries(
 ): Promise<ReadRegistryResult> {
   const committedAt = requireCommittedAt(source);
   const entryPaths = entries.map((entry) => entry.path);
-  const skillDirs = discoverSkillDirectories(entryPaths, source.subpath);
+  const discoveredDirs = discoverSkillDirectories(entryPaths, source.subpath);
+  // A nested, frontmatter-less SKILL.md is supporting material for its parent.
+  // An explicitly selected root remains eligible for compatibility parsing.
+  const nested = discoveredDirs.filter(
+    (dir) =>
+      dir !== source.subpath &&
+      discoveredDirs.some(
+        (parent) =>
+          parent !== dir && (parent === "" || dir.startsWith(`${parent}/`)),
+      ),
+  );
+  const metadataPaths = new Set(nested.map((dir) => `${dir}/SKILL.md`));
+  const metadataFiles = metadataPaths.size
+    ? await readFiles(metadataPaths)
+    : new Map<string, Buffer>();
+  for (const path of metadataPaths)
+    if (!metadataFiles.has(path))
+      throw new RegistrySubmissionError(
+        "REGISTRY_READ_FAILED",
+        "A nested skill metadata file could not be read",
+      );
+  const skillDirs = discoveredDirs.filter(
+    (dir) =>
+      !nested.includes(dir) ||
+      hasRegistryFrontmatter(
+        metadataFiles.get(`${dir}/SKILL.md`)?.toString("utf8") ?? "",
+      ),
+  );
 
   if (skillDirs.length === 0) {
     throw new RegistrySubmissionError(
@@ -389,6 +457,15 @@ async function readRegistrySkillEntries(
     repoSubpath: skillDir,
     dirName: skillDir === "" ? "" : lastSegment(skillDir),
     files: [],
+    supportingDocuments: discoveredDirs
+      .filter(
+        (dir) =>
+          !skillDirs.includes(dir) &&
+          ownerOf.get(`${dir}/SKILL.md`) === skillDir,
+      )
+      .map((dir) =>
+        `${dir}/SKILL.md`.slice(skillDir === "" ? 0 : skillDir.length + 1),
+      ),
   }));
   const byDir = new Map(skills.map((skill) => [skill.repoSubpath, skill]));
   const bundlePathOf = (entryPath: string, skillDir: string) =>
@@ -434,15 +511,31 @@ async function readRegistrySkillEntries(
     if (byDir.get(skillDir)!.rejection) continue;
     for (const file of list) wantedBytes += file.sizeBytes;
   }
-  if (wantedBytes > GITHUB_ZIP_LIMITS.maxTotalUncompressedBytes) {
+  if (wantedBytes > SKILL_STORAGE_LIMITS.maxBundleBytes) {
     throw new RegistrySubmissionError(
       "REGISTRY_SUBMISSION_TOO_LARGE",
-      `The skills in this repository add up to ${formatMiB(wantedBytes)}, more than the ${formatMiB(GITHUB_ZIP_LIMITS.maxTotalUncompressedBytes)} that can be imported at once. Each skill is within the limit on its own — submit them one at a time with a URL like https://github.com/owner/repo/tree/<branch>/skills/<skill>.`,
+      `The skills in this repository add up to ${formatMiB(wantedBytes)}, more than the ${formatMiB(SKILL_STORAGE_LIMITS.maxBundleBytes)} that can be imported at once. Each skill is within the limit on its own — submit them one at a time with a URL like https://github.com/owner/repo/tree/<branch>/skills/<skill>.`,
     );
   }
 
-  const files = await readFiles(new Set(wanted.keys()));
+  const remaining = new Set(
+    [...wanted.keys()].filter((path) => !metadataFiles.has(path)),
+  );
+  const files = remaining.size
+    ? await readFiles(remaining)
+    : new Map<string, Buffer>();
+  for (const [path, bytes] of metadataFiles)
+    if (wanted.has(path)) files.set(path, bytes);
 
+  const actualTotal = [...files.values()].reduce(
+    (total, bytes) => total + bytes.byteLength,
+    0,
+  );
+  if (actualTotal > SKILL_STORAGE_LIMITS.maxBundleBytes)
+    throw new RegistrySubmissionError(
+      "REGISTRY_SUBMISSION_TOO_LARGE",
+      "Actual skill bytes exceed the cumulative bundle limit",
+    );
   for (const [entryPath, skillDir] of wanted) {
     const bytes = files.get(entryPath);
     if (!bytes)

@@ -5,7 +5,7 @@
  * every turn that had a sandbox.
  */
 export const SKILL_STORAGE_LIMITS = Object.freeze({
-  maxFiles: 200,
-  maxFileBytes: 10 * 1024 * 1024,
-  maxBundleBytes: 50 * 1024 * 1024,
+  maxFiles: 20_000,
+  maxFileBytes: 64 * 1024 * 1024,
+  maxBundleBytes: 256 * 1024 * 1024,
 });

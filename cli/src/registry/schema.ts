@@ -21,6 +21,7 @@ const skillSummary = z.looseObject({
   installRef: z.string().nullable().optional(),
   // The skill's own short name; it becomes the directory name.
   name: z.string(),
+  installName: z.string().optional(),
   displayName: z.string(),
   description: z.string(),
   verified: z.boolean(),

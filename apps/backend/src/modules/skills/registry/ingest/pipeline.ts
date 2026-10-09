@@ -82,113 +82,117 @@ export async function runIngestPipeline(input: {
     }
   };
 
-  for (const stage of input.stages ?? GITHUB_INGEST_STAGES) {
-    const startedAt = new Date().toISOString();
-    try {
-      // Before the stage is announced: a deadline that fired during the
-      // previous stage must not show this one as started.
-      input.signal.throwIfAborted();
-      stagesState[stage.name] = { status: "running", startedAt };
-      await persist({ stage: stage.name, stages: stagesState });
+  try {
+    for (const stage of input.stages ?? GITHUB_INGEST_STAGES) {
+      const startedAt = new Date().toISOString();
+      try {
+        // Before the stage is announced: a deadline that fired during the
+        // previous stage must not show this one as started.
+        input.signal.throwIfAborted();
+        stagesState[stage.name] = { status: "running", startedAt };
+        await persist({ stage: stage.name, stages: stagesState });
 
-      const patch = await stage.run(ctx);
+        const patch = await stage.run(ctx);
 
-      stagesState[stage.name] = {
-        status: "succeeded",
-        startedAt,
-        finishedAt: new Date().toISOString(),
-      };
-      await persist({ ...(patch ?? {}), stages: stagesState });
-    } catch (caught) {
-      if (caught instanceof IngestSupersededError) {
-        throw caught;
-      }
-      // An abort surfaces as whatever the interrupted call rejects with; the
-      // signal is the reliable witness that it was the deadline.
-      const error = input.signal.aborted
-        ? new RegistrySubmissionError(
-            INGEST_DEADLINE_CODE,
-            "The import did not finish within its time limit",
-          )
-        : caught;
-      stagesState[stage.name] = {
-        status: "failed",
-        startedAt,
-        finishedAt: new Date().toISOString(),
-        error: describeIngestError(error),
-      };
-      if (stage.optional && !input.signal.aborted) {
-        logger.warn("Skill ingest optional stage failed", {
-          submissionId: submission.id,
-          stage: stage.name,
-          error: stagesState[stage.name]?.error,
-        });
-        await persist({ stages: stagesState });
-        continue;
-      }
-
-      // Rate limited: nothing is wrong with the source, and asking again
-      // before GitHub's reset only meets the same answer. The row goes back to
-      // `queued` with the reason and the time it resumes, which is what the
-      // submitter sees meanwhile — unless it has waited too long already.
-      if (error instanceof GitHubRateLimitedError) {
-        const resumeAt = ingestResumeAt(error);
-        if (mayWaitForRateLimit(submission.createdAt, resumeAt)) {
-          await persist({
-            stages: stagesState,
-            ...(ctx.results ? { results: ctx.results } : {}),
-            status: "queued",
-            error: describeIngestError(error),
-          });
-          logger.warn("Skill ingest paused by GitHub's rate limit", {
+        stagesState[stage.name] = {
+          status: "succeeded",
+          startedAt,
+          finishedAt: new Date().toISOString(),
+        };
+        await persist({ ...(patch ?? {}), stages: stagesState });
+      } catch (caught) {
+        if (caught instanceof IngestSupersededError) {
+          throw caught;
+        }
+        // An abort surfaces as whatever the interrupted call rejects with; the
+        // signal is the reliable witness that it was the deadline.
+        const error = input.signal.aborted
+          ? new RegistrySubmissionError(
+              INGEST_DEADLINE_CODE,
+              "The import did not finish within its time limit",
+            )
+          : caught;
+        stagesState[stage.name] = {
+          status: "failed",
+          startedAt,
+          finishedAt: new Date().toISOString(),
+          error: describeIngestError(error),
+        };
+        if (stage.optional && !input.signal.aborted) {
+          logger.warn("Skill ingest optional stage failed", {
             submissionId: submission.id,
             stage: stage.name,
-            resumeAt: resumeAt.toISOString(),
+            error: stagesState[stage.name]?.error,
           });
-          return {
-            status: "deferred",
-            submissionId: submission.id,
-            resumeAt,
-            submission: {
-              id: submission.id,
-              scope: submission.scope,
-              teamId: submission.teamId,
-              workspaceId: submission.workspaceId,
-              attempts: submission.attempts,
-            },
-          };
+          await persist({ stages: stagesState });
+          continue;
         }
-      }
 
-      const retrying =
-        input.willRetryTransient && isTransientIngestError(error);
-      // Best effort: if this write is refused the run was superseded, and the
-      // original failure is still the more useful thing to surface.
-      await writeSubmissionProgress(fence, {
-        stages: stagesState,
-        ...(ctx.results ? { results: ctx.results } : {}),
-        ...(retrying
-          ? { status: "queued" as const }
-          : {
-              status: "failed" as const,
+        // Rate limited: nothing is wrong with the source, and asking again
+        // before GitHub's reset only meets the same answer. The row goes back to
+        // `queued` with the reason and the time it resumes, which is what the
+        // submitter sees meanwhile — unless it has waited too long already.
+        if (error instanceof GitHubRateLimitedError) {
+          const resumeAt = ingestResumeAt(error);
+          if (mayWaitForRateLimit(submission.createdAt, resumeAt)) {
+            await persist({
+              stages: stagesState,
+              ...(ctx.results ? { results: ctx.results } : {}),
+              status: "queued",
               error: describeIngestError(error),
-              finishedAt: new Date(),
-            }),
-      }).catch(() => false);
-      throw error;
-    }
-  }
+            });
+            logger.warn("Skill ingest paused by GitHub's rate limit", {
+              submissionId: submission.id,
+              stage: stage.name,
+              resumeAt: resumeAt.toISOString(),
+            });
+            return {
+              status: "deferred",
+              submissionId: submission.id,
+              resumeAt,
+              submission: {
+                id: submission.id,
+                scope: submission.scope,
+                teamId: submission.teamId,
+                workspaceId: submission.workspaceId,
+                attempts: submission.attempts,
+              },
+            };
+          }
+        }
 
-  await persist({ status: "succeeded", stage: null, finishedAt: new Date() });
-  logger.info("Skill registry submission ingested", {
-    submissionId: submission.id,
-    source: submission.sourceInput,
-    submittedBy: submission.submittedBy,
-    skills: ctx.results?.length ?? 0,
-  });
-  return {
-    status: "succeeded",
-    submissionId: submission.id,
-    skills: ctx.results?.length ?? 0,
-  };
+        const retrying =
+          input.willRetryTransient && isTransientIngestError(error);
+        // Best effort: if this write is refused the run was superseded, and the
+        // original failure is still the more useful thing to surface.
+        await writeSubmissionProgress(fence, {
+          stages: stagesState,
+          ...(ctx.results ? { results: ctx.results } : {}),
+          ...(retrying
+            ? { status: "queued" as const }
+            : {
+                status: "failed" as const,
+                error: describeIngestError(error),
+                finishedAt: new Date(),
+              }),
+        }).catch(() => false);
+        throw error;
+      }
+    }
+
+    await persist({ status: "succeeded", stage: null, finishedAt: new Date() });
+    logger.info("Skill registry submission ingested", {
+      submissionId: submission.id,
+      source: submission.sourceInput,
+      submittedBy: submission.submittedBy,
+      skills: ctx.results?.length ?? 0,
+    });
+    return {
+      status: "succeeded",
+      submissionId: submission.id,
+      skills: ctx.results?.length ?? 0,
+    };
+  } finally {
+    ctx.read?.release?.();
+  }
 }

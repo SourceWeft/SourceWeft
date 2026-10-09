@@ -2,16 +2,14 @@ import { eq } from "drizzle-orm";
 import { db, skillVersionFiles, skillVersions } from "@sourceweft/db";
 import { logger } from "../../../shared/logger";
 import { ContentError } from "../../content/errors";
-import {
-  downloadRepoZip,
-  readZipEntries,
-} from "../../market/parser/github-zip";
+import { readPinnedGitHubFiles } from "../../market/parser/github-subtree";
 import {
   putSkillBlob,
   putSkillBundle,
   sha256Hex,
   SKILL_STORAGE_LIMITS,
 } from "./index";
+import { reserveSkillReadBytes } from "../registry/read-budget";
 import { parseGithubStoragePointer } from "./source-pointer";
 
 /**
@@ -53,8 +51,7 @@ export function isStoredObjectMissing(error: unknown): boolean {
 }
 
 export type SkillRestoreDeps = {
-  downloadZip: typeof downloadRepoZip;
-  readEntries: typeof readZipEntries;
+  readFiles: typeof readPinnedGitHubFiles;
   putBlob: typeof putSkillBlob;
   putBundle: typeof putSkillBundle;
 };
@@ -63,8 +60,7 @@ export type SkillRestoreDeps = {
 // from the turn's read path, and most importers never restore anything.
 function defaultDeps(): SkillRestoreDeps {
   return {
-    downloadZip: downloadRepoZip,
-    readEntries: readZipEntries,
+    readFiles: readPinnedGitHubFiles,
     putBlob: putSkillBlob,
     putBundle: putSkillBundle,
   };
@@ -99,67 +95,87 @@ async function restore(
       path: skillVersionFiles.path,
       mimeType: skillVersionFiles.mimeType,
       contentHash: skillVersionFiles.contentHash,
+      sizeBytes: skillVersionFiles.sizeBytes,
     })
     .from(skillVersionFiles)
     .where(eq(skillVersionFiles.skillVersionId, skillVersionId));
   const prefix = pointer.repoSubpath ? `${pointer.repoSubpath}/` : "";
   const wanted = new Map(rows.map((row) => [`${prefix}${row.path}`, row]));
 
-  let entries: Map<string, Buffer>;
-  try {
-    const zip = await deps.downloadZip({
-      owner: pointer.owner,
-      repo: pointer.repo,
-      subpath: pointer.repoSubpath,
-      repoUrl: `https://github.com/${pointer.owner}/${pointer.repo}`,
-      sourceUrl: `https://github.com/${pointer.owner}/${pointer.repo}/tree/${pointer.commitSha}/${pointer.repoSubpath}`,
-      commitSha: pointer.commitSha,
-    });
-    entries = await deps.readEntries(zip, (path) => wanted.has(path), {
-      maxFileBytes: SKILL_STORAGE_LIMITS.maxFileBytes,
-    });
-  } catch (error) {
+  if (!rows.length)
     throw new SkillRestoreError(
-      "SKILL_SOURCE_UNAVAILABLE",
-      `The skill's source could not be fetched: ${error instanceof Error ? error.message : String(error)}`,
+      "SKILL_SOURCE_MISMATCH",
+      "This version has no recorded file manifest",
     );
-  }
-
-  // Everything is checked before anything is written: a partial restore would
-  // leave a version that reads fine for one file and fails on the next.
-  const files: Array<{ path: string; bytes: Buffer; mimeType: string }> = [];
-  for (const [archivePath, row] of wanted) {
-    const bytes = entries.get(archivePath);
-    if (!bytes || sha256Hex(bytes) !== row.contentHash.toLowerCase()) {
+  const signal = AbortSignal.timeout(10 * 60_000);
+  const release = await reserveSkillReadBytes(
+    Math.min(
+      SKILL_STORAGE_LIMITS.maxBundleBytes,
+      rows.reduce((sum, row) => sum + row.sizeBytes, 0),
+    ),
+    signal,
+  );
+  try {
+    let entries: Map<string, Buffer>;
+    try {
+      entries = await deps.readFiles(
+        pointer,
+        [...wanted].map(([path, row]) => ({ path, sizeBytes: row.sizeBytes })),
+        {
+          maxFileBytes: SKILL_STORAGE_LIMITS.maxFileBytes,
+          maxTotalBytes: SKILL_STORAGE_LIMITS.maxBundleBytes,
+        },
+        { signal },
+      );
+    } catch (error) {
       throw new SkillRestoreError(
-        "SKILL_SOURCE_MISMATCH",
-        `The source no longer matches what was indexed (${row.path})`,
+        "SKILL_SOURCE_UNAVAILABLE",
+        `The skill's source could not be fetched: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
-    files.push({ path: row.path, bytes, mimeType: row.mimeType });
-  }
 
-  for (const file of files) {
-    await deps.putBlob({ bytes: file.bytes, mimeType: file.mimeType });
-  }
-  const bundle = await deps.putBundle(
-    files.map((file) => ({ path: file.path, bytes: file.bytes })),
-  );
-  if (version.bundleSha256 && bundle.sha256 !== version.bundleSha256) {
-    // The files are back and proven; only the zip differs — the bundle builder
-    // changed since ingest. The sandbox verifies the recorded digest, so say so
-    // rather than let staging fail without a reason.
-    logger.warn("Restored skill bundle differs from the recorded digest", {
+    // Everything is checked before anything is written: a partial restore would
+    // leave a version that reads fine for one file and fails on the next.
+    const files: Array<{ path: string; bytes: Buffer; mimeType: string }> = [];
+    for (const [archivePath, row] of wanted) {
+      const bytes = entries.get(archivePath);
+      if (
+        !bytes ||
+        bytes.byteLength !== row.sizeBytes ||
+        sha256Hex(bytes) !== row.contentHash.toLowerCase()
+      ) {
+        throw new SkillRestoreError(
+          "SKILL_SOURCE_MISMATCH",
+          `The source no longer matches what was indexed (${row.path})`,
+        );
+      }
+      files.push({ path: row.path, bytes, mimeType: row.mimeType });
+    }
+
+    for (const file of files) {
+      await deps.putBlob({ bytes: file.bytes, mimeType: file.mimeType });
+    }
+    const bundle = await deps.putBundle(
+      files.map((file) => ({ path: file.path, bytes: file.bytes })),
+    );
+    if (version.bundleSha256 && bundle.sha256 !== version.bundleSha256) {
+      // The files are back and proven; only the zip differs — the bundle builder
+      // changed since ingest. The sandbox verifies the recorded digest, so say so
+      // rather than let staging fail without a reason.
+      logger.warn("Restored skill bundle differs from the recorded digest", {
+        skillVersionId,
+        recorded: version.bundleSha256,
+        rebuilt: bundle.sha256,
+      });
+    }
+    logger.info("Skill version restored from its source", {
       skillVersionId,
-      recorded: version.bundleSha256,
-      rebuilt: bundle.sha256,
+      files: files.length,
+      commitSha: pointer.commitSha,
     });
+  } finally {
+    release();
   }
-  logger.info("Skill version restored from its source", {
-    skillVersionId,
-    files: files.length,
-    commitSha: pointer.commitSha,
-  });
 }
 
 const inFlight = new Map<string, Promise<void>>();

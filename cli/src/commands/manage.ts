@@ -1,3 +1,4 @@
+import { INSTALL_FORMAT_VERSION } from "../install/metadata-view";
 import { RegistryError, type RegistryClient } from "../registry/client";
 import { installFromRegistry } from "../install/install-skill";
 import {
@@ -209,12 +210,21 @@ export async function updateCommand(
       throw error;
     }
     const commit = latest.source.commitSha;
-    if (!commit || commit === skill.metadata.source.commitSha) {
+    if (
+      !commit ||
+      (commit === skill.metadata.source.commitSha &&
+        latest.skill.version === skill.metadata.version &&
+        (skill.metadata.installFormatVersion ?? 0) >= INSTALL_FORMAT_VERSION)
+    ) {
       outcomes.push({ skill, result: "up-to-date" });
       continue;
     }
-    if (latest.skill.name !== skill.name) {
-      outcomes.push({ skill, result: "renamed", name: latest.skill.name });
+    if ((latest.skill.installName ?? latest.skill.name) !== skill.name) {
+      outcomes.push({
+        skill,
+        result: "renamed",
+        name: latest.skill.installName ?? latest.skill.name,
+      });
       continue;
     }
     if (options.dryRun) {
@@ -224,7 +234,9 @@ export async function updateCommand(
     // An update brings new content, possibly new scripts: ask once for the run,
     // after saying what it would touch.
     ctx.out(
-      `${skill.metadata.slug}: ${skill.metadata.source.commitSha.slice(0, 7)} → ${commit.slice(0, 7)}`,
+      commit === skill.metadata.source.commitSha
+        ? `${skill.metadata.slug}: package ${skill.metadata.version} → ${latest.skill.version} (source ${commit.slice(0, 7)})`
+        : `${skill.metadata.slug}: ${skill.metadata.source.commitSha.slice(0, 7)} → ${commit.slice(0, 7)}`,
     );
     approved ??= await confirm("Update the skills above?", {
       assumeYes: options.yes,

@@ -1,5 +1,8 @@
 import {
   readSkillArchive,
+  retryTransientSourceRead,
+  isSafeBundlePath,
+  SKILL_STORAGE_LIMITS,
   type ReadSkillArchiveOptions,
 } from "@sourceweft/skill-format";
 
@@ -18,7 +21,7 @@ const TRUSTED_HOSTS = new Set(["codeload.github.com", "github.com"]);
 const MAX_REDIRECTS = 3;
 
 /** Compressed zipball ceiling — same bound the registry applies at ingest. */
-export const MAX_ARCHIVE_BYTES = 100 * 1024 * 1024;
+export const MAX_ARCHIVE_BYTES = 256 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 60_000;
 
 const OWNER_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/u;
@@ -53,6 +56,8 @@ export type DownloadOptions = {
   fetch?: typeof fetch;
   /** Override for tests. */
   baseUrl?: string;
+  /** Test override for immutable raw-file downloads. */
+  rawBaseUrl?: string;
 };
 
 export function assertPinnedRepo(source: PinnedRepo): void {
@@ -201,8 +206,138 @@ export async function downloadRepoZip(
 /** Downloads the repository at `source` and reads one skill's files out of it. */
 export async function fetchSkillFiles(
   source: PinnedRepo,
-  archive: ReadSkillArchiveOptions,
+  archive: ReadSkillArchiveOptions & {
+    manifest?: ReadonlyArray<{ path: string; sizeBytes: number }>;
+  },
   options: DownloadOptions = {},
 ): Promise<Map<string, Uint8Array>> {
+  if (archive.manifest)
+    return fetchPinnedManifestFiles(
+      source,
+      archive.subpath ?? "",
+      archive.manifest,
+      options,
+    );
   return readSkillArchive(await downloadRepoZip(source, options), archive);
+}
+
+/** Registry installs download only the recorded files, from the recorded commit. */
+async function fetchPinnedManifestFiles(
+  source: PinnedRepo,
+  subpath: string,
+  manifest: ReadonlyArray<{ path: string; sizeBytes: number }>,
+  options: DownloadOptions,
+): Promise<Map<string, Uint8Array>> {
+  assertPinnedRepo(source);
+  if (subpath && !isSafeBundlePath(subpath))
+    throw new GitHubSourceError("INVALID_SOURCE", "Unsafe skill source root");
+  if (
+    manifest.length > SKILL_STORAGE_LIMITS.maxFiles ||
+    manifest.reduce((sum, file) => sum + file.sizeBytes, 0) >
+      SKILL_STORAGE_LIMITS.maxBundleBytes
+  )
+    throw new GitHubSourceError(
+      "TOO_LARGE",
+      "Recorded skill exceeds shared bundle limits",
+    );
+  for (const file of manifest)
+    if (
+      !isSafeBundlePath(file.path) ||
+      !Number.isSafeInteger(file.sizeBytes) ||
+      file.sizeBytes < 0 ||
+      file.sizeBytes > SKILL_STORAGE_LIMITS.maxFileBytes
+    )
+      throw new GitHubSourceError(
+        "INVALID_SOURCE",
+        "Unsafe or oversized recorded skill file",
+      );
+  const base =
+    options.rawBaseUrl ??
+    options.baseUrl ??
+    "https://raw.githubusercontent.com";
+  const stop = new AbortController();
+  const signal = AbortSignal.any([
+    stop.signal,
+    AbortSignal.timeout(options.timeoutMs ?? 10 * 60_000),
+    ...(options.signal ? [options.signal] : []),
+  ]);
+  const files = new Map<string, Uint8Array>();
+  let next = 0,
+    failure: unknown;
+  await Promise.allSettled(
+    Array.from({ length: Math.min(8, manifest.length) }, async () => {
+      try {
+        while (!signal.aborted && next < manifest.length) {
+          const file = manifest[next++]!;
+          const path = [
+            source.owner,
+            source.repo,
+            source.commitSha,
+            ...(subpath ? subpath.split("/") : []),
+            ...file.path.split("/"),
+          ]
+            .map(encodeURIComponent)
+            .join("/");
+          const headers: Record<string, string> = {
+            accept: "application/octet-stream",
+          };
+          if (options.token) headers.authorization = `Bearer ${options.token}`;
+          const body = await retryTransientSourceRead(async () => {
+            const response = await (options.fetch ?? fetch)(`${base}/${path}`, {
+              headers,
+              redirect: "manual",
+              signal,
+            });
+            if (!response.ok || !response.body)
+              throw new GitHubSourceError(
+                response.status === 404
+                  ? "NOT_FOUND"
+                  : response.status === 403 || response.status === 429
+                    ? "RATE_LIMITED"
+                    : "UNAVAILABLE",
+                `Recorded file '${file.path}' could not be downloaded (${response.status})`,
+              );
+            const advertised = Number(response.headers.get("content-length"));
+            const encoding = response.headers.get("content-encoding");
+            if (
+              (!encoding || encoding.toLowerCase() === "identity") &&
+              Number.isFinite(advertised) &&
+              advertised > file.sizeBytes
+            )
+              throw new GitHubSourceError(
+                "TOO_LARGE",
+                `Recorded file '${file.path}' exceeds its expected size`,
+              );
+            const chunks: Uint8Array[] = [];
+            let total = 0;
+            for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+              total += chunk.byteLength;
+              if (total > file.sizeBytes)
+                throw new GitHubSourceError(
+                  "TOO_LARGE",
+                  `Recorded file '${file.path}' exceeds its expected size`,
+                );
+              chunks.push(chunk);
+            }
+            const body = new Uint8Array(total);
+            let offset = 0;
+            for (const chunk of chunks) {
+              body.set(chunk, offset);
+              offset += chunk.byteLength;
+            }
+            return body;
+          }, signal);
+          files.set(file.path, body);
+        }
+        if (signal.aborted) throw signal.reason;
+      } catch (error) {
+        if (failure === undefined) {
+          failure = error;
+          stop.abort(error);
+        }
+      }
+    }),
+  );
+  if (failure !== undefined) throw failure;
+  return files;
 }

@@ -1,3 +1,4 @@
+import { canUpgradeSupportingBundle } from "./bundle-projection";
 import { randomUUID } from "node:crypto";
 import { parseGithubStoragePointer } from "../storage/source-pointer";
 import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
@@ -404,7 +405,7 @@ export async function getRegistrySkillBySlug(slug: string) {
 export async function upsertRegistrySkillIndex(
   input: UpsertRegistrySkillInput,
 ): Promise<UpsertRegistrySkillResult> {
-  const version = input.commitSha;
+  let version = input.commitSha;
   const source = parseGithubStoragePointer(input.storagePointer);
   if (!source || source.commitSha !== input.commitSha)
     throw new RegistrySubmissionError(
@@ -503,6 +504,7 @@ export async function upsertRegistrySkillIndex(
           sql`(${skillVersions.version} = ${version} or ${skillVersions.storagePointer} = ${input.storagePointer})`,
         ),
       )
+      .orderBy(desc(skillVersions.createdAt), desc(skillVersions.id))
       .limit(1);
     if (existingVersion) {
       const storedSource = parseGithubStoragePointer(
@@ -537,10 +539,18 @@ export async function upsertRegistrySkillIndex(
             .map((f) => [f.path, f.contentHash])
             .sort((a, b) => a[0]!.localeCompare(b[0]!)),
         );
-      if (
+      const differs =
         existingVersion.bundleSha256 !== stored.bundle.sha256 ||
-        hashes(storedRows) !== hashes(stored.files)
-      ) {
+        hashes(storedRows) !== hashes(stored.files);
+      const supportingUpgrade =
+        differs &&
+        canUpgradeSupportingBundle({
+          previous: existingVersion.manifestJson,
+          next: input.manifestJson,
+          previousFiles: storedRows,
+          nextFiles: stored.files,
+        });
+      if (differs && !supportingUpgrade) {
         throw new RegistrySubmissionError(
           "REGISTRY_VERSION_CONFLICT",
           "This source has different files from the stored immutable version",
@@ -557,16 +567,21 @@ export async function upsertRegistrySkillIndex(
         );
       }
       await backfillSource();
-      return {
-        slug: input.slug,
-        skillId,
-        skillVersionId: existingVersion.id,
-        version: existingVersion.version,
-        status: existingVersion.status === "published" ? "indexed" : "queued",
-        flags: existingVersion.manifestJson.registry?.scan.flags ?? [],
-        diagnostics:
-          existingVersion.manifestJson.registry?.ingestion?.diagnostics ?? [],
-      };
+      if (!supportingUpgrade)
+        return {
+          slug: input.slug,
+          skillId,
+          skillVersionId: existingVersion.id,
+          version: existingVersion.version,
+          status: existingVersion.status === "published" ? "indexed" : "queued",
+          flags: existingVersion.manifestJson.registry?.scan.flags ?? [],
+          diagnostics:
+            existingVersion.manifestJson.registry?.ingestion?.diagnostics ?? [],
+        };
+      // Keep the old immutable package and installed references. A repaired,
+      // complete projection is a distinct package at the same source commit.
+      version = `${source.commitSha}-b2-${stored.bundle.sha256.slice(0, 12)}`;
+      input.manifestJson = { ...input.manifestJson, version };
     }
     if (existing?.status === "archived")
       throw new RegistrySubmissionError(

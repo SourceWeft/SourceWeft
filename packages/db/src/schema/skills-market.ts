@@ -132,6 +132,7 @@ export type SkillManifestJson = {
     repositoryId?: string;
     sourceRoot?: string;
     originalName?: string;
+    installName?: string;
     sourceUrl: string;
     repoUrl: string;
     submittedBy: string;

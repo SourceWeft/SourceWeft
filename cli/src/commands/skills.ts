@@ -208,6 +208,10 @@ export async function installCommand(
         : result.replaced
           ? "Updated"
           : "Installed";
+      if (result.metadata.originalSkillMd)
+        ctx.out(
+          "Skill metadata adapted for the agent; original SKILL.md is preserved locally.",
+        );
       ctx.out(
         `${verb} ${skill.skill.installRef ?? skill.skill.slug} → ${result.dir} (${agents.join(", ")})`,
       );

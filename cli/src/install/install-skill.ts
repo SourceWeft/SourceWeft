@@ -1,5 +1,6 @@
+import { prepareInstalledFiles, INSTALL_FORMAT_VERSION } from "./metadata-view";
 import type { SkillResponse } from "../registry/schema";
-import { isSafeSkillDirName } from "@sourceweft/skill-format";
+import { isSafeSkillDirName, sha256 } from "@sourceweft/skill-format";
 import { fetchSkillFiles, type PinnedRepo } from "../source/github";
 import { join } from "node:path";
 import {
@@ -84,7 +85,7 @@ export async function installFromRegistry(
   input: InstallInput,
 ): Promise<InstallResult> {
   const { skill } = input;
-  const name = skill.skill.name;
+  const name = skill.skill.installName ?? skill.skill.name;
   if (!isSafeSkillDirName(name)) {
     throw new UnsupportedSourceError(
       `'${name}' cannot be used as a directory name, so this skill cannot be installed with the CLI.`,
@@ -111,6 +112,8 @@ export async function installFromRegistry(
     existing.slug === skill.skill.slug &&
     existing.registry === input.registry &&
     existing.source.commitSha === source.commitSha &&
+    existing.version === skill.skill.version &&
+    (existing.installFormatVersion ?? 0) >= INSTALL_FORMAT_VERSION &&
     !hasLocalChanges(await detectLocalChanges(dir, existing), {
       includeAdded: false,
     })
@@ -122,12 +125,28 @@ export async function installFromRegistry(
   const download = input.download ?? fetchSkillFiles;
   const downloaded = await download(
     { owner: source.owner, repo: source.repo, commitSha: source.commitSha },
-    { subpath: source.subpath, keep: (path) => wanted.has(path) },
+    { subpath: source.subpath, keep: (path) => wanted.has(path), manifest },
   );
-  const files = verifyFiles(manifest, downloaded);
+  const verified = verifyFiles(manifest, downloaded);
+  let prepared: ReturnType<typeof prepareInstalledFiles>;
+  try {
+    prepared = prepareInstalledFiles(verified, name, skill.skill.description);
+  } catch (error) {
+    throw new UnsupportedSourceError(
+      `Skill metadata cannot be adapted: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  const files = prepared.files;
 
   const metadata: InstalledMetadata = {
     schema: 1,
+    installFormatVersion: INSTALL_FORMAT_VERSION,
+    ...(prepared.sourceFiles
+      ? {
+          sourceFiles: prepared.sourceFiles,
+          originalSkillMd: prepared.originalSkillMd,
+        }
+      : {}),
     registry: input.registry,
     slug: skill.skill.slug,
     ...(skill.skill.installRef ? { installRef: skill.skill.installRef } : {}),
@@ -139,7 +158,7 @@ export async function installFromRegistry(
     },
     license: skill.skill.license,
     files: Object.fromEntries(
-      manifest.map((file) => [file.path, file.contentHash]),
+      files.map((file) => [file.path, sha256(file.bytes)]),
     ),
     installedAt: (input.now?.() ?? new Date()).toISOString(),
     installedVia: "cli",

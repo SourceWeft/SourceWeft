@@ -487,3 +487,31 @@ test("an in-process bundle whose bodies will not load moves to unstageable inste
     },
   ]);
 });
+
+test("large complete skill bundles prepare all files without old file-count or byte ceilings", async () => {
+  const asset = Buffer.alloc(34 * 1024 * 1024);
+  const files = [
+    bundleFile("SKILL.md", "# large"),
+    ...Array.from({ length: 397 }, (_, i) =>
+      bundleFile(`references/${i}.md`, `Note ${i}`),
+    ),
+    ...["a", "b"].map((name) => ({
+      path: `assets/${name}.bin`,
+      mimeType: "application/octet-stream",
+      sizeBytes: asset.length,
+      contentHash: createHash("sha256").update(asset).digest("hex"),
+      isText: false as const,
+      contentText: null,
+      readBytes: async () => asset,
+    })),
+  ];
+  const descriptor = { ...skill(), ...inlineSkillContent(files) };
+  assert.equal(skillStagingRejection(descriptor), null);
+  const plan = await buildSkillSandboxAssetPlan(descriptor);
+  const bytes = (await plan.loadContent!())!;
+  assert.equal(createHash("sha256").update(bytes).digest("hex"), plan.sha256);
+  const staged = unzipSync(bytes);
+  assert.equal(Object.keys(staged).length, 400);
+  assert.equal(staged["assets/a.bin"]!.length, asset.length);
+  assert.equal(staged["assets/b.bin"]!.length, asset.length);
+});

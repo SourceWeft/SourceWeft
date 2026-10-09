@@ -204,3 +204,28 @@ test("generated variant labels cannot take another skill's natural name", async 
   assert.equal(resolved.exact, true);
   assert.equal(resolved.items[0]?.slug, literal);
 });
+
+test("human titles resolve by safe install names through repository selectors and scoped ambiguity", async () => {
+  const a = await seed("human-a", "human", "tools", "skills/a"),
+    b = await seed("human-b", "human", "tools", "skills/b");
+  for (const id of ["human-a", "human-b"])
+    await data.database.query(
+      `update skill_versions set manifest_json=jsonb_set(jsonb_set(manifest_json,'{registry,originalName}','"Human Title!"'),'{registry,installName}'::text[],'"human-title-12345678"') where skill_id=$1`,
+      [id],
+    );
+  await references.reconcileSkillInstallReferences("human");
+  const selected = await references.resolveSkillInstallReferences({
+    reference: "human/tools",
+    skill: "human-title-12345678",
+    path: "skills/a",
+  });
+  assert.deepEqual(
+    selected.items.map((x) => x.slug),
+    [a],
+  );
+  const ambiguous = await references.resolveSkillInstallReferences({
+    reference: "@human/human-title-12345678",
+  });
+  assert.deepEqual(ambiguous.items.map((x) => x.slug).sort(), [a, b].sort());
+  assert.equal(ambiguous.exact, false);
+});

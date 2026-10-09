@@ -5,8 +5,8 @@ Install skills from the SourceWeft marketplace onto a local coding agent.
 The marketplace only **indexes** skills: it records where each one lives (a
 GitHub repository, pinned to a commit) and what every file in it hashes to. The
 CLI downloads the files from that repository and installs them only if every
-file matches the record — so what lands on your machine is the content that was
-scanned, not whatever the upstream branch holds today.
+file matches the record. Where loader metadata needs adaptation, the CLI retains
+the original SKILL.md locally and records both source and installed hashes.
 
 ```
 npx @sourceweft/cli skills search pdf
@@ -77,7 +77,8 @@ lacks it.
 - **Verifies before writing.** The download is checked file by file against the
   registry's hashes. Any mismatch, missing file or oversize entry aborts with
   exit code 3 and nothing is written. Files in the repository that the registry
-  did not list are never installed.
+  did not list are never downloaded. A metadata adaptation may add a preserved
+  original SKILL.md backup; its hash is recorded in the local receipt.
 - **Installs atomically.** Files go into a temporary sibling directory first and
   are moved into place only when all are down.
 - **Never overwrites what it did not create**, and never follows a symbolic link
@@ -114,7 +115,6 @@ The parts shared with the backend — the content-hash definition, path and name
 rules, size limits, and the in-memory zip reader — live in
 `packages/skill-format` so both sides agree on them.
 
-
 ## Readable install references
 
 ```sh
@@ -128,4 +128,12 @@ npx @sourceweft/cli skills remove @aws/aws-serverless
 
 Use the exact reference shown by the marketplace. When an owner has multiple sources with the same name, the catalog assigns source-qualified references. Interactive install/info can ask you to choose; `--yes` and `--json` never choose an ambiguous source. Use the listed exact reference or `--path` in scripts. Repository selectors resolve through the selected SourceWeft registry and retain pinned-commit and file-hash checks.
 
-Existing URL slugs and `.sourceweft.json` records remain supported. Aliases remain bound to their source when upstream names change. Local directories retain the original skill name; another source with the same local name is rejected even with `--force`. Use a different installation root for a different environment.
+Existing URL slugs and `.sourceweft.json` records remain supported. Aliases remain bound to their source when upstream names change. Local directories use the safe installation name; another source with the same local name is rejected even with `--force`. Use a different installation root for a different environment.
+
+### Compatible and large skills (CLI 0.2.1)
+
+The registry may derive missing metadata from a standalone SKILL.md's visible Markdown. An explicit malformed or incomplete YAML header is still reported as an error. Original source files and human titles are preserved; an optional `installName` provides a safe directory name. CLI installations adapt missing/nonstandard loader metadata into a standard YAML header and keep the original file and source hashes in the local receipt.
+
+Registry installs fetch the complete recorded file list directly from its immutable GitHub commit, with bounded concurrency, byte limits and per-file hash verification. Unrelated repository files are not downloaded. Shared limits are 20,000 files, 64 MiB per file and 256 MiB per skill.
+
+A historical parent package repaired to include its supporting instructions may have a new package version at the same source commit. `skills update` checks both commit and package version, preserving local-change protections. Existing website URLs and aliases remain valid.

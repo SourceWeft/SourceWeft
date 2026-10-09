@@ -285,6 +285,8 @@ export type ReadZipEntriesOptions = {
    * ceiling still applies on top.
    */
   maxFileBytes?: number;
+  /** Skill callers pass their shared bundle ceiling; MCP keeps its default. */
+  maxTotalBytes?: number;
 };
 
 export async function readZipEntries(
@@ -294,6 +296,8 @@ export async function readZipEntries(
 ): Promise<Map<string, Buffer>> {
   const oversize = options.oversize ?? "reject";
   const maxFileBytes = options.maxFileBytes ?? GITHUB_ZIP_LIMITS.maxFileBytes;
+  const maxTotalBytes =
+    options.maxTotalBytes ?? GITHUB_ZIP_LIMITS.maxTotalUncompressedBytes;
   let declaredTotal = 0;
   let rejection: GitHubArchiveError | null = null;
 
@@ -321,7 +325,7 @@ export async function readZipEntries(
               return false;
             }
             declaredTotal += file.originalSize;
-            if (declaredTotal > GITHUB_ZIP_LIMITS.maxTotalUncompressedBytes) {
+            if (declaredTotal > maxTotalBytes) {
               rejection = new GitHubArchiveError(
                 "ARCHIVE_TOO_LARGE",
                 "Repository archive expands beyond the maximum allowed size",
@@ -357,7 +361,7 @@ export async function readZipEntries(
       );
     }
     actualTotal += bytes.byteLength;
-    if (actualTotal > GITHUB_ZIP_LIMITS.maxTotalUncompressedBytes) {
+    if (actualTotal > maxTotalBytes) {
       throw new GitHubArchiveError(
         "ARCHIVE_TOO_LARGE",
         "Repository archive expands beyond the maximum allowed size",
