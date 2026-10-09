@@ -95,7 +95,13 @@ async function bytes(
     fail(`GitHub subtree read failed (${response.status}): ${url}`);
   }
   const advertised = Number(response.headers.get("content-length"));
-  if (advertised > limit) {
+  // Fetch exposes decoded bytes, but Content-Length describes the encoded wire body.
+  // A gzip envelope can be larger than a tiny source file; only compare like units.
+  const encoding = response.headers
+    .get("content-encoding")
+    ?.trim()
+    .toLowerCase();
+  if ((!encoding || encoding === "identity") && advertised > limit) {
     await response.body?.cancel();
     throw new GitHubArchiveError(
       "ARCHIVE_TOO_LARGE",
