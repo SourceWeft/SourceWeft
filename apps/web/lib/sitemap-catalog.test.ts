@@ -1,7 +1,9 @@
 import { expect, it, vi } from "vitest";
 const calls = vi.hoisted(() => ({ index: vi.fn(), shard: vi.fn() }));
 vi.mock("server-only", () => ({}));
-vi.mock("./api-base-url", () => ({ apiBaseUrl: "https://api.test" }));
+vi.mock("./internal-api-base-url", () => ({
+  internalApiBaseUrl: () => "https://api.test",
+}));
 vi.mock("next/cache", () => ({ unstable_cache: (fn: unknown) => fn }));
 vi.mock("@sourceweft/market-sdk", () => ({
   MarketClient: class {

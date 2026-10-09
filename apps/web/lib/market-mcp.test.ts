@@ -6,7 +6,9 @@ const cacheCalls = vi.hoisted(
 );
 
 vi.mock("server-only", () => ({}));
-vi.mock("./api-base-url", () => ({ apiBaseUrl: "https://api.test" }));
+vi.mock("./internal-api-base-url", () => ({
+  internalApiBaseUrl: () => "https://api.test",
+}));
 vi.mock("next/cache", () => ({
   // A pass-through: what matters here is what the callbacks return.
   unstable_cache: (

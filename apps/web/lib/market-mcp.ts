@@ -16,7 +16,7 @@ import {
   type ListMarketMcpResponse,
 } from "@sourceweft/market-sdk";
 
-import { apiBaseUrl } from "./api-base-url";
+import { internalApiBaseUrl } from "./internal-api-base-url";
 import { readMcpReadme } from "./mcp-readme";
 
 const MCP_LIST_LIMIT = 100;
@@ -25,7 +25,7 @@ function marketClient() {
   // The MCP catalog is now served by the backend (sourceweft-api retired), so
   // the public read API lives at {backend}/v1/mcp — no separate service or
   // service token.
-  return new MarketClient({ baseUrl: apiBaseUrl });
+  return new MarketClient({ baseUrl: internalApiBaseUrl() });
 }
 
 export function isMarketNotFound(error: unknown) {

@@ -14,12 +14,12 @@ import {
   type MarketSkillLocale,
 } from "@sourceweft/market-sdk";
 
-import { apiBaseUrl } from "./api-base-url";
+import { internalApiBaseUrl } from "./internal-api-base-url";
 
 function marketClient() {
   // The public skill market is served by the backend at {backend}/v1/skills —
   // anonymous, so no service token.
-  return new MarketClient({ baseUrl: apiBaseUrl });
+  return new MarketClient({ baseUrl: internalApiBaseUrl() });
 }
 
 export function isMarketNotFound(error: unknown) {
