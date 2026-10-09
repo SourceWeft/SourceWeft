@@ -158,7 +158,14 @@ export async function generateMetadata({
     const url = alternates.canonical;
     return {
       alternates,
-      description,
+      // Issue #269: one English search-snippet experiment. Social descriptions
+      // retain the existing template; registry content and other pages do too.
+      description:
+        locale === "en" &&
+        decodedIdentifier === "io.github.paeyoungpark-web/lupa-mcp" &&
+        result.item.identifier === "io.github.paeyoungpark-web/lupa-mcp"
+          ? "Lupa MCP lets AI assistants search local Mac files and read indexed document text. Supports PDF, Office and HWP/HWPX files. Requires the Lupa macOS app."
+          : description,
       openGraph: {
         description,
         images: [OG_IMAGE],
