@@ -1,3 +1,5 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import assert from "node:assert/strict";
 import { test } from "vitest";
 
@@ -88,3 +90,16 @@ test("returns null for unparseable input", async () => {
   });
   assert.equal(duration, null);
 });
+
+test("malformed MP4 sample counts finish without blocking the parser process", async () => {
+  // Run in a child: a synchronous parser regression cannot defeat the test's timeout.
+  const hex =
+    "00000010667479704d34412000000000000000207374736400000000ffffffff000000006d7034610000000000000001";
+  const code = `import {parseBuffer} from 'music-metadata'; try { await parseBuffer(Buffer.from('${hex}','hex'), {mimeType:'audio/mp4'}); } catch {} process.stdout.write('completed');`;
+  const result = await promisify(execFile)(
+    process.execPath,
+    ["--input-type=module", "-e", code],
+    { timeout: 5000, maxBuffer: 1024 * 1024 },
+  );
+  assert.equal(result.stdout, "completed");
+}, 15000);
