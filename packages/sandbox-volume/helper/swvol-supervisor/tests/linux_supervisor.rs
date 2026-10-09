@@ -1,4 +1,6 @@
 #![cfg(target_os = "linux")]
+#[path = "support/gated_fuse.rs"]
+mod gated_fuse;
 use serde_json::{json, Value};
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
@@ -256,6 +258,29 @@ impl Drop for Fixture {
                 .arg("--lazy")
                 .arg(self.root.join("state"))
                 .status();
+        }
+        // Never traverse a mount that failed the owned-identity cleanup guard.
+        if fs::read_to_string("/proc/self/mountinfo")
+            .unwrap_or_default()
+            .lines()
+            .any(|line| {
+                line.split_whitespace()
+                    .nth(4)
+                    .is_some_and(|mount| std::path::Path::new(mount).starts_with(&self.root))
+            })
+        {
+            eprintln!(
+                "retaining fixture root because an owned mount did not close: {}",
+                self.root.display()
+            );
+            return;
+        }
+        if self.root.join(".gated-cleanup-unconfirmed").exists() {
+            eprintln!(
+                "retaining unresolved FUSE cleanup evidence: {}",
+                self.root.display()
+            );
+            return;
         }
         let _ = fs::remove_dir_all(&self.root);
     }
@@ -1127,7 +1152,7 @@ fn kernel_freezer_restart_without_explicit_parent_fails_closed() {
 }
 
 #[test]
-#[ignore = "isolated privileged Linux: successful native AIO continues after diagnostic kernel pause"]
+#[ignore = "manual ordinary-disk timing diagnostic: may be inconclusive if AIO finishes before pause ACK; not CI acceptance"]
 fn diagnostic_kernel_pause_does_not_claim_pending_native_aio_is_quiescent() {
     use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
     use std::os::unix::net::UnixListener;
@@ -1259,4 +1284,301 @@ fn diagnostic_kernel_pause_does_not_claim_pending_native_aio_is_quiescent() {
     assert_eq!(verified["writtenBytes"], 268435456u64);
     assert_eq!(verified["destroyResult"], 0);
     eprintln!("NATIVE_AIO_AFTER_DIAGNOSTIC_PAUSE at_ack={at_ack} after350ms={after} successful=64 bytes=268435456 production_freeze=rejected");
+}
+
+// This separate deterministic real-filesystem gate does not turn the ordinary
+// disk timing experiment above into a pass or qualify any cloud provider.
+#[test]
+#[ignore = "native ARM musl privileged Linux: real FUSE ASYNC_DIO gated writes"]
+fn gated_native_aio_completes_while_workload_remains_kernel_paused() {
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    use std::os::unix::fs::MetadataExt;
+    use std::os::unix::net::UnixListener;
+    let f = Fixture::with_kernel_io_fixture();
+    let mounted = f.root.join("workspace/gated-fuse");
+    let gate = gated_fuse::GatedFuse::mount(&mounted, &f.root.join("fuse-private"));
+    let init_deadline = Instant::now() + Duration::from_secs(10);
+    while !gate.ready() {
+        assert!(
+            Instant::now() < init_deadline,
+            "real FUSE ASYNC_DIO negotiation timed out"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let unavailable =
+        f.request(json!({"op":"freeze","expected_nonce":f.nonce,"freeze_id":"must-not-confirm"}));
+    assert_eq!(unavailable["ok"], false);
+    assert!(unavailable["error"]
+        .as_str()
+        .unwrap()
+        .contains("KERNEL_IO_QUIESCENCE_UNQUALIFIED"));
+    let source = f.root.join("workspace/aio.c");
+    let binary = f.root.join("workspace/aio");
+    fs::write(&source, include_str!("fixtures/native_aio_writer.c")).unwrap();
+    assert!(
+        // Match the native supervisor target and release musl ABI. This test must
+        // run on matching hardware, never QEMU syscall emulation.
+        Command::new(format!("{}-unknown-linux-musl-gcc", std::env::consts::ARCH))
+            .args(["-static", "-O2"])
+            .arg(&source)
+            .arg("-o")
+            .arg(&binary)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let socket = f.root.join("workspace/events.sock");
+    let listener = UnixListener::bind(&socket).unwrap();
+    fs::set_permissions(&socket, fs::Permissions::from_mode(0o666)).unwrap();
+    let ready = f.root.join("workspace/aio-ready");
+    let data = mounted.join("data");
+    f.open();
+    f.start(
+        "native-aio",
+        format!(
+            "exec {} {} {} {}",
+            binary.display(),
+            socket.display(),
+            data.display(),
+            ready.display()
+        ),
+    );
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !ready.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "AIO submitter did not become ready"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let submission: Value = serde_json::from_slice(&fs::read(&ready).unwrap()).unwrap();
+    assert_eq!(
+        submission["submitted"], 64,
+        "native AIO submission: {submission}"
+    );
+    assert_eq!(submission["errno"], 0);
+    let (stream, _) = listener.accept().unwrap();
+    let mut byte = 0u8;
+    let mut iov = libc::iovec {
+        iov_base: (&mut byte as *mut u8).cast(),
+        iov_len: 1,
+    };
+    let mut control = [0u64; 8];
+    let mut message: libc::msghdr = unsafe { std::mem::zeroed() };
+    message.msg_iov = &mut iov;
+    message.msg_iovlen = 1;
+    message.msg_control = control.as_mut_ptr().cast();
+    message.msg_controllen = std::mem::size_of_val(&control).try_into().unwrap();
+    assert_eq!(
+        unsafe { libc::recvmsg(stream.as_raw_fd(), &mut message, libc::MSG_CMSG_CLOEXEC) },
+        1
+    );
+    let fd = unsafe {
+        let header = libc::CMSG_FIRSTHDR(&message);
+        assert!(!header.is_null());
+        assert_eq!((*header).cmsg_level, libc::SOL_SOCKET);
+        assert_eq!((*header).cmsg_type, libc::SCM_RIGHTS);
+        OwnedFd::from_raw_fd(std::ptr::read_unaligned(
+            libc::CMSG_DATA(header).cast::<i32>(),
+        ))
+    };
+    let completions = || {
+        let mut total = 0u64;
+        loop {
+            let mut value = 0u64;
+            let count = unsafe { libc::read(fd.as_raw_fd(), (&mut value as *mut u64).cast(), 8) };
+            if count < 0 {
+                assert_eq!(
+                    std::io::Error::last_os_error().raw_os_error(),
+                    Some(libc::EAGAIN)
+                );
+                break;
+            }
+            assert_eq!(count, 8);
+            total += value;
+        }
+        total
+    };
+    while gate.received() != gated_fuse::SIZE {
+        assert!(
+            Instant::now() < deadline,
+            "all real FUSE payloads must be safely spooled within the original readiness budget"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(
+        gate.stats(),
+        (256, 1048576, 1048576),
+        "actual kernel splitting must fit negotiated max_background=512"
+    );
+    assert!(
+        fs::metadata(gate.backing()).unwrap().blocks() * 512 >= gated_fuse::SIZE,
+        "backing must really be preallocated, not sparse"
+    );
+    assert_eq!(
+        sha256_file(gate.backing()),
+        "a6d72ac7690f53be6ae46ba88506bd97302a093f7108472bd9efc3cefda06484",
+        "no user-visible payload may reach backing before explicit release"
+    );
+    let journal: Value =
+        serde_json::from_slice(&fs::read(f.root.join("state/cgroup.json")).unwrap()).unwrap();
+    let tree = PathBuf::from(journal["tree"].as_str().unwrap());
+    for group in std::iter::once(tree.clone()).chain(
+        fs::read_dir(&tree)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .filter(|p| p.is_dir()),
+    ) {
+        let pids = fs::read_to_string(group.join("cgroup.procs")).unwrap();
+        for controller in [std::process::id(), f.server.id()] {
+            assert!(
+                !pids.split_whitespace().any(|p| p == controller.to_string()),
+                "controller and FUSE server threads must stay outside frozen work"
+            );
+        }
+    }
+    let before = completions();
+    assert_eq!(
+        before, 0,
+        "FUSE must withhold all real write replies until release"
+    );
+    let pause =
+        f.ok(json!({"op":"pause_kernel","expected_nonce":f.nonce,"pause_id":"aio-observation"}));
+    assert_eq!(pause["user_threads_frozen"], true);
+    assert_eq!(pause["kernel_io_quiescence"], "unqualified");
+    assert!(pause["all_writers_stopped"].is_null());
+    let at_ack = before + completions();
+    assert!(
+        at_ack < 64,
+        "no pending native AIO at pause acknowledgement (before={before}, at_ack={at_ack}); this experiment is inconclusive"
+    );
+    assert_eq!(
+        at_ack, 0,
+        "no gated write may complete before controller release"
+    );
+    assert!(fs::read_to_string(tree.join("cgroup.events"))
+        .unwrap()
+        .contains("frozen 1"));
+    gate.release();
+    std::thread::sleep(Duration::from_millis(350));
+    let after = at_ack + completions();
+    assert!(
+        after > at_ack,
+        "pending AIO did not progress within the observation window"
+    );
+    let journal: Value =
+        serde_json::from_slice(&fs::read(f.root.join("state/cgroup.json")).unwrap()).unwrap();
+    assert!(fs::read_to_string(
+        PathBuf::from(journal["tree"].as_str().unwrap()).join("cgroup.events")
+    )
+    .unwrap()
+    .contains("frozen 1"));
+    f.ok(json!({"op":"thaw","expected_nonce":f.nonce,"pause_id":"aio-observation"}));
+    fs::write(ready.with_file_name("aio-ready.release"), "release").unwrap();
+    let result = f.completion("native-aio");
+    assert_eq!(result["completion"]["exit_code"], 0);
+    let verified: Value = serde_json::from_str(result["stdout"].as_str().unwrap()).unwrap();
+    assert_eq!(verified["successfulWrites"], 64);
+    assert_eq!(verified["writtenBytes"], 268435456u64);
+    assert_eq!(verified["destroyResult"], 0);
+    let durable_deadline = Instant::now() + Duration::from_secs(10);
+    while !gate.complete() {
+        assert!(
+            Instant::now() < durable_deadline,
+            "actual backing sync did not finish"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(
+        sha256_file(gate.backing()),
+        "f333d79a407c53df810df7153e4c674afb4ecf3c4a9401ea831ddf4e2a4b1ec9"
+    );
+    eprintln!("GATED_NATIVE_AIO boundary=real-fuse-async-dio callbacks=256 callback_bytes=1048576 spool_synced=true at_ack={at_ack} after350ms={after} successful=64 bytes=268435456 backing_sha256=f333d79a407c53df810df7153e4c674afb4ecf3c4a9401ea831ddf4e2a4b1ec9 production_freeze=rejected ordinary_disk=separate_manual_diagnostic");
+    gate.close()
+        .expect("owned FUSE workers, mount and control view must fully close");
+    assert!(
+        !fs::read_to_string("/proc/self/mountinfo")
+            .unwrap()
+            .lines()
+            .any(|line| line.split_whitespace().nth(4) == mounted.to_str()),
+        "RAII must unmount only the owned FUSE mount"
+    );
+    let drained =
+        f.ok(json!({"op":"drain","expected_nonce":f.nonce,"drain_id":"gated-test-finished"}));
+    assert_eq!(drained["all_namespaces_exited"], true);
+    assert_eq!(
+        tree,
+        PathBuf::from("/sys/fs/cgroup").join(format!("swvol-{}", f.nonce))
+    );
+    fs::remove_dir(&tree).expect("remove only the now-empty journal-owned cgroup tree");
+    drop(f);
+    assert_gated_fuse_cleanup_with_pending_writer();
+}
+
+fn sha256_file(path: &std::path::Path) -> String {
+    let output = Command::new("sha256sum").arg(path).output().unwrap();
+    assert!(output.status.success(), "actual backing SHA256 failed");
+    String::from_utf8(output.stdout)
+        .unwrap()
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .into()
+}
+
+// A real failure-cleanup subscenario, not a server/helper test counted as a pass.
+// Keep a write and its FD pending while paused, then close only this connection.
+fn assert_gated_fuse_cleanup_with_pending_writer() {
+    let f = Fixture::with_kernel_io_fixture();
+    let mounted = f.root.join("workspace/cleanup-fuse");
+    let gate = gated_fuse::GatedFuse::mount(&mounted, &f.root.join("cleanup-private"));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !gate.ready() {
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    f.open();
+    f.start(
+        "held-writer",
+        format!(
+            "exec dd if=/dev/zero of={}/data bs=4096 count=1 conv=notrunc status=none",
+            mounted.display()
+        ),
+    );
+    while gate.received() != 4096 {
+        assert!(
+            Instant::now() < deadline,
+            "real held FUSE write did not arrive"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let failed_pause = f.request(
+        json!({"op":"pause_kernel","expected_nonce":f.nonce,"pause_id":"cleanup-while-open"}),
+    );
+    assert_eq!(
+        failed_pause["ok"], false,
+        "a pending synchronous FUSE write must not be represented as a stopped writer"
+    );
+    assert!(failed_pause["error"]
+        .as_str()
+        .unwrap()
+        .contains("kernel freezer acknowledgement timed out"));
+    gate.close()
+        .expect("pending write cleanup must abort and join only its own FUSE connection");
+    assert!(!fs::read_to_string("/proc/self/mountinfo")
+        .unwrap()
+        .lines()
+        .any(|line| line.split_whitespace().nth(4) == mounted.to_str()));
+    let drained =
+        f.ok(json!({"op":"drain","expected_nonce":f.nonce,"drain_id":"held-writer-cleanup"}));
+    assert_eq!(drained["all_namespaces_exited"], true);
+    let journal: Value =
+        serde_json::from_slice(&fs::read(f.root.join("state/cgroup.json")).unwrap()).unwrap();
+    let tree = PathBuf::from(journal["tree"].as_str().unwrap());
+    assert_eq!(
+        tree,
+        PathBuf::from("/sys/fs/cgroup").join(format!("swvol-{}", f.nonce))
+    );
+    fs::remove_dir(tree).expect("the exact stopped writer tree must be empty");
+    eprintln!("GATED_FUSE_FAILURE_CLEANUP held_write_bytes=4096 pause_ack=timeout_expected fd_open_at_abort=true exact_mount_identity_rechecked=true worker_joined=true dispatch_joined=true own_mount_removed=true own_namespace_exited=true");
 }

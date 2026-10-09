@@ -155,29 +155,49 @@ stock root command/file API must not bypass the workload boundary, and pending
 asynchronous kernel I/O still needs qualification. Only a complete provider image,
 protected adapter, and real cloud acceptance may enable durable execution.
 
-Current local acceptance includes 22 isolated Linux regression cases with pids-limit 512 and
-768 MiB memory, including the opt-in kernel path and the default rejection path.
-This is local Linux evidence only. Both original cloud provider images currently
-lack delegation for their nonroot SDK execution identity; the independent root
-Cloudflare image has not yet qualified. A user-thread freezer is not an external
-persistence receipt and does not by itself prove that already-submitted kernel
-AIO/io_uring work has completed. That requires a separate kernel-I/O probe and
-quiescence design before the protected provider adapter can be activated.
+The reproducible `../test-linux.sh --with-fuse` acceptance selects 21 x86_64
+namespace/security cases and a separate native ARM musl scenario with a real FUSE
+ASYNC_DIO write gate. The original ordinary-disk native-AIO experiment remains
+available as an explicitly manual diagnostic. Its latest run had 51 completions
+before pause and 64 by ACK, leaving no pending observation window: inconclusive,
+not a pass. Earlier real ordinary-disk counterexamples remain evidence, but the
+controlled FUSE test does not retrospectively change that result.
 
+The mandatory gated scenario requires the kernel to advertise FUSE_ASYNC_DIO.
+Its test-only fuser=0.15.1 dependency uses abi-7-31 and requests 1 MiB writes and
+512 background requests; it is absent from the production dependency graph. The
+unchanged UID65534 C workload submits 64 real 4 MiB O_DIRECT native-AIO requests.
+The kernel delivers 256 actual FUSE writes. A controller outside the frozen leaf
+stores their payload in private synced spool files while withholding all replies.
+Backing is really preallocated, and its zero-content SHA256 is checked before
+release. Once pause ACK and frozen1 are observed with eventfd0, the controller
+releases actual backing writes and only then replies. At 350 ms completions must
+have increased while frozen1 remains. After thaw, all64 successful write results,
+256 MiB, io_destroy, and the entire backing SHA256 are checked.
 
-The native-AIO regression must run the supervisor and syscall workload on the
-builder's native architecture. On an ARM host, the pinned aarch64 builder exercises
-real kernel AIO; x86 workload execution through QEMU can return ENOSYS, and an
-emulated supervisor can add enough control latency to drain the pending window
-before its acknowledgement. Such runs are explicitly inconclusive, not passes.
-That case uses an 8 MiB private tmpfs for the root-owned control journal so its
-fsync cannot incidentally synchronize the workload filesystem. The other lifecycle
-cases retain their disk-backed state. The test verifies both actual successful
-AIO completions after diagnostic pause and unconditional production Freeze refusal.
+Spool sync_data is required preparation: the initial prototype left private data
+dirty and its first backing pwrite stalled over a second in balance_dirty_pages.
+Synchronizing only the private spool/allocation before freeze fixed that measured
+interference; three bounded native prototype runs then observed31/38/57 completed
+writes at350ms. Neither the time window nor data/resource assertions were relaxed.
+The acceptance container retains 2 CPUs,768 MiB,512 PIDs, an8 MiB private control
+journal and the pinned ARM musl compiler (Rust1.95.0). QEMU syscall emulation is
+not an alternate qualification path. The CI budget stays35 minutes without GB
+benchmarks.
 
-The reproducible `../test-linux.sh --with-fuse` entry explicitly runs the other
-21 namespace/security cases with the pinned x86_64 target, then requires the AIO
-case on an ARM64 Docker host using the pinned aarch64 builder. Both the supervisor
-and C syscall fixture use aarch64 musl; no GNU fixture or QEMU syscall substitute
-qualifies this phase. Unsupported host architecture fails rather than skips it.
-The CI job preserves its 35-minute budget and runs no manual gigabyte benchmarks.
+The same named scenario exercises failed cleanup with an independent real4096-byte
+synchronous FUSE write held open. Its kernel pause correctly times out, never
+claiming stopped writers. Cleanup binds the exact canonical mount, mount ID,
+fsname and device to a pre-opened connection abort fd, and rechecks that identity
+before aborting. It never guesses a connection from global lists. Only that owned
+connection is aborted/detached; release/dispatch threads are joined with bounded
+waiting, the owned mount is checked absent, and the namespace is drained. A changed
+identity or unresolved cleanup retains evidence and fails the test. This is test
+resource cleanup, not transparent recovery of production file descriptors.
+
+Both real provider images still lack writable delegation for their stock nonroot
+SDK identity. Neither the local FUSE test nor the independent root image qualifies
+a complete protected provider adapter. Production Freeze always rejects: cgroup
+user-thread stopping does not establish kernel-I/O quiescence, an external
+persistence receipt, or a durable upper filesystem. The ordinary-disk manual test
+and this controlled FUSE boundary must remain separately reported.

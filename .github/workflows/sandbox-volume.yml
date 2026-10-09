@@ -64,7 +64,8 @@ jobs:
   linux-filesystem:
     # The verified builder digest is arm64 and cross-compiles the x86_64 helper.
     # Use an explicit matching host and register x86_64 execution for its tests.
-    # The mandatory AIO phase runs native aarch64 supervisor + musl C workload;
+    # The mandatory real-FUSE gated AIO phase runs native aarch64 + musl C;
+    # ordinary-disk timing remains a separate manual diagnostic, not a CI pass.
     # QEMU cannot qualify kernel syscall behavior.
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 35
@@ -86,7 +87,7 @@ jobs:
             -w /home/rust/src \
             messense/rust-musl-cross@sha256:ce75e9174325d4fbb3de85c309e2d7ca29f7500169bc4b5d2c611ff7e86d549a \
             bash -c 'set -euo pipefail; for crate in swvol-core swvol swlazy swvol-supervisor; do cargo fetch --locked --manifest-path "$crate/Cargo.toml"; done'
-      - name: Real Linux durability, FUSE, x86 supervisor and native ARM kernel I/O
+      - name: Real Linux durability, FUSE, x86 supervisor and native ARM gated AIO
         run: packages/sandbox-volume/helper/test-linux.sh --with-fuse
       - name: Build verified release helpers for both architectures
         env:

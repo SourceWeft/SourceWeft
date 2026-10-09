@@ -42,17 +42,18 @@ docker run --rm --network none --pids-limit 512 "${capabilities[@]}" --tmpfs /en
         --target x86_64-unknown-linux-musl --test linux_durability signed_timestamp_boundaries_roundtrip_and_out_of_range_never_confirm -- --ignored --nocapture
       cargo test --locked --offline --manifest-path swlazy/Cargo.toml --target x86_64-unknown-linux-musl \
         --test formal_fuse -- --ignored --nocapture
-      echo "Supervisor x86_64: 21 namespace/security cases; AIO assigned to the mandatory native phase below."
+      echo "Supervisor x86_64: 21 namespace/security cases; gated AIO is native-only; ordinary-disk timing is a separate manual diagnostic."
       cargo test --locked --offline --manifest-path swvol-supervisor/Cargo.toml --target x86_64-unknown-linux-musl \
         --test linux_supervisor -- --ignored --nocapture \
-        --skip diagnostic_kernel_pause_does_not_claim_pending_native_aio_is_quiescent
+        --skip diagnostic_kernel_pause_does_not_claim_pending_native_aio_is_quiescent \
+        --skip gated_native_aio_completes_while_workload_remains_kernel_paused
     else
       echo "FUSE and supervisor namespace acceptance NOT RUN; rerun test-linux.sh --with-fuse on a capable Docker host."
     fi
   '
 
 if [ "$with_fuse" = 1 ]; then
-  echo "Supervisor native aarch64: mandatory kernel AIO counterexample; supervisor and C workload both musl."
+  echo "Supervisor native aarch64: mandatory real-FUSE gated AIO and owned failed-writer cleanup; both workloads musl. Ordinary-disk timing is NOT RUN/NOT counted as passed."
   docker run --rm --privileged --network none --pids-limit 512 --memory 768m --cpus 2 \
     -v "$PWD":/home/rust/src:ro \
     -v swvol-cargo-registry:/root/.cargo/registry \
@@ -64,6 +65,6 @@ if [ "$with_fuse" = 1 ]; then
       aarch64-unknown-linux-musl-gcc -dumpmachine
       cargo test --locked --offline --manifest-path swvol-supervisor/Cargo.toml \
         --target aarch64-unknown-linux-musl --test linux_supervisor \
-        diagnostic_kernel_pause_does_not_claim_pending_native_aio_is_quiescent -- --ignored --nocapture
+        gated_native_aio_completes_while_workload_remains_kernel_paused -- --ignored --nocapture
     '
 fi
