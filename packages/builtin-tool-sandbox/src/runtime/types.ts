@@ -81,8 +81,17 @@ export type SandboxSupervisorIdentity = {
   supervisorNonce: string;
   /** Signal-based pauses do not establish a persistence barrier. No shipped provider implements this capability. */
   stableFreeze:
-    | { available: false; mechanism: "none" | "signal-pause" }
-    | { available: true; mechanism: "cgroup-v2-freezer"; kernelEnforced: true };
+    | {
+        available: false;
+        mechanism: "none" | "signal-pause" | "cgroup-v2-freezer";
+        kernelIoQuiescence?: "unqualified";
+      }
+    | {
+        available: true;
+        mechanism: "cgroup-v2-freezer";
+        kernelEnforced: true;
+        kernelIoQuiescence: "qualified";
+      };
 };
 
 /** Narrow host-only RPC; this surface never accepts shell commands or arbitrary paths. */
@@ -100,7 +109,9 @@ export type SandboxVolumeControl = {
     allWritersStopped: true;
     mechanism: "cgroup-v2-freezer";
     kernelEnforced: true;
+    kernelIoQuiescent: true;
   }>;
+  /** Production barrier release only. The current supervisor's diagnostic pause/thaw RPCs do not satisfy this contract. */
   resume(input: {
     providerSandboxId: string;
     expectedNonce: string;

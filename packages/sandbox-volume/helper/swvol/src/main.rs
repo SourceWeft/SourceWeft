@@ -14,6 +14,7 @@
 
 mod safe_fs;
 mod control_client;
+mod capture;
 
 use anyhow::{anyhow, bail, Context, Result};
 use swvol_core::{ChunkRef, ChunkLoc, WireEntry, Manifest, RestorePlan as Plan};
@@ -57,9 +58,9 @@ const READ_STALL_SECS: u64 = 3; // a download slower than MIN_BYTES_PER_WINDOW p
 const MIN_BYTES_PER_WINDOW: usize = 2 * 1024 * 1024; // the sandbox link does ~47 MB/s: under 0.7 MB/s is a stall
 
 #[derive(Debug)]
-struct NeedSlots(String);
+enum NeedSlots { Capture(String), ManifestRead(String) }
 impl std::fmt::Display for NeedSlots {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "NEED_SLOTS: {}", self.0) }
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "NEED_SLOTS: {}", match self { Self::Capture(message) | Self::ManifestRead(message) => message }) }
 }
 impl std::error::Error for NeedSlots {}
 
@@ -69,6 +70,21 @@ fn error_exit_code(error: &anyhow::Error) -> i32 {
         return EXIT_NO_SPACE;
     }
     1
+}
+
+fn error_report(root: &Path, error: &anyhow::Error, rebase: Option<u64>) -> serde_json::Value {
+    let mut result = serde_json::json!({"ok":false,"error":format!("{error:#}"),"exit_code":error_exit_code(error)});
+    // A missing read proof is an authorization renewal, not capture progress.
+    // The host may already have advanced head past these unconfirmed receipts.
+    if matches!(error.downcast_ref::<NeedSlots>(), Some(NeedSlots::Capture(_))) {
+        match capture::progress(root, rebase) {
+            Ok(Some(progress)) if progress.has_uploads() => { result["capture_progress"] = serde_json::to_value(progress).expect("capture progress serialization"); },
+            Ok(Some(_)) => {},
+            Ok(None) => {},
+            Err(checkpoint_error) => { result["error"] = format!("{error:#}; durable capture progress unavailable: {checkpoint_error:#}").into(); result["exit_code"] = error_exit_code(&checkpoint_error).into(); },
+        }
+    }
+    result
 }
 
 // ---------- on-disk / wire types ----------
@@ -106,6 +122,8 @@ struct Slots {
     manifest_prefix: String,
     packs: HashMap<String, String>,
     manifests: HashMap<String, String>,
+    #[serde(default)]
+    manifest_reads: HashMap<String, String>,
 }
 
 // ---------- small helpers ----------
@@ -161,6 +179,34 @@ fn http_put(agent: &ureq::Agent, url: &str, body: &[u8]) -> Result<bool> {
         std::thread::sleep(Duration::from_millis(300 << attempt));
     }
     Err(last.unwrap_or_else(|| anyhow!("PUT failed")))
+}
+
+/// A pre-existing immutable key proves nothing about this journal's bytes.
+/// GET uses a separately signed read URL; PUT signatures cannot authenticate GET.
+fn publish_manifest(slots: &Slots, seq: u64, body: &[u8]) -> Result<()> {
+    let key = seq.to_string();
+    if let Some(put) = slots.manifests.get(&key) {
+        if http_put(&agent(), put, body)? { return Ok(()); }
+    }
+    // The host may already have applied this sequence and issue only its GET
+    // proof, while all new PUT slots start at head + 1.
+
+    let read = slots.manifest_reads.get(&key).ok_or_else(|| NeedSlots::ManifestRead(format!("no manifest read slot {seq} to verify existing bytes")))?;
+    let response = agent().get(read).call().map_err(|error| match error {
+        ureq::Error::Status(code, _) => anyhow!("MANIFEST_VERIFY_HTTP: read returned {code}; pending preserved"),
+        _ => anyhow!("MANIFEST_VERIFY_TRANSPORT: read unavailable; pending preserved"),
+    })?;
+    if response.status() != 200 { bail!("MANIFEST_VERIFY_HTTP: expected complete object response; pending preserved"); }
+    if let Some(length) = response.header("Content-Length") {
+        let length: u64 = length.parse().context("MANIFEST_VERIFY_LENGTH: invalid content length")?;
+        if length != body.len() as u64 { bail!("MANIFEST_SLOT_TAKEN: seq {seq} contains different manifest bytes"); }
+    }
+    let limit = body.len().checked_add(1).context("manifest verification byte budget overflow")?;
+    let mut existing = Vec::new();
+    response.into_reader().take(limit as u64).read_to_end(&mut existing)
+        .map_err(|_| anyhow!("MANIFEST_VERIFY_READ: truncated or interrupted object; pending preserved"))?;
+    if existing != body { bail!("MANIFEST_SLOT_TAKEN: seq {seq} contains different manifest bytes"); }
+    Ok(())
 }
 
 /// Download with stall detection and range-resume. A transfer that stops making
@@ -379,14 +425,33 @@ struct PackWriter {
     cur_key: Option<String>,
     new_locs: BTreeMap<String, ChunkLoc>,
     packs: Vec<(String, u64)>,
-    tx: Option<mpsc::SyncSender<(String, Vec<u8>)>>,
+    tx: Option<mpsc::SyncSender<(String, Vec<u8>, Option<capture::Receipt>)>>,
+    capture: Option<Arc<capture::Writer>>,
+    referenced: HashSet<String>,
     uploaders: Vec<std::thread::JoinHandle<Result<()>>>,
     uploaded_bytes: u64,
 }
 
 impl PackWriter {
     fn new(slots: &Slots, root: &Path) -> Self {
-        PackWriter { slots: slots.clone(), root: root.to_owned(), next_pack: 0, counter: meta_dir(root).join("pack.next"), buf: Vec::new(), cur_key: None, new_locs: BTreeMap::new(), packs: Vec::new(), tx: None, uploaders: Vec::new(), uploaded_bytes: 0 }
+        PackWriter { slots: slots.clone(), root: root.to_owned(), next_pack: 0, counter: meta_dir(root).join("pack.next"), buf: Vec::new(), cur_key: None, new_locs: BTreeMap::new(), packs: Vec::new(), tx: None, capture: None, referenced: HashSet::new(), uploaders: Vec::new(), uploaded_bytes: 0 }
+    }
+
+    fn resume(slots: &Slots, root: &Path, state: &State) -> Result<Self> {
+        let (capture, loaded) = capture::open(root, state, slots)?;
+        let mut writer = Self::new(slots, root);
+        writer.next_pack = loaded.packs.iter().filter_map(|(key, _)| key.rsplit('/').next()?.parse::<u32>().ok()).max().unwrap_or(state.next_pack);
+        writer.new_locs = loaded.locs; writer.packs = loaded.packs; writer.capture = Some(capture);
+        Ok(writer)
+    }
+    fn join_uploads(&mut self) -> Result<()> {
+        self.tx.take();
+        let mut first = None;
+        for worker in self.uploaders.drain(..) {
+            let result = worker.join().map_err(|_| anyhow!("uploader panicked")).and_then(|result| result);
+            if let Err(error) = result { if first.is_none() { first = Some(error); } }
+        }
+        match first { Some(error) => Err(error), None => Ok(()) }
     }
 
     /// Reserve the next pack slot. The reservation is durable BEFORE the slot is used,
@@ -403,7 +468,11 @@ impl PackWriter {
             if fresh.volume != self.slots.volume || fresh.attachment != self.slots.attachment || fresh.pack_prefix != self.slots.pack_prefix || fresh.manifest_prefix != self.slots.manifest_prefix { bail!("pack grant changed during capture"); }
             self.slots = fresh;
             if self.slots.packs.contains_key(&n.to_string()) { break; }
-            if !control_client::active() || Instant::now() >= deadline { return Err(NeedSlots(format!("no pack slot {n}")).into()); }
+            if !control_client::active() || Instant::now() >= deadline {
+                // Surface failed PUT/receipt fsync before reporting reusable progress.
+                self.join_uploads()?;
+                return Err(NeedSlots::Capture(format!("no pack slot {n}")).into());
+            }
             control_client::WAKE.store(true, std::sync::atomic::Ordering::Relaxed);
             std::thread::sleep(Duration::from_millis(100));
         }
@@ -417,20 +486,25 @@ impl PackWriter {
             return;
         }
         // Chunking and compression continue while earlier packs are on the wire.
-        let (tx, rx) = mpsc::sync_channel::<(String, Vec<u8>)>(1);
+        let (tx, rx) = mpsc::sync_channel::<(String, Vec<u8>, Option<capture::Receipt>)>(1);
         let rx = Arc::new(Mutex::new(rx));
         for _ in 0..UPLOAD_THREADS {
             let rx = rx.clone();
+            let capture = self.capture.clone();
             self.uploaders.push(std::thread::spawn(move || -> Result<()> {
                 let ag = agent();
                 loop {
                     let job = rx.lock().unwrap().recv();
                     match job {
-                        Ok((url, body)) => {
+                        Ok((url, body, receipt)) => {
                             if !http_put(&ag, &url, &body)? {
                                 bail!("PACK_SLOT_TAKEN: a pack slot was already written");
                             }
                             fault("after_pack_put");
+                            if let (Some(capture), Some(receipt)) = (&capture, receipt) {
+                                capture.save(receipt)?;
+                                fault("after_capture_receipt");
+                            }
                         }
                         Err(_) => return Ok(()),
                     }
@@ -459,10 +533,15 @@ impl PackWriter {
         if let Some(key) = self.cur_key.take() {
             let body = std::mem::take(&mut self.buf);
             let url = self.slots.packs.get(&self.next_pack.to_string()).cloned().ok_or_else(|| anyhow!("slot vanished"))?;
+            let receipt = self.capture.as_ref().map(|capture| capture.receipt(key.clone(), body.len() as u64,
+                self.new_locs.iter().filter(|(_, loc)| loc.0 == key).map(|(id, loc)| (id.clone(), loc.clone())).collect()));
             self.packs.push((key, body.len() as u64));
             self.uploaded_bytes += body.len() as u64;
             self.ensure_uploaders();
-            self.tx.as_ref().unwrap().send((url, body)).map_err(|_| anyhow!("uploader stopped"))?;
+            if self.tx.as_ref().unwrap().send((url, body, receipt)).is_err() {
+                self.join_uploads()?;
+                bail!("uploader stopped");
+            }
         }
         Ok(())
     }
@@ -485,10 +564,7 @@ impl PackWriter {
         } else {
             self.roll()?;
         }
-        self.tx.take();
-        for h in self.uploaders.drain(..) {
-            h.join().map_err(|_| anyhow!("uploader panicked"))??;
-        }
+        self.join_uploads()?;
         Ok(inline)
     }
 }
@@ -511,6 +587,7 @@ fn chunk_file(abs: &Path, md: &fs::Metadata, have: &HashMap<String, ChunkLoc>, p
     let mut refs = Vec::new();
     let mut push = |data: &[u8], pw: &mut PackWriter| -> Result<()> {
         let id = blake3::hash(data).to_hex().to_string();
+        pw.referenced.insert(id.clone());
         if !have.contains_key(&id) && !pw.new_locs.contains_key(&id) {
             pw.add(&id, data)?;
         }
@@ -589,9 +666,13 @@ fn sync_once(root: &Path, st: &mut State, scope: Scope, trigger: &str, rebase: O
         // The host explicitly rejected the old chain and issued a new epoch.
         // Keep every old byte for recovery; never replay it into a new slot.
         quarantine_pending(root)?;
+        capture::prepare_rebase(root, st, &slots, rebase.unwrap())?;
     } else {
         recover_pending(root, st, &slots)?;
     }
+    // A resumed capture must re-evaluate the whole current namespace, even
+    // when the triggering watch event covered only one directory.
+    let scope = if capture::has_pending(root)? { Scope::Full } else { scope };
     let old_seq = st.seq;
     let mut removed_locs = HashMap::new();
     let mut changed_ctimes = Vec::new();
@@ -717,7 +798,7 @@ fn sync_scoped(root: &Path, st: &mut State, scope: Scope, trigger: &str, rebase:
     // Watch scopes can overlap (for example a new parent and its heavy subtree).
     cands.sort_by(|a, b| a.rel.cmp(&b.rel));
     cands.dedup_by(|a, b| a.rel == b.rel);
-    let mut pw = PackWriter::new(&slots, root);
+    let mut pw = PackWriter::resume(slots, root, st)?;
     let mut upserts: Vec<(String, Entry)> = Vec::new();
     let unstable = Vec::new();
     let mut bytes_read = 0u64;
@@ -793,17 +874,19 @@ fn sync_scoped(root: &Path, st: &mut State, scope: Scope, trigger: &str, rebase:
     let inline = pw.finish(&manifest_key)?; // every referenced pack is in the bucket before the manifest exists
     let fresh_slots = load_slots(root)?;
     if fresh_slots.attachment != slots.attachment || fresh_slots.manifest_prefix != slots.manifest_prefix { bail!("manifest grant changed during capture"); }
-    let url = match fresh_slots.manifests.get(&seq.to_string()) {
-        Some(u) => u.clone(),
-        None => return Err(NeedSlots(format!("no manifest slot {seq}")).into()),
-    };
+    if !fresh_slots.manifests.contains_key(&seq.to_string()) && !fresh_slots.manifest_reads.contains_key(&seq.to_string()) { return Err(NeedSlots::Capture(format!("no manifest slot {seq}")).into()); }
+    // Unreferenced staged chunks (for example a file removed during a pause)
+    // must not enter State.have without being registered by this manifest.
+    let new_locs: BTreeMap<_, _> = pw.new_locs.iter().filter(|(id, _)| pw.referenced.contains(*id)).map(|(id, loc)| (id.clone(), loc.clone())).collect();
+    let used_packs: HashSet<_> = new_locs.values().map(|loc| loc.0.as_str()).collect();
+    let packs: Vec<_> = pw.packs.iter().filter(|(key, _)| used_packs.contains(key.as_str())).cloned().collect();
     let wire = |p: &String, e: &Entry| WireEntry { p: p.clone(), k: e.kind, m: e.mode, t: e.mtime_ns, s: e.size, l: e.link.clone(), c: e.chunks.clone() };
     let (m_upserts, m_deletes, m_chunks) = if rebase.is_some() {
         // Snapshot: every entry as it will be after this sync, with the location of every chunk it uses.
         let changed: HashMap<&String, &Entry> = upserts.iter().map(|(p, e)| (p, e)).collect();
         let mut all: Vec<WireEntry> = st.entries.iter().filter(|(p, _)| !deletes.contains(*p) && !changed.contains_key(p)).map(|(p, e)| wire(p, e)).collect();
         all.extend(upserts.iter().map(|(p, e)| wire(p, e)));
-        let mut locs = pw.new_locs.clone();
+        let mut locs = new_locs.clone();
         for w in &all {
             for c in &w.c {
                 if !locs.contains_key(&c.0) {
@@ -815,7 +898,7 @@ fn sync_scoped(root: &Path, st: &mut State, scope: Scope, trigger: &str, rebase:
         }
         (all, Vec::new(), locs)
     } else {
-        (upserts.iter().map(|(p, e)| wire(p, e)).collect(), deletes.iter().cloned().collect(), pw.new_locs.clone())
+        (upserts.iter().map(|(p, e)| wire(p, e)).collect(), deletes.iter().cloned().collect(), new_locs.clone())
     };
     let mut manifest = Manifest {
         v: 1,
@@ -829,7 +912,7 @@ fn sync_scoped(root: &Path, st: &mut State, scope: Scope, trigger: &str, rebase:
         upserts: m_upserts,
         deletes: m_deletes,
         chunks: m_chunks,
-        packs: pw.packs.clone(),
+        packs,
         unstable: unstable.clone(),
         skipped,
         ts_ms: now_ms(),
@@ -848,14 +931,11 @@ fn sync_scoped(root: &Path, st: &mut State, scope: Scope, trigger: &str, rebase:
     // Two-phase local commit: the exact manifest bytes are durable locally before they
     // are uploaded, so a crash after the upload replays the SAME manifest for this seq.
     let pending = meta_dir(root).join("pending.manifest");
-    let apply = PendingApply { seq, rebase: rebase.is_some(), next_pack: pw.next_pack, upserts, deletes: deletes.into_iter().collect(), new_locs: pw.new_locs.clone(), unstable };
+    let apply = PendingApply { seq, rebase: rebase.is_some(), next_pack: pw.next_pack, upserts, deletes: deletes.into_iter().collect(), new_locs, unstable };
     let journal = PendingJournal { manifest_key: manifest_key.clone(), body: body.clone(), apply };
     atomic_write(&pending, &encode_pending(&journal)?)?;
     fault("before_manifest_put");
-    if !http_put(&agent(), &url, &body)? {
-        // Our state says this seq is free, the bucket says it is taken: never guess, let the host rebase us.
-        bail!("MANIFEST_SLOT_TAKEN: seq {seq} already exists in this epoch");
-    }
+    publish_manifest(&fresh_slots, seq, &body)?;
     fault("after_manifest_put");
     commit_pending(root, st, journal.apply)?;
     // A durable commit does not become uncommitted if journal housekeeping fails.
@@ -909,6 +989,17 @@ fn commit_pending(root: &Path, st: &mut State, p: PendingApply) -> Result<()> {
         let old = st.have.insert(id.clone(), loc);
         chunks.insert(id, old);
     }
+    if p.rebase {
+        // Replay must apply the same cache invalidation as the original rebase.
+        // Numeric sequence checks cannot identify old-epoch inline locations
+        // after the accepted new epoch advances beyond their sequence numbers.
+        let referenced: HashSet<&str> = st.entries.values().flat_map(|entry| entry.chunks.iter().map(|chunk| chunk.0.as_str())).collect();
+        st.have.retain(|id, loc| {
+            if referenced.contains(id.as_str()) { return true; }
+            chunks.entry(id.clone()).or_insert_with(|| Some(loc.clone()));
+            false
+        });
+    }
     st.seq = p.seq;
     st.next_pack = p.next_pack;
     if let Err(error) = save_state(root, st) {
@@ -922,6 +1013,7 @@ fn commit_pending(root: &Path, st: &mut State, p: PendingApply) -> Result<()> {
         st.next_pack = old_pack;
         return Err(error);
     }
+    if let Err(error) = capture::committed(root, old_seq) { eprintln!("swvol: committed capture cleanup pending: {error:#}"); }
     Ok(())
 }
 
@@ -980,10 +1072,9 @@ fn recover_pending(root: &Path, st: &mut State, slots: &Slots) -> Result<()> {
         bail!("PENDING_EPOCH_MISMATCH: old bytes retained; explicit rebase recovery required");
     }
     if apply.seq == st.seq + 1 || apply.rebase {
-        let url = slots.manifests.get(&apply.seq.to_string()).ok_or_else(|| NeedSlots(format!("no manifest slot {} to replay", apply.seq)))?;
-        // An already-written immutable slot is safe only for the exact key and
-        // bytes reserved in this durable journal before the first upload.
-        http_put(&agent(), url, &body)?;
+        // Both fresh conflicts and lost-ACK recovery require byte equality,
+        // never merely the existence of an immutable object at this sequence.
+        publish_manifest(slots, apply.seq, &body)?;
         commit_pending(root, st, apply)?;
     } else if apply.seq != st.seq {
         bail!("pending manifest sequence disagrees with local state; preserving it for recovery");
@@ -1006,9 +1097,13 @@ fn cmd_restore(root: &Path, plan_src: &str, index_only: bool) -> Result<()> {
     metadata.chmod("", 0o700)?;
     let lock = metadata.lock_file()?;
     lock.try_lock_exclusive().map_err(|_| anyhow!("another swvol (restore or daemon) is running in this workspace"))?;
+    if capture::has_pending(root)? { bail!("CAPTURE_RESTORE_CONFLICT: preserve or explicitly rebase unconfirmed upload receipts before restoring"); }
     if metadata.names()?.iter().any(|name| name == "pending.manifest") {
         bail!("PENDING_RESTORE_CONFLICT: preserve or explicitly recover pending journal before restoring");
     }
+    // A scope header alone contains no uploaded data. Incomplete receipt writes
+    // were included in has_pending(), so only an empty journal can be cleared here.
+    capture::archive(root, "empty-restore", true)?;
     // Existing user content and pending commits are checked before touching identity.
     metadata.remove("identity", false)?;
     metadata.remove("state.bin", false)?;
@@ -1460,7 +1555,7 @@ fn cmd_daemon(root: &Path) -> Result<()> {
                 d.first.get_or_insert_with(Instant::now);
                 d.last.get_or_insert_with(Instant::now);
                 backoff_until = Instant::now() + Duration::from_secs(3);
-                serde_json::json!({"ok": false, "error": format!("{e:#}"), "exit_code": error_exit_code(e), "mode": "daemon"}).to_string()
+                let mut report = error_report(root, e, rebase); report["mode"] = "daemon".into(); report.to_string()
             }
         };
         if let Some((_, mut conn)) = req {
@@ -1582,9 +1677,9 @@ fn main() {
     match res {
         Ok(code) => std::process::exit(code),
         Err(e) => {
-            let code = error_exit_code(&e);
-            println!("{}", serde_json::json!({"ok": false, "error": format!("{e:#}"), "exit_code": code}));
-            std::process::exit(code);
+            let report = error_report(&root, &e, get("--rebase").and_then(|n| n.parse().ok()));
+            println!("{report}");
+            std::process::exit(report["exit_code"].as_i64().unwrap_or(1) as i32);
         }
     }
 }
@@ -1606,11 +1701,11 @@ mod durability_tests {
         fn new() -> Self {
             let root = std::env::temp_dir().join(format!("swvol-read-{}-{}-{}", std::process::id(), now_ms(), NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed)));
             fs::create_dir_all(meta_dir(&root)).unwrap();
-            fs::write(meta_dir(&root).join("slots.json"), r#"{"volume":"v","attachment":"a","pack_prefix":"att/a/p/","manifest_prefix":"att/a/m/","packs":{},"manifests":{}}"#).unwrap();
+            fs::write(meta_dir(&root).join("slots.json"), r#"{"volume":"v","attachment":"a","pack_prefix":"att/a/p/","manifest_prefix":"att/a/m/1/","packs":{},"manifests":{}}"#).unwrap();
             Self { root }
         }
         fn sync(&self) -> Result<SyncReport> {
-            sync_once(&self.root, &mut State { volume: "v".into(), attachment: "a".into(), ..State::default() }, Scope::Full, "test", None)
+            sync_once(&self.root, &mut State { volume: "v".into(), attachment: "a".into(), boot_id: boot_id(), ..State::default() }, Scope::Full, "test", None)
         }
     }
     impl Drop for Fixture { fn drop(&mut self) { let _ = fs::remove_dir_all(&self.root); } }
@@ -1621,7 +1716,7 @@ mod durability_tests {
         FAIL_CHUNK_READ.with(|fault| fault.set(true));
         let result = f.sync();
         FAIL_CHUNK_READ.with(|fault| fault.set(false));
-        assert!(result.is_err(), "a read failure must not acknowledge omitted content");
+        assert!(result.err().unwrap().to_string().contains("cannot persist file read"), "the injected read failure must reach file capture");
     }
     #[test]
     fn non_utf8_symlink_target_cannot_disappear_from_a_successful_flush() {

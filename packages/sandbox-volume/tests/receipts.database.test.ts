@@ -715,6 +715,7 @@ test(
             throw new Error("signer unavailable");
           return key;
         },
+        presignGet: async (key: string) => key,
       } as unknown as ObjectStore,
     });
     await assert.rejects(slotsService.issueSlots(a), /signer unavailable/);
@@ -1181,6 +1182,7 @@ test(
       keyPrefix: "test/",
       store: {
         presignWriteOnce: async (key: string) => key,
+        presignGet: async (key: string) => key,
       } as unknown as ObjectStore,
     });
     await signer.issueSlots(a);
@@ -1485,6 +1487,7 @@ test(
       store: {
         get: async (key: string) => (key.endsWith("/m/0/1") ? raw : null),
         presignWriteOnce: async (key: string) => key,
+        presignGet: async (key: string) => key,
       } as unknown as ObjectStore,
     });
     await assert.rejects(
@@ -1590,6 +1593,7 @@ test(
       store: {
         get: async () => null,
         presignWriteOnce: async (key: string) => key,
+        presignGet: async (key: string) => key,
       } as unknown as ObjectStore,
     });
     const issued = await control.issueControlToken(a.id, { ttlSeconds: 60 });
@@ -2303,5 +2307,85 @@ test(
       client.query = original;
       client.release();
     }
+  },
+);
+
+test(
+  "manifest read grants bind the same actor epoch key and TTL, including head without a spent PUT",
+  { skip: !enabled },
+  async () => {
+    const v = await volume();
+    const a = await service.attach(v.id, "manifest-read-grants");
+    await service.recordBootId(a.id, "boot");
+    const grant = (method: string, key: string, ttl?: number) =>
+      JSON.stringify({ method, key, ttl });
+    const signer = new VolumeService({
+      db: drizzle(pool),
+      keyPrefix: "manifest-grants/",
+      presignTtlSeconds: 73,
+      store: {
+        presignWriteOnce: async (key, ttl) => grant("PUT", key, ttl),
+        presignGet: async (key, ttl) => grant("GET", key, ttl),
+        get: async () => {
+          throw new Error("unused get");
+        },
+        put: async () => {
+          throw new Error("unused put");
+        },
+        size: async () => {
+          throw new Error("unused size");
+        },
+        copy: async () => {
+          throw new Error("unused copy");
+        },
+        deletePrefix: async () => {
+          throw new Error("unused delete");
+        },
+      },
+    });
+    const first = await signer.issueSlots(a);
+    assert.equal(first.manifest_reads?.["0"], undefined);
+    assert.deepEqual(
+      Object.keys(first.manifest_reads!),
+      Object.keys(first.manifests),
+    );
+    for (const [seq, write] of Object.entries(first.manifests)) {
+      const key = `manifest-grants/vol/${v.id}/att/${a.id}/m/0/${seq}`;
+      assert.deepEqual(JSON.parse(write), { method: "PUT", key, ttl: 73 });
+      assert.deepEqual(JSON.parse(first.manifest_reads![seq]!), {
+        method: "GET",
+        key,
+        ttl: 73,
+      });
+    }
+    await repo.applyManifest(
+      v.id,
+      manifest(v.id, a.id, 0, "confirmed"),
+      {},
+      new Map(),
+    );
+    const advanced = await signer.issueSlots(a, { nextPack: 0 });
+    assert.equal(
+      advanced.manifests["1"],
+      undefined,
+      "never reissue a consumed manifest PUT",
+    );
+    assert.deepEqual(JSON.parse(advanced.manifest_reads!["1"]!), {
+      method: "GET",
+      key: `manifest-grants/vol/${v.id}/att/${a.id}/m/0/1`,
+      ttl: 73,
+    });
+    assert.equal(Object.keys(advanced.manifests)[0], "2");
+    for (const seq of Object.keys(advanced.manifests))
+      assert.ok(advanced.manifest_reads![seq]);
+    const fresh = await repo.advanceAttachmentEpoch(a.id);
+    const rebased = await signer.issueSlots(fresh);
+    assert.deepEqual(JSON.parse(rebased.manifest_reads!["1"]!), {
+      method: "GET",
+      key: `manifest-grants/vol/${v.id}/att/${a.id}/m/1/1`,
+      ttl: 73,
+    });
+    assert.equal(rebased.manifests["1"], undefined);
+    assert.equal(await repo.head(v.id), 1);
   },
 );

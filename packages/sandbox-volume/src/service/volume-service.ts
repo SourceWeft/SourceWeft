@@ -1,4 +1,8 @@
-import { resolveVolumeLimits, type VolumeLimits } from "./quota";
+import {
+  resolveVolumeLimits,
+  VolumeQuotaExceeded,
+  type VolumeLimits,
+} from "./quota";
 import {
   VolumeLifecycle,
   type DrainRequest,
@@ -10,6 +14,12 @@ import {
   type ProviderAbsenceEvidence,
   type RecoveryCandidatesOptions,
 } from "./lifecycle";
+import {
+  parseCaptureProgress,
+  captureWindow,
+  CaptureProgressRejected,
+  MAX_CAPTURE_PACK_BYTES,
+} from "./capture-progress";
 import { VolumeMaintenance } from "./maintenance";
 import { createHash, randomBytes } from "node:crypto";
 import { zstdCompressSync } from "node:zlib";
@@ -20,7 +30,12 @@ import {
   PRESIGN_TTL_SECONDS,
 } from "../protocol/constants";
 import { ManifestRejected, parseManifestObject } from "../protocol/manifest";
-import type { ChunkLocation, RestorePlan, SlotSet } from "../protocol/types";
+import type {
+  CaptureProgress,
+  ChunkLocation,
+  RestorePlan,
+  SlotSet,
+} from "../protocol/types";
 import { validateManifest } from "../protocol/validate";
 import type { ObjectStore } from "../store/object-store";
 import {
@@ -28,6 +43,7 @@ import {
   attachmentCanWrite,
   VolumeConflict,
   type AttachmentRow,
+  type ExpectedCapture,
   type VolumeDatabase,
   type VolumeRow,
   type VolumeScope,
@@ -99,16 +115,20 @@ export class VolumeService {
   readonly repo: VolumeRepository;
   readonly maintenance: VolumeMaintenance;
   readonly lifecycle: VolumeLifecycle;
+  private readonly limits: VolumeLimits;
+  // Only progress objects returned by this service carry measured cumulative quota authority.
+  private readonly captures = new WeakMap<
+    CaptureProgress,
+    { packs: Map<number, number>; verifiedBytes: number; unknownPacks: number }
+  >();
   private readonly ttl: number;
   private readonly now: () => Date;
   /** Serialises WAL application per volume: two appliers would both try to take `head + 1`. */
   private readonly locks = new Map<string, Promise<unknown>>();
 
   constructor(private readonly config: VolumeServiceConfig) {
-    this.repo = new VolumeRepository(
-      config.db,
-      resolveVolumeLimits(config.limits),
-    );
+    this.limits = resolveVolumeLimits(config.limits);
+    this.repo = new VolumeRepository(config.db, this.limits);
     this.lifecycle = new VolumeLifecycle(config.db);
     this.maintenance = new VolumeMaintenance({
       db: config.db,
@@ -391,7 +411,12 @@ export class VolumeService {
   /** Write-once slots for the next packs and manifests of this attachment's epoch. */
   async issueSlots(
     attachment: AttachmentRow,
-    renewal?: { nextPack?: number; drainId?: string },
+    renewal?: {
+      nextPack?: number;
+      drainId?: string;
+      expectedCapture?: ExpectedCapture;
+      signal?: AbortSignal;
+    },
   ): Promise<SlotSet> {
     const prefix = this.volumePrefix(attachment.volumeId);
     const reservation = await this.repo.reserveSlots(
@@ -406,23 +431,47 @@ export class VolumeService {
           }
         : undefined,
       renewal?.drainId,
+      renewal?.expectedCapture,
+      renewal?.signal,
     );
+    renewal?.signal?.throwIfAborted();
     attachment = reservation.attachment;
     const packs: Record<string, string> = {};
     const manifests: Record<string, string> = {};
+    const manifestReads: Record<string, string> = {};
     for (
       let n = reservation.renewFromPack;
       n < attachment.slotsUntilPack;
       n++
     ) {
+      renewal?.signal?.throwIfAborted();
       packs[String(n)] = await this.config.store.presignWriteOnce(
         `${prefix}${this.packPrefix(attachment)}${String(n).padStart(6, "0")}`,
         this.ttl,
       );
     }
+    // A WAL applier can be one commit ahead of the helper's durable state.
+    // Permit read-back of that occupied head, never another PUT to the spent seq.
+    if (reservation.firstSeq > 1) {
+      renewal?.signal?.throwIfAborted();
+      const head = reservation.firstSeq - 1;
+      manifestReads[String(head)] = await this.config.store.presignGet(
+        `${prefix}${this.manifestPrefix(attachment)}${head}`,
+        this.ttl,
+      );
+    }
     for (let s = reservation.firstSeq; s <= reservation.lastSeq; s++) {
+      renewal?.signal?.throwIfAborted();
+      const key = `${prefix}${this.manifestPrefix(attachment)}${s}`;
       manifests[String(s)] = await this.config.store.presignWriteOnce(
-        `${prefix}${this.manifestPrefix(attachment)}${s}`,
+        key,
+        this.ttl,
+      );
+      renewal?.signal?.throwIfAborted();
+      // A PUT grant cannot read an occupied immutable slot. Recovery must compare
+      // its exact pending bytes through an independently signed GET for this key.
+      manifestReads[String(s)] = await this.config.store.presignGet(
+        key,
         this.ttl,
       );
     }
@@ -433,7 +482,152 @@ export class VolumeService {
       manifest_prefix: this.manifestPrefix(attachment),
       packs,
       manifests,
+      manifest_reads: manifestReads,
     };
+  }
+
+  /** Upload authorization only: neither stdout nor HEAD confirms a tree or WAL receipt.
+   * `previous` must be the exact object returned by this service, never a deserialized clone.
+   * The returned byte count measures only this window; cumulative quota authority stays here.
+   * Unseen prefix packs are charged 64 MiB each and may fail closed despite fitting in reality.
+   * This is an operation budget, not a complete inventory or physical pending-storage quota.
+   */
+  async renewCaptureSlots(
+    attachmentId: string,
+    candidate: unknown,
+    previous?: CaptureProgress,
+    options: { drainId?: string; signal?: AbortSignal } = {},
+  ): Promise<{
+    slotsUrl: string;
+    progress: CaptureProgress;
+    verifiedObjectBytes: number;
+  }> {
+    if (options.signal !== undefined)
+      AbortSignal.prototype.throwIfAborted.call(options.signal);
+    const progress = parseCaptureProgress(candidate, this.limits);
+    const prior =
+      previous === undefined
+        ? undefined
+        : parseCaptureProgress(previous, this.limits);
+    const memo =
+      previous === undefined ? undefined : this.captures.get(previous);
+    if (previous !== undefined && !memo)
+      throw new CaptureProgressRejected(
+        "previous capture progress was not verified by this service",
+      );
+    const numbers = captureWindow(progress, prior);
+    const check = async () => {
+      options.signal?.throwIfAborted();
+      const actor = await this.repo.getAttachment(attachmentId);
+      if (
+        !actor ||
+        !attachmentCanWrite(actor, options.drainId) ||
+        actor.id !== progress.attachment ||
+        actor.volumeId !== progress.volume ||
+        actor.bootId !== progress.boot_id ||
+        actor.epoch !== progress.epoch ||
+        progress.next_pack > actor.slotsUntilPack ||
+        numbers.some((n) => n >= actor.slotsUntilPack)
+      )
+        throw new VolumeConflict(
+          "capture progress attachment is fenced or outside issued slots",
+        );
+      const volume = await this.repo.getVolume(actor.volumeId);
+      if (!volume || volume.headSeq !== progress.base_seq)
+        throw new VolumeConflict("capture progress head changed");
+      return { actor, volume };
+    };
+    const { actor } = await check();
+    const controller = new AbortController();
+    const signal = options.signal
+      ? AbortSignal.any([options.signal, controller.signal])
+      : controller.signal;
+    const measured = new Map<number, number>();
+    let cursor = 0,
+      verifiedObjectBytes = 0;
+    let failed = false,
+      failure: unknown;
+    const worker = async () => {
+      try {
+        while (!failed && cursor < numbers.length) {
+          signal.throwIfAborted();
+          const n = numbers[cursor++]!;
+          const key = `${this.volumePrefix(actor.volumeId)}${this.packPrefix(actor)}${String(n).padStart(6, "0")}`;
+          const bytes = await this.config.store.size(key, { signal });
+          signal.throwIfAborted();
+          if (
+            bytes === null ||
+            !Number.isSafeInteger(bytes) ||
+            bytes < 1 ||
+            bytes > MAX_CAPTURE_PACK_BYTES
+          )
+            throw new CaptureProgressRejected(
+              "capture pack is missing or outside the size bound",
+            );
+          verifiedObjectBytes += bytes;
+          if (
+            !Number.isSafeInteger(verifiedObjectBytes) ||
+            verifiedObjectBytes > this.limits.maxObjectBytes
+          )
+            throw new VolumeQuotaExceeded(
+              "maxObjectBytes",
+              verifiedObjectBytes,
+              this.limits.maxObjectBytes,
+            );
+          measured.set(n, bytes);
+        }
+      } catch (error) {
+        if (!failed) {
+          failed = true;
+          failure = error;
+          controller.abort(error);
+        }
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(4, numbers.length) }, worker),
+    );
+    if (failed) throw failure;
+    signal.throwIfAborted();
+    const verifiedBytes = (memo?.verifiedBytes ?? 0) + verifiedObjectBytes;
+    // An unseen prefix has no inventory proof. Charge its worst allowed pack size;
+    // this may reject a large pending prefix even when its real bytes would fit.
+    const unknownPacks =
+      memo?.unknownPacks ?? progress.uploaded_packs - numbers.length;
+    const pendingObjectBytes =
+      verifiedBytes + unknownPacks * MAX_CAPTURE_PACK_BYTES;
+    const { volume } = await check();
+    const total = volume.storedBytes + pendingObjectBytes;
+    if (!Number.isSafeInteger(total) || total > this.limits.maxObjectBytes)
+      throw new VolumeQuotaExceeded(
+        "maxObjectBytes",
+        total,
+        this.limits.maxObjectBytes,
+      );
+    const packs = new Map(memo?.packs);
+    for (const [n, bytes] of measured) {
+      if (packs.has(n))
+        throw new CaptureProgressRejected("capture repeated a verified pack");
+      packs.set(n, bytes);
+    }
+    if (packs.size + unknownPacks !== progress.uploaded_packs)
+      throw new CaptureProgressRejected(
+        "capture pack count does not match verified progress",
+      );
+    const slotsUrl = await this.publishSlots(actor, {
+      nextPack: progress.next_pack,
+      drainId: options.drainId,
+      signal: options.signal,
+      expectedCapture: {
+        bootId: progress.boot_id,
+        epoch: progress.epoch,
+        baseSeq: progress.base_seq,
+        pendingObjectBytes,
+      },
+    });
+    options.signal?.throwIfAborted();
+    this.captures.set(progress, { packs, verifiedBytes, unknownPacks });
+    return { slotsUrl, progress, verifiedObjectBytes };
   }
 
   /** The restore plan: every entry, every needed chunk location, one GET URL per pack. */
@@ -483,17 +677,31 @@ export class VolumeService {
 
   async publishSlots(
     attachment: AttachmentRow,
-    options: { nextPack?: number; drainId?: string } = {},
+    options: {
+      nextPack?: number;
+      drainId?: string;
+      expectedCapture?: ExpectedCapture;
+      signal?: AbortSignal;
+    } = {},
   ): Promise<string> {
-    const fresh = (await this.repo.getAttachment(attachment.id)) ?? attachment;
+    if (options.signal !== undefined)
+      AbortSignal.prototype.throwIfAborted.call(options.signal);
+    // A HEAD-verified actor must never drift to a newly fetched boot/epoch.
+    const fresh = options.expectedCapture
+      ? attachment
+      : ((await this.repo.getAttachment(attachment.id)) ?? attachment);
     const slots = await this.issueSlots(fresh, options);
+    options.signal?.throwIfAborted();
     const key = `${this.volumePrefix(attachment.volumeId)}att/${attachment.id}/slots-${fresh.epoch}-${id(4)}`;
     await this.config.store.put(
       key,
       Buffer.from(JSON.stringify(slots), "utf8"),
       "application/json",
     );
-    return this.config.store.presignGet(key, 900);
+    options.signal?.throwIfAborted();
+    const url = await this.config.store.presignGet(key, 900);
+    options.signal?.throwIfAborted();
+    return url;
   }
 
   /** Apply every manifest the sandbox has uploaded past the current head, in order. Stops at the first gap or rejection. */

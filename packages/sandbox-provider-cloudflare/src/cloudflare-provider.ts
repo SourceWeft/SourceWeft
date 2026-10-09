@@ -51,6 +51,8 @@ export type CloudflareSandboxProviderOptions = {
   bridgeUrl: string;
   apiKey: string;
   maxOutputChars: number;
+  /** Independent deadline only for cleanup after a newly created sandbox fails initialization. Default: 30 seconds. */
+  createCleanupTimeoutMs?: number;
   /** Test seam; defaults to global fetch. */
   fetchImpl?: typeof fetch;
 };
@@ -60,6 +62,7 @@ export type CloudflareSandboxProviderOptions = {
  * on. The response body is captured (truncated) as diagnostic detail only.
  */
 export class CloudflareBridgeHttpError extends Error {
+  readonly typedCode?: typeof SANDBOX_PROVIDER_ERROR_CODES.instanceMissing;
   constructor(
     readonly status: number,
     readonly operation: CloudflareProviderOperation,
@@ -67,6 +70,23 @@ export class CloudflareBridgeHttpError extends Error {
   ) {
     super(`bridge responded ${status}${detail ? `: ${detail}` : ""}`);
     this.name = "CloudflareBridgeHttpError";
+    if (status === 404 && operation === "delete") {
+      try {
+        const payload: unknown = JSON.parse(detail);
+        if (
+          payload &&
+          typeof payload === "object" &&
+          !Array.isArray(payload) &&
+          Object.hasOwn(payload, "code") &&
+          (payload as { code?: unknown }).code ===
+            SANDBOX_PROVIDER_ERROR_CODES.instanceMissing
+        ) {
+          this.typedCode = SANDBOX_PROVIDER_ERROR_CODES.instanceMissing;
+        }
+      } catch {
+        /* A route/HTML 404 is not evidence that the instance is absent. */
+      }
+    }
   }
 }
 
@@ -321,6 +341,7 @@ export class CloudflareSandboxProvider implements SandboxProvider {
   readonly pathPolicy = CLOUDFLARE_SANDBOX_PATH_POLICY;
   readonly cancellationScope = "sandbox" as const;
   private readonly fetchImpl: typeof fetch;
+  private readonly createCleanupTimeoutMs: number;
 
   constructor(private readonly options: CloudflareSandboxProviderOptions) {
     if (!options.bridgeUrl) {
@@ -332,6 +353,14 @@ export class CloudflareSandboxProvider implements SandboxProvider {
       throw new Error(
         "SANDBOX_NOT_CONFIGURED: CF_SANDBOX_API_KEY is required.",
       );
+    }
+    this.createCleanupTimeoutMs = options.createCleanupTimeoutMs ?? 30_000;
+    if (
+      !Number.isSafeInteger(this.createCleanupTimeoutMs) ||
+      this.createCleanupTimeoutMs < 1 ||
+      this.createCleanupTimeoutMs > 2_147_483_647
+    ) {
+      throw new Error("invalid Cloudflare creation cleanup timeout");
     }
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
@@ -351,12 +380,90 @@ export class CloudflareSandboxProvider implements SandboxProvider {
       if (typeof payload.id !== "string" || !payload.id) {
         throw new Error("bridge create returned no sandbox id");
       }
-      await this.putFile(
-        "create",
-        payload.id,
-        SOURCEWEFT_SANDBOX_STAMP_PATH,
-        new TextEncoder().encode(payload.id),
-      );
+      try {
+        await this.putFile(
+          "create",
+          payload.id,
+          SOURCEWEFT_SANDBOX_STAMP_PATH,
+          new TextEncoder().encode(payload.id),
+        );
+      } catch (initializationError) {
+        // The create response is the only authority for this cleanup target.
+        // No caller-provided/existing sandbox id is eligible for deletion here.
+        let failure = mapCloudflareProviderError(initializationError, "create");
+        const creationCleanup: {
+          providerSandboxId: string;
+          status: "delete-requested" | "already-missing" | "unconfirmed";
+          reason?: string;
+        } = { providerSandboxId: payload.id, status: "delete-requested" };
+        // Never inherit the failed stamp request's aborted signal. Only this
+        // newly owned instance is eligible, and failed cleanup must not hide
+        // the initialization error indefinitely. Covers response bodies too.
+        const cleanupSignal = AbortSignal.timeout(this.createCleanupTimeoutMs);
+        try {
+          // Use the raw request: the legacy public delete mapper treats every
+          // HTTP 404 as missing, which is insufficient evidence for cleanup.
+          await this.request(
+            "delete",
+            "DELETE",
+            `/v1/sandbox/${encodeURIComponent(payload.id)}`,
+            { signal: cleanupSignal },
+          );
+          cleanupSignal.throwIfAborted();
+        } catch (cleanupError) {
+          if (
+            isSandboxInstanceMissingError(cleanupError) ||
+            (cleanupError instanceof CloudflareBridgeHttpError &&
+              cleanupError.typedCode ===
+                SANDBOX_PROVIDER_ERROR_CODES.instanceMissing)
+          ) {
+            creationCleanup.status = "already-missing";
+          } else {
+            creationCleanup.status = "unconfirmed";
+            creationCleanup.reason =
+              errorDiagnostic(
+                cleanupSignal.aborted ? cleanupSignal.reason : cleanupError,
+              ) || "sandbox cleanup failed without diagnostic detail";
+          }
+        }
+        // Preserve the initialization classification/cause, never replace it
+        // with a delete failure. Frozen third-party errors retain their original
+        // object in cause so metadata attachment cannot hide the initial error.
+        if (
+          !Object.isExtensible(failure) ||
+          Object.getOwnPropertyDescriptor(failure, "creationCleanup")
+            ?.configurable === false
+        ) {
+          const originalFailure = failure;
+          failure =
+            originalFailure instanceof SandboxProviderError
+              ? new SandboxProviderError(
+                  originalFailure.code,
+                  originalFailure.message,
+                  originalFailure.phase,
+                  originalFailure,
+                )
+              : new Error(originalFailure.message, { cause: originalFailure });
+          failure.name = originalFailure.name;
+          for (const key of ["code", "phase"] as const) {
+            const value = (
+              originalFailure as unknown as Record<string, unknown>
+            )[key];
+            if (typeof value === "string" || typeof value === "number")
+              Object.defineProperty(failure, key, {
+                value,
+                enumerable: true,
+                configurable: true,
+              });
+          }
+        }
+        Object.defineProperty(failure, "creationCleanup", {
+          value: creationCleanup,
+          enumerable: true,
+          configurable: true,
+        });
+        throw failure;
+      }
       return { id: payload.id };
     });
   }
@@ -629,14 +736,18 @@ export class CloudflareSandboxProvider implements SandboxProvider {
     if (init.contentType) {
       headers["Content-Type"] = init.contentType;
     }
-    const response = await fetchAfterConnectRetry(this.fetchImpl, `${this.options.bridgeUrl}${path}`, {
-      method,
-      headers,
-      // TS 5.9 types Uint8Array over ArrayBufferLike, which no longer
-      // satisfies BodyInit's BufferSource; the runtime accepts it fine.
-      body: init.body as BodyInit | undefined,
-      signal: init.signal,
-    });
+    const response = await fetchAfterConnectRetry(
+      this.fetchImpl,
+      `${this.options.bridgeUrl}${path}`,
+      {
+        method,
+        headers,
+        // TS 5.9 types Uint8Array over ArrayBufferLike, which no longer
+        // satisfies BodyInit's BufferSource; the runtime accepts it fine.
+        body: init.body as BodyInit | undefined,
+        signal: init.signal,
+      },
+    );
     if (!response.ok) {
       const detail = await response
         .text()

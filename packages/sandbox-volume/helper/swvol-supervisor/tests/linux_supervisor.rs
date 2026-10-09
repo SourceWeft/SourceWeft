@@ -89,12 +89,27 @@ struct Fixture {
     socket: PathBuf,
     server: Child,
     nonce: String,
+    cgroup_parent: Option<PathBuf>,
+    tmpfs_state: bool,
 }
 impl Fixture {
     fn new() -> Self {
         Self::with_nofile(None)
     }
     fn with_nofile(nofile: Option<u64>) -> Self {
+        Self::with_options(nofile, None, false)
+    }
+    fn with_kernel_freezer() -> Self {
+        Self::with_options(None, Some(PathBuf::from("/sys/fs/cgroup")), false)
+    }
+    fn with_kernel_io_fixture() -> Self {
+        Self::with_options(None, Some(PathBuf::from("/sys/fs/cgroup")), true)
+    }
+    fn with_options(
+        nofile: Option<u64>,
+        cgroup_parent: Option<PathBuf>,
+        tmpfs_state: bool,
+    ) -> Self {
         assert_eq!(
             unsafe { libc::geteuid() },
             0,
@@ -112,6 +127,22 @@ impl Fixture {
         fs::set_permissions(&root, fs::Permissions::from_mode(0o755)).unwrap();
         fs::create_dir(root.join("state")).unwrap();
         fs::set_permissions(root.join("state"), fs::Permissions::from_mode(0o700)).unwrap();
+        if tmpfs_state {
+            // Isolate control-journal fsync from the workload filesystem. A
+            // same-filesystem journal flush can incidentally drain native AIO
+            // and hide that a user-thread freezer itself is not an I/O barrier.
+            let mounted = Command::new("mount")
+                .args(["-t", "tmpfs", "-o", "size=8m,mode=0700", "tmpfs"])
+                .arg(root.join("state"))
+                .output()
+                .unwrap();
+            assert!(
+                mounted.status.success(),
+                "{}",
+                String::from_utf8_lossy(&mounted.stderr)
+            );
+        }
+
         fs::create_dir(root.join("workspace")).unwrap();
         fs::set_permissions(root.join("workspace"), fs::Permissions::from_mode(0o777)).unwrap();
         let socket = root.join("control.sock");
@@ -130,7 +161,7 @@ impl Fixture {
                 });
             }
         }
-        let server = server_command
+        server_command
             .arg("serve")
             .arg(&socket)
             .arg(root.join("state"))
@@ -141,14 +172,18 @@ impl Fixture {
                 "private-supervisor-sentinel",
             )
             .stdout(Stdio::null())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .unwrap();
+            .stderr(Stdio::inherit());
+        if let Some(parent) = &cgroup_parent {
+            server_command.args(["--cgroup-parent"]).arg(parent);
+        }
+        let server = server_command.spawn().unwrap();
         let mut out = Self {
             root,
             socket,
             server,
             nonce: String::new(),
+            cgroup_parent,
+            tmpfs_state,
         };
         out.nonce = wait_for_identity(&mut out.server, &out.socket, None).unwrap();
         out
@@ -189,16 +224,19 @@ impl Fixture {
     fn restart(&mut self) {
         self.server.kill().unwrap();
         self.server.wait().unwrap();
-        self.server = Command::new(env!("CARGO_BIN_EXE_swvol-supervisor"))
+        let mut command = Command::new(env!("CARGO_BIN_EXE_swvol-supervisor"));
+        command
             .arg("serve")
             .arg(&self.socket)
             .arg(self.root.join("state"))
             .arg(self.root.join("workspace"))
             .args(["65534", "65533"])
             .stdout(Stdio::null())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .unwrap();
+            .stderr(Stdio::inherit());
+        if let Some(parent) = &self.cgroup_parent {
+            command.arg("--cgroup-parent").arg(parent);
+        }
+        self.server = command.spawn().unwrap();
         self.nonce = wait_for_identity(&mut self.server, &self.socket, Some(&self.nonce)).unwrap();
     }
     fn size(&self, name: &str) -> u64 {
@@ -211,6 +249,14 @@ impl Drop for Fixture {
     fn drop(&mut self) {
         let _ = self.server.kill();
         let _ = self.server.wait();
+        if self.tmpfs_state {
+            // Only this fixture's private mount; dying PID namespaces may still
+            // hold references briefly after their controller exits.
+            let _ = Command::new("umount")
+                .arg("--lazy")
+                .arg(self.root.join("state"))
+                .status();
+        }
         let _ = fs::remove_dir_all(&self.root);
     }
 }
@@ -848,4 +894,369 @@ fn kernel_timer_resumes_diagnostic_pause_and_production_freeze_is_unavailable() 
         stopped,
         "namespace teardown remains a valid stop boundary"
     );
+}
+
+#[test]
+#[ignore = "isolated privileged Linux with writable own cgroup2; production provider remains gated"]
+fn diagnostic_kernel_pause_holds_sigcont_threads_and_reclaims_after_crash() {
+    let mut f = Fixture::with_kernel_freezer();
+    let identity = f.ok(json!({"op":"identity"}));
+    assert_eq!(identity["identity"]["stable_freeze"], false);
+    assert_eq!(identity["identity"]["kernel_io_quiescence"], "unqualified");
+    let unavailable =
+        f.request(json!({"op":"freeze","expected_nonce":f.nonce,"freeze_id":"production-blocked"}));
+    assert_eq!(unavailable["ok"], false);
+    assert!(unavailable["error"]
+        .as_str()
+        .unwrap()
+        .contains("KERNEL_IO_QUIESCENCE_UNQUALIFIED"));
+    assert_eq!(
+        identity["identity"]["freeze_mechanism"],
+        "cgroup-v2-freezer"
+    );
+    let source = f.root.join("workspace/timer.c");
+    let binary = f.root.join("workspace/timer");
+    fs::write(&source, include_str!("fixtures/posix_sigcont_writer.c")).unwrap();
+    assert!(
+        Command::new(format!("{}-unknown-linux-musl-gcc", std::env::consts::ARCH))
+            .args(["-static", "-O2"])
+            .arg(&source)
+            .arg("-o")
+            .arg(&binary)
+            .arg("-lrt")
+            .status()
+            .unwrap()
+            .success()
+    );
+    f.open();
+    f.start("timer", format!("exec {}", binary.display()));
+    let churn_source = f.root.join("workspace/churn.rs");
+    let churn_binary = f.root.join("workspace/churn-bin");
+    fs::write(&churn_source, include_str!("fixtures/bounded_writers.rs")).unwrap();
+    let target = format!("{}-unknown-linux-musl", std::env::consts::ARCH);
+    assert!(Command::new("rustc")
+        .args([
+            "--edition=2021",
+            "--target",
+            &target,
+            "-C",
+            &format!("linker={target}-gcc")
+        ])
+        .arg(&churn_source)
+        .arg("-o")
+        .arg(&churn_binary)
+        .status()
+        .unwrap()
+        .success());
+    f.start("churn", churn_binary.to_string_lossy().into_owned());
+    let sibling = Fixture::new();
+    sibling.open();
+    sibling.start(
+        "sibling",
+        "while :; do echo alive >> sibling; sleep 0.01; done".into(),
+    );
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while f.size("counter") < 10 {
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let ledger: Value =
+        serde_json::from_slice(&fs::read(f.root.join("state/cgroup.json")).unwrap()).unwrap();
+    let tree = PathBuf::from(ledger["tree"].as_str().unwrap());
+    assert!(!fs::read_to_string(tree.join("cgroup.procs"))
+        .unwrap()
+        .split_whitespace()
+        .any(|pid| pid == f.server.id().to_string()));
+    f.start(
+        "migration",
+        format!(
+            "echo $$ > {}/cgroup.procs",
+            tree.parent().unwrap().display()
+        ),
+    );
+    assert_ne!(f.completion("migration")["completion"]["exit_code"], 0);
+    for index in 0..3 {
+        let freeze_id = format!("kernel-{index}");
+        let proof =
+            f.ok(json!({"op":"pause_kernel","expected_nonce":f.nonce,"pause_id":freeze_id}));
+        assert!(proof["all_writers_stopped"].is_null());
+        assert_eq!(proof["user_threads_frozen"], true);
+        assert_eq!(proof["diagnostic_only"], true);
+        assert_eq!(proof["kernel_io_quiescence"], "unqualified");
+        assert_eq!(proof["mechanism"], "cgroup-v2-freezer");
+        let before = f.size("counter");
+        let churn = f.size("churn");
+        let sibling_before = sibling.size("sibling");
+        std::thread::sleep(Duration::from_millis(350));
+        assert_eq!(
+            f.size("counter"),
+            before,
+            "kernel SIGCONT escaped the persistent freezer"
+        );
+        assert_eq!(
+            f.size("churn"),
+            churn,
+            "fork/thread writers escaped the persistent freezer"
+        );
+        assert!(
+            sibling.size("sibling") > sibling_before,
+            "unrelated supervisor sibling was frozen"
+        );
+        assert_eq!(
+            f.request(json!({"op":"resume","expected_nonce":f.nonce,"pause_id":freeze_id}))["ok"],
+            false,
+            "diagnostic resume must not thaw a kernel barrier"
+        );
+        f.ok(json!({"op":"thaw","expected_nonce":f.nonce,"pause_id":freeze_id}));
+        std::thread::sleep(Duration::from_millis(60));
+        assert!(f.size("counter") > before);
+    }
+    f.ok(json!({"op":"pause_kernel","expected_nonce":f.nonce,"pause_id":"crash-frozen"}));
+    let before = f.size("counter");
+    f.restart();
+    assert!(
+        !tree.exists(),
+        "restart left the previous owned cgroup tree behind"
+    );
+    std::thread::sleep(Duration::from_millis(150));
+    assert_eq!(f.size("counter"), before);
+    let status = f.ok(json!({"op":"status","expected_nonce":f.nonce,"execution_id":"timer"}));
+    assert_eq!(status["namespace_exited"], true);
+    f.ok(json!({"op":"drain","expected_nonce":f.nonce,"drain_id":"recover"}));
+    f.ok(json!({"op":"open","expected_nonce":f.nonce,"drain_id":"recover"}));
+    f.start("new", "printf preserved".into());
+    assert_eq!(f.completion("new")["stdout"], "preserved");
+    std::thread::sleep(Duration::from_millis(50));
+    f.ok(json!({"op":"identity"}));
+    let current: Value =
+        serde_json::from_slice(&fs::read(f.root.join("state/cgroup.json")).unwrap()).unwrap();
+    assert!(
+        !PathBuf::from(current["tree"].as_str().unwrap())
+            .join("exec-new")
+            .exists(),
+        "completed workload leaf leaked"
+    );
+}
+
+#[test]
+#[ignore = "isolated privileged Linux: cancel/drain must reap even frozen launchers"]
+fn kernel_freezer_cancel_and_drain_preserve_files_and_release_their_leaves() {
+    let f = Fixture::with_kernel_freezer();
+    f.open();
+    for id in ["cancel", "drain"] {
+        f.start(
+            id,
+            format!("echo sentinel > {id}; while :; do echo dirty >> {id}; sleep 0.01; done"),
+        );
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while f.size(id) < 10 {
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        f.ok(json!({"op":"pause_kernel","expected_nonce":f.nonce,"pause_id":id}));
+        let before = f.size(id);
+        let start = Instant::now();
+        if id == "cancel" {
+            f.ok(json!({"op":"cancel","expected_nonce":f.nonce,"execution_id":id}));
+            f.ok(json!({"op":"thaw","expected_nonce":f.nonce,"pause_id":id}));
+            f.ok(json!({"op":"thaw","expected_nonce":f.nonce,"pause_id":id}));
+        } else {
+            f.ok(json!({"op":"drain","expected_nonce":f.nonce,"drain_id":"stop-all"}));
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "frozen launcher was not reaped"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+        assert_eq!(f.size(id), before);
+        let status = f.ok(json!({"op":"status","expected_nonce":f.nonce,"execution_id":id}));
+        assert_eq!(status["namespace_exited"], true);
+        let journal: Value =
+            serde_json::from_slice(&fs::read(f.root.join("state/cgroup.json")).unwrap()).unwrap();
+        assert!(!PathBuf::from(journal["tree"].as_str().unwrap())
+            .join(format!("exec-{id}"))
+            .exists());
+    }
+}
+
+#[test]
+#[ignore = "isolated Linux: explicit unsupported freezer parent must fail startup"]
+fn kernel_freezer_rejects_unverified_startup_parent_without_touching_workspace() {
+    let mut f = Fixture::new();
+    f.server.kill().unwrap();
+    f.server.wait().unwrap();
+    fs::write(f.root.join("workspace/sentinel"), "preserved").unwrap();
+    let result = Command::new(env!("CARGO_BIN_EXE_swvol-supervisor"))
+        .arg("serve")
+        .arg(&f.socket)
+        .arg(f.root.join("state"))
+        .arg(f.root.join("workspace"))
+        .args(["65534", "65533", "--cgroup-parent"])
+        .arg(&f.root)
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("not cgroup v2"));
+    assert_eq!(
+        fs::read_to_string(f.root.join("workspace/sentinel")).unwrap(),
+        "preserved"
+    );
+}
+
+#[test]
+#[ignore = "isolated Linux: persisted kernel mode cannot silently downgrade after restart"]
+fn kernel_freezer_restart_without_explicit_parent_fails_closed() {
+    let mut f = Fixture::with_kernel_freezer();
+    f.server.kill().unwrap();
+    f.server.wait().unwrap();
+    fs::write(f.root.join("workspace/sentinel"), "preserved").unwrap();
+    let result = Command::new(env!("CARGO_BIN_EXE_swvol-supervisor"))
+        .arg("serve")
+        .arg(&f.socket)
+        .arg(f.root.join("state"))
+        .arg(f.root.join("workspace"))
+        .args(["65534", "65533"])
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("refusing signal-only downgrade"));
+    assert_eq!(
+        fs::read_to_string(f.root.join("workspace/sentinel")).unwrap(),
+        "preserved"
+    );
+}
+
+#[test]
+#[ignore = "isolated privileged Linux: successful native AIO continues after diagnostic kernel pause"]
+fn diagnostic_kernel_pause_does_not_claim_pending_native_aio_is_quiescent() {
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    use std::os::unix::net::UnixListener;
+    let f = Fixture::with_kernel_io_fixture();
+    let unavailable =
+        f.request(json!({"op":"freeze","expected_nonce":f.nonce,"freeze_id":"must-not-confirm"}));
+    assert_eq!(unavailable["ok"], false);
+    assert!(unavailable["error"]
+        .as_str()
+        .unwrap()
+        .contains("KERNEL_IO_QUIESCENCE_UNQUALIFIED"));
+    let source = f.root.join("workspace/aio.c");
+    let binary = f.root.join("workspace/aio");
+    fs::write(&source, include_str!("fixtures/native_aio_writer.c")).unwrap();
+    assert!(
+        // Match the native supervisor target and release musl ABI. This test must
+        // run on matching hardware, never QEMU syscall emulation.
+        Command::new(format!("{}-unknown-linux-musl-gcc", std::env::consts::ARCH))
+            .args(["-static", "-O2"])
+            .arg(&source)
+            .arg("-o")
+            .arg(&binary)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let socket = f.root.join("workspace/events.sock");
+    let listener = UnixListener::bind(&socket).unwrap();
+    fs::set_permissions(&socket, fs::Permissions::from_mode(0o666)).unwrap();
+    let ready = f.root.join("workspace/aio-ready");
+    let data = f.root.join("workspace/aio-data");
+    f.open();
+    f.start(
+        "native-aio",
+        format!(
+            "exec {} {} {} {}",
+            binary.display(),
+            socket.display(),
+            data.display(),
+            ready.display()
+        ),
+    );
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !ready.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "AIO submitter did not become ready"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let submission: Value = serde_json::from_slice(&fs::read(&ready).unwrap()).unwrap();
+    assert_eq!(
+        submission["submitted"], 64,
+        "native AIO submission: {submission}"
+    );
+    assert_eq!(submission["errno"], 0);
+    let (stream, _) = listener.accept().unwrap();
+    let mut byte = 0u8;
+    let mut iov = libc::iovec {
+        iov_base: (&mut byte as *mut u8).cast(),
+        iov_len: 1,
+    };
+    let mut control = [0u64; 8];
+    let mut message: libc::msghdr = unsafe { std::mem::zeroed() };
+    message.msg_iov = &mut iov;
+    message.msg_iovlen = 1;
+    message.msg_control = control.as_mut_ptr().cast();
+    message.msg_controllen = std::mem::size_of_val(&control).try_into().unwrap();
+    assert_eq!(
+        unsafe { libc::recvmsg(stream.as_raw_fd(), &mut message, libc::MSG_CMSG_CLOEXEC) },
+        1
+    );
+    let fd = unsafe {
+        let header = libc::CMSG_FIRSTHDR(&message);
+        assert!(!header.is_null());
+        assert_eq!((*header).cmsg_level, libc::SOL_SOCKET);
+        assert_eq!((*header).cmsg_type, libc::SCM_RIGHTS);
+        OwnedFd::from_raw_fd(std::ptr::read_unaligned(
+            libc::CMSG_DATA(header).cast::<i32>(),
+        ))
+    };
+    let completions = || {
+        let mut total = 0u64;
+        loop {
+            let mut value = 0u64;
+            let count = unsafe { libc::read(fd.as_raw_fd(), (&mut value as *mut u64).cast(), 8) };
+            if count < 0 {
+                assert_eq!(
+                    std::io::Error::last_os_error().raw_os_error(),
+                    Some(libc::EAGAIN)
+                );
+                break;
+            }
+            assert_eq!(count, 8);
+            total += value;
+        }
+        total
+    };
+    let before = completions();
+    let pause =
+        f.ok(json!({"op":"pause_kernel","expected_nonce":f.nonce,"pause_id":"aio-observation"}));
+    assert_eq!(pause["user_threads_frozen"], true);
+    assert_eq!(pause["kernel_io_quiescence"], "unqualified");
+    assert!(pause["all_writers_stopped"].is_null());
+    let at_ack = before + completions();
+    assert!(
+        at_ack < 64,
+        "no pending native AIO at pause acknowledgement (before={before}, at_ack={at_ack}); this experiment is inconclusive"
+    );
+    std::thread::sleep(Duration::from_millis(350));
+    let after = at_ack + completions();
+    assert!(
+        after > at_ack,
+        "pending AIO did not progress within the observation window"
+    );
+    let journal: Value =
+        serde_json::from_slice(&fs::read(f.root.join("state/cgroup.json")).unwrap()).unwrap();
+    assert!(fs::read_to_string(
+        PathBuf::from(journal["tree"].as_str().unwrap()).join("cgroup.events")
+    )
+    .unwrap()
+    .contains("frozen 1"));
+    f.ok(json!({"op":"thaw","expected_nonce":f.nonce,"pause_id":"aio-observation"}));
+    fs::write(ready.with_file_name("aio-ready.release"), "release").unwrap();
+    let result = f.completion("native-aio");
+    assert_eq!(result["completion"]["exit_code"], 0);
+    let verified: Value = serde_json::from_str(result["stdout"].as_str().unwrap()).unwrap();
+    assert_eq!(verified["successfulWrites"], 64);
+    assert_eq!(verified["writtenBytes"], 268435456u64);
+    assert_eq!(verified["destroyResult"], 0);
+    eprintln!("NATIVE_AIO_AFTER_DIAGNOSTIC_PAUSE at_ack={at_ack} after350ms={after} successful=64 bytes=268435456 production_freeze=rejected");
 }

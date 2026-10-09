@@ -1,4 +1,4 @@
-/** Wire-level constants shared with the in-sandbox helper (helper/). Bump PROTOCOL_VERSION together with helper/VERSION. */
+/** Wire-level constants shared with the helper. Change PROTOCOL_VERSION only for wire-format changes; helper/VERSION also tracks implementation qualification. */
 export const PROTOCOL_VERSION = 1;
 
 /** Magic prefix of a manifest object: `SWVOLM1\n` | u64 little-endian inline length | inline chunk bytes | zstd(JSON). */

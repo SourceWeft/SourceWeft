@@ -42,7 +42,7 @@ export type E2EContext = {
   pool: Pool;
   keyPrefix: string;
   scope: VolumeScope;
-  close(): Promise<void>;
+  close(options?: { preserveSchema?: boolean }): Promise<void>;
 };
 
 export function testConfiguration(env: Record<string, string>) {
@@ -126,7 +126,7 @@ export async function createE2EContext(): Promise<E2EContext> {
     pool,
     keyPrefix,
     scope,
-    async close() {
+    async close(options = {}) {
       const failures: unknown[] = [];
       try {
         await pool.end();
@@ -134,7 +134,8 @@ export async function createE2EContext(): Promise<E2EContext> {
         failures.push(error);
       }
       try {
-        await admin.query(`drop schema ${schema} cascade`);
+        if (!options.preserveSchema)
+          await admin.query(`drop schema ${schema} cascade`);
       } catch (error) {
         failures.push(error);
       } finally {

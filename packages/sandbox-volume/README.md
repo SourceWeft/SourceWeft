@@ -29,12 +29,14 @@ complete protected bootstrap and typed control/file RPC integration. Runtime rej
 admission before creating an attachment when those capabilities are unavailable. Setting the
 flag alone is not a supported way to enable this unfinished integration.
 
-The current supervisor also has **no stable persistence-freeze capability**. A real workload
-used a POSIX SIGCONT timer to resume itself after SIGSTOP had been acknowledged. The production
-`freeze` RPC now returns `STABLE_FREEZE_UNAVAILABLE`; signal `pause` is diagnostic only and
-never returns a durable-writer-stop proof. Runtime requires an explicitly verified kernel
-freezer capability, a matching proof, and its own live barrier grant before checkpointing.
-Unit-test stubs for a future cgroup-v2 freezer do not establish real provider support.
+The current supervisor has **no qualified persistence-freeze capability**. A POSIX
+SIGCONT timer disproved signal pause; native AIO also completed accepted writes after
+kernel cgroup thread-pause acknowledgement. Both signal `pause` and explicit
+`pause_kernel` are diagnostics. Production `freeze` rejects with
+`STABLE_FREEZE_UNAVAILABLE` or `KERNEL_IO_QUIESCENCE_UNQUALIFIED`; diagnostics never
+return a durable-writer-stop proof. Runtime requires explicit kernel I/O qualification,
+a matching proof, and its own live barrier grant before checkpointing. Ideal unit-test
+stubs do not establish real provider support.
 
 Direct hook-level tests use the hardened eager `full` restore path; `shadow` creates a separate
 observation namespace and never restores or updates the primary volume. These tests do not
@@ -118,12 +120,12 @@ tests. Real cloud acceptance uses separate credentials and is not represented by
 
 Status: see GitHub issue #228.
 
-## Helper 0.3.0 recovery contract
+## Helper 0.4.0 recovery contract
 
 All four Rust crates and `helper/VERSION` are versioned together. A deployment must install
-and verify `swvol 0.3.0`; an older cached executable must fail the version check instead of
+and verify `swvol 0.4.0`; an older cached executable must fail the version check instead of
 being used with these hooks. Immutable manifest objects remain protocol v1. The local pending
-journal is now explicitly `SWVPEND2` and records its original manifest key. Ordinary recovery
+journal remains `SWVPEND2` and records its original manifest key. Ordinary recovery
 rejects an unknown journal version or an epoch mismatch and retains its bytes. Only a
 host-authorized explicit rebase may archive that journal in `.sourceweft/recovery` and rebuild
 from local content. Uncontrolled upgrades must not delete, ignore, or reinterpret an old
@@ -133,7 +135,7 @@ Upgrade the matched helper bundle through a stopped, checkpointed/fenced lifecyc
 verified fresh instance. Replacing a binary file beneath an already running daemon does not
 upgrade that process and is not a supported activation procedure.
 
-Version 0.3.0 rejects timestamp overflow that older release builds could wrap and confirm.
+Version 0.4.0 retains the timestamp overflow rejection introduced in 0.3.0; earlier builds could wrap and confirm.
 File, directory and symlink mtime use the signed 64-bit nanosecond range. Restore verifies
 actual timestamps/modes before publishing readiness: a filesystem returning success after
 clamping a timestamp is an error. Historical directory timestamps recorded as zero cannot
@@ -187,7 +189,47 @@ upper layer, and use a separately reviewed recovery procedure. It does not promi
 recovery of the entire FUSE daemon. Worker SIGKILL acceptance is distinct from this unresolved
 dispatch-lifecycle gate.
 
-The pinned fuser 0.15.1 encoder cannot correctly represent fractional timestamps before
-the Unix epoch. Formal `mount-volume` refuses plans containing negative mtime before mounting;
-it must not clamp them to zero or silently select eager mode. Eager restore's signed range
-is tested separately and still depends on the target filesystem preserving the requested time.
+The fixed fuser 0.15.1 negative fractional time encoding is handled by a
+version-specific attribute-wire adapter; see the signed-time contract below.
+Formal `mount-volume` now reports the supported signed nanosecond range exactly,
+without changing logical metadata or silently selecting eager mode. Eager restore
+still depends on the actual target filesystem preserving the requested time.
+
+## Capture-progress upload renewal
+
+`VolumeService.renewCaptureSlots` renews upload authorization when a helper has
+saved pack receipts but has not yet published its manifest. It does not advance
+the head, write a commit receipt, change the tree, checkpoint a drain, or confirm
+that user data is durable. The final manifest/WAL barrier is still required.
+
+Progress metadata is an untrusted claim. The service checks the exact schema,
+actor/boot/epoch/base, issued slot bounds and strictly advancing counts. It uses
+`recent_uploaded_pack_numbers` from the receipt tail instead of guessing a
+continuous range: inline-only reservations and interrupted uploads can leave
+legitimate numbering holes. Every newly claimed number is converted to this
+actor's own pack key and checked with HEAD, with at most 64 objects and four
+concurrent requests. Missing, empty, oversized or invalid objects do not authorize
+renewal. Scope and head are checked again after HEAD and inside the final slot
+allocation transaction. Caller cancellation also prevents publication of a result.
+
+The returned progress object and its number array are frozen. Pass that exact
+object as `previous`; clones, deserialized objects and progress from another
+service instance have no trusted cumulative-byte record and are rejected. The
+returned `verifiedObjectBytes` counts only the new HEAD window. A service-owned
+WeakMap retains the measured pack set and cumulative bytes for this operation.
+If the first report already has more than 64 packs, each unseen prefix pack is
+charged a conservative 64 MiB plus the actual verified bytes and registered volume
+bytes. Such a prefix can fail closed even when its real objects would fit; resolving
+that case requires a complete inventory. This bound does not implement a complete
+physical quota for all pending or unregistered objects in the bucket.
+
+## Signed FUSE attribute times
+
+The fixed fuser 0.15.1 encoder does not normalize negative fractional SystemTime
+inputs. An attribute-only adapter now targets its exact wire (signed seconds,
+nonnegative nanoseconds) pair. It changes no logical plan, restore or treehash
+time. The dependency is explicitly pinned to =0.15.1; an upgrade must remove or
+revalidate the adapter. Real kernel stat checked file/directory/symlink -1ns,
+negative fractions, whole seconds, i64 MIN/MAX and nonnegative times without
+changing the original plan. Eager restore still refuses readiness when its
+actual filesystem clamps unsupported timestamps.

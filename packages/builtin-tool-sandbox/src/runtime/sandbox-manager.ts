@@ -519,6 +519,7 @@ export class SandboxManager {
         proof.supervisorNonce !== identity.supervisorNonce ||
         proof.allWritersStopped !== true ||
         proof.kernelEnforced !== true ||
+        proof.kernelIoQuiescent !== true ||
         proof.mechanism !== identity.stableFreeze.mechanism
       ) {
         throw new Error(
@@ -741,10 +742,11 @@ export class SandboxManager {
     if (
       identity.stableFreeze?.available !== true ||
       identity.stableFreeze.mechanism !== "cgroup-v2-freezer" ||
-      identity.stableFreeze.kernelEnforced !== true
+      identity.stableFreeze.kernelEnforced !== true ||
+      identity.stableFreeze.kernelIoQuiescence !== "qualified"
     ) {
       throw new Error(
-        "SANDBOX_VOLUME_STABLE_FREEZE_UNAVAILABLE: a verified kernel-enforced freeze is required before attachment or durable execution; signal pause is diagnostic only.",
+        "SANDBOX_VOLUME_STABLE_FREEZE_UNAVAILABLE: a verified workspace barrier covering pending kernel I/O is required before attachment or durable execution; diagnostic signal/cgroup pauses do not qualify.",
       );
     }
   }

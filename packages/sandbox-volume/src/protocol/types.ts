@@ -78,10 +78,33 @@ export type SlotSet = {
   packs: Record<string, string>;
   /** manifest seq (as a string) -> pre-signed PUT URL */
   manifests: Record<string, string>;
+  /** GET capabilities for exact-body comparison after an uncertain/412 manifest PUT. */
+  manifest_reads?: Record<string, string>;
 };
 
 /** The JSON the helper prints after `flush`. Only the fields the host reads are typed. */
+/** Persisted upload progress, not a manifest/commit receipt or durability acknowledgement.
+ * Caller output is untrusted until its actor scope and immutable object HEADs are checked.
+ */
+export type CaptureProgress = {
+  v: 1;
+  volume: string;
+  attachment: string;
+  boot_id: string;
+  epoch: number;
+  base_seq: number;
+  /** Next reserved pack number; it also includes old captures and unused reservation holes. */
+  next_pack: number;
+  uploaded_packs: number;
+  uploaded_chunks: number;
+  uploaded_raw_bytes: number;
+  receipt_digest: string;
+  /** Actual fsynced receipt numbers, last <=64, strictly increasing; no URLs. */
+  recent_uploaded_pack_numbers: number[];
+};
+
 export type FlushReport = {
+  capture_progress?: CaptureProgress;
   ok?: boolean;
   seq?: number;
   ms?: number;

@@ -1,4 +1,5 @@
 #![cfg(target_os = "linux")]
+mod cgroup;
 use anyhow::{bail, ensure, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -36,6 +37,10 @@ struct Identity {
     stable_freeze: bool,
     #[serde(default)]
     freeze_mechanism: String,
+    #[serde(default)]
+    user_threads_freeze: String,
+    #[serde(default)]
+    kernel_io_quiescence: String,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -51,6 +56,10 @@ struct Gate {
     recovery_ancestry: Vec<Identity>,
     #[serde(default)]
     last_resumed_freeze: Option<String>,
+    #[serde(default)]
+    freeze_kind: Option<String>,
+    #[serde(default)]
+    last_resumed_kind: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -85,6 +94,14 @@ enum Request {
     Freeze {
         expected_nonce: String,
         freeze_id: String,
+    },
+    PauseKernel {
+        expected_nonce: String,
+        pause_id: String,
+    },
+    Thaw {
+        expected_nonce: String,
+        pause_id: String,
     },
     Pause {
         expected_nonce: String,
@@ -136,6 +153,7 @@ struct Supervisor {
     workloads: HashMap<String, Workload>,
     recovered_executions: HashSet<String>,
     finished_executions: HashSet<String>,
+    freezer: Option<cgroup::Freezer>,
     _lease: File,
 }
 
@@ -261,6 +279,11 @@ impl Workload {
             exited(&self.init_fd, Duration::from_secs(30))?,
             "namespace termination is not yet confirmed"
         );
+        // The unshare launcher may itself be kernel-frozen. Once namespace
+        // teardown is proven, kill our owned launcher so wait cannot hang.
+        if self.child.try_wait()?.is_none() {
+            self.child.kill()?;
+        }
         self.child.wait()?;
         self.stopped = true;
         Ok(())
@@ -341,6 +364,7 @@ impl Supervisor {
         workspace: PathBuf,
         workload_uid: u32,
         control_uid: u32,
+        cgroup_parent: Option<PathBuf>,
     ) -> Result<Self> {
         ensure!(
             unsafe { libc::geteuid() } == 0,
@@ -362,9 +386,12 @@ impl Supervisor {
             unsafe { libc::flock(lease.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0,
             "another supervisor owns this state directory"
         );
-        let identity = Identity {
+        ensure!(cgroup_parent.is_some() || !state_dir.join("cgroup.json").exists(), "persisted kernel-freezer state requires the explicit original cgroup parent; refusing signal-only downgrade");
+        let mut identity = Identity {
             stable_freeze: false,
             freeze_mechanism: "signal-pause".into(),
+            user_threads_freeze: "signal-observation".into(),
+            kernel_io_quiescence: "unqualified".into(),
             boot_id: fs::read_to_string("/proc/sys/kernel/random/boot_id")?
                 .trim()
                 .into(),
@@ -409,6 +436,21 @@ impl Supervisor {
                     .map(str::to_owned)
             })
             .collect();
+        let freezer = cgroup_parent
+            .as_ref()
+            .map(|parent| {
+                cgroup::Freezer::setup(
+                    &state_dir,
+                    parent,
+                    &identity.boot_id,
+                    &identity.supervisor_nonce,
+                )
+            })
+            .transpose()?;
+        if freezer.is_some() {
+            identity.freeze_mechanism = "cgroup-v2-freezer".into();
+            identity.user_threads_freeze = "kernel-cgroup-v2".into();
+        }
         // Every restart begins closed. Neither daemon startup nor credential presence
         // authorizes restoring admission to a volume with unconfirmed dirty files.
         let gate = Gate {
@@ -420,6 +462,8 @@ impl Supervisor {
             recovered_journal_digest,
             recovery_ancestry,
             last_resumed_freeze: None,
+            freeze_kind: None,
+            last_resumed_kind: None,
         };
         atomic_json(&state_dir.join("gate.json"), &gate)?;
         Ok(Self {
@@ -431,6 +475,7 @@ impl Supervisor {
             workloads: HashMap::new(),
             recovered_executions,
             finished_executions: HashSet::new(),
+            freezer,
             _lease: lease,
         })
     }
@@ -474,6 +519,22 @@ impl Supervisor {
             .open(directory.join("init.log"))?;
         let executable = std::env::current_exe()?;
         let parent = unsafe { libc::getpid() };
+        let cgroup_leaf = self
+            .freezer
+            .as_ref()
+            .map(|freezer| freezer.leaf(&launch.execution_id))
+            .transpose()?;
+        // Open the root-owned migration file before fork. The fixed pre_exec
+        // write completes before unshare or any user-controlled program runs.
+        let mut cgroup_procs = cgroup_leaf
+            .as_ref()
+            .map(|leaf| {
+                OpenOptions::new()
+                    .write(true)
+                    .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+                    .open(leaf.join("cgroup.procs"))
+            })
+            .transpose()?;
         let mut command = Command::new("/usr/bin/unshare");
         command
             .args(["--pid", "--fork", "--mount-proc", "--kill-child=KILL"])
@@ -493,10 +554,23 @@ impl Supervisor {
                 if libc::getppid() != parent {
                     libc::_exit(125);
                 }
+                if let Some(file) = &mut cgroup_procs {
+                    file.write_all(b"0")?;
+                }
                 Ok(())
             });
         }
-        let mut child = command.spawn()?;
+        let mut child = match command.spawn() {
+            Ok(child) => child,
+            Err(error) => {
+                if let Some(freezer) = &self.freezer {
+                    freezer
+                        .reap(&launch.execution_id)
+                        .context("failed spawn left an unconfirmed cgroup leaf")?;
+                }
+                return Err(error.into());
+            }
+        };
         let deadline = Instant::now() + Duration::from_secs(10);
         let own_namespace = fs::read_link("/proc/self/ns/pid")?;
         let init_result = (|| -> Result<(OwnedFd, NamespaceJournal)> {
@@ -537,8 +611,15 @@ impl Supervisor {
         let (init_fd, journal) = match init_result {
             Ok(value) => value,
             Err(error) => {
-                child.kill()?;
+                if child.try_wait()?.is_none() {
+                    child.kill()?;
+                }
                 child.wait()?;
+                if let Some(freezer) = &self.freezer {
+                    freezer
+                        .reap(&launch.execution_id)
+                        .context("failed namespace startup left an unconfirmed cgroup leaf")?;
+                }
                 return Err(error);
             }
         };
@@ -586,6 +667,9 @@ impl Supervisor {
             }
         }
         for execution_id in finished {
+            if let Some(freezer) = &self.freezer {
+                freezer.reap(&execution_id)?;
+            }
             self.workloads.remove(&execution_id);
             self.finished_executions.insert(execution_id);
         }
@@ -624,6 +708,8 @@ impl Supervisor {
                 opened.recovered_journal_digest = None;
                 opened.recovery_ancestry.clear();
                 opened.last_resumed_freeze = None;
+                opened.last_resumed_kind = None;
+                opened.freeze_kind = None;
                 atomic_json(&self.state_dir.join("gate.json"), &opened)?;
                 self.gate = opened;
                 Ok(serde_json::json!({"open":true}))
@@ -749,7 +835,86 @@ impl Supervisor {
             } => {
                 self.expected(&expected_nonce)?;
                 ensure!(token(&freeze_id), "invalid freeze id");
-                bail!("STABLE_FREEZE_UNAVAILABLE: signal pause cannot prevent kernel SIGCONT; no persistence barrier was established")
+                if self.freezer.is_some() {
+                    bail!("KERNEL_IO_QUIESCENCE_UNQUALIFIED: cgroup user-thread pause does not drain accepted kernel AIO; no persistence barrier was established");
+                }
+                bail!("STABLE_FREEZE_UNAVAILABLE: signal pause cannot prevent kernel SIGCONT; no persistence barrier was established");
+            }
+            Request::PauseKernel {
+                expected_nonce,
+                pause_id: freeze_id,
+            } => {
+                self.expected(&expected_nonce)?;
+                ensure!(token(&freeze_id), "invalid pause id");
+                ensure!(
+                    self.freezer.is_some(),
+                    "KERNEL_PAUSE_UNAVAILABLE: an explicit cgroup parent is required"
+                );
+                ensure!(self.gate.drain_id.is_none(), "volume is draining");
+                ensure!(
+                    self.gate.last_resumed_freeze.as_ref() != Some(&freeze_id),
+                    "completed freeze identity cannot be reused"
+                );
+                ensure!(
+                    self.gate
+                        .freeze_id
+                        .as_ref()
+                        .is_none_or(|id| id == &freeze_id)
+                        && self
+                            .gate
+                            .freeze_kind
+                            .as_deref()
+                            .is_none_or(|kind| kind == "cgroup-v2-freezer"),
+                    "another pause or freeze owns admission"
+                );
+                self.gate.open = false;
+                self.gate.freeze_id = Some(freeze_id.clone());
+                self.gate.freeze_kind = Some("cgroup-v2-freezer".into());
+                self.persist_gate()?;
+                self.freezer
+                    .as_ref()
+                    .context("missing kernel freezer")?
+                    .freeze()?;
+                Ok(
+                    serde_json::json!({"pause_id":freeze_id,"supervisor_nonce":self.gate.identity.supervisor_nonce,"user_threads_frozen":true,"diagnostic_only":true,"kernel_io_quiescence":"unqualified","mechanism":"cgroup-v2-freezer"}),
+                )
+            }
+            Request::Thaw {
+                expected_nonce,
+                pause_id: freeze_id,
+            } => {
+                self.expected(&expected_nonce)?;
+                if self.gate.open
+                    && self.gate.freeze_id.is_none()
+                    && self.gate.drain_id.is_none()
+                    && self.gate.last_resumed_freeze.as_ref() == Some(&freeze_id)
+                    && self.gate.last_resumed_kind.as_deref() == Some("cgroup-v2-freezer")
+                {
+                    return Ok(
+                        serde_json::json!({"pause_id":freeze_id,"user_threads_resumed":true,"diagnostic_only":true,"kernel_io_quiescence":"unqualified"}),
+                    );
+                }
+                ensure!(
+                    self.gate.freeze_id.as_ref() == Some(&freeze_id)
+                        && self.gate.freeze_kind.as_deref() == Some("cgroup-v2-freezer")
+                        && self.gate.drain_id.is_none(),
+                    "kernel freeze fence does not match"
+                );
+                self.freezer
+                    .as_ref()
+                    .context("STABLE_FREEZE_UNAVAILABLE")?
+                    .thaw()?;
+                let mut opened = self.gate.clone();
+                opened.open = true;
+                opened.freeze_id = None;
+                opened.freeze_kind = None;
+                opened.last_resumed_freeze = Some(freeze_id.clone());
+                opened.last_resumed_kind = Some("cgroup-v2-freezer".into());
+                atomic_json(&self.state_dir.join("gate.json"), &opened)?;
+                self.gate = opened;
+                Ok(
+                    serde_json::json!({"pause_id":freeze_id,"user_threads_resumed":true,"diagnostic_only":true,"kernel_io_quiescence":"unqualified"}),
+                )
             }
             Request::Pause {
                 expected_nonce,
@@ -770,7 +935,15 @@ impl Supervisor {
                     "another barrier owns the freeze"
                 );
                 self.gate.open = false;
+                ensure!(
+                    self.gate
+                        .freeze_kind
+                        .as_deref()
+                        .is_none_or(|kind| kind == "signal-pause"),
+                    "kernel freeze requires thaw, not diagnostic resume"
+                );
                 self.gate.freeze_id = Some(freeze_id.clone());
+                self.gate.freeze_kind = Some("signal-pause".into());
                 self.persist_gate()?;
                 for work in self.workloads.values() {
                     if !exited(&work.init_fd, Duration::ZERO)? {
@@ -798,11 +971,16 @@ impl Supervisor {
                     && self.gate.freeze_id.is_none()
                     && self.gate.drain_id.is_none()
                     && self.gate.last_resumed_freeze.as_ref() == Some(&freeze_id)
+                    && self.gate.last_resumed_kind.as_deref() == Some("signal-pause")
                 {
                     return Ok(
                         serde_json::json!({"pause_id":freeze_id,"resumed":true,"signal_pause":true}),
                     );
                 }
+                ensure!(
+                    self.gate.freeze_kind.as_deref() == Some("signal-pause"),
+                    "diagnostic resume cannot thaw a kernel freeze"
+                );
                 ensure!(
                     self.gate.freeze_id.as_ref() == Some(&freeze_id),
                     "freeze fence does not match"
@@ -825,6 +1003,8 @@ impl Supervisor {
                 opened.open = true;
                 opened.freeze_id = None;
                 opened.last_resumed_freeze = Some(freeze_id.clone());
+                opened.last_resumed_kind = Some("signal-pause".into());
+                opened.freeze_kind = None;
                 atomic_json(&self.state_dir.join("gate.json"), &opened)?;
                 self.gate = opened;
                 Ok(serde_json::json!({"pause_id":freeze_id,"resumed":true,"signal_pause":true}))
@@ -842,6 +1022,7 @@ impl Supervisor {
                 self.gate.open = false;
                 self.gate.drain_id = Some(drain_id.clone());
                 self.gate.freeze_id = None;
+                self.gate.freeze_kind = None;
                 self.persist_gate()?;
                 for work in self.workloads.values() {
                     signal_pidfd(&work.init_fd, libc::SIGKILL)?;
@@ -849,6 +1030,10 @@ impl Supervisor {
                 for work in self.workloads.values_mut() {
                     work.stop()?;
                 }
+                if let Some(freezer) = &self.freezer {
+                    freezer.thaw()?;
+                }
+                self.reap_finished()?;
                 Ok(
                     serde_json::json!({"drain_id":drain_id,"identity":self.gate.identity,"launch_gate_closed":true,"all_namespaces_exited":true,"recovered_from":self.gate.recovered_from,"journal_digest":self.gate.recovered_journal_digest,"recovery_ancestry":self.gate.recovery_ancestry}),
                 )
@@ -1268,7 +1453,7 @@ fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
         Some("version") => println!("swvol-supervisor {VERSION}"),
-        Some("serve") if args.len()==7 => serve(Path::new(&args[2]), Supervisor::new(PathBuf::from(&args[3]), PathBuf::from(&args[4]), args[5].parse()?, args[6].parse()?)?)?,
+        Some("serve") if args.len()==7 || (args.len()==9 && args[7]=="--cgroup-parent") => serve(Path::new(&args[2]), Supervisor::new(PathBuf::from(&args[3]), PathBuf::from(&args[4]), args[5].parse()?, args[6].parse()?, if args.len()==9{Some(PathBuf::from(&args[8]))}else{None})?)?,
         Some("init-child") if args.len()==5 => init_child(Path::new(&args[2]), args[3].parse()?, Path::new(&args[4]))?,
         Some("request") if args.len()==3 => {
             let mut request = Vec::new();
@@ -1282,7 +1467,7 @@ fn main() -> Result<()> {
             ensure!(!response.is_empty(),"supervisor closed the control channel without a result");
             print!("{response}");
         }
-        _ => bail!("usage: swvol-supervisor version | serve SOCKET STATE_DIR WORKSPACE WORKLOAD_UID CONTROL_UID | request SOCKET | init-child STATE_DIR UID WORKSPACE"),
+        _ => bail!("usage: swvol-supervisor version | serve SOCKET STATE_DIR WORKSPACE WORKLOAD_UID CONTROL_UID [--cgroup-parent PATH] | request SOCKET | init-child STATE_DIR UID WORKSPACE"),
     }
     Ok(())
 }

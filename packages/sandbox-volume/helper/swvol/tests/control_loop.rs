@@ -43,7 +43,7 @@ fn serve(mut stream: TcpStream, url: &str, token: &str, objects: &Arc<Mutex<BTre
         let manifests: BTreeMap<_, _> = (1..=8).map(|seq| (seq.to_string(), format!("{url}/att/a/m/1/{seq}"))).collect();
         let head = objects.lock().unwrap().keys().filter_map(|key| key.strip_prefix("/att/a/m/1/")?.parse::<u64>().ok()).max().unwrap_or(0);
         let body = json!({"head":head,"confirmedSeq":head.min(request["seq"].as_u64().unwrap()),"epoch":1,"hasMore":false,
-            "slots":{"volume":"v","attachment":"a","pack_prefix":"att/a/p/","manifest_prefix":"att/a/m/1/","packs":packs,"manifests":manifests},
+            "slots":{"volume":"v","attachment":"a","pack_prefix":"att/a/p/","manifest_prefix":"att/a/m/1/","packs":packs,"manifests":manifests,"manifest_reads":manifests},
             "slotsExpiresAt":"2030-01-01T00:00:00Z","controlExpiresAt":"2030-01-01T00:00:00Z","locators":{"chunks":{},"packs":{}}});
         (200, serde_json::to_vec(&body).unwrap())
     } else if method == "PUT" {

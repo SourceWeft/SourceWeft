@@ -25,10 +25,11 @@ background descendants exist. Normal command completion therefore preserves
 background services; explicit cancellation terminates namespace PID 1 and waits
 for kernel-confirmed exit, including detached descendants.
 
-`freeze` always returns `STABLE_FREEZE_UNAVAILABLE`. Identity declares
-`stable_freeze: false` and `freeze_mechanism: "signal-pause"`. This release has no
-kernel-enforced stable freeze capability and must not enable production volume
-attachment or durable operations.
+`freeze` is unavailable in every mode: default signal mode returns
+`STABLE_FREEZE_UNAVAILABLE`, and explicit cgroup mode returns
+`KERNEL_IO_QUIESCENCE_UNQUALIFIED`. Identity declares
+`stable_freeze: false` and `freeze_mechanism: "signal-pause"`. Production volume attachment and durable operations remain disabled: no shipped
+provider has passed the protected adapter and kernel-freezer qualification.
 
 `pause` is an explicit diagnostic signal operation. It reports only
 `observed_stopped: true`, `signal_pause: true`, and `stable_freeze: false`;
@@ -74,7 +75,8 @@ reading them never starts a command. Retrying the last successful resume is
 idempotent, while reusing a completed pause identity is rejected.
 
 Operations are `identity`, `open`,
-`start`, `status`, `cancel`, `freeze` (unavailable), `pause`, `resume`, and `drain`. Mutating requests require
+`start`, `status`, `cancel`, `freeze` (unavailable), diagnostic `pause`, `pause_kernel`,
+`resume`, `thaw`, and `drain`. Mutating requests require
 the current supervisor nonce. `start` requires a host-issued execution ID and never
 replays an existing ID. Control operations are not model tools and must never be
 exposed through an unauthenticated container endpoint.
@@ -118,3 +120,64 @@ fork/thread fixture itself is capped at four child processes, three writer threa
 per child, and ten seconds. It uses the pinned builder's matching musl cross-linker.
 
 Completed PID namespaces are collected on control requests: the controller waits for pidfd-confirmed namespace teardown, reaps the launcher, and releases kernel handles. Main-command completion with live background writers does not permit collection. Root-owned result journals and execution-ID replay fences remain intact. Linux regression coverage runs 600 sequential commands under a 256-FD supervisor limit and a 512-process container limit.
+
+## Explicit kernel-freezer experiment (provider qualification pending)
+
+An administrative test may start `serve ... --cgroup-parent CANONICAL_PARENT`.
+Startup requires a real cgroup-v2 filesystem, root-owned controls, and the actual
+controller PID in that parent. A private journal binds a unique owned subtree to
+boot/controller identity. The controller stays outside; launchers enter per-command
+leaves before unshare or user execution, and unprivileged workloads cannot migrate
+out. The default mode remains unchanged and cannot acknowledge Freeze.
+
+In explicit mode, diagnostic `pause_kernel(pause_id)` closes admission and waits
+up to five seconds for the kernel's hierarchical cgroup.events frozen observation.
+It reports only `user_threads_frozen: true`, `diagnostic_only: true`, and
+`kernel_io_quiescence: unqualified`, never all_writers_stopped or a durable barrier
+proof. Diagnostic `thaw(pause_id)` resumes that subtree; signal `resume(pause_id)`
+cannot thaw a kernel pause. Identity always declares stable_freeze=false, separately
+reporting the user_threads_freeze mechanism and unqualified kernel I/O state.
+Namespace cancellation/drain still prove init exit and reap frozen launchers.
+Completed leaves and empty journal-owned trees are reclaimed without deleting
+result journals or user files. Invalid delegation, unexpected live recovery
+processes, and incomplete kernel observations fail closed.
+
+A real native-AIO counterexample submitted 64 successful O_DIRECT writes to a
+preallocated private 256 MiB file. At cgroup frozen acknowledgement, zero had
+completed; 350 ms later all 64 had completed while frozen remained 1. io_getevents
+verified every write's byte count. Freezing user threads therefore does not prove
+pending kernel I/O is drained. Earlier local pre-AIO KernelTrue bundles must not
+be activated. No syscall is silently disabled, and termination is not substituted
+for a live workspace barrier.
+
+These local kernel tests do not establish a production provider capability. The
+stock root command/file API must not bypass the workload boundary, and pending
+asynchronous kernel I/O still needs qualification. Only a complete provider image,
+protected adapter, and real cloud acceptance may enable durable execution.
+
+Current local acceptance includes 22 isolated Linux regression cases with pids-limit 512 and
+768 MiB memory, including the opt-in kernel path and the default rejection path.
+This is local Linux evidence only. Both original cloud provider images currently
+lack delegation for their nonroot SDK execution identity; the independent root
+Cloudflare image has not yet qualified. A user-thread freezer is not an external
+persistence receipt and does not by itself prove that already-submitted kernel
+AIO/io_uring work has completed. That requires a separate kernel-I/O probe and
+quiescence design before the protected provider adapter can be activated.
+
+
+The native-AIO regression must run the supervisor and syscall workload on the
+builder's native architecture. On an ARM host, the pinned aarch64 builder exercises
+real kernel AIO; x86 workload execution through QEMU can return ENOSYS, and an
+emulated supervisor can add enough control latency to drain the pending window
+before its acknowledgement. Such runs are explicitly inconclusive, not passes.
+That case uses an 8 MiB private tmpfs for the root-owned control journal so its
+fsync cannot incidentally synchronize the workload filesystem. The other lifecycle
+cases retain their disk-backed state. The test verifies both actual successful
+AIO completions after diagnostic pause and unconditional production Freeze refusal.
+
+The reproducible `../test-linux.sh --with-fuse` entry explicitly runs the other
+21 namespace/security cases with the pinned x86_64 target, then requires the AIO
+case on an ARM64 Docker host using the pinned aarch64 builder. Both the supervisor
+and C syscall fixture use aarch64 musl; no GNU fixture or QEMU syscall substitute
+qualifies this phase. Unsupported host architecture fails rather than skips it.
+The CI job preserves its 35-minute budget and runs no manual gigabyte benchmarks.

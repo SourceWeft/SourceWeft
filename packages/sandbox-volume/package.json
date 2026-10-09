@@ -28,6 +28,7 @@
     "pg": "^8.23.0",
     "@types/pg": "^8.21.0",
     "@sourceweft/sandbox-provider-cloudflare": "workspace:*",
-    "@sourceweft/builtin-tool-sandbox": "workspace:*"
+    "@sourceweft/builtin-tool-sandbox": "workspace:*",
+    "@noble/hashes": "2.3.0"
   }
 }

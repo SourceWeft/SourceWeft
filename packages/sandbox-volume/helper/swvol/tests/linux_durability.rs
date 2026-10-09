@@ -34,7 +34,7 @@ impl Storage {
     fn grant(&self, root: &PathBuf, enabled: bool) {
         let packs: BTreeMap<_, _> = (0..64).filter(|_| enabled).map(|n| (n.to_string(), format!("{}/att/a/p/{n:06}", self.url))).collect();
         let manifests: BTreeMap<_, _> = (1..65).filter(|_| enabled).map(|n| (n.to_string(), format!("{}/att/a/m/1/{n}", self.url))).collect();
-        let bytes = serde_json::to_vec(&json!({"volume":"v","attachment":"a","pack_prefix":"att/a/p/","manifest_prefix":"att/a/m/1/","packs":packs,"manifests":manifests})).unwrap();
+        let bytes = serde_json::to_vec(&json!({"volume":"v","attachment":"a","pack_prefix":"att/a/p/","manifest_prefix":"att/a/m/1/","packs":packs,"manifests":manifests,"manifest_reads":manifests})).unwrap();
         let tmp = root.join(".sourceweft/slots.new");
         fs::write(&tmp, bytes).unwrap();
         fs::rename(tmp, root.join(".sourceweft/slots.json")).unwrap();
@@ -51,23 +51,26 @@ impl Drop for Storage { fn drop(&mut self) { self.stop.store(true, Ordering::Rel
 fn serve(mut stream: TcpStream, objects: &Objects) {
     stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
     let mut reader = BufReader::new(stream.try_clone().unwrap());
-    let mut first = String::new(); reader.read_line(&mut first).unwrap();
+    let mut first = String::new();
+    match reader.read_line(&mut first) { Ok(0) => return, Ok(_) => {}, Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => return, Err(error) => panic!("fixture request header: {error}") }
     let mut fields = first.split_whitespace();
     let method = fields.next().unwrap(); let path = fields.next().unwrap().to_owned();
     let mut length = 0;
     loop {
-        let mut line = String::new(); reader.read_line(&mut line).unwrap();
+        let mut line = String::new();
+        match reader.read_line(&mut line) { Ok(0) => return, Ok(_) => {}, Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => return, Err(error) => panic!("fixture request header: {error}") }
         if line == "\r\n" { break; }
         if let Some((key, value)) = line.split_once(':') { if key.eq_ignore_ascii_case("content-length") { length = value.trim().parse().unwrap(); } }
     }
-    let mut body = vec![0; length]; reader.read_exact(&mut body).unwrap();
+    let mut body = vec![0; length];
+    if let Err(error) = reader.read_exact(&mut body) { assert!(matches!(error.kind(), std::io::ErrorKind::UnexpectedEof | std::io::ErrorKind::ConnectionReset), "fixture body read: {error}"); return; }
     let mut map = objects.lock().unwrap();
     let (status, reply) = if method == "PUT" {
         if map.contains_key(&path) { (412, Vec::new()) }
         else { map.insert(path, body); (201, Vec::new()) }
     } else { match map.get(&path) { Some(data) => (200, data.clone()), None => (404, Vec::new()) } };
-    write!(stream, "HTTP/1.1 {status} Fixture\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", reply.len()).unwrap();
-    stream.write_all(&reply).unwrap();
+    let sent = (|| -> std::io::Result<()> { write!(stream, "HTTP/1.1 {status} Fixture\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", reply.len())?; stream.write_all(&reply) })();
+    if let Err(error) = sent { assert!(matches!(error.kind(), std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::ConnectionReset), "fixture response: {error}"); }
 }
 struct Fixture { root: PathBuf, restored: PathBuf, daemon: Option<Child> }
 impl Fixture {
@@ -157,17 +160,22 @@ fn changed_epoch_requires_explicit_rebase_and_archives_crashed_pending() {
     let crashed = Command::new(env!("CARGO_BIN_EXE_swvol")).args(["flush", "--root"]).arg(&f.root).env("SWVOL_FAULT", "before_manifest_put").output().unwrap();
     assert_eq!(crashed.status.code(), Some(137));
     let original = fs::read(f.root.join(".sourceweft/pending.manifest")).unwrap();
+    let original_capture_scope = fs::read(f.root.join(".sourceweft/capture/scope.json")).unwrap();
     let slot_path = f.root.join(".sourceweft/slots.json");
     let mut grant: Value = serde_json::from_slice(&fs::read(&slot_path).unwrap()).unwrap();
     grant["manifest_prefix"] = "att/a/m/2/".into();
     for (seq, url) in grant["manifests"].as_object_mut().unwrap() { *url = format!("{}/att/a/m/2/{seq}", storage.url).into(); }
+    for (seq, url) in grant["manifest_reads"].as_object_mut().unwrap() { *url = format!("{}/att/a/m/2/{seq}", storage.url).into(); }
     fs::write(slot_path, serde_json::to_vec(&grant).unwrap()).unwrap();
     let denied = f.run(&["flush"]); assert!(!denied.status.success());
     assert!(String::from_utf8_lossy(&denied.stdout).contains("PENDING_EPOCH_MISMATCH"));
     assert!(storage.objects.lock().unwrap().is_empty(), "old pending must not reach the new epoch");
     let rebased = f.run(&["flush", "--rebase", "0"]); assert!(rebased.status.success(), "{}", String::from_utf8_lossy(&rebased.stdout));
-    let archive = fs::read_dir(f.root.join(".sourceweft/recovery")).unwrap().next().unwrap().unwrap().path();
-    assert_eq!(fs::read(archive).unwrap(), original);
+    let archives: Vec<_> = fs::read_dir(f.root.join(".sourceweft/recovery")).unwrap().map(|entry| entry.unwrap().path()).collect();
+    let pending: Vec<_> = archives.iter().filter(|path| path.is_file() && path.file_name().unwrap().to_str().unwrap().starts_with("pending-")).collect();
+    assert_eq!(pending.len(), 1); assert_eq!(fs::read(pending[0]).unwrap(), original);
+    let captures: Vec<_> = archives.iter().filter(|path| path.is_dir() && path.file_name().unwrap().to_str().unwrap().starts_with("capture-rebase-")).collect();
+    assert_eq!(captures.len(), 1); assert_eq!(fs::read(captures[0].join("scope.json")).unwrap(), original_capture_scope);
     let manifests = storage.manifests(); assert_eq!(manifests.len(), 1); assert_eq!(manifests[0]["full"], true);
     assert!(storage.objects.lock().unwrap().contains_key("/att/a/m/2/1"));
 }
@@ -551,4 +559,168 @@ fn restore_refuses_ready_identity_for_unrepresentable_symlink_mode() {
     let error: Value = serde_json::from_slice(&output.stdout).unwrap(); assert!(error["error"].as_str().unwrap().contains("filesystem cannot preserve requested mode"), "{error}");
     assert!(!f.restored.join(".sourceweft/identity").exists()); assert!(!f.restored.join(".sourceweft/state.bin").exists());
     assert_eq!(fs::read_link(f.restored.join("link")).unwrap(), std::path::Path::new("untouched-target"));
+}
+
+fn receipt_fixture_data() -> Vec<u8> {
+    let mut seed=0x2280_0300u32;
+    (0..20*1024*1024).map(|_| { seed^=seed<<13; seed^=seed>>17; seed^=seed<<5; seed as u8 }).collect()
+}
+#[test]
+fn failed_pack_put_never_creates_a_reusable_receipt() {
+    let storage=Storage::new(); let f=Fixture::new(); storage.grant(&f.root,true);
+    storage.objects.lock().unwrap().insert("/att/a/p/000000".into(),b"occupied immutable object".to_vec());
+    fs::write(f.root.join("data"),receipt_fixture_data()).unwrap();
+    let before=fs::read(f.root.join(".sourceweft/state.bin")).unwrap();
+    let output=f.run(&["flush","--full"]); assert_eq!(output.status.code(),Some(1));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("PACK_SLOT_TAKEN"));
+    assert!(!f.root.join(".sourceweft/capture/pack-000000.json").exists());
+    assert_eq!(fs::read(f.root.join(".sourceweft/state.bin")).unwrap(),before);
+    assert_eq!(f.flush()["committed"],true);
+    for manifest in storage.manifests() { for loc in manifest["chunks"].as_object().unwrap().values() { assert_ne!(loc[0],"att/a/p/000000"); } }
+    assert_eq!(storage.objects.lock().unwrap()["/att/a/p/000000"],b"occupied immutable object");
+}
+#[test]
+fn uploaded_receipts_survive_process_crash_before_any_manifest() {
+    let storage=Storage::new(); let f=Fixture::new(); storage.grant(&f.root,true);
+    fs::write(f.root.join("data"),receipt_fixture_data()).unwrap();
+    let before=fs::read(f.root.join(".sourceweft/state.bin")).unwrap();
+    let output=Command::new(env!("CARGO_BIN_EXE_swvol")).args(["flush","--full","--root"]).arg(&f.root).env("SWVOL_FAULT","after_capture_receipt").output().unwrap();
+    assert_eq!(output.status.code(),Some(137)); assert!(String::from_utf8_lossy(&output.stderr).contains("injected fault at after_capture_receipt"));
+    assert!(storage.manifests().is_empty()); assert_eq!(fs::read(f.root.join(".sourceweft/state.bin")).unwrap(),before);
+    let mut recorded=BTreeMap::new();
+    for entry in fs::read_dir(f.root.join(".sourceweft/capture")).unwrap() {
+        let entry=entry.unwrap(); if !entry.file_name().to_str().unwrap().starts_with("pack-") {continue;}
+        let value:Value=serde_json::from_slice(&fs::read(entry.path()).unwrap()).unwrap();
+        for (id,loc) in value["body"]["chunks"].as_object().unwrap() {recorded.insert(id.clone(),loc.clone());}
+    }
+    assert!(!recorded.is_empty()); assert_eq!(f.flush()["committed"],true);
+    let manifests=storage.manifests(); assert_eq!(manifests.len(),1);
+    for (id,loc) in recorded {assert_eq!(manifests[0]["chunks"][&id],loc,"durable receipt must be reused, not reuploaded to another key");}
+    assert!(!f.root.join(".sourceweft/capture").exists());
+}
+
+#[test]
+fn conflicting_manifest_recovery_never_confirms_different_local_bytes() {
+    let storage=Storage::new(); let first=Fixture::new(); storage.grant(&first.root,true);
+    fs::write(first.root.join("data"),"remote version A").unwrap(); assert_eq!(first.flush()["seq"],1);
+    let remote=storage.objects.lock().unwrap()["/att/a/m/1/1"].clone();
+    let second=Fixture::new(); storage.grant(&second.root,true);
+    fs::write(second.root.join("data"),"unconfirmed local version B").unwrap();
+    let before=fs::read(second.root.join(".sourceweft/state.bin")).unwrap();
+    let rejected=second.run(&["flush","--full"]); assert!(!rejected.status.success());
+    assert!(String::from_utf8_lossy(&rejected.stdout).contains("MANIFEST_SLOT_TAKEN"));
+    let pending=fs::read(second.root.join(".sourceweft/pending.manifest")).unwrap();
+    let recovered=second.run(&["flush","--full"]);
+    assert!(!recovered.status.success(),"different bytes must never become locally confirmed merely because PUT returns 412: {}",String::from_utf8_lossy(&recovered.stdout));
+    assert_eq!(fs::read(second.root.join(".sourceweft/state.bin")).unwrap(),before);
+    assert_eq!(fs::read(second.root.join(".sourceweft/pending.manifest")).unwrap(),pending);
+    assert_eq!(storage.objects.lock().unwrap()["/att/a/m/1/1"],remote);
+    assert_eq!(fs::read_to_string(second.root.join("data")).unwrap(),"unconfirmed local version B");
+}
+
+#[test]
+fn pending_recovery_matches_existing_bytes_with_only_a_read_slot() {
+    let storage=Storage::new(); let f=Fixture::new(); storage.grant(&f.root,true); fs::write(f.root.join("data"),"lost acknowledgement").unwrap();
+    let crashed=Command::new(env!("CARGO_BIN_EXE_swvol")).args(["flush","--root"]).arg(&f.root).env("SWVOL_FAULT","after_manifest_put").output().unwrap(); assert_eq!(crashed.status.code(),Some(137));
+    let path=f.root.join(".sourceweft/slots.json"); let mut slots:Value=serde_json::from_slice(&fs::read(&path).unwrap()).unwrap(); slots["manifests"].as_object_mut().unwrap().remove("1"); fs::write(&path,serde_json::to_vec(&slots).unwrap()).unwrap();
+    assert_eq!(f.flush()["seq"],1); assert!(!f.root.join(".sourceweft/pending.manifest").exists()); assert_eq!(storage.manifests().len(),1);
+}
+#[test]
+fn pending_verification_missing_read_slot_stays_unconfirmed_without_empty_progress() {
+    let storage=Storage::new(); let f=Fixture::new(); storage.grant(&f.root,true); fs::write(f.root.join("data"),"lost acknowledgement").unwrap();
+    let crashed=Command::new(env!("CARGO_BIN_EXE_swvol")).args(["flush","--root"]).arg(&f.root).env("SWVOL_FAULT","after_manifest_put").output().unwrap(); assert_eq!(crashed.status.code(),Some(137));
+    let before=fs::read(f.root.join(".sourceweft/state.bin")).unwrap(); let pending=fs::read(f.root.join(".sourceweft/pending.manifest")).unwrap();
+    let path=f.root.join(".sourceweft/slots.json"); let mut slots:Value=serde_json::from_slice(&fs::read(&path).unwrap()).unwrap(); slots.as_object_mut().unwrap().remove("manifest_reads"); fs::write(&path,serde_json::to_vec(&slots).unwrap()).unwrap();
+    let result=f.run(&["flush"]); assert_eq!(result.status.code(),Some(76)); let report:Value=serde_json::from_slice(&result.stdout).unwrap(); assert!(report.get("capture_progress").is_none(),"zero uploaded packs must use the bounded legacy renewal path");
+    assert_eq!(fs::read(f.root.join(".sourceweft/state.bin")).unwrap(),before); assert_eq!(fs::read(f.root.join(".sourceweft/pending.manifest")).unwrap(),pending);
+    storage.grant(&f.root,true); assert_eq!(f.flush()["seq"],1);
+}
+#[test]
+fn manifest_get_oversize_short_different_and_network_failures_never_confirm() {
+    for mode in ["oversize","short","different","not-found","http-error","transport"] {
+        let storage=Storage::new(); let f=Fixture::new(); storage.grant(&f.root,true); fs::write(f.root.join("data"),"bounded manifest verification").unwrap();
+        let crashed=Command::new(env!("CARGO_BIN_EXE_swvol")).args(["flush","--root"]).arg(&f.root).env("SWVOL_FAULT","after_manifest_put").output().unwrap(); assert_eq!(crashed.status.code(),Some(137));
+        let original=storage.objects.lock().unwrap()["/att/a/m/1/1"].clone(); let before=fs::read(f.root.join(".sourceweft/state.bin")).unwrap(); let pending=fs::read(f.root.join(".sourceweft/pending.manifest")).unwrap();
+        let listener=TcpListener::bind("127.0.0.1:0").unwrap(); listener.set_nonblocking(true).unwrap(); let url=format!("http://{}/read",listener.local_addr().unwrap());
+        let server=std::thread::spawn(move||{
+            let deadline=Instant::now()+Duration::from_secs(5);
+            let mut stream=loop{match listener.accept(){Ok((stream,_))=>break stream,Err(error)if error.kind()==std::io::ErrorKind::WouldBlock=>{assert!(Instant::now()<deadline,"GET proof was not requested");std::thread::sleep(Duration::from_millis(5));},Err(error)=>panic!("GET proof fixture: {error}")}};
+            stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap(); let mut request=BufReader::new(stream.try_clone().unwrap()); let mut line=String::new();request.read_line(&mut line).unwrap();assert!(line.starts_with("GET /read "));
+            loop{line.clear();request.read_line(&mut line).unwrap();if line=="\r\n"{break;}}
+            let result=(||->std::io::Result<()>{
+                match mode {
+                    "oversize"=>{write!(stream,"HTTP/1.1 200 Fixture\r\nConnection: close\r\n\r\n")?;stream.write_all(&original)?;stream.write_all(&vec![0u8;1024*1024])?;},
+                    "short"=>{write!(stream,"HTTP/1.1 200 Fixture\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",original.len())?;stream.write_all(&original[..original.len()/2])?;},
+                    "different"=>{let mut changed=original.clone();changed[0]^=1;write!(stream,"HTTP/1.1 200 Fixture\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",changed.len())?;stream.write_all(&changed)?;},
+                    "not-found"=>{write!(stream,"HTTP/1.1 404 Fixture\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")?;},
+                    "http-error"=>{write!(stream,"HTTP/1.1 503 Fixture\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")?;},
+                    "transport"=>{}, _=>unreachable!()
+                }Ok(())})();
+            if let Err(error)=result{assert!(matches!(error.kind(),std::io::ErrorKind::BrokenPipe|std::io::ErrorKind::ConnectionReset),"{error}");}
+        });
+        let path=f.root.join(".sourceweft/slots.json");let mut slots:Value=serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();slots["manifest_reads"]["1"]=url.into();fs::write(path,serde_json::to_vec(&slots).unwrap()).unwrap();
+        let response=f.run(&["flush"]);server.join().unwrap();assert!(!response.status.success(),"{mode} GET incorrectly confirmed: {}",String::from_utf8_lossy(&response.stdout));
+        assert_eq!(fs::read(f.root.join(".sourceweft/state.bin")).unwrap(),before);assert_eq!(fs::read(f.root.join(".sourceweft/pending.manifest")).unwrap(),pending);assert_eq!(fs::read_to_string(f.root.join("data")).unwrap(),"bounded manifest verification");
+    }
+}
+
+#[test]
+fn nonempty_capture_missing_manifest_read_uses_ordinary_renewal_after_remote_head_advances() {
+    let storage=Storage::new(); let f=Fixture::new(); storage.grant(&f.root,true);
+    let data=receipt_fixture_data(); fs::write(f.root.join("data"),&data).unwrap();
+    let crashed=Command::new(env!("CARGO_BIN_EXE_swvol")).args(["flush","--full","--root"]).arg(&f.root).env("SWVOL_FAULT","after_manifest_put").output().unwrap();
+    assert_eq!(crashed.status.code(),Some(137));
+    assert!(f.root.join(".sourceweft/capture/pack-000000.json").exists());
+    let before=fs::read(f.root.join(".sourceweft/state.bin")).unwrap(); let pending=fs::read(f.root.join(".sourceweft/pending.manifest")).unwrap();
+    let remote=storage.objects.lock().unwrap().clone();
+    let path=f.root.join(".sourceweft/slots.json"); let mut slots:Value=serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    // The host has applied seq 1: new writes begin at 2, but the first refreshed
+    // grant is missing the separately signed head-1 GET authorization.
+    slots["manifests"].as_object_mut().unwrap().remove("1"); slots.as_object_mut().unwrap().remove("manifest_reads");
+    fs::write(&path,serde_json::to_vec(&slots).unwrap()).unwrap();
+    let result=f.run(&["flush"]); assert_eq!(result.status.code(),Some(76));
+    let report:Value=serde_json::from_slice(&result.stdout).unwrap();
+    assert!(report.get("capture_progress").is_none(),"manifest authorization renewal must not advertise stale base-0 upload progress after the host applies seq 1: {report}");
+    assert_eq!(fs::read(f.root.join(".sourceweft/state.bin")).unwrap(),before); assert_eq!(fs::read(f.root.join(".sourceweft/pending.manifest")).unwrap(),pending);
+    // Ordinary bounded renewal supplies GET for head 1; never reissues its PUT.
+    slots["manifest_reads"]=json!({"1":format!("{}/att/a/m/1/1",storage.url)});
+    fs::write(&path,serde_json::to_vec(&slots).unwrap()).unwrap();
+    assert_eq!(f.flush()["seq"],1); assert!(!f.root.join(".sourceweft/pending.manifest").exists());
+    assert_eq!(*storage.objects.lock().unwrap(),remote,"proof-only recovery must not reupload packs or a new manifest");
+    assert_eq!(fs::read(f.root.join("data")).unwrap(),data);
+}
+
+#[test]
+fn rebase_state_save_failure_then_pending_recovery_drops_unregistered_inline_locations() {
+    let storage=Storage::new(); let f=Fixture::new(); storage.grant(&f.root,true);
+    for n in 1..=9 { fs::write(f.root.join("marker"),format!("original marker {n}")).unwrap(); assert_eq!(f.flush()["seq"],n); }
+    let victim=b"only present in the rejected old epoch sequence ten";
+    fs::write(f.root.join("victim"),victim).unwrap(); assert_eq!(f.flush()["seq"],10);
+    let rejected=storage.manifests().into_iter().find(|m|m["seq"]==10).unwrap();
+    let id=rejected["upserts"].as_array().unwrap().iter().find(|e|e["p"]=="victim").unwrap()["c"][0][0].as_str().unwrap().to_owned();
+    assert!(rejected["chunks"].get(&id).is_some());
+    fs::remove_file(f.root.join("victim")).unwrap();
+    let path=f.root.join(".sourceweft/slots.json"); let mut slots:Value=serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    slots["manifest_prefix"]="att/a/m/2/".into();
+    for field in ["manifests","manifest_reads"] { for (n,url) in slots[field].as_object_mut().unwrap(){*url=format!("{}/att/a/m/2/{n}",storage.url).into();} }
+    fs::write(&path,serde_json::to_vec(&slots).unwrap()).unwrap();
+    let before=fs::read(f.root.join(".sourceweft/state.bin")).unwrap();
+    // A real filesystem publication failure occurs after the new manifest PUT.
+    let obstruction=f.root.join(".sourceweft/state.tmp"); fs::create_dir(&obstruction).unwrap();
+    let failed=f.run(&["flush","--rebase","3"]); assert!(!failed.status.success());
+    assert!(f.root.join(".sourceweft/pending.manifest").exists());
+    assert!(storage.objects.lock().unwrap().contains_key("/att/a/m/2/4"));
+    assert_eq!(fs::read(f.root.join(".sourceweft/state.bin")).unwrap(),before);
+    fs::remove_dir(obstruction).unwrap();
+    assert_eq!(f.flush()["seq"],4,"ordinary recovery must apply the durable rebase journal");
+    // Progress the accepted new epoch past the old sequence, so a later rebase
+    // cannot accidentally repair this by testing only numeric sequence > head.
+    for n in 5..=10 {fs::write(f.root.join("marker"),format!("accepted marker {n}")).unwrap();assert_eq!(f.flush()["seq"],n);}
+    fs::write(f.root.join("victim"),victim).unwrap(); assert_eq!(f.flush()["seq"],11);
+    let objects=storage.objects.lock().unwrap(); let body=&objects["/att/a/m/2/11"];
+    let offset=16+u64::from_le_bytes(body[8..16].try_into().unwrap())as usize;
+    let latest:Value=serde_json::from_slice(&zstd::stream::decode_all(&body[offset..]).unwrap()).unwrap();
+    assert!(latest["chunks"].get(&id).is_some(),"recreated content must publish a fresh registered location, not reuse rejected old-epoch inline bytes: {latest}");
+    assert_eq!(latest["chunks"][&id][0],"att/a/m/2/11");
+    assert_eq!(fs::read(f.root.join("victim")).unwrap(),victim);
 }

@@ -1,5 +1,6 @@
 mod eager;
 mod fuse;
+mod fuser_time;
 mod hydrate;
 mod notify;
 mod plan;

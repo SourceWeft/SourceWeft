@@ -131,6 +131,7 @@ function createProvider(
             available: true,
             mechanism: "cgroup-v2-freezer",
             kernelEnforced: true,
+            kernelIoQuiescence: "qualified",
           },
           bootId: "boot-1",
           supervisorNonce: "supervisor-1",
@@ -143,6 +144,7 @@ function createProvider(
           allWritersStopped: true,
           mechanism: "cgroup-v2-freezer",
           kernelEnforced: true,
+          kernelIoQuiescent: true,
         };
       },
       async resume() {},
@@ -825,6 +827,7 @@ function protectedVolumeOperationFixture() {
           available: true,
           mechanism: "cgroup-v2-freezer",
           kernelEnforced: true,
+          kernelIoQuiescence: "qualified",
         },
         bootId: "boot-1",
         supervisorNonce: "supervisor-1",
@@ -838,6 +841,7 @@ function protectedVolumeOperationFixture() {
         allWritersStopped: true,
         mechanism: "cgroup-v2-freezer",
         kernelEnforced: true,
+        kernelIoQuiescent: true,
       };
     },
     async resume() {
@@ -1200,8 +1204,20 @@ test("a shadow checkpoint is not promoted to confirmed by coordination recovery"
 for (const capability of [
   undefined,
   { available: false, mechanism: "signal-pause" },
+  {
+    available: false,
+    mechanism: "cgroup-v2-freezer",
+    kernelIoQuiescence: "unqualified",
+  },
   { available: true, mechanism: "signal-pause", kernelEnforced: true },
   { available: true, mechanism: "cgroup-v2-freezer", kernelEnforced: false },
+  { available: true, mechanism: "cgroup-v2-freezer", kernelEnforced: true },
+  {
+    available: true,
+    mechanism: "cgroup-v2-freezer",
+    kernelEnforced: true,
+    kernelIoQuiescence: "unqualified",
+  },
 ]) {
   test(`unverified stable freeze capability blocks attachment and dispatch: ${JSON.stringify(capability)}`, async () => {
     const { hooks, calls } = createHooks();
@@ -1338,3 +1354,40 @@ test("a verified freeze grant expires before resume can reopen writers", async (
     "release:persisted",
   ]);
 });
+
+for (const kernelIoQuiescent of [undefined, false]) {
+  test(`kernel-only freeze proof cannot confirm persistence: ${kernelIoQuiescent}`, async () => {
+    const { manager, provider, hooks, calls } =
+      protectedVolumeOperationFixture();
+    const sandbox = await manager.getOrCreateThreadSandbox(context);
+    const freeze = provider.volumeControl!.freeze;
+    provider.volumeControl!.freeze = async (input) =>
+      Object.assign({}, await freeze(input), {
+        kernelIoQuiescent,
+      }) as Awaited<ReturnType<typeof freeze>>;
+    hooks.checkpoint = async () => {
+      calls.push("confirmation");
+      return { sync: { persisted: true, confirmedSeq: 1 } };
+    };
+    await assert.rejects(
+      manager.withVolumeOperation({
+        sandbox,
+        context,
+        operationId: "unqualified-io-proof",
+        run: async () => {
+          calls.push("dispatch");
+        },
+      }),
+      /FREEZE_UNCONFIRMED/,
+    );
+    assert.deepEqual(calls, ["started", "dispatch", "freeze"]);
+    await assert.rejects(
+      manager.volumeCheckpoint(sandbox, {
+        freezeId: "barrier-permit-1",
+        supervisorNonce: "supervisor-1",
+      }),
+      /no validated kernel freeze proof/,
+    );
+    assert.ok(!calls.includes("confirmation"));
+  });
+}

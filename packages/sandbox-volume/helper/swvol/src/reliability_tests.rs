@@ -11,7 +11,7 @@ impl Fixture {
 }
 impl Drop for Fixture { fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); } }
 fn entry(size: u64) -> Entry { Entry { kind: 'f', mode: 0o600, mtime_ns: 1, size, link: None, chunks: vec![], ino: 1, ctime_ns: 1 } }
-fn slots() -> Slots { Slots { volume: "v".into(), attachment: "a".into(), pack_prefix: "p/".into(), manifest_prefix: "m/".into(), packs: HashMap::new(), manifests: HashMap::new() } }
+fn slots() -> Slots { Slots { volume: "v".into(), attachment: "a".into(), pack_prefix: "p/".into(), manifest_prefix: "m/".into(), packs: HashMap::new(), manifests: HashMap::new(), manifest_reads: HashMap::new() } }
 fn apply() -> PendingApply {
     PendingApply { seq: 2, rebase: false, next_pack: 8,
         upserts: vec![("replace".into(), entry(22)), ("insert".into(), entry(33))],
@@ -86,7 +86,7 @@ fn heavy_subtrees_are_registered_for_mandatory_scans() {
 fn failed_rebase_preserves_previous_local_watermark_and_chunk_index() {
     let f = Fixture::new();
     fs::write(meta_dir(&f.0).join("slots.json"), r#"{"volume":"v","attachment":"a","pack_prefix":"att/a/p/","manifest_prefix":"att/a/m/2/","packs":{},"manifests":{}}"#).unwrap();
-    let mut st = State { volume: "v".into(), attachment: "a".into(), seq: 10, ..State::default() };
+    let mut st = State { volume: "v".into(), attachment: "a".into(), boot_id: boot_id(), seq: 10, ..State::default() };
     let mut old = entry(1); old.chunks.push(ChunkRef("id".into(), 1));
     st.entries.insert("replace".into(), old);
     st.have.insert("id".into(), ChunkLoc("att/a/m/1/10".into(), 16, 5, 1));
@@ -108,4 +108,24 @@ fn pending_epoch_switch_refuses_replay_and_rebase_preserves_exact_old_bytes() {
     quarantine_pending(&f.0).unwrap(); assert!(!path.exists());
     let archive = fs::read_dir(meta_dir(&f.0).join("recovery")).unwrap().next().unwrap().unwrap().path();
     assert_eq!(fs::read(archive).unwrap(), bytes);
+}
+
+#[test]
+fn rebase_cache_pruning_preserves_final_references_and_undo_restores_all_old_locations() {
+    let f=Fixture::new(); let mut st=State {seq:10,..State::default()};
+    let mut kept=entry(1);kept.chunks=vec![ChunkRef("keep".into(),1)];
+    let mut deleted=entry(1);deleted.chunks=vec![ChunkRef("orphan".into(),1)];
+    st.entries.insert("keep-file".into(),kept);st.entries.insert("deleted".into(),deleted);
+    for id in ["keep","orphan","unreferenced"] {st.have.insert(id.into(),ChunkLoc(format!("old/{id}"),0,1,1));}
+    save_state(&f.0,&st).unwrap();let before=bincode::serialize(&st).unwrap();let logical_before=serde_json::to_value(&st).unwrap();
+    let pending=|| {
+        let mut new_entry=entry(1);new_entry.chunks=vec![ChunkRef("new".into(),1)];
+        PendingApply {seq:4,rebase:true,next_pack:2,upserts:vec![("new-file".into(),new_entry)],deletes:vec!["deleted".into()],new_locs:[("keep".into(),ChunkLoc("new/keep".into(),0,1,1)),("new".into(),ChunkLoc("new/new".into(),0,1,1))].into_iter().collect(),unstable:vec![]}
+    };
+    FAIL_STATE_SAVE.with(|value|value.set(true));let result=commit_pending(&f.0,&mut st,pending());FAIL_STATE_SAVE.with(|value|value.set(false));
+    assert_eq!(error_exit_code(&result.unwrap_err()),78);assert_eq!(serde_json::to_value(&st).unwrap(),logical_before);assert_eq!(fs::read(state_path(&f.0)).unwrap(),before);
+    commit_pending(&f.0,&mut st,pending()).unwrap();assert_eq!(st.seq,4);assert_eq!(st.have.len(),2);
+    assert_eq!(st.have["keep"].0,"new/keep");assert_eq!(st.have["new"].0,"new/new");
+    assert!(!st.have.contains_key("orphan"));assert!(!st.have.contains_key("unreferenced"));
+    assert_eq!(serde_json::to_value(load_state(&f.0).unwrap().unwrap()).unwrap(),serde_json::to_value(&st).unwrap());
 }

@@ -13,6 +13,7 @@ import {
 } from "@sourceweft/db/schema";
 import {
   enforceVolumeLimits,
+  VolumeQuotaExceeded,
   resolveVolumeLimits,
   type VolumeLimits,
 } from "./quota";
@@ -55,6 +56,15 @@ function chunkIdBytes(hex: string): Buffer {
 export class VolumeConflict extends Error {
   override readonly name = "VolumeConflict";
 }
+
+/** Fence for upload-only renewal after an independently checked capture window. */
+export type ExpectedCapture = {
+  bootId: string;
+  epoch: number;
+  baseSeq: number;
+  /** Host-measured pending bytes plus a conservative bound for unverified prefix packs. */
+  pendingObjectBytes?: number;
+};
 
 export type CommitIdentity = {
   epoch: number;
@@ -485,7 +495,25 @@ export class VolumeRepository {
     ttlSeconds: number,
     renewal?: { nextPack: number; lowWaterMark: number },
     drainId?: string,
+    expectedCapture?: ExpectedCapture,
+    signal?: AbortSignal,
   ) {
+    if (signal !== undefined) AbortSignal.prototype.throwIfAborted.call(signal);
+    if (
+      expectedCapture &&
+      (typeof expectedCapture.bootId !== "string" ||
+        !expectedCapture.bootId ||
+        !Number.isSafeInteger(expectedCapture.epoch) ||
+        expectedCapture.epoch < 0 ||
+        !Number.isSafeInteger(expectedCapture.baseSeq) ||
+        expectedCapture.baseSeq < 0 ||
+        expectedCapture.bootId !== expected.bootId ||
+        expectedCapture.epoch !== expected.epoch ||
+        (expectedCapture.pendingObjectBytes !== undefined &&
+          (!Number.isSafeInteger(expectedCapture.pendingObjectBytes) ||
+            expectedCapture.pendingObjectBytes < 0)))
+    )
+      throw new VolumeConflict("invalid capture slot fence");
     if (
       renewal &&
       (!Number.isSafeInteger(renewal.nextPack) ||
@@ -497,6 +525,7 @@ export class VolumeRepository {
       throw new Error("invalid slot renewal cursor");
     return this.db.transaction(async (tx) => {
       const head = await this.lockVolume(tx, expected.volumeId);
+      signal?.throwIfAborted();
       const rows = await tx
         .select()
         .from(sandboxVolumeAttachments)
@@ -505,11 +534,30 @@ export class VolumeRepository {
       if (
         !actor ||
         !attachmentCanWrite(actor, drainId) ||
-        actor.epoch !== expected.epoch
+        actor.volumeId !== expected.volumeId ||
+        actor.epoch !== expected.epoch ||
+        (expectedCapture !== undefined &&
+          (head !== expectedCapture.baseSeq ||
+            actor.bootId !== expectedCapture.bootId ||
+            actor.epoch !== expectedCapture.epoch))
       )
         throw new VolumeConflict(
           "attachment is inactive or epoch changed during slot issuance",
         );
+      if (expectedCapture?.pendingObjectBytes !== undefined) {
+        const [volume] = await tx
+          .select({ storedBytes: sandboxVolumes.storedBytes })
+          .from(sandboxVolumes)
+          .where(eq(sandboxVolumes.id, actor.volumeId));
+        const total =
+          (volume?.storedBytes ?? 0) + expectedCapture.pendingObjectBytes;
+        if (!Number.isSafeInteger(total) || total > this.limits.maxObjectBytes)
+          throw new VolumeQuotaExceeded(
+            "maxObjectBytes",
+            total,
+            this.limits.maxObjectBytes,
+          );
+      }
       const firstPack = actor.slotsUntilPack;
       if (renewal && renewal.nextPack > firstPack)
         throw new VolumeConflict(
@@ -524,9 +572,13 @@ export class VolumeRepository {
       const registered = await tx.execute<{ next_pack: number }>(sql`
         select coalesce(max(substring(pack_key from ${`^att/${actor.id}/p/([0-9]{6})(?:\\.r[0-9a-f]+)*$`})::int) + 1, 0)::int as next_pack
         from sandbox_volume_packs where volume_id = ${actor.volumeId}`);
-      const renewFromPack = registered.rows[0]?.next_pack ?? 0;
+      const renewFromPack = Math.max(
+        registered.rows[0]?.next_pack ?? 0,
+        expectedCapture ? (renewal?.nextPack ?? 0) : 0,
+      );
       if (firstPack + allocatePacks > 1_000_000)
         throw new Error("attachment pack slot namespace exhausted");
+      signal?.throwIfAborted();
       const updated = await tx
         .update(sandboxVolumeAttachments)
         .set({
@@ -536,6 +588,7 @@ export class VolumeRepository {
         })
         .where(eq(sandboxVolumeAttachments.id, actor.id))
         .returning();
+      signal?.throwIfAborted();
       return {
         attachment: updated[0]!,
         firstPack,

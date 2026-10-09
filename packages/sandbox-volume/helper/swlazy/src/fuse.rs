@@ -34,6 +34,7 @@ pub struct LazyFs {
     no_open: bool,
     no_opendir: bool,
     volume_jobs: Option<std::sync::mpsc::SyncSender<VolumeRead>>,
+    trace_reads: bool,
 }
 struct VolumeRead {
     deadline: Instant,
@@ -44,18 +45,16 @@ struct VolumeRead {
 }
 
 pub fn validate_mtimes(mtimes: impl IntoIterator<Item = i64>) -> std::io::Result<()> {
-    // Pinned fuser 0.15.1 time_from_system_time does not normalize fractional
-    // pre-epoch values: -1ns becomes (0s, 1ns). Preserve the plan and fail before
-    // mounting instead of changing its metadata or replacing the dependency.
-    if mtimes.into_iter().any(|ns| ns < 0) {
-        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput,
-            "NEGATIVE_MTIME_UNSUPPORTED: pinned fuser 0.15.1 cannot faithfully encode pre-epoch timestamps"));
+    for ns in mtimes {
+        if crate::fuser_time::attribute_time(ns).is_none() {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput,
+                "mtime cannot be represented by the pinned FUSE attribute encoder"));
+        }
     }
     Ok(())
 }
 fn ts(ns: i64) -> SystemTime {
-    assert!(ns >= 0, "negative FUSE mtime must be rejected before constructing nodes");
-    UNIX_EPOCH + Duration::from_nanos(ns as u64)
+    crate::fuser_time::attribute_time(ns).expect("FUSE attribute time was validated before creating nodes")
 }
 
 impl LazyFs {
@@ -71,6 +70,7 @@ impl LazyFs {
             no_open: false,
             no_opendir: false,
             volume_jobs: None,
+            trace_reads: std::env::var("SWVOL_FUSE_TRACE_READS").as_deref() == Ok("1"),
         };
         let dir = |parent| Node { parent, kind: FileType::Directory, perm: 0o755, mtime: UNIX_EPOCH, size: 0, off: 0, link: vec![], children: vec![], chunks: Arc::new(vec![]) };
         fs.nodes.push(dir(0)); // ino 0 unused
@@ -196,6 +196,7 @@ impl Filesystem for LazyFs {
             return reply.data(&[]);
         }
         let len = (size as u64).min(n.size - off) as usize;
+        if self.trace_reads { eprintln!("SWVOL_FUSE_READ ino={ino} offset={off} bytes={len}"); }
         if let Some(jobs) = &self.volume_jobs {
             if len > 8 * 1024 * 1024 { return reply.error(libc::EINVAL); }
             let job = VolumeRead { deadline: Instant::now() + Duration::from_secs(60), chunks: n.chunks.clone(), offset: off, size: len, reply };

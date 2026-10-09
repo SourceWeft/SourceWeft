@@ -23,7 +23,7 @@ export type ObjectStore = {
   get(key: string, options?: { maxBytes: number }): Promise<Uint8Array | null>;
   put(key: string, body: Uint8Array, contentType?: string): Promise<void>;
   /** Size in bytes, or null when the key does not exist. */
-  size(key: string): Promise<number | null>;
+  size(key: string, options?: { signal?: AbortSignal }): Promise<number | null>;
   /** Server-side copy (used to repair packs that will not download from a sandbox). */
   copy(fromKey: string, toKey: string): Promise<void>;
   /** Delete every object under a prefix; returns the number deleted (GC and test cleanup). */
@@ -162,14 +162,25 @@ export function createS3ObjectStore(config: S3ObjectStoreConfig): ObjectStore {
         requestOptions(),
       );
     },
-    async size(key) {
+    async size(key, options) {
+      const signal = options?.signal;
+      if (signal !== undefined) {
+        // Use the native brand check; a duck-typed stdout object is not a signal.
+        AbortSignal.prototype.throwIfAborted.call(signal);
+      }
       try {
         const response = await client.send(
           new HeadObjectCommand({ Bucket: bucket, Key: key }),
-          requestOptions(),
+          {
+            abortSignal: signal
+              ? AbortSignal.any([signal, AbortSignal.timeout(requestTimeoutMs)])
+              : AbortSignal.timeout(requestTimeoutMs),
+          },
         );
+        signal?.throwIfAborted();
         return response.ContentLength ?? null;
       } catch (error) {
+        signal?.throwIfAborted();
         if (isNotFound(error, "head")) return null;
         throw error;
       }

@@ -44,6 +44,14 @@ impl Directory {
         }
         self.child(OsStr::new(leaf), false)
     }
+    pub fn move_entry_to(&self, source: &str, target: &Directory, destination: &str) -> Result<()> {
+        if [source, destination].iter().any(|name| name.is_empty() || name.contains('/') || *name == "." || *name == "..") { bail!("invalid metadata rename leaf"); }
+        let source = CString::new(source)?; let destination = CString::new(destination)?;
+        if unsafe { libc::syscall(libc::SYS_renameat2, self.0.as_raw_fd(), source.as_ptr(), target.0.as_raw_fd(), destination.as_ptr(), libc::RENAME_NOREPLACE) } != 0 {
+            return Err(std::io::Error::last_os_error()).context("metadata rename refused replacement");
+        }
+        target.0.sync_all()?; self.0.sync_all()?; Ok(())
+    }
     pub fn directory(&self, relative: &str, create: bool) -> Result<Self> {
         let mut dir = Self(self.0.try_clone()?);
         for part in Path::new(relative).components() {

@@ -105,12 +105,31 @@ export function sandboxErrorDiagnostic(error: unknown): unknown {
     if (seen.has(value) || depth === 0) return undefined;
     seen.add(value);
     const record = value as Record<string, unknown>;
+    const cleanup =
+      record.creationCleanup && typeof record.creationCleanup === "object"
+        ? (record.creationCleanup as Record<string, unknown>)
+        : undefined;
     return {
       name: record.name,
       code: record.code,
       phase: record.phase,
       status: record.status ?? record.statusCode,
       message: record.message,
+      ...(cleanup &&
+      typeof cleanup.providerSandboxId === "string" &&
+      ["delete-requested", "already-missing", "unconfirmed"].includes(
+        String(cleanup.status),
+      )
+        ? {
+            creationCleanup: {
+              providerSandboxId: cleanup.providerSandboxId,
+              status: cleanup.status,
+              ...(typeof cleanup.reason === "string"
+                ? { reason: cleanup.reason }
+                : {}),
+            },
+          }
+        : {}),
       ...(record.cause === undefined
         ? {}
         : { cause: describe(record.cause, depth - 1) }),

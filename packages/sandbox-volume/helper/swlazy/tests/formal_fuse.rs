@@ -469,11 +469,11 @@ fn control_outage_does_not_multiply_read_budget_for_shared_chunks() {
 }
 
 #[test]
-#[ignore = "requires real /dev/fuse; negative metadata must be rejected before mount because pinned fuser cannot encode it faithfully"]
-fn formal_fuse_refuses_negative_mtime_without_clamping_or_mutating_plan() {
+#[ignore = "requires real /dev/fuse; checks signed nanosecond metadata through the actual kernel"]
+fn formal_fuse_preserves_signed_mtime_and_original_plan() {
     use std::os::unix::fs::MetadataExt;
     assert!(Path::new("/dev/fuse").exists());
-    for ns in [-1i64, -1_000_000_000, i64::MIN, i64::MAX] {
+    for ns in [-1i64, -999_999_999, -1_000_000_000, -1_000_000_001, -1_500_000_000, i64::MIN, 0, 1, i64::MAX] {
         for kind in ['f', 'd', 'l'] {
             let base = PathBuf::from(format!("/test/swvol-fuse-time-{}-{ns}-{kind}", std::process::id()));
             let mut mounts = Mounts { base: base.clone(), child: None, overlay: false };
@@ -485,16 +485,12 @@ fn formal_fuse_refuses_negative_mtime_without_clamping_or_mutating_plan() {
             loop {
                 if let Some(status) = mounts.child.as_mut().unwrap().try_wait().unwrap() {
                     let mut error = String::new(); mounts.child.as_mut().unwrap().stderr.as_mut().unwrap().read_to_string(&mut error).unwrap();
-                    assert!(ns < 0 && !status.success(), "unexpected mount exit {status}: {error}");
-                    assert!(error.contains("NEGATIVE_MTIME_UNSUPPORTED"), "must diagnose pinned dependency limit: {error}");
-                    assert_eq!(fs::read_dir(base.join("cache")).unwrap().count(), 0, "rejected plan must not start cache/workers");
-                    break;
+                    panic!("signed metadata must mount exactly: requested={ns} kind={kind} status={status} error={error}");
                 }
                 if fs::read_to_string("/proc/self/mountinfo").unwrap().contains(&format!(" {} ", base.join("lower").display())) {
                     let md = fs::symlink_metadata(base.join("lower/entry")).unwrap();
                     let actual = md.mtime() as i128 * 1_000_000_000 + md.mtime_nsec() as i128;
-                    assert!(ns >= 0, "negative plan incorrectly mounted: requested={ns}, actual={actual}, kind={kind}");
-                    assert_eq!(actual, ns as i128, "supported positive boundary must be exact");
+                    assert_eq!(actual, ns as i128, "every supported signed boundary must be exact");
                     break;
                 }
                 assert!(Instant::now() < deadline, "mount did not reject or become ready"); std::thread::sleep(Duration::from_millis(10));
@@ -502,5 +498,5 @@ fn formal_fuse_refuses_negative_mtime_without_clamping_or_mutating_plan() {
             assert_eq!(fs::read(&plan).unwrap(), bytes);
         }
     }
-    eprintln!("FUSE_TIME_CONTRACT_OK negative_minus_one_min_and_whole_second_rejected=true positive_max_exact=true kinds=file_directory_symlink original_plan_preserved=true");
+    eprintln!("FUSE_TIME_CONTRACT_OK signed_fraction_whole_second_min_max_exact=true kinds=file_directory_symlink original_plan_preserved=true");
 }

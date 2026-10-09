@@ -5,7 +5,7 @@ import {
   TAIL_MARKER,
 } from "../protocol/constants";
 import { parseCommandOutput } from "../protocol/marker";
-import type { FlushReport } from "../protocol/types";
+import type { CaptureProgress, FlushReport } from "../protocol/types";
 import type { AttachmentRow, VolumeScope } from "../service/repository";
 import type {
   DrainRequest,
@@ -116,7 +116,7 @@ function confirmedFlush(
 }
 
 const DEFAULT_ROOT = "/workspace";
-export const REQUIRED_HELPER_VERSION = "0.3.0";
+export const REQUIRED_HELPER_VERSION = "0.4.0";
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
@@ -427,45 +427,125 @@ export function createVolumeHooks(config: VolumeHooksConfig) {
             "command output cannot prove that an instance changed before execution",
           );
         }
-        const wal = await service.applyWal(input.attachmentId, {
-          drainId: input.drainId,
-        });
+        // Preserve the original 3 x 10-minute aggregate budget. More windows
+        // require scoped, fsynced capture receipts corroborated by object HEADs;
+        // stdout alone never permits unbounded storage grants or confirmation.
+        const recoveryDeadline = performance.now() + 1_800_000;
+        let renewals = 0;
+        let legacyRenewals = 0;
+        let previousProgress: CaptureProgress | undefined;
+        const remaining = () => {
+          const ms = Math.floor(recoveryDeadline - performance.now());
+          if (ms <= 0)
+            throw new VolumePersistenceError(
+              input.attachmentId,
+              "slot recovery exceeded its total deadline; retain the workspace",
+            );
+          return ms;
+        };
+        // Check both sides of each awaited phase. This prevents launching the
+        // next mutation/ACK after expiry; it does not claim to forcibly cancel
+        // underlying network or PostgreSQL operations already in flight.
+        const checked = async <T>(operation: () => Promise<T>): Promise<T> => {
+          remaining();
+          const result = await operation();
+          remaining();
+          return result;
+        };
+        const wal = await checked(() =>
+          service.applyWal(input.attachmentId, {
+            drainId: input.drainId,
+          }),
+        );
         let verifiedWal = wal;
         let verifiedFlush = parsed.flush;
         let verifiedFlushExit = parsed.flushExitCode;
-        // Only retry the barrier: the user command has already run. A bounded renewal
-        // handles exhausted slots without ever replaying that command.
-        for (
-          let attempt = 0;
-          input.allowShellRecovery !== false &&
-          attempt < 3 &&
-          (verifiedFlushExit === EXIT_NEED_SLOTS ||
-            verifiedFlush?.exit_code === EXIT_NEED_SLOTS);
-          attempt++
-        ) {
-          const attachment = await service.repo.getAttachment(
-            input.attachmentId,
-          );
-          if (!attachment || attachment.status !== "active")
-            throw new VolumePersistenceError(
-              input.attachmentId,
-              "slot renewal requires an active attachment",
+        const resumeCapture = async (rebaseHead?: number) => {
+          while (
+            input.allowShellRecovery !== false &&
+            !verifiedWal.rejected &&
+            (verifiedFlushExit === EXIT_NEED_SLOTS ||
+              verifiedFlush?.exit_code === EXIT_NEED_SLOTS)
+          ) {
+            if (renewals >= 32)
+              throw new VolumePersistenceError(
+                input.attachmentId,
+                "slot recovery exhausted its bounded upload windows; retain the workspace",
+              );
+            const signal = AbortSignal.timeout(remaining());
+            let slotsUrl: string;
+            const captureProgress = verifiedFlush?.capture_progress;
+            if (captureProgress !== undefined) {
+              const renewed = await checked(() =>
+                service.renewCaptureSlots(
+                  input.attachmentId,
+                  captureProgress,
+                  previousProgress,
+                  { drainId: input.drainId, signal },
+                ),
+              );
+              // Use the service's exact immutable object: its WeakMap carries
+              // trusted cumulative HEAD evidence, not a copied stdout value.
+              previousProgress = renewed.progress;
+              slotsUrl = renewed.slotsUrl;
+              log("volume.capture_progress", {
+                attachmentId: input.attachmentId,
+                nextPack: renewed.progress.next_pack,
+                uploadedPacks: renewed.progress.uploaded_packs,
+                uploadedRawBytes: renewed.progress.uploaded_raw_bytes,
+                verifiedObjectBytes: renewed.verifiedObjectBytes,
+              });
+            } else {
+              if (legacyRenewals >= 3)
+                throw new VolumePersistenceError(
+                  input.attachmentId,
+                  "slot recovery made no verified upload progress; retain the workspace",
+                );
+              const attachment = await checked(() =>
+                service.repo.getAttachment(input.attachmentId),
+              );
+              const writable =
+                attachment &&
+                (input.drainId === undefined
+                  ? attachment.status === "active"
+                  : attachment.status === "draining" &&
+                    attachment.drainId === input.drainId);
+              if (!writable)
+                throw new VolumePersistenceError(
+                  input.attachmentId,
+                  "slot renewal requires the current writable attachment",
+                );
+              slotsUrl = await checked(() =>
+                service.publishSlots(attachment, {
+                  drainId: input.drainId,
+                  signal,
+                }),
+              );
+              legacyRenewals++;
+            }
+            renewals++;
+            const mode =
+              rebaseHead === undefined ? "--full" : `--rebase ${rebaseHead}`;
+            const retry = await checked(() =>
+              input.executor.execute(
+                `${replaceSlots(slotsUrl)} && ${shellQuote(helperPath)} flush ${helperRootArgs} ${mode}`,
+                { timeoutMs: Math.min(600_000, remaining()) },
+              ),
             );
-          const slotsUrl = await service.publishSlots(attachment);
-          const retry = await input.executor.execute(
-            `${replaceSlots(slotsUrl)} && ${shellQuote(helperPath)} flush ${helperRootArgs} --full`,
-            { timeoutMs: 600_000 },
-          );
-          verifiedFlushExit = retry.exitCode;
-          try {
-            verifiedFlush = JSON.parse(retry.output) as FlushReport;
-          } catch {
-            verifiedFlush = null;
+            verifiedFlushExit = retry.exitCode;
+            try {
+              verifiedFlush = JSON.parse(retry.output) as FlushReport;
+            } catch {
+              verifiedFlush = null;
+            }
+            verifiedWal = await checked(() =>
+              service.applyWal(input.attachmentId, {
+                drainId: input.drainId,
+              }),
+            );
           }
-          verifiedWal = await service.applyWal(input.attachmentId, {
-            drainId: input.drainId,
-          });
-        }
+        };
+        await resumeCapture();
         let rebase: ParsedExecuteResult["sync"]["rebase"] = null;
         const slotTaken =
           typeof verifiedFlush?.error === "string" &&
@@ -474,14 +554,20 @@ export function createVolumeHooks(config: VolumeHooksConfig) {
           input.allowShellRecovery !== false &&
           (verifiedWal.rejected || slotTaken)
         ) {
-          const { slotsUrl, head } = await service.beginRebase(
-            input.attachmentId,
+          const { slotsUrl, head } = await checked(() =>
+            service.beginRebase(input.attachmentId, { drainId: input.drainId }),
           );
-          const rb = await input.executor.execute(
-            `${replaceSlots(slotsUrl)} && ${shellQuote(helperPath)} flush ${helperRootArgs} --rebase ${head}`,
-            { timeoutMs: 600_000 },
+          const rb = await checked(() =>
+            input.executor.execute(
+              `${replaceSlots(slotsUrl)} && ${shellQuote(helperPath)} flush ${helperRootArgs} --rebase ${head}`,
+              { timeoutMs: Math.min(600_000, remaining()) },
+            ),
           );
-          const wal2 = await service.applyWal(input.attachmentId);
+          const wal2 = await checked(() =>
+            service.applyWal(input.attachmentId, {
+              drainId: input.drainId,
+            }),
+          );
           verifiedWal = wal2;
           verifiedFlushExit = rb.exitCode;
           try {
@@ -489,9 +575,14 @@ export function createVolumeHooks(config: VolumeHooksConfig) {
           } catch {
             verifiedFlush = null;
           }
+          // An explicit rebase changes the receipt scope. Keep the same
+          // authoritative head argument throughout its bounded upload retries.
+          previousProgress = undefined;
+          await resumeCapture(head);
           rebase = {
-            applied: wal2.applied,
-            stillRejected: wal2.rejected !== null,
+            applied:
+              wal2.applied + (verifiedWal === wal2 ? 0 : verifiedWal.applied),
+            stillRejected: verifiedWal.rejected !== null,
           };
           log("volume.rebase", {
             attachmentId: input.attachmentId,
@@ -506,12 +597,16 @@ export function createVolumeHooks(config: VolumeHooksConfig) {
           ? parsed.flush!.unreadable!
           : [];
         if (unreadable.length) {
-          const attachment = await service.repo.getAttachment(
-            input.attachmentId,
+          const attachment = await checked(() =>
+            service.repo.getAttachment(input.attachmentId),
           );
           if (attachment)
             for (const key of unreadable)
-              repaired.push(await service.repairPack(attachment.volumeId, key));
+              repaired.push(
+                await checked(() =>
+                  service.repairPack(attachment.volumeId, key),
+                ),
+              );
         }
         if (
           verifiedFlushExit !== 0 ||
@@ -526,11 +621,13 @@ export function createVolumeHooks(config: VolumeHooksConfig) {
           error.durabilityStatus = "failed";
           throw error;
         }
+        const confirmedSeq = verifiedFlush.seq;
         if (
-          !(await service.confirmPersistence(
-            input.attachmentId,
-            verifiedFlush.seq,
-            { drainId: input.drainId, supervisorNonce: input.supervisorNonce },
+          !(await checked(() =>
+            service.confirmPersistence(input.attachmentId, confirmedSeq, {
+              drainId: input.drainId,
+              supervisorNonce: input.supervisorNonce,
+            }),
           ))
         ) {
           throw new VolumePersistenceError(
