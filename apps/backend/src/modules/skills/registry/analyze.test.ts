@@ -376,21 +376,21 @@ test("an oversize description is truncated to 1024 chars, not rejected", () => {
   assert.equal(analyzed.description, "d".repeat(1024));
 });
 
-test("frontmatter validation rejects a bad name and an empty description", () => {
-  assert.throws(
-    () =>
-      analyzeRegistrySkill({
-        owner: OWNER,
-        repo: REPO,
-        discovered: discovered({
-          files: [
-            file("SKILL.md", skillMd({ name: "Bad Name!", description: "d" })),
-          ],
-        }),
-      }),
-    (error) =>
-      error instanceof RegistrySubmissionError &&
-      error.code === "REGISTRY_SUBMISSION_INVALID_SKILL",
+test("human names get safe install identifiers and empty descriptions remain invalid", () => {
+  const analyzed = analyzeRegistrySkill({
+    owner: OWNER,
+    repo: REPO,
+    discovered: discovered({
+      files: [
+        file("SKILL.md", skillMd({ name: "Bad Name!", description: "d" })),
+      ],
+    }),
+  });
+  assert.equal(analyzed.originalName, "Bad Name!");
+  assert.match(analyzed.name, /^bad-name-[a-f0-9]{8}$/);
+  assert.equal(analyzed.displayName, "Bad Name!");
+  assert.ok(
+    analyzed.diagnostics.some((d) => d.code === "INSTALL_NAME_NORMALIZED"),
   );
 
   // Empty description is still rejected (truncation only applies to oversize).

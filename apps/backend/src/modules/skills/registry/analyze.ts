@@ -1,8 +1,7 @@
 import path from "node:path";
-import { isAgentSkillName } from "@sourceweft/skill-format";
+import { readRegistryMetadata, registryInstallName } from "./metadata";
 import type { SkillDiagnostic } from "@sourceweft/contracts";
 import type { SkillManifestJson } from "@sourceweft/db";
-import { parseSkillFrontmatter } from "../frontmatter";
 import { deriveRegistrySlug } from "./contracts";
 import type { DiscoveredSkill } from "./read";
 import { RegistrySubmissionError } from "./errors";
@@ -36,6 +35,7 @@ type RegistryFileRole = "model-readable" | "script" | "asset";
 export type AnalyzedRegistrySkill = {
   slug: string;
   name: string;
+  originalName?: string;
   displayName: string;
   description: string;
   /** Skill dir relative to the repo root — the pointer `#<subpath>`. */
@@ -50,7 +50,6 @@ export type AnalyzedRegistrySkill = {
   findings: import("./scan").RegistryFinding[];
 };
 
-const MAX_NAME_LENGTH = 64;
 const MAX_DESCRIPTION_LENGTH = 1024;
 
 // Files whose bytes must NOT be mounted as model-readable text at runtime: they
@@ -264,22 +263,27 @@ export function analyzeRegistrySkill(input: {
     );
   }
 
-  const frontmatter = parseSkillFrontmatter(skillMd.contentText);
-  if (!frontmatter)
-    throw new RegistrySubmissionError(
-      "REGISTRY_SUBMISSION_INVALID_SKILL",
-      "SKILL.md requires YAML frontmatter",
-    );
-  const name = frontmatter.name;
+  const { metadata: frontmatter, derived } = readRegistryMetadata(
+    skillMd.contentText,
+    discovered.dirName || input.repo,
+  );
+  const originalName = frontmatter.name;
   const description = frontmatter.description;
-  // The Agent Skills specification's rule, shared with the CLI so every name
-  // the registry accepts is also a name the CLI will install under.
-  if (typeof name !== "string" || !isAgentSkillName(name)) {
+  if (
+    typeof originalName !== "string" ||
+    !originalName.trim() ||
+    originalName.length > 1024 ||
+    /[\u0000-\u001f\u007f]/.test(originalName)
+  ) {
     throw new RegistrySubmissionError(
       "REGISTRY_SUBMISSION_INVALID_SKILL",
-      `SKILL.md 'name' must be 1-${MAX_NAME_LENGTH} lowercase letters, digits or hyphens, not starting or ending with a hyphen and without '--'`,
+      "SKILL.md name must be a non-empty human-readable string of at most 1024 characters",
     );
   }
+  const name = registryInstallName(
+    originalName.trim(),
+    discovered.dirName || input.repo,
+  );
   // The frontmatter `name` is authoritative; the directory it happens to sit in
   // is not required to match. The agentskills.io spec recommends they agree, but
   // real repos routinely differ (a directory suffixed `-skill`, a name
@@ -358,11 +362,17 @@ export function analyzeRegistrySkill(input: {
 
   const finalFlags = [...flags].sort();
   return {
-    slug: deriveRegistrySlug(input.owner, input.repo, name, discovered.repoSubpath),
+    slug: deriveRegistrySlug(
+      input.owner,
+      input.repo,
+      name,
+      discovered.repoSubpath,
+    ),
     name,
+    originalName: originalName.trim(),
     displayName:
       firstString(frontmatter.displayName, frontmatter.title) ??
-      titleCase(name),
+      (name === originalName.trim() ? titleCase(name) : originalName.trim()),
     description: normalizedDescription,
     repoSubpath: discovered.repoSubpath,
     capability,
@@ -375,6 +385,36 @@ export function analyzeRegistrySkill(input: {
     allowedTools,
     findings: baseScan.findings,
     diagnostics: [
+      ...(discovered.supportingDocuments ?? []).map((file) => ({
+        code: "SUPPORTING_SKILL_DOCUMENT",
+        severity: "warning" as const,
+        message:
+          "Nested instructions are retained as supporting documents in this parent skill bundle.",
+        file,
+      })),
+      ...(derived
+        ? [
+            {
+              code: "METADATA_DERIVED",
+              severity: "warning" as const,
+              message:
+                "Catalog metadata is derived from Markdown; the original SKILL.md is preserved.",
+              file: "SKILL.md",
+            },
+          ]
+        : []),
+      ...(name !== originalName.trim()
+        ? [
+            {
+              code: "INSTALL_NAME_NORMALIZED",
+              severity: "warning" as const,
+              message:
+                "A safe installation name is allocated separately from the original title.",
+              file: "SKILL.md",
+              field: "name",
+            },
+          ]
+        : []),
       ...(description.trim().length > MAX_DESCRIPTION_LENGTH
         ? [
             {

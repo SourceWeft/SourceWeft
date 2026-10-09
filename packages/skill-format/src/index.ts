@@ -15,3 +15,13 @@ export {
   type SkillArchiveErrorCode,
   type SkillArchiveLimits,
 } from "./zip";
+
+export { retryTransientSourceRead } from "./source-read";
+
+export {
+  parseSkillFrontmatter,
+  SkillParseError,
+  skillMetadataSource,
+  stringifySkillMetadata,
+  type SkillFrontmatter,
+} from "./frontmatter";

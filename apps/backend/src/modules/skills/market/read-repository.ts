@@ -230,6 +230,7 @@ export function mapMarketSkillSummary(
     slug: row.definition.slug,
     installRef: row.definition.installRef ?? null,
     name,
+    ...(registry?.installName ? { installName: registry.installName } : {}),
     // As the catalog does for a community skill: the version on show speaks
     // for itself, the definition row being only the last one indexed.
     displayName: manifest.displayName,
@@ -254,7 +255,7 @@ export function mapMarketSkillSummary(
     updatedAt: row.version.publishedAt?.toISOString() ?? null,
     // The CLI installs a skill as a directory named after it and refuses a
     // name that is not a safe one, so a command would only fail.
-    cliInstallable: isSafeSkillDirName(name),
+    cliInstallable: isSafeSkillDirName(registry?.installName ?? name),
     stars: row.definition.repoStars ?? 0,
     repoPushedAt: row.repository?.pushedAt?.toISOString() ?? null,
     repoArchived: row.repository?.archived ?? false,

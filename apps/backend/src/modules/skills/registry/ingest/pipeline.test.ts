@@ -661,3 +661,18 @@ test("a scoped reader failure never downloads the whole archive or writes a part
   assert.equal(vi.mocked(injected.downloadArchive).mock.calls.length, 0);
   assert.equal(mocks.upsert.mock.calls.length, 0);
 });
+
+test("retained read capacity is released after success or downstream failure", async () => {
+  for (const fail of [false, true]) {
+    seedRow();
+    skillsRead(["writer"]);
+    const release = vi.fn();
+    const read = await mocks.readArchive();
+    mocks.readArchive.mockResolvedValue({ ...read, release });
+    if (fail)
+      mocks.removed.mockRejectedValueOnce(new Error("downstream failure"));
+    if (fail) await assert.rejects(run(), /downstream failure/);
+    else await run();
+    assert.equal(release.mock.calls.length, 1);
+  }
+});

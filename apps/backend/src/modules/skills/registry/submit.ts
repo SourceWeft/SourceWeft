@@ -191,7 +191,8 @@ export async function writeSubmittedSkill(input: {
       registry: {
         repositoryId: input.read.source.repositoryId,
         sourceRoot: analyzed.repoSubpath,
-        originalName: analyzed.name,
+        originalName: analyzed.originalName ?? analyzed.name,
+        installName: analyzed.name,
         identifier: `gh:${owner}/${repo}${
           analyzed.repoSubpath ? `/${analyzed.repoSubpath}` : ""
         }`,
@@ -214,7 +215,7 @@ export async function writeSubmittedSkill(input: {
         ingestion: {
           formatVersion: 1,
           analyzedAt: new Date().toISOString(),
-          parserVersion: "1",
+          parserVersion: "2",
           scanRuleVersion: SCAN_RULE_VERSION,
           diagnostics: analyzed.diagnostics,
           findings: analyzed.findings,

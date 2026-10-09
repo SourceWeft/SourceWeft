@@ -37,11 +37,12 @@ export function planSkillInstallReferences(
   const names = new Map(
     rows.map((row) => [
       row.id,
-      marketSkillName({
-        slug: row.slug,
-        manifest: row.manifest,
-        skillMd: row.skillMd,
-      }),
+      row.manifest.registry?.installName ??
+        marketSkillName({
+          slug: row.slug,
+          manifest: row.manifest,
+          skillMd: row.skillMd,
+        }),
     ]),
   );
   const groups = new Map<string, SourceRow[]>();
@@ -206,7 +207,7 @@ export async function resolveSkillInstallReferences(input: {
   if (input.path !== undefined)
     conditions.push(eq(skillDefinitions.sourceRoot, input.path));
   const requestedName = scoped?.[2] ?? input.skill!;
-  const nameCondition = sql`(coalesce(${skillVersions.manifestJson}->'registry'->>'originalName',${skillVersions.manifestJson}->>'name')=${requestedName} or coalesce(${skillVersions.manifestJson}->'registry'->>'originalName',${skillVersions.manifestJson}->>'name') is null)`;
+  const nameCondition = sql`(${skillVersions.manifestJson}->'registry'->>'installName'=${requestedName} or coalesce(${skillVersions.manifestJson}->'registry'->>'originalName',${skillVersions.manifestJson}->>'name')=${requestedName} or coalesce(${skillVersions.manifestJson}->'registry'->>'originalName',${skillVersions.manifestJson}->>'name') is null)`;
   const rows = await db
     .select({
       definition: skillDefinitions,
@@ -245,6 +246,7 @@ export async function resolveSkillInstallReferences(input: {
     ? exact
     : rows.filter(
         (row) =>
+          row.version.manifestJson.registry?.installName === requestedName ||
           marketSkillName({
             slug: row.definition.slug,
             manifest: row.version.manifestJson,

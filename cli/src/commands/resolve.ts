@@ -12,7 +12,9 @@ export async function resolveInstallReference(
   if (!reference.includes("/")) {
     const detail = await client.getSkill(reference);
     if (
-      (options.skill !== undefined && detail.skill.name !== options.skill) ||
+      (options.skill !== undefined &&
+        detail.skill.name !== options.skill &&
+        detail.skill.installName !== options.skill) ||
       (options.path !== undefined && detail.source.repoSubpath !== options.path)
     )
       throw new UsageError("The selected skill does not match --skill/--path.");

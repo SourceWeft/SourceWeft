@@ -155,6 +155,13 @@ test("a deep link straight at one skill yields exactly that skill", () => {
 });
 
 describe("read-limits", () => {
+  beforeEach(() => {
+    state.limits = {
+      maxFiles: 200,
+      maxFileBytes: 10 * 1024 * 1024,
+      maxBundleBytes: 50 * 1024 * 1024,
+    };
+  });
   /**
    * The REAL numbers: a skill is refused at exactly `SKILL_STORAGE_LIMITS`, the
    * limits the object store and the sandbox staging run under — and a file the
@@ -188,10 +195,11 @@ describe("read-limits", () => {
     error.code === "REGISTRY_SUBMISSION_TOO_LARGE";
 
   test("the limits are the storage limits", () => {
+    state.limits = null;
     assert.deepEqual(SKILL_STORAGE_LIMITS, {
-      maxFiles: 200,
-      maxFileBytes: 10 * MiB,
-      maxBundleBytes: 50 * MiB,
+      maxFiles: 20_000,
+      maxFileBytes: 64 * MiB,
+      maxBundleBytes: 256 * MiB,
     });
   });
 
@@ -597,18 +605,21 @@ describe("read-bundle", () => {
     assert.equal(byDir.get("skills/inner")?.files.length, LIMITS.maxFiles);
   });
 
-  test("an archive that under-declares its sizes is caught on the actual bytes", async () => {
+  test("under-declared metadata cannot bypass transport decompression limits", async () => {
     lie.declaredSize = 1;
-    const read = await readRegistrySkillsFromArchive(
-      zipball({
-        "SKILL.md": SKILL_MD,
-        "assets/a.bin": new Uint8Array(LIMITS.maxFileBytes),
-        "assets/b.bin": new Uint8Array(LIMITS.maxFileBytes),
-      }),
-      source,
+    await assert.rejects(
+      readRegistrySkillsFromArchive(
+        zipball({
+          "SKILL.md": SKILL_MD,
+          "assets/a.bin": new Uint8Array(LIMITS.maxFileBytes),
+          "assets/b.bin": new Uint8Array(LIMITS.maxFileBytes),
+        }),
+        source,
+      ),
+      (error: unknown) =>
+        error instanceof GitHubArchiveError &&
+        error.code === "ARCHIVE_TOO_LARGE",
     );
-    assert.ok(tooLarge(read.skills[0]?.rejection));
-    assert.deepEqual(read.skills[0]?.files, []);
   });
 
   test("a source without a commit date is refused", async () => {
@@ -622,4 +633,66 @@ describe("read-bundle", () => {
         error.code === "REGISTRY_SUBMISSION_UNDATED",
     );
   });
+});
+
+test("nested frontmatter-less supporting instructions stay in the parent bundle", async () => {
+  const source = {
+    owner: "acme",
+    repo: "skills",
+    subpath: "skills/onboard",
+    repoUrl: "https://github.com/acme/skills",
+    sourceUrl: "https://github.com/acme/skills",
+    commitSha: "a".repeat(40),
+    committedAt: "2026-02-01T10:00:00Z",
+  };
+  const zip = zipball({
+    "skills/onboard/SKILL.md": strToU8(
+      "---\nname: onboard\ndescription: Onboard\n---\nBody",
+    ),
+    "skills/onboard/deploy/SKILL.md": strToU8("# Deploy\n\nCalled by parent."),
+    "skills/onboard/deploy/run.py": strToU8("print(1)"),
+  });
+  const read = await readRegistrySkillsFromArchive(zip, source);
+  assert.equal(read.skills.length, 1);
+  assert.deepEqual(read.skills[0]!.files.map((f) => f.bundlePath).sort(), [
+    "SKILL.md",
+    "deploy/SKILL.md",
+    "deploy/run.py",
+  ]);
+  const direct = await readRegistrySkillsFromArchive(zip, {
+    ...source,
+    subpath: "skills/onboard/deploy",
+  });
+  assert.equal(direct.skills[0]!.repoSubpath, "skills/onboard/deploy");
+  assert.equal(direct.skills[0]!.files.length, 2);
+});
+
+test("complete 400-file bundle and 31 MiB asset pass the new shared limits", async () => {
+  const source = {
+    owner: "acme",
+    repo: "skills",
+    subpath: "",
+    repoUrl: "https://github.com/acme/skills",
+    sourceUrl: "https://github.com/acme/skills",
+    commitSha: "a".repeat(40),
+    committedAt: "2026-02-01T10:00:00Z",
+  };
+  const input = {
+    "SKILL.md": strToU8("---\nname: large\ndescription: Large\n---\nBody"),
+    "assets/demo.bin": new Uint8Array(31 * 1024 * 1024),
+    ...Object.fromEntries(
+      Array.from({ length: 398 }, (_, i) => [
+        `references/${i}.md`,
+        strToU8(`Note ${i}`),
+      ]),
+    ),
+  };
+  const read = await readRegistrySkillsFromArchive(zipball(input), source);
+  assert.equal(read.skills[0]!.rejection, undefined);
+  assert.equal(read.skills[0]!.files.length, 400);
+  assert.equal(
+    read.skills[0]!.files.find((f) => f.bundlePath === "assets/demo.bin")!
+      .sizeBytes,
+    31 * 1024 * 1024,
+  );
 });

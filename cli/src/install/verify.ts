@@ -9,11 +9,9 @@ import { METADATA_FILE } from "./metadata";
 /**
  * Holds downloaded bytes to the registry's record of them.
  *
- * The record lists the files the registry indexed, scanned and hashed. What is
- * installed is exactly those files — nothing the repository holds beyond them,
- * and nothing short of them — and each one's bytes must hash to what was
- * recorded. So a skill is only ever installed as the content that was scanned,
- * not as whatever the upstream branch happens to hold now.
+ * Every source file is held to its recorded bytes before installation.
+ * A subsequent local metadata adapter records its installed hashes and keeps
+ * the original SKILL.md, so loader compatibility does not replace source proof.
  */
 
 export type ManifestFile = {
@@ -30,6 +28,8 @@ export type VerificationProblem =
   | { kind: "reserved-name"; path: string }
   | { kind: "missing-skill-md" }
   | { kind: "too-many-files"; count: number }
+  | { kind: "file-too-large"; path: string }
+  | { kind: "bundle-too-large" }
   | { kind: "missing"; path: string }
   | { kind: "size-mismatch"; path: string; expected: number; actual: number }
   | { kind: "hash-mismatch"; path: string; expected: string; actual: string };
@@ -53,6 +53,10 @@ export class VerificationError extends Error {
 
 export function describeProblem(problem: VerificationProblem): string {
   switch (problem.kind) {
+    case "file-too-large":
+      return `file '${problem.path}' exceeds the shared per-file limit`;
+    case "bundle-too-large":
+      return "bundle exceeds the shared total-byte limit";
     case "unsafe-path":
       return `'${problem.path}' is not a safe path`;
     case "case-collision":
@@ -80,7 +84,14 @@ export function checkManifest(
   if (manifest.length > SKILL_STORAGE_LIMITS.maxFiles) {
     problems.push({ kind: "too-many-files", count: manifest.length });
   }
+  if (
+    manifest.reduce((total, file) => total + file.sizeBytes, 0) >
+    SKILL_STORAGE_LIMITS.maxBundleBytes
+  )
+    problems.push({ kind: "bundle-too-large" });
   for (const file of manifest) {
+    if (file.sizeBytes > SKILL_STORAGE_LIMITS.maxFileBytes)
+      problems.push({ kind: "file-too-large", path: file.path });
     if (!isSafeBundlePath(file.path)) {
       problems.push({ kind: "unsafe-path", path: file.path });
     } else if (file.path === METADATA_FILE) {

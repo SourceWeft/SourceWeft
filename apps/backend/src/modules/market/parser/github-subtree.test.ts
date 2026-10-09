@@ -1,6 +1,11 @@
+import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { afterEach, expect, test, vi } from "vitest";
-import { readGitHubSubtree, clearGitHubSubtreeCache } from "./github-subtree";
+import {
+  readGitHubSubtree,
+  readPinnedGitHubFiles,
+  clearGitHubSubtreeCache,
+} from "./github-subtree";
 import type { PinnedGitHubSource } from "./github-zip";
 const commit = "a".repeat(40),
   root = "b".repeat(40),
@@ -187,4 +192,33 @@ test("identity Content-Length still refuses over-limit responses before reading"
       tree.readFiles(new Set(["skills/SKILL.md"]), 1024),
     ).rejects.toThrow(/size limit/);
   }
+});
+
+test("stored manifests read only recorded raw paths and honor the requested total ceiling", async () => {
+  const fetched: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      fetched.push(url);
+      return new Response(Uint8Array.from(body));
+    }),
+  );
+  const files = await readPinnedGitHubFiles(
+    source,
+    [{ path: "skills/SKILL.md", sizeBytes: body.length }],
+    { maxFileBytes: 64 * 1024 * 1024, maxTotalBytes: 256 * 1024 * 1024 },
+  );
+  assert.deepEqual([...files.keys()], ["skills/SKILL.md"]);
+  assert.ok(
+    fetched.every((url) =>
+      url.startsWith("https://raw.githubusercontent.com/"),
+    ),
+  );
+  await assert.rejects(
+    readPinnedGitHubFiles(source, [{ path: "../outside", sizeBytes: 1 }], {
+      maxFileBytes: 10,
+      maxTotalBytes: 20,
+    }),
+    /Unsafe/,
+  );
 });

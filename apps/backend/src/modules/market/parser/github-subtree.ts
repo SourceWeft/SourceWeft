@@ -1,3 +1,4 @@
+import { retryTransientSourceRead } from "@sourceweft/skill-format";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import {
@@ -83,7 +84,7 @@ function safePath(path: string) {
     path.split("/").every((p) => p !== "" && p !== "." && p !== "..")
   );
 }
-async function bytes(
+async function singleReadBytes(
   url: string,
   headers: Record<string, string>,
   limit: number,
@@ -141,6 +142,18 @@ async function bytes(
   return Buffer.concat(chunks, total);
 }
 
+async function bytes(
+  url: string,
+  headers: Record<string, string>,
+  limit: number,
+  options?: GitHubRequestOptions,
+) {
+  return retryTransientSourceRead(
+    () => singleReadBytes(url, headers, limit, options),
+    options?.signal,
+  );
+}
+
 /** Complete explicit subtree at an already provenance-verified immutable commit. Never follows symlinks or submodules. */
 export async function readGitHubSubtree(
   source: PinnedGitHubSource,
@@ -170,7 +183,11 @@ export async function readGitHubSubtree(
         "ARCHIVE_TOO_LARGE",
         "GitHub subtree listing is truncated; submit a smaller root",
       );
-    if (result.tree.length > GITHUB_ZIP_LIMITS.maxEntries)
+    if (
+      result.tree.filter((entry) => entry.type !== "tree").length >
+        GITHUB_ZIP_LIMITS.maxEntries ||
+      result.tree.length > GITHUB_ZIP_LIMITS.maxEntries * 2
+    )
       throw new GitHubArchiveError(
         "ARCHIVE_TOO_LARGE",
         "GitHub subtree exceeds entry limit",
@@ -210,7 +227,11 @@ export async function readGitHubSubtree(
   }
   return {
     entries: [...blobs].map(([path, e]) => ({ path, declaredSize: e.size! })),
-    async readFiles(wanted: ReadonlySet<string>, maxFileBytes: number) {
+    async readFiles(
+      wanted: ReadonlySet<string>,
+      maxFileBytes: number,
+      maxTotalBytes: number = GITHUB_ZIP_LIMITS.maxTotalUncompressedBytes,
+    ) {
       let declared = 0;
       for (const path of wanted) {
         const e = blobs.get(path);
@@ -222,7 +243,7 @@ export async function readGitHubSubtree(
             "Subtree file exceeds size limit",
           );
       }
-      if (declared > GITHUB_ZIP_LIMITS.maxTotalUncompressedBytes)
+      if (declared > maxTotalBytes)
         throw new GitHubArchiveError(
           "ARCHIVE_TOO_LARGE",
           "Subtree exceeds total size limit",
@@ -232,7 +253,7 @@ export async function readGitHubSubtree(
       let next = 0;
       let stopped = false;
       const outcomes = await Promise.allSettled(
-        Array.from({ length: Math.min(4, paths.length) }, async () => {
+        Array.from({ length: Math.min(8, paths.length) }, async () => {
           try {
             while (!stopped && next < paths.length) {
               const path = paths[next++]!;
@@ -267,4 +288,64 @@ export async function readGitHubSubtree(
       return files;
     },
   };
+}
+
+/** Read a stored version's exact recorded paths; unrelated repository bytes are never fetched. */
+export async function readPinnedGitHubFiles(
+  source: { owner: string; repo: string; commitSha: string },
+  files: readonly { path: string; sizeBytes: number }[],
+  limits: { maxFileBytes: number; maxTotalBytes: number },
+  options?: GitHubRequestOptions,
+): Promise<Map<string, Buffer>> {
+  if (!/^[a-f0-9]{40}$/.test(source.commitSha))
+    fail("Recorded source requires a full commit SHA");
+  if (
+    files.length > GITHUB_ZIP_LIMITS.maxEntries ||
+    files.reduce((sum, file) => sum + file.sizeBytes, 0) > limits.maxTotalBytes
+  )
+    throw new GitHubArchiveError(
+      "ARCHIVE_TOO_LARGE",
+      "Recorded bundle exceeds size limits",
+    );
+  const paths = new Set<string>();
+  for (const file of files) {
+    if (
+      !safePath(file.path) ||
+      paths.has(file.path) ||
+      !Number.isSafeInteger(file.sizeBytes) ||
+      file.sizeBytes < 0
+    )
+      fail("Unsafe recorded bundle path or size");
+    if (file.sizeBytes > limits.maxFileBytes)
+      throw new GitHubArchiveError(
+        "ARCHIVE_TOO_LARGE",
+        "Recorded file exceeds size limit",
+      );
+    paths.add(file.path);
+  }
+  const result = new Map<string, Buffer>();
+  let next = 0,
+    stopped = false;
+  const settled = await Promise.allSettled(
+    Array.from({ length: Math.min(8, files.length) }, async () => {
+      try {
+        while (!stopped && next < files.length) {
+          const file = files[next++]!;
+          const url = `https://raw.githubusercontent.com/${encodeURIComponent(source.owner)}/${encodeURIComponent(source.repo)}/${source.commitSha}/${file.path.split("/").map(encodeURIComponent).join("/")}`;
+          result.set(
+            file.path,
+            await bytes(url, githubDownloadHeaders(), file.sizeBytes, options),
+          );
+        }
+      } catch (error) {
+        stopped = true;
+        throw error;
+      }
+    }),
+  );
+  const failure = settled.find(
+    (value): value is PromiseRejectedResult => value.status === "rejected",
+  );
+  if (failure) throw failure.reason;
+  return result;
 }

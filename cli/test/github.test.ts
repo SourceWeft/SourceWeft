@@ -192,3 +192,81 @@ describe("downloadRepoZip", () => {
     );
   });
 });
+
+it("recorded-file downloads use immutable raw paths and never fetch the repository archive", async () => {
+  const paths: string[] = [];
+  const files = await fetchSkillFiles(
+    source,
+    { subpath: "skills/pdf", manifest: [{ path: "SKILL.md", sizeBytes: 5 }] },
+    {
+      fetch: async (input, init) => {
+        paths.push(String(input));
+        assert.equal(init?.redirect, "manual");
+        return new Response("# pdf");
+      },
+    },
+  );
+  assert.deepEqual(paths, [
+    `https://raw.githubusercontent.com/acme/skills/${SHA}/skills/pdf/SKILL.md`,
+  ]);
+  assert.equal(new TextDecoder().decode(files.get("SKILL.md")), "# pdf");
+});
+it("raw manifest downloads reject unsafe paths and oversized responses", async () => {
+  let calls = 0;
+  const options = {
+    fetch: async () => {
+      calls++;
+      return new Response("too long");
+    },
+  };
+  await assert.rejects(
+    fetchSkillFiles(
+      source,
+      {
+        subpath: "skills/pdf",
+        manifest: [{ path: "../outside", sizeBytes: 1 }],
+      },
+      options,
+    ),
+    /Unsafe/,
+  );
+  assert.equal(calls, 0);
+  await assert.rejects(
+    fetchSkillFiles(
+      source,
+      { subpath: "skills/pdf", manifest: [{ path: "SKILL.md", sizeBytes: 1 }] },
+      options,
+    ),
+    /expected size/,
+  );
+});
+it("raw downloads do not follow redirects or compare encoded length with decoded size", async () => {
+  await assert.rejects(
+    fetchSkillFiles(
+      source,
+      { manifest: [{ path: "SKILL.md", sizeBytes: 5 }] },
+      {
+        token: "test-token",
+        fetch: async (_url, init) => {
+          assert.equal(init?.redirect, "manual");
+          return new Response(null, {
+            status: 302,
+            headers: { location: "https://untrusted.example/x" },
+          });
+        },
+      },
+    ),
+    /302/,
+  );
+  const files = await fetchSkillFiles(
+    source,
+    { manifest: [{ path: "SKILL.md", sizeBytes: 5 }] },
+    {
+      fetch: async () =>
+        new Response("# pdf", {
+          headers: { "content-encoding": "gzip", "content-length": "30" },
+        }),
+    },
+  );
+  assert.equal(files.get("SKILL.md")?.length, 5);
+});

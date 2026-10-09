@@ -30,7 +30,10 @@ import {
 import { fetchSkillFiles } from "../src/source/github";
 
 const SHA = "0123456789abcdef0123456789abcdef01234567";
-const FILES = { "SKILL.md": "# pdf\n", "scripts/run.sh": "echo hi\n" };
+const FILES = {
+  "SKILL.md": "---\nname: pdf\ndescription: Work with PDFs\n---\n# pdf\n",
+  "scripts/run.sh": "echo hi\n",
+};
 
 const archive = zipSync(
   Object.fromEntries([
@@ -115,9 +118,20 @@ describe("registry and GitHub, against local servers", () => {
         );
       }
     });
-    githubServer = createServer((_req, res) =>
-      res.end(Buffer.from(githubBody)),
-    );
+    githubServer = createServer((req, res) => {
+      const prefix = `/acme/skills/${SHA}/skills/pdf/`;
+      if (req.url?.startsWith(prefix)) {
+        const path = decodeURIComponent(req.url.slice(prefix.length));
+        const value = (FILES as Record<string, string>)[path];
+        if (value === undefined) {
+          res.statusCode = 404;
+          res.end();
+          return;
+        }
+        // A changed mocked archive means the upstream file bytes were tampered.
+        res.end(githubBody === archive ? value : value.toUpperCase());
+      } else res.end(Buffer.from(githubBody));
+    });
     await Promise.all([
       new Promise<void>((r) => registryServer.listen(0, "127.0.0.1", r)),
       new Promise<void>((r) => githubServer.listen(0, "127.0.0.1", r)),
@@ -138,6 +152,7 @@ describe("registry and GitHub, against local servers", () => {
     fetchSkillFiles(source, archiveOptions, {
       ...options,
       baseUrl: githubBase,
+      rawBaseUrl: githubBase,
     });
 
   function context(lines: string[]): CommandContext {
@@ -443,4 +458,37 @@ describe("the built binary's exit codes", () => {
   it("falls back to the production registry when none is given", () => {
     assert.equal(normalizeRegistry(undefined), "https://api.sourceweft.com");
   });
+});
+
+it("installs a compatible human title using its separate safe install name", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sw-compatible-name-"));
+  try {
+    const detail = skillResponse();
+    detail.skill.name = "Human Title!";
+    detail.skill.installName = "human-title-12345678";
+    const result = await installFromRegistry({
+      skill: detail,
+      registry: "https://registry.example",
+      root,
+      download: async () =>
+        new Map(
+          Object.entries(FILES).map(([path, text]) => [path, strToU8(text)]),
+        ),
+    });
+    assert.equal(result.dir, join(root, "human-title-12345678"));
+    assert.ok(
+      (await readFile(join(result.dir, "SKILL.md"), "utf8")).includes(
+        "human-title-12345678",
+      ),
+    );
+    assert.equal(
+      await readFile(
+        join(result.dir, result.metadata.originalSkillMd!),
+        "utf8",
+      ),
+      FILES["SKILL.md"],
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

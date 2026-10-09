@@ -12,6 +12,9 @@ export const METADATA_FILE = ".sourceweft.json";
 
 export type InstalledMetadata = {
   schema: 1;
+  installFormatVersion?: number;
+  sourceFiles?: Record<string, string>;
+  originalSkillMd?: string;
   /** The registry the skill was resolved from. */
   registry: string;
   slug: string;
@@ -65,6 +68,16 @@ export function parseMetadata(raw: string): InstalledMetadata | null {
   }
   return {
     schema: 1,
+    ...(typeof value.installFormatVersion === "number"
+      ? { installFormatVersion: value.installFormatVersion }
+      : {}),
+    ...(isRecord(value.sourceFiles) &&
+    Object.values(value.sourceFiles).every((hash) => typeof hash === "string")
+      ? { sourceFiles: value.sourceFiles as Record<string, string> }
+      : {}),
+    ...(typeof value.originalSkillMd === "string"
+      ? { originalSkillMd: value.originalSkillMd }
+      : {}),
     registry: value.registry,
     slug: value.slug,
     ...(typeof value.installRef === "string"

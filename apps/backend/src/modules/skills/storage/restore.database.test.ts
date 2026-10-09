@@ -55,15 +55,18 @@ describe.skipIf(!skillDatabaseEnabled)(
       await data.closeDatabase();
     });
 
-    async function registrySkill() {
+    async function registrySkill(
+      extra: Array<{ path: string; bytes: Buffer; mimeType: string }> = [],
+    ) {
+      const sourceCommit = extra.length ? "b".repeat(40) : commitSha;
       const slug = `gh-restore-${randomUUID()}`;
       const saved = await repo.upsertRegistrySkillIndex({
         slug,
         submitterId: "skill-owner",
         displayName: "Restorable",
         description: "Restorable",
-        commitSha,
-        storagePointer: `github:fixture/skills@${commitSha}#skills/restorable`,
+        commitSha: sourceCommit,
+        storagePointer: `github:fixture/skills@${sourceCommit}#skills/restorable`,
         versionStatus: "published",
         outcome: "indexed",
         files: [
@@ -77,17 +80,18 @@ describe.skipIf(!skillDatabaseEnabled)(
             bytes: Buffer.from(script),
             mimeType: "text/x-python",
           },
+          ...extra,
         ],
         manifestJson: {
           slug,
           displayName: "Restorable",
           description: "Restorable",
-          version: commitSha.slice(0, 12),
+          version: sourceCommit.slice(0, 12),
           visibility: "restricted",
           categories: [],
           registry: {
             identifier: `gh:fixture/skills/${slug}`,
-            sourceUrl: `https://github.com/fixture/skills/tree/${commitSha}/skills/restorable`,
+            sourceUrl: `https://github.com/fixture/skills/tree/${sourceCommit}/skills/restorable`,
             repoUrl: "https://github.com/fixture/skills",
             submittedBy: "skill-owner",
             committedAt: "2026-01-01T00:00:00.000Z",
@@ -106,6 +110,12 @@ describe.skipIf(!skillDatabaseEnabled)(
                 sizeBytes: Buffer.byteLength(script),
                 role: "script",
               },
+              ...extra.map((file) => ({
+                path: file.path,
+                sha256: sha256(file.bytes),
+                sizeBytes: file.bytes.length,
+                role: "asset" as const,
+              })),
             ],
           },
         },
@@ -129,16 +139,18 @@ describe.skipIf(!skillDatabaseEnabled)(
     ) {
       const storage = await import("./index");
       return {
-        downloadZip: async () => {
+        readFiles: async (
+          _source: unknown,
+          wanted: Array<{ path: string }>,
+        ) => {
           calls.download += 1;
-          return Buffer.from("zip");
-        },
-        readEntries: async (_zip: Buffer, keep: (path: string) => boolean) =>
-          new Map(
+          const paths = new Set(wanted.map((file) => file.path));
+          return new Map(
             Object.entries(files)
-              .filter(([path]) => keep(path))
+              .filter(([path]) => paths.has(path))
               .map(([path, text]) => [path, Buffer.from(text)]),
-          ),
+          );
+        },
         putBlob: storage.putSkillBlob,
         putBundle: storage.putSkillBundle,
       } as unknown as import("./restore").SkillRestoreDeps;
@@ -206,15 +218,56 @@ describe.skipIf(!skillDatabaseEnabled)(
       ).rejects.toMatchObject({ code: "SKILL_SOURCE_MISMATCH" });
     });
 
+    test("a complete bundle above 64 MiB restores by its recorded manifest", async () => {
+      const extra = [
+        {
+          path: "assets/a.bin",
+          bytes: Buffer.alloc(34 * 1024 * 1024),
+          mimeType: "application/octet-stream",
+        },
+        {
+          path: "assets/b.bin",
+          bytes: Buffer.alloc(34 * 1024 * 1024, 1),
+          mimeType: "application/octet-stream",
+        },
+      ];
+      const skill = await registrySkill(extra);
+      for (const row of skill.rows) store.objects.delete(row.objectKey!);
+      store.objects.delete(skill.version.bundleObjectKey!);
+      const storage = await import("./index");
+      let calls = 0;
+      await restore.restoreSkillVersionFromSource(skill.skillVersionId, {
+        readFiles: async (source, wanted, limits) => {
+          calls++;
+          expect(source.commitSha).toBe("b".repeat(40));
+          expect(limits.maxTotalBytes).toBe(256 * 1024 * 1024);
+          const bodies = new Map([
+            ["skills/restorable/SKILL.md", Buffer.from(skillMd)],
+            ["skills/restorable/scripts/run.py", Buffer.from(script)],
+            ...extra.map(
+              (file) => [`skills/restorable/${file.path}`, file.bytes] as const,
+            ),
+          ]);
+          expect(wanted.length).toBe(4);
+          return bodies;
+        },
+        putBlob: storage.putSkillBlob,
+        putBundle: storage.putSkillBundle,
+      });
+      expect(calls).toBe(1);
+      for (const row of skill.rows)
+        expect(store.objects.has(row.objectKey!)).toBe(true);
+      expect(store.objects.has(skill.version.bundleObjectKey!)).toBe(true);
+    });
+
     test("an unreachable source says so; a version with no source keeps its own error", async () => {
       const skill = await registrySkill();
       const storage = await import("./index");
       await expect(
         restore.restoreSkillVersionFromSource(skill.skillVersionId, {
-          downloadZip: async () => {
+          readFiles: async () => {
             throw new Error("GitHub zipball download failed 404");
           },
-          readEntries: async () => new Map(),
           putBlob: storage.putSkillBlob,
           putBundle: storage.putSkillBundle,
         } as unknown as import("./restore").SkillRestoreDeps),
