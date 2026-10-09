@@ -1,3 +1,4 @@
+import { performance } from "node:perf_hooks";
 import {
   resolveVolumeLimits,
   VolumeQuotaExceeded,
@@ -49,6 +50,30 @@ import {
   type VolumeScope,
 } from "./repository";
 
+export type VolumeTimedPhase =
+  | "manifest_get"
+  | "manifest_parse"
+  | "chunk_lookup"
+  | "manifest_validate"
+  | "manifest_apply";
+/** Numeric/category-only observations: never keys, URLs, credentials or file paths. */
+export type VolumeMetric =
+  | {
+      phase: VolumeTimedPhase;
+      durationMs: number;
+      outcome: "ok" | "missing" | "error" | "replayed";
+      bytes?: number;
+    }
+  | {
+      phase: "pack_heads";
+      count: number;
+      sumMs: number;
+      wallMs: number;
+      maxInFlight: number;
+      missing: number;
+      failed: number;
+    };
+
 export type VolumeServiceConfig = {
   db: VolumeDatabase;
   store: ObjectStore;
@@ -59,6 +84,8 @@ export type VolumeServiceConfig = {
   now?: () => Date;
   limits?: Partial<VolumeLimits>;
   gcGraceMs?: number;
+  /** Optional synchronous observer; failures never change persistence and increment metricObserverFailures. */
+  onMetric?: (event: Readonly<VolumeMetric>) => void;
 };
 
 export type ControlRequest = {
@@ -107,11 +134,27 @@ function id(bytes = 6): string {
   return randomBytes(bytes).toString("hex");
 }
 
+// Limit repair verification to one operation per process across service instances.
+// Persistent reservations, not this memory limiter, coordinate distinct hosts.
+let repairVerification = Promise.resolve();
+async function boundedRepair<T>(work: () => Promise<T>): Promise<T> {
+  const run = repairVerification.then(work, work);
+  repairVerification = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
 /**
  * Host side of the volume protocol. Everything the sandbox can reach is a pre-signed URL produced
  * here; everything the sandbox sends back is validated before it touches the index.
  */
 export class VolumeService {
+  private observerFailures = 0;
+  get metricObserverFailures(): number {
+    return this.observerFailures;
+  }
   readonly repo: VolumeRepository;
   readonly maintenance: VolumeMaintenance;
   readonly lifecycle: VolumeLifecycle;
@@ -396,6 +439,70 @@ export class VolumeService {
     };
   }
 
+  private emitMetric(event: VolumeMetric): void {
+    try {
+      const result: unknown = this.config.onMetric?.(Object.freeze(event));
+      // An accidentally async observer must not introduce an unhandled rejection.
+      if (result && typeof (result as { then?: unknown }).then === "function")
+        void Promise.resolve(result).catch(() => {
+          this.observerFailures++;
+        });
+    } catch {
+      this.observerFailures++;
+    }
+  }
+  private async measured<T>(
+    phase: VolumeTimedPhase,
+    work: () => Promise<T>,
+  ): Promise<T> {
+    if (!this.config.onMetric) return work();
+    const started = performance.now();
+    try {
+      const value = await work();
+      this.emitMetric({
+        phase,
+        durationMs: performance.now() - started,
+        outcome:
+          value === null
+            ? "missing"
+            : phase === "manifest_apply" && value === false
+              ? "replayed"
+              : "ok",
+        ...(phase === "manifest_get" && value instanceof Uint8Array
+          ? { bytes: value.byteLength }
+          : {}),
+      });
+      return value;
+    } catch (error) {
+      this.emitMetric({
+        phase,
+        durationMs: performance.now() - started,
+        outcome: "error",
+      });
+      throw error;
+    }
+  }
+  private measuredParse(raw: Uint8Array) {
+    if (!this.config.onMetric) return parseManifestObject(raw);
+    const started = performance.now();
+    try {
+      const value = parseManifestObject(raw);
+      this.emitMetric({
+        phase: "manifest_parse",
+        durationMs: performance.now() - started,
+        outcome: "ok",
+      });
+      return value;
+    } catch (error) {
+      this.emitMetric({
+        phase: "manifest_parse",
+        durationMs: performance.now() - started,
+        outcome: "error",
+      });
+      throw error;
+    }
+  }
+
   async recordBootId(attachmentId: string, bootId: string): Promise<void> {
     await this.repo.recordBootId(attachmentId, bootId);
   }
@@ -418,6 +525,30 @@ export class VolumeService {
       signal?: AbortSignal;
     },
   ): Promise<SlotSet> {
+    if (!this.config.store.presignWriteOnceGrant)
+      throw new Error(
+        "object store must provide authoritative signed grant expiry",
+      );
+    let maxExpiry = 0,
+      minExpiry = Number.POSITIVE_INFINITY;
+    const grant = async (key: string): Promise<string> => {
+      const { url, expiresAt } = await this.config.store.presignWriteOnceGrant!(
+        key,
+        this.ttl,
+      );
+      const expiry = Date.prototype.getTime.call(expiresAt);
+      if (
+        typeof url !== "string" ||
+        !url ||
+        !Number.isSafeInteger(expiry) ||
+        expiry <= 0
+      )
+        throw new Error("invalid signed write grant metadata");
+      // Snapshot the numeric value now; a signer-owned Date must not mutate our bound.
+      maxExpiry = Math.max(maxExpiry, expiry);
+      minExpiry = Math.min(minExpiry, expiry);
+      return url;
+    };
     const prefix = this.volumePrefix(attachment.volumeId);
     const reservation = await this.repo.reserveSlots(
       attachment,
@@ -445,9 +576,8 @@ export class VolumeService {
       n++
     ) {
       renewal?.signal?.throwIfAborted();
-      packs[String(n)] = await this.config.store.presignWriteOnce(
+      packs[String(n)] = await grant(
         `${prefix}${this.packPrefix(attachment)}${String(n).padStart(6, "0")}`,
-        this.ttl,
       );
     }
     // A WAL applier can be one commit ahead of the helper's durable state.
@@ -463,10 +593,7 @@ export class VolumeService {
     for (let s = reservation.firstSeq; s <= reservation.lastSeq; s++) {
       renewal?.signal?.throwIfAborted();
       const key = `${prefix}${this.manifestPrefix(attachment)}${s}`;
-      manifests[String(s)] = await this.config.store.presignWriteOnce(
-        key,
-        this.ttl,
-      );
+      manifests[String(s)] = await grant(key);
       renewal?.signal?.throwIfAborted();
       // A PUT grant cannot read an occupied immutable slot. Recovery must compare
       // its exact pending bytes through an independently signed GET for this key.
@@ -475,6 +602,13 @@ export class VolumeService {
         this.ttl,
       );
     }
+    await this.repo.finalizeSlotGrants(attachment, new Date(maxExpiry), {
+      drainId: renewal?.drainId,
+      expectedCapture: renewal?.expectedCapture,
+      signal: renewal?.signal,
+      earliestExpiry: new Date(minExpiry),
+    });
+    renewal?.signal?.throwIfAborted();
     return {
       volume: attachment.volumeId,
       attachment: attachment.id,
@@ -748,13 +882,15 @@ export class VolumeService {
       const head = await this.repo.head(attachment.volumeId);
       const seq = head + 1;
       const ownKey = `${this.manifestPrefix(attachment)}${seq}`;
-      const raw = await this.config.store.get(`${prefix}${ownKey}`, {
-        maxBytes: MAX_MANIFEST_OBJECT_BYTES,
-      });
+      const raw = await this.measured("manifest_get", () =>
+        this.config.store.get(`${prefix}${ownKey}`, {
+          maxBytes: MAX_MANIFEST_OBJECT_BYTES,
+        }),
+      );
       if (raw === null) break;
       processed++;
       try {
-        const parsed = parseManifestObject(raw);
+        const parsed = this.measuredParse(raw);
         const wanted = new Set<string>(
           Object.keys(parsed.manifest.chunks ?? {}),
         );
@@ -766,36 +902,78 @@ export class VolumeService {
                   wanted.add(pair[0]);
               }
           }
-        const known = await this.repo.chunkLocations(
-          attachment.volumeId,
-          [...wanted].filter((id) => /^[0-9a-f]{64}$/.test(id)),
+        const known = await this.measured("chunk_lookup", () =>
+          this.repo.chunkLocations(
+            attachment.volumeId,
+            [...wanted].filter((id) => /^[0-9a-f]{64}$/.test(id)),
+          ),
         );
-        const validated = await validateManifest(parsed.manifest, {
-          volumeId: attachment.volumeId,
-          attachmentId: attachment.id,
-          head,
-          bootId: attachment.bootId,
-          slotsUntilPack: attachment.slotsUntilPack,
-          slotsUntilSeq: attachment.slotsUntilSeq,
-          packPrefix: this.packPrefix(attachment),
-          ownKey,
-          rawLength: parsed.rawLength,
-          inlineRange: parsed.inlineRange,
-          chunkKnown: async (chunkId) => Object.hasOwn(known, chunkId),
-          chunkLength: async (chunkId) => known[chunkId]?.[3] ?? null,
-          packSize: (key) => this.config.store.size(`${prefix}${key}`),
+        const heads = {
+          count: 0,
+          sumMs: 0,
+          maxInFlight: 0,
+          missing: 0,
+          failed: 0,
+        };
+        let inFlight = 0,
+          firstHead = 0,
+          lastHead = 0;
+        const packSize = this.config.onMetric
+          ? async (key: string) => {
+              const started = performance.now();
+              if (heads.count++ === 0) firstHead = started;
+              heads.maxInFlight = Math.max(heads.maxInFlight, ++inFlight);
+              try {
+                const size = await this.config.store.size(`${prefix}${key}`);
+                if (size === null) heads.missing++;
+                return size;
+              } catch (error) {
+                heads.failed++;
+                throw error;
+              } finally {
+                lastHead = performance.now();
+                heads.sumMs += lastHead - started;
+                inFlight--;
+              }
+            }
+          : (key: string) => this.config.store.size(`${prefix}${key}`);
+        const validated = await this.measured("manifest_validate", () =>
+          validateManifest(parsed.manifest, {
+            volumeId: attachment.volumeId,
+            attachmentId: attachment.id,
+            head,
+            bootId: attachment.bootId,
+            slotsUntilPack: attachment.slotsUntilPack,
+            slotsUntilSeq: attachment.slotsUntilSeq,
+            packPrefix: this.packPrefix(attachment),
+            ownKey,
+            rawLength: parsed.rawLength,
+            inlineRange: parsed.inlineRange,
+            chunkKnown: async (chunkId) => Object.hasOwn(known, chunkId),
+            chunkLength: async (chunkId) => known[chunkId]?.[3] ?? null,
+            packSize,
+          }),
+        ).finally(() => {
+          if (this.config.onMetric)
+            this.emitMetric({
+              phase: "pack_heads",
+              ...heads,
+              wallMs: heads.count ? lastHead - firstHead : 0,
+            });
         });
-        const applied = await this.repo.applyManifest(
-          attachment.volumeId,
-          validated.manifest,
-          validated.newChunks,
-          validated.packSizes,
-          {
-            epoch: attachment.epoch,
-            manifestKey: ownKey,
-            manifestHash: createHash("sha256").update(raw).digest("hex"),
-            drainId,
-          },
+        const applied = await this.measured("manifest_apply", () =>
+          this.repo.applyManifest(
+            attachment.volumeId,
+            validated.manifest,
+            validated.newChunks,
+            validated.packSizes,
+            {
+              epoch: attachment.epoch,
+              manifestKey: ownKey,
+              manifestHash: createHash("sha256").update(raw).digest("hex"),
+              drainId,
+            },
+          ),
         );
         if (!applied) continue;
         result.applied += 1;
@@ -844,18 +1022,51 @@ export class VolumeService {
     };
   }
 
-  /** A pack that will not download from the sandbox is copied server-side to a new key and repointed. */
-  async repairPack(volumeId: string, packKey: string): Promise<string> {
-    const prefix = this.volumePrefix(volumeId);
-    const expectedSize = await this.repo.registeredPackSize(volumeId, packKey);
-    if (expectedSize === null)
-      throw new Error("repair pack is not registered to this volume");
-    const newKey = `${packKey}.r${id(3)}`;
-    await this.config.store.copy(`${prefix}${packKey}`, `${prefix}${newKey}`);
-    if ((await this.config.store.size(`${prefix}${newKey}`)) !== expectedSize)
-      throw new Error("repaired pack size does not match registered object");
-    await this.repo.repointPack(volumeId, packKey, newKey);
-    return newKey;
+  /** A bounded, byte-verified repair. Unknown external results remain registered and charged. */
+  async repairPack(
+    volumeId: string,
+    packKey: string,
+    options: { reservationKey?: string } = {},
+  ): Promise<string> {
+    const reservation = await this.repo.reserveRepair(
+      volumeId,
+      packKey,
+      options.reservationKey ?? `${packKey}.r${id(12)}`,
+      options.reservationKey !== undefined,
+    );
+    if (reservation.state === "complete") return reservation.packKey;
+    return boundedRepair(async () => {
+      const prefix = this.volumePrefix(volumeId);
+      // The source body leaves scope before target GET; no second retained 64 MiB body.
+      const digest = async (key: string): Promise<string | null> => {
+        const bytes = await this.config.store.get(`${prefix}${key}`, {
+          maxBytes: reservation.sizeBytes,
+        });
+        if (bytes === null) return null;
+        if (bytes.length !== reservation.sizeBytes)
+          throw new Error(
+            "repair object length differs from reservation; reservation retained",
+          );
+        return createHash("sha256").update(bytes).digest("hex");
+      };
+      const sourceHash = await digest(packKey);
+      if (sourceHash === null)
+        throw new Error("repair source is missing; reservation retained");
+      let targetHash = await digest(reservation.packKey);
+      if (targetHash === null) {
+        await this.config.store.copy(
+          `${prefix}${packKey}`,
+          `${prefix}${reservation.packKey}`,
+        );
+        targetHash = await digest(reservation.packKey);
+      }
+      if (targetHash === null || targetHash !== sourceHash)
+        throw new Error(
+          "repair object does not match complete source bytes; reservation retained",
+        );
+      await this.repo.finishRepair(reservation);
+      return reservation.packKey;
+    });
   }
 
   /** Make the state at `seq` the new head (point-in-time recovery). Returns the new head. */

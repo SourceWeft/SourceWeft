@@ -116,7 +116,7 @@ function confirmedFlush(
 }
 
 const DEFAULT_ROOT = "/workspace";
-export const REQUIRED_HELPER_VERSION = "0.4.0";
+export const REQUIRED_HELPER_VERSION = "0.5.0";
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;

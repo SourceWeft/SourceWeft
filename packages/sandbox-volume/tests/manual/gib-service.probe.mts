@@ -1,3 +1,4 @@
+import { fixtureWriteGrant } from "../fixtures/write-grant";
 import assert from "node:assert/strict";
 import { createHash, createCipheriv, randomUUID } from "node:crypto";
 import * as fs from "node:fs";
@@ -57,6 +58,7 @@ function durable(path: string, b: any) {
 }
 const objectPath = (key: string) => join(root, "objects", sha(key));
 const store = {
+  presignWriteOnceGrant: fixtureWriteGrant,
   async presignWriteOnce(k: string) {
     return "fixture:" + k;
   },

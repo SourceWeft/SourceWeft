@@ -73,12 +73,50 @@ export type SandboxVolumeScope = {
   threadId: string;
 };
 
+/** Supplied only by protected bootstrap from the original fixed lower plan and
+ * actual root dispatcher launch. This is host attestation, not proof that a
+ * generic process PID owns a kernel FUSE connection. No workload pidfiles. */
+export type SandboxLazyMountRegistration = {
+  volumeId: string;
+  attachmentId: string;
+  bootId: string;
+  fixedBaseSeq: number;
+  planSha256: string;
+  planPath: string;
+  mountPath: string;
+  mountId: number;
+  deviceMajor: number;
+  deviceMinor: number;
+  fsName: "swvol";
+  fsType: "fuse" | "fuse.swvol";
+  dispatcherPid: number;
+  dispatcherStartTime: string;
+  dispatcherExecutable: string;
+};
+export type SandboxLazyMountStatus =
+  | { required: true; state: "unregistered" }
+  | {
+      required: true;
+      state: "registered";
+      controllerNonce: string;
+      registration: SandboxLazyMountRegistration;
+    }
+  | {
+      required: true;
+      state: "fenced";
+      reason: string;
+      controllerNonce?: string;
+      registration?: SandboxLazyMountRegistration;
+    };
+
 export type SandboxSupervisorIdentity = {
   protocolVersion: 1;
   boundary: "pid-namespace";
   protectedControl: true;
   bootId: string;
   supervisorNonce: string;
+  /** A declared required lazy mount can never be omitted as an eager fallback. */
+  lazyMount?: SandboxLazyMountStatus;
   /** Signal-based pauses do not establish a persistence barrier. No shipped provider implements this capability. */
   stableFreeze:
     | {
@@ -96,6 +134,13 @@ export type SandboxSupervisorIdentity = {
 
 /** Narrow host-only RPC; this surface never accepts shell commands or arbitrary paths. */
 export type SandboxVolumeControl = {
+  /** Bootstrap only; existing/fenced bindings cannot be replaced. No shipped
+   * provider implements this path and the manager never invents its inputs. */
+  registerLazyMount?(input: {
+    providerSandboxId: string;
+    expectedNonce: string;
+    registration: SandboxLazyMountRegistration;
+  }): Promise<SandboxLazyMountStatus>;
   identity(input: {
     providerSandboxId: string;
   }): Promise<SandboxSupervisorIdentity>;

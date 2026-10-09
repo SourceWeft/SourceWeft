@@ -3,6 +3,8 @@ export {
   VolumeControlUnauthorized,
   type ControlRequest,
   type VolumeServiceConfig,
+  type VolumeMetric,
+  type VolumeTimedPhase,
   type ApplyWalResult,
   type AttachFiles,
   type WalEntry,

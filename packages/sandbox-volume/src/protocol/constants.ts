@@ -20,6 +20,8 @@ export const MAX_FILE_BYTES = 8 * 1024 * 1024 * 1024;
 /** Match swvol CDC_MAX and swvol-core decode bounds; larger chunks cannot be restored. */
 export const MAX_CHUNK_RAW_BYTES = 4 * 1024 * 1024;
 export const MAX_CHUNK_COMPRESSED_BYTES = 8 * 1024 * 1024;
+/** Shared external pack bound; the manifest inline object retains its separate envelope budget. */
+export const MAX_PACK_OBJECT_BYTES = 64 * 1024 * 1024;
 export const MAX_PATH_COMPONENT_BYTES = 255;
 export const MAX_PATH_BYTES = 4096;
 /** Linux symlinkat accepts at most PATH_MAX-1 bytes; 4096 cannot be restored. */

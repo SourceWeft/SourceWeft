@@ -3,7 +3,7 @@ export type VolumeLimits = {
   maxLogicalBytes: number;
   maxFileBytes: number;
   maxEntries: number;
-  /** Total bytes of registered packs, including retained history; pending uploads are not registered yet. */
+  /** Registered retained packs plus durable repair reservations. General pending uploads are not fully inventoried. */
   maxObjectBytes: number;
 };
 export const DEFAULT_VOLUME_LIMITS: Readonly<VolumeLimits> = {

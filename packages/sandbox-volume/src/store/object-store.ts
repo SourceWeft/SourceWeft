@@ -16,9 +16,16 @@ import { PRESIGN_TTL_SECONDS } from "../protocol/constants";
  * The few object-store operations the volume service needs. Keys are full bucket keys.
  * Sandboxes never see credentials: they only get pre-signed URLs produced here.
  */
+export type WriteOnceGrant = { url: string; expiresAt: Date };
+
 export type ObjectStore = {
   /** Pre-signed PUT that succeeds only if the key does not exist yet (`If-None-Match: *` is part of the signature). */
   presignWriteOnce(key: string, ttlSeconds?: number): Promise<string>;
+  /** Authoritative expiry from the actual signed grant. Required for service slot issuance. */
+  presignWriteOnceGrant?(
+    key: string,
+    ttlSeconds?: number,
+  ): Promise<WriteOnceGrant>;
   presignGet(key: string, ttlSeconds?: number): Promise<string>;
   get(key: string, options?: { maxBytes: number }): Promise<Uint8Array | null>;
   put(key: string, body: Uint8Array, contentType?: string): Promise<void>;
@@ -71,19 +78,25 @@ export function createS3ObjectStore(config: S3ObjectStoreConfig): ObjectStore {
   });
   const client = new S3Client(clientConfig);
   const bucket = config.bucket;
+  const presignWriteOnce = async (
+    key: string,
+    ttlSeconds = PRESIGN_TTL_SECONDS,
+  ): Promise<string> => {
+    const command = new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      IfNoneMatch: "*",
+    });
+    return getSignedUrl(client, command, {
+      expiresIn: ttlSeconds,
+      signableHeaders: new Set(["host", "if-none-match"]),
+    });
+  };
   return {
-    async presignWriteOnce(key, ttlSeconds = PRESIGN_TTL_SECONDS) {
-      // The conditional header is signed, so a client that omits it gets 403 and one that
-      // sends it against an existing object gets 412: a slot can be written exactly once.
-      const command = new PutObjectCommand({
-        Bucket: bucket,
-        Key: key,
-        IfNoneMatch: "*",
-      });
-      return getSignedUrl(client, command, {
-        expiresIn: ttlSeconds,
-        signableHeaders: new Set(["host", "if-none-match"]),
-      });
+    presignWriteOnce,
+    async presignWriteOnceGrant(key, ttlSeconds = PRESIGN_TTL_SECONDS) {
+      const url = await presignWriteOnce(key, ttlSeconds);
+      return { url, expiresAt: signedWriteExpiry(url) };
     },
     async presignGet(key, ttlSeconds = PRESIGN_TTL_SECONDS) {
       return getSignedUrl(
@@ -237,6 +250,49 @@ export function createS3ObjectStore(config: S3ObjectStoreConfig): ObjectStore {
       );
     },
   };
+}
+
+/** Extract an absolute bound from the actual SigV4 URL, never from a later wall-clock guess. */
+export function signedWriteExpiry(value: string): Date {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("invalid signed grant URL");
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:")
+    throw new Error("invalid signed grant URL");
+  const unique = (name: string): string => {
+    const keys = [...url.searchParams.keys()].filter(
+      (key) => key.toLowerCase() === name.toLowerCase(),
+    );
+    if (keys.length !== 1 || keys[0] !== name)
+      throw new Error("signed grant has missing or ambiguous expiry metadata");
+    return url.searchParams.get(name)!;
+  };
+  const stamp = unique("X-Amz-Date"),
+    seconds = unique("X-Amz-Expires");
+  if (!/^\d{8}T\d{6}Z$/.test(stamp) || !/^[1-9]\d*$/.test(seconds))
+    throw new Error("invalid signed grant expiry metadata");
+  const ttl = Number(seconds);
+  if (!Number.isSafeInteger(ttl) || ttl > 604800)
+    throw new Error("invalid signed grant lifetime");
+  const date = new Date(
+    `${stamp.slice(0, 4)}-${stamp.slice(4, 6)}-${stamp.slice(6, 8)}T${stamp.slice(9, 11)}:${stamp.slice(11, 13)}:${stamp.slice(13, 15)}Z`,
+  );
+  if (
+    !Number.isFinite(date.getTime()) ||
+    date
+      .toISOString()
+      .replaceAll("-", "")
+      .replaceAll(":", "")
+      .replace(".000", "") !== stamp
+  )
+    throw new Error("invalid signed grant date");
+  const expiresAt = new Date(date.getTime() + ttl * 1000);
+  if (!Number.isFinite(expiresAt.getTime()))
+    throw new Error("signed grant expiry is not finite");
+  return expiresAt;
 }
 
 function isNotFound(error: unknown, operation: "get" | "head"): boolean {

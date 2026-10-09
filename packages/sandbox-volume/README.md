@@ -73,12 +73,40 @@ memory qualification and does not demonstrate a low RSS ceiling. Protocol valida
 the actual helper's chunk, path-component, entry-shape and symlink bounds. Invalid Unicode
 must be rejected before replacement decoding can change an indexed filename.
 
-Per-volume transaction quotas cover logical bytes, files, entries and registered objects.
+Upload slots require `ObjectStore.presignWriteOnceGrant` with authoritative expiry metadata.
+The existing string-returning signing method remains available for other callers. The S3
+implementation uses the same conditional PUT signer and reads the exact expiry from its
+unique, valid `X-Amz-Date` and `X-Amz-Expires` fields. Custom stores must supply a corresponding
+actual bound; slot issuance fails closed without one. The service snapshots every expiry,
+checks the actor/boot/epoch/drain and capture fence again under the volume lock, and persists
+the maximum before returning URLs or writing a slots file. Renewal never shortens a previous
+bound. A bundle whose earliest grant has already expired is rejected. This also covers slow
+signing and clock rollback between signatures; it does not use completion time to guess expiry.
+
+Per-volume transaction quotas cover logical bytes, files, entries, registered objects and
+pending repair-copy reservations. Repair reserves physical bytes under the volume lock before
+COPY, retains the original object inventory, and compares complete source/target SHA256 values
+before changing chunk locations. Verification reads at most 64 MiB per object through the
+existing storage deadline, with one verification operation per host process and no retained
+source body during target reads. This bounds inputs, without qualifying a process RSS ceiling.
+Failed or uncertain copies keep their reservation and protect both keys from GC; they do not
+expire automatically. Trusted operators can inspect `repo.listPendingRepairs(volumeId)` and
+resume an existing same-volume/source reservation with `repairPack(..., { reservationKey })`.
+A matching complete copy can finish after restart without another COPY. This verifies transport
+copy integrity; it cannot reconstruct a source whose original bytes are already unavailable.
+
 `service.maintenance.collect(volumeId)` defaults to a dry run and a 24-hour grace period.
-Explicit deletion protects current files, all retained history, inline manifests and all
-active/quarantined/draining attachments. Retired readers currently rely on retained history;
-history expiration needs explicit reader-generation pins first. Unknown bucket objects and deleted-thread outbox cleanup are
-not yet covered. No bucket-wide lifecycle expiration substitutes for this reference check.
+Explicit deletion protects current files, all retained history, inline manifests, pending
+repair source/target keys and all active/quarantined/draining attachments. Retired or superseded
+actors still protect their object namespace until their issued PUT grants expire, including
+derived repair keys. GC expands retained references once per batch and rechecks claims under the volume lock. A deleting tombstone
+withdraws a location while retaining its metadata and charged bytes until external deletion
+succeeds. New commits cannot reuse that withdrawn location; a fresh upload of the same hash
+may replace it and survives old-object deletion finalization. Retired readers currently rely
+on retained history; history expiration needs explicit reader-generation pins first.
+Unknown bucket objects, comprehensive pending-upload inventory, unconsumed signed PUT capacity
+and deleted-thread outbox cleanup remain uncovered. Repair accounting does not close those
+physical quota gaps. No bucket-wide lifecycle expiration substitutes for the reference check.
 
 Remaining production qualification includes the stronger durable-write path, protected provider
 bootstrap, actual renewal/repair integration, safe draining and automatic recovery, scale/soak testing,

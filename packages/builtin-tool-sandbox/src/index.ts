@@ -92,6 +92,8 @@ import type {
   SandboxVolumeExecutor,
   SandboxVolumeControl,
   SandboxSupervisorIdentity,
+  SandboxLazyMountRegistration,
+  SandboxLazyMountStatus,
   SandboxVolumeHooks,
   SandboxVolumeScope,
   SandboxRuntimeLimits,
@@ -177,6 +179,8 @@ export type {
   SandboxVolumeExecutor,
   SandboxVolumeControl,
   SandboxSupervisorIdentity,
+  SandboxLazyMountRegistration,
+  SandboxLazyMountStatus,
   SandboxVolumeHooks,
   SandboxVolumeScope,
 };

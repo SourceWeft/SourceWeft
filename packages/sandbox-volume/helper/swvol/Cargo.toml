@@ -1,6 +1,6 @@
 [package]
 name = "swvol"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 description = "SourceWeft sandbox volume helper (prototype): change detection, chunked incremental sync, restore"
 

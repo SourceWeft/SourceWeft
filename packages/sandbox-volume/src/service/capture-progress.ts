@@ -1,11 +1,12 @@
 import {
   MAX_CHUNK_RAW_BYTES,
+  MAX_PACK_OBJECT_BYTES,
   PACK_SLOTS_PER_ISSUE,
 } from "../protocol/constants";
 import type { CaptureProgress } from "../protocol/types";
 import type { VolumeLimits } from "./quota";
 
-export const MAX_CAPTURE_PACK_BYTES = 64 * 1024 * 1024;
+export const MAX_CAPTURE_PACK_BYTES = MAX_PACK_OBJECT_BYTES;
 export class CaptureProgressRejected extends Error {
   override readonly name = "CaptureProgressRejected";
 }

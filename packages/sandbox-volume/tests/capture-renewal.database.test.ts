@@ -1,3 +1,4 @@
+import { fixtureWriteGrant } from "./fixtures/write-grant";
 import assert from "node:assert/strict";
 import { randomUUID, createHash } from "node:crypto";
 import {
@@ -75,6 +76,7 @@ async function fixture(limits?: Partial<VolumeLimits>) {
   let onHead:
     ((key: string, signal?: AbortSignal) => Promise<void>) | undefined;
   const store: ObjectStore = {
+    presignWriteOnceGrant: fixtureWriteGrant,
     presignWriteOnce: async (key) => {
       signed.push(key);
       return `fixture:${key}`;

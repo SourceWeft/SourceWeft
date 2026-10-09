@@ -1,6 +1,7 @@
 import {
   MAX_CHUNK_RAW_BYTES,
   MAX_CHUNK_COMPRESSED_BYTES,
+  MAX_PACK_OBJECT_BYTES,
   MAX_FILE_BYTES,
   MAX_MANIFEST_ENTRIES,
   MAX_SYMLINK_TARGET_BYTES,
@@ -53,13 +54,16 @@ function isInt(value: unknown): value is number {
 }
 
 /**
- * The 18 checks from the prototype, in the same order. Every failure is a rejection of the whole
- * manifest; the chain stops at this seq and the attachment has to be rebuilt (epoch + 1).
+ * Complete metadata/ownership preflight precedes object I/O. At most four unique
+ * pack HEADs run together; every started request settles before validation fails.
+ * Transport failures remain retryable, while invalid metadata rejects the manifest.
  */
 export async function validateManifest(
   manifest: Manifest,
   ctx: ValidationContext,
 ): Promise<ValidatedManifest> {
+  // Keep the checked metadata stable across asynchronous authoritative lookups.
+  manifest = { ...manifest };
   if (
     manifest.v !== PROTOCOL_VERSION ||
     manifest.volume !== ctx.volumeId ||
@@ -94,8 +98,24 @@ export async function validateManifest(
       Array.isArray(manifest.chunks))
   )
     reject("invalid chunks object");
-  const upserts = Array.isArray(manifest.upserts) ? manifest.upserts : [];
-  const deletes = Array.isArray(manifest.deletes) ? manifest.deletes : [];
+  const upserts = Array.isArray(manifest.upserts)
+    ? manifest.upserts.map((entry) => {
+        if (!entry || typeof entry !== "object") return entry;
+        return {
+          ...entry,
+          ...(Array.isArray(entry.c)
+            ? {
+                c: entry.c.map((pair) =>
+                  Array.isArray(pair) && pair.length === 2
+                    ? ([pair[0], pair[1]] as [string, number])
+                    : pair,
+                ),
+              }
+            : {}),
+        };
+      })
+    : [];
+  const deletes = Array.isArray(manifest.deletes) ? [...manifest.deletes] : [];
   if (upserts.length + deletes.length > MAX_MANIFEST_ENTRIES) {
     reject("too many entries");
   }
@@ -105,13 +125,24 @@ export async function validateManifest(
     !Array.isArray(manifest.chunks)
       ? manifest.chunks
       : {};
+  // Snapshot every tuple before chunkKnown can yield. Five retained elements
+  // suffice to keep overlong arrays invalid without duplicating unbounded input.
+  const declaredLocations = Object.entries(declared).map(
+    ([id, location]) =>
+      [id, Array.isArray(location) ? location.slice(0, 5) : location] as const,
+  );
   const newChunks: Record<string, ChunkLocation> = {};
-  for (const [id, location] of Object.entries(declared)) {
-    if (manifest.full && CHUNK_ID.test(id) && (await ctx.chunkKnown(id)))
-      continue; // the host's own record stands
-    newChunks[id] = location;
+  for (const [id, location] of declaredLocations) {
+    // Check before assigning into a JS record: __proto__ must never install inherited chunks.
+    if (!CHUNK_ID.test(id)) reject("malformed chunk record");
+    if (manifest.full && (await ctx.chunkKnown(id))) continue; // the host's own record stands
+    if (!Array.isArray(location) || location.length !== 4)
+      reject("malformed chunk record");
+    // This private snapshot is length-checked here; primitive bounds are checked below.
+    newChunks[id] = location as ChunkLocation;
   }
   const packSizes = new Map<string, number>();
+  const packEnds = new Map<string, number>();
   for (const [id, location] of Object.entries(newChunks)) {
     if (
       !CHUNK_ID.test(id) ||
@@ -147,7 +178,7 @@ export async function validateManifest(
       !PACK_NAME.test(pack.slice(ctx.packPrefix.length))
     ) {
       reject(
-        `chunk points outside this attachment's packs: ${String(pack).slice(0, 80)}`,
+        `chunk points outside this attachment's packs: ${typeof pack === "string" ? pack.slice(0, 80) : "non-string key"}`,
       );
     }
     if (
@@ -155,18 +186,12 @@ export async function validateManifest(
       Number(pack.slice(ctx.packPrefix.length)) >= ctx.slotsUntilPack
     )
       reject("pack has no issued slot");
-    let size = packSizes.get(pack);
-    if (size === undefined) {
-      const found = await ctx.packSize(pack);
-      if (found === null)
-        reject(`referenced pack is not in the bucket: ${pack}`);
-      size = found;
-      packSizes.set(pack, size);
-    }
-    if (off + clen > size) reject("chunk extends past the end of its pack");
+    if (off + clen > MAX_PACK_OBJECT_BYTES)
+      reject("chunk bounds exceed the external pack limit");
+    packEnds.set(pack, Math.max(packEnds.get(pack) ?? 0, off + clen));
   }
   const known = async (id: string) =>
-    id in newChunks || (await ctx.chunkKnown(id));
+    Object.hasOwn(newChunks, id) || (await ctx.chunkKnown(id));
   const paths = new Map<string, ManifestEntry>();
   for (const entry of upserts) {
     validateEntryShape(entry);
@@ -218,6 +243,64 @@ export async function validateManifest(
     deleted.add(path);
     if (!isValidVolumePath(path))
       reject(`invalid delete path ${JSON.stringify(path).slice(0, 80)}`);
+  }
+  // Only fully checked actor-owned keys reach the callback. Cache the Promise,
+  // not just its result, so repeated chunks can never schedule duplicate HEADs.
+  const inFlight = new Map<string, Promise<number>>();
+  const keys = [...packEnds.keys()];
+  const failures = new Map<number, unknown>();
+  let cursor = 0;
+  const lookup = (key: string): Promise<number> => {
+    let pending = inFlight.get(key);
+    if (!pending) {
+      pending = Promise.resolve().then(async () => {
+        const size = await ctx.packSize(key);
+        if (size === null)
+          reject(`referenced pack is not in the bucket: ${key}`);
+        if (!isInt(size) || size < 1 || size > MAX_PACK_OBJECT_BYTES)
+          reject("invalid external pack size");
+        if (packEnds.get(key)! > size)
+          reject("chunk extends past the end of its pack");
+        return size;
+      });
+      inFlight.set(key, pending);
+    }
+    return pending;
+  };
+  const workers = Array.from({ length: Math.min(4, keys.length) }, async () => {
+    while (!failures.size && cursor < keys.length) {
+      const index = cursor++,
+        key = keys[index]!;
+      try {
+        packSizes.set(key, await lookup(key));
+      } catch (error) {
+        failures.set(index, error);
+      }
+    }
+  });
+  // Do not abort peers after the first error: preserve all outcomes of requests
+  // already issued, while not scheduling more work after failure is observed.
+  const settled = await Promise.allSettled(workers);
+  for (const [index, result] of settled.entries())
+    if (result.status === "rejected")
+      failures.set(keys.length + index, result.reason);
+  const errors = [...failures.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([, error]) => error);
+  if (errors.length === 1) {
+    if (errors[0] instanceof Error) throw errors[0];
+    throw new AggregateError(errors, "pack HEAD verification failed");
+  }
+  if (errors.length > 1) {
+    const aggregate = new AggregateError(
+      errors,
+      "pack HEAD verification failed",
+    );
+    if (errors.every((error) => error instanceof ManifestRejected))
+      throw new ManifestRejected((errors[0] as ManifestRejected).message, {
+        cause: aggregate,
+      });
+    throw aggregate; // Mixed or unknown infrastructure failures must not force a permanent WAL rejection.
   }
   return {
     manifest: { ...manifest, upserts, deletes, chunks: newChunks },

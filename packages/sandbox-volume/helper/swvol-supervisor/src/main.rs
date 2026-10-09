@@ -1,5 +1,6 @@
 #![cfg(target_os = "linux")]
 mod cgroup;
+mod lazy_mount;
 use anyhow::{bail, ensure, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -28,7 +29,7 @@ extern "C" fn lifecycle_signal(signal: i32) {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 struct Identity {
     boot_id: String,
@@ -60,6 +61,9 @@ struct Gate {
     freeze_kind: Option<String>,
     #[serde(default)]
     last_resumed_kind: Option<String>,
+    lazy_mount_required: bool,
+    #[serde(default)]
+    lazy_mount: Option<lazy_mount::Record>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -74,6 +78,10 @@ struct Launch {
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 enum Request {
     Identity,
+    RegisterLazyMount {
+        expected_nonce: String,
+        registration: lazy_mount::Registration,
+    },
     Open {
         expected_nonce: String,
         drain_id: Option<String>,
@@ -154,6 +162,8 @@ struct Supervisor {
     recovered_executions: HashSet<String>,
     finished_executions: HashSet<String>,
     freezer: Option<cgroup::Freezer>,
+    lazy_guard: Option<Arc<lazy_mount::Guard>>,
+    mount_watch: Arc<Mutex<Option<Arc<lazy_mount::Guard>>>>,
     _lease: File,
 }
 
@@ -163,6 +173,171 @@ fn token(value: &str) -> bool {
         && value
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
+fn valid_kernel_uuid(value: &str) -> bool {
+    let b = value.as_bytes();
+    b.len() == 36
+        && b[14] == b'4'
+        && matches!(b[19], b'8' | b'9' | b'a' | b'b')
+        && b.iter().enumerate().all(|(i, c)| {
+            if matches!(i, 8 | 13 | 18 | 23) {
+                *c == b'-'
+            } else {
+                c.is_ascii_digit() || (b'a'..=b'f').contains(c)
+            }
+        })
+}
+fn digest_hex(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+fn validate_gate(gate: &Gate, state_dir: &Path) -> Result<()> {
+    let identity = |value: &Identity| -> Result<()> {
+        ensure!(
+            valid_kernel_uuid(&value.boot_id) && valid_kernel_uuid(&value.supervisor_nonce),
+            "invalid prior boot/controller UUID"
+        );
+        ensure!(
+            !value.stable_freeze && value.kernel_io_quiescence == "unqualified",
+            "unknown prior kernel-I/O capability"
+        );
+        ensure!(
+            matches!(
+                (
+                    value.freeze_mechanism.as_str(),
+                    value.user_threads_freeze.as_str()
+                ),
+                ("signal-pause", "signal-observation") | ("cgroup-v2-freezer", "kernel-cgroup-v2")
+            ),
+            "unknown prior freeze identity"
+        );
+        Ok(())
+    };
+    identity(&gate.identity)?;
+    ensure!(
+        gate.recovery_ancestry.len() <= 1024,
+        "prior recovery ancestry exceeds its bound"
+    );
+    let mut owners = HashMap::new();
+    owners.insert(gate.identity.supervisor_nonce.as_str(), &gate.identity);
+    for value in gate
+        .recovered_from
+        .iter()
+        .chain(gate.recovery_ancestry.iter())
+    {
+        identity(value)?;
+        if let Some(previous) = owners.insert(value.supervisor_nonce.as_str(), value) {
+            ensure!(
+                previous == value,
+                "prior controller identity contradicts its ancestry"
+            );
+        }
+    }
+    match &gate.recovered_from {
+        None => ensure!(
+            gate.recovery_ancestry.is_empty(),
+            "orphaned recovery ancestry"
+        ),
+        Some(owner) => ensure!(
+            gate.recovery_ancestry.first() == Some(owner),
+            "recovery owner does not match ancestry"
+        ),
+    }
+    for value in [&gate.drain_id, &gate.freeze_id, &gate.last_resumed_freeze]
+        .into_iter()
+        .flatten()
+    {
+        ensure!(token(value), "invalid prior lifecycle fence");
+    }
+    for kind in [&gate.freeze_kind, &gate.last_resumed_kind]
+        .into_iter()
+        .flatten()
+    {
+        ensure!(
+            matches!(kind.as_str(), "signal-pause" | "cgroup-v2-freezer"),
+            "unknown prior lifecycle mechanism"
+        );
+    }
+    ensure!(
+        gate.freeze_id.is_some() == gate.freeze_kind.is_some()
+            && gate.last_resumed_freeze.is_some() == gate.last_resumed_kind.is_some(),
+        "incomplete prior lifecycle fence"
+    );
+    if let Some(digest) = &gate.recovered_journal_digest {
+        ensure!(digest_hex(digest), "invalid prior recovery digest");
+    }
+    if gate.open {
+        ensure!(
+            gate.drain_id.is_none() && gate.freeze_id.is_none() && gate.recovered_from.is_none(),
+            "prior admission contradicts recovery/freeze state"
+        );
+    }
+    if let Some(record) = &gate.lazy_mount {
+        ensure!(
+            gate.lazy_mount_required,
+            "registered lazy mount lacks explicit required intent"
+        );
+        record.registration.validate_persisted_shape(state_dir)?;
+        let owner = owners
+            .get(record.controller_nonce.as_str())
+            .context("lazy registration has no matching prior controller")?;
+        ensure!(
+            owner.boot_id == record.registration.boot_id,
+            "lazy registration boot contradicts its controller"
+        );
+        ensure!(
+            record.sealed_plan_path.as_ref()
+                == Some(&state_dir.join(format!(
+                    "lazy-fixed-plan-{}.json",
+                    record.registration.plan_sha256
+                ))),
+            "lazy original seal identity is incomplete"
+        );
+        match record.state.as_str() {
+            "registered" => ensure!(
+                record.reason.is_none()
+                    && record.controller_nonce == gate.identity.supervisor_nonce,
+                "registered state contradicts current controller"
+            ),
+            "fenced" => ensure!(
+                !gate.open && record.reason.as_ref().is_some_and(|r| token(r)),
+                "fenced registration cannot have open admission or an unknown reason"
+            ),
+            _ => bail!("unknown prior lazy registration state"),
+        }
+    } else if gate.lazy_mount_required {
+        ensure!(
+            !gate.open,
+            "required but unregistered prior mount cannot be open"
+        );
+    }
+    Ok(())
+}
+fn load_gate(path: &Path, state_dir: &Path) -> Result<Gate> {
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK)
+        .open(path)?;
+    let metadata = file.metadata()?;
+    ensure!(
+        metadata.is_file()
+            && metadata.uid() == 0
+            && metadata.mode() & 0o077 == 0
+            && metadata.len() <= MAX_REQUEST as u64,
+        "prior gate is not a bounded protected regular file"
+    );
+    let mut bytes = Vec::new();
+    file.take(MAX_REQUEST as u64 + 1).read_to_end(&mut bytes)?;
+    ensure!(
+        bytes.len() <= MAX_REQUEST,
+        "prior gate byte budget exceeded"
+    );
+    let gate: Gate = serde_json::from_slice(&bytes)?;
+    validate_gate(&gate, state_dir)?;
+    Ok(gate)
 }
 
 fn atomic_json(path: &Path, value: &impl Serialize) -> Result<()> {
@@ -190,6 +365,19 @@ fn private_dir(path: &Path) -> Result<()> {
         metadata.is_dir() && metadata.uid() == 0 && metadata.permissions().mode() & 0o077 == 0,
         "supervisor state directory must be root-owned, non-symlink, mode 0700"
     );
+    // A root-owned leaf below a workload-writable ancestor can be renamed and
+    // replaced. Canonical root-owned ancestry (sticky /tmp excepted) prevents
+    // workload code from redirecting later private journal writes.
+    let canonical = path.canonicalize()?;
+    for ancestor in canonical.ancestors() {
+        let metadata = fs::symlink_metadata(ancestor)?;
+        ensure!(
+            metadata.is_dir()
+                && metadata.uid() == 0
+                && (metadata.mode() & 0o022 == 0 || metadata.mode() & libc::S_ISVTX != 0),
+            "supervisor private state has an unprotected ancestor"
+        );
+    }
     Ok(())
 }
 
@@ -365,6 +553,7 @@ impl Supervisor {
         workload_uid: u32,
         control_uid: u32,
         cgroup_parent: Option<PathBuf>,
+        require_lazy_mount: bool,
     ) -> Result<Self> {
         ensure!(
             unsafe { libc::geteuid() } == 0,
@@ -375,6 +564,10 @@ impl Supervisor {
             "workload identity must be separate from root/control identity"
         );
         private_dir(&state_dir)?;
+        let state_dir = state_dir.canonicalize()?;
+        let previous_lease = fs::symlink_metadata(state_dir.join("supervisor.lock")).is_ok();
+        ensure!(!state_dir.join("gate.tmp").exists(),"LAZY_MOUNT_STARTUP_INCOMPLETE: interrupted gate publication must be preserved for explicit recovery");
+        ensure!(!previous_lease || state_dir.join("gate.json").exists(),"LAZY_MOUNT_STARTUP_INCOMPLETE: previous supervisor lease has no gate; refusing to guess eager mode");
         let lease = OpenOptions::new()
             .read(true)
             .write(true)
@@ -387,6 +580,14 @@ impl Supervisor {
             "another supervisor owns this state directory"
         );
         ensure!(cgroup_parent.is_some() || !state_dir.join("cgroup.json").exists(), "persisted kernel-freezer state requires the explicit original cgroup parent; refusing signal-only downgrade");
+        let previous_gate = state_dir.join("gate.json");
+        // Validate the complete previous authority before generating a new
+        // controller identity or examining/killing any journaled namespace.
+        let persisted = if previous_gate.exists() {
+            Some(load_gate(&previous_gate,&state_dir).context("LAZY_MOUNT_STARTUP_INCOMPLETE: prior gate authority is invalid; preserve data and live writers for explicit recovery")?)
+        } else {
+            None
+        };
         let mut identity = Identity {
             stable_freeze: false,
             freeze_mechanism: "signal-pause".into(),
@@ -399,31 +600,39 @@ impl Supervisor {
                 .trim()
                 .into(),
         };
-        let previous_gate = state_dir.join("gate.json");
-        let (recovered_from, recovery_ancestry) = if previous_gate.exists() {
-            let previous: Gate = serde_json::from_slice(&fs::read(&previous_gate)?)?;
-            let owner = previous
-                .recovered_from
-                .clone()
-                .unwrap_or_else(|| previous.identity.clone());
-            let mut ancestry = previous.recovery_ancestry;
-            if ancestry.is_empty() {
-                ancestry.push(owner.clone());
-            }
-            if ancestry
-                .last()
-                .is_none_or(|item| item.supervisor_nonce != previous.identity.supervisor_nonce)
-            {
-                ancestry.push(previous.identity);
-            }
-            ensure!(
-                ancestry.len() <= 1024,
-                "recovery ancestry exceeds safety bound; retain closed admission"
-            );
-            (Some(owner), ancestry)
-        } else {
-            (None, Vec::new())
-        };
+        let (recovered_from, recovery_ancestry, previous_required, mut previous_mount) =
+            if let Some(previous) = persisted {
+                let owner = previous
+                    .recovered_from
+                    .clone()
+                    .unwrap_or_else(|| previous.identity.clone());
+                let mut ancestry = previous.recovery_ancestry;
+                if ancestry.is_empty() {
+                    ancestry.push(owner.clone());
+                }
+                if ancestry
+                    .last()
+                    .is_none_or(|item| item.supervisor_nonce != previous.identity.supervisor_nonce)
+                {
+                    ancestry.push(previous.identity);
+                }
+                ensure!(
+                    ancestry.len() <= 1024,
+                    "recovery ancestry exceeds safety bound; retain closed admission"
+                );
+                (
+                    Some(owner),
+                    ancestry,
+                    previous.lazy_mount_required,
+                    previous.lazy_mount,
+                )
+            } else {
+                (None, Vec::new(), false, None)
+            };
+        if let Some(record) = &mut previous_mount {
+            record.state = "fenced".into();
+            record.reason = Some("supervisor_restarted_explicit_recovery_required".into());
+        }
         let recovered_journal_digest = Some(recover_namespaces(&state_dir, &identity.boot_id)?);
         let recovered_executions = fs::read_dir(&state_dir)?
             .collect::<std::io::Result<Vec<_>>>()?
@@ -464,8 +673,14 @@ impl Supervisor {
             last_resumed_freeze: None,
             freeze_kind: None,
             last_resumed_kind: None,
+            lazy_mount_required: require_lazy_mount
+                || previous_required
+                || previous_mount.is_some(),
+            lazy_mount: previous_mount,
         };
-        atomic_json(&state_dir.join("gate.json"), &gate)?;
+        atomic_json(&state_dir.join("gate.json"), &gate).context(
+            "LAZY_MOUNT_STARTUP_INCOMPLETE: initial closed intent could not be persisted",
+        )?;
         Ok(Self {
             gate,
             state_dir,
@@ -476,6 +691,8 @@ impl Supervisor {
             recovered_executions,
             finished_executions: HashSet::new(),
             freezer,
+            lazy_guard: None,
+            mount_watch: Arc::new(Mutex::new(None)),
             _lease: lease,
         })
     }
@@ -492,7 +709,91 @@ impl Supervisor {
         atomic_json(&self.state_dir.join("gate.json"), &self.gate)
     }
 
+    fn check_lazy_mount(&mut self, full_hash: bool) -> Result<()> {
+        if self
+            .gate
+            .lazy_mount
+            .as_ref()
+            .is_some_and(|r| r.state == "fenced")
+        {
+            return Ok(());
+        }
+        if let Some(guard) = &self.lazy_guard {
+            if guard.check(full_hash).is_err() {
+                self.gate.open = false;
+                if let Some(record) = &mut self.gate.lazy_mount {
+                    record.state = "fenced".into();
+                    record.reason = Some(
+                        guard
+                            .reason()
+                            .unwrap_or_else(|| "lazy_binding_unverified".into()),
+                    );
+                }
+                // Failure to fsync never reopens memory admission. Restart also
+                // fences any persisted binding before accepting a request.
+                self.persist_gate()?;
+            }
+        }
+        Ok(())
+    }
+    fn require_lazy_ready(&mut self) -> Result<()> {
+        self.check_lazy_mount(true)?;
+        if self.gate.lazy_mount_required {
+            ensure!(self.gate.lazy_mount.as_ref().is_some_and(|r|r.state=="registered") && self.lazy_guard.is_some(),"LAZY_MOUNT_FENCED: a live protected original dispatcher/mount binding is required; preserve upper and pending state");
+        }
+        Ok(())
+    }
+    fn register_lazy_mount(
+        &mut self,
+        registration: lazy_mount::Registration,
+    ) -> Result<serde_json::Value> {
+        ensure!(self.gate.lazy_mount_required,"LAZY_MOUNT_MODE_REQUIRED: protected bootstrap must start --require-lazy-mount; eager nodes cannot dynamically infer lazy intent");
+        if let Some(record) = &self.gate.lazy_mount {
+            ensure!(record.registration==registration && record.state=="registered", "LAZY_MOUNT_FENCED: cannot replace an existing dispatcher or fixed lower registration");
+            self.require_lazy_ready()?;
+            return Ok(serde_json::json!({"lazy_mount":self.gate.lazy_mount,"required":true}));
+        }
+        ensure!(
+            !self.gate.open
+                && self.gate.recovered_from.is_none()
+                && self.gate.drain_id.is_none()
+                && self.gate.freeze_id.is_none(),
+            "lazy registration requires closed fresh bootstrap, not recovery/rebase"
+        );
+        ensure!(
+            self.workloads.is_empty()
+                && self.finished_executions.is_empty()
+                && self.recovered_executions.is_empty(),
+            "lazy binding must precede every workload admission"
+        );
+        let guard = Arc::new(lazy_mount::Guard::bind(
+            registration,
+            &self.state_dir,
+            &self.gate.identity.boot_id,
+        )?);
+        let mut gate = self.gate.clone();
+        gate.open = false;
+        gate.lazy_mount_required = true;
+        gate.lazy_mount = Some(lazy_mount::Record {
+            registration: guard.registration.clone(),
+            controller_nonce: gate.identity.supervisor_nonce.clone(),
+            state: "registered".into(),
+            reason: None,
+            sealed_plan_path: Some(guard.sealed_plan_path.clone()),
+        });
+        atomic_json(&self.state_dir.join("gate.json"), &gate)?;
+        self.gate = gate;
+        self.lazy_guard = Some(guard.clone());
+        *self
+            .mount_watch
+            .lock()
+            .map_err(|_| anyhow::anyhow!("mount watch poisoned"))? = Some(guard);
+        self.require_lazy_ready()?;
+        Ok(serde_json::json!({"lazy_mount":self.gate.lazy_mount,"required":true}))
+    }
+
     fn start(&mut self, launch: Launch) -> Result<serde_json::Value> {
+        self.require_lazy_ready()?;
         ensure!(
             self.gate.open,
             "workload admission is closed for recovery/drain"
@@ -636,6 +937,7 @@ impl Supervisor {
             },
         );
         let authorize = atomic_json(&directory.join("namespace.json"), &journal).and_then(|_| {
+            self.require_lazy_ready()?;
             atomic_json(
                 &directory.join("go.json"),
                 &serde_json::json!({"start":true}),
@@ -680,13 +982,24 @@ impl Supervisor {
         // Every control request collects completed launchers, including new
         // launches when the host never asked for the previous command's result.
         self.reap_finished()?;
+        if self.check_lazy_mount(false).is_err() {
+            eprintln!("lazy mount fence could not be persisted; admission remains closed");
+        }
         match request {
+            Request::RegisterLazyMount {
+                expected_nonce,
+                registration,
+            } => {
+                self.expected(&expected_nonce)?;
+                self.register_lazy_mount(registration)
+            }
             Request::Identity => Ok(serde_json::to_value(&self.gate)?),
             Request::Open {
                 expected_nonce,
                 drain_id,
             } => {
                 self.expected(&expected_nonce)?;
+                self.require_lazy_ready()?;
                 ensure!(self.gate.drain_id == drain_id, "drain fence does not match");
                 ensure!(
                     self.gate.recovered_from.is_none() || drain_id.is_some(),
@@ -701,6 +1014,7 @@ impl Supervisor {
                         || exited(&work.init_fd, Duration::ZERO).unwrap_or(false)),
                     "existing workloads prevent reopening"
                 );
+                self.require_lazy_ready()?;
                 let mut opened = self.gate.clone();
                 opened.open = true;
                 opened.drain_id = None;
@@ -884,6 +1198,7 @@ impl Supervisor {
                 pause_id: freeze_id,
             } => {
                 self.expected(&expected_nonce)?;
+                self.require_lazy_ready()?;
                 if self.gate.open
                     && self.gate.freeze_id.is_none()
                     && self.gate.drain_id.is_none()
@@ -904,6 +1219,7 @@ impl Supervisor {
                     .as_ref()
                     .context("STABLE_FREEZE_UNAVAILABLE")?
                     .thaw()?;
+                self.require_lazy_ready()?;
                 let mut opened = self.gate.clone();
                 opened.open = true;
                 opened.freeze_id = None;
@@ -967,6 +1283,7 @@ impl Supervisor {
                 pause_id: freeze_id,
             } => {
                 self.expected(&expected_nonce)?;
+                self.require_lazy_ready()?;
                 if self.gate.open
                     && self.gate.freeze_id.is_none()
                     && self.gate.drain_id.is_none()
@@ -999,6 +1316,7 @@ impl Supervisor {
                 for work in self.workloads.values() {
                     work.await_receipt("resumed.json", &freeze_id)?;
                 }
+                self.require_lazy_ready()?;
                 let mut opened = self.gate.clone();
                 opened.open = true;
                 opened.freeze_id = None;
@@ -1413,7 +1731,23 @@ fn serve(socket: &Path, supervisor: Supervisor) -> Result<()> {
         "cannot assign control socket owner"
     );
     let owner = supervisor.control_uid;
+    let watch_required = supervisor.gate.lazy_mount_required;
+    let mount_watch = supervisor.mount_watch.clone();
     let supervisor = Arc::new(Mutex::new(supervisor));
+    let watch_state = supervisor.clone();
+    // One pre-created watcher per supervisor, not per request/registration.
+    // pidfd latches failure without waiting for the control-state lock. Every
+    // admission independently verifies the same guard before publishing go.
+    if watch_required {
+        std::thread::Builder::new().name("swvol-lazy-watch".into()).spawn(move||loop {
+        let guard=match mount_watch.lock(){Ok(value)=>value.clone(),Err(_)=>return};
+        if let Some(guard)=guard {
+            guard.poll_death(Duration::from_millis(50));
+            let _=guard.check(false);
+            if guard.reason().is_some(){match watch_state.lock(){Ok(mut state)=>{if state.check_lazy_mount(false).is_err(){eprintln!("lazy mount death fence persistence failed; admission stays closed");}},Err(_)=>return}return;}
+        } else {std::thread::sleep(Duration::from_millis(50));}
+    })?;
+    }
     // Pre-create a bounded control pool before workloads run. A partial request
     // or a fork storm cannot force the listener to spawn unbounded threads.
     let (send, receive) = std::sync::mpsc::sync_channel::<(UnixStream, Instant)>(4);
@@ -1453,7 +1787,11 @@ fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
         Some("version") => println!("swvol-supervisor {VERSION}"),
-        Some("serve") if args.len()==7 || (args.len()==9 && args[7]=="--cgroup-parent") => serve(Path::new(&args[2]), Supervisor::new(PathBuf::from(&args[3]), PathBuf::from(&args[4]), args[5].parse()?, args[6].parse()?, if args.len()==9{Some(PathBuf::from(&args[8]))}else{None})?)?,
+        Some("serve") if args.len()>=7 => {
+            let mut cgroup=None;let mut require_lazy=false;let mut index=7;
+            while index<args.len(){match args[index].as_str(){"--cgroup-parent" if cgroup.is_none()&&index+1<args.len()=>{cgroup=Some(PathBuf::from(&args[index+1]));index+=2},"--require-lazy-mount" if !require_lazy=>{require_lazy=true;index+=1},_=>bail!("unsupported or repeated supervisor option")}}
+            serve(Path::new(&args[2]),Supervisor::new(PathBuf::from(&args[3]),PathBuf::from(&args[4]),args[5].parse()?,args[6].parse()?,cgroup,require_lazy)?)?;
+        },
         Some("init-child") if args.len()==5 => init_child(Path::new(&args[2]), args[3].parse()?, Path::new(&args[4]))?,
         Some("request") if args.len()==3 => {
             let mut request = Vec::new();
@@ -1467,7 +1805,7 @@ fn main() -> Result<()> {
             ensure!(!response.is_empty(),"supervisor closed the control channel without a result");
             print!("{response}");
         }
-        _ => bail!("usage: swvol-supervisor version | serve SOCKET STATE_DIR WORKSPACE WORKLOAD_UID CONTROL_UID [--cgroup-parent PATH] | request SOCKET | init-child STATE_DIR UID WORKSPACE"),
+        _ => bail!("usage: swvol-supervisor version | serve SOCKET STATE_DIR WORKSPACE WORKLOAD_UID CONTROL_UID [--cgroup-parent PATH] [--require-lazy-mount] | request SOCKET | init-child STATE_DIR UID WORKSPACE"),
     }
     Ok(())
 }

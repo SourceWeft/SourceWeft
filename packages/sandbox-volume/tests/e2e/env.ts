@@ -8,7 +8,10 @@ import {
   createS3ObjectStore,
   type ObjectStore,
 } from "../../src/store/object-store";
-import { VolumeService } from "../../src/service/volume-service";
+import {
+  VolumeService,
+  type VolumeMetric,
+} from "../../src/service/volume-service";
 import type { VolumeScope } from "../../src/service/repository";
 
 /**
@@ -62,7 +65,9 @@ export function testConfiguration(env: Record<string, string>) {
   return { databaseUrl: env.SANDBOX_VOLUME_TEST_DATABASE_URL, prefix };
 }
 
-export async function createE2EContext(): Promise<E2EContext> {
+export async function createE2EContext(
+  options: { onMetric?: (event: Readonly<VolumeMetric>) => void } = {},
+): Promise<E2EContext> {
   const env = loadBackendEnv();
   const settings = testConfiguration(env);
   const schema = `swvol_e2e_${randomUUID().replaceAll("-", "")}`;
@@ -118,7 +123,12 @@ export async function createE2EContext(): Promise<E2EContext> {
     },
   });
   const keyPrefix = `${settings.prefix}${randomUUID()}/`;
-  const service = new VolumeService({ db, store, keyPrefix });
+  const service = new VolumeService({
+    db,
+    store,
+    keyPrefix,
+    onMetric: options.onMetric,
+  });
   return {
     env,
     store,

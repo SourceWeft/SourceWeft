@@ -52,55 +52,51 @@ export class VolumeMaintenance {
         result.pinned = true;
         return [] as string[];
       }
-      const rows = await tx.execute<{ pack_key: string }>(sql`
-    select p.pack_key from sandbox_volume_packs p
-    where p.volume_id=${volumeId}
-      and not exists(select 1 from sandbox_volume_commits m where m.volume_id=p.volume_id and m.manifest_key=p.pack_key)
-      and not exists(
-        select 1 from sandbox_volume_chunks c where c.volume_id=p.volume_id and c.pack_key=p.pack_key and (
-          exists(select 1 from sandbox_volume_entries e, jsonb_array_elements(e.chunks) j where e.volume_id=c.volume_id and j->>0=encode(c.chunk_id,'hex'))
-          or exists(select 1 from sandbox_volume_entry_versions e, jsonb_array_elements(e.chunks) j where e.volume_id=c.volume_id and j->>0=encode(c.chunk_id,'hex'))))
-      and not exists(select 1 from sandbox_volume_gc_candidates g where g.volume_id=p.volume_id and g.pack_key=p.pack_key and g.state='deleted')
-    order by p.pack_key limit ${limit}`);
+      const rows = await tx.execute<{ pack_key: string }>(
+        this.unreachable(volumeId, limit),
+      );
       const keys = rows.rows.map((row) => row.pack_key);
-      if (!dryRun)
-        for (const key of keys)
-          await tx.execute(sql`
-    insert into sandbox_volume_gc_candidates(volume_id,pack_key,not_before)
-    values(${volumeId},${key},now()+(${this.graceMs}*interval '1 millisecond')) on conflict do nothing`);
+      if (!dryRun && keys.length)
+        await tx.execute(sql`
+        insert into sandbox_volume_gc_candidates(volume_id,pack_key,not_before) values
+        ${sql.join(
+          keys.map(
+            (key) =>
+              sql`(${volumeId},${key},now()+(${this.graceMs}*interval '1 millisecond'))`,
+          ),
+          sql`, `,
+        )}
+        on conflict do nothing`);
       return keys;
     });
     result.candidates = candidates;
     if (dryRun || result.pinned) return result;
-    // Claim only previously registered objects, after a second reachability check under the same lock as writers.
-    for (const key of candidates) {
-      const claimed = await this.config.db.transaction(async (tx) => {
-        await tx.execute(
-          sql`select id from sandbox_volumes where id=${volumeId} for update`,
-        );
-        const pinned = await tx.execute(
-          sql`select 1 from sandbox_volume_attachments where volume_id=${volumeId} and status in ('active','quarantined','draining') limit 1`,
-        );
-        if (pinned.rows.length) return false;
-        const eligible = await tx.execute(sql`
-     select 1 from sandbox_volume_gc_candidates g join sandbox_volume_packs p using(volume_id,pack_key)
-     where g.volume_id=${volumeId} and g.pack_key=${key} and g.state in ('pending','deleting') and g.not_before<=now()
-       and not exists(select 1 from sandbox_volume_commits m where m.volume_id=g.volume_id and m.manifest_key=g.pack_key)
-       and not exists(select 1 from sandbox_volume_chunks c where c.volume_id=g.volume_id and c.pack_key=g.pack_key and (
-          exists(select 1 from sandbox_volume_entries e,jsonb_array_elements(e.chunks) j where e.volume_id=c.volume_id and j->>0=encode(c.chunk_id,'hex'))
-          or exists(select 1 from sandbox_volume_entry_versions e,jsonb_array_elements(e.chunks) j where e.volume_id=c.volume_id and j->>0=encode(c.chunk_id,'hex'))))
-     for update of g`);
-        if (!eligible.rows.length) return false;
-        await tx.execute(
-          sql`update sandbox_volume_gc_candidates set state='deleting',attempts=attempts+1,last_error=null where volume_id=${volumeId} and pack_key=${key}`,
-        );
-        // Once unreferenced locations are withdrawn, later attachments cannot newly refer to this object.
-        await tx.execute(
-          sql`delete from sandbox_volume_chunks where volume_id=${volumeId} and pack_key=${key}`,
-        );
-        return true;
-      });
-      if (!claimed) continue;
+    // Recheck the whole bounded batch once under the writer lock. A tombstone
+    // withdraws locators without discarding metadata before external success.
+    const claimed = candidates.length
+      ? await this.config.db.transaction(async (tx) => {
+          await tx.execute(
+            sql`select id from sandbox_volumes where id=${volumeId} for update`,
+          );
+          const pinned = await tx.execute(
+            sql`select 1 from sandbox_volume_attachments where volume_id=${volumeId} and status in ('active','quarantined','draining') limit 1`,
+          );
+          if (pinned.rows.length) {
+            result.pinned = true;
+            return [] as string[];
+          }
+          const eligible = await tx.execute<{ pack_key: string }>(
+            this.unreachable(volumeId, limit, candidates),
+          );
+          const keys = eligible.rows.map((row) => row.pack_key);
+          if (keys.length)
+            await tx.execute(
+              sql`update sandbox_volume_gc_candidates set state='deleting',attempts=attempts+1,last_error=null where volume_id=${volumeId} and pack_key=any(${sql.param(keys)}::text[])`,
+            );
+          return keys;
+        })
+      : [];
+    for (const key of claimed) {
       try {
         await this.config.store.deleteObject!(
           `${this.config.keyPrefix}vol/${volumeId}/${key}`,
@@ -109,6 +105,12 @@ export class VolumeMaintenance {
           await tx.execute(
             sql`select id from sandbox_volumes where id=${volumeId} for update`,
           );
+          // External deletion has now positively succeeded. Remove only stale
+          // locators still pointing to that object; concurrent fresh uploads of
+          // the same hash may already have moved their row to another pack.
+          await tx.execute(
+            sql`delete from sandbox_volume_chunks where volume_id=${volumeId} and pack_key=${key}`,
+          );
           await tx.execute(
             sql`delete from sandbox_volume_packs where volume_id=${volumeId} and pack_key=${key}`,
           );
@@ -116,7 +118,7 @@ export class VolumeMaintenance {
             sql`update sandbox_volume_gc_candidates set state='deleted',deleted_at=now(),last_error=null where volume_id=${volumeId} and pack_key=${key}`,
           );
           await tx.execute(
-            sql`update sandbox_volumes set stored_bytes=(select coalesce(sum(size_bytes),0) from sandbox_volume_packs where volume_id=${volumeId}) where id=${volumeId}`,
+            sql`update sandbox_volumes set stored_bytes=(select coalesce(sum(size_bytes),0) from sandbox_volume_packs where volume_id=${volumeId})+(select coalesce(sum(size_bytes),0) from sandbox_volume_object_reservations where volume_id=${volumeId} and state='pending') where id=${volumeId}`,
           );
         });
         result.deleted.push(key);
@@ -128,5 +130,26 @@ export class VolumeMaintenance {
       }
     }
     return result;
+  }
+  /** Expand retained trees once, not once per candidate chunk. History never expires here. */
+  private unreachable(volumeId: string, limit: number, dueKeys?: string[]) {
+    return sql`
+      with referenced_chunks as materialized (
+        select distinct j->>0 as id from (
+          select chunks from sandbox_volume_entries where volume_id=${volumeId}
+          union all select chunks from sandbox_volume_entry_versions where volume_id=${volumeId}
+        ) e cross join lateral jsonb_array_elements(e.chunks) j
+      ), referenced_packs as materialized (
+        select distinct c.pack_key from sandbox_volume_chunks c
+        join referenced_chunks r on r.id=encode(c.chunk_id,'hex') where c.volume_id=${volumeId}
+      )
+      select p.pack_key from sandbox_volume_packs p where p.volume_id=${volumeId}
+        and not exists(select 1 from sandbox_volume_commits m where m.volume_id=p.volume_id and m.manifest_key=p.pack_key)
+        and not exists(select 1 from sandbox_volume_attachments a where a.volume_id=p.volume_id and a.slots_expire_at>now() and starts_with(p.pack_key,'att/'||a.id||'/'))
+        and not exists(select 1 from referenced_packs r where r.pack_key=p.pack_key)
+        and not exists(select 1 from sandbox_volume_object_reservations r where r.volume_id=p.volume_id and r.state='pending' and (r.pack_key=p.pack_key or r.source_key=p.pack_key))
+        and not exists(select 1 from sandbox_volume_gc_candidates g where g.volume_id=p.volume_id and g.pack_key=p.pack_key and g.state='deleted')
+        ${dueKeys ? sql`and p.pack_key=any(${sql.param(dueKeys)}::text[]) and exists(select 1 from sandbox_volume_gc_candidates g where g.volume_id=p.volume_id and g.pack_key=p.pack_key and g.state in ('pending','deleting') and g.not_before<=now())` : sql``}
+      order by p.pack_key limit ${limit}`;
   }
 }

@@ -267,6 +267,11 @@ export class SandboxManager {
     string,
     SandboxSupervisorIdentity
   >();
+  private readonly lazyMountBindings = new Map<string, string>();
+  private readonly lazyMountIntents = new Map<
+    string,
+    { bootId: string; supervisorNonce: string }
+  >();
   private readonly verifiedFreezeBarriers = new Map<
     string,
     { freezeId: string; supervisorNonce: string }
@@ -350,6 +355,7 @@ export class SandboxManager {
             "SANDBOX_VOLUME_SUPERVISOR_UNVERIFIED: attachment requires protected instance identity.",
           );
         }
+        this.assertLazyMount(identity, sandbox.providerSandboxId);
         this.assertStableFreeze(identity);
         return previousSandboxId
           ? volume.onContainerReplaced({ ...attachInput, previousSandboxId })
@@ -380,6 +386,16 @@ export class SandboxManager {
     }
     if (!volume || !attachmentId) return;
     const executor = this.volumeExecutor(sandbox);
+    const control = this.input.provider.volumeControl;
+    if (control) {
+      this.assertLazyMount(
+        await control.identity({
+          providerSandboxId: sandbox.providerSandboxId,
+        }),
+        sandbox.providerSandboxId,
+        attachmentId,
+      );
+    }
     try {
       await volume.assertActive({ attachmentId, executor });
     } catch (error) {
@@ -450,6 +466,11 @@ export class SandboxManager {
         "SANDBOX_VOLUME_SUPERVISOR_UNVERIFIED: protected workload identity was not confirmed.",
       );
     }
+    this.assertLazyMount(
+      identity,
+      input.sandbox.providerSandboxId,
+      attachmentId,
+    );
     this.assertStableFreeze(identity);
     let permit: { permitId: string; reused: boolean };
     for (;;) {
@@ -491,6 +512,26 @@ export class SandboxManager {
         executor: this.volumeExecutor(input.sandbox),
       });
       input.signal?.throwIfAborted();
+      if (
+        identity.lazyMount ||
+        this.lazyMountBindings.has(input.sandbox.providerSandboxId)
+      ) {
+        const fresh = await control.identity({
+          providerSandboxId: input.sandbox.providerSandboxId,
+        });
+        if (
+          fresh.supervisorNonce !== identity.supervisorNonce ||
+          fresh.bootId !== identity.bootId
+        )
+          throw new Error(
+            "SANDBOX_VOLUME_LAZY_MOUNT_UNVERIFIED: controller changed before dispatch; preserve the original workspace",
+          );
+        this.assertLazyMount(
+          fresh,
+          input.sandbox.providerSandboxId,
+          attachmentId,
+        );
+      }
       // This durable transition precedes any provider request. A previous worker's
       // started operation is never dispatched again just because its result was lost.
       if (
@@ -508,6 +549,26 @@ export class SandboxManager {
       const result = await input.run(permit.permitId);
       completedResult = result;
       input.signal?.throwIfAborted();
+      if (
+        identity.lazyMount ||
+        this.lazyMountBindings.has(input.sandbox.providerSandboxId)
+      ) {
+        const fresh = await control.identity({
+          providerSandboxId: input.sandbox.providerSandboxId,
+        });
+        if (
+          fresh.supervisorNonce !== identity.supervisorNonce ||
+          fresh.bootId !== identity.bootId
+        )
+          throw new Error(
+            "SANDBOX_VOLUME_LAZY_MOUNT_UNVERIFIED: controller changed after dispatch; result durability is unknown",
+          );
+        this.assertLazyMount(
+          fresh,
+          input.sandbox.providerSandboxId,
+          attachmentId,
+        );
+      }
       const freezeId = `barrier-${permit.permitId}`;
       const proof = await control.freeze({
         providerSandboxId: input.sandbox.providerSandboxId,
@@ -737,6 +798,100 @@ export class SandboxManager {
     );
   }
 
+  /** A pidfd-backed mount binding is independent of kernel-I/O quiescence.
+   * No mountMode is inferred: protected bootstrap must report required mounts. */
+  private assertLazyMount(
+    identity: SandboxSupervisorIdentity,
+    sandboxId: string,
+    attachmentId?: string,
+  ): void {
+    const previous = this.lazyMountBindings.get(sandboxId);
+    const status = identity.lazyMount;
+    const reject = (): never => {
+      throw new Error(
+        "SANDBOX_VOLUME_LAZY_MOUNT_UNVERIFIED: original dispatcher, mount and fixed lower plan are not verified; preserve upper/pending and do not replay or remount",
+      );
+    };
+    // A required declaration is sticky before attachment creation as well as
+    // after it. Missing fields or a new controller need explicit verified
+    // bootstrap/recovery, never an implicit downgrade to eager behavior.
+    if (status?.required === true && !this.lazyMountIntents.has(sandboxId)) {
+      this.lazyMountIntents.set(sandboxId, {
+        bootId: identity.bootId,
+        supervisorNonce: identity.supervisorNonce,
+      });
+    }
+    const intent = this.lazyMountIntents.get(sandboxId);
+    if (
+      intent &&
+      (intent.bootId !== identity.bootId ||
+        intent.supervisorNonce !== identity.supervisorNonce)
+    )
+      return reject();
+    if (status === undefined && previous === undefined && intent === undefined)
+      return;
+    if (
+      !status ||
+      status.required !== true ||
+      status.state !== "registered" ||
+      status.controllerNonce !== identity.supervisorNonce
+    )
+      return reject();
+    const binding = status.registration;
+    const token = (v: unknown) =>
+      typeof v === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(v);
+    const path = (v: unknown) =>
+      typeof v === "string" &&
+      v.startsWith("/") &&
+      v.length <= 4096 &&
+      !v.includes("\0") &&
+      !v.split("/").some((c) => c === ".." || c === ".");
+    if (
+      !binding ||
+      !token(binding.volumeId) ||
+      !token(binding.attachmentId) ||
+      binding.bootId !== identity.bootId ||
+      (attachmentId !== undefined && binding.attachmentId !== attachmentId) ||
+      !Number.isSafeInteger(binding.fixedBaseSeq) ||
+      binding.fixedBaseSeq < 0 ||
+      !/^[a-f0-9]{64}$/.test(binding.planSha256) ||
+      !path(binding.planPath) ||
+      !path(binding.mountPath) ||
+      !path(binding.dispatcherExecutable) ||
+      !Number.isSafeInteger(binding.mountId) ||
+      binding.mountId <= 0 ||
+      binding.deviceMajor !== 0 ||
+      !Number.isSafeInteger(binding.deviceMinor) ||
+      binding.deviceMinor <= 0 ||
+      binding.fsName !== "swvol" ||
+      (binding.fsType !== "fuse" && binding.fsType !== "fuse.swvol") ||
+      !Number.isSafeInteger(binding.dispatcherPid) ||
+      binding.dispatcherPid <= 1 ||
+      !/^[0-9]+$/.test(binding.dispatcherStartTime)
+    )
+      reject();
+    const key = JSON.stringify([
+      status.controllerNonce,
+      binding.volumeId,
+      binding.attachmentId,
+      binding.bootId,
+      binding.fixedBaseSeq,
+      binding.planSha256,
+      binding.planPath,
+      binding.mountPath,
+      binding.mountId,
+      binding.deviceMajor,
+      binding.deviceMinor,
+      binding.fsName,
+      binding.fsType,
+      binding.dispatcherPid,
+      binding.dispatcherStartTime,
+      binding.dispatcherExecutable,
+    ]);
+    if (previous !== undefined && previous !== key) reject();
+    this.lazyMountBindings.set(sandboxId, key);
+  }
+
   /** Full-scan barrier before a sandbox goes away; a no-op without a volume. */
   private assertStableFreeze(identity: SandboxSupervisorIdentity): void {
     if (
@@ -763,6 +918,15 @@ export class SandboxManager {
     const attachmentId = this.volumeAttachments.get(sandbox.providerSandboxId);
     if (!volume || !attachmentId) return 0;
     const control = this.input.provider.volumeControl;
+    if (control) {
+      this.assertLazyMount(
+        await control.identity({
+          providerSandboxId: sandbox.providerSandboxId,
+        }),
+        sandbox.providerSandboxId,
+        attachmentId,
+      );
+    }
     if (
       !control ||
       !barrier.supervisorNonce ||

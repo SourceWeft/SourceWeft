@@ -1,3 +1,4 @@
+import { fixtureWriteGrant } from "./fixtures/write-grant";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -84,11 +85,21 @@ before(async () => {
       "utf8",
     ).replaceAll('"public".', `"${testSchema}".`),
   );
+  await pool.query(
+    readFileSync(
+      new URL(
+        "../../db/drizzle/0068_sandbox_volume_repairs.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    ).replaceAll('"public".', `"${testSchema}".`),
+  );
   const db = drizzle(pool);
   repo = new VolumeRepository(db);
   service = new VolumeService({
     db,
     store: {
+      presignWriteOnceGrant: fixtureWriteGrant,
       presignWriteOnce: async () => {
         throw new Error("unexpected slot issuance");
       },
@@ -710,6 +721,7 @@ test(
       db: drizzle(pool),
       keyPrefix: "test/",
       store: {
+        presignWriteOnceGrant: fixtureWriteGrant,
         presignWriteOnce: async (key: string) => {
           if (failing && key.endsWith("/p/000003"))
             throw new Error("signer unavailable");
@@ -816,6 +828,7 @@ test(
         "0065_sandbox_volume_control.sql",
         "0066_sandbox_volume_drain.sql",
         "0067_sandbox_volume_recovery.sql",
+        "0068_sandbox_volume_repairs.sql",
       ])
         await legacy.query(
           readFileSync(
@@ -947,6 +960,11 @@ test(
     });
     assert.equal((await gc.maintenance.collect(v.id)).pinned, true);
     await repo.rollback(v.id, 0); // Current tree is empty; retained historical file still pins usedKey.
+    // This test explicitly advances its own issued-grant lifetime before testing object grace.
+    await pool.query(
+      "update sandbox_volume_attachments set slots_expire_at=now()-interval '1 second' where id=$1",
+      [a.id],
+    );
     const dry = await gc.maintenance.collect(v.id);
     assert.deepEqual(dry.candidates, [orphanKey]);
     assert.deepEqual(deleted, []);
@@ -1181,6 +1199,7 @@ test(
       db: drizzle(pool),
       keyPrefix: "test/",
       store: {
+        presignWriteOnceGrant: fixtureWriteGrant,
         presignWriteOnce: async (key: string) => key,
         presignGet: async (key: string) => key,
       } as unknown as ObjectStore,
@@ -1265,6 +1284,7 @@ test(
       keyPrefix: "control/",
       store: {
         get: async (key: string) => (key.endsWith("/m/0/1") ? raw : null),
+        presignWriteOnceGrant: fixtureWriteGrant,
         presignWriteOnce: async (key: string) => key,
         presignGet: async (key: string) => key,
       } as unknown as ObjectStore,
@@ -1486,6 +1506,7 @@ test(
       keyPrefix: "drain/",
       store: {
         get: async (key: string) => (key.endsWith("/m/0/1") ? raw : null),
+        presignWriteOnceGrant: fixtureWriteGrant,
         presignWriteOnce: async (key: string) => key,
         presignGet: async (key: string) => key,
       } as unknown as ObjectStore,
@@ -1592,6 +1613,7 @@ test(
       keyPrefix: "sliding/",
       store: {
         get: async () => null,
+        presignWriteOnceGrant: fixtureWriteGrant,
         presignWriteOnce: async (key: string) => key,
         presignGet: async (key: string) => key,
       } as unknown as ObjectStore,
@@ -2044,6 +2066,7 @@ test(
       db: drizzle(pool),
       keyPrefix: "limit/",
       store: {
+        presignWriteOnceGrant: fixtureWriteGrant,
         presignWriteOnce: unexpected,
         presignGet: unexpected,
         put: unexpected,
@@ -2324,6 +2347,7 @@ test(
       keyPrefix: "manifest-grants/",
       presignTtlSeconds: 73,
       store: {
+        presignWriteOnceGrant: fixtureWriteGrant,
         presignWriteOnce: async (key, ttl) => grant("PUT", key, ttl),
         presignGet: async (key, ttl) => grant("GET", key, ttl),
         get: async () => {

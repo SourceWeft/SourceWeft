@@ -53,6 +53,12 @@ function chunkIdBytes(hex: string): Buffer {
   return Buffer.from(hex, "hex");
 }
 
+// GC retains recoverable metadata until the external deletion succeeds. A claimed
+// locator is nevertheless withdrawn from every reader and new commit immediately.
+function readableChunk() {
+  return sql`not exists(select 1 from sandbox_volume_gc_candidates g where g.volume_id=${sandboxVolumeChunks.volumeId} and g.pack_key=${sandboxVolumeChunks.packKey} and g.state in ('deleting','deleted'))`;
+}
+
 export class VolumeConflict extends Error {
   override readonly name = "VolumeConflict";
 }
@@ -64,6 +70,14 @@ export type ExpectedCapture = {
   baseSeq: number;
   /** Host-measured pending bytes plus a conservative bound for unverified prefix packs. */
   pendingObjectBytes?: number;
+};
+
+export type RepairReservation = {
+  volumeId: string;
+  packKey: string;
+  sourceKey: string;
+  sizeBytes: number;
+  state: "pending" | "complete";
 };
 
 export type CommitIdentity = {
@@ -584,7 +598,7 @@ export class VolumeRepository {
         .set({
           slotsUntilPack: firstPack + allocatePacks,
           slotsUntilSeq: lastSeq,
-          slotsExpireAt: sql`now() + (${ttlSeconds} * interval '1 second')`,
+          slotsExpireAt: sql`greatest(${sandboxVolumeAttachments.slotsExpireAt},now() + (${ttlSeconds} * interval '1 second'))`,
         })
         .where(eq(sandboxVolumeAttachments.id, actor.id))
         .returning();
@@ -599,6 +613,83 @@ export class VolumeRepository {
     });
   }
 
+  /** Persist the actual maximum PUT expiry before any URL is returned or published. */
+  async finalizeSlotGrants(
+    expected: AttachmentRow,
+    expiresAt: Date,
+    options: {
+      drainId?: string;
+      expectedCapture?: ExpectedCapture;
+      signal?: AbortSignal;
+      earliestExpiry?: Date;
+    } = {},
+  ): Promise<void> {
+    if (options.signal !== undefined)
+      AbortSignal.prototype.throwIfAborted.call(options.signal);
+    const expiry = Date.prototype.getTime.call(expiresAt);
+    const earliest = Date.prototype.getTime.call(
+      options.earliestExpiry ?? expiresAt,
+    );
+    if (!Number.isSafeInteger(earliest) || earliest > expiry || earliest <= 0)
+      throw new Error("invalid actual grant expiry range");
+    if (!Number.isSafeInteger(expiry) || expiry <= 0)
+      throw new Error("invalid actual grant expiry");
+    await this.db.transaction(async (tx) => {
+      const head = await this.lockVolume(tx, expected.volumeId);
+      options.signal?.throwIfAborted();
+      const rows = await tx
+        .select()
+        .from(sandboxVolumeAttachments)
+        .where(eq(sandboxVolumeAttachments.id, expected.id));
+      const actor = rows[0],
+        capture = options.expectedCapture;
+      if (
+        !actor ||
+        actor.volumeId !== expected.volumeId ||
+        actor.epoch !== expected.epoch ||
+        actor.bootId !== expected.bootId ||
+        !attachmentCanWrite(actor, options.drainId) ||
+        (capture &&
+          (head !== capture.baseSeq ||
+            actor.bootId !== capture.bootId ||
+            actor.epoch !== capture.epoch))
+      )
+        throw new VolumeConflict(
+          "signed grant actor changed before expiry finalization",
+        );
+      if (capture?.pendingObjectBytes !== undefined) {
+        const [volume] = await tx
+          .select({ storedBytes: sandboxVolumes.storedBytes })
+          .from(sandboxVolumes)
+          .where(eq(sandboxVolumes.id, actor.volumeId));
+        const total = (volume?.storedBytes ?? 0) + capture.pendingObjectBytes;
+        if (!Number.isSafeInteger(total) || total > this.limits.maxObjectBytes)
+          throw new VolumeQuotaExceeded(
+            "maxObjectBytes",
+            total,
+            this.limits.maxObjectBytes,
+          );
+      }
+      const finalized = await tx
+        .update(sandboxVolumeAttachments)
+        .set({
+          slotsExpireAt: sql`greatest(${sandboxVolumeAttachments.slotsExpireAt},${new Date(expiry).toISOString()}::timestamptz)`,
+        })
+        .where(
+          and(
+            eq(sandboxVolumeAttachments.id, actor.id),
+            sql`${new Date(earliest).toISOString()}::timestamptz>clock_timestamp()`,
+          ),
+        )
+        .returning({ id: sandboxVolumeAttachments.id });
+      if (!finalized.length)
+        throw new VolumeConflict(
+          "a signed write grant expired before publication",
+        );
+      options.signal?.throwIfAborted();
+    });
+  }
+
   async chunkLength(volumeId: string, chunkId: string): Promise<number | null> {
     const rows = await this.db
       .select({ length: sandboxVolumeChunks.rawLength })
@@ -607,6 +698,7 @@ export class VolumeRepository {
         and(
           eq(sandboxVolumeChunks.volumeId, volumeId),
           eq(sandboxVolumeChunks.chunkId, chunkIdBytes(chunkId)),
+          readableChunk(),
         ),
       )
       .limit(1);
@@ -621,6 +713,7 @@ export class VolumeRepository {
         and(
           eq(sandboxVolumeChunks.volumeId, volumeId),
           eq(sandboxVolumeChunks.chunkId, chunkIdBytes(chunkId)),
+          readableChunk(),
         ),
       )
       .limit(1);
@@ -728,6 +821,7 @@ export class VolumeRepository {
         .where(
           and(
             eq(sandboxVolumeChunks.volumeId, volumeId),
+            readableChunk(),
             sql`${sandboxVolumeChunks.chunkId} = any(${sql.param(batch, sandboxVolumeChunks.chunkId)}::bytea[])`,
           ),
         );
@@ -929,6 +1023,22 @@ export class VolumeRepository {
           );
       }
       await insertChunks(tx, volumeId, newChunks);
+      // Validation before the transaction can race a GC claim. Recheck this
+      // delta's references while holding the same volume lock as the claim.
+      const references = new Set(
+        (manifest.upserts ?? []).flatMap((entry) =>
+          (entry.c ?? []).map((pair) => pair[0]),
+        ),
+      );
+      if (references.size) {
+        const visible = await new VolumeRepository(
+          tx as unknown as VolumeDatabase,
+        ).chunkLocations(volumeId, references);
+        if (Object.keys(visible).length !== references.size)
+          throw new VolumeConflict(
+            "manifest references a missing or GC-withdrawn chunk",
+          );
+      }
       for (const [packKey, sizeBytes] of packSizes) {
         await tx
           .insert(sandboxVolumePacks)
@@ -943,7 +1053,7 @@ export class VolumeRepository {
         update sandbox_volumes set head_seq = ${seq}, updated_at = now(),
           file_count = (select count(*) from sandbox_volume_entries where volume_id = ${volumeId} and kind = 'f'),
           logical_bytes = (select coalesce(sum(size_bytes), 0) from sandbox_volume_entries where volume_id = ${volumeId} and kind = 'f'),
-          stored_bytes = (select coalesce(sum(size_bytes), 0) from sandbox_volume_packs where volume_id = ${volumeId})
+          stored_bytes = (select coalesce(sum(size_bytes), 0) from sandbox_volume_packs where volume_id = ${volumeId}) + (select coalesce(sum(size_bytes),0) from sandbox_volume_object_reservations where volume_id=${volumeId} and state='pending')
         where id = ${volumeId}`);
       await tx
         .update(sandboxVolumeAttachments)
@@ -972,7 +1082,7 @@ export class VolumeRepository {
         select count(*)::text as entries,
           coalesce(sum(case when kind = 'f' then size_bytes else 0 end),0)::text as logical,
           coalesce(max(case when kind = 'f' then size_bytes else 0 end),0)::text as file,
-          (select coalesce(sum(size_bytes),0)::text from sandbox_volume_packs where volume_id = ${volumeId}) as objects
+          ((select coalesce(sum(size_bytes),0) from sandbox_volume_packs where volume_id = ${volumeId}) + (select coalesce(sum(size_bytes),0) from sandbox_volume_object_reservations where volume_id=${volumeId} and state='pending'))::text as objects
         from sandbox_volume_entries where volume_id = ${volumeId}`);
     const totals = usage.rows[0]!;
     enforceVolumeLimits(this.limits, {
@@ -1063,18 +1173,141 @@ export class VolumeRepository {
     return rows[0]?.size ?? null;
   }
 
-  /** Repoint every chunk of `packKey` to `newKey` (after a server-side copy). */
-  async repointPack(
+  /** Reserve physical bytes before any external copy. Pending results never expire implicitly. */
+  async reserveRepair(
     volumeId: string,
+    sourceKey: string,
     packKey: string,
-    newKey: string,
-  ): Promise<void> {
-    await this.db.transaction(async (tx) => {
+    resume = false,
+  ): Promise<RepairReservation> {
+    return this.db.transaction(async (tx) => {
+      await this.lockVolume(tx, volumeId);
+      const existing = await tx.execute<{
+        source_key: string;
+        size_bytes: string;
+        state: "pending" | "complete";
+      }>(sql`
+        select source_key,size_bytes::text,state from sandbox_volume_object_reservations where volume_id=${volumeId} and pack_key=${packKey}`);
+      if (existing.rows.length) {
+        const row = existing.rows[0]!;
+        if (row.source_key !== sourceKey)
+          throw new VolumeConflict(
+            "repair reservation belongs to another source",
+          );
+        const deleting = await tx.execute(
+          sql`select 1 from sandbox_volume_gc_candidates where volume_id=${volumeId} and pack_key=${packKey} and state in ('deleting','deleted')`,
+        );
+        if (deleting.rows.length)
+          throw new VolumeConflict("repair target has been withdrawn by GC");
+        return {
+          volumeId,
+          sourceKey,
+          packKey,
+          sizeBytes: Number(row.size_bytes),
+          state: row.state,
+        };
+      }
+      if (resume)
+        throw new VolumeConflict(
+          "repair reservation does not exist in this volume",
+        );
+      const sources = await tx.execute<{
+        size_bytes: string;
+      }>(sql`select size_bytes::text from sandbox_volume_packs p where volume_id=${volumeId} and pack_key=${sourceKey}
+        and not exists(select 1 from sandbox_volume_gc_candidates g where g.volume_id=p.volume_id and g.pack_key=p.pack_key and g.state in ('deleting','deleted'))`);
+      const sizeBytes = Number(sources.rows[0]?.size_bytes);
+      if (!sources.rows.length)
+        throw new VolumeConflict(
+          "repair pack is not registered to this volume",
+        );
+      if (
+        !Number.isSafeInteger(sizeBytes) ||
+        sizeBytes <= 0 ||
+        sizeBytes > 64 * 1024 ** 2
+      )
+        throw new VolumeConflict(
+          "repair source exceeds the bounded copy verification limit",
+        );
+      if (
+        packKey === sourceKey ||
+        !packKey.startsWith(sourceKey + ".r") ||
+        !/^[0-9a-f]{24}$/.test(packKey.slice(sourceKey.length + 2))
+      )
+        throw new VolumeConflict("invalid repair target key");
       await tx.execute(
-        sql`update sandbox_volume_chunks set pack_key = ${newKey} where volume_id = ${volumeId} and pack_key = ${packKey}`,
+        sql`insert into sandbox_volume_object_reservations(volume_id,pack_key,source_key,size_bytes) values(${volumeId},${packKey},${sourceKey},${sizeBytes})`,
+      );
+      await this.checkLimits(tx, volumeId);
+      await tx.execute(
+        sql`update sandbox_volumes set stored_bytes=(select coalesce(sum(size_bytes),0) from sandbox_volume_packs where volume_id=${volumeId})+(select coalesce(sum(size_bytes),0) from sandbox_volume_object_reservations where volume_id=${volumeId} and state='pending') where id=${volumeId}`,
+      );
+      return { volumeId, sourceKey, packKey, sizeBytes, state: "pending" };
+    });
+  }
+
+  async listPendingRepairs(
+    volumeId: string,
+    limit = 100,
+  ): Promise<RepairReservation[]> {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1000)
+      throw new Error("invalid repair inventory limit");
+    const result = await this.db.execute<{
+      pack_key: string;
+      source_key: string;
+      size_bytes: string;
+    }>(sql`
+      select pack_key,source_key,size_bytes::text from sandbox_volume_object_reservations where volume_id=${volumeId} and state='pending' order by created_at,pack_key limit ${limit}`);
+    return result.rows.map((row) => ({
+      volumeId,
+      packKey: row.pack_key,
+      sourceKey: row.source_key,
+      sizeBytes: Number(row.size_bytes),
+      state: "pending",
+    }));
+  }
+
+  /** Caller must first compare the complete bounded source/target bytes. Never replace the old inventory row. */
+  async finishRepair(expected: RepairReservation): Promise<void> {
+    const { volumeId, sourceKey, packKey, sizeBytes } = expected;
+    await this.db.transaction(async (tx) => {
+      await this.lockVolume(tx, volumeId);
+      const rows = await tx.execute<{
+        source_key: string;
+        size_bytes: string;
+        state: string;
+      }>(
+        sql`select source_key,size_bytes::text,state from sandbox_volume_object_reservations where volume_id=${volumeId} and pack_key=${packKey} for update`,
+      );
+      const row = rows.rows[0];
+      if (
+        !row ||
+        row.source_key !== sourceKey ||
+        Number(row.size_bytes) !== sizeBytes
+      )
+        throw new VolumeConflict("repair reservation changed");
+      const blocked = await tx.execute(
+        sql`select 1 from sandbox_volume_gc_candidates where volume_id=${volumeId} and pack_key in (${sourceKey},${packKey}) and state in ('deleting','deleted')`,
+      );
+      if (blocked.rows.length)
+        throw new VolumeConflict("repair object was withdrawn by GC");
+      if (row.state === "complete") return;
+      const source = await tx.execute(
+        sql`select 1 from sandbox_volume_packs where volume_id=${volumeId} and pack_key=${sourceKey} and size_bytes=${sizeBytes}`,
+      );
+      if (!source.rows.length)
+        throw new VolumeConflict("repair source inventory changed");
+      await tx.execute(
+        sql`insert into sandbox_volume_packs(volume_id,pack_key,size_bytes) values(${volumeId},${packKey},${sizeBytes})`,
       );
       await tx.execute(
-        sql`update sandbox_volume_packs set pack_key = ${newKey} where volume_id = ${volumeId} and pack_key = ${packKey}`,
+        sql`update sandbox_volume_chunks set pack_key=${packKey} where volume_id=${volumeId} and pack_key=${sourceKey}`,
+      );
+      await tx.execute(
+        sql`update sandbox_volume_object_reservations set state='complete',completed_at=now() where volume_id=${volumeId} and pack_key=${packKey}`,
+      );
+      await this.checkLimits(tx, volumeId);
+      await tx.execute(
+        sql`update sandbox_volumes set stored_bytes=(select coalesce(sum(size_bytes),0) from sandbox_volume_packs where volume_id=${volumeId})+(select coalesce(sum(size_bytes),0) from sandbox_volume_object_reservations where volume_id=${volumeId} and state='pending') where id=${volumeId}`,
       );
     });
   }
@@ -1134,6 +1367,20 @@ async function insertChunks(
         rawLength,
       }));
     if (batch.length)
-      await tx.insert(sandboxVolumeChunks).values(batch).onConflictDoNothing();
+      await tx
+        .insert(sandboxVolumeChunks)
+        .values(batch)
+        .onConflictDoUpdate({
+          target: [sandboxVolumeChunks.volumeId, sandboxVolumeChunks.chunkId],
+          set: {
+            packKey: sql`excluded.pack_key`,
+            off: sql`excluded.off`,
+            compressedLength: sql`excluded.compressed_length`,
+            rawLength: sql`excluded.raw_length`,
+          },
+          // A fresh immutable upload may restore a withdrawn hash. Old readable
+          // locations remain unchanged, including historical readers' locations.
+          setWhere: sql`exists(select 1 from sandbox_volume_gc_candidates g where g.volume_id=${sandboxVolumeChunks.volumeId} and g.pack_key=${sandboxVolumeChunks.packKey} and g.state in ('deleting','deleted'))`,
+        });
   }
 }

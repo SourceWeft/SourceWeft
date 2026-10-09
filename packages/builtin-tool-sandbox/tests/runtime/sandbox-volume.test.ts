@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createSandboxRuntimeForTurn } from "../../src/runtime/runtime";
 import { SandboxManager } from "../../src/runtime/sandbox-manager";
+import { SandboxVolumePersistenceError } from "../../src/runtime/volume-durability";
 import { SourceWeftSandboxBackend } from "../../src/runtime/sourceweft-sandbox-backend";
 import {
   maxSandboxCommandTimeoutMs,
@@ -1391,3 +1392,240 @@ for (const kernelIoQuiescent of [undefined, false]) {
     assert.ok(!calls.includes("confirmation"));
   });
 }
+
+// Contract-only negative tests. The ideal I/O capability below is inherited
+// from the existing future-provider fixture; no real provider is qualified.
+async function declaredLazyFixture() {
+  const state = protectedVolumeOperationFixture();
+  const identity = await state.provider.volumeControl!.identity({
+    providerSandboxId: "provider-sandbox-1",
+  });
+  let reported: typeof identity = {
+    ...identity,
+    lazyMount: {
+      required: true,
+      state: "registered",
+      controllerNonce: identity.supervisorNonce,
+      registration: {
+        volumeId: "vol-1",
+        attachmentId: "att-1",
+        bootId: identity.bootId,
+        fixedBaseSeq: 7,
+        planSha256: "a".repeat(64),
+        planPath: "/private/state/original-plan.json",
+        mountPath: "/private/lower",
+        mountId: 41,
+        deviceMajor: 0,
+        deviceMinor: 57,
+        fsName: "swvol",
+        fsType: "fuse.swvol",
+        dispatcherPid: 101,
+        dispatcherStartTime: "1234",
+        dispatcherExecutable: "/usr/local/bin/swlazy",
+      },
+    },
+  };
+  state.provider.volumeControl!.identity = async () => reported;
+  return {
+    ...state,
+    identity: () => reported,
+    report: (value: typeof identity) => {
+      reported = value;
+    },
+  };
+}
+for (const lazyMount of [
+  { required: true, state: "unregistered" },
+  { required: true, state: "fenced", reason: "dispatcher_exited" },
+] as const) {
+  test(`declared ${lazyMount.state} lazy mount never authorizes attachment or dispatch`, async () => {
+    const f = await declaredLazyFixture();
+    f.report({ ...f.identity(), lazyMount });
+    await assert.rejects(
+      f.manager.getOrCreateThreadSandbox(context),
+      /LAZY_MOUNT_UNVERIFIED/,
+    );
+    assert.deepEqual(f.calls, []);
+    assert.deepEqual(f.executed, []);
+  });
+}
+test("cached required mount cannot disappear as an eager fallback", async () => {
+  const f = await declaredLazyFixture();
+  const sandbox = await f.manager.getOrCreateThreadSandbox(context);
+  await f.manager.volumeAssertActive(sandbox, context);
+  f.report({ ...f.identity(), lazyMount: undefined });
+  await assert.rejects(
+    f.manager.withVolumeOperation({
+      sandbox,
+      context,
+      operationId: "missing-mount",
+      run: async () => {
+        f.calls.push("dispatch");
+      },
+    }),
+    /LAZY_MOUNT_UNVERIFIED/,
+  );
+  assert.deepEqual(f.calls, []);
+});
+test("dispatcher death while acquiring a permit rejects before started and releases only not_started", async () => {
+  const f = await declaredLazyFixture();
+  const sandbox = await f.manager.getOrCreateThreadSandbox(context);
+  f.hooks.acquireOperation = async () => {
+    f.report({
+      ...f.identity(),
+      lazyMount: {
+        required: true,
+        state: "fenced",
+        reason: "dispatcher_exited",
+      },
+    });
+    return { permitId: "permit-1", reused: false };
+  };
+  await assert.rejects(
+    f.manager.withVolumeOperation({
+      sandbox,
+      context,
+      operationId: "mount-died-queued",
+      run: async () => {
+        f.calls.push("dispatch");
+      },
+    }),
+    /LAZY_MOUNT_UNVERIFIED/,
+  );
+  assert.deepEqual(f.calls, ["release:not_started"]);
+});
+test("dispatcher death after command completion never reaches freeze, checkpoint or persistence ACK", async () => {
+  const f = await declaredLazyFixture();
+  const sandbox = await f.manager.getOrCreateThreadSandbox(context);
+  await assert.rejects(
+    f.manager.withVolumeOperation({
+      sandbox,
+      context,
+      operationId: "mount-died-after-run",
+      run: async () => {
+        f.calls.push("dispatch");
+        f.report({
+          ...f.identity(),
+          lazyMount: {
+            required: true,
+            state: "fenced",
+            reason: "dispatcher_exited",
+          },
+        });
+        return { output: "original command completed", exitCode: 0 };
+      },
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof SandboxVolumePersistenceError);
+      assert.equal(error.durability.status, "unknown");
+      assert.equal(error.commandExitCode, 0);
+      assert.equal(error.commandOutput, "original command completed");
+      assert.match(error.message, /LAZY_MOUNT_UNVERIFIED/);
+      return true;
+    },
+  );
+  assert.deepEqual(f.calls, ["started", "dispatch"]);
+  await assert.rejects(
+    f.manager.volumeCheckpoint(sandbox, {
+      drainId: "explicit-drain",
+      supervisorNonce: "supervisor-1",
+    }),
+    /LAZY_MOUNT_UNVERIFIED/,
+  );
+  assert.deepEqual(f.calls, ["started", "dispatch"]);
+});
+test("a new fixed lower generation cannot replace the cached plan under the same dirty workspace", async () => {
+  const f = await declaredLazyFixture();
+  const sandbox = await f.manager.getOrCreateThreadSandbox(context);
+  await f.manager.volumeAssertActive(sandbox, context);
+  const identity = f.identity();
+  assert.equal(identity.lazyMount?.state, "registered");
+  if (identity.lazyMount?.state !== "registered")
+    throw new Error("fixture requires an attested registration");
+  f.report({
+    ...identity,
+    lazyMount: {
+      ...identity.lazyMount,
+      registration: {
+        ...identity.lazyMount.registration,
+        fixedBaseSeq: 8,
+        planSha256: "b".repeat(64),
+      },
+    },
+  });
+  await assert.rejects(
+    f.manager.withVolumeOperation({
+      sandbox,
+      context,
+      operationId: "forbidden-rebase",
+      run: async () => {
+        f.calls.push("dispatch");
+      },
+    }),
+    /LAZY_MOUNT_UNVERIFIED/,
+  );
+  assert.deepEqual(f.calls, []);
+});
+
+test("required intent observed before first attach cannot vanish in its completion window", async () => {
+  const f = await declaredLazyFixture();
+  const attach = f.hooks.attach;
+  f.hooks.attach = async (input) => {
+    const result = await attach(input);
+    f.report({ ...f.identity(), lazyMount: undefined });
+    return result;
+  };
+  const sandbox = await f.manager.getOrCreateThreadSandbox(context);
+  await assert.rejects(
+    f.manager.withVolumeOperation({
+      sandbox,
+      context,
+      operationId: "attach-window-omission",
+      run: async () => {
+        f.calls.push("dispatch");
+      },
+    }),
+    /LAZY_MOUNT_UNVERIFIED/,
+  );
+  assert.deepEqual(f.calls, []);
+});
+test("failed initial required registration cannot retry as omitted eager metadata", async () => {
+  const f = await declaredLazyFixture();
+  f.report({
+    ...f.identity(),
+    lazyMount: { required: true, state: "unregistered" },
+  });
+  await assert.rejects(
+    f.manager.getOrCreateThreadSandbox(context),
+    /LAZY_MOUNT_UNVERIFIED/,
+  );
+  f.report({ ...f.identity(), lazyMount: undefined });
+  await assert.rejects(
+    f.manager.getOrCreateThreadSandbox(context),
+    /LAZY_MOUNT_UNVERIFIED/,
+  );
+  assert.deepEqual(f.calls, []);
+  assert.deepEqual(f.executed, []);
+});
+test("a controller or boot change cannot clear observed required intent before attachment", async () => {
+  const f = await declaredLazyFixture();
+  f.report({
+    ...f.identity(),
+    lazyMount: { required: true, state: "unregistered" },
+  });
+  await assert.rejects(
+    f.manager.getOrCreateThreadSandbox(context),
+    /LAZY_MOUNT_UNVERIFIED/,
+  );
+  f.report({
+    ...f.identity(),
+    bootId: "new-boot",
+    supervisorNonce: "new-controller",
+    lazyMount: undefined,
+  });
+  await assert.rejects(
+    f.manager.getOrCreateThreadSandbox(context),
+    /LAZY_MOUNT_UNVERIFIED/,
+  );
+  assert.deepEqual(f.calls, []);
+});

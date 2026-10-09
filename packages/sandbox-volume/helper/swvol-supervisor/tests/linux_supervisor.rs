@@ -3,7 +3,7 @@
 mod gated_fuse;
 use serde_json::{json, Value};
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
@@ -201,9 +201,115 @@ impl Fixture {
         serde_json::from_str(&line).unwrap()
     }
     fn ok(&self, value: Value) -> Value {
-        let response = self.request(value);
+        let response = self.request(value.clone());
+        if response["ok"] != true {
+            eprintln!(
+                "SUPERVISOR_REQUEST_FAILED request={} response={}",
+                value.to_string().chars().take(4096).collect::<String>(),
+                response
+            );
+            self.failure_diagnostics();
+        }
         assert_eq!(response["ok"], true, "{response}");
         response["result"].clone()
+    }
+    fn failure_diagnostics(&self) {
+        fn tail(path: &std::path::Path) -> String {
+            let Ok(metadata) = fs::symlink_metadata(path) else {
+                return "<absent>".into();
+            };
+            if !metadata.is_file() {
+                return "<not regular>".into();
+            }
+            let Ok(mut file) = fs::File::open(path) else {
+                return "<unreadable>".into();
+            };
+            let _ = file.seek(SeekFrom::Start(metadata.len().saturating_sub(8192)));
+            let mut bytes = Vec::new();
+            let _ = file.take(8192).read_to_end(&mut bytes);
+            String::from_utf8_lossy(&bytes).into_owned()
+        }
+        eprintln!("OWN_GATE {}", tail(&self.root.join("state/gate.json")));
+        let Ok(entries) = fs::read_dir(self.root.join("state")) else {
+            return;
+        };
+        let mut directories: Vec<_> = entries
+            .filter_map(Result::ok)
+            .filter(|e| e.file_name().to_string_lossy().starts_with("exec-"))
+            .map(|e| e.path())
+            .collect();
+        directories.sort();
+        for directory in directories.into_iter().take(8) {
+            for name in [
+                "namespace.json",
+                "freeze-request.json",
+                "frozen.json",
+                "resume-request.json",
+                "resumed.json",
+                "init.log",
+                "stderr",
+            ] {
+                eprintln!(
+                    "OWN_RECEIPT {} {}",
+                    directory.join(name).display(),
+                    tail(&directory.join(name))
+                );
+            }
+            let Ok(bytes) = fs::read(directory.join("namespace.json")) else {
+                continue;
+            };
+            let Ok(journal) = serde_json::from_slice::<Value>(&bytes) else {
+                continue;
+            };
+            let Some(pid) = journal["init_pid"].as_u64() else {
+                continue;
+            };
+            let Ok(stat) = fs::read_to_string(format!("/proc/{pid}/stat")) else {
+                continue;
+            };
+            let same_start = stat
+                .rsplit_once(')')
+                .and_then(|(_, tail)| tail.split_whitespace().nth(19))
+                == journal["init_start_time"].as_str();
+            let same_ns = fs::read_link(format!("/proc/{pid}/ns/pid"))
+                .ok()
+                .as_deref()
+                .and_then(std::path::Path::to_str)
+                == journal["namespace"].as_str();
+            if !same_start || !same_ns {
+                continue;
+            }
+            let proc_root = std::path::PathBuf::from(format!("/proc/{pid}/root/proc"));
+            let Ok(processes) = fs::read_dir(proc_root) else {
+                continue;
+            };
+            for process in processes
+                .filter_map(Result::ok)
+                .filter(|e| e.file_name().to_string_lossy().parse::<u32>().is_ok())
+                .take(32)
+            {
+                let Ok(tasks) = fs::read_dir(process.path().join("task")) else {
+                    continue;
+                };
+                for task in tasks.filter_map(Result::ok).take(8) {
+                    let status = tail(&task.path().join("status"));
+                    let safe: Vec<_> = status
+                        .lines()
+                        .filter(|l| {
+                            ["State:", "Pid:", "Tgid:", "PPid:", "NSpid:"]
+                                .iter()
+                                .any(|prefix| l.starts_with(prefix))
+                        })
+                        .collect();
+                    eprintln!(
+                        "OWN_NAMESPACE_THREAD {} {:?} wchan={}",
+                        task.path().display(),
+                        safe,
+                        tail(&task.path().join("wchan"))
+                    );
+                }
+            }
+        }
     }
     fn open(&self) {
         self.ok(json!({"op":"open","expected_nonce":self.nonce,"drain_id":null}));
@@ -1278,7 +1384,10 @@ fn diagnostic_kernel_pause_does_not_claim_pending_native_aio_is_quiescent() {
     f.ok(json!({"op":"thaw","expected_nonce":f.nonce,"pause_id":"aio-observation"}));
     fs::write(ready.with_file_name("aio-ready.release"), "release").unwrap();
     let result = f.completion("native-aio");
-    assert_eq!(result["completion"]["exit_code"], 0);
+    assert_eq!(
+        result["completion"]["exit_code"], 0,
+        "actual native AIO completion/status: {result}"
+    );
     let verified: Value = serde_json::from_str(result["stdout"].as_str().unwrap()).unwrap();
     assert_eq!(verified["successfulWrites"], 64);
     assert_eq!(verified["writtenBytes"], 268435456u64);
@@ -1476,7 +1585,10 @@ fn gated_native_aio_completes_while_workload_remains_kernel_paused() {
     f.ok(json!({"op":"thaw","expected_nonce":f.nonce,"pause_id":"aio-observation"}));
     fs::write(ready.with_file_name("aio-ready.release"), "release").unwrap();
     let result = f.completion("native-aio");
-    assert_eq!(result["completion"]["exit_code"], 0);
+    assert_eq!(
+        result["completion"]["exit_code"], 0,
+        "actual native AIO completion/status: {result}"
+    );
     let verified: Value = serde_json::from_str(result["stdout"].as_str().unwrap()).unwrap();
     assert_eq!(verified["successfulWrites"], 64);
     assert_eq!(verified["writtenBytes"], 268435456u64);

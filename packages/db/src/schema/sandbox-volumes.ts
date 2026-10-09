@@ -449,3 +449,52 @@ export const sandboxVolumeRecoveries = pgTable(
     ),
   ],
 );
+
+/** Durable physical-copy reservations; unknown external results remain charged and pinned. */
+export const sandboxVolumeObjectReservations = pgTable(
+  "sandbox_volume_object_reservations",
+  {
+    volumeId: text("volume_id")
+      .notNull()
+      .references(() => sandboxVolumes.id, { onDelete: "cascade" }),
+    packKey: text("pack_key").notNull(),
+    sourceKey: text("source_key").notNull(),
+    sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
+    state: text("state")
+      .$type<"pending" | "complete">()
+      .notNull()
+      .default("pending"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
+    completedAt: timestamp("completed_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.volumeId, table.packKey] }),
+    index("sandbox_volume_object_reservations_source_idx").on(
+      table.volumeId,
+      table.sourceKey,
+      table.state,
+    ),
+    index("sandbox_volume_object_reservations_pending_idx").on(
+      table.volumeId,
+      table.state,
+      table.createdAt,
+    ),
+    check(
+      "sandbox_volume_object_reservations_state_check",
+      sql`${table.state} in ('pending','complete')`,
+    ),
+    check(
+      "sandbox_volume_object_reservations_size_check",
+      sql`${table.sizeBytes} > 0 and ${table.sizeBytes} <= 67108864`,
+    ),
+    check(
+      "sandbox_volume_object_reservations_key_check",
+      sql`${table.packKey} <> ${table.sourceKey}`,
+    ),
+  ],
+);

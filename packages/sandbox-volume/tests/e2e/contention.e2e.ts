@@ -148,12 +148,45 @@ test(
 
       const expiredGet = await ctx.store.presignGet(packKey, 1);
       const absentKey = `${ctx.keyPrefix}expiry-never-written`;
-      const expiredPut = await ctx.store.presignWriteOnce(absentKey, 1);
+      assert.ok(
+        ctx.store.presignWriteOnceGrant,
+        "real signed expiry metadata required",
+      );
+      const expiredWriteGrant = await ctx.store.presignWriteOnceGrant(
+        absentKey,
+        1,
+      );
+      const expiredPut = expiredWriteGrant.url;
+      const parameters = new URL(expiredPut).searchParams;
+      const signingDate = parameters.get("X-Amz-Date")!;
+      const parts = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/.exec(
+        signingDate,
+      );
+      assert.ok(parts);
+      const actualExpiry =
+        Date.UTC(
+          Number(parts[1]),
+          Number(parts[2]) - 1,
+          Number(parts[3]),
+          Number(parts[4]),
+          Number(parts[5]),
+          Number(parts[6]),
+        ) +
+        Number(parameters.get("X-Amz-Expires")) * 1000;
+      assert.equal(
+        expiredWriteGrant.expiresAt.getTime(),
+        actualExpiry,
+        "grant metadata must reflect the real request signature",
+      );
       await new Promise((resolve) => setTimeout(resolve, 2500));
       const expired = await fetchAfterConnectRetry(fetch, expiredGet, {
         signal: AbortSignal.timeout(30_000),
       });
       await expired.arrayBuffer();
+      assert.ok(
+        Date.now() > actualExpiry,
+        "real PUT signature must have expired before enforcement check",
+      );
       assert.equal(expired.status, 403);
       assert.equal(await conditionalPut(expiredPut, data[0]!), 403);
       assert.equal(await ctx.store.get(absentKey), null);
@@ -205,6 +238,7 @@ test(
           manifestStatuses: manifestResults,
           historyVerified: true,
           expiredSignaturesRejected: true,
+          actualWriteExpiryVerified: true,
         }),
       );
     } finally {

@@ -53,7 +53,7 @@ docker run --rm --network none --pids-limit 512 "${capabilities[@]}" --tmpfs /en
   '
 
 if [ "$with_fuse" = 1 ]; then
-  echo "Supervisor native aarch64: mandatory real-FUSE gated AIO and owned failed-writer cleanup; both workloads musl. Ordinary-disk timing is NOT RUN/NOT counted as passed."
+  echo "Supervisor native aarch64: mandatory real dispatcher admission faults, real-FUSE gated AIO and owned failed-writer cleanup; both workloads musl. Ordinary-disk timing is NOT RUN/NOT counted as passed."
   docker run --rm --privileged --network none --pids-limit 512 --memory 768m --cpus 2 \
     -v "$PWD":/home/rust/src:ro \
     -v swvol-cargo-registry:/root/.cargo/registry \
@@ -63,6 +63,11 @@ if [ "$with_fuse" = 1 ]; then
       test "$(uname -m)" = aarch64
       test "$(rustc --version | cut -d " " -f 2)" = 1.95.0
       aarch64-unknown-linux-musl-gcc -dumpmachine
+      # Process/executable attestation must use an actual native dispatcher.
+      cargo build --locked --offline --manifest-path swlazy/Cargo.toml --target aarch64-unknown-linux-musl
+      SWVOL_LAZY_BIN=/target/aarch64-unknown-linux-musl/debug/swlazy \
+        cargo test --locked --offline --manifest-path swvol-supervisor/Cargo.toml \
+        --target aarch64-unknown-linux-musl --test dispatcher_guard -- --ignored --nocapture --test-threads=1
       cargo test --locked --offline --manifest-path swvol-supervisor/Cargo.toml \
         --target aarch64-unknown-linux-musl --test linux_supervisor \
         gated_native_aio_completes_while_workload_remains_kernel_paused -- --ignored --nocapture

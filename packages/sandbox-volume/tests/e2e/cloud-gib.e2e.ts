@@ -23,6 +23,7 @@ import {
 // schema/object prefix and newly created sandbox IDs are touched. This proves
 // capture/WAL/eager restore, not protected runtime admission or every POSIX write.
 const enabled = e2eEnabled && process.env.SANDBOX_VOLUME_GIB_E2E === "1";
+const profileEnabled = process.env.SANDBOX_VOLUME_GIB_PROFILE === "1";
 const SIZE_GIB = process.env.SANDBOX_VOLUME_GIB_SIZE ?? "1";
 assert.match(SIZE_GIB, /^[12]$/, "GB test size must explicitly be 1 or 2 GiB");
 const FILES = 128 * Number(SIZE_GIB);
@@ -91,8 +92,20 @@ test(
       settings.CF_SANDBOX_BRIDGE_URL && settings.CF_SANDBOX_API_KEY,
       "explicit Cloudflare credentials required before creating any test resources",
     );
+    const helperBytes = readFileSync(
+      resolve(process.env.SANDBOX_VOLUME_GIB_HELPER_PATH ?? "helper/dist/swvol-x86_64"),
+    );
     const oracle = expected();
-    const ctx = await createE2EContext();
+    let metricStage = "attach";
+    const ctx = await createE2EContext({
+      onMetric: profileEnabled
+        ? (metric) =>
+            console.log(
+              "GIB_WAL_METRIC",
+              JSON.stringify({ stage: metricStage, ...metric }),
+            )
+        : undefined,
+    });
     const provider = createCloudflareSandboxProviderFactory({
       bridgeUrl: ctx.env.CF_SANDBOX_BRIDGE_URL!.replace(/\/$/, ""),
       apiKey: ctx.env.CF_SANDBOX_API_KEY!,
@@ -174,10 +187,7 @@ test(
     };
     try {
       const helperKey = `${ctx.keyPrefix}bin/swvol`;
-      await ctx.store.put(
-        helperKey,
-        readFileSync(resolve(process.cwd(), "helper/dist/swvol-x86_64")),
-      );
+      await ctx.store.put(helperKey, helperBytes);
       const hooks = createVolumeHooks({
         service: ctx.service,
         helper: { downloadUrl: () => ctx.store.presignGet(helperKey, 3600) },
@@ -199,23 +209,24 @@ test(
       console.log(machine.output.trim());
       console.log(
         "GIB_HELPER_SHA256",
-        createHash("sha256")
-          .update(
-            readFileSync(resolve(process.cwd(), "helper/dist/swvol-x86_64")),
-          )
-          .digest("hex"),
+        createHash("sha256").update(helperBytes).digest("hex"),
       );
+      metricStage = "initial-command";
       const started = performance.now();
       const raw = await executor(first).execute(
         hooks.wrapCommand(`python3 -c ${quote(generate)}`),
         { timeoutMs: 900_000 },
       );
+      const commandAndInitialFlushMs = performance.now() - started;
+      metricStage = "initial-confirm";
+      const confirmStarted = performance.now();
       const confirmed = await hooks.parseResult({
         attachmentId: attached.attachmentId,
         output: raw.output,
         exitCode: raw.exitCode,
         executor: executor(first),
       });
+      const confirmationAndRenewalMs = performance.now() - confirmStarted;
       assert.equal(confirmed.exitCode, 0, confirmed.output);
       assert.equal(
         confirmed.sync.persisted,
@@ -257,15 +268,125 @@ test(
           seed: SEED,
           sourceBytes: TOTAL_BYTES,
           sourceAllocatedBytes: generated.allocated,
+          sourceGenerationMs: Number(generated.seconds) * 1000,
+          commandAndInitialFlushMs,
+          confirmationAndRenewalMs,
+          sourceHashVerificationMs:
+            Number(event(original.output).seconds) * 1000,
           storedPackBytes,
           packs: packKeys.length,
           confirmedSeq: confirmed.sync.confirmedSeq,
           milliseconds: performance.now() - started,
         }),
       );
+      if (profileEnabled) {
+        // Same confirmed GiB tree, no reduced data or different restore strategy.
+        // These end-to-end barriers include provider/control/database work.
+        for (let trial = 1; trial <= 3; trial++) {
+          metricStage = `no-change-${trial}`;
+          const barrierStarted = performance.now();
+          const unchangedRaw = await executor(first).execute(
+            hooks.wrapCommand("true"),
+            {
+              timeoutMs: 600_000,
+            },
+          );
+          const unchanged = await hooks.parseResult({
+            attachmentId: attached.attachmentId,
+            output: unchangedRaw.output,
+            exitCode: unchangedRaw.exitCode,
+            executor: executor(first),
+          });
+          assert.equal(unchanged.exitCode, 0, unchanged.output);
+          assert.equal(unchanged.sync.persisted, true);
+          assert.equal(
+            unchanged.sync.confirmedSeq,
+            confirmed.sync.confirmedSeq,
+            "a no-change barrier must not create a new manifest",
+          );
+          console.log(
+            "GIB_METRIC",
+            JSON.stringify({
+              event: "no-change-barrier",
+              trial,
+              sourceBytes: TOTAL_BYTES,
+              confirmedSeq: unchanged.sync.confirmedSeq,
+              milliseconds: performance.now() - barrierStarted,
+            }),
+          );
+        }
+        const edit = `import os,pathlib
+p=pathlib.Path('/workspace/gib/file-000.bin')
+with p.open('r+b') as f:
+ f.seek(${FILE_BYTES / 2});b=f.read(1);assert len(b)==1
+ f.seek(${FILE_BYTES / 2});f.write(bytes([b[0]^1]));f.flush();os.fsync(f.fileno())
+os.utime(p,ns=(${MTIME},${MTIME}))`;
+        metricStage = "one-byte-edit";
+        const editStarted = performance.now();
+        const editRaw = await executor(first).execute(
+          hooks.wrapCommand(`python3 -c ${quote(edit)}`),
+          {
+            timeoutMs: 600_000,
+          },
+        );
+        const edited = await hooks.parseResult({
+          attachmentId: attached.attachmentId,
+          output: editRaw.output,
+          exitCode: editRaw.exitCode,
+          executor: executor(first),
+        });
+        const editBarrierMs = performance.now() - editStarted;
+        assert.equal(edited.exitCode, 0, edited.output);
+        assert.equal(edited.sync.persisted, true);
+        assert.ok(edited.sync.confirmedSeq! > confirmed.sync.confirmedSeq!);
+        const changedBytes = createHash("shake256", {
+          outputLength: FILE_BYTES,
+        })
+          .update(`${SEED}:0`)
+          .digest();
+        changedBytes[FILE_BYTES / 2] = changedBytes[FILE_BYTES / 2]! ^ 1;
+        oracle[0]![4] = createHash("sha256").update(changedBytes).digest("hex");
+        const editedActor = await ctx.service.repo.getAttachment(
+          attached.attachmentId,
+        );
+        assert.ok(editedActor);
+        const editedPlan = await ctx.service.plan(editedActor);
+        const addedPacks = Object.keys(editedPlan.packs).filter(
+          (key) => !packKeys.includes(key),
+        );
+        let addedPackBytes = 0;
+        for (const key of addedPacks) {
+          const size = await ctx.store.size(
+            `${ctx.keyPrefix}vol/${attached.volumeId}/${key}`,
+          );
+          assert.ok(size !== null);
+          addedPackBytes += size;
+        }
+        const editedCheck = await executor(first).execute(
+          `python3 -c ${quote(verify)}`,
+          {
+            timeoutMs: 300_000,
+          },
+        );
+        assert.equal(editedCheck.exitCode, 0, editedCheck.output);
+        assert.deepEqual(event(editedCheck.output).records, oracle);
+        console.log(
+          "GIB_METRIC",
+          JSON.stringify({
+            event: "one-byte-edit",
+            changedBytes: 1,
+            sourceBytes: TOTAL_BYTES,
+            milliseconds: editBarrierMs,
+            addedPacks: addedPacks.length,
+            addedPackBytes,
+            confirmedSeq: edited.sync.confirmedSeq,
+          }),
+        );
+      }
       await provider.deleteSandbox(first);
       sandboxes.delete(first);
       const second = await create();
+      metricStage = "restore";
       const restoreStarted = performance.now();
       const restored = await hooks.onContainerReplaced({
         scope: ctx.scope,
@@ -279,6 +400,7 @@ test(
         true,
         restored.output,
       );
+      const restoreAndAttachMs = performance.now() - restoreStarted;
       const check = await executor(second).execute(
         `python3 -c ${quote(verify)}`,
         { timeoutMs: 300_000 },
@@ -297,8 +419,15 @@ test(
           event: "restored",
           actualReadBytes: checked.bytes,
           files: FILES,
+          restoreAndAttachMs,
+          restoredHashVerificationMs: Number(checked.seconds) * 1000,
           milliseconds: performance.now() - restoreStarted,
         }),
+      );
+      assert.equal(
+        ctx.service.metricObserverFailures,
+        0,
+        "measurement observer must not fail silently",
       );
       succeeded = true;
     } catch (error) {

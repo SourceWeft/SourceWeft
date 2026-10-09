@@ -40,7 +40,23 @@ test("HEAD composes caller cancellation with its own deadline and rejects forged
     const controller = new AbortController();
     const result = store.size("pack", { signal: controller.signal });
     const rejected = assert.rejects(result);
-    await arrived;
+    // A transport/deadline failure before reaching the server must fail this
+    // observation, not leave the runner waiting forever for an impossible event.
+    await Promise.race([
+      arrived,
+      result.then(
+        () => {
+          throw new Error(
+            "HEAD completed without the expected pending server request",
+          );
+        },
+        (cause) => {
+          throw new Error("HEAD failed before the local server observed it", {
+            cause,
+          });
+        },
+      ),
+    ]);
     const at = Date.now();
     controller.abort();
     await rejected;

@@ -201,3 +201,70 @@ a complete protected provider adapter. Production Freeze always rejects: cgroup
 user-thread stopping does not establish kernel-I/O quiescence, an external
 persistence receipt, or a durable upper filesystem. The ordinary-disk manual test
 and this controlled FUSE boundary must remain separately reported.
+
+## Protected lazy-dispatcher admission fence
+
+This boundary closes **new admission** after a whole dispatcher dies. It does
+not recover outstanding FUSE requests or file descriptors, stop existing user
+workloads, remount an old dirty upper, switch to eager loading, or authorize a
+new lower generation. Those recovery contracts remain unresolved.
+
+Protected bootstrap must start the supervisor with `--require-lazy-mount`.
+The initial root-owned gate persists `required=true, open=false` before the
+control socket listens. Fresh eager nodes explicitly persist `required=false`
+and cannot dynamically register a lazy mount. Missing, interrupted or invalid
+gate evidence fails startup before namespace recovery or gate replacement.
+The required flag must be explicit in the new gate schema: legacy/unknown
+metadata is retained for operator-led stopped/fenced recovery, not guessed as
+eager state. A registration/seal ENOSPC cannot erase that startup requirement.
+
+The root/control-UID-only `register_lazy_mount` request supplies the actual
+volume/attachment, boot, original fixed base sequence, SHA256 and protected local
+plan path, raw kernel mount ID/device/fsname/type/path, dispatcher PID/start time
+and root-owned executable. The dispatcher must be the real `swlazy mount-volume`
+launch with that plan/path in the same mount namespace and hold a FUSE device FD.
+The current pure-FUSE implementation reports `fuse`/`swvol`; the subtype form
+`fuse.swvol`/`swvol` is also supported, but the registered raw identity must stay
+exactly equal. These are **protected host launch attestations** plus independent
+kernel liveness checks, not a generic proof connecting an arbitrary PID to a FUSE
+connection. Never obtain them from workload stdout, pidfiles or cached status.
+
+Registration obtains a pidfd and checks process identity before/after acquisition.
+The original root-owned plan is read-only, bounded to 32 MiB, and hashed with real
+SHA256 (`sha2=0.10.9`). Its volume/attachment/base must match. A create-new, fsynced,
+root0400 sealed copy preserves the original bytes. Admission compares both file
+identities and byte hashes; URL renewal belongs in the separate locator channel
+and cannot rewrite this fixed baseline. Existing/fenced registrations cannot be
+replaced by a new PID, mount or head. Restart retains the binding in closed state
+and requires an explicit future recovery design; it never silently rebinds.
+
+A single pre-created watcher observes the pidfd without waiting for a client
+request. Exit or lost mount/plan identity latches an invalid guard and persists
+closed admission. Every Open/Start/Resume/Thaw independently checks the same guard,
+including immediately before a newly prepared namespace receives its go receipt.
+Checks read kernel mountinfo rather than statting a dead FUSE path, which could
+block indefinitely with retained descriptors. Already admitted work stays unknown
+and is not silently killed; only explicit cancellation/drain retains its existing
+termination behavior. Upper/workdir, whiteouts, pending state and original lower
+plan are preserved.
+
+The typed host contract exposes registration/status only for a real protected
+bootstrap. The runtime rejects a declared missing/fenced or changed binding
+before dispatch/checkpoint and will not accept omission as eager fallback after
+observing a required binding. No fabricated `mountMode` or ready provider was
+added: current hooks do not implement lazy bootstrap, and the real provider
+profile remains unsupported. These Linux admission tests are distinct from
+provider activation and from kernel-I/O quiescence qualification.
+
+The host's observed required intent is pinned from its first declaration, even
+before an attachment exists, to the provider sandbox ID and boot/controller
+identity for that manager's lifetime. A missing field or changed controller is
+not a reset; a future explicit verified bootstrap/recovery must handle it.
+
+File-permission bootstrap remains a separate qualification gap. A root dispatcher
+must be started with the correct `SWLAZY_UID`/`SWLAZY_GID` matching the workload
+identity; otherwise a persisted mode0600 lower file can be unreadable to the
+workload. The five dispatcher admission fault tests use a small mode0644 empty
+lower sentinel and test admission/preservation, not complete restore ownership
+or permissions. They do not qualify that missing provider bootstrap and do not
+justify widening file permissions or switching restoration modes.

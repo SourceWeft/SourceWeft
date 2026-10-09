@@ -1,3 +1,4 @@
+import { fixtureWriteGrant } from "./fixtures/write-grant";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import {
@@ -191,6 +192,7 @@ for (const seed of seeds)
       const ledgerPath = join(evidenceDirectory, "confirmed.jsonl");
       durableWrite(ledgerPath, "");
       const store: ObjectStore = {
+        presignWriteOnceGrant: fixtureWriteGrant,
         presignWriteOnce: async (key) => key,
         presignGet: async (key) => key,
         get: async (key) => {
@@ -287,6 +289,20 @@ for (const seed of seeds)
         counter = 0;
       };
       await newActor();
+      const expireDrainedFixtureGrant = async () => {
+        // These are explicit string-key simulated grants, not real URLs. Advance
+        // only an actor whose stop proof and final checkpoint already retired it,
+        // so this model still exercises post-expiry GC without weakening live pins.
+        assert.equal(
+          (await service.repo.getAttachment(actor.id))!.status,
+          "retired",
+        );
+        const expired = await pool.query(
+          "update sandbox_volume_attachments set slots_expire_at=now()-interval '1 second' where id=$1 and status='retired' returning id",
+          [actor.id],
+        );
+        assert.equal(expired.rows.length, 1);
+      };
       const advance = (next: Tree) => {
         tree = copy(next);
         snapshots.push(copy(next));
@@ -615,6 +631,7 @@ for (const seed of seeds)
               confirmedSeq: head,
               stopProof: proof,
             });
+            await expireDrainedFixtureGrant();
             await service.maintenance.collect(volume.id, { dryRun: false });
             await newActor();
           } else if (operation === 9) {
@@ -678,6 +695,7 @@ for (const seed of seeds)
                 stopped: true,
               },
             });
+            await expireDrainedFixtureGrant();
             await newActor();
           } else {
             if (!tree.children.has("x\uFFFD")) {
