@@ -28,7 +28,12 @@ const file = {
 };
 function mock(
   entries: unknown[] = [file],
-  opts: { truncated?: boolean; raw?: Buffer; wrongCommit?: boolean } = {},
+  opts: {
+    truncated?: boolean;
+    raw?: Buffer;
+    wrongCommit?: boolean;
+    headers?: Record<string, string>;
+  } = {},
 ) {
   clearGitHubSubtreeCache();
   return vi.stubGlobal(
@@ -52,7 +57,9 @@ function mock(
           tree: entries,
         });
       if (url.startsWith("https://raw.githubusercontent.com/"))
-        return new Response(Uint8Array.from(opts.raw ?? body));
+        return new Response(Uint8Array.from(opts.raw ?? body), {
+          headers: opts.headers,
+        });
       throw Error("Unexpected fetch: " + url);
     }),
   );
@@ -133,4 +140,51 @@ test("immutable directory metadata is reused while blob bytes are still verified
   expect(vi.mocked(fetch).mock.calls.length).toBe(initial);
   await second.readFiles(new Set(["skills/SKILL.md"]), 1024);
   expect(vi.mocked(fetch).mock.calls.length).toBe(initial + 1);
+});
+
+test("encoded wire length may exceed a valid decoded Git blob", async () => {
+  for (const encoding of ["gzip", "br", "deflate"]) {
+    // Real Fetch has already decoded the body, while retaining response headers.
+    mock([file], {
+      headers: {
+        "content-encoding": encoding,
+        "content-length": String(body.length + 20),
+      },
+    });
+    const tree = await readGitHubSubtree(source);
+    expect(
+      (await tree.readFiles(new Set(["skills/SKILL.md"]), 1024)).get(
+        "skills/SKILL.md",
+      ),
+    ).toEqual(body);
+  }
+});
+
+test("decoded size and hash remain mandatory for compressed responses", async () => {
+  const headers = { "content-encoding": "gzip", "content-length": "1" };
+  mock([file], { headers, raw: Buffer.alloc(body.length + 1) });
+  const tooLarge = await readGitHubSubtree(source);
+  await expect(
+    tooLarge.readFiles(new Set(["skills/SKILL.md"]), 1024),
+  ).rejects.toThrow(/size limit/);
+  mock([file], { headers, raw: Buffer.alloc(body.length, 1) });
+  const corrupt = await readGitHubSubtree(source);
+  await expect(
+    corrupt.readFiles(new Set(["skills/SKILL.md"]), 1024),
+  ).rejects.toThrow(/integrity mismatch/);
+});
+
+test("identity Content-Length still refuses over-limit responses before reading", async () => {
+  for (const encoding of [undefined, "identity"]) {
+    mock([file], {
+      headers: {
+        "content-length": String(body.length + 1),
+        ...(encoding ? { "content-encoding": encoding } : {}),
+      },
+    });
+    const tree = await readGitHubSubtree(source);
+    await expect(
+      tree.readFiles(new Set(["skills/SKILL.md"]), 1024),
+    ).rejects.toThrow(/size limit/);
+  }
 });
