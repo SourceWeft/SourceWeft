@@ -1,6 +1,6 @@
 use super::{HostError, LocalHost, Result};
 use rusqlite::{params, OptionalExtension};
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 use serde_json::json;
 use serde_json::Value;
 use std::{
@@ -11,10 +11,11 @@ use std::{
     },
 };
 
+#[cfg(any(target_os = "macos", windows))]
+use std::{io::Read, path::Path};
+
 #[cfg(target_os = "macos")]
 use std::{
-    io::Read,
-    path::Path,
     process::{Command, Stdio},
     time::{Duration, Instant},
 };
@@ -69,14 +70,23 @@ impl LocalHost {
         action: &str,
         payload: Value,
     ) -> Result<Value> {
-        let lease = self.admission.enter().map_err(|code| HostError::new(code, "Local host is preparing an update"))?;
+        let lease = self
+            .admission
+            .enter()
+            .map_err(|code| HostError::new(code, "Local host is preparing an update"))?;
         self.dispatch_admitted(&lease, calls, id, owner, thread, action, payload)
     }
 
     /// The transport holds the admission lease until the result has been sent.
     pub fn dispatch_admitted(
-        &self, _lease: &super::maintenance::Lease, calls: &Executions, id: &str,
-        owner: &str, thread: &str, action: &str, payload: Value,
+        &self,
+        _lease: &super::maintenance::Lease,
+        calls: &Executions,
+        id: &str,
+        owner: &str,
+        thread: &str,
+        action: &str,
+        payload: Value,
     ) -> Result<Value> {
         if calls.is_cancelled(id) {
             return Err(HostError::new(
@@ -139,7 +149,7 @@ impl LocalHost {
         outcome
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", windows)))]
     fn perform(
         &self,
         _calls: &Executions,
@@ -151,11 +161,11 @@ impl LocalHost {
     ) -> Result<Value> {
         Err(HostError::new(
             "UNSUPPORTED_PLATFORM",
-            "Local execution currently requires macOS.",
+            "Local execution requires macOS or Windows with niubash.",
         ))
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     fn perform(
         &self,
         calls: &Executions,
@@ -175,17 +185,17 @@ impl LocalHost {
             let grant = text(payload, "folderId")?;
             let root = self.granted_directory(owner, grant)?;
             let requested = text(payload, "path")?;
-            let relative = if requested.starts_with('/') {
-                Path::new(requested)
-                    .strip_prefix(&root)
-                    .map_err(|_| HostError::new("PATH_DENIED", "Outside the selected folder"))?
-                    .to_str()
-                    .ok_or_else(|| HostError::new("INVALID_PATH", "Invalid path"))?
+            let wire_root = super::wire_path(&root);
+            let relative = if requested == wire_root || requested.is_empty() {
+                "."
+            } else if let Some(value) = requested.strip_prefix(&format!("{wire_root}/")) {
+                value
+            } else if Path::new(requested).is_absolute() {
+                return Err(HostError::new("PATH_DENIED", "Outside the selected folder"));
             } else {
                 requested
             };
             let path = checked_path(&root, relative, true)?;
-            use std::os::unix::fs::MetadataExt;
             if action == "folder.read" {
                 use base64::Engine;
                 let parts = Path::new(relative)
@@ -197,7 +207,7 @@ impl LocalHost {
                     .collect::<Vec<_>>();
                 let mut file = super::files::open_file_beneath(&root, &parts, libc::O_RDONLY)?;
                 let meta = file.metadata()?;
-                if !meta.is_file() || meta.nlink() != 1 {
+                if !meta.is_file() || !single_link(&file)? {
                     return Err(HostError::new(
                         "FILE_ACCESS_DENIED",
                         "Only regular, non-hardlinked files can be previewed.",
@@ -218,7 +228,9 @@ impl LocalHost {
             }
             let files = super::files::list_granted_directory(&root, Path::new(relative))?;
             self.granted_directory(owner, grant)?;
-            return Ok(json!({"root":root,"path":path,"files":files}));
+            return Ok(
+                json!({"root":super::wire_path(&root),"path":super::wire_path(&path),"files":files}),
+            );
         }
         if action == "workspace.check" {
             self.check_workspace(
@@ -289,6 +301,9 @@ impl LocalHost {
                 .lock()
                 .map_err(|_| HostError::new("HOST_UNAVAILABLE", "Execution lock failed"))?
                 .insert(id.into(), cancel.clone());
+            if calls.is_cancelled(id) {
+                cancel.store(true, Ordering::SeqCst);
+            }
             let result =
                 execute_command(&workspace.path, &cwd, command, timeout, max_output, cancel);
             if let Ok(mut active) = calls.active.lock() {
@@ -404,69 +419,90 @@ impl LocalHost {
             }
 
             "file.mkdir" => {
-                let path = checked_path(&workspace.path, relative, false)?;
-                if !path.exists() {
-                    std::fs::create_dir_all(&path)?;
+                #[cfg(windows)]
+                {
+                    return super::windows_files::mkdir(&workspace.path, relative);
                 }
-                if !path.is_dir() {
-                    return Err(HostError::new("NOT_A_DIRECTORY", "Path is not a directory"));
+                #[cfg(target_os = "macos")]
+                {
+                    let path = checked_path(&workspace.path, relative, false)?;
+                    if !path.exists() {
+                        std::fs::create_dir_all(&path)?;
+                    }
+                    if !path.is_dir() {
+                        return Err(HostError::new("NOT_A_DIRECTORY", "Path is not a directory"));
+                    }
+                    Ok(json!({"created":true}))
                 }
-                Ok(json!({"created":true}))
             }
             "file.list" => {
-                let path = checked_path(&workspace.path, relative, true)?;
-                let mut files = Vec::new();
-                let meta = path.symlink_metadata()?;
-                if meta.is_file() {
-                    use std::os::unix::fs::MetadataExt;
-                    if meta.nlink() > 1 {
-                        return Err(HostError::new(
-                            "HARDLINK_NOT_ALLOWED",
-                            "Hard-linked files cannot be searched.",
-                        ));
-                    }
-                    return Ok(
-                        json!({"files":[{"path":relative,"is_dir":false,"size":meta.len()}]}),
+                #[cfg(windows)]
+                {
+                    return super::windows_files::list_workspace(
+                        &workspace.path,
+                        relative,
+                        payload
+                            .get("recursive")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false),
                     );
                 }
-                let recursive = payload
-                    .get("recursive")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false);
-                let mut pending = vec![path];
-                while let Some(directory) = pending.pop() {
-                    // Recheck each visited path; never traverse a symbolic link.
-                    let rel = directory
-                        .strip_prefix(&workspace.path)
-                        .map_err(|_| HostError::new("PATH_DENIED", "Outside directory"))?;
-                    let directory = checked_path(
-                        &workspace.path,
-                        rel.to_str()
-                            .ok_or_else(|| HostError::new("INVALID_PATH", "Non-UTF8 path"))?,
-                        true,
-                    )?;
-                    for entry in std::fs::read_dir(directory)? {
-                        let entry = entry?;
-                        let meta = entry.path().symlink_metadata()?;
+                #[cfg(target_os = "macos")]
+                {
+                    let path = checked_path(&workspace.path, relative, true)?;
+                    let mut files = Vec::new();
+                    let meta = path.symlink_metadata()?;
+                    if meta.is_file() {
                         use std::os::unix::fs::MetadataExt;
-                        if meta.file_type().is_symlink()
-                            || (!meta.is_dir() && (!meta.is_file() || meta.nlink() > 1))
-                        {
-                            continue;
-                        }
-                        if files.len() >= 500 {
+                        if meta.nlink() > 1 {
                             return Err(HostError::new(
-                                "DIRECTORY_TOO_LARGE",
-                                "More than 500 entries. Choose a narrower directory.",
+                                "HARDLINK_NOT_ALLOWED",
+                                "Hard-linked files cannot be searched.",
                             ));
                         }
-                        if recursive && meta.is_dir() {
-                            pending.push(entry.path());
-                        }
-                        files.push(json!({"path":entry.path().strip_prefix(&workspace.path).map_err(|_|HostError::new("PATH_DENIED","Outside workspace"))?.to_string_lossy(),"is_dir":meta.is_dir(),"size":meta.len()}));
+                        return Ok(
+                            json!({"files":[{"path":relative,"is_dir":false,"size":meta.len()}]}),
+                        );
                     }
+                    let recursive = payload
+                        .get("recursive")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
+                    let mut pending = vec![path];
+                    while let Some(directory) = pending.pop() {
+                        // Recheck each visited path; never traverse a symbolic link.
+                        let rel = directory
+                            .strip_prefix(&workspace.path)
+                            .map_err(|_| HostError::new("PATH_DENIED", "Outside directory"))?;
+                        let directory = checked_path(
+                            &workspace.path,
+                            rel.to_str()
+                                .ok_or_else(|| HostError::new("INVALID_PATH", "Non-UTF8 path"))?,
+                            true,
+                        )?;
+                        for entry in std::fs::read_dir(directory)? {
+                            let entry = entry?;
+                            let meta = entry.path().symlink_metadata()?;
+                            use std::os::unix::fs::MetadataExt;
+                            if meta.file_type().is_symlink()
+                                || (!meta.is_dir() && (!meta.is_file() || meta.nlink() > 1))
+                            {
+                                continue;
+                            }
+                            if files.len() >= 500 {
+                                return Err(HostError::new(
+                                    "DIRECTORY_TOO_LARGE",
+                                    "More than 500 entries. Choose a narrower directory.",
+                                ));
+                            }
+                            if recursive && meta.is_dir() {
+                                pending.push(entry.path());
+                            }
+                            files.push(json!({"path":entry.path().strip_prefix(&workspace.path).map_err(|_|HostError::new("PATH_DENIED","Outside workspace"))?.to_string_lossy(),"is_dir":meta.is_dir(),"size":meta.len()}));
+                        }
+                    }
+                    Ok(json!({"files":files}))
                 }
-                Ok(json!({"files":files}))
             }
             _ => Err(HostError::new(
                 "UNSUPPORTED_ACTION",
@@ -476,7 +512,7 @@ impl LocalHost {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 fn text<'a>(payload: &'a Value, key: &str) -> Result<&'a str> {
     payload
         .get(key)
@@ -484,7 +520,7 @@ fn text<'a>(payload: &'a Value, key: &str) -> Result<&'a str> {
         .ok_or_else(|| HostError::new("INVALID_CALL", format!("Missing {key}")))
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 fn checked_path(root: &Path, relative: &str, must_exist: bool) -> Result<std::path::PathBuf> {
     use std::path::Component;
     let mut result = root.to_owned();
@@ -492,6 +528,8 @@ fn checked_path(root: &Path, relative: &str, must_exist: bool) -> Result<std::pa
         match component {
             Component::CurDir => {}
             Component::Normal(part) => {
+                #[cfg(windows)]
+                super::windows_files::validate_part(part)?;
                 result.push(part);
                 if let Ok(meta) = result.symlink_metadata() {
                     if meta.file_type().is_symlink() {
@@ -513,7 +551,46 @@ fn checked_path(root: &Path, relative: &str, must_exist: bool) -> Result<std::pa
     if must_exist && !result.exists() {
         return Err(HostError::new("PATH_MISSING", "Path does not exist"));
     }
+    #[cfg(windows)]
+    {
+        let directory = if result.is_dir() {
+            result.as_path()
+        } else {
+            result.parent().unwrap_or(root)
+        };
+        super::windows_files::pin_directory(
+            root,
+            directory
+                .strip_prefix(root)
+                .map_err(|_| HostError::new("PATH_DENIED", "Outside directory"))?,
+        )?;
+    }
     Ok(result)
+}
+
+#[cfg(any(target_os = "macos", windows))]
+fn single_link(file: &std::fs::File) -> Result<bool> {
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::unix::fs::MetadataExt;
+        Ok(file.metadata()?.nlink() == 1)
+    }
+    #[cfg(windows)]
+    {
+        Ok(super::windows_files::information(file)?.nNumberOfLinks == 1)
+    }
+}
+
+#[cfg(windows)]
+fn execute_command(
+    root: &Path,
+    cwd: &Path,
+    script: &str,
+    timeout: u64,
+    max: usize,
+    cancel: Arc<AtomicBool>,
+) -> Result<Value> {
+    super::windows_execution::execute(root, cwd, script, timeout, max, cancel)
 }
 
 #[cfg(target_os = "macos")]

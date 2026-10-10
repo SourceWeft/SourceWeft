@@ -18,7 +18,7 @@ vi.mock("../../modules/devices/access", () => ({
   resolveLocalCaller: vi.fn(async () => ({ sessionId: "session" })),
   connectRemote: vi.fn(),
   revokeFolderAccess: vi.fn(),
-  createNativeAccess: vi.fn(),
+  createNativeAccess: vi.fn(async () => ({ proof: "native-proof" })),
   setRemotePolicy: vi.fn(),
   requireDeviceAccess: vi.fn(),
 }));
@@ -68,6 +68,7 @@ vi.mock("../../modules/devices/provider", () => ({
   },
 }));
 import { registerLocalDeviceRoutes } from "./local-devices";
+import { createNativeAccess } from "../../modules/devices/access";
 function app() {
   const app = new Hono();
   app.onError((error, c) =>
@@ -85,6 +86,31 @@ beforeEach(() => {
   state.online = true;
   state.content = Buffer.from("disk content");
   vi.clearAllMocks();
+});
+
+test("native session accepts Windows drive paths without backend OS conversion", async () => {
+  const server = app();
+  const ticket = "e".repeat(32);
+  const credential = "t".repeat(43);
+  const response = await server.request("/v1/local-devices/native-session", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${credential}`,
+    },
+    body: JSON.stringify({
+      ticket,
+      workspaceBase: "C:/Users/test/task-workspaces",
+      name: "Windows PC",
+    }),
+  });
+  expect(response.status).toBe(200);
+  expect(createNativeAccess).toHaveBeenCalledWith(
+    ticket,
+    credential,
+    "C:/Users/test/task-workspaces",
+    "Windows PC",
+  );
 });
 test("directory list and preview are authenticated live reads with no HTTP caching", async () => {
   const server = app();

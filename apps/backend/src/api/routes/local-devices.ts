@@ -13,6 +13,7 @@ import {
 import type { Hono } from "hono";
 import { z } from "zod";
 import { localProviderForTurn } from "../../modules/devices/provider";
+import { nativeAbsolutePathSchema } from "../../modules/devices/native-path";
 import { and, eq, isNull } from "drizzle-orm";
 import {
   db,
@@ -160,7 +161,7 @@ export function registerLocalDeviceRoutes(app: Hono) {
     const data = z
       .object({
         ticket: z.string().min(32),
-        workspaceBase: z.string().startsWith("/").max(4096),
+        workspaceBase: nativeAbsolutePathSchema,
         name: z.string().trim().min(1).max(256).optional(),
       })
       .parse(await c.req.json());
@@ -310,7 +311,7 @@ export function registerLocalDeviceRoutes(app: Hono) {
       .object({
         id: z.string().uuid(),
         name: z.string().min(1).max(256),
-        path: z.string().startsWith("/").max(4096),
+        path: nativeAbsolutePathSchema,
       })
       .strict()
       .parse(await c.req.json());

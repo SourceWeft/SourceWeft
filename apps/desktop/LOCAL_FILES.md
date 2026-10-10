@@ -10,7 +10,7 @@ implicit migration, synchronization, or fallback.
 ## Choosing and using a directory
 
 A new PC conversation automatically allocates a durable directory under the app's
-`task-workspaces/<id>/files` storage. In the selected Mac's desktop client, choose
+`task-workspaces/<id>/files` storage. In the selected computer's desktop client, choose
 an existing directory before creating the conversation instead. The native picker
 issues an opaque, account-scoped directory grant. Neither browser requests nor
 model tool arguments can grant access by supplying a path.
@@ -86,7 +86,7 @@ switching conversations. Unsupported binary content shows a download action.
 
 Agent reads, writes, edits, glob and grep use physical paths under this directory.
 Edits compare the previous content before writing, so intervening external edits
-are rejected. Descriptor-relative reads and writes reject symlinks, hardlinks,
+are rejected. Descriptor-relative macOS operations and handle-pinned Windows operations reject symlinks, hardlinks,
 special files and path traversal. Read-only delegates and the interpreter receive
 read access to this directory and `/kb`, without a `/workfiles` mount.
 
@@ -101,12 +101,108 @@ second editable Workfiles copy. Artifact publication remains explicit.
 - Directory listing/recursive enumeration: at most 500 entries; exceeding this
   fails explicitly and asks for a narrower directory.
 - Text search: at most 200 candidate text files and 1 MiB total; up to 50 matches.
-- The native folder picker requires the selected Mac's connected desktop client.
+- The native folder picker requires the selected computer's connected desktop client.
   A browser on another device can use automatic allocation and inspect files when
   the selected PC is online, has enabled access from other devices, and the
   browser session has connected to it.
 - Existing skill/runtime asset installation retains its own provider constraints;
   this change does not validate arbitrary cloud-only dependencies on macOS.
+
+## Windows with niubash
+
+Windows installers include [niubash](https://github.com/unixwin/niubash) 1.3.3
+and its portable command utilities, used through `niu.exe -c`. No separate Shell
+installation, PATH changes or environment configuration are needed. The native
+host uses `resources/niubash/niu.exe` beside the installed desktop executable.
+Missing bundled files fail explicitly and require repair/reinstallation;
+PowerShell, CMD, Git Bash and cloud execution are never selected as a substitute.
+An optional `SOURCEWEFT_NIUBASH_PATH` absolute path overrides the bundled runtime;
+an invalid override fails rather than selecting another Shell.
+
+Windows support is **trusted local execution**, not the macOS Seatbelt sandbox.
+It is available by default after installation. Users still connect/enable their
+computer through the existing desktop authorization flow. Administrators can
+disable command execution with `SOURCEWEFT_WINDOWS_TRUSTED_LOCAL_EXECUTION=false`
+in the desktop process environment; only `true` and `false` are valid overrides.
+Existing account/session authorization, private conversation ownership,
+directory grants and tool approvals still apply. Approved commands run as the
+current Windows user and can access that user's files, installed tools and
+network beyond the selected task directory. Do not enable it for untrusted work.
+A Windows isolation sandbox is not implemented by this mode.
+
+Commands use Bash syntax with forward-slash native drive paths (`C:/task`), not
+PowerShell syntax. The command environment keeps the native tool PATH and Windows
+loader/app-data variables, sets HOME and temporary directories to the task root,
+and excludes other inherited variables, including `NIU_ENV` and `BASH_ENV`.
+niubash and its MIT license stay in SourceWeft's private resources; no machine-wide
+Shell change is performed. The pinned official archive is SHA-256 checked at
+build time. Windows `tauri build` and `tauri dev` prepare these resources
+automatically. Build hosts need access to GitHub for the first download; cached
+archives are verified on every build. For an offline build, pre-seed the cache
+explicitly with `node scripts/ci/prepare-niubash.mjs --archive <official-zip>`.
+No runtime download is performed on users' computers.
+The Windows installer uses the current user's install directory. On first use,
+the official portable runtime creates its command hardlinks there automatically;
+this does not change the system PATH or require a separate installation step.
+Installer replacement/uninstall also removes these generated links from the
+private runtime directory, preventing stale aliases after a runtime upgrade.
+
+Windows device credentials are account-scoped in Windows Credential Manager;
+macOS continues using Keychain. Directory identity uses the Windows volume and
+file ID. Native file tools hold ancestor handles and reject reparse points
+(including junctions), hardlinks, traversal, alternate streams and device names.
+They retain the same physical directory as execute. Existing-file writes check
+the observed content under a write-exclusive handle and durably back up old bytes;
+they write through that handle rather than macOS's atomic rename commit. A crash
+during a Windows write may require recovery from the backup.
+
+Each command starts suspended, joins a Job Object, then resumes. Cancellation,
+timeout, desktop shutdown and normal completion terminate remaining descendants.
+Failure to establish process control stops execution. Native output remains
+bounded and a repeated successful invocation returns its journaled result without
+executing again. Local drive directories are supported; UNC/network-share paths
+are not part of this initial path protocol.
+
+Verification on Windows requires prepared bundle resources and native Node on PATH:
+
+```sh
+node scripts/ci/prepare-niubash.mjs
+cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --test windows_local_execution
+```
+
+These tests use temporary directories and the bundled runtime without path or
+trusted-mode opt-in settings. They cover real niubash execution,
+file tools, Unicode/space/empty arguments, exit codes, output limits, removed
+startup hooks, timeout, child-process cancellation, replay protection, directory
+replacement, hardlinks, file versions and account boundaries.
+
+### Windows verification (2026-10-10)
+
+Passed locally on Windows: all 41 desktop Rust tests using the pinned portable
+niubash 1.3.3 archive, 13 backend device/path/route tests, 58 sandbox path/file
+backend tests, and 9 Web native-session tests. Backend, sandbox and Web TypeScript
+checks passed after building the existing UI package and generating Next route
+types. The CI installer download, SHA-256, extraction and niubash smoke
+check also passed locally. Backend test database operations were mocked.
+
+Native picker clicks, a signed desktop installer, live backend chat execution and
+the GitHub-hosted CI run have not been verified. macOS and Linux runtime checks
+were not run on this Windows host. This earlier verification used process-local
+opt-in before the bundled runtime became the default.
+
+### Bundled Windows runtime verification (2026-10-10)
+
+Passed locally: 41 desktop Rust tests, 12 archive-integrity/download-publication
+script tests, and all 3 Windows integration tests in a relocated Release layout
+whose path contains Chinese characters and spaces. Execution used the bundled
+runtime with no niubash path or trusted-mode environment settings; a command
+pipeline also passed with an empty PATH. First-launch command activation was
+checked from a fresh copy of the official portable files.
+
+The unsigned Windows x64 NSIS installer was rebuilt with all 13 portable runtime
+and license/notice files. Its generated install script includes private-runtime
+cleanup for replacement/uninstall. The installer has not been installed here;
+native login/picker/chat acceptance and actual uninstall remain unverified.
 
 ## Rollout
 

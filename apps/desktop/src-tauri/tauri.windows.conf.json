@@ -1,0 +1,17 @@
+{
+  "build": {
+    "beforeBuildCommand": "node ../../scripts/ci/prepare-niubash.mjs",
+    "beforeDevCommand": "node ../../scripts/ci/prepare-niubash.mjs"
+  },
+  "bundle": {
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "installerHooks": "niubash-installer-hooks.nsh"
+      }
+    },
+    "resources": {
+      "resources/niubash/": "resources/niubash/"
+    }
+  }
+}

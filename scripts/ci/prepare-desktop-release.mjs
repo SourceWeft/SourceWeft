@@ -112,7 +112,7 @@ const installer = {
   platform: mac ? "macos" : linux ? "linux" : "windows",
   arch: target.startsWith("aarch64") ? "arm64" : "x64",
   filename: installerName,
-  localExecutionSupported: mac,
+  localExecutionSupported: mac || target === "x86_64-pc-windows-msvc",
   ...(await digest(createReadStream(installerSource))),
 };
 const update = {

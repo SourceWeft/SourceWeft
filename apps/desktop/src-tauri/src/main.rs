@@ -145,7 +145,7 @@ fn main() {
             }
         })
         .setup(|app| {
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", windows))]
             {
                 let host = std::sync::Arc::new(sourceweft_desktop::local_host::LocalHost::open(
                     &app.path().app_data_dir()?,

@@ -314,7 +314,7 @@ impl LocalHost {
     }
 }
 
-fn safe_components(relative: &str) -> Result<Vec<&std::ffi::OsStr>> {
+pub(crate) fn safe_components(relative: &str) -> Result<Vec<&std::ffi::OsStr>> {
     if relative.is_empty() || relative.contains('\0') || relative.contains('\\') {
         return Err(HostError::new(
             "INVALID_PATH",
@@ -324,7 +324,11 @@ fn safe_components(relative: &str) -> Result<Vec<&std::ffi::OsStr>> {
     let mut parts = Vec::new();
     for component in Path::new(relative).components() {
         match component {
-            Component::Normal(part) => parts.push(part),
+            Component::Normal(part) => {
+                #[cfg(windows)]
+                super::windows_files::validate_part(part)?;
+                parts.push(part);
+            }
             _ => {
                 return Err(HostError::new(
                     "INVALID_PATH",
@@ -387,7 +391,12 @@ pub(crate) fn open_file_beneath(
     Err(HostError::new("INVALID_PATH", "A file path is required."))
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+pub(crate) fn open_file_beneath(root: &Path, parts: &[&std::ffi::OsStr], _: i32) -> Result<File> {
+    super::windows_files::open_file(root, parts)
+}
+
+#[cfg(not(any(unix, windows)))]
 fn open_file_beneath(_: &Path, _: &[&std::ffi::OsStr], _: i32) -> Result<File> {
     Err(HostError::new(
         "UNSUPPORTED_PLATFORM",
@@ -544,7 +553,7 @@ impl LocalHost {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 impl LocalHost {
     pub fn write_bytes(
         &self,
@@ -650,4 +659,12 @@ pub(crate) fn list_granted_directory(
         files.push(serde_json::json!({"path":root.join(relative).join(OsStr::from_bytes(name.to_bytes())),"is_dir":is_dir,"size":meta.st_size}));
     }
     Ok(files)
+}
+
+#[cfg(windows)]
+pub(crate) fn list_granted_directory(
+    root: &Path,
+    relative: &Path,
+) -> Result<Vec<serde_json::Value>> {
+    super::windows_files::list(root, relative)
 }

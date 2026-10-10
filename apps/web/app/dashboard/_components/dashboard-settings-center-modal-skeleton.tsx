@@ -315,9 +315,9 @@ export function DashboardSettingsCenterModalSkeleton({
   useEffect(() => {
     if (!desktopBridge.isAvailable()) return;
     let active = true;
-    void desktopBridge.info().then(
-      (info) => {
-        if (active) setIsLocalPc(info.platform === "macos");
+    void desktopBridge.localHostStatus().then(
+      (status) => {
+        if (active) setIsLocalPc(status.platformSupported);
       },
       () => {
         if (active) setIsLocalPc(false);

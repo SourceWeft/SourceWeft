@@ -1348,10 +1348,7 @@ test("SourceWeftSandboxBackend returns per-file permission errors for invalid do
 test("SourceWeftSandboxBackend returns recoverable error for absolute glob patterns outside sandbox roots", async () => {
   const { backend } = createBackend();
 
-  const result = await backend.glob(
-    "/files/**/*.md",
-    "/workspace/ppt-deck",
-  );
+  const result = await backend.glob("/files/**/*.md", "/workspace/ppt-deck");
 
   assert.match(result.error ?? "", /SANDBOX_READ_PATH_DENIED/u);
 });
@@ -1687,7 +1684,11 @@ test("a skill the host could not plan fails alone, without any sandbox traffic f
       plans: async () => [skillPlan("ppt-deck")],
       hasPlans: () => true,
       unstageable: () => [
-        { name: "huge", version: "1.0.0", error: "not stageable: bundle_too_large" },
+        {
+          name: "huge",
+          version: "1.0.0",
+          error: "not stageable: bundle_too_large",
+        },
       ],
       commandTimeoutMs: resolveSandboxCommandTimeoutMs({ limits }),
       maxOutputChars: limits.maxOutputChars,
@@ -1874,6 +1875,45 @@ test("native grep fails explicitly when the provider has no native search capabi
   );
   assert.deepEqual(provider.systemExecuted, []);
   assert.deepEqual(provider.executed, []);
+});
+
+test("Windows native file backend preserves drive paths through read, write, list and glob", async () => {
+  const { files, provider } = createProvider();
+  const root = "C:/Users/test/任务 folder";
+  provider.pathPolicy = {
+    workspaceRoot: root,
+    defaultCwd: root,
+    prepareTargetRoots: [root],
+    collectSourceRoots: [root],
+    readWriteRoots: [root],
+  };
+  provider.nativeFileOperations = true;
+  provider.readTextFile = async (input) =>
+    new TextDecoder().decode(files.get(input.sandboxPath));
+  provider.uploadFile = async (input) => {
+    assert.ok(input.sandboxPath.startsWith(`${root}/`));
+    files.set(input.sandboxPath, input.content);
+  };
+  provider.listFiles = async (input) =>
+    [...files.keys()]
+      .filter((path) => path.startsWith(`${input.sandboxPath}/`))
+      .map((path) => ({ path, is_dir: false }));
+  const { backend } = createBackendWithProvider(provider);
+  const written = await backend.write(`${root}/report.txt`, "hello");
+  assert.ok(!written.error, written.error);
+  assert.equal((await backend.read(`${root}/report.txt`)).content, "hello");
+  assert.equal((await backend.ls(root)).files?.[0]?.path, `${root}/report.txt`);
+  assert.equal(
+    (await backend.glob("*.txt", root)).files?.[0]?.path,
+    `${root}/report.txt`,
+  );
+  assert.equal(
+    (await backend.glob(`${root}/*.txt`, root)).files?.[0]?.path,
+    `${root}/report.txt`,
+  );
+  assert.ok((await backend.glob("D:/outside/*.txt", root)).error);
+  assert.ok((await backend.write("D:/outside.txt", "no")).error);
+  assert.deepEqual(provider.systemExecuted, []);
 });
 
 test("PC runtime removes prepare/collect while cloud runtime retains the bridge", async () => {

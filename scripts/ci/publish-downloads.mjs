@@ -145,7 +145,7 @@ export async function prepareManifest(
     );
     assert.equal(
       entry.localExecutionSupported,
-      entry.platform === "macos",
+      entry.platform === "macos" || entry.platform === "windows",
       "Unexpected local execution support",
     );
     const matches = files.filter((file) => basename(file) === entry.filename);

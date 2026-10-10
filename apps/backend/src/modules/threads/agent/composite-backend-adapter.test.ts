@@ -141,6 +141,17 @@ test("CompositeBackend delegates execute to sandbox default and routes SourceWef
   assert.equal((await composite.execute("pwd")).output, "executed:pwd");
 });
 
+test("CompositeBackend routes Windows physical paths without adding a POSIX root", async () => {
+  const backend = createBackend();
+  const root = "C:/Users/test/任务 folder";
+  const composite = new CompositeBackend(backend, {
+    "/": new PrefixedBackendAdapter("/", backend),
+    [`${root}/`]: new PrefixedBackendAdapter(root, backend),
+  });
+  await composite.read(`${root}/report.txt`);
+  assert.deepEqual(backend.calls, [["read", [`${root}/report.txt`, 0, 500]]]);
+});
+
 test("PrefixedBackendAdapter keeps CompositeBackend-stripped routes isolated", async () => {
   const conversationBackend = createBackend();
   const largeResultsBackend = createBackend();

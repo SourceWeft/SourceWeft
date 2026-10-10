@@ -13,6 +13,7 @@ use uuid::Uuid;
 pub struct Workspace {
     pub id: String,
     pub thread_id: String,
+    #[serde(serialize_with = "super::serialize_path")]
     pub path: PathBuf,
 }
 
@@ -28,13 +29,13 @@ pub struct LocalHost {
 
 impl LocalHost {
     pub fn open(app_data: &Path) -> Result<Self> {
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(any(target_os = "macos", windows)))]
         return Err(HostError::new(
             "UNSUPPORTED_PLATFORM",
-            "Local execution currently requires macOS.",
+            "Local execution requires macOS or Windows with niubash.",
         ));
 
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", windows))]
         {
             fs::create_dir_all(app_data)?;
             let base = app_data.canonicalize()?;
@@ -166,7 +167,7 @@ impl LocalHost {
     pub fn register_folder(&self, owner: &str, path: &Path) -> Result<serde_json::Value> {
         let (id, path) = self.grant_directory(owner, path)?;
         Ok(
-            serde_json::json!({"id":id,"path":path,"name":path.file_name().unwrap_or_default().to_string_lossy()}),
+            serde_json::json!({"id":id,"path":super::wire_path(&path),"name":path.file_name().unwrap_or_default().to_string_lossy()}),
         )
     }
 
@@ -380,8 +381,11 @@ impl LocalHost {
         }
         private_dir(&root)?;
         // Persist directory entries before committing readiness.
-        fs::File::open(&allocation)?.sync_all()?;
-        fs::File::open(&base)?.sync_all()?;
+        #[cfg(unix)]
+        {
+            fs::File::open(&allocation)?.sync_all()?;
+            fs::File::open(&base)?.sync_all()?;
+        }
         let (device, inode) = root_identity(&root)?;
         tx.execute(
             "UPDATE workspaces SET state='ready',root_device=?2,root_inode=?3 WHERE id=?1",
@@ -519,7 +523,11 @@ fn root_identity(path: &Path) -> Result<(u64, u64)> {
         let metadata = path.symlink_metadata()?;
         Ok((metadata.dev(), metadata.ino()))
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        super::windows_files::identity(path)
+    }
+    #[cfg(not(any(unix, windows)))]
     Err(HostError::new(
         "UNSUPPORTED_PLATFORM",
         "Workspace identity requires macOS.",
@@ -553,6 +561,12 @@ fn validate_identity(value: &str) -> Result<()> {
 }
 
 fn private_dir(path: &Path) -> Result<()> {
+    #[cfg(windows)]
+    match fs::create_dir(path) {
+        Ok(()) => (),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => (),
+        Err(error) => return Err(error.into()),
+    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::DirBuilderExt;
@@ -567,7 +581,11 @@ fn private_dir(path: &Path) -> Result<()> {
 
 fn require_real_directory(path: &Path) -> Result<()> {
     match path.symlink_metadata() {
-        Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => Ok(()),
+        Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
+            #[cfg(windows)]
+            { super::windows_files::pin_directory(path, Path::new("."))?; }
+            Ok(())
+        },
         _ => Err(HostError::new("WORKSPACE_MISSING", "The workspace directory is missing or was replaced. It will not be recreated automatically.")),
     }
 }

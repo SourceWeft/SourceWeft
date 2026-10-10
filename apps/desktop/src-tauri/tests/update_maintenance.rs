@@ -1,4 +1,4 @@
-#![cfg(target_os = "macos")]
+#![cfg(any(target_os = "macos", windows))]
 use serde_json::json;
 use sourceweft_desktop::local_host::{execution::Executions, LocalHost};
 

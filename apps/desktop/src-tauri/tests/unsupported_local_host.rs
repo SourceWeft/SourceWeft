@@ -1,4 +1,4 @@
-#![cfg(not(target_os = "macos"))]
+#![cfg(not(any(target_os = "macos", windows)))]
 
 use sourceweft_desktop::local_host::LocalHost;
 

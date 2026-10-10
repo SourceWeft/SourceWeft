@@ -38,7 +38,10 @@ function normalizePath(value: string) {
     return value;
   }
   const normalized = value.trim().replace(/\\/g, "/").replace(/\/+/g, "/");
-  const absolute = normalized.startsWith("/") ? normalized : `/${normalized}`;
+  const absolute =
+    normalized.startsWith("/") || /^[A-Za-z]:\//u.test(normalized)
+      ? normalized
+      : `/${normalized}`;
   const withoutTrailingSlash = absolute.replace(/\/$/g, "");
   return withoutTrailingSlash || "/";
 }
@@ -89,9 +92,7 @@ function policyRoots(input: {
   policy: SandboxProviderPathPolicy;
   kind: keyof Pick<
     SandboxProviderPathPolicy,
-    | "prepareTargetRoots"
-    | "collectSourceRoots"
-    | "readWriteRoots"
+    "prepareTargetRoots" | "collectSourceRoots" | "readWriteRoots"
   >;
 }) {
   return input.policy[input.kind].map(normalizePath);
@@ -134,9 +135,7 @@ function assertSandboxPathForPolicy(input: {
   policy: SandboxProviderPathPolicy;
   kind: keyof Pick<
     SandboxProviderPathPolicy,
-    | "prepareTargetRoots"
-    | "collectSourceRoots"
-    | "readWriteRoots"
+    "prepareTargetRoots" | "collectSourceRoots" | "readWriteRoots"
   >;
   code: string;
   description: string;

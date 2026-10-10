@@ -1,6 +1,8 @@
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+#[cfg(any(target_os = "macos", windows))]
+use sourceweft_desktop::local_host::credentials;
 use sourceweft_desktop::local_host::{execution::Executions, LocalHost};
 use std::{
     sync::{
@@ -20,13 +22,21 @@ fn computer_name() -> Result<String, String> {
     if !output.status.success() {
         return Err("Could not read macOS computer name".into());
     }
-    let name = String::from_utf8(output.stdout)
-        .map_err(|_| "Computer name is not valid UTF-8")?;
+    let name = String::from_utf8(output.stdout).map_err(|_| "Computer name is not valid UTF-8")?;
     let name = name.trim();
     if name.is_empty() {
         return Err("macOS computer name is empty".into());
     }
     Ok(name.to_owned())
+}
+
+#[cfg(windows)]
+fn computer_name() -> Result<String, String> {
+    let name = std::env::var("COMPUTERNAME").map_err(|_| "Could not read Windows computer name")?;
+    if name.trim().is_empty() {
+        return Err("Windows computer name is empty".into());
+    }
+    Ok(name)
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -56,15 +66,20 @@ pub struct RemoteHost {
 }
 
 impl RemoteHost {
-    #[cfg(target_os = "macos")]
-    pub async fn choose_folder(&self, ticket: String, user_id: String) -> Result<Value, String> {
+    #[cfg(any(target_os = "macos", windows))]
+    pub async fn choose_folder(
+        &self,
+        ticket: String,
+        user_id: String,
+        _app: tauri::AppHandle,
+    ) -> Result<Value, String> {
         let owner = user_id.clone();
         let authenticated = self.authenticate(ticket, user_id).await?;
         if authenticated["needsProof"] == true || self.status().user_id.as_deref() != Some(&owner) {
             return Err("Authenticate the current account before choosing a folder".into());
         }
         let folder_generation = self.generation.load(Ordering::SeqCst);
-        let bytes = security_framework::passwords::get_generic_password(
+        let bytes = credentials::get_generic_password(
             &self.keychain_service,
             &format!(
                 "local-device:{}",
@@ -79,21 +94,38 @@ impl RemoteHost {
         if self.status().device_id.as_deref() != Some(&credential.id) {
             return Err("Authenticate this computer before choosing a folder".into());
         }
-        let output = tauri::async_runtime::spawn_blocking(|| {
-            std::process::Command::new("/usr/bin/osascript")
-                .args([
-                    "-e",
-                    "POSIX path of (choose folder with prompt \"Choose a working directory\")",
-                ])
-                .output()
+        #[cfg(target_os = "macos")]
+        let path = {
+            let output = tauri::async_runtime::spawn_blocking(|| {
+                std::process::Command::new("/usr/bin/osascript")
+                    .args([
+                        "-e",
+                        "POSIX path of (choose folder with prompt \"Choose a working directory\")",
+                    ])
+                    .output()
+            })
+            .await
+            .map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string())?;
+            if !output.status.success() {
+                return Err("Folder selection cancelled or unavailable".into());
+            }
+            let path = String::from_utf8(output.stdout).map_err(|_| "Invalid folder path")?;
+            std::path::PathBuf::from(path.trim())
+        };
+        #[cfg(windows)]
+        let path = tauri::async_runtime::spawn_blocking(move || {
+            use tauri_plugin_dialog::DialogExt;
+            _app.dialog()
+                .file()
+                .set_title("Choose a working directory")
+                .blocking_pick_folder()
         })
         .await
         .map_err(|e| e.to_string())?
+        .ok_or("Folder selection cancelled or unavailable")?
+        .into_path()
         .map_err(|e| e.to_string())?;
-        if !output.status.success() {
-            return Err("Folder selection cancelled or unavailable".into());
-        }
-        let path = String::from_utf8(output.stdout).map_err(|_| "Invalid folder path")?;
         if self.generation.load(Ordering::SeqCst) != folder_generation
             || self.status().user_id.as_deref() != Some(&owner)
         {
@@ -101,7 +133,7 @@ impl RemoteHost {
         }
         let grant = self
             .host
-            .register_folder(&credential.user_id, std::path::Path::new(path.trim()))
+            .register_folder(&credential.user_id, &path)
             .map_err(|e| e.to_string())?;
         let response = reqwest::Client::new()
             .post(format!(
@@ -118,27 +150,31 @@ impl RemoteHost {
         }
         response.json().await.map_err(|e| e.to_string())
     }
-    #[cfg(not(target_os = "macos"))]
-    pub async fn choose_folder(&self, _ticket: String, _user_id: String) -> Result<Value, String> {
+    #[cfg(not(any(target_os = "macos", windows)))]
+    pub async fn choose_folder(
+        &self,
+        _ticket: String,
+        _user_id: String,
+        _app: tauri::AppHandle,
+    ) -> Result<Value, String> {
         Err("UNSUPPORTED_PLATFORM".into())
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     pub async fn authenticate(&self, ticket: String, user_id: String) -> Result<Value, String> {
+        #[cfg(windows)]
+        sourceweft_desktop::local_host::windows_execution::require_trusted_execution()
+            .map_err(|e| e.to_string())?;
         if self.status().device_id.is_some() && self.status().user_id.as_deref() != Some(&user_id) {
             self.disconnect();
         }
         let auth_generation = self.generation.load(Ordering::SeqCst);
         let account = format!("local-device:{user_id}");
-        let saved =
-            security_framework::passwords::get_generic_password(&self.keychain_service, &account);
+        let saved = credentials::get_generic_password(&self.keychain_service, &account);
         // Adopt only this account's pre-release credential; never another user's.
         let saved = match saved {
             Err(error) if error.code() == -25300 => {
-                match security_framework::passwords::get_generic_password(
-                    &self.keychain_service,
-                    "local-device",
-                ) {
+                match credentials::get_generic_password(&self.keychain_service, "local-device") {
                     Ok(bytes) => {
                         let legacy: Credentials = serde_json::from_slice(&bytes)
                             .map_err(|_| "Invalid saved legacy credentials")?;
@@ -164,6 +200,9 @@ impl RemoteHost {
         };
         let credentials: Credentials =
             serde_json::from_slice(&bytes).map_err(|_| "Invalid saved device credentials")?;
+        if credentials.user_id != user_id {
+            return Err("Saved device credentials belong to another account".into());
+        }
         let response = reqwest::Client::builder()
             .timeout(Duration::from_secs(15))
             .build()
@@ -173,7 +212,7 @@ impl RemoteHost {
                 credentials.api_base.trim_end_matches('/')
             ))
             .bearer_auth(&credentials.token)
-            .json(&json!({"ticket":ticket,"workspaceBase":self.host.workspace_base(),"name":computer_name()?}))
+            .json(&json!({"ticket":ticket,"workspaceBase":sourceweft_desktop::local_host::wire_path(&self.host.workspace_base()),"name":computer_name()?}))
             .send()
             .await
             .map_err(|e| e.to_string())?;
@@ -182,7 +221,7 @@ impl RemoteHost {
             return Err(format!("Native identity rejected: {}", response.status()));
         }
         let proof: Value = response.json().await.map_err(|e| e.to_string())?;
-        security_framework::passwords::set_generic_password(
+        credentials::set_generic_password(
             &self.keychain_service,
             &format!("local-device:{}", credentials.user_id),
             &bytes,
@@ -197,7 +236,7 @@ impl RemoteHost {
         Ok(proof)
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", windows)))]
     pub async fn authenticate(&self, _ticket: String, _user_id: String) -> Result<Value, String> {
         Err("UNSUPPORTED_PLATFORM: Local execution currently requires macOS.".into())
     }
@@ -225,13 +264,16 @@ impl RemoteHost {
             status.device_id = None;
         }
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", windows)))]
     pub async fn enroll(&self, _ticket: String) -> Result<RemoteStatus, String> {
         Err("UNSUPPORTED_PLATFORM: Local execution currently requires macOS.".into())
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     pub async fn enroll(&self, ticket: String) -> Result<RemoteStatus, String> {
+        #[cfg(windows)]
+        sourceweft_desktop::local_host::windows_execution::require_trusted_execution()
+            .map_err(|e| e.to_string())?;
         if self.status().device_id.is_some() {
             return Err("A local host is already enrolled in this application session.".into());
         }
@@ -273,7 +315,7 @@ impl RemoteHost {
             token: value["token"].as_str().ok_or("Missing credential")?.into(),
             api_base,
         };
-        security_framework::passwords::set_generic_password(
+        credentials::set_generic_password(
             &self.keychain_service,
             &format!("local-device:{}", credential.user_id),
             &serde_json::to_vec(&credential).map_err(|e| e.to_string())?,
@@ -355,7 +397,10 @@ async fn connection(
         .await
         .map_err(|e| e.to_string())?;
     let (mut sender, mut receiver) = socket.split();
-    let (events, mut results) = tokio::sync::mpsc::channel::<(Value, Arc<sourceweft_desktop::local_host::maintenance::Lease>)>(32);
+    let (events, mut results) = tokio::sync::mpsc::channel::<(
+        Value,
+        Arc<sourceweft_desktop::local_host::maintenance::Lease>,
+    )>(32);
     let serial = Arc::new(tokio::sync::Semaphore::new(1));
     let mut heartbeat = tokio::time::interval(Duration::from_secs(5));
     let mut last_received = tokio::time::Instant::now();

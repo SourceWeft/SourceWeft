@@ -11,6 +11,7 @@ import type {
   SandboxRuntimeContext,
 } from "@sourceweft/builtin-tool-sandbox";
 import { localCall } from "./service";
+import { isNativeAbsolutePath } from "./native-path";
 
 export async function localProviderForTurn(
   context: Pick<
@@ -83,7 +84,7 @@ export async function localProviderForTurn(
     if (
       typeof workspace.id !== "string" ||
       typeof workspace.path !== "string" ||
-      !workspace.path.startsWith("/")
+      !isNativeAbsolutePath(workspace.path)
     )
       throw new ContentError(
         409,

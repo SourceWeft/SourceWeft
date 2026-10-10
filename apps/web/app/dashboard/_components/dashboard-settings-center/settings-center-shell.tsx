@@ -81,9 +81,9 @@ export function DashboardSettingsCenterModal({
   React.useEffect(() => {
     if (!desktopBridge.isAvailable()) return;
     let active = true;
-    void desktopBridge.info().then(
-      (info) => {
-        if (active) setIsLocalPc(info.platform === "macos");
+    void desktopBridge.localHostStatus().then(
+      (status) => {
+        if (active) setIsLocalPc(status.platformSupported);
       },
       () => {
         if (active) setIsLocalPc(false);
@@ -96,7 +96,13 @@ export function DashboardSettingsCenterModal({
   const visibleMenuItems = [
     ...menuItems,
     ...(isLocalPc
-      ? [{ key: "local" as const, labelKey: "nav.localComputer", icon: Monitor }]
+      ? [
+          {
+            key: "local" as const,
+            labelKey: "nav.localComputer",
+            icon: Monitor,
+          },
+        ]
       : []),
     { key: "about" as const, labelKey: "nav.about", icon: Info },
   ];

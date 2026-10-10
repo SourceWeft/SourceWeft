@@ -15,18 +15,20 @@ import type {
 
 function normalizePrefix(prefix: string) {
   const normalized = prefix.replace(/\\/g, "/").replace(/\/+/g, "/");
-  const withLeading = normalized.startsWith("/")
-    ? normalized
-    : `/${normalized}`;
+  const withLeading =
+    normalized.startsWith("/") || /^[A-Za-z]:\//u.test(normalized)
+      ? normalized
+      : `/${normalized}`;
   return withLeading.replace(/\/+$/g, "") || "/";
 }
 
 function normalizePath(path: string | null | undefined) {
   const raw = path?.trim() || "/";
   const normalized = raw.replace(/\\/g, "/").replace(/\/+/g, "/");
-  const withLeading = normalized.startsWith("/")
-    ? normalized
-    : `/${normalized}`;
+  const withLeading =
+    normalized.startsWith("/") || /^[A-Za-z]:\//u.test(normalized)
+      ? normalized
+      : `/${normalized}`;
   return withLeading.replace(/\/+$/g, "") || "/";
 }
 

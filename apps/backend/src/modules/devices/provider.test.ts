@@ -97,3 +97,35 @@ test("a different account cannot resolve the directory", async () => {
   ).rejects.toThrow("private");
   expect(state.call).not.toHaveBeenCalled();
 });
+
+test("Windows directories retain their drive and scope across file and command dispatch", async () => {
+  state.call.mockImplementation(async (input) => {
+    if (input.action === "workspace.ensure")
+      return { id: "native", path: "C:/Users/test/任务 folder" };
+    return { output: "ok", exitCode: 0, files: [{ path: "sub/report.txt" }] };
+  });
+  const provider = (await localProviderForTurn(context))!.createProvider();
+  expect(provider.pathPolicy.workspaceRoot).toBe("C:/Users/test/任务 folder");
+  await provider.execute({
+    providerSandboxId: "native",
+    command: "echo ok",
+    cwd: "C:/Users/test/任务 folder/sub",
+    timeoutMs: 1000,
+    maxOutputChars: 100,
+  });
+  expect(state.call.mock.calls.at(-1)![0].payload.cwd).toBe("sub");
+  expect(
+    await provider.listFiles!({
+      providerSandboxId: "native",
+      sandboxPath: "C:/Users/test/任务 folder",
+    }),
+  ).toEqual([{ path: "C:/Users/test/任务 folder/sub/report.txt" }]);
+  for (const path of [
+    "D:/outside.txt",
+    "C:/Users/test/任务 folder-other/a",
+    "C:/Users/test/任务 folder/../a",
+  ])
+    await expect(
+      provider.downloadFile({ providerSandboxId: "native", sandboxPath: path }),
+    ).rejects.toThrow("LOCAL_PATH_DENIED");
+});

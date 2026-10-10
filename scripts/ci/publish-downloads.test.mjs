@@ -136,7 +136,7 @@ test("manifest preserves actual architectures and separates preview/stable", asy
       ["windows", "x64"],
     ],
   );
-  assert.equal(prepared.manifest.artifacts[1].localExecutionSupported, false);
+  assert.equal(prepared.manifest.artifacts[1].localExecutionSupported, true);
   assert(!JSON.stringify(prepared.manifest).includes("test-secret"));
   const prefixed = await prepareManifest(
     { ...config, prefix: "apps/desktop" },

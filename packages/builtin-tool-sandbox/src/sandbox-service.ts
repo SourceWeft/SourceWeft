@@ -148,6 +148,7 @@ export class AgentSandboxService {
         if (input.executionTarget?.kind === "local") {
           return `<local_working_directory>
 - Working directory and default cwd: ${provider.pathPolicy.workspaceRoot}.
+${/^[A-Za-z]:\//u.test(provider.pathPolicy.workspaceRoot) ? "- This PC runs Windows. Execute uses niubash (niu -c) with Bash syntax and native Windows tools; use forward-slash drive paths such as C:/task. Commands run in explicitly enabled trusted mode as the Windows user, with access to that user's files and network. niubash is not an OS isolation sandbox.\n" : ""}
 - File tools and execute operate on the same physical files on the bound PC. Write scripts, data, drafts and outputs directly here.
 - Files persist on this computer. External edits are visible on the next read. They are not automatically uploaded or synchronized.
 - /files is unavailable in PC conversations. Do not use prepare_sandbox_workspace or collect_sandbox_outputs.

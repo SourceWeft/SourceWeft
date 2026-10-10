@@ -20,6 +20,28 @@ const policy: SandboxProviderPathPolicy = {
   readWriteRoots: ["/workspace"],
 };
 
+test("Windows provider paths preserve the drive and reject other roots", () => {
+  const root = "C:/Users/test/任务 folder";
+  const windowsPolicy = {
+    ...policy,
+    workspaceRoot: root,
+    defaultCwd: root,
+    prepareTargetRoots: [root],
+    collectSourceRoots: [root],
+    readWriteRoots: [root],
+  };
+  assert.equal(assertExecuteCwd(undefined, windowsPolicy), root);
+  assert.equal(
+    assertSandboxWritePath(`${root}/report.txt`, windowsPolicy),
+    `${root}/report.txt`,
+  );
+  for (const path of ["D:/report.txt", `${root}-other/a`, `${root}/../outside`])
+    assert.throws(
+      () => assertSandboxReadPath(path, windowsPolicy),
+      /SANDBOX_READ_PATH_DENIED/,
+    );
+});
+
 test("sandbox path validation accepts only explicit SourceWeft and sandbox paths", () => {
   assert.equal(
     assertSourceWorkPath("/files/novel/chapter-01.md"),
@@ -157,7 +179,8 @@ describe("assertExecuteCommandPathPolicy", () => {
       /SANDBOX_EXECUTE_VFS_PATH_DENIED/,
     );
     assert.throws(
-      () => assertExecuteCommandPathPolicy("node /skills/tool-a/scripts/run.js"),
+      () =>
+        assertExecuteCommandPathPolicy("node /skills/tool-a/scripts/run.js"),
       /SANDBOX_EXECUTE_VFS_PATH_DENIED/,
     );
     assert.throws(

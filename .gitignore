@@ -54,6 +54,7 @@ dist/
 
 # rust
 target/
+/apps/desktop/src-tauri/resources/niubash/
 
 # Tauri mobile iOS local/build artifacts. Keep generated project sources under
 # apps/mobile/src-tauri/gen/apple tracked; only ignore local Xcode/CocoaPods

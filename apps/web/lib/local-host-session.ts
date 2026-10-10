@@ -12,7 +12,7 @@ let pending: Promise<NativeSession> | null = null;
 let generation = 0;
 let initializingUserId: string | undefined;
 
-/** Credential stays in Keychain. A local initialization failure never selects cloud. */
+/** Credential stays in the OS store. A local initialization failure never selects cloud. */
 export async function ensureLocalHostSession(
   expectedUserId?: string,
 ): Promise<NativeSession | null> {
@@ -79,7 +79,7 @@ export async function ensureLocalHostSession(
   return attempt;
 }
 
-/** Ordinary catalog/history/cloud calls must not wait for Keychain. */
+/** Ordinary catalog/history/cloud calls must not wait for the OS credential store. */
 export async function cachedLocalHostHeaders(
   path?: string,
 ): Promise<Record<string, string>> {
