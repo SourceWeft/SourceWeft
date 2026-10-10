@@ -109,7 +109,7 @@ jobs:
       - name: Verify manual image workflow when present in selected revision
         if: hashFiles('scripts/ci/manual-image-workflow.test.mjs') != ''
         run: node --test scripts/ci/manual-image-workflow.test.mjs
-      - run: node --test scripts/ci/verify-release-config.test.mjs scripts/ci/publish-downloads.test.mjs scripts/ci/publish-desktop-updates.test.mjs scripts/ci/desktop-update-manifest.test.mjs docker/selfhost-config.test.mjs
+      - run: node --test scripts/ci/desktop-download-aliases.test.mjs scripts/ci/verify-release-config.test.mjs scripts/ci/publish-downloads.test.mjs scripts/ci/publish-desktop-updates.test.mjs scripts/ci/desktop-update-manifest.test.mjs docker/selfhost-config.test.mjs
       - run: pnpm lint
       - run: pnpm check-types
 

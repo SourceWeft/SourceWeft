@@ -5,6 +5,20 @@ Releases, and publishes the same bytes to an S3-compatible bucket. The public
 website must use the bucket's public HTTPS domain rather than the S3 API endpoint.
 No bucket credentials are needed by the website.
 
+## README download links
+
+The README badges use GitHub `releases/latest/download/SourceWeft_<platform>`
+links with fixed asset names: `SourceWeft_aarch64.dmg`,
+`SourceWeft_x64-setup.exe`, and `SourceWeft_amd64.AppImage`.
+Before uploading either signed or candidate release drafts,
+`desktop-download-aliases.mjs` copies the corresponding versioned installers
+without changing their bytes. Missing, ambiguous, empty, or wrong-version inputs
+abort publication. Versioned assets remain available for pinned downloads.
+Aliases are staged separately and do not enter S3 or updater manifests.
+These links follow the release GitHub marks Latest, which can be an RC when
+published with the repository's explicit GitHub prerelease override; they do not
+select the website's stable or preview channel.
+
 ## GitHub Actions configuration
 
 Configure repository **Variables**:
