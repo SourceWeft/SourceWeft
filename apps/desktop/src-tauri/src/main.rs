@@ -96,13 +96,9 @@ struct SetAutostartInput {
 
 fn main() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
-            for url in argv
-                .into_iter()
-                .filter(|arg| arg.starts_with("sourceweft://"))
-            {
-                emit_deep_link(app, url);
-            }
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            // The plugin's `deep-link` feature already forwards URLs to
+            // setup_deep_links before this callback runs on Windows/Linux.
             let _ = focus_main_window(app);
         }))
         .plugin(tauri_plugin_deep_link::init())
@@ -576,10 +572,19 @@ fn emit_startup_deep_links(app: &AppHandle) {
     let handle = app.clone();
     thread::spawn(move || {
         thread::sleep(Duration::from_millis(500));
-        for url in links {
+        for url in unique_startup_deep_links(links) {
             emit_deep_link(&handle, url);
         }
     });
+}
+
+fn unique_startup_deep_links(links: Vec<String>) -> Vec<String> {
+    // CLI arguments and get_current() can contain the same startup URL.
+    let mut seen = std::collections::HashSet::new();
+    links
+        .into_iter()
+        .filter(|url| seen.insert(url.clone()))
+        .collect()
 }
 
 fn emit_deep_link(app: &AppHandle, url: String) {
@@ -637,5 +642,21 @@ fn tray_event_should_open(event: &TrayIconEvent) -> bool {
         } => *button == MouseButton::Left && *button_state == MouseButtonState::Up,
         TrayIconEvent::DoubleClick { .. } => true,
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod deep_link_tests {
+    use super::unique_startup_deep_links;
+
+    #[test]
+    fn startup_links_from_cli_and_plugin_are_delivered_once_in_order() {
+        let auth = "sourceweft://auth/complete?ott=test&state=test".to_string();
+        let other = "sourceweft://open/thread?id=1".to_string();
+        assert_eq!(
+            unique_startup_deep_links(vec![auth.clone(), other.clone(), auth.clone()]),
+            vec![auth, other]
+        );
+        assert!(unique_startup_deep_links(vec![]).is_empty());
     }
 }
