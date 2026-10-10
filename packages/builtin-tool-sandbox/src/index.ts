@@ -9,6 +9,8 @@ export {
   SANDBOX_PROVIDER_ERROR_CODES,
   isSandboxInstanceMissingError,
   SandboxInstanceChangedError,
+  hasSandboxPhysicalAbsenceEvidence,
+  type SandboxPhysicalAbsenceEvidence,
 } from "./runtime/errors";
 
 import { builtinSandboxCapabilityManifest } from "./manifest";
@@ -75,6 +77,7 @@ import type {
   SandboxCancellationResult,
   SandboxCollectedOutput,
   SandboxExecuteResult,
+  SandboxCommandDurability,
   SandboxOperationStatus,
   SandboxOperationStore,
   SandboxOperationTimelineItem,
@@ -86,6 +89,13 @@ import type {
   SandboxRecord,
   SandboxRef,
   SandboxRuntimeContext,
+  SandboxVolumeExecutor,
+  SandboxVolumeControl,
+  SandboxSupervisorIdentity,
+  SandboxLazyMountRegistration,
+  SandboxLazyMountStatus,
+  SandboxVolumeHooks,
+  SandboxVolumeScope,
   SandboxRuntimeLimits,
   SandboxStatus,
   SandboxStore,
@@ -151,6 +161,7 @@ export type {
   SandboxCancellationResult,
   SandboxCollectedOutput,
   SandboxExecuteResult,
+  SandboxCommandDurability,
   SandboxOperationStatus,
   SandboxOperationStore,
   SandboxOperationTimelineItem,
@@ -165,6 +176,13 @@ export type {
   SandboxRuntimeLimits,
   SandboxStatus,
   SandboxStore,
+  SandboxVolumeExecutor,
+  SandboxVolumeControl,
+  SandboxSupervisorIdentity,
+  SandboxLazyMountRegistration,
+  SandboxLazyMountStatus,
+  SandboxVolumeHooks,
+  SandboxVolumeScope,
 };
 export {
   SOURCEWEFT_KB_ROOT,

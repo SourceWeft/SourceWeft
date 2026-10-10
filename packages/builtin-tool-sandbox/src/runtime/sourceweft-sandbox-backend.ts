@@ -1,4 +1,11 @@
-import { SandboxInstanceChangedError } from "./errors";
+import {
+  readSandboxDurability,
+  volumeFailureResult,
+} from "./volume-durability";
+import {
+  SandboxInstanceChangedError,
+  SANDBOX_PROVIDER_ERROR_CODES,
+} from "./errors";
 import { randomUUID } from "node:crypto";
 import type {
   EditResult,
@@ -23,6 +30,7 @@ import {
 } from "./paths";
 import type {
   SandboxProvider,
+  SandboxExecuteResult,
   SandboxCancellationReason,
   SandboxCancellationResult,
   SandboxProviderPathPolicy,
@@ -228,19 +236,22 @@ function normalizeFileDataContent(
   return Array.isArray(content) ? content.join("\n") : content;
 }
 
-function replayExecuteResult(result: Record<string, unknown>) {
+function replayExecuteResult(
+  result: Record<string, unknown>,
+): SandboxExecuteResult {
+  const durability = readSandboxDurability(result.durability);
   return {
+    ...(durability ? { durability } : {}),
     output: typeof result.output === "string" ? result.output : "",
-    exitCode: typeof result.exitCode === "number" ? result.exitCode : 1,
+    exitCode:
+      result.exitCode === null || typeof result.exitCode === "number"
+        ? result.exitCode
+        : 1,
     truncated: result.truncated === true,
   };
 }
 
-function redactExecuteResult(result: {
-  output: string;
-  exitCode: number | null;
-  truncated: boolean;
-}) {
+function redactExecuteResult(result: SandboxExecuteResult) {
   return {
     ...result,
     output: redactSandboxText(result.output),
@@ -367,9 +378,7 @@ function modelExecutionCancellationReason(
 }
 
 function isProviderCommandTimeout(error: unknown) {
-  return (
-    error instanceof Error && error.message.includes("SANDBOX_COMMAND_TIMEOUT")
-  );
+  return isPinnedOperationProviderTimeout(error);
 }
 
 function waitForModelExecutionAbort(
@@ -548,11 +557,21 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
               error: "permission_denied" as const,
             };
           }
-          return {
-            path: filePath,
-            content: null,
-            error: "file_not_found" as const,
-          };
+          if (
+            error &&
+            typeof error === "object" &&
+            "code" in error &&
+            error.code === SANDBOX_PROVIDER_ERROR_CODES.fileMissing
+          ) {
+            return {
+              path: filePath,
+              content: null,
+              error: "file_not_found" as const,
+            };
+          }
+          // An unreadable or unavailable file may already contain saved user
+          // data. Never turn an unknown read outcome into permission to overwrite.
+          throw error;
         }
       }),
     );
@@ -561,41 +580,50 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
   private async uploadFilesToPinnedSandbox(input: {
     sandbox: SandboxRef;
     provider: SandboxProvider;
+    executionId: string;
     files: Array<[string, Uint8Array]>;
     signal: AbortSignal;
   }): Promise<FileUploadResponse[]> {
-    return Promise.all(
-      input.files.map(async ([filePath, content]) => {
-        let normalized: string;
-        try {
-          normalized = assertSandboxWritePath(
-            filePath,
-            input.provider.pathPolicy,
-          );
-        } catch {
-          return { path: filePath, error: "permission_denied" as const };
-        }
-        try {
-          throwBackendOperationAbortReason(input.signal);
-          const dir = normalized.slice(0, normalized.lastIndexOf("/")) || "/";
-          await input.provider.ensureDirectory({
-            providerSandboxId: input.sandbox.providerSandboxId,
-            directory: dir,
-          });
-          throwBackendOperationAbortReason(input.signal);
-          await input.provider.uploadFile({
-            providerSandboxId: input.sandbox.providerSandboxId,
-            sandboxPath: normalized,
-            content,
-          });
-          throwBackendOperationAbortReason(input.signal);
-          return { path: filePath, error: null };
-        } catch (error) {
-          if (input.signal.aborted) throw error;
-          return { path: filePath, error: "permission_denied" as const };
-        }
-      }),
-    );
+    return this.input.manager.withVolumeOperation({
+      sandbox: input.sandbox,
+      context: this.input.context,
+      operationId: input.executionId,
+      signal: input.signal,
+      run: () =>
+        Promise.all(
+          input.files.map(async ([filePath, content]) => {
+            let normalized: string;
+            try {
+              normalized = assertSandboxWritePath(
+                filePath,
+                input.provider.pathPolicy,
+              );
+            } catch {
+              return { path: filePath, error: "permission_denied" as const };
+            }
+            try {
+              throwBackendOperationAbortReason(input.signal);
+              const dir =
+                normalized.slice(0, normalized.lastIndexOf("/")) || "/";
+              await input.provider.ensureDirectory({
+                providerSandboxId: input.sandbox.providerSandboxId,
+                directory: dir,
+              });
+              throwBackendOperationAbortReason(input.signal);
+              await input.provider.uploadFile({
+                providerSandboxId: input.sandbox.providerSandboxId,
+                sandboxPath: normalized,
+                content,
+              });
+              throwBackendOperationAbortReason(input.signal);
+              return { path: filePath, error: null };
+            } catch (error) {
+              if (input.signal.aborted) throw error;
+              return { path: filePath, error: "permission_denied" as const };
+            }
+          }),
+        ),
+    });
   }
 
   private async readRawFromPinnedSandbox(input: {
@@ -996,6 +1024,11 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
           error: `Cannot write to ${normalized} because it already exists. Read and then make an edit, or write to a new path.`,
         };
       }
+      if (existing[0]?.error !== "file_not_found") {
+        return {
+          error: `Cannot establish that ${normalized} is absent; the existing file has been preserved.`,
+        };
+      }
       const result = await this.uploadFilesToPinnedSandbox({
         ...operationInput,
         files: [[normalized, new TextEncoder().encode(content)]],
@@ -1048,11 +1081,19 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
       }
       const [content, occurrences] = replaced;
       if (operationInput.provider.replaceTextFile) {
-        await operationInput.provider.replaceTextFile({
-          providerSandboxId: operationInput.sandbox.providerSandboxId,
-          sandboxPath: normalized,
-          content,
-          expected: raw.data.content,
+        const expected = raw.data.content;
+        await this.input.manager.withVolumeOperation({
+          sandbox: operationInput.sandbox,
+          context: this.input.context,
+          operationId: operationInput.executionId,
+          signal: operationInput.signal,
+          run: () =>
+            operationInput.provider.replaceTextFile!({
+              providerSandboxId: operationInput.sandbox.providerSandboxId,
+              sandboxPath: normalized,
+              content,
+              expected,
+            }),
         });
         return { path: normalized, filesUpdate: null, occurrences };
       }
@@ -1204,7 +1245,7 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
       signal?: AbortSignal;
       toolCallId?: string | null;
     } = {},
-  ) {
+  ): Promise<SandboxExecuteResult> {
     if (options.signal?.aborted) {
       throw (
         options.signal.reason ??
@@ -1275,7 +1316,10 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
       }
       executionId = randomUUID();
       let cancellationRun: Promise<SandboxCancellationResult> | undefined;
+      let commandSubmitted = false;
       const beginCancellation = (reason: SandboxCancellationReason) => {
+        if (!commandSubmitted)
+          return Promise.resolve({ confirmed: true, mode: "command" } as const);
         cancellationRun ??= this.input.manager.cancelExecution({
           sandbox,
           executionId: executionId!,
@@ -1288,11 +1332,13 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
           modelExecutionCancellationReason(options.signal),
         ).catch(() => undefined);
       });
-      const execution = this.input.manager
-        .providerForSandbox()
-        .execute({
+      const runOnce = async (hostExecutionId: string) => {
+        options.signal?.throwIfAborted();
+        executionId = hostExecutionId;
+        commandSubmitted = true;
+        return this.input.manager.executeUserCommand(sandbox, {
           providerSandboxId: sandbox.providerSandboxId,
-          executionId,
+          executionId: hostExecutionId,
           command,
           cwd: assertExecuteCwd(
             undefined,
@@ -1301,11 +1347,34 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
           timeoutMs: this.input.commandTimeoutMs,
           maxOutputChars: this.input.limits.maxOutputChars,
           ...(options.signal ? { signal: options.signal } : {}),
-        })
-        .then(
-          (result) => ({ kind: "result" as const, result }),
-          (error: unknown) => ({ kind: "error" as const, error }),
+        });
+      };
+      const execution = (async () => {
+        let confirmedSeq: number | undefined;
+        const result = await this.input.manager.withVolumeOperation({
+          sandbox,
+          context: this.input.context,
+          operationId: claim.operationId,
+          writerKind: "supervised",
+          signal: options.signal,
+          run: runOnce,
+          checkpoint: async (_result, barrier) => {
+            confirmedSeq = await this.input.manager.volumeCheckpoint(
+              sandbox,
+              barrier,
+            );
+            return confirmedSeq;
+          },
+        });
+        return this.input.manager.volumeConfirmedResult(
+          sandbox,
+          result,
+          confirmedSeq,
         );
+      })().then(
+        (result) => ({ kind: "result" as const, result }),
+        (error: unknown) => ({ kind: "error" as const, error }),
+      );
       try {
         const outcome = await Promise.race([
           execution,
@@ -1375,6 +1444,9 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
             truncated: redactedResult.truncated,
             outputChars: redactedResult.output.length,
             executionId,
+            ...(redactedResult.durability
+              ? { durability: redactedResult.durability }
+              : {}),
           },
           durationMs: Date.now() - startedAt,
         });
@@ -1411,6 +1483,7 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
           error: compactRecoverableToolOutput(
             redactSandboxText(compactError(error)),
           ),
+          ...volumeFailureResult(error),
           ...(errorCode ? { errorCode, failureCode: errorCode } : {}),
           ...(executionId ? { executionId } : {}),
           ...(cancellation

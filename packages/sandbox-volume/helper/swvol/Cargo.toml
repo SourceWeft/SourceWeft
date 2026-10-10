@@ -1,0 +1,28 @@
+[package]
+name = "swvol"
+version = "0.5.0"
+edition = "2021"
+description = "SourceWeft sandbox volume helper (prototype): change detection, chunked incremental sync, restore"
+
+[dependencies]
+swvol-core = { path = "../swvol-core" }
+anyhow = "1"
+libc = "0.2"
+bincode = "1"
+blake3 = "1"
+fastcdc = "3"
+filetime = "0.2"
+fs2 = "0.4"
+hex = "0.4"
+inotify = "0.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ureq = { version = "2", default-features = false, features = ["tls"] }
+zstd = "0.13"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true

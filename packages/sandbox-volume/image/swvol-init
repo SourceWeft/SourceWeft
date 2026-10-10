@@ -1,0 +1,57 @@
+#!/bin/sh
+# Fixed root image boot step. No tmpfs substitute: unsupported mounts fail explicitly.
+set -eu
+fail() { echo "swvol-init: $1" >&2; exit 1; }
+[ "$(id -u)" = 0 ] || fail 'root boot privilege required'
+B=/var/lib/swvol
+U=${SANDBOX_USER:-sandbox}
+UID_=$(id -u "$U")
+GID_=$(id -g "$U")
+[ -c /dev/fuse ] || fail 'FUSE device unavailable'
+[ -x /usr/local/sbin/swlazy ] || fail 'installed swlazy helper unavailable'
+[ -s "$B/plan.json" ] || [ -s /usr/local/share/swvol/plan.json.gz ] || fail 'restore plan unavailable'
+id swvol >/dev/null 2>&1 || fail 'installed swvol identity unavailable'
+chmod 0666 /dev/fuse
+grep -q '^user_allow_other' /etc/fuse.conf || fail 'FUSE allow-other configuration unavailable'
+mkdir -p "$B/lower" "$B/upper" "$B/work" "$B/cache" /run/swvol /workspace
+chown swvol:swvol "$B" "$B/lower" "$B/cache"
+chown "$U:$U" "$B/upper"
+chmod 755 "$B" "$B/lower" "$B/upper"
+if [ ! -s "$B/plan.json" ]; then
+  trap 'rm -f "$B/plan.json.tmp"' EXIT
+  trap 'exit 1' HUP INT TERM
+  gzip -dc /usr/local/share/swvol/plan.json.gz > "$B/plan.json.tmp"
+  [ -s "$B/plan.json.tmp" ] || fail 'empty restore plan'
+  mv "$B/plan.json.tmp" "$B/plan.json"
+  trap - EXIT HUP INT TERM
+fi
+chown swvol:swvol "$B/plan.json"
+if ! mountpoint -q "$B/lower"; then
+  setpriv --reuid=swvol --regid=swvol --init-groups env SWLAZY_UID="$UID_" SWLAZY_GID="$GID_" \
+    setsid /usr/local/sbin/swlazy mount-volume "$B/plan.json" "$B/cache" "$B/lower" --allow-other --cap-mb 1024 > "$B/fuse.log" 2>&1 < /dev/null &
+  fuse_pid=$!
+  for i in $(seq 1 200); do
+    mountpoint -q "$B/lower" && break
+    kill -0 "$fuse_pid" 2>/dev/null || fail 'FUSE helper exited before mounting'
+    sleep 0.05
+  done
+fi
+mountpoint -q "$B/lower" || fail 'FUSE lower failed to mount'
+UP=$B
+if [ -n "${SWVOL_UPPER_BASE:-}" ]; then
+  [ -d "$SWVOL_UPPER_BASE" ] || fail 'configured persistent upper base unavailable'
+  UP=$SWVOL_UPPER_BASE/swvol
+fi
+mkdir -p "$UP/upper" "$UP/work"
+chown "$U:$U" "$UP/upper"
+chmod 700 "$UP"
+if ! mountpoint -q /workspace; then
+  mount -t overlay overlay -o "lowerdir=$B/lower,upperdir=$UP/upper,workdir=$UP/work" /workspace 2> "$B/overlay.err" || fail 'persistent overlay mount failed'
+fi
+mountpoint -q /workspace || fail 'workspace failed to mount'
+chmod 700 "$B"
+chmod 600 "$B/plan.json"
+printf 'lower=mounted workspace=mounted upper=%s\n' "$UP" > /run/swvol/boot.log
+chmod 644 /run/swvol/boot.log
+chmod 755 /run/swvol
+cat /run/swvol/boot.log

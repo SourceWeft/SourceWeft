@@ -12,6 +12,44 @@ export const SANDBOX_PROVIDER_ERROR_CODES = {
 export type SandboxProviderErrorCode =
   (typeof SANDBOX_PROVIDER_ERROR_CODES)[keyof typeof SANDBOX_PROVIDER_ERROR_CODES];
 
+/** Issued only by an authenticated provider resource lookup, never a file/stamp probe. */
+export type SandboxPhysicalAbsenceEvidence = {
+  authority: "provider-resource-api";
+  outcome: "not_found";
+  provider: string;
+  providerSandboxId: string;
+  requestId: string;
+  observedAtMs: number;
+};
+
+export function hasSandboxPhysicalAbsenceEvidence(
+  error: unknown,
+  input: {
+    provider: string;
+    providerSandboxId: string;
+  },
+): boolean {
+  if (!error || typeof error !== "object" || !("physicalAbsence" in error))
+    return false;
+  const evidence =
+    error.physicalAbsence as Partial<SandboxPhysicalAbsenceEvidence> | null;
+  return (
+    typeof evidence === "object" &&
+    evidence !== null &&
+    evidence.authority === "provider-resource-api" &&
+    evidence.outcome === "not_found" &&
+    evidence.provider === input.provider &&
+    evidence.providerSandboxId === input.providerSandboxId &&
+    typeof evidence.requestId === "string" &&
+    evidence.requestId.length > 0 &&
+    evidence.requestId.length <= 256 &&
+    typeof evidence.observedAtMs === "number" &&
+    Number.isFinite(evidence.observedAtMs) &&
+    evidence.observedAtMs <= Date.now() &&
+    evidence.observedAtMs >= Date.now() - 60_000
+  );
+}
+
 /** Provider adapters own native error classification; callers use this code. */
 export class SandboxProviderError extends Error {
   constructor(
@@ -67,12 +105,31 @@ export function sandboxErrorDiagnostic(error: unknown): unknown {
     if (seen.has(value) || depth === 0) return undefined;
     seen.add(value);
     const record = value as Record<string, unknown>;
+    const cleanup =
+      record.creationCleanup && typeof record.creationCleanup === "object"
+        ? (record.creationCleanup as Record<string, unknown>)
+        : undefined;
     return {
       name: record.name,
       code: record.code,
       phase: record.phase,
       status: record.status ?? record.statusCode,
       message: record.message,
+      ...(cleanup &&
+      typeof cleanup.providerSandboxId === "string" &&
+      ["delete-requested", "already-missing", "unconfirmed"].includes(
+        String(cleanup.status),
+      )
+        ? {
+            creationCleanup: {
+              providerSandboxId: cleanup.providerSandboxId,
+              status: cleanup.status,
+              ...(typeof cleanup.reason === "string"
+                ? { reason: cleanup.reason }
+                : {}),
+            },
+          }
+        : {}),
       ...(record.cause === undefined
         ? {}
         : { cause: describe(record.cause, depth - 1) }),

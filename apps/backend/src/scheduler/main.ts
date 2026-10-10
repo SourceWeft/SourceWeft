@@ -27,6 +27,7 @@ import {
 } from "../billing-host/bindings";
 import { scheduleSyncModelPricing } from "./schedules/sync-model-pricing";
 import { startServiceHeartbeat } from "../shared/service-heartbeat";
+import { scheduleSandboxVolumeWal } from "./schedules/sandbox-volumes";
 
 validateBillingStartup();
 await syncGlobalModelGatewayConfigAtStartup();
@@ -60,6 +61,7 @@ async function tick() {
     jobs.push(durableChatRunService.failStaleActiveRuns());
     jobs.push(agentSandboxService.cleanupExpiredSandboxes());
     jobs.push(agentSandboxService.cleanupStaleSandboxOperations());
+    jobs.push(scheduleSandboxVolumeWal());
     // Direct uploads have no request to fail when a client walks away, so the
     // reserved rows are reconciled here instead of in a catch block.
     jobs.push(contentSourceService.failStaleSourceUploads());
