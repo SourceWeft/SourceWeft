@@ -91,7 +91,7 @@ test("unsigned installers require an explicit candidate policy and stay off stab
             desktopPublicationPolicy,
           },
         ),
-      /must be signed or candidate/,
+      /must be signed, updater-signed or candidate/,
     );
   }
 });
@@ -115,4 +115,18 @@ test("GitHub release flag defaults to semver and rejects malformed overrides", (
       /must be a boolean/,
     );
   }
+});
+
+test("updater-signed is explicit and preserves preview/stable channel rules", () => {
+  const result = validateReleaseConfig(
+    { GITHUB_REF_NAME: "v0.3.0-rc.7" },
+    { desktopPublicationPolicy: "updater-signed" },
+  );
+  assert.equal(result.desktopPolicy, "updater-signed");
+  assert.equal(result.prerelease, true);
+  assert.equal(result.latest, false);
+  assert.equal(
+    validateReleaseConfig({ GITHUB_REF_NAME: "v0.3.0" }).desktopPolicy,
+    "signed",
+  );
 });

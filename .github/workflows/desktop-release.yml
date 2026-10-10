@@ -1,6 +1,17 @@
-name: Signed desktop release
+name: Desktop update package build
 on:
   workflow_call:
+    inputs:
+      publication_policy:
+        type: string
+        default: signed
+  workflow_dispatch:
+    inputs:
+      publication_policy:
+        description: Explicit signing policy for build-only validation (does not publish)
+        type: choice
+        options: [signed, updater-signed]
+        default: updater-signed
 permissions:
   contents: read
   actions: read
@@ -29,16 +40,17 @@ jobs:
       APPIMAGE_EXTRACT_AND_RUN: "1"
       DESKTOP_RELEASE_TARGET: ${{ matrix.target }}
       SOURCEWEFT_SIGNED_RELEASE: "true"
+      DESKTOP_PUBLICATION_POLICY: ${{ inputs.publication_policy }}
       TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      WINDOWS_TIMESTAMP_URL: ${{ vars.WINDOWS_TIMESTAMP_URL }}
+      APPLE_CERTIFICATE: ${{ inputs.publication_policy == 'signed' && secrets.APPLE_CERTIFICATE || '' }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ inputs.publication_policy == 'signed' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+      APPLE_SIGNING_IDENTITY: ${{ inputs.publication_policy == 'signed' && secrets.APPLE_SIGNING_IDENTITY || '' }}
+      APPLE_ID: ${{ inputs.publication_policy == 'signed' && secrets.APPLE_ID || '' }}
+      APPLE_PASSWORD: ${{ inputs.publication_policy == 'signed' && secrets.APPLE_PASSWORD || '' }}
+      APPLE_TEAM_ID: ${{ inputs.publication_policy == 'signed' && secrets.APPLE_TEAM_ID || '' }}
+      WINDOWS_TIMESTAMP_URL: ${{ inputs.publication_policy == 'signed' && vars.WINDOWS_TIMESTAMP_URL || '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -63,8 +75,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
         if: steps.existing.outputs.exists != 'true'
       - run: node scripts/ci/verify-desktop-tag.mjs
+        if: github.ref_type == 'tag'
       - name: Import Windows signing certificate
-        if: runner.os == 'Windows' && steps.existing.outputs.exists != 'true'
+        if: runner.os == 'Windows' && inputs.publication_policy == 'signed' && steps.existing.outputs.exists != 'true'
         shell: pwsh
         env:
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
@@ -82,9 +95,14 @@ jobs:
       - name: Validate release signing configuration
         if: steps.existing.outputs.exists != 'true'
         run: node scripts/ci/desktop-release-config.mjs
-      - name: Build signed and notarized installers
+      - name: Build installers with required updater signatures
         if: steps.existing.outputs.exists != 'true'
-        run: pnpm --filter @sourceweft/desktop exec tauri build --ci --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --config src-tauri/tauri.release.generated.json -- --locked
+        shell: bash
+        run: |
+          if [ "$DESKTOP_PUBLICATION_POLICY" = "updater-signed" ]; then
+            unset APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID WINDOWS_TIMESTAMP_URL
+          fi
+          pnpm --filter @sourceweft/desktop exec tauri build --ci --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --config src-tauri/tauri.release.generated.json -- --locked
       - name: Build signature verifier
         if: steps.existing.outputs.exists != 'true'
         run: cargo build --locked --release --manifest-path scripts/ci/update-verifier/Cargo.toml

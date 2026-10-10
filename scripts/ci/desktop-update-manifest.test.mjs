@@ -12,7 +12,7 @@ import {
 import { releaseConfig } from "./desktop-release-config.mjs";
 
 const config = { prefix: "", publicBaseUrl: "https://download.sourceweft.com" };
-async function fixture(t) {
+async function fixture(t, policy = "signed") {
   const dir = await mkdtemp(join(tmpdir(), "update-manifest-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   for (const [target, name] of Object.entries(UPDATE_TARGETS)) {
@@ -28,15 +28,16 @@ async function fixture(t) {
         version: "0.2.0",
         target,
         filename,
-        distributionSigned: !name.startsWith("linux-"),
-        notarized: mac,
+        publicationPolicy: policy,
+        distributionSigned: policy === "signed" && !name.startsWith("linux-"),
+        notarized: policy === "signed" && mac,
         ...(await digest([bytes])),
       }),
     );
   }
   return dir;
 }
-const prepare = (dir, verifier = async () => {}) =>
+const prepare = (dir, verifier = async () => {}, policy = "signed") =>
   prepareUpdateManifest(
     config,
     dir,
@@ -44,6 +45,7 @@ const prepare = (dir, verifier = async () => {}) =>
     "Notes",
     "2026-09-20T00:00:00Z",
     verifier,
+    policy,
   );
 test("complete explicitly targeted release generates immutable signed-package references", async (t) => {
   const dir = await fixture(t);
@@ -133,4 +135,83 @@ test("Linux uses an updater-signed AppImage without claiming Windows or Apple co
   assert.equal(config.bundle.macOS, undefined);
   await rm(join(dir, "linux-x86_64.AppImage.sig"));
   await assert.rejects(prepare(dir), /signature/);
+});
+
+test("updater-signed verifies every target, preserves signatures, and rejects mode mixing", async (t) => {
+  const dir = await fixture(t, "updater-signed");
+  let verified = 0;
+  const result = await prepare(
+    dir,
+    async () => {
+      verified++;
+    },
+    "updater-signed",
+  );
+  assert.equal(verified, 4);
+  assert.equal(Object.keys(result.manifest.platforms).length, 4);
+  await assert.rejects(prepare(dir), /policy mismatch/);
+  await assert.rejects(prepare(dir, undefined, "candidate"), /cannot publish/);
+  await assert.rejects(
+    prepare(
+      dir,
+      async () => {
+        throw new Error("bad signature");
+      },
+      "updater-signed",
+    ),
+    /bad signature/,
+  );
+  await rm(join(dir, "windows-x86_64.exe.sig"));
+  await assert.rejects(prepare(dir, undefined, "updater-signed"), /signature/);
+});
+
+test("updater-signed never claims platform signing or notarization", async (t) => {
+  const dir = await fixture(t, "updater-signed");
+  const path = join(dir, "desktop-update-aarch64-apple-darwin.json");
+  const item = JSON.parse(await readFile(path, "utf8"));
+  await writeFile(path, JSON.stringify({ ...item, notarized: true }));
+  await assert.rejects(
+    prepare(dir, undefined, "updater-signed"),
+    /notarization/,
+  );
+});
+
+test("explicit updater-signed mode needs updater keys on all platforms, without platform certificates", () => {
+  for (const target of Object.keys(UPDATE_TARGETS)) {
+    const env = {
+      DESKTOP_PUBLICATION_POLICY: "updater-signed",
+      DESKTOP_RELEASE_TARGET: target,
+      TAURI_UPDATER_PUBLIC_KEY: "public",
+      TAURI_SIGNING_PRIVATE_KEY: "private",
+    };
+    const value = releaseConfig(env);
+    assert.equal(value.bundle.createUpdaterArtifacts, true);
+    assert.equal(value.plugins.updater.pubkey, "public");
+    assert(!JSON.stringify(value).includes("private"));
+    if (target.endsWith("apple-darwin"))
+      assert.equal(value.bundle.macOS.signingIdentity, "-");
+    if (target.endsWith("windows-msvc"))
+      assert.equal(value.bundle.windows, undefined);
+    for (const key of [
+      "TAURI_UPDATER_PUBLIC_KEY",
+      "TAURI_SIGNING_PRIVATE_KEY",
+    ]) {
+      assert.throws(
+        () => releaseConfig({ ...env, [key]: "" }),
+        new RegExp(key),
+      );
+    }
+    assert.throws(
+      () => releaseConfig({ ...env, APPLE_SIGNING_IDENTITY: "ambient" }),
+      /must be unset/,
+    );
+    assert.throws(
+      () => releaseConfig({ ...env, DESKTOP_PUBLICATION_POLICY: "candidate" }),
+      /cannot publish/,
+    );
+    assert.throws(
+      () => releaseConfig({ ...env, DESKTOP_PUBLICATION_POLICY: "unknown" }),
+      /policy/,
+    );
+  }
 });
