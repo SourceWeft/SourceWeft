@@ -234,6 +234,123 @@ test("reports a desktop sign-up for an account created just now", async () => {
   assert.equal(state.trackLogin.mock.calls.length, 0);
 });
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+const verifiedSession = {
+  data: {
+    session: { id: "session-1" },
+    user: { id: "user-1", createdAt: "2025-01-01T00:00:00.000Z" },
+  },
+  error: null,
+};
+
+test("redeems overlapping handoffs once and ignores replays after success", async () => {
+  startPendingSignIn();
+  const verification = deferred<typeof verifiedSession>();
+  state.verify.mockReturnValueOnce(verification.promise).mockResolvedValue({
+    data: null,
+    error: { message: "Invalid token" },
+  });
+  const onSuccess = vi.fn();
+  const onError = vi.fn();
+  const input = {
+    url: deepLink({ ott: "one-time-token", state: STATE }),
+    onSuccess,
+    onError,
+  };
+
+  const first = handleDesktopAuthDeepLink(input);
+  const duplicate = handleDesktopAuthDeepLink(input);
+  verification.resolve(verifiedSession);
+  await Promise.all([first, duplicate]);
+  await handleDesktopAuthDeepLink(input);
+
+  assert.equal(state.verify.mock.calls.length, 1);
+  assert.equal(onSuccess.mock.calls.length, 1);
+  assert.equal(onError.mock.calls.length, 0);
+  assert.equal(state.trackAuthError.mock.calls.length, 0);
+  assert.deepEqual(state.trackLogin.mock.calls, [["desktop"]]);
+  assert.equal(getPendingDesktopAuth().state, null);
+});
+
+test("does not start another verification for a fresh token during the same handoff", async () => {
+  startPendingSignIn();
+  const verification = deferred<typeof verifiedSession>();
+  state.verify.mockReturnValue(verification.promise);
+  const onSuccess = vi.fn();
+  const onError = vi.fn();
+  const first = handleDesktopAuthDeepLink({
+    url: deepLink({ ott: "first-token", state: STATE }),
+    onSuccess,
+    onError,
+  });
+  const second = handleDesktopAuthDeepLink({
+    url: deepLink({ ott: "new-token", state: STATE }),
+    onSuccess,
+    onError,
+  });
+  verification.resolve(verifiedSession);
+  await Promise.all([first, second]);
+
+  assert.deepEqual(state.verify.mock.calls, [[{ token: "first-token" }]]);
+  assert.equal(onSuccess.mock.calls.length, 1);
+  assert.equal(onError.mock.calls.length, 0);
+});
+
+for (const failureKind of ["rejected-token", "network-error"] as const) {
+  test(`reports ${failureKind} once and allows a fresh-token retry`, async () => {
+    startPendingSignIn();
+    const verification = deferred<{
+      data: null;
+      error: { message: string };
+    }>();
+    state.verify.mockReturnValue(verification.promise);
+    const onError = vi.fn();
+    const onSuccess = vi.fn();
+    const input = {
+      url: deepLink({ ott: "failed-token", state: STATE }),
+      onError,
+      onSuccess,
+    };
+    const pending = Promise.allSettled([
+      handleDesktopAuthDeepLink(input),
+      handleDesktopAuthDeepLink(input),
+    ]);
+    if (failureKind === "network-error") {
+      verification.reject(new Error("Network unavailable"));
+    } else {
+      verification.resolve({ data: null, error: { message: "Invalid token" } });
+    }
+    assert.deepEqual(await pending, [
+      { status: "fulfilled", value: true },
+      { status: "fulfilled", value: true },
+    ]);
+    assert.equal(state.verify.mock.calls.length, 1);
+    assert.deepEqual(onError.mock.calls, [["verification-failed"]]);
+    assert.deepEqual(state.trackAuthError.mock.calls, [[DESKTOP_ERROR]]);
+    assert.equal(onSuccess.mock.calls.length, 0);
+    assert.equal(getPendingDesktopAuth().state, STATE);
+
+    state.verify.mockResolvedValue(verifiedSession);
+    await handleDesktopAuthDeepLink({
+      ...input,
+      url: deepLink({ ott: "fresh-token", state: STATE }),
+    });
+    assert.equal(state.verify.mock.calls.length, 2);
+    assert.equal(onSuccess.mock.calls.length, 1);
+    assert.equal(onError.mock.calls.length, 1);
+    assert.equal(getPendingDesktopAuth().state, null);
+  });
+}
+
 test("builds the handoff deep link from a freshly issued token", async () => {
   state.generate.mockResolvedValue({
     data: { token: "one-time-token" },

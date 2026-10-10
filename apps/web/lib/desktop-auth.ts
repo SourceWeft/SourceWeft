@@ -18,6 +18,9 @@ const DESKTOP_AUTH_EXPIRES_AT_STORAGE_KEY =
 const FALLBACK_WEB_BASE_URL = "http://localhost:3000";
 const DESKTOP_PRODUCTION_WEB_BASE_URL = "https://sourceweft.com";
 const DESKTOP_AUTH_STATE_TTL_MS = 10 * 60 * 1000;
+// Shared by all mounted listeners; native events can arrive again while the
+// first handler is still redeeming the one-time token.
+const verifyingDesktopAuthStates = new Set<string>();
 
 function canUseStorage() {
   return typeof window !== "undefined" && Boolean(window.sessionStorage);
@@ -275,6 +278,10 @@ export async function handleDesktopAuthDeepLink(input: {
     return true;
   }
 
+  if (verifyingDesktopAuthStates.has(state)) {
+    return true;
+  }
+
   const token = parsed.searchParams.get("ott");
   if (!token) {
     trackDesktopHandoffError();
@@ -282,20 +289,32 @@ export async function handleDesktopAuthDeepLink(input: {
     return true;
   }
 
-  const result = await authClient.oneTimeToken.verify({ token });
-  if (result.error || !result.data) {
-    // Keep the pending sign-in: the browser page can hand over a fresh token.
-    trackDesktopHandoffError();
-    input.onError?.("verification-failed");
-    return true;
-  }
+  verifyingDesktopAuthStates.add(state);
+  try {
+    let result;
+    try {
+      result = await authClient.oneTimeToken.verify({ token });
+    } catch {
+      trackDesktopHandoffError();
+      input.onError?.("verification-failed");
+      return true;
+    }
+    if (result.error || !result.data) {
+      // Keep the pending sign-in: the browser page can hand over a fresh token.
+      trackDesktopHandoffError();
+      input.onError?.("verification-failed");
+      return true;
+    }
 
-  clearPendingDesktopAuth(state);
-  if (classifyAuthEvent(result.data.user?.createdAt) === "sign_up") {
-    trackSignUp("desktop");
-  } else {
-    trackLogin("desktop");
+    clearPendingDesktopAuth(state);
+    if (classifyAuthEvent(result.data.user?.createdAt) === "sign_up") {
+      trackSignUp("desktop");
+    } else {
+      trackLogin("desktop");
+    }
+    input.onSuccess?.();
+    return true;
+  } finally {
+    verifyingDesktopAuthStates.delete(state);
   }
-  input.onSuccess?.();
-  return true;
 }
