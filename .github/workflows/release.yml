@@ -179,6 +179,9 @@ jobs:
           path: release-installers
           merge-multiple: true
 
+      - name: Prepare fixed-name desktop downloads
+        run: node scripts/ci/desktop-download-aliases.mjs
+
       - name: Update GitHub release draft
         id: github_release
         uses: softprops/action-gh-release@v2
@@ -188,6 +191,7 @@ jobs:
           draft: true
           files: |
             sourceweft-selfhost-*.tar.gz
+            release-download-aliases/*
             release-installers/**/*.dmg
             release-installers/**/*.exe
             release-installers/**/*.AppImage
@@ -211,6 +215,7 @@ jobs:
           draft: true
           files: |
             sourceweft-selfhost-*.tar.gz
+            release-download-aliases/*
             release-installers/**/*.dmg
             release-installers/**/*.exe
             release-installers/**/*.AppImage
