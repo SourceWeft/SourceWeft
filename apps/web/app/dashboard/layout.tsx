@@ -12,6 +12,7 @@ import type * as React from "react";
 
 import { DashboardLayoutClient } from "./dashboard-layout-client";
 import { DesktopUpdateRuntime } from "./_components/desktop-update-runtime";
+import { DesktopRecovery } from "./_components/desktop-recovery";
 import { NO_INDEX_METADATA } from "../seo";
 
 export const metadata: Metadata = NO_INDEX_METADATA;
@@ -34,6 +35,7 @@ export default function DashboardLayout({
   return (
     <>
       <DesktopUpdateRuntime />
+      <DesktopRecovery />
       <DashboardLayoutClient>{children}</DashboardLayoutClient>
     </>
   );

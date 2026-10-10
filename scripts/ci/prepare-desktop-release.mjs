@@ -5,6 +5,10 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { digest } from "./desktop-release-artifacts.mjs";
 import {
+  updatePublicationPolicy,
+  distributionClaims,
+} from "./desktop-publication-policy.mjs";
+import {
   UPDATE_TARGETS,
   MAX_UPDATE_SIZE,
   verifyUpdateSignature,
@@ -12,6 +16,7 @@ import {
 } from "./desktop-update-manifest.mjs";
 
 const target = process.env.DESKTOP_RELEASE_TARGET;
+const policy = updatePublicationPolicy(process.env.DESKTOP_PUBLICATION_POLICY);
 assert(UPDATE_TARGETS[target], "Explicit DESKTOP_RELEASE_TARGET is required");
 const mac = target.endsWith("apple-darwin");
 const linux = target.endsWith("unknown-linux-gnu");
@@ -22,6 +27,13 @@ assert.equal(
 );
 const { version } = JSON.parse(
   await readFile("apps/desktop/package.json", "utf8"),
+);
+const publicKey = process.env.TAURI_UPDATER_PUBLIC_KEY?.trim();
+assert(publicKey, "TAURI_UPDATER_PUBLIC_KEY is required");
+const executable = `apps/desktop/src-tauri/target/${target}/release/sourceweft-desktop${process.platform === "win32" ? ".exe" : ""}`;
+assert(
+  (await readFile(executable)).includes(Buffer.from(publicKey)),
+  "Desktop executable must contain the configured updater public key; do not publish a keyless repair build",
 );
 const bundle = `apps/desktop/src-tauri/target/${target}/release/bundle`;
 // AppDir and app bundles may contain framework symlinks; enumerate only the
@@ -56,8 +68,20 @@ const run = (command, args) => {
 if (mac) {
   const app = `apps/desktop/src-tauri/target/${target}/release/bundle/macos/SourceWeft.app`;
   run("codesign", ["--verify", "--deep", "--strict", app]);
-  run("spctl", ["--assess", "--type", "execute", app]);
-  run("xcrun", ["stapler", "validate", app]);
+  if (policy === "signed") {
+    run("spctl", ["--assess", "--type", "execute", app]);
+    run("xcrun", ["stapler", "validate", app]);
+  } else {
+    const identity = spawnSync("codesign", ["--display", "--verbose=4", app], {
+      encoding: "utf8",
+    });
+    assert.equal(identity.status, 0, "Cannot inspect ad-hoc signature");
+    assert.match(
+      identity.stderr,
+      /Signature=adhoc/,
+      "Updater-signed macOS app must be ad-hoc signed",
+    );
+  }
   run("hdiutil", ["verify", one(".dmg")]);
 } else if (linux) {
   const file = await open(one(".AppImage"), "r");
@@ -81,11 +105,15 @@ if (mac) {
     await file.close();
   }
 } else {
-  run("powershell", [
+  // Match the workflow's PowerShell 7 host. Windows PowerShell 5 inherits a
+  // PSModulePath from pwsh that can make its Security module fail to load.
+  run("pwsh", [
     "-NoProfile",
     "-NonInteractive",
     "-Command",
-    "$s=Get-AuthenticodeSignature -LiteralPath $env:UPDATE_VERIFY_INSTALLER; if($s.Status -ne 'Valid'){throw 'Invalid Authenticode signature'}",
+    policy === "signed"
+      ? "$ErrorActionPreference='Stop'; Import-Module Microsoft.PowerShell.Security; $s=Get-AuthenticodeSignature -LiteralPath $env:UPDATE_VERIFY_INSTALLER; if($s.Status -ne 'Valid'){throw 'Invalid Authenticode signature'}"
+      : "$ErrorActionPreference='Stop'; Import-Module Microsoft.PowerShell.Security; $s=Get-AuthenticodeSignature -LiteralPath $env:UPDATE_VERIFY_INSTALLER; if($s.Status -ne 'NotSigned'){throw 'Expected an installer without Authenticode signing'}",
   ]);
 }
 const output = "desktop-release";
@@ -104,8 +132,8 @@ await copyFile(`${updateSource}.sig`, join(output, `${updateName}.sig`));
 const common = {
   schemaVersion: 1,
   version,
-  distributionSigned: !linux,
-  notarized: mac,
+  publicationPolicy: policy,
+  ...distributionClaims(policy, mac ? "macos" : linux ? "linux" : "windows"),
 };
 const installer = {
   ...common,

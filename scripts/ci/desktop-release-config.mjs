@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { writeFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { UPDATE_TARGETS } from "./desktop-update-manifest.mjs";
+import { updatePublicationPolicy } from "./desktop-publication-policy.mjs";
 
 export function releaseConfig(env) {
+  const policy = updatePublicationPolicy(env.DESKTOP_PUBLICATION_POLICY);
   const require = (name) => {
     assert(
       env[name]?.trim(),
@@ -25,6 +27,24 @@ export function releaseConfig(env) {
       },
     },
   };
+  if (policy === "updater-signed") {
+    // Explicit mode, never a catch-and-retry fallback. Reject ambient platform
+    // signing inputs so the resulting distribution claims remain truthful.
+    for (const key of Object.keys(env)) {
+      if (
+        (key.startsWith("APPLE_") ||
+          key.startsWith("WINDOWS_CERTIFICATE") ||
+          key === "WINDOWS_TIMESTAMP_URL") &&
+        env[key]?.trim()
+      )
+        throw new Error(`${key} must be unset for updater-signed releases`);
+    }
+    // Ad-hoc signing preserves macOS executable integrity (including arm64),
+    // but does not assert Developer ID identity or notarization.
+    if (target.endsWith("apple-darwin"))
+      config.bundle.macOS = { signingIdentity: "-" };
+    return config;
+  }
   if (target.endsWith("apple-darwin")) {
     for (const key of [
       "APPLE_CERTIFICATE",

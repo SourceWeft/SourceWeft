@@ -1,5 +1,6 @@
 import { appendFileSync, readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
+import { desktopPublicationPolicy } from "./desktop-publication-policy.mjs";
 
 export function releaseVersion(tag) {
   const match =
@@ -33,11 +34,14 @@ export function validateReleaseConfig(env, metadata = {}) {
   const desktopPolicy = Object.hasOwn(metadata, "desktopPublicationPolicy")
     ? metadata.desktopPublicationPolicy
     : "signed";
-  if (!["signed", "candidate"].includes(desktopPolicy)) {
+  // Missing metadata preserves the fully signed release default; never infer
+  // a weaker mode from missing credentials.
+  if (typeof desktopPolicy !== "string") {
     throw new Error(
-      "Changelog desktopPublicationPolicy must be signed or candidate.",
+      "Desktop publication policy must be signed, updater-signed or candidate",
     );
   }
+  desktopPublicationPolicy(desktopPolicy);
   if (desktopPolicy === "candidate" && !result.prerelease) {
     throw new Error(
       "Unsigned candidate installers require a semver prerelease version.",

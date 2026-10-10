@@ -34,7 +34,9 @@ test("umami enabled only when both vars are set", () => {
 });
 test("only one umami var logs an error and disables it", () => {
   const error = vi.spyOn(console, "error").mockImplementation(() => {});
-  expect(resolveUmamiConfig("https://umami.example/script.js", "")).toBeUndefined();
+  expect(
+    resolveUmamiConfig("https://umami.example/script.js", ""),
+  ).toBeUndefined();
   expect(resolveUmamiConfig("", "site-1")).toBeUndefined();
   // Reported once per process: the config is resolved on every request.
   expect(error).toHaveBeenCalledTimes(1);
@@ -84,4 +86,29 @@ test("the public configuration reads runtime settings", () => {
   vi.stubEnv("PUBLIC_WEB_BASE_URL", "https://notes.example");
   expect(publicRuntimeConfig().apiBaseUrl).toBe("http://gateway:8080");
   expect(publicWebBaseUrl()).toBe("https://notes.example");
+});
+test("desktop recovery is disabled by default and injected only after publication", () => {
+  vi.stubEnv("PUBLIC_DESKTOP_RECOVERY_RELEASE", "");
+  expect(serverPublicRuntimeConfig().desktopRecoveryRelease).toBeUndefined();
+  const release = {
+    published: true,
+    version: "0.3.1",
+    affectedVersions: ["0.3.0-rc.3"],
+    downloads: {
+      "macos-aarch64":
+        "https://download.sourceweft.com/releases/v0.3.1/app.dmg",
+    },
+  };
+  vi.stubEnv("PUBLIC_DESKTOP_RECOVERY_RELEASE", JSON.stringify(release));
+  expect(
+    JSON.parse(serializePublicConfig(serverPublicRuntimeConfig()))
+      .desktopRecoveryRelease.version,
+  ).toBe("0.3.1");
+  vi.stubEnv(
+    "PUBLIC_DESKTOP_RECOVERY_RELEASE",
+    JSON.stringify({ ...release, published: false }),
+  );
+  expect(() => serverPublicRuntimeConfig()).toThrow(
+    "PUBLIC_DESKTOP_RECOVERY_RELEASE",
+  );
 });

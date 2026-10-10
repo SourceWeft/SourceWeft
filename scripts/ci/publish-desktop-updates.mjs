@@ -223,6 +223,8 @@ if (
           process.env.GITHUB_REF_NAME,
           await readFile(process.env.UPDATE_NOTES_FILE, "utf8"),
           process.env.UPDATE_PUB_DATE,
+          undefined,
+          process.env.DESKTOP_PUBLICATION_POLICY,
         );
         if (mode === "upload") {
           await uploadUpdates(config, prepared, store);

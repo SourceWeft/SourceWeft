@@ -153,6 +153,49 @@ test("manifest preserves actual architectures and separates preview/stable", asy
   assert.equal(stable.prepared.manifest.channel, "stable");
 });
 
+test("updater-signed downloads require explicit artifact mode and all four targets", async (t) => {
+  const { root } = await fixture(t);
+  const prepare = () =>
+    prepareManifest(
+      config,
+      root,
+      "v1.2.3-rc.1",
+      "SourceWeft/SourceWeft",
+      "updater-signed",
+    );
+  await assert.rejects(prepare(), /publication policy mismatch/);
+  for (const [platform, arch, filename] of [
+    ["linux", "x64", "linux.AppImage"],
+    ["darwin", "x64", "intel.dmg"],
+  ]) {
+    const dir = join(root, `${platform}-${arch}`);
+    await mkdir(dir);
+    await writeFile(join(dir, filename), "installer fixture");
+    const entry = await describeInstaller(dir, platform, arch, "1.2.3-rc.1");
+    await writeFile(
+      join(dir, `desktop-manifest-${platform}-${arch}.json`),
+      JSON.stringify(entry),
+    );
+  }
+  const { filesUnder } = await import("./desktop-release-artifacts.mjs");
+  for (const path of (await filesUnder(root)).filter((p) =>
+    /desktop-manifest-.*\.json$/.test(p),
+  )) {
+    const entry = JSON.parse(await readFile(path, "utf8"));
+    entry.publicationPolicy = "updater-signed";
+    await writeFile(path, JSON.stringify(entry));
+  }
+  const { manifest } = await prepare();
+  assert.equal(manifest.artifacts.length, 4);
+  assert(
+    manifest.artifacts.every(
+      (item) => item.distributionSigned === false && item.notarized === false,
+    ),
+  );
+  await rm(join(root, "linux-x64"), { recursive: true });
+  await assert.rejects(prepare(), /every configured/);
+});
+
 test("missing platform, tampered payload and mismatched versions fail before upload", async (t) => {
   const { root, prepared } = await fixture(t);
   await assert.rejects(
@@ -328,7 +371,7 @@ test("candidate publication requires successful builds and never publishes appli
       "utf8",
     ),
   );
-  const signedOnly = "needs.preflight.outputs.desktop_policy == 'signed'";
+  const signedOnly = `contains(fromJSON('["signed","updater-signed"]'), needs.preflight.outputs.desktop_policy)`;
   assert.equal(workflow.jobs.desktop.if, signedOnly);
   assert.equal(
     workflow.jobs["desktop-candidate"].if,
@@ -365,7 +408,7 @@ test("candidate publication requires successful builds and never publishes appli
     workflow.jobs.preflight.steps.find(
       (step) => step.name === "Validate update publication configuration",
     ).if,
-    "steps.config.outputs.desktop_policy == 'signed'",
+    `contains(fromJSON('["signed","updater-signed"]'), steps.config.outputs.desktop_policy)`,
   );
   const draft = release.steps.find(
     (step) => step.id === "github_release_candidate",

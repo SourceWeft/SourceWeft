@@ -1225,6 +1225,22 @@
         "draftSavingUnavailable": "Draft saving is unavailable.",
         "connectionFailed": "Software update connection failed: {error}"
       }
+    },
+    "desktopRecovery": {
+      "title": "One manual upgrade is needed",
+      "description": "This desktop version cannot update automatically. Install the new version over the existing app to restore in-app updates.",
+      "versions": "Installed: {current} · Upgrade to: {next}",
+      "steps": "Installation steps",
+      "stepDownload": "Download the installer for this computer.",
+      "stepQuit": "Save your work and quit SourceWeft.",
+      "stepMac": "Open the DMG and drag SourceWeft into Applications. Choose Replace; do not remove app data.",
+      "stepWindows": "Run the installer and use the existing installation location. Do not remove app data.",
+      "stepLinux": "Replace the existing AppImage and make sure it is executable. Do not remove app data.",
+      "stepReopen": "Reopen SourceWeft and check for updates in Settings.",
+      "download": "Download the repair version",
+      "later": "Later today — do not remind again",
+      "storageError": "Could not save today’s reminder preference. Allow local storage and try again.",
+      "downloadError": "Could not open the download link. Please try again."
     }
   },
   "dashboardSkills": {

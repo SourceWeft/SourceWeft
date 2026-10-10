@@ -6,13 +6,18 @@ import { useTranslations } from "next-intl";
 import { Check, Copy } from "lucide-react";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import { BUILD_TIME, SHORT_BUILD_SHA } from "../../../../lib/app-version";
-import { publicWebBaseUrl } from "../../../../lib/public-runtime-config";
+import {
+  publicWebBaseUrl,
+  publicRuntimeConfig,
+} from "../../../../lib/public-runtime-config";
+import { recoveryDownload } from "../../../../lib/desktop-recovery";
 import {
   desktopBridge,
   type DesktopInfo,
 } from "../../../../lib/desktop-bridge";
 import { SourceWeftBrandMark } from "../../../_landing/components/sourceweft-brand";
 import { DesktopUpdatePanel } from "./desktop-update-panel";
+import { DesktopRecovery } from "../desktop-recovery";
 
 // The native host is injected before the app mounts; viewport width does not
 // distinguish a desktop browser from the installed PC client.
@@ -55,6 +60,9 @@ export function AboutPanel() {
   }, [isDesktop]);
 
   const buildDate = formatBuildDate(BUILD_TIME);
+  const needsRecovery =
+    info &&
+    recoveryDownload(publicRuntimeConfig().desktopRecoveryRelease, info);
 
   let versionLabel: string;
   if (!isDesktop) {
@@ -130,22 +138,26 @@ export function AboutPanel() {
         </Button>
       </div>
 
-      {isDesktop && info?.updaterProtocolVersion === 1 && (
+      {isDesktop && <DesktopRecovery panel />}
+      {isDesktop && !needsRecovery && info?.updaterProtocolVersion === 1 && (
         <DesktopUpdatePanel />
       )}
-      {isDesktop && info && info.updaterProtocolVersion === undefined && (
-        <button
-          className="text-xs underline"
-          type="button"
-          onClick={() => {
-            void desktopBridge.openExternalUrl(
-              `${publicWebBaseUrl()}/download`,
-            );
-          }}
-        >
-          Install the latest desktop app to enable automatic updates
-        </button>
-      )}
+      {isDesktop &&
+        !needsRecovery &&
+        info &&
+        info.updaterProtocolVersion === undefined && (
+          <button
+            className="text-xs underline"
+            type="button"
+            onClick={() => {
+              void desktopBridge.openExternalUrl(
+                `${publicWebBaseUrl()}/download`,
+              );
+            }}
+          >
+            Install the latest desktop app to enable automatic updates
+          </button>
+        )}
 
       {/* The desktop window refuses to navigate outside /dashboard and /auth, so
           the changelog opens in the system browser instead of in-app. */}
