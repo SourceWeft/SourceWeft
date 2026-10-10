@@ -105,13 +105,15 @@ if (mac) {
     await file.close();
   }
 } else {
-  run("powershell", [
+  // Match the workflow's PowerShell 7 host. Windows PowerShell 5 inherits a
+  // PSModulePath from pwsh that can make its Security module fail to load.
+  run("pwsh", [
     "-NoProfile",
     "-NonInteractive",
     "-Command",
     policy === "signed"
-      ? "$s=Get-AuthenticodeSignature -LiteralPath $env:UPDATE_VERIFY_INSTALLER; if($s.Status -ne 'Valid'){throw 'Invalid Authenticode signature'}"
-      : "$s=Get-AuthenticodeSignature -LiteralPath $env:UPDATE_VERIFY_INSTALLER; if($s.Status -ne 'NotSigned'){throw 'Expected an installer without Authenticode signing'}",
+      ? "$ErrorActionPreference='Stop'; Import-Module Microsoft.PowerShell.Security; $s=Get-AuthenticodeSignature -LiteralPath $env:UPDATE_VERIFY_INSTALLER; if($s.Status -ne 'Valid'){throw 'Invalid Authenticode signature'}"
+      : "$ErrorActionPreference='Stop'; Import-Module Microsoft.PowerShell.Security; $s=Get-AuthenticodeSignature -LiteralPath $env:UPDATE_VERIFY_INSTALLER; if($s.Status -ne 'NotSigned'){throw 'Expected an installer without Authenticode signing'}",
   ]);
 }
 const output = "desktop-release";
