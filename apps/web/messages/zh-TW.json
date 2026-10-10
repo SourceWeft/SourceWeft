@@ -1225,6 +1225,22 @@
         "draftSavingUnavailable": "草稿儲存功能目前不可用。",
         "connectionFailed": "軟體更新連接失敗：{error}"
       }
+    },
+    "desktopRecovery": {
+      "title": "需要手動升級一次",
+      "description": "目前桌面版本無法自動更新。請安裝新版並替換現有應用，之後即可恢復應用內更新。",
+      "versions": "目前版本：{current} · 升級至：{next}",
+      "steps": "檢視安裝步驟",
+      "stepDownload": "下載適合這臺電腦的安裝程式。",
+      "stepQuit": "儲存目前工作，然後退出 SourceWeft。",
+      "stepMac": "開啟 DMG，將 SourceWeft 拖入「應用程式」並選擇替換，無需清理應用資料。",
+      "stepWindows": "執行新版安裝程式，使用原安裝位置完成安裝，無需清理應用資料。",
+      "stepLinux": "替換原 AppImage，確認檔案具有執行權限，無需清理應用資料。",
+      "stepReopen": "重新開啟 SourceWeft，在設定中檢查更新。",
+      "download": "下載修復版",
+      "later": "稍後，今天不再提醒",
+      "storageError": "無法儲存今天的提醒偏好，請允許本機儲存後重試。",
+      "downloadError": "無法開啟下載連結，請重試。"
     }
   },
   "dashboardSkills": {

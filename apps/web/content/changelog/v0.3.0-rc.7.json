@@ -1,0 +1,16 @@
+{
+  "tag": "v0.3.0-rc.7",
+  "releasedAt": "2026-10-10",
+  "category": "Release",
+  "commit": "a43255afce26923890f6bd319414b9af204a0ee7",
+  "title": "Restore desktop updates with signed update packages",
+  "summary": "This release candidate embeds the desktop update verification key and publishes Tauri-signed update packages. It does not include Apple Developer ID signing, macOS notarization or Windows publisher signing; operating systems may warn or block installation. Clients missing the update key need one manual overwrite upgrade.",
+  "items": [
+    "Added an explicit updater-signed publication mode that requires update keys and verifies every package signature without requiring Apple or Windows distribution certificates. Fully signed publication remains a separate strict mode.",
+    "Added a desktop-only manual recovery prompt, gated on verified published installers. Later, close and Escape suppress reminders for the local calendar day; Settings keeps the repair download available.",
+    "Repair downloads use a same-origin redirect compatible with historical native clients and stop redirecting when the publication configuration is withdrawn.",
+    "Desktop sign-in callbacks are deduplicated before one-time token redemption. Local computer execution remains available on macOS only."
+  ],
+  "githubPrerelease": false,
+  "desktopPublicationPolicy": "updater-signed"
+}

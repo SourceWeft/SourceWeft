@@ -85,7 +85,7 @@ export async function prepareManifest(
   policy = "candidate",
 ) {
   assert(
-    ["candidate", "signed"].includes(policy),
+    ["candidate", "signed", "updater-signed"].includes(policy),
     "Invalid desktop publication policy",
   );
   const { version, prerelease } = releaseVersion(tag);
@@ -101,6 +101,12 @@ export async function prepareManifest(
   for (const path of descriptions) {
     const entry = JSON.parse(await readFile(path, "utf8"));
     assert.equal(entry.schemaVersion, 1, "Unknown artifact manifest schema");
+    if (policy === "updater-signed")
+      assert.equal(
+        entry.publicationPolicy,
+        policy,
+        "Installer publication policy mismatch",
+      );
     assert.equal(
       entry.version,
       version,
@@ -176,7 +182,7 @@ export async function prepareManifest(
       artifacts.some((a) => a.platform === "windows"),
     "Both macOS and Windows installers are required",
   );
-  if (policy === "signed") {
+  if (policy === "signed" || policy === "updater-signed") {
     assert.deepEqual(
       [...seen].sort(),
       ["macos-arm64", "macos-x64", "windows-x64", "linux-x64"].sort(),

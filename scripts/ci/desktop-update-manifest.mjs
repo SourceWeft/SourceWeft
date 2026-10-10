@@ -5,6 +5,10 @@ import { basename } from "node:path";
 import { spawnSync } from "node:child_process";
 import { digest, filesUnder } from "./desktop-release-artifacts.mjs";
 import { releaseVersion } from "./verify-release-config.mjs";
+import {
+  updatePublicationPolicy,
+  distributionClaims,
+} from "./desktop-publication-policy.mjs";
 
 export const MAX_UPDATE_SIZE = 512 * 1024 * 1024;
 export const UPDATE_TARGETS = Object.freeze({
@@ -129,7 +133,9 @@ export async function prepareUpdateManifest(
   notes,
   pubDate,
   verify = verifyUpdateSignature,
+  policy = "signed",
 ) {
+  updatePublicationPolicy(policy);
   const { version } = releaseVersion(tag);
   const files = await filesUnder(directory);
   const descriptions = files.filter((path) =>
@@ -149,14 +155,27 @@ export async function prepareUpdateManifest(
     assert.equal(item.schemaVersion, 1);
     assert.equal(item.version, version, "Update version differs from tag");
     assert.equal(
+      item.publicationPolicy ?? "signed",
+      policy,
+      "Update publication policy mismatch",
+    );
+    const claims = distributionClaims(
+      policy,
+      target.startsWith("darwin-")
+        ? "macos"
+        : target.startsWith("linux-")
+          ? "linux"
+          : "windows",
+    );
+    assert.equal(
       item.distributionSigned,
-      !target.startsWith("linux-"),
+      claims.distributionSigned,
       "Platform distribution-signing declaration is incorrect",
     );
     assert.equal(
       item.notarized,
-      target.startsWith("darwin-"),
-      "macOS release must be notarized",
+      claims.notarized,
+      "Platform notarization does not match publication policy",
     );
     assert(
       typeof item.filename === "string" &&
