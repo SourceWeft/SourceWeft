@@ -12,6 +12,62 @@ automatic checks and downloads. Installing a stable release does not change a
 saved preview preference. Preview receives later stable releases and newer RCs.
 All comparisons use SemVer. No downgrades or source fallback are permitted.
 
+## Historical-client recovery prompt
+
+The Web dashboard can show a manual upgrade dialog in the main desktop window,
+including clients without updater commands. It matches an explicit affected
+version list and the native OS/architecture; network or IPC errors never qualify
+as proof that a client needs repair. Browsers, embedded chats, Hub/preview windows,
+unlisted versions, and platforms without a published installer do not prompt.
+The prompt appears when the authenticated dashboard loads, not on the sign-in screen.
+
+`PUBLIC_DESKTOP_RECOVERY_RELEASE` is an optional **Web server runtime** JSON
+configuration. Leave it empty to disable recovery UI (the shipped default).
+The Docker Web service reads it from `docker/.env`. No signed installer has been
+published by adding this setting or by provisioning signing keys.
+
+Only after publishing a new signed release, verifying its public installer URLs,
+and testing an overwrite upgrade from the affected candidate should the release
+operator set this configuration and restart/redeploy Web. Example schema below
+uses illustrative filenames, **not live download links**:
+
+```json
+{
+  "published": true,
+  "version": "0.3.1",
+  "affectedVersions": ["0.3.0-rc.3"],
+  "downloads": {
+    "macos-aarch64": "https://download.sourceweft.com/releases/v0.3.1/VERIFIED-ARM-INSTALLER.dmg",
+    "macos-x86_64": "https://download.sourceweft.com/releases/v0.3.1/VERIFIED-INTEL-INSTALLER.dmg",
+    "windows-x86_64": "https://download.sourceweft.com/releases/v0.3.1/VERIFIED-INSTALLER.exe",
+    "linux-x86_64": "https://download.sourceweft.com/releases/v0.3.1/VERIFIED-INSTALLER.AppImage"
+  }
+}
+```
+
+Use the exact native versions that were confirmed affected. Add only platforms
+whose installer has been verified; partial platform rollout is supported. The
+`published` flag is the operator's publication attestation, not an automated
+availability check. Configuration rejects wrong hosts, non-HTTPS URLs, paths
+for another release, incorrect platform file extensions, or the repair version
+appearing in the affected list. Malformed non-empty configuration fails loading.
+Remove the configuration and redeploy Web to stop offering a withdrawn repair.
+Already-open windows must reload to receive a changed runtime configuration.
+The download action opens the Web origin's `/api/desktop-recovery` endpoint,
+which rechecks the active version/platform and issues a non-cacheable redirect
+to the configured installer. This works with historical native clients that
+reject direct external download-host URLs and stops stale prompts downloading
+through this endpoint after the repair configuration is withdrawn.
+
+“Later”, the close button, Escape and outside dismissal store the computer's
+local calendar date in WebView local storage, across account changes and app
+restarts. The next dashboard mount on another day may prompt again; there is no
+midnight interruption during an open session. Clearing WebView storage also
+clears the preference. If persistence fails, the dialog reports the failure
+instead of pretending the dismissal was saved. Settings → About keeps the
+repair download available regardless of dismissal. Normal update settings
+remain unchanged for unaffected versions.
+
 ## Signing prerequisites
 
 Create a protected GitHub environment named `desktop-release`. Set repository

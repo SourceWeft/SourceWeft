@@ -41,7 +41,10 @@ beforeEach(() => {
   openExternalUrl.mockResolvedValue(undefined);
 });
 
-afterEach(unmountAll);
+afterEach(async () => {
+  await unmountAll();
+  delete window.__SOURCEWEFT_CONFIG__;
+});
 
 test("web shows a shortened build sha and the changelog link", async () => {
   isAvailable.mockReturnValue(false);
@@ -101,4 +104,30 @@ test("a denied desktop bridge call degrades instead of hanging on a loader", asy
   const text = element.textContent ?? "";
   assert.match(text, /Unavailable/);
   assert.doesNotMatch(text, /Loading/);
+});
+test("published recovery replaces broken updater UI and stays available after dismissal", async () => {
+  const { serverPublicRuntimeConfig } =
+    await import("../../../../lib/public-runtime-config");
+  window.__SOURCEWEFT_CONFIG__ = {
+    ...serverPublicRuntimeConfig(),
+    desktopRecoveryRelease: {
+      version: "0.3.1",
+      affectedVersions: ["0.3.0-rc.3"],
+      downloads: {
+        "macos-aarch64":
+          "https://download.sourceweft.com/releases/v0.3.1/app.dmg",
+      },
+    },
+  };
+  isAvailable.mockReturnValue(true);
+  info.mockResolvedValue({
+    isDesktop: true,
+    platform: "macos",
+    arch: "aarch64",
+    appVersion: "0.3.0-rc.3",
+    updaterProtocolVersion: 1,
+  });
+  const element = await render();
+  assert.match(element.textContent ?? "", /Download the repair version/);
+  assert.doesNotMatch(element.textContent ?? "", /Loading update settings/);
 });

@@ -1,6 +1,11 @@
 import type { AnalyticsRuntimeConfig } from "./analytics/client";
+import {
+  parseDesktopRecoveryRelease,
+  type DesktopRecoveryRelease,
+} from "./desktop-recovery";
 
 export type PublicRuntimeConfig = {
+  desktopRecoveryRelease?: DesktopRecoveryRelease;
   analytics: AnalyticsRuntimeConfig;
   googleMobileClientId?: string;
   apiBaseUrl: string;
@@ -39,6 +44,9 @@ export function resolveUmamiConfig(
 
 export function serverPublicRuntimeConfig(): PublicRuntimeConfig {
   return {
+    desktopRecoveryRelease: parseDesktopRecoveryRelease(
+      env("PUBLIC_DESKTOP_RECOVERY_RELEASE"),
+    ),
     googleMobileClientId:
       env("PUBLIC_GOOGLE_MOBILE_CLIENT_ID") ||
       env("NEXT_PUBLIC_GOOGLE_MOBILE_CLIENT_ID"),
