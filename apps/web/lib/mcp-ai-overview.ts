@@ -12,6 +12,7 @@ import {
 import { HttpClient } from "@sourceweft/sdk";
 
 import { apiBaseUrl } from "./api-base-url";
+import { catalogLocale } from "./i18n/catalog-locale";
 
 /**
  * AI overviews of MCP servers (#152) on the web: the language to ask for,
@@ -33,8 +34,7 @@ export const MCP_OVERVIEW_LOCALES = marketMcpLocaleSchema.options;
 export function mcpOverviewLocale(
   locale: string | null | undefined,
 ): MarketMcpLocale {
-  const parsed = marketMcpLocaleSchema.safeParse(locale);
-  return parsed.success ? parsed.data : "en";
+  return catalogLocale(locale);
 }
 
 /**

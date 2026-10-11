@@ -16,7 +16,11 @@ import {
   type Tx,
 } from "../../catalog-overview/repository";
 import { recordSkillMarketEvent } from "./events";
-import { skillCategoryDefinitions, skillCategoryId } from "./taxonomy";
+import {
+  skillCategoryDefinitions,
+  skillCategoryId,
+  skillCategoryRows,
+} from "./taxonomy";
 import {
   SKILL_ANALYSIS_PROMPT_VERSION,
   SKILL_ANALYSIS_TAXONOMY_VERSION,
@@ -172,13 +176,7 @@ export async function applyAnalysisCategories(
     throw new Error("Invalid analysis category");
   await tx
     .insert(skillCategories)
-    .values(
-      skillCategoryDefinitions.map((c, sortOrder) => ({
-        ...c,
-        id: skillCategoryId(c.slug),
-        sortOrder,
-      })),
-    )
+    .values(skillCategoryRows())
     .onConflictDoNothing();
   const before = await tx
     .select({ slug: skillCategories.slug })

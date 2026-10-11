@@ -171,6 +171,27 @@ export function skillCategoryId(slug: string) {
   return `skillcat_${slug}`;
 }
 
+/**
+ * The taxonomy as `skill_categories` rows: exactly the table's columns, never
+ * the translations (or anything else) a definition carries. Every writer of
+ * that table goes through this.
+ */
+export function skillCategoryRows(): Array<{
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  sortOrder: number;
+}> {
+  return skillCategoryDefinitions.map((definition, sortOrder) => ({
+    id: skillCategoryId(definition.slug),
+    slug: definition.slug,
+    name: definition.name,
+    description: definition.description,
+    sortOrder,
+  }));
+}
+
 // Latin keywords are matched on word boundaries; CJK ones as plain substrings,
 // since `\b` means nothing between Han characters.
 const categoryKeywords: ReadonlyArray<readonly [string, readonly RegExp[]]> = [

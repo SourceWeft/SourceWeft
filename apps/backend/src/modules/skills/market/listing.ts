@@ -22,8 +22,8 @@ import { recordSkillMarketEvent } from "./events";
 import { ensureListingProvenance } from "./provenance";
 import {
   getSkillCategoryDefinition,
-  skillCategoryDefinitions,
   skillCategoryId,
+  skillCategoryRows,
 } from "./taxonomy";
 
 /**
@@ -41,15 +41,7 @@ export const SKILL_AUTO_LIST_ACTOR = "system:auto-list";
 export async function syncSkillCategories(): Promise<void> {
   await db
     .insert(skillCategories)
-    .values(
-      skillCategoryDefinitions.map((definition, index) => ({
-        id: skillCategoryId(definition.slug),
-        slug: definition.slug,
-        name: definition.name,
-        description: definition.description,
-        sortOrder: index,
-      })),
-    )
+    .values(skillCategoryRows())
     .onConflictDoUpdate({
       target: skillCategories.id,
       set: {

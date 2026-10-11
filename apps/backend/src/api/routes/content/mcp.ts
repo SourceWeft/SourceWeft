@@ -13,6 +13,7 @@ import {
 import { config } from "../../../shared/config";
 import { getSessionUserId, requireSession } from "../../middleware/auth-session";
 import { ApiError, ApiResponse } from "../../response/api-response";
+import { parseLocaleQuery } from "../query-params";
 import { ensureObjectBody, requireRouteParam } from "./helpers";
 
 function parseBooleanQuery(value: string | undefined) {
@@ -28,17 +29,6 @@ function parseLimitQuery(value: string | undefined) {
   }
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
-}
-
-/** The AI overview language (`?locale=`); English when not given. */
-function parseLocaleQuery(value: string | undefined) {
-  const parsed = marketMcpLocaleSchema.optional().safeParse(value || undefined);
-  if (!parsed.success) {
-    throw ApiError.validation(
-      parsed.error.flatten() as Record<string, unknown>,
-    );
-  }
-  return parsed.data;
 }
 
 export function registerMcpRoutes(app: Hono) {
@@ -57,7 +47,7 @@ export function registerMcpRoutes(app: Hono) {
       desktopOnly: parseBooleanQuery(c.req.query("desktopOnly")),
       limit: parseLimitQuery(c.req.query("limit")),
       cursor: c.req.query("cursor"),
-      locale: parseLocaleQuery(c.req.query("locale")),
+      locale: parseLocaleQuery(marketMcpLocaleSchema, c.req.query("locale")),
     });
     return ApiResponse.success(c, result);
   });
@@ -72,7 +62,8 @@ export function registerMcpRoutes(app: Hono) {
       workspaceId: requireRouteParam(c, "workspaceId"),
       userId: getSessionUserId(session),
       // The language of each category's name and description.
-      locale: parseLocaleQuery(c.req.query("locale")) ?? "en",
+      locale:
+        parseLocaleQuery(marketMcpLocaleSchema, c.req.query("locale")) ?? "en",
     });
     return ApiResponse.success(c, result);
   });
@@ -103,7 +94,7 @@ export function registerMcpRoutes(app: Hono) {
       workspaceId: requireRouteParam(c, "workspaceId"),
       userId: getSessionUserId(session),
       identifier: decodeURIComponent(requireRouteParam(c, "identifier")),
-      locale: parseLocaleQuery(c.req.query("locale")),
+      locale: parseLocaleQuery(marketMcpLocaleSchema, c.req.query("locale")),
     });
     return ApiResponse.success(c, result);
   });

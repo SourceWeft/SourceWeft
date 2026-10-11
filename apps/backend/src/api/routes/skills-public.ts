@@ -21,6 +21,7 @@ import {
 } from "../../modules/skills/market/collections";
 import { ApiError } from "../response/api-response";
 import { cachedJson } from "../response/cached-json";
+import { parseLocaleQuery } from "./query-params";
 
 /**
  * The public skill market: anonymous, cacheable reads of every skill that is
@@ -166,19 +167,15 @@ export function registerSkillPublicRoutes(app: Hono) {
   // Registered before `/v1/skills/:slug` so the literal segment wins.
   app.get("/v1/skills/categories", async (c) => {
     // The language of each category's name and description; English when not given.
-    const locale = marketSkillLocaleSchema
-      .optional()
-      .safeParse(given(c.req.query("locale")));
-    if (!locale.success) {
-      throw ApiError.validation(
-        locale.error.flatten() as Record<string, unknown>,
-      );
-    }
+    const locale = parseLocaleQuery(
+      marketSkillLocaleSchema,
+      given(c.req.query("locale")),
+    );
     return publicJson(
       c,
       conforming(
         listMarketSkillCategoriesResponseSchema,
-        await listMarketSkillCategories(locale.data ?? "en"),
+        await listMarketSkillCategories(locale ?? "en"),
       ),
     );
   });
@@ -197,19 +194,15 @@ export function registerSkillPublicRoutes(app: Hono) {
   app.get("/v1/skills/collections/:slug", async (c) => {
     const slug = c.req.param("slug");
     // The language of each item's `aiSummary`; English when not given.
-    const locale = marketSkillLocaleSchema
-      .optional()
-      .safeParse(given(c.req.query("locale")));
-    if (!locale.success) {
-      throw ApiError.validation(
-        locale.error.flatten() as Record<string, unknown>,
-      );
-    }
+    const locale = parseLocaleQuery(
+      marketSkillLocaleSchema,
+      given(c.req.query("locale")),
+    );
     // Unpublished and missing are the same 404.
     const found =
       slug.length > MAX_SLUG_LENGTH
         ? null
-        : await findPublicSkillCollection(slug, { locale: locale.data });
+        : await findPublicSkillCollection(slug, { locale });
     if (!found) {
       throw ApiError.notFound("Collection not found");
     }
@@ -222,20 +215,16 @@ export function registerSkillPublicRoutes(app: Hono) {
   app.get("/v1/skills/:slug", async (c) => {
     const slug = c.req.param("slug");
     // The language of the AI overview; English when not given.
-    const locale = marketSkillLocaleSchema
-      .optional()
-      .safeParse(given(c.req.query("locale")));
-    if (!locale.success) {
-      throw ApiError.validation(
-        locale.error.flatten() as Record<string, unknown>,
-      );
-    }
+    const locale = parseLocaleQuery(
+      marketSkillLocaleSchema,
+      given(c.req.query("locale")),
+    );
     // Not public, not there and not a skill at all are one answer: a 404 that
     // does not say which.
     const found =
       RESERVED_MARKET_SKILL_SLUGS.has(slug) || slug.length > MAX_SLUG_LENGTH
         ? null
-        : await findMarketSkill(slug, { locale: locale.data });
+        : await findMarketSkill(slug, { locale });
     if (!found) {
       throw ApiError.notFound("Skill not found");
     }
