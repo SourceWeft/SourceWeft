@@ -5,6 +5,7 @@ import { createRouteTestApp } from "../../test/hono";
 const mocks = vi.hoisted(() => ({
   countMcpByCategory: vi.fn(),
   findMcp: vi.fn(),
+  findMcpVersion: vi.fn(),
   listMcp: vi.fn(),
   isMarketAdmin: vi.fn(),
   requireSession: vi.fn(),
@@ -19,7 +20,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../../modules/market/read-repository", () => ({
   countMcpByCategory: mocks.countMcpByCategory,
   findMcp: mocks.findMcp,
-  findMcpVersion: vi.fn(),
+  findMcpVersion: mocks.findMcpVersion,
   listMcp: mocks.listMcp,
 }));
 vi.mock("../../modules/market/overview/admin", () => ({
@@ -105,6 +106,54 @@ test("the detail answer carries the latest version's README", async () => {
     readme,
   });
   assert.equal(mocks.findMcp.mock.calls[0]?.[0], "io.github.acme/weather");
+});
+
+test("an identifier is decoded once: %2F is a slash, and a literal % is a name that is not found", async () => {
+  mocks.findMcp.mockResolvedValue(null);
+  mocks.findMcpVersion.mockResolvedValue(null);
+  const app = createTestApp();
+
+  // Hono has already decoded the parameter; decoding it again would read
+  // "%" as the start of an escape and throw.
+  for (const path of [
+    "/v1/mcp/%25",
+    "/v1/mcp/%25/manifest",
+    "/v1/mcp/a%25zz",
+  ]) {
+    const response = await app.request(path);
+    assert.equal(response.status, 404, path);
+    assert.equal(
+      ((await response.json()) as { code?: string }).code,
+      "NOT_FOUND",
+      path,
+    );
+  }
+  assert.deepEqual(
+    mocks.findMcp.mock.calls.map((call) => call[0]),
+    ["%", "a%zz"],
+  );
+  assert.equal(mocks.findMcpVersion.mock.calls[0]?.[0], "%");
+
+  await app.request(
+    `/v1/mcp/${encodeURIComponent("io.github.acme/weather")}/manifest`,
+  );
+  assert.equal(
+    mocks.findMcpVersion.mock.calls[1]?.[0],
+    "io.github.acme/weather",
+  );
+});
+
+test("an admin route answers 404, not 500, for an identifier with a literal %", async () => {
+  mocks.requireSession.mockResolvedValue({ user: { id: "admin" } });
+  mocks.isMarketAdmin.mockReturnValue(true);
+  mocks.refetch.mockResolvedValue(null);
+
+  const response = await createTestApp().request(
+    "/v1/market/admin/mcp/%25/readme/refetch",
+    { method: "POST" },
+  );
+  assert.equal(response.status, 404);
+  assert.equal(mocks.refetch.mock.calls[0]?.[0], "%");
 });
 
 test("README admin endpoints are for market admins only", async () => {
