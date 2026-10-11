@@ -4098,6 +4098,22 @@
       "cautions": "安裝前請注意"
     }
   },
+  "catalogBadge": {
+    "summary": "在 README 中新增徽章",
+    "description": {
+      "mcp": "向讀者展示該 MCP 服務已收錄於 SourceWeft，徽章連結到本頁。",
+      "skill": "向讀者展示該技能已收錄於 SourceWeft，徽章連結到本頁。"
+    },
+    "formats": "程式碼片段格式",
+    "markdown": "Markdown",
+    "html": "HTML",
+    "copy": "複製",
+    "copied": "已複製",
+    "previewAlt": "「Listed on SourceWeft」徽章預覽",
+    "ownerHint": "你的技能已上架。可將此徽章新增到儲存庫的 README，它會連結到該技能在 SourceWeft 上的頁面。",
+    "claimHint": "下一步：在 README 中新增「Listed on SourceWeft」徽章，可在你任一已上架技能的頁面上複製。",
+    "submitHint": "可將此徽章新增到儲存庫的 README，它會連結到該服務在 SourceWeft 上的頁面。"
+  },
   "dashboardSkillOverview": {
     "block": {
       "title": "AI 產生的概覽",

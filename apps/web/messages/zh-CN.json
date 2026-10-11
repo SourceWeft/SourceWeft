@@ -4089,6 +4089,22 @@
       "cautions": "安装前请注意"
     }
   },
+  "catalogBadge": {
+    "summary": "在 README 中添加徽章",
+    "description": {
+      "mcp": "向读者展示该 MCP 服务已收录于 SourceWeft，徽章链接到本页。",
+      "skill": "向读者展示该技能已收录于 SourceWeft，徽章链接到本页。"
+    },
+    "formats": "代码片段格式",
+    "markdown": "Markdown",
+    "html": "HTML",
+    "copy": "复制",
+    "copied": "已复制",
+    "previewAlt": "“Listed on SourceWeft”徽章预览",
+    "ownerHint": "你的技能已上架。可将此徽章添加到仓库的 README，它会链接到该技能在 SourceWeft 上的页面。",
+    "claimHint": "下一步：在 README 中添加“Listed on SourceWeft”徽章，可在你任一已上架技能的页面上复制。",
+    "submitHint": "可将此徽章添加到仓库的 README，它会链接到该服务在 SourceWeft 上的页面。"
+  },
   "dashboardSkillOverview": {
     "block": {
       "title": "AI 生成的概览",

@@ -4098,6 +4098,22 @@
       "cautions": "Before you install"
     }
   },
+  "catalogBadge": {
+    "summary": "Add a badge to your README",
+    "description": {
+      "mcp": "Show readers this MCP server is listed on SourceWeft. The badge links to this page.",
+      "skill": "Show readers this skill is listed on SourceWeft. The badge links to this page."
+    },
+    "formats": "Snippet format",
+    "markdown": "Markdown",
+    "html": "HTML",
+    "copy": "Copy",
+    "copied": "Copied",
+    "previewAlt": "Preview of the “Listed on SourceWeft” badge",
+    "ownerHint": "Your skill is listed. Add this badge to your repository's README: it links to the skill's page on SourceWeft.",
+    "claimHint": "Next: add a “Listed on SourceWeft” badge to your README. Copy it from the page of any of your listed skills.",
+    "submitHint": "Add this badge to your repository's README: it links to the server's page on SourceWeft."
+  },
   "dashboardSkillOverview": {
     "block": {
       "title": "AI-generated overview",

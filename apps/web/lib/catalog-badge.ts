@@ -87,7 +87,9 @@ const LEFT_WIDTH = 57; // 5 + "listed on" (47) + 5
 const LOGO_X = LEFT_WIDTH + 5;
 const TEXT_X = LOGO_X + 14 + 3;
 const RIGHT_TEXT_WIDTH = 64; // "SourceWeft"
-const WIDTH = TEXT_X + RIGHT_TEXT_WIDTH + 5;
+/** The badge is this many pixels wide, and 20 high. */
+export const LISTED_BADGE_WIDTH = TEXT_X + RIGHT_TEXT_WIDTH + 5;
+const WIDTH = LISTED_BADGE_WIDTH;
 const LABEL_FILL = "#555";
 // The page background of the public site, with its zinc-950 text: legible on
 // GitHub's light and dark themes alike.

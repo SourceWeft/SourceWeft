@@ -7,6 +7,7 @@ import {
   LISTED_BADGE_ALT,
   LISTED_BADGE_ETAG,
   LISTED_BADGE_MARK_PATH,
+  LISTED_BADGE_WIDTH,
   badgeHtml,
   badgeMarkdown,
   catalogBadgeUrls,
@@ -113,6 +114,8 @@ describe("renderListedBadgeSvg", () => {
     const root = doc.documentElement;
     expect(root.tagName).toBe("svg");
     expect(root.getAttribute("height")).toBe("20");
+    // What the snippet panel reserves for its preview.
+    expect(root.getAttribute("width")).toBe(String(LISTED_BADGE_WIDTH));
     expect(root.getAttribute("role")).toBe("img");
     expect(root.getAttribute("aria-label")).toBe(LISTED_BADGE_ALT);
     expect(root.getElementsByTagName("title")[0]?.textContent).toBe(
