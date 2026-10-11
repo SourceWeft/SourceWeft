@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { desktopBridge } from "../../../lib/desktop-bridge";
+import { Fragment } from "react";
+import { useDesktopSettings } from "./dashboard-settings-center/use-desktop-settings";
 
 import { useBillingAvailable } from "../../../lib/billing-edition/capabilities";
 import {
@@ -311,22 +311,7 @@ export function DashboardSettingsCenterModalSkeleton({
   activeTab?: SettingsCenterTab;
 }) {
   const billingAvailable = useBillingAvailable();
-  const [isLocalPc, setIsLocalPc] = useState(false);
-  useEffect(() => {
-    if (!desktopBridge.isAvailable()) return;
-    let active = true;
-    void desktopBridge.info().then(
-      (info) => {
-        if (active) setIsLocalPc(info.platform === "macos");
-      },
-      () => {
-        if (active) setIsLocalPc(false);
-      },
-    );
-    return () => {
-      active = false;
-    };
-  }, []);
+  const { isDesktop, isLocalPc } = useDesktopSettings();
   const navItems: SettingsCenterTab[] = [
     "account",
     "team",
@@ -358,23 +343,34 @@ export function DashboardSettingsCenterModalSkeleton({
 
             <nav className="flex-1 overflow-y-auto px-2.5 py-2.5">
               <div className="space-y-0.5">
+                {isDesktop && (
+                  <SettingsSkeletonLine className="mx-2.5 mb-3 mt-1 w-24" />
+                )}
                 {navItems
                   .filter((item) =>
                     isSettingsTabAvailable(item, billingAvailable),
                   )
                   .map((item) => (
-                    <div
-                      className={cx(
-                        "flex h-8 items-center gap-2.5 rounded-md px-2.5",
-                        item ===
-                          resolveSettingsTab(activeTab, billingAvailable) &&
-                          "bg-background shadow-sm",
-                      )}
-                      key={item}
-                    >
-                      <SettingsSkeletonBlock className="h-3.5 w-3.5 shrink-0 rounded-sm" />
-                      <SettingsSkeletonLine className="w-20" />
-                    </div>
+                    <Fragment key={item}>
+                      {isDesktop &&
+                        item === (isLocalPc ? "local" : "about") && (
+                          <div className="mt-3 border-t border-border/70 px-2.5 pb-1.5 pt-3">
+                            <SettingsSkeletonLine className="w-20" />
+                          </div>
+                        )}
+                      <div
+                        className={cx(
+                          "flex h-8 items-center gap-2.5 rounded-md px-2.5",
+                          item ===
+                            resolveSettingsTab(activeTab, billingAvailable) &&
+                            "bg-background shadow-sm",
+                        )}
+                        key={item}
+                      >
+                        <SettingsSkeletonBlock className="h-3.5 w-3.5 shrink-0 rounded-sm" />
+                        <SettingsSkeletonLine className="w-20" />
+                      </div>
+                    </Fragment>
                   ))}
               </div>
             </nav>

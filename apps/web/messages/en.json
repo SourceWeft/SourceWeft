@@ -883,7 +883,8 @@
       "profile": "Profile",
       "usage": "Usage",
       "billing": "Billing",
-      "logOut": "Log out"
+      "logOut": "Log out",
+      "settings": "Settings"
     },
     "team": {
       "add": "Add team",
@@ -978,7 +979,9 @@
       "about": "About",
       "userFallback": "SourceWeft User",
       "close": "Close",
-      "srTitle": "Settings center"
+      "srTitle": "Settings center",
+      "accountGroup": "Account & workspace",
+      "desktopGroup": "Desktop app"
     },
     "account": {
       "profileTitle": "Profile",

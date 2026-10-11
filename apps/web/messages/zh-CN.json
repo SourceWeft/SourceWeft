@@ -874,7 +874,8 @@
       "profile": "个人资料",
       "usage": "用量",
       "billing": "账单",
-      "logOut": "退出登录"
+      "logOut": "退出登录",
+      "settings": "设置"
     },
     "team": {
       "add": "添加团队",
@@ -969,7 +970,9 @@
       "about": "关于",
       "userFallback": "SourceWeft 用户",
       "close": "关闭",
-      "srTitle": "设置中心"
+      "srTitle": "设置中心",
+      "accountGroup": "账户与工作区",
+      "desktopGroup": "桌面应用"
     },
     "account": {
       "profileTitle": "个人资料",

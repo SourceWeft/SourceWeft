@@ -12,7 +12,7 @@ import {
   LayoutGrid,
   LogOut,
   Plus,
-  User,
+  Settings,
 } from "lucide-react";
 import {
   Avatar,
@@ -47,6 +47,7 @@ import {
 import { dispatchDashboardShortcutsOpen } from "./dashboard-shortcuts";
 import { DashboardSettingsCenterModalSkeleton } from "./dashboard-settings-center-modal-skeleton";
 import { RawImage } from "../../_components/raw-image";
+import { useDesktopSettings } from "./dashboard-settings-center/use-desktop-settings";
 
 const DashboardSettingsCenterModal = React.lazy(async () => {
   const settingsModal = await import("./dashboard-settings-center-modal");
@@ -73,6 +74,7 @@ export function DashboardAccountMenu({
   const t = useTranslations("dashboardNav");
   const { isMobile } = useSidebar();
   const billingAvailable = useBillingAvailable();
+  const { isDesktop } = useDesktopSettings();
   const authState = useAuthenticate(authClient);
   const sessionState = authState.data as
     | {
@@ -125,6 +127,24 @@ export function DashboardAccountMenu({
   return (
     <>
       <SidebarMenu className={expanded ? "gap-2" : "items-center gap-2"}>
+        {isDesktop && (
+          <SidebarMenuItem>
+            <button
+              type="button"
+              aria-label={t("account.settings")}
+              title={t("account.settings")}
+              onClick={() => openSettings("account")}
+              className={
+                expanded
+                  ? "flex h-10 w-full items-center gap-2 rounded-lg px-2 text-sm text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
+                  : "flex size-10 items-center justify-center rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
+              }
+            >
+              <Settings className="size-4 shrink-0" />
+              {expanded && <span>{t("account.settings")}</span>}
+            </button>
+          </SidebarMenuItem>
+        )}
         <SidebarMenuItem>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -237,8 +257,8 @@ export function DashboardAccountMenu({
               </DropdownMenuSub>
               <DropdownMenuGroup>
                 <DropdownMenuItem onClick={() => openSettings("account")}>
-                  <User />
-                  {t("account.profile")}
+                  <Settings />
+                  {t("account.settings")}
                 </DropdownMenuItem>
                 {billingAvailable ? (
                   <>
