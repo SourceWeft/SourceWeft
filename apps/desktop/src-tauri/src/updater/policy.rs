@@ -128,6 +128,21 @@ pub fn identity(value: &Value, channel: Channel, target: &str) -> String {
     .to_string()
 }
 
+/// Rechecked before every package attempt and before accepting downloaded bytes.
+pub fn require_identity(
+    value: &Value,
+    channel: Channel,
+    target: &str,
+    expected: &str,
+) -> Result<()> {
+    validate(value, channel)?;
+    active(value)?;
+    if identity(value, channel, target) != expected {
+        return Err("UPDATE_CANDIDATE_EXPIRED".into());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -186,5 +201,31 @@ mod tests {
         m["sourceweft"]["distribution"] = "paused".into();
         assert!(validate(&m, Channel::Stable).is_ok());
         assert!(active(&m).is_err());
+    }
+    #[test]
+    fn retries_cannot_accept_changed_withdrawn_or_replaced_candidates() {
+        let original = manifest("0.3.0-rc.7");
+        let expected = identity(&original, Channel::Preview, TARGETS[0]);
+        assert!(require_identity(&original, Channel::Preview, TARGETS[0], &expected).is_ok());
+        let mut control_revision = original.clone();
+        control_revision["sourceweft"]["revision"] = 2.into();
+        assert!(
+            require_identity(&control_revision, Channel::Preview, TARGETS[0], &expected).is_ok()
+        );
+        for changed in [
+            {
+                let mut m = original.clone();
+                m["sourceweft"]["distribution"] = "withdrawn".into();
+                m
+            },
+            {
+                let mut m = original.clone();
+                m["platforms"][TARGETS[0]]["signature"] = "Y2hhbmdlZA==".into();
+                m
+            },
+            manifest("0.3.0-rc.8"),
+        ] {
+            assert!(require_identity(&changed, Channel::Preview, TARGETS[0], &expected).is_err());
+        }
     }
 }
