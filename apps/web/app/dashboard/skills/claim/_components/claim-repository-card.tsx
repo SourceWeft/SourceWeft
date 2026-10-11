@@ -31,6 +31,7 @@ export function ClaimRepositoryCard({
   repository: SkillClaimRepository;
 }) {
   const t = useTranslations("dashboardSkillsClaim");
+  const tb = useTranslations("catalogBadge");
   return (
     <section
       aria-label={repository.repo}
@@ -48,10 +49,17 @@ export function ClaimRepositoryCard({
       </div>
 
       {plan.kind === "claimedByYou" ? (
-        <p className="mt-3 flex items-center gap-1.5 text-sm text-foreground">
-          <BadgeCheck className="size-4 text-primary" />
-          {t("page.claimedByYou")}
-        </p>
+        <>
+          <p className="mt-3 flex items-center gap-1.5 text-sm text-foreground">
+            <BadgeCheck className="size-4 text-primary" />
+            {t("page.claimedByYou")}
+          </p>
+          {/* A claim is per repository and carries no skill slugs: each
+              listed skill's page has its own badge. */}
+          <p className="mt-2 text-xs text-muted-foreground">
+            {tb("claimHint")}
+          </p>
+        </>
       ) : plan.kind === "claimedBySomeone" ? (
         <p className="mt-3 text-sm text-muted-foreground">
           {t("page.claimedBySomeone")}

@@ -60,6 +60,8 @@ function numberQuery(value: string | undefined) {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
+// `c.req.param("identifier")` is already decoded by Hono (`%2F` included), so
+// the routes use it as is: decoding it again would throw on a literal `%`.
 export function registerMarketRoutes(app: Hono) {
   app.get("/v1/mcp", async (c) => {
     const parsed = listMarketMcpRequestSchema.safeParse({
@@ -110,10 +112,7 @@ export function registerMarketRoutes(app: Hono) {
       marketMcpLocaleSchema,
       c.req.query("locale"),
     );
-    const record = await findMcp(
-      decodeURIComponent(c.req.param("identifier")),
-      { locale },
-    );
+    const record = await findMcp(c.req.param("identifier"), { locale });
     if (!record) {
       throw ApiError.notFound("MCP item not found");
     }
@@ -131,7 +130,7 @@ export function registerMarketRoutes(app: Hono) {
 
   app.get("/v1/mcp/:identifier/manifest", async (c) => {
     const found = await findMcpVersion(
-      decodeURIComponent(c.req.param("identifier")),
+      c.req.param("identifier"),
       c.req.query("version"),
     );
     if (!found) {
@@ -204,7 +203,7 @@ export function registerMarketRoutes(app: Hono) {
   app.post("/v1/market/admin/submissions/:identifier/publish", async (c) => {
     await requireMarketAdmin(c);
     const result = await setSubmissionStatus(
-      decodeURIComponent(c.req.param("identifier")),
+      c.req.param("identifier"),
       "published",
     );
     if (!result) {
@@ -225,7 +224,7 @@ export function registerMarketRoutes(app: Hono) {
   app.post("/v1/market/admin/mcp/:identifier/readme/refetch", async (c) => {
     await requireMarketAdmin(c);
     const result = await requestMcpReadmeRefetch(
-      decodeURIComponent(c.req.param("identifier")),
+      c.req.param("identifier"),
     );
     if (!result) {
       throw ApiError.notFound(
@@ -251,7 +250,7 @@ export function registerMarketRoutes(app: Hono) {
   app.get("/v1/market/admin/mcp/:identifier/overview", async (c) => {
     await requireMarketAdmin(c);
     const state = await findMcpOverviewAdminState(
-      decodeURIComponent(c.req.param("identifier")),
+      c.req.param("identifier"),
     );
     if (!state) {
       throw ApiError.notFound("No MCP server with that identifier");
@@ -281,7 +280,7 @@ export function registerMarketRoutes(app: Hono) {
     async (c) => {
       const session = await requireMarketAdmin(c);
       const result = await regenerateMcpOverview({
-        identifier: decodeURIComponent(c.req.param("identifier")),
+        identifier: c.req.param("identifier"),
         actorUserId: getSessionUserId(session),
       });
       if (!result) {
@@ -312,7 +311,7 @@ export function registerMarketRoutes(app: Hono) {
       );
     }
     const result = await setMcpOverviewHidden({
-      identifier: decodeURIComponent(c.req.param("identifier")),
+      identifier: c.req.param("identifier"),
       hidden: parsed.data.hidden,
       actorUserId: getSessionUserId(session),
     });
@@ -330,7 +329,7 @@ export function registerMarketRoutes(app: Hono) {
   app.post("/v1/market/admin/submissions/:identifier/reject", async (c) => {
     await requireMarketAdmin(c);
     const result = await setSubmissionStatus(
-      decodeURIComponent(c.req.param("identifier")),
+      c.req.param("identifier"),
       "archived",
     );
     if (!result) {

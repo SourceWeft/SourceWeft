@@ -222,6 +222,18 @@ export function trackSkillInstalled(surface: "gallery" | "detail") {
   trackEvent("skill_installed", { surface });
 }
 
+export function trackBadgeSnippetCopied(input: {
+  kind: "mcp" | "skill";
+  method: "markdown" | "html";
+  surface: "mcp_detail" | "skill_detail" | "skill_owner" | "mcp_submit";
+}) {
+  trackEvent("badge_snippet_copied", {
+    kind: input.kind,
+    method: input.method,
+    surface: input.surface,
+  });
+}
+
 export function trackWorkspaceCreated() {
   trackEvent("workspace_created", {});
 }

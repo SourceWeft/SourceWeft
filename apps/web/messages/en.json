@@ -494,7 +494,10 @@
       "securityBody": "MCP servers receive tool arguments from a conversation and may perform external actions. Unverified listings are allowed, but SourceWeft marks them so you can review the server before enabling it.",
       "relatedHeading": "More servers like {name}",
       "breadcrumb": "Breadcrumb",
-      "sections": "Sections"
+      "sections": "Sections",
+      "copy": "Copy",
+      "copied": "Copied",
+      "copyFailed": "Copy failed"
     },
     "readme": {
       "imagePlaceholder": "Image",
@@ -2447,7 +2450,8 @@
       "published": "Published: {identifier}",
       "queued": "Submitted {identifier}, queued for manual review ({count, plural, one {# item} other {# items}} to confirm).",
       "failed": "Submission failed. Make sure this is a public MCP repository.",
-      "submit": "Submit"
+      "submit": "Submit",
+      "done": "Done"
     }
   },
   "dashboardSourcesHub": {
@@ -3465,6 +3469,8 @@
           ],
           "agentPrompt": "Read {url} and use it to find and install agent skills for me. Before installing one, show me its source, license and whether it ships scripts, and wait for my OK.",
           "copy": "Copy",
+          "copied": "Copied",
+          "copyFailed": "Copy failed",
           "ctaSignedIn": "Open Skills in dashboard",
           "ctaSignedOut": "Sign in to install"
         },
@@ -3617,6 +3623,8 @@
         ],
         "signedOutNote": "You will be asked to sign in first, then taken straight to this skill.",
         "copy": "Copy",
+        "copied": "Copied",
+        "copyFailed": "Copy failed",
         "executableNote": "This skill includes scripts. They run in your workspace sandbox when the skill is used — review the file list and source before adding it.",
         "promptOnlyNote": "This skill is instructions only: it ships no scripts to execute.",
         "options": {
@@ -4095,6 +4103,23 @@
     "overview": {
       "cautions": "Before you install"
     }
+  },
+  "catalogBadge": {
+    "summary": "Add a badge to your README",
+    "description": {
+      "mcp": "Show readers this MCP server is listed on SourceWeft. The badge links to this page.",
+      "skill": "Show readers this skill is listed on SourceWeft. The badge links to this page."
+    },
+    "formats": "Snippet format",
+    "markdown": "Markdown",
+    "html": "HTML",
+    "copy": "Copy",
+    "copied": "Copied",
+    "copyFailed": "Copy failed",
+    "previewAlt": "Preview of the “Listed on SourceWeft” badge",
+    "ownerHint": "Your skill is listed. Add this badge to your repository's README: it links to the skill's page on SourceWeft.",
+    "claimHint": "Next: add a “Listed on SourceWeft” badge to your README. Copy it from the page of any of your listed skills.",
+    "submitHint": "Add this badge to your repository's README: it links to the server's page on SourceWeft."
   },
   "dashboardSkillOverview": {
     "block": {

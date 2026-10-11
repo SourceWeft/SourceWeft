@@ -494,7 +494,10 @@
       "securityBody": "MCP 服務會從對話中接收工具引數，並可能執行外部操作。允許列出未驗證的服務，但 SourceWeft 會對其加以標記，以便你在啟用前先審查該服務。",
       "relatedHeading": "更多類似 {name} 的服務",
       "breadcrumb": "麵包屑導覽",
-      "sections": "章節導覽"
+      "sections": "章節導覽",
+      "copy": "複製",
+      "copied": "已複製",
+      "copyFailed": "複製失敗"
     },
     "readme": {
       "imagePlaceholder": "圖片",
@@ -2447,7 +2450,8 @@
       "published": "已發布：{identifier}",
       "queued": "已提交 {identifier}，已加入人工審核佇列（有 {count} 項待確認）。",
       "failed": "提交失敗。請確認這是一個公開的 MCP 儲存庫。",
-      "submit": "提交"
+      "submit": "提交",
+      "done": "完成"
     }
   },
   "dashboardSourcesHub": {
@@ -3465,6 +3469,8 @@
           ],
           "agentPrompt": "閱讀 {url} 中的說明，用它幫我找到並安裝合適的代理程式技能。安裝任何一個之前，先告訴我它的來源、授權條款以及是否附帶腳本，等我確認。",
           "copy": "複製",
+          "copied": "已複製",
+          "copyFailed": "複製失敗",
           "ctaSignedIn": "在儀表板中開啟技能",
           "ctaSignedOut": "登入後安裝"
         },
@@ -3617,6 +3623,8 @@
         ],
         "signedOutNote": "系統會先要求你登入，然後直接帶你回到這個技能。",
         "copy": "複製",
+        "copied": "已複製",
+        "copyFailed": "複製失敗",
         "executableNote": "該技能包含腳本。使用該技能時，腳本會在你的工作區沙箱中執行——新增前請先檢視檔案列表和原始碼。",
         "promptOnlyNote": "該技能僅含說明：不附帶任何可執行的腳本。",
         "options": {
@@ -4095,6 +4103,23 @@
     "overview": {
       "cautions": "安裝前請注意"
     }
+  },
+  "catalogBadge": {
+    "summary": "在 README 中新增徽章",
+    "description": {
+      "mcp": "向讀者展示該 MCP 服務已收錄於 SourceWeft，徽章連結到本頁。",
+      "skill": "向讀者展示該技能已收錄於 SourceWeft，徽章連結到本頁。"
+    },
+    "formats": "程式碼片段格式",
+    "markdown": "Markdown",
+    "html": "HTML",
+    "copy": "複製",
+    "copied": "已複製",
+    "copyFailed": "複製失敗",
+    "previewAlt": "「Listed on SourceWeft」徽章預覽",
+    "ownerHint": "你的技能已上架。可將此徽章新增到儲存庫的 README，它會連結到該技能在 SourceWeft 上的頁面。",
+    "claimHint": "下一步：在 README 中新增「Listed on SourceWeft」徽章，可在你任一已上架技能的頁面上複製。",
+    "submitHint": "可將此徽章新增到儲存庫的 README，它會連結到該服務在 SourceWeft 上的頁面。"
   },
   "dashboardSkillOverview": {
     "block": {

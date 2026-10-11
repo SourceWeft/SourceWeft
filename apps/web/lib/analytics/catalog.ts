@@ -102,6 +102,12 @@ export const ANALYTICS_EVENTS = {
   source_added: { params: ["kind", "source_count"], keyEvent: false },
   artifact_shared: { params: [], keyEvent: false },
   skill_installed: { params: ["surface"], keyEvent: false },
+  // An author copied the "Listed on SourceWeft" README badge: `kind` mcp |
+  // skill, `surface` where, `method` markdown | html.
+  badge_snippet_copied: {
+    params: ["kind", "surface", "method"],
+    keyEvent: false,
+  },
   workspace_created: { params: [], keyEvent: false },
   team_created: { params: ["edition"], keyEvent: false },
 } as const satisfies Record<string, EventDefinition>;

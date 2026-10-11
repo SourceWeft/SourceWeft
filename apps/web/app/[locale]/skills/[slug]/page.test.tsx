@@ -80,6 +80,7 @@ vi.mock("../_components/community/public-skill-run-stats", () => ({
 }));
 
 import PublicSkillDetailPage, { generateMetadata } from "./page";
+import { SITE_URL } from "../../../seo";
 
 const SHA = "0123456789abcdef0123456789abcdef01234567";
 
@@ -157,9 +158,9 @@ function response(
   };
 }
 
-async function render(tab?: string) {
+async function render(tab?: string, locale = "en") {
   const element = await PublicSkillDetailPage({
-    params: Promise.resolve({ locale: "en", slug: "pdf-forms" }),
+    params: Promise.resolve({ locale, slug: "pdf-forms" }),
     searchParams: Promise.resolve(tab ? { tab } : {}),
   });
   return renderToStaticMarkup(element);
@@ -252,6 +253,31 @@ describe("public skill detail page", () => {
         'href="mailto:support@sourceweft.com?subject=Skill%20takedown%3A%20pdf-forms"',
       );
       expect(html).toContain("Report or request removal");
+    }
+  });
+
+  it("offers the README badge, folded, between the ownership note and the removal link", async () => {
+    const markdown = `[![Listed on SourceWeft](${SITE_URL}/badge/skills/pdf-forms.svg)](${SITE_URL}/skills/pdf-forms?utm_source=readme&amp;utm_medium=badge)`;
+    for (const locale of ["en", "zh-CN"]) {
+      const html = await render(undefined, locale);
+      const badge =
+        /<details[^>]*data-testid="catalog-badge"[^>]*>([\s\S]*?)<\/details>/.exec(
+          html,
+        );
+      expect(badge?.[0]).not.toMatch(/<details[^>]*\bopen\b/);
+      expect(badge?.[1]).toContain("Add a badge to your README");
+      expect(badge?.[1]).toContain("Show readers this skill is listed");
+      expect(badge?.[1]).toContain(
+        `src="${SITE_URL}/badge/skills/pdf-forms.svg"`,
+      );
+      // The canonical English page, whatever the page's language.
+      expect(badge?.[1]).toContain(markdown);
+      expect(
+        html.indexOf("Content belongs to its original authors"),
+      ).toBeLessThan(badge!.index);
+      expect(badge!.index).toBeLessThan(
+        html.indexOf("Report or request removal"),
+      );
     }
   });
 
