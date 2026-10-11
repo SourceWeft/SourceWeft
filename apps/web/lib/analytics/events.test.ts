@@ -9,6 +9,7 @@ vi.mock("./client", () => ({ trackEvent: sent.trackEvent }));
 
 import {
   trackArtifactShared,
+  trackBadgeSnippetCopied,
   trackBeginCheckout,
   trackChatMessageSent,
   trackConnectorConnected,
@@ -113,5 +114,17 @@ test("trackTeamCreated sends the edition", () => {
   assert.deepEqual(sent.trackEvent.mock.calls[0], [
     "team_created",
     { edition: "commercial" },
+  ]);
+});
+
+test("trackBadgeSnippetCopied sends the kind, surface and snippet format", () => {
+  trackBadgeSnippetCopied({
+    kind: "mcp",
+    method: "markdown",
+    surface: "mcp_detail",
+  });
+  assert.deepEqual(sent.trackEvent.mock.calls[0], [
+    "badge_snippet_copied",
+    { kind: "mcp", method: "markdown", surface: "mcp_detail" },
   ]);
 });

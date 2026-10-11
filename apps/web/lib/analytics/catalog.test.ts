@@ -50,6 +50,21 @@ test("validateEvent allows object arrays only for items", () => {
   assert.equal(typeof validateEvent("login", { method: [{ a: 1 }] }), "string");
 });
 
+test("badge_snippet_copied reuses registered dimensions", () => {
+  assert.deepEqual(ANALYTICS_EVENTS.badge_snippet_copied, {
+    params: ["kind", "surface", "method"],
+    keyEvent: false,
+  });
+  assert.equal(
+    validateEvent("badge_snippet_copied", {
+      kind: "skill",
+      method: "html",
+      surface: "skill_owner",
+    }),
+    null,
+  );
+});
+
 test("GA4 checklist matches the committed file", async () => {
   await expect(renderGa4Checklist()).toMatchFileSnapshot("./ga4-checklist.md");
 });
