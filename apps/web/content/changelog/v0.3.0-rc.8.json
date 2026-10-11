@@ -1,0 +1,17 @@
+{
+  "tag": "v0.3.0-rc.8",
+  "releasedAt": "2026-10-11",
+  "category": "Release",
+  "commit": "137dad0a9efe3b9177adb71607d5e9ad0a52a77d",
+  "title": "Recover interrupted desktop updates",
+  "summary": "Desktop updates now recover from temporary network interruptions with bounded retries and clearer local diagnostics. Update packages remain Tauri-signed; this release does not include Apple Developer ID signing, macOS notarization or Windows publisher signing.",
+  "items": [
+    "Update checks retry temporary connection failures within a fixed time budget, while certificate, manifest and signature failures remain blocking errors.",
+    "Interrupted update downloads can retry once from fresh bytes, recheck the selected release and verify the package signature before installation becomes available. Cancellation remains responsive during requests and retry delays.",
+    "Local rotating update logs record sanitized cause chains, attempt counts, timing and recovery results without storing credentials or response contents.",
+    "Shared settings navigation is clearer, and the public footer includes a support email contact.",
+    "Release publication verifies draft assets by release ID and supports recovery of verified download alias publication."
+  ],
+  "githubPrerelease": false,
+  "desktopPublicationPolicy": "updater-signed"
+}
