@@ -15,6 +15,7 @@ import {
 } from "@sourceweft/market-sdk";
 
 import type { Locale } from "@sourceweft/i18n/locales";
+import { catalogLocale } from "./i18n/catalog-locale";
 import { internalApiBaseUrl } from "./internal-api-base-url";
 
 function marketClient() {
@@ -41,8 +42,6 @@ const cachedListSkills = unstable_cache(
   { revalidate: SKILL_REVALIDATE_SECONDS },
 );
 
-const MARKET_SKILL_LOCALES: readonly string[] = ["en", "zh-CN", "zh-TW"];
-
 /**
  * A route's locale as one the market writes AI summaries in; English for
  * anything else.
@@ -50,9 +49,7 @@ const MARKET_SKILL_LOCALES: readonly string[] = ["en", "zh-CN", "zh-TW"];
 export function marketSkillLocale(
   locale: string | null | undefined,
 ): MarketSkillLocale {
-  return MARKET_SKILL_LOCALES.includes(locale ?? "")
-    ? (locale as MarketSkillLocale)
-    : "en";
+  return catalogLocale(locale);
 }
 
 /**
