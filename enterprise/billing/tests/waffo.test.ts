@@ -101,9 +101,18 @@ test("provider selection is explicit and Waffo needs only its two new credential
       }),
     /private key/,
   );
+  assert.equal(
+    readBillingConfig({ WAFFO_TEST_MODE: "false" }, "http://localhost").waffo
+      .environment,
+    "prod",
+  );
   assert.throws(
-    () => readBillingConfig({ WAFFO_ENVIRONMENT: "other" }, "http://localhost"),
-    /WAFFO_ENVIRONMENT/,
+    () => readBillingConfig({ WAFFO_TEST_MODE: "other" }, "http://localhost"),
+    /Invalid billing boolean/,
+  );
+  assert.throws(
+    () => readBillingConfig({ WAFFO_ENVIRONMENT: "test" }, "http://localhost"),
+    /WAFFO_ENVIRONMENT is no longer supported/,
   );
 });
 
