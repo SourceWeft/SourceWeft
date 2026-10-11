@@ -25,6 +25,7 @@ import { CatalogBadgeSnippet } from "../../../_components/market/catalog-badge-s
  * safety-scans it, then either publishes it immediately or routes it to review.
  * A published server is on the public market at once, so the dialog stays open
  * to hand its author the server's README badge; one sent to review has none yet.
+ * A server published after its author closed the dialog gets a toast instead.
  */
 export function SubmitMcpDialog() {
   const t = useTranslations("dashboardMcpPanel");
@@ -34,10 +35,14 @@ export function SubmitMcpDialog() {
   const [submitting, setSubmitting] = React.useState(false);
   // The identifier of the server just published, while the dialog shows it.
   const [published, setPublished] = React.useState<string | null>(null);
+  // Whether the dialog is open now, for a submission that settles later.
+  const openRef = React.useRef(open);
 
   function changeOpen(next: boolean) {
+    openRef.current = next;
     setOpen(next);
-    if (!next) setPublished(null);
+    // Reset on the way in: closing content stays on screen while it animates.
+    if (next) setPublished(null);
   }
 
   async function handleSubmit() {
@@ -51,7 +56,13 @@ export function SubmitMcpDialog() {
       const result = await submitMcp(trimmed);
       setRepoUrl("");
       if (result.status === "published") {
-        setPublished(result.identifier);
+        if (openRef.current) {
+          setPublished(result.identifier);
+        } else {
+          toast.success(
+            t("submit.published", { identifier: result.identifier }),
+          );
+        }
       } else {
         toast.success(
           t("submit.queued", {
