@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { marketMcpLocaleSchema } from "@sourceweft/market-contracts";
+import {
+  marketMcpLocaleSchema,
+  marketSkillLocaleSchema,
+} from "@sourceweft/market-contracts";
 
 import { catalogLocale } from "./catalog-locale";
 
@@ -18,8 +21,13 @@ describe("catalogLocale", () => {
     expect(catalogLocale(locale)).toBe(expected);
   });
 
-  it("covers every locale the catalog writes in", () => {
-    for (const locale of marketMcpLocaleSchema.options)
+  it("covers every locale the catalog writes in, for MCP servers and skills", () => {
+    // Skills have their own locale enum; one gaining a language must not be
+    // read in English here without a test failing.
+    for (const locale of [
+      ...marketMcpLocaleSchema.options,
+      ...marketSkillLocaleSchema.options,
+    ])
       expect(catalogLocale(locale)).toBe(locale);
   });
 });

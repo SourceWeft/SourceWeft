@@ -12,6 +12,8 @@ describe("parseLocaleQuery", () => {
     (schema) => {
       expect(parseLocaleQuery(schema, undefined)).toBeUndefined();
       expect(parseLocaleQuery(schema, "")).toBeUndefined();
+      // `?locale=%20`, as the public skill routes have always read it.
+      expect(parseLocaleQuery(schema, "  ")).toBeUndefined();
     },
   );
 
