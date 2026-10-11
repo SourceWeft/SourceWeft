@@ -22,6 +22,10 @@ const BADGE_HEADERS = {
   "x-robots-tag": "noindex",
 };
 
+// No identifier or slug holds a "%" or a control character. A decoded "%"
+// would be read as an escape again on its way to the market.
+const UNLISTABLE_KEY_CHARACTER = /[%\p{Cc}]/u;
+
 /**
  * The entry's key from the path: what precedes `.svg`, its segments decoded and
  * rejoined, so an MCP identifier may be written `a%2Fb.svg` or `a/b.svg`. Null
@@ -36,7 +40,8 @@ export function badgeKeyFromPath(segments: readonly string[]): string | null {
   }
   if (!path.endsWith(".svg")) return null;
   const key = path.slice(0, -".svg".length);
-  return key && key.length <= MAX_KEY_LENGTH ? key : null;
+  if (!key || key.length > MAX_KEY_LENGTH) return null;
+  return UNLISTABLE_KEY_CHARACTER.test(key) ? null : key;
 }
 
 export function badgeNotFound() {

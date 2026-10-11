@@ -79,6 +79,23 @@ describe("GET /badge/mcp/<identifier>.svg", () => {
     expect(market.getPublicMcpManifest).not.toHaveBeenCalled();
   });
 
+  it("answers 404 for a key holding a literal % or a control character, without asking the market", async () => {
+    // A decoded "%" would be decoded once more on its way to the market and
+    // fail there as a 5xx; no identifier contains one, or a control character.
+    for (const segments of [
+      ["%25.svg"],
+      ["io.github.o%2Fweather%25.svg"],
+      ["io.github.o", "%2525.svg"],
+      ["io.github.o%2Fweat%00her.svg"],
+      ["io.github.o%2Fweather%0A.svg"],
+      ["io.github.o%2Fweather%7F.svg"],
+      ["io.github.o%2Fweather%C2%85.svg"],
+    ]) {
+      expectNotFound(await get(segments));
+    }
+    expect(market.getPublicMcpManifest).not.toHaveBeenCalled();
+  });
+
   it("answers 404 for a server that is not listed", async () => {
     market.getPublicMcpManifest.mockRejectedValue({ status: 404 });
     const response = await get(["io.github.o%2Fgone.svg"]);

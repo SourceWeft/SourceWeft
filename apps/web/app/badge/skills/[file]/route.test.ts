@@ -70,6 +70,18 @@ describe("GET /badge/skills/<slug>.svg", () => {
     expect(market.getPublicSkill).not.toHaveBeenCalled();
   });
 
+  it("answers 404 for a slug holding a literal % or a control character, without asking the market", async () => {
+    for (const file of [
+      "%25.svg",
+      "gh-a%25b.svg",
+      "gh-a%09b.svg",
+      "gh-a%1Fb.svg",
+    ]) {
+      expectNotFound(await get(file));
+    }
+    expect(market.getPublicSkill).not.toHaveBeenCalled();
+  });
+
   it("answers 404 for a skill that is not listed", async () => {
     market.getPublicSkill.mockRejectedValue({ status: 404 });
     expectNotFound(await get("hidden.svg"));
