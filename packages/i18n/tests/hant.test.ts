@@ -12,6 +12,8 @@ test("repairs OpenCC's word-splitting slips", () => {
   assert.equal(toTaiwanTraditional("资源文件"), "資源檔案");
   assert.equal(toTaiwanTraditional("开源文件"), "開源檔案");
   assert.equal(toTaiwanTraditional("批准并发布"), "核准並發布");
+  // OpenCC reads "上复" as 上覆 (to overlay), leaving 覆制, which is no word.
+  assert.equal(toTaiwanTraditional("在页面上复制"), "在頁面上複製");
 });
 
 test("leaves placeholders and ICU syntax alone", () => {
