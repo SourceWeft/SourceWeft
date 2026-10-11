@@ -174,7 +174,7 @@ export const mcpCategoryDefinitions: McpCategoryDefinition[] = [
     description: "Maps, location, weather, travel, transport, health, wellness, and local services.",
     zhCN: {
       name: "位置与生活",
-      description: "地图、位置、天气、旅行、交通、健康、养生与本地服务。",
+      description: "地图、位置、天气、旅行、交通、健康、养生与本地生活服务。",
     },
     aliases: ["location", "lifestyle", "location-travel", "location-services", "travel", "travel-transport", "weather", "health", "wellness", "health-wellness"],
   },
