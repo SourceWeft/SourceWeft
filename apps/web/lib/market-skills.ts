@@ -16,7 +16,6 @@ import {
 
 import type { Locale } from "@sourceweft/i18n/locales";
 import { internalApiBaseUrl } from "./internal-api-base-url";
-import { localizeMarketCategories } from "./market-categories";
 
 function marketClient() {
   // The public skill market is served by the backend at {backend}/v1/skills —
@@ -70,32 +69,22 @@ export async function listPublicSkills(
   }
 }
 
+// The locale is an argument, so it is part of each read's cache key.
 const cachedListSkillCategories = unstable_cache(
-  async () => marketClient().listSkillCategories(),
+  async (locale: Locale) => marketClient().listSkillCategories({ locale }),
   ["public-skills-categories"],
   { revalidate: SKILL_REVALIDATE_SECONDS },
 );
 
-async function localizedSkillCategories(
-  response: ListMarketSkillCategoriesResponse,
-  locale: Locale,
-): Promise<ListMarketSkillCategoriesResponse> {
-  return {
-    ...response,
-    items: await localizeMarketCategories("skills", response.items, locale),
-  };
-}
-
+/** Every skill category with its count, named in the page's language. */
 export async function listPublicSkillCategories(
   locale: Locale,
 ): Promise<ListMarketSkillCategoriesResponse> {
-  let response: ListMarketSkillCategoriesResponse;
   try {
-    response = await cachedListSkillCategories();
+    return await cachedListSkillCategories(locale);
   } catch {
     return { items: [], total: 0 };
   }
-  return localizedSkillCategories(response, locale);
 }
 
 /**
@@ -103,10 +92,10 @@ export async function listPublicSkillCategories(
  * must use this: with the swallowing variant an outage is indistinguishable
  * from "no such category" and would 404 every category page at once.
  */
-export async function requirePublicSkillCategories(
+export function requirePublicSkillCategories(
   locale: Locale,
 ): Promise<ListMarketSkillCategoriesResponse> {
-  return localizedSkillCategories(await cachedListSkillCategories(), locale);
+  return cachedListSkillCategories(locale);
 }
 
 // The locale is an argument, so it is part of each read's cache key: the AI

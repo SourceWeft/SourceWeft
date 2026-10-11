@@ -2,7 +2,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { marketItemSummarySchema } from "@sourceweft/market-contracts";
 
+import { deepMergeMessages } from "@sourceweft/i18n/catalog";
 import enMessages from "@/messages/en.json";
+import zhTWMessages from "@/messages/zh-TW.json";
 import { flush, mountWithIntl, unmountAll } from "@/test/react";
 
 import { McpMarket } from "./mcp-market";
@@ -118,5 +120,26 @@ describe("dashboard MCP market cards", { timeout: 30_000 }, () => {
       "ws-1",
       expect.objectContaining({ locale: "zh-TW" }),
     );
+  });
+
+  it("asks for the category names in the viewer's language", async () => {
+    await mountWithIntl(<McpMarket />, { locale: "zh-TW" });
+    await flush(4);
+    expect(api.listWorkspaceMarketMcpCategories).toHaveBeenCalledWith("ws-1", {
+      locale: "zh-TW",
+    });
+  });
+
+  it("labels the all-categories choice in the viewer's language", async () => {
+    await mountWithIntl(<McpMarket />, {
+      locale: "zh-TW",
+      messages: deepMergeMessages(enMessages, zhTWMessages),
+    });
+    await flush(4);
+    const facet = [...document.querySelectorAll("details")].find((node) =>
+      node.querySelector("summary")?.textContent?.includes("分類"),
+    );
+    expect(facet?.textContent).toContain("全部");
+    expect(facet?.textContent).not.toContain("All");
   });
 });

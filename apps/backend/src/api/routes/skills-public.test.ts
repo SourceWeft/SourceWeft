@@ -292,6 +292,23 @@ test("categories is a route of its own, not a skill called 'categories'", async 
   assert.equal(mocks.findMarketSkill.mock.calls.length, 0);
 });
 
+test("categories are read in the language asked for, English by default", async () => {
+  const app = createTestApp();
+  assert.equal(
+    (await app.request("/v1/skills/categories?locale=zh-TW")).status,
+    200,
+  );
+  assert.deepEqual(mocks.listMarketSkillCategories.mock.calls.at(-1), [
+    "zh-TW",
+  ]);
+  assert.equal((await app.request("/v1/skills/categories")).status, 200);
+  assert.deepEqual(mocks.listMarketSkillCategories.mock.calls.at(-1), ["en"]);
+  assert.equal(
+    (await app.request("/v1/skills/categories?locale=fr")).status,
+    400,
+  );
+});
+
 test("reserved path segments are a 404 without a lookup", async () => {
   assert.deepEqual([...RESERVED_MARKET_SKILL_SLUGS].sort(), [
     "categories",

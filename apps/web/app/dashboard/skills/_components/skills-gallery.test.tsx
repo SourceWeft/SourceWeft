@@ -108,6 +108,15 @@ function button(name: string) {
   return match;
 }
 
+test("asks for the category names in the viewer's language", async () => {
+  api.listSkillsCatalog.mockResolvedValue({ items: [], nextCursor: null });
+  await mountWithIntl(<SkillsGallery />, { locale: "zh-CN" });
+  await flush(4);
+  expect(api.listSkillCatalogCategories).toHaveBeenCalledWith("ws-1", {
+    locale: "zh-CN",
+  });
+});
+
 test("asks the server for one page and sections built-ins, own and community skills", async () => {
   api.listSkillsCatalog.mockResolvedValue({
     items: [

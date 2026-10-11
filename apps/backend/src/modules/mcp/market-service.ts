@@ -1,3 +1,4 @@
+import type { Locale } from "@sourceweft/i18n";
 import type {
   ListMarketMcpRequest,
   MarketMcpLocale,
@@ -41,12 +42,12 @@ export class MarketService {
     }
   }
 
-  async listMcpCategories() {
+  async listMcpCategories(locale: Locale = "en") {
     if (!this.isEnabled()) {
       return { items: [] };
     }
     try {
-      return await readMcpCategories();
+      return await readMcpCategories(locale);
     } catch (error) {
       logger.warn("Market listMcpCategories failed; returning empty list", {
         error: error instanceof Error ? error.message : String(error),

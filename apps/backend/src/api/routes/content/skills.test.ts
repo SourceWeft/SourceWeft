@@ -166,13 +166,30 @@ test("categories is not shadowed by the catalogId route", async () => {
   const response = await createTestApp().request(`${base}/categories`);
   assert.equal(response.status, 200);
   assert.deepEqual(mocks.listCatalogCategories.mock.calls, [
-    [{ userId: "user_1" }],
+    [{ userId: "user_1", locale: "en" }],
   ]);
   assert.equal(mocks.getCatalogSkillDetail.mock.calls.length, 0);
   const body = (await response.json()) as {
     items: Array<{ slug: string; count: number }>;
   };
   assert.equal(body.items[0]?.count, 2);
+});
+
+test("catalog categories are named in the language asked for", async () => {
+  mocks.listCatalogCategories.mockResolvedValue({ items: [] });
+  const response = await createTestApp().request(
+    `${base}/categories?locale=zh-CN`,
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(mocks.listCatalogCategories.mock.calls.at(-1), [
+    { userId: "user_1", locale: "zh-CN" },
+  ]);
+  const calls = mocks.listCatalogCategories.mock.calls.length;
+  assert.equal(
+    (await createTestApp().request(`${base}/categories?locale=fr`)).status,
+    400,
+  );
+  assert.equal(mocks.listCatalogCategories.mock.calls.length, calls);
 });
 
 test("bad catalog paging input is a validation error, not a query", async () => {

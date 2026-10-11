@@ -454,3 +454,24 @@ test("the overview admin status reports readiness and coverage", async () => {
   // The literal route is not taken for a server called "overview".
   assert.equal(mocks.overviewState.mock.calls.length, 0);
 });
+
+test("categories are named and described in the language asked for", async () => {
+  const app = createTestApp();
+  const finance = async (query: string) => {
+    const response = await app.request(`/v1/mcp/categories${query}`);
+    assert.equal(response.status, 200);
+    const body = (await response.json()) as {
+      items: { slug: string; name: string; description: string | null }[];
+    };
+    return body.items.find((item) => item.slug === "finance");
+  };
+  assert.equal((await finance(""))?.name, "Finance");
+  assert.equal((await finance("?locale=zh-CN"))?.name, "金融");
+  assert.deepEqual(await finance("?locale=zh-TW"), {
+    id: "mcp-cat-finance",
+    slug: "finance",
+    name: "金融",
+    description: "股票、加密貨幣、交易、會計、銀行、市場行情與金融資料。",
+  });
+  assert.equal((await app.request("/v1/mcp/categories?locale=fr")).status, 400);
+});

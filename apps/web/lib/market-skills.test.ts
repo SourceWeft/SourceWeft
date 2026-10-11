@@ -26,22 +26,6 @@ vi.mock("next/cache", () => ({
     return callback;
   },
 }));
-vi.mock("next-intl/server", async () => {
-  const { createTranslator } = await import("next-intl");
-  const { deepMergeMessages } = await import("@sourceweft/i18n/catalog");
-  const en = (await import("../messages/en.json")).default;
-  return {
-    getTranslations: async (input: { locale: string; namespace: string }) =>
-      createTranslator({
-        locale: input.locale,
-        messages: deepMergeMessages(
-          en,
-          (await import(`../messages/${input.locale}.json`)).default,
-        ),
-        namespace: input.namespace as never,
-      }),
-  };
-});
 vi.mock("@sourceweft/market-sdk", () => {
   class MarketClientError extends Error {
     readonly status: number;
@@ -149,32 +133,28 @@ describe("categories", () => {
     await expect(requirePublicSkillCategories("en")).resolves.toEqual(response);
   });
 
-  it("names and describes the categories in the page's language", async () => {
-    client.listSkillCategories.mockResolvedValue({
+  it("asks the market for the categories in the page's language", async () => {
+    const response = {
       items: [
         {
           count: 3,
-          description: "Writing, reviewing, testing and debugging code.",
-          name: "Software Development",
+          description: "编写代码。",
+          name: "软件开发",
           slug: "development",
         },
       ],
       total: 3,
-    });
+    };
+    client.listSkillCategories.mockResolvedValue(response);
     for (const read of [
       listPublicSkillCategories,
       requirePublicSkillCategories,
     ]) {
-      const { items, total } = await read("zh-CN");
-      expect(total).toBe(3);
-      expect(items).toEqual([
-        {
-          count: 3,
-          description: "编写、审查、测试与调试代码。",
-          name: "软件开发",
-          slug: "development",
-        },
-      ]);
+      client.listSkillCategories.mockClear();
+      expect(await read("zh-CN")).toEqual(response);
+      expect(client.listSkillCategories).toHaveBeenCalledWith({
+        locale: "zh-CN",
+      });
     }
   });
 });
