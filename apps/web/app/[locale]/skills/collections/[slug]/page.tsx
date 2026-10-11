@@ -87,10 +87,10 @@ export async function generateMetadata({
     const url = `${SITE_URL}${skillCollectionPath(collection.slug)}`;
     return {
       // The shell is localized, so the indexable page carries hreflang and a
-    // self-canonical per locale; narrowed views keep the plain canonical.
-    alternates: isIndexableListing(collection.itemCount)
-      ? buildAlternates(skillCollectionPath(collection.slug), locale)
-      : { canonical: url },
+      // self-canonical per locale; narrowed views keep the plain canonical.
+      alternates: isIndexableListing(collection.itemCount)
+        ? buildAlternates(skillCollectionPath(collection.slug), locale)
+        : { canonical: url },
       description,
       openGraph: {
         description,
@@ -125,7 +125,7 @@ export default async function PublicSkillCollectionPage({ params }: PageProps) {
   const [authState, result, categories] = await Promise.all([
     resolveInitialLandingAuthState(),
     loadCollection(decodeURIComponent(slug), locale),
-    listPublicSkillCategories(),
+    listPublicSkillCategories(locale),
   ]);
   const { collection, items } = result;
   const pageUrl = `${SITE_URL}${skillCollectionPath(collection.slug)}`;

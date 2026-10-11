@@ -220,7 +220,7 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
     resolveInitialLandingAuthState(),
     loadMcp(decodedIdentifier),
     getPublicMcpDetail(decodedIdentifier, overviewLocale),
-    listPublicMcpCategories(),
+    listPublicMcpCategories(locale),
   ]);
   const { item, manifest, version } = result;
   const categoryNames = mcpCategoryNames(categoriesResponse.items);

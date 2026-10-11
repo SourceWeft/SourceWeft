@@ -1,4 +1,5 @@
 import { McpIcon as McpBrandIcon } from "../../../../_components/site-icons";
+import type { Locale } from "@sourceweft/i18n/locales";
 import type { Metadata } from "next";
 import { LocaleLink } from "../../../_components/locale-link";
 import { notFound } from "next/navigation";
@@ -33,10 +34,7 @@ import {
   type McpSearchParams,
 } from "../../_components/mcp-browse";
 import { McpListingView, McpSearchForm } from "../../_components/mcp-listing";
-import {
-  mcpCategoryPath,
-  mcpPath,
-} from "../../_components/mcp-display";
+import { mcpCategoryPath, mcpPath } from "../../_components/mcp-display";
 
 // Canonical and JSON-LD embed the public site URL, which is injected at
 // container start, so this must never be prerendered at build time.
@@ -47,10 +45,10 @@ type PageProps = {
   searchParams: Promise<McpSearchParams>;
 };
 
-async function loadCategory(slug: string) {
+async function loadCategory(slug: string, locale: Locale) {
   // Throws on a market outage so the page 5xxs rather than 404ing every
   // category at once.
-  const { items } = await requirePublicMcpCategories();
+  const { items } = await requirePublicMcpCategories(locale);
   return items.find((category) => category.slug === slug) ?? null;
 }
 
@@ -59,9 +57,12 @@ export async function generateMetadata({
   searchParams,
 }: PageProps): Promise<Metadata> {
   const { locale, slug } = await params;
+  const pageLocale = hasLocale(routing.locales, locale)
+    ? locale
+    : routing.defaultLocale;
   const t = await getTranslations({ locale, namespace: "mcp.category" });
   const decodedSlug = decodeURIComponent(slug);
-  const category = await loadCategory(decodedSlug);
+  const category = await loadCategory(decodedSlug, pageLocale);
 
   if (!category) {
     return { ...NO_INDEX_METADATA, title: t("notFound") };
@@ -89,12 +90,13 @@ export async function generateMetadata({
   return {
     // The shell is localized, so the indexable page carries hreflang and a
     // self-canonical per locale; narrowed views keep the plain canonical.
-    alternates: !narrowed && isIndexableListing(market.items.length)
-      ? buildAlternates(
-          mcpCategoryPath(category.slug),
-          hasLocale(routing.locales, locale) ? locale : routing.defaultLocale,
-        )
-      : { canonical: url },
+    alternates:
+      !narrowed && isIndexableListing(market.items.length)
+        ? buildAlternates(
+            mcpCategoryPath(category.slug),
+            hasLocale(routing.locales, locale) ? locale : routing.defaultLocale,
+          )
+        : { canonical: url },
     description,
     openGraph: {
       description,
@@ -133,8 +135,8 @@ export default async function PublicMcpCategoryPage({
   const decodedSlug = decodeURIComponent(slug);
   const [authState, category, categoriesResponse] = await Promise.all([
     resolveInitialLandingAuthState(),
-    loadCategory(decodedSlug),
-    requirePublicMcpCategories(),
+    loadCategory(decodedSlug, locale),
+    requirePublicMcpCategories(locale),
   ]);
 
   if (!category) {

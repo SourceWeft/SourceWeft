@@ -16,7 +16,9 @@ import {
   type ListMarketMcpResponse,
 } from "@sourceweft/market-sdk";
 
+import type { Locale } from "@sourceweft/i18n/locales";
 import { internalApiBaseUrl } from "./internal-api-base-url";
+import { localizeMarketCategories } from "./market-categories";
 import { readMcpReadme } from "./mcp-readme";
 
 const MCP_LIST_LIMIT = 100;
@@ -64,12 +66,26 @@ const cachedListMcpCategories = unstable_cache(
   { revalidate: MCP_LIST_REVALIDATE_SECONDS },
 );
 
-export async function listPublicMcpCategories(): Promise<ListMarketCategoriesResponse> {
+async function localizedMcpCategories(
+  response: ListMarketCategoriesResponse,
+  locale: Locale,
+): Promise<ListMarketCategoriesResponse> {
+  return {
+    ...response,
+    items: await localizeMarketCategories("mcp", response.items, locale),
+  };
+}
+
+export async function listPublicMcpCategories(
+  locale: Locale,
+): Promise<ListMarketCategoriesResponse> {
+  let response: ListMarketCategoriesResponse;
   try {
-    return await cachedListMcpCategories();
+    response = await cachedListMcpCategories();
   } catch {
     return { items: [] };
   }
+  return localizedMcpCategories(response, locale);
 }
 
 /**
@@ -77,8 +93,10 @@ export async function listPublicMcpCategories(): Promise<ListMarketCategoriesRes
  * must use this: with the swallowing variant an outage is indistinguishable
  * from "no such category" and would 404 every category page at once.
  */
-export function requirePublicMcpCategories(): Promise<ListMarketCategoriesResponse> {
-  return cachedListMcpCategories();
+export async function requirePublicMcpCategories(
+  locale: Locale,
+): Promise<ListMarketCategoriesResponse> {
+  return localizedMcpCategories(await cachedListMcpCategories(), locale);
 }
 
 const cachedMcpCategoryCounts = unstable_cache(

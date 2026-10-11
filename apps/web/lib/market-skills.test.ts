@@ -26,6 +26,22 @@ vi.mock("next/cache", () => ({
     return callback;
   },
 }));
+vi.mock("next-intl/server", async () => {
+  const { createTranslator } = await import("next-intl");
+  const { deepMergeMessages } = await import("@sourceweft/i18n/catalog");
+  const en = (await import("../messages/en.json")).default;
+  return {
+    getTranslations: async (input: { locale: string; namespace: string }) =>
+      createTranslator({
+        locale: input.locale,
+        messages: deepMergeMessages(
+          en,
+          (await import(`../messages/${input.locale}.json`)).default,
+        ),
+        namespace: input.namespace as never,
+      }),
+  };
+});
 vi.mock("@sourceweft/market-sdk", () => {
   class MarketClientError extends Error {
     readonly status: number;
@@ -110,7 +126,7 @@ describe("listPublicSkills", () => {
 describe("categories", () => {
   it("swallows an outage for list pages", async () => {
     client.listSkillCategories.mockRejectedValue(new Error("down"));
-    await expect(listPublicSkillCategories()).resolves.toEqual({
+    await expect(listPublicSkillCategories("en")).resolves.toEqual({
       items: [],
       total: 0,
     });
@@ -118,7 +134,7 @@ describe("categories", () => {
 
   it("propagates an outage for category pages, so it is not a 404", async () => {
     client.listSkillCategories.mockRejectedValue(new Error("down"));
-    await expect(requirePublicSkillCategories()).rejects.toThrow("down");
+    await expect(requirePublicSkillCategories("en")).rejects.toThrow("down");
   });
 
   it("returns the categories when the market answers", async () => {
@@ -129,8 +145,37 @@ describe("categories", () => {
       total: 3,
     };
     client.listSkillCategories.mockResolvedValue(response);
-    await expect(listPublicSkillCategories()).resolves.toBe(response);
-    await expect(requirePublicSkillCategories()).resolves.toBe(response);
+    await expect(listPublicSkillCategories("en")).resolves.toEqual(response);
+    await expect(requirePublicSkillCategories("en")).resolves.toEqual(response);
+  });
+
+  it("names and describes the categories in the page's language", async () => {
+    client.listSkillCategories.mockResolvedValue({
+      items: [
+        {
+          count: 3,
+          description: "Writing, reviewing, testing and debugging code.",
+          name: "Software Development",
+          slug: "development",
+        },
+      ],
+      total: 3,
+    });
+    for (const read of [
+      listPublicSkillCategories,
+      requirePublicSkillCategories,
+    ]) {
+      const { items, total } = await read("zh-CN");
+      expect(total).toBe(3);
+      expect(items).toEqual([
+        {
+          count: 3,
+          description: "编写、审查、测试与调试代码。",
+          name: "软件开发",
+          slug: "development",
+        },
+      ]);
+    }
   });
 });
 

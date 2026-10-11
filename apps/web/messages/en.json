@@ -5336,5 +5336,139 @@
     "runStatusError": "Unable to check generation status. Please try again.",
     "stopError": "Unable to stop generation. Please try again.",
     "otherRun": "Another participant is generating this response."
+  },
+  "marketCategories": {
+    "mcp": {
+      "developer-tools": {
+        "name": "Developer Tools",
+        "description": "Code, Git, APIs, SDKs, CI/CD, developer workflows, and local developer tooling."
+      },
+      "browser-automation": {
+        "name": "Browser Automation",
+        "description": "Browser control, page inspection, screenshots, web tests, and automation."
+      },
+      "web-search-scraping": {
+        "name": "Web Search & Scraping",
+        "description": "Search, news retrieval, crawling, scraping, extraction, and public web collection."
+      },
+      "data-analytics": {
+        "name": "Data & Analytics",
+        "description": "Data analysis, BI, reports, metrics, ETL, spreadsheets, and visualization."
+      },
+      "databases": {
+        "name": "Databases",
+        "description": "SQL, NoSQL, graph, vector, cache, and database administration."
+      },
+      "files-storage": {
+        "name": "Files & Storage",
+        "description": "Local files, documents, PDFs, object storage, cloud drives, and storage systems."
+      },
+      "knowledge-memory": {
+        "name": "Knowledge & Memory",
+        "description": "RAG, knowledge bases, documentation retrieval, memory, semantic search, and contextual recall."
+      },
+      "productivity-workflow": {
+        "name": "Productivity & Workflow",
+        "description": "Tasks, calendars, notes, automation workflows, project management, and personal productivity."
+      },
+      "communication-collaboration": {
+        "name": "Communication & Collaboration",
+        "description": "Email, chat, messaging, meetings, social channels, and team collaboration."
+      },
+      "business-commerce": {
+        "name": "Business & Commerce",
+        "description": "CRM, support, sales, marketing, ecommerce, payments, customer data, and business SaaS."
+      },
+      "cloud-infrastructure": {
+        "name": "Cloud & Infrastructure",
+        "description": "Cloud providers, hosting, Kubernetes, Docker, Terraform, networking, deployment, and operations."
+      },
+      "security-monitoring": {
+        "name": "Security & Monitoring",
+        "description": "Security, identity, secrets, compliance, testing, logs, monitoring, alerts, and observability."
+      },
+      "finance": {
+        "name": "Finance",
+        "description": "Stocks, crypto, trading, accounting, banking, markets, and financial data."
+      },
+      "media-design": {
+        "name": "Media & Design",
+        "description": "Images, video, audio, TTS, design tools, 3D, and creative workflows."
+      },
+      "location-lifestyle": {
+        "name": "Location & Lifestyle",
+        "description": "Maps, location, weather, travel, transport, health, wellness, and local services."
+      },
+      "ai-ml": {
+        "name": "AI & ML",
+        "description": "LLM providers, agents, models, embeddings, inference, and machine learning workflows."
+      },
+      "other": {
+        "name": "Other",
+        "description": "MCP servers that do not fit a primary SourceWeft category yet."
+      }
+    },
+    "skills": {
+      "documents-office": {
+        "name": "Documents & Office",
+        "description": "Word, PowerPoint, Excel, PDF and other office files."
+      },
+      "writing-content": {
+        "name": "Writing & Content",
+        "description": "Drafting, editing, translation and content production."
+      },
+      "research-analysis": {
+        "name": "Research & Analysis",
+        "description": "Literature review, investigation and structured reasoning."
+      },
+      "data-analytics": {
+        "name": "Data & Analytics",
+        "description": "Data cleaning, SQL, statistics and visualization."
+      },
+      "design-creative": {
+        "name": "Design & Creative",
+        "description": "Visual design, branding, art, image and video work."
+      },
+      "development": {
+        "name": "Software Development",
+        "description": "Writing, reviewing, testing and debugging code."
+      },
+      "devops-cloud": {
+        "name": "DevOps & Cloud",
+        "description": "Deployment, infrastructure, CI/CD and operations."
+      },
+      "ai-agents": {
+        "name": "AI & Agents",
+        "description": "Prompting, agent workflows, MCP servers and skill authoring."
+      },
+      "productivity-workflow": {
+        "name": "Productivity & Workflow",
+        "description": "Planning, meetings, task management and personal workflow."
+      },
+      "communication": {
+        "name": "Communication",
+        "description": "Email, announcements, team and customer communication."
+      },
+      "marketing-sales": {
+        "name": "Marketing & Sales",
+        "description": "SEO, campaigns, copy, outreach and sales enablement."
+      },
+      "business-finance": {
+        "name": "Business & Finance",
+        "description": "Strategy, finance, legal and operations."
+      },
+      "learning-education": {
+        "name": "Learning & Education",
+        "description": "Teaching, tutoring, study methods and explanations."
+      },
+      "security": {
+        "name": "Security",
+        "description": "Security review, threat modelling and hardening."
+      },
+      "other": {
+        "name": "Other",
+        "description": "Skills that do not fit another category."
+      }
+    }
   }
 }

@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const client = vi.hoisted(() => ({ getMcp: vi.fn(), listMcp: vi.fn() }));
+const client = vi.hoisted(() => ({
+  getMcp: vi.fn(),
+  listMcp: vi.fn(),
+  listMcpCategories: vi.fn(),
+}));
 const cacheCalls = vi.hoisted(
   () => [] as { keys: string[]; options: { revalidate?: number } }[],
 );
@@ -20,6 +24,22 @@ vi.mock("next/cache", () => ({
     return callback;
   },
 }));
+vi.mock("next-intl/server", async () => {
+  const { createTranslator } = await import("next-intl");
+  const { deepMergeMessages } = await import("@sourceweft/i18n/catalog");
+  const en = (await import("../messages/en.json")).default;
+  return {
+    getTranslations: async (input: { locale: string; namespace: string }) =>
+      createTranslator({
+        locale: input.locale,
+        messages: deepMergeMessages(
+          en,
+          (await import(`../messages/${input.locale}.json`)).default,
+        ),
+        namespace: input.namespace as never,
+      }),
+  };
+});
 vi.mock("@sourceweft/market-sdk", () => {
   class MarketClientError extends Error {
     readonly status: number;
@@ -32,11 +52,17 @@ vi.mock("@sourceweft/market-sdk", () => {
     constructor(readonly options: { baseUrl: string }) {}
     getMcp = client.getMcp;
     listMcp = client.listMcp;
+    listMcpCategories = client.listMcpCategories;
   }
   return { MarketClient, MarketClientError };
 });
 
-import { getPublicMcpDetail, listPublicMcp } from "./market-mcp";
+import {
+  getPublicMcpDetail,
+  listPublicMcp,
+  listPublicMcpCategories,
+  requirePublicMcpCategories,
+} from "./market-mcp";
 
 const versions = [{ status: "published", version: "1.0.0" }];
 const source = {
@@ -122,5 +148,31 @@ describe("listPublicMcp", () => {
       limit: 100,
       locale: "zh-TW",
     });
+  });
+});
+
+describe("categories", () => {
+  it("names and describes the categories in the page's language", async () => {
+    const finance = {
+      description:
+        "Stocks, crypto, trading, accounting, banking, markets, and financial data.",
+      id: "c1",
+      name: "Finance",
+      slug: "finance",
+    };
+    client.listMcpCategories.mockResolvedValue({ items: [finance] });
+    for (const read of [listPublicMcpCategories, requirePublicMcpCategories]) {
+      expect(await read("en")).toEqual({ items: [finance] });
+      expect(await read("zh-TW")).toEqual({
+        items: [
+          {
+            ...finance,
+            description:
+              "股票、加密貨幣、交易、會計、銀行、市場行情與金融資料。",
+            name: "金融",
+          },
+        ],
+      });
+    }
   });
 });

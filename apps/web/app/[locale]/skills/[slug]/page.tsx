@@ -496,7 +496,7 @@ export default async function PublicSkillDetailPage({
   const [authState, result, categoriesResponse] = await Promise.all([
     resolveInitialLandingAuthState(),
     loadSkill(decodedSlug, uiLocale),
-    listPublicSkillCategories(),
+    listPublicSkillCategories(locale),
   ]);
   const { files, scanFlags, skill, source, versions } = result;
   // Cached with the reviews section's own read, so this costs nothing extra.
