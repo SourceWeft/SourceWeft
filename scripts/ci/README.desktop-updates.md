@@ -315,3 +315,42 @@ Rust 1.94.1 crashes with SIGSEGV even for
 `rustc --version`, before compiling project code. The Dockerfile checks compiler
 startup explicitly. Use the native Ubuntu x64 CI runner to validate the package;
 do not lower the Rust version or relabel an ARM package as x64.
+
+### Transient network failures and local diagnostics
+
+The desktop updater records JSON lines in `updater.log` next to its preferences
+(macOS: `~/Library/Application Support/<bundle identifier>/`). Request events
+include an operation ID, phase (`metadata`, `plugin_check`, `package`), attempt,
+elapsed milliseconds, classified cause chain, HTTP status when available, retry
+choice and delay. Successful retries record `recovered: true`. Arbitrary source
+error text is omitted: proxy credentials, URLs, headers and response bodies must
+never be written to diagnostics. Unknown causes are explicitly marked omitted.
+The log rotates at 256 KiB into one previous file; Unix files use mode 0600.
+
+Manifest requests have at most three attempts, 15 seconds each, within a shared
+50-second check budget. Backoff is 1 then 2 seconds plus up to 255 ms jitter.
+`Retry-After` supports delta-seconds and HTTP dates; if its delay cannot fit the
+remaining budget the operation fails without retrying early. Retryable metadata
+HTTP statuses are 408, 429, 500, 502, 503 and 504. Known transport interruptions
+are retryable; certificate/policy/JSON/signature errors and unknown failures are
+not. Plugin errors that hide their HTTP status are not guessed from text.
+
+Package transfers allow one retry, with a fresh buffer and candidate revalidation,
+within the original 20-minute total budget. Metadata retries are not multiplied
+by package retries. Cancellation interrupts requests and backoff. Installation
+is never retried. No alternate endpoint, direct connection, certificate bypass,
+or unsigned package fallback is used.
+
+For a macOS release-mode regression check, build a **separate bundle identifier**
+and an older validation version, embedding the existing public updater key. Do
+not replace the installed app or publish this verification build. Run
+`apps/desktop/scripts/updater-fault-proxy.py --upstream-port <local proxy port>`
+and give only the validation app `http_proxy` and `https_proxy` pointing to
+`http://127.0.0.1:17897`. The fixture forwards encrypted CONNECT traffic to the
+existing local proxy. By default it drops the first two TLS handshakes and cuts
+tunnel six after 64 KiB (expected first package transfer); inspect its counters
+alongside the app log, since unrelated update retries can change that sequence.
+Use `--cut-first-transfer` to cut the first tunnel exceeding 64 KiB regardless of
+connection count when the underlying network introduces additional failures.
+Verify metadata succeeds on attempt three and the signed package reaches `ready`
+on attempt two; do not install it. Stop the fixture and validation app afterwards.

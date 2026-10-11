@@ -1,11 +1,11 @@
 use super::{
+    network::{self, Failure, Journal, Operation, Policy},
     policy::{self, Channel, Result},
     preferences::Preferences,
 };
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::{
-    io::Write,
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -57,6 +57,7 @@ struct Inner {
 pub struct Service {
     inner: Mutex<Inner>,
     preferences_path: PathBuf,
+    journal: Journal,
     pub gate: Arc<tokio::sync::Mutex<()>>,
     pub cancel: AtomicBool,
     pub automatic_download: AtomicBool,
@@ -77,30 +78,9 @@ impl Service {
         let record = json!({"time":now(),"event":"desktop_update","status":view.status,
             "currentVersion":view.current_version,"targetVersion":view.version,
             "channel":view.preferences.as_ref().map(|p|p.channel),"errorCode":error_code});
-        let result = (|| -> std::io::Result<()> {
-            let path = self.preferences_path.with_file_name("updater.log");
-            let metadata = std::fs::symlink_metadata(&path);
-            if metadata.as_ref().is_ok_and(|m| !m.file_type().is_file()) {
-                return Err(std::io::Error::other("Updater log must be a regular file"));
-            }
-            let truncate = metadata.is_ok_and(|m| m.len() > 262144);
-            let mut options = std::fs::OpenOptions::new();
-            options
-                .create(true)
-                .write(true)
-                .append(!truncate)
-                .truncate(truncate);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::OpenOptionsExt;
-                options.mode(0o600);
-            }
-            writeln!(options.open(path)?, "{record}")
-        })();
-        if result.is_err() {
-            eprintln!("desktop_update: local diagnostic log unavailable");
-        }
+        self.journal.write(record);
     }
+
     pub fn snapshot(&self) -> Snapshot {
         self.inner.lock().expect("update state").view.clone()
     }
@@ -245,46 +225,57 @@ impl Service {
             .send(error.map_or(Ok(()), |e| Err(format!("UPDATE_SAVE_FAILED: {e}"))))
             .map_err(|_| "UPDATE_OPERATION_EXPIRED".into())
     }
-    async fn metadata(&self) -> Result<Value> {
-        let channel = self.preferences()?.channel;
-        let response = reqwest::Client::builder()
-            .https_only(true)
-            .redirect(reqwest::redirect::Policy::none())
-            .timeout(Duration::from_secs(15))
-            .build()
-            .map_err(|e| e.to_string())?
-            .get(channel.endpoint())
-            .header("Cache-Control", "no-cache")
-            .send()
-            .await
-            .map_err(|e| format!("UPDATE_NETWORK: {e}"))?;
-        if response.status() == reqwest::StatusCode::NOT_FOUND {
-            return Err("UPDATE_CHANNEL_UNAVAILABLE".into());
-        }
-        if response.status() != reqwest::StatusCode::OK {
-            return Err(format!("UPDATE_HTTP_{}", response.status()));
-        }
-        let mut response = response;
-        let mut bytes = Vec::new();
-        while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
-            if bytes.len() + chunk.len() > 1024 * 1024 {
-                return Err("UPDATE_MANIFEST_TOO_LARGE".into());
-            }
-            bytes.extend_from_slice(&chunk);
-        }
-        let value =
-            serde_json::from_slice(&bytes).map_err(|e| format!("INVALID_UPDATE_MANIFEST: {e}"))?;
-        policy::validate(&value, channel)?;
-        policy::active(&value)?;
-        Ok(value)
+    async fn metadata(
+        &self,
+        operation: &Operation,
+        cancellable: bool,
+    ) -> std::result::Result<Value, Failure> {
+        let channel = self.preferences().map_err(Failure::terminal)?.channel;
+        network::run(
+            &self.journal,
+            operation,
+            "metadata",
+            Policy::METADATA,
+            cancellable.then_some(&self.cancel),
+            |_| async {
+                let client = reqwest::Client::builder()
+                    .https_only(true)
+                    .redirect(reqwest::redirect::Policy::none())
+                    .retry(reqwest::retry::never())
+                    .timeout(network::REQUEST_TIMEOUT)
+                    .build()
+                    .map_err(Failure::reqwest)?;
+                let value = network::manifest(&client, &channel.endpoint()).await?;
+                policy::validate(&value, channel).map_err(Failure::terminal)?;
+                policy::active(&value).map_err(Failure::terminal)?;
+                Ok(value)
+            },
+        )
+        .await
     }
-    async fn revalidate(&self, expected: &str) -> Result<()> {
-        let value = self.metadata().await?;
-        if policy::identity(&value, self.preferences()?.channel, policy::target()?) != expected {
-            return Err("UPDATE_CANDIDATE_EXPIRED".into());
-        }
-        Ok(())
+    async fn revalidate(
+        &self,
+        expected: &str,
+        operation: &Operation,
+        cancellable: bool,
+    ) -> std::result::Result<(), Failure> {
+        // Bound each control check as well as the encompassing download/install.
+        let control = Operation {
+            id: operation.id.clone(),
+            deadline: operation
+                .deadline
+                .min(tokio::time::Instant::now() + network::CHECK_BUDGET),
+        };
+        let value = self.metadata(&control, cancellable).await?;
+        policy::require_identity(
+            &value,
+            self.preferences().map_err(Failure::terminal)?.channel,
+            policy::target().map_err(Failure::terminal)?,
+            expected,
+        )
+        .map_err(Failure::terminal)
     }
+
     pub async fn check(&self, app: &AppHandle) -> Result<()> {
         if cfg!(debug_assertions) {
             return Err("UPDATE_DISABLED_IN_DEVELOPMENT".into());
@@ -293,7 +284,11 @@ impl Service {
             .filter(|s| !s.is_empty())
             .ok_or("UPDATE_PUBLIC_KEY_NOT_CONFIGURED")?;
         self.status(app, "checking");
-        let value = self.metadata().await?;
+        let operation = Operation::new(network::CHECK_BUDGET);
+        let value = self
+            .metadata(&operation, false)
+            .await
+            .map_err(|e| e.message())?;
         let mut prefs = self.preferences()?;
         let version = policy::validate(&value, prefs.channel)?;
         self.change(app, |i| i.view.last_checked = Some(now()));
@@ -335,7 +330,7 @@ impl Service {
         if let Some(ready) = existing {
             self.status(app, if ready { "ready" } else { "available" });
         } else {
-            let update = app
+            let updater = app
                 .updater_builder()
                 .pubkey(key)
                 .target(target)
@@ -351,15 +346,23 @@ impl Service {
                 .configure_client(|client| {
                     client
                         .https_only(true)
+                        .retry(updater_http::retry::never())
                         .redirect(updater_http::redirect::Policy::none())
                         .read_timeout(Duration::from_secs(60))
                 })
                 .build()
-                .map_err(|e| e.to_string())?
-                .check()
-                .await
-                .map_err(|e| format!("UPDATE_CHECK: {e}"))?
-                .ok_or("UPDATE_CANDIDATE_EXPIRED")?;
+                .map_err(|_| "UPDATE_CLIENT_BUILD_FAILED")?;
+            let update = network::run(
+                &self.journal,
+                &operation,
+                "plugin_check",
+                Policy::METADATA,
+                None,
+                |_| async { updater.check().await.map_err(Failure::plugin) },
+            )
+            .await
+            .map_err(|e| e.message())?
+            .ok_or("UPDATE_CANDIDATE_EXPIRED")?;
             policy::validate(&update.raw_json, prefs.channel)?;
             policy::active(&update.raw_json)?;
             if policy::identity(&update.raw_json, prefs.channel, target) != identity {
@@ -404,7 +407,6 @@ impl Service {
                 .ok_or("UPDATE_CANDIDATE_EXPIRED")?;
             (c.update.clone(), c.identity.clone())
         };
-        self.revalidate(&identity).await?;
         if !automatic {
             let mut i = self.inner.lock().map_err(|_| "UPDATE_STATE_UNAVAILABLE")?;
             let mut prefs = i
@@ -417,31 +419,33 @@ impl Service {
             prefs.save(&self.preferences_path)?;
             i.view.preferences = Some(prefs);
         }
+        let operation = Operation::new(network::DOWNLOAD_BUDGET);
         self.cancel.store(false, Ordering::SeqCst);
         self.automatic_download.store(automatic, Ordering::SeqCst);
         self.change(app, |i| {
-            i.view.operation_id = Some(uuid::Uuid::new_v4().to_string());
+            i.view.operation_id = Some(operation.id.clone());
             i.view.downloaded_bytes = 0;
             i.view.total_bytes = None;
         });
         self.status(app, "downloading");
-        update.timeout = Some(Duration::from_secs(1200));
-        let over_limit = AtomicBool::new(false);
-        let mut last_event = Instant::now();
-        let mut received = 0u64;
-        let bytes = {
+        update.timeout = Some(network::DOWNLOAD_BUDGET);
+        let result = network::run(&self.journal, &operation, "package", Policy::DOWNLOAD, Some(&self.cancel), |_| async {
+            // A retry always starts with a fresh policy check and a fresh buffer.
+            // Do not multiply the three-attempt metadata policy with package retries.
+            self.revalidate(&identity, &operation, true).await.map_err(|mut e| { e.retryable = false; e })?;
+            self.change(app, |i| { i.view.downloaded_bytes = 0; i.view.total_bytes = None; });
+            self.status(app, "downloading");
+            let over_limit = AtomicBool::new(false);
+            let mut last_event = Instant::now();
+            let mut received = 0u64;
             let future = update.download(
                 |size, total| {
                     received = received.saturating_add(size as u64);
-                    if received > policy::MAX_BYTES || total.is_some_and(|v| v > policy::MAX_BYTES)
-                    {
+                    if received > policy::MAX_BYTES || total.is_some_and(|v| v > policy::MAX_BYTES) {
                         over_limit.store(true, Ordering::SeqCst);
                     }
                     if last_event.elapsed() >= Duration::from_millis(200) {
-                        self.change(app, |i| {
-                            i.view.downloaded_bytes = received;
-                            i.view.total_bytes = total;
-                        });
+                        self.change(app, |i| { i.view.downloaded_bytes = received; i.view.total_bytes = total; });
                         last_event = Instant::now();
                     }
                 },
@@ -450,21 +454,32 @@ impl Service {
             tokio::pin!(future);
             let mut tick = tokio::time::interval(Duration::from_millis(100));
             let mut last_control = Instant::now();
-            loop {
+            let bytes = loop {
                 tokio::select! {
-                    result = &mut future => break result.map_err(|e| format!("UPDATE_DOWNLOAD: {e}"))?,
+                    result = &mut future => break result.map_err(Failure::plugin)?,
                     _ = tick.tick() => {
-                        if self.cancel.load(Ordering::SeqCst) { self.status(app, "available"); self.change(app, |i| i.view.operation_id = None); return Ok(()); }
-                        if over_limit.load(Ordering::SeqCst) { return Err("UPDATE_PACKAGE_TOO_LARGE".into()); }
-                        if last_control.elapsed() >= Duration::from_secs(60) { self.revalidate(&identity).await?; last_control = Instant::now(); }
+                        if over_limit.load(Ordering::SeqCst) { return Err(Failure::terminal("UPDATE_PACKAGE_TOO_LARGE")); }
+                        if last_control.elapsed() >= Duration::from_secs(60) {
+                            self.revalidate(&identity, &operation, true).await.map_err(|mut e| { e.retryable = false; e })?;
+                            last_control = Instant::now();
+                        }
                     }
                 }
+            };
+            if bytes.len() as u64 > policy::MAX_BYTES { return Err(Failure::terminal("UPDATE_PACKAGE_TOO_LARGE")); }
+            self.revalidate(&identity, &operation, true).await.map_err(|mut e| { e.retryable = false; e })?;
+            Ok(bytes)
+        }).await;
+        self.automatic_download.store(false, Ordering::SeqCst);
+        let bytes = match result {
+            Err(e) if e.cancelled() => {
+                self.status(app, "available");
+                self.change(app, |i| i.view.operation_id = None);
+                return Ok(());
             }
+            Err(e) => return Err(e.message()),
+            Ok(bytes) => bytes,
         };
-        if bytes.len() as u64 > policy::MAX_BYTES {
-            return Err("UPDATE_PACKAGE_TOO_LARGE".into());
-        }
-        self.revalidate(&identity).await?;
         self.change(app, |i| {
             i.view.operation_id = None;
             if self.cancel.load(Ordering::SeqCst) {
@@ -478,7 +493,6 @@ impl Service {
             }
             i.view.error = None;
         });
-        self.automatic_download.store(false, Ordering::SeqCst);
         self.record();
         Ok(())
     }
@@ -492,7 +506,9 @@ impl Service {
                 .identity
                 .clone()
         };
-        self.revalidate(&identity).await?;
+        self.revalidate(&identity, &Operation::new(network::CHECK_BUDGET), false)
+            .await
+            .map_err(|e| e.message())?;
         let (tx, rx) = tokio::sync::oneshot::channel();
         app.dialog()
             .message(format!(
@@ -563,7 +579,14 @@ impl Service {
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
-        self.revalidate(&identity).await?;
+        if let Err(e) = self
+            .revalidate(&identity, &Operation::new(network::CHECK_BUDGET), true)
+            .await
+        {
+            if !e.cancelled() {
+                return Err(e.message());
+            }
+        }
         if self.cancel.load(Ordering::SeqCst) {
             self.change(app, |i| i.view.operation_id = None);
             self.status(app, "ready");
@@ -645,6 +668,7 @@ pub fn setup(app: &AppHandle) -> Result<()> {
             candidate: None,
             save: None,
         }),
+        journal: Journal::new(path.with_file_name("updater.log")),
         preferences_path: path,
         gate: Arc::new(tokio::sync::Mutex::new(())),
         cancel: AtomicBool::new(false),
