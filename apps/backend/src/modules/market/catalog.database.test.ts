@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { Hono } from "hono";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import {
@@ -294,6 +294,80 @@ describe("MCP catalog on the mcp_* tables", () => {
       expect(await syncAt({ ...sorted, categories: ["databases"] })).toBe(
         second,
       );
+    });
+
+    test("the same version going live bumps updated_at", async () => {
+      const held = manifest("held");
+      await syncAt(held);
+      // Back in review, with the server row itself left as it was: only the
+      // version's first publication can move updated_at on the next sync.
+      const [server] = await data.db
+        .select({ id: data.mcpServers.id })
+        .from(data.mcpServers)
+        .where(eq(data.mcpServers.identifier, held.identifier));
+      await data.db
+        .update(data.mcpServerVersions)
+        .set({ status: "reviewing", publishedAt: null })
+        .where(eq(data.mcpServerVersions.serverId, server!.id));
+      const [before] = await data.db
+        .select({ updatedAt: data.mcpServers.updatedAt })
+        .from(data.mcpServers)
+        .where(eq(data.mcpServers.id, server!.id));
+      const published = await syncAt(held);
+      expect(published > before!.updatedAt.toISOString()).toBe(true);
+      expect(await syncAt(held)).toBe(published);
+    });
+
+    test("an unchanged re-sync writes nothing but the server and version upserts", async () => {
+      const steady = manifest("steady", {
+        categories: ["developer-tools", "databases"],
+      });
+      await syncAt(steady);
+      const [server] = await data.db
+        .select({ id: data.mcpServers.id })
+        .from(data.mcpServers)
+        .where(eq(data.mcpServers.identifier, steady.identifier));
+      // xmin is the writing transaction: a row deleted and inserted again, or
+      // upserted to the same values, gets a new one.
+      const rowVersions = async () =>
+        (
+          await data.db.execute<{ row: string; xmin: string }>(sql`
+            select 'link:' || c.slug as row, l.xmin::text as xmin
+            from ${data.mcpServerCategories} l
+            join ${data.mcpCategories} c on c.id = l.category_id
+            where l.server_id = ${server!.id}
+            union all
+            select 'category:' || c.slug, c.xmin::text
+            from ${data.mcpCategories} c
+            where c.slug in ('developer-tools', 'databases')
+            order by 1`)
+        ).rows;
+      const before = await rowVersions();
+      expect(before.map((r) => r.row)).toEqual([
+        "category:databases",
+        "category:developer-tools",
+        "link:databases",
+        "link:developer-tools",
+      ]);
+      const select = vi.spyOn(data.db, "select");
+      const insert = vi.spyOn(data.db, "insert");
+      const remove = vi.spyOn(data.db, "delete");
+      try {
+        clock += 60_000;
+        vi.setSystemTime(clock);
+        await ingest.upsertMarketMcp({ ...federated, manifest: steady });
+        // The server and version upserts; the version's first publication
+        // is read from its own upsert, and the categories are read once and
+        // left alone because they did not change.
+        expect(insert).toHaveBeenCalledTimes(2);
+        expect(select).toHaveBeenCalledTimes(1);
+        expect(remove).not.toHaveBeenCalled();
+      } finally {
+        select.mockRestore();
+        insert.mockRestore();
+        remove.mockRestore();
+      }
+      expect(await rowVersions()).toEqual(before);
     });
 
     test("an ignored category change on owned categories keeps updated_at", async () => {

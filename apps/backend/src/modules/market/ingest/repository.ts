@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { MarketMcpManifest } from "@sourceweft/market-contracts";
 import {
   db,
@@ -39,33 +39,33 @@ type Executor = Pick<typeof db, "insert">;
 
 /**
  * Makes sure an `mcp_categories` row exists for each slug, with the
- * taxonomy's current name and description; returns their ids in order.
+ * taxonomy's current name and description, in one statement; returns their
+ * ids in order, without repeats.
  */
 export async function upsertMcpCategories(
   executor: Executor,
   slugs: readonly string[],
 ): Promise<string[]> {
-  const ids: string[] = [];
-  for (const slug of slugs) {
-    const categoryId = mcpCategoryId(slug);
-    await executor
-      .insert(mcpCategories)
-      .values({
-        id: categoryId,
+  const unique = [...new Set(slugs)];
+  if (unique.length === 0) return [];
+  await executor
+    .insert(mcpCategories)
+    .values(
+      unique.map((slug) => ({
+        id: mcpCategoryId(slug),
         slug,
         name: categoryName(slug),
         description: categoryDescription(slug),
-      })
-      .onConflictDoUpdate({
-        target: mcpCategories.slug,
-        set: {
-          name: categoryName(slug),
-          description: categoryDescription(slug),
-        },
-      });
-    ids.push(categoryId);
-  }
-  return ids;
+      })),
+    )
+    .onConflictDoUpdate({
+      target: mcpCategories.slug,
+      set: {
+        name: sql`excluded.name`,
+        description: sql`excluded.description`,
+      },
+    });
+  return unique.map(mcpCategoryId);
 }
 
 function metadataFromManifest(manifest: MarketMcpManifest) {
@@ -216,8 +216,8 @@ export async function upsertMarketMcp(input: {
         verified: facets.verified,
         desktopOnly: facets.desktopOnly,
         runtime: facets.runtime,
-        // updated_at is what the page shows as "Updated" and the sitemap
-        // serves as lastmod, so a federation run that changes nothing must not
+        // updated_at is what the page shows as "Updated" and the floor of the
+        // sitemap's lastmod, so a federation run that changes nothing must not
         // move it. lastIndexedAt is excluded because every sync restamps it.
         updatedAt: sql`case when (
           ${mcpServers.name}, ${mcpServers.summary}, ${mcpServers.description},
@@ -249,28 +249,13 @@ export async function upsertMarketMcp(input: {
     );
   }
 
-  // A version going live changes the page even when the row's own fields do
-  // not, so it moves updated_at too (below).
-  const [previousVersion] = await db
-    .select({ publishedAt: mcpServerVersions.publishedAt })
-    .from(mcpServerVersions)
-    .where(
-      and(
-        eq(mcpServerVersions.serverId, itemId),
-        eq(mcpServerVersions.version, manifest.version),
-      ),
-    )
-    .limit(1);
-  const versionPublished =
-    publishedAt !== null && !previousVersion?.publishedAt;
-
   // The README columns (`readme_md`, `readme_*`) are deliberately absent from
   // both the insert and the conflict update: a new version starts `pending`
   // and due by the column defaults, and is then filled from the previous
   // version's README when there is one (it stays due, so the next batch reads
   // it fresh). A re-sync never clears or rewrites a README the fetch job (or
   // a submission) stored.
-  await db
+  const [version] = await db
     .insert(mcpServerVersions)
     .values({
       id: versionId,
@@ -294,7 +279,16 @@ export async function upsertMarketMcp(input: {
         // Same first-publish preservation as the item row.
         publishedAt: sql`coalesce(${mcpServerVersions.publishedAt}, excluded.published_at)`,
       },
-    });
+    })
+    .returning({ publishedAt: mcpServerVersions.publishedAt });
+  // A version going live changes the page even when the row's own fields do
+  // not, so it moves updated_at too (below). The upsert keeps the first
+  // publication time, so it hands back this run's `now` exactly when this
+  // run is the one that published the version (timestamptz keeps the
+  // millisecond).
+  const versionPublished =
+    publishedAt !== null &&
+    version?.publishedAt?.getTime() === publishedAt.getTime();
   await carryOverMcpReadme({ serverId: itemId, versionId });
 
   // Categories follow the manifest only while nobody has chosen them: once the
@@ -314,7 +308,11 @@ export async function upsertMarketMcp(input: {
   return itemId;
 }
 
-/** Rewrites a server's categories; reports whether the set changed. */
+/**
+ * Sets a server's categories to `slugs`; reports whether the set changed.
+ * An unchanged set is only read: federation re-syncs every server, and
+ * rewriting identical rows on each run would only churn them.
+ */
 async function replaceMcpServerCategories(
   serverId: string,
   slugs: readonly string[],
@@ -323,23 +321,23 @@ async function replaceMcpServerCategories(
     .select({ categoryId: mcpServerCategories.categoryId })
     .from(mcpServerCategories)
     .where(eq(mcpServerCategories.serverId, serverId));
+  const wanted = new Set(slugs.map(mcpCategoryId));
+  if (
+    before.length === wanted.size &&
+    before.every((row) => wanted.has(row.categoryId))
+  )
+    return false;
 
   await db
     .delete(mcpServerCategories)
     .where(eq(mcpServerCategories.serverId, serverId));
-
-  const after = new Set(await upsertMcpCategories(db, slugs));
-  for (const categoryId of after) {
+  const categoryIds = await upsertMcpCategories(db, slugs);
+  if (categoryIds.length > 0)
     await db
       .insert(mcpServerCategories)
-      .values({ serverId, categoryId })
+      .values(categoryIds.map((categoryId) => ({ serverId, categoryId })))
       .onConflictDoNothing({
         target: [mcpServerCategories.serverId, mcpServerCategories.categoryId],
       });
-  }
-
-  return (
-    before.length !== after.size ||
-    before.some((row) => !after.has(row.categoryId))
-  );
+  return true;
 }
