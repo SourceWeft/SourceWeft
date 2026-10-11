@@ -12,7 +12,7 @@ import {
   X,
   Monitor,
 } from "lucide-react";
-import { desktopBridge } from "../../../../lib/desktop-bridge";
+import { useDesktopSettings } from "./use-desktop-settings";
 import { LocalHostPanel } from "./local-host-panel";
 import { useBillingAvailable } from "../../../../lib/billing-edition/capabilities";
 import {
@@ -77,26 +77,17 @@ export function DashboardSettingsCenterModal({
     hasTeam ? "team" : "personal",
   );
   const wasOpenRef = React.useRef(open);
-  const [isLocalPc, setIsLocalPc] = React.useState(false);
-  React.useEffect(() => {
-    if (!desktopBridge.isAvailable()) return;
-    let active = true;
-    void desktopBridge.info().then(
-      (info) => {
-        if (active) setIsLocalPc(info.platform === "macos");
-      },
-      () => {
-        if (active) setIsLocalPc(false);
-      },
-    );
-    return () => {
-      active = false;
-    };
-  }, []);
+  const { isDesktop, isLocalPc } = useDesktopSettings();
   const visibleMenuItems = [
     ...menuItems,
     ...(isLocalPc
-      ? [{ key: "local" as const, labelKey: "nav.localComputer", icon: Monitor }]
+      ? [
+          {
+            key: "local" as const,
+            labelKey: "nav.localComputer",
+            icon: Monitor,
+          },
+        ]
       : []),
     { key: "about" as const, labelKey: "nav.about", icon: Info },
   ];
@@ -143,6 +134,11 @@ export function DashboardSettingsCenterModal({
             {/* Nav */}
             <nav className="flex-1 overflow-y-auto px-2.5 py-2.5">
               <div className="space-y-0.5">
+                {isDesktop && (
+                  <p className="px-2.5 pb-1.5 pt-1 text-[11px] font-medium text-muted-foreground">
+                    {t("nav.accountGroup")}
+                  </p>
+                )}
                 {visibleMenuItems
                   .filter((item) =>
                     isSettingsTabAvailable(item.key, billingAvailable),
@@ -151,20 +147,29 @@ export function DashboardSettingsCenterModal({
                     const Icon = item.icon;
                     const active = activeTab === item.key;
                     return (
-                      <button
-                        className={cn(
-                          "flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-[13px] transition-colors",
-                          active
-                            ? "bg-background text-foreground shadow-sm"
-                            : "text-muted-foreground hover:bg-background/60 hover:text-foreground",
-                        )}
-                        key={item.key}
-                        onClick={() => setActiveTab(item.key)}
-                        type="button"
-                      >
-                        <Icon className="h-3.5 w-3.5 shrink-0" />
-                        {t(item.labelKey)}
-                      </button>
+                      <React.Fragment key={item.key}>
+                        {isDesktop &&
+                          item.key === (isLocalPc ? "local" : "about") && (
+                            <p className="mt-3 border-t border-border/70 px-2.5 pb-1.5 pt-3 text-[11px] font-medium text-muted-foreground">
+                              {t("nav.desktopGroup")}
+                            </p>
+                          )}
+                        <button
+                          aria-current={active ? "page" : undefined}
+                          className={cn(
+                            "flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-[13px] transition-colors",
+                            active
+                              ? "bg-background text-foreground shadow-sm"
+                              : "text-muted-foreground hover:bg-background/60 hover:text-foreground",
+                          )}
+                          key={item.key}
+                          onClick={() => setActiveTab(item.key)}
+                          type="button"
+                        >
+                          <Icon className="h-3.5 w-3.5 shrink-0" />
+                          {t(item.labelKey)}
+                        </button>
+                      </React.Fragment>
                     );
                   })}
               </div>

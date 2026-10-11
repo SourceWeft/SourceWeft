@@ -883,7 +883,8 @@
       "profile": "個人資料",
       "usage": "用量",
       "billing": "帳單",
-      "logOut": "登出"
+      "logOut": "登出",
+      "settings": "設定"
     },
     "team": {
       "add": "新增團隊",
@@ -978,7 +979,9 @@
       "about": "關於",
       "userFallback": "SourceWeft 使用者",
       "close": "關閉",
-      "srTitle": "設定中心"
+      "srTitle": "設定中心",
+      "accountGroup": "帳戶與工作區",
+      "desktopGroup": "桌面版"
     },
     "account": {
       "profileTitle": "個人資料",
