@@ -34,6 +34,7 @@ export function SkillInstallOptions({
     terminal: string;
     copy: string;
     copied: string;
+    copyFailed: string;
     expand: string;
     collapse: string;
   };
@@ -80,6 +81,7 @@ export function SkillInstallOptions({
         <CopyButton
           className="h-7 shrink-0 px-2"
           copiedLabel={labels.copied}
+          failedLabel={labels.copyFailed}
           label={labels.copy}
           value={value}
         />

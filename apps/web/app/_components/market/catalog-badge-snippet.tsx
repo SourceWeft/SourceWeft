@@ -133,6 +133,7 @@ function BadgeSnippetBody({
         <CopyButton
           className="h-7 shrink-0 px-2"
           copiedLabel={t("copied")}
+          failedLabel={t("copyFailed")}
           label={t("copy")}
           onCopied={() =>
             trackBadgeSnippetCopied({

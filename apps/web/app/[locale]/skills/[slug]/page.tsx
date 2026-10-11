@@ -246,6 +246,7 @@ function CommandLine({
       <CopyButton
         className="h-8 shrink-0 px-2"
         copiedLabel={t("copied")}
+        failedLabel={t("copyFailed")}
         label={t("copy")}
         value={command}
       />
@@ -373,6 +374,7 @@ function InstallBox({
             terminal: t("options.terminal"),
             copy: t("copy"),
             copied: t("copied"),
+            copyFailed: t("copyFailed"),
             expand: t("options.expand"),
             collapse: t("options.collapse"),
           }}

@@ -487,7 +487,8 @@
       "breadcrumb": "面包屑导航",
       "sections": "章节导航",
       "copy": "复制",
-      "copied": "已复制"
+      "copied": "已复制",
+      "copyFailed": "复制失败"
     },
     "readme": {
       "imagePlaceholder": "图片",
@@ -3458,6 +3459,7 @@
           "agentPrompt": "阅读 {url} 中的说明，用它帮我找到并安装合适的智能体技能。安装任何一个之前，先告诉我它的来源、许可证以及是否附带脚本，等我确认。",
           "copy": "复制",
           "copied": "已复制",
+          "copyFailed": "复制失败",
           "ctaSignedIn": "在控制台中打开技能",
           "ctaSignedOut": "登录后安装"
         },
@@ -3611,6 +3613,7 @@
         "signedOutNote": "系统会先要求你登录，然后直接带你回到这个技能。",
         "copy": "复制",
         "copied": "已复制",
+        "copyFailed": "复制失败",
         "executableNote": "该技能包含脚本。使用该技能时，脚本会在你的工作区沙箱中运行——添加前请先查看文件列表和源代码。",
         "promptOnlyNote": "该技能仅含说明：不附带任何可执行的脚本。",
         "options": {
@@ -4101,6 +4104,7 @@
     "html": "HTML",
     "copy": "复制",
     "copied": "已复制",
+    "copyFailed": "复制失败",
     "previewAlt": "“Listed on SourceWeft”徽章预览",
     "ownerHint": "你的技能已上架。可将此徽章添加到仓库的 README，它会链接到该技能在 SourceWeft 上的页面。",
     "claimHint": "下一步：在 README 中添加“Listed on SourceWeft”徽章，可在你任一已上架技能的页面上复制。",

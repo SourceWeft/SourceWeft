@@ -496,7 +496,8 @@
       "breadcrumb": "Breadcrumb",
       "sections": "Sections",
       "copy": "Copy",
-      "copied": "Copied"
+      "copied": "Copied",
+      "copyFailed": "Copy failed"
     },
     "readme": {
       "imagePlaceholder": "Image",
@@ -3467,6 +3468,7 @@
           "agentPrompt": "Read {url} and use it to find and install agent skills for me. Before installing one, show me its source, license and whether it ships scripts, and wait for my OK.",
           "copy": "Copy",
           "copied": "Copied",
+          "copyFailed": "Copy failed",
           "ctaSignedIn": "Open Skills in dashboard",
           "ctaSignedOut": "Sign in to install"
         },
@@ -3620,6 +3622,7 @@
         "signedOutNote": "You will be asked to sign in first, then taken straight to this skill.",
         "copy": "Copy",
         "copied": "Copied",
+        "copyFailed": "Copy failed",
         "executableNote": "This skill includes scripts. They run in your workspace sandbox when the skill is used — review the file list and source before adding it.",
         "promptOnlyNote": "This skill is instructions only: it ships no scripts to execute.",
         "options": {
@@ -4110,6 +4113,7 @@
     "html": "HTML",
     "copy": "Copy",
     "copied": "Copied",
+    "copyFailed": "Copy failed",
     "previewAlt": "Preview of the “Listed on SourceWeft” badge",
     "ownerHint": "Your skill is listed. Add this badge to your repository's README: it links to the skill's page on SourceWeft.",
     "claimHint": "Next: add a “Listed on SourceWeft” badge to your README. Copy it from the page of any of your listed skills.",

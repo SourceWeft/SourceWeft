@@ -613,6 +613,7 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
                         </div>
                         <CopyButton
                           copiedLabel={t("copied")}
+                          failedLabel={t("copyFailed")}
                           label={t("copy")}
                           value={clientConfig}
                         />

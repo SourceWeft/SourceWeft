@@ -496,7 +496,8 @@
       "breadcrumb": "麵包屑導覽",
       "sections": "章節導覽",
       "copy": "複製",
-      "copied": "已複製"
+      "copied": "已複製",
+      "copyFailed": "複製失敗"
     },
     "readme": {
       "imagePlaceholder": "圖片",
@@ -3467,6 +3468,7 @@
           "agentPrompt": "閱讀 {url} 中的說明，用它幫我找到並安裝合適的代理程式技能。安裝任何一個之前，先告訴我它的來源、授權條款以及是否附帶腳本，等我確認。",
           "copy": "複製",
           "copied": "已複製",
+          "copyFailed": "複製失敗",
           "ctaSignedIn": "在儀表板中開啟技能",
           "ctaSignedOut": "登入後安裝"
         },
@@ -3620,6 +3622,7 @@
         "signedOutNote": "系統會先要求你登入，然後直接帶你回到這個技能。",
         "copy": "複製",
         "copied": "已複製",
+        "copyFailed": "複製失敗",
         "executableNote": "該技能包含腳本。使用該技能時，腳本會在你的工作區沙箱中執行——新增前請先檢視檔案列表和原始碼。",
         "promptOnlyNote": "該技能僅含說明：不附帶任何可執行的腳本。",
         "options": {
@@ -4110,6 +4113,7 @@
     "html": "HTML",
     "copy": "複製",
     "copied": "已複製",
+    "copyFailed": "複製失敗",
     "previewAlt": "「Listed on SourceWeft」徽章預覽",
     "ownerHint": "你的技能已上架。可將此徽章新增到儲存庫的 README，它會連結到該技能在 SourceWeft 上的頁面。",
     "claimHint": "下一步：在 README 中新增「Listed on SourceWeft」徽章，可在你任一已上架技能的頁面上複製。",
