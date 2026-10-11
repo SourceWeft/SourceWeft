@@ -2231,6 +2231,7 @@
       "searchPlaceholder": "Search MCP",
       "searchSummaryAll": "all",
       "categorySummaryAll": "All",
+      "categoriesUnavailable": "Categories couldn't be loaded. They'll be back the next time the list refreshes.",
       "facets": {
         "search": "Search",
         "category": "Category",

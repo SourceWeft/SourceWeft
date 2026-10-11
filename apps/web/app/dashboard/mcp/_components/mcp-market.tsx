@@ -69,6 +69,7 @@ import { trackMcpServerInstalled } from "../../../../lib/analytics-events";
 type MarketMcpItem = ListWorkspaceMarketMcpResponse["items"][number];
 type MarketMcpSummary = MarketMcpItem["market"];
 type CategoryKey = "all" | (string & {});
+type CategoryChoice = { key: CategoryKey; label: string };
 type StatusFilter = "all" | "installed" | "not_installed";
 type TrustFilter = "all" | "trusted" | "unverified";
 type DeviceFilter = "all" | "web" | "desktop";
@@ -87,32 +88,12 @@ const catalogRequestsByWorkspace = new Map<
 >();
 const categoryRequestsByWorkspace = new Map<
   string,
-  Promise<Array<{ key: CategoryKey; label: string }>>
+  Promise<CategoryChoice[] | null>
 >();
 
-const fallbackCategories: Array<{ key: CategoryKey; label: string }> = [
-  { key: "all", label: "All" },
-  { key: "developer-tools", label: "Developer Tools" },
-  { key: "browser-automation", label: "Browser Automation" },
-  { key: "web-search-scraping", label: "Web Search & Scraping" },
-  { key: "data-analytics", label: "Data & Analytics" },
-  { key: "databases", label: "Databases" },
-  { key: "files-storage", label: "Files & Storage" },
-  { key: "knowledge-memory", label: "Knowledge & Memory" },
-  { key: "productivity-workflow", label: "Productivity & Workflow" },
-  {
-    key: "communication-collaboration",
-    label: "Communication & Collaboration",
-  },
-  { key: "business-commerce", label: "Business & Commerce" },
-  { key: "cloud-infrastructure", label: "Cloud & Infrastructure" },
-  { key: "security-monitoring", label: "Security & Monitoring" },
-  { key: "finance", label: "Finance" },
-  { key: "media-design", label: "Media & Design" },
-  { key: "location-lifestyle", label: "Location & Lifestyle" },
-  { key: "ai-ml", label: "AI & ML" },
-  { key: "other", label: "Other" },
-];
+// The "all" choice is labelled from messages where it is shown; every other
+// category comes from the market, in the viewer's language.
+const allCategoryChoice: CategoryChoice = { key: "all", label: "All" };
 
 const statusOptions: Array<{ key: StatusFilter }> = [
   { key: "all" },
@@ -173,10 +154,16 @@ function fetchMcpCatalog(
   return promise;
 }
 
+/**
+ * The category choices, "all" first; null when the market could not list
+ * them. There is no built-in copy to fall back to: its names would be English
+ * in any language and could drift from the market's taxonomy. Nothing is
+ * cached, so the next catalog load asks again.
+ */
 function fetchMcpCategories(
   targetWorkspaceId: string,
   locale: MarketMcpLocale,
-) {
+): Promise<CategoryChoice[] | null> {
   // Names are in the viewer's language, so the language is part of the key.
   const key = `${targetWorkspaceId}:${locale}`;
   const pending = categoryRequestsByWorkspace.get(key);
@@ -186,13 +173,13 @@ function fetchMcpCategories(
   const promise = contentClient
     .listWorkspaceMarketMcpCategories(targetWorkspaceId, { locale })
     .then((response) => [
-      { key: "all" as const, label: "All" },
+      allCategoryChoice,
       ...response.items.map((category) => ({
         key: category.slug as CategoryKey,
         label: category.name,
       })),
     ])
-    .catch(() => fallbackCategories)
+    .catch(() => null)
     .finally(() => {
       if (categoryRequestsByWorkspace.get(key) === promise) {
         categoryRequestsByWorkspace.delete(key);
@@ -204,7 +191,7 @@ function fetchMcpCategories(
 
 function categoryForMcp(
   item: MarketMcpSummary,
-  categories: Array<{ key: CategoryKey; label: string }>,
+  categories: CategoryChoice[],
 ): CategoryKey {
   const normalizedCategories = item.categories.map((entry) =>
     entry.trim().toLowerCase(),
@@ -488,6 +475,7 @@ function SortMenu({
 
 function McpFilterPanel({
   selectedCategories,
+  categoriesUnavailable,
   categoryCounts,
   deviceFilter,
   installedCount,
@@ -506,8 +494,9 @@ function McpFilterPanel({
   categories,
 }: {
   selectedCategories: CategoryKey[];
+  categoriesUnavailable: boolean;
   categoryCounts: Record<CategoryKey, number>;
-  categories: Array<{ key: CategoryKey; label: string }>;
+  categories: CategoryChoice[];
   deviceFilter: DeviceFilter;
   installedCount: number;
   onCategoryChange: (value: CategoryKey) => void;
@@ -595,6 +584,11 @@ function McpFilterPanel({
                 onClick={() => onCategoryChange(item.key)}
               />
             ))}
+            {categoriesUnavailable ? (
+              <p className="px-2 py-1 text-[11px] leading-4 text-muted-foreground">
+                {t("filters.categoriesUnavailable")}
+              </p>
+            ) : null}
           </div>
         </FilterFacet>
 
@@ -671,7 +665,7 @@ function McpCard({
   onUninstall,
   pendingActions,
 }: {
-  categories: Array<{ key: CategoryKey; label: string }>;
+  categories: CategoryChoice[];
   highlight?: boolean;
   isDesktopHost: boolean;
   item: MarketMcpItem;
@@ -698,9 +692,10 @@ function McpCard({
   const sourceUrl = sourceLinkForMcp(market);
   const sourceIsGithub = sourceUrl ? isGithubSourceUrl(sourceUrl) : false;
   const itemCategory = categoryForMcp(market, categories);
-  const itemCategoryLabel =
-    categories.find((category) => category.key === itemCategory)?.label ??
-    itemCategory;
+  // Only a category the market named: never a raw slug.
+  const itemCategoryLabel = categories.find(
+    (category) => category.key === itemCategory,
+  )?.label;
   const needsCredentials =
     install &&
     install.authType !== "none" &&
@@ -849,9 +844,14 @@ function McpCard({
         <Badge className="h-5 px-1.5 text-[10px]" variant="outline">
           {desktopOnly ? t("badges.desktopOnly") : t("badges.webExecutable")}
         </Badge>
-        <Badge className="h-5 px-1.5 text-[10px] capitalize" variant="outline">
-          {itemCategoryLabel}
-        </Badge>
+        {itemCategoryLabel ? (
+          <Badge
+            className="h-5 px-1.5 text-[10px] capitalize"
+            variant="outline"
+          >
+            {itemCategoryLabel}
+          </Badge>
+        ) : null}
       </div>
 
       {!trusted ? (
@@ -974,10 +974,18 @@ export function McpMarket() {
     null,
   );
   const [items, setItems] = React.useState<MarketMcpItem[]>([]);
-  // Only "all" until the market answers: the full fallback list is English,
-  // so showing it first would flash English names in a translated UI.
-  const [categories, setCategories] = React.useState(
-    fallbackCategories.slice(0, 1),
+  // Only "all" until the market answers, and when it cannot.
+  const [categories, setCategories] = React.useState<CategoryChoice[]>([
+    allCategoryChoice,
+  ]);
+  const [categoriesUnavailable, setCategoriesUnavailable] =
+    React.useState(false);
+  const showCategories = React.useCallback(
+    (choices: CategoryChoice[] | null) => {
+      setCategories(choices ?? [allCategoryChoice]);
+      setCategoriesUnavailable(choices === null);
+    },
+    [],
   );
   const [pendingActions, setPendingActions] = React.useState<
     ReadonlySet<string>
@@ -1136,7 +1144,7 @@ export function McpMarket() {
       loadedCatalogWorkspaceIdRef.current = resolved.id;
       setItems(result.items);
       setNextCursor(result.nextCursor ?? null);
-      setCategories(categoryResult);
+      showCategories(categoryResult);
       setCatalogStatus("ready");
     } catch (loadError) {
       if (catalogGenerationRef.current !== generation) return;
@@ -1147,7 +1155,15 @@ export function McpMarket() {
         loadError instanceof Error ? loadError.message : t("errors.loadFailed"),
       );
     }
-  }, [resolveWorkspace, serverQuery, category, deviceFilter, overviewLocale, t]);
+  }, [
+    resolveWorkspace,
+    serverQuery,
+    category,
+    deviceFilter,
+    overviewLocale,
+    showCategories,
+    t,
+  ]);
 
   React.useEffect(() => {
     void loadCatalog();
@@ -1333,7 +1349,7 @@ export function McpMarket() {
       if (workspaceIdRef.current !== nextWorkspaceId) return;
       loadedCatalogWorkspaceIdRef.current = nextWorkspaceId;
       setItems(result.items);
-      setCategories(categoryResult);
+      showCategories(categoryResult);
       setCatalogStatus("ready");
     } catch (changeError) {
       setItems([]);
@@ -1548,6 +1564,7 @@ export function McpMarket() {
   const filtersPanel = (
     <McpFilterPanel
       selectedCategories={selectedCategories}
+      categoriesUnavailable={categoriesUnavailable}
       categoryCounts={categoryCounts}
       categories={categories}
       deviceFilter={deviceFilter}
@@ -1568,6 +1585,7 @@ export function McpMarket() {
   const drawerFiltersPanel = (
     <McpFilterPanel
       selectedCategories={selectedCategories}
+      categoriesUnavailable={categoriesUnavailable}
       categoryCounts={categoryCounts}
       categories={categories}
       deviceFilter={deviceFilter}
