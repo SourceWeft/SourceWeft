@@ -148,16 +148,26 @@ export async function generateMetadata({
         ? `${skill.displayName} · ${source.repoSubpath}`
         : skill.displayName,
     });
-    const description = shortSeoText(
-      t("metaDescription", {
-        description: skill.description,
-        name: skill.displayName,
-      }),
-    );
     // The body is the author's English; a locale counts as its own page only
     // where the skill has an AI overview written in it (§20). Each read is
     // the same cached market read the page body makes for that locale.
     const translated = await overviewLocales(skill.slug);
+    // A translated page describes itself with its own overview; any other
+    // page is, or canonicalizes to, the English one and keeps its template.
+    const overview = translated.includes(locale)
+      ? (await getPublicSkill(skill.slug, marketSkillLocale(locale))).aiOverview
+      : null;
+    const description = shortSeoText(
+      overview
+        ? t("metaDescriptionOverview", {
+            name: skill.displayName,
+            summary: overview.summary,
+          })
+        : t("metaDescription", {
+            description: skill.description,
+            name: skill.displayName,
+          }),
+    );
     const alternates = buildTranslatedAlternates(
       skillPath(skill.slug),
       locale,

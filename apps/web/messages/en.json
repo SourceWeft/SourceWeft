@@ -439,6 +439,8 @@
     },
     "detail": {
       "metaFallback": "MCP Server",
+      "metaTitle": "{name} MCP Server",
+      "metaDescriptionOverview": "{name}: {summary}",
       "breadcrumbHome": "Home",
       "breadcrumbServers": "MCP Servers",
       "updated": "Updated {date}",
@@ -3554,6 +3556,7 @@
       "fallbackMetaTitle": "Agent Skill",
       "metaTitle": "{name} Agent Skill",
       "metaDescription": "{name}: {description} Read the full SKILL.md, files, versions, license, and source.",
+      "metaDescriptionOverview": "{name}: {summary}",
       "noLicense": "No license",
       "by": "by",
       "repository": "Repository",

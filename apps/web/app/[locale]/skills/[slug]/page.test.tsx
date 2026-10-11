@@ -572,4 +572,35 @@ describe("generateMetadata", () => {
     expect(String(zhTW.alternates?.canonical)).toMatch(/\/skills\/pdf-forms$/);
     expect(String(zhTW.alternates?.canonical)).not.toMatch(/zh-TW/);
   });
+
+  it("describes a translated page with its own overview summary", async () => {
+    // zh-CN has its own overview; zh-TW and English get the English one.
+    market.getPublicSkill.mockImplementation(async (_slug, locale) => ({
+      ...response(),
+      aiOverview: {
+        summary: locale === "zh-CN" ? "填写并提取 PDF 表单。" : "Fills forms.",
+        whatItDoes: "w",
+        whenToUse: "u",
+        requirements: "r",
+        locale: locale === "zh-CN" ? "zh-CN" : "en",
+        generatedAt: "2026-09-20T00:00:00.000Z",
+      },
+    }));
+    const metadata = (locale: string) =>
+      generateMetadata({
+        params: Promise.resolve({ locale, slug: "pdf-forms" }),
+        searchParams: Promise.resolve({}),
+      });
+
+    const zhCN = await metadata("zh-CN");
+    expect(zhCN.description).toBe("PDF Forms: 填写并提取 PDF 表单。");
+    expect(zhCN.openGraph?.description).toBe(zhCN.description);
+    expect(zhCN.twitter?.description).toBe(zhCN.description);
+
+    for (const locale of ["en", "zh-TW"]) {
+      expect((await metadata(locale)).description).toMatch(
+        /Read the full SKILL\.md/,
+      );
+    }
+  });
 });

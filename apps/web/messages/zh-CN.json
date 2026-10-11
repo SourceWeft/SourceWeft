@@ -430,6 +430,8 @@
     },
     "detail": {
       "metaFallback": "MCP 服务",
+      "metaTitle": "{name} MCP 服务",
+      "metaDescriptionOverview": "{name}：{summary}",
       "breadcrumbHome": "首页",
       "breadcrumbServers": "MCP 服务",
       "updated": "更新于 {date}",
@@ -3545,6 +3547,7 @@
       "fallbackMetaTitle": "智能体技能",
       "metaTitle": "{name} 智能体技能",
       "metaDescription": "{name}：{description} 查看完整的 SKILL.md、文件、版本、许可证和来源。",
+      "metaDescriptionOverview": "{name}：{summary}",
       "noLicense": "无许可证",
       "by": "作者",
       "repository": "仓库",

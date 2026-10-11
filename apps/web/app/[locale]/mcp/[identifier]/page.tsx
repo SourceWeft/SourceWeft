@@ -56,6 +56,7 @@ import {
   McpVerificationBadge,
   publicMcpDescription,
   runtimeLabel,
+  shortSeoText,
   transportLabel,
   verificationLabel,
 } from "../_components/mcp-display";
@@ -141,13 +142,23 @@ export async function generateMetadata({
     const pageLocale = hasLocale(routing.locales, locale)
       ? locale
       : routing.defaultLocale;
-    const [result, detail] = await Promise.all([
+    const [result, detail, t] = await Promise.all([
       loadMcp(decodedIdentifier),
       // The same cached read as the page body's.
       getPublicMcpDetail(decodedIdentifier, mcpOverviewLocale(pageLocale)),
+      getTranslations({ locale: pageLocale, namespace: "mcp.detail" }),
     ]);
-    const title = `${result.item.name} MCP Server`;
-    const description = mcpDetailSeoDescription(result);
+    const name = result.item.name;
+    const title = t("metaTitle", { name });
+    // A translated page describes itself with its own overview; any other
+    // page is, or canonicalizes to, the English one and keeps its template.
+    const overview = detail.aiOverview;
+    const description =
+      pageLocale !== routing.defaultLocale && overview?.locale === pageLocale
+        ? shortSeoText(
+            t("metaDescriptionOverview", { name, summary: overview.summary }),
+          )
+        : mcpDetailSeoDescription(result);
     // The body is the registry's English; a locale counts as its own page only
     // where the server has a visible AI overview written in it, as for skills.
     const alternates = buildTranslatedAlternates(
