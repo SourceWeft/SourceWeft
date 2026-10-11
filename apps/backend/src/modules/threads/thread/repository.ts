@@ -32,9 +32,11 @@ type RawThreadRow = {
   persona_id: string | null;
   origin: ThreadRecord["origin"];
   created_by: string | null;
-  created_at: Date;
-  updated_at: Date;
-  last_message_at: Date | null;
+  // pg queries decode timestamps to Date; Drizzle raw transaction queries
+  // intentionally return timestamp strings instead.
+  created_at: Date | string;
+  updated_at: Date | string;
+  last_message_at: Date | string | null;
 };
 
 const THREAD_RETURNING_SQL = `
@@ -92,10 +94,10 @@ function mapRawThread(row: RawThreadRow, sourceCount = 0): ThreadRecord {
     personaId: row.persona_id,
     origin: row.origin,
     createdBy: row.created_by,
-    createdAt: row.created_at.toISOString(),
-    updatedAt: row.updated_at.toISOString(),
+    createdAt: new Date(row.created_at).toISOString(),
+    updatedAt: new Date(row.updated_at).toISOString(),
     lastMessageAt: row.last_message_at
-      ? row.last_message_at.toISOString()
+      ? new Date(row.last_message_at).toISOString()
       : null,
   };
 }

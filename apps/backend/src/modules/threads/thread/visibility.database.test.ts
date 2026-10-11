@@ -9,7 +9,8 @@ let schema: typeof import("@sourceweft/db");
 let repository: typeof import("./repository");
 let artifactRepository: typeof import("../../artifacts/repository");
 let shares: typeof import("../../sharing/store");
-let isolated: Awaited<ReturnType<typeof createIsolatedTestDatabase>> | undefined;
+let isolated:
+  Awaited<ReturnType<typeof createIsolatedTestDatabase>> | undefined;
 const originalDatabaseUrl = process.env.DATABASE_URL;
 let teamId: string;
 let workspaceId: string;
@@ -18,6 +19,8 @@ let artifactId: string;
 let ownerId: string;
 let peerId: string;
 let token: string;
+const createdAt = new Date("2026-01-02T03:04:05.123Z");
+const lastMessageAt = new Date("2026-01-02T04:05:06.456Z");
 
 beforeAll(async () => {
   isolated = await createIsolatedTestDatabase("thread_vis");
@@ -67,6 +70,9 @@ beforeEach(async () => {
     title: "Visibility regression",
     visibility: "workspace",
     createdBy: ownerId,
+    createdAt,
+    updatedAt: createdAt,
+    lastMessageAt,
   });
   await schema.db.insert(schema.artifacts).values({
     id: artifactId,
@@ -219,14 +225,17 @@ test("an artifact write failure rolls back the thread and public-share revocatio
   await installArtifactTrigger(
     "raise exception 'visibility regression injected failure';",
   );
-  await assert.rejects(() => change("private"), (error: unknown) => {
-    // Drizzle wraps the PostgreSQL exception as the failed query's cause.
-    for (let cause = error; cause instanceof Error; cause = cause.cause) {
-      if (cause.message.includes("visibility regression injected failure"))
-        return true;
-    }
-    return false;
-  });
+  await assert.rejects(
+    () => change("private"),
+    (error: unknown) => {
+      // Drizzle wraps the PostgreSQL exception as the failed query's cause.
+      for (let cause = error; cause instanceof Error; cause = cause.cause) {
+        if (cause.message.includes("visibility regression injected failure"))
+          return true;
+      }
+      return false;
+    },
+  );
   assert.deepEqual(await visibility(), {
     thread_visibility: "workspace",
     artifact_visibility: "workspace",
@@ -253,6 +262,9 @@ test("non-owner and mismatched tenant scopes cannot change any visibility", asyn
 test("re-sharing restores internal visibility without reviving the old public token", async () => {
   const hidden = await change("private");
   assert.ok(hidden);
+  assert.equal(hidden.thread.createdAt, createdAt.toISOString());
+  assert.equal(hidden.thread.lastMessageAt, lastMessageAt.toISOString());
+  assert.ok(Date.parse(hidden.thread.updatedAt) > createdAt.getTime());
   assert.deepEqual(hidden.revokedArtifactIds, [artifactId]);
   assert.equal(await shares.findLiveShareByToken(token), null);
   const restored = await change("workspace");
