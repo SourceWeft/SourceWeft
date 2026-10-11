@@ -56,6 +56,13 @@ export function validateReleaseConfig(env, metadata = {}) {
   };
 }
 
+/** Recovery selects an existing release without pretending the workflow runs on that tag. */
+export function publicationTag(env = process.env) {
+  const tag = env.DESKTOP_RELEASE_TAG ?? env.GITHUB_REF_NAME;
+  releaseVersion(tag);
+  return tag;
+}
+
 if (
   process.argv[1] &&
   import.meta.url === pathToFileURL(process.argv[1]).href
