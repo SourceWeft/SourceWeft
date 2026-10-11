@@ -38,6 +38,7 @@
     }
   },
   "footer": {
+    "supportEmail": "Support email",
     "tagline": "Your AI workspace. Built to get work done.",
     "product": "Product",
     "company": "Company",
