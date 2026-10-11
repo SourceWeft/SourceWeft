@@ -133,11 +133,11 @@ function readme(
   };
 }
 
-async function render() {
+async function render(locale = "en") {
   const element = await PublicMcpDetailPage({
     params: Promise.resolve({
       identifier: encodeURIComponent(IDENTIFIER),
-      locale: "en",
+      locale,
     }),
   });
   return renderToStaticMarkup(element);
@@ -300,6 +300,32 @@ describe("public MCP detail page security note", () => {
     expect(html).toMatch(
       /<div class="(?:[^"]* )?flex(?: [^"]*)?"><svg[\s\S]*?<\/svg>Security note<\/div><p>MCP servers receive tool arguments/,
     );
+  });
+});
+
+describe("public MCP detail page README badge", () => {
+  // As React writes it into the page's text.
+  const markdown = `[![Listed on SourceWeft](${SITE_URL}/badge/mcp/io.github.o%2Fweather.svg)](${SITE_URL}/mcp/io.github.o%2Fweather?utm_source=readme&amp;utm_medium=badge)`;
+
+  it("offers every visitor the badge, folded, in the details rail under the security note", async () => {
+    const html = await render();
+    const badge =
+      /<details[^>]*data-testid="catalog-badge"[^>]*>([\s\S]*?)<\/details>/.exec(
+        html,
+      );
+    expect(badge?.[0]).not.toMatch(/<details[^>]*\bopen\b/);
+    expect(badge?.[1]).toContain("Add a badge to your README");
+    expect(badge?.[1]).toContain(
+      `src="${SITE_URL}/badge/mcp/io.github.o%2Fweather.svg"`,
+    );
+    expect(badge?.[1]).toContain(markdown);
+    expect(html.indexOf("Security note")).toBeLessThan(badge!.index);
+  });
+
+  it("links a Chinese page's snippet to the canonical English page", async () => {
+    const html = await render("zh-CN");
+    expect(html).toContain(markdown);
+    expect(html).not.toMatch(/\/zh-CN\/(?:badge|mcp)\//);
   });
 });
 

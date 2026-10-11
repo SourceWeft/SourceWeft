@@ -22,6 +22,7 @@ import { resolveInitialLandingAuthState } from "../../../_landing/auth-state-ser
 import { SourceWeftFooter } from "../../../_landing/components/sourceweft-footer";
 import { SourceWeftHeader } from "../../../_landing/components/sourceweft-header";
 import { marketingContainerClassName } from "../../../_landing/components/marketing-container";
+import { CatalogBadgeSnippet } from "../../../_components/market/catalog-badge-snippet";
 import { McpAiOverviewView } from "../../../_components/market/mcp-ai-overview-view";
 import {
   McpReadmeRepositoryLink,
@@ -483,6 +484,15 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
                   {t("securityHeading")}
                 </div>
                 <p>{t("securityBody")}</p>
+              </section>
+
+              <section className={panelClassName}>
+                <CatalogBadgeSnippet
+                  display="disclosure"
+                  siteUrl={SITE_URL}
+                  surface="mcp_detail"
+                  target={{ kind: "mcp", key: item.identifier }}
+                />
               </section>
             </aside>
           </div>

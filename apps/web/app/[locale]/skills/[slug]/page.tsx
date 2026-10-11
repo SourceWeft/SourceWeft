@@ -16,6 +16,7 @@ import { cn } from "@sourceweft/ui-web/lib/utils";
 
 import { routing } from "../../../../i18n/routing";
 import { buildTranslatedAlternates } from "../../../../lib/i18n/metadata";
+import { CatalogBadgeSnippet } from "../../../_components/market/catalog-badge-snippet";
 import { UntrustedMarkdown } from "../../../_components/market/untrusted-markdown";
 import { JsonLd } from "../../../_components/seo/json-ld";
 import { resolveInitialLandingAuthState } from "../../../_landing/auth-state-server";
@@ -1058,6 +1059,13 @@ export default async function PublicSkillDetailPage({
             {t("detail.attribution.license")} {license}
           </p>
           <p className="mt-3">{t("detail.attribution.ownership")}</p>
+          <CatalogBadgeSnippet
+            className="mt-3 max-w-xl"
+            display="disclosure"
+            siteUrl={SITE_URL}
+            surface="skill_detail"
+            target={{ kind: "skill", key: skill.slug }}
+          />
           <p className="mt-3">
             <a
               className="font-medium text-zinc-950 underline decoration-zinc-300 underline-offset-4 hover:decoration-zinc-950 dark:text-white dark:decoration-white/20 dark:hover:decoration-white"
