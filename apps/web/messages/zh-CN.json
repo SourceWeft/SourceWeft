@@ -38,6 +38,7 @@
     }
   },
   "footer": {
+    "supportEmail": "客服邮箱",
     "tagline": "你的 AI 工作空间。让想法成为成果。",
     "product": "产品",
     "company": "公司",

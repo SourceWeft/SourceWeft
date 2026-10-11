@@ -84,10 +84,19 @@ export function SourceWeftFooter({
     <footer className="border-t border-zinc-200 py-12 dark:border-white/[0.06]">
       <div className={`mx-auto ${marketingContainerClassName}`}>
         <div className="grid gap-8 sm:grid-cols-2 md:grid-cols-4">
-          <div>
+          <div className="min-w-0">
             <SourceWeftBrandLockup size="footer" />
             <p className="mt-3 text-xs leading-relaxed text-zinc-400 dark:text-zinc-600">
               {t("tagline")}
+            </p>
+            <p className="mt-4 text-sm leading-relaxed text-zinc-600 dark:text-zinc-300">
+              <span className="block">{t("supportEmail")}</span>
+              <a
+                href="mailto:support@sourceweft.com"
+                className="rounded-sm break-words underline underline-offset-4 transition-colors hover:text-zinc-950 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-current dark:hover:text-white"
+              >
+                support@sourceweft.com
+              </a>
             </p>
             <GitHubLink className="-ml-3 mt-3" />
           </div>
