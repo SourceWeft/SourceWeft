@@ -453,22 +453,15 @@ test("serving the bytes counts a view only when asked", async () => {
   assert.equal(mockIncrement.mock.calls.length, 1);
 });
 
-test("privating a thread revokes its artifact shares and audits each", async () => {
-  mockRevokeForThread.mockResolvedValue(["art-1", "art-2"]);
-
-  const count = await sharingService.revokeSharesForPrivatedThread({
+test("committed thread share revocations are audited without writing grants again", async () => {
+  const count = await sharingService.recordSharesRevokedForPrivatedThread({
     teamId: "team-1",
-    workspaceId: "ws-1",
-    threadId: "thread-1",
     actorUserId: "actor",
+    artifactIds: ["art-1", "art-2"],
   });
 
   assert.equal(count, 2);
-  assert.deepEqual(mockRevokeForThread.mock.calls[0]?.[0], {
-    teamId: "team-1",
-    workspaceId: "ws-1",
-    threadId: "thread-1",
-  });
+  assert.equal(mockRevokeForThread.mock.calls.length, 0);
   assert.equal(mockAuditRecord.mock.calls.length, 2);
   assert.deepEqual(mockAuditRecord.mock.calls[0]?.[0], {
     teamId: "team-1",
@@ -480,14 +473,11 @@ test("privating a thread revokes its artifact shares and audits each", async () 
   });
 });
 
-test("privating a thread with no live shares audits nothing", async () => {
-  mockRevokeForThread.mockResolvedValue([]);
-
-  const count = await sharingService.revokeSharesForPrivatedThread({
+test("privating a thread with no committed revocations audits nothing", async () => {
+  const count = await sharingService.recordSharesRevokedForPrivatedThread({
     teamId: "team-1",
-    workspaceId: "ws-1",
-    threadId: "thread-1",
     actorUserId: "actor",
+    artifactIds: [],
   });
 
   assert.equal(count, 0);

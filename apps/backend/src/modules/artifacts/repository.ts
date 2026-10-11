@@ -939,14 +939,17 @@ export async function deleteArtifactRecord(input: {
  * is re-shared or hidden its artifacts move with it. `private` maps to private,
  * anything else to workspace-visible. Returns the number of rows updated.
  */
-export async function updateArtifactsVisibilityForThread(input: {
-  teamId: string;
-  workspaceId: string;
-  threadId: string;
-  threadVisibility: "private" | "workspace" | "public_link";
-}) {
+export async function updateArtifactsVisibilityForThread(
+  input: {
+    teamId: string;
+    workspaceId: string;
+    threadId: string;
+    threadVisibility: "private" | "workspace" | "public_link";
+  },
+  executor: Pick<typeof db, "update"> = db,
+) {
   const mapped = input.threadVisibility === "private" ? "private" : "workspace";
-  const rows = await db
+  const rows = await executor
     .update(artifacts)
     .set({ visibility: mapped, updatedAt: new Date() })
     .where(
