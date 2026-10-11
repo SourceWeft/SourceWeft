@@ -28,6 +28,7 @@ import { mcpCardText } from "../../../../lib/mcp-ai-overview";
 import { slugify } from "../../../../lib/slug";
 
 import { McpIcon } from "./mcp-client";
+import { mcpPath } from "./mcp-paths";
 import { marketingContainerClassName } from "../../../_landing/components/marketing-container";
 
 // FAQ copy lives in the `mcp.faq.items` catalog; these keys drive both the
@@ -56,9 +57,8 @@ export function mcpCategoryLabel(
   );
 }
 
-export function mcpPath(identifier: string) {
-  return `/mcp/${encodeURIComponent(identifier)}`;
-}
+// Kept importable from here; it lives in a client-safe module.
+export { mcpPath };
 
 export function slugifyAnchor(value: string) {
   return slugify(value);
