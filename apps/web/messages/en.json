@@ -494,7 +494,9 @@
       "securityBody": "MCP servers receive tool arguments from a conversation and may perform external actions. Unverified listings are allowed, but SourceWeft marks them so you can review the server before enabling it.",
       "relatedHeading": "More servers like {name}",
       "breadcrumb": "Breadcrumb",
-      "sections": "Sections"
+      "sections": "Sections",
+      "copy": "Copy",
+      "copied": "Copied"
     },
     "readme": {
       "imagePlaceholder": "Image",
@@ -3463,6 +3465,7 @@
           ],
           "agentPrompt": "Read {url} and use it to find and install agent skills for me. Before installing one, show me its source, license and whether it ships scripts, and wait for my OK.",
           "copy": "Copy",
+          "copied": "Copied",
           "ctaSignedIn": "Open Skills in dashboard",
           "ctaSignedOut": "Sign in to install"
         },
@@ -3615,6 +3618,7 @@
         ],
         "signedOutNote": "You will be asked to sign in first, then taken straight to this skill.",
         "copy": "Copy",
+        "copied": "Copied",
         "executableNote": "This skill includes scripts. They run in your workspace sandbox when the skill is used — review the file list and source before adding it.",
         "promptOnlyNote": "This skill is instructions only: it ships no scripts to execute.",
         "options": {

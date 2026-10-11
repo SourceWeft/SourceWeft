@@ -191,6 +191,7 @@ async function GetStartedPanels({ signedIn }: { signedIn: boolean }) {
               </p>
               <CopyButton
                 className="h-8 shrink-0 px-2"
+                copiedLabel={t("install.copied")}
                 label={t("install.copy")}
                 value={panel.agentPrompt}
               />

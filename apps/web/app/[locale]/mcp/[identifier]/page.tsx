@@ -601,7 +601,11 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
                               : ""}
                           </p>
                         </div>
-                        <CopyButton value={clientConfig} />
+                        <CopyButton
+                          copiedLabel={t("copied")}
+                          label={t("copy")}
+                          value={clientConfig}
+                        />
                       </div>
                       <pre className="mt-4 overflow-x-auto rounded-lg bg-zinc-950 p-4 font-mono text-xs leading-5 text-zinc-100">
                         {clientConfig}

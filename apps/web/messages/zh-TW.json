@@ -494,7 +494,9 @@
       "securityBody": "MCP 服務會從對話中接收工具引數，並可能執行外部操作。允許列出未驗證的服務，但 SourceWeft 會對其加以標記，以便你在啟用前先審查該服務。",
       "relatedHeading": "更多類似 {name} 的服務",
       "breadcrumb": "麵包屑導覽",
-      "sections": "章節導覽"
+      "sections": "章節導覽",
+      "copy": "複製",
+      "copied": "已複製"
     },
     "readme": {
       "imagePlaceholder": "圖片",
@@ -3463,6 +3465,7 @@
           ],
           "agentPrompt": "閱讀 {url} 中的說明，用它幫我找到並安裝合適的代理程式技能。安裝任何一個之前，先告訴我它的來源、授權條款以及是否附帶腳本，等我確認。",
           "copy": "複製",
+          "copied": "已複製",
           "ctaSignedIn": "在儀表板中開啟技能",
           "ctaSignedOut": "登入後安裝"
         },
@@ -3615,6 +3618,7 @@
         ],
         "signedOutNote": "系統會先要求你登入，然後直接帶你回到這個技能。",
         "copy": "複製",
+        "copied": "已複製",
         "executableNote": "該技能包含腳本。使用該技能時，腳本會在你的工作區沙箱中執行——新增前請先檢視檔案列表和原始碼。",
         "promptOnlyNote": "該技能僅含說明：不附帶任何可執行的腳本。",
         "options": {

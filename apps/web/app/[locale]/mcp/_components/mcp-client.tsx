@@ -54,13 +54,22 @@ export function McpIcon({
   );
 }
 
+/**
+ * Copies `value`, then says `copiedLabel` for a moment. Both labels arrive
+ * translated. `onCopied` runs only once the clipboard took the text; a refused
+ * clipboard leaves the button as it was.
+ */
 export function CopyButton({
   className,
-  label = "Copy",
+  copiedLabel,
+  label,
+  onCopied,
   value,
 }: {
   className?: string;
-  label?: string;
+  copiedLabel: string;
+  label: string;
+  onCopied?: () => void;
   value: string;
 }) {
   const [copied, setCopied] = useState(false);
@@ -71,15 +80,21 @@ export function CopyButton({
         className,
       )}
       onClick={() => {
-        void navigator.clipboard.writeText(value).then(() => {
-          setCopied(true);
-          window.setTimeout(() => setCopied(false), 1600);
-        });
+        navigator.clipboard.writeText(value).then(
+          () => {
+            setCopied(true);
+            onCopied?.();
+            window.setTimeout(() => setCopied(false), 1600);
+          },
+          () => {
+            // Refused (no permission, insecure context): nothing was copied.
+          },
+        );
       }}
       type="button"
     >
       {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-      {copied ? "Copied" : label}
+      {copied ? copiedLabel : label}
     </button>
   );
 }

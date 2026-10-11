@@ -485,7 +485,9 @@
       "securityBody": "MCP 服务会从对话中接收工具参数，并可能执行外部操作。允许列出未验证的服务，但 SourceWeft 会对其加以标记，以便你在启用前先审查该服务。",
       "relatedHeading": "更多类似 {name} 的服务",
       "breadcrumb": "面包屑导航",
-      "sections": "章节导航"
+      "sections": "章节导航",
+      "copy": "复制",
+      "copied": "已复制"
     },
     "readme": {
       "imagePlaceholder": "图片",
@@ -3454,6 +3456,7 @@
           ],
           "agentPrompt": "阅读 {url} 中的说明，用它帮我找到并安装合适的智能体技能。安装任何一个之前，先告诉我它的来源、许可证以及是否附带脚本，等我确认。",
           "copy": "复制",
+          "copied": "已复制",
           "ctaSignedIn": "在控制台中打开技能",
           "ctaSignedOut": "登录后安装"
         },
@@ -3606,6 +3609,7 @@
         ],
         "signedOutNote": "系统会先要求你登录，然后直接带你回到这个技能。",
         "copy": "复制",
+        "copied": "已复制",
         "executableNote": "该技能包含脚本。使用该技能时，脚本会在你的工作区沙箱中运行——添加前请先查看文件列表和源代码。",
         "promptOnlyNote": "该技能仅含说明：不附带任何可执行的脚本。",
         "options": {
