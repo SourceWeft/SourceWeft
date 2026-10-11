@@ -183,7 +183,20 @@ export function verifyGithubAssets(assets, expected) {
   }
 }
 
-async function github(repository, path, allowMissing = false) {
+// The tag endpoint does not resolve drafts. Authenticated listing includes both
+// draft and published releases, so use it consistently before publication.
+export async function findReleaseByTag(tag, fetchPage) {
+  const matches = [];
+  for (let page = 1; ; page++) {
+    const releases = await fetchPage(page);
+    assert(Array.isArray(releases), "Invalid GitHub release list");
+    matches.push(...releases.filter((release) => release.tag_name === tag));
+    assert(matches.length <= 1, "Duplicate releases for requested tag");
+    if (releases.length < 100) return matches[0] ?? null;
+  }
+}
+
+async function github(repository, path) {
   assert(process.env.GH_TOKEN, "GH_TOKEN is required");
   const response = await fetch(
     `https://api.github.com/repos/${repository}/${path}`,
@@ -196,9 +209,21 @@ async function github(repository, path, allowMissing = false) {
       signal: AbortSignal.timeout(30_000),
     },
   );
-  if (allowMissing && response.status === 404) return null;
   assert(response.ok, `GitHub request failed: HTTP ${response.status}`);
   return response.json();
+}
+async function releaseForTag(repository, tag) {
+  const release = await findReleaseByTag(tag, (page) =>
+    github(repository, `releases?per_page=100&page=${page}`),
+  );
+  if (!release) return null;
+  assert(
+    Number.isSafeInteger(release.id) && release.id > 0,
+    "Invalid release ID",
+  );
+  const details = await github(repository, `releases/${release.id}`);
+  assert.equal(details.tag_name, tag, "Release tag changed during lookup");
+  return details;
 }
 async function pages(repository, path, key) {
   const result = [];
@@ -320,7 +345,7 @@ if (
       "Recovery requires updater-signed artifacts",
     );
     const image = await verifyPublishedImage(repository, tag, sha);
-    const release = await github(repository, `releases/tags/${tag}`, true);
+    const release = await releaseForTag(repository, tag);
     await mkdir("output/recovery", { recursive: true });
     // Notes must come from the immutable release source, not later maintenance commits.
     await writeFile(metadataPath, source);
@@ -364,7 +389,8 @@ if (
       "Original installer hashes and all updater signatures verified.",
     );
   } else if (mode === "verify-github") {
-    const release = await github(repository, `releases/tags/${tag}`);
+    const release = await releaseForTag(repository, tag);
+    assert(release, "Expected uploaded release draft or published release");
     const files = [
       ...(await filesUnder("release-installers")),
       ...(await filesUnder("release-download-aliases")),

@@ -7,8 +7,59 @@ import {
   validateRecoverySource,
   validatePublishedImageConfig,
   verifyGithubAssets,
+  findReleaseByTag,
 } from "./desktop-release-recovery.mjs";
 import { publicationTag } from "./verify-release-config.mjs";
+
+test("release lookup includes drafts and published releases without a tag endpoint", async () => {
+  for (const draft of [true, false]) {
+    const expected = { id: 409410083, tag_name: "v0.3.0-rc.7", draft };
+    assert.deepEqual(
+      await findReleaseByTag(expected.tag_name, async () => [
+        { id: 1, tag_name: "v0.3.0-rc.6", draft: false },
+        expected,
+      ]),
+      expected,
+    );
+  }
+});
+
+test("release lookup paginates and rejects ambiguous drafts across pages", async () => {
+  const first = Array.from({ length: 100 }, (_, id) => ({
+    id,
+    tag_name: `other-${id}`,
+  }));
+  const expected = { id: 409410083, tag_name: "v0.3.0-rc.7", draft: true };
+  const visited = [];
+  assert.deepEqual(
+    await findReleaseByTag(expected.tag_name, async (page) => {
+      visited.push(page);
+      return page === 1 ? first : [expected];
+    }),
+    expected,
+  );
+  assert.deepEqual(visited, [1, 2]);
+  await assert.rejects(
+    findReleaseByTag(expected.tag_name, async (page) =>
+      page === 1 ? [expected, ...first.slice(1)] : [expected],
+    ),
+    /Duplicate releases/,
+  );
+});
+
+test("release lookup distinguishes absent release from API failure", async () => {
+  assert.equal(await findReleaseByTag("v0.3.0-rc.7", async () => []), null);
+  await assert.rejects(
+    findReleaseByTag("v0.3.0-rc.7", async () => {
+      throw new Error("GitHub request failed: HTTP 403");
+    }),
+    /HTTP 403/,
+  );
+  await assert.rejects(
+    findReleaseByTag("v0.3.0-rc.7", async () => ({})),
+    /Invalid GitHub release list/,
+  );
+});
 
 function fixture() {
   const sha = "a".repeat(40);
