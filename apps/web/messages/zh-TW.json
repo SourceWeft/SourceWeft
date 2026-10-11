@@ -2231,6 +2231,7 @@
       "searchPlaceholder": "搜尋 MCP",
       "searchSummaryAll": "全部",
       "categorySummaryAll": "全部",
+      "categorySummarySelected": "已選 {count} 個",
       "categoriesUnavailable": "分類暫時無法載入，列表下次重新整理時會重新取得。",
       "facets": {
         "search": "搜尋",

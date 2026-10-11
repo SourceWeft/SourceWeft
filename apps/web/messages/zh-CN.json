@@ -2222,6 +2222,7 @@
       "searchPlaceholder": "搜索 MCP",
       "searchSummaryAll": "全部",
       "categorySummaryAll": "全部",
+      "categorySummarySelected": "已选 {count} 个",
       "categoriesUnavailable": "分类暂时无法加载，列表下次刷新时会重新获取。",
       "facets": {
         "search": "搜索",

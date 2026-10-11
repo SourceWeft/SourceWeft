@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { marketItemSummarySchema } from "@sourceweft/market-contracts";
 
@@ -209,6 +210,27 @@ describe("McpMarket categories", { timeout: 30_000 }, () => {
     expect(facet?.textContent).toContain("全部");
     expect(unavailable).toBeTruthy();
     expect(facet?.textContent).toContain(unavailable);
+  });
+
+  it("still says how many categories are selected when a later load fails", async () => {
+    api.listWorkspaceMarketMcpCategories
+      .mockResolvedValueOnce({
+        items: [{ slug: "developer-tools", name: "开发者工具" }],
+      })
+      .mockRejectedValue(new Error("categories down"));
+    await mountWithIntl(<McpMarket />, zhCN);
+    await flush(6);
+    const choice = [
+      ...(categoryFacet()?.querySelectorAll("button") ?? []),
+    ].find((node) => node.textContent?.includes("开发者工具"));
+    expect(choice).toBeDefined();
+    await act(async () => choice!.click());
+    await flush(6);
+
+    // The selection still filters the list, so the facet must still show it.
+    const summary = categoryFacet()?.querySelector("summary")?.textContent;
+    expect(categoryFacet()?.textContent).toContain(unavailable);
+    expect(summary).toContain("已选 1 个");
   });
 
   it("shows the categories again once a later load gets them", async () => {

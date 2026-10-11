@@ -333,6 +333,25 @@ function FilterFacet({
   );
 }
 
+/**
+ * What the category facet says it is filtering by. While category names are
+ * unavailable the selection still filters the list, so it reports how many
+ * are selected rather than going blank.
+ */
+function categoryFacetSummary(
+  selected: CategoryKey[],
+  categories: Array<{ key: CategoryKey; label: string }>,
+  t: (key: string, values?: { count: number }) => string,
+) {
+  if (selected.length === 0) return t("filters.categorySummaryAll");
+  const labels = categories
+    .filter((item) => selected.includes(item.key))
+    .map((item) => item.label);
+  return labels.length === selected.length
+    ? labels.join(", ")
+    : t("filters.categorySummarySelected", { count: selected.length });
+}
+
 function FacetChoice({
   active,
   count,
@@ -557,14 +576,7 @@ function McpFilterPanel({
         <FilterFacet
           defaultOpen
           label={t("filters.facets.category")}
-          summary={
-            selectedCategories.length === 0
-              ? t("filters.categorySummaryAll")
-              : categories
-                  .filter((item) => selectedCategories.includes(item.key))
-                  .map((item) => item.label)
-                  .join(", ")
-          }
+          summary={categoryFacetSummary(selectedCategories, categories, t)}
         >
           <div className="space-y-1">
             {categories.map((item) => (
