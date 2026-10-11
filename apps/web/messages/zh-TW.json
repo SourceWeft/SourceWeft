@@ -2447,7 +2447,8 @@
       "published": "已發布：{identifier}",
       "queued": "已提交 {identifier}，已加入人工審核佇列（有 {count} 項待確認）。",
       "failed": "提交失敗。請確認這是一個公開的 MCP 儲存庫。",
-      "submit": "提交"
+      "submit": "提交",
+      "done": "完成"
     }
   },
   "dashboardSourcesHub": {

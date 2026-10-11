@@ -2438,7 +2438,8 @@
       "published": "已发布：{identifier}",
       "queued": "已提交 {identifier}，已加入人工审核队列（有 {count} 项待确认）。",
       "failed": "提交失败。请确认这是一个公开的 MCP 仓库。",
-      "submit": "提交"
+      "submit": "提交",
+      "done": "完成"
     }
   },
   "dashboardSourcesHub": {

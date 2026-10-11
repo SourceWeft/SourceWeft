@@ -2447,7 +2447,8 @@
       "published": "Published: {identifier}",
       "queued": "Submitted {identifier}, queued for manual review ({count, plural, one {# item} other {# items}} to confirm).",
       "failed": "Submission failed. Make sure this is a public MCP repository.",
-      "submit": "Submit"
+      "submit": "Submit",
+      "done": "Done"
     }
   },
   "dashboardSourcesHub": {
