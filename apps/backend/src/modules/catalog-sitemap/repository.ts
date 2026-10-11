@@ -2,8 +2,9 @@ import { sql } from "drizzle-orm";
 import {
   db,
   mcpServers,
-  mcpServerVersions,
+  mcpServerVersionOverviews,
   skillDefinitions,
+  skillVersionOverviews,
   skillVersions,
 } from "@sourceweft/db";
 import {
@@ -13,30 +14,48 @@ import {
   type CatalogSitemapIndex,
   type CatalogSitemapShard,
 } from "@sourceweft/market-contracts";
+import { latestPublishedVersionOf } from "../market/latest-version";
 import { publicMarketMcpCondition } from "../market/read-repository";
 import { publicMarketSkillCondition } from "../skills/market/read-repository";
 import { readMcpOverviewLocales } from "../market/overview/repository";
 import { readSkillOverviewLocales } from "../skills/market/overview-repository";
 import { planSitemapShards } from "./planner";
 
+/**
+ * What a sitemap lists for each kind. `from`/`where` alone are the rows (the
+ * index only counts them); `shardFrom` adds what a shard row needs to name
+ * the version the page shows. `modified` is the lastmod: the later of the
+ * listing's own last change and the newest overview of the shown version —
+ * hidden ones included, so hiding an overview never moves lastmod back. A
+ * README or manifest change reaches it through the overview it regenerates;
+ * columns every sync or README recheck restamps (`last_indexed_at`,
+ * `readme_fetched_at`) are deliberately not part of it.
+ */
 function source(kind: CatalogSitemapKind) {
   if (kind === "mcp")
     return {
       from: sql`${mcpServers}`,
+      shardFrom: sql`${mcpServers} left join lateral (
+        select ${latestPublishedVersionOf(mcpServers.id)} as id
+      ) shown on true`,
       where: publicMarketMcpCondition(),
       id: sql`${mcpServers.id}`,
       key: sql`${mcpServers.identifier}`,
-      modified: sql`${mcpServers.updatedAt}`,
-      version: sql`(select ${mcpServerVersions.id} from ${mcpServerVersions}
-      where ${mcpServerVersions.serverId} = ${mcpServers.id} and ${mcpServerVersions.status} = 'published'
-      order by ${mcpServerVersions.publishedAt} desc, ${mcpServerVersions.createdAt} desc limit 1)`,
+      modified: sql`greatest(${mcpServers.updatedAt}, (
+        select max(${mcpServerVersionOverviews.generatedAt}) from ${mcpServerVersionOverviews}
+        where ${mcpServerVersionOverviews.mcpServerVersionId} = shown.id))`,
+      version: sql`shown.id`,
     };
+  const from = sql`${skillDefinitions} inner join ${skillVersions} on ${skillVersions.skillId} = ${skillDefinitions.id}`;
   return {
-    from: sql`${skillDefinitions} inner join ${skillVersions} on ${skillVersions.skillId} = ${skillDefinitions.id}`,
+    from,
+    shardFrom: from,
     where: publicMarketSkillCondition(),
     id: sql`${skillDefinitions.id}`,
     key: sql`${skillDefinitions.slug}`,
-    modified: sql`coalesce(${skillVersions.publishedAt}, ${skillDefinitions.listedAt}, ${skillDefinitions.createdAt})`,
+    modified: sql`greatest(coalesce(${skillVersions.publishedAt}, ${skillDefinitions.listedAt}, ${skillDefinitions.createdAt}), (
+      select max(${skillVersionOverviews.generatedAt}) from ${skillVersionOverviews}
+      where ${skillVersionOverviews.skillVersionId} = ${skillVersions.id}))`,
     version: sql`${skillVersions.id}`,
   };
 }
@@ -75,7 +94,7 @@ export async function readCatalogSitemapShard(
     versionId: string | null;
   }>(sql`
     select ${s.key} as key, ${s.modified} as modified, ${s.version} as "versionId"
-    from ${s.from} where ${s.where} and md5(${s.id}) like ${prefix + "%"}
+    from ${s.shardFrom} where ${s.where} and md5(${s.id}) like ${prefix + "%"}
     order by ${s.id} limit ${SITEMAP_MAX_URLS + 1}`);
   if (result.rows.length > SITEMAP_MAX_URLS)
     throw new Error("Sitemap shard exceeds protocol limit; refresh the index");
