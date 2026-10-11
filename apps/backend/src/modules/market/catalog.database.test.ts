@@ -234,6 +234,79 @@ describe("MCP catalog on the mcp_* tables", () => {
     expect((await categoriesOf(tools.identifier)).slugs).toEqual(["databases"]);
   });
 
+  describe("updated_at follows listed content, not sync runs", () => {
+    const federated = {
+      status: "published" as const,
+      visibility: "public" as const,
+      origin: "upstream" as const,
+      source: "registry.test",
+    };
+    // Only Date is faked: each sync runs at a known instant, and the
+    // per-sync lastIndexedAt changes exactly as it does in production.
+    let clock = Date.parse("2026-10-01T00:00:00.000Z");
+    async function syncAt(input: MarketMcpManifest) {
+      clock += 60_000;
+      vi.setSystemTime(clock);
+      await ingest.upsertMarketMcp({ ...federated, manifest: input });
+      const [row] = await data.db
+        .select({ updatedAt: data.mcpServers.updatedAt })
+        .from(data.mcpServers)
+        .where(eq(data.mcpServers.identifier, input.identifier));
+      return row!.updatedAt.toISOString();
+    }
+
+    beforeAll(() => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+    });
+    afterAll(() => {
+      vi.useRealTimers();
+    });
+
+    test("an unchanged re-sync keeps updated_at", async () => {
+      const stable = manifest("stable");
+      const first = await syncAt(stable);
+      expect(await syncAt(stable)).toBe(first);
+    });
+
+    test("a changed listed field bumps updated_at", async () => {
+      const edited = manifest("edited");
+      const first = await syncAt(edited);
+      const second = await syncAt({ ...edited, summary: "rewritten summary" });
+      expect(second > first).toBe(true);
+      expect(await syncAt({ ...edited, summary: "rewritten summary" })).toBe(
+        second,
+      );
+    });
+
+    test("a newly published version bumps updated_at", async () => {
+      const versioned = manifest("versioned");
+      const first = await syncAt(versioned);
+      const second = await syncAt({ ...versioned, version: "1.1.0" });
+      expect(second > first).toBe(true);
+      expect(await syncAt({ ...versioned, version: "1.1.0" })).toBe(second);
+    });
+
+    test("an auto category change bumps updated_at", async () => {
+      const sorted = manifest("sorted", { categories: ["developer-tools"] });
+      const first = await syncAt(sorted);
+      const second = await syncAt({ ...sorted, categories: ["databases"] });
+      expect(second > first).toBe(true);
+      expect(await syncAt({ ...sorted, categories: ["databases"] })).toBe(
+        second,
+      );
+    });
+
+    test("an ignored category change on owned categories keeps updated_at", async () => {
+      const owned = manifest("owned", { categories: ["developer-tools"] });
+      const first = await syncAt(owned);
+      await data.db
+        .update(data.mcpServers)
+        .set({ categoriesSetBy: "admin" })
+        .where(eq(data.mcpServers.identifier, owned.identifier));
+      expect(await syncAt({ ...owned, categories: ["databases"] })).toBe(first);
+    });
+  });
+
   test("a flagged submission waits for review, then publishes", async () => {
     const risky = manifest("risky");
     state.parse.mockResolvedValue({

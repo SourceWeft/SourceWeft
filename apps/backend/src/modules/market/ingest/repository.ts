@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { MarketMcpManifest } from "@sourceweft/market-contracts";
 import {
   db,
@@ -216,7 +216,24 @@ export async function upsertMarketMcp(input: {
         verified: facets.verified,
         desktopOnly: facets.desktopOnly,
         runtime: facets.runtime,
-        updatedAt: now,
+        // updated_at is what the page shows as "Updated" and the sitemap
+        // serves as lastmod, so a federation run that changes nothing must not
+        // move it. lastIndexedAt is excluded because every sync restamps it.
+        updatedAt: sql`case when (
+          ${mcpServers.name}, ${mcpServers.summary}, ${mcpServers.description},
+          ${mcpServers.status}, ${mcpServers.visibility}, ${mcpServers.owner},
+          ${mcpServers.sourceUrl}, ${mcpServers.repoUrl},
+          ${mcpServers.metadataJson} - 'lastIndexedAt',
+          ${mcpServers.transport}, ${mcpServers.official}, ${mcpServers.verified},
+          ${mcpServers.desktopOnly}, ${mcpServers.runtime}
+        ) is distinct from (
+          excluded.name, excluded.summary, excluded.description,
+          excluded.status, excluded.visibility, excluded.owner,
+          excluded.source_url, excluded.repo_url,
+          excluded.metadata_json - 'lastIndexedAt',
+          excluded.transport, excluded.official, excluded.verified,
+          excluded.desktop_only, excluded.runtime
+        ) then excluded.updated_at else ${mcpServers.updatedAt} end`,
         // Keep the FIRST publish time on re-upsert. Stamping now() each
         // federation run turned the catalog's primary sort key into a
         // sync-touch time and broke every in-flight keyset pagination on every
@@ -231,6 +248,21 @@ export async function upsertMarketMcp(input: {
       `MCP catalog upsert returned no row for ${manifest.identifier}`,
     );
   }
+
+  // A version going live changes the page even when the row's own fields do
+  // not, so it moves updated_at too (below).
+  const [previousVersion] = await db
+    .select({ publishedAt: mcpServerVersions.publishedAt })
+    .from(mcpServerVersions)
+    .where(
+      and(
+        eq(mcpServerVersions.serverId, itemId),
+        eq(mcpServerVersions.version, manifest.version),
+      ),
+    )
+    .limit(1);
+  const versionPublished =
+    publishedAt !== null && !previousVersion?.publishedAt;
 
   // The README columns (`readme_md`, `readme_*`) are deliberately absent from
   // both the insert and the conflict update: a new version starts `pending`
@@ -268,22 +300,46 @@ export async function upsertMarketMcp(input: {
   // Categories follow the manifest only while nobody has chosen them: once the
   // AI overview ('ai') or a market admin ('admin') owns them, a re-sync leaves
   // them alone.
-  if (server.categoriesSetBy !== "auto") {
-    return itemId;
+  const categoriesChanged =
+    server.categoriesSetBy === "auto" &&
+    (await replaceMcpServerCategories(itemId, manifest.categories));
+
+  if (versionPublished || categoriesChanged) {
+    await db
+      .update(mcpServers)
+      .set({ updatedAt: now })
+      .where(eq(mcpServers.id, itemId));
   }
+
+  return itemId;
+}
+
+/** Rewrites a server's categories; reports whether the set changed. */
+async function replaceMcpServerCategories(
+  serverId: string,
+  slugs: readonly string[],
+): Promise<boolean> {
+  const before = await db
+    .select({ categoryId: mcpServerCategories.categoryId })
+    .from(mcpServerCategories)
+    .where(eq(mcpServerCategories.serverId, serverId));
 
   await db
     .delete(mcpServerCategories)
-    .where(eq(mcpServerCategories.serverId, itemId));
+    .where(eq(mcpServerCategories.serverId, serverId));
 
-  for (const categoryId of await upsertMcpCategories(db, manifest.categories)) {
+  const after = new Set(await upsertMcpCategories(db, slugs));
+  for (const categoryId of after) {
     await db
       .insert(mcpServerCategories)
-      .values({ serverId: itemId, categoryId })
+      .values({ serverId, categoryId })
       .onConflictDoNothing({
         target: [mcpServerCategories.serverId, mcpServerCategories.categoryId],
       });
   }
 
-  return itemId;
+  return (
+    before.length !== after.size ||
+    before.some((row) => !after.has(row.categoryId))
+  );
 }
