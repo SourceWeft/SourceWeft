@@ -169,8 +169,28 @@ test("GET /market/mcp/categories forwards workspace and user", async () => {
   assert.deepEqual(mocks.listMarketMcpCategories.mock.calls[0]?.[0], {
     workspaceId: "workspace_1",
     userId: "user_1",
+    locale: "en",
   });
   assert.equal(mocks.installMarketMcp.mock.calls.length, 0);
+});
+
+test("GET /market/mcp/categories names categories in the language asked for", async () => {
+  resetRouteMocks();
+  mocks.listMarketMcpCategories.mockResolvedValue({ items: [] });
+  const path = "/v1/workspaces/workspace_1/market/mcp/categories";
+
+  const response = await createTestApp().request(`${path}?locale=zh-TW`);
+  assert.equal(response.status, 200);
+  assert.equal(
+    mocks.listMarketMcpCategories.mock.calls[0]?.[0]?.locale,
+    "zh-TW",
+  );
+
+  assert.equal(
+    (await createTestApp().request(`${path}?locale=fr`)).status,
+    400,
+  );
+  assert.equal(mocks.listMarketMcpCategories.mock.calls.length, 1);
 });
 
 test("POST /market/mcp/:identifier/install decodes identifier and returns 201", async () => {

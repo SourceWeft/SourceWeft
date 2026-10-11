@@ -864,10 +864,9 @@ describe.skipIf(!skillDatabaseEnabled)(
 
       const counts = async (viewer: Viewer) =>
         new Map(
-          (await service.listCatalogCategories(viewer)).items.map((item) => [
-            item.slug,
-            item.count,
-          ]),
+          (
+            await service.listCatalogCategories({ ...viewer, locale: "en" })
+          ).items.map((item) => [item.slug, item.count]),
         );
       let before = await counts(stranger);
       let own = await counts(owner);
@@ -896,12 +895,27 @@ describe.skipIf(!skillDatabaseEnabled)(
       assert.ok(after.get("documents-office")! >= publicDocs);
 
       // Every category of the taxonomy, in its order, empty ones included.
-      const items = (await service.listCatalogCategories(stranger)).items;
+      const items = (
+        await service.listCatalogCategories({ ...stranger, locale: "en" })
+      ).items;
       assert.deepEqual(
         items.map((item) => item.slug),
         taxonomy.skillCategoryDefinitions.map((definition) => definition.slug),
       );
       assert.ok(items.every((item) => item.name && item.count >= 0));
+
+      // The same list, named in the reader's language.
+      const traditional = (
+        await service.listCatalogCategories({ ...stranger, locale: "zh-TW" })
+      ).items;
+      assert.deepEqual(
+        traditional.map((item) => item.slug),
+        items.map((item) => item.slug),
+      );
+      assert.equal(
+        traditional.find((item) => item.slug === "development")?.name,
+        "軟體開發",
+      );
     });
 
     // --- full text ------------------------------------------------------------

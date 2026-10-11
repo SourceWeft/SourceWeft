@@ -164,15 +164,24 @@ export function registerSkillPublicRoutes(app: Hono) {
   });
 
   // Registered before `/v1/skills/:slug` so the literal segment wins.
-  app.get("/v1/skills/categories", async (c) =>
-    publicJson(
+  app.get("/v1/skills/categories", async (c) => {
+    // The language of each category's name and description; English when not given.
+    const locale = marketSkillLocaleSchema
+      .optional()
+      .safeParse(given(c.req.query("locale")));
+    if (!locale.success) {
+      throw ApiError.validation(
+        locale.error.flatten() as Record<string, unknown>,
+      );
+    }
+    return publicJson(
       c,
       conforming(
         listMarketSkillCategoriesResponseSchema,
-        await listMarketSkillCategories(),
+        await listMarketSkillCategories(locale.data ?? "en"),
       ),
-    ),
-  );
+    );
+  });
 
   // Literal segments too, for the same reason.
   app.get("/v1/skills/collections", async (c) =>

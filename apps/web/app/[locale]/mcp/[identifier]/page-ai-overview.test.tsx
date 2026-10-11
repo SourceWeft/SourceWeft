@@ -312,6 +312,37 @@ describe("public MCP detail page hreflang", () => {
     });
   });
 
+  it("titles the page in its language", async () => {
+    withDetail();
+    expect((await metadata("en")).title).toBe("Weather MCP Server");
+    expect((await metadata("zh-CN")).title).toBe("Weather MCP 服务");
+    expect((await metadata("zh-TW")).title).toBe("Weather MCP 服務");
+  });
+
+  it("describes a translated page with its own overview summary", async () => {
+    withDetail({
+      aiOverview: overview({
+        locale: "zh-CN",
+        summary: "为出行规划查询天气。",
+      }),
+      overviewLocales: ["en", "zh-CN"],
+    });
+    const translated = await metadata("zh-CN");
+    expect(translated.description).toBe("Weather：为出行规划查询天气。");
+    expect(translated.openGraph?.description).toBe(translated.description);
+    expect(translated.twitter?.description).toBe(translated.description);
+  });
+
+  it("keeps the English description where the overview is not in the page's language", async () => {
+    // English itself, and a Chinese page served the English fallback.
+    withDetail({ aiOverview: overview(), overviewLocales: ["en"] });
+    for (const locale of ["en", "zh-CN"]) {
+      expect((await metadata(locale)).description).toMatch(
+        /^Use Weather as an MCP server for /,
+      );
+    }
+  });
+
   it("keeps the canonical on English, with no alternates, without an overview in another language", async () => {
     for (const overviewLocales of [[], ["en"]] as MarketMcpLocale[][]) {
       withDetail({ overviewLocales });

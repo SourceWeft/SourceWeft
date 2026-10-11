@@ -1,6 +1,9 @@
 import type { ThreadSourceSelectionResponse, UpdateThreadSourceSelectionRequest } from "@sourceweft/contracts";
 import type { RegistryVersionsResponse, RegistryVersionDetail } from "@sourceweft/contracts";
-import type { MarketMcpLocale } from "@sourceweft/market-contracts";
+import type {
+  MarketMcpLocale,
+  MarketSkillLocale,
+} from "@sourceweft/market-contracts";
 import type {
   ThreadRunFailureSummary,
   AddByokModelRequest,
@@ -130,6 +133,11 @@ import type {
   UpdateWorkspaceSkillResponse,
 } from "@sourceweft/contracts";
 import { HttpClient } from "./http-client";
+
+/** `?locale=…` when a language is asked for, nothing otherwise. */
+function localeQuery(locale: string | undefined) {
+  return locale ? `?${new URLSearchParams({ locale }).toString()}` : "";
+}
 
 function encode(value: string) {
   return encodeURIComponent(value);
@@ -795,10 +803,16 @@ export class ContentClient {
     );
   }
 
-  /** The market's categories, each with how many community skills it holds. */
-  listSkillCatalogCategories(workspaceId: string) {
+  /**
+   * The market's categories, each with how many community skills it holds,
+   * named in `locale` (English when omitted).
+   */
+  listSkillCatalogCategories(
+    workspaceId: string,
+    options: { locale?: MarketSkillLocale } = {},
+  ) {
     return this.http.get<ListSkillCatalogCategoriesResponse>(
-      `/v1/workspaces/${encode(workspaceId)}/skills/catalog/categories`,
+      `/v1/workspaces/${encode(workspaceId)}/skills/catalog/categories${localeQuery(options.locale)}`,
     );
   }
 
@@ -1007,9 +1021,13 @@ export class ContentClient {
     );
   }
 
-  listWorkspaceMarketMcpCategories(workspaceId: string) {
+  /** The MCP categories, named in `locale` (English when omitted). */
+  listWorkspaceMarketMcpCategories(
+    workspaceId: string,
+    options: { locale?: MarketMcpLocale } = {},
+  ) {
     return this.http.get<ListWorkspaceMarketMcpCategoriesResponse>(
-      `/v1/workspaces/${encode(workspaceId)}/market/mcp/categories`,
+      `/v1/workspaces/${encode(workspaceId)}/market/mcp/categories${localeQuery(options.locale)}`,
     );
   }
 

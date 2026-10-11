@@ -8,6 +8,7 @@ import {
 import { DynamicStructuredTool } from "@langchain/core/tools";
 import type { InterruptOnConfig } from "langchain";
 import type { ToolConfirmationRequest } from "@sourceweft/contracts";
+import type { Locale } from "@sourceweft/i18n";
 import { config } from "../../shared/config";
 import { createMcpRequestScope } from "./network";
 import { logger } from "../../shared/logger";
@@ -674,13 +675,14 @@ export class McpService {
   async listMarketMcpCategories(input: {
     workspaceId: string;
     userId: string;
+    locale: Locale;
   }) {
     await requireMcpWorkspace({
       workspaceId: input.workspaceId,
       userId: input.userId,
       permission: "mcp.read",
     });
-    return marketService.listMcpCategories();
+    return marketService.listMcpCategories(input.locale);
   }
 
   async countMarketMcpCategories(input: {

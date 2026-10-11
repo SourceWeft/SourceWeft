@@ -18,8 +18,10 @@ import {
   skillVersions,
 } from "@sourceweft/db";
 import type { SkillManifestJson } from "@sourceweft/db";
+import type { Locale } from "@sourceweft/i18n";
 import { isSafeSkillDirName } from "@sourceweft/skill-format";
 import { ContentError } from "../../content/errors";
+import { catalogCategoryText } from "../../../shared/catalog-category-text";
 import { parseSkillFrontmatter } from "../frontmatter";
 import { getSkillLogo } from "../logo";
 import { parseGithubStoragePointer } from "../storage/source-pointer";
@@ -506,7 +508,10 @@ export async function listMarketSkills(
  * filed under it — 0 included, so the list keeps its shape. `total` counts
  * skills, not filings: one in two categories is one skill.
  */
-export async function listMarketSkillCategories(): Promise<ListMarketSkillCategoriesResponse> {
+/** Every skill category with its public count, in the reader's language. */
+export async function listMarketSkillCategories(
+  locale: Locale = "en",
+): Promise<ListMarketSkillCategoriesResponse> {
   const [rows, [totals]] = await Promise.all([
     db
       .select({ slug: skillCategories.slug, count: count() })
@@ -532,8 +537,7 @@ export async function listMarketSkillCategories(): Promise<ListMarketSkillCatego
   return {
     items: skillCategoryDefinitions.map((definition) => ({
       slug: definition.slug,
-      name: definition.name,
-      description: definition.description,
+      ...catalogCategoryText(definition, locale),
       count: counts.get(definition.slug) ?? 0,
     })),
     total: Number(totals?.total ?? 0),

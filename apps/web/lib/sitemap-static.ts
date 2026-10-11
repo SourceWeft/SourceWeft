@@ -1,4 +1,5 @@
 import type { MetadataRoute } from "next";
+import { DEFAULT_LOCALE } from "@sourceweft/i18n/locales";
 
 import {
   listPublishedBlogPosts,
@@ -35,8 +36,8 @@ export async function buildStaticSitemap(): Promise<MetadataRoute.Sitemap> {
     listPublishedBlogSitemapEntries(),
     listPublishedBlogPosts(),
     requirePublicMcpCounts({ includeDesktopOnly: true }),
-    requirePublicMcpCategories(),
-    requirePublicSkillCategories(),
+    requirePublicMcpCategories(DEFAULT_LOCALE),
+    requirePublicSkillCategories(DEFAULT_LOCALE),
     requirePublicSkillCollections(),
   ]);
 

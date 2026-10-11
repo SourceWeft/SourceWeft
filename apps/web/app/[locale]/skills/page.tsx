@@ -98,7 +98,8 @@ export async function generateMetadata({
       url: `${SITE_URL}/skills`,
     },
     // Search, facet, sort, and paged permutations are infinite and add nothing
-    // over the directory itself, so they stay crawlable but out of the index.
+    // over the directory itself, so they stay out of the index; robots.ts also
+    // keeps the search, facet and sort ones out of the crawl.
     ...(listView ? NO_INDEX_METADATA : {}),
     title,
     twitter: {
@@ -225,7 +226,7 @@ export default async function PublicSkillsMarketPage({
 
   const [authState, categoriesResponse, market, home] = await Promise.all([
     resolveInitialLandingAuthState(),
-    listPublicSkillCategories(),
+    listPublicSkillCategories(locale),
     listView
       ? listPublicSkills({
           ...skillsListRequest(state),

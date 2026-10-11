@@ -1,4 +1,5 @@
 import "server-only";
+import { DEFAULT_LOCALE } from "@sourceweft/i18n/locales";
 import { requirePublicMcpCounts } from "./market-mcp";
 import { requirePublicSkillCategories } from "./market-skills";
 
@@ -7,7 +8,7 @@ export type LandingMarketStats = { mcp: number | null; skills: number | null };
 export async function getLandingMarketStats(): Promise<LandingMarketStats> {
   const [mcp, skills] = await Promise.allSettled([
     requirePublicMcpCounts(),
-    requirePublicSkillCategories(),
+    requirePublicSkillCategories(DEFAULT_LOCALE),
   ]);
   // Never turn a failed read into a zero or cache a fabricated count.
   if (mcp.status === "rejected") console.warn("Landing MCP count unavailable");

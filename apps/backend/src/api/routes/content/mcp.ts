@@ -71,6 +71,8 @@ export function registerMcpRoutes(app: Hono) {
     const result = await mcpService.listMarketMcpCategories({
       workspaceId: requireRouteParam(c, "workspaceId"),
       userId: getSessionUserId(session),
+      // The language of each category's name and description.
+      locale: parseLocaleQuery(c.req.query("locale")) ?? "en",
     });
     return ApiResponse.success(c, result);
   });

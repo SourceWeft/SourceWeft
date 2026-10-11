@@ -110,7 +110,7 @@ describe("listPublicSkills", () => {
 describe("categories", () => {
   it("swallows an outage for list pages", async () => {
     client.listSkillCategories.mockRejectedValue(new Error("down"));
-    await expect(listPublicSkillCategories()).resolves.toEqual({
+    await expect(listPublicSkillCategories("en")).resolves.toEqual({
       items: [],
       total: 0,
     });
@@ -118,7 +118,7 @@ describe("categories", () => {
 
   it("propagates an outage for category pages, so it is not a 404", async () => {
     client.listSkillCategories.mockRejectedValue(new Error("down"));
-    await expect(requirePublicSkillCategories()).rejects.toThrow("down");
+    await expect(requirePublicSkillCategories("en")).rejects.toThrow("down");
   });
 
   it("returns the categories when the market answers", async () => {
@@ -129,8 +129,33 @@ describe("categories", () => {
       total: 3,
     };
     client.listSkillCategories.mockResolvedValue(response);
-    await expect(listPublicSkillCategories()).resolves.toBe(response);
-    await expect(requirePublicSkillCategories()).resolves.toBe(response);
+    await expect(listPublicSkillCategories("en")).resolves.toEqual(response);
+    await expect(requirePublicSkillCategories("en")).resolves.toEqual(response);
+  });
+
+  it("asks the market for the categories in the page's language", async () => {
+    const response = {
+      items: [
+        {
+          count: 3,
+          description: "编写代码。",
+          name: "软件开发",
+          slug: "development",
+        },
+      ],
+      total: 3,
+    };
+    client.listSkillCategories.mockResolvedValue(response);
+    for (const read of [
+      listPublicSkillCategories,
+      requirePublicSkillCategories,
+    ]) {
+      client.listSkillCategories.mockClear();
+      expect(await read("zh-CN")).toEqual(response);
+      expect(client.listSkillCategories).toHaveBeenCalledWith({
+        locale: "zh-CN",
+      });
+    }
   });
 });
 

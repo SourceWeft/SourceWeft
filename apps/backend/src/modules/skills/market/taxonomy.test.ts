@@ -93,3 +93,18 @@ test("'write the test' is development, not writing", () => {
     "writing-content",
   );
 });
+
+test("every skill category carries its Simplified Chinese name and description", () => {
+  for (const definition of skillCategoryDefinitions) {
+    assert.match(
+      definition.zhCN?.name ?? "",
+      /\p{Script=Han}/u,
+      definition.slug,
+    );
+    assert.match(
+      definition.zhCN?.description ?? "",
+      /\p{Script=Han}/u,
+      definition.slug,
+    );
+  }
+});

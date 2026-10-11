@@ -122,10 +122,17 @@ export class MarketClient {
     );
   }
 
-  /** Every skill category with its public count. */
-  listSkillCategories() {
+  /**
+   * Every skill category with its public count, named in `locale` (English
+   * when omitted).
+   */
+  listSkillCategories(options: { locale?: MarketSkillLocale } = {}) {
+    const params = new URLSearchParams();
+    if (options.locale) {
+      params.set("locale", options.locale);
+    }
     return this.request(
-      "/v1/skills/categories",
+      appendQuery("/v1/skills/categories", params),
       { method: "GET" },
       listMarketSkillCategoriesResponseSchema,
     );
@@ -217,9 +224,14 @@ export class MarketClient {
     );
   }
 
-  listMcpCategories() {
+  /** The MCP categories, named in `locale` (English when omitted). */
+  listMcpCategories(options: { locale?: MarketMcpLocale } = {}) {
+    const params = new URLSearchParams();
+    if (options.locale) {
+      params.set("locale", options.locale);
+    }
     return this.request(
-      "/v1/mcp/categories",
+      appendQuery("/v1/mcp/categories", params),
       { method: "GET" },
       listMarketCategoriesResponseSchema,
     );

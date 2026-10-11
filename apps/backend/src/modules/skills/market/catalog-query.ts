@@ -26,6 +26,8 @@ import {
   skillVersions,
   workspaceSkills,
 } from "@sourceweft/db";
+import type { Locale } from "@sourceweft/i18n";
+import { catalogCategoryText } from "../../../shared/catalog-category-text";
 import { skillCategoryDefinitions } from "./taxonomy";
 
 /**
@@ -478,6 +480,7 @@ export function boundedCatalogItemMatchesFilters(
  */
 export async function listSkillCatalogCategoryCounts(input: {
   userId: string;
+  locale: Locale;
 }): Promise<SkillCatalogCategory[]> {
   const rows = await db
     .select({
@@ -513,8 +516,7 @@ export async function listSkillCatalogCategoryCounts(input: {
   const counts = new Map(rows.map((row) => [row.slug, Number(row.count)]));
   return skillCategoryDefinitions.map((definition) => ({
     slug: definition.slug,
-    name: definition.name,
-    description: definition.description,
+    ...catalogCategoryText(definition, input.locale),
     count: counts.get(definition.slug) ?? 0,
   }));
 }

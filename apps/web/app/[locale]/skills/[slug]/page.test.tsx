@@ -572,4 +572,63 @@ describe("generateMetadata", () => {
     expect(String(zhTW.alternates?.canonical)).toMatch(/\/skills\/pdf-forms$/);
     expect(String(zhTW.alternates?.canonical)).not.toMatch(/zh-TW/);
   });
+
+  it("reads each language once, so a failing repeat read cannot drop the metadata", async () => {
+    const reads = new Map<string, number>();
+    market.getPublicSkill.mockImplementation(async (_slug, locale) => {
+      const count = (reads.get(locale) ?? 0) + 1;
+      reads.set(locale, count);
+      if (locale === "zh-CN" && count > 1) throw new Error("market down");
+      return {
+        ...response(),
+        aiOverview: {
+          summary: "填写 PDF 表单。",
+          whatItDoes: "w",
+          whenToUse: "u",
+          requirements: "r",
+          locale: locale === "zh-CN" ? "zh-CN" : "en",
+          generatedAt: "2026-09-20T00:00:00.000Z",
+        },
+      };
+    });
+    const zhCN = await generateMetadata({
+      params: Promise.resolve({ locale: "zh-CN", slug: "pdf-forms" }),
+      searchParams: Promise.resolve({}),
+    });
+    expect(String(zhCN.alternates?.canonical)).toMatch(
+      /\/zh-CN\/skills\/pdf-forms$/,
+    );
+    expect(zhCN.description).toBe("PDF Forms: 填写 PDF 表单。");
+  });
+
+  it("describes a translated page with its own overview summary", async () => {
+    // zh-CN has its own overview; zh-TW and English get the English one.
+    market.getPublicSkill.mockImplementation(async (_slug, locale) => ({
+      ...response(),
+      aiOverview: {
+        summary: locale === "zh-CN" ? "填写并提取 PDF 表单。" : "Fills forms.",
+        whatItDoes: "w",
+        whenToUse: "u",
+        requirements: "r",
+        locale: locale === "zh-CN" ? "zh-CN" : "en",
+        generatedAt: "2026-09-20T00:00:00.000Z",
+      },
+    }));
+    const metadata = (locale: string) =>
+      generateMetadata({
+        params: Promise.resolve({ locale, slug: "pdf-forms" }),
+        searchParams: Promise.resolve({}),
+      });
+
+    const zhCN = await metadata("zh-CN");
+    expect(zhCN.description).toBe("PDF Forms: 填写并提取 PDF 表单。");
+    expect(zhCN.openGraph?.description).toBe(zhCN.description);
+    expect(zhCN.twitter?.description).toBe(zhCN.description);
+
+    for (const locale of ["en", "zh-TW"]) {
+      expect((await metadata(locale)).description).toMatch(
+        /Read the full SKILL\.md/,
+      );
+    }
+  });
 });

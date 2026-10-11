@@ -104,26 +104,41 @@ async function loadSkill(slug: string, locale?: string) {
   }
 }
 
+type SkillAiOverview = NonNullable<
+  Awaited<ReturnType<typeof getPublicSkill>>["aiOverview"]
+>;
+
 /**
- * The non-default locales this skill has an AI overview in. The market answers
- * with the English overview when the asked-for one is missing (or hidden), so
- * only an answer in the asked-for locale counts. A failed read counts as none.
+ * The AI overviews this skill has in each non-default locale. The market
+ * answers with the English overview when the asked-for one is missing (or
+ * hidden), so only an answer in the asked-for locale counts. A failed read
+ * counts as none.
  */
-async function overviewLocales(slug: string): Promise<Locale[]> {
+async function translatedOverviews(
+  slug: string,
+): Promise<Map<Locale, SkillAiOverview>> {
   const candidates = routing.locales.filter(
     (id) => id !== routing.defaultLocale,
   );
   const found = await Promise.all(
     candidates.map(async (id) => {
       try {
-        const detail = await getPublicSkill(slug, marketSkillLocale(id));
-        return detail.aiOverview?.locale === id;
+        const { aiOverview } = await getPublicSkill(
+          slug,
+          marketSkillLocale(id),
+        );
+        return aiOverview?.locale === id ? aiOverview : null;
       } catch {
-        return false;
+        return null;
       }
     }),
   );
-  return candidates.filter((_, index) => found[index]);
+  return new Map(
+    candidates.flatMap((id, index) => {
+      const overview = found[index];
+      return overview ? [[id, overview] as const] : [];
+    }),
+  );
 }
 
 const panelClassName =
@@ -148,16 +163,25 @@ export async function generateMetadata({
         ? `${skill.displayName} · ${source.repoSubpath}`
         : skill.displayName,
     });
-    const description = shortSeoText(
-      t("metaDescription", {
-        description: skill.description,
-        name: skill.displayName,
-      }),
-    );
     // The body is the author's English; a locale counts as its own page only
     // where the skill has an AI overview written in it (§20). Each read is
     // the same cached market read the page body makes for that locale.
-    const translated = await overviewLocales(skill.slug);
+    const overviews = await translatedOverviews(skill.slug);
+    const translated = [...overviews.keys()];
+    // A translated page describes itself with its own overview; any other
+    // page is, or canonicalizes to, the English one and keeps its template.
+    const overview = overviews.get(locale) ?? null;
+    const description = shortSeoText(
+      overview
+        ? t("metaDescriptionOverview", {
+            name: skill.displayName,
+            summary: overview.summary,
+          })
+        : t("metaDescription", {
+            description: skill.description,
+            name: skill.displayName,
+          }),
+    );
     const alternates = buildTranslatedAlternates(
       skillPath(skill.slug),
       locale,
@@ -486,7 +510,7 @@ export default async function PublicSkillDetailPage({
   const [authState, result, categoriesResponse] = await Promise.all([
     resolveInitialLandingAuthState(),
     loadSkill(decodedSlug, uiLocale),
-    listPublicSkillCategories(),
+    listPublicSkillCategories(locale),
   ]);
   const { files, scanFlags, skill, source, versions } = result;
   // Cached with the reviews section's own read, so this costs nothing extra.

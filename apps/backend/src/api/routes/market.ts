@@ -82,9 +82,17 @@ export function registerMarketRoutes(app: Hono) {
     return cachedJson(c, await listMcp(parsed.data), { maxAge: 60 });
   });
 
-  app.get("/v1/mcp/categories", async (c) =>
-    cachedJson(c, await listMcpCategories(), { maxAge: 300 }),
-  );
+  app.get("/v1/mcp/categories", async (c) => {
+    const locale = marketMcpLocaleSchema
+      .optional()
+      .safeParse(c.req.query("locale") || undefined);
+    if (!locale.success) {
+      throw ApiError.validation(
+        locale.error.flatten() as Record<string, unknown>,
+      );
+    }
+    return cachedJson(c, listMcpCategories(locale.data), { maxAge: 300 });
+  });
 
   // Registered before `/v1/mcp/:identifier` so the literal segment wins.
   app.get("/v1/mcp/category-counts", async (c) =>

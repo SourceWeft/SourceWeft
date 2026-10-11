@@ -1,3 +1,4 @@
+import type { Locale } from "@sourceweft/i18n/locales";
 import type { Metadata } from "next";
 import { LocaleLink } from "../../../_components/locale-link";
 import { notFound } from "next/navigation";
@@ -31,10 +32,7 @@ import {
   skillsListRequest,
   type SkillsSearchParams,
 } from "../../_components/skills-browse";
-import {
-  skillCategoryPath,
-  skillPath,
-} from "../../_components/skills-format";
+import { skillCategoryPath, skillPath } from "../../_components/skills-format";
 import {
   SkillsListingView,
   SkillsSearchForm,
@@ -50,10 +48,10 @@ type PageProps = {
   searchParams: Promise<SkillsSearchParams>;
 };
 
-async function loadCategories() {
+async function loadCategories(locale: Locale) {
   // Throws on a market outage so the page 5xxs rather than 404ing every
   // category at once.
-  return requirePublicSkillCategories();
+  return requirePublicSkillCategories(locale);
 }
 
 export async function generateMetadata({
@@ -69,7 +67,7 @@ export async function generateMetadata({
     namespace: "publicSkills.category",
   });
   const decodedSlug = decodeURIComponent(slug);
-  const { items } = await loadCategories();
+  const { items } = await loadCategories(locale);
   const category = items.find((entry) => entry.slug === decodedSlug);
 
   if (!category) {
@@ -90,9 +88,10 @@ export async function generateMetadata({
   return {
     // The shell is localized, so the indexable page carries hreflang and a
     // self-canonical per locale; narrowed views keep the plain canonical.
-    alternates: !isSkillsNarrowed(state) && isIndexableListing(category.count)
-      ? buildAlternates(skillCategoryPath(category.slug), locale)
-      : { canonical: url },
+    alternates:
+      !isSkillsNarrowed(state) && isIndexableListing(category.count)
+        ? buildAlternates(skillCategoryPath(category.slug), locale)
+        : { canonical: url },
     description,
     openGraph: {
       description,
@@ -134,7 +133,7 @@ export default async function PublicSkillCategoryPage({
   const decodedSlug = decodeURIComponent(slug);
   const [authState, categoriesResponse] = await Promise.all([
     resolveInitialLandingAuthState(),
-    loadCategories(),
+    loadCategories(locale),
   ]);
   const category = categoriesResponse.items.find(
     (entry) => entry.slug === decodedSlug,

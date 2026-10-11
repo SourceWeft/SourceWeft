@@ -25,8 +25,9 @@ import {
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import type { SkillCatalogCategory } from "@sourceweft/contracts";
+import { marketSkillLocaleSchema } from "@sourceweft/market-contracts";
 import { Badge } from "@sourceweft/ui-web/components/ui/badge";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import {
@@ -798,6 +799,9 @@ function SkillsGalleryView({
 }) {
   const t = useTranslations("dashboardSkills");
   const tm = useTranslations("dashboardSkillsMarket");
+  // Category names come back in the viewer's language; English for any other.
+  const parsedLocale = marketSkillLocaleSchema.safeParse(useLocale());
+  const categoryLocale = parsedLocale.success ? parsedLocale.data : "en";
   const dashboardState = useDashboardChatState();
   const [workspace, setWorkspace] = React.useState<ResolvedWorkspace | null>(
     null,
@@ -1020,8 +1024,10 @@ function SkillsGalleryView({
   const loadCategories = React.useCallback(
     async (targetWorkspaceId: string) => {
       try {
-        const result =
-          await contentClient.listSkillCatalogCategories(targetWorkspaceId);
+        const result = await contentClient.listSkillCatalogCategories(
+          targetWorkspaceId,
+          { locale: categoryLocale },
+        );
         if (workspaceIdRef.current === targetWorkspaceId) {
           setCategories(result.items);
         }
@@ -1031,7 +1037,7 @@ function SkillsGalleryView({
         if (workspaceIdRef.current === targetWorkspaceId) setCategories([]);
       }
     },
-    [],
+    [categoryLocale],
   );
 
   React.useEffect(() => {

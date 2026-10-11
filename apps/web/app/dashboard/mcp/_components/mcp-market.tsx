@@ -173,13 +173,18 @@ function fetchMcpCatalog(
   return promise;
 }
 
-function fetchMcpCategories(targetWorkspaceId: string) {
-  const pending = categoryRequestsByWorkspace.get(targetWorkspaceId);
+function fetchMcpCategories(
+  targetWorkspaceId: string,
+  locale: MarketMcpLocale,
+) {
+  // Names are in the viewer's language, so the language is part of the key.
+  const key = `${targetWorkspaceId}:${locale}`;
+  const pending = categoryRequestsByWorkspace.get(key);
   if (pending) {
     return pending;
   }
   const promise = contentClient
-    .listWorkspaceMarketMcpCategories(targetWorkspaceId)
+    .listWorkspaceMarketMcpCategories(targetWorkspaceId, { locale })
     .then((response) => [
       { key: "all" as const, label: "All" },
       ...response.items.map((category) => ({
@@ -189,11 +194,11 @@ function fetchMcpCategories(targetWorkspaceId: string) {
     ])
     .catch(() => fallbackCategories)
     .finally(() => {
-      if (categoryRequestsByWorkspace.get(targetWorkspaceId) === promise) {
-        categoryRequestsByWorkspace.delete(targetWorkspaceId);
+      if (categoryRequestsByWorkspace.get(key) === promise) {
+        categoryRequestsByWorkspace.delete(key);
       }
     });
-  categoryRequestsByWorkspace.set(targetWorkspaceId, promise);
+  categoryRequestsByWorkspace.set(key, promise);
   return promise;
 }
 
@@ -582,7 +587,11 @@ function McpFilterPanel({
                 }
                 count={categoryCounts[item.key] ?? 0}
                 key={item.key}
-                label={item.label}
+                label={
+                  item.key === "all"
+                    ? t("filters.categorySummaryAll")
+                    : item.label
+                }
                 onClick={() => onCategoryChange(item.key)}
               />
             ))}
@@ -965,7 +974,11 @@ export function McpMarket() {
     null,
   );
   const [items, setItems] = React.useState<MarketMcpItem[]>([]);
-  const [categories, setCategories] = React.useState(fallbackCategories);
+  // Only "all" until the market answers: the full fallback list is English,
+  // so showing it first would flash English names in a translated UI.
+  const [categories, setCategories] = React.useState(
+    fallbackCategories.slice(0, 1),
+  );
   const [pendingActions, setPendingActions] = React.useState<
     ReadonlySet<string>
   >(() => new Set<string>());
@@ -1117,7 +1130,7 @@ export function McpMarket() {
             deviceFilter === "all" ? undefined : deviceFilter === "desktop",
           locale: overviewLocale,
         }),
-        fetchMcpCategories(resolved.id),
+        fetchMcpCategories(resolved.id, overviewLocale),
       ]);
       if (catalogGenerationRef.current !== generation) return;
       loadedCatalogWorkspaceIdRef.current = resolved.id;
@@ -1315,7 +1328,7 @@ export function McpMarket() {
         fetchMcpCatalog(nextWorkspaceId, { locale: overviewLocale }),
         // Refresh categories too, or the facet + bucketing keep the previous
         // workspace's taxonomy after a switch.
-        fetchMcpCategories(nextWorkspaceId),
+        fetchMcpCategories(nextWorkspaceId, overviewLocale),
       ]);
       if (workspaceIdRef.current !== nextWorkspaceId) return;
       loadedCatalogWorkspaceIdRef.current = nextWorkspaceId;

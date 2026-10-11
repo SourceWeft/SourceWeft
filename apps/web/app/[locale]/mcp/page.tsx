@@ -84,7 +84,8 @@ export async function generateMetadata({
       url: `${SITE_URL}/mcp`,
     },
     // Search, facet, and paged permutations are infinite and add nothing over
-    // the directory itself, so they stay crawlable but out of the index.
+    // the directory itself, so they stay out of the index; robots.ts also
+    // keeps the search and facet ones out of the crawl.
     ...(listView ? NO_INDEX_METADATA : {}),
     title: t("title"),
     twitter: {
@@ -230,7 +231,7 @@ export default async function PublicMcpMarketPage({
   const params = await searchParams;
   const [authState, categoriesResponse] = await Promise.all([
     resolveInitialLandingAuthState(),
-    listPublicMcpCategories(),
+    listPublicMcpCategories(locale),
   ]);
   const categories = categoriesResponse.items;
   const categoryNames = mcpCategoryNames(categories);

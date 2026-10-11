@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const client = vi.hoisted(() => ({ getMcp: vi.fn(), listMcp: vi.fn() }));
+const client = vi.hoisted(() => ({
+  getMcp: vi.fn(),
+  listMcp: vi.fn(),
+  listMcpCategories: vi.fn(),
+}));
 const cacheCalls = vi.hoisted(
   () => [] as { keys: string[]; options: { revalidate?: number } }[],
 );
@@ -32,11 +36,17 @@ vi.mock("@sourceweft/market-sdk", () => {
     constructor(readonly options: { baseUrl: string }) {}
     getMcp = client.getMcp;
     listMcp = client.listMcp;
+    listMcpCategories = client.listMcpCategories;
   }
   return { MarketClient, MarketClientError };
 });
 
-import { getPublicMcpDetail, listPublicMcp } from "./market-mcp";
+import {
+  getPublicMcpDetail,
+  listPublicMcp,
+  listPublicMcpCategories,
+  requirePublicMcpCategories,
+} from "./market-mcp";
 
 const versions = [{ status: "published", version: "1.0.0" }];
 const source = {
@@ -122,5 +132,21 @@ describe("listPublicMcp", () => {
       limit: 100,
       locale: "zh-TW",
     });
+  });
+});
+
+describe("categories", () => {
+  it("asks the market for the categories in the page's language", async () => {
+    const response = {
+      items: [{ description: "股票", id: "c1", name: "金融", slug: "finance" }],
+    };
+    client.listMcpCategories.mockResolvedValue(response);
+    for (const read of [listPublicMcpCategories, requirePublicMcpCategories]) {
+      client.listMcpCategories.mockClear();
+      expect(await read("zh-TW")).toEqual(response);
+      expect(client.listMcpCategories).toHaveBeenCalledWith({
+        locale: "zh-TW",
+      });
+    }
   });
 });

@@ -440,6 +440,8 @@
     },
     "detail": {
       "metaFallback": "MCP 服務",
+      "metaTitle": "{name} MCP 服務",
+      "metaDescriptionOverview": "{name}：{summary}",
       "breadcrumbHome": "首頁",
       "breadcrumbServers": "MCP 服務",
       "updated": "更新於 {date}",
@@ -3555,6 +3557,7 @@
       "fallbackMetaTitle": "代理程式技能",
       "metaTitle": "{name} 代理程式技能",
       "metaDescription": "{name}：{description} 檢視完整的 SKILL.md、檔案、版本、授權條款和來源。",
+      "metaDescriptionOverview": "{name}：{summary}",
       "noLicense": "無授權條款",
       "by": "作者",
       "repository": "儲存庫",

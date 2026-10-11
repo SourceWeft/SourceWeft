@@ -14,6 +14,7 @@ import {
   type MarketSkillLocale,
 } from "@sourceweft/market-sdk";
 
+import type { Locale } from "@sourceweft/i18n/locales";
 import { internalApiBaseUrl } from "./internal-api-base-url";
 
 function marketClient() {
@@ -68,15 +69,19 @@ export async function listPublicSkills(
   }
 }
 
+// The locale is an argument, so it is part of each read's cache key.
 const cachedListSkillCategories = unstable_cache(
-  async () => marketClient().listSkillCategories(),
+  async (locale: Locale) => marketClient().listSkillCategories({ locale }),
   ["public-skills-categories"],
   { revalidate: SKILL_REVALIDATE_SECONDS },
 );
 
-export async function listPublicSkillCategories(): Promise<ListMarketSkillCategoriesResponse> {
+/** Every skill category with its count, named in the page's language. */
+export async function listPublicSkillCategories(
+  locale: Locale,
+): Promise<ListMarketSkillCategoriesResponse> {
   try {
-    return await cachedListSkillCategories();
+    return await cachedListSkillCategories(locale);
   } catch {
     return { items: [], total: 0 };
   }
@@ -87,8 +92,10 @@ export async function listPublicSkillCategories(): Promise<ListMarketSkillCatego
  * must use this: with the swallowing variant an outage is indistinguishable
  * from "no such category" and would 404 every category page at once.
  */
-export function requirePublicSkillCategories(): Promise<ListMarketSkillCategoriesResponse> {
-  return cachedListSkillCategories();
+export function requirePublicSkillCategories(
+  locale: Locale,
+): Promise<ListMarketSkillCategoriesResponse> {
+  return cachedListSkillCategories(locale);
 }
 
 // The locale is an argument, so it is part of each read's cache key: the AI

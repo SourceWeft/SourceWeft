@@ -138,3 +138,19 @@ test("skill submissions address the async ingest endpoints with encoded ids and 
   // The synchronous `/skills/registry/submit` endpoint no longer exists.
   assert.equal("submitRegistrySkill" in client, false);
 });
+
+test("workspace category lists ask for the reader's language", async () => {
+  const { client, paths } = recordingClient();
+  await client.listWorkspaceMarketMcpCategories("workspace", {
+    locale: "zh-TW",
+  });
+  await client.listWorkspaceMarketMcpCategories("workspace");
+  await client.listSkillCatalogCategories("workspace", { locale: "zh-CN" });
+  await client.listSkillCatalogCategories("workspace");
+  assert.deepEqual(paths, [
+    "/v1/workspaces/workspace/market/mcp/categories?locale=zh-TW",
+    "/v1/workspaces/workspace/market/mcp/categories",
+    "/v1/workspaces/workspace/skills/catalog/categories?locale=zh-CN",
+    "/v1/workspaces/workspace/skills/catalog/categories",
+  ]);
+});

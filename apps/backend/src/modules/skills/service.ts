@@ -35,7 +35,7 @@ import {
   validateCustomSkillFileInput,
 } from "./custom-validation";
 import { and, asc, eq, ilike, ne, or, sql } from "drizzle-orm";
-import { LOCALE_IDS } from "@sourceweft/i18n";
+import { LOCALE_IDS, type Locale } from "@sourceweft/i18n";
 import {
   SKILLS_CATALOG_DEFAULT_PAGE_SIZE,
   type SkillCatalogSort,
@@ -633,7 +633,7 @@ export class ContentSkillsService {
    * The market's categories, each with how many community skills this viewer
    * would find under it — the same visibility the catalog lists by.
    */
-  async listCatalogCategories(input: { userId: string }) {
+  async listCatalogCategories(input: { userId: string; locale: Locale }) {
     return { items: await listSkillCatalogCategoryCounts(input) };
   }
 

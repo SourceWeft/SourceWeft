@@ -9,10 +9,10 @@
  * automation" and "databases" say nothing useful about a skill.
  */
 
-export type SkillCategoryDefinition = {
+import type { TranslatedCatalogCategory } from "../../../shared/catalog-category-text";
+
+export type SkillCategoryDefinition = TranslatedCatalogCategory & {
   slug: string;
-  name: string;
-  description: string;
 };
 
 export const SKILL_FALLBACK_CATEGORY_SLUG = "other";
@@ -26,76 +26,136 @@ export const skillCategoryDefinitions: readonly SkillCategoryDefinition[] = [
     slug: "documents-office",
     name: "Documents & Office",
     description: "Word, PowerPoint, Excel, PDF and other office files.",
+    zhCN: {
+      name: "文档与办公",
+      description: "Word、PowerPoint、Excel、PDF 及其他办公文件。",
+    },
   },
   {
     slug: "writing-content",
     name: "Writing & Content",
     description: "Drafting, editing, translation and content production.",
+    zhCN: {
+      name: "写作与内容",
+      description: "起草、编辑、翻译与内容制作。",
+    },
   },
   {
     slug: "research-analysis",
     name: "Research & Analysis",
     description: "Literature review, investigation and structured reasoning.",
+    zhCN: {
+      name: "研究与分析",
+      description: "文献综述、调查研究与结构化推理。",
+    },
   },
   {
     slug: "data-analytics",
     name: "Data & Analytics",
     description: "Data cleaning, SQL, statistics and visualization.",
+    zhCN: {
+      name: "数据与分析",
+      description: "数据清洗、SQL、统计与可视化。",
+    },
   },
   {
     slug: "design-creative",
     name: "Design & Creative",
     description: "Visual design, branding, art, image and video work.",
+    zhCN: {
+      name: "设计与创意",
+      description: "视觉设计、品牌、艺术、图像与视频创作。",
+    },
   },
   {
     slug: "development",
     name: "Software Development",
     description: "Writing, reviewing, testing and debugging code.",
+    zhCN: {
+      name: "软件开发",
+      description: "编写、审查、测试与调试代码。",
+    },
   },
   {
     slug: "devops-cloud",
     name: "DevOps & Cloud",
     description: "Deployment, infrastructure, CI/CD and operations.",
+    zhCN: {
+      name: "DevOps 与云端",
+      description: "部署、基础设施、CI/CD 与运维。",
+    },
   },
   {
     slug: "ai-agents",
     name: "AI & Agents",
     description: "Prompting, agent workflows, MCP servers and skill authoring.",
+    zhCN: {
+      name: "AI 与智能体",
+      description: "提示词、智能体工作流、MCP 服务与技能编写。",
+    },
   },
   {
     slug: "productivity-workflow",
     name: "Productivity & Workflow",
     description: "Planning, meetings, task management and personal workflow.",
+    zhCN: {
+      name: "效率与工作流",
+      description: "计划、会议、任务管理与个人工作流。",
+    },
   },
   {
     slug: "communication",
     name: "Communication",
     description: "Email, announcements, team and customer communication.",
+    zhCN: {
+      name: "沟通",
+      description: "邮件、公告，以及团队与客户沟通。",
+    },
   },
   {
     slug: "marketing-sales",
     name: "Marketing & Sales",
     description: "SEO, campaigns, copy, outreach and sales enablement.",
+    zhCN: {
+      name: "营销与销售",
+      description: "SEO、营销活动、文案、客户拓展与销售赋能。",
+    },
   },
   {
     slug: "business-finance",
     name: "Business & Finance",
     description: "Strategy, finance, legal and operations.",
+    zhCN: {
+      name: "商业与财务",
+      description: "战略、财务、法务与运营。",
+    },
   },
   {
     slug: "learning-education",
     name: "Learning & Education",
     description: "Teaching, tutoring, study methods and explanations.",
+    zhCN: {
+      name: "学习与教育",
+      description: "教学、辅导、学习方法与讲解。",
+    },
   },
   {
     slug: "security",
     name: "Security",
     description: "Security review, threat modelling and hardening.",
+    zhCN: {
+      name: "安全",
+      description: "安全审查、威胁建模与安全加固。",
+    },
   },
   {
     slug: SKILL_FALLBACK_CATEGORY_SLUG,
     name: "Other",
     description: "Skills that do not fit another category.",
+    zhCN: {
+      name: "其他",
+      description: "不属于其他分类的技能。",
+    },
   },
 ];
 
