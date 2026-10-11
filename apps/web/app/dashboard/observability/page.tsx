@@ -3187,6 +3187,7 @@ export default function ObservabilityPage() {
   const loadMcpRuns = React.useCallback(
     async (cursor?: string | null) => {
       if (!selectedWorkspaceId) {
+        setLoadingMcpRuns(false);
         setMcpRuns([]);
         setMcpActionRuns([]);
         setMcpNextCursor(null);
