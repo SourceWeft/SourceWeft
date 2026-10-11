@@ -720,6 +720,7 @@ export default function SkillDetailPage() {
                   catalogId={detail.skill.catalogId}
                   key={`owner-${detail.skill.skillId}-${claimRevision}`}
                   onChanged={() => void refreshDetail()}
+                  slug={detail.skill.slug}
                   workspaceId={workspace.id}
                 />
               ) : null}

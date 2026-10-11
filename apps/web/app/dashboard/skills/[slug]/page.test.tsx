@@ -52,6 +52,13 @@ vi.mock("../_components/skill-claim-panel", () => ({
 vi.mock("../_components/skill-introduction", () => ({
   SkillIntroduction: () => null,
 }));
+const ownerListing = vi.hoisted(() => ({ props: vi.fn() }));
+vi.mock("../_components/skill-owner-listing", () => ({
+  SkillOwnerListing: (props: Record<string, unknown>) => {
+    ownerListing.props(props);
+    return null;
+  },
+}));
 
 let view: Mounted;
 let container: HTMLDivElement;
@@ -190,4 +197,26 @@ test("without the param nothing is asked", async () => {
   await renderPage();
   expect(prompt()).toBeNull();
   expect(navigation.replace).not.toHaveBeenCalled();
+});
+
+test("hands the author panel of a community skill its public market slug", async () => {
+  navigation.search = "";
+  api.getSkillCatalogDetailBySlug.mockResolvedValue(
+    detail({
+      catalogId: "skill-1:v1",
+      slug: "gh-ada-skills-pdf",
+      sourceType: "registry_github",
+      visibility: "public",
+    }),
+  );
+  await renderPage();
+  // The slug the market serves the skill under (skill_definitions.slug), from
+  // the loaded skill rather than the address bar.
+  expect(ownerListing.props).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      catalogId: "skill-1:v1",
+      slug: "gh-ada-skills-pdf",
+      workspaceId: "ws-1",
+    }),
+  );
 });

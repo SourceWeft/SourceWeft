@@ -6,7 +6,9 @@ import { toast } from "sonner";
 import type { OwnerSkillListing } from "@sourceweft/contracts";
 import { Switch } from "@sourceweft/ui-web/components/ui/switch";
 
+import { publicWebBaseUrl } from "../../../../lib/public-runtime-config";
 import { contentClient } from "../../../../lib/sdk";
+import { CatalogBadgeSnippet } from "../../../_components/market/catalog-badge-snippet";
 import { ownerListingView } from "./skill-market-standing";
 
 /**
@@ -18,17 +20,23 @@ import { ownerListingView } from "./skill-market-standing";
  * Mounted for every community skill; the route answers 404 for anyone who is
  * not the author — the importer of an unclaimed skill included — and then
  * this renders nothing, so nobody else learns it exists.
+ *
+ * While the skill is listed, the author also gets its "Listed on SourceWeft"
+ * README badge: `slug` is the skill's public market slug.
  */
 export function SkillOwnerListing({
   workspaceId,
   catalogId,
+  slug,
   onChanged,
 }: {
   workspaceId: string;
   catalogId: string;
+  slug: string;
   onChanged?: () => void;
 }) {
   const t = useTranslations("dashboardSkillsMarket");
+  const tb = useTranslations("catalogBadge");
   const [listing, setListing] = React.useState<OwnerSkillListing | null>(null);
   const [busy, setBusy] = React.useState(false);
 
@@ -98,6 +106,16 @@ export function SkillOwnerListing({
           onCheckedChange={(checked) => void change(checked)}
         />
       </div>
+      {view.state === "listed" ? (
+        <CatalogBadgeSnippet
+          className="mt-4 border-t border-border pt-4"
+          display="inline"
+          intro={tb("ownerHint")}
+          siteUrl={publicWebBaseUrl()}
+          surface="skill_owner"
+          target={{ kind: "skill", key: slug }}
+        />
+      ) : null}
     </section>
   );
 }
