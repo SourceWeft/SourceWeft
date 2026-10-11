@@ -43,6 +43,7 @@ import {
 } from "../middleware/auth-session";
 import { ApiError, ApiResponse } from "../response/api-response";
 import { cachedJson } from "../response/cached-json";
+import { parseLocaleQuery } from "./query-params";
 
 function booleanQuery(value: string | undefined) {
   if (value === undefined) {
@@ -85,15 +86,11 @@ export function registerMarketRoutes(app: Hono) {
   });
 
   app.get("/v1/mcp/categories", async (c) => {
-    const locale = marketMcpLocaleSchema
-      .optional()
-      .safeParse(c.req.query("locale") || undefined);
-    if (!locale.success) {
-      throw ApiError.validation(
-        locale.error.flatten() as Record<string, unknown>,
-      );
-    }
-    return cachedJson(c, listMcpCategories(locale.data), { maxAge: 300 });
+    const locale = parseLocaleQuery(
+      marketMcpLocaleSchema,
+      c.req.query("locale"),
+    );
+    return cachedJson(c, listMcpCategories(locale), { maxAge: 300 });
   });
 
   // Registered before `/v1/mcp/:identifier` so the literal segment wins.
@@ -111,18 +108,11 @@ export function registerMarketRoutes(app: Hono) {
 
   app.get("/v1/mcp/:identifier", async (c) => {
     // The language of the AI overview; English when not given.
-    const locale = marketMcpLocaleSchema
-      .optional()
-      .safeParse(c.req.query("locale") || undefined);
-    if (!locale.success) {
-      throw ApiError.validation(
-        locale.error.flatten() as Record<string, unknown>,
-      );
-    }
-    const record = await findMcp(
-      c.req.param("identifier"),
-      { locale: locale.data },
+    const locale = parseLocaleQuery(
+      marketMcpLocaleSchema,
+      c.req.query("locale"),
     );
+    const record = await findMcp(c.req.param("identifier"), { locale });
     if (!record) {
       throw ApiError.notFound("MCP item not found");
     }

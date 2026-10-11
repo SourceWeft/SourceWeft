@@ -30,6 +30,7 @@ import {
 } from "../../middleware/auth-session";
 import { ApiError, ApiResponse } from "../../response/api-response";
 import { logger } from "../../../shared/logger";
+import { parseLocaleQuery } from "../query-params";
 import { ensureObjectBody, requireRouteParam } from "./helpers";
 
 async function resolveSkillContext(c: import("hono").Context) {
@@ -188,19 +189,15 @@ export function registerSkillRoutes(app: Hono) {
   app.get("/skills/catalog/categories", async (c) => {
     const { session } = await resolveSkillContext(c);
     // The language of each category's name and description.
-    const locale = marketSkillLocaleSchema
-      .optional()
-      .safeParse(c.req.query("locale") || undefined);
-    if (!locale.success) {
-      throw ApiError.validation(
-        locale.error.flatten() as Record<string, unknown>,
-      );
-    }
+    const locale = parseLocaleQuery(
+      marketSkillLocaleSchema,
+      c.req.query("locale"),
+    );
     return ApiResponse.success(
       c,
       await contentSkillsService.listCatalogCategories({
         userId: getSessionUserId(session),
-        locale: locale.data ?? "en",
+        locale: locale ?? "en",
       }),
     );
   });

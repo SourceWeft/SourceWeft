@@ -1,7 +1,11 @@
 // @vitest-environment jsdom
+import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { marketItemSummarySchema } from "@sourceweft/market-contracts";
 
+import { deepMergeMessages } from "@sourceweft/i18n/catalog";
+import enMessages from "@/messages/en.json";
+import zhCNMessages from "@/messages/zh-CN.json";
 import { flush, mountWithIntl, unmountAll } from "@/test/react";
 
 import { McpMarket } from "./mcp-market";
@@ -151,5 +155,99 @@ describe("McpMarket ?mcp= deep link", { timeout: 30_000 }, () => {
     expect(document.body.textContent).toContain("On Page");
     expect(dialog()).toBeNull();
     expect(api.getWorkspaceMarketMcp).not.toHaveBeenCalled();
+  });
+});
+
+describe("McpMarket categories", { timeout: 30_000 }, () => {
+  const tooling = marketItemSummarySchema.parse({
+    ...summary("io.github.o/tooling", "Tooling"),
+    categories: ["developer-tools"],
+  });
+  const zhCN = {
+    locale: "zh-CN",
+    messages: deepMergeMessages(enMessages, zhCNMessages),
+  };
+  const unavailable =
+    zhCNMessages.dashboardMcpPanel.filters.categoriesUnavailable;
+
+  function categoryFacet() {
+    return [...document.querySelectorAll("details")].find((node) =>
+      node.querySelector("summary")?.textContent?.includes("分类"),
+    );
+  }
+  function card(name: string) {
+    return [...document.querySelectorAll("article")].find((node) =>
+      node.textContent?.includes(name),
+    );
+  }
+
+  beforeEach(() => {
+    api.listWorkspaceMarketMcp.mockResolvedValue({
+      items: [{ install: null, market: tooling }],
+      nextCursor: null,
+    });
+  });
+
+  it("says the categories are unavailable instead of showing a built-in English list", async () => {
+    api.listWorkspaceMarketMcpCategories.mockRejectedValue(
+      new Error("categories down"),
+    );
+    await mountWithIntl(<McpMarket />, zhCN);
+    await flush(6);
+
+    for (const english of [
+      "Developer Tools",
+      "Databases",
+      "Browser Automation",
+    ])
+      expect(document.body.textContent).not.toContain(english);
+    // Without names, a card shows no category rather than a raw slug.
+    expect(card("Tooling")).toBeDefined();
+    expect(card("Tooling")?.textContent?.toLowerCase()).not.toContain(
+      "developer-tools",
+    );
+    const facet = categoryFacet();
+    expect(facet?.textContent).toContain("全部");
+    expect(unavailable).toBeTruthy();
+    expect(facet?.textContent).toContain(unavailable);
+  });
+
+  it("still says how many categories are selected when a later load fails", async () => {
+    api.listWorkspaceMarketMcpCategories
+      .mockResolvedValueOnce({
+        items: [{ slug: "developer-tools", name: "开发者工具" }],
+      })
+      .mockRejectedValue(new Error("categories down"));
+    await mountWithIntl(<McpMarket />, zhCN);
+    await flush(6);
+    const choice = [
+      ...(categoryFacet()?.querySelectorAll("button") ?? []),
+    ].find((node) => node.textContent?.includes("开发者工具"));
+    expect(choice).toBeDefined();
+    await act(async () => choice!.click());
+    await flush(6);
+
+    // The selection still filters the list, so the facet must still show it.
+    const summary = categoryFacet()?.querySelector("summary")?.textContent;
+    expect(categoryFacet()?.textContent).toContain(unavailable);
+    expect(summary).toContain("已选 1 个");
+  });
+
+  it("shows the categories again once a later load gets them", async () => {
+    api.listWorkspaceMarketMcpCategories
+      .mockRejectedValueOnce(new Error("categories down"))
+      .mockResolvedValue({
+        items: [{ slug: "developer-tools", name: "开发者工具" }],
+      });
+    const first = await mountWithIntl(<McpMarket />, zhCN);
+    await flush(6);
+    expect(categoryFacet()?.textContent).toContain(unavailable);
+    await first.unmount();
+
+    await mountWithIntl(<McpMarket />, zhCN);
+    await flush(6);
+    expect(categoryFacet()?.textContent).toContain("开发者工具");
+    expect(categoryFacet()?.textContent).not.toContain(unavailable);
+    expect(card("Tooling")?.textContent).toContain("开发者工具");
   });
 });

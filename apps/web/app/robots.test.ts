@@ -64,4 +64,19 @@ describe("robots.txt", () => {
     expect(blocked("/blog?tab=latest")).toBe(false);
     expect(blocked("/pricing?type=team")).toBe(false);
   });
+
+  it("keeps React Server Component payloads out of the crawl on every page", () => {
+    for (const url of [
+      "/?_rsc=1ld0r",
+      "/download?_rsc=a1b2c",
+      "/zh-TW/download?_rsc=a1b2c",
+      "/zh-CN/mcp?category=finance&_rsc=x9",
+      "/skills/pdf-forms?_rsc=x9",
+    ]) {
+      expect(blocked(url), url).toBe(true);
+    }
+    for (const url of ["/", "/download", "/zh-CN/mcp", "/skills/pdf-forms"]) {
+      expect(blocked(url), url).toBe(false);
+    }
+  });
 });

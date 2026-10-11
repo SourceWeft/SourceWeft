@@ -5,6 +5,8 @@ import {
   getSkillCategoryDefinition,
   SKILL_FALLBACK_CATEGORY_SLUG,
   skillCategoryDefinitions,
+  skillCategoryId,
+  skillCategoryRows,
 } from "./taxonomy";
 
 test("every category slug is unique and the fallback exists", () => {
@@ -107,4 +109,28 @@ test("every skill category carries its Simplified Chinese name and description",
       definition.slug,
     );
   }
+});
+
+test("category rows carry exactly the skill_categories columns, in display order", () => {
+  const rows = skillCategoryRows();
+  assert.equal(rows.length, skillCategoryDefinitions.length);
+  rows.forEach((row, index) => {
+    const definition = skillCategoryDefinitions[index]!;
+    // Only the table's columns: a translation (or any later field) on a
+    // definition never rides along into an insert.
+    assert.deepEqual(Object.keys(row).sort(), [
+      "description",
+      "id",
+      "name",
+      "slug",
+      "sortOrder",
+    ]);
+    assert.deepEqual(row, {
+      id: skillCategoryId(definition.slug),
+      slug: definition.slug,
+      name: definition.name,
+      description: definition.description,
+      sortOrder: index,
+    });
+  });
 });

@@ -27,7 +27,6 @@ import {
 import { toast } from "sonner";
 import { useLocale, useTranslations } from "next-intl";
 import type { SkillCatalogCategory } from "@sourceweft/contracts";
-import { marketSkillLocaleSchema } from "@sourceweft/market-contracts";
 import { Badge } from "@sourceweft/ui-web/components/ui/badge";
 import { Button } from "@sourceweft/ui-web/components/ui/button";
 import {
@@ -44,6 +43,7 @@ import {
   SheetTitle,
 } from "@sourceweft/ui-web/components/ui/sheet";
 import { cn } from "@sourceweft/ui-web/lib/utils";
+import { catalogLocale } from "../../../../lib/i18n/catalog-locale";
 import { contentClient, workspaceClient } from "../../../../lib/sdk";
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
 import { SkillIcon } from "../../../_components/site-icons";
@@ -800,8 +800,7 @@ function SkillsGalleryView({
   const t = useTranslations("dashboardSkills");
   const tm = useTranslations("dashboardSkillsMarket");
   // Category names come back in the viewer's language; English for any other.
-  const parsedLocale = marketSkillLocaleSchema.safeParse(useLocale());
-  const categoryLocale = parsedLocale.success ? parsedLocale.data : "en";
+  const categoryLocale = catalogLocale(useLocale());
   const dashboardState = useDashboardChatState();
   const [workspace, setWorkspace] = React.useState<ResolvedWorkspace | null>(
     null,
