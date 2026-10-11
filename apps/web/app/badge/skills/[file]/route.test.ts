@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { renderListedBadgeSvg } from "../../../../lib/catalog-badge";
+import {
+  LISTED_BADGE_ETAG,
+  renderListedBadgeSvg,
+} from "../../../../lib/catalog-badge";
 
 const market = vi.hoisted(() => ({ getPublicSkill: vi.fn() }));
 vi.mock("../../../../lib/market-skills", () => ({
@@ -43,7 +46,7 @@ describe("GET /badge/skills/<slug>.svg", () => {
       "content-security-policy":
         "default-src 'none'; style-src 'unsafe-inline'; sandbox",
       "content-type": "image/svg+xml; charset=utf-8",
-      etag: '"sw-listed-v1"',
+      etag: LISTED_BADGE_ETAG,
       "x-content-type-options": "nosniff",
       "x-robots-tag": "noindex",
     });
@@ -94,10 +97,10 @@ describe("GET /badge/skills/<slug>.svg", () => {
 
   it("answers 304 to a matching If-None-Match", async () => {
     const response = await get("gh-ada-skills-pdf.svg", {
-      "if-none-match": '"sw-listed-v1"',
+      "if-none-match": LISTED_BADGE_ETAG,
     });
     expect(response.status).toBe(304);
     expect(await response.text()).toBe("");
-    expect(response.headers.get("etag")).toBe('"sw-listed-v1"');
+    expect(response.headers.get("etag")).toBe(LISTED_BADGE_ETAG);
   });
 });

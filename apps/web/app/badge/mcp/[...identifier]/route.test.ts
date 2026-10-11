@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { renderListedBadgeSvg } from "../../../../lib/catalog-badge";
+import {
+  LISTED_BADGE_ETAG,
+  renderListedBadgeSvg,
+} from "../../../../lib/catalog-badge";
 
 const market = vi.hoisted(() => ({ getPublicMcpManifest: vi.fn() }));
 vi.mock("../../../../lib/market-mcp", () => ({
@@ -48,7 +51,7 @@ describe("GET /badge/mcp/<identifier>.svg", () => {
       "content-security-policy":
         "default-src 'none'; style-src 'unsafe-inline'; sandbox",
       "content-type": "image/svg+xml; charset=utf-8",
-      etag: '"sw-listed-v1"',
+      etag: LISTED_BADGE_ETAG,
       "x-content-type-options": "nosniff",
       "x-robots-tag": "noindex",
     });
@@ -112,9 +115,9 @@ describe("GET /badge/mcp/<identifier>.svg", () => {
 
   it("answers 304 to a matching If-None-Match, once the server is known to be listed", async () => {
     for (const tag of [
-      '"sw-listed-v1"',
-      'W/"sw-listed-v1"',
-      '"other", "sw-listed-v1"',
+      LISTED_BADGE_ETAG,
+      `W/${LISTED_BADGE_ETAG}`,
+      `"other", ${LISTED_BADGE_ETAG}`,
       "*",
     ]) {
       const response = await get(["io.github.o%2Fweather.svg"], {
@@ -122,18 +125,19 @@ describe("GET /badge/mcp/<identifier>.svg", () => {
       });
       expect(response.status).toBe(304);
       expect(await response.text()).toBe("");
-      expect(response.headers.get("etag")).toBe('"sw-listed-v1"');
+      expect(response.headers.get("etag")).toBe(LISTED_BADGE_ETAG);
       expect(response.headers.get("cache-control")).toContain("max-age=3600");
     }
+    // The hand-numbered tag the badge first shipped with is stale now.
     const stale = await get(["io.github.o%2Fweather.svg"], {
-      "if-none-match": '"sw-listed-v0"',
+      "if-none-match": '"sw-listed-v1"',
     });
     expect(stale.status).toBe(200);
 
     market.getPublicMcpManifest.mockRejectedValue({ status: 404 });
     expectNotFound(
       await get(["io.github.o%2Fweather.svg"], {
-        "if-none-match": '"sw-listed-v1"',
+        "if-none-match": LISTED_BADGE_ETAG,
       }),
     );
   });

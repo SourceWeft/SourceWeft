@@ -15,12 +15,6 @@ export type CatalogBadgeUrls = { badgeUrl: string; detailUrl: string };
 /** The badge's text alternative. English: READMEs are read worldwide. */
 export const LISTED_BADGE_ALT = "Listed on SourceWeft";
 
-/**
- * Every listed entry gets the same picture, so one constant ETag serves them
- * all. Bump the version whenever the picture changes.
- */
-export const LISTED_BADGE_ETAG = '"sw-listed-v1"';
-
 // Lets analytics tell badge visits apart from other GitHub referrals.
 const BADGE_CAMPAIGN = "utm_source=readme&utm_medium=badge";
 
@@ -123,3 +117,23 @@ const LISTED_BADGE_SVG = [
 export function renderListedBadgeSvg() {
   return LISTED_BADGE_SVG;
 }
+
+/**
+ * A strong ETag for a badge picture: FNV-1a (32-bit) over its UTF-16 code
+ * units. Plain arithmetic, since the snippet panel loads this module in the
+ * browser too. It only has to change when the picture does.
+ */
+export function badgeEtag(svg: string) {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < svg.length; index += 1) {
+    hash ^= svg.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `"sw-listed-${(hash >>> 0).toString(16).padStart(8, "0")}"`;
+}
+
+/**
+ * Every listed entry gets the same picture, so one ETag serves them all. It
+ * is derived from the picture, so changing the SVG changes it.
+ */
+export const LISTED_BADGE_ETAG = badgeEtag(LISTED_BADGE_SVG);

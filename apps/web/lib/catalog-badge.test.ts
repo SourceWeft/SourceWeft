@@ -8,6 +8,7 @@ import {
   LISTED_BADGE_ETAG,
   LISTED_BADGE_MARK_PATH,
   LISTED_BADGE_WIDTH,
+  badgeEtag,
   badgeHtml,
   badgeMarkdown,
   catalogBadgeUrls,
@@ -148,8 +149,27 @@ describe("renderListedBadgeSvg", () => {
     expect(svg).toContain(`d="${iconPath}"`);
   });
 
-  it("is the same every time, and versioned by its ETag", () => {
+  it("is the same every time, and tagged by a hash of itself", () => {
     expect(renderListedBadgeSvg()).toBe(svg);
-    expect(LISTED_BADGE_ETAG).toBe('"sw-listed-v1"');
+    expect(LISTED_BADGE_ETAG).toBe(badgeEtag(svg));
+    expect(LISTED_BADGE_ETAG).toMatch(/^"sw-listed-[0-9a-f]{8}"$/);
+  });
+});
+
+describe("badgeEtag", () => {
+  it("changes whenever the picture does", () => {
+    const svg = renderListedBadgeSvg();
+    const recoloured = svg.replace('fill="#555"', 'fill="#556"');
+    expect(recoloured).not.toBe(svg);
+    expect(badgeEtag(recoloured)).not.toBe(badgeEtag(svg));
+    expect(badgeEtag(`${svg} `)).not.toBe(badgeEtag(svg));
+    expect(badgeEtag(svg)).toBe(badgeEtag(`${svg}`));
+  });
+
+  it("is FNV-1a over the picture, a strong quoted tag", () => {
+    // FNV-1a 32-bit known answers.
+    expect(badgeEtag("")).toBe('"sw-listed-811c9dc5"');
+    expect(badgeEtag("a")).toBe('"sw-listed-e40c292c"');
+    expect(badgeEtag("foobar")).toBe('"sw-listed-bf9cf968"');
   });
 });
