@@ -40,13 +40,14 @@ type Executor = Pick<typeof db, "insert">;
 /**
  * Makes sure an `mcp_categories` row exists for each slug, with the
  * taxonomy's current name and description, in one statement; returns their
- * ids in order, without repeats.
+ * ids in slug order, without repeats. Federation and the AI overview both
+ * call this concurrently, so every writer locks the rows in that one order.
  */
 export async function upsertMcpCategories(
   executor: Executor,
   slugs: readonly string[],
 ): Promise<string[]> {
-  const unique = [...new Set(slugs)];
+  const unique = [...new Set(slugs)].sort();
   if (unique.length === 0) return [];
   await executor
     .insert(mcpCategories)
