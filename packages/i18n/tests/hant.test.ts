@@ -14,6 +14,15 @@ test("repairs OpenCC's word-splitting slips", () => {
   assert.equal(toTaiwanTraditional("批准并发布"), "核准並發布");
   // OpenCC reads "上复" as 上覆 (to overlay), leaving 覆制, which is no word.
   assert.equal(toTaiwanTraditional("在页面上复制"), "在頁面上複製");
+  assert.equal(toTaiwanTraditional("页上复制"), "頁上複製");
+});
+
+test("the 覆制 repair is anchored on 上, not every 覆制 boundary", () => {
+  // OpenCC gets these right on its own: 覆 belongs to the preceding word and
+  // 制度 is the next one. A bare "覆制" glossary entry would rewrite them into
+  // 顛複製度 / 答複製度.
+  assert.equal(toTaiwanTraditional("颠覆制度"), "顛覆制度");
+  assert.equal(toTaiwanTraditional("答复制度"), "答覆制度");
 });
 
 test("leaves placeholders and ICU syntax alone", () => {
