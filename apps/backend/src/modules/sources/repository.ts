@@ -220,7 +220,10 @@ export async function listSourceRecords(input: {
             .orderBy(desc(sources.updatedAt), desc(sources.id));
 
   const pageRows = !treeView && input.limit ? rows.slice(0, input.limit) : rows;
-  const nextRow = !treeView && input.limit ? (rows[input.limit] ?? null) : null;
+  const nextRow =
+    !treeView && input.limit && rows.length > input.limit
+      ? pageRows.at(-1)
+      : null;
 
   return {
     items: pageRows.map(mapSource),
@@ -311,7 +314,7 @@ export async function listSourceMentionRecords(input: {
     .limit(input.limit + 1);
 
   const pageRows = rows.slice(0, input.limit);
-  const nextRow = rows[input.limit] ?? null;
+  const nextRow = rows.length > input.limit ? pageRows.at(-1) : null;
   return {
     items: pageRows.map((row) => ({
       id: row.id,

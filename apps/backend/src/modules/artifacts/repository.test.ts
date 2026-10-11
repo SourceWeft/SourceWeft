@@ -396,6 +396,6 @@ test("artifact summary query keeps limit-plus-one cursor pagination", async () =
   assert.ok(result.nextCursor);
   assert.deepEqual(
     JSON.parse(Buffer.from(result.nextCursor, "base64url").toString("utf8")),
-    { createdAt: "2026-08-23T01:00:00.000Z", id: "older" },
+    { createdAt: "2026-08-23T02:00:00.000Z", id: "newer" },
   );
 });

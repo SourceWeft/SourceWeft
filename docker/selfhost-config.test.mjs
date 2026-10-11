@@ -60,6 +60,31 @@ test("backend containers prepare the database before their command; Web and util
     new RegExp(`^CMD \\["node", "${WEB_SERVER_SCRIPT}"\\]$`, "m"),
   );
 });
+
+test("explicit migrations own preparation even when automatic migrations are disabled", () => {
+  const env = {
+    DATABASE_URL: "postgresql://unused/database",
+    MIGRATION_ENABLED: "false",
+  };
+  for (const command of [
+    ["node", resolve("apps/backend/dist/launch.js"), "migrate"],
+    [process.execPath, "apps/backend/dist/launch.js", "migrate"],
+    ["pnpm", "--filter", "@sourceweft/backend", "migrate"],
+    ["pnpm", "--filter", "@sourceweft/backend", "run", "migrate"],
+  ]) {
+    assert.equal(databasePreparationCommand(env, command), null);
+  }
+  // The exception must not bypass readiness checks for service startup or an
+  // unrelated command that happens to contain the word "migrate".
+  for (const command of [
+    ["node", "apps/backend/dist/launch.js", "api"],
+    ["node", "unrelated.js", "migrate"],
+    ["pnpm", "--filter", "web", "migrate"],
+    ["pnpm", "--filter", "@sourceweft/backend", "start:api"],
+  ]) {
+    assert.equal(databasePreparationCommand(env, command)[1].at(-1), "prepare");
+  }
+});
 test("README initializer generates independent secrets and never overwrites an existing installation", () => {
   const dir = mkdtempSync(join(tmpdir(), "sourceweft-init-test-"));
   try {

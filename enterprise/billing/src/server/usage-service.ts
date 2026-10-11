@@ -139,7 +139,7 @@ export class BillingUsageService {
         const entries = await this.store.listLedger(
           account.teamId,
           undefined,
-          undefined,
+          { actorUserId: account.userId },
           client,
         );
         const usageByFeature = new Map<string, BillingUsageItem>();
@@ -240,7 +240,7 @@ export class BillingUsageService {
       options,
     );
     const items = rows.slice(0, safeLimit);
-    const nextRow = rows[safeLimit] ?? null;
+    const nextRow = rows.length > safeLimit ? items.at(-1) : null;
 
     return {
       teamId: normalizedTeamId,

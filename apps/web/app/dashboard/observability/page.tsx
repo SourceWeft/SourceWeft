@@ -1,6 +1,7 @@
 "use client";
 
 import { TraceListSkeletonRows, TraceSkeletonBlock, TraceSkeletonLine } from "./trace-loading-skeleton";
+import { ALL_WORKSPACES, useObservabilityWorkspaceScope } from "./use-workspace-scope";
 
 import { useLocale as useDisplayLocale } from "next-intl";
 import { parsePolicyPayload } from "@sourceweft/contracts/llm-observability";
@@ -73,7 +74,6 @@ const TRACE_TREE_ROW_HEIGHT_PX = 48;
 const TRACE_LOG_ROW_HEIGHT_PX = 49;
 const TRACE_VIRTUALIZE_THRESHOLD = 120;
 const MCP_RUN_LIMIT = 50;
-const ALL_WORKSPACES = "__all__";
 const EMPTY_TREE_ROWS: TreeRow[] = [];
 const NOISY_MESSAGE_FIELDS = new Set([
   "additional_kwargs",
@@ -3107,9 +3107,8 @@ export default function ObservabilityPage() {
   const [filtersVisible, setFiltersVisible] = React.useState(true);
   const [filtersDrawerOpen, setFiltersDrawerOpen] = React.useState(false);
   const [timelineDialogOpen, setTimelineDialogOpen] = React.useState(false);
-  const [selectedWorkspaceScope, setSelectedWorkspaceScope] = React.useState<
-    string | null
-  >(workspaceId ?? (organizationId ? ALL_WORKSPACES : null));
+  const [selectedWorkspaceScope, setSelectedWorkspaceScope] =
+    useObservabilityWorkspaceScope({ organizationId, workspaceId, workspaces });
   const listRequestIdRef = React.useRef(0);
   const mcpRequestIdRef = React.useRef(0);
   const detailRequestIdRef = React.useRef(0);
@@ -3117,14 +3116,6 @@ export default function ObservabilityPage() {
   const selectedWorkspaceId = allWorkspacesSelected
     ? null
     : selectedWorkspaceScope;
-
-  React.useEffect(() => {
-    if (!selectedWorkspaceScope) {
-      setSelectedWorkspaceScope(
-        workspaceId ?? (organizationId ? ALL_WORKSPACES : null),
-      );
-    }
-  }, [organizationId, selectedWorkspaceScope, workspaceId]);
 
   const loadTraces = React.useCallback(
     async (cursor?: string | null) => {
@@ -3270,6 +3261,7 @@ export default function ObservabilityPage() {
 
   React.useEffect(() => {
     listRequestIdRef.current += 1;
+    mcpRequestIdRef.current += 1;
     detailRequestIdRef.current += 1;
     setTraces([]);
     setDetail(null);
@@ -3414,7 +3406,7 @@ export default function ObservabilityPage() {
         void switchWorkspace(nextWorkspaceId);
       }
     },
-    [switchWorkspace],
+    [setSelectedWorkspaceScope, switchWorkspace],
   );
 
   const clearFilters = React.useCallback(() => {

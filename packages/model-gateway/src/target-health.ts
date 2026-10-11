@@ -22,6 +22,8 @@
  * not poison each other.
  */
 
+import type { GatewayExecutionMode } from "./types";
+
 const DEFAULT_BASE_COOLDOWN_MS = 10_000;
 const DEFAULT_MAX_COOLDOWN_MS = 600_000;
 
@@ -29,6 +31,7 @@ type TargetHealthKeyInput = {
   provider: string;
   baseUrl: string;
   providerModel: string;
+  routeDecision?: { mode: GatewayExecutionMode };
 };
 
 export function targetHealthKey(target: TargetHealthKeyInput): string {
@@ -55,6 +58,9 @@ export class TargetHealthRegistry {
   }
 
   markFailure(target: TargetHealthKeyInput): void {
+    // BYOK uses another account's credentials even when its endpoint/model
+    // matches GLOBAL. It must neither poison nor reset shared route health.
+    if (target.routeDecision?.mode === "BYOK") return;
     const key = targetHealthKey(target);
     const consecutiveFailures =
       (this.states.get(key)?.consecutiveFailures ?? 0) + 1;
@@ -70,10 +76,12 @@ export class TargetHealthRegistry {
   }
 
   markSuccess(target: TargetHealthKeyInput): void {
+    if (target.routeDecision?.mode === "BYOK") return;
     this.states.delete(targetHealthKey(target));
   }
 
   isCoolingDown(target: TargetHealthKeyInput): boolean {
+    if (target.routeDecision?.mode === "BYOK") return false;
     const state = this.states.get(targetHealthKey(target));
     return state !== undefined && state.unhealthyUntilMs > this.now();
   }

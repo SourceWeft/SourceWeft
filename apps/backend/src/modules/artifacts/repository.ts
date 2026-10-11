@@ -1007,7 +1007,7 @@ export async function listArtifactRecords(input: {
 
   const limit = input.limit ?? 100;
   const items = rows.slice(0, limit).map(mapArtifact);
-  const nextRow = rows[limit] ?? null;
+  const nextRow = rows.length > limit ? rows[limit - 1] : null;
   return {
     items,
     nextCursor: nextRow
@@ -1087,7 +1087,7 @@ export async function listArtifactSummaryRecords(input: {
 
   const limit = input.limit ?? 100;
   const visibleRows = rows.slice(0, limit);
-  const nextRow = rows[limit] ?? null;
+  const nextRow = rows.length > limit ? visibleRows.at(-1) : null;
   return {
     items: visibleRows.map((row) => ({
       ...row,
