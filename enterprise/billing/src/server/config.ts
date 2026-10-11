@@ -118,11 +118,19 @@ function parsePlanFamily(value: string | undefined, fallback: PlanFamily) {
   return normalized;
 }
 
-function parseWaffoEnvironment(value: string | undefined): "test" | "prod" {
-  const mode = value?.trim().toLowerCase() ?? "test";
-  if (mode !== "test" && mode !== "prod")
-    throw new Error("Invalid WAFFO_ENVIRONMENT");
-  return mode;
+/**
+ * Waffo follows the same `*_TEST_MODE` boolean as Creem and Stripe. The retired
+ * `WAFFO_ENVIRONMENT` name is rejected instead of being read, so a stale
+ * deployment cannot silently keep pointing at the wrong Waffo environment.
+ */
+function parseWaffoEnvironment(
+  env: Readonly<Record<string, string | undefined>>,
+): "test" | "prod" {
+  if (env.WAFFO_ENVIRONMENT !== undefined)
+    throw new Error(
+      "WAFFO_ENVIRONMENT is no longer supported; set WAFFO_TEST_MODE=true or false",
+    );
+  return parseBoolean(env.WAFFO_TEST_MODE, true) ? "test" : "prod";
 }
 
 export function readBillingConfig(
@@ -204,7 +212,7 @@ export function readBillingConfig(
     waffo: {
       merchantId: env.WAFFO_MERCHANT_ID?.trim() || "",
       privateKey: env.WAFFO_PRIVATE_KEY || "",
-      environment: parseWaffoEnvironment(env.WAFFO_ENVIRONMENT),
+      environment: parseWaffoEnvironment(env),
     },
     catalog: {
       individualProMonthlyAmountCents: parsePositiveNumber(

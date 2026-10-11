@@ -65,7 +65,7 @@ For a provider's test checkout, keep commercial enabled, set
 `SOURCEWEFT_SAAS_ENABLED=true`, select `BACKEND_BILLING_PROVIDER=creem`, `stripe`
 or `waffo`, and configure that provider's test credentials, signed webhook and
 product catalog. Use `CREEM_TEST_MODE=true`, `STRIPE_TEST_MODE=true`, or
-`WAFFO_ENVIRONMENT=test`, respectively. Missing required configuration fails
+`WAFFO_TEST_MODE=true`, respectively (all default to test mode). Missing required configuration fails
 startup; the application never switches provider or falls back to unmetered mode.
 
 To handle Waffo refunds, add `refund.succeeded` and `refund.failed` to the
