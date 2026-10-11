@@ -43,6 +43,11 @@ export default function robots(): MetadataRoute.Robots {
           "/organization/",
           "/settings/",
           ...catalogPermutations(),
+          // React Server Component payloads (`?_rsc=`) are what client
+          // navigation and link prefetch fetch; the HTML already carries the
+          // first render's payload, so crawling them only spends crawl budget.
+          "/*?_rsc=",
+          "/*&_rsc=",
         ],
         userAgent: "*",
       },
