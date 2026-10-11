@@ -3,6 +3,7 @@ import { createReadStream } from "node:fs";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { digest } from "./desktop-release-artifacts.mjs";
+import { publicationTag } from "./verify-release-config.mjs";
 import {
   compareVersions,
   downloadConfig,
@@ -220,7 +221,7 @@ if (
         const prepared = await prepareUpdateManifest(
           config,
           "release-installers",
-          process.env.GITHUB_REF_NAME,
+          publicationTag(),
           await readFile(process.env.UPDATE_NOTES_FILE, "utf8"),
           process.env.UPDATE_PUB_DATE,
           undefined,

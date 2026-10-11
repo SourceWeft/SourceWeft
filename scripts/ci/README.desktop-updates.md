@@ -157,6 +157,40 @@ Do not enable `PUBLIC_DESKTOP_RECOVERY_RELEASE` until the final public download
 URLs and historical upgrade tests have passed. The shipped recovery setting stays
 empty; this build mode does not turn on user prompts.
 
+### Resume an alias-preparation failure without rebuilding
+
+`desktop-release-recovery.yml` is a publication-only recovery path for a completed
+first-attempt tag release whose only failed step was `Prepare fixed-name desktop
+downloads`. Run it from reviewed `main`, specifying the existing tag and original
+release run ID. It does not move the tag, rebuild images/installers or use the
+private updater signing key.
+
+The preflight requires the tag's commit to belong to main, the original run to
+match the tag/repository/workflow/commit, every required quality check and all
+four native builds to have passed, and the exact unexpired original artifacts
+to remain available. It also verifies the already-published image's content
+digests and both architectures' revision/version labels. Other failure types,
+ambiguous rerun histories and missing checks are rejected.
+
+After downloading the original artifacts, recovery rechecks installer hashes and
+all updater signatures. Aliases are byte-for-byte copies outside the original
+artifact tree. GitHub uploads do not overwrite existing assets; required asset
+sizes and server-reported SHA-256 digests must match before publication. Public
+CDN verification and conditional channel promotion reuse the normal publishers.
+An already-public matching Release is left public while missing publication
+steps are retried; mismatched existing bytes abort recovery.
+
+```sh
+gh workflow run desktop-release-recovery.yml --ref main \
+  -f release_tag=v0.3.0-rc.7 -f source_run_id=38103386319
+```
+
+`DESKTOP_RELEASE_TAG` selects the immutable target for publication tools without
+overwriting the maintenance workflow's `GITHUB_REF_NAME`. Release notes and
+self-hosting files come from the original tag, not the maintenance checkout.
+Recovery shares the original tag's workflow concurrency group and does not enable
+the Web recovery prompt. Receipts are saved as `recovery-receipts-*` artifacts.
+
 Official clients use `https://download.sourceweft.com` with no storage prefix.
 The update CLI rejects a different host/prefix; custom branded builds must define
 their own compiled trust and publication configuration explicitly.

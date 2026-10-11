@@ -1,0 +1,148 @@
+name: Resume verified desktop publication
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing immutable release tag
+        required: true
+        type: string
+      source_run_id:
+        description: Original release run that failed only at fixed-name alias preparation
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: release-refs/tags/${{ inputs.release_tag }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: desktop-release
+    timeout-minutes: 30
+    env:
+      DESKTOP_RELEASE_TAG: ${{ inputs.release_tag }}
+      RECOVERY_RUN_ID: ${{ inputs.source_run_id }}
+      DOWNLOADS_S3_ENDPOINT: ${{ vars.DOWNLOADS_S3_ENDPOINT }}
+      DOWNLOADS_S3_BUCKET: ${{ vars.DOWNLOADS_S3_BUCKET }}
+      DOWNLOADS_S3_REGION: ${{ vars.DOWNLOADS_S3_REGION }}
+      DOWNLOADS_S3_FORCE_PATH_STYLE: ${{ vars.DOWNLOADS_S3_FORCE_PATH_STYLE }}
+      DOWNLOADS_S3_PREFIX: ${{ vars.DOWNLOADS_S3_PREFIX }}
+      DOWNLOADS_PUBLIC_BASE_URL: ${{ vars.DOWNLOADS_PUBLIC_BASE_URL }}
+      TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
+      DESKTOP_UPDATE_VERIFIER: scripts/ci/update-verifier/target/release/sourceweft-update-verifier
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.19.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Verify immutable source, passed checks, artifacts and existing image
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/ci/desktop-release-recovery.mjs preflight
+      - name: Select original publication policy
+        run: echo "DESKTOP_PUBLICATION_POLICY=${{ steps.source.outputs.policy }}" >> "$GITHUB_ENV"
+      - name: Validate publication destinations
+        env:
+          DOWNLOADS_S3_ACCESS_KEY_ID: ${{ secrets.DOWNLOADS_S3_ACCESS_KEY_ID }}
+          DOWNLOADS_S3_SECRET_ACCESS_KEY: ${{ secrets.DOWNLOADS_S3_SECRET_ACCESS_KEY }}
+        run: |
+          node scripts/ci/publish-downloads.mjs validate
+          node scripts/ci/publish-desktop-updates.mjs validate
+      - name: Download unchanged original desktop artifacts
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.source_run_id }}
+          pattern: desktop-release-*-${{ steps.source.outputs.sha }}
+          path: release-installers
+          merge-multiple: true
+      - uses: dtolnay/rust-toolchain@1.94.1
+      - name: Build signature verifier
+        run: cargo build --locked --release --manifest-path scripts/ci/update-verifier/Cargo.toml
+      - name: Prepare notes from immutable tag metadata
+        run: node scripts/ci/prepare-update-notes.mjs
+      - name: Reverify every original installer and updater signature
+        run: node scripts/ci/desktop-release-recovery.mjs verify-packages
+      - name: Prepare fixed-name aliases without modifying originals
+        run: node scripts/ci/desktop-download-aliases.mjs
+      - name: Package original self-hosting files deterministically
+        shell: bash
+        run: |
+          git archive --format=tar '${{ steps.source.outputs.sha }}' docker/docker-compose.yml docker/nginx.conf docker/.env.example docker/README.md docker/README.zh-CN.md docker/compose.legacy-volumes.yml | gzip -n > "sourceweft-selfhost-${DESKTOP_RELEASE_TAG}.tar.gz"
+      - name: Prepare draft without overwriting existing assets
+        if: steps.source.outputs.published != 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.source.outputs.tag }}
+          target_commitish: ${{ steps.source.outputs.sha }}
+          name: ${{ steps.source.outputs.tag }}
+          draft: true
+          overwrite_files: false
+          prerelease: ${{ steps.source.outputs.prerelease == 'true' }}
+          fail_on_unmatched_files: true
+          files: |
+            sourceweft-selfhost-${{ steps.source.outputs.tag }}.tar.gz
+            release-download-aliases/*
+            release-installers/**/*.dmg
+            release-installers/**/*.exe
+            release-installers/**/*.AppImage
+            release-installers/**/*.app.tar.gz
+            release-installers/**/*.sig
+          body: |
+            Desktop repair release with verified Tauri updater signatures, plus self-hosting files for Web/Docker.
+
+            ${{ steps.source.outputs.policy == 'signed' && 'macOS installers are Developer ID signed and notarized; Windows installers are publisher-signed.' || 'These installers have no Apple Developer ID or Windows publisher certificate; macOS is not notarized. Operating systems may warn or block installation.' }}
+            Historical clients missing the updater key require one manual overwrite installation. Local device execution currently requires macOS.
+
+            Publication resumed using unchanged desktop artifacts and image from the original verified release build.
+          generate_release_notes: true
+      - name: Verify GitHub asset bytes
+        id: assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/ci/desktop-release-recovery.mjs verify-github
+      - name: Upload and verify public downloads
+        env:
+          DOWNLOADS_S3_ACCESS_KEY_ID: ${{ secrets.DOWNLOADS_S3_ACCESS_KEY_ID }}
+          DOWNLOADS_S3_SECRET_ACCESS_KEY: ${{ secrets.DOWNLOADS_S3_SECRET_ACCESS_KEY }}
+        run: node scripts/ci/publish-downloads.mjs upload
+      - name: Upload and verify application updates
+        env:
+          DOWNLOADS_S3_ACCESS_KEY_ID: ${{ secrets.DOWNLOADS_S3_ACCESS_KEY_ID }}
+          DOWNLOADS_S3_SECRET_ACCESS_KEY: ${{ secrets.DOWNLOADS_S3_SECRET_ACCESS_KEY }}
+        run: node scripts/ci/publish-desktop-updates.mjs upload
+      - name: Publish verified release
+        if: steps.source.outputs.published != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ steps.assets.outputs.release_id }}
+          RELEASE_PRERELEASE: ${{ steps.source.outputs.prerelease }}
+        run: gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" -F draft=false -F prerelease="$RELEASE_PRERELEASE" --jq .html_url
+      - name: Promote verified update and download channels
+        env:
+          DOWNLOADS_S3_ACCESS_KEY_ID: ${{ secrets.DOWNLOADS_S3_ACCESS_KEY_ID }}
+          DOWNLOADS_S3_SECRET_ACCESS_KEY: ${{ secrets.DOWNLOADS_S3_SECRET_ACCESS_KEY }}
+        run: |
+          node scripts/ci/publish-desktop-updates.mjs promote
+          node scripts/ci/publish-downloads.mjs promote
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: recovery-receipts-${{ github.run_id }}-${{ github.run_attempt }}
+          path: output/
+          if-no-files-found: ignore

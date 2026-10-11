@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import { basename, dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 import { digest, filesUnder } from "./desktop-release-artifacts.mjs";
-import { releaseVersion } from "./verify-release-config.mjs";
+import { releaseVersion, publicationTag } from "./verify-release-config.mjs";
 
 const manifestPath = "output/downloads/manifest.json";
 const immutableCache = "public, max-age=31536000, immutable";
@@ -416,7 +416,7 @@ if (
     const prepared = await prepareManifest(
       config,
       "release-installers",
-      process.env.GITHUB_REF_NAME,
+      publicationTag(),
       process.env.GITHUB_REPOSITORY,
       process.env.DESKTOP_PUBLICATION_POLICY ?? "candidate",
     );

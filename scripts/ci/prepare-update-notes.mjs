@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile, appendFile } from "node:fs/promises";
-import { releaseVersion } from "./verify-release-config.mjs";
-const { version } = releaseVersion(process.env.GITHUB_REF_NAME);
+import { releaseVersion, publicationTag } from "./verify-release-config.mjs";
+const { version } = releaseVersion(publicationTag());
 const entry = JSON.parse(
   await readFile(`apps/web/content/changelog/v${version}.json`, "utf8"),
 );
