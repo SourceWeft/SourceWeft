@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { basename, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 export function runtimeEnvironment(input) {
@@ -46,10 +47,32 @@ export function runtimeEnvironment(input) {
 /** The Web server the image runs by default (the Dockerfile CMD). */
 export const WEB_SERVER_SCRIPT = "/app/web-standalone/apps/web/server.js";
 
+const launcherScript = fileURLToPath(
+  new URL("../apps/backend/dist/launch.js", import.meta.url),
+);
+
+function runsExplicitMigration([command = "", ...args]) {
+  if (basename(command) === "node") {
+    return (
+      args.length === 2 &&
+      args[1] === "migrate" &&
+      resolve(args[0]) === launcherScript
+    );
+  }
+  if (basename(command) !== "pnpm") return false;
+  return (
+    args[0] === "--filter" &&
+    args[1] === "@sourceweft/backend" &&
+    ((args.length === 3 && args[2] === "migrate") ||
+      (args.length === 4 && args[2] === "run" && args[3] === "migrate"))
+  );
+}
+
 /**
  * The step a backend container runs before its command: bring the database
  * schema up to date (or, with MIGRATION_ENABLED=false, check it) under the
- * migration lock, whatever the backend command is. Two kinds of container skip
+ * migration lock. Explicit migration commands own that preparation themselves,
+ * including when automatic migrations are disabled. Two other container kinds skip
  * it: the Web server, which only reads the database and does not carry the
  * backend's configuration, and a container with no database — utility commands
  * such as `pnpm --version`.
@@ -57,13 +80,8 @@ export const WEB_SERVER_SCRIPT = "/app/web-standalone/apps/web/server.js";
 export function databasePreparationCommand(env, command = []) {
   if (!env.DATABASE_URL) return null;
   if (command.includes(WEB_SERVER_SCRIPT)) return null;
-  return [
-    process.execPath,
-    [
-      fileURLToPath(new URL("../apps/backend/dist/launch.js", import.meta.url)),
-      "prepare",
-    ],
-  ];
+  if (runsExplicitMigration(command)) return null;
+  return [process.execPath, [launcherScript, "prepare"]];
 }
 
 if (

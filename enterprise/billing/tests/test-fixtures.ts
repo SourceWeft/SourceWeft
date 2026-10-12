@@ -146,15 +146,26 @@ export class MemoryBillingStore implements BillingStore {
   async listLedger(
     teamId: string,
     limit?: number,
-    options?: { activityOnly?: boolean },
+    options?: {
+      activityOnly?: boolean;
+      actorUserId?: string;
+      cursor?: { createdAt: Date; id: string } | null;
+    },
   ) {
     const entries = this.ledgers.filter(
       (entry) =>
         entry.teamId === teamId &&
-        (!options?.activityOnly || entry.activityVisible),
+        (!options?.activityOnly || entry.activityVisible) &&
+        (!options?.actorUserId || entry.actorUserId === options.actorUserId) &&
+        (!options?.cursor ||
+          Date.parse(entry.createdAt) < options.cursor.createdAt.getTime() ||
+          (Date.parse(entry.createdAt) === options.cursor.createdAt.getTime() &&
+            entry.id < options.cursor.id)),
     );
     const sorted = [...entries].sort(
-      (left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt),
+      (left, right) =>
+        Date.parse(right.createdAt) - Date.parse(left.createdAt) ||
+        right.id.localeCompare(left.id),
     );
 
     return limit === undefined ? sorted : sorted.slice(0, limit);

@@ -11,7 +11,8 @@
     "build:edge": "wxt build --browser edge",
     "zip": "wxt zip --browser chrome",
     "zip:edge": "wxt zip --browser edge",
-    "check-types": "tsc --noEmit"
+    "check-types": "tsc --noEmit",
+    "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
     "@sourceweft/sdk": "workspace:*"

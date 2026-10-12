@@ -46,6 +46,12 @@ the auth and extension steps then also run only in that step.
 migrates, whatever `MIGRATION_ENABLED` says. Use it for a Kubernetes Job, a
 release pipeline, or the Compose `migrate` service.
 
+The image entrypoint lets this explicit command (and `node
+apps/backend/dist/launch.js migrate`) perform its own locked migration step.
+It does not first run the automatic readiness check, which would otherwise
+reject a pending schema when `MIGRATION_ENABLED=false` before the migration
+could run.
+
 Outside the image — running the backend from source with `pnpm start:*` —
 nothing migrates automatically: run `migrate` first, as with Dify's source
 deployment. Local development (`pnpm dev`) likewise uses

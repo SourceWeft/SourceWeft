@@ -4,7 +4,6 @@ import { validateThreadExecutionTarget } from "../devices/service";
 import type { ThreadExecutionTarget } from "@sourceweft/contracts";
 import { findCitationByMessageRank } from "../citations";
 import { sharingService } from "../sharing";
-import { updateArtifactsVisibilityForThread } from "../artifacts/repository";
 import { ContentError } from "../content/errors";
 import type { MessageRecord } from "../content/types";
 import { requireContentWorkspace } from "../workspace/guards";
@@ -579,31 +578,15 @@ class ContentThreadService {
       kind: "access_changed",
     }).catch(() => undefined);
 
-    // Going private withdraws external exposure, and the serve path now keys off
-    // the live share rather than the artifact's `visibility` flag. So revoke the
-    // artifacts' public shares BEFORE they inherit the `private` label below:
-    // revoking first means there is never an intermediate state of a `private`
-    // artifact still holding a live public token, even if the relabel step
-    // fails. Flipping back to workspace still requires a fresh publish — a
-    // revoked token stays dead and is never silently resurrected.
-    if (input.visibility === "private") {
-      await sharingService.revokeSharesForPrivatedThread({
-        teamId: workspace.organizationId,
-        workspaceId: workspace.id,
-        threadId: input.threadId,
-        actorUserId: input.userId,
-      });
-    }
-
-    // Artifacts inherit thread visibility, so re-sharing/hiding a thread re-labels its artifacts.
-    await updateArtifactsVisibilityForThread({
+    // Revocation and inherited artifact visibility already committed with the
+    // thread. Audit only those committed revocations, after releasing its lock.
+    await sharingService.recordSharesRevokedForPrivatedThread({
       teamId: workspace.organizationId,
-      workspaceId: workspace.id,
-      threadId: input.threadId,
-      threadVisibility: input.visibility,
+      actorUserId: input.userId,
+      artifactIds: updated.revokedArtifactIds,
     });
 
-    return { thread: updated };
+    return { thread: updated.thread };
   }
 
   async getInitialChatPreferences(input: {

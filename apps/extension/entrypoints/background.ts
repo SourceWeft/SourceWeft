@@ -11,6 +11,32 @@ type AuthTokens = {
 
 const STORAGE_KEY = "sourceweft.auth.tokens";
 const DEFAULT_SCOPE = "openid profile email offline_access";
+let authGeneration = 0;
+let signInAttempt = 0;
+let storageWrites: Promise<void> = Promise.resolve();
+let pendingRefresh: {
+  generation: number;
+  promise: Promise<AuthTokens>;
+} | null = null;
+
+class SessionChangedError extends Error {
+  constructor() {
+    super("The authentication session changed. Try again.");
+  }
+}
+
+class TokenExchangeError extends Error {
+  constructor(
+    message: string,
+    readonly oauthError?: string,
+  ) {
+    super(message);
+  }
+}
+
+function requireCurrentSession(generation: number) {
+  if (generation !== authGeneration) throw new SessionChangedError();
+}
 
 type ExtensionEnv = {
   VITE_API_BASE_URL?: string;
@@ -49,18 +75,30 @@ async function pkceChallenge(verifier: string) {
 }
 
 async function readTokens() {
+  await storageWrites;
   const stored = await chrome.storage.local.get(STORAGE_KEY);
   const value = stored[STORAGE_KEY] as AuthTokens | undefined;
   return value || null;
 }
 
-async function writeTokens(value: AuthTokens | null) {
-  if (!value) {
-    await chrome.storage.local.remove(STORAGE_KEY);
-    return;
-  }
+function queueStorageWrite(operation: () => Promise<void>) {
+  const write = storageWrites.then(operation);
+  storageWrites = write.then(
+    () => {},
+    () => {},
+  );
+  return write;
+}
 
-  await chrome.storage.local.set({ [STORAGE_KEY]: value });
+function writeTokens(value: AuthTokens | null, generation: number) {
+  // A generation check alone cannot cancel a chrome.storage write that has
+  // already started. Serialize writes so logout/new login always commits last.
+  return queueStorageWrite(async () => {
+    requireCurrentSession(generation);
+    if (value) await chrome.storage.local.set({ [STORAGE_KEY]: value });
+    else await chrome.storage.local.remove(STORAGE_KEY);
+    requireCurrentSession(generation);
+  });
 }
 
 function tokenIsExpired(tokens: AuthTokens, skewMs = 45_000) {
@@ -87,10 +125,13 @@ async function exchangeToken(body: URLSearchParams) {
   } | null;
 
   if (!response.ok || !payload?.access_token) {
-    throw new Error(
+    throw new TokenExchangeError(
       payload?.error_description ||
         payload?.error ||
         `Token exchange failed (${response.status})`,
+      response.status === 400 || response.status === 401
+        ? payload?.error
+        : undefined,
     );
   }
 
@@ -133,6 +174,8 @@ async function registerPublicClient(redirectUri: string) {
 }
 
 async function signInWithPkce() {
+  const generation = authGeneration;
+  const attempt = ++signInAttempt;
   const redirectUri = chrome.identity.getRedirectURL("provider_cb");
   const clientId = await registerPublicClient(redirectUri);
   const verifier = randomString(32);
@@ -184,23 +227,56 @@ async function signInWithPkce() {
     ...tokens,
     clientId,
   };
-  await writeTokens(stored);
+  requireCurrentSession(generation);
+  if (attempt !== signInAttempt) throw new SessionChangedError();
+  // Only a successful sign-in replaces the session. A cancelled attempt must
+  // not discard a concurrently rotated refresh credential for the old account.
+  await writeTokens(stored, ++authGeneration);
   return stored;
 }
 
-async function refreshTokens() {
+function refreshTokens(): Promise<AuthTokens> {
+  const generation = authGeneration;
+  if (pendingRefresh?.generation === generation) return pendingRefresh.promise;
+  const promise = refreshSession(generation);
+  pendingRefresh = { generation, promise };
+  void promise.then(
+    () => {
+      if (pendingRefresh?.promise === promise) pendingRefresh = null;
+    },
+    () => {
+      if (pendingRefresh?.promise === promise) pendingRefresh = null;
+    },
+  );
+  return promise;
+}
+
+async function refreshSession(generation: number) {
   const existing = await readTokens();
+  requireCurrentSession(generation);
   if (!existing?.refreshToken) {
     throw new Error("No refresh token available");
   }
 
-  const refreshed = await exchangeToken(
-    new URLSearchParams({
-      grant_type: "refresh_token",
-      refresh_token: existing.refreshToken,
-      client_id: existing.clientId,
-    }),
-  );
+  let refreshed;
+  try {
+    refreshed = await exchangeToken(
+      new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: existing.refreshToken,
+        client_id: existing.clientId,
+      }),
+    );
+  } catch (error) {
+    // Network/server failures leave the refresh credential usable. Only a
+    // definitive refresh-grant rejection ends this session.
+    if (
+      error instanceof TokenExchangeError &&
+      error.oauthError === "invalid_grant"
+    )
+      await writeTokens(null, generation);
+    throw error;
+  }
 
   const merged: AuthTokens = {
     ...existing,
@@ -208,12 +284,14 @@ async function refreshTokens() {
     refreshToken: refreshed.refreshToken || existing.refreshToken,
   };
 
-  await writeTokens(merged);
+  await writeTokens(merged, generation);
   return merged;
 }
 
 async function ensureAccessToken() {
+  const generation = authGeneration;
   const existing = await readTokens();
+  if (generation !== authGeneration) return null;
   if (!existing) {
     return null;
   }
@@ -224,9 +302,14 @@ async function ensureAccessToken() {
 
   try {
     return await refreshTokens();
-  } catch {
-    await writeTokens(null);
-    return null;
+  } catch (error) {
+    if (
+      error instanceof SessionChangedError ||
+      (error instanceof TokenExchangeError &&
+        error.oauthError === "invalid_grant")
+    )
+      return null;
+    throw error;
   }
 }
 
@@ -313,7 +396,12 @@ export default defineBackground({
             }
 
             if (command === "auth.sign-out") {
-              await writeTokens(null);
+              authGeneration += 1;
+              // This explicit removal must run even if a later sign-in starts
+              // and fails while we wait for an older storage write to finish.
+              await queueStorageWrite(() =>
+                chrome.storage.local.remove(STORAGE_KEY),
+              );
               sendResponse(ok({ signedOut: true }));
               return;
             }
@@ -328,7 +416,11 @@ export default defineBackground({
       },
     );
 
-    void ensureAccessToken();
+    void ensureAccessToken().catch(() => {
+      console.warn(
+        "[extension] Session refresh unavailable; will retry on the next request",
+      );
+    });
     // eslint-disable-next-line no-console
     console.log("[extension] background started");
   },

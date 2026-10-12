@@ -178,12 +178,15 @@ export async function revokeShareLink(input: {
  * while the artifacts were workspace-visible, and the flip withdraws it — a
  * later flip back must not silently re-arm the old tokens.
  */
-export async function revokeShareLinksForThreadArtifacts(input: {
-  teamId: string;
-  workspaceId: string;
-  threadId: string;
-}): Promise<string[]> {
-  const rows = await db
+export async function revokeShareLinksForThreadArtifacts(
+  input: {
+    teamId: string;
+    workspaceId: string;
+    threadId: string;
+  },
+  executor: Pick<typeof db, "update" | "select"> = db,
+): Promise<string[]> {
+  const rows = await executor
     .update(shareLinks)
     .set({ revokedAt: new Date() })
     .where(
@@ -193,7 +196,7 @@ export async function revokeShareLinksForThreadArtifacts(input: {
         isNull(shareLinks.revokedAt),
         inArray(
           shareLinks.targetId,
-          db
+          executor
             .select({ id: artifacts.id })
             .from(artifacts)
             .where(

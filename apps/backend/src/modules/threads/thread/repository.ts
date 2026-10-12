@@ -1,5 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { database } from "@sourceweft/db";
+import { database, db } from "@sourceweft/db";
+import { sql } from "drizzle-orm";
+import { updateArtifactsVisibilityForThread } from "../../artifacts/repository";
+import { revokeShareLinksForThreadArtifacts } from "../../sharing/store";
 import { toPostgresTextArray } from "../../sources/sql";
 import type { ThreadRecord } from "../../content/types";
 import {
@@ -29,9 +32,11 @@ type RawThreadRow = {
   persona_id: string | null;
   origin: ThreadRecord["origin"];
   created_by: string | null;
-  created_at: Date;
-  updated_at: Date;
-  last_message_at: Date | null;
+  // pg queries decode timestamps to Date; Drizzle raw transaction queries
+  // intentionally return timestamp strings instead.
+  created_at: Date | string;
+  updated_at: Date | string;
+  last_message_at: Date | string | null;
 };
 
 const THREAD_RETURNING_SQL = `
@@ -89,10 +94,10 @@ function mapRawThread(row: RawThreadRow, sourceCount = 0): ThreadRecord {
     personaId: row.persona_id,
     origin: row.origin,
     createdBy: row.created_by,
-    createdAt: row.created_at.toISOString(),
-    updatedAt: row.updated_at.toISOString(),
+    createdAt: new Date(row.created_at).toISOString(),
+    updatedAt: new Date(row.updated_at).toISOString(),
     lastMessageAt: row.last_message_at
-      ? row.last_message_at.toISOString()
+      ? new Date(row.last_message_at).toISOString()
       : null,
   };
 }
@@ -470,35 +475,49 @@ export async function updateThreadVisibilityRecord(input: {
   viewerUserId: string;
   visibility: ThreadRecord["visibility"];
 }) {
-  const result = await database.query<RawThreadRow>(
-    `
+  const updated = await db.transaction(async (tx) => {
+    // This update holds the thread row lock until all inherited visibility and
+    // public grants are committed. Other flips and artifact publishers (which
+    // acquire FOR SHARE on the thread) cannot interleave with these writes.
+    const result = await tx.execute<RawThreadRow>(sql`
       update threads
-      set visibility = $5,
+      set visibility = ${input.visibility},
           updated_at = now()
-      where id = $1
-        and team_id = $2
-        and workspace_id = $3
-        and created_by = $4
-      returning ${THREAD_RETURNING_SQL}
-    `,
-    [
-      input.threadId,
-      input.teamId,
-      input.workspaceId,
-      input.viewerUserId,
-      input.visibility,
-    ],
-  );
-  const row = result.rows[0];
-  if (!row) return null;
+      where id = ${input.threadId}
+        and team_id = ${input.teamId}
+        and workspace_id = ${input.workspaceId}
+        and created_by = ${input.viewerUserId}
+      returning ${sql.raw(THREAD_RETURNING_SQL)}
+    `);
+    const row = result.rows[0];
+    if (!row) return null;
+
+    const revokedArtifactIds =
+      input.visibility === "private"
+        ? await revokeShareLinksForThreadArtifacts(input, tx)
+        : [];
+    await updateArtifactsVisibilityForThread(
+      {
+        ...input,
+        threadVisibility: input.visibility,
+      },
+      tx,
+    );
+
+    return { row, revokedArtifactIds };
+  });
+  if (!updated) return null;
 
   const sourceCounts = await countUsedSourceIdsByThread({
     teamId: input.teamId,
     workspaceId: input.workspaceId,
-    threadIds: [row.id],
+    threadIds: [updated.row.id],
   });
 
-  return mapRawThread(row, sourceCounts.get(row.id) ?? 0);
+  return {
+    thread: mapRawThread(updated.row, sourceCounts.get(updated.row.id) ?? 0),
+    revokedArtifactIds: updated.revokedArtifactIds,
+  };
 }
 
 export async function updateThreadTitleIfMatches(input: {
