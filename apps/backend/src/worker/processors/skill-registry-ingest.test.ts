@@ -35,6 +35,7 @@ import {
   processSkillRegistryIngestJob,
   SKILL_INGEST_JOB_DEADLINE_MS,
   SKILL_INGEST_WORKER_CONCURRENCY,
+  skillIngestDeadlineMs,
 } from "./skill-registry-ingest";
 
 const job = (attemptsMade = 0, attempts = 3) => ({
@@ -51,6 +52,96 @@ beforeEach(() => {
 test("default import concurrency is two and attempt budget remains ten minutes", () => {
   assert.equal(SKILL_INGEST_WORKER_CONCURRENCY, 2);
   assert.equal(SKILL_INGEST_JOB_DEADLINE_MS, 600_000);
+});
+
+test("the attempt budget is ten minutes plus 50 ms a file, at most twenty minutes more", () => {
+  assert.equal(skillIngestDeadlineMs(0), 600_000);
+  assert.equal(skillIngestDeadlineMs(10), 600_500);
+  assert.equal(skillIngestDeadlineMs(7_527), 600_000 + 376_350);
+  assert.equal(skillIngestDeadlineMs(20_000), 600_000 + 1_000_000);
+  assert.equal(skillIngestDeadlineMs(100_000), 600_000 + 1_200_000);
+  assert.equal(skillIngestDeadlineMs(-5), 600_000);
+  assert.equal(skillIngestDeadlineMs(Number.NaN), 600_000);
+  assert.equal(skillIngestDeadlineMs(10, 1_000), 1_500);
+});
+
+test("a spent deadline aborts the run's signal and the job ends as a deadline failure", async () => {
+  // The pipeline maps a fired signal to REGISTRY_SUBMISSION_DEADLINE (see
+  // pipeline.test.ts); what is checked here is that the processor's own signal
+  // fires after `deadlineMs`, and that the failure is deterministic.
+  mocks.runPipeline.mockImplementation(
+    (input: { signal: AbortSignal }) =>
+      new Promise((_, reject) => {
+        input.signal.addEventListener("abort", () =>
+          reject(
+            new RegistrySubmissionError(
+              "REGISTRY_SUBMISSION_DEADLINE",
+              "The import did not finish within its time limit",
+            ),
+          ),
+        );
+      }),
+  );
+  await assert.rejects(
+    processSkillRegistryIngestJob(job(), { deadlineMs: 20 }),
+    (thrown) =>
+      thrown instanceof UnrecoverableError &&
+      thrown.message.includes("REGISTRY_SUBMISSION_DEADLINE"),
+  );
+  const signal = mocks.runPipeline.mock.calls[0]?.[0].signal as AbortSignal;
+  assert.equal(signal.aborted, true);
+  assert.equal((signal.reason as { name?: string }).name, "TimeoutError");
+});
+
+test("the deadline moves out once the file count is known, by 50 ms a file up to twenty minutes", async () => {
+  vi.useFakeTimers();
+  try {
+    let input!: { signal: AbortSignal; onFileCount: (count: number) => void };
+    let finish!: () => void;
+    mocks.runPipeline.mockImplementation(
+      (received: typeof input) =>
+        new Promise((resolve) => {
+          input = received;
+          finish = () => resolve({ status: "succeeded" });
+        }),
+    );
+    const running = processSkillRegistryIngestJob(job(), {
+      deadlineMs: 1_000,
+    });
+    await vi.advanceTimersByTimeAsync(999);
+    assert.equal(input.signal.aborted, false);
+
+    // 30,000 files would add 25 minutes; the extension is capped at 20.
+    input.onFileCount(30_000);
+    await vi.advanceTimersByTimeAsync(1);
+    assert.equal(input.signal.aborted, false, "base deadline no longer fires");
+    await vi.advanceTimersByTimeAsync(1_200_000 - 1);
+    assert.equal(input.signal.aborted, false, "extended deadline not yet due");
+    // A later, smaller count never pulls the deadline back in.
+    input.onFileCount(10);
+    await vi.advanceTimersByTimeAsync(1);
+    assert.equal(input.signal.aborted, true, "extended deadline fires");
+    assert.equal(
+      (input.signal.reason as { name?: string }).name,
+      "TimeoutError",
+    );
+
+    finish();
+    assert.deepEqual(await running, { status: "succeeded" });
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("a finished run leaves no deadline timer behind", async () => {
+  vi.useFakeTimers();
+  try {
+    mocks.runPipeline.mockResolvedValue({ status: "succeeded" });
+    await processSkillRegistryIngestJob(job(), { deadlineMs: 60_000 });
+    assert.equal(vi.getTimerCount(), 0);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test("the pipeline is told whether a transient failure will be retried", async () => {

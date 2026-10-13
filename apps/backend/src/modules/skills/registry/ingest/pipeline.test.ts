@@ -230,6 +230,31 @@ test("the GitHub helpers receive the job's abort signal", async () => {
   );
 });
 
+test("the file-count hook reaches whichever reader lists the files", async () => {
+  // Archive path: the zipball reader gets the hook with the signal.
+  skillsRead(["writer"]);
+  const onFileCount = vi.fn();
+  const controller = new AbortController();
+  await run({ signal: controller.signal, onFileCount });
+  assert.equal(mocks.readArchive.mock.calls[0]?.[2]?.onFileCount, onFileCount);
+  assert.equal(mocks.readArchive.mock.calls[0]?.[2]?.signal, controller.signal);
+
+  // Subtree path: the scoped reader gets it instead, before it fetches a file.
+  seedRow();
+  skillsRead(["writer"]);
+  const value = await mocks.readArchive();
+  const readSubtree = vi.fn<NonNullable<IngestDeps["readSubtree"]>>(
+    async () => value,
+  );
+  const injected = deps({
+    resolveSource: vi.fn(async () => ({ ...source, subpath: "skills/writer" })),
+    readSubtree,
+  });
+  await run({ deps: injected, signal: controller.signal, onFileCount });
+  assert.equal(readSubtree.mock.calls[0]?.[1]?.onFileCount, onFileCount);
+  assert.equal(readSubtree.mock.calls[0]?.[1]?.signal, controller.signal);
+});
+
 test("a deterministic failure marks the row failed with its code, even when retries remain, and writes no catalog rows", async () => {
   mocks.readArchive.mockRejectedValue(
     new RegistrySubmissionError("REGISTRY_SUBMISSION_NOT_SKILL", "No SKILL.md"),

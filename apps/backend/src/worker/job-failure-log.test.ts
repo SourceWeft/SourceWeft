@@ -66,3 +66,70 @@ test("worker job failure log includes connector error details", () => {
   assert.equal(log.errorCode, "CONNECTOR_SCHEMA_VALIDATION_FAILED");
   assert.equal(log.errorStatusCode, 400);
 });
+
+test("a failed database query is logged by its SQL head and parameter count, never the parameter values", () => {
+  // The shape of drizzle's DrizzleQueryError: `message` carries the SQL and
+  // every bound parameter, which for a 7,500-file bundle insert ran to several
+  // megabytes per attempt.
+  const params = Array.from({ length: 100_000 }, (_, i) => `param-value-${i}`);
+  const query = `insert into "skill_version_files" (${"col, ".repeat(400)}) values (${params.map(() => "?").join(", ")})`;
+  const error = new Error(
+    `Failed query: ${query}\nparams: ${params.join(",")}`,
+  );
+  error.name = "DrizzleQueryError";
+  Object.assign(error, {
+    query,
+    params,
+    cause: new Error(
+      "bind message supplies 100000 parameters, but prepared statement requires 65535",
+    ),
+  });
+  error.stack = `${error.name}: ${error.message}\n    at run (repository.ts:1:1)`;
+
+  const log = buildWorkerJobFailureLog(
+    {
+      id: "skill-registry-ingest-1",
+      name: "skill-registry-ingest",
+      attemptsMade: 1,
+      opts: { attempts: 3 },
+      data: { submissionId: "sub_1" },
+    } as never,
+    error,
+  );
+
+  const message = log.error as string;
+  const stack = log.stack as string;
+  assert.ok(message.length < 4096, `error field is ${message.length} chars`);
+  assert.ok(stack.length < 4096, `stack field is ${stack.length} chars`);
+  assert.ok(
+    message.startsWith('Failed query: insert into "skill_version_files"'),
+  );
+  assert.ok(message.includes("(100000 params)"));
+  assert.ok(message.includes("bind message supplies 100000 parameters"));
+  assert.ok(!message.includes("param-value-"));
+  assert.ok(!stack.includes("param-value-"));
+  assert.equal(log.errorName, "DrizzleQueryError");
+});
+
+test("an ordinary oversized error message and stack are capped", () => {
+  const error = new Error("x".repeat(10_000));
+  error.stack = `Error: ${"y".repeat(10_000)}\n    at somewhere`;
+  const log = buildWorkerJobFailureLog(undefined, error);
+  const message = log.error as string;
+  const stack = log.stack as string;
+  assert.ok(
+    message.length <= 4096 + 40,
+    `error field is ${message.length} chars`,
+  );
+  assert.ok(message.startsWith("x".repeat(4096)));
+  assert.ok(message.endsWith("…[truncated 5904 chars]"));
+  assert.ok(stack.length <= 4096 + 40, `stack field is ${stack.length} chars`);
+  assert.match(stack, /…\[truncated \d+ chars\]$/);
+});
+
+test("a short error message and stack are logged untouched", () => {
+  const error = new Error("boom");
+  const log = buildWorkerJobFailureLog(undefined, error);
+  assert.equal(log.error, "boom");
+  assert.equal(log.stack, error.stack);
+});

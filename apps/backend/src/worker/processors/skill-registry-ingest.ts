@@ -19,10 +19,72 @@ export const SKILL_INGEST_WORKER_CONCURRENCY =
   config.skillIngestWorkerConcurrency;
 
 /**
- * Wall-clock budget of one attempt. Delivered as an AbortSignal, so it cuts a
- * stalled GitHub transfer short and is checked between stages and skills.
+ * Wall-clock budget of one attempt before the source is listed. Delivered as
+ * an AbortSignal, so it cuts a stalled GitHub transfer short and is checked
+ * between stages and skills.
  */
 export const SKILL_INGEST_JOB_DEADLINE_MS = 10 * 60_000;
+/**
+ * Added per listed file once the count is known: the subtree transport fetches
+ * each file on its own, so a large repository needs more time than a small one
+ * even when nothing is wrong. Capped so a listing at the file limit cannot hold
+ * a worker slot indefinitely.
+ */
+export const SKILL_INGEST_PER_FILE_MS = 50;
+export const SKILL_INGEST_MAX_FILE_EXTENSION_MS = 20 * 60_000;
+
+/** The whole budget of an attempt that lists `fileCount` files. */
+export function skillIngestDeadlineMs(
+  fileCount: number,
+  baseMs = SKILL_INGEST_JOB_DEADLINE_MS,
+): number {
+  const files =
+    Number.isFinite(fileCount) && fileCount > 0 ? Math.floor(fileCount) : 0;
+  return (
+    baseMs +
+    Math.min(
+      files * SKILL_INGEST_PER_FILE_MS,
+      SKILL_INGEST_MAX_FILE_EXTENSION_MS,
+    )
+  );
+}
+
+/**
+ * A deadline that starts at `baseMs` and moves out, never in, once the file
+ * count is known. Its timer is unreferenced like `AbortSignal.timeout`'s, and
+ * cleared when the run ends, so a finished job keeps nothing alive.
+ */
+function startIngestDeadline(baseMs: number) {
+  const controller = new AbortController();
+  const startedAt = Date.now();
+  let budgetMs = baseMs;
+  let timer: NodeJS.Timeout | undefined;
+  const arm = () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(
+      () =>
+        controller.abort(
+          new DOMException("The ingest attempt timed out", "TimeoutError"),
+        ),
+      Math.max(0, startedAt + budgetMs - Date.now()),
+    );
+    timer.unref();
+  };
+  arm();
+  return {
+    signal: controller.signal,
+    onFileCount(count: number) {
+      const next = skillIngestDeadlineMs(count, baseMs);
+      if (controller.signal.aborted || next <= budgetMs) return;
+      budgetMs = next;
+      arm();
+    },
+    clear() {
+      if (timer) clearTimeout(timer);
+      timer = undefined;
+    },
+  };
+}
 
 const JOB_FAILED_CODE = "SKILL_INGEST_JOB_FAILED";
 
@@ -43,13 +105,15 @@ export async function processSkillRegistryIngestJob(
     );
   }
   const maxAttempts = job.opts?.attempts ?? 1;
+  const deadline = startIngestDeadline(
+    options.deadlineMs ?? SKILL_INGEST_JOB_DEADLINE_MS,
+  );
   let outcome: IngestRunOutcome;
   try {
     outcome = await runIngestPipeline({
       submissionId,
-      signal: AbortSignal.timeout(
-        options.deadlineMs ?? SKILL_INGEST_JOB_DEADLINE_MS,
-      ),
+      signal: deadline.signal,
+      onFileCount: deadline.onFileCount,
       willRetryTransient: job.attemptsMade + 1 < maxAttempts,
       deps: options.deps,
     });
@@ -69,6 +133,8 @@ export async function processSkillRegistryIngestJob(
     // spend the remaining attempts on it.
     const described = describeIngestError(error);
     throw new UnrecoverableError(`${described.code}: ${described.message}`);
+  } finally {
+    deadline.clear();
   }
   if (outcome.status === "deferred") {
     // A new job rather than this one retried: a BullMQ retry would come back

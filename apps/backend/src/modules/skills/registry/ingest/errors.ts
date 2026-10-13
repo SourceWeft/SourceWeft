@@ -1,3 +1,4 @@
+import { safeErrorMessage } from "../../../../shared/safe-error-text";
 import { isContentError } from "../../../content/errors";
 import { GitHubArchiveError } from "../../../market/parser/github-zip";
 import { GitHubRateLimitedError } from "../../../market/parser/github";
@@ -127,8 +128,7 @@ export function describeIngestError(error: unknown): IngestErrorDescription {
   ) {
     return { code: mapped.code, message: mapped.message };
   }
-  return {
-    code: INGEST_FAILED_CODE,
-    message: mapped instanceof Error ? mapped.message : String(mapped),
-  };
+  // Capped: the row is read back on every poll, and a failed bulk query's
+  // message carries every value it tried to bind.
+  return { code: INGEST_FAILED_CODE, message: safeErrorMessage(mapped) };
 }

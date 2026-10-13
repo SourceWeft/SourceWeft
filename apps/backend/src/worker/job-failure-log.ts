@@ -1,6 +1,7 @@
 import type { Job } from "bullmq";
 import { isConnectorError } from "../modules/connectors/errors";
 import { isContentError } from "../modules/content/errors";
+import { safeErrorMessage, safeErrorStack } from "../shared/safe-error-text";
 
 type LoggableJob = Pick<
   Job<Record<string, unknown>>,
@@ -73,13 +74,11 @@ export function buildWorkerJobFailureLog(
     type: job?.name || "unknown",
     attemptsMade: job?.attemptsMade ?? null,
     maxAttempts: job?.opts.attempts ?? 1,
-    retrying:
-      job && job.attemptsMade < (job.opts.attempts ?? 1)
-        ? true
-        : false,
-    error: error.message,
+    retrying: job && job.attemptsMade < (job.opts.attempts ?? 1) ? true : false,
+    // Never the raw message: a failed bulk query's names every bound value.
+    error: safeErrorMessage(error),
     errorName: error.name,
-    stack: error.stack,
+    stack: safeErrorStack(error),
   };
 
   if (job) {

@@ -1,5 +1,6 @@
 import { canUpgradeSupportingBundle } from "./bundle-projection";
 import { randomUUID } from "node:crypto";
+import { chunk } from "../../../shared/chunk";
 import { parseGithubStoragePointer } from "../storage/source-pointer";
 import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import {
@@ -778,15 +779,19 @@ export async function upsertRegistrySkillIndex(
     });
     // One manifest row per file. The bytes are the blob at `objectKey`;
     // `contentText` stays null for an `object` version.
-    await tx.insert(skillVersionFiles).values(
-      stored.files.map((file) => ({
-        ...file,
-        contentText: null,
-        id: randomUUID(),
-        skillVersionId,
-        createdAt: now,
-      })),
-    );
+    const fileRows = stored.files.map((file) => ({
+      ...file,
+      contentText: null,
+      id: randomUUID(),
+      skillVersionId,
+      createdAt: now,
+    }));
+    // PostgreSQL binds at most 65,535 parameters to one statement, and each
+    // row binds nine: a 7,527-file repository failed every attempt as a single
+    // insert. 5,000 rows a statement keeps the largest bundle well under it.
+    for (const rows of chunk(fileRows, 5000)) {
+      await tx.insert(skillVersionFiles).values(rows);
+    }
     // Recorded because nobody chose it: an admin wondering where the badge
     // went finds the version that took it.
     if (existing?.verified && takesCurrent) {
