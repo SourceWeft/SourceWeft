@@ -28,12 +28,22 @@ import {
 } from "./auth-error-i18n";
 import { resolveMailLocale } from "./mail-locale";
 import { mailDeliveryConfigured } from "../mail/delivery";
+import { createAuthMiddleware } from "better-auth/api";
 import { serializeAuthLogArgs } from "./auth-log-args";
+import {
+  logAuthSessionCreated,
+  logAuthUserCreated,
+  logDesktopHandoffCompleted,
+  resolveBetterAuthLogLevel,
+} from "./auth-activity-log";
 import {
   isPersonalOrganizationMetadata,
   parseSourceweftOrganizationKind,
   withSourceweftOrganizationKind,
 } from "./organization-metadata";
+
+/** Endpoint of the `oneTimeToken` plugin that the desktop deep link redeems. */
+const DESKTOP_HANDOFF_VERIFY_PATH = "/one-time-token/verify";
 
 function buildAcceptInvitationUrl(invitationId: string) {
   const url = new URL("/auth/accept-invitation", config.auth.webBaseUrl);
@@ -166,17 +176,25 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}): any {
         (process.env.BETTER_AUTH_LOG_LEVEL as
           "debug" | "info" | "warn" | "error" | undefined) || "info",
       log: (level, message, ...args) => {
+        const resolved = resolveBetterAuthLogLevel({ level, message, args });
         const meta =
-          args.length > 0 ? { args: serializeAuthLogArgs(args) } : undefined;
-        if (level === "debug") {
+          args.length > 0 || resolved.code
+            ? {
+                ...(resolved.code ? { code: resolved.code } : {}),
+                ...(args.length > 0
+                  ? { args: serializeAuthLogArgs(args) }
+                  : {}),
+              }
+            : undefined;
+        if (resolved.level === "debug") {
           logger.debug(`[BetterAuth] ${message}`, meta);
           return;
         }
-        if (level === "info") {
+        if (resolved.level === "info") {
           logger.info(`[BetterAuth] ${message}`, meta);
           return;
         }
-        if (level === "warn") {
+        if (resolved.level === "warn") {
           logger.warn(`[BetterAuth] ${message}`, meta);
           return;
         }
@@ -720,7 +738,23 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}): any {
     ],
     ...(isRuntimeMode
       ? {
+          // The desktop app redeems the deep-linked one-time token here; the
+          // handoff is complete once the verify endpoint has answered.
+          hooks: {
+            after: createAuthMiddleware(async (ctx) => {
+              if (ctx.path === DESKTOP_HANDOFF_VERIFY_PATH) {
+                logDesktopHandoffCompleted(ctx.context.returned);
+              }
+            }),
+          },
           databaseHooks: {
+            user: {
+              create: {
+                after: async (user) => {
+                  logAuthUserCreated(user);
+                },
+              },
+            },
             session: {
               delete: {
                 after: async (session) => {
@@ -730,7 +764,8 @@ export function createSourceweftAuth(options: SourceweftAuthOptions = {}): any {
                 },
               },
               create: {
-                after: async (session) => {
+                after: async (session, context) => {
+                  logAuthSessionCreated(session, context);
                   const { onboardingService } = await import("../onboarding");
                   await onboardingService.ensurePersonalTeamForUser({
                     userId: session.userId,

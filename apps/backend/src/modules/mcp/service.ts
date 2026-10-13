@@ -12,6 +12,7 @@ import type { Locale } from "@sourceweft/i18n";
 import { config } from "../../shared/config";
 import { createMcpRequestScope } from "./network";
 import { logger } from "../../shared/logger";
+import { shortId } from "../../shared/log-ids";
 import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
 import {
   decryptTeamSecret,
@@ -889,6 +890,14 @@ export class McpService {
     if (!install) {
       throw new McpError(500, "MCP_INSTALL_FAILED", "Failed to install MCP");
     }
+    // Success twin of the skill/MCP "install rejected" lines: catalog
+    // identifier and version only, never the manifest or endpoint.
+    logger.info("mcp.installed", {
+      teamId: shortId(workspace.organizationId),
+      workspaceId: shortId(workspace.id),
+      identifier: parsed.data.identifier,
+      version: parsed.data.version,
+    });
 
     const [installWithStatus] = await overlayUserCredentialStatus({
       teamId: workspace.organizationId,

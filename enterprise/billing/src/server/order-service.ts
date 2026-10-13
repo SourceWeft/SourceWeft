@@ -1,5 +1,6 @@
 import { BillingSubscriptionService } from "./subscription-service";
 import { assertSubscriptionPurchaseAllowed } from "./subscription-policy";
+import { shortId } from "./log-ids";
 import { createHash, randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
 import {
@@ -346,6 +347,18 @@ export class BillingOrderService {
     private readonly alerts?: BillingAlertSink,
     private readonly host?: BillingServiceHost,
   ) {}
+
+  /** One activity line per provider checkout session; no buyer details. */
+  private logCheckoutCreated(
+    order: Pick<BillingOrderState, "teamId" | "kind">,
+    provider: string,
+  ) {
+    this.host?.logger.info("billing.checkout_created", {
+      provider,
+      teamId: shortId(order.teamId),
+      kind: order.kind,
+    });
+  }
 
   async createPricingCheckout(input: {
     request: CreatePricingCheckoutRequest;
@@ -815,6 +828,7 @@ export class BillingOrderService {
       }));
       throw error;
     }
+    this.logCheckoutCreated(order, providerResult.provider);
     const updated = await updateOrderLocked(
       this.store,
       order.id,
@@ -905,6 +919,7 @@ export class BillingOrderService {
       });
       throw error;
     }
+    this.logCheckoutCreated(input.order, providerResult.provider);
     return this.store.runInTransaction(async (client) => {
       await this.store.lockSubscriptionTarget(
         String(input.order.metadata.subscriptionTarget),

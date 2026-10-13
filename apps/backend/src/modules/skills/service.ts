@@ -84,6 +84,7 @@ import { isMarketAdmin } from "../market/admin";
 import { normalizeGitHubSource } from "../market/parser/github";
 import { config } from "../../shared/config";
 import { logger } from "../../shared/logger";
+import { shortId } from "../../shared/log-ids";
 
 // Lexical registry search tuning. Kept small — the registry catalog is a
 // curated index, not a document corpus (skill-registry-index.md §4).
@@ -1128,6 +1129,7 @@ export class ContentSkillsService {
         workspaceSkill: mapWorkspaceSkill(row.enabled),
       };
     }
+    const installedVia = input.installedVia ?? "user";
     const workspaceSkill = await upsertWorkspaceSkill({
       teamId: input.teamId,
       workspaceId: input.workspaceId,
@@ -1136,7 +1138,14 @@ export class ContentSkillsService {
       enabledBy: input.userId,
       // Re-installing must not wipe the config of a skill already in place.
       configJson: input.configJson ?? row.enabled?.configJson,
-      installedVia: input.installedVia ?? "user",
+      installedVia,
+    });
+    // Success twin of the agent tool's "install rejected" line.
+    logger.info("skill.installed", {
+      teamId: shortId(input.teamId),
+      workspaceId: shortId(input.workspaceId),
+      slug: row.definition.slug,
+      installedVia,
     });
     return {
       ...describeInstallableRow(row),

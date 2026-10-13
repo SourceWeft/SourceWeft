@@ -6,6 +6,7 @@ import {
   publishThreadEvent,
   type ThreadEventKind,
 } from "../../../shared/notify-hub";
+import { logChatRunFinished } from "./run-activity-log";
 import type {
   ChatRunSnapshot,
   ChatThreadRunMode,
@@ -1163,6 +1164,12 @@ export async function finishChatThreadRun(input: {
   });
 
   const run = row ? mapRun(row) : null;
+  // Every terminal transition (runner, failure persistence, stale recovery)
+  // goes through this CAS, so the winner's row is the one place a run is
+  // reported finished exactly once.
+  if (run) {
+    logChatRunFinished(run);
+  }
   // Doubles as "assistant message finalized": the payload carries the message
   // ids so the client can reconcile the completed turn.
   emitRunEvent(run, "run_finished");

@@ -38,6 +38,7 @@ import type {
   DurableRunRequestSnapshot,
 } from "./types";
 import { logger } from "../../../shared/logger";
+import { logChatRunStarted } from "./run-activity-log";
 import {
   ACTIVE_RUN_CONSTRAINT,
   ATTACH_HEARTBEAT_MS,
@@ -627,6 +628,7 @@ export class DurableChatRunService {
         errorMessage: CLIENT_CANCELLED_MESSAGE,
       };
     }
+    logChatRunStarted(running);
     return running;
   }
 
