@@ -1,9 +1,83 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
+import { HttpClientError } from "@sourceweft/sdk";
+import { retryOnceOnServiceUnavailable } from "./dashboard-chat-request-retry";
 import {
   resolveWorkspaceSwitchTransition,
   type WorkspaceSwitchTransitionState,
 } from "./dashboard-chat-transitions";
+
+function httpError(status: number) {
+  return new HttpClientError({
+    message: `HTTP ${status}`,
+    status,
+    statusText: status === 503 ? "Service Unavailable" : "Error",
+    code: "HTTP_ERROR",
+  });
+}
+
+test("a 503 is retried once after a short backoff", async () => {
+  const waits: number[] = [];
+  let calls = 0;
+  const request = async () => {
+    calls += 1;
+    if (calls === 1) throw httpError(503);
+    return "ok";
+  };
+
+  const result = await retryOnceOnServiceUnavailable(request, {
+    wait: async (ms) => {
+      waits.push(ms);
+    },
+  });
+
+  assert.equal(result, "ok");
+  assert.equal(calls, 2);
+  assert.deepEqual(waits, [500]);
+});
+
+test("a second 503 is not retried again", async () => {
+  let calls = 0;
+  const request = async () => {
+    calls += 1;
+    throw httpError(503);
+  };
+
+  await assert.rejects(
+    retryOnceOnServiceUnavailable(request, { wait: async () => {} }),
+    (error: unknown) =>
+      error instanceof HttpClientError && error.status === 503,
+  );
+  assert.equal(calls, 2);
+});
+
+test("other failures are not retried", async () => {
+  let calls = 0;
+  const request = async () => {
+    calls += 1;
+    throw httpError(500);
+  };
+
+  await assert.rejects(
+    retryOnceOnServiceUnavailable(request, { wait: async () => {} }),
+    (error: unknown) =>
+      error instanceof HttpClientError && error.status === 500,
+  );
+  assert.equal(calls, 1);
+
+  let plainCalls = 0;
+  await assert.rejects(
+    retryOnceOnServiceUnavailable(
+      async () => {
+        plainCalls += 1;
+        throw new Error("offline");
+      },
+      { wait: async () => {} },
+    ),
+    /offline/,
+  );
+  assert.equal(plainCalls, 1);
+});
 
 const activeThreadState = {
   mode: "thread",

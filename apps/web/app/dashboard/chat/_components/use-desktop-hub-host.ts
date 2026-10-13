@@ -338,7 +338,7 @@ export function useDesktopHubHost(
                   destination.workspaceId,
                   destination.workspaceName ?? undefined,
                 );
-                if (!switched)
+                if (switched !== "switched")
                   throw new Error(
                     "Could not return to the original workspace.",
                   );

@@ -308,7 +308,7 @@ export function DashboardSidebar() {
   const handleWorkspaceChange = (nextId: string) => {
     closeConversations();
     void switchWorkspace(nextId).then((switched) => {
-      if (switched) {
+      if (switched === "switched") {
         router.push("/dashboard/chat");
       }
     });

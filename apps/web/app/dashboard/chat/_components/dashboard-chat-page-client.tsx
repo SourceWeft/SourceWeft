@@ -700,7 +700,7 @@ export function DashboardChatPageClient() {
       }
 
       void switchWorkspace(targetWorkspaceId).then((switched) => {
-        if (switched) {
+        if (switched === "switched") {
           router.push("/dashboard/chat");
         }
       });

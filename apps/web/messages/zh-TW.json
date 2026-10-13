@@ -3421,7 +3421,8 @@
       "created": "已建立「{name}」",
       "createFailed": "建立工作區失敗。",
       "loadFailed": "載入工作區失敗。",
-      "noActiveTeam": "尚未選擇使用中的團隊。"
+      "noActiveTeam": "尚未選擇使用中的團隊。",
+      "openFailed": "開啟工作區失敗。"
     }
   },
   "publicSkills": {

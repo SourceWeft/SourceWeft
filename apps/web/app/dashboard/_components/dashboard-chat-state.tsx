@@ -25,8 +25,10 @@ import {
   dashboardClient,
   workspaceClient,
 } from "../../../lib/sdk";
+import { retryOnceOnServiceUnavailable } from "./dashboard-chat-request-retry";
 import {
   resolveWorkspaceSwitchTransition,
+  type WorkspaceSwitchResult,
   type WorkspaceSwitchStatus,
   type WorkspaceSwitchTransitionState,
 } from "./dashboard-chat-transitions";
@@ -97,7 +99,7 @@ type DashboardChatState = {
   switchWorkspace: (
     workspaceId: string,
     workspaceName?: string,
-  ) => Promise<boolean>;
+  ) => Promise<WorkspaceSwitchResult>;
   loadMorePrivateChats: () => Promise<void>;
   startNewChat: () => void;
   createChat: (input?: {
@@ -283,10 +285,12 @@ export function DashboardChatStateProvider({
   // stream and appends to whichever bucket each thread belongs to.
   const fetchChatsPage = useCallback(
     async (targetWorkspaceId: string, cursor?: string | null) => {
-      const threads = await contentClient.listThreads(targetWorkspaceId, {
-        cursor: cursor ?? undefined,
-        limit: THREADS_PAGE_SIZE,
-      });
+      const threads = await retryOnceOnServiceUnavailable(() =>
+        contentClient.listThreads(targetWorkspaceId, {
+          cursor: cursor ?? undefined,
+          limit: THREADS_PAGE_SIZE,
+        }),
+      );
 
       const items = threads.items.map(mapThreadToChatItem);
       return {
@@ -581,14 +585,17 @@ export function DashboardChatStateProvider({
   );
 
   const switchWorkspace = useCallback(
-    async (nextWorkspaceId: string, nextWorkspaceName?: string) => {
+    async (
+      nextWorkspaceId: string,
+      nextWorkspaceName?: string,
+    ): Promise<WorkspaceSwitchResult> => {
       const target =
         workspaces.find((item) => item.id === nextWorkspaceId) ??
         (nextWorkspaceName
           ? { id: nextWorkspaceId, name: nextWorkspaceName }
           : null);
       if (!target) {
-        return false;
+        return "failed";
       }
 
       const generation = ++workspaceSwitchGenerationRef.current;
@@ -636,10 +643,12 @@ export function DashboardChatStateProvider({
       try {
         const [threads, preferences] = await Promise.all([
           fetchChatsPage(target.id),
-          contentClient.getInitialChatPreferences(target.id),
+          retryOnceOnServiceUnavailable(() =>
+            contentClient.getInitialChatPreferences(target.id),
+          ),
         ]);
         if (!isCurrent()) {
-          return false;
+          return "superseded";
         }
 
         setWorkspaceId(target.id);
@@ -655,10 +664,10 @@ export function DashboardChatStateProvider({
             type: "success",
           }),
         );
-        return true;
+        return "switched";
       } catch (error) {
         if (!isCurrent()) {
-          return false;
+          return "superseded";
         }
 
         applyTransition(
@@ -670,7 +679,7 @@ export function DashboardChatStateProvider({
                 : t("switchWorkspaceFailed"),
           }),
         );
-        return false;
+        return "failed";
       } finally {
         if (isCurrent()) {
           setIsLoadingPrivateChats(false);
