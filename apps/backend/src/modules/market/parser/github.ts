@@ -61,15 +61,26 @@ export class GitHubArchiveError extends Error {
  * anyway (the market upkeep) stops asking for this round.
  */
 export class GitHubRateLimitedError extends GitHubArchiveError {
+  /** The hourly ceiling the answer named (`x-ratelimit-limit`), if it did. */
+  readonly limit: number | null;
+  /** What was left of it (`x-ratelimit-remaining`), if the answer said. */
+  readonly remaining: number | null;
+
   constructor(
     readonly resetAt: Date,
     url: string,
+    budget: Pick<GitHubRateLimitBudget, "limit" | "remaining"> = {
+      limit: null,
+      remaining: null,
+    },
   ) {
     super(
       "ARCHIVE_RATE_LIMITED",
       `GitHub's rate limit is spent until ${resetAt.toISOString()}: ${url}`,
     );
     this.name = "GitHubRateLimitedError";
+    this.limit = budget.limit;
+    this.remaining = budget.remaining;
   }
 }
 
@@ -246,6 +257,36 @@ export function isGitHubRateLimitResponse(response: Response): boolean {
   );
 }
 
+/**
+ * What a GitHub answer says about the primary rate limit: the hourly ceiling
+ * (5,000 with a token, 60 without), what is left of it, and when it resets.
+ * Every REST answer carries the headers, not only a refusal, so a caller
+ * spending many requests can stop before the limit does it for them. Each
+ * is `null` when the answer does not say (a proxy, a mocked fetch).
+ */
+export type GitHubRateLimitBudget = {
+  limit: number | null;
+  remaining: number | null;
+  resetAt: Date | null;
+};
+
+export function githubRateLimitBudget(
+  response: Response,
+): GitHubRateLimitBudget {
+  const integer = (name: string): number | null => {
+    const raw = response.headers.get(name);
+    if (raw === null || raw.trim() === "") return null;
+    const value = Number(raw);
+    return Number.isInteger(value) && value >= 0 ? value : null;
+  };
+  const reset = integer("x-ratelimit-reset");
+  return {
+    limit: integer("x-ratelimit-limit"),
+    remaining: integer("x-ratelimit-remaining"),
+    resetAt: reset === null ? null : new Date(reset * 1000),
+  };
+}
+
 /** Fallback when a rate limit answer names no time: GitHub's own advice is a minute. */
 const githubRateLimitDefaultWaitMs = 60_000;
 
@@ -370,7 +411,11 @@ export async function githubFetch(
       // one more 403 to misread as "forbidden".
       if (attempt >= githubMaxRetries || wanted > budget) {
         void response.body?.cancel().catch(() => undefined);
-        throw new GitHubRateLimitedError(githubRateLimitResetAt(response), url);
+        throw new GitHubRateLimitedError(
+          githubRateLimitResetAt(response),
+          url,
+          githubRateLimitBudget(response),
+        );
       }
     } else if (attempt >= githubMaxRetries) {
       return response;
@@ -521,6 +566,7 @@ export async function githubGraphql<T>(
     throw new GitHubRateLimitedError(
       githubRateLimitResetAt(response),
       GITHUB_GRAPHQL_URL,
+      githubRateLimitBudget(response),
     );
   }
   if (!body.data) {
