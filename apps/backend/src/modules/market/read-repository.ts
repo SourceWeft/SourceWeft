@@ -53,8 +53,6 @@ type VersionRow = Pick<
   keyof typeof versionColumns
 >;
 
-const records: MarketMcpRecord[] = [];
-
 function iso(value: Date | null) {
   return value ? value.toISOString() : null;
 }
@@ -90,109 +88,6 @@ export function parseMcpCategoryFilter(category?: string): string[] {
         .filter(Boolean) ?? [],
     ),
   ];
-}
-
-function fallbackListMcp(input: {
-  query?: string;
-  category?: string;
-  transport?: McpTransport;
-  official?: boolean;
-  verified?: boolean;
-  runtime?: McpRuntime;
-  includeDesktopOnly?: boolean;
-  desktopOnly?: boolean;
-  limit?: number;
-}) {
-  const query = input.query?.trim().toLowerCase();
-  const categories = parseMcpCategoryFilter(input.category);
-  const limit = input.limit ?? 50;
-  const items = records
-    .map((record) => record.item)
-    .filter((item) => item.status === "published")
-    .filter((item) =>
-      typeof input.desktopOnly === "boolean"
-        ? item.desktopOnly === input.desktopOnly
-        : input.includeDesktopOnly || !item.desktopOnly,
-    )
-    .filter((item) =>
-      categories.length > 0
-        ? item.categories.some((category) => categories.includes(category))
-        : true,
-    )
-    .filter((item) =>
-      input.transport ? item.transport === input.transport : true,
-    )
-    .filter((item) =>
-      typeof input.official === "boolean"
-        ? item.official === input.official
-        : true,
-    )
-    .filter((item) =>
-      typeof input.verified === "boolean"
-        ? item.verified === input.verified
-        : true,
-    )
-    .filter((item) => (input.runtime ? item.runtime === input.runtime : true))
-    .filter((item) => {
-      if (!query) {
-        return true;
-      }
-      const searchableIdentifier = identifierForSearch(item.identifier);
-      return (
-        item.name.toLowerCase().includes(query) ||
-        item.summary.toLowerCase().includes(query) ||
-        searchableIdentifier.includes(query) ||
-        (queryIncludesTechnicalIdentifierSyntax(query) &&
-          item.identifier.toLowerCase().includes(query))
-      );
-    })
-    .slice(0, limit);
-
-  return { items, nextCursor: null };
-}
-
-function fallbackFindMcp(identifier: string) {
-  return (
-    records.find((record) => record.item.identifier === identifier) ?? null
-  );
-}
-
-// Only genuine connectivity failures should fall back to the (empty) static
-// list. Query errors — bad SQL, constraint violations, serialization failures —
-// must propagate so the caller returns a 500 instead of masking a bug as an
-// empty catalog.
-const DB_CONNECTION_ERROR_CODES = new Set([
-  "econnrefused",
-  "econnreset",
-  "etimedout",
-  "enotfound",
-  "epipe",
-  "08000", // connection_exception
-  "08001", // sqlclient_unable_to_establish_sqlconnection
-  "08003", // connection_does_not_exist
-  "08004", // sqlserver_rejected_establishment_of_sqlconnection
-  "08006", // connection_failure
-  "57p01", // admin_shutdown
-  "57p03", // cannot_connect_now
-]);
-
-function isDatabaseUnavailable(error: unknown) {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-  const code = (error as { code?: string }).code?.toLowerCase();
-  if (code && DB_CONNECTION_ERROR_CODES.has(code)) {
-    return true;
-  }
-  const message = error.message.toLowerCase();
-  return (
-    message.includes("econnrefused") ||
-    message.includes("connection terminated") ||
-    message.includes("connection refused") ||
-    message.includes("could not connect") ||
-    message.includes("connect etimedout") ||
-    message.includes("the database system is")
-  );
 }
 
 function stringMeta(
@@ -564,20 +459,13 @@ export async function listMcp(input: {
     );
   }
 
-  let dbRows: Array<typeof mcpServers.$inferSelect>;
-  try {
-    dbRows = await db
-      .select()
-      .from(mcpServers)
-      .where(and(...conditions))
-      .orderBy(desc(mcpServers.publishedAt), desc(mcpServers.id))
-      .limit(limit + 1);
-  } catch (error) {
-    if (isDatabaseUnavailable(error)) {
-      return fallbackListMcp(input);
-    }
-    throw error;
-  }
+  // A storage failure is not an empty catalog; let the API return a 5xx.
+  const dbRows = await db
+    .select()
+    .from(mcpServers)
+    .where(and(...conditions))
+    .orderBy(desc(mcpServers.publishedAt), desc(mcpServers.id))
+    .limit(limit + 1);
 
   const hasMore = dbRows.length > limit;
   const pageRows = hasMore ? dbRows.slice(0, limit) : dbRows;
@@ -628,40 +516,33 @@ export async function countMcpByCategory(input: {
     conditions.push(eq(mcpServers.desktopOnly, false));
   }
 
-  try {
-    const [categoryRows, totalRows] = await Promise.all([
-      db
-        .select({
-          slug: mcpCategories.slug,
-          count: sql<number>`count(distinct ${mcpServers.id})::int`,
-        })
-        .from(mcpServers)
-        .innerJoin(
-          mcpServerCategories,
-          eq(mcpServerCategories.serverId, mcpServers.id),
-        )
-        .innerJoin(
-          mcpCategories,
-          eq(mcpCategories.id, mcpServerCategories.categoryId),
-        )
-        .where(and(...conditions))
-        .groupBy(mcpCategories.slug),
-      db
-        .select({ count: sql<number>`count(*)::int` })
-        .from(mcpServers)
-        .where(and(...conditions)),
-    ]);
-    const counts: Record<string, number> = {};
-    for (const row of categoryRows) {
-      counts[row.slug] = Number(row.count);
-    }
-    return { counts, total: Number(totalRows[0]?.count ?? 0) };
-  } catch (error) {
-    if (isDatabaseUnavailable(error)) {
-      return { counts: {}, total: 0 };
-    }
-    throw error;
+  const [categoryRows, totalRows] = await Promise.all([
+    db
+      .select({
+        slug: mcpCategories.slug,
+        count: sql<number>`count(distinct ${mcpServers.id})::int`,
+      })
+      .from(mcpServers)
+      .innerJoin(
+        mcpServerCategories,
+        eq(mcpServerCategories.serverId, mcpServers.id),
+      )
+      .innerJoin(
+        mcpCategories,
+        eq(mcpCategories.id, mcpServerCategories.categoryId),
+      )
+      .where(and(...conditions))
+      .groupBy(mcpCategories.slug),
+    db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(mcpServers)
+      .where(and(...conditions)),
+  ]);
+  const counts: Record<string, number> = {};
+  for (const row of categoryRows) {
+    counts[row.slug] = Number(row.count);
   }
+  return { counts, total: Number(totalRows[0]?.count ?? 0) };
 }
 
 /**
@@ -673,21 +554,14 @@ export async function findMcp(
   identifier: string,
   options: { locale?: MarketMcpLocale } = {},
 ): Promise<MarketMcpRecord | null> {
-  let row: typeof mcpServers.$inferSelect | undefined;
-  try {
-    [row] = await db
-      .select()
-      .from(mcpServers)
-      .where(
-        and(eq(mcpServers.identifier, identifier), publicMarketMcpCondition()),
-      )
-      .limit(1);
-  } catch (error) {
-    if (isDatabaseUnavailable(error)) {
-      return fallbackFindMcp(identifier);
-    }
-    throw error;
-  }
+  // Preserve database errors: returning null here would turn an outage into 404.
+  const [row] = await db
+    .select()
+    .from(mcpServers)
+    .where(
+      and(eq(mcpServers.identifier, identifier), publicMarketMcpCondition()),
+    )
+    .limit(1);
   if (row) {
     // Only ever expose published versions on the public API. Loading drafts
     // here would let a consumer install an unpublished version by naming it,
@@ -746,7 +620,7 @@ export async function findMcp(
         : null,
     };
   }
-  return fallbackFindMcp(identifier);
+  return null;
 }
 
 export async function findMcpVersion(identifier: string, version?: string) {
