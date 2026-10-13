@@ -9,7 +9,9 @@ const description =
 const canonicalUrl = `${SITE_URL}/privacy`;
 
 export const metadata: Metadata = {
-  title,
+  // `absolute` bypasses the root layout's "%s | SourceWeft" template, which
+  // would otherwise suffix the site name a second time.
+  title: { absolute: title },
   description,
   alternates: {
     canonical: canonicalUrl,

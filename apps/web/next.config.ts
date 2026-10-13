@@ -59,6 +59,41 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     "/changelog": ["./content/changelog/**"],
   },
+  async headers() {
+    return [
+      {
+        source: "/(.*)",
+        headers: [
+          // Browsers ignore HSTS over plain http, so a self-host without TLS
+          // is unaffected.
+          {
+            key: "Strict-Transport-Security",
+            value: "max-age=31536000; includeSubDomains",
+          },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          // Nothing in the app asks for these; the only media API in use is
+          // screen capture (`getDisplayMedia`), which is `display-capture`.
+          {
+            key: "Permissions-Policy",
+            value: "camera=(), microphone=(), geolocation=()",
+          },
+        ],
+      },
+      {
+        // Not under /api: those route handlers set their own, stricter values
+        // (`/api/source-file` a `sandbox` CSP, `/api/artifact-file` its own
+        // CSP and `no-referrer` for tokened URLs), and Next drops a handler's
+        // header when the config already set the same key.
+        source: "/((?!api/).*)",
+        headers: [
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          // The app frames itself same-origin (sub-agent panel, mobile route
+          // sheet) and nothing else may frame it.
+          { key: "Content-Security-Policy", value: "frame-ancestors 'self'" },
+        ],
+      },
+    ];
+  },
   async rewrites() {
     // Keep public sitemap files at the site root; the shared implementation
     // lives below /sitemap and is excluded from locale negotiation.

@@ -55,9 +55,81 @@ export type SkillsSearchParams = Record<string, string | string[] | undefined>;
 // that rejection into an empty page.
 const MAX_QUERY_LENGTH = 200;
 const MAX_CURSOR_LENGTH = 1024;
+const CURSOR_PATTERN = /^[A-Za-z0-9_-]+$/;
 
 function first(value: string | string[] | undefined) {
   return (Array.isArray(value) ? value[0] : value)?.trim() || undefined;
+}
+
+/**
+ * The sort a cursor belongs to, or undefined for anything the market did not
+ * hand out. A cursor is base64url JSON of `[sort, ...keys, id]`; the name
+ * sort's older form was the bare `[name, id]`.
+ */
+function cursorSort(cursor: string): string | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(atob(cursor.replace(/-/g, "+").replace(/_/g, "/")));
+  } catch {
+    return undefined;
+  }
+  if (!Array.isArray(parsed)) {
+    return undefined;
+  }
+  const isId = (value: unknown) => typeof value === "string" && value.length > 0;
+  const isNonNegativeInt = (value: unknown) =>
+    typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= 0 &&
+    value <= 2_147_483_647;
+  const isMicros = (value: unknown) =>
+    typeof value === "string" && /^-?\d{1,18}$/.test(value);
+  if (parsed.length === 2) {
+    return typeof parsed[0] === "string" && isId(parsed[1])
+      ? "name"
+      : undefined;
+  }
+  const [sort, ...keys] = parsed;
+  switch (sort) {
+    case "name":
+      return keys.length === 2 && typeof keys[0] === "string" && isId(keys[1])
+        ? sort
+        : undefined;
+    case "popular":
+    case "stars":
+      return keys.length === 2 && isNonNegativeInt(keys[0]) && isId(keys[1])
+        ? sort
+        : undefined;
+    case "new":
+      return keys.length === 2 && isMicros(keys[0]) && isId(keys[1])
+        ? sort
+        : undefined;
+    case "recommended":
+      return keys.length === 6 &&
+        keys[0] === "featured-rank" &&
+        typeof keys[1] === "boolean" &&
+        typeof keys[2] === "boolean" &&
+        isNonNegativeInt(keys[3]) &&
+        isMicros(keys[4]) &&
+        isId(keys[5])
+        ? sort
+        : undefined;
+    default:
+      return undefined;
+  }
+}
+
+// Crawlers replay stale and mangled cursors, and the API answers those with a
+// 400 that the swallowing list wrapper turns into an empty page served as 200.
+// Only a cursor that is well-formed and belongs to the current sort goes
+// through; anything else starts the listing from its first page.
+function cursorFor(value: string | undefined, sort: SkillSortOption) {
+  return value &&
+    value.length <= MAX_CURSOR_LENGTH &&
+    CURSOR_PATTERN.test(value) &&
+    cursorSort(value) === sort
+    ? value
+    : undefined;
 }
 
 function oneOf<T extends string>(
@@ -73,13 +145,13 @@ export function parseSkillsBrowseState(
   params: SkillsSearchParams,
   input: { category?: string } = {},
 ): SkillsBrowseState {
-  const cursor = first(params.cursor);
+  const sort = oneOf(first(params.sort), skillSortOptions);
   return {
     capability: oneOf(first(params.type), skillCapabilityOptions),
     category: input.category ?? "all",
-    cursor: cursor && cursor.length <= MAX_CURSOR_LENGTH ? cursor : undefined,
+    cursor: cursorFor(first(params.cursor), sort),
     query: (first(params.q) ?? "").slice(0, MAX_QUERY_LENGTH).trim(),
-    sort: oneOf(first(params.sort), skillSortOptions),
+    sort,
     trust: oneOf(first(params.trust), skillTrustOptions),
     view: first(params.view) === "all",
   };

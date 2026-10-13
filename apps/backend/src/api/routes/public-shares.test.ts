@@ -4,6 +4,7 @@ import { createRouteTestApp } from "../../test/hono";
 
 const mocks = vi.hoisted(() => ({
   resolvePublicArtifactBytes: vi.fn(),
+  getSharedArtifactFile: vi.fn(),
   getSharedArtifactVersionMediaBytes: vi.fn(),
   getSharedCurrentArtifactVersionMedia: vi.fn(),
 }));
@@ -17,6 +18,7 @@ vi.mock("../../modules/sharing", () => ({
 
 vi.mock("../../modules/artifacts", () => ({
   contentArtifactsService: {
+    getSharedArtifactFile: mocks.getSharedArtifactFile,
     getSharedArtifactVersionMediaBytes:
       mocks.getSharedArtifactVersionMediaBytes,
     getSharedCurrentArtifactVersionMedia:
@@ -24,6 +26,7 @@ vi.mock("../../modules/artifacts", () => ({
   },
 }));
 
+import { securityHeadersMiddleware } from "../middleware/security-headers";
 import { registerPublicShareRoutes } from "./public-shares";
 
 const createTestApp = () => createRouteTestApp(registerPublicShareRoutes);
@@ -109,4 +112,36 @@ test("public version media reports a genuine miss (matching version, no such res
   assert.equal(response.status, 404);
   const body = await response.json();
   assert.equal(body.code, "ARTIFACT_VERSION_MEDIA_NOT_FOUND");
+});
+
+test("raw share bytes keep their own CSP and referrer policy under the global security headers", async () => {
+  mocks.getSharedArtifactFile.mockResolvedValue({
+    body: "<p>shared</p>",
+    contentType: "text/html; charset=utf-8",
+    fileName: "index.html",
+    executionPolicy: null,
+  });
+  const app = createRouteTestApp((app) => {
+    app.use("*", securityHeadersMiddleware);
+    registerPublicShareRoutes(app);
+  });
+
+  const response = await app.request(
+    "http://localhost/v1/public/shares/tok/raw",
+  );
+
+  assert.equal(response.status, 200);
+  // The route's allow-list (self plus the web origin) survives; a global
+  // framing header would block the cross-origin share page.
+  assert.match(
+    response.headers.get("content-security-policy") ?? "",
+    /frame-ancestors 'self' \S+/,
+  );
+  assert.equal(response.headers.get("x-frame-options"), null);
+  assert.equal(response.headers.get("referrer-policy"), "no-referrer");
+  assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(
+    response.headers.get("strict-transport-security"),
+    "max-age=31536000; includeSubDomains",
+  );
 });
