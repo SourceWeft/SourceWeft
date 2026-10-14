@@ -1,10 +1,41 @@
 ---
-subject: Your two-factor verification code
-heading: Two-factor verification
-preview: Use this code to complete your SourceWeft sign-in.
+subject: Your SourceWeft two-factor code
+heading: Complete your sign-in
+preview: Enter this code on the two-factor verification page to finish signing in.
 ---
-<p>Use this verification code to complete your SourceWeft sign-in.</p>
 
-<p class="otp-code">{{otp}}</p>
-
-<p class="muted">This code expires soon and can only be used once.</p>
+<p style="margin: 0 0 18px; color: #374151; font-size: 15px; line-height: 26px">
+  Enter this code on the two-factor verification page to finish signing in.
+</p>
+<p
+  class="otp-code"
+  style="
+    margin: 24px 0;
+    padding: 20px 12px;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    background: #f9fafb;
+    color: #111827;
+    font-family: monospace;
+    font-size: 32px;
+    font-weight: 700;
+    letter-spacing: 6px;
+    line-height: 40px;
+    text-align: center;
+  "
+>
+  {{otp}}
+</p>
+<p
+  class="muted"
+  style="margin: 18px 0 0; color: #6b7280; font-size: 13px; line-height: 22px"
+>
+  Use this code once and don’t share it with anyone. If it has expired, request
+  a new code on the same page.
+</p>
+<p
+  class="muted"
+  style="margin: 18px 0 0; color: #6b7280; font-size: 13px; line-height: 22px"
+>
+  If you didn’t request this, you can ignore this email.
+</p>

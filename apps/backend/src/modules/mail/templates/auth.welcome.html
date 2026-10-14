@@ -1,56 +1,66 @@
 ---
 subject: Welcome to SourceWeft
-heading: Welcome to SourceWeft
-preview: Connect your sources, ask grounded questions, and create cited outputs.
-action: Open SourceWeft
+heading: Start with one source
+preview: Add a source, ask a question, and check the citations.
+action: Open your workspace
 url: {{dashboardUrl}}
 ---
-<p class="lead">{{greeting}}</p>
 
-<p>
-  Welcome to SourceWeft, the open-source NotebookLM alternative for deep
-  knowledge work. We're building it so you can connect your sources, ask
-  grounded questions, and create outputs that stay tied to verifiable citations.
+{{#if greeting}}
+<p style="margin: 0 0 18px; color: #374151; font-size: 15px; line-height: 26px">
+  {{greeting}}
 </p>
-
-<p>A strong first session has three simple moves:</p>
-
-<ul class="pillar-list">
-  <li>
-    <strong>Connect your source space</strong> — upload PDFs, paste URLs, write
-    notes, add YouTube links, or bring in tools like Notion, Google Drive,
-    Gmail, and Slack.
-  </li>
-  <li>
-    <strong>Ask with evidence</strong> — select sources and ask questions. The
-    answer should come back grounded, cited, and easy to verify.
-  </li>
-  <li>
-    <strong>Create from context</strong> — turn research into briefings, study
-    guides, FAQs, timelines, drafts, Artifacts, and working files.
-  </li>
-</ul>
-
-<p>
-  If you want the shortest path, open your dashboard, add one document you know
-  well, and ask for a key claim, decision, date, risk, or quote. SourceWeft will
-  show you how it read the source instead of asking you to trust a black box.
+{{/if}}
+<p style="margin: 0 0 18px; color: #374151; font-size: 15px; line-height: 26px">
+  SourceWeft helps you find answers in your own sources. Start with a document
+  you know well:
 </p>
-
-<p>
-  SourceWeft is self-hosted, multi-model, and built for teams that want control
-  over their data, models, and knowledge workflows. Virtual FS and Skills give
-  agents a real workspace when you are ready to go deeper.
-</p>
-
-<p class="signature">
-  Happy weaving,<br />
+<ol style="margin: 0 0 20px; padding-left: 24px">
+  <li
+    style="
+      margin: 0 0 12px;
+      padding-left: 4px;
+      color: #374151;
+      font-size: 15px;
+      line-height: 26px;
+    "
+  >
+    <strong>Add a source</strong><br />Upload a document or paste a link.
+  </li>
+  <li
+    style="
+      margin: 0 0 12px;
+      padding-left: 4px;
+      color: #374151;
+      font-size: 15px;
+      line-height: 26px;
+    "
+  >
+    <strong>Ask a question</strong><br />Try “What are the main points in this
+    source?”
+  </li>
+  <li
+    style="
+      margin: 0 0 12px;
+      padding-left: 4px;
+      color: #374151;
+      font-size: 15px;
+      line-height: 26px;
+    "
+  >
+    <strong>Check the citations</strong><br />Open the cited passages to see
+    where the answer comes from.
+  </li>
+</ol>
+<p style="margin: 0 0 18px; color: #374151; font-size: 15px; line-height: 26px">
   The SourceWeft team
 </p>
-
-<p class="link-row">
-  <a href="{{dashboardUrl}}">Workspace</a>
-  <a href="{{docsUrl}}">Docs</a>
-  <a href="{{githubUrl}}">GitHub</a>
-  <a href="{{discordUrl}}">Discord</a>
+<p
+  class="muted"
+  style="margin: 18px 0 0; color: #6b7280; font-size: 13px; line-height: 22px"
+>
+  {{#if docsUrl}}<a href="{{docsUrl}}" style="color: #374151">Help docs</a
+  >{{/if}} {{#if discordUrl}}<a href="{{discordUrl}}" style="color: #374151"
+    >Community</a
+  >{{/if}}
 </p>

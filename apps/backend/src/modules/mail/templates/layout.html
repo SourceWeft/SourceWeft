@@ -1,7 +1,8 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="{{htmlLang}}">
   <head>
     <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="x-apple-disable-message-reformatting" />
     <meta name="color-scheme" content="light dark" />
     <meta name="supported-color-schemes" content="light dark" />
@@ -11,211 +12,196 @@
         color-scheme: light dark;
         supported-color-schemes: light dark;
       }
-
-      body {
-        background: #ffffff;
-        color: #111827;
-        font-family:
-          -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        margin: 0;
-        padding: 0;
-      }
-
       a {
-        color: #111827;
+        color: #374151;
       }
-
-      .wrapper {
-        margin: 0 auto;
-        max-width: 520px;
-        padding: 40px 16px;
-      }
-
-      .card {
-        border: 1px solid #e5e7eb;
-        border-radius: 8px;
-        padding: 28px;
-      }
-
-      .logo {
-        border-radius: 999px;
-        display: block;
-        height: 40px;
-        margin: 0 auto 28px;
-        width: 40px;
-      }
-
-      h1 {
-        color: #111827;
-        font-size: 24px;
-        line-height: 32px;
-        margin: 0 0 24px;
-        text-align: center;
-      }
-
       p,
       li {
-        color: #374151;
-        font-size: 14px;
-        line-height: 24px;
-      }
-
-      ol,
-      ul {
-        margin: 0 0 16px;
-        padding-left: 22px;
-      }
-
-      .action {
-        margin: 32px 0;
-        text-align: center;
-      }
-
-      .button {
-        background: #111827;
-        border-radius: 6px;
-        color: #ffffff !important;
-        display: inline-block;
-        font-size: 13px;
-        font-weight: 600;
-        padding: 12px 20px;
-        text-decoration: none;
-      }
-
-      .footer {
-        border-top: 1px solid #e5e7eb;
-        color: #6b7280;
-        font-size: 12px;
-        line-height: 20px;
-        margin-top: 28px;
-        padding-top: 20px;
-      }
-
-      .footer a {
-        color: #6b7280;
-        text-decoration: none;
-      }
-
-      .lead {
-        color: #111827;
         font-size: 15px;
         line-height: 26px;
+        color: #374151;
       }
-
-      .pillar-list {
-        margin: 18px 0;
-        padding: 0;
-      }
-
-      .pillar-list li {
-        border-left: 3px solid #111827;
-        list-style: none;
-        margin: 0 0 12px;
-        padding-left: 12px;
-      }
-
-      .link-row {
-        margin: 24px 0 6px;
-      }
-
-      .link-row a {
-        color: #111827;
-        font-size: 13px;
-        font-weight: 600;
-        margin-right: 14px;
-        text-decoration: none;
-      }
-
-      .signature {
-        margin-top: 26px;
-      }
-
-      .otp-code {
-        color: #111827;
-        font-size: 32px;
-        font-weight: 700;
-        letter-spacing: 6px;
-        line-height: 40px;
-        margin: 20px 0;
-        text-align: center;
-      }
-
-      .muted {
-        color: #6b7280;
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
         font-size: 12px;
         line-height: 20px;
       }
-
-      pre {
-        background: #f9fafb;
-        border: 1px solid #e5e7eb;
-        border-radius: 6px;
-        color: #111827;
-        font-size: 12px;
-        line-height: 18px;
-        overflow-x: auto;
-        padding: 12px;
-        white-space: pre-wrap;
+      @media only screen and (max-width: 600px) {
+        .outer {
+          padding: 20px 12px !important;
+        }
+        .content {
+          padding: 28px 22px !important;
+        }
+        h1 {
+          font-size: 24px !important;
+          line-height: 32px !important;
+        }
       }
-
       @media (prefers-color-scheme: dark) {
-        body {
-          background: #000000 !important;
-          color: #f9fafb !important;
+        body,
+        .canvas {
+          background: #111111 !important;
         }
-
         .card {
-          border-color: #333333 !important;
+          background: #1b1b1b !important;
+          border-color: #363636 !important;
         }
-
         h1,
-        a {
+        .brand {
           color: #f9fafb !important;
         }
-
         p,
         li,
-        pre,
-        .lead,
-        .otp-code {
+        a,
+        pre {
           color: #d1d5db !important;
         }
-
-        .pillar-list li {
-          border-color: #d1d5db !important;
-        }
-
-        .button {
-          background: #262626 !important;
-          color: #ffffff !important;
-        }
-
-        .footer {
-          border-color: #333333 !important;
-          color: #9ca3af !important;
-        }
-
+        .muted,
+        .footer,
         .footer a {
           color: #9ca3af !important;
+        }
+        .otp-code {
+          background: #262626 !important;
+          color: #f9fafb !important;
+          border-color: #404040 !important;
+        }
+        .button-cell,
+        .button {
+          background: #f3f4f6 !important;
+          color: #111827 !important;
+        }
+        .footer {
+          border-color: #363636 !important;
         }
       }
     </style>
   </head>
-  <body>
-    <div data-mail-preview="true" style="display: none; max-height: 0; overflow: hidden;">
+  <body
+    style="
+      margin: 0;
+      padding: 0;
+      background: #f6f7f8;
+      color: #111827;
+      font-family:
+        -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;,
+        &quot;Microsoft YaHei&quot;, sans-serif;
+    "
+  >
+    <div
+      data-mail-preview="true"
+      style="
+        display: none;
+        font-size: 1px;
+        line-height: 1px;
+        max-height: 0;
+        max-width: 0;
+        opacity: 0;
+        overflow: hidden;
+        mso-hide: all;
+      "
+    >
       {{preview}}
     </div>
-    <div class="wrapper">
-      <div class="card">
-        <img class="logo" src="{{imageUrl}}" width="40" height="40" alt="{{siteName}}" />
-        <h1>{{heading}}</h1>
-        {{{bodyHtml}}}
-        {{{actionHtml}}}
-        <div class="footer">
-          {{siteName}}
-          <a href="{{baseUrl}}">{{baseUrlLabel}}</a>
-        </div>
-      </div>
-    </div>
+    <table
+      role="presentation"
+      class="canvas"
+      width="100%"
+      cellpadding="0"
+      cellspacing="0"
+      border="0"
+      style="width: 100%; background: #f6f7f8"
+    >
+      <tr>
+        <td class="outer" align="center" style="padding: 48px 16px">
+          <!--[if mso]><table role="presentation" width="560" align="center"><tr><td><![endif]-->
+          <table
+            role="presentation"
+            class="card"
+            width="100%"
+            cellpadding="0"
+            cellspacing="0"
+            border="0"
+            style="
+              width: 100%;
+              max-width: 560px;
+              background: #ffffff;
+              border: 1px solid #e5e7eb;
+              border-radius: 12px;
+            "
+          >
+            <tr>
+              <td class="content" style="padding: 36px 40px">
+                <table
+                  role="presentation"
+                  cellpadding="0"
+                  cellspacing="0"
+                  border="0"
+                  style="margin-bottom: 32px"
+                >
+                  <tr>
+                    <td style="vertical-align: middle; padding-right: 12px">
+                      <img
+                        src="{{imageUrl}}"
+                        width="32"
+                        height="32"
+                        alt=""
+                        style="display: block; border: 0; border-radius: 8px"
+                      />
+                    </td>
+                    <td
+                      class="brand"
+                      style="
+                        vertical-align: middle;
+                        color: #111827;
+                        font-size: 16px;
+                        font-weight: 700;
+                        letter-spacing: -0.3px;
+                      "
+                    >
+                      {{siteName}}
+                    </td>
+                  </tr>
+                </table>
+                <h1
+                  style="
+                    margin: 0 0 24px;
+                    color: #111827;
+                    font-size: 28px;
+                    font-weight: 700;
+                    letter-spacing: -0.6px;
+                    line-height: 36px;
+                  "
+                >
+                  {{heading}}
+                </h1>
+                {{{bodyHtml}}} {{{actionHtml}}}
+                <div
+                  class="footer"
+                  style="
+                    margin-top: 32px;
+                    padding-top: 20px;
+                    border-top: 1px solid #e5e7eb;
+                    color: #6b7280;
+                    font-size: 12px;
+                    line-height: 20px;
+                  "
+                >
+                  {{siteName}} &middot;
+                  <a
+                    href="{{baseUrl}}"
+                    style="color: #6b7280; text-decoration: underline"
+                    >{{baseUrlLabel}}</a
+                  >
+                </div>
+              </td>
+            </tr>
+          </table>
+          <!--[if mso]></td></tr></table><![endif]-->
+        </td>
+      </tr>
+    </table>
   </body>
 </html>
