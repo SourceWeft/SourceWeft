@@ -19,10 +19,7 @@ const SECURITY_HEADERS: ReadonlyArray<readonly [name: string, value: string]> =
     ["Referrer-Policy", "no-referrer"],
   ];
 
-export const securityHeadersMiddleware: MiddlewareHandler = async (
-  c,
-  next,
-) => {
+export const securityHeadersMiddleware: MiddlewareHandler = async (c, next) => {
   await next();
   for (const [name, value] of SECURITY_HEADERS) {
     if (!c.res.headers.has(name)) {

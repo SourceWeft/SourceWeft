@@ -76,7 +76,8 @@ function cursorSort(cursor: string): string | undefined {
   if (!Array.isArray(parsed)) {
     return undefined;
   }
-  const isId = (value: unknown) => typeof value === "string" && value.length > 0;
+  const isId = (value: unknown) =>
+    typeof value === "string" && value.length > 0;
   const isNonNegativeInt = (value: unknown) =>
     typeof value === "number" &&
     Number.isInteger(value) &&

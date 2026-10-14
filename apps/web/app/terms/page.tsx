@@ -105,7 +105,7 @@ const sections = [
   {
     title: "Disclaimers and Limitation of Liability",
     body: [
-      "SourceWeft is provided on an \"as is\" and \"as available\" basis. To the maximum extent permitted by law, we disclaim warranties of merchantability, fitness for a particular purpose, non-infringement, and uninterrupted or error-free operation.",
+      'SourceWeft is provided on an "as is" and "as available" basis. To the maximum extent permitted by law, we disclaim warranties of merchantability, fitness for a particular purpose, non-infringement, and uninterrupted or error-free operation.',
       "To the maximum extent permitted by law, SourceWeft will not be liable for indirect, incidental, special, consequential, exemplary, or punitive damages, or for lost profits, revenues, data, or goodwill.",
     ],
   },

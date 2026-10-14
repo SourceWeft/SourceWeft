@@ -91,12 +91,16 @@ describe("parseSkillsBrowseState", () => {
       ["popular", cursorOf(["popular", "many", "skill_1"])],
       ["stars", cursorOf(["stars", -1, "skill_1"])],
       ["new", cursorOf(["new", "yesterday", "skill_1"])],
-      ["recommended", cursorOf(["recommended", "old-rank", true, true, 1, "123", "skill_1"])],
-      ["recommended", cursorOf(["recommended", "featured-rank", true, true, 1, "123"])],
+      [
+        "recommended",
+        cursorOf(["recommended", "old-rank", true, true, 1, "123", "skill_1"]),
+      ],
+      [
+        "recommended",
+        cursorOf(["recommended", "featured-rank", true, true, 1, "123"]),
+      ],
     ]) {
-      expect(parseSkillsBrowseState({ cursor, sort }).cursor).toBe(
-        undefined,
-      );
+      expect(parseSkillsBrowseState({ cursor, sort }).cursor).toBe(undefined);
     }
   });
 
@@ -106,16 +110,16 @@ describe("parseSkillsBrowseState", () => {
     expect(
       parseSkillsBrowseState({ cursor: popular, sort: "new" }).cursor,
     ).toBeUndefined();
-    expect(parseSkillsBrowseState({ cursor: popular, sort: "popular" }).cursor).toBe(
-      popular,
-    );
+    expect(
+      parseSkillsBrowseState({ cursor: popular, sort: "popular" }).cursor,
+    ).toBe(popular);
   });
 
   it("honors the name sort's older bare [name, id] cursor", () => {
     const legacy = cursorOf(["Alpha", "skill_1"]);
-    expect(parseSkillsBrowseState({ cursor: legacy, sort: "name" }).cursor).toBe(
-      legacy,
-    );
+    expect(
+      parseSkillsBrowseState({ cursor: legacy, sort: "name" }).cursor,
+    ).toBe(legacy);
     expect(parseSkillsBrowseState({ cursor: legacy }).cursor).toBeUndefined();
   });
 });

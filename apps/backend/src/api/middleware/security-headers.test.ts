@@ -8,7 +8,10 @@ const createTestApp = () =>
     app.use("*", securityHeadersMiddleware);
     app.get("/plain", (c) => c.json({ ok: true }));
     app.get("/own", (c) => {
-      c.header("Content-Security-Policy", "frame-ancestors 'self' https://web.example");
+      c.header(
+        "Content-Security-Policy",
+        "frame-ancestors 'self' https://web.example",
+      );
       c.header("Referrer-Policy", "same-origin");
       c.header("Strict-Transport-Security", "max-age=60");
       return c.body("<p>hi</p>");
