@@ -31,10 +31,13 @@ function fixture(
   const syncCalls: unknown[][] = [];
   const reversalCalls: unknown[][] = [];
   const warnCalls: { message: string; fields?: Record<string, unknown> }[] = [];
+  const infoCalls: { message: string; fields?: Record<string, unknown> }[] = [];
   const handler = createCreemWebhookHandler({
     config,
     logger: {
-      info() {},
+      info(message, fields) {
+        infoCalls.push({ message, fields });
+      },
       warn(message, fields) {
         warnCalls.push({ message, fields });
       },
@@ -49,7 +52,7 @@ function fixture(
         reversalCalls.push(args);
       }),
   });
-  return { config, handler, syncCalls, reversalCalls, warnCalls };
+  return { config, handler, syncCalls, reversalCalls, warnCalls, infoCalls };
 }
 
 function sign(raw: string, secret = "creem-fixture-signing-secret") {
@@ -129,6 +132,76 @@ test("signed unsupported types are acknowledged without a mode check", async () 
   assert.equal(response?.status, 200);
   assert.equal(f.syncCalls.length, 0);
   assert.equal(f.reversalCalls.length, 0);
+});
+
+test("accepted deliveries log one billing.webhook_processed line without customer data", async () => {
+  const f = fixture();
+  const processed = () =>
+    f.infoCalls.filter((call) => call.message === "billing.webhook_processed");
+
+  const subscriptionRaw = JSON.stringify({
+    id: "evt_sub_1",
+    eventType: "subscription.active",
+    object: {
+      id: "sub_1",
+      mode: "test",
+      customer: { id: "cust_1", email: "buyer@example.invalid" },
+      metadata: { teamId: "team_1234567890" },
+    },
+  });
+  const subscriptionResponse = await f.handler(
+    post(subscriptionRaw, sign(subscriptionRaw)),
+  );
+  assert.equal(subscriptionResponse?.status, 200);
+  assert.deepEqual(processed().map((call) => call.fields), [
+    {
+      provider: "creem",
+      eventType: "subscription.active",
+      eventId: "evt_sub_1",
+      outcome: "processed",
+    },
+  ]);
+
+  const refundRaw = JSON.stringify({
+    id: "evt_refund_9",
+    eventType: "refund.created",
+    object: { id: "ref_9", mode: "test", status: "succeeded" },
+  });
+  await f.handler(post(refundRaw, sign(refundRaw)));
+  assert.deepEqual(processed()[1]?.fields, {
+    provider: "creem",
+    eventType: "refund.created",
+    eventId: "evt_refund_9",
+    outcome: "processed",
+  });
+
+  const unsupportedRaw = JSON.stringify({
+    id: "evt_unsupported_1",
+    eventType: "credits.granted",
+    object: {},
+  });
+  await f.handler(post(unsupportedRaw, sign(unsupportedRaw)));
+  assert.deepEqual(processed()[2]?.fields, {
+    provider: "creem",
+    eventType: "credits.granted",
+    eventId: "evt_unsupported_1",
+    outcome: "ignored",
+  });
+
+  // Rejected deliveries (bad signature, mode mismatch) never count as processed.
+  await f.handler(post(subscriptionRaw, "invalid"));
+  const mismatchRaw = JSON.stringify({
+    id: "evt_sub_2",
+    eventType: "subscription.active",
+    object: { id: "sub_2", mode: "prod" },
+  });
+  await f.handler(post(mismatchRaw, sign(mismatchRaw)));
+  assert.equal(processed().length, 3);
+
+  const serialized = JSON.stringify(f.infoCalls);
+  assert.ok(!serialized.includes("buyer@example.invalid"), "email leaked");
+  assert.ok(!serialized.includes("team_1234567890"), "team id leaked");
+  assert.ok(!serialized.includes("cust_1"), "customer id leaked");
 });
 
 test("signed refund and dispute events are dispatched to the reversal sync", async () => {

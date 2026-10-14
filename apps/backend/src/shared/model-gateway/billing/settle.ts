@@ -5,6 +5,7 @@ import {
   type UsageInfo,
 } from "@sourceweft/model-gateway";
 import { logger } from "../../logger";
+import { metrics } from "../../metrics";
 import type { ContentBillingPort } from "../../../modules/content/billing-port";
 import { meterBillableModelUsage } from "../../../modules/content/model-billing";
 import { resolveGatewayObservedIdentity } from "../../../modules/content/model-gateway-audit";
@@ -191,6 +192,14 @@ export async function settleModelCall(
     await scheduleReconciliation(
       metered.billedBy === "skipped" ? undefined : input.idempotencyKey,
     );
+
+    // Settlement runs once per model call, so it is counted rather than
+    // logged: a tool-using turn would otherwise emit a line per call. The
+    // periodic metrics.snapshot carries the count and credits per model.
+    const settledCredits = metered.billing?.consumedCredits ?? 0;
+    const model = observedIdentity.modelAlias ?? options.profileAlias;
+    metrics.inc("billing.settled", { model, billedBy: metered.billedBy });
+    metrics.observe("billing.settled_credits", settledCredits, { model });
 
     return {
       ...baseTrace,

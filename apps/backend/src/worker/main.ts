@@ -3,6 +3,7 @@ import { Worker, type Job } from "bullmq";
 import { config } from "../shared/config";
 import { buildAuditInputFromJob, recordJobAudit } from "../shared/jobs-audit";
 import { logger } from "../shared/logger";
+import { metrics } from "../shared/metrics";
 import {
   ensureModelConfigAvailable,
   modelCatalog,
@@ -55,6 +56,9 @@ await ensureModelConfigAvailable();
 // Connectors are contributed by capabilities, so registering them reads
 // manifests. Await it before serving so the registry is never consulted empty.
 await connectorAdaptersReady();
+// Chat-run and billing counters are incremented in this process; without the
+// flush they would accumulate and never appear in the logs.
+metrics.startPeriodicFlush();
 
 type JobPayload = Record<string, unknown>;
 type JobProcessor = (job: Job<JobPayload>) => Promise<unknown>;

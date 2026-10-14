@@ -23,6 +23,7 @@ vi.mock("../../shared/logger", () => ({
   },
 }));
 
+import { metrics } from "../../shared/metrics";
 import { performanceLoggingMiddleware } from "./performance-logging";
 
 function createApp(input: { responseSize: number; status?: number }) {
@@ -91,6 +92,29 @@ test("responses below both thresholds do not emit a performance event", async ()
 
   assert.equal(mocks.info.mock.calls.length, 0);
   assert.equal(mocks.warn.mock.calls.length, 0);
+});
+
+test("every request counts http.requests by method, route template and status", async () => {
+  setDuration(20);
+  const app = createApp({ responseSize: 100, status: 201 });
+  await app.request("/v1/workspaces/workspace-1/test");
+  await app.request("/v1/workspaces/workspace-2/test");
+  await app.request("/v1/workspaces/workspace-3/missing");
+
+  const counters = metrics.snapshot().counters;
+  // Both workspace ids collapse onto the template; the raw path never appears.
+  assert.equal(
+    counters["http.requests{method=GET,route=/v1/workspaces/:workspaceId/test,status=201}"],
+    2,
+  );
+  assert.equal(
+    counters["http.requests{method=GET,route=/v1/workspaces/:workspaceId/*,status=404}"],
+    1,
+  );
+  for (const key of Object.keys(counters)) {
+    assert.ok(!key.includes("workspace-1"), `raw path leaked into ${key}`);
+  }
+  assert.equal(mocks.info.mock.calls.length, 0);
 });
 
 test("server failures retain WARN and the explicit threshold reason", async () => {

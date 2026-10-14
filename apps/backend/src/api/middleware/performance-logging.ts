@@ -1,6 +1,7 @@
 import type { Context, Next } from "hono";
 import { config } from "../../shared/config";
 import { logger } from "../../shared/logger";
+import { metrics } from "../../shared/metrics";
 
 function parseContentLength(value: string | null) {
   if (!value) {
@@ -20,6 +21,15 @@ export async function performanceLoggingMiddleware(c: Context, next: Next) {
   const startedAt = performance.now();
 
   await next();
+
+  // Once the handler has run, `routePath` is the matched handler's template
+  // (`/v1/workspaces/:workspaceId/threads`), or this middleware's own pattern
+  // when nothing matched. Never the raw path, so ids stay out of metric keys.
+  metrics.inc("http.requests", {
+    method: c.req.method,
+    route: c.req.routePath,
+    status: c.res.status,
+  });
 
   const durationMs = Math.round(performance.now() - startedAt);
   const responseSizeBytes = parseContentLength(

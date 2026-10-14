@@ -24,6 +24,26 @@ function failure(
   return Response.json({ error: "Failed to process webhook" }, { status: 500 });
 }
 
+/**
+ * One activity line per accepted delivery. Only the event's own identifiers
+ * and type are reported — never the customer object or metadata.
+ */
+function logWebhookProcessed(
+  logger: BillingLogger,
+  input: {
+    eventType: string;
+    eventId: string | null;
+    outcome: "processed" | "ignored";
+  },
+) {
+  logger.info("billing.webhook_processed", {
+    provider: "creem",
+    eventType: input.eventType,
+    eventId: input.eventId,
+    outcome: input.outcome,
+  });
+}
+
 function flattenCreemEvent(
   event: Record<string, unknown>,
 ): Record<string, unknown> | null {
@@ -151,6 +171,11 @@ export function createCreemWebhookHandler(deps: {
           eventType as "refund.created" | "dispute.created",
           data,
         );
+        logWebhookProcessed(logger, {
+          eventType,
+          eventId: webhookId,
+          outcome: "processed",
+        });
         return Response.json({ message: "Webhook received" });
       } catch (error) {
         return failure(
@@ -180,9 +205,10 @@ export function createCreemWebhookHandler(deps: {
       "subscription.expired": "expired",
     };
     if (!Object.hasOwn(statuses, eventType)) {
-      logger.info("Ignoring unsupported Creem webhook event", {
+      logWebhookProcessed(logger, {
         eventType,
-        webhookId: event.id,
+        eventId: readString(event, "id"),
+        outcome: "ignored",
       });
       return Response.json({ message: "Webhook received" });
     }
@@ -209,6 +235,11 @@ export function createCreemWebhookHandler(deps: {
     }
     try {
       await syncCreemSubscriptionEvent(eventType, data, statuses[eventType]!);
+      logWebhookProcessed(logger, {
+        eventType,
+        eventId: readString(data, "webhookId"),
+        outcome: "processed",
+      });
       return Response.json({ message: "Webhook received" });
     } catch (error) {
       return failure(logger, "Failed to process Creem webhook", error);

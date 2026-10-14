@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   listMcpActionRuns: vi.fn(),
   listMcpToolRuns: vi.fn(),
   listWorkspaceMcpInstalls: vi.fn(),
+  logInfo: vi.fn(),
   requireMcpWorkspace: vi.fn(),
   setWorkspaceMcpToolsEnabled: vi.fn(),
   updateMcpActionRun: vi.fn(),
@@ -54,6 +55,16 @@ vi.mock("../../shared/config", () => ({
 vi.mock("./oauth-repository", () => ({
   getMcpOAuthStatus: vi.fn(async () => ({ connected: false, issuer: null })),
   createDbMcpOAuthStore: vi.fn(() => ({})),
+  listUserConnectedOAuthInstallIds: vi.fn(async () => new Set<string>()),
+}));
+
+vi.mock("../../shared/logger", () => ({
+  logger: {
+    debug: vi.fn(),
+    info: mocks.logInfo,
+    warn: vi.fn(),
+    error: vi.fn(),
+  },
 }));
 
 vi.mock("../../shared/secrets", () => ({
@@ -109,6 +120,7 @@ vi.mock("./repository", () => ({
     mocks.findWorkspaceMcpInstallByMarketIdentifier,
   listMcpActionRuns: mocks.listMcpActionRuns,
   listMcpToolRuns: mocks.listMcpToolRuns,
+  listUserCredentialInstallIds: vi.fn(async () => new Set<string>()),
   listWorkspaceMcpInstalls: mocks.listWorkspaceMcpInstalls,
   setWorkspaceMcpToolsEnabled: mocks.setWorkspaceMcpToolsEnabled,
   updateMcpActionRun: mocks.updateMcpActionRun,
@@ -786,6 +798,71 @@ test("installMarketMcp refuses to downgrade an already-installed newer version",
   );
   // The downgrade is rejected before any install write happens.
   assert.equal(mocks.createOrUpdateMarketMcpInstall.mock.calls.length, 0);
+});
+
+test("installMarketMcp logs mcp.installed with truncated ids once the row is written", async () => {
+  resetMcpServiceMocks();
+  mocks.requireMcpWorkspace.mockResolvedValue({
+    workspace: {
+      id: "workspace_0199cd4f7b1e7c3a",
+      organizationId: "team_0199cd4f7b1e7c3a9f0e",
+    },
+    membership: { role: "editor" },
+  });
+  // An OAuth manifest skips the live auth probe that a "none" manifest runs.
+  mocks.getMcpManifest.mockResolvedValue({
+    manifest: {
+      schemaVersion: 1,
+      identifier: "github",
+      name: "GitHub",
+      summary: "GitHub MCP",
+      version: "1.2.0",
+      categories: ["developer-tools"],
+      transport: "streamable_http",
+      endpointUrl: "https://mcp.example.com/mcp?token=should-not-be-logged",
+      auth: { required: true, type: "oauth", allowedHeaderNames: [] },
+      tools: [],
+      official: true,
+      verified: false,
+      desktopOnly: false,
+      webExecutable: true,
+    },
+    item: { verified: false },
+    version: { provenanceJson: {} },
+  });
+  mocks.findWorkspaceMcpInstallByMarketIdentifier.mockResolvedValue(null);
+  mocks.createOrUpdateMarketMcpInstall.mockResolvedValue(
+    mcpInstall({
+      id: "mcp_install_2",
+      marketVersion: "1.2.0",
+      authType: "oauth",
+      workspaceId: "workspace_0199cd4f7b1e7c3a",
+      teamId: "team_0199cd4f7b1e7c3a9f0e",
+    }),
+  );
+
+  const result = await new McpService().installMarketMcp({
+    workspaceId: "workspace_0199cd4f7b1e7c3a",
+    userId: "user_0199cd4f7b1e7c3a9f0e",
+    identifier: "github",
+  });
+
+  assert.equal(result.install.id, "mcp_install_2");
+  const installed = mocks.logInfo.mock.calls.filter(
+    (call) => call[0] === "mcp.installed",
+  );
+  assert.equal(installed.length, 1);
+  const fields = installed[0]?.[1] as Record<string, unknown>;
+  assert.deepEqual(fields, {
+    teamId: "team_019",
+    workspaceId: "workspac",
+    identifier: "github",
+    version: "1.2.0",
+  });
+  const serialized = JSON.stringify(fields);
+  assert.ok(!serialized.includes("team_0199cd4f7b1e7c3a9f0e"), "team id leaked");
+  assert.ok(!serialized.includes("user_0199cd4f"), "user id leaked");
+  assert.ok(!serialized.includes("mcp.example.com"), "endpoint leaked");
 });
 
 test("deleteInstall removes a workspace MCP install with manage permission", async () => {
