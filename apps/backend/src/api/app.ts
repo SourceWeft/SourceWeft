@@ -13,6 +13,7 @@ import { config } from "../shared/config";
 import { logApiError } from "./response/log-api-error";
 import { ApiError, ApiResponse, toApiError } from "./response/api-response";
 import { performanceLoggingMiddleware } from "./middleware/performance-logging";
+import { securityHeadersMiddleware } from "./middleware/security-headers";
 import { workspaceRoleGuard } from "./middleware/workspace-role";
 import { registerAuthMetaRoutes } from "./routes/auth-meta";
 import { registerBillingRoutes } from "./routes/billing";
@@ -42,6 +43,9 @@ import { withBetterAuthClientIp } from "./better-auth-request";
 export function createApp() {
   const app = new Hono();
 
+  // First, so it wraps every response below, including not-found and error
+  // responses and the auth handler's.
+  app.use("*", securityHeadersMiddleware);
   app.use("*", createApiCors(config.auth.trustedOrigins));
 
   app.on(["GET", "POST"], "/api/auth/*", async (c) => {

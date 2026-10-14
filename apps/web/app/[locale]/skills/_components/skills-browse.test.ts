@@ -11,6 +11,10 @@ import {
   skillsListRequest,
 } from "./skills-browse";
 
+/** A cursor the market would hand out: base64url JSON of `[sort, ...keys, id]`. */
+const cursorOf = (tuple: unknown[]) =>
+  Buffer.from(JSON.stringify(tuple)).toString("base64url");
+
 describe("parseSkillsBrowseState", () => {
   it("defaults to the browse home", () => {
     const state = parseSkillsBrowseState({});
@@ -31,9 +35,10 @@ describe("parseSkillsBrowseState", () => {
   });
 
   it("reads every facet", () => {
+    const cursor = cursorOf(["popular", 42, "skill_1"]);
     expect(
       parseSkillsBrowseState({
-        cursor: "abc",
+        cursor,
         q: "  pdf forms ",
         sort: "popular",
         trust: "verified",
@@ -42,7 +47,7 @@ describe("parseSkillsBrowseState", () => {
     ).toEqual({
       capability: "executable",
       category: "all",
-      cursor: "abc",
+      cursor,
       query: "pdf forms",
       sort: "popular",
       trust: "verified",
@@ -68,6 +73,50 @@ describe("parseSkillsBrowseState", () => {
     });
     expect(state.query).toHaveLength(200);
     expect(state.cursor).toBeUndefined();
+  });
+
+  it("drops a cursor that is not base64url", () => {
+    for (const cursor of ["a+b/c=", "abc def", "YWJj.", "%2Babc"]) {
+      expect(parseSkillsBrowseState({ cursor, sort: "name" }).cursor).toBe(
+        undefined,
+      );
+    }
+  });
+
+  it("drops a cursor that does not decode to a tuple the market hands out", () => {
+    for (const [sort, cursor] of [
+      ["name", "abc"],
+      ["name", cursorOf(["name"])],
+      ["name", cursorOf([7, "skill_1"])],
+      ["popular", cursorOf(["popular", "many", "skill_1"])],
+      ["stars", cursorOf(["stars", -1, "skill_1"])],
+      ["new", cursorOf(["new", "yesterday", "skill_1"])],
+      ["recommended", cursorOf(["recommended", "old-rank", true, true, 1, "123", "skill_1"])],
+      ["recommended", cursorOf(["recommended", "featured-rank", true, true, 1, "123"])],
+    ]) {
+      expect(parseSkillsBrowseState({ cursor, sort }).cursor).toBe(
+        undefined,
+      );
+    }
+  });
+
+  it("drops a cursor from another sort than the current one", () => {
+    const popular = cursorOf(["popular", 42, "skill_1"]);
+    expect(parseSkillsBrowseState({ cursor: popular }).cursor).toBeUndefined();
+    expect(
+      parseSkillsBrowseState({ cursor: popular, sort: "new" }).cursor,
+    ).toBeUndefined();
+    expect(parseSkillsBrowseState({ cursor: popular, sort: "popular" }).cursor).toBe(
+      popular,
+    );
+  });
+
+  it("honors the name sort's older bare [name, id] cursor", () => {
+    const legacy = cursorOf(["Alpha", "skill_1"]);
+    expect(parseSkillsBrowseState({ cursor: legacy, sort: "name" }).cursor).toBe(
+      legacy,
+    );
+    expect(parseSkillsBrowseState({ cursor: legacy }).cursor).toBeUndefined();
   });
 });
 
@@ -207,7 +256,7 @@ describe("skillsBrowseHref", () => {
     const state = {
       ...base,
       capability: "executable" as const,
-      cursor: "a+b/c=",
+      cursor: cursorOf(["name", "C++ & Rust helper", "skill_9"]),
       query: "c++ & rust",
       sort: "name" as const,
       trust: "verified" as const,

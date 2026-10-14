@@ -24,3 +24,19 @@ test("does not serve the removed desktop sign-in rendezvous", async () => {
   assert.equal(poll.status, 404);
   assert.equal(complete.status, 404);
 });
+
+test("every API response carries the baseline security headers and no framing header", async () => {
+  const response = await createApp().request("http://localhost/v1/health");
+
+  assert.equal(response.status, 200);
+  assert.equal(
+    response.headers.get("strict-transport-security"),
+    "max-age=31536000; includeSubDomains",
+  );
+  assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(response.headers.get("referrer-policy"), "no-referrer");
+  // Public share bytes are framed by the (cross-origin) web app and carry
+  // their own `frame-ancestors`; a global framing header would break them.
+  assert.equal(response.headers.get("x-frame-options"), null);
+  assert.equal(response.headers.get("content-security-policy"), null);
+});
