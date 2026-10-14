@@ -1,6 +1,13 @@
 type ViewMode = "thread" | "new";
 export type WorkspaceSwitchStatus = "idle" | "loading" | "error";
 
+/**
+ * Outcome of `switchWorkspace`: the target is now active, the switch failed
+ * (unknown target or a request error, recorded in `lastChatTransitionError`),
+ * or a newer switch started before this one finished and owns the UI now.
+ */
+export type WorkspaceSwitchResult = "switched" | "failed" | "superseded";
+
 type DashboardChatSelection = {
   mode: ViewMode;
   activeChatId: string;

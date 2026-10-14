@@ -3421,7 +3421,8 @@
       "created": "Created \"{name}\"",
       "createFailed": "Failed to create workspace.",
       "loadFailed": "Failed to load workspaces.",
-      "noActiveTeam": "No active team selected."
+      "noActiveTeam": "No active team selected.",
+      "openFailed": "Failed to open workspace."
     }
   },
   "publicSkills": {

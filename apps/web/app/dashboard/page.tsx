@@ -295,6 +295,7 @@ function OverviewPanel({
   featuredWorkspace,
   onCreateWorkspace,
   onOpenWorkspace,
+  openLoading,
   recentActivity,
 }: {
   canCreate: boolean;
@@ -302,6 +303,7 @@ function OverviewPanel({
   featuredWorkspace: WorkspaceWithPreview | null;
   onCreateWorkspace: () => void;
   onOpenWorkspace: (workspaceId: string) => void;
+  openLoading: boolean;
   recentActivity: ActivityItem[];
 }) {
   const t = useTranslations("dashboardHome");
@@ -331,10 +333,15 @@ function OverviewPanel({
               {featuredWorkspace ? (
                 <Button
                   className="rounded-xl"
+                  disabled={openLoading}
                   onClick={() => onOpenWorkspace(featuredWorkspace.id)}
                 >
                   {t("overview.openWorkspace")}
-                  <ArrowRight className="h-4 w-4" />
+                  {openLoading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <ArrowRight className="h-4 w-4" />
+                  )}
                 </Button>
               ) : null}
 
@@ -509,6 +516,10 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [createLoading, setCreateLoading] = useState(false);
+  const [openingWorkspaceId, setOpeningWorkspaceId] = useState<string | null>(
+    null,
+  );
+  const openWorkspaceRequestRef = useRef(0);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(
     null,
   );
@@ -715,8 +726,10 @@ export default function DashboardPage() {
         workspace.id,
         workspace.name,
       );
-      if (switched) {
+      if (switched === "switched") {
         router.push("/dashboard/chat");
+      } else if (switched === "failed") {
+        toast.error(t("toasts.openFailed"));
       }
     } catch {
       toast.error(t("toasts.createFailed"));
@@ -727,16 +740,29 @@ export default function DashboardPage() {
 
   async function handleOpenWorkspace(workspaceId: string) {
     const workspace = workspaces.find((item) => item.id === workspaceId);
+    const request = ++openWorkspaceRequestRef.current;
 
     setStoredDashboardWorkspaceId(resolvedOrganizationId, workspaceId);
     setActiveWorkspaceId(workspaceId);
+    setOpeningWorkspaceId(workspaceId);
 
-    const switched = await dashboardState.switchWorkspace(
-      workspaceId,
-      workspace?.name,
-    );
-    if (switched) {
-      router.push("/dashboard/chat");
+    try {
+      const switched = await dashboardState.switchWorkspace(
+        workspaceId,
+        workspace?.name,
+      );
+      if (switched === "switched") {
+        router.push("/dashboard/chat");
+      } else if (switched === "failed") {
+        toast.error(t("toasts.openFailed"));
+      }
+      // "superseded": a newer switch owns the outcome; stay quiet.
+    } finally {
+      // Only the latest open request clears the pending state, so a click that
+      // superseded this one keeps its own spinner.
+      if (openWorkspaceRequestRef.current === request) {
+        setOpeningWorkspaceId(null);
+      }
     }
   }
 
@@ -783,6 +809,10 @@ export default function DashboardPage() {
                 onCreateWorkspace={() => void handleCreateWorkspace()}
                 onOpenWorkspace={(workspaceId) =>
                   void handleOpenWorkspace(workspaceId)
+                }
+                openLoading={
+                  featuredWorkspace !== null &&
+                  openingWorkspaceId === featuredWorkspace.id
                 }
                 recentActivity={recentActivity}
               />

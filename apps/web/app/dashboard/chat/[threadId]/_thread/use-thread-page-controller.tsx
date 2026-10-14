@@ -1335,7 +1335,7 @@ export function useThreadPageController({
       }
 
       void switchWorkspace(targetWorkspaceId).then((switched) => {
-        if (switched) {
+        if (switched === "switched") {
           router.push("/dashboard/chat");
         }
       });

@@ -3412,7 +3412,8 @@
       "created": "已创建“{name}”",
       "createFailed": "创建工作区失败。",
       "loadFailed": "加载工作区失败。",
-      "noActiveTeam": "尚未选择活跃团队。"
+      "noActiveTeam": "尚未选择活跃团队。",
+      "openFailed": "打开工作区失败。"
     }
   },
   "publicSkills": {
