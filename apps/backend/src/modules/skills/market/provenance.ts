@@ -208,6 +208,9 @@ export async function runProvenanceSweep(
       tally.rateLimitedUntil = error.resetAt.toISOString();
       logger.warn("Skill provenance sweep stopped: GitHub rate limit reached", {
         resetAt: tally.rateLimitedUntil,
+        // The ceiling tells a token's 5,000/hour from an anonymous 60/hour.
+        limit: error.limit,
+        remaining: error.remaining,
         checked: tally.confirmed + tally.foreign + tally.unknown,
       });
       break;
