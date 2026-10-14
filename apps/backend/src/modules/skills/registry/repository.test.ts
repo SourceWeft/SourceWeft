@@ -225,6 +225,43 @@ beforeEach(() => {
   dbState.transactions = 0;
 });
 
+test("the file manifest is written in statements of at most 5,000 rows", async () => {
+  // PostgreSQL binds at most 65,535 parameters per statement; a 7,527-file
+  // repository (9 columns a row) failed every attempt in one insert.
+  const manyFiles = (count: number) => [
+    FILES[0]!,
+    ...Array.from({ length: count - 1 }, (_, i) => ({
+      path: `docs/${i}.md`,
+      bytes: text(`doc ${i}`),
+      mimeType: "text/markdown",
+    })),
+  ];
+  const inserts = () =>
+    dbState.ops.filter(
+      (op) => op.op === "insert" && op.table === "skill_version_files",
+    ).length;
+
+  await upsertRegistrySkillIndex(upsertInput({ files: manyFiles(10) }));
+  assert.equal(inserts(), 1);
+  assert.equal(dbState.fileRows.length, 10);
+
+  dbState.ops = [];
+  dbState.fileRows = [];
+  dbState.definitionRows = [];
+  dbState.versionRows = [];
+  await upsertRegistrySkillIndex(
+    upsertInput({
+      slug: "gh-acme-large",
+      storagePointer: `github:acme/large@${"b".repeat(40)}#skills/large`,
+      commitSha: "b".repeat(40),
+      files: manyFiles(7_527),
+    }),
+  );
+  assert.equal(inserts(), 2); // ceil(7527 / 5000)
+  assert.equal(dbState.fileRows.length, 7_527);
+  assert.equal(dbState.transactions, 2);
+});
+
 test("where a skill's content lives follows from where it came from", () => {
   assertSkillStorageInvariant("registry_github", "object");
   assertSkillStorageInvariant("builtin", "repo_builtin");

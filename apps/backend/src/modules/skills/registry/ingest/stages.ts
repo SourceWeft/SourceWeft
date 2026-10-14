@@ -84,6 +84,11 @@ export type IngestContext = {
   > & { onComplete: SkillSubmissionOnComplete | null };
   /** The job's overall deadline. Checked between stages and handed to GitHub. */
   signal: AbortSignal;
+  /**
+   * Told the listing's entry count as soon as a reader knows it, before a
+   * file is read: the job sizes its deadline by it.
+   */
+  onFileCount?: (count: number) => void;
   deps: IngestDeps;
   source?: PinnedGitHubSource;
   archive?: Buffer;
@@ -136,7 +141,10 @@ const downloadStage: IngestStage = {
   name: "download",
   async run(ctx) {
     if (ctx.source?.subpath && ctx.deps.readSubtree) {
-      ctx.read = await ctx.deps.readSubtree(ctx.source, { signal: ctx.signal });
+      ctx.read = await ctx.deps.readSubtree(ctx.source, {
+        signal: ctx.signal,
+        onFileCount: ctx.onFileCount,
+      });
       return;
     }
     // Held on the context, so later stages of this run never fetch it again.
@@ -153,7 +161,7 @@ const discoverStage: IngestStage = {
     ctx.read = await readRegistrySkillsFromArchive(
       need(ctx.archive, "archive"),
       need(ctx.source, "source"),
-      { signal: ctx.signal },
+      { signal: ctx.signal, onFileCount: ctx.onFileCount },
     );
     // The zipball is the run's largest allocation and nothing reads it again.
     ctx.archive = undefined;

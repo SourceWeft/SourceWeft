@@ -1,3 +1,4 @@
+import { chunk } from "../../../shared/chunk";
 import { logger } from "../../../shared/logger";
 import { hasGitHubToken } from "../parser/github";
 import {
@@ -135,14 +136,6 @@ const UNSUPPORTED_MESSAGES = {
 
 /** Most registry entries for hosted servers list no repository at all. */
 const NO_REPOSITORY_MESSAGE = "The server lists no repository";
-
-function chunk<T>(items: readonly T[], size: number): T[][] {
-  const chunks: T[][] = [];
-  for (let start = 0; start < items.length; start += size) {
-    chunks.push(items.slice(start, start + size));
-  }
-  return chunks;
-}
 
 /**
  * Read a batch of versions' READMEs from GitHub and store each outcome (see

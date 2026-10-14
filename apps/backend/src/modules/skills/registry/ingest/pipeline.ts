@@ -59,6 +59,8 @@ export async function runIngestPipeline(input: {
    * never sees a failure that is about to be retried away.
    */
   willRetryTransient: boolean;
+  /** Told the file count once a reader has listed the source; see `IngestContext`. */
+  onFileCount?: (count: number) => void;
   deps?: Partial<IngestDeps>;
   stages?: readonly IngestStage[];
 }): Promise<IngestRunOutcome> {
@@ -73,6 +75,7 @@ export async function runIngestPipeline(input: {
   const ctx: IngestContext = {
     submission,
     signal: input.signal,
+    onFileCount: input.onFileCount,
     deps: { ...defaultIngestDeps, ...input.deps },
   };
   const stagesState: SkillSubmissionStages = {};

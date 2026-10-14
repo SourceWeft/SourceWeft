@@ -330,13 +330,24 @@ export async function readRegistrySkillsFromGitHub(
   }
 }
 
+export type ReadRegistryOptions = Pick<GitHubRequestOptions, "signal"> & {
+  /**
+   * Told how many entries the listing holds before any of them is read: the
+   * subtree transport fetches each file on its own, so a caller with a time
+   * budget sizes it here, when the count is first known and nothing is spent.
+   */
+  onFileCount?: (count: number) => void;
+};
+
 /** Locate and read every skill bundle in an already-downloaded zipball. */
 async function budgetedRead(
   source: PinnedGitHubSource,
   entries: Array<{ path: string; declaredSize: number }>,
   readFiles: (wanted: ReadonlySet<string>) => Promise<Map<string, Buffer>>,
-  signal?: AbortSignal,
+  options?: ReadRegistryOptions,
 ): Promise<ReadRegistryResult> {
+  const signal = options?.signal;
+  options?.onFileCount?.(entries.length);
   const weight = Math.min(
     SKILL_STORAGE_LIMITS.maxBundleBytes,
     entries.reduce((total, entry) => total + entry.declaredSize, 0),
@@ -355,7 +366,7 @@ async function budgetedRead(
 export async function readRegistrySkillsFromArchive(
   zip: Buffer,
   source: PinnedGitHubSource,
-  options?: Pick<GitHubRequestOptions, "signal">,
+  options?: ReadRegistryOptions,
 ): Promise<ReadRegistryResult> {
   return budgetedRead(
     source,
@@ -365,13 +376,13 @@ export async function readRegistrySkillsFromArchive(
         maxFileBytes: SKILL_STORAGE_LIMITS.maxFileBytes,
         maxTotalBytes: SKILL_STORAGE_LIMITS.maxBundleBytes,
       }),
-    options?.signal,
+    options,
   );
 }
 
 export async function readRegistrySkillsFromSubtree(
   source: PinnedGitHubSource,
-  options?: GitHubRequestOptions,
+  options?: GitHubRequestOptions & ReadRegistryOptions,
 ): Promise<ReadRegistryResult> {
   const tree = await readGitHubSubtree(source, options);
   return budgetedRead(
@@ -383,7 +394,7 @@ export async function readRegistrySkillsFromSubtree(
         SKILL_STORAGE_LIMITS.maxFileBytes,
         SKILL_STORAGE_LIMITS.maxBundleBytes,
       ),
-    options?.signal,
+    options,
   );
 }
 

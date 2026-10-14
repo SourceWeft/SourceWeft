@@ -667,6 +667,47 @@ test("nested frontmatter-less supporting instructions stay in the parent bundle"
   assert.equal(direct.skills[0]!.files.length, 2);
 });
 
+test("the reader reports how many entries it is about to read, before reading them", async () => {
+  const source = {
+    owner: "acme",
+    repo: "skills",
+    subpath: "",
+    repoUrl: "https://github.com/acme/skills",
+    sourceUrl: "https://github.com/acme/skills",
+    commitSha: "a".repeat(40),
+    committedAt: "2026-02-01T10:00:00Z",
+  };
+  const counts: number[] = [];
+  let readsWhenReported = -1;
+  let reads = 0;
+  state.zip = {
+    readZipEntries: async (...args: unknown[]) => {
+      reads += 1;
+      const actual = await vi.importActual<GitHubZip>(
+        "../../market/parser/github-zip",
+      );
+      return (actual.readZipEntries as (...a: unknown[]) => unknown)(...args);
+    },
+  };
+  const read = await readRegistrySkillsFromArchive(
+    zipball({
+      "SKILL.md": strToU8("---\nname: a\ndescription: A\n---\nBody"),
+      "references/1.md": strToU8("one"),
+      "references/2.md": strToU8("two"),
+    }),
+    source,
+    {
+      onFileCount: (count) => {
+        counts.push(count);
+        readsWhenReported = reads;
+      },
+    },
+  );
+  assert.equal(read.skills[0]!.files.length, 3);
+  assert.deepEqual(counts, [3]);
+  assert.equal(readsWhenReported, 0);
+});
+
 test("complete 400-file bundle and 31 MiB asset pass the new shared limits", async () => {
   const source = {
     owner: "acme",
