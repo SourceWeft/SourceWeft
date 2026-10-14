@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { NextRequest } from "next/server";
+import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
 import { test } from "vitest";
 
 import { SW_LOCALE_HEADER } from "./lib/i18n/constants";
@@ -92,11 +93,59 @@ test("/skills is localized: the bare path rewrites onto /en and /en/skills canon
 });
 
 // /skills/SKILL.md stays at app/skills/SKILL.md/route.ts (not under [locale]):
-// the matcher skips any path with a file extension, so it is never rewritten.
+// the catalog-detail exception must not rewrite this real file endpoint.
 test("the agent entry point /skills/SKILL.md is outside the proxy matcher", () => {
-  const matcher = new RegExp(`^${config.matcher[0]}$`);
-  assert.equal(matcher.test("/skills"), true);
-  assert.equal(matcher.test("/skills/SKILL.md"), false);
+  assert.equal(matches("/skills"), true);
+  assert.equal(matches("/skills/SKILL.md"), false);
+});
+
+function matches(url: string) {
+  return unstable_doesMiddlewareMatch({ config, nextConfig: {}, url });
+}
+
+for (const path of [
+  "/mcp/io.github.heintonny%2Fkeycloak-mcp.test",
+  "/mcp/io.github.mastyf-ai%2Fmastyf.ai",
+  "/skills/agent.v2",
+]) {
+  test(`dotted catalog detail uses locale routing: ${path}`, () => {
+    assert.equal(matches(path), true);
+    const bare = proxy(req(path));
+    assert.equal(
+      bare.headers.get("x-middleware-rewrite"),
+      `http://localhost:3000/en${path}`,
+    );
+    assert.equal(matches(`/en${path}`), true);
+    assert.equal(
+      proxy(req(`/en${path}`)).headers.get("location"),
+      `http://localhost:3000${path}`,
+    );
+    for (const locale of ["zh-CN", "zh-TW"]) {
+      assert.equal(matches(`/${locale}${path}`), true);
+      const localized = proxy(req(`/${locale}${path}`));
+      assert.equal(localized.headers.get("location"), null);
+      assert.equal(
+        localized.headers.get("x-middleware-request-x-sw-locale"),
+        locale,
+      );
+    }
+  });
+}
+
+test("file endpoints and static assets stay outside the proxy", () => {
+  for (const path of [
+    "/skills/SKILL.md",
+    "/skills/agent.v2/install.md",
+    "/en/skills/agent.v2/install.md",
+    "/zh-CN/skills/agent.v2/install.md",
+    "/favicon.ico",
+    "/icons/mcp.svg",
+    "/_next/static/chunk.js",
+    "/file-viewer/viewer.js",
+    "/api/mcp/agent.test",
+    "/sitemap-mcp-4.xml",
+  ])
+    assert.equal(matches(path), false, path);
 });
 
 test("/download is localized: the bare path rewrites onto /en and /en/download canonicalizes", () => {

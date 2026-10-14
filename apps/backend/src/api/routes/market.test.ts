@@ -53,6 +53,30 @@ import { registerMarketRoutes } from "./market";
 
 const createTestApp = () => createRouteTestApp(registerMarketRoutes);
 
+test("database failures are server errors, not cacheable missing catalog data", async () => {
+  const error = Object.assign(new Error("connection refused"), {
+    code: "ECONNREFUSED",
+  });
+  mocks.findMcp.mockRejectedValue(error);
+  mocks.findMcpVersion.mockRejectedValue(error);
+  mocks.listMcp.mockRejectedValue(error);
+  mocks.countMcpByCategory.mockRejectedValue(error);
+  const app = createTestApp();
+  for (const path of [
+    "/v1/mcp",
+    "/v1/mcp/category-counts",
+    "/v1/mcp/missing",
+    "/v1/mcp/missing/manifest",
+  ]) {
+    const response = await app.request(path);
+    assert.equal(response.status, 500, path);
+    assert.doesNotMatch(
+      response.headers.get("cache-control") ?? "",
+      /public|max-age/,
+    );
+  }
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
 });

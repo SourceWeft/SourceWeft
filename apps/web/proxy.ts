@@ -52,7 +52,9 @@ export function proxy(request: NextRequest) {
   }
 
   const url = request.nextUrl;
-  const { locale: pathLocale, pathname: bare } = stripLocalePrefix(url.pathname);
+  const { locale: pathLocale, pathname: bare } = stripLocalePrefix(
+    url.pathname,
+  );
   const cookieLocale = normalizeToLocale(
     request.cookies.get(SW_LOCALE_COOKIE)?.value,
   );
@@ -86,11 +88,22 @@ export function proxy(request: NextRequest) {
   const acceptLocale = parseAcceptLanguage(
     request.headers.get("accept-language"),
   );
-  return withLocaleHeader(request, negotiateLocale([cookieLocale, acceptLocale]));
+  return withLocaleHeader(
+    request,
+    negotiateLocale([cookieLocale, acceptLocale]),
+  );
 }
 
 export const config = {
   // Skip API routes, Next internals, the OG image, the preview asset directory
-  // injected by @sourceweft/preview, and any file with an extension.
-  matcher: ["/((?!api|_next|og|file-viewer|.*\\.[\\w]+$).*)"],
+  // injected by @sourceweft/preview, and files with extensions. Catalog detail
+  // identifiers can themselves end in .test, .ai, etc.; explicitly include
+  // those single-segment routes so their default-locale rewrite still runs.
+  // Keep the real SKILL.md endpoint and nested install.md endpoints excluded.
+  // Matcher sources must be literals for Next's build-time static analysis.
+  matcher: [
+    "/((?!api|_next|og|file-viewer|.*\\.[\\w]+$).*)",
+    "/:locale(en|zh-CN|zh-TW)?/mcp/:identifier",
+    "/:locale(en|zh-CN|zh-TW)?/skills/((?!SKILL\\.md$)[^/]+)",
+  ],
 };

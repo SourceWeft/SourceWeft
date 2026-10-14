@@ -5,9 +5,58 @@ import { PgDialect } from "drizzle-orm/pg-core";
 import { sql, type SQL } from "drizzle-orm";
 import {
   identifierForSearch,
+  findMcp,
+  findMcpVersion,
+  countMcpByCategory,
   listMcp,
   parseMcpCategoryFilter,
 } from "./read-repository";
+
+for (const code of ["ECONNREFUSED", "ETIMEDOUT", "08006", "57P01", "XX000"]) {
+  test(`public catalog reads propagate database errors (${code})`, async () => {
+    const failure = Object.assign(new Error("database unavailable"), { code });
+    // Throw from the real query's await boundary, including Drizzle's wrapper.
+    const wrapped = new Error("Failed query", { cause: failure });
+    for (const error of [failure, wrapped]) {
+      const query: Record<string, unknown> = {
+        from: () => query,
+        where: () => query,
+        orderBy: () => query,
+        innerJoin: () => query,
+        groupBy: () => query,
+        limit: () => query,
+        then: (_resolve: unknown, reject: (reason: unknown) => unknown) =>
+          reject(error),
+      };
+      const select = vi
+        .spyOn(db, "select")
+        .mockReturnValue(query as unknown as ReturnType<typeof db.select>);
+      try {
+        for (const read of [
+          () => findMcp("io.github.acme/server"),
+          () => findMcpVersion("io.github.acme/server"),
+          () => listMcp({}),
+          () => countMcpByCategory({}),
+        ])
+          await assert.rejects(read, (actual) => actual === error);
+      } finally {
+        select.mockRestore();
+      }
+    }
+  });
+}
+
+test("a successful lookup with no record remains not found", async () => {
+  const select = vi.spyOn(db, "select").mockReturnValue({
+    from: () => ({ where: () => ({ limit: async () => [] }) }),
+  } as unknown as ReturnType<typeof db.select>);
+  try {
+    assert.equal(await findMcp("missing"), null);
+    assert.equal(await findMcpVersion("missing"), null);
+  } finally {
+    select.mockRestore();
+  }
+});
 
 test("search identifiers ignore the generic GitHub registry namespace", () => {
   assert.equal(
