@@ -432,6 +432,13 @@ export type AgentToolSandboxHostLimits = {
   readonly maxCaptureFiles: number;
 };
 
+/** A command exit status and its storage acknowledgement are separate outcomes. */
+export type SandboxCommandDurability = {
+  readonly status: "confirmed" | "pending" | "failed" | "unknown";
+  readonly attachmentId: string;
+  readonly confirmedSeq?: number;
+};
+
 export type AgentToolSandboxServices = {
   readonly allowedReadRoots?: readonly string[];
   readonly downloadCurrentFile: (input: {
@@ -472,6 +479,7 @@ export type AgentToolSandboxServices = {
     readonly exitCode: number | null;
     readonly output: string;
     readonly truncated?: boolean;
+    readonly durability?: SandboxCommandDurability;
   }>;
   readonly captureCurrentTree?: (input: {
     readonly root: string;

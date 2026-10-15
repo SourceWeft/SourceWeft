@@ -21,6 +21,7 @@ function sandboxTimelineResult(input: {
   const projected: Record<string, unknown> = {};
   for (const key of [
     "exitCode",
+    "commandExitCode",
     "outputChars",
     "totalBytes",
     "truncated",
@@ -31,6 +32,24 @@ function sandboxTimelineResult(input: {
       typeof value === "boolean"
     ) {
       projected[key] = value;
+    }
+  }
+  const durability = input.result.durability;
+  if (durability && typeof durability === "object") {
+    const value = durability as Record<string, unknown>;
+    if (
+      ["confirmed", "pending", "failed", "unknown"].includes(
+        String(value.status),
+      )
+    ) {
+      projected.durability = {
+        status: value.status,
+        ...(typeof value.confirmedSeq === "number" &&
+        Number.isSafeInteger(value.confirmedSeq) &&
+        value.confirmedSeq >= 0
+          ? { confirmedSeq: value.confirmedSeq }
+          : {}),
+      };
     }
   }
   if (input.operationType === "prepare" && Array.isArray(input.result.files)) {
@@ -322,19 +341,23 @@ export class DrizzleSandboxOperationStore implements SandboxOperationStore {
     toolCallId: string;
     request: Record<string, unknown>;
   }) {
-    const inserted = await db.insert(agentSandboxOperations).values({
-      id: input.operationId,
-      operationType: input.operationType,
-      teamId: input.context.teamId,
-      workspaceId: input.context.workspaceId,
-      threadId: input.context.threadId,
-      messageId: input.context.messageId,
-      toolCallId: input.toolCallId,
-      userId: input.context.userId,
-      status: "running",
-      requestJsonRedacted: input.request,
-      resultJsonRedacted: {},
-    }).onConflictDoNothing().returning({ id: agentSandboxOperations.id });
+    const inserted = await db
+      .insert(agentSandboxOperations)
+      .values({
+        id: input.operationId,
+        operationType: input.operationType,
+        teamId: input.context.teamId,
+        workspaceId: input.context.workspaceId,
+        threadId: input.context.threadId,
+        messageId: input.context.messageId,
+        toolCallId: input.toolCallId,
+        userId: input.context.userId,
+        status: "running",
+        requestJsonRedacted: input.request,
+        resultJsonRedacted: {},
+      })
+      .onConflictDoNothing()
+      .returning({ id: agentSandboxOperations.id });
     return inserted.length > 0;
   }
 
@@ -356,7 +379,8 @@ export class DrizzleSandboxOperationStore implements SandboxOperationStore {
     staleBefore: Date;
     result: Record<string, unknown>;
   }) {
-    const updated = await db.update(agentSandboxOperations)
+    const updated = await db
+      .update(agentSandboxOperations)
       .set({
         status: "failed",
         resultJsonRedacted: input.result,
@@ -384,7 +408,8 @@ export class DrizzleSandboxOperationStore implements SandboxOperationStore {
     result?: Record<string, unknown>;
     durationMs?: number;
   }) {
-    await db.update(agentSandboxOperations)
+    await db
+      .update(agentSandboxOperations)
       .set({
         sandboxId: input.sandboxId ?? null,
         status: input.status,
@@ -439,8 +464,6 @@ export class DrizzleSandboxOperationStore implements SandboxOperationStore {
       ),
       orderBy: [desc(agentSandboxOperations.createdAt)],
     });
-    return existing
-      ? { result: existing.resultJsonRedacted }
-      : null;
+    return existing ? { result: existing.resultJsonRedacted } : null;
   }
 }

@@ -1,0 +1,343 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { after, before, test } from "node:test";
+import { createCloudflareSandboxProviderFactory } from "@sourceweft/sandbox-provider-cloudflare";
+import type { SandboxProvider } from "@sourceweft/builtin-tool-sandbox";
+import {
+  VolumePersistenceError,
+  createVolumeHooks,
+  type SandboxExecutor,
+  type VolumeHooks,
+} from "../../src/hooks/index";
+import {
+  cleanupE2EContext,
+  createE2EContext,
+  e2eEnabled,
+  type E2EContext,
+} from "./env";
+
+/**
+ * Sandbox e2e on the real Cloudflare dev bridge through the real provider package:
+ * attach to an empty volume, sync a mixed tree, destroy + rebuild, refuse an unattached container,
+ * checkpoint, roll back an acknowledged deletion. The helper binary comes from helper/dist
+ * (run `pnpm helper:build` first) and is downloaded into the sandbox through a pre-signed URL,
+ * which is also the production fallback for images that do not ship it.
+ */
+const MAX_OUTPUT = 4 * 1024 * 1024;
+let ctx: E2EContext;
+let provider: SandboxProvider;
+let hooks: VolumeHooks;
+const sandboxes: string[] = [];
+let volumeId: string | null = null;
+
+const shellQuote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`;
+// Independent oracle: escaped structured records avoid delimiter collisions and
+// include directory/symlink times, not only regular-file metadata.
+const fingerprintScript = `import os,stat,json,hashlib
+root='/workspace'; records=[]; files=0
+for parent,dirs,names in os.walk(root,followlinks=False):
+ if parent==root:
+  dirs[:]=[x for x in dirs if not x.startswith('.sourceweft')]
+  names=[x for x in names if not x.startswith('.sourceweft')]
+ for name in sorted(dirs+names):
+  path=os.path.join(parent,name); rel=os.path.relpath(path,root); rel.encode('utf-8')
+  m=os.lstat(path); mode=stat.S_IMODE(m.st_mode)
+  if stat.S_ISREG(m.st_mode):
+   h=hashlib.sha256()
+   with open(path,'rb') as f:
+    for data in iter(lambda:f.read(1048576),b''): h.update(data)
+   records.append(['f',rel,mode,m.st_mtime_ns,m.st_size,h.hexdigest()]); files+=1
+  elif stat.S_ISDIR(m.st_mode): records.append(['d',rel,mode,m.st_mtime_ns])
+  elif stat.S_ISLNK(m.st_mode):
+   target=os.readlink(path); target.encode('utf-8'); records.append(['l',rel,mode,m.st_mtime_ns,target])
+  else: raise RuntimeError('unsupported fingerprint entry')
+raw=json.dumps(sorted(records,key=lambda x:x[1]),ensure_ascii=True,separators=(',',':')).encode()
+print('FP v=2 sha256='+hashlib.sha256(raw).hexdigest()+' entries='+str(len(records))+' files='+str(files))`;
+const FINGERPRINT = `python3 -c ${shellQuote(fingerprintScript)}`;
+
+function executorFor(sandboxId: string): SandboxExecutor {
+  return {
+    async execute(command, options) {
+      const result = await provider.execute({
+        providerSandboxId: sandboxId,
+        command,
+        timeoutMs: options.timeoutMs,
+        maxOutputChars: MAX_OUTPUT,
+      });
+      return { output: result.output, exitCode: result.exitCode };
+    },
+  };
+}
+
+async function newSandbox(): Promise<string> {
+  for (let attempt = 0; attempt < 60; attempt++) {
+    try {
+      const { id } = await provider.createSandbox({
+        labels: { purpose: "sandbox-volume-e2e" },
+        ttlSeconds: 1800,
+      });
+      sandboxes.push(id);
+      for (let i = 0; i < 60; i++) {
+        const probe = await provider
+          .execute({
+            providerSandboxId: id,
+            command: "true",
+            timeoutMs: 30_000,
+            maxOutputChars: 1000,
+          })
+          .catch(() => null);
+        if (probe && probe.exitCode === 0) return id;
+        await new Promise((r) => setTimeout(r, 5000));
+      }
+      throw new Error("sandbox never became ready");
+    } catch (error) {
+      if (!/capacity|503/.test(String(error))) throw error;
+      await new Promise((r) => setTimeout(r, 20_000));
+    }
+  }
+  throw new Error("no sandbox capacity");
+}
+
+async function run(
+  sandboxId: string,
+  attachmentId: string,
+  command: string,
+  timeoutMs = 300_000,
+) {
+  const executor = executorFor(sandboxId);
+  const result = await executor.execute(hooks.wrapCommand(command), {
+    timeoutMs,
+  });
+  return hooks.parseResult({
+    attachmentId,
+    output: result.output,
+    exitCode: result.exitCode,
+    executor,
+  });
+}
+
+/** The stock image pre-creates these under /workspace; they are synced like anything else but are not part of the scenario. */
+const IMAGE_DIRS = new Set(["input", "output", "work"]);
+function paths(entries: Array<{ path: string }>): string[] {
+  return entries
+    .map((e) => e.path)
+    .filter((p) => !IMAGE_DIRS.has(p))
+    .sort();
+}
+
+function fingerprint(output: string): string {
+  const line = output.split("\n").find((l) => l.startsWith("FP "));
+  assert.ok(line, `no fingerprint in output: ${output.slice(-300)}`);
+  return line;
+}
+
+before(async () => {
+  if (!e2eEnabled) return;
+  ctx = await createE2EContext();
+  provider = createCloudflareSandboxProviderFactory({
+    bridgeUrl: ctx.env.CF_SANDBOX_BRIDGE_URL!.replace(/\/$/, ""),
+    apiKey: ctx.env.CF_SANDBOX_API_KEY!,
+    maxOutputChars: MAX_OUTPUT,
+  }).createProvider();
+  const helperKey = `${ctx.keyPrefix}bin/swvol`;
+  await ctx.store.put(
+    helperKey,
+    readFileSync(resolve(process.cwd(), "helper/dist/swvol-x86_64")),
+  );
+  hooks = createVolumeHooks({
+    service: ctx.service,
+    helper: { downloadUrl: () => ctx.store.presignGet(helperKey, 3600) },
+    log: (event, fields) =>
+      console.log(`  [${event}] ${JSON.stringify(fields)}`),
+  });
+});
+
+after(async () => {
+  if (ctx)
+    await cleanupE2EContext(ctx, {
+      provider,
+      sandboxIds: sandboxes,
+      volumeIds: volumeId ? [volumeId] : [],
+    });
+});
+
+test(
+  "a volume survives sandbox destruction, refuses unattached containers and can be rolled back",
+  { skip: !e2eEnabled, timeout: 1_800_000 },
+  async () => {
+    const first = await newSandbox();
+    const attached = await hooks.attach({
+      scope: ctx.scope,
+      sandboxId: first,
+      executor: executorFor(first),
+    });
+    volumeId = attached.volumeId;
+    assert.equal(attached.daemon, true, attached.output);
+    assert.equal((attached.restore as { entries?: number })?.entries, 0);
+
+    // T2: a mixed tree in one command; the barrier makes it durable before the result returns.
+    const r1 = await run(
+      first,
+      attached.attachmentId,
+      `cd /workspace && mkdir -p src/deep "dir with space" empty && printf 'hello\\n' > src/a.txt && head -c 3000000 /dev/urandom > src/deep/blob.bin && printf 'x' > "dir with space/中文.md" && : > zero.txt && ln -s src/a.txt link && ln -s nowhere dangling && chmod 600 src/a.txt && chmod 755 src/deep/blob.bin && touch -d '2024-01-02T03:04:05Z' src/a.txt && python3 -c ${shellQuote("import os; [os.utime(p,ns=(-1,-1),follow_symlinks=False) for p in ['dir with space/中文.md','dir with space','link']]")} && echo done`,
+    );
+    assert.equal(r1.exitCode, 0, r1.output);
+    assert.equal(r1.sync.persisted, true, JSON.stringify(r1.sync));
+    assert.equal(r1.output.trim().endsWith("done"), true);
+    let entries = await ctx.service.repo.entries(volumeId);
+    assert.deepEqual(paths(entries), [
+      "dangling",
+      "dir with space",
+      "dir with space/中文.md",
+      "empty",
+      "link",
+      "src",
+      "src/a.txt",
+      "src/deep",
+      "src/deep/blob.bin",
+      "zero.txt",
+    ]);
+    assert.equal(entries.find((e) => e.path === "src/a.txt")!.mode, 0o600);
+    for (const path of ["dir with space/中文.md", "dir with space", "link"])
+      assert.equal(
+        entries.find((entry) => entry.path === path)!.mtimeNs,
+        -1n,
+        `${path}: source must actually retain the negative nanosecond time`,
+      );
+    assert.equal(
+      entries.find((e) => e.path === "dangling")!.linkTarget,
+      "nowhere",
+    );
+
+    // T5: delete, rename a directory, replace a directory by a file.
+    const r2 = await run(
+      first,
+      attached.attachmentId,
+      `cd /workspace && rm zero.txt && mv src moved && rmdir empty && echo file > empty && printf 'more\\n' >> moved/a.txt && echo ok`,
+    );
+    assert.equal(r2.sync.persisted, true, JSON.stringify(r2.sync));
+    entries = await ctx.service.repo.entries(volumeId);
+    assert.deepEqual(paths(entries), [
+      "dangling",
+      "dir with space",
+      "dir with space/中文.md",
+      "empty",
+      "link",
+      "moved",
+      "moved/a.txt",
+      "moved/deep",
+      "moved/deep/blob.bin",
+    ]);
+    assert.equal(entries.find((e) => e.path === "empty")!.kind, "f");
+    const headBeforeDelete = await ctx.service.repo.head(volumeId);
+    const fpA = fingerprint(
+      (await run(first, attached.attachmentId, FINGERPRINT)).output,
+    );
+
+    // T7: destroy the sandbox, attach a fresh one, the tree comes back identical.
+    await provider.deleteSandbox(first);
+    const second = await newSandbox();
+    const reattached = await hooks.onContainerReplaced({
+      scope: ctx.scope,
+      sandboxId: second,
+      previousSandboxId: first,
+      executor: executorFor(second),
+    });
+    assert.equal(reattached.volumeId, volumeId);
+    assert.equal(
+      (reattached.restore as { ok?: boolean })?.ok,
+      true,
+      reattached.output,
+    );
+    const fpB = fingerprint(
+      (await run(second, reattached.attachmentId, FINGERPRINT)).output,
+    );
+    assert.equal(
+      fpB,
+      fpA,
+      "restored tree must match the original byte for byte, including metadata",
+    );
+    const r3 = await run(
+      second,
+      reattached.attachmentId,
+      "cd /workspace && cat moved/a.txt && readlink link",
+    );
+    assert.equal(r3.output.trim(), "hello\nmore\nsrc/a.txt");
+
+    const guardedHead = await ctx.service.repo.head(volumeId);
+    const guardedTree = await ctx.service.repo.entries(volumeId);
+
+    // T9: a container that was not restored in this boot cannot run commands or write the volume.
+    await executorFor(second).execute(
+      "rm -f /workspace/.sourceweft/identity; kill $(cat /workspace/.sourceweft/daemon.pid) 2>/dev/null; true",
+      { timeoutMs: 30_000 },
+    );
+    await assert.rejects(
+      run(
+        second,
+        reattached.attachmentId,
+        "cd /workspace && rm -rf moved && echo should-not-run > forbidden-ran.txt",
+      ),
+      VolumePersistenceError,
+    );
+    assert.equal(
+      await ctx.service.repo.head(volumeId),
+      guardedHead,
+      "nothing was synced from the unattached container",
+    );
+    assert.deepEqual(await ctx.service.repo.entries(volumeId), guardedTree);
+    const untouched = await executorFor(second).execute(
+      "test -d /workspace/moved && test ! -e /workspace/forbidden-ran.txt",
+      { timeoutMs: 30_000 },
+    );
+    assert.equal(
+      untouched.exitCode,
+      0,
+      "the rejected command did not execute or delete local data",
+    );
+    // This test explicitly destroys the damaged instance before requesting recovery.
+    await provider.deleteSandbox(second);
+    const third = await newSandbox();
+    const recovered = await hooks.onContainerReplaced({
+      scope: ctx.scope,
+      sandboxId: third,
+      previousSandboxId: second,
+      executor: executorFor(third),
+    });
+    const fpC = fingerprint(
+      (await run(third, recovered.attachmentId, FINGERPRINT)).output,
+    );
+    assert.equal(fpC, fpA);
+
+    // Checkpoint with nothing changed uploads nothing.
+    const cp = await hooks.checkpoint({
+      attachmentId: recovered.attachmentId,
+      executor: executorFor(third),
+    });
+    assert.equal(cp.sync.persisted, true);
+    assert.equal(cp.sync.flush?.upserts ?? 0, 0);
+
+    // Acknowledged deletion, then point-in-time rollback and a rebuild that brings the files back.
+    const r4 = await run(
+      third,
+      recovered.attachmentId,
+      "cd /workspace && rm -rf moved 'dir with space' empty link dangling && echo gone",
+    );
+    assert.equal(r4.sync.persisted, true);
+    assert.deepEqual(paths(await ctx.service.repo.entries(volumeId)), []);
+    await ctx.service.rollback(volumeId, headBeforeDelete);
+    await provider.deleteSandbox(third);
+    const fourth = await newSandbox();
+    const rolled = await hooks.attach({
+      scope: ctx.scope,
+      sandboxId: fourth,
+      executor: executorFor(fourth),
+    });
+    const fpD = fingerprint(
+      (await run(fourth, rolled.attachmentId, FINGERPRINT)).output,
+    );
+    assert.equal(fpD, fpA, "rollback restores the exact tree");
+    assert.equal(await ctx.service.repo.rejectCount(volumeId), 0);
+  },
+);

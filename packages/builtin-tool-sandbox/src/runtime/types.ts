@@ -1,4 +1,6 @@
 import type { ExecuteResponse } from "deepagents";
+import type { SandboxCommandDurability } from "@sourceweft/contracts/agent-tools";
+export type { SandboxCommandDurability } from "@sourceweft/contracts/agent-tools";
 import type { SandboxCommandBudget } from "./command-budgets";
 
 export const SOURCEWEFT_WORK_ROOT = "/files";
@@ -49,7 +51,217 @@ export type SandboxRef = {
   providerSandboxId: string;
 };
 
-export type SandboxExecuteResult = ExecuteResponse;
+export type SandboxExecuteResult = ExecuteResponse & {
+  durability?: SandboxCommandDurability;
+};
+
+/**
+ * Persistent-volume integration (packages/sandbox-volume). The manager calls these at five
+ * points of the sandbox lifecycle; everything else about volumes stays behind this interface.
+ * Absent → sandboxes behave exactly as before.
+ */
+export type SandboxVolumeExecutor = {
+  execute(
+    command: string,
+    options: { timeoutMs: number },
+  ): Promise<{ output: string; exitCode: number | null }>;
+};
+
+export type SandboxVolumeScope = {
+  teamId: string;
+  workspaceId: string;
+  threadId: string;
+};
+
+/** Supplied only by protected bootstrap from the original fixed lower plan and
+ * actual root dispatcher launch. This is host attestation, not proof that a
+ * generic process PID owns a kernel FUSE connection. No workload pidfiles. */
+export type SandboxLazyMountRegistration = {
+  volumeId: string;
+  attachmentId: string;
+  bootId: string;
+  fixedBaseSeq: number;
+  planSha256: string;
+  planPath: string;
+  mountPath: string;
+  mountId: number;
+  deviceMajor: number;
+  deviceMinor: number;
+  fsName: "swvol";
+  fsType: "fuse" | "fuse.swvol";
+  dispatcherPid: number;
+  dispatcherStartTime: string;
+  dispatcherExecutable: string;
+};
+export type SandboxLazyMountStatus =
+  | { required: true; state: "unregistered" }
+  | {
+      required: true;
+      state: "registered";
+      controllerNonce: string;
+      registration: SandboxLazyMountRegistration;
+    }
+  | {
+      required: true;
+      state: "fenced";
+      reason: string;
+      controllerNonce?: string;
+      registration?: SandboxLazyMountRegistration;
+    };
+
+export type SandboxSupervisorIdentity = {
+  protocolVersion: 1;
+  boundary: "pid-namespace";
+  protectedControl: true;
+  bootId: string;
+  supervisorNonce: string;
+  /** A declared required lazy mount can never be omitted as an eager fallback. */
+  lazyMount?: SandboxLazyMountStatus;
+  /** Signal-based pauses do not establish a persistence barrier. No shipped provider implements this capability. */
+  stableFreeze:
+    | {
+        available: false;
+        mechanism: "none" | "signal-pause" | "cgroup-v2-freezer";
+        kernelIoQuiescence?: "unqualified";
+      }
+    | {
+        available: true;
+        mechanism: "cgroup-v2-freezer";
+        kernelEnforced: true;
+        kernelIoQuiescence: "qualified";
+      };
+};
+
+/** Narrow host-only RPC; this surface never accepts shell commands or arbitrary paths. */
+export type SandboxVolumeControl = {
+  /** Bootstrap only; existing/fenced bindings cannot be replaced. No shipped
+   * provider implements this path and the manager never invents its inputs. */
+  registerLazyMount?(input: {
+    providerSandboxId: string;
+    expectedNonce: string;
+    registration: SandboxLazyMountRegistration;
+  }): Promise<SandboxLazyMountStatus>;
+  identity(input: {
+    providerSandboxId: string;
+  }): Promise<SandboxSupervisorIdentity>;
+  freeze(input: {
+    providerSandboxId: string;
+    expectedNonce: string;
+    freezeId: string;
+  }): Promise<{
+    freezeId: string;
+    supervisorNonce: string;
+    allWritersStopped: true;
+    mechanism: "cgroup-v2-freezer";
+    kernelEnforced: true;
+    kernelIoQuiescent: true;
+  }>;
+  /** Production barrier release only. The current supervisor's diagnostic pause/thaw RPCs do not satisfy this contract. */
+  resume(input: {
+    providerSandboxId: string;
+    expectedNonce: string;
+    freezeId: string;
+  }): Promise<void>;
+  flush(input: {
+    providerSandboxId: string;
+    expectedNonce: string;
+    attachmentId: string;
+    freezeId?: string;
+    drainId?: string;
+    full: true;
+  }): Promise<{ output: string; exitCode: number | null }>;
+  drain(input: {
+    providerSandboxId: string;
+    expectedNonce: string;
+    drainId: string;
+  }): Promise<{
+    drainId: string;
+    bootId: string;
+    supervisorNonce: string;
+    launchGateClosed: true;
+    allNamespacesExited: true;
+  }>;
+};
+
+export type SandboxVolumeHooks = {
+  /** Set only by the typed protected bootstrap implementation, never legacy workspace metadata hooks. */
+  protectedBootstrap?: true;
+  acquireOperation?(input: {
+    attachmentId: string;
+    operationId: string;
+    sandboxId: string;
+    bootId: string;
+    supervisorNonce: string;
+    writerKind?: "external" | "supervised";
+  }): Promise<{ permitId: string; reused: boolean }>;
+  markOperationStarted?(input: {
+    attachmentId: string;
+    permitId: string;
+  }): Promise<boolean>;
+  releaseOperation?(
+    input: { attachmentId: string; permitId: string } & (
+      | { outcome: "not_started" }
+      | { outcome: "persisted"; confirmedSeq: number }
+    ),
+  ): Promise<void>;
+  assertActive(input: {
+    attachmentId: string;
+    executor: SandboxVolumeExecutor;
+  }): Promise<void>;
+  quarantine(input: { attachmentId: string; reason: string }): Promise<void>;
+  attach(input: {
+    scope: SandboxVolumeScope;
+    sandboxId: string;
+    executor: SandboxVolumeExecutor;
+  }): Promise<{ attachmentId: string }>;
+  wrapCommand(command: string, options?: { full?: boolean }): string;
+  parseResult(input: {
+    attachmentId: string;
+    output: string;
+    exitCode: number | null;
+    executor: SandboxVolumeExecutor;
+  }): Promise<{
+    output: string;
+    exitCode: number | null;
+    sync: {
+      persisted: boolean;
+      confirmedSeq?: number;
+      mode?: "shadow" | "full";
+    };
+  }>;
+  checkpoint(input: {
+    attachmentId: string;
+    executor: SandboxVolumeExecutor;
+    freezeId?: string;
+    drainId?: string;
+    supervisorNonce?: string;
+    trustedFlush?: (input: {
+      attachmentId: string;
+      freezeId?: string;
+      drainId?: string;
+    }) => Promise<{ output: string; exitCode: number | null }>;
+  }): Promise<{
+    sync: {
+      persisted: boolean;
+      confirmedSeq?: number;
+      mode?: "shadow" | "full";
+    };
+  }>;
+  /** Checkpoint for a sandbox this process did not attach (cleanup workers); null when the thread has no volume. */
+  checkpointScope(input: {
+    scope: SandboxVolumeScope;
+    sandboxId: string;
+    executor: SandboxVolumeExecutor;
+  }): Promise<{ sync: { persisted: boolean } } | null>;
+  onContainerReplaced(input: {
+    scope: SandboxVolumeScope;
+    sandboxId: string;
+    /** Provider-confirmed missing old instance, or the refused command's same instance ID. */
+    previousSandboxId?: string;
+    executor: SandboxVolumeExecutor;
+  }): Promise<{ attachmentId: string }>;
+  isContainerReplacedError(error: unknown): boolean;
+};
 
 export type SandboxCancellationReason = "user_cancelled" | "timed_out";
 
@@ -147,6 +359,14 @@ export type SandboxProvider = {
    * explicitly so the durable generation fence does not quarantine siblings.
    */
   cancellationScope?: "command" | "sandbox";
+  /** Separately authenticated privileged volume control, never exposed through generic execution/file APIs. */
+  volumeControl?: SandboxVolumeControl;
+  /** Executes only inside the registered workload namespace/UID; never an arbitrary privileged shell. */
+  executeSupervised?(
+    input: Parameters<SandboxProvider["execute"]>[0] & {
+      expectedNonce: string;
+    },
+  ): Promise<SandboxExecuteResult>;
   createSandbox(input: CreateSandboxInput): Promise<{ id: string }>;
   /** Must verify reusability when no stronger health check is declared. */
   getSandbox(providerSandboxId: string): Promise<unknown>;

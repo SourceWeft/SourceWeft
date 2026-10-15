@@ -26,6 +26,17 @@ export function pinnedOperationCancellationReason(
 }
 
 export function isPinnedOperationProviderTimeout(error: unknown) {
+  // Structured outer errors describe the operation that actually failed. A
+  // storage/control error may mention a timeout in its cause without meaning
+  // that the user's already-completed command timed out.
+  if (
+    error &&
+    typeof error === "object" &&
+    "code" in error &&
+    typeof error.code === "string"
+  ) {
+    return error.code === "SANDBOX_COMMAND_TIMEOUT";
+  }
   return (
     error instanceof Error && error.message.includes("SANDBOX_COMMAND_TIMEOUT")
   );
@@ -62,10 +73,7 @@ export async function runPinnedSandboxOperation<T>(input: {
     timeoutMs: number;
   }) => Promise<T>;
 }): Promise<T> {
-  if (
-    !Number.isSafeInteger(input.timeoutMs) ||
-    input.timeoutMs <= 0
-  ) {
+  if (!Number.isSafeInteger(input.timeoutMs) || input.timeoutMs <= 0) {
     throw new Error("SANDBOX_PINNED_OPERATION_TIMEOUT_INVALID");
   }
 

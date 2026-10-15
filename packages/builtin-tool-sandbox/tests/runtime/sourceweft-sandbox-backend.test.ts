@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SourceWeftSandboxBackend } from "../../src/runtime/sourceweft-sandbox-backend";
+import {
+  SandboxProviderError,
+  SANDBOX_PROVIDER_ERROR_CODES,
+} from "../../src/runtime/errors";
 import { SandboxManager } from "../../src/runtime/sandbox-manager";
 import {
   maxSandboxCommandTimeoutMs,
@@ -358,7 +362,11 @@ function createProvider() {
     async downloadFile(input) {
       const content = files.get(input.sandboxPath);
       if (!content) {
-        throw new Error("not found");
+        throw new SandboxProviderError(
+          SANDBOX_PROVIDER_ERROR_CODES.fileMissing,
+          "not found",
+          "download",
+        );
       }
       return Buffer.from(content);
     },
@@ -387,6 +395,37 @@ function createBackend() {
   });
   return { backend, files, provider };
 }
+
+test("write never overwrites an existing file when its existence probe fails", async () => {
+  for (const failure of [
+    new SandboxProviderError(
+      SANDBOX_PROVIDER_ERROR_CODES.unavailable,
+      "storage unavailable",
+      "download",
+    ),
+    new SandboxProviderError(
+      SANDBOX_PROVIDER_ERROR_CODES.authentication,
+      "authorization failed",
+      "download",
+    ),
+    new Error("connection reset while reading"),
+  ]) {
+    const { backend, files, provider } = createBackend();
+    files.set("/workspace/saved.txt", Buffer.from("previously saved"));
+    provider.downloadFile = async () => {
+      throw failure;
+    };
+    await assert.rejects(
+      backend.write("/workspace/saved.txt", "replacement"),
+      (error) => error === failure,
+    );
+    assert.equal(
+      Buffer.from(files.get("/workspace/saved.txt")!).toString(),
+      "previously saved",
+    );
+    assert.deepEqual(provider.uploadedFiles, []);
+  }
+});
 
 function createBackendWithOperationStore(
   operationStore: SandboxOperationStore,
@@ -1348,10 +1387,7 @@ test("SourceWeftSandboxBackend returns per-file permission errors for invalid do
 test("SourceWeftSandboxBackend returns recoverable error for absolute glob patterns outside sandbox roots", async () => {
   const { backend } = createBackend();
 
-  const result = await backend.glob(
-    "/files/**/*.md",
-    "/workspace/ppt-deck",
-  );
+  const result = await backend.glob("/files/**/*.md", "/workspace/ppt-deck");
 
   assert.match(result.error ?? "", /SANDBOX_READ_PATH_DENIED/u);
 });
@@ -1687,7 +1723,11 @@ test("a skill the host could not plan fails alone, without any sandbox traffic f
       plans: async () => [skillPlan("ppt-deck")],
       hasPlans: () => true,
       unstageable: () => [
-        { name: "huge", version: "1.0.0", error: "not stageable: bundle_too_large" },
+        {
+          name: "huge",
+          version: "1.0.0",
+          error: "not stageable: bundle_too_large",
+        },
       ],
       commandTimeoutMs: resolveSandboxCommandTimeoutMs({ limits }),
       maxOutputChars: limits.maxOutputChars,

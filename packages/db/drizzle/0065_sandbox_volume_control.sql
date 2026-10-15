@@ -1,0 +1,2 @@
+ALTER TABLE "sandbox_volume_attachments" ADD COLUMN "control_token_hash" text;--> statement-breakpoint
+ALTER TABLE "sandbox_volume_attachments" ADD COLUMN "control_expires_at" timestamp with time zone;
