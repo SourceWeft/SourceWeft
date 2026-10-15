@@ -1,0 +1,18 @@
+{
+  "tag": "v0.3.0-rc.9",
+  "releasedAt": "2026-10-14",
+  "category": "Release",
+  "commit": "a3e3e4b864af943d2e25c60888f372e95198c6b6",
+  "title": "Catalog reliability and production operations",
+  "summary": "This release makes public catalogs more reliable and easier to discover, strengthens browser and API security, and adds privacy-safe production activity logging. Signed desktop update packages remain on the existing Preview policy; stable/latest promotion is unchanged.",
+  "items": [
+    "Public MCP and Skill sitemaps cover the full catalog, use content-based lastmod dates, and keep non-indexable React server component payloads out of the crawl.",
+    "Authors can add a safe Listed on SourceWeft badge to GitHub READMEs for catalog skills and MCP servers.",
+    "Large Skill repositories and GitHub rate limits are handled more reliably, with bounded chunked imports and refresh pauses until quota reset.",
+    "Dashboard workspace switches now show progress, recover from transient service errors, and report failures with a retry path.",
+    "Web and API responses receive security headers; public legal-page titles and Skill listing cursors are corrected.",
+    "Production logs now report privacy-safe chat, authentication, billing, and installation activity, including worker metrics."
+  ],
+  "githubPrerelease": false,
+  "desktopPublicationPolicy": "updater-signed"
+}
