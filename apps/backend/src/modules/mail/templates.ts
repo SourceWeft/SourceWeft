@@ -206,15 +206,24 @@ function resolveImageUrl(baseUrl: string, variables: MailTemplateVariables) {
   return `${baseUrl}/icon-512.png`;
 }
 
-function buildActionHtml(action: string, url: string) {
+function buildActionHtml(action: string, url: string, locale: string) {
   if (!action || !url) {
     return "";
   }
 
+  const backupLabel =
+    locale === "zh-CN"
+      ? "按钮无法打开？复制以下链接到浏览器："
+      : locale === "zh-TW"
+        ? "按鈕無法開啟？複製以下連結到瀏覽器："
+        : "Button not working? Copy this link into your browser:";
   return [
-    '<div class="action">',
-    `<a class="button" href="${escapeHtml(url)}">${escapeHtml(action)}</a>`,
-    "</div>",
+    '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:28px 0 20px;"><tr>',
+    '<td class="button-cell" bgcolor="#111827" style="background:#111827;border-radius:6px;text-align:center;mso-padding-alt:14px 24px;">',
+    `<a class="button" href="${escapeHtml(url)}" style="display:inline-block;background:#111827;border:1px solid #111827;border-radius:6px;color:#ffffff;font-size:15px;font-weight:600;line-height:22px;padding:14px 24px;text-decoration:none;mso-padding-alt:0;">${escapeHtml(action)}</a>`,
+    "</td></tr></table>",
+    `<p class="muted" style="margin:0 0 8px;color:#6b7280;font-size:12px;line-height:20px;">${backupLabel}</p>`,
+    `<p style="margin:0;font-size:12px;line-height:20px;overflow-wrap:anywhere;word-break:break-all;"><a href="${escapeHtml(url)}" style="color:#6b7280;text-decoration:underline;">${escapeHtml(url)}</a></p>`,
   ].join("");
 }
 
@@ -237,7 +246,7 @@ export function renderMailTemplate(
   const url = interpolateRaw(template.metadata.url, variables);
   const bodyHtml = interpolateEscaped(template.body, variables);
   const layoutHtml = interpolateEscaped(readTemplateFile("layout.html"), {
-    actionHtml: buildActionHtml(action, url),
+    actionHtml: buildActionHtml(action, url, effectiveLocale),
     baseUrl,
     baseUrlLabel: baseUrl.replace(/^https?:\/\//, ""),
     bodyHtml,

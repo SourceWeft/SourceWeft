@@ -31,6 +31,7 @@
     "blog:sync": "tsx src/scripts/sync-notion-blog.ts",
     "preview:user": "tsx src/scripts/user-preview.ts",
     "mail:welcome": "tsx src/scripts/send-welcome-email.ts",
+    "mail:preview": "tsx src/scripts/preview-user-emails.ts",
     "benchmark:video-render": "tsx src/scripts/benchmark-video-render.ts",
     "check-types": "tsc --noEmit",
     "check-types:build": "tsc --noEmit -p tsconfig.build.json",

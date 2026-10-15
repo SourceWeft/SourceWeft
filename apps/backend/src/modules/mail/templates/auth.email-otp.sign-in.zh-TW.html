@@ -1,10 +1,40 @@
 ---
-subject: 你的登入驗證碼
-heading: 你的登入驗證碼
-preview: 使用此驗證碼登入 SourceWeft。
+subject: SourceWeft 登入驗證碼
+heading: 登入 SourceWeft
+preview: 請在登入頁面輸入以下驗證碼，繼續登入。
 ---
-<p>使用此驗證碼登入 SourceWeft。</p>
 
-<p class="otp-code">{{otp}}</p>
-
-<p class="muted">此驗證碼即將過期，且僅可使用一次。</p>
+<p style="margin: 0 0 18px; color: #374151; font-size: 15px; line-height: 26px">
+  請在登入頁面輸入以下驗證碼，繼續登入。
+</p>
+<p
+  class="otp-code"
+  style="
+    margin: 24px 0;
+    padding: 20px 12px;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    background: #f9fafb;
+    color: #111827;
+    font-family: monospace;
+    font-size: 32px;
+    font-weight: 700;
+    letter-spacing: 6px;
+    line-height: 40px;
+    text-align: center;
+  "
+>
+  {{otp}}
+</p>
+<p
+  class="muted"
+  style="margin: 18px 0 0; color: #6b7280; font-size: 13px; line-height: 22px"
+>
+  驗證碼僅可使用一次，請勿與他人分享。若已失效，請在原頁面重新取得。
+</p>
+<p
+  class="muted"
+  style="margin: 18px 0 0; color: #6b7280; font-size: 13px; line-height: 22px"
+>
+  如果不是你本人操作，請忽略這封郵件。
+</p>
