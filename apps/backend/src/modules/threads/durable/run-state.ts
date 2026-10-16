@@ -1,6 +1,10 @@
 import { ContentError } from "../../content/errors";
 import { sanitizeClientErrorMessage } from "../../content/model-gateway-error";
-import type { ChatThreadRunRecord, ChatThreadRunStatus } from "./types";
+import type {
+  ChatThreadRunRecord,
+  ChatThreadRunStatus,
+  ChatThreadRunStopState,
+} from "./types";
 import {
   getSnapshotRecord,
   hasPendingConfirmations,
@@ -65,7 +69,7 @@ export function toTerminalJobStatus(status: ChatThreadRunStatus) {
   return "cancelled";
 }
 
-export function toTerminalRunError(run: ChatThreadRunRecord) {
+export function toTerminalRunError(run: ChatThreadRunStopState) {
   if (run.status === "cancelled") {
     return new ContentError(
       499,
@@ -84,7 +88,7 @@ export function toTerminalRunError(run: ChatThreadRunRecord) {
 }
 
 /** A claimed worker may execute only while its durable run remains running. */
-export function toRunStopError(run: ChatThreadRunRecord | null) {
+export function toRunStopError(run: ChatThreadRunStopState | null) {
   if (run?.status === "running") return null;
   if (run?.status === "cancel_requested")
     return new ContentError(

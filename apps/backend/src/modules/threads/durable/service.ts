@@ -18,6 +18,7 @@ import {
   findActiveChatThreadRun,
   findLatestChatThreadRunSummary,
   findChatThreadRunById,
+  findChatThreadRunStopState,
   findChatThreadRunByIdempotencyKey,
   listExpiredApprovalWaitingRuns,
   listSilentActiveRuns,
@@ -539,7 +540,7 @@ export class DurableChatRunService {
   }
 
   async getRunStopError(run: ChatThreadRunRecord) {
-    const current = await findChatThreadRunById({
+    const current = await findChatThreadRunStopState({
       runId: run.id,
       teamId: run.teamId,
       workspaceId: run.workspaceId,

@@ -49,6 +49,12 @@ export type ChatThreadRunRecord = {
   updatedAt: string;
 };
 
+/** Minimal state needed for worker cancellation/ownership checks. */
+export type ChatThreadRunStopState = Pick<
+  ChatThreadRunRecord,
+  "status" | "errorCode" | "errorMessage"
+>;
+
 export type DurableRunRequestSnapshot =
   | (StreamThreadEventInput & { mode: "send" })
   | (RefreshThreadInput & { mode: "refresh" })

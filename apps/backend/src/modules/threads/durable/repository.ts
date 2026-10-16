@@ -12,6 +12,7 @@ import type {
   ChatThreadRunMode,
   ChatThreadRunRecord,
   ChatThreadRunStatus,
+  ChatThreadRunStopState,
   DurableRunRequestSnapshot,
 } from "./types";
 import type { MessageRenderBlock } from "../turn/types";
@@ -286,6 +287,30 @@ export async function findChatThreadRunById(input: {
     .limit(1);
 
   return row ? mapRun(row) : null;
+}
+
+/** Per-event control checks must not transfer request/snapshot payloads. */
+export async function findChatThreadRunStopState(input: {
+  runId: string;
+  teamId: string;
+  workspaceId: string;
+}): Promise<ChatThreadRunStopState | null> {
+  const [row] = await db
+    .select({
+      status: chatThreadRuns.status,
+      errorCode: chatThreadRuns.errorCode,
+      errorMessage: chatThreadRuns.errorMessage,
+    })
+    .from(chatThreadRuns)
+    .where(
+      and(
+        eq(chatThreadRuns.id, input.runId),
+        eq(chatThreadRuns.teamId, input.teamId),
+        eq(chatThreadRuns.workspaceId, input.workspaceId),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
 }
 
 export async function findChatThreadRunByIdempotencyKey(input: {
