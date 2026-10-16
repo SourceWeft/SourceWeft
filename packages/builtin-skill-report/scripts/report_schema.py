@@ -5,6 +5,8 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 MAX_SOURCE_BYTES = 2 * 1024 * 1024
+REPORT_CITATION_TOKEN = re.compile(r"\[\s*S[1-9][0-9]*(?:\s*[,;，；]\s*S[1-9][0-9]*)*\s*\]", re.I)
+TEXT_URL = re.compile(r"https?://[^\s<>\"'，。；！？（）【】]+", re.I)
 RUNTIME_TOKEN = re.compile(r"\[c\d+\]|[\[【]\u200b?(?:citation\s*:|cite:)|||<citation", re.I)
 
 
@@ -30,6 +32,16 @@ def text(value, label, limit=4000):
     return value
 
 
+def statement_input_text(value, label, limit=4000):
+    text(value, label, limit)
+    # URL path/query brackets are literal source text, not report citations.
+    # Mask them only for validation; never change the stored or rendered text.
+    outside_urls = TEXT_URL.sub('', value)
+    if REPORT_CITATION_TOKEN.search(outside_urls):
+        fail('Inline report citation markers are not allowed in statement/cell text; use the citations array')
+    return value
+
+
 def array(value, label, maximum, minimum=1):
     if not isinstance(value, list) or not minimum <= len(value) <= maximum:
         fail(f"Invalid {label} count")
@@ -46,7 +58,7 @@ def citations(value, ids, required=False):
 
 def statement(value, ids, paragraph=False):
     obj(value, ["text", "kind", "citations"] + (["type"] if paragraph else []))
-    text(value["text"], "statement")
+    statement_input_text(value["text"], "statement")
     if value["kind"] not in ("fact", "analysis", "recommendation"):
         fail("Invalid statement kind")
     citations(value["citations"], ids, value["kind"] == "fact")
@@ -118,7 +130,7 @@ def validate_report(report):
                         fail("Table dimension mismatch")
                     for cell in row:
                         obj(cell, ["text", "status", "citations"])
-                        text(cell["text"], "cell", 2000)
+                        statement_input_text(cell["text"], "cell", 2000)
                         if cell["status"] not in ("value", "unknown", "conflict", "not_applicable"):
                             fail("Invalid cell status")
                         citations(cell["citations"], ids, cell["status"] in ("value", "conflict"))

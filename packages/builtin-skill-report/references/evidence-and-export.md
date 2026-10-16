@@ -38,7 +38,7 @@ Use a fresh output directory:
 python3 /skills/report/scripts/generate_report.py --source /workspace/report.source.json --output-dir /workspace/report-output --formats html,md
 node /skills/report/scripts/build-html.cjs /workspace/report-output/draft.html /workspace/report-output/report.html
 node /skills/report/scripts/qa-html.cjs /workspace/report-output/report.html /workspace/report-output/qa
-python3 /skills/report/scripts/verify_report.py --source /workspace/report-output/report.source.json --output-dir /workspace/report-output --formats html,md
+python3 /skills/report/scripts/verify_report.py --source /workspace/report.source.json --output-dir /workspace/report-output --formats html,md
 ```
 
 HTML is required and becomes primary. Add docx and/or pdf when requested; use the identical format list for generation and verification. PDF uses the selected LibreOffice converter and an internal temporary DOCX. Deliver report.docx only when docx is requested. Missing dependencies, failed conversion or failed checks block completion. Do not remove a promised format, substitute a converter or reuse older outputs.

@@ -65,6 +65,38 @@ class ReportTest(unittest.TestCase):
         for url in ('javascript:alert(1)', 'file:///tmp/x', 'https://user:pass@example.com/a', '//example.com', 'https://example.com/a b'):
             self.reject(lambda r: r['sources'][0]['display'].update(url=url))
 
+    def test_inline_report_citations_rejected_in_all_statement_and_cell_inputs(self):
+        targets = [
+            lambda r: r['summary'][0],
+            lambda r: r['sections'][1]['blocks'][0],
+            lambda r: r['sections'][1]['blocks'][1]['items'][0],
+            lambda r: r['sections'][0]['blocks'][0]['rows'][0][0],
+        ]
+        for target in targets:
+            for marker in ('[S1]', '[S12]', '[ S1 ]', '[S1, S2]'):
+                with self.subTest(target=targets.index(target), marker=marker):
+                    report = copy.deepcopy(self.report)
+                    target(report)['text'] = 'A factual sentence ' + marker
+                    with self.assertRaisesRegex(ValueError, 'use the citations array'):
+                        validate_report(report)
+
+    def test_plain_s1_numbers_and_literal_url_brackets_are_preserved(self):
+        original = '普通 S1 文字与 [1]、(2)，原始链接 https://example.test/docs/[S1]?q=[S2]'
+        targets = [
+            self.report['summary'][0],
+            self.report['sections'][1]['blocks'][0],
+            self.report['sections'][1]['blocks'][1]['items'][0],
+            self.report['sections'][0]['blocks'][0]['rows'][0][0],
+        ]
+        for target in targets:
+            target['text'] = original
+        validate_report(self.report)
+        for target in targets:
+            self.assertEqual(target['text'], original)
+        self.report['summary'][0]['text'] = 'https://example.test/docs/[S1]。额外手写引用[S2]'
+        with self.assertRaisesRegex(ValueError, 'use the citations array'):
+            validate_report(self.report)
+
     def test_public_outputs_escape_text_and_exclude_private_provenance(self):
         self.report['summary'][0]['text'] = '<script>alert("x")</script> & [text] | raw'
         validate_report(self.report)

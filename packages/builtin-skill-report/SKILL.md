@@ -12,7 +12,7 @@ Use the current root Agent and existing sandbox/publish tools. Do not start anot
 1. Establish the question, audience and selected source scope. Read actual authorized sources with the current source tools; `/files` is working memory, not independent evidence. Observe/retain useful source footnotes. Do not invent provenance, citations, prices, coverage or confidence.
 2. Respect `<skill_runtime_config name="report">`: template (briefing/comparison/decision), language (auto/zh-CN/en-US), length (concise/standard), audience and formats. Infer auto language from the request; the JSON must resolve to zh-CN or en-US. Concise normally has 2–4 sections, standard 4–6. Keep the actual page within the existing 12,000px QA limit; never truncate or bypass QA to force a pass.
 3. Write `report.source.json` as a persistent Workfile, then use `prepare_sandbox_workspace` to stage it under the active sandbox workspace. `/files` and `/kb` are logical paths, not command paths. Skill scripts are already staged under `/skills/report` (or the runtime-provided physical skill root); do not copy or rewrite them. Report does not require the separate HTML Skill to be enabled.
-4. Use the strict report-local JSON documented in `references/report-structure.md`. Facts require source references, analysis/recommendations are visibly labeled, and unknown/conflicting table cells are explicit. Only `sources[].display` reaches public formats; `provenance` stays private. Structural validation does not authenticate evidence or establish factual support.
+4. Use the strict report-local JSON documented in `references/report-structure.md`. Put source IDs only in each statement/cell `citations` array; never handwrite `[S1]`-style report markers in summary, paragraph, bullet or cell text, because the renderer adds them once. Validation rejects such input rather than silently deleting it. Facts require source references, analysis/recommendations are visibly labeled, and unknown/conflicting table cells are explicit. Only `sources[].display` reaches public formats; `provenance` stays private. Structural validation does not authenticate evidence or establish factual support.
 
 ## Execution and verification integrity
 
@@ -20,7 +20,7 @@ Run content verification and HTML QA as separate `execute` calls and retain thei
 
 A sandbox operation marked `succeeded` means the execution request completed; it does not mean the command or report passed. For every required step, inspect the returned tool `exitCode`. Verification requires both `exitCode=0` and its returned JSON `passed=true`; HTML QA independently requires both `exitCode=0` and `qa.json`/its returned JSON `passed=true`. A pipeline's exit code, a truncated log, an older attempt's success, or `generated_pending_qa` is not proof. If the result JSON is missing or truncated, read the saved check result in a separate operation before proceeding. Structural checks still do not replace actual evidence and visual review.
 
-Bind each result to the current attempt's input, output paths and final file digests. Re-run verification and QA after any content or layout change, and use only that attempt's screenshots and receipts. A final attempt cannot inherit an earlier version's passed status. Preserve failed attempts in their own directories.
+Verify against the original prepared input path used for generation; do not point `--source` at the output copy of `report.source.json` and compare it with itself. Bind each result to the current attempt's input, output paths and final file digests. Re-run verification and QA after any content or layout change, and use only that attempt's screenshots and receipts. A final attempt cannot inherit an earlier version's passed status. Preserve failed attempts in their own directories.
 
 If a long report exceeds the HTML height limit or fails PDF checks, record the actual failure and diagnose the input/layout. Do not delete necessary facts, source coverage, limitations, conflicting values or references merely to obtain `passed=true`. For any content revision, record what sections, claims, table rows and citations were added, removed or corrected, why the change serves the user's scope, and which underlying evidence was rechecked. Compare the revised report against the original scope before delivery. If complete content cannot satisfy the current bounds, report that blocker rather than silently reducing the promised deliverable.
 
@@ -31,7 +31,7 @@ Choose a fresh generation directory for each attempt/version; existing directori
 ```bash
 python3 /skills/report/scripts/generate_report.py --source /workspace/report.source.json --output-dir /workspace/report-v1 --formats html,md
 node /skills/report/scripts/build-html.cjs /workspace/report-v1/draft.html /workspace/report-v1/report.html
-python3 /skills/report/scripts/verify_report.py --source /workspace/report-v1/report.source.json --output-dir /workspace/report-v1 --formats html,md
+python3 /skills/report/scripts/verify_report.py --source /workspace/report.source.json --output-dir /workspace/report-v1 --formats html,md
 node /skills/report/scripts/qa-html.cjs /workspace/report-v1/report.html /workspace/report-v1/qa
 ```
 
