@@ -318,6 +318,59 @@ export async function findChatThreadRunStopState(input: {
   return row ?? null;
 }
 
+/** Control fields for attach polling; payloads are read only for recovery/replay. */
+export type ChatThreadRunAttachState = Pick<
+  ChatThreadRunRecord,
+  | "status"
+  | "jobId"
+  | "streamKey"
+  | "eventOffset"
+  | "errorCode"
+  | "errorMessage"
+  | "startedAt"
+  | "heartbeatAt"
+  | "createdAt"
+  | "updatedAt"
+>;
+
+export async function findChatThreadRunAttachState(input: {
+  runId: string;
+  teamId: string;
+  workspaceId: string;
+}): Promise<ChatThreadRunAttachState | null> {
+  const [row] = await db
+    .select({
+      status: chatThreadRuns.status,
+      jobId: chatThreadRuns.jobId,
+      streamKey: chatThreadRuns.streamKey,
+      eventOffset: chatThreadRuns.eventOffset,
+      errorCode: chatThreadRuns.errorCode,
+      errorMessage: chatThreadRuns.errorMessage,
+      startedAt: chatThreadRuns.startedAt,
+      heartbeatAt: chatThreadRuns.heartbeatAt,
+      createdAt: chatThreadRuns.createdAt,
+      updatedAt: chatThreadRuns.updatedAt,
+    })
+    .from(chatThreadRuns)
+    .where(
+      and(
+        eq(chatThreadRuns.id, input.runId),
+        eq(chatThreadRuns.teamId, input.teamId),
+        eq(chatThreadRuns.workspaceId, input.workspaceId),
+      ),
+    )
+    .limit(1);
+  return row
+    ? {
+        ...row,
+        startedAt: row.startedAt?.toISOString() ?? null,
+        heartbeatAt: row.heartbeatAt?.toISOString() ?? null,
+        createdAt: row.createdAt.toISOString(),
+        updatedAt: row.updatedAt.toISOString(),
+      }
+    : null;
+}
+
 export async function findChatThreadRunByIdempotencyKey(input: {
   teamId: string;
   workspaceId: string;

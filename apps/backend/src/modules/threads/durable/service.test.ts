@@ -941,6 +941,7 @@ test("attach state fails stale running run and synthesizes terminal events", asy
     run: staleRun,
     offset: 0,
     sawErrorEvent: false,
+    findAttachState: async () => null,
     findRunById: async () => staleRun,
     failStaleRun: async (run) => {
       failCalls.push(run);
