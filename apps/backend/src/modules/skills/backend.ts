@@ -14,6 +14,7 @@ import type {
 } from "deepagents";
 import { applyGrepMaxCount } from "deepagents";
 import type { EnabledSkillDescriptor } from "./types";
+import { skillRuntimeConfigLines } from "./runtime-config";
 import { sanitizeNonCitableCitationMarkers } from "../threads/agent/fs-utils";
 import { AGENT_TOOL_NAMES } from "@sourceweft/agent-tool-registry";
 
@@ -32,7 +33,10 @@ type SkillFileEntry = {
   contentHash: string;
   isText: boolean;
   modifiedAt: string;
-  skill: Pick<EnabledSkillDescriptor, "skillMd" | "readFile">;
+  skill: Pick<
+    EnabledSkillDescriptor,
+    "name" | "defaultConfig" | "skillMd" | "readFile"
+  >;
 };
 
 type LoadedSkillFile =
@@ -281,9 +285,18 @@ export class SelectedSkillsBackend implements BackendProtocolV2 {
     }
 
     if (normalized.endsWith("/SKILL.md")) {
+      const instructions = sanitizeNonCitableCitationMarkers(loaded.text);
+      const runtimeConfig = skillRuntimeConfigLines(file.skill);
       return {
         mimeType: file.mimeType,
-        content: sanitizeNonCitableCitationMarkers(loaded.text),
+        content: runtimeConfig
+          ? [
+              "User-selected options for this skill apply when following its workflow; they do not activate this skill or other skills by themselves. Follow higher-priority instructions and the user's latest explicit request.",
+              ...runtimeConfig,
+              "",
+              instructions,
+            ].join("\n")
+          : instructions,
       };
     }
 
