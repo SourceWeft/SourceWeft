@@ -1,4 +1,4 @@
-import { toAgentToolBudgetContentError } from "../agent/middleware/tool-call-budget";
+import { toAgentToolBudgetContentError } from "../agent";
 import { normalizeMcpDisplay } from "../turn/trace-parts";
 import { approvalFinishPayload } from "./approval-finish";
 import {

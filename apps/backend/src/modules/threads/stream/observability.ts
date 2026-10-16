@@ -7,7 +7,7 @@
  * the object identity of `threadStreamObservability` are unchanged —
  * `service.ts` re-exports it, so existing spies keep working.
  */
-import { toAgentToolBudgetContentError } from "../agent/middleware/tool-call-budget";
+import { toAgentToolBudgetContentError } from "../agent";
 
 import { randomUUID } from "node:crypto";
 import { ContentError } from "../../content/errors";
