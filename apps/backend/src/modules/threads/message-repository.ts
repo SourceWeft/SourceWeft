@@ -345,17 +345,41 @@ export async function updateMessageMetadataRecord(input: {
   return row ? mapMessage(row) : null;
 }
 
-export async function updateMessageRecord(input: {
+type MessageWriteScope = {
   teamId: string;
   workspaceId: string;
   threadId: string;
   messageId: string;
+};
+
+type MessageWriteFields = {
   content?: string;
   contentJson?: Record<string, unknown>;
   model?: string | null;
   creditsConsumed?: number | null;
   metadata?: Record<string, unknown>;
-}) {
+};
+
+type MessageProjection = (
+  current: MessageRecord,
+) => MessageWriteFields & { metadata: Record<string, unknown> };
+
+export function updateMessageRecord(
+  input: MessageWriteScope & MessageWriteFields,
+) {
+  return writeMessageRecord(input);
+}
+
+/** Host-only projection under the existing row lock; no unused full-row return. */
+export async function persistMessageProjection(
+  input: MessageWriteScope & {
+    project: MessageProjection;
+  },
+): Promise<void> {
+  await writeMessageRecord(input, input.project, false);
+}
+
+function messageWriteSet(input: MessageWriteFields) {
   const set: Partial<typeof messages.$inferInsert> = {};
   if (input.content !== undefined) {
     set.content = input.content;
@@ -373,16 +397,20 @@ export async function updateMessageRecord(input: {
     set.metadata = input.metadata;
   }
 
-  if (Object.keys(set).length === 0) {
-    return findMessageRecord({
-      teamId: input.teamId,
-      workspaceId: input.workspaceId,
-      messageId: input.messageId,
-    });
-  }
+  return set;
+}
 
+async function writeMessageRecord(
+  input: MessageWriteScope & MessageWriteFields,
+  project?: MessageProjection,
+  returnRecord = true,
+): Promise<MessageRecord | null> {
+  const set = messageWriteSet(input);
+  if (!project && Object.keys(set).length === 0) {
+    return returnRecord ? findMessageRecord(input) : null;
+  }
   const row =
-    input.metadata === undefined
+    input.metadata === undefined && !project
       ? (
           await db
             .update(messages)
@@ -411,17 +439,17 @@ export async function updateMessageRecord(input: {
             )
             .for("update")
             .limit(1);
-          if (!current) {
-            return null;
-          }
-          if (
-            !canApplyReasoningWrite(current.metadata ?? {}, input.metadata!)
-          ) {
-            return current;
+          if (!current) return null;
+          // Construct the snapshot from the same locked authority that guards
+          // the write; never substitute an unlocked pre-read or cached metadata.
+          const fields = project ? project(mapMessage(current)) : input;
+          const metadata = fields.metadata!;
+          if (!canApplyReasoningWrite(current.metadata ?? {}, metadata)) {
+            return returnRecord ? current : null;
           }
           const renderBlocks = mergeCommittedArtifactRenderBlocks({
-            incoming: Array.isArray(input.metadata?.renderBlocks)
-              ? input.metadata.renderBlocks
+            incoming: Array.isArray(metadata.renderBlocks)
+              ? metadata.renderBlocks
               : undefined,
             authoritative: [
               Array.isArray(current.metadata?.renderBlocks)
@@ -430,8 +458,8 @@ export async function updateMessageRecord(input: {
             ],
           });
           const toolCalls = mergeCommittedArtifactToolCalls({
-            incoming: Array.isArray(input.metadata?.toolCalls)
-              ? input.metadata.toolCalls
+            incoming: Array.isArray(metadata.toolCalls)
+              ? metadata.toolCalls
               : undefined,
             authoritative: [
               {
@@ -444,13 +472,13 @@ export async function updateMessageRecord(input: {
               },
             ],
           });
-          const [updated] = await tx
+          const mutation = tx
             .update(messages)
             .set({
-              ...set,
+              ...(project ? messageWriteSet(fields) : set),
               metadata: {
-                ...input.metadata,
-                ...(input.metadata?.reasoningWrite === undefined &&
+                ...metadata,
+                ...(metadata.reasoningWrite === undefined &&
                 current.metadata?.reasoningWrite
                   ? {
                       reasoning: current.metadata.reasoning,
@@ -461,11 +489,14 @@ export async function updateMessageRecord(input: {
                 ...(toolCalls ? { toolCalls } : {}),
               },
             })
-            .where(eq(messages.id, current.id))
-            .returning();
+            .where(eq(messages.id, current.id));
+          if (!returnRecord) {
+            await mutation;
+            return null;
+          }
+          const [updated] = await mutation.returning();
           return updated ?? null;
         });
-
   return row ? mapMessage(row) : null;
 }
 

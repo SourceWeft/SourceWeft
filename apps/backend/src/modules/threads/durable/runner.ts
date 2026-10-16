@@ -40,6 +40,7 @@ import {
 import {
   createMessageRecord,
   findMessageRecord,
+  persistMessageProjection,
   updateMessageRecord,
 } from "../message-repository";
 import { findThreadRecord } from "../thread/repository";
@@ -76,6 +77,23 @@ type DurableChatRunServiceAppendRunEvent =
 type DurableChatRunServiceFinishRun = typeof durableChatRunService.finishRun;
 
 const ASSISTANT_SNAPSHOT_FLUSH_MS = 500;
+/** Cooldown starts after a successful write, so slow writes do not erase it. */
+function createAssistantSnapshotFlushWindow(
+  input: { now?: () => number } = {},
+) {
+  const now = input.now ?? Date.now;
+  let lastAssistantSnapshotFlushAt = 0;
+  return async (persist: () => Promise<void>, force = false) => {
+    if (
+      !force &&
+      now() - lastAssistantSnapshotFlushAt < ASSISTANT_SNAPSHOT_FLUSH_MS
+    )
+      return;
+    await persist();
+    lastAssistantSnapshotFlushAt = now();
+  };
+}
+
 const TOOL_CONFIRMATION_FINISH_REASON = "tool_confirmation_requested";
 // Fallback cadence for detecting a cancel the pub/sub delivery may have missed
 // (a Stop that landed before the worker subscribed, or a dropped message).
@@ -1287,25 +1305,22 @@ async function updateAssistantSnapshot(input: {
   assistantMessageId: string;
   snapshot: ChatRunSnapshot;
 }) {
-  const currentMessage = await findMessageRecord({
-    teamId: input.run.teamId,
-    workspaceId: input.run.workspaceId,
-    messageId: input.assistantMessageId,
-  });
-  await updateMessageRecord({
+  await persistMessageProjection({
     teamId: input.run.teamId,
     workspaceId: input.run.workspaceId,
     threadId: input.run.threadId,
     messageId: input.assistantMessageId,
-    content: appendAssistantContinuationContent({
-      existingContent:
-        input.snapshot.assistantMessage?.content ?? currentMessage?.content,
-      nextContent: input.snapshot.assistantContent ?? "",
-    }),
-    metadata: buildSnapshotMetadata({
-      currentMetadata: currentMessage?.metadata,
-      run: input.run,
-      snapshot: input.snapshot,
+    project: (currentMessage) => ({
+      content: appendAssistantContinuationContent({
+        existingContent:
+          input.snapshot.assistantMessage?.content ?? currentMessage.content,
+        nextContent: input.snapshot.assistantContent ?? "",
+      }),
+      metadata: buildSnapshotMetadata({
+        currentMetadata: currentMessage.metadata,
+        run: input.run,
+        snapshot: input.snapshot,
+      }),
     }),
   });
 }
@@ -1574,7 +1589,7 @@ export async function processThreadChatRunJob(
   let terminalErrorCode: string | null = null;
   let terminalErrorMessage: string | null = null;
   let assistantMessagePersisted = false;
-  let lastAssistantSnapshotFlushAt = 0;
+  const flushAssistantSnapshot = createAssistantSnapshotFlushWindow();
 
   const maybeFlushAssistantSnapshot = async (force = false) => {
     if (
@@ -1586,20 +1601,16 @@ export async function processThreadChatRunJob(
       return;
     }
 
-    const now = Date.now();
-    if (
-      !force &&
-      now - lastAssistantSnapshotFlushAt < ASSISTANT_SNAPSHOT_FLUSH_MS
-    ) {
-      return;
-    }
-
-    lastAssistantSnapshotFlushAt = now;
-    await updateAssistantSnapshot({
-      run,
-      assistantMessageId,
-      snapshot,
-    });
+    const messageId = assistantMessageId;
+    await flushAssistantSnapshot(
+      () =>
+        updateAssistantSnapshot({
+          run,
+          assistantMessageId: messageId,
+          snapshot,
+        }),
+      force,
+    );
   };
 
   const applyRunProgress = async (
@@ -2159,6 +2170,7 @@ export async function processThreadChatRunJob(
 }
 
 export const testExports = {
+  createAssistantSnapshotFlushWindow,
   snapshotWithFinalizedResult,
   buildSnapshotMetadata,
   resolvePersistedTerminalMessageIds,

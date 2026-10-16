@@ -1223,3 +1223,51 @@ test("MCP display identity survives durable events, trace parts, and persisted s
     mcpDisplay,
   );
 });
+
+test("slow assistant snapshot writes keep a full cooldown after successful completion and force keeps the latest text", async () => {
+  let clock = 1_000;
+  let content = "first";
+  const saved: string[] = [];
+  const flush = testExports.createAssistantSnapshotFlushWindow({
+    now: () => clock,
+  });
+  const persist = async () => {
+    saved.push(content);
+    clock += 750;
+  };
+  await flush(persist);
+  assert.deepEqual(saved, ["first"]);
+  content += " raw one";
+  await flush(persist);
+  clock += 499;
+  content += " raw two";
+  await flush(persist);
+  assert.deepEqual(saved, ["first"]);
+  // A forced terminal boundary bypasses the window and persists all buffered text.
+  await flush(persist, true);
+  assert.deepEqual(saved, ["first", "first raw one raw two"]);
+  content += " later";
+  clock += 500;
+  await flush(persist);
+  assert.equal(saved.at(-1), content);
+});
+
+test("failed assistant snapshot writes propagate and never start a success cooldown", async () => {
+  let clock = 1_000;
+  let attempts = 0;
+  const flush = testExports.createAssistantSnapshotFlushWindow({
+    now: () => clock,
+  });
+  await assert.rejects(
+    flush(async () => {
+      attempts++;
+      clock += 750;
+      throw new Error("write failed");
+    }),
+    /write failed/,
+  );
+  await flush(async () => {
+    attempts++;
+  });
+  assert.equal(attempts, 2);
+});
