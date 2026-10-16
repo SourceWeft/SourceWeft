@@ -9,8 +9,8 @@ import subprocess
 import tempfile
 import zipfile
 import xml.etree.ElementTree as ET
-from generate_report import markdown_document
-from report_schema import read_report, parse_formats, public_texts
+from generate_report import markdown_document, page_number_footer_xml
+from report_schema import read_report, parse_formats, public_texts, effective_presentation
 
 MAX_FILE_BYTES = 32 * 1024 * 1024
 
@@ -71,7 +71,88 @@ def assert_content(report, extracted, label, ordered=True):
             position = found + len(value)
 
 
-def docx_text(path):
+def xml_signature(node):
+    return (node.tag, tuple(sorted(node.attrib.items())), node.text or '', node.tail or '', tuple(xml_signature(child) for child in node))
+
+
+def validate_page_footer(archive, names, document, types):
+    """Allow only our exact non-executable PAGE/NUMPAGES part and one live reference."""
+    w = '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}'
+    r = '{http://schemas.openxmlformats.org/officeDocument/2006/relationships}'
+    rel_ns = '{http://schemas.openxmlformats.org/package/2006/relationships}'
+    footer_names = [name for name in names if name.startswith('word/footer')]
+    if footer_names != ['word/footer1.xml']:
+        raise ValueError('Unexpected or missing DOCX page-number footer parts')
+    if any(name.startswith('word/_rels/footer') for name in names):
+        raise ValueError('DOCX footer relationships are not allowed')
+    data = archive.read('word/footer1.xml')
+    if b'<!DOCTYPE' in data or b'<!ENTITY' in data:
+        raise ValueError('Unexpected DOCX XML declarations')
+    if xml_signature(ET.fromstring(data)) != xml_signature(ET.fromstring(page_number_footer_xml())):
+        raise ValueError('DOCX page-number footer differs from the controlled fields')
+    rel_path = 'word/_rels/document.xml.rels'
+    if rel_path not in names:
+        raise ValueError('Missing DOCX page-number relationship')
+    rel_data = archive.read(rel_path)
+    if b'<!DOCTYPE' in rel_data or b'<!ENTITY' in rel_data:
+        raise ValueError('Unexpected DOCX XML declarations')
+    relations = ET.fromstring(rel_data)
+    if relations.tag != rel_ns + 'Relationships':
+        raise ValueError('Invalid DOCX page-number relationships root')
+    relationship_ids = [node.get('Id') for node in relations]
+    if any(not identity for identity in relationship_ids) or len(relationship_ids) != len(set(relationship_ids)):
+        raise ValueError('Duplicate or empty DOCX relationship Id')
+    footer_relations = [node for node in relations if node.get('Type', '').endswith('/footer')]
+    if len(footer_relations) != 1:
+        raise ValueError('Unexpected DOCX page-number relationships')
+    relation = footer_relations[0]
+    if relation.tag != rel_ns + 'Relationship' or relation.get('Type') != 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer' or relation.get('Target') != 'footer1.xml' or relation.get('TargetMode', 'Internal') != 'Internal' or not relation.get('Id'):
+        raise ValueError('Invalid DOCX page-number relationship')
+    refs = list(document.iter(w + 'footerReference'))
+    section_refs = [ref for section in document.iter(w + 'sectPr') for ref in section.findall(w + 'footerReference')]
+    if len(refs) != 1 or len(section_refs) != 1 or refs[0] is not section_refs[0] or refs[0].attrib != {w + 'type': 'default', r + 'id': relation.get('Id')}:
+        raise ValueError('Unexpected or dangling DOCX page-number reference')
+    c = '{http://schemas.openxmlformats.org/package/2006/content-types}'
+    footer_types = [node for node in types if 'footer' in node.get('PartName', '') or 'footer' in node.get('ContentType', '')]
+    if len(footer_types) != 1 or footer_types[0].tag != c + 'Override' or footer_types[0].attrib != {'PartName': '/word/footer1.xml', 'ContentType': 'application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml'}:
+        raise ValueError('Invalid DOCX page-number content type')
+
+
+def pdf_body_with_page_numbers(raw, bbox):
+    """Validate actual bottom-margin glyphs before removing exactly one footer per page.
+
+    A body sentence resembling a page number is never removed by a global regex.
+    We require spatial evidence plus the last raw line, independently on every page.
+    """
+    root = ET.fromstring(bbox)
+    ns = '{http://www.w3.org/1999/xhtml}'
+    pages = list(root.iter(ns + 'page'))
+    chunks = raw.split('\f')
+    if chunks and not chunks[-1].strip():
+        chunks.pop()
+    if not pages or len(pages) != len(chunks):
+        raise ValueError('PDF page-count evidence differs')
+    bodies = []
+    for index, (page, chunk) in enumerate(zip(pages, chunks), 1):
+        height = float(page.get('height', '0'))
+        width = float(page.get('width', '0'))
+        if not 840 < height < 843 or not 594 < width < 597:
+            raise ValueError('Unexpected PDF page size for controlled footer')
+        expected = f'Page {index} / {len(pages)}'
+        # A4 body ends at 20 mm; the native footer is 10 mm from the edge.
+        footer_words = [word for word in page.iter(ns + 'word') if float(word.get('yMin', '-1')) >= height - 58]
+        if normalized(' '.join(word.text or '' for word in footer_words)) != normalized(expected):
+            raise ValueError('PDF page-number footer glyphs differ or are missing')
+        if any(float(word.get('xMin', '-1')) < width * .3 or float(word.get('xMax', '9999')) > width * .7 or float(word.get('yMax', '9999')) > height - 20 for word in footer_words):
+            raise ValueError('PDF page-number footer is outside its controlled location')
+        lines = chunk.rstrip().splitlines()
+        if not lines or normalized(lines[-1]) != normalized(expected):
+            raise ValueError('PDF raw footer differs from spatial page-number evidence')
+        bodies.append('\n'.join(lines[:-1]))
+    return '\n'.join(bodies)
+
+
+def docx_text(path, report=None):
     bounded_read(path)
     with zipfile.ZipFile(path) as archive:
         entries = archive.infolist()
@@ -111,13 +192,27 @@ def docx_text(path):
         if info.file_size > MAX_FILE_BYTES:
             raise ValueError('DOCX XML exceeds limit')
         xml = archive.read(info)
+        if b'<!DOCTYPE' in xml or b'<!ENTITY' in xml:
+            raise ValueError('Unexpected DOCX XML declarations')
+        document = ET.fromstring(xml)
+        numbered = report is not None and effective_presentation(report)['pageNumbers']
+        if numbered:
+            validate_page_footer(archive, names, document, types)
+            if any(name.startswith('word/header') for name in names):
+                raise ValueError('Unexpected header parts outside the report DOCX body')
+        else:
+            if any(name.startswith(('word/footer', 'word/_rels/footer')) for name in names) or list(document.iter('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}footerReference')) or any('footer' in node.get('PartName', '') or 'footer' in node.get('ContentType', '') for node in types):
+                raise ValueError('Unexpected page-number parts outside the report DOCX body')
         namespace = '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}'
         for entry in entries:
             if entry.filename.startswith(('word/header', 'word/footer', 'word/comments', 'word/footnotes', 'word/endnotes')) and entry.filename.endswith('.xml'):
+                if numbered and entry.filename == 'word/footer1.xml':
+                    continue
                 extra = archive.read(entry)
                 if b'<!DOCTYPE' in extra or b'<!ENTITY' in extra:
                     raise ValueError('Unexpected DOCX XML declarations')
-                if any((node.text or '').strip() for node in ET.fromstring(extra).iter(namespace + 't')):
+                extra_root = ET.fromstring(extra)
+                if any((node.text or '').strip() for node in extra_root.iter(namespace + 't')) or any(node.tag in {namespace + name for name in ('fldSimple', 'fldChar', 'instrText', 'hyperlink', 'drawing', 'object')} for node in extra_root.iter()):
                     raise ValueError('Unexpected text outside the report DOCX body')
     if b'<!DOCTYPE' in xml or b'<!ENTITY' in xml:
         raise ValueError('Unexpected DOCX XML declarations')
@@ -147,7 +242,7 @@ def verify(source, directory, formats):
                 raise ValueError('Markdown differs from the frozen report')
             checks.append('Markdown exact deterministic text')
         elif fmt == 'docx':
-            assert_content(report, docx_text(path), 'DOCX')
+            assert_content(report, docx_text(path, report), 'DOCX')
             checks.append('DOCX package and public reading order')
         else:
             if not data.startswith(b'%PDF-'):
@@ -158,7 +253,12 @@ def verify(source, directory, formats):
                 # Read PDF content streams: layout mode interleaves adjacent
                 # wrapped table cells. Keep the same strict whole-fragment,
                 # number and citation checks; visual layout is reviewed separately.
-                assert_content(report, bounded_read(extracted).decode('utf-8'), 'PDF', ordered=False)
+                public = bounded_read(extracted).decode('utf-8')
+                if effective_presentation(report)['pageNumbers']:
+                    bbox_path = Path(temporary) / 'spatial.html'
+                    subprocess.run(['pdftotext', '-bbox', str(path.resolve()), str(bbox_path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30, check=True)
+                    public = pdf_body_with_page_numbers(public, bounded_read(bbox_path))
+                assert_content(report, public, 'PDF', ordered=False)
             checks.append('PDF extraction and all public text/numbers; visual review remains required')
         files.append({'fileName': path.name, 'byteLength': len(data), 'contentDigest': 'sha256:' + hashlib.sha256(data).hexdigest()})
     unexpected = [f'report.{fmt}' for fmt in ('md', 'docx', 'pdf') if fmt not in formats and (directory / f'report.{fmt}').exists()]

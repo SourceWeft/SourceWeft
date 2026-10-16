@@ -95,3 +95,22 @@ jobs:
             output/reports/${{ matrix.provider }}/revised/verification.json
             output/reports/${{ matrix.provider }}/revised/qa/*.jpg
             output/reports/${{ matrix.provider }}/revised/pdf-pages/*.png
+            output/reports/${{ matrix.provider }}/long-table/report.html
+            output/reports/${{ matrix.provider }}/long-table/report.md
+            output/reports/${{ matrix.provider }}/long-table/report.docx
+            output/reports/${{ matrix.provider }}/long-table/report.pdf
+            output/reports/${{ matrix.provider }}/long-table/verification.json
+            output/reports/${{ matrix.provider }}/long-table/native-layout.json
+            output/reports/${{ matrix.provider }}/long-table/qa/qa.json
+            output/reports/${{ matrix.provider }}/long-table/qa/*.jpg
+            output/reports/${{ matrix.provider }}/long-table/pdf-pages/*.png
+            output/reports/${{ matrix.provider }}/long-table-revised/report.html
+            output/reports/${{ matrix.provider }}/long-table-revised/report.md
+            output/reports/${{ matrix.provider }}/long-table-revised/report.docx
+            output/reports/${{ matrix.provider }}/long-table-revised/report.pdf
+            output/reports/${{ matrix.provider }}/long-table-revised/verification.json
+            output/reports/${{ matrix.provider }}/long-table-revised/native-layout.json
+            output/reports/${{ matrix.provider }}/long-table-revised/qa/qa.json
+            output/reports/${{ matrix.provider }}/long-table-revised/qa/*.jpg
+            output/reports/${{ matrix.provider }}/long-table-revised/pdf-pages/*.png
+            output/reports/${{ matrix.provider }}/oversize/qa/qa.json

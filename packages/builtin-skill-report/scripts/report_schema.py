@@ -7,6 +7,7 @@ from urllib.parse import urlsplit
 MAX_SOURCE_BYTES = 2 * 1024 * 1024
 REPORT_CITATION_TOKEN = re.compile(r"\[\s*S[1-9][0-9]*(?:\s*[,;，；]\s*S[1-9][0-9]*)*\s*\]", re.I)
 TEXT_URL = re.compile(r"https?://[^\s<>\"'，。；！？（）【】]+", re.I)
+PRESENTATION_DEFAULTS = {"mobileDensity": "standard", "tableOfContents": False, "pageNumbers": False, "citationLayout": "inline"}
 RUNTIME_TOKEN = re.compile(r"\[c\d+\]|[\[【]\u200b?(?:citation\s*:|cite:)|||<citation", re.I)
 
 
@@ -65,7 +66,7 @@ def statement(value, ids, paragraph=False):
 
 
 def validate_report(report):
-    obj(report, ["schemaVersion", "title", "language", "template", "summary", "sections", "sources"], ["audience"])
+    obj(report, ["schemaVersion", "title", "language", "template", "summary", "sections", "sources"], ["audience", "presentation"])
     if type(report["schemaVersion"]) is not int or report["schemaVersion"] != 1:
         fail("Unsupported report schemaVersion")
     text(report["title"], "title", 200)
@@ -75,6 +76,14 @@ def validate_report(report):
         fail("Unsupported template")
     if "audience" in report:
         text(report["audience"], "audience", 200)
+    if "presentation" in report:
+        presentation = obj(report["presentation"], [], PRESENTATION_DEFAULTS)
+        for key in ("tableOfContents", "pageNumbers"):
+            if key in presentation and type(presentation[key]) is not bool:
+                fail(f"Invalid presentation {key}; expected boolean")
+        for key, allowed in (("mobileDensity", ("standard", "compact")), ("citationLayout", ("inline", "source-notes"))):
+            if key in presentation and (not isinstance(presentation[key], str) or presentation[key] not in allowed):
+                fail(f"Invalid presentation {key}")
     ids = set()
     for source in array(report["sources"], "sources", 100):
         obj(source, ["id", "display"], ["provenance"])
@@ -163,7 +172,7 @@ def parse_formats(raw):
 
 
 def labels(report):
-    return ({"summary": "摘要", "sources": "参考来源", "analysis": "分析", "recommendation": "建议", "unknown": "资料未说明", "conflict": "来源冲突", "not_applicable": "不适用"} if report["language"] == "zh-CN" else {"summary": "Summary", "sources": "Sources", "analysis": "Analysis", "recommendation": "Recommendation", "unknown": "Not stated", "conflict": "Conflicting sources", "not_applicable": "Not applicable"})
+    return ({"contents": "目录", "source_note": "来源", "summary": "摘要", "sources": "参考来源", "analysis": "分析", "recommendation": "建议", "unknown": "资料未说明", "conflict": "来源冲突", "not_applicable": "不适用"} if report["language"] == "zh-CN" else {"contents": "Contents", "source_note": "Sources", "summary": "Summary", "sources": "Sources", "analysis": "Analysis", "recommendation": "Recommendation", "unknown": "Not stated", "conflict": "Conflicting sources", "not_applicable": "Not applicable"})
 
 
 def statement_text(item, report):
@@ -181,25 +190,60 @@ def source_text(source):
     return f"[{source['id']}] {d['title']}" + (f" — {d['locator']}" if d.get('locator') else '') + (f" — {d['url']}" if d.get('url') else '')
 
 
+def effective_presentation(report):
+    """Resolve layout defaults without changing the frozen editable source."""
+    return {**PRESENTATION_DEFAULTS, **report.get('presentation', {})}
+
+
+def contents_entries(report):
+    """Only actual section identities/headings become the optional static TOC."""
+    return [(section['id'], section['heading']) for section in report['sections']] if effective_presentation(report)['tableOfContents'] else []
+
+
+def citation_parts(body, citation_ids, report):
+    suffix = ''.join(f' [{sid}]' for sid in citation_ids)
+    if effective_presentation(report)['citationLayout'] == 'inline':
+        return body + suffix, None
+    note = labels(report)['source_note'] + ':' + suffix if citation_ids else None
+    return body, note
+
+
+def statement_parts(item, report):
+    prefix = '' if item['kind'] == 'fact' else labels(report)[item['kind']] + ': '
+    return citation_parts(prefix + item['text'], item['citations'], report)
+
+
+def cell_parts(cell, report):
+    status = '' if cell['status'] == 'value' else ' (' + labels(report)[cell['status']] + ')'
+    return citation_parts(cell['text'] + status, cell['citations'], report)
+
+
 def public_texts(report):
     """Expected public reading order, shared by format renderers and verification."""
+    def visible(parts):
+        return (part for part in parts if part is not None)
     yield report['title']
     yield labels(report)['summary']
     for item in report['summary']:
-        yield statement_text(item, report)
+        yield from visible(statement_parts(item, report))
+    entries = contents_entries(report)
+    if entries:
+        yield labels(report)['contents']
+        for _, heading in entries:
+            yield heading
     for section in report['sections']:
         yield section['heading']
         for block in section['blocks']:
             if block['type'] == 'paragraph':
-                yield statement_text(block, report)
+                yield from visible(statement_parts(block, report))
             elif block['type'] == 'bullets':
                 for item in block['items']:
-                    yield statement_text(item, report)
+                    yield from visible(statement_parts(item, report))
             else:
                 yield from block['columns']
                 for row in block['rows']:
                     for cell in row:
-                        yield cell_text(cell, report)
+                        yield from visible(cell_parts(cell, report))
     yield labels(report)['sources']
     for source in report['sources']:
         yield source_text(source)

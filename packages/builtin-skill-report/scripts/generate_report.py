@@ -7,7 +7,7 @@ import shutil
 import subprocess
 import tempfile
 import unicodedata
-from report_schema import read_report, parse_formats, labels, statement_text, cell_text, source_text
+from report_schema import read_report, parse_formats, labels, source_text, effective_presentation, contents_entries, statement_parts, cell_parts
 
 
 def h(value):
@@ -19,19 +19,35 @@ def md(value):
     return ''.join('\\' + char if char in '\\`*_{}[]<>()#+.!|~' else char for char in value).replace('\n', '<br>')
 
 
+def html_parts(parts):
+    body, note = parts
+    return h(body) + (f'<p class="source-note">{h(note)}</p>' if note else '')
+
+
 def html_document(report):
-    out = [f'<!doctype html><html lang="{report["language"]}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{h(report["title"])}</title><style>body{{font-family:"Noto Sans SC",sans-serif;color:#182328;background:#fff;margin:0;line-height:1.7}}main{{max-width:900px;margin:auto;padding:48px 28px}}h1{{font-size:2rem;line-height:1.25}}h2{{margin-top:2rem}}p,li{{overflow-wrap:anywhere}}.table-wrap{{overflow-x:auto}}table{{border-collapse:collapse;width:100%;font-size:.9rem}}th,td{{border:1px solid #cbd5d8;text-align:left;vertical-align:top;padding:10px;min-width:100px;overflow-wrap:anywhere}}th{{background:#eef3f3}}.sources{{font-size:.85rem}}@media(max-width:600px){{main{{padding:24px 16px}}h1{{font-size:1.65rem}}}}@media print{{main{{padding:0}}tr{{break-inside:avoid}}h2{{break-after:avoid}}}}</style></head><body><main>', f'<h1>{h(report["title"])}</h1>', f'<h2>{labels(report)["summary"]}</h2>']
-    out += [f'<p>{h(statement_text(item, report))}</p>' for item in report['summary']]
+    presentation = effective_presentation(report)
+    # Presets are finite, source-owned settings; no arbitrary style input.
+    compact = ('@media(max-width:600px){body{line-height:1.5}p,li{margin:.5em 0}th,td{padding:6px}main{padding:20px 12px}h1{font-size:1.5rem}h2{margin-top:1.4rem}}' if presentation['mobileDensity'] == 'compact' else '')
+    out = [f'''<!doctype html><html lang="{report["language"]}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{h(report["title"])}</title><style>body{{font-family:"Noto Sans SC",sans-serif;color:#182328;background:#fff;margin:0;line-height:1.7}}main{{max-width:900px;margin:auto;padding:48px 28px}}h1{{font-size:2rem;line-height:1.25}}h2{{margin-top:2rem}}p,li{{overflow-wrap:anywhere}}.table-wrap{{overflow-x:auto}}table{{border-collapse:collapse;width:100%;font-size:.9rem}}th,td{{border:1px solid #cbd5d8;text-align:left;vertical-align:top;padding:10px;min-width:100px;overflow-wrap:anywhere}}th{{background:#eef3f3}}.sources{{font-size:.85rem}}.source-note{{margin-top:.25em;color:#45565c}}.report-statement>p:first-child{{margin-bottom:.25em}}nav a{{color:inherit}}@media(max-width:600px){{main{{padding:24px 16px}}h1{{font-size:1.65rem}}}}{compact}@media print{{main{{padding:0}}tr,.report-statement{{break-inside:avoid}}h2{{break-after:avoid}}}}</style></head><body><main>''', f'<h1>{h(report["title"])}</h1>', f'<h2>{labels(report)["summary"]}</h2>']
+    def paragraph(item):
+        body, note = statement_parts(item, report)
+        if note:
+            return f'<div class="report-statement"><p>{h(body)}</p><p class="source-note">{h(note)}</p></div>'
+        return f'<p>{h(body)}</p>'
+    out += [paragraph(item) for item in report['summary']]
+    entries = contents_entries(report)
+    if entries:
+        out.append(f'<nav aria-label="{labels(report)["contents"]}"><h2>{labels(report)["contents"]}</h2><ul>' + ''.join(f'<li><a href="#{h(sid)}">{h(heading)}</a></li>' for sid, heading in entries) + '</ul></nav>')
     for section in report['sections']:
         out.append(f'<section id="{section["id"]}"><h2>{h(section["heading"])}</h2>')
         for block in section['blocks']:
             if block['type'] == 'paragraph':
-                out.append(f'<p>{h(statement_text(block, report))}</p>')
+                out.append(paragraph(block))
             elif block['type'] == 'bullets':
-                out.append('<ul>' + ''.join(f'<li>{h(statement_text(item, report))}</li>' for item in block['items']) + '</ul>')
+                out.append('<ul>' + ''.join(f'<li>{html_parts(statement_parts(item, report))}</li>' for item in block['items']) + '</ul>')
             else:
                 out.append('<div class="table-wrap"><table><thead><tr>' + ''.join(f'<th scope="col">{h(c)}</th>' for c in block['columns']) + '</tr></thead><tbody>')
-                out += ['<tr>' + ''.join(f'<td>{h(cell_text(c, report))}</td>' for c in row) + '</tr>' for row in block['rows']]
+                out += ['<tr>' + ''.join(f'<td>{html_parts(cell_parts(c, report))}</td>' for c in row) + '</tr>' for row in block['rows']]
                 out.append('</tbody></table></div>')
         out.append('</section>')
     out.append(f'<section class="sources"><h2>{labels(report)["sources"]}</h2>')
@@ -40,21 +56,37 @@ def html_document(report):
     return '\n'.join(out)
 
 
+def markdown_parts(parts, separator='\n\n'):
+    body, note = parts
+    return md(body) + (separator + md(note) if note else '')
+
+
 def markdown_document(report):
     out = ['# ' + md(report['title']), '## ' + labels(report)['summary']]
-    out += [md(statement_text(item, report)) for item in report['summary']]
+    out += [markdown_parts(statement_parts(item, report)) for item in report['summary']]
+    entries = contents_entries(report)
+    if entries:
+        out.append('## ' + labels(report)['contents'])
+        out.append('\n'.join(f'- [{md(heading)}](#{sid})' for sid, heading in entries))
     for section in report['sections']:
+        if entries:
+            out.append(f'<a id="{section["id"]}"></a>')
         out.append('## ' + md(section['heading']))
         for block in section['blocks']:
             if block['type'] == 'paragraph':
-                out.append(md(statement_text(block, report)))
+                out.append(markdown_parts(statement_parts(block, report)))
             elif block['type'] == 'bullets':
-                out.append('\n'.join('- ' + md(statement_text(item, report)) for item in block['items']))
+                out.append('\n'.join('- ' + markdown_parts(statement_parts(item, report), '\n  ') for item in block['items']))
             else:
-                out.append('| ' + ' | '.join(md(c) for c in block['columns']) + ' |\n| ' + ' | '.join('---' for _ in block['columns']) + ' |\n' + '\n'.join('| ' + ' | '.join(md(cell_text(c, report)) for c in row) + ' |' for row in block['rows']))
+                out.append('| ' + ' | '.join(md(c) for c in block['columns']) + ' |\n| ' + ' | '.join('---' for _ in block['columns']) + ' |\n' + '\n'.join('| ' + ' | '.join(markdown_parts(cell_parts(c, report), '<br>') for c in row) + ' |' for row in block['rows']))
     out.append('## ' + labels(report)['sources'])
     out += [md(source_text(source)) for source in report['sources']]
     return '\n\n'.join(out) + '\n'
+
+
+def page_number_footer_xml():
+    """Only permitted generated footer. Cached values are updated by LibreOffice."""
+    return '''<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:t xml:space="preserve">Page </w:t></w:r><w:fldSimple w:instr="PAGE"><w:r><w:t>1</w:t></w:r></w:fldSimple><w:r><w:t xml:space="preserve"> / </w:t></w:r><w:fldSimple w:instr="NUMPAGES"><w:r><w:t>1</w:t></w:r></w:fldSimple></w:p></w:ftr>'''
 
 
 def estimated_cell_width_mm(value, font_points=10.5):
@@ -69,7 +101,7 @@ def estimated_cell_width_mm(value, font_points=10.5):
 
 
 def table_column_widths_mm(block, report, available=170.0):
-    natural = [max(estimated_cell_width_mm(block['columns'][index], 11), *(estimated_cell_width_mm(cell_text(row[index], report)) for row in block['rows'])) for index in range(len(block['columns']))]
+    natural = [max(estimated_cell_width_mm(block['columns'][index], 11), *(estimated_cell_width_mm(part) for row in block['rows'] for part in cell_parts(row[index], report) if part)) for index in range(len(block['columns']))]
     short = [width <= 55.0 for width in natural]
     # Keep short cells, including source/status labels, on one line whenever
     # possible. Allocate remaining width to long prose columns independently.
@@ -99,8 +131,8 @@ def strip_paragraph_borders(element):
 
 def write_docx(report, destination):
     from docx import Document
-    from docx.shared import Inches, Mm, Pt, RGBColor
-    from docx.oxml import OxmlElement
+    from docx.shared import Mm, Pt, RGBColor
+    from docx.oxml import OxmlElement, parse_xml
     from docx.oxml.ns import qn
     doc = Document()
     section = doc.sections[0]
@@ -131,19 +163,69 @@ def write_docx(report, destination):
             for attribute in ('themeColor', 'themeTint', 'themeShade'):
                 color.attrib.pop(qn('w:' + attribute), None)
         heading.element.get_or_add_rPr().rFonts.set(qn('w:eastAsia'), 'Noto Sans CJK SC')
+    presentation = effective_presentation(report)
+    if presentation['pageNumbers']:
+        section.footer_distance = Mm(10)
+        footer = section.footer._element
+        footer.attrib.clear()
+        template = parse_xml(page_number_footer_xml())
+        for child in list(footer):
+            footer.remove(child)
+        for child in list(template):
+            footer.append(child)
+    def append_parts(parts, paragraph, in_table=False):
+        body, note = parts
+        paragraph.add_run(body)
+        if note:
+            paragraph.paragraph_format.space_after = Pt(0)
+            # Table rows already use cantSplit. A keep-next inside cells can
+            # chain rows in LibreOffice and push a whole table to the next page.
+            paragraph.paragraph_format.keep_with_next = not in_table
+            parent = paragraph._parent
+            note_paragraph = parent.add_paragraph(note)
+            note_paragraph.paragraph_format.keep_together = True
+            note_paragraph.paragraph_format.keep_with_next = False
+            # Latin identifiers remain words; do not split inside S12.
+            wrap = OxmlElement('w:wordWrap')
+            wrap.set(qn('w:val'), '0')
+            note_paragraph._p.get_or_add_pPr().append(wrap)
+        return paragraph
+    entries = contents_entries(report)
+    bookmarks = {sid: f'sw_section_{index}' for index, (sid, _) in enumerate(entries, 1)}
     title_paragraph = doc.add_heading(report['title'], 0)
     strip_paragraph_borders(title_paragraph._p)
     doc.add_heading(labels(report)['summary'], 1)
     for item in report['summary']:
-        doc.add_paragraph(statement_text(item, report))
+        append_parts(statement_parts(item, report), doc.add_paragraph())
+    if entries:
+        doc.add_heading(labels(report)['contents'], 1)
+        for sid, heading in entries:
+            paragraph = doc.add_paragraph()
+            link = OxmlElement('w:hyperlink')
+            link.set(qn('w:anchor'), bookmarks[sid])
+            run = OxmlElement('w:r')
+            value = OxmlElement('w:t')
+            value.text = heading
+            run.append(value)
+            link.append(run)
+            paragraph._p.append(link)
     for section_data in report['sections']:
-        doc.add_heading(section_data['heading'], 1)
+        section_heading = doc.add_heading(section_data['heading'], 1)
+        if entries:
+            bookmark_id = str(list(bookmarks).index(section_data['id']) + 1)
+            start = OxmlElement('w:bookmarkStart')
+            start.set(qn('w:id'), bookmark_id)
+            start.set(qn('w:name'), bookmarks[section_data['id']])
+            end = OxmlElement('w:bookmarkEnd')
+            end.set(qn('w:id'), bookmark_id)
+            section_heading._p.insert(1 if section_heading._p.pPr is not None else 0, start)
+            section_heading._p.append(end)
         for block in section_data['blocks']:
             if block['type'] == 'paragraph':
-                doc.add_paragraph(statement_text(block, report))
+                append_parts(statement_parts(block, report), doc.add_paragraph())
             elif block['type'] == 'bullets':
                 for item in block['items']:
-                    doc.add_paragraph(statement_text(item, report), style='List Bullet')
+                    append_parts(statement_parts(item, report), doc.add_paragraph(style='List Bullet'))
             else:
                 table = doc.add_table(rows=1, cols=len(block['columns']))
                 table.style = 'Table Grid'
@@ -169,7 +251,8 @@ def write_docx(report, destination):
                 for row in block['rows']:
                     cells = table.add_row().cells
                     for target, cell in zip(cells, row):
-                        target.text = cell_text(cell, report)
+                        target.text = ''
+                        append_parts(cell_parts(cell, report), target.paragraphs[0], in_table=True)
                     no_split = OxmlElement('w:cantSplit')
                     table.rows[-1]._tr.get_or_add_trPr().append(no_split)
                 for row_index, row in enumerate(table.rows):

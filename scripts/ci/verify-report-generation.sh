@@ -57,6 +57,87 @@ for name, digest in old.items():
 print('Offline non-root report generation, all four formats, three HTML viewports, revision and unchanged original bytes verified; factual/visual certification is separate.')
 PY
 
+# Optional presentation is part of the private frozen source, not turn-local CSS.
+# Legacy comparison above remains the default/short case. This custom case must
+# actually span PDF pages with repeated headings, real PAGE/NUMPAGES and no lost
+# rows. The native validator records page count dynamically rather than assuming
+# the same pagination on the two provisioned images.
+report_long_fixture="$report_skill/tests/fixtures/long-table.source.json"
+build_report "$report_long_fixture" "$report_root/long-table"
+python3 -B "$report_skill/tests/test_report_qualification.py" --qualify-layout \
+  "$report_long_fixture" "$report_root/long-table"
+python3 -B - "$report_root" <<'PYRESTORE'
+import hashlib, json, sys
+from pathlib import Path
+root = Path(sys.argv[1])
+original = root/'long-table'
+source = json.loads((original/'report.source.json').read_text())
+(root/'long-table-digests.json').write_text(json.dumps({name: hashlib.sha256((original/name).read_bytes()).hexdigest() for name in ['report.html','report.md','report.docx','report.pdf','report.source.json']}))
+source['summary'][0]['text'] += ' 修订仅增加这句测试说明。'
+(root/'long-table-revision.source.json').write_text(json.dumps(source, ensure_ascii=False, indent=2))
+PYRESTORE
+build_report "$report_root/long-table-revision.source.json" "$report_root/long-table-revised"
+python3 -B "$report_skill/tests/test_report_qualification.py" --qualify-layout \
+  "$report_root/long-table-revision.source.json" "$report_root/long-table-revised"
+python3 -B - "$report_root" <<'PYPRESERVE'
+import hashlib, json, sys
+from pathlib import Path
+root = Path(sys.argv[1])
+original = json.loads((root/'long-table/report.source.json').read_text())
+revised = json.loads((root/'long-table-revised/report.source.json').read_text())
+expected = json.loads(json.dumps(original))
+expected['summary'][0]['text'] += ' 修订仅增加这句测试说明。'
+assert revised == expected, 'Restoration changed presentation, facts, dates, sources or structure'
+for name, digest in json.loads((root/'long-table-digests.json').read_text()).items():
+    assert hashlib.sha256((root/'long-table'/name).read_bytes()).hexdigest() == digest
+    assert hashlib.sha256((root/'long-table-revised'/name).read_bytes()).hexdigest() != digest
+for name in ['long-table', 'long-table-revised']:
+    output = root/name
+    assert json.loads((output/'verification.json').read_text())['passed'] is True
+    qa = json.loads((output/'qa/qa.json').read_text())
+    assert qa['passed'] is True and qa['unchanged'] is True
+    assert len(qa['checks']) == 3
+    assert all(check['height'] <= 12000 for check in qa['checks'])
+    assert qa['contentDigest'] == 'sha256:' + hashlib.sha256((output/'report.html').read_bytes()).hexdigest()
+print('Custom frozen presentation restored; all four revised formats pass, real PDF page fields and repeated table headers checked, original bytes unchanged.')
+PYPRESERVE
+
+# A valid source can exceed the existing standard browser budget. Exercise the
+# actual bundler/browser and require its specific nonzero height rejection; a
+# missing font, crash or swallowed exit status is not an acceptable negative.
+python3 -B - "$report_root" "$report_long_fixture" <<'PYOVERSIZE'
+import json, sys
+from pathlib import Path
+root, fixture = Path(sys.argv[1]), Path(sys.argv[2])
+source = json.loads(fixture.read_text())
+source['title'] = '虚构超标准高度回归报告'
+source['presentation'] = {'mobileDensity': 'standard'}
+source['sections'] = [{'id': 'oversize', 'heading': '保留全部正文的高度负例', 'blocks': [
+    {'type': 'paragraph', 'text': f'段落{i:02d}。' + '本段为虚构回归正文，必须原样保留以验证标准高度限制，不能通过删除内容或缩小文字绕过检查。' * 25, 'kind': 'analysis', 'citations': []}
+    for i in range(20)
+]}]
+(root/'oversize.source.json').write_text(json.dumps(source, ensure_ascii=False, indent=2))
+PYOVERSIZE
+python3 -B "$report_skill/scripts/generate_report.py" --source "$report_root/oversize.source.json" \
+  --output-dir "$report_root/oversize" --formats html,md
+node "$report_skill/scripts/build-html.cjs" "$report_root/oversize/draft.html" "$report_root/oversize/report.html"
+if node "$report_skill/scripts/qa-html.cjs" "$report_root/oversize/report.html" "$report_root/oversize/qa" > "$report_root/oversize/html-qa.log" 2> "$report_root/oversize/html-qa-error.log"; then
+  echo 'Unexpectedly accepted a report above the standard height budget' >&2
+  exit 1
+fi
+python3 -B - "$report_root/oversize" <<'PYREJECT'
+import hashlib, json, sys
+from pathlib import Path
+output = Path(sys.argv[1])
+qa = json.loads((output/'qa/qa.json').read_text())
+assert qa['passed'] is False and qa['unchanged'] is True
+assert len(qa['checks']) == 3
+assert qa['contentDigest'] == 'sha256:' + hashlib.sha256((output/'report.html').read_bytes()).hexdigest()
+assert any(check['height'] > 12000 and 'Report exceeds the existing 12,000px QA height budget' in check['issues'] for check in qa['checks']), 'Expected an actual height rejection, not a browser/dependency failure'
+assert all(not check['violations'] for check in qa['checks'])
+print('Actual standard-height rejection verified without changing the budget or dropping source content.')
+PYREJECT
+
 # Content-stream regression: adjacent long cells and two dates remain intact.
 # This is not a layout-mode fallback: the selected production mode is always raw.
 report_pdf_regression="$report_root/pdf-reading-order-regression"
