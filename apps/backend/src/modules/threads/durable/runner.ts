@@ -1,3 +1,4 @@
+import { toAgentToolBudgetContentError } from "../agent/middleware/tool-call-budget";
 import { normalizeMcpDisplay } from "../turn/trace-parts";
 import { approvalFinishPayload } from "./approval-finish";
 import {
@@ -191,6 +192,8 @@ function toDurableRunContentError(error: unknown) {
   if (error instanceof ContentError) {
     return error;
   }
+  const budgetError = toAgentToolBudgetContentError(error);
+  if (budgetError) return budgetError;
   const modelError = toContentError(error);
   if (modelError.code === "MODEL_CONFIGURATION_ERROR") return modelError;
   if (isSandboxExecuteToolCallIdRequiredError(error)) {

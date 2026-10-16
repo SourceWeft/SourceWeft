@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
 import { AGENT_TOOL_NAMES } from "@sourceweft/agent-tool-registry";
-import { tool } from "langchain";
+import { tool, ToolCallLimitExceededError } from "langchain";
 import { StateBackend } from "deepagents";
 import { describe, test, vi } from "vitest";
 import { testExports as agentTestExports } from "..";
@@ -139,6 +139,7 @@ test("middleware stack keeps SourceWeft middleware order stable", async () => {
       "SourceWeftContextCompressionTrace",
       "SourceWeftUnansweredToolCalls",
       "modelRetryMiddleware",
+      "SourceWeftToolBudgetTurn",
       "ToolCallLimitMiddleware",
       "ExtraMiddleware",
     ];
@@ -183,6 +184,7 @@ test("subagent middleware receives fresh retry, summary, limit, and observabilit
       "SummarizationMiddleware",
       "SourceWeftUnansweredToolCalls",
       "modelRetryMiddleware",
+      "SourceWeftToolBudgetTurn",
       "ToolCallLimitMiddleware",
     ],
   );
@@ -261,44 +263,24 @@ test("tool call limit blocks calls beyond the configured run limit", async () =>
     );
     assert.ok(middleware);
 
-    const update = await afterModelHook(middleware)({
-      messages: [
-        new HumanMessage("Use tools"),
-        new AIMessage({
-          content: "",
-          tool_calls: [
-            { id: "call-1", name: "search_sources", args: {} },
-            { id: "call-2", name: "search_sources", args: {} },
-            { id: "call-3", name: "search_sources", args: {} },
+    await assert.rejects(
+      async () =>
+        afterModelHook(middleware)({
+          messages: [
+            new HumanMessage("Use tools"),
+            new AIMessage({
+              content: "",
+              tool_calls: [
+                { id: "call-1", name: "search_sources", args: {} },
+                { id: "call-2", name: "search_sources", args: {} },
+                { id: "call-3", name: "search_sources", args: {} },
+              ],
+            }),
           ],
+          threadToolCallCount: {},
+          runToolCallCount: {},
         }),
-      ],
-      threadToolCallCount: {},
-      runToolCallCount: {},
-    });
-
-    const messages = (update as { messages?: unknown[] }).messages ?? [];
-    assert.equal(messages.length, 1);
-    const blocked = messages[0];
-    assert.ok(ToolMessage.isInstance(blocked));
-    const blockedToolMessage = blocked as ToolMessage;
-    assert.equal(blockedToolMessage.tool_call_id, "call-3");
-    assert.equal(blockedToolMessage.name, "search_sources");
-    assert.equal(
-      blockedToolMessage.content,
-      "Tool call limit exceeded. Do not make additional tool calls.",
-    );
-    assert.deepEqual(
-      (update as { threadToolCallCount?: unknown }).threadToolCallCount,
-      {
-        __all__: 2,
-      },
-    );
-    assert.deepEqual(
-      (update as { runToolCallCount?: unknown }).runToolCallCount,
-      {
-        __all__: 3,
-      },
+      ToolCallLimitExceededError,
     );
   } finally {
     Object.assign(config.chat.agent, originalAgentConfig);

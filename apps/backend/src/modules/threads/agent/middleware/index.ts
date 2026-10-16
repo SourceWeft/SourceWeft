@@ -34,6 +34,7 @@ import { createSourceWeftToolExecutionTimeoutMiddleware } from "./tool-execution
 import type { TraceContext } from "../../../llm-observability";
 import { createSourceWeftToolCallContextMiddleware } from "./tool-call-context";
 import { createSourceWeftToolCallCountChannelsMiddleware } from "./tool-call-count-channels";
+import { createSourceWeftGlobalToolCallLimitMiddleware } from "./tool-call-budget";
 
 const RETRYABLE_READ_TOOL_NAMES = [
   AGENT_TOOL_NAMES.searchSources,
@@ -128,10 +129,8 @@ export function createSourceWeftSubagentMiddlewareStack(
       retryOn: isRetryableModelContentError,
       onFailure: "error",
     }),
-    toolCallLimitMiddleware({
-      runLimit: config.chat.agent.toolCallRunLimit,
-      threadLimit: config.chat.agent.toolCallThreadLimit,
-      exitBehavior: "continue",
+    ...createSourceWeftGlobalToolCallLimitMiddleware({
+      userMessageId: input.toolObservabilityContext?.userMessageId,
     }),
   ];
 }
@@ -195,10 +194,8 @@ export async function createSourceWeftAgentMiddlewareStack(
       retryOn: isRetryableModelContentError,
       onFailure: "error",
     }),
-    toolCallLimitMiddleware({
-      runLimit: config.chat.agent.toolCallRunLimit,
-      threadLimit: config.chat.agent.toolCallThreadLimit,
-      exitBehavior: "continue",
+    ...createSourceWeftGlobalToolCallLimitMiddleware({
+      userMessageId: input.toolObservabilityContext?.userMessageId,
     }),
     ...(input.extraMiddleware ?? []),
   ];

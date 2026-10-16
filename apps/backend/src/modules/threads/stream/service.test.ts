@@ -1,3 +1,4 @@
+import { ToolCallLimitExceededError } from "langchain";
 import assert from "node:assert/strict";
 import { afterAll, test, vi } from "vitest";
 import type { ToolConfirmationRequest } from "@sourceweft/contracts";
@@ -2389,6 +2390,56 @@ test("streamThreadEvents honors cancellation after agent outcome before finaliza
     events.find((event) => event.type === "error")?.code,
     "CLIENT_CANCELLED",
   );
+  assert.equal(
+    events.some((event) => event.type === "assistant-message"),
+    false,
+  );
+});
+
+test("streamed typed budget exhaustion emits an explicit safe error and never finalizes a successful answer", async () => {
+  let finalized = false;
+  let persistedCode: string | undefined;
+  const service = new ContentThreadStreamService(
+    createTurnService({
+      finalize: async () => {
+        finalized = true;
+        throw new Error("must not finalize");
+      },
+    }) as unknown as ConstructorParameters<
+      typeof ContentThreadStreamService
+    >[0],
+    async function* (): AsyncGenerator<DeepAgentTurnEvent> {
+      throw new Error("private middleware wrapper", {
+        cause: new ToolCallLimitExceededError(
+          301,
+          20,
+          300,
+          48,
+          "private-tool-name",
+        ),
+      });
+    },
+    async () => null,
+    async (input) => {
+      persistedCode = input.contentError.code;
+      return createAssistantMessageRecord({ id: "budget-error" });
+    },
+    createBillingPort(),
+  );
+  const events: Record<string, unknown>[] = [];
+  for await (const event of service.streamThreadEvents({
+    workspaceId: "workspace-1",
+    threadId: "thread-1",
+    userId: "user-1",
+    content: "continue saved work",
+  }))
+    events.push(parseSseData(event));
+  assert.equal(finalized, false);
+  assert.equal(persistedCode, "AGENT_TOOL_BUDGET_EXCEEDED");
+  const error = events.find((event) => event.type === "error");
+  assert.equal(error?.code, "AGENT_TOOL_BUDGET_EXCEEDED");
+  assert.match(String(error?.error), /conversation.*tool-call limit/i);
+  assert.doesNotMatch(String(error?.error), /private/);
   assert.equal(
     events.some((event) => event.type === "assistant-message"),
     false,
