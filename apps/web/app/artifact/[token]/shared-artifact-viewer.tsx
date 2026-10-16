@@ -10,6 +10,11 @@ import {
 } from "@sourceweft/agent-tool-registry/ui";
 import type { PublicSharedArtifactResponse } from "@sourceweft/contracts";
 import { RawImage } from "../../_components/raw-image";
+import {
+  ArtifactFileDownloads,
+  artifactDownloadFiles,
+  artifactPrimaryPreviewFile,
+} from "@sourceweft/builtin-tool-publish-artifact/ui";
 import { Preview } from "@sourceweft/preview/react";
 
 type SharedArtifact = PublicSharedArtifactResponse["artifact"];
@@ -82,7 +87,12 @@ export function SharedArtifactViewer({
   // A capability that renders its own download (e.g. the video presentation's
   // client-render overlay) suppresses the header's generic file download, so a
   // viewer never sees two.
-  const capabilityOwnsDownload = Boolean(capability?.blocksDefaultDownload);
+  const capabilityOwnsDownload =
+    Boolean(capability?.blocksDefaultDownload) ||
+    (!capabilityContent &&
+      artifactDownloadFiles(
+        (artifact.payload as Record<string, unknown> | null)?.versionFiles,
+      ).length > 0);
 
   const hasVisual =
     Boolean(capabilityContent) ||
@@ -136,10 +146,19 @@ export function SharedArtifactViewer({
   // Capability UI wins; otherwise a generic, type-agnostic fallback keyed off
   // the served bytes: embeddable files (image/pdf/text/media) in a sandboxed
   // iframe, else the poster image, else a download prompt.
+  const primary = artifactPrimaryPreviewFile(
+    (artifact.payload as Record<string, unknown> | null)?.versionFiles,
+  );
   const preview =
     capabilityContent ??
     (artifact.fileUrl ? (
-      <Preview source={{ name: title, url: artifact.fileUrl }} />
+      <Preview
+        source={{
+          name: primary?.fileName ?? title,
+          mimeType: primary?.contentType,
+          url: artifact.fileUrl,
+        }}
+      />
     ) : artifact.previewImageUrl ? (
       <div className="flex h-full flex-col items-center justify-center overflow-auto p-6">
         <RawImage
@@ -223,7 +242,17 @@ export function SharedArtifactViewer({
             used size directly, so it works even where percentage-height
             collapses (the native-fullscreen top layer). Same for every preview
             type — iframe or canvas. */}
-        <div className="absolute inset-0">{preview}</div>
+        <div className="absolute inset-0 flex min-h-0 flex-col">
+          {!capabilityContent && (
+            <ArtifactFileDownloads
+              files={
+                (artifact.payload as Record<string, unknown> | null)
+                  ?.versionFiles
+              }
+            />
+          )}
+          <div className="min-h-0 flex-1">{preview}</div>
+        </div>
       </div>
 
       <footer
@@ -235,9 +264,7 @@ export function SharedArtifactViewer({
           rel="noopener"
         >
           {t.rich("madeWith", {
-            brand: (chunks) => (
-              <span className="font-medium">{chunks}</span>
-            ),
+            brand: (chunks) => <span className="font-medium">{chunks}</span>,
           })}
         </Link>
       </footer>

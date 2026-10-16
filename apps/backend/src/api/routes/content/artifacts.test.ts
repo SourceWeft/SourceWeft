@@ -8,6 +8,7 @@ vi.mock("../../../shared/config", () => ({
 
 const mocks = vi.hoisted(() => ({
   getArtifactFile: vi.fn(),
+  getArtifactAsset: vi.fn(),
   getArtifactVersionMedia: vi.fn(),
   getArtifactVersionMediaBytes: vi.fn(),
   getSessionUserId: vi.fn(),
@@ -24,6 +25,7 @@ vi.mock("../../middleware/auth-session", () => ({
 vi.mock("../../../modules/artifacts", () => ({
   contentArtifactsService: {
     getArtifactFile: mocks.getArtifactFile,
+    getArtifactAsset: mocks.getArtifactAsset,
     getArtifactVersionMedia: mocks.getArtifactVersionMedia,
     getArtifactVersionMediaBytes: mocks.getArtifactVersionMediaBytes,
     listArtifacts: mocks.listArtifacts,
@@ -222,4 +224,25 @@ test("HTML file responses bind the requested version and carry the registered sa
   );
   assert.equal(response.headers.get("cache-control"), "private, no-store");
   assert.equal(await response.text(), "<html>verified</html>");
+});
+
+test("authenticated exact-version assets support explicit attachment downloads", async () => {
+  mocks.getArtifactAsset.mockResolvedValue({
+    body: Buffer.from("pdf"),
+    contentType: "application/pdf",
+    fileName: "report.pdf",
+  });
+  const response = await createTestApp().request(
+    "/v1/workspaces/workspace-1/artifacts/artifact-1/assets/report.pdf?artifactVersionId=version-1&download=1",
+  );
+  assert.equal(response.status, 200);
+  assert.equal(
+    mocks.getArtifactAsset.mock.calls[0]?.[0].artifactVersionId,
+    "version-1",
+  );
+  assert.equal(
+    response.headers.get("content-disposition"),
+    "attachment; filename*=UTF-8''report.pdf",
+  );
+  assert.equal(response.headers.get("content-type"), "application/pdf");
 });

@@ -681,19 +681,31 @@ export class ContentArtifactsService {
     handler?: ArtifactViewHandler | null;
     isPublic?: boolean;
     currentVersion?: CurrentArtifactVersionRecord | null;
+    artifactVersionId?: string;
   }) {
-    const base = this.buildArtifactResponse(input);
-    if (input.handler?.executionPolicy) {
-      const version =
-        "currentVersion" in input
-          ? input.currentVersion
-          : await findCurrentReadyArtifactVersionRecord({
-              teamId: input.teamId,
-              workspaceId: input.workspaceId,
-              artifactId: input.artifact.id,
-              expectedArtifactType: input.artifact.artifactType,
-            });
-      if (!version || !canViewContent(input.userId, version))
+    const base = this.buildArtifactResponse({
+      ...input,
+      artifactVersionId: input.artifactVersionId,
+    });
+    const version =
+      "currentVersion" in input
+        ? input.currentVersion
+        : await findCurrentReadyArtifactVersionRecord({
+            teamId: input.teamId,
+            workspaceId: input.workspaceId,
+            artifactId: input.artifact.id,
+            expectedArtifactType: input.artifact.artifactType,
+          });
+    if (version && !canViewContent(input.userId, version)) {
+      throw new ContentError(404, "ARTIFACT_NOT_FOUND", "Artifact not found");
+    }
+    // A file manifest is a host contract, independent of the producing type.
+    // Capabilities with dedicated media readers continue to own their projection.
+    if (
+      input.handler?.executionPolicy ||
+      (version?.filesJson && !input.handler?.resolveVersionMedia)
+    ) {
+      if (!version)
         return {
           ...base,
           payloadJson: {},
@@ -708,11 +720,12 @@ export class ContentArtifactsService {
           artifactVersionId: version.versionId,
           resource,
         });
-      const payload =
-        input.handler.buildPublicPayload?.({
-          artifact: { ...input.artifact, payloadJson: version.contentJson },
-          assetUrl: (fileName) => url({ kind: "asset", fileName })!,
-        }) ?? {};
+      const payload = input.handler?.executionPolicy
+        ? (input.handler.buildPublicPayload?.({
+            artifact: { ...input.artifact, payloadJson: version.contentJson },
+            assetUrl: (fileName) => url({ kind: "asset", fileName })!,
+          }) ?? {})
+        : version.contentJson;
       return {
         ...base,
         artifactVersionId: version.versionId,
@@ -735,7 +748,11 @@ export class ContentArtifactsService {
         }),
       };
     }
-    if (!input.handler?.resolveVersionMedia) return base;
+    if (!input.handler?.resolveVersionMedia)
+      return {
+        ...base,
+        payloadJson: { ...base.payloadJson, versionFiles: null },
+      };
     const unavailable = () => ({
       ...base,
       payloadJson: {},
@@ -746,18 +763,6 @@ export class ContentArtifactsService {
       previewUrl: null,
     });
     if (input.artifact.status !== "ready") return unavailable();
-    const version =
-      "currentVersion" in input
-        ? input.currentVersion
-        : await findCurrentReadyArtifactVersionRecord({
-            teamId: input.teamId,
-            workspaceId: input.workspaceId,
-            artifactId: input.artifact.id,
-            expectedArtifactType: input.artifact.artifactType,
-          });
-    if (version && !canViewContent(input.userId, version)) {
-      throw new ContentError(404, "ARTIFACT_NOT_FOUND", "Artifact not found");
-    }
     const media = version
       ? input.handler.resolveVersionMedia({
           artifact: {
@@ -818,14 +823,7 @@ export class ContentArtifactsService {
     const publicArtifactIds = await findPubliclySharedArtifactIds(
       artifacts.items.map((artifact) => artifact.id),
     );
-    const versionedArtifactIds = artifacts.items
-      .filter((artifact) =>
-        Boolean(
-          registry.handlerFor(artifact.artifactType)?.resolveVersionMedia ||
-          registry.handlerFor(artifact.artifactType)?.executionPolicy,
-        ),
-      )
-      .map((artifact) => artifact.id);
+    const versionedArtifactIds = artifacts.items.map((artifact) => artifact.id);
     const currentVersions = await listCurrentReadyArtifactVersionRecords({
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
@@ -930,6 +928,7 @@ export class ContentArtifactsService {
           userId: input.userId,
           handler: registry.handlerFor(version.artifactType),
           currentVersion: { ...version, artifactId: version.id },
+          artifactVersionId: version.versionId,
         }),
       };
     }

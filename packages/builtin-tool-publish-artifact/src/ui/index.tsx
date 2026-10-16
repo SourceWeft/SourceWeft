@@ -48,3 +48,9 @@ export {
   type ToolOutputFieldReader,
   type ToolOutputValueReader,
 } from "./artifact-view";
+
+export {
+  ArtifactFileDownloads,
+  artifactDownloadFiles,
+  artifactPrimaryPreviewFile,
+} from "./artifact-file-downloads";

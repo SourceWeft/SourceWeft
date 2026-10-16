@@ -212,13 +212,34 @@ function buildWorkfileReferenceText(citation: AgentCitation) {
   const title = compactWhitespace(citation.sourceTitle || "Untitled source");
   if (citation.fileReference) {
     const reference = citation.fileReference;
-    return `File: ${reference.file.relativePath}. Location: ${JSON.stringify(reference.locator)}. Version: ${reference.file.revision}.`;
+    const identity = JSON.stringify({
+      workspaceId: reference.workspaceId,
+      threadId: reference.threadId,
+      backendKind: reference.file.backendKind,
+      fileId: reference.file.fileId,
+    });
+    // File locators are flat contract objects; key order is not evidence identity.
+    const locator = JSON.stringify(
+      Object.fromEntries(
+        Object.entries(reference.locator).sort(([left], [right]) =>
+          left.localeCompare(right),
+        ),
+      ),
+    );
+    return `File: ${reference.file.relativePath}. Identity: ${identity}. Location: ${locator}. Version: ${reference.file.revision}.`;
   }
   if (citation.externalUri) {
     const lead = title ? trimSentence(title) : "Web source.";
     return `${lead} ${citation.externalUri}`;
   }
-  return `Source Library: ${title || "Untitled source"}.`;
+  const identity = JSON.stringify({
+    sourceId: citation.sourceId,
+    documentId: citation.documentId,
+    chunkId: citation.chunkId,
+    ...(citation.chunkNo !== undefined ? { chunkNo: citation.chunkNo } : {}),
+    ...(citation.path ? { path: citation.path } : {}),
+  });
+  return `Source Library: ${title || "Untitled source"}. Evidence: ${identity}.`;
 }
 
 function buildCitationLookup(citations: AgentCitation[]) {
@@ -311,12 +332,10 @@ export function rewriteWorkfileCitationMarkers(input: {
           continue;
         }
 
-        const groupKey =
-          citation.externalUri ??
-          citation.sourceId ??
-          citation.documentId ??
-          citation.sourceTitle;
+        // Reuse only the same persisted evidence reference. A source or title
+        // alone cannot distinguish chunks, file revisions, or file locations.
         const referenceText = buildWorkfileReferenceText(citation);
+        const groupKey = referenceText;
         let label = labelByCitationGroup.get(groupKey);
 
         if (!label) {
@@ -720,7 +739,7 @@ export class WorkingFilesBackend implements BackendProtocolV2 {
       files.map(async ([filePath, content]) => {
         const normalized = normalizeWorkingFilePath(filePath);
         const { file } = await workingFilesService.putBytes({
-        signal: currentSourceWeftToolInvocationSignal(),
+          signal: currentSourceWeftToolInvocationSignal(),
           workspaceId: this.input.workspaceId,
           threadId: this.input.threadId,
           userId: this.input.userId,

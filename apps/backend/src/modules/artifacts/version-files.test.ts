@@ -87,3 +87,43 @@ test("version reads verify the persisted bytes instead of trusting storage", asy
     /does not match/,
   );
 });
+
+test("only public deliverables receive downloads, previews and private files do not", () => {
+  const projection = projectArtifactVersionFiles({
+    filesJson: {
+      schemaVersion: 1,
+      files: [
+        primary,
+        { ...primary, fileName: "report.pdf", role: "asset" },
+        {
+          ...primary,
+          fileName: "private.pdf",
+          role: "asset",
+          access: "private",
+        },
+        { ...primary, fileName: "cover.png", role: "preview" },
+        {
+          ...primary,
+          fileName: "source.json",
+          role: "source",
+          access: "private",
+        },
+      ],
+    },
+    url: (resource) => JSON.stringify(resource),
+  })!;
+  assert.deepEqual(
+    projection.map((file) => file.fileName),
+    ["index.html", "report.pdf", "cover.png"],
+  );
+  assert.deepEqual(JSON.parse(projection[1]!.downloadUrl!), {
+    kind: "asset",
+    fileName: "report.pdf",
+    download: true,
+  });
+  assert.equal(projection[2]!.downloadUrl, undefined);
+  assert.equal(
+    projectArtifactVersionFiles({ filesJson: null, url: () => "unused" }),
+    null,
+  );
+});

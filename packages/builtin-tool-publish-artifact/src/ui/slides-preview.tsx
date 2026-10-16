@@ -18,6 +18,10 @@ import type {
   ArtifactPreviewContext,
   ArtifactPreviewResult,
 } from "@sourceweft/contracts/artifact-ui";
+import {
+  ArtifactFileDownloads,
+  artifactDownloadFiles,
+} from "./artifact-file-downloads";
 import { SLIDES_ARTIFACT_TYPE } from "../artifact-view";
 import { SlidesFallback } from "./slides-fallback";
 import { PptxViewJsPreview } from "./slides-pptx-preview";
@@ -38,16 +42,27 @@ export function slidesPreview(
   // in the side panel it stays a self-sized card.
   if (isReady && proxyFileUrl) {
     const immersive = context.layout === "page";
+    const hasDownloads =
+      artifactDownloadFiles(context.payload.versionFiles).length > 0;
+    const deck = (
+      <PptxViewJsPreview
+        className={immersive ? "h-full w-full" : undefined}
+        controls={immersive ? "overlay" : "bar"}
+        fileUrl={proxyFileUrl}
+        fill={immersive}
+        title={title}
+      />
+    );
     return {
       id: "slides-pptx",
-      content: (
-        <PptxViewJsPreview
-          className={immersive ? "h-full w-full" : undefined}
-          controls={immersive ? "overlay" : "bar"}
-          fileUrl={proxyFileUrl}
-          fill={immersive}
-          title={title}
-        />
+      blocksDefaultDownload: hasDownloads,
+      content: hasDownloads ? (
+        <div className="flex h-full min-h-0 flex-col">
+          <ArtifactFileDownloads files={context.payload.versionFiles} />
+          <div className="min-h-0 flex-1">{deck}</div>
+        </div>
+      ) : (
+        deck
       ),
     };
   }

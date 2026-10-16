@@ -829,3 +829,132 @@ test("exact-version media storage must remain inside the artifact namespace", ()
     false,
   );
 });
+
+test.each(["file", "slides", SYNTHETIC_FILE_ARTIFACT_TYPE])(
+  "%s exact-version detail projects public downloads without storage coordinates",
+  async (artifactType) => {
+    vi.clearAllMocks();
+    mocks.requireContentWorkspace.mockResolvedValue({
+      id: "workspace-1",
+      organizationId: "team-1",
+    });
+    mocks.loadArtifactViewHandlerRegistry.mockResolvedValue(
+      createArtifactViewHandlerRegistry([]),
+    );
+    const file = {
+      fileName: "report.pdf",
+      contentType: "application/pdf",
+      byteLength: 3,
+      contentDigest: `sha256:${"a".repeat(64)}`,
+      role: "primary",
+      access: "artifact",
+      storageBucket: "content",
+      storageKey: "workspaces/workspace-1/artifacts/artifact-1/v1/report.pdf",
+    };
+    mocks.findReadyArtifactVersionRecord.mockResolvedValue({
+      id: "artifact-1",
+      teamId: "team-1",
+      workspaceId: "workspace-1",
+      artifactType,
+      status: "ready",
+      title: "Report",
+      payloadJson: {},
+      storageKey: file.storageKey,
+      storageBucket: "content",
+      previewStorageKey: null,
+      visibility: "workspace",
+      createdBy: "user-1",
+      versionId: "version-1",
+      versionNo: 1,
+      contentJson: { fileName: "report.pdf", mimeType: "application/pdf" },
+      filesJson: {
+        schemaVersion: 1,
+        files: [
+          file,
+          { ...file, fileName: "report.md", role: "asset" },
+          {
+            ...file,
+            fileName: "source.json",
+            role: "source",
+            access: "private",
+          },
+        ],
+      },
+    });
+    const { artifact } = await contentArtifactsService.getArtifact({
+      workspaceId: "workspace-1",
+      artifactId: "artifact-1",
+      artifactVersionId: "version-1",
+      userId: "user-1",
+    });
+    assert.equal(artifact.artifactVersionId, "version-1");
+    const payload = artifact.payloadJson as {
+      versionFiles: { fileName: string; downloadUrl: string }[];
+    };
+    assert.deepEqual(
+      payload.versionFiles.map((file) => file.fileName),
+      ["report.pdf", "report.md"],
+    );
+    const download = new URL(
+      payload.versionFiles[1]!.downloadUrl,
+      "https://app.test",
+    );
+    assert.equal(download.searchParams.get("artifactVersionId"), "version-1");
+    assert.equal(download.searchParams.get("download"), "1");
+    assert.equal(download.searchParams.get("assetFileName"), "report.md");
+    assert.doesNotMatch(
+      JSON.stringify(payload.versionFiles),
+      /storageKey|storageBucket|source.json/,
+    );
+    assert.equal(artifact.storageKey, null);
+    assert.equal(
+      mocks.findCurrentReadyArtifactVersionRecord.mock.calls.length,
+      0,
+    );
+  },
+);
+
+test("legacy exact file detail preserves requested identity and cannot forge file projections", async () => {
+  vi.clearAllMocks();
+  mocks.requireContentWorkspace.mockResolvedValue({
+    id: "workspace-1",
+    organizationId: "team-1",
+  });
+  mocks.loadArtifactViewHandlerRegistry.mockResolvedValue(
+    createArtifactViewHandlerRegistry([]),
+  );
+  mocks.findReadyArtifactVersionRecord.mockResolvedValue({
+    id: "artifact-1",
+    teamId: "team-1",
+    workspaceId: "workspace-1",
+    artifactType: "file",
+    status: "ready",
+    title: "Legacy",
+    storageKey: "legacy-key",
+    visibility: "workspace",
+    createdBy: "user-1",
+    versionId: "legacy-version",
+    versionNo: 1,
+    filesJson: null,
+    contentJson: {
+      versionFiles: [
+        { fileName: "forged", downloadUrl: "https://untrusted.test" },
+      ],
+    },
+  });
+  const { artifact } = await contentArtifactsService.getArtifact({
+    workspaceId: "workspace-1",
+    artifactId: "artifact-1",
+    artifactVersionId: "legacy-version",
+    userId: "user-1",
+  });
+  assert.equal(artifact.artifactVersionId, "legacy-version");
+  assert.equal(
+    (artifact.payloadJson as { versionFiles: unknown }).versionFiles,
+    null,
+  );
+  assert.equal(
+    mocks.findCurrentReadyArtifactVersionRecord.mock.calls.length,
+    0,
+  );
+});

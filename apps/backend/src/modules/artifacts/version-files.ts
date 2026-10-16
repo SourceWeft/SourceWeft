@@ -93,7 +93,15 @@ export function projectArtifactVersionFiles(input: {
         url: input.url(resource),
         ...(file.role === "primary"
           ? { downloadUrl: input.url({ kind: "download" }) }
-          : {}),
+          : file.role === "asset"
+            ? {
+                downloadUrl: input.url({
+                  kind: "asset",
+                  fileName: file.fileName,
+                  download: true,
+                }),
+              }
+            : {}),
       };
     });
 }
