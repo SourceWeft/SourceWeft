@@ -154,9 +154,10 @@ def verify(source, directory, formats):
                 raise ValueError('Invalid PDF signature')
             with tempfile.TemporaryDirectory(prefix='sourceweft-report-verify-') as temporary:
                 extracted = Path(temporary) / 'content.txt'
-                subprocess.run(['pdftotext', '-layout', str(path.resolve()), str(extracted)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30, check=True)
-                # PDF table layout may reorder cells on wrapped lines. Check all
-                # expected text/numbers, while ordered checks cover other formats.
+                subprocess.run(['pdftotext', '-raw', str(path.resolve()), str(extracted)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30, check=True)
+                # Read PDF content streams: layout mode interleaves adjacent
+                # wrapped table cells. Keep the same strict whole-fragment,
+                # number and citation checks; visual layout is reviewed separately.
                 assert_content(report, bounded_read(extracted).decode('utf-8'), 'PDF', ordered=False)
             checks.append('PDF extraction and all public text/numbers; visual review remains required')
         files.append({'fileName': path.name, 'byteLength': len(data), 'contentDigest': 'sha256:' + hashlib.sha256(data).hexdigest()})
