@@ -1,0 +1,202 @@
+{
+  "schemaVersion": 1,
+  "title": "虚构研究工具导出能力与价格比较报告",
+  "language": "zh-CN",
+  "template": "comparison",
+  "audience": "研究团队负责人",
+  "summary": [
+    {
+      "text": "本报告仅比较三份虚构测试资料，不构成真实市场推荐。",
+      "kind": "analysis",
+      "citations": []
+    },
+    {
+      "text": "青岚和砺石分别标示 99 元/月与 129 元/月，晨帆定价未提供。",
+      "kind": "fact",
+      "citations": [
+        "S1",
+        "S2",
+        "S3"
+      ]
+    }
+  ],
+  "sections": [
+    {
+      "id": "comparison",
+      "heading": "功能、价格与未知信息",
+      "blocks": [
+        {
+          "type": "table",
+          "columns": [
+            "产品",
+            "已声明导出",
+            "基础版价格",
+            "团队成员上限"
+          ],
+          "rows": [
+            [
+              {
+                "text": "青岚研报",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "CSV",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "99 元/月",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "10 人与 20 人两种记录；版本与口径未解释",
+                "status": "conflict",
+                "citations": [
+                  "S1",
+                  "S3"
+                ]
+              }
+            ],
+            [
+              {
+                "text": "砺石笔记",
+                "status": "value",
+                "citations": [
+                  "S2"
+                ]
+              },
+              {
+                "text": "Markdown、PDF",
+                "status": "value",
+                "citations": [
+                  "S2"
+                ]
+              },
+              {
+                "text": "129 元/月",
+                "status": "value",
+                "citations": [
+                  "S2"
+                ]
+              },
+              {
+                "text": "未声明",
+                "status": "unknown",
+                "citations": []
+              }
+            ],
+            [
+              {
+                "text": "晨帆资料台",
+                "status": "value",
+                "citations": [
+                  "S3"
+                ]
+              },
+              {
+                "text": "HTML 阅读、XLSX",
+                "status": "value",
+                "citations": [
+                  "S3"
+                ]
+              },
+              {
+                "text": "未提供",
+                "status": "unknown",
+                "citations": []
+              },
+              {
+                "text": "未声明",
+                "status": "unknown",
+                "citations": []
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "decision",
+      "heading": "初步建议与验证事项",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "如交付重点是 Markdown 与 PDF，可优先验证砺石笔记的导出体验。",
+          "kind": "recommendation",
+          "citations": [
+            "S2"
+          ]
+        },
+        {
+          "type": "bullets",
+          "items": [
+            {
+              "text": "青岚团队规模上限应向供应商澄清，不能直接采用较大数字。",
+              "kind": "recommendation",
+              "citations": [
+                "S1",
+                "S3"
+              ]
+            },
+            {
+              "text": "晨帆价格未知，不能将缺失定价当作免费。",
+              "kind": "analysis",
+              "citations": [
+                "S3"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "id": "S1",
+      "display": {
+        "title": "青岚研报：虚构产品资料 A",
+        "locator": "官方功能页（虚构）"
+      },
+      "provenance": {
+        "fileId": "PRIVATE-FIXTURE-QINGLAN",
+        "scope": "fixture-only",
+        "revision": "1",
+        "locator": "sources/qinglan.md"
+      }
+    },
+    {
+      "id": "S2",
+      "display": {
+        "title": "砺石笔记：虚构产品资料 B",
+        "locator": "产品说明（虚构）"
+      },
+      "provenance": {
+        "fileId": "PRIVATE-FIXTURE-LISHI",
+        "scope": "fixture-only",
+        "revision": "1",
+        "locator": "sources/lishi.md"
+      }
+    },
+    {
+      "id": "S3",
+      "display": {
+        "title": "晨帆资料台：虚构产品资料 C",
+        "locator": "产品说明与附录（虚构）"
+      },
+      "provenance": {
+        "fileId": "PRIVATE-FIXTURE-CHENFAN",
+        "scope": "fixture-only",
+        "revision": "1",
+        "locator": "sources/chenfan.md"
+      }
+    }
+  ]
+}

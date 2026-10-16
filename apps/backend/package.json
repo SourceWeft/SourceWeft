@@ -73,6 +73,7 @@
     "@sourceweft/builtin-skill-image-generate": "workspace:*",
     "@sourceweft/builtin-skill-meeting-summary": "workspace:*",
     "@sourceweft/builtin-skill-ppt-deck": "workspace:*",
+    "@sourceweft/builtin-skill-report": "workspace:*",
     "@sourceweft/builtin-skill-video-presentation": "workspace:*",
     "@sourceweft/builtin-tool-sandbox": "workspace:*",
     "@sourceweft/builtin-tool-video-presentation": "workspace:*",
