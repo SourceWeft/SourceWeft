@@ -328,10 +328,12 @@ async fn package_policy_never_exceeds_two_attempts() {
     assert_eq!(calls.load(Ordering::SeqCst), 2);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn sequential_stages_share_one_deadline() {
     let (_dir, journal) = fixture();
+    let start = Instant::now();
     let operation = Operation::new(Duration::from_millis(80));
+    let deadline = operation.deadline;
     run(
         &journal,
         &operation,
@@ -345,20 +347,57 @@ async fn sequential_stages_share_one_deadline() {
     )
     .await
     .unwrap();
-    let start = Instant::now();
+    assert_eq!(start.elapsed(), Duration::from_millis(50));
+    assert_eq!(operation.deadline, deadline);
+    let second_stage_start = Instant::now();
+    let remaining = deadline - second_stage_start;
+    assert_eq!(remaining, Duration::from_millis(30));
+    let calls = AtomicU32::new(0);
     let e = run::<(), _, _>(
         &journal,
         &operation,
         "plugin_check",
         Policy::METADATA,
         None,
-        |_| async { std::future::pending().await },
+        |_| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            async { std::future::pending().await }
+        },
     )
     .await
     .unwrap_err();
     assert_eq!(e.kind, "timeout");
-    assert!(start.elapsed() < Duration::from_millis(100));
+    assert_eq!(e.code, "UPDATE_NETWORK");
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(second_stage_start.elapsed(), remaining);
+    assert_eq!(Instant::now(), deadline);
+    assert_eq!(start.elapsed(), Duration::from_millis(80));
 }
+#[tokio::test(start_paused = true)]
+async fn elapsed_deadline_rejects_a_stage_before_invoking_its_request() {
+    let (_dir, journal) = fixture();
+    let operation = Operation::new(Duration::from_millis(80));
+    tokio::time::advance(Duration::from_millis(81)).await;
+    let calls = AtomicU32::new(0);
+    let error = run::<(), _, _>(
+        &journal,
+        &operation,
+        "plugin_check",
+        Policy::METADATA,
+        None,
+        |_| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            async { Ok(()) }
+        },
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.code, "UPDATE_BUDGET_EXHAUSTED");
+    assert_eq!(error.kind, "policy");
+    assert!(!error.retryable);
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+}
+
 #[test]
 fn terminal_codes_and_rotated_files_do_not_leak_details() {
     assert_eq!(
