@@ -30,6 +30,18 @@ Keep internal IDs, file revisions and machine identity in private provenance. Ne
 
 Escaping text prevents executable markup; it does not determine whether the text should be disclosed. Review the report's actual source disclosure before publishing.
 
+## Review content before publishing
+
+Review the actual draft against the passages returned by the readers, separately from format verification. Scale review coverage to the report's complexity and consequences; check every decision-critical fact rather than imposing a fixed sample count on every report.
+
+- For each key fact, match its citation to the specific supporting passage, not merely the source title. Check the meaning, numbers, units and table dimension. Being able to locate a citation does not establish that it supports the assertion. Correct wrong-source citations and split sentences whose parts have different support.
+- Preserve publication and updated dates when both are present. Distinguish historical announcements, the currently read document and behavior actually tested. Retain account, platform, age, rollout and other scope qualifications; an updated page does not prove its present wording appeared in the original publication.
+- Bound unknowns to what was actually read. A missing statement in a selected overview does not establish absence from all official documentation. A truncated result cannot support conclusions about omitted sections: read the needed passage or explicitly limit the claim. Keep unresolved source disagreements visible.
+- For a substantial research or decision report, normally develop at least three complete reasoning chains: supported fact → relevance to the question → recommendation → tradeoff and observable acceptance condition. Scale the number and detail to short briefs without padding or inventing recommendations. Label proposed metrics as proposals, not sourced facts. Do not change the decision being argued midway; for example, default availability or callability is distinct from automatic generation. A third party's interface or control settings do not establish how this project must implement its own controls.
+- External documentation cannot prove that this project has implemented, run or validated a workflow. Support execution claims with actual tool results and version receipts. Keep human-prepared research, model-authored content, deterministic export checks and application publication distinct; none alone certifies factual accuracy.
+
+Resolve unsupported key assertions or disclose the remaining limitation before presenting the report as complete. This is content review within the existing workflow, not a new service, additional Agent, automatic fact certification or universal sharing gate. Keep source IDs in structured citations instead of manually repeating them in statement or cell text.
+
 ## Generate, verify and publish
 
 Use a fresh output directory:
