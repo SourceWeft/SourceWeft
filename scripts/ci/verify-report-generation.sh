@@ -102,6 +102,88 @@ for name in ['long-table', 'long-table-revised']:
 print('Custom frozen presentation restored; all four revised formats pass, real PDF page fields and repeated table headers checked, original bytes unchanged.')
 PYPRESERVE
 
+# A clickable PDF TOC is a real export requirement. Preserve every visible run,
+# bookmark and footer but remove the actual internal hyperlink wrappers from a
+# copy of the generated DOCX; the same LibreOffice must produce a PDF whose
+# content still verifies while navigation qualification rejects it.
+python3 -B - "$report_root" "$report_skill" <<'PYNAVIGATION'
+import hashlib, json, shutil, subprocess, sys, zipfile
+import xml.etree.ElementTree as ET
+from pathlib import Path
+root, skill = Path(sys.argv[1]), Path(sys.argv[2])
+sys.path.insert(0, str(skill/'scripts'))
+from verify_report import assert_content, docx_text, pdf_body_with_page_numbers
+from report_schema import read_report
+original = root/'long-table'
+negative = root/'navigation-negative'
+negative.mkdir()
+for name in ['report.html', 'report.md', 'report.docx', 'report.pdf', 'report.source.json']:
+    shutil.copyfile(original/name, negative/name)
+namespace = '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}'
+with zipfile.ZipFile(original/'report.docx') as archive:
+    parts = [(info, archive.read(info.filename)) for info in archive.infolist()]
+document = ET.fromstring(dict((info.filename, data) for info, data in parts)['word/document.xml'])
+removed = 0
+for parent in document.iter():
+    for link in list(parent):
+        if link.tag == namespace+'hyperlink' and link.get(namespace+'anchor'):
+            index = list(parent).index(link)
+            for offset, child in enumerate(list(link)):
+                parent.insert(index+offset, child)
+            parent.remove(link)
+            removed += 1
+assert removed == 2, 'Negative must actually remove the fixed fixture contents links'
+with zipfile.ZipFile(negative/'report.docx', 'w') as archive:
+    for info, data in parts:
+        archive.writestr(info, ET.tostring(document, encoding='utf-8', xml_declaration=True) if info.filename == 'word/document.xml' else data)
+converted = negative/'converted'
+converted.mkdir()
+subprocess.run(['soffice', '-env:UserInstallation='+(negative/'office-profile').resolve().as_uri(), '--headless', '--convert-to', 'pdf', '--outdir', str(converted), str((negative/'report.docx').resolve())], check=True, timeout=90, stdout=subprocess.DEVNULL)
+assert (converted/'report.pdf').is_file() and (converted/'report.pdf').stat().st_size > 0
+shutil.copyfile(converted/'report.pdf', negative/'report.pdf')
+# Keep the deliberately stripped conversion input as evidence, then restore the
+# valid DOCX deliverable. Its independent navigation guard must not mask the PDF
+# navigation defect that this negative isolates.
+(negative/'report.docx').rename(negative/'no-links.input.docx')
+shutil.copyfile(original/'report.docx', negative/'report.docx')
+source = read_report(skill/'tests/fixtures/long-table.source.json')
+assert_content(source, docx_text(negative/'report.docx', source), 'DOCX')
+raw = subprocess.run(['pdftotext', '-raw', str(negative/'report.pdf'), '-'], capture_output=True, text=True, check=True, timeout=30).stdout
+bbox = subprocess.run(['pdftotext', '-bbox', str(negative/'report.pdf'), '-'], capture_output=True, text=True, check=True, timeout=30).stdout
+assert_content(source, pdf_body_with_page_numbers(raw, bbox), 'PDF', ordered=False)
+for name in ['report.html', 'report.md', 'report.source.json']:
+    assert (original/name).read_bytes() == (negative/name).read_bytes()
+result = {'bodyContentPreserved': True, 'controlledDocxAndPdfFootersValid': True, 'htmlMarkdownAndSourceBytesUnchanged': True, 'navigationPassed': False, 'scope': 'Body/footer preservation only; actual navigation must independently reject this candidate'}
+assert hashlib.sha256((original/'report.pdf').read_bytes()).digest() != hashlib.sha256((negative/'report.pdf').read_bytes()).digest()
+(negative/'content-verification.json').write_text(json.dumps(result, ensure_ascii=False, indent=2))
+PYNAVIGATION
+if python3 -B "$report_skill/tests/test_report_qualification.py" --qualify-navigation \
+  "$report_long_fixture" "$report_root/navigation-negative/report.pdf" \
+  > "$report_root/navigation-negative/rejected.json" 2> "$report_root/navigation-negative/rejected.log"; then
+  echo 'Unexpectedly accepted a PDF with painted contents labels but no clickable links' >&2
+  exit 1
+fi
+python3 -B - "$report_root/navigation-negative" <<'PYNAVREJECT'
+import sys
+from pathlib import Path
+root = Path(sys.argv[1])
+assert 'PDF contents needs exactly one actual clickable internal link per section heading' in (root/'rejected.log').read_text(), 'Expected actual missing-link rejection, not missing tools or malformed content'
+print('Real same-engine PDF navigation negative rejected: contents labels and all body/footer text survive while clickable links are absent.')
+PYNAVREJECT
+if python3 -B "$report_skill/scripts/verify_report.py" --source "$report_long_fixture" \
+  --output-dir "$report_root/navigation-negative" --formats "$report_formats" \
+  > "$report_root/navigation-negative/verifier-rejected.json" 2> "$report_root/navigation-negative/verifier-rejected.log"; then
+  echo 'Production verification unexpectedly accepted an unclickable PDF table of contents' >&2
+  exit 1
+fi
+python3 -B - "$report_root/navigation-negative" <<'PYVERIFIERNAV'
+import sys
+from pathlib import Path
+root = Path(sys.argv[1])
+assert 'PDF contents navigation' in (root/'verifier-rejected.log').read_text(), 'Expected production navigation rejection, not another content/dependency failure'
+print('Production verification independently rejects the same real PDF solely for missing contents navigation.')
+PYVERIFIERNAV
+
 # A valid source can exceed the existing standard browser budget. Exercise the
 # actual bundler/browser and require its specific nonzero height rejection; a
 # missing font, crash or swallowed exit status is not an acceptable negative.

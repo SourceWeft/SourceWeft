@@ -5,12 +5,14 @@ from html.parser import HTMLParser
 import json
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import tempfile
 import zipfile
+from urllib.parse import urlsplit
 import xml.etree.ElementTree as ET
 from generate_report import markdown_document, page_number_footer_xml
-from report_schema import read_report, parse_formats, public_texts, effective_presentation
+from report_schema import read_report, parse_formats, public_texts, effective_presentation, contents_entries
 
 MAX_FILE_BYTES = 32 * 1024 * 1024
 
@@ -152,6 +154,116 @@ def pdf_body_with_page_numbers(raw, bbox):
     return '\n'.join(bodies)
 
 
+def assert_pdf_navigation(report, xml, pdf_name):
+    """Check exported clickable TOC links and actual heading text at their destinations.
+
+    Poppler splits long/mixed-font labels into fragments. Consume them in report
+    order rather than using a dictionary keyed by a possibly repeated heading.
+    """
+    def reject(reason):
+        raise ValueError('PDF contents navigation: ' + reason)
+    root = ET.fromstring(xml)
+    pages = root.findall('page')
+    numbers = [page.get('number') for page in pages]
+    if not pages or numbers != [str(index) for index in range(1, len(pages) + 1)]:
+        reject('invalid page sequence')
+    fonts = {font.get('id'): float(font.get('size', '0')) for font in root.iter('fontspec')}
+    anchors = [(int(page.get('number')), anchor) for page in pages for anchor in page.iter('a')]
+    expected_file = Path(pdf_name).stem + '.html'
+
+    def heading_on_page(page, heading):
+        # The generator uses Heading 1 at 15 pt. At explicit Poppler zoom=1,
+        # match only contiguous visible heading fragments, never a whole-page
+        # concatenation that could falsely match ordinary prose or the TOC.
+        texts = page.findall('text')
+        expected = normalized(heading)
+        for start, text in enumerate(texts):
+            candidate = ''
+            previous = None
+            first_left = float(text.get('left', '0'))
+            for node in texts[start:]:
+                if list(node.iter('a')) or not 14.5 <= fonts.get(node.get('font'), 0) <= 15.5:
+                    break
+                left, top = float(node.get('left', '0')), float(node.get('top', '0'))
+                if previous is not None:
+                    prev_left, prev_top, prev_width, prev_height = previous
+                    same_line = abs(top - prev_top) <= 2 and abs(left - (prev_left + prev_width)) <= 8
+                    next_line = 0 < top - prev_top <= prev_height * 1.8 and abs(left - first_left) <= 2
+                    if not (same_line or next_line):
+                        break
+                candidate += normalized(''.join(node.itertext()))
+                if candidate == expected:
+                    return True
+                if not expected.startswith(candidate):
+                    break
+                previous = (left, top, float(node.get('width', '0')), float(node.get('height', '0')))
+        return False
+
+    cursor = 0
+    previous_target = 0
+    checked = []
+    for _, heading in contents_entries(report):
+        expected = normalized(heading)
+        label = ''
+        target = None
+        source_pages = []
+        while label != expected:
+            if cursor >= len(anchors):
+                reject('missing clickable internal link for ' + heading)
+            source_page, anchor = anchors[cursor]
+            cursor += 1
+            href = urlsplit(anchor.get('href', ''))
+            if href.scheme or href.netloc or href.query or href.path not in ('', expected_file) or not re.fullmatch(r'[1-9][0-9]*', href.fragment):
+                reject('external or invalid target for ' + heading)
+            destination = int(href.fragment)
+            if not 1 <= destination <= len(pages) or (target is not None and target != destination):
+                reject('missing or inconsistent destination for ' + heading)
+            target = destination
+            fragment = normalized(''.join(anchor.itertext()))
+            if not fragment or not expected.startswith(label + fragment):
+                reject('link label/order differs from the frozen report')
+            label += fragment
+            source_pages.append(source_page)
+        if target < previous_target or target < max(source_pages) or not heading_on_page(pages[target - 1], heading):
+            reject('target does not contain the actual section heading: ' + heading)
+        previous_target = target
+        checked.append({'heading': heading, 'sourcePages': sorted(set(source_pages)), 'targetPage': target})
+    if cursor != len(anchors):
+        reject('unexpected extra PDF links')
+    return checked
+
+
+def assert_docx_navigation(report, document, styles):
+    entries = contents_entries(report)
+    if not entries:
+        return
+    w = '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}'
+    def reject(reason):
+        raise ValueError('DOCX contents navigation: ' + reason)
+    parents = {child: parent for parent in document.iter() for child in parent}
+    links = list(document.iter(w + 'hyperlink'))
+    starts = list(document.iter(w + 'bookmarkStart'))
+    ends = list(document.iter(w + 'bookmarkEnd'))
+    if len(links) != len(entries) or len(starts) != len(entries) or len(ends) != len(entries):
+        reject('unexpected link or bookmark count')
+    definitions = {node.get(w + 'styleId'): node for node in styles.findall(w + 'style')}
+    for name in ('Hyperlink', 'FollowedHyperlink'):
+        if name not in definitions or definitions[name].get(w + 'type') != 'character':
+            reject('missing registered hyperlink character style')
+    for index, (link, (_, heading), start, end) in enumerate(zip(links, entries, starts, ends), 1):
+        name, identity = f'sw_section_{index}', str(index)
+        if link.attrib != {w + 'anchor': name, w + 'history': '1'} or ''.join(node.text or '' for node in link.iter(w + 't')) != heading:
+            reject('link label or internal target differs')
+        if any(run.find(w + 'rPr/' + w + 'rStyle') is None or run.find(w + 'rPr/' + w + 'rStyle').get(w + 'val') != 'Hyperlink' for run in link.findall(w + 'r')):
+            reject('link does not apply its registered character style')
+        if start.attrib != {w + 'id': identity, w + 'name': name} or end.attrib != {w + 'id': identity}:
+            reject('bookmark identity differs')
+        paragraph = parents.get(start)
+        style = paragraph.find(w + 'pPr/' + w + 'pStyle') if paragraph is not None else None
+        if paragraph is None or paragraph.tag != w + 'p' or parents.get(end) is not paragraph or style is None or style.get(w + 'val') != 'Heading1' or ''.join(node.text or '' for node in paragraph.iter(w + 't')) != heading:
+            reject('bookmark does not contain the actual section heading')
+
+
 def docx_text(path, report=None):
     bounded_read(path)
     with zipfile.ZipFile(path) as archive:
@@ -195,6 +307,10 @@ def docx_text(path, report=None):
         if b'<!DOCTYPE' in xml or b'<!ENTITY' in xml:
             raise ValueError('Unexpected DOCX XML declarations')
         document = ET.fromstring(xml)
+        if report is not None and contents_entries(report):
+            if 'word/styles.xml' not in names:
+                raise ValueError('DOCX contents navigation: missing style definitions')
+            assert_docx_navigation(report, document, package_xml('word/styles.xml'))
         numbered = report is not None and effective_presentation(report)['pageNumbers']
         if numbered:
             validate_page_footer(archive, names, document, types)
@@ -259,6 +375,14 @@ def verify(source, directory, formats):
                     subprocess.run(['pdftotext', '-bbox', str(path.resolve()), str(bbox_path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30, check=True)
                     public = pdf_body_with_page_numbers(public, bounded_read(bbox_path))
                 assert_content(report, public, 'PDF', ordered=False)
+                if contents_entries(report):
+                    if not shutil.which('pdftohtml'):
+                        raise RuntimeError('pdftohtml is required to verify requested PDF contents navigation; no fallback is accepted')
+                    navigation = Path(temporary) / 'navigation.xml'
+                    with navigation.open('wb') as stream:
+                        subprocess.run(['pdftohtml', '-xml', '-stdout', '-i', '-zoom', '1', str(path.resolve())], stdout=stream, stderr=subprocess.DEVNULL, timeout=30, check=True)
+                    assert_pdf_navigation(report, bounded_read(navigation), path.name)
+                    checks.append('PDF clickable internal contents links and actual target headings')
             checks.append('PDF extraction and all public text/numbers; visual review remains required')
         files.append({'fileName': path.name, 'byteLength': len(data), 'contentDigest': 'sha256:' + hashlib.sha256(data).hexdigest()})
     unexpected = [f'report.{fmt}' for fmt in ('md', 'docx', 'pdf') if fmt not in formats and (directory / f'report.{fmt}').exists()]

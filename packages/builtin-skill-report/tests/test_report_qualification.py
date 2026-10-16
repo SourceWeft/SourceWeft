@@ -14,6 +14,7 @@ import tempfile
 import unittest
 import xml.etree.ElementTree as ET
 import zipfile
+from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
@@ -22,6 +23,53 @@ from report_schema import read_report
 from verify_report import verify
 
 FIXTURE = ROOT / 'tests/fixtures/long-table.source.json'
+
+
+def pdf_navigation(xml, headings, page_texts, pdf_name='report.pdf'):
+    """Require actual clickable PDF links, not just painted TOC labels/bookmarks.
+
+    Poppler emits one page fragment per real link annotation. Only this PDF's
+    internal page fragments count; remote/external files never satisfy a TOC.
+    """
+    if len(xml.encode('utf-8')) > 32 * 1024 * 1024:
+        raise AssertionError('PDF navigation XML exceeds 32 MiB')
+    document = ET.fromstring(xml)
+    pages = {int(page.get('number')): page for page in document.findall('page')}
+    if set(pages) != set(page_texts):
+        raise AssertionError('PDF navigation XML pages differ from actual extracted pages')
+    expected = [re.sub(r'\s+', '', heading) for heading in headings]
+    found = {heading: [] for heading in expected}
+    for page_no, page in pages.items():
+        for link in page.iter('a'):
+            label = re.sub(r'\s+', '', ''.join(link.itertext()))
+            if label not in found:
+                continue
+            target = urlsplit(link.get('href', ''))
+            allowed_names = ('', Path(pdf_name).stem + '.html', pdf_name)
+            if target.scheme or target.netloc or target.query or target.path not in allowed_names or not re.fullmatch(r'[1-9][0-9]*', target.fragment):
+                raise AssertionError(f'PDF contents link is not an internal page target: {label}')
+            destination = int(target.fragment)
+            if destination not in pages:
+                raise AssertionError(f'PDF contents link target is outside the actual PDF: {label}')
+            # Raw text alone could mistake a TOC label on page 1 for the actual
+            # section heading. Also require a non-link text node on that page.
+            body_nodes = [node for node in pages[destination].findall('text') if not list(node.iter('a'))]
+            body_texts = [re.sub(r'\s+', '', ''.join(node.itertext())) for node in body_nodes]
+            if label not in body_texts or label not in re.sub(r'\s+', '', page_texts[destination]):
+                raise AssertionError(f'PDF contents link does not target the actual section page: {label}')
+            found[label].append({'label': headings[expected.index(label)], 'sourcePage': page_no, 'targetPage': destination})
+    if any(len(found[heading]) != 1 for heading in expected):
+        raise AssertionError('PDF contents needs exactly one actual clickable internal link per section heading')
+    return [found[heading][0] for heading in expected]
+
+
+def qualify_navigation(source_path, pdf):
+    source = read_report(source_path)
+    headings = [section['heading'] for section in source['sections']]
+    xml = subprocess.run(['pdftohtml', '-xml', '-stdout', '-i', str(pdf)], capture_output=True, text=True, check=True, timeout=30).stdout
+    page_count = int(re.search(r'^Pages:\s+(\d+)$', subprocess.run(['pdfinfo', str(pdf)], capture_output=True, text=True, check=True, timeout=30).stdout, re.M).group(1))
+    texts = {number: subprocess.run(['pdftotext', '-f', str(number), '-l', str(number), '-raw', str(pdf), '-'], capture_output=True, text=True, check=True, timeout=30).stdout for number in range(1, page_count + 1)}
+    return pdf_navigation(xml, headings, texts, Path(pdf).name)
 
 
 def qualify_layout(source_path, output_path):
@@ -78,9 +126,41 @@ def qualify_layout(source_path, output_path):
         raise AssertionError('This short summary/contents fixture must begin its table on page 1 rather than leave most of the page blank')
     if seen_ids != expected_ids:
         raise AssertionError(f'Rows changed, repeated, missing or reordered: {seen_ids}')
-    result = {'passed': True, 'pageCount': count, 'tablePages': table_pages, 'recordCount': len(seen_ids), 'contentsTargets': expected_headings, 'pages': pages, 'pdfDigest': 'sha256:' + hashlib.sha256(pdf.read_bytes()).hexdigest(), 'visualReview': 'not_run'}
+    navigation = qualify_navigation(source_path, pdf)
+    result = {'passed': True, 'pdfContentsLinks': navigation, 'pageCount': count, 'tablePages': table_pages, 'recordCount': len(seen_ids), 'contentsTargets': expected_headings, 'pages': pages, 'pdfDigest': 'sha256:' + hashlib.sha256(pdf.read_bytes()).hexdigest(), 'visualReview': 'not_run'}
     (output / 'native-layout.json').write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n')
     return result
+
+
+class PdfNavigationContract(unittest.TestCase):
+    def setUp(self):
+        self.headings = ['记录清单', '检查限制']
+        self.texts = {1: '目录 记录清单 检查限制 记录清单 正文', 2: '检查限制 正文'}
+        self.xml = '<pdf2xml><page number="1"><text><a href="report.html#1">记录清单</a></text><text><a href="report.html#2">检查限制</a></text><text>记录清单</text><text>正文</text></page><page number="2"><text>检查限制</text><text>正文</text></page></pdf2xml>'
+
+    def test_real_link_targets_must_match_actual_section_pages(self):
+        result = pdf_navigation(self.xml, self.headings, self.texts)
+        self.assertEqual([item['targetPage'] for item in result], [1, 2])
+        self.assertEqual([item['label'] for item in result], self.headings)
+
+    def test_painted_labels_external_links_and_duplicate_links_do_not_pass(self):
+        variants = [
+            re.sub(r'<a[^>]*>(.*?)</a>', r'\1', self.xml),
+            self.xml.replace('report.html#2', 'https://example.test/report.html#2'),
+            self.xml.replace('report.html#2', 'other.html#2'),
+            self.xml.replace('report.html#2', 'report.html#99'),
+            self.xml.replace('</page><page number="2">', '<text><a href="report.html#1">记录清单</a></text></page><page number="2">'),
+        ]
+        for xml in variants:
+            with self.subTest(xml=xml):
+                with self.assertRaises(AssertionError):
+                    pdf_navigation(xml, self.headings, self.texts)
+
+    def test_toc_label_on_wrong_target_page_is_not_a_body_heading(self):
+        # The raw text of page 1 contains both TOC labels. An annotation to that
+        # page cannot satisfy the second section, whose real heading is page 2.
+        with self.assertRaisesRegex(AssertionError, 'actual section page'):
+            pdf_navigation(self.xml.replace('report.html#2', 'report.html#1'), self.headings, self.texts)
 
 
 class FrozenPresentationQualification(unittest.TestCase):
@@ -124,7 +204,9 @@ class FrozenPresentationQualification(unittest.TestCase):
 
 
 if __name__ == '__main__':
-    if len(sys.argv) == 4 and sys.argv[1] == '--qualify-layout':
+    if len(sys.argv) == 4 and sys.argv[1] == '--qualify-navigation':
+        print(json.dumps(qualify_navigation(sys.argv[2], sys.argv[3]), ensure_ascii=False))
+    elif len(sys.argv) == 4 and sys.argv[1] == '--qualify-layout':
         print(json.dumps(qualify_layout(sys.argv[2], sys.argv[3]), ensure_ascii=False))
     else:
         unittest.main()

@@ -134,6 +134,7 @@ def write_docx(report, destination):
     from docx.shared import Mm, Pt, RGBColor
     from docx.oxml import OxmlElement, parse_xml
     from docx.oxml.ns import qn
+    from docx.enum.style import WD_STYLE_TYPE
     doc = Document()
     section = doc.sections[0]
     section.page_width = Mm(210)
@@ -191,6 +192,14 @@ def write_docx(report, destination):
             note_paragraph._p.get_or_add_pPr().append(wrap)
         return paragraph
     entries = contents_entries(report)
+    if entries:
+        # LibreOffice enumerates hyperlinks through registered character styles.
+        # Referencing an undefined Hyperlink style produces visible but inert PDF text.
+        for name in ('Hyperlink', 'FollowedHyperlink'):
+            link_style = doc.styles.add_style(name, WD_STYLE_TYPE.CHARACTER, builtin=True)
+            link_style.base_style = doc.styles['Default Paragraph Font']
+            link_style.font.color.rgb = RGBColor(0, 0, 0)
+            link_style.font.underline = False
     bookmarks = {sid: f'sw_section_{index}' for index, (sid, _) in enumerate(entries, 1)}
     title_paragraph = doc.add_heading(report['title'], 0)
     strip_paragraph_borders(title_paragraph._p)
@@ -203,7 +212,13 @@ def write_docx(report, destination):
             paragraph = doc.add_paragraph()
             link = OxmlElement('w:hyperlink')
             link.set(qn('w:anchor'), bookmarks[sid])
+            link.set(qn('w:history'), '1')
             run = OxmlElement('w:r')
+            properties = OxmlElement('w:rPr')
+            link_style = OxmlElement('w:rStyle')
+            link_style.set(qn('w:val'), 'Hyperlink')
+            properties.append(link_style)
+            run.append(properties)
             value = OxmlElement('w:t')
             value.text = heading
             run.append(value)
@@ -306,6 +321,8 @@ def preflight(formats):
 def generate(source, output, formats):
     report = read_report(source)
     preflight(formats)
+    if 'pdf' in formats and contents_entries(report) and not shutil.which('pdftohtml'):
+        raise RuntimeError('pdftohtml is required for requested PDF contents navigation; use the provisioned sandbox, do not install/fallback')
     output = Path(output)
     # mkdir(exist_ok=False) is the contract: never mix outputs from another version.
     output.mkdir(parents=True, exist_ok=False)
