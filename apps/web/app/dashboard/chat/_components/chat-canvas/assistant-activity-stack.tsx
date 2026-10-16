@@ -144,17 +144,9 @@ export function AssistantActivityRenderItems({
   resolvedConfirmations?: ToolConfirmationResolution[];
 }) {
   const renderItems = groupConsecutiveToolItems(items);
-  const streamingReasoningKey = isStreaming
-    ? (() => {
-        for (let i = items.length - 1; i >= 0; i -= 1) {
-          const candidate = items[i];
-          if (candidate && candidate.type === "reasoning") {
-            return candidate.key;
-          }
-        }
-        return undefined;
-      })()
-    : undefined;
+  const lastItem = items.at(-1);
+  const streamingReasoningKey =
+    isStreaming && lastItem?.type === "reasoning" ? lastItem.key : undefined;
 
   return (
     <>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { ReactNode } from "react";
 import {
   CheckCircle2,
@@ -22,6 +22,7 @@ import { AssistantToolCard } from "./assistant-tool-card";
 import { WebToolResults } from "../web-tool-results";
 import type { CitationRecord, ToolConfirmationResolution } from "./types";
 import { formatCompactDuration } from "./duration-format";
+import { useActivityDisclosure } from "./activity-disclosure-state";
 
 function ActivityStatusCell({ children }: { children: ReactNode }) {
   return <span className={ASSISTANT_ACTIVITY_ICON_CLASS}>{children}</span>;
@@ -149,18 +150,18 @@ function AssistantReasoningRow({
           duration: formatCompactDuration(item.durationMs),
         })
       : t("duration.thoughtForFew");
-  const [isOpen, setIsOpen] = useState(isStreaming);
-
-  useEffect(() => {
-    setIsOpen(isStreaming);
-  }, [isStreaming]);
+  const [isOpen, setIsOpen] = useActivityDisclosure(
+    "reasoning",
+    item.id,
+    isStreaming,
+  );
 
   return (
     <div className="group text-muted-foreground transition-colors hover:text-foreground">
       <button
         aria-expanded={isOpen}
         className={ASSISTANT_ACTIVITY_ROW_CLASS}
-        onClick={() => setIsOpen((value) => !value)}
+        onClick={() => setIsOpen(!isOpen)}
         type="button"
       >
         <ActivityStatusCell>
