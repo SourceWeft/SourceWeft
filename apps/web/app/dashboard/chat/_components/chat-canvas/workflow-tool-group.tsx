@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { ChevronRight, Layers, Loader2 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { Shimmer } from "@sourceweft/ui-web/components/ai-elements/shimmer";
@@ -13,6 +13,10 @@ import { isSandboxToolResultFailure } from "./sandbox-tool-result-display";
 import type { WorkflowBlockEntry } from "./subagent-grouping";
 import { summarizeToolGroup } from "./tool-group-summary";
 import type { ToolCallRecord } from "./types";
+import {
+  useActivityDisclosure,
+  useHasManuallyExpandedReasoning,
+} from "./activity-disclosure-state";
 
 function isFailedToolCall(toolCall: ToolCallRecord) {
   return (
@@ -42,7 +46,6 @@ export function WorkflowToolGroup({
 }) {
   const t = useTranslations("dashboardChatCanvas");
   const locale = useLocale();
-  const [userOpen, setUserOpen] = useState<boolean | null>(null);
 
   const toolCalls = entries
     .map(resolveToolCall)
@@ -52,7 +55,16 @@ export function WorkflowToolGroup({
     .reverse()
     .find((toolCall) => toolCall.status === "running");
   const isLive = isRunning || Boolean(runningToolCall);
-  const isOpen = userOpen ?? (isLive || failedCount > 0);
+  const hasExpandedReasoning = useHasManuallyExpandedReasoning(
+    entries
+      .filter((entry) => entry.block.type === "reasoning")
+      .map((entry) => entry.block.id),
+  );
+  const [isOpen, setOpen] = useActivityDisclosure(
+    "tool-group",
+    entries[0]?.block.id ?? "",
+    isLive || failedCount > 0 || hasExpandedReasoning,
+  );
   const label = runningToolCall
     ? getAssistantToolTitle(runningToolCall, t)
     : summarizeToolGroup({ locale, t, toolCalls });
@@ -65,7 +77,7 @@ export function WorkflowToolGroup({
           ASSISTANT_ACTIVITY_ROW_CLASS,
           "group text-muted-foreground transition-colors hover:text-foreground",
         )}
-        onClick={() => setUserOpen(!isOpen)}
+        onClick={() => setOpen(!isOpen)}
         type="button"
       >
         <span className={ASSISTANT_ACTIVITY_ICON_CLASS}>
@@ -80,11 +92,7 @@ export function WorkflowToolGroup({
             className="truncate text-[13px] text-foreground/80"
             title={label}
           >
-            {runningToolCall ? (
-              <Shimmer duration={1}>{label}</Shimmer>
-            ) : (
-              label
-            )}
+            {runningToolCall ? <Shimmer duration={1}>{label}</Shimmer> : label}
           </span>
           {failedCount > 0 ? (
             <span className="shrink-0 text-destructive text-xs">

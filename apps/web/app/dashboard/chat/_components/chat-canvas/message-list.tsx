@@ -73,9 +73,14 @@ import {
   AssistantActivityRenderItems,
 } from "./assistant-activity-stack";
 import { AssistantToolCard } from "./assistant-tool-card";
+import {
+  ActivityDisclosureProvider,
+  ActivityDisclosureScope,
+} from "./activity-disclosure-state";
 import { ArtifactOutputCard } from "./artifact-output-card";
 import {
   buildAssistantRenderSegments,
+  getRunningWorkflowBlockId,
   type AssistantTerminalBlock,
   type AssistantWorkflowBlock,
 } from "./assistant-render-segments";
@@ -504,14 +509,10 @@ function AssistantMessageBody({
       : null;
   const isWorkflowRunning = renderState.status === "running";
   const segments = buildAssistantRenderSegments(renderBlocks);
-  let lastWorkflowSegmentId: string | null = null;
-  for (let index = segments.length - 1; index >= 0; index -= 1) {
-    const segment = segments[index];
-    if (segment?.type === "workflow") {
-      lastWorkflowSegmentId = segment.id;
-      break;
-    }
-  }
+  const runningWorkflowBlockId = getRunningWorkflowBlockId(
+    segments,
+    isWorkflowRunning,
+  );
   const lastAnswerSegmentId = findLastAnswerSegmentId({
     segments,
     toolCalls: version.toolCalls,
@@ -539,12 +540,10 @@ function AssistantMessageBody({
             isToolOutputClaimingInProgress(toolCall.output)
         : false;
     }) ||
-    (isWorkflowRunning &&
-      segments.some((segment) =>
-        segment.type === "workflow"
-          ? segment.blocks.some((block) => block.type === "reasoning")
-          : false,
-      ));
+    renderBlocks.some(
+      (block) =>
+        block.type === "reasoning" && block.id === runningWorkflowBlockId,
+    );
   const fallbackPhase = resolveAssistantFallbackActivity({
     hasConcreteActiveActivity,
     isLive: renderState.shouldShowLiveThinking,
@@ -748,15 +747,13 @@ function AssistantMessageBody({
                   const toolCall = resolveWorkflowToolCall(entry.block);
                   return Boolean(
                     toolCall &&
-                      isGroupableToolCall(toolCall, resolvedConfirmations),
+                    isGroupableToolCall(toolCall, resolvedConfirmations),
                   );
                 },
               ).map((item) => {
-                const lastBlockIndex = segment.blocks.length - 1;
                 const isBlockRunning = (blockIndex: number) =>
-                  segment.id === lastWorkflowSegmentId &&
-                  isWorkflowRunning &&
-                  blockIndex === lastBlockIndex;
+                  runningWorkflowBlockId !== undefined &&
+                  segment.blocks[blockIndex]?.id === runningWorkflowBlockId;
                 if (item.kind === "tool-group") {
                   return (
                     <WorkflowToolGroup
@@ -987,15 +984,17 @@ function AssistantTimeline({
   workspaceId?: string | null;
 }) {
   return (
-    <AssistantMessageBody
-      artifactStatuses={artifactStatuses}
-      onArtifactPreview={onArtifactPreview}
-      onCitationClick={onCitationClick}
-      onWorkfileClick={onWorkfileClick}
-      renderState={renderState}
-      resolvedConfirmations={resolvedConfirmations}
-      workspaceId={workspaceId}
-    />
+    <ActivityDisclosureScope messageKey={renderState.renderKey}>
+      <AssistantMessageBody
+        artifactStatuses={artifactStatuses}
+        onArtifactPreview={onArtifactPreview}
+        onCitationClick={onCitationClick}
+        onWorkfileClick={onWorkfileClick}
+        renderState={renderState}
+        resolvedConfirmations={resolvedConfirmations}
+        workspaceId={workspaceId}
+      />
+    </ActivityDisclosureScope>
   );
 }
 
@@ -1480,7 +1479,15 @@ const MessageGroupItem = memo(function MessageGroupItem({
   );
 });
 
-export function MessageList({
+export function MessageList(props: MessageListProps) {
+  return (
+    <ActivityDisclosureProvider>
+      <MessageListContent {...props} />
+    </ActivityDisclosureProvider>
+  );
+}
+
+function MessageListContent({
   activeThreadRun = null,
   activeVersionByGroup = {},
   allSources = [],
@@ -1614,7 +1621,9 @@ export function MessageList({
           {collapsedHistoryCount > 0 ? (
             <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed bg-muted/20 px-4 py-3 text-center text-xs text-muted-foreground">
               <span>
-                {t("messageList.olderHidden", { count: collapsedHistoryCount })}
+                {t("messageList.olderHidden", {
+                  count: collapsedHistoryCount,
+                })}
               </span>
               <Button
                 onClick={() => setShowCollapsedHistory(true)}
