@@ -55,6 +55,10 @@ export type ChatThreadRunStopState = Pick<
   "status" | "errorCode" | "errorMessage"
 >;
 
+/** Heartbeat acknowledgement; never transports the run's payloads. */
+export type ChatThreadRunHeartbeat = ChatThreadRunStopState &
+  Pick<ChatThreadRunRecord, "heartbeatAt" | "updatedAt">;
+
 export type DurableRunRequestSnapshot =
   | (StreamThreadEventInput & { mode: "send" })
   | (RefreshThreadInput & { mode: "refresh" })

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { chatThreadRuns, db, messages } from "@sourceweft/db";
 import { logger } from "../../../shared/logger";
@@ -13,6 +14,7 @@ import type {
   ChatThreadRunRecord,
   ChatThreadRunStatus,
   ChatThreadRunStopState,
+  ChatThreadRunHeartbeat,
   DurableRunRequestSnapshot,
 } from "./types";
 import type { MessageRenderBlock } from "../turn/types";
@@ -137,6 +139,9 @@ async function syncCommittedArtifactBlocksToMessage(
     incoming: currentBlocks,
     authoritative: [snapshotBlocks],
   });
+  // The publication projection is usually unchanged while reasoning streams.
+  // Keep authority/conflict validation above, but avoid rewriting large metadata.
+  if (isDeepStrictEqual(currentBlocks, renderBlocks)) return;
   await tx
     .update(messages)
     .set({
@@ -530,7 +535,7 @@ export async function markChatThreadRunRunning(input: {
   return run;
 }
 
-export async function updateChatThreadRunProgress(input: {
+type ChatThreadRunProgressInput = {
   runId: string;
   teamId: string;
   workspaceId: string;
@@ -538,7 +543,18 @@ export async function updateChatThreadRunProgress(input: {
   assistantMessageId?: string | null;
   eventOffset?: number;
   snapshotJson?: ChatRunSnapshot;
-}) {
+};
+
+/** Write-only streaming path; persistence and locks match the full-record path. */
+export function updateChatThreadRunProgress(
+  input: ChatThreadRunProgressInput & { returnRecord: false },
+): Promise<void>;
+export function updateChatThreadRunProgress(
+  input: ChatThreadRunProgressInput & { returnRecord?: true },
+): Promise<ChatThreadRunRecord | null>;
+export async function updateChatThreadRunProgress(
+  input: ChatThreadRunProgressInput & { returnRecord?: boolean },
+): Promise<ChatThreadRunRecord | null | void> {
   const row = await db.transaction(async (tx) => {
     const context = await lockRunSnapshotContext(tx, input);
     if (!context || !RUNNER_PROGRESS_STATUSES.includes(context.runRow.status)) {
@@ -574,7 +590,7 @@ export async function updateChatThreadRunProgress(input: {
           }
         : {}),
     };
-    const [updated] = await tx
+    const mutation = tx
       .update(chatThreadRuns)
       .set(set)
       .where(
@@ -582,10 +598,15 @@ export async function updateChatThreadRunProgress(input: {
           eq(chatThreadRuns.id, context.runRow.id),
           eq(chatThreadRuns.status, context.runRow.status),
         ),
-      )
-      .returning();
-    if (!updated) {
-      return null;
+      );
+    // appendRunEvent consumes no row. Do not send the full snapshot/request
+    // back over the database connection after writing it.
+    let updated: ChatThreadRunRow | undefined;
+    if (input.returnRecord === false) {
+      await mutation;
+    } else {
+      [updated] = await mutation.returning();
+      if (!updated) return null;
     }
     if (snapshot) {
       await syncCommittedArtifactBlocksToMessage(tx, {
@@ -597,6 +618,7 @@ export async function updateChatThreadRunProgress(input: {
     return updated;
   });
 
+  if (input.returnRecord === false) return;
   return row ? mapRun(row) : null;
 }
 
@@ -1205,7 +1227,7 @@ export async function touchChatThreadRunHeartbeat(input: {
   runId: string;
   teamId: string;
   workspaceId: string;
-}) {
+}): Promise<ChatThreadRunHeartbeat | null> {
   const [row] = await db
     .update(chatThreadRuns)
     .set({
@@ -1220,7 +1242,19 @@ export async function touchChatThreadRunHeartbeat(input: {
         inArray(chatThreadRuns.status, ACTIVE_RUN_STATUSES),
       ),
     )
-    .returning();
+    .returning({
+      status: chatThreadRuns.status,
+      errorCode: chatThreadRuns.errorCode,
+      errorMessage: chatThreadRuns.errorMessage,
+      heartbeatAt: chatThreadRuns.heartbeatAt,
+      updatedAt: chatThreadRuns.updatedAt,
+    });
 
-  return row ? mapRun(row) : null;
+  return row
+    ? {
+        ...row,
+        heartbeatAt: row.heartbeatAt?.toISOString() ?? null,
+        updatedAt: row.updatedAt.toISOString(),
+      }
+    : null;
 }

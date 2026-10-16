@@ -1602,7 +1602,11 @@ export async function processThreadChatRunJob(
     });
   };
 
-  const applyRunProgress = async (updated: ChatThreadRunRecord | null) => {
+  const applyRunProgress = async (
+    updated:
+      | ChatThreadRunRecord
+      | Awaited<ReturnType<typeof durableChatRunService.heartbeat>>,
+  ) => {
     if (!updated || updated.status !== "running") {
       const reason =
         (await durableChatRunService.getRunStopError(run)) ??
@@ -1614,7 +1618,9 @@ export async function processThreadChatRunJob(
       abortTurn(reason);
       throw reason;
     }
-    run = updated;
+    // Heartbeats return only control/timestamp fields; preparation progress
+    // still returns the full record. Preserve the local run identity/payloads.
+    run = { ...run, ...updated };
   };
   const heartbeat = async () =>
     applyRunProgress(await durableChatRunService.heartbeat(run));

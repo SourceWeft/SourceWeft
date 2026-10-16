@@ -530,6 +530,7 @@ export class DurableChatRunService {
       workspaceId: input.run.workspaceId,
       eventOffset: offset,
       snapshotJson: input.snapshot,
+      returnRecord: false,
     });
   }
 
