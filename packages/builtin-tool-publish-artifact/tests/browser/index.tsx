@@ -34,7 +34,7 @@ createRoot(document.getElementById("root")!).render(
               role: "asset",
               url: "/report.pdf?artifactVersionId=version-1",
               downloadUrl: "/report.pdf?artifactVersionId=version-1&download=1",
-              byteLength: 45,
+              byteLength: 50,
             },
             {
               fileName: "source.json",
