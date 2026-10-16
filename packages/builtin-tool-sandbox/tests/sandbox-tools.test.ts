@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import { capabilityManifestSchema } from "@sourceweft/capability-contracts";
 import { agentToolInvocationConfig } from "@sourceweft/contracts/testing";
@@ -185,7 +186,7 @@ test("sandbox package owns tool manifest and runtime schemas", () => {
   );
   assert.match(
     sandboxToolDescriptions.execute,
-    /Never include SourceWeft DB-backed VFS logical paths such as \/files, \/kb, or \/skills/u,
+    /Never include SourceWeft DB-backed VFS logical paths such as \/files or \/kb/u,
   );
   assert.match(
     sandboxToolDescriptions.execute,
@@ -883,4 +884,279 @@ test("collect_sandbox_outputs forwards Host timeout and never persists late sand
     ),
     false,
   );
+});
+
+test("named artifact selectors require an immutable version and flat file name", () => {
+  const named = {
+    artifactId: "a",
+    artifactVersionId: "v1",
+    artifactFileName: "report.source.json",
+    sandboxPath: "/workspace/input/source.json",
+  };
+  assert.equal(
+    prepareSandboxWorkspaceSchema.safeParse({ files: [named] }).success,
+    true,
+  );
+  for (const file of [
+    { ...named, artifactId: undefined },
+    { ...named, artifactVersionId: undefined },
+    { ...named, artifactFileName: "../source.json" },
+    { ...named, artifactFileName: "folder/source.json" },
+    { ...named, sourcePath: "/files/source.json" },
+  ])
+    assert.equal(
+      prepareSandboxWorkspaceSchema.safeParse({ files: [file] }).success,
+      false,
+    );
+  assert.equal(
+    prepareSandboxWorkspaceSchema.safeParse({
+      files: [{ artifactId: "a", sandboxPath: named.sandboxPath }],
+    }).success,
+    true,
+  );
+});
+
+function namedPrepareHarness(
+  overrides: {
+    reader?: Parameters<typeof createSandboxTools>[0]["artifacts"];
+    limits?: Partial<SandboxRuntimeLimits>;
+  } = {},
+) {
+  const uploads: Array<{ path: string; bytes: Uint8Array }[]> = [];
+  let receipt: Record<string, unknown> | undefined;
+  const manager = {
+    providerForSandbox: () => ({ pathPolicy: TEST_SANDBOX_PATH_POLICY }),
+    beginToolOperation: async () =>
+      receipt
+        ? { kind: "replay", result: receipt }
+        : { kind: "run", operationId: "operation-1" },
+    getOrCreateThreadSandbox: async () => ({ id: "sandbox-1" }),
+    completeToolOperation: async (input: {
+      result: Record<string, unknown>;
+      status: string;
+    }) => {
+      if (input.status === "succeeded") receipt = input.result;
+    },
+    releaseThreadSandboxLease: async () => undefined,
+  };
+  const tools = createSandboxTools({
+    filesystem: {
+      readRaw: async () => {
+        throw new Error("must not read Workfiles");
+      },
+    } as never,
+    manager: manager as never,
+    context: TEST_CONTEXT,
+    limits: { ...TEST_LIMITS, ...overrides.limits },
+    artifacts: overrides.reader,
+    trustedHost: {
+      uploadCurrentFiles: async (files) => {
+        uploads.push([...files]);
+      },
+      downloadCurrentFile: async () => Buffer.from(""),
+    },
+  });
+  const prepare = tools.find(
+    (tool) => tool.name === "prepare_sandbox_workspace",
+  )!;
+  const invoke = async (files: unknown[], signal?: AbortSignal) => {
+    const result: unknown = await prepare.invoke(
+      prepareSandboxWorkspaceSchema.parse({ files }),
+      agentToolInvocationConfig(
+        {
+          toolCall: {
+            id: "named-prepare",
+            type: "tool_call" as const,
+            name: "prepare_sandbox_workspace",
+            args: {},
+          },
+        },
+        signal,
+      ),
+    );
+    return JSON.parse(
+      String(
+        result && typeof result === "object" && "content" in result
+          ? result.content
+          : result,
+      ),
+    );
+  };
+  return { uploads, invoke };
+}
+const namedSelector = {
+  artifactId: "a",
+  artifactVersionId: "v1",
+  artifactFileName: "report.source.json",
+  sandboxPath: "/workspace/input/report.source.json",
+};
+function namedResult(bytes = Buffer.from("private source")) {
+  return {
+    bytes,
+    fileName: "report.source.json",
+    artifactVersionId: "v1",
+    versionNo: 1,
+    contentDigest: `sha256:${createHash("sha256").update(bytes).digest("hex")}`,
+  };
+}
+
+test("named attachment staging returns exact editing identity, reauthorizes replay and never repeats upload", async () => {
+  let allowed = true;
+  const requests: unknown[] = [];
+  const harness = namedPrepareHarness({
+    reader: {
+      readPrimaryBytes: async () => {
+        throw new Error("must not fallback to primary");
+      },
+      readVersionFileBytes: async (input) => {
+        requests.push(input);
+        return allowed ? namedResult() : null;
+      },
+    },
+  });
+  const result = await harness.invoke([namedSelector]);
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.files[0].sourceArtifact, {
+    artifactId: "a",
+    artifactVersionId: "v1",
+    versionNo: 1,
+    fileName: "report.source.json",
+    contentDigest: namedResult().contentDigest,
+  });
+  assert.equal(harness.uploads.length, 1);
+  assert.equal(
+    Buffer.from(harness.uploads[0]![0]!.bytes).toString(),
+    "private source",
+  );
+  assert.doesNotMatch(
+    JSON.stringify(result),
+    /storageKey|storageBucket|private source|https?:/,
+  );
+  assert.equal((await harness.invoke([namedSelector])).ok, true);
+  assert.equal(requests.length, 2);
+  assert.equal(harness.uploads.length, 1);
+  allowed = false;
+  assert.equal(
+    (await harness.invoke([namedSelector])).code,
+    "SANDBOX_ARTIFACT_NOT_FOUND",
+  );
+  assert.equal(requests.length, 3);
+  assert.equal(harness.uploads.length, 1);
+});
+
+test("named sources fail closed without their reader, on a missing source or wrong returned version", async () => {
+  for (const reader of [
+    undefined,
+    {
+      readPrimaryBytes: async () => {
+        throw new Error("no fallback");
+      },
+    },
+    {
+      readPrimaryBytes: async () => null,
+      readVersionFileBytes: async () => null,
+    },
+    {
+      readPrimaryBytes: async () => null,
+      readVersionFileBytes: async () => ({
+        ...namedResult(),
+        artifactVersionId: "v2",
+      }),
+    },
+  ]) {
+    const harness = namedPrepareHarness({ reader });
+    assert.equal((await harness.invoke([namedSelector])).ok, false);
+    assert.equal(harness.uploads.length, 0);
+  }
+});
+
+test("named sources honor host preparation budgets and canceled reads never upload", async () => {
+  const budgets: number[] = [];
+  const oversized = namedPrepareHarness({
+    limits: { maxPrepareFileBytes: 4 },
+    reader: {
+      readPrimaryBytes: async () => null,
+      readVersionFileBytes: async ({ maxBytes }) => {
+        budgets.push(maxBytes);
+        return namedResult(Buffer.from("12345"));
+      },
+    },
+  });
+  assert.equal((await oversized.invoke([namedSelector])).ok, false);
+  assert.deepEqual(budgets, [4]);
+  assert.equal(oversized.uploads.length, 0);
+  const controller = new AbortController();
+  const canceled = namedPrepareHarness({
+    reader: {
+      readPrimaryBytes: async () => null,
+      readVersionFileBytes: async ({ signal }) => {
+        assert.equal(signal, controller.signal);
+        controller.abort(new Error("cancel named source"));
+        return namedResult();
+      },
+    },
+  });
+  await assert.rejects(
+    canceled.invoke([namedSelector], controller.signal),
+    /cancel named source/,
+  );
+  assert.equal(canceled.uploads.length, 0);
+});
+
+test("primary artifact staging remains available without a named attachment reader", async () => {
+  const harness = namedPrepareHarness({
+    reader: { readPrimaryBytes: async () => ({ bytes: Buffer.from("image") }) },
+  });
+  assert.equal(
+    (
+      await harness.invoke([
+        { artifactId: "a", sandboxPath: "/workspace/input/image.png" },
+      ])
+    ).ok,
+    true,
+  );
+  assert.equal(harness.uploads.length, 1);
+});
+
+test("named source readers cannot return invalid version numbers or forged content digests", async () => {
+  for (const change of [
+    { versionNo: 0 },
+    { versionNo: 1.5 },
+    { contentDigest: "not-a-digest" },
+    { contentDigest: `sha256:${"b".repeat(64)}` },
+    { fileName: "other.json" },
+  ]) {
+    const harness = namedPrepareHarness({
+      reader: {
+        readPrimaryBytes: async () => null,
+        readVersionFileBytes: async () => ({ ...namedResult(), ...change }),
+      },
+    });
+    assert.equal(
+      (await harness.invoke([namedSelector])).code,
+      "SANDBOX_ARTIFACT_SOURCE_INVALID",
+    );
+    assert.equal(harness.uploads.length, 0);
+  }
+});
+
+test("named sources share the remaining preparation budget with primary artifacts", async () => {
+  const budgets: number[] = [];
+  const harness = namedPrepareHarness({
+    limits: { maxPrepareFileBytes: 10, maxPrepareTotalBytes: 6 },
+    reader: {
+      readPrimaryBytes: async () => ({ bytes: Buffer.from("1234") }),
+      readVersionFileBytes: async ({ maxBytes }) => {
+        budgets.push(maxBytes);
+        return namedResult(Buffer.from("567"));
+      },
+    },
+  });
+  const result = await harness.invoke([
+    { artifactId: "image", sandboxPath: "/workspace/input/image.png" },
+    namedSelector,
+  ]);
+  assert.equal(result.ok, false);
+  assert.deepEqual(budgets, [2]);
+  assert.equal(harness.uploads.length, 0);
 });

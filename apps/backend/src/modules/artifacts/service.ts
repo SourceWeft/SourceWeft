@@ -5,6 +5,7 @@ import {
 } from "@sourceweft/contracts/artifact-urls";
 import {
   resolveArtifactVersionFile,
+  resolveArtifactVersionAttachment,
   readArtifactVersionFile,
   projectArtifactVersionFiles,
 } from "./version-files";
@@ -37,6 +38,8 @@ import {
   deleteArtifactObject,
   deleteArtifactObjectsByPrefix,
   downloadArtifactObject,
+  downloadFileObject,
+  getContentStorageBucketName,
   downloadArtifactObjectRange,
   downloadArtifactObjectWithMetadata,
 } from "../sources/storage";
@@ -981,6 +984,59 @@ export class ContentArtifactsService {
           : null,
       executionPolicy:
         file.role === "primary" ? handler?.executionPolicy : undefined,
+    };
+  }
+
+  /** Host-only attachment recovery for sandbox authoring; not a public byte route. */
+  async readArtifactVersionAttachment(input: {
+    workspaceId: string;
+    artifactId: string;
+    artifactVersionId: string;
+    fileName: string;
+    userId: string;
+    maxBytes: number;
+    signal?: AbortSignal;
+  }) {
+    input.signal?.throwIfAborted();
+    const { workspace, version } =
+      await this.requireViewableArtifactVersion(input);
+    const file = resolveArtifactVersionAttachment({
+      filesJson: version.filesJson,
+      workspaceId: workspace.id,
+      artifactId: version.id,
+      fileName: input.fileName,
+    });
+    const maxBytes = Math.min(
+      input.maxBytes,
+      ARTIFACT_STORAGE_MAX_DOWNLOAD_BYTES,
+    );
+    if (
+      !Number.isSafeInteger(maxBytes) ||
+      maxBytes <= 0 ||
+      file.byteLength > maxBytes
+    ) {
+      throw new ContentError(
+        413,
+        "ARTIFACT_FILE_TOO_LARGE",
+        "The version file exceeds the sandbox preparation limit",
+      );
+    }
+    input.signal?.throwIfAborted();
+    const result = await readArtifactVersionFile(file, ({ bucket, key }) =>
+      downloadFileObject({
+        bucket: bucket || getContentStorageBucketName(),
+        key,
+        maxBytes,
+        signal: input.signal,
+      }),
+    );
+    input.signal?.throwIfAborted();
+    return {
+      bytes: result.body,
+      fileName: result.fileName,
+      artifactVersionId: version.versionId,
+      versionNo: version.versionNo,
+      contentDigest: file.contentDigest,
     };
   }
 

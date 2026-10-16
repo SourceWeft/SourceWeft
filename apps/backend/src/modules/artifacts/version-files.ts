@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { ArtifactResource } from "@sourceweft/contracts/artifact-urls";
 import {
   parseArtifactVersionFiles,
+  artifactFileNameSchema,
   type ArtifactVersionFile,
 } from "@sourceweft/contracts/artifact-version-files";
 import { ContentError } from "../content/errors";
@@ -28,6 +29,33 @@ export function resolveArtifactVersionFile(input: {
         return false;
     }
   });
+  if (
+    !file ||
+    !file.storageKey.startsWith(
+      `workspaces/${input.workspaceId}/artifacts/${input.artifactId}/`,
+    )
+  ) {
+    throw new ContentError(
+      404,
+      "ARTIFACT_VERSION_FILE_NOT_FOUND",
+      "This version has no authorized file for this request",
+    );
+  }
+  return file;
+}
+
+/** Internal authoring reader only. Never use this selector on HTTP/share routes. */
+export function resolveArtifactVersionAttachment(input: {
+  filesJson: unknown;
+  workspaceId: string;
+  artifactId: string;
+  fileName: string;
+}): ArtifactVersionFile {
+  const name = artifactFileNameSchema.safeParse(input.fileName);
+  const manifest = parseArtifactVersionFiles(input.filesJson);
+  const file = name.success
+    ? manifest?.files.find((item) => item.fileName === name.data)
+    : undefined;
   if (
     !file ||
     !file.storageKey.startsWith(

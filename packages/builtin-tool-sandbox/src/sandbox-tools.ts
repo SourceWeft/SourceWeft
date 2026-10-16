@@ -8,14 +8,15 @@ import {
   type SandboxProviderPathPolicy,
 } from "./runtime/types";
 import { z } from "zod";
+import { artifactFileNameSchema } from "@sourceweft/contracts/artifact-version-files";
 
 function formatRoots(roots: readonly string[]) {
   return roots.join(", ");
 }
 
 export const sandboxToolDescriptions = {
-  prepareSandboxWorkspace: `Materialize explicitly selected SourceWeft DB-backed VFS ${SOURCEWEFT_WORK_ROOT} Workfile content as ordinary provider sandbox files under provider-allowed prepare target roots. Put generated code, data files, plans, and QA notes in ${SOURCEWEFT_WORK_ROOT} first, then prepare only files needed for sandbox execution. /kb and /skills are SourceWeft DB-backed VFS roots, not transfer sources. A file entry may instead name a ready workspace artifact by artifactId to stage its primary bytes (for example a generated image) into the sandbox.`,
-  execute: `Execute a shell command in the provider sandbox filesystem. Never include SourceWeft DB-backed VFS logical paths such as ${SOURCEWEFT_WORK_ROOT}, /kb, or /skills in an execute command; they are not sandbox paths even for mkdir, ls, cat, test, node, python, or shell redirection. Use prepare_sandbox_workspace to materialize selected Files under provider sandbox paths before execution. Files that SourceWeft must later read, inspect, collect, or publish must be written under the current provider read/write roots.`,
+  prepareSandboxWorkspace: `Materialize explicitly selected SourceWeft DB-backed VFS ${SOURCEWEFT_WORK_ROOT} Workfile content as ordinary provider sandbox files under provider-allowed prepare target roots. Put generated code, data files, plans, and QA notes in ${SOURCEWEFT_WORK_ROOT} first, then prepare only files needed for sandbox execution. /kb and /skills are SourceWeft DB-backed VFS roots, not transfer sources. A file entry may instead name a ready workspace artifact by artifactId to stage its primary bytes (for example a generated image) into the sandbox. To restore a named attachment, including a private editing source, provide artifactId, artifactVersionId and artifactFileName. Preserve the returned versionNo as expectedVersionNo when republishing; never infer authoring source from HTML.`,
+  execute: `Execute a shell command in the provider sandbox filesystem. Never include SourceWeft DB-backed VFS logical paths such as ${SOURCEWEFT_WORK_ROOT} or /kb in an execute command; they are not sandbox paths even for mkdir, ls, cat, test, node, python, or shell redirection. Use prepare_sandbox_workspace to materialize selected Files under provider sandbox paths before execution. /skills scripts may be executed at their actual sandbox paths only after the runtime confirms they are staged. If staging is unavailable, fail rather than guessing a script path. Files that SourceWeft must later read, inspect, collect, or publish must be written under the current provider read/write roots.`,
   collectSandboxOutputs: `Persist explicitly selected provider sandbox text outputs from provider-allowed collect source roots into SourceWeft DB-backed VFS ${SOURCEWEFT_WORK_ROOT} Files. Do not use this tool for binary outputs such as .pptx, .pdf, .zip, or .xlsx files; publish binary outputs with publish_artifact using artifactType=slides for PPTX decks or artifactType=file for generic downloadable files.`,
 } as const;
 
@@ -52,8 +53,18 @@ export const prepareSandboxWorkspaceSchema = z.object({
            */
           artifactId: z.string().min(1).optional(),
           artifactVersionId: z.string().min(1).optional(),
+          artifactFileName: artifactFileNameSchema.optional(),
           sandboxPath: z.string().min(1),
         })
+        .refine(
+          (file) =>
+            !file.artifactFileName ||
+            Boolean(file.artifactId && file.artifactVersionId),
+          {
+            message:
+              "artifactFileName requires artifactId and artifactVersionId",
+          },
+        )
         .refine((file) => !file.artifactVersionId || Boolean(file.artifactId), {
           message: "artifactVersionId requires artifactId",
         })

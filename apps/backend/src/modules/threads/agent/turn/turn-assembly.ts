@@ -143,12 +143,13 @@ export function buildFilesystemBackend(
     teamId: prepared.workspace.organizationId,
     workspaceId: prepared.workspace.id,
     sourceIds: prepared.sourceIds,
-    validateScope: () => assertThreadSourceSelection({
-      workspaceId: prepared.workspace.id,
-      threadId: prepared.thread.id,
-      userId: prepared.userId,
-      revision: prepared.sourceSelectionRevision,
-    }),
+    validateScope: () =>
+      assertThreadSourceSelection({
+        workspaceId: prepared.workspace.id,
+        threadId: prepared.thread.id,
+        userId: prepared.userId,
+        revision: prepared.sourceSelectionRevision,
+      }),
     citationRegistry: runtime.citationRegistry,
   });
 
@@ -209,7 +210,8 @@ export function filesystemMountsForPrompt(input: {
         ? {
             label: "Files",
             citable: true,
-            citationPolicy: "Use read_document, search_files or view_image for versioned File citations. These are references to task files, not Source Library evidence.",
+            citationPolicy:
+              "Use read_document, search_files or view_image for versioned File citations. These are references to task files, not Source Library evidence.",
             persisted: true,
             userVisible: true,
             threadScoped: false,
@@ -715,6 +717,36 @@ export async function buildSandboxRuntimeForPreparedTurn(input: {
             ),
           },
           artifacts: {
+            readVersionFileBytes: async ({
+              artifactId,
+              artifactVersionId,
+              fileName,
+              maxBytes,
+              signal,
+            }) => {
+              try {
+                const { contentArtifactsService } =
+                  await import("../../../artifacts");
+                return await contentArtifactsService.readArtifactVersionAttachment(
+                  {
+                    workspaceId: prepared.workspace.id,
+                    userId: prepared.userId,
+                    artifactId,
+                    artifactVersionId,
+                    fileName,
+                    maxBytes,
+                    signal,
+                  },
+                );
+              } catch (error) {
+                if (
+                  error instanceof ContentError &&
+                  (error.statusCode === 404 || error.statusCode === 403)
+                )
+                  return null;
+                throw error;
+              }
+            },
             // Workspace-scoped on purpose: an artifactId arriving from tool
             // input can only reach rows this turn's workspace could already see.
             readPrimaryBytes: async ({ artifactId, artifactVersionId }) => {
@@ -807,25 +839,98 @@ export async function buildThreadAgentAssembly(
     promptFilesystemMounts,
   );
   const fileImages = new FileImageContext();
-  const fileRoot = filesystemBackend.localFiles ? sandboxRuntime?.pathPolicy.workspaceRoot : "/files";
-  const fileScopeId = JSON.stringify([prepared.workspace.organizationId, prepared.workspace.id, prepared.thread.id]);
-  const fileReader = fileRoot ? createFileReader({
-    backend, root: fileRoot, backendKind: filesystemBackend.localFiles ? "local_fs" : "cloud_vfs", scopeId: fileScopeId, signal: abortSignal,
-    download: filesystemBackend.localFiles
-      ? (path, signal) => sandboxRuntime!.trustedHost.downloadCurrentFile({ sandboxPath: path, signal })
-      : async (path, signal) => { const { file, bytes } = await workingFilesService.readBytes({ workspaceId: prepared.workspace.id, threadId: prepared.thread.id, userId: prepared.userId, path, signal }); return { bytes, metadata: { fileId: file.id, origin: file.origin, revision: `sha256:${file.contentHash}` } }; },
-  }) : null;
-  const fileTools = fileReader && fileRoot ? [
-    createViewImageTool({ read: fileReader, images: fileImages, signal: abortSignal, citationRegistry: filesystemBackend.citationRegistry, supportsImageInput: (prepared.chatProfile.configJson as Record<string, unknown> | null)?.supportsImageInput === true }),
-    ...createFileDocumentTools({ read: fileReader, backend, root: fileRoot, scopeId: fileScopeId, signal: abortSignal, citationRegistry: filesystemBackend.citationRegistry,
-      nativeSearch: filesystemBackend.localFiles ? async (paths, query, signal) => {
-        const target = prepared.thread.executionTarget;
-        if (target?.kind !== "local" || !sandboxRuntime) throw new ContentError(409, "LOCAL_FILES_UNAVAILABLE", "The bound computer is unavailable.");
-        const result = await sandboxRuntime.backend.searchNativeFiles(paths, query, { literal: true, ignoreCase: true, firstPerFile: true, signal });
-        return { matchedPaths: result.matches.map((match) => match.path), visitedPaths: result.visitedPaths, skipped: result.skipped };
-      } : undefined,
-    }),
-  ] : [];
+  const fileRoot = filesystemBackend.localFiles
+    ? sandboxRuntime?.pathPolicy.workspaceRoot
+    : "/files";
+  const fileScopeId = JSON.stringify([
+    prepared.workspace.organizationId,
+    prepared.workspace.id,
+    prepared.thread.id,
+  ]);
+  const fileReader = fileRoot
+    ? createFileReader({
+        backend,
+        root: fileRoot,
+        backendKind: filesystemBackend.localFiles ? "local_fs" : "cloud_vfs",
+        scopeId: fileScopeId,
+        signal: abortSignal,
+        download: filesystemBackend.localFiles
+          ? (path, signal) =>
+              sandboxRuntime!.trustedHost.downloadCurrentFile({
+                sandboxPath: path,
+                signal,
+              })
+          : async (path, signal) => {
+              const { file, bytes } = await workingFilesService.readBytes({
+                workspaceId: prepared.workspace.id,
+                threadId: prepared.thread.id,
+                userId: prepared.userId,
+                path,
+                signal,
+              });
+              return {
+                bytes,
+                metadata: {
+                  fileId: file.id,
+                  origin: file.origin,
+                  revision: `sha256:${file.contentHash}`,
+                },
+              };
+            },
+      })
+    : null;
+  const fileTools =
+    fileReader && fileRoot
+      ? [
+          createViewImageTool({
+            read: fileReader,
+            images: fileImages,
+            signal: abortSignal,
+            citationRegistry: filesystemBackend.citationRegistry,
+            supportsImageInput:
+              (
+                prepared.chatProfile.configJson as Record<
+                  string,
+                  unknown
+                > | null
+              )?.supportsImageInput === true,
+          }),
+          ...createFileDocumentTools({
+            read: fileReader,
+            backend,
+            root: fileRoot,
+            scopeId: fileScopeId,
+            signal: abortSignal,
+            citationRegistry: filesystemBackend.citationRegistry,
+            nativeSearch: filesystemBackend.localFiles
+              ? async (paths, query, signal) => {
+                  const target = prepared.thread.executionTarget;
+                  if (target?.kind !== "local" || !sandboxRuntime)
+                    throw new ContentError(
+                      409,
+                      "LOCAL_FILES_UNAVAILABLE",
+                      "The bound computer is unavailable.",
+                    );
+                  const result = await sandboxRuntime.backend.searchNativeFiles(
+                    paths,
+                    query,
+                    {
+                      literal: true,
+                      ignoreCase: true,
+                      firstPerFile: true,
+                      signal,
+                    },
+                  );
+                  return {
+                    matchedPaths: result.matches.map((match) => match.path),
+                    visitedPaths: result.visitedPaths,
+                    skipped: result.skipped,
+                  };
+                }
+              : undefined,
+          }),
+        ]
+      : [];
   // A persona-owned thread binds only the persona's allowlisted tools. The
   // permissions already deny registry tools it may not use; this pass also drops
   // connector, MCP, and sandbox tools, which are bound under their own names.
@@ -900,8 +1005,9 @@ export async function buildThreadAgentAssembly(
   }
 
   const skills = prepared.enabledSkills.length > 0 ? ["/skills/"] : undefined;
-  const childMiddleware = (subagentType: string) =>
-    [fileImages.middleware(), ...createSourceWeftSubagentMiddlewareStack({
+  const childMiddleware = (subagentType: string) => [
+    fileImages.middleware(),
+    ...createSourceWeftSubagentMiddlewareStack({
       backend,
       chatProfileConfig: prepared.chatProfile.configJson,
       model,
@@ -915,7 +1021,8 @@ export async function buildThreadAgentAssembly(
         userMessageId: prepared.userMessage.id,
         subagentType,
       },
-    })];
+    }),
+  ];
 
   // Define general-purpose explicitly so child retries, limits, summary policy,
   // billing model, skills, HITL, and observability do not depend on Deep Agents'
