@@ -28,6 +28,7 @@ vi.mock("../../modules/artifacts", () => ({
   },
 }));
 
+import { ContentError } from "../../modules/content/errors";
 import { securityHeadersMiddleware } from "../middleware/security-headers";
 import { registerPublicShareRoutes } from "./public-shares";
 
@@ -178,4 +179,33 @@ test("public exact-version asset downloads retain live-share authorization", asy
     404,
   );
   assert.equal(mocks.getSharedVersionFile.mock.calls.length, 0);
+});
+
+test("share tokens never reach private authoring sources, even for the live version", async () => {
+  // The member-only source-file reader lives on the workspace artifact routes
+  // and must not be mirrored here; a share token gets the generic 404 and no
+  // artifact service method runs.
+  for (const path of [
+    "/v1/public/shares/tok/versions/version-1/source-files/report.source.json",
+    "/v1/public/shares/tok/source-files/report.source.json",
+    "/v1/public/shares/tok/assets/report.source.json?artifactVersionId=version-1",
+  ]) {
+    mocks.getSharedVersionFile.mockRejectedValue(
+      new ContentError(
+        404,
+        "ARTIFACT_VERSION_FILE_NOT_FOUND",
+        "This version has no authorized file for this request",
+      ),
+    );
+    const response = await createTestApp().request(`http://localhost${path}`);
+    assert.equal(response.status, 404, path);
+  }
+  assert.equal(mocks.getSharedArtifactFile.mock.calls.length, 0);
+  assert.equal(mocks.getSharedArtifactVersionMediaBytes.mock.calls.length, 0);
+  // Only the asset path is a real route; its selector refuses source files.
+  assert.equal(mocks.getSharedVersionFile.mock.calls.length, 1);
+  assert.deepEqual(mocks.getSharedVersionFile.mock.calls[0]?.[2], {
+    kind: "asset",
+    fileName: "report.source.json",
+  });
 });

@@ -2185,6 +2185,17 @@
       "citedVerified": "{path} · Cited version verified",
       "fileUnavailable": "File is unavailable."
     },
+    "evidence": {
+      "title": "Evidence ({count})",
+      "open": "Open evidence {id}",
+      "unresolvableHint": "This reference cannot be opened; only its text is kept.",
+      "kind": {
+        "chunk": "Source library",
+        "file": "File",
+        "external": "Web",
+        "unresolvable": "Unresolvable"
+      }
+    },
     "location": {
       "page": "Page {page}",
       "slide": "Slide {slide}",

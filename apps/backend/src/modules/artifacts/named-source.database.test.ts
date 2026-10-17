@@ -298,3 +298,102 @@ test("workspace authoring access rechecks membership, artifact/version identity 
       (error as { code: string }).code === "ARTIFACT_VERSION_FILE_NOT_FOUND",
   );
 });
+
+test("member source-file reads serve the private report source to viewers only and never other manifest entries", async () => {
+  const published = await writer.publishArtifact({
+    context,
+    spec: spec("member read"),
+  });
+  const request = {
+    workspaceId: context.workspaceId,
+    userId: context.userId,
+    artifactId: published.artifactId,
+    artifactVersionId: published.versionId,
+    fileName: "report.source.json",
+  };
+  const fileNotFound = (error: unknown) =>
+    (error as { statusCode: number; code: string }).statusCode === 404 &&
+    (error as { code: string }).code === "ARTIFACT_VERSION_FILE_NOT_FOUND";
+  const notFound = (error: unknown) =>
+    (error as { statusCode: number }).statusCode === 404;
+
+  const read = await service.readArtifactVersionSourceFile(request);
+  assert.deepEqual(JSON.parse(Buffer.from(read.bytes).toString()), {
+    label: "member read",
+  });
+  assert.equal(read.artifactVersionId, published.versionId);
+  assert.equal(read.fileName, "report.source.json");
+  assert.doesNotMatch(
+    JSON.stringify({ ...read, bytes: undefined }),
+    /storageKey|storageBucket/,
+  );
+
+  // Private artifact: another workspace member is not a viewer yet.
+  await assert.rejects(
+    service.readArtifactVersionSourceFile({ ...request, userId: otherUserId }),
+    notFound,
+  );
+  await db.db
+    .update(db.artifacts)
+    .set({ visibility: "workspace" })
+    .where(eq(db.artifacts.id, published.artifactId));
+  assert.ok(
+    (
+      await service.readArtifactVersionSourceFile({
+        ...request,
+        userId: otherUserId,
+      })
+    ).bytes.length > 0,
+  );
+  // Non-members and other workspaces stay out.
+  await assert.rejects(
+    service.readArtifactVersionSourceFile({
+      ...request,
+      userId: randomUUID(),
+    }),
+    notFound,
+  );
+  await assert.rejects(
+    service.readArtifactVersionSourceFile({
+      ...request,
+      workspaceId: randomUUID(),
+    }),
+    notFound,
+  );
+  // Other manifest entries are invisible through this reader, including the
+  // private asset the host-only attachment reader can still recover.
+  for (const fileName of ["private-notes.txt", "report.md", "missing.json"]) {
+    await assert.rejects(
+      service.readArtifactVersionSourceFile({ ...request, fileName }),
+      fileNotFound,
+      fileName,
+    );
+  }
+  assert.equal(
+    Buffer.from(
+      (
+        await service.readArtifactVersionAttachment({
+          ...request,
+          fileName: "private-notes.txt",
+          maxBytes: 1024,
+        })
+      ).bytes,
+    ).toString(),
+    "member read",
+  );
+  // Tampered storage is refused, not served.
+  const version = await repository.findReadyArtifactVersionRecord({
+    ...context,
+    artifactId: published.artifactId,
+    artifactVersionId: published.versionId,
+  });
+  const file = version!.filesJson!.files.find(
+    (file) => file.fileName === request.fileName,
+  )!;
+  objects.set(file.storageKey, Buffer.from("tampered member source"));
+  await assert.rejects(
+    service.readArtifactVersionSourceFile(request),
+    (error: unknown) =>
+      (error as { code: string }).code === "ARTIFACT_FILE_INTEGRITY_MISMATCH",
+  );
+});

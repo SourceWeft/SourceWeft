@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   getSessionUserId: vi.fn(),
   listArtifacts: vi.fn(),
   listArtifactSummaries: vi.fn(),
+  readArtifactVersionSourceFile: vi.fn(),
   requireSession: vi.fn(),
 }));
 
@@ -30,6 +31,7 @@ vi.mock("../../../modules/artifacts", () => ({
     getArtifactVersionMediaBytes: mocks.getArtifactVersionMediaBytes,
     listArtifacts: mocks.listArtifacts,
     listArtifactSummaries: mocks.listArtifactSummaries,
+    readArtifactVersionSourceFile: mocks.readArtifactVersionSourceFile,
   },
 }));
 
@@ -37,6 +39,7 @@ vi.mock("../../../modules/sharing", () => ({
   sharingService: {},
 }));
 
+import { ContentError } from "../../../modules/content/errors";
 import { registerArtifactRoutes } from "./artifacts";
 
 const createTestApp = () => createWorkspaceRouteTestApp(registerArtifactRoutes);
@@ -245,4 +248,70 @@ test("authenticated exact-version assets support explicit attachment downloads",
     "attachment; filename*=UTF-8''report.pdf",
   );
   assert.equal(response.headers.get("content-type"), "application/pdf");
+});
+
+const sourceFileUrl =
+  "/v1/workspaces/workspace-1/artifacts/artifact-1/versions/version-1/source-files/report.source.json";
+
+test("member source-file route returns the exact private bytes as uncacheable JSON", async () => {
+  const bytes = Buffer.from('{"sources":[{"id":"S1"}]}');
+  mocks.readArtifactVersionSourceFile.mockResolvedValue({
+    bytes,
+    fileName: "report.source.json",
+    artifactVersionId: "version-1",
+    versionNo: 1,
+    contentDigest: "sha256:ignored",
+  });
+  const response = await createTestApp().request(sourceFileUrl);
+  assert.equal(response.status, 200);
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()), bytes);
+  assert.equal(response.headers.get("content-type"), "application/json");
+  assert.equal(response.headers.get("content-length"), String(bytes.length));
+  assert.equal(response.headers.get("cache-control"), "private, no-store");
+  assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(response.headers.get("referrer-policy"), "no-referrer");
+  assert.equal(response.headers.get("content-disposition"), null);
+  assert.deepEqual(mocks.readArtifactVersionSourceFile.mock.calls[0]?.[0], {
+    workspaceId: "workspace-1",
+    artifactId: "artifact-1",
+    artifactVersionId: "version-1",
+    fileName: "report.source.json",
+    userId: "user-1",
+  });
+});
+
+test("member source-file route relays the service's existence-hiding 404 and integrity 409", async () => {
+  mocks.readArtifactVersionSourceFile.mockRejectedValue(
+    new ContentError(
+      404,
+      "ARTIFACT_VERSION_FILE_NOT_FOUND",
+      "This version has no authorized file for this request",
+    ),
+  );
+  let response = await createTestApp().request(sourceFileUrl);
+  assert.equal(response.status, 404);
+  assert.equal(
+    ((await response.json()) as { code: string }).code,
+    "ARTIFACT_VERSION_FILE_NOT_FOUND",
+  );
+  mocks.readArtifactVersionSourceFile.mockRejectedValue(
+    new ContentError(
+      409,
+      "ARTIFACT_FILE_INTEGRITY_MISMATCH",
+      "The stored file does not match its published version",
+    ),
+  );
+  response = await createTestApp().request(sourceFileUrl);
+  assert.equal(response.status, 409);
+  assert.equal(
+    ((await response.json()) as { code: string }).code,
+    "ARTIFACT_FILE_INTEGRITY_MISMATCH",
+  );
+});
+
+test("member source-file route requires a session before touching the service", async () => {
+  mocks.requireSession.mockResolvedValue(null);
+  const response = await createTestApp().request(sourceFileUrl);
+  assert.equal(response.status, 401);
+  assert.equal(mocks.readArtifactVersionSourceFile.mock.calls.length, 0);
 });

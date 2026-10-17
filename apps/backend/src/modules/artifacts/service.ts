@@ -1,4 +1,7 @@
-import { parseArtifactVersionFiles } from "@sourceweft/contracts/artifact-version-files";
+import {
+  parseArtifactVersionFiles,
+  type ArtifactVersionFile,
+} from "@sourceweft/contracts/artifact-version-files";
 import {
   buildArtifactProxyUrl,
   type ArtifactResource,
@@ -30,6 +33,7 @@ import type {
   ArtifactViewHandler,
 } from "@sourceweft/contracts";
 import { artifactVersionMediaProjectionSchema } from "@sourceweft/contracts";
+import { config } from "../../shared/config";
 import { requireContentWorkspace } from "../workspace/guards";
 import { workspaceService } from "../workspace";
 import { canViewContent } from "../workspace/content-visibility";
@@ -580,6 +584,17 @@ function decodeArtifactCursor(cursor: string | undefined) {
   }
 }
 
+/**
+ * Private authoring files a workspace member may read back over HTTP. Only the
+ * report evidence source today; any addition must stay `role: "source"` JSON
+ * and must be argued for in the evidence-links contract first.
+ */
+export const MEMBER_READABLE_SOURCE_FILES = ["report.source.json"] as const;
+
+function isMemberReadableSourceFileName(fileName: string) {
+  return (MEMBER_READABLE_SOURCE_FILES as readonly string[]).includes(fileName);
+}
+
 export class ContentArtifactsService {
   /**
    * Resolves one artifact for a member, enforcing both the workspace boundary
@@ -997,6 +1012,54 @@ export class ContentArtifactsService {
     maxBytes: number;
     signal?: AbortSignal;
   }) {
+    return this.readPrivateVersionFile(input, () => true);
+  }
+
+  /**
+   * Member-only reader behind
+   * `GET /artifacts/:id/versions/:versionId/source-files/:fileName`. It is the
+   * single HTTP exception to "private authoring never leaves the host": the
+   * caller must already view the exact version (workspace membership plus
+   * content visibility), the name must sit in `MEMBER_READABLE_SOURCE_FILES`,
+   * and the manifest entry must be a JSON `source` file. Every other outcome is
+   * the same 404 the attachment reader uses so existence is never revealed.
+   * Never wire this onto a share-token route.
+   */
+  async readArtifactVersionSourceFile(input: {
+    workspaceId: string;
+    artifactId: string;
+    artifactVersionId: string;
+    fileName: string;
+    userId: string;
+    signal?: AbortSignal;
+  }) {
+    if (!isMemberReadableSourceFileName(input.fileName)) {
+      throw new ContentError(
+        404,
+        "ARTIFACT_VERSION_FILE_NOT_FOUND",
+        "This version has no authorized file for this request",
+      );
+    }
+    return this.readPrivateVersionFile(
+      { ...input, maxBytes: config.sandbox.maxPrepareFileBytes },
+      (file) =>
+        file.role === "source" &&
+        normalizeMimeType(file.contentType) === "application/json",
+    );
+  }
+
+  private async readPrivateVersionFile(
+    input: {
+      workspaceId: string;
+      artifactId: string;
+      artifactVersionId: string;
+      fileName: string;
+      userId: string;
+      maxBytes: number;
+      signal?: AbortSignal;
+    },
+    accept: (file: ArtifactVersionFile) => boolean,
+  ) {
     input.signal?.throwIfAborted();
     const { workspace, version } =
       await this.requireViewableArtifactVersion(input);
@@ -1006,6 +1069,13 @@ export class ContentArtifactsService {
       artifactId: version.id,
       fileName: input.fileName,
     });
+    if (!accept(file)) {
+      throw new ContentError(
+        404,
+        "ARTIFACT_VERSION_FILE_NOT_FOUND",
+        "This version has no authorized file for this request",
+      );
+    }
     const maxBytes = Math.min(
       input.maxBytes,
       ARTIFACT_STORAGE_MAX_DOWNLOAD_BYTES,

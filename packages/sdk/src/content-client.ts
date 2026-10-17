@@ -282,6 +282,23 @@ export class ContentClient {
     );
   }
 
+  /**
+   * Member-only read of a private authoring source (for example
+   * `report.source.json`) for one exact version. Resolves to the parsed JSON
+   * document; a missing, non-allowlisted or non-viewable file rejects with the
+   * 404 `HttpClientError` the API answers. Never available through share links.
+   */
+  readArtifactVersionSourceFile(
+    workspaceId: string,
+    artifactId: string,
+    artifactVersionId: string,
+    fileName: string,
+  ): Promise<unknown> {
+    return this.http.get<unknown>(
+      `/v1/workspaces/${encode(workspaceId)}/artifacts/${encode(artifactId)}/versions/${encode(artifactVersionId)}/source-files/${encode(fileName)}`,
+    );
+  }
+
   deleteArtifact(workspaceId: string, artifactId: string) {
     return this.http.delete<DeleteArtifactResponse>(
       `/v1/workspaces/${encode(workspaceId)}/artifacts/${encode(artifactId)}`,

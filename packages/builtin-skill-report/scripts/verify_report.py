@@ -12,7 +12,7 @@ import zipfile
 from urllib.parse import urlsplit
 import xml.etree.ElementTree as ET
 from generate_report import markdown_document, page_number_footer_xml
-from report_schema import read_report, parse_formats, public_texts, effective_presentation, contents_entries
+from report_schema import read_report, parse_formats, public_texts, effective_presentation, contents_entries, provenance_counts
 
 MAX_FILE_BYTES = 32 * 1024 * 1024
 
@@ -388,7 +388,8 @@ def verify(source, directory, formats):
     unexpected = [f'report.{fmt}' for fmt in ('md', 'docx', 'pdf') if fmt not in formats and (directory / f'report.{fmt}').exists()]
     if unexpected:
         raise ValueError('Unrequested deliverables present: ' + ', '.join(unexpected))
-    return {'passed': True, 'checks': checks, 'files': files, 'evidenceAuthenticated': False, 'visualReview': 'not_run'}
+    # Provenance counts are structural shape statistics only; nothing here authenticates evidence.
+    return {'passed': True, 'checks': checks, 'files': files, 'provenance': provenance_counts(report), 'evidenceAuthenticated': False, 'visualReview': 'not_run'}
 
 
 def main():

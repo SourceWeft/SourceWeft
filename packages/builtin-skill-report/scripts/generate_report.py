@@ -7,7 +7,7 @@ import shutil
 import subprocess
 import tempfile
 import unicodedata
-from report_schema import read_report, parse_formats, labels, source_text, effective_presentation, contents_entries, statement_parts, cell_parts
+from report_schema import read_report, parse_formats, labels, source_text, effective_presentation, contents_entries, statement_parts, cell_parts, statement_body, cell_body
 
 
 def h(value):
@@ -19,21 +19,43 @@ def md(value):
     return ''.join('\\' + char if char in '\\`*_{}[]<>()#+.!|~' else char for char in value).replace('\n', '<br>')
 
 
+def html_citations(citation_ids):
+    """Display-level anchors to the sources section; the visible text stays ` [S1]`."""
+    return ''.join(f' <a class="cite" href="#src-{h(sid)}">[{h(sid)}]</a>' for sid in citation_ids)
+
+
+def html_cited(body, citation_ids, report):
+    """Escaped HTML mirror of report_schema.citation_parts with anchored markers."""
+    anchors = html_citations(citation_ids)
+    if effective_presentation(report)['citationLayout'] == 'inline':
+        return h(body) + anchors, None
+    note = h(labels(report)['source_note'] + ':') + anchors if citation_ids else None
+    return h(body), note
+
+
+def html_statement_parts(item, report):
+    return html_cited(statement_body(item, report), item['citations'], report)
+
+
+def html_cell_parts(cell, report):
+    return html_cited(cell_body(cell, report), cell['citations'], report)
+
+
 def html_parts(parts):
     body, note = parts
-    return h(body) + (f'<p class="source-note">{h(note)}</p>' if note else '')
+    return body + (f'<p class="source-note">{note}</p>' if note else '')
 
 
 def html_document(report):
     presentation = effective_presentation(report)
     # Presets are finite, source-owned settings; no arbitrary style input.
     compact = ('@media(max-width:600px){body{line-height:1.5}p,li{margin:.5em 0}th,td{padding:6px}main{padding:20px 12px}h1{font-size:1.5rem}h2{margin-top:1.4rem}}' if presentation['mobileDensity'] == 'compact' else '')
-    out = [f'''<!doctype html><html lang="{report["language"]}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{h(report["title"])}</title><style>body{{font-family:"Noto Sans SC",sans-serif;color:#182328;background:#fff;margin:0;line-height:1.7}}main{{max-width:900px;margin:auto;padding:48px 28px}}h1{{font-size:2rem;line-height:1.25}}h2{{margin-top:2rem}}p,li{{overflow-wrap:anywhere}}.table-wrap{{overflow-x:auto}}table{{border-collapse:collapse;width:100%;font-size:.9rem}}th,td{{border:1px solid #cbd5d8;text-align:left;vertical-align:top;padding:10px;min-width:100px;overflow-wrap:anywhere}}th{{background:#eef3f3}}.sources{{font-size:.85rem}}.source-note{{margin:.25em 0 0;color:#45565c}}td .source-note{{margin-top:0}}.report-statement>p:first-child{{margin-bottom:.25em}}nav a{{color:inherit}}@media(max-width:600px){{main{{padding:24px 16px}}h1{{font-size:1.65rem}}}}{compact}@media print{{main{{padding:0}}tr,.report-statement{{break-inside:avoid}}h2{{break-after:avoid}}}}</style></head><body><main>''', f'<h1>{h(report["title"])}</h1>', f'<h2>{labels(report)["summary"]}</h2>']
+    out = [f'''<!doctype html><html lang="{report["language"]}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{h(report["title"])}</title><style>body{{font-family:"Noto Sans SC",sans-serif;color:#182328;background:#fff;margin:0;line-height:1.7}}main{{max-width:900px;margin:auto;padding:48px 28px}}h1{{font-size:2rem;line-height:1.25}}h2{{margin-top:2rem}}p,li{{overflow-wrap:anywhere}}.table-wrap{{overflow-x:auto}}table{{border-collapse:collapse;width:100%;font-size:.9rem}}th,td{{border:1px solid #cbd5d8;text-align:left;vertical-align:top;padding:10px;min-width:100px;overflow-wrap:anywhere}}th{{background:#eef3f3}}.sources{{font-size:.85rem}}.source-note{{margin:.25em 0 0;color:#45565c}}td .source-note{{margin-top:0}}.report-statement>p:first-child{{margin-bottom:.25em}}nav a{{color:inherit}}a.cite{{color:inherit;text-decoration:none;border-bottom:1px dotted currentColor}}.sources p{{scroll-margin-top:1rem}}@media(max-width:600px){{main{{padding:24px 16px}}h1{{font-size:1.65rem}}}}{compact}@media print{{main{{padding:0}}tr,.report-statement{{break-inside:avoid}}h2{{break-after:avoid}}}}</style></head><body><main>''', f'<h1>{h(report["title"])}</h1>', f'<h2>{labels(report)["summary"]}</h2>']
     def paragraph(item):
-        body, note = statement_parts(item, report)
+        body, note = html_statement_parts(item, report)
         if note:
-            return f'<div class="report-statement"><p>{h(body)}</p><p class="source-note">{h(note)}</p></div>'
-        return f'<p>{h(body)}</p>'
+            return f'<div class="report-statement"><p>{body}</p><p class="source-note">{note}</p></div>'
+        return f'<p>{body}</p>'
     out += [paragraph(item) for item in report['summary']]
     entries = contents_entries(report)
     if entries:
@@ -44,14 +66,14 @@ def html_document(report):
             if block['type'] == 'paragraph':
                 out.append(paragraph(block))
             elif block['type'] == 'bullets':
-                out.append('<ul>' + ''.join(f'<li>{html_parts(statement_parts(item, report))}</li>' for item in block['items']) + '</ul>')
+                out.append('<ul>' + ''.join(f'<li>{html_parts(html_statement_parts(item, report))}</li>' for item in block['items']) + '</ul>')
             else:
                 out.append('<div class="table-wrap"><table><thead><tr>' + ''.join(f'<th scope="col">{h(c)}</th>' for c in block['columns']) + '</tr></thead><tbody>')
-                out += ['<tr>' + ''.join(f'<td>{html_parts(cell_parts(c, report))}</td>' for c in row) + '</tr>' for row in block['rows']]
+                out += ['<tr>' + ''.join(f'<td>{html_parts(html_cell_parts(c, report))}</td>' for c in row) + '</tr>' for row in block['rows']]
                 out.append('</tbody></table></div>')
         out.append('</section>')
     out.append(f'<section class="sources"><h2>{labels(report)["sources"]}</h2>')
-    out += [f'<p>{h(source_text(source))}</p>' for source in report['sources']]
+    out += [f'<p id="src-{h(source["id"])}" data-source-id="{h(source["id"])}">{h(source_text(source))}</p>' for source in report['sources']]
     out.append('</section></main></body></html>')
     return '\n'.join(out)
 
