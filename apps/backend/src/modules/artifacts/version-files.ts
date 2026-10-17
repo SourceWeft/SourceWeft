@@ -44,7 +44,13 @@ export function resolveArtifactVersionFile(input: {
   return file;
 }
 
-/** Internal authoring reader only. Never use this selector on HTTP/share routes. */
+/**
+ * Internal authoring reader only. The single HTTP exception is the member-only
+ * `GET /artifacts/:id/versions/:versionId/source-files/:fileName` route, which
+ * goes through `ContentArtifactsService.readArtifactVersionSourceFile` and its
+ * allowlist + `role: "source"` JSON checks. Never use this selector on share
+ * routes.
+ */
 export function resolveArtifactVersionAttachment(input: {
   filesJson: unknown;
   workspaceId: string;

@@ -2176,6 +2176,17 @@
       "citedVerified": "{path} · 已验证引用版本",
       "fileUnavailable": "文件不可用。"
     },
+    "evidence": {
+      "title": "证据（{count}）",
+      "open": "打开证据 {id}",
+      "unresolvableHint": "此引用无法打开，仅保留文本。",
+      "kind": {
+        "chunk": "来源库",
+        "file": "文件",
+        "external": "网页",
+        "unresolvable": "不可解析"
+      }
+    },
     "location": {
       "page": "第 {page} 页",
       "slide": "第 {slide} 张幻灯片",
