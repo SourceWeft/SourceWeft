@@ -1,0 +1,26 @@
+diff --git a/dist/agents/nodes/AgentNode.cjs b/dist/agents/nodes/AgentNode.cjs
+index 4a61d8624c2836d26664f18f00c95b126d50e732..9288c6875ac781006dd944b5b1714f4e6227be84 100644
+--- a/dist/agents/nodes/AgentNode.cjs
++++ b/dist/agents/nodes/AgentNode.cjs
+@@ -309,7 +309,7 @@ var AgentNode = class extends require_RunnableCallable.RunnableCallable {
+ 						*/
+ 						if (!isInternalModelResponse(middlewareResponse)) throw new Error(`Invalid response from "wrapModelCall" in middleware "${currentMiddleware.name}": expected AIMessage or Command, got ${typeof middlewareResponse}`);
+ 						if (_langchain_core_messages.AIMessage.isInstance(middlewareResponse)) lastAiMessage = middlewareResponse;
+-						else if ((0, _langchain_langgraph.isCommand)(middlewareResponse)) collectedCommands.push(middlewareResponse);
++						else if ((0, _langchain_langgraph.isCommand)(middlewareResponse)) { if (!collectedCommands.includes(middlewareResponse)) collectedCommands.push(middlewareResponse); }
+ 						return middlewareResponse;
+ 					} catch (error) {
+ 						throw require_errors.MiddlewareError.wrap(error, currentMiddleware.name);
+diff --git a/dist/agents/nodes/AgentNode.js b/dist/agents/nodes/AgentNode.js
+index 32ddeb36d2e65ee4a9f64347d57f28fe7fefaa1c..cf69e52b0aea2d045c44a1c9b899298ff0cc974f 100644
+--- a/dist/agents/nodes/AgentNode.js
++++ b/dist/agents/nodes/AgentNode.js
+@@ -309,7 +309,7 @@ var AgentNode = class extends RunnableCallable {
+ 						*/
+ 						if (!isInternalModelResponse(middlewareResponse)) throw new Error(`Invalid response from "wrapModelCall" in middleware "${currentMiddleware.name}": expected AIMessage or Command, got ${typeof middlewareResponse}`);
+ 						if (AIMessage.isInstance(middlewareResponse)) lastAiMessage = middlewareResponse;
+-						else if (isCommand(middlewareResponse)) collectedCommands.push(middlewareResponse);
++						else if (isCommand(middlewareResponse)) { if (!collectedCommands.includes(middlewareResponse)) collectedCommands.push(middlewareResponse); }
+ 						return middlewareResponse;
+ 					} catch (error) {
+ 						throw MiddlewareError.wrap(error, currentMiddleware.name);

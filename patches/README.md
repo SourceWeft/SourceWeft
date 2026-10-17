@@ -87,3 +87,65 @@ long growing Markdown in both streaming modes; it reproduces the cascade on
 the unpatched package. Do not wrap its frame loop in `act()`, which drains
 each update and hides this scheduling failure. Also verify a live long chat
 through publication, final reply, reload, and artifact download.
+
+
+## LangChain model middleware Command collection
+
+`langchain@1.5.10` deduplicates the same `Command` object in the model
+middleware response collector, in both ESM and CommonJS. Its inner-handler
+normalization already uses this identity check; the middleware-validation
+layer must apply the same rule when no new AI message has been generated.
+
+Without the patch, a checkpoint-only preparation Command passing through
+nested middleware can collect the same native summarization Command several
+times. This writes `_summarizationEvent` repeatedly in one graph step and fails
+its native LastValue channel before the next Provider request. Real v3 report
+streaming reproduced this failure; it is not a Provider/tool-argument error.
+
+Only repeated object identity is deduplicated. Distinct Commands and genuine
+conflicting LastValue writes retain their original behavior. No model,
+Provider, transport, compression policy, retry policy or dependency version is
+changed. Review/remove this patch when upgrading LangChain to a release with
+the equivalent collector fix.
+
+Use the existing patch workflow:
+
+```sh
+pnpm patch langchain@1.5.10 --edit-dir /tmp/langchain-command-edit
+pnpm patch-commit /tmp/langchain-command-edit --patches-dir patches
+pnpm install --no-frozen-lockfile --ignore-scripts
+pnpm install --frozen-lockfile --ignore-scripts
+```
+
+Verify `step-budget-full-stack.test.ts` with the installed SDK, including
+pressure-triggered native summarization, v3 streaming, native approval and
+saved-decision recovery, plus the distinct-Command conflict negative case.
+Run the other budget/governance tests, backend type checks and full tests;
+verify frozen installation and Docker prune retain the patch. Reload already
+running API/worker processes before the real report loop, since relinking a
+package does not replace modules already loaded in memory.
+
+
+## Deep Agents child approval middleware composition
+
+`deepagents@1.13.1` reuses an explicitly supplied
+`HumanInTheLoopMiddleware` when constructing custom and implicit general-purpose
+children, instead of appending a second middleware with the same name. Root
+agent construction already supports replacing this named native middleware;
+child construction must honor the same composition when the host preserves
+the original approval map while guarding checkpoint-only preparation steps.
+
+The ESM and CommonJS runtime chunks are patched. A child with no supplied
+approval middleware still receives the original native middleware and original
+`interruptOn` map. This patch does not disable approvals, change filesystem
+permissions, accept an undocumented disable sentinel, or alter subagent tools.
+Review/remove the patch when adopting an upstream version with equivalent
+child middleware composition.
+
+Use the standard `pnpm patch deepagents@1.13.1` workflow followed by explicit
+non-frozen and frozen installs with `--ignore-scripts`. Verify the installed
+SDK's actual general-purpose child approval fixture in
+`step-budget-full-stack.test.ts`, including the last normal preparation step,
+real approval/resume and closing. Keep the complete root/child budget, saved-AI
+replay, read-only scope and native approval tests; do not validate only the
+root agent or replace approval with an unconditional allow.

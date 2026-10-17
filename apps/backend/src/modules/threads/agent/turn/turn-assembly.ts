@@ -1008,6 +1008,7 @@ export async function buildThreadAgentAssembly(
   const childMiddleware = (subagentType: string) => [
     fileImages.middleware(),
     ...createSourceWeftSubagentMiddlewareStack({
+      ...(subagentType === "general-purpose" ? { interruptOn } : {}),
       backend,
       chatProfileConfig: prepared.chatProfile.configJson,
       model,

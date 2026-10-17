@@ -288,6 +288,41 @@ export function getAgentStepPhase(
         : "finalizing"
     : null;
 }
+/** A saved provider response is replayed through afterModel, never generated again. */
+export function getAgentStepReplayMessage(
+  state: unknown,
+  userMessageId: string | null | undefined,
+): AIMessage | null {
+  if (!userMessageId) return null;
+  assertAgentStepIdentity(state, userMessageId);
+  const entry = readBudget(state)?.scopes[currentAgentStepScope()];
+  if (
+    !entry ||
+    !isV2Scope(entry) ||
+    entry.decisionPreparation?.status !== "ready"
+  )
+    return null;
+  const messages = values(state)?.messages;
+  if (!Array.isArray(messages)) return null;
+  const latest = [...messages].reverse().find(AIMessage.isInstance);
+  if (
+    !latest?.id ||
+    latest.id === entry.decisionPreparation.previousAssistantId
+  )
+    return null;
+  const completed = new Set(
+    messages
+      .filter(ToolMessage.isInstance)
+      .map((message) => message.tool_call_id),
+  );
+  if (latest.tool_calls?.some((call) => call.id && completed.has(call.id)))
+    throw new ContentError(
+      500,
+      "AGENT_STEP_STATE_INVALID",
+      "Pending agent decision conflicts with completed tool receipts.",
+    );
+  return latest;
+}
 export function isAgentStepClosing(state: unknown): boolean {
   return getAgentStepPhase(state) === "closing";
 }
@@ -796,38 +831,8 @@ export function createSourceWeftStepBudgetMiddleware(
           ].sort(),
         );
         const current = readBudget(request.state)?.scopes[scope];
-        if (
-          current &&
-          isV2Scope(current) &&
-          current.decisionPreparation?.status === "ready"
-        ) {
-          const latest = [...request.state.messages]
-            .reverse()
-            .find(AIMessage.isInstance);
-          if (
-            latest?.id &&
-            latest.id !== current.decisionPreparation.previousAssistantId
-          ) {
-            const completed = new Set(
-              request.state.messages
-                .filter(ToolMessage.isInstance)
-                .map((message) => message.tool_call_id),
-            );
-            if (
-              latest.tool_calls?.some(
-                (call) => call.id && completed.has(call.id),
-              )
-            )
-              throw new ContentError(
-                500,
-                "AGENT_STEP_STATE_INVALID",
-                "Pending agent decision conflicts with completed tool receipts.",
-              );
-            // Replay only the authoritative checkpointed response, never its
-            // provider request. Native afterModel/HITL must still run before tools.
-            return latest;
-          }
-        }
+        const replay = getAgentStepReplayMessage(request.state, userMessageId);
+        if (replay) return replay;
         if (
           current &&
           isV2Scope(current) &&
@@ -931,6 +936,61 @@ export function createSourceWeftStepBudgetMiddleware(
       } as never),
     } as T;
   }
+  /** Guard the first native afterModel hook: preparation has no new AI response. */
+  function guardAfterModel<T extends AgentMiddleware>(middleware: T): T {
+    const original = middleware.afterModel;
+    if (!original)
+      throw new Error("Agent preparation guard requires an afterModel hook");
+    const hook = typeof original === "function" ? original : original.hook;
+    const allowed =
+      typeof original === "function" ? [] : (original.canJumpTo ?? []);
+    return attachBudgetState(
+      createMiddleware({
+        ...middleware,
+        stateSchema: governance.stateSchema,
+        afterModel: {
+          canJumpTo: [...new Set([...allowed, "model" as const])],
+          hook: (state, runtime) => {
+            const budget = readBudget(state);
+            const scope = currentAgentStepScope();
+            const entry =
+              budget?.userMessageId === userMessageId
+                ? budget.scopes[scope]
+                : undefined;
+            if (
+              entry &&
+              isV2Scope(entry) &&
+              entry.decisionPreparation?.status === "prepared"
+            ) {
+              const latest = [...state.messages]
+                .reverse()
+                .find(AIMessage.isInstance);
+              if (
+                (latest?.id ?? null) !==
+                entry.decisionPreparation.previousAssistantId
+              )
+                throw new ContentError(
+                  500,
+                  "AGENT_STEP_STATE_INVALID",
+                  "Agent preparation contains an unexpected model response.",
+                );
+              return {
+                ...patch(scope, {
+                  ...entry,
+                  decisionPreparation: {
+                    ...entry.decisionPreparation,
+                    status: "ready",
+                  },
+                }),
+                jumpTo: "model" as const,
+              };
+            }
+            return hook(state as never, runtime as never);
+          },
+        },
+      }) as T,
+    );
+  }
   const nativeToolCallRepair = createPatchToolCallsMiddleware();
   const nativeBeforeAgent = nativeToolCallRepair.beforeAgent!;
   const beforeRepair =
@@ -985,6 +1045,7 @@ export function createSourceWeftStepBudgetMiddleware(
   return {
     governance,
     toolCallRepair,
+    guardAfterModel,
     finalization: attachBudgetState(finalization),
     attachBudgetState,
   };

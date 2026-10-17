@@ -110,6 +110,7 @@ export async function createThreadAgent(
     chatProfileConfig: params.chatProfileConfig,
     contextCompressionReportKey: params.contextCompressionReportKey,
     commandExecutionPolicy: params.commandExecutionPolicy,
+    interruptOn: params.interruptOn,
     extraMiddleware: params.extraMiddleware,
     filesystemMounts,
     toolObservabilityContext: params.toolObservabilityContext,

@@ -1,3 +1,4 @@
+import { agentStateUpdateError } from "./state-update-error";
 import { toObjectRecord } from "../../../../shared/records";
 import { Command } from "@langchain/langgraph";
 import {
@@ -624,9 +625,10 @@ export async function* invokeDeepAgentTurn(input: {
       break;
     }
   } catch (error) {
+    const stateFailure = agentStateUpdateError(error);
     const stepFailure = await captureAgentStepFailureCheckpoint({
       ...input,
-      error,
+      error: stateFailure ?? error,
       beforeInput: beforeInputCheckpoint,
       beforeAssistant: beforeAssistantCheckpoint,
       readCurrentCheckpoint: async () => {
@@ -637,7 +639,7 @@ export async function* invokeDeepAgentTurn(input: {
         );
       },
     });
-    throw stepFailure ?? error;
+    throw stepFailure ?? stateFailure ?? error;
   } finally {
     // Projection writes are best-effort but must land before the turn ends,
     // so a child thread is complete by the time the parent's finish is sent.

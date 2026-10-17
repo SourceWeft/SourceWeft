@@ -3,6 +3,7 @@ import type { BaseLanguageModel } from "@langchain/core/language_models/base";
 import type { AnyBackendProtocol } from "deepagents";
 import {
   modelRetryMiddleware,
+  humanInTheLoopMiddleware,
   todoListMiddleware,
   toolCallLimitMiddleware,
   toolRetryMiddleware,
@@ -70,6 +71,7 @@ export type SourceWeftAgentMiddlewareStackInput = {
   backend: AnyBackendProtocol;
   chatProfileConfig?: unknown;
   commandExecutionPolicy?: CommandExecutionPolicy;
+  interruptOn?: Parameters<typeof humanInTheLoopMiddleware>[0]["interruptOn"];
   contextCompressionReportKey?: string;
   execution?: LangChainModelExecutionConfig;
   extraMiddleware?: AgentMiddleware[];
@@ -82,6 +84,7 @@ export type SourceWeftAgentMiddlewareStackInput = {
 };
 
 export type SourceWeftSubagentMiddlewareStackInput = {
+  interruptOn?: Parameters<typeof humanInTheLoopMiddleware>[0]["interruptOn"];
   backend: AnyBackendProtocol;
   chatProfileConfig?: unknown;
   model: BaseLanguageModel;
@@ -106,6 +109,13 @@ export function createSourceWeftSubagentMiddlewareStack(
     createSourceWeftToolCallCountChannelsMiddleware(),
     stepBudget.governance,
     stepBudget.toolCallRepair,
+    ...(input.interruptOn
+      ? [
+          stepBudget.guardAfterModel(
+            humanInTheLoopMiddleware({ interruptOn: input.interruptOn }),
+          ),
+        ]
+      : []),
     createSourceWeftToolCallContextMiddleware({
       subagentType: input.toolObservabilityContext?.subagentType,
     }),
@@ -125,6 +135,7 @@ export function createSourceWeftSubagentMiddlewareStack(
       onFailure: "error",
     }),
     createSourceWeftSummarizationMiddleware({
+      userMessageId: input.toolObservabilityContext?.userMessageId,
       backend: input.backend,
       chatProfileConfig: input.chatProfileConfig,
       model: input.model,
@@ -176,6 +187,13 @@ export async function createSourceWeftAgentMiddlewareStack(
     createSourceWeftToolCallCountChannelsMiddleware(),
     stepBudget.governance,
     stepBudget.toolCallRepair,
+    ...(input.interruptOn
+      ? [
+          stepBudget.guardAfterModel(
+            humanInTheLoopMiddleware({ interruptOn: input.interruptOn }),
+          ),
+        ]
+      : []),
     createSourceWeftToolCallContextMiddleware(),
     // deepagents >=1.12 no longer includes the todo middleware by default;
     // tool tracking and the todo panel depend on the write_todos tool.
@@ -207,6 +225,7 @@ export async function createSourceWeftAgentMiddlewareStack(
     // place of its generic SummarizationMiddleware while retaining native
     // checkpoint/history offloading semantics.
     createSourceWeftSummarizationMiddleware({
+      userMessageId: input.toolObservabilityContext?.userMessageId,
       backend: input.backend,
       chatProfileConfig: input.chatProfileConfig,
       model: input.model,

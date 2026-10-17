@@ -1,0 +1,44 @@
+diff --git a/dist/langsmith-Ck9t7AGW.cjs b/dist/langsmith-Ck9t7AGW.cjs
+index 73358e217c3dfed16fa5c7d8fa063d660c32f568..6db51f7ab4e72e55d6620b82ce216dbcd1af4ae4 100644
+--- a/dist/langsmith-Ck9t7AGW.cjs
++++ b/dist/langsmith-Ck9t7AGW.cjs
+@@ -3424,7 +3424,7 @@ function createSubAgent(spec, options) {
+ 	if (!spec.model) throw new Error(`SubAgent '${spec.name}' must specify 'model'`);
+ 	if (!spec.tools) throw new Error(`SubAgent '${spec.name}' must specify 'tools'`);
+ 	const middleware = [...spec.middleware ?? []];
+-	if (spec.interruptOn) middleware.push((0, langchain.humanInTheLoopMiddleware)({ interruptOn: spec.interruptOn }));
++	if (spec.interruptOn && !middleware.some((entry) => entry.name === "HumanInTheLoopMiddleware")) middleware.push((0, langchain.humanInTheLoopMiddleware)({ interruptOn: spec.interruptOn }));
+ 	const selectedResponseFormat = options?.responseFormat ?? spec.responseFormat;
+ 	return (0, langchain.createAgent)({
+ 		model: spec.model,
+@@ -3452,7 +3452,7 @@ function getSubagents(options) {
+ 	const forkModeNames = /* @__PURE__ */ new Set();
+ 	if (generalPurposeAgent) {
+ 		const generalPurposeMiddleware = [...generalPurposeMiddlewareBase];
+-		if (defaultInterruptOn) generalPurposeMiddleware.push((0, langchain.humanInTheLoopMiddleware)({ interruptOn: defaultInterruptOn }));
++		if (defaultInterruptOn && !generalPurposeMiddleware.some((entry) => entry.name === "HumanInTheLoopMiddleware")) generalPurposeMiddleware.push((0, langchain.humanInTheLoopMiddleware)({ interruptOn: defaultInterruptOn }));
+ 		const gpSpec = {
+ 			name: "general-purpose",
+ 			description: DEFAULT_GENERAL_PURPOSE_DESCRIPTION,
+diff --git a/dist/langsmith-zm0ILQsV.js b/dist/langsmith-zm0ILQsV.js
+index b39a395ff5ca6d73ba79ca3a41c4fb7bea945c5c..13ba62752434e0ec300577f780d9369eee7200e3 100644
+--- a/dist/langsmith-zm0ILQsV.js
++++ b/dist/langsmith-zm0ILQsV.js
+@@ -3400,7 +3400,7 @@ function createSubAgent(spec, options) {
+ 	if (!spec.model) throw new Error(`SubAgent '${spec.name}' must specify 'model'`);
+ 	if (!spec.tools) throw new Error(`SubAgent '${spec.name}' must specify 'tools'`);
+ 	const middleware = [...spec.middleware ?? []];
+-	if (spec.interruptOn) middleware.push(humanInTheLoopMiddleware({ interruptOn: spec.interruptOn }));
++	if (spec.interruptOn && !middleware.some((entry) => entry.name === "HumanInTheLoopMiddleware")) middleware.push(humanInTheLoopMiddleware({ interruptOn: spec.interruptOn }));
+ 	const selectedResponseFormat = options?.responseFormat ?? spec.responseFormat;
+ 	return createAgent({
+ 		model: spec.model,
+@@ -3428,7 +3428,7 @@ function getSubagents(options) {
+ 	const forkModeNames = /* @__PURE__ */ new Set();
+ 	if (generalPurposeAgent) {
+ 		const generalPurposeMiddleware = [...generalPurposeMiddlewareBase];
+-		if (defaultInterruptOn) generalPurposeMiddleware.push(humanInTheLoopMiddleware({ interruptOn: defaultInterruptOn }));
++		if (defaultInterruptOn && !generalPurposeMiddleware.some((entry) => entry.name === "HumanInTheLoopMiddleware")) generalPurposeMiddleware.push(humanInTheLoopMiddleware({ interruptOn: defaultInterruptOn }));
+ 		const gpSpec = {
+ 			name: "general-purpose",
+ 			description: DEFAULT_GENERAL_PURPOSE_DESCRIPTION,
