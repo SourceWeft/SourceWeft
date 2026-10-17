@@ -961,7 +961,11 @@ test("cancelled runs reject late artifact outputs", async () => {
     teamId,
     workspaceId,
   });
-  assert.deepEqual(persisted?.snapshotJson, { finishReason: "cancelled" });
+  assert.deepEqual(persisted?.snapshotJson, {
+    finishReason: "cancelled",
+    agentRunProgress: null,
+    agentRunStop: null,
+  });
 });
 
 test("completed runs reject late background artifact outputs", async () => {
