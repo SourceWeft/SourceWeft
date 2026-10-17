@@ -394,7 +394,7 @@ async fn connection(
                                 let result_id=id.clone();
                                 let work_lease=lease.clone();
                                 let result=tauri::async_runtime::spawn_blocking(move||host.dispatch_admitted(&work_lease,&calls,&id,&owner,&thread,&action,payload)).await;
-                                let reply=match result{Ok(Ok(result))=>json!({"type":"result","id":result_id,"ok":true,"result":result}),Ok(Err(error))=>json!({"type":"result","id":result_id,"ok":false,"error":error.to_string()}),Err(_)=>json!({"type":"result","id":result_id,"ok":false,"error":"LOCAL_EXECUTION_JOIN_FAILED"})};
+                                let reply=match result{Ok(Ok(result))=>json!({"type":"result","id":result_id,"ok":true,"result":result}),Ok(Err(error))=>json!({"type":"result","id":result_id,"ok":false,"error":error.to_string(),"errorCode":error.code}),Err(_)=>json!({"type":"result","id":result_id,"ok":false,"error":"LOCAL_EXECUTION_JOIN_FAILED"})};
                                 let _=events.send((reply,lease)).await;
                             });
                         },

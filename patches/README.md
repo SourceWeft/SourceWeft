@@ -88,7 +88,6 @@ the unpatched package. Do not wrap its frame loop in `act()`, which drains
 each update and hides this scheduling failure. Also verify a live long chat
 through publication, final reply, reload, and artifact download.
 
-
 ## LangChain model middleware Command collection
 
 `langchain@1.5.10` deduplicates the same `Command` object in the model
@@ -125,7 +124,6 @@ verify frozen installation and Docker prune retain the patch. Reload already
 running API/worker processes before the real report loop, since relinking a
 package does not replace modules already loaded in memory.
 
-
 ## Deep Agents child approval middleware composition
 
 `deepagents@1.13.1` reuses an explicitly supplied
@@ -149,3 +147,17 @@ SDK's actual general-purpose child approval fixture in
 real approval/resume and closing. Keep the complete root/child budget, saved-AI
 replay, read-only scope and native approval tests; do not validate only the
 root agent or replace approval with an unconditional allow.
+
+## Deep Agents filesystem failure receipts
+
+The same `deepagents@1.13.1` patch makes `read_file`, `write_file` and `edit_file` use
+the SDK's existing `toolError` helper when their backend returns `error`.
+Returning the error as an ordinary text block or bare string causes the native ToolNode to
+label a failed operation `status: success`; this was reproduced by the
+real report loop and by installed-SDK regression tests.
+
+Both ESM and CommonJS preserve the exact error content, tool name and call ID
+while returning `status: error`, matching the existing permission and delete
+error branches. Successful reads/writes/edits and their state updates are unchanged.
+Run `filesystem-backend-errors-sdk.test.ts`, the full budget/governance SDK
+fixtures, and the sandbox backend tests before refreshing this patch.

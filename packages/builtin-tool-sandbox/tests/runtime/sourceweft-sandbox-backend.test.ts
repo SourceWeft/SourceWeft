@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SourceWeftSandboxBackend } from "../../src/runtime/sourceweft-sandbox-backend";
+import {
+  SandboxProviderError,
+  SANDBOX_PROVIDER_ERROR_CODES,
+} from "../../src/runtime/errors";
 import { SandboxManager } from "../../src/runtime/sandbox-manager";
 import {
   maxSandboxCommandTimeoutMs,
@@ -358,7 +362,11 @@ function createProvider() {
     async downloadFile(input) {
       const content = files.get(input.sandboxPath);
       if (!content) {
-        throw new Error("not found");
+        throw new SandboxProviderError(
+          SANDBOX_PROVIDER_ERROR_CODES.fileMissing,
+          "SANDBOX_FILE_NOT_FOUND: requested sandbox file was not found.",
+          "download",
+        );
       }
       return Buffer.from(content);
     },
@@ -1348,10 +1356,7 @@ test("SourceWeftSandboxBackend returns per-file permission errors for invalid do
 test("SourceWeftSandboxBackend returns recoverable error for absolute glob patterns outside sandbox roots", async () => {
   const { backend } = createBackend();
 
-  const result = await backend.glob(
-    "/files/**/*.md",
-    "/workspace/ppt-deck",
-  );
+  const result = await backend.glob("/files/**/*.md", "/workspace/ppt-deck");
 
   assert.match(result.error ?? "", /SANDBOX_READ_PATH_DENIED/u);
 });
@@ -1687,7 +1692,11 @@ test("a skill the host could not plan fails alone, without any sandbox traffic f
       plans: async () => [skillPlan("ppt-deck")],
       hasPlans: () => true,
       unstageable: () => [
-        { name: "huge", version: "1.0.0", error: "not stageable: bundle_too_large" },
+        {
+          name: "huge",
+          version: "1.0.0",
+          error: "not stageable: bundle_too_large",
+        },
       ],
       commandTimeoutMs: resolveSandboxCommandTimeoutMs({ limits }),
       maxOutputChars: limits.maxOutputChars,
@@ -1972,4 +1981,109 @@ test("the runtime prompt of a turn without stageable skills is byte-identical, b
   )!;
   assert.notEqual(stagedAtStart.buildRuntimePrompt(), withoutStaging);
   assert.match(stagedAtStart.buildRuntimePrompt(), /materialized read-only/u);
+});
+
+test("SourceWeftSandboxBackend only creates after typed missing and preserves existing empty/nonempty bytes", async () => {
+  const { backend, files, provider } = createBackend();
+  const path = "/workspace/create-and-read.txt";
+  assert.equal((await backend.write(path, "written exactly")).path, path);
+  assert.equal((await backend.readRaw(path)).data?.content, "written exactly");
+  for (const content of ["", "original bytes"]) {
+    files.set(path, new TextEncoder().encode(content));
+    const uploads = provider.uploadedFiles.length;
+    assert.match(
+      (await backend.write(path, "must not overwrite")).error ?? "",
+      /already exists/,
+    );
+    assert.equal(provider.uploadedFiles.length, uploads);
+    assert.equal(new TextDecoder().decode(files.get(path)), content);
+  }
+});
+
+test("SourceWeftSandboxBackend preserves provider read failures and never uploads after an inconclusive existence check", async () => {
+  const failures = [
+    new SandboxProviderError(
+      SANDBOX_PROVIDER_ERROR_CODES.authentication,
+      "provider authentication failed",
+      "download",
+    ),
+    new SandboxProviderError(
+      SANDBOX_PROVIDER_ERROR_CODES.unavailable,
+      "provider network unavailable",
+      "download",
+    ),
+    new SandboxProviderError(
+      SANDBOX_PROVIDER_ERROR_CODES.instanceMissing,
+      "sandbox identity lost",
+      "download",
+    ),
+    new SandboxProviderError(
+      SANDBOX_PROVIDER_ERROR_CODES.unknown,
+      "provider unknown error",
+      "download",
+    ),
+    new Error("file not found"),
+    new Error("network failed"),
+  ];
+  for (const failure of failures) {
+    const { provider } = createProvider();
+    provider.downloadFile = async () => {
+      throw failure;
+    };
+    const { backend } = createBackendWithProvider(provider);
+    await assert.rejects(
+      backend.write("/workspace/never-written.txt", "data"),
+      (error) => error === failure,
+    );
+    await assert.rejects(
+      backend.readRaw("/workspace/unavailable.txt"),
+      (error) => error === failure,
+    );
+    await assert.rejects(
+      backend.downloadFiles(["/workspace/unavailable.txt"]),
+      (error) => error === failure,
+    );
+    assert.deepEqual(provider.uploadedFiles, []);
+    assert.deepEqual(provider.ensuredDirectories, []);
+  }
+});
+
+test("SourceWeftSandboxBackend upload provider failures retain their cause instead of permission_denied", async () => {
+  const { provider } = createProvider();
+  const failure = new SandboxProviderError(
+    SANDBOX_PROVIDER_ERROR_CODES.unavailable,
+    "upload transport unavailable",
+    "upload",
+  );
+  provider.uploadFile = async () => {
+    throw failure;
+  };
+  const { backend } = createBackendWithProvider(provider);
+  await assert.rejects(
+    backend.write("/workspace/upload-failed.txt", "data"),
+    (error) => error === failure,
+  );
+  await assert.rejects(
+    backend.uploadFiles([["/workspace/upload-failed.txt", new Uint8Array()]]),
+    (error) => error === failure,
+  );
+});
+
+test("SourceWeftSandboxBackend readRaw missing is explicit and nonzero read command is not invented ENOENT", async () => {
+  const { backend, provider } = createBackend();
+  assert.match(
+    (await backend.readRaw("/workspace/missing.txt")).error ?? "",
+    /^ENOENT:/,
+  );
+  provider.executeSystem = async () => ({
+    exitCode: 2,
+    output: "Permission denied",
+    truncated: false,
+  });
+  const result = await backend.read("/workspace/unreadable.txt");
+  assert.match(
+    result.error ?? "",
+    /SANDBOX_FILE_READ_FAILED.*Permission denied/,
+  );
+  assert.doesNotMatch(result.error ?? "", /ENOENT/);
 });

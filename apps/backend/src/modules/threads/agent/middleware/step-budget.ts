@@ -703,21 +703,20 @@ export function createSourceWeftStepBudgetMiddleware(
           phase: "working",
           summary: "unused",
         };
-        if (isV2Scope(entry) && entry.decisionPreparation) return;
         const emit = (next: ScopeBudget) => {
           if (scope !== "main" || !isV2Scope(next)) return;
-          if (
-            entry.steps !== 0 &&
-            isV2Scope(entry) &&
-            entry.phase === next.phase
-          )
-            return;
           const progress = selectAgentRunProgress(
             { [KEY]: { userMessageId, scopes: { main: next } } },
             { userMessageId: userMessageId! },
           );
           getWriter()?.({ type: "agent-run-progress", progress });
         };
+        if (isV2Scope(entry) && entry.decisionPreparation) {
+          // A new run's runtime/durable snapshot starts empty, even when the
+          // trusted checkpoint resumes in the same phase and decision slot.
+          emit(entry);
+          return;
+        }
         if (isV2Scope(entry)) {
           if (
             entry.phase === "working" &&

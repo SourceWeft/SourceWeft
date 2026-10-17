@@ -37,7 +37,14 @@ impl std::fmt::Display for HostError {
 impl std::error::Error for HostError {}
 impl From<std::io::Error> for HostError {
     fn from(error: std::io::Error) -> Self {
-        Self::new("LOCAL_IO_ERROR", error.to_string())
+        Self::new(
+            if error.kind() == std::io::ErrorKind::NotFound {
+                "FILE_NOT_FOUND"
+            } else {
+                "LOCAL_IO_ERROR"
+            },
+            error.to_string(),
+        )
     }
 }
 impl From<rusqlite::Error> for HostError {

@@ -665,3 +665,297 @@ describe("createCloudflareSandboxProviderFactory", () => {
     ]);
   });
 });
+
+describe("ambiguous empty download metadata", () => {
+  const metadata = (value: unknown, exit = 0) =>
+    sseResponse([
+      {
+        event: "stdout",
+        data: Buffer.from(JSON.stringify(value)).toString("base64"),
+      },
+      { event: "exit", data: JSON.stringify({ exit_code: exit }) },
+    ]);
+  const missing = {
+    protocol: "sourceweft-file-stat-v1",
+    kind: "missing",
+    errno: 2,
+  };
+  test("only authoritative missing classifies HTTP 200 empty as fileMissing", async () => {
+    const { provider, requests } = createProvider([
+      [/^GET /, () => new Response(new Uint8Array())],
+      [/^POST .*\/exec$/, () => metadata(missing)],
+    ]);
+    await assert.rejects(
+      provider.downloadFile({
+        providerSandboxId: "sb-1",
+        sandboxPath: "/workspace/missing.txt",
+        timeoutMs: 1234,
+      }),
+      (error: unknown) =>
+        error instanceof SandboxProviderError &&
+        error.code === SANDBOX_PROVIDER_ERROR_CODES.fileMissing,
+    );
+    assert.equal(requests.length, 2);
+    const body = JSON.parse(String(requests[1]!.body));
+    assert(body.timeout_ms > 0 && body.timeout_ms <= 1234);
+    assert.match(body.argv[2], /^python3 -c /);
+  });
+  test("a confirmed empty regular file remains a real zero-byte file", async () => {
+    const { provider, requests } = createProvider([
+      [/^GET /, () => new Response(new Uint8Array())],
+      [
+        /^POST .*\/exec$/,
+        () =>
+          metadata({
+            protocol: "sourceweft-file-stat-v1",
+            kind: "regular",
+            size: 0,
+          }),
+      ],
+    ]);
+    assert.equal(
+      (
+        await provider.downloadFile({
+          providerSandboxId: "sb-1",
+          sandboxPath: "/workspace/empty.txt",
+        })
+      ).length,
+      0,
+    );
+    assert.equal(requests.length, 2);
+    assert(JSON.parse(String(requests[1]!.body)).timeout_ms <= 5000);
+  });
+  test("nonempty downloads keep their original HTTP-only behavior", async () => {
+    const { provider, requests } = createProvider([
+      [/^GET /, () => new Response("bytes")],
+    ]);
+    assert.equal(
+      (
+        await provider.downloadFile({
+          providerSandboxId: "sb-1",
+          sandboxPath: "/workspace/present.txt",
+        })
+      ).toString(),
+      "bytes",
+    );
+    assert.equal(requests.length, 1);
+  });
+  const invalid = [
+    [
+      "incomplete nonempty file",
+      { protocol: "sourceweft-file-stat-v1", kind: "regular", size: 20 },
+      /SANDBOX_FILE_DOWNLOAD_INCOMPLETE/,
+    ],
+    [
+      "directory",
+      { protocol: "sourceweft-file-stat-v1", kind: "not_regular" },
+      /SANDBOX_FILE_NOT_REGULAR/,
+    ],
+    [
+      "permission denial",
+      { protocol: "sourceweft-file-stat-v1", kind: "error", errno: 13 },
+      /SANDBOX_FILE_METADATA_FAILED/,
+    ],
+    [
+      "I/O error",
+      { protocol: "sourceweft-file-stat-v1", kind: "error", errno: 5 },
+      /SANDBOX_FILE_METADATA_FAILED/,
+    ],
+    [
+      "wrong protocol",
+      { protocol: "other", kind: "missing", errno: 2 },
+      /SANDBOX_FILE_METADATA_INVALID/,
+    ],
+    [
+      "wrong missing errno",
+      { protocol: "sourceweft-file-stat-v1", kind: "missing", errno: 13 },
+      /SANDBOX_FILE_METADATA_INVALID/,
+    ],
+    [
+      "extra fields",
+      { ...missing, success: true },
+      /SANDBOX_FILE_METADATA_INVALID/,
+    ],
+    [
+      "negative size",
+      { protocol: "sourceweft-file-stat-v1", kind: "regular", size: -1 },
+      /SANDBOX_FILE_METADATA_INVALID/,
+    ],
+    [
+      "fractional size",
+      { protocol: "sourceweft-file-stat-v1", kind: "regular", size: 0.5 },
+      /SANDBOX_FILE_METADATA_INVALID/,
+    ],
+    ["non-object", [], /SANDBOX_FILE_METADATA_INVALID/],
+  ] as const;
+  for (const [name, value, expected] of invalid)
+    test(`${name} is never missing`, async () => {
+      const { provider } = createProvider([
+        [/^GET /, () => new Response(new Uint8Array())],
+        [/^POST .*\/exec$/, () => metadata(value)],
+      ]);
+      await assert.rejects(
+        provider.downloadFile({
+          providerSandboxId: "sb-1",
+          sandboxPath: "/workspace/file",
+        }),
+        expected,
+      );
+    });
+  test("nonzero metadata execution cannot claim missing", async () => {
+    const { provider } = createProvider([
+      [/^GET /, () => new Response(new Uint8Array())],
+      [/^POST .*\/exec$/, () => metadata(missing, 1)],
+    ]);
+    await assert.rejects(
+      provider.downloadFile({
+        providerSandboxId: "sb-1",
+        sandboxPath: "/workspace/file",
+      }),
+      /SANDBOX_FILE_METADATA_FAILED/,
+    );
+  });
+  test("invalid or truncated metadata output fails closed", async () => {
+    for (const output of [
+      "not JSON",
+      JSON.stringify(missing) + "x".repeat(3000),
+    ]) {
+      const { provider } = createProvider([
+        [/^GET /, () => new Response(new Uint8Array())],
+        [
+          /^POST .*\/exec$/,
+          () =>
+            sseResponse([
+              { event: "stdout", data: Buffer.from(output).toString("base64") },
+              { event: "exit", data: "0" },
+            ]),
+        ],
+      ]);
+      await assert.rejects(
+        provider.downloadFile({
+          providerSandboxId: "sb-1",
+          sandboxPath: "/workspace/file",
+        }),
+        /SANDBOX_FILE_METADATA_(INVALID|FAILED)/,
+      );
+    }
+  });
+  test("metadata transport failures retain auth/unavailable classification", async () => {
+    for (const [status, code] of [
+      [403, SANDBOX_PROVIDER_ERROR_CODES.authentication],
+      [500, SANDBOX_PROVIDER_ERROR_CODES.unavailable],
+    ] as const) {
+      const { provider } = createProvider([
+        [/^GET /, () => new Response(new Uint8Array())],
+        [/^POST .*\/exec$/, () => new Response("metadata failed", { status })],
+      ]);
+      await assert.rejects(
+        provider.downloadFile({
+          providerSandboxId: "sb-1",
+          sandboxPath: "/workspace/file",
+        }),
+        (error: unknown) =>
+          error instanceof SandboxProviderError && error.code === code,
+      );
+    }
+  });
+  test("quoted metadata paths cannot execute shell substitutions", async () => {
+    const { execFileSync } = await import("node:child_process");
+    const path = "/workspace/a' ; printf PWNED ; #$(printf INJECTED)\nΩ.txt";
+    const { provider, requests } = createProvider([
+      [/^GET /, () => new Response(new Uint8Array())],
+      [
+        /^POST .*\/exec$/,
+        (request) => {
+          const { argv } = JSON.parse(String(request.body));
+          const output = execFileSync("/bin/sh", ["-c", argv[2]], {
+            encoding: "utf8",
+          });
+          assert.doesNotMatch(output, /PWNED|INJECTED/);
+          assert.deepEqual(JSON.parse(output), missing);
+          return sseResponse([
+            { event: "stdout", data: Buffer.from(output).toString("base64") },
+            { event: "exit", data: "0" },
+          ]);
+        },
+      ],
+    ]);
+    await assert.rejects(
+      provider.downloadFile({ providerSandboxId: "sb-1", sandboxPath: path }),
+      (error: unknown) =>
+        error instanceof SandboxProviderError &&
+        error.code === SANDBOX_PROVIDER_ERROR_CODES.fileMissing,
+    );
+    assert(requests[0]!.url.includes("%23"));
+    assert(requests[0]!.url.includes("%0A"));
+  });
+  test("cancellation after the empty response prevents a metadata command", async () => {
+    const controller = new AbortController();
+    const { provider, requests } = createProvider([
+      [
+        /^GET /,
+        () => {
+          controller.abort(new DOMException("cancelled", "AbortError"));
+          return new Response(new Uint8Array());
+        },
+      ],
+    ]);
+    await assert.rejects(
+      provider.downloadFile({
+        providerSandboxId: "sb-1",
+        sandboxPath: "/workspace/file",
+        signal: controller.signal,
+      }),
+    );
+    assert.equal(requests.length, 1);
+  });
+  test("cancellation during metadata is forwarded and cannot accept a late empty result", async () => {
+    const controller = new AbortController();
+    const { provider, requests } = createProvider([
+      [/^GET /, () => new Response(new Uint8Array())],
+      [
+        /^POST .*\/exec$/,
+        (request) => {
+          controller.abort(new DOMException("cancelled", "AbortError"));
+          assert.equal(request.signal?.aborted, true);
+          return metadata({
+            protocol: "sourceweft-file-stat-v1",
+            kind: "regular",
+            size: 0,
+          });
+        },
+      ],
+    ]);
+    await assert.rejects(
+      provider.downloadFile({
+        providerSandboxId: "sb-1",
+        sandboxPath: "/workspace/file",
+        signal: controller.signal,
+      }),
+    );
+    assert.equal(requests.length, 2);
+  });
+  test("an exhausted original timeout does not start a metadata command", async () => {
+    const originalNow = Date.now;
+    let calls = 0;
+    const { provider, requests } = createProvider([
+      [/^GET /, () => new Response(new Uint8Array())],
+    ]);
+    Date.now = () => (calls++ === 0 ? 0 : 100);
+    try {
+      await assert.rejects(
+        provider.downloadFile({
+          providerSandboxId: "sb-1",
+          sandboxPath: "/workspace/file",
+          timeoutMs: 50,
+        }),
+        (error: unknown) =>
+          error instanceof SandboxProviderError &&
+          error.code === SANDBOX_PROVIDER_ERROR_CODES.timeout,
+      );
+      assert.equal(requests.length, 1);
+    } finally {
+      Date.now = originalNow;
+    }
+  });
+});

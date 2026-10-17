@@ -16,6 +16,7 @@
  * `graph.stream({ subgraphs: true })` — so sub-agent grouping in
  * subagent-namespace.ts is reused as-is.
  */
+import { ToolMessage } from "@langchain/core/messages";
 import { stringifyAgentMessageContent } from "./content";
 import { toObjectRecord } from "../../../../shared/records";
 
@@ -110,6 +111,18 @@ function extractToolFinishedResult(output: unknown): {
   output: unknown;
 } {
   const record = toObjectRecord(output);
+  // The installed v3 SDK also emits live ToolMessage instances (and their
+  // plain JSON form), rather than only lc-constructor serialization. Status is
+  // authoritative; never infer an error from a content prefix or a domain's
+  // unrelated `status` field. Keep successful output normalization unchanged.
+  if (
+    record?.status === "error" &&
+    (ToolMessage.isInstance(output) ||
+      (record.type === "tool" && typeof record.tool_call_id === "string"))
+  ) {
+    const content = parseMaybeJson(record.content);
+    return { error: errorMessageContent(content), output: content };
+  }
   const kwargs = toObjectRecord(record?.kwargs);
   if (record && record.lc !== undefined && kwargs) {
     const content = parseMaybeJson(kwargs.content);

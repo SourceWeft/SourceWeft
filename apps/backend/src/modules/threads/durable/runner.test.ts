@@ -1485,3 +1485,66 @@ test("successive late phase events cannot resurrect an error or cancellation sna
     assert.equal(snapshot.lastEventType, "finish");
   }
 });
+
+test("same-call retries distinguish omitted errors, explicit clearing and new failures", () => {
+  const failed = testExports.updateSnapshotFromPayload(
+    {},
+    {
+      type: "tool-call-error",
+      id: "retry-read",
+      tool: "read_file",
+      error: "sandbox unhealthy",
+      toolCall: {
+        id: "retry-read",
+        tool: "read_file",
+        status: "error",
+        error: "sandbox unhealthy",
+      },
+    },
+  );
+  const omitted = testExports.updateSnapshotFromPayload(failed, {
+    type: "tool-call-end",
+    id: "retry-read",
+    status: "completed",
+  });
+  assert.equal(
+    toToolCallTrace(omitted.toolCalls?.[0])?.error,
+    "sandbox unhealthy",
+  );
+  const cleared = testExports.updateSnapshotFromPayload(failed, {
+    type: "tool-call-result",
+    id: "retry-read",
+    toolCall: {
+      id: "retry-read",
+      tool: "read_file",
+      status: "completed",
+      error: null,
+    },
+    output: { content: "verified bytes" },
+  });
+  assert.equal(toToolCallTrace(cleared.toolCalls?.[0])?.error, null);
+  const restarted = testExports.updateSnapshotFromPayload(failed, {
+    type: "tool-call-start",
+    id: "retry-read",
+    tool: "read_file",
+  });
+  assert.equal(toToolCallTrace(restarted.toolCalls?.[0])?.error, null);
+  assert.equal(toToolCallTrace(restarted.toolCalls?.[0])?.status, "running");
+  const failedAgain = testExports.updateSnapshotFromPayload(restarted, {
+    type: "tool-call-error",
+    id: "retry-read",
+    error: "new permission failure",
+  });
+  assert.equal(
+    toToolCallTrace(failedAgain.toolCalls?.[0])?.error,
+    "new permission failure",
+  );
+  const explicitTopLevelClear = testExports.updateSnapshotFromPayload(
+    failedAgain,
+    { type: "tool-call-result", id: "retry-read", error: null },
+  );
+  assert.equal(
+    toToolCallTrace(explicitTopLevelClear.toolCalls?.[0])?.error,
+    null,
+  );
+});

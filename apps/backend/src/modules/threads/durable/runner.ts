@@ -360,12 +360,14 @@ function mergeToolCallFromPayload(input: {
   const status =
     input.payload.type === "tool-call-error"
       ? "error"
-      : input.payload.type === "tool-call-result" ||
-          input.payload.type === "tool-call-end"
-        ? typeof input.payload.status === "string"
-          ? input.payload.status
-          : (toolCall?.status ?? "completed")
-        : (toolCall?.status ?? existingRecord?.status ?? "running");
+      : input.payload.type === "tool-call-start"
+        ? (toolCall?.status ?? "running")
+        : input.payload.type === "tool-call-result" ||
+            input.payload.type === "tool-call-end"
+          ? typeof input.payload.status === "string"
+            ? input.payload.status
+            : (toolCall?.status ?? "completed")
+          : (toolCall?.status ?? existingRecord?.status ?? "running");
   const sequence =
     getTraceSequence(toolCall) ?? getTraceSequence(existingRecord);
 
@@ -388,8 +390,17 @@ function mergeToolCallFromPayload(input: {
         : (toolCall?.latencyMs ?? existingRecord?.latencyMs ?? null),
     error:
       input.payload.type === "tool-call-error"
-        ? input.payload.error
-        : (toolCall?.error ?? existingRecord?.error ?? null),
+        ? (input.payload.error ??
+          toolCall?.error ??
+          existingRecord?.error ??
+          null)
+        : toolCall?.error !== undefined
+          ? toolCall.error
+          : input.payload.error !== undefined
+            ? input.payload.error
+            : input.payload.type === "tool-call-start"
+              ? null
+              : (existingRecord?.error ?? null),
   });
 }
 

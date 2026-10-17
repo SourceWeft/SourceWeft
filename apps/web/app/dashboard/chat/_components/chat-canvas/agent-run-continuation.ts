@@ -50,6 +50,7 @@ export function readMessageAgentRunProgress(input: {
     !input.isRunActive ||
     input.version.metadata?.agentRunStop ||
     input.version.isCancelled ||
+    input.version.isError ||
     input.version.metadata?.isCancelled === true ||
     input.version.metadata?.isError === true ||
     input.version.threadRun?.status === "cancelled" ||

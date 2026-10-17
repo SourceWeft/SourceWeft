@@ -1389,15 +1389,22 @@ function resolveToolCallFromStreamEvent(input: {
     existing?.latencyMs ??
     null;
 
+  // Inspect the wire field before normalization: an omitted error preserves the
+  // prior value, while explicit null and a new start clear the old attempt.
+  const wireToolCall = toObjectRecord(input.event.toolCall);
   const normalizedError =
-    normalizedToolCall?.error ??
-    (input.event.type === "tool-call-error"
+    input.event.type === "tool-call-error"
       ? (sanitizeClientErrorMessage(toNullableString(input.event.error)) ??
+        normalizedToolCall?.error ??
         "Tool execution failed.")
-      : normalizedStatus === "error"
-        ? (sanitizeClientErrorMessage(existing?.error) ??
-          "Tool execution failed.")
-        : null);
+      : wireToolCall?.error !== undefined
+        ? sanitizeClientErrorMessage(toNullableString(wireToolCall.error))
+        : input.event.error !== undefined
+          ? sanitizeClientErrorMessage(toNullableString(input.event.error))
+          : input.event.type === "tool-call-start"
+            ? null
+            : (existing?.error ??
+              (normalizedStatus === "error" ? "Tool execution failed." : null));
 
   const mcpDisplay =
     normalizedToolCall?.mcpDisplay ??

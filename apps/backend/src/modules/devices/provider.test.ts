@@ -97,3 +97,42 @@ test("a different account cannot resolve the directory", async () => {
   ).rejects.toThrow("private");
   expect(state.call).not.toHaveBeenCalled();
 });
+
+test("PC download maps only structured FILE_NOT_FOUND into provider missing", async () => {
+  const { ContentError } = await import("../content/errors");
+  const { SandboxProviderError, SANDBOX_PROVIDER_ERROR_CODES } =
+    await import("@sourceweft/builtin-tool-sandbox");
+  const provider = (await localProviderForTurn(context))!.createProvider();
+  // Resolve the workspace before injecting a file-operation failure; workspace
+  // initialization is deliberately memoized by the real provider.
+  await provider.getSandbox("native");
+  const missing = new ContentError(404, "FILE_NOT_FOUND", "本地文件不存在");
+  state.call.mockRejectedValue(missing);
+  await expect(
+    provider.downloadFile({
+      providerSandboxId: "native",
+      sandboxPath: "/Users/test/task/missing.bin",
+    }),
+  ).rejects.toMatchObject({
+    code: SANDBOX_PROVIDER_ERROR_CODES.fileMissing,
+    cause: missing,
+  });
+  for (const failure of [
+    new ContentError(
+      409,
+      "LOCAL_EXECUTION_FAILED",
+      "FILE_NOT_FOUND: no such file",
+    ),
+    new ContentError(403, "FILE_ACCESS_DENIED", "denied"),
+    new ContentError(409, "DEVICE_OFFLINE", "offline"),
+  ]) {
+    state.call.mockRejectedValue(failure);
+    await expect(
+      provider.downloadFile({
+        providerSandboxId: "native",
+        sandboxPath: "/Users/test/task/unknown.bin",
+      }),
+    ).rejects.toBe(failure);
+    expect(failure).not.toBeInstanceOf(SandboxProviderError);
+  }
+});
