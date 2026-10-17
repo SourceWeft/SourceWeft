@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import {
   ChevronDown,
@@ -18,13 +18,11 @@ import {
   CollapsibleTrigger,
 } from "@sourceweft/ui-web/components/ui/collapsible";
 import { cn } from "@sourceweft/ui-web/lib/utils";
-import { contentClient } from "../../../../../lib/sdk";
 import type { CitationRecord } from "../chat-canvas/types";
 import type { ArtifactListItem } from "../sources-hub/types";
+import { loadReportEvidence } from "./report-evidence-loader";
 import {
   chunkCitationRecord,
-  parseReportEvidenceSources,
-  REPORT_SOURCE_FILE_NAME,
   type ReportEvidenceProvenance,
   type ReportEvidenceSource,
 } from "./report-evidence";
@@ -58,10 +56,6 @@ const KIND_ICONS: Record<ReportEvidenceProvenance["kind"], LucideIcon> = {
   missing: CircleHelp,
 };
 
-function evidenceKey(artifactId: string, versionId: string) {
-  return `${artifactId}:${versionId}`;
-}
-
 /**
  * Member-only evidence list for a published HTML report. Reads the private
  * `report.source.json` of the artifact's current version and lets a workspace
@@ -70,14 +64,6 @@ function evidenceKey(artifactId: string, versionId: string) {
  * while loading, when the version has no source file (404), or when the file
  * is not a report source. The public share page never mounts this.
  */
-
-function isNotFoundError(error: unknown) {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    (error as { status?: unknown }).status === 404
-  );
-}
 
 export function ReportEvidencePanel({
   artifact,
@@ -93,10 +79,10 @@ export function ReportEvidencePanel({
     artifact.status === "ready" &&
     Boolean(workspaceId) &&
     Boolean(versionId);
-  const key = versionId ? evidenceKey(artifact.id, versionId) : null;
-  // One fetch per artifact+version for the life of the panel; switching back
-  // to an already-read version does not hit the API again.
-  const cache = useRef(new Map<string, ReportEvidenceSource[] | null>());
+  const key =
+    workspaceId && versionId
+      ? `${workspaceId}:${artifact.id}:${versionId}`
+      : null;
   const [state, setState] = useState<EvidenceState | null>(null);
   const [open, setOpen] = useState(true);
   const [active, setActive] = useState<ActivePreview | null>(null);
@@ -106,34 +92,14 @@ export function ReportEvidencePanel({
     if (!eligible || !workspaceId || !versionId || !key) {
       return;
     }
-    const cached = cache.current.get(key);
-    if (cached !== undefined) {
-      setState({ key, sources: cached });
-      return;
-    }
     let cancelled = false;
-    contentClient
-      .readArtifactVersionSourceFile(
-        workspaceId,
-        artifact.id,
-        versionId,
-        REPORT_SOURCE_FILE_NAME,
-      )
-      .then((document) => ({
-        sources: parseReportEvidenceSources(document),
-        settled: true,
-      }))
-      // 404 (no private source on this version) or a document that is not a
-      // report source mean "no panel" and are remembered; transient failures
-      // (network, 401 during refresh, 5xx) are not cached so a later open retries.
-      .catch((error: unknown) => ({
-        sources: null,
-        settled: isNotFoundError(error),
-      }))
-      .then(({ sources, settled }) => {
-        if (settled) cache.current.set(key, sources);
+    // The loader dedupes concurrent panels and remembers settled answers, so
+    // the Hub's inline panel and the expanded dialog share one request.
+    void loadReportEvidence(workspaceId, artifact.id, versionId).then(
+      (sources) => {
         if (!cancelled) setState({ key, sources });
-      });
+      },
+    );
     return () => {
       cancelled = true;
     };

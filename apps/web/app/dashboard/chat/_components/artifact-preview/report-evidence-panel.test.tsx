@@ -45,6 +45,7 @@ vi.mock("../file-citation-preview", () => ({
 }));
 
 import { ReportEvidencePanel } from "./report-evidence-panel";
+import { resetReportEvidenceCache } from "./report-evidence-loader";
 import {
   click,
   flush,
@@ -149,6 +150,7 @@ async function mountPanel(item: ArtifactListItem, workspaceId = "workspace-1") {
 
 beforeEach(() => {
   readArtifactVersionSourceFile.mockReset();
+  resetReportEvidenceCache();
 });
 afterEach(unmountAll);
 afterEach(() => {
@@ -270,4 +272,70 @@ test("reads each artifact version once", async () => {
     readArtifactVersionSourceFile.mock.calls.map((call) => call[2]),
     ["version-1", "version-2"],
   );
+});
+
+test("panels mounted at the same time share one source-file request", async () => {
+  let release: (value: unknown) => void = () => {};
+  readArtifactVersionSourceFile.mockReturnValue(
+    new Promise((resolve) => {
+      release = resolve;
+    }),
+  );
+  const first = await mountWithIntl(
+    createElement(ReportEvidencePanel, {
+      artifact: artifact(),
+      workspaceId: "workspace-1",
+    }),
+  );
+  const second = await mountWithIntl(
+    createElement(ReportEvidencePanel, {
+      artifact: artifact(),
+      workspaceId: "workspace-1",
+    }),
+  );
+  await flush(2);
+  assert.equal(readArtifactVersionSourceFile.mock.calls.length, 1);
+  release(reportSource);
+  await flush(4);
+  assert.equal(
+    first.container.querySelectorAll("button[aria-label^='Open evidence']")
+      .length,
+    3,
+  );
+  assert.equal(
+    second.container.querySelectorAll("button[aria-label^='Open evidence']")
+      .length,
+    3,
+  );
+  assert.equal(readArtifactVersionSourceFile.mock.calls.length, 1);
+});
+
+test("a remembered 404 is not requested again by a later panel", async () => {
+  readArtifactVersionSourceFile.mockRejectedValue(notFound());
+  const first = await mountPanel(artifact());
+  await first.unmount();
+  const { container } = await mountPanel(artifact());
+  assert.equal(container.innerHTML, "");
+  assert.equal(readArtifactVersionSourceFile.mock.calls.length, 1);
+});
+
+test("a transient failure is retried by a later panel", async () => {
+  readArtifactVersionSourceFile.mockRejectedValueOnce(
+    new HttpClientError({
+      message: "upstream",
+      status: 502,
+      statusText: "Bad Gateway",
+      code: "UPSTREAM",
+    }),
+  );
+  const first = await mountPanel(artifact());
+  assert.equal(first.container.innerHTML, "");
+  await first.unmount();
+  readArtifactVersionSourceFile.mockResolvedValueOnce(reportSource);
+  const { container } = await mountPanel(artifact());
+  assert.equal(
+    container.querySelectorAll("button[aria-label^='Open evidence']").length,
+    3,
+  );
+  assert.equal(readArtifactVersionSourceFile.mock.calls.length, 2);
 });
