@@ -339,6 +339,7 @@ test("projection never adds a client event kind", async () => {
   // a new member to DeepAgentTurnEvent without updating this table fails
   // typecheck, which is the point — projection is persistence, not streaming.
   const KNOWN_EVENT_KINDS: Record<DeepAgentTurnEvent["type"], true> = {
+    "agent-run-progress": true,
     "text-delta": true,
     "text-replace": true,
     "text-interrupted": true,

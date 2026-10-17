@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { agentRunStopMetadata } from "./agent-run-stop-metadata";
+import {
+  agentRunStopMetadata,
+  agentRunProgressMetadata,
+} from "./agent-run-stop-metadata";
 
 const stop = {
   reason: "step_limit",
@@ -30,4 +33,31 @@ test("error marker survives an omitted finish but explicit null clears it", () =
 test("cancellation always clears an earlier valid step-limit marker", () => {
   assert.equal(agentRunStopMetadata(stop, true).agentRunStop, null);
   assert.equal(agentRunStopMetadata(undefined, true).agentRunStop, null);
+});
+
+test("progress metadata ignores stale events, preserves omitted snapshots and clears cancellation", () => {
+  const progress = {
+    policyVersion: 2,
+    phase: "closing",
+    normalSteps: 400,
+    normalLimit: 400,
+    closingSteps: 2,
+    closingLimit: 40,
+    steps: 402,
+    limit: 440,
+  };
+  assert.deepEqual(agentRunProgressMetadata(progress), {
+    agentRunProgress: progress,
+  });
+  assert.deepEqual(
+    agentRunProgressMetadata(
+      { ...progress, closingSteps: 1, steps: 401 },
+      progress,
+    ),
+    { agentRunProgress: progress },
+  );
+  assert.deepEqual(agentRunProgressMetadata(undefined, progress), {});
+  assert.deepEqual(agentRunProgressMetadata(progress, progress, true), {
+    agentRunProgress: null,
+  });
 });

@@ -122,6 +122,7 @@ test("middleware stack keeps SourceWeft middleware order stable", async () => {
     const expectedMiddlewareOrder = [
       "SourceWeftToolCallCountChannels",
       "SourceWeftRunStepBudget",
+      "patchToolCallsMiddleware",
       "SourceWeftToolCallContext",
       "todoListMiddleware",
       ...(config.chat.agent.askUserEnabled ? ["SourceWeftAskUser"] : []),
@@ -141,6 +142,7 @@ test("middleware stack keeps SourceWeft middleware order stable", async () => {
       "SourceWeftUnansweredToolCalls",
       "modelRetryMiddleware",
       "ExtraMiddleware",
+      "SourceWeftClosingToolGovernance",
       "SourceWeftRunStepFinalization",
     ];
 
@@ -172,6 +174,7 @@ test("subagent middleware receives fresh retry, summary, limit, and observabilit
     [
       "SourceWeftToolCallCountChannels",
       "SourceWeftRunStepBudget",
+      "patchToolCallsMiddleware",
       "SourceWeftToolCallContext",
       ...(config.chat.agent.askUserEnabled ? ["SourceWeftAskUser"] : []),
       ...(config.chat.agent.askUserEnabled
@@ -185,6 +188,7 @@ test("subagent middleware receives fresh retry, summary, limit, and observabilit
       "SummarizationMiddleware",
       "SourceWeftUnansweredToolCalls",
       "modelRetryMiddleware",
+      "SourceWeftClosingToolGovernance",
       "SourceWeftRunStepFinalization",
     ],
   );

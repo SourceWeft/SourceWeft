@@ -1,4 +1,7 @@
-import { agentRunStopMetadata } from "./agent-run-stop-metadata";
+import {
+  agentRunStopMetadata,
+  agentRunProgressMetadata,
+} from "./agent-run-stop-metadata";
 import { sanitizeClientErrorMessage } from "../_components/chat-canvas/client-error-message";
 import {
   isDelegateToolName,
@@ -133,6 +136,7 @@ type HandleStreamingThreadTitlePendingInput = {
 
 type HandleStreamingFinishInput = ContextInput & {
   agentRunStop?: unknown;
+  agentRunProgress?: unknown;
   finishReason?: string | null;
 };
 
@@ -151,6 +155,7 @@ type HandleStreamingAssistantMessageInput = ContextInput & {
 
 type ErrorEventPayload = {
   agentRunStop?: unknown;
+  agentRunProgress?: unknown;
   code?: string;
   error?: string;
   messageId?: string;
@@ -162,6 +167,7 @@ type HandleStreamingErrorInput = {
   event: ErrorEventPayload;
   markStreamingAssistantAsError: (errorInput: {
     agentRunStop?: unknown;
+    agentRunProgress?: unknown;
     code?: string | null;
     error: string;
     messageId?: string | null;
@@ -796,10 +802,38 @@ export function handleStreamingThreadTitlePending({
   setPendingTitleJobId(typeof jobId === "string" ? jobId : null);
 }
 
+export function handleStreamingAgentRunProgress({
+  context,
+  progress,
+}: ContextInput & { progress: unknown }) {
+  context.updateStreamingAssistantMessage((message) => {
+    const run = context.toObjectRecord(message.metadata.threadRun);
+    if (
+      message.metadata.isCancelled === true ||
+      message.metadata.isError === true ||
+      message.metadata.errorCode === "CLIENT_CANCELLED" ||
+      message.metadata.agentRunStop ||
+      (run?.status && run.status !== "running")
+    )
+      return message;
+    return {
+      ...message,
+      metadata: {
+        ...message.metadata,
+        ...agentRunProgressMetadata(
+          progress,
+          message.metadata.agentRunProgress,
+        ),
+      },
+    };
+  });
+}
+
 export function handleStreamingFinish({
   context,
   finishReason,
   agentRunStop,
+  agentRunProgress,
 }: HandleStreamingFinishInput) {
   const renderBlocks = context.streamRenderBuffer.snapshotRenderBlocks();
   const terminalRecords = finishStreamingAssistantRun({
@@ -846,6 +880,13 @@ export function handleStreamingFinish({
       metadata: {
         ...message.metadata,
         ...terminalState.metadata,
+        ...agentRunProgressMetadata(
+          agentRunProgress,
+          message.metadata.agentRunProgress,
+          message.metadata.isCancelled === true ||
+            message.metadata.errorCode === "CLIENT_CANCELLED" ||
+            finishReason === "cancelled",
+        ),
         ...agentRunStopMetadata(
           agentRunStop,
           message.metadata.isCancelled === true ||
@@ -864,6 +905,7 @@ export function handleStreamingFinish({
 }
 
 export const testExports = {
+  handleStreamingAgentRunProgress,
   buildReasoningTraceEvent,
   buildThinkingStepTraceEvent,
   handleStreamingAssistantMessage,
@@ -927,6 +969,7 @@ export function handleStreamingAssistantMessage({
       error: null,
       errorCode: null,
       agentRunStop: null,
+      agentRunProgress: null,
       excludeFromContext: false,
       userMessageId: nextUserMessageId,
       sourceUserMessageId: nextUserMessageId,
@@ -954,6 +997,11 @@ export function handleStreamingError({
   const errorMessage = sanitizeClientErrorMessage(event.error) ?? "Model error";
   setSuppressErrorToast(event.code === "CLIENT_CANCELLED");
   markStreamingAssistantAsError({
+    ...agentRunProgressMetadata(
+      event.agentRunProgress,
+      undefined,
+      event.code === "CLIENT_CANCELLED",
+    ),
     ...agentRunStopMetadata(
       event.agentRunStop,
       event.code === "CLIENT_CANCELLED",
@@ -1037,6 +1085,7 @@ export function handleStreamingStart({
       userMessageId: serverUserMessageId,
       sourceUserMessageId: serverUserMessageId,
       agentRunStop: null,
+      agentRunProgress: null,
       threadRun: {
         ...(context.toObjectRecord(message.metadata.threadRun) ?? {}),
         ...(serverThreadRun ?? {}),

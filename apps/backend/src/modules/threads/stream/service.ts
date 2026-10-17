@@ -1,4 +1,4 @@
-import { readAgentRunStop } from "@sourceweft/contracts";
+import { readAgentRunStop, readAgentRunProgress } from "@sourceweft/contracts";
 import { toObjectRecord } from "../../../shared/records";
 import type { MeterConsumeResponse } from "@sourceweft/contracts";
 import { clientReasoningMetadata } from "../turn/reasoning-state";
@@ -665,6 +665,7 @@ class ContentThreadStreamService {
               usage: completedOutcome.usage,
               finishReason: completedOutcome.finishReason ?? "stop",
               agentRunStop: completedOutcome.agentRunStop,
+              agentRunProgress: completedOutcome.agentRunProgress,
               reasoning: completedOutcome.reasoning,
               agentCheckpoint: completedOutcome.agentCheckpoint,
               latencyMs: Date.now() - chatStartedAt,
@@ -835,7 +836,10 @@ class ContentThreadStreamService {
         type: "finish",
         finishReason: outcome?.finishReason ?? "stop",
         ...(finalizedAssistantMessage
-          ? { agentRunStop: readAgentRunStop(outcome?.agentRunStop) }
+          ? {
+              agentRunStop: readAgentRunStop(outcome?.agentRunStop),
+              agentRunProgress: readAgentRunProgress(outcome?.agentRunProgress),
+            }
           : {}),
         ...(finalizedAssistantMessage
           ? {
@@ -1221,6 +1225,7 @@ class ContentThreadStreamService {
             usage: completedOutcome.usage,
             finishReason: completedOutcome.finishReason ?? "stop",
             agentRunStop: completedOutcome.agentRunStop,
+            agentRunProgress: completedOutcome.agentRunProgress,
             reasoning: completedOutcome.reasoning,
             agentCheckpoint: completedOutcome.agentCheckpoint,
             latencyMs: Date.now() - chatStartedAt,

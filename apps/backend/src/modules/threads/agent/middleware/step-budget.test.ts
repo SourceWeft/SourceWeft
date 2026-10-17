@@ -22,7 +22,7 @@ import { z } from "zod";
 import { ScriptedChatModel } from "../../../../test/chat-model";
 import { ContentError } from "../../../content/errors";
 import {
-  createSourceWeftStepBudgetMiddleware,
+  createSourceWeftStepBudgetMiddleware as createCurrentStepBudgetMiddleware,
   selectAgentStepStop,
   agentRunStopFromStepBudgetError,
   currentAgentStepScope,
@@ -35,6 +35,39 @@ import { createSourceWeftSummarizationMiddleware } from "./context-compression";
 import { createCommandToolChoiceMiddleware } from "./command-tool-choice";
 import { createSourceWeftToolCallCountChannelsMiddleware } from "./tool-call-count-channels";
 import { createSourceWeftToolCallContextMiddleware } from "./tool-call-context";
+
+// Historical suite exercises explicit checkpoint v1; production initializes v2.
+function createSourceWeftStepBudgetMiddleware(input: {
+  userMessageId?: string;
+  maxSteps?: number;
+}) {
+  const budget = createCurrentStepBudgetMiddleware(input);
+  const original = budget.governance.beforeAgent as Function;
+  budget.governance.beforeAgent = ((state: any, runtime: any) => {
+    const initialized = original(state, runtime);
+    const previous = state.sourceweftRunStepBudget;
+    if (
+      previous != null &&
+      (!previous.scopes || typeof previous.userMessageId !== "string")
+    )
+      return initialized;
+    const scope = currentAgentStepScope();
+    const existing =
+      previous?.userMessageId === input.userMessageId ? previous.scopes : {};
+    if (existing?.[scope]) return initialized;
+    return {
+      ...initialized,
+      sourceweftRunStepBudget: {
+        userMessageId: input.userMessageId,
+        scopes: {
+          ...existing,
+          [scope]: { steps: 0, limit: input.maxSteps ?? 2, summary: "unused" },
+        },
+      },
+    };
+  }) as typeof budget.governance.beforeAgent;
+  return budget;
+}
 
 type Options = { configurable: { thread_id: string } };
 type Agent = {
@@ -519,36 +552,45 @@ test("summary inputs keep bounded explicitly untrusted result excerpts and disca
   assert.doesNotMatch(text, /PRIVATE_REASONING/);
 });
 
-test("400 business decisions finish their tools before one finalization without hitting graph recursion", async () => {
-  let business = 0,
-    summaries = 0,
-    effects = 0;
-  const probe = tool(
-    async () => {
-      effects++;
-      return "saved";
-    },
-    { name: "probe", description: "effect", schema: z.object({}) },
-  );
-  const model = new ScriptedChatModel((messages) =>
-    isSummary(messages)
-      ? (summaries++,
-        new AIMessage("400 operations completed; remaining work can continue."))
-      : (business++,
-        new AIMessage({ content: "", tool_calls: [call(`step-${business}`)] })),
-  );
-  const result = await graph({ model, tools: [probe], limit: 400 }).invoke({
-    messages: [new HumanMessage("long task")],
-  });
-  assert.equal(business, 400);
-  assert.equal(effects, 400);
-  assert.equal(summaries, 1);
-  assert.equal(
-    selectAgentStepStop(result, { userMessageId: "user-1" })?.agentRunStop
-      .steps,
-    400,
-  );
-});
+test(
+  "400 business decisions finish their tools before one finalization without hitting graph recursion",
+  { timeout: 300_000 },
+  async () => {
+    let business = 0,
+      summaries = 0,
+      effects = 0;
+    const probe = tool(
+      async () => {
+        effects++;
+        return "saved";
+      },
+      { name: "probe", description: "effect", schema: z.object({}) },
+    );
+    const model = new ScriptedChatModel((messages) =>
+      isSummary(messages)
+        ? (summaries++,
+          new AIMessage(
+            "400 operations completed; remaining work can continue.",
+          ))
+        : (business++,
+          new AIMessage({
+            content: "",
+            tool_calls: [call(`step-${business}`)],
+          })),
+    );
+    const result = await graph({ model, tools: [probe], limit: 400 }).invoke({
+      messages: [new HumanMessage("long task")],
+    });
+    assert.equal(business, 400);
+    assert.equal(effects, 400);
+    assert.equal(summaries, 1);
+    assert.equal(
+      selectAgentStepStop(result, { userMessageId: "user-1" })?.agentRunStop
+        .steps,
+      400,
+    );
+  },
+);
 
 test("legacy tool audit counters never become steps or block a fresh policy run", async () => {
   const saver = new MemorySaver();

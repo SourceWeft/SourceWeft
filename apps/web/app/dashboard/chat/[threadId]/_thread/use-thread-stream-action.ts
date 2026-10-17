@@ -1,5 +1,8 @@
 "use client";
-import { agentRunStopMetadata } from "../agent-run-stop-metadata";
+import {
+  agentRunStopMetadata,
+  agentRunProgressMetadata,
+} from "../agent-run-stop-metadata";
 import { sanitizeClientErrorMessage } from "../../_components/chat-canvas/client-error-message";
 
 import { useCallback } from "react";
@@ -610,6 +613,7 @@ export function useThreadStreamAction({
 
       const markStreamingAssistantAsError = (errorInput: {
         agentRunStop?: unknown;
+        agentRunProgress?: unknown;
         code?: string | null;
         error: string;
         messageId?: string | null;
@@ -677,6 +681,11 @@ export function useThreadStreamAction({
             isError: !isClientCancelled,
             isCancelled: isClientCancelled,
             ...agentRunStopMetadata(errorInput.agentRunStop, isClientCancelled),
+            ...agentRunProgressMetadata(
+              errorInput.agentRunProgress,
+              message.metadata.agentRunProgress,
+              isClientCancelled,
+            ),
             excludeFromContext: true,
             error: errorInput.error,
             errorCode: errorInput.code ?? null,

@@ -1690,3 +1690,46 @@ test("finish persists validated step stop while cancellation suppresses continua
   });
   assert.equal(message.metadata.agentRunStop, null);
 });
+
+test("root phase progress survives finish and ignores stale or terminal late events", () => {
+  let message: ChatMessageItem = {
+    id: "assistant-closing",
+    role: "assistant",
+    content: "",
+    contentJson: {},
+    parentMessageId: null,
+    metadata: { threadRun: { status: "running" } },
+    createdAt: new Date(0).toISOString(),
+  };
+  const context = createBaseStreamingContext({
+    updateStreamingAssistantMessage: (updater) => {
+      message = updater(message);
+    },
+  });
+  const progress = {
+    policyVersion: 2,
+    phase: "closing",
+    normalSteps: 400,
+    normalLimit: 400,
+    closingSteps: 2,
+    closingLimit: 40,
+    steps: 402,
+    limit: 440,
+  };
+  testExports.handleStreamingAgentRunProgress({ context, progress });
+  assert.deepEqual(message.metadata.agentRunProgress, progress);
+  testExports.handleStreamingAgentRunProgress({
+    context,
+    progress: { ...progress, closingSteps: 1, steps: 401 },
+  });
+  assert.deepEqual(message.metadata.agentRunProgress, progress);
+  testExports.handleStreamingFinish({ context });
+  assert.deepEqual(message.metadata.agentRunProgress, progress);
+  testExports.handleStreamingAgentRunProgress({
+    context,
+    progress: { ...progress, closingSteps: 3, steps: 403 },
+  });
+  assert.deepEqual(message.metadata.agentRunProgress, progress);
+  testExports.handleStreamingFinish({ context, finishReason: "cancelled" });
+  assert.equal(message.metadata.agentRunProgress, null);
+});

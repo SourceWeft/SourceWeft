@@ -1368,3 +1368,120 @@ test("cancellation message writers reject a late successful step-limit marker", 
     );
   }
 });
+
+test("closing progress survives approval/reload and rejects regressions and late terminal events", () => {
+  const closing = {
+    policyVersion: 2,
+    phase: "closing",
+    normalSteps: 400,
+    normalLimit: 400,
+    closingSteps: 1,
+    closingLimit: 40,
+    steps: 401,
+    limit: 440,
+  } as const;
+  let snapshot = testExports.updateSnapshotFromPayload(
+    {},
+    { type: "agent-run-progress", progress: closing },
+  );
+  assert.deepEqual(snapshot.agentRunProgress, closing);
+  assert.equal(snapshot.agentRunStop, undefined);
+  for (const status of [
+    "running",
+    "waiting_for_approval",
+    "completed",
+    "failed",
+  ] as const) {
+    const input = { currentMetadata: {}, run: createRun({ status }), snapshot };
+    assert.deepEqual(
+      buildAssistantMessageSnapshotMetadata(input).agentRunProgress,
+      closing,
+    );
+    assert.deepEqual(
+      buildAssistantMessageConfirmationMetadata(input).agentRunProgress,
+      closing,
+    );
+    assert.deepEqual(
+      testExports.buildSnapshotMetadata(input).agentRunProgress,
+      closing,
+    );
+  }
+  snapshot = testExports.updateSnapshotFromPayload(snapshot, {
+    type: "agent-run-progress",
+    progress: {
+      ...closing,
+      phase: "working",
+      closingSteps: 0,
+      steps: 400,
+    },
+  });
+  assert.deepEqual(snapshot.agentRunProgress, closing);
+  snapshot = testExports.updateSnapshotFromPayload(snapshot, {
+    type: "finish",
+    finishReason: "stop",
+  });
+  snapshot = testExports.updateSnapshotFromPayload(snapshot, {
+    type: "agent-run-progress",
+    progress: {
+      ...closing,
+      phase: "finalizing",
+      closingSteps: 40,
+      steps: 440,
+    },
+  });
+  assert.deepEqual(snapshot.agentRunProgress, closing);
+  const cancelled = testExports.updateSnapshotFromPayload(snapshot, {
+    type: "error",
+    code: "CLIENT_CANCELLED",
+  });
+  assert.equal(cancelled.agentRunProgress, null);
+  assert.equal(
+    buildAssistantMessageSnapshotMetadata({
+      currentMetadata: { agentRunProgress: closing },
+      run: createRun({ status: "cancelled" }),
+      snapshot,
+    }).agentRunProgress,
+    undefined,
+  );
+});
+
+test("successive late phase events cannot resurrect an error or cancellation snapshot", () => {
+  const progress = {
+    policyVersion: 2,
+    phase: "closing",
+    normalSteps: 400,
+    normalLimit: 400,
+    closingSteps: 1,
+    closingLimit: 40,
+    steps: 401,
+    limit: 440,
+  } as const;
+  for (const code of ["CLIENT_CANCELLED", "MODEL_UPSTREAM_ERROR"]) {
+    const stopped = testExports.updateSnapshotFromPayload(
+      {},
+      { type: "error", code },
+    );
+    let snapshot = stopped;
+    for (let i = 0; i < 2; i++)
+      snapshot = testExports.updateSnapshotFromPayload(snapshot, {
+        type: "agent-run-progress",
+        progress,
+      });
+    assert.deepEqual(snapshot, stopped);
+    snapshot = testExports.updateSnapshotFromPayload(snapshot, {
+      type: "thread-title",
+      title: "late title",
+    });
+    snapshot = testExports.updateSnapshotFromPayload(snapshot, {
+      type: "agent-run-progress",
+      progress,
+    });
+    assert.equal(snapshot.agentRunProgress, stopped.agentRunProgress);
+    snapshot = testExports.updateSnapshotFromPayload(snapshot, {
+      type: "finish",
+      agentRunProgress: progress,
+    });
+    assert.equal(snapshot.agentRunProgress, stopped.agentRunProgress);
+    assert.equal(snapshot.lastEventType, "finish");
+  }
+});

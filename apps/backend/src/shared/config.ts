@@ -34,14 +34,32 @@ function parseAgentMaxSteps() {
       );
     }
   }
+  return parseAgentStepCount(name, 400);
+}
+
+function parseAgentStepCount(name: string, fallback: number) {
   const raw = process.env[name];
-  if (raw === undefined) return 400;
+  if (raw === undefined) return fallback;
   const value = raw.trim();
   const parsed = Number(value);
   if (!/^[1-9]\d*$/.test(value) || !Number.isSafeInteger(parsed)) {
     throw new Error(`${name} must be a positive decimal safe integer.`);
   }
   return parsed;
+}
+
+function parseAgentStepBudget() {
+  const maxSteps = parseAgentMaxSteps();
+  const closingSteps = parseAgentStepCount(
+    "SOURCEWEFT_AGENT_CLOSING_STEPS",
+    40,
+  );
+  if (!Number.isSafeInteger(maxSteps + closingSteps)) {
+    throw new Error(
+      "SOURCEWEFT_AGENT_MAX_STEPS + SOURCEWEFT_AGENT_CLOSING_STEPS must be a safe integer.",
+    );
+  }
+  return { maxSteps, closingSteps };
 }
 
 function parsePositiveNumber(value: string | undefined, fallback: number) {
@@ -478,7 +496,7 @@ export const config = {
       maxReservedOutputTokens: 8_192,
       maxGrepRecallTopK: 300,
       maxReadOutputChars: 80_000,
-      maxSteps: parseAgentMaxSteps(),
+      ...parseAgentStepBudget(),
       interpreter: {
         enabled: parseStrictBooleanEnv(
           "SOURCEWEFT_AGENT_INTERPRETER_ENABLED",

@@ -1,4 +1,4 @@
-import type { AgentRunStop } from "@sourceweft/contracts";
+import type { AgentRunStop, AgentRunProgress } from "@sourceweft/contracts";
 import type { UsageInfo } from "@sourceweft/model-gateway";
 import type { AgentCitation } from "../citation-registry";
 import { runToolRetrieval } from "./retrieval-runner";
@@ -29,11 +29,13 @@ export type DeepAgentTurnOutcome = {
   usage?: UsageInfo;
   finishReason?: string;
   agentRunStop?: AgentRunStop;
+  agentRunProgress?: AgentRunProgress;
   reasoning?: string;
   agentCheckpoint: AgentCheckpointMetadata;
 };
 
 export type DeepAgentTurnEvent =
+  | { type: "agent-run-progress"; progress: AgentRunProgress }
   | {
       type: "text-delta";
       delta: string;

@@ -322,6 +322,7 @@ for (const scenario of ["summary-failure", "payment-failure"] as const) {
     const budget = createSourceWeftStepBudgetMiddleware({
       userMessageId: "human-current",
       maxSteps: 1,
+      closingSteps: 1,
     });
     const agent = createDeepAgent({
       model,
@@ -352,7 +353,11 @@ for (const scenario of ["summary-failure", "payment-failure"] as const) {
       1,
       "the fixture must actually exercise the tools-disabled summary call",
     );
-    assert.equal(effects, 1, "the exhausted graph executes no extra tool");
+    assert.equal(
+      effects,
+      2,
+      "normal and closing batches execute, finalization executes no extra tool",
+    );
     // The real middleware supplies its private default state; do not seed a
     // forged budget channel merely to satisfy the SDK's projected input type.
     const head = (await agent.getState(options)) as unknown as {
@@ -385,8 +390,13 @@ for (const scenario of ["summary-failure", "payment-failure"] as const) {
     );
     assert.deepEqual(agentRunStopFromStepBudgetError(normalized), {
       reason: "step_limit",
-      steps: 1,
-      limit: 1,
+      policyVersion: 2,
+      normalSteps: 1,
+      normalLimit: 1,
+      closingSteps: 1,
+      closingLimit: 1,
+      steps: 2,
+      limit: 2,
       canContinue: true,
       summaryStatus: "failed",
     });

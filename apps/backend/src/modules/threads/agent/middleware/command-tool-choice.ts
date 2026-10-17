@@ -1,5 +1,9 @@
 import { createMiddleware } from "langchain";
-import { isAgentStepFinalizing } from "./step-budget";
+import {
+  AGENT_STEP_AUTHORIZED_TOOL_IDS,
+  isAgentStepClosing,
+  isAgentStepFinalizing,
+} from "./step-budget";
 
 export type CommandExecutionPolicy = {
   initialToolPolicy: "auto" | { kind: "force"; toolName: string };
@@ -102,8 +106,22 @@ export function createCommandToolChoiceMiddleware(
       if (isAgentStepFinalizing(request.state))
         return handler({ ...request, tools: [], toolChoice: "none" });
       const tools = filterCommandModelTools(request.tools, policy.toolPolicy);
+      const authorized = {
+        [AGENT_STEP_AUTHORIZED_TOOL_IDS]: tools.flatMap((tool) => {
+          const name = commandModelToolName(tool);
+          return name ? [name] : [];
+        }),
+      };
+      if (isAgentStepClosing(request.state)) {
+        return handler({
+          ...request,
+          ...authorized,
+          tools,
+          toolChoice: "auto",
+        });
+      }
       if (policy.initialToolPolicy === "auto") {
-        return handler({ ...request, tools });
+        return handler({ ...request, ...authorized, tools });
       }
       const targetToolName = policy.initialToolPolicy.toolName;
       const targetTool = tools.find(
@@ -121,6 +139,7 @@ export function createCommandToolChoiceMiddleware(
       );
       const commandRequest = {
         ...request,
+        ...authorized,
         tools,
         modelSettings: {
           ...request.modelSettings,

@@ -37,6 +37,7 @@ import { handleCustomStreamChunk } from "./custom-stream-handler";
 import { buildFinalOutcome } from "./final-outcome";
 import {
   selectAgentStepStop,
+  selectAgentRunProgress,
   AgentStepSummaryError,
 } from "../middleware/step-budget";
 import {
@@ -601,6 +602,10 @@ export async function* invokeDeepAgentTurn(input: {
           userMessageId: input.prepared.userMessage.id,
           config: runConfig,
         };
+        const progress =
+          selectAgentRunProgress(graphOutput, selectionInput) ??
+          selectAgentRunProgress(headState, selectionInput);
+        if (progress) runtime.agentRunProgress = progress;
         const selected =
           selectAgentStepStop(graphOutput, selectionInput) ??
           selectAgentStepStop(headState, selectionInput);

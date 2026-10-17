@@ -2085,6 +2085,12 @@
       "dismissQuestion": "Dismiss question",
       "end": "End"
     },
+    "runBudget": {
+      "closing": "Completing checks and delivery. Tools remain available within the closing budget.",
+      "finalizing": "Preparing a final progress summary.",
+      "budget": "Per agent: {normalLimit} working steps + {closingLimit} closing steps.",
+      "usage": "Used: {normalSteps} working steps, {closingSteps} closing steps."
+    },
     "stepLimit": {
       "title": "Run step limit reached",
       "body": "This run used {steps} of {limit} steps. Review the summary and continue any unfinished work.",

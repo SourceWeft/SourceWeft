@@ -5,12 +5,17 @@ import { afterEach, beforeEach, test, vi } from "vitest";
 // a developer's .env and refill values deliberately absent in a test.
 vi.mock("dotenv/config", () => ({}));
 
+const closingStepsEnv = "SOURCEWEFT_AGENT_CLOSING_STEPS";
 const maxStepsEnv = "SOURCEWEFT_AGENT_MAX_STEPS";
 const retiredToolLimitEnvs = [
   "SOURCEWEFT_AGENT_TOOL_CALL_RUN_LIMIT",
   "SOURCEWEFT_AGENT_TOOL_CALL_THREAD_LIMIT",
 ] as const;
-const agentBudgetEnvNames = [maxStepsEnv, ...retiredToolLimitEnvs];
+const agentBudgetEnvNames = [
+  maxStepsEnv,
+  closingStepsEnv,
+  ...retiredToolLimitEnvs,
+];
 const originalAgentBudgetEnv = new Map(
   agentBudgetEnvNames.map((name) => [name, process.env[name]]),
 );
@@ -171,6 +176,7 @@ test("agent runs default to 400 model-decision steps, without legacy tool-count 
   vi.resetModules();
   const { config } = await import("./config");
   assert.equal(config.chat.agent.maxSteps, 400);
+  assert.equal(config.chat.agent.closingSteps, 40);
   assert.equal("toolCallRunLimit" in config.chat.agent, false);
   assert.equal("toolCallThreadLimit" in config.chat.agent, false);
 });
@@ -179,7 +185,7 @@ for (const [raw, expected] of [
   ["1", 1],
   ["400", 400],
   [" 25 ", 25],
-  [String(Number.MAX_SAFE_INTEGER), Number.MAX_SAFE_INTEGER],
+  [String(Number.MAX_SAFE_INTEGER - 40), Number.MAX_SAFE_INTEGER - 40],
 ] as const) {
   test(`agent max steps accepts an explicit positive decimal safe integer: ${JSON.stringify(raw)}`, async () => {
     process.env[maxStepsEnv] = raw;
@@ -333,3 +339,35 @@ for (const value of ["0", "33", "2.5", "many"]) {
     );
   });
 }
+
+for (const raw of [
+  "",
+  "0",
+  "-1",
+  "1.2",
+  "40.0",
+  "01",
+  "1e3",
+  "NaN",
+  "9007199254740992",
+]) {
+  test(`invalid explicit closing budget fails startup: ${JSON.stringify(raw)}`, async () => {
+    process.env[closingStepsEnv] = raw;
+    vi.resetModules();
+    await assert.rejects(
+      import("./config"),
+      /SOURCEWEFT_AGENT_CLOSING_STEPS must be a positive decimal safe integer/,
+    );
+  });
+}
+test("closing budget supports a strict override and rejects unsafe combined budgets", async () => {
+  process.env[closingStepsEnv] = " 12 ";
+  vi.resetModules();
+  assert.equal((await import("./config")).config.chat.agent.closingSteps, 12);
+  process.env[maxStepsEnv] = String(Number.MAX_SAFE_INTEGER);
+  vi.resetModules();
+  await assert.rejects(
+    import("./config"),
+    /MAX_STEPS \+ SOURCEWEFT_AGENT_CLOSING_STEPS must be a safe integer/,
+  );
+});

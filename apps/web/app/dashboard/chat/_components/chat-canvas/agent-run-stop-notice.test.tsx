@@ -2,7 +2,10 @@
 import { createElement } from "react";
 import assert from "node:assert/strict";
 import { afterEach, test, vi } from "vitest";
-import { AgentRunStopNotice } from "./agent-run-stop-notice";
+import {
+  AgentRunStopNotice,
+  AgentRunProgressNotice,
+} from "./agent-run-stop-notice";
 import { click, mountWithIntl, unmountAll, withIntl } from "@/test/react";
 
 afterEach(unmountAll);
@@ -49,4 +52,64 @@ test("failed-summary and read-only states remain explicit without a delivered-su
     /report.*delivered|successfully completed/i,
   );
   assert.equal(view.container.querySelector("button")?.disabled, true);
+});
+
+test("active closing and finalizing remain neutral with tools and no Continue action", async () => {
+  const progress = {
+    policyVersion: 2,
+    phase: "closing",
+    normalSteps: 400,
+    normalLimit: 400,
+    closingSteps: 2,
+    closingLimit: 40,
+    steps: 402,
+    limit: 440,
+  } as const;
+  const view = await mountWithIntl(
+    createElement(AgentRunProgressNotice, { progress }),
+  );
+  assert.match(view.container.textContent ?? "", /Tools remain available/);
+  assert.match(
+    view.container.textContent ?? "",
+    /400 working steps \+ 40 closing steps/,
+  );
+  assert.equal(view.container.querySelector("button"), null);
+  assert.doesNotMatch(
+    view.container.textContent ?? "",
+    /limit reached|stopped/i,
+  );
+  await view.render(
+    withIntl(
+      createElement(AgentRunProgressNotice, {
+        progress: {
+          ...progress,
+          phase: "finalizing",
+          closingSteps: 40,
+          steps: 440,
+        },
+      }),
+    ),
+  );
+  assert.match(view.container.textContent ?? "", /final progress summary/);
+  assert.equal(view.container.querySelector("button"), null);
+});
+test("segmented final stop explains the independent 400+40 budget", async () => {
+  const view = await mountWithIntl(
+    createElement(AgentRunStopNotice, {
+      stop: {
+        ...stop,
+        policyVersion: 2,
+        normalSteps: 400,
+        normalLimit: 400,
+        closingSteps: 40,
+        closingLimit: 40,
+        steps: 440,
+        limit: 440,
+      },
+    }),
+  );
+  assert.match(
+    view.container.textContent ?? "",
+    /Per agent: 400 working steps \+ 40 closing steps/,
+  );
 });

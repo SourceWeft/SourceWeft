@@ -120,3 +120,45 @@ test("custom stream handler ignores unknown custom payloads", async () => {
     sequence: 1,
   });
 });
+
+test("budget phase progress is validated and monotonic without creating a stop", async () => {
+  const runtime = createTurnRuntime({
+    prepared: {
+      runTraceId: "budget-progress",
+      workspace: { id: "workspace" },
+      thread: { id: "thread" },
+    } as never,
+  });
+  const closing = {
+    policyVersion: 2,
+    phase: "closing",
+    normalSteps: 400,
+    normalLimit: 400,
+    closingSteps: 1,
+    closingLimit: 40,
+    steps: 401,
+    limit: 440,
+  } as const;
+  const events = await collectCustomStreamEvents({
+    payload: { type: "agent-run-progress", progress: closing },
+    runtime,
+  });
+  assert.deepEqual(events, [{ type: "agent-run-progress", progress: closing }]);
+  assert.deepEqual(runtime.agentRunProgress, closing);
+  assert.equal(runtime.agentRunStop, undefined);
+  for (const progress of [
+    closing,
+    { ...closing, phase: "working", closingSteps: 0, steps: 400 },
+    { ...closing, privateScope: "secret" },
+    { ...closing, closingLimit: 80, limit: 480 },
+  ]) {
+    assert.deepEqual(
+      await collectCustomStreamEvents({
+        payload: { type: "agent-run-progress", progress },
+        runtime,
+      }),
+      [],
+    );
+  }
+  assert.deepEqual(runtime.agentRunProgress, closing);
+});

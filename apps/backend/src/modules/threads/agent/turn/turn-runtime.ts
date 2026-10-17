@@ -1,4 +1,4 @@
-import type { AgentRunStop } from "@sourceweft/contracts";
+import type { AgentRunStop, AgentRunProgress } from "@sourceweft/contracts";
 import { AgentCitationRegistry } from "../citation-registry";
 import type {
   PreparedThreadTurn,
@@ -94,6 +94,7 @@ export function createTurnRuntime(input: { prepared: PreparedThreadTurn }) {
     assistantContentFromUpdates: null as string | null,
     finishReason: undefined as string | undefined,
     agentRunStop: undefined as AgentRunStop | undefined,
+    agentRunProgress: undefined as AgentRunProgress | undefined,
     stepLimitSummary: null as string | null,
     modelReasoning: undefined as string | undefined,
     providerFields: undefined as Record<string, unknown> | undefined,

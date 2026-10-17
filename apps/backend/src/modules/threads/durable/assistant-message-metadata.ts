@@ -1,4 +1,4 @@
-import { readAgentRunStop } from "@sourceweft/contracts";
+import { readAgentRunStop, readAgentRunProgress } from "@sourceweft/contracts";
 import { findMessageRecord, updateMessageRecord } from "../message-repository";
 import { preserveTraceMetadata } from "../turn/trace-metadata";
 import { projectSnapshotReasoning } from "../turn/reasoning-state";
@@ -31,10 +31,9 @@ export function withAssistantThreadRunMetadata(
   run: ChatThreadRunRecord,
 ) {
   const cancelled = run.status === "cancelled";
-  const normalized =
-    cancelled && snapshot.agentRunStop !== undefined
-      ? { ...snapshot, agentRunStop: null }
-      : snapshot;
+  const normalized = cancelled
+    ? { ...snapshot, agentRunStop: null, agentRunProgress: null }
+    : snapshot;
   if (!normalized.assistantMessage) {
     return normalized;
   }
@@ -44,7 +43,9 @@ export function withAssistantThreadRunMetadata(
       ...normalized.assistantMessage,
       metadata: {
         ...normalized.assistantMessage.metadata,
-        ...(cancelled ? { agentRunStop: undefined } : {}),
+        ...(cancelled
+          ? { agentRunStop: undefined, agentRunProgress: undefined }
+          : {}),
         ...buildThreadRunMetadata(run),
       },
     },
@@ -203,6 +204,11 @@ export function buildAssistantMessageSnapshotMetadata(input: {
   snapshot: ChatRunSnapshot;
 }) {
   const nextMetadata = {
+    agentRunProgress:
+      input.run.status === "cancelled" ||
+      input.run.status === "cancel_requested"
+        ? undefined
+        : (readAgentRunProgress(input.snapshot.agentRunProgress) ?? undefined),
     agentRunStop:
       input.run.status === "cancelled" ||
       input.run.status === "cancel_requested"
@@ -258,6 +264,11 @@ export function buildAssistantMessageConfirmationMetadata(input: {
   const approvalExpiresAt =
     input.snapshot.approvalExpiresAt ?? currentThreadRun?.approvalExpiresAt;
   const nextMetadata = {
+    agentRunProgress:
+      input.run.status === "cancelled" ||
+      input.run.status === "cancel_requested"
+        ? undefined
+        : (readAgentRunProgress(input.snapshot.agentRunProgress) ?? undefined),
     agentRunStop:
       input.run.status === "cancelled" ||
       input.run.status === "cancel_requested"

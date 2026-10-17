@@ -35,6 +35,7 @@ import type { TraceContext } from "../../../llm-observability";
 import { createSourceWeftToolCallContextMiddleware } from "./tool-call-context";
 import { createSourceWeftToolCallCountChannelsMiddleware } from "./tool-call-count-channels";
 import { createSourceWeftStepBudgetMiddleware } from "./step-budget";
+import { createSourceWeftClosingToolGovernanceMiddleware } from "./closing-tool-governance";
 
 const RETRYABLE_READ_TOOL_NAMES = [
   AGENT_TOOL_NAMES.searchSources,
@@ -104,6 +105,7 @@ export function createSourceWeftSubagentMiddlewareStack(
     // concurrent-safe reducer (parallel `task` subagents write them at once).
     createSourceWeftToolCallCountChannelsMiddleware(),
     stepBudget.governance,
+    stepBudget.toolCallRepair,
     createSourceWeftToolCallContextMiddleware({
       subagentType: input.toolObservabilityContext?.subagentType,
     }),
@@ -133,6 +135,9 @@ export function createSourceWeftSubagentMiddlewareStack(
       retryOn: isRetryableModelContentError,
       onFailure: "error",
     }),
+    createSourceWeftClosingToolGovernanceMiddleware({
+      userMessageId: input.toolObservabilityContext?.userMessageId,
+    }),
     stepBudget.finalization,
   ].map((middleware) =>
     [
@@ -142,6 +147,7 @@ export function createSourceWeftSubagentMiddlewareStack(
       "ContextEditingMiddleware",
       "SourceWeftCommandToolChoice",
       "SourceWeftRunStepFinalization",
+      "SourceWeftClosingToolGovernance",
     ].includes(middleware.name)
       ? stepBudget.attachBudgetState(middleware)
       : middleware,
@@ -169,6 +175,7 @@ export async function createSourceWeftAgentMiddlewareStack(
     // concurrent-safe reducer (parallel `task` subagents write them at once).
     createSourceWeftToolCallCountChannelsMiddleware(),
     stepBudget.governance,
+    stepBudget.toolCallRepair,
     createSourceWeftToolCallContextMiddleware(),
     // deepagents >=1.12 no longer includes the todo middleware by default;
     // tool tracking and the todo panel depend on the write_todos tool.
@@ -212,6 +219,9 @@ export async function createSourceWeftAgentMiddlewareStack(
       onFailure: "error",
     }),
     ...(input.extraMiddleware ?? []),
+    createSourceWeftClosingToolGovernanceMiddleware({
+      userMessageId: input.toolObservabilityContext?.userMessageId,
+    }),
     stepBudget.finalization,
   ].map((middleware) =>
     [
@@ -221,6 +231,7 @@ export async function createSourceWeftAgentMiddlewareStack(
       "ContextEditingMiddleware",
       "SourceWeftCommandToolChoice",
       "SourceWeftRunStepFinalization",
+      "SourceWeftClosingToolGovernance",
     ].includes(middleware.name)
       ? stepBudget.attachBudgetState(middleware)
       : middleware,

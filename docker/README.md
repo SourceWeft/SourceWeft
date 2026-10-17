@@ -56,21 +56,26 @@ is `http://api:3001` inside the Web container, independently of public addresses
 
 ## Agent run limits
 
-`SOURCEWEFT_AGENT_MAX_STEPS` defaults to `400` for each root or child agent run.
-One logical model decision and its complete tool batch count as one step;
-parallel tools and tool retries do not each consume another step. Root and child
-budgets are independent, so a delegated task tree can exceed 400 steps in total.
+`SOURCEWEFT_AGENT_MAX_STEPS` defaults to `400` working steps and
+`SOURCEWEFT_AGENT_CLOSING_STEPS` defaults to `40` additional tool-enabled closing
+steps for each root or child agent run. One logical model decision and its complete
+tool batch count as one step; parallel tools and tool retries do not each consume
+another step. Root and child budgets are independent: 440 is not a task-tree total.
 Auxiliary model calls and retries remain metered by the existing gateway.
 
-At the limit, an already authorized tool batch finishes under its existing
-approval and timeout rules, followed by at most one additional summary using the
-same model with tools disabled. The summary identifies unfinished work; it does
-not mark an unpublished report as delivered. If summarization fails, the turn
-reports the failure and preserves saved progress. Continue with a new message in
-the same conversation. Retry and approval resume retain their original budget.
+After working steps, the current authorized tool batch finishes and the agent
+enters closing to verify, repair, save and publish the existing delivery. Existing
+authorization and publication checks remain; closing cannot start new delegated
+tasks or expand the available tool identities. A child already requested by the
+last working batch retains its independent budget. Natural completion in either
+stage ends normally. After closing is exhausted, the last tool batch finishes,
+followed by at most one same-model summary with tools disabled. A summary does not
+mark an unpublished report as delivered. Summary failure remains explicit and
+preserves saved progress. A new message in the same conversation starts a new
+budget; retry and approval resume retain their original policy and counters.
 
-The setting accepts a positive decimal safe integer; explicit empty or invalid
-values fail startup. Remove `SOURCEWEFT_AGENT_TOOL_CALL_RUN_LIMIT` and
+Both settings accept positive decimal safe integers and their sum must be safe;
+explicit empty or invalid values fail startup. Remove `SOURCEWEFT_AGENT_TOOL_CALL_RUN_LIMIT` and
 `SOURCEWEFT_AGENT_TOOL_CALL_THREAD_LIMIT` from existing `.env` files: either
 retired variable triggers a migration error, even when the new setting is also
 present. Historical checkpoint tool counts are preserved but are not converted

@@ -1,5 +1,11 @@
-import { AgentRunStopNotice } from "./agent-run-stop-notice";
-import { readMessageAgentRunStop } from "./agent-run-continuation";
+import {
+  AgentRunStopNotice,
+  AgentRunProgressNotice,
+} from "./agent-run-stop-notice";
+import {
+  readMessageAgentRunStop,
+  readMessageAgentRunProgress,
+} from "./agent-run-continuation";
 import { formatDisplayDate } from "@/lib/i18n/format";
 
 import { useLocale as useDisplayLocale } from "next-intl";
@@ -1331,6 +1337,14 @@ const MessageGroupItem = memo(function MessageGroupItem({
               isLatestAssistantGroup && isConversationTail,
             isActiveVersion: versionIndex === activeVisibleBranchIndex,
           });
+          const runProgress = readMessageAgentRunProgress({
+            role: group.role,
+            version,
+            isLatestAssistantGroup:
+              isLatestAssistantGroup && isConversationTail,
+            isActiveVersion: versionIndex === activeVisibleBranchIndex,
+            isRunActive: hasActiveRunOnThisGroup || isStreamingThisVersion,
+          });
           const showRunErrorBanner = shouldShowRunErrorBanner({
             hasActiveRunOnThisGroup,
             isStreamingThisVersion,
@@ -1381,6 +1395,9 @@ const MessageGroupItem = memo(function MessageGroupItem({
                         resolvedConfirmations={resolvedConfirmations}
                         workspaceId={workspaceId}
                       />
+                      {runProgress ? (
+                        <AgentRunProgressNotice progress={runProgress} />
+                      ) : null}
                       {stepStop ? (
                         <AgentRunStopNotice
                           stop={stepStop}

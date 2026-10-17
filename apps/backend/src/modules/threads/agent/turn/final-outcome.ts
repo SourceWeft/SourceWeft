@@ -223,6 +223,9 @@ export async function* buildFinalOutcome(input: {
       usage: runtime.billingScope?.totalUsage(),
       finishReason: runtime.finishReason,
       ...(runtime.agentRunStop ? { agentRunStop: runtime.agentRunStop } : {}),
+      ...(runtime.agentRunProgress
+        ? { agentRunProgress: runtime.agentRunProgress }
+        : {}),
       reasoning: runtime.modelReasoning,
       retrieval: finalRetrieval,
       citations: usedCitations,

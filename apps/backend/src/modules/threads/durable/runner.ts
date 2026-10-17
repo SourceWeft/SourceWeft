@@ -1,4 +1,8 @@
-import { readAgentRunStop } from "@sourceweft/contracts";
+import {
+  readAgentRunStop,
+  readAgentRunProgress,
+  advanceAgentRunProgress,
+} from "@sourceweft/contracts";
 import {
   agentCheckpointFromStepStopError,
   toAgentToolBudgetContentError,
@@ -795,9 +799,25 @@ function updateSnapshotFromPayload(
     return snapshot;
   }
 
+  // A rejected late phase event must not replace the terminal marker: a
+  // second event would otherwise bypass the guard after cancellation/error.
+  if (
+    payload.type === "agent-run-progress" &&
+    (snapshot.finishReason ||
+      snapshot.lastEventType === "finish" ||
+      snapshot.lastEventType === "error")
+  ) {
+    return snapshot;
+  }
   const next: ChatRunSnapshot = {
     ...snapshot,
-    lastEventType: payload.type,
+    lastEventType:
+      (snapshot.lastEventType === "finish" ||
+        snapshot.lastEventType === "error") &&
+      payload.type !== "finish" &&
+      payload.type !== "error"
+        ? snapshot.lastEventType
+        : payload.type,
   };
   if (payload.type === "text-delta" && typeof payload.delta === "string") {
     next.assistantContent = `${next.assistantContent ?? ""}${payload.delta}`;
@@ -889,7 +909,28 @@ function updateSnapshotFromPayload(
       });
     }
   }
+  if (
+    payload.type === "agent-run-progress" &&
+    !snapshot.finishReason &&
+    snapshot.lastEventType !== "finish" &&
+    snapshot.lastEventType !== "error"
+  ) {
+    next.agentRunProgress = advanceAgentRunProgress(
+      snapshot.agentRunProgress,
+      payload.progress,
+    );
+  }
   if (payload.type === "finish" || payload.type === "error") {
+    if (payload.code === "CLIENT_CANCELLED") next.agentRunProgress = null;
+    else if (
+      payload.agentRunProgress !== undefined &&
+      snapshot.lastEventType !== "finish" &&
+      snapshot.lastEventType !== "error"
+    )
+      next.agentRunProgress = advanceAgentRunProgress(
+        snapshot.agentRunProgress,
+        payload.agentRunProgress,
+      );
     if (payload.code === "CLIENT_CANCELLED") next.agentRunStop = null;
     else if (payload.agentRunStop !== undefined)
       next.agentRunStop = readAgentRunStop(payload.agentRunStop);
@@ -1123,6 +1164,11 @@ function buildSnapshotMetadata(input: {
     ...(input.currentMetadata ?? {}),
     userMessageId: input.run.userMessageId,
     sourceUserMessageId: input.run.userMessageId,
+    agentRunProgress:
+      input.run.status === "cancelled" ||
+      input.run.status === "cancel_requested"
+        ? undefined
+        : (readAgentRunProgress(input.snapshot.agentRunProgress) ?? undefined),
     agentRunStop:
       input.run.status === "cancelled" ||
       input.run.status === "cancel_requested"
@@ -1167,6 +1213,10 @@ function snapshotWithFinalizedResult(
   return {
     ...snapshot,
     ...result,
+    agentRunProgress:
+      metadata.isCancelled === true
+        ? null
+        : readAgentRunProgress(metadata.agentRunProgress),
     agentRunStop:
       metadata.isCancelled === true
         ? null
