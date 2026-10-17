@@ -35,6 +35,15 @@ import {
 } from "./command-success";
 import { handleCustomStreamChunk } from "./custom-stream-handler";
 import { buildFinalOutcome } from "./final-outcome";
+import {
+  selectAgentStepStop,
+  AgentStepSummaryError,
+} from "../middleware/step-budget";
+import {
+  applyVerifiedAgentStepStop,
+  assertAgentStepStopNotCancelled,
+  captureAgentStepFailureCheckpoint,
+} from "./step-stop-outcome";
 import { handleAskUserStreamChunk } from "./ask-user-stream-handler";
 import { payloadHasAskUserInterrupt } from "../middleware/ask-user";
 import {
@@ -521,14 +530,17 @@ export async function* invokeDeepAgentTurn(input: {
       // a mid-stream `updates` chunk, so handle HITL/askUser here. The final
       // checkpoint is read from `getState` (v3 `checkpoints` events don't carry
       // thread_id/checkpoint_ns).
+      // The completed graph output is the same invocation's authoritative
+      // values, even if a later checkpoint read fails. Its rejection must stay
+      // visible; a failed summary cannot become an ordinary successful answer.
+      const graphOutput = stream.interrupted ? undefined : await stream.output;
+      const headState = await getAgentHeadStateOrNull(
+        agent,
+        runConfig as AgentRunnableConfig,
+      );
       finalCheckpoint =
         checkpointRefFromConfig(
-          (
-            (await getAgentHeadStateOrNull(
-              agent,
-              runConfig as AgentRunnableConfig,
-            )) as { config?: unknown } | null
-          )?.config,
+          (headState as { config?: unknown } | null)?.config,
         ) ?? finalCheckpoint;
 
       if (stream.interrupted && stream.interrupts.length > 0) {
@@ -584,10 +596,43 @@ export async function* invokeDeepAgentTurn(input: {
           }
         }
       }
+      if (!stream.interrupted) {
+        const selectionInput = {
+          userMessageId: input.prepared.userMessage.id,
+          config: runConfig,
+        };
+        const selected =
+          selectAgentStepStop(graphOutput, selectionInput) ??
+          selectAgentStepStop(headState, selectionInput);
+        if (selected) {
+          await assertAgentStepStopNotCancelled(input);
+          if (!finalCheckpoint) {
+            throw new AgentStepSummaryError(selected.agentRunStop, {
+              cause: new Error(
+                "The step-limit summary checkpoint is unavailable",
+              ),
+            });
+          }
+          applyVerifiedAgentStepStop(runtime, selected);
+        }
+      }
       break;
     }
   } catch (error) {
-    throw error;
+    const stepFailure = await captureAgentStepFailureCheckpoint({
+      ...input,
+      error,
+      beforeInput: beforeInputCheckpoint,
+      beforeAssistant: beforeAssistantCheckpoint,
+      readCurrentCheckpoint: async () => {
+        if (!agent || !runConfig) return null;
+        const head = await getAgentHeadStateOrNull(agent, runConfig);
+        return checkpointRefFromConfig(
+          (head as { config?: unknown } | null)?.config,
+        );
+      },
+    });
+    throw stepFailure ?? error;
   } finally {
     // Projection writes are best-effort but must land before the turn ends,
     // so a child thread is complete by the time the parent's finish is sent.

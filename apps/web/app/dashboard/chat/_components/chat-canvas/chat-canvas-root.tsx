@@ -1,3 +1,4 @@
+import type { AgentContinuationInputBuilder } from "./agent-run-continuation";
 import { MessageRenderBoundary } from "@/app/_components/chat-error-recovery";
 import {
   useCallback,
@@ -633,6 +634,32 @@ export function ChatCanvas({
     lastTrackedSourceCountRef.current = selectedSources.length;
   }, [selectedSources.length]);
 
+  const continuationInputRef = useRef<AgentContinuationInputBuilder | null>(
+    null,
+  );
+  const registerContinuationInput = useCallback(
+    (builder: AgentContinuationInputBuilder | null) => {
+      continuationInputRef.current = builder;
+    },
+    [],
+  );
+  const continuationDisabled =
+    !onSendMessage ||
+    !workspaceId ||
+    localStatus.blocked ||
+    Boolean(activeThreadRun) ||
+    isStreaming ||
+    isStopping ||
+    isEditing ||
+    otherUserRunActive;
+  function handleContinueAgentRun() {
+    if (continuationDisabled) return;
+    const input = continuationInputRef.current?.(
+      t("stepLimit.continueMessage"),
+    );
+    if (input) handleSendMessage(input);
+  }
+
   function handleSendMessage(input: ChatSendInput) {
     if (!workspaceId) {
       toast.error(t("errors.noWorkspaceSelected"));
@@ -727,6 +754,10 @@ export function ChatCanvas({
     >
       <MessageRenderBoundary key={messageRecoveryKey ?? composerDraftKey}>
         <MessageList
+          continuationDisabled={continuationDisabled}
+          onContinueAgentRun={
+            onSendMessage ? handleContinueAgentRun : undefined
+          }
           activeThreadRun={activeThreadRun}
           activeVersionByGroup={activeVersionByGroup}
           artifactStatuses={artifactStatuses}
@@ -950,6 +981,7 @@ export function ChatCanvas({
           ) : null}
           {typingIndicator}
           <Composer
+            onRegisterContinuationInput={registerContinuationInput}
             draftKey={composerDraftKey}
             placeholder={
               localStatus.blocked

@@ -2084,6 +2084,13 @@
       "needsInput": "助理需要你的輸入",
       "dismissQuestion": "忽略問題",
       "end": "結束"
+    },
+    "stepLimit": {
+      "title": "本次執行已達到步數上限",
+      "body": "本次執行已使用 {steps}/{limit} 步。請檢視總結，再繼續尚未完成的工作。",
+      "summaryFailed": "本次執行已使用 {steps}/{limit} 步，但總結產生失敗。你可以從已儲存的進度繼續。",
+      "continue": "繼續剩餘任務",
+      "continueMessage": "請根據目前工作階段已儲存的進度繼續尚未完成的工作。先確認現有結果，避免重複已完成的操作。"
     }
   },
   "dashboardChatFiles": {

@@ -209,3 +209,5 @@ export {
   updateWorkspacePersona,
 } from "./personas";
 export type { PersonaOverrides, PersonaSpec } from "./personas";
+
+export { agentCheckpointFromStepStopError } from "./turn/step-stop-outcome";

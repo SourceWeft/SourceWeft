@@ -1298,3 +1298,73 @@ test("typed global tool budgets remain safe and distinct at the terminal error b
     "AGENT_TOOL_BUDGET_EXCEEDED",
   );
 });
+
+test("step-limit stop survives error then bare finish, message reload, and explicit clearing", () => {
+  const agentRunStop = {
+    reason: "step_limit",
+    steps: 400,
+    limit: 400,
+    canContinue: true,
+    summaryStatus: "failed",
+  } as const;
+  let snapshot = testExports.updateSnapshotFromPayload(
+    {},
+    { type: "error", code: "AGENT_STEP_SUMMARY_FAILED", agentRunStop },
+  );
+  snapshot = testExports.updateSnapshotFromPayload(snapshot, {
+    type: "finish",
+  });
+  assert.deepEqual(snapshot.agentRunStop, agentRunStop);
+  const metadata = buildAssistantMessageSnapshotMetadata({
+    currentMetadata: {},
+    run: createRun({ status: "failed" }),
+    snapshot,
+  });
+  assert.deepEqual(metadata.agentRunStop, agentRunStop);
+  const cleared = testExports.updateSnapshotFromPayload(snapshot, {
+    type: "finish",
+    agentRunStop: null,
+  });
+  assert.equal(cleared.agentRunStop, null);
+  const cancelled = testExports.updateSnapshotFromPayload(snapshot, {
+    type: "error",
+    code: "CLIENT_CANCELLED",
+    agentRunStop,
+  });
+  assert.equal(cancelled.agentRunStop, null);
+  const nextMetadata = buildAssistantMessageSnapshotMetadata({
+    currentMetadata: metadata,
+    run: createRun({ status: "cancelled" }),
+    snapshot: cancelled,
+  });
+  assert.equal(nextMetadata.agentRunStop, undefined);
+});
+
+test("cancellation message writers reject a late successful step-limit marker", () => {
+  const agentRunStop = {
+    reason: "step_limit",
+    steps: 400,
+    limit: 400,
+    canContinue: true,
+    summaryStatus: "completed",
+  } as const;
+  for (const status of ["cancel_requested", "cancelled"] as const) {
+    const input = {
+      currentMetadata: { agentRunStop },
+      run: createRun({ status }),
+      snapshot: { agentRunStop },
+    };
+    assert.equal(
+      buildAssistantMessageSnapshotMetadata(input).agentRunStop,
+      undefined,
+    );
+    assert.equal(
+      buildAssistantMessageConfirmationMetadata(input).agentRunStop,
+      undefined,
+    );
+    assert.equal(
+      testExports.buildSnapshotMetadata(input).agentRunStop,
+      undefined,
+    );
+  }
+});

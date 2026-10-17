@@ -9,6 +9,7 @@ import {
 } from "@sourceweft/agent-tool-registry";
 import {
   buildChatToolsRequest,
+  buildConfiguredComposerToolsSelection,
   buildCapabilityOptionToolsSelection,
   buildCapabilityToolToggleSelection,
   buildComposerToolsSelection,
@@ -614,4 +615,72 @@ test("composerOptionValues leaves an option with no declaration alone", () => {
     composerOptionValues(undeclared, IMAGE_MODEL_CAPABILITIES),
     undeclared.values,
   );
+});
+
+test("shared normal-send and continuation selection preserves runtime skill options and explicit capability settings", () => {
+  const tools = buildConfiguredComposerToolsSelection({
+    disabledToolNames: [],
+    activeConnectorIds: {},
+    selectedSkills: [
+      {
+        id: "ppt-skill",
+        catalogId: "skill:ppt",
+        slug: "ppt-deck",
+        name: "ppt-deck",
+        displayName: "PPT Deck",
+        description: "Create decks.",
+        sourceType: "builtin",
+        version: "1.0.0",
+        hasReadme: false,
+        defaultEnabled: true,
+        options: [
+          {
+            id: "stylePreset",
+            title: "Style",
+            valueType: "string",
+            target: { path: "config.stylePreset" },
+            values: [],
+          },
+        ],
+      },
+    ],
+    capabilityToolsWithOptions: [
+      {
+        id: "image",
+        capabilityId: "image",
+        contributionId: "image",
+        toolName: AGENT_TOOL_NAMES.generateImage,
+        title: "Image",
+        description: "Image",
+        inputSchema: {},
+        outputSchema: {},
+        risk: "write",
+        sourcePackageName: null,
+        options: [
+          {
+            id: "aspectRatio",
+            title: "Ratio",
+            valueType: "string",
+            target: { path: "config.aspectRatio" },
+            values: [],
+          },
+        ],
+      },
+    ],
+    visibleCapabilityTools: [],
+    options: {
+      skillOptionOverrides: { "ppt-skill": { stylePreset: "executive" } },
+      capabilityOptionOverrides: {
+        [AGENT_TOOL_NAMES.generateImage]: { aspectRatio: "16:9" },
+      },
+      capabilityToolEnabledOverrides: {},
+    },
+  });
+  assert.deepEqual(tools?.skillRuntimeConfig, {
+    "ppt-skill": { stylePreset: "executive" },
+  });
+  assert.deepEqual(tools?.[AGENT_TOOL_NAMES.generateImage], {
+    enabled: true,
+    config: { aspectRatio: "16:9" },
+  });
 });

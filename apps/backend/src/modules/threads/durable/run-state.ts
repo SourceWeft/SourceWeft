@@ -1,3 +1,5 @@
+import { readAgentRunStop } from "@sourceweft/contracts";
+import { toObjectRecord } from "../../../shared/records";
 import { ContentError } from "../../content/errors";
 import { sanitizeClientErrorMessage } from "../../content/model-gateway-error";
 import type {
@@ -182,12 +184,21 @@ export function synthesizeTerminalRunEvents(input: {
 }) {
   const events: string[] = [];
   const terminalError = toTerminalRunError(input.run);
+  const snapshot = getSnapshotRecord(input.run);
+  const metadata = toObjectRecord(
+    toObjectRecord(snapshot.assistantMessage)?.metadata,
+  );
+  const agentRunStop =
+    input.run.status === "cancelled"
+      ? null
+      : readAgentRunStop(snapshot.agentRunStop ?? metadata?.agentRunStop);
   if (terminalError && !input.sawErrorEvent) {
     events.push(
       `data: ${JSON.stringify({
         type: "error",
         code: terminalError.code,
         error: sanitizeClientErrorMessage(terminalError.message),
+        ...(agentRunStop ? { agentRunStop } : {}),
         ...(input.run.userMessageId
           ? { userMessageId: input.run.userMessageId }
           : {}),
@@ -197,6 +208,11 @@ export function synthesizeTerminalRunEvents(input: {
       })}\n\n`,
     );
   }
-  events.push(`data: ${JSON.stringify({ type: "finish" })}\n\n`);
+  events.push(
+    `data: ${JSON.stringify({
+      type: "finish",
+      ...(agentRunStop ? { agentRunStop, finishReason: "step_limit" } : {}),
+    })}\n\n`,
+  );
   return events;
 }

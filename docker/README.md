@@ -54,6 +54,28 @@ keep the public URL consistent with the browser's origin. SSE buffering is disab
 and WebSocket Upgrade is forwarded by the bundled gateway. `INTERNAL_API_BASE_URL`
 is `http://api:3001` inside the Web container, independently of public addresses.
 
+## Agent run limits
+
+`SOURCEWEFT_AGENT_MAX_STEPS` defaults to `400` for each root or child agent run.
+One logical model decision and its complete tool batch count as one step;
+parallel tools and tool retries do not each consume another step. Root and child
+budgets are independent, so a delegated task tree can exceed 400 steps in total.
+Auxiliary model calls and retries remain metered by the existing gateway.
+
+At the limit, an already authorized tool batch finishes under its existing
+approval and timeout rules, followed by at most one additional summary using the
+same model with tools disabled. The summary identifies unfinished work; it does
+not mark an unpublished report as delivered. If summarization fails, the turn
+reports the failure and preserves saved progress. Continue with a new message in
+the same conversation. Retry and approval resume retain their original budget.
+
+The setting accepts a positive decimal safe integer; explicit empty or invalid
+values fail startup. Remove `SOURCEWEFT_AGENT_TOOL_CALL_RUN_LIMIT` and
+`SOURCEWEFT_AGENT_TOOL_CALL_THREAD_LIMIT` from existing `.env` files: either
+retired variable triggers a migration error, even when the new setting is also
+present. Historical checkpoint tool counts are preserved but are not converted
+into steps or used as a lifetime conversation limit.
+
 ## Optional services
 
 - External S3: set `COMPOSE_PROFILES=` to disable bundled storage, set `S3_ENDPOINT`,

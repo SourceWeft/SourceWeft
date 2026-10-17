@@ -1,3 +1,4 @@
+import { readAgentRunStop } from "@sourceweft/contracts";
 import type { ContentBillingPort } from "../../content/billing-port";
 import { workspaceService } from "../../workspace";
 import { createCitationRecords, replaceCitationRecords } from "../../citations";
@@ -205,6 +206,7 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
       final: null,
     },
     finishReason: input.finishReason,
+    agentRunStop: readAgentRunStop(input.agentRunStop) ?? undefined,
     usage: input.usage,
     ...projectReasoning({
       run: prepared.reasoningRun,

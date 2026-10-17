@@ -1,3 +1,4 @@
+import type { ComposerOptionsState } from "./composer-options";
 import {
   AGENT_TOOL_NAMES,
   agentToolNamesByCapability,
@@ -150,6 +151,40 @@ export function buildChatToolsRequest(input: {
     ...entries,
     ...webAccessSelection,
   };
+}
+
+/** Shared by ordinary draft submission and an explicit plain-message continuation. */
+export function buildConfiguredComposerToolsSelection(input: {
+  disabledToolNames: string[];
+  selectedSkills: ChatSkillItem[];
+  activeConnectorIds?: Record<string, string | null>;
+  connectorToolsEnabled?: Record<string, boolean>;
+  capabilityToolsWithOptions: CapabilityCatalogTool[];
+  visibleCapabilityTools: CapabilityCatalogTool[];
+  options: ComposerOptionsState;
+}) {
+  const base = buildComposerToolsSelection(input);
+  const withSkills = mergeChatToolsSelection(
+    base,
+    buildSkillOptionToolsSelection({
+      selectedSkills: input.selectedSkills,
+      overrides: input.options.skillOptionOverrides,
+    }),
+  );
+  const withOptions = mergeChatToolsSelection(
+    withSkills,
+    buildCapabilityOptionToolsSelection({
+      catalogTools: input.capabilityToolsWithOptions,
+      overrides: input.options.capabilityOptionOverrides,
+    }),
+  );
+  return mergeChatToolsSelection(
+    withOptions,
+    buildCapabilityToolToggleSelection({
+      catalogTools: input.visibleCapabilityTools,
+      overrides: input.options.capabilityToolEnabledOverrides,
+    }),
+  );
 }
 
 export function isCapabilityToolVisibleInComposerOptions(

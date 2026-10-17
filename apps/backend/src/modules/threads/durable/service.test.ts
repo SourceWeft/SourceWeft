@@ -1069,3 +1069,55 @@ test("redelivered waiting_for_approval run reports approval state without execut
     assistantMessageId: "assistant-message-1",
   });
 });
+
+test("terminal replay restores only validated step-limit metadata and cancellation wins", () => {
+  const agentRunStop = {
+    reason: "step_limit",
+    steps: 400,
+    limit: 400,
+    canContinue: true,
+    summaryStatus: "completed",
+  } as const;
+  for (const status of ["completed", "failed"] as const) {
+    const marker = {
+      ...agentRunStop,
+      summaryStatus: status === "failed" ? "failed" : "completed",
+    };
+    const events = synthesizeTerminalRunEvents({
+      run: createRun({
+        status,
+        snapshotJson: {
+          assistantMessage: { metadata: { agentRunStop: marker } },
+        },
+      }),
+      sawErrorEvent: false,
+    }).map(parseSseData);
+    assert.deepEqual(events.at(-1), {
+      type: "finish",
+      finishReason: "step_limit",
+      agentRunStop: marker,
+    });
+    if (status === "failed") assert.deepEqual(events[0]?.agentRunStop, marker);
+  }
+  for (const input of [
+    { status: "cancelled" as const, agentRunStop },
+    {
+      status: "completed" as const,
+      agentRunStop: { ...agentRunStop, steps: 399 },
+    },
+    {
+      status: "completed" as const,
+      agentRunStop: { ...agentRunStop, privateScope: "secret" },
+    },
+  ]) {
+    const events = synthesizeTerminalRunEvents({
+      run: createRun({
+        status: input.status,
+        snapshotJson: { agentRunStop: input.agentRunStop },
+      }),
+      sawErrorEvent: false,
+    }).map(parseSseData);
+    assert.deepEqual(events.at(-1), { type: "finish" });
+    assert.equal(events[0]?.agentRunStop, undefined);
+  }
+});

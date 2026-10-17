@@ -1,4 +1,5 @@
 import { createMiddleware } from "langchain";
+import { isAgentStepFinalizing } from "./step-budget";
 
 export type CommandExecutionPolicy = {
   initialToolPolicy: "auto" | { kind: "force"; toolName: string };
@@ -98,6 +99,8 @@ export function createCommandToolChoiceMiddleware(
   return createMiddleware({
     name: "SourceWeftCommandToolChoice",
     wrapModelCall: async (request, handler) => {
+      if (isAgentStepFinalizing(request.state))
+        return handler({ ...request, tools: [], toolChoice: "none" });
       const tools = filterCommandModelTools(request.tools, policy.toolPolicy);
       if (policy.initialToolPolicy === "auto") {
         return handler({ ...request, tools });

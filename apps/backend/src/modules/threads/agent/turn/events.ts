@@ -1,3 +1,4 @@
+import type { AgentRunStop } from "@sourceweft/contracts";
 import type { UsageInfo } from "@sourceweft/model-gateway";
 import type { AgentCitation } from "../citation-registry";
 import { runToolRetrieval } from "./retrieval-runner";
@@ -27,6 +28,7 @@ export type DeepAgentTurnOutcome = {
   traceParts?: TracePart[];
   usage?: UsageInfo;
   finishReason?: string;
+  agentRunStop?: AgentRunStop;
   reasoning?: string;
   agentCheckpoint: AgentCheckpointMetadata;
 };

@@ -1,3 +1,5 @@
+import { AgentRunStopNotice } from "./agent-run-stop-notice";
+import { readMessageAgentRunStop } from "./agent-run-continuation";
 import { formatDisplayDate } from "@/lib/i18n/format";
 
 import { useLocale as useDisplayLocale } from "next-intl";
@@ -1000,6 +1002,8 @@ function AssistantTimeline({
 }
 
 type MessageListProps = {
+  continuationDisabled?: boolean;
+  onContinueAgentRun?: () => void;
   activeThreadRun?: ActiveThreadRun | null;
   activeVersionByGroup?: Record<string, number>;
   artifactStatuses?: ReadonlyMap<string, ArtifactStatusSnapshot>;
@@ -1181,12 +1185,15 @@ async function copyMessageText(text: string, t: Translate) {
 }
 
 type MessageGroupItemProps = {
+  continuationDisabled: boolean;
+  onContinueAgentRun?: () => void;
   activeOriginalBranchIndexRaw?: number;
   activeThreadRun?: ActiveThreadRun | null;
   artifactStatuses?: ReadonlyMap<string, ArtifactStatusSnapshot>;
   group: VersionedMessageGroup;
   highlightedMessageId: string | null;
   isLatestAssistantGroup: boolean;
+  isConversationTail: boolean;
   isLatestUserGroup: boolean;
   isStreaming: boolean;
   onActiveVersionChange?: MessageListProps["onActiveVersionChange"];
@@ -1205,12 +1212,15 @@ type MessageGroupItemProps = {
 };
 
 const MessageGroupItem = memo(function MessageGroupItem({
+  continuationDisabled,
+  onContinueAgentRun,
   activeOriginalBranchIndexRaw,
   activeThreadRun,
   artifactStatuses,
   group,
   highlightedMessageId,
   isLatestAssistantGroup,
+  isConversationTail,
   isLatestUserGroup,
   isStreaming,
   onActiveVersionChange,
@@ -1315,6 +1325,13 @@ const MessageGroupItem = memo(function MessageGroupItem({
             versionIndex === activeVisibleBranchIndex &&
             isLatestAssistantGroup &&
             Boolean(activeThreadRun);
+          const stepStop = readMessageAgentRunStop({
+            role: group.role,
+            version,
+            isLatestAssistantGroup:
+              isLatestAssistantGroup && isConversationTail,
+            isActiveVersion: versionIndex === activeVisibleBranchIndex,
+          });
           const showRunErrorBanner = shouldShowRunErrorBanner({
             hasActiveRunOnThisGroup,
             isStreamingThisVersion,
@@ -1365,6 +1382,17 @@ const MessageGroupItem = memo(function MessageGroupItem({
                         resolvedConfirmations={resolvedConfirmations}
                         workspaceId={workspaceId}
                       />
+                      {stepStop ? (
+                        <AgentRunStopNotice
+                          stop={stepStop}
+                          disabled={
+                            continuationDisabled ||
+                            isStreaming ||
+                            Boolean(activeThreadRun)
+                          }
+                          onContinue={onContinueAgentRun}
+                        />
+                      ) : null}
                       {showRunErrorBanner && renderState.error ? (
                         <ChatErrorNotice
                           code={renderState.error.code}
@@ -1481,6 +1509,8 @@ const MessageGroupItem = memo(function MessageGroupItem({
 });
 
 export function MessageList({
+  continuationDisabled = false,
+  onContinueAgentRun,
   activeThreadRun = null,
   activeVersionByGroup = {},
   allSources = [],
@@ -1659,6 +1689,8 @@ export function MessageList({
 
             return (
               <MessageGroupItem
+                continuationDisabled={continuationDisabled}
+                onContinueAgentRun={onContinueAgentRun}
                 activeOriginalBranchIndexRaw={
                   activeVersionByGroup[group.groupId]
                 }
@@ -1667,6 +1699,9 @@ export function MessageList({
                 group={group}
                 highlightedMessageId={highlightedMessageId}
                 isLatestAssistantGroup={isLatestAssistantGroup}
+                isConversationTail={
+                  messageGroups.at(-1)?.groupId === group.groupId
+                }
                 isLatestUserGroup={isLatestUserGroup}
                 isStreaming={isStreaming}
                 key={`${group.groupId}:${group.latestVersionId}:${selectedUserVersionIdForAssistant ?? "all"}:${activeOriginalBranchIndex}`}

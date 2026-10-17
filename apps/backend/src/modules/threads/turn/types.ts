@@ -1,6 +1,6 @@
 import type { MeteredModelCallTrace } from "../../../shared/model-gateway/index";
 import type { UsageInfo } from "@sourceweft/model-gateway";
-import type { ToolApprovalResume } from "@sourceweft/contracts";
+import type { AgentRunStop, ToolApprovalResume } from "@sourceweft/contracts";
 import type { InvocationEvent, InvocationPlan } from "../../invocations/types";
 import { AGENT_TOOL_NAMES } from "@sourceweft/agent-tool-registry";
 import type { AgentCitation } from "../agent/citation-registry";
@@ -430,6 +430,7 @@ export type FinalizeThreadTurnCommand = {
   assistantContent: string;
   usage?: UsageInfo;
   finishReason?: string;
+  agentRunStop?: AgentRunStop;
   reasoning?: string;
   routeDecision?: Record<string, unknown>;
   provider?: string | null;

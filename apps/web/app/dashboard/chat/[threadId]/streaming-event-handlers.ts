@@ -1,3 +1,4 @@
+import { agentRunStopMetadata } from "./agent-run-stop-metadata";
 import { sanitizeClientErrorMessage } from "../_components/chat-canvas/client-error-message";
 import {
   isDelegateToolName,
@@ -131,6 +132,7 @@ type HandleStreamingThreadTitlePendingInput = {
 };
 
 type HandleStreamingFinishInput = ContextInput & {
+  agentRunStop?: unknown;
   finishReason?: string | null;
 };
 
@@ -148,6 +150,7 @@ type HandleStreamingAssistantMessageInput = ContextInput & {
 };
 
 type ErrorEventPayload = {
+  agentRunStop?: unknown;
   code?: string;
   error?: string;
   messageId?: string;
@@ -158,6 +161,7 @@ type ErrorEventPayload = {
 type HandleStreamingErrorInput = {
   event: ErrorEventPayload;
   markStreamingAssistantAsError: (errorInput: {
+    agentRunStop?: unknown;
     code?: string | null;
     error: string;
     messageId?: string | null;
@@ -795,6 +799,7 @@ export function handleStreamingThreadTitlePending({
 export function handleStreamingFinish({
   context,
   finishReason,
+  agentRunStop,
 }: HandleStreamingFinishInput) {
   const renderBlocks = context.streamRenderBuffer.snapshotRenderBlocks();
   const terminalRecords = finishStreamingAssistantRun({
@@ -841,6 +846,12 @@ export function handleStreamingFinish({
       metadata: {
         ...message.metadata,
         ...terminalState.metadata,
+        ...agentRunStopMetadata(
+          agentRunStop,
+          message.metadata.isCancelled === true ||
+            message.metadata.errorCode === "CLIENT_CANCELLED" ||
+            finishReason === "cancelled",
+        ),
         [STREAM_TEXT_PAUSED_KEY]: false,
       },
     };
@@ -915,6 +926,7 @@ export function handleStreamingAssistantMessage({
       // errorCode too) or flash the previous error banner before content lands.
       error: null,
       errorCode: null,
+      agentRunStop: null,
       excludeFromContext: false,
       userMessageId: nextUserMessageId,
       sourceUserMessageId: nextUserMessageId,
@@ -942,6 +954,10 @@ export function handleStreamingError({
   const errorMessage = sanitizeClientErrorMessage(event.error) ?? "Model error";
   setSuppressErrorToast(event.code === "CLIENT_CANCELLED");
   markStreamingAssistantAsError({
+    ...agentRunStopMetadata(
+      event.agentRunStop,
+      event.code === "CLIENT_CANCELLED",
+    ),
     code: event.code ?? null,
     error: errorMessage,
     messageId: typeof event.messageId === "string" ? event.messageId : null,
@@ -1020,6 +1036,7 @@ export function handleStreamingStart({
       ...message.metadata,
       userMessageId: serverUserMessageId,
       sourceUserMessageId: serverUserMessageId,
+      agentRunStop: null,
       threadRun: {
         ...(context.toObjectRecord(message.metadata.threadRun) ?? {}),
         ...(serverThreadRun ?? {}),

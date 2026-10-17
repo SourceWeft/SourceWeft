@@ -1,3 +1,4 @@
+import type { AgentRunStop } from "@sourceweft/contracts";
 import { AgentCitationRegistry } from "../citation-registry";
 import type {
   PreparedThreadTurn,
@@ -92,6 +93,8 @@ export function createTurnRuntime(input: { prepared: PreparedThreadTurn }) {
     assistantContent: "",
     assistantContentFromUpdates: null as string | null,
     finishReason: undefined as string | undefined,
+    agentRunStop: undefined as AgentRunStop | undefined,
+    stepLimitSummary: null as string | null,
     modelReasoning: undefined as string | undefined,
     providerFields: undefined as Record<string, unknown> | undefined,
     hasStreamedText: false,
@@ -119,12 +122,12 @@ export function createTurnRuntime(input: { prepared: PreparedThreadTurn }) {
         .map((callId) => retrievalCallsById.get(callId))
         .filter((call): call is RetrievalCallTrace => Boolean(call));
     },
-    collectToolCalls() {
+    collectToolCalls(options: { preserveRunning?: boolean } = {}) {
       return toolCallOrder
         .map((callId) => toolCallsById.get(callId))
         .filter((call): call is ToolCallTrace => Boolean(call))
         .map((call) => {
-          if (call.status !== "running") {
+          if (call.status !== "running" || options.preserveRunning) {
             return call;
           }
 

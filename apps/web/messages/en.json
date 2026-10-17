@@ -2084,6 +2084,13 @@
       "needsInput": "The assistant needs your input",
       "dismissQuestion": "Dismiss question",
       "end": "End"
+    },
+    "stepLimit": {
+      "title": "Run step limit reached",
+      "body": "This run used {steps} of {limit} steps. Review the summary and continue any unfinished work.",
+      "summaryFailed": "This run used {steps} of {limit} steps, but its summary failed. You can continue from saved progress.",
+      "continue": "Continue remaining work",
+      "continueMessage": "Continue the unfinished work from the saved progress in this conversation. Check existing results first and avoid repeating completed actions."
     }
   },
   "dashboardChatFiles": {

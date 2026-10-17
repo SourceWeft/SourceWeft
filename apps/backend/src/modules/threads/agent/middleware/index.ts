@@ -34,7 +34,7 @@ import { createSourceWeftToolExecutionTimeoutMiddleware } from "./tool-execution
 import type { TraceContext } from "../../../llm-observability";
 import { createSourceWeftToolCallContextMiddleware } from "./tool-call-context";
 import { createSourceWeftToolCallCountChannelsMiddleware } from "./tool-call-count-channels";
-import { createSourceWeftGlobalToolCallLimitMiddleware } from "./tool-call-budget";
+import { createSourceWeftStepBudgetMiddleware } from "./step-budget";
 
 const RETRYABLE_READ_TOOL_NAMES = [
   AGENT_TOOL_NAMES.searchSources,
@@ -96,10 +96,14 @@ export type SourceWeftSubagentMiddlewareStackInput = {
 export function createSourceWeftSubagentMiddlewareStack(
   input: SourceWeftSubagentMiddlewareStackInput,
 ): AgentMiddleware[] {
+  const stepBudget = createSourceWeftStepBudgetMiddleware({
+    userMessageId: input.toolObservabilityContext?.userMessageId,
+  });
   return [
     // Must precede every toolCallLimitMiddleware so the count channels bind to a
     // concurrent-safe reducer (parallel `task` subagents write them at once).
     createSourceWeftToolCallCountChannelsMiddleware(),
+    stepBudget.governance,
     createSourceWeftToolCallContextMiddleware({
       subagentType: input.toolObservabilityContext?.subagentType,
     }),
@@ -129,15 +133,27 @@ export function createSourceWeftSubagentMiddlewareStack(
       retryOn: isRetryableModelContentError,
       onFailure: "error",
     }),
-    ...createSourceWeftGlobalToolCallLimitMiddleware({
-      userMessageId: input.toolObservabilityContext?.userMessageId,
-    }),
-  ];
+    stepBudget.finalization,
+  ].map((middleware) =>
+    [
+      "SummarizationMiddleware",
+      "SourceWeftContextCompressionTrace",
+      "SourceWeftPreSummaryContextEditing",
+      "ContextEditingMiddleware",
+      "SourceWeftCommandToolChoice",
+      "SourceWeftRunStepFinalization",
+    ].includes(middleware.name)
+      ? stepBudget.attachBudgetState(middleware)
+      : middleware,
+  );
 }
 
 export async function createSourceWeftAgentMiddlewareStack(
   input: SourceWeftAgentMiddlewareStackInput,
 ): Promise<AgentMiddleware[]> {
+  const stepBudget = createSourceWeftStepBudgetMiddleware({
+    userMessageId: input.toolObservabilityContext?.userMessageId,
+  });
   const contextCompressionMiddleware =
     await createSourceWeftContextCompressionMiddleware({
       modelAlias: input.modelAlias,
@@ -152,6 +168,7 @@ export async function createSourceWeftAgentMiddlewareStack(
     // Must precede every toolCallLimitMiddleware so the count channels bind to a
     // concurrent-safe reducer (parallel `task` subagents write them at once).
     createSourceWeftToolCallCountChannelsMiddleware(),
+    stepBudget.governance,
     createSourceWeftToolCallContextMiddleware(),
     // deepagents >=1.12 no longer includes the todo middleware by default;
     // tool tracking and the todo panel depend on the write_todos tool.
@@ -194,11 +211,20 @@ export async function createSourceWeftAgentMiddlewareStack(
       retryOn: isRetryableModelContentError,
       onFailure: "error",
     }),
-    ...createSourceWeftGlobalToolCallLimitMiddleware({
-      userMessageId: input.toolObservabilityContext?.userMessageId,
-    }),
     ...(input.extraMiddleware ?? []),
-  ];
+    stepBudget.finalization,
+  ].map((middleware) =>
+    [
+      "SummarizationMiddleware",
+      "SourceWeftContextCompressionTrace",
+      "SourceWeftPreSummaryContextEditing",
+      "ContextEditingMiddleware",
+      "SourceWeftCommandToolChoice",
+      "SourceWeftRunStepFinalization",
+    ].includes(middleware.name)
+      ? stepBudget.attachBudgetState(middleware)
+      : middleware,
+  );
 }
 
 export {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
 import { AGENT_TOOL_NAMES } from "@sourceweft/agent-tool-registry";
-import { tool, ToolCallLimitExceededError } from "langchain";
+import { tool } from "langchain";
 import { StateBackend } from "deepagents";
 import { describe, test, vi } from "vitest";
 import { testExports as agentTestExports } from "..";
@@ -121,6 +121,7 @@ test("middleware stack keeps SourceWeft middleware order stable", async () => {
 
     const expectedMiddlewareOrder = [
       "SourceWeftToolCallCountChannels",
+      "SourceWeftRunStepBudget",
       "SourceWeftToolCallContext",
       "todoListMiddleware",
       ...(config.chat.agent.askUserEnabled ? ["SourceWeftAskUser"] : []),
@@ -139,9 +140,8 @@ test("middleware stack keeps SourceWeft middleware order stable", async () => {
       "SourceWeftContextCompressionTrace",
       "SourceWeftUnansweredToolCalls",
       "modelRetryMiddleware",
-      "SourceWeftToolBudgetTurn",
-      "ToolCallLimitMiddleware",
       "ExtraMiddleware",
+      "SourceWeftRunStepFinalization",
     ];
 
     assert.deepEqual(
@@ -171,6 +171,7 @@ test("subagent middleware receives fresh retry, summary, limit, and observabilit
     first.map((middleware) => middleware.name),
     [
       "SourceWeftToolCallCountChannels",
+      "SourceWeftRunStepBudget",
       "SourceWeftToolCallContext",
       ...(config.chat.agent.askUserEnabled ? ["SourceWeftAskUser"] : []),
       ...(config.chat.agent.askUserEnabled
@@ -184,8 +185,7 @@ test("subagent middleware receives fresh retry, summary, limit, and observabilit
       "SummarizationMiddleware",
       "SourceWeftUnansweredToolCalls",
       "modelRetryMiddleware",
-      "SourceWeftToolBudgetTurn",
-      "ToolCallLimitMiddleware",
+      "SourceWeftRunStepFinalization",
     ],
   );
   assert.notStrictEqual(first[0], second[0]);
@@ -246,45 +246,20 @@ test("tool retry only retries safe read-only tools", async () => {
   assert.equal(executeAttempts, 1);
 });
 
-test("tool call limit blocks calls beyond the configured run limit", async () => {
-  const originalAgentConfig = { ...config.chat.agent };
-
-  try {
-    config.chat.agent.toolCallRunLimit = 2;
-    config.chat.agent.toolCallThreadLimit = 10;
-
-    const stack = await createSourceWeftAgentMiddlewareStack({
-      ...middlewareRuntime,
-      modelAlias: "chat-default",
-      filesystemMounts: [],
-    });
-    const middleware = stack.find(
-      (item) => item.name === "ToolCallLimitMiddleware",
-    );
-    assert.ok(middleware);
-
-    await assert.rejects(
-      async () =>
-        afterModelHook(middleware)({
-          messages: [
-            new HumanMessage("Use tools"),
-            new AIMessage({
-              content: "",
-              tool_calls: [
-                { id: "call-1", name: "search_sources", args: {} },
-                { id: "call-2", name: "search_sources", args: {} },
-                { id: "call-3", name: "search_sources", args: {} },
-              ],
-            }),
-          ],
-          threadToolCallCount: {},
-          runToolCallCount: {},
-        }),
-      ToolCallLimitExceededError,
-    );
-  } finally {
-    Object.assign(config.chat.agent, originalAgentConfig);
-  }
+test("global tool-call ceilings are replaced by logical model-step governance", async () => {
+  const stack = await createSourceWeftAgentMiddlewareStack({
+    ...middlewareRuntime,
+    modelAlias: "chat-default",
+    filesystemMounts: [],
+  });
+  const names = stack.map((middleware) => middleware.name);
+  assert.equal(names.includes("ToolCallLimitMiddleware"), false);
+  assert.ok(names.includes("SourceWeftRunStepBudget"));
+  assert.equal(names.at(-1), "SourceWeftRunStepFinalization");
+  assert.equal(
+    names.includes("ToolCallLimitMiddleware[askUser]"),
+    config.chat.agent.askUserEnabled,
+  );
 });
 
 test("image history sanitizer replaces image blocks with text placeholders", async () => {

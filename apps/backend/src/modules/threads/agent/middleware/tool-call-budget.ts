@@ -1,65 +1,7 @@
-import {
-  createMiddleware,
-  ToolCallLimitExceededError,
-  toolCallLimitMiddleware,
-} from "langchain";
-import { withLangGraph } from "@langchain/langgraph/zod";
-import { z } from "zod/v4";
-import { config } from "../../../../shared/config";
+import { ToolCallLimitExceededError } from "langchain";
 import { ContentError } from "../../../content/errors";
 
 export const AGENT_TOOL_BUDGET_EXCEEDED = "AGENT_TOOL_BUDGET_EXCEEDED";
-
-/**
- * Every prepared turn builds fresh middleware with its trusted user-message ID.
- * Late child projections may carry an older marker; only this turn's ID may
- * update the channel. Empty/default/foreign writes cannot roll it back.
- */
-export function createSourceWeftGlobalToolCallLimitMiddleware(
-  input: {
-    userMessageId?: string | null;
-  } = {},
-) {
-  const turnId = input.userMessageId?.trim() ? input.userMessageId : null;
-  const marker = z.string().nullable();
-  const defaulted = marker.default(null);
-  const turnBoundary = createMiddleware({
-    name: "SourceWeftToolBudgetTurn",
-    stateSchema: z.object({
-      sourceweftToolBudgetTurnId: withLangGraph(
-        defaulted as unknown as typeof marker,
-        {
-          reducer: {
-            fn: (current: string | null, update: string | null) =>
-              turnId !== null && update === turnId ? turnId : (current ?? null),
-          },
-          default: () => null,
-        },
-      ),
-    }),
-    beforeAgent: (state) => {
-      if (!turnId || state.sourceweftToolBudgetTurnId === turnId) return;
-      const previous = state.sourceweftToolBudgetTurnId;
-      // Legacy checkpoints bind a marker without clearing an interrupted run's
-      // budget. Only a positively identified new user turn gets a fresh run
-      // budget; thread counts, retries and HITL continuations stay untouched.
-      return {
-        sourceweftToolBudgetTurnId: turnId,
-        ...(typeof previous === "string" && previous.length > 0
-          ? { runToolCallCount: {} }
-          : {}),
-      };
-    },
-  });
-  return [
-    turnBoundary,
-    toolCallLimitMiddleware({
-      runLimit: config.chat.agent.toolCallRunLimit,
-      threadLimit: config.chat.agent.toolCallThreadLimit,
-      exitBehavior: "error",
-    }),
-  ];
-}
 
 function findBudgetError(
   error: unknown,

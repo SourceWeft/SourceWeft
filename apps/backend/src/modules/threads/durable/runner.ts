@@ -1,4 +1,8 @@
-import { toAgentToolBudgetContentError } from "../agent";
+import { readAgentRunStop } from "@sourceweft/contracts";
+import {
+  agentCheckpointFromStepStopError,
+  toAgentToolBudgetContentError,
+} from "../agent";
 import { normalizeMcpDisplay } from "../turn/trace-parts";
 import { approvalFinishPayload } from "./approval-finish";
 import {
@@ -885,6 +889,11 @@ function updateSnapshotFromPayload(
       });
     }
   }
+  if (payload.type === "finish" || payload.type === "error") {
+    if (payload.code === "CLIENT_CANCELLED") next.agentRunStop = null;
+    else if (payload.agentRunStop !== undefined)
+      next.agentRunStop = readAgentRunStop(payload.agentRunStop);
+  }
   if (payload.type === "finish") {
     next.finishReason =
       typeof payload.finishReason === "string" ? payload.finishReason : null;
@@ -1114,6 +1123,11 @@ function buildSnapshotMetadata(input: {
     ...(input.currentMetadata ?? {}),
     userMessageId: input.run.userMessageId,
     sourceUserMessageId: input.run.userMessageId,
+    agentRunStop:
+      input.run.status === "cancelled" ||
+      input.run.status === "cancel_requested"
+        ? undefined
+        : (readAgentRunStop(input.snapshot.agentRunStop) ?? undefined),
     toolCalls: input.snapshot.toolCalls ?? [],
     thinkingSteps: input.snapshot.thinkingSteps ?? [],
     ...projectSnapshotReasoning(input.snapshot, input.run.status !== "running"),
@@ -1153,6 +1167,10 @@ function snapshotWithFinalizedResult(
   return {
     ...snapshot,
     ...result,
+    agentRunStop:
+      metadata.isCancelled === true
+        ? null
+        : readAgentRunStop(metadata.agentRunStop),
     meteredLlmCalls: Array.isArray(metadata.meteredLlmCalls)
       ? (metadata.meteredLlmCalls as NonNullable<
           ChatRunSnapshot["meteredLlmCalls"]
@@ -1368,6 +1386,17 @@ async function createDurableErrorMessage(input: {
       excludeFromContext: true,
       error: input.createErrorInput.contentError.message,
       errorCode: input.createErrorInput.contentError.code,
+      agentRunStop: isClientCancelled
+        ? undefined
+        : (readAgentRunStop(
+            toObjectRecord(input.createErrorInput.contentError.details)
+              ?.agentRunStop,
+          ) ?? undefined),
+      agentCheckpoint: isClientCancelled
+        ? undefined
+        : (agentCheckpointFromStepStopError(
+            input.createErrorInput.contentError,
+          ) ?? undefined),
       userMessageId: input.createErrorInput.prepared.userMessage.id,
       sourceUserMessageId: input.createErrorInput.prepared.userMessage.id,
       traceId:
@@ -1441,22 +1470,44 @@ export async function persistTerminalFailure(input: {
       status: input.status,
       ...messageIds,
     };
-    const snapshot = input.snapshot.assistantMessage
+    const stoppedSnapshot = {
+      ...input.snapshot,
+      ...(input.status !== "cancelled" &&
+      agentCheckpointFromStepStopError(input.contentError)
+        ? {
+            agentCheckpoint: agentCheckpointFromStepStopError(
+              input.contentError,
+            )!,
+          }
+        : {}),
+      agentRunStop:
+        input.status === "cancelled"
+          ? null
+          : readAgentRunStop(
+              toObjectRecord(input.contentError.details)?.agentRunStop,
+            ),
+    };
+    const snapshot = stoppedSnapshot.assistantMessage
       ? {
-          ...input.snapshot,
+          ...stoppedSnapshot,
           assistantMessage: {
-            ...input.snapshot.assistantMessage,
+            ...stoppedSnapshot.assistantMessage,
             metadata: {
-              ...input.snapshot.assistantMessage.metadata,
+              ...stoppedSnapshot.assistantMessage.metadata,
               isError: input.status === "failed",
               isCancelled: input.status === "cancelled",
               error: input.contentError.message,
               errorCode: input.contentError.code,
+              agentRunStop:
+                readAgentRunStop(stoppedSnapshot.agentRunStop) ?? undefined,
+              ...(stoppedSnapshot.agentCheckpoint
+                ? { agentCheckpoint: stoppedSnapshot.agentCheckpoint }
+                : {}),
               ...buildThreadRunMetadata(terminalRun),
             },
           },
         }
-      : input.snapshot;
+      : stoppedSnapshot;
     const clientErrorMessage = sanitizeClientErrorMessage(
       input.contentError.message,
     );
@@ -1474,6 +1525,9 @@ export async function persistTerminalFailure(input: {
     }
     const errorPayload = toSseData({
       type: "error",
+      ...(stoppedSnapshot.agentRunStop
+        ? { agentRunStop: stoppedSnapshot.agentRunStop }
+        : {}),
       code: input.contentError.code,
       error: clientErrorMessage,
       ...(terminalRun.userMessageId
@@ -1511,6 +1565,11 @@ export async function persistTerminalFailure(input: {
           isCancelled: input.status === "cancelled",
           error: input.contentError.message,
           errorCode: input.contentError.code,
+          agentRunStop:
+            readAgentRunStop(stoppedSnapshot.agentRunStop) ?? undefined,
+          ...(stoppedSnapshot.agentCheckpoint
+            ? { agentCheckpoint: stoppedSnapshot.agentCheckpoint }
+            : {}),
           ...buildThreadRunMetadata(terminalRun),
         },
       });

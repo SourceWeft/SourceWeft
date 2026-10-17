@@ -1,4 +1,4 @@
-import type { MeterConsumeResponse } from "@sourceweft/contracts";
+import type { AgentRunStop, MeterConsumeResponse } from "@sourceweft/contracts";
 import type { UsageInfo } from "@sourceweft/model-gateway";
 import type { MessageRecord, ThreadRecord } from "../../content/types";
 import type { AgentCitation } from "../agent/citation-registry";
@@ -102,6 +102,7 @@ export type ChatRunSnapshot = DurableRunResultSnapshot & {
   availableCitations?: unknown[];
   lastEventType?: string;
   finishReason?: string | null;
+  agentRunStop?: AgentRunStop | null;
   agentCheckpoint?: AgentCheckpointMetadata | null;
   approvalRequestedAt?: string | null;
   approvalExpiresAt?: string | null;

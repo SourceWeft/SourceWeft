@@ -1,3 +1,4 @@
+import { readAgentRunStop } from "@sourceweft/contracts";
 import { loadThreadSourceSelection } from "../source-selection-service";
 import { resolveTurnSourceSelection, selectedSourceAnchors } from "../source-selection";
 import { extractImagePartsFromContentJson } from "./message-image-parts";
@@ -1941,9 +1942,9 @@ function mcpInstallIdsFromTools(
 function resolveLatestAssistantFinalCheckpoint(
   messageRecords: Awaited<ReturnType<typeof listMessageRecordsByThread>>,
 ) {
-  const messages = collapseSupersededMessages(messageRecords).filter(
-    (message) => !isContextExcludedMessage(message),
-  );
+  // Failed summaries remain excluded from model text, but their verified
+  // checkpoint is the continuation base for the saved execution progress.
+  const messages = collapseSupersededMessages(messageRecords);
 
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
@@ -1951,9 +1952,16 @@ function resolveLatestAssistantFinalCheckpoint(
       continue;
     }
 
+    const stepStop = message.metadata?.isCancelled === true ? null
+      : readAgentRunStop(message.metadata?.agentRunStop);
+    if (isContextExcludedMessage(message) && !stepStop) continue;
     const checkpoint = resolveAgentCheckpointMetadata(message);
     if (checkpoint?.final) {
       return checkpoint.final;
+    }
+    if (stepStop) {
+      throw new ContentError(409, "AGENT_STEP_CONTINUATION_UNAVAILABLE",
+        "Saved progress checkpoint is unavailable. The run cannot be continued safely.");
     }
   }
 

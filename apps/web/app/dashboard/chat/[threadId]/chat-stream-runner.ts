@@ -55,6 +55,7 @@ const TITLE_POLL_INTERVAL_MS = 1000;
 const TITLE_POLL_TIMEOUT_MS = 60000;
 
 export type ChatStreamEventPayload = ToolCallEventPayload & {
+  agentRunStop?: unknown;
   availableCitations?: unknown;
   citations?: unknown;
   code?: string;
@@ -129,6 +130,7 @@ type RunChatStreamInput = {
     event: ChatStreamEventPayload & { type: ChatStreamToolCallEventType },
   ) => boolean;
   markStreamingAssistantAsError: (errorInput: {
+    agentRunStop?: unknown;
     code?: string | null;
     error: string;
     messageId?: string | null;
@@ -738,6 +740,7 @@ export async function runChatStream(
         const finishState = handleStreamingFinish({
           context: streamingEventHandlerContext,
           finishReason,
+          agentRunStop: data.agentRunStop,
         });
         receivedFinishEvent = finishState.receivedFinishEvent;
         streamEnded = finishState.streamEnded;

@@ -1,14 +1,25 @@
 import assert from "node:assert/strict";
-import { afterEach, test, vi } from "vitest";
+import { afterEach, beforeEach, test, vi } from "vitest";
 
 // Configuration cases supply their own env; reloading config must not re-read
 // a developer's .env and refill values deliberately absent in a test.
 vi.mock("dotenv/config", () => ({}));
 
-const toolCallRunLimitEnv = "SOURCEWEFT_AGENT_TOOL_CALL_RUN_LIMIT";
-const toolCallThreadLimitEnv = "SOURCEWEFT_AGENT_TOOL_CALL_THREAD_LIMIT";
-const originalRunLimit = process.env[toolCallRunLimitEnv];
-const originalThreadLimit = process.env[toolCallThreadLimitEnv];
+const maxStepsEnv = "SOURCEWEFT_AGENT_MAX_STEPS";
+const retiredToolLimitEnvs = [
+  "SOURCEWEFT_AGENT_TOOL_CALL_RUN_LIMIT",
+  "SOURCEWEFT_AGENT_TOOL_CALL_THREAD_LIMIT",
+] as const;
+const agentBudgetEnvNames = [maxStepsEnv, ...retiredToolLimitEnvs];
+const originalAgentBudgetEnv = new Map(
+  agentBudgetEnvNames.map((name) => [name, process.env[name]]),
+);
+
+// Every configuration test starts without ambient budget settings. Individual
+// migration/override cases explicitly install only the values they exercise.
+beforeEach(() => {
+  for (const name of agentBudgetEnvNames) delete process.env[name];
+});
 const originalMcpOrigins = process.env.MCP_ALLOWED_INTERNAL_ORIGINS;
 const originalLlmOrigins = process.env.LLM_ALLOWED_INTERNAL_ORIGINS;
 const originalDocumentParseProvider = process.env.DOCUMENT_PARSE_PROVIDER;
@@ -42,16 +53,10 @@ afterEach(() => {
   if (originalMcpOrigins === undefined)
     delete process.env.MCP_ALLOWED_INTERNAL_ORIGINS;
   else process.env.MCP_ALLOWED_INTERNAL_ORIGINS = originalMcpOrigins;
-  if (originalRunLimit === undefined) {
-    delete process.env[toolCallRunLimitEnv];
-  } else {
-    process.env[toolCallRunLimitEnv] = originalRunLimit;
-  }
-
-  if (originalThreadLimit === undefined) {
-    delete process.env[toolCallThreadLimitEnv];
-  } else {
-    process.env[toolCallThreadLimitEnv] = originalThreadLimit;
+  for (const name of agentBudgetEnvNames) {
+    const original = originalAgentBudgetEnv.get(name);
+    if (original === undefined) delete process.env[name];
+    else process.env[name] = original;
   }
 
   for (const name of interpreterEnvNames) {
@@ -162,16 +167,84 @@ test("agent interpreter rejects an inconsistent turn budget", async () => {
   );
 });
 
-test("agent tool call limits are configurable via environment", async () => {
-  process.env[toolCallRunLimitEnv] = "7";
-  process.env[toolCallThreadLimitEnv] = "11";
+test("agent runs default to 400 model-decision steps, without legacy tool-count fields", async () => {
   vi.resetModules();
-
   const { config } = await import("./config");
-
-  assert.equal(config.chat.agent.toolCallRunLimit, 7);
-  assert.equal(config.chat.agent.toolCallThreadLimit, 11);
+  assert.equal(config.chat.agent.maxSteps, 400);
+  assert.equal("toolCallRunLimit" in config.chat.agent, false);
+  assert.equal("toolCallThreadLimit" in config.chat.agent, false);
 });
+
+for (const [raw, expected] of [
+  ["1", 1],
+  ["400", 400],
+  [" 25 ", 25],
+  [String(Number.MAX_SAFE_INTEGER), Number.MAX_SAFE_INTEGER],
+] as const) {
+  test(`agent max steps accepts an explicit positive decimal safe integer: ${JSON.stringify(raw)}`, async () => {
+    process.env[maxStepsEnv] = raw;
+    vi.resetModules();
+    assert.equal(
+      (await import("./config")).config.chat.agent.maxSteps,
+      expected,
+    );
+  });
+}
+
+for (const raw of [
+  "",
+  " ",
+  "0",
+  "-1",
+  "1.5",
+  "400.0",
+  "+7",
+  "01",
+  "1e3",
+  "0x10",
+  "1_000",
+  "NaN",
+  "Infinity",
+  "true",
+  "private-invalid-value",
+  "9007199254740992",
+  "9".repeat(400),
+]) {
+  test(`invalid explicit agent max steps fails startup: ${JSON.stringify(raw.slice(0, 30))}`, async () => {
+    process.env[maxStepsEnv] = raw;
+    vi.resetModules();
+    await assert.rejects(import("./config"), (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.match(
+        error.message,
+        /SOURCEWEFT_AGENT_MAX_STEPS must be a positive decimal safe integer/,
+      );
+      assert.doesNotMatch(error.message, /private-invalid-value/);
+      return true;
+    });
+  });
+}
+
+for (const retired of retiredToolLimitEnvs) {
+  for (const value of ["", "48", "private-retired-value"]) {
+    test(`retired tool-count setting requires explicit migration even with max steps: ${retired}/${value ? "set" : "empty"}`, async () => {
+      process.env[retired] = value;
+      process.env[maxStepsEnv] = "400";
+      vi.resetModules();
+      await assert.rejects(import("./config"), (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.ok(error.message.includes(retired));
+        assert.match(
+          error.message,
+          /Remove it and configure SOURCEWEFT_AGENT_MAX_STEPS instead/,
+        );
+        assert.match(error.message, /different units/);
+        assert.doesNotMatch(error.message, /private-retired-value/);
+        return true;
+      });
+    });
+  }
+}
 
 test("MCP overview pace defaults to 20 versions every 5 minutes", async () => {
   vi.resetModules();

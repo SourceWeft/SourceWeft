@@ -37,6 +37,14 @@ PUBLIC_API_BASE_URL=
 
 只发布网关端口，外部 HTTPS 代理可以转发到该端口。公开地址应与浏览器使用的 origin 一致。网关禁用 SSE 缓冲并转发 WebSocket Upgrade。Web 容器通过 `INTERNAL_API_BASE_URL=http://api:3001` 访问 API，不依赖公开地址。
 
+## Agent 单次运行上限
+
+`SOURCEWEFT_AGENT_MAX_STEPS` 默认为 `400`，根 Agent 与每个子 Agent 各自使用独立的单次运行预算。一轮逻辑模型决策及其整批工具算一步，并行工具和工具重试不逐个加步；整个委派任务树的总步数可能超过 400。辅助模型调用与重试仍沿现有网关计费。
+
+达到上限后，当前已授权的工具批次按原审批和超时规则完成，再由同一模型最多额外生成一次禁用工具的总结。总结明确未完成事项，不把尚未发布的报告说成交付成功。总结失败时明确报错并保留已保存进度；可在同一会话发送新消息续作。Retry 与审批恢复继续使用原预算。
+
+该变量只接受正十进制安全整数，显式空值或非法值会使启动失败。请从已有 `.env` 中移除 `SOURCEWEFT_AGENT_TOOL_CALL_RUN_LIMIT` 和 `SOURCEWEFT_AGENT_TOOL_CALL_THREAD_LIMIT`；即使同时设置了新变量，任一旧变量仍会触发明确迁移错误。旧 checkpoint 的工具计数保留为历史记录，不换算为步数，也不再作为会话终身上限。
+
 ## 可选服务
 
 - 外部 S3：设置 `COMPOSE_PROFILES=` 停用内置存储，填写 `S3_ENDPOINT`、`S3_REGION`、`S3_BUCKET`、`S3_ACCESS_KEY_ID`、`S3_SECRET_ACCESS_KEY` 和路径样式配置。使用已有桶时设置 `S3_CREATE_BUCKET=false`。初始化会检查桶是否可用，缺失或无权访问时明确失败。

@@ -1217,7 +1217,7 @@ export async function finishChatThreadRun(input: {
             context,
             incoming: input.snapshotJson,
           });
-    const snapshot = fenceProtectedOperationsForTerminal({
+    const fencedSnapshot = fenceProtectedOperationsForTerminal({
       snapshot: mergedSnapshot,
       scope: {
         runId: context.runRow.id,
@@ -1229,6 +1229,10 @@ export async function finishChatThreadRun(input: {
         `RUN_TERMINATED_${input.status.toUpperCase()}`,
       markedAt: now.toISOString(),
     });
+    const snapshot =
+      input.status === "cancelled"
+        ? withAssistantThreadRunMetadata(fencedSnapshot, projectedRun)
+        : fencedSnapshot;
     const [updated] = await tx
       .update(chatThreadRuns)
       .set({

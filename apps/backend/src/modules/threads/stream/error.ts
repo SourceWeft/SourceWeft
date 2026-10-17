@@ -1,3 +1,6 @@
+import { agentCheckpointFromStepStopError } from "../agent";
+import { readAgentRunStop } from "@sourceweft/contracts";
+import { toObjectRecord } from "../../../shared/records";
 import {
   recordGatewayOperationEvent,
   type LlmExecutionConfig,
@@ -128,6 +131,16 @@ export async function createThreadStreamErrorMessage(input: {
       excludeFromContext: true,
       error: clientErrorMessage,
       errorCode: input.contentError.code,
+      agentRunStop:
+        input.contentError.code === "CLIENT_CANCELLED"
+          ? undefined
+          : (readAgentRunStop(
+              toObjectRecord(input.contentError.details)?.agentRunStop,
+            ) ?? undefined),
+      agentCheckpoint:
+        input.contentError.code === "CLIENT_CANCELLED"
+          ? undefined
+          : (agentCheckpointFromStepStopError(input.contentError) ?? undefined),
       userMessageId: input.prepared.userMessage.id,
       sourceUserMessageId: input.prepared.userMessage.id,
       traceId:

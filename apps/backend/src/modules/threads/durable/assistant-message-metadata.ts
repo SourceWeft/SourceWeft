@@ -1,3 +1,4 @@
+import { readAgentRunStop } from "@sourceweft/contracts";
 import { findMessageRecord, updateMessageRecord } from "../message-repository";
 import { preserveTraceMetadata } from "../turn/trace-metadata";
 import { projectSnapshotReasoning } from "../turn/reasoning-state";
@@ -29,15 +30,21 @@ export function withAssistantThreadRunMetadata(
   snapshot: ChatRunSnapshot,
   run: ChatThreadRunRecord,
 ) {
-  if (!snapshot.assistantMessage) {
-    return snapshot;
+  const cancelled = run.status === "cancelled";
+  const normalized =
+    cancelled && snapshot.agentRunStop !== undefined
+      ? { ...snapshot, agentRunStop: null }
+      : snapshot;
+  if (!normalized.assistantMessage) {
+    return normalized;
   }
   return {
-    ...snapshot,
+    ...normalized,
     assistantMessage: {
-      ...snapshot.assistantMessage,
+      ...normalized.assistantMessage,
       metadata: {
-        ...snapshot.assistantMessage.metadata,
+        ...normalized.assistantMessage.metadata,
+        ...(cancelled ? { agentRunStop: undefined } : {}),
         ...buildThreadRunMetadata(run),
       },
     },
@@ -196,6 +203,11 @@ export function buildAssistantMessageSnapshotMetadata(input: {
   snapshot: ChatRunSnapshot;
 }) {
   const nextMetadata = {
+    agentRunStop:
+      input.run.status === "cancelled" ||
+      input.run.status === "cancel_requested"
+        ? undefined
+        : (readAgentRunStop(input.snapshot.agentRunStop) ?? undefined),
     ...projectSnapshotReasoning(input.snapshot, input.run.status !== "running"),
     ...(input.snapshot.reasoningSegments !== undefined
       ? { reasoningSegments: input.snapshot.reasoningSegments }
@@ -246,6 +258,11 @@ export function buildAssistantMessageConfirmationMetadata(input: {
   const approvalExpiresAt =
     input.snapshot.approvalExpiresAt ?? currentThreadRun?.approvalExpiresAt;
   const nextMetadata = {
+    agentRunStop:
+      input.run.status === "cancelled" ||
+      input.run.status === "cancel_requested"
+        ? undefined
+        : (readAgentRunStop(input.snapshot.agentRunStop) ?? undefined),
     ...projectSnapshotReasoning(input.snapshot, input.run.status !== "running"),
     ...(input.snapshot.reasoningSegments !== undefined
       ? { reasoningSegments: input.snapshot.reasoningSegments }
