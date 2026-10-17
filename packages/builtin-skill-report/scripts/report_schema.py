@@ -9,6 +9,13 @@ REPORT_CITATION_TOKEN = re.compile(r"\[\s*S[1-9][0-9]*(?:\s*[,;，；]\s*S[1-9][
 TEXT_URL = re.compile(r"https?://[^\s<>\"'，。；！？（）【】]+", re.I)
 PRESENTATION_DEFAULTS = {"mobileDensity": "standard", "tableOfContents": False, "pageNumbers": False, "citationLayout": "inline"}
 RUNTIME_TOKEN = re.compile(r"\[c\d+\]|[\[【]\u200b?(?:citation\s*:|cite:)|||<citation", re.I)
+# Legacy provenance: free-form observed strings without a `kind` discriminator.
+LEGACY_PROVENANCE_KEYS = ("sourceId", "documentId", "chunkId", "fileId", "scope", "revision", "locator")
+# Resolvable provenance mirrors the host /files footnotes and packages/contracts/src/files.ts.
+PROVENANCE_KINDS = ("chunk", "file", "external")
+FILE_BACKENDS = ("cloud_vfs", "local_fs")
+FILE_REVISION = re.compile(r"sha256:[a-f0-9]{64}")
+FILE_LOCATOR_FIELDS = {"lines": (["start", "end"], []), "page": (["page"], []), "slide": (["slide"], []), "paragraph": (["index"], ["heading"]), "cells": (["sheet", "range"], []), "image": ([], [])}
 
 
 def fail(message):
@@ -57,6 +64,111 @@ def citations(value, ids, required=False):
         fail("Duplicate citation")
 
 
+def safe_url(raw_url, label):
+    text(raw_url, label, 2000)
+    url = urlsplit(raw_url)
+    if url.scheme not in ("http", "https") or not url.hostname or url.username or url.password or any(c.isspace() for c in raw_url) or '\\' in raw_url:
+        fail(f"Unsafe {label}")
+    return raw_url
+
+
+def identifier(value, label, limit=200):
+    """Observed host identity copied verbatim; bounded, non-blank, no controls."""
+    if not isinstance(value, str) or not value.strip() or len(value) > limit or any(ord(c) < 32 or ord(c) == 127 for c in value):
+        fail(f"Invalid {label}")
+    return value
+
+
+def positive_int(value, label, minimum=1):
+    if type(value) is not int or value < minimum:
+        fail(f"Invalid {label}; expected an integer >= {minimum}")
+    return value
+
+
+def relative_path(value, label):
+    # Mirrors fileRelativePathSchema: beneath the root, no backslash/control, no '.'/'..' parts.
+    if not isinstance(value, str) or not 1 <= len(value) <= 4096 or value.startswith('/') or any(c == '\\' or ord(c) < 32 or ord(c) == 127 for c in value) or any(part in ('', '.', '..') for part in value.split('/')):
+        fail(f"Invalid {label}; expected a relative file path beneath the authorized root")
+    return value
+
+
+def file_locator(value):
+    """Mirrors fileLocatorSchema in packages/contracts/src/files.ts."""
+    kind = value.get("kind") if isinstance(value, dict) else None
+    if not isinstance(kind, str) or kind not in FILE_LOCATOR_FIELDS:
+        fail("Invalid provenance locator kind")
+    required, optional = FILE_LOCATOR_FIELDS[kind]
+    obj(value, ["kind"] + required, optional)
+    if kind == "lines":
+        if positive_int(value["end"], "locator end") < positive_int(value["start"], "locator start"):
+            fail("Invalid locator line range")
+    elif kind in ("page", "slide"):
+        positive_int(value[kind], f"locator {kind}")
+    elif kind == "paragraph":
+        positive_int(value["index"], "locator index", 0)
+        if "heading" in value:
+            identifier(value["heading"], "locator heading", 1000)
+    elif kind == "cells":
+        identifier(value["sheet"], "locator sheet", 256)
+        identifier(value["range"], "locator range", 64)
+    return value
+
+
+def provenance_object(provenance):
+    """Private provenance: strict per-kind shapes, or the legacy free-form strings."""
+    if not isinstance(provenance, dict):
+        fail("Expected provenance object")
+    if "kind" not in provenance:
+        obj(provenance, [], LEGACY_PROVENANCE_KEYS)
+        if not provenance:
+            fail("Empty provenance")
+        for key, value in provenance.items():
+            text(value, f"provenance {key}", 1000)
+        return provenance
+    kind = provenance["kind"]
+    if kind == "chunk":
+        obj(provenance, ["kind", "sourceId", "documentId", "chunkId"], ["chunkNo", "path"])
+        for key in ("sourceId", "documentId", "chunkId"):
+            identifier(provenance[key], f"provenance {key}")
+        if "chunkNo" in provenance:
+            # Host chunk numbers are 0-based (ingest index); the footnote copies them verbatim.
+            positive_int(provenance["chunkNo"], "provenance chunkNo", 0)
+        if "path" in provenance:
+            # Footnote-emitted document path; copied verbatim, never used for navigation.
+            identifier(provenance["path"], "provenance path", 1000)
+    elif kind == "file":
+        obj(provenance, ["kind", "workspaceId", "threadId", "backendKind", "fileId", "relativePath", "revision", "locator"])
+        for key in ("workspaceId", "threadId", "fileId"):
+            identifier(provenance[key], f"provenance {key}")
+        if provenance["backendKind"] not in FILE_BACKENDS:
+            fail("Invalid provenance backendKind")
+        relative_path(provenance["relativePath"], "provenance relativePath")
+        if not isinstance(provenance["revision"], str) or not FILE_REVISION.fullmatch(provenance["revision"]):
+            fail("Invalid provenance revision; expected sha256:<64 hex>")
+        file_locator(provenance["locator"])
+    elif kind == "external":
+        obj(provenance, ["kind", "url"])
+        safe_url(provenance["url"], "provenance url")
+    else:
+        fail("Unsupported provenance kind")
+    return provenance
+
+
+def provenance_status(source):
+    """Structural classification only: resolvable (typed kind), legacy (free-form), missing."""
+    provenance = source.get("provenance")
+    if provenance is None:
+        return "missing"
+    return "resolvable" if provenance.get("kind") in PROVENANCE_KINDS else "legacy"
+
+
+def provenance_counts(report):
+    counts = {"resolvable": 0, "legacy": 0, "missing": 0}
+    for source in report["sources"]:
+        counts[provenance_status(source)] += 1
+    return counts
+
+
 def statement(value, ids, paragraph=False):
     obj(value, ["text", "kind", "citations"] + (["type"] if paragraph else []))
     statement_input_text(value["text"], "statement")
@@ -96,16 +208,9 @@ def validate_report(report):
         if "locator" in display:
             text(display["locator"], "source locator", 500)
         if "url" in display:
-            raw_url = text(display["url"], "source URL", 2000)
-            url = urlsplit(raw_url)
-            if url.scheme not in ("http", "https") or not url.hostname or url.username or url.password or any(c.isspace() for c in raw_url) or '\\' in raw_url:
-                fail("Unsafe source URL")
+            safe_url(display["url"], "source URL")
         if "provenance" in source:
-            provenance = obj(source["provenance"], [], ["sourceId", "documentId", "chunkId", "fileId", "scope", "revision", "locator"])
-            if not provenance:
-                fail("Empty provenance")
-            for key, value in provenance.items():
-                text(value, f"provenance {key}", 1000)
+            provenance_object(source["provenance"])
     for item in array(report["summary"], "summary", 10):
         statement(item, ids)
     sections = set()
@@ -208,14 +313,24 @@ def citation_parts(body, citation_ids, report):
     return body, note
 
 
-def statement_parts(item, report):
+def statement_body(item, report):
+    """Statement text with its kind label, before any citation markers."""
     prefix = '' if item['kind'] == 'fact' else labels(report)[item['kind']] + ': '
-    return citation_parts(prefix + item['text'], item['citations'], report)
+    return prefix + item['text']
+
+
+def cell_body(cell, report):
+    """Cell text with its status label, before any citation markers."""
+    status = '' if cell['status'] == 'value' else ' (' + labels(report)[cell['status']] + ')'
+    return cell['text'] + status
+
+
+def statement_parts(item, report):
+    return citation_parts(statement_body(item, report), item['citations'], report)
 
 
 def cell_parts(cell, report):
-    status = '' if cell['status'] == 'value' else ' (' + labels(report)[cell['status']] + ')'
-    return citation_parts(cell['text'] + status, cell['citations'], report)
+    return citation_parts(cell_body(cell, report), cell['citations'], report)
 
 
 def public_texts(report):

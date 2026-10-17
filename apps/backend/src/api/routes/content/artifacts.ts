@@ -195,6 +195,36 @@ export function registerArtifactRoutes(app: Hono) {
     return c.body(Buffer.from(result.body), result.status);
   });
 
+  // Member-only reader for private authoring sources (today: the report
+  // evidence `report.source.json`). It serves raw bytes to a signed-in member
+  // who can already view the exact version; the service decides which names
+  // and manifest roles qualify and answers 404 for everything else. This must
+  // never be mirrored on public-shares.ts: share tokens expose published
+  // deliverables only, never private sources.
+  app.get(
+    "/artifacts/:id/versions/:versionId/source-files/:fileName",
+    async (c) => {
+      const session = await requireSession(c);
+      if (!session) {
+        throw ApiError.unauthorized();
+      }
+      const result =
+        await contentArtifactsService.readArtifactVersionSourceFile({
+          workspaceId: requireRouteParam(c, "workspaceId"),
+          artifactId: requireRouteParam(c, "id"),
+          artifactVersionId: requireRouteParam(c, "versionId"),
+          fileName: requireRouteParam(c, "fileName"),
+          userId: getSessionUserId(session),
+        });
+      c.header("Content-Type", "application/json");
+      c.header("Content-Length", String(result.bytes.byteLength));
+      c.header("Cache-Control", "private, no-store");
+      c.header("X-Content-Type-Options", "nosniff");
+      c.header("Referrer-Policy", "no-referrer");
+      return c.body(result.bytes);
+    },
+  );
+
   app.get("/artifacts/:id", async (c) => {
     const session = await requireSession(c);
     if (!session) {

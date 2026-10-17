@@ -53,6 +53,7 @@ import {
   UnsupportedArtifactPreview,
 } from "./fallbacks";
 import { resolveArtifactPreviewRenderer } from "./preview-registry";
+import { ReportEvidencePanel } from "./report-evidence-panel";
 import type { ArtifactPreviewLayout } from "./types";
 import { isArtifactPending, payloadRecord } from "./utils";
 import { withArtifactVersionMediaProxyUrls } from "../chat-canvas/use-artifact-version-media";
@@ -367,6 +368,10 @@ export function ArtifactPreviewPanel({
         )}
       >
         {previewContent}
+
+        {/* Decides for itself whether this artifact is a ready HTML report with
+            a member-readable source file; the shell stays feature-agnostic. */}
+        <ReportEvidencePanel artifact={artifact} workspaceId={workspaceId} />
 
         {artifact.promptText ? (
           <div className="mt-3 rounded-xl border bg-background/70 p-3">
