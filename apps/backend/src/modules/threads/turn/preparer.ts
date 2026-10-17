@@ -1,5 +1,9 @@
+import { readAgentRunStop } from "@sourceweft/contracts";
 import { loadThreadSourceSelection } from "../source-selection-service";
-import { resolveTurnSourceSelection, selectedSourceAnchors } from "../source-selection";
+import {
+  resolveTurnSourceSelection,
+  selectedSourceAnchors,
+} from "../source-selection";
 import { extractImagePartsFromContentJson } from "./message-image-parts";
 import { readContinuationRenderBlocks } from "./render-blocks";
 import { randomUUID } from "node:crypto";
@@ -37,7 +41,13 @@ import {
   findMessageRecord,
   listMessageRecordsByThread,
   updateMessageMetadataRecord,
+  persistMessageProjection,
 } from "../message-repository";
+import {
+  appendAgentRunOrigin,
+  collectRefreshAgentRunOrigins,
+  readAgentRunOrigins,
+} from "./agent-run-origins";
 import {
   normalizeThreadModelSettings,
   applyResolvedThreadModelSettings,
@@ -1322,22 +1332,43 @@ export async function prepareThreadTurn(
   });
 
   const persistedSourceSelection = await loadThreadSourceSelection({
-    teamId: workspace.organizationId, workspaceId: workspace.id, threadId: thread.id,
+    teamId: workspace.organizationId,
+    workspaceId: workspace.id,
+    threadId: thread.id,
   });
-  if (input.sourceSelectionRevision !== undefined && input.sourceSelectionRevision !== persistedSourceSelection.revision) {
-    throw new ContentError(409, "SOURCE_SELECTION_CONFLICT", "Sources changed in another window. Reload the selection before sending.");
+  if (
+    input.sourceSelectionRevision !== undefined &&
+    input.sourceSelectionRevision !== persistedSourceSelection.revision
+  ) {
+    throw new ContentError(
+      409,
+      "SOURCE_SELECTION_CONFLICT",
+      "Sources changed in another window. Reload the selection before sending.",
+    );
   }
-  const selectedSourceIds = resolveTurnSourceSelection(input.sourceIds, persistedSourceSelection);
+  const selectedSourceIds = resolveTurnSourceSelection(
+    input.sourceIds,
+    persistedSourceSelection,
+  );
   const sourceScope = await resolveSourceTreeScope({
-    teamId: workspace.organizationId, workspaceId: workspace.id, selectedSourceIds,
+    teamId: workspace.organizationId,
+    workspaceId: workspace.id,
+    selectedSourceIds,
   });
   const sourceIds = sourceScope.effectiveSourceIds;
-  const mentionedSourceIds = selectedSourceAnchors(sourceIds, requestedMentionedSourceIds);
+  const mentionedSourceIds = selectedSourceAnchors(
+    sourceIds,
+    requestedMentionedSourceIds,
+  );
   const mentionedSourceScope = await resolveSourceTreeScope({
-    teamId: workspace.organizationId, workspaceId: workspace.id,
+    teamId: workspace.organizationId,
+    workspaceId: workspace.id,
     selectedSourceIds: mentionedSourceIds,
   });
-  const effectiveMentionedSourceIds = selectedSourceAnchors(sourceIds, mentionedSourceScope.effectiveSourceIds);
+  const effectiveMentionedSourceIds = selectedSourceAnchors(
+    sourceIds,
+    mentionedSourceScope.effectiveSourceIds,
+  );
   const markerToolCommand = lastToolCommandMarker(parsedPrompt.markers);
   const requestedCommand = parseRequestedCommand({
     command: markerToolCommand
@@ -1830,7 +1861,7 @@ export async function prepareThreadTurn(
     continuation: Boolean(input.assistantMessageId),
     metadata: continuedAssistantMessage?.metadata,
   });
-  const userMessageWithTraceId = existingUserMessage
+  let userMessageWithTraceId = existingUserMessage
     ? userMessage
     : ((await updateMessageMetadataRecord({
         teamId: workspace.organizationId,
@@ -1845,6 +1876,50 @@ export async function prepareThreadTurn(
         ...userMessage,
         metadata: { ...userMessage.metadata, traceId: runTraceId },
       });
+
+  const refreshAgentStepBudget = input.refreshAgentStepBudget
+    ? collectRefreshAgentRunOrigins({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        threadId: thread.id,
+        userMessage: userMessageWithTraceId,
+        messages: messageRecords,
+      })
+    : undefined;
+  // Record the actual graph before any model/tool can run, including failures
+  // and zero-output cancellations which never create an assistant checkpoint.
+  // The projection reads and appends under the repository's existing row lock.
+  let recordedUser: typeof userMessageWithTraceId | null = null;
+  await persistMessageProjection({
+    teamId: workspace.organizationId,
+    workspaceId: workspace.id,
+    threadId: thread.id,
+    messageId: userMessage.id,
+    project: (current) => {
+      const metadata = appendAgentRunOrigin({
+        current,
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        threadId: thread.id,
+        userMessageId: userMessage.id,
+        graphThreadId: agentBaseCheckpoint?.threadId ?? agentRunThreadId,
+        priorGraphThreadIds:
+          refreshAgentStepBudget?.graphThreadIds ??
+          (existingUserMessage && !readAgentRunOrigins(current.metadata).length
+            ? [thread.id]
+            : []),
+      });
+      recordedUser = { ...current, metadata };
+      return { metadata };
+    },
+  });
+  if (!recordedUser)
+    throw new ContentError(
+      409,
+      "AGENT_STEP_REFRESH_UNAVAILABLE",
+      "The user message disappeared before execution could be recorded.",
+    );
+  userMessageWithTraceId = recordedUser;
 
   if (pendingVisionFallbackBilling.length > 0) {
     preflightBilling = buildVisionFallbackPreflightBilling({
@@ -1897,6 +1972,7 @@ export async function prepareThreadTurn(
     llmIdempotencyKey,
     agentMode,
     agentBaseCheckpoint,
+    refreshAgentStepBudget,
     agentRunThreadId,
     toolApprovalResume,
     traceContinuation,
@@ -1941,9 +2017,9 @@ function mcpInstallIdsFromTools(
 function resolveLatestAssistantFinalCheckpoint(
   messageRecords: Awaited<ReturnType<typeof listMessageRecordsByThread>>,
 ) {
-  const messages = collapseSupersededMessages(messageRecords).filter(
-    (message) => !isContextExcludedMessage(message),
-  );
+  // Failed summaries remain excluded from model text, but their verified
+  // checkpoint is the continuation base for the saved execution progress.
+  const messages = collapseSupersededMessages(messageRecords);
 
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
@@ -1951,9 +2027,21 @@ function resolveLatestAssistantFinalCheckpoint(
       continue;
     }
 
+    const stepStop =
+      message.metadata?.isCancelled === true
+        ? null
+        : readAgentRunStop(message.metadata?.agentRunStop);
+    if (isContextExcludedMessage(message) && !stepStop) continue;
     const checkpoint = resolveAgentCheckpointMetadata(message);
     if (checkpoint?.final) {
       return checkpoint.final;
+    }
+    if (stepStop) {
+      throw new ContentError(
+        409,
+        "AGENT_STEP_CONTINUATION_UNAVAILABLE",
+        "Saved progress checkpoint is unavailable. The run cannot be continued safely.",
+      );
     }
   }
 

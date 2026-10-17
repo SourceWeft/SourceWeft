@@ -1,3 +1,4 @@
+import { ToolCallLimitExceededError } from "langchain";
 import assert from "node:assert/strict";
 import { afterAll, test, vi } from "vitest";
 import type { ToolConfirmationRequest } from "@sourceweft/contracts";
@@ -2393,4 +2394,145 @@ test("streamThreadEvents honors cancellation after agent outcome before finaliza
     events.some((event) => event.type === "assistant-message"),
     false,
   );
+});
+
+test("streamed typed budget exhaustion emits an explicit safe error and never finalizes a successful answer", async () => {
+  let finalized = false;
+  let persistedCode: string | undefined;
+  const service = new ContentThreadStreamService(
+    createTurnService({
+      finalize: async () => {
+        finalized = true;
+        throw new Error("must not finalize");
+      },
+    }) as unknown as ConstructorParameters<
+      typeof ContentThreadStreamService
+    >[0],
+    async function* (): AsyncGenerator<DeepAgentTurnEvent> {
+      throw new Error("private middleware wrapper", {
+        cause: new ToolCallLimitExceededError(
+          301,
+          20,
+          300,
+          48,
+          "private-tool-name",
+        ),
+      });
+    },
+    async () => null,
+    async (input) => {
+      persistedCode = input.contentError.code;
+      return createAssistantMessageRecord({ id: "budget-error" });
+    },
+    createBillingPort(),
+  );
+  const events: Record<string, unknown>[] = [];
+  for await (const event of service.streamThreadEvents({
+    workspaceId: "workspace-1",
+    threadId: "thread-1",
+    userId: "user-1",
+    content: "continue saved work",
+  }))
+    events.push(parseSseData(event));
+  assert.equal(finalized, false);
+  assert.equal(persistedCode, "AGENT_TOOL_BUDGET_EXCEEDED");
+  const error = events.find((event) => event.type === "error");
+  assert.equal(error?.code, "AGENT_TOOL_BUDGET_EXCEEDED");
+  assert.match(String(error?.error), /conversation.*tool-call limit/i);
+  assert.doesNotMatch(String(error?.error), /private/);
+  assert.equal(
+    events.some((event) => event.type === "assistant-message"),
+    false,
+  );
+});
+
+test("step-limit outcome persists and streams a partial-run marker without implying artifact publication", async () => {
+  const agentRunStop = {
+    reason: "step_limit",
+    steps: 400,
+    limit: 400,
+    canContinue: true,
+    summaryStatus: "completed",
+  } as const;
+  let finalized: Record<string, unknown> | null = null;
+  const base = createTurnService();
+  const service = new ContentThreadStreamService(
+    createTurnService({
+      finalize: async (value) => {
+        finalized = value as Record<string, unknown>;
+        return base.finalizeThreadTurn(undefined);
+      },
+    }) as unknown as ConstructorParameters<
+      typeof ContentThreadStreamService
+    >[0],
+    async function* (): AsyncGenerator<DeepAgentTurnEvent> {
+      yield {
+        type: "done",
+        outcome: {
+          ...outcome,
+          assistantContent: "Progress saved; export QA remains.",
+          finishReason: "step_limit",
+          agentRunStop,
+        },
+      };
+    },
+    async () => null,
+    undefined,
+    createBillingPort(),
+  );
+  const events: Record<string, unknown>[] = [];
+  for await (const event of service.streamThreadEvents({
+    workspaceId: "workspace-1",
+    threadId: "thread-1",
+    userId: "user-1",
+    content: "Generate report",
+  }))
+    events.push(parseSseData(event));
+  assert.equal(finalized?.["finishReason"], "step_limit");
+  assert.deepEqual(finalized?.["agentRunStop"], agentRunStop);
+  const finish = events.find((event) => event.type === "finish");
+  assert.deepEqual(finish?.agentRunStop, agentRunStop);
+  assert.equal(finish?.finishReason, "step_limit");
+  assert.equal(
+    events.some((event) => event.type === "artifact-published"),
+    false,
+  );
+});
+
+test("summary failure retains its continuation marker through trailing finish and keeps billing code", async () => {
+  const agentRunStop = {
+    reason: "step_limit",
+    steps: 400,
+    limit: 400,
+    canContinue: true,
+    summaryStatus: "failed",
+  } as const;
+  const service = new ContentThreadStreamService(
+    createTurnService() as unknown as ConstructorParameters<
+      typeof ContentThreadStreamService
+    >[0],
+    async function* (): AsyncGenerator<DeepAgentTurnEvent> {
+      throw new ContentError(
+        402,
+        "BILLING_INSUFFICIENT_CREDITS",
+        "Not enough credits",
+        { details: { agentRunStop } },
+      );
+    },
+    async () => null,
+    async () => createAssistantMessageRecord({ id: "summary-failed" }),
+    createBillingPort(),
+  );
+  const events: Record<string, unknown>[] = [];
+  for await (const event of service.streamThreadEvents({
+    workspaceId: "workspace-1",
+    threadId: "thread-1",
+    userId: "user-1",
+    content: "Continue report",
+  }))
+    events.push(parseSseData(event));
+  const error = events.find((event) => event.type === "error");
+  assert.equal(error?.code, "BILLING_INSUFFICIENT_CREDITS");
+  assert.deepEqual(error?.agentRunStop, agentRunStop);
+  assert.equal(Object.hasOwn(events.at(-1) ?? {}, "agentRunStop"), false);
 });

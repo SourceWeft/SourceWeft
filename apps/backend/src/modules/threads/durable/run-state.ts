@@ -1,6 +1,12 @@
+import { readAgentRunStop } from "@sourceweft/contracts";
+import { toObjectRecord } from "../../../shared/records";
 import { ContentError } from "../../content/errors";
 import { sanitizeClientErrorMessage } from "../../content/model-gateway-error";
-import type { ChatThreadRunRecord, ChatThreadRunStatus } from "./types";
+import type {
+  ChatThreadRunRecord,
+  ChatThreadRunStatus,
+  ChatThreadRunStopState,
+} from "./types";
 import {
   getSnapshotRecord,
   hasPendingConfirmations,
@@ -65,7 +71,7 @@ export function toTerminalJobStatus(status: ChatThreadRunStatus) {
   return "cancelled";
 }
 
-export function toTerminalRunError(run: ChatThreadRunRecord) {
+export function toTerminalRunError(run: ChatThreadRunStopState) {
   if (run.status === "cancelled") {
     return new ContentError(
       499,
@@ -84,7 +90,7 @@ export function toTerminalRunError(run: ChatThreadRunRecord) {
 }
 
 /** A claimed worker may execute only while its durable run remains running. */
-export function toRunStopError(run: ChatThreadRunRecord | null) {
+export function toRunStopError(run: ChatThreadRunStopState | null) {
   if (run?.status === "running") return null;
   if (run?.status === "cancel_requested")
     return new ContentError(
@@ -178,12 +184,21 @@ export function synthesizeTerminalRunEvents(input: {
 }) {
   const events: string[] = [];
   const terminalError = toTerminalRunError(input.run);
+  const snapshot = getSnapshotRecord(input.run);
+  const metadata = toObjectRecord(
+    toObjectRecord(snapshot.assistantMessage)?.metadata,
+  );
+  const agentRunStop =
+    input.run.status === "cancelled"
+      ? null
+      : readAgentRunStop(snapshot.agentRunStop ?? metadata?.agentRunStop);
   if (terminalError && !input.sawErrorEvent) {
     events.push(
       `data: ${JSON.stringify({
         type: "error",
         code: terminalError.code,
         error: sanitizeClientErrorMessage(terminalError.message),
+        ...(agentRunStop ? { agentRunStop } : {}),
         ...(input.run.userMessageId
           ? { userMessageId: input.run.userMessageId }
           : {}),
@@ -193,6 +208,11 @@ export function synthesizeTerminalRunEvents(input: {
       })}\n\n`,
     );
   }
-  events.push(`data: ${JSON.stringify({ type: "finish" })}\n\n`);
+  events.push(
+    `data: ${JSON.stringify({
+      type: "finish",
+      ...(agentRunStop ? { agentRunStop, finishReason: "step_limit" } : {}),
+    })}\n\n`,
+  );
   return events;
 }

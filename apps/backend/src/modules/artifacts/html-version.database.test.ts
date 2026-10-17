@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { afterAll, beforeAll, test, vi } from "vitest";
+import { and, eq } from "drizzle-orm";
+import { afterAll, beforeAll, beforeEach, test, vi } from "vitest";
 import { createIsolatedTestDatabase } from "../../test/isolated-database";
 import type { ArtifactStorage } from "@sourceweft/contracts/artifact-storage";
 import type { ArtifactPublishSpec } from "@sourceweft/contracts/artifact-write";
@@ -28,13 +29,6 @@ beforeAll(async () => {
   db = await import("@sourceweft/db");
   repository = await import("./repository");
   const storage = await import("../sources/storage");
-  vi.spyOn(storage, "downloadArtifactObject").mockImplementation(
-    async ({ key }) => {
-      const bytes = objects.get(key);
-      if (!bytes) throw new Error("Test object not found");
-      return Buffer.from(bytes);
-    },
-  );
   const { ArtifactWriter } = await import("./writer");
   ({ contentArtifactsService: service } = await import("./service"));
   const memoryStorage: ArtifactStorage = {
@@ -94,6 +88,19 @@ beforeAll(async () => {
     title: "Private HTML",
   });
 }, 120_000);
+
+// The shared test setup restores spies after each test. Install the same
+// memory-object reader for every case while exercising real PostgreSQL below.
+beforeEach(async () => {
+  const storage = await import("../sources/storage");
+  vi.spyOn(storage, "downloadArtifactObject").mockImplementation(
+    async ({ key }) => {
+      const bytes = objects.get(key);
+      if (!bytes) throw new Error("Test object not found");
+      return Buffer.from(bytes);
+    },
+  );
+});
 
 afterAll(async () => {
   if (db) await db.database.end();
@@ -223,4 +230,130 @@ test("migrated HTML versions retain their own files, reject stale writes and enf
     /storageKey|storageBucket|authoring.json/,
   );
   assert.equal(objects.size, 4, "losing write cleans only its own uploads");
+}, 30_000);
+
+test("ordinary file attachments project exact-version downloads without private sources", async () => {
+  const fileSpec = (label: string): ArtifactPublishSpec => ({
+    artifactType: "file",
+    title: "Versioned comparison",
+    payload: {
+      fileName: "comparison.csv",
+      mimeType: "text/csv",
+      // Producer-authored file lists are never authority for browser links.
+      versionFiles: [
+        { fileName: "invented.txt", url: "https://invalid.example" },
+      ],
+    },
+    attachments: [
+      {
+        fileName: "comparison.csv",
+        contentType: "text/csv",
+        bytes: Buffer.from(`name,value\n${label},1\n`),
+        role: "primary",
+      },
+      {
+        fileName: "report.md",
+        contentType: "text/markdown",
+        bytes: Buffer.from(`# ${label}\n`),
+        role: "asset",
+        access: "artifact",
+      },
+      {
+        fileName: "inputs.json",
+        contentType: "application/json",
+        bytes: Buffer.from('{"internal":true}'),
+        role: "source",
+        access: "private",
+      },
+    ],
+  });
+  const first = await writer.publishArtifact({
+    context,
+    spec: fileSpec("one"),
+  });
+  const second = await writer.completeArtifact({
+    context,
+    artifactId: first.artifactId,
+    expectedVersionNo: 1,
+    expectedStatuses: ["ready"],
+    spec: fileSpec("two"),
+  });
+  const listed = await service.listArtifacts({
+    workspaceId: context.workspaceId,
+    userId: context.userId,
+  });
+  const projected = listed.items.find((item) => item.id === first.artifactId)!;
+  assert.equal(projected.artifactVersionId, second.versionId);
+  assert.ok("versionFiles" in projected.payloadJson);
+  const files = projected.payloadJson.versionFiles as Array<{
+    fileName: string;
+    downloadUrl?: string;
+  }>;
+  assert.deepEqual(
+    files.map((file) => file.fileName),
+    ["comparison.csv", "report.md"],
+  );
+  for (const file of files) {
+    const url = new URL(file.downloadUrl!, "http://local.test");
+    assert.equal(url.searchParams.get("artifactVersionId"), second.versionId);
+    assert.equal(url.searchParams.get("download"), "1");
+  }
+  assert.doesNotMatch(
+    JSON.stringify(files),
+    /inputs.json|invented.txt|storageKey|storageBucket/,
+  );
+  for (const [artifactVersionId, label] of [
+    [first.versionId, "one"],
+    [second.versionId, "two"],
+  ]) {
+    const asset = await service.getArtifactVersionFile({
+      ...context,
+      artifactId: first.artifactId,
+      artifactVersionId: artifactVersionId!,
+      resource: { kind: "asset", fileName: "report.md", download: true },
+    });
+    assert.equal(Buffer.from(asset.body).toString(), `# ${label}\n`);
+  }
+  await assert.rejects(
+    service.getArtifactVersionFile({
+      ...context,
+      artifactId: first.artifactId,
+      artifactVersionId: second.versionId,
+      resource: { kind: "asset", fileName: "inputs.json", download: true },
+    }),
+  );
+  await assert.rejects(
+    service.getArtifactVersionFile({
+      ...context,
+      userId: otherUserId,
+      artifactId: first.artifactId,
+      artifactVersionId: second.versionId,
+      resource: { kind: "asset", fileName: "report.md", download: true },
+    }),
+  );
+  await db.db
+    .delete(db.workspaceMemberships)
+    .where(
+      and(
+        eq(db.workspaceMemberships.workspaceId, context.workspaceId),
+        eq(db.workspaceMemberships.userId, context.userId),
+      ),
+    );
+  try {
+    await assert.rejects(
+      service.getArtifactVersionFile({
+        ...context,
+        artifactId: first.artifactId,
+        artifactVersionId: second.versionId,
+        resource: { kind: "asset", fileName: "report.md", download: true },
+      }),
+    );
+  } finally {
+    await db.db.insert(db.workspaceMemberships).values({
+      workspaceId: context.workspaceId,
+      userId: context.userId,
+      role: "editor",
+      source: "guest",
+    });
+  }
 }, 30_000);

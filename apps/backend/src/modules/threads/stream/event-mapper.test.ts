@@ -398,3 +398,24 @@ test("mapDeepAgentEventToSse returns null for an unrecognized event type", () =>
   );
   assert.equal(result, null);
 });
+
+test("closing progress maps to a live budget event rather than a stopped run", () => {
+  const progress = {
+    policyVersion: 2,
+    phase: "closing",
+    normalSteps: 400,
+    normalLimit: 400,
+    closingSteps: 1,
+    closingLimit: 40,
+    steps: 401,
+    limit: 440,
+  } as const;
+  const encoded = mapDeepAgentEventToSse(
+    { type: "agent-run-progress", progress },
+    "text-budget",
+  );
+  assert.deepEqual(parseSseData(encoded!), {
+    type: "agent-run-progress",
+    progress,
+  });
+});

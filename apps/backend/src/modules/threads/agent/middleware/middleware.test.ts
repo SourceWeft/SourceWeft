@@ -121,6 +121,8 @@ test("middleware stack keeps SourceWeft middleware order stable", async () => {
 
     const expectedMiddlewareOrder = [
       "SourceWeftToolCallCountChannels",
+      "SourceWeftRunStepBudget",
+      "patchToolCallsMiddleware",
       "SourceWeftToolCallContext",
       "todoListMiddleware",
       ...(config.chat.agent.askUserEnabled ? ["SourceWeftAskUser"] : []),
@@ -139,8 +141,9 @@ test("middleware stack keeps SourceWeft middleware order stable", async () => {
       "SourceWeftContextCompressionTrace",
       "SourceWeftUnansweredToolCalls",
       "modelRetryMiddleware",
-      "ToolCallLimitMiddleware",
       "ExtraMiddleware",
+      "SourceWeftClosingToolGovernance",
+      "SourceWeftRunStepFinalization",
     ];
 
     assert.deepEqual(
@@ -170,6 +173,8 @@ test("subagent middleware receives fresh retry, summary, limit, and observabilit
     first.map((middleware) => middleware.name),
     [
       "SourceWeftToolCallCountChannels",
+      "SourceWeftRunStepBudget",
+      "patchToolCallsMiddleware",
       "SourceWeftToolCallContext",
       ...(config.chat.agent.askUserEnabled ? ["SourceWeftAskUser"] : []),
       ...(config.chat.agent.askUserEnabled
@@ -183,7 +188,8 @@ test("subagent middleware receives fresh retry, summary, limit, and observabilit
       "SummarizationMiddleware",
       "SourceWeftUnansweredToolCalls",
       "modelRetryMiddleware",
-      "ToolCallLimitMiddleware",
+      "SourceWeftClosingToolGovernance",
+      "SourceWeftRunStepFinalization",
     ],
   );
   assert.notStrictEqual(first[0], second[0]);
@@ -244,65 +250,20 @@ test("tool retry only retries safe read-only tools", async () => {
   assert.equal(executeAttempts, 1);
 });
 
-test("tool call limit blocks calls beyond the configured run limit", async () => {
-  const originalAgentConfig = { ...config.chat.agent };
-
-  try {
-    config.chat.agent.toolCallRunLimit = 2;
-    config.chat.agent.toolCallThreadLimit = 10;
-
-    const stack = await createSourceWeftAgentMiddlewareStack({
-      ...middlewareRuntime,
-      modelAlias: "chat-default",
-      filesystemMounts: [],
-    });
-    const middleware = stack.find(
-      (item) => item.name === "ToolCallLimitMiddleware",
-    );
-    assert.ok(middleware);
-
-    const update = await afterModelHook(middleware)({
-      messages: [
-        new HumanMessage("Use tools"),
-        new AIMessage({
-          content: "",
-          tool_calls: [
-            { id: "call-1", name: "search_sources", args: {} },
-            { id: "call-2", name: "search_sources", args: {} },
-            { id: "call-3", name: "search_sources", args: {} },
-          ],
-        }),
-      ],
-      threadToolCallCount: {},
-      runToolCallCount: {},
-    });
-
-    const messages = (update as { messages?: unknown[] }).messages ?? [];
-    assert.equal(messages.length, 1);
-    const blocked = messages[0];
-    assert.ok(ToolMessage.isInstance(blocked));
-    const blockedToolMessage = blocked as ToolMessage;
-    assert.equal(blockedToolMessage.tool_call_id, "call-3");
-    assert.equal(blockedToolMessage.name, "search_sources");
-    assert.equal(
-      blockedToolMessage.content,
-      "Tool call limit exceeded. Do not make additional tool calls.",
-    );
-    assert.deepEqual(
-      (update as { threadToolCallCount?: unknown }).threadToolCallCount,
-      {
-        __all__: 2,
-      },
-    );
-    assert.deepEqual(
-      (update as { runToolCallCount?: unknown }).runToolCallCount,
-      {
-        __all__: 3,
-      },
-    );
-  } finally {
-    Object.assign(config.chat.agent, originalAgentConfig);
-  }
+test("global tool-call ceilings are replaced by logical model-step governance", async () => {
+  const stack = await createSourceWeftAgentMiddlewareStack({
+    ...middlewareRuntime,
+    modelAlias: "chat-default",
+    filesystemMounts: [],
+  });
+  const names = stack.map((middleware) => middleware.name);
+  assert.equal(names.includes("ToolCallLimitMiddleware"), false);
+  assert.ok(names.includes("SourceWeftRunStepBudget"));
+  assert.equal(names.at(-1), "SourceWeftRunStepFinalization");
+  assert.equal(
+    names.includes("ToolCallLimitMiddleware[askUser]"),
+    config.chat.agent.askUserEnabled,
+  );
 });
 
 test("image history sanitizer replaces image blocks with text placeholders", async () => {

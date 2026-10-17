@@ -53,6 +53,22 @@ const server = createServer(async (req, res) => {
     );
     return;
   }
+  if (url.pathname === "/report.pdf") {
+    if (url.searchParams.get("artifactVersionId") !== "version-1") {
+      res.statusCode = 409;
+      res.end("Exact fixture version required");
+      return;
+    }
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", 'attachment; filename="report.pdf"');
+    res.end("%PDF-1.4\n% SourceWeft download route fixture\n%%EOF");
+    return;
+  }
+  if (url.pathname === "/source.json") {
+    res.statusCode = 403;
+    res.end("Private authoring source");
+    return;
+  }
   if (url.pathname === "/app.js") {
     res.setHeader("Content-Type", "text/javascript");
     res.end(await readFile(resolve(output, "app.js")));

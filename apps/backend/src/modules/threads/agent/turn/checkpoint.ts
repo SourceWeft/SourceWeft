@@ -1,15 +1,19 @@
+import type { RunnableConfig } from "@langchain/core/runnables";
 import { buildAgentConfig } from "..";
 import type { createThreadAgent } from "..";
 import { ContentError } from "../../../content/errors";
 import type { AgentCheckpointRef, PreparedThreadTurn } from "../..";
 import { toObjectRecord } from "../../../../shared/records";
 
-export type AgentRunnableConfig =
+type NativeAgentRunnableConfig =
   Awaited<ReturnType<typeof createThreadAgent>> extends {
     stream: (input: unknown, config?: infer Config) => unknown;
   }
     ? NonNullable<Config>
     : Record<string, unknown>;
+
+/** Native stream options also carry the standard runnable tracing configuration. */
+export type AgentRunnableConfig = NativeAgentRunnableConfig & RunnableConfig;
 
 function checkpointRefToConfig(checkpoint: AgentCheckpointRef) {
   return {

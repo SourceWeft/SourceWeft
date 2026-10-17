@@ -3,6 +3,7 @@ import type { BaseLanguageModel } from "@langchain/core/language_models/base";
 import type { AnyBackendProtocol } from "deepagents";
 import {
   modelRetryMiddleware,
+  humanInTheLoopMiddleware,
   todoListMiddleware,
   toolCallLimitMiddleware,
   toolRetryMiddleware,
@@ -34,6 +35,8 @@ import { createSourceWeftToolExecutionTimeoutMiddleware } from "./tool-execution
 import type { TraceContext } from "../../../llm-observability";
 import { createSourceWeftToolCallContextMiddleware } from "./tool-call-context";
 import { createSourceWeftToolCallCountChannelsMiddleware } from "./tool-call-count-channels";
+import { createSourceWeftStepBudgetMiddleware } from "./step-budget";
+import { createSourceWeftClosingToolGovernanceMiddleware } from "./closing-tool-governance";
 
 const RETRYABLE_READ_TOOL_NAMES = [
   AGENT_TOOL_NAMES.searchSources,
@@ -68,6 +71,7 @@ export type SourceWeftAgentMiddlewareStackInput = {
   backend: AnyBackendProtocol;
   chatProfileConfig?: unknown;
   commandExecutionPolicy?: CommandExecutionPolicy;
+  interruptOn?: Parameters<typeof humanInTheLoopMiddleware>[0]["interruptOn"];
   contextCompressionReportKey?: string;
   execution?: LangChainModelExecutionConfig;
   extraMiddleware?: AgentMiddleware[];
@@ -80,6 +84,7 @@ export type SourceWeftAgentMiddlewareStackInput = {
 };
 
 export type SourceWeftSubagentMiddlewareStackInput = {
+  interruptOn?: Parameters<typeof humanInTheLoopMiddleware>[0]["interruptOn"];
   backend: AnyBackendProtocol;
   chatProfileConfig?: unknown;
   model: BaseLanguageModel;
@@ -95,10 +100,22 @@ export type SourceWeftSubagentMiddlewareStackInput = {
 export function createSourceWeftSubagentMiddlewareStack(
   input: SourceWeftSubagentMiddlewareStackInput,
 ): AgentMiddleware[] {
+  const stepBudget = createSourceWeftStepBudgetMiddleware({
+    userMessageId: input.toolObservabilityContext?.userMessageId,
+  });
   return [
     // Must precede every toolCallLimitMiddleware so the count channels bind to a
     // concurrent-safe reducer (parallel `task` subagents write them at once).
     createSourceWeftToolCallCountChannelsMiddleware(),
+    stepBudget.governance,
+    stepBudget.toolCallRepair,
+    ...(input.interruptOn
+      ? [
+          stepBudget.guardAfterModel(
+            humanInTheLoopMiddleware({ interruptOn: input.interruptOn }),
+          ),
+        ]
+      : []),
     createSourceWeftToolCallContextMiddleware({
       subagentType: input.toolObservabilityContext?.subagentType,
     }),
@@ -118,6 +135,7 @@ export function createSourceWeftSubagentMiddlewareStack(
       onFailure: "error",
     }),
     createSourceWeftSummarizationMiddleware({
+      userMessageId: input.toolObservabilityContext?.userMessageId,
       backend: input.backend,
       chatProfileConfig: input.chatProfileConfig,
       model: input.model,
@@ -128,17 +146,31 @@ export function createSourceWeftSubagentMiddlewareStack(
       retryOn: isRetryableModelContentError,
       onFailure: "error",
     }),
-    toolCallLimitMiddleware({
-      runLimit: config.chat.agent.toolCallRunLimit,
-      threadLimit: config.chat.agent.toolCallThreadLimit,
-      exitBehavior: "continue",
+    createSourceWeftClosingToolGovernanceMiddleware({
+      userMessageId: input.toolObservabilityContext?.userMessageId,
     }),
-  ];
+    stepBudget.finalization,
+  ].map((middleware) =>
+    [
+      "SummarizationMiddleware",
+      "SourceWeftContextCompressionTrace",
+      "SourceWeftPreSummaryContextEditing",
+      "ContextEditingMiddleware",
+      "SourceWeftCommandToolChoice",
+      "SourceWeftRunStepFinalization",
+      "SourceWeftClosingToolGovernance",
+    ].includes(middleware.name)
+      ? stepBudget.attachBudgetState(middleware)
+      : middleware,
+  );
 }
 
 export async function createSourceWeftAgentMiddlewareStack(
   input: SourceWeftAgentMiddlewareStackInput,
 ): Promise<AgentMiddleware[]> {
+  const stepBudget = createSourceWeftStepBudgetMiddleware({
+    userMessageId: input.toolObservabilityContext?.userMessageId,
+  });
   const contextCompressionMiddleware =
     await createSourceWeftContextCompressionMiddleware({
       modelAlias: input.modelAlias,
@@ -153,6 +185,15 @@ export async function createSourceWeftAgentMiddlewareStack(
     // Must precede every toolCallLimitMiddleware so the count channels bind to a
     // concurrent-safe reducer (parallel `task` subagents write them at once).
     createSourceWeftToolCallCountChannelsMiddleware(),
+    stepBudget.governance,
+    stepBudget.toolCallRepair,
+    ...(input.interruptOn
+      ? [
+          stepBudget.guardAfterModel(
+            humanInTheLoopMiddleware({ interruptOn: input.interruptOn }),
+          ),
+        ]
+      : []),
     createSourceWeftToolCallContextMiddleware(),
     // deepagents >=1.12 no longer includes the todo middleware by default;
     // tool tracking and the todo panel depend on the write_todos tool.
@@ -184,6 +225,7 @@ export async function createSourceWeftAgentMiddlewareStack(
     // place of its generic SummarizationMiddleware while retaining native
     // checkpoint/history offloading semantics.
     createSourceWeftSummarizationMiddleware({
+      userMessageId: input.toolObservabilityContext?.userMessageId,
       backend: input.backend,
       chatProfileConfig: input.chatProfileConfig,
       model: input.model,
@@ -195,13 +237,24 @@ export async function createSourceWeftAgentMiddlewareStack(
       retryOn: isRetryableModelContentError,
       onFailure: "error",
     }),
-    toolCallLimitMiddleware({
-      runLimit: config.chat.agent.toolCallRunLimit,
-      threadLimit: config.chat.agent.toolCallThreadLimit,
-      exitBehavior: "continue",
-    }),
     ...(input.extraMiddleware ?? []),
-  ];
+    createSourceWeftClosingToolGovernanceMiddleware({
+      userMessageId: input.toolObservabilityContext?.userMessageId,
+    }),
+    stepBudget.finalization,
+  ].map((middleware) =>
+    [
+      "SummarizationMiddleware",
+      "SourceWeftContextCompressionTrace",
+      "SourceWeftPreSummaryContextEditing",
+      "ContextEditingMiddleware",
+      "SourceWeftCommandToolChoice",
+      "SourceWeftRunStepFinalization",
+      "SourceWeftClosingToolGovernance",
+    ].includes(middleware.name)
+      ? stepBudget.attachBudgetState(middleware)
+      : middleware,
+  );
 }
 
 export {

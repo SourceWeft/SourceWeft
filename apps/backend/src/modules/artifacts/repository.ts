@@ -25,6 +25,37 @@ type ArtifactRow = typeof artifacts.$inferSelect;
 type ArtifactStatus = ArtifactRow["status"];
 type ArtifactType = ArtifactRow["artifactType"];
 
+/** Host-owned durable-run identity; never taken from model publish arguments. */
+export type ArtifactPublicationRunFence = {
+  runId: string;
+  teamId: string;
+  workspaceId: string;
+};
+
+async function lockActiveArtifactPublicationRun(
+  tx: ArtifactWriteTransaction,
+  fence: ArtifactPublicationRunFence,
+): Promise<boolean> {
+  const [run] = await tx
+    .select({ status: chatThreadRuns.status })
+    .from(chatThreadRuns)
+    .where(
+      and(
+        eq(chatThreadRuns.id, fence.runId),
+        eq(chatThreadRuns.teamId, fence.teamId),
+        eq(chatThreadRuns.workspaceId, fence.workspaceId),
+      ),
+    )
+    .for("update")
+    .limit(1);
+  return Boolean(
+    run &&
+    (run.status === "queued" ||
+      run.status === "running" ||
+      run.status === "waiting_for_approval"),
+  );
+}
+
 async function lockPublicationVisibility(
   tx: ArtifactWriteTransaction,
   input: { teamId: string; workspaceId: string; threadId: string },
@@ -169,13 +200,25 @@ export async function createReadyArtifactRecord(input: {
   previewMetadata?: Record<string, unknown> | null;
   /** Idempotency token, when the caller asked for "the artifact for this request". */
   requestKey?: string | null;
+  publishRunFence?: ArtifactPublicationRunFence;
 }) {
   // The row and its first version are one fact, not two. Written separately, a
   // failure between them leaves a status=ready artifact with zero versions —
   // readable by the API, unopenable by any version-based reader.
   return db.transaction(async (tx) => {
     await lockArtifactRequestKey(tx, input);
+    // Parent deletion cascades to runs: always lock the parent before the run
+    // so publishing and thread deletion cannot wait on each other in reverse.
     const visibility = await lockPublicationVisibility(tx, input);
+    if (
+      input.publishRunFence &&
+      !(await lockActiveArtifactPublicationRun(tx, input.publishRunFence))
+    ) {
+      throw new ArtifactError({
+        code: ARTIFACT_WRITE_ERROR_CODES.stateConflict,
+        message: "The chat run is no longer active for artifact publication",
+      });
+    }
     const existing = await findArtifactRecordByRequestKeyWithExecutor(tx, {
       ...input,
       visibility,
@@ -465,11 +508,7 @@ export async function markArtifactReady(input: {
    * row is locked in this same transaction so cancellation and publication
    * have one serialization point.
    */
-  publishRunFence?: {
-    runId: string;
-    teamId: string;
-    workspaceId: string;
-  };
+  publishRunFence?: ArtifactPublicationRunFence;
 }) {
   const versionId = randomUUID();
 
@@ -478,31 +517,46 @@ export async function markArtifactReady(input: {
   // version as the newest row — the payload and the version history disagree
   // forever.
   return db.transaction(async (tx) => {
+    let publicationThreadId: string | null = null;
     if (input.publishRunFence) {
-      const [run] = await tx
-        .select({ status: chatThreadRuns.status })
-        .from(chatThreadRuns)
+      // Parent DELETE updates artifact parents and cascades to runs. Lock the
+      // thread before either child, then recheck identity under the artifact lock.
+      const [identity] = await tx
+        .select({ threadId: artifacts.threadId })
+        .from(artifacts)
         .where(
           and(
-            eq(chatThreadRuns.id, input.publishRunFence.runId),
-            eq(chatThreadRuns.teamId, input.publishRunFence.teamId),
-            eq(chatThreadRuns.workspaceId, input.publishRunFence.workspaceId),
+            eq(artifacts.id, input.artifactId),
+            eq(artifacts.teamId, input.teamId),
+            eq(artifacts.workspaceId, input.workspaceId),
+            visibleContentWhere({ userId: input.userId }, artifacts),
           ),
         )
-        .for("update")
         .limit(1);
-      if (
-        !run ||
-        (run.status !== "queued" &&
-          run.status !== "running" &&
-          run.status !== "waiting_for_approval")
-      ) {
+      // Legacy threadless artifacts have no parent to protect. Non-run writes
+      // retain their existing path; a durable-run completion must refuse them.
+      if (!identity?.threadId) return null;
+      const [thread] = await tx
+        .select({ id: threads.id })
+        .from(threads)
+        .where(
+          and(
+            eq(threads.id, identity.threadId),
+            eq(threads.teamId, input.teamId),
+            eq(threads.workspaceId, input.workspaceId),
+          ),
+        )
+        .for("share")
+        .limit(1);
+      if (!thread) return null;
+      publicationThreadId = identity.threadId;
+      if (!(await lockActiveArtifactPublicationRun(tx, input.publishRunFence)))
         return null;
-      }
     }
 
     const [current] = await tx
       .select({
+        threadId: artifacts.threadId,
         storageBucket: artifacts.storageBucket,
         storageKey: artifacts.storageKey,
         previewMetadataJson: artifacts.previewMetadataJson,
@@ -521,7 +575,11 @@ export async function markArtifactReady(input: {
       // Take the row lock before deciding what to carry forward, so a
       // concurrent publisher cannot swap storage pointers underneath us.
       .for("update");
-    if (!current) return null;
+    if (
+      !current ||
+      (input.publishRunFence && current.threadId !== publicationThreadId)
+    )
+      return null;
 
     // Compare-and-swap on status, matching markArtifactRunning/markArtifactFailed.
     // Without it two concurrent completions of the same artifact both race to

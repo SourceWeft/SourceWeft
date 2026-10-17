@@ -529,6 +529,7 @@ export async function resolveRefreshThreadStreamInput(
     existingUserMessage: latestUserMessage,
     assistantMessageParentId: latestAssistantMessage.id,
     assistantMessageId: null,
+    refreshAgentStepBudget: true,
     agentMode: checkpoint?.beforeInput ? "fork" : "continue",
     agentBaseCheckpoint: checkpoint?.beforeInput ?? null,
     agentRunThreadId: refreshRunThreadId,

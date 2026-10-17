@@ -20,6 +20,10 @@ import {
   type PresentationCapability,
   type PresentationState,
 } from "@sourceweft/contracts/html-artifact";
+import {
+  ArtifactFileDownloads,
+  artifactDownloadFiles,
+} from "./artifact-file-downloads";
 import { ARTIFACT_LIMITS } from "@sourceweft/contracts/artifact-files";
 
 export type HtmlPreviewFile = {
@@ -27,6 +31,8 @@ export type HtmlPreviewFile = {
   role: string;
   url: string | null;
   downloadUrl?: string | null;
+  access?: "artifact" | "private";
+  byteLength?: number;
 };
 
 /** One renderer for every producer. No generation engine is imported here. */
@@ -293,7 +299,7 @@ export function HtmlPreview({
             <Copy className="size-3.5" />
             {copied ? "Copied" : "Copy"}
           </Button>
-          {downloadUrl && (
+          {downloadUrl && !artifactDownloadFiles(files).length && (
             <Button size="sm" variant="ghost" asChild>
               <a href={downloadUrl} aria-label="Download HTML">
                 <Download className="size-3.5" />
@@ -315,6 +321,7 @@ export function HtmlPreview({
           </Button>
         </div>
       </div>
+      <ArtifactFileDownloads files={files} />
       {error && (
         <p role="alert" className="border-b px-4 py-2 text-sm text-destructive">
           {error}

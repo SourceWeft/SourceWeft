@@ -1,4 +1,8 @@
-import { SandboxInstanceChangedError } from "./errors";
+import {
+  SandboxInstanceChangedError,
+  SandboxProviderError,
+  SANDBOX_PROVIDER_ERROR_CODES,
+} from "./errors";
 import { randomUUID } from "node:crypto";
 import type {
   EditResult,
@@ -548,11 +552,19 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
               error: "permission_denied" as const,
             };
           }
-          return {
-            path: filePath,
-            content: null,
-            error: "file_not_found" as const,
-          };
+          if (
+            error instanceof SandboxProviderError &&
+            error.code === SANDBOX_PROVIDER_ERROR_CODES.fileMissing
+          ) {
+            return {
+              path: filePath,
+              content: null,
+              error: "file_not_found" as const,
+            };
+          }
+          // Only the provider's explicit missing-file classification proves
+          // absence. Authentication, network and unknown failures remain failures.
+          throw error;
         }
       }),
     );
@@ -575,25 +587,22 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
         } catch {
           return { path: filePath, error: "permission_denied" as const };
         }
-        try {
-          throwBackendOperationAbortReason(input.signal);
-          const dir = normalized.slice(0, normalized.lastIndexOf("/")) || "/";
-          await input.provider.ensureDirectory({
-            providerSandboxId: input.sandbox.providerSandboxId,
-            directory: dir,
-          });
-          throwBackendOperationAbortReason(input.signal);
-          await input.provider.uploadFile({
-            providerSandboxId: input.sandbox.providerSandboxId,
-            sandboxPath: normalized,
-            content,
-          });
-          throwBackendOperationAbortReason(input.signal);
-          return { path: filePath, error: null };
-        } catch (error) {
-          if (input.signal.aborted) throw error;
-          return { path: filePath, error: "permission_denied" as const };
-        }
+        // Only the local path check above owns permission_denied; provider
+        // exceptions retain their typed cause through the host operation.
+        throwBackendOperationAbortReason(input.signal);
+        const dir = normalized.slice(0, normalized.lastIndexOf("/")) || "/";
+        await input.provider.ensureDirectory({
+          providerSandboxId: input.sandbox.providerSandboxId,
+          directory: dir,
+        });
+        throwBackendOperationAbortReason(input.signal);
+        await input.provider.uploadFile({
+          providerSandboxId: input.sandbox.providerSandboxId,
+          sandboxPath: normalized,
+          content,
+        });
+        throwBackendOperationAbortReason(input.signal);
+        return { path: filePath, error: null };
       }),
     );
   }
@@ -610,10 +619,18 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
       ...input,
       paths: [input.filePath],
     });
-    if (result?.error || !result?.content) {
+    if (result?.error === "permission_denied") {
       return {
-        error: `ENOENT: no such file, read_file '${input.filePath}'`,
+        error: `EACCES: permission denied, read_file '${input.filePath}'`,
       };
+    }
+    if (result?.error === "file_not_found") {
+      return { error: `ENOENT: no such file, read_file '${input.filePath}'` };
+    }
+    if (!result || result.error || result.content == null) {
+      throw new Error(
+        "SANDBOX_FILE_DOWNLOAD_RESULT_INVALID: provider did not return file bytes or an explicit missing-file result.",
+      );
     }
     const mimeType = inferMimeType(input.filePath);
     const now = new Date().toISOString();
@@ -731,7 +748,9 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
       options,
     );
     if (result.exitCode !== 0) {
-      return { error: `ENOENT: no such file, read_file '${normalized}'` };
+      return {
+        error: `SANDBOX_FILE_READ_FAILED: read_file '${normalized}' exited with status ${result.exitCode ?? "unknown"}.${result.output ? ` ${redactSandboxText(result.output).slice(0, 600)}` : ""}`,
+      };
     }
     return { content: result.output, mimeType };
   }
@@ -991,7 +1010,18 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
         ...operationInput,
         paths: [normalized],
       });
-      if (existing[0]?.content !== null && !existing[0]?.error) {
+      const previous = existing[0];
+      if (!previous || (!previous.error && previous.content == null)) {
+        throw new Error(
+          "SANDBOX_FILE_DOWNLOAD_RESULT_INVALID: cannot establish whether the destination exists.",
+        );
+      }
+      if (previous.error && previous.error !== "file_not_found") {
+        return {
+          error: `Cannot check whether ${normalized} exists: ${previous.error}. No file was written.`,
+        };
+      }
+      if (!previous.error) {
         return {
           error: `Cannot write to ${normalized} because it already exists. Read and then make an edit, or write to a new path.`,
         };

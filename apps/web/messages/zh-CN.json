@@ -2075,6 +2075,19 @@
       "needsInput": "助手需要你的输入",
       "dismissQuestion": "忽略问题",
       "end": "结束"
+    },
+    "runBudget": {
+      "closing": "已进入收尾，优先完成核验与交付；收尾预算内仍可使用工具。",
+      "finalizing": "正在整理最终进度总结。",
+      "budget": "每个 Agent：常规 {normalLimit} 步 + 收尾 {closingLimit} 步。",
+      "usage": "已用：常规 {normalSteps} 步，收尾 {closingSteps} 步。"
+    },
+    "stepLimit": {
+      "title": "本次运行已达到步数上限",
+      "body": "本次运行已使用 {steps}/{limit} 步。请查看总结，再继续尚未完成的工作。",
+      "summaryFailed": "本次运行已使用 {steps}/{limit} 步，但总结生成失败。你可以从已保存的进度继续。",
+      "continue": "继续剩余任务",
+      "continueMessage": "请根据当前会话已保存的进度继续尚未完成的工作。先确认现有结果，避免重复已完成的操作。"
     }
   },
   "dashboardChatFiles": {

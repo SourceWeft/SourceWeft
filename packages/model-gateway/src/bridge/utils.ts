@@ -1005,8 +1005,22 @@ export async function createLangChainChatModel(input: {
   return createFailoverLangChainChatModel({
     config: resolvedConfig,
     candidates,
-    buildModel: (target, options) =>
-      createChatModel({ config: resolvedConfig, target, payload, options }),
+    buildModel: (target, options, binding) =>
+      createChatModel({
+        config: resolvedConfig,
+        target,
+        payload:
+          binding?.maxTokens === undefined
+            ? payload
+            : {
+                ...payload,
+                maxTokens: Math.min(
+                  payload.maxTokens ?? binding.maxTokens,
+                  binding.maxTokens,
+                ),
+              },
+        options,
+      }),
   }) as unknown as BaseLanguageModel;
 }
 
@@ -1027,6 +1041,7 @@ function createFailoverLangChainChatModel(input: {
   buildModel: (
     target: ResolvedRequestTarget,
     options?: RequestOptions,
+    binding?: Pick<ChatCompleteInput, "maxTokens">,
   ) => LangChainChatModelLike;
 }): LangChainChatModelLike {
   // Keep a model for capability/property inspection only. Executions build a
@@ -1237,14 +1252,42 @@ function createFailoverLangChainChatModel(input: {
         model.invoke(messages, callOptions),
       ),
     stream: async (messages, options) => streamWithFailover(messages, options),
-    bindTools: (tools, kwargs) =>
-      createFailoverLangChainChatModel({
+    bindTools: (tools, kwargs) => {
+      // SDKs such as ChatOpenAI/Anthropic use constructor maxTokens, ignoring
+      // the same-named call option. Apply a bounded binding to each fresh
+      // routed model before construction; never mutate the original facade.
+      const requestedCap = kwargs?.maxTokens;
+      if (
+        requestedCap !== undefined &&
+        (typeof requestedCap !== "number" ||
+          !Number.isSafeInteger(requestedCap) ||
+          requestedCap <= 0)
+      ) {
+        throw new ModelGatewayError({
+          code: "BAD_REQUEST",
+          message: "Bound maxTokens must be a positive safe integer",
+          retryable: false,
+        });
+      }
+      const boundOptions = kwargs ? { ...kwargs } : undefined;
+      if (boundOptions) delete boundOptions.maxTokens;
+      return createFailoverLangChainChatModel({
         ...input,
-        buildModel: (target, options) => {
-          const model = input.buildModel(target, options);
-          return model.bindTools ? model.bindTools(tools, kwargs) : model;
+        buildModel: (target, options, binding) => {
+          const downstreamCap = binding?.maxTokens;
+          const maxTokens =
+            typeof requestedCap === "number"
+              ? Math.min(requestedCap, downstreamCap ?? requestedCap)
+              : downstreamCap;
+          const model = input.buildModel(
+            target,
+            options,
+            maxTokens === undefined ? undefined : { maxTokens },
+          );
+          return model.bindTools ? model.bindTools(tools, boundOptions) : model;
         },
-      }),
+      });
+    },
     withStructuredOutput: (schema, config) => ({
       invoke: (structuredInput, options) =>
         runWithFailover("chat.complete", options, (model, callOptions) => {

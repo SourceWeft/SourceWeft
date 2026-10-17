@@ -51,7 +51,7 @@ export async function* buildFinalOutcome(input: {
   finalCheckpoint ??= checkpointRefFromConfig(
     (finalState as { config?: unknown } | null)?.config,
   );
-  if (finalState) {
+  if (finalState && !runtime.agentRunStop) {
     const finalToolCalls = extractToolCallsFromAgentState(finalState);
     rememberObservedToolCalls(runtime.observedToolCallsById, finalToolCalls);
     for (const promoted of promotePendingToolStreamsFromToolCalls({
@@ -73,22 +73,26 @@ export async function* buildFinalOutcome(input: {
     }
   }
 
-  const hasCompletedToolOutput = runtime
-    .collectToolCalls()
-    .some((call) => call.status === "completed" && !call.error);
-  const toolCalls = runtime.collectToolCalls();
-  let assistantText = resolveFinalAssistantText({
-    assistantContent: runtime.assistantContent,
-    assistantContentFromUpdates: runtime.assistantContentFromUpdates,
-    commandSuccessCriteria: input.prepared.commandSuccessCriteria,
-    hasCompletedToolOutput,
-    toolCalls,
-    allowSilentEmptyResponse: shouldSilenceEmptyApprovalResume({
-      assistantMessageId: input.prepared.assistantMessageId,
-      hasCompletedToolOutput,
-      toolApprovalResume: input.prepared.toolApprovalResume,
-    }),
+  const toolCalls = runtime.collectToolCalls({
+    preserveRunning: Boolean(runtime.agentRunStop),
   });
+  const hasCompletedToolOutput = toolCalls.some(
+    (call) => call.status === "completed" && !call.error,
+  );
+  let assistantText =
+    runtime.stepLimitSummary ??
+    resolveFinalAssistantText({
+      assistantContent: runtime.assistantContent,
+      assistantContentFromUpdates: runtime.assistantContentFromUpdates,
+      commandSuccessCriteria: input.prepared.commandSuccessCriteria,
+      hasCompletedToolOutput,
+      toolCalls,
+      allowSilentEmptyResponse: shouldSilenceEmptyApprovalResume({
+        assistantMessageId: input.prepared.assistantMessageId,
+        hasCompletedToolOutput,
+        toolApprovalResume: input.prepared.toolApprovalResume,
+      }),
+    });
 
   const finalRetrieval = runtime.latestToolRetrieval;
   const finalCitations = runtime.citationRegistry.list();
@@ -150,7 +154,9 @@ export async function* buildFinalOutcome(input: {
     criteria: input.prepared.commandSuccessCriteria,
     toolCalls,
   });
-  if (!commandSatisfied) {
+  // A bounded partial stop is not command success, and must not be rewritten
+  // into either a fabricated delivery or the ordinary command-failure answer.
+  if (!runtime.agentRunStop && !commandSatisfied) {
     const criteria = input.prepared.commandSuccessCriteria;
     const errorText = commandSuccessFailureText(criteria, toolCalls);
     assistantText = errorText;
@@ -186,7 +192,7 @@ export async function* buildFinalOutcome(input: {
   }
 
   if (
-    commandSatisfied &&
+    (commandSatisfied || runtime.agentRunStop) &&
     !runtime.hasStreamedText &&
     assistantText.length > 0
   ) {
@@ -195,6 +201,14 @@ export async function* buildFinalOutcome(input: {
       type: "text-delta",
       delta: sanitizeSseValue(assistantText),
     };
+  }
+
+  if (runtime.agentRunStop && runtime.hasStreamedText) {
+    // Stream filters for an explicitly invoked artifact command may have hidden
+    // summary prose, or an earlier decision may have emitted draft text. The
+    // committed tools-disabled summary is the authority for the final answer.
+    runtime.renderBlocks.replaceText(assistantText);
+    yield { type: "text-replace", text: sanitizeSseValue(assistantText) };
   }
 
   const finalRenderBlocks = finalizeMessageRenderBlocks({
@@ -208,6 +222,10 @@ export async function* buildFinalOutcome(input: {
       assistantContent: assistantText,
       usage: runtime.billingScope?.totalUsage(),
       finishReason: runtime.finishReason,
+      ...(runtime.agentRunStop ? { agentRunStop: runtime.agentRunStop } : {}),
+      ...(runtime.agentRunProgress
+        ? { agentRunProgress: runtime.agentRunProgress }
+        : {}),
       reasoning: runtime.modelReasoning,
       retrieval: finalRetrieval,
       citations: usedCitations,

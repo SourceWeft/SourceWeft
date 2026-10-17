@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "title": "多列日期与引用完整性回归",
+  "language": "zh-CN",
+  "template": "comparison",
+  "summary": [
+    {
+      "text": "本材料完全虚构，仅验证相邻长单元格换行后的内容检查。",
+      "kind": "analysis",
+      "citations": []
+    }
+  ],
+  "sections": [
+    {
+      "id": "dates",
+      "heading": "双日期与相邻说明",
+      "blocks": [
+        {
+          "type": "table",
+          "columns": [
+            "材料",
+            "日期标注",
+            "说明"
+          ],
+          "rows": [
+            [
+              {
+                "text": "虚构资料",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "2026-06-08（页面另标 2026-07-16 更新）",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "这是一段虚构说明，用来使相邻单元格同时出现多行文本，必须完整保留日期、字符和来源编号。",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "type": "paragraph",
+          "text": "此段的引用必须与完整的校验文字一起保留。",
+          "kind": "analysis",
+          "citations": [
+            "S1"
+          ]
+        }
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "id": "S1",
+      "display": {
+        "title": "自建虚构回归材料",
+        "locator": "同一行的多列换行与段落引用"
+      }
+    }
+  ]
+}

@@ -1,4 +1,8 @@
-import type { MeterConsumeResponse } from "@sourceweft/contracts";
+import type {
+  AgentRunStop,
+  AgentRunProgress,
+  MeterConsumeResponse,
+} from "@sourceweft/contracts";
 import type { UsageInfo } from "@sourceweft/model-gateway";
 import type { MessageRecord, ThreadRecord } from "../../content/types";
 import type { AgentCitation } from "../agent/citation-registry";
@@ -49,6 +53,16 @@ export type ChatThreadRunRecord = {
   updatedAt: string;
 };
 
+/** Minimal state needed for worker cancellation/ownership checks. */
+export type ChatThreadRunStopState = Pick<
+  ChatThreadRunRecord,
+  "status" | "errorCode" | "errorMessage"
+>;
+
+/** Heartbeat acknowledgement; never transports the run's payloads. */
+export type ChatThreadRunHeartbeat = ChatThreadRunStopState &
+  Pick<ChatThreadRunRecord, "heartbeatAt" | "updatedAt">;
+
 export type DurableRunRequestSnapshot =
   | (StreamThreadEventInput & { mode: "send" })
   | (RefreshThreadInput & { mode: "refresh" })
@@ -92,6 +106,8 @@ export type ChatRunSnapshot = DurableRunResultSnapshot & {
   availableCitations?: unknown[];
   lastEventType?: string;
   finishReason?: string | null;
+  agentRunStop?: AgentRunStop | null;
+  agentRunProgress?: AgentRunProgress | null;
   agentCheckpoint?: AgentCheckpointMetadata | null;
   approvalRequestedAt?: string | null;
   approvalExpiresAt?: string | null;

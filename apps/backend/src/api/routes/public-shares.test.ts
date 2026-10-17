@@ -5,6 +5,7 @@ import { createRouteTestApp } from "../../test/hono";
 const mocks = vi.hoisted(() => ({
   resolvePublicArtifactBytes: vi.fn(),
   getSharedArtifactFile: vi.fn(),
+  getSharedVersionFile: vi.fn(),
   getSharedArtifactVersionMediaBytes: vi.fn(),
   getSharedCurrentArtifactVersionMedia: vi.fn(),
 }));
@@ -19,6 +20,7 @@ vi.mock("../../modules/sharing", () => ({
 vi.mock("../../modules/artifacts", () => ({
   contentArtifactsService: {
     getSharedArtifactFile: mocks.getSharedArtifactFile,
+    getSharedVersionFile: mocks.getSharedVersionFile,
     getSharedArtifactVersionMediaBytes:
       mocks.getSharedArtifactVersionMediaBytes,
     getSharedCurrentArtifactVersionMedia:
@@ -144,4 +146,36 @@ test("raw share bytes keep their own CSP and referrer policy under the global se
     response.headers.get("strict-transport-security"),
     "max-age=31536000; includeSubDomains",
   );
+});
+
+test("public exact-version asset downloads retain live-share authorization", async () => {
+  mocks.getSharedVersionFile.mockResolvedValue({
+    body: Buffer.from("pdf"),
+    contentType: "application/pdf",
+    fileName: "report.pdf",
+  });
+  const response = await createTestApp().request(
+    "/v1/public/shares/tok/assets/report.pdf?artifactVersionId=version-1&download=1",
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(mocks.getSharedVersionFile.mock.calls[0], [
+    artifact,
+    "version-1",
+    { kind: "asset", fileName: "report.pdf" },
+  ]);
+  assert.equal(
+    response.headers.get("content-disposition"),
+    "attachment; filename*=UTF-8''report.pdf",
+  );
+  mocks.resolvePublicArtifactBytes.mockResolvedValue(null);
+  mocks.getSharedVersionFile.mockClear();
+  assert.equal(
+    (
+      await createTestApp().request(
+        "/v1/public/shares/tok/assets/report.pdf?artifactVersionId=version-1&download=1",
+      )
+    ).status,
+    404,
+  );
+  assert.equal(mocks.getSharedVersionFile.mock.calls.length, 0);
 });

@@ -74,7 +74,11 @@ export async function proxyArtifactFile(request: NextRequest) {
   if (asset === "previewImage") {
     resource = { kind: "previewImage" };
   } else if (assetFileName) {
-    resource = { fileName: assetFileName, kind: "asset" };
+    resource = {
+      fileName: assetFileName,
+      kind: "asset",
+      ...(isDownload ? { download: true } : {}),
+    };
   }
   const upstreamPath =
     artifactVersionId && versionMedia

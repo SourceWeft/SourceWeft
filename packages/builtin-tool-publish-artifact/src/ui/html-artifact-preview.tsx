@@ -15,6 +15,8 @@ const fileProjectionSchema = z.array(
     role: z.string(),
     url: z.string().nullable(),
     downloadUrl: z.string().nullable().optional(),
+    access: z.enum(["artifact", "private"]).optional(),
+    byteLength: z.number().int().positive().optional(),
   }),
 );
 

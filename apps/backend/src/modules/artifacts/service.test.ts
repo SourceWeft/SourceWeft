@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { test, vi } from "vitest";
 import { contentArtifactsService, testExports } from "./service";
 import { createArtifactViewHandlerRegistry } from "./view-handlers";
@@ -12,6 +13,7 @@ import {
 
 const mocks = vi.hoisted(() => ({
   downloadArtifactObjectRange: vi.fn(),
+  downloadFileObject: vi.fn(),
   downloadArtifactObjectWithMetadata: vi.fn(),
   findArtifactRecord: vi.fn(),
   findCurrentReadyArtifactVersionRecord: vi.fn(),
@@ -46,6 +48,8 @@ vi.mock("../workspace/guards", () => ({
 
 vi.mock("../sources/storage", () => ({
   downloadArtifactObject: vi.fn(),
+  downloadFileObject: mocks.downloadFileObject,
+  getContentStorageBucketName: () => "configured-bucket",
   downloadArtifactObjectRange: mocks.downloadArtifactObjectRange,
   downloadArtifactObjectWithMetadata: mocks.downloadArtifactObjectWithMetadata,
 }));
@@ -827,5 +831,288 @@ test("exact-version media storage must remain inside the artifact namespace", ()
       storageKey: "workspaces/workspace-1/artifacts/artifact-other/private.mp4",
     }),
     false,
+  );
+});
+
+test.each(["file", "slides", SYNTHETIC_FILE_ARTIFACT_TYPE])(
+  "%s exact-version detail projects public downloads without storage coordinates",
+  async (artifactType) => {
+    vi.clearAllMocks();
+    mocks.requireContentWorkspace.mockResolvedValue({
+      id: "workspace-1",
+      organizationId: "team-1",
+    });
+    mocks.loadArtifactViewHandlerRegistry.mockResolvedValue(
+      createArtifactViewHandlerRegistry([]),
+    );
+    const file = {
+      fileName: "report.pdf",
+      contentType: "application/pdf",
+      byteLength: 3,
+      contentDigest: `sha256:${"a".repeat(64)}`,
+      role: "primary",
+      access: "artifact",
+      storageBucket: "content",
+      storageKey: "workspaces/workspace-1/artifacts/artifact-1/v1/report.pdf",
+    };
+    mocks.findReadyArtifactVersionRecord.mockResolvedValue({
+      id: "artifact-1",
+      teamId: "team-1",
+      workspaceId: "workspace-1",
+      artifactType,
+      status: "ready",
+      title: "Report",
+      payloadJson: {},
+      storageKey: file.storageKey,
+      storageBucket: "content",
+      previewStorageKey: null,
+      visibility: "workspace",
+      createdBy: "user-1",
+      versionId: "version-1",
+      versionNo: 1,
+      contentJson: { fileName: "report.pdf", mimeType: "application/pdf" },
+      filesJson: {
+        schemaVersion: 1,
+        files: [
+          file,
+          { ...file, fileName: "report.md", role: "asset" },
+          {
+            ...file,
+            fileName: "source.json",
+            role: "source",
+            access: "private",
+          },
+        ],
+      },
+    });
+    const { artifact } = await contentArtifactsService.getArtifact({
+      workspaceId: "workspace-1",
+      artifactId: "artifact-1",
+      artifactVersionId: "version-1",
+      userId: "user-1",
+    });
+    assert.equal(artifact.artifactVersionId, "version-1");
+    const payload = artifact.payloadJson as {
+      versionFiles: { fileName: string; downloadUrl: string }[];
+    };
+    assert.deepEqual(
+      payload.versionFiles.map((file) => file.fileName),
+      ["report.pdf", "report.md"],
+    );
+    const download = new URL(
+      payload.versionFiles[1]!.downloadUrl,
+      "https://app.test",
+    );
+    assert.equal(download.searchParams.get("artifactVersionId"), "version-1");
+    assert.equal(download.searchParams.get("download"), "1");
+    assert.equal(download.searchParams.get("assetFileName"), "report.md");
+    assert.doesNotMatch(
+      JSON.stringify(payload.versionFiles),
+      /storageKey|storageBucket|source.json/,
+    );
+    assert.equal(artifact.storageKey, null);
+    assert.equal(
+      mocks.findCurrentReadyArtifactVersionRecord.mock.calls.length,
+      0,
+    );
+  },
+);
+
+test("legacy exact file detail preserves requested identity and cannot forge file projections", async () => {
+  vi.clearAllMocks();
+  mocks.requireContentWorkspace.mockResolvedValue({
+    id: "workspace-1",
+    organizationId: "team-1",
+  });
+  mocks.loadArtifactViewHandlerRegistry.mockResolvedValue(
+    createArtifactViewHandlerRegistry([]),
+  );
+  mocks.findReadyArtifactVersionRecord.mockResolvedValue({
+    id: "artifact-1",
+    teamId: "team-1",
+    workspaceId: "workspace-1",
+    artifactType: "file",
+    status: "ready",
+    title: "Legacy",
+    storageKey: "legacy-key",
+    visibility: "workspace",
+    createdBy: "user-1",
+    versionId: "legacy-version",
+    versionNo: 1,
+    filesJson: null,
+    contentJson: {
+      versionFiles: [
+        { fileName: "forged", downloadUrl: "https://untrusted.test" },
+      ],
+    },
+  });
+  const { artifact } = await contentArtifactsService.getArtifact({
+    workspaceId: "workspace-1",
+    artifactId: "artifact-1",
+    artifactVersionId: "legacy-version",
+    userId: "user-1",
+  });
+  assert.equal(artifact.artifactVersionId, "legacy-version");
+  assert.equal(
+    (artifact.payloadJson as { versionFiles: unknown }).versionFiles,
+    null,
+  );
+  assert.equal(
+    mocks.findCurrentReadyArtifactVersionRecord.mock.calls.length,
+    0,
+  );
+});
+
+function namedVersionFixture() {
+  vi.clearAllMocks();
+  const bytes = Buffer.from("private source v1");
+  const file = {
+    fileName: "report.source.json",
+    contentType: "application/json",
+    byteLength: bytes.length,
+    contentDigest: `sha256:${createHash("sha256").update(bytes).digest("hex")}`,
+    storageBucket: "content",
+    storageKey:
+      "workspaces/workspace-1/artifacts/artifact-1/version-1/source.json",
+    role: "source",
+    access: "private",
+  };
+  const version = {
+    id: "artifact-1",
+    versionId: "version-1",
+    versionNo: 1,
+    artifactType: "html",
+    visibility: "workspace",
+    createdBy: "user-1",
+    filesJson: { schemaVersion: 1, files: [file] },
+  };
+  mocks.requireContentWorkspace.mockResolvedValue({
+    id: "workspace-1",
+    organizationId: "team-1",
+  });
+  mocks.findReadyArtifactVersionRecord.mockResolvedValue(version);
+  mocks.downloadFileObject.mockResolvedValue(bytes);
+  return {
+    bytes,
+    file,
+    version,
+    request: {
+      workspaceId: "workspace-1",
+      artifactId: "artifact-1",
+      artifactVersionId: "version-1",
+      fileName: "report.source.json",
+      userId: "user-1",
+      maxBytes: 1000,
+    },
+  };
+}
+
+test("host-only attachment recovery authorizes the exact version and uses bounded verified bytes", async () => {
+  const { bytes, file, request } = namedVersionFixture();
+  const result =
+    await contentArtifactsService.readArtifactVersionAttachment(request);
+  assert.deepEqual(result.bytes, bytes);
+  assert.equal(result.versionNo, 1);
+  assert.equal(result.artifactVersionId, "version-1");
+  assert.equal(result.contentDigest, file.contentDigest);
+  assert.equal(
+    mocks.findCurrentReadyArtifactVersionRecord.mock.calls.length,
+    0,
+  );
+  assert.deepEqual(mocks.findReadyArtifactVersionRecord.mock.calls[0]?.[0], {
+    teamId: "team-1",
+    workspaceId: "workspace-1",
+    artifactId: "artifact-1",
+    artifactVersionId: "version-1",
+  });
+  assert.deepEqual(mocks.downloadFileObject.mock.calls[0]?.[0], {
+    bucket: "content",
+    key: file.storageKey,
+    maxBytes: 1000,
+    signal: undefined,
+  });
+  assert.doesNotMatch(
+    JSON.stringify({ ...result, bytes: undefined }),
+    /storageKey|storageBucket/,
+  );
+});
+
+test("private attachment recovery rejects denied visibility, missing version and legacy manifest before storage", async () => {
+  for (const mode of ["private", "missing", "legacy", "wrong-prefix"]) {
+    const { version, file, request } = namedVersionFixture();
+    mocks.findReadyArtifactVersionRecord.mockResolvedValue(
+      mode === "missing"
+        ? null
+        : mode === "private"
+          ? { ...version, visibility: "private", createdBy: "other-user" }
+          : mode === "legacy"
+            ? { ...version, filesJson: null }
+            : {
+                ...version,
+                filesJson: {
+                  schemaVersion: 1,
+                  files: [
+                    {
+                      ...file,
+                      storageKey:
+                        "workspaces/other/artifacts/artifact-1/source.json",
+                    },
+                  ],
+                },
+              },
+    );
+    await assert.rejects(
+      contentArtifactsService.readArtifactVersionAttachment(request),
+    );
+    assert.equal(mocks.downloadFileObject.mock.calls.length, 0);
+  }
+});
+
+test("private attachment reads reject manifest size and byte integrity mismatches", async () => {
+  let fixture = namedVersionFixture();
+  await assert.rejects(
+    contentArtifactsService.readArtifactVersionAttachment({
+      ...fixture.request,
+      maxBytes: 1,
+    }),
+    (error: unknown) =>
+      (error as { code: string }).code === "ARTIFACT_FILE_TOO_LARGE",
+  );
+  assert.equal(mocks.downloadFileObject.mock.calls.length, 0);
+  fixture = namedVersionFixture();
+  mocks.downloadFileObject.mockResolvedValue(
+    Buffer.from("changed private source"),
+  );
+  await assert.rejects(
+    contentArtifactsService.readArtifactVersionAttachment(fixture.request),
+    (error: unknown) =>
+      (error as { code: string }).code === "ARTIFACT_FILE_INTEGRITY_MISMATCH",
+  );
+});
+
+test("private attachment reads propagate cancellation before and after storage without returning bytes", async () => {
+  const fixture = namedVersionFixture();
+  const alreadyAborted = new AbortController();
+  alreadyAborted.abort(new Error("cancel before source"));
+  await assert.rejects(
+    contentArtifactsService.readArtifactVersionAttachment({
+      ...fixture.request,
+      signal: alreadyAborted.signal,
+    }),
+    /cancel before source/,
+  );
+  assert.equal(mocks.downloadFileObject.mock.calls.length, 0);
+  const controller = new AbortController();
+  mocks.downloadFileObject.mockImplementation(async ({ signal }) => {
+    assert.equal(signal, controller.signal);
+    controller.abort(new Error("cancel during source"));
+    return fixture.bytes;
+  });
+  await assert.rejects(
+    contentArtifactsService.readArtifactVersionAttachment({
+      ...fixture.request,
+      signal: controller.signal,
+    }),
+    /cancel during source/,
   );
 });

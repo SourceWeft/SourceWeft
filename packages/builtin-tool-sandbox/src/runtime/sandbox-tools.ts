@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { isSandboxInstanceMissingError } from "./errors";
 import { tool, type ToolRuntime } from "langchain";
 import type { BackendProtocolV2 } from "deepagents";
@@ -184,6 +185,20 @@ function decodeSandboxTextOutput(content: Buffer, sandboxPath: string) {
  * turn could already see. Absent in runtimes that have no artifact store.
  */
 export type SandboxArtifactReader = {
+  /** Named files require immutable identity; private/source access is host-authorized. */
+  readVersionFileBytes?(input: {
+    artifactId: string;
+    artifactVersionId: string;
+    fileName: string;
+    maxBytes: number;
+    signal?: AbortSignal;
+  }): Promise<{
+    bytes: Uint8Array;
+    fileName: string;
+    artifactVersionId: string;
+    versionNo: number;
+    contentDigest: string;
+  } | null>;
   readPrimaryBytes(input: {
     artifactId: string;
     artifactVersionId?: string;
@@ -219,6 +234,64 @@ export function createSandboxTools(input: {
         operationType: "prepare",
         runtime,
       });
+      const readNamedArtifact = async (
+        file: PrepareSandboxWorkspaceInput["files"][number],
+        maxBytes: number,
+      ) => {
+        const reader = input.artifacts?.readVersionFileBytes;
+        if (!reader)
+          throw new Error(
+            "SANDBOX_ARTIFACT_SOURCE_UNAVAILABLE: named artifact staging is not available in this runtime.",
+          );
+        if (
+          !file.artifactId ||
+          !file.artifactVersionId ||
+          !file.artifactFileName
+        )
+          throw new Error(
+            "SANDBOX_ARTIFACT_SOURCE_INVALID: a named attachment requires artifact and version identity.",
+          );
+        throwIfInvocationAborted(signal);
+        if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0)
+          throw new Error(
+            "SANDBOX_TOTAL_SIZE_EXCEEDED: no preparation budget remains for the named file.",
+          );
+        const result = await reader({
+          artifactId: file.artifactId,
+          artifactVersionId: file.artifactVersionId,
+          fileName: file.artifactFileName,
+          maxBytes,
+          signal,
+        });
+        throwIfInvocationAborted(signal);
+        if (!result)
+          throw new Error(
+            "SANDBOX_ARTIFACT_NOT_FOUND: the named version file is not available in this workspace.",
+          );
+        if (
+          result.artifactVersionId !== file.artifactVersionId ||
+          result.fileName !== file.artifactFileName
+        )
+          throw new Error(
+            "SANDBOX_ARTIFACT_SOURCE_INVALID: the reader did not return the requested version file.",
+          );
+        if (
+          !Number.isSafeInteger(result.versionNo) ||
+          result.versionNo <= 0 ||
+          !/^sha256:[a-f0-9]{64}$/.test(result.contentDigest) ||
+          `sha256:${createHash("sha256").update(result.bytes).digest("hex")}` !==
+            result.contentDigest
+        ) {
+          throw new Error(
+            "SANDBOX_ARTIFACT_SOURCE_INVALID: the reader returned invalid version or digest metadata.",
+          );
+        }
+        if (result.bytes.byteLength > maxBytes)
+          throw new Error(
+            "SANDBOX_FILE_TOO_LARGE: the named file exceeds the preparation limit.",
+          );
+        return result;
+      };
       const claim = await input.manager.beginToolOperation({
         context: input.context,
         operationType: "prepare",
@@ -226,7 +299,48 @@ export function createSandboxTools(input: {
         request: { files: args.files },
       });
       if (claim.kind === "replay") {
-        return JSON.stringify(claim.result);
+        // Receipts are idempotent, but never an authorization grant for private sources.
+        try {
+          let replayBytes = 0;
+          const receiptFiles = Array.isArray(claim.result.files)
+            ? claim.result.files
+            : [];
+          for (const [index, file] of args.files.entries()) {
+            if (!file.artifactFileName) {
+              const size = receiptFiles[index]?.sizeBytes;
+              if (args.files.some((item) => item.artifactFileName)) {
+                if (!Number.isSafeInteger(size) || size < 0)
+                  throw new Error(
+                    "SANDBOX_ARTIFACT_SOURCE_INVALID: the receipt has no valid preparation size.",
+                  );
+                replayBytes += size;
+              }
+            } else {
+              const result = await readNamedArtifact(
+                file,
+                Math.min(
+                  input.limits.maxPrepareFileBytes,
+                  input.limits.maxPrepareTotalBytes - replayBytes,
+                ),
+              );
+              replayBytes += result.bytes.byteLength;
+            }
+            if (replayBytes > input.limits.maxPrepareTotalBytes)
+              throw new Error(
+                "SANDBOX_TOTAL_SIZE_EXCEEDED: prepared files exceed the preparation limit.",
+              );
+          }
+          return JSON.stringify(claim.result);
+        } catch (error) {
+          const controlError = cancellationControlError({ error, signal });
+          if (controlError) throw controlError;
+          return JSON.stringify(
+            toRecoverableSandboxToolErrorOutput({
+              error,
+              operationType: "prepare",
+            }),
+          );
+        }
       }
       let sandboxId: string | null = null;
       let totalBytes = 0;
@@ -240,6 +354,7 @@ export function createSandboxTools(input: {
           artifactVersionId: string;
           versionNo: number;
           contentDigest?: string;
+          fileName?: string;
         };
       }> = [];
 
@@ -262,21 +377,30 @@ export function createSandboxTools(input: {
                 artifactVersionId: string;
                 versionNo: number;
                 contentDigest?: string;
+                fileName?: string;
               }
             | undefined;
           if (file.artifactId) {
             const reader = input.artifacts?.readPrimaryBytes;
-            if (!reader) {
+            if (!file.artifactFileName && !reader) {
               throw new Error(
                 "SANDBOX_ARTIFACT_SOURCE_UNAVAILABLE: artifact staging is not available in this runtime.",
               );
             }
-            const artifact = await reader({
-              artifactId: file.artifactId,
-              ...(file.artifactVersionId
-                ? { artifactVersionId: file.artifactVersionId }
-                : {}),
-            });
+            const artifact = file.artifactFileName
+              ? await readNamedArtifact(
+                  file,
+                  Math.min(
+                    input.limits.maxPrepareFileBytes,
+                    input.limits.maxPrepareTotalBytes - totalBytes,
+                  ),
+                )
+              : await reader!({
+                  artifactId: file.artifactId,
+                  ...(file.artifactVersionId
+                    ? { artifactVersionId: file.artifactVersionId }
+                    : {}),
+                });
             throwIfInvocationAborted(signal);
             if (!artifact) {
               throw new Error(
@@ -290,6 +414,7 @@ export function createSandboxTools(input: {
                 artifactVersionId: artifact.artifactVersionId,
                 versionNo: artifact.versionNo,
                 contentDigest: artifact.contentDigest,
+                ...(artifact.fileName ? { fileName: artifact.fileName } : {}),
               };
             sourceLabel = `artifact:${file.artifactId}`;
           } else {

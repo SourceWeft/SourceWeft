@@ -22,6 +22,46 @@ function parseBoundedIntegerEnv(input: {
   return parsed;
 }
 
+function parseAgentMaxSteps() {
+  const name = "SOURCEWEFT_AGENT_MAX_STEPS";
+  for (const retired of [
+    "SOURCEWEFT_AGENT_TOOL_CALL_RUN_LIMIT",
+    "SOURCEWEFT_AGENT_TOOL_CALL_THREAD_LIMIT",
+  ]) {
+    if (process.env[retired] !== undefined) {
+      throw new Error(
+        `${retired} is no longer supported. Remove it and configure ${name} instead; tool-call counts and agent steps are different units.`,
+      );
+    }
+  }
+  return parseAgentStepCount(name, 400);
+}
+
+function parseAgentStepCount(name: string, fallback: number) {
+  const raw = process.env[name];
+  if (raw === undefined) return fallback;
+  const value = raw.trim();
+  const parsed = Number(value);
+  if (!/^[1-9]\d*$/.test(value) || !Number.isSafeInteger(parsed)) {
+    throw new Error(`${name} must be a positive decimal safe integer.`);
+  }
+  return parsed;
+}
+
+function parseAgentStepBudget() {
+  const maxSteps = parseAgentMaxSteps();
+  const closingSteps = parseAgentStepCount(
+    "SOURCEWEFT_AGENT_CLOSING_STEPS",
+    40,
+  );
+  if (!Number.isSafeInteger(maxSteps + closingSteps)) {
+    throw new Error(
+      "SOURCEWEFT_AGENT_MAX_STEPS + SOURCEWEFT_AGENT_CLOSING_STEPS must be a safe integer.",
+    );
+  }
+  return { maxSteps, closingSteps };
+}
+
 function parsePositiveNumber(value: string | undefined, fallback: number) {
   if (value === undefined) {
     return fallback;
@@ -456,14 +496,7 @@ export const config = {
       maxReservedOutputTokens: 8_192,
       maxGrepRecallTopK: 300,
       maxReadOutputChars: 80_000,
-      toolCallRunLimit: parsePositiveInteger(
-        process.env.SOURCEWEFT_AGENT_TOOL_CALL_RUN_LIMIT,
-        48,
-      ),
-      toolCallThreadLimit: parsePositiveInteger(
-        process.env.SOURCEWEFT_AGENT_TOOL_CALL_THREAD_LIMIT,
-        300,
-      ),
+      ...parseAgentStepBudget(),
       interpreter: {
         enabled: parseStrictBooleanEnv(
           "SOURCEWEFT_AGENT_INTERPRETER_ENABLED",

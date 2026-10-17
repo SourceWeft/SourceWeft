@@ -380,7 +380,9 @@ test("extractApprovedMcpActionsFromMessage reconstructs approved MCP refs by act
           output: {
             type: "tool_confirmation_request",
             status: "proposed",
-            execution: { executor: { kind: "mcp_action_run", actionRunId: "x" } },
+            execution: {
+              executor: { kind: "mcp_action_run", actionRunId: "x" },
+            },
           },
         },
         // The approved one is reconstructed. The LangChain tool name comes off
@@ -462,4 +464,34 @@ test("an answer to a question that was ended is refused", async () => {
     }),
     { code: "USER_QUESTION_ENDED" },
   );
+});
+
+test("host refresh retains the original message fork and requests trusted same-human budget carry", async () => {
+  const beforeInput = { threadId: "root-graph", checkpointId: "before-user" };
+  setThreadMessages([
+    message("user", {
+      id: "same-human",
+      metadata: { agentRunThreadIds: ["root-graph"] },
+    }),
+    message("assistant", {
+      id: "old-assistant",
+      metadata: {
+        userMessageId: "same-human",
+        agentCheckpoint: {
+          beforeInput,
+          final: { threadId: "root-graph", checkpointId: "after-user" },
+        },
+      },
+    }),
+  ]);
+  const input = await resolveRefreshThreadStreamInput({
+    workspaceId: "workspace-1",
+    threadId: "thread-1",
+    userId: "user-1",
+    assistantMessageId: "old-assistant",
+  });
+  assert.equal(input.existingUserMessage?.id, "same-human");
+  assert.equal(input.refreshAgentStepBudget, true);
+  assert.equal(input.agentMode, "fork");
+  assert.deepEqual(input.agentBaseCheckpoint, beforeInput);
 });

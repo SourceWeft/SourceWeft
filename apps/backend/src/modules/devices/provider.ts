@@ -1,3 +1,7 @@
+import {
+  SandboxProviderError,
+  SANDBOX_PROVIDER_ERROR_CODES,
+} from "@sourceweft/builtin-tool-sandbox";
 import { randomUUID } from "node:crypto";
 import { readLocalBinaryFile } from "./read-binary-file";
 import { grepLocalFilePaths } from "./native-grep";
@@ -265,16 +269,28 @@ export async function localProviderForTurn(
       return result;
     },
     downloadFile: async (input) => {
-      return readLocalBinaryFile({
-        call,
-        workspaceId: id,
-        path: relative(input.sandboxPath),
-        signal: input.signal,
-        onCleanupError: (error) =>
-          logger.warn("Local file transfer cleanup failed", {
-            error: String(error),
-          }),
-      });
+      try {
+        return await readLocalBinaryFile({
+          call,
+          workspaceId: id,
+          path: relative(input.sandboxPath),
+          signal: input.signal,
+          onCleanupError: (error) =>
+            logger.warn("Local file transfer cleanup failed", {
+              error: String(error),
+            }),
+        });
+      } catch (error) {
+        if (error instanceof ContentError && error.code === "FILE_NOT_FOUND") {
+          throw new SandboxProviderError(
+            SANDBOX_PROVIDER_ERROR_CODES.fileMissing,
+            "SANDBOX_FILE_NOT_FOUND: requested local file was not found.",
+            "download",
+            error,
+          );
+        }
+        throw error;
+      }
     },
     ensureDirectory: async (input) =>
       call("file.mkdir", { workspaceId: id, path: relative(input.directory) }),

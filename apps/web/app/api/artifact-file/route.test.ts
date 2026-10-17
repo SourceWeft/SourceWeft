@@ -307,3 +307,36 @@ test("an empty or ambiguous version never falls through to the current file", as
   }
   assert.equal(fetchMock.mock.calls.length, 0);
 });
+
+test("artifact asset download preserves version, filename and attachment disposition", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: URL) => {
+      assert.equal(
+        url.pathname,
+        "/v1/workspaces/w/artifacts/a/assets/report.pdf",
+      );
+      assert.equal(url.searchParams.get("artifactVersionId"), "version-1");
+      assert.equal(url.searchParams.get("download"), "1");
+      return new Response("pdf-bytes", {
+        headers: {
+          "content-type": "application/pdf",
+          "content-disposition": "attachment; filename*=UTF-8''report.pdf",
+        },
+      });
+    }),
+  );
+  const { GET } = await import("./route");
+  const response = await GET(
+    new NextRequest(
+      "http://localhost:3000/api/artifact-file?workspaceId=w&artifactId=a&artifactVersionId=version-1&assetFileName=report.pdf&download=1",
+    ),
+  );
+  assert.equal(response.status, 200);
+  assert.equal(
+    response.headers.get("content-disposition"),
+    "attachment; filename*=UTF-8''report.pdf",
+  );
+  assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(await response.text(), "pdf-bytes");
+});

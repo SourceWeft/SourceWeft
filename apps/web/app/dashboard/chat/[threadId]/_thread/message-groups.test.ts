@@ -4,6 +4,10 @@ import type { ToolCallRecord } from "../../_components/chat-canvas/types";
 import type { ChatMessageItem } from "../streaming-assistant-state";
 import { buildVersionedMessageGroups } from "./message-groups";
 import {
+  readMessageAgentRunProgress,
+  readMessageAgentRunStop,
+} from "../../_components/chat-canvas/agent-run-continuation";
+import {
   dropStaleActiveThreadRunMessages,
   findActiveThreadRunMessage,
   findLatestActiveThreadRunMessage,
@@ -1209,4 +1213,243 @@ test("live MCP identity is never inherited across a different tool or call id", 
   });
   assert.equal(otherId.id, "new-call");
   assert.equal(otherId.mcpDisplay, undefined);
+});
+
+test("public run budget survives real message grouping without leaking private metadata", () => {
+  const progress = {
+    policyVersion: 2,
+    phase: "closing",
+    normalSteps: 2,
+    normalLimit: 2,
+    closingSteps: 1,
+    closingLimit: 40,
+    steps: 3,
+    limit: 42,
+  };
+  const message = createMessage({
+    id: "budget-assistant",
+    role: "assistant",
+    metadata: {
+      agentRunProgress: progress,
+      privateCheckpoint: { secret: "do-not-project" },
+      threadRun: { status: "running" },
+      sourceUserMessageId: "user-budget",
+    },
+  });
+  const version = buildVersionedMessageGroups([message])[0]!.versions[0]!;
+  assert.deepEqual(
+    readMessageAgentRunProgress({
+      role: "assistant",
+      version,
+      isLatestAssistantGroup: true,
+      isActiveVersion: true,
+      isRunActive: true,
+    }),
+    progress,
+  );
+  assert.equal(version.metadata?.privateCheckpoint, undefined);
+  assert.equal(version.threadRun?.status, "running");
+  assert.equal(version.sourceUserMessageId, "user-budget");
+  assert.equal(
+    readMessageAgentRunProgress({
+      role: "assistant",
+      version,
+      isLatestAssistantGroup: true,
+      isActiveVersion: false,
+      isRunActive: true,
+    }),
+    null,
+  );
+  const stop = {
+    policyVersion: 2,
+    reason: "step_limit",
+    normalSteps: 2,
+    normalLimit: 2,
+    closingSteps: 40,
+    closingLimit: 40,
+    steps: 42,
+    limit: 42,
+    canContinue: true,
+    summaryStatus: "completed",
+  };
+  const stopped = buildVersionedMessageGroups([
+    {
+      ...message,
+      metadata: {
+        ...message.metadata,
+        agentRunProgress: {
+          ...progress,
+          phase: "finalizing",
+          closingSteps: 40,
+          steps: 42,
+        },
+        agentRunStop: stop,
+        threadRun: { status: "completed" },
+      },
+    },
+  ])[0]!.versions[0]!;
+  assert.deepEqual(
+    readMessageAgentRunStop({
+      role: "assistant",
+      version: stopped,
+      isLatestAssistantGroup: true,
+      isActiveVersion: true,
+    }),
+    stop,
+  );
+  assert.equal(
+    readMessageAgentRunProgress({
+      role: "assistant",
+      version: stopped,
+      isLatestAssistantGroup: true,
+      isActiveVersion: true,
+      isRunActive: false,
+    }),
+    null,
+  );
+});
+test("message grouping rejects malformed run budgets and preserves historical stop notices", () => {
+  const legacyStop = {
+    reason: "step_limit",
+    steps: 400,
+    limit: 400,
+    canContinue: true,
+    summaryStatus: "failed",
+  };
+  const version = buildVersionedMessageGroups([
+    createMessage({
+      id: "legacy-budget",
+      role: "assistant",
+      metadata: {
+        agentRunStop: legacyStop,
+        agentRunProgress: {
+          policyVersion: 2,
+          phase: "closing",
+          namespace: "private",
+        },
+      },
+    }),
+  ])[0]!.versions[0]!;
+  assert.deepEqual(
+    readMessageAgentRunStop({
+      role: "assistant",
+      version,
+      isLatestAssistantGroup: true,
+      isActiveVersion: true,
+    }),
+    legacyStop,
+  );
+  assert.equal(version.metadata?.agentRunProgress, undefined);
+  const invalid = buildVersionedMessageGroups([
+    createMessage({
+      id: "invalid-budget",
+      role: "assistant",
+      metadata: {
+        agentRunStop: { ...legacyStop, privateCheckpoint: "secret" },
+      },
+    }),
+  ])[0]!.versions[0]!;
+  assert.equal(
+    readMessageAgentRunStop({
+      role: "assistant",
+      version: invalid,
+      isLatestAssistantGroup: true,
+      isActiveVersion: true,
+    }),
+    null,
+  );
+});
+
+test("failed real message projection hides closing progress when active-run state lags", () => {
+  const progress = {
+    policyVersion: 2,
+    phase: "closing",
+    normalSteps: 2,
+    normalLimit: 2,
+    closingSteps: 9,
+    closingLimit: 40,
+    steps: 11,
+    limit: 42,
+  };
+  const version = buildVersionedMessageGroups([
+    createMessage({
+      id: "failed-closing",
+      role: "assistant",
+      metadata: {
+        isError: true,
+        agentRunProgress: progress,
+        threadRun: { status: "failed" },
+      },
+    }),
+  ])[0]!.versions[0]!;
+  assert.equal(version.isError, true);
+  assert.equal(version.metadata?.isError, undefined);
+  assert.equal(
+    readMessageAgentRunProgress({
+      role: "assistant",
+      version,
+      isLatestAssistantGroup: true,
+      isActiveVersion: true,
+      isRunActive: true,
+    }),
+    null,
+  );
+});
+
+test("live same-call retries preserve omitted errors but clear explicit null and new starts", () => {
+  const calls = new Map<string, ToolCallRecord>();
+  const failed = resolveToolCallFromStreamEvent({
+    event: {
+      type: "tool-call-error",
+      id: "retry-read",
+      tool: "read_file",
+      error: "sandbox unhealthy",
+    },
+    streamToolCallsById: calls,
+  });
+  calls.set(failed.id, failed);
+  const omitted = resolveToolCallFromStreamEvent({
+    event: { type: "tool-call-end", id: failed.id, status: "completed" },
+    streamToolCallsById: calls,
+  });
+  assert.equal(omitted.error, "sandbox unhealthy");
+  const cleared = resolveToolCallFromStreamEvent({
+    event: {
+      type: "tool-call-result",
+      id: failed.id,
+      toolCall: {
+        id: failed.id,
+        tool: "read_file",
+        status: "completed",
+        error: null,
+      },
+    },
+    streamToolCallsById: calls,
+  });
+  assert.equal(cleared.error, null);
+  // SSE JSON may carry an explicit top-level null even though error events
+  // normally advertise a string. Preserve the wire presence distinction.
+  const topClear = resolveToolCallFromStreamEvent({
+    event: JSON.parse(
+      JSON.stringify({ type: "tool-call-result", id: failed.id, error: null }),
+    ),
+    streamToolCallsById: calls,
+  });
+  assert.equal(topClear.error, null);
+  const restarted = resolveToolCallFromStreamEvent({
+    event: { type: "tool-call-start", id: failed.id, tool: "read_file" },
+    streamToolCallsById: calls,
+  });
+  assert.equal(restarted.error, null);
+  assert.equal(restarted.status, "running");
+  calls.set(restarted.id, restarted);
+  const failedAgain = resolveToolCallFromStreamEvent({
+    event: {
+      type: "tool-call-error",
+      id: failed.id,
+      error: "new permission failure",
+    },
+    streamToolCallsById: calls,
+  });
+  assert.equal(failedAgain.error, "new permission failure");
 });

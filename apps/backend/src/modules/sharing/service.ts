@@ -300,7 +300,7 @@ export class SharingService {
           case "previewImage":
             return `${publicPreviewUrl(token)}?${versionQuery}`;
           case "asset":
-            return `${publicShareAssetUrl(token, resource.fileName)}?${versionQuery}`;
+            return `${publicShareAssetUrl(token, resource.fileName)}?${versionQuery}${resource.download ? "&download=1" : ""}`;
           case "sourceJson":
             return null;
         }
@@ -326,14 +326,12 @@ export class SharingService {
           await contentArtifactsService.isSharedArtifactInlineRenderable(
             artifact,
           ),
-        payload: payload
-          ? {
-              ...payload,
-              artifactVersionId: fileVersion.versionId,
-              versionNo: fileVersion.versionNo,
-              versionFiles: files,
-            }
-          : null,
+        payload: {
+          ...(payload ?? {}),
+          artifactVersionId: fileVersion.versionId,
+          versionNo: fileVersion.versionNo,
+          versionFiles: files,
+        },
         previewImageUrl:
           files.find((file) => file.role === "preview")?.url ?? null,
         description: null,

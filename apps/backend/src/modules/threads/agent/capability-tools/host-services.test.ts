@@ -98,3 +98,42 @@ test("an aborted publisher cannot append an artifact output card", async () => {
 
   assert.deepEqual(renderBlocks.list(), []);
 });
+
+test("host run fence overrides caller input and a rejected publication never appends output", async () => {
+  const renderBlocks = createMessageRenderBlockBuilder();
+  const refusal = new Error("The durable run was cancelled before commit");
+  await assert.rejects(
+    publishArtifactAndRecordOutput({
+      origin: {
+        producer: { kind: "main" },
+        sourceToolCallId: "cancel-race",
+        threadRunId: "trusted-run",
+      },
+      publish: async (input) => {
+        assert.deepEqual(input.publishRunFence, {
+          runId: "trusted-run",
+          teamId: "team-1",
+          workspaceId: "workspace-1",
+        });
+        throw refusal;
+      },
+      publishInput: {
+        context: {
+          teamId: "team-1",
+          workspaceId: "workspace-1",
+          threadId: "thread-1",
+          userId: "user-1",
+        },
+        publishRunFence: {
+          runId: "untrusted-run",
+          teamId: "other-team",
+          workspaceId: "other-workspace",
+        },
+        spec: { artifactType: "image", title: "Cancelled image", payload: {} },
+      },
+      runtime: { renderBlocks },
+    }),
+    (error) => error === refusal,
+  );
+  assert.deepEqual(renderBlocks.list(), []);
+});

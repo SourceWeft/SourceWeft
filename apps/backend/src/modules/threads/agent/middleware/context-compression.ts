@@ -32,6 +32,10 @@ import {
 } from "@sourceweft/agent-tool-registry";
 import { toObjectRecord } from "../../../../shared/records";
 import { readBooleanEnv } from "../../../../shared/env";
+import {
+  isAgentStepFinalizing,
+  getAgentStepReplayMessage,
+} from "./step-budget";
 
 const DEFAULT_CONTEXT_LENGTH = config.chat.agent.defaultContextLength;
 export const SOURCEWEFT_TOOL_OUTPUT_PLACEHOLDER =
@@ -414,6 +418,7 @@ export function createSourceWeftSummaryModel(
 }
 
 export function createSourceWeftSummarizationMiddleware(input: {
+  userMessageId?: string | null;
   backend: AnyBackendProtocol;
   chatProfileConfig?: unknown;
   model: BaseLanguageModel;
@@ -447,6 +452,15 @@ export function createSourceWeftSummarizationMiddleware(input: {
       request: Parameters<typeof wrapModelCall>[0],
       handler: Parameters<typeof wrapModelCall>[1],
     ) => {
+      if (isAgentStepFinalizing(request.state)) return handler(request);
+      // This authoritative response already exists in the checkpoint. Its tool
+      // results are legitimately pending approval, so there is no model input
+      // to validate/compress yet. Replay still traverses native afterModel/HITL.
+      const replay = getAgentStepReplayMessage(
+        request.state,
+        input.userMessageId,
+      );
+      if (replay) return replay;
       const currentTurnStart = latestHumanMessageIndex(request.messages);
       if (currentTurnStart >= 0) {
         groupCompleteToolExchanges(
@@ -910,6 +924,7 @@ function createSourceWeftCompressionTraceMiddleware(input: {
   return createMiddleware({
     name: "SourceWeftContextCompressionTrace",
     beforeModel: async (state) => {
+      if (isAgentStepFinalizing(state)) return;
       const messages = Array.isArray(state.messages)
         ? (state.messages as BaseMessage[])
         : [];
@@ -934,6 +949,7 @@ function createSourceWeftCompressionTraceMiddleware(input: {
       });
     },
     wrapModelCall: async (request, handler) => {
+      if (isAgentStepFinalizing(request.state)) return handler(request);
       const beforeCallTokens = estimateSourceWeftMessageTokens(
         request.messages,
       );
@@ -1115,6 +1131,7 @@ function createSourceWeftPreSummaryContextEditingMiddleware(input: {
   return createMiddleware({
     name: "SourceWeftPreSummaryContextEditing",
     beforeModel: async (state) => {
+      if (isAgentStepFinalizing(state)) return;
       const messages = Array.isArray(state.messages)
         ? (state.messages as BaseMessage[])
         : [];
@@ -1215,12 +1232,18 @@ export async function createSourceWeftContextCompressionMiddleware(
   }
 
   if (settings.contextEditingEnabled) {
-    middleware.push(
-      contextEditingMiddleware({
-        edits: [createSourceWeftToolOutputEdit(settings.budget)],
-        tokenCountMethod: "approx",
-      }),
-    );
+    const editing = contextEditingMiddleware({
+      edits: [createSourceWeftToolOutputEdit(settings.budget)],
+      tokenCountMethod: "approx",
+    });
+    const editRequest = editing.wrapModelCall;
+    middleware.push({
+      ...editing,
+      wrapModelCall: (request, handler) =>
+        isAgentStepFinalizing(request.state)
+          ? handler(request)
+          : editRequest!(request, handler),
+    });
   }
 
   return middleware;

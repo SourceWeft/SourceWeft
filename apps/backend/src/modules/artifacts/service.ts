@@ -5,6 +5,7 @@ import {
 } from "@sourceweft/contracts/artifact-urls";
 import {
   resolveArtifactVersionFile,
+  resolveArtifactVersionAttachment,
   readArtifactVersionFile,
   projectArtifactVersionFiles,
 } from "./version-files";
@@ -37,6 +38,8 @@ import {
   deleteArtifactObject,
   deleteArtifactObjectsByPrefix,
   downloadArtifactObject,
+  downloadFileObject,
+  getContentStorageBucketName,
   downloadArtifactObjectRange,
   downloadArtifactObjectWithMetadata,
 } from "../sources/storage";
@@ -681,19 +684,31 @@ export class ContentArtifactsService {
     handler?: ArtifactViewHandler | null;
     isPublic?: boolean;
     currentVersion?: CurrentArtifactVersionRecord | null;
+    artifactVersionId?: string;
   }) {
-    const base = this.buildArtifactResponse(input);
-    if (input.handler?.executionPolicy) {
-      const version =
-        "currentVersion" in input
-          ? input.currentVersion
-          : await findCurrentReadyArtifactVersionRecord({
-              teamId: input.teamId,
-              workspaceId: input.workspaceId,
-              artifactId: input.artifact.id,
-              expectedArtifactType: input.artifact.artifactType,
-            });
-      if (!version || !canViewContent(input.userId, version))
+    const base = this.buildArtifactResponse({
+      ...input,
+      artifactVersionId: input.artifactVersionId,
+    });
+    const version =
+      "currentVersion" in input
+        ? input.currentVersion
+        : await findCurrentReadyArtifactVersionRecord({
+            teamId: input.teamId,
+            workspaceId: input.workspaceId,
+            artifactId: input.artifact.id,
+            expectedArtifactType: input.artifact.artifactType,
+          });
+    if (version && !canViewContent(input.userId, version)) {
+      throw new ContentError(404, "ARTIFACT_NOT_FOUND", "Artifact not found");
+    }
+    // A file manifest is a host contract, independent of the producing type.
+    // Capabilities with dedicated media readers continue to own their projection.
+    if (
+      input.handler?.executionPolicy ||
+      (version?.filesJson && !input.handler?.resolveVersionMedia)
+    ) {
+      if (!version)
         return {
           ...base,
           payloadJson: {},
@@ -708,11 +723,12 @@ export class ContentArtifactsService {
           artifactVersionId: version.versionId,
           resource,
         });
-      const payload =
-        input.handler.buildPublicPayload?.({
-          artifact: { ...input.artifact, payloadJson: version.contentJson },
-          assetUrl: (fileName) => url({ kind: "asset", fileName })!,
-        }) ?? {};
+      const payload = input.handler?.executionPolicy
+        ? (input.handler.buildPublicPayload?.({
+            artifact: { ...input.artifact, payloadJson: version.contentJson },
+            assetUrl: (fileName) => url({ kind: "asset", fileName })!,
+          }) ?? {})
+        : version.contentJson;
       return {
         ...base,
         artifactVersionId: version.versionId,
@@ -735,7 +751,11 @@ export class ContentArtifactsService {
         }),
       };
     }
-    if (!input.handler?.resolveVersionMedia) return base;
+    if (!input.handler?.resolveVersionMedia)
+      return {
+        ...base,
+        payloadJson: { ...base.payloadJson, versionFiles: null },
+      };
     const unavailable = () => ({
       ...base,
       payloadJson: {},
@@ -746,18 +766,6 @@ export class ContentArtifactsService {
       previewUrl: null,
     });
     if (input.artifact.status !== "ready") return unavailable();
-    const version =
-      "currentVersion" in input
-        ? input.currentVersion
-        : await findCurrentReadyArtifactVersionRecord({
-            teamId: input.teamId,
-            workspaceId: input.workspaceId,
-            artifactId: input.artifact.id,
-            expectedArtifactType: input.artifact.artifactType,
-          });
-    if (version && !canViewContent(input.userId, version)) {
-      throw new ContentError(404, "ARTIFACT_NOT_FOUND", "Artifact not found");
-    }
     const media = version
       ? input.handler.resolveVersionMedia({
           artifact: {
@@ -818,14 +826,7 @@ export class ContentArtifactsService {
     const publicArtifactIds = await findPubliclySharedArtifactIds(
       artifacts.items.map((artifact) => artifact.id),
     );
-    const versionedArtifactIds = artifacts.items
-      .filter((artifact) =>
-        Boolean(
-          registry.handlerFor(artifact.artifactType)?.resolveVersionMedia ||
-          registry.handlerFor(artifact.artifactType)?.executionPolicy,
-        ),
-      )
-      .map((artifact) => artifact.id);
+    const versionedArtifactIds = artifacts.items.map((artifact) => artifact.id);
     const currentVersions = await listCurrentReadyArtifactVersionRecords({
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
@@ -930,6 +931,7 @@ export class ContentArtifactsService {
           userId: input.userId,
           handler: registry.handlerFor(version.artifactType),
           currentVersion: { ...version, artifactId: version.id },
+          artifactVersionId: version.versionId,
         }),
       };
     }
@@ -982,6 +984,59 @@ export class ContentArtifactsService {
           : null,
       executionPolicy:
         file.role === "primary" ? handler?.executionPolicy : undefined,
+    };
+  }
+
+  /** Host-only attachment recovery for sandbox authoring; not a public byte route. */
+  async readArtifactVersionAttachment(input: {
+    workspaceId: string;
+    artifactId: string;
+    artifactVersionId: string;
+    fileName: string;
+    userId: string;
+    maxBytes: number;
+    signal?: AbortSignal;
+  }) {
+    input.signal?.throwIfAborted();
+    const { workspace, version } =
+      await this.requireViewableArtifactVersion(input);
+    const file = resolveArtifactVersionAttachment({
+      filesJson: version.filesJson,
+      workspaceId: workspace.id,
+      artifactId: version.id,
+      fileName: input.fileName,
+    });
+    const maxBytes = Math.min(
+      input.maxBytes,
+      ARTIFACT_STORAGE_MAX_DOWNLOAD_BYTES,
+    );
+    if (
+      !Number.isSafeInteger(maxBytes) ||
+      maxBytes <= 0 ||
+      file.byteLength > maxBytes
+    ) {
+      throw new ContentError(
+        413,
+        "ARTIFACT_FILE_TOO_LARGE",
+        "The version file exceeds the sandbox preparation limit",
+      );
+    }
+    input.signal?.throwIfAborted();
+    const result = await readArtifactVersionFile(file, ({ bucket, key }) =>
+      downloadFileObject({
+        bucket: bucket || getContentStorageBucketName(),
+        key,
+        maxBytes,
+        signal: input.signal,
+      }),
+    );
+    input.signal?.throwIfAborted();
+    return {
+      bytes: result.body,
+      fileName: result.fileName,
+      artifactVersionId: version.versionId,
+      versionNo: version.versionNo,
+      contentDigest: file.contentDigest,
     };
   }
 

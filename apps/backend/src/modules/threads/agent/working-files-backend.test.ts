@@ -1,8 +1,11 @@
 import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { AgentCitationRegistry } from "./citation-registry";
-import { WorkingFilesBackend } from "./working-files-backend";
+import { type AgentCitation, AgentCitationRegistry } from "./citation-registry";
+import {
+  rewriteWorkfileCitationMarkers,
+  WorkingFilesBackend,
+} from "./working-files-backend";
 import { MountedAgentFilesystemBackend } from "@sourceweft/builtin-vfs";
 import { ContentError } from "../../content/errors";
 import type { WorkingFileRecord } from "../../content/types";
@@ -17,7 +20,10 @@ function record(input: {
   updatedAt?: string;
 }): WorkingFileRecord {
   return {
-    payloadKind: "inline_text", storageBucket: null, storageKey: null, origin: "unknown",
+    payloadKind: "inline_text",
+    storageBucket: null,
+    storageKey: null,
+    origin: "unknown",
     contentHash: createHash("sha256").update(input.contentText).digest("hex"),
     id: `wf-${input.path}`,
     teamId: "team-1",
@@ -131,7 +137,9 @@ test("WorkingFilesBackend missing reads direct source mentions back to /kb", asy
 test("WorkingFilesBackend preserves non-not-found getWorkingFile errors", async () => {
   const originalGet = workingFilesService.getWorkingFile;
   workingFilesService.getWorkingFile = async () =>
-    Promise.reject(new ContentError(403, "WORKFILE_SCOPE_DENIED", "scope denied"));
+    Promise.reject(
+      new ContentError(403, "WORKFILE_SCOPE_DENIED", "scope denied"),
+    );
   try {
     const backend = new WorkingFilesBackend({
       teamId: "team-1",
@@ -172,9 +180,7 @@ test("WorkingFilesBackend neutralizes citation-like markers in agent-facing read
       /non-citable citation marker c1 removed/i,
     );
 
-    const [download] = await backend.downloadFiles([
-      "/files/notes/todo.md",
-    ]);
+    const [download] = await backend.downloadFiles(["/files/notes/todo.md"]);
     assert.equal(download?.error, null);
     const downloaded = download?.content
       ? new TextDecoder().decode(download.content)
@@ -281,7 +287,7 @@ test("WorkingFilesBackend rewrites runtime citations to markdown footnotes on wr
         "## References",
         "",
         "[^example-article]: Example Article. https://example.com/article",
-        "[^annual-report-2025-pdf]: Source Library: Annual Report 2025.pdf.",
+        '[^annual-report-2025-pdf]: Source Library: Annual Report 2025.pdf. Evidence: {"sourceId":"source-1","documentId":"doc-1","chunkId":"chunk-1","chunkNo":0}.',
       ].join("\n"),
     );
   } finally {
@@ -348,6 +354,153 @@ test("WorkingFilesBackend reuses existing footnote definitions and removes unkno
   }
 });
 
+function sourceEvidence(overrides: Partial<AgentCitation> = {}): AgentCitation {
+  return {
+    citation: "c1",
+    sourceId: "source-1",
+    sourceTitle: "Report",
+    documentId: "document-1",
+    chunkId: "chunk-1",
+    chunkNo: 0,
+    score: 1,
+    excerpt: "Evidence",
+    quoteText: "Evidence",
+    origin: "read_file",
+    ...overrides,
+  };
+}
+
+test("workfile footnotes distinguish chunks and preserve observed source locators", () => {
+  const result = rewriteWorkfileCitationMarkers({
+    content: "First [citation:c1] Second [citation:c2] Repeat [citation:c1]",
+    citations: [
+      sourceEvidence({ path: "/kb/report.md" }),
+      sourceEvidence({ citation: "c2", chunkId: "chunk-2", chunkNo: 1 }),
+    ],
+  });
+  assert.match(
+    result,
+    /First \[\^report\] Second \[\^report-2\] Repeat \[\^report\]/,
+  );
+  assert.match(
+    result,
+    /"sourceId":"source-1","documentId":"document-1","chunkId":"chunk-1","chunkNo":0,"path":"\/kb\/report.md"/,
+  );
+  assert.match(result, /"chunkId":"chunk-2","chunkNo":1/);
+  assert.equal((result.match(/^\[\^report\]:/gm) ?? []).length, 1);
+});
+
+test.each([{ sourceId: "source-2" }, { documentId: "document-2" }])(
+  "workfile footnotes distinguish same-title source identities %j",
+  (difference) => {
+    const result = rewriteWorkfileCitationMarkers({
+      content: "First [citation:c1] Different [citation:c2]",
+      citations: [
+        sourceEvidence(),
+        sourceEvidence({ ...difference, citation: "c2" }),
+      ],
+    });
+    assert.match(result, /First \[\^report\] Different \[\^report-2\]/);
+  },
+);
+
+test("workfile footnotes reuse exact persisted evidence without upgrading ambiguous legacy references", () => {
+  const first = rewriteWorkfileCitationMarkers({
+    content: "First [citation:c1]",
+    citations: [sourceEvidence()],
+  });
+  const repeated = rewriteWorkfileCitationMarkers({
+    content: `${first}\nAgain [citation:c2]`,
+    citations: [sourceEvidence({ citation: "c2" })],
+  });
+  assert.match(repeated, /Again \[\^report\]/);
+  assert.equal((repeated.match(/^\[\^report\]:/gm) ?? []).length, 1);
+  const legacy = rewriteWorkfileCitationMarkers({
+    content:
+      "Old [^report]\n\n[^report]: Source Library: Report.\nNew [citation:c1]",
+    citations: [sourceEvidence()],
+  });
+  assert.match(legacy, /New \[\^report-2\]/);
+});
+
+function fileEvidence(
+  overrides: {
+    fileId?: string;
+    revision?: string;
+    locator?: { kind: "page"; page: number };
+    workspaceId?: string;
+    backendKind?: "cloud_vfs" | "local_fs";
+  } = {},
+): AgentCitation {
+  return sourceEvidence({
+    sourceId: null,
+    documentId: null,
+    sourceTitle: "report.pdf",
+    origin: "read_document",
+    fileReference: {
+      presentation: "text",
+      workspaceId: overrides.workspaceId ?? "workspace-1",
+      threadId: "thread-1",
+      file: {
+        scopeKind: "files",
+        backendKind: overrides.backendKind ?? "cloud_vfs",
+        fileId: overrides.fileId ?? "file-1",
+        relativePath: "report.pdf",
+        name: "report.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 12,
+        revision: overrides.revision ?? `sha256:${"a".repeat(64)}`,
+        origin: "user_provided",
+        capabilities: {
+          readText: false,
+          readDocument: true,
+          viewImage: false,
+          searchText: true,
+          write: false,
+        },
+      },
+      locator: overrides.locator ?? { kind: "page", page: 1 },
+    },
+  });
+}
+
+test("workfile footnotes reuse equivalent locators regardless of object key order", () => {
+  const repeated = fileEvidence({ locator: { page: 1, kind: "page" } });
+  const result = rewriteWorkfileCitationMarkers({
+    content: "First [citation:c1] Repeat [citation:c2]",
+    citations: [fileEvidence(), { ...repeated, citation: "c2" }],
+  });
+  assert.match(result, /First \[\^report-pdf\] Repeat \[\^report-pdf\]/);
+});
+
+test.each([
+  { fileId: "file-2" },
+  { revision: `sha256:${"b".repeat(64)}` },
+  { locator: { kind: "page" as const, page: 2 } },
+  { workspaceId: "workspace-2" },
+  { backendKind: "local_fs" as const },
+])(
+  "workfile footnotes distinguish same-title file evidence %j",
+  (difference) => {
+    const result = rewriteWorkfileCitationMarkers({
+      content:
+        "First [citation:c1] Different [citation:c2] Duplicate [citation:c3]",
+      citations: [
+        fileEvidence(),
+        { ...fileEvidence(difference), citation: "c2" },
+        { ...fileEvidence(), citation: "c3" },
+      ],
+    });
+    assert.match(
+      result,
+      /First \[\^report-pdf\] Different \[\^report-pdf-2\] Duplicate \[\^report-pdf\]/,
+    );
+    assert.match(result, /"fileId":"file-1"/);
+    assert.match(result, /Location: {"kind":"page","page":1}/);
+    assert.match(result, new RegExp(`Version: sha256:${"a".repeat(64)}`));
+  },
+);
+
 test("toWorkingFileListItem omits file content", () => {
   const file = record({
     path: "/files/notes/todo.md",
@@ -406,10 +559,7 @@ test("MountedAgentFilesystemBackend exposes /kb and /files roots, defaults file 
     (await backend.write("/kb/a.md", "x")).error?.startsWith("EROFS"),
     true,
   );
-  assert.equal(
-    (await backend.write("/files/a.md", "x")).path,
-    "/files/a.md",
-  );
+  assert.equal((await backend.write("/files/a.md", "x")).path, "/files/a.md");
   assert.deepEqual((await backend.grep("anything", "/")).matches, [
     { path: "/files/a.md", line: 1, text: "work" },
   ]);

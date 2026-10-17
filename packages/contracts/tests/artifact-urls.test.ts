@@ -37,7 +37,10 @@ test("preview page URL matches every predecessor byte for byte", () => {
 
 test("preview page URL form-encodes identifiers the way URLSearchParams always did", () => {
   assert.equal(
-    buildArtifactPreviewUrl({ artifactId: "artifact 1", workspaceId: "workspace 1" }),
+    buildArtifactPreviewUrl({
+      artifactId: "artifact 1",
+      workspaceId: "workspace 1",
+    }),
     "/artifact-preview?artifactId=artifact+1&workspaceId=workspace+1",
   );
 });
@@ -120,15 +123,57 @@ test("unsafe asset file names are rejected rather than escaped", () => {
   for (const fileName of ["", "  ", ".", "..", "../secret", "a/b", "a\\b"]) {
     assert.equal(isSafeFlatArtifactAssetFileName(fileName), false, fileName);
     assert.equal(
-      buildArtifactRestUrl({ ...target, resource: { fileName, kind: "asset" } }),
+      buildArtifactRestUrl({
+        ...target,
+        resource: { fileName, kind: "asset" },
+      }),
       null,
       fileName,
     );
     assert.equal(
-      buildArtifactProxyUrl({ ...target, resource: { fileName, kind: "asset" } }),
+      buildArtifactProxyUrl({
+        ...target,
+        resource: { fileName, kind: "asset" },
+      }),
       null,
       fileName,
     );
   }
   assert.equal(isSafeFlatArtifactAssetFileName("source.json"), true);
+});
+
+test("asset download intent preserves inline URLs and exact version", () => {
+  const input = {
+    ...target,
+    artifactVersionId: "version 1",
+    resource: { kind: "asset" as const, fileName: "report.pdf" },
+  };
+  assert.equal(
+    buildArtifactRestUrl(input),
+    "/v1/workspaces/workspace-1/artifacts/artifact-1/assets/report.pdf?artifactVersionId=version%201",
+  );
+  assert.equal(
+    buildArtifactRestUrl({
+      ...input,
+      resource: { ...input.resource, download: true },
+    }),
+    "/v1/workspaces/workspace-1/artifacts/artifact-1/assets/report.pdf?artifactVersionId=version%201&download=1",
+  );
+  assert.equal(
+    buildArtifactRestUrl({
+      ...target,
+      resource: { ...input.resource, download: true },
+    }),
+    "/v1/workspaces/workspace-1/artifacts/artifact-1/assets/report.pdf?download=1",
+  );
+  const proxy = new URL(
+    buildArtifactProxyUrl({
+      ...input,
+      resource: { ...input.resource, download: true },
+    })!,
+    "https://app.test",
+  );
+  assert.equal(proxy.searchParams.get("artifactVersionId"), "version 1");
+  assert.equal(proxy.searchParams.get("assetFileName"), "report.pdf");
+  assert.equal(proxy.searchParams.get("download"), "1");
 });

@@ -303,7 +303,7 @@ export function registerArtifactRoutes(app: Hono) {
     c.header("Content-Type", result.contentType);
     c.header(
       "Content-Disposition",
-      `inline; filename*=UTF-8''${encodeURIComponent(result.fileName)}`,
+      `${c.req.query("download") === "1" ? "attachment" : "inline"}; filename*=UTF-8''${encodeURIComponent(result.fileName)}`,
     );
     c.header(
       "Cache-Control",

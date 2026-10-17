@@ -274,3 +274,18 @@ test("exact version identity survives every URL adapter", () => {
     "v1",
   );
 });
+
+test("asset download normalization preserves exact version and download intent", () => {
+  for (const input of [
+    "/v1/workspaces/w/artifacts/a/assets/report.pdf?artifactVersionId=v1&download=1",
+    "/api/artifact-file?workspaceId=w&artifactId=a&assetFileName=report.pdf&artifactVersionId=v1&download=1",
+  ]) {
+    const result = new URL(
+      artifactApiUrlToProxyFileUrl(input)!,
+      "https://app.test",
+    );
+    assert.equal(result.searchParams.get("artifactVersionId"), "v1");
+    assert.equal(result.searchParams.get("download"), "1");
+    assert.equal(result.searchParams.get("assetFileName"), "report.pdf");
+  }
+});

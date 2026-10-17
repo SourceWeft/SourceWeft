@@ -5,6 +5,7 @@ import {
   projectArtifactVersionFiles,
   readArtifactVersionFile,
   resolveArtifactVersionFile,
+  resolveArtifactVersionAttachment,
 } from "./version-files";
 
 const body = Buffer.from("<html>version one</html>");
@@ -85,5 +86,75 @@ test("version reads verify the persisted bytes instead of trusting storage", asy
       Buffer.from("<html>version two</html>"),
     ),
     /does not match/,
+  );
+});
+
+test("only public deliverables receive downloads, previews and private files do not", () => {
+  const projection = projectArtifactVersionFiles({
+    filesJson: {
+      schemaVersion: 1,
+      files: [
+        primary,
+        { ...primary, fileName: "report.pdf", role: "asset" },
+        {
+          ...primary,
+          fileName: "private.pdf",
+          role: "asset",
+          access: "private",
+        },
+        { ...primary, fileName: "cover.png", role: "preview" },
+        {
+          ...primary,
+          fileName: "source.json",
+          role: "source",
+          access: "private",
+        },
+      ],
+    },
+    url: (resource) => JSON.stringify(resource),
+  })!;
+  assert.deepEqual(
+    projection.map((file) => file.fileName),
+    ["index.html", "report.pdf", "cover.png"],
+  );
+  assert.deepEqual(JSON.parse(projection[1]!.downloadUrl!), {
+    kind: "asset",
+    fileName: "report.pdf",
+    download: true,
+  });
+  assert.equal(projection[2]!.downloadUrl, undefined);
+  assert.equal(
+    projectArtifactVersionFiles({ filesJson: null, url: () => "unused" }),
+    null,
+  );
+});
+
+test("internal attachment lookup can recover private authoring without widening public selectors", () => {
+  const input = {
+    filesJson,
+    workspaceId: "w",
+    artifactId: "a",
+    fileName: "authoring.zip",
+  };
+  assert.equal(resolveArtifactVersionAttachment(input).role, "source");
+  assert.throws(() =>
+    resolveArtifactVersionFile({
+      ...input,
+      resource: { kind: "asset", fileName: input.fileName },
+    }),
+  );
+  for (const denied of [
+    { ...input, filesJson: null },
+    { ...input, workspaceId: "other" },
+    { ...input, fileName: "../authoring.zip" },
+    { ...input, fileName: "missing.json" },
+  ]) {
+    assert.throws(() => resolveArtifactVersionAttachment(denied));
+  }
+  assert.doesNotMatch(
+    JSON.stringify(
+      projectArtifactVersionFiles({ filesJson, url: () => "/file" }),
+    ),
+    /authoring/,
   );
 });

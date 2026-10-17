@@ -39,6 +39,7 @@ type ParsedArtifactRouteBase =
       artifactId: string;
       fileName: string;
       kind: "asset";
+      download?: boolean;
       workspaceId: string;
     };
 
@@ -173,6 +174,7 @@ export function resolveArtifactPageUrl(input: {
 }
 
 export function resolveArtifactProxyAssetUrl(input: {
+  download?: boolean;
   artifactVersionId?: string | null;
   artifactId: string;
   fileName: string;
@@ -183,7 +185,11 @@ export function resolveArtifactProxyAssetUrl(input: {
     ...(input.artifactVersionId
       ? { artifactVersionId: input.artifactVersionId }
       : {}),
-    resource: { fileName: input.fileName, kind: "asset" },
+    resource: {
+      fileName: input.fileName,
+      kind: "asset",
+      ...(input.download ? { download: true } : {}),
+    },
     workspaceId: input.workspaceId,
   });
 }
@@ -293,7 +299,15 @@ function parseArtifactRoute(value: string): ParsedArtifactRoute | null {
   const version = new URL(value, "http://sourceweft.local").searchParams.get(
     "artifactVersionId",
   );
-  return { ...route, ...(version ? { artifactVersionId: version } : {}) };
+  return {
+    ...route,
+    ...(route.kind === "asset" &&
+    new URL(value, "http://sourceweft.local").searchParams.get("download") ===
+      "1"
+      ? { download: true }
+      : {}),
+    ...(version ? { artifactVersionId: version } : {}),
+  };
 }
 
 export function artifactApiUrlToPageUrl(value: string) {
