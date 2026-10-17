@@ -388,6 +388,35 @@ export async function commitCurrentRunArtifactPublication(
         requestKey: input.artifact.semanticRequestKey,
       });
 
+      // Read only immutable ownership first. Lock the parent thread before
+      // its run because DELETE threads cascades to run rows in that order.
+      const [runIdentity] = await tx
+        .select({ threadId: chatThreadRuns.threadId })
+        .from(chatThreadRuns)
+        .where(
+          and(
+            eq(chatThreadRuns.id, input.context.runId),
+            eq(chatThreadRuns.teamId, input.context.teamId),
+            eq(chatThreadRuns.workspaceId, input.context.workspaceId),
+          ),
+        )
+        .limit(1);
+      if (!runIdentity) return { ok: false, reason: "run_inactive" };
+      const [threadRow] = await tx
+        .select({ visibility: threads.visibility })
+        .from(threads)
+        .where(
+          and(
+            eq(threads.id, runIdentity.threadId),
+            eq(threads.teamId, input.context.teamId),
+            eq(threads.workspaceId, input.context.workspaceId),
+          ),
+        )
+        .for("share")
+        .limit(1);
+      if (!threadRow) {
+        return { ok: false, reason: "run_inactive" };
+      }
       const [runRow] = await tx
         .select()
         .from(chatThreadRuns)
@@ -402,6 +431,7 @@ export async function commitCurrentRunArtifactPublication(
         .limit(1);
       if (
         !runRow ||
+        runRow.threadId !== runIdentity.threadId ||
         runRow.userId !== input.context.actorUserId ||
         !ACTIVE_PUBLICATION_RUN_STATUSES.includes(
           runRow.status as (typeof ACTIVE_PUBLICATION_RUN_STATUSES)[number],
@@ -410,21 +440,6 @@ export async function commitCurrentRunArtifactPublication(
         return { ok: false, reason: "run_inactive" };
       }
       await failpoint("after_run_lock");
-      const [threadRow] = await tx
-        .select({ visibility: threads.visibility })
-        .from(threads)
-        .where(
-          and(
-            eq(threads.id, runRow.threadId),
-            eq(threads.teamId, input.context.teamId),
-            eq(threads.workspaceId, input.context.workspaceId),
-          ),
-        )
-        .for("share")
-        .limit(1);
-      if (!threadRow) {
-        return { ok: false, reason: "run_inactive" };
-      }
       const publicationVisibility =
         threadRow.visibility === "private" ? "private" : "workspace";
       await lockWorkspaceAccessRowsWithExecutor(tx, {
