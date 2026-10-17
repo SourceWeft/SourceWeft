@@ -26,6 +26,21 @@ export type AssistantRenderSegment =
       type: "terminal";
     };
 
+export function getRunningWorkflowBlockId(
+  segments: AssistantRenderSegment[],
+  isRunning: boolean,
+) {
+  if (!isRunning) return undefined;
+  // Terminal artifacts are rendered at the bottom independently of the live
+  // inline stream. Answer text, however, ends the preceding thinking block.
+  for (let index = segments.length - 1; index >= 0; index -= 1) {
+    const segment = segments[index];
+    if (segment?.type === "terminal") continue;
+    return segment?.type === "workflow" ? segment.blocks.at(-1)?.id : undefined;
+  }
+  return undefined;
+}
+
 function appendAnswerSegment(
   segments: AssistantRenderSegment[],
   block: AssistantAnswerBlock,

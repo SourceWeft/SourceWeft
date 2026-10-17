@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import type { MessageRenderBlock } from "./types";
-import { buildAssistantRenderSegments } from "./assistant-render-segments";
+import {
+  buildAssistantRenderSegments,
+  getRunningWorkflowBlockId,
+} from "./assistant-render-segments";
 
 function reasoning(id: string): MessageRenderBlock {
   return { id, text: `Reasoning ${id}`, type: "reasoning" };
@@ -28,6 +31,69 @@ function terminalArtifact(id: string): MessageRenderBlock {
 function text(id: string): MessageRenderBlock {
   return { id, text: `Answer ${id}`, type: "text" };
 }
+
+test("only the latest inline workflow block can be running", () => {
+  assert.equal(getRunningWorkflowBlockId([], true), undefined);
+  assert.equal(
+    getRunningWorkflowBlockId(
+      buildAssistantRenderSegments([reasoning("r")]),
+      true,
+    ),
+    "r",
+  );
+  assert.equal(
+    getRunningWorkflowBlockId(
+      buildAssistantRenderSegments([reasoning("r"), tool("t")]),
+      true,
+    ),
+    "t",
+  );
+  assert.equal(
+    getRunningWorkflowBlockId(
+      buildAssistantRenderSegments([reasoning("r"), text("a")]),
+      true,
+    ),
+    undefined,
+  );
+  assert.equal(
+    getRunningWorkflowBlockId(
+      buildAssistantRenderSegments([reasoning("r")]),
+      false,
+    ),
+    undefined,
+  );
+});
+
+test("terminal artifacts do not reactivate thinking or interrupt the inline stream", () => {
+  assert.equal(
+    getRunningWorkflowBlockId(
+      buildAssistantRenderSegments([
+        reasoning("r"),
+        terminalArtifact("artifact"),
+      ]),
+      true,
+    ),
+    "r",
+  );
+  assert.equal(
+    getRunningWorkflowBlockId(
+      buildAssistantRenderSegments([
+        reasoning("r"),
+        text("answer"),
+        terminalArtifact("artifact"),
+      ]),
+      true,
+    ),
+    undefined,
+  );
+  assert.equal(
+    getRunningWorkflowBlockId(
+      buildAssistantRenderSegments([terminalArtifact("artifact")]),
+      true,
+    ),
+    undefined,
+  );
+});
 
 test("buildAssistantRenderSegments keeps assistant text visible around workflow", () => {
   const segments = buildAssistantRenderSegments([
