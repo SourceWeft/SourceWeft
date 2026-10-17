@@ -175,6 +175,8 @@ export type StreamThreadEventInput = LegacyThreadProfileAliasInput & {
   assistantMessageParentId?: string | null;
   agentMode?: "continue" | "replay" | "fork";
   agentBaseCheckpoint?: AgentCheckpointRef | null;
+  /** Set by the host refresh resolver, never exposed in the HTTP request schema. */
+  refreshAgentStepBudget?: true;
   agentRunThreadId?: string;
   toolApprovalResume?: ToolApprovalResume | null;
   assistantMessageId?: string | null;
@@ -274,6 +276,12 @@ export type PreparedThreadTurn = {
   llmIdempotencyKey: string;
   agentMode: "continue" | "replay" | "fork";
   agentBaseCheckpoint: AgentCheckpointRef | null;
+  refreshAgentStepBudget?: {
+    graphThreadIds: string[];
+    checkpointRefs: AgentCheckpointRef[];
+    historyFloors: AgentCheckpointRef[];
+    requireExistingBudget: boolean;
+  };
   agentRunThreadId: string;
   toolApprovalResume: ToolApprovalResume | null;
   traceContinuation: TraceContinuationMetadata | null;

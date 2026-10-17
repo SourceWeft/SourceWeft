@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, test } from "vitest";
 import { createIsolatedTestDatabase } from "../../test/isolated-database";
 import { beginReasoningRun, projectReasoning } from "./turn/reasoning-state";
+import { appendAgentRunOrigin } from "./turn/agent-run-origins";
 
 let isolated:
   Awaited<ReturnType<typeof createIsolatedTestDatabase>> | undefined;
@@ -21,32 +22,28 @@ beforeAll(async () => {
   process.env.DATABASE_URL = isolated.url;
   schema = await import("@sourceweft/db");
   repository = await import("./message-repository");
-  await schema.db
-    .insert(schema.workspaces)
-    .values({
-      id: workspaceId,
-      organizationId: teamId,
-      name: "Projection",
-      slug: workspaceId,
-    });
+  await schema.db.insert(schema.workspaces).values({
+    id: workspaceId,
+    organizationId: teamId,
+    name: "Projection",
+    slug: workspaceId,
+  });
   await schema.db
     .insert(schema.threads)
     .values({ id: threadId, teamId, workspaceId, title: "Projection" });
 }, 120_000);
 beforeEach(async () => {
   messageId = randomUUID();
-  await schema.db
-    .insert(schema.messages)
-    .values({
-      id: messageId,
-      teamId,
-      workspaceId,
-      threadId,
-      role: "assistant",
-      content: "prefix",
-      creditsConsumed: 17,
-      metadata: { marker: "latest", counter: 0 },
-    });
+  await schema.db.insert(schema.messages).values({
+    id: messageId,
+    teamId,
+    workspaceId,
+    threadId,
+    role: "assistant",
+    content: "prefix",
+    creditsConsumed: 17,
+    metadata: { marker: "latest", counter: 0 },
+  });
 });
 afterAll(async () => {
   if (schema) await schema.database.end();
@@ -213,5 +210,39 @@ test("projection retains authoritative committed artifact/tool output and existi
       })
     )?.content,
     "full result",
+  );
+});
+
+test("concurrent host graph lineage appends preserve both references and locked metadata", async () => {
+  await schema.db
+    .update(schema.messages)
+    .set({ role: "user" })
+    .where((await import("drizzle-orm")).eq(schema.messages.id, messageId));
+  const append = (graphThreadId: string) =>
+    repository.persistMessageProjection({
+      ...scope(),
+      project: (current) => ({
+        metadata: appendAgentRunOrigin({
+          current,
+          teamId,
+          workspaceId,
+          threadId,
+          userMessageId: messageId,
+          graphThreadId,
+        }),
+      }),
+    });
+  await Promise.all([append("first-graph"), append("second-graph")]);
+  const row = (await current())!;
+  assert.deepEqual([...(row.metadata.agentRunThreadIds as string[])].sort(), [
+    "first-graph",
+    "second-graph",
+  ]);
+  assert.equal(row.metadata.marker, "latest");
+  assert.equal(row.metadata.counter, 0);
+  await append("first-graph");
+  assert.equal(
+    ((await current())!.metadata.agentRunThreadIds as string[]).length,
+    2,
   );
 });

@@ -78,6 +78,10 @@ import type { ArtifactToolRuntimePromptProvider } from "../prompts/tool-prompt-p
 import { commandExecutionPolicyFor } from "./command-success";
 import type { AgentRunnableConfig } from "./checkpoint";
 import { resolveAgentBaseConfig } from "./checkpoint";
+import {
+  carryAgentStepBudgetIntoRefresh,
+  type RefreshBudgetAgent,
+} from "./refresh-step-budget";
 import type { TurnRuntime } from "./turn-runtime";
 import { PrefixedBackendAdapter } from "../composite-backend-adapter";
 import {
@@ -1190,6 +1194,14 @@ export async function buildThreadAgentAssembly(
   ) => {
     const stream = async () => {
       let effectiveRunConfig = runConfig as AgentRunnableConfig;
+      if (prepared.refreshAgentStepBudget) {
+        effectiveRunConfig = await carryAgentStepBudgetIntoRefresh({
+          agent: agent as unknown as RefreshBudgetAgent,
+          destination: effectiveRunConfig,
+          userMessageId: prepared.userMessage.id,
+          ...prepared.refreshAgentStepBudget,
+        });
+      }
       if (skills) {
         const checkpointConfig = await agent.updateState(effectiveRunConfig, {
           skillsMetadata: new Overwrite(

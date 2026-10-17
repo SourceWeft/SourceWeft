@@ -2,6 +2,7 @@ import { AIMessage, ToolMessage } from "@langchain/core/messages";
 import { Command, StateSchema, ReducedValue } from "@langchain/langgraph";
 import { createMiddleware } from "langchain";
 import { z } from "zod/v4";
+import { readAgentRunStop } from "@sourceweft/contracts";
 import {
   getAgentStepClosingToolIds,
   assertAgentStepIdentity,
@@ -9,7 +10,116 @@ import {
   isAgentStepClosing,
   isAgentStepFinalizing,
   selectAgentStepStops,
+  readAgentStepTaskFailure,
+  readAgentStepBudgetForRefresh,
 } from "./step-budget";
+
+const FAILED_CHILD_SUMMARY_TEXT =
+  "The child reached its execution budget, but its progress summary failed. Existing tool effects are not proof of verified completion or publication. The parent may inspect and integrate existing work; this same task will not restart.";
+
+/** Strict inspection of server-created partial receipts when rolling back messages. */
+export function readAgentPartialTasksForRefresh(
+  state: unknown,
+  userMessageId: string,
+): Record<string, string> {
+  const obj =
+    state && typeof state === "object"
+      ? (state as Record<string, unknown>)
+      : {};
+  const raw = obj.sourceweftPartialTaskResults;
+  if (raw == null) return {};
+  if (typeof raw !== "object" || Array.isArray(raw))
+    throw new Error("Invalid saved partial task receipts");
+  const selected: Record<string, string> = {};
+  for (const [identity, value] of Object.entries(raw)) {
+    let ids: unknown;
+    try {
+      ids = JSON.parse(identity);
+    } catch {
+      throw new Error("Invalid saved partial task identity");
+    }
+    if (
+      !Array.isArray(ids) ||
+      ids.length !== 3 ||
+      ids.some((id) => typeof id !== "string" || !id)
+    )
+      throw new Error("Invalid saved partial task identity");
+    if (ids[0] !== userMessageId) continue;
+    if (typeof value !== "string")
+      throw new Error("Invalid saved partial task receipt");
+    let decoded: unknown;
+    try {
+      decoded = JSON.parse(value);
+    } catch {
+      throw new Error("Invalid saved partial task receipt");
+    }
+    const result = z
+      .object({
+        status: z.literal("partial"),
+        reason: z.literal("step_limit"),
+        results: z
+          .array(
+            z
+              .object({
+                agentRunStop: z.unknown(),
+                summaryText: z.string().trim().min(1).max(16000),
+              })
+              .strict(),
+          )
+          .min(1),
+      })
+      .strict()
+      .safeParse(decoded);
+    if (
+      !result.success ||
+      result.data.results.some((item) => {
+        const stop = readAgentRunStop(item.agentRunStop);
+        return !stop;
+      })
+    )
+      throw new Error("Invalid saved partial task receipt");
+    const budget = readAgentStepBudgetForRefresh(state, userMessageId);
+    if (
+      !budget ||
+      !result.data.results.every((item) => {
+        const stop = readAgentRunStop(item.agentRunStop)!;
+        return Object.entries(budget.scopes).some(([scope, entry]) => {
+          const child =
+            ids[1] === "main"
+              ? scope.startsWith("graph:")
+              : scope.startsWith(`${ids[1]}|`);
+          if (
+            !child ||
+            entry.steps !== stop.steps ||
+            entry.limit !== stop.limit
+          )
+            return false;
+          if ("policyVersion" in entry) {
+            if (
+              !("policyVersion" in stop) ||
+              stop.policyVersion !== 2 ||
+              entry.normalSteps !== stop.normalSteps ||
+              entry.normalLimit !== stop.normalLimit ||
+              entry.closingSteps !== stop.closingSteps ||
+              entry.closingLimit !== stop.closingLimit
+            )
+              return false;
+          } else if ("policyVersion" in stop) return false;
+          return stop.summaryStatus === "completed"
+            ? entry.summary === "completed" &&
+                entry.summaryText === item.summaryText
+            : entry.summary === "reserved" &&
+                item.summaryText === FAILED_CHILD_SUMMARY_TEXT;
+        });
+      })
+    )
+      throw new Error(
+        "Saved partial task receipt has no matching exhausted child scope",
+      );
+    selected[identity] = value;
+  }
+  return selected;
+}
 
 // These are the actual host/SDK capability expansion entries. Existing mounted
 // skill files and authorized connector actions remain available. This does not
@@ -143,8 +253,53 @@ export function createSourceWeftClosingToolGovernanceMiddleware(input: {
           content: saved,
           name,
           tool_call_id: request.toolCall.id ?? "",
+          status: JSON.parse(saved).results.some(
+            (item: { agentRunStop: { summaryStatus: string } }) =>
+              item.agentRunStop.summaryStatus === "failed",
+          )
+            ? "error"
+            : "success",
         });
-      const result = await handler(request);
+      let result: Awaited<ReturnType<typeof handler>>;
+      try {
+        result = await handler(request);
+      } catch (error) {
+        const failure =
+          name === "task" && input.userMessageId && taskIdentity
+            ? readAgentStepTaskFailure(error, {
+                userMessageId: input.userMessageId,
+                parentScope: currentAgentStepScope(),
+              })
+            : null;
+        if (!failure) throw error;
+        if ("priorityError" in failure) throw failure.priorityError;
+        const partial = {
+          status: "partial",
+          reason: "step_limit",
+          results: [
+            {
+              agentRunStop: failure.agentRunStop,
+              summaryText: FAILED_CHILD_SUMMARY_TEXT,
+            },
+          ],
+        };
+        const content = JSON.stringify(partial);
+        return new Command({
+          update: {
+            sourceweftRunStepBudget: failure.budget,
+            [key]: { [taskIdentity!]: content },
+            messages: [
+              new ToolMessage({
+                content,
+                artifact: partial,
+                name,
+                tool_call_id: request.toolCall.id ?? "",
+                status: "error",
+              }),
+            ],
+          },
+        });
+      }
       if (
         name !== "task" ||
         !input.userMessageId ||
