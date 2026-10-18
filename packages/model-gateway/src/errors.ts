@@ -3,6 +3,9 @@ import { isRecord } from "./utils/object";
 
 const RETRYABLE_CODES: ReadonlySet<GatewayErrorCode> = new Set([
   "TIMEOUT",
+  "STREAM_IDLE_TIMEOUT",
+  "REASONING_BUDGET_EXCEEDED",
+  "STREAM_DURATION_EXCEEDED",
   "RATE_LIMIT",
   "UPSTREAM",
   // DeepSeek's own JSON-mode docs admit the occasional empty response; one
@@ -22,6 +25,11 @@ const RETRYABLE_CODES: ReadonlySet<GatewayErrorCode> = new Set([
  */
 const FAILOVERABLE_CODES: ReadonlySet<GatewayErrorCode> = new Set([
   "TIMEOUT",
+  // A stream that went silent is a channel fault, like a first-token timeout.
+  // REASONING_BUDGET_EXCEEDED and STREAM_DURATION_EXCEEDED are deliberately
+  // absent: the model looped on / kept producing for this request, and
+  // another provider of it would do the same.
+  "STREAM_IDLE_TIMEOUT",
   "RATE_LIMIT",
   "UPSTREAM",
   "QUOTA",
@@ -308,8 +316,11 @@ const SURFACED_ERROR_RANK: Record<GatewayErrorCode, number> = {
   BAD_REQUEST: 6,
   POLICY: 6,
   CONFIGURATION: 6,
+  REASONING_BUDGET_EXCEEDED: 6,
+  STREAM_DURATION_EXCEEDED: 6,
   UPSTREAM: 5,
   TIMEOUT: 4,
+  STREAM_IDLE_TIMEOUT: 4,
   RATE_LIMIT: 3,
   UNKNOWN: 2,
   QUOTA: 1,

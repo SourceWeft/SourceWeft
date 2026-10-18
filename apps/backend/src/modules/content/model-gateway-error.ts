@@ -7,10 +7,19 @@ import { ContentError } from "./errors";
  * the request itself. These are the codes a retry (or the next human message)
  * can reasonably expect to clear.
  */
+export const MODEL_REASONING_BUDGET_EXCEEDED_CODE =
+  "MODEL_REASONING_BUDGET_EXCEEDED";
+export const MODEL_STREAM_DURATION_EXCEEDED_CODE =
+  "MODEL_STREAM_DURATION_EXCEEDED";
+
 export const MODEL_UPSTREAM_CONTENT_ERROR_CODES: ReadonlySet<string> = new Set([
   "MODEL_TIMEOUT",
   "MODEL_RATE_LIMITED",
   "MODEL_UPSTREAM_ERROR",
+  // The gateway's per-call reasoning watchdog fired: the model, not the
+  // sandbox or the request, is at fault, so a failed run keeps its lease.
+  MODEL_REASONING_BUDGET_EXCEEDED_CODE,
+  MODEL_STREAM_DURATION_EXCEEDED_CODE,
 ]);
 
 const RETRYABLE_CONTENT_ERROR_CODES = MODEL_UPSTREAM_CONTENT_ERROR_CODES;
@@ -114,11 +123,35 @@ function contentErrorFromGatewayCode(input: {
     );
   }
 
-  if (input.code === "TIMEOUT") {
+  // STREAM_IDLE_TIMEOUT is the gateway's per-chunk watchdog (no data between
+  // chunks for STREAM_IDLE_TIMEOUT_MS); to the run it is the same transient
+  // condition as a first-token timeout, so it shares MODEL_TIMEOUT and the
+  // same-step retry that code already gets.
+  if (input.code === "TIMEOUT" || input.code === "STREAM_IDLE_TIMEOUT") {
     return new ContentError(
       504,
       "MODEL_TIMEOUT",
       "LLM request timed out",
+      metadata,
+    );
+  }
+
+  // Per-attempt stream wall clock (STREAM_DURATION_MS): the model kept
+  // producing, so this is a run-away response rather than a dead transport.
+  if (input.code === "STREAM_DURATION_EXCEEDED") {
+    return new ContentError(
+      504,
+      MODEL_STREAM_DURATION_EXCEEDED_CODE,
+      "The model response ran too long and was stopped. Please try again.",
+      metadata,
+    );
+  }
+
+  if (input.code === "REASONING_BUDGET_EXCEEDED") {
+    return new ContentError(
+      502,
+      MODEL_REASONING_BUDGET_EXCEEDED_CODE,
+      "The model spent too long reasoning and the response was stopped. Please try again.",
       metadata,
     );
   }

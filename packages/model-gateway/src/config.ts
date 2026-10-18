@@ -8,6 +8,7 @@ import {
   orderByTargetHealth,
 } from "./target-health";
 import { defaultStrictJsonSchemaSupport } from "./strict-json-schema-support";
+import { DEFAULT_STREAM_GUARDS } from "./bridge/stream-guards";
 import type {
   CustomByokProviderConfig,
   GatewayExecutionInput,
@@ -17,6 +18,7 @@ import type {
   ResolvedModelRouteConfig,
   ResolvedRequestTarget,
   RoutingStrategy,
+  StreamGuardThresholds,
 } from "./types";
 
 /**
@@ -195,6 +197,22 @@ function normalizeRoutes(
   );
 }
 
+function resolveStreamGuards(
+  overrides: ModelGatewayConfig["streamGuards"],
+): StreamGuardThresholds {
+  const resolved = { ...DEFAULT_STREAM_GUARDS, ...(overrides ?? {}) };
+  for (const [key, value] of Object.entries(resolved)) {
+    if (!Number.isFinite(value) || value <= 0) {
+      throw new ModelGatewayError({
+        code: "BAD_REQUEST",
+        message: `streamGuards.${key} must be a positive number`,
+        retryable: false,
+      });
+    }
+  }
+  return resolved;
+}
+
 export function resolveModelGatewayConfig(
   config: ModelGatewayConfig,
 ): ResolvedModelGatewayConfig {
@@ -255,6 +273,7 @@ export function resolveModelGatewayConfig(
     targetHealth: config.targetHealth ?? defaultTargetHealthRegistry,
     strictJsonSchemaSupport:
       config.strictJsonSchemaSupport ?? defaultStrictJsonSchemaSupport,
+    streamGuards: resolveStreamGuards(config.streamGuards),
   };
 }
 

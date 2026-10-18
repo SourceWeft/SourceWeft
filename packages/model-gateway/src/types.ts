@@ -31,6 +31,23 @@ export type GatewayErrorCode =
    * the productive recovery is the caller's repair loop.
    */
   | "STRUCTURED_OUTPUT"
+  /**
+   * The stream opened but no chunk arrived within the idle budget after the
+   * first one. Transient like TIMEOUT: retryable and failoverable.
+   */
+  | "STREAM_IDLE_TIMEOUT"
+  /**
+   * One call streamed more `reasoning_content` than the per-call budget. The
+   * model itself is looping, so another provider of the same request would
+   * not help: retryable (a fresh attempt may behave) but not failoverable.
+   */
+  | "REASONING_BUDGET_EXCEEDED"
+  /**
+   * One stream stayed open past the per-call wall clock after its first
+   * chunk, however steadily it produced. Retryable, not failoverable: another
+   * provider of the same request would run just as long.
+   */
+  | "STREAM_DURATION_EXCEEDED"
   | "UNKNOWN";
 
 export interface GatewayErrorData {
@@ -197,6 +214,13 @@ export interface ObserveGenerationError {
   latencyMs?: number;
   errorCode?: string;
   errorMessage?: string;
+  /**
+   * Set when the gateway itself interrupted a live stream
+   * (`stream_idle_timeout` / `reasoning_budget_exceeded`); the usage recorded
+   * alongside is what the provider had reported by then.
+   */
+  finishReason?: string;
+  output?: Record<string, unknown>;
   providerFields?: Record<string, unknown>;
   observation?: ModelCallObservation;
   usage?: UsageInfo;
@@ -855,6 +879,22 @@ export interface ModelGatewayConfig {
   requestMetadata?: Record<string, unknown>;
   observeSink?: ObserveSink;
   langchainFactories?: LangChainFactories;
+  /**
+   * Live-stream guard thresholds for the LangChain facade. Defaults are the
+   * exported constants (`STREAM_IDLE_TIMEOUT_MS`, `REASONING_CHARS_LIMIT`);
+   * this is a host/test injection point, not a deployment setting.
+   */
+  streamGuards?: Partial<StreamGuardThresholds>;
+}
+
+/** Per-call guard thresholds applied while a model stream is open. */
+export interface StreamGuardThresholds {
+  /** Longest gap tolerated between two chunks once the first one arrived. */
+  idleTimeoutMs: number;
+  /** Cumulative `reasoning_content` characters tolerated in one call. */
+  reasoningCharsLimit: number;
+  /** Longest a stream may stay open after its first chunk, whatever its pace. */
+  maxDurationMs: number;
 }
 
 export interface ResolvedGatewayProviderConfig {
@@ -930,6 +970,7 @@ export interface ResolvedModelGatewayConfig {
   langchainFactories?: LangChainFactories;
   targetHealth: TargetHealthRegistry;
   strictJsonSchemaSupport: StrictJsonSchemaSupportCache;
+  streamGuards: StreamGuardThresholds;
 }
 
 export interface ResolvedRequestTarget {

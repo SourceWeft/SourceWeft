@@ -4,7 +4,10 @@ import { test } from "vitest";
 import { ContentError } from "./errors";
 import { toApiError } from "../../api/response/api-response";
 import {
+  isModelUpstreamContentErrorCode,
   isRetryableModelContentError,
+  MODEL_REASONING_BUDGET_EXCEEDED_CODE,
+  MODEL_STREAM_DURATION_EXCEEDED_CODE,
   sanitizeClientErrorMessage,
   toContentError,
 } from "./model-gateway-error";
@@ -141,5 +144,131 @@ for (const statusCode of [401, 403]) {
       retryable: false,
       statusCode,
     });
+  });
+}
+
+for (const wrapper of ["direct", "cause", "serialized"] as const) {
+  test(`stream idle timeout maps to the existing MODEL_TIMEOUT through ${wrapper}`, () => {
+    const gatewayError = new ModelGatewayError({
+      code: "STREAM_IDLE_TIMEOUT",
+      message: "No chunk received for 60000 ms",
+      retryable: true,
+      provider: "deepseek",
+    });
+    const source =
+      wrapper === "direct"
+        ? gatewayError
+        : wrapper === "cause"
+          ? new Error("MiddlewareError", { cause: gatewayError })
+          : {
+              error: {
+                code: gatewayError.code,
+                message: gatewayError.message,
+                retryable: true,
+                provider: "deepseek",
+              },
+            };
+    const error = toContentError(source);
+    assert.equal(error.code, "MODEL_TIMEOUT");
+    assert.equal(error.statusCode, 504);
+    assert.equal(error.message, "LLM request timed out");
+    assert.deepEqual(error.details, {
+      gatewayCode: "STREAM_IDLE_TIMEOUT",
+      retryable: true,
+      provider: "deepseek",
+    });
+    assert.equal(isRetryableModelContentError(source), true);
+    assert.equal(isRetryableModelContentError(error), true);
+    assert.equal(isModelUpstreamContentErrorCode(error.code), true);
+  });
+
+  test(`reasoning budget overrun maps to its own retryable upstream code through ${wrapper}`, () => {
+    const gatewayError = new ModelGatewayError({
+      code: "REASONING_BUDGET_EXCEEDED",
+      message: "reasoning_content exceeded 200000 chars (raw: 200017)",
+      retryable: true,
+      provider: "deepseek",
+      requestId: "req-reasoning",
+    });
+    const source =
+      wrapper === "direct"
+        ? gatewayError
+        : wrapper === "cause"
+          ? new Error("MiddlewareError", { cause: gatewayError })
+          : {
+              error: {
+                code: gatewayError.code,
+                message: gatewayError.message,
+                retryable: true,
+                provider: "deepseek",
+                requestId: "req-reasoning",
+              },
+            };
+    const error = toContentError(source);
+    assert.equal(error.code, MODEL_REASONING_BUDGET_EXCEEDED_CODE);
+    assert.equal(error.statusCode, 502);
+    assert.equal(
+      error.message,
+      "The model spent too long reasoning and the response was stopped. Please try again.",
+    );
+    assert.deepEqual(error.details, {
+      gatewayCode: "REASONING_BUDGET_EXCEEDED",
+      retryable: true,
+      provider: "deepseek",
+      requestId: "req-reasoning",
+    });
+    const apiError = toApiError(error);
+    assert.equal(apiError.code, error.code);
+    assert.equal(apiError.statusCode, 502);
+    assert.equal(isRetryableModelContentError(source), true);
+    assert.equal(isRetryableModelContentError(error), true);
+    // B1 lease retention: a failed run with this code keeps its sandbox lease.
+    assert.equal(isModelUpstreamContentErrorCode(error.code), true);
+  });
+}
+
+for (const wrapper of ["direct", "cause", "serialized"] as const) {
+  test(`stream duration overrun maps to its own retryable upstream code through ${wrapper}`, () => {
+    const gatewayError = new ModelGatewayError({
+      code: "STREAM_DURATION_EXCEEDED",
+      message: "Stream ran longer than 1800000 ms",
+      retryable: true,
+      provider: "deepseek",
+      requestId: "req-duration",
+    });
+    const source =
+      wrapper === "direct"
+        ? gatewayError
+        : wrapper === "cause"
+          ? new Error("MiddlewareError", { cause: gatewayError })
+          : {
+              error: {
+                code: gatewayError.code,
+                message: gatewayError.message,
+                retryable: true,
+                provider: "deepseek",
+                requestId: "req-duration",
+              },
+            };
+    const error = toContentError(source);
+    assert.equal(error.code, MODEL_STREAM_DURATION_EXCEEDED_CODE);
+    assert.equal(error.statusCode, 504);
+    assert.equal(
+      error.message,
+      "The model response ran too long and was stopped. Please try again.",
+    );
+    assert.deepEqual(error.details, {
+      gatewayCode: "STREAM_DURATION_EXCEEDED",
+      retryable: true,
+      provider: "deepseek",
+      requestId: "req-duration",
+    });
+    const apiError = toApiError(error);
+    assert.equal(apiError.code, error.code);
+    assert.equal(apiError.statusCode, 504);
+    assert.equal(isRetryableModelContentError(source), true);
+    assert.equal(isRetryableModelContentError(error), true);
+    // B1 lease retention: a failed run with this code keeps its sandbox lease.
+    assert.equal(isModelUpstreamContentErrorCode(error.code), true);
   });
 }

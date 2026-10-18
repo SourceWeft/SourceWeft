@@ -7,8 +7,14 @@ import {
   awaitWithSignal,
   fetchWithRequestSignal,
   resolveRequestDefaults,
-  resolveRequestOptions,
 } from "../request-options";
+import {
+  abortedAttemptError,
+  createAttemptGuard,
+  guardFinishReason,
+  guardUsageFromError,
+  type AttemptGuard,
+} from "./stream-guards";
 import type { BaseLanguageModel } from "@langchain/core/language_models/base";
 import { Runnable, RunnableBinding } from "@langchain/core/runnables";
 import {
@@ -187,6 +193,11 @@ export function createChatModel(input: {
           input.config.fetch,
           input.options?.signal,
         ),
+        retryLog: {
+          logger: input.config.logger,
+          provider: input.target.provider,
+          providerModel: input.target.providerModel,
+        },
       },
     );
 
@@ -534,16 +545,43 @@ function createObservedLangChainChatModel(input: {
       });
       return result;
     } catch (error) {
-      await emitGenerationError(
-        input.config,
-        buildGenerationErrorEvent({
+      // When the attempt guard cut the call, LangChain surfaces a generic
+      // abort by the time it unwinds; the attempt signal carries the verdict.
+      const surfaced = abortedAttemptError(input.options?.signal) ?? error;
+      const code = normalizeGatewayError(surfaced).code;
+      const finishReason = guardFinishReason(code);
+      const guardUsage = guardUsageFromError(surfaced);
+      const observation = guardUsage
+        ? normalizeModelCallObservation({
+            modelAlias: input.payload.model,
+            context: {
+              target: input.target,
+              modality: "chat",
+              rawResponse: undefined,
+              sdkUsage: guardUsage,
+              responseMetadata: undefined,
+            },
+          })
+        : undefined;
+      await emitGenerationError(input.config, {
+        ...buildGenerationErrorEvent({
           traceId: generation.start.traceId,
           spanId: generation.spanId,
           startedAtMs: generation.startedAtMs,
-          error,
+          error: surfaced,
           attributes: generation.start.attributes,
         }),
-      );
+        ...(finishReason
+          ? {
+              finishReason,
+              output: {
+                finishReason,
+                routeDecision: input.target.routeDecision,
+              },
+            }
+          : {}),
+        ...(observation ? { observation, usage: observation.usage } : {}),
+      });
       throw error;
     }
   }
@@ -738,18 +776,39 @@ async function* observeStream(input: {
         attributes: input.generation.start.attributes,
       });
     } else {
+      // A guard trip or timeout reaches this loop as the attempt signal's
+      // reason — through a rejected next(), or through return() when the
+      // consumer stopped iterating right after the trip. Either way the
+      // signal carries the verdict; only a consumer-initiated return with a
+      // live signal is a cancellation.
+      const surfaced =
+        abortedAttemptError(input.signal) ?? (failed ? failure : undefined);
+      const cancelled = surfaced === undefined;
+      const guardReason = cancelled
+        ? undefined
+        : guardFinishReason(normalizeGatewayError(surfaced).code);
       await emitGenerationError(input.config, {
         ...buildGenerationErrorEvent({
           traceId: input.generation.start.traceId,
           spanId: input.generation.spanId,
           startedAtMs: input.generation.startedAtMs,
-          error: failure,
+          error: surfaced,
           attributes: input.generation.start.attributes,
         }),
-        ...(!failed
+        ...(cancelled
           ? {
               errorCode: "CANCELLED",
               errorMessage: "Chat stream cancelled before completion",
+            }
+          : {}),
+        ...(guardReason
+          ? {
+              finishReason: guardReason,
+              output: {
+                finishReason: guardReason,
+                reasoning,
+                routeDecision: input.routeDecision,
+              },
             }
           : {}),
         observation,
@@ -946,6 +1005,11 @@ export function createEmbeddingsModel(input: {
     {
       ...input.options,
       fetch: fetchWithRequestSignal(input.config.fetch, input.options?.signal),
+      retryLog: {
+        logger: input.config.logger,
+        provider: input.target.provider,
+        providerModel: input.target.providerModel,
+      },
     },
   );
 }
@@ -1051,6 +1115,46 @@ function createFailoverLangChainChatModel(input: {
   const callerAborted = (options?: Record<string, unknown>) =>
     Boolean((options as { signal?: AbortSignal } | undefined)?.signal?.aborted);
 
+  /**
+   * One target attempt's request options: the resolved defaults plus a guard
+   * signal that honours the caller's abort, bounds the first token by the
+   * attempt `timeoutMs`, and then watches the open stream (idle + reasoning).
+   */
+  const openAttempt = (
+    target: ResolvedRequestTarget,
+    options: Record<string, unknown> | undefined,
+  ) => {
+    const defaults = resolveRequestDefaults(
+      input.config,
+      target,
+      options as RequestOptions,
+    );
+    const guard = createAttemptGuard({
+      signal: defaults.signal,
+      firstTokenTimeoutMs: defaults.timeoutMs,
+      thresholds: input.config.streamGuards,
+      target,
+    });
+    return { guard, requestOptions: { ...defaults, signal: guard.signal } };
+  };
+
+  const settleWithin = async (pending: Promise<unknown>, ms: number) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        pending.then(
+          () => {},
+          () => {},
+        ),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, ms);
+        }),
+      ]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  };
+
   const logFailover = (
     operation: string,
     index: number,
@@ -1085,16 +1189,36 @@ function createFailoverLangChainChatModel(input: {
     let index = 0;
     while (index < input.candidates.length) {
       const target = input.candidates[index]!;
+      let guard: AttemptGuard | undefined;
       try {
-        const requestOptions = resolveRequestOptions(
-          input.config,
+        const { requestOptions, guard: attemptGuard } = openAttempt(
           target,
-          options as RequestOptions,
+          options,
         );
-        const callOptions = { ...options, signal: requestOptions.signal };
-        const result = await awaitWithSignal(requestOptions.signal, () =>
+        guard = attemptGuard;
+        const callOptions = {
+          ...options,
+          signal: requestOptions.signal,
+          ...(options?.callbacks !== undefined
+            ? { callbacks: attemptGuard.callbacks(options.callbacks) }
+            : {}),
+        };
+        // The underlying call keeps running after a trip until the SDK
+        // notices the abort. Let it unwind (bounded) so its observation and
+        // callbacks settle before this attempt's error is surfaced.
+        const pending = Promise.resolve().then(() =>
           run(input.buildModel(target, requestOptions), callOptions),
         );
+        pending.catch(() => {});
+        let result: T;
+        try {
+          result = await awaitWithSignal(requestOptions.signal, () => pending);
+        } catch (error) {
+          // A caller abort ("stop") must not wait on the SDK; only a guard
+          // trip or timeout gives the call a moment to unwind.
+          if (!callerAborted(options)) await settleWithin(pending, 1_000);
+          throw attemptGuard.verdict(error);
+        }
         input.config.targetHealth.markSuccess(target);
         return result;
       } catch (error) {
@@ -1154,6 +1278,8 @@ function createFailoverLangChainChatModel(input: {
         }
         logFailover(operation, index, error, nextIndex);
         index = nextIndex;
+      } finally {
+        guard?.settle();
       }
     }
     throw selectSurfacedFailoverError(attempts);
@@ -1170,11 +1296,7 @@ function createFailoverLangChainChatModel(input: {
       let iterator: StreamIterator<unknown> | undefined;
       let yielded = false;
       let failed = false;
-      const requestOptions = resolveRequestOptions(
-        input.config,
-        target,
-        options as RequestOptions,
-      );
+      const { requestOptions, guard } = openAttempt(target, options);
       try {
         try {
           iterator = await openStreamIterator({
@@ -1191,6 +1313,10 @@ function createFailoverLangChainChatModel(input: {
               if (!yielded) input.config.targetHealth.markSuccess(target);
               return;
             }
+            // Arms the idle watchdog and the reasoning budget; a trip aborts
+            // the attempt signal, which the next `iterator.next()` observes.
+            guard.observeChunk(next.value);
+            if (guard.signal.aborted) throw guard.signal.reason;
             // Once any chunk is visible, a later error must not replay it.
             if (!yielded) input.config.targetHealth.markSuccess(target);
             yielded = true;
@@ -1198,8 +1324,9 @@ function createFailoverLangChainChatModel(input: {
           }
         } catch (error) {
           failed = true;
-          throw error;
+          throw guard.verdict(error);
         } finally {
+          guard.settle();
           await closeStreamIterator(iterator, input.config.logger, failed);
         }
       } catch (error) {

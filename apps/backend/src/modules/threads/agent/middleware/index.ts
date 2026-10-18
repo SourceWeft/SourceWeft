@@ -2,7 +2,6 @@ import { AGENT_TOOL_NAMES } from "@sourceweft/agent-tool-registry";
 import type { BaseLanguageModel } from "@langchain/core/language_models/base";
 import type { AnyBackendProtocol } from "deepagents";
 import {
-  modelRetryMiddleware,
   humanInTheLoopMiddleware,
   todoListMiddleware,
   toolCallLimitMiddleware,
@@ -11,7 +10,6 @@ import {
 } from "langchain";
 import type { LangChainModelExecutionConfig } from "@sourceweft/model-gateway";
 import type { AgentFilesystemMountCapability } from "../filesystem-capabilities";
-import { isRetryableModelContentError } from "../../../content/model-gateway-error";
 import { config } from "../../../../shared/config";
 import { createAskUserMiddleware } from "./ask-user";
 import { createRepeatToolCallReminderMiddleware } from "./repeat-tool-call-reminder";
@@ -36,6 +34,7 @@ import type { TraceContext } from "../../../llm-observability";
 import { createSourceWeftToolCallContextMiddleware } from "./tool-call-context";
 import { createSourceWeftToolCallCountChannelsMiddleware } from "./tool-call-count-channels";
 import { createSourceWeftStepBudgetMiddleware } from "./step-budget";
+import { createSourceWeftModelRetryMiddleware } from "./model-call-observability";
 import { createSourceWeftClosingToolGovernanceMiddleware } from "./closing-tool-governance";
 
 const RETRYABLE_READ_TOOL_NAMES = [
@@ -142,9 +141,10 @@ export function createSourceWeftSubagentMiddlewareStack(
     }),
     // Innermost request rewrite, so it sees the history after summarization.
     createSourceWeftUnansweredToolCallsMiddleware(),
-    modelRetryMiddleware({
-      retryOn: isRetryableModelContentError,
-      onFailure: "error",
+    // Bounded same-step retry (scope + LangChain retry + per-attempt observer;
+    // order is load-bearing, see model-call-observability.ts).
+    ...createSourceWeftModelRetryMiddleware({
+      context: input.toolObservabilityContext,
     }),
     createSourceWeftClosingToolGovernanceMiddleware({
       userMessageId: input.toolObservabilityContext?.userMessageId,
@@ -233,9 +233,10 @@ export async function createSourceWeftAgentMiddlewareStack(
     ...contextCompressionMiddleware,
     // Innermost request rewrite, so it sees the history after summarization.
     createSourceWeftUnansweredToolCallsMiddleware(),
-    modelRetryMiddleware({
-      retryOn: isRetryableModelContentError,
-      onFailure: "error",
+    // Bounded same-step retry (scope + LangChain retry + per-attempt observer;
+    // order is load-bearing, see model-call-observability.ts).
+    ...createSourceWeftModelRetryMiddleware({
+      context: input.toolObservabilityContext,
     }),
     ...(input.extraMiddleware ?? []),
     createSourceWeftClosingToolGovernanceMiddleware({

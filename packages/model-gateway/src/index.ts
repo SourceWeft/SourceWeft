@@ -41,6 +41,11 @@ export {
 export { hasConfiguredCredentialHeaders } from "./auth-headers";
 
 export { createLangChainChatModel } from "./bridge/utils";
+export {
+  REASONING_CHARS_LIMIT,
+  STREAM_IDLE_TIMEOUT_MS,
+  STREAM_MAX_DURATION_MS,
+} from "./bridge/stream-guards";
 export type { LangChainModelExecutionConfig } from "./bridge/utils";
 export { resolveThinkingMode } from "./thinking";
 export { normalizeModelCallObservation } from "./observation/normalize";
@@ -131,6 +136,7 @@ export type {
   StructuredOutputConfig,
   StructuredOutputDiagnostics,
   StructuredOutputMechanism,
+  StreamGuardThresholds,
   ThinkingConfig,
   ToolBindingOptions,
   ToolCall,
