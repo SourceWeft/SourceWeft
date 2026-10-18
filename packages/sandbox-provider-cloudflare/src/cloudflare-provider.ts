@@ -67,7 +67,40 @@ export type CloudflareSandboxProviderOptions = {
   maxOutputChars: number;
   /** Test seam; defaults to global fetch. */
   fetchImpl?: typeof fetch;
+  /**
+   * Test seam for the readiness probe's wall clock and backoff sleep; defaults
+   * to `Date.now` and an abortable `setTimeout`.
+   */
+  clock?: ProviderClock;
 };
+
+export type ProviderClock = {
+  now: () => number;
+  sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
+};
+
+function sleepWithSignal(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason);
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+const DEFAULT_PROVIDER_CLOCK: ProviderClock = Object.freeze({
+  now: () => Date.now(),
+  sleep: sleepWithSignal,
+});
 
 /**
  * An HTTP failure from the bridge, carrying the status the error mapper keys
@@ -330,11 +363,42 @@ const HEARTBEAT_THRESHOLD_MS = 120_000;
 const HEARTBEAT_INTERVAL_SECONDS = 45;
 export const EXEC_HEARTBEAT_MARKER = "[sourceweft-heartbeat]";
 
+/*
+ * Readiness probe run at the end of `createSandbox` (S1 of the cold-start
+ * recovery plan, Issue #323). Live-measured 2026-10-18: a cold Cloudflare
+ * create takes 21–70 s and the first command then sat at 56–77 s or timed out,
+ * because `POST /v1/sandbox` + stamp write returns before the container can
+ * actually run a command. The probe re-reads the stamp and runs `true` until
+ * the bridge answers, so cold start is paid inside create (where the manager
+ * already retries and no tool budget is ticking) instead of by the first
+ * model command.
+ */
+/** Single exec attempt budget for the probe's `true` command. */
+export const READINESS_PROBE_COMMAND_TIMEOUT_MS = 5_000;
+/** Total wall clock the probe may spend before create fails closed. */
+export const READINESS_PROBE_BUDGET_MS = 90_000;
+/** Backoff before each retry; the last entry repeats once the sequence is exhausted. */
+export const READINESS_PROBE_BACKOFF_MS: readonly number[] = Object.freeze([
+  1_000, 2_000, 4_000,
+]);
+const READINESS_PROBE_COMMAND = "true";
+const READINESS_PROBE_MAX_OUTPUT_CHARS = 256;
+
+/** Only transient provider failures keep the probe polling; everything else fails create. */
+function isReadinessProbeRetryableError(error: unknown): boolean {
+  return (
+    error instanceof SandboxProviderError &&
+    (error.code === SANDBOX_PROVIDER_ERROR_CODES.unavailable ||
+      error.code === SANDBOX_PROVIDER_ERROR_CODES.timeout)
+  );
+}
+
 export class CloudflareSandboxProvider implements SandboxProvider {
   readonly id = "cloudflare";
   readonly pathPolicy = CLOUDFLARE_SANDBOX_PATH_POLICY;
   readonly cancellationScope = "sandbox" as const;
   private readonly fetchImpl: typeof fetch;
+  private readonly clock: ProviderClock;
 
   constructor(private readonly options: CloudflareSandboxProviderOptions) {
     if (!options.bridgeUrl) {
@@ -348,13 +412,21 @@ export class CloudflareSandboxProvider implements SandboxProvider {
       );
     }
     this.fetchImpl = options.fetchImpl ?? fetch;
+    this.clock = options.clock ?? DEFAULT_PROVIDER_CLOCK;
   }
 
-  async createSandbox(_input: {
+  /**
+   * `signal` is the optional host-cancellation signal of `CreateSandboxInput`
+   * (typed inline so this provider does not depend on the shared type
+   * carrying it): when it aborts, the readiness probe stops at once and the
+   * half-created sandbox is deleted on a best-effort basis.
+   */
+  async createSandbox(input: {
     ttlSeconds: number;
     labels: Record<string, string>;
+    signal?: AbortSignal;
   }) {
-    return this.withProviderErrorMapping("create", async () => {
+    const created = await this.withProviderErrorMapping("create", async () => {
       // Network options are deliberately absent: fully open egress is the
       // Cloudflare default and the product's goal state. TTL stays a
       // DB-enforced concern (the manager's expiry sweep calls deleteSandbox);
@@ -373,6 +445,15 @@ export class CloudflareSandboxProvider implements SandboxProvider {
       );
       return { id: payload.id };
     });
+    try {
+      await this.waitForSandboxReady(created.id, { signal: input.signal });
+    } catch (error) {
+      // Fail closed without leaving a container behind: the row for this id
+      // is never written, so nothing else would ever delete it before TTL.
+      await this.deleteSandbox(created.id).catch(() => undefined);
+      throw error;
+    }
+    return created;
   }
 
   async getSandbox(providerSandboxId: string) {
@@ -682,6 +763,67 @@ export class CloudflareSandboxProvider implements SandboxProvider {
         );
       }
     });
+  }
+
+  /**
+   * Poll `verifyStamp` + `true` until the container executes commands, or
+   * fail closed with SANDBOX_NOT_READY_OR_UNHEALTHY once
+   * READINESS_PROBE_BUDGET_MS is spent. Only `unavailable` and `timeout`
+   * provider codes (plus a `true` that did not exit 0, which is the same
+   * "container not serving yet" signal) are retried; auth, missing-instance
+   * and unknown errors propagate at once. An aborted `signal` rethrows its
+   * reason immediately, including mid-backoff.
+   */
+  private async waitForSandboxReady(
+    providerSandboxId: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<void> {
+    const { signal } = options;
+    const startedAt = this.clock.now();
+    for (let attempt = 0; ; attempt += 1) {
+      signal?.throwIfAborted();
+      try {
+        await this.withProviderErrorMapping("get", () =>
+          this.verifyStamp(providerSandboxId),
+        );
+        const result = await this.executeSystem({
+          providerSandboxId,
+          command: READINESS_PROBE_COMMAND,
+          timeoutMs: READINESS_PROBE_COMMAND_TIMEOUT_MS,
+          maxOutputChars: READINESS_PROBE_MAX_OUTPUT_CHARS,
+          signal,
+        });
+        if (result.exitCode === 0) {
+          return;
+        }
+        throw new SandboxProviderError(
+          SANDBOX_PROVIDER_ERROR_CODES.unavailable,
+          `SANDBOX_NOT_READY_OR_UNHEALTHY: readiness probe exited with ${String(result.exitCode)}.`,
+          "execute",
+        );
+      } catch (error) {
+        if (signal?.aborted) {
+          throw signal.reason;
+        }
+        if (!isReadinessProbeRetryableError(error)) {
+          throw error;
+        }
+        const delayMs =
+          READINESS_PROBE_BACKOFF_MS[
+            Math.min(attempt, READINESS_PROBE_BACKOFF_MS.length - 1)
+          ]!;
+        const elapsedMs = this.clock.now() - startedAt;
+        if (elapsedMs + delayMs >= READINESS_PROBE_BUDGET_MS) {
+          throw new SandboxProviderError(
+            SANDBOX_PROVIDER_ERROR_CODES.unavailable,
+            `SANDBOX_NOT_READY_OR_UNHEALTHY: sandbox did not become ready within ${READINESS_PROBE_BUDGET_MS / 1000}s after create. Retry the operation to create a fresh sandbox.`,
+            "create",
+            error,
+          );
+        }
+        await this.clock.sleep(delayMs, signal);
+      }
+    }
   }
 
   /**

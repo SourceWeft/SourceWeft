@@ -139,6 +139,7 @@ import {
   buildFilesystemBackend,
   buildSandboxRuntimeForPreparedTurn,
   buildThreadAgentAssembly,
+  prefetchSandboxForPreparedTurn,
   type ToolCollection,
   type ThreadAgentAssembly,
 } from "./turn-assembly";
@@ -216,6 +217,13 @@ export async function* invokeDeepAgentTurn(input: {
     sandboxRuntime = await buildSandboxRuntimeForPreparedTurn({
       prepared: input.prepared,
       filesystemBackend,
+    });
+    // Overlap the cloud sandbox cold start with the rest of the assembly and
+    // the model's first decision; see prefetchSandboxForPreparedTurn.
+    prefetchSandboxForPreparedTurn({
+      prepared: input.prepared,
+      sandboxRuntime,
+      signal: input.abortSignal,
     });
     const toolCollection = await buildToolCollection({
       prepared: input.prepared,

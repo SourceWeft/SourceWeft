@@ -56,7 +56,8 @@ function optionsFromSelection(
   return options;
 }
 
-function skillActivatesTool(
+/** Whether a selected skill's manifest `tools` activate a tool the predicate accepts. */
+export function skillActivatesTool(
   skill: EnabledSkillDescriptor,
   predicate: (toolName: string) => boolean,
 ) {

@@ -143,6 +143,12 @@ export type CreateSandboxInput = {
    * as `default` (provider default egress). See `SandboxNetworkPolicy`.
    */
   networkPolicy?: SandboxNetworkPolicy;
+  /**
+   * Host invocation cancellation for the acquisition that requested this
+   * sandbox. Optional for providers; one that performs a readiness probe
+   * inside createSandbox should stop probing when it aborts.
+   */
+  signal?: AbortSignal;
 };
 
 export type SandboxProvider = {

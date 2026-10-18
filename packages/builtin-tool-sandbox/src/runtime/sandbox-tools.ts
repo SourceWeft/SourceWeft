@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
-import { isSandboxInstanceMissingError } from "./errors";
+import {
+  isSandboxInstanceMissingError,
+  SANDBOX_REPLACED_NOTICE,
+} from "./errors";
 import { tool, type ToolRuntime } from "langchain";
 import type { BackendProtocolV2 } from "deepagents";
 import {
@@ -137,6 +140,21 @@ function toRecoverableSandboxToolErrorOutput(input: {
     message: compactRecoverableToolError(input.error),
     recoverable: true as const,
   };
+}
+
+/**
+ * The first model-visible result produced on a replacement generation
+ * carries the one-shot notice: /workspace is empty again. For prepare that
+ * is informational (it just refilled it); for collect it explains a missing
+ * output without a misleading "file not found".
+ */
+function withReplacementDiagnostics<T extends Record<string, unknown>>(
+  result: T,
+  replaced: boolean,
+): T {
+  return replaced
+    ? { ...result, diagnostics: `sandbox replaced. ${SANDBOX_REPLACED_NOTICE}` }
+    : result;
 }
 
 function requireSandboxToolCallId(input: {
@@ -343,6 +361,7 @@ export function createSandboxTools(input: {
         }
       }
       let sandboxId: string | null = null;
+      let replaced = false;
       let totalBytes = 0;
       const prepared: Array<{
         content: Uint8Array;
@@ -361,8 +380,10 @@ export function createSandboxTools(input: {
       try {
         const sandbox = await input.manager.getOrCreateThreadSandbox(
           input.context,
+          { ...(signal ? { signal } : {}) },
         );
         sandboxId = sandbox.id;
+        replaced = input.manager.consumeReplacementNotice();
         for (const file of args.files) {
           throwIfInvocationAborted(signal);
           const sandboxPath = assertPrepareSandboxPath(
@@ -459,11 +480,14 @@ export function createSandboxTools(input: {
           { signal },
         );
         throwIfInvocationAborted(signal);
-        const result = {
-          ok: true,
-          files: prepared.map(({ content: _content, ...file }) => file),
-          totalBytes,
-        };
+        const result = withReplacementDiagnostics(
+          {
+            ok: true,
+            files: prepared.map(({ content: _content, ...file }) => file),
+            totalBytes,
+          },
+          replaced,
+        );
         await input.manager.completeToolOperation({
           operationId: claim.operationId,
           sandboxId,
@@ -488,10 +512,13 @@ export function createSandboxTools(input: {
           });
           throw controlError;
         }
-        const result = toRecoverableSandboxToolErrorOutput({
-          error,
-          operationType: "prepare",
-        });
+        const result = withReplacementDiagnostics(
+          toRecoverableSandboxToolErrorOutput({
+            error,
+            operationType: "prepare",
+          }),
+          replaced,
+        );
         await input.manager.completeToolOperation({
           operationId: claim.operationId,
           sandboxId,
@@ -499,12 +526,17 @@ export function createSandboxTools(input: {
           result,
           durationMs: Date.now() - startedAt,
         });
-        await input.manager
-          .releaseThreadSandboxLease({
-            context: input.context,
-            reason: "sandbox_prepare_runtime_error",
-          })
-          .catch(() => undefined);
+        // Only a confirmed-gone instance shortens the lease; a transient
+        // or input error leaves a healthy sandbox on its full TTL (same
+        // policy as execute).
+        if (isSandboxInstanceMissingError(error)) {
+          await input.manager
+            .releaseThreadSandboxLease({
+              context: input.context,
+              reason: "sandbox_prepare_runtime_error",
+            })
+            .catch(() => undefined);
+        }
         if (sandboxId && isSandboxInstanceMissingError(error)) {
           await input.manager
             .expireThreadSandbox({ sandboxId })
@@ -539,6 +571,7 @@ export function createSandboxTools(input: {
         return JSON.stringify(claim.result);
       }
       let sandboxId: string | null = null;
+      let replaced = false;
       let totalBytes = 0;
       const collected: Array<{
         sandboxPath: string;
@@ -550,8 +583,10 @@ export function createSandboxTools(input: {
       try {
         const sandbox = await input.manager.getOrCreateThreadSandbox(
           input.context,
+          { ...(signal ? { signal } : {}) },
         );
         sandboxId = sandbox.id;
+        replaced = input.manager.consumeReplacementNotice();
         for (const output of args.outputs) {
           throwIfInvocationAborted(signal);
           const sandboxPath = assertCollectSandboxPath(
@@ -606,13 +641,16 @@ export function createSandboxTools(input: {
             throw new Error(write.error);
           }
         }
-        const result = {
-          ok: true,
-          outputs: collected.map(
-            ({ textContent: _textContent, ...output }) => output,
-          ),
-          totalBytes,
-        };
+        const result = withReplacementDiagnostics(
+          {
+            ok: true,
+            outputs: collected.map(
+              ({ textContent: _textContent, ...output }) => output,
+            ),
+            totalBytes,
+          },
+          replaced,
+        );
         await input.manager.completeToolOperation({
           operationId: claim.operationId,
           sandboxId,
@@ -648,10 +686,13 @@ export function createSandboxTools(input: {
           });
           return JSON.stringify(result);
         }
-        const result = toRecoverableSandboxToolErrorOutput({
-          error,
-          operationType: "collect",
-        });
+        const result = withReplacementDiagnostics(
+          toRecoverableSandboxToolErrorOutput({
+            error,
+            operationType: "collect",
+          }),
+          replaced,
+        );
         await input.manager.completeToolOperation({
           operationId: claim.operationId,
           sandboxId,
@@ -659,12 +700,17 @@ export function createSandboxTools(input: {
           result,
           durationMs: Date.now() - startedAt,
         });
-        await input.manager
-          .releaseThreadSandboxLease({
-            context: input.context,
-            reason: "sandbox_collect_runtime_error",
-          })
-          .catch(() => undefined);
+        // Only a confirmed-gone instance shortens the lease; a transient
+        // or input error leaves a healthy sandbox on its full TTL (same
+        // policy as execute).
+        if (isSandboxInstanceMissingError(error)) {
+          await input.manager
+            .releaseThreadSandboxLease({
+              context: input.context,
+              reason: "sandbox_collect_runtime_error",
+            })
+            .catch(() => undefined);
+        }
         if (sandboxId && isSandboxInstanceMissingError(error)) {
           await input.manager
             .expireThreadSandbox({ sandboxId })

@@ -3,12 +3,15 @@ export {
   executeAgentTool,
   prepareSandboxWorkspaceAgentTool,
   sandboxAgentToolDefs,
+  SANDBOX_TOOL_EXECUTION_TIMEOUT_MS,
 } from "./agent-tool-defs";
 export {
   SandboxProviderError,
   SANDBOX_PROVIDER_ERROR_CODES,
   isSandboxInstanceMissingError,
   SandboxInstanceChangedError,
+  SandboxReplacedError,
+  SANDBOX_REPLACED_NOTICE,
 } from "./runtime/errors";
 
 import { builtinSandboxCapabilityManifest } from "./manifest";

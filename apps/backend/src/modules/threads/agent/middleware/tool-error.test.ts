@@ -13,6 +13,7 @@ import { ScriptedChatModel } from "../../../../test/chat-model";
 import {
   createSourceWeftToolErrorMiddleware,
   formatSourceWeftToolError,
+  SANDBOX_TIMEOUT_INSTANCE_NOTE,
 } from "./tool-error";
 import {
   AgentToolExecutionTimeoutError,
@@ -209,4 +210,34 @@ test("a real Deep Agent continues after invalid tool arguments", async () => {
     "the next model request must contain the failed tool result",
   );
   assert.equal(messages.at(-1)?.content, "Recovered successfully.");
+});
+
+test("sandbox command timeouts tell the model a started command's instance is gone", () => {
+  for (const toolName of ["execute", "prepare_sandbox_workspace"]) {
+    const timeout = new AgentToolExecutionTimeoutError({
+      timeoutMs: 240_000,
+      toolName,
+    });
+    const wrapped = new Error("middleware wrapper", { cause: timeout });
+
+    const message = formatSourceWeftToolError(wrapped, request({ toolName }));
+    assert.equal(
+      message,
+      `[AGENT_TOOL_EXECUTION_TIMEOUT] Tool '${toolName}' timed out after 240000ms. The call did not produce a successful result. ${SANDBOX_TIMEOUT_INSTANCE_NOTE}`,
+    );
+    assert.ok(String(message).length <= 600);
+  }
+});
+
+test("non-sandbox tool timeouts carry no sandbox instance note", () => {
+  const timeout = new AgentToolExecutionTimeoutError({
+    timeoutMs: 120_000,
+    toolName: "collect_sandbox_outputs",
+  });
+
+  const message = formatSourceWeftToolError(
+    new Error("middleware wrapper", { cause: timeout }),
+    request({ toolName: "collect_sandbox_outputs" }),
+  );
+  assert.equal(String(message).includes(SANDBOX_TIMEOUT_INSTANCE_NOTE), false);
 });

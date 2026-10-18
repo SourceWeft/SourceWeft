@@ -28,6 +28,7 @@ import {
   buildSandboxRuntimeForPreparedTurn,
   filesystemMountsForPrompt,
   mountInstalledSkillForTurn,
+  prefetchSandboxForPreparedTurn,
 } from "./turn-assembly";
 import {
   createSourceWeftToolCallContextMiddleware,
@@ -818,6 +819,218 @@ describe("sandbox runtime assembly tool permissions", () => {
       prompt.includes("persists explicitly selected sandbox text outputs"),
       false,
     );
+  });
+});
+
+describe("sandbox prefetch at turn assembly", () => {
+  beforeEach(() => {
+    Object.assign(config.sandbox, structuredClone(originalSandboxConfig));
+    config.sandbox.enabled = true;
+    config.sandbox.provider = SYNTHETIC_SANDBOX_PROVIDER_ID;
+  });
+
+  afterEach(() => {
+    Object.assign(config.sandbox, structuredClone(originalSandboxConfig));
+  });
+
+  /** A selected skill whose manifest declares the given sandbox tools. */
+  function sandboxSkill(tools: string[]): EnabledSkillDescriptor {
+    const markdown = "---\nname: report\ndescription: Report\n---\n# report";
+    return {
+      workspaceSkillId: "workspace-skill-report",
+      sourceType: "builtin",
+      name: "report",
+      version: "1.0.0",
+      description: "Report",
+      tools,
+      ...inlineSkillContent([
+        {
+          path: "SKILL.md",
+          contentText: markdown,
+          mimeType: "text/markdown",
+          sizeBytes: Buffer.byteLength(markdown, "utf8"),
+          contentHash: "hash-report",
+        },
+      ]),
+    };
+  }
+
+  async function runtimeWithSessionSpy(prepared: PreparedThreadTurn) {
+    const sandboxRuntime = await buildSandboxRuntimeForPreparedTurn({
+      prepared,
+      filesystemBackend: {
+        ...filesystemBackend,
+        skillSandboxAssets: new TurnSkillSandboxAssets(),
+      },
+    });
+    assert.ok(sandboxRuntime);
+    const ensureCurrentSession = vi
+      .spyOn(sandboxRuntime.trustedHost, "ensureCurrentSession")
+      .mockResolvedValue({
+        sessionGeneration: "sandbox-generation-1",
+        hostLimits: {
+          commandTimeoutMs: 1,
+          maxOutputChars: 1,
+          maxUploadFileBytes: 1,
+          maxUploadTotalBytes: 1,
+          maxDownloadFileBytes: 1,
+          maxDownloadTotalBytes: 1,
+          maxCaptureFiles: 1,
+        },
+      });
+    return { sandboxRuntime, ensureCurrentSession };
+  }
+
+  test("does not fire for a plain chat turn (execute bound with permission ask, no skill)", async () => {
+    // The default cloud turn: sandbox tools bind, permission resolves to "ask",
+    // nothing selected the sandbox. A container must not start for "hello".
+    const prepared = createPreparedTurn();
+    prepared.toolPermissions = { [AGENT_TOOL_NAMES.execute]: "ask" };
+    const { sandboxRuntime, ensureCurrentSession } =
+      await runtimeWithSessionSpy(prepared);
+
+    assert.equal(
+      prefetchSandboxForPreparedTurn({ prepared, sandboxRuntime }),
+      false,
+    );
+    assert.equal(ensureCurrentSession.mock.calls.length, 0);
+  });
+
+  test("fires once when a selected skill declares execute, even with permission ask", async () => {
+    const prepared = createPreparedTurn();
+    prepared.toolPermissions = { [AGENT_TOOL_NAMES.execute]: "ask" };
+    prepared.enabledSkills = [
+      sandboxSkill([
+        AGENT_TOOL_NAMES.prepareSandboxWorkspace,
+        AGENT_TOOL_NAMES.execute,
+        "publish_artifact",
+      ]),
+    ];
+    const { sandboxRuntime, ensureCurrentSession } =
+      await runtimeWithSessionSpy(prepared);
+
+    assert.equal(
+      prefetchSandboxForPreparedTurn({ prepared, sandboxRuntime }),
+      true,
+    );
+    assert.equal(ensureCurrentSession.mock.calls.length, 1);
+  });
+
+  test("fires when execute is explicitly allowed and no skill is selected", async () => {
+    const prepared = createPreparedTurn();
+    prepared.toolPermissions = { [AGENT_TOOL_NAMES.execute]: "allow" };
+    const { sandboxRuntime, ensureCurrentSession } =
+      await runtimeWithSessionSpy(prepared);
+
+    assert.equal(
+      prefetchSandboxForPreparedTurn({ prepared, sandboxRuntime }),
+      true,
+    );
+    assert.equal(ensureCurrentSession.mock.calls.length, 1);
+  });
+
+  test("a skill declaring only prepare_sandbox_workspace is enough", async () => {
+    const prepared = createPreparedTurn();
+    prepared.enabledSkills = [
+      sandboxSkill([AGENT_TOOL_NAMES.prepareSandboxWorkspace]),
+    ];
+    const { sandboxRuntime, ensureCurrentSession } =
+      await runtimeWithSessionSpy(prepared);
+
+    assert.equal(
+      prefetchSandboxForPreparedTurn({ prepared, sandboxRuntime }),
+      true,
+    );
+    assert.equal(ensureCurrentSession.mock.calls.length, 1);
+  });
+
+  test("a declaring skill does not override a denied or disabled tool", async () => {
+    const prepared = createPreparedTurn({ [AGENT_TOOL_NAMES.execute]: "deny" });
+    prepared.enabledSkills = [sandboxSkill([AGENT_TOOL_NAMES.execute])];
+    prepared.runtimeTools = {
+      [AGENT_TOOL_NAMES.execute]: {
+        toolName: AGENT_TOOL_NAMES.execute,
+        enabled: false,
+        permission: "deny",
+        shouldBind: false,
+        selection: {},
+        options: {},
+      },
+    };
+    // execute is denied so the sandbox runtime itself may be absent; the
+    // trigger must say no regardless of the runtime.
+    const sandboxRuntime = await buildSandboxRuntimeForPreparedTurn({
+      prepared: createPreparedTurn({ [AGENT_TOOL_NAMES.execute]: "allow" }),
+      filesystemBackend: {
+        ...filesystemBackend,
+        skillSandboxAssets: new TurnSkillSandboxAssets(),
+      },
+    });
+    assert.ok(sandboxRuntime);
+    const ensureCurrentSession = vi.spyOn(
+      sandboxRuntime.trustedHost,
+      "ensureCurrentSession",
+    );
+
+    assert.equal(
+      prefetchSandboxForPreparedTurn({ prepared, sandboxRuntime }),
+      false,
+    );
+    assert.equal(ensureCurrentSession.mock.calls.length, 0);
+  });
+
+  test("does not fire for a local execution target, a cancelled run, or no runtime", async () => {
+    const prepared = createPreparedTurn({
+      [AGENT_TOOL_NAMES.execute]: "allow",
+    });
+    const { sandboxRuntime, ensureCurrentSession } =
+      await runtimeWithSessionSpy(prepared);
+
+    const aborted = new AbortController();
+    aborted.abort();
+    assert.equal(
+      prefetchSandboxForPreparedTurn({
+        prepared,
+        sandboxRuntime,
+        signal: aborted.signal,
+      }),
+      false,
+    );
+
+    const localPrepared = {
+      ...prepared,
+      thread: { ...prepared.thread, executionTarget: { kind: "local" } },
+    } as unknown as PreparedThreadTurn;
+    assert.equal(
+      prefetchSandboxForPreparedTurn({
+        prepared: localPrepared,
+        sandboxRuntime,
+      }),
+      false,
+    );
+    assert.equal(
+      prefetchSandboxForPreparedTurn({ prepared, sandboxRuntime: null }),
+      false,
+    );
+    assert.equal(ensureCurrentSession.mock.calls.length, 0);
+  });
+
+  test("a failed prefetch never surfaces to the turn", async () => {
+    const prepared = createPreparedTurn({
+      [AGENT_TOOL_NAMES.execute]: "allow",
+    });
+    const { sandboxRuntime, ensureCurrentSession } =
+      await runtimeWithSessionSpy(prepared);
+    ensureCurrentSession.mockRejectedValue(new Error("provider unavailable"));
+
+    assert.equal(
+      prefetchSandboxForPreparedTurn({ prepared, sandboxRuntime }),
+      true,
+    );
+    // Let the rejected acquisition settle; an unhandled rejection would fail
+    // the vitest worker.
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(ensureCurrentSession.mock.calls.length, 1);
   });
 });
 

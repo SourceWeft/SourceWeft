@@ -2,7 +2,9 @@ import {
   SandboxInstanceChangedError,
   SandboxProviderError,
   SANDBOX_PROVIDER_ERROR_CODES,
+  SANDBOX_REPLACED_NOTICE,
 } from "./errors";
+import { executeAgentTool } from "../agent-tool-defs";
 import { randomUUID } from "node:crypto";
 import type {
   EditResult,
@@ -65,12 +67,47 @@ const TEXT_MIME_TYPE = "text/plain";
 const EXECUTE_TOOL_NAME = "execute";
 const READ_FILE_BINARY_UNSUPPORTED_CODE = "READ_FILE_BINARY_UNSUPPORTED";
 const MAX_RECOVERABLE_TOOL_OUTPUT_CHARS = 2_000;
+const SANDBOX_TOOL_BUDGET_EXHAUSTED_CODE = "SANDBOX_TOOL_BUDGET_EXHAUSTED";
 const RECOVERABLE_EXECUTE_ERROR_CODES = new Set([
   "SANDBOX_EXECUTE_COMMAND_DENIED",
   "SANDBOX_EXECUTE_CWD_DENIED",
   "SANDBOX_EXECUTE_VFS_PATH_DENIED",
   "SANDBOX_SKILL_STAGING_UNAVAILABLE",
+  // A momentary provider outage (429/5xx/connection reset) is recoverable by
+  // retrying the same command; the instance itself is still current.
+  SANDBOX_PROVIDER_ERROR_CODES.unavailable,
+  SANDBOX_TOOL_BUDGET_EXHAUSTED_CODE,
 ]);
+/**
+ * Execute errors after which the thread lease is shortened to the release
+ * grace: only classes that prove this generation is gone or must not be
+ * reused. Transient provider errors (NOT_READY) and command-level timeouts
+ * leave the instance alive and keep the full lease — shortening it made the
+ * sweeper delete a healthy sandbox during the model's next think, forcing
+ * another cold start.
+ */
+const LEASE_RELEASING_EXECUTE_ERROR_CODES = new Set<string>([
+  "SANDBOX_INSTANCE_CHANGED",
+  "SANDBOX_EXECUTION_RESULT_DISCARDED",
+  SANDBOX_PROVIDER_ERROR_CODES.instanceMissing,
+]);
+/**
+ * The provider command timer must expire before the host tool deadline so
+ * every timeout is the backend's controlled cancellation (fence → terminate →
+ * typed error) rather than the host middleware's abort racing it.
+ */
+const SANDBOX_EXECUTE_HOST_DEADLINE_MARGIN_MS = 5_000;
+/** Below this the deadline is effectively spent; the provider still needs a positive timer. */
+const SANDBOX_EXECUTE_MIN_PROVIDER_TIMEOUT_MS = 1_000;
+/** Attempts (first call + retries) the NOT_READY hint allows before escalating. */
+const SANDBOX_UNAVAILABLE_MAX_ATTEMPTS = 3;
+/**
+ * Least tool budget worth spawning a command with. A caller that spent its
+ * budget waiting for a sibling's cold start would otherwise run with a 1-5 s
+ * provider timer, time out, and terminate the fresh generation it waited for;
+ * instead it reports the exhausted budget and the model retries in a new call.
+ */
+const SANDBOX_EXECUTE_MIN_REMAINING_BUDGET_MS = 10_000;
 
 function hasControlChars(value: string) {
   return /[\x00-\x1f\x7f]/.test(value);
@@ -270,12 +307,35 @@ function sandboxErrorCode(message: string) {
   return match?.[1] ?? null;
 }
 
+function structuredErrorCode(error: unknown) {
+  return error &&
+    typeof error === "object" &&
+    typeof (error as { code?: unknown }).code === "string"
+    ? (error as { code: string }).code
+    : null;
+}
+
 function recoverableExecuteErrorCode(error: unknown) {
-  const code = sandboxErrorCode(compactError(error));
+  const code =
+    structuredErrorCode(error) ?? sandboxErrorCode(compactError(error));
   return code && RECOVERABLE_EXECUTE_ERROR_CODES.has(code) ? code : null;
 }
 
-function recoverableExecuteFailureHint(errorCode: string, localRoot?: string) {
+function recoverableExecuteFailureHint(
+  errorCode: string,
+  localRoot?: string,
+  options: { midExecution?: boolean } = {},
+) {
+  if (errorCode === SANDBOX_PROVIDER_ERROR_CODES.unavailable) {
+    // Only an outage BEFORE the command spawned is safe to retry blindly; a
+    // connection lost mid-command may have run a non-idempotent command.
+    return options.midExecution
+      ? "The connection to the sandbox was lost while the command was running; it may have run partly or fully. Check its effects (output files, state) before retrying it in a new tool call."
+      : "The sandbox provider is temporarily unavailable. Wait 10-20 seconds, then retry the same command in a new tool call (at most 2 retries). Do not change the report content because of this error.";
+  }
+  if (errorCode === SANDBOX_TOOL_BUDGET_EXHAUSTED_CODE) {
+    return "The tool budget was spent acquiring the sandbox, which is now ready. Retry the same command in a new tool call.";
+  }
   if (
     localRoot &&
     [
@@ -443,13 +503,65 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
        */
       commandTimeoutMs: number;
       toolApprovalEnabled: boolean;
+      /**
+       * Wall-clock budget the host grants one `execute` invocation. Defaults
+       * to the budget the tool definition declares; a constructor field for
+       * the same reason as `commandTimeoutMs` (tests override it, model
+       * arguments cannot). The host clamps the declaration to its own ceiling,
+       * never raises it, so the declared value is an upper bound on what the
+       * host actually grants.
+       */
+      toolExecutionTimeoutMs?: number;
     },
   ) {
     this.id = `sourceweft-sandbox:${input.context.threadId}`;
   }
 
-  private async sandboxRef() {
-    return this.input.manager.getOrCreateThreadSandbox(this.input.context);
+  private async sandboxRef(signal?: AbortSignal) {
+    return this.input.manager.getOrCreateThreadSandbox(this.input.context, {
+      ...(signal ? { signal } : {}),
+    });
+  }
+
+  /**
+   * Provider timer for one execute = min(command budget, what is left of the
+   * tool budget minus a margin). The host invocation signal carries no
+   * deadline (it only aborts with a TimeoutError reason), so the remaining
+   * budget is derived from `startedAt`, recorded at execute entry, plus the
+   * declared tool budget. The host timer started slightly earlier, in the
+   * tool middleware; the margin absorbs that gap.
+   *
+   * A call without a host invocation signal has no host deadline to beat —
+   * that is a host-only runtime (deliverable pipelines on the `batch`
+   * budget), which keeps its full command budget.
+   */
+  private remainingToolBudgetMs(startedAt: number) {
+    const toolBudgetMs =
+      this.input.toolExecutionTimeoutMs ?? executeAgentTool.executionTimeoutMs;
+    return toolBudgetMs - (Date.now() - startedAt);
+  }
+
+  private providerExecuteTimeoutMs(startedAt: number, signal?: AbortSignal) {
+    if (!signal) return this.input.commandTimeoutMs;
+    return Math.max(
+      SANDBOX_EXECUTE_MIN_PROVIDER_TIMEOUT_MS,
+      Math.min(
+        this.input.commandTimeoutMs,
+        this.remainingToolBudgetMs(startedAt) -
+          SANDBOX_EXECUTE_HOST_DEADLINE_MARGIN_MS,
+      ),
+    );
+  }
+
+  /** Attach the one-shot replacement notice to a model-visible result. */
+  private withReplacementDiagnostics<
+    T extends { output: string; exitCode: number | null; truncated: boolean },
+  >(result: T, replaced: boolean): T {
+    if (!replaced) return result;
+    return {
+      ...result,
+      output: `${result.output}${result.output.endsWith("\n") || result.output === "" ? "" : "\n"}Diagnostics: sandbox replaced. ${SANDBOX_REPLACED_NOTICE}`,
+    };
   }
 
   private pathPolicy() {
@@ -467,7 +579,7 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
     }) => Promise<T>,
   ) {
     throwBackendOperationAbortReason(options.signal);
-    const sandbox = await this.sandboxRef();
+    const sandbox = await this.sandboxRef(options.signal);
     throwBackendOperationAbortReason(options.signal);
     const provider = this.input.manager.providerForSandbox();
     return runPinnedSandboxOperation({
@@ -1164,11 +1276,17 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
   private recoverableExecuteFailureResult(input: {
     command: string;
     error: unknown;
+    midExecution?: boolean;
   }) {
-    const message = compactError(input.error);
+    const rawMessage = compactError(input.error);
     const failureCode =
       recoverableExecuteErrorCode(input.error) ??
       "SANDBOX_EXECUTE_REQUEST_DENIED";
+    // Provider errors carry their code structurally; keep the first line
+    // self-describing either way.
+    const message = rawMessage.startsWith(`${failureCode}:`)
+      ? rawMessage
+      : `${failureCode}: ${rawMessage}`;
     const commandFingerprint = sandboxRequestFingerprint({
       command: input.command,
     });
@@ -1176,15 +1294,34 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
       commandFingerprint,
       failureCode,
     });
+    const unavailable =
+      failureCode === SANDBOX_PROVIDER_ERROR_CODES.unavailable;
+    const hint = `Hint: ${recoverableExecuteFailureHint(
+      failureCode,
+      this.input.manager.providerForSandbox().nativeFileOperations
+        ? this.pathPolicy().workspaceRoot
+        : undefined,
+      { midExecution: input.midExecution === true },
+    )}`;
+    // Transient classes (outage, spent budget) are retried by design, so the
+    // input-failure escalation does not apply; an outage that outlasts its
+    // retries REPLACES the retry hint rather than contradicting it.
+    const guidance = unavailable
+      ? repeatCount > SANDBOX_UNAVAILABLE_MAX_ATTEMPTS
+        ? [
+            `Hint: The sandbox provider stayed unavailable across ${repeatCount} attempts. Stop retrying; tell the user the sandbox is unavailable right now.`,
+          ]
+        : [hint]
+      : failureCode === SANDBOX_TOOL_BUDGET_EXHAUSTED_CODE || repeatCount <= 1
+        ? [hint]
+        : [
+            hint,
+            `Repeated execute input failure detected (repeatCount=${repeatCount}). Stop retrying the same command form; change the approach before calling execute again.`,
+          ];
     const output = [
       message,
-      `Hint: ${recoverableExecuteFailureHint(failureCode, this.input.manager.providerForSandbox().nativeFileOperations ? this.pathPolicy().workspaceRoot : undefined)}`,
+      ...guidance,
       `Diagnostics: toolName=${EXECUTE_TOOL_NAME} commandFingerprint=${commandFingerprint} failureCode=${failureCode} repeatCount=${repeatCount} runId=${this.input.context.runId}`,
-      ...(repeatCount > 1
-        ? [
-            `Repeated execute input failure detected (repeatCount=${repeatCount}). Stop retrying the same command form; change the approach before calling execute again.`,
-          ]
-        : []),
     ].join("\n");
 
     return {
@@ -1204,11 +1341,18 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
     error: unknown;
     operationId: string;
     startedAt: number;
+    replaced?: boolean;
+    midExecution?: boolean;
   }) {
     const failure = this.recoverableExecuteFailureResult({
       command: input.command,
       error: input.error,
+      ...(input.midExecution ? { midExecution: true } : {}),
     });
+    failure.result = this.withReplacementDiagnostics(
+      failure.result,
+      input.replaced === true,
+    );
     await this.input.manager.completeToolOperation({
       operationId: input.operationId,
       status: "succeeded",
@@ -1254,6 +1398,7 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
     }
     let sandboxId: string | null = null;
     let executionId: string | null = null;
+    let replaced = false;
     try {
       // Two-phase path policy (docs/architecture/sandbox-skill-staging.md D2):
       // /files and /kb fail fast here; a /skills-referencing command is
@@ -1283,12 +1428,17 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
       }
       const sandbox = await this.input.manager.getOrCreateThreadSandbox(
         this.input.context,
+        { ...(options.signal ? { signal: options.signal } : {}) },
       );
       sandboxId = sandbox.id;
+      replaced = this.input.manager.consumeReplacementNotice();
       if (skillsDeferred) {
         // Acquisition staged what was registered at the time; a bundle added
         // since (a skill installed mid-turn) is staged here, on first use.
-        await this.input.manager.ensureSkillAssetsStaged(sandbox);
+        await this.input.manager.ensureSkillAssetsStaged(
+          sandbox,
+          options.signal,
+        );
       }
       if (
         skillsDeferred &&
@@ -1301,6 +1451,24 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
           ),
           operationId: claim.operationId,
           startedAt,
+          replaced,
+        });
+      }
+      if (
+        options.signal &&
+        this.remainingToolBudgetMs(startedAt) <
+          SANDBOX_EXECUTE_MIN_REMAINING_BUDGET_MS
+      ) {
+        // Nothing is spawned, so nothing is cancelled: the generation this
+        // caller waited for stays intact for the retry.
+        return await this.completeRecoverableExecuteFailure({
+          command,
+          error: new Error(
+            `${SANDBOX_TOOL_BUDGET_EXHAUSTED_CODE}: the tool budget was spent acquiring the sandbox; the command was not started.`,
+          ),
+          operationId: claim.operationId,
+          startedAt,
+          replaced,
         });
       }
       executionId = randomUUID();
@@ -1328,7 +1496,7 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
             undefined,
             this.input.manager.providerForSandbox().pathPolicy,
           ),
-          timeoutMs: this.input.commandTimeoutMs,
+          timeoutMs: this.providerExecuteTimeoutMs(startedAt, options.signal),
           maxOutputChars: this.input.limits.maxOutputChars,
           ...(options.signal ? { signal: options.signal } : {}),
         })
@@ -1394,7 +1562,10 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
           }
           throw new SandboxModelExecutionAbortError({ cancellation, reason });
         }
-        const redactedResult = redactExecuteResult(outcome.result);
+        const redactedResult = this.withReplacementDiagnostics(
+          redactExecuteResult(outcome.result),
+          replaced,
+        );
         await this.input.manager.completeToolOperation({
           operationId: claim.operationId,
           sandboxId: sandbox.id,
@@ -1423,16 +1594,29 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
         abortWait.dispose();
       }
     } catch (error) {
+      if (
+        !options.signal?.aborted &&
+        recoverableExecuteErrorCode(error) ===
+          SANDBOX_PROVIDER_ERROR_CODES.unavailable
+      ) {
+        // The provider (or its acquisition) was momentarily unavailable: a
+        // recoverable result rather than a thrown tool error, and the
+        // instance stays leased. Only a failure BEFORE the command spawned
+        // (executionId unset) earns the "retry the same command" hint.
+        return await this.completeRecoverableExecuteFailure({
+          command,
+          error,
+          operationId: claim.operationId,
+          startedAt,
+          replaced,
+          midExecution: executionId !== null,
+        });
+      }
       const commandFingerprint = sandboxRequestFingerprint({ command });
       const cancellation =
         error instanceof SandboxModelExecutionAbortError ? error : null;
-      const structuredCode =
-        error &&
-        typeof error === "object" &&
-        typeof (error as { code?: unknown }).code === "string"
-          ? (error as { code: string }).code
-          : null;
-      const errorCode = structuredCode ?? sandboxErrorCode(compactError(error));
+      const errorCode =
+        structuredErrorCode(error) ?? sandboxErrorCode(compactError(error));
       await this.input.manager.completeToolOperation({
         operationId: claim.operationId,
         sandboxId,
@@ -1458,7 +1642,11 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
         },
         durationMs: Date.now() - startedAt,
       });
-      if (!cancellation) {
+      if (
+        !cancellation &&
+        errorCode &&
+        LEASE_RELEASING_EXECUTE_ERROR_CODES.has(errorCode)
+      ) {
         await this.input.manager
           .releaseThreadSandboxLease({
             context: this.input.context,

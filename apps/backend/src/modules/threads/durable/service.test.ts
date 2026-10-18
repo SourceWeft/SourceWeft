@@ -1121,3 +1121,104 @@ test("terminal replay restores only validated step-limit metadata and cancellati
     assert.equal(events[0]?.agentRunStop, undefined);
   }
 });
+
+test("failed runs with a model/upstream error keep the thread sandbox lease", async () => {
+  for (const errorCode of [
+    "MODEL_UPSTREAM_ERROR",
+    "MODEL_TIMEOUT",
+    "MODEL_RATE_LIMITED",
+  ]) {
+    const run = createRun();
+    const released: string[] = [];
+    const finished = await testExports.finishRunWithDependencies(
+      {
+        run,
+        status: "failed",
+        errorCode,
+        errorMessage: "LLM request failed",
+      },
+      {
+        finishRun: async (input) => ({
+          ...run,
+          status: input.status,
+          errorCode: input.errorCode ?? null,
+          errorMessage: input.errorMessage ?? null,
+        }),
+        releaseLease: async (_run, reason) => {
+          released.push(reason);
+        },
+      },
+    );
+
+    assert.equal(finished?.status, "failed");
+    assert.deepEqual(released, [], `${errorCode} must not release the lease`);
+  }
+});
+
+test("other failed runs and cancelled runs release the thread sandbox lease", async () => {
+  const cases: Array<{
+    status: "failed" | "cancelled";
+    errorCode: string | null;
+    reason: string;
+  }> = [
+    {
+      status: "failed",
+      errorCode: "CHAT_RUN_STALE",
+      reason: "chat_run_failed",
+    },
+    { status: "failed", errorCode: null, reason: "chat_run_failed" },
+    {
+      status: "cancelled",
+      errorCode: "CLIENT_CANCELLED",
+      reason: "chat_run_cancelled",
+    },
+  ];
+  for (const testCase of cases) {
+    const run = createRun();
+    const released: string[] = [];
+    await testExports.finishRunWithDependencies(
+      { run, status: testCase.status, errorCode: testCase.errorCode },
+      {
+        finishRun: async (input) => ({
+          ...run,
+          status: input.status,
+          errorCode: input.errorCode ?? null,
+          errorMessage: input.errorMessage ?? null,
+        }),
+        releaseLease: async (_run, reason) => {
+          released.push(reason);
+        },
+      },
+    );
+    assert.deepEqual(released, [testCase.reason]);
+  }
+});
+
+test("completed runs never release the thread sandbox lease", async () => {
+  const run = createRun();
+  let releaseCalls = 0;
+  await testExports.finishRunWithDependencies(
+    { run, status: "completed" },
+    {
+      finishRun: async (input) => ({ ...run, status: input.status }),
+      releaseLease: async () => {
+        releaseCalls += 1;
+      },
+    },
+  );
+  assert.equal(releaseCalls, 0);
+  assert.equal(
+    testExports.shouldReleaseSandboxLeaseForFinishedRun({
+      status: "failed",
+      errorCode: "MODEL_UPSTREAM_ERROR",
+    }),
+    false,
+  );
+  assert.equal(
+    testExports.shouldReleaseSandboxLeaseForFinishedRun({
+      status: "failed",
+      errorCode: "MODEL_CONFIGURATION_ERROR",
+    }),
+    true,
+  );
+});
