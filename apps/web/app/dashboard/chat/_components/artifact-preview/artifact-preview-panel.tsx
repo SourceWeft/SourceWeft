@@ -35,7 +35,10 @@ import {
 } from "@sourceweft/ui-web/components/ui/button";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { contentClient } from "../../../../../lib/sdk";
-import { loadArtifactShare } from "./artifact-share-lookup";
+import {
+  forgetArtifactShare,
+  loadArtifactShare,
+} from "./artifact-share-lookup";
 import { ShareArtifactDialog } from "./share-artifact-dialog";
 import {
   artifactTitle,
@@ -396,7 +399,12 @@ export function ArtifactPreviewPanel({
           title={title}
           share={share}
           isShareLoading={isShareLoading}
-          onShareChange={setShare}
+          onShareChange={(next) => {
+            // A mutation makes any briefly remembered lookup stale for other
+            // mounted panels; forget it before the local state moves on.
+            forgetArtifactShare(workspaceId, artifact.id);
+            setShare(next);
+          }}
         />
       ) : null}
 
