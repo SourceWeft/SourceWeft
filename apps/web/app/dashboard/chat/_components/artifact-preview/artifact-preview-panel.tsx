@@ -35,6 +35,7 @@ import {
 } from "@sourceweft/ui-web/components/ui/button";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { contentClient } from "../../../../../lib/sdk";
+import { loadArtifactShare } from "./artifact-share-lookup";
 import { ShareArtifactDialog } from "./share-artifact-dialog";
 import {
   artifactTitle,
@@ -124,10 +125,11 @@ export function ArtifactPreviewPanel({
     }
     let cancelled = false;
     setIsShareLoading(true);
-    contentClient
-      .getArtifactShare(workspaceId, artifact.id)
+    // One outstanding lookup is shared by every mounted panel (Hub inline
+    // plus expanded dialog, doubled by StrictMode); see artifact-share-lookup.
+    loadArtifactShare(workspaceId, artifact.id)
       .then((result) => {
-        if (!cancelled) setShare(result.share);
+        if (!cancelled) setShare(result);
       })
       .catch(() => {
         // Not being allowed to read share state (e.g. not the creator) simply
