@@ -3,6 +3,9 @@ export {
   CloudflareBridgeHttpError,
   CloudflareSandboxProvider,
   EXEC_HEARTBEAT_MARKER,
+  READINESS_PROBE_BACKOFF_MS,
+  READINESS_PROBE_BUDGET_MS,
+  READINESS_PROBE_COMMAND_TIMEOUT_MS,
   SOURCEWEFT_SANDBOX_STAMP_PATH,
   extractExitCode,
   extractSseText,
@@ -13,6 +16,7 @@ export {
 export type {
   CloudflareProviderOperation,
   CloudflareSandboxProviderOptions,
+  ProviderClock,
 } from "./cloudflare-provider";
 export { createCloudflareSandboxProviderFactory } from "./provider-factory";
 export type { CloudflareProviderFactoryConfig } from "./provider-factory";

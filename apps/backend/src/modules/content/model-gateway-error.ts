@@ -1,11 +1,27 @@
 import { ModelGatewayError } from "../../shared/model-gateway/errors";
 import { ContentError } from "./errors";
 
-const RETRYABLE_CONTENT_ERROR_CODES = new Set([
+/**
+ * ContentError codes for a model call that failed on the provider side —
+ * timeout, rate limit, or any other upstream failure — rather than because of
+ * the request itself. These are the codes a retry (or the next human message)
+ * can reasonably expect to clear.
+ */
+export const MODEL_UPSTREAM_CONTENT_ERROR_CODES: ReadonlySet<string> = new Set([
   "MODEL_TIMEOUT",
   "MODEL_RATE_LIMITED",
   "MODEL_UPSTREAM_ERROR",
 ]);
+
+const RETRYABLE_CONTENT_ERROR_CODES = MODEL_UPSTREAM_CONTENT_ERROR_CODES;
+
+export function isModelUpstreamContentErrorCode(
+  code: string | null | undefined,
+): boolean {
+  return (
+    typeof code === "string" && MODEL_UPSTREAM_CONTENT_ERROR_CODES.has(code)
+  );
+}
 
 function toRecord(value: unknown) {
   return value && typeof value === "object"

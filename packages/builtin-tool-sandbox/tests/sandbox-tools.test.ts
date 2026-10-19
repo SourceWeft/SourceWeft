@@ -920,10 +920,13 @@ function namedPrepareHarness(
   overrides: {
     reader?: Parameters<typeof createSandboxTools>[0]["artifacts"];
     limits?: Partial<SandboxRuntimeLimits>;
+    /** The manager replaced a terminated stateless generation before this call. */
+    replaced?: boolean;
   } = {},
 ) {
   const uploads: Array<{ path: string; bytes: Uint8Array }[]> = [];
   let receipt: Record<string, unknown> | undefined;
+  let replaced = overrides.replaced === true;
   const manager = {
     providerForSandbox: () => ({ pathPolicy: TEST_SANDBOX_PATH_POLICY }),
     beginToolOperation: async () =>
@@ -931,6 +934,11 @@ function namedPrepareHarness(
         ? { kind: "replay", result: receipt }
         : { kind: "run", operationId: "operation-1" },
     getOrCreateThreadSandbox: async () => ({ id: "sandbox-1" }),
+    consumeReplacementNotice: () => {
+      const pending = replaced;
+      replaced = false;
+      return pending;
+    },
     completeToolOperation: async (input: {
       result: Record<string, unknown>;
       status: string;
@@ -1159,4 +1167,27 @@ test("named sources share the remaining preparation budget with primary artifact
   assert.equal(result.ok, false);
   assert.deepEqual(budgets, [2]);
   assert.equal(harness.uploads.length, 0);
+});
+
+test("prepare carries the one-shot replacement notice when it runs on a fresh generation", async () => {
+  const harness = namedPrepareHarness({
+    reader: {
+      readPrimaryBytes: async () => {
+        throw new Error("must not fallback to primary");
+      },
+      readVersionFileBytes: async () => namedResult(),
+    },
+    replaced: true,
+  });
+  const first = await harness.invoke([namedSelector]);
+  assert.equal(first.ok, true);
+  assert.match(
+    String(first.diagnostics),
+    /^sandbox replaced\. The previous sandbox was terminated after a timeout before it accepted any operation\./u,
+  );
+  // Only the first result on the replacement carries it; the replay receipt
+  // of the same call does, the next distinct call would not.
+  const replay = await harness.invoke([namedSelector]);
+  assert.equal(replay.ok, true);
+  assert.equal(replay.diagnostics, first.diagnostics);
 });

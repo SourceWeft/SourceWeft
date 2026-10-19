@@ -58,6 +58,7 @@ import {
 } from "@sourceweft/agent-tool-registry";
 import { WorkingFilesBackend } from "../working-files-backend";
 import { agentSandboxService } from "../sandbox-service/service";
+import { skillActivatesTool } from "../../turn/tool-selection";
 import { listArtifactSummaryRecords } from "../../../artifacts/repository";
 import type { AgentSandboxRuntimeForTurn } from "@sourceweft/builtin-tool-sandbox";
 import { TurnSkillSandboxAssets } from "../../../skills/sandbox-assets";
@@ -90,6 +91,7 @@ import {
   filterInheritableAgentTools,
   getToolPermission,
   isToolDenied,
+  shouldBindAgentTool,
 } from "./tool-utils";
 import {
   INTERPRETER_MAX_TOOL_NAMES,
@@ -793,6 +795,99 @@ export async function buildSandboxRuntimeForPreparedTurn(input: {
   }
 
   return sandboxRuntime;
+}
+
+/**
+ * Sandbox prefetch switch (S2 of the sandbox cold-start recovery contract,
+ * issue #323). A code constant rather than an env var on purpose: it exists so
+ * the overlap can be switched off in one place while the provider readiness
+ * probe settles, not as a deployment knob.
+ */
+const SANDBOX_PREFETCH_ENABLED = true;
+
+/** Tools whose first call would otherwise pay the sandbox cold start. */
+const SANDBOX_PREFETCH_TRIGGER_TOOLS: readonly string[] = [
+  AGENT_TOOL_NAMES.execute,
+  AGENT_TOOL_NAMES.prepareSandboxWorkspace,
+];
+
+/**
+ * Whether the turn will actually use the sandbox, as opposed to merely having
+ * the sandbox tools bound. `execute` and `prepare_sandbox_workspace` bind on
+ * every cloud turn (activation default "always") with permission "ask", so
+ * "bound" would start a container (cold start + 1 h TTL) for a plain chat
+ * message before the user approved any sandbox call. A turn earns the prefetch
+ * only when a selected or invoked skill declares a sandbox command tool in its
+ * manifest `tools`, or the tool's resolved permission is an explicit "allow"
+ * (skill runtime / command workflow / persona override); and in either case
+ * the tool must not be denied or disabled for the turn.
+ */
+function preparedTurnWillUseSandbox(prepared: PreparedThreadTurn) {
+  return SANDBOX_PREFETCH_TRIGGER_TOOLS.some((toolName) => {
+    if (!shouldBindAgentTool({ prepared, toolName })) {
+      return false;
+    }
+    if (prepared.toolPermissions[toolName] === "allow") {
+      return true;
+    }
+    return prepared.enabledSkills.some((skill) =>
+      skillActivatesTool(skill, (name) => name === toolName),
+    );
+  });
+}
+
+/**
+ * Starts the cloud sandbox acquisition for a prepared turn so the provider
+ * cold start (create + readiness probe + asset staging, 21–70 s observed)
+ * overlaps the model's first decision instead of being charged to the first
+ * `execute` / `prepare_sandbox_workspace` call's tool budget.
+ *
+ * Fire-and-forget: the acquisition goes through the runtime's trusted-host
+ * adapter, which calls `SandboxManager.getOrCreateThreadSandbox` with the
+ * same runtime context (provider, team, workspace, thread, run, user) the
+ * model-facing tools use, so the manager's per-context initialization memo
+ * dedupes the two and the tools simply await the in-flight acquisition. A
+ * prefetch failure is logged at debug level and never affects the turn: the
+ * first real tool call re-enters the same path and reports its own error.
+ *
+ * Only fires when the turn will actually use a sandbox command tool (see
+ * preparedTurnWillUseSandbox) and the execution target is not the user's
+ * bound PC (the local provider has no cold start and must not be touched
+ * before the model asks for it).
+ *
+ * Returns whether a prefetch was started.
+ */
+export function prefetchSandboxForPreparedTurn(input: {
+  prepared: PreparedThreadTurn;
+  sandboxRuntime: AgentSandboxRuntimeForTurn | null;
+  /** The run's abort signal; an already-cancelled run skips the prefetch. */
+  signal?: AbortSignal;
+}): boolean {
+  const { prepared, sandboxRuntime, signal } = input;
+  if (!SANDBOX_PREFETCH_ENABLED || !sandboxRuntime || signal?.aborted) {
+    return false;
+  }
+  if (prepared.thread.executionTarget?.kind === "local") {
+    return false;
+  }
+  if (!preparedTurnWillUseSandbox(prepared)) {
+    return false;
+  }
+  // TODO(#323): pass `{ signal }` through to
+  // `SandboxManager.getOrCreateThreadSandbox(context, { signal })`. The
+  // manager accepts the option, but `AgentSandboxRuntimeForTurn` does not
+  // expose the manager to the host; it only surfaces the trusted-host adapter,
+  // whose `ensureCurrentSession()` acquires through the same memoized manager
+  // path but takes no signal. A cancelled run therefore lets an in-flight
+  // prefetch finish on its own (the lease release at run end reclaims it).
+  void sandboxRuntime.trustedHost.ensureCurrentSession().catch((error) => {
+    logger.debug("Sandbox prefetch failed; first tool call will retry", {
+      threadId: prepared.thread.id,
+      runId: prepared.runTraceId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
+  return true;
 }
 
 export async function buildThreadAgentAssembly(

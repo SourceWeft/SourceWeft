@@ -4,6 +4,7 @@ import { toolErrorMiddleware, type ToolCallRequest } from "langchain";
 import { sanitizeClientErrorMessage } from "../../../content/model-gateway-error";
 import { redactErrorMessage } from "../../../mcp/security";
 import { ContentError } from "../../../content/errors";
+import { AGENT_TOOL_NAMES } from "@sourceweft/agent-tool-registry";
 import {
   AGENT_TOOL_EXECUTION_TIMEOUT_CODE,
   AGENT_TOOL_TERMINATION_UNKNOWN_CODE,
@@ -14,6 +15,21 @@ import {
 import { isAgentStepPriorityTaskFailure } from "./step-budget";
 
 const MAX_TOOL_ERROR_MESSAGE_LENGTH = 600;
+
+/**
+ * Sandbox command tools whose host timeout terminates the sandbox instance a
+ * started command ran on (the backend's timeout cancellation fences and
+ * deletes it). A call that timed out while still acquiring terminated nothing:
+ * a sibling acquisition may finish and the next call reuses that instance.
+ */
+const SANDBOX_COMMAND_TOOL_NAMES: ReadonlySet<string> = new Set([
+  AGENT_TOOL_NAMES.execute,
+  AGENT_TOOL_NAMES.prepareSandboxWorkspace,
+]);
+
+/** Appended to the timeout message for sandbox command tools (S5, #323). */
+export const SANDBOX_TIMEOUT_INSTANCE_NOTE =
+  "If this call had started a command, its sandbox instance was terminated; the next sandbox call acquires or reuses an instance.";
 
 function truncateToolErrorMessage(value: string) {
   const trimmed = value.trim();
@@ -104,7 +120,13 @@ export function formatSourceWeftToolError(
   const timeout = findCause(error, isAgentToolExecutionTimeoutReason);
   if (timeout) {
     const reason = timeout as { timeoutMs: number; toolName: string };
-    return `[${AGENT_TOOL_EXECUTION_TIMEOUT_CODE}] Tool '${reason.toolName}' timed out after ${reason.timeoutMs}ms. The call did not produce a successful result.`;
+    return truncateToolErrorMessage(
+      `[${AGENT_TOOL_EXECUTION_TIMEOUT_CODE}] Tool '${reason.toolName}' timed out after ${reason.timeoutMs}ms. The call did not produce a successful result.${
+        SANDBOX_COMMAND_TOOL_NAMES.has(reason.toolName)
+          ? ` ${SANDBOX_TIMEOUT_INSTANCE_NOTE}`
+          : ""
+      }`,
+    );
   }
 
   if (request.runtime.signal?.aborted) {

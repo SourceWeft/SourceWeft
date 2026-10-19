@@ -49,13 +49,59 @@ export function isSandboxProviderUnavailableError(error: unknown): boolean {
   );
 }
 
+/**
+ * The provider created the container but its readiness probe (run inside
+ * createSandbox, budget 90 s) never saw it execute a command, and the provider
+ * already deleted it. Detected by message because the provider exposes no
+ * dedicated flag; a create-level retry of this failure would cost another
+ * create + full probe budget, so the manager must not retry it.
+ */
+export function isSandboxReadinessProbeFailure(error: unknown): boolean {
+  if (!isSandboxProviderUnavailableError(error)) return false;
+  const message = (error as { message?: unknown }).message;
+  return (
+    typeof message === "string" &&
+    /readiness probe|did not become ready/iu.test(message)
+  );
+}
+
+/**
+ * The generation the run was bound to has been terminated after it already
+ * accepted at least one operation (a prepare, upload, or execute result the
+ * model may now rely on). Replacing it silently would hand the model an empty
+ * /workspace while it believes files exist there, so sandbox tools fail closed
+ * for the rest of the turn. A generation that accepted nothing is replaced
+ * instead (see SandboxManager.getOrCreateThreadSandbox).
+ */
 export class SandboxInstanceChangedError extends Error {
   readonly code = "SANDBOX_INSTANCE_CHANGED";
   constructor() {
     super(
-      "Sandbox instance is no longer current. This operation cannot continue on a replacement instance.",
+      "SANDBOX_INSTANCE_CHANGED: The sandbox used earlier in this run was terminated after a timeout and had already accepted operations, so it cannot be replaced silently. Sandbox tools are unavailable for the rest of this turn; explain the situation to the user and continue in the next message.",
     );
     this.name = "SandboxInstanceChangedError";
+  }
+}
+
+/**
+ * One-line notice attached to the first model-visible tool result that runs on
+ * a replacement generation. The manager replaces a terminated generation only
+ * when it accepted no operation, so nothing the model wrote is lost — but
+ * /workspace starts empty again and prepare must be repeated.
+ */
+export const SANDBOX_REPLACED_NOTICE =
+  "The previous sandbox was terminated after a timeout before it accepted any operation. A fresh sandbox is ready but its /workspace is empty: run prepare_sandbox_workspace again before continuing.";
+
+/**
+ * Thrown by hosts that cannot render SANDBOX_REPLACED_NOTICE inside a tool
+ * result. This package renders the notice in execute/prepare/collect results
+ * instead of throwing, so the class exists for the fallback path only.
+ */
+export class SandboxReplacedError extends Error {
+  readonly code = "SANDBOX_REPLACED";
+  constructor() {
+    super(`SANDBOX_REPLACED: ${SANDBOX_REPLACED_NOTICE}`);
+    this.name = "SandboxReplacedError";
   }
 }
 

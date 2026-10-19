@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   isSandboxInstanceMissingError,
   isSandboxProviderUnavailableError,
+  isSandboxReadinessProbeFailure,
   SandboxInstanceChangedError,
   sandboxErrorDiagnostic,
 } from "./errors";
@@ -93,14 +94,23 @@ function skillPlanKey(plan: RuntimeAssetPlan) {
 
 const SKILL_NAME_IN_COMMAND = /\/skills\/([a-zA-Z0-9][a-zA-Z0-9._-]*)/gu;
 
-const SANDBOX_CREATING_STALE_MS = 2 * 60 * 1000;
+// Longest single provider create the manager plans for: the create call
+// itself (21-70 s measured on Cloudflare, 2026-10-18) plus the provider's
+// in-create readiness probe budget (90 s), plus the two POST-level retries
+// (500 ms + 1500 ms + jitter) — a probe failure is never retried, see
+// createProviderSandbox. ≈ 70 + 90 + 2.5 s.
+export const SANDBOX_CREATE_WORST_CASE_MS = 70_000 + 90_000 + 2_500;
 // How long a sibling execute waits for another call's in-flight cold start
-// before giving up. Must comfortably exceed a real provider cold start (~30s
-// observed) so parallel `task`/execute calls that share one thread sandbox
-// don't fail with SANDBOX_CREATION_WAIT_TIMEOUT while the winner is still
-// legitimately provisioning. Kept well under SANDBOX_CREATING_STALE_MS so a
-// genuinely dead creation is still reclaimable as stale.
-const SANDBOX_CREATING_WAIT_TIMEOUT_MS = 45_000;
+// before giving up. Must comfortably exceed SANDBOX_CREATE_WORST_CASE_MS so
+// parallel `task`/execute calls that share one thread sandbox don't fail with
+// SANDBOX_CREATION_WAIT_TIMEOUT while the winner is still legitimately
+// provisioning. Kept under SANDBOX_CREATING_STALE_MS so a genuinely dead
+// creation is still reclaimable.
+export const SANDBOX_CREATING_WAIT_TIMEOUT_MS = 180_000;
+// A `creating` row that stopped being updated for this long is reclaimable by
+// another worker. Exceeds the sibling wait by a full minute so a creation
+// that is still legitimately running is never reclaimed by a sibling.
+export const SANDBOX_CREATING_STALE_MS = 4 * 60 * 1000;
 const SANDBOX_CREATING_WAIT_INTERVAL_MS = 250;
 export const SANDBOX_OPERATION_STALE_GRACE_MS = 30 * 1000;
 export const SANDBOX_RELEASE_LEASE_GRACE_MS = 5 * 60 * 1000;
@@ -166,9 +176,68 @@ function failedRetryMessage(input: {
 /** Backoff before each retry of a sandbox creation the provider refused as unavailable. */
 const SANDBOX_CREATE_RETRY_DELAYS_MS = [500, 1500] as const;
 
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function abortReason(signal: AbortSignal): unknown {
+  return (
+    signal.reason ??
+    new DOMException("Sandbox acquisition was cancelled.", "AbortError")
+  );
 }
+
+function throwIfAborted(signal?: AbortSignal) {
+  if (signal?.aborted) throw abortReason(signal);
+}
+
+/** Sleep that ends early — by rejecting with the signal's reason — on abort. */
+function sleep(ms: number, signal?: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(abortReason(signal));
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(abortReason(signal!));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/**
+ * Wait for a shared promise without owning it: an abort stops this caller's
+ * wait but leaves the shared work (another caller's acquisition) running.
+ */
+function raceWithSignal<T>(
+  promise: Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(abortReason(signal));
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(abortReason(signal));
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(resolve, reject).finally(() => {
+      signal.removeEventListener("abort", onAbort);
+    });
+  });
+}
+
+export type SandboxAcquisitionOptions = {
+  waitTimeoutMs?: number;
+  waitIntervalMs?: number;
+  /**
+   * Host invocation cancellation. The caller that starts an acquisition owns
+   * it: its abort stops the sibling wait, the provider create (including the
+   * provider's readiness probe) and asset staging, marks the creating row as
+   * errored and rethrows the signal's reason — without fencing or expiring
+   * anything, because nothing was handed out. A caller that merely joins an
+   * acquisition in flight only stops waiting.
+   */
+  signal?: AbortSignal;
+};
 
 export function resolveSandboxToolOperationReplay(input: {
   operationType: SandboxBridgeOperationType;
@@ -305,6 +374,24 @@ export class SandboxManager {
     string,
     Exclude<SandboxExecutionResultDisposition, "accepted">
   >();
+  /**
+   * Generations (providerSandboxId) that accepted at least one operation the
+   * model may rely on: a succeeded prepare/execute/collect record, or an
+   * execute/file result the generation fence accepted. Host staging of
+   * required assets and skill bundles is deliberately NOT recorded — it is
+   * idempotent host work that a replacement generation re-runs, so it never
+   * represents state the model put there. A fenced generation in this set is
+   * fail-closed (SandboxInstanceChangedError); one outside it is replaced.
+   */
+  private readonly acceptedOperations = new Set<string>();
+  /** Record id → providerSandboxId for every generation this manager handed out. */
+  private readonly generationsBySandboxId = new Map<string, string>();
+  /**
+   * Set when a terminated stateless generation was forgotten so the next
+   * acquisition creates a fresh one; consumed once by the first model-visible
+   * tool result that runs on the replacement (see consumeReplacementNotice).
+   */
+  private pendingReplacementNotice = false;
   private latestRequiredAssetResolutions: RuntimeAssetResolution[] | null =
     null;
   private latestSkillResolutions: RuntimeAssetResolution[] | null = null;
@@ -323,7 +410,7 @@ export class SandboxManager {
 
   async getOrCreateThreadSandbox(
     context: SandboxRuntimeContext,
-    options: { waitTimeoutMs?: number; waitIntervalMs?: number } = {},
+    options: SandboxAcquisitionOptions = {},
   ): Promise<SandboxRef> {
     const key = JSON.stringify([
       this.input.provider.id,
@@ -333,52 +420,174 @@ export class SandboxManager {
       context.runId,
       context.userId,
     ]);
-    let initialization = this.initializationRuns.get(key);
-    if (!initialization) {
-      initialization = (async () => {
-        const sandbox = await this.acquireThreadSandbox(context, options);
-        await this.acquisitionPhase(
-          "prepare",
-          context,
-          async () => {
-            await this.ensureRequiredAssetsOnce(sandbox);
-            await this.ensureSkillAssetsStaged(sandbox);
-          },
-          sandbox.id,
-        );
-        return sandbox;
-      })();
-      this.initializationRuns.set(key, initialization);
-    }
-    const sandbox = await initialization;
-    if (this.invalidatedSandboxes.has(sandbox.providerSandboxId)) {
-      throw new SandboxInstanceChangedError();
-    }
-    await this.acquisitionPhase(
-      "renew",
-      context,
-      async () => {
-        const touched = await this.input.sandboxStore.touchSandbox({
-          sandboxId: sandbox.id,
-          providerSandboxId: sandbox.providerSandboxId,
-          expiresAt: this.sandboxExpiresAt(),
+    throwIfAborted(options.signal);
+    // At most one replacement per call: a generation that is fenced again
+    // right after being recreated is not a cold-start casualty.
+    for (let replacements = 0; ; replacements += 1) {
+      let initialization = this.initializationRuns.get(key);
+      let owner = false;
+      if (!initialization) {
+        owner = true;
+        initialization = this.initializeThreadSandbox(context, options);
+        this.initializationRuns.set(key, initialization);
+        const started = initialization;
+        void started.catch(() => {
+          // Callers already waiting share this failure (siblings must not
+          // each start a sandbox after the same outage), but it is not the
+          // run's verdict: a later call re-acquires, which is what makes the
+          // NOT_READY "retry in a new tool call" hint — and a prefetch that
+          // hit a 429 — recoverable at all.
+          if (this.initializationRuns.get(key) === started) {
+            this.initializationRuns.delete(key);
+          }
         });
-        if (!touched) throw new SandboxInstanceChangedError();
-      },
-      sandbox.id,
-    );
-    return sandbox;
+      }
+      const sandbox = owner
+        ? await initialization
+        : await raceWithSignal(initialization, options.signal);
+      this.generationsBySandboxId.set(sandbox.id, sandbox.providerSandboxId);
+      if (this.invalidatedSandboxes.has(sandbox.providerSandboxId)) {
+        if (
+          replacements > 0 ||
+          !this.forgetStatelessGeneration({
+            key,
+            initialization,
+            sandbox,
+            context,
+            phase: "fence",
+          })
+        ) {
+          throw new SandboxInstanceChangedError();
+        }
+        continue;
+      }
+      const touched = await this.acquisitionPhase(
+        "renew",
+        context,
+        () =>
+          this.input.sandboxStore.touchSandbox({
+            sandboxId: sandbox.id,
+            providerSandboxId: sandbox.providerSandboxId,
+            expiresAt: this.sandboxExpiresAt(),
+          }),
+        sandbox.id,
+      );
+      if (touched) return sandbox;
+      // The durable row is no longer ready (swept, or fenced by another
+      // worker). Late results for it are rejected by the store comparison;
+      // record the fence here so they are rejected without a round trip.
+      this.invalidatedSandboxes.set(
+        sandbox.providerSandboxId,
+        "instance_changed",
+      );
+      if (
+        replacements > 0 ||
+        !this.forgetStatelessGeneration({
+          key,
+          initialization,
+          sandbox,
+          context,
+          phase: "renew",
+        })
+      ) {
+        this.input.logWarn?.("sandbox.acquire.failed", {
+          phase: "renew",
+          provider: this.input.provider.id,
+          ...context,
+          sandboxId: sandbox.id,
+          error: sandboxErrorDiagnostic(new SandboxInstanceChangedError()),
+        });
+        throw new SandboxInstanceChangedError();
+      }
+    }
+  }
+
+  /**
+   * Drop a terminated generation that accepted no operation so the next
+   * acquisition creates a fresh one. Returns false — and changes nothing —
+   * when the generation accepted operations: the model may rely on files in
+   * that /workspace, so it must fail closed instead. The old id stays in
+   * `invalidatedSandboxes`; late results from it are still rejected.
+   */
+  private forgetStatelessGeneration(input: {
+    key: string;
+    initialization: Promise<SandboxRef>;
+    sandbox: SandboxRef;
+    context: SandboxRuntimeContext;
+    phase: "fence" | "renew";
+  }): boolean {
+    const generation = input.sandbox.providerSandboxId;
+    if (this.acceptedOperations.has(generation)) return false;
+    if (this.initializationRuns.get(input.key) === input.initialization) {
+      this.initializationRuns.delete(input.key);
+    }
+    this.skillStagingStates.delete(generation);
+    this.requiredAssetStagingRuns.delete(generation);
+    // Conservative until the replacement stages again: /skills stays denied.
+    this.latestSkillResolutions = null;
+    this.latestRequiredAssetResolutions = null;
+    this.pendingReplacementNotice = true;
+    this.input.logWarn?.("sandbox.generation.replaced", {
+      phase: input.phase,
+      provider: this.input.provider.id,
+      ...input.context,
+      sandboxId: input.sandbox.id,
+      providerSandboxId: generation,
+      disposition: this.invalidatedSandboxes.get(generation),
+    });
+    return true;
+  }
+
+  /**
+   * True exactly once after a stateless generation was replaced. Tool code
+   * attaches the replacement notice to the result it is about to return, so
+   * the model learns that /workspace is empty from the call that first ran on
+   * the fresh generation rather than from a confusing "No such file".
+   */
+  consumeReplacementNotice(): boolean {
+    const pending = this.pendingReplacementNotice;
+    this.pendingReplacementNotice = false;
+    return pending;
+  }
+
+  private async initializeThreadSandbox(
+    context: SandboxRuntimeContext,
+    options: SandboxAcquisitionOptions,
+  ): Promise<SandboxRef> {
+    try {
+      const sandbox = await this.acquireThreadSandbox(context, options);
+      await this.acquisitionPhase(
+        "prepare",
+        context,
+        async () => {
+          await this.ensureRequiredAssetsOnce(sandbox, options.signal);
+          throwIfAborted(options.signal);
+          await this.ensureSkillAssetsStaged(sandbox, options.signal);
+          throwIfAborted(options.signal);
+        },
+        sandbox.id,
+      );
+      return sandbox;
+    } catch (error) {
+      // Whatever failed first, an aborted owner reports its own reason.
+      if (options.signal?.aborted) throw abortReason(options.signal);
+      throw error;
+    }
   }
 
   private async acquireThreadSandbox(
     context: SandboxRuntimeContext,
-    options: { waitTimeoutMs?: number; waitIntervalMs?: number } = {},
+    options: SandboxAcquisitionOptions = {},
   ): Promise<SandboxRef> {
+    const signal = options.signal;
     const waitTimeoutMs =
       options.waitTimeoutMs ?? SANDBOX_CREATING_WAIT_TIMEOUT_MS;
     const waitIntervalMs =
       options.waitIntervalMs ?? SANDBOX_CREATING_WAIT_INTERVAL_MS;
     const waitStartedAt = Date.now();
+    // Fenced generations this call already tried to expire; seeing one again
+    // means the store is not converging and the call must fail closed.
+    const expiredHere = new Set<string>();
 
     for (;;) {
       const existing = await this.acquisitionPhase("lookup", context, () =>
@@ -393,7 +602,7 @@ export class SandboxManager {
           const ageMs = Date.now() - existing.updatedAt.getTime();
           if (ageMs < SANDBOX_CREATING_STALE_MS) {
             if (Date.now() - waitStartedAt < waitTimeoutMs) {
-              await sleep(waitIntervalMs);
+              await sleep(waitIntervalMs, signal);
               continue;
             }
             throw new Error(
@@ -411,6 +620,23 @@ export class SandboxManager {
             );
           }
         } else {
+          if (this.invalidatedSandboxes.has(existing.providerSandboxId)) {
+            // This manager already fenced that generation; the store still
+            // says ready only because the fence write did not land. Never
+            // hand it out again — expire it and look once more.
+            if (expiredHere.has(existing.providerSandboxId)) {
+              throw new SandboxInstanceChangedError();
+            }
+            expiredHere.add(existing.providerSandboxId);
+            const expired = await this.input.sandboxStore.markSandboxExpired({
+              sandboxId: existing.id,
+              providerSandboxId: existing.providerSandboxId,
+              expectedStatus: "ready",
+              expectedUpdatedAt: existing.updatedAtToken ?? existing.updatedAt,
+            });
+            if (!expired) throw new SandboxInstanceChangedError();
+            continue;
+          }
           try {
             await this.acquisitionPhase(
               "check",
@@ -433,6 +659,10 @@ export class SandboxManager {
             }
             continue;
           }
+          // A generation found ready — created by an earlier turn or another
+          // worker — may already hold files the model relies on; this manager
+          // cannot know, so it is never a replacement candidate.
+          this.acceptedOperations.add(existing.providerSandboxId);
           return {
             id: existing.id,
             provider: this.input.provider.id,
@@ -457,15 +687,17 @@ export class SandboxManager {
             "SANDBOX_CREATION_WAIT_TIMEOUT: sandbox acquisition is still in progress.",
           );
         }
-        await sleep(waitIntervalMs);
+        await sleep(waitIntervalMs, signal);
         continue;
       }
 
       const startedAt = Date.now();
       let providerSandboxId: string | undefined;
       try {
-        const sandbox = await this.createProviderSandbox(context, id);
+        throwIfAborted(signal);
+        const sandbox = await this.createProviderSandbox(context, id, signal);
         providerSandboxId = sandbox.id;
+        throwIfAborted(signal);
         await this.checkReusableSandbox(sandbox.id);
         const ready = await this.input.sandboxStore.markSandboxReady({
           sandboxId: id,
@@ -495,6 +727,24 @@ export class SandboxManager {
           providerSandboxId,
           error: sandboxErrorDiagnostic(error),
         });
+        if (providerSandboxId !== undefined) {
+          // The container exists but its row will never be ready (abort,
+          // failed health check, or another worker claimed the row). The
+          // expiry sweep reclaims ready rows only and the bridge has no
+          // reaper, so delete it now; best effort, the error below wins.
+          try {
+            await this.input.provider.deleteSandbox(providerSandboxId);
+          } catch (deleteError) {
+            this.input.logWarn?.("sandbox.acquire.failed", {
+              phase: "delete_unready_create",
+              provider: this.input.provider.id,
+              ...context,
+              sandboxId: id,
+              providerSandboxId,
+              error: sandboxErrorDiagnostic(deleteError),
+            });
+          }
+        }
         try {
           await this.input.sandboxStore.markCreatingSandboxError({
             sandboxId: id,
@@ -543,11 +793,13 @@ export class SandboxManager {
   private async createProviderSandbox(
     context: SandboxRuntimeContext,
     sandboxId: string,
+    signal?: AbortSignal,
   ) {
     for (let attempt = 0; ; attempt += 1) {
       try {
         return await this.input.provider.createSandbox({
           ttlSeconds: this.input.ttlSeconds,
+          ...(signal ? { signal } : {}),
           labels: {
             sourceweft: "true",
             provider: this.input.provider.id,
@@ -560,9 +812,18 @@ export class SandboxManager {
         });
       } catch (error) {
         const delayMs = SANDBOX_CREATE_RETRY_DELAYS_MS[attempt];
-        if (delayMs === undefined || !isSandboxProviderUnavailableError(error)) {
+        if (
+          delayMs === undefined ||
+          !isSandboxProviderUnavailableError(error) ||
+          // The container was created and probed for the full budget without
+          // ever serving a command; the provider deleted it. Retrying would
+          // spend another create + probe budget and blow the sibling wait.
+          isSandboxReadinessProbeFailure(error)
+        ) {
           throw error;
         }
+        // An abort that surfaced as a provider error is not an outage.
+        throwIfAborted(signal);
         this.input.logWarn?.("sandbox.create.retry", {
           provider: this.input.provider.id,
           ...context,
@@ -573,7 +834,10 @@ export class SandboxManager {
           error: sandboxErrorDiagnostic(error),
         });
         // Jitter so callers that failed together do not retry together.
-        await sleep(delayMs + Math.floor(Math.random() * (delayMs / 4)));
+        await sleep(
+          delayMs + Math.floor(Math.random() * (delayMs / 4)),
+          signal,
+        );
       }
     }
   }
@@ -641,15 +905,30 @@ export class SandboxManager {
   }
 
   /** Required assets fail the sandbox acquisition instead of degrading. */
-  private async ensureRequiredAssetsOnce(sandbox: SandboxRef) {
+  private async ensureRequiredAssetsOnce(
+    sandbox: SandboxRef,
+    signal?: AbortSignal,
+  ) {
     const staging = this.input.requiredAssetStaging;
     if (!staging) {
       return;
     }
     let run = this.requiredAssetStagingRuns.get(sandbox.providerSandboxId);
     if (!run) {
-      run = this.runRequiredAssetStaging(sandbox, staging);
-      this.requiredAssetStagingRuns.set(sandbox.providerSandboxId, run);
+      const started = this.runRequiredAssetStaging(sandbox, staging, signal);
+      run = started;
+      this.requiredAssetStagingRuns.set(sandbox.providerSandboxId, started);
+      void started.catch(() => {
+        // An aborted staging run proves nothing about the assets; let the
+        // next acquisition of this generation stage them.
+        if (
+          signal?.aborted &&
+          this.requiredAssetStagingRuns.get(sandbox.providerSandboxId) ===
+            started
+        ) {
+          this.requiredAssetStagingRuns.delete(sandbox.providerSandboxId);
+        }
+      });
     }
     this.latestRequiredAssetResolutions = await run;
   }
@@ -657,16 +936,22 @@ export class SandboxManager {
   private async runRequiredAssetStaging(
     sandbox: SandboxRef,
     staging: SandboxRuntimeAssetStaging,
+    signal?: AbortSignal,
   ): Promise<RuntimeAssetResolution[]> {
     const plans = await staging.plans();
+    throwIfAborted(signal);
     const resolutions = await ensureRuntimeAssets({
       session: this.runtimeAssetStagingSession(
         sandbox.providerSandboxId,
         staging,
+        signal,
       ),
       assets: plans,
       ...(staging.logger ? { logger: staging.logger } : {}),
     });
+    // The engine records an aborted command as a failed asset; the abort is
+    // the real outcome.
+    throwIfAborted(signal);
     const failed = resolutions.filter((resolution) => !resolution.ok);
     if (failed.length > 0) {
       for (const resolution of failed) {
@@ -703,7 +988,7 @@ export class SandboxManager {
    * staging failure leaves the sandbox usable with /skills denied (today's
    * behavior), which the resolutions record.
    */
-  async ensureSkillAssetsStaged(sandbox: SandboxRef) {
+  async ensureSkillAssetsStaged(sandbox: SandboxRef, signal?: AbortSignal) {
     const staging = this.input.skillStaging;
     if (!staging) {
       return;
@@ -717,9 +1002,10 @@ export class SandboxManager {
     // Serialized per sandbox: parallel executes share one staging directory
     // per bundle, so two concurrent runs of the same plan would race on it.
     const run = current.tail.then(() =>
-      this.stagePendingSkillPlans(sandbox, staging, current),
+      this.stagePendingSkillPlans(sandbox, staging, current, signal),
     );
-    current.tail = run;
+    // Only an abort rejects a run; the tail must stay settled for the next.
+    current.tail = run.catch(() => undefined);
     await run;
     // Read after staging: building a plan can itself move a skill here. The
     // host's verdict wins over an earlier attempt under the same name.
@@ -737,8 +1023,10 @@ export class SandboxManager {
     sandbox: SandboxRef,
     staging: SandboxSkillStaging,
     state: SkillStagingState,
+    signal?: AbortSignal,
   ): Promise<void> {
     try {
+      throwIfAborted(signal);
       const plans = await staging.plans();
       // A failed bundle is not retried within the turn (each attempt costs
       // several sandbox round trips); an identical bundle staged by an earlier
@@ -753,10 +1041,14 @@ export class SandboxManager {
         session: this.runtimeAssetStagingSession(
           sandbox.providerSandboxId,
           staging,
+          signal,
         ),
         assets: pending,
         ...(staging.logger ? { logger: staging.logger } : {}),
       });
+      // An aborted attempt must not be memoized as a failed bundle: the
+      // bundle was never judged, and the memo would deny /skills all turn.
+      throwIfAborted(signal);
       resolutions.forEach((resolution, index) => {
         const plan = pending[index];
         if (plan) {
@@ -787,6 +1079,7 @@ export class SandboxManager {
         }
       });
     } catch (error) {
+      if (signal?.aborted) throw error;
       staging.logger?.warn?.("sandbox_skill_staging_failed", {
         error: error instanceof Error ? error.message : String(error),
       });
@@ -802,6 +1095,7 @@ export class SandboxManager {
   private runtimeAssetStagingSession(
     providerSandboxId: string,
     staging: SandboxRuntimeAssetStaging,
+    signal?: AbortSignal,
   ): RuntimeAssetSessionLike {
     const provider = this.input.provider;
     const execute = provider.executeSystem
@@ -812,11 +1106,13 @@ export class SandboxManager {
       skillsRoot: provider.pathPolicy.skillsRoot,
       checksumCommand: provider.id === "local" ? "shasum -a 256" : undefined,
       execute: async (command) => {
+        throwIfAborted(signal);
         const result = await execute({
           providerSandboxId,
           command,
           timeoutMs: staging.commandTimeoutMs,
           maxOutputChars: staging.maxOutputChars,
+          ...(signal ? { signal } : {}),
         });
         return {
           exitCode: result.exitCode,
@@ -829,6 +1125,7 @@ export class SandboxManager {
       uploadFiles: async (files) => {
         const results: Array<{ path: string; error?: string | null }> = [];
         for (const [path, content] of files) {
+          throwIfAborted(signal);
           try {
             await provider.uploadFile({
               providerSandboxId,
@@ -852,6 +1149,7 @@ export class SandboxManager {
           error?: string | null;
         }> = [];
         for (const path of paths) {
+          throwIfAborted(signal);
           try {
             const content = await provider.downloadFile({
               providerSandboxId,
@@ -1034,6 +1332,12 @@ export class SandboxManager {
         expiresAt: this.sandboxExpiresAt(),
       });
       if (!touched) throw new SandboxInstanceChangedError();
+      // A succeeded tool operation is state the model may rely on (a prepare
+      // that uploaded files, an execute that wrote outputs); a recoverable
+      // failure recorded under the same status counts too, since a partial
+      // upload may have landed. From here on this generation fails closed.
+      const generation = this.generationsBySandboxId.get(input.sandboxId);
+      if (generation) this.acceptedOperations.add(generation);
     }
     await this.input.operationStore.completeToolOperation({
       ...input,
@@ -1098,6 +1402,22 @@ export class SandboxManager {
    * Command-scoped cancellation leaves unrelated siblings reusable.
    */
   async resolveExecutionResultDisposition(
+    sandbox: SandboxRef,
+    context: SandboxRuntimeContext,
+  ): Promise<SandboxExecutionResultDisposition> {
+    const disposition = await this.resolveDispositionAgainstFence(
+      sandbox,
+      context,
+    );
+    // The caller is about to hand the model a result produced on this
+    // generation; from now on it cannot be replaced silently.
+    if (disposition === "accepted") {
+      this.acceptedOperations.add(sandbox.providerSandboxId);
+    }
+    return disposition;
+  }
+
+  private async resolveDispositionAgainstFence(
     sandbox: SandboxRef,
     context: SandboxRuntimeContext,
   ): Promise<SandboxExecutionResultDisposition> {

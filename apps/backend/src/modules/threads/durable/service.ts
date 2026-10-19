@@ -1,5 +1,8 @@
 import { ContentError } from "../../content/errors";
-import { sanitizeClientErrorMessage } from "../../content/model-gateway-error";
+import {
+  isModelUpstreamContentErrorCode,
+  sanitizeClientErrorMessage,
+} from "../../content/model-gateway-error";
 import type { ThreadRunFailureSummary } from "@sourceweft/contracts/threads";
 import { requireContentWorkspace } from "../../workspace/guards";
 import {
@@ -159,6 +162,67 @@ async function resolveRedeliveredActiveRun(
     ...(recovered.errorCode ? { errorCode: recovered.errorCode } : {}),
     ...(recovered.errorMessage ? { errorMessage: recovered.errorMessage } : {}),
   };
+}
+
+type FinishRunInput = {
+  run: ChatThreadRunRecord;
+  status: "completed" | "failed" | "cancelled";
+  userMessageId?: string | null;
+  assistantMessageId?: string | null;
+  snapshot?: ChatRunSnapshot;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+};
+
+/**
+ * Whether a run reaching a terminal status should give up its thread sandbox
+ * lease (shorten the sandbox TTL so the sweeper reclaims it soon).
+ *
+ * A `failed` run whose error is a model/upstream failure (timeout, rate limit,
+ * provider error) keeps the lease: the sandbox and its /workspace are intact,
+ * the failure had nothing to do with it, and the user's next message is almost
+ * always a "continue" that would otherwise pay the full cold start again
+ * (S7 of the sandbox cold-start recovery contract, issue #323). The sandbox
+ * then lives out its normal TTL (<= 1 h) instead of the 5 min release window.
+ * `cancelled` runs and every other failure release as before.
+ */
+function shouldReleaseSandboxLeaseForFinishedRun(input: {
+  status: FinishRunInput["status"];
+  errorCode: string | null | undefined;
+}) {
+  if (input.status === "cancelled") return true;
+  if (input.status !== "failed") return false;
+  return !isModelUpstreamContentErrorCode(input.errorCode);
+}
+
+async function finishRunWithDependencies(
+  input: FinishRunInput,
+  dependencies: {
+    finishRun: typeof finishChatThreadRun;
+    releaseLease: typeof releaseSandboxLeaseForTerminalRun;
+  },
+) {
+  const finished = await dependencies.finishRun({
+    runId: input.run.id,
+    teamId: input.run.teamId,
+    workspaceId: input.run.workspaceId,
+    status: input.status,
+    userMessageId: input.userMessageId,
+    assistantMessageId: input.assistantMessageId,
+    snapshotJson: input.snapshot,
+    errorCode: input.errorCode,
+    errorMessage: input.errorMessage,
+  });
+  if (
+    finished &&
+    shouldReleaseSandboxLeaseForFinishedRun({
+      status: input.status,
+      errorCode: input.errorCode ?? finished.errorCode,
+    })
+  ) {
+    await dependencies.releaseLease(finished, `chat_run_${input.status}`);
+  }
+  return finished;
 }
 
 export class DurableChatRunService {
@@ -634,36 +698,11 @@ export class DurableChatRunService {
     return running;
   }
 
-  async finishRun(input: {
-    run: ChatThreadRunRecord;
-    status: "completed" | "failed" | "cancelled";
-    userMessageId?: string | null;
-    assistantMessageId?: string | null;
-    snapshot?: ChatRunSnapshot;
-    errorCode?: string | null;
-    errorMessage?: string | null;
-  }) {
-    const finished = await finishChatThreadRun({
-      runId: input.run.id,
-      teamId: input.run.teamId,
-      workspaceId: input.run.workspaceId,
-      status: input.status,
-      userMessageId: input.userMessageId,
-      assistantMessageId: input.assistantMessageId,
-      snapshotJson: input.snapshot,
-      errorCode: input.errorCode,
-      errorMessage: input.errorMessage,
+  async finishRun(input: FinishRunInput) {
+    return finishRunWithDependencies(input, {
+      finishRun: finishChatThreadRun,
+      releaseLease: releaseSandboxLeaseForTerminalRun,
     });
-    if (
-      finished &&
-      (input.status === "failed" || input.status === "cancelled")
-    ) {
-      await releaseSandboxLeaseForTerminalRun(
-        finished,
-        `chat_run_${input.status}`,
-      );
-    }
-    return finished;
   }
 
   async markWaitingForApproval(input: {
@@ -757,6 +796,8 @@ export const durableChatRunService = new DurableChatRunService();
 
 export const testExports = {
   buildAssistantMessageSnapshotMetadata,
+  finishRunWithDependencies,
+  shouldReleaseSandboxLeaseForFinishedRun,
   buildAssistantMessageConfirmationMetadata,
   completeApprovalRunIfNoPendingConfirmations,
   failRunIfStale,

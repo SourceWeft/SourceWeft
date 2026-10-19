@@ -10,6 +10,9 @@ import {
   CLOUDFLARE_SANDBOX_PATH_POLICY,
   CloudflareBridgeHttpError,
   CloudflareSandboxProvider,
+  READINESS_PROBE_BACKOFF_MS,
+  READINESS_PROBE_BUDGET_MS,
+  READINESS_PROBE_COMMAND_TIMEOUT_MS,
   SOURCEWEFT_SANDBOX_STAMP_PATH,
   extractExitCode,
   extractSseText,
@@ -17,6 +20,7 @@ import {
   workspaceRelativePath,
 } from "../src/cloudflare-provider";
 import { createCloudflareSandboxProviderFactory } from "../src/provider-factory";
+import type { ProviderClock } from "../src/cloudflare-provider";
 
 const BRIDGE_URL = "https://bridge.example.workers.dev";
 const API_KEY = "test-api-key";
@@ -75,6 +79,7 @@ function createMockBridge(routes: Array<[RegExp, RouteHandler]>) {
 function createProvider(
   routes: Array<[RegExp, RouteHandler]>,
   maxOutputChars = 10_000,
+  clock?: ProviderClock,
 ) {
   const bridge = createMockBridge(routes);
   const provider = new CloudflareSandboxProvider({
@@ -82,8 +87,56 @@ function createProvider(
     apiKey: API_KEY,
     maxOutputChars,
     fetchImpl: bridge.fetchImpl,
+    clock,
   });
   return { provider, requests: bridge.requests };
+}
+
+/**
+ * Fake clock for the readiness probe: every sleep advances virtual time by
+ * its full duration instantly and is recorded, and honours abort like the
+ * real one.
+ */
+function createFakeClock() {
+  let now = 0;
+  const sleeps: number[] = [];
+  const clock: ProviderClock = {
+    now: () => now,
+    sleep: async (ms, signal) => {
+      signal?.throwIfAborted();
+      sleeps.push(ms);
+      now += ms;
+    },
+  };
+  return { clock, sleeps, now: () => now };
+}
+
+const STAMP_ROUTE = /^GET .*\.sourceweft-sandbox-id$/;
+const EXEC_ROUTE = /^POST .*\/exec$/;
+
+function execExit(exitCode: number) {
+  return sseResponse([
+    { event: "exit", data: JSON.stringify({ exit_code: exitCode }) },
+  ]);
+}
+
+/** Bridge routes for a healthy create: create, stamp write, stamp read, exec. */
+function readyCreateRoutes(
+  exec: RouteHandler = () => execExit(0),
+): Array<[RegExp, RouteHandler]> {
+  return [
+    [/^POST .*\/v1\/sandbox$/, () => Response.json({ id: "sb-1" })],
+    [/^PUT /, () => new Response(null, { status: 200 })],
+    [STAMP_ROUTE, () => new Response("sb-1\n")],
+    [EXEC_ROUTE, exec],
+    [/^DELETE /, () => new Response(null, { status: 200 })],
+  ];
+}
+
+function methodsOf(requests: RecordedRequest[]) {
+  return requests.map(
+    (request) => `${request.method} ${new URL(request.url).pathname}`,
+  );
 }
 
 describe("path policy", () => {
@@ -170,11 +223,13 @@ describe("SSE payload extraction", () => {
 });
 
 describe("CloudflareSandboxProvider", () => {
-  test("creates a sandbox and writes the identity stamp", async () => {
-    const { provider, requests } = createProvider([
-      [/^POST .*\/v1\/sandbox$/, () => Response.json({ id: "sb-1" })],
-      [/^PUT /, () => new Response(null, { status: 200 })],
-    ]);
+  test("creates a sandbox, writes the identity stamp and probes readiness", async () => {
+    const { clock, sleeps } = createFakeClock();
+    const { provider, requests } = createProvider(
+      readyCreateRoutes(),
+      10_000,
+      clock,
+    );
 
     const sandbox = await provider.createSandbox({
       ttlSeconds: 3600,
@@ -182,13 +237,25 @@ describe("CloudflareSandboxProvider", () => {
     });
 
     assert.equal(sandbox.id, "sb-1");
-    assert.equal(requests.length, 2);
+    assert.deepEqual(methodsOf(requests), [
+      "POST /v1/sandbox",
+      "PUT /v1/sandbox/sb-1/file/workspace/.sourceweft-sandbox-id",
+      "GET /v1/sandbox/sb-1/file/workspace/.sourceweft-sandbox-id",
+      "POST /v1/sandbox/sb-1/exec",
+    ]);
     assert.equal(requests[0]?.headers.Authorization, `Bearer ${API_KEY}`);
     assert.equal(
       requests[1]?.url,
       `${BRIDGE_URL}/v1/sandbox/sb-1/file/workspace/${SOURCEWEFT_SANDBOX_STAMP_PATH.slice("/workspace/".length)}`,
     );
     assert.deepEqual(requests[1]?.body, new TextEncoder().encode("sb-1"));
+    const probe = JSON.parse(String(requests[3]?.body)) as {
+      argv: string[];
+      timeout_ms: number;
+    };
+    assert.deepEqual(probe.argv, ["sh", "-lc", "true"]);
+    assert.equal(probe.timeout_ms, READINESS_PROBE_COMMAND_TIMEOUT_MS);
+    assert.deepEqual(sleeps, []);
   });
 
   test("fails clearly when create returns no id", async () => {
@@ -556,6 +623,294 @@ describe("CloudflareSandboxProvider", () => {
         }),
       /SANDBOX_NOT_CONFIGURED: CF_SANDBOX_API_KEY/,
     );
+  });
+});
+
+describe("createSandbox readiness probe", () => {
+  test("exports the probe thresholds", () => {
+    assert.equal(READINESS_PROBE_COMMAND_TIMEOUT_MS, 5_000);
+    assert.equal(READINESS_PROBE_BUDGET_MS, 90_000);
+    assert.deepEqual([...READINESS_PROBE_BACKOFF_MS], [1_000, 2_000, 4_000]);
+  });
+
+  test("retries unavailable probes with 1s/2s backoff until the container answers", async () => {
+    const { clock, sleeps } = createFakeClock();
+    let execCalls = 0;
+    const { provider, requests } = createProvider(
+      readyCreateRoutes(() =>
+        ++execCalls < 3
+          ? new Response("not ready", { status: 503 })
+          : execExit(0),
+      ),
+      10_000,
+      clock,
+    );
+
+    const sandbox = await provider.createSandbox({
+      ttlSeconds: 60,
+      labels: {},
+    });
+
+    assert.equal(sandbox.id, "sb-1");
+    assert.equal(execCalls, 3);
+    assert.deepEqual(sleeps, [1_000, 2_000]);
+    assert.deepEqual(methodsOf(requests), [
+      "POST /v1/sandbox",
+      "PUT /v1/sandbox/sb-1/file/workspace/.sourceweft-sandbox-id",
+      "GET /v1/sandbox/sb-1/file/workspace/.sourceweft-sandbox-id",
+      "POST /v1/sandbox/sb-1/exec",
+      "GET /v1/sandbox/sb-1/file/workspace/.sourceweft-sandbox-id",
+      "POST /v1/sandbox/sb-1/exec",
+      "GET /v1/sandbox/sb-1/file/workspace/.sourceweft-sandbox-id",
+      "POST /v1/sandbox/sb-1/exec",
+    ]);
+    assert.ok(!requests.some((request) => request.method === "DELETE"));
+  });
+
+  test("treats a probe that does not exit 0 as not ready yet", async () => {
+    const { clock, sleeps } = createFakeClock();
+    let execCalls = 0;
+    const { provider } = createProvider(
+      readyCreateRoutes(() => execExit(++execCalls < 2 ? 127 : 0)),
+      10_000,
+      clock,
+    );
+
+    await provider.createSandbox({ ttlSeconds: 60, labels: {} });
+
+    assert.equal(execCalls, 2);
+    assert.deepEqual(sleeps, [1_000]);
+  });
+
+  test("fails closed and deletes the sandbox when the budget is exhausted", async () => {
+    const { clock, sleeps, now } = createFakeClock();
+    let execCalls = 0;
+    const { provider, requests } = createProvider(
+      readyCreateRoutes(() => {
+        execCalls += 1;
+        return new Response("not ready", { status: 503 });
+      }),
+      10_000,
+      clock,
+    );
+
+    await assert.rejects(
+      provider.createSandbox({ ttlSeconds: 60, labels: {} }),
+      (error: unknown) =>
+        error instanceof SandboxProviderError &&
+        error.code === SANDBOX_PROVIDER_ERROR_CODES.unavailable &&
+        error.phase === "create" &&
+        /sandbox did not become ready within 90s after create/.test(
+          error.message,
+        ) &&
+        error.cause instanceof SandboxProviderError &&
+        error.cause.code === SANDBOX_PROVIDER_ERROR_CODES.unavailable,
+    );
+
+    // 1s, 2s, then 4s capped: 3s + 21 * 4s = 87s; the next 4s would cross 90s.
+    assert.deepEqual(sleeps, [1_000, 2_000, ...Array<number>(21).fill(4_000)]);
+    assert.equal(now(), 87_000);
+    assert.ok(now() < READINESS_PROBE_BUDGET_MS);
+    assert.ok(now() + 4_000 >= READINESS_PROBE_BUDGET_MS);
+    assert.equal(execCalls, sleeps.length + 1);
+    assert.equal(requests.at(-1)?.method, "DELETE");
+    assert.equal(new URL(requests.at(-1)!.url).pathname, "/v1/sandbox/sb-1");
+  });
+
+  test("retries a probe whose exec times out", async () => {
+    const { clock, sleeps } = createFakeClock();
+    let execCalls = 0;
+    const { provider } = createProvider(
+      readyCreateRoutes(() =>
+        ++execCalls < 2
+          ? new Response("gateway timeout", { status: 504 })
+          : execExit(0),
+      ),
+      10_000,
+      clock,
+    );
+
+    await provider.createSandbox({ ttlSeconds: 60, labels: {} });
+
+    assert.equal(execCalls, 2);
+    assert.deepEqual(sleeps, [1_000]);
+  });
+
+  test("retries when the stamp read itself is temporarily unavailable", async () => {
+    const { clock, sleeps } = createFakeClock();
+    let stampReads = 0;
+    const { provider, requests } = createProvider(
+      [
+        [/^POST .*\/v1\/sandbox$/, () => Response.json({ id: "sb-1" })],
+        [/^PUT /, () => new Response(null, { status: 200 })],
+        [
+          STAMP_ROUTE,
+          () =>
+            ++stampReads < 2
+              ? new Response("warming", { status: 503 })
+              : new Response("sb-1\n"),
+        ],
+        [EXEC_ROUTE, () => execExit(0)],
+      ],
+      10_000,
+      clock,
+    );
+
+    await provider.createSandbox({ ttlSeconds: 60, labels: {} });
+
+    assert.equal(stampReads, 2);
+    assert.deepEqual(sleeps, [1_000]);
+    assert.equal(
+      requests.filter((request) =>
+        EXEC_ROUTE.test(`${request.method} ${request.url}`),
+      ).length,
+      1,
+    );
+  });
+
+  test("does not retry authentication failures and still deletes the sandbox", async () => {
+    const { clock, sleeps } = createFakeClock();
+    let execCalls = 0;
+    const { provider, requests } = createProvider(
+      readyCreateRoutes(() => {
+        execCalls += 1;
+        return new Response("forbidden", { status: 401 });
+      }),
+      10_000,
+      clock,
+    );
+
+    await assert.rejects(
+      provider.createSandbox({ ttlSeconds: 60, labels: {} }),
+      (error: unknown) =>
+        error instanceof SandboxProviderError &&
+        error.code === SANDBOX_PROVIDER_ERROR_CODES.authentication,
+    );
+
+    assert.equal(execCalls, 1);
+    assert.deepEqual(sleeps, []);
+    assert.equal(requests.at(-1)?.method, "DELETE");
+  });
+
+  test("does not retry a stamp mismatch", async () => {
+    const { clock, sleeps } = createFakeClock();
+    const { provider, requests } = createProvider(
+      [
+        [/^POST .*\/v1\/sandbox$/, () => Response.json({ id: "sb-1" })],
+        [/^PUT /, () => new Response(null, { status: 200 })],
+        [STAMP_ROUTE, () => new Response("sb-other\n")],
+        [EXEC_ROUTE, () => execExit(0)],
+        [/^DELETE /, () => new Response(null, { status: 200 })],
+      ],
+      10_000,
+      clock,
+    );
+
+    await assert.rejects(
+      provider.createSandbox({ ttlSeconds: 60, labels: {} }),
+      (error: unknown) => isSandboxInstanceMissingError(error),
+    );
+
+    assert.deepEqual(sleeps, []);
+    assert.ok(
+      !requests.some((request) =>
+        EXEC_ROUTE.test(`${request.method} ${request.url}`),
+      ),
+    );
+    assert.equal(requests.at(-1)?.method, "DELETE");
+  });
+
+  test("stops immediately when the signal aborts during a probe attempt", async () => {
+    const { clock, sleeps } = createFakeClock();
+    const controller = new AbortController();
+    const reason = new DOMException("turn cancelled", "AbortError");
+    let execCalls = 0;
+    const { provider, requests } = createProvider(
+      readyCreateRoutes((request) => {
+        execCalls += 1;
+        controller.abort(reason);
+        assert.equal(request.signal?.aborted, true);
+        return new Response("not ready", { status: 503 });
+      }),
+      10_000,
+      clock,
+    );
+
+    await assert.rejects(
+      provider.createSandbox({
+        ttlSeconds: 60,
+        labels: {},
+        signal: controller.signal,
+      }),
+      (error: unknown) => error === reason,
+    );
+
+    assert.equal(execCalls, 1);
+    assert.deepEqual(sleeps, []);
+    assert.equal(requests.at(-1)?.method, "DELETE");
+  });
+
+  test("stops immediately when the signal aborts during backoff (real timer)", async () => {
+    const controller = new AbortController();
+    const reason = new Error("cancelled mid-backoff");
+    let execCalls = 0;
+    const { provider, requests } = createProvider(
+      readyCreateRoutes(() => {
+        execCalls += 1;
+        return new Response("not ready", { status: 503 });
+      }),
+    );
+
+    const startedAt = Date.now();
+    const pending = provider.createSandbox({
+      ttlSeconds: 60,
+      labels: {},
+      signal: controller.signal,
+    });
+    setTimeout(() => controller.abort(reason), 20);
+
+    await assert.rejects(pending, (error: unknown) => error === reason);
+
+    assert.ok(Date.now() - startedAt < READINESS_PROBE_BACKOFF_MS[0]!);
+    assert.equal(execCalls, 1);
+    assert.equal(requests.at(-1)?.method, "DELETE");
+  });
+
+  test("does not run a probe when the signal is already aborted", async () => {
+    const controller = new AbortController();
+    controller.abort(new Error("already cancelled"));
+    const { provider, requests } = createProvider(readyCreateRoutes());
+
+    await assert.rejects(
+      provider.createSandbox({
+        ttlSeconds: 60,
+        labels: {},
+        signal: controller.signal,
+      }),
+      /already cancelled/,
+    );
+
+    assert.ok(
+      !requests.some((request) =>
+        EXEC_ROUTE.test(`${request.method} ${request.url}`),
+      ),
+    );
+    assert.equal(requests.at(-1)?.method, "DELETE");
+  });
+
+  test("health checks stay stamp-only and never exec", async () => {
+    const { provider, requests } = createProvider([
+      [STAMP_ROUTE, () => new Response("sb-9\n")],
+      [EXEC_ROUTE, () => assert.fail("health check must not exec")],
+    ]);
+
+    await provider.checkSandboxHealth("sb-9");
+    await provider.getSandbox("sb-9");
+
+    assert.deepEqual(methodsOf(requests), [
+      "GET /v1/sandbox/sb-9/file/workspace/.sourceweft-sandbox-id",
+      "GET /v1/sandbox/sb-9/file/workspace/.sourceweft-sandbox-id",
+    ]);
   });
 });
 

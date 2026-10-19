@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   SandboxManager,
+  SANDBOX_CREATE_WORST_CASE_MS,
+  SANDBOX_CREATING_STALE_MS,
+  SANDBOX_CREATING_WAIT_TIMEOUT_MS,
   resolveSandboxToolOperationReplay,
   stableSandboxRequestJson,
 } from "../../src/runtime/sandbox-manager";
@@ -901,11 +904,15 @@ for (const error of [
       if (result.status === "rejected")
         assert.strictEqual(result.reason, error);
     }
+    // Concurrent callers shared one check. A later call is a new attempt
+    // (a momentary outage must not poison the whole turn), so it checks
+    // again — and still neither expires nor recreates the instance.
+    assert.equal(checked, 1);
     await assert.rejects(
       manager.getOrCreateThreadSandbox(context),
       (e) => e === error,
     );
-    assert.equal(checked, 1);
+    assert.equal(checked, 2);
     assert.equal(expired, 0);
     assert.equal(created, 0);
   });
@@ -954,36 +961,354 @@ test("renewal errors preserve the original cause and safe diagnostics without in
   assert.ok(!JSON.stringify(logs).includes("private-value"));
 });
 
-test("a bound instance that loses its ready state is never replaced within that run", async () => {
-  const { context, store } = acquisitionFixture();
-  let active = true,
-    checks = 0,
-    created = 0;
+/**
+ * A store that tracks one thread's generations like the real table does:
+ * creating → ready → expired. Lets a test drive the full fence/replace cycle
+ * (terminate → look up → recreate) instead of scripting each lookup.
+ */
+function createStatefulSandboxStore() {
+  type Row = {
+    id: string;
+    providerSandboxId: string;
+    status: "creating" | "ready" | "expired" | "error";
+    updatedAt: Date;
+  };
+  const rows: Row[] = [];
+  const calls = { expired: 0, ready: 0, creatingError: 0, released: 0 };
+  const store: SandboxStore & { rows: Row[]; calls: typeof calls } = {
+    rows,
+    calls,
+    async findLatestActiveThreadSandbox({ context }) {
+      const row = [...rows]
+        .reverse()
+        .find((r) => r.status === "creating" || r.status === "ready");
+      return row
+        ? {
+            ...context,
+            id: row.id,
+            provider: "fake",
+            providerSandboxId: row.providerSandboxId,
+            status: row.status,
+            updatedAt: row.updatedAt,
+            expiresAt: new Date(Date.now() + 3600_000),
+          }
+        : null;
+    },
+    async insertCreatingSandbox(input) {
+      rows.push({
+        id: input.sandboxId,
+        providerSandboxId: input.providerSandboxId,
+        status: "creating",
+        updatedAt: new Date(),
+      });
+      return true;
+    },
+    async markSandboxReady(input) {
+      const row = rows.find((r) => r.id === input.sandboxId);
+      if (!row || row.status !== "creating") return false;
+      row.status = "ready";
+      row.providerSandboxId = input.providerSandboxId;
+      calls.ready += 1;
+      return true;
+    },
+    async markCreatingSandboxError(input) {
+      const row = rows.find((r) => r.id === input.sandboxId);
+      if (!row || row.status !== "creating") return false;
+      row.status = "error";
+      calls.creatingError += 1;
+      return true;
+    },
+    async markSandboxExpired(input) {
+      const row = rows.find((r) => r.id === input.sandboxId);
+      if (!row || row.status === "expired") return false;
+      row.status = "expired";
+      calls.expired += 1;
+      return true;
+    },
+    async releaseReadyThreadSandboxLease() {
+      calls.released += 1;
+      return 0;
+    },
+    async touchSandbox(input) {
+      const row = rows.find((r) => r.id === input.sandboxId);
+      return row?.status === "ready";
+    },
+  };
+  return store;
+}
+
+function replacementFixture() {
+  const { context } = acquisitionFixture();
+  const store = createStatefulSandboxStore();
+  let created = 0;
+  const logs: Array<{ event: string; meta: Record<string, unknown> }> = [];
   const manager = new SandboxManager({
     provider: {
       ...createTestProvider(),
-      getSandbox: async () => {
-        checks++;
-      },
       createSandbox: async () => {
-        created++;
-        return { id: "unexpected" };
+        created += 1;
+        return { id: `remote-${created}` };
       },
     },
-    sandboxStore: { ...store, touchSandbox: async () => active },
+    sandboxStore: store,
     operationStore: createMessageScopedOperationStore(),
     ttlSeconds: 3600,
     maxCommandTimeoutMs: 1000,
+    logWarn: (event, meta) =>
+      logs.push({ event, meta: meta as Record<string, unknown> }),
   });
-  await manager.getOrCreateThreadSandbox(context);
-  active = false;
+  return { context, store, manager, logs, created: () => created };
+}
+
+test("a generation terminated after a timeout before accepting any operation is replaced on the next acquisition", async () => {
+  const { context, store, manager, logs, created } = replacementFixture();
+  const first = await manager.getOrCreateThreadSandbox(context);
+  assert.equal(first.providerSandboxId, "remote-1");
+
+  // Provider without command-scoped cancellation: the host timeout deletes
+  // the sandbox and fences the generation.
+  const cancellation = await manager.cancelExecution({
+    sandbox: first,
+    executionId: "execution-1",
+    reason: "timed_out",
+  });
+  assert.deepEqual(cancellation, { confirmed: true, mode: "sandbox" });
+
+  const second = await manager.getOrCreateThreadSandbox(context);
+  assert.equal(second.providerSandboxId, "remote-2");
+  assert.notEqual(second.id, first.id);
+  assert.equal(created(), 2);
+  assert.equal(
+    logs.some((log) => log.event === "sandbox.generation.replaced"),
+    true,
+  );
+  // The notice reaches the model exactly once.
+  assert.equal(manager.consumeReplacementNotice(), true);
+  assert.equal(manager.consumeReplacementNotice(), false);
+
+  // Late results for the old generation are still rejected, and the
+  // replacement is the only generation whose results are accepted.
+  assert.equal(
+    await manager.resolveExecutionResultDisposition(first, context),
+    "sandbox_terminated",
+  );
+  assert.equal(
+    await manager.resolveExecutionResultDisposition(second, context),
+    "accepted",
+  );
+  // A third acquisition reuses the replacement without creating again.
+  const third = await manager.getOrCreateThreadSandbox(context);
+  assert.strictEqual(third, second);
+  assert.equal(created(), 2);
+});
+
+test("a generation that accepted an operation is never replaced within that run", async () => {
+  const { context, manager, created } = replacementFixture();
+  const first = await manager.getOrCreateThreadSandbox(context);
+  // A succeeded upload/prepare receipt on this generation.
+  await manager.completeToolOperation({
+    operationId: "prepare-1",
+    sandboxId: first.id,
+    status: "succeeded",
+    result: { ok: true },
+  });
+  await manager.cancelExecution({
+    sandbox: first,
+    executionId: "execution-1",
+    reason: "timed_out",
+  });
   await assert.rejects(
     manager.getOrCreateThreadSandbox(context),
     (e: unknown) =>
       (e as { code?: string }).code === "SANDBOX_INSTANCE_CHANGED",
   );
-  assert.equal(checks, 1);
-  assert.equal(created, 0);
+  await assert.rejects(
+    manager.getOrCreateThreadSandbox(context),
+    (e: unknown) =>
+      (e as { code?: string }).code === "SANDBOX_INSTANCE_CHANGED",
+  );
+  assert.equal(created(), 1);
+  assert.equal(manager.consumeReplacementNotice(), false);
+});
+
+test("an accepted execute result also pins the generation against replacement", async () => {
+  const { context, manager, created } = replacementFixture();
+  const first = await manager.getOrCreateThreadSandbox(context);
+  assert.equal(
+    await manager.resolveExecutionResultDisposition(first, context),
+    "accepted",
+  );
+  await manager.cancelExecution({
+    sandbox: first,
+    executionId: "execution-1",
+    reason: "timed_out",
+  });
+  await assert.rejects(
+    manager.getOrCreateThreadSandbox(context),
+    (e: unknown) =>
+      (e as { code?: string }).code === "SANDBOX_INSTANCE_CHANGED",
+  );
+  assert.equal(created(), 1);
+});
+
+test("a bound instance that loses its ready state is replaced only when it accepted nothing", async () => {
+  // Stateless: the swept row is forgotten and a fresh generation is created.
+  {
+    const { context, store, manager, created } = replacementFixture();
+    const first = await manager.getOrCreateThreadSandbox(context);
+    store.rows.find((row) => row.id === first.id)!.status = "expired";
+    const second = await manager.getOrCreateThreadSandbox(context);
+    assert.equal(second.providerSandboxId, "remote-2");
+    assert.equal(created(), 2);
+    assert.equal(
+      await manager.resolveExecutionResultDisposition(first, context),
+      "instance_changed",
+    );
+  }
+  // Stateful: the run stays pinned to the lost generation and fails closed.
+  {
+    const { context, store, manager, created } = replacementFixture();
+    const first = await manager.getOrCreateThreadSandbox(context);
+    await manager.completeToolOperation({
+      operationId: "prepare-1",
+      sandboxId: first.id,
+      status: "succeeded",
+      result: { ok: true },
+    });
+    store.rows.find((row) => row.id === first.id)!.status = "expired";
+    await assert.rejects(
+      manager.getOrCreateThreadSandbox(context),
+      (e: unknown) =>
+        (e as { code?: string }).code === "SANDBOX_INSTANCE_CHANGED",
+    );
+    assert.equal(created(), 1);
+  }
+});
+
+test("a replacement that is fenced again in the same call fails closed instead of looping", async () => {
+  const { context, store, manager, created } = replacementFixture();
+  const first = await manager.getOrCreateThreadSandbox(context);
+  await manager.cancelExecution({
+    sandbox: first,
+    executionId: "execution-1",
+    reason: "timed_out",
+  });
+  // The fence write did not land: the store still reports the old row ready
+  // and refuses to expire it.
+  store.rows.find((row) => row.id === first.id)!.status = "ready";
+  store.markSandboxExpired = async () => false;
+  await assert.rejects(
+    manager.getOrCreateThreadSandbox(context),
+    (e: unknown) =>
+      (e as { code?: string }).code === "SANDBOX_INSTANCE_CHANGED",
+  );
+  assert.equal(created(), 1);
+});
+
+test("aborting an acquisition while the provider create is blocked marks the row errored without fencing or expiring", async () => {
+  const { context, store, manager } = replacementFixture();
+  let createGate!: () => void;
+  const createEntered = new Promise<void>((resolve) => {
+    createGate = resolve;
+  });
+  const provider = manager.providerForSandbox();
+  provider.createSandbox = async (input) => {
+    createGate();
+    await new Promise<never>((_resolve, reject) => {
+      input.signal?.addEventListener("abort", () =>
+        reject(input.signal?.reason),
+      );
+    });
+    throw new Error("unreachable");
+  };
+  const controller = new AbortController();
+  const reason = Object.assign(new Error("tool deadline elapsed"), {
+    name: "TimeoutError",
+  });
+  const acquisition = manager.getOrCreateThreadSandbox(context, {
+    signal: controller.signal,
+  });
+  void acquisition.catch(() => undefined);
+  await createEntered;
+  controller.abort(reason);
+  await assert.rejects(acquisition, (e) => e === reason);
+  assert.equal(store.calls.ready, 0);
+  assert.equal(store.calls.expired, 0);
+  assert.equal(store.calls.creatingError, 1);
+
+  // The aborted acquisition is this caller's outcome, not the run's: the
+  // next call starts over and succeeds.
+  provider.createSandbox = async () => ({ id: "remote-after-abort" });
+  const sandbox = await manager.getOrCreateThreadSandbox(context);
+  assert.equal(sandbox.providerSandboxId, "remote-after-abort");
+  assert.equal(
+    await manager.resolveExecutionResultDisposition(sandbox, context),
+    "accepted",
+  );
+});
+
+test("aborting while waiting for a sibling's creation stops the wait at once", async () => {
+  const { context, store, existing } = acquisitionFixture();
+  const manager = new SandboxManager({
+    provider: createTestProvider(),
+    sandboxStore: {
+      ...store,
+      findLatestActiveThreadSandbox: async () => ({
+        ...existing,
+        providerSandboxId: "creating:other",
+        status: "creating" as const,
+        updatedAt: new Date(),
+      }),
+    },
+    operationStore: createMessageScopedOperationStore(),
+    ttlSeconds: 3600,
+    maxCommandTimeoutMs: 1000,
+  });
+  const controller = new AbortController();
+  const reason = new DOMException("user stopped", "AbortError");
+  const acquisition = manager.getOrCreateThreadSandbox(context, {
+    signal: controller.signal,
+    waitIntervalMs: 10_000,
+    waitTimeoutMs: 60_000,
+  });
+  void acquisition.catch(() => undefined);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const startedAt = Date.now();
+  controller.abort(reason);
+  await assert.rejects(acquisition, (e) => e === reason);
+  assert.ok(Date.now() - startedAt < 1_000);
+});
+
+test("a joiner's abort stops only its own wait; the owner's acquisition completes", async () => {
+  const { context, manager, created } = replacementFixture();
+  let releaseCreate!: () => void;
+  const createGate = new Promise<void>((resolve) => {
+    releaseCreate = resolve;
+  });
+  manager.providerForSandbox().createSandbox = async () => {
+    await createGate;
+    return { id: "remote-shared" };
+  };
+  const owner = manager.getOrCreateThreadSandbox(context);
+  const joinerController = new AbortController();
+  const joiner = manager.getOrCreateThreadSandbox(context, {
+    signal: joinerController.signal,
+  });
+  void joiner.catch(() => undefined);
+  const reason = new DOMException("joiner stopped", "AbortError");
+  joinerController.abort(reason);
+  await assert.rejects(joiner, (e) => e === reason);
+  releaseCreate();
+  const sandbox = await owner;
+  assert.equal(sandbox.providerSandboxId, "remote-shared");
+  assert.equal(created(), 0);
+});
+
+test("creation timing constants cover one worst-case create and leave the stale sweep a margin", () => {
+  assert.ok(SANDBOX_CREATING_WAIT_TIMEOUT_MS > SANDBOX_CREATE_WORST_CASE_MS);
+  assert.ok(
+    SANDBOX_CREATING_STALE_MS >= SANDBOX_CREATING_WAIT_TIMEOUT_MS + 60_000,
+  );
 });
 
 test("late operation completion cannot persist success after its instance expires", async () => {
@@ -1224,3 +1549,95 @@ for (const code of [
     );
   });
 }
+
+test("sandbox creation does not retry a readiness-probe failure: the provider already spent its probe budget", async () => {
+  const fixture = retryFixture(async () => {
+    throw new SandboxProviderError(
+      SANDBOX_PROVIDER_ERROR_CODES.unavailable,
+      "SANDBOX_NOT_READY_OR_UNHEALTHY: sandbox did not become ready within 90s after create. Retry the operation to create a fresh sandbox.",
+      "create",
+    );
+  });
+  await assert.rejects(fixture.acquire("probe-exhausted"), {
+    code: SANDBOX_PROVIDER_ERROR_CODES.unavailable,
+  });
+  assert.equal(fixture.attempts(), 1);
+  assert.equal(
+    fixture.warnings.some((w) => w.event === "sandbox.create.retry"),
+    false,
+  );
+});
+
+test("a ready generation reused from an earlier turn is never replaced: its /workspace may already hold state", async () => {
+  const { context, store, manager, created } = replacementFixture();
+  // Left ready by a previous turn (or another worker); this manager did not
+  // create it and cannot know what the model already put there.
+  store.rows.push({
+    id: "instance-earlier",
+    providerSandboxId: "remote-earlier",
+    status: "ready",
+    updatedAt: new Date(),
+  });
+  const reused = await manager.getOrCreateThreadSandbox(context);
+  assert.equal(reused.providerSandboxId, "remote-earlier");
+  assert.equal(created(), 0);
+  await manager.cancelExecution({
+    sandbox: reused,
+    executionId: "execution-1",
+    reason: "timed_out",
+  });
+  await assert.rejects(
+    manager.getOrCreateThreadSandbox(context),
+    (e: unknown) =>
+      (e as { code?: string }).code === "SANDBOX_INSTANCE_CHANGED",
+  );
+  assert.equal(created(), 0);
+  assert.equal(manager.consumeReplacementNotice(), false);
+});
+
+test("a failed acquisition is forgotten after it settles so the next call re-acquires", async () => {
+  const fixture = retryFixture(async (attempt) => {
+    if (attempt === 1) {
+      // A probe-budget failure is not retried inside the create; it must
+      // still not poison the rest of the turn.
+      throw new SandboxProviderError(
+        SANDBOX_PROVIDER_ERROR_CODES.unavailable,
+        "SANDBOX_NOT_READY_OR_UNHEALTHY: sandbox did not become ready within 90s after create.",
+        "create",
+      );
+    }
+    return { id: "sandbox-after-outage" };
+  });
+  await assert.rejects(fixture.acquire("same-run"), {
+    code: SANDBOX_PROVIDER_ERROR_CODES.unavailable,
+  });
+  assert.equal(fixture.attempts(), 1);
+  const sandbox = await fixture.acquire("same-run");
+  assert.equal(sandbox.providerSandboxId, "sandbox-after-outage");
+  assert.equal(fixture.attempts(), 2);
+});
+
+test("an abort that lands after the provider create resolved deletes the live container", async () => {
+  const { context, store, manager } = replacementFixture();
+  const controller = new AbortController();
+  const reason = new DOMException("user stopped", "AbortError");
+  const deleted: string[] = [];
+  const provider = manager.providerForSandbox();
+  provider.createSandbox = async () => {
+    // The provider ignores the signal and returns a running container just
+    // as the host gives up on this call.
+    controller.abort(reason);
+    return { id: "remote-live-but-unready" };
+  };
+  provider.deleteSandbox = async (id) => {
+    deleted.push(id);
+  };
+  await assert.rejects(
+    manager.getOrCreateThreadSandbox(context, { signal: controller.signal }),
+    (e) => e === reason,
+  );
+  assert.deepEqual(deleted, ["remote-live-but-unready"]);
+  assert.equal(store.calls.ready, 0);
+  assert.equal(store.calls.expired, 0);
+  assert.equal(store.calls.creatingError, 1);
+});

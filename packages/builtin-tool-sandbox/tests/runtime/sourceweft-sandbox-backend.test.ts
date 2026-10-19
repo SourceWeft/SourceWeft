@@ -1119,9 +1119,283 @@ test("SourceWeftSandboxBackend throws and records failed operation when execute 
     String(operationStore.completed.at(-1)?.result?.error),
     /provider bridge failed/u,
   );
+  // An unclassified provider failure proves nothing about the instance, so
+  // the lease keeps its full TTL instead of being cut to the release grace.
+  assert.deepEqual(sandboxStore.releaseReasons, []);
+});
+
+test("SourceWeftSandboxBackend releases the lease only after a confirmed-termination execute error", async () => {
+  const { provider } = createProvider();
+  let activeProviderSandboxId = "provider-sandbox-1";
+  const sandboxStore = {
+    ...createSandboxStore(),
+    async findLatestActiveThreadSandbox() {
+      return {
+        id:
+          activeProviderSandboxId === "provider-sandbox-1"
+            ? "sandbox-record-1"
+            : "sandbox-record-2",
+        provider: "fake",
+        providerSandboxId: activeProviderSandboxId,
+        teamId: context.teamId,
+        workspaceId: context.workspaceId,
+        threadId: context.threadId,
+        userId: context.userId,
+        status: "ready" as const,
+        updatedAt: new Date(),
+        expiresAt: new Date(Date.now() + 3600_000),
+      };
+    },
+  } satisfies SandboxStore;
+  provider.execute = async () => {
+    // Another worker replaced the generation while the command ran.
+    activeProviderSandboxId = "provider-sandbox-2";
+    return { output: "stale", exitCode: 0, truncated: false };
+  };
+  const { backend } = createBackendWithProvider(provider, sandboxStore);
+
+  await assert.rejects(
+    backend.execute("node /workspace/a.js"),
+    (error: unknown) =>
+      (error as { code?: unknown }).code === "SANDBOX_INSTANCE_CHANGED",
+  );
   assert.deepEqual(sandboxStore.releaseReasons, [
     "sandbox_execute_runtime_error",
   ]);
+});
+
+test("SourceWeftSandboxBackend turns a provider outage into a recoverable execute result that keeps the lease", async () => {
+  const { provider } = createProvider();
+  provider.execute = async () => {
+    throw new SandboxProviderError(
+      SANDBOX_PROVIDER_ERROR_CODES.unavailable,
+      "sandbox provider container is temporarily unavailable.",
+      "execute",
+    );
+  };
+  const sandboxStore = createSandboxStore();
+  const operationStore = createOperationStore();
+  const { backend } = createBackendWithProvider(
+    provider,
+    sandboxStore,
+    operationStore,
+  );
+
+  const result = await backend.execute("node /workspace/a.js");
+  assert.equal(result.exitCode, 1);
+  const lines = result.output.split("\n");
+  assert.match(
+    lines[0] ?? "",
+    /^SANDBOX_NOT_READY_OR_UNHEALTHY: sandbox provider container/u,
+  );
+  // The command had already spawned: a blind "retry the same command" could
+  // double-run it, so the hint asks the model to check its effects first.
+  assert.equal(
+    lines[1],
+    "Hint: The connection to the sandbox was lost while the command was running; it may have run partly or fully. Check its effects (output files, state) before retrying it in a new tool call.",
+  );
+  assert.match(lines[2] ?? "", /failureCode=SANDBOX_NOT_READY_OR_UNHEALTHY/u);
+  assert.equal(lines.length, 3, "no repeat escalation on the first failure");
+  assert.ok(result.output.length < 600);
+  assert.deepEqual(sandboxStore.releaseReasons, []);
+  assert.equal(operationStore.completed.at(-1)?.status, "succeeded");
+  assert.equal(
+    operationStore.completed.at(-1)?.result?.errorCode,
+    "SANDBOX_NOT_READY_OR_UNHEALTHY",
+  );
+
+  // Three attempts are tolerated; the fourth replaces the hint with the
+  // escalation instead of contradicting it.
+  await backend.execute("node /workspace/a.js");
+  const third = await backend.execute("node /workspace/a.js");
+  assert.equal(third.output.split("\n").length, 3);
+  const fourth = await backend.execute("node /workspace/a.js");
+  assert.match(
+    fourth.output,
+    /^SANDBOX_NOT_READY_OR_UNHEALTHY: .*\nHint: The sandbox provider stayed unavailable across 4 attempts\. Stop retrying;.*\nDiagnostics: /u,
+  );
+  assert.doesNotMatch(fourth.output, /retry the same|Check its effects/u);
+  assert.equal(fourth.output.split("\n").length, 3);
+  assert.deepEqual(sandboxStore.releaseReasons, []);
+});
+
+test("SourceWeftSandboxBackend reports an acquisition-time provider outage the same recoverable way", async () => {
+  const { provider } = createProvider();
+  provider.createSandbox = async () => {
+    throw new SandboxProviderError(
+      SANDBOX_PROVIDER_ERROR_CODES.unavailable,
+      "SANDBOX_NOT_READY_OR_UNHEALTHY: sandbox did not become ready within 90s after create.",
+      "create",
+    );
+  };
+  const sandboxStore = {
+    ...createSandboxStore(),
+    async findLatestActiveThreadSandbox() {
+      return null;
+    },
+  } satisfies SandboxStore;
+  const { backend } = createBackendWithProvider(provider, sandboxStore);
+
+  const result = await backend.execute("node /workspace/a.js");
+  assert.equal(result.exitCode, 1);
+  const lines = result.output.split("\n");
+  assert.match(
+    lines[0] ?? "",
+    /^SANDBOX_NOT_READY_OR_UNHEALTHY: sandbox did not become ready/u,
+  );
+  // Nothing spawned, so the same command is safe to retry.
+  assert.equal(
+    lines[1],
+    "Hint: The sandbox provider is temporarily unavailable. Wait 10-20 seconds, then retry the same command in a new tool call (at most 2 retries). Do not change the report content because of this error.",
+  );
+  assert.equal(lines.length, 3);
+  assert.equal(provider.executeInputs.length, 0);
+  assert.deepEqual(sandboxStore.releaseReasons, []);
+});
+
+test("SourceWeftSandboxBackend caps the provider timer at the remaining tool budget under a host deadline", async () => {
+  const { provider } = createProvider();
+  const manager = new SandboxManager({
+    provider,
+    sandboxStore: createSandboxStore(),
+    operationStore: createNullOperationStore(),
+    ttlSeconds: limits.ttlSeconds,
+    maxCommandTimeoutMs: maxSandboxCommandTimeoutMs(limits),
+  });
+  const backend = new SourceWeftSandboxBackend({
+    manager,
+    context,
+    limits,
+    commandTimeoutMs: 10_000,
+    toolApprovalEnabled: true,
+    // Pretend the host granted 12 s: 12 s − 5 s margin leaves 7 s.
+    toolExecutionTimeoutMs: 12_000,
+  });
+
+  await backend.execute("node /workspace/a.js", {
+    signal: new AbortController().signal,
+  });
+  const timeoutMs = provider.executeInputs[0]?.timeoutMs ?? 0;
+  assert.ok(
+    timeoutMs <= 7_000,
+    `provider timer ${timeoutMs} must beat the host deadline`,
+  );
+  assert.ok(timeoutMs >= 6_000, "the command keeps what the budget leaves");
+
+  // Without a host invocation signal there is no host deadline to beat.
+  await backend.execute("node /workspace/b.js");
+  assert.equal(provider.executeInputs[1]?.timeoutMs, 10_000);
+});
+
+test("SourceWeftSandboxBackend hands the next execute a fresh instance after a stateless generation timed out", async () => {
+  const { provider } = createProvider();
+  const rows: Array<{ id: string; providerSandboxId: string; status: string }> =
+    [];
+  let created = 0;
+  provider.createSandbox = async () => {
+    created += 1;
+    return { id: `provider-sandbox-${created}` };
+  };
+  let timeoutProviderCall = true;
+  const executionStarted = deferred<void>();
+  provider.execute = async (input) => {
+    provider.executeInputs.push(input);
+    if (timeoutProviderCall) {
+      executionStarted.resolve();
+      return new Promise(() => undefined);
+    }
+    return { output: "fresh", exitCode: 0, truncated: false };
+  };
+  const sandboxStore = {
+    ...createSandboxStore(),
+    async findLatestActiveThreadSandbox() {
+      const row = [...rows]
+        .reverse()
+        .find((r) => r.status === "ready" || r.status === "creating");
+      return row
+        ? {
+            id: row.id,
+            provider: "fake",
+            providerSandboxId: row.providerSandboxId,
+            teamId: context.teamId,
+            workspaceId: context.workspaceId,
+            threadId: context.threadId,
+            userId: context.userId,
+            status: row.status as "ready" | "creating",
+            updatedAt: new Date(),
+            expiresAt: new Date(Date.now() + 3600_000),
+          }
+        : null;
+    },
+    async insertCreatingSandbox(input) {
+      rows.push({
+        id: input.sandboxId,
+        providerSandboxId: input.providerSandboxId,
+        status: "creating",
+      });
+      return true;
+    },
+    async markSandboxReady(input) {
+      const row = rows.find((r) => r.id === input.sandboxId)!;
+      row.status = "ready";
+      row.providerSandboxId = input.providerSandboxId;
+      return true;
+    },
+    async markSandboxExpired(input) {
+      const row = rows.find((r) => r.id === input.sandboxId);
+      if (!row) return false;
+      row.status = "expired";
+      return true;
+    },
+    async touchSandbox(input) {
+      return rows.find((r) => r.id === input.sandboxId)?.status === "ready";
+    },
+  } satisfies SandboxStore;
+  const operationStore = createOperationStore();
+  const { backend } = createBackendWithProvider(
+    provider,
+    sandboxStore,
+    operationStore,
+  );
+
+  const deadline = new AbortController();
+  const first = backend.execute("node /workspace/slow.js", {
+    signal: deadline.signal,
+  });
+  void first.catch(() => undefined);
+  await executionStarted.promise;
+  deadline.abort(
+    Object.assign(new Error("tool deadline elapsed"), { name: "TimeoutError" }),
+  );
+  await assert.rejects(
+    first,
+    (error: unknown) =>
+      (error as { code?: unknown }).code === "SANDBOX_OPERATION_TIMED_OUT",
+  );
+
+  timeoutProviderCall = false;
+  const second = await backend.execute("ls /workspace", {
+    signal: new AbortController().signal,
+    toolCallId: "tool-call-2",
+  });
+  assert.equal(created, 2);
+  assert.equal(
+    provider.executeInputs[1]?.providerSandboxId,
+    "provider-sandbox-2",
+  );
+  assert.equal(second.exitCode, 0);
+  assert.equal(
+    second.output,
+    "fresh\nDiagnostics: sandbox replaced. The previous sandbox was terminated after a timeout before it accepted any operation. A fresh sandbox is ready but its /workspace is empty: run prepare_sandbox_workspace again before continuing.",
+  );
+  // The notice is one-shot.
+  const third = await backend.execute("ls /workspace", {
+    signal: new AbortController().signal,
+    toolCallId: "tool-call-3",
+  });
+  assert.equal(third.output, "fresh");
+  assert.equal(created, 2);
+  assert.deepEqual(sandboxStore.releaseReasons, []);
 });
 
 test("SourceWeftSandboxBackend Stop waits for physical cancellation and discards a late execute success", async () => {
@@ -2086,4 +2360,60 @@ test("SourceWeftSandboxBackend readRaw missing is explicit and nonzero read comm
     /SANDBOX_FILE_READ_FAILED.*Permission denied/,
   );
   assert.doesNotMatch(result.error ?? "", /ENOENT/);
+});
+
+test("SourceWeftSandboxBackend reports an exhausted tool budget instead of spawning a doomed command", async () => {
+  const { provider } = createProvider();
+  let deleteCalls = 0;
+  provider.deleteSandbox = async () => {
+    deleteCalls += 1;
+  };
+  const sandboxStore = createSandboxStore();
+  const operationStore = createOperationStore();
+  const manager = new SandboxManager({
+    provider,
+    sandboxStore,
+    operationStore,
+    ttlSeconds: limits.ttlSeconds,
+    maxCommandTimeoutMs: maxSandboxCommandTimeoutMs(limits),
+  });
+  const backend = new SourceWeftSandboxBackend({
+    manager,
+    context,
+    limits,
+    commandTimeoutMs: 10_000,
+    toolApprovalEnabled: true,
+    // A joiner that waited out a sibling's cold start: under 10 s left.
+    toolExecutionTimeoutMs: 7_000,
+  });
+
+  const result = await backend.execute("node /workspace/a.js", {
+    signal: new AbortController().signal,
+  });
+  assert.equal(result.exitCode, 1);
+  const lines = result.output.split("\n");
+  assert.match(lines[0] ?? "", /^SANDBOX_TOOL_BUDGET_EXHAUSTED: /u);
+  assert.equal(
+    lines[1],
+    "Hint: The tool budget was spent acquiring the sandbox, which is now ready. Retry the same command in a new tool call.",
+  );
+  assert.match(lines[2] ?? "", /failureCode=SANDBOX_TOOL_BUDGET_EXHAUSTED/u);
+  assert.equal(lines.length, 3);
+  // Nothing spawned, nothing terminated, lease untouched.
+  assert.equal(provider.executeInputs.length, 0);
+  assert.equal(deleteCalls, 0);
+  assert.deepEqual(sandboxStore.releaseReasons, []);
+  assert.equal(operationStore.completed.at(-1)?.status, "succeeded");
+  assert.equal(
+    operationStore.completed.at(-1)?.result?.errorCode,
+    "SANDBOX_TOOL_BUDGET_EXHAUSTED",
+  );
+  // A repeat is not an "input failure": no stop-retrying escalation.
+  const again = await backend.execute("node /workspace/a.js", {
+    signal: new AbortController().signal,
+  });
+  assert.equal(again.output.split("\n").length, 3);
+  // Without a host deadline the command simply runs.
+  await backend.execute("node /workspace/a.js");
+  assert.equal(provider.executeInputs.length, 1);
 });
