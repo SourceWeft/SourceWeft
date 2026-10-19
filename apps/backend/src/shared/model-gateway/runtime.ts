@@ -29,6 +29,7 @@ import { resolveCustomByokProvider } from "./byok-provider-resolver";
 
 import { OPENROUTER_APP_TITLE } from "./attribution";
 import { createLlmFetch, llmEndpointPolicy } from "./network";
+import { createGatewayLogger } from "./gateway-logger";
 
 type ActiveConfigVersionRow = typeof modelGatewayConfigVersions.$inferSelect;
 
@@ -463,6 +464,9 @@ export function buildRoutedModelGatewayConfig(
 ): ModelGatewayConfig {
   const byok = options.byok ?? true;
   return {
+    // Without this the package's retry/failover/quota lines never print:
+    // only the agent middleware's `agent.model_call.retry` was visible.
+    logger: createGatewayLogger(),
     fetch: createLlmFetch(
       llmEndpointPolicy(
         Object.values(configInput.providers).map(

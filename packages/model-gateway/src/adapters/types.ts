@@ -6,6 +6,7 @@ import type {
   ChatCompleteInput,
   EmbedBatchInput,
   EmbedInput,
+  GatewayLogger,
   ImageGenerateInput,
   ImageGenerateResult,
   ProviderKind,
@@ -20,6 +21,12 @@ import type {
 /** Host transport, supplied by the bridge rather than by model input. */
 export type AdapterRequestOptions = RequestOptions & {
   fetch?: typeof globalThis.fetch;
+  /** Where SDK-level retries report each failed attempt. */
+  retryLog?: {
+    logger: GatewayLogger;
+    provider: string;
+    providerModel: string;
+  };
 };
 
 export interface ChatAdapter {
