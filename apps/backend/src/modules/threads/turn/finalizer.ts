@@ -16,6 +16,10 @@ import { computeTurnProviderCost } from "./cost";
 import { summarizeRetrievalCalls } from "./retrieval-summary";
 import { preserveTraceMetadata } from "./trace-metadata";
 import { projectReasoning } from "./reasoning-state";
+import {
+  boundReasoningRenderBlocks,
+  boundSnapshotReasoning,
+} from "../durable/reasoning-bounds";
 import type { FinalizeThreadTurnInput } from "./types";
 
 export function preserveAssistantMetadataForContinuation(input: {
@@ -209,9 +213,12 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
     agentRunStop: readAgentRunStop(input.agentRunStop) ?? undefined,
     agentRunProgress: readAgentRunProgress(input.agentRunProgress) ?? undefined,
     usage: input.usage,
+    // The runtime text is unbounded; every terminal writer projects it through
+    // the snapshot bound so the reasoningWrite CAS sees one string per
+    // revision (see durable/reasoning-bounds.ts).
     ...projectReasoning({
       run: prepared.reasoningRun,
-      text: input.reasoning,
+      text: boundSnapshotReasoning(input.reasoning),
       terminal: true,
     }),
     reasoningSegments: input.reasoningSegments,
@@ -228,7 +235,7 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
     }),
     toolCalls: input.toolCalls.map(serializeToolCallForMessage),
     ...(input.renderBlocks && input.renderBlocks.length > 0
-      ? { renderBlocks: input.renderBlocks }
+      ? { renderBlocks: boundReasoningRenderBlocks(input.renderBlocks) }
       : {}),
     thinkingSteps: input.thinkingSteps,
     retrieval: {

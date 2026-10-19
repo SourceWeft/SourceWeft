@@ -25,6 +25,7 @@ import type {
 import type { TracePart } from "../turn/trace-parts";
 import { sanitizeClientErrorMessage } from "../../content/model-gateway-error";
 import { projectReasoning } from "../turn/reasoning-state";
+import { boundReasoningRenderBlocks, boundSnapshotReasoning } from "../durable";
 
 export type ThreadStreamPartialErrorState = {
   reasoning?: string;
@@ -150,15 +151,19 @@ export async function createThreadStreamErrorMessage(input: {
       agentMode: input.prepared.agentMode,
       versionOf: input.prepared.assistantMessageParentId,
       ...errorBilling.metadata,
+      // Bounded like the run snapshot so a later snapshot-derived terminal
+      // write at the same revision projects the identical string.
       ...projectReasoning({
         run: input.prepared.reasoningRun,
-        text: input.partialState?.reasoning,
+        text: boundSnapshotReasoning(input.partialState?.reasoning),
         terminal: true,
       }),
       reasoningSegments: input.partialState?.reasoningSegments,
       toolCalls: input.partialState?.toolCalls,
       traceParts: input.partialState?.traceParts,
-      renderBlocks: input.partialState?.renderBlocks,
+      renderBlocks: boundReasoningRenderBlocks(
+        input.partialState?.renderBlocks,
+      ),
       thinkingSteps: input.partialState?.thinkingSteps,
       retrieval: {
         citations: input.partialState?.citations ?? [],

@@ -18,3 +18,10 @@ export {
   createProtectedRunOperationCacheServices,
   createProtectedRunReceiptServices,
 } from "./protected-agent-tool-state-repository";
+
+// Referenced by stream/error.ts: terminal writers must bound reasoning with
+// the same rule the runner applies to the snapshot (reasoning-bounds.ts).
+export {
+  boundReasoningRenderBlocks,
+  boundSnapshotReasoning,
+} from "./reasoning-bounds";

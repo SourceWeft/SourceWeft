@@ -121,42 +121,30 @@ function isSameReasoningSegment(
   existing: ModelReasoningSegmentTrace | undefined,
   next: ModelReasoningSegmentTrace,
 ) {
-  return (
-    existing?.id === next.id &&
-    typeof existing.text === "string" &&
-    typeof next.text === "string"
-  );
+  return existing?.id === next.id;
 }
 
+// One record per segment id, updated in place. The id is the identity; text
+// is not (it grows with every delta, and other segment shapes may omit it),
+// so matching on anything beyond the id never merged and every delta appended
+// a `${id}:n` duplicate instead. The first sequence seen for an id is kept,
+// matching `durable/runner.ts` `mergeReasoningSegment`.
 export function upsertReasoningSegmentTrace(
   segmentsById: Map<string, ModelReasoningSegmentTrace>,
   next: ModelReasoningSegmentTrace,
 ) {
-  if (isSameReasoningSegment(segmentsById.get(next.id), next)) {
-    const existing = segmentsById.get(next.id);
-    segmentsById.set(next.id, {
-      ...(existing ?? next),
-      ...next,
-      id: next.id,
-      sequence: existing?.sequence ?? next.sequence,
-    });
-    return;
-  }
-
-  if (!segmentsById.has(next.id)) {
+  const existing = segmentsById.get(next.id);
+  if (!existing || !isSameReasoningSegment(existing, next)) {
     segmentsById.set(next.id, next);
     return;
   }
 
-  let suffix = 2;
-  let nextId = `${next.id}:${suffix}`;
-  while (segmentsById.has(nextId)) {
-    suffix += 1;
-    nextId = `${next.id}:${suffix}`;
-  }
-  segmentsById.set(nextId, {
+  segmentsById.set(next.id, {
+    ...existing,
     ...next,
-    id: nextId,
+    id: next.id,
+    text: next.text ?? existing.text,
+    sequence: existing.sequence ?? next.sequence,
   });
 }
 
