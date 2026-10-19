@@ -1104,6 +1104,11 @@ export async function buildThreadAgentAssembly(
   }
 
   const skills = prepared.enabledSkills.length > 0 ? ["/skills/"] : undefined;
+  // One wall clock for the root and every child scope of this run, keyed by
+  // the durable run row (the trace id is regenerated per prepare) with one
+  // origin: a child spawned late in the run inherits the run's remaining time.
+  const wallClockRunId = prepared.threadRunId ?? prepared.runTraceId;
+  const turnStartedAtMs = Date.now();
   const childMiddleware = (subagentType: string) => [
     fileImages.middleware(),
     ...createSourceWeftSubagentMiddlewareStack({
@@ -1112,6 +1117,8 @@ export async function buildThreadAgentAssembly(
       chatProfileConfig: prepared.chatProfile.configJson,
       model,
       traceContext,
+      runId: wallClockRunId,
+      turnStartedAtMs,
       toolObservabilityContext: {
         runId: prepared.runTraceId,
         teamId: prepared.workspace.organizationId,
@@ -1173,6 +1180,8 @@ export async function buildThreadAgentAssembly(
     extraMiddleware: [...interpreterMiddleware, fileImages.middleware()],
     contextCompressionReportKey: prepared.userMessage.id,
     traceContext,
+    runId: wallClockRunId,
+    turnStartedAtMs,
     toolObservabilityContext: {
       runId: prepared.runTraceId,
       teamId: prepared.workspace.organizationId,

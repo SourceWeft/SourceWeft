@@ -68,6 +68,10 @@ export interface CreateThreadAgentParams {
   extraMiddleware?: AgentMiddleware[];
   traceContext?: TraceContext;
   toolObservabilityContext?: SourceWeftToolObservabilityContext;
+  /** Durable run row id keying the step-budget wall clock (not the trace id). */
+  runId?: string | null;
+  /** Run start origin (epoch ms) for the step-budget wall clock. */
+  turnStartedAtMs?: number | null;
   interruptOn?: Record<string, boolean | InterruptOnConfig>;
   /**
    * The chat model to drive the agent with.
@@ -115,6 +119,8 @@ export async function createThreadAgent(
     filesystemMounts,
     toolObservabilityContext: params.toolObservabilityContext,
     traceContext: params.traceContext,
+    runId: params.runId,
+    turnStartedAtMs: params.turnStartedAtMs,
   });
 
   const agent = createDeepAgent({

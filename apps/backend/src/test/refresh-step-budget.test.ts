@@ -137,6 +137,48 @@ test.each(["prepared", "ready"])(
   },
 );
 
+const wallClock = () => ({
+  runId: "interrupted-run",
+  startedAtMs: 1_000,
+  closingStartedAtMs: 2_000,
+  trigger: "wall_clock",
+});
+
+test("refresh drops the interrupted run's wall clock and keeps every consumed step and limit", async () => {
+  // Single candidate: only the final normalization pass can strip it.
+  const single = fake([
+    snapshot("clocked", { ...exhausted(), wallClock: wallClock() }),
+  ]);
+  await carry(single.agent);
+  assert.deepEqual(
+    (single.updates[0]!.sourceweftRunStepBudget as any).scopes.main,
+    exhausted(),
+  );
+  // Merged candidates: the selected high-water entry is stripped on merge.
+  const merged = fake([
+    snapshot("new-low", v2({ wallClock: wallClock() })),
+    snapshot("old-full", {
+      ...exhausted(),
+      wallClock: { runId: "older-run", startedAtMs: 5 },
+    }),
+  ]);
+  await carry(merged.agent);
+  const entry = (merged.updates[0]!.sourceweftRunStepBudget as any).scopes.main;
+  assert.deepEqual(entry, exhausted());
+  assert.equal("wallClock" in entry, false);
+});
+
+test("refresh carries a budget without a wall clock unchanged", async () => {
+  for (const entry of [v2(), exhausted()]) {
+    const f = fake([snapshot("plain", entry)]);
+    await carry(f.agent);
+    assert.deepEqual(
+      (f.updates[0]!.sourceweftRunStepBudget as any).scopes.main,
+      entry,
+    );
+  }
+});
+
 test.each([
   ["limits", v2({ limit: 5, closingLimit: 3 })],
   ["policy", { steps: 1, limit: 4, summary: "unused" }],

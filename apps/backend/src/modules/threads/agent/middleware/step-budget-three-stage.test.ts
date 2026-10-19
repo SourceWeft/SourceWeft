@@ -21,9 +21,7 @@ type AgentOptions = {
 };
 type Agent = {
   invoke(input: unknown, options?: AgentOptions): Promise<Record<string, any>>;
-  getState(
-    options: AgentOptions,
-  ): Promise<{
+  getState(options: AgentOptions): Promise<{
     values: Record<string, any>;
     tasks: Array<{ interrupts?: unknown[] }>;
   }>;
@@ -204,6 +202,105 @@ test.each([
         limit: normal + closing,
         canContinue: true,
         summaryStatus: "completed",
+      },
+    );
+  },
+);
+test(
+  "a working wall-clock trigger keeps all 40 tool-enabled closing decisions before the one tool-free finalization",
+  { timeout: 300_000 },
+  async () => {
+    let now = 0,
+      effects = 0,
+      models = 0,
+      summaryCalls = 0;
+    const phases: string[] = [];
+    const probe = tool(
+      async () => {
+        effects++;
+        return "saved";
+      },
+      { name: "probe", description: "save", schema: z.object({}) },
+    );
+    const model = new ScriptedChatModel((messages) => {
+      models++;
+      if (summary(messages)) {
+        summaryCalls++;
+        return new AIMessage("Saved progress, publication unverified.");
+      }
+      // The working clock expires after the first decision; the closing clock
+      // never does, so the closing allowance is exhausted by steps alone.
+      if (models === 1) now = 45 * 60_000;
+      return call("probe", `p${models}`);
+    });
+    const budget = createSourceWeftStepBudgetMiddleware({
+      userMessageId: "u",
+      maxSteps: 400,
+      closingSteps: 40,
+      runId: "run-1",
+      wallClock: { workingMs: 45 * 60_000, closingMs: 10 * 60_000 },
+      now: () => now,
+    });
+    const { createMiddleware } = await import("langchain");
+    const observer = budget.attachBudgetState(
+      createMiddleware({
+        name: "PhaseObserver",
+        wrapModelCall: async (request, handler) => {
+          const response = await handler(request);
+          if (AIMessage.isInstance(response))
+            phases.push(getAgentStepPhase(request.state)!);
+          return response;
+        },
+      }),
+    );
+    const agent = createDeepAgent({
+      model,
+      tools: [probe],
+      backend: new StateBackend(),
+      middleware: [
+        budget.governance,
+        budget.toolCallRepair,
+        observer,
+        budget.finalization,
+      ],
+    }) as unknown as Agent;
+    const result = await agent.invoke(
+      { messages: [new HumanMessage("work")] },
+      { recursionLimit: 10000 },
+    );
+    // One normal decision, the wall-clock-forced last normal decision, forty
+    // closing decisions, then the summary.
+    assert.equal(effects, 42);
+    assert.equal(models, 43);
+    assert.equal(summaryCalls, 1);
+    assert.deepEqual(phases, [
+      "working",
+      "working",
+      ...Array(40).fill("closing"),
+      "finalizing",
+    ]);
+    assert.deepEqual(
+      selectAgentStepStop(result, { userMessageId: "u" })?.agentRunStop,
+      {
+        policyVersion: 2,
+        reason: "step_limit",
+        normalSteps: 400,
+        normalLimit: 400,
+        closingSteps: 40,
+        closingLimit: 40,
+        steps: 440,
+        limit: 440,
+        canContinue: true,
+        summaryStatus: "completed",
+      },
+    );
+    assert.deepEqual(
+      (result as any).sourceweftRunStepBudget.scopes.main.wallClock,
+      {
+        runId: "run-1",
+        startedAtMs: 0,
+        closingStartedAtMs: 45 * 60_000,
+        trigger: "wall_clock",
       },
     );
   },

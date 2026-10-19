@@ -9,7 +9,10 @@ import { z } from "zod";
 import { createIsolatedTestDatabase } from "../../test/isolated-database";
 import { UniqueVersionPostgresSaver } from "../../shared/unique-version-postgres-saver";
 import { ScriptedChatModel } from "../../test/chat-model";
-import { createSourceWeftStepBudgetMiddleware } from "./agent/middleware/step-budget";
+import {
+  createSourceWeftStepBudgetMiddleware,
+  readAgentStepBudgetForRefresh,
+} from "./agent/middleware/step-budget";
 import {
   carryAgentStepBudgetIntoRefresh,
   type RefreshBudgetAgent,
@@ -212,3 +215,90 @@ test("PostgreSQL native refresh pages exact root history and preserves the same-
     { userMessageId: string } | undefined;
   assert.equal(previousBudget?.userMessageId, "prior-human");
 });
+
+test.each([
+  ["without", undefined],
+  [
+    "with",
+    {
+      runId: "interrupted-run",
+      startedAtMs: 1_000,
+      closingStartedAtMs: 2_000,
+      trigger: "wall_clock",
+    },
+  ],
+])(
+  "PostgreSQL persisted v2 budget %s a wall clock is read by the refresh parser and carried without one",
+  async (_label, wallClock) => {
+    const uid = randomUUID();
+    const build = () => {
+      const b = createSourceWeftStepBudgetMiddleware({
+        userMessageId: uid,
+        maxSteps: 2,
+        closingSteps: 2,
+      });
+      return createDeepAgent({
+        model: new ScriptedChatModel(() => new AIMessage("unused")),
+        backend: new StateBackend(),
+        checkpointer: saver,
+        middleware: [b.governance, b.toolCallRepair, b.finalization],
+      }) as any;
+    };
+    const consumed = {
+      policyVersion: 2,
+      steps: 3,
+      limit: 4,
+      normalSteps: 2,
+      normalLimit: 2,
+      closingSteps: 1,
+      closingLimit: 2,
+      phase: "closing",
+      availableToolIds: ["probe"],
+      closingToolIds: ["probe"],
+      summary: "unused",
+    };
+    const persisted = wallClock ? { ...consumed, wallClock } : consumed;
+    const opts = {
+      configurable: { thread_id: randomUUID(), checkpoint_ns: "" },
+    };
+    await build().updateState(opts, {
+      messages: [new HumanMessage("interrupted work")],
+      sourceweftRunStepBudget: {
+        userMessageId: uid,
+        scopes: { main: persisted },
+      },
+    });
+    // The snapshot the refresh scan reads is the raw PostgreSQL checkpoint.
+    const tuple = await saver.getTuple(opts);
+    assert.deepEqual(tuple?.checkpoint.channel_values.sourceweftRunStepBudget, {
+      userMessageId: uid,
+      scopes: { main: persisted },
+    });
+    assert.deepEqual(
+      readAgentStepBudgetForRefresh(tuple?.checkpoint.channel_values, uid),
+      { userMessageId: uid, scopes: { main: persisted } },
+    );
+    const fresh = build();
+    const destination = {
+      configurable: { thread_id: randomUUID(), checkpoint_ns: "" },
+    };
+    const config = await carryAgentStepBudgetIntoRefresh({
+      agent: fresh,
+      destination,
+      userMessageId: uid,
+      graphThreadIds: [opts.configurable.thread_id],
+      requireExistingBudget: true,
+    });
+    const carried = await fresh.getState(config);
+    assert.deepEqual(carried.values.sourceweftRunStepBudget, {
+      userMessageId: uid,
+      scopes: { main: consumed },
+    });
+    // The origin checkpoint keeps its own clock; only the fork starts fresh.
+    assert.deepEqual(
+      (await saver.getTuple(opts))?.checkpoint.channel_values
+        .sourceweftRunStepBudget,
+      { userMessageId: uid, scopes: { main: persisted } },
+    );
+  },
+);
