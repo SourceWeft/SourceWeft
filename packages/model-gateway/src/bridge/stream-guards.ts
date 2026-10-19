@@ -15,9 +15,11 @@ import type {
 /**
  * After the first chunk, the longest gap tolerated between two chunks. A
  * provider that stops sending bytes without closing the connection is cut
- * here instead of living until the socket dies.
+ * here instead of living until the socket dies. 120 s matches the common
+ * hosted default (OpenClaw cloud, LobeChat relay first-chunk); every false
+ * trip costs a retry and a replay of the partial output, so it is not tighter.
  */
-export const STREAM_IDLE_TIMEOUT_MS = 60_000;
+export const STREAM_IDLE_TIMEOUT_MS = 120_000;
 
 /**
  * Cumulative `reasoning_content` characters tolerated in one model call. A

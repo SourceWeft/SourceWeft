@@ -74,11 +74,11 @@ function progressEvents(
 }
 
 test("thresholds are exported constants and the resolved config defaults", () => {
-  assert.equal(STREAM_IDLE_TIMEOUT_MS, 60_000);
+  assert.equal(STREAM_IDLE_TIMEOUT_MS, 120_000);
   assert.equal(REASONING_CHARS_LIMIT, 200_000);
   assert.equal(STREAM_MAX_DURATION_MS, 30 * 60_000);
   assert.deepEqual(DEFAULT_STREAM_GUARDS, {
-    idleTimeoutMs: 60_000,
+    idleTimeoutMs: 120_000,
     reasoningCharsLimit: 200_000,
     maxDurationMs: 1_800_000,
   });
