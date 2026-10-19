@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test, vi } from "vitest";
-import { contentArtifactsService, testExports } from "./service";
+import { config } from "../../shared/config";
+import { ContentError } from "../content/errors";
+import {
+  contentArtifactsService,
+  MEMBER_READABLE_SOURCE_FILES,
+  testExports,
+} from "./service";
 import { createArtifactViewHandlerRegistry } from "./view-handlers";
 import {
   createSyntheticFileArtifactViewHandler,
@@ -1115,4 +1121,174 @@ test("private attachment reads propagate cancellation before and after storage w
     }),
     /cancel during source/,
   );
+});
+
+function sourceFileRequest() {
+  const fixture = namedVersionFixture();
+  const { maxBytes: _ignored, ...request } = fixture.request;
+  return { ...fixture, request };
+}
+
+function withManifestFile(
+  fixture: ReturnType<typeof sourceFileRequest>,
+  patch: Partial<typeof fixture.file>,
+) {
+  mocks.findReadyArtifactVersionRecord.mockResolvedValue({
+    ...fixture.version,
+    filesJson: { schemaVersion: 1, files: [{ ...fixture.file, ...patch }] },
+  });
+}
+
+const isFileNotFound = (error: unknown) =>
+  (error as { statusCode: number; code: string }).statusCode === 404 &&
+  (error as { code: string }).code === "ARTIFACT_VERSION_FILE_NOT_FOUND";
+
+test("member source-file reads return the exact verified bytes under the sandbox attachment limit", async () => {
+  assert.deepEqual([...MEMBER_READABLE_SOURCE_FILES], ["report.source.json"]);
+  const { bytes, file, request } = sourceFileRequest();
+  const result =
+    await contentArtifactsService.readArtifactVersionSourceFile(request);
+  assert.deepEqual(result.bytes, bytes);
+  assert.equal(result.fileName, "report.source.json");
+  assert.equal(result.artifactVersionId, "version-1");
+  assert.equal(result.versionNo, 1);
+  assert.equal(result.contentDigest, file.contentDigest);
+  assert.deepEqual(mocks.findReadyArtifactVersionRecord.mock.calls[0]?.[0], {
+    teamId: "team-1",
+    workspaceId: "workspace-1",
+    artifactId: "artifact-1",
+    artifactVersionId: "version-1",
+  });
+  assert.deepEqual(mocks.downloadFileObject.mock.calls[0]?.[0], {
+    bucket: "content",
+    key: file.storageKey,
+    maxBytes: config.sandbox.maxPrepareFileBytes,
+    signal: undefined,
+  });
+  assert.doesNotMatch(
+    JSON.stringify({ ...result, bytes: undefined }),
+    /storageKey|storageBucket/,
+  );
+});
+
+test("member source-file reads refuse names outside the allowlist before any lookup", async () => {
+  for (const fileName of [
+    "private-notes.txt",
+    "index.html",
+    "REPORT.SOURCE.JSON",
+    " report.source.json",
+    "../report.source.json",
+    "",
+  ]) {
+    const { request } = sourceFileRequest();
+    await assert.rejects(
+      contentArtifactsService.readArtifactVersionSourceFile({
+        ...request,
+        fileName,
+      }),
+      isFileNotFound,
+      fileName,
+    );
+    assert.equal(mocks.requireContentWorkspace.mock.calls.length, 0);
+    assert.equal(mocks.findReadyArtifactVersionRecord.mock.calls.length, 0);
+    assert.equal(mocks.downloadFileObject.mock.calls.length, 0);
+  }
+});
+
+test("member source-file reads hide allowlisted names whose manifest entry is not a JSON source", async () => {
+  const cases: Array<
+    [string, Partial<ReturnType<typeof sourceFileRequest>["file"]>]
+  > = [
+    ["asset under the allowed name", { role: "asset" }],
+    [
+      "public asset under the allowed name",
+      { role: "asset", access: "artifact" },
+    ],
+    ["source with a non-JSON content type", { contentType: "text/plain" }],
+    ["manifest lacks the file entirely", { fileName: "other.source.json" }],
+  ];
+  for (const [label, patch] of cases) {
+    const fixture = sourceFileRequest();
+    withManifestFile(fixture, patch);
+    await assert.rejects(
+      contentArtifactsService.readArtifactVersionSourceFile(fixture.request),
+      isFileNotFound,
+      label,
+    );
+    assert.equal(mocks.downloadFileObject.mock.calls.length, 0, label);
+  }
+  // A JSON content type with parameters still qualifies.
+  const fixture = sourceFileRequest();
+  withManifestFile(fixture, { contentType: "application/json; charset=utf-8" });
+  assert.deepEqual(
+    (
+      await contentArtifactsService.readArtifactVersionSourceFile(
+        fixture.request,
+      )
+    ).bytes,
+    fixture.bytes,
+  );
+});
+
+test("member source-file reads answer 404 for non-members, other workspaces and invisible or unready versions", async () => {
+  const notFound = (error: unknown) =>
+    (error as { statusCode: number }).statusCode === 404;
+  let fixture = sourceFileRequest();
+  mocks.requireContentWorkspace.mockRejectedValue(
+    new ContentError(404, "WORKSPACE_NOT_FOUND", "Workspace not found"),
+  );
+  await assert.rejects(
+    contentArtifactsService.readArtifactVersionSourceFile(fixture.request),
+    notFound,
+  );
+  assert.equal(mocks.findReadyArtifactVersionRecord.mock.calls.length, 0);
+
+  fixture = sourceFileRequest();
+  mocks.findReadyArtifactVersionRecord.mockResolvedValue(null);
+  await assert.rejects(
+    contentArtifactsService.readArtifactVersionSourceFile(fixture.request),
+    notFound,
+  );
+
+  fixture = sourceFileRequest();
+  mocks.findReadyArtifactVersionRecord.mockResolvedValue({
+    ...fixture.version,
+    visibility: "private",
+    createdBy: "other-user",
+  });
+  await assert.rejects(
+    contentArtifactsService.readArtifactVersionSourceFile(fixture.request),
+    notFound,
+  );
+
+  fixture = sourceFileRequest();
+  withManifestFile(fixture, {
+    storageKey: "workspaces/other-workspace/artifacts/artifact-1/source.json",
+  });
+  await assert.rejects(
+    contentArtifactsService.readArtifactVersionSourceFile(fixture.request),
+    isFileNotFound,
+  );
+  assert.equal(mocks.downloadFileObject.mock.calls.length, 0);
+});
+
+test("member source-file reads reject tampered bytes with 409 and oversized manifests with 413", async () => {
+  let fixture = sourceFileRequest();
+  mocks.downloadFileObject.mockResolvedValue(Buffer.from("tampered source"));
+  await assert.rejects(
+    contentArtifactsService.readArtifactVersionSourceFile(fixture.request),
+    (error: unknown) =>
+      (error as { statusCode: number; code: string }).statusCode === 409 &&
+      (error as { code: string }).code === "ARTIFACT_FILE_INTEGRITY_MISMATCH",
+  );
+  fixture = sourceFileRequest();
+  withManifestFile(fixture, {
+    byteLength: config.sandbox.maxPrepareFileBytes + 1,
+  });
+  await assert.rejects(
+    contentArtifactsService.readArtifactVersionSourceFile(fixture.request),
+    (error: unknown) =>
+      (error as { code: string }).code === "ARTIFACT_FILE_TOO_LARGE",
+  );
+  assert.equal(mocks.downloadFileObject.mock.calls.length, 0);
 });

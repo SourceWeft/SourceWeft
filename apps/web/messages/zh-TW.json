@@ -2185,6 +2185,17 @@
       "citedVerified": "{path} · 已驗證引用版本",
       "fileUnavailable": "檔案不可用。"
     },
+    "evidence": {
+      "title": "證據（{count}）",
+      "open": "開啟證據 {id}",
+      "unresolvableHint": "此引用無法開啟，僅保留文字。",
+      "kind": {
+        "chunk": "來源庫",
+        "file": "檔案",
+        "external": "網頁",
+        "unresolvable": "不可解析"
+      }
+    },
     "location": {
       "page": "第 {page} 頁",
       "slide": "第 {slide} 張投影片",

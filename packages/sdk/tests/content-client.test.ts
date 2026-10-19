@@ -154,3 +154,25 @@ test("workspace category lists ask for the reader's language", async () => {
     "/v1/workspaces/workspace/skills/catalog/categories",
   ]);
 });
+
+test("readArtifactVersionSourceFile addresses the member-only exact-version source route and returns the parsed JSON", async () => {
+  const paths: string[] = [];
+  const client = new ContentClient({
+    get: async (path: string) => {
+      paths.push(path);
+      return { sources: [{ id: "S1" }] };
+    },
+  } as never);
+
+  const document = await client.readArtifactVersionSourceFile(
+    "workspace / one",
+    "artifact 1",
+    "version/1",
+    "report.source.json",
+  );
+
+  assert.deepEqual(paths, [
+    "/v1/workspaces/workspace%20%2F%20one/artifacts/artifact%201/versions/version%2F1/source-files/report.source.json",
+  ]);
+  assert.deepEqual(document, { sources: [{ id: "S1" }] });
+});

@@ -20,13 +20,19 @@ A statement has `text`, `kind` (`fact`, `analysis` or `recommendation`) and `cit
 
 Tables use `columns` and rectangular `rows`. A cell has `text`, `status` (`value`, `unknown`, `conflict` or `not_applicable`) and `citations`. Value and conflict cells require supporting sources. Unknown stays unknown; lack of evidence does not establish that a feature is absent or inapplicable. Conflicts should describe the disagreement and cite the competing evidence.
 
-Each source has a unique report-local ID such as `S1`, matching `S` followed by a positive integer, independent of turn-local `c1`. Citations contain these IDs. Sources have `display: { title, locator?, url? }` and optional private `provenance`. The provenance fields `sourceId`, `documentId`, `chunkId`, `fileId`, `scope`, `revision` and `locator` are optional strings; use only observed values. Do not insert arbitrary objects or invented identities. A saved source is an editing record, not authority to access data.
+Each source has a unique report-local ID such as `S1`, matching `S` followed by a positive integer, independent of turn-local `c1`. Citations contain these IDs. Sources have `display: { title, locator?, url? }` and optional private `provenance`, which takes one of three resolvable shapes distinguished by `kind`:
+
+- `{ "kind": "chunk", "sourceId", "documentId", "chunkId", "chunkNo"?, "path"? }` — copied verbatim from a `/files` footnote `Source Library: … Evidence: {sourceId, documentId, chunkId, chunkNo, path}`; keep `chunkNo` (0-based, as the host numbers chunks) and `path` only when the footnote shows them.
+- `{ "kind": "file", "workspaceId", "threadId", "backendKind", "fileId", "relativePath", "revision", "locator" }` — copied verbatim from a `/files` footnote `File: <relativePath>. Identity: {workspaceId, threadId, backendKind, fileId}. Location: {locator}. Version: sha256:…`; `locator` is the footnote's location object unchanged.
+- `{ "kind": "external", "url" }` — the actual HTTP(S) URL that was read.
+
+Copy only the fields listed; the validator rejects unknown keys. Never invent, guess, abbreviate or recombine identities: an id that was not observed in a current footnote or reader result does not belong in provenance. Omit `provenance` when no footnote exists rather than fabricating one. Earlier sources without `kind` (free-form string fields) remain valid for revisions. Provenance stays private in every export; a saved source is an editing record, not authority to access data.
 
 ## Separate public references from private provenance
 
 Public display fields contain human-readable titles, actually observed page/section/table locations and actual HTTP(S) URLs. Do not include URL credentials. For internal material without a public URL, keep the title and useful observed locator without manufacturing a SourceWeft link.
 
-Keep internal IDs, file revisions and machine identity in private provenance. Never emit `/kb`, `/files`, workspace/thread/file/chunk IDs, storage coordinates, runtime markers or raw identity JSON into public report text and references. Inspect all public text fields, including titles, tables and display.locator: omitting the provenance object alone does not sanitize copied confidential text.
+Keep internal IDs, file revisions and machine identity in private provenance. Never emit `/kb`, `/files`, workspace/thread/file/chunk IDs, storage coordinates, runtime markers or raw identity JSON into public report text and references. In HTML each rendered `[S1]` marker is an in-document link to the matching entry of the sources section; this is display navigation only, carries no provenance, and `display.url` stays plain text. Inspect all public text fields, including titles, tables and display.locator: omitting the provenance object alone does not sanitize copied confidential text.
 
 Escaping text prevents executable markup; it does not determine whether the text should be disclosed. Review the report's actual source disclosure before publishing.
 

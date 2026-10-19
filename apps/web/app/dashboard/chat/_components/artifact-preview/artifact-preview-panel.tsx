@@ -35,6 +35,10 @@ import {
 } from "@sourceweft/ui-web/components/ui/button";
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { contentClient } from "../../../../../lib/sdk";
+import {
+  forgetArtifactShare,
+  loadArtifactShare,
+} from "./artifact-share-lookup";
 import { ShareArtifactDialog } from "./share-artifact-dialog";
 import {
   artifactTitle,
@@ -53,6 +57,7 @@ import {
   UnsupportedArtifactPreview,
 } from "./fallbacks";
 import { resolveArtifactPreviewRenderer } from "./preview-registry";
+import { ReportEvidencePanel } from "./report-evidence-panel";
 import type { ArtifactPreviewLayout } from "./types";
 import { isArtifactPending, payloadRecord } from "./utils";
 import { withArtifactVersionMediaProxyUrls } from "../chat-canvas/use-artifact-version-media";
@@ -123,10 +128,11 @@ export function ArtifactPreviewPanel({
     }
     let cancelled = false;
     setIsShareLoading(true);
-    contentClient
-      .getArtifactShare(workspaceId, artifact.id)
+    // One outstanding lookup is shared by every mounted panel (Hub inline
+    // plus expanded dialog, doubled by StrictMode); see artifact-share-lookup.
+    loadArtifactShare(workspaceId, artifact.id)
       .then((result) => {
-        if (!cancelled) setShare(result.share);
+        if (!cancelled) setShare(result);
       })
       .catch(() => {
         // Not being allowed to read share state (e.g. not the creator) simply
@@ -368,6 +374,10 @@ export function ArtifactPreviewPanel({
       >
         {previewContent}
 
+        {/* Decides for itself whether this artifact is a ready HTML report with
+            a member-readable source file; the shell stays feature-agnostic. */}
+        <ReportEvidencePanel artifact={artifact} workspaceId={workspaceId} />
+
         {artifact.promptText ? (
           <div className="mt-3 rounded-xl border bg-background/70 p-3">
             <p className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
@@ -389,7 +399,12 @@ export function ArtifactPreviewPanel({
           title={title}
           share={share}
           isShareLoading={isShareLoading}
-          onShareChange={setShare}
+          onShareChange={(next) => {
+            // A mutation makes any briefly remembered lookup stale for other
+            // mounted panels; forget it before the local state moves on.
+            forgetArtifactShare(workspaceId, artifact.id);
+            setShare(next);
+          }}
         />
       ) : null}
 
