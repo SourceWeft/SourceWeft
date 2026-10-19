@@ -1,3 +1,4 @@
+import { localInvocationFailure } from "./invocation-reply";
 import { requireDeviceAccess, type LocalExecutionCaller } from "./access";
 import { consumeLocalFileReply } from "./binary-transfer";
 import { ContentError } from "../content/errors";
@@ -352,11 +353,7 @@ export async function localCall(input: {
       current &&
       ["failed", "cancelled", "outcome_unknown"].includes(current.status)
     )
-      throw new ContentError(
-        409,
-        `LOCAL_EXECUTION_${current.status.toUpperCase()}`,
-        current.error ?? "Local execution did not complete.",
-      );
+      throw localInvocationFailure(current);
     await new Promise((resolve) => setTimeout(resolve, 150));
   }
   await db

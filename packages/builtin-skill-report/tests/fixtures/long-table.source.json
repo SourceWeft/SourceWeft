@@ -1,0 +1,803 @@
+{
+  "schemaVersion": 1,
+  "title": "虚构资料核验长表回归报告",
+  "language": "zh-CN",
+  "template": "comparison",
+  "audience": "报告质量核验员",
+  "presentation": {
+    "mobileDensity": "compact",
+    "tableOfContents": true,
+    "pageNumbers": true,
+    "citationLayout": "source-notes"
+  },
+  "summary": [
+    {
+      "text": "本报告使用人工编制的虚构记录检验跨页表格，不描述真实产品、客户或市场事实。",
+      "kind": "analysis",
+      "citations": []
+    }
+  ],
+  "sections": [
+    {
+      "id": "records",
+      "heading": "跨页核验记录",
+      "blocks": [
+        {
+          "type": "table",
+          "columns": [
+            "回归编号",
+            "核验日期",
+            "资料说明"
+          ],
+          "rows": [
+            [
+              {
+                "text": "ROW001",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "2026-10-01",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "虚构记录 01：交付前逐项核对正文、日期与来源；表格跨页后仍须保留此行完整信息，不得缩小字体、删除文字或将缺失数据视为零。",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              }
+            ],
+            [
+              {
+                "text": "ROW002",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "2026-10-02",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "虚构记录 02：交付前逐项核对正文、日期与来源；表格跨页后仍须保留此行完整信息，不得缩小字体、删除文字或将缺失数据视为零。",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              }
+            ],
+            [
+              {
+                "text": "ROW003",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "2026-10-03",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "虚构记录 03：交付前逐项核对正文、日期与来源；表格跨页后仍须保留此行完整信息，不得缩小字体、删除文字或将缺失数据视为零。",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              }
+            ],
+            [
+              {
+                "text": "ROW004",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "2026-10-04",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "虚构记录 04：交付前逐项核对正文、日期与来源；表格跨页后仍须保留此行完整信息，不得缩小字体、删除文字或将缺失数据视为零。",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              }
+            ],
+            [
+              {
+                "text": "ROW005",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "2026-10-05",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "虚构记录 05：交付前逐项核对正文、日期与来源；表格跨页后仍须保留此行完整信息，不得缩小字体、删除文字或将缺失数据视为零。",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              }
+            ],
+            [
+              {
+                "text": "ROW006",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "2026-10-06",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "虚构记录 06：交付前逐项核对正文、日期与来源；表格跨页后仍须保留此行完整信息，不得缩小字体、删除文字或将缺失数据视为零。",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              }
+            ],
+            [
+              {
+                "text": "ROW007",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "2026-10-07",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "虚构记录 07：交付前逐项核对正文、日期与来源；表格跨页后仍须保留此行完整信息，不得缩小字体、删除文字或将缺失数据视为零。",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              }
+            ],
+            [
+              {
+                "text": "ROW008",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "2026-10-08",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "虚构记录 08：交付前逐项核对正文、日期与来源；表格跨页后仍须保留此行完整信息，不得缩小字体、删除文字或将缺失数据视为零。",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              }
+            ],
+            [
+              {
+                "text": "ROW009",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "2026-10-09",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "虚构记录 09：交付前逐项核对正文、日期与来源；表格跨页后仍须保留此行完整信息，不得缩小字体、删除文字或将缺失数据视为零。",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              }
+            ],
+            [
+              {
+                "text": "ROW010",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "2026-10-10",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "虚构记录 10：交付前逐项核对正文、日期与来源；表格跨页后仍须保留此行完整信息，不得缩小字体、删除文字或将缺失数据视为零。",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              }
+            ],
+            [
+              {
+                "text": "ROW011",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "2026-10-11",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "虚构记录 11：交付前逐项核对正文、日期与来源；表格跨页后仍须保留此行完整信息，不得缩小字体、删除文字或将缺失数据视为零。",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              }
+            ],
+            [
+              {
+                "text": "ROW012",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "2026-10-12",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "虚构记录 12：交付前逐项核对正文、日期与来源；表格跨页后仍须保留此行完整信息，不得缩小字体、删除文字或将缺失数据视为零。",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              }
+            ],
+            [
+              {
+                "text": "ROW013",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "2026-10-13",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "虚构记录 13：交付前逐项核对正文、日期与来源；表格跨页后仍须保留此行完整信息，不得缩小字体、删除文字或将缺失数据视为零。",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              }
+            ],
+            [
+              {
+                "text": "ROW014",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "2026-10-14",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "虚构记录 14：交付前逐项核对正文、日期与来源；表格跨页后仍须保留此行完整信息，不得缩小字体、删除文字或将缺失数据视为零。",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              }
+            ],
+            [
+              {
+                "text": "ROW015",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "2026-10-15",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "虚构记录 15：交付前逐项核对正文、日期与来源；表格跨页后仍须保留此行完整信息，不得缩小字体、删除文字或将缺失数据视为零。",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              }
+            ],
+            [
+              {
+                "text": "ROW016",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "2026-10-16",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "虚构记录 16：交付前逐项核对正文、日期与来源；表格跨页后仍须保留此行完整信息，不得缩小字体、删除文字或将缺失数据视为零。",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              }
+            ],
+            [
+              {
+                "text": "ROW017",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "2026-10-17",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "虚构记录 17：交付前逐项核对正文、日期与来源；表格跨页后仍须保留此行完整信息，不得缩小字体、删除文字或将缺失数据视为零。",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              }
+            ],
+            [
+              {
+                "text": "ROW018",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "2026-10-18",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "虚构记录 18：交付前逐项核对正文、日期与来源；表格跨页后仍须保留此行完整信息，不得缩小字体、删除文字或将缺失数据视为零。",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              }
+            ],
+            [
+              {
+                "text": "ROW019",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "2026-10-19",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "虚构记录 19：交付前逐项核对正文、日期与来源；表格跨页后仍须保留此行完整信息，不得缩小字体、删除文字或将缺失数据视为零。",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              }
+            ],
+            [
+              {
+                "text": "ROW020",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "2026-10-20",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "虚构记录 20：交付前逐项核对正文、日期与来源；表格跨页后仍须保留此行完整信息，不得缩小字体、删除文字或将缺失数据视为零。",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              }
+            ],
+            [
+              {
+                "text": "ROW021",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "2026-10-21",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "虚构记录 21：交付前逐项核对正文、日期与来源；表格跨页后仍须保留此行完整信息，不得缩小字体、删除文字或将缺失数据视为零。",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              }
+            ],
+            [
+              {
+                "text": "ROW022",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "2026-10-22",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "虚构记录 22：交付前逐项核对正文、日期与来源；表格跨页后仍须保留此行完整信息，不得缩小字体、删除文字或将缺失数据视为零。",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              }
+            ],
+            [
+              {
+                "text": "ROW023",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "2026-10-23",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "虚构记录 23：交付前逐项核对正文、日期与来源；表格跨页后仍须保留此行完整信息，不得缩小字体、删除文字或将缺失数据视为零。",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              }
+            ],
+            [
+              {
+                "text": "ROW024",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "2026-10-24",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "虚构记录 24：交付前逐项核对正文、日期与来源；表格跨页后仍须保留此行完整信息，不得缩小字体、删除文字或将缺失数据视为零。",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              }
+            ],
+            [
+              {
+                "text": "ROW025",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "2026-10-25",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "虚构记录 25：交付前逐项核对正文、日期与来源；表格跨页后仍须保留此行完整信息，不得缩小字体、删除文字或将缺失数据视为零。",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              }
+            ],
+            [
+              {
+                "text": "ROW026",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "2026-10-26",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "虚构记录 26：交付前逐项核对正文、日期与来源；表格跨页后仍须保留此行完整信息，不得缩小字体、删除文字或将缺失数据视为零。",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              }
+            ],
+            [
+              {
+                "text": "ROW027",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "2026-10-27",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "虚构记录 27：交付前逐项核对正文、日期与来源；表格跨页后仍须保留此行完整信息，不得缩小字体、删除文字或将缺失数据视为零。",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              }
+            ],
+            [
+              {
+                "text": "ROW028",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "2026-10-28",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "虚构记录 28：交付前逐项核对正文、日期与来源；表格跨页后仍须保留此行完整信息，不得缩小字体、删除文字或将缺失数据视为零。",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              }
+            ],
+            [
+              {
+                "text": "ROW029",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "2026-10-01",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "虚构记录 29：交付前逐项核对正文、日期与来源；表格跨页后仍须保留此行完整信息，不得缩小字体、删除文字或将缺失数据视为零。",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              }
+            ],
+            [
+              {
+                "text": "ROW030",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "2026-10-02",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "虚构记录 30：交付前逐项核对正文、日期与来源；表格跨页后仍须保留此行完整信息，不得缩小字体、删除文字或将缺失数据视为零。",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              }
+            ],
+            [
+              {
+                "text": "ROW031",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "2026-10-03",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "虚构记录 31：交付前逐项核对正文、日期与来源；表格跨页后仍须保留此行完整信息，不得缩小字体、删除文字或将缺失数据视为零。",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              }
+            ],
+            [
+              {
+                "text": "ROW032",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "2026-10-04",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              },
+              {
+                "text": "虚构记录 32：交付前逐项核对正文、日期与来源；表格跨页后仍须保留此行完整信息，不得缩小字体、删除文字或将缺失数据视为零。",
+                "status": "value",
+                "citations": [
+                  "S1"
+                ]
+              }
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "decision",
+      "heading": "检查方法与限制",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "只有全部编号、日期、来源标签与重复表头均完整，才通过机器保真检查；视觉质量与现实事实支持仍需另行审阅。",
+          "kind": "recommendation",
+          "citations": [
+            "S1"
+          ]
+        }
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "id": "S1",
+      "display": {
+        "title": "跨页表格虚构回归记录",
+        "locator": "本仓库生成的固定测试资料；不构成外部证据"
+      },
+      "provenance": {
+        "fileId": "PRIVATE-FIXTURE-LONG-TABLE",
+        "scope": "fixture-only",
+        "revision": "1",
+        "locator": "sources/long-table.md"
+      }
+    }
+  ]
+}

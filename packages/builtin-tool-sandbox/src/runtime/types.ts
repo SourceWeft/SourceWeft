@@ -70,6 +70,13 @@ export type SandboxCancelExecutionInput = {
 };
 
 export type SandboxPreparedFile = {
+  sourceArtifact?: {
+    artifactId: string;
+    artifactVersionId: string;
+    versionNo: number;
+    fileName?: string;
+    contentDigest?: string;
+  };
   sourcePath: string;
   sandboxPath: string;
   sizeBytes: number;

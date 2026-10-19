@@ -1236,3 +1236,44 @@ test.each(["publish", "complete"] as const)(
     assertCleanupDiagnostics(deletedKeys);
   },
 );
+
+test("a fenced retry cannot bypass the run transaction through an existing ready artifact", async () => {
+  reusableRecord = {
+    id: "artifact-existing",
+    status: "ready",
+    latestVersionId: "version-existing",
+  };
+  const conflict = new ArtifactError({
+    code: ARTIFACT_WRITE_ERROR_CODES.stateConflict,
+    message: "Run cancelled",
+  });
+  createReadyError = conflict;
+  const fence = {
+    runId: "cancelled-run",
+    teamId: CONTEXT.teamId,
+    workspaceId: CONTEXT.workspaceId,
+  };
+  await assert.rejects(
+    makeWriter().publishArtifact({
+      context: CONTEXT,
+      spec: { ...writeWithFiles(), ...IDEMPOTENT },
+      publishRunFence: fence,
+    }),
+    (error) => error === conflict,
+  );
+  assert.equal(
+    requestKeyLookups.length,
+    0,
+    "reuse is settled only by the run-fenced commit",
+  );
+  assert.deepEqual(created[0]?.publishRunFence, fence);
+  assert.deepEqual(
+    deletedKeys,
+    uploads.map(({ key }) => key),
+  );
+  assert.equal(
+    referenceLookups.length,
+    0,
+    "a definite cancelled-run refusal does not retain uncertain uploads",
+  );
+});

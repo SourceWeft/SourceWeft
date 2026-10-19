@@ -79,7 +79,14 @@ export async function publishArtifactAndRecordOutput(input: {
   publishInput: Parameters<typeof publishArtifact>[0];
   runtime: Pick<TurnRuntime, "renderBlocks">;
 }) {
-  const result = await input.publish(input.publishInput);
+  const result = await input.publish({
+    ...input.publishInput,
+    publishRunFence: {
+      runId: input.origin.threadRunId,
+      teamId: input.publishInput.context.teamId,
+      workspaceId: input.publishInput.context.workspaceId,
+    },
+  });
   recordPublishedArtifactOutput({
     origin: input.origin,
     result,

@@ -110,6 +110,7 @@ export async function createThreadAgent(
     chatProfileConfig: params.chatProfileConfig,
     contextCompressionReportKey: params.contextCompressionReportKey,
     commandExecutionPolicy: params.commandExecutionPolicy,
+    interruptOn: params.interruptOn,
     extraMiddleware: params.extraMiddleware,
     filesystemMounts,
     toolObservabilityContext: params.toolObservabilityContext,
@@ -175,6 +176,7 @@ export const testExports = {
  * block — it is not a barrel for the whole directory.
  */
 export type { AgentCitation } from "./citation-registry";
+export { toAgentToolBudgetContentError } from "./middleware/tool-call-budget";
 export { agentSandboxService } from "./sandbox-service/service";
 // Type-only on purpose: a value re-export of turn/runner here would close a
 // runtime cycle (agent/index → turn/runner → turn/checkpoint → agent/index).
@@ -208,3 +210,5 @@ export {
   updateWorkspacePersona,
 } from "./personas";
 export type { PersonaOverrides, PersonaSpec } from "./personas";
+
+export { agentCheckpointFromStepStopError } from "./turn/step-stop-outcome";

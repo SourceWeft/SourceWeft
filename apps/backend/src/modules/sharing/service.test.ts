@@ -483,3 +483,54 @@ test("privating a thread with no committed revocations audits nothing", async ()
   assert.equal(count, 0);
   assert.equal(mockAuditRecord.mock.calls.length, 0);
 });
+
+test("ordinary file shares expose only safe exact-version downloads without a type public payload", async () => {
+  mockFindLive.mockResolvedValue(LIVE_ARTIFACT_SHARE);
+  mockFindArtifact.mockResolvedValue(
+    artifact({
+      artifactType: "file",
+      payloadJson: { secret: "authoring-source" },
+    }),
+  );
+  mockBuildPublicPayload.mockResolvedValue(null);
+  const file = {
+    fileName: "report.pdf",
+    contentType: "application/pdf",
+    byteLength: 3,
+    contentDigest: `sha256:${"a".repeat(64)}`,
+    role: "primary",
+    access: "artifact",
+    storageBucket: "content",
+    storageKey: "workspaces/ws-1/artifacts/art-1/v1/report.pdf",
+  };
+  mockCurrentVersionFiles.mockResolvedValue({
+    versionId: "version-1",
+    versionNo: 1,
+    contentJson: { secret: "authoring-source" },
+    filesJson: {
+      schemaVersion: 1,
+      files: [
+        file,
+        { ...file, fileName: "report.md", role: "asset" },
+        { ...file, fileName: "private.md", role: "asset", access: "private" },
+        { ...file, fileName: "source.json", role: "source", access: "private" },
+      ],
+    },
+  });
+  const projection = await sharingService.resolvePublicArtifact("tok");
+  const payload = projection?.payload as {
+    versionFiles: { fileName: string; downloadUrl: string }[];
+  };
+  assert.deepEqual(
+    payload.versionFiles.map((file) => file.fileName),
+    ["report.pdf", "report.md"],
+  );
+  const download = new URL(payload.versionFiles[1]!.downloadUrl);
+  assert.equal(download.pathname, "/v1/public/shares/tok/assets/report.md");
+  assert.equal(download.searchParams.get("artifactVersionId"), "version-1");
+  assert.equal(download.searchParams.get("download"), "1");
+  assert.doesNotMatch(
+    JSON.stringify(projection),
+    /authoring-source|storageKey|storageBucket|private.md|source.json/,
+  );
+});

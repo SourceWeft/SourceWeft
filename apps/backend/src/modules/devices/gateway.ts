@@ -3,7 +3,10 @@ import { storeLocalFileReply } from "./binary-transfer";
 import type { Server as HttpServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
-import { z } from "zod";
+import {
+  localDeviceReplySchema,
+  persistLocalFailureCode,
+} from "./invocation-reply";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import {
   openLocalConnection,
@@ -12,18 +15,6 @@ import {
 import { db, localDevices, localToolInvocations } from "@sourceweft/db";
 import { tokenHash } from "./service";
 import { logger } from "../../shared/logger";
-
-const replySchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("heartbeat") }),
-  z.object({ type: z.literal("accepted"), id: z.string().max(256) }),
-  z.object({
-    type: z.literal("result"),
-    id: z.string().max(256),
-    ok: z.boolean(),
-    result: z.record(z.string(), z.unknown()).optional(),
-    error: z.string().max(4000).optional(),
-  }),
-]);
 
 export function attachLocalDeviceGateway(server: HttpServer) {
   const wss = new WebSocketServer({
@@ -81,7 +72,9 @@ async function serveDevice(ws: WebSocket, deviceId: string, userId: string) {
   );
   ws.on("message", (bytes) => {
     void (async () => {
-      const parsed = replySchema.safeParse(JSON.parse(bytes.toString()));
+      const parsed = localDeviceReplySchema.safeParse(
+        JSON.parse(bytes.toString()),
+      );
       if (!parsed.success) {
         ws.close(1008, "Invalid device message");
         return;
@@ -129,7 +122,7 @@ async function serveDevice(ws: WebSocket, deviceId: string, userId: string) {
                 { userId, deviceId, invocationId: message.id },
                 message.result ?? {},
               )
-            : (message.result ?? null);
+            : persistLocalFailureCode(message);
         await db
           .update(localToolInvocations)
           .set({

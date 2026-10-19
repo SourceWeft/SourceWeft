@@ -7,6 +7,7 @@ import { findThreadRecord } from "../thread/repository";
 import type { MessageRecord, ThreadRecord } from "../../content/types";
 import {
   findChatThreadRunById,
+  findChatThreadRunAttachState,
   findChatThreadRunByIdempotencyKey,
 } from "./repository";
 import {
@@ -17,6 +18,8 @@ import type { ChatRunSnapshot, ChatThreadRunRecord } from "./types";
 import { normalizeRetrievalSnapshot } from "./snapshot";
 import {
   isTerminalRunStatus,
+  hasLiveRunWorker,
+  isStaleActiveRun,
   parseSsePayload,
   synthesizeTerminalRunEvents,
   toTerminalRunError,
@@ -289,18 +292,42 @@ export async function resolveAttachRunState(input: {
   offset: number;
   sawErrorEvent: boolean;
   findRunById?: typeof findChatThreadRunById;
+  findAttachState?: typeof findChatThreadRunAttachState;
   failStaleRun?: (run: ChatThreadRunRecord) => Promise<ChatThreadRunRecord>;
   getEvents?: (
     streamKey: string,
     offset: number,
   ) => Promise<{ events: ChatRunStreamEvent[]; nextOffset: number }>;
 }) {
+  const scope = {
+    runId: input.run.id,
+    teamId: input.run.teamId,
+    workspaceId: input.run.workspaceId,
+  };
+  const control = await (input.findAttachState ?? findChatThreadRunAttachState)(
+    scope,
+  );
+  if (control) {
+    const activeRun = { ...input.run, ...control };
+    // Recovery reads snapshots for approval pauses and orphaned workers. A live
+    // worker already bypasses snapshot-terminal recovery, so only that path can
+    // omit the payload read while retaining the same time and status checks.
+    if (
+      !isTerminalRunStatus(activeRun.status) &&
+      activeRun.status !== "waiting_for_approval" &&
+      hasLiveRunWorker(activeRun) &&
+      !isStaleActiveRun(activeRun)
+    ) {
+      return {
+        run: activeRun,
+        sawErrorEvent: input.sawErrorEvent,
+        terminalEvents: null,
+      };
+    }
+  }
+
   let run =
-    (await (input.findRunById ?? findChatThreadRunById)({
-      runId: input.run.id,
-      teamId: input.run.teamId,
-      workspaceId: input.run.workspaceId,
-    })) ?? input.run;
+    (await (input.findRunById ?? findChatThreadRunById)(scope)) ?? input.run;
   run = await (input.failStaleRun ?? failRunIfStale)(run);
   if (!isTerminalRunStatus(run.status)) {
     return {

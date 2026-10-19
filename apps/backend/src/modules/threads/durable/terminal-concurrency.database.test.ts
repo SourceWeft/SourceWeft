@@ -252,6 +252,18 @@ test("Redis terminal write failure leaves durable failure and attach reconstruct
 
 test("cancel completion wins the run row lock before a late artifact publication", async () => {
   await repository.markChatThreadRunRunning(scope());
+  await repository.updateChatThreadRunProgress({
+    ...scope(),
+    snapshotJson: {
+      agentRunStop: {
+        reason: "step_limit",
+        steps: 400,
+        limit: 400,
+        canContinue: true,
+        summaryStatus: "completed",
+      },
+    },
+  });
   const connection = await lockRun();
   const cancelling = repository.finishChatThreadRun({
     ...scope(),
@@ -273,6 +285,7 @@ test("cancel completion wins the run row lock before a late artifact publication
     assert.equal((await cancelling)?.status, "cancelled");
     assert.equal(await publication, null);
     assert.equal((await current())?.status, "cancelled");
+    assert.equal((await current())?.snapshotJson.agentRunStop, null);
   } finally {
     await connection.query("rollback");
     connection.release();
@@ -1006,3 +1019,94 @@ test("a failed terminal-state read cannot replace the original preparation Conte
   assert.equal((await current())?.status, "running");
   assert.equal(append.mock.calls.length, 0);
 });
+
+for (const status of ["failed", "cancelled"] as const) {
+  test(`step-summary stop persists through terminal commit and reconnect; ${status} wins`, async () => {
+    const { ContentError } = await import("../../content/errors");
+    const stop = {
+      reason: "step_limit",
+      steps: 400,
+      limit: 400,
+      canContinue: true,
+      summaryStatus: "failed",
+    };
+    const userMessageId = randomUUID();
+    const assistantMessageId = randomUUID();
+    await schema.db.insert(schema.messages).values([
+      {
+        id: userMessageId,
+        teamId,
+        workspaceId,
+        threadId,
+        role: "user",
+        content: "report",
+        createdBy: run.userId,
+      },
+      {
+        id: assistantMessageId,
+        teamId,
+        workspaceId,
+        threadId,
+        role: "assistant",
+        content: "saved progress",
+        metadata: { agentRunStop: stop },
+      },
+    ]);
+    await repository.markChatThreadRunRunning(scope());
+    await repository.updateChatThreadRunProgress({
+      ...scope(),
+      userMessageId,
+      assistantMessageId,
+    });
+    const error =
+      status === "cancelled"
+        ? new ContentError(499, "CLIENT_CANCELLED", "Chat run was cancelled", {
+            details: { agentRunStop: stop },
+          })
+        : new ContentError(
+            402,
+            "BILLING_INSUFFICIENT_CREDITS",
+            "Not enough credits",
+            { details: { agentRunStop: stop } },
+          );
+    await runner.persistTerminalFailure({
+      run,
+      status,
+      assistantMessageId,
+      snapshot: {
+        agentRunStop: stop as never,
+        assistantContent: "saved progress",
+      },
+      contentError: error,
+      finishRun: service.durableChatRunService.finishRun.bind(
+        service.durableChatRunService,
+      ),
+      appendRunEvent: async (input) => {
+        assert.equal((await current())?.status, status);
+        emitted.push(input.payload);
+      },
+    });
+    const saved = (await current())!;
+    assert.equal(saved.status, status);
+    assert.equal(saved.errorCode, error.code);
+    const [assistant] = await schema.db
+      .select()
+      .from(schema.messages)
+      .where(eq(schema.messages.id, assistantMessageId));
+    if (status === "cancelled") {
+      assert.equal(assistant?.metadata?.agentRunStop, undefined);
+      assert.equal(saved.snapshotJson.agentRunStop, null);
+    } else {
+      assert.deepEqual(assistant?.metadata?.agentRunStop, stop);
+      assert.deepEqual(saved.snapshotJson.agentRunStop, stop);
+    }
+    const replay = service
+      .synthesizeTerminalRunEvents({ run: saved, sawErrorEvent: false })
+      .map((value) => JSON.parse(value.slice(6)));
+    assert.deepEqual(
+      replay.at(-1)?.agentRunStop,
+      status === "cancelled" ? undefined : stop,
+    );
+    assert.equal(replay[0]?.code, error.code);
+  });
+}

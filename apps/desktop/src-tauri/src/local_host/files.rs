@@ -373,9 +373,14 @@ pub(crate) fn open_file_beneath(
         let descriptor =
             unsafe { libc::openat(directory.as_raw_fd(), name.as_ptr(), flags, 0o600) };
         if descriptor < 0 {
+            let error = std::io::Error::last_os_error();
             return Err(HostError::new(
-                "FILE_ACCESS_DENIED",
-                std::io::Error::last_os_error().to_string(),
+                if error.kind() == std::io::ErrorKind::NotFound {
+                    "FILE_NOT_FOUND"
+                } else {
+                    "FILE_ACCESS_DENIED"
+                },
+                error.to_string(),
             ));
         }
         let next = unsafe { File::from_raw_fd(descriptor) };

@@ -272,7 +272,7 @@ function resolveAssistantForUserMessage(
   return candidates[candidates.length - 1] ?? null;
 }
 
-function resolveUserForAssistantMessage(
+export function resolveUserForAssistantMessage(
   messages: MessageRecord[],
   assistantMessage: MessageRecord,
 ) {

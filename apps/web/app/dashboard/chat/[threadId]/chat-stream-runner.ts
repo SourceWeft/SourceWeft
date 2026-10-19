@@ -20,6 +20,7 @@ import type {
 import {
   createStreamingEventHandlerContext,
   handleStreamingAssistantMessage,
+  handleStreamingAgentRunProgress,
   handleStreamingCitations,
   handleStreamingError,
   handleStreamingFinish,
@@ -55,6 +56,9 @@ const TITLE_POLL_INTERVAL_MS = 1000;
 const TITLE_POLL_TIMEOUT_MS = 60000;
 
 export type ChatStreamEventPayload = ToolCallEventPayload & {
+  agentRunStop?: unknown;
+  agentRunProgress?: unknown;
+  progress?: unknown;
   availableCitations?: unknown;
   citations?: unknown;
   code?: string;
@@ -129,6 +133,8 @@ type RunChatStreamInput = {
     event: ChatStreamEventPayload & { type: ChatStreamToolCallEventType },
   ) => boolean;
   markStreamingAssistantAsError: (errorInput: {
+    agentRunStop?: unknown;
+    agentRunProgress?: unknown;
     code?: string | null;
     error: string;
     messageId?: string | null;
@@ -657,6 +663,11 @@ export async function runChatStream(
           setArtifactsRefreshKey: input.setArtifactsRefreshKey,
           setWorkfilesRefreshKey: input.setWorkfilesRefreshKey,
         });
+      } else if (data.type === "agent-run-progress") {
+        handleStreamingAgentRunProgress({
+          context: streamingEventHandlerContext,
+          progress: data.progress,
+        });
       } else if (data.type === "thinking-step") {
         handleStreamingThinkingStep({
           context: streamingEventHandlerContext,
@@ -738,6 +749,8 @@ export async function runChatStream(
         const finishState = handleStreamingFinish({
           context: streamingEventHandlerContext,
           finishReason,
+          agentRunStop: data.agentRunStop,
+          agentRunProgress: data.agentRunProgress,
         });
         receivedFinishEvent = finishState.receivedFinishEvent;
         streamEnded = finishState.streamEnded;

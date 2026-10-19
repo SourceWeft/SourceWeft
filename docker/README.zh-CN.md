@@ -37,6 +37,16 @@ PUBLIC_API_BASE_URL=
 
 只发布网关端口，外部 HTTPS 代理可以转发到该端口。公开地址应与浏览器使用的 origin 一致。网关禁用 SSE 缓冲并转发 WebSocket Upgrade。Web 容器通过 `INTERNAL_API_BASE_URL=http://api:3001` 访问 API，不依赖公开地址。
 
+## Agent 单次运行上限
+
+`SOURCEWEFT_AGENT_MAX_STEPS` 默认为 `400` 步常规执行，`SOURCEWEFT_AGENT_CLOSING_STEPS` 默认为额外 `40` 步可用工具收尾。根 Agent 与每个子 Agent 各自独立计数；440 不是整个任务树的总额。一轮逻辑模型决策及其整批工具算一步，并行工具和工具重试不逐个加步；辅助模型调用与重试仍沿现有网关计费。
+
+常规预算耗尽后，当前已授权工具批次先完成，再自动进入核验、修复、保存和发布当前交付的收尾阶段。原权限和发布校验继续生效；收尾禁止新增委派或扩大可用工具身份。最后一轮常规批次已请求的子任务仍使用自己的独立预算。任一阶段自然完成即正常结束。收尾预算耗尽后，最后工具批次完成，再由同一模型最多额外生成一次禁用工具的总结。总结不能把未发布报告说成交付成功；总结失败明确报错并保留进度。同一会话新消息开启新预算，Retry 与审批恢复保留原策略和计数。
+
+两个变量均须为正十进制安全整数，且总和必须为安全整数。
+
+显式空值或非法值会使启动失败。请从已有 `.env` 中移除 `SOURCEWEFT_AGENT_TOOL_CALL_RUN_LIMIT` 和 `SOURCEWEFT_AGENT_TOOL_CALL_THREAD_LIMIT`；即使同时设置了新变量，任一旧变量仍会触发明确迁移错误。旧 checkpoint 的工具计数保留为历史记录，不换算为步数，也不再作为会话终身上限。
+
 ## 可选服务
 
 - 外部 S3：设置 `COMPOSE_PROFILES=` 停用内置存储，填写 `S3_ENDPOINT`、`S3_REGION`、`S3_BUCKET`、`S3_ACCESS_KEY_ID`、`S3_SECRET_ACCESS_KEY` 和路径样式配置。使用已有桶时设置 `S3_CREATE_BUCKET=false`。初始化会检查桶是否可用，缺失或无权访问时明确失败。

@@ -1,6 +1,6 @@
 # Maintained AnyDoc native binding
 
-This package preserves the AnyDoc 0.2.4 Node API and conversion implementation from official tag `v0.2.4` (commit `42bf1c5ecdde9eb0d96d6bd75a9e6698cf93b14c`). Upstream MIT licensing is retained. `UPSTREAM.json` records original source checksums; `upstream/Cargo.lock` pins the native dependency graph, including pdf-inspector 1.14.2.
+This package preserves the AnyDoc 0.2.4 Node API and conversion implementation from official tag `v0.2.4` (commit `42bf1c5ecdde9eb0d96d6bd75a9e6698cf93b14c`). Upstream MIT licensing is retained. `UPSTREAM.json` records original source checksums; `upstream/Cargo.lock` pins the native dependency graph, including pdf-inspector 1.14.2 and zip 9.0.0. The zip dependency is patched from 8.6.0 to address [RUSTSEC-2026-0367](https://rustsec.org/advisories/RUSTSEC-2026-0367.html), [RUSTSEC-2026-0368](https://rustsec.org/advisories/RUSTSEC-2026-0368.html), and [RUSTSEC-2026-0369](https://rustsec.org/advisories/RUSTSEC-2026-0369.html). Its MIT license text is unchanged; the original checksums remain recorded alongside patched checksums.
 
 The only conversion patch is in `upstream/src/formats/pdf.rs`: configure `remove_page_numbers=false`. The upstream isolated-line heuristic deletes legitimate standalone quantities such as `39`. Preservation also retains genuine numeric page footers; this is an explicit content-preservation tradeoff, not a parser/provider or OCR change. Scanned documents still reject OCR through the existing caller policy.
 

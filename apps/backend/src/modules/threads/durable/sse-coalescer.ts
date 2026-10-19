@@ -9,6 +9,11 @@
  * model itself was done in 6 s. Text deltas were already windowed; reasoning
  * deltas were not.
  *
+ * Successful slow writes extend the next collection window to at most one
+ * second; cheap writes retain the 80 ms cadence. Accumulated deltas also flush
+ * at 4096 UTF-16 characters. No timer is introduced: incoming events and the
+ * caller's boundaries/end flush continue to drive persistence.
+ *
  * Only the persistence cadence changes. The in-memory snapshot is still updated
  * per raw event by the caller, and a client applies a windowed delta exactly as
  * it applies the token-sized ones: text is appended, a reasoning segment is
@@ -16,6 +21,8 @@
  */
 
 export const STREAM_APPEND_DELTA_FLUSH_MS = 80;
+const MAX_DELTA_FLUSH_MS = 1000;
+const MAX_BUFFERED_DELTA_CHARS = 4096;
 
 type Payload = Record<string, unknown>;
 
@@ -25,7 +32,9 @@ export function isTextDeltaPayload(
   return payload?.type === "text-delta" && typeof payload.delta === "string";
 }
 
-export function isReasoningDeltaPayload(payload: Payload | null): payload is Payload & {
+export function isReasoningDeltaPayload(
+  payload: Payload | null,
+): payload is Payload & {
   type: "reasoning";
   reasoning: string;
   segment: Payload & { id: string };
@@ -48,7 +57,8 @@ function continuesPending(pending: Payload, payload: Payload) {
   }
   if (isReasoningDeltaPayload(pending)) {
     return (
-      isReasoningDeltaPayload(payload) && payload.segment.id === pending.segment.id
+      isReasoningDeltaPayload(payload) &&
+      payload.segment.id === pending.segment.id
     );
   }
   return false;
@@ -69,6 +79,12 @@ function mergeDelta(pending: Payload, payload: Payload): Payload {
   return payload;
 }
 
+function deltaCharacters(payload: Payload) {
+  if (isTextDeltaPayload(payload)) return payload.delta.length;
+  if (isReasoningDeltaPayload(payload)) return payload.reasoning.length;
+  return 0;
+}
+
 export function createDeltaCoalescer(input: {
   /** Persists one (possibly merged) delta payload. */
   flush: (payload: Payload) => Promise<void>;
@@ -79,6 +95,8 @@ export function createDeltaCoalescer(input: {
   const now = input.now ?? Date.now;
   let pending: Payload | null = null;
   let pendingStartedAt = 0;
+  let pendingCharacters = 0;
+  let collectionWindowMs = flushMs;
 
   const flush = async () => {
     if (!pending) {
@@ -87,7 +105,16 @@ export function createDeltaCoalescer(input: {
     const payload = pending;
     pending = null;
     pendingStartedAt = 0;
+    pendingCharacters = 0;
+    const flushStartedAt = now();
     await input.flush(payload);
+    // Measure only a successful persistence. Start the next collection window
+    // with its first delta, after this write completes, rather than charging
+    // this write's latency against that new window.
+    collectionWindowMs = Math.max(
+      flushMs,
+      Math.min(MAX_DELTA_FLUSH_MS, now() - flushStartedAt),
+    );
   };
 
   /**
@@ -105,13 +132,25 @@ export function createDeltaCoalescer(input: {
     if (!isDelta) {
       return false;
     }
+    const characters = deltaCharacters(payload!);
+    if (pending && pendingCharacters + characters > MAX_BUFFERED_DELTA_CHARS) {
+      await flush();
+    }
     if (!pending) {
       pending = { ...payload! };
+      pendingCharacters = characters;
       pendingStartedAt = now();
+      // One oversized raw event is persisted unchanged, never split or merged
+      // with other events. Across raw events, accumulated text stays bounded.
+      if (pendingCharacters >= MAX_BUFFERED_DELTA_CHARS) await flush();
       return true;
     }
     pending = mergeDelta(pending, payload!);
-    if (now() - pendingStartedAt >= flushMs) {
+    pendingCharacters += characters;
+    if (
+      pendingCharacters >= MAX_BUFFERED_DELTA_CHARS ||
+      now() - pendingStartedAt >= collectionWindowMs
+    ) {
       await flush();
     }
     return true;

@@ -218,6 +218,9 @@ export function mapDeepAgentEventToSse(
   event: Exclude<DeepAgentTurnEvent, { type: "done" }>,
   textId: string,
 ) {
+  if (event.type === "agent-run-progress") {
+    return toSseData({ type: "agent-run-progress", progress: event.progress });
+  }
   if (event.type === "text-delta") {
     return toSseData({
       type: "text-delta",

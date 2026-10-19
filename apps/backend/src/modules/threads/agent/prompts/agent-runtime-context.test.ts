@@ -239,3 +239,27 @@ describe("from runner.test.ts", () => {
     assert.ok(!prompt.includes(SYNTHETIC_PROMPT_MARKER));
   });
 });
+
+test("passively selected runtime options remain on-demand instead of activating strict system instructions", () => {
+  const prompt = buildAgentRuntimeContext({
+    timezone: "UTC",
+    invokedSkillIds: [],
+    enabledSkills: [
+      {
+        workspaceSkillId: "selected-report",
+        sourceType: "builtin",
+        name: "report",
+        version: "1.0.0",
+        description: "Reports",
+        defaultConfig: {
+          config: { length: "standard", formats: "html,md,docx,pdf" },
+        },
+        files: [],
+      },
+    ],
+  });
+  assert.doesNotMatch(
+    prompt,
+    /<active_skills>|<skill_runtime_config|formats: html,md,docx,pdf|length: standard/,
+  );
+});

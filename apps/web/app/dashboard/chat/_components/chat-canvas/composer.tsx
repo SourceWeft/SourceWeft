@@ -1,3 +1,4 @@
+import type { AgentContinuationInputBuilder } from "./agent-run-continuation";
 import {
   readChatDraft,
   registerChatDraftFlusher,
@@ -6,6 +7,7 @@ import {
 } from "../../../../../lib/chat-drafts";
 import {
   Fragment,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -98,10 +100,7 @@ import {
 import type { SourceItem } from "../source-types";
 import { SourceIcon, toAttachmentData } from "./source-rendering";
 import {
-  buildCapabilityOptionToolsSelection,
-  buildCapabilityToolToggleSelection,
-  buildComposerToolsSelection,
-  buildSkillOptionToolsSelection,
+  buildConfiguredComposerToolsSelection,
   composerOptionValues,
   getConnectorAgentToolNames,
   isCapabilityToolVisibleInComposerOptions,
@@ -403,6 +402,7 @@ function capabilityOptionDefaultValue(option: ComposerOptionDescriptor) {
 }
 
 function ComposerBody({
+  onRegisterContinuationInput,
   draftKey,
   draftPaused = false,
   workingFolderSlot,
@@ -443,6 +443,9 @@ function ComposerBody({
   composerOptions = EMPTY_COMPOSER_OPTIONS,
   onComposerOptionsChange,
 }: {
+  onRegisterContinuationInput?: (
+    builder: AgentContinuationInputBuilder | null,
+  ) => void;
   draftKey?: string;
   draftPaused?: boolean;
   workingFolderSlot?: import("react").ReactNode;
@@ -691,6 +694,60 @@ function ComposerBody({
       ),
     [visibleCapabilityTools],
   );
+  const buildContinuationInput = useCallback<AgentContinuationInputBuilder>(
+    (content) => {
+      if (isEditing || isStopping || submitDisabled) return null;
+      const turnSkills = availableSkills.filter((skill) =>
+        effectiveSelectedSkillIds.includes(skill.id),
+      );
+      const tools = buildConfiguredComposerToolsSelection({
+        disabledToolNames,
+        selectedSkills: turnSkills,
+        activeConnectorIds: resolvedConnectorIds,
+        connectorToolsEnabled,
+        capabilityToolsWithOptions,
+        visibleCapabilityTools,
+        options: activeComposerOptions,
+      });
+      return {
+        content,
+        skillIds: effectiveSelectedSkillIds,
+        tools:
+          selectedMcpInstallIds.length || selectedMcpToolIds.length
+            ? {
+                ...tools,
+                mcp: {
+                  enabled: true,
+                  installIds: selectedMcpInstallIds,
+                  toolIds: selectedMcpToolIds,
+                },
+              }
+            : tools,
+      };
+    },
+    [
+      isEditing,
+      isStopping,
+      submitDisabled,
+      availableSkills,
+      effectiveSelectedSkillIds,
+      disabledToolNames,
+      resolvedConnectorIds,
+      connectorToolsEnabled,
+      capabilityToolsWithOptions,
+      visibleCapabilityTools,
+      selectedMcpInstallIds,
+      selectedMcpToolIds,
+      activeComposerOptions,
+    ],
+  );
+  // Registration does not submit or replace the user's draft. A click in the
+  // conversation uses the same current selection builders as a normal send.
+  useLayoutEffect(() => {
+    onRegisterContinuationInput?.(buildContinuationInput);
+    return () => onRegisterContinuationInput?.(null);
+  }, [onRegisterContinuationInput, buildContinuationInput]);
+
   const capabilityOptionOverrideCount = useMemo(
     () =>
       Object.entries(capabilityOptionOverrides).reduce(
@@ -1505,33 +1562,16 @@ function ComposerBody({
                     userInput: userTextContent,
                   }
                 : undefined;
-            const tools = buildComposerToolsSelection({
-              disabledToolNames,
-              selectedSkills: turnSkills,
-              activeConnectorIds: resolvedConnectorIds,
-              connectorToolsEnabled,
-            });
-            const toolsWithSkillOptions = mergeChatToolsSelection(
-              tools,
-              buildSkillOptionToolsSelection({
+            const toolsWithCapabilityToggles =
+              buildConfiguredComposerToolsSelection({
+                disabledToolNames,
                 selectedSkills: turnSkills,
-                overrides: skillOptionOverrides,
-              }),
-            );
-            const toolsWithCapabilityOptions = mergeChatToolsSelection(
-              toolsWithSkillOptions,
-              buildCapabilityOptionToolsSelection({
-                catalogTools: capabilityToolsWithOptions,
-                overrides: capabilityOptionOverrides,
-              }),
-            );
-            const toolsWithCapabilityToggles = mergeChatToolsSelection(
-              toolsWithCapabilityOptions,
-              buildCapabilityToolToggleSelection({
-                catalogTools: visibleCapabilityTools,
-                overrides: capabilityToolEnabledOverrides,
-              }),
-            );
+                activeConnectorIds: resolvedConnectorIds,
+                connectorToolsEnabled,
+                capabilityToolsWithOptions,
+                visibleCapabilityTools,
+                options: activeComposerOptions,
+              });
             const toolCommandNames = new Set(
               tokenResolvedCommands
                 .filter((command) => command.kind === "tool-command")

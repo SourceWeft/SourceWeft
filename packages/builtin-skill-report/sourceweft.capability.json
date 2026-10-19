@@ -1,0 +1,152 @@
+{
+  "schemaVersion": 1,
+  "id": "sourceweft/report",
+  "kind": "skill",
+  "name": "Research Report",
+  "description": "Create and revise source-grounded research briefs, comparisons and decision reports as offline HTML with matching selected document exports.",
+  "version": "1.0.0",
+  "entry": "./src/index.ts",
+  "skills": [
+    {
+      "id": "report",
+      "visibility": "public",
+      "defaultEnabled": false,
+      "listing": "listed",
+      "categories": ["create"],
+      "options": [
+        {
+          "id": "template",
+          "title": "Report",
+          "valueType": "string",
+          "defaultValue": "briefing",
+          "target": {
+            "path": "config.template"
+          },
+          "values": [
+            {
+              "value": "briefing",
+              "label": "Research brief"
+            },
+            {
+              "value": "comparison",
+              "label": "Comparison"
+            },
+            {
+              "value": "decision",
+              "label": "Decision recommendation"
+            }
+          ]
+        },
+        {
+          "id": "language",
+          "title": "Language",
+          "valueType": "string",
+          "defaultValue": "auto",
+          "target": {
+            "path": "config.language"
+          },
+          "values": [
+            {
+              "value": "auto",
+              "label": "Auto"
+            },
+            {
+              "value": "zh-CN",
+              "label": "Chinese"
+            },
+            {
+              "value": "en-US",
+              "label": "English"
+            }
+          ]
+        },
+        {
+          "id": "length",
+          "title": "Length",
+          "valueType": "string",
+          "defaultValue": "concise",
+          "target": {
+            "path": "config.length"
+          },
+          "values": [
+            {
+              "value": "concise",
+              "label": "Concise"
+            },
+            {
+              "value": "standard",
+              "label": "Standard"
+            }
+          ]
+        },
+        {
+          "id": "audience",
+          "title": "Audience",
+          "valueType": "string",
+          "defaultValue": "general",
+          "target": {
+            "path": "config.audience"
+          },
+          "values": [
+            {
+              "value": "general",
+              "label": "General"
+            },
+            {
+              "value": "executive",
+              "label": "Executive"
+            },
+            {
+              "value": "technical",
+              "label": "Technical"
+            }
+          ]
+        },
+        {
+          "id": "formats",
+          "title": "Formats",
+          "valueType": "string",
+          "defaultValue": "html,md",
+          "target": {
+            "path": "config.formats"
+          },
+          "values": [
+            {
+              "value": "html,md",
+              "label": "HTML + Markdown"
+            },
+            {
+              "value": "html,md,docx",
+              "label": "HTML + Markdown + Word"
+            },
+            {
+              "value": "html,md,docx,pdf",
+              "label": "All document formats"
+            }
+          ]
+        }
+      ],
+      "runtime": {
+        "tools": [
+          "prepare_sandbox_workspace",
+          "execute",
+          "review_html_visuals",
+          "publish_artifact"
+        ],
+        "output": {
+          "kind": "artifact",
+          "artifactType": "html",
+          "publisherTool": "publish_artifact"
+        }
+      },
+      "command": {
+        "title": "Create Report",
+        "aliases": ["research-report"],
+        "category": "Artifacts",
+        "iconName": "file-text"
+      },
+      "managed": true,
+      "slash": true
+    }
+  ]
+}

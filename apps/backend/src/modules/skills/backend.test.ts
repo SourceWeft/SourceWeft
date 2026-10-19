@@ -2,10 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 import { SelectedSkillsBackend } from "./backend";
 import { createSkillFileReader, inlineSkillContent } from "./file-content";
-import type {
-  EnabledSkillDescriptor,
-  SkillFileManifestEntry,
-} from "./types";
+import type { EnabledSkillDescriptor, SkillFileManifestEntry } from "./types";
 
 const skillMd = `---
 name: meeting-summary
@@ -233,7 +230,10 @@ function manifestSkill(name: string) {
     entry("scripts/build.py", "text/x-python", 16),
     // Over grep's per-file bound: listed and readable, never scanned.
     entry("data/huge.csv", "text/csv", 5 * 1024 * 1024),
-    { ...entry("assets/brand.ttf", "font/ttf", font.byteLength), isText: false },
+    {
+      ...entry("assets/brand.ttf", "font/ttf", font.byteLength),
+      isText: false,
+    },
   ];
   const fetched: string[] = [];
   const descriptor: EnabledSkillDescriptor = {
@@ -261,7 +261,13 @@ function entry(
   mimeType: string,
   sizeBytes: number,
 ): SkillFileManifestEntry {
-  return { path, mimeType, sizeBytes, contentHash: `hash-${path}`, isText: true };
+  return {
+    path,
+    mimeType,
+    sizeBytes,
+    contentHash: `hash-${path}`,
+    isText: true,
+  };
 }
 
 test("listing, globbing and SKILL.md reads fetch no body", async () => {
@@ -287,7 +293,10 @@ test("listing, globbing and SKILL.md reads fetch no body", async () => {
     descriptor.skillMd,
   );
   const [download] = await backend.downloadFiles(["/brand/SKILL.md"]);
-  assert.equal(new TextDecoder().decode(download!.content!), descriptor.skillMd);
+  assert.equal(
+    new TextDecoder().decode(download!.content!),
+    descriptor.skillMd,
+  );
 
   assert.deepEqual(fetched, []);
 });
@@ -335,11 +344,7 @@ test("grep fetches only the searched skill's text files, within the size bound",
 
   assert.deepEqual(
     result.matches?.map((match) => match.path),
-    [
-      "/brand/SKILL.md",
-      "/brand/reference/guide.md",
-      "/brand/scripts/build.py",
-    ],
+    ["/brand/SKILL.md", "/brand/reference/guide.md", "/brand/scripts/build.py"],
   );
   assert.deepEqual(brand.fetched.sort(), [
     "brand/reference/guide.md",
@@ -362,9 +367,99 @@ test("a body that cannot be loaded is a read error, not a thrown turn", async ()
   const read = await backend.read("/brand/reference/guide.md");
   assert.match(read.error ?? "", /EIO: .*storage is down/);
   // SKILL.md never depended on the loader, and a search just skips the file.
-  assert.equal(typeof (await backend.read("/brand/SKILL.md")).content, "string");
+  assert.equal(
+    typeof (await backend.read("/brand/SKILL.md")).content,
+    "string",
+  );
   assert.deepEqual(
     (await backend.grep("palette", "/brand")).matches?.map((m) => m.path),
     ["/brand/SKILL.md"],
+  );
+});
+
+test("progressive Skill reads expose only the requested Skill runtime options", async () => {
+  const selected = {
+    ...skills[0]!,
+    defaultConfig: {
+      config: { length: "standard", formats: "html,md,docx,pdf" },
+    },
+  };
+  const other = {
+    ...skills[0]!,
+    workspaceSkillId: "other-skill",
+    name: "other",
+    defaultConfig: { config: { secretPreference: "OTHER-SKILL-ONLY" } },
+  };
+  const backend = new SelectedSkillsBackend([selected, other]);
+  const result = await backend.read("/meeting-summary/SKILL.md");
+  assert.ok(typeof result.content === "string");
+  assert.match(
+    result.content ?? "",
+    /<skill_runtime_config name="meeting-summary">/,
+  );
+  assert.match(result.content ?? "", /length: standard/);
+  assert.match(result.content ?? "", /formats: html,md,docx,pdf/);
+  assert.match(
+    result.content ?? "",
+    /do not activate this skill or other skills/,
+  );
+  assert.ok(result.content?.endsWith(skillMd));
+  assert.doesNotMatch(result.content ?? "", /OTHER-SKILL-ONLY|name="other"/);
+  const support = await backend.read("/meeting-summary/templates/action-items.md");
+  assert.ok(typeof support.content === "string");
+  assert.doesNotMatch(support.content, /skill_runtime_config|formats:/);
+  // Existing SKILL.md full-read behavior is unchanged by offset/limit arguments.
+  assert.equal(
+    (await backend.read("/meeting-summary/SKILL.md", 1, 1)).content,
+    result.content,
+  );
+});
+
+test("runtime read headers never change raw, downloaded, searched or manifested Skill bytes", async () => {
+  const selected = {
+    ...skills[0]!,
+    defaultConfig: { config: { formats: "html,md,docx,pdf" } },
+  };
+  const backend = new SelectedSkillsBackend([selected]);
+  await backend.read("/meeting-summary/SKILL.md");
+  assert.equal(
+    (await backend.readRaw("/meeting-summary/SKILL.md")).data?.content,
+    skillMd,
+  );
+  const [download] = await backend.downloadFiles(["/meeting-summary/SKILL.md"]);
+  assert.ok(download);
+  assert.ok(download.content instanceof Uint8Array);
+  assert.equal(new TextDecoder().decode(download.content), skillMd);
+  assert.deepEqual(selected.files, skills[0]!.files);
+  assert.equal(
+    (
+      await backend.grep(
+        "skill_runtime_config|html,md,docx,pdf",
+        "/meeting-summary",
+      )
+    ).matches?.length,
+    0,
+  );
+});
+
+test("runtime options are replaced with the Skill descriptor and never leak into a fresh turn", async () => {
+  const backend = new SelectedSkillsBackend([
+    { ...skills[0]!, defaultConfig: { config: { length: "standard" } } },
+  ]);
+  const initial = await backend.read("/meeting-summary/SKILL.md");
+  assert.ok(typeof initial.content === "string");
+  assert.match(initial.content, /length: standard/);
+  backend.addSkill({
+    ...skills[0]!,
+    defaultConfig: { config: { length: "concise" } },
+  });
+  const current = await backend.read("/meeting-summary/SKILL.md");
+  assert.ok(typeof current.content === "string");
+  assert.match(current.content, /length: concise/);
+  assert.doesNotMatch(current.content, /length: standard/);
+  assert.equal(
+    (await new SelectedSkillsBackend(skills).read("/meeting-summary/SKILL.md"))
+      .content,
+    skillMd,
   );
 });

@@ -1,3 +1,12 @@
+import {
+  readAgentRunStop,
+  readAgentRunProgress,
+  advanceAgentRunProgress,
+} from "@sourceweft/contracts";
+import {
+  agentCheckpointFromStepStopError,
+  toAgentToolBudgetContentError,
+} from "../agent";
 import { normalizeMcpDisplay } from "../turn/trace-parts";
 import { approvalFinishPayload } from "./approval-finish";
 import {
@@ -40,6 +49,7 @@ import {
 import {
   createMessageRecord,
   findMessageRecord,
+  persistMessageProjection,
   updateMessageRecord,
 } from "../message-repository";
 import { findThreadRecord } from "../thread/repository";
@@ -76,6 +86,23 @@ type DurableChatRunServiceAppendRunEvent =
 type DurableChatRunServiceFinishRun = typeof durableChatRunService.finishRun;
 
 const ASSISTANT_SNAPSHOT_FLUSH_MS = 500;
+/** Cooldown starts after a successful write, so slow writes do not erase it. */
+function createAssistantSnapshotFlushWindow(
+  input: { now?: () => number } = {},
+) {
+  const now = input.now ?? Date.now;
+  let lastAssistantSnapshotFlushAt = 0;
+  return async (persist: () => Promise<void>, force = false) => {
+    if (
+      !force &&
+      now() - lastAssistantSnapshotFlushAt < ASSISTANT_SNAPSHOT_FLUSH_MS
+    )
+      return;
+    await persist();
+    lastAssistantSnapshotFlushAt = now();
+  };
+}
+
 const TOOL_CONFIRMATION_FINISH_REASON = "tool_confirmation_requested";
 // Fallback cadence for detecting a cancel the pub/sub delivery may have missed
 // (a Stop that landed before the worker subscribed, or a dropped message).
@@ -173,6 +200,8 @@ function toDurableRunContentError(error: unknown) {
   if (error instanceof ContentError) {
     return error;
   }
+  const budgetError = toAgentToolBudgetContentError(error);
+  if (budgetError) return budgetError;
   const modelError = toContentError(error);
   if (modelError.code === "MODEL_CONFIGURATION_ERROR") return modelError;
   if (isSandboxExecuteToolCallIdRequiredError(error)) {
@@ -331,12 +360,14 @@ function mergeToolCallFromPayload(input: {
   const status =
     input.payload.type === "tool-call-error"
       ? "error"
-      : input.payload.type === "tool-call-result" ||
-          input.payload.type === "tool-call-end"
-        ? typeof input.payload.status === "string"
-          ? input.payload.status
-          : (toolCall?.status ?? "completed")
-        : (toolCall?.status ?? existingRecord?.status ?? "running");
+      : input.payload.type === "tool-call-start"
+        ? (toolCall?.status ?? "running")
+        : input.payload.type === "tool-call-result" ||
+            input.payload.type === "tool-call-end"
+          ? typeof input.payload.status === "string"
+            ? input.payload.status
+            : (toolCall?.status ?? "completed")
+          : (toolCall?.status ?? existingRecord?.status ?? "running");
   const sequence =
     getTraceSequence(toolCall) ?? getTraceSequence(existingRecord);
 
@@ -359,8 +390,17 @@ function mergeToolCallFromPayload(input: {
         : (toolCall?.latencyMs ?? existingRecord?.latencyMs ?? null),
     error:
       input.payload.type === "tool-call-error"
-        ? input.payload.error
-        : (toolCall?.error ?? existingRecord?.error ?? null),
+        ? (input.payload.error ??
+          toolCall?.error ??
+          existingRecord?.error ??
+          null)
+        : toolCall?.error !== undefined
+          ? toolCall.error
+          : input.payload.error !== undefined
+            ? input.payload.error
+            : input.payload.type === "tool-call-start"
+              ? null
+              : (existingRecord?.error ?? null),
   });
 }
 
@@ -770,9 +810,25 @@ function updateSnapshotFromPayload(
     return snapshot;
   }
 
+  // A rejected late phase event must not replace the terminal marker: a
+  // second event would otherwise bypass the guard after cancellation/error.
+  if (
+    payload.type === "agent-run-progress" &&
+    (snapshot.finishReason ||
+      snapshot.lastEventType === "finish" ||
+      snapshot.lastEventType === "error")
+  ) {
+    return snapshot;
+  }
   const next: ChatRunSnapshot = {
     ...snapshot,
-    lastEventType: payload.type,
+    lastEventType:
+      (snapshot.lastEventType === "finish" ||
+        snapshot.lastEventType === "error") &&
+      payload.type !== "finish" &&
+      payload.type !== "error"
+        ? snapshot.lastEventType
+        : payload.type,
   };
   if (payload.type === "text-delta" && typeof payload.delta === "string") {
     next.assistantContent = `${next.assistantContent ?? ""}${payload.delta}`;
@@ -863,6 +919,32 @@ function updateSnapshotFromPayload(
         toolCallId,
       });
     }
+  }
+  if (
+    payload.type === "agent-run-progress" &&
+    !snapshot.finishReason &&
+    snapshot.lastEventType !== "finish" &&
+    snapshot.lastEventType !== "error"
+  ) {
+    next.agentRunProgress = advanceAgentRunProgress(
+      snapshot.agentRunProgress,
+      payload.progress,
+    );
+  }
+  if (payload.type === "finish" || payload.type === "error") {
+    if (payload.code === "CLIENT_CANCELLED") next.agentRunProgress = null;
+    else if (
+      payload.agentRunProgress !== undefined &&
+      snapshot.lastEventType !== "finish" &&
+      snapshot.lastEventType !== "error"
+    )
+      next.agentRunProgress = advanceAgentRunProgress(
+        snapshot.agentRunProgress,
+        payload.agentRunProgress,
+      );
+    if (payload.code === "CLIENT_CANCELLED") next.agentRunStop = null;
+    else if (payload.agentRunStop !== undefined)
+      next.agentRunStop = readAgentRunStop(payload.agentRunStop);
   }
   if (payload.type === "finish") {
     next.finishReason =
@@ -1093,6 +1175,16 @@ function buildSnapshotMetadata(input: {
     ...(input.currentMetadata ?? {}),
     userMessageId: input.run.userMessageId,
     sourceUserMessageId: input.run.userMessageId,
+    agentRunProgress:
+      input.run.status === "cancelled" ||
+      input.run.status === "cancel_requested"
+        ? undefined
+        : (readAgentRunProgress(input.snapshot.agentRunProgress) ?? undefined),
+    agentRunStop:
+      input.run.status === "cancelled" ||
+      input.run.status === "cancel_requested"
+        ? undefined
+        : (readAgentRunStop(input.snapshot.agentRunStop) ?? undefined),
     toolCalls: input.snapshot.toolCalls ?? [],
     thinkingSteps: input.snapshot.thinkingSteps ?? [],
     ...projectSnapshotReasoning(input.snapshot, input.run.status !== "running"),
@@ -1132,6 +1224,14 @@ function snapshotWithFinalizedResult(
   return {
     ...snapshot,
     ...result,
+    agentRunProgress:
+      metadata.isCancelled === true
+        ? null
+        : readAgentRunProgress(metadata.agentRunProgress),
+    agentRunStop:
+      metadata.isCancelled === true
+        ? null
+        : readAgentRunStop(metadata.agentRunStop),
     meteredLlmCalls: Array.isArray(metadata.meteredLlmCalls)
       ? (metadata.meteredLlmCalls as NonNullable<
           ChatRunSnapshot["meteredLlmCalls"]
@@ -1287,25 +1387,22 @@ async function updateAssistantSnapshot(input: {
   assistantMessageId: string;
   snapshot: ChatRunSnapshot;
 }) {
-  const currentMessage = await findMessageRecord({
-    teamId: input.run.teamId,
-    workspaceId: input.run.workspaceId,
-    messageId: input.assistantMessageId,
-  });
-  await updateMessageRecord({
+  await persistMessageProjection({
     teamId: input.run.teamId,
     workspaceId: input.run.workspaceId,
     threadId: input.run.threadId,
     messageId: input.assistantMessageId,
-    content: appendAssistantContinuationContent({
-      existingContent:
-        input.snapshot.assistantMessage?.content ?? currentMessage?.content,
-      nextContent: input.snapshot.assistantContent ?? "",
-    }),
-    metadata: buildSnapshotMetadata({
-      currentMetadata: currentMessage?.metadata,
-      run: input.run,
-      snapshot: input.snapshot,
+    project: (currentMessage) => ({
+      content: appendAssistantContinuationContent({
+        existingContent:
+          input.snapshot.assistantMessage?.content ?? currentMessage.content,
+        nextContent: input.snapshot.assistantContent ?? "",
+      }),
+      metadata: buildSnapshotMetadata({
+        currentMetadata: currentMessage.metadata,
+        run: input.run,
+        snapshot: input.snapshot,
+      }),
     }),
   });
 }
@@ -1350,6 +1447,17 @@ async function createDurableErrorMessage(input: {
       excludeFromContext: true,
       error: input.createErrorInput.contentError.message,
       errorCode: input.createErrorInput.contentError.code,
+      agentRunStop: isClientCancelled
+        ? undefined
+        : (readAgentRunStop(
+            toObjectRecord(input.createErrorInput.contentError.details)
+              ?.agentRunStop,
+          ) ?? undefined),
+      agentCheckpoint: isClientCancelled
+        ? undefined
+        : (agentCheckpointFromStepStopError(
+            input.createErrorInput.contentError,
+          ) ?? undefined),
       userMessageId: input.createErrorInput.prepared.userMessage.id,
       sourceUserMessageId: input.createErrorInput.prepared.userMessage.id,
       traceId:
@@ -1423,22 +1531,44 @@ export async function persistTerminalFailure(input: {
       status: input.status,
       ...messageIds,
     };
-    const snapshot = input.snapshot.assistantMessage
+    const stoppedSnapshot = {
+      ...input.snapshot,
+      ...(input.status !== "cancelled" &&
+      agentCheckpointFromStepStopError(input.contentError)
+        ? {
+            agentCheckpoint: agentCheckpointFromStepStopError(
+              input.contentError,
+            )!,
+          }
+        : {}),
+      agentRunStop:
+        input.status === "cancelled"
+          ? null
+          : readAgentRunStop(
+              toObjectRecord(input.contentError.details)?.agentRunStop,
+            ),
+    };
+    const snapshot = stoppedSnapshot.assistantMessage
       ? {
-          ...input.snapshot,
+          ...stoppedSnapshot,
           assistantMessage: {
-            ...input.snapshot.assistantMessage,
+            ...stoppedSnapshot.assistantMessage,
             metadata: {
-              ...input.snapshot.assistantMessage.metadata,
+              ...stoppedSnapshot.assistantMessage.metadata,
               isError: input.status === "failed",
               isCancelled: input.status === "cancelled",
               error: input.contentError.message,
               errorCode: input.contentError.code,
+              agentRunStop:
+                readAgentRunStop(stoppedSnapshot.agentRunStop) ?? undefined,
+              ...(stoppedSnapshot.agentCheckpoint
+                ? { agentCheckpoint: stoppedSnapshot.agentCheckpoint }
+                : {}),
               ...buildThreadRunMetadata(terminalRun),
             },
           },
         }
-      : input.snapshot;
+      : stoppedSnapshot;
     const clientErrorMessage = sanitizeClientErrorMessage(
       input.contentError.message,
     );
@@ -1456,6 +1586,9 @@ export async function persistTerminalFailure(input: {
     }
     const errorPayload = toSseData({
       type: "error",
+      ...(stoppedSnapshot.agentRunStop
+        ? { agentRunStop: stoppedSnapshot.agentRunStop }
+        : {}),
       code: input.contentError.code,
       error: clientErrorMessage,
       ...(terminalRun.userMessageId
@@ -1493,6 +1626,11 @@ export async function persistTerminalFailure(input: {
           isCancelled: input.status === "cancelled",
           error: input.contentError.message,
           errorCode: input.contentError.code,
+          agentRunStop:
+            readAgentRunStop(stoppedSnapshot.agentRunStop) ?? undefined,
+          ...(stoppedSnapshot.agentCheckpoint
+            ? { agentCheckpoint: stoppedSnapshot.agentCheckpoint }
+            : {}),
           ...buildThreadRunMetadata(terminalRun),
         },
       });
@@ -1574,7 +1712,7 @@ export async function processThreadChatRunJob(
   let terminalErrorCode: string | null = null;
   let terminalErrorMessage: string | null = null;
   let assistantMessagePersisted = false;
-  let lastAssistantSnapshotFlushAt = 0;
+  const flushAssistantSnapshot = createAssistantSnapshotFlushWindow();
 
   const maybeFlushAssistantSnapshot = async (force = false) => {
     if (
@@ -1586,23 +1724,23 @@ export async function processThreadChatRunJob(
       return;
     }
 
-    const now = Date.now();
-    if (
-      !force &&
-      now - lastAssistantSnapshotFlushAt < ASSISTANT_SNAPSHOT_FLUSH_MS
-    ) {
-      return;
-    }
-
-    lastAssistantSnapshotFlushAt = now;
-    await updateAssistantSnapshot({
-      run,
-      assistantMessageId,
-      snapshot,
-    });
+    const messageId = assistantMessageId;
+    await flushAssistantSnapshot(
+      () =>
+        updateAssistantSnapshot({
+          run,
+          assistantMessageId: messageId,
+          snapshot,
+        }),
+      force,
+    );
   };
 
-  const applyRunProgress = async (updated: ChatThreadRunRecord | null) => {
+  const applyRunProgress = async (
+    updated:
+      | ChatThreadRunRecord
+      | Awaited<ReturnType<typeof durableChatRunService.heartbeat>>,
+  ) => {
     if (!updated || updated.status !== "running") {
       const reason =
         (await durableChatRunService.getRunStopError(run)) ??
@@ -1614,7 +1752,9 @@ export async function processThreadChatRunJob(
       abortTurn(reason);
       throw reason;
     }
-    run = updated;
+    // Heartbeats return only control/timestamp fields; preparation progress
+    // still returns the full record. Preserve the local run identity/payloads.
+    run = { ...run, ...updated };
   };
   const heartbeat = async () =>
     applyRunProgress(await durableChatRunService.heartbeat(run));
@@ -2153,6 +2293,7 @@ export async function processThreadChatRunJob(
 }
 
 export const testExports = {
+  createAssistantSnapshotFlushWindow,
   snapshotWithFinalizedResult,
   buildSnapshotMetadata,
   resolvePersistedTerminalMessageIds,

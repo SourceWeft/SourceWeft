@@ -1,3 +1,4 @@
+import { ToolCallLimitExceededError } from "langchain";
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import { ModelGatewayError } from "../../../shared/model-gateway/errors";
@@ -34,4 +35,29 @@ test("stream observations preserve safe configuration failures", () => {
     "Thread access denied",
   );
   assert.equal(toObservationError(existing), existing);
+});
+
+test("typed global tool budgets remain safe and distinct at the terminal error boundary", () => {
+  const source = new ToolCallLimitExceededError(
+    301,
+    20,
+    300,
+    48,
+    "private-tool-name",
+  );
+  for (const candidate of [
+    source,
+    new Error("private-wrapper", { cause: source }),
+  ]) {
+    const mapped = toObservationError(candidate);
+    assert.equal(mapped.code, "AGENT_TOOL_BUDGET_EXCEEDED");
+    assert.equal(mapped.statusCode, 409);
+    assert.equal(mapped.recoverable, false);
+    assert.deepEqual(mapped.details, { scope: "thread", retryable: false });
+    assert.doesNotMatch(mapped.message, /private/);
+  }
+  assert.notEqual(
+    toObservationError(new Error("Tool call limit exceeded")).code,
+    "AGENT_TOOL_BUDGET_EXCEEDED",
+  );
 });

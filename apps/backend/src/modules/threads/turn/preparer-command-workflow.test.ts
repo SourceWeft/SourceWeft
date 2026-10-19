@@ -4,6 +4,7 @@ import { afterEach, test } from "vitest";
 import { ContentError } from "../../content/errors";
 import {
   listCapabilityCommands,
+  listCapabilityRecords,
   testExports as capabilityWorkflowTestExports,
 } from "./capability-command-workflows";
 import { resolveThreadCommand } from "./thread-command";
@@ -55,6 +56,13 @@ test("capability workflow discovery exposes manifest artifact tool commands from
       },
       {
         actionKind: "skill",
+        aliases: ["research-report"],
+        iconName: "file-text",
+        targetId: "report",
+        visible: true,
+      },
+      {
+        actionKind: "skill",
         aliases: ["video-presentation", "video"],
         iconName: "video-presentation",
         targetId: "video-presentation",
@@ -65,7 +73,7 @@ test("capability workflow discovery exposes manifest artifact tool commands from
       artifactTools
         .filter((command) => command.visible)
         .map((command) => command.targetId),
-      ["image-generate", "ppt-deck", "video-presentation"],
+      ["image-generate", "ppt-deck", "report", "video-presentation"],
     );
   } finally {
     if (previousRoot === undefined) {
@@ -279,10 +287,7 @@ test("resolveThreadCommand resolves manifest skill aliases to enabled skills", a
     /Create a PowerPoint PPTX deck by following the ppt-deck skill workflow/,
   );
   assert.doesNotMatch(command?.workflow?.renderedPrompt ?? "", /SKILL\.md/);
-  assert.match(
-    command?.workflow?.renderedPrompt ?? "",
-    /publish_artifact/,
-  );
+  assert.match(command?.workflow?.renderedPrompt ?? "", /publish_artifact/);
   assert.deepEqual(command?.workflow?.defaultTools, [
     "prepare_sandbox_workspace",
     "execute",
@@ -399,3 +404,84 @@ test("resolveThreadCommand rejects unknown tool aliases as command-not-found", a
       error.statusCode === 404,
   );
 });
+
+test.each(["/report", "/research-report"])(
+  "report command %s requires explicit opt-in and uses its declared Agent workflow",
+  async (name) => {
+    const records = await listCapabilityRecords();
+    const contribution = records
+      .find((record) => record.manifest.id === "sourceweft/report")
+      ?.manifest.contributes.skills.find((skill) => skill.id === "report");
+    assert.ok(contribution);
+    assert.equal(contribution.defaultEnabled, false);
+    assert.deepEqual(contribution.runtime?.tools, [
+      "prepare_sandbox_workspace",
+      "execute",
+      "review_html_visuals",
+      "publish_artifact",
+    ]);
+    const request = {
+      arguments: "Create a source-grounded research brief",
+      kind: "skill" as const,
+      name,
+    };
+    await assert.rejects(
+      resolveThreadCommand({ command: request, enabledSkills: [] }),
+      (error) =>
+        error instanceof ContentError &&
+        error.code === "COMMAND_NOT_FOUND" &&
+        error.statusCode === 404,
+    );
+    const command = await resolveThreadCommand({
+      command: request,
+      enabledSkills: [
+        {
+          workspaceSkillId: "builtin:report",
+          selectionId: "builtin:report",
+          sourceType: "builtin",
+          name: "report",
+          displayName: "Research Report",
+          version: "1.0.0",
+          description: "Create source-grounded reports",
+          defaultEnabled: false,
+          files: [],
+          slash: true,
+          tools: [...contribution.runtime!.tools],
+        },
+      ],
+    });
+    assert.equal(command?.name, name);
+    assert.equal(command?.canonicalName, "/report");
+    assert.equal(command?.kind, "skill");
+    assert.equal(command?.skillSlug, "report");
+    assert.equal(command?.workflow?.kind, "skill_workflow");
+    assert.equal(command?.workflow?.execution, "agent");
+    assert.deepEqual(
+      command?.workflow?.defaultTools,
+      contribution.runtime!.tools,
+    );
+    assert.deepEqual(command?.workflow?.permissionOverrides, {});
+    assert.deepEqual(command?.workflow?.successCriteria, {
+      kind: "artifact",
+      artifactType: "html",
+      toolName: "publish_artifact",
+    });
+    assert.match(
+      command?.workflow?.renderedPrompt ?? "",
+      /name="\/report" kind="skill_workflow" skill="report"/,
+    );
+    assert.match(
+      command?.workflow?.renderedPrompt ?? "",
+      /DeepAgents skills middleware/,
+    );
+    assert.match(command?.workflow?.renderedPrompt ?? "", /publish_artifact/);
+    // Resolving an opted-in turn does not register activation for later turns.
+    await assert.rejects(
+      resolveThreadCommand({ command: request, enabledSkills: [] }),
+      (error) =>
+        error instanceof ContentError &&
+        error.code === "COMMAND_NOT_FOUND" &&
+        error.statusCode === 404,
+    );
+  },
+);

@@ -141,3 +141,56 @@ fn native_search_keeps_literal_matching_and_file_scope_on_the_host() {
         "CALL_CANCELLED"
     );
 }
+
+#[test]
+fn missing_binary_file_has_structured_code_without_weakening_path_denials() {
+    use std::os::unix::fs::symlink;
+    let temp = tempfile::tempdir().unwrap();
+    let host = LocalHost::open(temp.path()).unwrap();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    assert_eq!(
+        host.begin_binary_read("owner", "thread", &workspace.id, "missing.bin")
+            .unwrap_err()
+            .code,
+        "FILE_NOT_FOUND"
+    );
+    fs::write(workspace.path.join("target.bin"), b"present").unwrap();
+    symlink(
+        workspace.path.join("target.bin"),
+        workspace.path.join("link.bin"),
+    )
+    .unwrap();
+    assert_eq!(
+        host.begin_binary_read("owner", "thread", &workspace.id, "link.bin")
+            .unwrap_err()
+            .code,
+        "FILE_ACCESS_DENIED"
+    );
+    assert_ne!(
+        host.begin_binary_read("owner", "thread", &workspace.id, "../missing.bin")
+            .unwrap_err()
+            .code,
+        "FILE_NOT_FOUND"
+    );
+    assert_ne!(
+        host.begin_binary_read("other", "thread", &workspace.id, "missing.bin")
+            .unwrap_err()
+            .code,
+        "FILE_NOT_FOUND"
+    );
+}
+
+#[test]
+fn io_error_classification_only_marks_not_found_as_missing() {
+    use sourceweft_desktop::local_host::HostError;
+    let missing: HostError = std::io::Error::from(std::io::ErrorKind::NotFound).into();
+    assert_eq!(missing.code, "FILE_NOT_FOUND");
+    for kind in [
+        std::io::ErrorKind::PermissionDenied,
+        std::io::ErrorKind::Interrupted,
+        std::io::ErrorKind::Other,
+    ] {
+        let error: HostError = std::io::Error::from(kind).into();
+        assert_eq!(error.code, "LOCAL_IO_ERROR");
+    }
+}

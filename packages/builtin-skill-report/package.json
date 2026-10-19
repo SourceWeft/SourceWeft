@@ -1,0 +1,18 @@
+{
+  "name": "@sourceweft/builtin-skill-report",
+  "license": "Apache-2.0",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "test": "python3 -B -m unittest discover -s tests -p 'test_*.py' && node --test tests/*.test.cjs"
+  },
+  "devDependencies": {
+    "@sourceweft/typescript-config": "workspace:*",
+    "typescript": "5.9.2"
+  }
+}

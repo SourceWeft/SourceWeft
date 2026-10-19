@@ -201,3 +201,69 @@ test("vision fallback preflight billing maps settled traces without re-metering"
     ],
   );
 });
+
+test("step-summary failure resumes its saved checkpoint while error text stays excluded", () => {
+  const stop = {
+    reason: "step_limit",
+    steps: 400,
+    limit: 400,
+    canContinue: true,
+    summaryStatus: "failed",
+  };
+  const previous = {
+    id: "old",
+    role: "assistant",
+    metadata: {
+      agentCheckpoint: {
+        final: { threadId: "thread-1", checkpointId: "old-checkpoint" },
+      },
+    },
+  };
+  const failed = {
+    id: "failed",
+    role: "assistant",
+    metadata: {
+      excludeFromContext: true,
+      isError: true,
+      agentRunStop: stop,
+      agentCheckpoint: {
+        final: { threadId: "thread-1", checkpointId: "saved-progress" },
+      },
+    },
+  };
+  const select = (messages: unknown[]) =>
+    testExports.resolveLatestAssistantFinalCheckpoint(messages as never);
+  assert.deepEqual(select([previous, failed]), {
+    threadId: "thread-1",
+    checkpointId: "saved-progress",
+  });
+  assert.deepEqual(
+    select([
+      previous,
+      { ...failed, metadata: { ...failed.metadata, agentRunStop: null } },
+    ]),
+    { threadId: "thread-1", checkpointId: "old-checkpoint" },
+  );
+  assert.deepEqual(
+    select([
+      previous,
+      { ...failed, metadata: { ...failed.metadata, isCancelled: true } },
+    ]),
+    { threadId: "thread-1", checkpointId: "old-checkpoint" },
+  );
+  assert.throws(
+    () =>
+      select([
+        previous,
+        {
+          ...failed,
+          metadata: { ...failed.metadata, agentCheckpoint: { final: null } },
+        },
+      ]),
+    (error: unknown) =>
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "AGENT_STEP_CONTINUATION_UNAVAILABLE",
+  );
+});

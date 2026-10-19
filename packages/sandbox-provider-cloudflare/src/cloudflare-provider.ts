@@ -43,6 +43,21 @@ export const SOURCEWEFT_SANDBOX_STAMP_PATH =
 
 const WORKSPACE_ROOT_PREFIX = "/workspace/";
 
+const EMPTY_DOWNLOAD_METADATA_TIMEOUT_MS = 5_000;
+const FILE_STAT_PROTOCOL = "sourceweft-file-stat-v1";
+// Python is an existing declared image dependency. Paths are argv data, never
+// interpolated into Python or evaluated as shell code. No file is opened/written.
+const EMPTY_DOWNLOAD_STAT_SCRIPT = `import errno,json,os,stat,sys
+try:
+    info=os.stat(sys.argv[1],follow_symlinks=False)
+except FileNotFoundError:
+    result={"kind":"missing","errno":errno.ENOENT}
+except OSError as error:
+    result={"kind":"error","errno":error.errno}
+else:
+    result={"kind":"regular","size":info.st_size} if stat.S_ISREG(info.st_mode) else {"kind":"not_regular"}
+print(json.dumps({"protocol":"sourceweft-file-stat-v1",**result},separators=(",",":")))`;
+
 export type CloudflareProviderOperation =
   "create" | "get" | "delete" | "execute" | "upload" | "download" | "mkdir";
 
@@ -524,14 +539,128 @@ export class CloudflareSandboxProvider implements SandboxProvider {
     timeoutMs?: number;
   }) {
     return this.withProviderErrorMapping("download", async () => {
+      const startedAt = Date.now();
       const response = await this.request(
         "download",
         "GET",
         this.filePath(input.providerSandboxId, input.sandboxPath),
         { signal: input.signal },
       );
-      return Buffer.from(await response.arrayBuffer());
+      const content = Buffer.from(await response.arrayBuffer());
+      if (content.byteLength !== 0) return content;
+      // The stock bridge can turn a missing-file stream into HTTP 200 + zero
+      // bytes. Zero bytes alone never prove absence: preserve real empty files.
+      await this.confirmEmptyDownload(input, startedAt);
+      return content;
     });
+  }
+
+  private async confirmEmptyDownload(
+    input: {
+      providerSandboxId: string;
+      executionId?: string;
+      sandboxPath: string;
+      signal?: AbortSignal;
+      timeoutMs?: number;
+    },
+    startedAt: number,
+  ): Promise<void> {
+    input.signal?.throwIfAborted();
+    if (
+      input.timeoutMs !== undefined &&
+      (!Number.isSafeInteger(input.timeoutMs) || input.timeoutMs <= 0)
+    ) {
+      throw new Error(
+        "SANDBOX_FILE_METADATA_INVALID: invalid download timeout.",
+      );
+    }
+    const remaining =
+      input.timeoutMs === undefined
+        ? EMPTY_DOWNLOAD_METADATA_TIMEOUT_MS
+        : input.timeoutMs - (Date.now() - startedAt);
+    if (remaining <= 0) {
+      throw new SandboxProviderError(
+        SANDBOX_PROVIDER_ERROR_CODES.timeout,
+        "SANDBOX_COMMAND_TIMEOUT: no download budget remains for metadata verification.",
+        "download",
+      );
+    }
+    const result = await this.executeSystem({
+      providerSandboxId: input.providerSandboxId,
+      executionId: input.executionId,
+      command: `python3 -c ${shellQuote(EMPTY_DOWNLOAD_STAT_SCRIPT)} ${shellQuote(input.sandboxPath)}`,
+      timeoutMs: Math.min(EMPTY_DOWNLOAD_METADATA_TIMEOUT_MS, remaining),
+      maxOutputChars: 2_048,
+      signal: input.signal,
+    });
+    input.signal?.throwIfAborted();
+    if (result.exitCode !== 0 || result.truncated) {
+      throw new Error(
+        "SANDBOX_FILE_METADATA_FAILED: metadata command did not complete successfully.",
+      );
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(result.output);
+    } catch {
+      throw new Error(
+        "SANDBOX_FILE_METADATA_INVALID: metadata command returned invalid JSON.",
+      );
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error(
+        "SANDBOX_FILE_METADATA_INVALID: expected a structured metadata result.",
+      );
+    }
+    const value = parsed as Record<string, unknown>;
+    const fields = (...keys: string[]) =>
+      Object.keys(value).length === keys.length &&
+      keys.every((key) => Object.hasOwn(value, key));
+    if (value.protocol !== FILE_STAT_PROTOCOL) {
+      throw new Error(
+        "SANDBOX_FILE_METADATA_INVALID: metadata protocol mismatch.",
+      );
+    }
+    if (
+      value.kind === "missing" &&
+      fields("protocol", "kind", "errno") &&
+      value.errno === 2
+    ) {
+      throw new SandboxProviderError(
+        SANDBOX_PROVIDER_ERROR_CODES.fileMissing,
+        "SANDBOX_FILE_NOT_FOUND: requested sandbox file was not found.",
+        "download",
+      );
+    }
+    if (
+      value.kind === "regular" &&
+      fields("protocol", "kind", "size") &&
+      Number.isSafeInteger(value.size) &&
+      (value.size as number) >= 0
+    ) {
+      if (value.size === 0) return;
+      throw new Error(
+        "SANDBOX_FILE_DOWNLOAD_INCOMPLETE: the bridge returned zero bytes for a nonempty regular file.",
+      );
+    }
+    if (value.kind === "not_regular" && fields("protocol", "kind")) {
+      throw new Error(
+        "SANDBOX_FILE_NOT_REGULAR: empty download metadata does not describe a regular file.",
+      );
+    }
+    if (
+      value.kind === "error" &&
+      fields("protocol", "kind", "errno") &&
+      (value.errno === null ||
+        (Number.isSafeInteger(value.errno) && (value.errno as number) > 0))
+    ) {
+      throw new Error(
+        `SANDBOX_FILE_METADATA_FAILED: stat failed with errno ${value.errno}.`,
+      );
+    }
+    throw new Error(
+      "SANDBOX_FILE_METADATA_INVALID: metadata fields are not valid for the result kind.",
+    );
   }
 
   async ensureDirectory(input: {

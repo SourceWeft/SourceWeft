@@ -754,3 +754,407 @@ test("storage reference evidence includes current pointers and nested historical
     },
   );
 });
+
+test("generic first publication rejects cancellation that wins while waiting for the request lock and cleans its uploads", async () => {
+  const run = await runInput();
+  const objects = new Map<string, Uint8Array>();
+  const deleted: string[] = [];
+  const writer = new ArtifactWriter({
+    storage: {
+      buildArtifactStorageKey,
+      getBucketName: () => "cancelled-first-publication",
+      upload: async ({ key, body }) => {
+        objects.set(key, new Uint8Array(body));
+        // The preflight has already returned a miss. Hold only the commit's
+        // request lock so the real writer has passed its last signal check.
+        await connection.query("begin");
+        await connection.query(
+          "select pg_advisory_xact_lock(hashtextextended($1, 0))",
+          [[teamId, workspaceId, "image", requestKey].join("\u001f")],
+        );
+      },
+      delete: async ({ key }) => {
+        objects.delete(key);
+        deleted.push(key);
+      },
+      download: async () => {
+        throw new Error("writer must not download");
+      },
+    },
+    repository: {
+      createReady: repository.createReadyArtifactRecord,
+      createPending: repository.createPendingArtifactRecord,
+      markReady: repository.markArtifactReady,
+      markFailed: repository.markArtifactFailed,
+      findByRequestKey: repository.findArtifactRecordByRequestKey,
+      findWriteReferences: repository.findArtifactWriteReferences,
+    },
+  });
+  const connection = await schema.database.connect();
+  let publication: Promise<PromiseSettledResult<unknown>> | undefined;
+  try {
+    publication = Promise.allSettled([
+      writer.publishArtifact({
+        context: { teamId, workspaceId, threadId, userId },
+        publishRunFence: { runId: run.context.runId, teamId, workspaceId },
+        spec: {
+          artifactType: "image",
+          title: "Cancelled first report",
+          payload: {},
+          idempotency: { requestKey },
+          attachments: [
+            {
+              fileName: "report.png",
+              contentType: "image/png",
+              role: "primary",
+              bytes: new Uint8Array([1, 2, 3]),
+            },
+          ],
+        },
+      }),
+    ]).then(([result]) => result!);
+    await waitForBlockedQuery("%pg_advisory_xact_lock%");
+    assert.equal(
+      objects.size,
+      1,
+      "the actual writer has uploaded before the blocked commit",
+    );
+    await schema.database.query(
+      "update chat_thread_runs set status = 'cancel_requested' where id = $1",
+      [run.context.runId],
+    );
+    await connection.query("commit");
+    const result = await publication;
+    assert.equal(result.status, "rejected");
+    if (result.status === "rejected")
+      assert.equal(result.reason.code, "ARTIFACT_STATE_CONFLICT");
+    assert.deepEqual(await records(), { artifacts: [], versions: [] });
+    assert.equal(
+      objects.size,
+      0,
+      "all attempted uploaded bytes are cleaned after definite refusal",
+    );
+    assert.equal(deleted.length, 1);
+  } finally {
+    await connection.query("rollback");
+    connection.release();
+    await publication;
+  }
+});
+
+test("generic first publication that locks its run first commits before a racing cancellation", async () => {
+  const run = await runInput();
+  const connection = await schema.database.connect();
+  let publication:
+    ReturnType<typeof repository.createReadyArtifactRecord> | undefined;
+  let cancellation: Promise<unknown> | undefined;
+  try {
+    await connection.query("begin");
+    await connection.query(
+      "select id from workspaces where id = $1 for update",
+      [workspaceId],
+    );
+    publication = repository.createReadyArtifactRecord(
+      input({
+        publishRunFence: { runId: run.context.runId, teamId, workspaceId },
+      }),
+    );
+    // The insert has acquired thread+run locks and waits on the parent workspace FK.
+    await waitForBlockedQuery('%insert into "artifacts"%');
+    cancellation = schema.database.query(
+      "update chat_thread_runs set status = 'cancel_requested' where id = $1",
+      [run.context.runId],
+    );
+    await waitForBlockedQuery("update chat_thread_runs%");
+    await connection.query("commit");
+    const committed = await publication;
+    await cancellation;
+    const stored = await records();
+    assert.equal(stored.artifacts.length, 1);
+    assert.equal(stored.versions.length, 1);
+    assert.equal(stored.artifacts[0]!.id, committed.artifactId);
+    assert.equal(stored.versions[0]!.id, committed.versionId);
+  } finally {
+    await connection.query("rollback");
+    connection.release();
+    await Promise.allSettled(
+      [publication, cancellation].filter((value) => value !== undefined),
+    );
+  }
+});
+
+test("deleting the publication thread cannot deadlock the initial run-fenced publication", async () => {
+  const run = await runInput();
+  const connection = await schema.database.connect();
+  let publication: Promise<PromiseSettledResult<unknown>> | undefined;
+  let deletion: Promise<PromiseSettledResult<unknown>> | undefined;
+  try {
+    await connection.query("begin");
+    await connection.query("select id from threads where id = $1 for update", [
+      threadId,
+    ]);
+    publication = Promise.allSettled([
+      repository.createReadyArtifactRecord(
+        input({
+          publishRunFence: { runId: run.context.runId, teamId, workspaceId },
+        }),
+      ),
+    ]).then(([result]) => result!);
+    await waitForBlockedQuery('%from "threads"%');
+    // The real deletion path holds the parent thread then cascades its runs.
+    deletion = Promise.allSettled([
+      connection.query("delete from threads where id = $1", [threadId]),
+    ]).then(([result]) => result!);
+    const deleted = await deletion;
+    assert.equal(
+      deleted.status,
+      "fulfilled",
+      "deletion must not be a deadlock victim",
+    );
+    await connection.query("commit");
+    const published = await publication;
+    assert.equal(
+      published.status,
+      "rejected",
+      "a deleted thread cannot accept a new publication",
+    );
+    if (published.status === "rejected")
+      assert.equal(
+        published.reason.code ?? published.reason.cause?.code,
+        "ARTIFACT_STATE_CONFLICT",
+      );
+    assert.deepEqual(await records(), { artifacts: [], versions: [] });
+  } finally {
+    await connection.query("rollback");
+    connection.release();
+    await Promise.allSettled(
+      [publication, deletion].filter((value) => value !== undefined),
+    );
+  }
+});
+
+test("deleting the publication thread cannot deadlock protected current-run publication", async () => {
+  const request = await runInput();
+  const connection = await schema.database.connect();
+  let pending: Promise<PromiseSettledResult<unknown>> | undefined;
+  let deletion: Promise<PromiseSettledResult<unknown>> | undefined;
+  try {
+    await connection.query("begin");
+    await connection.query("select id from threads where id = $1 for update", [
+      threadId,
+    ]);
+    pending = Promise.allSettled([
+      publication.commitCurrentRunArtifactPublication(request),
+    ]).then(([result]) => result!);
+    await waitForBlockedQuery('%from "threads"%');
+    deletion = Promise.allSettled([
+      connection.query("delete from threads where id = $1", [threadId]),
+    ]).then(([result]) => result!);
+    const removed = await deletion;
+    assert.equal(
+      removed.status,
+      "fulfilled",
+      "deletion cannot become a deadlock victim",
+    );
+    await connection.query("commit");
+    const committed = await pending;
+    assert.equal(
+      committed.status,
+      "fulfilled",
+      committed.status === "rejected"
+        ? committed.reason.cause?.code
+        : undefined,
+    );
+    if (committed.status === "fulfilled")
+      assert.deepEqual(committed.value, { ok: false, reason: "run_inactive" });
+    assert.deepEqual(await records(), { artifacts: [], versions: [] });
+  } finally {
+    await connection.query("rollback");
+    connection.release();
+    await Promise.allSettled(
+      [pending, deletion].filter((value) => value !== undefined),
+    );
+  }
+});
+
+test("thread deletion cannot deadlock the actual fenced markArtifactReady republish", async () => {
+  const run = await runInput();
+  const artifact = await repository.createReadyArtifactRecord(input());
+  const deleting = await schema.database.connect();
+  let publication: Promise<PromiseSettledResult<unknown>> | undefined;
+  let deletion: Promise<PromiseSettledResult<unknown>> | undefined;
+  try {
+    await deleting.query("begin");
+    // Pause real parent deletion after its thread/artifact locks, before it
+    // reaches chat_thread_runs. A schema-level PG probe confirmed this order.
+    await deleting.query("select id from threads where id = $1 for update", [
+      threadId,
+    ]);
+    await deleting.query("select id from artifacts where id = $1 for update", [
+      artifact.artifactId,
+    ]);
+    publication = Promise.allSettled([
+      repository.markArtifactReady({
+        artifactId: artifact.artifactId,
+        teamId,
+        workspaceId,
+        userId,
+        payload: { revised: true },
+        expectedStatuses: ["ready"],
+        expectedVersionNo: 1,
+        publishRunFence: { runId: run.context.runId, teamId, workspaceId },
+      }),
+    ]).then(([result]) => result!);
+    await waitForBlockedQuery("%from %");
+    deletion = Promise.allSettled([
+      deleting.query("delete from threads where id = $1", [threadId]),
+    ]).then(([result]) => result!);
+    const removed = await deletion;
+    assert.equal(
+      removed.status,
+      "fulfilled",
+      removed.status === "rejected"
+        ? (removed.reason.cause?.code ?? removed.reason.code)
+        : undefined,
+    );
+    await deleting.query("commit");
+    const published = await publication;
+    assert.equal(
+      published.status,
+      "fulfilled",
+      published.status === "rejected"
+        ? (published.reason.cause?.code ?? published.reason.code)
+        : undefined,
+    );
+    if (published.status === "fulfilled") assert.equal(published.value, null);
+    // Thread deletion SET NULLs existing artifacts; it must preserve the
+    // already-published version while refusing this late republish.
+    const stored = await records();
+    assert.equal(stored.artifacts.length, 1);
+    assert.equal(stored.artifacts[0]!.id, artifact.artifactId);
+    assert.equal(stored.artifacts[0]!.threadId, null);
+    assert.equal(stored.artifacts[0]!.currentVersionNo, 1);
+    assert.deepEqual(stored.artifacts[0]!.payloadJson, { image: "data" });
+    assert.equal(stored.versions.length, 1);
+    assert.equal(stored.versions[0]!.id, artifact.versionId);
+    assert.equal(stored.versions[0]!.versionNo, 1);
+    assert.deepEqual(stored.versions[0]!.contentJson, { image: "data" });
+  } finally {
+    await deleting.query("rollback");
+    deleting.release();
+    await Promise.allSettled(
+      [publication, deletion].filter((value) => value !== undefined),
+    );
+  }
+});
+
+test("fenced markArtifactReady preserves active publication, version CAS and cancelled-run refusal", async () => {
+  const run = await runInput();
+  const artifact = await repository.createReadyArtifactRecord(input());
+  const request = {
+    artifactId: artifact.artifactId,
+    teamId,
+    workspaceId,
+    userId,
+    payload: { revised: true },
+    expectedStatuses: ["ready"] as const,
+    publishRunFence: { runId: run.context.runId, teamId, workspaceId },
+  };
+  assert.ok(
+    await repository.markArtifactReady({
+      ...request,
+      expectedStatuses: ["ready"],
+      expectedVersionNo: 1,
+    }),
+  );
+  assert.equal(
+    await repository.markArtifactReady({
+      ...request,
+      expectedStatuses: ["ready"],
+      expectedVersionNo: 1,
+    }),
+    null,
+  );
+  await schema.database.query(
+    "update chat_thread_runs set status = 'cancel_requested' where id = $1",
+    [run.context.runId],
+  );
+  assert.equal(
+    await repository.markArtifactReady({
+      ...request,
+      expectedStatuses: ["ready"],
+      expectedVersionNo: 2,
+    }),
+    null,
+  );
+  const stored = await records();
+  assert.equal(stored.artifacts[0]!.currentVersionNo, 2);
+  assert.equal(stored.versions.length, 2);
+});
+
+test("fenced legacy threadless artifacts refuse publication while non-run completion remains compatible", async () => {
+  const run = await runInput();
+  const artifact = await repository.createReadyArtifactRecord(input());
+  await schema.db
+    .update(schema.artifacts)
+    .set({ threadId: null })
+    .where(eq(schema.artifacts.id, artifact.artifactId));
+  const request = {
+    artifactId: artifact.artifactId,
+    teamId,
+    workspaceId,
+    userId,
+    payload: { legacy: true },
+    expectedVersionNo: 1,
+  };
+  assert.equal(
+    await repository.markArtifactReady({
+      ...request,
+      publishRunFence: { runId: run.context.runId, teamId, workspaceId },
+    }),
+    null,
+  );
+  assert.ok(await repository.markArtifactReady(request));
+  const stored = await records();
+  assert.equal(stored.artifacts[0]!.threadId, null);
+  assert.equal(stored.artifacts[0]!.currentVersionNo, 2);
+  assert.equal(stored.versions.length, 2);
+});
+
+test("fenced markArtifactReady rechecks artifact parent identity after waiting for the thread lock", async () => {
+  const run = await runInput();
+  const artifact = await repository.createReadyArtifactRecord(input());
+  const otherThreadId = await createThread();
+  const connection = await schema.database.connect();
+  let publication: ReturnType<typeof repository.markArtifactReady> | undefined;
+  try {
+    await connection.query("begin");
+    await connection.query("select id from threads where id = $1 for update", [
+      threadId,
+    ]);
+    publication = repository.markArtifactReady({
+      artifactId: artifact.artifactId,
+      teamId,
+      workspaceId,
+      userId,
+      payload: { wrongParent: true },
+      expectedVersionNo: 1,
+      publishRunFence: { runId: run.context.runId, teamId, workspaceId },
+    });
+    await waitForBlockedQuery('%from "threads"%');
+    await connection.query(
+      "update artifacts set thread_id = $1 where id = $2",
+      [otherThreadId, artifact.artifactId],
+    );
+    await connection.query("commit");
+    assert.equal(await publication, null);
+    const stored = await records();
+    assert.equal(stored.artifacts[0]!.threadId, otherThreadId);
+    assert.equal(stored.artifacts[0]!.currentVersionNo, 1);
+    assert.equal(stored.versions.length, 1);
+  } finally {
+    await connection.query("rollback");
+    connection.release();
+    await publication;
+  }
+});

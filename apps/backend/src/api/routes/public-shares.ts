@@ -350,6 +350,10 @@ export function registerPublicShareRoutes(app: Hono) {
       inertArtifactCsp([config.auth.webBaseUrl]),
     );
     c.header("Content-Type", asset.contentType);
+    c.header(
+      "Content-Disposition",
+      `${c.req.query("download") === "1" ? "attachment" : "inline"}; filename*=UTF-8''${encodeURIComponent(asset.fileName)}`,
+    );
     c.header("X-Content-Type-Options", "nosniff");
     c.header("Referrer-Policy", "no-referrer");
     c.header("Cache-Control", SHARE_BYTES_CACHE_CONTROL);

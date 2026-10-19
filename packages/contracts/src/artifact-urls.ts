@@ -66,7 +66,11 @@ export type ArtifactResource =
   | { readonly kind: "download" }
   | { readonly kind: "previewImage" }
   | { readonly kind: "sourceJson" }
-  | { readonly kind: "asset"; readonly fileName: string };
+  | {
+      readonly kind: "asset";
+      readonly fileName: string;
+      readonly download?: boolean;
+    };
 
 export type ArtifactUrlTarget = {
   readonly artifactVersionId?: string;
@@ -173,7 +177,7 @@ export function buildArtifactRestUrl(input: ArtifactUrlTarget): string | null {
       return `${root}/source.json${suffix}`;
     case "asset":
       return isSafeFlatArtifactAssetFileName(resource.fileName)
-        ? `${root}/assets/${encodeURIComponent(resource.fileName)}${suffix}`
+        ? `${root}/assets/${encodeURIComponent(resource.fileName)}${suffix}${resource.download ? `${suffix ? "&" : "?"}download=1` : ""}`
         : null;
   }
 }
@@ -234,6 +238,7 @@ export function buildArtifactProxyQuery(
         return null;
       }
       params.set("assetFileName", resource.fileName);
+      if (resource.download) params.set("download", "1");
       break;
     }
   }

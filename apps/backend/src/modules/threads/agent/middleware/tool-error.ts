@@ -3,12 +3,15 @@ import { ToolInputParsingException } from "@langchain/core/tools";
 import { toolErrorMiddleware, type ToolCallRequest } from "langchain";
 import { sanitizeClientErrorMessage } from "../../../content/model-gateway-error";
 import { redactErrorMessage } from "../../../mcp/security";
+import { ContentError } from "../../../content/errors";
 import {
   AGENT_TOOL_EXECUTION_TIMEOUT_CODE,
   AGENT_TOOL_TERMINATION_UNKNOWN_CODE,
   isAgentToolExecutionTimeoutReason,
   isAgentToolTerminationUnknownReason,
 } from "./tool-execution-timeout";
+
+import { isAgentStepPriorityTaskFailure } from "./step-budget";
 
 const MAX_TOOL_ERROR_MESSAGE_LENGTH = 600;
 
@@ -58,6 +61,20 @@ export function formatSourceWeftToolError(
   error: unknown,
   request: ToolCallRequest,
 ): MessageContent | undefined {
+  // The durable cancellation gate can observe DB cancellation before the
+  // AbortSignal broadcast arrives. Only a typed host cancellation is control
+  // flow; model/tool text or a plain JSON object cannot cancel the run.
+  if (
+    findCause(
+      error,
+      (candidate) =>
+        candidate instanceof ContentError &&
+        candidate.statusCode === 499 &&
+        candidate.code === "CLIENT_CANCELLED",
+    ) ||
+    isAgentStepPriorityTaskFailure(error)
+  )
+    return undefined;
   const agentTerminationUnknown = findCause(
     error,
     isAgentToolTerminationUnknownReason,

@@ -1,3 +1,4 @@
+import { readAgentRunProgress, readAgentRunStop } from "@sourceweft/contracts";
 import type {
   ChatSendInput,
   CitationRecord,
@@ -477,8 +478,25 @@ function buildVersionedMessageGroups(
               ? toObjectRecord(version.metadata.threadRun)
               : null;
 
+          // MessageVersion is a public display projection, not a metadata passthrough.
+          const agentRunProgress =
+            group.role === "assistant"
+              ? readAgentRunProgress(version.metadata.agentRunProgress)
+              : null;
+          const agentRunStop =
+            group.role === "assistant"
+              ? readAgentRunStop(version.metadata.agentRunStop)
+              : null;
+
           return {
             id: version.id,
+            metadata:
+              agentRunProgress || agentRunStop
+                ? {
+                    ...(agentRunProgress ? { agentRunProgress } : {}),
+                    ...(agentRunStop ? { agentRunStop } : {}),
+                  }
+                : undefined,
             renderKey:
               toNullableString(version.metadata[STREAM_RENDER_KEY]) ??
               undefined,

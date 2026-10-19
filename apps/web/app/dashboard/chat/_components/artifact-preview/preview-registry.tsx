@@ -7,6 +7,11 @@ import { resolveArtifactPreview } from "@sourceweft/agent-tool-registry/ui";
 import type { ArtifactPreviewContext, ArtifactPreviewRenderer } from "./types";
 import "../artifact-render-host";
 import { videoFilePreviewRenderer } from "./adapters/video-file-preview";
+import {
+  ArtifactFileDownloads,
+  artifactDownloadFiles,
+  artifactPrimaryPreviewFile,
+} from "@sourceweft/builtin-tool-publish-artifact/ui";
 import { Preview } from "@sourceweft/preview/react";
 
 export const artifactPreviewRenderers: ArtifactPreviewRenderer[] = [
@@ -15,14 +20,25 @@ export const artifactPreviewRenderers: ArtifactPreviewRenderer[] = [
     id: "file-preview",
     match: ({ artifact, proxyFileUrl }) =>
       artifact.status === "ready" && Boolean(proxyFileUrl),
-    render: ({ artifact, proxyFileUrl, title }) => (
-      <Preview
-        source={{
-          url: proxyFileUrl!,
-          name: artifact.storageKey?.split("/").pop() || title,
-        }}
-      />
-    ),
+    render: ({ artifact, proxyFileUrl, title, payload }) => {
+      const primary = artifactPrimaryPreviewFile(payload.versionFiles);
+      return (
+        <div className="flex h-full min-h-0 flex-col">
+          <ArtifactFileDownloads files={payload.versionFiles} />
+          <div className="min-h-0 flex-1">
+            <Preview
+              source={{
+                url: proxyFileUrl!,
+                name:
+                  primary?.fileName ??
+                  (artifact.storageKey?.split("/").pop() || title),
+                mimeType: primary?.contentType,
+              }}
+            />
+          </div>
+        </div>
+      );
+    },
   },
 ];
 
@@ -42,7 +58,14 @@ export function resolveArtifactPreviewRenderer(
     };
   }
 
-  return (
-    artifactPreviewRenderers.find((renderer) => renderer.match(context)) ?? null
+  const fallback = artifactPreviewRenderers.find((renderer) =>
+    renderer.match(context),
   );
+  if (!fallback) return null;
+  return {
+    ...fallback,
+    blocksDefaultDownload:
+      fallback.id === "file-preview" &&
+      artifactDownloadFiles(context.payload.versionFiles).length > 0,
+  };
 }

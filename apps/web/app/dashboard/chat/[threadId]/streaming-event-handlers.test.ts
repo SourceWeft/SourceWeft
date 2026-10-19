@@ -1598,3 +1598,138 @@ test("presentation artifact result without a published URL does not append card"
   assert.equal(refreshCount, 0);
   assert.deepEqual(message.metadata.renderBlocks, []);
 });
+
+test("step-limit failed summary survives error then bare finish and explicit null clears it", () => {
+  let message: ChatMessageItem = {
+    id: "assistant-limit",
+    role: "assistant",
+    content: "Saved progress",
+    contentJson: {},
+    parentMessageId: null,
+    metadata: {},
+    createdAt: new Date(0).toISOString(),
+  };
+  const stop = {
+    reason: "step_limit",
+    steps: 400,
+    limit: 400,
+    canContinue: true,
+    summaryStatus: "failed",
+  } as const;
+  const context = createBaseStreamingContext({
+    updateStreamingAssistantMessage: (updater) => {
+      message = updater(message);
+    },
+  });
+  testExports.handleStreamingError({
+    event: {
+      code: "AGENT_STEP_SUMMARY_FAILED",
+      error: "Summary failed",
+      agentRunStop: stop,
+    },
+    markStreamingAssistantAsError: (input) => {
+      message.metadata = {
+        ...message.metadata,
+        agentRunStop: input.agentRunStop,
+        error: input.error,
+        errorCode: input.code,
+        threadRun: { status: "failed" },
+      };
+    },
+    persistedUserMessageId: "user-1",
+    setStreamError: () => undefined,
+    setSuppressErrorToast: () => undefined,
+  });
+  assert.deepEqual(message.metadata.agentRunStop, stop);
+  testExports.handleStreamingFinish({ context });
+  assert.deepEqual(message.metadata.agentRunStop, stop);
+  assert.equal(
+    (message.metadata.threadRun as { status: string }).status,
+    "failed",
+  );
+  testExports.handleStreamingFinish({ context, agentRunStop: null });
+  assert.equal(message.metadata.agentRunStop, null);
+});
+
+test("finish persists validated step stop while cancellation suppresses continuation", () => {
+  let message: ChatMessageItem = {
+    id: "assistant-limit",
+    role: "assistant",
+    content: "Summary",
+    contentJson: {},
+    parentMessageId: null,
+    metadata: {},
+    createdAt: new Date(0).toISOString(),
+  };
+  const stop = {
+    reason: "step_limit",
+    steps: 400,
+    limit: 400,
+    canContinue: true,
+    summaryStatus: "completed",
+  } as const;
+  const context = createBaseStreamingContext({
+    updateStreamingAssistantMessage: (updater) => {
+      message = updater(message);
+    },
+  });
+  testExports.handleStreamingFinish({
+    context,
+    agentRunStop: stop,
+    finishReason: "step_limit",
+  });
+  assert.deepEqual(message.metadata.agentRunStop, stop);
+  testExports.handleStreamingError({
+    event: { code: "CLIENT_CANCELLED", error: "Cancelled", agentRunStop: stop },
+    markStreamingAssistantAsError: (input) => {
+      message.metadata.agentRunStop = input.agentRunStop;
+    },
+    persistedUserMessageId: "user-1",
+    setStreamError: () => undefined,
+    setSuppressErrorToast: () => undefined,
+  });
+  assert.equal(message.metadata.agentRunStop, null);
+});
+
+test("root phase progress survives finish and ignores stale or terminal late events", () => {
+  let message: ChatMessageItem = {
+    id: "assistant-closing",
+    role: "assistant",
+    content: "",
+    contentJson: {},
+    parentMessageId: null,
+    metadata: { threadRun: { status: "running" } },
+    createdAt: new Date(0).toISOString(),
+  };
+  const context = createBaseStreamingContext({
+    updateStreamingAssistantMessage: (updater) => {
+      message = updater(message);
+    },
+  });
+  const progress = {
+    policyVersion: 2,
+    phase: "closing",
+    normalSteps: 400,
+    normalLimit: 400,
+    closingSteps: 2,
+    closingLimit: 40,
+    steps: 402,
+    limit: 440,
+  };
+  testExports.handleStreamingAgentRunProgress({ context, progress });
+  assert.deepEqual(message.metadata.agentRunProgress, progress);
+  testExports.handleStreamingAgentRunProgress({
+    context,
+    progress: { ...progress, closingSteps: 1, steps: 401 },
+  });
+  assert.deepEqual(message.metadata.agentRunProgress, progress);
+  testExports.handleStreamingFinish({ context });
+  assert.deepEqual(message.metadata.agentRunProgress, progress);
+  testExports.handleStreamingAgentRunProgress({
+    context,
+    progress: { ...progress, closingSteps: 3, steps: 403 },
+  });
+  assert.deepEqual(message.metadata.agentRunProgress, progress);
+  testExports.handleStreamingFinish({ context, finishReason: "cancelled" });
+  assert.equal(message.metadata.agentRunProgress, null);
+});

@@ -423,14 +423,21 @@ export class ArtifactWriter {
     /** Pre-allocated when the id had to exist before the work (billing keys). */
     readonly artifactId?: string;
     readonly signal?: AbortSignal;
+    readonly publishRunFence?: Parameters<
+      typeof createReadyArtifactRecord
+    >[0]["publishRunFence"];
   }): Promise<PublishArtifactResult> {
     throwArtifactWriteAbortReason(input.signal);
     // Before prepareArtifactWrite, never after: the uploads live in there.
-    const existing = await this.findReusable({
-      context: input.context,
-      spec: input.spec,
-      statuses: REUSE_STATUSES.publish,
-    });
+    // Fenced retries must recheck run activity under the same transaction as
+    // reuse. An early reuse return would append output to a cancelled run.
+    const existing = input.publishRunFence
+      ? null
+      : await this.findReusable({
+          context: input.context,
+          spec: input.spec,
+          statuses: REUSE_STATUSES.publish,
+        });
     throwArtifactWriteAbortReason(input.signal);
     if (existing?.latestVersionId) {
       return {
@@ -463,6 +470,9 @@ export class ArtifactWriter {
     try {
       record = await this.deps.repository.createReady({
         artifactId,
+        ...(input.publishRunFence
+          ? { publishRunFence: input.publishRunFence }
+          : {}),
         artifactType: this.assertKnownArtifactType(input.spec.artifactType),
         requestKey: this.requestKeyOf(input.spec),
         teamId: input.context.teamId,

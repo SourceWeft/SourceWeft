@@ -1,3 +1,4 @@
+import { ToolCallLimitExceededError } from "langchain";
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import { ContentError } from "../../content/errors";
@@ -1221,5 +1222,329 @@ test("MCP display identity survives durable events, trace parts, and persisted s
   assert.deepEqual(
     (metadata.toolCalls as Array<{ mcpDisplay: unknown }>)[0]?.mcpDisplay,
     mcpDisplay,
+  );
+});
+
+test("slow assistant snapshot writes keep a full cooldown after successful completion and force keeps the latest text", async () => {
+  let clock = 1_000;
+  let content = "first";
+  const saved: string[] = [];
+  const flush = testExports.createAssistantSnapshotFlushWindow({
+    now: () => clock,
+  });
+  const persist = async () => {
+    saved.push(content);
+    clock += 750;
+  };
+  await flush(persist);
+  assert.deepEqual(saved, ["first"]);
+  content += " raw one";
+  await flush(persist);
+  clock += 499;
+  content += " raw two";
+  await flush(persist);
+  assert.deepEqual(saved, ["first"]);
+  // A forced terminal boundary bypasses the window and persists all buffered text.
+  await flush(persist, true);
+  assert.deepEqual(saved, ["first", "first raw one raw two"]);
+  content += " later";
+  clock += 500;
+  await flush(persist);
+  assert.equal(saved.at(-1), content);
+});
+
+test("failed assistant snapshot writes propagate and never start a success cooldown", async () => {
+  let clock = 1_000;
+  let attempts = 0;
+  const flush = testExports.createAssistantSnapshotFlushWindow({
+    now: () => clock,
+  });
+  await assert.rejects(
+    flush(async () => {
+      attempts++;
+      clock += 750;
+      throw new Error("write failed");
+    }),
+    /write failed/,
+  );
+  await flush(async () => {
+    attempts++;
+  });
+  assert.equal(attempts, 2);
+});
+
+test("typed global tool budgets remain safe and distinct at the terminal error boundary", () => {
+  const source = new ToolCallLimitExceededError(
+    301,
+    20,
+    300,
+    48,
+    "private-tool-name",
+  );
+  for (const candidate of [
+    source,
+    new Error("private-wrapper", { cause: source }),
+  ]) {
+    const mapped = testExports.toDurableRunContentError(candidate);
+    assert.equal(mapped.code, "AGENT_TOOL_BUDGET_EXCEEDED");
+    assert.equal(mapped.statusCode, 409);
+    assert.equal(mapped.recoverable, false);
+    assert.deepEqual(mapped.details, { scope: "thread", retryable: false });
+    assert.doesNotMatch(mapped.message, /private/);
+  }
+  assert.notEqual(
+    testExports.toDurableRunContentError(new Error("Tool call limit exceeded"))
+      .code,
+    "AGENT_TOOL_BUDGET_EXCEEDED",
+  );
+});
+
+test("step-limit stop survives error then bare finish, message reload, and explicit clearing", () => {
+  const agentRunStop = {
+    reason: "step_limit",
+    steps: 400,
+    limit: 400,
+    canContinue: true,
+    summaryStatus: "failed",
+  } as const;
+  let snapshot = testExports.updateSnapshotFromPayload(
+    {},
+    { type: "error", code: "AGENT_STEP_SUMMARY_FAILED", agentRunStop },
+  );
+  snapshot = testExports.updateSnapshotFromPayload(snapshot, {
+    type: "finish",
+  });
+  assert.deepEqual(snapshot.agentRunStop, agentRunStop);
+  const metadata = buildAssistantMessageSnapshotMetadata({
+    currentMetadata: {},
+    run: createRun({ status: "failed" }),
+    snapshot,
+  });
+  assert.deepEqual(metadata.agentRunStop, agentRunStop);
+  const cleared = testExports.updateSnapshotFromPayload(snapshot, {
+    type: "finish",
+    agentRunStop: null,
+  });
+  assert.equal(cleared.agentRunStop, null);
+  const cancelled = testExports.updateSnapshotFromPayload(snapshot, {
+    type: "error",
+    code: "CLIENT_CANCELLED",
+    agentRunStop,
+  });
+  assert.equal(cancelled.agentRunStop, null);
+  const nextMetadata = buildAssistantMessageSnapshotMetadata({
+    currentMetadata: metadata,
+    run: createRun({ status: "cancelled" }),
+    snapshot: cancelled,
+  });
+  assert.equal(nextMetadata.agentRunStop, undefined);
+});
+
+test("cancellation message writers reject a late successful step-limit marker", () => {
+  const agentRunStop = {
+    reason: "step_limit",
+    steps: 400,
+    limit: 400,
+    canContinue: true,
+    summaryStatus: "completed",
+  } as const;
+  for (const status of ["cancel_requested", "cancelled"] as const) {
+    const input = {
+      currentMetadata: { agentRunStop },
+      run: createRun({ status }),
+      snapshot: { agentRunStop },
+    };
+    assert.equal(
+      buildAssistantMessageSnapshotMetadata(input).agentRunStop,
+      undefined,
+    );
+    assert.equal(
+      buildAssistantMessageConfirmationMetadata(input).agentRunStop,
+      undefined,
+    );
+    assert.equal(
+      testExports.buildSnapshotMetadata(input).agentRunStop,
+      undefined,
+    );
+  }
+});
+
+test("closing progress survives approval/reload and rejects regressions and late terminal events", () => {
+  const closing = {
+    policyVersion: 2,
+    phase: "closing",
+    normalSteps: 400,
+    normalLimit: 400,
+    closingSteps: 1,
+    closingLimit: 40,
+    steps: 401,
+    limit: 440,
+  } as const;
+  let snapshot = testExports.updateSnapshotFromPayload(
+    {},
+    { type: "agent-run-progress", progress: closing },
+  );
+  assert.deepEqual(snapshot.agentRunProgress, closing);
+  assert.equal(snapshot.agentRunStop, undefined);
+  for (const status of [
+    "running",
+    "waiting_for_approval",
+    "completed",
+    "failed",
+  ] as const) {
+    const input = { currentMetadata: {}, run: createRun({ status }), snapshot };
+    assert.deepEqual(
+      buildAssistantMessageSnapshotMetadata(input).agentRunProgress,
+      closing,
+    );
+    assert.deepEqual(
+      buildAssistantMessageConfirmationMetadata(input).agentRunProgress,
+      closing,
+    );
+    assert.deepEqual(
+      testExports.buildSnapshotMetadata(input).agentRunProgress,
+      closing,
+    );
+  }
+  snapshot = testExports.updateSnapshotFromPayload(snapshot, {
+    type: "agent-run-progress",
+    progress: {
+      ...closing,
+      phase: "working",
+      closingSteps: 0,
+      steps: 400,
+    },
+  });
+  assert.deepEqual(snapshot.agentRunProgress, closing);
+  snapshot = testExports.updateSnapshotFromPayload(snapshot, {
+    type: "finish",
+    finishReason: "stop",
+  });
+  snapshot = testExports.updateSnapshotFromPayload(snapshot, {
+    type: "agent-run-progress",
+    progress: {
+      ...closing,
+      phase: "finalizing",
+      closingSteps: 40,
+      steps: 440,
+    },
+  });
+  assert.deepEqual(snapshot.agentRunProgress, closing);
+  const cancelled = testExports.updateSnapshotFromPayload(snapshot, {
+    type: "error",
+    code: "CLIENT_CANCELLED",
+  });
+  assert.equal(cancelled.agentRunProgress, null);
+  assert.equal(
+    buildAssistantMessageSnapshotMetadata({
+      currentMetadata: { agentRunProgress: closing },
+      run: createRun({ status: "cancelled" }),
+      snapshot,
+    }).agentRunProgress,
+    undefined,
+  );
+});
+
+test("successive late phase events cannot resurrect an error or cancellation snapshot", () => {
+  const progress = {
+    policyVersion: 2,
+    phase: "closing",
+    normalSteps: 400,
+    normalLimit: 400,
+    closingSteps: 1,
+    closingLimit: 40,
+    steps: 401,
+    limit: 440,
+  } as const;
+  for (const code of ["CLIENT_CANCELLED", "MODEL_UPSTREAM_ERROR"]) {
+    const stopped = testExports.updateSnapshotFromPayload(
+      {},
+      { type: "error", code },
+    );
+    let snapshot = stopped;
+    for (let i = 0; i < 2; i++)
+      snapshot = testExports.updateSnapshotFromPayload(snapshot, {
+        type: "agent-run-progress",
+        progress,
+      });
+    assert.deepEqual(snapshot, stopped);
+    snapshot = testExports.updateSnapshotFromPayload(snapshot, {
+      type: "thread-title",
+      title: "late title",
+    });
+    snapshot = testExports.updateSnapshotFromPayload(snapshot, {
+      type: "agent-run-progress",
+      progress,
+    });
+    assert.equal(snapshot.agentRunProgress, stopped.agentRunProgress);
+    snapshot = testExports.updateSnapshotFromPayload(snapshot, {
+      type: "finish",
+      agentRunProgress: progress,
+    });
+    assert.equal(snapshot.agentRunProgress, stopped.agentRunProgress);
+    assert.equal(snapshot.lastEventType, "finish");
+  }
+});
+
+test("same-call retries distinguish omitted errors, explicit clearing and new failures", () => {
+  const failed = testExports.updateSnapshotFromPayload(
+    {},
+    {
+      type: "tool-call-error",
+      id: "retry-read",
+      tool: "read_file",
+      error: "sandbox unhealthy",
+      toolCall: {
+        id: "retry-read",
+        tool: "read_file",
+        status: "error",
+        error: "sandbox unhealthy",
+      },
+    },
+  );
+  const omitted = testExports.updateSnapshotFromPayload(failed, {
+    type: "tool-call-end",
+    id: "retry-read",
+    status: "completed",
+  });
+  assert.equal(
+    toToolCallTrace(omitted.toolCalls?.[0])?.error,
+    "sandbox unhealthy",
+  );
+  const cleared = testExports.updateSnapshotFromPayload(failed, {
+    type: "tool-call-result",
+    id: "retry-read",
+    toolCall: {
+      id: "retry-read",
+      tool: "read_file",
+      status: "completed",
+      error: null,
+    },
+    output: { content: "verified bytes" },
+  });
+  assert.equal(toToolCallTrace(cleared.toolCalls?.[0])?.error, null);
+  const restarted = testExports.updateSnapshotFromPayload(failed, {
+    type: "tool-call-start",
+    id: "retry-read",
+    tool: "read_file",
+  });
+  assert.equal(toToolCallTrace(restarted.toolCalls?.[0])?.error, null);
+  assert.equal(toToolCallTrace(restarted.toolCalls?.[0])?.status, "running");
+  const failedAgain = testExports.updateSnapshotFromPayload(restarted, {
+    type: "tool-call-error",
+    id: "retry-read",
+    error: "new permission failure",
+  });
+  assert.equal(
+    toToolCallTrace(failedAgain.toolCalls?.[0])?.error,
+    "new permission failure",
+  );
+  const explicitTopLevelClear = testExports.updateSnapshotFromPayload(
+    failedAgain,
+    { type: "tool-call-result", id: "retry-read", error: null },
+  );
+  assert.equal(
+    toToolCallTrace(explicitTopLevelClear.toolCalls?.[0])?.error,
+    null,
   );
 });

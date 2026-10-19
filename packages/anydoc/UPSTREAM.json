@@ -7,11 +7,13 @@
   "files": [
     {
       "path": "Cargo.lock",
-      "sha256": "7faf5b93ab3d496d848556be84eda6def764a18f50e4de39298847b612980d26"
+      "sha256": "7faf5b93ab3d496d848556be84eda6def764a18f50e4de39298847b612980d26",
+      "patchedSha256": "c2ff7551d141dd0dcb41ecfe8a14907f7aa9aea1eae5030f36376177bb829f87"
     },
     {
       "path": "Cargo.toml",
-      "sha256": "9c1c134e3f5b1c1559f88afd8d86ab4f4db2950fc633b3f5fb2b7dc14c37b55c"
+      "sha256": "9c1c134e3f5b1c1559f88afd8d86ab4f4db2950fc633b3f5fb2b7dc14c37b55c",
+      "patchedSha256": "846f6442e49508d8031703bc73b1f33eaad6ab10489a3b0b7d9df479724cacc0"
     },
     {
       "path": "LICENSE",
@@ -367,7 +369,7 @@
       "sha256": "11b3c6ded88dd5f9310af2cb2793d100192189b1f13061d4308d02df4415b05f"
     }
   ],
-  "patch": "src/formats/pdf.rs: disable ambiguous isolated-line page-number removal",
+  "patch": "src/formats/pdf.rs: disable ambiguous isolated-line page-number removal; Cargo.toml/Cargo.lock: upgrade zip to 9.0.0 for RUSTSEC-2026-0367, RUSTSEC-2026-0368, and RUSTSEC-2026-0369",
   "wrapperFiles": [
     {
       "path": "anydoc.js",
@@ -382,5 +384,5 @@
       "sha256": "be3a2053efdbf31e59736e0308422775228d9001cbdab6c32bef7bdaa05d049f"
     }
   ],
-  "licenseNoticesSha256": "eac99349cd2f3016940b2aa6ac58d16ea5f9f594bd7202c8b32be0a6a549fa2b"
+  "licenseNoticesSha256": "5e4340a2142a00d9cba55349ba60f26dbbba6d9741c9f0468c2803cb0221ef4a"
 }

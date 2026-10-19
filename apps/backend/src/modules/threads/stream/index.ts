@@ -22,3 +22,6 @@ export type {
   RefreshThreadInput,
   ResumeThreadInput,
 } from "./types";
+
+// Shared error normalization used by the agent boundary regression tests.
+export { toObservationError } from "./observability";

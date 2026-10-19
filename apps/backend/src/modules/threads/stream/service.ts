@@ -1,3 +1,5 @@
+import { readAgentRunStop, readAgentRunProgress } from "@sourceweft/contracts";
+import { toObjectRecord } from "../../../shared/records";
 import type { MeterConsumeResponse } from "@sourceweft/contracts";
 import { clientReasoningMetadata } from "../turn/reasoning-state";
 import {
@@ -662,6 +664,8 @@ class ContentThreadStreamService {
               assistantContent: completedOutcome.assistantContent,
               usage: completedOutcome.usage,
               finishReason: completedOutcome.finishReason ?? "stop",
+              agentRunStop: completedOutcome.agentRunStop,
+              agentRunProgress: completedOutcome.agentRunProgress,
               reasoning: completedOutcome.reasoning,
               agentCheckpoint: completedOutcome.agentCheckpoint,
               latencyMs: Date.now() - chatStartedAt,
@@ -803,6 +807,12 @@ class ContentThreadStreamService {
         );
         yield toSseData({
           type: "error",
+          agentRunStop:
+            contentError.code === "CLIENT_CANCELLED"
+              ? null
+              : readAgentRunStop(
+                  toObjectRecord(contentError.details)?.agentRunStop,
+                ),
           code: contentError.code,
           error: clientErrorMessage,
           userMessageId: prepared.userMessage.id,
@@ -825,6 +835,12 @@ class ContentThreadStreamService {
       yield toSseData({
         type: "finish",
         finishReason: outcome?.finishReason ?? "stop",
+        ...(finalizedAssistantMessage
+          ? {
+              agentRunStop: readAgentRunStop(outcome?.agentRunStop),
+              agentRunProgress: readAgentRunProgress(outcome?.agentRunProgress),
+            }
+          : {}),
         ...(finalizedAssistantMessage
           ? {
               messageId: finalizedAssistantMessage.id,
@@ -1208,6 +1224,8 @@ class ContentThreadStreamService {
             assistantContent: completedOutcome.assistantContent,
             usage: completedOutcome.usage,
             finishReason: completedOutcome.finishReason ?? "stop",
+            agentRunStop: completedOutcome.agentRunStop,
+            agentRunProgress: completedOutcome.agentRunProgress,
             reasoning: completedOutcome.reasoning,
             agentCheckpoint: completedOutcome.agentCheckpoint,
             latencyMs: Date.now() - chatStartedAt,

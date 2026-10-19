@@ -1,6 +1,10 @@
 import type { MeteredModelCallTrace } from "../../../shared/model-gateway/index";
 import type { UsageInfo } from "@sourceweft/model-gateway";
-import type { ToolApprovalResume } from "@sourceweft/contracts";
+import type {
+  AgentRunStop,
+  AgentRunProgress,
+  ToolApprovalResume,
+} from "@sourceweft/contracts";
 import type { InvocationEvent, InvocationPlan } from "../../invocations/types";
 import { AGENT_TOOL_NAMES } from "@sourceweft/agent-tool-registry";
 import type { AgentCitation } from "../agent/citation-registry";
@@ -171,6 +175,8 @@ export type StreamThreadEventInput = LegacyThreadProfileAliasInput & {
   assistantMessageParentId?: string | null;
   agentMode?: "continue" | "replay" | "fork";
   agentBaseCheckpoint?: AgentCheckpointRef | null;
+  /** Set by the host refresh resolver, never exposed in the HTTP request schema. */
+  refreshAgentStepBudget?: true;
   agentRunThreadId?: string;
   toolApprovalResume?: ToolApprovalResume | null;
   assistantMessageId?: string | null;
@@ -270,6 +276,12 @@ export type PreparedThreadTurn = {
   llmIdempotencyKey: string;
   agentMode: "continue" | "replay" | "fork";
   agentBaseCheckpoint: AgentCheckpointRef | null;
+  refreshAgentStepBudget?: {
+    graphThreadIds: string[];
+    checkpointRefs: AgentCheckpointRef[];
+    historyFloors: AgentCheckpointRef[];
+    requireExistingBudget: boolean;
+  };
   agentRunThreadId: string;
   toolApprovalResume: ToolApprovalResume | null;
   traceContinuation: TraceContinuationMetadata | null;
@@ -430,6 +442,8 @@ export type FinalizeThreadTurnCommand = {
   assistantContent: string;
   usage?: UsageInfo;
   finishReason?: string;
+  agentRunStop?: AgentRunStop;
+  agentRunProgress?: AgentRunProgress;
   reasoning?: string;
   routeDecision?: Record<string, unknown>;
   provider?: string | null;
