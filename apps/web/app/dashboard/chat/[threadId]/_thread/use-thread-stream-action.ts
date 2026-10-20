@@ -421,8 +421,11 @@ export function useThreadStreamAction({
         latestAssistantMessageContent = shouldSeedAttachContent
           ? seededAttachContent
           : attachOnlyAssistantMessage.content;
+        const persistedToolCalls = resolveToolCallsFromMetadata(
+          attachOnlyAssistantMessage.metadata,
+        );
         resolveToolConfirmationCalls(
-          resolveToolCallsFromMetadata(attachOnlyAssistantMessage.metadata),
+          persistedToolCalls,
           input.resolvedConfirmationIds,
           input.toolApprovalResume,
         ).forEach((toolCall) => {
@@ -432,6 +435,7 @@ export function useThreadStreamAction({
           resolveTracePartsFromMetadata(attachOnlyAssistantMessage.metadata),
           input.resolvedConfirmationIds,
           input.toolApprovalResume,
+          persistedToolCalls,
         );
         resolveThinkingStepsFromMetadata(
           attachOnlyAssistantMessage.metadata,

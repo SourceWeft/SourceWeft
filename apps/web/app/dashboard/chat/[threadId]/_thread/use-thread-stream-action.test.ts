@@ -202,3 +202,62 @@ test("terminal messages normalize stale running thinking steps", () => {
     "completed",
   );
 });
+
+test("approval continuations resolve output-free trace parts through the canonical tool call", () => {
+  // Persisted trace parts no longer embed the tool output (#330); the pending
+  // confirmation must still be matched so the part leaves `approval_requested`.
+  const toolCall = confirmationToolCall("approved-action");
+  const outputFreePart: TracePartRecord = {
+    id: "tool-approved-action",
+    kind: "tool",
+    order: 0,
+    createdAt: new Date(0).toISOString(),
+    updatedAt: new Date(0).toISOString(),
+    toolCallId: toolCall.id,
+    tool: toolCall.tool,
+    status: "approval_requested",
+    input: toolCall.input,
+    error: null,
+    latencyMs: 0,
+  };
+  const resume = { decisions: [{ type: "approve" as const }] };
+
+  const [viaToolCall] = resolveTracePartToolConfirmations(
+    [outputFreePart],
+    ["approved-action"],
+    resume,
+    [toolCall],
+  );
+  assert.equal(viaToolCall?.kind, "tool");
+  if (viaToolCall?.kind !== "tool") {
+    throw new Error("expected a tool trace part");
+  }
+  assert.equal(viaToolCall.status, "completed");
+  assert.equal(viaToolCall.approvalState, "approved");
+  assert.equal(viaToolCall.approvalConfirmationId, "approved-action");
+  assert.equal(
+    "output" in viaToolCall,
+    false,
+    "resolution must not introduce an inline output copy on the part",
+  );
+
+  const [viaApprovalField] = resolveTracePartToolConfirmations(
+    [{ ...outputFreePart, approvalConfirmationId: "approved-action" }],
+    ["approved-action"],
+    resume,
+  );
+  assert.equal(
+    viaApprovalField?.kind === "tool" ? viaApprovalField.status : null,
+    "completed",
+  );
+
+  const [unresolved] = resolveTracePartToolConfirmations(
+    [outputFreePart],
+    ["approved-action"],
+    resume,
+  );
+  assert.equal(
+    unresolved?.kind === "tool" ? unresolved.status : null,
+    "approval_requested",
+  );
+});

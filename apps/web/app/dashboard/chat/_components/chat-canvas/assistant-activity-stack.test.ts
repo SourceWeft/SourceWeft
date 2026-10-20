@@ -7,6 +7,11 @@ import { registerAgentTools } from "@sourceweft/agent-tool-registry";
 import messages from "../../../../../messages/en.json";
 import { groupConsecutiveToolItems } from "./assistant-activity-groups";
 import { buildAssistantActivityItems } from "./assistant-activity-items";
+import { parseDelegateToolCall } from "./delegate-tool-card-state";
+import { compactText, getToolOutputContent } from "./message-assets";
+import { getReadFilePreview } from "./read-file-preview";
+import { getSandboxExecuteView } from "./sandbox-tool-result-display";
+import { getToolConfirmationOutput } from "./tool-confirmation-state";
 import {
   ASSISTANT_ACTIVITY_DETAIL_CLASS,
   ASSISTANT_ACTIVITY_DETAIL_TEXT_CLASS,
@@ -633,4 +638,196 @@ test("trace-only MCP activity retains explicit server and raw tool names", () =>
     item?.type === "tool" ? item.toolCall.mcpDisplay : undefined,
     mcpDisplay,
   );
+});
+
+describe("output-free trace parts resolve card output from the canonical tool call", () => {
+  // Persisted trace parts carry structure only; `toolCalls[id].output` is the
+  // single full copy (#330). Every card reader must see the same output it
+  // would see on the canonical tool call.
+  const createdAt = "2026-06-01T00:00:00.000Z";
+  const stdout = "line\n".repeat(400);
+  const report = `# Report\n${"x".repeat(600)}`;
+  const readFileContent = Array.from(
+    { length: 40 },
+    (_, index) => `line ${index + 1}`,
+  ).join("\n");
+  const mcpDisplay = { serverName: "Docs", toolName: "Search docs" };
+  const toolCalls: ToolCallRecord[] = [
+    {
+      id: "exec-1",
+      tool: "execute",
+      input: { command: "ls -R" },
+      output: JSON.stringify({
+        ok: true,
+        output: stdout,
+        truncated: true,
+        exitCode: 0,
+      }),
+      latencyMs: 12,
+      status: "completed",
+      error: null,
+      sequence: 1,
+    },
+    {
+      id: "read-1",
+      tool: "read_file",
+      input: { path: "/files/notes.md" },
+      output: { content: readFileContent },
+      latencyMs: 3,
+      status: "completed",
+      error: null,
+      sequence: 2,
+    },
+    {
+      id: "task-1",
+      tool: "task",
+      input: { subagent_type: "explore", description: "Survey the repo." },
+      output: { report, sourceweft: { childThreadId: "child-1" } },
+      latencyMs: 900,
+      status: "completed",
+      error: null,
+      sequence: 3,
+    },
+    {
+      id: "search-1",
+      tool: "search_docs",
+      input: { query: "bounds" },
+      output: { content: "y".repeat(500) },
+      latencyMs: 5,
+      status: "completed",
+      error: null,
+      sequence: 4,
+      mcpDisplay,
+    },
+    {
+      id: "confirm-1",
+      tool: "execute",
+      input: { command: "pwd" },
+      output: {
+        type: "tool_confirmation_request",
+        schemaVersion: 1,
+        id: "approval-1",
+        domain: "connector",
+        subject: { label: "Mac", provider: "provider", connectorId: "c-1" },
+        action: {
+          type: "execute",
+          toolName: "execute",
+          label: "Execute",
+          riskLevel: "high",
+          status: "proposed",
+          requiresApproval: true,
+        },
+        preview: { title: "Run pwd" },
+        decisionOptions: [
+          { decision: "approve", label: "Approve" },
+          { decision: "reject", label: "Reject" },
+        ],
+        execution: {
+          providerStatus: "not_executed",
+          executor: {
+            kind: "connector_action_run",
+            connectorId: "c-1",
+            actionRunId: "r-1",
+          },
+        },
+        status: "proposed",
+        userMessage: "Waiting for confirmation.",
+      },
+      latencyMs: null,
+      status: "approval_requested",
+      error: null,
+      sequence: 5,
+    },
+  ];
+  const traceParts: TracePartRecord[] = toolCalls.map((toolCall, index) => ({
+    createdAt,
+    updatedAt: createdAt,
+    id: `part-${toolCall.id}`,
+    kind: "tool",
+    order: index + 1,
+    toolCallId: toolCall.id,
+    tool: toolCall.tool,
+    status: toolCall.status,
+    input: toolCall.input,
+    error: toolCall.error,
+    latencyMs: toolCall.latencyMs,
+  }));
+  const items = buildAssistantActivityItems({ toolCalls, traceParts });
+
+  function resolved(id: string) {
+    const item = items.find(
+      (candidate) => candidate.type === "tool" && candidate.toolCall.id === id,
+    );
+    if (!item || item.type !== "tool") {
+      throw new Error(`missing tool item ${id}`);
+    }
+    return item.toolCall;
+  }
+  function canonical(id: string) {
+    const toolCall = toolCalls.find((candidate) => candidate.id === id);
+    if (!toolCall) {
+      throw new Error(`missing tool call ${id}`);
+    }
+    return toolCall;
+  }
+
+  test("every card sees the canonical output", () => {
+    assert.equal(items.length, toolCalls.length);
+    for (const toolCall of toolCalls) {
+      assert.deepEqual(resolved(toolCall.id).output, toolCall.output);
+      assert.equal(resolved(toolCall.id).status, toolCall.status);
+      assert.equal(resolved(toolCall.id).latencyMs, toolCall.latencyMs);
+    }
+  });
+
+  test("generic card summary is unchanged", () => {
+    const summary = (toolCall: ToolCallRecord) =>
+      compactText(getToolOutputContent(toolCall.output) ?? "", 220);
+    assert.equal(summary(resolved("search-1")), summary(canonical("search-1")));
+    assert.ok(summary(resolved("search-1")).length > 0);
+    assert.deepEqual(resolved("search-1").mcpDisplay, mcpDisplay);
+  });
+
+  test("read_file preview is unchanged", () => {
+    const preview = getReadFilePreview(resolved("read-1"));
+    assert.ok(preview);
+    assert.deepEqual(preview, getReadFilePreview(canonical("read-1")));
+    assert.equal(preview.isTruncated, true);
+    assert.equal(preview.path, "/files/notes.md");
+  });
+
+  test("sandbox card keeps full stdout and the truncated flag", () => {
+    const view = getSandboxExecuteView({
+      input: resolved("exec-1").input,
+      output: resolved("exec-1").output,
+      toolName: "execute",
+    });
+    assert.ok(view);
+    assert.equal(view.output, stdout);
+    assert.equal(view.truncated, true);
+    assert.deepEqual(
+      view,
+      getSandboxExecuteView({
+        input: canonical("exec-1").input,
+        output: canonical("exec-1").output,
+        toolName: "execute",
+      }),
+    );
+  });
+
+  test("delegate card still extracts the report", () => {
+    const view = parseDelegateToolCall(resolved("task-1"));
+    assert.equal(view.report, report);
+    assert.equal(view.childThreadId, "child-1");
+    assert.equal(view.subagentType, "explore");
+  });
+
+  test("confirmation card still resolves the pending request", () => {
+    const confirmation = getToolConfirmationOutput(
+      resolved("confirm-1").output,
+    );
+    assert.ok(confirmation);
+    assert.equal(confirmation.id, "approval-1");
+    assert.equal(resolved("confirm-1").status, "approval_requested");
+  });
 });

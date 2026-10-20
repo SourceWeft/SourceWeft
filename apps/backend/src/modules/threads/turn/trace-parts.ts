@@ -28,6 +28,11 @@ export type ToolTracePart = TracePartBase & {
   tool: string;
   status: ToolCallTrace["status"];
   input: Record<string, unknown>;
+  /**
+   * Never populated. Tool output lives only on the canonical tool call
+   * (`toolCalls[id].output`); readers resolve it by `toolCallId`. Legacy rows
+   * that still carry it are stripped by `normalizeTraceParts`.
+   */
   output?: unknown;
   error?: string | null;
   latencyMs?: number | null;
@@ -135,7 +140,6 @@ export function normalizeTraceParts(value: unknown): TracePart[] {
           tool,
           status,
           input,
-          ...(record.output !== undefined ? { output: record.output } : {}),
           ...(typeof record.error === "string" || record.error === null
             ? { error: record.error }
             : {}),
@@ -266,7 +270,6 @@ export function tracePartFromToolCall(
       : {}),
     status: toolCall.status,
     input: toolCall.input,
-    ...(toolCall.output !== undefined ? { output: toolCall.output } : {}),
     error: toolCall.error,
     latencyMs: toolCall.latencyMs,
     ...(toolCall.approvalState

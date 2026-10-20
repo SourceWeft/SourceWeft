@@ -6,6 +6,7 @@ import {
   mergeChatRunSnapshot,
   mergeCommittedArtifactRenderBlocks,
   resolveTerminalStatusFromFinishedSnapshot,
+  updateExistingTracePartsFromToolCalls,
 } from "./snapshot";
 import type { ChatRunSnapshot } from "./types";
 
@@ -250,5 +251,71 @@ test("a genuinely finished snapshot still resolves terminal", () => {
       errorCode: "CHAT_RUN_FAILED",
     } as never),
     "failed",
+  );
+});
+
+test("refreshing existing tool trace parts from tool calls keeps them output-free", () => {
+  const traceParts = [
+    {
+      id: "publish-1",
+      kind: "tool",
+      order: 0,
+      createdAt: "2026-05-25T00:00:00.000Z",
+      updatedAt: "2026-05-25T00:00:00.000Z",
+      toolCallId: "publish-1",
+      tool: "publish_artifact",
+      input: { title: "Deck" },
+      status: "running",
+      latencyMs: null,
+      error: null,
+    },
+  ];
+  const refreshed = updateExistingTracePartsFromToolCalls(traceParts, [
+    {
+      id: "publish-1",
+      tool: "publish_artifact",
+      input: { title: "Deck" },
+      output: { type: "committed_artifact_result", body: "x".repeat(50_000) },
+      status: "completed",
+      latencyMs: 42,
+      error: null,
+      sequence: 1,
+      approvalState: "approved",
+      approvalConfirmationId: "confirmation-1",
+    },
+    {
+      id: "unknown-tool",
+      tool: "search_sources",
+      input: {},
+      output: "ignored",
+      status: "completed",
+      latencyMs: null,
+      error: null,
+      sequence: 2,
+    },
+  ]);
+  assert.ok(refreshed);
+  assert.equal(refreshed.length, 1);
+  const part = refreshed[0]!;
+  assert.equal(part.kind, "tool");
+  assert.ok(!("output" in part));
+  assert.ok(JSON.stringify(refreshed).length < 1024);
+  assert.deepEqual(
+    part.kind === "tool"
+      ? {
+          status: part.status,
+          latencyMs: part.latencyMs,
+          approvalState: part.approvalState,
+          approvalConfirmationId: part.approvalConfirmationId,
+          order: part.order,
+        }
+      : null,
+    {
+      status: "completed",
+      latencyMs: 42,
+      approvalState: "approved",
+      approvalConfirmationId: "confirmation-1",
+      order: 0,
+    },
   );
 });

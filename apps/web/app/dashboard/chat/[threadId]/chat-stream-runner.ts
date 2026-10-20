@@ -18,6 +18,7 @@ import type {
   SelectedModels,
 } from "../_components/model-catalog-utils";
 import {
+  buildToolCallTraceEvent,
   createStreamingEventHandlerContext,
   handleStreamingAssistantMessage,
   handleStreamingAgentRunProgress,
@@ -574,24 +575,8 @@ export async function runChatStream(
         },
         streamToolCallsById,
       }),
-    resolveTraceEventFromStreamEvent: ({ event, toolCall }) => {
-      if (!event.type.startsWith("tool-call-")) {
-        return null;
-      }
-      return {
-        type: "tool-call",
-        id:
-          typeof toolCall.sequence === "number"
-            ? `${toolCall.id}:${toolCall.sequence}`
-            : toolCall.id,
-        itemId: toolCall.id,
-        sequence: toolCall.sequence,
-        eventType: event.type,
-        tool: toolCall.tool,
-        toolCall,
-        payload: event as Record<string, unknown>,
-      };
-    },
+    // Output-free by design: `streamToolCallsById` is the single full copy.
+    resolveTraceEventFromStreamEvent: buildToolCallTraceEvent,
     streamRenderBuffer,
     streamThinkingStepsById: input.streamThinkingStepsById,
     streamToolCallsById: input.streamToolCallsById,
