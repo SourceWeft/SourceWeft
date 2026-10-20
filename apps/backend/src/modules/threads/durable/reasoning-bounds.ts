@@ -32,6 +32,15 @@ function truncationMarker(droppedChars: number) {
 }
 
 /**
+ * Whether `text` is a bounded tail: it starts with the truncation marker, so
+ * its head is gone and it can no longer be squared with the runtime text by
+ * cutting from either end.
+ */
+export function hasReasoningTruncationMarker(text: string): boolean {
+  return MARKER_PATTERN.test(text);
+}
+
+/**
  * Keep the tail of `text` so the result is at most `limit` characters, with
  * an inline `…[reasoning truncated: N chars dropped]` prefix counting every
  * character dropped so far. Pure and idempotent: feeding an already-bounded

@@ -33,6 +33,7 @@ import {
   boundReasoningRenderBlocks,
   boundReasoningSegmentText,
   boundSnapshotReasoning,
+  hasReasoningTruncationMarker,
 } from "./reasoning-bounds";
 import { ContentThreadStreamService } from "../stream/service";
 import { ContentThreadTurnService } from "../turn/service";
@@ -819,6 +820,275 @@ function appendToolRenderBlock(input: {
   ];
 }
 
+/** The render block id of a reasoning segment; the only link from block to segment. */
+function reasoningRenderBlockId(segmentId: string) {
+  return `reasoning-${segmentId}`;
+}
+
+/**
+ * The turn layer's notice that a model call failed after streaming part of
+ * its output and is being retried: everything the failed attempt streamed is
+ * withdrawn before the retry re-emits under new segment ids.
+ */
+type SegmentResetPayload = {
+  reason: string;
+  attempt: number | null;
+  /** Reasoning segments the failed attempt produced. */
+  segmentIds: string[];
+  /** Tool calls whose argument chunks streamed but never completed. */
+  toolCallIds: string[];
+  /** Length of `assistantContent` before the failed attempt started. */
+  keepTextChars: number | null;
+  /** Reasoning characters the failed attempt streamed (withdrawn from the end). */
+  dropReasoningChars: number | null;
+  /** Length of the unbounded runtime reasoning before the failed attempt started. */
+  keepReasoningChars: number | null;
+};
+
+function parseSegmentResetPayload(
+  payload: Record<string, unknown>,
+): SegmentResetPayload | null {
+  if (payload.type !== "segment-reset") {
+    return null;
+  }
+  const stringList = (value: unknown) =>
+    Array.isArray(value)
+      ? value.filter(
+          (item): item is string => typeof item === "string" && item.length > 0,
+        )
+      : [];
+  const nonNegativeInteger = (value: unknown) =>
+    typeof value === "number" && Number.isInteger(value) && value >= 0
+      ? value
+      : null;
+  return {
+    reason: typeof payload.reason === "string" ? payload.reason : "unknown",
+    attempt: nonNegativeInteger(payload.attempt),
+    segmentIds: stringList(payload.segmentIds),
+    toolCallIds: stringList(payload.toolCallIds),
+    keepTextChars: nonNegativeInteger(payload.keepTextChars),
+    dropReasoningChars: nonNegativeInteger(payload.dropReasoningChars),
+    keepReasoningChars: nonNegativeInteger(payload.keepReasoningChars),
+  };
+}
+
+/**
+ * The run's accumulated `reasoning` after a reset.
+ *
+ * While the snapshot text is under its cap it is the plain concatenation of
+ * every delta, exactly what the runtime holds, so the failed attempt's
+ * characters are cut from the end (`dropReasoningChars`; `keepReasoningChars`
+ * is the same cut expressed from the start, used only when the drop count is
+ * absent). The result is what `boundSnapshotReasoning` yields for the runtime
+ * text, so the finalizer's terminal write and a snapshot-sourced terminal
+ * failure still agree at the same revision (the #328 "equal revision ⇒ equal
+ * text" invariant). Rebuilding from render blocks would not: each block is
+ * bounded on its own at the segment cap, so a surviving 70k segment would put
+ * a per-segment marker into a string the runtime never produces.
+ *
+ * Once the snapshot text carries the snapshot marker, its prefix is already
+ * gone and no cut from the end can be squared with the runtime; the survivors'
+ * blocks are the best available source, in order, bounded by the snapshot rule.
+ */
+function resetSnapshotReasoning(input: {
+  current: string;
+  reset: SegmentResetPayload;
+  survivingSegmentBlocks: MessageRenderBlock[];
+}) {
+  const { current, reset } = input;
+  if (!hasReasoningTruncationMarker(current)) {
+    if (reset.dropReasoningChars !== null) {
+      return current.slice(
+        0,
+        Math.max(0, current.length - reset.dropReasoningChars),
+      );
+    }
+    if (reset.keepReasoningChars !== null) {
+      return current.slice(0, reset.keepReasoningChars);
+    }
+  }
+  return boundSnapshotReasoning(
+    input.survivingSegmentBlocks
+      .map((block) => (block.type === "reasoning" ? block.text : ""))
+      .join(""),
+  );
+}
+
+/**
+ * Drop the last `dropChars` characters of streamed text from the text render
+ * blocks, walking back from the newest block. Counted from the end rather than
+ * from an absolute offset: on a continuation the blocks start with the prior
+ * run's text while `assistantContent` holds only this run's, so only the
+ * amount to withdraw is shared between the two.
+ */
+function truncateTextRenderBlocks(
+  blocks: MessageRenderBlock[],
+  dropChars: number,
+) {
+  let remaining = dropChars;
+  const result: MessageRenderBlock[] = [];
+  for (let index = blocks.length - 1; index >= 0; index -= 1) {
+    const block = blocks[index]!;
+    if (block.type !== "text" || remaining <= 0) {
+      result.unshift(block);
+      continue;
+    }
+    if (block.text.length <= remaining) {
+      remaining -= block.text.length;
+      continue;
+    }
+    result.unshift({
+      ...block,
+      text: block.text.slice(0, block.text.length - remaining),
+    });
+    remaining = 0;
+  }
+  return result;
+}
+
+/**
+ * Withdraw the output of a failed model attempt from the snapshot.
+ *
+ * Reasoning is removed by segment id wherever the segment left a trace: its
+ * `reasoningSegments` record, its render block, its trace event (matched by
+ * `itemId`, never by rebuilding the event id) and its trace part. Tool calls
+ * are removed only while still `running`: a call that reached a result, an
+ * error or an approval request came from a model call that succeeded, so a
+ * reset naming it by mistake leaves it alone. `thinking-step` state is not
+ * the model's output and is left as is, and the surviving trace events keep
+ * their `displayOrder` so an attaching client sees the same order as before.
+ *
+ * `reasoning` loses the failed attempt's characters (see
+ * `resetSnapshotReasoning`; the block fallback only reads this run's segments,
+ * since continuation blocks of a prior run live in `reasoningRun.base`) and
+ * the revision moves forward so the reasoningWrite CAS accepts the shorter
+ * text. The turn layer opens a fresh segment at every model-call begin, so a
+ * failed attempt never extends an earlier open segment: `segmentIds` describes
+ * the whole withdrawal and no segment is ever partially cut.
+ */
+function applySegmentReset(
+  snapshot: ChatRunSnapshot,
+  reset: SegmentResetPayload,
+): ChatRunSnapshot {
+  const segmentIds = new Set(reset.segmentIds);
+  const removableToolCallIds = new Set(
+    reset.toolCallIds.filter((id) => {
+      const record = findToolCallSnapshotById(snapshot.toolCalls, id);
+      return !!record && record.status === "running";
+    }),
+  );
+  // A list that lost nothing is handed back as it was (same reference,
+  // `undefined` stays `undefined`): a reset naming only unknown ids changes
+  // nothing beyond the revision.
+  const ifShrunk = <K extends string, T>(
+    key: K,
+    before: T[] | undefined,
+    after: T[],
+  ): Partial<Record<K, T[]>> =>
+    before !== undefined && before.length !== after.length
+      ? ({ [key]: after } as Record<K, T[]>)
+      : {};
+  const reasoningSegments = (snapshot.reasoningSegments ?? []).filter(
+    (segment) => {
+      const id = toObjectRecord(segment)?.id;
+      return typeof id !== "string" || !segmentIds.has(id);
+    },
+  );
+  const remainingSegmentBlockIds = new Set(
+    reasoningSegments
+      .map((segment) => toObjectRecord(segment)?.id)
+      .filter((id): id is string => typeof id === "string")
+      .map(reasoningRenderBlockId),
+  );
+
+  const assistantContent = snapshot.assistantContent ?? "";
+  const dropTextChars =
+    reset.keepTextChars !== null &&
+    reset.keepTextChars < assistantContent.length
+      ? assistantContent.length - reset.keepTextChars
+      : 0;
+  const removedReasoningBlockIds = new Set(
+    [...segmentIds].map(reasoningRenderBlockId),
+  );
+  const currentBlocks = normalizeRenderBlocks(snapshot.renderBlocks);
+  const survivingBlocks = currentBlocks.filter((block) =>
+    block.type === "reasoning"
+      ? !removedReasoningBlockIds.has(block.id)
+      : block.type === "tool"
+        ? !removableToolCallIds.has(block.toolCallId)
+        : true,
+  );
+  const nextBlocks =
+    survivingBlocks.length === currentBlocks.length && dropTextChars === 0
+      ? currentBlocks
+      : truncateTextRenderBlocks(survivingBlocks, dropTextChars);
+  const renderBlocks =
+    nextBlocks === currentBlocks ? snapshot.renderBlocks : nextBlocks;
+  const reasoning = resetSnapshotReasoning({
+    current: snapshot.reasoning ?? "",
+    reset,
+    survivingSegmentBlocks: nextBlocks.filter(
+      (block) =>
+        block.type === "reasoning" && remainingSegmentBlockIds.has(block.id),
+    ),
+  });
+
+  const traceEvents = (snapshot.traceEvents ?? []).filter((event) => {
+    const record = toObjectRecord(event);
+    const itemId = typeof record?.itemId === "string" ? record.itemId : null;
+    if (!itemId) {
+      return true;
+    }
+    if (record?.type === "reasoning") {
+      return !segmentIds.has(itemId);
+    }
+    if (record?.type === "tool-call") {
+      return !removableToolCallIds.has(itemId);
+    }
+    return true;
+  });
+  const traceParts = (snapshot.traceParts ?? []).filter((part) => {
+    const record = toObjectRecord(part);
+    if (record?.kind === "reasoning") {
+      return typeof record.id !== "string" || !segmentIds.has(record.id);
+    }
+    if (record?.kind === "tool") {
+      return (
+        typeof record.toolCallId !== "string" ||
+        !removableToolCallIds.has(record.toolCallId)
+      );
+    }
+    return true;
+  });
+  const toolCalls = (snapshot.toolCalls ?? []).filter((toolCall) => {
+    const id = toObjectRecord(toolCall)?.id;
+    return typeof id !== "string" || !removableToolCallIds.has(id);
+  });
+
+  return {
+    ...snapshot,
+    ...(dropTextChars
+      ? {
+          assistantContent: assistantContent.slice(
+            0,
+            assistantContent.length - dropTextChars,
+          ),
+        }
+      : {}),
+    ...(reasoning !== snapshot.reasoning ? { reasoning } : {}),
+    reasoningRevision: (snapshot.reasoningRevision ?? 0) + 1,
+    ...ifShrunk(
+      "reasoningSegments",
+      snapshot.reasoningSegments,
+      reasoningSegments,
+    ),
+    ...(renderBlocks !== snapshot.renderBlocks ? { renderBlocks } : {}),
+    ...ifShrunk("traceEvents", snapshot.traceEvents, traceEvents),
+    ...ifShrunk("traceParts", snapshot.traceParts, traceParts),
+    ...ifShrunk("toolCalls", snapshot.toolCalls, toolCalls),
+  };
+}
+
 function updateSnapshotFromPayload(
   snapshot: ChatRunSnapshot,
   payload: Record<string, unknown> | null,
@@ -889,7 +1159,7 @@ function updateSnapshotFromPayload(
             typeof segment.durationMs === "number"
               ? segment.durationMs
               : undefined,
-          id: `reasoning-${segment.id}`,
+          id: reasoningRenderBlockId(segment.id),
           text: payload.reasoning,
         });
         next.traceParts = upsertTracePart(
@@ -897,6 +1167,12 @@ function updateSnapshotFromPayload(
           tracePartFromReasoningSegment(segment),
         );
       }
+    }
+  }
+  if (payload.type === "segment-reset") {
+    const reset = parseSegmentResetPayload(payload);
+    if (reset) {
+      Object.assign(next, applySegmentReset(next, reset));
     }
   }
   if (payload.type === "thinking-step" && payload.step) {
@@ -1055,6 +1331,22 @@ function buildTraceEventId(input: {
   return suffix ? `${id}:${suffix}` : id;
 }
 
+/**
+ * One past the highest `displayOrder` present. Equal to the array length while
+ * events are only ever appended; after a segment reset removed events, the
+ * survivors keep their order and a new event must still sort after them.
+ */
+function nextTraceDisplayOrder(events: unknown[]) {
+  let highest = -1;
+  for (const event of events) {
+    const displayOrder = toObjectRecord(event)?.displayOrder;
+    if (typeof displayOrder === "number" && Number.isFinite(displayOrder)) {
+      highest = Math.max(highest, displayOrder);
+    }
+  }
+  return Math.max(highest + 1, events.length);
+}
+
 function appendTraceEvent(
   events: unknown[] | undefined,
   event: Record<string, unknown> | null,
@@ -1067,7 +1359,7 @@ function appendTraceEvent(
   const key = getTraceEventKey(event);
   const nextEvent = {
     ...event,
-    displayOrder: current.length,
+    displayOrder: nextTraceDisplayOrder(current),
   };
   if (!key) {
     return [...current, nextEvent];

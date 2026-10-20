@@ -344,6 +344,34 @@ test("mapDeepAgentEventToSse maps text replacement events", () => {
   assert.equal(data.text, "Final markdown\n\n![Generated](/artifact.png)");
 });
 
+test("mapDeepAgentEventToSse maps segment-reset events verbatim", () => {
+  const event: Exclude<DeepAgentTurnEvent, { type: "done" }> = {
+    type: "segment-reset",
+    reason: "model_call_retry",
+    attempt: 2,
+    segmentIds: ["model-reasoning:run-1:3"],
+    toolCallIds: ["call-9"],
+    keepTextChars: 120,
+    keepReasoningChars: 4096,
+    dropTextChars: 30,
+    dropReasoningChars: 512,
+  };
+
+  const data = parseSseData(mapDeepAgentEventToSse(event, "text-1"));
+
+  assert.deepEqual(data, {
+    type: "segment-reset",
+    reason: "model_call_retry",
+    attempt: 2,
+    segmentIds: ["model-reasoning:run-1:3"],
+    toolCallIds: ["call-9"],
+    keepTextChars: 120,
+    keepReasoningChars: 4096,
+    dropTextChars: 30,
+    dropReasoningChars: 512,
+  });
+});
+
 test("mapDeepAgentEventToSse sends delta-only reasoning segment metadata", () => {
   const event: Exclude<DeepAgentTurnEvent, { type: "done" }> = {
     type: "reasoning",

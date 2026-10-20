@@ -237,6 +237,20 @@ export function mapDeepAgentEventToSse(
     });
   }
 
+  if (event.type === "segment-reset") {
+    return toSseData({
+      type: "segment-reset",
+      reason: event.reason,
+      attempt: event.attempt,
+      segmentIds: event.segmentIds,
+      toolCallIds: event.toolCallIds,
+      keepTextChars: event.keepTextChars,
+      keepReasoningChars: event.keepReasoningChars,
+      dropTextChars: event.dropTextChars,
+      dropReasoningChars: event.dropReasoningChars,
+    });
+  }
+
   if (event.type === "text-interrupted") {
     return toSseData({
       type: "text-interrupted",

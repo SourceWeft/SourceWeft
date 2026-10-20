@@ -319,3 +319,54 @@ test("refreshing existing tool trace parts from tool calls keeps them output-fre
     },
   );
 });
+
+test("a pre-reset snapshot at a lower revision cannot overwrite the post-reset shorter reasoning", () => {
+  const reasoningRun = { runId: "run", parentRunId: null, base: "" };
+  let snapshot: ChatRunSnapshot = { reasoningRun, reasoningRevision: 0 };
+  const stream = (segmentId: string, sequence: number, deltas: string[]) => {
+    for (const delta of deltas) {
+      snapshot = testExports.updateSnapshotFromPayload(snapshot, {
+        type: "reasoning",
+        reasoning: delta,
+        segment: { id: segmentId, sequence, phase: "initial" },
+      });
+    }
+  };
+  stream("model-reasoning-A", 1, ["long ", "failed ", "attempt"]);
+  const preReset = snapshot;
+  assert.equal(preReset.reasoning, "long failed attempt");
+
+  snapshot = testExports.updateSnapshotFromPayload(snapshot, {
+    type: "segment-reset",
+    reason: "model_call_retry",
+    attempt: 2,
+    segmentIds: ["model-reasoning-A"],
+    toolCallIds: [],
+    keepTextChars: 0,
+    dropReasoningChars: "long failed attempt".length,
+    keepReasoningChars: 0,
+  });
+  stream("model-reasoning-B", 2, ["short"]);
+  const postReset = snapshot;
+  assert.equal(postReset.reasoning, "short");
+  assert.ok(postReset.reasoningRevision! > preReset.reasoningRevision!);
+
+  // A stale flush carrying the failed attempt's text loses to the reset.
+  const merged = mergeChatRunSnapshot({
+    current: postReset,
+    incoming: preReset,
+  });
+  assert.equal(merged.reasoning, "short");
+  assert.equal(merged.reasoningRevision, postReset.reasoningRevision);
+  assert.deepEqual(
+    (merged.reasoningSegments as Array<{ id: string }>).map((s) => s.id),
+    ["model-reasoning-B"],
+  );
+
+  // The reverse direction (reset applied over the stale copy) wins as usual.
+  const forward = mergeChatRunSnapshot({
+    current: preReset,
+    incoming: postReset,
+  });
+  assert.equal(forward.reasoning, "short");
+});

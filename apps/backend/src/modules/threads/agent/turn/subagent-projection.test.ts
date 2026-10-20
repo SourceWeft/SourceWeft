@@ -352,9 +352,10 @@ test("projection never adds a client event kind", async () => {
     "thinking-step": true,
     citations: true,
     reasoning: true,
+    "segment-reset": true,
     done: true,
   };
-  assert.equal(Object.keys(KNOWN_EVENT_KINDS).length, 14);
+  assert.equal(Object.keys(KNOWN_EVENT_KINDS).length, 15);
 
   const projector = createSubagentProjector({
     prepared: createPrepared(),

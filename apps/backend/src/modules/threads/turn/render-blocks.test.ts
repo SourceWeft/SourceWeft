@@ -341,3 +341,47 @@ test("new text in a resumed turn never merges into, or replaces, the parked turn
     { id: "text-3", type: "text", text: "Before the pause." },
   ]);
 });
+
+test("rollback withdraws blocks appended since the mark and trims the block that was open", () => {
+  const builder = createMessageRenderBlockBuilder();
+  builder.appendReasoning({ id: "r-1", text: "think" });
+  builder.appendText("Hello");
+  const mark = builder.mark();
+
+  builder.appendText(" world");
+  builder.appendReasoning({ id: "r-2", text: "more" });
+  builder.appendTool("call-1");
+  builder.rollback(mark);
+
+  assert.deepEqual(builder.list(), [
+    { id: "r-1", type: "reasoning", text: "think" },
+    { id: "text-1", type: "text", text: "Hello" },
+  ]);
+
+  // A mark taken before any block existed empties the builder.
+  const empty = createMessageRenderBlockBuilder();
+  const start = empty.mark();
+  empty.appendText("x");
+  empty.rollback(start);
+  assert.deepEqual(empty.list(), []);
+});
+
+test("rollback never reaches into a resumed turn's seeded blocks", () => {
+  const builder = createMessageRenderBlockBuilder([
+    { id: "text-1", type: "text", text: "parked" },
+  ]);
+  const mark = builder.mark();
+  builder.appendText("new");
+  builder.rollback(mark);
+  assert.deepEqual(builder.list(), [
+    { id: "text-1", type: "text", text: "parked" },
+  ]);
+  // A stale mark (taken after blocks that were already withdrawn) is ignored.
+  builder.appendText("a");
+  const later = builder.mark();
+  builder.rollback(mark);
+  builder.rollback(later);
+  assert.deepEqual(builder.list(), [
+    { id: "text-1", type: "text", text: "parked" },
+  ]);
+});

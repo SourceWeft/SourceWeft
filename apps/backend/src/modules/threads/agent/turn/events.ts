@@ -118,6 +118,27 @@ export type DeepAgentTurnEvent =
       segment: ModelReasoningSegmentTrace;
     }
   | {
+      // A model-call attempt died mid-stream and the retry middleware is about
+      // to replay the call (`attempt` is the attempt that starts next; 2 for
+      // the first retry). Everything the failed attempt streamed is withdrawn:
+      // `segmentIds` are its reasoning segments, `toolCallIds` the tool calls
+      // whose argument chunks it streamed but never completed. The text and
+      // unbounded reasoning the attempt streamed are described twice: as the
+      // this-run lengths that survive (`keep*Chars`) and as the tail lengths
+      // to cut (`drop*Chars`) — the latter is what a client whose buffer
+      // starts with a prior run's text (a resumed turn) must apply. The
+      // retried attempt then streams under fresh segment ids.
+      type: "segment-reset";
+      reason: "model_call_retry";
+      attempt: number;
+      segmentIds: string[];
+      toolCallIds: string[];
+      keepTextChars: number;
+      keepReasoningChars: number;
+      dropTextChars: number;
+      dropReasoningChars: number;
+    }
+  | {
       type: "done";
       outcome: DeepAgentTurnOutcome;
     };

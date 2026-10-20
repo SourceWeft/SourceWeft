@@ -96,6 +96,32 @@ type HandleStreamingTextReplaceInput = ContextInput & {
   text: string;
 };
 
+/**
+ * Wire shape of the `segment-reset` SSE event: a model call failed mid-stream
+ * and the turn layer is retrying it. Everything the failed attempt streamed
+ * (reasoning segments, partial text, partial tool inputs) is withdrawn so the
+ * retried attempt replaces it instead of appending a duplicate.
+ */
+export type SegmentResetEventPayload = {
+  attempt?: unknown;
+  dropReasoningChars?: unknown;
+  dropTextChars?: unknown;
+  keepReasoningChars?: unknown;
+  keepTextChars?: unknown;
+  reason?: unknown;
+  segmentIds?: unknown;
+  toolCallIds?: unknown;
+};
+
+type HandleStreamingSegmentResetInput = ContextInput & {
+  drainQueuedDeltasNow: () => void;
+  event: SegmentResetEventPayload;
+  getAssistantText: () => string;
+  setAssistantText: (text: string) => void;
+  setHasRenderedDelta: (hasRenderedDelta: boolean) => void;
+  setLatestAssistantMessageContent: (content: string) => void;
+};
+
 type HandleStreamingTextInterruptedInput = ContextInput;
 
 type HandleStreamingToolCallEventInput = ContextInput & {
@@ -280,6 +306,198 @@ export function handleStreamingTextReplace({
       },
     },
   }));
+}
+
+function toNonNegativeInteger(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.floor(value)
+    : null;
+}
+
+/**
+ * Length to keep: cut `drop` characters from the end when the event carries a
+ * drop count, else fall back to the absolute `keep` length, else keep all.
+ */
+function resolveKeptLength(input: {
+  drop: unknown;
+  keep: unknown;
+  length: number;
+}) {
+  const drop = toNonNegativeInteger(input.drop);
+  if (drop !== null) {
+    return Math.max(0, input.length - drop);
+  }
+  return Math.min(
+    input.length,
+    toNonNegativeInteger(input.keep) ?? input.length,
+  );
+}
+
+/**
+ * `upsertModelReasoningSegment` stores a colliding segment id as `${id}:2`,
+ * `${id}:3`, ... so a reset naming `id` must also catch those variants.
+ */
+function matchesResetSegmentId(candidate: string, segmentIds: Set<string>) {
+  if (segmentIds.has(candidate)) {
+    return true;
+  }
+  const suffixStart = candidate.lastIndexOf(":");
+  if (suffixStart <= 0) {
+    return false;
+  }
+  const suffix = candidate.slice(suffixStart + 1);
+  return (
+    /^\d+$/.test(suffix) && segmentIds.has(candidate.slice(0, suffixStart))
+  );
+}
+
+/**
+ * Applies a `segment-reset` event (a model call retry) to the in-progress
+ * assistant message.
+ *
+ * - Reasoning segments named by `segmentIds` are dropped from
+ *   `metadata.reasoningSegments`, their trace parts / trace events and their
+ *   render blocks (`stream-reasoning-<id>`), and `metadata.reasoning` is cut
+ *   back to `keepReasoningChars`.
+ * - Tool calls named by `toolCallIds` are removed from `streamToolCallsById`
+ *   (which also clears their accumulated `tool-input-delta` input) and from
+ *   their placeholder cards, but only while still `running`: a completed,
+ *   errored or approval-requested tool call is never withdrawn.
+ * - The streamed text is cut from the end by `dropTextChars` (the failed
+ *   attempt's characters), like `text-replace` with the kept prefix. The
+ *   absolute `keepTextChars` / `keepReasoningChars` are this-run lengths and
+ *   are only used when the drop counts are absent: on a `resume`
+ *   continuation the client text and `metadata.reasoning` are seeded with the
+ *   prior run's content, which an absolute keep length would wipe.
+ *
+ * Unknown ids are ignored, so a reset is safe to replay on attach.
+ */
+export function handleStreamingSegmentReset({
+  context,
+  drainQueuedDeltasNow,
+  event,
+  getAssistantText,
+  setAssistantText,
+  setHasRenderedDelta,
+  setLatestAssistantMessageContent,
+}: HandleStreamingSegmentResetInput) {
+  const segmentIds = new Set(normalizeStringArray(event.segmentIds) ?? []);
+  const requestedToolCallIds = normalizeStringArray(event.toolCallIds) ?? [];
+
+  // Flush deltas queued before the reset so `keepTextChars` is measured
+  // against the full streamed text, then cut.
+  drainQueuedDeltasNow();
+  const currentText = getAssistantText();
+  const keptText = currentText.slice(
+    0,
+    resolveKeptLength({
+      drop: event.dropTextChars,
+      keep: event.keepTextChars,
+      length: currentText.length,
+    }),
+  );
+
+  const removedToolCallIds = new Set<string>();
+  for (const toolCallId of requestedToolCallIds) {
+    const existing = context.streamToolCallsById.get(toolCallId);
+    if (existing && existing.status !== "running") {
+      continue;
+    }
+    if (existing) {
+      context.streamToolCallsById.delete(toolCallId);
+    }
+    removedToolCallIds.add(toolCallId);
+  }
+
+  context.streamRenderBuffer.clearQueuedDeltas();
+  context.streamRenderBuffer.removeReasoningBlocks(
+    [...segmentIds].map((segmentId) => `stream-reasoning-${segmentId}`),
+  );
+  context.streamRenderBuffer.removeToolBlocks(removedToolCallIds);
+  if (keptText.length !== currentText.length) {
+    context.streamRenderBuffer.truncateText(keptText.length);
+  }
+
+  setAssistantText(keptText);
+  setLatestAssistantMessageContent(keptText);
+  setHasRenderedDelta(keptText.length > 0);
+
+  context.updateStreamingAssistantMessage((message) => {
+    const currentReasoning = context.toNullableString(
+      message.metadata.reasoning,
+    );
+    const reasoning =
+      currentReasoning !== null &&
+      (event.dropReasoningChars !== undefined ||
+        event.keepReasoningChars !== undefined)
+        ? currentReasoning.slice(
+            0,
+            resolveKeptLength({
+              drop: event.dropReasoningChars,
+              keep: event.keepReasoningChars,
+              length: currentReasoning.length,
+            }),
+          )
+        : currentReasoning;
+    const reasoningSegments = Array.isArray(message.metadata.reasoningSegments)
+      ? message.metadata.reasoningSegments
+          .map((item, index) =>
+            context.normalizeModelReasoningSegmentRecord(item, index),
+          )
+          .filter((item): item is ModelReasoningSegmentRecord => item !== null)
+          .filter((segment) => !matchesResetSegmentId(segment.id, segmentIds))
+      : [];
+    const traceParts = getTraceParts(message.metadata).filter((part) => {
+      if (part.kind === "reasoning") {
+        return !matchesResetSegmentId(part.id, segmentIds);
+      }
+      if (part.kind === "tool") {
+        return !removedToolCallIds.has(part.toolCallId);
+      }
+      return true;
+    });
+    const traceEvents = getReasoningTraceEvents(message.metadata).filter(
+      (traceEvent) => {
+        if (traceEvent.type === "reasoning") {
+          return !(
+            matchesResetSegmentId(traceEvent.segment.id, segmentIds) ||
+            (typeof traceEvent.itemId === "string" &&
+              matchesResetSegmentId(traceEvent.itemId, segmentIds))
+          );
+        }
+        if (traceEvent.type === "tool-call") {
+          const toolCallId = traceEvent.itemId ?? traceEvent.toolCall?.id;
+          return !(
+            typeof toolCallId === "string" && removedToolCallIds.has(toolCallId)
+          );
+        }
+        return true;
+      },
+    );
+
+    return {
+      ...message,
+      content: keptText,
+      metadata: {
+        ...message.metadata,
+        ...(reasoning === null ? {} : { reasoning }),
+        reasoningSegments,
+        traceEvents,
+        traceParts,
+        [STREAM_TEXT_INTERRUPTED_KEY]: false,
+        renderBlocks: context.streamRenderBuffer.snapshotRenderBlocks(),
+        threadRun: {
+          ...(context.toObjectRecord(message.metadata.threadRun) ?? {}),
+          idempotencyKey: context.durableRunKey,
+          status: "running",
+          mode: context.mode,
+        },
+      },
+    };
+  });
+  // Recomputes `metadata.toolCalls` and the text-pause flag from the pruned
+  // `streamToolCallsById`, so the stale pending card disappears.
+  context.syncStreamingToolCalls();
 }
 
 export function handleStreamingTextInterrupted({
@@ -968,6 +1186,8 @@ export const testExports = {
   handleStreamingError,
   handleStreamingFinish,
   handleStreamingReasoning,
+  handleStreamingSegmentReset,
+  handleStreamingTextDelta,
   handleStreamingThinkingStep,
   handleStreamingToolCallEvent,
   resolveFinishedThreadRunStatus,

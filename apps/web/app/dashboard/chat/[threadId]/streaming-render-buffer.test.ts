@@ -101,3 +101,58 @@ test("replaceText preserves existing text segmentation when final text has same 
     },
   ]);
 });
+
+test("removeReasoningBlocks and removeToolBlocks drop only the named blocks", () => {
+  const buffer = createStreamingRenderBuffer({ maxDeltaBatchChars: 800 });
+  buffer.appendReasoningBlock({ id: "stream-reasoning-a", text: "a" });
+  buffer.appendText("hello");
+  buffer.appendToolBlock("tool-1");
+  buffer.appendToolBlock("tool-2");
+  buffer.appendReasoningBlock({ id: "stream-reasoning-b", text: "b" });
+
+  buffer.removeReasoningBlocks(["stream-reasoning-a", "stream-reasoning-x"]);
+  buffer.removeToolBlocks(["tool-1", "tool-x"]);
+
+  assert.deepEqual(
+    buffer.snapshotRenderBlocks().map((block) => block.id),
+    ["stream-text-1", "stream-tool-tool-2", "stream-reasoning-b"],
+  );
+});
+
+test("truncateText cuts across text blocks and keeps fresh text block ids unique", () => {
+  const buffer = createStreamingRenderBuffer({ maxDeltaBatchChars: 800 });
+  buffer.appendText("hello ");
+  buffer.appendToolBlock("tool-1");
+  buffer.appendText("world");
+
+  buffer.truncateText("hello wo".length);
+  assert.deepEqual(buffer.snapshotRenderBlocks(), [
+    { id: "stream-text-1", type: "text", text: "hello " },
+    { id: "stream-tool-tool-1", type: "tool", toolCallId: "tool-1" },
+    { id: "stream-text-2", type: "text", text: "wo" },
+  ]);
+
+  buffer.truncateText("hel".length);
+  assert.deepEqual(buffer.snapshotRenderBlocks(), [
+    { id: "stream-text-1", type: "text", text: "hel" },
+    { id: "stream-tool-tool-1", type: "tool", toolCallId: "tool-1" },
+  ]);
+
+  buffer.appendReasoningBlock({ id: "stream-reasoning-b", text: "b" });
+  buffer.appendText("again");
+  assert.deepEqual(
+    buffer.snapshotRenderBlocks().map((block) => block.id),
+    [
+      "stream-text-1",
+      "stream-tool-tool-1",
+      "stream-reasoning-b",
+      "stream-text-3",
+    ],
+  );
+
+  buffer.truncateText(0);
+  assert.deepEqual(
+    buffer.snapshotRenderBlocks().map((block) => block.id),
+    ["stream-tool-tool-1", "stream-reasoning-b"],
+  );
+});

@@ -115,7 +115,9 @@ export function createMessageRenderBlockBuilder(
     }) {
       const id = `artifact-output:${input.threadRunId}:${input.artifactId}:${input.artifactVersionId}`;
       if (
-        blocks.some((block) => block.type === "artifact_output" && block.id === id)
+        blocks.some(
+          (block) => block.type === "artifact_output" && block.id === id,
+        )
       ) {
         return;
       }
@@ -126,7 +128,8 @@ export function createMessageRenderBlockBuilder(
         id,
         placement: "terminal",
         producer: input.producer,
-        sequence: blocks.filter((block) => block.type === "artifact_output").length + 1,
+        sequence:
+          blocks.filter((block) => block.type === "artifact_output").length + 1,
         sourceToolCallId: input.sourceToolCallId,
         threadRunId: input.threadRunId,
         type: "artifact_output",
@@ -147,11 +150,7 @@ export function createMessageRenderBlockBuilder(
         toolCallId,
       });
     },
-    appendReasoning(input: {
-      durationMs?: number;
-      id: string;
-      text: string;
-    }) {
+    appendReasoning(input: { durationMs?: number; id: string; text: string }) {
       if (!input.text) {
         return;
       }
@@ -236,8 +235,44 @@ export function createMessageRenderBlockBuilder(
       });
       nextTextId += 1;
     },
+    /**
+     * Snapshot the builder so a later `rollback` can withdraw everything
+     * appended since — a model-call retry drops the failed attempt's blocks.
+     * Only the tail text/reasoning block can be partially rolled back, because
+     * appends only ever extend the last block.
+     */
+    mark(): MessageRenderBlockMark {
+      const last = blocks[blocks.length - 1];
+      return {
+        count: blocks.length,
+        lastBlockChars:
+          last && (last.type === "text" || last.type === "reasoning")
+            ? last.text.length
+            : null,
+      };
+    },
+    rollback(mark: MessageRenderBlockMark) {
+      if (mark.count < seededCount || mark.count > blocks.length) {
+        return;
+      }
+      blocks.splice(mark.count);
+      const last = blocks[blocks.length - 1];
+      if (
+        mark.lastBlockChars !== null &&
+        last &&
+        (last.type === "text" || last.type === "reasoning") &&
+        last.text.length > mark.lastBlockChars
+      ) {
+        last.text = last.text.slice(0, mark.lastBlockChars);
+      }
+    },
     list() {
       return cloneBlocks(blocks);
     },
   };
 }
+
+export type MessageRenderBlockMark = {
+  count: number;
+  lastBlockChars: number | null;
+};

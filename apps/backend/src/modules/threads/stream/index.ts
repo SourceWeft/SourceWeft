@@ -25,3 +25,7 @@ export type {
 
 // Shared error normalization used by the agent boundary regression tests.
 export { toObservationError } from "./observability";
+
+// Referenced by the agent retry-sequence test to assert the SSE frames a
+// turn's events map to (segment-reset beside the message events).
+export { mapDeepAgentEventToSse } from "./event-mapper";

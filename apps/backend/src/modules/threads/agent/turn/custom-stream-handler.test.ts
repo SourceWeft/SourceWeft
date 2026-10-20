@@ -162,3 +162,146 @@ test("budget phase progress is validated and monotonic without creating a stop",
   }
   assert.deepEqual(runtime.agentRunProgress, closing);
 });
+
+test("model-call-begin marks the boundary and model-call-retry withdraws the attempt as one segment-reset", async () => {
+  const runtime = createTurnRuntime({
+    prepared: {
+      runTraceId: "trace-retry-reset",
+      workspace: { id: "workspace" },
+      thread: { id: "thread" },
+    } as never,
+  });
+
+  assert.deepEqual(
+    await collectCustomStreamEvents({
+      payload: { type: "model-call-begin", attempt: 1 },
+      runtime,
+    }),
+    [],
+  );
+  assert.equal(runtime.modelCallBoundary?.attempt, 1);
+
+  runtime.modelReasoning = "partial";
+  const segment = runtime.appendReasoningSegment("partial");
+  runtime.renderBlocks.appendReasoning({ id: segment.id, text: "partial" });
+  runtime.assistantContent = "Half";
+  runtime.renderBlocks.appendText("Half");
+  runtime.hasStreamedText = true;
+  runtime.partialToolArgsBySlot.set("0", {
+    id: "call-1",
+    name: "write_file",
+    args: '{"content":"a',
+    lastContentLength: 1,
+  });
+
+  const events = await collectCustomStreamEvents({
+    payload: {
+      type: "model-call-retry",
+      attempt: 2,
+      errorCode: "MODEL_TIMEOUT",
+    },
+    runtime,
+  });
+  assert.deepEqual(events, [
+    {
+      type: "segment-reset",
+      reason: "model_call_retry",
+      attempt: 2,
+      segmentIds: [segment.id],
+      toolCallIds: ["call-1"],
+      keepTextChars: 0,
+      keepReasoningChars: 0,
+      dropTextChars: "Half".length,
+      dropReasoningChars: "partial".length,
+    },
+  ]);
+  assert.equal(runtime.modelCallBoundary, null);
+  assert.equal(runtime.assistantContent, "");
+  assert.equal(runtime.modelReasoning, undefined);
+  assert.deepEqual(runtime.reasoningSegments, []);
+  assert.deepEqual(runtime.renderBlocks.list(), []);
+  assert.equal(runtime.partialToolArgsBySlot.size, 0);
+  assert.equal(runtime.currentReasoningSegment, null);
+  // The retried attempt's segment takes a fresh id.
+  assert.notEqual(runtime.appendReasoningSegment("again").id, segment.id);
+});
+
+test("model-call-retry without a preceding model-call-begin emits nothing", async () => {
+  const runtime = createTurnRuntime({
+    prepared: {
+      runTraceId: "trace-retry-no-begin",
+      workspace: { id: "workspace" },
+      thread: { id: "thread" },
+    } as never,
+  });
+  runtime.assistantContent = "kept";
+  const events = await collectCustomStreamEvents({
+    payload: {
+      type: "model-call-retry",
+      attempt: 2,
+      errorCode: "MODEL_TIMEOUT",
+    },
+    runtime,
+  });
+  assert.deepEqual(events, []);
+  assert.equal(runtime.assistantContent, "kept");
+});
+
+test("model-call-begin closes a segment left open by a model re-entry, so the retry withdraws by id", async () => {
+  const runtime = createTurnRuntime({
+    prepared: {
+      runTraceId: "trace-reenter",
+      workspace: { id: "workspace" },
+      thread: { id: "thread" },
+    } as never,
+  });
+  await collectCustomStreamEvents({
+    payload: { type: "model-call-begin", attempt: 1 },
+    runtime,
+  });
+  runtime.modelReasoning = "first";
+  const first = runtime.appendReasoningSegment("first");
+  runtime.renderBlocks.appendReasoning({ id: first.id, text: "first" });
+
+  // No tool boundary before the next call (step-budget `jumpTo: "model"`).
+  await collectCustomStreamEvents({
+    payload: { type: "model-call-begin", attempt: 1 },
+    runtime,
+  });
+  assert.equal(runtime.currentReasoningSegment, null);
+  runtime.modelReasoning = "first" + "second";
+  const second = runtime.appendReasoningSegment("second");
+  runtime.renderBlocks.appendReasoning({ id: second.id, text: "second" });
+  assert.notEqual(second.id, first.id);
+
+  const events = await collectCustomStreamEvents({
+    payload: {
+      type: "model-call-retry",
+      attempt: 2,
+      errorCode: "MODEL_TIMEOUT",
+    },
+    runtime,
+  });
+  assert.deepEqual(events, [
+    {
+      type: "segment-reset",
+      reason: "model_call_retry",
+      attempt: 2,
+      segmentIds: [second.id],
+      toolCallIds: [],
+      keepTextChars: 0,
+      keepReasoningChars: "first".length,
+      dropTextChars: 0,
+      dropReasoningChars: "second".length,
+    },
+  ]);
+  assert.deepEqual(
+    runtime.reasoningSegments.map((segment) => [segment.id, segment.text]),
+    [[first.id, "first"]],
+  );
+  assert.equal(runtime.modelReasoning, "first");
+  assert.deepEqual(
+    runtime.renderBlocks.list().map((block) => block.id),
+    [first.id],
+  );
+});

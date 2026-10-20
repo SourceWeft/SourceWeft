@@ -8,6 +8,10 @@ import {
   normalizeGeneratedPresentationProgressEvent,
 } from "./progress-events";
 import type { TurnRuntime } from "./turn-runtime";
+import {
+  MODEL_CALL_BEGIN_CUSTOM_EVENT,
+  MODEL_CALL_RETRY_CUSTOM_EVENT,
+} from "../middleware/model-call-observability";
 
 export async function* handleCustomStreamChunk(input: {
   payload: unknown;
@@ -27,6 +31,36 @@ export async function* handleCustomStreamChunk(input: {
       runtime.agentRunProgress = next;
       yield { type: "agent-run-progress", progress: next };
     }
+    return;
+  }
+  if (record?.type === MODEL_CALL_BEGIN_CUSTOM_EVENT) {
+    // Every attempt (first or retried) re-marks the boundary: what the runtime
+    // holds now is what survives if this attempt dies mid-stream. Any segment
+    // still open (a model re-entry without a tool boundary, e.g. the step
+    // budget's `jumpTo: "model"`) is closed first, so everything the attempt
+    // streams lands in segments of its own and a reset can name them by id.
+    runtime.resetReasoningBoundary();
+    runtime.modelCallBoundary = runtime.captureModelCallBoundary(
+      readAttempt(record.attempt),
+    );
+    return;
+  }
+  if (record?.type === MODEL_CALL_RETRY_CUSTOM_EVENT) {
+    const boundary = runtime.modelCallBoundary;
+    if (!boundary) {
+      // No attempt was announced, so nothing is attributable to one; the
+      // retried attempt simply streams on (the pre-reset behaviour).
+      return;
+    }
+    const discarded = runtime.discardModelOutputSince(boundary);
+    runtime.resetReasoningBoundary();
+    runtime.modelCallBoundary = null;
+    yield {
+      type: "segment-reset",
+      reason: "model_call_retry",
+      attempt: readAttempt(record.attempt, boundary.attempt + 1),
+      ...discarded,
+    };
     return;
   }
   const progressEvent =
@@ -52,4 +86,10 @@ export async function* handleCustomStreamChunk(input: {
   if (progressThinkingEvent) {
     yield progressThinkingEvent;
   }
+}
+
+function readAttempt(value: unknown, fallback = 1) {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1
+    ? value
+    : fallback;
 }

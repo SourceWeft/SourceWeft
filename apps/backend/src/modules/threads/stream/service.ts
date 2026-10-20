@@ -556,6 +556,30 @@ class ContentThreadStreamService {
           if (event.type === "text-replace") {
             assistantContent = event.text;
           }
+          if (event.type === "segment-reset") {
+            // The failed attempt's output is withdrawn here exactly as the
+            // runtime withdrew it; the retried attempt streams fresh segments.
+            // Cut from the end: these accumulators may start with a resumed
+            // turn's prior text, which the runtime's this-run `keep*` lengths
+            // do not account for.
+            assistantContent = assistantContent.slice(
+              0,
+              assistantContent.length - event.dropTextChars,
+            );
+            const keptReasoning = reasoning?.slice(
+              0,
+              reasoning.length - event.dropReasoningChars,
+            );
+            reasoning = keptReasoning ? keptReasoning : undefined;
+            for (const segmentId of event.segmentIds) {
+              reasoningSegmentsById.delete(segmentId);
+            }
+            traceParts = traceParts.filter(
+              (part) =>
+                part.kind !== "reasoning" ||
+                !event.segmentIds.includes(part.id),
+            );
+          }
           if (event.type === "reasoning") {
             reasoning = appendReasoningChunk(reasoning, event.reasoning);
             upsertReasoningSegmentTrace(reasoningSegmentsById, event.segment);
