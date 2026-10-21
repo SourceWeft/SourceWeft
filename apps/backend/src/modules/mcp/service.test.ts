@@ -399,6 +399,42 @@ test("MCP auth probing fails installation preparation on network errors", async 
   }
 });
 
+test("MCP auth probing treats a same-origin redirect as not requiring auth", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = vi.fn(
+    async () =>
+      new Response(null, { status: 307, headers: { location: "/mcp/" } }),
+  );
+  try {
+    assert.equal(
+      await mcpEndpointRequiresAuth("https://mcp.example.com/mcp"),
+      false,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("MCP auth probing blocks a cross-origin redirect", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = vi.fn(
+    async () =>
+      new Response(null, {
+        status: 302,
+        headers: { location: "https://login.example.net/sso" },
+      }),
+  );
+  try {
+    await assert.rejects(
+      () => mcpEndpointRequiresAuth("https://mcp.example.com/mcp"),
+      (error) =>
+        error instanceof McpError && error.code === "MCP_ENDPOINT_BLOCKED",
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("buildLangChainToolsForTurn rejects an unavailable selected install", async () => {
   resetMcpServiceMocks();
   const active = mcpInstall({ id: "active" });
@@ -860,7 +896,10 @@ test("installMarketMcp logs mcp.installed with truncated ids once the row is wri
     version: "1.2.0",
   });
   const serialized = JSON.stringify(fields);
-  assert.ok(!serialized.includes("team_0199cd4f7b1e7c3a9f0e"), "team id leaked");
+  assert.ok(
+    !serialized.includes("team_0199cd4f7b1e7c3a9f0e"),
+    "team id leaked",
+  );
   assert.ok(!serialized.includes("user_0199cd4f"), "user id leaked");
   assert.ok(!serialized.includes("mcp.example.com"), "endpoint leaked");
 });

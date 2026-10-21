@@ -88,18 +88,26 @@ export function createControlledFetch(
           // Apply the same target policy we apply when following, so a hostile
           // redirect still aborts the scope instead of being returned
           // unfollowed and silently ignored by the caller.
+          let resolved: string;
           try {
-            const target = checkEndpointUrl(
-              new URL(location, url).toString(),
-              policy,
-            );
+            resolved = new URL(location, url).toString();
+          } catch {
+            // An unparseable Location cannot be followed by anyone; hand the
+            // response back unchanged, as before this policy applied here.
+            return response;
+          }
+          try {
+            const target = checkEndpointUrl(resolved, policy);
             if (target.origin !== url.origin)
               throw new EndpointPolicyError(
                 "redirect",
                 "Cross-origin endpoint redirects are not allowed; configure the destination endpoint directly.",
               );
           } catch (error) {
-            await response.body?.cancel();
+            // Record the denial before anything else can fail, so the scope
+            // is poisoned even if cancelling the body rejects.
+            rememberDenial(error);
+            await response.body?.cancel().catch(() => {});
             throw error;
           }
           return response;
