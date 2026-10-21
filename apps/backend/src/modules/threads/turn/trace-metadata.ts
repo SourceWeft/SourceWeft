@@ -155,10 +155,32 @@ function appendTraceItemsByStateId(existing: unknown, next: unknown) {
   return output;
 }
 
+/**
+ * Persisted reasoning segments are structure only (id, sequence, durationMs,
+ * phase, toolCallId, tool): the text lives in the reasoning render block and
+ * the `reasoning` string, and nothing reads a segment's text back. Message
+ * writers pass the runtime segments through here; legacy rows lose the text
+ * on their next rewrite.
+ */
+export function reasoningSegmentsWithoutText(value: unknown) {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  return value.map((item) => {
+    const record = toObjectRecord(item);
+    if (!record || !("text" in record)) {
+      return item;
+    }
+    const { text: _text, ...structure } = record;
+    return structure;
+  });
+}
+
 function appendReasoningSegments(existing: unknown, next: unknown) {
-  const existingItems = Array.isArray(existing) ? existing : [];
-  const nextItems = Array.isArray(next) ? next : [];
-  return appendTraceItemsByStateId(existingItems, nextItems);
+  return appendTraceItemsByStateId(
+    reasoningSegmentsWithoutText(existing) ?? [],
+    reasoningSegmentsWithoutText(next) ?? [],
+  );
 }
 
 function appendTraceParts(existing: unknown, next: unknown) {

@@ -1954,17 +1954,20 @@ test("streamThreadEvents preserves partial assistant content for persisted error
       tool: "search_sources",
     },
   ]);
+  // Reasoning trace parts are structure only: the text lives in the render
+  // blocks and the `reasoning` string.
+  const reasoningParts = (
+    partialState?.traceParts as Array<Record<string, unknown>>
+  ).filter((part) => part.kind === "reasoning");
   assert.deepEqual(
-    (
-      partialState?.traceParts as Array<{
-        kind: string;
-        order: number;
-        text?: string;
-      }>
-    )
-      .filter((part) => part.kind === "reasoning")
-      .map((part) => `${part.order}:${part.kind}:${part.text ?? ""}`),
-    ["0:reasoning:It came from the source."],
+    reasoningParts.map(
+      (part) => `${part.order}:${part.kind}:${part.id}:${part.phase}`,
+    ),
+    ["0:reasoning:model-reasoning-1:after_tool"],
+  );
+  assert.equal(
+    reasoningParts.some((part) => Object.hasOwn(part, "text")),
+    false,
   );
   assert.deepEqual(partialState?.thinkingSteps, [
     {

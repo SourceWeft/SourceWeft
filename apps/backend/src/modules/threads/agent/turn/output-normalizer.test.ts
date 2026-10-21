@@ -471,6 +471,25 @@ test("client metadata sanitization redacts persisted skill read payloads", () =>
   ]);
 });
 
+test("client metadata sanitization leaves input-free tool trace parts unchanged", () => {
+  // Trace parts no longer carry tool input: the skill redaction and its title
+  // come from the canonical tool call, so a part without input is a no-op.
+  const part = {
+    id: "call-skill",
+    kind: "tool",
+    order: 0,
+    createdAt: "2026-05-25T00:00:00.000Z",
+    updatedAt: "2026-05-25T00:00:00.000Z",
+    status: "completed",
+    tool: "read_file",
+    toolCallId: "call-skill",
+  };
+  const metadata = sanitizeThreadMessageMetadataForClient({
+    traceParts: [part],
+  });
+  assert.deepEqual(metadata.traceParts, [part]);
+});
+
 test("client metadata excludes reasoning persistence state without hiding reasoning", () => {
   const input = {
     reasoning: "before\nafter",
