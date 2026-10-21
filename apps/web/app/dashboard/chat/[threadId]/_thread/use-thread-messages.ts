@@ -106,6 +106,17 @@ export function useThreadMessages({
   );
   const [isLoadingOlderMessages, setIsLoadingOlderMessages] = useState(false);
   const loadedThreadMessagesKeyRef = useRef<string | null>(null);
+  // The workspace/thread whose active-run lookup has settled (loaded or gave
+  // up). Until a full load settles for the current thread, whether a run is
+  // active is unknown: the composer must not offer Send for a thread that may
+  // be running (see resolveComposerRunControl). Derived per key, so a thread
+  // or workspace change is "unknown" again from its first render.
+  const activeRunLookupKey = `${workspaceId ?? ""}:${threadId}`;
+  const [settledActiveRunLookupKey, setSettledActiveRunLookupKey] = useState<
+    string | null
+  >(null);
+  const isActiveRunLookupPending =
+    settledActiveRunLookupKey !== activeRunLookupKey;
   const threadMessagesLoadGenerationRef = useRef(0);
   // Forward-cursor watermark of the newest RAW server message rendered, used to
   // incrementally append newer messages on a room 'message' frame instead of
@@ -178,6 +189,7 @@ export function useThreadMessages({
         setStreamingAssistantSnapshot(null);
         clearTerminalLocalRunState();
         setOlderMessagesCursor(null);
+        setSettledActiveRunLookupKey(activeRunLookupKey);
         return "loaded";
       }
 
@@ -237,6 +249,9 @@ export function useThreadMessages({
           }
           const resolvedRunningRun = matchedRunningAssistant?.run ?? runningRun;
           setActiveThreadRun(resolvedRunningRun);
+          // Same batch as the active run, so the composer goes straight from
+          // pending Stop to Stop (run found) or Send (none), never via Send.
+          setSettledActiveRunLookupKey(activeRunLookupKey);
           setMessages(serverMessages);
           setStreamingAssistantSnapshot(null);
           if (!resolvedRunningRun) {
@@ -279,6 +294,10 @@ export function useThreadMessages({
               setStreamingAssistantSnapshot(null);
               setOlderMessagesCursor(null);
             }
+            // Gave up: settle rather than block the composer forever. The
+            // thread's reload/retry UX applies, and a send that races a
+            // still-active run hits the server's one-run-per-thread backstop.
+            setSettledActiveRunLookupKey(activeRunLookupKey);
             return "failed";
           }
 
@@ -288,8 +307,10 @@ export function useThreadMessages({
           }
         }
       }
+      setSettledActiveRunLookupKey(activeRunLookupKey);
       return "failed";
     }, [
+      activeRunLookupKey,
       attachedRunKeyRef,
       clearTerminalLocalRunState,
       setActiveThreadRun,
@@ -424,6 +445,7 @@ export function useThreadMessages({
 
   return {
     appendNewerThreadMessages,
+    isActiveRunLookupPending,
     isLoadingOlderMessages,
     loadOlderThreadMessages,
     loadThreadMessages,

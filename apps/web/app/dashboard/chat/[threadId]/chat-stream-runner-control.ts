@@ -74,6 +74,38 @@ export function resolveOtherUserRunActive(input: {
   return runUserId !== input.currentUserId;
 }
 
+/**
+ * What the composer's submit slot offers for the current run state:
+ * - "stop": our own run is executing or stopping, so Stop is live;
+ * - "pending-stop": the thread's active run is not known yet (the initial
+ *   active-run lookup has not settled), so a disabled Stop holds the slot and
+ *   submitting is blocked. It never stops or sends anything; it becomes the
+ *   real Stop if the lookup finds a run, or Send if it finds none;
+ * - "send": no run of ours is active (idle, waiting for approval, or another
+ *   member's run, which is followed but never stopped from here).
+ */
+export type ComposerRunControl = "send" | "stop" | "pending-stop";
+
+export function resolveComposerRunControl(input: {
+  activeRunLookupPending: boolean;
+  chatExecutionState: ChatExecutionState | undefined;
+  otherUserRunActive: boolean;
+}): ComposerRunControl {
+  const state = input.chatExecutionState ?? "idle";
+  if (input.otherUserRunActive) {
+    return "send";
+  }
+  if (state === "executing" || state === "stopping") {
+    return "stop";
+  }
+  // A known local run (e.g. waiting for approval) already answers the lookup;
+  // only an apparently idle thread can still hide an unknown server run.
+  if (state === "idle" && input.activeRunLookupPending) {
+    return "pending-stop";
+  }
+  return "send";
+}
+
 export function resolveWaitingForApprovalRun(input: {
   assistantMessageId?: string | null;
   current: ActiveThreadRun | null;

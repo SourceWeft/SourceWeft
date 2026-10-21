@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 import {
   resolveChatExecutionState,
+  resolveComposerRunControl,
   resolveOtherUserRunActive,
   resolveWaitingForApprovalRun,
   type ActiveThreadRun,
@@ -168,4 +169,77 @@ test("Stop stays visible while the session user id is still loading", () => {
     }),
     false,
   );
+});
+
+test("composer holds a pending Stop, never Send, while the active run is unknown", () => {
+  assert.equal(
+    resolveComposerRunControl({
+      activeRunLookupPending: true,
+      chatExecutionState: "idle",
+      otherUserRunActive: false,
+    }),
+    "pending-stop",
+  );
+  // The canvas may not receive an execution state yet (treated as idle).
+  assert.equal(
+    resolveComposerRunControl({
+      activeRunLookupPending: true,
+      chatExecutionState: undefined,
+      otherUserRunActive: false,
+    }),
+    "pending-stop",
+  );
+});
+
+test("composer resolves the lookup to Stop for our run and Send for none", () => {
+  for (const chatExecutionState of ["executing", "stopping"] as const) {
+    for (const activeRunLookupPending of [true, false]) {
+      assert.equal(
+        resolveComposerRunControl({
+          activeRunLookupPending,
+          chatExecutionState,
+          otherUserRunActive: false,
+        }),
+        "stop",
+      );
+    }
+  }
+  assert.equal(
+    resolveComposerRunControl({
+      activeRunLookupPending: false,
+      chatExecutionState: "idle",
+      otherUserRunActive: false,
+    }),
+    "send",
+  );
+  // A new-chat canvas has no thread lookup at all.
+  assert.equal(
+    resolveComposerRunControl({
+      activeRunLookupPending: false,
+      chatExecutionState: undefined,
+      otherUserRunActive: false,
+    }),
+    "send",
+  );
+});
+
+test("composer keeps Send for another member's run and an approval wait", () => {
+  for (const activeRunLookupPending of [true, false]) {
+    assert.equal(
+      resolveComposerRunControl({
+        activeRunLookupPending,
+        chatExecutionState: "executing",
+        otherUserRunActive: true,
+      }),
+      "send",
+    );
+    assert.equal(
+      resolveComposerRunControl({
+        activeRunLookupPending,
+        chatExecutionState: "waiting_for_approval",
+        otherUserRunActive: false,
+      }),
+      "send",
+    );
+  }
 });

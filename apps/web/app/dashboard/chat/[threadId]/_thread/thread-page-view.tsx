@@ -67,6 +67,7 @@ export function DashboardChatThreadPageView({
   activeAssistantVersion,
   assistantVersionById,
   activeThreadRun,
+  activeRunLookupPending,
   otherUserRunActive,
   presentViewers,
   typingViewers,
@@ -356,6 +357,7 @@ export function DashboardChatThreadPageView({
               activeVersionByGroup={activeVersionByGroup}
               assistantVersionById={assistantVersionById}
               activeThreadRun={activeThreadRun}
+              activeRunLookupPending={activeRunLookupPending}
               otherUserRunActive={otherUserRunActive}
               typingIndicator={<ThreadTypingIndicator typing={typingViewers} />}
               onComposerType={onComposerType}

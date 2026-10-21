@@ -429,6 +429,7 @@ export function useThreadPageController({
   >(null);
   const {
     appendNewerThreadMessages,
+    isActiveRunLookupPending,
     isLoadingOlderMessages,
     loadOlderThreadMessages,
     loadThreadMessages,
@@ -1381,6 +1382,9 @@ export function useThreadPageController({
     activeAssistantVersion,
     assistantVersionById,
     activeThreadRun,
+    // The thread's active run is not known yet (initial lookup in flight): the
+    // composer holds a pending Stop instead of offering Send.
+    activeRunLookupPending: isActiveRunLookupPending,
     otherUserRunActive,
     presentViewers,
     typingViewers,

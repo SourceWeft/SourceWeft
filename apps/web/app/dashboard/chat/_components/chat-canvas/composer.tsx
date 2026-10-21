@@ -439,6 +439,7 @@ function ComposerBody({
   disabledToolNames = [],
   onDisabledToolNamesChange,
   onStopStreaming,
+  stopPending = false,
   isStopping = false,
   composerOptions = EMPTY_COMPOSER_OPTIONS,
   onComposerOptionsChange,
@@ -496,6 +497,11 @@ function ComposerBody({
   disabledToolNames?: ChatToolName[];
   onDisabledToolNamesChange?: (toolNames: ChatToolName[]) => void;
   onStopStreaming?: () => void;
+  /**
+   * Whether a run is active is not known yet: hold the Stop slot with a
+   * disabled Stop (never Send) until it resolves to a live Stop or to Send.
+   */
+  stopPending?: boolean;
   isStopping?: boolean;
   composerOptions?: ComposerOptionsState;
   onComposerOptionsChange?: (options: ComposerOptionsState) => void;
@@ -2503,15 +2509,19 @@ function ComposerBody({
                 <ComposerAddImageButton />
 
                 <div>
-                  {onStopStreaming && (draftText ?? "").trim().length === 0 ? (
+                  {(onStopStreaming || stopPending) &&
+                  (draftText ?? "").trim().length === 0 ? (
                     // Stop stays in the submit slot (unmoved) but only while the
                     // composer is empty during our own run. The moment there is
                     // text to send, this becomes the Send button so a follow-up
                     // can be queued without touching the running response.
+                    // A pending Stop (run not known yet) is disabled and inert.
                     <PromptInputSubmit
                       className="size-9 shrink-0 rounded-full px-0 shadow-xs"
-                      disabled={isStopping}
-                      onStop={isStopping ? undefined : onStopStreaming}
+                      disabled={isStopping || stopPending}
+                      onStop={
+                        isStopping || stopPending ? undefined : onStopStreaming
+                      }
                       status={isStopping ? "submitted" : "streaming"}
                       title={
                         isStopping ? t("composer.stopping") : t("composer.stop")
