@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test, { after, before } from "node:test";
 import { BaseChatModel } from "@langchain/core/language_models/chat_models";
-import { AIMessageChunk } from "@langchain/core/messages";
+import { AIMessage, AIMessageChunk } from "@langchain/core/messages";
 import { ChatGenerationChunk } from "@langchain/core/outputs";
 import type { CallbackManagerForLLMRun } from "@langchain/core/callbacks/manager";
 import {
@@ -15,10 +15,12 @@ import {
   createAttemptGuard,
   DEFAULT_STREAM_GUARDS,
   guardFinishReason,
+  guardUsageFromError,
   REASONING_CHARS_LIMIT,
   STREAM_IDLE_TIMEOUT_MS,
   STREAM_MAX_DURATION_MS,
   TIMEOUT_ABORT_MESSAGE,
+  truncatedToolCallMessageError,
 } from "../src/bridge/stream-guards";
 import type { LangChainChatModelLike } from "../src/types";
 import {
@@ -148,7 +150,44 @@ test("new codes: retryable, failover and surfacing rank", () => {
     "reasoning_budget_exceeded",
   );
   assert.equal(guardFinishReason("TIMEOUT"), undefined);
+  // A tool call cut by the output limit: the model would be cut the same way
+  // elsewhere, so it is retryable but not failoverable, and it explains the
+  // request as much as a reasoning budget trip does.
+  const truncated = new ModelGatewayError({
+    code: "OUTPUT_TRUNCATED",
+    message: "x",
+  });
+  assert.equal(truncated.retryable, true);
+  assert.equal(isFailoverableCode("OUTPUT_TRUNCATED"), false);
+  assert.equal(
+    surfacedErrorRankForCode("OUTPUT_TRUNCATED"),
+    surfacedErrorRankForCode("REASONING_BUDGET_EXCEEDED"),
+  );
+  assert.equal(guardFinishReason("OUTPUT_TRUNCATED"), "output_truncated");
 });
+
+/**
+ * Probe b2 (`.docs/superpowers/reports/2026-10-21-b4-deepseek-max-tokens-probe.md`
+ * §2): DeepSeek hit `max_tokens` while writing a tool call. The stream is
+ * reasoning, then tool-call deltas whose `arguments` string is never
+ * terminated, `finish_reason: "length"`, then the usage chunk — HTTP 200
+ * throughout. LangChain's aggregation repairs the partial JSON into a
+ * valid-looking `tool_calls` entry (`invalid_tool_calls` empty).
+ */
+const TRUNCATED_TOOL_CALL_USAGE = {
+  prompt_tokens: 392,
+  completion_tokens: 16_384,
+  total_tokens: 16_776,
+  completion_tokens_details: { reasoning_tokens: 14_565 },
+  prompt_tokens_details: { cached_tokens: 256 },
+};
+const TRUNCATED_TOOL_CALL_CHUNKS: FakeStreamChunk[] = [
+  { reasoning: "We need to call the tool once with the whole CSV." },
+  { toolCalls: [{ index: 0, id: "call_b2", name: "lookup", args: "" }] },
+  { toolCalls: [{ index: 0, args: '{"q": "id,name,city,country' }] },
+  { toolCalls: [{ index: 0, args: "\\n1,Ada,London,UK\\n2,Bo" }] },
+  { content: "", finishReason: "length" },
+];
 
 for (const { label, entry, handlerShape } of VARIANTS) {
   test(`${label}: a stream that goes silent after the first chunk ends with STREAM_IDLE_TIMEOUT`, async () => {
@@ -569,4 +608,355 @@ test("attempt guard: settle stops every timer", async () => {
   guard.settle();
   await new Promise((r) => setTimeout(r, 120));
   assert.equal(guard.signal.aborted, false);
+});
+
+for (const { label, entry, handlerShape } of VARIANTS) {
+  test(`${label}: a length finish in the middle of a tool call ends with OUTPUT_TRUNCATED`, async () => {
+    server.setScenario({
+      kind: "stream",
+      chunks: TRUNCATED_TOOL_CALL_CHUNKS,
+      usage: TRUNCATED_TOOL_CALL_USAGE,
+    });
+    const result = await run({
+      entry,
+      handlerShape,
+      timeoutMs: 5_000,
+      tools: true,
+      thinking: true,
+      signal: new AbortController().signal,
+    });
+    assert.equal(result.error?.code, "OUTPUT_TRUNCATED");
+    assert.equal(result.error?.name, "ModelGatewayError");
+    assert.match(result.error?.message ?? "", /output token limit/);
+    assert.equal(result.final, undefined);
+    // What the guard refuses. The chunk aggregate (stream, handleLLMNewToken)
+    // repairs the cut arguments into a valid-looking tool call — the probe's
+    // finding; the v3 aggregate finalizes the block as an `invalid_tool_call`
+    // content block with `tool_calls` (and `invalid_tool_calls`) empty.
+    // Neither reaches the caller.
+    const end = result.callbacks.find((e) => e.event === "llm_end") as
+      { message?: { toolCalls?: unknown[]; content?: unknown } } | undefined;
+    if (handlerShape === "chat-model-stream-events") {
+      assert.deepEqual(end?.message?.toolCalls, []);
+      assert.ok(
+        (end?.message?.content as Array<{ type: string }>).some(
+          (block) => block.type === "invalid_tool_call",
+        ),
+      );
+    } else {
+      assert.equal(end?.message?.toolCalls?.length, 1);
+    }
+    assert.deepEqual(
+      result.observation.errors.map((e) => [e.errorCode, e.finishReason]),
+      [["OUTPUT_TRUNCATED", "output_truncated"]],
+    );
+    const usage = JSON.parse(
+      JSON.stringify(result.observation.errors[0]?.usage),
+    ) as Record<string, unknown>;
+    assert.equal(usage.inputTokens, 392);
+    assert.equal(usage.outputTokens, 16_384);
+    assert.equal(usage.totalTokens, 16_776);
+    assert.equal(result.observation.ends.length, 0);
+    // The response completed before it was judged: the stream consumer had
+    // every chunk (the usage chunk included); the error replaces the clean end.
+    if (entry === "stream")
+      assert.equal(
+        result.chunks?.length,
+        TRUNCATED_TOOL_CALL_CHUNKS.length + 1,
+      );
+    // Not a provider failure: no retry, no failover.
+    assert.deepEqual(
+      result.warnings.filter((w) => w.message !== "model-gateway.failover"),
+      result.warnings,
+    );
+  });
+
+  test(`${label}: a length finish without a tool call is delivered unchanged`, async () => {
+    server.setScenario({
+      kind: "stream",
+      chunks: [
+        { content: "Once upon" },
+        { content: " a ti" },
+        { content: "", finishReason: "length" },
+      ],
+      usage: TRUNCATED_TOOL_CALL_USAGE,
+    });
+    const result = await run({
+      entry,
+      handlerShape,
+      timeoutMs: 5_000,
+      tools: true,
+      signal: new AbortController().signal,
+    });
+    assert.equal(result.error, undefined);
+    const content = result.final?.content;
+    assert.equal(
+      Array.isArray(content)
+        ? (content as Array<{ text?: string }>).map((b) => b.text).join("")
+        : content,
+      "Once upon a ti",
+    );
+    assert.deepEqual(result.final?.toolCalls ?? [], []);
+    if (entry === "stream" || handlerShape === "chat-model-stream-events") {
+      assert.equal(result.final?.finishReason, "length");
+    } else {
+      // Core keeps the handleLLMNewToken aggregate's finish reason on the
+      // generation, not the message; the chunk callback carried it.
+      assert.ok(result.callbacks.some((e) => e.finishReason === "length"));
+    }
+    assert.deepEqual(result.observation.errors, []);
+    assert.equal(result.observation.ends.length, 1);
+    if (entry === "stream")
+      assert.equal(result.observation.ends[0]?.finishReason, "length");
+  });
+}
+
+/**
+ * A non-streamed `invoke` (no callbacks, so core does not stream internally):
+ * the only evidence is the returned message, whose `response_metadata` core
+ * fills from the generation's `finish_reason`.
+ */
+class FinishReasonModel extends BaseChatModel {
+  constructor(
+    private readonly finishReason: string,
+    private readonly withToolCall: boolean,
+  ) {
+    super({});
+  }
+
+  _llmType() {
+    return "finish-reason";
+  }
+
+  async _generate() {
+    return {
+      generations: [
+        {
+          text: "",
+          message: new AIMessage({
+            content: this.withToolCall ? "" : "cut off mid sent",
+            ...(this.withToolCall
+              ? {
+                  tool_calls: [
+                    { id: "call_1", name: "lookup", args: { q: "cut" } },
+                  ],
+                }
+              : {}),
+            usage_metadata: {
+              input_tokens: 5,
+              output_tokens: 2,
+              total_tokens: 7,
+            },
+          }),
+          generationInfo: { finish_reason: this.finishReason },
+        },
+      ],
+    };
+  }
+}
+
+for (const [finishReason, withToolCall, expectedCode] of [
+  ["length", true, "OUTPUT_TRUNCATED"],
+  ["length", false, undefined],
+  ["stop", true, undefined],
+] as const) {
+  test(`non-streamed invoke: finish ${finishReason} ${withToolCall ? "with" : "without"} a tool call → ${expectedCode ?? "delivered"}`, async () => {
+    const result = await run({
+      entry: "invoke",
+      timeoutMs: 5_000,
+      withoutCallbacks: true,
+      signal: new AbortController().signal,
+      config: {
+        langchainFactories: {
+          createChatModel: () =>
+            new FinishReasonModel(
+              finishReason,
+              withToolCall,
+            ) as unknown as LangChainChatModelLike,
+        },
+      },
+    });
+    assert.equal(result.error?.code, expectedCode);
+    if (expectedCode) {
+      assert.deepEqual(
+        result.observation.errors.map((e) => [e.errorCode, e.finishReason]),
+        [[expectedCode, "output_truncated"]],
+      );
+      assert.deepEqual(
+        JSON.parse(JSON.stringify(result.observation.errors[0]?.usage)),
+        { inputTokens: 5, outputTokens: 2, totalTokens: 7 },
+      );
+      assert.equal(result.observation.ends.length, 0);
+    } else {
+      assert.equal(result.final?.finishReason, finishReason);
+      assert.deepEqual(result.observation.errors, []);
+      assert.equal(result.observation.ends[0]?.finishReason, finishReason);
+    }
+  });
+}
+
+test("truncated tool call verdict: a length finish with any tool call field, nothing else", () => {
+  const target = { provider: "p", providerModel: "m" };
+  const usage = { input_tokens: 1, output_tokens: 2, total_tokens: 3 };
+  const length = { response_metadata: { finish_reason: "length" } };
+  const call = { id: "c", name: "lookup", args: { q: "x" } };
+  const truncated = truncatedToolCallMessageError(
+    { ...length, tool_calls: [call], usage_metadata: usage },
+    target,
+  );
+  assert.equal(truncated?.code, "OUTPUT_TRUNCATED");
+  assert.equal(truncated?.retryable, true);
+  assert.equal(truncated?.provider, "p");
+  assert.deepEqual(truncated?.metadata?.outputTruncated, {
+    finishReason: "length",
+    toolCalls: 1,
+    providerModel: "m",
+    usage,
+  });
+  assert.equal(guardUsageFromError(truncated), usage);
+  assert.equal(
+    truncatedToolCallMessageError(
+      { ...length, tool_call_chunks: [{ index: 0, args: "{" }] },
+      target,
+    )?.code,
+    "OUTPUT_TRUNCATED",
+  );
+  assert.equal(
+    truncatedToolCallMessageError(
+      { ...length, invalid_tool_calls: [{ name: "lookup", args: "{" }] },
+      target,
+    )?.code,
+    "OUTPUT_TRUNCATED",
+  );
+  assert.equal(
+    truncatedToolCallMessageError(
+      { response_metadata: { finishReason: "length" }, tool_calls: [call] },
+      target,
+    )?.code,
+    "OUTPUT_TRUNCATED",
+  );
+  // v3 (v1 content) aggregate: the cut call is a content block only.
+  for (const type of [
+    "invalid_tool_call",
+    "tool_call",
+    "tool_call_chunk",
+    "tool_use",
+    "input_json_delta",
+  ]) {
+    assert.equal(
+      truncatedToolCallMessageError(
+        {
+          ...length,
+          content: [
+            { type: "text", text: "" },
+            { type, id: "c", name: "lookup" },
+          ],
+          tool_calls: [],
+          invalid_tool_calls: [],
+        },
+        target,
+      )?.code,
+      "OUTPUT_TRUNCATED",
+      type,
+    );
+  }
+  assert.equal(
+    truncatedToolCallMessageError(
+      { ...length, content: [{ type: "text", text: "cut" }] },
+      target,
+    ),
+    undefined,
+  );
+  assert.equal(
+    truncatedToolCallMessageError({ ...length, content: "text" }, target),
+    undefined,
+  );
+  assert.equal(
+    truncatedToolCallMessageError(
+      { ...length, tool_calls: [], invalid_tool_calls: [] },
+      target,
+    ),
+    undefined,
+  );
+  assert.equal(
+    truncatedToolCallMessageError(
+      {
+        response_metadata: { finish_reason: "tool_calls" },
+        tool_calls: [call],
+      },
+      target,
+    ),
+    undefined,
+  );
+  assert.equal(truncatedToolCallMessageError(undefined, target), undefined);
+});
+
+test("attempt guard: completion() judges from the chunks it observed, finish reason from the generation when the chunk lacks it", () => {
+  const guard = createAttemptGuard({
+    firstTokenTimeoutMs: 1_000,
+    thresholds: DEFAULT_STREAM_GUARDS,
+    target: { provider: "p", providerModel: "m" },
+  });
+  guard.observeChunk(
+    new AIMessageChunk({
+      content: "",
+      tool_call_chunks: [
+        {
+          index: 0,
+          id: "c",
+          name: "lookup",
+          args: '{"q":',
+          type: "tool_call_chunk",
+        },
+      ],
+    }),
+  );
+  assert.equal(guard.completion(), undefined, "no finish yet");
+  // The handleLLMNewToken chunk carries finish_reason on the generation only.
+  guard.observeChunk(new AIMessageChunk({ content: "" }), "length");
+  guard.observeChunk(
+    new AIMessageChunk({
+      content: "",
+      usage_metadata: { input_tokens: 1, output_tokens: 2, total_tokens: 3 },
+    }),
+  );
+  assert.equal(guard.state.toolCallChunks, 1);
+  assert.equal(guard.state.finishReason, "length");
+  const verdict = guard.completion();
+  assert.equal(verdict?.code, "OUTPUT_TRUNCATED");
+  assert.deepEqual(guardUsageFromError(verdict), {
+    input_tokens: 1,
+    output_tokens: 2,
+    total_tokens: 3,
+  });
+  assert.equal(
+    guard.signal.aborted,
+    false,
+    "completion() judges, it does not abort",
+  );
+  guard.settle();
+
+  const text = createAttemptGuard({
+    firstTokenTimeoutMs: 1_000,
+    thresholds: DEFAULT_STREAM_GUARDS,
+    target: { provider: "p", providerModel: "m" },
+  });
+  text.observeChunk(
+    new AIMessageChunk({
+      content: "cut",
+      response_metadata: { finish_reason: "length" },
+    }),
+  );
+  assert.equal(text.completion(), undefined);
+  // The completed message is extra evidence for calls no callback observed.
+  assert.equal(
+    text.completion({
+      message: {
+        tool_calls: [{ id: "c", name: "lookup", args: {} }],
+        response_metadata: { finish_reason: "length" },
+      },
+    })?.code,
+    "OUTPUT_TRUNCATED",
+  );
+  text.settle();
 });

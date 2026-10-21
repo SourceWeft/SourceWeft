@@ -10,12 +10,15 @@ import { config } from "../../../../shared/config";
 import { logger } from "../../../../shared/logger";
 import { ModelGatewayError } from "../../../../shared/model-gateway/errors";
 import {
+  isModelUpstreamContentErrorCode,
+  MODEL_OUTPUT_TRUNCATED_CODE,
   MODEL_REASONING_BUDGET_EXCEEDED_CODE,
   MODEL_STREAM_DURATION_EXCEEDED_CODE,
   toContentError,
 } from "../../../content/model-gateway-error";
 import { createSourceWeftAgentMiddlewareStack } from "./index";
 import {
+  isToolCallTruncatedByOutputLimit,
   MODEL_CALL_FAILED_EVENT,
   MODEL_CALL_RETRY_EVENT,
 } from "./model-call-observability";
@@ -56,6 +59,34 @@ const streamDurationExceeded = () =>
     message: "Stream ran longer than 1800000 ms",
     retryable: true,
     provider: "deepseek",
+  });
+
+/** The gateway facade's verdict on a `length` finish mid tool call (#338). */
+const outputTruncated = () =>
+  new ModelGatewayError({
+    code: "OUTPUT_TRUNCATED",
+    message: "finish_reason=length while emitting tool call probe",
+    retryable: true,
+    provider: "deepseek",
+  });
+
+/**
+ * What a `length`-cut tool call looks like once LangChain has aggregated the
+ * chunks and the gateway facade has NOT intercepted it: a valid-looking
+ * `tool_calls` entry (partial-JSON repair) whose `query` is the truncated
+ * fragment, under `finish_reason: "length"`. `finishReasonKey` picks the
+ * OpenAI-compatible or the v3 spelling of the finish reason.
+ */
+const truncatedToolCallMessage = (
+  finishReasonKey: "finish_reason" | "finishReason" = "finish_reason",
+) =>
+  new AIMessage({
+    content: "",
+    tool_calls: [{ id: "probe-cut", name: "probe", args: { query: "al" } }],
+    response_metadata: {
+      [finishReasonKey]: "length",
+      model_provider: "deepseek",
+    },
   });
 
 const badRequest = () =>
@@ -416,4 +447,280 @@ test("a non-retryable gateway error is surfaced immediately without a retry", as
   assert.equal(failed.length, 1);
   assert.equal(failed[0]?.reason, "not_retryable");
   assert.equal(failed[0]?.attempt, 1);
+});
+
+/** A tool that records every invocation's args so a truncated call is visible. */
+function recordingProbe() {
+  const invocations: unknown[] = [];
+  const probe = tool(
+    async (input: { query: string }) => {
+      invocations.push(input);
+      return `verified ${input.query}`;
+    },
+    {
+      name: "probe",
+      description: "verify",
+      schema: z.object({ query: z.string() }),
+    },
+  );
+  return { probe, invocations };
+}
+
+async function invokeCatching(agent: Agent, thread: string) {
+  try {
+    return {
+      result: await agent.invoke(
+        { messages: [new HumanMessage("Verify alpha then answer.")] },
+        { configurable: { thread_id: thread } },
+      ),
+      caught: undefined,
+    };
+  } catch (error) {
+    return { result: undefined, caught: error };
+  }
+}
+
+test("a gateway OUTPUT_TRUNCATED attempt is retried once inside the step and the truncated call never executes", async () => {
+  const { probe, invocations } = recordingProbe();
+  let calls = 0;
+  const agent = await buildAgent(
+    new ScriptedChatModel(() => {
+      calls++;
+      if (calls === 1) throw outputTruncated();
+      return calls === 2
+        ? new AIMessage({
+            content: "",
+            tool_calls: [
+              { id: "probe-full", name: "probe", args: { query: "alpha" } },
+            ],
+          })
+        : new AIMessage("Done after verifying alpha.");
+    }),
+    [probe],
+  );
+  const result = await agent.invoke(
+    { messages: [new HumanMessage("Verify alpha then answer.")] },
+    { configurable: { thread_id: "retry-truncated-gateway" } },
+  );
+
+  assert.equal(calls, 3);
+  assert.deepEqual(invocations, [{ query: "alpha" }]);
+  assert.equal(
+    (result.messages as AIMessage[]).at(-1)?.content,
+    "Done after verifying alpha.",
+  );
+  assert.equal(
+    selectAgentRunProgress(result, { userMessageId: CONTEXT.userMessageId })
+      ?.steps,
+    2,
+  );
+  const retries = logged(MODEL_CALL_RETRY_EVENT);
+  assert.equal(retries.length, 1);
+  assert.equal(retries[0]?.attempt, 1);
+  assert.equal(retries[0]?.errorCode, MODEL_OUTPUT_TRUNCATED_CODE);
+  assert.equal(retries[0]?.gatewayCode, "OUTPUT_TRUNCATED");
+  assert.equal(logged(MODEL_CALL_FAILED_EVENT).length, 0);
+}, 20_000);
+
+for (const finishReasonKey of ["finish_reason", "finishReason"] as const) {
+  test(`backstop: a \`${finishReasonKey}: length\` response carrying tool calls is retried instead of executed`, async () => {
+    const { probe, invocations } = recordingProbe();
+    let calls = 0;
+    const agent = await buildAgent(
+      new ScriptedChatModel(() => {
+        calls++;
+        if (calls === 1) return truncatedToolCallMessage(finishReasonKey);
+        return calls === 2
+          ? new AIMessage({
+              content: "",
+              tool_calls: [
+                { id: "probe-full", name: "probe", args: { query: "alpha" } },
+              ],
+            })
+          : new AIMessage("Done after verifying alpha.");
+      }),
+      [probe],
+    );
+    const result = await agent.invoke(
+      { messages: [new HumanMessage("Verify alpha then answer.")] },
+      {
+        configurable: {
+          thread_id: `retry-truncated-backstop-${finishReasonKey}`,
+        },
+      },
+    );
+
+    assert.equal(calls, 3);
+    // The truncated `{ query: "al" }` never reached the tool.
+    assert.deepEqual(invocations, [{ query: "alpha" }]);
+    assert.equal(
+      (result.messages as AIMessage[]).at(-1)?.content,
+      "Done after verifying alpha.",
+    );
+    const messages = result.messages as AIMessage[];
+    assert.ok(
+      !messages.some((message) =>
+        (message.tool_calls ?? []).some((call) => call.id === "probe-cut"),
+      ),
+      "the truncated decision must not be persisted",
+    );
+    assert.equal(
+      selectAgentRunProgress(result, { userMessageId: CONTEXT.userMessageId })
+        ?.steps,
+      2,
+    );
+    const retries = logged(MODEL_CALL_RETRY_EVENT);
+    assert.equal(retries.length, 1);
+    assert.equal(retries[0]?.attempt, 1);
+    assert.equal(retries[0]?.errorCode, MODEL_OUTPUT_TRUNCATED_CODE);
+    assert.equal(retries[0]?.gatewayCode, "OUTPUT_TRUNCATED");
+    assert.equal(retries[0]?.errorName, "ContentError");
+    assert.equal(logged(MODEL_CALL_FAILED_EVENT).length, 0);
+  }, 20_000);
+}
+
+test("two truncated attempts fail the run with MODEL_OUTPUT_TRUNCATED after one retry, with no tool executed", async () => {
+  const { probe, invocations } = recordingProbe();
+  let calls = 0;
+  const agent = await buildAgent(
+    new ScriptedChatModel(() => {
+      calls++;
+      return truncatedToolCallMessage();
+    }),
+    [probe],
+  );
+  const { caught } = await invokeCatching(agent, "retry-truncated-twice");
+
+  assert.ok(caught, "expected the run to fail");
+  const error = toContentError(caught);
+  assert.equal(error.code, MODEL_OUTPUT_TRUNCATED_CODE);
+  assert.equal(error.code, "MODEL_OUTPUT_TRUNCATED");
+  assert.equal(calls, 2);
+  assert.deepEqual(invocations, []);
+  assert.deepEqual(
+    logged(MODEL_CALL_RETRY_EVENT).map((entry) => [
+      entry.attempt,
+      entry.errorCode,
+      entry.gatewayCode,
+    ]),
+    [[1, MODEL_OUTPUT_TRUNCATED_CODE, "OUTPUT_TRUNCATED"]],
+  );
+  const failed = logged(MODEL_CALL_FAILED_EVENT);
+  assert.equal(failed.length, 1);
+  assert.equal(failed[0]?.attempt, 2);
+  assert.equal(failed[0]?.reason, "code_budget");
+  // The durable service keeps the sandbox lease for this code (#324).
+  assert.equal(isModelUpstreamContentErrorCode(error.code), true);
+}, 20_000);
+
+test("a gateway OUTPUT_TRUNCATED followed by a backstop-caught truncation shares the one-retry budget", async () => {
+  const { probe, invocations } = recordingProbe();
+  let calls = 0;
+  const agent = await buildAgent(
+    new ScriptedChatModel(() => {
+      calls++;
+      if (calls === 1) throw outputTruncated();
+      return truncatedToolCallMessage();
+    }),
+    [probe],
+  );
+  const { caught } = await invokeCatching(agent, "retry-truncated-mixed");
+
+  assert.equal(toContentError(caught).code, MODEL_OUTPUT_TRUNCATED_CODE);
+  assert.equal(calls, 2);
+  assert.deepEqual(invocations, []);
+  assert.equal(logged(MODEL_CALL_FAILED_EVENT)[0]?.reason, "code_budget");
+}, 20_000);
+
+test("a length-cut plain-text answer without tool calls completes normally", async () => {
+  const { probe, invocations } = recordingProbe();
+  let calls = 0;
+  const agent = await buildAgent(
+    new ScriptedChatModel(() => {
+      calls++;
+      return new AIMessage({
+        content: "The answer, cut short by the output limit",
+        response_metadata: { finish_reason: "length" },
+      });
+    }),
+    [probe],
+  );
+  const result = await agent.invoke(
+    { messages: [new HumanMessage("Answer.")] },
+    { configurable: { thread_id: "length-plain-text" } },
+  );
+
+  assert.equal(calls, 1);
+  assert.deepEqual(invocations, []);
+  assert.equal(
+    (result.messages as AIMessage[]).at(-1)?.content,
+    "The answer, cut short by the output limit",
+  );
+  assert.equal(logged(MODEL_CALL_RETRY_EVENT).length, 0);
+  assert.equal(logged(MODEL_CALL_FAILED_EVENT).length, 0);
+});
+
+test("the truncation predicate reads both finish-reason spellings and every tool-call field", () => {
+  const length = (fields: Record<string, unknown>) => ({
+    response_metadata: { finish_reason: "length" },
+    ...fields,
+  });
+  assert.equal(isToolCallTruncatedByOutputLimit(null), false);
+  assert.equal(isToolCallTruncatedByOutputLimit(length({})), false);
+  assert.equal(
+    isToolCallTruncatedByOutputLimit(length({ tool_calls: [], content: "x" })),
+    false,
+  );
+  assert.equal(
+    isToolCallTruncatedByOutputLimit(length({ tool_calls: [{ name: "w" }] })),
+    true,
+  );
+  assert.equal(
+    isToolCallTruncatedByOutputLimit(
+      length({ tool_calls: [], tool_call_chunks: [{ args: '{"a' }] }),
+    ),
+    true,
+  );
+  assert.equal(
+    isToolCallTruncatedByOutputLimit(
+      length({ invalid_tool_calls: [{ name: "w", args: '{"a' }] }),
+    ),
+    true,
+  );
+  assert.equal(
+    isToolCallTruncatedByOutputLimit({
+      response_metadata: { finishReason: "length" },
+      tool_calls: [{ name: "w" }],
+    }),
+    true,
+  );
+  // Core's v1 assembly leaves an unparseable call as a content block only.
+  assert.equal(
+    isToolCallTruncatedByOutputLimit(
+      length({
+        tool_calls: [],
+        invalid_tool_calls: [],
+        content: [
+          { type: "text", text: "" },
+          { type: "invalid_tool_call", name: "w", args: '{"a', error: "x" },
+        ],
+      }),
+    ),
+    true,
+  );
+  assert.equal(
+    isToolCallTruncatedByOutputLimit(
+      length({ tool_calls: [], content: [{ type: "text", text: "cut sho" }] }),
+    ),
+    false,
+  );
+  for (const finish of ["stop", "tool_calls", undefined]) {
+    assert.equal(
+      isToolCallTruncatedByOutputLimit({
+        response_metadata: { finish_reason: finish },
+        tool_calls: [{ name: "w" }],
+      }),
+      false,
+    );
+  }
 });

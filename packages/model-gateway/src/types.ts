@@ -48,6 +48,17 @@ export type GatewayErrorCode =
    * provider of the same request would run just as long.
    */
   | "STREAM_DURATION_EXCEEDED"
+  /**
+   * The provider stopped the response at its output token limit
+   * (`finish_reason: "length"`) in the middle of a tool call. The arguments
+   * JSON is cut short, and LangChain's chunk aggregation repairs the partial
+   * JSON into a valid-looking `tool_calls` entry, so without this guard the
+   * caller would execute a truncated call. Retryable (a fresh attempt may
+   * answer within the limit), not failoverable: another provider of the same
+   * request would cut at the same budget. A `length` finish without tool
+   * calls is delivered unchanged.
+   */
+  | "OUTPUT_TRUNCATED"
   | "UNKNOWN";
 
 export interface GatewayErrorData {

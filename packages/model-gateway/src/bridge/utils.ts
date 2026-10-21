@@ -13,6 +13,9 @@ import {
   createAttemptGuard,
   guardFinishReason,
   guardUsageFromError,
+  toolCallCount,
+  truncatedToolCallError,
+  truncatedToolCallMessageError,
   type AttemptGuard,
 } from "./stream-guards";
 import type { BaseLanguageModel } from "@langchain/core/language_models/base";
@@ -479,6 +482,12 @@ function createObservedLangChainChatModel(input: {
     messages: unknown,
     /** Extra non-content fields for the generation's output record. */
     extraOutput?: () => Record<string, unknown> | undefined,
+    /**
+     * Judges a response that completed; a returned error is recorded as the
+     * generation's failure (with the response's usage) and thrown in place of
+     * the result. The attempt guard's verdict on the signal is checked first.
+     */
+    verdictOnCompletion?: (result: unknown) => unknown,
   ): Promise<unknown> {
     const generation = createGenerationObservation({
       operation: "chat.complete",
@@ -490,60 +499,10 @@ function createObservedLangChainChatModel(input: {
       target: input.target,
     });
     await emitGenerationStart(input.config, generation.start);
+    const responseCapture = createProviderResponseCapture();
+    let result: unknown;
     try {
-      const responseCapture = createProviderResponseCapture();
-      const result = await runWithProviderResponseCapture(responseCapture, run);
-      const responseMetadata = extractResponseMetadata(
-        result as { response_metadata?: unknown },
-      );
-      const reasoning = extractReasoning(
-        result as Parameters<typeof extractReasoning>[0],
-      );
-      const observation = normalizeModelCallObservation({
-        modelAlias: input.payload.model,
-        context: {
-          target: input.target,
-          modality: "chat",
-          rawResponse: result,
-          sdkUsage:
-            (result as { usage_metadata?: unknown }).usage_metadata ??
-            extractUsage({
-              raw: result,
-              usageMetadata: (result as { usage_metadata?: unknown })
-                .usage_metadata,
-              responseMetadata,
-            }),
-          responseMetadata,
-          responseHeaders: responseCapture.headers,
-        },
-      });
-      observation.traceId = generation.start.traceId;
-      observation.spanId = generation.spanId;
-      await emitGenerationEnd(input.config, {
-        traceId: generation.start.traceId,
-        spanId: generation.spanId,
-        endedAt: new Date().toISOString(),
-        latencyMs: Date.now() - generation.startedAtMs,
-        output: {
-          finishReason: extractFinishReason(responseMetadata),
-          reasoning,
-          routeDecision: input.target.routeDecision,
-          ...(extraOutput?.() ?? {}),
-        },
-        outputText:
-          typeof (result as { content?: unknown }).content === "string"
-            ? (result as { content: string }).content
-            : undefined,
-        finishReason: extractFinishReason(responseMetadata),
-        reasoningText: reasoning,
-        providerFields: cloneRecord(responseMetadata),
-        observation,
-        usage: observation.usage,
-        rawCaptureMode: "sdk_metadata",
-        providerResponse: toProviderResponse(responseMetadata),
-        attributes: generation.start.attributes,
-      });
-      return result;
+      result = await runWithProviderResponseCapture(responseCapture, run);
     } catch (error) {
       // When the attempt guard cut the call, LangChain surfaces a generic
       // abort by the time it unwinds; the attempt signal carries the verdict.
@@ -584,6 +543,96 @@ function createObservedLangChainChatModel(input: {
       });
       throw error;
     }
+
+    const responseMetadata = extractResponseMetadata(
+      result as { response_metadata?: unknown },
+    );
+    const reasoning = extractReasoning(
+      result as Parameters<typeof extractReasoning>[0],
+    );
+    const observation = normalizeModelCallObservation({
+      modelAlias: input.payload.model,
+      context: {
+        target: input.target,
+        modality: "chat",
+        rawResponse: result,
+        sdkUsage:
+          (result as { usage_metadata?: unknown }).usage_metadata ??
+          extractUsage({
+            raw: result,
+            usageMetadata: (result as { usage_metadata?: unknown })
+              .usage_metadata,
+            responseMetadata,
+          }),
+        responseMetadata,
+        responseHeaders: responseCapture.headers,
+      },
+    });
+    observation.traceId = generation.start.traceId;
+    observation.spanId = generation.spanId;
+
+    // A response that completed may still be refused: the attempt guard's
+    // verdict reached the signal from `handleLLMEnd` (before `invoke`
+    // resolved), or the completed message itself fails the completion check.
+    // Either way the generation is a failure, recorded with the usage the
+    // response really consumed.
+    const verdict =
+      abortedAttemptError(input.options?.signal) ??
+      verdictOnCompletion?.(result);
+    if (verdict !== undefined) {
+      const finishReason = guardFinishReason(
+        normalizeGatewayError(verdict).code,
+      );
+      await emitGenerationError(input.config, {
+        ...buildGenerationErrorEvent({
+          traceId: generation.start.traceId,
+          spanId: generation.spanId,
+          startedAtMs: generation.startedAtMs,
+          error: verdict,
+          attributes: generation.start.attributes,
+        }),
+        ...(finishReason
+          ? {
+              finishReason,
+              output: {
+                finishReason,
+                reasoning,
+                routeDecision: input.target.routeDecision,
+              },
+            }
+          : {}),
+        observation,
+        usage: observation.usage,
+        providerFields: cloneRecord(responseMetadata),
+      });
+      throw verdict;
+    }
+
+    await emitGenerationEnd(input.config, {
+      traceId: generation.start.traceId,
+      spanId: generation.spanId,
+      endedAt: new Date().toISOString(),
+      latencyMs: Date.now() - generation.startedAtMs,
+      output: {
+        finishReason: extractFinishReason(responseMetadata),
+        reasoning,
+        routeDecision: input.target.routeDecision,
+        ...(extraOutput?.() ?? {}),
+      },
+      outputText:
+        typeof (result as { content?: unknown }).content === "string"
+          ? (result as { content: string }).content
+          : undefined,
+      finishReason: extractFinishReason(responseMetadata),
+      reasoningText: reasoning,
+      providerFields: cloneRecord(responseMetadata),
+      observation,
+      usage: observation.usage,
+      rawCaptureMode: "sdk_metadata",
+      providerResponse: toProviderResponse(responseMetadata),
+      attributes: generation.start.attributes,
+    });
+    return result;
   }
 
   const invoke: LangChainChatModelLike["invoke"] = async (
@@ -593,6 +642,10 @@ function createObservedLangChainChatModel(input: {
     observeInvocation(
       () => input.model.invoke(messages, callOptions),
       messages,
+      undefined,
+      // The non-streamed `invoke` no callback observes: the message is the
+      // only evidence of a `length` finish mid tool call.
+      (result) => truncatedToolCallMessageError(result, input.target),
     );
 
   const stream: LangChainChatModelLike["stream"] = async (
@@ -685,6 +738,7 @@ async function* observeStream(input: {
   let reasoning: string | undefined;
   let providerFields: Record<string, unknown> | undefined;
   let outputText = "";
+  let toolCalls = 0;
   let lastChunk: unknown;
   let iterator: StreamIterator<unknown> | undefined;
   const captureObservation = () => {
@@ -740,10 +794,23 @@ async function* observeStream(input: {
           extractReasoning(lastChunk as Parameters<typeof extractReasoning>[0]),
         );
         providerFields = cloneRecord(responseMetadata) ?? providerFields;
+        toolCalls += toolCallCount(lastChunk);
         const content = (lastChunk as { content?: unknown }).content;
         if (typeof content === "string") outputText += content;
         yield lastChunk;
       }
+      // The stream ended on its own: a `length` finish after tool-call deltas
+      // is a truncated tool call, failed here so the generation records it
+      // (with the usage the trailing chunk carried) and the consumer gets the
+      // error in place of a clean end.
+      const truncated = truncatedToolCallError({
+        finishReason,
+        toolCalls,
+        target: input.target,
+        usage: (lastChunk as { usage_metadata?: unknown } | undefined)
+          ?.usage_metadata,
+      });
+      if (truncated) throw truncated;
       drained = true;
     } catch (error) {
       failed = true;
@@ -1183,6 +1250,7 @@ function createFailoverLangChainChatModel(input: {
     run: (
       model: LangChainChatModelLike,
       options: Record<string, unknown>,
+      guard: AttemptGuard,
     ) => Promise<T>,
   ): Promise<T> {
     const attempts: TargetAttemptError[] = [];
@@ -1207,7 +1275,7 @@ function createFailoverLangChainChatModel(input: {
         // notices the abort. Let it unwind (bounded) so its observation and
         // callbacks settle before this attempt's error is surfaced.
         const pending = Promise.resolve().then(() =>
-          run(input.buildModel(target, requestOptions), callOptions),
+          run(input.buildModel(target, requestOptions), callOptions, guard!),
         );
         pending.catch(() => {});
         let result: T;
@@ -1310,6 +1378,12 @@ function createFailoverLangChainChatModel(input: {
           for (;;) {
             const next = await iterator.next();
             if (next.done) {
+              // A `length` finish after tool-call deltas is a truncated tool
+              // call: refused at the end of the stream, where the trailing
+              // usage chunk has been seen (the observation shim, when
+              // present, has already failed the generation for it).
+              const truncated = guard.completion();
+              if (truncated) throw truncated;
               if (!yielded) input.config.targetHealth.markSuccess(target);
               return;
             }
@@ -1375,8 +1449,18 @@ function createFailoverLangChainChatModel(input: {
     getName: () =>
       primaryModel.getName?.() ?? input.candidates[0]!.providerModel,
     invoke: (messages, options) =>
-      runWithFailover("chat.complete", options, (model, callOptions) =>
-        model.invoke(messages, callOptions),
+      runWithFailover(
+        "chat.complete",
+        options,
+        async (model, callOptions, guard) => {
+          const result = await model.invoke(messages, callOptions);
+          // With callbacks the guard already judged the response in
+          // `handleLLMEnd` (and the race above surfaced it); this covers the
+          // non-streamed call no callback observed, from the message itself.
+          const truncated = guard.completion({ message: result });
+          if (truncated) throw truncated;
+          return result;
+        },
       ),
     stream: async (messages, options) => streamWithFailover(messages, options),
     bindTools: (tools, kwargs) => {

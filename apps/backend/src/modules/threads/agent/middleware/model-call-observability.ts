@@ -7,11 +7,14 @@ import {
 } from "langchain";
 import { logger } from "../../../../shared/logger";
 import {
+  createModelOutputTruncatedContentError,
   isRetryableModelContentError,
+  MODEL_OUTPUT_TRUNCATED_CODE,
   MODEL_REASONING_BUDGET_EXCEEDED_CODE,
   MODEL_STREAM_DURATION_EXCEEDED_CODE,
   toContentError,
 } from "../../../content/model-gateway-error";
+import { extractFinishReasonFromMessageChunk } from "../turn/content";
 import { currentAgentStepScope } from "./step-budget";
 import type { SourceWeftToolObservabilityContext } from "./tool-observability";
 
@@ -36,12 +39,17 @@ import type { SourceWeftToolObservabilityContext } from "./tool-observability";
  * - `modelRetryMiddleware` sits inside it with a `retryOn` predicate that
  *   reads the scope to log `agent.model_call.retry` / `agent.model_call.failed`
  *   and to refuse a second retry of `MODEL_REASONING_BUDGET_EXCEEDED` /
- *   `MODEL_STREAM_DURATION_EXCEEDED` (the same prompt almost always overruns
- *   again; one more attempt is the cap).
+ *   `MODEL_STREAM_DURATION_EXCEEDED` / `MODEL_OUTPUT_TRUNCATED` (the same
+ *   prompt almost always overruns again; one more attempt is the cap).
  * - `attempt` (innermost) wraps each attempt the retry loop makes: it is the
  *   only hook that sees every attempt individually, so it owns the counter and
  *   the timer. `wrapModelCall` handlers compose first-is-outermost
- *   (`AgentNode`), which is why the array order below is load-bearing.
+ *   (`AgentNode`), which is why the array order below is load-bearing. It is
+ *   also where the truncated-tool-call backstop lives (see
+ *   {@link isToolCallTruncatedByOutputLimit}): a response the gateway let
+ *   through with `finish_reason: "length"` and tool calls is turned into the
+ *   same `MODEL_OUTPUT_TRUNCATED` failure the gateway would have raised, from
+ *   inside the retry loop, so it is retried instead of executed.
  *
  * Stream side: each attempt announces itself with a LangGraph custom event
  * (`model-call-begin`) and a retry decision emits `model-call-retry` before
@@ -107,17 +115,91 @@ export const MODEL_CALL_MAX_RETRIES = 2;
 export const MODEL_CALL_RETRY_INITIAL_DELAY_MS = 1_000;
 export const MODEL_CALL_RETRY_BACKOFF_FACTOR = 2;
 /**
- * A reasoning-budget or stream-duration overrun is retried at most once per
- * model call: the model itself, not the transport, ran away, so a second
- * replay of the same prompt is unlikely to end differently. Beyond the cap
- * the retry predicate reports the error as not retryable and the retry
- * middleware's `onFailure: "error"` surfaces it.
+ * A reasoning-budget, stream-duration or output-limit overrun is retried at
+ * most once per model call: the model itself, not the transport, ran away (or
+ * out of output budget), so a second replay of the same prompt is unlikely to
+ * end differently. Beyond the cap the retry predicate reports the error as
+ * not retryable and the retry middleware's `onFailure: "error"` surfaces it.
  */
 export const REASONING_BUDGET_MAX_RETRIES = 1;
 export const SINGLE_RETRY_CONTENT_ERROR_CODES: ReadonlySet<string> = new Set([
   MODEL_REASONING_BUDGET_EXCEEDED_CODE,
   MODEL_STREAM_DURATION_EXCEEDED_CODE,
+  MODEL_OUTPUT_TRUNCATED_CODE,
 ]);
+
+function toRecord(value: unknown) {
+  return value && typeof value === "object"
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function nonEmptyArray(value: unknown) {
+  return Array.isArray(value) && value.length > 0;
+}
+
+const TOOL_CALL_CONTENT_BLOCK_TYPES: ReadonlySet<string> = new Set([
+  "tool_call",
+  "invalid_tool_call",
+  "tool_call_chunk",
+  "tool_use",
+  "input_json_delta",
+]);
+
+/**
+ * Core's v1 message assembly (`ChatModelStream._assembleMessage`, the path a
+ * v3 `streamEvents` run takes) finalizes a tool block whose JSON will not
+ * parse as an `invalid_tool_call` *content block*, and `AIMessage` does not
+ * backfill `invalid_tool_calls` from content. The block is still the record
+ * that a tool call was being emitted when the output stopped.
+ */
+function hasToolCallContentBlock(content: unknown) {
+  return (
+    Array.isArray(content) &&
+    content.some((block) => {
+      const type = toRecord(block)?.type;
+      return (
+        typeof type === "string" && TOOL_CALL_CONTENT_BLOCK_TYPES.has(type)
+      );
+    })
+  );
+}
+
+/**
+ * Second line of defence for issue #338. A provider that stops at its output
+ * token limit in the middle of a tool call answers HTTP 200 with
+ * `finish_reason: "length"` and an unterminated `arguments` string; LangChain's
+ * chunk aggregation repairs the partial JSON into a valid-looking `tool_calls`
+ * entry, so the tools node would execute a truncated `write_file`. The gateway
+ * facade raises `OUTPUT_TRUNCATED` for this shape first; this check catches a
+ * response that reached the agent anyway (a provider or adapter path that
+ * bypasses the facade). Both the OpenAI-compatible `finish_reason` and the
+ * v3 `finishReason` spelling are read. Any tool-call evidence counts —
+ * parsed (`tool_calls`), chunked, unparseable (`invalid_tool_calls`), or a
+ * tool block left in v1 content — because the response was cut while the
+ * model was emitting a call either way. A `length` finish on a plain-text
+ * answer is delivered unchanged.
+ */
+export function isToolCallTruncatedByOutputLimit(response: unknown): boolean {
+  const record = toRecord(response);
+  if (!record) return false;
+  if (extractFinishReasonFromMessageChunk(record) !== "length") return false;
+  return (
+    nonEmptyArray(record.tool_calls) ||
+    nonEmptyArray(record.tool_call_chunks) ||
+    nonEmptyArray(record.invalid_tool_calls) ||
+    hasToolCallContentBlock(record.content)
+  );
+}
+
+function throwIfToolCallTruncated(response: unknown) {
+  if (!isToolCallTruncatedByOutputLimit(response)) return;
+  const metadata = toRecord(toRecord(response)?.response_metadata);
+  throw createModelOutputTruncatedContentError({
+    provider: metadata?.model_provider,
+    requestId: metadata?.id ?? metadata?.requestId,
+  });
+}
 
 type ModelCallScope = {
   /** Attempts started for this model call (1-based once the first begins). */
@@ -277,7 +359,11 @@ export function createSourceWeftModelRetryMiddleware(
         attempt: current?.attempt ?? 1,
       });
       try {
-        return await handler(request);
+        const response = await handler(request);
+        // Inside the try so a truncated response is recorded as this
+        // attempt's failure, exactly like an error thrown by the gateway.
+        throwIfToolCallTruncated(response);
+        return response;
       } catch (error) {
         if (current) {
           const failure = describeFailure(error);

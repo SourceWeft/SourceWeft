@@ -1127,6 +1127,8 @@ test("failed runs with a model/upstream error keep the thread sandbox lease", as
     "MODEL_UPSTREAM_ERROR",
     "MODEL_TIMEOUT",
     "MODEL_RATE_LIMITED",
+    // #338: output cut at max_tokens mid tool call, retried once and failed.
+    "MODEL_OUTPUT_TRUNCATED",
   ]) {
     const run = createRun();
     const released: string[] = [];
