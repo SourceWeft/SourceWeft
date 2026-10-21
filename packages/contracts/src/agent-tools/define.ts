@@ -72,12 +72,25 @@ export type AgentToolExecutionScope = z.infer<
   typeof agentToolExecutionScopeSchema
 >;
 
-export const agentToolTerminalResultSpecSchema = z
-  .object({
-    kind: z.literal("committed_artifact"),
-    artifactType: z.string().trim().min(1),
-  })
-  .strict();
+export const agentToolTerminalResultSpecSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("committed_artifact"),
+      artifactType: z.string().trim().min(1),
+    })
+    .strict(),
+  /**
+   * A synchronous publisher whose ready receipt names the exact committed
+   * version. Unlike `committed_artifact` it does not own a conversation output
+   * block, so it proves delivery for budget governance, not run recovery.
+   */
+  z
+    .object({
+      kind: z.literal("published_artifact"),
+      artifactTypes: z.array(z.string().trim().min(1)).min(1),
+    })
+    .strict(),
+]);
 export type AgentToolTerminalResultSpec = z.infer<
   typeof agentToolTerminalResultSpecSchema
 >;
@@ -102,6 +115,58 @@ export const committedArtifactToolResultSchema = z
 export type CommittedArtifactToolResult = z.infer<
   typeof committedArtifactToolResultSchema
 >;
+
+/** Receipt instruction carried by every successful `published_artifact` result. */
+export const PUBLISHED_ARTIFACT_NEXT_STEP = "committed — summarize and finish";
+
+/**
+ * Host-produced ready receipt of a `published_artifact` tool. Type-specific
+ * receipt fields pass through; a bare model-authored `{ status: "ready" }` is
+ * still rejected because the exact version and next step are required.
+ */
+export const publishedArtifactToolResultSchema = z.object({
+  ok: z.literal(true),
+  status: z.literal("ready"),
+  artifactType: z.string().trim().min(1),
+  artifactId: z.string().trim().min(1),
+  artifactVersionId: z.string().trim().min(1),
+  nextStep: z.literal(PUBLISHED_ARTIFACT_NEXT_STEP),
+});
+
+export type TerminalToolResult = {
+  artifactType: string;
+  artifactId: string;
+  artifactVersionId: string;
+};
+
+/** The committed artifact a tool output proves under its declared contract. */
+export function readTerminalToolResult(
+  spec: AgentToolTerminalResultSpec | undefined,
+  output: unknown,
+): TerminalToolResult | null {
+  if (spec?.kind === "committed_artifact") {
+    const parsed = committedArtifactToolResultSchema.safeParse(output);
+    return parsed.success && parsed.data.artifactType === spec.artifactType
+      ? pickTerminalToolResult(parsed.data)
+      : null;
+  }
+  if (spec?.kind === "published_artifact") {
+    const parsed = publishedArtifactToolResultSchema.safeParse(output);
+    return parsed.success &&
+      spec.artifactTypes.includes(parsed.data.artifactType)
+      ? pickTerminalToolResult(parsed.data)
+      : null;
+  }
+  return null;
+}
+
+function pickTerminalToolResult(value: TerminalToolResult): TerminalToolResult {
+  return {
+    artifactType: value.artifactType,
+    artifactId: value.artifactId,
+    artifactVersionId: value.artifactVersionId,
+  };
+}
 export type GlobalIconName = string;
 export type GlobalIconTone = "brand" | "mono";
 

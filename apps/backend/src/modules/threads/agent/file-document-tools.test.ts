@@ -94,17 +94,127 @@ it("document continuation is tied to the exact file version", async () => {
     (await f.readDocument.invoke({ path: "long.txt" })) as string,
   );
   expect(first.segments[0].text).toHaveLength(20_000);
+  expect(first.continuation).toMatch(/^rd1\./);
   const second = JSON.parse(
+    (await f.readDocument.invoke({
+      path: "long.txt",
+      continuation: first.continuation,
+    })) as string,
+  );
+  expect(second.segments[0].text).toHaveLength(100);
+  expect(second.continuation).toBeNull();
+  data["/files/long.txt"] = "changed";
+  await expect(
+    f.readDocument.invoke({
+      path: "long.txt",
+      continuation: first.continuation,
+    }),
+  ).rejects.toMatchObject({
+    code: "FILE_CHANGED",
+    message: expect.stringContaining("Omit `continuation`"),
+  });
+});
+
+it("still accepts the legacy `cursor` input and unprefixed tokens", async () => {
+  const f = fixture({ "/files/long.txt": "a".repeat(20_100) });
+  const first = JSON.parse(
+    (await f.readDocument.invoke({ path: "long.txt" })) as string,
+  );
+  const viaCursor = JSON.parse(
     (await f.readDocument.invoke({
       path: "long.txt",
       cursor: first.continuation,
     })) as string,
   );
-  expect(second.segments[0].text).toHaveLength(100);
-  data["/files/long.txt"] = "changed";
+  expect(viaCursor.segments[0].text).toHaveLength(100);
+  const legacy = JSON.parse(
+    (await f.readDocument.invoke({
+      path: "long.txt",
+      continuation: first.continuation.slice("rd1.".length),
+    })) as string,
+  );
+  expect(legacy.segments[0].text).toHaveLength(100);
+});
+
+it("treats null or empty continuation values as absent and prefers a real token", async () => {
+  const f = fixture({ "/files/long.txt": "a".repeat(20_100) });
+  const first = JSON.parse(
+    (await f.readDocument.invoke({ path: "long.txt" })) as string,
+  );
+  for (const input of [
+    { continuation: null },
+    { continuation: "" },
+    { cursor: null },
+    { continuation: null, cursor: "" },
+  ]) {
+    const fromStart = JSON.parse(
+      (await f.readDocument.invoke({ path: "long.txt", ...input })) as string,
+    );
+    expect(fromStart.segments[0].text).toHaveLength(20_000);
+  }
+  for (const input of [
+    { continuation: "", cursor: first.continuation },
+    { continuation: null, cursor: first.continuation },
+    { continuation: first.continuation, cursor: "" },
+  ]) {
+    const resumed = JSON.parse(
+      (await f.readDocument.invoke({ path: "long.txt", ...input })) as string,
+    );
+    expect(resumed.segments[0].text).toHaveLength(100);
+  }
+});
+
+it("rejects bad continuations with guidance that names the recovery", async () => {
+  const f = fixture({
+    "/files/long.txt": "a".repeat(20_100),
+    "/files/other.txt": "b".repeat(20_100),
+  });
+  const first = JSON.parse(
+    (await f.readDocument.invoke({ path: "long.txt" })) as string,
+  );
+  const guidance = expect.stringContaining(
+    "Pass back the exact `continuation` value from the previous read_document result for this same path",
+  );
+  for (const [continuation, reason] of [
+    ["not-a-token", "malformed"],
+    [
+      Buffer.from(JSON.stringify({ unit: "x" })).toString("base64url"),
+      "malformed",
+    ],
+    ["0b9a5f1e-8c4d-4e2a-9f3b-7a6c5d4e3f21", "search_files continuation"],
+  ] as const) {
+    await expect(
+      f.readDocument.invoke({ path: "long.txt", continuation }),
+    ).rejects.toMatchObject({
+      code: "INVALID_CURSOR",
+      statusCode: 400,
+      message: expect.stringContaining(reason),
+    });
+  }
   await expect(
-    f.readDocument.invoke({ path: "long.txt", cursor: first.continuation }),
-  ).rejects.toMatchObject({ code: "FILE_CHANGED" });
+    f.readDocument.invoke({ path: "long.txt", continuation: "%%%" }),
+  ).rejects.toMatchObject({ code: "INVALID_CURSOR", message: guidance });
+  await expect(
+    f.readDocument.invoke({
+      path: "other.txt",
+      continuation: first.continuation,
+    }),
+  ).rejects.toMatchObject({
+    code: "INVALID_CURSOR",
+    message: expect.stringContaining("belongs to a different file"),
+  });
+  const state = JSON.parse(
+    Buffer.from(first.continuation.slice(4), "base64url").toString("utf8"),
+  );
+  const pastEnd = `rd1.${Buffer.from(
+    JSON.stringify({ ...state, unit: 99, offset: 0 }),
+  ).toString("base64url")}`;
+  await expect(
+    f.readDocument.invoke({ path: "long.txt", continuation: pastEnd }),
+  ).rejects.toMatchObject({
+    code: "INVALID_CURSOR",
+    message: expect.stringContaining("past the end"),
+  });
 });
 
 it("neutralizes untrusted citation syntax for the model while preserving the real quoted text", async () => {

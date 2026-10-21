@@ -13,6 +13,10 @@ import {
   readAgentStepTaskFailure,
   readAgentStepBudgetForRefresh,
 } from "./step-budget";
+import {
+  COMMITTED_DELIVERY_BLOCKED_TOOL_NAMES,
+  readCommittedDelivery,
+} from "./committed-delivery";
 
 const FAILED_CHILD_SUMMARY_TEXT =
   "The child reached its execution budget, but its progress summary failed. Existing tool effects are not proof of verified completion or publication. The parent may inspect and integrate existing work; this same task will not restart.";
@@ -171,7 +175,21 @@ export function createSourceWeftClosingToolGovernanceMiddleware(input: {
         assertAgentStepIdentity(request.state, input.userMessageId);
       if (isAgentStepFinalizing(request.state))
         return handler({ ...request, tools: [], toolChoice: "none" });
-      if (!isAgentStepClosing(request.state)) return handler(request);
+      const committed = readCommittedDelivery(request.state.messages) !== null;
+      const withdrawn = (name: string) =>
+        committed && COMMITTED_DELIVERY_BLOCKED_TOOL_NAMES.has(name);
+      if (!isAgentStepClosing(request.state))
+        return handler(
+          committed
+            ? {
+                ...request,
+                tools: request.tools.filter((tool) => {
+                  const name = agentModelToolName(tool);
+                  return name === null || !withdrawn(name);
+                }),
+              }
+            : request,
+        );
       const ids = getAgentStepClosingToolIds(request.state);
       if (!ids) throw new Error("Agent closing tool snapshot is missing.");
       const allowed = new Set(ids);
@@ -183,7 +201,8 @@ export function createSourceWeftClosingToolGovernanceMiddleware(input: {
           return (
             name !== null &&
             allowed.has(name) &&
-            !CLOSING_BLOCKED_TOOL_NAMES.has(name)
+            !CLOSING_BLOCKED_TOOL_NAMES.has(name) &&
+            !withdrawn(name)
           );
         }),
       });
@@ -224,6 +243,17 @@ export function createSourceWeftClosingToolGovernanceMiddleware(input: {
       const closing = isAgentStepClosing(request.state);
       const ids = closing ? getAgentStepClosingToolIds(request.state) : null;
       const name = request.toolCall.name;
+      if (
+        COMMITTED_DELIVERY_BLOCKED_TOOL_NAMES.has(name) &&
+        readCommittedDelivery(request.state.messages) !== null
+      ) {
+        return new ToolMessage({
+          content: `[AGENT_DELIVERY_COMMITTED] Tool '${name}' is unavailable after this turn's deliverable was committed. Reply to the user with the final summary now.`,
+          tool_call_id: request.toolCall.id ?? "",
+          name,
+          status: "error",
+        });
+      }
       if (
         isAgentStepFinalizing(request.state) ||
         (closing &&

@@ -4,8 +4,11 @@ import {
   AGENT_TOOL_EXECUTION_TIMEOUT_DEFAULT_MS,
   AGENT_TOOL_EXECUTION_TIMEOUT_MIN_MS,
   AGENT_TOOL_HOST_LIMITS,
+  agentToolTerminalResultSpecSchema,
   committedArtifactToolResultSchema,
   defineAgentTool,
+  PUBLISHED_ARTIFACT_NEXT_STEP,
+  readTerminalToolResult,
   resolveAgentToolHostInvocationSignal,
   resolveAgentToolTimeoutMs,
   withAgentToolHostInvocationSignal,
@@ -208,6 +211,89 @@ test("committedArtifactToolResultSchema accepts only exact committed ready facts
     }).success,
     false,
   );
+});
+
+test("terminal result specs are a closed union of committed and published artifacts", () => {
+  assert.equal(
+    agentToolTerminalResultSpecSchema.safeParse({
+      kind: "published_artifact",
+      artifactTypes: ["html", "file"],
+    }).success,
+    true,
+  );
+  for (const invalid of [
+    { kind: "published_artifact", artifactTypes: [] },
+    { kind: "published_artifact", artifactType: "html" },
+    { kind: "committed_artifact", artifactTypes: ["html"] },
+    { kind: "other", artifactType: "html" },
+  ])
+    assert.equal(
+      agentToolTerminalResultSpecSchema.safeParse(invalid).success,
+      false,
+    );
+});
+
+test("readTerminalToolResult proves only the exact version under the declared contract", () => {
+  const committed = {
+    status: "ready",
+    type: "committed_artifact_result",
+    artifactType: "report",
+    artifactId: "artifact-1",
+    artifactVersionId: "version-1",
+    artifactOutputBlockId: "artifact-output:run-1:artifact-1:version-1",
+    workflowVersion: "video-presentation-agent",
+  };
+  const proved = {
+    artifactType: "report",
+    artifactId: "artifact-1",
+    artifactVersionId: "version-1",
+  };
+  assert.deepEqual(
+    readTerminalToolResult(
+      { kind: "committed_artifact", artifactType: "report" },
+      committed,
+    ),
+    proved,
+  );
+  assert.equal(
+    readTerminalToolResult(
+      { kind: "committed_artifact", artifactType: "deck" },
+      committed,
+    ),
+    null,
+  );
+  const receipt = {
+    ok: true,
+    type: "html_artifact_result",
+    status: "ready",
+    nextStep: PUBLISHED_ARTIFACT_NEXT_STEP,
+    artifactType: "report",
+    artifactId: "artifact-1",
+    artifactVersionId: "version-1",
+    artifactUrl: "/artifact-preview?artifactId=artifact-1",
+  };
+  const published = {
+    kind: "published_artifact" as const,
+    artifactTypes: ["report"],
+  };
+  assert.deepEqual(readTerminalToolResult(published, receipt), proved);
+  assert.equal(readTerminalToolResult(undefined, receipt), null);
+  assert.equal(
+    readTerminalToolResult(
+      { kind: "committed_artifact", artifactType: "report" },
+      receipt,
+    ),
+    null,
+  );
+  for (const forged of [
+    { ...receipt, ok: false },
+    { ...receipt, status: "processing" },
+    { ...receipt, nextStep: "continue" },
+    { ...receipt, artifactVersionId: " " },
+    { ok: true, status: "ready", artifactType: "report", artifactId: "a" },
+    "status: ready",
+  ])
+    assert.equal(readTerminalToolResult(published, forged), null);
 });
 
 test("generic Agent-tool host limits are finite positive hard ceilings", () => {
