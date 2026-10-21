@@ -86,10 +86,17 @@ const announced = (messages: BaseMessage[]) => {
 type Turn = {
   userMessageId: string;
   request: string;
-  respond: (call: number, messages: BaseMessage[]) => AIMessage;
+  respond: (
+    call: number,
+    messages: BaseMessage[],
+    /** Tool names bound for this model call, after tool governance. */
+    tools: readonly string[],
+  ) => AIMessage;
 };
 type Outcome = {
   seen: BaseMessage[][];
+  bound: string[][];
+  messages: BaseMessage[];
   progress: ReturnType<typeof selectAgentRunProgress>;
   stop: ReturnType<typeof selectAgentStepStop>;
   scope: AgentStepV2ScopeBudget;
@@ -116,10 +123,16 @@ async function thread(input: {
   try {
     for (const [index, turn] of input.turns.entries()) {
       const seen: BaseMessage[][] = [];
+      const bound: string[][] = [];
       const model = new ScriptedChatModel((messages) => {
         seen.push(messages);
-        return turn.respond(seen.length, messages);
+        return turn.respond(seen.length, messages, bound.at(-1) ?? []);
       });
+      // The SDK binds the governed tool list before every model call.
+      model.bindTools = ((tools: Array<{ name?: string }>) => {
+        bound.push(tools.map((tool) => String(tool.name)));
+        return model;
+      }) as typeof model.bindTools;
       const publisher = tool(async () => input.publishes[counts.published++]!, {
         name: PUBLISHER,
         description: "publish",
@@ -156,6 +169,8 @@ async function thread(input: {
       );
       outcomes.push({
         seen,
+        bound,
+        messages: result.messages,
         progress: selectAgentRunProgress(result, {
           userMessageId: turn.userMessageId,
         }),
@@ -204,6 +219,56 @@ test("after a committed publish the run ends with one further model call that is
   assert.equal(outcome.progress?.phase, "working");
   assert.equal(outcome.stop, null);
   assert.equal(outcome.scope.wallClock?.trigger, undefined);
+});
+
+test("after a committed publish todo bookkeeping is withdrawn, so publish is followed directly by the summary", async () => {
+  // Live shape (run 420ff3ee): publish → write_todos → summary. A model that
+  // updates todos whenever write_todos is offered must now answer instead.
+  const outcome = await single({
+    thread: "committed-no-todos",
+    publishes: [receipt("version-1")],
+    respond: (n, _messages, tools) =>
+      n === 1
+        ? call(PUBLISHER, "publish-1")
+        : tools.includes("write_todos")
+          ? call("write_todos", `todos-${n}`, {
+              todos: [{ content: "Publish the report", status: "completed" }],
+            })
+          : new AIMessage("Published the report; QA passed before publishing."),
+  });
+  assert.equal(outcome.seen.length, 2);
+  assert.ok(outcome.bound[0]!.includes("write_todos"));
+  assert.equal(outcome.bound[1]!.includes("write_todos"), false);
+  // Delivery tools stay available for an explicitly requested further deliverable.
+  assert.ok(outcome.bound[1]!.includes(PUBLISHER));
+  assert.ok(outcome.bound[1]!.includes("probe"));
+  assert.ok(
+    systemText(outcome.seen[1]!).includes("do not update the todo list"),
+  );
+  assert.equal(outcome.stop, null);
+});
+
+test("a write_todos call made after a committed publish anyway is denied without changing the todo list", async () => {
+  const outcome = await single({
+    thread: "committed-todos-denied",
+    publishes: [receipt("version-1")],
+    respond: (n) =>
+      n === 1
+        ? call(PUBLISHER, "publish-1")
+        : n === 2
+          ? call("write_todos", "todos-late", {
+              todos: [{ content: "Publish the report", status: "completed" }],
+            })
+          : new AIMessage("Published the report."),
+  });
+  const denied = outcome.messages.find(
+    (message) =>
+      ToolMessage.isInstance(message) && message.tool_call_id === "todos-late",
+  ) as ToolMessage | undefined;
+  assert.equal(denied?.status, "error");
+  assert.match(String(denied?.content), /AGENT_DELIVERY_COMMITTED/);
+  assert.equal(outcome.seen.length, 3);
+  assert.equal(announced(outcome.seen[2]!), "working:2");
 });
 
 test("a runaway loop after a committed publish is moved into closing, then closing finalizes it", async () => {
@@ -404,6 +469,9 @@ test("an earlier turn's delivery never tells a new request on the same thread to
   assert.equal(second!.seen.length, 6);
   for (const messages of second!.seen)
     assert.equal(has(messages, COMMITTED_MARKER), false);
+  // An earlier turn's delivery does not withdraw this turn's todo tool.
+  assert.equal(first!.bound[1]!.includes("write_todos"), false);
+  for (const names of second!.bound) assert.ok(names.includes("write_todos"));
   assert.equal(run.probes, 5);
   assert.equal(second!.progress?.phase, "working");
   assert.equal(second!.progress?.normalSteps, 6);

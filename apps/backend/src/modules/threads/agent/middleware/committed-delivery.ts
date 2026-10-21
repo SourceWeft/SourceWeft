@@ -17,7 +17,15 @@ import {
  */
 export const COMMITTED_DELIVERY_TOOL_DECISION_LIMIT = 3;
 
-const COMMITTED_DELIVERY_PROMPT = `Deliverable committed, finish now unless the user's request explicitly asked for a further deliverable or revision that is not yet published; in that case produce and publish only that, then finish. A host-verified publisher receipt in this turn confirms the published deliverable was delivered. Never re-verify, re-render or re-draft an already-published deliverable on your own. The final reply summarizes what was published and only the checks completed before publishing.`;
+const COMMITTED_DELIVERY_PROMPT = `Deliverable committed, finish now unless the user's request explicitly asked for a further deliverable or revision that is not yet published; in that case produce and publish only that, then finish. A host-verified publisher receipt in this turn confirms the published deliverable was delivered. Never re-verify, re-render or re-draft an already-published deliverable on your own, and do not update the todo list. The final reply summarizes what was published and only the checks completed before publishing.`;
+
+/**
+ * Bookkeeping tools withdrawn once this turn holds a committed delivery: a
+ * decision spent on them only delays the final reply. Delivery tools stay
+ * available for a further deliverable the user explicitly requested.
+ */
+export const COMMITTED_DELIVERY_BLOCKED_TOOL_NAMES: ReadonlySet<string> =
+  new Set(["write_todos"]);
 
 export type CommittedDelivery = {
   result: TerminalToolResult;
