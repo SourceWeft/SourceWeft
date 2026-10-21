@@ -12,24 +12,32 @@ import {
 import { ChatGenerationChunk, type ChatResult } from "@langchain/core/outputs";
 import { tool } from "@langchain/core/tools";
 import { MemorySaver } from "@langchain/langgraph";
-import { createDeepAgent } from "deepagents";
-import type { AgentMiddleware } from "langchain";
+import { createDeepAgent, type SubAgent } from "deepagents";
+import { createMiddleware, type AgentMiddleware } from "langchain";
 import { afterEach, beforeEach, test, vi } from "vitest";
 import { z } from "zod";
 import { logger } from "../../../../shared/logger";
 import { ModelGatewayError } from "../../../../shared/model-gateway/errors";
 import { createPreparedThreadTurn } from "../../../../test/prepared-turn";
-import { collectMessageStreamEvents } from "../../../../test/turn-stream-collectors";
+import {
+  collectCustomStreamEvents,
+  collectMessageStreamEvents,
+} from "../../../../test/turn-stream-collectors";
+import { mapDeepAgentEventToSse } from "../../stream";
 import {
   createSourceWeftModelRetryMiddleware,
   MODEL_CALL_RETRY_EVENT,
 } from "../middleware/model-call-observability";
+import { ScriptedChatModel } from "../../../../test/chat-model";
 import type { DeepAgentTurnEvent } from "./events";
+import { isSubagentNamespace } from "./subagent-namespace";
 import { createTurnRuntime } from "./turn-runtime";
+import { handleToolArgDeltaChunk } from "./tool-arg-stream-handler";
 import {
   adaptMessagesEvent,
   adaptToolArgDelta,
   adoptV3RunStream,
+  unwrapCustomEvent,
 } from "./v3-protocol";
 
 /**
@@ -44,8 +52,12 @@ type Turn =
       reasoning: string[];
       text: string[];
       toolCall?: { id: string; name: string; argChunks: string[] };
-      /** Throw after this many reasoning chunks have been yielded. */
-      failAfterReasoningChunks?: number;
+      /**
+       * Throw (the gateway's idle-watchdog error) after this many content
+       * chunks — reasoning, text and tool-arg fragments counted in stream
+       * order — have been yielded.
+       */
+      failAfterChunks?: number;
     }
   | { throwError: () => Error };
 
@@ -83,28 +95,34 @@ class StreamingScriptedChatModel extends BaseChatModel {
    */
   async *_streamResponseChunks(): AsyncGenerator<ChatGenerationChunk> {
     const turn = this.nextTurn();
-    let reasoningChunks = 0;
+    let chunks = 0;
+    const guard = () => {
+      if (chunks === turn.failAfterChunks) throw idleTimeout();
+    };
     for (const reasoning of ["", ...turn.reasoning]) {
-      if (reasoningChunks === turn.failAfterReasoningChunks) throw timeout();
+      guard();
       yield new ChatGenerationChunk({
         text: "",
         message: new AIMessageChunk({
           content: [{ type: "reasoning", reasoning, index: 0 }],
         }),
       });
-      if (reasoning.length > 0) reasoningChunks += 1;
+      if (reasoning.length > 0) chunks += 1;
     }
     for (const text of ["", ...turn.text]) {
+      guard();
       yield new ChatGenerationChunk({
         text,
         message: new AIMessageChunk({
           content: [{ type: "text", text, index: 1 }],
         }),
       });
+      if (text.length > 0) chunks += 1;
     }
     if (turn.toolCall) {
       let index = 0;
       for (const args of turn.toolCall.argChunks) {
+        guard();
         yield new ChatGenerationChunk({
           text: "",
           message: new AIMessageChunk({
@@ -122,8 +140,10 @@ class StreamingScriptedChatModel extends BaseChatModel {
           }),
         });
         index += 1;
+        chunks += 1;
       }
     }
+    guard();
     yield new ChatGenerationChunk({
       text: "",
       message: new AIMessageChunk({
@@ -158,16 +178,18 @@ const probe = tool(async () => "verified", {
   schema: z.object({ query: z.string() }),
 });
 
-const SCRIPT: Turn[] = [
-  {
-    reasoning: ["Let me ", "check the ", "sources."],
-    text: ["I will ", "verify first."],
-    toolCall: {
-      id: "call-probe",
-      name: "probe",
-      argChunks: ['{"query":', '"alpha"}'],
-    },
+const FIRST_DECISION = {
+  reasoning: ["Let me ", "check the ", "sources."],
+  text: ["I will ", "verify first."],
+  toolCall: {
+    id: "call-probe",
+    name: "probe",
+    argChunks: ['{"query":', '"alpha"}'],
   },
+} satisfies Turn;
+
+const SCRIPT: Turn[] = [
+  FIRST_DECISION,
   {
     reasoning: ["Verified."],
     text: ["Here is ", "the answer."],
@@ -181,16 +203,69 @@ const timeout = () =>
     provider: "deepseek",
   });
 
+/** The gateway's per-chunk watchdog (B3); maps to MODEL_TIMEOUT like `timeout`. */
+const idleTimeout = () =>
+  new ModelGatewayError({
+    code: "STREAM_IDLE_TIMEOUT",
+    message: "No stream data for 120000 ms",
+    provider: "deepseek",
+  });
+
+const SEGMENT_RESET_EMPTY = {
+  type: "segment-reset",
+  reason: "model_call_retry",
+  attempt: 2,
+  segmentIds: [],
+  toolCallIds: [],
+  keepTextChars: 0,
+  keepReasoningChars: 0,
+  dropTextChars: 0,
+  dropReasoningChars: 0,
+} as const;
+
 type Observed = {
   /** Raw v3 `messages` protocol events, reduced to the fields the runner reads. */
   protocol: unknown[];
-  /** DeepAgentTurnEvents the production message handler yields from them. */
+  /**
+   * DeepAgentTurnEvents the production message + custom handlers yield from
+   * them, with per-run ids normalised (see `observe`).
+   */
   turn: unknown[];
+  /** The same events, unnormalised. */
+  raw: DeepAgentTurnEvent[];
+  /** SSE frames `mapDeepAgentEventToSse` produced for `raw`. */
+  sse: unknown[];
   argDeltas: unknown[];
   calls: number;
   assistantContent: string;
   modelReasoning: string;
+  /** The runtime's reasoning segments once the stream drained. */
+  segments: Array<{ id: string; text: string }>;
+  renderBlocks: unknown[];
+  /** Tool-call ids still held by the streamed tool-arg buffers. */
+  pendingToolArgIds: Array<string | undefined>;
 };
+
+/**
+ * The run-independent view two observations are compared on. Segment ids are
+ * left out: the retry bundle itself closes the open segment at every model
+ * call (`model-call-begin`), so a run without it numbers segments differently.
+ */
+function comparable(observed: Observed) {
+  const { protocol, turn, argDeltas, assistantContent, modelReasoning } =
+    observed;
+  return {
+    protocol,
+    turn: turn.map((event) =>
+      (event as { type: string }).type === "reasoning"
+        ? { ...(event as object), segmentId: undefined }
+        : event,
+    ),
+    argDeltas,
+    assistantContent,
+    modelReasoning,
+  };
+}
 
 async function observe(input: {
   turns: Turn[];
@@ -219,6 +294,15 @@ async function observe(input: {
   const turn: DeepAgentTurnEvent[] = [];
   const argDeltas: unknown[] = [];
   for await (const event of stream) {
+    if (event.method === "custom") {
+      turn.push(
+        ...(await collectCustomStreamEvents({
+          payload: unwrapCustomEvent(event.params?.data),
+          runtime,
+        })),
+      );
+      continue;
+    }
     if (event.method !== "messages") continue;
     const data = event.params?.data as Record<string, unknown>;
     const delta = data.delta as Record<string, unknown> | undefined;
@@ -243,22 +327,60 @@ async function observe(input: {
         })),
       );
     }
+    // The runner feeds the same chunk to the tool-arg streamer right after the
+    // message handler (runner.ts), which is what fills the pending buffers a
+    // reset must clear.
     const argDelta = adaptToolArgDelta(data);
-    if (argDelta) argDeltas.push(argDelta);
+    if (argDelta) {
+      argDeltas.push(argDelta);
+      for (const argEvent of handleToolArgDeltaChunk({
+        delta: argDelta,
+        runtime,
+      })) {
+        turn.push(argEvent);
+      }
+    }
   }
   await stream.output;
+  const normaliseId = (id: string) => id.replace(input.thread, "<run>");
   return {
     protocol,
     // Segment ids/durations are per-run; compare the user-visible shape.
     turn: turn.map((event) =>
       event.type === "reasoning"
-        ? { type: "reasoning", reasoning: event.reasoning }
-        : event,
+        ? {
+            type: "reasoning",
+            reasoning: event.reasoning,
+            segmentId: normaliseId(event.segment.id),
+          }
+        : event.type === "segment-reset"
+          ? { ...event, segmentIds: event.segmentIds.map(normaliseId) }
+          : event,
     ),
+    raw: turn,
+    sse: turn.flatMap((event) => {
+      if (event.type === "done") return [];
+      const frame = mapDeepAgentEventToSse(event, "text-1");
+      return frame === null ? [] : [JSON.parse(frame.replace(/^data: /, ""))];
+    }),
     argDeltas,
     calls: model.calls,
     assistantContent: runtime.assistantContent,
     modelReasoning: runtime.modelReasoning ?? "",
+    segments: runtime.reasoningSegments.map((segment) => ({
+      id: normaliseId(segment.id),
+      text: segment.text,
+    })),
+    // Reasoning block durations are wall-clock; ids are per-run.
+    renderBlocks: runtime.renderBlocks.list().map((block) => {
+      const { durationMs: _durationMs, ...rest } = block as {
+        durationMs?: number;
+      } & typeof block;
+      return { ...rest, id: normaliseId(block.id) };
+    }),
+    pendingToolArgIds: [...runtime.partialToolArgsBySlot.values()].map(
+      (state) => state.id,
+    ),
   };
 }
 
@@ -318,7 +440,17 @@ test("the retry middleware bundle leaves the streamed v3 event sequence byte-ide
     ),
   );
 
-  assert.deepEqual(withRetry, baseline);
+  assert.deepEqual(comparable(withRetry), comparable(baseline));
+  assert.ok(
+    !baseline.turn.some(
+      (event) => (event as { type: string }).type === "segment-reset",
+    ),
+  );
+  assert.ok(
+    !withRetry.turn.some(
+      (event) => (event as { type: string }).type === "segment-reset",
+    ),
+  );
   assert.equal(warn.mock.calls.length, 0);
 });
 
@@ -335,10 +467,15 @@ test("a first-token timeout retried inside the step produces the same event sequ
   });
 
   assert.equal(retried.calls, baseline.calls + 1);
+  // Nothing streamed before the failure, so the reset has nothing to withdraw;
+  // it is still announced so the client can show the retry.
   assert.deepEqual(
-    { ...retried, calls: undefined },
-    { ...baseline, calls: undefined },
+    comparable({ ...retried, turn: retried.turn.slice(1) }),
+    comparable(baseline),
   );
+  assert.deepEqual(retried.turn[0], SEGMENT_RESET_EMPTY);
+  assert.deepEqual(retried.segments, baseline.segments);
+  assert.deepEqual(retried.renderBlocks, baseline.renderBlocks);
   const retries = warn.mock.calls.filter(
     (call) => call[0] === MODEL_CALL_RETRY_EVENT,
   );
@@ -349,37 +486,414 @@ test("a first-token timeout retried inside the step produces the same event sequ
   );
 });
 
-test("characterization: an attempt that dies mid-stream leaks its partial deltas before the retried attempt replays in full", async () => {
-  // Documents today's behaviour rather than endorsing it: the gateway's idle
-  // watchdog aborts a stream that already surfaced some reasoning, LangChain
-  // retries the whole call, and the client sees the fragment twice. Bounding
-  // that duplication is B4 (reasoning persistence), out of scope here.
+test("an attempt that dies mid-stream is withdrawn by one segment-reset and the retried attempt streams under a fresh segment id", async () => {
   const clean = await observe({
     turns: SCRIPT,
     middleware: fastRetry(),
     thread: "seq-midstream-clean",
   });
   const retried = await observe({
-    turns: [{ ...SCRIPT[0]!, failAfterReasoningChunks: 1 }, ...SCRIPT],
+    turns: [
+      {
+        reasoning: FIRST_DECISION.reasoning,
+        text: ["I will "],
+        // The failed attempt leaves a pending (never promoted) tool-arg buffer.
+        toolCall: {
+          id: "call-write",
+          name: "write_file",
+          argChunks: ['{"path":"notes.md",', '"content":"hel'],
+        },
+        // 3 reasoning + 1 text + 2 arg chunks, then the idle watchdog fires.
+        failAfterChunks: 6,
+      },
+      ...SCRIPT,
+    ],
     middleware: fastRetry(),
     thread: "seq-midstream-retried",
   });
   assert.equal(retried.calls, clean.calls + 1);
+
+  const types = (events: unknown[]) =>
+    events.map((event) => (event as { type: string }).type);
+  assert.deepEqual(types(retried.turn), [
+    "reasoning",
+    "reasoning",
+    "reasoning",
+    "text-delta",
+    "segment-reset",
+    ...types(clean.turn),
+  ]);
+  // Both write_file arg fragments reached the pending buffer before the
+  // failure (no `tool-input-delta` surfaces for them: core's v3 block-delta
+  // carries the accumulated args, which the handler concatenates again — a
+  // pre-existing gap outside this change), and the reset names that call.
   assert.deepEqual(
-    retried.turn.map((event) => (event as { type: string }).type),
+    retried.argDeltas.slice(0, 2).map((delta) => (delta as { id: string }).id),
+    ["call-write", "call-write"],
+  );
+  const resets = retried.turn.filter(
+    (event) => (event as { type: string }).type === "segment-reset",
+  );
+  assert.equal(resets.length, 1);
+  assert.deepEqual(resets[0], {
+    type: "segment-reset",
+    reason: "model_call_retry",
+    attempt: 2,
+    segmentIds: ["model-reasoning:<run>:1"],
+    toolCallIds: ["call-write"],
+    keepTextChars: 0,
+    keepReasoningChars: 0,
+    dropTextChars: "I will ".length,
+    dropReasoningChars: "Let me check the sources.".length,
+  });
+  // The SSE frame carries the contract verbatim, beside the other frames.
+  assert.deepEqual(
+    retried.sse.filter(
+      (frame) => (frame as { type: string }).type === "segment-reset",
+    ),
     [
-      "reasoning",
-      ...clean.turn.map((event) => (event as { type: string }).type),
+      {
+        type: "segment-reset",
+        reason: "model_call_retry",
+        attempt: 2,
+        segmentIds: ["model-reasoning:seq-midstream-retried:1"],
+        toolCallIds: ["call-write"],
+        keepTextChars: 0,
+        keepReasoningChars: 0,
+        dropTextChars: "I will ".length,
+        dropReasoningChars: "Let me check the sources.".length,
+      },
     ],
   );
-  // The leaked fragment reaches the client as its own reasoning event (and
-  // render block); the accumulated text only matches because the replayed
-  // first fragment is byte-identical and appendReasoningChunk collapses an
-  // identical chunk. Any other split would duplicate it.
-  assert.equal(retried.modelReasoning, clean.modelReasoning);
+  assert.equal(retried.sse.length, retried.turn.length);
+
+  // The withdrawn fragment streamed under segment 1; the retried attempt opens
+  // segment 2, which id 1 never reappears under, and the second model call
+  // opens segment 3 (every model-call-begin closes the open segment).
+  const segmentIds = (observed: Observed) =>
+    observed.turn.flatMap((event) =>
+      (event as { type: string }).type === "reasoning"
+        ? [(event as { segmentId: string }).segmentId]
+        : [],
+    );
+  assert.deepEqual(segmentIds(clean), [
+    "model-reasoning:<run>:1",
+    "model-reasoning:<run>:1",
+    "model-reasoning:<run>:1",
+    "model-reasoning:<run>:2",
+  ]);
+  assert.deepEqual(segmentIds(retried), [
+    "model-reasoning:<run>:1",
+    "model-reasoning:<run>:1",
+    "model-reasoning:<run>:1",
+    "model-reasoning:<run>:2",
+    "model-reasoning:<run>:2",
+    "model-reasoning:<run>:2",
+    "model-reasoning:<run>:3",
+  ]);
+
+  // What the turn ends with is exactly what a clean run ends with: one
+  // reasoning segment per decision, no duplicated text, no stray blocks, no
+  // pending tool-arg buffer for the abandoned write_file.
   assert.equal(retried.assistantContent, clean.assistantContent);
+  assert.equal(retried.modelReasoning, clean.modelReasoning);
+  assert.deepEqual(
+    retried.segments.map((segment) => segment.text),
+    clean.segments.map((segment) => segment.text),
+  );
+  assert.deepEqual(
+    retried.segments.map((segment) => segment.id),
+    ["model-reasoning:<run>:2", "model-reasoning:<run>:3"],
+  );
+  assert.ok(!retried.pendingToolArgIds.includes("call-write"));
+  assert.deepEqual(retried.pendingToolArgIds, clean.pendingToolArgIds);
+  assert.deepEqual(
+    retried.renderBlocks.map((block) => {
+      const { id: _id, ...rest } = block as { id: string };
+      return rest;
+    }),
+    clean.renderBlocks.map((block) => {
+      const { id: _id, ...rest } = block as { id: string };
+      return rest;
+    }),
+  );
   assert.equal(
     warn.mock.calls.filter((call) => call[0] === MODEL_CALL_RETRY_EVENT).length,
     1,
+  );
+});
+
+test("a retry after a tool round-trip keeps everything streamed before the failed attempt", async () => {
+  // Second decision: attempt 1 streams one reasoning fragment then dies;
+  // attempt 2 answers in full. Only the fragment is withdrawn.
+  const clean = await observe({
+    turns: SCRIPT,
+    middleware: fastRetry(),
+    thread: "seq-second-decision-clean",
+  });
+  const retried = await observe({
+    turns: [
+      SCRIPT[0]!,
+      { reasoning: ["Veri"], text: [], failAfterChunks: 1 },
+      SCRIPT[1]!,
+    ],
+    middleware: fastRetry(),
+    thread: "seq-second-decision-retried",
+  });
+  assert.equal(retried.calls, clean.calls + 1);
+
+  const resetIndex = retried.turn.findIndex(
+    (event) => (event as { type: string }).type === "segment-reset",
+  );
+  assert.ok(resetIndex > 0);
+  assert.deepEqual(retried.turn[resetIndex], {
+    type: "segment-reset",
+    reason: "model_call_retry",
+    attempt: 2,
+    segmentIds: ["model-reasoning:<run>:2"],
+    toolCallIds: [],
+    keepTextChars: "I will verify first.".length,
+    keepReasoningChars: "Let me check the sources.".length,
+    dropTextChars: 0,
+    dropReasoningChars: "Veri".length,
+  });
+  assert.deepEqual(retried.turn[resetIndex - 1], {
+    type: "reasoning",
+    reasoning: "Veri",
+    segmentId: "model-reasoning:<run>:2",
+  });
+  assert.deepEqual(
+    [
+      ...retried.turn.slice(0, resetIndex - 1),
+      ...retried.turn.slice(resetIndex + 1),
+    ].map((event) =>
+      (event as { type: string }).type === "reasoning"
+        ? { ...(event as object), segmentId: undefined }
+        : event,
+    ),
+    clean.turn.map((event) =>
+      (event as { type: string }).type === "reasoning"
+        ? { ...(event as object), segmentId: undefined }
+        : event,
+    ),
+  );
+  assert.equal(retried.assistantContent, clean.assistantContent);
+  assert.equal(retried.modelReasoning, clean.modelReasoning);
+  assert.deepEqual(retried.segments, [
+    { id: "model-reasoning:<run>:1", text: "Let me check the sources." },
+    { id: "model-reasoning:<run>:3", text: "Verified." },
+  ]);
+  assert.equal(
+    retried.turn.filter(
+      (event) => (event as { type: string }).type === "segment-reset",
+    ).length,
+    1,
+  );
+});
+
+test("a sub-agent's retry never reaches the parent stream: no model-call events, no segment-reset", async () => {
+  // Main agent: delegate once, then answer. Delegate: a streaming model whose
+  // first attempt dies mid-reasoning and whose retry succeeds — with its own
+  // retry bundle, so any model-call-* custom event here would be the child's.
+  // A child's custom events surface under the parent's depth-1 `tools:`
+  // namespace (its `messages` events are depth 2), which the runner would pass
+  // through as main — so the middleware itself writes them for `main` only.
+  let mainCalls = 0;
+  const mainModel = new ScriptedChatModel(() => {
+    mainCalls += 1;
+    return mainCalls === 1
+      ? new AIMessage({
+          content: "",
+          tool_calls: [
+            {
+              id: "task-1",
+              name: "task",
+              args: { description: "verify alpha", subagent_type: "verifier" },
+            },
+          ],
+        })
+      : new AIMessage("Delegate confirmed.");
+  });
+  const childModel = new StreamingScriptedChatModel([
+    { ...SCRIPT[0]!, failAfterChunks: 2 },
+    ...SCRIPT,
+  ]);
+  const verifier: SubAgent = {
+    name: "verifier",
+    description: "Verifies a claim.",
+    systemPrompt: "Verify the claim, then stop.",
+    tools: [probe] as unknown as SubAgent["tools"],
+    model: childModel,
+    middleware: fastRetry(),
+    interruptOn: {},
+  };
+  const agent = createDeepAgent({
+    model: mainModel,
+    tools: [],
+    middleware: [],
+    subagents: [verifier],
+    checkpointer: new MemorySaver(),
+  } as never) as unknown as {
+    streamEvents(input: unknown, options: unknown): Promise<unknown>;
+  };
+  const runtime = createTurnRuntime({
+    prepared: createPreparedThreadTurn({ runTraceId: "seq-subagent" }),
+  });
+  const stream = adoptV3RunStream(
+    await agent.streamEvents(
+      { messages: [new HumanMessage("Have the verifier check alpha.")] },
+      {
+        version: "v3",
+        configurable: { thread_id: "seq-subagent" },
+        recursionLimit: 25,
+      },
+    ),
+  );
+
+  const custom: Array<{ namespace: unknown[]; payload: unknown }> = [];
+  const parentTurn: DeepAgentTurnEvent[] = [];
+  for await (const event of stream) {
+    if (event.method !== "custom") continue;
+    const namespace = Array.isArray(event.params?.namespace)
+      ? (event.params.namespace as unknown[])
+      : [];
+    const payload = unwrapCustomEvent(event.params?.data);
+    custom.push({ namespace, payload });
+    // The runner's rule (runner.ts): a sub-agent's non-tool events never reach
+    // the parent's handlers — but see above, a child's custom events are not
+    // classified as the child's, so this is the path they would take.
+    if (isSubagentNamespace(namespace)) continue;
+    parentTurn.push(...(await collectCustomStreamEvents({ payload, runtime })));
+  }
+  await stream.output;
+
+  assert.equal(childModel.calls, 3);
+  assert.deepEqual(
+    custom.filter(({ payload }) =>
+      String((payload as { type?: string }).type).startsWith("model-call-"),
+    ),
+    [],
+  );
+  assert.deepEqual(parentTurn, []);
+  assert.equal(runtime.modelCallBoundary, null);
+  assert.equal(
+    warn.mock.calls.filter((call) => call[0] === MODEL_CALL_RETRY_EVENT).length,
+    1,
+  );
+});
+
+/**
+ * What a client following the SSE sequence ends up holding: reasoning text per
+ * segment id, with `segment-reset` dropping segments by id and cutting the
+ * accumulated text/reasoning from the end.
+ */
+function replaySse(frames: unknown[]) {
+  const segments = new Map<string, string>();
+  let text = "";
+  let reasoning = "";
+  for (const raw of frames) {
+    const frame = raw as Record<string, unknown>;
+    if (frame.type === "text-delta") text += String(frame.delta);
+    if (frame.type === "reasoning") {
+      const id = (frame.segment as { id: string }).id;
+      segments.set(id, (segments.get(id) ?? "") + String(frame.reasoning));
+      reasoning += String(frame.reasoning);
+    }
+    if (frame.type === "segment-reset") {
+      for (const id of frame.segmentIds as string[]) segments.delete(id);
+      text = text.slice(0, text.length - Number(frame.dropTextChars));
+      reasoning = reasoning.slice(
+        0,
+        reasoning.length - Number(frame.dropReasoningChars),
+      );
+    }
+  }
+  return { segments: [...segments.entries()], text, reasoning };
+}
+
+test("two consecutive model calls without a tool boundary: a retry in the second withdraws only its own segment", async () => {
+  // Re-enter the model straight after the first call, the way the step
+  // budget's `jumpTo: "model"` does (LangChain only honours the jump when the
+  // decision carried tool calls, so call 1 issues one that never runs). Call 2
+  // therefore begins with call 1's segment still open; its first attempt dies
+  // mid-text and its retry answers.
+  let reentered = false;
+  const reenterOnce = createMiddleware({
+    name: "ReenterModelOnce",
+    afterModel: {
+      canJumpTo: ["model"],
+      hook: () => {
+        if (reentered) return undefined;
+        reentered = true;
+        return { jumpTo: "model" };
+      },
+    },
+  });
+  const observed = await observe({
+    turns: [
+      { reasoning: ["A"], text: ["one"], toolCall: FIRST_DECISION.toolCall },
+      { reasoning: ["B"], text: ["tw"], failAfterChunks: 2 },
+      { reasoning: ["B2"], text: ["two"] },
+    ],
+    middleware: [reenterOnce, ...fastRetry()],
+    thread: "seq-reenter",
+  });
+  assert.equal(observed.calls, 3);
+
+  assert.deepEqual(observed.turn, [
+    { type: "reasoning", reasoning: "A", segmentId: "model-reasoning:<run>:1" },
+    { type: "text-delta", delta: "one" },
+    { type: "reasoning", reasoning: "B", segmentId: "model-reasoning:<run>:2" },
+    { type: "text-delta", delta: "tw" },
+    {
+      type: "segment-reset",
+      reason: "model_call_retry",
+      attempt: 2,
+      segmentIds: ["model-reasoning:<run>:2"],
+      toolCallIds: [],
+      keepTextChars: "one".length,
+      keepReasoningChars: "A".length,
+      dropTextChars: "tw".length,
+      dropReasoningChars: "B".length,
+    },
+    {
+      type: "reasoning",
+      reasoning: "B2",
+      segmentId: "model-reasoning:<run>:3",
+    },
+    { type: "text-delta", delta: "two" },
+  ]);
+
+  // Runtime and a replaying client agree: call 1's segment intact, call 2's
+  // failed segment gone, the retried one in its place.
+  const expectedSegments = [
+    ["model-reasoning:seq-reenter:1", "A"],
+    ["model-reasoning:seq-reenter:3", "B2"],
+  ];
+  assert.deepEqual(
+    observed.segments.map((segment) => [
+      segment.id.replace("<run>", "seq-reenter"),
+      segment.text,
+    ]),
+    expectedSegments,
+  );
+  assert.deepEqual(replaySse(observed.sse), {
+    segments: expectedSegments,
+    text: "onetwo",
+    reasoning: "AB2",
+  });
+  assert.equal(observed.assistantContent, "onetwo");
+  assert.equal(observed.modelReasoning, "AB2");
+  assert.deepEqual(
+    observed.renderBlocks.map((block) => {
+      const { id, ...rest } = block as { id: string; type: string };
+      return { ...rest, id: id.startsWith("text-") ? "text" : id };
+    }),
+    [
+      { id: "model-reasoning:<run>:1", type: "reasoning", text: "A" },
+      { id: "text", type: "text", text: "one" },
+      { id: "model-reasoning:<run>:3", type: "reasoning", text: "B2" },
+      { id: "text", type: "text", text: "two" },
+    ],
   );
 });

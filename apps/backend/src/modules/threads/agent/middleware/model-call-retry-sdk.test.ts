@@ -20,6 +20,7 @@ import {
   MODEL_CALL_RETRY_EVENT,
 } from "./model-call-observability";
 import { selectAgentRunProgress } from "./step-budget";
+import { unwrapCustomEvent } from "../turn/v3-protocol";
 
 // Same storage boundary as step-budget-full-stack.test.ts: the production
 // middleware stack (retry included) stays real; only the checkpointer is
@@ -145,6 +146,77 @@ test("a timed-out attempt is retried inside the same step: run completes, steps 
   assert.equal(typeof retries[0]?.elapsedMs, "number");
   assert.equal(logged(MODEL_CALL_FAILED_EVENT).length, 0);
 }, 20_000);
+
+test("every attempt announces itself on the custom stream, and a granted retry is announced before the next attempt", async () => {
+  let calls = 0;
+  const agent = await buildAgent(
+    new ScriptedChatModel(() => {
+      if (++calls === 1) throw timeout();
+      return new AIMessage("Recovered on the second attempt.");
+    }),
+  );
+  const stream = (await (
+    agent as unknown as {
+      streamEvents(input: unknown, options: unknown): Promise<unknown>;
+    }
+  ).streamEvents(
+    { messages: [new HumanMessage("Answer.")] },
+    { version: "v3", configurable: { thread_id: "retry-custom-stream" } },
+  )) as AsyncIterable<{ method: string; params?: { data?: unknown } }>;
+  const custom: unknown[] = [];
+  for await (const event of stream) {
+    if (event.method !== "custom") continue;
+    const payload = unwrapCustomEvent(event.params?.data);
+    if (String((payload as { type?: string }).type).startsWith("model-call-")) {
+      custom.push(payload);
+    }
+  }
+
+  assert.equal(calls, 2);
+  assert.deepEqual(custom, [
+    { type: "model-call-begin", attempt: 1 },
+    { type: "model-call-retry", attempt: 2, errorCode: "MODEL_TIMEOUT" },
+    { type: "model-call-begin", attempt: 2 },
+  ]);
+}, 20_000);
+
+test("a non-retryable failure announces its attempt but no retry", async () => {
+  const agent = await buildAgent(
+    new ScriptedChatModel(() => {
+      throw badRequest();
+    }),
+  );
+  const stream = (await (
+    agent as unknown as {
+      streamEvents(input: unknown, options: unknown): Promise<unknown>;
+    }
+  ).streamEvents(
+    { messages: [new HumanMessage("Answer.")] },
+    { version: "v3", configurable: { thread_id: "retry-custom-stream-fail" } },
+  )) as AsyncIterable<{ method: string; params?: { data?: unknown } }> & {
+    output: Promise<unknown>;
+  };
+  const custom: unknown[] = [];
+  let caught: unknown;
+  try {
+    for await (const event of stream) {
+      if (event.method !== "custom") continue;
+      const payload = unwrapCustomEvent(event.params?.data);
+      if (
+        String((payload as { type?: string }).type).startsWith("model-call-")
+      ) {
+        custom.push(payload);
+      }
+    }
+    await stream.output;
+  } catch (error) {
+    caught = error;
+  }
+
+  assert.equal(toContentError(caught).code, "MODEL_REQUEST_INVALID");
+  assert.deepEqual(custom, [{ type: "model-call-begin", attempt: 1 }]);
+  assert.equal(logged(MODEL_CALL_RETRY_EVENT).length, 0);
+});
 
 test("retries never charge the step budget: one failure per decision across a tool round-trip still counts two steps", async () => {
   let calls = 0,

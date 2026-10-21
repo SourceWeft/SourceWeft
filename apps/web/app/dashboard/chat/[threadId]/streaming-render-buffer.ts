@@ -110,6 +110,57 @@ export function createStreamingRenderBuffer({
       return deltaQueue.length > 0;
     },
 
+    removeReasoningBlocks(blockIds: Iterable<string>) {
+      const ids = new Set(blockIds);
+      if (ids.size === 0) {
+        return;
+      }
+      for (let index = renderBlocks.length - 1; index >= 0; index -= 1) {
+        const block = renderBlocks[index];
+        if (block?.type === "reasoning" && ids.has(block.id)) {
+          renderBlocks.splice(index, 1);
+        }
+      }
+    },
+
+    removeToolBlocks(toolCallIds: Iterable<string>) {
+      const ids = new Set(toolCallIds);
+      if (ids.size === 0) {
+        return;
+      }
+      for (let index = renderBlocks.length - 1; index >= 0; index -= 1) {
+        const block = renderBlocks[index];
+        if (block?.type === "tool" && ids.has(block.toolCallId)) {
+          renderBlocks.splice(index, 1);
+        }
+      }
+    },
+
+    /**
+     * Keeps only the first `keepChars` characters of the streamed text across
+     * the text blocks in order. Blocks emptied by the cut are dropped; the text
+     * block id counter is left alone so later blocks never reuse an id.
+     */
+    truncateText(keepChars: number) {
+      let remaining = Math.max(0, Math.floor(keepChars));
+      for (let index = 0; index < renderBlocks.length; index += 1) {
+        const block = renderBlocks[index];
+        if (block?.type !== "text") {
+          continue;
+        }
+        if (remaining >= block.text.length) {
+          remaining -= block.text.length;
+          continue;
+        }
+        block.text = block.text.slice(0, remaining);
+        remaining = 0;
+        if (block.text.length === 0) {
+          renderBlocks.splice(index, 1);
+          index -= 1;
+        }
+      }
+    },
+
     replaceRenderBlocks(nextRenderBlocks: MessageRenderBlock[]) {
       renderBlocks.length = 0;
       renderBlocks.push(...nextRenderBlocks.map(cloneRenderBlock));

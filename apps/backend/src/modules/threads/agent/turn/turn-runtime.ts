@@ -6,7 +6,10 @@ import type {
   ThinkingStepTrace,
   ToolCallTrace,
 } from "../..";
-import { createMessageRenderBlockBuilder } from "../../turn/render-blocks";
+import {
+  createMessageRenderBlockBuilder,
+  type MessageRenderBlockMark,
+} from "../../turn/render-blocks";
 import { AGENT_TOOL_NAMES } from "@sourceweft/agent-tool-registry";
 import { createCitationSnapshotTracker } from "./citation-tracker";
 import type { DeepAgentTurnOutcome } from "./events";
@@ -29,6 +32,34 @@ type RetrievalCitation = ReturnType<
 >;
 
 export type TurnRuntime = ReturnType<typeof createTurnRuntime>;
+
+/**
+ * What the runtime held when a model-call attempt began. A retry of that call
+ * rolls the runtime back to it (`discardModelOutputSince`) so the failed
+ * attempt's partial stream is withdrawn instead of replayed on top of itself.
+ * Strings are kept by reference (immutable, so no copy); the event the client
+ * receives carries their lengths.
+ */
+export type ModelCallBoundary = {
+  attempt: number;
+  assistantContent: string;
+  modelReasoning: string | undefined;
+  hasStreamedText: boolean;
+  hasTextSinceLastToolBoundary: boolean;
+  suppressRawToolCallText: boolean;
+  suppressLeakedCommandSpecText: boolean;
+  finishReason: string | undefined;
+  providerFields: Record<string, unknown> | undefined;
+  /**
+   * Reasoning segments that existed before the attempt started. The caller
+   * closes any open segment before capturing, so every segment the attempt
+   * streams is a new one and `segmentIds` fully describes a withdrawal.
+   */
+  segmentCount: number;
+  renderBlocks: MessageRenderBlockMark;
+  /** Streamed tool-arg buffers by slot, with the args length each had. */
+  toolArgSlots: Map<string, number>;
+};
 
 export function createTurnRuntime(input: { prepared: PreparedThreadTurn }) {
   const retrievalCallsById = new Map<string, RetrievalCallTrace>();
@@ -54,6 +85,10 @@ export function createTurnRuntime(input: { prepared: PreparedThreadTurn }) {
   );
   const runStartedAt = Date.now();
   let currentReasoningSegmentStartedAt: number | null = null;
+  // Segment ids are never reused: a segment withdrawn by a model-call retry
+  // keeps its index so the retried attempt's segment gets a fresh id (the
+  // client drops the old id on `segment-reset`).
+  let nextReasoningSegmentIndex = 1;
   const citationRegistry = new AgentCitationRegistry({
     workspaceId: input.prepared.workspace.id,
     threadId: input.prepared.thread.id,
@@ -111,12 +146,94 @@ export function createTurnRuntime(input: { prepared: PreparedThreadTurn }) {
     suppressLeakedCommandSpecText: false,
     currentReasoningSegment: null as
       DeepAgentTurnOutcome["reasoningSegments"][number] | null,
+    /** Set by `model-call-begin`; consumed by `model-call-retry`. */
+    modelCallBoundary: null as ModelCallBoundary | null,
     nextReasoningContext: { phase: "initial" } as
       | { phase: "initial" }
       | { phase: "after_tool"; toolCallId: string; tool: string },
     resetReasoningBoundary() {
       runtime.currentReasoningSegment = null;
       currentReasoningSegmentStartedAt = null;
+    },
+    /** Snapshot the model-output state as a model-call attempt begins. */
+    captureModelCallBoundary(attempt: number): ModelCallBoundary {
+      return {
+        attempt,
+        assistantContent: runtime.assistantContent,
+        modelReasoning: runtime.modelReasoning,
+        hasStreamedText: runtime.hasStreamedText,
+        hasTextSinceLastToolBoundary: runtime.hasTextSinceLastToolBoundary,
+        suppressRawToolCallText: runtime.suppressRawToolCallText,
+        suppressLeakedCommandSpecText: runtime.suppressLeakedCommandSpecText,
+        finishReason: runtime.finishReason,
+        providerFields: runtime.providerFields,
+        segmentCount: reasoningSegments.length,
+        renderBlocks: renderBlocks.mark(),
+        toolArgSlots: new Map(
+          [...partialToolArgsBySlot].map(([slot, state]) => [
+            slot,
+            state.args.length,
+          ]),
+        ),
+      };
+    },
+    /**
+     * Withdraw everything a failed model-call attempt streamed since
+     * `boundary`: its reasoning segments, its text, its render blocks and its
+     * pending tool-arg buffers. Returns what the client must drop, both as
+     * this-run lengths to keep (`keep*Chars`) and as tail lengths to cut
+     * (`drop*Chars`, which also hold for a client that seeded a prior run's
+     * text ahead of this one). The caller resets the reasoning boundary so
+     * the retried attempt opens a new segment.
+     */
+    discardModelOutputSince(boundary: ModelCallBoundary) {
+      const segmentIds = reasoningSegments
+        .splice(boundary.segmentCount)
+        .map((segment) => segment.id);
+      const dropTextChars = Math.max(
+        0,
+        runtime.assistantContent.length - boundary.assistantContent.length,
+      );
+      const dropReasoningChars = Math.max(
+        0,
+        (runtime.modelReasoning?.length ?? 0) -
+          (boundary.modelReasoning?.length ?? 0),
+      );
+      runtime.currentReasoningSegment = null;
+      currentReasoningSegmentStartedAt = null;
+
+      const toolCallIds: string[] = [];
+      for (const [slot, state] of partialToolArgsBySlot) {
+        const before = boundary.toolArgSlots.get(slot);
+        if (before !== undefined && state.args.length <= before) {
+          continue;
+        }
+        if (state.id && !toolCallsById.has(state.id)) {
+          toolCallIds.push(state.id);
+        }
+        partialToolArgsBySlot.delete(slot);
+      }
+
+      renderBlocks.rollback(boundary.renderBlocks);
+      runtime.assistantContent = boundary.assistantContent;
+      runtime.modelReasoning = boundary.modelReasoning;
+      runtime.hasStreamedText = boundary.hasStreamedText;
+      runtime.hasTextSinceLastToolBoundary =
+        boundary.hasTextSinceLastToolBoundary;
+      runtime.suppressRawToolCallText = boundary.suppressRawToolCallText;
+      runtime.suppressLeakedCommandSpecText =
+        boundary.suppressLeakedCommandSpecText;
+      runtime.finishReason = boundary.finishReason;
+      runtime.providerFields = boundary.providerFields;
+
+      return {
+        segmentIds,
+        toolCallIds,
+        keepTextChars: boundary.assistantContent.length,
+        keepReasoningChars: boundary.modelReasoning?.length ?? 0,
+        dropTextChars,
+        dropReasoningChars,
+      };
     },
     collectRetrievalCalls() {
       return retrievalCallOrder
@@ -160,7 +277,7 @@ export function createTurnRuntime(input: { prepared: PreparedThreadTurn }) {
         runtime.currentReasoningSegment = {
           id: createModelReasoningSegmentId({
             runTraceId: input.prepared.runTraceId,
-            index: reasoningSegments.length + 1,
+            index: nextReasoningSegmentIndex,
           }),
           text: "",
           sequence: nextSequence(),
@@ -174,6 +291,7 @@ export function createTurnRuntime(input: { prepared: PreparedThreadTurn }) {
             : {}),
         };
         reasoningSegments.push(runtime.currentReasoningSegment);
+        nextReasoningSegmentIndex += 1;
       }
 
       runtime.currentReasoningSegment.durationMs =

@@ -307,3 +307,34 @@ test("character-triggered persistence is awaited rather than started in the back
   await push;
   assert.equal(completed, true);
 });
+
+test("a segment reset is persisted after the deltas it withdraws, never buffered or reordered", async () => {
+  const { coalescer, flushed } = harness();
+  assert.equal(await coalescer.push(reasoning("A", "a1", 1)), true);
+  assert.equal(await coalescer.push(reasoning("A", "a2", 2)), true);
+  assert.equal(await coalescer.push(text("partial")), true);
+  const reset = {
+    type: "segment-reset",
+    reason: "model_call_retry",
+    attempt: 2,
+    segmentIds: ["A"],
+    toolCallIds: [],
+    keepTextChars: 0,
+    dropReasoningChars: 4,
+    keepReasoningChars: 0,
+  };
+  // Not a delta: whatever was pending is flushed first and the caller appends
+  // the reset itself, so the replay order is reasoning, text, reset.
+  assert.equal(await coalescer.push(reset), false);
+  assert.deepEqual(
+    flushed.map((payload) => payload.type),
+    ["reasoning", "text-delta"],
+  );
+  assert.equal(flushed[0]?.reasoning, "a1a2");
+  assert.equal(await coalescer.push(reasoning("B", "b1", 3)), true);
+  await coalescer.flush();
+  assert.deepEqual(
+    flushed.map((payload) => payload.type),
+    ["reasoning", "text-delta", "reasoning"],
+  );
+});

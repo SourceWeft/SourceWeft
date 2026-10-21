@@ -1867,3 +1867,401 @@ test("tool-call trace events are output-free while streamToolCallsById keeps the
     "completed",
   );
 });
+
+/**
+ * `seed` mirrors a `mode: "resume"` attach: `use-thread-stream-action` seeds
+ * the assistant text, the render buffer and `metadata.reasoning` with the
+ * prior run's persisted content before this run streams.
+ */
+function createSegmentResetHarness(seed?: {
+  content: string;
+  reasoning: string;
+}) {
+  let message: ChatMessageItem = {
+    id: "assistant-1",
+    role: "assistant",
+    content: seed?.content ?? "",
+    contentJson: {},
+    parentMessageId: null,
+    metadata: seed ? { reasoning: seed.reasoning } : {},
+    createdAt: new Date(0).toISOString(),
+  };
+  let assistantText = seed?.content ?? "";
+  let latestContent = seed?.content ?? "";
+  let hasRenderedDelta = false;
+  const streamToolCallsById = new Map<string, ToolCallRecord>();
+  const streamRenderBuffer = createStreamingRenderBuffer({
+    initialRenderBlocks: seed
+      ? [{ id: "persisted-text-1", type: "text", text: seed.content }]
+      : [],
+    maxDeltaBatchChars: 800,
+  });
+  const normalizeModelReasoningSegmentRecord = (
+    value: unknown,
+    fallbackSequence = 0,
+  ): ModelReasoningSegmentRecord | null => {
+    const record =
+      value && typeof value === "object" && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : null;
+    const text = typeof record?.text === "string" ? record.text : "";
+    if (!record || !text) {
+      return null;
+    }
+    return {
+      id:
+        typeof record.id === "string"
+          ? record.id
+          : `model-reasoning-${fallbackSequence + 1}`,
+      text,
+      sequence:
+        typeof record.sequence === "number"
+          ? record.sequence
+          : fallbackSequence,
+      phase:
+        record.phase === "initial" || record.phase === "after_tool"
+          ? record.phase
+          : undefined,
+    };
+  };
+  const context = createBaseStreamingContext({
+    normalizeModelReasoningSegmentRecord,
+    // Mirrors `resolveToolCallFromStreamEvent`: a `tool-input-delta` merges
+    // its partial input into the running record, a result completes it.
+    resolveToolCallFromStreamEvent: ({ event, streamToolCallsById: byId }) => {
+      const data = getToolEventData(event) as
+        { input?: Record<string, unknown>; tool?: string } | undefined;
+      const id = event.id ?? "tool-1";
+      const existing = byId.get(id);
+      return {
+        id,
+        tool: data?.tool ?? existing?.tool ?? "write_file",
+        input: { ...(existing?.input ?? {}), ...(data?.input ?? {}) },
+        output: event.type === "tool-call-result" ? { ok: true } : null,
+        latencyMs: event.type === "tool-call-result" ? 5 : null,
+        status: event.type === "tool-call-result" ? "completed" : "running",
+        error: null,
+        sequence: existing?.sequence ?? byId.size + 1,
+      };
+    },
+    resolveTraceEventFromStreamEvent: buildToolCallTraceEvent,
+    streamRenderBuffer,
+    streamToolCallsById,
+    syncStreamingToolCalls: () => {
+      message = {
+        ...message,
+        metadata: {
+          ...message.metadata,
+          toolCalls: [...streamToolCallsById.values()],
+          renderBlocks: streamRenderBuffer.snapshotRenderBlocks(),
+        },
+      };
+    },
+    updateStreamingAssistantMessage: (updater) => {
+      message = updater(message);
+    },
+  });
+  // Mirrors the runner's `drainQueuedDeltasNow`.
+  const drainQueuedDeltasNow = () => {
+    if (!streamRenderBuffer.hasQueuedDeltas()) {
+      return;
+    }
+    assistantText += streamRenderBuffer.drainQueuedDeltas();
+    streamRenderBuffer.appendText(assistantText.slice(latestContent.length));
+    latestContent = assistantText;
+    message = {
+      ...message,
+      content: assistantText,
+      metadata: {
+        ...message.metadata,
+        renderBlocks: streamRenderBuffer.snapshotRenderBlocks(),
+      },
+    };
+  };
+  const textDelta = (delta: string) => {
+    testExports.handleStreamingTextDelta({
+      context,
+      assistantText,
+      delta,
+      enqueueDelta: (value) => streamRenderBuffer.enqueueDelta(value),
+      startDeltaDrain: () => undefined,
+    });
+  };
+  const reasoning = (id: string, text: string, sequence: number) => {
+    testExports.handleStreamingReasoning({
+      context,
+      reasoning: text,
+      segment: { id, text, sequence, phase: "initial" },
+    });
+  };
+  const toolEvent = (
+    type: string,
+    id: string,
+    data: { input?: Record<string, unknown>; tool?: string },
+  ) => {
+    testExports.handleStreamingToolCallEvent({
+      context,
+      event: toolCallEventWithData({ type, id, data }),
+      drainQueuedDeltasNow,
+      refreshedArtifactToolIds: new Set(),
+      refreshedWorkfileToolIds: new Set(),
+      setArtifactsRefreshKey: () => undefined,
+      setWorkfilesRefreshKey: () => undefined,
+    });
+  };
+  const segmentReset = (event: {
+    segmentIds: string[];
+    toolCallIds: string[];
+    keepTextChars?: number;
+    keepReasoningChars?: number;
+    dropTextChars?: number;
+    dropReasoningChars?: number;
+  }) => {
+    testExports.handleStreamingSegmentReset({
+      context,
+      event: { ...event, reason: "model_call_retry", attempt: 2 },
+      drainQueuedDeltasNow,
+      getAssistantText: () => assistantText,
+      setAssistantText: (text) => {
+        assistantText = text;
+      },
+      setHasRenderedDelta: (value) => {
+        hasRenderedDelta = value;
+      },
+      setLatestAssistantMessageContent: (content) => {
+        latestContent = content;
+      },
+    });
+  };
+
+  return {
+    drainQueuedDeltasNow,
+    getAssistantText: () => assistantText,
+    getHasRenderedDelta: () => hasRenderedDelta,
+    getMessage: () => message,
+    reasoning,
+    segmentReset,
+    streamToolCallsById,
+    textDelta,
+    toolEvent,
+  };
+}
+
+test("segment-reset withdraws the failed model attempt so the retry replaces it", () => {
+  const harness = createSegmentResetHarness();
+
+  // Reasoning that survives the reset, then the text written before the
+  // failed attempt started.
+  harness.reasoning("seg-0", "pre ", 0);
+  harness.textDelta("Hello ");
+  harness.drainQueuedDeltasNow();
+  const keepTextChars = harness.getAssistantText().length;
+  const keepReasoningChars = "pre ".length;
+
+  // A completed tool call that must survive even when the reset names it.
+  harness.toolEvent("tool-call-start", "tool-done", { tool: "read_file" });
+  harness.toolEvent("tool-call-result", "tool-done", {});
+
+  // The failed attempt: reasoning segment A, a partial text delta and a tool
+  // call whose argument chunks never completed.
+  harness.reasoning("seg-a", "doomed thought", 1);
+  harness.textDelta("partial A");
+  harness.toolEvent("tool-input-delta", "tool-pending", {
+    tool: "write_file",
+    input: { path: "a.ts", content: "cons" },
+  });
+  assert.equal(harness.getAssistantText(), "Hello partial A");
+  assert.equal(
+    harness.streamToolCallsById.get("tool-pending")?.status,
+    "running",
+  );
+
+  harness.segmentReset({
+    segmentIds: ["seg-a"],
+    toolCallIds: ["tool-pending", "tool-done", "tool-unknown"],
+    keepTextChars,
+    keepReasoningChars,
+  });
+
+  assert.equal(harness.getAssistantText(), "Hello ");
+  assert.equal(harness.getMessage().content, "Hello ");
+  assert.equal(harness.getHasRenderedDelta(), true);
+  assert.equal(harness.streamToolCallsById.has("tool-pending"), false);
+  assert.equal(
+    harness.streamToolCallsById.get("tool-done")?.status,
+    "completed",
+  );
+
+  // The retried attempt: a new segment id and fresh text.
+  harness.reasoning("seg-b", "better thought", 2);
+  harness.textDelta("World");
+  harness.drainQueuedDeltasNow();
+
+  const message = harness.getMessage();
+  assert.equal(message.content, "Hello World");
+  assert.equal(message.metadata.reasoning, "pre better thought");
+  assert.deepEqual(
+    (message.metadata.reasoningSegments as ModelReasoningSegmentRecord[]).map(
+      (segment) => [segment.id, segment.text],
+    ),
+    [
+      ["seg-0", "pre "],
+      ["seg-b", "better thought"],
+    ],
+  );
+  assert.deepEqual(
+    (message.metadata.renderBlocks as Array<{ id: string; type: string }>).map(
+      (block) => block.id,
+    ),
+    [
+      "stream-reasoning-seg-0",
+      "stream-text-1",
+      "stream-tool-tool-done",
+      "stream-reasoning-seg-b",
+      // The failed attempt's emptied block (stream-text-2) is dropped and the
+      // retry's text never reuses its id.
+      "stream-text-3",
+    ],
+  );
+  const textBlocks = (
+    message.metadata.renderBlocks as Array<{ type: string; text?: string }>
+  ).filter((block) => block.type === "text");
+  assert.deepEqual(
+    textBlocks.map((block) => block.text),
+    ["Hello ", "World"],
+  );
+  assert.deepEqual(
+    (message.metadata.toolCalls as ToolCallRecord[]).map((call) => call.id),
+    ["tool-done"],
+  );
+  const traceParts = message.metadata.traceParts as TracePartRecord[];
+  assert.deepEqual(
+    traceParts.map((part) =>
+      part.kind === "tool"
+        ? `tool:${part.toolCallId}`
+        : `${part.kind}:${part.id}`,
+    ),
+    ["reasoning:seg-0", "tool:tool-done", "reasoning:seg-b"],
+  );
+  const traceEvents = message.metadata
+    .traceEvents as ReasoningTraceEventRecord[];
+  assert.deepEqual(
+    traceEvents.map((event) => event.itemId),
+    ["tool-done"],
+  );
+  assert.deepEqual(
+    buildAssistantActivityItems({
+      assistantText: message.content,
+      toolCalls: message.metadata.toolCalls as ToolCallRecord[],
+      traceParts,
+    }).map((item) =>
+      item.type === "tool"
+        ? `tool:${item.toolCall.id}`
+        : `${item.type}:${item.id}`,
+    ),
+    ["reasoning:seg-0", "tool:tool-done", "reasoning:seg-b"],
+  );
+  assert.equal(message.metadata.isTextInterrupted, false);
+});
+
+test("segment-reset naming unknown ids leaves the streamed state alone", () => {
+  const harness = createSegmentResetHarness();
+  harness.reasoning("seg-0", "thinking", 0);
+  harness.textDelta("Hello");
+  harness.toolEvent("tool-call-start", "tool-done", { tool: "read_file" });
+  harness.toolEvent("tool-call-result", "tool-done", {});
+  harness.drainQueuedDeltasNow();
+  const before = harness.getMessage();
+
+  harness.segmentReset({
+    segmentIds: ["seg-missing"],
+    toolCallIds: ["tool-missing", "tool-done"],
+    keepTextChars: "Hello".length,
+    keepReasoningChars: "thinking".length,
+  });
+
+  const after = harness.getMessage();
+  assert.equal(after.content, before.content);
+  assert.equal(harness.getAssistantText(), "Hello");
+  assert.equal(after.metadata.reasoning, "thinking");
+  assert.deepEqual(
+    after.metadata.reasoningSegments,
+    before.metadata.reasoningSegments,
+  );
+  assert.deepEqual(after.metadata.renderBlocks, before.metadata.renderBlocks);
+  assert.deepEqual(after.metadata.traceParts, before.metadata.traceParts);
+  assert.deepEqual(after.metadata.traceEvents, before.metadata.traceEvents);
+  assert.deepEqual(after.metadata.toolCalls, before.metadata.toolCalls);
+  assert.equal(
+    harness.streamToolCallsById.get("tool-done")?.status,
+    "completed",
+  );
+});
+
+test("segment-reset on a resume continuation cuts only the failed attempt from the end", () => {
+  const priorText = "Earlier answer.\n";
+  const priorReasoning = "earlier reasoning ";
+  const harness = createSegmentResetHarness({
+    content: priorText,
+    reasoning: priorReasoning,
+  });
+
+  // This run: reasoning segment A and a partial text delta, then the model
+  // call fails and is retried.
+  harness.reasoning("seg-a", "doomed", 1);
+  harness.textDelta("partial A");
+  harness.drainQueuedDeltasNow();
+  assert.equal(harness.getAssistantText(), `${priorText}partial A`);
+  assert.equal(
+    harness.getMessage().metadata.reasoning,
+    `${priorReasoning}doomed`,
+  );
+
+  // The producer's this-run lengths would be 0 here; the drop counts win.
+  harness.segmentReset({
+    segmentIds: ["seg-a"],
+    toolCallIds: [],
+    keepTextChars: 0,
+    keepReasoningChars: 0,
+    dropTextChars: "partial A".length,
+    dropReasoningChars: "doomed".length,
+  });
+
+  assert.equal(harness.getAssistantText(), priorText);
+  assert.equal(harness.getMessage().content, priorText);
+  assert.equal(harness.getMessage().metadata.reasoning, priorReasoning);
+  assert.deepEqual(harness.getMessage().metadata.reasoningSegments, []);
+
+  harness.reasoning("seg-b", "better", 2);
+  harness.textDelta("Retried answer.");
+  harness.drainQueuedDeltasNow();
+
+  const message = harness.getMessage();
+  assert.equal(message.content, `${priorText}Retried answer.`);
+  assert.equal(message.metadata.reasoning, `${priorReasoning}better`);
+  assert.deepEqual(
+    (message.metadata.renderBlocks as Array<{ type: string; text?: string }>)
+      .filter((block) => block.type === "text")
+      .map((block) => block.text),
+    [priorText, "Retried answer."],
+  );
+});
+
+test("segment-reset falls back to absolute keep lengths without drop counts", () => {
+  const harness = createSegmentResetHarness();
+  harness.reasoning("seg-0", "pre ", 0);
+  harness.textDelta("Hello ");
+  harness.drainQueuedDeltasNow();
+  harness.reasoning("seg-a", "doomed", 1);
+  harness.textDelta("partial A");
+
+  harness.segmentReset({
+    segmentIds: ["seg-a"],
+    toolCallIds: [],
+    keepTextChars: "Hello ".length,
+    keepReasoningChars: "pre ".length,
+  });
+
+  assert.equal(harness.getAssistantText(), "Hello ");
+  assert.equal(harness.getMessage().metadata.reasoning, "pre ");
+});

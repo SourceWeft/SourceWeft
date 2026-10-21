@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { getWriter } from "@langchain/langgraph";
 import {
   createMiddleware,
   modelRetryMiddleware,
@@ -11,6 +12,7 @@ import {
   MODEL_STREAM_DURATION_EXCEEDED_CODE,
   toContentError,
 } from "../../../content/model-gateway-error";
+import { currentAgentStepScope } from "./step-budget";
 import type { SourceWeftToolObservabilityContext } from "./tool-observability";
 
 /**
@@ -41,11 +43,63 @@ import type { SourceWeftToolObservabilityContext } from "./tool-observability";
  *   the timer. `wrapModelCall` handlers compose first-is-outermost
  *   (`AgentNode`), which is why the array order below is load-bearing.
  *
+ * Stream side: each attempt announces itself with a LangGraph custom event
+ * (`model-call-begin`) and a retry decision emits `model-call-retry` before
+ * the next attempt starts. The turn's custom-stream handler turns the pair into
+ * a `segment-reset` so the client withdraws what the failed attempt streamed
+ * instead of seeing it replayed. Both are written through `getWriter()` (as
+ * the step budget's progress is), so they ride the same ordered stream as the
+ * model's own message chunks. Only the main graph writes them: a sub-agent's
+ * custom events surface under the parent's `tools:` namespace (depth 1, which
+ * the runner treats as main, unlike the child's depth-2 `messages` events),
+ * so a child's retry is gated here, at the source, the way the step budget
+ * emits progress for `main` only.
+ *
+ * Ordering assumption: `getWriter()` pushes a custom event straight onto the
+ * run stream, whereas the model's chunks reach it through LangChain's shared,
+ * non-awaited callback queue. A `model-call-retry` therefore lands after the
+ * failed attempt's chunks only because that queue is idle in this process (no
+ * other async callback handlers are registered). An environment that adds one
+ * — a LangSmith tracer, say — could delay late chunks past the reset, and the
+ * client would then append a withdrawn fragment to the retried attempt.
+ *
  * No middleware here keeps state beyond the scope of one model call.
  */
 
 export const MODEL_CALL_RETRY_EVENT = "agent.model_call.retry" as const;
 export const MODEL_CALL_FAILED_EVENT = "agent.model_call.failed" as const;
+
+/** Custom stream event: a model-call attempt (`attempt`, 1-based) is starting. */
+export const MODEL_CALL_BEGIN_CUSTOM_EVENT = "model-call-begin" as const;
+/** Custom stream event: a retry was granted; `attempt` is the one about to start. */
+export const MODEL_CALL_RETRY_CUSTOM_EVENT = "model-call-retry" as const;
+
+export type ModelCallBeginCustomEvent = {
+  type: typeof MODEL_CALL_BEGIN_CUSTOM_EVENT;
+  attempt: number;
+};
+export type ModelCallRetryCustomEvent = {
+  type: typeof MODEL_CALL_RETRY_CUSTOM_EVENT;
+  attempt: number;
+  errorCode: string;
+};
+
+function writeCustomEvent(
+  event: ModelCallBeginCustomEvent | ModelCallRetryCustomEvent,
+) {
+  if (!isMainGraphModelCall()) return;
+  getWriter()?.(event);
+}
+
+function isMainGraphModelCall(): boolean {
+  try {
+    return currentAgentStepScope() === "main";
+  } catch {
+    // No graph scope: the middleware is being driven outside a LangGraph run,
+    // where there is no stream to write to either.
+    return false;
+  }
+}
 
 /** Retries after the initial attempt (LangChain default restated). */
 export const MODEL_CALL_MAX_RETRIES = 2;
@@ -182,6 +236,11 @@ export function createSourceWeftModelRetryMiddleware(
     };
     if (reason === null) {
       logger.warn(MODEL_CALL_RETRY_EVENT, logMeta(context, fields));
+      writeCustomEvent({
+        type: MODEL_CALL_RETRY_CUSTOM_EVENT,
+        attempt: (attempt ?? 1) + 1,
+        errorCode: failure.errorCode,
+      });
       return true;
     }
     logger.warn(
@@ -213,6 +272,10 @@ export function createSourceWeftModelRetryMiddleware(
         current.attempt += 1;
         current.attemptStartedAt = startedAt;
       }
+      writeCustomEvent({
+        type: MODEL_CALL_BEGIN_CUSTOM_EVENT,
+        attempt: current?.attempt ?? 1,
+      });
       try {
         return await handler(request);
       } catch (error) {

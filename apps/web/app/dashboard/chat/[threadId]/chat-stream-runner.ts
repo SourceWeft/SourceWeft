@@ -26,6 +26,7 @@ import {
   handleStreamingError,
   handleStreamingFinish,
   handleStreamingReasoning,
+  handleStreamingSegmentReset,
   handleStreamingStart,
   handleStreamingTextDelta,
   handleStreamingTextInterrupted,
@@ -59,6 +60,7 @@ const TITLE_POLL_TIMEOUT_MS = 60000;
 export type ChatStreamEventPayload = ToolCallEventPayload & {
   agentRunStop?: unknown;
   agentRunProgress?: unknown;
+  attempt?: number;
   progress?: unknown;
   availableCitations?: unknown;
   citations?: unknown;
@@ -67,6 +69,8 @@ export type ChatStreamEventPayload = ToolCallEventPayload & {
   contentJson?: unknown;
   data?: unknown;
   delta?: string;
+  dropReasoningChars?: number;
+  dropTextChars?: number;
   effectiveMentionedSourceIds?: unknown;
   effectiveSourceIds?: unknown;
   error?: string;
@@ -75,6 +79,8 @@ export type ChatStreamEventPayload = ToolCallEventPayload & {
   id?: string;
   input?: unknown;
   jobId?: string;
+  keepReasoningChars?: number;
+  keepTextChars?: number;
   latencyMs?: number;
   liveConfirmations?: unknown;
   mentionedSourceIds?: unknown;
@@ -82,8 +88,10 @@ export type ChatStreamEventPayload = ToolCallEventPayload & {
   output?: unknown;
   parentMessageId?: string | null;
   query?: string;
+  reason?: string;
   reasoning?: string;
   segment?: unknown;
+  segmentIds?: unknown;
   sourceIds?: unknown;
   status?: string;
   step?: unknown;
@@ -93,7 +101,30 @@ export type ChatStreamEventPayload = ToolCallEventPayload & {
   title?: string;
   tool?: string;
   toolCall?: unknown;
+  toolCallIds?: unknown;
   userMessageId?: string;
+};
+
+/**
+ * `segment-reset`: the turn layer retried a failed model call. Everything the
+ * failed attempt streamed is withdrawn before the retry streams a replacement.
+ */
+export type ChatStreamSegmentResetEvent = {
+  type: "segment-reset";
+  reason: "model_call_retry";
+  attempt: number;
+  segmentIds: string[];
+  toolCallIds: string[];
+  keepTextChars: number;
+  keepReasoningChars: number;
+  /**
+   * Characters streamed by the failed attempt. Preferred over the `keep*`
+   * absolute lengths: on a `resume` continuation the client text and
+   * reasoning are seeded with the prior run's content, so only a cut from the
+   * end is correct there.
+   */
+  dropTextChars?: number;
+  dropReasoningChars?: number;
 };
 
 export type ChatStreamToolCallEventType =
@@ -637,6 +668,19 @@ export async function runChatStream(
       } else if (data.type === "text-interrupted") {
         handleStreamingTextInterrupted({
           context: streamingEventHandlerContext,
+        });
+      } else if (data.type === "segment-reset") {
+        // Same path on live streams and on attach/replay: the replayed reset
+        // withdraws the failed attempt before its retry is replayed.
+        handleStreamingSegmentReset({
+          context: streamingEventHandlerContext,
+          event: data,
+          drainQueuedDeltasNow,
+          getAssistantText: input.getAssistantText,
+          setAssistantText: input.setAssistantText,
+          setLatestAssistantMessageContent:
+            input.setLatestAssistantMessageContent,
+          setHasRenderedDelta: input.setHasRenderedDelta,
         });
       } else if (isToolCallEvent(data)) {
         handleStreamingToolCallEvent({
