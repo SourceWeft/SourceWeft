@@ -106,8 +106,10 @@ import type {
   StartThreadTurnResponse,
   EndThreadQuestionsRequest,
   EndThreadQuestionsResponse,
+  StreamThreadMode,
   StreamThreadRequest,
   StreamThreadResponse,
+  ThreadRunSummary,
   CompleteSourceUploadResponse,
   CreateSourceUploadIntentRequest,
   CreateSourceUploadIntentResponse,
@@ -132,7 +134,25 @@ import type {
   UpdateWorkspaceSkillRequest,
   UpdateWorkspaceSkillResponse,
 } from "@sourceweft/contracts";
+import { SOURCEWEFT_WEB_RUN_STOP_SUFFIX } from "@sourceweft/contracts";
 import { HttpClient } from "./http-client";
+
+/**
+ * What a stopped run returns: the turn's persisted result when one exists,
+ * otherwise the stopped run's state with empty billing and retrieval.
+ */
+export type StopThreadRunResponse =
+  | StreamThreadResponse
+  | {
+      threadRun: {
+        id: string;
+        idempotencyKey: string;
+        status: ThreadRunSummary["status"];
+        mode: StreamThreadMode;
+      };
+      billing: NonNullable<StreamThreadResponse["billing"]>;
+      retrieval: StreamThreadResponse["retrieval"];
+    };
 
 /** `?locale=…` when a language is asked for, nothing otherwise. */
 function localeQuery(locale: string | undefined) {
@@ -1287,6 +1307,21 @@ export class ContentClient {
       {
         ...input,
         mode: "resume",
+        stream: false,
+      },
+    );
+  }
+
+  /**
+   * Stop a durable chat run by its idempotency key (the run's own key, without
+   * the `:stop` suffix). Idempotent: stopping an already-finished run returns
+   * its result. See the stop contract next to `SOURCEWEFT_WEB_RUN_STOP_SUFFIX`.
+   */
+  stopThreadRun(workspaceId: string, threadId: string, runKey: string) {
+    return this.http.post<StopThreadRunResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/stream`,
+      {
+        idempotencyKey: `${runKey}${SOURCEWEFT_WEB_RUN_STOP_SUFFIX}`,
         stream: false,
       },
     );
