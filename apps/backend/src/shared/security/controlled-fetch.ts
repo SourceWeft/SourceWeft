@@ -81,12 +81,29 @@ export function createControlledFetch(
           dispatcher: agentFor(url),
         } as RequestInit & { dispatcher: Agent });
         const location = response.headers.get("location");
-        if (
-          !location ||
-          ![301, 302, 303, 307, 308].includes(response.status) ||
-          request.redirect === "manual"
-        )
+        if (!location || ![301, 302, 303, 307, 308].includes(response.status))
           return response;
+        if (request.redirect === "manual") {
+          // The caller follows redirects itself (the MCP SDK does since 1.32).
+          // Apply the same target policy we apply when following, so a hostile
+          // redirect still aborts the scope instead of being returned
+          // unfollowed and silently ignored by the caller.
+          try {
+            const target = checkEndpointUrl(
+              new URL(location, url).toString(),
+              policy,
+            );
+            if (target.origin !== url.origin)
+              throw new EndpointPolicyError(
+                "redirect",
+                "Cross-origin endpoint redirects are not allowed; configure the destination endpoint directly.",
+              );
+          } catch (error) {
+            await response.body?.cancel();
+            throw error;
+          }
+          return response;
+        }
         await response.body?.cancel();
         if (request.redirect === "error" || redirects >= 3) {
           throw new EndpointPolicyError(

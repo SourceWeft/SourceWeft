@@ -161,6 +161,31 @@ test("same-origin redirects preserve POST on 307 and explicit manual mode", asyn
   await manual.body?.cancel();
 });
 
+test.each([
+  ["a metadata address", "http://169.254.169.254/metadata"],
+  ["another origin", "http://127.0.0.1:1/elsewhere"],
+])(
+  "manual mode still applies the redirect target policy to %s and poisons the scope",
+  async (_label, location) => {
+    const port = await serve((_req, res) => {
+      res.writeHead(302, { location });
+      res.end();
+    });
+    const origin = `http://127.0.0.1:${port}`;
+    const requests = scope({
+      enforceAddressChecks: true,
+      allowedInternalOrigins: [origin],
+    });
+    await assert.rejects(
+      requests.fetch(`${origin}/.well-known/oauth-protected-resource`, {
+        redirect: "manual",
+      }),
+      (error: unknown) => error instanceof EndpointPolicyError,
+    );
+    assert.throws(() => requests.throwIfDenied(), EndpointPolicyError);
+  },
+);
+
 test("caller cancellation and closing the scope terminate active streams", async () => {
   const port = await serve((_req, res) => {
     res.writeHead(200);
