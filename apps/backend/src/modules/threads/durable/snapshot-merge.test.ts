@@ -5,7 +5,9 @@ import { testExports } from "./runner";
 import {
   mergeChatRunSnapshot,
   mergeCommittedArtifactRenderBlocks,
+  readSnapshotRetrieval,
   resolveTerminalStatusFromFinishedSnapshot,
+  slimSnapshotAssistantMessage,
   updateExistingTracePartsFromToolCalls,
 } from "./snapshot";
 import type { ChatRunSnapshot } from "./types";
@@ -191,10 +193,11 @@ test("nested assistant metadata also preserves committed blocks", () => {
     },
   });
 
+  // Legacy embedded metadata still counts as committed-artifact authority, but
+  // the copy itself is no longer written back into the slim embedded message.
   assert.deepEqual(merged.renderBlocks, [committedBlock]);
-  assert.deepEqual(merged.assistantMessage?.metadata.renderBlocks, [
-    committedBlock,
-  ]);
+  assert.equal(merged.assistantMessage?.content, "done");
+  assert.equal("renderBlocks" in merged.assistantMessage!.metadata, false);
 });
 
 test("runner snapshots cannot overwrite host-only Agent tool state", () => {
@@ -299,6 +302,7 @@ test("refreshing existing tool trace parts from tool calls keeps them output-fre
   const part = refreshed[0]!;
   assert.equal(part.kind, "tool");
   assert.ok(!("output" in part));
+  assert.ok(!("input" in part));
   assert.ok(JSON.stringify(refreshed).length < 1024);
   assert.deepEqual(
     part.kind === "tool"
@@ -369,4 +373,238 @@ test("a pre-reset snapshot at a lower revision cannot overwrite the post-reset s
     incoming: postReset,
   });
   assert.equal(forward.reasoning, "short");
+});
+
+const committedToolCall = {
+  id: "publish-1",
+  tool: "publish_artifact",
+  input: { title: "Deck" },
+  status: "completed",
+  latencyMs: 10,
+  error: null,
+  sequence: 1,
+  output: {
+    status: "ready",
+    type: "committed_artifact_result",
+    artifactType: "slides",
+    artifactId: "artifact-1",
+    artifactVersionId: "version-1",
+    artifactOutputBlockId: committedBlock.id,
+    workflowVersion: "v1",
+  },
+};
+
+function fullAssistantMessage(metadata: Record<string, unknown>) {
+  return {
+    id: "message-1",
+    teamId: "team-1",
+    workspaceId: "workspace-1",
+    threadId: "thread-1",
+    parentMessageId: "user-message-1",
+    role: "assistant" as const,
+    content: "final answer",
+    createdBy: null,
+    model: "gpt-5",
+    creditsConsumed: 7,
+    contentJson: { version: 1, parts: [] },
+    metadata,
+    createdAt: "2026-10-21T00:00:00.000Z",
+  };
+}
+
+const finalizedMetadata = {
+  finishReason: "stop",
+  errorCode: null,
+  traceId: "trace-1",
+  userMessageId: "user-message-1",
+  threadRun: { id: "run-1", status: "running" },
+  agentRunStop: { reason: "step_limit" },
+  toolCalls: [committedToolCall],
+  renderBlocks: [committedBlock],
+  traceParts: [{ id: "publish-1", kind: "tool" }],
+  traceEvents: [{ id: "event-1" }],
+  reasoning: "long reasoning",
+  reasoningSegments: [{ id: "segment-1", text: "long reasoning" }],
+  retrieval: { citations: [{ id: "c1" }], availableCitations: [{ id: "c1" }] },
+  meteredLlmCalls: [{ id: "call-1", consumedCredits: 7 }],
+  meteredLlmCreditsConsumed: 7,
+  providerCostUsd: 0.01,
+  modelAlias: "gpt-5",
+};
+
+const slimAssistantMessage = {
+  id: "message-1",
+  threadId: "thread-1",
+  role: "assistant",
+  parentMessageId: "user-message-1",
+  content: "final answer",
+  contentJson: { version: 1, parts: [] },
+  model: "gpt-5",
+  createdAt: "2026-10-21T00:00:00.000Z",
+  metadata: {
+    finishReason: "stop",
+    errorCode: null,
+    traceId: "trace-1",
+    userMessageId: "user-message-1",
+    threadRun: { id: "run-1", status: "running" },
+    agentRunStop: { reason: "step_limit" },
+  },
+};
+
+test("the merged snapshot persists only the slim assistant message", () => {
+  const merged = mergeChatRunSnapshot({
+    current: {},
+    incoming: {
+      toolCalls: [committedToolCall],
+      renderBlocks: [committedBlock],
+      assistantMessage: fullAssistantMessage(finalizedMetadata),
+    },
+  });
+
+  assert.deepEqual(merged.assistantMessage, slimAssistantMessage);
+  assert.deepEqual(
+    slimSnapshotAssistantMessage(fullAssistantMessage(finalizedMetadata)),
+    slimAssistantMessage,
+  );
+  assert.deepEqual(merged.toolCalls, [committedToolCall]);
+  assert.deepEqual(merged.renderBlocks, [committedBlock]);
+});
+
+test("a row written with the full embedded copy shrinks on its next write", () => {
+  const merged = mergeChatRunSnapshot({
+    current: {
+      toolCalls: [committedToolCall],
+      renderBlocks: [committedBlock],
+      assistantMessage: fullAssistantMessage(finalizedMetadata),
+    },
+    incoming: { lastEventType: "finish" },
+  });
+
+  assert.deepEqual(merged.assistantMessage, slimAssistantMessage);
+  assert.equal(merged.lastEventType, "finish");
+});
+
+test("committed artifacts held only in a legacy embedded copy survive the slim merge", () => {
+  // A row from before the slim copy whose top level lost the committed
+  // publication (stale runner write) while the embedded metadata kept it.
+  const merged = mergeChatRunSnapshot({
+    current: {
+      toolCalls: [],
+      renderBlocks: [],
+      assistantMessage: fullAssistantMessage({
+        toolCalls: [committedToolCall],
+        renderBlocks: [committedBlock],
+      }),
+    },
+    incoming: {
+      toolCalls: [{ ...committedToolCall, output: { stale: true } }],
+      renderBlocks: [{ id: "text-1", type: "text", text: "stale" }],
+    },
+  });
+
+  assert.deepEqual(merged.renderBlocks, [
+    { id: "text-1", type: "text", text: "stale" },
+    committedBlock,
+  ]);
+  assert.deepEqual(
+    (merged.toolCalls as Array<{ output?: unknown }>)[0]?.output,
+    committedToolCall.output,
+  );
+  assert.equal("toolCalls" in merged.assistantMessage!.metadata, false);
+  assert.equal("renderBlocks" in merged.assistantMessage!.metadata, false);
+});
+
+test("the stale backstop still sees finishReason between finalize and finishRun", () => {
+  // Between the finalizer's commit and finishRun, the finish reason exists only
+  // on the embedded assistant message of the persisted snapshot.
+  const persisted = mergeChatRunSnapshot({
+    current: {},
+    incoming: {
+      assistantMessage: fullAssistantMessage({
+        ...finalizedMetadata,
+        errorCode: undefined,
+      }),
+    },
+  });
+  assert.equal(persisted.finishReason, undefined);
+  assert.equal(persisted.assistantMessage?.metadata.finishReason, "stop");
+  assert.equal(
+    resolveTerminalStatusFromFinishedSnapshot(
+      JSON.parse(JSON.stringify(persisted)) as ChatRunSnapshot,
+    ),
+    "completed",
+  );
+});
+
+test("citations events write one retrieval location and keep its profile fields", () => {
+  const registry = [{ id: "c1" }, { id: "c2" }];
+  let snapshot = testExports.updateSnapshotFromPayload(
+    {},
+    { type: "citations", citations: registry },
+  );
+  assert.deepEqual(snapshot.retrieval, {
+    citations: registry,
+    availableCitations: registry,
+  });
+  assert.equal("citations" in snapshot, false);
+  assert.equal("availableCitations" in snapshot, false);
+
+  snapshot = {
+    ...snapshot,
+    retrieval: {
+      embeddingProfileId: "profile-1",
+      vectorStrategy: "ann_hnsw",
+      annIndexUsed: "idx",
+      citations: [],
+      availableCitations: registry,
+    },
+  };
+  snapshot = testExports.updateSnapshotFromPayload(snapshot, {
+    type: "citations",
+    citations: [{ id: "c2" }],
+    availableCitations: registry,
+  });
+  assert.deepEqual(snapshot.retrieval, {
+    embeddingProfileId: "profile-1",
+    vectorStrategy: "ann_hnsw",
+    annIndexUsed: "idx",
+    citations: [{ id: "c2" }],
+    availableCitations: registry,
+  });
+  assert.equal("citations" in snapshot, false);
+});
+
+test("retrieval reads fall back to top-level citations of older rows", () => {
+  assert.equal(readSnapshotRetrieval({}), undefined);
+  assert.deepEqual(readSnapshotRetrieval({ citations: [{ id: "c1" }] }), {
+    citations: [{ id: "c1" }],
+    availableCitations: [{ id: "c1" }],
+  });
+  assert.deepEqual(
+    readSnapshotRetrieval({
+      citations: [{ id: "c1" }],
+      availableCitations: [{ id: "c1" }, { id: "c2" }],
+    }),
+    {
+      citations: [{ id: "c1" }],
+      availableCitations: [{ id: "c1" }, { id: "c2" }],
+    },
+  );
+  // The single location wins over a stale legacy copy.
+  assert.deepEqual(
+    readSnapshotRetrieval({
+      citations: [{ id: "stale" }],
+      availableCitations: [{ id: "stale" }],
+      retrieval: {
+        embeddingProfileId: "profile-1",
+        citations: [],
+        availableCitations: [{ id: "c1" }],
+      },
+    }),
+    {
+      embeddingProfileId: "profile-1",
+      citations: [],
+      availableCitations: [{ id: "c1" }],
+    },
+  );
 });

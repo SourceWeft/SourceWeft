@@ -15,7 +15,7 @@ import {
   type ChatRunStreamEvent,
 } from "./stream-manager";
 import type { ChatRunSnapshot, ChatThreadRunRecord } from "./types";
-import { normalizeRetrievalSnapshot } from "./snapshot";
+import { normalizeRetrievalSnapshot, readSnapshotRetrieval } from "./snapshot";
 import {
   isTerminalRunStatus,
   hasLiveRunWorker,
@@ -85,15 +85,20 @@ export async function getRunResult(run: ChatThreadRunRecord) {
           messageId: run.userMessageId,
         })
       : null);
+  // The messages row is the assistant message's source of truth; the snapshot
+  // keeps only a slim copy, used when the row is missing.
+  const assistantMessageId =
+    run.assistantMessageId ?? snapshot.assistantMessage?.id ?? null;
   const assistantMessage =
-    snapshot.assistantMessage ??
-    (run.assistantMessageId
+    (assistantMessageId
       ? await findMessageRecord({
           teamId: run.teamId,
           workspaceId: run.workspaceId,
-          messageId: run.assistantMessageId,
+          messageId: assistantMessageId,
         })
-      : null);
+      : null) ??
+    snapshot.assistantMessage ??
+    null;
 
   if (!thread || !userMessage || !assistantMessage) {
     throw new ContentError(
@@ -111,7 +116,7 @@ export async function getRunResult(run: ChatThreadRunRecord) {
       metadata: clientReasoningMetadata(assistantMessage.metadata),
     } as MessageRecord,
     billing: snapshot.billing ?? buildEmptyBilling(run.teamId),
-    retrieval: normalizeRetrievalSnapshot(snapshot.retrieval) ?? {
+    retrieval: normalizeRetrievalSnapshot(readSnapshotRetrieval(snapshot)) ?? {
       embeddingProfileId: null,
       vectorStrategy: null,
       annIndexUsed: null,

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { beforeEach, test, vi } from "vitest";
 
 const findThreadRecordMock = vi.fn();
+const findMessageRecordMock = vi.fn();
 
 // Only the thread lookup is stubbed; the visibility decision (`canViewThread`)
 // stays real so the test exercises the actual authorization rule.
@@ -13,18 +14,29 @@ vi.mock("../thread/repository", async (importActual) => {
   };
 });
 
+vi.mock("../message-repository", async (importActual) => {
+  const actual = await importActual<typeof import("../message-repository")>();
+  return {
+    ...actual,
+    findMessageRecord: (input: unknown) => findMessageRecordMock(input),
+  };
+});
+
 const { isRunThreadViewable, getRunResult } = await import("./run-results");
 
+const reasoningWrite = {
+  runId: "run",
+  parentRunId: "prior",
+  base: "before",
+  revision: 2,
+  terminal: true,
+};
+
 test("completed API result retains reasoning but excludes its internal fixed base", async () => {
+  findMessageRecordMock.mockResolvedValue(null);
   const metadata = {
     reasoning: "before\nafter",
-    reasoningWrite: {
-      runId: "run",
-      parentRunId: "prior",
-      base: "before",
-      revision: 2,
-      terminal: true,
-    },
+    reasoningWrite: { ...reasoningWrite },
   };
   const run = {
     snapshotJson: {
@@ -37,6 +49,85 @@ test("completed API result retains reasoning but excludes its internal fixed bas
   assert.equal(result.assistantMessage.metadata.reasoning, metadata.reasoning);
   assert.equal("reasoningWrite" in result.assistantMessage.metadata, false);
   assert.equal(metadata.reasoningWrite.base, "before");
+});
+
+test("the run result reads the assistant message from its row, not the slim snapshot copy", async () => {
+  const rowMetadata = {
+    finishReason: "stop",
+    reasoning: "before\nafter",
+    reasoningWrite: { ...reasoningWrite },
+    meteredLlmCalls: [{ id: "call-1", consumedCredits: 3 }],
+    toolCalls: [{ id: "tool-1", tool: "search", output: "found" }],
+  };
+  findMessageRecordMock.mockResolvedValue({
+    id: "assistant",
+    content: "final answer",
+    metadata: rowMetadata,
+  });
+  const run = {
+    teamId: "team-1",
+    workspaceId: "workspace-1",
+    assistantMessageId: "assistant",
+    snapshotJson: {
+      thread: { id: "thread" },
+      userMessage: { id: "user" },
+      assistantMessage: {
+        id: "assistant",
+        content: "partial",
+        metadata: { finishReason: "stop" },
+      },
+      retrieval: {
+        embeddingProfileId: "profile-1",
+        vectorStrategy: "ann_hnsw",
+        annIndexUsed: "idx",
+        citations: [{ id: "c1" }],
+        availableCitations: [{ id: "c1" }, { id: "c2" }],
+      },
+    },
+  } as unknown as Parameters<typeof getRunResult>[0];
+  const result = await getRunResult(run);
+  assert.deepEqual(findMessageRecordMock.mock.lastCall?.[0], {
+    teamId: "team-1",
+    workspaceId: "workspace-1",
+    messageId: "assistant",
+  });
+  assert.equal(result.assistantMessage.content, "final answer");
+  assert.deepEqual(
+    result.assistantMessage.metadata.meteredLlmCalls,
+    rowMetadata.meteredLlmCalls,
+  );
+  assert.deepEqual(
+    result.assistantMessage.metadata.toolCalls,
+    rowMetadata.toolCalls,
+  );
+  assert.equal("reasoningWrite" in result.assistantMessage.metadata, false);
+  assert.deepEqual(result.retrieval, {
+    embeddingProfileId: "profile-1",
+    vectorStrategy: "ann_hnsw",
+    annIndexUsed: "idx",
+    citations: [{ id: "c1" }],
+    availableCitations: [{ id: "c1" }, { id: "c2" }],
+  });
+});
+
+test("the run result still reads retrieval from rows written before the single location", async () => {
+  findMessageRecordMock.mockResolvedValue({ id: "assistant", metadata: {} });
+  const run = {
+    assistantMessageId: "assistant",
+    snapshotJson: {
+      thread: { id: "thread" },
+      userMessage: { id: "user" },
+      citations: [{ id: "c1" }],
+    },
+  } as unknown as Parameters<typeof getRunResult>[0];
+  const result = await getRunResult(run);
+  assert.deepEqual(result.retrieval, {
+    embeddingProfileId: null,
+    vectorStrategy: null,
+    annIndexUsed: null,
+    citations: [{ id: "c1" }],
+    availableCitations: [{ id: "c1" }],
+  });
 });
 
 const context = {

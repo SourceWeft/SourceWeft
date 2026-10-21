@@ -152,7 +152,9 @@ test("finalized results replace snapshot accounting once without inheriting anot
     { meteredLlmCalls: [{ id: "old-call", consumedCredits: 9 }] as never },
     result,
   );
-  assert.deepEqual(next.meteredLlmCalls, calls);
+  // The per-call list lives on the messages row only; an inherited list from
+  // an older snapshot is dropped rather than kept.
+  assert.equal(next.meteredLlmCalls, undefined);
   assert.equal(next.meteredLlmCreditsConsumed, 2);
   assert.deepEqual(next.usage, { totalTokens: 5 });
   assert.deepEqual(testExports.snapshotWithFinalizedResult(next, result), next);
@@ -162,6 +164,53 @@ test("finalized results replace snapshot accounting once without inheriting anot
   } as never);
   assert.equal(missing.meteredLlmCalls, undefined);
   assert.equal(missing.usage, undefined);
+});
+
+test("a paused turn's finalized retrieval keeps the streamed citations", () => {
+  const registry = [{ citation: "c1" }, { citation: "c2" }];
+  const result = {
+    assistantMessage: { metadata: {} },
+    billing: { consumedCredits: 0 },
+    retrieval: {
+      embeddingProfileId: "profile-1",
+      vectorStrategy: "ann_hnsw",
+      annIndexUsed: "idx",
+      citations: [],
+      availableCitations: registry,
+    },
+  } as never;
+  const expected = {
+    embeddingProfileId: "profile-1",
+    vectorStrategy: "ann_hnsw",
+    annIndexUsed: "idx",
+    citations: registry,
+    availableCitations: registry,
+  };
+
+  // A paused turn emits no closing citations event, so the registry streamed
+  // as `citations` stays what its message projects, as before retrieval had
+  // one location. Older rows streamed it to the top level.
+  for (const streamed of [
+    { retrieval: { citations: registry, availableCitations: registry } },
+    { citations: registry, availableCitations: registry } as ChatRunSnapshot,
+  ]) {
+    const next = testExports.snapshotWithFinalizedResult(streamed, result);
+    assert.deepEqual(next.retrieval, expected);
+    assert.equal(next.citations, undefined);
+    assert.equal(next.availableCitations, undefined);
+    assert.deepEqual(
+      testExports.buildSnapshotMetadata({
+        run: createRun({ status: "waiting_for_approval" }),
+        snapshot: { ...next, finishReason: "tool_confirmation_requested" },
+      }).retrieval,
+      expected,
+    );
+  }
+  // Without streamed citations the finalizer's retrieval stands.
+  assert.deepEqual(
+    testExports.snapshotWithFinalizedResult({}, result).retrieval,
+    (result as { retrieval: unknown }).retrieval,
+  );
 });
 
 test("terminal failure commits the run before emitting error and finish", async () => {
@@ -430,10 +479,10 @@ test("waiting approval metadata keeps confirmation and resume checkpoint", () =>
 
   assert.equal(metadata.finishReason, "tool_confirmation_requested");
   assert.equal(metadata.reasoning, "Need to ask for approval.");
+  // Persisted segments are structure only; the text is in `reasoning`.
   assert.deepEqual(metadata.reasoningSegments, [
     {
       id: "reasoning-before-approval",
-      text: "Need to ask for approval.",
       sequence: 1,
     },
   ]);
@@ -618,7 +667,8 @@ test("run snapshots update streaming reasoning deltas in one trace part", () => 
         }
       ).traceParts ?? []
     ).map((part) => `${part.order}:${part.kind}:${part.text ?? ""}`),
-    ["0:reasoning:The user wants TEST"],
+    // Reasoning trace parts are structure only.
+    ["0:reasoning:"],
   );
 });
 
@@ -1759,4 +1809,67 @@ test("tool-call-error trace events keep the error state without the payload", ()
   );
   assert.ok(JSON.stringify(cappedEvent).length < 2_300);
   assert.equal(toToolCallTrace(capped.toolCalls?.[0])?.error, longError);
+});
+
+test("the waiting-for-approval write keeps the retrieval profile fields", () => {
+  const retrieval = {
+    embeddingProfileId: "profile-1",
+    vectorStrategy: "ann_hnsw" as const,
+    annIndexUsed: "idx",
+    citations: [{ id: "c1" }],
+    availableCitations: [{ id: "c1" }, { id: "c2" }],
+  };
+  const run = createRun({ status: "waiting_for_approval" });
+  const snapshot: ChatRunSnapshot = {
+    finishReason: "tool_confirmation_requested",
+    retrieval,
+  };
+
+  assert.deepEqual(
+    testExports.buildSnapshotMetadata({ run, snapshot }).retrieval,
+    retrieval,
+  );
+  for (const metadata of [
+    buildAssistantMessageConfirmationMetadata({
+      currentMetadata: {},
+      run,
+      snapshot,
+    }),
+    buildAssistantMessageSnapshotMetadata({
+      currentMetadata: {},
+      run,
+      snapshot,
+    }),
+  ]) {
+    assert.deepEqual(metadata.retrieval, retrieval);
+  }
+});
+
+test("message projections read retrieval from older rows' top-level citations", () => {
+  const run = createRun({ status: "failed" });
+  const snapshot = {
+    citations: [{ id: "c1" }],
+    availableCitations: [{ id: "c1" }, { id: "c2" }],
+  } as ChatRunSnapshot;
+  const expected = {
+    citations: [{ id: "c1" }],
+    availableCitations: [{ id: "c1" }, { id: "c2" }],
+  };
+
+  assert.deepEqual(
+    testExports.buildSnapshotMetadata({ run, snapshot }).retrieval,
+    expected,
+  );
+  assert.deepEqual(
+    buildAssistantMessageSnapshotMetadata({
+      currentMetadata: {},
+      run,
+      snapshot,
+    }).retrieval,
+    expected,
+  );
+  assert.deepEqual(
+    testExports.buildSnapshotMetadata({ run, snapshot: {} }).retrieval,
+    { citations: [], availableCitations: [] },
+  );
 });

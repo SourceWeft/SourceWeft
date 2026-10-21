@@ -624,10 +624,10 @@ test("handled confirmation metadata replaces stale approval_requested tool calls
     ],
   );
   assert.equal(metadata.reasoning, "before approval");
+  // Persisted segments are structure only; the text is in `reasoning`.
   assert.deepEqual(metadata.reasoningSegments, [
     {
       id: "reasoning-before",
-      text: "Need approval before deleting.",
       sequence: 1,
     },
   ]);
@@ -693,7 +693,6 @@ test("pending confirmation metadata keeps approval expiry on the assistant messa
   assert.deepEqual(metadata.reasoningSegments, [
     {
       id: "reasoning-before",
-      text: "Need user approval.",
       sequence: 1,
     },
   ]);

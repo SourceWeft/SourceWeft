@@ -29,6 +29,7 @@ import {
   mergeCommittedArtifactRenderBlocks,
   parseStringArray,
   replaceConfirmationInToolCalls,
+  slimSnapshotAssistantMessage,
   updateExistingTracePartsFromToolCalls,
 } from "./snapshot";
 import { toObjectRecord } from "../../../shared/records";
@@ -190,13 +191,13 @@ function mergeLockedTerminalSnapshot(input: {
     ...terminalFields,
     ...(currentAssistant || incomingAssistant
       ? {
-          assistantMessage: {
+          assistantMessage: slimSnapshotAssistantMessage({
             ...(currentAssistant ?? incomingAssistant!),
             metadata: {
               ...currentMetadata,
               ...terminalMetadata,
             },
-          },
+          }),
         }
       : {}),
   };
@@ -800,7 +801,14 @@ export async function appendArtifactOutputToChatRun(input: {
           type: "artifact_output",
         };
     const renderBlocks = existing ? currentBlocks : [...currentBlocks, block];
-    const nextSnapshot = { ...snapshot, renderBlocks };
+    const assistantMessage = slimSnapshotAssistantMessage(
+      snapshot.assistantMessage,
+    );
+    const nextSnapshot = {
+      ...snapshot,
+      ...(assistantMessage ? { assistantMessage } : {}),
+      renderBlocks,
+    };
 
     const [updatedRun] = await tx
       .update(chatThreadRuns)

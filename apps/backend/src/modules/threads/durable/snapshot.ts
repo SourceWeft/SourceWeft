@@ -10,7 +10,13 @@ import {
   type TracePart,
 } from "../turn/trace-parts";
 import { buildTerminalAssistantTraceState } from "../turn/assistant-run-terminal-state";
-import type { ChatRunSnapshot, ChatThreadRunStatus } from "./types";
+import type {
+  ChatRunSnapshot,
+  ChatRunSnapshotAssistantMessage,
+  ChatRunSnapshotRetrieval,
+  ChatThreadRunStatus,
+  DurableRunResultSnapshot,
+} from "./types";
 import type { EmbeddingVectorStrategy } from "../../content/types";
 import { CLIENT_CANCELLED_CODE } from "./run-constants";
 import { ContentError } from "../../content/errors";
@@ -51,14 +57,76 @@ function getRenderBlocks(value: unknown): unknown[] | undefined {
   return Array.isArray(record?.renderBlocks) ? record.renderBlocks : undefined;
 }
 
-function getAssistantRenderBlocks(snapshot: ChatRunSnapshot) {
-  return getRenderBlocks(snapshot.assistantMessage?.metadata);
+function getToolCalls(value: unknown): unknown[] | undefined {
+  const record = toObjectRecord(value);
+  return Array.isArray(record?.toolCalls) ? record.toolCalls : undefined;
+}
+
+/** Message-record fields a run snapshot keeps for its assistant message. */
+const SNAPSHOT_ASSISTANT_MESSAGE_FIELDS = [
+  "id",
+  "threadId",
+  "role",
+  "parentMessageId",
+  "content",
+  "contentJson",
+  "model",
+  "createdAt",
+  "updatedAt",
+] as const;
+
+/**
+ * Metadata scalars a run snapshot keeps for its assistant message: the
+ * terminal backstop (`finishReason`, `errorCode`, `error`), approval and run
+ * identity (`threadRun`), and stop/trace identity. `finishReason` exists only
+ * here between finalize and `finishRun`, so the stale backstop needs it.
+ */
+const SNAPSHOT_ASSISTANT_METADATA_FIELDS = [
+  "finishReason",
+  "errorCode",
+  "error",
+  "isError",
+  "isCancelled",
+  "threadRun",
+  "traceId",
+  "userMessageId",
+  "agentRunStop",
+] as const;
+
+/**
+ * The bounded copy of the assistant message a run snapshot persists.
+ *
+ * The messages row is the source of truth for the assistant message; the
+ * snapshot used to embed the whole row (tool calls, trace, reasoning,
+ * retrieval, metering), which doubled every persisted run. Fields are
+ * allow-listed so a new message field cannot re-inflate the snapshot.
+ */
+export function slimSnapshotAssistantMessage(
+  message: unknown,
+): ChatRunSnapshotAssistantMessage | undefined {
+  const record = toObjectRecord(message);
+  if (!record) {
+    return undefined;
+  }
+  const metadata = toObjectRecord(record.metadata) ?? {};
+  const slim: Record<string, unknown> = { metadata: {} };
+  for (const key of SNAPSHOT_ASSISTANT_MESSAGE_FIELDS) {
+    if (record[key] !== undefined) slim[key] = record[key];
+  }
+  const slimMetadata = slim.metadata as Record<string, unknown>;
+  for (const key of SNAPSHOT_ASSISTANT_METADATA_FIELDS) {
+    if (metadata[key] !== undefined) slimMetadata[key] = metadata[key];
+  }
+  return slim as ChatRunSnapshotAssistantMessage;
 }
 
 /**
  * Merge a full runner snapshot with persisted publication facts. Incoming
  * scalar/tool/progress fields win, while committed artifact outputs survive
- * stale runner, approval, cancellation, and recovery projections.
+ * stale runner, approval, cancellation, and recovery projections. The output
+ * always carries the slim assistant message, so rows written before the slim
+ * copy shrink on their next write; their embedded render blocks and tool calls
+ * still count as committed-artifact authority.
  */
 export function mergeChatRunSnapshot(input: {
   current: ChatRunSnapshot;
@@ -90,6 +158,7 @@ export function mergeChatRunSnapshot(input: {
     incoming.reasoningSegments = input.current.reasoningSegments;
   }
   const messageBlocks = getRenderBlocks(input.assistantMessageMetadata);
+  const messageToolCalls = getToolCalls(input.assistantMessageMetadata);
   const currentAssistant = input.current.assistantMessage;
   const incomingAssistant = incoming.assistantMessage;
   const assistantMessage = incomingAssistant ?? currentAssistant;
@@ -101,16 +170,11 @@ export function mergeChatRunSnapshot(input: {
       : input.current.renderBlocks,
     authoritative: [
       input.current.renderBlocks,
-      getAssistantRenderBlocks(input.current),
+      getRenderBlocks(currentMetadata),
       messageBlocks,
-      getAssistantRenderBlocks(incoming),
+      getRenderBlocks(incomingMetadata),
     ],
   });
-  const messageToolCalls = Array.isArray(
-    input.assistantMessageMetadata?.toolCalls,
-  )
-    ? input.assistantMessageMetadata.toolCalls
-    : undefined;
   const toolCalls = mergeCommittedArtifactToolCalls({
     incoming: Array.isArray(incoming.toolCalls)
       ? incoming.toolCalls
@@ -121,40 +185,14 @@ export function mergeChatRunSnapshot(input: {
         renderBlocks: input.current.renderBlocks,
       },
       {
-        toolCalls: Array.isArray(currentMetadata.toolCalls)
-          ? currentMetadata.toolCalls
-          : undefined,
+        toolCalls: getToolCalls(currentMetadata),
         renderBlocks: getRenderBlocks(currentMetadata),
       },
       { toolCalls: messageToolCalls, renderBlocks: messageBlocks },
-    ],
-  });
-  const assistantRenderBlocks = mergeCommittedArtifactRenderBlocks({
-    incoming:
-      getRenderBlocks(incomingMetadata) ?? getRenderBlocks(currentMetadata),
-    authoritative: [
-      getRenderBlocks(currentMetadata),
-      messageBlocks,
-      renderBlocks,
-    ],
-  });
-  const assistantToolCalls = mergeCommittedArtifactToolCalls({
-    incoming:
-      (Array.isArray(incomingMetadata.toolCalls)
-        ? incomingMetadata.toolCalls
-        : undefined) ??
-      (Array.isArray(currentMetadata.toolCalls)
-        ? currentMetadata.toolCalls
-        : undefined),
-    authoritative: [
       {
-        toolCalls: Array.isArray(currentMetadata.toolCalls)
-          ? currentMetadata.toolCalls
-          : undefined,
-        renderBlocks: getRenderBlocks(currentMetadata),
+        toolCalls: getToolCalls(incomingMetadata),
+        renderBlocks: getRenderBlocks(incomingMetadata),
       },
-      { toolCalls: messageToolCalls, renderBlocks: messageBlocks },
-      { toolCalls, renderBlocks },
     ],
   });
 
@@ -168,18 +206,11 @@ export function mergeChatRunSnapshot(input: {
     ...(toolCalls ? { toolCalls } : {}),
     ...(assistantMessage
       ? {
-          assistantMessage: {
+          assistantMessage: slimSnapshotAssistantMessage({
             ...(currentAssistant ?? assistantMessage),
             ...(incomingAssistant ?? {}),
-            metadata: {
-              ...currentMetadata,
-              ...incomingMetadata,
-              ...(assistantRenderBlocks
-                ? { renderBlocks: assistantRenderBlocks }
-                : {}),
-              ...(assistantToolCalls ? { toolCalls: assistantToolCalls } : {}),
-            },
-          },
+            metadata: { ...currentMetadata, ...incomingMetadata },
+          }),
         }
       : {}),
   };
@@ -327,9 +358,9 @@ export function updateExistingTracePartsFromToolCalls(
         ? {
             id: normalized.id,
             tool: existingToolPart.tool,
-            input: existingToolPart.input,
-            // Trace parts never carry output; the incoming tool call's
-            // canonical output wins in mergeToolCallTraceState regardless.
+            // Trace parts carry neither input nor output; the incoming tool
+            // call's canonical copies win in mergeToolCallTraceState anyway.
+            input: {},
             output: undefined,
             status: existingToolPart.status,
             latencyMs: existingToolPart.latencyMs ?? null,
@@ -471,7 +502,7 @@ function normalizeVectorStrategy(
 
 export function normalizeRetrievalSnapshot(
   value: unknown,
-): ChatRunSnapshot["retrieval"] {
+): DurableRunResultSnapshot["retrieval"] {
   const record =
     value && typeof value === "object" && !Array.isArray(value)
       ? (value as Record<string, unknown>)
@@ -494,5 +525,46 @@ export function normalizeRetrievalSnapshot(
       : Array.isArray(record.citations)
         ? record.citations
         : [],
+  };
+}
+
+function arrayOrUndefined(value: unknown) {
+  return Array.isArray(value) ? value : undefined;
+}
+
+/**
+ * The run's retrieval in the messages-row shape. New snapshots keep it in one
+ * place, `snapshot.retrieval`; rows written before that also carry top-level
+ * `citations` / `availableCitations` from `citations` events, read as a
+ * fallback. Profile fields are copied only when present.
+ */
+export function readSnapshotRetrieval(
+  snapshot: ChatRunSnapshot,
+): ChatRunSnapshotRetrieval | undefined {
+  const retrieval = toObjectRecord(snapshot.retrieval);
+  const citations =
+    arrayOrUndefined(retrieval?.citations) ??
+    arrayOrUndefined(snapshot.citations);
+  const availableCitations =
+    arrayOrUndefined(retrieval?.availableCitations) ??
+    arrayOrUndefined(snapshot.availableCitations) ??
+    citations;
+  if (!retrieval && !citations && !availableCitations) {
+    return undefined;
+  }
+  const stringOrNull = (value: unknown) =>
+    typeof value === "string" ? value : null;
+  return {
+    ...(retrieval?.embeddingProfileId !== undefined
+      ? { embeddingProfileId: stringOrNull(retrieval.embeddingProfileId) }
+      : {}),
+    ...(retrieval?.vectorStrategy !== undefined
+      ? { vectorStrategy: normalizeVectorStrategy(retrieval.vectorStrategy) }
+      : {}),
+    ...(retrieval?.annIndexUsed !== undefined
+      ? { annIndexUsed: stringOrNull(retrieval.annIndexUsed) }
+      : {}),
+    citations: citations ?? [],
+    availableCitations: availableCitations ?? [],
   };
 }

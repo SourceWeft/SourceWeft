@@ -301,6 +301,57 @@ test("create commits artifact, exact version, canonical output, and one card ato
   }
 });
 
+test("publication keeps the run snapshot's embedded assistant message slim", async () => {
+  const run = await createRunningRun();
+  const toolCall = runningToolCall({
+    sourceToolCallId: run.sourceToolCallId,
+    sourceToolName: run.sourceToolName,
+  });
+  // A row written before the slim copy embeds the whole message metadata.
+  await db
+    .update(chatThreadRuns)
+    .set({
+      snapshotJson: {
+        toolCalls: [toolCall],
+        renderBlocks: [],
+        assistantMessage: {
+          id: run.assistantMessageId,
+          threadId: run.threadId,
+          role: "assistant",
+          content: "",
+          metadata: {
+            finishReason: "stop",
+            toolCalls: [toolCall],
+            renderBlocks: [],
+            meteredLlmCalls: [{ id: "call-1", consumedCredits: 1 }],
+          },
+        },
+      },
+    })
+    .where(eq(chatThreadRuns.id, run.runId));
+  const service = createCurrentRunArtifactPublicationService({
+    notify: vi.fn().mockResolvedValue(undefined),
+  });
+
+  const published = await service.publish(publicationInput(run));
+
+  assert.ok(published.ok);
+  const projections = await readRunAndMessage(run);
+  const toolCalls = projections.run.toolCalls as Array<Record<string, unknown>>;
+  assert.deepEqual(toolCalls[0]?.output, published.result);
+  assert.equal(
+    (projections.run.renderBlocks as Array<Record<string, unknown>>)[0]?.id,
+    published.result.artifactOutputBlockId,
+  );
+  assert.deepEqual(projections.run.assistantMessage, {
+    id: run.assistantMessageId,
+    threadId: run.threadId,
+    role: "assistant",
+    content: "",
+    metadata: { finishReason: "stop" },
+  });
+});
+
 test("storage coordinates require a host-preallocated artifact identity", async () => {
   const run = await createRunningRun();
   const input = publicationInput(run, {
