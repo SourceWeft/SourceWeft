@@ -114,3 +114,36 @@ test("AssistantToolCard renders edit_file workfile diff preview", async () => {
   assert.match(element.textContent ?? "", /-const title = 'Old';/);
   assert.match(element.textContent ?? "", /\+const title = 'New';/);
 });
+
+test("AssistantToolCard renders a running write_file's streamed partial code keyed by file_path", async () => {
+  // A `tool-input-delta` partial: deepagents' write_file names its path
+  // `file_path`, and the call is still being authored.
+  const element = await renderToolCard({
+    toolCall: toolCall({
+      input: {
+        content: "def fib(n):\n    a, b = 0",
+        file_path: "/files/fib.py",
+      },
+      latencyMs: null,
+      status: "running",
+      tool: "write_file",
+    }),
+  });
+
+  assert.match(element.textContent ?? "", /fib\.py/);
+  assert.match(element.textContent ?? "", /def fib\(n\):/);
+  assert.match(element.textContent ?? "", /a, b = 0/);
+  await unmountAll();
+
+  // Without a path field the preview has nothing to key on (the #335 live
+  // failure: partials carried `content` only).
+  const pathless = await renderToolCard({
+    toolCall: toolCall({
+      input: { content: "def fib(n):\n    a, b = 0" },
+      latencyMs: null,
+      status: "running",
+      tool: "write_file",
+    }),
+  });
+  assert.doesNotMatch(pathless.textContent ?? "", /def fib\(n\):/);
+});

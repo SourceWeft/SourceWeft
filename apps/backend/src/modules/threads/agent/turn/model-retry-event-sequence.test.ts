@@ -1148,6 +1148,18 @@ test("a write_file call streams its growing content before the authoritative too
     { id: "call-write", content: "hello wor" },
     { id: "call-write", content: "hello world" },
   ]);
+  // The partial carries the model's own path field, which the client's
+  // workfile preview needs before it renders the code.
+  for (const event of observed.turn) {
+    if ((event as { type: string }).type === "tool-input-delta") {
+      const { input, toolCall } = event as {
+        input: Record<string, unknown>;
+        toolCall: { input: Record<string, unknown> };
+      };
+      assert.equal(input.file_path, "/notes.md");
+      assert.deepEqual(toolCall.input, input);
+    }
+  }
   const lastPartial = observed.timeline.lastIndexOf("turn:tool-input-delta");
   const started = observed.timeline.indexOf("tools:tool-started:call-write");
   assert.ok(started > 0, "the write_file call ran");

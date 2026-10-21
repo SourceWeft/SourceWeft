@@ -21,6 +21,13 @@ const STREAMED_CONTENT_FIELD: Record<string, string> = {
 };
 
 /**
+ * Path spellings forwarded with a partial input, as soon as they parse. The
+ * client resolves a workfile preview from any of them (deepagents' write_file
+ * takes `file_path`), so a partial must carry whichever one the model used.
+ */
+const STREAMED_PATH_FIELDS = ["path", "file_path", "filePath"] as const;
+
+/**
  * Pull the streamable content string out of a (possibly partial) parsed args
  * object for a streamed tool. Returns null when the field isn't a string yet.
  */
@@ -102,10 +109,12 @@ export function* handleToolArgDeltaChunk(input: {
     parsed && typeof parsed === "object"
       ? (parsed as Record<string, unknown>)
       : {};
-  const rawInput: Record<string, unknown> = {
-    ...(typeof record.path === "string" ? { path: record.path } : {}),
-    content,
-  };
+  const rawInput: Record<string, unknown> = { content };
+  for (const key of STREAMED_PATH_FIELDS) {
+    if (typeof record[key] === "string") {
+      rawInput[key] = record[key];
+    }
+  }
   const clientInput = sanitizeFilesystemToolInputForClient(
     state.name,
     rawInput,

@@ -212,3 +212,20 @@ test("a different call id on an occupied slot starts a fresh buffer under the ne
   assert.equal(state?.id, "c2");
   assert.equal(state?.args, '{"file_path":"/b.py","content":"new');
 });
+
+test("a partial input forwards whichever path field the model used, once it parses", () => {
+  for (const key of ["path", "file_path", "filePath"]) {
+    const runtime = makeRuntime();
+    const [event] = feed(runtime, {
+      index: 0,
+      id: `c-${key}`,
+      name: "write_file",
+      args: `{"${key}":"/files/a.py","content":"pri`,
+    });
+    assert.ok(event && event.type === "tool-input-delta");
+    if (event.type === "tool-input-delta") {
+      assert.deepEqual(event.input, { content: "pri", [key]: "/files/a.py" });
+      assert.deepEqual(event.toolCall.input, event.input);
+    }
+  }
+});
