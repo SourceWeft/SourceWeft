@@ -1640,24 +1640,51 @@ function resolveToolConfirmationCall(input: {
 }
 
 function resolveTracePartToolConfirmation(input: {
+  confirmationId: string;
   part: TracePartRecord;
   status: "approved" | "rejected";
 }) {
   if (input.part.kind !== "tool") {
     return input.part;
   }
-  const confirmationId = getToolConfirmationId(input.part.output);
   return {
     ...input.part,
-    output: resolveToolConfirmationOutput({
-      output: input.part.output,
-      status: input.status,
-    }),
+    // Persisted trace parts are output-free; the canonical confirmation output
+    // lives on `toolCalls[id]` and is resolved there. Only legacy parts that
+    // still carry an inline output get it rewritten here.
+    ...(input.part.output !== undefined
+      ? {
+          output: resolveToolConfirmationOutput({
+            output: input.part.output,
+            status: input.status,
+          }),
+        }
+      : {}),
     status: "completed" as const,
     approvalState: input.status,
-    approvalConfirmationId: confirmationId ?? input.part.approvalConfirmationId,
+    approvalConfirmationId: input.confirmationId,
     updatedAt: new Date().toISOString(),
   } satisfies TracePartRecord;
+}
+
+/**
+ * Finds the pending confirmation a tool trace part refers to. Trace parts no
+ * longer embed the tool output, so the id is recovered from the part's own
+ * approval field or from the canonical tool call that shares its
+ * `toolCallId`; a legacy inline output is still honoured.
+ */
+function getTracePartToolConfirmationId(
+  part: Extract<TracePartRecord, { kind: "tool" }>,
+  toolCalls: ToolCallRecord[] | undefined,
+) {
+  return (
+    getToolConfirmationId(part.output) ??
+    part.approvalConfirmationId ??
+    getToolConfirmationId(
+      toolCalls?.find((toolCall) => toolCall.id === part.toolCallId)?.output,
+    ) ??
+    null
+  );
 }
 
 function excludeResolvedToolConfirmationCalls(
@@ -1702,6 +1729,7 @@ function resolveTracePartToolConfirmations(
   traceParts: TracePartRecord[],
   confirmationIds: string[] | undefined,
   toolApprovalResume?: ToolApprovalResume | null,
+  toolCalls?: ToolCallRecord[],
 ) {
   if (!confirmationIds?.length) {
     return traceParts;
@@ -1710,7 +1738,7 @@ function resolveTracePartToolConfirmations(
     if (part.kind !== "tool") {
       return part;
     }
-    const confirmationId = getToolConfirmationId(part.output);
+    const confirmationId = getTracePartToolConfirmationId(part, toolCalls);
     if (!confirmationId) {
       return part;
     }
@@ -1719,7 +1747,9 @@ function resolveTracePartToolConfirmations(
       confirmationIds,
       toolApprovalResume,
     });
-    return status ? resolveTracePartToolConfirmation({ part, status }) : part;
+    return status
+      ? resolveTracePartToolConfirmation({ confirmationId, part, status })
+      : part;
   });
 }
 

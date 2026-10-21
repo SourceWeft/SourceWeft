@@ -74,6 +74,7 @@ import type {
   DurableRunResultSnapshot,
 } from "./types";
 import { toObjectRecord } from "../../../shared/records";
+import { truncateErrorText } from "../../../shared/safe-error-text";
 import {
   isTerminalRunStatus,
   parseSsePayload,
@@ -1193,13 +1194,59 @@ function traceEventFromPayload(input: {
       sequence,
       eventType: payload.type,
       tool: typeof payload.tool === "string" ? payload.tool : toolCall?.tool,
-      toolCall: toolCall ?? undefined,
-      payload,
+      // Identity and state only. The event used to carry the raw SSE payload
+      // and the full toolCall, so one completed tool's output sat in the
+      // trace three times per result event; see projectToolCallTraceEvent.
+      toolCall: toolCall ? projectToolCallTraceEvent(toolCall) : undefined,
     };
   }
 
   return null;
 }
+
+/**
+ * The bounded projection of a tool call kept on a tool-call trace event.
+ *
+ * Trace events exist for ordering (`id`/`sequence`, read by the preparer's
+ * continuation recovery and the trace-metadata merge) and for display
+ * identity (`id`/`tool`/`mcpDisplay`, read by the web normalizer). The tool's
+ * `input` and `output` are deliberately absent: both can be hundreds of KB
+ * (`write_file` content, search results) and are already persisted exactly
+ * once in `snapshot.toolCalls[id]`, which is where every consumer of tool
+ * output reads them. Fields are allow-listed rather than denied so a future
+ * large field cannot re-inflate the trace by default.
+ */
+function projectToolCallTraceEvent(toolCall: Record<string, unknown>) {
+  const projected: Record<string, unknown> = {};
+  for (const key of [
+    "id",
+    "tool",
+    "mcpDisplay",
+    "status",
+    "latencyMs",
+    "error",
+    "sequence",
+    "approvalState",
+    "approvalConfirmationId",
+    "producer",
+  ] as const) {
+    if (toolCall[key] !== undefined) {
+      projected[key] = toolCall[key];
+    }
+  }
+  // `error` is a raw string of any length (a tool may echo its whole stdout);
+  // the canonical copy on `toolCalls[id].error` is left intact.
+  if (typeof projected.error === "string") {
+    projected.error = truncateErrorText(
+      projected.error,
+      MAX_TOOL_TRACE_EVENT_ERROR_CHARS,
+    );
+  }
+  return projected;
+}
+
+/** Longest `toolCall.error` a tool-call trace event carries. */
+const MAX_TOOL_TRACE_EVENT_ERROR_CHARS = 2_000;
 
 function buildSnapshotMetadata(input: {
   currentMetadata?: Record<string, unknown> | null;

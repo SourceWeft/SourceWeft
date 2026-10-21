@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import type { ToolCallRecord } from "../../_components/chat-canvas/types";
+import { buildMessageRenderState } from "../../_components/chat-canvas/message-render-state";
+import { getSandboxExecuteView } from "../../_components/chat-canvas/sandbox-tool-result-display";
 import type { ChatMessageItem } from "../streaming-assistant-state";
 import { buildVersionedMessageGroups } from "./message-groups";
 import {
@@ -1452,4 +1454,160 @@ test("live same-call retries preserve omitted errors but clear explicit null and
     streamToolCallsById: calls,
   });
   assert.equal(failedAgain.error, "new permission failure");
+});
+
+test("reload rendering resolves tool output from toolCalls when persisted trace parts and events are output-free", () => {
+  // #330: persisted `traceParts` carry no `output` and persisted `traceEvents`
+  // carry neither `payload` nor `toolCall.output`; `metadata.toolCalls` is the
+  // single full copy. The reload path must render exactly that copy.
+  const createdAt = new Date(0).toISOString();
+  const mcpDisplay = { serverName: "Docs", toolName: "Search docs" };
+  const stdout = "line\n".repeat(400);
+  const executeOutput = JSON.stringify({
+    ok: true,
+    output: stdout,
+    truncated: true,
+    exitCode: 0,
+  });
+  const searchOutput = { content: "y".repeat(500) };
+  const assistant = createMessage({
+    id: "assistant-reload",
+    role: "assistant",
+    content: "Done.",
+    metadata: {
+      toolCalls: [
+        {
+          id: "exec-1",
+          tool: "execute",
+          input: { command: "ls -R" },
+          output: executeOutput,
+          status: "completed",
+          latencyMs: 12,
+          error: null,
+          sequence: 1,
+        },
+        {
+          id: "search-1",
+          tool: "search_docs",
+          input: { query: "bounds" },
+          output: searchOutput,
+          status: "completed",
+          latencyMs: 5,
+          error: null,
+          sequence: 2,
+        },
+      ],
+      traceParts: [
+        {
+          id: "part-exec-1",
+          kind: "tool",
+          order: 1,
+          createdAt,
+          updatedAt: createdAt,
+          toolCallId: "exec-1",
+          tool: "execute",
+          status: "completed",
+          input: { command: "ls -R" },
+          error: null,
+          latencyMs: 12,
+        },
+        {
+          id: "part-search-1",
+          kind: "tool",
+          order: 2,
+          createdAt,
+          updatedAt: createdAt,
+          toolCallId: "search-1",
+          tool: "search_docs",
+          status: "completed",
+          input: { query: "bounds" },
+          error: null,
+          latencyMs: 5,
+          mcpDisplay,
+        },
+      ],
+      traceEvents: [
+        {
+          type: "tool-call",
+          id: "exec-1:1",
+          itemId: "exec-1",
+          sequence: 1,
+          eventType: "tool-call-end",
+          tool: "execute",
+          toolCall: {
+            id: "exec-1",
+            tool: "execute",
+            status: "completed",
+            latencyMs: 12,
+            error: null,
+            sequence: 1,
+          },
+        },
+        {
+          type: "tool-call",
+          id: "search-1:2",
+          itemId: "search-1",
+          sequence: 2,
+          eventType: "tool-call-end",
+          tool: "search_docs",
+          toolCall: {
+            id: "search-1",
+            tool: "search_docs",
+            mcpDisplay,
+            status: "completed",
+            latencyMs: 5,
+            error: null,
+            sequence: 2,
+          },
+        },
+      ],
+    },
+  });
+
+  const version = buildVersionedMessageGroups([assistant])[0]?.versions[0];
+  assert.ok(version);
+  const serializedTraceEvents = JSON.stringify(version.traceEvents);
+  assert.equal(serializedTraceEvents.includes("yyyyyyyy"), false);
+  assert.equal(serializedTraceEvents.includes("payload"), false);
+  assert.equal(version.traceEvents?.length, 2);
+  assert.deepEqual(
+    version.toolCalls?.find((toolCall) => toolCall.id === "search-1")
+      ?.mcpDisplay,
+    mcpDisplay,
+  );
+
+  const state = buildMessageRenderState({
+    isAssistantStreaming: false,
+    role: "assistant",
+    version,
+  });
+  const toolItems = state.activityItems.filter(
+    (
+      item,
+    ): item is Extract<
+      (typeof state.activityItems)[number],
+      { type: "tool" }
+    > => item.type === "tool",
+  );
+  assert.deepEqual(
+    toolItems.map((item) => item.toolCall.id),
+    ["exec-1", "search-1"],
+  );
+  for (const item of toolItems) {
+    const canonical: ToolCallRecord | undefined = version.toolCalls?.find(
+      (toolCall) => toolCall.id === item.toolCall.id,
+    );
+    assert.ok(canonical);
+    assert.notEqual(canonical.output, null);
+    assert.deepEqual(item.toolCall.output, canonical.output);
+  }
+  assert.deepEqual(toolItems[1]?.toolCall.mcpDisplay, mcpDisplay);
+  const sandboxView = getSandboxExecuteView({
+    input: toolItems[0]!.toolCall.input,
+    output: toolItems[0]!.toolCall.output,
+    toolName: "execute",
+  });
+  assert.equal(sandboxView?.output, stdout);
+  assert.equal(sandboxView?.truncated, true);
+  assert.deepEqual(toolItems[1]?.toolCall.output, searchOutput);
 });

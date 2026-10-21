@@ -638,6 +638,12 @@ function buildReasoningTracePart(
   };
 }
 
+/**
+ * Live trace parts are structural only, like the persisted ones: the tool
+ * output is never copied here. `syncStreamingToolCalls` keeps
+ * `metadata.toolCalls` current from `streamToolCallsById`, and
+ * `buildToolCallFromPart` resolves the card output from that single copy.
+ */
 function buildToolTracePart(toolCall: ToolCallRecord): TracePartDraft {
   return {
     id: toolCall.id,
@@ -646,7 +652,6 @@ function buildToolTracePart(toolCall: ToolCallRecord): TracePartDraft {
     tool: toolCall.tool,
     status: toolCall.status,
     input: toolCall.input,
-    output: toolCall.output,
     error: toolCall.error,
     latencyMs: toolCall.latencyMs,
     approvalState: toolCall.approvalState,
@@ -680,6 +685,56 @@ function buildReasoningTraceEvent(input: {
     sequence: input.segment.sequence,
     reasoning: input.reasoning,
     segment: input.segment,
+  };
+}
+
+/**
+ * Builds the in-memory trace event for a tool-call SSE event.
+ *
+ * Trace events only record ordering and identity. The single full copy of a
+ * tool call (input + output) lives in `streamToolCallsById` (persisted as
+ * `metadata.toolCalls[id].output`), so the event deliberately carries neither
+ * the SSE payload nor the output: a long live session would otherwise hold one
+ * copy of every tool output per tool-call event. This mirrors the persisted
+ * shape the backend writes to `metadata.traceEvents`.
+ */
+export function buildToolCallTraceEvent(input: {
+  event: ToolCallEventPayload;
+  toolCall: ToolCallRecord;
+}): ReasoningTraceEventRecord | null {
+  if (!input.event.type.startsWith("tool-call-")) {
+    return null;
+  }
+  const { toolCall } = input;
+  return {
+    type: "tool-call",
+    id:
+      typeof toolCall.sequence === "number"
+        ? `${toolCall.id}:${toolCall.sequence}`
+        : toolCall.id,
+    itemId: toolCall.id,
+    sequence: toolCall.sequence,
+    eventType: input.event.type,
+    tool: toolCall.tool,
+    toolCall: {
+      id: toolCall.id,
+      tool: toolCall.tool,
+      input: {},
+      output: null,
+      latencyMs: toolCall.latencyMs,
+      status: toolCall.status,
+      error: toolCall.error,
+      ...(typeof toolCall.sequence === "number"
+        ? { sequence: toolCall.sequence }
+        : {}),
+      ...(toolCall.mcpDisplay ? { mcpDisplay: toolCall.mcpDisplay } : {}),
+      ...(toolCall.approvalState
+        ? { approvalState: toolCall.approvalState }
+        : {}),
+      ...(toolCall.approvalConfirmationId
+        ? { approvalConfirmationId: toolCall.approvalConfirmationId }
+        : {}),
+    },
   };
 }
 
@@ -908,6 +963,7 @@ export const testExports = {
   handleStreamingAgentRunProgress,
   buildReasoningTraceEvent,
   buildThinkingStepTraceEvent,
+  buildToolCallTraceEvent,
   handleStreamingAssistantMessage,
   handleStreamingError,
   handleStreamingFinish,

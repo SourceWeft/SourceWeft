@@ -1,9 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import type { ModelReasoningSegmentRecord } from "../_components/chat-canvas";
+import type {
+  ModelReasoningSegmentRecord,
+  ReasoningTraceEventRecord,
+  ToolCallRecord,
+  TracePartRecord,
+} from "../_components/chat-canvas";
+import { buildAssistantActivityItems } from "../_components/chat-canvas/assistant-activity-items";
 import type { ChatMessageItem } from "./streaming-assistant-state";
 import { createStreamingRenderBuffer } from "./streaming-render-buffer";
 import {
+  buildToolCallTraceEvent,
   testExports,
   type StreamingEventHandlerContext,
   type ToolCallEventPayload,
@@ -1732,4 +1739,131 @@ test("root phase progress survives finish and ignores stale or terminal late eve
   assert.deepEqual(message.metadata.agentRunProgress, progress);
   testExports.handleStreamingFinish({ context, finishReason: "cancelled" });
   assert.equal(message.metadata.agentRunProgress, null);
+});
+
+test("tool-call trace events are output-free while streamToolCallsById keeps the full copy", () => {
+  const fullToolCall: ToolCallRecord = {
+    id: "exec-1",
+    tool: "execute",
+    input: { command: "cat big.log" },
+    output: {
+      ok: true,
+      output: "x".repeat(20_000),
+      truncated: true,
+      exitCode: 0,
+    },
+    latencyMs: 40,
+    status: "completed",
+    error: null,
+    sequence: 3,
+    mcpDisplay: { serverName: "Sandbox", toolName: "Execute" },
+    approvalState: "approved",
+    approvalConfirmationId: "confirmation-1",
+  };
+  const event = {
+    type: "tool-call-result",
+    id: "exec-1",
+    output: fullToolCall.output,
+  } as ToolCallEventPayload;
+
+  const traceEvent = buildToolCallTraceEvent({ event, toolCall: fullToolCall });
+  assert.deepEqual(traceEvent, {
+    type: "tool-call",
+    id: "exec-1:3",
+    itemId: "exec-1",
+    sequence: 3,
+    eventType: "tool-call-result",
+    tool: "execute",
+    toolCall: {
+      id: "exec-1",
+      tool: "execute",
+      input: {},
+      output: null,
+      latencyMs: 40,
+      status: "completed",
+      error: null,
+      sequence: 3,
+      mcpDisplay: { serverName: "Sandbox", toolName: "Execute" },
+      approvalState: "approved",
+      approvalConfirmationId: "confirmation-1",
+    },
+  });
+  assert.equal(
+    buildToolCallTraceEvent({
+      event: { type: "tool-input-delta", id: "exec-1" },
+      toolCall: fullToolCall,
+    }),
+    null,
+  );
+
+  let message: ChatMessageItem = {
+    id: "assistant-1",
+    role: "assistant",
+    content: "",
+    contentJson: {},
+    parentMessageId: null,
+    metadata: {},
+    createdAt: new Date(0).toISOString(),
+  };
+  const streamToolCallsById = new Map<string, ToolCallRecord>();
+  const context = createBaseStreamingContext({
+    resolveToolCallFromStreamEvent: () => fullToolCall,
+    resolveTraceEventFromStreamEvent: buildToolCallTraceEvent,
+    streamToolCallsById,
+    updateStreamingAssistantMessage: (updater) => {
+      message = updater(message);
+    },
+  });
+  testExports.handleStreamingToolCallEvent({
+    context,
+    drainQueuedDeltasNow: () => undefined,
+    event,
+    refreshedArtifactToolIds: new Set(),
+    refreshedWorkfileToolIds: new Set(),
+    setArtifactsRefreshKey: () => undefined,
+    setWorkfilesRefreshKey: () => undefined,
+  });
+
+  const [stored] = message.metadata.traceEvents as ReasoningTraceEventRecord[];
+  assert.equal(stored?.type, "tool-call");
+  assert.equal(
+    stored?.type === "tool-call" ? stored.toolCall?.output : "missing",
+    null,
+  );
+  assert.equal(
+    stored?.type === "tool-call" ? stored.payload : "missing",
+    undefined,
+  );
+  assert.equal(JSON.stringify(stored).includes("xxxxxxxx"), false);
+  assert.deepEqual(
+    streamToolCallsById.get("exec-1")?.output,
+    fullToolCall.output,
+  );
+
+  // The live trace part is structural only as well: no second output copy.
+  const traceParts = message.metadata.traceParts as TracePartRecord[];
+  assert.equal(traceParts.length, 1);
+  const [livePart] = traceParts;
+  assert.equal(livePart?.kind, "tool");
+  assert.equal(livePart && "output" in livePart, false);
+  assert.equal(JSON.stringify(traceParts).includes("xxxxxxxx"), false);
+  assert.deepEqual(
+    livePart?.kind === "tool" ? livePart.input : null,
+    fullToolCall.input,
+  );
+
+  // The live card still renders the full output from the single copy.
+  const [liveItem] = buildAssistantActivityItems({
+    toolCalls: [...streamToolCallsById.values()],
+    traceParts,
+  });
+  assert.equal(liveItem?.type, "tool");
+  assert.deepEqual(
+    liveItem?.type === "tool" ? liveItem.toolCall.output : null,
+    fullToolCall.output,
+  );
+  assert.equal(
+    liveItem?.type === "tool" ? liveItem.toolCall.status : null,
+    "completed",
+  );
 });

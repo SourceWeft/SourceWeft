@@ -100,7 +100,6 @@ test("continuation metadata preserves append-only trace events", () => {
           toolCallId: "search-page",
           tool: "search_notion_pages",
           input: {},
-          output: null,
           status: "completed",
         },
         {
@@ -112,11 +111,6 @@ test("continuation metadata preserves append-only trace events", () => {
           toolCallId: "create-page",
           tool: "create_notion_page",
           input: {},
-          output: {
-            type: "tool_confirmation_request",
-            id: "confirmation-1",
-            status: "proposed",
-          },
           status: "approval_requested",
           approvalConfirmationId: "confirmation-1",
         },
@@ -199,10 +193,6 @@ test("continuation metadata preserves append-only trace events", () => {
           toolCallId: "create-page",
           tool: "create_notion_page",
           input: {},
-          output: {
-            type: "connector_tool_result",
-            pageId: "page-1",
-          },
           status: "completed",
           approvalState: "approved",
           approvalConfirmationId: "confirmation-1",

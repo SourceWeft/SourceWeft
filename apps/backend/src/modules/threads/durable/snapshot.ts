@@ -328,7 +328,9 @@ export function updateExistingTracePartsFromToolCalls(
             id: normalized.id,
             tool: existingToolPart.tool,
             input: existingToolPart.input,
-            output: existingToolPart.output,
+            // Trace parts never carry output; the incoming tool call's
+            // canonical output wins in mergeToolCallTraceState regardless.
+            output: undefined,
             status: existingToolPart.status,
             latencyMs: existingToolPart.latencyMs ?? null,
             error: existingToolPart.error ?? null,

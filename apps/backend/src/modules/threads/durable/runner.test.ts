@@ -711,6 +711,8 @@ test("run snapshots create tool trace parts from stable event payloads without t
       error: null,
     },
   ]);
+  // The tool trace part carries identity and status only; the progress
+  // data (the canonical output copy) is asserted on snapshot.toolCalls above.
   assert.deepEqual(
     (
       snapshot.traceParts as Array<{
@@ -723,18 +725,14 @@ test("run snapshots create tool trace parts from stable event payloads without t
       kind: part.kind,
       toolCallId: part.toolCallId,
       status: part.status,
-      output: part.output,
+      hasOutput: part.output !== undefined,
     })),
     [
       {
         kind: "tool",
         toolCallId: "pptx-tool",
         status: "running",
-        output: {
-          type: "publish_artifact_progress",
-          stage: "planning",
-          title: "Quarterly review",
-        },
+        hasOutput: false,
       },
     ],
   );
@@ -1223,6 +1221,17 @@ test("MCP display identity survives durable events, trace parts, and persisted s
     (metadata.toolCalls as Array<{ mcpDisplay: unknown }>)[0]?.mcpDisplay,
     mcpDisplay,
   );
+  // The web normalizer recovers display identity for older finalized records
+  // from the trace event's toolCall; it must survive the output-free projection.
+  const traceEvents = metadata.traceEvents as Array<{
+    toolCall?: { id?: string; tool?: string; mcpDisplay?: unknown };
+  }>;
+  assert.equal(traceEvents.length, 3);
+  for (const event of traceEvents) {
+    assert.equal(event.toolCall?.id, "search-call");
+    assert.equal(event.toolCall?.tool, tool);
+    assert.deepEqual(event.toolCall?.mcpDisplay, mcpDisplay);
+  }
 });
 
 test("slow assistant snapshot writes keep a full cooldown after successful completion and force keeps the latest text", async () => {
@@ -1547,4 +1556,207 @@ test("same-call retries distinguish omitted errors, explicit clearing and new fa
     toToolCallTrace(explicitTopLevelClear.toolCalls?.[0])?.error,
     null,
   );
+});
+
+test("tool-call trace events keep identity and state but never the tool input or output", () => {
+  const output = { text: "x".repeat(100_000) }; // one 100 KB tool result
+  const input = { path: "notes.md", content: "y".repeat(20_000) };
+  const mcpDisplay = { serverName: "Notion", toolName: "search_pages" };
+  const toolCall = (status: string, latencyMs: number | null) => ({
+    id: "write-1",
+    tool: "write_file",
+    input,
+    output: status === "running" ? null : output,
+    status,
+    latencyMs,
+    error: null,
+    sequence: 4,
+    mcpDisplay,
+    approvalState: "approved",
+    approvalConfirmationId: "confirm-1",
+    producer: {
+      kind: "subagent",
+      subagentType: "writer",
+      taskCallId: "task-1",
+    },
+  });
+  let snapshot: ChatRunSnapshot = {};
+  snapshot = testExports.updateSnapshotFromPayload(snapshot, {
+    type: "tool-call-start",
+    id: "write-1",
+    tool: "write_file",
+    input,
+    toolCall: toolCall("running", null),
+  });
+  snapshot = testExports.updateSnapshotFromPayload(snapshot, {
+    type: "tool-call-event",
+    id: "write-1",
+    tool: "write_file",
+    data: {
+      type: "write_progress",
+      bytes: 100_000,
+      preview: "x".repeat(50_000),
+    },
+  });
+  snapshot = testExports.updateSnapshotFromPayload(snapshot, {
+    type: "tool-call-result",
+    id: "write-1",
+    tool: "write_file",
+    output,
+    latencyMs: 42,
+    toolCall: toolCall("completed", 42),
+  });
+  snapshot = testExports.updateSnapshotFromPayload(snapshot, {
+    type: "tool-call-end",
+    id: "write-1",
+    tool: "write_file",
+    status: "completed",
+    latencyMs: 42,
+    toolCall: toolCall("completed", 42),
+  });
+
+  // The output lives exactly once, on the snapshot tool call.
+  assert.deepEqual(toToolCallTrace(snapshot.toolCalls?.[0])?.output, {
+    type: "write_progress",
+    bytes: 100_000,
+    preview: "x".repeat(50_000),
+    text: output.text,
+  });
+  assert.equal(
+    toToolCallTrace(snapshot.toolCalls?.[0])?.input.content,
+    input.content,
+  );
+
+  const events = (snapshot.traceEvents ?? []) as Array<Record<string, unknown>>;
+  assert.deepEqual(
+    events.map((event) => event.eventType),
+    ["tool-call-start", "tool-call-event", "tool-call-result", "tool-call-end"],
+  );
+  for (const event of events) {
+    const serialized = JSON.stringify(event);
+    assert.ok(
+      serialized.length < 2_048,
+      `${event.eventType} trace event is ${serialized.length} bytes`,
+    );
+    assert.equal("payload" in event, false, `${event.eventType} keeps payload`);
+    assert.doesNotMatch(serialized, /xxxxxxxxxx|yyyyyyyyyy/);
+    assert.equal(event.type, "tool-call");
+    assert.equal(event.itemId, "write-1");
+    assert.equal(event.tool, "write_file");
+  }
+  // The stable payload (no toolCall) still yields an event without a toolCall.
+  assert.equal(events[1]?.toolCall, undefined);
+  assert.deepEqual(events[2]?.toolCall, {
+    id: "write-1",
+    tool: "write_file",
+    mcpDisplay,
+    status: "completed",
+    latencyMs: 42,
+    error: null,
+    sequence: 4,
+    approvalState: "approved",
+    approvalConfirmationId: "confirm-1",
+    producer: {
+      kind: "subagent",
+      subagentType: "writer",
+      taskCallId: "task-1",
+    },
+  });
+  assert.deepEqual(
+    events.map((event) => `${event.sequence}:${event.id}`),
+    [
+      "4:write-1:4:tool-call-start:0",
+      "null:write-1:write_progress:tool-call-event:1",
+      "4:write-1:4:tool-call-result:2",
+      "4:write-1:4:tool-call-end:3",
+    ],
+  );
+
+  // The assistant message metadata inherits the bounded events verbatim.
+  const metadata = testExports.buildSnapshotMetadata({
+    currentMetadata: {},
+    run: createRun(),
+    snapshot: JSON.parse(JSON.stringify(snapshot)),
+  });
+  assert.ok(
+    JSON.stringify(metadata.traceEvents).length < 4 * 2_048,
+    "metadata.traceEvents is not bounded",
+  );
+  assert.deepEqual(
+    toToolCallTrace((metadata.toolCalls as unknown[])[0])?.output,
+    toToolCallTrace(snapshot.toolCalls?.[0])?.output,
+  );
+});
+
+test("tool-call-error trace events keep the error state without the payload", () => {
+  const snapshot = testExports.updateSnapshotFromPayload(
+    {},
+    {
+      type: "tool-call-error",
+      id: "read-1",
+      tool: "read_file",
+      error: "permission denied",
+      input: { path: "secret.txt" },
+      toolCall: {
+        id: "read-1",
+        tool: "read_file",
+        input: { path: "secret.txt" },
+        output: { partial: "z".repeat(10_000) },
+        status: "error",
+        latencyMs: 7,
+        error: "permission denied",
+        sequence: 1,
+      },
+    },
+  );
+  const [event] = (snapshot.traceEvents ?? []) as Array<
+    Record<string, unknown>
+  >;
+  assert.ok(event);
+  assert.equal(event.eventType, "tool-call-error");
+  assert.equal("payload" in event, false);
+  assert.deepEqual(event.toolCall, {
+    id: "read-1",
+    tool: "read_file",
+    status: "error",
+    latencyMs: 7,
+    error: "permission denied",
+    sequence: 1,
+  });
+  assert.equal(
+    toToolCallTrace(snapshot.toolCalls?.[0])?.error,
+    "permission denied",
+  );
+
+  // A tool may echo its whole stdout into `error`; the trace event caps it,
+  // the canonical toolCalls[id].error keeps the full text.
+  const longError = "e".repeat(50_000);
+  const capped = testExports.updateSnapshotFromPayload(
+    {},
+    {
+      type: "tool-call-error",
+      id: "run-1",
+      tool: "execute",
+      error: longError,
+      toolCall: {
+        id: "run-1",
+        tool: "execute",
+        input: {},
+        output: null,
+        status: "error",
+        latencyMs: 3,
+        error: longError,
+        sequence: 1,
+      },
+    },
+  );
+  const [cappedEvent] = (capped.traceEvents ?? []) as Array<{
+    toolCall?: { error?: string };
+  }>;
+  assert.equal(
+    cappedEvent?.toolCall?.error,
+    `${"e".repeat(2_000)}…[truncated 48000 chars]`,
+  );
+  assert.ok(JSON.stringify(cappedEvent).length < 2_300);
+  assert.equal(toToolCallTrace(capped.toolCalls?.[0])?.error, longError);
 });
