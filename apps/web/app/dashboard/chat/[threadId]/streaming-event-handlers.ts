@@ -711,7 +711,9 @@ function normalizeStreamingModelReasoningSegment(input: {
   const directSegment = input.context.normalizeModelReasoningSegmentRecord(
     input.segment,
   );
-  if (directSegment) {
+  // A structural (text-less) segment is not a full-text snapshot: fall
+  // through so the delta accumulates onto the segment's existing text.
+  if (directSegment && directSegment.text.length > 0) {
     return directSegment;
   }
 
@@ -724,7 +726,7 @@ function normalizeStreamingModelReasoningSegment(input: {
     ...segmentRecord,
     text: input.reasoning,
   });
-  if (!fallbackSegment) {
+  if (!fallbackSegment || fallbackSegment.text.length === 0) {
     return null;
   }
 
@@ -857,10 +859,11 @@ function buildReasoningTracePart(
 }
 
 /**
- * Live trace parts are structural only, like the persisted ones: the tool
- * output is never copied here. `syncStreamingToolCalls` keeps
- * `metadata.toolCalls` current from `streamToolCallsById`, and
- * `buildToolCallFromPart` resolves the card output from that single copy.
+ * Live trace parts are structural only, like the persisted ones: neither the
+ * tool input nor its output is copied here. `syncStreamingToolCalls` keeps
+ * `metadata.toolCalls` current from `streamToolCallsById` (which accumulates
+ * `tool-input-delta` input), and `buildToolCallFromPart` resolves the card's
+ * input and output from that single copy.
  */
 function buildToolTracePart(toolCall: ToolCallRecord): TracePartDraft {
   return {
@@ -869,7 +872,6 @@ function buildToolTracePart(toolCall: ToolCallRecord): TracePartDraft {
     toolCallId: toolCall.id,
     tool: toolCall.tool,
     status: toolCall.status,
-    input: toolCall.input,
     error: toolCall.error,
     latencyMs: toolCall.latencyMs,
     approvalState: toolCall.approvalState,

@@ -1611,3 +1611,420 @@ test("reload rendering resolves tool output from toolCalls when persisted trace 
   assert.equal(sandboxView?.truncated, true);
   assert.deepEqual(toolItems[1]?.toolCall.output, searchOutput);
 });
+
+/**
+ * #333 reload equivalence. The `/messages` client view of an assistant row no
+ * longer carries `meteredLlmCalls`, `reasoning`, `traceEvents`, segment text,
+ * reasoning trace part text, trace part `input` or citation `quoteText`; the
+ * backend backfills `toolCalls[].mcpDisplay` from `traceEvents` before it
+ * omits them. Everything the UI renders after reload must be identical.
+ */
+function buildReloadEquivalenceRows() {
+  const createdAt = new Date(0).toISOString();
+  const updatedAt = new Date(1000).toISOString();
+  const mcpDisplay = { serverName: "Docs", toolName: "Search docs" };
+  const executeOutput = JSON.stringify({
+    ok: true,
+    output: "src\nsrc/index.ts\n",
+    truncated: false,
+    exitCode: 0,
+  });
+  const citation = (index: number) => ({
+    citation: `[${index}]`,
+    sourceId: "source-1",
+    sourceTitle: "Handbook",
+    documentId: "document-1",
+    chunkId: `chunk-${index}`,
+    chunkNo: index,
+    score: 0.9 - index / 100,
+    excerpt: `Excerpt ${index} of the handbook.`,
+    quoteText: `Excerpt ${index} of the handbook.`,
+    origin: "knowledge",
+    path: "/handbook.md",
+  });
+  const availableCitations = [citation(1), citation(2)];
+  const toolCalls = [
+    {
+      id: "read-1",
+      tool: "read_file",
+      input: { file_path: "/workspace/notes.md", offset: 0, limit: 40 },
+      output: "     1\t# Notes\n     2\tHello\n",
+      latencyMs: 4,
+      status: "completed",
+      error: null,
+      sequence: 1,
+    },
+    {
+      id: "exec-1",
+      tool: "execute",
+      input: { command: "ls -R src" },
+      output: executeOutput,
+      latencyMs: 12,
+      status: "completed",
+      error: null,
+      sequence: 2,
+    },
+    {
+      id: "write-1",
+      tool: "write_file",
+      input: {
+        file_path: "/workspace/out.ts",
+        content: "export const a = 1;\n",
+      },
+      output: "Updated file /workspace/out.ts",
+      latencyMs: 3,
+      status: "completed",
+      error: null,
+      sequence: 3,
+    },
+    {
+      id: "task-1",
+      tool: "task",
+      input: { subagent_type: "researcher", description: "Find the policy" },
+      output: "The policy is in section 4.",
+      latencyMs: 900,
+      status: "completed",
+      error: null,
+      sequence: 4,
+      producer: { kind: "main" },
+    },
+    {
+      id: "search-1",
+      tool: "search_docs",
+      input: { query: "retention policy" },
+      output: { content: "Retention is 30 days." },
+      latencyMs: 5,
+      status: "completed",
+      error: null,
+      sequence: 5,
+    },
+    {
+      id: "notion-1",
+      tool: "create_notion_page",
+      input: { title: "Summary" },
+      output: {
+        type: "tool_confirmation_request",
+        id: "confirmation-1",
+        status: "pending",
+      },
+      latencyMs: null,
+      status: "approval_requested",
+      error: null,
+      sequence: 6,
+      approvalConfirmationId: "confirmation-1",
+    },
+  ];
+  const reasoningText = (index: number) =>
+    `Thinking step ${index}: decide the next tool.`;
+  const oldSegments = [1, 2].map((index) => ({
+    id: `model-reasoning:run-1:${index}`,
+    text: reasoningText(index),
+    sequence: index,
+    durationMs: 1000 * index,
+    phase: index === 1 ? "initial" : "after_tool",
+    ...(index === 2 ? { toolCallId: "read-1", tool: "read_file" } : {}),
+  }));
+  const toolPart = (
+    call: (typeof toolCalls)[number],
+    order: number,
+    withInput: boolean,
+  ) => ({
+    id: `part-${call.id}`,
+    kind: "tool",
+    order,
+    createdAt,
+    updatedAt,
+    toolCallId: call.id,
+    tool: call.tool,
+    status: call.status,
+    ...(withInput ? { input: call.input } : {}),
+    error: call.error,
+    latencyMs: call.latencyMs,
+    ...(call.approvalConfirmationId
+      ? { approvalConfirmationId: call.approvalConfirmationId }
+      : {}),
+  });
+  const traceParts = (legacy: boolean) => [
+    {
+      id: "model-reasoning:run-1:1",
+      kind: "reasoning",
+      order: 0,
+      createdAt,
+      updatedAt,
+      ...(legacy ? { text: reasoningText(1) } : {}),
+      phase: "initial",
+      durationMs: 1000,
+    },
+    ...toolCalls.slice(0, 1).map((call) => toolPart(call, 1, legacy)),
+    {
+      id: "model-reasoning:run-1:2",
+      kind: "reasoning",
+      order: 2,
+      createdAt,
+      updatedAt,
+      ...(legacy ? { text: reasoningText(2) } : {}),
+      phase: "after_tool",
+      toolCallId: "read-1",
+      tool: "read_file",
+      durationMs: 2000,
+    },
+    ...toolCalls
+      .slice(1)
+      .map((call, index) => toolPart(call, index + 3, legacy)),
+    {
+      id: "step-1",
+      kind: "step",
+      order: 9,
+      createdAt,
+      updatedAt,
+      title: "Checked selected sources",
+      status: "completed",
+      items: ["Handbook"],
+    },
+  ];
+  const renderBlocks = [
+    {
+      id: "reasoning-model-reasoning:run-1:1",
+      type: "reasoning",
+      text: reasoningText(1),
+      durationMs: 1000,
+    },
+    { id: "tool-read-1", type: "tool", toolCallId: "read-1" },
+    {
+      id: "reasoning-model-reasoning:run-1:2",
+      type: "reasoning",
+      text: reasoningText(2),
+      durationMs: 2000,
+    },
+    ...toolCalls.slice(1).map((call) => ({
+      id: `tool-${call.id}`,
+      type: "tool",
+      toolCallId: call.id,
+    })),
+    { id: "text-1", type: "text", text: "Retention is 30 days [1]." },
+  ];
+  const baseMetadata = {
+    finishReason: "tool_confirmation_requested",
+    threadRun: { id: "run-1", status: "waiting_for_approval", mode: "send" },
+    renderBlocks,
+    thinkingSteps: [
+      {
+        id: "step-1",
+        title: "Checked selected sources",
+        status: "completed",
+        items: ["Handbook"],
+        sequence: 1,
+      },
+    ],
+  };
+  const oldRow = createMessage({
+    id: "assistant-333",
+    role: "assistant",
+    content: "Retention is 30 days [1].",
+    metadata: {
+      ...baseMetadata,
+      // Legacy: `search-1` lost its display on the finalized tool call; only
+      // the trace event still carries it.
+      toolCalls,
+      traceParts: traceParts(true),
+      reasoning: `${reasoningText(1)}${reasoningText(2)}`,
+      reasoningSegments: oldSegments,
+      traceEvents: [
+        ...oldSegments.map((segment) => ({
+          type: "reasoning",
+          id: `${segment.id}:${segment.sequence}`,
+          itemId: segment.id,
+          sequence: segment.sequence,
+          reasoning: segment.text,
+          segment,
+        })),
+        {
+          type: "tool-call",
+          id: "search-1:5",
+          itemId: "search-1",
+          sequence: 5,
+          eventType: "tool-call-end",
+          tool: "search_docs",
+          toolCall: {
+            id: "search-1",
+            tool: "search_docs",
+            mcpDisplay,
+            status: "completed",
+            latencyMs: 5,
+            error: null,
+            sequence: 5,
+          },
+        },
+      ],
+      meteredLlmCalls: [
+        { spanId: "span-1", consumedCredits: 3, billingStatus: "settled" },
+      ],
+      meteredLlmCreditsConsumed: 3,
+      retrieval: {
+        citations: [availableCitations[0]],
+        availableCitations,
+      },
+    },
+  });
+  const omitKey = <T extends Record<string, unknown>>(record: T, key: string) =>
+    Object.fromEntries(
+      Object.entries(record).filter(([entryKey]) => entryKey !== key),
+    );
+  const stripQuote = (item: ReturnType<typeof citation>) =>
+    omitKey(item, "quoteText");
+  const newRow = createMessage({
+    id: "assistant-333",
+    role: "assistant",
+    content: "Retention is 30 days [1].",
+    metadata: {
+      ...baseMetadata,
+      toolCalls: toolCalls.map((call) =>
+        call.id === "search-1" ? { ...call, mcpDisplay } : call,
+      ),
+      traceParts: traceParts(false),
+      reasoningSegments: oldSegments.map((segment) => omitKey(segment, "text")),
+      meteredLlmCreditsConsumed: 3,
+      retrieval: {
+        citations: [stripQuote(availableCitations[0]!)],
+        availableCitations: availableCitations.map(stripQuote),
+      },
+    },
+  });
+  return { mcpDisplay, newRow, oldRow };
+}
+
+function reloadRenderModel(row: ChatMessageItem) {
+  const version = buildVersionedMessageGroups([row])[0]?.versions[0];
+  assert.ok(version);
+  const state = buildMessageRenderState({
+    isAssistantStreaming: false,
+    role: "assistant",
+    version,
+  });
+  return {
+    version,
+    model: {
+      status: state.status,
+      text: state.text,
+      error: state.error,
+      // "Thought for Ns" rows and their expanded text come from these blocks.
+      bodyBlocks: state.bodyBlocks,
+      // Tool cards join render blocks to `toolCalls` by id.
+      toolCalls: version.toolCalls,
+      toolCards: state.bodyBlocks.flatMap((block) =>
+        block.type === "tool"
+          ? [version.toolCalls?.find((call) => call.id === block.toolCallId)]
+          : [],
+      ),
+      thinkingSteps: version.thinkingSteps,
+      toolActivity: state.activityItems.flatMap((item) =>
+        item.type === "tool"
+          ? [
+              {
+                key: item.key,
+                toolCall: item.toolCall,
+                toolStep: item.toolStep,
+              },
+            ]
+          : [],
+      ),
+      activityOrder: state.activityItems.map((item) => item.key),
+      citations: state.citations,
+      availableCitations: state.availableCitations,
+      threadRun: version.threadRun,
+      finishReason: version.finishReason,
+    },
+  };
+}
+
+test("#333 reload renders the same model from the deduped /messages client view", () => {
+  const { mcpDisplay, newRow, oldRow } = buildReloadEquivalenceRows();
+  const before = reloadRenderModel(oldRow);
+  const after = reloadRenderModel(newRow);
+
+  assert.deepEqual(after.model, before.model);
+
+  // Spot-check that the compared model is the real, populated one.
+  const reasoningBlocks = after.model.bodyBlocks.filter(
+    (block) => block.type === "reasoning",
+  );
+  assert.deepEqual(
+    reasoningBlocks.map((block) =>
+      block.type === "reasoning" ? [block.text, block.durationMs] : null,
+    ),
+    [
+      ["Thinking step 1: decide the next tool.", 1000],
+      ["Thinking step 2: decide the next tool.", 2000],
+    ],
+  );
+  assert.equal(after.model.toolCards.length, 6);
+  assert.ok(after.model.toolCards.every((call) => call !== undefined));
+  assert.deepEqual(
+    after.model.toolCalls?.find((call) => call.id === "search-1")?.mcpDisplay,
+    mcpDisplay,
+  );
+  for (const item of after.model.toolActivity) {
+    const canonical = after.version.toolCalls?.find(
+      (call) => call.id === item.toolCall.id,
+    );
+    assert.ok(canonical);
+    assert.deepEqual(item.toolCall.input, canonical.input);
+    assert.deepEqual(item.toolCall.output, canonical.output);
+  }
+  assert.equal(
+    after.model.toolActivity.find((item) => item.toolCall.id === "notion-1")
+      ?.toolCall.approvalConfirmationId,
+    "confirmation-1",
+  );
+  const execute = after.model.toolCalls?.find((call) => call.id === "exec-1");
+  assert.equal(
+    getSandboxExecuteView({
+      input: execute?.input,
+      output: execute?.output,
+      toolName: "execute",
+    })?.output,
+    "src\nsrc/index.ts\n",
+  );
+  assert.deepEqual(
+    after.model.availableCitations.map((item) => item.chunkId),
+    ["chunk-1", "chunk-2"],
+  );
+  assert.equal(
+    JSON.stringify(after.model.availableCitations).includes("quoteText"),
+    false,
+  );
+
+  // Structural reasoning parts and segments survive without their text.
+  assert.deepEqual(
+    after.version.traceParts
+      ?.filter((part) => part.kind === "reasoning")
+      .map((part) => [part.id, part.kind === "reasoning" ? part.text : null]),
+    [
+      ["model-reasoning:run-1:1", ""],
+      ["model-reasoning:run-1:2", ""],
+    ],
+  );
+  assert.deepEqual(
+    after.version.modelReasoningSegments?.map((segment) => [
+      segment.id,
+      segment.text,
+      segment.durationMs,
+    ]),
+    [
+      ["model-reasoning:run-1:1", "", 1000],
+      ["model-reasoning:run-1:2", "", 2000],
+    ],
+  );
+  assert.equal(
+    after.version.traceParts?.some(
+      (part) => part.kind === "tool" && "input" in part,
+    ),
+    false,
+  );
+  // A legacy row's inline part input is still parsed (never preferred).
+  assert.ok(
+    before.version.traceParts?.every(
+      (part) => part.kind !== "tool" || part.input !== undefined,
+    ),
+  );
+});

@@ -996,10 +996,11 @@ function normalizeModelReasoningSegmentRecord(
     return null;
   }
 
-  const text = toNullableString(record.text)?.trim();
-  if (!text) {
-    return null;
-  }
+  // Structural segments carry no text (Issue #333: persisted segments and the
+  // `/messages` view keep id/sequence/phase/tool/duration only; the visible
+  // reasoning text lives in the reasoning render blocks). They normalize to
+  // `text: ""` instead of being dropped.
+  const text = toNullableString(record.text)?.trim() ?? "";
 
   return {
     id: toNullableString(record.id) ?? `model-reasoning-${fallbackIndex + 1}`,
@@ -1126,10 +1127,9 @@ function normalizeTracePartRecord(value: unknown): TracePartRecord | null {
   }
 
   if (record.kind === "reasoning") {
-    const text = toNullableString(record.text);
-    if (!text) {
-      return null;
-    }
+    // Structural parts carry no text (Issue #333); keep them so the activity
+    // order is the same with and without the legacy inline text.
+    const text = toNullableString(record.text) ?? "";
     return {
       id,
       kind: "reasoning",
@@ -1161,6 +1161,7 @@ function normalizeTracePartRecord(value: unknown): TracePartRecord | null {
     ) {
       return null;
     }
+    const legacyInput = toObjectRecord(record.input);
     return {
       id,
       kind: "tool",
@@ -1170,7 +1171,9 @@ function normalizeTracePartRecord(value: unknown): TracePartRecord | null {
       toolCallId,
       tool,
       status,
-      input: toObjectRecord(record.input) ?? {},
+      // Legacy rows only: trace parts are structural and the input lives on
+      // `toolCalls[toolCallId].input` (Issue #333).
+      ...(legacyInput ? { input: legacyInput } : {}),
       output: record.output,
       error:
         typeof record.error === "string" || record.error === null
