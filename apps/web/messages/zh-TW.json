@@ -1979,7 +1979,8 @@
       "noResumeData": "確認回應未包含恢復資料。",
       "resumeHandlerUnavailable": "工具確認恢復處理器不可用。",
       "sendFailed": "傳送訊息失敗。",
-      "toolExecutionFailed": "工具執行失敗。"
+      "toolExecutionFailed": "工具執行失敗。",
+      "liveStreamEnded": "即時輸出在執行結束前中斷。"
     },
     "chatRoot": {
       "queued": "已排隊",

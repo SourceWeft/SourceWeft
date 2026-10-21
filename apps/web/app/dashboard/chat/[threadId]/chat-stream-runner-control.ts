@@ -50,6 +50,30 @@ export function resolveChatExecutionState(input: {
   return "idle";
 }
 
+/**
+ * Whether the active run belongs to another member (followed live, never
+ * stoppable from here). An unattributed run is treated as ours. While the
+ * session is still loading the current user id is unknown, so a run is treated
+ * as possibly ours and Stop stays visible: the stop endpoint authorizes
+ * server-side, and hiding Stop during session load would strand our own run
+ * after a reload. Once the session has settled, a missing user id (signed out
+ * or the session read failed) no longer counts as "possibly ours".
+ */
+export function resolveOtherUserRunActive(input: {
+  activeThreadRun: ActiveThreadRun | null;
+  currentUserId: string | null | undefined;
+  sessionPending: boolean;
+}): boolean {
+  const runUserId = input.activeThreadRun?.userId;
+  if (runUserId == null) {
+    return false;
+  }
+  if (input.currentUserId == null) {
+    return !input.sessionPending;
+  }
+  return runUserId !== input.currentUserId;
+}
+
 export function resolveWaitingForApprovalRun(input: {
   assistantMessageId?: string | null;
   current: ActiveThreadRun | null;
@@ -157,10 +181,19 @@ export function useChatStreamRunnerControl({
 
   const markRunTerminal = useCallback(
     (input: {
+      // An attach-only stream failed in transport while the run itself may
+      // still be executing server-side. Keep the active run (and Stop), release
+      // the attach slot so it can be re-attached; recovery reconciles it.
+      attachFailed?: boolean;
       detachedWithoutFinish: boolean;
       durableRunKey: string;
       waitingForApproval?: boolean;
     }) => {
+      if (input.attachFailed) {
+        setIsStreaming(false);
+        clearAttachedRunKeyIfCurrent(input.durableRunKey);
+        return;
+      }
       if (!input.detachedWithoutFinish) {
         setIsStreaming(false);
         setIsStopping(false);
@@ -245,6 +278,7 @@ export function useChatStreamRunnerControl({
     isStopping,
     isStreaming,
     markRunStarted,
+    markRunStopped,
     markRunTerminal,
     setActiveThreadRun,
     stopStreaming,

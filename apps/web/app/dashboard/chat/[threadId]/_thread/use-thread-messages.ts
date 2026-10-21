@@ -32,6 +32,9 @@ import {
 const MAX_INCREMENTAL_DRAIN_PAGES = 10;
 import type { ThreadStreamActionInput } from "./use-thread-stream-action";
 
+/** Outcome of a full thread reload; "failed" means it gave up retrying. */
+export type ThreadMessagesLoadResult = "loaded" | "failed" | "superseded";
+
 type UseThreadMessagesInput = {
   activeThreadRunRef: RefObject<ActiveThreadRun | null>;
   attachedRunKeyRef: RefObject<string | null>;
@@ -160,132 +163,145 @@ export function useThreadMessages({
     [setStreamingAssistantSnapshot, threadId, workspaceId],
   );
 
-  const loadThreadMessages = useCallback(async () => {
-    const loadGeneration = threadMessagesLoadGenerationRef.current + 1;
-    threadMessagesLoadGenerationRef.current = loadGeneration;
+  // Full reload that reports its outcome (attach recovery needs to know a
+  // reload gave up); `loadThreadMessages` below is the plain void form.
+  const loadThreadMessagesWithResult =
+    useCallback(async (): Promise<ThreadMessagesLoadResult> => {
+      const loadGeneration = threadMessagesLoadGenerationRef.current + 1;
+      threadMessagesLoadGenerationRef.current = loadGeneration;
 
-    if (!workspaceId) {
-      loadedThreadMessagesKeyRef.current = null;
-      newestMessageCursorRef.current = null;
-      setMessages([]);
-      setLatestRunFailure(null);
-      setStreamingAssistantSnapshot(null);
-      clearTerminalLocalRunState();
-      setOlderMessagesCursor(null);
-      return;
-    }
-
-    const threadMessagesKey = `${workspaceId}:${threadId}`;
-
-    for (
-      let attempt = 0;
-      attempt <= THREAD_MESSAGES_LOAD_RETRY_DELAYS_MS.length;
-      attempt += 1
-    ) {
-      try {
-        const [messagesResult, activeRunResult] = await Promise.all([
-          contentClient.listThreadMessages(workspaceId, threadId, {
-            include: "metadata,contentJson,citations",
-            limit: THREAD_MESSAGES_INITIAL_PAGE_SIZE,
-          }),
-          contentClient.getActiveThreadRun(workspaceId, threadId),
-        ]);
-        let serverMessages = mapThreadMessagesToChatMessages(
-          messagesResult.items,
-        );
-        const activeRun = activeRunResult.threadRun;
-
-        if (threadMessagesLoadGenerationRef.current !== loadGeneration) {
-          return;
-        }
-
-        setLatestRunFailure(
-          activeRun ? null : (activeRunResult.latestFailure ?? null),
-        );
-
-        loadedThreadMessagesKeyRef.current = threadMessagesKey;
-        // Watermark from the raw server page (the newest 80), never from
-        // rendered/optimistic messages.
-        newestMessageCursorRef.current = newestServerCursor(
-          messagesResult.items,
-        );
-        setOlderMessagesCursor(messagesResult.nextCursor ?? null);
-        const runningRun = activeRun
-          ? normalizeActiveThreadRun(activeRun)
-          : null;
-        let runningAssistant: {
-          message: ChatMessageItem;
-          run: ActiveThreadRun;
-        } | null = findActiveThreadRunMessage(serverMessages, runningRun);
-        const matchedRunningAssistant = runningAssistant;
-        if (runningRun && !runningAssistant) {
-          const latestUserMessage = [...serverMessages]
-            .reverse()
-            .find((message) => message.role === "user");
-          const placeholder = createActiveThreadRunPlaceholder({
-            run: runningRun,
-            latestUserMessageId: latestUserMessage?.id ?? null,
-          });
-          serverMessages = [...serverMessages, placeholder];
-          runningAssistant = { message: placeholder, run: runningRun };
-        }
-        const resolvedRunningRun = matchedRunningAssistant?.run ?? runningRun;
-        setActiveThreadRun(resolvedRunningRun);
-        setMessages(serverMessages);
+      if (!workspaceId) {
+        loadedThreadMessagesKeyRef.current = null;
+        newestMessageCursorRef.current = null;
+        setMessages([]);
+        setLatestRunFailure(null);
         setStreamingAssistantSnapshot(null);
-        if (!resolvedRunningRun) {
-          clearTerminalLocalRunState();
-        }
-        if (
-          resolvedRunningRun &&
-          resolvedRunningRun.status !== "waiting_for_approval" &&
-          runningAssistant &&
-          resolvedRunningRun.idempotencyKey !== attachedRunKeyRef.current
-        ) {
-          attachedRunKeyRef.current = resolvedRunningRun.idempotencyKey;
-          void streamThreadActionRef.current?.({
-            mode: resolvedRunningRun.mode ?? "send",
-            durableRunKey: resolvedRunningRun.idempotencyKey,
-            attachOnly: true,
-            // Keep the run attributed to its initiator so following another
-            // member's run does not lock our composer (owner-aware gating).
-            runOwnerUserId: resolvedRunningRun.userId ?? null,
-            assistantMessageId: runningAssistant.message.id,
-            baseMessages: serverMessages,
-          });
-        }
-        return;
-      } catch (error) {
-        if (threadMessagesLoadGenerationRef.current !== loadGeneration) {
-          return;
-        }
+        clearTerminalLocalRunState();
+        setOlderMessagesCursor(null);
+        return "loaded";
+      }
 
-        const retryDelay = THREAD_MESSAGES_LOAD_RETRY_DELAYS_MS[attempt];
-        if (retryDelay === undefined || !shouldRetryThreadMessagesLoad(error)) {
-          if (loadedThreadMessagesKeyRef.current !== threadMessagesKey) {
-            setMessages([]);
-            setStreamingAssistantSnapshot(null);
-            setOlderMessagesCursor(null);
+      const threadMessagesKey = `${workspaceId}:${threadId}`;
+
+      for (
+        let attempt = 0;
+        attempt <= THREAD_MESSAGES_LOAD_RETRY_DELAYS_MS.length;
+        attempt += 1
+      ) {
+        try {
+          const [messagesResult, activeRunResult] = await Promise.all([
+            contentClient.listThreadMessages(workspaceId, threadId, {
+              include: "metadata,contentJson,citations",
+              limit: THREAD_MESSAGES_INITIAL_PAGE_SIZE,
+            }),
+            contentClient.getActiveThreadRun(workspaceId, threadId),
+          ]);
+          let serverMessages = mapThreadMessagesToChatMessages(
+            messagesResult.items,
+          );
+          const activeRun = activeRunResult.threadRun;
+
+          if (threadMessagesLoadGenerationRef.current !== loadGeneration) {
+            return "superseded";
           }
-          return;
-        }
 
-        await waitForThreadMessagesRetry(retryDelay);
-        if (threadMessagesLoadGenerationRef.current !== loadGeneration) {
-          return;
+          setLatestRunFailure(
+            activeRun ? null : (activeRunResult.latestFailure ?? null),
+          );
+
+          loadedThreadMessagesKeyRef.current = threadMessagesKey;
+          // Watermark from the raw server page (the newest 80), never from
+          // rendered/optimistic messages.
+          newestMessageCursorRef.current = newestServerCursor(
+            messagesResult.items,
+          );
+          setOlderMessagesCursor(messagesResult.nextCursor ?? null);
+          const runningRun = activeRun
+            ? normalizeActiveThreadRun(activeRun)
+            : null;
+          let runningAssistant: {
+            message: ChatMessageItem;
+            run: ActiveThreadRun;
+          } | null = findActiveThreadRunMessage(serverMessages, runningRun);
+          const matchedRunningAssistant = runningAssistant;
+          if (runningRun && !runningAssistant) {
+            const latestUserMessage = [...serverMessages]
+              .reverse()
+              .find((message) => message.role === "user");
+            const placeholder = createActiveThreadRunPlaceholder({
+              run: runningRun,
+              latestUserMessageId: latestUserMessage?.id ?? null,
+            });
+            serverMessages = [...serverMessages, placeholder];
+            runningAssistant = { message: placeholder, run: runningRun };
+          }
+          const resolvedRunningRun = matchedRunningAssistant?.run ?? runningRun;
+          setActiveThreadRun(resolvedRunningRun);
+          setMessages(serverMessages);
+          setStreamingAssistantSnapshot(null);
+          if (!resolvedRunningRun) {
+            clearTerminalLocalRunState();
+          }
+          if (
+            resolvedRunningRun &&
+            resolvedRunningRun.status !== "waiting_for_approval" &&
+            runningAssistant &&
+            resolvedRunningRun.idempotencyKey !== attachedRunKeyRef.current
+          ) {
+            attachedRunKeyRef.current = resolvedRunningRun.idempotencyKey;
+            void streamThreadActionRef.current?.({
+              mode: resolvedRunningRun.mode ?? "send",
+              durableRunKey: resolvedRunningRun.idempotencyKey,
+              attachOnly: true,
+              // Keep the run attributed to its initiator so following another
+              // member's run does not lock our composer (owner-aware gating).
+              runOwnerUserId: resolvedRunningRun.userId ?? null,
+              assistantMessageId: runningAssistant.message.id,
+              baseMessages: serverMessages,
+              // A reload attach: a transport failure keeps the run and is
+              // recovered (see attach-reattach.ts) instead of failing the turn.
+              reattachOnFailure: true,
+            });
+          }
+          return "loaded";
+        } catch (error) {
+          if (threadMessagesLoadGenerationRef.current !== loadGeneration) {
+            return "superseded";
+          }
+
+          const retryDelay = THREAD_MESSAGES_LOAD_RETRY_DELAYS_MS[attempt];
+          if (
+            retryDelay === undefined ||
+            !shouldRetryThreadMessagesLoad(error)
+          ) {
+            if (loadedThreadMessagesKeyRef.current !== threadMessagesKey) {
+              setMessages([]);
+              setStreamingAssistantSnapshot(null);
+              setOlderMessagesCursor(null);
+            }
+            return "failed";
+          }
+
+          await waitForThreadMessagesRetry(retryDelay);
+          if (threadMessagesLoadGenerationRef.current !== loadGeneration) {
+            return "superseded";
+          }
         }
       }
-    }
-  }, [
-    attachedRunKeyRef,
-    clearTerminalLocalRunState,
-    setActiveThreadRun,
-    setLatestRunFailure,
-    setStreamingAssistantSnapshot,
-    streamThreadActionRef,
-    threadId,
-    workspaceId,
-  ]);
+      return "failed";
+    }, [
+      attachedRunKeyRef,
+      clearTerminalLocalRunState,
+      setActiveThreadRun,
+      setLatestRunFailure,
+      setStreamingAssistantSnapshot,
+      streamThreadActionRef,
+      threadId,
+      workspaceId,
+    ]);
+  const loadThreadMessages = useCallback(async () => {
+    await loadThreadMessagesWithResult();
+  }, [loadThreadMessagesWithResult]);
 
   // Incremental forward sync: on a room 'message' frame, append messages newer
   // than the watermark instead of replacing the whole list. Idle-only (the
@@ -411,6 +427,7 @@ export function useThreadMessages({
     isLoadingOlderMessages,
     loadOlderThreadMessages,
     loadThreadMessages,
+    loadThreadMessagesWithResult,
     mergeStreamingAssistantIntoMessages,
     messages,
     latestRunFailure,
