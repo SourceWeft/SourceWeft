@@ -58,7 +58,7 @@ const wallClockSchema = z
     runId: z.string().min(1),
     startedAtMs: z.number().int().nonnegative().safe(),
     closingStartedAtMs: z.number().int().nonnegative().safe().optional(),
-    trigger: z.enum(["steps", "wall_clock"]).optional(),
+    trigger: z.enum(["steps", "wall_clock", "committed_delivery"]).optional(),
   })
   .strict();
 const v2ScopeSchema = z
@@ -904,38 +904,34 @@ export function createSourceWeftStepBudgetMiddleware(
         let current: ScopeBudget = entry;
         if (isV2Scope(entry)) {
           const clock = clockFor(entry);
-          // A committed delivery followed by repeated tool-calling decisions
-          // exhausts both allowances: the next decision is the finalizing
-          // summary, exactly as an expired closing clock would make it.
           if (
-            isCommittedDeliveryExhausted(readCommittedDelivery(state.messages))
-          )
-            current = {
-              ...entry,
-              steps: entry.limit,
-              normalSteps: entry.normalLimit,
-              closingSteps: entry.closingLimit,
-              ...(clock ? { wallClock: clock } : {}),
-            };
-          else if (
             entry.phase === "working" &&
             entry.normalSteps < entry.normalLimit
           ) {
-            const next =
+            // An expired working clock, or a committed delivery followed by
+            // repeated tool-calling decisions, makes this call the last
+            // normal decision; the bounded closing phase follows.
+            const trigger =
               clock && now() - clock.startedAtMs >= workingWallClockMs
-                ? {
-                    ...entry,
-                    steps:
-                      entry.steps + (entry.normalLimit - entry.normalSteps),
-                    normalSteps: entry.normalLimit,
-                    wallClock: { ...clock, trigger: "wall_clock" as const },
-                  }
-                : {
-                    ...entry,
-                    steps: entry.steps + 1,
-                    normalSteps: entry.normalSteps + 1,
-                    ...(clock ? { wallClock: clock } : {}),
-                  };
+                ? ("wall_clock" as const)
+                : isCommittedDeliveryExhausted(
+                      readCommittedDelivery(state.messages),
+                    )
+                  ? ("committed_delivery" as const)
+                  : null;
+            const next = trigger
+              ? {
+                  ...entry,
+                  steps: entry.steps + (entry.normalLimit - entry.normalSteps),
+                  normalSteps: entry.normalLimit,
+                  ...(clock ? { wallClock: { ...clock, trigger } } : {}),
+                }
+              : {
+                  ...entry,
+                  steps: entry.steps + 1,
+                  normalSteps: entry.normalSteps + 1,
+                  ...(clock ? { wallClock: clock } : {}),
+                };
             emit(next);
             return patch(scope, next);
           } else if (entry.closingSteps < entry.closingLimit) {
@@ -1088,10 +1084,14 @@ export function createSourceWeftStepBudgetMiddleware(
         // After a committed delivery the finish instruction replaces the
         // closing prompt, which would otherwise invite more delivery work.
         const delivery = readCommittedDelivery(request.state.messages);
+        const closingDecisionsLeft =
+          current && isV2Scope(current) && current.phase === "closing"
+            ? current.closingLimit - current.closingSteps + 1
+            : null;
         const instruction = delivery
-          ? committedDeliveryPrompt(delivery)
-          : current && isV2Scope(current) && current.phase === "closing"
-            ? `${CLOSING_PROMPT}${current.closingLimit - current.closingSteps + 1}`
+          ? committedDeliveryPrompt(delivery, closingDecisionsLeft)
+          : closingDecisionsLeft !== null
+            ? `${CLOSING_PROMPT}${closingDecisionsLeft}`
             : null;
         if (instruction)
           return handler({

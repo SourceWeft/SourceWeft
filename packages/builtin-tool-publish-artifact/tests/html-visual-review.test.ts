@@ -260,6 +260,68 @@ test("a provider 400 about the image becomes an actionable failed review", async
   ]);
   assert.equal(r.providerMessage, "unsupported image");
 });
+test("provider complaints about image size, aspect or format ask for slices", async () => {
+  for (const message of [
+    "Image exceeds the maximum allowed dimensions",
+    "Invalid image: aspect ratio too large",
+    "image format not recognised",
+    "Could not decode image data",
+  ]) {
+    const f = factory("");
+    f.complete.mockRejectedValueOnce(
+      Object.assign(new Error(message), { statusCode: 400 }),
+    );
+    const r = JSON.parse(
+      await f.tool.invoke({
+        imagePaths: ["/workspace/qa/a.png"],
+        criteria: "Check readability",
+      }),
+    );
+    assert.equal(r.reason, "HTML_QA_IMAGE_REJECTED_BY_MODEL", message);
+    assert.match(r.instruction, /QA script/);
+  }
+});
+test("a model that cannot take image input is reported, not sent back to re-slice", async () => {
+  for (const message of [
+    "model does not support image input",
+    "This model doesn't support images",
+    "Image input is not supported for this model",
+    "deepseek-chat is a text-only model; image content not allowed",
+    "The requested model is not a multimodal model",
+  ]) {
+    const f = factory("");
+    f.complete.mockRejectedValueOnce(
+      Object.assign(new Error(message), { code: "BAD_REQUEST" }),
+    );
+    const r = JSON.parse(
+      await f.tool.invoke({
+        imagePaths: ["/workspace/qa/a.png"],
+        criteria: "Check readability",
+      }),
+    );
+    assert.equal(r.passed, false, message);
+    assert.equal(r.reason, "HTML_QA_VISION_MODEL_UNAVAILABLE", message);
+    assert.equal(r.rejectedImages, undefined);
+    assert.match(r.instruction, /Do not re-run QA/);
+    assert.doesNotMatch(r.instruction, /slices/);
+  }
+});
+test("a 400 that only mentions an image field without a size or capability cause still throws", async () => {
+  const f = factory("");
+  f.complete.mockRejectedValueOnce(
+    Object.assign(new Error("image_url.detail must be one of low, high"), {
+      code: "BAD_REQUEST",
+      statusCode: 400,
+    }),
+  );
+  await assert.rejects(
+    f.tool.invoke({
+      imagePaths: ["/workspace/qa/a.png"],
+      criteria: "Check readability",
+    }),
+    /image_url\.detail/,
+  );
+});
 test("other provider failures still throw", async () => {
   const f = factory("");
   f.complete.mockRejectedValueOnce(

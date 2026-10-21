@@ -108,6 +108,9 @@ class ReportTest(unittest.TestCase):
                          'Analysis: growth slows', 'analysis : growth slows', '[Analysis] growth slows', 'ANALYSIS - growth slows'),
             'recommendation': ('建议：采用方案A', '（建议）采用方案A', 'Recommendation: adopt A', 'recommendation — adopt A'),
         }
+        cases['analysis'] += ('分析——增长放缓', '分析—增长放缓', '分析–增长放缓', '分析｜增长放缓', '分析|增长放缓', '分析 — 增长放缓',
+                              'Analyses: growth slows', '[Analyses] growth slows', 'Analysis—growth slows', 'Analysis -- growth slows')
+        cases['recommendation'] += ('建议——采用方案A', '建议｜采用方案A', 'Recommendations: adopt A', 'RECOMMENDATIONS — adopt A', '[Recommendations] adopt A')
         for target in targets:
             for kind, texts in cases.items():
                 for text in texts:
@@ -118,8 +121,9 @@ class ReportTest(unittest.TestCase):
                             validate_report(report)
                         self.assertEqual(target(report)['text'], text)
         accepted = {
-            'analysis': ('分析显示增长放缓', 'Analysis shows growth slows', 'Analysis-driven planning matters', '增长放缓。分析：见下文'),
-            'recommendation': ('建议在下季度采用方案A', 'Recommendations vary by team', '采用方案A'),
+            'analysis': ('分析显示增长放缓', 'Analysis shows growth slows', 'Analysis-driven planning matters', 'Analyses differ by region',
+                         '增长放缓。分析：见下文', '分析-增长放缓'),
+            'recommendation': ('建议在下季度采用方案A', 'Recommendations vary by team', 'Recommendation-grade evidence is thin', '采用方案A'),
             'fact': ('分析：这是一句被引用的事实原文',),
         }
         for kind, texts in accepted.items():

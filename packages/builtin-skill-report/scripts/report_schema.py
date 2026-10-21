@@ -169,22 +169,29 @@ def provenance_counts(report):
     return counts
 
 
+# English labels also match their plurals ("Analyses:", "Recommendations:").
+LABEL_PLURALS = {"Analysis": "Analys(?:is|es)", "Recommendation": "Recommendations?"}
+
+
 def own_label_prefix(value, kind):
     """The kind label (either language) the text already starts with, if any.
 
     The renderer prefixes analysis/recommendation statements with their label,
     so text that repeats it renders as "分析: 分析：…". A label counts only
-    when followed by a colon, a spaced dash or wrapped in brackets, so ordinary
-    sentences such as "建议在…" or "Analysis shows…" remain valid.
+    when wrapped in brackets or followed by a colon, an em/en dash or vertical
+    bar (spacing optional), or an ASCII hyphen followed by whitespace, so
+    ordinary sentences such as "建议在…", "Analysis shows…" or
+    "Analysis-driven…" remain valid.
     """
     for language in ("zh-CN", "en-US"):
-        label = re.escape(labels({"language": language})[kind])
+        name = labels({"language": language})[kind]
+        label = LABEL_PLURALS.get(name, re.escape(name))
         if re.match(
-            r"\s*(?:\*\*|__)?\s*(?:[\[【(（]\s*" + label + r"\s*[\]】)）]|" + label + r"\s*(?:\*\*|__)?\s*(?:[:：]|[-–—|｜]\s))",
+            r"\s*(?:\*\*|__)?\s*(?:[\[【(（]\s*" + label + r"\s*[\]】)）]|" + label + r"\s*(?:\*\*|__)?\s*(?:[:：]|[—–｜|]+|-+\s))",
             value,
             re.I,
         ):
-            return labels({"language": language})[kind]
+            return name
     return None
 
 

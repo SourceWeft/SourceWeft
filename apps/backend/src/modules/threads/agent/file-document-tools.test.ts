@@ -136,6 +136,34 @@ it("still accepts the legacy `cursor` input and unprefixed tokens", async () => 
   expect(legacy.segments[0].text).toHaveLength(100);
 });
 
+it("treats null or empty continuation values as absent and prefers a real token", async () => {
+  const f = fixture({ "/files/long.txt": "a".repeat(20_100) });
+  const first = JSON.parse(
+    (await f.readDocument.invoke({ path: "long.txt" })) as string,
+  );
+  for (const input of [
+    { continuation: null },
+    { continuation: "" },
+    { cursor: null },
+    { continuation: null, cursor: "" },
+  ]) {
+    const fromStart = JSON.parse(
+      (await f.readDocument.invoke({ path: "long.txt", ...input })) as string,
+    );
+    expect(fromStart.segments[0].text).toHaveLength(20_000);
+  }
+  for (const input of [
+    { continuation: "", cursor: first.continuation },
+    { continuation: null, cursor: first.continuation },
+    { continuation: first.continuation, cursor: "" },
+  ]) {
+    const resumed = JSON.parse(
+      (await f.readDocument.invoke({ path: "long.txt", ...input })) as string,
+    );
+    expect(resumed.segments[0].text).toHaveLength(100);
+  }
+});
+
 it("rejects bad continuations with guidance that names the recovery", async () => {
   const f = fixture({
     "/files/long.txt": "a".repeat(20_100),

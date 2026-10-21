@@ -230,7 +230,23 @@ export function createHtmlVisualReviewTools(input: HtmlVisualReviewInput) {
               );
             } catch (error) {
               signal?.throwIfAborted();
-              if (!isImageRejection(error)) throw error;
+              const rejection = classifyImageRejection(error);
+              if (!rejection) throw error;
+              if (rejection === "vision_unavailable")
+                // Same convention as VISION_PROFILE_UNAVAILABLE: a failed
+                // review the agent reports, not something re-slicing fixes.
+                return JSON.stringify({
+                  passed: false,
+                  reason: "HTML_QA_VISION_MODEL_UNAVAILABLE",
+                  reviewedImages: verdicts.length,
+                  verdicts,
+                  providerMessage: String((error as Error).message).slice(
+                    0,
+                    300,
+                  ),
+                  instruction:
+                    "The configured vision model does not accept image input. Do not re-run QA or retry the review; report that visual review is unavailable and that delivery is blocked on a vision-capable model configuration.",
+                });
               return JSON.stringify({
                 passed: false,
                 reason: "HTML_QA_IMAGE_REJECTED_BY_MODEL",
@@ -360,21 +376,46 @@ function dimensionProblem(image: { width: number; height: number }) {
   return null;
 }
 
-/** A provider 4xx that blames the supplied image(s), not the request shape. */
-function isImageRejection(error: unknown) {
+/**
+ * Classify a provider 4xx that mentions images. Only a complaint about the
+ * images themselves (size, dimensions, aspect ratio, format, undecodable
+ * content) is fixable by re-slicing; a model that cannot take image input at
+ * all is a configuration problem, and re-running QA would only loop. Anything
+ * else stays a thrown error.
+ */
+function classifyImageRejection(
+  error: unknown,
+): "image_content" | "vision_unavailable" | null {
   const record = error as {
     code?: unknown;
     statusCode?: unknown;
     message?: unknown;
   } | null;
-  return Boolean(
-    record &&
-    (record.code === "BAD_REQUEST" ||
+  if (
+    !record ||
+    typeof record.message !== "string" ||
+    !(
+      record.code === "BAD_REQUEST" ||
       (typeof record.statusCode === "number" &&
         record.statusCode >= 400 &&
         record.statusCode < 500 &&
-        ![401, 402, 403, 408, 429].includes(record.statusCode))) &&
-    typeof record.message === "string" &&
-    /image/i.test(record.message),
-  );
+        ![401, 402, 403, 408, 429].includes(record.statusCode))
+    ) ||
+    !/image|vision|multi-?modal/i.test(record.message)
+  )
+    return null;
+  const message = record.message;
+  if (
+    /(?:does\s*n[o']t|do\s*n[o']t|cannot|can't|not)\s+(?:support|accept|handle|process)(?:s|ed)?\s+(?:\w+\s+){0,2}(?:image|vision|multi-?modal)|(?:image|vision|multi-?modal)\s+(?:input|content|inputs)?\s*(?:is|are)?\s*not\s+(?:supported|enabled|available|allowed)|text[-\s]only|not\s+a\s+(?:vision|multi-?modal)\s+model|no\s+vision\s+(?:support|capabilit)/i.test(
+      message,
+    )
+  )
+    return "vision_unavailable";
+  if (
+    /size|dimension|aspect|ratio|resolution|pixel|too\s+(?:large|big|long|tall|wide|small)|exceed|format|unsupported\s+image|invalid\s+image|image\s+(?:is\s+)?(?:invalid|corrupt|malformed)|decode|corrupt|malformed/i.test(
+      message,
+    )
+  )
+    return "image_content";
+  return null;
 }

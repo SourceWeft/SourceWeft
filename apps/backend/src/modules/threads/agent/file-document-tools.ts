@@ -111,7 +111,9 @@ export function createFileDocumentTools(input: {
       let unit = 0,
         offset = 0;
       // `cursor` is the input name models used before it matched the output.
-      const supplied = requested ?? cursor;
+      // A model may echo the terminal `continuation: null` or send "", so an
+      // empty value never hides a token supplied under the other name.
+      const supplied = requested || cursor || undefined;
       if (supplied) {
         const state = parseDocumentContinuation(supplied);
         if (state.fileId !== file.fileId)
@@ -194,14 +196,14 @@ export function createFileDocumentTools(input: {
         continuation: z
           .string()
           .max(4096)
-          .optional()
+          .nullish()
           .describe(
             "The exact `continuation` from the previous read_document result for this path. Omit to read from the beginning.",
           ),
         cursor: z
           .string()
           .max(4096)
-          .optional()
+          .nullish()
           .describe("Deprecated alias of `continuation`."),
       }),
     },
