@@ -29,6 +29,11 @@ import type { MessageRenderBlock, PreparedThreadTurn } from "../turn/types";
 import { createThreadStreamErrorMessage } from "../stream/error";
 import { toSseData } from "../stream/helpers";
 import { createDeltaCoalescer } from "./sse-coalescer";
+import {
+  boundReasoningRenderBlocks,
+  boundReasoningSegmentText,
+  boundSnapshotReasoning,
+} from "./reasoning-bounds";
 import { ContentThreadStreamService } from "../stream/service";
 import { ContentThreadTurnService } from "../turn/service";
 import {
@@ -556,19 +561,27 @@ function mergeReasoningSegment(existing: unknown[], next: unknown) {
 
   // One record per segment id, updated in place: the SSE segment carries no
   // `text` (only id, sequence, duration, phase), so any check beyond the id
-  // never matched and every streamed delta appended a duplicate record.
+  // never matched and every streamed delta appended a duplicate record. The
+  // first sequence seen for an id is kept, matching
+  // `stream/run-trace-state.ts` `upsertReasoningSegmentTrace`.
   if (existingIndex >= 0) {
-    return existing.map((item, index) =>
-      index === existingIndex
-        ? {
-            ...(item && typeof item === "object" && !Array.isArray(item)
-              ? (item as Record<string, unknown>)
-              : {}),
-            ...record,
-            id,
-          }
-        : item,
-    );
+    return existing.map((item, index) => {
+      if (index !== existingIndex) {
+        return item;
+      }
+      const existingRecord =
+        item && typeof item === "object" && !Array.isArray(item)
+          ? (item as Record<string, unknown>)
+          : {};
+      return {
+        ...existingRecord,
+        ...record,
+        id,
+        ...(existingRecord.sequence !== undefined
+          ? { sequence: existingRecord.sequence }
+          : {}),
+      };
+    });
   }
 
   return [...existing, record];
@@ -757,7 +770,10 @@ function appendReasoningRenderBlock(input: {
       block.type === "reasoning" && block.id === input.id
         ? {
             ...block,
-            text: `${block.text}${input.text}`,
+            // One block per segment accumulates every streamed delta; keep
+            // the tail so a long model call cannot grow the snapshot without
+            // bound (see reasoning-bounds.ts).
+            text: boundReasoningSegmentText(`${block.text}${input.text}`),
             ...(typeof input.durationMs === "number"
               ? { durationMs: input.durationMs }
               : {}),
@@ -771,7 +787,7 @@ function appendReasoningRenderBlock(input: {
     {
       id: input.id,
       type: "reasoning" as const,
-      text: input.text,
+      text: boundReasoningSegmentText(input.text),
       ...(typeof input.durationMs === "number"
         ? { durationMs: input.durationMs }
         : {}),
@@ -845,7 +861,12 @@ function updateSnapshotFromPayload(
     });
   }
   if (payload.type === "reasoning" && typeof payload.reasoning === "string") {
-    next.reasoning = `${next.reasoning ?? ""}${payload.reasoning}`;
+    // Bounded per revision: the text for a given revision is a pure function
+    // of the delta sequence, so the reasoningWrite CAS (equal revision ⇒ equal
+    // text) still holds after truncation.
+    next.reasoning = boundSnapshotReasoning(
+      `${next.reasoning ?? ""}${payload.reasoning}`,
+    );
     next.reasoningRevision = (snapshot.reasoningRevision ?? 0) + 1;
     if (payload.segment) {
       next.reasoningSegments = mergeReasoningSegment(
@@ -1064,10 +1085,19 @@ function appendTraceEvent(
     Number.isFinite(existing.displayOrder)
       ? existing.displayOrder
       : existingIndex;
+  // A reasoning segment is one event updated in place per delta; its `chars`
+  // counts every delta streamed for the segment, not just the latest one.
+  const chars =
+    event.type === "reasoning" &&
+    typeof event.chars === "number" &&
+    typeof existing?.chars === "number"
+      ? { chars: existing.chars + event.chars }
+      : {};
   return current.map((item, index) =>
     index === existingIndex
       ? {
           ...event,
+          ...chars,
           displayOrder,
         }
       : item,
@@ -1090,11 +1120,15 @@ function traceEventFromPayload(input: {
       return null;
     }
     const sequence = getTraceSequence(segment);
+    // Segment-level identity (no eventIndex): every streamed delta of one
+    // segment upserts the same event, so a run carries one trace event per
+    // reasoning segment instead of one per token. The delta text itself is
+    // not kept: the client replays reasoning from renderBlocks/reasoning, and
+    // per-delta copies were what inflated snapshots to megabytes.
     return {
       type: "reasoning",
       id: buildTraceEventId({
         baseId: segmentId,
-        eventIndex,
         eventType: payload.type,
         phase: typeof segment.phase === "string" ? segment.phase : null,
         sequence,
@@ -1102,8 +1136,9 @@ function traceEventFromPayload(input: {
       itemId: segmentId,
       sequence,
       segment,
-      reasoning:
-        typeof payload.reasoning === "string" ? payload.reasoning : undefined,
+      ...(typeof payload.reasoning === "string"
+        ? { chars: payload.reasoning.length }
+        : {}),
     };
   }
 
@@ -1468,17 +1503,23 @@ async function createDurableErrorMessage(input: {
       agentMode: input.createErrorInput.prepared.agentMode,
       versionOf: input.createErrorInput.prepared.assistantMessageParentId,
       ...errorBilling.metadata,
+      // The runtime partial state is unbounded; project it through the same
+      // bound as the snapshot so every terminal writer of this revision
+      // produces the identical string the reasoningWrite CAS compares.
       ...projectReasoning({
         run: input.snapshot.reasoningRun,
-        text:
+        text: boundSnapshotReasoning(
           input.createErrorInput.partialState?.reasoning ??
-          input.snapshot.reasoning,
+            input.snapshot.reasoning,
+        ),
         terminal: true,
       }),
       reasoningSegments: input.snapshot.reasoningSegments ?? [],
       traceParts: input.snapshot.traceParts ?? [],
       toolCalls: input.snapshot.toolCalls ?? [],
-      renderBlocks: input.snapshot.renderBlocks ?? [],
+      renderBlocks: boundReasoningRenderBlocks(
+        input.snapshot.renderBlocks ?? [],
+      ),
       thinkingSteps: input.snapshot.thinkingSteps ?? [],
       retrieval: {
         citations: input.snapshot.citations ?? [],

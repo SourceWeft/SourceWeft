@@ -674,9 +674,9 @@ test("run snapshots keep append-only trace events by sequence", () => {
       }>
     ).map((event) => `${event.sequence}:${event.type}:${event.id}`),
     [
-      "1:reasoning:model-reasoning-1:1:initial:reasoning:0",
+      "1:reasoning:model-reasoning-1:1:initial:reasoning",
       "2:tool-call:search-page:2:tool-call-result:1",
-      "3:reasoning:model-reasoning-1:3:after_tool:reasoning:2",
+      "3:reasoning:model-reasoning-1:3:after_tool:reasoning",
     ],
   );
 });

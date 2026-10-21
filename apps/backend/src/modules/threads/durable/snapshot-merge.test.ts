@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
+import { MAX_SNAPSHOT_REASONING_CHARS } from "./reasoning-bounds";
+import { testExports } from "./runner";
 import {
   mergeChatRunSnapshot,
   mergeCommittedArtifactRenderBlocks,
   resolveTerminalStatusFromFinishedSnapshot,
 } from "./snapshot";
+import type { ChatRunSnapshot } from "./types";
 
 const committedBlock = {
   artifactId: "artifact-1",
@@ -36,6 +39,51 @@ test("reasoning base survives restart snapshots and rejects re-capture from part
       }),
     /cannot change its reasoning base/,
   );
+});
+
+test("an over-long reasoning stays bounded through the snapshot merge", () => {
+  const reasoningRun = { runId: "run", parentRunId: null, base: "" };
+  let incoming: ChatRunSnapshot = { reasoningRun, reasoningRevision: 0 };
+  const delta = "0123456789abcdef"; // 16 chars
+  const deltas = 20_000; // 320,000 chars > MAX_SNAPSHOT_REASONING_CHARS
+  for (let index = 0; index < deltas; index++) {
+    incoming = testExports.updateSnapshotFromPayload(incoming, {
+      type: "reasoning",
+      reasoning: delta,
+      segment: {
+        id: `model-reasoning-${Math.floor(index / 5_000) + 1}`,
+        sequence: Math.floor(index / 5_000) + 1,
+        phase: "initial",
+      },
+    });
+  }
+  assert.ok(incoming.reasoning);
+  assert.ok(incoming.reasoning.length <= MAX_SNAPSHOT_REASONING_CHARS);
+  assert.match(
+    incoming.reasoning,
+    /^…\[reasoning truncated: \d+ chars dropped\]/u,
+  );
+
+  const merged = mergeChatRunSnapshot({
+    current: { reasoningRun, reasoning: "older", reasoningRevision: 3 },
+    incoming,
+  });
+  assert.equal(merged.reasoning, incoming.reasoning);
+  assert.equal(merged.reasoningRevision, deltas);
+  assert.ok(merged.reasoning!.length <= MAX_SNAPSHOT_REASONING_CHARS);
+  assert.equal(merged.traceEvents?.length, 4);
+
+  // A stale, unbounded copy at a lower revision cannot resurrect the longer text.
+  const stale = mergeChatRunSnapshot({
+    current: merged,
+    incoming: {
+      reasoningRun,
+      reasoning: delta.repeat(deltas),
+      reasoningRevision: deltas - 1,
+    },
+  });
+  assert.equal(stale.reasoning, incoming.reasoning);
+  assert.equal(stale.reasoningRevision, deltas);
 });
 
 test("stale runner render blocks cannot remove a committed artifact output", () => {
