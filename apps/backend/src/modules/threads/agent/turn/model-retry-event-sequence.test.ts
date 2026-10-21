@@ -58,12 +58,20 @@ type Turn =
        * order — have been yielded.
        */
       failAfterChunks?: number;
+      /**
+       * Finish with the provider's output-limit reason instead of the natural
+       * one (`tool_calls` / `stop`): the #338 shape, where a tool call cut by
+       * `max_tokens` still aggregates into a valid-looking `tool_calls` entry.
+       */
+      finishReason?: "length";
     }
   | { throwError: () => Error };
 
 class StreamingScriptedChatModel extends BaseChatModel {
   readonly turns: Turn[];
   calls = 0;
+  /** The finish reason the turn being streamed asked for, if overridden. */
+  private activeFinishReason: "length" | undefined;
 
   constructor(turns: Turn[], params: BaseChatModelParams = {}) {
     super(params);
@@ -83,7 +91,33 @@ class StreamingScriptedChatModel extends BaseChatModel {
     this.calls += 1;
     if (!turn) throw new Error("no scripted turn left");
     if ("throwError" in turn) throw turn.throwError();
+    this.activeFinishReason = turn.finishReason;
     return turn;
+  }
+
+  /**
+   * Core's generic chunk-to-event bridge (`compat.convertChunksToEvents`)
+   * hardcodes `message-finish` as `reason: "stop"` and drops the chunks'
+   * `response_metadata`. The production path does not: `ChatOpenAI` streams
+   * protocol events through core's `convertOpenAICompletionsStream`, whose
+   * `message-finish` carries the provider's mapped reason (`"length"`) and
+   * `responseMetadata.finish_reason`. Mirror that for a `length` turn so the
+   * assembled AIMessage the middleware sees has the production shape.
+   */
+  async *_streamChatModelEvents(
+    ...args: Parameters<BaseChatModel["_streamChatModelEvents"]>
+  ): ReturnType<BaseChatModel["_streamChatModelEvents"]> {
+    for await (const event of super._streamChatModelEvents(...args)) {
+      if (event.event === "message-finish" && this.activeFinishReason) {
+        yield {
+          ...event,
+          reason: this.activeFinishReason,
+          responseMetadata: { finish_reason: this.activeFinishReason },
+        };
+        continue;
+      }
+      yield event;
+    }
   }
 
   /**
@@ -149,7 +183,8 @@ class StreamingScriptedChatModel extends BaseChatModel {
       message: new AIMessageChunk({
         content: "",
         response_metadata: {
-          finish_reason: turn.toolCall ? "tool_calls" : "stop",
+          finish_reason:
+            turn.finishReason ?? (turn.toolCall ? "tool_calls" : "stop"),
         },
       }),
     });
@@ -172,11 +207,19 @@ class StreamingScriptedChatModel extends BaseChatModel {
   }
 }
 
-const probe = tool(async () => "verified", {
-  name: "probe",
-  description: "verify",
-  schema: z.object({ query: z.string() }),
-});
+/** Every argument set the probe tool was actually invoked with. */
+const probeInvocations: unknown[] = [];
+const probe = tool(
+  async (input: { query: string }) => {
+    probeInvocations.push(input);
+    return "verified";
+  },
+  {
+    name: "probe",
+    description: "verify",
+    schema: z.object({ query: z.string() }),
+  },
+);
 
 const FIRST_DECISION = {
   reasoning: ["Let me ", "check the ", "sources."],
@@ -389,6 +432,7 @@ const spyWarn = () =>
 let warn: ReturnType<typeof spyWarn>;
 beforeEach(() => {
   warn = spyWarn();
+  probeInvocations.length = 0;
 });
 afterEach(() => {
   warn.mockRestore();
@@ -620,6 +664,126 @@ test("an attempt that dies mid-stream is withdrawn by one segment-reset and the 
   assert.equal(
     warn.mock.calls.filter((call) => call[0] === MODEL_CALL_RETRY_EVENT).length,
     1,
+  );
+});
+
+test("a tool call cut by the output limit is withdrawn by a segment-reset, never executed, and the retried attempt streams clean (#338)", async () => {
+  const clean = await observe({
+    turns: SCRIPT,
+    middleware: fastRetry(),
+    thread: "seq-length-clean",
+  });
+  const cleanInvocations = [...probeInvocations];
+  probeInvocations.length = 0;
+  // Attempt 1 streams reasoning, a text fragment and a tool call whose args
+  // stop mid-string; the provider closes the message with `length`. The
+  // chunks aggregate into tool_calls=[{query:"al"}] (partial-JSON repair),
+  // which the retry bundle's per-attempt observer rejects before the tools
+  // node can see it. Attempt 2 is the clean first decision.
+  const retried = await observe({
+    turns: [
+      {
+        reasoning: FIRST_DECISION.reasoning,
+        text: ["I will "],
+        toolCall: {
+          id: "call-cut",
+          name: "probe",
+          argChunks: ['{"query":', '"al'],
+        },
+        finishReason: "length",
+      },
+      ...SCRIPT,
+    ],
+    middleware: fastRetry(),
+    thread: "seq-length-retried",
+  });
+  assert.equal(retried.calls, clean.calls + 1);
+
+  // The truncated call never ran; only the clean decision's call did, once.
+  assert.deepEqual(cleanInvocations, [{ query: "alpha" }]);
+  assert.deepEqual(probeInvocations, cleanInvocations);
+
+  const types = (events: unknown[]) =>
+    events.map((event) => (event as { type: string }).type);
+  assert.deepEqual(types(retried.turn), [
+    "reasoning",
+    "reasoning",
+    "reasoning",
+    "text-delta",
+    "segment-reset",
+    ...types(clean.turn),
+  ]);
+  // #334: the reset names the cut call so the client withdraws its streamed
+  // arguments along with the attempt's reasoning and text.
+  const resets = retried.turn.filter(
+    (event) => (event as { type: string }).type === "segment-reset",
+  );
+  assert.deepEqual(resets, [
+    {
+      type: "segment-reset",
+      reason: "model_call_retry",
+      attempt: 2,
+      segmentIds: ["model-reasoning:<run>:1"],
+      toolCallIds: ["call-cut"],
+      keepTextChars: 0,
+      keepReasoningChars: 0,
+      dropTextChars: "I will ".length,
+      dropReasoningChars: "Let me check the sources.".length,
+    },
+  ]);
+  assert.deepEqual(
+    retried.argDeltas.slice(0, 2).map((delta) => (delta as { id: string }).id),
+    ["call-cut", "call-cut"],
+  );
+  assert.ok(!retried.pendingToolArgIds.includes("call-cut"));
+  assert.deepEqual(retried.pendingToolArgIds, clean.pendingToolArgIds);
+
+  // What the turn ends with is exactly what a clean run ends with.
+  assert.equal(retried.assistantContent, clean.assistantContent);
+  assert.equal(retried.modelReasoning, clean.modelReasoning);
+  assert.deepEqual(
+    retried.segments.map((segment) => segment.text),
+    clean.segments.map((segment) => segment.text),
+  );
+  assert.deepEqual(
+    retried.segments.map((segment) => segment.id),
+    ["model-reasoning:<run>:2", "model-reasoning:<run>:3"],
+  );
+  const retries = warn.mock.calls.filter(
+    (call) => call[0] === MODEL_CALL_RETRY_EVENT,
+  );
+  assert.equal(retries.length, 1);
+  assert.deepEqual(
+    [
+      (retries[0]?.[1] as { errorCode?: string }).errorCode,
+      (retries[0]?.[1] as { gatewayCode?: string }).gatewayCode,
+    ],
+    ["MODEL_OUTPUT_TRUNCATED", "OUTPUT_TRUNCATED"],
+  );
+});
+
+test("a length finish on a plain-text answer streams through untouched: no reset, no retry", async () => {
+  const observed = await observe({
+    turns: [
+      {
+        reasoning: ["Thinking."],
+        text: ["A long answer cut sho"],
+        finishReason: "length",
+      },
+    ],
+    middleware: fastRetry(),
+    thread: "seq-length-plain-text",
+  });
+  assert.equal(observed.calls, 1);
+  assert.deepEqual(probeInvocations, []);
+  assert.deepEqual(
+    observed.turn.map((event) => (event as { type: string }).type),
+    ["reasoning", "text-delta"],
+  );
+  assert.equal(observed.assistantContent, "A long answer cut sho");
+  assert.equal(
+    warn.mock.calls.filter((call) => call[0] === MODEL_CALL_RETRY_EVENT).length,
+    0,
   );
 });
 

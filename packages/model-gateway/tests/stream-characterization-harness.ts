@@ -210,6 +210,11 @@ export type HarnessOptions = {
   config?: Partial<ModelGatewayConfig>;
   /** Pass callbacks as a CallbackManager (LangGraph's shape) instead of an array. */
   callbacksAsManager?: boolean;
+  /**
+   * Pass no callbacks at all: core then does not stream internally on
+   * `invoke`, so nothing observes the call chunk by chunk.
+   */
+  withoutCallbacks?: boolean;
   /** Which internal streaming path `invoke` takes; defaults to `llm-new-token`. */
   handlerShape?: HandlerShape;
   /** The fake server's request log, to record the bodies this run sent. */
@@ -307,7 +312,7 @@ export async function recordRun(options: HarnessOptions): Promise<RecordedRun> {
     ? CallbackManager.fromHandlers({}).copy([recorder], true)
     : [recorder];
   const callOptions = {
-    callbacks,
+    ...(options.withoutCallbacks ? {} : { callbacks }),
     ...(options.signal ? { signal: options.signal } : {}),
   };
   const messages = [{ role: "user", content: "hello" }];
@@ -346,7 +351,7 @@ export async function recordRun(options: HarnessOptions): Promise<RecordedRun> {
     };
   }
   run.elapsedMs = Date.now() - startedAt;
-  await recorder.settled(1_000);
+  if (!options.withoutCallbacks) await recorder.settled(1_000);
   run.requestBodies = (options.requests ?? [])
     .slice(requestsBefore)
     .map((request) => request.body);

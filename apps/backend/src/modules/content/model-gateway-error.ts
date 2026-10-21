@@ -11,6 +11,17 @@ export const MODEL_REASONING_BUDGET_EXCEEDED_CODE =
   "MODEL_REASONING_BUDGET_EXCEEDED";
 export const MODEL_STREAM_DURATION_EXCEEDED_CODE =
   "MODEL_STREAM_DURATION_EXCEEDED";
+/**
+ * The provider hit its output token limit (`finish_reason: "length"`) while
+ * emitting a tool call: the arguments JSON is cut short, and the aggregated
+ * message would still present a valid-looking `tool_calls` entry (issue #338).
+ * Raised by the gateway (`OUTPUT_TRUNCATED`) or, as a backstop, by the agent's
+ * per-attempt model-call observer; both throw this one ContentError so the
+ * retry policy treats them alike.
+ */
+export const MODEL_OUTPUT_TRUNCATED_CODE = "MODEL_OUTPUT_TRUNCATED";
+export const MODEL_OUTPUT_TRUNCATED_MESSAGE =
+  "The model hit its output limit before finishing a tool call, so the incomplete call was not executed. Try again, or ask for a smaller result (for example split the task or shorten the content).";
 
 export const MODEL_UPSTREAM_CONTENT_ERROR_CODES: ReadonlySet<string> = new Set([
   "MODEL_TIMEOUT",
@@ -20,6 +31,9 @@ export const MODEL_UPSTREAM_CONTENT_ERROR_CODES: ReadonlySet<string> = new Set([
   // sandbox or the request, is at fault, so a failed run keeps its lease.
   MODEL_REASONING_BUDGET_EXCEEDED_CODE,
   MODEL_STREAM_DURATION_EXCEEDED_CODE,
+  // Output cut at max_tokens mid tool call: the model, not the sandbox, is at
+  // fault, so a failed run keeps its lease and the step is retried.
+  MODEL_OUTPUT_TRUNCATED_CODE,
 ]);
 
 const RETRYABLE_CONTENT_ERROR_CODES = MODEL_UPSTREAM_CONTENT_ERROR_CODES;
@@ -67,6 +81,29 @@ function findGatewayError(
   }
 
   return null;
+}
+
+function findContentError(
+  error: unknown,
+  seen = new Set<unknown>(),
+): ContentError | null {
+  if (!error || seen.has(error)) {
+    return null;
+  }
+  seen.add(error);
+
+  if (error instanceof ContentError) {
+    return error;
+  }
+
+  const record = toRecord(error);
+  if (!record) {
+    return null;
+  }
+
+  return (
+    findContentError(record.cause, seen) ?? findContentError(record.error, seen)
+  );
 }
 
 function findGatewayErrorData(
@@ -156,6 +193,15 @@ function contentErrorFromGatewayCode(input: {
     );
   }
 
+  if (input.code === "OUTPUT_TRUNCATED") {
+    return new ContentError(
+      502,
+      MODEL_OUTPUT_TRUNCATED_CODE,
+      MODEL_OUTPUT_TRUNCATED_MESSAGE,
+      metadata,
+    );
+  }
+
   if (input.code === "CONFIGURATION") {
     return new ContentError(
       503,
@@ -229,7 +275,32 @@ export function sanitizeClientErrorMessage(value: string) {
   return text.length > 600 ? `${text.slice(0, 597).trimEnd()}...` : text;
 }
 
+/**
+ * The ContentError the agent's backstop throws when it catches a `length`
+ * finish with tool calls that the gateway facade did not: the same code,
+ * message and metadata the gateway's `OUTPUT_TRUNCATED` maps to, so the
+ * retry policy, run error code and lease retention cannot tell them apart.
+ */
+export function createModelOutputTruncatedContentError(
+  input: { provider?: unknown; requestId?: unknown } = {},
+): ContentError {
+  return contentErrorFromGatewayCode({
+    code: "OUTPUT_TRUNCATED",
+    message: MODEL_OUTPUT_TRUNCATED_MESSAGE,
+    retryable: true,
+    provider: input.provider,
+    requestId: input.requestId,
+  });
+}
+
 export function toContentError(error: unknown): ContentError {
+  // A ContentError is already the mapped shape; re-mapping it would classify
+  // it by its (non-gateway) code and demote it to MODEL_UPSTREAM_ERROR.
+  const contentError = findContentError(error);
+  if (contentError) {
+    return contentError;
+  }
+
   const gatewayError = findGatewayError(error);
   if (gatewayError) {
     return contentErrorFromGatewayCode({
@@ -266,10 +337,13 @@ export function toContentError(error: unknown): ContentError {
 }
 
 export function isRetryableModelContentError(error: unknown): boolean {
-  if (error instanceof ContentError) {
-    const details = toRecord(error.details);
+  // Direct or wrapped (LangChain's MiddlewareError carries the thrown error as
+  // its `cause`): the ContentError's own code and retry mark decide.
+  const contentError = findContentError(error);
+  if (contentError) {
+    const details = toRecord(contentError.details);
     return (
-      RETRYABLE_CONTENT_ERROR_CODES.has(error.code) &&
+      RETRYABLE_CONTENT_ERROR_CODES.has(contentError.code) &&
       details?.retryable === true
     );
   }

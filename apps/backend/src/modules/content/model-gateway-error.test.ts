@@ -4,8 +4,11 @@ import { test } from "vitest";
 import { ContentError } from "./errors";
 import { toApiError } from "../../api/response/api-response";
 import {
+  createModelOutputTruncatedContentError,
   isModelUpstreamContentErrorCode,
   isRetryableModelContentError,
+  MODEL_OUTPUT_TRUNCATED_CODE,
+  MODEL_OUTPUT_TRUNCATED_MESSAGE,
   MODEL_REASONING_BUDGET_EXCEEDED_CODE,
   MODEL_STREAM_DURATION_EXCEEDED_CODE,
   sanitizeClientErrorMessage,
@@ -272,3 +275,108 @@ for (const wrapper of ["direct", "cause", "serialized"] as const) {
     assert.equal(isModelUpstreamContentErrorCode(error.code), true);
   });
 }
+
+for (const wrapper of ["direct", "cause", "serialized"] as const) {
+  test(`output truncated mid tool call maps to its own retryable upstream code through ${wrapper}`, () => {
+    const gatewayError = new ModelGatewayError({
+      code: "OUTPUT_TRUNCATED",
+      message: "finish_reason=length while emitting tool call write_file",
+      retryable: true,
+      provider: "deepseek",
+      requestId: "req-truncated",
+    });
+    const source =
+      wrapper === "direct"
+        ? gatewayError
+        : wrapper === "cause"
+          ? new Error("MiddlewareError", { cause: gatewayError })
+          : {
+              error: {
+                code: gatewayError.code,
+                message: gatewayError.message,
+                retryable: true,
+                provider: "deepseek",
+                requestId: "req-truncated",
+              },
+            };
+    const error = toContentError(source);
+    assert.equal(error.code, MODEL_OUTPUT_TRUNCATED_CODE);
+    assert.equal(error.code, "MODEL_OUTPUT_TRUNCATED");
+    assert.equal(error.statusCode, 502);
+    assert.equal(error.message, MODEL_OUTPUT_TRUNCATED_MESSAGE);
+    assert.match(error.message, /output limit before finishing a tool call/);
+    assert.match(error.message, /ask for a smaller result/);
+    // The gateway's raw reason (tool name included) never reaches the user.
+    assert.doesNotMatch(error.message, /finish_reason|write_file/);
+    assert.deepEqual(error.details, {
+      gatewayCode: "OUTPUT_TRUNCATED",
+      retryable: true,
+      provider: "deepseek",
+      requestId: "req-truncated",
+    });
+    const apiError = toApiError(error);
+    assert.equal(apiError.code, error.code);
+    assert.equal(apiError.statusCode, 502);
+    assert.equal(isRetryableModelContentError(source), true);
+    assert.equal(isRetryableModelContentError(error), true);
+    // Lease retention (#324): a failed run with this code keeps its sandbox.
+    assert.equal(isModelUpstreamContentErrorCode(error.code), true);
+  });
+}
+
+test("the agent backstop's truncation error is indistinguishable from the gateway's mapping", () => {
+  const fromGateway = toContentError(
+    new ModelGatewayError({
+      code: "OUTPUT_TRUNCATED",
+      message: "anything the gateway said",
+      retryable: true,
+      provider: "deepseek",
+    }),
+  );
+  const fromBackstop = createModelOutputTruncatedContentError({
+    provider: "deepseek",
+  });
+  assert.ok(fromBackstop instanceof ContentError);
+  assert.equal(fromBackstop.code, fromGateway.code);
+  assert.equal(fromBackstop.statusCode, fromGateway.statusCode);
+  assert.equal(fromBackstop.message, fromGateway.message);
+  assert.deepEqual(fromBackstop.details, fromGateway.details);
+  assert.equal(isRetryableModelContentError(fromBackstop), true);
+  assert.equal(isModelUpstreamContentErrorCode(fromBackstop.code), true);
+  // No provider known: the error still carries its retry and gateway marks.
+  assert.deepEqual(createModelOutputTruncatedContentError().details, {
+    gatewayCode: "OUTPUT_TRUNCATED",
+    retryable: true,
+  });
+});
+
+test("toContentError returns an already-mapped ContentError unchanged, directly or through a cause", () => {
+  const mapped = createModelOutputTruncatedContentError({
+    provider: "deepseek",
+  });
+  assert.equal(toContentError(mapped), mapped);
+  assert.equal(
+    toContentError(new Error("MiddlewareError", { cause: mapped })),
+    mapped,
+  );
+  assert.equal(toContentError({ error: mapped }), mapped);
+  // The retry predicate sees through the same wrapping (LangChain's
+  // MiddlewareError), and still demands the ContentError's own retry mark.
+  assert.equal(
+    isRetryableModelContentError(
+      new Error("MiddlewareError", { cause: mapped }),
+    ),
+    true,
+  );
+  assert.equal(
+    isRetryableModelContentError(
+      new Error("MiddlewareError", {
+        cause: new ContentError(502, MODEL_OUTPUT_TRUNCATED_CODE, "no mark"),
+      }),
+    ),
+    false,
+  );
+  // Without the passthrough, the non-gateway code would fall through to the
+  // generic upstream mapping and the retry policy would lose its code budget.
+  assert.notEqual(toContentError(mapped).code, "MODEL_UPSTREAM_ERROR");
+});
