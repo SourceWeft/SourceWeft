@@ -7,6 +7,7 @@ export {
   READINESS_PROBE_BUDGET_MS,
   READINESS_PROBE_COMMAND_TIMEOUT_MS,
   SOURCEWEFT_SANDBOX_STAMP_PATH,
+  UNAVAILABLE_RETRY_BACKOFF_MS,
   extractExitCode,
   extractSseText,
   mapCloudflareProviderError,

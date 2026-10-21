@@ -86,7 +86,22 @@ type SkillStagingState = {
   attempts: Map<string, SkillStagingAttempt>;
   /** Serializes staging runs for this sandbox; never rejects. */
   tail: Promise<void>;
+  /**
+   * Generation lifetime of staging: aborted the moment this provider sandbox
+   * is fenced, expired or forgotten, so no run (background or top-up) keeps
+   * sending commands or file transfers to it. On Cloudflare a request to a
+   * deleted sandbox id is not harmless — the bridge's get-or-create would
+   * resurrect an untracked container.
+   */
+  controller: AbortController;
 };
+
+function generationStoppedReason() {
+  return new DOMException(
+    "Sandbox generation was invalidated; skill staging stopped.",
+    "AbortError",
+  );
+}
 
 function skillPlanKey(plan: RuntimeAssetPlan) {
   return `${plan.version}:${plan.sha256}`;
@@ -231,10 +246,12 @@ export type SandboxAcquisitionOptions = {
   /**
    * Host invocation cancellation. The caller that starts an acquisition owns
    * it: its abort stops the sibling wait, the provider create (including the
-   * provider's readiness probe) and asset staging, marks the creating row as
-   * errored and rethrows the signal's reason — without fencing or expiring
-   * anything, because nothing was handed out. A caller that merely joins an
-   * acquisition in flight only stops waiting.
+   * provider's readiness probe) and required-asset staging, marks the
+   * creating row as errored and rethrows the signal's reason — without
+   * fencing or expiring anything, because nothing was handed out. A caller
+   * that merely joins an acquisition in flight only stops waiting. Skill
+   * staging is started by the acquisition but not owned by it (see
+   * startSkillStaging), so this signal never reaches it.
    */
   signal?: AbortSignal;
 };
@@ -476,10 +493,7 @@ export class SandboxManager {
       // The durable row is no longer ready (swept, or fenced by another
       // worker). Late results for it are rejected by the store comparison;
       // record the fence here so they are rejected without a round trip.
-      this.invalidatedSandboxes.set(
-        sandbox.providerSandboxId,
-        "instance_changed",
-      );
+      this.invalidateGeneration(sandbox.providerSandboxId, "instance_changed");
       if (
         replacements > 0 ||
         !this.forgetStatelessGeneration({
@@ -521,6 +535,7 @@ export class SandboxManager {
     if (this.initializationRuns.get(input.key) === input.initialization) {
       this.initializationRuns.delete(input.key);
     }
+    this.stopSkillStaging(generation);
     this.skillStagingStates.delete(generation);
     this.requiredAssetStagingRuns.delete(generation);
     // Conservative until the replacement stages again: /skills stays denied.
@@ -536,6 +551,38 @@ export class SandboxManager {
       disposition: this.invalidatedSandboxes.get(generation),
     });
     return true;
+  }
+
+  /**
+   * The single way a generation is fenced in this manager: record the
+   * disposition late results are judged by, and stop that generation's skill
+   * staging at once (see SkillStagingState.controller).
+   */
+  private invalidateGeneration(
+    providerSandboxId: string,
+    disposition: Exclude<SandboxExecutionResultDisposition, "accepted">,
+  ) {
+    this.invalidatedSandboxes.set(providerSandboxId, disposition);
+    this.stopSkillStaging(providerSandboxId);
+  }
+
+  private stopSkillStaging(providerSandboxId: string) {
+    const state = this.skillStagingStates.get(providerSandboxId);
+    if (state && !state.controller.signal.aborted) {
+      state.controller.abort(generationStoppedReason());
+    }
+  }
+
+  /**
+   * The fence recorded for a generation, or null while it is live. Callers
+   * that waited for skill staging check it before running anything on the
+   * generation: staging stops silently when its generation is fenced, and
+   * the caller then reports the fence the same way a late result would.
+   */
+  generationInvalidation(
+    sandbox: SandboxRef,
+  ): Exclude<SandboxExecutionResultDisposition, "accepted"> | null {
+    return this.invalidatedSandboxes.get(sandbox.providerSandboxId) ?? null;
   }
 
   /**
@@ -562,11 +609,10 @@ export class SandboxManager {
         async () => {
           await this.ensureRequiredAssetsOnce(sandbox, options.signal);
           throwIfAborted(options.signal);
-          await this.ensureSkillAssetsStaged(sandbox, options.signal);
-          throwIfAborted(options.signal);
         },
         sandbox.id,
       );
+      this.startSkillStaging(sandbox, context);
       return sandbox;
     } catch (error) {
       // Whatever failed first, an aborted owner reports its own reason.
@@ -980,33 +1026,115 @@ export class SandboxManager {
   }
 
   /**
+   * Start skill staging for a freshly acquired generation without making the
+   * acquisition wait for it (Issue #323 B2). The turn-start prefetch acquires
+   * the sandbox, so staging overlaps the model's first decision; a command
+   * that never references /skills does not pay for it, and one that does
+   * joins this run through `ensureSkillAssetsStaged` (the per-generation
+   * tail) instead of restarting it.
+   *
+   * Detached from every caller: no tool call's signal reaches it. Every
+   * later /skills caller of this generation depends on this run, so one tool
+   * call's abort must not cancel it — each caller's signal only stops that
+   * caller's own wait. What does stop it is the generation's own lifetime:
+   * fencing, expiring or forgetting the generation aborts its staging
+   * controller (invalidateGeneration / stopSkillStaging), so staging never
+   * keeps addressing a sandbox that was cancelled or deleted. Each command
+   * stays bounded by the staging command timeout. The run resolves even when
+   * stopped that way; the catch is the no-unhandled-rejection guarantee, not
+   * an expected path.
+   *
+   * Deliberate trade-off: "references /skills" is a textual check on the
+   * command. A command that reaches /skills only indirectly (`bash run.sh`
+   * where the script calls /skills/...) does not wait, and in the first
+   * seconds of a turn it can race the staging still in flight and see a
+   * missing or partial bundle directory. Before this change every first
+   * command paid the whole staging time instead; commands that name /skills
+   * (the documented contract) still wait for it.
+   */
+  private startSkillStaging(
+    sandbox: SandboxRef,
+    context: SandboxRuntimeContext,
+  ) {
+    if (!this.input.skillStaging) {
+      return;
+    }
+    void this.ensureSkillAssetsStaged(sandbox).catch((error: unknown) => {
+      this.input.logWarn?.("sandbox.skill_staging.failed", {
+        provider: this.input.provider.id,
+        ...context,
+        sandboxId: sandbox.id,
+        providerSandboxId: sandbox.providerSandboxId,
+        error: sandboxErrorDiagnostic(error),
+      });
+    });
+  }
+
+  /**
    * Stage skill bundles into the sandbox: each bundle once per provider
-   * sandbox per manager lifetime. Runs at sandbox acquisition, and again from
-   * the execute path whenever a command references /skills, so a bundle
-   * registered after acquisition is staged on its first use. A call with
-   * nothing new costs one `plans()` read and no sandbox traffic. Never throws:
+   * sandbox per manager lifetime. Started (not awaited) by sandbox
+   * acquisition, and called again from the execute paths whenever a command
+   * references /skills — that call waits for the run already in flight and
+   * then stages only what is still pending, so a bundle registered after
+   * acquisition is staged on its first use and nothing is staged twice. A
+   * call with nothing new costs one `plans()` read and no sandbox traffic.
+   *
+   * `signal` stops this caller's wait at once, and aborts only the run this
+   * call itself queued (an aborted attempt is not memoized as failed). It
+   * never cancels a run another caller started. Rejects only on that abort:
    * staging failure leaves the sandbox usable with /skills denied (today's
-   * behavior), which the resolutions record.
+   * behavior), which the resolutions record. When the generation itself is
+   * fenced mid-run, staging stops and this resolves without recording
+   * anything; callers then consult generationInvalidation.
    */
   async ensureSkillAssetsStaged(sandbox: SandboxRef, signal?: AbortSignal) {
     const staging = this.input.skillStaging;
     if (!staging) {
       return;
     }
+    throwIfAborted(signal);
     let state = this.skillStagingStates.get(sandbox.providerSandboxId);
     if (!state) {
-      state = { attempts: new Map(), tail: Promise.resolve() };
+      state = {
+        attempts: new Map(),
+        tail: Promise.resolve(),
+        controller: new AbortController(),
+      };
       this.skillStagingStates.set(sandbox.providerSandboxId, state);
+      if (this.invalidatedSandboxes.has(sandbox.providerSandboxId)) {
+        state.controller.abort(generationStoppedReason());
+      }
     }
     const current = state;
+    const generationSignal = current.controller.signal;
+    // A run stops on its generation's fence, and additionally on the signal
+    // of the caller that queued it (the background run has none).
+    const runSignal = signal
+      ? AbortSignal.any([signal, generationSignal])
+      : generationSignal;
     // Serialized per sandbox: parallel executes share one staging directory
     // per bundle, so two concurrent runs of the same plan would race on it.
     const run = current.tail.then(() =>
-      this.stagePendingSkillPlans(sandbox, staging, current, signal),
+      this.stagePendingSkillPlans(sandbox, staging, current, runSignal),
     );
     // Only an abort rejects a run; the tail must stay settled for the next.
     current.tail = run.catch(() => undefined);
-    await run;
+    try {
+      await raceWithSignal(run, signal);
+    } catch (error) {
+      // This caller's own abort is its answer.
+      if (signal?.aborted) throw error;
+      // The generation is gone: nothing was judged, so nothing is recorded,
+      // and the caller learns of the fence through generationInvalidation.
+      if (generationSignal.aborted) return;
+      throw error;
+    }
+    // A replaced generation's late run must not speak for its replacement:
+    // forgetStatelessGeneration dropped this state and reset the resolutions
+    // so /skills stays denied until the new generation has staged.
+    if (this.skillStagingStates.get(sandbox.providerSandboxId) !== current) {
+      return;
+    }
     // Read after staging: building a plan can itself move a skill here. The
     // host's verdict wins over an earlier attempt under the same name.
     const unstageable = staging.unstageable?.() ?? [];
@@ -1049,6 +1177,9 @@ export class SandboxManager {
       // An aborted attempt must not be memoized as a failed bundle: the
       // bundle was never judged, and the memo would deny /skills all turn.
       throwIfAborted(signal);
+      if (this.invalidatedSandboxes.has(sandbox.providerSandboxId)) {
+        throw generationStoppedReason();
+      }
       resolutions.forEach((resolution, index) => {
         const plan = pending[index];
         if (plan) {
@@ -1079,7 +1210,12 @@ export class SandboxManager {
         }
       });
     } catch (error) {
-      if (signal?.aborted) throw error;
+      if (
+        signal?.aborted ||
+        this.invalidatedSandboxes.has(sandbox.providerSandboxId)
+      ) {
+        throw error;
+      }
       staging.logger?.warn?.("sandbox_skill_staging_failed", {
         error: error instanceof Error ? error.message : String(error),
       });
@@ -1091,6 +1227,15 @@ export class SandboxManager {
    * engine's session shape. Commands run through executeSystem when the
    * provider distinguishes it — staging is host-issued work, not model
    * command text.
+   *
+   * The engine marks each command it knows to be safe to re-run
+   * (`idempotent`); that verdict is forwarded to executeSystem so a provider
+   * may ride out a transient SANDBOX_NOT_READY_OR_UNHEALTHY itself. The
+   * manager adds no retry of its own — not for commands and not for the
+   * per-file transfers below, whose transient-failure retry belongs to the
+   * provider (Cloudflare retries its file PUT/GET for every caller) — so
+   * attempts never multiply. The plain `execute` fallback never receives the
+   * flag.
    */
   private runtimeAssetStagingSession(
     providerSandboxId: string,
@@ -1098,22 +1243,33 @@ export class SandboxManager {
     signal?: AbortSignal,
   ): RuntimeAssetSessionLike {
     const provider = this.input.provider;
-    const execute = provider.executeSystem
-      ? provider.executeSystem.bind(provider)
-      : provider.execute.bind(provider);
+    // Belt and braces next to the generation signal: never address a fenced
+    // generation, whatever signal this session was built with.
+    const assertLive = () => {
+      throwIfAborted(signal);
+      if (this.invalidatedSandboxes.has(providerSandboxId)) {
+        throw generationStoppedReason();
+      }
+    };
     return {
       rootDir: provider.pathPolicy.workspaceRoot,
       skillsRoot: provider.pathPolicy.skillsRoot,
       checksumCommand: provider.id === "local" ? "shasum -a 256" : undefined,
-      execute: async (command) => {
-        throwIfAborted(signal);
-        const result = await execute({
+      execute: async (command, options) => {
+        assertLive();
+        const input = {
           providerSandboxId,
           command,
           timeoutMs: staging.commandTimeoutMs,
           maxOutputChars: staging.maxOutputChars,
           ...(signal ? { signal } : {}),
-        });
+        };
+        const result = provider.executeSystem
+          ? await provider.executeSystem({
+              ...input,
+              ...(options?.idempotent === true ? { idempotent: true } : {}),
+            })
+          : await provider.execute(input);
         return {
           exitCode: result.exitCode,
           output: result.output,
@@ -1125,7 +1281,7 @@ export class SandboxManager {
       uploadFiles: async (files) => {
         const results: Array<{ path: string; error?: string | null }> = [];
         for (const [path, content] of files) {
-          throwIfAborted(signal);
+          assertLive();
           try {
             await provider.uploadFile({
               providerSandboxId,
@@ -1149,7 +1305,7 @@ export class SandboxManager {
           error?: string | null;
         }> = [];
         for (const path of paths) {
-          throwIfAborted(signal);
+          assertLive();
           try {
             const content = await provider.downloadFile({
               providerSandboxId,
@@ -1348,6 +1504,10 @@ export class SandboxManager {
   }
 
   async expireThreadSandbox(input: { sandboxId: string }) {
+    // The expiry sweep deletes an expired row's container; staging must not
+    // outlive the row it was staging for.
+    const generation = this.generationsBySandboxId.get(input.sandboxId);
+    if (generation) this.stopSkillStaging(generation);
     await this.input.sandboxStore.markSandboxExpired({
       sandboxId: input.sandboxId,
     });
@@ -1499,7 +1659,7 @@ export class SandboxManager {
       // Persist the generation fence before asking the provider to terminate.
       // That ordering lets managers in other turns/processes reject late bytes
       // while physical deletion is still in flight.
-      this.invalidatedSandboxes.set(
+      this.invalidateGeneration(
         input.sandbox.providerSandboxId,
         "termination_unknown",
       );
@@ -1532,7 +1692,7 @@ export class SandboxManager {
     }
 
     if (!result.confirmed || result.mode === "sandbox") {
-      this.invalidatedSandboxes.set(
+      this.invalidateGeneration(
         input.sandbox.providerSandboxId,
         result.confirmed ? "sandbox_terminated" : "termination_unknown",
       );
@@ -1546,7 +1706,7 @@ export class SandboxManager {
           });
         } catch {
           result = { confirmed: false, mode: "unknown" };
-          this.invalidatedSandboxes.set(
+          this.invalidateGeneration(
             input.sandbox.providerSandboxId,
             "termination_unknown",
           );

@@ -1641,3 +1641,119 @@ test("an abort that lands after the provider create resolved deletes the live co
   assert.equal(store.calls.expired, 0);
   assert.equal(store.calls.creatingError, 1);
 });
+
+// ── Background skill staging (Issue #323 B2) ─────────────────────────────
+
+for (const fence of ["cancelExecution", "renew failure"] as const)
+  test(`a fenced generation's skill staging stops (${fence}): no further provider calls to it, and it never speaks for the replacement`, async () => {
+    const { context } = acquisitionFixture();
+    const loads: Array<(content: Uint8Array | null) => void> = [];
+    const loadEntered: Array<() => void> = [];
+    const entered = [0, 1].map(
+      (index) =>
+        new Promise<void>((resolve) => {
+          loadEntered[index] = resolve;
+        }),
+    );
+    let created = 0;
+    const calls: Array<{ kind: string; providerSandboxId: string }> = [];
+    const executeInputs: Array<Record<string, unknown>> = [];
+    const store = createStatefulSandboxStore();
+    const manager = new SandboxManager({
+      provider: {
+        // No executeSystem: staging falls back to plain execute, which must
+        // never receive the idempotent flag.
+        ...createTestProvider(),
+        createSandbox: async () => {
+          created += 1;
+          return { id: `remote-${created}` };
+        },
+        execute: async (input) => {
+          executeInputs.push(input);
+          calls.push({
+            kind: "execute",
+            providerSandboxId: input.providerSandboxId,
+          });
+          return { output: "", exitCode: 0, truncated: false };
+        },
+        uploadFile: async (input) => {
+          calls.push({
+            kind: "upload",
+            providerSandboxId: input.providerSandboxId,
+          });
+        },
+        downloadFile: async (input) => {
+          calls.push({
+            kind: "download",
+            providerSandboxId: input.providerSandboxId,
+          });
+          return Buffer.from("");
+        },
+      },
+      sandboxStore: store,
+      operationStore: createMessageScopedOperationStore(),
+      ttlSeconds: 3600,
+      maxCommandTimeoutMs: 1000,
+      skillStaging: {
+        plans: async () => [
+          {
+            name: "notes",
+            version: "sv-1",
+            platform: "any",
+            sha256: "a".repeat(64),
+            archive: "zip",
+            entrypoint: "SKILL.md",
+            installDir: "/skills/notes",
+            loadContent: () =>
+              new Promise<Uint8Array | null>((resolve) => {
+                const index = loads.length;
+                loads.push(resolve);
+                loadEntered[index]?.();
+              }),
+          },
+        ],
+        commandTimeoutMs: 1000,
+        maxOutputChars: 1000,
+      },
+    });
+
+    const first = await manager.getOrCreateThreadSandbox(context);
+    await entered[0];
+    if (fence === "cancelExecution") {
+      // Host timeout without a command-scoped kill → sandbox delete.
+      await manager.cancelExecution({
+        sandbox: first,
+        executionId: "execution-1",
+        reason: "timed_out",
+      });
+    } else {
+      // Swept / fenced by another worker: the next renewal fails and the
+      // stateless generation is forgotten.
+      await store.markSandboxExpired({ sandboxId: first.id });
+    }
+    const callsToFirst = () =>
+      calls.filter((call) => call.providerSandboxId === "remote-1").length;
+    const firstCallsAtFence = callsToFirst();
+    const second = await manager.getOrCreateThreadSandbox(context);
+    assert.equal(second.providerSandboxId, "remote-2");
+    await entered[1];
+
+    // The old generation's blocked load resolves after the fence.
+    loads[0]!(new Uint8Array([1, 2, 3]));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(
+      callsToFirst(),
+      firstCallsAtFence,
+      "staging must not address a fenced generation",
+    );
+    assert.equal(manager.skillScriptsStaged(), false);
+    assert.equal(manager.skillAssetResolutions(), null);
+
+    loads[1]!(new Uint8Array([1, 2, 3]));
+    await manager.ensureSkillAssetsStaged(second);
+    assert.equal(manager.skillScriptsStaged(), true);
+    assert.equal(loads.length, 2, "each generation started staging once");
+    assert.equal(callsToFirst(), firstCallsAtFence);
+    assert.ok(executeInputs.length > 0);
+    assert.ok(executeInputs.every((input) => !("idempotent" in input)));
+  });

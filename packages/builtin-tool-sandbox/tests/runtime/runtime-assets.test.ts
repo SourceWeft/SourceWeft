@@ -445,3 +445,63 @@ test("macOS skill staging uses the bound folder and shasum, including spaces", a
   );
   assert.ok(executed.every((command) => !command.includes("'/skills/notes")));
 });
+
+test("every rung marks exactly the commands that converge on re-run as idempotent", async () => {
+  const { session } = fakeSession({
+    // image probe misses, fetch fails, then the upload rung's commands pass.
+    executeResults: [{ exitCode: 1 }, { exitCode: 22, output: "404" }],
+  });
+  const flags: Array<[label: string, idempotent: boolean | undefined]> = [];
+  const execute = session.execute.bind(session);
+  session.execute = async (command, options) => {
+    const label =
+      options?.toolCallId?.split(":asset-chrome-headless-shell-")[1] ??
+      (command.includes(".sourceweft-asset.json") ? "stamp" : "?");
+    flags.push([label, options?.idempotent]);
+    return execute(command, options);
+  };
+
+  const [result] = await ensureRuntimeAssets({
+    session,
+    toolCallKey: "turn-1",
+    assets: [
+      plan({
+        imagePathEnvVar: "SOURCEWEFT_REMOTION_BROWSER",
+        fetchUrl: async () => "https://cache.example/asset.zip",
+        loadContent: async () => new Uint8Array([1, 2, 3]),
+        installDir: "/skills/chrome-headless-shell",
+      }),
+    ],
+  });
+
+  assert.equal(result?.ok, true);
+  assert.equal(result?.rung, "upload");
+  assert.deepEqual(flags, [
+    ["image-probe", true],
+    ["fetch", true],
+    ["upload-prepare", true],
+    ["upload-relocate", true],
+    ["upload-unpack", undefined],
+    ["stamp", true],
+  ]);
+});
+
+test("the upload relocate step converges when an earlier attempt already moved the archive", async () => {
+  const { session, executed } = fakeSession({});
+  await ensureRuntimeAssets({
+    session,
+    assets: [
+      plan({
+        loadContent: async () => new Uint8Array([1, 2, 3]),
+        installDir: "/skills/chrome-headless-shell",
+      }),
+    ],
+  });
+  const relocate = executed.find((command) => command.includes("/.inbox/"));
+  assert.ok(relocate);
+  // Guarded move, then the staged copy is what decides success.
+  assert.match(
+    relocate,
+    /^set -e && if \[ -e '[^']+\.inbox\/chrome-headless-shell-149\.0\.7790\.0\.zip' \]; then mv -f '[^']+' '\/skills\/chrome-headless-shell\.staging\/asset\.zip'; fi && test -f '\/skills\/chrome-headless-shell\.staging\/asset\.zip'$/u,
+  );
+});
