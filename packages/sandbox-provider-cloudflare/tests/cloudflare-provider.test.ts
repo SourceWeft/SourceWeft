@@ -14,6 +14,7 @@ import {
   READINESS_PROBE_BUDGET_MS,
   READINESS_PROBE_COMMAND_TIMEOUT_MS,
   SOURCEWEFT_SANDBOX_STAMP_PATH,
+  UNAVAILABLE_RETRY_BACKOFF_MS,
   extractExitCode,
   extractSseText,
   mapCloudflareProviderError,
@@ -914,6 +915,629 @@ describe("createSandbox readiness probe", () => {
   });
 });
 
+/** Answers with each listed status in turn, then delegates to `ok`. */
+function statusSequence(
+  statuses: readonly number[],
+  ok: RouteHandler,
+): RouteHandler & { calls: () => number } {
+  let calls = 0;
+  const handler = (request: RecordedRequest) => {
+    const status = statuses[calls];
+    calls += 1;
+    return status === undefined
+      ? ok(request)
+      : new Response("busy", { status });
+  };
+  return Object.assign(handler, { calls: () => calls });
+}
+
+function hasCode(code: string) {
+  return (error: unknown) =>
+    error instanceof SandboxProviderError && error.code === code;
+}
+
+/**
+ * A clock whose sleep never elapses on its own: it records the delay, then
+ * stays pending until the signal aborts (rejecting with its reason).
+ */
+function createPendingClock() {
+  const sleeps: number[] = [];
+  let markStarted: () => void = () => undefined;
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+  const clock: ProviderClock = {
+    now: () => 0,
+    sleep: (ms, signal) =>
+      new Promise<void>((_resolve, reject) => {
+        sleeps.push(ms);
+        signal?.addEventListener("abort", () => reject(signal.reason), {
+          once: true,
+        });
+        markStarted();
+      }),
+  };
+  return { clock, sleeps, started };
+}
+
+function countRequests(requests: RecordedRequest[], pattern: RegExp) {
+  return requests.filter((request) =>
+    pattern.test(`${request.method} ${request.url}`),
+  ).length;
+}
+
+describe("unavailable retry", () => {
+  test("exports the retry backoff", () => {
+    assert.deepEqual([...UNAVAILABLE_RETRY_BACKOFF_MS], [1_000, 2_000, 4_000]);
+  });
+
+  test("GET retries 503s with 1s/2s backoff until the bridge answers", async () => {
+    const { clock, sleeps } = createFakeClock();
+    const stamp = statusSequence([503, 503], () => new Response("sb-1\n"));
+    const { provider, requests } = createProvider(
+      [[STAMP_ROUTE, stamp]],
+      10_000,
+      clock,
+    );
+
+    assert.deepEqual(await provider.getSandbox("sb-1"), { id: "sb-1" });
+    assert.equal(requests.length, 3);
+    assert.deepEqual(sleeps, [1_000, 2_000]);
+  });
+
+  test("health check and download GETs retry too", async () => {
+    const { clock, sleeps } = createFakeClock();
+    const { provider, requests } = createProvider(
+      [
+        [STAMP_ROUTE, statusSequence([502], () => new Response("sb-1\n"))],
+        [/^GET /, statusSequence([503], () => new Response("bytes"))],
+      ],
+      10_000,
+      clock,
+    );
+
+    await provider.checkSandboxHealth("sb-1");
+    const downloaded = await provider.downloadFile({
+      providerSandboxId: "sb-1",
+      sandboxPath: "/workspace/output/a.txt",
+    });
+
+    assert.equal(downloaded.toString(), "bytes");
+    assert.equal(requests.length, 4);
+    assert.deepEqual(sleeps, [1_000, 1_000]);
+  });
+
+  test("PUT re-sends the same upload bytes after 503s", async () => {
+    const { clock, sleeps } = createFakeClock();
+    const payload = new TextEncoder().encode("file-bytes");
+    const { provider, requests } = createProvider(
+      [
+        [
+          /^PUT /,
+          statusSequence([503, 503], () => new Response(null, { status: 200 })),
+        ],
+      ],
+      10_000,
+      clock,
+    );
+
+    await provider.uploadFile({
+      providerSandboxId: "sb-1",
+      sandboxPath: "/workspace/input/a.txt",
+      content: payload,
+    });
+
+    assert.equal(requests.length, 3);
+    for (const request of requests) {
+      assert.equal(request.method, "PUT");
+      assert.deepEqual(request.body, payload);
+    }
+    assert.deepEqual(sleeps, [1_000, 2_000]);
+  });
+
+  test("DELETE retries 503s", async () => {
+    const { clock, sleeps } = createFakeClock();
+    const { provider, requests } = createProvider(
+      [
+        [
+          /^DELETE /,
+          statusSequence([503, 503], () => new Response(null, { status: 200 })),
+        ],
+      ],
+      10_000,
+      clock,
+    );
+
+    await provider.deleteSandbox("sb-1");
+
+    assert.equal(requests.length, 3);
+    assert.deepEqual(sleeps, [1_000, 2_000]);
+  });
+
+  test("retries 429 and network failures", async () => {
+    const { clock, sleeps } = createFakeClock();
+    let networkCalls = 0;
+    const { provider, requests } = createProvider(
+      [
+        [STAMP_ROUTE, statusSequence([429], () => new Response("sb-1\n"))],
+        [
+          /^DELETE /,
+          () => {
+            networkCalls += 1;
+            if (networkCalls < 2) {
+              throw new TypeError("fetch failed");
+            }
+            return new Response(null, { status: 200 });
+          },
+        ],
+      ],
+      10_000,
+      clock,
+    );
+
+    await provider.getSandbox("sb-1");
+    await provider.deleteSandbox("sb-1");
+
+    assert.equal(requests.length, 4);
+    assert.deepEqual(sleeps, [1_000, 1_000]);
+  });
+
+  test("gives up after four attempts with the normal unavailable error", async () => {
+    const { clock, sleeps } = createFakeClock();
+    const { provider, requests } = createProvider(
+      [[STAMP_ROUTE, () => new Response("busy", { status: 503 })]],
+      10_000,
+      clock,
+    );
+    const expected = mapCloudflareProviderError(
+      new CloudflareBridgeHttpError(503, "get", "busy"),
+      "get",
+    );
+
+    await assert.rejects(
+      provider.getSandbox("sb-1"),
+      (error: unknown) =>
+        hasCode(SANDBOX_PROVIDER_ERROR_CODES.unavailable)(error) &&
+        (error as Error).message === expected.message,
+    );
+    assert.equal(requests.length, 4);
+    assert.deepEqual(sleeps, [1_000, 2_000, 4_000]);
+  });
+
+  test("never retries auth, missing, timeout or unknown failures", async () => {
+    const cases: Array<[string, RouteHandler, string]> = [
+      [
+        "401",
+        () => new Response("no", { status: 401 }),
+        SANDBOX_PROVIDER_ERROR_CODES.authentication,
+      ],
+      [
+        "403",
+        () => new Response("no", { status: 403 }),
+        SANDBOX_PROVIDER_ERROR_CODES.authentication,
+      ],
+      [
+        "404",
+        () => new Response("no", { status: 404 }),
+        SANDBOX_PROVIDER_ERROR_CODES.instanceMissing,
+      ],
+      [
+        "408",
+        () => new Response("slow", { status: 408 }),
+        SANDBOX_PROVIDER_ERROR_CODES.timeout,
+      ],
+      [
+        "504",
+        () => new Response("slow", { status: 504 }),
+        SANDBOX_PROVIDER_ERROR_CODES.timeout,
+      ],
+      [
+        "400",
+        () => new Response("bad", { status: 400 }),
+        SANDBOX_PROVIDER_ERROR_CODES.unknown,
+      ],
+      [
+        "fetch abort",
+        () => {
+          throw new DOMException("This operation was aborted", "AbortError");
+        },
+        SANDBOX_PROVIDER_ERROR_CODES.timeout,
+      ],
+      [
+        "fetch timeout",
+        () => {
+          throw new DOMException(
+            "The operation was aborted due to timeout",
+            "TimeoutError",
+          );
+        },
+        SANDBOX_PROVIDER_ERROR_CODES.timeout,
+      ],
+    ];
+    for (const [name, handler, code] of cases) {
+      const { clock, sleeps } = createFakeClock();
+      const { provider, requests } = createProvider(
+        [[STAMP_ROUTE, handler]],
+        10_000,
+        clock,
+      );
+      await assert.rejects(provider.getSandbox("sb-1"), hasCode(code), name);
+      assert.equal(requests.length, 1, name);
+      assert.deepEqual(sleeps, [], name);
+    }
+  });
+
+  test("never retries a missing download", async () => {
+    const { clock, sleeps } = createFakeClock();
+    const { provider, requests } = createProvider(
+      [[/^GET /, () => new Response("nope", { status: 404 })]],
+      10_000,
+      clock,
+    );
+
+    await assert.rejects(
+      provider.downloadFile({
+        providerSandboxId: "sb-1",
+        sandboxPath: "/workspace/output/missing.txt",
+      }),
+      hasCode(SANDBOX_PROVIDER_ERROR_CODES.fileMissing),
+    );
+    assert.equal(requests.length, 1);
+    assert.deepEqual(sleeps, []);
+  });
+
+  test("an abort during backoff rejects with the reason and stops fetching", async () => {
+    const { clock, sleeps, started } = createPendingClock();
+    const controller = new AbortController();
+    const reason = new Error("cancelled mid-backoff");
+    const { provider, requests } = createProvider(
+      [[/^GET /, () => new Response("busy", { status: 503 })]],
+      10_000,
+      clock,
+    );
+
+    const pending = provider.downloadFile({
+      providerSandboxId: "sb-1",
+      sandboxPath: "/workspace/output/a.txt",
+      signal: controller.signal,
+    });
+    await started;
+    controller.abort(reason);
+
+    await assert.rejects(pending, (error: unknown) => error === reason);
+    assert.equal(requests.length, 1);
+    assert.deepEqual(sleeps, [1_000]);
+  });
+
+  test("a failure after the signal aborted is not retried", async () => {
+    const { clock, sleeps } = createFakeClock();
+    const controller = new AbortController();
+    const { provider, requests } = createProvider(
+      [
+        [
+          /^GET /,
+          () => {
+            controller.abort(new Error("cancelled"));
+            return new Response("busy", { status: 503 });
+          },
+        ],
+      ],
+      10_000,
+      clock,
+    );
+
+    await assert.rejects(
+      provider.downloadFile({
+        providerSandboxId: "sb-1",
+        sandboxPath: "/workspace/output/a.txt",
+        signal: controller.signal,
+      }),
+    );
+    assert.equal(requests.length, 1);
+    assert.deepEqual(sleeps, []);
+  });
+});
+
+describe("create leaves unavailable retries to the manager", () => {
+  const CREATE_ROUTE = /^POST .*\/v1\/sandbox$/;
+
+  test("sends the create POST once and surfaces unavailable", async () => {
+    const outcomes: Array<[string, RouteHandler]> = [
+      ["503", () => new Response("busy", { status: 503 })],
+      ["429", () => new Response("slow down", { status: 429 })],
+      ["500", () => new Response("boom", { status: 500 })],
+      ["502", () => new Response("bad gateway", { status: 502 })],
+      [
+        "network",
+        () => {
+          throw new TypeError("fetch failed");
+        },
+      ],
+    ];
+    for (const [name, handler] of outcomes) {
+      const { clock, sleeps } = createFakeClock();
+      const { provider, requests } = createProvider(
+        [[CREATE_ROUTE, handler]],
+        10_000,
+        clock,
+      );
+
+      await assert.rejects(
+        provider.createSandbox({ ttlSeconds: 60, labels: {} }),
+        hasCode(SANDBOX_PROVIDER_ERROR_CODES.unavailable),
+        name,
+      );
+      assert.equal(requests.length, 1, name);
+      assert.deepEqual(sleeps, [], name);
+    }
+  });
+
+  test("sends the identity stamp PUT once and surfaces unavailable", async () => {
+    const { clock, sleeps } = createFakeClock();
+    const [create] = readyCreateRoutes();
+    const { provider, requests } = createProvider(
+      [create!, [/^PUT /, () => new Response("busy", { status: 503 })]],
+      10_000,
+      clock,
+    );
+
+    await assert.rejects(
+      provider.createSandbox({ ttlSeconds: 60, labels: {} }),
+      hasCode(SANDBOX_PROVIDER_ERROR_CODES.unavailable),
+    );
+    assert.deepEqual(methodsOf(requests), [
+      "POST /v1/sandbox",
+      "PUT /v1/sandbox/sb-1/file/workspace/.sourceweft-sandbox-id",
+    ]);
+    assert.deepEqual(sleeps, []);
+  });
+
+  test("deletes a failed sandbox with a single attempt", async () => {
+    const { clock, sleeps } = createFakeClock();
+    const [create, put, stamp] = readyCreateRoutes();
+    const { provider, requests } = createProvider(
+      [
+        create!,
+        put!,
+        stamp!,
+        [EXEC_ROUTE, () => new Response("forbidden", { status: 401 })],
+        [/^DELETE /, () => new Response("busy", { status: 503 })],
+      ],
+      10_000,
+      clock,
+    );
+
+    await assert.rejects(
+      provider.createSandbox({ ttlSeconds: 60, labels: {} }),
+      hasCode(SANDBOX_PROVIDER_ERROR_CODES.authentication),
+    );
+    assert.equal(countRequests(requests, /^DELETE /), 1);
+    assert.deepEqual(sleeps, []);
+  });
+
+  test("the readiness probe does not nest retries inside its own polling", async () => {
+    const { clock, sleeps } = createFakeClock();
+    const [create, put, , exec, del] = readyCreateRoutes();
+    const { provider, requests } = createProvider(
+      [
+        create!,
+        put!,
+        [STAMP_ROUTE, () => new Response("warming", { status: 503 })],
+        exec!,
+        del!,
+      ],
+      10_000,
+      clock,
+    );
+
+    await assert.rejects(
+      provider.createSandbox({ ttlSeconds: 60, labels: {} }),
+      /sandbox did not become ready within 90s/,
+    );
+
+    // Same schedule as an exec-failure probe: one stamp read per probe
+    // attempt, no hidden 1s/2s/4s request retries inside an attempt.
+    assert.deepEqual(sleeps, [1_000, 2_000, ...Array<number>(21).fill(4_000)]);
+    assert.equal(countRequests(requests, STAMP_ROUTE), sleeps.length + 1);
+    assert.equal(countRequests(requests, EXEC_ROUTE), 0);
+  });
+});
+
+describe("executeSystem unavailable retry", () => {
+  const command = {
+    providerSandboxId: "sb-1",
+    command: "mkdir -p /workspace/x",
+    timeoutMs: 5_000,
+    maxOutputChars: 100,
+  };
+
+  test("retries an idempotent system command whose exec was refused", async () => {
+    const { clock, sleeps } = createFakeClock();
+    const exec = statusSequence([503], () => execExit(0));
+    const { provider, requests } = createProvider(
+      [[EXEC_ROUTE, exec]],
+      10_000,
+      clock,
+    );
+
+    const result = await provider.executeSystem({
+      ...command,
+      idempotent: true,
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(requests.length, 2);
+    for (const request of requests) {
+      assert.equal(
+        (JSON.parse(String(request.body)) as { timeout_ms: number }).timeout_ms,
+        5_000,
+      );
+    }
+    assert.deepEqual(sleeps, [1_000]);
+  });
+
+  test("runs a system command once unless it is declared idempotent", async () => {
+    const { clock, sleeps } = createFakeClock();
+    const { provider, requests } = createProvider(
+      [[EXEC_ROUTE, () => new Response("busy", { status: 503 })]],
+      10_000,
+      clock,
+    );
+
+    await assert.rejects(
+      provider.executeSystem(command),
+      hasCode(SANDBOX_PROVIDER_ERROR_CODES.unavailable),
+    );
+    await assert.rejects(
+      provider.executeSystem({ ...command, idempotent: false }),
+      hasCode(SANDBOX_PROVIDER_ERROR_CODES.unavailable),
+    );
+    assert.equal(requests.length, 2);
+    assert.deepEqual(sleeps, []);
+  });
+
+  test("never retries an idempotent command that timed out", async () => {
+    const { clock, sleeps } = createFakeClock();
+    const { provider, requests } = createProvider(
+      [[EXEC_ROUTE, () => new Response("slow", { status: 504 })]],
+      10_000,
+      clock,
+    );
+
+    await assert.rejects(
+      provider.executeSystem({ ...command, idempotent: true }),
+      hasCode(SANDBOX_PROVIDER_ERROR_CODES.timeout),
+    );
+    assert.equal(requests.length, 1);
+    assert.deepEqual(sleeps, []);
+  });
+
+  test("never retries a model command, even if it claims to be idempotent", async () => {
+    const { clock, sleeps } = createFakeClock();
+    const { provider, requests } = createProvider(
+      [[EXEC_ROUTE, () => new Response("busy", { status: 503 })]],
+      10_000,
+      clock,
+    );
+
+    await assert.rejects(
+      provider.execute(command),
+      hasCode(SANDBOX_PROVIDER_ERROR_CODES.unavailable),
+    );
+    await assert.rejects(
+      provider.execute({ ...command, idempotent: true } as Parameters<
+        CloudflareSandboxProvider["execute"]
+      >[0]),
+      hasCode(SANDBOX_PROVIDER_ERROR_CODES.unavailable),
+    );
+    assert.equal(requests.length, 2);
+    assert.deepEqual(sleeps, []);
+  });
+
+  test("never retries an idempotent command after other 5xx or a mid-stream failure", async () => {
+    const outcomes: Array<[string, RouteHandler]> = [
+      ["500", () => new Response("boom", { status: 500 })],
+      ["502", () => new Response("bad gateway", { status: 502 })],
+      [
+        "stream error",
+        () =>
+          sseResponse([{ event: "error", data: '{"text":"socket hang up"}' }]),
+      ],
+    ];
+    for (const [name, handler] of outcomes) {
+      const { clock, sleeps } = createFakeClock();
+      const { provider, requests } = createProvider(
+        [[EXEC_ROUTE, handler]],
+        10_000,
+        clock,
+      );
+
+      await assert.rejects(
+        provider.executeSystem({ ...command, idempotent: true }),
+        name,
+      );
+      assert.equal(requests.length, 1, name);
+      assert.deepEqual(sleeps, [], name);
+    }
+  });
+
+  test("retries an idempotent command refused with 429 or never connected", async () => {
+    const failures: Array<[string, () => Response]> = [
+      ["429", () => new Response("slow down", { status: 429 })],
+      [
+        "ECONNREFUSED",
+        () => {
+          throw new TypeError("fetch failed", {
+            cause: Object.assign(new Error("connect ECONNREFUSED"), {
+              code: "ECONNREFUSED",
+            }),
+          });
+        },
+      ],
+    ];
+    for (const [name, fail] of failures) {
+      const { clock, sleeps } = createFakeClock();
+      let calls = 0;
+      const { provider } = createProvider(
+        [[EXEC_ROUTE, () => (++calls < 2 ? fail() : execExit(0))]],
+        10_000,
+        clock,
+      );
+
+      const result = await provider.executeSystem({
+        ...command,
+        idempotent: true,
+      });
+
+      assert.equal(result.exitCode, 0, name);
+      assert.equal(calls, 2, name);
+      assert.deepEqual(sleeps, [1_000], name);
+    }
+  });
+
+  test("an abort during idempotent backoff rejects with the reason", async () => {
+    const { clock, sleeps, started } = createPendingClock();
+    const controller = new AbortController();
+    const reason = new DOMException("turn cancelled", "AbortError");
+    const { provider, requests } = createProvider(
+      [[EXEC_ROUTE, () => new Response("busy", { status: 503 })]],
+      10_000,
+      clock,
+    );
+
+    const pending = provider.executeSystem({
+      ...command,
+      idempotent: true,
+      signal: controller.signal,
+    });
+    await started;
+    controller.abort(reason);
+
+    await assert.rejects(pending, (error: unknown) => error === reason);
+    assert.equal(requests.length, 1);
+    assert.deepEqual(sleeps, [1_000]);
+  });
+
+  test("ensureDirectory retries a refused mkdir", async () => {
+    const { clock, sleeps } = createFakeClock();
+    const exec = statusSequence([503], () => execExit(0));
+    const { provider, requests } = createProvider(
+      [[EXEC_ROUTE, exec]],
+      10_000,
+      clock,
+    );
+
+    await provider.ensureDirectory({
+      providerSandboxId: "sb-1",
+      directory: "/workspace/x",
+    });
+
+    assert.equal(exec.calls(), 2);
+    assert.equal(requests.length, 2);
+    assert.deepEqual(sleeps, [1_000]);
+  });
+});
+
 describe("mapCloudflareProviderError", () => {
   test("maps auth failures", () => {
     for (const status of [401, 403]) {
@@ -1196,14 +1820,25 @@ describe("ambiguous empty download metadata", () => {
     }
   });
   test("metadata transport failures retain auth/unavailable classification", async () => {
-    for (const [status, code] of [
-      [403, SANDBOX_PROVIDER_ERROR_CODES.authentication],
-      [500, SANDBOX_PROVIDER_ERROR_CODES.unavailable],
+    for (const [status, code, execCalls] of [
+      [403, SANDBOX_PROVIDER_ERROR_CODES.authentication, 1],
+      // The stat script is idempotent, but a 500 is not a refusal.
+      [500, SANDBOX_PROVIDER_ERROR_CODES.unavailable, 1],
+      // A 503 refusal is retried before giving up.
+      [503, SANDBOX_PROVIDER_ERROR_CODES.unavailable, 4],
     ] as const) {
-      const { provider } = createProvider([
-        [/^GET /, () => new Response(new Uint8Array())],
-        [/^POST .*\/exec$/, () => new Response("metadata failed", { status })],
-      ]);
+      const { clock } = createFakeClock();
+      const { provider, requests } = createProvider(
+        [
+          [/^GET /, () => new Response(new Uint8Array())],
+          [
+            /^POST .*\/exec$/,
+            () => new Response("metadata failed", { status }),
+          ],
+        ],
+        10_000,
+        clock,
+      );
       await assert.rejects(
         provider.downloadFile({
           providerSandboxId: "sb-1",
@@ -1212,7 +1847,42 @@ describe("ambiguous empty download metadata", () => {
         (error: unknown) =>
           error instanceof SandboxProviderError && error.code === code,
       );
+      assert.equal(
+        requests.filter((request) => request.method === "POST").length,
+        execCalls,
+      );
     }
+  });
+  test("metadata retries stay inside the download budget", async () => {
+    const { clock, sleeps, now } = createFakeClock();
+    const { provider, requests } = createProvider(
+      [
+        [/^GET /, () => new Response(new Uint8Array())],
+        [/^POST .*\/exec$/, () => new Response("busy", { status: 503 })],
+      ],
+      10_000,
+      clock,
+    );
+    const expected = mapCloudflareProviderError(
+      new CloudflareBridgeHttpError(503, "execute", "busy"),
+      "execute",
+    );
+
+    await assert.rejects(
+      provider.downloadFile({
+        providerSandboxId: "sb-1",
+        sandboxPath: "/workspace/file",
+        timeoutMs: 7_000,
+      }),
+      (error: unknown) =>
+        error instanceof SandboxProviderError &&
+        error.code === SANDBOX_PROVIDER_ERROR_CODES.unavailable &&
+        error.message === expected.message,
+    );
+    // 0 + 1s + 5s attempt fits 7s; 1s + 2s + 5s would not, so no 2nd retry.
+    assert.equal(requests.filter((r) => r.method === "POST").length, 2);
+    assert.deepEqual(sleeps, [1_000]);
+    assert.ok(now() <= 7_000);
   });
   test("quoted metadata paths cannot execute shell substitutions", async () => {
     const { execFileSync } = await import("node:child_process");

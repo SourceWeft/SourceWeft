@@ -190,6 +190,16 @@ export type SandboxProvider = {
     timeoutMs: number;
     maxOutputChars: number;
     signal?: AbortSignal;
+    /**
+     * The caller asserts the command is safe to re-run — after a partial or
+     * lost-response first attempt — and converges to the same outcome.
+     * Providers MAY then retry it on transient unavailability
+     * (SANDBOX_NOT_READY_OR_UNHEALTHY) with bounded backoff; without it a
+     * provider must not re-send the command. Only host-issued system commands
+     * set it (today: the runtime-asset staging steps the engine audited); the
+     * model's `execute` never does, and `execute` has no such field.
+     */
+    idempotent?: boolean;
   }): Promise<SandboxExecuteResult>;
   uploadFile(input: {
     providerSandboxId: string;

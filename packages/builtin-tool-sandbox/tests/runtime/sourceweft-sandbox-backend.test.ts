@@ -297,6 +297,7 @@ function createProvider() {
   const systemExecuteInputs: Array<{
     command: string;
     cwd?: string;
+    idempotent?: boolean;
     maxOutputChars: number;
     providerSandboxId: string;
     timeoutMs: number;
@@ -2008,6 +2009,349 @@ test("a skill the host could not plan fails alone, without any sandbox traffic f
       ["huge", false],
     ],
   );
+});
+
+// ── Skill staging overlaps the turn (Issue #323 B2) ──────────────────────
+
+/** Resolve after `ms` of wall time — long enough for any unblocked chain. */
+function settle(ms = 20) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+test("prefetch starts skill staging; a non-/skills command does not wait for it and a /skills command waits only for the in-flight run", async () => {
+  const loadEntered = deferred<void>();
+  const gate = deferred<Uint8Array | null>();
+  let loads = 0;
+  const { backend, manager, provider, uploadsFor } =
+    createGrowingSkillStagingBackend([
+      skillPlan("ppt-deck", async () => {
+        loads += 1;
+        loadEntered.resolve();
+        return gate.promise;
+      }),
+    ]);
+
+  // The turn-start prefetch: the same acquisition trustedHost
+  // .ensureCurrentSession() runs, fire-and-forget.
+  let prefetched = false;
+  const prefetch = manager.getOrCreateThreadSandbox(context).then((ref) => {
+    prefetched = true;
+    return ref;
+  });
+  await loadEntered.promise;
+  await settle();
+  assert.equal(
+    prefetched,
+    true,
+    "acquisition must hand the sandbox out without awaiting skill staging",
+  );
+  // Conservative until staging resolved: /skills stays denied.
+  assert.equal(manager.skillScriptsStaged(), false);
+
+  let plainDone = false;
+  const plain = backend
+    .execute("echo unrelated", { toolCallId: "tool-call-overlap-1" })
+    .then((result) => {
+      plainDone = true;
+      return result;
+    });
+  let skillsDone = false;
+  const skills = backend
+    .execute("python3 /skills/ppt-deck/scripts/a.py", {
+      toolCallId: "tool-call-overlap-2",
+    })
+    .then((result) => {
+      skillsDone = true;
+      return result;
+    });
+  await settle();
+  assert.equal(
+    plainDone,
+    true,
+    "a command that does not reference /skills must not wait for skill staging",
+  );
+  assert.equal((await plain).output, "user execute");
+  assert.equal(skillsDone, false, "a /skills command waits for staging");
+  assert.ok(!provider.executed.some((command) => command.includes("/skills")));
+
+  gate.resolve(new Uint8Array([1, 2, 3]));
+  const skillsResult = await skills;
+  assert.equal(skillsResult.output, "user execute");
+  assert.equal(
+    provider.executed.at(-1),
+    "python3 /skills/ppt-deck/scripts/a.py",
+  );
+  // The /skills command joined the prefetch's run instead of restarting it.
+  assert.equal(loads, 1);
+  assert.equal(uploadsFor("ppt-deck"), 1);
+  assert.equal(manager.skillScriptsStaged(), true);
+  await prefetch;
+});
+
+test("a /skills caller's abort stops only its own wait; the acquisition's staging run completes and is reused", async () => {
+  const loadEntered = deferred<void>();
+  const gate = deferred<Uint8Array | null>();
+  let loads = 0;
+  const { backend, manager, provider, uploadsFor } =
+    createGrowingSkillStagingBackend([
+      skillPlan("ppt-deck", async () => {
+        loads += 1;
+        loadEntered.resolve();
+        return gate.promise;
+      }),
+    ]);
+  await manager.getOrCreateThreadSandbox(context);
+  await loadEntered.promise;
+
+  const controller = new AbortController();
+  const aborted = backend.execute("python3 /skills/ppt-deck/scripts/a.py", {
+    toolCallId: "tool-call-overlap-abort-1",
+    signal: controller.signal,
+  });
+  await settle();
+  controller.abort(new DOMException("user stopped", "AbortError"));
+  await assert.rejects(aborted, /user stopped/u);
+  assert.ok(!provider.executed.some((command) => command.includes("/skills")));
+
+  // The detached run was not cancelled by that caller's signal.
+  gate.resolve(new Uint8Array([1, 2, 3]));
+  const result = await backend.execute(
+    "python3 /skills/ppt-deck/scripts/a.py",
+    { toolCallId: "tool-call-overlap-abort-2" },
+  );
+  assert.equal(result.output, "user execute");
+  assert.equal(loads, 1);
+  assert.equal(uploadsFor("ppt-deck"), 1);
+  assert.deepEqual(
+    manager.skillAssetResolutions()?.map((resolution) => resolution.ok),
+    [true],
+  );
+});
+
+test("skill staging forwards the engine's idempotent verdict to executeSystem: every staging command but the unpack", async () => {
+  const { backend, provider } = createGrowingSkillStagingBackend([
+    skillPlan("ppt-deck"),
+  ]);
+
+  await backend.execute("python3 /skills/ppt-deck/scripts/a.py", {
+    toolCallId: "tool-call-idempotent-1",
+  });
+
+  const staging = provider.systemExecuteInputs.filter((input) =>
+    input.command.includes("/skills/ppt-deck"),
+  );
+  const flagged = (match: (command: string) => boolean) =>
+    staging
+      .filter((input) => match(input.command))
+      .map((input) => input.idempotent);
+  // upload-prepare: rm -rf + mkdir -p.
+  assert.deepEqual(
+    flagged((command) =>
+      command.includes("mkdir -p '/skills/ppt-deck.staging'"),
+    ),
+    [true],
+  );
+  // upload-relocate: guarded move, convergent on re-run.
+  assert.deepEqual(
+    flagged((command) => command.includes("/.inbox/ppt-deck-sv-1.zip")),
+    [true],
+  );
+  // upload-unpack consumes asset.zip and moves the staging dir away: unsafe.
+  assert.deepEqual(
+    flagged((command) => command.includes("unzip -q asset.zip")),
+    [undefined],
+  );
+  // stamp write: identical bytes on every attempt.
+  assert.deepEqual(
+    flagged((command) => command.includes(".sourceweft-asset.json")),
+    [true],
+  );
+  assert.equal(staging.length, 4);
+});
+
+/**
+ * Models the Cloudflare provider's S4 contract: an `idempotent` executeSystem
+ * that hits SANDBOX_NOT_READY_OR_UNHEALTHY is retried inside the provider;
+ * anything else surfaces the first failure. `transientOn` picks the command.
+ */
+function withProviderSideUnavailableRetry(
+  provider: ReturnType<typeof createProvider>["provider"],
+  transientOn: (command: string) => boolean,
+) {
+  const attempts: Array<{ command: string; idempotent: boolean }> = [];
+  let injected = false;
+  const inner = provider.executeSystem!.bind(provider);
+  provider.executeSystem = async (input) => {
+    const attempt = async () => {
+      attempts.push({
+        command: input.command,
+        idempotent: input.idempotent === true,
+      });
+      if (!injected && transientOn(input.command)) {
+        injected = true;
+        throw new SandboxProviderError(
+          SANDBOX_PROVIDER_ERROR_CODES.unavailable,
+          "SANDBOX_NOT_READY_OR_UNHEALTHY: sandbox provider container is temporarily unavailable. Retry when the provider is available.",
+          "execute",
+        );
+      }
+      return inner(input);
+    };
+    try {
+      return await attempt();
+    } catch (error) {
+      const retryable =
+        input.idempotent === true &&
+        error instanceof SandboxProviderError &&
+        error.code === SANDBOX_PROVIDER_ERROR_CODES.unavailable;
+      if (!retryable) throw error;
+      return attempt();
+    }
+  };
+  return attempts;
+}
+
+test("a transient NOT_READY on an idempotent staging command is ridden out by the provider; the manager adds no retry of its own", async () => {
+  const { backend, manager, provider } = createGrowingSkillStagingBackend([
+    skillPlan("ppt-deck"),
+  ]);
+  const attempts = withProviderSideUnavailableRetry(provider, (command) =>
+    command.includes("mkdir -p '/skills/ppt-deck.staging'"),
+  );
+
+  const result = await backend.execute(
+    "python3 /skills/ppt-deck/scripts/a.py",
+    { toolCallId: "tool-call-not-ready-1" },
+  );
+
+  assert.equal(result.output, "user execute");
+  assert.deepEqual(
+    manager
+      .skillAssetResolutions()
+      ?.map((resolution) => [resolution.ok, resolution.rung]),
+    [[true, "upload"]],
+  );
+  assert.equal(
+    attempts.filter((attempt) =>
+      attempt.command.includes("mkdir -p '/skills/ppt-deck.staging'"),
+    ).length,
+    2,
+    "one failed attempt plus the provider's own retry",
+  );
+});
+
+test("a transient NOT_READY on the non-idempotent unpack fails the rung once, with no manager-level retry", async () => {
+  const { backend, manager, provider } = createGrowingSkillStagingBackend([
+    skillPlan("ppt-deck"),
+  ]);
+  const attempts = withProviderSideUnavailableRetry(provider, (command) =>
+    command.includes("unzip -q asset.zip"),
+  );
+
+  const result = await backend.execute(
+    "python3 /skills/ppt-deck/scripts/a.py",
+    { toolCallId: "tool-call-not-ready-2" },
+  );
+
+  assert.match(result.output, /SANDBOX_SKILL_STAGING_UNAVAILABLE/u);
+  assert.equal(
+    attempts.filter((attempt) => attempt.command.includes("unzip -q")).length,
+    1,
+  );
+  assert.match(
+    manager.skillAssetResolutions()?.[0]?.error ?? "",
+    /SANDBOX_NOT_READY_OR_UNHEALTHY/u,
+  );
+});
+
+test("neither the model's execute nor the pinned read-only file fallbacks carry idempotent", async () => {
+  const { backend, files, provider } = createSkillStagingBackend({});
+  files.set("/workspace/notes.md", new TextEncoder().encode("hello\n"));
+
+  await backend.execute("echo model", { toolCallId: "tool-call-flag-1" });
+  await backend.execute("python3 /skills/ppt-deck/scripts/a.py", {
+    toolCallId: "tool-call-flag-2",
+  });
+  assert.deepEqual(provider.executed, [
+    "echo model",
+    "python3 /skills/ppt-deck/scripts/a.py",
+  ]);
+  for (const input of provider.executeInputs) {
+    assert.equal(
+      "idempotent" in input,
+      false,
+      `model execute must not carry idempotent: ${input.command}`,
+    );
+  }
+  // Model command text never goes through executeSystem.
+  assert.ok(
+    !provider.systemExecuteInputs.some(
+      (input) =>
+        input.command === "echo model" ||
+        input.command === "python3 /skills/ppt-deck/scripts/a.py",
+    ),
+  );
+
+  // ls/read/grep/glob fallbacks run inside a pinned window whose expiry
+  // deletes the sandbox, so a provider retry must not spend that window.
+  const before = provider.systemExecuteInputs.length;
+  assert.equal((await backend.read("/workspace/notes.md")).content, "hello\n");
+  await backend.ls("/workspace");
+  await backend.grep("hello", "/workspace");
+  await backend.glob("*.md", "/workspace");
+  const fileTools = provider.systemExecuteInputs.slice(before);
+  assert.equal(fileTools.length, 4);
+  assert.ok(fileTools.every((input) => !("idempotent" in input)));
+});
+
+test("cancelling a generation stops its in-flight skill staging: no further staging traffic, and a waiting /skills command reports the fence", async () => {
+  const loadEntered = deferred<void>();
+  const gate = deferred<Uint8Array | null>();
+  const { backend, manager, provider } = createGrowingSkillStagingBackend([
+    skillPlan("ppt-deck", async () => {
+      loadEntered.resolve();
+      return gate.promise;
+    }),
+  ]);
+  const deleted: string[] = [];
+  provider.deleteSandbox = async (providerSandboxId) => {
+    deleted.push(providerSandboxId);
+  };
+  const sandbox = await manager.getOrCreateThreadSandbox(context);
+  await loadEntered.promise;
+
+  const waiting = backend.execute("python3 /skills/ppt-deck/scripts/a.py", {
+    toolCallId: "tool-call-fenced-staging-1",
+  });
+  await settle();
+  // A sibling's timeout: no command-scoped kill, so the sandbox is deleted.
+  const cancellation = await manager.cancelExecution({
+    sandbox,
+    executionId: "sibling-execution",
+    reason: "timed_out",
+  });
+  assert.deepEqual(cancellation, { confirmed: true, mode: "sandbox" });
+  assert.deepEqual(deleted, ["provider-sandbox-1"]);
+
+  const systemAfterCancel = provider.systemExecuteInputs.length;
+  const uploadsAfterCancel = provider.uploadedFiles.length;
+  // The blocked bundle load resolves only after the delete.
+  gate.resolve(new Uint8Array([1, 2, 3]));
+  await assert.rejects(
+    waiting,
+    /SANDBOX_EXECUTION_RESULT_DISCARDED|discarded/u,
+  );
+  await settle();
+
+  assert.equal(
+    provider.systemExecuteInputs.length,
+    systemAfterCancel,
+    "staging must not send commands to a deleted sandbox",
+  );
+  assert.equal(provider.uploadedFiles.length, uploadsAfterCancel);
+  assert.ok(!provider.executed.some((command) => command.includes("/skills")));
+  // Nothing was judged, so nothing was memoized as a failed bundle.
+  assert.equal(manager.skillAssetResolutions(), null);
 });
 
 test("a missing required runtime asset fails acquisition instead of degrading", async () => {

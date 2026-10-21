@@ -37,7 +37,16 @@ export type RuntimeAssetSessionLike = {
   readonly rootDir: string;
   execute(
     command: string,
-    options?: { toolCallId?: string },
+    options?: {
+      toolCallId?: string;
+      /**
+       * The engine asserts this command converges when re-run after a partial
+       * or lost-response first attempt (see the per-command audit on
+       * `ensureRuntimeAsset`). A session forwards it to the provider's
+       * executeSystem, which may then retry transient unavailability.
+       */
+      idempotent?: boolean;
+    },
   ): Promise<{ exitCode: number | null; output: string; truncated?: boolean }>;
   uploadFiles(
     files: Array<[path: string, content: Uint8Array]>,
@@ -234,6 +243,8 @@ async function writeStamp(input: {
       `mkdir -p ${shellQuoteSingle(input.assetDir)}`,
       `printf '%s' ${shellQuoteSingle(stamp)} > ${shellQuoteSingle(`${input.assetDir}/${STAMP_FILE}`)}`,
     ].join(" && "),
+    // Same bytes on every attempt (the stamp is built once, above).
+    { idempotent: true },
   );
   return result.exitCode === 0;
 }
@@ -266,11 +277,33 @@ async function ensureRuntimeAsset(input: {
         `${rootDir}/${ASSETS_DIR}/${plan.name}/${plan.version}`);
   const stagingDir = `${assetDir}.staging`;
   const entrypointPath = `${assetDir}/${plan.entrypoint}`;
-  const execute = (command: string, label: string) =>
+  /*
+   * Re-run audit (Issue #323 S4) — `idempotent` lets the provider re-send a
+   * command after a transient SANDBOX_NOT_READY_OR_UNHEALTHY, including one
+   * whose first attempt ran and only lost its response:
+   *   image-probe     read-only `test -x` + printf                    → safe
+   *   fetch           restarts from `rm -rf <staging>`, re-downloads,
+   *                   re-verifies and re-promotes; converges          → safe
+   *   upload-prepare  `rm -rf` + `mkdir -p`                           → safe
+   *   upload-relocate guarded move + `test -f` (see call site)        → safe
+   *   upload-unpack   `cd <staging>` + consumes asset.zip, then moves
+   *                   <staging> away: a re-run after a completed first
+   *                   attempt fails, so it is NOT flagged (a transient
+   *                   there fails the rung, exactly as before)        → unsafe
+   *   stamp write     `mkdir -p` + overwrite with identical bytes     → safe
+   * The stamp is still written last and checked by content, so a re-run can
+   * never make an unverified directory look staged.
+   */
+  const execute = (
+    command: string,
+    label: string,
+    options: { idempotent?: boolean } = {},
+  ) =>
     session.execute(command, {
       ...(input.toolCallKey
         ? { toolCallId: `${input.toolCallKey}:asset-${plan.name}-${label}` }
         : {}),
+      ...(options.idempotent ? { idempotent: true } : {}),
     });
 
   // Rung: image — the sandbox image baked the asset and points at it via env.
@@ -280,6 +313,7 @@ async function ensureRuntimeAsset(input: {
     const probe = await execute(
       `test -x "$${plan.imagePathEnvVar}" && printf '%s' "$${plan.imagePathEnvVar}"`,
       "image-probe",
+      { idempotent: true },
     );
     const probedPath = probe.output.trim();
     if (probe.exitCode === 0 && probedPath.startsWith("/")) {
@@ -326,7 +360,7 @@ async function ensureRuntimeAsset(input: {
             checksumCommand: session.checksumCommand,
           }),
         ].join(" && ");
-        const result = await execute(command, "fetch");
+        const result = await execute(command, "fetch", { idempotent: true });
         if (result.exitCode === 0) {
           if (await writeStamp({ session, plan, assetDir, rung: "fetch" })) {
             return {
@@ -384,6 +418,7 @@ async function ensureRuntimeAsset(input: {
             `mkdir -p ${shellQuoteSingle(dirNameOf(uploadPath))}`,
           ].join(" && "),
           "upload-prepare",
+          { idempotent: true },
         );
         if (prepare.exitCode !== 0) {
           throw new Error(
@@ -395,9 +430,17 @@ async function ensureRuntimeAsset(input: {
           throw new Error(`upload failed: ${uploaded.error}`);
         }
         if (uploadPath !== `${stagingDir}/asset.zip`) {
+          // Re-runnable: when an earlier attempt already moved the archive
+          // (its response lost), the inbox file is gone and the staged copy
+          // is what counts. The staging dir was emptied just above, so a
+          // present asset.zip can only be this upload; a partial cross-device
+          // move is overwritten by the re-run, and the digest check in the
+          // unpack step rejects anything else.
+          const target = shellQuoteSingle(`${stagingDir}/asset.zip`);
           const relocate = await execute(
-            `set -e && mv ${shellQuoteSingle(uploadPath)} ${shellQuoteSingle(`${stagingDir}/asset.zip`)}`,
+            `set -e && if [ -e ${shellQuoteSingle(uploadPath)} ]; then mv -f ${shellQuoteSingle(uploadPath)} ${target}; fi && test -f ${target}`,
             "upload-relocate",
+            { idempotent: true },
           );
           if (relocate.exitCode !== 0) {
             throw new Error(
@@ -405,6 +448,7 @@ async function ensureRuntimeAsset(input: {
             );
           }
         }
+        // Deliberately not `idempotent`: see the re-run audit above.
         const result = await execute(
           unpackAndPromoteCommand({
             plan,

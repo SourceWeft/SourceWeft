@@ -846,9 +846,13 @@ function preparedTurnWillUseSandbox(prepared: PreparedThreadTurn) {
  * adapter, which calls `SandboxManager.getOrCreateThreadSandbox` with the
  * same runtime context (provider, team, workspace, thread, run, user) the
  * model-facing tools use, so the manager's per-context initialization memo
- * dedupes the two and the tools simply await the in-flight acquisition. A
- * prefetch failure is logged at debug level and never affects the turn: the
- * first real tool call re-enters the same path and reports its own error.
+ * dedupes the two and the tools simply await the in-flight acquisition. The
+ * acquisition also starts skill-bundle staging without waiting for it, so
+ * staging overlaps the model's first decision too: a command that does not
+ * reference /skills never waits for it, and a /skills command joins the run
+ * in flight instead of restarting it. A prefetch failure is logged at debug
+ * level and never affects the turn: the first real tool call re-enters the
+ * same path and reports its own error.
  *
  * Only fires when the turn will actually use a sandbox command tool (see
  * preparedTurnWillUseSandbox) and the execution target is not the user's
