@@ -25,6 +25,8 @@ import {
   listThinkingSteps,
 } from "./thinking";
 import {
+  closeDeepAgentTodosAfterCommittedDelivery,
+  DEEPAGENTS_TODOS_STEP_ID,
   extractToolCallsFromAgentState,
   rememberObservedToolCalls,
   promotePendingToolStreamsFromToolCalls,
@@ -76,6 +78,16 @@ export async function* buildFinalOutcome(input: {
   const toolCalls = runtime.collectToolCalls({
     preserveRunning: Boolean(runtime.agentRunStop),
   });
+  const closedTodos = closeDeepAgentTodosAfterCommittedDelivery({
+    step: runtime.thinkingStepsById.get(DEEPAGENTS_TODOS_STEP_ID),
+    toolCalls,
+  });
+  if (closedTodos) {
+    yield {
+      type: "thinking-step",
+      step: runtime.setThinkingStep(closedTodos),
+    };
+  }
   const hasCompletedToolOutput = toolCalls.some(
     (call) => call.status === "completed" && !call.error,
   );
