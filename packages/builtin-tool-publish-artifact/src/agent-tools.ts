@@ -8,7 +8,10 @@ import type {
   AgentToolHostServices,
   AgentToolTurnContext,
 } from "@sourceweft/contracts/agent-tools";
-import { resolveAgentToolHostInvocationSignal } from "@sourceweft/contracts/agent-tools";
+import {
+  PUBLISHED_ARTIFACT_NEXT_STEP,
+  resolveAgentToolHostInvocationSignal,
+} from "@sourceweft/contracts/agent-tools";
 import { isArtifactError } from "@sourceweft/contracts/artifact-errors";
 import { PUBLISH_ARTIFACT_TOOL_NAME } from "./agent-tool-defs";
 import { publishArtifact, type PublishArtifactServices } from "./publisher";
@@ -104,6 +107,7 @@ const pptxArtifactRuntimePromptProvider = {
       "Supported source kinds in this phase are `sandbox_path` for sandbox files and `work_file` for SourceWeft workfiles.",
       "`/files` is text-oriented working memory and is not the fallback destination for binary sandbox outputs; publish binary outputs as artifacts instead.",
       "Do not create artifact manifest JSON files or move files only to satisfy a fixed output directory.",
+      `A \`publish_artifact\` result with \`ok: true\`, \`status: "ready"\` and \`nextStep: "${PUBLISHED_ARTIFACT_NEXT_STEP}"\` means the deliverable is delivered. Finish now: the final reply summarizes what was published and only the checks completed before publishing; do not re-verify, re-render or start new drafts afterwards. Publish again only when the user asked for another revision.`,
     ];
   },
 };

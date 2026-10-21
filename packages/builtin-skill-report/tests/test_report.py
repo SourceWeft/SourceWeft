@@ -97,6 +97,39 @@ class ReportTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'use the citations array'):
             validate_report(self.report)
 
+    def test_statement_text_repeating_its_own_label_is_rejected_not_stripped(self):
+        targets = [
+            lambda r: r['summary'][0],
+            lambda r: r['sections'][1]['blocks'][0],
+            lambda r: r['sections'][1]['blocks'][1]['items'][0],
+        ]
+        cases = {
+            'analysis': ('分析：增长放缓', '分析: 增长放缓', '  分析 ： 增长放缓', '【分析】增长放缓', '**分析**：增长放缓',
+                         'Analysis: growth slows', 'analysis : growth slows', '[Analysis] growth slows', 'ANALYSIS - growth slows'),
+            'recommendation': ('建议：采用方案A', '（建议）采用方案A', 'Recommendation: adopt A', 'recommendation — adopt A'),
+        }
+        for target in targets:
+            for kind, texts in cases.items():
+                for text in texts:
+                    with self.subTest(target=targets.index(target), kind=kind, text=text):
+                        report = copy.deepcopy(self.report)
+                        target(report).update(text=text, kind=kind)
+                        with self.assertRaisesRegex(ValueError, 'must not start with its own label'):
+                            validate_report(report)
+                        self.assertEqual(target(report)['text'], text)
+        accepted = {
+            'analysis': ('分析显示增长放缓', 'Analysis shows growth slows', 'Analysis-driven planning matters', '增长放缓。分析：见下文'),
+            'recommendation': ('建议在下季度采用方案A', 'Recommendations vary by team', '采用方案A'),
+            'fact': ('分析：这是一句被引用的事实原文',),
+        }
+        for kind, texts in accepted.items():
+            for text in texts:
+                with self.subTest(kind=kind, text=text):
+                    report = copy.deepcopy(self.report)
+                    report['summary'][0].update(text=text, kind=kind, citations=['S1'])
+                    validate_report(report)
+                    self.assertEqual(report['summary'][0]['text'], text)
+
     def test_public_outputs_escape_text_and_exclude_private_provenance(self):
         self.report['summary'][0]['text'] = '<script>alert("x")</script> & [text] | raw'
         validate_report(self.report)

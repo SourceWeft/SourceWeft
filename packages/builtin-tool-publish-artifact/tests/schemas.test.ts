@@ -8,6 +8,7 @@ import {
   PublishArtifactOutputSchema,
   PptxOutputError,
 } from "../src/schemas";
+import { PUBLISHED_ARTIFACT_NEXT_STEP } from "@sourceweft/contracts/agent-tools";
 
 function previewImage() {
   return {
@@ -157,6 +158,7 @@ test("PublishArtifactOutputSchema requires a slides artifact URL", () => {
     reused: false,
     type: "presentation_artifact_result",
     status: "ready",
+    nextStep: PUBLISHED_ARTIFACT_NEXT_STEP,
     artifactId: "artifact-1",
     artifact_id: "artifact-1",
     artifactType: "slides",
@@ -189,6 +191,7 @@ test("PublishArtifactOutputSchema accepts a generic file artifact URL", () => {
     reused: false,
     type: "file_artifact_result",
     status: "ready",
+    nextStep: PUBLISHED_ARTIFACT_NEXT_STEP,
     artifactId: "artifact-1",
     artifact_id: "artifact-1",
     artifactType: "file",
@@ -207,6 +210,44 @@ test("PublishArtifactOutputSchema accepts a generic file artifact URL", () => {
 
   assert.equal(parsed.artifactType, "file");
   assert.equal(parsed.download_url, parsed.downloadUrl);
+});
+
+test("PublishArtifactOutputSchema requires the committed next step on every ready receipt", () => {
+  const receipt = {
+    ok: true,
+    reused: false,
+    type: "file_artifact_result",
+    status: "ready",
+    nextStep: PUBLISHED_ARTIFACT_NEXT_STEP,
+    artifactId: "artifact-1",
+    artifact_id: "artifact-1",
+    artifactType: "file",
+    title: "Archive",
+    artifactUrl: "/artifact-preview?artifactId=artifact-1",
+    artifact_url: "/artifact-preview?artifactId=artifact-1",
+    downloadUrl: "/api/artifact-file?artifactId=artifact-1&download=1",
+    download_url: "/api/artifact-file?artifactId=artifact-1&download=1",
+    byteLength: 42,
+    byte_length: 42,
+    fileName: "archive.zip",
+    file_name: "archive.zip",
+    mimeType: "application/zip",
+    mime_type: "application/zip",
+  };
+  assert.equal(
+    PUBLISHED_ARTIFACT_NEXT_STEP,
+    "committed — summarize and finish",
+  );
+  const { nextStep: _nextStep, ...withoutNextStep } = receipt;
+  assert.equal(
+    PublishArtifactOutputSchema.safeParse(withoutNextStep).success,
+    false,
+  );
+  assert.equal(
+    PublishArtifactOutputSchema.safeParse({ ...receipt, nextStep: "continue" })
+      .success,
+    false,
+  );
 });
 
 test("PublishArtifactErrorOutputSchema accepts recoverable publisher failures", () => {

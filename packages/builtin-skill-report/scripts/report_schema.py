@@ -169,11 +169,33 @@ def provenance_counts(report):
     return counts
 
 
+def own_label_prefix(value, kind):
+    """The kind label (either language) the text already starts with, if any.
+
+    The renderer prefixes analysis/recommendation statements with their label,
+    so text that repeats it renders as "分析: 分析：…". A label counts only
+    when followed by a colon, a spaced dash or wrapped in brackets, so ordinary
+    sentences such as "建议在…" or "Analysis shows…" remain valid.
+    """
+    for language in ("zh-CN", "en-US"):
+        label = re.escape(labels({"language": language})[kind])
+        if re.match(
+            r"\s*(?:\*\*|__)?\s*(?:[\[【(（]\s*" + label + r"\s*[\]】)）]|" + label + r"\s*(?:\*\*|__)?\s*(?:[:：]|[-–—|｜]\s))",
+            value,
+            re.I,
+        ):
+            return labels({"language": language})[kind]
+    return None
+
+
 def statement(value, ids, paragraph=False):
     obj(value, ["text", "kind", "citations"] + (["type"] if paragraph else []))
     statement_input_text(value["text"], "statement")
     if value["kind"] not in ("fact", "analysis", "recommendation"):
         fail("Invalid statement kind")
+    label = own_label_prefix(value["text"], value["kind"]) if value["kind"] != "fact" else None
+    if label:
+        fail(f"Statement text must not start with its own label '{label}'; the renderer adds it, so remove the label from text")
     citations(value["citations"], ids, value["kind"] == "fact")
 
 

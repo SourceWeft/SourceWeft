@@ -1,4 +1,5 @@
 import { HTML_ARTIFACT_TYPE } from "@sourceweft/contracts/html-artifact";
+import { PUBLISHED_ARTIFACT_NEXT_STEP } from "@sourceweft/contracts/agent-tools";
 import { extensionForPath, fileNameForTitle } from "../artifact-files";
 import { ArtifactPublishError } from "../schemas";
 import type { ArtifactTypeHandler } from "../artifact-type-handlers";
@@ -47,6 +48,7 @@ export const htmlTypeHandler: ArtifactTypeHandler = {
         ok: true,
         type: "html_artifact_result",
         status: "ready",
+        nextStep: PUBLISHED_ARTIFACT_NEXT_STEP,
         reused,
         artifactId,
         artifact_id: artifactId,

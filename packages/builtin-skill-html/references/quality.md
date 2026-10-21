@@ -1,6 +1,6 @@
 # Final-file quality checks
 
-Check the actual bundled file at desktop, tablet and mobile viewports. Confirm headings, text, tables, charts, image loading and long-page tails. Review screenshots with the configured vision model. Source inspection alone cannot establish visual quality.
+Check the actual bundled file at desktop, tablet and mobile viewports. Confirm headings, text, tables, charts, image loading and long-page tails. Review every screenshot slice listed in `qa.json` `images` with the configured vision model. Source inspection alone cannot establish visual quality.
 
 For interactions, write a small conventional Playwright module next to the page. Example:
 

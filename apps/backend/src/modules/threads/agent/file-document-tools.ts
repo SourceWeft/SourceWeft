@@ -12,6 +12,47 @@ import type { ScopedFileReader } from "./file-reader";
 import { sanitizeNonCitableCitationMarkers } from "./fs-utils";
 import type { AgentCitationRegistry } from "./citation-registry";
 
+const DOCUMENT_CONTINUATION_PREFIX = "rd1.";
+const documentContinuationSchema = z
+  .object({
+    fileId: z.string(),
+    revision: z.string(),
+    unit: z.number().int().nonnegative(),
+    offset: z.number().int().nonnegative(),
+  })
+  .strict();
+const SEARCH_CONTINUATION_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function invalidContinuation(reason: string) {
+  return new ContentError(
+    400,
+    "INVALID_CURSOR",
+    `${reason} Pass back the exact \`continuation\` value from the previous read_document result for this same path, unchanged; continuations from search_files or other tools are not valid here. Omit \`continuation\` to read from the beginning.`,
+  );
+}
+
+/** Accepts current `rd1.` tokens and the unprefixed tokens issued before. */
+function parseDocumentContinuation(token: string) {
+  if (SEARCH_CONTINUATION_PATTERN.test(token))
+    throw invalidContinuation(
+      "This is a search_files continuation, not a read_document one.",
+    );
+  const encoded = token.startsWith(DOCUMENT_CONTINUATION_PREFIX)
+    ? token.slice(DOCUMENT_CONTINUATION_PREFIX.length)
+    : token;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+  } catch {
+    parsed = undefined;
+  }
+  const state = documentContinuationSchema.safeParse(parsed);
+  if (!state.success)
+    throw invalidContinuation("This read_document continuation is malformed.");
+  return state.data;
+}
+
 export function createFileDocumentTools(input: {
   read: ScopedFileReader;
   backend: Pick<BackendProtocolV2, "glob">;
@@ -65,37 +106,23 @@ export function createFileDocumentTools(input: {
   };
 
   const readDocument = tool(
-    async ({ path, cursor }) => {
+    async ({ path, continuation: requested, cursor }) => {
       const { file, document } = await read(path);
       let unit = 0,
         offset = 0;
-      if (cursor) {
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(
-            Buffer.from(cursor, "base64url").toString("utf8"),
+      // `cursor` is the input name models used before it matched the output.
+      const supplied = requested ?? cursor;
+      if (supplied) {
+        const state = parseDocumentContinuation(supplied);
+        if (state.fileId !== file.fileId)
+          throw invalidContinuation(
+            "This continuation belongs to a different file.",
           );
-        } catch {
-          throw new ContentError(
-            400,
-            "INVALID_CURSOR",
-            "Invalid document cursor.",
-          );
-        }
-        const state = z
-          .object({
-            fileId: z.string(),
-            revision: z.string(),
-            unit: z.number().int().nonnegative(),
-            offset: z.number().int().nonnegative(),
-          })
-          .strict()
-          .parse(parsed);
-        if (state.fileId !== file.fileId || state.revision !== file.revision)
+        if (state.revision !== file.revision)
           throw new ContentError(
             409,
             "FILE_CHANGED",
-            "The document changed; start a new read.",
+            "The document changed since this continuation was issued. Omit `continuation` to read the current version from the beginning.",
           );
         unit = state.unit;
         offset = state.offset;
@@ -104,10 +131,8 @@ export function createFileDocumentTools(input: {
         unit > document.segments.length ||
         offset > (document.segments[unit]?.text.length ?? 0)
       )
-        throw new ContentError(
-          400,
-          "INVALID_CURSOR",
-          "Document cursor exceeds the available text.",
+        throw invalidContinuation(
+          "This continuation points past the end of the document text.",
         );
       const segments: FileDocument["segments"] = [];
       const rawSegments: string[] = [];
@@ -135,14 +160,14 @@ export function createFileDocumentTools(input: {
       }
       const continuation =
         unit < document.segments.length
-          ? Buffer.from(
+          ? `${DOCUMENT_CONTINUATION_PREFIX}${Buffer.from(
               JSON.stringify({
                 fileId: file.fileId,
                 revision: file.revision,
                 unit,
                 offset,
               }),
-            ).toString("base64url")
+            ).toString("base64url")}`
           : null;
       const citedSegments = segments.map((segment, index) => ({
         ...segment,
@@ -163,10 +188,21 @@ export function createFileDocumentTools(input: {
     {
       name: "read_document",
       description:
-        "Read extractable text from a file in this conversation's Files, with page, slide, paragraph, line or spreadsheet cell locations. It does not add a Source or search Sources. Returns bounded text and a continuation cursor. Images are not OCRed; spreadsheet formulas are not executed.",
+        "Read extractable text from a file in this conversation's Files, with page, slide, paragraph, line or spreadsheet cell locations. It does not add a Source or search Sources. Returns bounded text; when more text remains the result has a non-null `continuation`: call read_document again with the same `path` and that exact `continuation` value. Images are not OCRed; spreadsheet formulas are not executed.",
       schema: z.object({
         path: z.string().min(1),
-        cursor: z.string().max(4096).optional(),
+        continuation: z
+          .string()
+          .max(4096)
+          .optional()
+          .describe(
+            "The exact `continuation` from the previous read_document result for this path. Omit to read from the beginning.",
+          ),
+        cursor: z
+          .string()
+          .max(4096)
+          .optional()
+          .describe("Deprecated alias of `continuation`."),
       }),
     },
   );

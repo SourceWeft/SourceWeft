@@ -17,8 +17,13 @@ import { withLangGraph } from "@langchain/langgraph/zod";
 import { createMiddleware, type AgentMiddleware } from "langchain";
 import { createPatchToolCallsMiddleware } from "deepagents";
 import { z } from "zod/v4";
-import { getAgentToolDefinition } from "@sourceweft/agent-tool-registry";
-import { committedArtifactToolResultSchema } from "@sourceweft/contracts/agent-tools";
+import {
+  committedDeliveryPrompt,
+  isCommittedDeliveryExhausted,
+  readCommittedDelivery,
+  readCommittedToolMessage,
+  readToolMessageResult,
+} from "./committed-delivery";
 import {
   readAgentRunStop,
   type AgentRunStop,
@@ -537,31 +542,14 @@ export function buildAgentStepSummaryInput(
     .filter(ToolMessage.isInstance)
     .slice(-24)
     .map((message) => {
-      let result: Record<string, unknown> | null = object(message.artifact);
-      if (
-        !result &&
-        typeof message.content === "string" &&
-        message.content.length <= 32_000
-      ) {
-        try {
-          result = object(JSON.parse(message.content));
-        } catch {
-          /* Plain tool text is not promoted to result authority. */
-        }
-      }
-      const definition = getAgentToolDefinition(message.name ?? "");
-      const committed =
-        definition?.terminalResult?.kind === "committed_artifact"
-          ? committedArtifactToolResultSchema.safeParse(result)
-          : null;
+      // Plain tool text is not promoted to result authority.
+      const result = readToolMessageResult(message);
+      const committed = readCommittedToolMessage(message);
       return {
         tool: String(message.name ?? "tool").slice(0, 160),
         status: message.status ?? "success",
         resultExcerpt: textContent(message).slice(0, 600),
-        ...(committed?.success &&
-        committed.data.artifactType === definition?.terminalResult?.artifactType
-          ? { committedArtifact: committed.data }
-          : {}),
+        ...(committed ? { committedArtifact: committed } : {}),
         ...(typeof result?.exitCode === "number"
           ? { exitCode: result.exitCode }
           : {}),
@@ -916,7 +904,20 @@ export function createSourceWeftStepBudgetMiddleware(
         let current: ScopeBudget = entry;
         if (isV2Scope(entry)) {
           const clock = clockFor(entry);
+          // A committed delivery followed by repeated tool-calling decisions
+          // exhausts both allowances: the next decision is the finalizing
+          // summary, exactly as an expired closing clock would make it.
           if (
+            isCommittedDeliveryExhausted(readCommittedDelivery(state.messages))
+          )
+            current = {
+              ...entry,
+              steps: entry.limit,
+              normalSteps: entry.normalLimit,
+              closingSteps: entry.closingLimit,
+              ...(clock ? { wallClock: clock } : {}),
+            };
+          else if (
             entry.phase === "working" &&
             entry.normalSteps < entry.normalLimit
           ) {
@@ -937,8 +938,7 @@ export function createSourceWeftStepBudgetMiddleware(
                   };
             emit(next);
             return patch(scope, next);
-          }
-          if (entry.closingSteps < entry.closingLimit) {
+          } else if (entry.closingSteps < entry.closingLimit) {
             if (!entry.closingToolIds && !entry.availableToolIds)
               throw new ContentError(
                 500,
@@ -1085,11 +1085,19 @@ export function createSourceWeftStepBudgetMiddleware(
             }),
           });
         }
-        if (current && isV2Scope(current) && current.phase === "closing")
+        // After a committed delivery the finish instruction replaces the
+        // closing prompt, which would otherwise invite more delivery work.
+        const delivery = readCommittedDelivery(request.state.messages);
+        const instruction = delivery
+          ? committedDeliveryPrompt(delivery)
+          : current && isV2Scope(current) && current.phase === "closing"
+            ? `${CLOSING_PROMPT}${current.closingLimit - current.closingSteps + 1}`
+            : null;
+        if (instruction)
           return handler({
             ...request,
             systemMessage: new SystemMessage(
-              `${textContent(request.systemMessage)}\n\n${CLOSING_PROMPT}${current.closingLimit - current.closingSteps + 1}`,
+              `${textContent(request.systemMessage)}\n\n${instruction}`,
             ),
           });
         return handler(request);

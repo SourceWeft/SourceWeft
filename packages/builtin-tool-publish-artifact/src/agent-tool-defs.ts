@@ -18,6 +18,10 @@ export const publishArtifactAgentTool = defineAgentTool({
   },
   defaultPermission: "ask",
   riskLevel: "medium",
+  terminalResult: {
+    kind: "published_artifact",
+    artifactTypes: ["html", "slides", "file", "image"],
+  },
   slash: {
     description: "Publish an existing file artifact",
     displayName: "Publish Artifact",
