@@ -52,16 +52,27 @@ export function* handleToolArgDeltaChunk(input: {
 }): Generator<DeepAgentTurnEvent> {
   const { delta, runtime } = input;
   const slotKey = String(delta.index);
-  const state =
-    runtime.partialToolArgsBySlot.get(slotKey) ??
-    ({ args: "", lastContentLength: 0 } as PartialToolArgStreamState);
+  const existing = runtime.partialToolArgsBySlot.get(slotKey);
+  // A different id in a known slot is a different call: start it afresh
+  // rather than appending its args to (and reporting it under) the old id.
+  const state: PartialToolArgStreamState =
+    existing && !(delta.id && existing.id && delta.id !== existing.id)
+      ? existing
+      : { args: "", lastContentLength: 0 };
   if (delta.id && !state.id) {
     state.id = delta.id;
   }
   if (delta.name && !state.name) {
     state.name = delta.name;
   }
-  state.args += delta.args;
+  // @langchain/core's v3 producers (compat `convertChunksToEvents`, the OpenAI
+  // completions/responses converters) put the block's ACCUMULATED args on
+  // every block-delta, so a fragment that extends the buffer replaces it.
+  // Anything else is appended, defensively, in case a producer sends true
+  // deltas.
+  state.args = delta.args.startsWith(state.args)
+    ? delta.args
+    : state.args + delta.args;
   runtime.partialToolArgsBySlot.set(slotKey, state);
 
   // Need the real tool-call id (so the client reconciles with tool-call-start)

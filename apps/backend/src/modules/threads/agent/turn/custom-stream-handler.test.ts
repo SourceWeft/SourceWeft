@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import { collectCustomStreamEvents } from "../../../../test/turn-stream-collectors";
+import { handleToolArgDeltaChunk } from "./tool-arg-stream-handler";
 import { createTurnRuntime } from "./turn-runtime";
 
 test("custom stream handler emits generated artifact progress events", async () => {
@@ -304,4 +305,77 @@ test("model-call-begin closes a segment left open by a model re-entry, so the re
     runtime.renderBlocks.list().map((block) => block.id),
     [first.id],
   );
+});
+
+test("model-call-begin drops an earlier call's tool-arg slots, so a retry names the new call", async () => {
+  const runtime = createTurnRuntime({
+    prepared: {
+      runTraceId: "trace-slot-reuse",
+      workspace: { id: "workspace" },
+      thread: { id: "thread" },
+    } as never,
+  });
+  // A completed earlier call left a long buffer in block slot 0, and its tool
+  // call was promoted by the `tools` method.
+  await collectCustomStreamEvents({
+    payload: { type: "model-call-begin", attempt: 1 },
+    runtime,
+  });
+  [
+    ...handleToolArgDeltaChunk({
+      delta: {
+        index: 0,
+        id: "old-call",
+        name: "write_file",
+        args: '{"path":"/a.ts","content":"a long finished file"}',
+      },
+      runtime,
+    }),
+  ];
+  runtime.toolCallsById.set("old-call", {
+    id: "old-call",
+    tool: "write_file",
+    input: {},
+    output: null,
+    status: "completed",
+    latencyMs: null,
+    error: null,
+    sequence: 1,
+  });
+
+  // The next call reuses slot 0 with a shorter (cumulative) buffer, then fails.
+  await collectCustomStreamEvents({
+    payload: { type: "model-call-begin", attempt: 1 },
+    runtime,
+  });
+  assert.equal(runtime.partialToolArgsBySlot.size, 0);
+  const deltas = [
+    ...handleToolArgDeltaChunk({
+      delta: {
+        index: 0,
+        id: "new-call",
+        name: "write_file",
+        args: '{"content":"x',
+      },
+      runtime,
+    }),
+  ];
+  assert.deepEqual(
+    deltas.map((event) => event.type === "tool-input-delta" && event.id),
+    ["new-call"],
+  );
+
+  const events = await collectCustomStreamEvents({
+    payload: {
+      type: "model-call-retry",
+      attempt: 2,
+      errorCode: "MODEL_TIMEOUT",
+    },
+    runtime,
+  });
+  assert.deepEqual(
+    events.map((event) => event.type === "segment-reset" && event.toolCallIds),
+    [["new-call"]],
+  );
+  assert.equal(runtime.partialToolArgsBySlot.size, 0);
 });

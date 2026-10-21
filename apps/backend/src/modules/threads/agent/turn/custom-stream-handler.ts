@@ -40,6 +40,17 @@ export async function* handleCustomStreamChunk(input: {
     // budget's `jumpTo: "model"`) is closed first, so everything the attempt
     // streams lands in segments of its own and a reset can name them by id.
     runtime.resetReasoningBoundary();
+    // Streamed tool-arg slots are keyed by block index, which every model call
+    // restarts at 0, so a slot left by an earlier call would absorb this one's
+    // chunks. They are dropped here, before the boundary is captured: an
+    // earlier successful call's tool calls have been promoted by the `tools`
+    // method by now, and a retried attempt's predecessor was already withdrawn
+    // by `model-call-retry`, so nothing still owed to the client is lost, and
+    // every slot after this point belongs to this attempt (which is what lets a
+    // `segment-reset` name its call ids). Not the v3 `message-finish` event:
+    // it fires once the provider stream ends, before middleware inside the
+    // attempt can still fail it, and it also fires for non-model node output.
+    runtime.partialToolArgsBySlot.clear();
     runtime.modelCallBoundary = runtime.captureModelCallBoundary(
       readAttempt(record.attempt),
     );

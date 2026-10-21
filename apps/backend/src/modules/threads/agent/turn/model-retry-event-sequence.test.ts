@@ -287,6 +287,12 @@ type Observed = {
   renderBlocks: unknown[];
   /** Tool-call ids still held by the streamed tool-arg buffers. */
   pendingToolArgIds: Array<string | undefined>;
+  /**
+   * Every v3 event and every turn event in arrival order, as
+   * `messages:<event>`, `custom:<type>`, `tools:<event>:<tool_call_id>` and
+   * `turn:<type>`, so a test can assert what streams before what.
+   */
+  timeline: string[];
 };
 
 /**
@@ -336,18 +342,28 @@ async function observe(input: {
   const protocol: unknown[] = [];
   const turn: DeepAgentTurnEvent[] = [];
   const argDeltas: unknown[] = [];
+  const timeline: string[] = [];
+  const emit = (events: DeepAgentTurnEvent[]) => {
+    for (const event of events) {
+      turn.push(event);
+      timeline.push(`turn:${event.type}`);
+    }
+  };
   for await (const event of stream) {
     if (event.method === "custom") {
-      turn.push(
-        ...(await collectCustomStreamEvents({
-          payload: unwrapCustomEvent(event.params?.data),
-          runtime,
-        })),
-      );
+      const payload = unwrapCustomEvent(event.params?.data);
+      timeline.push(`custom:${String((payload as { type?: unknown }).type)}`);
+      emit(await collectCustomStreamEvents({ payload, runtime }));
+      continue;
+    }
+    if (event.method === "tools") {
+      const data = event.params?.data as Record<string, unknown>;
+      timeline.push(`tools:${String(data.event)}:${String(data.tool_call_id)}`);
       continue;
     }
     if (event.method !== "messages") continue;
     const data = event.params?.data as Record<string, unknown>;
+    timeline.push(`messages:${String(data.event)}`);
     const delta = data.delta as Record<string, unknown> | undefined;
     protocol.push({
       event: data.event,
@@ -361,13 +377,13 @@ async function observe(input: {
         : {}),
     });
     for (const payload of adaptMessagesEvent(data)) {
-      turn.push(
-        ...(await collectMessageStreamEvents({
+      emit(
+        await collectMessageStreamEvents({
           payload,
           commandSuccessCriteria: { kind: "none" },
           runtime,
           suppressModelReasoning: false,
-        })),
+        }),
       );
     }
     // The runner feeds the same chunk to the tool-arg streamer right after the
@@ -376,12 +392,7 @@ async function observe(input: {
     const argDelta = adaptToolArgDelta(data);
     if (argDelta) {
       argDeltas.push(argDelta);
-      for (const argEvent of handleToolArgDeltaChunk({
-        delta: argDelta,
-        runtime,
-      })) {
-        turn.push(argEvent);
-      }
+      emit([...handleToolArgDeltaChunk({ delta: argDelta, runtime })]);
     }
   }
   await stream.output;
@@ -424,6 +435,7 @@ async function observe(input: {
     pendingToolArgIds: [...runtime.partialToolArgsBySlot.values()].map(
       (state) => state.id,
     ),
+    timeline,
   };
 }
 
@@ -564,17 +576,23 @@ test("an attempt that dies mid-stream is withdrawn by one segment-reset and the 
     "reasoning",
     "reasoning",
     "text-delta",
+    "tool-input-delta",
     "segment-reset",
     ...types(clean.turn),
   ]);
   // Both write_file arg fragments reached the pending buffer before the
-  // failure (no `tool-input-delta` surfaces for them: core's v3 block-delta
-  // carries the accumulated args, which the handler concatenates again — a
-  // pre-existing gap outside this change), and the reset names that call.
+  // failure, the partial `content` streamed to the client as it was written,
+  // and the reset names that call so the client can drop it.
   assert.deepEqual(
     retried.argDeltas.slice(0, 2).map((delta) => (delta as { id: string }).id),
     ["call-write", "call-write"],
   );
+  const partial = retried.turn[4] as DeepAgentTurnEvent;
+  assert.equal(partial.type, "tool-input-delta");
+  if (partial.type === "tool-input-delta") {
+    assert.equal(partial.id, "call-write");
+    assert.equal(partial.input.content, "hel");
+  }
   const resets = retried.turn.filter(
     (event) => (event as { type: string }).type === "segment-reset",
   );
@@ -1060,4 +1078,213 @@ test("two consecutive model calls without a tool boundary: a retry in the second
       { id: "text", type: "text", text: "two" },
     ],
   );
+});
+
+/** The `tool-input-delta` events of a turn, reduced to call id and content. */
+function toolInputDeltas(observed: Observed) {
+  return observed.raw.flatMap((event) =>
+    event.type === "tool-input-delta"
+      ? [{ id: event.id, content: event.input.content }]
+      : [],
+  );
+}
+
+const writeFileCall = (id: string, argChunks: string[]) => ({
+  id,
+  name: "write_file",
+  argChunks,
+});
+
+test("a write_file call streams its growing content before the authoritative tool call (issue #335)", async () => {
+  const observed = await observe({
+    turns: [
+      {
+        reasoning: [],
+        text: [],
+        toolCall: writeFileCall("call-write", [
+          '{"file_path":"/notes.md",',
+          '"content":"hel',
+          "lo wor",
+          'ld"}',
+        ]),
+      },
+      { reasoning: [], text: ["Done."] },
+    ],
+    middleware: fastRetry(),
+    thread: "seq-write-stream",
+  });
+
+  // Core's v3 block-delta carries the call's ACCUMULATED args, with id and
+  // name on every delta, keyed by the tool_call_chunk's index.
+  assert.deepEqual(observed.argDeltas, [
+    {
+      index: 2,
+      id: "call-write",
+      name: "write_file",
+      args: '{"file_path":"/notes.md",',
+    },
+    {
+      index: 2,
+      id: "call-write",
+      name: "write_file",
+      args: '{"file_path":"/notes.md","content":"hel',
+    },
+    {
+      index: 2,
+      id: "call-write",
+      name: "write_file",
+      args: '{"file_path":"/notes.md","content":"hello wor',
+    },
+    {
+      index: 2,
+      id: "call-write",
+      name: "write_file",
+      args: '{"file_path":"/notes.md","content":"hello world"}',
+    },
+  ]);
+
+  assert.deepEqual(toolInputDeltas(observed), [
+    { id: "call-write", content: "hel" },
+    { id: "call-write", content: "hello wor" },
+    { id: "call-write", content: "hello world" },
+  ]);
+  const lastPartial = observed.timeline.lastIndexOf("turn:tool-input-delta");
+  const started = observed.timeline.indexOf("tools:tool-started:call-write");
+  assert.ok(started > 0, "the write_file call ran");
+  assert.ok(
+    lastPartial >= 0 && lastPartial < started,
+    "every partial streamed before the authoritative call",
+  );
+  // Each model call announces itself before its message stream opens.
+  assert.deepEqual(
+    observed.timeline.filter(
+      (entry) =>
+        entry === "custom:model-call-begin" ||
+        entry === "messages:message-start",
+    ),
+    [
+      "custom:model-call-begin",
+      "messages:message-start",
+      "custom:model-call-begin",
+      "messages:message-start",
+    ],
+  );
+});
+
+test("successive model calls streaming write_file on the same slot each stream under their own call id (issue #335)", async () => {
+  // Block indexes restart with every model call, so both calls' chunks land
+  // on slot 2. With and without the retry bundle (which announces every
+  // attempt), the second call must not stream under the first call's id.
+  for (const [label, middleware] of [
+    ["with-retry", fastRetry()],
+    ["no-middleware", []],
+  ] as const) {
+    const observed = await observe({
+      turns: [
+        {
+          reasoning: [],
+          text: [],
+          toolCall: writeFileCall("call-write-1", [
+            '{"file_path":"/a.md",',
+            '"content":"the first file body"}',
+          ]),
+        },
+        {
+          reasoning: [],
+          text: [],
+          toolCall: writeFileCall("call-write-2", [
+            '{"file_path":"/b.md",',
+            '"content":"sec',
+            'ond"}',
+          ]),
+        },
+        { reasoning: [], text: ["Done."] },
+      ],
+      middleware: [...middleware],
+      thread: `seq-write-twice-${label}`,
+    });
+    assert.equal(observed.calls, 3, label);
+    assert.deepEqual(
+      toolInputDeltas(observed),
+      [
+        { id: "call-write-1", content: "the first file body" },
+        { id: "call-write-2", content: "sec" },
+        { id: "call-write-2", content: "second" },
+      ],
+      label,
+    );
+  }
+});
+
+test("a retry after a successful write_file names the failed attempt's own write_file in segment-reset (issue #335)", async () => {
+  // Call 1 writes a file on slot 2 (longer args than the failed attempt
+  // streams). Call 2's first attempt starts another write_file on slot 2 and
+  // dies mid-args; the reset must name THAT call, not call 1's.
+  const observed = await observe({
+    turns: [
+      {
+        reasoning: ["A"],
+        text: [],
+        toolCall: writeFileCall("call-write-1", [
+          '{"file_path":"/a.md",',
+          '"content":"the first file body"}',
+        ]),
+      },
+      {
+        reasoning: ["B"],
+        text: [],
+        toolCall: writeFileCall("call-write-2", [
+          '{"file_path":"/b.md",',
+          '"content":"hel',
+        ]),
+        // 1 reasoning + 2 arg chunks, then the idle watchdog fires.
+        failAfterChunks: 3,
+      },
+      { reasoning: ["B2"], text: ["Done."] },
+    ],
+    middleware: fastRetry(),
+    thread: "seq-write-then-retry",
+  });
+  assert.equal(observed.calls, 3);
+
+  const resets = observed.turn.filter(
+    (event) => (event as { type: string }).type === "segment-reset",
+  );
+  assert.deepEqual(resets, [
+    {
+      type: "segment-reset",
+      reason: "model_call_retry",
+      attempt: 2,
+      segmentIds: ["model-reasoning:<run>:2"],
+      toolCallIds: ["call-write-2"],
+      keepTextChars: 0,
+      keepReasoningChars: "A".length,
+      dropTextChars: 0,
+      dropReasoningChars: "B".length,
+    },
+  ]);
+  // The failed attempt's partial streamed under its own id before the reset.
+  assert.deepEqual(toolInputDeltas(observed), [
+    { id: "call-write-1", content: "the first file body" },
+    { id: "call-write-2", content: "hel" },
+  ]);
+  assert.ok(
+    observed.timeline.lastIndexOf("turn:tool-input-delta") <
+      observed.timeline.indexOf("turn:segment-reset"),
+  );
+  // A failed attempt's message stream never finishes: no content-block-finish
+  // or message-finish between its last delta and the retry.
+  const retryAt = observed.timeline.indexOf("custom:model-call-retry");
+  const secondStart = observed.timeline.indexOf(
+    "messages:message-start",
+    observed.timeline.indexOf("messages:message-start") + 1,
+  );
+  assert.ok(secondStart > 0 && secondStart < retryAt);
+  assert.deepEqual(
+    observed.timeline
+      .slice(secondStart, retryAt)
+      .filter((entry) => entry.endsWith("-finish")),
+    [],
+  );
+  assert.ok(!observed.pendingToolArgIds.includes("call-write-2"));
 });

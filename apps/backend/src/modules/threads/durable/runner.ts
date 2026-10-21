@@ -2139,9 +2139,9 @@ export async function processThreadChatRunJob(
   const heartbeat = async () =>
     applyRunProgress(await durableChatRunService.heartbeat(run));
 
-  // Streamed text and reasoning deltas are persisted in windows, not one round
-  // trip per token: every appended event rewrites the run snapshot, and a
-  // reasoning model emits over a thousand deltas in seconds.
+  // Streamed text, reasoning and tool-input deltas are persisted in windows,
+  // not one round trip per token: every appended event rewrites the run
+  // snapshot, and a reasoning model emits over a thousand deltas in seconds.
   const deltaCoalescer = createDeltaCoalescer({
     flush: async (payload) => {
       await heartbeat();

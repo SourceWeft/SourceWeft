@@ -338,3 +338,53 @@ test("a segment reset is persisted after the deltas it withdraws, never buffered
     ["reasoning", "text-delta", "reasoning"],
   );
 });
+
+const toolInput = (id: string, content: string) => ({
+  type: "tool-input-delta",
+  id,
+  tool: "write_file",
+  input: { path: "/files/a.py", content },
+  toolCall: { id, tool: "write_file", input: { content }, status: "running" },
+});
+
+test("tool-input deltas of one call inside the window persist as its latest snapshot", async () => {
+  const { coalescer, flushed } = harness();
+  assert.equal(await coalescer.push(toolInput("call-1", "pri")), true);
+  assert.equal(await coalescer.push(toolInput("call-1", "print(")), true);
+  assert.equal(await coalescer.push(toolInput("call-1", "print(1)")), true);
+  await coalescer.flush();
+  assert.deepEqual(flushed, [toolInput("call-1", "print(1)")]);
+});
+
+test("a large tool-input snapshot is windowed by time, not flushed by the character bound", async () => {
+  const { coalescer, flushed, tick } = harness();
+  const big = "x".repeat(10_000);
+  assert.equal(await coalescer.push(toolInput("call-1", big)), true);
+  assert.equal(await coalescer.push(toolInput("call-1", `${big}y`)), true);
+  assert.equal(flushed.length, 0);
+  tick(80);
+  assert.equal(await coalescer.push(toolInput("call-1", `${big}yz`)), true);
+  assert.deepEqual(flushed, [toolInput("call-1", `${big}yz`)]);
+});
+
+test("another call's tool-input delta, text or a tool-call-start flushes the pending snapshot first, in order", async () => {
+  const { coalescer, flushed } = harness();
+  await coalescer.push(toolInput("call-1", "a"));
+  await coalescer.push(toolInput("call-2", "b"));
+  await coalescer.push(text("note"));
+  await coalescer.push(toolInput("call-2", "bc"));
+  assert.equal(
+    await coalescer.push({ type: "tool-call-start", id: "call-2" }),
+    false,
+  );
+  assert.deepEqual(
+    flushed.map((payload) => [payload.type, payload.id]),
+    [
+      ["tool-input-delta", "call-1"],
+      ["tool-input-delta", "call-2"],
+      ["text-delta", "t"],
+      ["tool-input-delta", "call-2"],
+    ],
+  );
+  assert.deepEqual(flushed[3], toolInput("call-2", "bc"));
+});
