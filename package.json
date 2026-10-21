@@ -56,18 +56,20 @@
       "pptxgenjs>image-size": "-",
       "js-yaml@4": "4.3.2",
       "js-yaml@5": "^5.4.1",
-      "hono": "4.13.7",
+      "hono": "4.13.13",
       "next": "16.3.8",
       "creem": "1.6.0",
       "proxy-addr": "2.0.8",
       "source-map-js": "1.2.2",
       "fast-copy@4": "4.1.0",
       "postcss-selector-parser@7": "7.1.6",
-      "@modelcontextprotocol/sdk": "1.31.0",
+      "@modelcontextprotocol/sdk": "1.32.1",
       "braces": "workspace:@sourceweft/security-braces@*",
       "mocha>serialize-javascript": "7.0.5",
       "mocha>diff": "8.0.3",
-      "handlebars": "4.7.10"
+      "handlebars": "4.7.10",
+      "follow-redirects": "^1.16.1",
+      "vite": "^8.2.4"
     },
     "peerDependencyRules": {
       "allowedVersions": {

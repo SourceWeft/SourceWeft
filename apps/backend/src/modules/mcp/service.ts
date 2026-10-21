@@ -103,7 +103,9 @@ export async function mcpEndpointRequiresAuth(
       method: "POST",
       // Don't follow redirects: the endpoint passed SSRF validation, but a 3xx
       // could bounce the probe to an internal/metadata address (blind SSRF). A
-      // redirect is simply "not a 401".
+      // same-origin redirect is simply "not a 401"; a cross-origin or unsafe
+      // one is rejected by the request scope (MCP_ENDPOINT_BLOCKED), as every
+      // later request to this endpoint would be.
       redirect: "manual",
       headers: {
         "content-type": "application/json",

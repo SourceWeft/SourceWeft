@@ -14,8 +14,8 @@ const backend = appRequire("backend");
 const web = appRequire("web");
 const docs = appRequire("docs");
 
-function verifyVersion(parent, name, version) {
-  let directory = path.dirname(parent.resolve(name));
+function verifyVersion(parent, name, version, entry = name) {
+  let directory = path.dirname(parent.resolve(entry));
   while (directory !== path.dirname(directory)) {
     const metadataPath = path.join(directory, "package.json");
     if (existsSync(metadataPath)) {
@@ -44,8 +44,19 @@ for (const app of [backend, web]) {
   verifyVersion(app, "@vitest/coverage-v8", "4.1.11");
   const vitest = createRequire(app.resolve("vitest/package.json"));
   verifyVersion(vitest, "@vitest/mocker", "4.1.11");
+  verifyVersion(vitest, "vite", "8.3.5");
 }
-verifyVersion(backend, "hono", "4.13.7");
+verifyVersion(backend, "hono", "4.13.13");
+verifyVersion(
+  backend,
+  "@modelcontextprotocol/sdk",
+  "1.32.1",
+  "@modelcontextprotocol/sdk/client/index.js",
+);
+// follow-redirects is reached only through axios (via @anycrawl/js-sdk).
+const anycrawl = createRequire(backend.resolve("@anycrawl/js-sdk"));
+const axios = createRequire(anycrawl.resolve("axios"));
+verifyVersion(axios, "follow-redirects", "1.16.1");
 
 // Resolve YAML through an actual affected consumer, not an extra test dependency.
 const eslint = createRequire(web.resolve("eslint"));

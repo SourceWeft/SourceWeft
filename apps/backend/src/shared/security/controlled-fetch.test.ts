@@ -161,6 +161,78 @@ test("same-origin redirects preserve POST on 307 and explicit manual mode", asyn
   await manual.body?.cancel();
 });
 
+test.each([
+  ["a metadata address", "http://169.254.169.254/metadata"],
+  ["another origin", "http://127.0.0.1:1/elsewhere"],
+])(
+  "manual mode still applies the redirect target policy to %s and poisons the scope",
+  async (_label, location) => {
+    const port = await serve((_req, res) => {
+      res.writeHead(302, { location });
+      res.end();
+    });
+    const origin = `http://127.0.0.1:${port}`;
+    const requests = scope({
+      enforceAddressChecks: true,
+      allowedInternalOrigins: [origin],
+    });
+    await assert.rejects(
+      requests.fetch(`${origin}/.well-known/oauth-protected-resource`, {
+        redirect: "manual",
+      }),
+      (error: unknown) => error instanceof EndpointPolicyError,
+    );
+    assert.throws(() => requests.throwIfDenied(), EndpointPolicyError);
+  },
+);
+
+test.each([true, false])(
+  "manual mode rejects a cross-origin redirect to an otherwise allowed target with address checks=%s",
+  async (enforceAddressChecks) => {
+    let reached = false;
+    const targetPort = await serve((_req, res) => {
+      reached = true;
+      res.end("other origin");
+    });
+    const target = `http://127.0.0.1:${targetPort}`;
+    const port = await serve((_req, res) => {
+      res.writeHead(302, { location: `${target}/metadata` });
+      res.end();
+    });
+    const origin = `http://127.0.0.1:${port}`;
+    const requests = scope({
+      enforceAddressChecks,
+      // The target passes the endpoint policy, so only the origin rule applies.
+      allowedInternalOrigins: [origin, target],
+    });
+    await assert.rejects(
+      requests.fetch(origin, { redirect: "manual" }),
+      (error: unknown) =>
+        error instanceof EndpointPolicyError && error.reason === "redirect",
+    );
+    assert.equal(reached, false);
+    assert.throws(() => requests.throwIfDenied(), EndpointPolicyError);
+    // A poisoned scope refuses further requests before touching the network.
+    await assert.rejects(requests.fetch(origin), EndpointPolicyError);
+  },
+);
+
+test("manual mode returns a redirect whose Location cannot be parsed", async () => {
+  const port = await serve((_req, res) => {
+    res.writeHead(302, { location: "http://[bad" });
+    res.end();
+  });
+  const origin = `http://127.0.0.1:${port}`;
+  const requests = scope({
+    enforceAddressChecks: true,
+    allowedInternalOrigins: [origin],
+  });
+  const response = await requests.fetch(origin, { redirect: "manual" });
+  assert.equal(response.status, 302);
+  await response.body?.cancel();
+  requests.throwIfDenied();
+});
+
 test("caller cancellation and closing the scope terminate active streams", async () => {
   const port = await serve((_req, res) => {
     res.writeHead(200);
