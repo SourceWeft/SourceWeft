@@ -222,3 +222,69 @@ describe("durableChatRunService.stopRunForJob", () => {
     expect(mocks.requestChatThreadRunCancel).not.toHaveBeenCalled();
   });
 });
+
+describe("durableChatRunService.stopRunAndReturn", () => {
+  const snapshotJson = {
+    thread: { id: "thread-1" },
+    userMessage: { id: "user-message-1", metadata: {} },
+    assistantMessage: { id: "assistant-message-1", metadata: {} },
+  };
+  const stopInput = {
+    workspaceId: "workspace-1",
+    threadId: "thread-1",
+    userId: "user-1",
+    idempotencyKeyWithStopSuffix: "sourceweft-web-run:key-1:stop",
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.requireContentWorkspace.mockResolvedValue({
+      id: "workspace-1",
+      organizationId: "team-1",
+    });
+  });
+
+  it("returns the turn's result with the cancelled run's state", async () => {
+    const running = createRun({ snapshotJson });
+    mocks.findChatThreadRunByIdempotencyKey.mockResolvedValue(running);
+    mocks.requestChatThreadRunCancel.mockResolvedValue(
+      createRun({ status: "cancel_requested", snapshotJson }),
+    );
+    mocks.forceCancelStoppedRun.mockResolvedValue(
+      createRun({ status: "cancelled", snapshotJson }),
+    );
+
+    const result = await durableChatRunService.stopRunAndReturn(stopInput);
+
+    expect(result).toMatchObject({
+      thread: { id: "thread-1" },
+      userMessage: { id: "user-message-1" },
+      assistantMessage: { id: "assistant-message-1" },
+      threadRun: {
+        id: "run-1",
+        idempotencyKey: "sourceweft-web-run:key-1",
+        status: "cancelled",
+        mode: "send",
+      },
+    });
+  });
+
+  it("reports how an already finished run ended, read after the wait", async () => {
+    const completed = createRun({ status: "completed", snapshotJson });
+    mocks.findChatThreadRunByIdempotencyKey.mockResolvedValue(completed);
+    mocks.findChatThreadRunById.mockResolvedValue(completed);
+
+    const result = await durableChatRunService.stopRunAndReturn(stopInput);
+
+    expect(mocks.requestChatThreadRunCancel).not.toHaveBeenCalled();
+    expect(mocks.findChatThreadRunById).toHaveBeenCalledWith({
+      runId: "run-1",
+      teamId: "team-1",
+      workspaceId: "workspace-1",
+    });
+    expect(result).toMatchObject({
+      assistantMessage: { id: "assistant-message-1" },
+      threadRun: { id: "run-1", status: "completed" },
+    });
+  });
+});

@@ -73,6 +73,7 @@ import {
   resolveAttachRunState,
   resolveOwnedRun,
   resolveViewableRun,
+  toStoppedThreadRun,
   wait,
   waitForRunResult,
 } from "./run-results";
@@ -507,9 +508,14 @@ export class DurableChatRunService {
       userId: input.userId,
       idempotencyKey,
     });
+    // Every stop result carries the run's own state (`threadRun`), so a caller
+    // can see whether the run was cancelled or had already finished.
     if (stopped.status === "cancelled") {
       try {
-        return await getRunResult(stopped);
+        return {
+          ...(await getRunResult(stopped)),
+          threadRun: toStoppedThreadRun(stopped),
+        };
       } catch (error) {
         if (error instanceof ContentError) {
           return buildStoppedRunFallback(stopped);
@@ -522,23 +528,35 @@ export class DurableChatRunService {
       timeoutMs: STOP_RESULT_WAIT_TIMEOUT_MS,
       requireTerminal: true,
       throwTerminalErrors: false,
-    }).catch((error) => {
-      if (error instanceof ContentError) {
-        return findChatThreadRunById({
+    }).then(
+      async (result) => {
+        // The wait only returns the turn's result; read the terminal row it
+        // observed for the run's final status.
+        const latest = await findChatThreadRunById({
           runId: stopped.id,
           teamId: stopped.teamId,
           workspaceId: stopped.workspaceId,
-        }).then(async (latest) => {
-          const stoppedRun = isTerminalRunStatus(
-            latest?.status ?? stopped.status,
-          )
-            ? (latest ?? stopped)
-            : await forceCancelStoppedRun(latest ?? stopped);
-          return buildStoppedRunFallback(stoppedRun);
         });
-      }
-      throw error;
-    });
+        return { ...result, threadRun: toStoppedThreadRun(latest ?? stopped) };
+      },
+      (error) => {
+        if (error instanceof ContentError) {
+          return findChatThreadRunById({
+            runId: stopped.id,
+            teamId: stopped.teamId,
+            workspaceId: stopped.workspaceId,
+          }).then(async (latest) => {
+            const stoppedRun = isTerminalRunStatus(
+              latest?.status ?? stopped.status,
+            )
+              ? (latest ?? stopped)
+              : await forceCancelStoppedRun(latest ?? stopped);
+            return buildStoppedRunFallback(stoppedRun);
+          });
+        }
+        throw error;
+      },
+    );
   }
 
   async getRunResult(input: {

@@ -65,10 +65,10 @@ export const SOURCEWEFT_WEB_RUN_IDEMPOTENCY_PREFIX = "sourceweft-web-run:";
  *    `{ idempotencyKey: runKey + SOURCEWEFT_WEB_RUN_STOP_SUFFIX, stream: false }`,
  *    where `runKey` is the run's own idempotency key. Only the member who
  *    started the run, with access to the workspace, may stop it; anything
- *    else is `404`. The response is the turn's persisted result
- *    (`thread`, `userMessage`, `assistantMessage`, `billing`, `retrieval`), or,
- *    when the stopped run has no result to return, `{ threadRun, billing,
- *    retrieval }` with the run's terminal status. The call waits a bounded
+ *    else is `404`. The response always carries `threadRun` (`id`,
+ *    `idempotencyKey`, `status`, `mode`) with the run's terminal status, plus
+ *    the turn's persisted result (`thread`, `userMessage`, `assistantMessage`)
+ *    when it has one, and `billing` and `retrieval`. The call waits a bounded
  *    time for the worker to settle the run.
  * 2. Jobs API (SDK `JobsClient.cancelJob`): `POST /v1/jobs/:id/cancel` on the
  *    run's `thread-chat-run` job delegates to the same durable stop, with the

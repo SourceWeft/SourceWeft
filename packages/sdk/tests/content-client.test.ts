@@ -182,11 +182,18 @@ test("stopThreadRun posts the run's stop key to the thread stream without stream
   const client = new ContentClient({
     post: async (path: string, body?: unknown) => {
       calls.push({ path, body });
-      return {};
+      return {
+        threadRun: {
+          id: "run-1",
+          idempotencyKey: "sourceweft-web-run:key-1",
+          status: "cancelled",
+          mode: "send",
+        },
+      };
     },
   } as never);
 
-  await client.stopThreadRun(
+  const result = await client.stopThreadRun(
     "workspace / one",
     "thread?two",
     "sourceweft-web-run:key-1",
@@ -201,4 +208,5 @@ test("stopThreadRun posts the run's stop key to the thread stream without stream
       },
     },
   ]);
+  assert.equal(result.threadRun.status, "cancelled");
 });
