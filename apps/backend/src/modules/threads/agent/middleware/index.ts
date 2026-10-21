@@ -80,6 +80,10 @@ export type SourceWeftAgentMiddlewareStackInput = {
   model: BaseLanguageModel;
   toolObservabilityContext?: SourceWeftToolObservabilityContext;
   traceContext?: TraceContext;
+  /** Durable run row id keying the step-budget wall clock (not the trace id). */
+  runId?: string | null;
+  /** Run start origin for the step-budget wall clock (epoch ms). */
+  turnStartedAtMs?: number | null;
 };
 
 export type SourceWeftSubagentMiddlewareStackInput = {
@@ -89,6 +93,10 @@ export type SourceWeftSubagentMiddlewareStackInput = {
   model: BaseLanguageModel;
   toolObservabilityContext?: SourceWeftToolObservabilityContext;
   traceContext?: TraceContext;
+  /** Durable run row id keying the step-budget wall clock (not the trace id). */
+  runId?: string | null;
+  /** Root run start origin; child scopes share the run's wall clock. */
+  turnStartedAtMs?: number | null;
 };
 
 /**
@@ -101,6 +109,8 @@ export function createSourceWeftSubagentMiddlewareStack(
 ): AgentMiddleware[] {
   const stepBudget = createSourceWeftStepBudgetMiddleware({
     userMessageId: input.toolObservabilityContext?.userMessageId,
+    runId: input.runId,
+    turnStartedAtMs: input.turnStartedAtMs,
   });
   return [
     // Must precede every toolCallLimitMiddleware so the count channels bind to a
@@ -170,6 +180,8 @@ export async function createSourceWeftAgentMiddlewareStack(
 ): Promise<AgentMiddleware[]> {
   const stepBudget = createSourceWeftStepBudgetMiddleware({
     userMessageId: input.toolObservabilityContext?.userMessageId,
+    runId: input.runId,
+    turnStartedAtMs: input.turnStartedAtMs,
   });
   const contextCompressionMiddleware =
     await createSourceWeftContextCompressionMiddleware({

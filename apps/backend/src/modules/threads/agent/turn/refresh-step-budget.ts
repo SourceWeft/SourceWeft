@@ -72,6 +72,22 @@ function assertNoUnreturnedRootDelegate(state: unknown): void {
     unavailable();
 }
 
+type V2Scope = Extract<Scope, { policyVersion: 2 }>;
+/**
+ * Fields that describe one execution of the turn rather than consumed budget.
+ * Replay preparation belongs to the superseded AI response, and the run wall
+ * clock belongs to the run that was interrupted. Neither survives a refresh:
+ * the refreshed turn starts a fresh clock from its own run lease.
+ */
+function stripRefreshTransients(entry: V2Scope) {
+  const {
+    decisionPreparation: _preparation,
+    wallClock: _clock,
+    ...safe
+  } = entry;
+  return safe;
+}
+
 function mergeScope(previous: Scope | undefined, next: Scope): Scope {
   if (!previous) return next;
   const v2 = isV2(previous);
@@ -107,8 +123,9 @@ function mergeScope(previous: Scope | undefined, next: Scope): Scope {
   if (!isV2(selected)) return selected;
   // The original reserved decision was already consumed. A message rollback
   // cannot replay its old AI response against unrelated earlier messages.
-  // Conservatively keep the consumed slot and discard only replay preparation.
-  const { decisionPreparation: _preparation, ...safe } = selected;
+  // Conservatively keep the consumed slot and discard only replay preparation
+  // and the interrupted run's wall clock.
+  const safe = stripRefreshTransients(selected);
   if (isV2(previous) && isV2(next))
     return {
       ...safe,
@@ -259,13 +276,9 @@ export async function carryAgentStepBudgetIntoRefresh(input: {
     return input.destination;
   }
   if (!scopes.main && Object.keys(scopes).length) unavailable();
-  // Normalize even a single candidate (mergeScope strips preparation on merge).
-  for (const [scope, entry] of Object.entries(scopes)) {
-    if (isV2(entry)) {
-      const { decisionPreparation: _preparation, ...safe } = entry;
-      scopes[scope] = safe;
-    }
-  }
+  // Normalize even a single candidate (mergeScope strips transients on merge).
+  for (const [scope, entry] of Object.entries(scopes))
+    if (isV2(entry)) scopes[scope] = stripRefreshTransients(entry);
   input.destination.signal?.throwIfAborted();
   const next = await input.agent.updateState(input.destination, {
     sourceweftRunStepBudget: { userMessageId: input.userMessageId, scopes },

@@ -43,6 +43,19 @@ const legacyScopeSchema = z
   })
   .strict()
   .refine((value) => value.steps <= value.limit);
+/**
+ * Run-level wall clock. Keyed by the durable run row (`chat_thread_runs.id`):
+ * a HITL resume, refresh or new message each create a new run, so their
+ * clock restarts instead of inheriting the time spent waiting.
+ */
+const wallClockSchema = z
+  .object({
+    runId: z.string().min(1),
+    startedAtMs: z.number().int().nonnegative().safe(),
+    closingStartedAtMs: z.number().int().nonnegative().safe().optional(),
+    trigger: z.enum(["steps", "wall_clock"]).optional(),
+  })
+  .strict();
 const v2ScopeSchema = z
   .object({
     policyVersion: z.literal(2),
@@ -64,6 +77,7 @@ const v2ScopeSchema = z
     closingToolIds: z.array(z.string().min(1)).optional(),
     summary: z.enum(["unused", "reserved", "completed"]),
     summaryText: z.string().max(16_000).optional(),
+    wallClock: wallClockSchema.optional(),
   })
   .strict()
   .refine(
@@ -96,6 +110,8 @@ const budgetSchema = z
   .strict();
 type ScopeBudget = z.infer<typeof scopeSchema>;
 type V2ScopeBudget = z.infer<typeof v2ScopeSchema>;
+export type AgentStepV2ScopeBudget = V2ScopeBudget;
+type AgentStepWallClock = z.infer<typeof wallClockSchema>;
 function isV2Scope(entry: ScopeBudget): entry is V2ScopeBudget {
   return "policyVersion" in entry && entry.policyVersion === 2;
 }
@@ -631,6 +647,22 @@ export function createSourceWeftStepBudgetMiddleware(
     userMessageId?: string | null;
     maxSteps?: number;
     closingSteps?: number;
+    /**
+     * Durable run row identity (`prepared.threadRunId`), not the per-prepare
+     * trace id. The wall clock is keyed by it: a scope entry whose clock
+     * belongs to an earlier run (HITL resume, refresh, new message) restarts
+     * timing, so waiting time is never charged. Without it no clock is kept.
+     */
+    runId?: string | null;
+    wallClock?: { workingMs: number; closingMs: number };
+    /** Test seam; defaults to `Date.now`. */
+    now?: () => number;
+    /**
+     * Clock origin for scopes created by this factory (the root run's start).
+     * Child agent scopes receive the same origin so a late-spawned child shares
+     * the run's remaining time instead of a fresh budget.
+     */
+    turnStartedAtMs?: number | null;
   } = {},
 ) {
   const userMessageId = input.userMessageId?.trim()
@@ -647,6 +679,32 @@ export function createSourceWeftStepBudgetMiddleware(
     ].every((v) => Number.isSafeInteger(v) && v > 0)
   )
     throw new Error("Invalid agent step budget limits");
+  const runId = input.runId?.trim() ? input.runId : null;
+  const workingWallClockMs =
+    input.wallClock?.workingMs ?? config.chat.agent.workingWallClockMs;
+  const closingWallClockMs =
+    input.wallClock?.closingMs ?? config.chat.agent.closingWallClockMs;
+  if (
+    ![workingWallClockMs, closingWallClockMs].every(
+      (v) => Number.isSafeInteger(v) && v > 0,
+    )
+  )
+    throw new Error("Invalid agent wall-clock limits");
+  const now = input.now ?? Date.now;
+  const turnStartedAtMs =
+    input.turnStartedAtMs == null ? null : input.turnStartedAtMs;
+  if (
+    turnStartedAtMs !== null &&
+    !(Number.isSafeInteger(turnStartedAtMs) && turnStartedAtMs >= 0)
+  )
+    throw new Error("Invalid agent run start time");
+  /** The scope's clock for this run; another run's clock restarts timing. */
+  const clockFor = (entry: V2ScopeBudget): AgentStepWallClock | undefined =>
+    !runId
+      ? undefined
+      : entry.wallClock?.runId === runId
+        ? entry.wallClock
+        : { runId, startedAtMs: turnStartedAtMs ?? now() };
   const advertisedTools = new Map<string, string[]>();
   const dispatched = new Map<string, Promise<unknown>>();
   const reservedHere = new Set<string>();
@@ -754,7 +812,14 @@ export function createSourceWeftStepBudgetMiddleware(
             "AGENT_STEP_STATE_INVALID",
             "Completed agent progress summary changed.",
           );
-        scopes[scope] = next;
+        // The wall clock follows the run: this factory's clock wins; a clock
+        // from another run is only carried, never adopted as this run's origin.
+        const wallClock =
+          next.wallClock?.runId === runId
+            ? next.wallClock
+            : (previous.wallClock ?? next.wallClock);
+        const { wallClock: _next, ...merged } = next;
+        scopes[scope] = wallClock ? { ...merged, wallClock } : merged;
       } else {
         scopes[scope] = {
           ...previous,
@@ -843,16 +908,33 @@ export function createSourceWeftStepBudgetMiddleware(
           emit(entry);
           return;
         }
+        // The run wall clock only ever spends steps faster: an expired working
+        // clock makes this call the last normal decision (the step-limit
+        // preparation in finalization.wrapModelCall keys on
+        // normalSteps === normalLimit), and an expired closing clock exhausts
+        // the closing allowance so the finalizing reservation below applies.
+        let current: ScopeBudget = entry;
         if (isV2Scope(entry)) {
+          const clock = clockFor(entry);
           if (
             entry.phase === "working" &&
             entry.normalSteps < entry.normalLimit
           ) {
-            const next = {
-              ...entry,
-              steps: entry.steps + 1,
-              normalSteps: entry.normalSteps + 1,
-            };
+            const next =
+              clock && now() - clock.startedAtMs >= workingWallClockMs
+                ? {
+                    ...entry,
+                    steps:
+                      entry.steps + (entry.normalLimit - entry.normalSteps),
+                    normalSteps: entry.normalLimit,
+                    wallClock: { ...clock, trigger: "wall_clock" as const },
+                  }
+                : {
+                    ...entry,
+                    steps: entry.steps + 1,
+                    normalSteps: entry.normalSteps + 1,
+                    ...(clock ? { wallClock: clock } : {}),
+                  };
             emit(next);
             return patch(scope, next);
           }
@@ -863,24 +945,45 @@ export function createSourceWeftStepBudgetMiddleware(
                 "AGENT_STEP_STATE_INVALID",
                 "Agent closing tool snapshot is unavailable; continue with a new user message.",
               );
-            const next = {
-              ...entry,
-              phase: "closing" as const,
-              steps: entry.steps + 1,
-              closingSteps: entry.closingSteps + 1,
-              closingToolIds: entry.closingToolIds ?? entry.availableToolIds!,
+            const closingToolIds =
+              entry.closingToolIds ?? entry.availableToolIds!;
+            const closingClock = clock && {
+              ...clock,
+              closingStartedAtMs: clock.closingStartedAtMs ?? now(),
             };
-            emit(next);
-            return patch(scope, next);
+            if (
+              closingClock &&
+              now() - closingClock.closingStartedAtMs >= closingWallClockMs
+            ) {
+              current = {
+                ...entry,
+                phase: "closing" as const,
+                steps: entry.limit,
+                closingSteps: entry.closingLimit,
+                closingToolIds,
+                wallClock: { ...closingClock, trigger: "wall_clock" as const },
+              };
+            } else {
+              const next = {
+                ...entry,
+                phase: "closing" as const,
+                steps: entry.steps + 1,
+                closingSteps: entry.closingSteps + 1,
+                closingToolIds,
+                ...(closingClock ? { wallClock: closingClock } : {}),
+              };
+              emit(next);
+              return patch(scope, next);
+            }
           }
         } else if (entry.steps < entry.limit)
           return patch(scope, { ...entry, steps: entry.steps + 1 });
-        if (entry.summary === "completed") return { jumpTo: "end" as const };
-        if (entry.summary === "reserved") throw failedSummary(entry, scope);
+        if (current.summary === "completed") return { jumpTo: "end" as const };
+        if (current.summary === "reserved") throw failedSummary(current, scope);
         reservedHere.add(scope);
         const next = {
-          ...entry,
-          ...(isV2Scope(entry) ? { phase: "finalizing" as const } : {}),
+          ...current,
+          ...(isV2Scope(current) ? { phase: "finalizing" as const } : {}),
           summary: "reserved" as const,
         };
         emit(next);

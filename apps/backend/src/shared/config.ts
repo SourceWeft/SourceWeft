@@ -48,6 +48,20 @@ function parseAgentStepCount(name: string, fallback: number) {
   return parsed;
 }
 
+// Run-level wall clock (M3): a durable run enters bounded closing after
+// `workingWallClockMs` and the tool-free finalization after a further
+// `closingWallClockMs`, measured from the run's start. Deployment literals,
+// deliberately not environment variables; the clock restarts per durable run.
+const AGENT_WORKING_WALL_CLOCK_MS = 45 * 60_000;
+const AGENT_CLOSING_WALL_CLOCK_MS = 10 * 60_000;
+
+function agentWallClockMs(name: string, value: number) {
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(`${name} must be a positive safe integer.`);
+  }
+  return value;
+}
+
 function parseAgentStepBudget() {
   const maxSteps = parseAgentMaxSteps();
   const closingSteps = parseAgentStepCount(
@@ -59,7 +73,18 @@ function parseAgentStepBudget() {
       "SOURCEWEFT_AGENT_MAX_STEPS + SOURCEWEFT_AGENT_CLOSING_STEPS must be a safe integer.",
     );
   }
-  return { maxSteps, closingSteps };
+  return {
+    maxSteps,
+    closingSteps,
+    workingWallClockMs: agentWallClockMs(
+      "chat.agent.workingWallClockMs",
+      AGENT_WORKING_WALL_CLOCK_MS,
+    ),
+    closingWallClockMs: agentWallClockMs(
+      "chat.agent.closingWallClockMs",
+      AGENT_CLOSING_WALL_CLOCK_MS,
+    ),
+  };
 }
 
 function parsePositiveNumber(value: string | undefined, fallback: number) {

@@ -177,6 +177,9 @@ test("agent runs default to 400 model-decision steps, without legacy tool-count 
   const { config } = await import("./config");
   assert.equal(config.chat.agent.maxSteps, 400);
   assert.equal(config.chat.agent.closingSteps, 40);
+  // Run wall clock: 45 min working, 10 min closing; literals, no env variable.
+  assert.equal(config.chat.agent.workingWallClockMs, 45 * 60_000);
+  assert.equal(config.chat.agent.closingWallClockMs, 10 * 60_000);
   assert.equal("toolCallRunLimit" in config.chat.agent, false);
   assert.equal("toolCallThreadLimit" in config.chat.agent, false);
 });
