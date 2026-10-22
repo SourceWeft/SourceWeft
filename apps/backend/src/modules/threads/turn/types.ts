@@ -209,6 +209,13 @@ export type TraceContinuationMetadata = {
   toolSequenceById: Record<string, number>;
   traceParts?: TracePart[];
   snapshotToolCalls?: ReadonlyArray<{ id: string; sequence?: number | null }>;
+  /**
+   * The continued message's citation registry. The resume keeps these ids and
+   * numbers new evidence after them.
+   */
+  citations?: AgentCitation[];
+  /** Registry ids the continued message's text already cites. */
+  citedCitationKeys?: string[];
 };
 
 export type PreparedThreadTurn = {

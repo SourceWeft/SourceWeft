@@ -78,6 +78,32 @@ export class AgentCitationRegistry {
   private byChunkId = new Map<string, AgentCitation>();
   private byExternalUri = new Map<string, AgentCitation>();
   private order: string[] = [];
+  private nextCitationNumber = 1;
+
+  private nextCitationKey() {
+    return `c${this.nextCitationNumber++}`;
+  }
+
+  /**
+   * Seeds the registry a resumed turn continues: the earlier turn's ids stay
+   * as they are, and evidence found after the resume is numbered after them.
+   */
+  restore(citations: readonly AgentCitation[]) {
+    for (const citation of citations) {
+      if (this.byChunkId.has(citation.chunkId)) continue;
+      this.addEvidence(citation.chunkId, citation);
+      if (citation.externalUri) {
+        this.byExternalUri.set(citation.externalUri, citation);
+      }
+      const number = /^c(\d+)$/.exec(citation.citation)?.[1];
+      if (number) {
+        this.nextCitationNumber = Math.max(
+          this.nextCitationNumber,
+          Number(number) + 1,
+        );
+      }
+    }
+  }
 
   addFile(input: {
     file: FileRef;
@@ -100,7 +126,7 @@ export class AgentCitationRegistry {
     const existing = this.byChunkId.get(key);
     if (existing) return existing;
     return this.addEvidence(key, {
-      citation: `c${this.order.length + 1}`,
+      citation: this.nextCitationKey(),
       sourceId: null,
       documentId: null,
       chunkId: key,
@@ -142,7 +168,7 @@ export class AgentCitationRegistry {
       return existing;
     }
 
-    const citation = `c${this.order.length + 1}`;
+    const citation = this.nextCitationKey();
     const excerpt = cleanCitationExcerpt(input.content).slice(0, 320);
     const evidence: AgentCitation = {
       citation,
@@ -198,7 +224,7 @@ export class AgentCitationRegistry {
       return existing;
     }
 
-    const citation = `c${this.order.length + 1}`;
+    const citation = this.nextCitationKey();
     const key = `external:${input.externalUri}`;
     const evidence: AgentCitation = {
       citation,

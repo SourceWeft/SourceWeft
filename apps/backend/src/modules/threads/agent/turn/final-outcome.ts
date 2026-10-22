@@ -143,7 +143,19 @@ export async function* buildFinalOutcome(input: {
     citations: finalCitations,
   });
   assistantText = citationNormalization.text;
-  const usedCitations = citationNormalization.citations;
+  // A resumed turn's message keeps the text it showed before the pause, so the
+  // ids that text cites stay used alongside the ones this turn adds.
+  const continuedCitedKeys = new Set(
+    input.prepared.traceContinuation?.citedCitationKeys,
+  );
+  const usedCitations = [
+    ...finalCitations.filter((citation) =>
+      continuedCitedKeys.has(citation.citation),
+    ),
+    ...citationNormalization.citations.filter(
+      (citation) => !continuedCitedKeys.has(citation.citation),
+    ),
+  ];
 
   yield {
     type: "thinking-step",

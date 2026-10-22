@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test, vi } from "vitest";
+import { continuedCitationsEvent } from "./citation-tracker";
 import { createTurnRuntime } from "./turn-runtime";
 
 test("turn runtime measures reasoning duration per segment", () => {
@@ -185,4 +186,96 @@ test("discardModelOutputSince never reports a negative drop when the attempt its
   assert.equal(discarded.dropTextChars, 0);
   assert.equal(discarded.keepTextChars, 6);
   assert.equal(runtime.assistantContent, "before");
+});
+
+test("a resumed turn continues its message's citation registry", () => {
+  const runtime = createTurnRuntime({
+    prepared: {
+      runTraceId: "trace-resume-citations",
+      workspace: { id: "workspace" },
+      thread: { id: "thread" },
+      traceContinuation: {
+        maxSequence: 0,
+        toolSequenceById: {},
+        citations: [
+          {
+            citation: "c1",
+            sourceId: "source-1",
+            sourceTitle: "Report",
+            documentId: "document-1",
+            chunkId: "chunk-1",
+            chunkNo: 1,
+            score: 1,
+            excerpt: "Revenue",
+            quoteText: "Revenue",
+            origin: "read_file",
+          },
+          {
+            citation: "c2",
+            sourceId: null,
+            sourceTitle: "Exports",
+            documentId: null,
+            chunkId: "external:https://example.com/exports",
+            score: 1,
+            excerpt: "Exports",
+            quoteText: "Exports",
+            origin: "web_fetch",
+            externalUri: "https://example.com/exports",
+          },
+        ],
+        citedCitationKeys: ["c2"],
+      },
+    } as never,
+  });
+
+  // The turn opens with the continued registry and the ids its text cites,
+  // once: the tracker then reports only growth.
+  const prepared = {
+    traceContinuation: { citedCitationKeys: ["c2"] },
+  } as never;
+  const event = continuedCitationsEvent({
+    prepared,
+    getNewCitationSnapshot: runtime.getNewCitationSnapshot,
+  });
+  assert.deepEqual(
+    event?.availableCitations?.map((citation) => citation.citation),
+    ["c1", "c2"],
+  );
+  assert.deepEqual(
+    event?.citations.map((citation) => citation.citation),
+    ["c2"],
+  );
+  assert.equal(
+    continuedCitationsEvent({
+      prepared,
+      getNewCitationSnapshot: runtime.getNewCitationSnapshot,
+    }),
+    null,
+  );
+
+  // Evidence seen before the pause keeps its id; new evidence is numbered after.
+  const again = runtime.citationRegistry.addChunk({
+    origin: "read_file",
+    sourceId: "source-1",
+    documentId: "document-1",
+    chunkId: "chunk-1",
+    chunkNo: 1,
+    content: "Revenue",
+  });
+  assert.equal(again.citation, "c1");
+  const fetched = runtime.citationRegistry.addExternal({
+    origin: "web_fetch",
+    externalUri: "https://example.com/exports",
+    content: "Exports",
+  });
+  assert.equal(fetched.citation, "c2");
+  const added = runtime.citationRegistry.addChunk({
+    origin: "read_file",
+    sourceId: "source-3",
+    documentId: "document-3",
+    chunkId: "chunk-3",
+    chunkNo: 3,
+    content: "Margins",
+  });
+  assert.equal(added.citation, "c3");
 });

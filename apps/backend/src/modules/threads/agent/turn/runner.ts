@@ -83,6 +83,7 @@ import {
   type ToolCollection,
   type ThreadAgentAssembly,
 } from "./turn-assembly";
+import { continuedCitationsEvent } from "./citation-tracker";
 import { createTurnRuntime } from "./turn-runtime";
 
 const MAX_AUTO_APPROVED_SANDBOX_HITL_RESUMES = 8;
@@ -114,6 +115,13 @@ export async function* invokeDeepAgentTurn(input: {
   abortSignal?: AbortSignal;
 }): AsyncGenerator<DeepAgentTurnEvent> {
   const runtime = createTurnRuntime({ prepared: input.prepared });
+  const continuedCitations = continuedCitationsEvent({
+    prepared: input.prepared,
+    getNewCitationSnapshot: runtime.getNewCitationSnapshot,
+  });
+  if (continuedCitations) {
+    yield continuedCitations;
+  }
   const { toolCallsById, toolCallOrder, resolveToolCallSequence } = runtime;
 
   // Maps each streamed tool event's subgraph namespace to its tool call id, so a

@@ -6,6 +6,7 @@ import {
 } from "../source-selection";
 import { extractImagePartsFromContentJson } from "./message-image-parts";
 import { readContinuationRenderBlocks } from "./render-blocks";
+import { normalizeAssistantCitations } from "../agent/turn/citations";
 import { randomUUID } from "node:crypto";
 import { beginReasoningRun } from "./reasoning-state";
 import type {
@@ -35,7 +36,11 @@ import {
   findThreadRecord,
   updateThreadModelSettingsRecord,
 } from "../thread/repository";
-import { applyPersonaToolAllowlist, resolvePersona } from "../agent";
+import {
+  applyPersonaToolAllowlist,
+  resolvePersona,
+  type AgentCitation,
+} from "../agent";
 import {
   createMessageRecord,
   findMessageRecord,
@@ -336,17 +341,43 @@ function resolveTraceContinuationMetadata(
   }
 
   const renderBlocks = readContinuationRenderBlocks(metadata.renderBlocks);
+  const citations = readContinuationCitations(metadata.retrieval);
+  const citedCitationKeys = normalizeAssistantCitations({
+    assistantText: assistantMessage.content,
+    citations,
+  }).citations.map((citation) => citation.citation);
   return maxSequence > 0 ||
     Object.keys(toolSequenceById).length > 0 ||
     traceParts.length > 0 ||
-    renderBlocks.length > 0
+    renderBlocks.length > 0 ||
+    citations.length > 0
     ? {
         maxSequence,
         toolSequenceById,
         traceParts,
         ...(renderBlocks.length > 0 ? { renderBlocks } : {}),
+        ...(citations.length > 0 ? { citations, citedCitationKeys } : {}),
       }
     : null;
+}
+
+/**
+ * The registry a paused turn left on its message. A paused turn finalizes
+ * with no used citations, so the available list is the registry.
+ */
+function readContinuationCitations(value: unknown): AgentCitation[] {
+  const retrieval = toObjectRecord(value);
+  const list = Array.isArray(retrieval?.availableCitations)
+    ? retrieval.availableCitations
+    : Array.isArray(retrieval?.citations)
+      ? retrieval.citations
+      : [];
+  return list.filter((item): item is AgentCitation => {
+    const record = toObjectRecord(item);
+    return (
+      typeof record?.citation === "string" && typeof record.chunkId === "string"
+    );
+  });
 }
 
 function chatProfileSupportsImageInput(input: {
