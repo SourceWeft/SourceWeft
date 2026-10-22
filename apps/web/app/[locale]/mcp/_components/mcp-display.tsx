@@ -25,6 +25,11 @@ import type {
 
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { mcpCardText } from "../../../../lib/mcp-ai-overview";
+import {
+  mcpRuntimeKind,
+  runtimeLabel,
+  transportLabel,
+} from "../../../../lib/mcp-labels";
 import { slugify } from "../../../../lib/slug";
 
 import { McpIcon } from "./mcp-client";
@@ -57,8 +62,8 @@ export function mcpCategoryLabel(
   );
 }
 
-// Kept importable from here; it lives in a client-safe module.
-export { mcpPath };
+// Kept importable from here; they live in client-safe modules.
+export { mcpPath, runtimeLabel, transportLabel };
 
 export function slugifyAnchor(value: string) {
   return slugify(value);
@@ -72,36 +77,6 @@ export function verificationLabel(item: {
     return "Official";
   }
   return item.verified ? "Verified" : "Unverified";
-}
-
-export function runtimeLabel(item: {
-  desktopOnly?: boolean;
-  runtime?: McpRuntime;
-  webExecutable?: boolean;
-}) {
-  if (item.runtime === "hybrid") {
-    return "Web + Desktop";
-  }
-  if (item.runtime === "desktop" || item.desktopOnly || !item.webExecutable) {
-    return "Desktop only";
-  }
-  return "Web executable";
-}
-
-export function transportLabel(transport?: McpTransport | null) {
-  if (transport === "streamable_http") {
-    return "Streamable HTTP";
-  }
-  if (transport === "http_sse_compat") {
-    return "HTTP/SSE";
-  }
-  if (transport === "sse") {
-    return "SSE";
-  }
-  if (transport === "stdio") {
-    return "STDIO";
-  }
-  return "MCP";
 }
 
 export function riskLabel(risk: McpRiskLevel) {
@@ -177,9 +152,9 @@ export async function McpRuntimeBadge({
   };
 }) {
   const t = await getTranslations("mcp.badges.runtime");
+  const key = mcpRuntimeKind(item);
   const desktop =
     item.runtime === "desktop" || item.desktopOnly || !item.webExecutable;
-  const key = item.runtime === "hybrid" ? "hybrid" : desktop ? "desktop" : "web";
   return (
     <Badge>
       {desktop ? <Laptop className="size-3.5" /> : <Globe2 className="size-3.5" />}
