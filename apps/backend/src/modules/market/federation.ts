@@ -1,10 +1,19 @@
+import { createHash } from "node:crypto";
 import {
   marketMcpManifestSchema,
+  type MarketMcpAuthRequirement,
   type MarketMcpManifest,
   type McpTransport,
 } from "@sourceweft/market-contracts";
+import { config } from "../../shared/config";
 import { logger } from "../../shared/logger";
-import { upsertMarketMcp } from "./ingest/repository";
+import {
+  probeMcpEndpointAuth,
+  type McpEndpointAuthProbe,
+} from "../../shared/mcp-auth-probe";
+import { createControlledFetch } from "../../shared/security/controlled-fetch";
+import { mcpServerVersionId } from "./ingest/plan";
+import { findStoredAuthProbes, upsertMarketMcp } from "./ingest/repository";
 import { classifyByText } from "./parser/categories";
 import { registryServerProvenance } from "./registry-server";
 
@@ -30,7 +39,7 @@ export const DEFAULT_REGISTRY_SOURCES: RegistrySource[] = [
   },
 ];
 
-type RegistryRemote = { type?: string; url?: string };
+type RegistryRemote = { type?: string; url?: string; headers?: unknown[] };
 type RegistryServer = {
   name?: string;
   title?: string;
@@ -133,6 +142,93 @@ export function registryRepositoryProvenance(
   return Object.keys(kept).length > 0 ? kept : undefined;
 }
 
+const HEADER_NAME_RE = /^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,128}$/;
+
+/** The remote the manifest's endpoint comes from. */
+function primaryRemote(server: RegistryServer) {
+  return server.remotes?.[0];
+}
+
+/**
+ * How a federated server is authenticated, from the headers its remote
+ * declares and what its endpoint answered an unauthenticated `initialize`
+ * (`probe`; undefined when it could not be probed):
+ * - an OAuth challenge → "oauth", required; a declared credential header
+ *   (`Authorization`, else the first secret one) stays as `headerName`, so
+ *   the listing can say "OAuth or API key";
+ * - a 401 without one → the declared credential header, required, or
+ *   "oauth" when none is declared (the MCP spec's meaning of a bare 401);
+ * - otherwise → the declared headers, required only when one is declared
+ *   required; none when nothing is.
+ * A header that is neither required nor answered by a 401 is optional, which
+ * the catalog lists as not required.
+ */
+export function registryRemoteAuth(
+  remote: RegistryRemote | undefined,
+  probe: McpEndpointAuthProbe | undefined,
+): MarketMcpAuthRequirement {
+  const headers = (remote?.headers ?? []).flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const header = entry as {
+      name?: unknown;
+      isRequired?: unknown;
+      isSecret?: unknown;
+    };
+    const name = typeof header.name === "string" ? header.name.trim() : "";
+    return HEADER_NAME_RE.test(name)
+      ? [
+          {
+            name,
+            required: header.isRequired === true,
+            secret: header.isSecret === true,
+          },
+        ]
+      : [];
+  });
+  // Header names are case-insensitive; the first spelling declared wins.
+  const seen = new Set<string>();
+  const names: string[] = [];
+  for (const { name } of headers) {
+    if (seen.has(name.toLowerCase())) continue;
+    seen.add(name.toLowerCase());
+    names.push(name);
+  }
+  const credentialHeader =
+    names.find((name) => /^authorization$/i.test(name)) ??
+    headers.find((header) => header.secret)?.name;
+
+  if (probe === "oauth" || (probe === "credential" && names.length === 0)) {
+    return {
+      type: "oauth",
+      required: true,
+      headerName: credentialHeader,
+      allowedHeaderNames: names,
+    };
+  }
+  const required =
+    probe === "credential" || headers.some((header) => header.required);
+  if (!required || names.length === 0) {
+    return { type: "none", required: false, allowedHeaderNames: [] };
+  }
+  if (credentialHeader && /^authorization$/i.test(credentialHeader)) {
+    return {
+      type: "bearer",
+      required: true,
+      headerName: credentialHeader,
+      displayName: "Authorization token",
+      allowedHeaderNames: names,
+    };
+  }
+  const single = names.length === 1 ? names[0] : undefined;
+  return {
+    type: single ? "api_key_header" : "custom_headers",
+    required: true,
+    headerName: single,
+    displayName: single ?? "Custom headers",
+    allowedHeaderNames: names,
+  };
+}
+
 /**
  * Map an upstream registry entry to our market manifest. Returns null for
  * entries we can't represent (missing name/version). Registry entries are
@@ -141,7 +237,9 @@ export function registryRepositoryProvenance(
  */
 export function mapRegistryServerToManifest(
   entry: RegistryEntry,
-  options: { verified: boolean } = { verified: false },
+  options: { verified: boolean; authProbe?: McpEndpointAuthProbe } = {
+    verified: false,
+  },
 ): MarketMcpManifest | null {
   const server: RegistryServer = entry.server ?? entry;
   const identifier = server.name?.trim();
@@ -150,7 +248,7 @@ export function mapRegistryServerToManifest(
     return null;
   }
 
-  const remote = server.remotes?.[0];
+  const remote = primaryRemote(server);
   const hasRemote = Boolean(remote?.url);
   const transport: McpTransport = hasRemote
     ? transportFromRemote(remote)
@@ -186,7 +284,10 @@ export function mapRegistryServerToManifest(
     webExecutable: hasRemote,
     official: false,
     verified: options.verified,
-    auth: { type: "none" as const, required: false, allowedHeaderNames: [] },
+    auth: registryRemoteAuth(
+      hasRemote ? remote : undefined,
+      hasRemote ? options.authProbe : undefined,
+    ),
     categories,
     tools: [],
     sourceUrl: server.repository?.url ?? undefined,
@@ -239,6 +340,126 @@ async function fetchRegistryPageWithRetry(
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
+const AUTH_PROBE_RESULTS: readonly McpEndpointAuthProbe[] = [
+  "open",
+  "credential",
+  "oauth",
+];
+const AUTH_PROBE_CONCURRENCY = 8;
+
+/**
+ * The probe as kept in the version's provenance. The endpoint is kept by hash
+ * only: a registry remote URL can carry a credential in its query, which
+ * provenance never stores.
+ */
+export function authProbeRecord(
+  endpointUrl: string,
+  result: McpEndpointAuthProbe,
+) {
+  return {
+    endpointSha256: createHash("sha256").update(endpointUrl).digest("hex"),
+    result,
+  };
+}
+
+/** The version's stored probe, when it was of this same endpoint. */
+function storedAuthProbe(
+  value: unknown,
+  endpointUrl: string,
+): McpEndpointAuthProbe | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const stored = value as { endpointSha256?: unknown; result?: unknown };
+  return AUTH_PROBE_RESULTS.includes(stored.result as McpEndpointAuthProbe) &&
+    stored.endpointSha256 ===
+      authProbeRecord(endpointUrl, stored.result as McpEndpointAuthProbe)
+        .endpointSha256
+    ? (stored.result as McpEndpointAuthProbe)
+    : undefined;
+}
+
+async function probeRegistryEndpoint(
+  endpointUrl: string,
+): Promise<McpEndpointAuthProbe> {
+  // Registry endpoints are third-party input: the same endpoint policy as an
+  // install's requests, checked on every connection.
+  const requests = createControlledFetch({
+    enforceAddressChecks: config.endpointAddressChecksEnabled,
+    allowedInternalOrigins: config.mcpAllowedInternalOrigins ?? [],
+  });
+  try {
+    return await probeMcpEndpointAuth(endpointUrl, requests.fetch);
+  } catch (error) {
+    requests.throwIfDenied();
+    throw error;
+  } finally {
+    await requests.close();
+  }
+}
+
+/**
+ * The endpoint auth probe of each entry with a remote: the one stored for
+ * that version when it probed the same endpoint, else a fresh one. A version
+ * is probed once; a probe that fails is left out (the entry is mapped from
+ * its declared headers alone) and retried on the next sync.
+ */
+async function registryAuthProbes(entries: RegistryEntry[]) {
+  const targets = entries.flatMap((entry) => {
+    const server: RegistryServer = entry.server ?? entry;
+    const identifier = server.name?.trim();
+    const version = server.version?.trim();
+    const endpointUrl = primaryRemote(server)?.url;
+    return identifier && version && endpointUrl
+      ? [
+          {
+            entry,
+            identifier,
+            endpointUrl,
+            versionId: mcpServerVersionId(identifier, version),
+          },
+        ]
+      : [];
+  });
+  const stored = await findStoredAuthProbes(
+    targets.map((target) => target.versionId),
+  );
+  const probes = new Map<RegistryEntry, McpEndpointAuthProbe>();
+  const pending: typeof targets = [];
+  for (const target of targets) {
+    const reused = storedAuthProbe(
+      stored.get(target.versionId),
+      target.endpointUrl,
+    );
+    if (reused) probes.set(target.entry, reused);
+    else pending.push(target);
+  }
+  let failed = 0;
+  let next = 0;
+  const worker = async () => {
+    while (next < pending.length) {
+      const target = pending[next++]!;
+      try {
+        probes.set(
+          target.entry,
+          await probeRegistryEndpoint(target.endpointUrl),
+        );
+      } catch (error) {
+        failed += 1;
+        logger.warn("Registry federation auth probe failed", {
+          identifier: target.identifier,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  };
+  await Promise.all(
+    Array.from(
+      { length: Math.min(AUTH_PROBE_CONCURRENCY, pending.length) },
+      worker,
+    ),
+  );
+  return { probes, probed: pending.length - failed, failed };
+}
+
 /**
  * Pull every server from an upstream registry and upsert it into the catalog as
  * origin=upstream. Returns counts for observability. `maxServers` bounds a run.
@@ -255,6 +476,8 @@ export async function ingestFromRegistry(input: {
   let cursor: string | undefined;
   let ingested = 0;
   let skipped = 0;
+  let authProbed = 0;
+  let authProbeFailed = 0;
   let partial = false;
   let error: string | undefined;
 
@@ -284,6 +507,11 @@ export async function ingestFromRegistry(input: {
     if (entries.length === 0) {
       break;
     }
+    const authProbes = await registryAuthProbes(
+      entries.filter(isLatestEntry).slice(0, maxServers - ingested),
+    );
+    authProbed += authProbes.probed;
+    authProbeFailed += authProbes.failed;
     for (const entry of entries) {
       if (ingested >= maxServers) {
         break;
@@ -292,8 +520,10 @@ export async function ingestFromRegistry(input: {
         skipped += 1;
         continue;
       }
+      const authProbe = authProbes.probes.get(entry);
       const manifest = mapRegistryServerToManifest(entry, {
         verified: input.verified,
+        authProbe,
       });
       if (!manifest) {
         skipped += 1;
@@ -314,6 +544,12 @@ export async function ingestFromRegistry(input: {
             // Packages and remotes, names and flags only: what the AI
             // overview says the server needs to run.
             registryServer: registryServerProvenance(entry.server ?? entry),
+            // The endpoint's answer to an unauthenticated initialize, kept so
+            // the next sync reuses it instead of probing the version again.
+            authProbe:
+              authProbe && manifest.endpointUrl
+                ? authProbeRecord(manifest.endpointUrl, authProbe)
+                : undefined,
           },
         });
         ingested += 1;
@@ -336,9 +572,19 @@ export async function ingestFromRegistry(input: {
     source: input.source,
     ingested,
     skipped,
+    authProbed,
+    authProbeFailed,
     partial,
   });
-  return { source: input.source, ingested, skipped, partial, error };
+  return {
+    source: input.source,
+    ingested,
+    skipped,
+    authProbed,
+    authProbeFailed,
+    partial,
+    error,
+  };
 }
 
 export async function runMarketFederation(

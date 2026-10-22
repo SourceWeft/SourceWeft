@@ -429,6 +429,14 @@
         }
       }
     },
+    "authMethod": {
+      "notRequired": "无需",
+      "required": "需要",
+      "oauth": "OAuth",
+      "oauthOrApiKey": "OAuth 或 API 密钥",
+      "apiKey": "API 密钥",
+      "customHeaders": "自定义请求头"
+    },
     "detail": {
       "metaFallback": "MCP 服务",
       "metaTitle": "{name} MCP 服务",
@@ -440,8 +448,6 @@
       "auth": "鉴权",
       "license": "许可证",
       "language": "语言",
-      "required": "需要",
-      "notRequired": "无需",
       "unknown": "未知",
       "addToWorkspace": "添加到工作区",
       "signInToInstall": "登录以安装",
@@ -2399,9 +2405,7 @@
         "updated": "更新时间"
       },
       "fieldValues": {
-        "unknown": "未知",
-        "authRequired": "必需",
-        "authNotRequired": "非必需"
+        "unknown": "未知"
       },
       "links": {
         "homepage": "主页",

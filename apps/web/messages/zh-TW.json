@@ -438,6 +438,14 @@
         }
       }
     },
+    "authMethod": {
+      "notRequired": "無需",
+      "required": "需要",
+      "oauth": "OAuth",
+      "oauthOrApiKey": "OAuth 或 API 金鑰",
+      "apiKey": "API 金鑰",
+      "customHeaders": "自訂請求標頭"
+    },
     "detail": {
       "metaFallback": "MCP 服務",
       "metaTitle": "{name} MCP 服務",
@@ -449,8 +457,6 @@
       "auth": "驗證方式",
       "license": "授權條款",
       "language": "語言",
-      "required": "需要",
-      "notRequired": "無需",
       "unknown": "未知",
       "addToWorkspace": "新增到工作區",
       "signInToInstall": "登入以安裝",
@@ -2408,9 +2414,7 @@
         "updated": "更新時間"
       },
       "fieldValues": {
-        "unknown": "未知",
-        "authRequired": "必需",
-        "authNotRequired": "非必需"
+        "unknown": "未知"
       },
       "links": {
         "homepage": "首頁",

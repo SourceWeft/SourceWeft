@@ -294,6 +294,42 @@ describe("public MCP detail page README", () => {
   });
 });
 
+describe("public MCP detail page Auth field", () => {
+  function authField(html: string) {
+    return html.match(/<dt[^>]*>Auth<\/dt><dd[^>]*>([^<]*)<\/dd>/)?.[1];
+  }
+
+  it("says an open server needs no authentication", async () => {
+    expect(authField(await render())).toBe("Not required");
+  });
+
+  // Issue #337: OAuth sign-in, or the account key in the Authorization header.
+  it("names OAuth or an API key for an OAuth server that takes a key header", async () => {
+    market.getPublicMcpManifest.mockResolvedValue(
+      getMarketMcpManifestResponseSchema.parse({
+        ...manifestResponse,
+        item: { ...manifestResponse.item, requiresAuth: true },
+        manifest: {
+          ...manifestResponse.manifest,
+          auth: {
+            type: "oauth",
+            required: true,
+            headerName: "Authorization",
+            allowedHeaderNames: ["Authorization"],
+          },
+        },
+      }),
+    );
+    const html = await render();
+    expect(authField(html)).toBe("OAuth or API key");
+    // Installation then asks for the credential and notes the OAuth sign-in.
+    expect(html).toContain("Connect the required credentials.");
+    expect(html).toContain(
+      "The client completes OAuth sign-in on first connect.",
+    );
+  });
+});
+
 describe("public MCP detail page security note", () => {
   it("keeps its heading on its own line above its text", async () => {
     const html = await render();

@@ -42,6 +42,7 @@ import {
   hasMcpReadmeToShow,
   isLongMcpReadme,
 } from "../../../../lib/mcp-readme";
+import { mcpAuthMethod } from "../../../../lib/mcp-auth-method";
 import { CopyButton, McpIcon } from "../_components/mcp-client";
 import {
   ExternalTextLink,
@@ -209,6 +210,7 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
   }
   setRequestLocale(locale);
   const t = await getTranslations("mcp.detail");
+  const tAuth = await getTranslations("mcp.authMethod");
   const decodedIdentifier = decodeURIComponent(identifier);
   // AI text in the visitor's language, English when there is none in it.
   const overviewLocale = mcpOverviewLocale(locale);
@@ -405,10 +407,7 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
               <dl className="grid grid-cols-2 gap-4 text-sm">
                 {[
                   [t("tools"), String(manifest.tools.length)],
-                  [
-                    t("auth"),
-                    manifest.auth.required ? t("required") : t("notRequired"),
-                  ],
+                  [t("auth"), tAuth(mcpAuthMethod(manifest.auth))],
                   [
                     t("license"),
                     manifest.license ?? item.license ?? t("unknown"),

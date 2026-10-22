@@ -438,6 +438,14 @@
         }
       }
     },
+    "authMethod": {
+      "notRequired": "Not required",
+      "required": "Required",
+      "oauth": "OAuth",
+      "oauthOrApiKey": "OAuth or API key",
+      "apiKey": "API key",
+      "customHeaders": "Custom headers"
+    },
     "detail": {
       "metaFallback": "MCP Server",
       "metaTitle": "{name} MCP Server",
@@ -449,8 +457,6 @@
       "auth": "Auth",
       "license": "License",
       "language": "Language",
-      "required": "Required",
-      "notRequired": "Not required",
       "unknown": "Unknown",
       "addToWorkspace": "Add to workspace",
       "signInToInstall": "Sign in to install",
@@ -2408,9 +2414,7 @@
         "updated": "Updated"
       },
       "fieldValues": {
-        "unknown": "Unknown",
-        "authRequired": "Required",
-        "authNotRequired": "Not required"
+        "unknown": "Unknown"
       },
       "links": {
         "homepage": "Homepage",

@@ -27,6 +27,10 @@ A skill's own script really executed in the cloud sandbox: the agent is asked fo
 
 The default source is a real script-bearing Cisco fixture; it is queued by the current local rules. The authenticated test administrator publishes it for installation tests. This does not substitute for malformed or changed-content fixtures.
 
+### MCP catalog auth (#337)
+
+`mcp-catalog-auth.spec.ts` federates the live `io.github.arcmira/arcmira` registry entry into the same isolated deployment through the real ingest (`apps/backend/scripts/federate-registry-entry-e2e.ts`), which probes the live endpoint, then checks the catalog manifest and the public page's Auth field in en, zh-CN and zh-TW. The API alone is enough; no worker or accounts. Run it from web with `pnpm exec playwright test e2e/mcp-catalog-auth.spec.ts`; behind a fake-IP proxy add `NODE_ENV=development` to that command, for the same reason as above. The Web caches a listing's manifest for an hour, so use a Web server that has not served that listing since its last sync (a fresh `.next`). A failed probe is retried by the next sync, which the spec stands in for with up to three attempts. Its first test checks Arcmira itself still answers with an OAuth challenge: if that fails, upstream changed.
+
 ## Full acceptance fixtures
 
 The approved inert fixtures are now published at https://github.com/QThans/sourceweft-skill-registry-e2e. The committed `fixtures/public-registry.json` pins A/B/C and expected original SKILL.md hashes. After setup, run `pnpm test:e2e:skills:full` from `apps/web` for the complete eight-case acceptance run.

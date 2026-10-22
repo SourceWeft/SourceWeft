@@ -12,6 +12,7 @@ import type { Locale } from "@sourceweft/i18n";
 import { config } from "../../shared/config";
 import { createMcpRequestScope } from "./network";
 import { logger } from "../../shared/logger";
+import { probeMcpEndpointAuth } from "../../shared/mcp-auth-probe";
 import { shortId } from "../../shared/log-ids";
 import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
 import {
@@ -88,43 +89,18 @@ async function assertWebTransport(manifest: MarketMcpManifest) {
 
 /**
  * Does this endpoint demand authentication? One cheap unauthenticated MCP
- * initialize; a 401 is the spec's signal for OAuth. A network/protocol failure
+ * initialize; any 401 is treated as the spec's signal for OAuth. A network/protocol failure
  * aborts installation because treating an unverified probe as "no auth" would
  * silently create an unusable install.
  */
 export async function mcpEndpointRequiresAuth(
   endpointUrl: string,
 ): Promise<boolean> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 5000);
+  // A cross-origin or unsafe redirect is rejected by the request scope
+  // (MCP_ENDPOINT_BLOCKED), as every later request to this endpoint would be.
   const requests = createMcpRequestScope();
   try {
-    const response = await requests.fetch(endpointUrl, {
-      method: "POST",
-      // Don't follow redirects: the endpoint passed SSRF validation, but a 3xx
-      // could bounce the probe to an internal/metadata address (blind SSRF). A
-      // same-origin redirect is simply "not a 401"; a cross-origin or unsafe
-      // one is rejected by the request scope (MCP_ENDPOINT_BLOCKED), as every
-      // later request to this endpoint would be.
-      redirect: "manual",
-      headers: {
-        "content-type": "application/json",
-        accept: "application/json, text/event-stream",
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "initialize",
-        params: {
-          protocolVersion: "2024-11-05",
-          capabilities: {},
-          clientInfo: { name: "sourceweft-auth-probe", version: "1" },
-        },
-      }),
-      signal: controller.signal,
-    });
-    await response.body?.cancel();
-    return response.status === 401;
+    return (await probeMcpEndpointAuth(endpointUrl, requests.fetch)) !== "open";
   } catch (error) {
     requests.throwIfDenied();
     throw new McpError(
@@ -136,7 +112,6 @@ export async function mcpEndpointRequiresAuth(
       { recoverable: true },
     );
   } finally {
-    clearTimeout(timer);
     await requests.close();
   }
 }
@@ -861,11 +836,13 @@ export class McpService {
 
     await assertWebTransport(manifestForInstall);
 
-    // The official registry carries no auth metadata, so federated manifests
-    // all claim auth "none" — which left OAuth-gated servers (GitHub, Notion…)
-    // installed with no Connect path and failed at turn time. Probe
-    // the (already SSRF-validated) endpoint once at install: a 401 means the
-    // server wants OAuth per the MCP spec. Probe failure aborts installation.
+    // Federation records auth from the registry's declared headers and its own
+    // probe, but a manifest can still claim "none" (an endpoint the catalog
+    // could not probe, or a version synced before it did) — which left
+    // OAuth-gated servers (GitHub, Notion…) installed with no Connect path and
+    // failed at turn time. Probe the (already SSRF-validated) endpoint once at
+    // install: a 401 means the server wants OAuth per the MCP spec. Probe
+    // failure aborts installation.
     if (
       manifestForInstall.auth.type === "none" &&
       manifestForInstall.endpointUrl &&

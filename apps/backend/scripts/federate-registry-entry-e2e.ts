@@ -21,7 +21,9 @@ import { parse } from "dotenv";
 const REGISTRY_SOURCE = "registry.modelcontextprotocol.io";
 const identifier = process.argv[2]?.trim();
 if (!identifier) {
-  throw new Error("Usage: federate-registry-entry-e2e.ts <registry identifier>");
+  throw new Error(
+    "Usage: federate-registry-entry-e2e.ts <registry identifier>",
+  );
 }
 
 const envPath = resolve(".env.skills-test");
