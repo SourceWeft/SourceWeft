@@ -149,6 +149,10 @@ export const workspaceMcpInstallSchema = z.object({
   webExecutable: z.boolean(),
   authType: mcpAuthTypeSchema,
   credentialStatus: workspaceMcpCredentialStatusSchema,
+  // How the CALLING member is connected, overlaid per user like
+  // credentialStatus: their OAuth session, their own header credential, or
+  // neither. One at a time — connecting one way replaces the other.
+  connectedVia: z.enum(["oauth", "header"]).nullable().optional(),
   enabled: z.boolean(),
   manifestJson: marketMcpManifestSchema,
   signature: z.string().nullable(),
