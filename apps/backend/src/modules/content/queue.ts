@@ -201,10 +201,30 @@ export async function enqueueThreadTitleGenerateJob(
   }
 }
 
+const THREAD_CHAT_RUN_JOB_ID_PREFIX = `${THREAD_CHAT_RUN_JOB}_`;
+
+/** The deterministic queue job id of a durable chat run. */
+export function threadChatRunJobId(runId: string) {
+  return `${THREAD_CHAT_RUN_JOB_ID_PREFIX}${runId}`;
+}
+
+/**
+ * Inverse of `threadChatRunJobId`: the run id a chat-run job id names, or null
+ * when the id is not a chat-run job id. The result is only a lookup key; it
+ * never authorizes anything on its own.
+ */
+export function parseThreadChatRunJobId(jobId: string): string | null {
+  if (!jobId.startsWith(THREAD_CHAT_RUN_JOB_ID_PREFIX)) {
+    return null;
+  }
+  const runId = jobId.slice(THREAD_CHAT_RUN_JOB_ID_PREFIX.length);
+  return runId ? runId : null;
+}
+
 export async function enqueueThreadChatRunJob(
   payload: ThreadChatRunJobPayload,
 ) {
-  const jobId = `${THREAD_CHAT_RUN_JOB}_${payload.runId}`;
+  const jobId = threadChatRunJobId(payload.runId);
   const existing = await jobsQueue.getJob(jobId);
   if (existing) {
     return existing;

@@ -42,6 +42,7 @@ import {
   isCompletedArtifactToolCall,
   isCompletedWorkfileWriteToolCall,
   isRunAlreadyActiveStreamError,
+  isTransientStreamRequestFailure,
   mergeThinkingStepRecords,
   normalizeCitationRecords,
   normalizeModelReasoningSegmentRecord,
@@ -71,6 +72,7 @@ import {
   resolveClientTimezone,
 } from "./thread-utils";
 import type { ActiveThreadRun } from "../chat-stream-runner-control";
+import type { AttachReattachScheduler } from "./attach-reattach";
 import { mergeCommittedArtifactOutputsIntoMessage } from "./artifact-output-reconcile";
 import { useLocalConversationStatus } from "../../_components/local-conversation-status";
 import { reportLocalAvailabilityError } from "../../../../../lib/local-availability-events";
@@ -95,6 +97,12 @@ export type ThreadStreamActionInput = {
   byokSelections?: Partial<Record<ModelType, ByokModelSelection | null>>;
   durableRunKey?: string;
   attachOnly?: boolean;
+  // Set by the reload path (loadThreadMessages) on its attach: a transport
+  // failure of that attach — network/5xx, an SSE error without a finish, or an
+  // end-of-stream without a finish — keeps the run and is recovered by
+  // attachReattach instead of failing the turn. Other attaches (e.g. the
+  // tool-approval resume) keep the ordinary error behaviour.
+  reattachOnFailure?: boolean;
   // Called when the send hit the server's 409 one-run-per-thread backstop, so
   // the caller can re-queue it (the composer is not restored / no toast).
   onRunAlreadyActive?: () => void;
@@ -108,6 +116,15 @@ export type ThreadStreamActionInput = {
 };
 
 type UseThreadStreamActionInput = {
+  // Recovery for attach-only streams that fail in transport (see
+  // attach-reattach.ts). Required so such a failure is never silently final.
+  attachReattach: Pick<
+    AttachReattachScheduler,
+    | "handleAttachFailure"
+    | "noteAttachProgress"
+    | "noteAttachSucceeded"
+    | "noteStreamStart"
+  >;
   catalogKindEnabled: Record<ModelType, boolean>;
   clearAttachedRunKeyIfCurrent: (durableRunKey: string) => void;
   clearEditingState: () => void;
@@ -122,6 +139,7 @@ type UseThreadStreamActionInput = {
     userId?: string | null;
   }) => void;
   markRunTerminal: (input: {
+    attachFailed?: boolean;
     detachedWithoutFinish: boolean;
     durableRunKey: string;
     waitingForApproval?: boolean;
@@ -179,6 +197,7 @@ function normalizeActiveThreadRun(run: ActiveThreadRun): ActiveThreadRun {
 }
 
 export function useThreadStreamAction({
+  attachReattach,
   catalogKindEnabled,
   clearAttachedRunKeyIfCurrent,
   clearEditingState,
@@ -225,6 +244,9 @@ export function useThreadStreamAction({
       }
 
       const durableRunKey = input.durableRunKey ?? createDurableRunKey();
+      const recoverableAttach =
+        input.attachOnly === true && input.reattachOnFailure === true;
+      attachReattach.noteStreamStart(durableRunKey, input.attachOnly === true);
       markRunStarted({
         idempotencyKey: durableRunKey,
         status: "running",
@@ -399,6 +421,15 @@ export function useThreadStreamAction({
       let receivedFinishEvent = false;
       let waitingForApproval = false;
       let detachedWithoutFinish = false;
+      let attachFailed = false;
+      // For a recoverable attach: the assistant message as it was before a
+      // server `error` event marked it, so an error that turns out to be an
+      // attach failure (no finish follows) can be undone. Held in an object so
+      // closure writes are not narrowed away.
+      const attachRecovery: {
+        preErrorMessage: ChatMessageItem | null;
+        progressNoted: boolean;
+      } = { preErrorMessage: null, progressNoted: false };
       let suppressErrorToast = false;
       let streamingAssistantMessage =
         messageSnapshot.find(
@@ -715,6 +746,29 @@ export function useThreadStreamAction({
         commitStreamingAssistantMessage();
       };
 
+      const markStreamErrorForRun: typeof markStreamingAssistantAsError = (
+        errorInput,
+      ) => {
+        if (recoverableAttach && !streamError) {
+          attachRecovery.preErrorMessage = streamingAssistantMessage;
+        }
+        markStreamingAssistantAsError(errorInput);
+      };
+      // The first non-error event of a recoverable attach means the connection
+      // works again: the next failure streak gets a fresh retry budget.
+      const noteAttachProgress = () => {
+        if (!recoverableAttach || attachRecovery.progressNoted || streamError) {
+          return;
+        }
+        attachRecovery.progressNoted = true;
+        attachReattach.noteAttachProgress(durableRunKey);
+      };
+      const updateStreamingAssistantMessageForRun: typeof updateStreamingAssistantMessage =
+        (updater) => {
+          noteAttachProgress();
+          updateStreamingAssistantMessage(updater);
+        };
+
       try {
         const streamResult = await runChatStream({
           appendReasoningChunk,
@@ -733,7 +787,7 @@ export function useThreadStreamAction({
           assistantMessageId: input.assistantMessageId,
           isCompletedArtifactToolCall,
           isCompletedWorkfileWriteToolCall,
-          markStreamingAssistantAsError,
+          markStreamingAssistantAsError: markStreamErrorForRun,
           mergeThinkingStepRecords,
           mode: input.mode,
           mentionedSourceIds: input.mentionedSourceIds,
@@ -763,6 +817,7 @@ export function useThreadStreamAction({
             });
           },
           onPersistedAssistantMessageId: (messageId) => {
+            noteAttachProgress();
             persistedAssistantMessageId = messageId;
             updateActiveRunIfCurrent(durableRunKey, (run) => ({
               ...run,
@@ -781,6 +836,7 @@ export function useThreadStreamAction({
             preparedEffectiveSourceIds = sourceIds;
           },
           onPreparedThreadRun: (threadRun) => {
+            noteAttachProgress();
             input.onAccepted?.();
             preparedThreadRunId = toNullableString(threadRun.id);
             updateActiveRunIfCurrent(durableRunKey, (run) => ({
@@ -852,7 +908,8 @@ export function useThreadStreamAction({
           toObjectRecord,
           tools: input.tools,
           updateChatTitle,
-          updateStreamingAssistantMessage,
+          updateStreamingAssistantMessage:
+            updateStreamingAssistantMessageForRun,
           userMessageId: input.userMessageId,
           workspaceId,
         });
@@ -870,8 +927,22 @@ export function useThreadStreamAction({
           throw streamError;
         }
         if (!receivedFinishEvent) {
+          if (recoverableAttach) {
+            // A clean end-of-stream before the run finished: the run may still
+            // be executing. Release the attach slot and reconcile, rather than
+            // holding it (which would keep the UI executing after the run ends).
+            attachFailed = true;
+            attachReattach.handleAttachFailure(
+              durableRunKey,
+              new Error("The live stream ended before the run finished."),
+            );
+            return;
+          }
           detachedWithoutFinish = true;
           return;
+        }
+        if (input.attachOnly) {
+          attachReattach.noteAttachSucceeded(durableRunKey);
         }
 
         if (waitingForApproval) {
@@ -939,6 +1010,26 @@ export function useThreadStreamAction({
           `/v1/workspaces/${encodeURIComponent(workspaceId)}/threads/${encodeURIComponent(threadId)}/stream`,
           error,
         );
+        // A reload attach that failed in transport says nothing about the
+        // run, which keeps executing server-side: a network/5xx failure, or a
+        // server `error` event with no finish (the attach itself broke; a real
+        // run error always comes with a finish). Undo any error mark, keep the
+        // partial render and the active run (Stop stays), and let recovery
+        // reconcile/re-attach. A 4xx or a finished error keeps the old path.
+        const isAttachTransportFailure =
+          recoverableAttach &&
+          (streamError
+            ? !receivedFinishEvent
+            : isTransientStreamRequestFailure(error));
+        if (isAttachTransportFailure) {
+          attachFailed = true;
+          if (attachRecovery.preErrorMessage) {
+            streamingAssistantMessage = attachRecovery.preErrorMessage;
+          }
+          commitStreamingAssistantMessage();
+          attachReattach.handleAttachFailure(durableRunKey, error);
+          return;
+        }
         // The server's one-run-per-thread backstop: this queued send lost the
         // race for the free window. Don't restore the composer or toast — the
         // controller re-queues it (see onRunAlreadyActive) so it isn't lost.
@@ -1005,6 +1096,7 @@ export function useThreadStreamAction({
         }
       } finally {
         markRunTerminal({
+          attachFailed,
           detachedWithoutFinish,
           durableRunKey,
           waitingForApproval,
@@ -1014,6 +1106,7 @@ export function useThreadStreamAction({
     [
       t,
       tErrors,
+      attachReattach,
       catalogKindEnabled,
       clearAttachedRunKeyIfCurrent,
       clearEditingState,

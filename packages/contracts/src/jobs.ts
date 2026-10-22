@@ -54,4 +54,33 @@ export type CancelJobResponse = z.infer<typeof cancelJobResponseSchema>;
 
 /** Idempotency key prefix for runs started from the web client. */
 export const SOURCEWEFT_WEB_RUN_IDEMPOTENCY_PREFIX = "sourceweft-web-run:";
+
+/**
+ * Suffix that turns a durable chat run's idempotency key into its stop key.
+ *
+ * Stopping a running chat run — two equivalent entry points:
+ *
+ * 1. Thread stream (canonical; SDK `ContentClient.stopThreadRun`):
+ *    `POST /v1/workspaces/:workspaceId/threads/:threadId/stream` with body
+ *    `{ idempotencyKey: runKey + SOURCEWEFT_WEB_RUN_STOP_SUFFIX, stream: false }`,
+ *    where `runKey` is the run's own idempotency key. Only the member who
+ *    started the run, with access to the workspace, may stop it; anything
+ *    else is `404`. The response always carries `threadRun` (`id`,
+ *    `idempotencyKey`, `status`, `mode`) with the run's terminal status, plus
+ *    the turn's persisted result (`thread`, `userMessage`, `assistantMessage`)
+ *    when it has one, and `billing` and `retrieval`. The call waits a bounded
+ *    time for the worker to settle the run.
+ * 2. Jobs API (SDK `JobsClient.cancelJob`): `POST /v1/jobs/:id/cancel` on the
+ *    run's `thread-chat-run` job delegates to the same durable stop, with the
+ *    same authorization (workspace, thread and key read from the run, never
+ *    from job data), instead of removing the queue job. It returns as soon as
+ *    the cancellation is persisted, with the usual `{ id, removed: true }`
+ *    (`removed` meaning the run will not continue; the queue entry itself is
+ *    left for the worker to settle). Unknown or foreign jobs are `404`.
+ *    Other job types keep queue semantics: an active job is `409 JOB_RUNNING`.
+ *
+ * Both are idempotent: stopping a run that is already cancelled, finished or
+ * failed — including one that finishes while the stop is in flight — succeeds
+ * without changing its terminal state, never `409`.
+ */
 export const SOURCEWEFT_WEB_RUN_STOP_SUFFIX = ":stop";

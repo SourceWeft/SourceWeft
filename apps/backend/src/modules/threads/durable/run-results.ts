@@ -43,14 +43,19 @@ export function buildEmptyBilling(teamId: string) {
   };
 }
 
+/** The stopped run's own state, carried on every stop result. */
+export function toStoppedThreadRun(run: ChatThreadRunRecord) {
+  return {
+    id: run.id,
+    idempotencyKey: run.idempotencyKey,
+    status: run.status,
+    mode: run.mode,
+  };
+}
+
 export function buildStoppedRunFallback(run: ChatThreadRunRecord) {
   return {
-    threadRun: {
-      id: run.id,
-      idempotencyKey: run.idempotencyKey,
-      status: run.status,
-      mode: run.mode,
-    },
+    threadRun: toStoppedThreadRun(run),
     billing: buildEmptyBilling(run.teamId),
     retrieval: {
       embeddingProfileId: null,

@@ -7,6 +7,7 @@ import type { ThreadRunFailureSummary } from "@sourceweft/contracts/threads";
 import { requireContentWorkspace } from "../../workspace/guards";
 import {
   enqueueThreadChatRunJob,
+  parseThreadChatRunJobId,
   type ThreadChatRunJobPayload,
   type ThreadChatRunJobResult,
 } from "../../content/queue";
@@ -72,6 +73,7 @@ import {
   resolveAttachRunState,
   resolveOwnedRun,
   resolveViewableRun,
+  toStoppedThreadRun,
   wait,
   waitForRunResult,
 } from "./run-results";
@@ -457,6 +459,39 @@ export class DurableChatRunService {
     return run;
   }
 
+  /**
+   * Stop the chat run behind a `thread-chat-run` queue job — the
+   * `POST /v1/jobs/:id/cancel` path. BullMQ cannot remove an active job, so
+   * the cancel is the same durable stop as the thread stream's `:stop` key.
+   *
+   * The job id only names the run. Authorization is the stream stop's own:
+   * `stopRun` → `resolveOwnedRun` (workspace access, then the run by its
+   * idempotency key in that workspace, on that thread, initiated by the
+   * caller), with workspace/thread/key read from the run row, never from job
+   * data. The ownership check here only keeps a foreign run's workspace out
+   * of the lookup; every rejection is the same 404 so existence never leaks.
+   *
+   * Returns the run after the cancellation fence is persisted (or as found,
+   * when it was already terminal) without waiting for the worker to unwind.
+   */
+  async stopRunForJob(input: { jobId: string; userId: string }) {
+    const runId = parseThreadChatRunJobId(input.jobId);
+    const run = runId ? await findChatThreadRunById({ runId }) : null;
+    if (
+      !run ||
+      run.userId !== input.userId ||
+      (run.jobId !== null && run.jobId !== input.jobId)
+    ) {
+      throw new ContentError(404, "CHAT_RUN_NOT_FOUND", "Chat run not found");
+    }
+    return this.stopRun({
+      workspaceId: run.workspaceId,
+      threadId: run.threadId,
+      userId: input.userId,
+      idempotencyKey: run.idempotencyKey,
+    });
+  }
+
   async stopRunAndReturn(input: {
     workspaceId: string;
     threadId: string;
@@ -473,9 +508,14 @@ export class DurableChatRunService {
       userId: input.userId,
       idempotencyKey,
     });
+    // Every stop result carries the run's own state (`threadRun`), so a caller
+    // can see whether the run was cancelled or had already finished.
     if (stopped.status === "cancelled") {
       try {
-        return await getRunResult(stopped);
+        return {
+          ...(await getRunResult(stopped)),
+          threadRun: toStoppedThreadRun(stopped),
+        };
       } catch (error) {
         if (error instanceof ContentError) {
           return buildStoppedRunFallback(stopped);
@@ -488,23 +528,35 @@ export class DurableChatRunService {
       timeoutMs: STOP_RESULT_WAIT_TIMEOUT_MS,
       requireTerminal: true,
       throwTerminalErrors: false,
-    }).catch((error) => {
-      if (error instanceof ContentError) {
-        return findChatThreadRunById({
+    }).then(
+      async (result) => {
+        // The wait only returns the turn's result; read the terminal row it
+        // observed for the run's final status.
+        const latest = await findChatThreadRunById({
           runId: stopped.id,
           teamId: stopped.teamId,
           workspaceId: stopped.workspaceId,
-        }).then(async (latest) => {
-          const stoppedRun = isTerminalRunStatus(
-            latest?.status ?? stopped.status,
-          )
-            ? (latest ?? stopped)
-            : await forceCancelStoppedRun(latest ?? stopped);
-          return buildStoppedRunFallback(stoppedRun);
         });
-      }
-      throw error;
-    });
+        return { ...result, threadRun: toStoppedThreadRun(latest ?? stopped) };
+      },
+      (error) => {
+        if (error instanceof ContentError) {
+          return findChatThreadRunById({
+            runId: stopped.id,
+            teamId: stopped.teamId,
+            workspaceId: stopped.workspaceId,
+          }).then(async (latest) => {
+            const stoppedRun = isTerminalRunStatus(
+              latest?.status ?? stopped.status,
+            )
+              ? (latest ?? stopped)
+              : await forceCancelStoppedRun(latest ?? stopped);
+            return buildStoppedRunFallback(stoppedRun);
+          });
+        }
+        throw error;
+      },
+    );
   }
 
   async getRunResult(input: {
