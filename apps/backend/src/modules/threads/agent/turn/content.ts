@@ -35,6 +35,7 @@ export function extractTextDeltas(content: unknown): string[] {
 }
 
 export function sanitizeSseValue(value: string) {
+  // eslint-disable-next-line no-control-regex -- strips NUL bytes
   return value.replace(/\u0000/g, "");
 }
 

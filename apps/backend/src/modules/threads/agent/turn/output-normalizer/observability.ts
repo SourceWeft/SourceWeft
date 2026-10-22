@@ -31,6 +31,7 @@ const MAX_OBSERVABLE_TOOL_CONTENT_CHARS = 8_000;
 function compactObservableToolContent(value: string) {
   const sanitized = value
     .replace(/\0/g, "\uFFFD")
+    // eslint-disable-next-line no-control-regex -- strips control characters
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
   if (sanitized.length <= MAX_OBSERVABLE_TOOL_CONTENT_CHARS) {
     return sanitized;

@@ -4,10 +4,7 @@ import {
   ARTIFACT_WRITE_ERROR_CODES,
   ArtifactError,
 } from "@sourceweft/contracts/artifact-errors";
-import {
-  primaryArtifactAttachment,
-  type ArtifactPublishSpec,
-} from "@sourceweft/contracts/artifact-write";
+import type { ArtifactPublishSpec } from "@sourceweft/contracts/artifact-write";
 
 /**
  * The writer is the one way an artifact is written, so these tests pin the

@@ -848,8 +848,8 @@ function cutToLength(text: string, length: number): string {
 function cleanLine(value: unknown, max: number): string {
   if (typeof value !== "string") return "";
   const text = value
-    // eslint-disable-next-line no-control-regex
     .replace(
+      // eslint-disable-next-line no-control-regex -- strips control characters
       /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]/g,
       " ",
     )

@@ -360,7 +360,7 @@ export class DurableChatRunService {
       mode: input.mode,
       idempotencyKey: input.idempotencyKey,
     } as DurableRunRequestSnapshot;
-    let run = await createChatThreadRun({
+    const run = await createChatThreadRun({
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
       threadId: input.threadId,

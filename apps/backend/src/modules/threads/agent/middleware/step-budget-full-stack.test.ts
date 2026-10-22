@@ -120,7 +120,7 @@ test("preparation does not request approval twice for the prior completed tool b
       interruptOn: { probe: true },
       checkpointer: new MemorySaver(),
     }) as unknown as {
-      invoke(input: unknown, options?: unknown): Promise<Record<string, any>>;
+      invoke(input: unknown, options?: unknown): Promise<unknown>;
       getState(
         options: unknown,
       ): Promise<{ tasks: { interrupts?: unknown[] }[] }>;

@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { RegistrySubmissionError } from "./errors";
 import { type RegistryExistingEntry, triageRegistrySubmission } from "./guard";
 
 const CLEAN = { reviewRequired: false, flags: [] as string[] };

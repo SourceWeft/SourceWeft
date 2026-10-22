@@ -70,7 +70,12 @@ async function request(path: string, body?: unknown) {
     body: body === undefined ? undefined : JSON.stringify(body),
   });
 }
-async function create(title: string, executionTarget?: unknown) {
+/** The thread fields these checks read from the create-thread response. */
+type CreatedThread = { id: string; executionTarget: unknown };
+async function create(
+  title: string,
+  executionTarget?: unknown,
+): Promise<CreatedThread> {
   const response = await request(`/v1/workspaces/${workspace.id}/threads`, {
     title,
     ...(executionTarget ? { executionTarget } : {}),
@@ -79,10 +84,13 @@ async function create(title: string, executionTarget?: unknown) {
   assert.equal(response.status, 201, JSON.stringify(value));
   return value.thread;
 }
+/** Reads the code a rejected PostgreSQL or domain error carries. */
+const errorCode = (error: unknown) => (error as { code?: unknown }).code;
 async function pgRejected(sql: string, values: unknown[], message: RegExp) {
   await assert.rejects(
     database.query(sql, values),
-    (error: any) => error.code === "23514" && message.test(error.message),
+    (error: unknown) =>
+      errorCode(error) === "23514" && message.test((error as Error).message),
   );
 }
 try {
@@ -101,7 +109,7 @@ try {
   }
   ids.deviceA = a;
   ids.deviceB = b;
-  let cloud: any, local: any;
+  let cloud: CreatedThread, local: CreatedThread;
   await check(
     "Creation fixes cloud target and creates no local binding",
     async () => {
@@ -275,7 +283,7 @@ try {
     async () => {
       await assert.rejects(
         localProviderForTurn(context(local.id)),
-        (error: any) => error.code === "DEVICE_OFFLINE",
+        (error: unknown) => errorCode(error) === "DEVICE_OFFLINE",
       );
       assert.equal(
         (
@@ -304,7 +312,7 @@ try {
       try {
         await assert.rejects(
           localProviderForTurn(context(missing.id)),
-          (error: any) => error.code === "LOCAL_BINDING_INVALID",
+          (error: unknown) => errorCode(error) === "LOCAL_BINDING_INVALID",
         );
       } finally {
         await database.query(

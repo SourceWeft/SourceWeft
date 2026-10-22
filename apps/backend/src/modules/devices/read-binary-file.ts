@@ -69,6 +69,7 @@ export async function readLocalBinaryFile(input: {
       // Cleanup is independent of cancellation of the read itself.
       await input.call("file.binary.close", { ...scope, transferId });
     } catch (error) {
+      // eslint-disable-next-line no-unsafe-finally -- body succeeded: surface the close failure
       if (!failed) throw error;
       input.onCleanupError?.(error);
     }

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { ToolMessage } from "@langchain/core/messages";
+import type { RunnableConfig } from "@langchain/core/runnables";
 import { resolveAgentToolHostInvocationSignal } from "@sourceweft/contracts/agent-tools";
 import { tool } from "langchain";
 import { afterEach, test, vi } from "vitest";
@@ -14,10 +15,23 @@ import {
 } from "./tool-execution-timeout";
 import { currentSourceWeftToolInvocationSignal } from "./tool-call-context";
 
+/** The slice of a tool the middleware hands back to the handler. */
+type InvokableTool = {
+  invoke(input: unknown, config?: RunnableConfig): unknown;
+};
+
+/** The tool-call request shape these tests build and observe. */
+type TestToolCallRequest = {
+  runtime: { signal?: AbortSignal };
+  state: { messages: unknown[] };
+  tool?: InvokableTool;
+  toolCall: { args: Record<string, unknown>; id: string; name: string };
+};
+
 type MiddlewareWithWrapToolCall = {
   wrapToolCall?: (
-    request: any,
-    handler: (request: any) => unknown | Promise<unknown>,
+    request: TestToolCallRequest,
+    handler: (request: TestToolCallRequest) => unknown | Promise<unknown>,
   ) => Promise<unknown>;
 };
 
@@ -30,9 +44,9 @@ function wrapToolCallHook(middleware: unknown) {
 function request(input: {
   args?: Record<string, unknown>;
   signal?: AbortSignal;
-  tool?: unknown;
+  tool?: InvokableTool;
   toolName?: string;
-}) {
+}): TestToolCallRequest {
   return {
     runtime: input.signal ? { signal: input.signal } : {},
     state: { messages: [] },
@@ -73,7 +87,7 @@ test("passes one merged signal through runtime and the Host configurable side ch
     readonly schema = schema;
     #result = "private-ok";
 
-    invoke(_input: unknown, config?: { signal?: AbortSignal }) {
+    invoke(_input: unknown, config?: RunnableConfig) {
       langChainSignal = config?.signal;
       invokeSignal = resolveAgentToolHostInvocationSignal(config);
       return this.#result;
@@ -321,7 +335,7 @@ test("a real LangChain tool callback must finish cleanup before timeout settles"
   const invocation = wrapToolCallHook(middleware)(
     request({ tool: actualTool, toolName: actualTool.name }),
     (next) =>
-      next.tool.invoke(
+      next.tool!.invoke(
         {
           args: {},
           id: "call-timeout",
@@ -415,7 +429,7 @@ test("a real LangChain tool that ignores abort becomes termination_unknown after
   const invocation = wrapToolCallHook(middleware)(
     request({ tool: actualTool, toolName: actualTool.name }),
     (next) =>
-      next.tool.invoke(
+      next.tool!.invoke(
         {
           args: {},
           id: "call-timeout",

@@ -12,7 +12,6 @@ import {
   commitCurrentRunArtifactPublication,
   type CurrentRunArtifactPublicationInput,
   type CurrentRunArtifactPublicationRepositoryDependencies,
-  type CurrentRunArtifactPublicationStage,
 } from "./current-run-publication-repository";
 
 export type {

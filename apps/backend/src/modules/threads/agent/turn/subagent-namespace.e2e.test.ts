@@ -14,7 +14,7 @@ import { test } from "vitest";
 import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
 import { tool } from "@langchain/core/tools";
 import { MemorySaver } from "@langchain/langgraph";
-import { createDeepAgent, StateBackend, type SubAgent } from "deepagents";
+import { createDeepAgent, type SubAgent } from "deepagents";
 import { z } from "zod";
 import { ScriptedChatModel } from "../../../../test/chat-model";
 import {

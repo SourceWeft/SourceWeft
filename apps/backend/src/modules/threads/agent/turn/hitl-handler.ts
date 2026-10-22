@@ -27,7 +27,6 @@ import {
 import { logger } from "../../../../shared/logger";
 import { toObjectRecord } from "../../../../shared/records";
 import { parseToolArgs, sameToolArgs } from "./output-normalizer";
-import type { ObservedAgentToolCall } from "./tool-tracker";
 
 export type HitlActionRequest = {
   args: Record<string, unknown>;

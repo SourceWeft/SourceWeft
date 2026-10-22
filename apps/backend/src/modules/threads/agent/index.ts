@@ -97,7 +97,6 @@ export async function createThreadAgent(
   const checkpointer = await getChatCheckpointer();
 
   const modelAlias = params.modelAlias || config.chat.defaultModelAlias;
-  const providerModel = params.providerModel || modelAlias;
   const backend = params.backend ?? new StateBackend();
 
   const filesystemMounts =

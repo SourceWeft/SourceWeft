@@ -161,7 +161,15 @@ async function thread(input: {
         middleware,
         checkpointer: saver,
       }) as unknown as {
-        invoke(input: unknown, options?: unknown): Promise<Record<string, any>>;
+        invoke(
+          input: unknown,
+          options?: unknown,
+        ): Promise<{
+          messages: BaseMessage[];
+          sourceweftRunStepBudget: {
+            scopes: Record<string, AgentStepV2ScopeBudget>;
+          };
+        }>;
       };
       const result = await agent.invoke(
         { messages: [new HumanMessage(turn.request)] },
@@ -177,7 +185,7 @@ async function thread(input: {
         stop: selectAgentStepStop(result, {
           userMessageId: turn.userMessageId,
         }),
-        scope: result.sourceweftRunStepBudget.scopes.main,
+        scope: result.sourceweftRunStepBudget.scopes.main!,
       });
     }
     return { outcomes, ...counts };
@@ -521,7 +529,7 @@ test("a committed video presentation result also triggers the finish instruction
       }),
       checkpointer: new MemorySaver(),
     }) as unknown as {
-      invoke(input: unknown, options?: unknown): Promise<any>;
+      invoke(input: unknown, options?: unknown): Promise<unknown>;
     };
     await agent.invoke(
       { messages: [new HumanMessage("Make the video.")] },
@@ -598,7 +606,9 @@ test("a child agent's delivery finishes the child only; the parent scope is not 
         }),
       },
     ],
-  }) as unknown as { invoke(input: unknown, options?: unknown): Promise<any> };
+  }) as unknown as {
+    invoke(input: unknown, options?: unknown): Promise<unknown>;
+  };
   const result = await agent.invoke(
     { messages: [new HumanMessage("Delegate the report, then integrate.")] },
     {

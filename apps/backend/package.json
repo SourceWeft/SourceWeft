@@ -33,6 +33,7 @@
     "mail:welcome": "tsx src/scripts/send-welcome-email.ts",
     "mail:preview": "tsx src/scripts/preview-user-emails.ts",
     "benchmark:video-render": "tsx src/scripts/benchmark-video-render.ts",
+    "lint": "eslint --max-warnings 0",
     "check-types": "tsc --noEmit",
     "check-types:build": "tsc --noEmit -p tsconfig.build.json",
     "creem:product:create": "tsx src/scripts/create-creem-product.ts",
@@ -119,12 +120,15 @@
     "@sourceweft/security-braces": "workspace:*"
   },
   "devDependencies": {
+    "@sourceweft/eslint-config": "workspace:*",
     "@types/node": "^22.20.1",
     "@types/pg": "^8.21.0",
     "@types/ws": "^8.18.1",
     "@vitest/coverage-v8": "4.1.12",
     "auth": "1.7.2",
     "concurrently": "^9.2.4",
+    "eslint": "^9.39.5",
+    "globals": "^16.5.0",
     "tsup": "^8.5.1",
     "tsx": "^4.23.12",
     "vitest": "4.1.12"

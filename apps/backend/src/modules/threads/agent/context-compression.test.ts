@@ -583,7 +583,6 @@ test("summarization keeps the entire long current turn and the original system m
     { length: 41 },
     (_, index) => new HumanMessage(`Old ${index}`),
   );
-  let event: { cutoffIndex?: number; summaryMessage?: BaseMessage } | undefined;
   const result = await middleware.wrapModelCall(
     {
       messages: [...oldMessages, ...currentTurn],
@@ -599,8 +598,16 @@ test("summarization keeps the entire long current turn and the original system m
       return new AIMessage("Next response") as never;
     },
   );
-  event = (result as { update?: { _summarizationEvent?: typeof event } }).update
-    ?._summarizationEvent;
+  const event = (
+    result as {
+      update?: {
+        _summarizationEvent?: {
+          cutoffIndex?: number;
+          summaryMessage?: BaseMessage;
+        };
+      };
+    }
+  ).update?._summarizationEvent;
   assert.equal(prompts.length, 1);
   assert.doesNotMatch(
     prompts[0]!,

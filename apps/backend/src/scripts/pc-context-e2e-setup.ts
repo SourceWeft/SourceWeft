@@ -37,11 +37,14 @@ const { createLocalAccountIssuer } = await import("@better-auth/core/db");
 const context = await auth.$context;
 const email = "pc-context-e2e@sourceweft.invalid",
   password = "PC-Context-E2E-2026!";
-const user = await context.internalAdapter.createUser({
-  name: "PC Context E2E",
-  email,
-  emailVerified: true,
-});
+const user = await context.internalAdapter.createUser(
+  {
+    name: "PC Context E2E",
+    email,
+    emailVerified: true,
+  },
+  { method: "email-password" },
+);
 await context.internalAdapter.createAccount({
   userId: user.id,
   accountId: user.id,

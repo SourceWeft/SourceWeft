@@ -15,14 +15,16 @@ export function normalizeChatTitle(
 }
 
 export function normalizeGeneratedChatTitle(value: string | undefined) {
-  const title = normalizeChatTitle(value?.replace(/^[\'"]+|[\'"]+$/g, ""), "");
+  const title = normalizeChatTitle(value?.replace(/^['"]+|['"]+$/g, ""), "");
   if (!title) {
     return null;
   }
 
   return (
-    title.replace(/[.!?。！？]+$/u, "").slice(0, CHAT_TITLE_MAX_LENGTH).trim() ||
-    null
+    title
+      .replace(/[.!?。！？]+$/u, "")
+      .slice(0, CHAT_TITLE_MAX_LENGTH)
+      .trim() || null
   );
 }
 

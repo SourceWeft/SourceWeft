@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
-import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
+import {
+  AIMessage,
+  type BaseMessage,
+  HumanMessage,
+  ToolMessage,
+} from "@langchain/core/messages";
 import { tool } from "@langchain/core/tools";
 import { createDeepAgent, StateBackend } from "deepagents";
 import { test } from "vitest";
@@ -7,6 +12,7 @@ import { createMiddleware } from "langchain";
 import { z } from "zod";
 import { ScriptedChatModel } from "../../../../test/chat-model";
 import {
+  type AgentStepV2ScopeBudget,
   createSourceWeftStepBudgetMiddleware,
   isAgentStepClosing,
   selectAgentStepStop,
@@ -14,13 +20,21 @@ import {
 import { createSourceWeftClosingToolGovernanceMiddleware } from "./closing-tool-governance";
 import { createCommandToolChoiceMiddleware } from "./command-tool-choice";
 
+type TestAgentState = {
+  messages: BaseMessage[];
+  sourceweftRunStepBudget: {
+    userMessageId: string;
+    scopes: Record<string, AgentStepV2ScopeBudget>;
+  };
+  sourceweftPartialTaskResults: Record<string, string>;
+};
 type TestAgent = {
   invoke(
     input: unknown,
     options?: { configurable: { thread_id: string } },
-  ): Promise<Record<string, any>>;
+  ): Promise<TestAgentState>;
   getState(options: { configurable: { thread_id: string } }): Promise<{
-    values: Record<string, any>;
+    values: TestAgentState;
     tasks: Array<{ interrupts?: unknown[] }>;
   }>;
   updateState(
@@ -116,10 +130,7 @@ test("real SDK closing can verify failure, repair, recheck and publish before na
     "publish",
   ]);
   assert.equal(selectAgentStepStop(result, { userMessageId: "user-1" }), null);
-  assert.equal(
-    (result as any).sourceweftRunStepBudget.scopes.main.phase,
-    "closing",
-  );
+  assert.equal(result.sourceweftRunStepBudget.scopes.main!.phase, "closing");
 });
 
 test("closing removes task and capability expansion from advertised tools and rejects hallucinated calls without side effects", async () => {
@@ -150,11 +161,11 @@ test("closing removes task and capability expansion from advertised tools and re
             ? call("enable_skill", "enable")
             : new AIMessage("done");
   });
-  model.bindTools = ((tools: any[]) => {
+  model.bindTools = ((tools: Array<{ name: string }>) => {
     bindings.push(tools.map((t) => t.name));
     return model;
-  }) as any;
-  const result: any = await createTestAgent({
+  }) as ScriptedChatModel["bindTools"];
+  const result = await createTestAgent({
     model,
     tools,
     backend: new StateBackend(),
@@ -174,7 +185,7 @@ test("closing removes task and capability expansion from advertised tools and re
   assert.equal(effects, 1);
   assert.equal(
     result.messages.filter(
-      (m: any) => m instanceof ToolMessage && m.status === "error",
+      (m) => m instanceof ToolMessage && m.status === "error",
     ).length,
     3,
   );
@@ -201,10 +212,13 @@ test("command force target yields to auto in closing and freezes full command-au
         ? call("verify", "verify")
         : new AIMessage("done"),
   );
-  model.bindTools = ((tools: unknown[], options: any) => {
+  model.bindTools = ((
+    tools: unknown[],
+    options?: { tool_choice?: unknown },
+  ) => {
     choices.push(options?.tool_choice);
     return model;
-  }) as any;
+  }) as ScriptedChatModel["bindTools"];
   const command = budget.attachBudgetState(
     createCommandToolChoiceMiddleware({
       initialToolPolicy: { kind: "force", toolName: "target" },
@@ -262,7 +276,7 @@ test("parallel children independently exhaust budgets and return trusted partial
         })
       : new AIMessage("Parent integrated partial results."),
   );
-  const result: any = await createTestAgent({
+  const result = await createTestAgent({
     model: parent,
     backend: new StateBackend(),
     middleware: stack(2, 1).middleware,
@@ -281,11 +295,11 @@ test("parallel children independently exhaust budgets and return trusted partial
   assert.equal(parentCalls, 2);
   assert.equal(selectAgentStepStop(result, { userMessageId: "user-1" }), null);
   const tasks = result.messages.filter(
-    (m: any) => m instanceof ToolMessage && m.name === "task",
+    (m): m is ToolMessage => m instanceof ToolMessage && m.name === "task",
   );
   assert.equal(tasks.length, 2);
   for (const task of tasks) {
-    const partial = JSON.parse(task.content);
+    const partial = JSON.parse(task.content as string);
     assert.equal(partial.status, "partial");
     assert.equal(partial.results.length, 1);
     assert.equal(partial.results[0].agentRunStop.steps, 2);
@@ -326,7 +340,7 @@ test("closing freezes last authorized identities even when a new tool is registe
         ? call("late_tool", "late")
         : new AIMessage("done"),
   );
-  const result: any = await createTestAgent({
+  const result = await createTestAgent({
     model,
     tools,
     backend: new StateBackend(),
@@ -344,7 +358,7 @@ test("closing freezes last authorized identities even when a new tool is registe
   assert.deepEqual(effects, ["probe"]);
   assert(
     result.messages.some(
-      (m: any) =>
+      (m) =>
         m instanceof ToolMessage &&
         m.tool_call_id === "late" &&
         m.status === "error",
@@ -380,7 +394,7 @@ test("same trusted tool-call identity replays a stopped child partial without re
         })
       : new AIMessage("done"),
   );
-  const result: any = await createTestAgent({
+  const result = await createTestAgent({
     model: parent,
     backend: new StateBackend(),
     middleware: stack(3, 1).middleware,
@@ -399,10 +413,10 @@ test("same trusted tool-call identity replays a stopped child partial without re
   assert.equal(parentCalls, 3);
   assert.equal(Object.keys(result.sourceweftRunStepBudget.scopes).length, 2);
   const tasks = result.messages.filter(
-    (m: any) => m instanceof ToolMessage && m.name === "task",
+    (m): m is ToolMessage => m instanceof ToolMessage && m.name === "task",
   );
   assert.equal(tasks.length, 2);
-  assert.equal(tasks[0].content, tasks[1].content);
+  assert.equal(tasks[0]!.content, tasks[1]!.content);
 });
 
 test("duplicate task identities in one SDK decision reject both children before effects", async () => {
@@ -424,7 +438,7 @@ test("duplicate task identities in one SDK decision reject both children before 
         })
       : new AIMessage("duplicate requests rejected"),
   );
-  const result: any = await createTestAgent({
+  const result = await createTestAgent({
     model: parent,
     backend: new StateBackend(),
     middleware: stack(2, 1).middleware,
@@ -441,16 +455,16 @@ test("duplicate task identities in one SDK decision reject both children before 
   }).invoke({ messages: [new HumanMessage("duplicate")] });
   assert.equal(childCalls, 0);
   const rejected = result.messages.filter(
-    (message: any) =>
+    (message): message is ToolMessage =>
       message instanceof ToolMessage &&
       message.tool_call_id === "duplicate-task",
   );
   assert.equal(rejected.length, 2);
   assert(
     rejected.every(
-      (message: any) =>
+      (message) =>
         message.status === "error" &&
-        message.content.includes("AGENT_TASK_IDENTITY_DUPLICATE"),
+        (message.content as string).includes("AGENT_TASK_IDENTITY_DUPLICATE"),
     ),
   );
   assert.equal(Object.keys(result.sourceweftRunStepBudget.scopes).length, 1);
@@ -516,7 +530,7 @@ test("a new trusted user turn prunes old partial task replay records", async () 
       nextBudget.finalization,
     ],
   });
-  const result: any = await nextAgent.invoke(
+  const result = await nextAgent.invoke(
     { messages: [new HumanMessage({ id: "user-new", content: "new" })] },
     options,
   );

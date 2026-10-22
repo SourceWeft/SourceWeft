@@ -113,7 +113,7 @@ describe("renderBlocks persistence", () => {
       "renderBlocks should be an array"
     );
 
-    const renderBlocks = finalMessage?.metadata?.renderBlocks as any[];
+    const renderBlocks = finalMessage?.metadata?.renderBlocks as Array<{ id: string }>;
     assert.equal(renderBlocks.length, 4, "Should have exactly 4 blocks, not duplicated");
 
     assert.deepEqual(
@@ -142,7 +142,7 @@ describe("renderBlocks persistence", () => {
       where: eq(messages.id, assistantMessageId),
     });
 
-    const firstDuration = (firstMessage?.metadata?.threadRun as any)?.durationMs;
+    const firstDuration = (firstMessage?.metadata?.threadRun as { durationMs?: number } | undefined)?.durationMs;
     assert.equal(firstDuration, 5000, "First run duration should be 5000ms");
 
     await db
@@ -163,7 +163,7 @@ describe("renderBlocks persistence", () => {
       where: eq(messages.id, assistantMessageId),
     });
 
-    const secondDuration = (secondMessage?.metadata?.threadRun as any)?.durationMs;
+    const secondDuration = (secondMessage?.metadata?.threadRun as { durationMs?: number } | undefined)?.durationMs;
     assert.equal(secondDuration, 8000, "Second run duration should be 8000ms (accumulated)");
   });
 
@@ -199,8 +199,8 @@ describe("renderBlocks persistence", () => {
       where: eq(messages.id, assistantMessageId),
     });
 
-    const renderBlocks = finalMessage?.metadata?.renderBlocks as any[];
+    const renderBlocks = finalMessage?.metadata?.renderBlocks as Array<{ id: string }>;
     assert.equal(renderBlocks.length, 1, "Should have exactly 1 block (replaced, not appended)");
-    assert.equal(renderBlocks[0].id, "new-1", "Should be the new block");
+    assert.equal(renderBlocks[0]!.id, "new-1", "Should be the new block");
   });
 });

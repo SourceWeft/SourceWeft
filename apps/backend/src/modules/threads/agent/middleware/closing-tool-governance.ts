@@ -228,8 +228,9 @@ export function createSourceWeftClosingToolGovernanceMiddleware(input: {
           .find((message) => AIMessage.isInstance(message));
         if (
           AIMessage.isInstance(decision) &&
-          decision.tool_calls?.filter((call) => call.id === request.toolCall.id)
-            .length! > 1
+          (decision.tool_calls?.filter(
+            (call) => call.id === request.toolCall.id,
+          ).length ?? 0) > 1
         ) {
           return new ToolMessage({
             content:

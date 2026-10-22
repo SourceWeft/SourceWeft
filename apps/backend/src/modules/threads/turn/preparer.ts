@@ -99,17 +99,12 @@ import {
   resolveMarkerToolSelection,
   resolveToolPermissions,
 } from "./thread-command-tools";
-import type {
-  PreparedThreadTurn,
-  ConnectorToolSelection,
-  StreamThreadEventInput,
-} from "./types";
+import type { PreparedThreadTurn, StreamThreadEventInput } from "./types";
 import {
   resolveSourceIdsByTitles,
   resolveSourceTreeScope,
 } from "../../sources/service";
 import type { EnabledSkillDescriptor } from "../../skills/types";
-import { AGENT_TOOL_NAMES } from "@sourceweft/agent-tool-registry";
 import {
   resolveSelectedSkills,
   normalizeSkillIds,
@@ -1611,7 +1606,6 @@ export async function prepareThreadTurn(
   const commandSuccessCriteria =
     resolvedCommand?.workflow?.successCriteria ??
     selectedSkillRuntime.successCriteria;
-  const mcpTools = {};
   const profileAlias = resolvedChatModel.profileAlias;
   const modelAlias = resolvedChatModel.modelAlias;
   const chatProfile = await resolveActiveChatProfileByAlias(profileAlias);

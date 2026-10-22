@@ -39,14 +39,6 @@ type MiddlewareWithAfterAgent = {
   afterAgent?: (state: unknown) => unknown | Promise<unknown>;
 };
 
-type MiddlewareWithAfterModel = {
-  afterModel?:
-    | ((state: unknown, runtime?: unknown) => unknown | Promise<unknown>)
-    | {
-        hook: (state: unknown, runtime?: unknown) => unknown | Promise<unknown>;
-      };
-};
-
 type MiddlewareWithWrapToolCall = {
   // Always awaited by callers, so the hook is typed as returning a promise —
   // `unknown | Promise<unknown>` collapses to `unknown` and breaks
@@ -70,17 +62,6 @@ function afterAgentHook(middleware: unknown) {
     throw new Error("Expected afterAgent hook");
   }
   return hook;
-}
-
-function afterModelHook(middleware: unknown) {
-  const hook = (middleware as MiddlewareWithAfterModel).afterModel;
-  if (typeof hook === "function") {
-    return hook;
-  }
-  if (hook && typeof hook === "object" && typeof hook.hook === "function") {
-    return hook.hook;
-  }
-  throw new Error("Expected afterModel hook");
 }
 
 function wrapModelCallHook(middleware: unknown) {

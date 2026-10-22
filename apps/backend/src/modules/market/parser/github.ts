@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type { NormalizedGitHubSource } from "../types";
 
 const githubUserAgent = "SourceWeft-MCP-Ingest/1.0";

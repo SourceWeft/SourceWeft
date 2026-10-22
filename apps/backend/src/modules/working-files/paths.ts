@@ -34,6 +34,7 @@ export function normalizeWorkingFilePath(path: string | undefined | null) {
   if (
     normalized.includes("..") ||
     normalized.includes("~") ||
+    // eslint-disable-next-line no-control-regex -- rejects control characters
     /[\u0000-\u001f\u007f]/u.test(normalized)
   ) {
     throw new ContentError(

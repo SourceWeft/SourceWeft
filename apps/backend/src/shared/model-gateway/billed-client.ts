@@ -458,11 +458,13 @@ async function* billedStream(
         observation: slot.observation,
       });
     } catch (error) {
+      // eslint-disable-next-line no-unsafe-finally -- stream succeeded: surface the settlement failure
       if (!failed && !closeFailed) throw error;
       logger.warn("Settlement failed while closing gateway stream", {
         operation: billingOptions.operation,
       });
     }
+    // eslint-disable-next-line no-unsafe-finally -- stream succeeded: surface the close failure
     if (closeFailed && !failed) throw closeError;
   }
 }

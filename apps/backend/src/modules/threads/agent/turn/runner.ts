@@ -1,11 +1,6 @@
 import { agentStateUpdateError } from "./state-update-error";
 import { toObjectRecord } from "../../../../shared/records";
 import { Command } from "@langchain/langgraph";
-import {
-  AGENT_TOOL_NAMES,
-  hasAgentToolCapability,
-  isAgentToolDomain,
-} from "@sourceweft/agent-tool-registry";
 import { ContentError } from "../../../content/errors";
 import { logger } from "../../../../shared/logger";
 
@@ -16,24 +11,11 @@ import type { TraceContext } from "../../../llm-observability";
 import type { AgentCheckpointRef, PreparedThreadTurn } from "../..";
 import type { RunCancellationGate } from "../../run-cancellation";
 import {
-  createMessageRenderBlockBuilder,
-  finalizeMessageRenderBlocks,
-} from "../../turn/render-blocks";
-import {
   checkpointRefFromConfig,
   getAgentHeadStateOrNull,
   getAgentStateOrNull,
-  resolveAgentBaseConfig,
-  resolveHitlInterruptCheckpoint,
   type AgentRunnableConfig,
 } from "./checkpoint";
-import {
-  commandSuccessFailureText,
-  isCommandSuccessSatisfied,
-  resolveFinalAssistantText,
-  shouldSuppressLeakedCommandSpecText,
-  shouldSuppressRawToolCallText,
-} from "./command-success";
 import { handleCustomStreamChunk } from "./custom-stream-handler";
 import { buildFinalOutcome } from "./final-outcome";
 import {
@@ -84,50 +66,8 @@ import {
 } from "./tool-stream-handler";
 import type { DeepAgentTurnEvent } from "./events";
 export type { DeepAgentTurnEvent, DeepAgentTurnOutcome } from "./events";
-import { createModelReasoningSegmentId } from "./thinking";
-import {
-  getMcpToolDisplayName,
-  normalizeToolInput,
-  shouldBindAgentTool,
-} from "./tool-utils";
-import {
-  collectToolOutputRecords,
-  extractGeneratedImageArtifacts,
-  extractToolOutputText,
-  extractWebFetchUrls,
-  FILESYSTEM_TOOL_PRESENTERS,
-  filesystemScope,
-  GENERATED_IMAGE_ALT,
-  getConnectorToolErrorTextContentError,
-  getConnectorToolOutputContentError,
-  getFilesystemToolDescription,
-  getFilesystemToolEndTitle,
-  getFilesystemToolStartTitle,
-  normalizeToolOutputString,
-  parseJsonObjectText,
-} from "./output-normalizer";
-import {
-  buildDeepAgentTodosStep,
-  createTraceSequenceAllocator,
-  isDeepAgentsWriteTodosTool,
-  parseDeepAgentTodos,
-  resolveDeepAgentTodosStepStatus,
-  resolveToolsStreamToolCall,
-} from "./tool-tracker";
-import {
-  buildAutoApprovedHitlResume,
-  buildAutoApprovedHitlResumeDecisions,
-  commandResumeFromHitlDecisions,
-  commandResumeFromToolApprovalResume,
-  shouldSilenceEmptyApprovalResume,
-} from "./hitl-handler";
-import {
-  buildArtifactGenerationStep,
-  buildPresentationProgressThinkingEvent,
-  buildPresentationProgressThinkingStep,
-  normalizeGeneratedImageProgressEvent,
-  normalizeGeneratedPresentationProgressEvent,
-} from "./progress-events";
+import { resolveToolsStreamToolCall } from "./tool-tracker";
+import { commandResumeFromToolApprovalResume } from "./hitl-handler";
 export {
   normalizeGeneratedImageProgressEvent,
   normalizeGeneratedPresentationProgressEvent,
@@ -144,7 +84,6 @@ import {
   type ThreadAgentAssembly,
 } from "./turn-assembly";
 import { createTurnRuntime } from "./turn-runtime";
-import { buildAgentRuntimeContext } from "../prompts/agent-runtime-context";
 
 const MAX_AUTO_APPROVED_SANDBOX_HITL_RESUMES = 8;
 
@@ -175,13 +114,7 @@ export async function* invokeDeepAgentTurn(input: {
   abortSignal?: AbortSignal;
 }): AsyncGenerator<DeepAgentTurnEvent> {
   const runtime = createTurnRuntime({ prepared: input.prepared });
-  const {
-    toolCallsById,
-    toolCallOrder,
-    observedToolCallsById,
-    reasoningSegments,
-    resolveToolCallSequence,
-  } = runtime;
+  const { toolCallsById, toolCallOrder, resolveToolCallSequence } = runtime;
 
   // Maps each streamed tool event's subgraph namespace to its tool call id, so a
   // `task` delegate's child tool events can be correlated back to the parent
@@ -280,8 +213,6 @@ export async function* invokeDeepAgentTurn(input: {
       model: billedModel,
       abortSignal: input.abortSignal,
     });
-    const { visibleSources, selectedSourcesOmitted } = runtimePromptContext;
-
     const {
       agent: assembledAgent,
       agentMessages,

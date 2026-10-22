@@ -163,7 +163,7 @@ function withWebCallback(url: string, fallbackPath: string) {
   return parsed.toString();
 }
 
-export function createSourceweftAuth(options: SourceweftAuthOptions = {}): any {
+export function createSourceweftAuth(options: SourceweftAuthOptions = {}) {
   const mode = options.mode || "runtime";
   const isRuntimeMode = mode === "runtime";
 

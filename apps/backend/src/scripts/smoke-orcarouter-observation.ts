@@ -1,7 +1,7 @@
 import "dotenv/config";
-// eslint-disable-next-line @typescript-eslint/no-restricted-imports -- manual
-// smoke probe against an operator-supplied key; intentionally unbilled (see
-// the matching exemption in shared/model-gateway/architecture.test.ts).
+// Manual smoke probe against an operator-supplied key; intentionally unbilled
+// (see the matching exemption in shared/model-gateway/architecture.test.ts).
+// eslint-disable-next-line @typescript-eslint/no-restricted-imports -- see above
 import {
   createModelGateway,
   getProviderResponseAdapter,

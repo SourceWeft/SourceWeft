@@ -321,8 +321,8 @@ test("model-call-begin drops an earlier call's tool-arg slots, so a retry names 
     payload: { type: "model-call-begin", attempt: 1 },
     runtime,
   });
-  [
-    ...handleToolArgDeltaChunk({
+  Array.from(
+    handleToolArgDeltaChunk({
       delta: {
         index: 0,
         id: "old-call",
@@ -331,7 +331,7 @@ test("model-call-begin drops an earlier call's tool-arg slots, so a retry names 
       },
       runtime,
     }),
-  ];
+  );
   runtime.toolCallsById.set("old-call", {
     id: "old-call",
     tool: "write_file",

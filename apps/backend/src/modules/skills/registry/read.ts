@@ -6,7 +6,6 @@ import { SKILL_STORAGE_LIMITS } from "../storage";
 import { RegistrySubmissionError } from "./errors";
 import {
   downloadRepoZip,
-  GITHUB_ZIP_LIMITS,
   GitHubArchiveError,
   listZipEntries,
   readZipEntries,

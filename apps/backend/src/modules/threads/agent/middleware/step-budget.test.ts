@@ -5,12 +5,13 @@ import {
   ToolMessage,
   type BaseMessage,
 } from "@langchain/core/messages";
-import { tool } from "@langchain/core/tools";
+import { type StructuredToolInterface, tool } from "@langchain/core/tools";
 import { MemorySaver, Command, interrupt } from "@langchain/langgraph";
 import {
   createDeepAgent,
   StateBackend,
   createSummarizationMiddleware,
+  type SubAgent,
 } from "deepagents";
 import {
   createMiddleware,
@@ -26,24 +27,35 @@ import {
   selectAgentStepStop,
   agentRunStopFromStepBudgetError,
   currentAgentStepScope,
-  AgentStepSummaryError,
   agentStepBudgetContentError,
   isAgentStepFinalizing,
   buildAgentStepSummaryInput,
+  type AgentStepBudgetState,
 } from "./step-budget";
 import { createSourceWeftSummarizationMiddleware } from "./context-compression";
 import { createCommandToolChoiceMiddleware } from "./command-tool-choice";
 import { createSourceWeftToolCallCountChannelsMiddleware } from "./tool-call-count-channels";
 import { createSourceWeftToolCallContextMiddleware } from "./tool-call-context";
 
+/** The governance `beforeAgent` hook as the v1 seeding wrapper calls it. */
+type BudgetBeforeAgent = (
+  state: {
+    sourceweftRunStepBudget?: {
+      userMessageId?: unknown;
+      scopes?: Record<string, unknown>;
+    } | null;
+  },
+  runtime: unknown,
+) => Record<string, unknown> | undefined;
 // Historical suite exercises explicit checkpoint v1; production initializes v2.
 function createSourceWeftStepBudgetMiddleware(input: {
   userMessageId?: string;
   maxSteps?: number;
 }) {
   const budget = createCurrentStepBudgetMiddleware(input);
-  const original = budget.governance.beforeAgent as Function;
-  budget.governance.beforeAgent = ((state: any, runtime: any) => {
+  const original = budget.governance
+    .beforeAgent as unknown as BudgetBeforeAgent;
+  const seedV1: BudgetBeforeAgent = (state, runtime) => {
     const initialized = original(state, runtime);
     const previous = state.sourceweftRunStepBudget;
     if (
@@ -53,7 +65,7 @@ function createSourceWeftStepBudgetMiddleware(input: {
       return initialized;
     const scope = currentAgentStepScope();
     const existing =
-      previous?.userMessageId === input.userMessageId ? previous.scopes : {};
+      previous?.userMessageId === input.userMessageId ? previous!.scopes : {};
     if (existing?.[scope]) return initialized;
     return {
       ...initialized,
@@ -65,15 +77,21 @@ function createSourceWeftStepBudgetMiddleware(input: {
         },
       },
     };
-  }) as typeof budget.governance.beforeAgent;
+  };
+  budget.governance.beforeAgent =
+    seedV1 as unknown as typeof budget.governance.beforeAgent;
   return budget;
 }
 
 type Options = { configurable: { thread_id: string } };
+type AgentState = {
+  messages: BaseMessage[];
+  sourceweftRunStepBudget: AgentStepBudgetState;
+};
 type Agent = {
-  invoke(input: unknown, options?: Options): Promise<Record<string, any>>;
+  invoke(input: unknown, options?: Options): Promise<AgentState>;
   getState(options: Options): Promise<{
-    values: Record<string, any>;
+    values: AgentState;
     tasks: Array<{ interrupts?: unknown[] }>;
   }>;
   updateState(
@@ -85,10 +103,10 @@ function graph(input: {
   model: ScriptedChatModel;
   uid?: string;
   limit?: number;
-  tools?: any[];
+  tools?: StructuredToolInterface[];
   checkpointer?: MemorySaver;
   middleware?: AgentMiddleware[];
-  subagents?: any[];
+  subagents?: SubAgent[];
 }) {
   const budget = createSourceWeftStepBudgetMiddleware({
     userMessageId: input.uid ?? "user-1",
@@ -346,8 +364,8 @@ test("same-ID retry preserves a reserved finalization slot; a distinct new user 
   await next.invoke({ messages: [new HumanMessage("continue")] }, options);
   const state = await next.getState(options);
   assert.equal(state.values.sourceweftRunStepBudget.userMessageId, "new-user");
-  assert.equal(state.values.sourceweftRunStepBudget.scopes.main.limit, 3);
-  assert.equal(state.values.sourceweftRunStepBudget.scopes.main.steps, 1);
+  assert.equal(state.values.sourceweftRunStepBudget.scopes.main!.limit, 3);
+  assert.equal(state.values.sourceweftRunStepBudget.scopes.main!.steps, 1);
 });
 
 test("checkpointed completed summaries freeze the original limit and do not spend again on same-ID re-entry", async () => {
@@ -484,9 +502,7 @@ test("root and parallel children own stable independent graph budgets", async ()
   assert.equal(parentCalls, 2);
   assert.equal(summaryCalls, 2);
   assert.equal(effects, 4);
-  const scopes = Object.entries(result.sourceweftRunStepBudget.scopes) as Array<
-    [string, any]
-  >;
+  const scopes = Object.entries(result.sourceweftRunStepBudget.scopes);
   assert.equal(scopes.find(([key]) => key === "main")?.[1].steps, 2);
   assert.equal(scopes.filter(([key]) => key !== "main").length, 2);
   assert.equal(selectAgentStepStop(result, { userMessageId: "user-1" }), null);
@@ -612,7 +628,7 @@ test("legacy tool audit counters never become steps or block a fresh policy run"
     { messages: [new HumanMessage("same legacy request")] },
     options,
   );
-  assert.equal(result.sourceweftRunStepBudget.scopes.main.steps, 1);
+  assert.equal(result.sourceweftRunStepBudget.scopes.main!.steps, 1);
   assert.equal(selectAgentStepStop(result, { userMessageId: "user-1" }), null);
 });
 
@@ -876,7 +892,7 @@ test("an approved legacy HITL checkpoint adopts steps only after its pending too
   assert.equal(effects, 1);
   assert.equal(calls, 1);
   assert.equal(result.sourceweftRunStepBudget.userMessageId, "user-1");
-  assert.equal(result.sourceweftRunStepBudget.scopes.main.steps, 1);
+  assert.equal(result.sourceweftRunStepBudget.scopes.main!.steps, 1);
   assert.equal(selectAgentStepStop(result, { userMessageId: "user-1" }), null);
 });
 

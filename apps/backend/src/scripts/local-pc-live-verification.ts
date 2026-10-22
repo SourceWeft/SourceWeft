@@ -12,6 +12,11 @@ const host = JSON.parse(await readFile(join(runDirectory, "host-ready.json"), "u
 const threadId = process.argv[2];
 assert(threadId && /^[\da-f-]{36}$/.test(threadId));
 const marker = "WEB_LOCAL_E2E_5dcf5e35";
+type InvocationResult = { exitCode?: number; output?: string };
+type InvocationRow = { id: string; device_id: string; run_id: string; action: string; payload: unknown; status: string; result: InvocationResult | null; error: unknown };
+type NativeInvocationRow = { id: string; state: string; result: string };
+type SandboxRow = { id: string; provider: string; provider_sandbox_id: string; status: string };
+type MessageRow = { id: string; role: string; content: unknown; content_json: unknown };
 try {
   const thread = (await database.query("SELECT id,execution_target_json FROM threads WHERE id=$1", [threadId])).rows[0];
   assert.deepEqual(thread.execution_target_json, { kind: "local", deviceId: host.deviceId });
@@ -20,26 +25,26 @@ try {
   assert(binding.workspace_path.startsWith(host.nativeData + "/task-workspaces/"));
   const file = join(binding.workspace_path, "browser-triggered.txt");
   assert.equal(await readFile(file, "utf8"), marker + "\n");
-  const invocations = (await database.query("SELECT id,device_id,run_id,action,payload,status,result,error FROM local_tool_invocations WHERE thread_id=$1 ORDER BY created_at", [threadId])).rows;
-  const execution = invocations.find((row: any) => row.action === "command.execute" && row.result?.exitCode === 0 && row.result?.output?.includes(marker));
+  const invocations = (await database.query<InvocationRow>("SELECT id,device_id,run_id,action,payload,status,result,error FROM local_tool_invocations WHERE thread_id=$1 ORDER BY created_at", [threadId])).rows;
+  const execution = invocations.find((row) => row.action === "command.execute" && row.result?.exitCode === 0 && row.result?.output?.includes(marker));
   assert(execution, "A real successful native command must exist");
   assert.equal(execution.device_id, host.deviceId);
-  assert.equal(execution.result.output, binding.workspace_path + "\n" + marker + "\n");
-  const native = JSON.parse(execFileSync("sqlite3", ["-json", join(host.nativeData, "local-host/state.sqlite3"), "SELECT id,state,result FROM local_invocations"], { encoding: "utf8" }));
-  const nativeExecution = native.find((row: any) => row.id === execution.id);
-  assert.equal(nativeExecution.state, "done");
-  assert.deepEqual(JSON.parse(nativeExecution.result), execution.result);
-  const sandboxes = (await database.query("SELECT id,provider,provider_sandbox_id,status FROM agent_sandboxes WHERE thread_id=$1", [threadId])).rows;
+  assert.equal(execution.result!.output, binding.workspace_path + "\n" + marker + "\n");
+  const native: NativeInvocationRow[] = JSON.parse(execFileSync("sqlite3", ["-json", join(host.nativeData, "local-host/state.sqlite3"), "SELECT id,state,result FROM local_invocations"], { encoding: "utf8" }));
+  const nativeExecution = native.find((row) => row.id === execution.id);
+  assert.equal(nativeExecution!.state, "done");
+  assert.deepEqual(JSON.parse(nativeExecution!.result), execution.result);
+  const sandboxes = (await database.query<SandboxRow>("SELECT id,provider,provider_sandbox_id,status FROM agent_sandboxes WHERE thread_id=$1", [threadId])).rows;
   assert(sandboxes.length > 0);
-  assert(sandboxes.every((row: any) => row.provider === "local" && row.provider_sandbox_id === binding.local_workspace_id));
-  const messages = (await database.query("SELECT id,role,content,content_json FROM messages WHERE thread_id=$1", [threadId])).rows;
-  assert(messages.some((row: any) => row.role === "assistant" && JSON.stringify(row).includes(marker) && JSON.stringify(row).includes(binding.workspace_path)));
+  assert(sandboxes.every((row) => row.provider === "local" && row.provider_sandbox_id === binding.local_workspace_id));
+  const messages = (await database.query<MessageRow>("SELECT id,role,content,content_json FROM messages WHERE thread_id=$1", [threadId])).rows;
+  assert(messages.some((row) => row.role === "assistant" && JSON.stringify(row).includes(marker) && JSON.stringify(row).includes(binding.workspace_path)));
   const report = {
     status: "passed", scope: "real-browser-agent-production-rust-host-seatbelt-file-conversation",
     uiEnrollmentCovered: false, enrollment: "isolated fixture via real authentication and enrollment endpoints",
     screenState: "CUA reported locked at test start; native host and independent browser worked",
     thread, binding, file, marker, execution, nativeExecution, sandboxes,
-    incidentalFailures: invocations.filter((row: any) => row.result?.exitCode && row.result.exitCode !== 0),
+    incidentalFailures: invocations.filter((row) => row.result?.exitCode && row.result.exitCode !== 0),
     limitations: ["Native onboarding and folder picker remain untested", "Skill initialization attempted /skills and was denied", "Approval card displayed /workspace instead of native path"],
   };
   await writeFile(join(runDirectory, "execution-verification.json"), JSON.stringify(report, null, 2));
