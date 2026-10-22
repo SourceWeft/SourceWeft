@@ -444,7 +444,18 @@
       "oauth": "OAuth",
       "oauthOrApiKey": "OAuth or API key",
       "apiKey": "API key",
-      "customHeaders": "Custom headers"
+      "customHeaders": "Custom headers",
+      "optionalApiKey": "Not required · optional API key",
+      "explain": {
+        "notRequired": "Connects without a credential.",
+        "optionalApiKey": "Connects without a credential; you can add an API key in the {header} header.",
+        "required": "Needs a credential to connect.",
+        "oauth": "Sign in with OAuth when you connect.",
+        "oauthOrApiKey": "Sign in with OAuth, or send an API key in the {header} header.",
+        "apiKey": "Send an API key in the {header} header.",
+        "apiKeyAnyHeader": "Send an API key in a request header.",
+        "customHeaders": "Send the request headers this server asks for."
+      }
     },
     "detail": {
       "metaFallback": "MCP Server",
@@ -2452,6 +2463,18 @@
       "headersHint": "Use one header per line. Secret values are not shown again after saving.",
       "noAuthNote": "This MCP server does not require credentials.",
       "oauthNote": "This MCP server uses OAuth. Connect your account with the provider — you'll be redirected to grant access, then returned here. Your token is stored encrypted and refreshed automatically.",
+      "optionalKeyNote": "This MCP server works without a credential. Add an API key if you have one.",
+      "method": {
+        "label": "Connection method",
+        "oauth": "Sign in with OAuth",
+        "apiKey": "Use an API key",
+        "optional": "Optional",
+        "switchNotice": "Switching replaces your current connection."
+      },
+      "connectedVia": {
+        "oauth": "Connected with OAuth",
+        "header": "Connected with an API key"
+      },
       "connect": "Connect",
       "close": "Close",
       "cancel": "Cancel",
@@ -2461,7 +2484,9 @@
         "nameAndValueRequired": "Header name and value are required.",
         "bearerRequired": "Enter a bearer token before saving.",
         "apiKeyRequired": "Enter the header name and API key before saving.",
-        "headerRequired": "Add at least one header before saving."
+        "headerRequired": "Add at least one header before saving.",
+        "keyRequired": "Enter an API key before saving.",
+        "methodNotAllowed": "This server doesn't accept that connection method."
       },
       "toasts": {
         "saved": "MCP credentials saved",
