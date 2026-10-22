@@ -1727,6 +1727,34 @@ test("testInstall on an OAuth-or-key install uses the member's saved bearer key"
   assert.equal(auth.authProvider, undefined);
 });
 
+test("testInstall returns the install with the member's own connection status", async () => {
+  resetAuthMethodMocks();
+  const install = oauthOrKeyInstall();
+  mocks.findWorkspaceMcpInstall.mockResolvedValue(install);
+  mocks.findWorkspaceMcpCredential.mockResolvedValue({
+    authType: "bearer",
+    encryptedSecret: "enc:arc-key",
+  });
+  mocks.upsertWorkspaceMcpTools.mockResolvedValue(undefined);
+  // The row as stored: the install-level status, never the member's.
+  mocks.updateWorkspaceMcpInstall.mockResolvedValue({
+    ...install,
+    credentialStatus: "required",
+  });
+  vi.mocked(listUserCredentialInstallIds).mockResolvedValue(
+    new Set([install.id]),
+  );
+
+  const result = await new McpService().testInstall({
+    workspaceId: "workspace_1",
+    userId: "user_1",
+    installId: install.id,
+  });
+
+  assert.equal(result.install.credentialStatus, "configured");
+  assert.equal(result.install.connectedVia, "header");
+});
+
 test("testInstall on an OAuth-or-key install with no connection fails fast", async () => {
   resetAuthMethodMocks();
   const install = oauthOrKeyInstall();

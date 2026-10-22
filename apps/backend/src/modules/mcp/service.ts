@@ -1224,8 +1224,16 @@ export class McpService {
         lastTestedAt: new Date(),
         lastError: null,
       });
+      // The stored row carries the install-level credentialStatus; the caller
+      // gets their own, as from every other install response.
+      const [installWithStatus] = await overlayUserCredentialStatus({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        userId: input.userId,
+        installs: [updated ?? install],
+      });
       return {
-        install: updated ?? install,
+        install: installWithStatus ?? updated ?? install,
         toolCount: tools.length,
       };
     } catch (error) {
