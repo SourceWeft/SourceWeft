@@ -6,11 +6,33 @@ import { MemorySaver } from "@langchain/langgraph";
 import { createDeepAgent, StateBackend } from "deepagents";
 import { z } from "zod";
 import { ScriptedChatModel } from "./chat-model";
-import { createSourceWeftStepBudgetMiddleware } from "../modules/threads/agent/middleware/step-budget";
+import {
+  createSourceWeftStepBudgetMiddleware,
+  type AgentStepV2ScopeBudget,
+} from "../modules/threads/agent/middleware/step-budget";
 import {
   carryAgentStepBudgetIntoRefresh,
   type RefreshBudgetAgent,
 } from "../modules/threads/agent/turn/refresh-step-budget";
+import type { AgentRunnableConfig } from "../modules/threads/agent/turn/checkpoint";
+
+/**
+ * The budget channel as these tests read it. Scopes may be legacy v1 or v2,
+ * so every v2-only field is optional.
+ */
+type BudgetView = {
+  userMessageId: string;
+  scopes: Record<string, Partial<AgentStepV2ScopeBudget>>;
+};
+type AgentState = { sourceweftRunStepBudget: BudgetView };
+// The SDK's static middleware inference requires middleware-owned channels at
+// invocation; the runtime initializes them, so tests use an explicit boundary.
+type Agent = RefreshBudgetAgent & {
+  invoke(input: unknown, config?: unknown): Promise<AgentState>;
+  getState(
+    config: unknown,
+  ): Promise<{ config: AgentRunnableConfig; values: AgentState }>;
+};
 
 const destination = {
   configurable: { thread_id: "destination", checkpoint_ns: "" },
@@ -63,11 +85,11 @@ function snapshot(
 }
 function fake(states: ReturnType<typeof snapshot>[]) {
   const updates: Record<string, unknown>[] = [],
-    queries: unknown[] = [];
+    queries: Array<{ config: unknown; options: unknown }> = [];
   const agent: RefreshBudgetAgent = {
     async *getStateHistory(config, options) {
       queries.push({ config, options });
-      const floor = (options.before as any)?.configurable.checkpoint_id;
+      const floor = options.before?.configurable!.checkpoint_id;
       const start = floor
         ? states.findIndex(
             (state) => state.config.configurable.checkpoint_id === floor,
@@ -89,7 +111,8 @@ function fake(states: ReturnType<typeof snapshot>[]) {
   return { agent, updates, queries };
 }
 const failure = (error: unknown) =>
-  (error as any)?.code === "AGENT_STEP_REFRESH_UNAVAILABLE";
+  (error as { code?: unknown } | null | undefined)?.code ===
+  "AGENT_STEP_REFRESH_UNAVAILABLE";
 async function carry(
   agent: RefreshBudgetAgent,
   extra: Record<string, unknown> = {},
@@ -111,7 +134,7 @@ test("refresh keeps an older exhausted high-water mark over a newer buggy low-bu
   ]);
   await carry(agent);
   assert.deepEqual(
-    (updates[0]!.sourceweftRunStepBudget as any).scopes.main,
+    (updates[0]!.sourceweftRunStepBudget as BudgetView).scopes.main,
     exhausted(),
   );
 });
@@ -130,7 +153,8 @@ test.each(["prepared", "ready"])(
       snapshot("earlier", v2({ steps: 2, normalSteps: 2 })),
     ]);
     await carry(agent);
-    const entry = (updates[0]!.sourceweftRunStepBudget as any).scopes.main;
+    const entry = (updates[0]!.sourceweftRunStepBudget as BudgetView).scopes
+      .main!;
     assert.equal(entry.steps, 2);
     assert.equal(entry.decisionPreparation, undefined);
     assert.deepEqual(entry.availableToolIds, ["probe"]);
@@ -151,7 +175,7 @@ test("refresh drops the interrupted run's wall clock and keeps every consumed st
   ]);
   await carry(single.agent);
   assert.deepEqual(
-    (single.updates[0]!.sourceweftRunStepBudget as any).scopes.main,
+    (single.updates[0]!.sourceweftRunStepBudget as BudgetView).scopes.main,
     exhausted(),
   );
   // Merged candidates: the selected high-water entry is stripped on merge.
@@ -163,7 +187,8 @@ test("refresh drops the interrupted run's wall clock and keeps every consumed st
     }),
   ]);
   await carry(merged.agent);
-  const entry = (merged.updates[0]!.sourceweftRunStepBudget as any).scopes.main;
+  const entry = (merged.updates[0]!.sourceweftRunStepBudget as BudgetView)
+    .scopes.main!;
   assert.deepEqual(entry, exhausted());
   assert.equal("wallClock" in entry, false);
 });
@@ -173,7 +198,7 @@ test("refresh carries a budget without a wall clock unchanged", async () => {
     const f = fake([snapshot("plain", entry)]);
     await carry(f.agent);
     assert.deepEqual(
-      (f.updates[0]!.sourceweftRunStepBudget as any).scopes.main,
+      (f.updates[0]!.sourceweftRunStepBudget as BudgetView).scopes.main,
       entry,
     );
   }
@@ -249,7 +274,7 @@ test("native history is paged and a trusted beforeInput floor avoids scanning ea
   const f = fake(states);
   await carry(f.agent);
   assert.equal(f.queries.length, 2);
-  for (const query of f.queries as any[])
+  for (const query of f.queries)
     assert.deepEqual(query.config, {
       configurable: { thread_id: "origin", checkpoint_ns: "" },
     });
@@ -278,7 +303,7 @@ test("legacy adoption is explicit, and missing recorded policy is not mistaken f
   const known = fake([snapshot("v1", v1)]);
   await carry(known.agent);
   assert.deepEqual(
-    (known.updates[0]!.sourceweftRunStepBudget as any).scopes.main,
+    (known.updates[0]!.sourceweftRunStepBudget as BudgetView).scopes.main,
     v1,
   );
 });
@@ -327,7 +352,7 @@ test.each(["reserved", "completed"])(
         backend: new StateBackend(),
         checkpointer: saver,
         middleware: [b.governance, b.toolCallRepair, b.finalization],
-      }) as any;
+      }) as unknown as Agent;
     }
     const opts = { configurable: { thread_id: `sdk-${summaryStatus}` } };
     const prior = graph("prior", false);
@@ -389,11 +414,11 @@ test.each(["reserved", "completed"])(
       "new-human",
     );
     assert.equal(
-      state.values.sourceweftRunStepBudget.scopes.main.normalLimit,
+      state.values.sourceweftRunStepBudget.scopes.main!.normalLimit,
       3,
     );
     assert.equal(
-      state.values.sourceweftRunStepBudget.scopes.main.normalSteps,
+      state.values.sourceweftRunStepBudget.scopes.main!.normalSteps,
       1,
     );
   },
@@ -418,7 +443,7 @@ test.each(["prepared", "ready"])(
         backend: new StateBackend(),
         checkpointer: saver,
         middleware: [b.governance, b.toolCallRepair, b.finalization],
-      }) as any;
+      }) as unknown as Agent;
     };
     const origin = build();
     const opts = { configurable: { thread_id: `pending-${status}` } };
@@ -456,8 +481,8 @@ test.each(["prepared", "ready"])(
       config,
     );
     assert.equal(calls, 1);
-    assert.equal(result.sourceweftRunStepBudget.scopes.main.normalSteps, 1);
-    assert.equal(result.sourceweftRunStepBudget.scopes.main.closingSteps, 1);
+    assert.equal(result.sourceweftRunStepBudget.scopes.main!.normalSteps, 1);
+    assert.equal(result.sourceweftRunStepBudget.scopes.main!.closingSteps, 1);
   },
 );
 
@@ -495,7 +520,7 @@ test("native SDK refresh keeps v1 policy instead of reopening a closing allowanc
       backend: new StateBackend(),
       checkpointer: saver,
       middleware: [b.governance, b.toolCallRepair, b.finalization],
-    }) as any;
+    }) as unknown as Agent;
   };
   const origin = build("u");
   const opts = { configurable: { thread_id: "legacy-v1-origin" } };
@@ -524,10 +549,10 @@ test("native SDK refresh keeps v1 policy instead of reopening a closing allowanc
   );
   assert.equal(calls, 2);
   assert.equal(
-    result.sourceweftRunStepBudget.scopes.main.policyVersion,
+    result.sourceweftRunStepBudget.scopes.main!.policyVersion,
     undefined,
   );
-  assert.equal(result.sourceweftRunStepBudget.scopes.main.limit, 2);
+  assert.equal(result.sourceweftRunStepBudget.scopes.main!.limit, 2);
 });
 
 test("reaching an early floor cannot hide a required known checkpoint", async () => {

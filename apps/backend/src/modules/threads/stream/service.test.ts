@@ -1,3 +1,4 @@
+/* eslint-disable require-yield -- fake turn streams here fail before emitting any event */
 import { ToolCallLimitExceededError } from "langchain";
 import assert from "node:assert/strict";
 import { afterAll, test, vi } from "vitest";

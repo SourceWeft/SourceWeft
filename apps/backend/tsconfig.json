@@ -2,6 +2,10 @@
   "extends": "../../packages/typescript-config/base.json",
   "compilerOptions": {
     "baseUrl": ".",
+    // An application, not a library: nothing consumes its declarations, and
+    // emitting them would force `any` onto inferred better-auth types.
+    "declaration": false,
+    "declarationMap": false,
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "noEmit": true,

@@ -24,8 +24,8 @@ export function toPlainText(value: string): string {
       .replace(/^\s*[-*+]\s+/gm, "")
       .replace(/(\*\*|__)(.+?)\1/g, "$2")
       .replace(/`+/g, "")
-      // eslint-disable-next-line no-control-regex
       .replace(
+        // eslint-disable-next-line no-control-regex -- strips control characters
         /[\u0000-\u0008\u000b-\u001f\u007f\u200b-\u200f\u2028-\u202e]/g,
         " ",
       )

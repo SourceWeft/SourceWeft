@@ -5,16 +5,31 @@ import { createMiddleware } from "langchain";
 import { test } from "vitest";
 import { ScriptedChatModel } from "../../../../test/chat-model";
 
+/** The parts of the `task` tool's Command result this probe asserts on. */
+type ProbeToolResult = {
+  update?: {
+    messages: Array<{ tool_call_id?: string; content: unknown }>;
+  };
+};
+
 test("installed SDK task identity, child exposure, runtime state and native output probe", async () => {
   const advertised: string[][] = [];
   let parentCalls = 0;
-  let observed: any;
+  let observed:
+    | {
+        name: string;
+        id: string | undefined;
+        stateMessages: number;
+        runtime: boolean;
+        result: ProbeToolResult;
+      }
+    | undefined;
   const childTools: string[][] = [];
   const child = new ScriptedChatModel(() => new AIMessage("child result"));
-  child.bindTools = ((tools: any[]) => {
+  child.bindTools = ((tools: Array<{ name: string }>) => {
     childTools.push(tools.map((t) => t.name));
     return child;
-  }) as any;
+  }) as ScriptedChatModel["bindTools"];
   const model = new ScriptedChatModel(() =>
     ++parentCalls === 1
       ? new AIMessage({
@@ -29,10 +44,10 @@ test("installed SDK task identity, child exposure, runtime state and native outp
         })
       : new AIMessage("done"),
   );
-  model.bindTools = ((tools: any[]) => {
+  model.bindTools = ((tools: Array<{ name: string }>) => {
     advertised.push(tools.map((t) => t.name));
     return model;
-  }) as any;
+  }) as ScriptedChatModel["bindTools"];
   const probe = createMiddleware({
     name: "Probe",
     wrapToolCall: async (request, handler) => {
@@ -42,12 +57,12 @@ test("installed SDK task identity, child exposure, runtime state and native outp
         id: request.toolCall.id,
         stateMessages: request.state.messages.length,
         runtime: !!request.runtime.signal,
-        result,
+        result: result as ProbeToolResult,
       };
       return result;
     },
   });
-  const result: any = await createDeepAgent({
+  const result = await createDeepAgent({
     model,
     backend: new StateBackend(),
     middleware: [probe],
@@ -62,12 +77,13 @@ test("installed SDK task identity, child exposure, runtime state and native outp
     ],
   }).invoke({ messages: [new HumanMessage("probe")] });
   assert(advertised[0]!.includes("task"));
+  assert(observed);
   assert.equal(observed.name, "task");
   assert.equal(observed.id, "probe-task");
   assert(observed.stateMessages > 0);
   assert(observed.result.update);
-  assert.equal(observed.result.update.messages[0].tool_call_id, "probe-task");
-  assert.equal(observed.result.update.messages[0].content, "child result");
+  assert.equal(observed.result.update.messages[0]!.tool_call_id, "probe-task");
+  assert.equal(observed.result.update.messages[0]!.content, "child result");
   assert(childTools.every((names) => !names.includes("task")));
-  assert.equal(result.messages.at(-1).content, "done");
+  assert.equal(result.messages.at(-1)!.content, "done");
 });

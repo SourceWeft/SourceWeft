@@ -1,4 +1,5 @@
 import { config as baseConfig } from "@sourceweft/eslint-config/base";
+import globals from "globals";
 
 /**
  * Backend ESLint configuration.
@@ -14,6 +15,32 @@ export default [
   ...baseConfig,
   {
     ignores: ["dist/**", "node_modules/**", "drizzle/**"],
+  },
+  {
+    // Plain Node scripts (storage init, asset copy) run outside TypeScript.
+    files: ["**/*.{js,mjs}"],
+    languageOptions: {
+      globals: globals.node,
+    },
+  },
+  {
+    rules: {
+      // This rule guards env vars inlined into cached build outputs. The
+      // backend reads its environment at runtime (tsup leaves process.env
+      // untouched) and loads .env itself, so turbo's hash is unaffected.
+      "turbo/no-undeclared-env-vars": "off",
+      // A leading underscore marks a deliberately unused binding: interface
+      // parameters, and properties omitted via `const { x: _x, ...rest }`.
+      "@typescript-eslint/no-unused-vars": [
+        "error",
+        {
+          argsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
+          caughtErrorsIgnorePattern: "^_",
+          destructuredArrayIgnorePattern: "^_",
+        },
+      ],
+    },
   },
   {
     files: ["src/**/*.ts"],

@@ -68,7 +68,6 @@ import {
   type SkillRunObserver,
 } from "../../../skills/market/run-stats";
 import { buildRequiredSandboxRuntimeAssetPlans } from "../../../../shared/sandbox-assets/plans";
-import { config } from "../../../../shared/config";
 import { createSourceWeftSubagentMiddlewareStack } from "../middleware";
 import { createGeneralPurposeSubagent } from "../subagents/general-purpose";
 import { createExploreSubagent } from "../subagents/explore";
@@ -916,7 +915,6 @@ export async function buildThreadAgentAssembly(
     mcpTools,
     mcpToolRuntime,
   } = toolCollection;
-  const { skillsBackend } = filesystemBackend;
   const promptFilesystemMounts = filesystemMountsForPrompt({
     filesystemBackend,
     sandboxRuntime,

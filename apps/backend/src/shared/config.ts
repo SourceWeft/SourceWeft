@@ -100,24 +100,6 @@ function parsePositiveNumber(value: string | undefined, fallback: number) {
   return parsed;
 }
 
-function parseNonNegativeNumber(value: string | undefined, fallback: number) {
-  if (value === undefined) {
-    return fallback;
-  }
-
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    return fallback;
-  }
-
-  return parsed;
-}
-
-function parseNonNegativeInteger(value: string | undefined, fallback: number) {
-  const parsed = parseNonNegativeNumber(value, fallback);
-  return Number.isInteger(parsed) ? parsed : fallback;
-}
-
 const pdf2MarkdownOutputs = new Set(["markdown", "json", "all"]);
 
 function parseCsv(value: string | undefined): string[] {

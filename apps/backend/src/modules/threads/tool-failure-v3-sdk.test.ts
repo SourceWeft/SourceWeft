@@ -73,7 +73,13 @@ test.each([
     let typedReceipt = false;
     for await (const protocol of stream) {
       if (protocol.method !== "tools") continue;
-      const data = protocol.params?.data as any;
+      const data = protocol.params?.data as
+        | {
+            event?: unknown;
+            tool_call_id?: unknown;
+            output?: { status?: unknown };
+          }
+        | undefined;
       if (data?.event === "tool-finished" && data.tool_call_id === id)
         typedReceipt = data.output?.status === "error";
       const payload = adaptToolsEvent(data, names);
@@ -115,11 +121,15 @@ test.each([
       runtime.collectToolCalls()[0]?.error ?? "",
       /Backend rejected/,
     );
-    const durableCall = (snapshot.toolCalls as any[])[0];
+    const durableCall = (
+      snapshot.toolCalls as Array<{ status: string; error: string }>
+    )[0]!;
     assert.equal(durableCall.status, "error");
     assert.match(durableCall.error, /Backend rejected/);
     assert.equal(
-      (snapshot.traceParts as any[]).find((p) => p.kind === "tool")?.status,
+      (snapshot.traceParts as Array<{ kind: string; status?: string }>).find(
+        (p) => p.kind === "tool",
+      )?.status,
       "error",
     );
   },

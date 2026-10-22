@@ -80,6 +80,7 @@ function fail(message: string): never {
 function safePath(path: string) {
   return (
     path.length > 0 &&
+    // eslint-disable-next-line no-control-regex -- rejects control characters
     !/[\\\x00-\x1f\x7f]/.test(path) &&
     path.split("/").every((p) => p !== "" && p !== "." && p !== "..")
   );

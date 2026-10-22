@@ -55,7 +55,7 @@ export type ApplyGeneratedThreadTitleInput = Omit<
 
 export function buildFallbackThreadTitle(messageContent: string) {
   const normalized = messageContent
-    .replace(/[`*_#>\[\](){}]/g, " ")
+    .replace(/[`*_#>[\](){}]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 

@@ -246,6 +246,7 @@ export function createFileDocumentTools(input: {
       if (
         glob.startsWith("/") ||
         glob.split("/").includes("..") ||
+        // eslint-disable-next-line no-control-regex -- rejects control characters
         /[\x00-\x1f]/.test(glob)
       )
         throw new ContentError(

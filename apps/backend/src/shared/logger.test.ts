@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { Writable } from "node:stream";
-import { afterEach, test } from "vitest";
+import { test } from "vitest";
 import pino from "pino";
 
 // Re-implement the logger factory inline so tests can capture output.
@@ -115,9 +115,7 @@ test("handles BigInt in metadata", () => {
   const { stream, lines } = captureOutput();
   const logger = createLogger(stream);
 
-  assert.doesNotThrow(() =>
-    logger.info("BigInt test", { count: 1n }),
-  );
+  assert.doesNotThrow(() => logger.info("BigInt test", { count: 1n }));
 
   const parsed = lines().map((l) => JSON.parse(l));
   assert.equal(parsed.length, 1);

@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
-import { AIMessage, HumanMessage } from "@langchain/core/messages";
-import { tool } from "@langchain/core/tools";
+import {
+  AIMessage,
+  type BaseMessage,
+  HumanMessage,
+} from "@langchain/core/messages";
+import { type StructuredToolInterface, tool } from "@langchain/core/tools";
 import { MemorySaver, Command, interrupt } from "@langchain/langgraph";
 import { createDeepAgent, StateBackend } from "deepagents";
 import { createMiddleware, type AgentMiddleware } from "langchain";
@@ -12,6 +16,7 @@ import {
   currentAgentStepScope,
   selectAgentRunProgress,
   selectAgentStepStop,
+  type AgentStepBudgetState,
   type AgentStepV2ScopeBudget,
 } from "./step-budget";
 
@@ -22,12 +27,23 @@ type AgentOptions = {
   configurable?: { thread_id: string };
   recursionLimit?: number;
 };
+type AgentState = {
+  messages: BaseMessage[];
+  sourceweftRunStepBudget: AgentStepBudgetState;
+};
 type Agent = {
-  invoke(input: unknown, options?: AgentOptions): Promise<Record<string, any>>;
+  invoke(input: unknown, options?: AgentOptions): Promise<AgentState>;
   getState(
     options: AgentOptions,
-  ): Promise<{ values: Record<string, any>; tasks: unknown[] }>;
+  ): Promise<{ values: AgentState; tasks: unknown[] }>;
 };
+/** The governance `beforeAgent` hook as the v1 seeding wrapper calls it. */
+type BudgetBeforeAgent = (
+  state: {
+    sourceweftRunStepBudget?: { scopes?: Record<string, unknown> } | null;
+  },
+  runtime: unknown,
+) => Record<string, unknown> | undefined;
 const MINUTE = 60_000;
 const WORKING_MS = 45 * MINUTE;
 const CLOSING_MS = 10 * MINUTE;
@@ -35,11 +51,11 @@ const CLOSING_MARKER = "You have entered bounded delivery closing";
 const SUMMARY_MARKER = "business-step budget for this run is exhausted";
 const call = (name: string, id: string) =>
   new AIMessage({ content: "", tool_calls: [{ name, id, args: {} }] });
-const hasText = (messages: any[], marker: string) =>
+const hasText = (messages: BaseMessage[], marker: string) =>
   messages.some(
     (m) => typeof m.content === "string" && m.content.includes(marker),
   );
-const closingRemaining = (messages: any[]) => {
+const closingRemaining = (messages: BaseMessage[]) => {
   const system = messages.find(
     (m) => typeof m.content === "string" && m.content.includes(CLOSING_MARKER),
   );
@@ -103,7 +119,7 @@ function progressObserver(
 function agentFor(input: {
   budget: ReturnType<typeof createSourceWeftStepBudgetMiddleware>;
   model: ScriptedChatModel;
-  tools?: any[];
+  tools?: StructuredToolInterface[];
   saver?: MemorySaver;
   observer?: AgentMiddleware;
 }) {
@@ -120,7 +136,7 @@ function agentFor(input: {
     ...(input.saver ? { checkpointer: input.saver } : {}),
   }) as unknown as Agent;
 }
-const mainScope = (state: Record<string, any>) =>
+const mainScope = (state: AgentState) =>
   state.sourceweftRunStepBudget.scopes.main as AgentStepV2ScopeBudget;
 
 test("44:59 stays working; 45:00 makes the call the last normal decision and the next call runs closing with CLOSING_PROMPT and closingToolIds; closing +10:00 finalizes with a step_limit stop", async () => {
@@ -319,8 +335,9 @@ test("a legacy v1 scope keeps its two-stage policy and never gains a clock", asy
     summaryCalls = 0;
   const budget = budgetFor({ now: time.now, normal: 400, closing: 40 });
   // Seed the persisted v1 budget the way the historical suite does.
-  const original = budget.governance.beforeAgent as Function;
-  budget.governance.beforeAgent = ((state: any, runtime: any) => {
+  const original = budget.governance
+    .beforeAgent as unknown as BudgetBeforeAgent;
+  const seedV1: BudgetBeforeAgent = (state, runtime) => {
     const initialized = original(state, runtime);
     if (state.sourceweftRunStepBudget?.scopes?.[currentAgentStepScope()])
       return initialized;
@@ -333,7 +350,9 @@ test("a legacy v1 scope keeps its two-stage policy and never gains a clock", asy
         },
       },
     };
-  }) as typeof budget.governance.beforeAgent;
+  };
+  budget.governance.beforeAgent =
+    seedV1 as unknown as typeof budget.governance.beforeAgent;
   const result = await agentFor({
     budget,
     tools: [probeTool()],
@@ -348,7 +367,7 @@ test("a legacy v1 scope keeps its two-stage policy and never gains a clock", asy
   }).invoke({ messages: [new HumanMessage("work")] });
   assert.equal(calls, 3);
   assert.equal(summaryCalls, 1);
-  const scope = result.sourceweftRunStepBudget.scopes.main;
+  const scope = result.sourceweftRunStepBudget.scopes.main!;
   assert.equal("policyVersion" in scope, false);
   assert.equal("wallClock" in scope, false);
   assert.deepEqual(

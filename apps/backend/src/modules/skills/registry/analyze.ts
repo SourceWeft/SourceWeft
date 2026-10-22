@@ -273,6 +273,7 @@ export function analyzeRegistrySkill(input: {
     typeof originalName !== "string" ||
     !originalName.trim() ||
     originalName.length > 1024 ||
+    // eslint-disable-next-line no-control-regex -- rejects control characters
     /[\u0000-\u001f\u007f]/.test(originalName)
   ) {
     throw new RegistrySubmissionError(

@@ -1,4 +1,3 @@
-import { config } from "../../shared/config";
 import { sanitizeCustomHeaders } from "../../shared/security/public-endpoint";
 import {
   createLlmFetch,

@@ -132,6 +132,7 @@ function wrapBilledModel<T extends object>(
           observation: slot.observation,
         });
       } catch (error) {
+        // eslint-disable-next-line no-unsafe-finally -- call succeeded: surface the settlement failure
         if (!failed) throw error;
         logger.warn("Settlement failed after model error", { operation });
       }

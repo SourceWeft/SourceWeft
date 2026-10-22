@@ -5,7 +5,6 @@ import type {
   FileData,
   FileDownloadResponse,
   FileInfo,
-  FileOperationError,
   FileUploadResponse,
   GlobResult,
   GrepMatch,
@@ -132,31 +131,6 @@ function inferMimeType(path: string) {
 
 function toError(error: unknown) {
   return error instanceof Error ? error.message : String(error);
-}
-
-function fileOperationErrorFromMessage(error: unknown): FileOperationError {
-  const normalized = toError(error).toLowerCase();
-  if (
-    normalized.includes("enoent") ||
-    normalized.includes("not found") ||
-    normalized.includes("no such file")
-  ) {
-    return "file_not_found";
-  }
-  if (normalized.includes("eisdir") || normalized.includes("directory")) {
-    return "is_directory";
-  }
-  if (
-    normalized.includes("erofs") ||
-    normalized.includes("read-only") ||
-    normalized.includes("not allowed") ||
-    normalized.includes("permission") ||
-    normalized.includes("quota") ||
-    normalized.includes("size")
-  ) {
-    return "permission_denied";
-  }
-  return "invalid_path";
 }
 
 function missingWorkingFileHint(normalizedPath: string) {

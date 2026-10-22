@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { AIMessage, HumanMessage } from "@langchain/core/messages";
-import { tool } from "@langchain/core/tools";
+import { type StructuredToolInterface, tool } from "@langchain/core/tools";
 import { MemorySaver, Command, interrupt } from "@langchain/langgraph";
 import { createDeepAgent, StateBackend } from "deepagents";
 import {
@@ -10,12 +10,18 @@ import {
 } from "langchain";
 import { test } from "vitest";
 import { z } from "zod";
+import type { AgentRunProgress } from "@sourceweft/contracts";
 import { ScriptedChatModel } from "../../../../test/chat-model";
 import {
   createSourceWeftStepBudgetMiddleware,
   selectAgentRunProgress,
+  type AgentStepV2ScopeBudget,
 } from "./step-budget";
 import { adoptV3RunStream, unwrapCustomEvent } from "../turn/v3-protocol";
+/** The budget channel as middleware hooks in this suite read it. */
+type BudgetView = {
+  sourceweftRunStepBudget?: { scopes: Record<string, AgentStepV2ScopeBudget> };
+};
 type Agent = {
   invoke(input: unknown, options: unknown): Promise<unknown>;
   streamEvents(input: unknown, options: unknown): Promise<unknown>;
@@ -29,9 +35,10 @@ async function collect(agent: Agent, input: unknown, thread: string) {
       configurable: { thread_id: thread },
     }),
   );
-  const progress: any[] = [];
+  const progress: AgentRunProgress[] = [];
   for await (const event of run) {
-    const data = unwrapCustomEvent(event.params?.data) as any;
+    const data = unwrapCustomEvent(event.params?.data) as
+      { type?: unknown; progress: AgentRunProgress } | null | undefined;
     if (event.method === "custom" && data?.type === "agent-run-progress")
       progress.push(data.progress);
   }
@@ -40,7 +47,7 @@ async function collect(agent: Agent, input: unknown, thread: string) {
 function build(input: {
   model: ScriptedChatModel;
   saver: MemorySaver;
-  tools?: any[];
+  tools?: StructuredToolInterface[];
   hitl?: boolean;
   extra?: (
     budget: ReturnType<typeof createSourceWeftStepBudgetMiddleware>,
@@ -164,8 +171,8 @@ test.each(["ready", "prepared"])(
                   name: "CrashPreparedProgress",
                   afterModel: (state) => {
                     if (
-                      (state as any).sourceweftRunStepBudget?.scopes.main
-                        .decisionPreparation?.status === "prepared"
+                      (state as BudgetView).sourceweftRunStepBudget?.scopes
+                        .main!.decisionPreparation?.status === "prepared"
                     )
                       throw new Error("preparation-crash");
                   },

@@ -1,5 +1,9 @@
-import { adaptBillingTestPort } from "../../test/billing-runtime";
+import {
+  adaptBillingTestPort,
+  type LegacyBillingTestPort,
+} from "../../test/billing-runtime";
 import { beforeEach, expect, test, vi } from "vitest";
+import type { ChunkSpec } from "../content/types";
 
 const TEAM_ID = "team_1";
 const WORKSPACE_ID = "ws_1";
@@ -99,13 +103,13 @@ const { SourceIndexingService } = await import("./indexing-service");
 
 /** Captures what the call site handed the billing wrapper. */
 type Captured = {
-  scopeInput?: Record<string, any>;
-  embedOptions?: Record<string, any>;
+  scopeInput?: Record<string, unknown>;
+  embedOptions?: Record<string, unknown>;
   embedPayload?: unknown;
 };
 
 let captured: Captured;
-let billing: {
+let billing: LegacyBillingTestPort & {
   meterIngestion: ReturnType<typeof vi.fn>;
   getSummary: ReturnType<typeof vi.fn>;
 };
@@ -141,11 +145,17 @@ beforeEach(() => {
   });
 
   withBilledModelGateway.mockImplementation(
-    async (input: Record<string, any>, run: (gateway: any) => Promise<any>) => {
+    async (
+      input: Record<string, unknown>,
+      run: (gateway: unknown) => Promise<unknown>,
+    ) => {
       captured.scopeInput = input;
       return run({
         embeddings: {
-          embedBatch: async (payload: unknown, options: any) => {
+          embedBatch: async (
+            payload: unknown,
+            options: Record<string, unknown>,
+          ) => {
             captured.embedOptions = options;
             captured.embedPayload = payload;
             return embedResult;
@@ -162,10 +172,12 @@ beforeEach(() => {
 });
 
 function makeService() {
-  return new SourceIndexingService(billing as any);
+  return new SourceIndexingService(billing);
 }
 
-const chunks = [{ text: "hello world", startIndex: 0, endIndex: 11 }] as any;
+const chunks = [
+  { text: "hello world", startIndex: 0, endIndex: 11 },
+] as ChunkSpec[];
 
 test("embedBatch runs through the billed wrapper as a covered ingestion call", async () => {
   await makeService().indexSource({

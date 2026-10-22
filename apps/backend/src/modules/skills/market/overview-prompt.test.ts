@@ -248,7 +248,7 @@ test("evidence requires original source and cannot cite synthesized provenance",
 
 function modelOutput(built = prompt()) {
   const value = output();
-  const { evidence, ...classification } = value.classification;
+  const { evidence: _evidence, ...classification } = value.classification;
   return {
     ...value,
     classification: {

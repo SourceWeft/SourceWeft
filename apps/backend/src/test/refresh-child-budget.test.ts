@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
-import { AIMessage, HumanMessage } from "@langchain/core/messages";
+import {
+  AIMessage,
+  type BaseMessage,
+  HumanMessage,
+  type ToolMessage,
+} from "@langchain/core/messages";
 import { tool } from "@langchain/core/tools";
 import { MemorySaver } from "@langchain/langgraph";
 import { createDeepAgent, StateBackend } from "deepagents";
@@ -10,25 +15,25 @@ import {
   selectAgentStepStop,
   agentRunStopFromStepBudgetError,
   createSourceWeftStepBudgetMiddleware,
+  type AgentStepBudgetState,
 } from "../modules/threads/agent/middleware/step-budget";
 import { createRunCancellationGate } from "../modules/threads/run-cancellation";
 import { ContentError } from "../modules/content/errors";
 import { createSourceWeftToolErrorMiddleware } from "../modules/threads/agent/middleware/tool-error";
-import {
-  readAgentPartialTasksForRefresh,
-  createSourceWeftClosingToolGovernanceMiddleware,
-} from "../modules/threads/agent/middleware/closing-tool-governance";
+import { createSourceWeftClosingToolGovernanceMiddleware } from "../modules/threads/agent/middleware/closing-tool-governance";
 import {
   carryAgentStepBudgetIntoRefresh,
   type RefreshBudgetAgent,
 } from "../modules/threads/agent/turn/refresh-step-budget";
 import type { AgentRunnableConfig } from "../modules/threads/agent/turn/checkpoint";
 
+type AgentState = {
+  messages: BaseMessage[];
+  sourceweftRunStepBudget: AgentStepBudgetState;
+  sourceweftPartialTaskResults: Record<string, string>;
+};
 type Agent = RefreshBudgetAgent & {
-  invoke(
-    input: unknown,
-    config: AgentRunnableConfig,
-  ): Promise<Record<string, any>>;
+  invoke(input: unknown, config: AgentRunnableConfig): Promise<AgentState>;
 };
 function stack(normal: number, userMessageId = "same-human") {
   const budget = createSourceWeftStepBudgetMiddleware({
@@ -208,7 +213,7 @@ test.each(["throw", "empty", "tool-call"])(
       "child failure must not mark root as stopped",
     );
     const tasks = original.messages.filter(
-      (message: unknown) =>
+      (message): message is ToolMessage =>
         message instanceof Object &&
         "name" in message &&
         message.name === "task",
@@ -216,11 +221,11 @@ test.each(["throw", "empty", "tool-call"])(
     assert.equal(tasks.length, 2);
     for (const message of tasks) {
       assert.equal(message.status, "error");
-      const partial = JSON.parse(message.content);
+      const partial = JSON.parse(message.content as string);
       assert.equal(partial.status, "partial");
       assert.equal(partial.results[0].agentRunStop.summaryStatus, "failed");
       assert.doesNotMatch(
-        message.content,
+        message.content as string,
         /private child summary provider failure/,
       );
     }
@@ -374,7 +379,7 @@ test.each([401, 402, 403])(
       nextResult.sourceweftRunStepBudget.userMessageId,
       "next-human",
     );
-    assert.equal(nextResult.sourceweftRunStepBudget.scopes.main.steps, 1);
+    assert.equal(nextResult.sourceweftRunStepBudget.scopes.main!.steps, 1);
     assert.equal(effects, 2);
   },
 );

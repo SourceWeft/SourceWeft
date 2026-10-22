@@ -37,10 +37,6 @@ export type ResolvedCommandWorkflow = {
   execution: "agent" | "direct";
 };
 
-type ToolCommandDefinition = {
-  workflow: CapabilityCommandWorkflow;
-};
-
 /**
  * The success criterion is whatever the manifest declared. A manifest that says
  * `runtime.output.kind: "artifact"` gets an `artifact` criterion regardless of the

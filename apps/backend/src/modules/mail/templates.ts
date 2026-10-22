@@ -147,7 +147,7 @@ function resolveConditionBlocks(
   fallback: MailTemplateVariables = {},
 ) {
   return template.replace(
-    /\{\{\#if\s+([a-zA-Z0-9_.-]+)\s*\}\}([\s\S]*?)\{\{\/if\}\}/g,
+    /\{\{#if\s+([a-zA-Z0-9_.-]+)\s*\}\}([\s\S]*?)\{\{\/if\}\}/g,
     (_, key: string, content: string) =>
       isTruthy(lookupVariable(variables, key, fallback)) ? content : "",
   );

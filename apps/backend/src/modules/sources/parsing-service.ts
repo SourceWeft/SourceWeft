@@ -40,7 +40,6 @@ import {
   getSourceStatusDetail,
   updateSourceRecordForLatestRevision,
   updateSourceRecord,
-  updateSourceStatus,
   updateSourceStatusForLatestRevision,
 } from "./repository";
 import type { SourceIndexingService } from "./indexing-service";

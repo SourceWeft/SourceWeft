@@ -1,6 +1,5 @@
 import { and, eq } from "drizzle-orm";
 import {
-  db,
   skillDefinitions,
   skillVersions,
   skillVersionAnalysis,

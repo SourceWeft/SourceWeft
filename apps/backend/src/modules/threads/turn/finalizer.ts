@@ -1,5 +1,4 @@
 import { readAgentRunStop, readAgentRunProgress } from "@sourceweft/contracts";
-import type { ContentBillingPort } from "../../content/billing-port";
 import { workspaceService } from "../../workspace";
 import { createCitationRecords, replaceCitationRecords } from "../../citations";
 import {

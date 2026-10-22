@@ -173,7 +173,7 @@ export function registerDashboardRoutes(app: Hono) {
       throw initialChatPreferencesResult.reason;
     }
 
-    let modelCatalog =
+    const modelCatalog =
       modelCatalogResult.status === "fulfilled"
         ? modelCatalogResult.value
         : null;

@@ -26,11 +26,14 @@ const password = "LocalPC-e2e-20260909!";
 const existing = await context.internalAdapter.findUserByEmail(email);
 const user =
   existing?.user ??
-  (await context.internalAdapter.createUser({
-    name: "Local PC E2E",
-    email,
-    emailVerified: true,
-  }));
+  (await context.internalAdapter.createUser(
+    {
+      name: "Local PC E2E",
+      email,
+      emailVerified: true,
+    },
+    { method: "email-password" },
+  ));
 await context.internalAdapter.createAccount({
   userId: user.id,
   accountId: user.id,

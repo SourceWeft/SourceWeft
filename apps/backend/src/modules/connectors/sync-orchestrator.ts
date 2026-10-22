@@ -44,7 +44,6 @@ import type {
   ConnectorItem,
   ConnectorSyncBlock,
   ConnectorSyncReadinessResult,
-  ConnectorSyncRunTriggerType,
   SourceConnectorRecord,
 } from "./types";
 

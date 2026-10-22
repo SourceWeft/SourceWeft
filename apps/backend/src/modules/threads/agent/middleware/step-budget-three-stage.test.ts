@@ -1,12 +1,17 @@
 import assert from "node:assert/strict";
-import { AIMessage, HumanMessage } from "@langchain/core/messages";
-import { tool } from "@langchain/core/tools";
+import {
+  AIMessage,
+  type BaseMessage,
+  HumanMessage,
+} from "@langchain/core/messages";
+import { type StructuredToolInterface, tool } from "@langchain/core/tools";
 import { MemorySaver, Command, interrupt } from "@langchain/langgraph";
 import { createDeepAgent, StateBackend } from "deepagents";
 import { test } from "vitest";
 import { z } from "zod";
 import { ScriptedChatModel } from "../../../../test/chat-model";
 import {
+  type AgentStepV2ScopeBudget,
   createSourceWeftStepBudgetMiddleware,
   selectAgentRunProgress,
   selectAgentStepStop,
@@ -19,10 +24,19 @@ type AgentOptions = {
   configurable?: { thread_id: string };
   recursionLimit?: number;
 };
+/** The budget channel as these tests read it: every scope is a v2 entry. */
+type BudgetChannel = {
+  userMessageId: string;
+  scopes: Record<string, AgentStepV2ScopeBudget>;
+};
+type AgentState = {
+  messages: BaseMessage[];
+  sourceweftRunStepBudget: BudgetChannel;
+};
 type Agent = {
-  invoke(input: unknown, options?: AgentOptions): Promise<Record<string, any>>;
+  invoke(input: unknown, options?: AgentOptions): Promise<AgentState>;
   getState(options: AgentOptions): Promise<{
-    values: Record<string, any>;
+    values: AgentState;
     tasks: Array<{ interrupts?: unknown[] }>;
   }>;
 };
@@ -31,7 +45,7 @@ function setup(input: {
   closing?: number;
   uid?: string;
   model: ScriptedChatModel;
-  tools?: any[];
+  tools?: StructuredToolInterface[];
   saver?: MemorySaver;
 }) {
   const budget = createSourceWeftStepBudgetMiddleware({
@@ -49,7 +63,7 @@ function setup(input: {
 }
 const call = (name: string, id: string) =>
   new AIMessage({ content: "", tool_calls: [{ name, id, args: {} }] });
-const summary = (messages: any[]) =>
+const summary = (messages: BaseMessage[]) =>
   messages.some(
     (m) =>
       typeof m.content === "string" &&
@@ -294,15 +308,12 @@ test(
         summaryStatus: "completed",
       },
     );
-    assert.deepEqual(
-      (result as any).sourceweftRunStepBudget.scopes.main.wallClock,
-      {
-        runId: "run-1",
-        startedAtMs: 0,
-        closingStartedAtMs: 45 * 60_000,
-        trigger: "wall_clock",
-      },
-    );
+    assert.deepEqual(result.sourceweftRunStepBudget.scopes.main!.wallClock, {
+      runId: "run-1",
+      startedAtMs: 0,
+      closingStartedAtMs: 45 * 60_000,
+      trigger: "wall_clock",
+    });
   },
 );
 test.each([2, 4])(
@@ -419,7 +430,7 @@ test("persisted v1 same-user resume stays two-stage; next user receives v2 budge
     {
       messages: [new HumanMessage("resume")],
       sourceweftRunStepBudget: old,
-    } as any,
+    },
     opts,
   );
   assert.equal(summaries, 1);
@@ -474,7 +485,7 @@ test("unknown versions and inconsistent v2 counters fail before model dispatch",
           userMessageId: "u",
           scopes: { main: entry },
         },
-      } as any),
+      }),
     );
   }
   assert.equal(calls, 0);
@@ -545,11 +556,11 @@ test("last working task batch completes independent parallel child 1+1 budgets b
   assert.equal(parentCalls, 2);
   assert.equal(effects, 4);
   assert.equal(childSummaries, 2);
-  const scopes = (result as any).sourceweftRunStepBudget.scopes;
+  const scopes = result.sourceweftRunStepBudget.scopes;
   assert.equal(Object.keys(scopes).length, 3);
-  assert.equal(scopes.main.phase, "closing");
-  assert.equal(scopes.main.steps, 2);
-  for (const [scope, entry] of Object.entries(scopes) as [string, any][]) {
+  assert.equal(scopes.main!.phase, "closing");
+  assert.equal(scopes.main!.steps, 2);
+  for (const [scope, entry] of Object.entries(scopes)) {
     if (scope === "main") continue;
     assert.equal(entry.steps, 2);
     assert.equal(entry.normalSteps, 1);
@@ -585,7 +596,7 @@ test("missing boundary tool snapshot fails explicitly instead of silently droppi
           },
         },
       },
-    } as any),
+    }),
     /closing tool snapshot is unavailable/,
   );
   assert.equal(calls, 0);
@@ -619,10 +630,10 @@ test("last normal provider failure has a durable tool snapshot and same-user rei
   assert.equal(firstCalls, 1);
   assert.equal(effects, 0);
   const checkpoint = await failed.getState(opts);
-  const entry = (checkpoint.values as any).sourceweftRunStepBudget.scopes.main;
+  const entry = checkpoint.values.sourceweftRunStepBudget.scopes.main!;
   assert.equal(entry.normalSteps, 1);
-  assert.equal(entry.decisionPreparation.status, "ready");
-  assert.ok(entry.availableToolIds.includes("probe"));
+  assert.equal(entry.decisionPreparation!.status, "ready");
+  assert.ok(entry.availableToolIds!.includes("probe"));
   let resumedCalls = 0;
   const restored = setup({
     normal: 99,
@@ -649,7 +660,7 @@ test("last normal provider failure has a durable tool snapshot and same-user rei
     limit: 3,
   });
   assert.equal(
-    (result as any).sourceweftRunStepBudget.scopes.main.decisionPreparation,
+    result.sourceweftRunStepBudget.scopes.main!.decisionPreparation,
     undefined,
   );
 });
@@ -681,7 +692,8 @@ test.each([false, true])(
       createMiddleware({
         name: "CrashBeforeBudgetAfterModel",
         afterModel: (state) => {
-          const entry = (state as any).sourceweftRunStepBudget?.scopes.main;
+          const entry = (state as Partial<AgentState>).sourceweftRunStepBudget
+            ?.scopes.main;
           const latest = [...state.messages]
             .reverse()
             .find(AIMessage.isInstance);
@@ -763,7 +775,8 @@ test("saved AI replay preserves the native HITL approval chain before tools", as
     createMiddleware({
       name: "CrashBeforeApproval",
       afterModel: (state) => {
-        const entry = (state as any).sourceweftRunStepBudget?.scopes.main;
+        const entry = (state as Partial<AgentState>).sourceweftRunStepBudget
+          ?.scopes.main;
         const latest = [...state.messages].reverse().find(AIMessage.isInstance);
         if (
           entry?.decisionPreparation?.status === "ready" &&
@@ -848,7 +861,7 @@ test("crash after preparation checkpoint but before readiness does not dispatch 
       name: "CrashAfterPreparation",
       afterModel: (state) => {
         if (
-          (state as any).sourceweftRunStepBudget?.scopes.main
+          (state as Partial<AgentState>).sourceweftRunStepBudget?.scopes.main!
             .decisionPreparation?.status === "prepared"
         )
           throw new Error("prepared-before-ready-crash");
@@ -878,8 +891,8 @@ test("crash after preparation checkpoint but before readiness does not dispatch 
   assert.equal(effects, 0);
   const state = await first.getState(opts);
   assert.equal(
-    (state.values as any).sourceweftRunStepBudget.scopes.main
-      .decisionPreparation.status,
+    state.values.sourceweftRunStepBudget.scopes.main!.decisionPreparation!
+      .status,
     "prepared",
   );
   const result = await setup({

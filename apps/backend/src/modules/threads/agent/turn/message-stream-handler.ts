@@ -1,4 +1,3 @@
-import { hasAgentToolCapability } from "@sourceweft/agent-tool-registry";
 import type { CommandSuccessCriteria } from "../..";
 import type { ContentBillingPort } from "../../../content/billing-port";
 import type { LlmExecutionConfig } from "../../../content/model-gateway-audit";

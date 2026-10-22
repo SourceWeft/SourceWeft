@@ -12,12 +12,36 @@ import { ScriptedChatModel } from "../../test/chat-model";
 import {
   createSourceWeftStepBudgetMiddleware,
   readAgentStepBudgetForRefresh,
+  type AgentStepBudgetState,
 } from "./agent/middleware/step-budget";
 import {
   carryAgentStepBudgetIntoRefresh,
   type RefreshBudgetAgent,
 } from "./agent/turn/refresh-step-budget";
 import type { AgentRunnableConfig } from "./agent/turn/checkpoint";
+
+/** A checkpoint coordinate as the native graph returns it. */
+type CheckpointConfig = AgentRunnableConfig & {
+  configurable: {
+    thread_id: string;
+    checkpoint_ns: string;
+    checkpoint_id: string;
+  };
+};
+type AgentState = { sourceweftRunStepBudget: AgentStepBudgetState };
+// The SDK's static middleware inference requires middleware-owned channels at
+// invocation; the runtime initializes them, so tests use an explicit boundary.
+type Agent = {
+  invoke(input: unknown, config?: unknown): Promise<AgentState>;
+  getState(
+    config: unknown,
+  ): Promise<{ config: CheckpointConfig; values: AgentState }>;
+  getStateHistory: RefreshBudgetAgent["getStateHistory"];
+  updateState(
+    config: AgentRunnableConfig,
+    update: Record<string, unknown>,
+  ): Promise<CheckpointConfig>;
+};
 
 let isolated: Awaited<ReturnType<typeof createIsolatedTestDatabase>>;
 let saver: UniqueVersionPostgresSaver;
@@ -80,7 +104,7 @@ test("PostgreSQL native refresh pages exact root history and preserves the same-
       backend: new StateBackend(),
       checkpointer: saver,
       middleware: [b.governance, b.toolCallRepair, b.finalization],
-    }) as any;
+    }) as unknown as Agent;
   };
   const opts = { configurable: { thread_id: randomUUID(), checkpoint_ns: "" } };
   const prior = build("prior-human", false);
@@ -95,7 +119,7 @@ test("PostgreSQL native refresh pages exact root history and preserves the same-
   assert.equal(calls, 2);
   assert.equal(effects, 2);
   assert.equal(
-    exhausted.values.sourceweftRunStepBudget.scopes.main.summary,
+    exhausted.values.sourceweftRunStepBudget.scopes.main!.summary,
     "completed",
   );
   // Preserve a lower branch left by the old recharge bug. The newest state is
@@ -242,7 +266,7 @@ test.each([
         backend: new StateBackend(),
         checkpointer: saver,
         middleware: [b.governance, b.toolCallRepair, b.finalization],
-      }) as any;
+      }) as unknown as Agent;
     };
     const consumed = {
       policyVersion: 2,
