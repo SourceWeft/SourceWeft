@@ -295,6 +295,44 @@ test("POST /mcp-installs/:installId/credentials validates auth-specific payloads
   assert.equal(mocks.upsertCredentials.mock.calls.length, 0);
 });
 
+test("POST /mcp-installs/:installId/credentials surfaces a disallowed credential method", async () => {
+  resetRouteMocks();
+  mocks.upsertCredentials.mockRejectedValue(
+    new McpError(
+      400,
+      "MCP_CREDENTIAL_METHOD_NOT_ALLOWED",
+      "This MCP server does not accept that credential type",
+    ),
+  );
+
+  const response = await createTestApp().request(
+    "/v1/workspaces/workspace_1/mcp-installs/mcp_install_1/credentials",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        authType: "api_key_header",
+        apiKeyHeaderName: "X-Api-Key",
+        apiKey: "k",
+      }),
+      headers: { "content-type": "application/json" },
+    },
+  );
+
+  assert.equal(response.status, 400);
+  assert.deepEqual(await readJson(response), {
+    code: "MCP_CREDENTIAL_METHOD_NOT_ALLOWED",
+    message: "This MCP server does not accept that credential type",
+  });
+  assert.deepEqual(mocks.upsertCredentials.mock.calls[0]?.[0], {
+    workspaceId: "workspace_1",
+    userId: "user_1",
+    installId: "mcp_install_1",
+    authType: "api_key_header",
+    apiKeyHeaderName: "X-Api-Key",
+    apiKey: "k",
+  });
+});
+
 test("POST /mcp-installs/:installId/test maps MCP errors to API errors", async () => {
   resetRouteMocks();
   mocks.testInstall.mockRejectedValue(

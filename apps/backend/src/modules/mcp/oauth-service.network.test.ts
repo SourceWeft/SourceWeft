@@ -15,6 +15,7 @@ const state = vi.hoisted(() => ({
   redirectMetadata: false,
   origins: [] as string[],
   calls: [] as string[],
+  deletedCredentials: [] as Array<Record<string, string>>,
   stored: {
     client: undefined as OAuthClientInformationFull | undefined,
     tokens: undefined as OAuthTokens | undefined,
@@ -48,6 +49,9 @@ vi.mock("./repository", () => ({
     authType: "oauth",
     endpointUrl: state.endpoint,
   }),
+  deleteWorkspaceMcpCredential: async (scope: Record<string, string>) => {
+    state.deletedCredentials.push(scope);
+  },
 }));
 vi.mock("./oauth-repository", () => ({
   getMcpOAuthStatus: async () => ({ connected: false }),
@@ -103,6 +107,7 @@ afterEach(async () => {
     ),
   );
   state.calls = [];
+  state.deletedCredentials = [];
   state.addressChecks = true;
   state.origins = [];
   state.denyToken = false;
@@ -210,11 +215,21 @@ test.each([true, false])(
     assert.equal(redirect.searchParams.get("state"), state.stored.nonce);
     assert.ok(redirect.searchParams.get("code_challenge"));
     const nonce = state.stored.nonce!;
+    assert.deepEqual(state.deletedCredentials, []);
     assert.deepEqual(
       await completeMcpOAuthCallback({ state: nonce, code: "fixture-code" }),
       { workspaceId: "workspace", installId: "install" },
     );
     assert.equal(state.stored.tokens?.access_token, "fixture-access");
+    // Connecting OAuth replaces only this member's static credential.
+    assert.deepEqual(state.deletedCredentials, [
+      {
+        teamId: "team",
+        workspaceId: "workspace",
+        installId: "install",
+        userId: "user",
+      },
+    ]);
     assert.equal(state.stored.nonce, undefined);
     await assert.rejects(
       completeMcpOAuthCallback({ state: nonce, code: "fixture-code" }),
