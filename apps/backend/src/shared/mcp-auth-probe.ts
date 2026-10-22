@@ -2,9 +2,11 @@
  * What an MCP endpoint says about authentication when sent one
  * unauthenticated `initialize`:
  * - "oauth": a 401 whose `WWW-Authenticate` names protected-resource metadata
- *   (RFC 9728) — the MCP authorization spec's OAuth discovery signal;
- * - "credential": a 401 without it — some credential is required, and the
- *   challenge alone does not say which;
+ *   (RFC 9728) — the MCP authorization spec's OAuth discovery signal — or,
+ *   when it names none, whose well-known protected-resource metadata lists an
+ *   authorization server;
+ * - "credential": a 401 without either — some credential is required, and the
+ *   endpoint does not say which;
  * - "open": anything else (an initialize answer, a redirect, an error page).
  */
 export type McpEndpointAuthProbe = "open" | "credential" | "oauth";
@@ -16,7 +18,9 @@ const PROBE_TIMEOUT_MS = 5000;
  * policy (an SSRF-checked request scope). Redirects are not followed: the
  * endpoint passed the policy, but a 3xx could bounce the probe to an internal
  * address; a same-origin redirect is simply "not a 401". Network and policy
- * failures are thrown for the caller to handle.
+ * failures of the `initialize` are thrown for the caller to handle; those of
+ * the well-known lookup only mean no metadata was found. One time budget
+ * covers both.
  */
 export async function probeMcpEndpointAuth(
   endpointUrl: string,
@@ -49,8 +53,66 @@ export async function probeMcpEndpointAuth(
       return "open";
     }
     const challenge = response.headers.get("www-authenticate") ?? "";
-    return /\bresource_metadata\s*=/i.test(challenge) ? "oauth" : "credential";
+    if (/\bresource_metadata\s*=/i.test(challenge)) {
+      return "oauth";
+    }
+    return (await namesAuthorizationServer(
+      endpointUrl,
+      fetchImpl,
+      controller.signal,
+    ))
+      ? "oauth"
+      : "credential";
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * The RFC 9728 well-known metadata locations for an endpoint: the
+ * path-specific one first, then the origin's. Query and fragment are not
+ * part of a resource's metadata location.
+ */
+function protectedResourceMetadataUrls(endpointUrl: string): string[] {
+  const url = new URL(endpointUrl);
+  const path = url.pathname.replace(/\/+$/, "");
+  const root = `${url.origin}/.well-known/oauth-protected-resource`;
+  return path ? [`${root}${path}`, root] : [root];
+}
+
+/**
+ * Whether the endpoint's well-known protected-resource metadata names an
+ * authorization server — OAuth discovery for a server whose 401 challenge
+ * does not point at its metadata.
+ */
+async function namesAuthorizationServer(
+  endpointUrl: string,
+  fetchImpl: typeof globalThis.fetch,
+  signal: AbortSignal,
+): Promise<boolean> {
+  for (const metadataUrl of protectedResourceMetadataUrls(endpointUrl)) {
+    try {
+      const response = await fetchImpl(metadataUrl, {
+        method: "GET",
+        redirect: "manual",
+        headers: { accept: "application/json" },
+        signal,
+      });
+      if (response.status !== 200) {
+        await response.body?.cancel();
+        continue;
+      }
+      const metadata = (await response.json()) as {
+        authorization_servers?: unknown;
+      } | null;
+      const servers = metadata?.authorization_servers;
+      if (Array.isArray(servers) && servers.length > 0) {
+        return true;
+      }
+    } catch {
+      // Unreachable, timed out or not JSON: no metadata at this location.
+      if (signal.aborted) return false;
+    }
+  }
+  return false;
 }

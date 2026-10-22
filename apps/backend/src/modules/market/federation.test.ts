@@ -22,6 +22,7 @@ import {
   mapRegistryServerToManifest,
   registryRemoteAuth,
   registryRepositoryProvenance,
+  storedAuthProbe,
 } from "./federation";
 import { mcpServerVersionId } from "./ingest/plan";
 
@@ -410,6 +411,11 @@ test("registry auth: an OAuth challenge with a declared Authorization header is 
     required: true,
     headerName: "Authorization",
     allowedHeaderNames: ["Authorization"],
+    posture: "required",
+    methods: [
+      { type: "oauth" },
+      { type: "header", name: "Authorization", scheme: "bearer" },
+    ],
   });
 });
 
@@ -419,6 +425,8 @@ test("registry auth: an OAuth challenge without a credential header is OAuth onl
     required: true,
     headerName: undefined,
     allowedHeaderNames: [],
+    posture: "required",
+    methods: [{ type: "oauth" }],
   });
   // A non-secret header is configuration, not an alternative credential.
   assert.equal(
@@ -440,6 +448,8 @@ test("registry auth: a bare 401 is the declared credential, or OAuth when none i
     headerName: "Authorization",
     displayName: "Authorization token",
     allowedHeaderNames: ["Authorization"],
+    posture: "required",
+    methods: [{ type: "header", name: "Authorization", scheme: "bearer" }],
   });
   assert.deepEqual(
     registryRemoteAuth(
@@ -452,6 +462,8 @@ test("registry auth: a bare 401 is the declared credential, or OAuth when none i
       headerName: "X-Api-Key",
       displayName: "X-Api-Key",
       allowedHeaderNames: ["X-Api-Key"],
+      posture: "required",
+      methods: [{ type: "header", name: "X-Api-Key" }],
     },
   );
   assert.equal(registryRemoteAuth(remote([]), "credential").type, "oauth");
@@ -463,6 +475,8 @@ test("registry auth: an open endpoint is required only by a header declared requ
     type: "none",
     required: false,
     allowedHeaderNames: [],
+    posture: "optional",
+    methods: [{ type: "header", name: "Authorization", scheme: "bearer" }],
   });
   const required = registryRemoteAuth(
     remote([
@@ -477,6 +491,8 @@ test("registry auth: an open endpoint is required only by a header declared requ
     headerName: undefined,
     displayName: "Custom headers",
     allowedHeaderNames: ["X-Api-Key", "X-Org"],
+    posture: "required",
+    methods: [{ type: "header", name: "X-Api-Key" }],
   });
 });
 
@@ -496,9 +512,146 @@ test("registry auth: without a probe, only the declared flags count", () => {
       headerName: "Authorization",
       displayName: "Authorization token",
       allowedHeaderNames: ["Authorization"],
+      posture: "required",
+      methods: [{ type: "header", name: "Authorization", scheme: "bearer" }],
     },
   );
   assert.equal(registryRemoteAuth(undefined, undefined).type, "none");
+});
+
+test("registry auth: Arcmira's optional secret Authorization behind an OAuth challenge", () => {
+  const auth = registryRemoteAuth(arcmiraEntry.server.remotes[0], "oauth");
+  assert.equal(auth.type, "oauth");
+  assert.equal(auth.posture, "required");
+  assert.deepEqual(auth.methods, [
+    { type: "oauth" },
+    {
+      type: "header",
+      name: "Authorization",
+      scheme: "bearer",
+      description:
+        "Bearer <key>. Omit the header and the host signs you in through OAuth.",
+    },
+  ]);
+});
+
+test("registry auth: an open endpoint with an optional secret key is optional and installs as none", () => {
+  // Exa-like: works without a key, takes one in `x-api-key`.
+  const auth = registryRemoteAuth(
+    remote([
+      {
+        name: "x-api-key",
+        isSecret: true,
+        description: "  Your Exa API key for higher rate limits.  ",
+      },
+    ]),
+    "open",
+  );
+  assert.deepEqual(auth, {
+    type: "none",
+    required: false,
+    allowedHeaderNames: [],
+    posture: "optional",
+    methods: [
+      {
+        type: "header",
+        name: "x-api-key",
+        description: "Your Exa API key for higher rate limits.",
+      },
+    ],
+  });
+});
+
+test("registry auth: posture and methods across probes and declared headers", () => {
+  const cases: Array<{
+    headers: unknown[];
+    probe: "open" | "credential" | "oauth" | undefined;
+    posture: string;
+    methods: unknown[];
+  }> = [
+    { headers: [], probe: undefined, posture: "none", methods: [] },
+    { headers: [], probe: "open", posture: "none", methods: [] },
+    {
+      headers: [],
+      probe: "credential",
+      posture: "required",
+      methods: [{ type: "oauth" }],
+    },
+    // A non-secret header is configuration, never a method.
+    {
+      headers: [{ name: "X-Region" }],
+      probe: "open",
+      posture: "none",
+      methods: [],
+    },
+    {
+      headers: [{ name: "X-Region", isRequired: true }],
+      probe: "open",
+      posture: "required",
+      methods: [],
+    },
+    {
+      headers: [{ name: "X-Region" }],
+      probe: "credential",
+      posture: "required",
+      methods: [],
+    },
+    {
+      headers: [{ name: "X-Api-Key", isSecret: true }],
+      probe: undefined,
+      posture: "optional",
+      methods: [{ type: "header", name: "X-Api-Key" }],
+    },
+    {
+      headers: [{ name: "X-Api-Key", isSecret: true }],
+      probe: "oauth",
+      posture: "required",
+      methods: [{ type: "oauth" }, { type: "header", name: "X-Api-Key" }],
+    },
+    // Authorization wins over an earlier secret header, in any spelling.
+    {
+      headers: [
+        { name: "X-Api-Key", isSecret: true },
+        { name: "authorization" },
+      ],
+      probe: "open",
+      posture: "optional",
+      methods: [{ type: "header", name: "authorization", scheme: "bearer" }],
+    },
+  ];
+  for (const { headers, probe, posture, methods } of cases) {
+    const auth = registryRemoteAuth(remote(headers), probe);
+    const label = `${JSON.stringify(headers)} / ${probe}`;
+    assert.equal(auth.posture, posture, label);
+    assert.deepEqual(auth.methods, methods, label);
+  }
+  // An optional posture never blocks an install.
+  for (const probe of ["open", undefined] as const) {
+    assert.equal(
+      registryRemoteAuth(remote([authorization]), probe).type,
+      "none",
+    );
+  }
+});
+
+test("registry auth: a method's description is the header's, trimmed to 300 characters", () => {
+  const [method] = registryRemoteAuth(
+    remote([{ ...authorization, description: ` ${"k".repeat(400)} ` }]),
+    "open",
+  ).methods!;
+  assert.deepEqual(method, {
+    type: "header",
+    name: "Authorization",
+    scheme: "bearer",
+    description: "k".repeat(300),
+  });
+  assert.deepEqual(
+    registryRemoteAuth(
+      remote([{ ...authorization, description: "   " }]),
+      "open",
+    ).methods,
+    [{ type: "header", name: "Authorization", scheme: "bearer" }],
+  );
 });
 
 test("registry auth: malformed and duplicate header names are dropped", () => {
@@ -518,6 +671,7 @@ test("registry auth: malformed and duplicate header names are dropped", () => {
 
 test("issue #337: Arcmira is federated as OAuth or API key, and the probe is stored", async () => {
   mocks.upsert.mockResolvedValue("item-id");
+  const startedAt = Date.now();
   const fetch = stubRegistryAndEndpoints([arcmiraEntry], () =>
     oauthChallenge(),
   );
@@ -546,10 +700,25 @@ test("issue #337: Arcmira is federated as OAuth or API key, and the probe is sto
     required: true,
     headerName: "Authorization",
     allowedHeaderNames: ["Authorization"],
+    posture: "required",
+    methods: [
+      { type: "oauth" },
+      {
+        type: "header",
+        name: "Authorization",
+        scheme: "bearer",
+        description:
+          "Bearer <key>. Omit the header and the host signs you in through OAuth.",
+      },
+    ],
   });
+  const probedAt = new Date(input.provenanceJson.authProbe.probedAt);
+  assert.ok(
+    probedAt.getTime() >= startedAt && probedAt.getTime() <= Date.now(),
+  );
   assert.deepEqual(
     input.provenanceJson.authProbe,
-    authProbeRecord(ARCMIRA_ENDPOINT, "oauth"),
+    authProbeRecord(ARCMIRA_ENDPOINT, "oauth", probedAt),
   );
   assert.equal(input.provenanceJson.authProbe.endpointSha256.length, 64);
   assert.equal(
@@ -558,14 +727,15 @@ test("issue #337: Arcmira is federated as OAuth or API key, and the probe is sto
   );
 });
 
-test("a version's stored probe of the same endpoint is reused, not repeated", async () => {
+const DAY_MS = 24 * 60 * 60 * 1000;
+const daysAgo = (days: number) => new Date(Date.now() - days * DAY_MS);
+
+test("a version's recent stored probe of the same endpoint is reused, not repeated", async () => {
   mocks.upsert.mockResolvedValue("item-id");
+  const stored = authProbeRecord(ARCMIRA_ENDPOINT, "oauth", daysAgo(29));
   mocks.storedProbes.mockResolvedValueOnce(
     new Map([
-      [
-        mcpServerVersionId("io.github.arcmira/arcmira", "0.10.7"),
-        authProbeRecord(ARCMIRA_ENDPOINT, "oauth"),
-      ],
+      [mcpServerVersionId("io.github.arcmira/arcmira", "0.10.7"), stored],
     ]),
   );
   const fetch = stubRegistryAndEndpoints([arcmiraEntry], () => {
@@ -586,10 +756,80 @@ test("a version's stored probe of the same endpoint is reused, not repeated", as
   const input = mocks.upsert.mock.calls[0]?.[0];
   assert.ok(input);
   assert.equal(input.manifest.auth.type, "oauth");
-  assert.deepEqual(
-    input.provenanceJson.authProbe,
-    authProbeRecord(ARCMIRA_ENDPOINT, "oauth"),
+  // The reused record keeps its probe time, so it still expires.
+  assert.deepEqual(input.provenanceJson.authProbe, stored);
+});
+
+test("a stored probe 30 days old, or without a probe time, is probed again", async () => {
+  const versionId = mcpServerVersionId("io.github.arcmira/arcmira", "0.10.7");
+  const { probedAt: _, ...untimed } = authProbeRecord(
+    ARCMIRA_ENDPOINT,
+    "open",
+    new Date(),
   );
+  for (const record of [
+    authProbeRecord(ARCMIRA_ENDPOINT, "open", daysAgo(30)),
+    untimed,
+  ]) {
+    vi.clearAllMocks();
+    mocks.upsert.mockResolvedValue("item-id");
+    mocks.storedProbes.mockResolvedValueOnce(new Map([[versionId, record]]));
+    const fetch = stubRegistryAndEndpoints([arcmiraEntry], () =>
+      oauthChallenge(),
+    );
+
+    const result = await ingestFromRegistry({
+      source: "registry.test",
+      baseUrl: "https://registry.test",
+      verified: true,
+    });
+
+    assert.equal(endpointCalls(fetch).length, 1, JSON.stringify(record));
+    assert.equal(result.authProbed, 1);
+    const input = mocks.upsert.mock.calls[0]?.[0];
+    assert.equal(input.manifest.auth.type, "oauth");
+    assert.equal(input.provenanceJson.authProbe.result, "oauth");
+    assert.ok(
+      Date.now() - Date.parse(input.provenanceJson.authProbe.probedAt) < DAY_MS,
+    );
+  }
+});
+
+test("a stored probe is reused only when well-formed, same-endpoint and under 30 days old", () => {
+  const now = new Date("2026-10-22T00:00:00.000Z");
+  const at = (days: number) => new Date(now.getTime() - days * DAY_MS);
+  const record = authProbeRecord(ARCMIRA_ENDPOINT, "credential", at(1));
+  assert.deepEqual(storedAuthProbe(record, ARCMIRA_ENDPOINT, now), {
+    result: "credential",
+    probedAt: at(1),
+  });
+  assert.ok(
+    storedAuthProbe(
+      authProbeRecord(
+        ARCMIRA_ENDPOINT,
+        "open",
+        new Date(now.getTime() - DAY_MS * 30 + 1),
+      ),
+      ARCMIRA_ENDPOINT,
+      now,
+    ),
+  );
+  for (const stale of [
+    authProbeRecord(ARCMIRA_ENDPOINT, "open", at(30)),
+    authProbeRecord(ARCMIRA_ENDPOINT, "open", at(-1)),
+    authProbeRecord("https://old.arcmira.com/mcp", "open", at(1)),
+    { ...record, probedAt: "yesterday" },
+    { ...record, probedAt: undefined },
+    { ...record, result: "maybe" },
+    null,
+    "oauth",
+  ]) {
+    assert.equal(
+      storedAuthProbe(stale, ARCMIRA_ENDPOINT, now),
+      undefined,
+      JSON.stringify(stale),
+    );
+  }
 });
 
 test("a stored probe of another endpoint is probed again", async () => {
@@ -598,7 +838,7 @@ test("a stored probe of another endpoint is probed again", async () => {
     new Map([
       [
         mcpServerVersionId("io.github.arcmira/arcmira", "0.10.7"),
-        authProbeRecord("https://old.arcmira.com/mcp", "open"),
+        authProbeRecord("https://old.arcmira.com/mcp", "open", daysAgo(1)),
       ],
     ]),
   );
@@ -614,6 +854,35 @@ test("a stored probe of another endpoint is probed again", async () => {
 
   assert.equal(endpointCalls(fetch).length, 1);
   assert.equal(mocks.upsert.mock.calls[0]?.[0].manifest.auth.type, "oauth");
+});
+
+test("a bare 401 with well-known protected-resource metadata is federated as OAuth", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  const fetch = stubRegistryAndEndpoints([arcmiraEntry], (url) =>
+    url === ARCMIRA_ENDPOINT
+      ? new Response(null, { status: 401 })
+      : url ===
+          "https://mcp.arcmira.com/.well-known/oauth-protected-resource/mcp"
+        ? new Response(
+            JSON.stringify({
+              resource: ARCMIRA_ENDPOINT,
+              authorization_servers: ["https://auth.arcmira.com"],
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          )
+        : new Response(null, { status: 404 }),
+  );
+
+  await ingestFromRegistry({
+    source: "registry.test",
+    baseUrl: "https://registry.test",
+    verified: true,
+  });
+
+  assert.equal(endpointCalls(fetch).length, 2);
+  const input = mocks.upsert.mock.calls[0]?.[0];
+  assert.equal(input.manifest.auth.type, "oauth");
+  assert.equal(input.provenanceJson.authProbe.result, "oauth");
 });
 
 test("a failed probe keeps the run going, maps declared headers alone and stores nothing", async () => {
