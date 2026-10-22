@@ -266,10 +266,11 @@ export function adaptMessagesEvent(
  * Extract a streaming tool-call argument fragment from a v3 `messages`
  * content-block-delta. These are the partial tool_call_chunks
  * ({@link adaptMessagesEvent} intentionally leaves them for this dedicated path)
- * that carry incremental arg JSON (`args` is a substring, concatenated by
- * `index`). The runner accumulates these to surface incremental write_file
- * `content` before the authoritative fully-formed call arrives via the `tools`
- * method. Returns null for any non tool_call_chunk delta.
+ * that carry the call's partial arg JSON (under @langchain/core the block's
+ * accumulated args so far, keyed by `index`). The runner accumulates these to
+ * surface incremental write_file `content` before the authoritative
+ * fully-formed call arrives via the `tools` method. Returns null for any non
+ * tool_call_chunk delta.
  */
 export function adaptToolArgDelta(
   data: unknown,

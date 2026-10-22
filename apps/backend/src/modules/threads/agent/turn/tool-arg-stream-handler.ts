@@ -9,6 +9,8 @@ export type PartialToolArgStreamState = {
   name?: string;
   args: string;
   lastContentLength: number;
+  /** The path fields the last emitted partial carried, serialized. */
+  lastPath?: string;
 };
 
 /**
@@ -19,6 +21,13 @@ export type PartialToolArgStreamState = {
 const STREAMED_CONTENT_FIELD: Record<string, string> = {
   write_file: "content",
 };
+
+/**
+ * Path spellings forwarded with a partial input, as soon as they parse. The
+ * client resolves a workfile preview from any of them (deepagents' write_file
+ * takes `file_path`), so a partial must carry whichever one the model used.
+ */
+const STREAMED_PATH_FIELDS = ["path", "file_path", "filePath"] as const;
 
 /**
  * Pull the streamable content string out of a (possibly partial) parsed args
@@ -52,16 +61,27 @@ export function* handleToolArgDeltaChunk(input: {
 }): Generator<DeepAgentTurnEvent> {
   const { delta, runtime } = input;
   const slotKey = String(delta.index);
-  const state =
-    runtime.partialToolArgsBySlot.get(slotKey) ??
-    ({ args: "", lastContentLength: 0 } as PartialToolArgStreamState);
+  const existing = runtime.partialToolArgsBySlot.get(slotKey);
+  // A different id in a known slot is a different call: start it afresh
+  // rather than appending its args to (and reporting it under) the old id.
+  const state: PartialToolArgStreamState =
+    existing && !(delta.id && existing.id && delta.id !== existing.id)
+      ? existing
+      : { args: "", lastContentLength: 0 };
   if (delta.id && !state.id) {
     state.id = delta.id;
   }
   if (delta.name && !state.name) {
     state.name = delta.name;
   }
-  state.args += delta.args;
+  // @langchain/core's v3 producers (compat `convertChunksToEvents`, the OpenAI
+  // completions/responses converters) put the block's ACCUMULATED args on
+  // every block-delta, so a fragment that extends the buffer replaces it.
+  // Anything else is appended, defensively, in case a producer sends true
+  // deltas.
+  state.args = delta.args.startsWith(state.args)
+    ? delta.args
+    : state.args + delta.args;
   runtime.partialToolArgsBySlot.set(slotKey, state);
 
   // Need the real tool-call id (so the client reconciles with tool-call-start)
@@ -82,19 +102,34 @@ export function* handleToolArgDeltaChunk(input: {
     return;
   }
   const content = extractStreamableContent(state.name, parsed);
-  if (content === null || content.length <= state.lastContentLength) {
+  if (content === null) {
     return;
   }
-  state.lastContentLength = content.length;
-
   const record =
     parsed && typeof parsed === "object"
       ? (parsed as Record<string, unknown>)
       : {};
-  const rawInput: Record<string, unknown> = {
-    ...(typeof record.path === "string" ? { path: record.path } : {}),
-    content,
-  };
+  const pathFields: Record<string, unknown> = {};
+  for (const key of STREAMED_PATH_FIELDS) {
+    if (typeof record[key] === "string") {
+      pathFields[key] = record[key];
+    }
+  }
+  // Models emit the arguments in either order. When `content` comes first the
+  // path only parses once the content is complete, so a partial is also due
+  // when the path changes, or the client would never see it before the
+  // authoritative call.
+  const path = JSON.stringify(pathFields);
+  if (
+    content.length <= state.lastContentLength &&
+    path === (state.lastPath ?? "{}")
+  ) {
+    return;
+  }
+  state.lastContentLength = content.length;
+  state.lastPath = path;
+
+  const rawInput: Record<string, unknown> = { content, ...pathFields };
   const clientInput = sanitizeFilesystemToolInputForClient(
     state.name,
     rawInput,

@@ -113,3 +113,144 @@ test("does not re-emit when content has not advanced", () => {
   const events = feed(runtime, { index: 0, args: "}" });
   assert.equal(events.length, 0);
 });
+
+/** Content of each emitted `tool-input-delta`, with its call id. */
+function contents(events: ReturnType<typeof feed>) {
+  return events.flatMap((event) =>
+    event.type === "tool-input-delta"
+      ? [
+          {
+            id: event.id,
+            toolCallId: event.toolCall.id,
+            content: event.input.content,
+          },
+        ]
+      : [],
+  );
+}
+
+test("v3 cumulative block-deltas stream growing content without double concatenation (issue #335)", () => {
+  // @langchain/core's v3 producers put the call's ACCUMULATED args on every
+  // block-delta, with id and name on each one, keyed by the chunk's index.
+  const runtime = makeRuntime();
+  const snapshots = [
+    '{"file_path":"/files/a.py",',
+    '{"file_path":"/files/a.py","content":"pri',
+    '{"file_path":"/files/a.py","content":"print(1)',
+    '{"file_path":"/files/a.py","content":"print(1)"}',
+  ];
+  const emitted = snapshots.map((args) =>
+    contents(feed(runtime, { index: 2, id: "c1", name: "write_file", args })),
+  );
+  assert.deepEqual(emitted, [
+    [],
+    [{ id: "c1", toolCallId: "c1", content: "pri" }],
+    [{ id: "c1", toolCallId: "c1", content: "print(1)" }],
+    [],
+  ]);
+  assert.equal(runtime.partialToolArgsBySlot.get("2")?.args, snapshots.at(-1));
+});
+
+test("true per-chunk deltas still accumulate by concatenation (issue #335)", () => {
+  const runtime = makeRuntime();
+  const fragments = [
+    '{"file_path":"/files/a.py",',
+    '"content":"pri',
+    "nt(1)",
+    '"}',
+  ];
+  const emitted = fragments.map((args, position) =>
+    contents(
+      feed(runtime, {
+        index: 2,
+        ...(position === 0 ? { id: "c1", name: "write_file" } : {}),
+        args,
+      }),
+    ),
+  );
+  assert.deepEqual(emitted, [
+    [],
+    [{ id: "c1", toolCallId: "c1", content: "pri" }],
+    [{ id: "c1", toolCallId: "c1", content: "print(1)" }],
+    [],
+  ]);
+  assert.equal(
+    runtime.partialToolArgsBySlot.get("2")?.args,
+    fragments.join(""),
+  );
+});
+
+test("a different call id on an occupied slot starts a fresh buffer under the new id (issue #335)", () => {
+  // A later model call restarts block indexes, so its call lands on the slot
+  // an earlier call used.
+  const runtime = makeRuntime();
+  feed(runtime, {
+    index: 2,
+    id: "c1",
+    name: "write_file",
+    args: '{"file_path":"/a.py","content":"old body"}',
+  });
+  const first = contents(
+    feed(runtime, {
+      index: 2,
+      id: "c2",
+      name: "write_file",
+      args: '{"file_path":"/b.py","content":"n',
+    }),
+  );
+  assert.deepEqual(first, [{ id: "c2", toolCallId: "c2", content: "n" }]);
+  const second = contents(
+    feed(runtime, {
+      index: 2,
+      id: "c2",
+      name: "write_file",
+      args: '{"file_path":"/b.py","content":"new',
+    }),
+  );
+  assert.deepEqual(second, [{ id: "c2", toolCallId: "c2", content: "new" }]);
+  const state = runtime.partialToolArgsBySlot.get("2");
+  assert.equal(state?.id, "c2");
+  assert.equal(state?.args, '{"file_path":"/b.py","content":"new');
+});
+
+test("a partial input forwards whichever path field the model used, once it parses", () => {
+  for (const key of ["path", "file_path", "filePath"]) {
+    const runtime = makeRuntime();
+    const [event] = feed(runtime, {
+      index: 0,
+      id: `c-${key}`,
+      name: "write_file",
+      args: `{"${key}":"/files/a.py","content":"pri`,
+    });
+    assert.ok(event && event.type === "tool-input-delta");
+    if (event.type === "tool-input-delta") {
+      assert.deepEqual(event.input, { content: "pri", [key]: "/files/a.py" });
+      assert.deepEqual(event.toolCall.input, event.input);
+    }
+  }
+});
+
+test("content streamed before its path still delivers the path once it parses", () => {
+  // DeepSeek commonly emits `content` ahead of `file_path`: the path only
+  // parses after the content is complete, so its arrival alone is a partial.
+  const runtime = makeRuntime();
+  const snapshots = [
+    '{"content":"pri',
+    '{"content":"print(1)",',
+    '{"content":"print(1)","file_path":"/files/a',
+    '{"content":"print(1)","file_path":"/files/a.py"}',
+    '{"content":"print(1)","file_path":"/files/a.py"}',
+  ];
+  const inputs = snapshots.map((args) =>
+    feed(runtime, { index: 0, id: "c1", name: "write_file", args }).map(
+      (event) => (event.type === "tool-input-delta" ? event.input : null),
+    ),
+  );
+  assert.deepEqual(inputs, [
+    [{ content: "pri" }],
+    [{ content: "print(1)" }],
+    [{ content: "print(1)", file_path: "/files/a" }],
+    [{ content: "print(1)", file_path: "/files/a.py" }],
+    [],
+  ]);
+});

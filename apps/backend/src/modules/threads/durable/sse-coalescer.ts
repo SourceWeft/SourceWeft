@@ -7,7 +7,9 @@
  * event turns a six-second answer into minutes of writes: measured on a
  * reasoning model, 1,356 `reasoning` events took 116 s to persist while the
  * model itself was done in 6 s. Text deltas were already windowed; reasoning
- * deltas were not.
+ * deltas were not. A streamed `write_file` sends a `tool-input-delta` per
+ * argument chunk, each carrying the whole content so far, so a window of those
+ * for one call keeps only its latest snapshot.
  *
  * Successful slow writes extend the next collection window to at most one
  * second; cheap writes retain the 80 ms cadence. Accumulated deltas also flush
@@ -17,7 +19,8 @@
  * Only the persistence cadence changes. The in-memory snapshot is still updated
  * per raw event by the caller, and a client applies a windowed delta exactly as
  * it applies the token-sized ones: text is appended, a reasoning segment is
- * upserted by its id with the latest `segment` fields.
+ * upserted by its id with the latest `segment` fields, and a tool call's input
+ * is replaced by the latest snapshot.
  */
 
 export const STREAM_APPEND_DELTA_FLUSH_MS = 80;
@@ -51,6 +54,20 @@ export function isReasoningDeltaPayload(
   );
 }
 
+export function isToolInputDeltaPayload(
+  payload: Payload | null,
+): payload is Payload & { type: "tool-input-delta"; id: string } {
+  return payload?.type === "tool-input-delta" && typeof payload.id === "string";
+}
+
+function isDeltaPayload(payload: Payload | null): payload is Payload {
+  return (
+    isTextDeltaPayload(payload) ||
+    isReasoningDeltaPayload(payload) ||
+    isToolInputDeltaPayload(payload)
+  );
+}
+
 function continuesPending(pending: Payload, payload: Payload) {
   if (isTextDeltaPayload(pending)) {
     return isTextDeltaPayload(payload);
@@ -60,6 +77,9 @@ function continuesPending(pending: Payload, payload: Payload) {
       isReasoningDeltaPayload(payload) &&
       payload.segment.id === pending.segment.id
     );
+  }
+  if (isToolInputDeltaPayload(pending)) {
+    return isToolInputDeltaPayload(payload) && payload.id === pending.id;
   }
   return false;
 }
@@ -76,12 +96,14 @@ function mergeDelta(pending: Payload, payload: Payload): Payload {
       segment: payload.segment,
     };
   }
+  // A tool-input delta is a snapshot of the call's input: the latest wins.
   return payload;
 }
 
 function deltaCharacters(payload: Payload) {
   if (isTextDeltaPayload(payload)) return payload.delta.length;
   if (isReasoningDeltaPayload(payload)) return payload.reasoning.length;
+  // Snapshots replace rather than accumulate, so they never grow the window.
   return 0;
 }
 
@@ -124,8 +146,7 @@ export function createDeltaCoalescer(input: {
    * the caller appends the event itself.
    */
   const push = async (payload: Payload | null): Promise<boolean> => {
-    const isDelta =
-      isTextDeltaPayload(payload) || isReasoningDeltaPayload(payload);
+    const isDelta = isDeltaPayload(payload);
     if (pending && (!isDelta || !continuesPending(pending, payload!))) {
       await flush();
     }

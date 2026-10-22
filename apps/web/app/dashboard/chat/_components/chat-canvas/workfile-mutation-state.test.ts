@@ -219,3 +219,34 @@ test("resolveWorkfileMutationPreview ignores non-workfile paths", () => {
     null,
   );
 });
+
+test("resolveWorkfileMutationPreview previews a running write_file whose content streams before its path", () => {
+  const partial = toolCall({
+    input: { content: "def fib(n):" },
+    status: "running",
+    tool: "write_file",
+  });
+  assert.deepEqual(resolveWorkfileMutationPreview(partial), {
+    kind: "write",
+    language: "log",
+    lineCount: 1,
+    path: null,
+    previewContent: "def fib(n):",
+    previewTruncated: false,
+    sizeBytes: 11,
+  });
+  // Only a call still streaming may lack its path; a finished one never
+  // previews without one, and a pathless edit_file never previews.
+  assert.equal(
+    resolveWorkfileMutationPreview({ ...partial, status: "completed" }),
+    null,
+  );
+  assert.equal(
+    resolveWorkfileMutationPreview({
+      ...partial,
+      input: { new_string: "a", old_string: "b" },
+      tool: "edit_file",
+    }),
+    null,
+  );
+});
