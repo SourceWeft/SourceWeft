@@ -15,7 +15,11 @@ export type WorkfileMutationPreviewModel =
       kind: "write";
       language: WorkfileCodeLanguage;
       lineCount: number;
-      path: string;
+      /**
+       * Null only while a write_file is still streaming its arguments and the
+       * model has emitted `content` before the path.
+       */
+      path: string | null;
       previewContent: string;
       previewTruncated: boolean;
       sizeBytes: number;
@@ -165,11 +169,15 @@ export function resolveWorkfileMutationPreview(
   toolCall: ToolCallRecord,
 ): WorkfileMutationPreviewModel | null {
   const path = resolveToolPath(toolCall);
-  if (!isCodeFilePath(path)) {
-    return null;
-  }
 
   if (toolCall.tool === "write_file") {
+    // A streamed write_file partial can carry `content` before its path:
+    // models emit the arguments in either order, so the code still renders
+    // live and the path joins once it parses (or with the authoritative call).
+    const pendingPath = path === null && toolCall.status === "running";
+    if (!pendingPath && !isCodeFilePath(path)) {
+      return null;
+    }
     const content = getStringField(toolCall.input, ["content"], {
       allowEmpty: true,
     });
@@ -179,13 +187,17 @@ export function resolveWorkfileMutationPreview(
     const preview = previewText(content);
     return {
       kind: "write",
-      language: resolveWorkfileCodeLanguage({ path }),
+      language: path === null ? "log" : resolveWorkfileCodeLanguage({ path }),
       lineCount: lineCount(content),
       path,
       previewContent: preview.content,
       previewTruncated: preview.truncated,
       sizeBytes: textSizeBytes(content),
     };
+  }
+
+  if (!isCodeFilePath(path)) {
+    return null;
   }
 
   if (toolCall.tool === "edit_file") {

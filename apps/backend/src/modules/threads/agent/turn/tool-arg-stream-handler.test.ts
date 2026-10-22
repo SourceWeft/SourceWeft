@@ -229,3 +229,28 @@ test("a partial input forwards whichever path field the model used, once it pars
     }
   }
 });
+
+test("content streamed before its path still delivers the path once it parses", () => {
+  // DeepSeek commonly emits `content` ahead of `file_path`: the path only
+  // parses after the content is complete, so its arrival alone is a partial.
+  const runtime = makeRuntime();
+  const snapshots = [
+    '{"content":"pri',
+    '{"content":"print(1)",',
+    '{"content":"print(1)","file_path":"/files/a',
+    '{"content":"print(1)","file_path":"/files/a.py"}',
+    '{"content":"print(1)","file_path":"/files/a.py"}',
+  ];
+  const inputs = snapshots.map((args) =>
+    feed(runtime, { index: 0, id: "c1", name: "write_file", args }).map(
+      (event) => (event.type === "tool-input-delta" ? event.input : null),
+    ),
+  );
+  assert.deepEqual(inputs, [
+    [{ content: "pri" }],
+    [{ content: "print(1)" }],
+    [{ content: "print(1)", file_path: "/files/a" }],
+    [{ content: "print(1)", file_path: "/files/a.py" }],
+    [],
+  ]);
+});

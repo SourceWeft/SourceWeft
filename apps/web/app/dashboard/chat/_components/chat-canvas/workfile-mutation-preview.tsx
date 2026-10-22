@@ -21,11 +21,16 @@ function formatBytes(sizeBytes: number) {
 }
 
 function buildMetadata(
-  t: ReturnType<typeof useTranslations<"dashboardChatCanvas.workfile.mutationPreview">>,
+  t: ReturnType<
+    typeof useTranslations<"dashboardChatCanvas.workfile.mutationPreview">
+  >,
   preview: WorkfileMutationPreviewModel,
 ) {
   return preview.kind === "write"
-    ? [t("lineCount", { count: preview.lineCount }), formatBytes(preview.sizeBytes)]
+    ? [
+        t("lineCount", { count: preview.lineCount }),
+        formatBytes(preview.sizeBytes),
+      ]
     : [
         preview.occurrences !== null
           ? t("replacementCount", { count: preview.occurrences })
@@ -44,26 +49,30 @@ export function WorkfileMutationPreview({
   preview: WorkfileMutationPreviewModel;
 }) {
   const t = useTranslations("dashboardChatCanvas.workfile.mutationPreview");
-  const fileName = basename(preview.path);
+  const path = preview.path;
+  // A write still streaming its content ahead of its path has no file yet.
+  const fileName = path === null ? "" : basename(path);
   const metadata = buildMetadata(t, preview);
 
   return (
     <div className="space-y-2.5">
-      <WorkfilePathSnippet
-        action={
-          <Button
-            className="h-8 shrink-0 px-2 text-xs"
-            disabled={!onWorkfileClick}
-            onClick={() => onWorkfileClick?.(preview.path)}
-            size="sm"
-            type="button"
-            variant="outline"
-          >
-            {t("openWorkfile")}
-          </Button>
-        }
-        path={preview.path}
-      />
+      {path === null ? null : (
+        <WorkfilePathSnippet
+          action={
+            <Button
+              className="h-8 shrink-0 px-2 text-xs"
+              disabled={!onWorkfileClick}
+              onClick={() => onWorkfileClick?.(path)}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              {t("openWorkfile")}
+            </Button>
+          }
+          path={path}
+        />
+      )}
       {metadata.length > 0 ? (
         <p className="text-muted-foreground/70 text-xs">
           {metadata.join(" · ")}

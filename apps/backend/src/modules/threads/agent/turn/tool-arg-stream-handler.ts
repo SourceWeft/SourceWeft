@@ -9,6 +9,8 @@ export type PartialToolArgStreamState = {
   name?: string;
   args: string;
   lastContentLength: number;
+  /** The path fields the last emitted partial carried, serialized. */
+  lastPath?: string;
 };
 
 /**
@@ -100,21 +102,34 @@ export function* handleToolArgDeltaChunk(input: {
     return;
   }
   const content = extractStreamableContent(state.name, parsed);
-  if (content === null || content.length <= state.lastContentLength) {
+  if (content === null) {
     return;
   }
-  state.lastContentLength = content.length;
-
   const record =
     parsed && typeof parsed === "object"
       ? (parsed as Record<string, unknown>)
       : {};
-  const rawInput: Record<string, unknown> = { content };
+  const pathFields: Record<string, unknown> = {};
   for (const key of STREAMED_PATH_FIELDS) {
     if (typeof record[key] === "string") {
-      rawInput[key] = record[key];
+      pathFields[key] = record[key];
     }
   }
+  // Models emit the arguments in either order. When `content` comes first the
+  // path only parses once the content is complete, so a partial is also due
+  // when the path changes, or the client would never see it before the
+  // authoritative call.
+  const path = JSON.stringify(pathFields);
+  if (
+    content.length <= state.lastContentLength &&
+    path === (state.lastPath ?? "{}")
+  ) {
+    return;
+  }
+  state.lastContentLength = content.length;
+  state.lastPath = path;
+
+  const rawInput: Record<string, unknown> = { content, ...pathFields };
   const clientInput = sanitizeFilesystemToolInputForClient(
     state.name,
     rawInput,

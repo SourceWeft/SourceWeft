@@ -135,8 +135,8 @@ test("AssistantToolCard renders a running write_file's streamed partial code key
   assert.match(element.textContent ?? "", /a, b = 0/);
   await unmountAll();
 
-  // Without a path field the preview has nothing to key on (the #335 live
-  // failure: partials carried `content` only).
+  // Models also emit `content` before the path: the partial code still
+  // renders, without a path row, until the path parses.
   const pathless = await renderToolCard({
     toolCall: toolCall({
       input: { content: "def fib(n):\n    a, b = 0" },
@@ -145,5 +145,9 @@ test("AssistantToolCard renders a running write_file's streamed partial code key
       tool: "write_file",
     }),
   });
-  assert.doesNotMatch(pathless.textContent ?? "", /def fib\(n\):/);
+  assert.match(pathless.textContent ?? "", /def fib\(n\):/);
+  assert.equal(
+    pathless.querySelector('input[aria-label="Workfile path"]'),
+    null,
+  );
 });
