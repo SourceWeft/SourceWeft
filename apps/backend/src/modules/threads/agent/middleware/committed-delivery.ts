@@ -9,6 +9,8 @@ import {
   readTerminalToolResult,
   type TerminalToolResult,
 } from "@sourceweft/contracts/agent-tools";
+import type { ToolCallTrace } from "../..";
+import { collectToolOutputRecords } from "../turn/output-normalizer";
 
 /**
  * Tool-calling decisions a working scope may still make after its latest
@@ -65,6 +67,20 @@ export function readCommittedToolMessage(
         readToolMessageResult(message),
       )
     : null;
+}
+
+/** The committed artifact a traced tool call proves under its tool's contract. */
+export function readCommittedToolCall(
+  call: ToolCallTrace,
+): TerminalToolResult | null {
+  if (call.status !== "completed" || call.error) return null;
+  const spec = getAgentToolDefinition(call.tool)?.terminalResult;
+  if (!spec) return null;
+  for (const record of collectToolOutputRecords(call.output)) {
+    const result = readTerminalToolResult(spec, record);
+    if (result) return result;
+  }
+  return null;
 }
 
 /**

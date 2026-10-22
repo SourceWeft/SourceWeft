@@ -5,6 +5,7 @@ import type {
   ToolProducer,
 } from "../..";
 import { toObjectRecord } from "../../../../shared/records";
+import { readCommittedToolCall } from "../middleware/committed-delivery";
 import {
   extractToolPayloadInput,
   parseToolArgs,
@@ -280,7 +281,7 @@ export function createTraceSequenceAllocator(input: {
 
 export const DEEPAGENTS_WRITE_TODOS_TOOL_NAME = "write_todos";
 
-const DEEPAGENTS_TODOS_STEP_ID = "deepagents:todos";
+export const DEEPAGENTS_TODOS_STEP_ID = "deepagents:todos";
 
 export type DeepAgentTodo = {
   content: string;
@@ -346,6 +347,7 @@ export function resolveDeepAgentTodosStepStatus(
 export function buildDeepAgentTodosStep(input: {
   toolCallId: string;
   todos: DeepAgentTodo[];
+  closedBy?: "committed_delivery";
 }): Omit<ThinkingStepTrace, "sequence"> {
   return {
     id: DEEPAGENTS_TODOS_STEP_ID,
@@ -362,8 +364,48 @@ export function buildDeepAgentTodosStep(input: {
       toolCallId: input.toolCallId,
       todos: input.todos,
       visibility: DEEPAGENTS_TODOS_VISIBILITY,
+      ...(input.closedBy ? { closedBy: input.closedBy } : {}),
     },
   };
+}
+
+/**
+ * A committed delivery withdraws `write_todos` from its scope, so the model can
+ * never close the todo it was working on when it published. The host closes it
+ * from that publisher receipt; pending todos stay as the model left them, and
+ * `closedBy` records that the host, not the model, made the change.
+ */
+export function closeDeepAgentTodosAfterCommittedDelivery(input: {
+  step: ThinkingStepTrace | undefined;
+  toolCalls: readonly ToolCallTrace[];
+}): Omit<ThinkingStepTrace, "sequence"> | null {
+  const metadata = input.step?.metadata;
+  const toolCallId = metadata?.toolCallId;
+  if (typeof toolCallId !== "string") return null;
+  const todos = parseDeepAgentTodos({ todos: metadata?.todos });
+  if (!todos.some((todo) => todo.status === "in_progress")) return null;
+  const writeIndex = input.toolCalls.findIndex(
+    (call) => call.id === toolCallId,
+  );
+  if (writeIndex < 0) return null;
+  // Only a receipt from the scope that wrote the list, after that write.
+  const scope = input.toolCalls[writeIndex]?.producer?.taskCallId;
+  const committed = input.toolCalls
+    .slice(writeIndex + 1)
+    .some(
+      (call) =>
+        call.producer?.taskCallId === scope && readCommittedToolCall(call),
+    );
+  if (!committed) return null;
+  return buildDeepAgentTodosStep({
+    toolCallId,
+    todos: todos.map((todo) =>
+      todo.status === "in_progress"
+        ? { ...todo, status: "completed" as const }
+        : todo,
+    ),
+    closedBy: "committed_delivery",
+  });
 }
 
 export type ToolsStreamToolCallSnapshot = {
