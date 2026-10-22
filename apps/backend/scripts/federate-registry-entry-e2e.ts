@@ -20,9 +20,12 @@ import { parse } from "dotenv";
  */
 const REGISTRY_SOURCE = "registry.modelcontextprotocol.io";
 const identifier = process.argv[2]?.trim();
+// The registry to read the entry from: the official one unless a test points
+// at its own (the mock MCP server serves `/v0/servers`).
+const registryBase = process.argv[3]?.trim() || `https://${REGISTRY_SOURCE}`;
 if (!identifier) {
   throw new Error(
-    "Usage: federate-registry-entry-e2e.ts <registry identifier>",
+    "Usage: federate-registry-entry-e2e.ts <registry identifier> [registry base URL]",
   );
 }
 
@@ -35,7 +38,7 @@ if (!new URL(env.DATABASE_URL!).pathname.startsWith("/sourceweft_skillv6_"))
 process.env.DOTENV_CONFIG_PATH = envPath;
 Object.assign(process.env, env);
 
-const upstream = new URL("/v0/servers", `https://${REGISTRY_SOURCE}`);
+const upstream = new URL("/v0/servers", registryBase);
 upstream.searchParams.set("search", identifier);
 upstream.searchParams.set("version", "latest");
 const response = await fetch(upstream, {
