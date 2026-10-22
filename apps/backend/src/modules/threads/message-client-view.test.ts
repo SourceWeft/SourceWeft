@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import type { MessageRecord } from "../content/types";
+import { expandToolCallOutputsFromClient } from "@sourceweft/contracts";
 import { projectThreadMessageForClient } from "./message-client-view";
 
 const mcpDisplay = { serverName: "Notion", toolName: "search" };
@@ -295,4 +296,40 @@ test("assistant client view of a metadata-trimmed row keeps its shape", () => {
     projectThreadMessageForClient(message("assistant", {})).metadata,
     {},
   );
+});
+
+test("assistant client view sends each sandbox operation once and the SDK restores every output", () => {
+  const timeline = [0, 1, 2].map((index) => ({
+    operationType: index === 0 ? "create" : "execute",
+    status: "succeeded",
+    createdAt: `2026-10-22T10:1${index}:00.000Z`,
+    durationMs: 100 + index,
+    result: { output: `stdout ${index}` },
+  }));
+  const toolCalls = [1, 2].map((index) => ({
+    id: `call-${index}`,
+    tool: "execute",
+    status: "completed",
+    input: { command: `step ${index}` },
+    output: {
+      content: `done ${index}`,
+      status: "success",
+      lc_kwargs: { id: `message-${index}`, content: `done ${index}` },
+      operations: timeline.slice(0, index + 1),
+    },
+  }));
+  const view = projectThreadMessageForClient(
+    message("assistant", { toolCalls }),
+  ).metadata;
+
+  assert.deepEqual(view.toolCallOperationPool, timeline);
+  const [first] = view.toolCalls as Array<{ output: Record<string, unknown> }>;
+  assert.deepEqual(first?.output, {
+    content: "done 1",
+    status: "success",
+    lc_kwargs: { id: "message-1" },
+    operationRefs: [0, 1],
+    lcKwargsMirrored: ["content"],
+  });
+  assert.deepEqual(expandToolCallOutputsFromClient(view), { toolCalls });
 });

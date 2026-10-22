@@ -210,3 +210,52 @@ test("stopThreadRun posts the run's stop key to the thread stream without stream
   ]);
   assert.equal(result.threadRun.status, "cancelled");
 });
+
+test("listThreadMessages restores tool-call outputs compacted by the API", async () => {
+  const operation = { operationType: "execute", status: "succeeded" };
+  const client = new ContentClient({
+    get: async () => ({
+      items: [
+        {
+          id: "assistant-1",
+          role: "assistant",
+          metadata: {
+            toolCallOperationPool: [operation],
+            toolCalls: [
+              {
+                id: "call-1",
+                tool: "execute",
+                output: {
+                  content: "done",
+                  lc_kwargs: { id: "message-1" },
+                  lcKwargsMirrored: ["content"],
+                  operationRefs: [0],
+                },
+              },
+            ],
+          },
+        },
+        { id: "user-1", role: "user", metadata: {} },
+      ],
+      nextCursor: null,
+    }),
+  } as never);
+
+  const page = await client.listThreadMessages("workspace-1", "thread-1");
+
+  assert.deepEqual(page.items[0]?.metadata, {
+    toolCalls: [
+      {
+        id: "call-1",
+        tool: "execute",
+        output: {
+          content: "done",
+          lc_kwargs: { id: "message-1", content: "done" },
+          operations: [operation],
+        },
+      },
+    ],
+  });
+  assert.deepEqual(page.items[1]?.metadata, {});
+  assert.equal(page.nextCursor, null);
+});

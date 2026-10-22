@@ -1,3 +1,4 @@
+import { compactToolCallOutputsForClient } from "@sourceweft/contracts";
 import type { MessageRecord } from "../content/types";
 import { toObjectRecord } from "../../shared/records";
 import { sanitizeThreadMessageMetadataForClient } from "./agent/turn/output-normalizer";
@@ -20,6 +21,10 @@ import { normalizeMcpDisplay } from "./turn/trace-parts";
  * - `text` on reasoning segments and reasoning trace parts, and `input` on
  *   trace parts (legacy copies of the render blocks and `toolCalls[].input`),
  * - `quoteText` on retrieval citations (byte-identical to `excerpt`).
+ *
+ * Tool-call outputs are then compacted losslessly (each sandbox operation
+ * once per message, no mirrored ToolMessage `lc_kwargs`); the SDK expands
+ * them back, see `compactToolCallOutputsForClient`.
  */
 export function projectThreadMessageForClient(
   message: MessageRecord,
@@ -29,7 +34,9 @@ export function projectThreadMessageForClient(
     ...message,
     metadata:
       message.role === "assistant"
-        ? projectAssistantMetadataForClient(metadata)
+        ? compactToolCallOutputsForClient(
+            projectAssistantMetadataForClient(metadata),
+          )
         : metadata,
   };
 }

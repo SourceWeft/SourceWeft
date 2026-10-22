@@ -5,6 +5,7 @@ export * from "./capabilities";
 export * from "./sources";
 export * from "./artifacts";
 export * from "./messages";
+export * from "./thread-message-compaction";
 export * from "./threads";
 export * from "./personas";
 export * from "./source-selection";
