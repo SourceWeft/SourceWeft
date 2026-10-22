@@ -6,6 +6,8 @@ import {
   type McpReadmeStatus,
   marketItemSummarySchema,
 } from "@sourceweft/market-contracts";
+import { workspaceMcpInstallSchema } from "@sourceweft/contracts";
+import type { WorkspaceMcpInstall } from "@sourceweft/sdk";
 
 import { mountWithIntl, unmountAll } from "@/test/react";
 
@@ -17,7 +19,7 @@ vi.mock("../../../../lib/sdk", () => ({ contentClient: api }));
 const SHA = "0123456789abcdef0123456789abcdef01234567";
 const IDENTIFIER = "io.github.o/weather";
 
-const summary = marketItemSummarySchema.parse({
+const SUMMARY = {
   createdAt: "2026-09-01T00:00:00.000Z",
   id: "mcp-1",
   identifier: IDENTIFIER,
@@ -29,7 +31,73 @@ const summary = marketItemSummarySchema.parse({
   updatedAt: "2026-09-15T00:00:00.000Z",
   verified: true,
   visibility: "public",
-});
+};
+const summary = marketItemSummarySchema.parse(SUMMARY);
+/** A federated registry entry: the catalog publishes no tools. */
+const federated = marketItemSummarySchema.parse({ ...SUMMARY, toolsCount: 0 });
+
+/** A workspace install of the server with these synced tools. */
+function installed(
+  tools: Array<{
+    name: string;
+    title?: string;
+    description?: string;
+    risk?: string;
+    enabled?: boolean;
+  }>,
+): WorkspaceMcpInstall {
+  return workspaceMcpInstallSchema.parse({
+    authType: "none",
+    createdAt: "2026-09-01T00:00:00.000Z",
+    createdBy: null,
+    credentialStatus: "not_required",
+    desktopOnly: false,
+    enabled: true,
+    endpointUrl: "https://mcp.example.com/mcp",
+    id: "install-1",
+    lastError: null,
+    lastTestedAt: null,
+    manifestJson: {
+      identifier: IDENTIFIER,
+      name: "Weather",
+      schemaVersion: 1,
+      summary: "Forecasts for any city.",
+      transport: "streamable_http",
+      version: "1.0.0",
+    },
+    marketIdentifier: IDENTIFIER,
+    marketVersion: "1.0.0",
+    name: "Weather",
+    official: false,
+    signature: null,
+    signingKeyId: null,
+    source: "market",
+    status: "active",
+    summary: "Forecasts for any city.",
+    teamId: "team-1",
+    tools: tools.map((tool, index) => ({
+      annotations: {},
+      createdAt: "2026-09-01T00:00:00.000Z",
+      description: tool.description ?? null,
+      enabled: tool.enabled ?? true,
+      id: `tool-${index}`,
+      inputSchema: {},
+      installId: "install-1",
+      lastDiscoveredHash: null,
+      normalizedToolName: tool.name,
+      outputSchema: null,
+      risk: tool.risk ?? "unknown",
+      serverToolName: tool.name,
+      title: tool.title ?? null,
+      updatedAt: "2026-09-01T00:00:00.000Z",
+    })),
+    transport: "streamable_http",
+    updatedAt: "2026-09-01T00:00:00.000Z",
+    verified: true,
+    webExecutable: true,
+    workspaceId: "ws-1",
+  });
+}
 
 function readme(
   status: McpReadmeStatus,
@@ -55,11 +123,25 @@ function readme(
 }
 
 /** The workspace detail: `market` is the public detail, README included. */
-function detail(value?: MarketMcpReadme | null) {
+function detail(
+  value?: MarketMcpReadme | null,
+  {
+    install = null,
+    item = summary,
+    catalogTools = [
+      { description: "Daily forecast.", name: "forecast", risk: "read" },
+      { name: "alerts", risk: "read" },
+    ],
+  }: {
+    install?: WorkspaceMcpInstall | null;
+    item?: typeof summary;
+    catalogTools?: Array<Record<string, unknown>>;
+  } = {},
+) {
   return {
-    install: null,
+    install,
     market: {
-      item: summary,
+      item,
       ...(value === undefined ? {} : { readme: value }),
       versions: [
         {
@@ -69,14 +151,7 @@ function detail(value?: MarketMcpReadme | null) {
             name: "Weather",
             schemaVersion: 1,
             summary: "Forecasts for any city.",
-            tools: [
-              {
-                description: "Daily forecast.",
-                name: "forecast",
-                risk: "read",
-              },
-              { name: "alerts", risk: "read" },
-            ],
+            tools: catalogTools,
             transport: "streamable_http",
             version: "1.0.0",
           },
@@ -88,11 +163,15 @@ function detail(value?: MarketMcpReadme | null) {
   };
 }
 
-async function open(value?: MarketMcpReadme | null) {
-  api.getWorkspaceMarketMcp.mockResolvedValue(detail(value));
+async function open(
+  value?: MarketMcpReadme | null,
+  options: Parameters<typeof detail>[1] = {},
+) {
+  const loaded = detail(value, options);
+  api.getWorkspaceMarketMcp.mockResolvedValue(loaded);
   await mountWithIntl(
     <McpDetailDialog
-      item={{ install: null, market: summary }}
+      item={{ install: loaded.install, market: loaded.market.item }}
       onConfigure={vi.fn()}
       onInstall={vi.fn()}
       onOpenChange={vi.fn()}
@@ -119,6 +198,20 @@ function activePanel() {
   return document.querySelector<HTMLElement>(
     '[role="tabpanel"][data-state="active"]',
   )!;
+}
+
+function field(label: string) {
+  const term = [...document.querySelectorAll("dt")].find(
+    (node) => node.textContent === label,
+  );
+  if (!term) throw new Error(`No field named ${label}`);
+  return term.nextElementSibling as HTMLElement;
+}
+
+function toolNames() {
+  return [...activePanel().querySelectorAll("li")].map(
+    (node) => node.querySelector("span")?.textContent,
+  );
 }
 
 // Radix tabs activate on a primary-button mousedown, not on click.
@@ -254,5 +347,81 @@ describe("McpDetailDialog tabs", { timeout: 30_000 }, () => {
     expect(heading.parentElement!.textContent).toBe(
       `${heading.textContent}${body.textContent}`,
     );
+  });
+});
+
+describe("McpDetailDialog tools and server details", { timeout: 30_000 }, () => {
+  it("counts and lists the install's synced tools when the catalog has none", async () => {
+    await open(null, {
+      catalogTools: [],
+      install: installed([
+        {
+          description: "Search the workspace.",
+          name: "notion-search",
+          risk: "read",
+          title: "Search",
+        },
+        { name: "notion-create-pages", risk: "write" },
+        { enabled: false, name: "notion-delete-page", risk: "destructive" },
+      ]),
+      item: federated,
+    });
+    expect(activePanel().textContent).toContain("3 tools synced");
+    expect(tabs().map((node) => node.textContent)).toEqual([
+      "Overview",
+      "Tools (3)",
+    ]);
+    expect(field("Tools").textContent).toBe("3");
+
+    await select("Tools (3)");
+    const panel = activePanel();
+    expect(toolNames()).toEqual([
+      "Search",
+      "notion-create-pages",
+      "notion-delete-page",
+    ]);
+    expect(panel.textContent).toContain("Search the workspace.");
+    expect(panel.textContent).not.toContain("Tool details are published");
+    const items = [...panel.querySelectorAll("li")];
+    expect(items[1]!.textContent).not.toContain("Disabled");
+    expect(items[2]!.textContent).toContain("Disabled");
+    expect(items[2]!.textContent).toContain("Destructive");
+  });
+
+  it("keeps the catalog's tools until the install has synced any", async () => {
+    await open(null, { install: installed([]) });
+    expect(field("Tools").textContent).toBe("2");
+    await select("Tools (2)");
+    expect(toolNames()).toEqual(["forecast", "alerts"]);
+  });
+
+  it("says tools are pending only when neither the catalog nor an install has any", async () => {
+    await open(null, { catalogTools: [], item: federated });
+    expect(field("Tools").textContent).toBe("0");
+    await select("Tools (0)");
+    expect(activePanel().textContent).toBe(
+      "Tool details are published after the server is indexed or installed.",
+    );
+  });
+
+  it("shows server details as written, with readable transport and runtime", async () => {
+    await open(null, {
+      item: marketItemSummarySchema.parse({
+        ...SUMMARY,
+        identifier: "io.github.Arcmira/arcmira",
+      }),
+    });
+    for (const node of document.querySelectorAll("dd")) {
+      expect(node.classList.contains("capitalize")).toBe(false);
+    }
+    expect(field("Identifier").textContent).toBe("io.github.Arcmira/arcmira");
+    expect(field("Transport").textContent).toBe("Streamable HTTP");
+    expect(field("Runtime").textContent).toBe("Web executable");
+    await unmountAll();
+
+    await open(null, {
+      item: marketItemSummarySchema.parse({ ...SUMMARY, runtime: "desktop" }),
+    });
+    expect(field("Runtime").textContent).toBe("Desktop only");
   });
 });

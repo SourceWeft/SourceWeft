@@ -36,6 +36,7 @@ import {
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { contentClient, workspaceClient } from "../../../../lib/sdk";
 import { mcpOverviewLocale } from "../../../../lib/mcp-ai-overview";
+import { mcpRuntimeKind, transportLabel } from "../../../../lib/mcp-labels";
 import { hasMcpReadmeToShow, readMcpReadme } from "../../../../lib/mcp-readme";
 import { mcpAuthMethod } from "../../../../lib/mcp-auth-method";
 import { formatShortRelativeTime } from "../../../../lib/relative-time";
@@ -49,6 +50,7 @@ import { McpAiOverviewView } from "../../../_components/market/mcp-ai-overview-v
 import { McpIcon } from "../../../_components/site-icons";
 import { invalidateWorkspaceMcpCache } from "../../chat/_components/sources-hub/mcp/use-mcp";
 import { CredentialsDialog } from "../_components/mcp-credentials-dialog";
+import { mcpDetailTools } from "../_components/mcp-detail-tools";
 import { McpOverviewAdmin } from "../_components/mcp-overview-admin";
 
 type MarketMcpDetail = Awaited<
@@ -94,6 +96,7 @@ export default function McpDetailPage() {
   const overviewLocale = mcpOverviewLocale(locale);
   const t = useTranslations("dashboardMcpPanel");
   const tAuth = useTranslations("mcp.authMethod");
+  const tRuntime = useTranslations("mcp.badges.runtime");
   const params = useParams<{ identifier?: string | string[] }>();
   const rawIdentifier = Array.isArray(params.identifier)
     ? params.identifier[0]
@@ -207,7 +210,12 @@ export default function McpDetailPage() {
   const shownReadme = hasMcpReadmeToShow(readme) ? readme : null;
   const trusted = Boolean(item?.official || item?.verified);
   const desktopOnly = Boolean(item && (item.desktopOnly || !item.webExecutable));
-  const tools = manifest?.tools ?? [];
+  const { tools, count: toolsCount } = mcpDetailTools(
+    manifest,
+    install,
+    item?.toolsCount ?? 0,
+  );
+  const transport = manifest?.transport ?? item?.transport ?? null;
   const description = manifest?.description ?? item?.summary ?? "";
   const sourceUrl = manifest?.sourceUrl ?? item?.sourceUrl ?? null;
   const repoUrl = manifest?.repoUrl ?? item?.repoUrl ?? null;
@@ -518,9 +526,7 @@ export default function McpDetailPage() {
                           </TabsTrigger>
                         ) : null}
                         <TabsTrigger className="px-2.5 text-xs" value="tools">
-                          {t("detail.tabs.tools", {
-                            count: tools.length || item.toolsCount,
-                          })}
+                          {t("detail.tabs.tools", { count: toolsCount })}
                         </TabsTrigger>
                       </TabsList>
                     </div>
@@ -614,15 +620,25 @@ export default function McpDetailPage() {
                                   <span className="min-w-0 truncate font-mono text-xs font-medium text-foreground">
                                     {tool.title ?? tool.name}
                                   </span>
-                                  <Badge
-                                    className={cn(
-                                      "h-5 shrink-0 px-1.5 text-[10px]",
-                                      meta.className,
+                                  <div className="flex shrink-0 items-center gap-1">
+                                    {tool.enabled ? null : (
+                                      <Badge
+                                        className="h-5 px-1.5 text-[10px] text-muted-foreground"
+                                        variant="outline"
+                                      >
+                                        {t("detail.disabled")}
+                                      </Badge>
                                     )}
-                                    variant="outline"
-                                  >
-                                    {t(`risk.${meta.riskKey}`)}
-                                  </Badge>
+                                    <Badge
+                                      className={cn(
+                                        "h-5 px-1.5 text-[10px]",
+                                        meta.className,
+                                      )}
+                                      variant="outline"
+                                    >
+                                      {t(`risk.${meta.riskKey}`)}
+                                    </Badge>
+                                  </div>
                                 </div>
                                 {tool.description ? (
                                   <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
@@ -666,15 +682,14 @@ export default function McpDetailPage() {
                       {
                         key: "transport",
                         label: t("detail.fields.transport"),
-                        value:
-                          manifest?.transport ??
-                          item.transport ??
-                          t("detail.fieldValues.unknown"),
+                        value: transport
+                          ? transportLabel(transport)
+                          : t("detail.fieldValues.unknown"),
                       },
                       {
                         key: "runtime",
                         label: t("detail.fields.runtime"),
-                        value: item.runtime,
+                        value: tRuntime(mcpRuntimeKind(item)),
                       },
                       {
                         key: "auth",
@@ -686,7 +701,7 @@ export default function McpDetailPage() {
                       {
                         key: "tools",
                         label: t("detail.fields.tools"),
-                        value: String(tools.length || item.toolsCount),
+                        value: String(toolsCount),
                       },
                       {
                         key: "updated",
@@ -698,7 +713,7 @@ export default function McpDetailPage() {
                     ].map(({ key, label, value }) => (
                       <div key={key}>
                         <dt className="text-muted-foreground">{label}</dt>
-                        <dd className="mt-0.5 font-medium text-foreground capitalize">
+                        <dd className="mt-0.5 break-words font-medium text-foreground">
                           {value}
                         </dd>
                       </div>

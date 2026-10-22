@@ -42,6 +42,7 @@ import {
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { contentClient } from "../../../../lib/sdk";
 import { mcpOverviewLocale } from "../../../../lib/mcp-ai-overview";
+import { mcpRuntimeKind, transportLabel } from "../../../../lib/mcp-labels";
 import { hasMcpReadmeToShow, readMcpReadme } from "../../../../lib/mcp-readme";
 import { mcpAuthMethod } from "../../../../lib/mcp-auth-method";
 import { formatShortRelativeTime } from "../../../../lib/relative-time";
@@ -52,6 +53,7 @@ import {
 } from "../../../_components/market/mcp-readme-section";
 import { McpAiOverviewView } from "../../../_components/market/mcp-ai-overview-view";
 import { McpIcon } from "../../../_components/site-icons";
+import { mcpDetailTools } from "./mcp-detail-tools";
 
 type MarketMcpItem = ListWorkspaceMarketMcpResponse["items"][number];
 type MarketMcpDetail = Awaited<
@@ -145,6 +147,7 @@ export function McpDetailDialog({
   const overviewLocale = mcpOverviewLocale(locale);
   const t = useTranslations("dashboardMcpPanel");
   const tAuth = useTranslations("mcp.authMethod");
+  const tRuntime = useTranslations("mcp.badges.runtime");
   const [detail, setDetail] = React.useState<MarketMcpDetail | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
@@ -207,7 +210,12 @@ export function McpDetailDialog({
   const desktopOnly = Boolean(
     market && (market.desktopOnly || !market.webExecutable),
   );
-  const tools = manifest?.tools ?? [];
+  const { tools, count: toolsCount } = mcpDetailTools(
+    manifest,
+    install,
+    market?.toolsCount ?? 0,
+  );
+  const transport = manifest?.transport ?? market?.transport ?? null;
   const description = manifest?.description ?? market?.summary ?? "";
   const sourceUrl = manifest?.sourceUrl ?? market?.sourceUrl ?? null;
   const repoUrl = manifest?.repoUrl ?? market?.repoUrl ?? null;
@@ -340,9 +348,7 @@ export function McpDetailDialog({
                         </TabsTrigger>
                       ) : null}
                       <TabsTrigger className="px-2.5 text-xs" value="tools">
-                        {t("detail.tabs.tools", {
-                          count: tools.length || market.toolsCount,
-                        })}
+                        {t("detail.tabs.tools", { count: toolsCount })}
                       </TabsTrigger>
                     </TabsList>
                   </div>
@@ -462,15 +468,25 @@ export function McpDetailDialog({
                                 <span className="min-w-0 truncate font-mono text-xs font-medium text-foreground">
                                   {tool.title ?? tool.name}
                                 </span>
-                                <Badge
-                                  className={cn(
-                                    "h-5 shrink-0 px-1.5 text-[10px]",
-                                    meta.className,
+                                <div className="flex shrink-0 items-center gap-1">
+                                  {tool.enabled ? null : (
+                                    <Badge
+                                      className="h-5 px-1.5 text-[10px] text-muted-foreground"
+                                      variant="outline"
+                                    >
+                                      {t("detail.disabled")}
+                                    </Badge>
                                   )}
-                                  variant="outline"
-                                >
-                                  {t(`risk.${meta.riskKey}`)}
-                                </Badge>
+                                  <Badge
+                                    className={cn(
+                                      "h-5 px-1.5 text-[10px]",
+                                      meta.className,
+                                    )}
+                                    variant="outline"
+                                  >
+                                    {t(`risk.${meta.riskKey}`)}
+                                  </Badge>
+                                </div>
                               </div>
                               {tool.description ? (
                                 <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
@@ -508,15 +524,14 @@ export function McpDetailDialog({
                       {
                         key: "transport",
                         label: t("detail.fields.transport"),
-                        value:
-                          manifest?.transport ??
-                          market.transport ??
-                          t("detail.fieldValues.unknown"),
+                        value: transport
+                          ? transportLabel(transport)
+                          : t("detail.fieldValues.unknown"),
                       },
                       {
                         key: "runtime",
                         label: t("detail.fields.runtime"),
-                        value: market.runtime,
+                        value: tRuntime(mcpRuntimeKind(market)),
                       },
                       {
                         key: "auth",
@@ -528,7 +543,7 @@ export function McpDetailDialog({
                       {
                         key: "tools",
                         label: t("detail.fields.tools"),
-                        value: String(tools.length || market.toolsCount),
+                        value: String(toolsCount),
                       },
                     ].map(({ key, label, value }) => (
                       <div key={key}>
