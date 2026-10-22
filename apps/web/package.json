@@ -94,13 +94,13 @@
     "@types/pg": "^8.21.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
-    "@vitest/coverage-v8": "4.1.11",
+    "@vitest/coverage-v8": "4.1.12",
     "autoprefixer": "^10.5.4",
     "eslint": "^9.39.5",
     "postcss": "^8.5.26",
     "sharp": "^0.35.5",
     "tailwindcss": "^4.3.3",
     "typescript": "5.9.2",
-    "vitest": "4.1.11"
+    "vitest": "4.1.12"
   }
 }
