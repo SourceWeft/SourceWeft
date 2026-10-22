@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  compactToolCallOperations,
   compactToolCallOutputsForClient,
+  expandToolCallOperations,
   expandToolCallOutputsFromClient,
 } from "../src/thread-message-compaction";
 
@@ -168,4 +170,59 @@ test("expanded operations are independent copies of the pooled entry", () => {
   assert.notEqual(first, second);
   first.status = "mutated";
   assert.equal(second.status, "succeeded");
+});
+
+test("stored operations pool once per record and expand to the written shape", () => {
+  const snapshot = { status: "running", ...cumulativeRun(40) };
+  const stored = compactToolCallOperations(snapshot);
+
+  assert.equal((stored.toolCallOperationPool as unknown[]).length, 41);
+  // Storage pools operations only; mirrored lc_kwargs stay as written.
+  const output = (
+    stored.toolCalls as Array<{ output?: Record<string, unknown> }>
+  )[1]?.output;
+  assert.equal("lcKwargsMirrored" in (output ?? {}), false);
+  assert.deepEqual(expandToolCallOperations(stored), snapshot);
+  assert.ok(bytes(stored) < bytes(snapshot) / 4);
+});
+
+test("re-compacting a stored record is idempotent, including newly inline calls", () => {
+  const stored = compactToolCallOperations(cumulativeRun(5));
+  assert.deepEqual(compactToolCallOperations(stored), stored);
+
+  // A writer that spread a stored record and appended an expanded call.
+  const appended = {
+    ...stored,
+    toolCalls: [
+      ...(stored.toolCalls as unknown[]),
+      {
+        id: "call-new",
+        tool: "execute",
+        output: toolMessageOutput(9, [operation(0), operation(9)]),
+      },
+    ],
+  };
+  const expected = {
+    ...cumulativeRun(5),
+    toolCalls: [
+      ...cumulativeRun(5).toolCalls,
+      {
+        id: "call-new",
+        tool: "execute",
+        output: toolMessageOutput(9, [operation(0), operation(9)]),
+      },
+    ],
+  };
+  assert.deepEqual(
+    expandToolCallOperations(compactToolCallOperations(appended)),
+    expected,
+  );
+});
+
+test("records without a pool are returned as they are", () => {
+  const legacy = cumulativeRun(2);
+  assert.equal(expandToolCallOperations(legacy), legacy);
+  assert.deepEqual(compactToolCallOperations({ status: "queued" }), {
+    status: "queued",
+  });
 });

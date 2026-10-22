@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeAll, beforeEach, test, vi } from "vitest";
 import { eq } from "drizzle-orm";
+import { expandToolCallOutputsFromClient } from "@sourceweft/contracts";
 import { createIsolatedTestDatabase } from "../../../test/isolated-database";
 import { createPreparedThreadTurn } from "../../../test/prepared-turn";
 import { createBillingPort } from "../../../test/thread-stream-fixtures";
@@ -1492,4 +1493,879 @@ test("an old snapshot row shrinks on its next progress write and keeps its commi
     ).length,
     38,
   );
+}, 120_000);
+
+// ---------------------------------------------------------------------------
+// Sandbox-heavy run (live run 35e25891, Issue #333 reopened)
+// ---------------------------------------------------------------------------
+
+/**
+ * Every sandbox tool output (`execute`, `prepare_sandbox_workspace`,
+ * `collect_sandbox_outputs`) carries the message's whole operation timeline as
+ * of that call (`appendSandboxOperationTimeline`, `listMessageOperations`
+ * limit 50), so inline storage grows quadratically with the command count.
+ * The live run stored 746,672 chars of operations in a 729,054 B snapshot at
+ * 39 executes; this run has 84 executes and 6 prepares.
+ */
+const SANDBOX_STEP_COUNT = 30;
+const SANDBOX_CALLS_PER_STEP = 3;
+const SANDBOX_CALL_COUNT = SANDBOX_STEP_COUNT * SANDBOX_CALLS_PER_STEP;
+/** Calls that run `prepare_sandbox_workspace`; every other call is `execute`. */
+const PREPARE_CALLS = new Set([0, 15, 30, 45, 60, 75]);
+const EXECUTE_CALL_COUNT = SANDBOX_CALL_COUNT - PREPARE_CALLS.size;
+const OPERATION_TIMELINE_LIMIT = 50;
+const SANDBOX_THINKING_STEPS = new Set([0, 6, 12, 18, 24]);
+const SANDBOX_METERED_CALL_COUNT = SANDBOX_STEP_COUNT + 1;
+const SANDBOX_REASONING_DELTA_CHARS = 40;
+const SANDBOX_REPORT_CHARS = 4_000;
+const CLIENT_VIEW_LIMIT = 640 * 1_024;
+/** A structure-only trace event (`projectToolCallTraceEvent`), see below. */
+const TRACE_EVENT_BYTES = 360;
+/** The quadratic inline shape must be far beyond every bound below. */
+const INLINE_OPERATIONS_MIN_BYTES = 2 * 1_024 * 1_024;
+
+type SandboxOperation = {
+  operationType: "prepare" | "execute";
+  status: "succeeded";
+  createdAt: string;
+  durationMs: number;
+  result: { exitCode: number; output: string; outputTruncated: boolean };
+};
+
+type SandboxRunStep = {
+  segment: ModelReasoningSegmentTrace;
+  thinking: ThinkingStepTrace[];
+  calls: ToolCallTrace[];
+};
+
+type SandboxRun = {
+  steps: SandboxRunStep[];
+  toolCalls: ToolCallTrace[];
+  /** Every distinct operation, in creation order (one per sandbox call). */
+  operations: SandboxOperation[];
+  thinkingSteps: ThinkingStepTrace[];
+  meteredLlmCalls: MeteredLlmCallTrace[];
+  renderBlocks: MessageRenderBlock[];
+  reasoning: string;
+  report: string;
+};
+
+/** A serialized LangChain ToolMessage, as the sandbox tools return it. */
+function sandboxToolMessage(input: {
+  toolCallId: string;
+  name: string;
+  content: string;
+  operations: SandboxOperation[];
+}) {
+  return {
+    name: input.name,
+    type: "tool",
+    status: "success",
+    content: input.content,
+    metadata: {},
+    lc_kwargs: {
+      id: `tool-message-${input.toolCallId}`,
+      name: input.name,
+      status: "success",
+      content: input.content,
+      metadata: {},
+      tool_call_id: input.toolCallId,
+      additional_kwargs: {},
+      response_metadata: {},
+    },
+    operations: input.operations,
+    lc_namespace: ["langchain_core", "messages"],
+    tool_call_id: input.toolCallId,
+    lc_serializable: true,
+    additional_kwargs: {},
+    response_metadata: {},
+  };
+}
+
+function buildSandboxRun(input: {
+  userMessageId: string;
+  seed: number;
+}): SandboxRun {
+  const random = createRandom(input.seed);
+  const gatewayConfigId = `gateway-${randomUUID()}`;
+  let sequence = 0;
+  const nextSequence = () => ++sequence;
+  const steps: SandboxRunStep[] = [];
+  const toolCalls: ToolCallTrace[] = [];
+  const operations: SandboxOperation[] = [];
+  const thinkingSteps: ThinkingStepTrace[] = [];
+  const renderBlocks: MessageRenderBlock[] = [];
+  let reasoning = "";
+
+  // One more step than tool steps: the last model call writes the report.
+  for (let step = 0; step <= SANDBOX_STEP_COUNT; step++) {
+    const previous = toolCalls.at(-1);
+    const text = prose(random, 500 + ((step * 211) % 400));
+    reasoning += text;
+    const segment: ModelReasoningSegmentTrace = {
+      id: `model-reasoning-${step + 1}`,
+      text,
+      sequence: nextSequence(),
+      durationMs: 1_200 + text.length * 3,
+      ...(previous
+        ? {
+            phase: "after_tool" as const,
+            toolCallId: previous.id,
+            tool: previous.tool,
+          }
+        : { phase: "initial" as const }),
+    };
+    renderBlocks.push({
+      id: `reasoning-${segment.id}`,
+      type: "reasoning",
+      text,
+      durationMs: segment.durationMs,
+    });
+    const thinking: ThinkingStepTrace[] = SANDBOX_THINKING_STEPS.has(step)
+      ? [
+          {
+            id: `thinking-step-${step + 1}`,
+            kind: "log",
+            title: `Checking ${prose(random, 30)}`,
+            status: "completed",
+            items: [prose(random, 64), prose(random, 48)],
+            sequence: nextSequence(),
+            description: prose(random, 90),
+          },
+        ]
+      : [];
+    thinkingSteps.push(...thinking);
+    const calls: ToolCallTrace[] = [];
+    if (step < SANDBOX_STEP_COUNT) {
+      for (let slot = 0; slot < SANDBOX_CALLS_PER_STEP; slot++) {
+        const index = toolCalls.length;
+        const id = `call_${String(index).padStart(2, "0")}_${randomUUID().slice(0, 12)}`;
+        const prepare = PREPARE_CALLS.has(index);
+        const tool = prepare ? "prepare_sandbox_workspace" : "execute";
+        const operation: SandboxOperation = {
+          operationType: prepare ? "prepare" : "execute",
+          status: "succeeded",
+          createdAt: new Date(1_790_000_000_000 + index * 41_000).toISOString(),
+          durationMs: 150 + Math.floor(random() * 9_000),
+          result: {
+            exitCode: 0,
+            output: prose(random, 400 + ((index * 389) % 700), 96),
+            outputTruncated: false,
+          },
+        };
+        operations.push(operation);
+        const stdout = prose(random, 1_024 + ((index * 577) % 2_048), 96);
+        const call: ToolCallTrace = {
+          id,
+          tool,
+          input: prepare
+            ? {
+                files: [
+                  {
+                    sourcePath: `/workspace/data/part-${index}.csv`,
+                    targetPath: `/home/user/work/data/part-${index}.csv`,
+                  },
+                ],
+              }
+            : {
+                command: `cd /home/user/work && python3 scripts/aggregate.py --input data/part-${index}.csv --format table`,
+              },
+          output: sandboxToolMessage({
+            toolCallId: id,
+            name: tool,
+            content: `${stdout}\n\n[Command succeeded with exit code 0]`,
+            // The timeline as of this call, capped to the latest 50.
+            operations: operations.slice(-OPERATION_TIMELINE_LIMIT),
+          }),
+          status: "completed",
+          latencyMs: operation.durationMs + 60,
+          error: null,
+          sequence: nextSequence(),
+        };
+        calls.push(call);
+        toolCalls.push(call);
+        renderBlocks.push({ id: `tool-${id}`, type: "tool", toolCallId: id });
+      }
+    }
+    steps.push({ segment, thinking, calls });
+  }
+
+  const report = prose(random, SANDBOX_REPORT_CHARS, 110);
+  renderBlocks.push({
+    id: `text-${renderBlocks.length + 1}`,
+    type: "text",
+    text: report,
+  });
+  const meteredLlmCalls = Array.from(
+    { length: SANDBOX_METERED_CALL_COUNT },
+    (_, index) =>
+      buildMeteredCall({
+        index,
+        random,
+        userMessageId: input.userMessageId,
+        gatewayConfigId,
+      }),
+  );
+
+  assert.equal(toolCalls.length, SANDBOX_CALL_COUNT);
+  assert.equal(
+    toolCalls.filter((call) => call.tool === "execute").length,
+    EXECUTE_CALL_COUNT,
+  );
+  return {
+    steps,
+    toolCalls,
+    operations,
+    thinkingSteps,
+    meteredLlmCalls,
+    renderBlocks,
+    reasoning,
+    report,
+  };
+}
+
+async function* scriptedSandboxTurn(
+  run: SandboxRun,
+  counts: Record<string, number>,
+): AsyncGenerator<DeepAgentTurnEvent> {
+  const count = (type: string) => {
+    counts[type] = (counts[type] ?? 0) + 1;
+  };
+  for (const { segment, thinking, calls } of run.steps) {
+    let streamed = "";
+    const deltas = chunk(segment.text, SANDBOX_REASONING_DELTA_CHARS);
+    for (const [index, delta] of deltas.entries()) {
+      streamed += delta;
+      count("reasoning");
+      yield {
+        type: "reasoning",
+        reasoning: delta,
+        segment: {
+          ...segment,
+          text: streamed,
+          durationMs:
+            index === deltas.length - 1
+              ? segment.durationMs
+              : Math.floor(((segment.durationMs ?? 0) * index) / deltas.length),
+        },
+      };
+    }
+    for (const item of thinking) {
+      count("thinking-step");
+      yield {
+        type: "thinking-step",
+        step: { ...item, status: "in_progress", items: item.items.slice(0, 1) },
+      };
+    }
+    for (const call of calls) {
+      const running: ToolCallTrace = {
+        ...call,
+        output: null,
+        status: "running",
+        latencyMs: null,
+      };
+      count("tool-call-start");
+      yield {
+        type: "tool-call-start",
+        id: call.id,
+        tool: call.tool,
+        input: call.input,
+        toolCall: running,
+      };
+      count("tool-call-result");
+      yield {
+        type: "tool-call-result",
+        id: call.id,
+        tool: call.tool,
+        input: call.input,
+        output: call.output,
+        latencyMs: call.latencyMs,
+        toolCall: call,
+      };
+      count("tool-call-end");
+      yield {
+        type: "tool-call-end",
+        id: call.id,
+        tool: call.tool,
+        latencyMs: call.latencyMs,
+        status: "completed",
+        toolCall: call,
+      };
+    }
+    for (const item of thinking) {
+      count("thinking-step");
+      yield { type: "thinking-step", step: item };
+    }
+  }
+  for (const delta of chunk(run.report, TEXT_DELTA_CHARS)) {
+    count("text-delta");
+    yield { type: "text-delta", delta };
+  }
+  const usage = run.meteredLlmCalls.reduce(
+    (sum, call) => ({
+      inputTokens: sum.inputTokens + (call.usage?.inputTokens ?? 0),
+      outputTokens: sum.outputTokens + (call.usage?.outputTokens ?? 0),
+      totalTokens: sum.totalTokens + (call.usage?.totalTokens ?? 0),
+    }),
+    { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+  );
+  yield {
+    type: "done",
+    outcome: {
+      assistantContent: run.report,
+      retrieval: null,
+      citations: [],
+      availableCitations: [],
+      retrievalCalls: [],
+      toolCalls: run.toolCalls,
+      meteredLlmCalls: run.meteredLlmCalls,
+      thinkingSteps: run.thinkingSteps,
+      renderBlocks: run.renderBlocks,
+      reasoningSegments: run.steps.map((step) => step.segment),
+      usage,
+      finishReason: "stop",
+      reasoning: run.reasoning,
+      agentCheckpoint: {
+        beforeInput: null,
+        beforeAssistant: null,
+        resume: null,
+        final: null,
+      },
+    },
+  };
+}
+
+type StoredToolCallShape = {
+  hasPool: boolean;
+  poolLength: number | null;
+  toolCalls: number;
+  inlineOutputs: number;
+  refOutputs: number;
+  /** Position of any `"operations"` key anywhere in the stored JSON, 0 if none. */
+  operationsKeyAt: number;
+  compressed: number;
+  textBytes: number;
+};
+
+/** The stored JSON as PostgreSQL holds it, bypassing the column type. */
+async function readStoredToolCallShape(
+  table: "chat_thread_runs" | "messages",
+  id: string,
+): Promise<StoredToolCallShape> {
+  const column = table === "chat_thread_runs" ? "snapshot_json" : "metadata";
+  const {
+    rows: [row],
+  } = await schema.database.query<Record<string, unknown>>(
+    `select
+       ${column} ? 'toolCallOperationPool' as has_pool,
+       case when jsonb_typeof(${column}->'toolCallOperationPool') = 'array'
+         then jsonb_array_length(${column}->'toolCallOperationPool') end as pool_length,
+       jsonb_array_length(${column}->'toolCalls') as tool_calls,
+       (select count(*) from jsonb_array_elements(${column}->'toolCalls') as call
+         where jsonb_typeof(call->'output') = 'object'
+           and call->'output' ? 'operations') as inline_outputs,
+       (select count(*) from jsonb_array_elements(${column}->'toolCalls') as call
+         where jsonb_typeof(call->'output') = 'object'
+           and call->'output' ? 'operationRefs') as ref_outputs,
+       position('"operations"' in ${column}::text) as operations_key_at,
+       pg_column_size(${column}) as compressed,
+       octet_length(${column}::text) as text_bytes
+     from ${table} where id = $1`,
+    [id],
+  );
+  assert.ok(row, `${table} ${id} missing`);
+  return {
+    hasPool: row.has_pool === true,
+    poolLength: row.pool_length === null ? null : Number(row.pool_length),
+    toolCalls: Number(row.tool_calls),
+    inlineOutputs: Number(row.inline_outputs),
+    refOutputs: Number(row.ref_outputs),
+    operationsKeyAt: Number(row.operations_key_at),
+    compressed: Number(row.compressed),
+    textBytes: Number(row.text_bytes),
+  };
+}
+
+function assertPooledStorage(
+  shape: StoredToolCallShape,
+  run: SandboxRun,
+  label: string,
+) {
+  assert.equal(shape.hasPool, true, `${label} has no toolCallOperationPool`);
+  assert.equal(
+    shape.poolLength,
+    run.operations.length,
+    `${label} pool holds each distinct operation once`,
+  );
+  assert.equal(shape.toolCalls, SANDBOX_CALL_COUNT, `${label} toolCalls`);
+  assert.equal(shape.inlineOutputs, 0, `${label} stores inline operations`);
+  assert.equal(shape.refOutputs, SANDBOX_CALL_COUNT, `${label} operationRefs`);
+  assert.equal(
+    shape.operationsKeyAt,
+    0,
+    `${label} stores an "operations" key outside the pool`,
+  );
+}
+
+/** Every tool call reads back exactly as streamed (Run command card input). */
+function assertToolCallsAsStreamed(
+  record: Record<string, unknown>,
+  run: SandboxRun,
+  label: string,
+) {
+  assert.equal(
+    "toolCallOperationPool" in record,
+    false,
+    `${label} exposes the storage pool`,
+  );
+  const stored = asRecords(record.toolCalls);
+  assert.equal(stored.length, SANDBOX_CALL_COUNT, `${label} toolCalls`);
+  for (const call of run.toolCalls) {
+    const item = stored.find((candidate) => candidate.id === call.id);
+    assert.ok(item, `${label} ${call.id} missing`);
+    const output = item.output as Record<string, unknown>;
+    const streamed = call.output as Record<string, unknown>;
+    assert.equal("operationRefs" in output, false, `${label} ${call.id} refs`);
+    assert.deepEqual(
+      output.operations,
+      streamed.operations,
+      `${label} ${call.id} operations`,
+    );
+    assert.equal(output.content, streamed.content, `${label} ${call.id}`);
+    assert.deepEqual(
+      output.lc_kwargs,
+      streamed.lc_kwargs,
+      `${label} lc_kwargs`,
+    );
+    assert.deepEqual(output, streamed, `${label} ${call.id} output`);
+    assert.deepEqual(item.input, call.input, `${label} ${call.id} input`);
+  }
+}
+
+/** Bytes of each tool output's `operations` as stored without the pool. */
+function inlineOperationBytes(run: SandboxRun) {
+  return run.toolCalls.reduce(
+    (sum, call) =>
+      sum + bytes((call.output as Record<string, unknown>).operations),
+    0,
+  );
+}
+
+function outputWithoutOperations(call: ToolCallTrace) {
+  const { operations: _operations, ...rest } = call.output as Record<
+    string,
+    unknown
+  >;
+  return rest;
+}
+
+test("a sandbox-heavy run stores each sandbox operation once and reads every timeline back unchanged", async () => {
+  const run = await createRun();
+  const counts: Record<string, number> = {};
+  let appended = 0;
+  vi.spyOn(streams.chatRunStreamManager, "subscribeCancel").mockResolvedValue(
+    async () => {},
+  );
+  vi.spyOn(streams.chatRunStreamManager, "appendEvent").mockImplementation(
+    async () => ++appended,
+  );
+  const { ContentThreadStreamService } =
+    await vi.importActual<typeof import("../stream/service")>(
+      "../stream/service",
+    );
+  const { ContentThreadTurnService } = await import("../turn/service");
+  const billing = createBillingPort();
+  const turnService = new ContentThreadTurnService(billing);
+  let synthetic: SandboxRun | undefined;
+  const streamService = new ContentThreadStreamService(
+    {
+      prepareThreadTurn: async () => {
+        const userMessage = await messages.createMessageRecord({
+          teamId,
+          workspaceId,
+          threadId,
+          role: "user",
+          content: "Aggregate the quarterly data in the sandbox.",
+          createdBy: null,
+        });
+        synthetic = buildSandboxRun({
+          userMessageId: userMessage.id,
+          seed: 35_025_891,
+        });
+        return preparedTurn({ run, userMessage });
+      },
+      finalizeThreadTurn: (
+        command: Parameters<typeof turnService.finalizeThreadTurn>[0],
+      ) => turnService.finalizeThreadTurn(command),
+    } as unknown as ConstructorParameters<typeof ContentThreadStreamService>[0],
+    () => scriptedSandboxTurn(synthetic!, counts),
+    async () => null,
+    undefined,
+    billing,
+  );
+  mocked.stream.mockImplementation(
+    (...args: Parameters<typeof streamService.streamThreadEvents>) =>
+      streamService.streamThreadEvents(...args),
+  );
+
+  const startedAt = Date.now();
+  const result = await runner.processThreadChatRunJob({
+    runId: run.id,
+    teamId,
+    workspaceId,
+    threadId,
+    userId,
+  });
+  const elapsedMs = Date.now() - startedAt;
+  assert.equal(result.status, "completed", JSON.stringify(result));
+  assert.ok(synthetic);
+  assert.ok(result.assistantMessageId);
+  assert.equal(counts["tool-call-result"], SANDBOX_CALL_COUNT);
+  const inlineBytes = inlineOperationBytes(synthetic);
+  const operationRefCount = synthetic.toolCalls.reduce(
+    (sum, call) =>
+      sum +
+      asRecords((call.output as Record<string, unknown>).operations).length,
+    0,
+  );
+  assert.ok(
+    inlineBytes > INLINE_OPERATIONS_MIN_BYTES,
+    `inline operations are only ${inlineBytes} bytes`,
+  );
+
+  // 1. The snapshot stores each distinct operation once.
+  const snapshotShape = await readStoredToolCallShape(
+    "chat_thread_runs",
+    run.id,
+  );
+  assert.ok(
+    snapshotShape.compressed < SNAPSHOT_COMPRESSED_LIMIT,
+    `pg_column_size(snapshot_json) is ${snapshotShape.compressed} bytes`,
+  );
+  assertPooledStorage(snapshotShape, synthetic, "snapshot_json");
+
+  // 2. So does the messages row, within a bound derived from the run's payload.
+  const messageShape = await readStoredToolCallShape(
+    "messages",
+    result.assistantMessageId,
+  );
+  assertPooledStorage(messageShape, synthetic, "messages.metadata");
+  /**
+   * The messages row stores, each once: the tool inputs and outputs without
+   * `operations` (a ToolMessage keeps `content` twice, top level and
+   * `lc_kwargs`), the operation pool, the reasoning twice (`reasoning` and
+   * its render blocks), the thinking steps, the metering list (design D1)
+   * and the report's text block. Around that payload: one `operationRefs`
+   * index per timeline entry (≤ 4 B each), per-item structure (ids, kinds,
+   * sequences, statuses, punctuation) at the allowances measured on the long
+   * report run above, and the structure-only `traceEvents` (three per tool
+   * call, one per reasoning segment, two per thinking step; measured ~311 B
+   * each here, allowed 360 B). The structure allowance gets 25% headroom:
+   * measured on this fixture, structure is ~194 KB against ~252 KB allowed,
+   * so the bound sits ~7% above the ~852 KB text. The bound applies to the
+   * text form; the compressed jsonb must also fit it. Inline operations add
+   * ~2.9 MB, so a row that stores them fails it several times over.
+   */
+  const toolPayloadBytes = synthetic.toolCalls.reduce(
+    (sum, call) =>
+      sum + bytes(call.input) + bytes(outputWithoutOperations(call)),
+    0,
+  );
+  const messagePayloadBytes =
+    toolPayloadBytes +
+    bytes(synthetic.operations) +
+    2 * bytes(synthetic.reasoning) +
+    bytes(synthetic.thinkingSteps) +
+    bytes(synthetic.meteredLlmCalls) +
+    bytes(synthetic.report);
+  const messageStructureAllowance =
+    operationRefCount * 4 +
+    SANDBOX_CALL_COUNT *
+      (STRUCTURE_BYTES.toolCall + STRUCTURE_BYTES.tracePart) +
+    synthetic.renderBlocks.length * STRUCTURE_BYTES.renderBlock +
+    synthetic.steps.length *
+      (STRUCTURE_BYTES.reasoningSegment + STRUCTURE_BYTES.tracePart) +
+    (3 * SANDBOX_CALL_COUNT +
+      synthetic.steps.length +
+      2 * synthetic.thinkingSteps.length) *
+      TRACE_EVENT_BYTES +
+    STRUCTURE_BYTES.fixed;
+  const messageBound = Math.ceil(
+    messagePayloadBytes + messageStructureAllowance * 1.25,
+  );
+
+  // 3. The app's read paths restore every timeline exactly as streamed.
+  const persisted = (await repository.findChatThreadRunById({
+    runId: run.id,
+    teamId,
+    workspaceId,
+  }))!;
+  assert.equal(persisted.status, "completed");
+  assertToolCallsAsStreamed(
+    persisted.snapshotJson,
+    synthetic,
+    "findChatThreadRunById",
+  );
+  const found = await messages.findMessageRecord({
+    teamId,
+    workspaceId,
+    messageId: result.assistantMessageId,
+  });
+  assert.ok(found);
+  assertToolCallsAsStreamed(found.metadata, synthetic, "findMessageRecord");
+  const { stored, view } = await readClientAssistantMessage(
+    result.assistantMessageId,
+  );
+  assertToolCallsAsStreamed(
+    stored.metadata,
+    synthetic,
+    "listMessageRecordPageByThread",
+  );
+  assert.deepEqual(stored.metadata, found.metadata);
+  assert.equal(stored.content, synthetic.report);
+
+  // 4. The /messages wire stays compact and expands back to the stored shape.
+  const viewBytes = bytes(view);
+  const viewPool = asRecords(view.metadata.toolCallOperationPool);
+  assert.equal(viewPool.length, synthetic.operations.length);
+  for (const call of asRecords(view.metadata.toolCalls)) {
+    const output = call.output as Record<string, unknown>;
+    assert.equal("operations" in output, false, `${call.id} inline in view`);
+    assert.ok(Array.isArray(output.operationRefs), `${call.id} view refs`);
+  }
+  const expanded = expandToolCallOutputsFromClient(view.metadata);
+  assert.deepEqual(expanded.toolCalls, stored.metadata.toolCalls);
+  assert.equal("toolCallOperationPool" in expanded, false);
+  // Apart from what the view drops or projects (see message-client-view.ts;
+  // the client sanitizer drops `reasoningWrite`), every metadata field is
+  // the stored one.
+  const projectedKeys = new Set(["traceParts", "reasoningSegments"]);
+  const droppedKeys = new Set([
+    "meteredLlmCalls",
+    "reasoning",
+    "reasoningWrite",
+    "traceEvents",
+  ]);
+  for (const key of Object.keys(stored.metadata)) {
+    if (droppedKeys.has(key) || projectedKeys.has(key)) continue;
+    assert.deepEqual(expanded[key], stored.metadata[key], `view ${key}`);
+  }
+  for (const key of Object.keys(expanded)) {
+    assert.ok(key in stored.metadata, `view adds ${key}`);
+  }
+
+  console.log(
+    "[#333 size bounds] sandbox-heavy run",
+    JSON.stringify(
+      {
+        elapsedMs,
+        appendedEvents: appended,
+        streamedEvents: counts,
+        sandboxCalls: SANDBOX_CALL_COUNT,
+        distinctOperations: synthetic.operations.length,
+        operationRefs: operationRefCount,
+        inlineEquivalent: {
+          operationsBytes: inlineBytes,
+          toolCallsBytes: bytes(synthetic.toolCalls),
+          distinctOperationBytes: bytes(synthetic.operations),
+        },
+        snapshot: {
+          pgColumnSize: snapshotShape.compressed,
+          textBytes: snapshotShape.textBytes,
+          limit: SNAPSHOT_COMPRESSED_LIMIT,
+        },
+        messagesRow: {
+          pgColumnSize: messageShape.compressed,
+          textBytes: messageShape.textBytes,
+          bound: messageBound,
+          payloadBytes: messagePayloadBytes,
+          structureAllowance: messageStructureAllowance,
+          // As read back: `toolCalls` here is the expanded, inline shape.
+          readBackMetadata: metadataBreakdown(found.metadata),
+        },
+        clientView: {
+          bytes: viewBytes,
+          limit: CLIENT_VIEW_LIMIT,
+          metadata: metadataBreakdown(view.metadata),
+        },
+      },
+      null,
+      2,
+    ),
+  );
+  assert.ok(
+    messageShape.textBytes < messageBound,
+    `messages.metadata text is ${messageShape.textBytes} bytes, bound ${messageBound}`,
+  );
+  assert.ok(
+    messageShape.compressed < messageBound,
+    `pg_column_size(messages.metadata) is ${messageShape.compressed} bytes, bound ${messageBound}`,
+  );
+  assert.ok(messageBound < inlineBytes / 2);
+  assert.ok(
+    viewBytes < CLIENT_VIEW_LIMIT,
+    `/messages assistant view is ${viewBytes} bytes`,
+  );
+}, 600_000);
+
+test("rows stored with inline sandbox operations read unchanged and pool on their next write", async () => {
+  const run = await createRun();
+  const running = await repository.markChatThreadRunRunning({
+    runId: run.id,
+    teamId,
+    workspaceId,
+  });
+  assert.equal(running?.status, "running");
+  const userMessage = await messages.createMessageRecord({
+    teamId,
+    workspaceId,
+    threadId,
+    role: "user",
+    content: "Aggregate the quarterly data in the sandbox.",
+    createdBy: null,
+  });
+  const synthetic = buildSandboxRun({
+    userMessageId: userMessage.id,
+    seed: 333_035,
+  });
+  const segments = synthetic.steps.map((step) => step.segment);
+  const oldMetadata: Record<string, unknown> = {
+    userMessageId: userMessage.id,
+    sourceUserMessageId: userMessage.id,
+    traceId: run.id,
+    threadRun: { id: run.id, status: "running", mode: "send" },
+    modelAlias: "deepseek-v4-pro",
+    finishReason: "stop",
+    toolCalls: synthetic.toolCalls,
+    thinkingSteps: synthetic.thinkingSteps,
+    reasoning: synthetic.reasoning,
+    reasoningSegments: segments,
+    renderBlocks: synthetic.renderBlocks,
+  };
+  const assistantMessage = await messages.createMessageRecord({
+    teamId,
+    workspaceId,
+    threadId,
+    parentMessageId: userMessage.id,
+    role: "assistant",
+    content: synthetic.report,
+    createdBy: null,
+    model: "deepseek-v4-pro",
+  });
+  const oldSnapshot: Record<string, unknown> = {
+    reasoningRun: { runId: run.id, parentRunId: null, base: "" },
+    reasoningRevision: 900,
+    assistantContent: synthetic.report,
+    reasoningSegments: segments,
+    toolCalls: synthetic.toolCalls,
+    thinkingSteps: synthetic.thinkingSteps,
+    renderBlocks: synthetic.renderBlocks,
+    lastEventType: "tool-call-end",
+  };
+  // Raw SQL: the column type would pool these; old rows hold them inline.
+  await schema.database.query(
+    "update messages set metadata = $1::jsonb where id = $2",
+    [JSON.stringify(oldMetadata), assistantMessage.id],
+  );
+  await schema.database.query(
+    "update chat_thread_runs set snapshot_json = $1::jsonb, user_message_id = $2, assistant_message_id = $3 where id = $4",
+    [JSON.stringify(oldSnapshot), userMessage.id, assistantMessage.id, run.id],
+  );
+  const snapshotBefore = await readStoredToolCallShape(
+    "chat_thread_runs",
+    run.id,
+  );
+  const messageBefore = await readStoredToolCallShape(
+    "messages",
+    assistantMessage.id,
+  );
+  for (const shape of [snapshotBefore, messageBefore]) {
+    assert.equal(shape.hasPool, false);
+    assert.equal(shape.inlineOutputs, SANDBOX_CALL_COUNT);
+  }
+
+  // Old rows read as stored.
+  const readRun = async () =>
+    (await repository.findChatThreadRunById({
+      runId: run.id,
+      teamId,
+      workspaceId,
+    }))!;
+  const readMessage = async () =>
+    (await messages.findMessageRecord({
+      teamId,
+      workspaceId,
+      messageId: assistantMessage.id,
+    }))!;
+  assert.deepEqual((await readRun()).snapshotJson, oldSnapshot);
+  const oldRow = await readMessage();
+  assert.deepEqual(oldRow.metadata, oldMetadata);
+  assertToolCallsAsStreamed(oldRow.metadata, synthetic, "old messages row");
+
+  // One write through each repository pools the row.
+  const updated = await messages.updateMessageMetadataRecord({
+    teamId,
+    workspaceId,
+    threadId,
+    messageId: assistantMessage.id,
+    metadata: oldRow.metadata,
+  });
+  assert.ok(updated);
+  assert.deepEqual(updated.metadata, oldMetadata);
+  await repository.updateChatThreadRunProgress({
+    runId: run.id,
+    teamId,
+    workspaceId,
+    eventOffset: 1,
+    snapshotJson: { lastEventType: "thinking-step" },
+    returnRecord: false,
+  });
+
+  const snapshotAfter = await readStoredToolCallShape(
+    "chat_thread_runs",
+    run.id,
+  );
+  const messageAfter = await readStoredToolCallShape(
+    "messages",
+    assistantMessage.id,
+  );
+  console.log(
+    "[#333 size bounds] inline sandbox operations row",
+    JSON.stringify(
+      {
+        snapshot: {
+          before: {
+            pgColumnSize: snapshotBefore.compressed,
+            textBytes: snapshotBefore.textBytes,
+          },
+          after: {
+            pgColumnSize: snapshotAfter.compressed,
+            textBytes: snapshotAfter.textBytes,
+          },
+        },
+        messagesRow: {
+          before: {
+            pgColumnSize: messageBefore.compressed,
+            textBytes: messageBefore.textBytes,
+          },
+          after: {
+            pgColumnSize: messageAfter.compressed,
+            textBytes: messageAfter.textBytes,
+          },
+        },
+      },
+      null,
+      2,
+    ),
+  );
+  assertPooledStorage(snapshotAfter, synthetic, "rewritten snapshot_json");
+  assertPooledStorage(messageAfter, synthetic, "rewritten messages.metadata");
+  assert.ok(snapshotAfter.textBytes < snapshotBefore.textBytes / 4);
+  assert.ok(messageAfter.textBytes < messageBefore.textBytes / 4);
+
+  // And still read back unchanged.
+  assert.deepEqual((await readMessage()).metadata, oldMetadata);
+  const rewritten = (await readRun()).snapshotJson;
+  assertToolCallsAsStreamed(rewritten, synthetic, "rewritten snapshot");
+  assert.equal(rewritten.lastEventType, "thinking-step");
 }, 120_000);
