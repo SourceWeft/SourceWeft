@@ -1,11 +1,16 @@
 import { desc, sql } from "drizzle-orm";
 import { messageRoleSchema } from "@sourceweft/contracts/messages";
 import { threadRunStatusSchema } from "@sourceweft/contracts/stream";
+import {
+  compactToolCallOperations,
+  expandToolCallOperations,
+} from "@sourceweft/contracts/thread-message-compaction";
 import { workingFilePurposeSchema } from "@sourceweft/contracts/working-files";
 import {
   type AnyPgColumn,
   boolean,
   check,
+  customType,
   foreignKey,
   index,
   integer,
@@ -19,6 +24,32 @@ import {
 } from "drizzle-orm/pg-core";
 import { emptyJsonObject, sqlEnumList } from "./shared";
 import { workspaces } from "./identity-workspace";
+
+/**
+ * jsonb for records holding a run's `toolCalls` (run snapshots, message
+ * metadata). Every sandbox tool output carries the message's operation
+ * timeline as of that call, so a run with N commands would store O(N²)
+ * operations: each distinct operation is written once and restored on read,
+ * so callers always see the shape they wrote. Rows stored inline read as-is.
+ */
+const toolCallRecordJsonb = customType<{
+  data: Record<string, unknown>;
+  driverData: unknown;
+}>({
+  dataType() {
+    return "jsonb";
+  },
+  toDriver(value) {
+    return JSON.stringify(compactToolCallOperations(value));
+  },
+  fromDriver(value) {
+    const parsed: unknown =
+      typeof value === "string" ? JSON.parse(value) : value;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? expandToolCallOperations(parsed as Record<string, unknown>)
+      : (parsed as Record<string, unknown>);
+  },
+});
 
 type ThreadModelSettings = {
   llmProfileAlias?: string | null;
@@ -169,7 +200,7 @@ export const messages = pgTable(
     providerCostUsd: numeric("provider_cost_usd", { precision: 18, scale: 12 }),
     latencyMs: integer("latency_ms"),
     creditsConsumed: integer("credits_consumed"),
-    metadata: jsonb("metadata")
+    metadata: toolCallRecordJsonb("metadata")
       .$type<Record<string, unknown>>()
       .notNull()
       .default(emptyJsonObject),
@@ -270,7 +301,7 @@ export const chatThreadRuns = pgTable(
       .$type<Record<string, unknown>>()
       .notNull()
       .default(emptyJsonObject),
-    snapshotJson: jsonb("snapshot_json")
+    snapshotJson: toolCallRecordJsonb("snapshot_json")
       .$type<Record<string, unknown>>()
       .notNull()
       .default(emptyJsonObject),

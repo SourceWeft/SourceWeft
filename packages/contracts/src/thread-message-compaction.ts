@@ -1,5 +1,5 @@
 /**
- * Lossless compaction of assistant tool-call outputs in `/messages`.
+ * Lossless compaction of assistant tool-call outputs, in storage and `/messages`.
  *
  * Stored tool outputs repeat state across calls and inside each call:
  *
@@ -8,7 +8,9 @@
  * - a serialized LangChain ToolMessage mirrors its fields (`content`, `name`,
  *   `status`, …) under `lc_kwargs`.
  *
- * The API sends each distinct operation once per message
+ * Storage keeps each distinct operation once per run snapshot and message
+ * row (`compactToolCallOperations` on write, `expandToolCallOperations` on
+ * read). The API sends each distinct operation once per message
  * (`metadata.toolCallOperationPool`) with per-call indices
  * (`output.operationRefs`), and lists the `lc_kwargs` keys that equal the
  * output's own field (`output.lcKwargsMirrored`) instead of repeating them.
@@ -77,14 +79,19 @@ function expandLcKwargs(output: Record<string, unknown>) {
   return { ...rest, lc_kwargs: kwargs };
 }
 
-/** API side: compact one assistant message's metadata for `/messages`. */
-export function compactToolCallOutputsForClient(
-  metadata: Record<string, unknown>,
+/**
+ * Store each distinct tool-call operation once on `record` (a run snapshot or
+ * message metadata holding `toolCalls`). Already pooled input is expanded
+ * first, so the result is the same however often a record is written.
+ */
+export function compactToolCallOperations(
+  record: Record<string, unknown>,
 ): Record<string, unknown> {
+  const expanded = expandToolCallOperations(record);
   const pool: unknown[] = [];
   const poolIndex = new Map<string, number>();
   let references = 0;
-  const pooled = mapToolCallOutputs(metadata, (output) => {
+  const pooled = mapToolCallOutputs(expanded, (output) => {
     if (!Array.isArray(output.operations)) {
       return output;
     }
@@ -103,21 +110,21 @@ export function compactToolCallOutputsForClient(
     return { ...rest, [OPERATION_REFS_KEY]: refs };
   });
   // Pool only when operations repeat across calls; otherwise inline is smaller.
-  const withOperations = references > pool.length ? pooled : metadata;
-  const compacted = mapToolCallOutputs(withOperations, compactLcKwargs);
   return references > pool.length
-    ? { ...compacted, [OPERATION_POOL_KEY]: pool }
-    : compacted;
+    ? { ...pooled, [OPERATION_POOL_KEY]: pool }
+    : expanded;
 }
 
-/** SDK side: restore the stored shape of one message's metadata. */
-export function expandToolCallOutputsFromClient(
-  metadata: Record<string, unknown>,
+/** Restore every tool-call output's inline `operations` from the pool. */
+export function expandToolCallOperations(
+  record: Record<string, unknown>,
 ): Record<string, unknown> {
-  const { [OPERATION_POOL_KEY]: pool, ...rest } = metadata;
+  if (!(OPERATION_POOL_KEY in record)) {
+    return record;
+  }
+  const { [OPERATION_POOL_KEY]: pool, ...rest } = record;
   return mapToolCallOutputs(rest, (output) => {
-    const lcExpanded = expandLcKwargs(output);
-    const refs = lcExpanded[OPERATION_REFS_KEY];
+    const refs = output[OPERATION_REFS_KEY];
     if (
       !Array.isArray(pool) ||
       !Array.isArray(refs) ||
@@ -128,12 +135,29 @@ export function expandToolCallOutputsFromClient(
           (index as number) < pool.length,
       )
     ) {
-      return lcExpanded;
+      return output;
     }
-    const { [OPERATION_REFS_KEY]: _refs, ...withoutRefs } = lcExpanded;
+    const { [OPERATION_REFS_KEY]: _refs, ...withoutRefs } = output;
     return {
       ...withoutRefs,
       operations: refs.map((index: number) => structuredClone(pool[index])),
     };
   });
+}
+
+/** API side: compact one assistant message's metadata for `/messages`. */
+export function compactToolCallOutputsForClient(
+  metadata: Record<string, unknown>,
+): Record<string, unknown> {
+  return mapToolCallOutputs(
+    compactToolCallOperations(metadata),
+    compactLcKwargs,
+  );
+}
+
+/** SDK side: restore the stored shape of one message's metadata. */
+export function expandToolCallOutputsFromClient(
+  metadata: Record<string, unknown>,
+): Record<string, unknown> {
+  return expandToolCallOperations(mapToolCallOutputs(metadata, expandLcKwargs));
 }

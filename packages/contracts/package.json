@@ -29,6 +29,7 @@
     "./sources": "./src/sources.ts",
     "./artifacts": "./src/artifacts.ts",
     "./messages": "./src/messages.ts",
+    "./thread-message-compaction": "./src/thread-message-compaction.ts",
     "./threads": "./src/threads.ts",
     "./stream": "./src/stream.ts",
     "./skills": "./src/skills.ts",
