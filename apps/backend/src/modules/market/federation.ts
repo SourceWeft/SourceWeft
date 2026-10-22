@@ -93,14 +93,50 @@ function providerFromIdentifier(identifier: string) {
   return namespace;
 }
 
+// Server names that say only "this is an MCP server" — `com.notion/mcp`.
+const GENERIC_SERVER_NAMES = new Set([
+  "mcp",
+  "server",
+  "mcp-server",
+  "server-mcp",
+  "mcp-remote",
+  "remote",
+]);
+
+function humanize(value: string) {
+  return value
+    .replace(/[-_]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+/**
+ * The brand a reverse-DNS namespace names: the owner of `io.github.<owner>`,
+ * otherwise the domain label after the top-level one (`com.notion` →
+ * notion).
+ */
+function namespaceBrand(namespace: string) {
+  const labels = namespace.split(".").filter(Boolean);
+  if (labels[0] === "io" && labels[1] === "github" && labels[2]) {
+    return labels[2];
+  }
+  return labels[1] ?? labels[0] ?? namespace;
+}
+
+/**
+ * The registry title, else the server name humanized — or, when that name is
+ * generic (`com.notion/mcp` would read "Mcp"), the namespace's brand.
+ */
 function displayName(server: RegistryServer, identifier: string) {
   if (server.title && server.title.trim()) {
     return server.title.trim();
   }
+  const [namespace = identifier] = identifier.split("/");
   const tail = identifier.split("/").pop() ?? identifier;
-  return tail
-    .replace(/[-_]+/g, " ")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+  return humanize(
+    GENERIC_SERVER_NAMES.has(tail.toLowerCase())
+      ? namespaceBrand(namespace)
+      : tail,
+  );
 }
 
 function registryIconUrl(server: RegistryServer) {

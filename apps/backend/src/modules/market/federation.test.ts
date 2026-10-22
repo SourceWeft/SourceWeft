@@ -93,6 +93,34 @@ test("registry entries are categorized from their text, not left empty", async (
   assert.ok(manifest.categories.includes("databases"));
 });
 
+function nameFor(name: string, title?: string) {
+  return mapRegistryServerToManifest(
+    {
+      server: {
+        name,
+        title,
+        version: "1.0.0",
+        remotes: [{ type: "streamable-http", url: "https://acme.test/mcp" }],
+      },
+    },
+    { verified: true },
+  )?.name;
+}
+
+test("an untitled entry with a generic name is named after its namespace", () => {
+  // Notion's official entry has no title: it was listed as "Mcp".
+  assert.equal(nameFor("com.notion/mcp"), "Notion");
+  assert.equal(nameFor("ai.smithery/server"), "Smithery");
+  assert.equal(nameFor("io.github.acme-labs/mcp-server"), "Acme Labs");
+  assert.equal(nameFor("io.github.acme/MCP"), "Acme");
+});
+
+test("a title, or a specific name, is kept as the display name", () => {
+  assert.equal(nameFor("com.notion/mcp", "Notion MCP"), "Notion MCP");
+  assert.equal(nameFor("io.github.acme/postgres-mcp"), "Postgres Mcp");
+  assert.equal(nameFor("io.github.acme/weather"), "Weather");
+});
+
 test("registry entries preserve the first valid HTTPS icon", () => {
   const manifest = mapRegistryServerToManifest(
     {
