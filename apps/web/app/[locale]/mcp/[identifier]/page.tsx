@@ -42,6 +42,10 @@ import {
   hasMcpReadmeToShow,
   isLongMcpReadme,
 } from "../../../../lib/mcp-readme";
+import {
+  mcpAuthExplanation,
+  mcpAuthMethod,
+} from "../../../../lib/mcp-auth-method";
 import { CopyButton, McpIcon } from "../_components/mcp-client";
 import {
   ExternalTextLink,
@@ -209,6 +213,7 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
   }
   setRequestLocale(locale);
   const t = await getTranslations("mcp.detail");
+  const tAuth = await getTranslations("mcp.authMethod");
   const decodedIdentifier = decodeURIComponent(identifier);
   // AI text in the visitor's language, English when there is none in it.
   const overviewLocale = mcpOverviewLocale(locale);
@@ -224,6 +229,7 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
     listPublicMcpCategories(locale),
   ]);
   const { item, manifest, version } = result;
+  const authExplanation = mcpAuthExplanation(manifest.auth);
   const categoryNames = mcpCategoryNames(categoriesResponse.items);
   const relatedMarket =
     item.categories.length > 0
@@ -404,23 +410,42 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
             <aside className="order-2 rounded-xl border border-zinc-300 bg-white/70 p-5 lg:order-none dark:border-white/10 dark:bg-white/[0.04]">
               <dl className="grid grid-cols-2 gap-4 text-sm">
                 {[
-                  [t("tools"), String(manifest.tools.length)],
-                  [
-                    t("auth"),
-                    manifest.auth.required ? t("required") : t("notRequired"),
-                  ],
-                  [
-                    t("license"),
-                    manifest.license ?? item.license ?? t("unknown"),
-                  ],
-                  [
-                    t("language"),
-                    manifest.language ?? item.language ?? t("unknown"),
-                  ],
-                ].map(([label, value]) => (
+                  { label: t("tools"), value: String(manifest.tools.length) },
+                  {
+                    label: t("auth"),
+                    value: tAuth(mcpAuthMethod(manifest.auth)),
+                    // A second <dd>: the value stays its own term's first
+                    // description, wrapping rather than truncating.
+                    explanation: tAuth(
+                      `explain.${authExplanation.key}`,
+                      authExplanation.values,
+                    ),
+                  },
+                  {
+                    label: t("license"),
+                    value: manifest.license ?? item.license ?? t("unknown"),
+                  },
+                  {
+                    label: t("language"),
+                    value: manifest.language ?? item.language ?? t("unknown"),
+                  },
+                ].map(({ label, value, explanation }) => (
                   <div className="min-w-0" key={label}>
                     <dt className="text-xs text-zinc-500">{label}</dt>
-                    <dd className="mt-1 truncate font-medium">{value}</dd>
+                    <dd
+                      className={
+                        explanation
+                          ? "mt-1 break-words font-medium"
+                          : "mt-1 truncate font-medium"
+                      }
+                    >
+                      {value}
+                    </dd>
+                    {explanation ? (
+                      <dd className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                        {explanation}
+                      </dd>
+                    ) : null}
                   </div>
                 ))}
               </dl>

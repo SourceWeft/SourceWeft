@@ -438,6 +438,25 @@
         }
       }
     },
+    "authMethod": {
+      "notRequired": "無需",
+      "required": "需要",
+      "oauth": "OAuth",
+      "oauthOrApiKey": "OAuth 或 API 金鑰",
+      "apiKey": "API 金鑰",
+      "customHeaders": "自訂請求標頭",
+      "optionalApiKey": "無需 · 可選 API 金鑰",
+      "explain": {
+        "notRequired": "無需憑證即可連接。",
+        "optionalApiKey": "無需憑證即可連接；也可以在 {header} 請求標頭中新增 API 金鑰。",
+        "required": "需要憑證才能連接。",
+        "oauth": "連接時使用 OAuth 登入。",
+        "oauthOrApiKey": "使用 OAuth 登入，或在 {header} 請求標頭中傳送 API 金鑰。",
+        "apiKey": "在 {header} 請求標頭中傳送 API 金鑰。",
+        "apiKeyAnyHeader": "在請求標頭中傳送 API 金鑰。",
+        "customHeaders": "傳送此伺服器要求的請求標頭。"
+      }
+    },
     "detail": {
       "metaFallback": "MCP 服務",
       "metaTitle": "{name} MCP 服務",
@@ -449,8 +468,6 @@
       "auth": "驗證方式",
       "license": "授權條款",
       "language": "語言",
-      "required": "需要",
-      "notRequired": "無需",
       "unknown": "未知",
       "addToWorkspace": "新增到工作區",
       "signInToInstall": "登入以安裝",
@@ -2409,9 +2426,7 @@
         "updated": "更新時間"
       },
       "fieldValues": {
-        "unknown": "未知",
-        "authRequired": "必需",
-        "authNotRequired": "非必需"
+        "unknown": "未知"
       },
       "links": {
         "homepage": "首頁",
@@ -2449,6 +2464,18 @@
       "headersHint": "每行填寫一個請求標頭。儲存後將不再顯示機密值。",
       "noAuthNote": "此 MCP 伺服器無需憑證。",
       "oauthNote": "此 MCP 伺服器使用 OAuth。請與提供方連接你的帳戶——你將被重新導向以授予存取權限，然後返回此處。你的權杖將加密儲存並自動重新整理。",
+      "optionalKeyNote": "此 MCP 伺服器無需憑證即可使用。如有 API 金鑰，可在此新增。",
+      "method": {
+        "label": "連接方式",
+        "oauth": "使用 OAuth 登入",
+        "apiKey": "使用 API 金鑰",
+        "optional": "可選",
+        "switchNotice": "切換會替換你目前的連接。"
+      },
+      "connectedVia": {
+        "oauth": "已使用 OAuth 連接",
+        "header": "已使用 API 金鑰連接"
+      },
       "connect": "連接",
       "close": "關閉",
       "cancel": "取消",
@@ -2458,7 +2485,9 @@
         "nameAndValueRequired": "請求標頭的名稱和值均為必填。",
         "bearerRequired": "儲存前請輸入 Bearer 權杖。",
         "apiKeyRequired": "儲存前請輸入請求標頭名稱和 API 金鑰。",
-        "headerRequired": "儲存前請至少新增一個請求標頭。"
+        "headerRequired": "儲存前請至少新增一個請求標頭。",
+        "keyRequired": "儲存前需輸入 API 金鑰。",
+        "methodNotAllowed": "此伺服器不接受這種連接方式。"
       },
       "toasts": {
         "saved": "MCP 憑證已儲存",

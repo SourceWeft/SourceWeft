@@ -25,6 +25,7 @@ import type {
   MarketMcpToolManifest,
   McpAuthType,
 } from "@sourceweft/market-sdk";
+import { STATIC_MCP_AUTH_TYPES } from "./auth-methods";
 import { deleteMcpOAuthSessionsForInstall } from "./oauth-repository";
 import { hashJson, normalizedMcpToolName } from "./security";
 
@@ -665,8 +666,10 @@ export async function findWorkspaceMcpCredential(input: {
 }
 
 /**
- * Install ids for which this user has a stored static credential. Batched so a
- * per-user credential-status overlay over an install list is one query, not N.
+ * Install ids for which this user has a stored static credential (a secret
+ * sent as headers; a row saved as `none`/`oauth` holds no secret and does not
+ * count). Batched so a per-user credential-status overlay over an install list
+ * is one query, not N.
  */
 export async function listUserCredentialInstallIds(input: {
   teamId: string;
@@ -686,9 +689,33 @@ export async function listUserCredentialInstallIds(input: {
         eq(workspaceMcpCredentials.workspaceId, input.workspaceId),
         eq(workspaceMcpCredentials.userId, input.userId),
         inArray(workspaceMcpCredentials.installId, input.installIds),
+        inArray(workspaceMcpCredentials.authType, [...STATIC_MCP_AUTH_TYPES]),
       ),
     );
   return new Set(rows.map((row) => row.installId));
+}
+
+/**
+ * Remove ONE user's static credential for an install. Called when that user
+ * connects the install with OAuth instead: a member is connected by one method
+ * at a time, and every other member's credential is left alone.
+ */
+export async function deleteWorkspaceMcpCredential(input: {
+  teamId: string;
+  workspaceId: string;
+  installId: string;
+  userId: string;
+}) {
+  await db
+    .delete(workspaceMcpCredentials)
+    .where(
+      and(
+        eq(workspaceMcpCredentials.teamId, input.teamId),
+        eq(workspaceMcpCredentials.workspaceId, input.workspaceId),
+        eq(workspaceMcpCredentials.installId, input.installId),
+        eq(workspaceMcpCredentials.userId, input.userId),
+      ),
+    );
 }
 
 /**

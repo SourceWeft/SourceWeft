@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import type { MarketMcpManifest } from "@sourceweft/market-contracts";
 import {
   db,
@@ -145,6 +145,31 @@ export async function getMarketItemForSubmission(identifier: string): Promise<{
       .map((version) => version.provenanceJson?.submittedBy)
       .find((value): value is string => typeof value === "string") ?? null;
   return { hasUpstream, status: item.status, submittedBy };
+}
+
+/**
+ * The endpoint auth probes federation stored for these versions
+ * (`provenanceJson.authProbe`), by version id. Versions without one are
+ * absent.
+ */
+export async function findStoredAuthProbes(
+  versionIds: string[],
+): Promise<Map<string, unknown>> {
+  if (versionIds.length === 0) {
+    return new Map();
+  }
+  const rows = await db
+    .select({
+      id: mcpServerVersions.id,
+      authProbe: sql<unknown>`${mcpServerVersions.provenanceJson} -> 'authProbe'`,
+    })
+    .from(mcpServerVersions)
+    .where(inArray(mcpServerVersions.id, versionIds));
+  return new Map(
+    rows.flatMap((row) =>
+      row.authProbe == null ? [] : [[row.id, row.authProbe] as const],
+    ),
+  );
 }
 
 /**

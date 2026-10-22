@@ -41,6 +41,31 @@ export const mcpVerificationStatusSchema = z.enum([
   "unverified",
 ]);
 
+/**
+ * Whether a server needs a credential at all: `none` serves anonymous calls,
+ * `optional` serves them but accepts a credential (more quota, more tools),
+ * `required` refuses them. The names follow the MCP remote-auth proposal
+ * (SEP-2742, now ext-server-card #13) so a standard declaration maps 1:1.
+ */
+export const mcpAuthPostureSchema = z.enum(["none", "optional", "required"]);
+
+/**
+ * One way to authenticate to a server. A server can accept several (OAuth or
+ * an API key); a member connects with one of them. A header method names the
+ * header the server reads; `scheme: "bearer"` means its value is sent as
+ * `Bearer <secret>`. `description` is the publisher's own hint (the registry
+ * header description), shown next to the field.
+ */
+export const marketMcpAuthMethodSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("oauth") }),
+  z.object({
+    type: z.literal("header"),
+    name: z.string(),
+    scheme: z.enum(["bearer"]).optional(),
+    description: z.string().optional(),
+  }),
+]);
+
 export const marketMcpAuthRequirementSchema = z.object({
   type: mcpAuthTypeSchema,
   required: z.boolean().default(false),
@@ -48,6 +73,10 @@ export const marketMcpAuthRequirementSchema = z.object({
   displayName: z.string().optional(),
   instructions: z.string().optional(),
   allowedHeaderNames: z.array(z.string()).default([]),
+  // Absent on manifests written before they existed; `type`/`required` stay
+  // the install-time auth type and remain authoritative for runtime.
+  posture: mcpAuthPostureSchema.optional(),
+  methods: z.array(marketMcpAuthMethodSchema).optional(),
 });
 
 export const marketMcpToolManifestSchema = z.object({
@@ -255,6 +284,8 @@ export type MarketItemStatus = z.infer<typeof marketItemStatusSchema>;
 export type MarketItemVisibility = z.infer<typeof marketItemVisibilitySchema>;
 export type McpTransport = z.infer<typeof mcpTransportSchema>;
 export type McpAuthType = z.infer<typeof mcpAuthTypeSchema>;
+export type McpAuthPosture = z.infer<typeof mcpAuthPostureSchema>;
+export type MarketMcpAuthMethod = z.infer<typeof marketMcpAuthMethodSchema>;
 export type McpRiskLevel = z.infer<typeof mcpRiskLevelSchema>;
 export type McpRuntime = z.infer<typeof mcpRuntimeSchema>;
 export type McpVerificationStatus = z.infer<typeof mcpVerificationStatusSchema>;

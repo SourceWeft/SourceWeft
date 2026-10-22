@@ -294,6 +294,100 @@ describe("public MCP detail page README", () => {
   });
 });
 
+describe("public MCP detail page Auth field", () => {
+  function authField(html: string) {
+    return html.match(/<dt[^>]*>Auth<\/dt><dd[^>]*>([^<]*)<\/dd>/)?.[1];
+  }
+
+  // The second description under the Auth term: what the label means.
+  function authExplanation(html: string) {
+    return html.match(
+      /<dt[^>]*>Auth<\/dt><dd[^>]*>[^<]*<\/dd><dd[^>]*>([^<]*)<\/dd>/,
+    )?.[1];
+  }
+
+  function withAuth(auth: Record<string, unknown>) {
+    market.getPublicMcpManifest.mockResolvedValue(
+      getMarketMcpManifestResponseSchema.parse({
+        ...manifestResponse,
+        manifest: { ...manifestResponse.manifest, auth },
+      }),
+    );
+  }
+
+  it("says an open server needs no authentication", async () => {
+    const html = await render();
+    expect(authField(html)).toBe("Not required");
+    expect(authExplanation(html)).toBe("Connects without a credential.");
+  });
+
+  // Issue #337: an open server that takes an optional key header (Exa-like).
+  it("names an optional API key and the header it goes in", async () => {
+    withAuth({
+      type: "none",
+      required: false,
+      posture: "optional",
+      methods: [
+        {
+          type: "header",
+          name: "x-api-key",
+          description: "Exa API key for higher rate limits",
+        },
+      ],
+    });
+    const html = await render();
+    expect(authField(html)).toBe("Not required · optional API key");
+    expect(authExplanation(html)).toBe(
+      "Connects without a credential; you can add an API key in the x-api-key header.",
+    );
+  });
+
+  it("explains a key header and an OAuth sign-in", async () => {
+    withAuth({
+      type: "bearer",
+      required: true,
+      headerName: "Authorization",
+      allowedHeaderNames: ["Authorization"],
+    });
+    expect(authExplanation(await render())).toBe(
+      "Send an API key in the Authorization header.",
+    );
+    withAuth({ type: "oauth", required: true });
+    expect(authExplanation(await render())).toBe(
+      "Sign in with OAuth when you connect.",
+    );
+  });
+
+  // Issue #337: OAuth sign-in, or the account key in the Authorization header.
+  it("names OAuth or an API key for an OAuth server that takes a key header", async () => {
+    market.getPublicMcpManifest.mockResolvedValue(
+      getMarketMcpManifestResponseSchema.parse({
+        ...manifestResponse,
+        item: { ...manifestResponse.item, requiresAuth: true },
+        manifest: {
+          ...manifestResponse.manifest,
+          auth: {
+            type: "oauth",
+            required: true,
+            headerName: "Authorization",
+            allowedHeaderNames: ["Authorization"],
+          },
+        },
+      }),
+    );
+    const html = await render();
+    expect(authField(html)).toBe("OAuth or API key");
+    expect(authExplanation(html)).toBe(
+      "Sign in with OAuth, or send an API key in the Authorization header.",
+    );
+    // Installation then asks for the credential and notes the OAuth sign-in.
+    expect(html).toContain("Connect the required credentials.");
+    expect(html).toContain(
+      "The client completes OAuth sign-in on first connect.",
+    );
+  });
+});
+
 describe("public MCP detail page security note", () => {
   it("keeps its heading on its own line above its text", async () => {
     const html = await render();

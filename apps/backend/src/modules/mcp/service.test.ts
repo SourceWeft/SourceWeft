@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   createOrUpdateMarketMcpInstall: vi.fn(),
   deleteWorkspaceMcpInstall: vi.fn(),
   decryptSecret: vi.fn(),
+  deleteMcpOAuthSession: vi.fn(),
   encryptSecret: vi.fn(),
   findMcpActionRun: vi.fn(),
   findWorkspaceMcpCredential: vi.fn(),
@@ -55,7 +56,15 @@ vi.mock("../../shared/config", () => ({
 vi.mock("./oauth-repository", () => ({
   getMcpOAuthStatus: vi.fn(async () => ({ connected: false, issuer: null })),
   createDbMcpOAuthStore: vi.fn(() => ({})),
+  deleteMcpOAuthSession: mocks.deleteMcpOAuthSession,
   listUserConnectedOAuthInstallIds: vi.fn(async () => new Set<string>()),
+}));
+
+// Real decryption (via the mocked master-secret decryptSecret); encryption is
+// stubbed so credential saves don't need a team data-key row.
+vi.mock("../../shared/team-secrets", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../shared/team-secrets")>()),
+  encryptTeamSecret: vi.fn(async (plainText: string) => `enc:${plainText}`),
 }));
 
 vi.mock("../../shared/logger", () => ({
@@ -139,6 +148,11 @@ import {
 } from "./service";
 import { assertSafeMcpEndpoint } from "./security";
 import { config } from "../../shared/config";
+import {
+  getMcpOAuthStatus,
+  listUserConnectedOAuthInstallIds,
+} from "./oauth-repository";
+import { listUserCredentialInstallIds } from "./repository";
 
 const NOW = "2026-01-01T00:00:00.000Z";
 
@@ -1495,4 +1509,507 @@ test("respondToApproval approves MCP confirmations with edited args", async () =
   assert.deepEqual(result.confirmation.preview.requestJson, {
     title: "Edited",
   });
+});
+
+// --- Member-chosen auth method (#337) --------------------------------------
+
+/** Arcmira-like: an OAuth server that also accepts `Authorization: Bearer`. */
+function oauthOrKeyInstall(
+  input: Partial<WorkspaceMcpInstallRecord> = {},
+): WorkspaceMcpInstallRecord {
+  return mcpInstall({
+    id: "mcp_install_arcmira",
+    marketIdentifier: "arcmira",
+    name: "Arcmira",
+    authType: "oauth",
+    credentialStatus: "required",
+    manifestJson: {
+      auth: {
+        type: "oauth",
+        required: true,
+        headerName: "Authorization",
+        allowedHeaderNames: ["Authorization"],
+        posture: "required",
+        methods: [
+          { type: "oauth" },
+          { type: "header", name: "Authorization", scheme: "bearer" },
+        ],
+      },
+    },
+    ...input,
+  });
+}
+
+/** Exa-like: open server with an optional secret header. */
+function optionalKeyInstall(
+  input: Partial<WorkspaceMcpInstallRecord> = {},
+): WorkspaceMcpInstallRecord {
+  return mcpInstall({
+    id: "mcp_install_exa",
+    marketIdentifier: "exa",
+    name: "Exa",
+    authType: "none",
+    credentialStatus: "not_required",
+    manifestJson: {
+      auth: {
+        type: "none",
+        required: false,
+        allowedHeaderNames: [],
+        posture: "optional",
+        methods: [{ type: "header", name: "x-api-key" }],
+      },
+    },
+    ...input,
+  });
+}
+
+function resetAuthMethodMocks() {
+  resetMcpServiceMocks();
+  vi.mocked(getMcpOAuthStatus).mockResolvedValue({
+    connected: false,
+    issuer: null,
+  });
+  vi.mocked(listUserConnectedOAuthInstallIds).mockResolvedValue(new Set());
+  vi.mocked(listUserCredentialInstallIds).mockResolvedValue(new Set());
+  mocks.decryptSecret.mockImplementation((cipherText: string) =>
+    cipherText.replace(/^enc:/, ""),
+  );
+  mocks.upsertWorkspaceMcpCredential.mockResolvedValue(undefined);
+  mocks.deleteMcpOAuthSession.mockResolvedValue(undefined);
+}
+
+function lastClientAuth() {
+  const call = mocks.createLangChainMcpClient.mock.calls.at(-1)?.[0] as
+    | {
+        headers: Record<string, string>;
+        authProvider?: unknown;
+      }
+    | undefined;
+  assert.ok(call, "no MCP client was created");
+  return call;
+}
+
+function credentialInput(
+  input: Partial<Parameters<McpService["upsertCredentials"]>[0]>,
+) {
+  return {
+    workspaceId: "workspace_1",
+    userId: "user_1",
+    installId: "mcp_install_arcmira",
+    authType: "bearer" as const,
+    ...input,
+  };
+}
+
+test("saving a bearer key on an OAuth-or-key install stores it and drops only this member's OAuth session", async () => {
+  resetAuthMethodMocks();
+  const install = oauthOrKeyInstall();
+  mocks.findWorkspaceMcpInstall.mockResolvedValue(install);
+  vi.mocked(listUserCredentialInstallIds).mockResolvedValue(
+    new Set([install.id]),
+  );
+
+  const result = await new McpService().upsertCredentials(
+    credentialInput({ authType: "bearer", bearerToken: "arc-key" }),
+  );
+
+  const saved = mocks.upsertWorkspaceMcpCredential.mock.calls[0]?.[0];
+  assert.equal(saved?.authType, "bearer");
+  assert.equal(saved?.encryptedSecret, "enc:arc-key");
+  assert.equal(saved?.userId, "user_1");
+  assert.deepEqual(mocks.deleteMcpOAuthSession.mock.calls, [
+    [
+      {
+        teamId: "team_1",
+        workspaceId: "workspace_1",
+        installId: install.id,
+        userId: "user_1",
+      },
+    ],
+  ]);
+  assert.equal(result.install.credentialStatus, "configured");
+  assert.equal(result.install.connectedVia, "header");
+});
+
+test("a turn on an OAuth-or-key install sends the member's saved bearer key", async () => {
+  resetAuthMethodMocks();
+  const install = oauthOrKeyInstall();
+  mocks.listWorkspaceMcpInstalls.mockResolvedValue([install]);
+  mocks.findWorkspaceMcpCredential.mockResolvedValue({
+    authType: "bearer",
+    encryptedSecret: "enc:arc-key",
+  });
+  toolsByInstallId.set(install.id, [
+    originalTool({ name: "mcp__arcmira__read_repo" }),
+  ]);
+  install.tools = [
+    mcpTool({
+      installId: install.id,
+      normalizedToolName: "mcp__arcmira__read_repo",
+    }),
+  ];
+
+  const runtime = await new McpService().buildLangChainToolsForTurn(
+    serviceInput({ installIds: [install.id] }),
+  );
+
+  const auth = lastClientAuth();
+  assert.deepEqual(auth.headers, { Authorization: "Bearer arc-key" });
+  assert.equal(auth.authProvider, undefined);
+  assert.equal(
+    mocks.findWorkspaceMcpCredential.mock.calls[0]?.[0]?.userId,
+    "user_1",
+  );
+  await runtime.close();
+});
+
+test("a turn on an OAuth-or-key install prefers the member's OAuth session", async () => {
+  resetAuthMethodMocks();
+  const install = oauthOrKeyInstall({ tools: [] });
+  mocks.listWorkspaceMcpInstalls.mockResolvedValue([install]);
+  vi.mocked(getMcpOAuthStatus).mockResolvedValue({
+    connected: true,
+    issuer: "https://auth.arcmira.example",
+  });
+  mocks.findWorkspaceMcpCredential.mockResolvedValue({
+    authType: "bearer",
+    encryptedSecret: "enc:stale-key",
+  });
+
+  const runtime = await new McpService().buildLangChainToolsForTurn(
+    serviceInput({ installIds: [install.id] }),
+  );
+
+  const auth = lastClientAuth();
+  assert.deepEqual(auth.headers, {});
+  assert.ok(auth.authProvider, "expected the member's OAuth provider");
+  assert.equal(mocks.findWorkspaceMcpCredential.mock.calls.length, 0);
+  await runtime.close();
+});
+
+test("a turn on an OAuth-or-key install with neither connection still needs OAuth", async () => {
+  resetAuthMethodMocks();
+  const install = oauthOrKeyInstall({ tools: [] });
+  mocks.listWorkspaceMcpInstalls.mockResolvedValue([install]);
+
+  await assert.rejects(
+    () =>
+      new McpService().buildLangChainToolsForTurn(
+        serviceInput({ installIds: [install.id] }),
+      ),
+    (error: unknown) =>
+      error instanceof McpError &&
+      error.code === "MCP_OAUTH_NOT_CONNECTED" &&
+      error.statusCode === 409,
+  );
+  assert.equal(mocks.createLangChainMcpClient.mock.calls.length, 0);
+});
+
+test("testInstall on an OAuth-or-key install uses the member's saved bearer key", async () => {
+  resetAuthMethodMocks();
+  const install = oauthOrKeyInstall();
+  mocks.findWorkspaceMcpInstall.mockResolvedValue(install);
+  mocks.findWorkspaceMcpCredential.mockResolvedValue({
+    authType: "bearer",
+    encryptedSecret: "enc:arc-key",
+  });
+  mocks.upsertWorkspaceMcpTools.mockResolvedValue(undefined);
+  mocks.updateWorkspaceMcpInstall.mockResolvedValue(install);
+
+  await new McpService().testInstall({
+    workspaceId: "workspace_1",
+    userId: "user_1",
+    installId: install.id,
+  });
+
+  const auth = lastClientAuth();
+  assert.deepEqual(auth.headers, { Authorization: "Bearer arc-key" });
+  assert.equal(auth.authProvider, undefined);
+});
+
+test("testInstall returns the install with the member's own connection status", async () => {
+  resetAuthMethodMocks();
+  const install = oauthOrKeyInstall();
+  mocks.findWorkspaceMcpInstall.mockResolvedValue(install);
+  mocks.findWorkspaceMcpCredential.mockResolvedValue({
+    authType: "bearer",
+    encryptedSecret: "enc:arc-key",
+  });
+  mocks.upsertWorkspaceMcpTools.mockResolvedValue(undefined);
+  // The row as stored: the install-level status, never the member's.
+  mocks.updateWorkspaceMcpInstall.mockResolvedValue({
+    ...install,
+    credentialStatus: "required",
+  });
+  vi.mocked(listUserCredentialInstallIds).mockResolvedValue(
+    new Set([install.id]),
+  );
+
+  const result = await new McpService().testInstall({
+    workspaceId: "workspace_1",
+    userId: "user_1",
+    installId: install.id,
+  });
+
+  assert.equal(result.install.credentialStatus, "configured");
+  assert.equal(result.install.connectedVia, "header");
+});
+
+test("testInstall on an OAuth-or-key install with no connection fails fast", async () => {
+  resetAuthMethodMocks();
+  const install = oauthOrKeyInstall();
+  mocks.findWorkspaceMcpInstall.mockResolvedValue(install);
+
+  await assert.rejects(
+    () =>
+      new McpService().testInstall({
+        workspaceId: "workspace_1",
+        userId: "user_1",
+        installId: install.id,
+      }),
+    (error: unknown) =>
+      error instanceof McpError &&
+      error.code === "MCP_OAUTH_NOT_CONNECTED" &&
+      error.statusCode === 400,
+  );
+  assert.equal(mocks.updateWorkspaceMcpInstall.mock.calls.length, 0);
+});
+
+test("credential saves of a method the install does not accept are rejected", async () => {
+  const cases: Array<{
+    install: WorkspaceMcpInstallRecord;
+    input: Partial<Parameters<McpService["upsertCredentials"]>[0]>;
+  }> = [
+    // Arcmira's header method is Bearer, not an arbitrary API-key header.
+    {
+      install: oauthOrKeyInstall(),
+      input: {
+        authType: "api_key_header",
+        apiKeyHeaderName: "X-Api-Key",
+        apiKey: "k",
+      },
+    },
+    {
+      install: oauthOrKeyInstall(),
+      input: { authType: "custom_headers", headers: { "X-Api-Key": "k" } },
+    },
+    // An optional key install's method is a plain header, not Bearer.
+    {
+      install: optionalKeyInstall(),
+      input: { authType: "bearer", bearerToken: "k" },
+    },
+    // Legacy installs accept only their own type.
+    {
+      install: mcpInstall({ authType: "bearer", manifestJson: {} }),
+      input: {
+        authType: "api_key_header",
+        apiKeyHeaderName: "X-Api-Key",
+        apiKey: "k",
+      },
+    },
+    {
+      install: mcpInstall({ authType: "oauth", manifestJson: {} }),
+      input: { authType: "bearer", bearerToken: "k" },
+    },
+  ];
+  for (const { install, input } of cases) {
+    resetAuthMethodMocks();
+    mocks.findWorkspaceMcpInstall.mockResolvedValue(install);
+    await assert.rejects(
+      () =>
+        new McpService().upsertCredentials(
+          credentialInput({ installId: install.id, ...input }),
+        ),
+      (error: unknown) =>
+        error instanceof McpError &&
+        error.code === "MCP_CREDENTIAL_METHOD_NOT_ALLOWED" &&
+        error.statusCode === 400,
+      `${install.authType} install accepted ${input.authType}`,
+    );
+    assert.equal(mocks.upsertWorkspaceMcpCredential.mock.calls.length, 0);
+    assert.equal(mocks.deleteMcpOAuthSession.mock.calls.length, 0);
+  }
+});
+
+test("a method-backed API-key save takes the header name from the method, not the client", async () => {
+  resetAuthMethodMocks();
+  const install = optionalKeyInstall();
+  mocks.findWorkspaceMcpInstall.mockResolvedValue(install);
+  vi.mocked(listUserCredentialInstallIds).mockResolvedValue(
+    new Set([install.id]),
+  );
+
+  const result = await new McpService().upsertCredentials(
+    credentialInput({
+      installId: install.id,
+      authType: "api_key_header",
+      apiKeyHeaderName: "X-Forwarded-To-Attacker",
+      apiKey: "exa-key",
+    }),
+  );
+
+  const saved = mocks.upsertWorkspaceMcpCredential.mock.calls[0]?.[0];
+  assert.equal(saved?.authType, "api_key_header");
+  assert.equal(saved?.headerName, "x-api-key");
+  assert.equal(saved?.encryptedSecret, "enc:exa-key");
+  // No OAuth method, so there is no OAuth session to replace.
+  assert.equal(mocks.deleteMcpOAuthSession.mock.calls.length, 0);
+  assert.equal(result.install.credentialStatus, "configured");
+  assert.equal(result.install.connectedVia, "header");
+});
+
+test("a turn on an optional-key install sends the member's saved key, or nothing", async () => {
+  resetAuthMethodMocks();
+  const install = optionalKeyInstall({ tools: [] });
+  mocks.listWorkspaceMcpInstalls.mockResolvedValue([install]);
+  mocks.findWorkspaceMcpCredential.mockResolvedValue({
+    authType: "api_key_header",
+    encryptedSecret: "enc:exa-key",
+    headerName: "x-api-key",
+  });
+
+  const withKey = await new McpService().buildLangChainToolsForTurn(
+    serviceInput({ installIds: [install.id] }),
+  );
+  assert.deepEqual(lastClientAuth().headers, { "x-api-key": "exa-key" });
+  await withKey.close();
+
+  mocks.findWorkspaceMcpCredential.mockResolvedValue(null);
+  const withoutKey = await new McpService().buildLangChainToolsForTurn(
+    serviceInput({ installIds: [install.id] }),
+  );
+  assert.deepEqual(lastClientAuth().headers, {});
+  // No OAuth method: the member's OAuth status is never consulted.
+  assert.equal(vi.mocked(getMcpOAuthStatus).mock.calls.length, 0);
+  await withoutKey.close();
+});
+
+test("legacy installs without declared methods save and resolve auth as before", async () => {
+  resetAuthMethodMocks();
+  // api_key_header keeps the client-chosen header name.
+  const keyInstall = mcpInstall({
+    id: "mcp_install_key",
+    authType: "api_key_header",
+    manifestJson: { auth: { type: "api_key_header", headerName: "X-Api-Key" } },
+  });
+  mocks.findWorkspaceMcpInstall.mockResolvedValue(keyInstall);
+  await new McpService().upsertCredentials(
+    credentialInput({
+      installId: keyInstall.id,
+      authType: "api_key_header",
+      apiKeyHeaderName: "X-Custom-Key",
+      apiKey: "k",
+    }),
+  );
+  assert.equal(
+    mocks.upsertWorkspaceMcpCredential.mock.calls[0]?.[0]?.headerName,
+    "X-Custom-Key",
+  );
+  assert.equal(mocks.deleteMcpOAuthSession.mock.calls.length, 0);
+
+  // An OAuth-only install never reads a stored credential.
+  const oauthInstall = mcpInstall({
+    id: "mcp_install_oauth",
+    authType: "oauth",
+    tools: [],
+  });
+  mocks.listWorkspaceMcpInstalls.mockResolvedValue([oauthInstall]);
+  mocks.findWorkspaceMcpCredential.mockResolvedValue({
+    authType: "bearer",
+    encryptedSecret: "enc:stray",
+  });
+  await assert.rejects(
+    () =>
+      new McpService().buildLangChainToolsForTurn(
+        serviceInput({ installIds: [oauthInstall.id] }),
+      ),
+    (error: unknown) =>
+      error instanceof McpError && error.code === "MCP_OAUTH_NOT_CONNECTED",
+  );
+  assert.equal(mocks.findWorkspaceMcpCredential.mock.calls.length, 0);
+
+  // A static install without the member's credential fails preparation.
+  const bearerInstall = mcpInstall({
+    id: "mcp_install_bearer",
+    authType: "bearer",
+    tools: [],
+  });
+  mocks.listWorkspaceMcpInstalls.mockResolvedValue([bearerInstall]);
+  mocks.findWorkspaceMcpCredential.mockResolvedValue(null);
+  vi.mocked(getMcpOAuthStatus).mockClear();
+  await assert.rejects(
+    () =>
+      new McpService().buildLangChainToolsForTurn(
+        serviceInput({ installIds: [bearerInstall.id] }),
+      ),
+    (error: unknown) =>
+      error instanceof McpError && error.code === "MCP_CREDENTIAL_REQUIRED",
+  );
+  assert.equal(vi.mocked(getMcpOAuthStatus).mock.calls.length, 0);
+});
+
+test("listInstalls overlays per-member status and connectedVia in two batched queries", async () => {
+  resetAuthMethodMocks();
+  const viaOAuth = oauthOrKeyInstall({ id: "a_oauth" });
+  const viaHeader = oauthOrKeyInstall({ id: "b_header" });
+  const unconnected = oauthOrKeyInstall({ id: "c_none" });
+  const optionalWithKey = optionalKeyInstall({ id: "d_optional_key" });
+  const optionalWithout = optionalKeyInstall({ id: "e_optional" });
+  const legacyOpen = mcpInstall({ id: "f_open", authType: "none" });
+  const legacyBearer = mcpInstall({ id: "g_bearer", authType: "bearer" });
+  const legacyOAuth = mcpInstall({ id: "h_oauth", authType: "oauth" });
+  mocks.listWorkspaceMcpInstalls.mockResolvedValue([
+    viaOAuth,
+    viaHeader,
+    unconnected,
+    optionalWithKey,
+    optionalWithout,
+    legacyOpen,
+    legacyBearer,
+    legacyOAuth,
+  ]);
+  vi.mocked(listUserConnectedOAuthInstallIds).mockResolvedValue(
+    new Set(["a_oauth"]),
+  );
+  vi.mocked(listUserCredentialInstallIds).mockResolvedValue(
+    new Set(["b_header", "d_optional_key"]),
+  );
+
+  const { items } = await new McpService().listInstalls({
+    workspaceId: "workspace_1",
+    userId: "user_1",
+  });
+
+  assert.deepEqual(
+    items.map((item) => [item.id, item.credentialStatus, item.connectedVia]),
+    [
+      ["a_oauth", "configured", "oauth"],
+      ["b_header", "configured", "header"],
+      ["c_none", "required", null],
+      ["d_optional_key", "configured", "header"],
+      ["e_optional", "not_required", null],
+      ["f_open", "not_required", null],
+      ["g_bearer", "required", null],
+      ["h_oauth", "required", null],
+    ],
+  );
+  const oauthCalls = vi.mocked(listUserConnectedOAuthInstallIds).mock.calls;
+  const credentialCalls = vi.mocked(listUserCredentialInstallIds).mock.calls;
+  assert.equal(oauthCalls.length, 1);
+  assert.equal(credentialCalls.length, 1);
+  assert.deepEqual(oauthCalls[0]?.[0]?.installIds, [
+    "a_oauth",
+    "b_header",
+    "c_none",
+    "h_oauth",
+  ]);
+  // A legacy OAuth-only or open install is never matched to a stored key.
+  assert.deepEqual(credentialCalls[0]?.[0]?.installIds, [
+    "a_oauth",
+    "b_header",
+    "c_none",
+    "d_optional_key",
+    "e_optional",
+    "g_bearer",
+  ]);
 });

@@ -12,12 +12,19 @@ import type { Locale } from "@sourceweft/i18n";
 import { config } from "../../shared/config";
 import { createMcpRequestScope } from "./network";
 import { logger } from "../../shared/logger";
+import { probeMcpEndpointAuth } from "../../shared/mcp-auth-probe";
 import { shortId } from "../../shared/log-ids";
 import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
 import {
   decryptTeamSecret,
   encryptTeamSecret,
 } from "../../shared/team-secrets";
+import {
+  declaredMcpHeaderMethodFor,
+  isStaticMcpAuthType,
+  mcpInstallAllowsOAuth,
+  mcpInstallAllowsStaticCredential,
+} from "./auth-methods";
 import { McpError } from "./errors";
 import {
   createLangChainMcpClient,
@@ -27,6 +34,7 @@ import {
 import { McpOAuthClientProvider } from "./oauth-provider";
 import {
   createDbMcpOAuthStore,
+  deleteMcpOAuthSession,
   getMcpOAuthStatus,
   listUserConnectedOAuthInstallIds,
 } from "./oauth-repository";
@@ -88,43 +96,18 @@ async function assertWebTransport(manifest: MarketMcpManifest) {
 
 /**
  * Does this endpoint demand authentication? One cheap unauthenticated MCP
- * initialize; a 401 is the spec's signal for OAuth. A network/protocol failure
+ * initialize; any 401 is treated as the spec's signal for OAuth. A network/protocol failure
  * aborts installation because treating an unverified probe as "no auth" would
  * silently create an unusable install.
  */
 export async function mcpEndpointRequiresAuth(
   endpointUrl: string,
 ): Promise<boolean> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 5000);
+  // A cross-origin or unsafe redirect is rejected by the request scope
+  // (MCP_ENDPOINT_BLOCKED), as every later request to this endpoint would be.
   const requests = createMcpRequestScope();
   try {
-    const response = await requests.fetch(endpointUrl, {
-      method: "POST",
-      // Don't follow redirects: the endpoint passed SSRF validation, but a 3xx
-      // could bounce the probe to an internal/metadata address (blind SSRF). A
-      // same-origin redirect is simply "not a 401"; a cross-origin or unsafe
-      // one is rejected by the request scope (MCP_ENDPOINT_BLOCKED), as every
-      // later request to this endpoint would be.
-      redirect: "manual",
-      headers: {
-        "content-type": "application/json",
-        accept: "application/json, text/event-stream",
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "initialize",
-        params: {
-          protocolVersion: "2024-11-05",
-          capabilities: {},
-          clientInfo: { name: "sourceweft-auth-probe", version: "1" },
-        },
-      }),
-      signal: controller.signal,
-    });
-    await response.body?.cancel();
-    return response.status === 401;
+    return (await probeMcpEndpointAuth(endpointUrl, requests.fetch)) !== "open";
   } catch (error) {
     requests.throwIfDenied();
     throw new McpError(
@@ -136,7 +119,6 @@ export async function mcpEndpointRequiresAuth(
       { recoverable: true },
     );
   } finally {
-    clearTimeout(timer);
     await requests.close();
   }
 }
@@ -578,8 +560,9 @@ export function withMcpApprovalNote(value: unknown): unknown {
  * Overlay per-user credential status onto installs. `credentialStatus` is a
  * per-user fact now (static credentials and OAuth tokens are both keyed by
  * user), so the value returned to a caller reflects THAT user's configuration,
- * not a shared install-level flag: `none` → not_required; otherwise
- * `configured` iff the user has their own credential/token, else `required`.
+ * not a shared install-level flag: `configured` iff the user is connected by
+ * an OAuth session or their own credential the install accepts; otherwise
+ * `none` → not_required, else `required`. `connectedVia` says which.
  */
 async function overlayUserCredentialStatus<
   T extends WorkspaceMcpInstallRecord,
@@ -589,14 +572,11 @@ async function overlayUserCredentialStatus<
   userId: string;
   installs: T[];
 }): Promise<T[]> {
-  const authRequired = input.installs.filter(
-    (install) => install.authType !== "none",
-  );
-  const oauthIds = authRequired
-    .filter((install) => install.authType === "oauth")
+  const oauthIds = input.installs
+    .filter((install) => mcpInstallAllowsOAuth(install))
     .map((install) => install.id);
-  const staticIds = authRequired
-    .filter((install) => install.authType !== "oauth")
+  const staticIds = input.installs
+    .filter((install) => mcpInstallAllowsStaticCredential(install))
     .map((install) => install.id);
   const [connected, credentialed] = await Promise.all([
     listUserConnectedOAuthInstallIds({
@@ -611,16 +591,83 @@ async function overlayUserCredentialStatus<
     }),
   ]);
   return input.installs.map((install) => {
+    // Both can exist only for rows written before connecting one way replaced
+    // the other; the OAuth session wins, as it does at runtime.
+    const connectedVia = connected.has(install.id)
+      ? ("oauth" as const)
+      : credentialed.has(install.id)
+        ? ("header" as const)
+        : null;
     let status: WorkspaceMcpCredentialStatus;
-    if (install.authType === "none") {
+    if (connectedVia) {
+      status = "configured";
+    } else if (install.authType === "none") {
       status = "not_required";
-    } else if (install.authType === "oauth") {
-      status = connected.has(install.id) ? "configured" : "required";
     } else {
-      status = credentialed.has(install.id) ? "configured" : "required";
+      status = "required";
     }
-    return { ...install, credentialStatus: status };
+    return { ...install, credentialStatus: status, connectedVia };
   });
+}
+
+/**
+ * How the INVOKING member authenticates to an install: their own OAuth session
+ * if connected (the SDK attaches the bearer and refreshes on 401), else their
+ * own stored static credential if the install accepts one. Never another
+ * member's. `missing` names what an unconnected member lacks for an install
+ * that demands auth; an open (`none`) install proceeds without headers.
+ */
+async function resolveMemberMcpAuth(input: {
+  teamId: string;
+  workspaceId: string;
+  userId: string;
+  install: WorkspaceMcpInstallRecord;
+}): Promise<
+  | {
+      headers: Record<string, string>;
+      authProvider?: OAuthClientProvider;
+    }
+  | { missing: "oauth" | "credential" }
+> {
+  const { install } = input;
+  const scope = {
+    teamId: input.teamId,
+    workspaceId: input.workspaceId,
+    installId: install.id,
+    userId: input.userId,
+  };
+  if (mcpInstallAllowsOAuth(install)) {
+    const status = await getMcpOAuthStatus(scope);
+    if (status.connected && status.issuer) {
+      return {
+        headers: {},
+        authProvider: new McpOAuthClientProvider({
+          redirectUrl: config.mcpOAuth.redirectUrl,
+          clientName: config.mcpOAuth.clientName,
+          issuer: status.issuer,
+          configuredClients: config.mcpOAuth.clients,
+          store: createDbMcpOAuthStore(scope, status.issuer),
+        }),
+      };
+    }
+  }
+  // An OAuth-only install never reads a stored credential, as before methods.
+  if (
+    install.authType !== "oauth" ||
+    mcpInstallAllowsStaticCredential(install)
+  ) {
+    const credential = await findWorkspaceMcpCredential(scope);
+    if (credential && isStaticMcpAuthType(credential.authType)) {
+      return { headers: await headersFromCredential(credential) };
+    }
+  }
+  if (install.authType === "oauth") {
+    return { missing: "oauth" };
+  }
+  if (install.authType !== "none") {
+    return { missing: "credential" };
+  }
+  return { headers: {} };
 }
 
 export class McpService {
@@ -861,11 +908,13 @@ export class McpService {
 
     await assertWebTransport(manifestForInstall);
 
-    // The official registry carries no auth metadata, so federated manifests
-    // all claim auth "none" — which left OAuth-gated servers (GitHub, Notion…)
-    // installed with no Connect path and failed at turn time. Probe
-    // the (already SSRF-validated) endpoint once at install: a 401 means the
-    // server wants OAuth per the MCP spec. Probe failure aborts installation.
+    // Federation records auth from the registry's declared headers and its own
+    // probe, but a manifest can still claim "none" (an endpoint the catalog
+    // could not probe, or a version synced before it did) — which left
+    // OAuth-gated servers (GitHub, Notion…) installed with no Connect path and
+    // failed at turn time. Probe the (already SSRF-validated) endpoint once at
+    // install: a 401 means the server wants OAuth per the MCP spec. Probe
+    // failure aborts installation.
     if (
       manifestForInstall.auth.type === "none" &&
       manifestForInstall.endpointUrl &&
@@ -992,6 +1041,17 @@ export class McpService {
     if (!install) {
       throw new McpError(404, "MCP_INSTALL_NOT_FOUND", "MCP install not found");
     }
+    // A member may save the install's own auth type, or a header method the
+    // install declares (e.g. an API key on an OAuth server). A declared method
+    // fixes the header name, so the client's name is ignored for it.
+    const headerMethod = declaredMcpHeaderMethodFor(install, input.authType);
+    if (!headerMethod && input.authType !== install.authType) {
+      throw new McpError(
+        400,
+        "MCP_CREDENTIAL_METHOD_NOT_ALLOWED",
+        "This MCP server does not accept that credential type",
+      );
+    }
 
     let encryptedSecret: string | null = null;
     let encryptedHeaders: string | null = null;
@@ -1009,14 +1069,15 @@ export class McpService {
         workspace.organizationId,
       );
     } else if (input.authType === "api_key_header") {
-      if (!input.apiKeyHeaderName || !input.apiKey) {
+      const requestedHeaderName = headerMethod?.name ?? input.apiKeyHeaderName;
+      if (!requestedHeaderName || !input.apiKey) {
         throw new McpError(
           400,
           "MCP_CREDENTIAL_REQUIRED",
           "API key header and value are required",
         );
       }
-      headerName = sanitizeHeaderName(input.apiKeyHeaderName);
+      headerName = sanitizeHeaderName(requestedHeaderName);
       encryptedSecret = await encryptTeamSecret(
         input.apiKey,
         workspace.organizationId,
@@ -1043,6 +1104,16 @@ export class McpService {
       headerName,
       configuredBy: input.userId,
     });
+    // One connection method per member: a saved key replaces THIS member's
+    // OAuth session for the install, never anyone else's.
+    if (isStaticMcpAuthType(input.authType) && mcpInstallAllowsOAuth(install)) {
+      await deleteMcpOAuthSession({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        installId: install.id,
+        userId: input.userId,
+      });
+    }
     const [installWithStatus] = await overlayUserCredentialStatus({
       teamId: workspace.organizationId,
       workspaceId: workspace.id,
@@ -1093,43 +1164,26 @@ export class McpService {
       allowedInternalOrigins: config.mcpAllowedInternalOrigins,
     });
 
-    // Same auth split as buildLangChainToolsForTurn: an oauth install tests
-    // with the caller's token provider. Testing an unconnected oauth install
-    // fails fast WITHOUT flipping status to "error" — a status flip here would
-    // silently drop the install from every turn until a later successful test.
-    let headers: Record<string, string> = {};
-    let authProvider: OAuthClientProvider | undefined;
-    if (install.authType === "oauth") {
-      const scope = {
-        teamId: workspace.organizationId,
-        workspaceId: workspace.id,
-        installId: install.id,
-        userId: input.userId,
-      };
-      const status = await getMcpOAuthStatus(scope);
-      if (!status.connected || !status.issuer) {
-        throw new McpError(
-          400,
-          "MCP_OAUTH_NOT_CONNECTED",
-          "Connect this MCP server before testing it",
-        );
-      }
-      authProvider = new McpOAuthClientProvider({
-        redirectUrl: config.mcpOAuth.redirectUrl,
-        clientName: config.mcpOAuth.clientName,
-        issuer: status.issuer,
-        configuredClients: config.mcpOAuth.clients,
-        store: createDbMcpOAuthStore(scope, status.issuer),
-      });
-    } else {
-      const credential = await findWorkspaceMcpCredential({
-        teamId: workspace.organizationId,
-        workspaceId: workspace.id,
-        installId: input.installId,
-        userId: input.userId,
-      });
-      headers = credential ? await headersFromCredential(credential) : {};
+    // Same auth resolution as buildLangChainToolsForTurn. Testing an
+    // unconnected oauth install fails fast WITHOUT flipping status to "error" —
+    // a status flip here would silently drop the install from every turn until
+    // a later successful test. A static install without a credential is tested
+    // unauthenticated, as before.
+    const auth = await resolveMemberMcpAuth({
+      teamId: workspace.organizationId,
+      workspaceId: workspace.id,
+      userId: input.userId,
+      install,
+    });
+    if ("missing" in auth && auth.missing === "oauth") {
+      throw new McpError(
+        400,
+        "MCP_OAUTH_NOT_CONNECTED",
+        "Connect this MCP server before testing it",
+      );
     }
+    const { headers, authProvider } =
+      "missing" in auth ? { headers: {}, authProvider: undefined } : auth;
     const client = createLangChainMcpClient({ install, headers, authProvider });
     try {
       const tools = await withTimeout(
@@ -1170,8 +1224,16 @@ export class McpService {
         lastTestedAt: new Date(),
         lastError: null,
       });
+      // The stored row carries the install-level credentialStatus; the caller
+      // gets their own, as from every other install response.
+      const [installWithStatus] = await overlayUserCredentialStatus({
+        teamId: workspace.organizationId,
+        workspaceId: workspace.id,
+        userId: input.userId,
+        installs: [updated ?? install],
+      });
       return {
-        install: updated ?? install,
+        install: installWithStatus ?? updated ?? install,
         toolCount: tools.length,
       };
     } catch (error) {
@@ -1295,56 +1357,31 @@ export class McpService {
             );
           }
         }
-        // Resolve auth per install: OAuth installs use a per-user token provider
-        // (the SDK attaches the bearer and refreshes on 401); the other auth types
-        // use static credential headers. A selected install without its required
-        // per-user credential fails preparation.
-        let headers: Record<string, string> = {};
-        let authProvider: OAuthClientProvider | undefined;
-        if (install.authType === "oauth") {
-          const scope = {
-            teamId: workspace.organizationId,
-            workspaceId: workspace.id,
-            installId: install.id,
-            userId: input.userId,
-          };
-          const status = await getMcpOAuthStatus(scope);
-          if (!status.connected || !status.issuer) {
-            throw new McpError(
-              409,
-              "MCP_OAUTH_NOT_CONNECTED",
-              `Selected MCP install '${install.name}' is not connected for this user`,
-              { installId: install.id },
-            );
-          }
-          authProvider = new McpOAuthClientProvider({
-            redirectUrl: config.mcpOAuth.redirectUrl,
-            clientName: config.mcpOAuth.clientName,
-            issuer: status.issuer,
-            configuredClients: config.mcpOAuth.clients,
-            store: createDbMcpOAuthStore(scope, status.issuer),
-          });
-        } else {
-          // Static credentials are per-user: use the INVOKING user's own
-          // credential, never a workspace-shared one. A user who hasn't
-          // configured this install has no headers (the connection fails as
-          // unauthenticated) rather than borrowing another member's token.
-          const credential = await findWorkspaceMcpCredential({
-            teamId: workspace.organizationId,
-            workspaceId: workspace.id,
-            installId: install.id,
-            userId: input.userId,
-          });
-          if (install.authType !== "none" && !credential) {
-            throw new McpError(
-              409,
-              "MCP_CREDENTIAL_REQUIRED",
-              `Selected MCP install '${install.name}' has no credential for this user`,
-              { installId: install.id },
-            );
-          }
-          headers = credential ? await headersFromCredential(credential) : {};
+        // Resolve auth per install from the invoking user's own connection. A
+        // selected install without its required per-user connection fails
+        // preparation rather than borrowing another member's token.
+        const auth = await resolveMemberMcpAuth({
+          teamId: workspace.organizationId,
+          workspaceId: workspace.id,
+          userId: input.userId,
+          install,
+        });
+        if ("missing" in auth) {
+          throw auth.missing === "oauth"
+            ? new McpError(
+                409,
+                "MCP_OAUTH_NOT_CONNECTED",
+                `Selected MCP install '${install.name}' is not connected for this user`,
+                { installId: install.id },
+              )
+            : new McpError(
+                409,
+                "MCP_CREDENTIAL_REQUIRED",
+                `Selected MCP install '${install.name}' has no credential for this user`,
+                { installId: install.id },
+              );
         }
+        const { headers, authProvider } = auth;
         // Discovery is strict (`onConnectionError: "throw"`). Any selected
         // server failure closes all clients opened for this turn.
         const client = createLangChainMcpClient({

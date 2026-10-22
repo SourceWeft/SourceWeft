@@ -37,6 +37,7 @@ import { cn } from "@sourceweft/ui-web/lib/utils";
 import { contentClient, workspaceClient } from "../../../../lib/sdk";
 import { mcpOverviewLocale } from "../../../../lib/mcp-ai-overview";
 import { hasMcpReadmeToShow, readMcpReadme } from "../../../../lib/mcp-readme";
+import { mcpAuthMethod } from "../../../../lib/mcp-auth-method";
 import { formatShortRelativeTime } from "../../../../lib/relative-time";
 import { useDashboardChatState } from "../../_components/dashboard-chat-state";
 import {
@@ -92,6 +93,7 @@ export default function McpDetailPage() {
   // The AI overview in the viewer's language, English when there is none.
   const overviewLocale = mcpOverviewLocale(locale);
   const t = useTranslations("dashboardMcpPanel");
+  const tAuth = useTranslations("mcp.authMethod");
   const params = useParams<{ identifier?: string | string[] }>();
   const rawIdentifier = Array.isArray(params.identifier)
     ? params.identifier[0]
@@ -677,9 +679,9 @@ export default function McpDetailPage() {
                       {
                         key: "auth",
                         label: t("detail.fields.auth"),
-                        value: item.requiresAuth
-                          ? t("detail.fieldValues.authRequired")
-                          : t("detail.fieldValues.authNotRequired"),
+                        value: tAuth(
+                          mcpAuthMethod(manifest?.auth, item.requiresAuth),
+                        ),
                       },
                       {
                         key: "tools",

@@ -43,6 +43,7 @@ import { cn } from "@sourceweft/ui-web/lib/utils";
 import { contentClient } from "../../../../lib/sdk";
 import { mcpOverviewLocale } from "../../../../lib/mcp-ai-overview";
 import { hasMcpReadmeToShow, readMcpReadme } from "../../../../lib/mcp-readme";
+import { mcpAuthMethod } from "../../../../lib/mcp-auth-method";
 import { formatShortRelativeTime } from "../../../../lib/relative-time";
 import {
   McpReadmeRepositoryLink,
@@ -143,6 +144,7 @@ export function McpDetailDialog({
   // The AI overview in the viewer's language, English when there is none.
   const overviewLocale = mcpOverviewLocale(locale);
   const t = useTranslations("dashboardMcpPanel");
+  const tAuth = useTranslations("mcp.authMethod");
   const [detail, setDetail] = React.useState<MarketMcpDetail | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
@@ -519,9 +521,9 @@ export function McpDetailDialog({
                       {
                         key: "auth",
                         label: t("detail.fields.auth"),
-                        value: market.requiresAuth
-                          ? t("detail.fieldValues.authRequired")
-                          : t("detail.fieldValues.authNotRequired"),
+                        value: tAuth(
+                          mcpAuthMethod(manifest?.auth, market.requiresAuth),
+                        ),
                       },
                       {
                         key: "tools",
