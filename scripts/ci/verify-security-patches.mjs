@@ -40,10 +40,10 @@ function verifyVersion(parent, name, version, entry = name) {
 for (const app of [web, docs]) verifyVersion(app, "next", "16.3.8");
 for (const app of [backend, web]) {
   verifyVersion(app, "sharp", "0.35.5");
-  verifyVersion(app, "vitest", "4.1.11");
-  verifyVersion(app, "@vitest/coverage-v8", "4.1.11");
+  verifyVersion(app, "vitest", "4.1.12");
+  verifyVersion(app, "@vitest/coverage-v8", "4.1.12");
   const vitest = createRequire(app.resolve("vitest/package.json"));
-  verifyVersion(vitest, "@vitest/mocker", "4.1.11");
+  verifyVersion(vitest, "@vitest/mocker", "4.1.12");
   verifyVersion(vitest, "vite", "8.3.5");
 }
 verifyVersion(backend, "hono", "4.13.13");
