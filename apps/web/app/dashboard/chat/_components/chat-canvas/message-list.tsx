@@ -116,6 +116,7 @@ import {
   resolveToolCallArtifactId,
 } from "./artifact-work-state";
 import { findLastAnswerSegmentId } from "./message-evidence";
+import { TaskPlanCard } from "./task-plan";
 import {
   buildMessageRenderState,
   getVisibleAssistantAnswerText,
@@ -719,6 +720,12 @@ function AssistantMessageBody({
 
   return (
     <>
+      {renderState.taskPlan ? (
+        <TaskPlanCard
+          isRunning={isWorkflowRunning}
+          plan={renderState.taskPlan}
+        />
+      ) : null}
       {segments.map((segment) => {
         if (segment.type === "terminal") {
           const artifactCount = segment.blocks.filter(

@@ -10,6 +10,11 @@ import {
   getMessageText,
   stripGeneratedImageMarkdown,
 } from "./message-assets";
+import {
+  resolveTaskPlan,
+  taskPlanSignature,
+  type TaskPlan,
+} from "./task-plan-state";
 
 export type AssistantLifecycle =
   | "idle"
@@ -37,6 +42,7 @@ export type MessageRenderState = {
   shouldShowLiveThinking: boolean;
   sourceIds: string[];
   status: AssistantLifecycle | "user";
+  taskPlan: TaskPlan | null;
   text: string;
   timestamp?: string;
 };
@@ -165,6 +171,8 @@ export function buildMessageRenderState(input: {
           traceParts: version.traceParts,
         })
       : [];
+  const taskPlan =
+    role === "assistant" ? resolveTaskPlan(version.thinkingSteps) : null;
   const citations = version.citations ?? [];
   const availableCitations = version.availableCitations ?? [];
   const sourceIds =
@@ -210,6 +218,7 @@ export function buildMessageRenderState(input: {
     blockSignature(bodyBlocks),
     toolSignature(version.toolCalls),
     activitySignature(activityItems),
+    taskPlanSignature(taskPlan),
     citationSignature(citations),
     citationSignature(availableCitations),
     version.threadRun?.id ?? "",
@@ -244,6 +253,7 @@ export function buildMessageRenderState(input: {
     shouldShowLiveThinking,
     sourceIds,
     status,
+    taskPlan,
     text,
     timestamp,
   };

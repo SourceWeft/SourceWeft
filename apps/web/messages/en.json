@@ -1797,6 +1797,15 @@
         "ms": "ms"
       }
     },
+    "taskPlan": {
+      "title": "Task plan",
+      "progress": "{completed}/{total} done",
+      "status": {
+        "pending": "Pending",
+        "in_progress": "In progress",
+        "completed": "Completed"
+      }
+    },
     "delegate": {
       "status": {
         "running": "Running",
