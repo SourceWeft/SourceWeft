@@ -12,6 +12,28 @@
 export type McpEndpointAuthProbe = "open" | "credential" | "oauth";
 
 const PROBE_TIMEOUT_MS = 5000;
+// Protected-resource metadata is a few hundred bytes; the endpoint is
+// third-party, so a larger body is not read.
+const METADATA_MAX_BYTES = 64 * 1024;
+
+/** The body as text, or a throw once it passes `METADATA_MAX_BYTES`. */
+async function readCappedText(response: Response): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) return "";
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > METADATA_MAX_BYTES) {
+      await reader.cancel();
+      throw new Error("Protected-resource metadata is too large");
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
 
 /**
  * Send the probe through `fetchImpl`, which the caller scopes to its endpoint
@@ -102,7 +124,7 @@ async function namesAuthorizationServer(
         await response.body?.cancel();
         continue;
       }
-      const metadata = (await response.json()) as {
+      const metadata = JSON.parse(await readCappedText(response)) as {
         authorization_servers?: unknown;
       } | null;
       const servers = metadata?.authorization_servers;

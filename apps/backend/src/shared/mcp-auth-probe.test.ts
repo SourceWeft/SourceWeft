@@ -88,6 +88,17 @@ test("a bare 401 with path-specific protected-resource metadata is OAuth", async
   assert.equal("authorization" in init.headers, false);
 });
 
+test("oversized protected-resource metadata is not read", async () => {
+  const padding = "x".repeat(70 * 1024);
+  const fetch = routing(new Response(null, { status: 401 }), {
+    [PATH_METADATA]: metadata({
+      authorization_servers: ["https://auth.example.com"],
+      padding,
+    }),
+  });
+  assert.equal(await probeMcpEndpointAuth(ENDPOINT, fetch), "credential");
+});
+
 test("a bare 401 falls back to the origin's protected-resource metadata", async () => {
   const fetch = routing(new Response(null, { status: 401 }), {
     [ROOT_METADATA]: metadata({
