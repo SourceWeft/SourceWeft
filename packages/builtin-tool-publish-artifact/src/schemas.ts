@@ -3,6 +3,7 @@ import {
   artifactContentDigestSchema,
   artifactFileNameSchema,
 } from "@sourceweft/contracts/artifact-version-files";
+import { PUBLISHED_ARTIFACT_NEXT_STEP } from "@sourceweft/contracts/agent-tools";
 
 export const SandboxPathSourceSchema = z.object({
   kind: z.literal("sandbox_path"),
@@ -213,6 +214,7 @@ export const PublishSlidesArtifactOutputSchema = z.object({
   ok: z.literal(true),
   type: z.literal("presentation_artifact_result"),
   status: z.literal("ready"),
+  nextStep: z.literal(PUBLISHED_ARTIFACT_NEXT_STEP),
   reused: z.boolean(),
   artifactId: z.string(),
   artifactVersionId: z.string().optional(),
@@ -237,6 +239,7 @@ export const PublishFileArtifactOutputSchema = z.object({
   ok: z.literal(true),
   type: z.literal("file_artifact_result"),
   status: z.literal("ready"),
+  nextStep: z.literal(PUBLISHED_ARTIFACT_NEXT_STEP),
   reused: z.boolean(),
   artifactId: z.string(),
   artifactVersionId: z.string().optional(),
@@ -269,6 +272,7 @@ export const PublishImageArtifactOutputSchema = z.object({
   ok: z.literal(true),
   type: z.literal("generated_image"),
   status: z.literal("ready"),
+  nextStep: z.literal(PUBLISHED_ARTIFACT_NEXT_STEP),
   reused: z.boolean(),
   artifactId: z.string(),
   artifactVersionId: z.string().optional(),

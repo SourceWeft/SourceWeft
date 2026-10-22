@@ -50,6 +50,62 @@ export function resolveChatExecutionState(input: {
   return "idle";
 }
 
+/**
+ * Whether the active run belongs to another member (followed live, never
+ * stoppable from here). An unattributed run is treated as ours. While the
+ * session is still loading the current user id is unknown, so a run is treated
+ * as possibly ours and Stop stays visible: the stop endpoint authorizes
+ * server-side, and hiding Stop during session load would strand our own run
+ * after a reload. Once the session has settled, a missing user id (signed out
+ * or the session read failed) no longer counts as "possibly ours".
+ */
+export function resolveOtherUserRunActive(input: {
+  activeThreadRun: ActiveThreadRun | null;
+  currentUserId: string | null | undefined;
+  sessionPending: boolean;
+}): boolean {
+  const runUserId = input.activeThreadRun?.userId;
+  if (runUserId == null) {
+    return false;
+  }
+  if (input.currentUserId == null) {
+    return !input.sessionPending;
+  }
+  return runUserId !== input.currentUserId;
+}
+
+/**
+ * What the composer's submit slot offers for the current run state:
+ * - "stop": our own run is executing or stopping, so Stop is live;
+ * - "pending-stop": the thread's active run is not known yet (the initial
+ *   active-run lookup has not settled), so a disabled Stop holds the slot and
+ *   submitting is blocked. It never stops or sends anything; it becomes the
+ *   real Stop if the lookup finds a run, or Send if it finds none;
+ * - "send": no run of ours is active (idle, waiting for approval, or another
+ *   member's run, which is followed but never stopped from here).
+ */
+export type ComposerRunControl = "send" | "stop" | "pending-stop";
+
+export function resolveComposerRunControl(input: {
+  activeRunLookupPending: boolean;
+  chatExecutionState: ChatExecutionState | undefined;
+  otherUserRunActive: boolean;
+}): ComposerRunControl {
+  const state = input.chatExecutionState ?? "idle";
+  if (input.otherUserRunActive) {
+    return "send";
+  }
+  if (state === "executing" || state === "stopping") {
+    return "stop";
+  }
+  // A known local run (e.g. waiting for approval) already answers the lookup;
+  // only an apparently idle thread can still hide an unknown server run.
+  if (state === "idle" && input.activeRunLookupPending) {
+    return "pending-stop";
+  }
+  return "send";
+}
+
 export function resolveWaitingForApprovalRun(input: {
   assistantMessageId?: string | null;
   current: ActiveThreadRun | null;
@@ -157,10 +213,19 @@ export function useChatStreamRunnerControl({
 
   const markRunTerminal = useCallback(
     (input: {
+      // An attach-only stream failed in transport while the run itself may
+      // still be executing server-side. Keep the active run (and Stop), release
+      // the attach slot so it can be re-attached; recovery reconciles it.
+      attachFailed?: boolean;
       detachedWithoutFinish: boolean;
       durableRunKey: string;
       waitingForApproval?: boolean;
     }) => {
+      if (input.attachFailed) {
+        setIsStreaming(false);
+        clearAttachedRunKeyIfCurrent(input.durableRunKey);
+        return;
+      }
       if (!input.detachedWithoutFinish) {
         setIsStreaming(false);
         setIsStopping(false);
@@ -245,6 +310,7 @@ export function useChatStreamRunnerControl({
     isStopping,
     isStreaming,
     markRunStarted,
+    markRunStopped,
     markRunTerminal,
     setActiveThreadRun,
     stopStreaming,

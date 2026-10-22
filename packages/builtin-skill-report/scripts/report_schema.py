@@ -169,11 +169,40 @@ def provenance_counts(report):
     return counts
 
 
+# English labels also match their plurals ("Analyses:", "Recommendations:").
+LABEL_PLURALS = {"Analysis": "Analys(?:is|es)", "Recommendation": "Recommendations?"}
+
+
+def own_label_prefix(value, kind):
+    """The kind label (either language) the text already starts with, if any.
+
+    The renderer prefixes analysis/recommendation statements with their label,
+    so text that repeats it renders as "分析: 分析：…". A label counts only
+    when wrapped in brackets or followed by a colon, an em/en dash or vertical
+    bar (spacing optional), or an ASCII hyphen followed by whitespace, so
+    ordinary sentences such as "建议在…", "Analysis shows…" or
+    "Analysis-driven…" remain valid.
+    """
+    for language in ("zh-CN", "en-US"):
+        name = labels({"language": language})[kind]
+        label = LABEL_PLURALS.get(name, re.escape(name))
+        if re.match(
+            r"\s*(?:\*\*|__)?\s*(?:[\[【(（]\s*" + label + r"\s*[\]】)）]|" + label + r"\s*(?:\*\*|__)?\s*(?:[:：]|[—–｜|]+|-+\s))",
+            value,
+            re.I,
+        ):
+            return name
+    return None
+
+
 def statement(value, ids, paragraph=False):
     obj(value, ["text", "kind", "citations"] + (["type"] if paragraph else []))
     statement_input_text(value["text"], "statement")
     if value["kind"] not in ("fact", "analysis", "recommendation"):
         fail("Invalid statement kind")
+    label = own_label_prefix(value["text"], value["kind"]) if value["kind"] != "fact" else None
+    if label:
+        fail(f"Statement text must not start with its own label '{label}'; the renderer adds it, so remove the label from text")
     citations(value["citations"], ids, value["kind"] == "fact")
 
 

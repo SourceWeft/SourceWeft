@@ -31,9 +31,10 @@ import { ToolInterventionBar } from "./tool-confirmation";
 import { useLocalOperationStatus } from "../local-conversation-status";
 import { UserQuestionInterventionBar } from "./user-question-panel";
 import { resolveMessageVersionRunLifecycle } from "./thread-run-state";
-import type {
-  ActiveThreadRun,
-  ChatExecutionState,
+import {
+  resolveComposerRunControl,
+  type ActiveThreadRun,
+  type ChatExecutionState,
 } from "../../[threadId]/chat-stream-runner-control";
 import {
   deriveTerminalToolConfirmationResolutions,
@@ -151,6 +152,7 @@ export function ChatCanvas({
   highlightedMessageId = null,
   hasOlderMessages = false,
   activeThreadRun = null,
+  activeRunLookupPending = false,
   otherUserRunActive = false,
   typingIndicator,
   onComposerType,
@@ -213,6 +215,10 @@ export function ChatCanvas({
   activeVersionByGroup?: Record<string, number>;
   artifactStatuses?: ReadonlyMap<string, ArtifactStatusSnapshot>;
   activeThreadRun?: ActiveThreadRun | null;
+  // True until the thread's initial active-run lookup settles: a run may be
+  // active server-side that this page does not know about yet, so the composer
+  // shows a pending (disabled) Stop and blocks submitting instead of Send.
+  activeRunLookupPending?: boolean;
   // True when the active run on this shared thread was started by another
   // member. We follow it live but must not lock this member's composer or show
   // them a Stop button for a run they don't own.
@@ -453,7 +459,14 @@ export function ChatCanvas({
   // background tool/artifact work still blocks composing. The Stop control is
   // still shown for one's own run via `composerStopStreaming` below.
   const localStatus = useLocalOperationStatus();
+  const composerRunControl = resolveComposerRunControl({
+    activeRunLookupPending,
+    chatExecutionState,
+    otherUserRunActive,
+  });
+  const isComposerStopPending = composerRunControl === "pending-stop";
   const isSubmitDisabledForRun =
+    isComposerStopPending ||
     localStatus.blocked ||
     shouldLockComposerForApproval({
       isWaitingForApproval,
@@ -462,10 +475,7 @@ export function ChatCanvas({
     (isWaitingForApproval && hasPendingQuestionItems) ||
     hasActivelyRunningToolWorkState;
   const composerStopStreaming =
-    !otherUserRunActive &&
-    (chatExecutionState === "executing" || chatExecutionState === "stopping")
-      ? onStopStreaming
-      : undefined;
+    composerRunControl === "stop" ? onStopStreaming : undefined;
   const isComposerStopping = chatExecutionState === "stopping";
 
   const applyToolConfirmationState = useCallback(
@@ -647,6 +657,7 @@ export function ChatCanvas({
     !onSendMessage ||
     !workspaceId ||
     localStatus.blocked ||
+    activeRunLookupPending ||
     Boolean(activeThreadRun) ||
     isStreaming ||
     isStopping ||
@@ -1022,6 +1033,7 @@ export function ChatCanvas({
               })
             }
             onStopStreaming={composerStopStreaming}
+            stopPending={isComposerStopPending}
             onType={onComposerType}
             onThinkingSettingsChange={onThinkingSettingsChange}
             searchEnabled={searchEnabled}

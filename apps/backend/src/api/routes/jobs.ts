@@ -1,4 +1,10 @@
 import { Hono } from "hono";
+import { isContentError } from "../../modules/content/errors";
+import {
+  parseThreadChatRunJobId,
+  THREAD_CHAT_RUN_JOB,
+} from "../../modules/content/queue";
+import { durableChatRunService } from "../../modules/threads";
 import { presentJobState } from "../../shared/job-status";
 import { jobsQueue } from "../../shared/queue";
 import { requireSession } from "../middleware/auth-session";
@@ -14,6 +20,26 @@ function assertJobOwnedBySession(job: { data: unknown }, userId: string) {
 
   if (jobUserId !== userId) {
     throw new ApiError(404, "JOB_NOT_FOUND", "Job not found");
+  }
+}
+
+/**
+ * Cancel a durable chat run through the jobs API. BullMQ refuses to remove an
+ * active job, so a `thread-chat-run` job is stopped the way the thread stream
+ * stops it (`durableChatRunService.stopRun`, the `:stop` key path), with the
+ * same authorization. Any rejection is reported as an unknown job.
+ *
+ * A run that is already stopped, finished, or finishes while this request is
+ * in flight is still a successful cancel: the stop is idempotent.
+ */
+async function cancelChatRunJob(jobId: string, userId: string) {
+  try {
+    await durableChatRunService.stopRunForJob({ jobId, userId });
+  } catch (error) {
+    if (isContentError(error) && error.statusCode === 404) {
+      throw new ApiError(404, "JOB_NOT_FOUND", "Job not found");
+    }
+    throw error;
   }
 }
 
@@ -92,6 +118,20 @@ export function registerJobRoutes(app: Hono) {
 
     const cancelId = c.req.param("id");
     const job = await jobsQueue.getJob(cancelId);
+    // A finished chat-run job may already be evicted from the queue
+    // (removeOnComplete/removeOnFail); its run row still answers the cancel.
+    if (
+      job
+        ? job.name === THREAD_CHAT_RUN_JOB
+        : parseThreadChatRunJobId(cancelId) !== null
+    ) {
+      if (job) {
+        assertJobOwnedBySession(job, session.user.id);
+      }
+      await cancelChatRunJob(cancelId, session.user.id);
+      return ApiResponse.success(c, { id: cancelId, removed: true });
+    }
+
     if (!job) {
       throw new ApiError(404, "JOB_NOT_FOUND", "Job not found");
     }

@@ -176,3 +176,37 @@ test("readArtifactVersionSourceFile addresses the member-only exact-version sour
   ]);
   assert.deepEqual(document, { sources: [{ id: "S1" }] });
 });
+
+test("stopThreadRun posts the run's stop key to the thread stream without streaming", async () => {
+  const calls: { path: string; body: unknown }[] = [];
+  const client = new ContentClient({
+    post: async (path: string, body?: unknown) => {
+      calls.push({ path, body });
+      return {
+        threadRun: {
+          id: "run-1",
+          idempotencyKey: "sourceweft-web-run:key-1",
+          status: "cancelled",
+          mode: "send",
+        },
+      };
+    },
+  } as never);
+
+  const result = await client.stopThreadRun(
+    "workspace / one",
+    "thread?two",
+    "sourceweft-web-run:key-1",
+  );
+
+  assert.deepEqual(calls, [
+    {
+      path: "/v1/workspaces/workspace%20%2F%20one/threads/thread%3Ftwo/stream",
+      body: {
+        idempotencyKey: "sourceweft-web-run:key-1:stop",
+        stream: false,
+      },
+    },
+  ]);
+  assert.equal(result.threadRun.status, "cancelled");
+});

@@ -44,9 +44,11 @@ import { useDesktopAuthDeepLink } from "../../../../../lib/use-desktop-auth-deep
 import { contentClient, connectorsClient } from "../../../../../lib/sdk";
 import type { SourceConnector } from "@sourceweft/sdk";
 import {
+  resolveOtherUserRunActive,
   resolveWaitingForApprovalRun,
   useChatStreamRunnerControl,
 } from "../chat-stream-runner-control";
+import { useAttachReattach } from "./use-attach-reattach";
 import { useThreadBootstrap } from "./use-thread-bootstrap";
 import { useThreadMessages } from "./use-thread-messages";
 import { useThreadRoom } from "./use-thread-room";
@@ -410,9 +412,10 @@ export function useThreadPageController({
     isStopping,
     isStreaming,
     markRunStarted,
+    markRunStopped,
     markRunTerminal,
     setActiveThreadRun,
-    stopStreaming: handleStopStreaming,
+    stopStreaming: stopRunStreaming,
     updateActiveRunIfCurrent,
   } = useChatStreamRunnerControl({
     getDisplayErrorMessage: displayStreamError,
@@ -426,9 +429,11 @@ export function useThreadPageController({
   >(null);
   const {
     appendNewerThreadMessages,
+    isActiveRunLookupPending,
     isLoadingOlderMessages,
     loadOlderThreadMessages,
     loadThreadMessages,
+    loadThreadMessagesWithResult,
     mergeStreamingAssistantIntoMessages,
     messages,
     latestRunFailure,
@@ -627,12 +632,14 @@ export function useThreadPageController({
   // locked. Another member's run on a shared thread is followed live but never
   // locks our composer; our own run (and an optimistic run whose initiator is
   // not yet attributed) still locks as before.
-  const { data: chatSessionData } = authClient.useSession();
+  const { data: chatSessionData, isPending: isChatSessionPending } =
+    authClient.useSession();
   const currentUserId = chatSessionData?.user?.id ?? null;
-  const otherUserRunActive =
-    activeThreadRun != null &&
-    activeThreadRun.userId != null &&
-    activeThreadRun.userId !== currentUserId;
+  const otherUserRunActive = resolveOtherUserRunActive({
+    activeThreadRun,
+    currentUserId,
+    sessionPending: isChatSessionPending,
+  });
 
   // Presence + typing state, fed by the room SSE below (opens no stream itself).
   const { presentViewers, typingViewers, onPresence, onTyping, notifyTyping } =
@@ -679,7 +686,18 @@ export function useThreadPageController({
   const retryBackoffUntilRef = useRef(0);
   const [retryTick, setRetryTick] = useState(0);
 
+  const { attachReattach, handleStopStreaming } = useAttachReattach({
+    activeThreadRunRef,
+    displayStreamError,
+    loadThreadMessages: loadThreadMessagesWithResult,
+    markRunStopped,
+    stopRunStreaming,
+    threadId,
+    workspaceId,
+  });
+
   const { streamThreadAction } = useThreadStreamAction({
+    attachReattach,
     catalogKindEnabled,
     clearAttachedRunKeyIfCurrent,
     clearEditingState,
@@ -1364,6 +1382,9 @@ export function useThreadPageController({
     activeAssistantVersion,
     assistantVersionById,
     activeThreadRun,
+    // The thread's active run is not known yet (initial lookup in flight): the
+    // composer holds a pending Stop instead of offering Send.
+    activeRunLookupPending: isActiveRunLookupPending,
     otherUserRunActive,
     presentViewers,
     typingViewers,

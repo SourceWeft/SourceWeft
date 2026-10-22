@@ -1,4 +1,5 @@
 import { htmlTypeHandler } from "./html/type-handler";
+import { PUBLISHED_ARTIFACT_NEXT_STEP } from "@sourceweft/contracts/agent-tools";
 import {
   ARTIFACT_LIMITS,
   ARTIFACT_MIME_TYPES,
@@ -123,6 +124,7 @@ const slidesTypeHandler: ArtifactTypeHandler = {
           ok: true,
           type: "presentation_artifact_result",
           status: "ready",
+          nextStep: PUBLISHED_ARTIFACT_NEXT_STEP,
           artifactId: outputInput.artifactId,
           reused: outputInput.reused,
           artifact_id: outputInput.artifactId,
@@ -186,6 +188,7 @@ const fileTypeHandler: ArtifactTypeHandler = {
           ok: true,
           type: "file_artifact_result",
           status: "ready",
+          nextStep: PUBLISHED_ARTIFACT_NEXT_STEP,
           artifactId: outputInput.artifactId,
           reused: outputInput.reused,
           artifact_id: outputInput.artifactId,
@@ -255,6 +258,7 @@ const imageTypeHandler: ArtifactTypeHandler = {
           ok: true,
           type: "generated_image",
           status: "ready",
+          nextStep: PUBLISHED_ARTIFACT_NEXT_STEP,
           artifactId: outputInput.artifactId,
           reused: outputInput.reused,
           artifact_id: outputInput.artifactId,

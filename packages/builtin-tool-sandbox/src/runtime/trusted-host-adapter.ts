@@ -300,6 +300,15 @@ export function createTrustedSandboxHostAdapter(input: {
     timeoutMs?: number;
   };
 
+  /**
+   * Host-built read-only probes: `realpath -m` (canonicalPath), the
+   * `find`/`stat` manifest (readManifest) and `stat` (statFile). Read-only,
+   * yet deliberately NOT `idempotent`: they run inside pinned upload/capture
+   * operations and verified downloads whose deadline forces a whole-sandbox
+   * cancellation (a delete on Cloudflare), and that window can be as small
+   * as one probe's own timeout. A provider retry's backoff spent inside it
+   * could turn a fast-failing transient into a deleted sandbox.
+   */
   const runSystem = async (command: string, options: SystemRunOptions = {}) => {
     const current = options.current ?? (await session());
     return providerExecuteSystem(current.provider)({
@@ -824,9 +833,23 @@ export function createTrustedSandboxHostAdapter(input: {
       });
       const current = await session();
       if (skillsDeferred) {
-        // Same lazy top-up as the model execute path: bundles registered
-        // after acquisition are staged on first /skills use.
-        await input.manager.ensureSkillAssetsStaged(current.sandbox);
+        // Same as the model execute path: wait for the staging run the
+        // acquisition started (never restart it), then top up bundles
+        // registered after acquisition. The signal only stops this wait.
+        try {
+          await input.manager.ensureSkillAssetsStaged(
+            current.sandbox,
+            executeInput.signal,
+          );
+        } catch (error) {
+          throwIfAborted(executeInput.signal);
+          throw error;
+        }
+        // Staging stops silently when its generation is fenced; surface the
+        // fence (instance changed / discarded / unknown) before running.
+        if (input.manager.generationInvalidation(current.sandbox)) {
+          await assertPinnedGeneration(current);
+        }
       }
       if (
         skillsDeferred &&

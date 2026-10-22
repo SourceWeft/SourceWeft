@@ -19,6 +19,11 @@ import {
   PublishArtifactErrorOutputSchema,
   PublishArtifactOutputSchema,
 } from "../src/schemas";
+import { publishArtifactAgentTool } from "../src/agent-tool-defs";
+import {
+  PUBLISHED_ARTIFACT_NEXT_STEP,
+  readTerminalToolResult,
+} from "@sourceweft/contracts/agent-tools";
 
 function validPptxBuffer() {
   return Buffer.from(
@@ -1721,5 +1726,170 @@ test("PPTX_OUTPUT_NOT_FOUND keeps its code and message", async () => {
       );
       return true;
     },
+  );
+});
+
+test("publish_artifact declares a published-artifact terminal result for every type it publishes", () => {
+  assert.deepEqual(publishArtifactAgentTool.terminalResult, {
+    kind: "published_artifact",
+    artifactTypes: ["html", "slides", "file", "image"],
+  });
+});
+
+test.each(["slides", "file"] as const)(
+  "publish_artifact %s receipt says committed — summarize and finish and proves the exact version",
+  async (artifactType) => {
+    const publisher = createPublisherTool();
+    const output = JSON.parse(
+      String(
+        await publisher.invoke({
+          artifactType,
+          title: "Delivered",
+          source: {
+            kind: "sandbox_path",
+            path:
+              artifactType === "slides"
+                ? "/workspace/deck.pptx"
+                : "/workspace/output.txt",
+          },
+          ...(artifactType === "slides"
+            ? { previewImage: previewImage() }
+            : {}),
+        }),
+      ),
+    );
+
+    assert.equal(output.nextStep, "committed — summarize and finish");
+    assert.equal(output.nextStep, PUBLISHED_ARTIFACT_NEXT_STEP);
+    PublishArtifactOutputSchema.parse(output);
+    assert.deepEqual(
+      readTerminalToolResult(publishArtifactAgentTool.terminalResult, output),
+      {
+        artifactType,
+        artifactId: "artifact-1",
+        artifactVersionId: "version-1",
+      },
+    );
+  },
+);
+
+test("publish_artifact html and image receipts carry the committed next step", async () => {
+  const bytes = Buffer.from(
+    '<!doctype html><html lang="en"><head><meta charset="utf-8"></head><body><h1>Report</h1></body></html>',
+  );
+  const source = { kind: "sandbox_path" as const, path: "/workspace/r.html" };
+  const html = await publishArtifact({
+    context,
+    services: {
+      artifacts: {
+        publishArtifact: async () => ({
+          artifactId: "a-html",
+          versionId: "v-html",
+          reused: false,
+        }),
+      },
+    },
+    sourceAdapters: [
+      {
+        kind: "sandbox_path" as const,
+        canRead: () => true,
+        read: async () => ({ bytes, path: source.path, source }),
+      },
+    ],
+    input: { artifactType: "html", title: "Report", source },
+  } as unknown as Parameters<typeof publishArtifact>[0]);
+  assert.equal(html.type, "html_artifact_result");
+  assert.equal(html.nextStep, PUBLISHED_ARTIFACT_NEXT_STEP);
+  assert.equal(
+    readTerminalToolResult(publishArtifactAgentTool.terminalResult, html)
+      ?.artifactVersionId,
+    "v-html",
+  );
+
+  const image = await publishPreparedArtifact({
+    context,
+    descriptor: { artifactType: "image", title: "Image" },
+    source: {
+      bytes: Buffer.from("png-bytes"),
+      mimeType: "image/png",
+      path: "generated-image.png",
+    },
+    services: services(),
+  });
+  assert.equal(image.output.nextStep, PUBLISHED_ARTIFACT_NEXT_STEP);
+  assert.equal(
+    readTerminalToolResult(
+      publishArtifactAgentTool.terminalResult,
+      image.output,
+    )?.artifactType,
+    "image",
+  );
+});
+
+test("publish_artifact failures and model-authored ready text are not committed receipts", async () => {
+  const publisher = createPublisherTool();
+  const failure = JSON.parse(
+    String(
+      await publisher.invoke({
+        artifactType: "file",
+        title: "Broken",
+        source: { kind: "sandbox_path", path: "" },
+      }),
+    ),
+  );
+  assert.equal(failure.ok, false);
+  assert.equal(failure.nextStep, undefined);
+  assert.equal(
+    readTerminalToolResult(publishArtifactAgentTool.terminalResult, failure),
+    null,
+  );
+  assert.equal(
+    readTerminalToolResult(publishArtifactAgentTool.terminalResult, {
+      ok: true,
+      status: "ready",
+      artifactType: "html",
+      artifactId: "artifact-1",
+    }),
+    null,
+  );
+  assert.equal(
+    readTerminalToolResult(publishArtifactAgentTool.terminalResult, {
+      ok: true,
+      status: "ready",
+      artifactType: "video_presentation",
+      artifactId: "artifact-1",
+      artifactVersionId: "version-1",
+      nextStep: PUBLISHED_ARTIFACT_NEXT_STEP,
+    }),
+    null,
+  );
+});
+
+test("publisher prompt says a ready receipt is delivery and the reply reports only pre-publish checks", () => {
+  const result = createCapabilityAgentTools({
+    toolIds: ["publish_artifact"],
+    context: {
+      shouldBindAgentTool: (toolName) => toolName === "publish_artifact",
+      teamId: "team-1",
+      workspaceId: "workspace-1",
+      threadId: "thread-1",
+      userId: "user-1",
+      userMessageId: "message-1",
+    },
+    services: services(),
+  });
+  const prompt = result.promptProviders
+    .flatMap((provider) =>
+      provider.buildLines({
+        runtimeTools: { publish_artifact: { enabled: true } },
+      }),
+    )
+    .join("\n");
+  assert.match(prompt, /means the deliverable is delivered/);
+  assert.match(prompt, /committed — summarize and finish/);
+  assert.match(prompt, /only the checks completed before publishing/);
+  assert.match(
+    prompt,
+    /Publish again only when the user asked for another revision/,
   );
 });

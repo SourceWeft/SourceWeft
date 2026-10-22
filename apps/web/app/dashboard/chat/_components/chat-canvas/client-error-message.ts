@@ -34,6 +34,8 @@ export function sanitizeClientErrorMessage(
     const localMessages: Record<string, string> = {
       "Failed to send message.": "errors.sendFailed",
       "Tool execution failed.": "errors.toolExecutionFailed",
+      "The live stream ended before the run finished.":
+        "errors.liveStreamEnded",
       "The generated tool arguments were invalid. Please retry.":
         "errors.toolArgsInvalid",
     };

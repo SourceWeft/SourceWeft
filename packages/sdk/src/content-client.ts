@@ -106,8 +106,10 @@ import type {
   StartThreadTurnResponse,
   EndThreadQuestionsRequest,
   EndThreadQuestionsResponse,
+  StreamThreadMode,
   StreamThreadRequest,
   StreamThreadResponse,
+  ThreadRunSummary,
   CompleteSourceUploadResponse,
   CreateSourceUploadIntentRequest,
   CreateSourceUploadIntentResponse,
@@ -132,7 +134,29 @@ import type {
   UpdateWorkspaceSkillRequest,
   UpdateWorkspaceSkillResponse,
 } from "@sourceweft/contracts";
+import { SOURCEWEFT_WEB_RUN_STOP_SUFFIX } from "@sourceweft/contracts";
 import { HttpClient } from "./http-client";
+
+/** The stopped run's own state, carried on every stop result. */
+export type StoppedThreadRun = {
+  id: string;
+  idempotencyKey: string;
+  status: ThreadRunSummary["status"];
+  mode: StreamThreadMode;
+};
+
+/**
+ * What a stopped run returns: always the run's state (`threadRun`), plus the
+ * turn's persisted result when one exists, otherwise empty billing and
+ * retrieval.
+ */
+export type StopThreadRunResponse =
+  | (StreamThreadResponse & { threadRun: StoppedThreadRun })
+  | {
+      threadRun: StoppedThreadRun;
+      billing: NonNullable<StreamThreadResponse["billing"]>;
+      retrieval: StreamThreadResponse["retrieval"];
+    };
 
 /** `?locale=…` when a language is asked for, nothing otherwise. */
 function localeQuery(locale: string | undefined) {
@@ -1287,6 +1311,23 @@ export class ContentClient {
       {
         ...input,
         mode: "resume",
+        stream: false,
+      },
+    );
+  }
+
+  /**
+   * Stop a durable chat run by its idempotency key (the run's own key, without
+   * the `:stop` suffix). Idempotent: stopping an already-finished run returns
+   * its result. `threadRun.status` is the run's terminal status (`cancelled`,
+   * or how it finished). See the stop contract next to
+   * `SOURCEWEFT_WEB_RUN_STOP_SUFFIX`.
+   */
+  stopThreadRun(workspaceId: string, threadId: string, runKey: string) {
+    return this.http.post<StopThreadRunResponse>(
+      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/stream`,
+      {
+        idempotencyKey: `${runKey}${SOURCEWEFT_WEB_RUN_STOP_SUFFIX}`,
         stream: false,
       },
     );

@@ -68,8 +68,8 @@ export type CloudflareSandboxProviderOptions = {
   /** Test seam; defaults to global fetch. */
   fetchImpl?: typeof fetch;
   /**
-   * Test seam for the readiness probe's wall clock and backoff sleep; defaults
-   * to `Date.now` and an abortable `setTimeout`.
+   * Test seam for the readiness probe's wall clock and the probe/unavailable
+   * retry backoff sleep; defaults to `Date.now` and an abortable `setTimeout`.
    */
   clock?: ProviderClock;
 };
@@ -393,6 +393,70 @@ function isReadinessProbeRetryableError(error: unknown): boolean {
   );
 }
 
+/*
+ * Bounded retry of transient unavailability (S4 of the cold-start recovery
+ * plan, Issue #323): an idempotent operation that fails with
+ * SANDBOX_NOT_READY_OR_UNHEALTHY is re-sent after each backoff entry in turn,
+ * so the length of the sequence bounds the retries. Auth, missing-instance,
+ * missing-file, timeout and unknown failures are never retried, nor is
+ * anything once the caller's signal has aborted.
+ */
+/** Backoff before each retry; at most `length` retries (`length + 1` attempts). */
+export const UNAVAILABLE_RETRY_BACKOFF_MS: readonly number[] = Object.freeze([
+  1_000, 2_000, 4_000,
+]);
+
+/**
+ * - `unavailable`: retry whatever maps to the `unavailable` provider code
+ *   (GET/PUT/DELETE, which are safe to re-send).
+ * - `notStarted`: retry only failures that prove the request never reached a
+ *   command: an explicit HTTP 429/503 refusal, or a connection-level fetch
+ *   rejection before any response (`fetch failed`, ECONNREFUSED, ECONNRESET).
+ *   Other 5xx are excluded because an intermediary 500/502 can arrive while
+ *   the first attempt is still running in the container (idempotent exec).
+ * - `none`: single attempt.
+ */
+type UnavailableRetryPolicy = "unavailable" | "notStarted" | "none";
+
+/** Fetch rejections raised before any response existed (see `notStarted`). */
+const preResponseFailures = new WeakSet<object>();
+
+/**
+ * Abort reasons raised by a cancelled backoff sleep. They are cancellations,
+ * not provider failures, so `withProviderErrorMapping` rethrows them as-is at
+ * every nesting level. (A primitive reason cannot be tracked and is mapped
+ * like any other abort.)
+ */
+const backoffAbortReasons = new WeakSet<object>();
+
+function isUnavailableRetryable(
+  error: unknown,
+  operation: CloudflareProviderOperation,
+  policy: UnavailableRetryPolicy,
+): boolean {
+  if (policy === "none") {
+    return false;
+  }
+  const mapped = mapCloudflareProviderError(error, operation);
+  if (
+    !(mapped instanceof SandboxProviderError) ||
+    mapped.code !== SANDBOX_PROVIDER_ERROR_CODES.unavailable
+  ) {
+    return false;
+  }
+  if (policy === "unavailable") {
+    return true;
+  }
+  // `notStarted`: inspect the raw failure behind an already-mapped error.
+  const raw = error instanceof SandboxProviderError ? error.cause : error;
+  if (raw instanceof CloudflareBridgeHttpError) {
+    return raw.status === 429 || raw.status === 503;
+  }
+  return (
+    typeof raw === "object" && raw !== null && preResponseFailures.has(raw)
+  );
+}
+
 export class CloudflareSandboxProvider implements SandboxProvider {
   readonly id = "cloudflare";
   readonly pathPolicy = CLOUDFLARE_SANDBOX_PATH_POLICY;
@@ -432,6 +496,11 @@ export class CloudflareSandboxProvider implements SandboxProvider {
       // DB-enforced concern (the manager's expiry sweep calls deleteSandbox);
       // labels have no stock-bridge counterpart and the DB row already
       // carries the context.
+      //
+      // Neither the create POST nor the stamp PUT retries here: the manager
+      // already retries a whole create that fails as unavailable (and logs
+      // it), so a provider-level retry would only multiply attempts and push
+      // the worst case past the manager's sibling wait.
       const response = await this.request("create", "POST", "/v1/sandbox");
       const payload = (await response.json()) as { id?: unknown };
       if (typeof payload.id !== "string" || !payload.id) {
@@ -442,6 +511,7 @@ export class CloudflareSandboxProvider implements SandboxProvider {
         payload.id,
         SOURCEWEFT_SANDBOX_STAMP_PATH,
         new TextEncoder().encode(payload.id),
+        "none",
       );
       return { id: payload.id };
     });
@@ -450,30 +520,59 @@ export class CloudflareSandboxProvider implements SandboxProvider {
     } catch (error) {
       // Fail closed without leaving a container behind: the row for this id
       // is never written, so nothing else would ever delete it before TTL.
-      await this.deleteSandbox(created.id).catch(() => undefined);
+      // Single attempt: an abort must stop create at once, not after backoff.
+      await this.deleteSandboxOnce(created.id).catch(() => undefined);
       throw error;
     }
     return created;
   }
 
+  /**
+   * Unavailable failures are retried with UNAVAILABLE_RETRY_BACKOFF_MS. The
+   * interface carries no signal here, so that up-to-7 s backoff cannot be cut
+   * short by a cancel.
+   */
   async getSandbox(providerSandboxId: string) {
     return this.withProviderErrorMapping("get", () =>
       this.verifyStamp(providerSandboxId),
     );
   }
 
+  /**
+   * Unavailable failures are retried with UNAVAILABLE_RETRY_BACKOFF_MS. The
+   * interface carries no signal here, so that up-to-7 s backoff cannot be cut
+   * short by a cancel.
+   */
   async checkSandboxHealth(providerSandboxId: string) {
     return this.withProviderErrorMapping("get", () =>
       this.verifyStamp(providerSandboxId),
     );
   }
 
+  /**
+   * Unavailable failures are retried with UNAVAILABLE_RETRY_BACKOFF_MS. The
+   * interface carries no signal here, so that up-to-7 s backoff cannot be cut
+   * short by a cancel.
+   */
   async deleteSandbox(providerSandboxId: string) {
+    return this.deleteSandboxWith(providerSandboxId, "unavailable");
+  }
+
+  /** Best-effort cleanup that must not wait out a retry backoff. */
+  private async deleteSandboxOnce(providerSandboxId: string) {
+    return this.deleteSandboxWith(providerSandboxId, "none");
+  }
+
+  private async deleteSandboxWith(
+    providerSandboxId: string,
+    retry: UnavailableRetryPolicy,
+  ) {
     return this.withProviderErrorMapping("delete", async () => {
       await this.request(
         "delete",
         "DELETE",
         `/v1/sandbox/${encodeURIComponent(providerSandboxId)}`,
+        { retry },
       );
     });
   }
@@ -503,12 +602,51 @@ export class CloudflareSandboxProvider implements SandboxProvider {
     maxOutputChars: number;
     signal?: AbortSignal;
   }) {
-    return this.executeSystem(input);
+    // Model commands are never retried: whatever the caller's object carries,
+    // `idempotent` is forced off so the flag cannot leak through.
+    return this.executeSystem({ ...input, idempotent: false });
   }
 
   async executeSystem(input: {
     providerSandboxId: string;
     executionId?: string;
+    command: string;
+    cwd?: string;
+    timeoutMs: number;
+    maxOutputChars: number;
+    signal?: AbortSignal;
+    /**
+     * The caller asserts the command is safe to re-run. Only host-issued
+     * system commands set it (model commands never do); a whole attempt whose
+     * exec was refused (HTTP 429/503) or never connected is then retried with
+     * UNAVAILABLE_RETRY_BACKOFF_MS, each attempt with the same `timeoutMs`.
+     * Other 5xx, timeouts and aborts are never retried. Absent/false: one
+     * attempt.
+     */
+    idempotent?: boolean;
+  }): Promise<ExecuteResponse> {
+    return this.executeSystemWithRetry(input);
+  }
+
+  /**
+   * `deadline` (provider-clock ms) bounds the idempotent retries: a retry
+   * whose backoff plus attempt timeout would end past it is not started.
+   */
+  private async executeSystemWithRetry(
+    input: Parameters<CloudflareSandboxProvider["executeSystem"]>[0],
+    deadline?: number,
+  ): Promise<ExecuteResponse> {
+    return this.withUnavailableRetry(
+      "execute",
+      input.idempotent === true ? "notStarted" : "none",
+      input.signal,
+      () => this.executeSystemAttempt(input),
+      { deadline, attemptMs: input.timeoutMs },
+    );
+  }
+
+  private async executeSystemAttempt(input: {
+    providerSandboxId: string;
     command: string;
     cwd?: string;
     timeoutMs: number;
@@ -597,6 +735,11 @@ export class CloudflareSandboxProvider implements SandboxProvider {
     });
   }
 
+  /**
+   * Unavailable failures are retried with UNAVAILABLE_RETRY_BACKOFF_MS. The
+   * interface carries no signal here, so that up-to-7 s backoff cannot be cut
+   * short by a cancel.
+   */
   async uploadFile(input: {
     providerSandboxId: string;
     sandboxPath: string;
@@ -620,7 +763,7 @@ export class CloudflareSandboxProvider implements SandboxProvider {
     timeoutMs?: number;
   }) {
     return this.withProviderErrorMapping("download", async () => {
-      const startedAt = Date.now();
+      const startedAt = this.clock.now();
       const response = await this.request(
         "download",
         "GET",
@@ -658,7 +801,7 @@ export class CloudflareSandboxProvider implements SandboxProvider {
     const remaining =
       input.timeoutMs === undefined
         ? EMPTY_DOWNLOAD_METADATA_TIMEOUT_MS
-        : input.timeoutMs - (Date.now() - startedAt);
+        : input.timeoutMs - (this.clock.now() - startedAt);
     if (remaining <= 0) {
       throw new SandboxProviderError(
         SANDBOX_PROVIDER_ERROR_CODES.timeout,
@@ -666,14 +809,19 @@ export class CloudflareSandboxProvider implements SandboxProvider {
         "download",
       );
     }
-    const result = await this.executeSystem({
-      providerSandboxId: input.providerSandboxId,
-      executionId: input.executionId,
-      command: `python3 -c ${shellQuote(EMPTY_DOWNLOAD_STAT_SCRIPT)} ${shellQuote(input.sandboxPath)}`,
-      timeoutMs: Math.min(EMPTY_DOWNLOAD_METADATA_TIMEOUT_MS, remaining),
-      maxOutputChars: 2_048,
-      signal: input.signal,
-    });
+    // Retries stay inside the download's own budget when it has one.
+    const result = await this.executeSystemWithRetry(
+      {
+        providerSandboxId: input.providerSandboxId,
+        executionId: input.executionId,
+        command: `python3 -c ${shellQuote(EMPTY_DOWNLOAD_STAT_SCRIPT)} ${shellQuote(input.sandboxPath)}`,
+        timeoutMs: Math.min(EMPTY_DOWNLOAD_METADATA_TIMEOUT_MS, remaining),
+        maxOutputChars: 2_048,
+        signal: input.signal,
+        idempotent: true,
+      },
+      input.timeoutMs === undefined ? undefined : startedAt + input.timeoutMs,
+    );
     input.signal?.throwIfAborted();
     if (result.exitCode !== 0 || result.truncated) {
       throw new Error(
@@ -754,6 +902,7 @@ export class CloudflareSandboxProvider implements SandboxProvider {
         command: `mkdir -p ${shellQuote(input.directory)}`,
         timeoutMs: 30_000,
         maxOutputChars: this.options.maxOutputChars,
+        idempotent: true,
       });
       if (result.exitCode !== 0) {
         throw new Error(
@@ -783,8 +932,11 @@ export class CloudflareSandboxProvider implements SandboxProvider {
     for (let attempt = 0; ; attempt += 1) {
       signal?.throwIfAborted();
       try {
+        // This loop is the retry: neither the stamp read nor the probe exec
+        // (not idempotent-flagged) retries internally, so retries never nest
+        // and the budget is not overshot.
         await this.withProviderErrorMapping("get", () =>
-          this.verifyStamp(providerSandboxId),
+          this.verifyStamp(providerSandboxId, "none"),
         );
         const result = await this.executeSystem({
           providerSandboxId,
@@ -831,13 +983,17 @@ export class CloudflareSandboxProvider implements SandboxProvider {
    * (no such file) and a mismatched id (fresh container behind the same DO
    * name) both mean the sandbox this row refers to no longer exists.
    */
-  private async verifyStamp(providerSandboxId: string) {
+  private async verifyStamp(
+    providerSandboxId: string,
+    retry: UnavailableRetryPolicy = "unavailable",
+  ) {
     let response: Response;
     try {
       response = await this.request(
         "get",
         "GET",
         this.filePath(providerSandboxId, SOURCEWEFT_SANDBOX_STAMP_PATH),
+        { retry },
       );
     } catch (error) {
       // A missing stamp proves identity loss; a generic 400 does not.
@@ -871,6 +1027,7 @@ export class CloudflareSandboxProvider implements SandboxProvider {
     providerSandboxId: string,
     sandboxPath: string,
     content: Uint8Array,
+    retry?: UnavailableRetryPolicy,
   ) {
     await this.request(
       operation,
@@ -879,6 +1036,7 @@ export class CloudflareSandboxProvider implements SandboxProvider {
       {
         body: content,
         contentType: "application/octet-stream",
+        retry,
       },
     );
   }
@@ -888,9 +1046,18 @@ export class CloudflareSandboxProvider implements SandboxProvider {
     method: string,
     path: string,
     init: {
-      body?: BodyInit | Uint8Array;
+      /**
+       * Deliberately not a stream: a string or byte array can be re-sent
+       * verbatim by the unavailable retry.
+       */
+      body?: string | Uint8Array;
       contentType?: string;
       signal?: AbortSignal;
+      /**
+       * Defaults to `unavailable` for GET/PUT/DELETE and `none` for POST: a
+       * POST (create, exec) is never re-sent unless its caller opts in.
+       */
+      retry?: UnavailableRetryPolicy;
     } = {},
   ): Promise<Response> {
     const headers: Record<string, string> = {
@@ -899,22 +1066,84 @@ export class CloudflareSandboxProvider implements SandboxProvider {
     if (init.contentType) {
       headers["Content-Type"] = init.contentType;
     }
-    const response = await this.fetchImpl(`${this.options.bridgeUrl}${path}`, {
-      method,
-      headers,
-      // TS 5.9 types Uint8Array over ArrayBufferLike, which no longer
-      // satisfies BodyInit's BufferSource; the runtime accepts it fine.
-      body: init.body as BodyInit | undefined,
-      signal: init.signal,
-    });
-    if (!response.ok) {
-      const detail = await response
-        .text()
-        .then((text) => text.slice(0, 200))
-        .catch(() => "");
-      throw new CloudflareBridgeHttpError(response.status, operation, detail);
+    return this.withUnavailableRetry(
+      operation,
+      init.retry ?? (method === "POST" ? "none" : "unavailable"),
+      init.signal,
+      async () => {
+        let response: Response;
+        try {
+          response = await this.fetchImpl(`${this.options.bridgeUrl}${path}`, {
+            method,
+            headers,
+            // TS 5.9 types Uint8Array over ArrayBufferLike, which no longer
+            // satisfies BodyInit's BufferSource; the runtime accepts it fine.
+            body: init.body as BodyInit | undefined,
+            signal: init.signal,
+          });
+        } catch (error) {
+          if (typeof error === "object" && error !== null) {
+            preResponseFailures.add(error);
+          }
+          throw error;
+        }
+        if (!response.ok) {
+          const detail = await response
+            .text()
+            .then((text) => text.slice(0, 200))
+            .catch(() => "");
+          throw new CloudflareBridgeHttpError(
+            response.status,
+            operation,
+            detail,
+          );
+        }
+        return response;
+      },
+    );
+  }
+
+  /**
+   * Run `attempt`, re-running it after each UNAVAILABLE_RETRY_BACKOFF_MS
+   * entry while `policy` deems the failure retryable. The decision keys on
+   * the mapped provider code (`mapCloudflareProviderError`), so status logic
+   * lives in one place; the last failure is rethrown unchanged for the normal
+   * mapping. An abort during the backoff rethrows the abort reason at once.
+   * With a `deadline` (provider-clock ms), a retry whose backoff plus
+   * `attemptMs` would end past it is not started.
+   */
+  private async withUnavailableRetry<T>(
+    operation: CloudflareProviderOperation,
+    policy: UnavailableRetryPolicy,
+    signal: AbortSignal | undefined,
+    attempt: () => Promise<T>,
+    bounds: { deadline?: number; attemptMs?: number } = {},
+  ): Promise<T> {
+    for (let retry = 0; ; retry += 1) {
+      try {
+        return await attempt();
+      } catch (error) {
+        const delayMs = UNAVAILABLE_RETRY_BACKOFF_MS[retry];
+        if (
+          delayMs === undefined ||
+          signal?.aborted ||
+          !isUnavailableRetryable(error, operation, policy) ||
+          (bounds.deadline !== undefined &&
+            this.clock.now() + delayMs + (bounds.attemptMs ?? 0) >
+              bounds.deadline)
+        ) {
+          throw error;
+        }
+        try {
+          await this.clock.sleep(delayMs, signal);
+        } catch (abortReason) {
+          if (typeof abortReason === "object" && abortReason !== null) {
+            backoffAbortReasons.add(abortReason);
+          }
+          throw abortReason;
+        }
+      }
     }
-    return response;
   }
 
   private async withProviderErrorMapping<T>(
@@ -924,6 +1153,13 @@ export class CloudflareSandboxProvider implements SandboxProvider {
     try {
       return await fn();
     } catch (error) {
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        backoffAbortReasons.has(error)
+      ) {
+        throw error;
+      }
       throw mapCloudflareProviderError(error, operation);
     }
   }

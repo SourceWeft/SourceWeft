@@ -1996,7 +1996,8 @@
       "noResumeData": "Confirmation response did not include resume data.",
       "resumeHandlerUnavailable": "Tool confirmation resume handler is not available.",
       "sendFailed": "Failed to send message.",
-      "toolExecutionFailed": "Tool execution failed."
+      "toolExecutionFailed": "Tool execution failed.",
+      "liveStreamEnded": "The live stream ended before the run finished."
     },
     "chatRoot": {
       "queued": "Queued",

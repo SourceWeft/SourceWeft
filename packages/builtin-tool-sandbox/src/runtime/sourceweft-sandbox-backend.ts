@@ -600,6 +600,14 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
     });
   }
 
+  /**
+   * Host-built, read-only file-tool fallbacks (`ls`, `read`, `grep`, `glob`).
+   * Read-only, yet deliberately NOT `idempotent`: they run inside a pinned
+   * operation whose window equals the per-command timeout, and that window's
+   * expiry forces a whole-sandbox cancellation (a delete on Cloudflare). A
+   * provider retry's backoff spent inside it could turn a fast-failing
+   * transient into a deleted sandbox; the transient is reported instead.
+   */
   private runInternalCommand(
     command: string,
     options: SandboxBackendHostOperationOptions,
@@ -1433,12 +1441,34 @@ export class SourceWeftSandboxBackend implements SandboxBackendProtocolV2 {
       sandboxId = sandbox.id;
       replaced = this.input.manager.consumeReplacementNotice();
       if (skillsDeferred) {
-        // Acquisition staged what was registered at the time; a bundle added
-        // since (a skill installed mid-turn) is staged here, on first use.
+        // Acquisition started staging what was registered at the time and
+        // did not wait for it; only a /skills command does, and it joins
+        // that run instead of restarting it. A bundle added since (a skill
+        // installed mid-turn) is staged here, on first use. A command that
+        // never names /skills skips this and pays nothing for staging — a
+        // deliberate trade-off: one that reaches /skills only indirectly
+        // (a script calling /skills/...) can race in-flight staging early in
+        // a turn (see SandboxManager.startSkillStaging).
         await this.input.manager.ensureSkillAssetsStaged(
           sandbox,
           options.signal,
         );
+        // Staging stops silently when its generation is fenced; report the
+        // fence exactly as a late result on that generation would be
+        // reported, instead of running the command on it.
+        const fenced = this.input.manager.generationInvalidation(sandbox);
+        if (fenced === "instance_changed") {
+          throw new SandboxInstanceChangedError();
+        }
+        if (fenced === "termination_unknown") {
+          throw new SandboxModelExecutionAbortError({
+            cancellation: { confirmed: false, mode: "unknown" },
+            reason: "user_cancelled",
+          });
+        }
+        if (fenced === "sandbox_terminated") {
+          throw new SandboxModelExecutionResultDiscardedError();
+        }
       }
       if (
         skillsDeferred &&

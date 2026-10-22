@@ -1987,7 +1987,8 @@
       "noResumeData": "确认响应未包含恢复数据。",
       "resumeHandlerUnavailable": "工具确认恢复处理器不可用。",
       "sendFailed": "发送消息失败。",
-      "toolExecutionFailed": "工具执行失败。"
+      "toolExecutionFailed": "工具执行失败。",
+      "liveStreamEnded": "实时输出在运行结束前中断。"
     },
     "chatRoot": {
       "queued": "已排队",

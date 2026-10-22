@@ -17,8 +17,13 @@ import { withLangGraph } from "@langchain/langgraph/zod";
 import { createMiddleware, type AgentMiddleware } from "langchain";
 import { createPatchToolCallsMiddleware } from "deepagents";
 import { z } from "zod/v4";
-import { getAgentToolDefinition } from "@sourceweft/agent-tool-registry";
-import { committedArtifactToolResultSchema } from "@sourceweft/contracts/agent-tools";
+import {
+  committedDeliveryPrompt,
+  isCommittedDeliveryExhausted,
+  readCommittedDelivery,
+  readCommittedToolMessage,
+  readToolMessageResult,
+} from "./committed-delivery";
 import {
   readAgentRunStop,
   type AgentRunStop,
@@ -53,7 +58,7 @@ const wallClockSchema = z
     runId: z.string().min(1),
     startedAtMs: z.number().int().nonnegative().safe(),
     closingStartedAtMs: z.number().int().nonnegative().safe().optional(),
-    trigger: z.enum(["steps", "wall_clock"]).optional(),
+    trigger: z.enum(["steps", "wall_clock", "committed_delivery"]).optional(),
   })
   .strict();
 const v2ScopeSchema = z
@@ -537,31 +542,14 @@ export function buildAgentStepSummaryInput(
     .filter(ToolMessage.isInstance)
     .slice(-24)
     .map((message) => {
-      let result: Record<string, unknown> | null = object(message.artifact);
-      if (
-        !result &&
-        typeof message.content === "string" &&
-        message.content.length <= 32_000
-      ) {
-        try {
-          result = object(JSON.parse(message.content));
-        } catch {
-          /* Plain tool text is not promoted to result authority. */
-        }
-      }
-      const definition = getAgentToolDefinition(message.name ?? "");
-      const committed =
-        definition?.terminalResult?.kind === "committed_artifact"
-          ? committedArtifactToolResultSchema.safeParse(result)
-          : null;
+      // Plain tool text is not promoted to result authority.
+      const result = readToolMessageResult(message);
+      const committed = readCommittedToolMessage(message);
       return {
         tool: String(message.name ?? "tool").slice(0, 160),
         status: message.status ?? "success",
         resultExcerpt: textContent(message).slice(0, 600),
-        ...(committed?.success &&
-        committed.data.artifactType === definition?.terminalResult?.artifactType
-          ? { committedArtifact: committed.data }
-          : {}),
+        ...(committed ? { committedArtifact: committed } : {}),
         ...(typeof result?.exitCode === "number"
           ? { exitCode: result.exitCode }
           : {}),
@@ -920,25 +908,33 @@ export function createSourceWeftStepBudgetMiddleware(
             entry.phase === "working" &&
             entry.normalSteps < entry.normalLimit
           ) {
-            const next =
+            // An expired working clock, or a committed delivery followed by
+            // repeated tool-calling decisions, makes this call the last
+            // normal decision; the bounded closing phase follows.
+            const trigger =
               clock && now() - clock.startedAtMs >= workingWallClockMs
-                ? {
-                    ...entry,
-                    steps:
-                      entry.steps + (entry.normalLimit - entry.normalSteps),
-                    normalSteps: entry.normalLimit,
-                    wallClock: { ...clock, trigger: "wall_clock" as const },
-                  }
-                : {
-                    ...entry,
-                    steps: entry.steps + 1,
-                    normalSteps: entry.normalSteps + 1,
-                    ...(clock ? { wallClock: clock } : {}),
-                  };
+                ? ("wall_clock" as const)
+                : isCommittedDeliveryExhausted(
+                      readCommittedDelivery(state.messages),
+                    )
+                  ? ("committed_delivery" as const)
+                  : null;
+            const next = trigger
+              ? {
+                  ...entry,
+                  steps: entry.steps + (entry.normalLimit - entry.normalSteps),
+                  normalSteps: entry.normalLimit,
+                  ...(clock ? { wallClock: { ...clock, trigger } } : {}),
+                }
+              : {
+                  ...entry,
+                  steps: entry.steps + 1,
+                  normalSteps: entry.normalSteps + 1,
+                  ...(clock ? { wallClock: clock } : {}),
+                };
             emit(next);
             return patch(scope, next);
-          }
-          if (entry.closingSteps < entry.closingLimit) {
+          } else if (entry.closingSteps < entry.closingLimit) {
             if (!entry.closingToolIds && !entry.availableToolIds)
               throw new ContentError(
                 500,
@@ -1085,11 +1081,23 @@ export function createSourceWeftStepBudgetMiddleware(
             }),
           });
         }
-        if (current && isV2Scope(current) && current.phase === "closing")
+        // After a committed delivery the finish instruction replaces the
+        // closing prompt, which would otherwise invite more delivery work.
+        const delivery = readCommittedDelivery(request.state.messages);
+        const closingDecisionsLeft =
+          current && isV2Scope(current) && current.phase === "closing"
+            ? current.closingLimit - current.closingSteps + 1
+            : null;
+        const instruction = delivery
+          ? committedDeliveryPrompt(delivery, closingDecisionsLeft)
+          : closingDecisionsLeft !== null
+            ? `${CLOSING_PROMPT}${closingDecisionsLeft}`
+            : null;
+        if (instruction)
           return handler({
             ...request,
             systemMessage: new SystemMessage(
-              `${textContent(request.systemMessage)}\n\n${CLOSING_PROMPT}${current.closingLimit - current.closingSteps + 1}`,
+              `${textContent(request.systemMessage)}\n\n${instruction}`,
             ),
           });
         return handler(request);

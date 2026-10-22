@@ -174,6 +174,15 @@ function isRunAlreadyActiveStreamError(error: unknown): boolean {
   );
 }
 
+/**
+ * Is this a transport-level failure of a stream request (network/read error or
+ * a 5xx), as opposed to the server rejecting the request (4xx)? Only these say
+ * nothing about the run itself, so only these are worth re-attaching after.
+ */
+function isTransientStreamRequestFailure(error: unknown): boolean {
+  return !(error instanceof StreamRequestError) || error.status >= 500;
+}
+
 function getReadableStreamRequestError(input: {
   status: number;
   code?: string | null;
@@ -1907,6 +1916,7 @@ export {
   STREAM_TEXT_PAUSED_KEY,
   THREAD_MESSAGES_INITIAL_PAGE_SIZE,
   THREAD_MESSAGES_LOAD_RETRY_DELAYS_MS,
+  isTransientStreamRequestFailure,
   throwStreamRequestError,
   toNullableNumber,
   toNullableString,

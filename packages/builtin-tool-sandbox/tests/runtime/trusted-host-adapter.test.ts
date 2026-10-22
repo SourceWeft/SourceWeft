@@ -1028,14 +1028,190 @@ test("trusted execute stages a skill bundle registered after the sandbox was acq
 test("native downloads use rooted snapshots without GNU shell path probes", async () => {
   const harness = createHarness();
   harness.enableNativeFiles();
-  const bytes = await harness.runtime.trustedHost.downloadCurrentFile({ sandboxPath: "/workspace/project/b.bin" });
+  const bytes = await harness.runtime.trustedHost.downloadCurrentFile({
+    sandboxPath: "/workspace/project/b.bin",
+  });
   assert.deepEqual([...bytes], [4, 5]);
   assert.equal(harness.executeInputs.length, 0);
-  await assert.rejects(harness.runtime.trustedHost.downloadCurrentFile({ sandboxPath: "/etc/secret" }));
+  await assert.rejects(
+    harness.runtime.trustedHost.downloadCurrentFile({
+      sandboxPath: "/etc/secret",
+    }),
+  );
   assert.equal(harness.downloadInputs.length, 1);
   harness.setDownloadHandler(async () => Buffer.alloc(9));
-  await assert.rejects(harness.runtime.trustedHost.downloadCurrentFile({ sandboxPath: "/workspace/project/b.bin" }), /SANDBOX_HOST_DOWNLOAD_TOO_LARGE/);
-  harness.setDownloadHandler(async () => { throw new Error("LOCAL_PATH_DENIED: symlink"); });
-  await assert.rejects(harness.runtime.trustedHost.downloadCurrentFile({ sandboxPath: "/workspace/project/link" }), /LOCAL_PATH_DENIED/);
+  await assert.rejects(
+    harness.runtime.trustedHost.downloadCurrentFile({
+      sandboxPath: "/workspace/project/b.bin",
+    }),
+    /SANDBOX_HOST_DOWNLOAD_TOO_LARGE/,
+  );
+  harness.setDownloadHandler(async () => {
+    throw new Error("LOCAL_PATH_DENIED: symlink");
+  });
+  await assert.rejects(
+    harness.runtime.trustedHost.downloadCurrentFile({
+      sandboxPath: "/workspace/project/link",
+    }),
+    /LOCAL_PATH_DENIED/,
+  );
   assert.equal(harness.executeInputs.length, 0);
+});
+
+// ── Turn-start prefetch and skill staging (Issue #323 B2) ────────────────
+
+type SkillPlan = Awaited<
+  ReturnType<
+    NonNullable<
+      Parameters<typeof createSandboxRuntimeForTurn>[0]["skillAssets"]
+    >["plans"]
+  >
+>[number];
+
+function notesPlan(
+  loadContent: () => Promise<Uint8Array | null> = async () =>
+    new Uint8Array([1, 2, 3]),
+): SkillPlan {
+  return {
+    name: "notes",
+    version: "sv-1",
+    platform: "any",
+    sha256: "a".repeat(64),
+    archive: "zip",
+    entrypoint: "SKILL.md",
+    installDir: "/skills/notes",
+    loadContent,
+  };
+}
+
+function gate<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+
+type SystemInput = Parameters<NonNullable<SandboxProvider["executeSystem"]>>[0];
+
+test("the turn-start prefetch stages skills, so the first /skills command issues no staging traffic", async () => {
+  const systemInputs: SystemInput[] = [];
+  const stampWritten = gate<void>();
+  const { runtime, uploads } = createHarness({
+    executeSystem: async (input) => {
+      systemInputs.push(input);
+      if (input.command.includes("/skills/notes/.sourceweft-asset.json")) {
+        stampWritten.resolve();
+      }
+      return { output: "", exitCode: 0, truncated: false };
+    },
+    skillAssets: { plans: async () => [notesPlan()], hasPlans: () => true },
+  });
+
+  // What prefetchSandboxForPreparedTurn fires at turn start.
+  await runtime.trustedHost.ensureCurrentSession();
+  await stampWritten.promise;
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(
+    uploads.filter((upload) => upload.path.includes("notes-sv-1.zip")).length,
+    1,
+  );
+
+  const systemBefore = systemInputs.length;
+  const uploadsBefore = uploads.length;
+  const result = await runtime.backend.execute(
+    "python3 /skills/notes/scripts/run.py",
+    { toolCallId: "tool-call-prefetched-skills" },
+  );
+  assert.equal(result.output, "model-ok");
+  assert.equal(systemInputs.length, systemBefore);
+  assert.equal(uploads.length, uploadsBefore);
+});
+
+test("trusted execute: a non-/skills command does not wait for in-flight staging; a /skills command joins it", async () => {
+  const loadEntered = gate<void>();
+  const release = gate<Uint8Array | null>();
+  let loads = 0;
+  const { runtime, uploads } = createHarness({
+    skillAssets: {
+      plans: async () => [
+        notesPlan(async () => {
+          loads += 1;
+          loadEntered.resolve();
+          return release.promise;
+        }),
+      ],
+      hasPlans: () => true,
+    },
+  });
+
+  await runtime.trustedHost.ensureCurrentSession();
+  await loadEntered.promise;
+
+  const plain = await runtime.trustedHost.executeCurrent({
+    command: "echo unrelated",
+    timeoutMs: 1_000,
+  });
+  assert.equal(plain.exitCode, 0);
+
+  let skillsDone = false;
+  const skills = runtime.trustedHost
+    .executeCurrent({
+      command: "python3 /skills/notes/scripts/run.py",
+      timeoutMs: 1_000,
+    })
+    .then((result) => {
+      skillsDone = true;
+      return result;
+    });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(skillsDone, false);
+
+  release.resolve(new Uint8Array([1, 2, 3]));
+  assert.equal((await skills).exitCode, 0);
+  assert.equal(loads, 1);
+  assert.equal(
+    uploads.filter((upload) => upload.path.includes("notes-sv-1.zip")).length,
+    1,
+  );
+});
+
+test("trusted probes and caller command text never carry idempotent", async () => {
+  const systemInputs: SystemInput[] = [];
+  const { runtime } = createHarness({
+    executeSystem: async (input) => {
+      systemInputs.push(input);
+      const target = input.command.match(/target='([^']*)'/u)?.[1];
+      if (input.command.includes("SOURCEWEFT_CANONICAL_PATH=") && target) {
+        return {
+          output: `SOURCEWEFT_CANONICAL_PATH=${target}`,
+          exitCode: 0,
+          truncated: false,
+        };
+      }
+      return { output: "ok", exitCode: 0, truncated: false };
+    },
+  });
+
+  // Probes run inside a pinned window whose expiry deletes the sandbox.
+  await runtime.trustedHost.uploadCurrentFiles([
+    { path: "/workspace/project/c.bin", bytes: new Uint8Array([1]) },
+  ]);
+  const probes = systemInputs.splice(0);
+  assert.ok(probes.length > 0);
+  assert.ok(
+    probes.every(
+      (input) =>
+        input.command.includes("realpath -m") && !("idempotent" in input),
+    ),
+  );
+
+  await runtime.trustedHost.executeCurrent({
+    command: "touch /workspace/out.txt",
+    timeoutMs: 1_000,
+  });
+  assert.deepEqual(
+    systemInputs.map((input) => [input.command, "idempotent" in input]),
+    [["touch /workspace/out.txt", false]],
+  );
 });
