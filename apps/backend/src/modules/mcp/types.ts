@@ -45,6 +45,8 @@ export type WorkspaceMcpInstallRecord = {
   webExecutable: boolean;
   authType: McpAuthType;
   credentialStatus: WorkspaceMcpCredentialStatus;
+  // Overlaid per calling member with credentialStatus; absent on raw rows.
+  connectedVia?: "oauth" | "header" | null;
   enabled: boolean;
   manifestJson: Record<string, unknown>;
   signature: string | null;

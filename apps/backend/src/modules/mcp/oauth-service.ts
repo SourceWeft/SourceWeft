@@ -12,8 +12,12 @@ import {
   getMcpOAuthStatus,
   type McpOAuthScope,
 } from "./oauth-repository";
+import { mcpInstallAllowsOAuth } from "./auth-methods";
 import { requireMcpWorkspace } from "./permissions";
-import { findWorkspaceMcpInstall } from "./repository";
+import {
+  deleteWorkspaceMcpCredential,
+  findWorkspaceMcpInstall,
+} from "./repository";
 import { assertSafeMcpEndpoint } from "./security";
 import { createMcpRequestScope } from "./network";
 
@@ -107,7 +111,7 @@ export async function startMcpOAuthAuthorization(input: {
   if (!install) {
     throw new McpError(404, "MCP_INSTALL_NOT_FOUND", "MCP install not found");
   }
-  if (install.authType !== "oauth") {
+  if (!mcpInstallAllowsOAuth(install)) {
     throw new McpError(
       400,
       "MCP_OAUTH_NOT_APPLICABLE",
@@ -132,6 +136,7 @@ export async function startMcpOAuthAuthorization(input: {
     userId: input.userId,
   };
   if ((await getMcpOAuthStatus(scope)).connected) {
+    await deleteWorkspaceMcpCredential(scope);
     return { status: "connected" };
   }
 
@@ -150,6 +155,7 @@ export async function startMcpOAuthAuthorization(input: {
     requests.throwIfDenied();
     if (result === "AUTHORIZED") {
       // The SDK found still-valid tokens and skipped the redirect.
+      await deleteWorkspaceMcpCredential(scope);
       return { status: "connected" };
     }
     if (!authorizationUrl) {
@@ -220,6 +226,9 @@ export async function completeMcpOAuthCallback(input: {
       );
     }
     await clearMcpOAuthTransient(scope);
+    // One connection method per member: OAuth replaces THIS member's static
+    // credential for the install (e.g. an API key saved earlier), no one else's.
+    await deleteWorkspaceMcpCredential(scope);
     // Credential status is now derived per-user (from this user's token-bearing
     // OAuth session), NOT written install-level: flipping the shared install flag
     // to "configured" here would make every other member appear connected. The
