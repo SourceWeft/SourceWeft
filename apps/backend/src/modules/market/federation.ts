@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   marketMcpManifestSchema,
+  type MarketMcpAuthMethod,
   type MarketMcpAuthRequirement,
   type MarketMcpManifest,
   type McpTransport,
@@ -162,6 +163,11 @@ function primaryRemote(server: RegistryServer) {
  *   required; none when nothing is.
  * A header that is neither required nor answered by a 401 is optional, which
  * the catalog lists as not required.
+ *
+ * Alongside, what a member may connect with: `methods` (OAuth first, then the
+ * credential header) and `posture` — required when the endpoint or a
+ * declared header demands auth, optional when only a credential header is
+ * offered. An optional posture keeps `type` "none", so installs never block.
  */
 export function registryRemoteAuth(
   remote: RegistryRemote | undefined,
@@ -173,14 +179,20 @@ export function registryRemoteAuth(
       name?: unknown;
       isRequired?: unknown;
       isSecret?: unknown;
+      description?: unknown;
     };
     const name = typeof header.name === "string" ? header.name.trim() : "";
+    const description =
+      typeof header.description === "string"
+        ? header.description.trim().slice(0, 300).trim()
+        : "";
     return HEADER_NAME_RE.test(name)
       ? [
           {
             name,
             required: header.isRequired === true,
             secret: header.isSecret === true,
+            description: description || undefined,
           },
         ]
       : [];
@@ -196,19 +208,52 @@ export function registryRemoteAuth(
   const credentialHeader =
     names.find((name) => /^authorization$/i.test(name)) ??
     headers.find((header) => header.secret)?.name;
+  const oauth =
+    probe === "oauth" || (probe === "credential" && names.length === 0);
 
-  if (probe === "oauth" || (probe === "credential" && names.length === 0)) {
+  const methods: MarketMcpAuthMethod[] = oauth ? [{ type: "oauth" }] : [];
+  if (credentialHeader) {
+    const description = headers.find(
+      (header) => header.name.toLowerCase() === credentialHeader.toLowerCase(),
+    )?.description;
+    methods.push({
+      type: "header",
+      name: credentialHeader,
+      ...(/^authorization$/i.test(credentialHeader)
+        ? { scheme: "bearer" as const }
+        : {}),
+      ...(description ? { description } : {}),
+    });
+  }
+  const posture =
+    probe === "oauth" ||
+    probe === "credential" ||
+    headers.some((header) => header.required)
+      ? "required"
+      : credentialHeader
+        ? "optional"
+        : "none";
+
+  if (oauth) {
     return {
       type: "oauth",
       required: true,
       headerName: credentialHeader,
       allowedHeaderNames: names,
+      posture,
+      methods,
     };
   }
   const required =
     probe === "credential" || headers.some((header) => header.required);
   if (!required || names.length === 0) {
-    return { type: "none", required: false, allowedHeaderNames: [] };
+    return {
+      type: "none",
+      required: false,
+      allowedHeaderNames: [],
+      posture,
+      methods,
+    };
   }
   if (credentialHeader && /^authorization$/i.test(credentialHeader)) {
     return {
@@ -217,6 +262,8 @@ export function registryRemoteAuth(
       headerName: credentialHeader,
       displayName: "Authorization token",
       allowedHeaderNames: names,
+      posture,
+      methods,
     };
   }
   const single = names.length === 1 ? names[0] : undefined;
@@ -226,6 +273,8 @@ export function registryRemoteAuth(
     headerName: single,
     displayName: single ?? "Custom headers",
     allowedHeaderNames: names,
+    posture,
+    methods,
   };
 }
 
@@ -346,6 +395,14 @@ const AUTH_PROBE_RESULTS: readonly McpEndpointAuthProbe[] = [
   "oauth",
 ];
 const AUTH_PROBE_CONCURRENCY = 8;
+// An endpoint's auth can change without a new registry version.
+const AUTH_PROBE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+
+type AuthProbe = { result: McpEndpointAuthProbe; probedAt: Date };
+
+function endpointSha256(endpointUrl: string) {
+  return createHash("sha256").update(endpointUrl).digest("hex");
+}
 
 /**
  * The probe as kept in the version's provenance. The endpoint is kept by hash
@@ -355,25 +412,42 @@ const AUTH_PROBE_CONCURRENCY = 8;
 export function authProbeRecord(
   endpointUrl: string,
   result: McpEndpointAuthProbe,
+  probedAt: Date,
 ) {
   return {
-    endpointSha256: createHash("sha256").update(endpointUrl).digest("hex"),
+    endpointSha256: endpointSha256(endpointUrl),
     result,
+    probedAt: probedAt.toISOString(),
   };
 }
 
-/** The version's stored probe, when it was of this same endpoint. */
-function storedAuthProbe(
+/**
+ * The version's stored probe, when it was of this same endpoint and is under
+ * 30 days old at `now`. A record without a probe time is probed again.
+ */
+export function storedAuthProbe(
   value: unknown,
   endpointUrl: string,
-): McpEndpointAuthProbe | undefined {
+  now: Date,
+): AuthProbe | undefined {
   if (!value || typeof value !== "object") return undefined;
-  const stored = value as { endpointSha256?: unknown; result?: unknown };
-  return AUTH_PROBE_RESULTS.includes(stored.result as McpEndpointAuthProbe) &&
-    stored.endpointSha256 ===
-      authProbeRecord(endpointUrl, stored.result as McpEndpointAuthProbe)
-        .endpointSha256
-    ? (stored.result as McpEndpointAuthProbe)
+  const stored = value as {
+    endpointSha256?: unknown;
+    result?: unknown;
+    probedAt?: unknown;
+  };
+  if (!AUTH_PROBE_RESULTS.includes(stored.result as McpEndpointAuthProbe)) {
+    return undefined;
+  }
+  const result = stored.result as McpEndpointAuthProbe;
+  const probedAt = new Date(
+    typeof stored.probedAt === "string" ? stored.probedAt : Number.NaN,
+  );
+  const age = now.getTime() - probedAt.getTime();
+  return stored.endpointSha256 === endpointSha256(endpointUrl) &&
+    age >= 0 &&
+    age < AUTH_PROBE_MAX_AGE_MS
+    ? { result, probedAt }
     : undefined;
 }
 
@@ -398,11 +472,11 @@ async function probeRegistryEndpoint(
 
 /**
  * The endpoint auth probe of each entry with a remote: the one stored for
- * that version when it probed the same endpoint, else a fresh one. A version
- * is probed once; a probe that fails is left out (the entry is mapped from
+ * that version when it probed the same endpoint within 30 days of `now`,
+ * else a fresh one. A probe that fails is left out (the entry is mapped from
  * its declared headers alone) and retried on the next sync.
  */
-async function registryAuthProbes(entries: RegistryEntry[]) {
+async function registryAuthProbes(entries: RegistryEntry[], now: Date) {
   const targets = entries.flatMap((entry) => {
     const server: RegistryServer = entry.server ?? entry;
     const identifier = server.name?.trim();
@@ -422,12 +496,13 @@ async function registryAuthProbes(entries: RegistryEntry[]) {
   const stored = await findStoredAuthProbes(
     targets.map((target) => target.versionId),
   );
-  const probes = new Map<RegistryEntry, McpEndpointAuthProbe>();
+  const probes = new Map<RegistryEntry, AuthProbe>();
   const pending: typeof targets = [];
   for (const target of targets) {
     const reused = storedAuthProbe(
       stored.get(target.versionId),
       target.endpointUrl,
+      now,
     );
     if (reused) probes.set(target.entry, reused);
     else pending.push(target);
@@ -438,10 +513,10 @@ async function registryAuthProbes(entries: RegistryEntry[]) {
     while (next < pending.length) {
       const target = pending[next++]!;
       try {
-        probes.set(
-          target.entry,
-          await probeRegistryEndpoint(target.endpointUrl),
-        );
+        probes.set(target.entry, {
+          result: await probeRegistryEndpoint(target.endpointUrl),
+          probedAt: now,
+        });
       } catch (error) {
         failed += 1;
         logger.warn("Registry federation auth probe failed", {
@@ -509,6 +584,7 @@ export async function ingestFromRegistry(input: {
     }
     const authProbes = await registryAuthProbes(
       entries.filter(isLatestEntry).slice(0, maxServers - ingested),
+      new Date(),
     );
     authProbed += authProbes.probed;
     authProbeFailed += authProbes.failed;
@@ -523,7 +599,7 @@ export async function ingestFromRegistry(input: {
       const authProbe = authProbes.probes.get(entry);
       const manifest = mapRegistryServerToManifest(entry, {
         verified: input.verified,
-        authProbe,
+        authProbe: authProbe?.result,
       });
       if (!manifest) {
         skipped += 1;
@@ -544,11 +620,16 @@ export async function ingestFromRegistry(input: {
             // Packages and remotes, names and flags only: what the AI
             // overview says the server needs to run.
             registryServer: registryServerProvenance(entry.server ?? entry),
-            // The endpoint's answer to an unauthenticated initialize, kept so
-            // the next sync reuses it instead of probing the version again.
+            // The endpoint's answer to an unauthenticated initialize and when
+            // it was given, kept so syncs within 30 days reuse it instead of
+            // probing the version again.
             authProbe:
               authProbe && manifest.endpointUrl
-                ? authProbeRecord(manifest.endpointUrl, authProbe)
+                ? authProbeRecord(
+                    manifest.endpointUrl,
+                    authProbe.result,
+                    authProbe.probedAt,
+                  )
                 : undefined,
           },
         });
