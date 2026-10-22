@@ -134,7 +134,10 @@ import type {
   UpdateWorkspaceSkillRequest,
   UpdateWorkspaceSkillResponse,
 } from "@sourceweft/contracts";
-import { SOURCEWEFT_WEB_RUN_STOP_SUFFIX } from "@sourceweft/contracts";
+import {
+  SOURCEWEFT_WEB_RUN_STOP_SUFFIX,
+  expandToolCallOutputsFromClient,
+} from "@sourceweft/contracts";
 import { HttpClient } from "./http-client";
 
 /** The stopped run's own state, carried on every stop result. */
@@ -582,9 +585,19 @@ export class ContentClient {
     }
 
     const query = params.toString();
-    return this.http.get<ListThreadMessagesResponse>(
-      `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/messages${query ? `?${query}` : ""}`,
-    );
+    // The API sends repeated tool-call output state once per message; restore
+    // the stored shape so callers read every output as persisted.
+    return this.http
+      .get<ListThreadMessagesResponse>(
+        `/v1/workspaces/${encode(workspaceId)}/threads/${encode(threadId)}/messages${query ? `?${query}` : ""}`,
+      )
+      .then((page) => ({
+        ...page,
+        items: page.items.map((message) => ({
+          ...message,
+          metadata: expandToolCallOutputsFromClient(message.metadata),
+        })),
+      }));
   }
 
   getActiveThreadRun(workspaceId: string, threadId: string) {

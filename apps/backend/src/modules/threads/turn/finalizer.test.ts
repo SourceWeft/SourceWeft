@@ -304,6 +304,24 @@ test("continuation metadata preserves append-only trace events", () => {
       "3:reasoning:create-page:::",
     ],
   );
+  // The rewrite drops the legacy copies: segment and reasoning-part text
+  // (render blocks and `reasoning` hold it) and trace-part input
+  // (`toolCalls[].input` holds it).
+  for (const segment of metadata.reasoningSegments as Record<
+    string,
+    unknown
+  >[]) {
+    assert.equal(Object.hasOwn(segment, "text"), false);
+  }
+  for (const part of metadata.traceParts as Record<string, unknown>[]) {
+    assert.equal(Object.hasOwn(part, "text"), false);
+    assert.equal(Object.hasOwn(part, "input"), false);
+  }
+  assert.deepEqual(metadata.reasoningSegments, [
+    { id: "segment-1", sequence: 1 },
+    { id: "segment-2", sequence: 5, toolCallId: "create-page" },
+  ]);
+  assert.equal(metadata.reasoning, "after approval");
 });
 
 test("continuation metadata replaces render blocks from resumed runs", () => {

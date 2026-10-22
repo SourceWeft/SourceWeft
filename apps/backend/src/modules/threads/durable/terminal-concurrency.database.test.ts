@@ -679,11 +679,113 @@ for (const finishReason of ["stop", "tool_confirmation_requested"]) {
       true,
     );
     const saved = (await current())!.snapshotJson;
-    assert.deepEqual(saved.meteredLlmCalls, [call]);
+    // The per-call list lives on the messages row only; the snapshot keeps
+    // the committed total and a slim assistant message.
+    assert.equal("meteredLlmCalls" in saved, false);
+    assert.equal(saved.meteredLlmCreditsConsumed, 23);
     assert.deepEqual(saved.usage, call.usage);
+    const savedAssistant = saved.assistantMessage as {
+      metadata: Record<string, unknown>;
+    };
+    assert.equal("meteredLlmCalls" in savedAssistant.metadata, false);
+    assert.equal("thinkingSteps" in savedAssistant.metadata, false);
     assert.equal(consume.mock.calls.length, 0);
   });
 }
+
+test("an error after a committed finalize keeps the committed charge on the message", async () => {
+  const messages = await import("../message-repository");
+  const { ContentError } = await import("../../content/errors");
+  vi.spyOn(streams.chatRunStreamManager, "subscribeCancel").mockResolvedValue(
+    async () => {},
+  );
+  vi.spyOn(streams.chatRunStreamManager, "appendEvent").mockImplementation(
+    async (_key, event) => {
+      emitted.push(event);
+      return emitted.length;
+    },
+  );
+  const call = {
+    id: `settled:${run.id}`,
+    consumedCredits: 23,
+    billingStatus: "metered",
+    usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
+  };
+  let assistantId: string | undefined;
+  mocked.stream.mockImplementation(async function* (_request, options) {
+    const userMessage = await messages.createMessageRecord({
+      teamId,
+      workspaceId,
+      threadId,
+      role: "user",
+      content: "question",
+      createdBy: null,
+    });
+    const prepared = {
+      workspace: { id: workspaceId, organizationId: teamId },
+      thread: { id: threadId },
+      userMessage,
+      userId: "test-user",
+      runTraceId: run.id,
+      reasoningRun: { runId: run.id, parentRunId: null, base: "" },
+      modelAlias: "synthetic-chat",
+      profileAlias: "synthetic-chat",
+      preflightThinkingSteps: [],
+      preflightBilling: [],
+      failurePersistence: "persist-error-turn",
+    };
+    const placeholder = await options.onPrepared(prepared);
+    assistantId = placeholder.assistantMessageId;
+    const committed = await messages.updateMessageRecord({
+      teamId,
+      workspaceId,
+      threadId,
+      messageId: assistantId!,
+      creditsConsumed: 23,
+      metadata: {
+        meteredLlmCalls: [call],
+        meteredLlmCreditsConsumed: 23,
+        usage: call.usage,
+        finishReason: "stop",
+        billingSkipped: false,
+      },
+    });
+    await options.onFinalized({
+      assistantMessage: committed,
+      billing: {
+        teamId,
+        consumedCredits: 23,
+        availableCredits: 77,
+        consumedThisCycle: 23,
+        idempotencyReplayed: false,
+      },
+    });
+    // A failure after the commit, with no partial runtime state: the list
+    // must come from the committed messages row, not the (slim) snapshot.
+    const contentError = new ContentError(
+      502,
+      "MODEL_UPSTREAM_ERROR",
+      "late failure",
+    );
+    await options.createErrorMessage({ prepared, contentError });
+    yield `data: ${JSON.stringify({ type: "error", code: contentError.code, error: contentError.message })}\n\n`;
+  });
+
+  const result = await runner.processThreadChatRunJob(jobPayload());
+
+  assert.equal(result.status, "failed");
+  const stored = await messages.findMessageRecord({
+    teamId,
+    workspaceId,
+    messageId: assistantId!,
+  });
+  assert.equal(stored?.metadata.isError, true);
+  assert.deepEqual(stored?.metadata.meteredLlmCalls, [call]);
+  assert.equal(stored?.metadata.meteredLlmCreditsConsumed, 23);
+  assert.equal(stored?.creditsConsumed, 23);
+  const saved = (await current())!.snapshotJson;
+  assert.equal("meteredLlmCalls" in saved, false);
+});
 
 async function useFailingPreparation(prepare: () => Promise<never>) {
   const { ContentThreadStreamService } =

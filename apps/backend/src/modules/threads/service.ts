@@ -69,7 +69,7 @@ import {
 } from "../workspace/store";
 import type { ChatThreadRunMode } from "./durable/types";
 import type { StreamThreadEventInput } from "./turn/types";
-import { sanitizeThreadMessageMetadataForClient } from "./agent/turn/output-normalizer";
+import { projectThreadMessageForClient } from "./message-client-view";
 import type { ThreadChatPreferences } from "@sourceweft/contracts";
 
 const DEFAULT_THREAD_PAGE_LIMIT = 20;
@@ -134,20 +134,13 @@ function findImagePart(input: { contentJson: unknown; imageId: string }) {
   return null;
 }
 
-function sanitizeClientMessageRecord(message: MessageRecord): MessageRecord {
-  return {
-    ...message,
-    metadata: sanitizeThreadMessageMetadataForClient(message.metadata),
-  };
-}
-
 function sanitizeClientMessagePage(input: {
   items: MessageRecord[];
   nextCursor: string | null;
 }) {
   return {
     ...input,
-    items: input.items.map(sanitizeClientMessageRecord),
+    items: input.items.map(projectThreadMessageForClient),
   };
 }
 

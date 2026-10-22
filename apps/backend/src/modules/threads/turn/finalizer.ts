@@ -14,7 +14,10 @@ import {
 } from "../message-repository";
 import { computeTurnProviderCost } from "./cost";
 import { summarizeRetrievalCalls } from "./retrieval-summary";
-import { preserveTraceMetadata } from "./trace-metadata";
+import {
+  preserveTraceMetadata,
+  reasoningSegmentsWithoutText,
+} from "./trace-metadata";
 import { projectReasoning } from "./reasoning-state";
 import {
   boundReasoningRenderBlocks,
@@ -221,7 +224,7 @@ export async function finalizeThreadTurn(input: FinalizeThreadTurnInput) {
       text: boundSnapshotReasoning(input.reasoning),
       terminal: true,
     }),
-    reasoningSegments: input.reasoningSegments,
+    reasoningSegments: reasoningSegmentsWithoutText(input.reasoningSegments),
     traceParts: input.traceParts,
     traceEvents: Array.isArray(input.assistantMetadata?.traceEvents)
       ? input.assistantMetadata.traceEvents

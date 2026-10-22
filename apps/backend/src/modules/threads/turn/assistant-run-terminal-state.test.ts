@@ -73,7 +73,6 @@ test("terminal assistant state preserves a supplied cancellation reason", () => 
         toolCallId: "tool-1",
         tool: "web_search",
         status: "running",
-        input: {},
       },
     ],
   });
@@ -99,7 +98,6 @@ test("buildTerminalAssistantTraceState closes active steps and trace parts", () 
         toolCallId: "tool-1",
         tool: "web_search",
         status: "running",
-        input: {},
       },
     ],
   });

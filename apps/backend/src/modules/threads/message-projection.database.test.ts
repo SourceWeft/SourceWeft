@@ -246,3 +246,96 @@ test("concurrent host graph lineage appends preserve both references and locked 
     2,
   );
 });
+
+test("the /messages client view projects a stored legacy row without rewriting it", async () => {
+  const { projectThreadMessageForClient } =
+    await import("./message-client-view");
+  const excerpt = "Invoice total is 50.";
+  const legacy = {
+    reasoning: "Need to search.",
+    meteredLlmCalls: [{ spanId: "span-1", consumedCredits: 17 }],
+    reasoningSegments: [
+      { id: "segment-1", text: "Need to search.", sequence: 1 },
+    ],
+    traceEvents: [
+      {
+        type: "tool-call",
+        id: "tool-call:search-1:2",
+        itemId: "search-1",
+        payload: {
+          toolCall: {
+            id: "search-1",
+            tool: "notion_search",
+            mcpDisplay: { serverName: "Notion", toolName: "search" },
+          },
+        },
+      },
+    ],
+    toolCalls: [
+      {
+        id: "search-1",
+        tool: "notion_search",
+        input: { query: "invoice" },
+        output: { pages: 1 },
+        status: "completed",
+        sequence: 2,
+      },
+    ],
+    traceParts: [
+      { id: "segment-1", kind: "reasoning", order: 0, text: "Need to search." },
+      {
+        id: "search-1",
+        kind: "tool",
+        order: 1,
+        toolCallId: "search-1",
+        tool: "notion_search",
+        status: "completed",
+        input: { query: "invoice" },
+      },
+    ],
+    retrieval: {
+      citations: [{ citation: "c1", excerpt, quoteText: excerpt }],
+      availableCitations: [{ citation: "c1", excerpt, quoteText: excerpt }],
+    },
+  };
+  await repository.updateMessageRecord({ ...scope(), metadata: legacy });
+
+  const [stored] = await repository
+    .listMessageRecordsByThread({
+      teamId,
+      workspaceId,
+      threadId,
+    })
+    .then((items) => items.filter((item) => item.id === messageId));
+  assert.ok(stored);
+  const view = projectThreadMessageForClient(stored).metadata;
+  const body = JSON.stringify(view);
+  for (const absent of [
+    '"meteredLlmCalls"',
+    '"reasoning":',
+    '"traceEvents"',
+    '"quoteText"',
+    '"text"',
+  ]) {
+    assert.equal(body.includes(absent), false, absent);
+  }
+  assert.equal(
+    (view.traceParts as Record<string, unknown>[]).some((part) =>
+      Object.hasOwn(part, "input"),
+    ),
+    false,
+  );
+  assert.deepEqual(
+    (view.toolCalls as Record<string, unknown>[])[0]?.mcpDisplay,
+    {
+      serverName: "Notion",
+      toolName: "search",
+    },
+  );
+  // Storage is unchanged: the projection is read-time only.
+  const row = (await current())!;
+  assert.equal(row.metadata.reasoning, "Need to search.");
+  assert.deepEqual(row.metadata.meteredLlmCalls, legacy.meteredLlmCalls);
+  assert.deepEqual(row.metadata.traceParts, legacy.traceParts);
+  assert.deepEqual(row.metadata.retrieval, legacy.retrieval);
+});

@@ -15,7 +15,13 @@ export type TracePartBase = {
 
 export type ReasoningTracePart = TracePartBase & {
   kind: "reasoning";
-  text: string;
+  /**
+   * Never populated. A reasoning part is structure only (identity, order,
+   * phase, owning tool call, duration); the text lives in the reasoning render
+   * block and the `reasoning` string. Legacy rows that still carry it are
+   * stripped by `normalizeTraceParts`.
+   */
+  text?: string;
   phase?: "initial" | "after_tool";
   toolCallId?: string;
   tool?: string;
@@ -27,7 +33,12 @@ export type ToolTracePart = TracePartBase & {
   toolCallId: string;
   tool: string;
   status: ToolCallTrace["status"];
-  input: Record<string, unknown>;
+  /**
+   * Never populated. Tool input lives only on the canonical tool call
+   * (`toolCalls[id].input`); readers resolve it by `toolCallId`. Legacy rows
+   * that still carry it are stripped by `normalizeTraceParts`.
+   */
+  input?: Record<string, unknown>;
   /**
    * Never populated. Tool output lives only on the canonical tool call
    * (`toolCalls[id].output`); readers resolve it by `toolCallId`. Legacy rows
@@ -95,17 +106,12 @@ export function normalizeTraceParts(value: unknown): TracePart[] {
         return null;
       }
       if (kind === "reasoning") {
-        const text = typeof record.text === "string" ? record.text : "";
-        if (!text) {
-          return null;
-        }
         return {
           id,
           kind,
           order,
           createdAt,
           updatedAt,
-          text,
           ...(record.phase === "initial" || record.phase === "after_tool"
             ? { phase: record.phase }
             : {}),
@@ -123,7 +129,6 @@ export function normalizeTraceParts(value: unknown): TracePart[] {
         const toolCallId =
           typeof record.toolCallId === "string" ? record.toolCallId : id;
         const tool = typeof record.tool === "string" ? record.tool : "";
-        const input = toObjectRecord(record.input) ?? {};
         const status =
           record.status === "approval_requested" ||
           record.status === "completed" ||
@@ -139,7 +144,6 @@ export function normalizeTraceParts(value: unknown): TracePart[] {
           toolCallId,
           tool,
           status,
-          input,
           ...(typeof record.error === "string" || record.error === null
             ? { error: record.error }
             : {}),
@@ -236,7 +240,6 @@ export function tracePartFromReasoningSegment(
   return {
     kind: "reasoning",
     id: segment.id,
-    text: segment.text,
     ...(segment.phase ? { phase: segment.phase } : {}),
     ...(segment.toolCallId ? { toolCallId: segment.toolCallId } : {}),
     ...(segment.tool ? { tool: segment.tool } : {}),
@@ -269,7 +272,6 @@ export function tracePartFromToolCall(
       ? { mcpDisplay: normalizeMcpDisplay(toolCall.mcpDisplay) }
       : {}),
     status: toolCall.status,
-    input: toolCall.input,
     error: toolCall.error,
     latencyMs: toolCall.latencyMs,
     ...(toolCall.approvalState

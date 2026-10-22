@@ -23,6 +23,7 @@ import type {
   ToolCallTrace,
 } from "../turn/types";
 import type { TracePart } from "../turn/trace-parts";
+import { reasoningSegmentsWithoutText } from "../turn/trace-metadata";
 import { sanitizeClientErrorMessage } from "../../content/model-gateway-error";
 import { projectReasoning } from "../turn/reasoning-state";
 import { boundReasoningRenderBlocks, boundSnapshotReasoning } from "../durable";
@@ -158,7 +159,9 @@ export async function createThreadStreamErrorMessage(input: {
         text: boundSnapshotReasoning(input.partialState?.reasoning),
         terminal: true,
       }),
-      reasoningSegments: input.partialState?.reasoningSegments,
+      reasoningSegments: reasoningSegmentsWithoutText(
+        input.partialState?.reasoningSegments,
+      ),
       toolCalls: input.partialState?.toolCalls,
       traceParts: input.partialState?.traceParts,
       renderBlocks: boundReasoningRenderBlocks(

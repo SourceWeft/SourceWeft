@@ -67,7 +67,9 @@ function buildToolCallFromPart(input: {
   return {
     id: part.toolCallId,
     tool: part.tool,
-    input: part.input,
+    // `toolCalls[id]` holds the single copy of the input; trace parts are
+    // structural (Issue #333). A legacy part's inline input is the fallback.
+    input: matchedToolCall?.input ?? part.input ?? {},
     output: part.output ?? matchedToolCall?.output,
     latencyMs: part.latencyMs ?? matchedToolCall?.latencyMs ?? null,
     status: part.status,

@@ -15,6 +15,7 @@ import {
   type StreamingEventHandlerContext,
   type ToolCallEventPayload,
 } from "./streaming-event-handlers";
+import { normalizeModelReasoningSegmentRecord } from "./_thread/message-normalizers";
 
 function createBaseStreamingContext(
   overrides: Partial<StreamingEventHandlerContext> = {},
@@ -1840,19 +1841,17 @@ test("tool-call trace events are output-free while streamToolCallsById keeps the
     fullToolCall.output,
   );
 
-  // The live trace part is structural only as well: no second output copy.
+  // The live trace part is structural only as well: no second output or
+  // input copy (#333); `streamToolCallsById` holds the single copy.
   const traceParts = message.metadata.traceParts as TracePartRecord[];
   assert.equal(traceParts.length, 1);
   const [livePart] = traceParts;
   assert.equal(livePart?.kind, "tool");
   assert.equal(livePart && "output" in livePart, false);
+  assert.equal(livePart && "input" in livePart, false);
   assert.equal(JSON.stringify(traceParts).includes("xxxxxxxx"), false);
-  assert.deepEqual(
-    livePart?.kind === "tool" ? livePart.input : null,
-    fullToolCall.input,
-  );
 
-  // The live card still renders the full output from the single copy.
+  // The live card still renders the full input and output from the single copy.
   const [liveItem] = buildAssistantActivityItems({
     toolCalls: [...streamToolCallsById.values()],
     traceParts,
@@ -1861,6 +1860,10 @@ test("tool-call trace events are output-free while streamToolCallsById keeps the
   assert.deepEqual(
     liveItem?.type === "tool" ? liveItem.toolCall.output : null,
     fullToolCall.output,
+  );
+  assert.deepEqual(
+    liveItem?.type === "tool" ? liveItem.toolCall.input : null,
+    fullToolCall.input,
   );
   assert.equal(
     liveItem?.type === "tool" ? liveItem.toolCall.status : null,
@@ -2264,4 +2267,105 @@ test("segment-reset falls back to absolute keep lengths without drop counts", ()
 
   assert.equal(harness.getAssistantText(), "Hello ");
   assert.equal(harness.getMessage().metadata.reasoning, "pre ");
+});
+
+/**
+ * #333: the real normalizer now keeps structural (text-less) reasoning
+ * segments instead of dropping them. Live reasoning handling must be exactly
+ * what it was with the old drop-on-empty normalizer, both for text-less SSE
+ * segments and when an attach seeds text-less segments from `/messages`.
+ */
+test("text-less reasoning segments stream exactly as with the drop-on-empty normalizer", () => {
+  const legacyNormalize: StreamingEventHandlerContext["normalizeModelReasoningSegmentRecord"] =
+    (value, fallbackIndex) => {
+      const segment = normalizeModelReasoningSegmentRecord(
+        value,
+        fallbackIndex,
+      );
+      return segment && segment.text.length > 0 ? segment : null;
+    };
+  const run = (
+    normalize: StreamingEventHandlerContext["normalizeModelReasoningSegmentRecord"],
+    seedMetadata: Record<string, unknown>,
+  ) => {
+    let message: ChatMessageItem = {
+      id: "assistant-1",
+      role: "assistant",
+      content: "",
+      contentJson: {},
+      parentMessageId: null,
+      metadata: seedMetadata,
+      createdAt: new Date(0).toISOString(),
+    };
+    const streamRenderBuffer = createStreamingRenderBuffer({
+      maxDeltaBatchChars: 800,
+    });
+    const context = createBaseStreamingContext({
+      normalizeModelReasoningSegmentRecord: normalize,
+      streamRenderBuffer,
+      updateStreamingAssistantMessage: (updater) => {
+        message = updater(message);
+      },
+    });
+    const first = {
+      id: "model-reasoning:run-1:1",
+      sequence: 1,
+      phase: "initial",
+    };
+    const second = {
+      id: "model-reasoning:run-1:2",
+      sequence: 3,
+      phase: "after_tool",
+      toolCallId: "tool-1",
+      tool: "read_file",
+    };
+    for (const [reasoning, segment] of [
+      ["Let me ", first],
+      ["check the file.", first],
+      ["   ", first],
+      ["It says ", second],
+      ["hello.", { ...second, text: "It says hello." }],
+    ] as const) {
+      testExports.handleStreamingReasoning({ context, reasoning, segment });
+    }
+    const stripTimes = (parts: unknown) =>
+      (parts as TracePartRecord[]).map((part) =>
+        Object.fromEntries(
+          Object.entries(part).filter(
+            ([key]) => key !== "createdAt" && key !== "updatedAt",
+          ),
+        ),
+      );
+    return {
+      reasoning: message.metadata.reasoning,
+      reasoningSegments: message.metadata.reasoningSegments,
+      traceParts: stripTimes(message.metadata.traceParts),
+      renderBlocks: message.metadata.renderBlocks,
+    };
+  };
+
+  const fresh = run(normalizeModelReasoningSegmentRecord, {});
+  assert.deepEqual(fresh, run(legacyNormalize, {}));
+  assert.ok((fresh.renderBlocks as unknown[]).length > 0);
+
+  // An attach to a running run seeds the `/messages` metadata, whose
+  // segments and reasoning parts are structural since #333.
+  const seeded = {
+    reasoningSegments: [
+      { id: "model-reasoning:run-1:1", sequence: 1, phase: "initial" },
+    ],
+  };
+  const attached = run(normalizeModelReasoningSegmentRecord, seeded);
+  const legacyAttached = run(legacyNormalize, seeded);
+  assert.deepEqual(attached.reasoning, legacyAttached.reasoning);
+  assert.deepEqual(attached.renderBlocks, legacyAttached.renderBlocks);
+  assert.deepEqual(attached.traceParts, legacyAttached.traceParts);
+  assert.deepEqual(
+    (attached.reasoningSegments as ModelReasoningSegmentRecord[]).map(
+      (segment) => [segment.id, segment.text],
+    ),
+    (legacyAttached.reasoningSegments as ModelReasoningSegmentRecord[]).map(
+      (segment) => [segment.id, segment.text],
+    ),
+  );
 });

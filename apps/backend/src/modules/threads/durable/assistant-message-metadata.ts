@@ -3,6 +3,7 @@ import { findMessageRecord, updateMessageRecord } from "../message-repository";
 import { preserveTraceMetadata } from "../turn/trace-metadata";
 import { projectSnapshotReasoning } from "../turn/reasoning-state";
 import type { ChatRunSnapshot, ChatThreadRunRecord } from "./types";
+import { readSnapshotRetrieval } from "./snapshot";
 import { toObjectRecord } from "../../../shared/records";
 
 export function buildThreadRunMetadata(run: ChatThreadRunRecord) {
@@ -198,6 +199,11 @@ export async function updateAssistantMessageConfirmationMetadata(input: {
   });
 }
 
+function retrievalMetadata(snapshot: ChatRunSnapshot) {
+  const retrieval = readSnapshotRetrieval(snapshot);
+  return retrieval ? { retrieval } : {};
+}
+
 export function buildAssistantMessageSnapshotMetadata(input: {
   currentMetadata: Record<string, unknown>;
   run: ChatThreadRunRecord;
@@ -233,9 +239,7 @@ export function buildAssistantMessageSnapshotMetadata(input: {
     ...(input.snapshot.agentCheckpoint !== undefined
       ? { agentCheckpoint: input.snapshot.agentCheckpoint }
       : {}),
-    ...(input.snapshot.retrieval !== undefined
-      ? { retrieval: input.snapshot.retrieval }
-      : {}),
+    ...retrievalMetadata(input.snapshot),
     ...(input.snapshot.finishReason !== undefined
       ? { finishReason: input.snapshot.finishReason }
       : {}),
@@ -293,9 +297,7 @@ export function buildAssistantMessageConfirmationMetadata(input: {
     ...(input.snapshot.agentCheckpoint !== undefined
       ? { agentCheckpoint: input.snapshot.agentCheckpoint }
       : {}),
-    ...(input.snapshot.retrieval !== undefined
-      ? { retrieval: input.snapshot.retrieval }
-      : {}),
+    ...retrievalMetadata(input.snapshot),
     threadRun:
       input.run.status === "waiting_for_approval"
         ? {

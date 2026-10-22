@@ -300,6 +300,11 @@ export type ThinkingStepRecord = {
 
 export type ModelReasoningSegmentRecord = {
   id: string;
+  /**
+   * Empty for a structural segment: persisted segments and `/messages` carry
+   * no text since Issue #333. The visible reasoning text lives in the
+   * reasoning render blocks.
+   */
   text: string;
   sequence?: number;
   durationMs?: number;
@@ -345,6 +350,10 @@ export type TracePartRecord =
       order: number;
       createdAt: string;
       updatedAt: string;
+      /**
+       * Empty for a structural part (persisted parts carry no text since
+       * Issue #333); the visible text lives in the reasoning render blocks.
+       */
       text: string;
       phase?: "initial" | "after_tool";
       toolCallId?: string;
@@ -360,7 +369,12 @@ export type TracePartRecord =
       toolCallId: string;
       tool: string;
       status: ToolCallRecord["status"];
-      input: Record<string, unknown>;
+      /**
+       * Legacy only. Trace parts are structural: the single copy of a tool
+       * call's input lives on `toolCalls[toolCallId].input`. Rows written
+       * before Issue #333 may still carry an inline copy.
+       */
+      input?: Record<string, unknown>;
       output?: unknown;
       error?: string | null;
       latencyMs?: number | null;

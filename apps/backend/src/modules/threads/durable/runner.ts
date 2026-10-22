@@ -25,7 +25,11 @@ import {
   sanitizeClientErrorMessage,
   toContentError,
 } from "../../content/model-gateway-error";
-import type { MessageRenderBlock, PreparedThreadTurn } from "../turn/types";
+import type {
+  MessageRenderBlock,
+  MeteredLlmCallTrace,
+  PreparedThreadTurn,
+} from "../turn/types";
 import { createThreadStreamErrorMessage } from "../stream/error";
 import { toSseData } from "../stream/helpers";
 import { createDeltaCoalescer } from "./sse-coalescer";
@@ -74,6 +78,7 @@ import type {
   DurableRunRequestSnapshot,
   DurableRunResultSnapshot,
 } from "./types";
+import { readSnapshotRetrieval } from "./snapshot";
 import { toObjectRecord } from "../../../shared/records";
 import { truncateErrorText } from "../../../shared/safe-error-text";
 import {
@@ -1257,14 +1262,22 @@ function updateSnapshotFromPayload(
     }
   }
   if (payload.type === "citations") {
-    if (Array.isArray(payload.citations)) {
-      next.citations = payload.citations;
-    }
-    if (Array.isArray(payload.availableCitations)) {
-      next.availableCitations = payload.availableCitations;
-    } else if (Array.isArray(payload.citations)) {
-      next.availableCitations = payload.citations;
-    }
+    // One location: `retrieval`, in the messages-row shape. Profile fields from
+    // a finalized result survive; mid-run `citations` is the whole registry.
+    const current = readSnapshotRetrieval(next);
+    const citations = Array.isArray(payload.citations)
+      ? payload.citations
+      : current?.citations;
+    const availableCitations = Array.isArray(payload.availableCitations)
+      ? payload.availableCitations
+      : Array.isArray(payload.citations)
+        ? payload.citations
+        : current?.availableCitations;
+    next.retrieval = {
+      ...(current ?? {}),
+      citations: citations ?? [],
+      availableCitations: availableCitations ?? [],
+    };
   }
   next.traceEvents = appendTraceEvent(
     next.traceEvents,
@@ -1574,10 +1587,9 @@ function buildSnapshotMetadata(input: {
     ...(input.snapshot.agentCheckpoint !== undefined
       ? { agentCheckpoint: input.snapshot.agentCheckpoint }
       : {}),
-    retrieval: {
-      citations: input.snapshot.citations ?? [],
-      availableCitations:
-        input.snapshot.availableCitations ?? input.snapshot.citations ?? [],
+    retrieval: readSnapshotRetrieval(input.snapshot) ?? {
+      citations: [],
+      availableCitations: [],
     },
     ...buildThreadRunMetadata(input.run),
   };
@@ -1593,11 +1605,29 @@ function snapshotWithFinalizedResult(
     Pick<DurableRunResultSnapshot, "retrieval" | "billing">,
 ): ChatRunSnapshot {
   const metadata = result.assistantMessage.metadata ?? {};
+  // The streamed `citations` events stay the projected citations: a paused
+  // turn finalizes with `citations: []` but emits no closing citations event,
+  // so its message keeps the registry it streamed. The finalizer adds the
+  // retrieval profile fields.
+  const streamed = readSnapshotRetrieval(snapshot);
+  const retrieval =
+    result.retrieval && streamed
+      ? {
+          ...result.retrieval,
+          citations: streamed.citations,
+          availableCitations: streamed.availableCitations,
+        }
+      : (result.retrieval ?? streamed);
   // Only the committed finalizer result supplies these fields. Assign missing
   // values as undefined too, so a different run's facts cannot be inherited.
   return {
     ...snapshot,
     ...result,
+    retrieval,
+    // Rows written before retrieval had one location carried these top-level
+    // copies; `readSnapshotRetrieval` above already folded them in.
+    citations: undefined,
+    availableCitations: undefined,
     agentRunProgress:
       metadata.isCancelled === true
         ? null
@@ -1606,11 +1636,9 @@ function snapshotWithFinalizedResult(
       metadata.isCancelled === true
         ? null
         : readAgentRunStop(metadata.agentRunStop),
-    meteredLlmCalls: Array.isArray(metadata.meteredLlmCalls)
-      ? (metadata.meteredLlmCalls as NonNullable<
-          ChatRunSnapshot["meteredLlmCalls"]
-        >)
-      : undefined,
+    // The per-call metering list stays on the messages row only; the snapshot
+    // keeps the committed total and drops a list inherited from older rows.
+    meteredLlmCalls: undefined,
     meteredLlmCreditsConsumed:
       typeof metadata.meteredLlmCreditsConsumed === "number"
         ? metadata.meteredLlmCreditsConsumed
@@ -1781,6 +1809,20 @@ async function updateAssistantSnapshot(input: {
   });
 }
 
+async function readMessageMeteredLlmCalls(input: {
+  run: ChatThreadRunRecord;
+  messageId: string;
+}) {
+  const message = await findMessageRecord({
+    teamId: input.run.teamId,
+    workspaceId: input.run.workspaceId,
+    messageId: input.messageId,
+  });
+  return Array.isArray(message?.metadata.meteredLlmCalls)
+    ? (message.metadata.meteredLlmCalls as MeteredLlmCallTrace[])
+    : undefined;
+}
+
 async function createDurableErrorMessage(input: {
   run: ChatThreadRunRecord;
   assistantMessageId: string | null;
@@ -1793,8 +1835,14 @@ async function createDurableErrorMessage(input: {
 
   const isClientCancelled =
     input.createErrorInput.contentError.code === "CLIENT_CANCELLED";
+  // An error after a committed finalize must keep the committed charge: the
+  // list lives on the messages row; `snapshot.meteredLlmCalls` is legacy.
   const meteredLlmCalls =
     input.createErrorInput.partialState?.meteredLlmCalls ??
+    (await readMessageMeteredLlmCalls({
+      run: input.run,
+      messageId: input.assistantMessageId,
+    })) ??
     input.snapshot.meteredLlmCalls ??
     [];
   const errorBilling = buildErrorTurnBilling({
@@ -1860,10 +1908,9 @@ async function createDurableErrorMessage(input: {
         input.snapshot.renderBlocks ?? [],
       ),
       thinkingSteps: input.snapshot.thinkingSteps ?? [],
-      retrieval: {
-        citations: input.snapshot.citations ?? [],
-        availableCitations:
-          input.snapshot.availableCitations ?? input.snapshot.citations ?? [],
+      retrieval: readSnapshotRetrieval(input.snapshot) ?? {
+        citations: [],
+        availableCitations: [],
       },
       ...buildThreadRunMetadata({
         ...input.run,

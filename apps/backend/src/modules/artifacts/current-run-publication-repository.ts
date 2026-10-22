@@ -22,7 +22,10 @@ import {
   committedArtifactBlockIdentityMatches,
   mergeCommittedArtifactRenderBlocks,
 } from "../threads/render-block-projection";
-import { updateExistingTracePartsFromToolCalls } from "../threads/durable/snapshot";
+import {
+  slimSnapshotAssistantMessage,
+  updateExistingTracePartsFromToolCalls,
+} from "../threads/durable/snapshot";
 import { toObjectRecord } from "../../shared/records";
 
 type ArtifactType = typeof artifacts.$inferSelect.artifactType;
@@ -339,11 +342,15 @@ function findCommittedRepublishReplay(input: {
   return { block: block as ArtifactOutputBlock, output };
 }
 
+/**
+ * The run snapshot after a publication. The committed render blocks and tool
+ * calls live at the snapshot top level; the embedded assistant message stays
+ * the slim copy (scalars from the just-written message row), never the whole
+ * row's metadata.
+ */
 function nextAssistantSnapshot(input: {
   messageMetadata: Record<string, unknown>;
-  renderBlocks: unknown[];
   snapshot: Record<string, unknown>;
-  toolCalls: ToolCallTrace[];
 }) {
   const assistantMessage = toObjectRecord(input.snapshot.assistantMessage);
   if (!assistantMessage) {
@@ -352,15 +359,10 @@ function nextAssistantSnapshot(input: {
   const metadata = toObjectRecord(assistantMessage.metadata) ?? {};
   return {
     ...input.snapshot,
-    assistantMessage: {
+    assistantMessage: slimSnapshotAssistantMessage({
       ...assistantMessage,
-      metadata: {
-        ...metadata,
-        ...input.messageMetadata,
-        renderBlocks: input.renderBlocks,
-        toolCalls: input.toolCalls,
-      },
-    },
+      metadata: { ...metadata, ...input.messageMetadata },
+    }),
   };
 }
 
@@ -770,9 +772,7 @@ export async function commitCurrentRunArtifactPublication(
 
       const finalSnapshotBase = nextAssistantSnapshot({
         messageMetadata: nextMessageMetadata,
-        renderBlocks: blockProjection.renderBlocks,
         snapshot: snapshotAfterToolOutput,
-        toolCalls: runToolCalls,
       });
       const finalSnapshot = {
         ...finalSnapshotBase,

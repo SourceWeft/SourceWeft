@@ -4,6 +4,7 @@ import type {
   ToolCallRecord,
   TracePartRecord,
 } from "../../_components/chat-canvas";
+import { buildAssistantActivityItems } from "../../_components/chat-canvas/assistant-activity-items";
 import {
   excludeResolvedToolConfirmationCalls,
   resolveReasoningTraceEventsFromMetadata,
@@ -216,7 +217,6 @@ test("approval continuations resolve output-free trace parts through the canonic
     toolCallId: toolCall.id,
     tool: toolCall.tool,
     status: "approval_requested",
-    input: toolCall.input,
     error: null,
     latencyMs: 0,
   };
@@ -240,6 +240,11 @@ test("approval continuations resolve output-free trace parts through the canonic
     false,
     "resolution must not introduce an inline output copy on the part",
   );
+  assert.equal(
+    "input" in viaToolCall,
+    false,
+    "resolution must not introduce an inline input copy on the part",
+  );
 
   const [viaApprovalField] = resolveTracePartToolConfirmations(
     [{ ...outputFreePart, approvalConfirmationId: "approved-action" }],
@@ -259,5 +264,79 @@ test("approval continuations resolve output-free trace parts through the canonic
   assert.equal(
     unresolved?.kind === "tool" ? unresolved.status : null,
     "approval_requested",
+  );
+});
+
+test("attach seeding from the deduped /messages view keeps structural parts and the canonical input (#333)", () => {
+  // `use-thread-stream-action` seeds an attach to a running run from the
+  // `/messages` row: trace parts carry no input and reasoning parts no text,
+  // and `traceEvents` are omitted.
+  const toolCall = {
+    ...confirmationToolCall("approved-action"),
+    input: { page_id: "page-1" },
+  };
+  const createdAt = new Date(0).toISOString();
+  const metadata = {
+    threadRun: { id: "run-1", status: "waiting_for_approval" },
+    toolCalls: [toolCall],
+    traceParts: [
+      {
+        id: "model-reasoning:run-1:1",
+        kind: "reasoning",
+        order: 0,
+        createdAt,
+        updatedAt: createdAt,
+        phase: "initial",
+        durationMs: 800,
+      },
+      {
+        id: "part-tool",
+        kind: "tool",
+        order: 1,
+        createdAt,
+        updatedAt: createdAt,
+        toolCallId: toolCall.id,
+        tool: toolCall.tool,
+        status: "approval_requested",
+        error: null,
+        latencyMs: 0,
+      },
+    ],
+  };
+
+  assert.deepEqual(resolveReasoningTraceEventsFromMetadata(metadata), []);
+  const parts = resolveTracePartToolConfirmations(
+    resolveTracePartsFromMetadata(metadata),
+    ["approved-action"],
+    { decisions: [{ type: "approve" as const }] },
+    [toolCall],
+  );
+  assert.deepEqual(
+    parts.map((part) => [part.kind, part.id]),
+    [
+      ["reasoning", "model-reasoning:run-1:1"],
+      ["tool", "part-tool"],
+    ],
+  );
+  const [reasoningPart, toolPart] = parts;
+  assert.equal(
+    reasoningPart?.kind === "reasoning" ? reasoningPart.text : null,
+    "",
+  );
+  assert.equal(toolPart && "input" in toolPart, false);
+  assert.equal(toolPart?.kind === "tool" ? toolPart.status : null, "completed");
+
+  const toolItem = buildAssistantActivityItems({
+    toolCalls: resolveToolConfirmationCalls([toolCall], ["approved-action"], {
+      decisions: [{ type: "approve" as const }],
+    }),
+    traceParts: parts,
+  }).find((item) => item.type === "tool");
+  assert.deepEqual(toolItem?.type === "tool" ? toolItem.toolCall.input : null, {
+    page_id: "page-1",
+  });
+  assert.equal(
+    toolItem?.type === "tool" ? toolItem.toolCall.approvalState : null,
+    "approved",
   );
 });

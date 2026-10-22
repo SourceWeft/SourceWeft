@@ -739,6 +739,7 @@ describe("output-free trace parts resolve card output from the canonical tool ca
       sequence: 5,
     },
   ];
+  // Neither output (#330) nor input (#333) is copied into the parts.
   const traceParts: TracePartRecord[] = toolCalls.map((toolCall, index) => ({
     createdAt,
     updatedAt: createdAt,
@@ -748,7 +749,6 @@ describe("output-free trace parts resolve card output from the canonical tool ca
     toolCallId: toolCall.id,
     tool: toolCall.tool,
     status: toolCall.status,
-    input: toolCall.input,
     error: toolCall.error,
     latencyMs: toolCall.latencyMs,
   }));
@@ -771,10 +771,11 @@ describe("output-free trace parts resolve card output from the canonical tool ca
     return toolCall;
   }
 
-  test("every card sees the canonical output", () => {
+  test("every card sees the canonical output and input", () => {
     assert.equal(items.length, toolCalls.length);
     for (const toolCall of toolCalls) {
       assert.deepEqual(resolved(toolCall.id).output, toolCall.output);
+      assert.deepEqual(resolved(toolCall.id).input, toolCall.input);
       assert.equal(resolved(toolCall.id).status, toolCall.status);
       assert.equal(resolved(toolCall.id).latencyMs, toolCall.latencyMs);
     }
@@ -829,5 +830,96 @@ describe("output-free trace parts resolve card output from the canonical tool ca
     assert.ok(confirmation);
     assert.equal(confirmation.id, "approval-1");
     assert.equal(resolved("confirm-1").status, "approval_requested");
+  });
+});
+
+describe("input-free trace parts resolve card input from the canonical tool call (#333)", () => {
+  const createdAt = "2026-06-01T00:00:00.000Z";
+  const part = (
+    overrides: Partial<Extract<TracePartRecord, { kind: "tool" }>> = {},
+  ): TracePartRecord => ({
+    createdAt,
+    updatedAt: createdAt,
+    id: "part-tool-1",
+    kind: "tool",
+    order: 1,
+    toolCallId: "tool-1",
+    tool: "search_sources",
+    status: "completed",
+    ...overrides,
+  });
+  const toolCall: ToolCallRecord = {
+    error: null,
+    id: "tool-1",
+    input: { query: "canonical" },
+    latencyMs: 10,
+    output: { resultCount: 1 },
+    status: "completed",
+    tool: "search_sources",
+  };
+
+  test("the canonical tool call's input wins over a legacy inline copy", () => {
+    const [item] = buildAssistantActivityItems({
+      toolCalls: [toolCall],
+      traceParts: [part({ input: { query: "legacy" } })],
+    });
+    assert.deepEqual(item?.type === "tool" ? item.toolCall.input : null, {
+      query: "canonical",
+    });
+  });
+
+  test("an input-free part takes the canonical input", () => {
+    const [item] = buildAssistantActivityItems({
+      toolCalls: [toolCall],
+      traceParts: [part()],
+    });
+    assert.deepEqual(item?.type === "tool" ? item.toolCall.input : null, {
+      query: "canonical",
+    });
+  });
+
+  test("a legacy part without a matching tool call keeps its inline input", () => {
+    const [item] = buildAssistantActivityItems({
+      traceParts: [part({ input: { query: "legacy" } })],
+    });
+    assert.deepEqual(item?.type === "tool" ? item.toolCall.input : null, {
+      query: "legacy",
+    });
+  });
+
+  test("an unmatched input-free part defaults to an empty input", () => {
+    const [item] = buildAssistantActivityItems({ traceParts: [part()] });
+    assert.deepEqual(item?.type === "tool" ? item.toolCall.input : null, {});
+  });
+
+  test("a structural reasoning part without text stays in the activity order", () => {
+    const items = buildAssistantActivityItems({
+      assistantText: "Final answer.",
+      toolCalls: [toolCall],
+      traceParts: [
+        {
+          createdAt,
+          updatedAt: createdAt,
+          durationMs: 1200,
+          id: "reasoning-1",
+          kind: "reasoning",
+          order: 0,
+          phase: "initial",
+          text: "",
+        },
+        part(),
+      ],
+    });
+    assert.deepEqual(
+      items.map((item) => [item.type, item.id]),
+      [
+        ["reasoning", "reasoning-1"],
+        ["tool", "part-tool-1"],
+      ],
+    );
+    assert.equal(
+      items[0]?.type === "reasoning" ? items[0].durationMs : null,
+      1200,
+    );
   });
 });

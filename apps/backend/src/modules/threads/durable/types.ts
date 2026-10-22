@@ -4,7 +4,11 @@ import type {
   MeterConsumeResponse,
 } from "@sourceweft/contracts";
 import type { UsageInfo } from "@sourceweft/model-gateway";
-import type { MessageRecord, ThreadRecord } from "../../content/types";
+import type {
+  EmbeddingVectorStrategy,
+  MessageRecord,
+  ThreadRecord,
+} from "../../content/types";
 import type { AgentCitation } from "../agent/citation-registry";
 import type {
   EditThreadInput,
@@ -83,7 +87,45 @@ export type DurableRunResultSnapshot = {
   };
 };
 
-export type ChatRunSnapshot = DurableRunResultSnapshot & {
+/**
+ * The assistant message a run snapshot persists: identity, content and the
+ * metadata scalars of `slimSnapshotAssistantMessage`. The messages row holds
+ * the full metadata. The worker's in-memory snapshot may carry the full
+ * record; persistence slims it.
+ */
+export type ChatRunSnapshotAssistantMessage = Pick<
+  MessageRecord,
+  | "id"
+  | "threadId"
+  | "role"
+  | "parentMessageId"
+  | "content"
+  | "contentJson"
+  | "model"
+  | "createdAt"
+  | "metadata"
+> &
+  Partial<MessageRecord> & { updatedAt?: string };
+
+/**
+ * Snapshot retrieval, in the messages-row `metadata.retrieval` shape. Profile
+ * fields arrive with the finalized result; `citations` events fill the lists
+ * mid-run (`citations` is then the whole registry).
+ */
+export type ChatRunSnapshotRetrieval = {
+  embeddingProfileId?: string | null;
+  vectorStrategy?: EmbeddingVectorStrategy | null;
+  annIndexUsed?: string | null;
+  citations: unknown[];
+  availableCitations: unknown[];
+};
+
+export type ChatRunSnapshot = Omit<
+  DurableRunResultSnapshot,
+  "assistantMessage" | "retrieval"
+> & {
+  assistantMessage?: ChatRunSnapshotAssistantMessage;
+  retrieval?: ChatRunSnapshotRetrieval;
   /** Captured before the first message write; reused when this run is retried. */
   reasoningRun?: import("../turn/reasoning-state").ReasoningRun;
   reasoningRevision?: number;
@@ -99,11 +141,20 @@ export type ChatRunSnapshot = DurableRunResultSnapshot & {
   traceEvents?: unknown[];
   traceParts?: unknown[];
   renderBlocks?: unknown[];
-  meteredLlmCalls?: MeteredLlmCallTrace[];
+  /**
+   * @deprecated Rows written before #333 only. The list lives on the messages
+   * row (`metadata.meteredLlmCalls`); new snapshots keep only the total.
+   */
+  readonly meteredLlmCalls?: MeteredLlmCallTrace[];
   meteredLlmCreditsConsumed?: number;
   usage?: UsageInfo;
-  citations?: unknown[];
-  availableCitations?: unknown[];
+  /**
+   * @deprecated Rows written before #333 only; read through
+   * `readSnapshotRetrieval`. New snapshots keep both lists in `retrieval`.
+   */
+  readonly citations?: unknown[];
+  /** @deprecated See `citations`. */
+  readonly availableCitations?: unknown[];
   lastEventType?: string;
   finishReason?: string | null;
   agentRunStop?: AgentRunStop | null;

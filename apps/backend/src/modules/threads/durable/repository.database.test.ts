@@ -1010,3 +1010,128 @@ test("completed runs reject late background artifact outputs", async () => {
 
   assert.equal(result, null);
 });
+
+test("rows with a full embedded assistant message shrink on their next write", async () => {
+  const run = await createChatThreadRun({
+    teamId,
+    workspaceId,
+    threadId,
+    userId: "user-1",
+    idempotencyKey: `slim-snapshot:${randomUUID()}`,
+    mode: "send",
+    requestJson: {
+      mode: "send",
+      workspaceId,
+      threadId,
+      userId: "user-1",
+      content: "shrink the legacy snapshot",
+    },
+  });
+  assert.ok(run);
+  await markChatThreadRunRunning({ runId: run.id, teamId, workspaceId });
+  const assistantMessageId = randomUUID();
+  const block = {
+    artifactId: "artifact-1",
+    artifactVersionId: "version-1",
+    id: `artifact-output:${run.id}:artifact-1:version-1`,
+    placement: "terminal",
+    producer: { kind: "main" },
+    sequence: 1,
+    sourceToolCallId: "publish",
+    threadRunId: run.id,
+    type: "artifact_output",
+  };
+  await db.insert(messages).values({
+    id: assistantMessageId,
+    teamId,
+    workspaceId,
+    threadId,
+    role: "assistant",
+    content: "",
+    metadata: {},
+  });
+  // A row written before the slim copy: the committed block survives only in
+  // the embedded metadata, next to the full metered/trace/retrieval copies.
+  await db
+    .update(chatThreadRuns)
+    .set({
+      assistantMessageId,
+      snapshotJson: {
+        renderBlocks: [],
+        citations: [{ id: "c1" }],
+        meteredLlmCalls: [{ id: "call-1", consumedCredits: 4 }],
+        assistantMessage: {
+          id: assistantMessageId,
+          threadId,
+          role: "assistant",
+          content: "",
+          metadata: {
+            finishReason: "stop",
+            renderBlocks: [block],
+            traceEvents: [{ id: "event-1" }],
+            meteredLlmCalls: [{ id: "call-1", consumedCredits: 4 }],
+            retrieval: { citations: [], availableCitations: [] },
+          },
+        },
+      },
+    })
+    .where(eq(chatThreadRuns.id, run.id));
+
+  await updateChatThreadRunProgress({
+    runId: run.id,
+    teamId,
+    workspaceId,
+    snapshotJson: { assistantContent: "next", renderBlocks: [] },
+  });
+  const progressed = await findChatThreadRunById({
+    runId: run.id,
+    teamId,
+    workspaceId,
+  });
+  assert.deepEqual(progressed?.snapshotJson.renderBlocks, [block]);
+  assert.deepEqual(progressed?.snapshotJson.assistantMessage, {
+    id: assistantMessageId,
+    threadId,
+    role: "assistant",
+    content: "",
+    metadata: { finishReason: "stop" },
+  });
+
+  const finished = await finishChatThreadRun({
+    runId: run.id,
+    teamId,
+    workspaceId,
+    status: "failed",
+    snapshotMode: "terminal_patch",
+    snapshotJson: {
+      assistantMessage: {
+        id: assistantMessageId,
+        threadId,
+        role: "assistant",
+        content: "",
+        contentJson: {},
+        parentMessageId: null,
+        model: null,
+        createdAt: new Date(0).toISOString(),
+        metadata: {
+          errorCode: "CHAT_RUN_STALE",
+          toolCalls: [{ id: "tool-1" }],
+        },
+      },
+      errorCode: "CHAT_RUN_STALE",
+    },
+    errorCode: "CHAT_RUN_STALE",
+    errorMessage: "Run became stale",
+  });
+  const metadata = (
+    finished?.snapshotJson.assistantMessage as {
+      metadata: Record<string, unknown>;
+    }
+  ).metadata;
+  assert.deepEqual(Object.keys(metadata).sort(), [
+    "errorCode",
+    "finishReason",
+    "threadRun",
+  ]);
+  assert.deepEqual(finished?.snapshotJson.renderBlocks, [block]);
+});
