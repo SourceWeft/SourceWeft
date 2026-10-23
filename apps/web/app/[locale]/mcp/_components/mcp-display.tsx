@@ -157,7 +157,11 @@ export async function McpRuntimeBadge({
     item.runtime === "desktop" || item.desktopOnly || !item.webExecutable;
   return (
     <Badge>
-      {desktop ? <Laptop className="size-3.5" /> : <Globe2 className="size-3.5" />}
+      {desktop ? (
+        <Laptop className="size-3.5" />
+      ) : (
+        <Globe2 className="size-3.5" />
+      )}
       {t(key)}
     </Badge>
   );
@@ -244,14 +248,17 @@ export async function McpMarketCard({
       href={mcpPath(item.identifier)}
     >
       <div className="flex items-start gap-3">
-        <McpIcon iconUrl={item.iconUrl} trusted={trusted} />
+        <McpIcon
+          iconSource={item.iconSource}
+          iconUrl={item.iconUrl}
+          name={item.name}
+          trusted={trusted}
+        />
         <div className="min-w-0 flex-1">
           <h3 className="truncate text-base font-semibold leading-6 text-zinc-950 dark:text-white">
             {item.name}
           </h3>
           <p className="mt-0.5 truncate text-xs text-zinc-500">
-
-
             {item.providerName ?? item.identifier}
           </p>
         </div>
@@ -391,7 +398,11 @@ export async function McpToolRows({
   return (
     <div className="divide-y divide-zinc-200 overflow-hidden rounded-lg border border-zinc-300 bg-white/58 dark:divide-white/10 dark:border-white/10 dark:bg-white/[0.03]">
       {tools.map((tool) => (
-        <article className="scroll-mt-24 p-4" id={`tool-${slugifyAnchor(tool.name)}`} key={tool.name}>
+        <article
+          className="scroll-mt-24 p-4"
+          id={`tool-${slugifyAnchor(tool.name)}`}
+          key={tool.name}
+        >
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
               <h3 className="font-mono text-sm font-semibold text-zinc-950 dark:text-white">
@@ -431,8 +442,9 @@ export async function McpToolRows({
           <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-500">
             {t("tools.inputFields", {
               fields:
-                Object.keys(tool.inputSchema ?? {}).slice(0, 8).join(", ") ||
-                t("tools.schemaObject"),
+                Object.keys(tool.inputSchema ?? {})
+                  .slice(0, 8)
+                  .join(", ") || t("tools.schemaObject"),
             })}
           </p>
         </article>

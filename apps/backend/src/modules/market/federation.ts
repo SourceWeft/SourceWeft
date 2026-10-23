@@ -13,8 +13,14 @@ import {
   type McpEndpointAuthProbe,
 } from "../../shared/mcp-auth-probe";
 import { createControlledFetch } from "../../shared/security/controlled-fetch";
+import type { ResolvedIcon } from "./icons/chain";
+import { registryIcons, type IconTarget } from "./icons/registry-icons";
 import { mcpServerVersionId } from "./ingest/plan";
-import { findStoredAuthProbes, upsertMarketMcp } from "./ingest/repository";
+import {
+  findStoredAuthProbes,
+  findStoredIconProvenance,
+  upsertMarketMcp,
+} from "./ingest/repository";
 import { classifyByText } from "./parser/categories";
 import { registryServerProvenance } from "./registry-server";
 
@@ -322,7 +328,13 @@ export function registryRemoteAuth(
  */
 export function mapRegistryServerToManifest(
   entry: RegistryEntry,
-  options: { verified: boolean; authProbe?: McpEndpointAuthProbe } = {
+  options: {
+    verified: boolean;
+    authProbe?: McpEndpointAuthProbe;
+    // The logo chain's answer for this entry (`icons/`); without it the
+    // manifest keeps the registry icon alone and no source.
+    icon?: ResolvedIcon;
+  } = {
     verified: false,
   },
 ): MarketMcpManifest | null {
@@ -362,7 +374,8 @@ export function mapRegistryServerToManifest(
     description: server.description?.trim() || undefined,
     providerName: providerFromIdentifier(identifier),
     homepageUrl: server.websiteUrl,
-    iconUrl: registryIconUrl(server),
+    iconUrl: options.icon ? options.icon.iconUrl : registryIconUrl(server),
+    iconSource: options.icon?.iconSource,
     transport,
     endpointUrl: hasRemote ? remote?.url : undefined,
     desktopOnly: !hasRemote,
@@ -572,6 +585,34 @@ async function registryAuthProbes(entries: RegistryEntry[], now: Date) {
 }
 
 /**
+ * The logo chain of each entry (`icons/registry-icons.ts`), keyed by version
+ * id: steps 1–3 from the entry and the version's stored provenance, then a
+ * favicon fetch for the namespace domain when they found nothing and no
+ * outcome is cached for it.
+ */
+async function registryEntryIcons(entries: RegistryEntry[], now: Date) {
+  const targets: IconTarget[] = entries.flatMap((entry) => {
+    const server: RegistryServer = entry.server ?? entry;
+    const identifier = server.name?.trim();
+    const version = server.version?.trim();
+    if (!identifier || !version) return [];
+    const repositoryUrl = server.repository?.url?.trim();
+    return [
+      {
+        key: mcpServerVersionId(identifier, version),
+        identifier,
+        registryIconUrl: registryIconUrl(server),
+        repositoryUrl: repositoryUrl || undefined,
+      },
+    ];
+  });
+  return registryIcons(targets, {
+    now,
+    stored: await findStoredIconProvenance(targets.map((t) => t.key)),
+  });
+}
+
+/**
  * Pull every server from an upstream registry and upsert it into the catalog as
  * origin=upstream. Returns counts for observability. `maxServers` bounds a run.
  */
@@ -589,6 +630,9 @@ export async function ingestFromRegistry(input: {
   let skipped = 0;
   let authProbed = 0;
   let authProbeFailed = 0;
+  let faviconFetched = 0;
+  let faviconFailed = 0;
+  let faviconSkipped = 0;
   let partial = false;
   let error: string | undefined;
 
@@ -618,12 +662,17 @@ export async function ingestFromRegistry(input: {
     if (entries.length === 0) {
       break;
     }
-    const authProbes = await registryAuthProbes(
-      entries.filter(isLatestEntry).slice(0, maxServers - ingested),
-      new Date(),
-    );
+    const now = new Date();
+    const latestEntries = entries
+      .filter(isLatestEntry)
+      .slice(0, maxServers - ingested);
+    const authProbes = await registryAuthProbes(latestEntries, now);
     authProbed += authProbes.probed;
     authProbeFailed += authProbes.failed;
+    const icons = await registryEntryIcons(latestEntries, now);
+    faviconFetched += icons.faviconFetched;
+    faviconFailed += icons.faviconFailed;
+    faviconSkipped += icons.faviconSkipped;
     for (const entry of entries) {
       if (ingested >= maxServers) {
         break;
@@ -633,9 +682,17 @@ export async function ingestFromRegistry(input: {
         continue;
       }
       const authProbe = authProbes.probes.get(entry);
+      const server: RegistryServer = entry.server ?? entry;
+      const icon = icons.icons.get(
+        mcpServerVersionId(
+          server.name?.trim() ?? "",
+          server.version?.trim() ?? "",
+        ),
+      );
       const manifest = mapRegistryServerToManifest(entry, {
         verified: input.verified,
         authProbe: authProbe?.result,
+        icon,
       });
       if (!manifest) {
         skipped += 1;
@@ -667,6 +724,9 @@ export async function ingestFromRegistry(input: {
                     authProbe.probedAt,
                   )
                 : undefined,
+            // The namespace domain's favicon fetch and when it was made, kept
+            // so syncs reuse a hit and retry a miss only after 30 days.
+            iconProbe: icon?.iconProbe,
           },
         });
         ingested += 1;
@@ -691,6 +751,9 @@ export async function ingestFromRegistry(input: {
     skipped,
     authProbed,
     authProbeFailed,
+    faviconFetched,
+    faviconFailed,
+    faviconSkipped,
     partial,
   });
   return {
@@ -699,6 +762,9 @@ export async function ingestFromRegistry(input: {
     skipped,
     authProbed,
     authProbeFailed,
+    faviconFetched,
+    faviconFailed,
+    faviconSkipped,
     partial,
     error,
   };

@@ -6,11 +6,23 @@ const mocks = vi.hoisted(() => ({
   storedProbes: vi.fn(
     async (_versionIds: string[]) => new Map<string, unknown>(),
   ),
+  storedIconProvenance: vi.fn(
+    async (_versionIds: string[]) =>
+      new Map<
+        string,
+        {
+          selfDescription?: unknown;
+          githubRegistry?: unknown;
+          iconProbe?: unknown;
+        }
+      >(),
+  ),
 }));
 
 vi.mock("./ingest/repository", () => ({
   upsertMarketMcp: mocks.upsert,
   findStoredAuthProbes: mocks.storedProbes,
+  findStoredIconProvenance: mocks.storedIconProvenance,
 }));
 vi.mock("../../shared/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn() },
@@ -961,4 +973,119 @@ test("a registry endpoint on a private address is never probed", async () => {
   assert.equal(endpointCalls(fetch).length, 0);
   assert.equal(result.authProbeFailed, 1);
   assert.equal(mocks.upsert.mock.calls[0]?.[0].manifest.auth.type, "none");
+});
+
+test("issue #367: the logo chain labels an io.github entry github-avatar and keeps a registry icon as registry", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  stubRegistryAndEndpoints(
+    [
+      serverEntry(1),
+      {
+        server: {
+          name: "com.acme/mcp",
+          version: "1.0.0",
+          icons: [{ src: "https://cdn.acme.test/icon.png" }],
+          remotes: [{ type: "streamable-http", url: "https://acme.test/mcp" }],
+        },
+      },
+    ],
+    () => new Response("{}", { status: 200 }),
+  );
+
+  const result = await ingestFromRegistry({
+    source: "registry.test",
+    baseUrl: "https://registry.test",
+    verified: true,
+  });
+
+  assert.equal(result.ingested, 2);
+  const manifests = mocks.upsert.mock.calls.map((call) => call[0].manifest);
+  const acme = manifests.find(
+    (m) => m.identifier === "io.github.acme/server-1",
+  );
+  assert.equal(acme?.iconUrl, "https://github.com/acme.png?size=128");
+  assert.equal(acme?.iconSource, "github-avatar");
+  const registry = manifests.find((m) => m.identifier === "com.acme/mcp");
+  assert.equal(registry?.iconUrl, "https://cdn.acme.test/icon.png");
+  assert.equal(registry?.iconSource, "registry");
+  assert.equal(result.faviconFetched, 0);
+});
+
+test("issue #367: without public storage a domain entry stays a placeholder and no favicon service is called", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  // The test process has no PUBLIC_S3_* configuration, so the favicon step is
+  // skipped and counted rather than fetched.
+  const fetch = stubRegistryAndEndpoints(
+    [
+      {
+        server: {
+          name: "com.notion/mcp",
+          version: "1.0.1",
+          repository: {},
+          remotes: [
+            { type: "streamable-http", url: "https://mcp.notion.com/mcp" },
+          ],
+        },
+      },
+    ],
+    () => new Response("{}", { status: 200 }),
+  );
+
+  const result = await ingestFromRegistry({
+    source: "registry.test",
+    baseUrl: "https://registry.test",
+    verified: true,
+  });
+
+  assert.equal(result.ingested, 1);
+  assert.equal(result.faviconSkipped, 1);
+  assert.equal(result.faviconFetched, 0);
+  const input = mocks.upsert.mock.calls[0]?.[0];
+  assert.equal(input.manifest.iconUrl, undefined);
+  assert.equal(input.manifest.iconSource, "placeholder");
+  assert.equal(input.provenanceJson.iconProbe, undefined);
+  for (const call of fetch.mock.calls) {
+    assert.doesNotMatch(requestUrl(call[0]), /google|duckduckgo/);
+  }
+});
+
+test("issue #367: a cached favicon hit in provenance is reused, served from our URL and written back", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  const hit = {
+    domain: "notion.com",
+    result: "hit",
+    probedAt: new Date().toISOString(),
+    url: "https://assets.test/market/mcp-icons/notion.com/abc.png",
+    service: "google",
+  };
+  mocks.storedIconProvenance.mockResolvedValueOnce(
+    new Map([
+      [mcpServerVersionId("com.notion/mcp", "1.0.1"), { iconProbe: hit }],
+    ]),
+  );
+  stubRegistryAndEndpoints(
+    [
+      {
+        server: {
+          name: "com.notion/mcp",
+          version: "1.0.1",
+          remotes: [
+            { type: "streamable-http", url: "https://mcp.notion.com/mcp" },
+          ],
+        },
+      },
+    ],
+    () => new Response("{}", { status: 200 }),
+  );
+
+  await ingestFromRegistry({
+    source: "registry.test",
+    baseUrl: "https://registry.test",
+    verified: true,
+  });
+
+  const input = mocks.upsert.mock.calls[0]?.[0];
+  assert.equal(input.manifest.iconUrl, hit.url);
+  assert.equal(input.manifest.iconSource, "favicon");
+  assert.deepEqual(input.provenanceJson.iconProbe, hit);
 });
