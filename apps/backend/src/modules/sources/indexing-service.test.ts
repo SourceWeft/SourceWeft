@@ -41,16 +41,12 @@ let embedResult: {
   usage: { totalTokens: number };
 };
 const identity = {
-  version: 1,
+  version: 2,
   revision: "test-definition",
   profileId: "global:embedding:test",
   profileAlias: "default-embedding",
-  provider: "test",
-  providerKind: "openai-compatible",
-  baseUrl: "http://test.internal",
-  providerModel: "test-embed",
+  canonicalModel: "test-embed",
   requestedDimensions: 2,
-  providerRouting: null,
 };
 const ensureModelConfigAvailable = vi.fn();
 const recordGatewayOperationEvent = vi.fn();
@@ -307,7 +303,7 @@ test("a result from a different actual model cannot write vectors or bill ingest
       userId: USER_ID,
       chunks,
     }),
-  ).rejects.toThrow(/different Provider or model/);
+  ).rejects.toThrow(/different model/);
   expect(createSourceDocumentChunksAndEmbeddings).not.toHaveBeenCalled();
   expect(billing.meterIngestion).not.toHaveBeenCalled();
   expect(recordGatewayOperationEvent).toHaveBeenCalledWith(

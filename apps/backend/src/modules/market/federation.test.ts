@@ -4,13 +4,17 @@ import { afterEach, test, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   upsert: vi.fn(),
   storedProbes: vi.fn(
-    async (_versionIds: string[]) => new Map<string, unknown>(),
+    async (_versionIds: string[]) =>
+      new Map<
+        string,
+        { authProbe?: unknown; toolsListing?: unknown; tools?: unknown }
+      >(),
   ),
 }));
 
 vi.mock("./ingest/repository", () => ({
   upsertMarketMcp: mocks.upsert,
-  findStoredAuthProbes: mocks.storedProbes,
+  findStoredEndpointProbes: mocks.storedProbes,
 }));
 vi.mock("../../shared/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn() },
@@ -18,11 +22,16 @@ vi.mock("../../shared/logger", () => ({
 
 import {
   authProbeRecord,
+  DEFAULT_REGISTRY_PAGE_RETRY,
+  federateRegistryEntry,
   ingestFromRegistry,
   mapRegistryServerToManifest,
   registryRemoteAuth,
   registryRepositoryProvenance,
+  runMarketFederation,
   storedAuthProbe,
+  storedToolsListing,
+  toolsListingRecord,
 } from "./federation";
 import { mcpServerVersionId } from "./ingest/plan";
 
@@ -66,6 +75,7 @@ test("a mid-pagination fetch failure keeps the partial run instead of discarding
     source: "registry.test",
     baseUrl: "https://registry.test",
     verified: true,
+    retry: noWaitRetry(3),
   });
 
   // The two page-1 servers were upserted and must be reported, not lost.
@@ -73,6 +83,236 @@ test("a mid-pagination fetch failure keeps the partial run instead of discarding
   assert.equal(result.partial, true);
   assert.ok(result.error?.includes("fetch failed"));
   assert.equal(mocks.upsert.mock.calls.length, 2);
+  // Where to resume from: the page that could not be read.
+  assert.equal(result.nextCursor, "page-2");
+  const pageRequests = (fetch as ReturnType<typeof vi.fn>).mock.calls.filter(
+    ([input]) => String(input).includes("/v0/servers"),
+  );
+  // One request for page 1, then every attempt at page 2.
+  assert.equal(pageRequests.length, 1 + 3);
+});
+
+/** A page retry policy that does not wait between attempts. */
+function noWaitRetry(attempts: number) {
+  return { attempts, delayMs: () => 0 };
+}
+
+test("the default page retry backs off exponentially and is bounded", () => {
+  assert.equal(DEFAULT_REGISTRY_PAGE_RETRY.attempts, 6);
+  assert.deepEqual(
+    [2, 3, 4, 5, 6].map((attempt) =>
+      DEFAULT_REGISTRY_PAGE_RETRY.delayMs(attempt),
+    ),
+    [1000, 2000, 4000, 8000, 16000],
+  );
+  assert.equal(DEFAULT_REGISTRY_PAGE_RETRY.delayMs(10), 30_000);
+});
+
+test("a page that fails once is retried and the walk completes", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  let page2Attempts = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: string) => {
+      const url = new URL(input);
+      const cursor = url.searchParams.get("cursor");
+      if (cursor === "page-2" && page2Attempts++ === 0) {
+        throw new TypeError("fetch failed");
+      }
+      const body = cursor
+        ? { servers: [serverEntry(3)], metadata: { nextCursor: null } }
+        : {
+            servers: [serverEntry(1), serverEntry(2)],
+            metadata: { nextCursor: "page-2" },
+          };
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }),
+  );
+
+  const result = await ingestFromRegistry({
+    source: "registry.test",
+    baseUrl: "https://registry.test",
+    verified: true,
+    retry: noWaitRetry(3),
+  });
+
+  assert.equal(result.ingested, 3);
+  assert.equal(result.partial, false);
+  assert.equal(result.nextCursor, undefined);
+  assert.equal(page2Attempts, 2);
+});
+
+test("a run resumes from the cursor of a partial run", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  const fetch = vi.fn(async (input: string) => {
+    const url = new URL(input);
+    assert.equal(url.searchParams.get("cursor"), "page-2");
+    return new Response(
+      JSON.stringify({
+        servers: [serverEntry(3)],
+        metadata: { nextCursor: null },
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  const result = await ingestFromRegistry({
+    source: "registry.test",
+    baseUrl: "https://registry.test",
+    verified: true,
+    cursor: "page-2",
+  });
+
+  assert.equal(result.ingested, 1);
+  assert.equal(result.partial, false);
+  assert.equal(
+    fetch.mock.calls.filter(([input]) => String(input).includes("/v0/servers"))
+      .length,
+    1,
+  );
+});
+
+test("runMarketFederation resumes a partial walk from its cursor instead of starting over", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  let page2Requests = 0;
+  const fetch = vi.fn(async (input: string) => {
+    const url = new URL(input);
+    const cursor = url.searchParams.get("cursor");
+    // Page 2 fails every attempt the first time it is asked for, then works.
+    if (cursor === "page-2" && page2Requests++ < 2) {
+      throw new TypeError("fetch failed");
+    }
+    const body = cursor
+      ? { servers: [serverEntry(3)], metadata: { nextCursor: null } }
+      : {
+          servers: [serverEntry(1), serverEntry(2)],
+          metadata: { nextCursor: "page-2" },
+        };
+    return new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  const [result] = await runMarketFederation(
+    [{ source: "registry.test", baseUrl: "https://registry.test", verified: true }],
+    { retry: noWaitRetry(2), resume: { maxResumes: 3, delayMs: 0 } },
+  );
+
+  assert.equal(result?.ingested, 3);
+  assert.equal(result?.partial, false);
+  assert.equal(result?.resumes, 1);
+  // Page 1 was read once: the resume started at page 2.
+  const pageOneRequests = fetch.mock.calls.filter(
+    ([input]) =>
+      String(input).includes("/v0/servers") &&
+      !new URL(String(input)).searchParams.get("cursor"),
+  );
+  assert.equal(pageOneRequests.length, 1);
+  assert.equal(mocks.upsert.mock.calls.length, 3);
+});
+
+test("runMarketFederation gives up after the resume budget and reports the partial walk", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: string) => {
+      const url = new URL(input);
+      if (url.searchParams.get("cursor")) throw new TypeError("fetch failed");
+      return new Response(
+        JSON.stringify({
+          servers: [serverEntry(1)],
+          metadata: { nextCursor: "page-2" },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }),
+  );
+
+  const [result] = await runMarketFederation(
+    [{ source: "registry.test", baseUrl: "https://registry.test", verified: true }],
+    { retry: noWaitRetry(1), resume: { maxResumes: 2, delayMs: 0 } },
+  );
+
+  assert.equal(result?.partial, true);
+  assert.equal(result?.resumes, 2);
+  assert.equal(result?.nextCursor, "page-2");
+  // Page 1 was ingested once; the resumes never re-read it.
+  assert.equal(result?.ingested, 1);
+});
+
+test("federateRegistryEntry federates the latest version of one identifier, now", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  const fetch = vi.fn(async (input: string, init?: RequestInit) => {
+    const url = new URL(input);
+    if (url.pathname === "/v0/servers") {
+      assert.equal(url.searchParams.get("search"), "io.github.acme/server-7");
+      assert.equal(url.searchParams.get("version"), "latest");
+      return new Response(
+        JSON.stringify({
+          servers: [
+            // The search is a text match: a neighbour, an old version, the one.
+            serverEntry(70),
+            {
+              ...serverEntry(7),
+              _meta: {
+                "io.modelcontextprotocol.registry/official": {
+                  isLatest: false,
+                },
+              },
+            },
+            serverEntry(7),
+          ],
+          metadata: { count: 3 },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
+    // The endpoint probe: an open server.
+    assert.equal(init?.method, "POST");
+    return new Response("{}", { status: 200 });
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  const result = await federateRegistryEntry({
+    identifier: "io.github.acme/server-7",
+    source: { source: "registry.test", baseUrl: "https://registry.test", verified: true },
+  });
+
+  assert.equal(result.found, true);
+  assert.equal(result.ingested, 1);
+  assert.equal(mocks.upsert.mock.calls.length, 1);
+  const [{ manifest, provenanceJson }] = mocks.upsert.mock.calls[0]!;
+  assert.equal(manifest.identifier, "io.github.acme/server-7");
+  assert.equal(manifest.verified, true);
+  assert.equal(provenanceJson.source, "registry.test");
+});
+
+test("federateRegistryEntry reports an identifier the registry does not have", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      async () =>
+        new Response(JSON.stringify({ servers: [serverEntry(70)] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    ),
+  );
+
+  const result = await federateRegistryEntry({
+    identifier: "io.github.acme/server-7",
+    source: { source: "registry.test", baseUrl: "https://registry.test", verified: true },
+  });
+
+  assert.equal(result.found, false);
+  assert.equal(result.ingested, 0);
+  assert.equal(mocks.upsert.mock.calls.length, 0);
 });
 
 test("registry entries are categorized from their text, not left empty", async () => {
@@ -763,7 +1003,10 @@ test("a version's recent stored probe of the same endpoint is reused, not repeat
   const stored = authProbeRecord(ARCMIRA_ENDPOINT, "oauth", daysAgo(29));
   mocks.storedProbes.mockResolvedValueOnce(
     new Map([
-      [mcpServerVersionId("io.github.arcmira/arcmira", "0.10.7"), stored],
+      [
+        mcpServerVersionId("io.github.arcmira/arcmira", "0.10.7"),
+        { authProbe: stored },
+      ],
     ]),
   );
   const fetch = stubRegistryAndEndpoints([arcmiraEntry], () => {
@@ -801,7 +1044,9 @@ test("a stored probe 30 days old, or without a probe time, is probed again", asy
   ]) {
     vi.clearAllMocks();
     mocks.upsert.mockResolvedValue("item-id");
-    mocks.storedProbes.mockResolvedValueOnce(new Map([[versionId, record]]));
+    mocks.storedProbes.mockResolvedValueOnce(
+      new Map([[versionId, { authProbe: record }]]),
+    );
     const fetch = stubRegistryAndEndpoints([arcmiraEntry], () =>
       oauthChallenge(),
     );
@@ -866,7 +1111,13 @@ test("a stored probe of another endpoint is probed again", async () => {
     new Map([
       [
         mcpServerVersionId("io.github.arcmira/arcmira", "0.10.7"),
-        authProbeRecord("https://old.arcmira.com/mcp", "open", daysAgo(1)),
+        {
+          authProbe: authProbeRecord(
+            "https://old.arcmira.com/mcp",
+            "open",
+            daysAgo(1),
+          ),
+        },
       ],
     ]),
   );
@@ -961,4 +1212,286 @@ test("a registry endpoint on a private address is never probed", async () => {
   assert.equal(endpointCalls(fetch).length, 0);
   assert.equal(result.authProbeFailed, 1);
   assert.equal(mocks.upsert.mock.calls[0]?.[0].manifest.auth.type, "none");
+});
+
+const OPEN_ENDPOINT = "https://mcp.open.test/mcp";
+const openEntry = {
+  server: {
+    name: "io.github.acme/open",
+    version: "2.0.0",
+    description: "An open server.",
+    remotes: [{ type: "streamable-http", url: OPEN_ENDPOINT }],
+  },
+};
+const openVersionId = mcpServerVersionId("io.github.acme/open", "2.0.0");
+const listedTools = [
+  {
+    name: "search",
+    description: "Search the index.",
+    inputSchema: {
+      type: "object",
+      properties: { query: { type: "string" } },
+      required: ["query"],
+    },
+    // The server's own claim; never the catalog risk.
+    annotations: { readOnlyHint: true },
+  },
+  { name: "delete_all", inputSchema: { type: "object" } },
+];
+
+/**
+ * A registry page with `entries`; every endpoint is an MCP server that answers
+ * without credentials and lists `tools`. Returns the JSON-RPC methods each
+ * endpoint received.
+ */
+function stubOpenMcpEndpoints(entries: unknown[], tools: unknown[]) {
+  const methods: Array<{ url: string; method: string }> = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: unknown, init?: RequestInit) => {
+      const url = requestUrl(input);
+      if (url.startsWith("https://registry.test/")) {
+        return Response.json({
+          servers: entries,
+          metadata: { nextCursor: null },
+        });
+      }
+      const request = new Request(input as RequestInfo, init);
+      if (request.method !== "POST") return new Response(null, { status: 405 });
+      const message = (await request.json()) as { id?: number; method: string };
+      methods.push({ url, method: message.method });
+      if (message.id === undefined) return new Response(null, { status: 202 });
+      return Response.json({
+        jsonrpc: "2.0",
+        id: message.id,
+        result:
+          message.method === "initialize"
+            ? {
+                protocolVersion: "2025-06-18",
+                capabilities: { tools: {} },
+                serverInfo: { name: "open", version: "1" },
+              }
+            : { tools },
+      });
+    }),
+  );
+  return methods;
+}
+
+function ingestTestRegistry() {
+  return ingestFromRegistry({
+    source: "registry.test",
+    baseUrl: "https://registry.test",
+    verified: true,
+  });
+}
+
+test("an open endpoint's tools are listed into the manifest with an unknown risk", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  const methods = stubOpenMcpEndpoints([openEntry], listedTools);
+
+  const result = await ingestTestRegistry();
+
+  assert.equal(result.toolsListed, 1);
+  assert.equal(result.toolsListFailed, 0);
+  // The auth probe's initialize, then the listing's own handshake.
+  assert.deepEqual(
+    methods.map((call) => call.method),
+    ["initialize", "initialize", "notifications/initialized", "tools/list"],
+  );
+  const input = mocks.upsert.mock.calls[0]?.[0];
+  assert.deepEqual(input.manifest.tools, [
+    {
+      name: "search",
+      description: "Search the index.",
+      inputSchema: listedTools[0]!.inputSchema,
+      annotations: { readOnlyHint: true },
+      risk: "unknown",
+    },
+    {
+      name: "delete_all",
+      inputSchema: { type: "object" },
+      annotations: {},
+      risk: "unknown",
+    },
+  ]);
+  const listedAt = new Date(input.provenanceJson.toolsListing.listedAt);
+  assert.deepEqual(
+    input.provenanceJson.toolsListing,
+    toolsListingRecord(OPEN_ENDPOINT, 2, listedAt),
+  );
+  assert.equal(
+    JSON.stringify(input.provenanceJson.toolsListing).includes("open.test"),
+    false,
+  );
+});
+
+test("an endpoint that asks for a credential is not listed", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  const fetch = stubRegistryAndEndpoints([arcmiraEntry], () =>
+    oauthChallenge(),
+  );
+
+  const result = await ingestTestRegistry();
+
+  assert.equal(endpointCalls(fetch).length, 1);
+  assert.equal(result.toolsListed, 0);
+  const input = mocks.upsert.mock.calls[0]?.[0];
+  assert.deepEqual(input.manifest.tools, []);
+  assert.equal(input.provenanceJson.toolsListing, undefined);
+});
+
+test("an endpoint URL with a query, user info or a template is not listed", async () => {
+  for (const url of [
+    "https://mcp.open.test/mcp?api_key=publisher-key",
+    "https://user:pass@mcp.open.test/mcp",
+    "https://{tenant}.open.test/mcp",
+  ]) {
+    vi.clearAllMocks();
+    mocks.upsert.mockResolvedValue("item-id");
+    const methods = stubOpenMcpEndpoints(
+      [
+        {
+          server: {
+            ...openEntry.server,
+            remotes: [{ type: "streamable-http", url }],
+          },
+        },
+      ],
+      listedTools,
+    );
+
+    const result = await ingestTestRegistry();
+
+    assert.equal(result.toolsListed, 0, url);
+    assert.equal(
+      methods.some((call) => call.method === "tools/list"),
+      false,
+      url,
+    );
+    assert.deepEqual(mocks.upsert.mock.calls[0]?.[0].manifest.tools, [], url);
+  }
+});
+
+test("a version's recent stored listing is reused, not repeated", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  const record = toolsListingRecord(OPEN_ENDPOINT, 1, daysAgo(29));
+  mocks.storedProbes.mockResolvedValueOnce(
+    new Map([
+      [
+        openVersionId,
+        {
+          authProbe: authProbeRecord(OPEN_ENDPOINT, "open", daysAgo(1)),
+          toolsListing: record,
+          tools: [{ ...listedTools[0], risk: "read" }],
+        },
+      ],
+    ]),
+  );
+  const methods = stubOpenMcpEndpoints([openEntry], []);
+
+  const result = await ingestTestRegistry();
+
+  assert.deepEqual(methods, []);
+  assert.equal(result.toolsListed, 0);
+  const input = mocks.upsert.mock.calls[0]?.[0];
+  assert.deepEqual(
+    input.manifest.tools.map((tool: { name: string; risk: string }) => [
+      tool.name,
+      tool.risk,
+    ]),
+    // Stored tools are bounded again, risk included.
+    [["search", "unknown"]],
+  );
+  assert.deepEqual(input.provenanceJson.toolsListing, record);
+});
+
+test("a failed listing keeps the stored tools and the run going", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  const record = toolsListingRecord(OPEN_ENDPOINT, 1, daysAgo(40));
+  mocks.storedProbes.mockResolvedValueOnce(
+    new Map([
+      [openVersionId, { toolsListing: record, tools: [listedTools[0]] }],
+    ]),
+  );
+  stubRegistryAndEndpoints([openEntry, serverEntry(1)], (url) =>
+    url === OPEN_ENDPOINT
+      ? // The probe's initialize is answered; the listing's is not JSON-RPC.
+        new Response("{}", { status: 200 })
+      : new Response(null, { status: 401 }),
+  );
+
+  const result = await ingestTestRegistry();
+
+  assert.equal(result.ingested, 2);
+  assert.equal(result.toolsListed, 0);
+  assert.equal(result.toolsListFailed, 1);
+  const open = mocks.upsert.mock.calls.find(
+    ([input]) => input.manifest.identifier === "io.github.acme/open",
+  )?.[0];
+  assert.deepEqual(
+    open.manifest.tools.map((tool: { name: string }) => tool.name),
+    ["search"],
+  );
+  // Still stale, so the next sync lists it again.
+  assert.deepEqual(open.provenanceJson.toolsListing, record);
+});
+
+test("a stored listing is read back only for the same endpoint and with a valid time", () => {
+  const now = new Date("2026-10-24T00:00:00.000Z");
+  const at = (days: number) => new Date(now.getTime() - days * DAY_MS);
+  const tools = [listedTools[0]];
+  assert.equal(
+    storedToolsListing(
+      { toolsListing: toolsListingRecord(OPEN_ENDPOINT, 1, at(1)), tools },
+      OPEN_ENDPOINT,
+      now,
+    )?.fresh,
+    true,
+  );
+  assert.equal(
+    storedToolsListing(
+      { toolsListing: toolsListingRecord(OPEN_ENDPOINT, 1, at(30)), tools },
+      OPEN_ENDPOINT,
+      now,
+    )?.fresh,
+    false,
+  );
+  for (const stored of [
+    {
+      toolsListing: toolsListingRecord("https://old.test/mcp", 1, at(1)),
+      tools,
+    },
+    {
+      toolsListing: {
+        ...toolsListingRecord(OPEN_ENDPOINT, 1, at(1)),
+        listedAt: "soon",
+      },
+    },
+    { tools },
+    undefined,
+  ]) {
+    assert.equal(
+      storedToolsListing(stored, OPEN_ENDPOINT, now),
+      undefined,
+      JSON.stringify(stored),
+    );
+  }
+});
+
+test("a stdio-only entry gets no tools even when some are passed", () => {
+  const manifest = mapRegistryServerToManifest(
+    {
+      server: {
+        name: "io.github.acme/local",
+        version: "1.0.0",
+        packages: [{ registryType: "npm", identifier: "acme-local" }],
+      },
+    },
+    {
+      verified: true,
+      tools: [{ name: "x", inputSchema: {}, annotations: {}, risk: "unknown" }],
+    },
+  );
+  assert.deepEqual(manifest?.tools, []);
 });

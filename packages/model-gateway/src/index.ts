@@ -2,6 +2,7 @@ export { createModelGateway, ModelGatewayClient } from "./client";
 
 export {
   ModelGatewayError,
+  canonicalProviderModel,
   createHttpGatewayError,
   isFailoverableCode,
   isFailoverableError,

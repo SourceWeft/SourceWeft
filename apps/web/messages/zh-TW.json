@@ -409,8 +409,10 @@
     },
     "tools": {
       "empty": "工具後設資料尚未被收錄。",
-      "inputFields": "輸入欄位：{fields}",
-      "schemaObject": "schema 物件"
+      "parameters": "輸入參數",
+      "required": "必填",
+      "moreParameters": "另有 {count} 個",
+      "noParameters": "無需輸入參數。"
     },
     "faq": {
       "eyebrow": "MCP 常見問答",

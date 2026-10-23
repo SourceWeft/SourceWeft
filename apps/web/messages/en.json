@@ -409,8 +409,10 @@
     },
     "tools": {
       "empty": "Tool metadata has not been indexed yet.",
-      "inputFields": "Input fields: {fields}",
-      "schemaObject": "schema object"
+      "parameters": "Parameters",
+      "required": "required",
+      "moreParameters": "+{count} more",
+      "noParameters": "Takes no parameters."
     },
     "faq": {
       "eyebrow": "MCP FAQ",

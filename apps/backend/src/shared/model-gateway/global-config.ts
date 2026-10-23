@@ -4,6 +4,7 @@ import { logger } from "../logger";
 import {
   DEFAULT_IMAGE_GENERATION_REQUEST,
   STRICT_JSON_SCHEMA_SUPPORT,
+  canonicalProviderModel,
   isImageGenerationEndpoint,
   isImageGenerationSizing,
   type ImageGenerationRequestConfig,
@@ -128,9 +129,14 @@ export type GlobalEmbeddingProfileEntry = {
   profileAlias: string;
   modelAlias: string;
   /**
-   * Always exactly one target: two embedding models behind one alias would mix
-   * incompatible vector spaces in the same index. `parseEmbeddingProfileEntry`
-   * rejects the multi-target form outright.
+   * Ordered by ascending priority like chat targets, with one extra rule: every
+   * target must serve the same model (`canonicalProviderModel` of
+   * `targetModel`, so `BAAI/bge-m3` and `Pro/BAAI/bge-m3` are the same model).
+   * The same model on two Providers is one vector space, so failing over
+   * between them keeps the index valid; two different embedding models behind
+   * one alias would mix incompatible vectors in one index, and
+   * `parseEmbeddingProfileEntry` rejects that form. A multi-target profile must
+   * also state its `pricing`, because each target may bill differently.
    */
   targets: GlobalProfileTarget[];
   routingStrategy: ModelGatewayRoutingStrategy;
@@ -1377,10 +1383,33 @@ function parseEmbeddingProfileEntry(
     `embeddingProfiles[${index}].modelAlias`,
   );
 
-  if (entry.targets !== undefined && entry.targets !== null) {
-    throw new Error(
-      `Global model gateway config entry 'embeddingProfiles[${index}]' cannot declare multiple targets: embeddings behind one alias must stay on a single model to keep one vector space`,
+  const field = `embeddingProfiles[${index}]`;
+  const targets = parseProfileTargets({
+    entry: entry as Record<string, unknown>,
+    field,
+    modelAlias,
+  });
+  const pricing = parsePricingEntry(entry.pricing, `${field}.pricing`);
+
+  // One alias, one vector space: every target must serve the same model.
+  // Failing over to the same model on another Provider keeps stored vectors
+  // comparable; a different model would silently corrupt the index.
+  if (targets.length > 1) {
+    const primary = targets[0]!;
+    const primaryModel = canonicalProviderModel(primary.targetModel);
+    const mixed = targets.find(
+      (target) => canonicalProviderModel(target.targetModel) !== primaryModel,
     );
+    if (mixed) {
+      throw new Error(
+        `Global model gateway config entry '${field}' cannot mix embedding models behind one alias: '${primary.gatewaySlug}/${primary.targetModel}' and '${mixed.gatewaySlug}/${mixed.targetModel}' are different models, and one alias must stay on a single model to keep one vector space`,
+      );
+    }
+    if (!hasExplicitPricing(pricing)) {
+      throw new Error(
+        `Global model gateway config entry '${field}' declares multiple targets and must set an explicit 'pricing' block or 'pricing.litellmKey'`,
+      );
+    }
   }
 
   return {
@@ -1393,27 +1422,16 @@ function parseEmbeddingProfileEntry(
       `embeddingProfiles[${index}].profileAlias`,
     ),
     modelAlias,
-    targets: parseProfileTargets({
-      entry: entry as Record<string, unknown>,
-      field: `embeddingProfiles[${index}]`,
-      modelAlias,
-    }),
+    targets,
     routingStrategy: asRoutingStrategy(
       entry.routingStrategy,
-      `embeddingProfiles[${index}].routingStrategy`,
+      `${field}.routingStrategy`,
     ),
     requestedDimensions,
     vectorStrategy,
     isDefault: asBoolean(entry.isDefault, false),
     isActive: asBoolean(entry.isActive, true),
-    ...(entry.pricing !== undefined
-      ? {
-          pricing: parsePricingEntry(
-            entry.pricing,
-            `embeddingProfiles[${index}].pricing`,
-          ),
-        }
-      : {}),
+    ...(pricing !== undefined ? { pricing } : {}),
   };
 }
 

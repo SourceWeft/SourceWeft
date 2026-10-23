@@ -31,6 +31,7 @@ import {
   transportLabel,
 } from "../../../../lib/mcp-labels";
 import { slugify } from "../../../../lib/slug";
+import { mcpToolParameters } from "../../../../lib/mcp-tool-parameters";
 
 import { McpIcon } from "./mcp-client";
 import { mcpPath } from "./mcp-paths";
@@ -397,46 +398,77 @@ export async function McpToolRows({
               <h3 className="font-mono text-sm font-semibold text-zinc-950 dark:text-white">
                 {tool.name}
               </h3>
-              {tool.title ? (
+              {toolTitle(tool) ? (
                 <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-                  {tool.title}
+                  {toolTitle(tool)}
                 </p>
               ) : null}
             </div>
-            <Badge
-              tone={
-                tool.risk === "read"
-                  ? "good"
-                  : tool.risk === "unknown"
-                    ? "neutral"
-                    : "warn"
-              }
-            >
-              {t(
-                `badges.risk.${
-                  tool.risk === "read" ||
-                  tool.risk === "write" ||
-                  tool.risk === "destructive"
-                    ? tool.risk
-                    : "unknown"
-                }`,
-              )}
-            </Badge>
+            {/* Listed tools carry no risk of their own: an "Unknown" badge on
+                every one of them would say nothing. */}
+            {tool.risk === "read" ||
+            tool.risk === "write" ||
+            tool.risk === "destructive" ? (
+              <Badge tone={tool.risk === "read" ? "good" : "warn"}>
+                {t(`badges.risk.${tool.risk}`)}
+              </Badge>
+            ) : null}
           </div>
           {tool.description ? (
-            <p className="mt-3 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+            <p className="mt-3 whitespace-pre-line break-words text-sm leading-6 text-zinc-600 dark:text-zinc-400">
               {tool.description}
             </p>
           ) : null}
-          <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-500">
-            {t("tools.inputFields", {
-              fields:
-                Object.keys(tool.inputSchema ?? {}).slice(0, 8).join(", ") ||
-                t("tools.schemaObject"),
-            })}
-          </p>
+          <McpToolParameterList inputSchema={tool.inputSchema} />
         </article>
       ))}
+    </div>
+  );
+}
+
+function toolTitle(tool: MarketMcpToolManifest) {
+  const annotated = tool.annotations?.title;
+  const title =
+    tool.title ?? (typeof annotated === "string" ? annotated : undefined);
+  return title && title !== tool.name ? title : null;
+}
+
+const SHOWN_TOOL_PARAMETERS = 12;
+
+async function McpToolParameterList({
+  inputSchema,
+}: {
+  inputSchema: Record<string, unknown> | undefined;
+}) {
+  const t = await getTranslations("mcp");
+  const parameters = mcpToolParameters(inputSchema);
+  if (parameters.length === 0) {
+    return (
+      <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-500">
+        {t("tools.noParameters")}
+      </p>
+    );
+  }
+  const hidden = parameters.length - SHOWN_TOOL_PARAMETERS;
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-500">
+      <span>{t("tools.parameters")}</span>
+      {parameters.slice(0, SHOWN_TOOL_PARAMETERS).map((parameter) => (
+        <code
+          className="rounded border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 font-mono text-zinc-700 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-300"
+          key={parameter.name}
+        >
+          {parameter.name}
+          {parameter.required ? (
+            <span className="ml-1 font-sans text-zinc-500">
+              {t("tools.required")}
+            </span>
+          ) : null}
+        </code>
+      ))}
+      {hidden > 0 ? (
+        <span>{t("tools.moreParameters", { count: hidden })}</span>
+      ) : null}
     </div>
   );
 }

@@ -31,7 +31,7 @@ import { lockSourceForWrite } from "./source-write-lock";
 import {
   assertEmbeddingIdentityCurrent,
   EmbeddingIdentityError,
-  validateEmbeddingResult,
+  validateEmbeddingDimensions,
   type EmbeddingIndexIdentity,
 } from "../../shared/model-gateway/embedding-identity";
 export {
@@ -1065,12 +1065,8 @@ export async function createSourceDocumentChunksAndEmbeddings(
     }
     await assertEmbeddingIdentityCurrent(tx, input.embeddingIdentity);
     if (input.embeddings.length > 0) {
-      const dim = validateEmbeddingResult(
+      const dim = validateEmbeddingDimensions(
         input.embeddingIdentity,
-        {
-          provider: input.embeddingIdentity.provider,
-          providerModel: input.embeddingIdentity.providerModel,
-        },
         input.embeddings,
       );
       if (input.embeddingIdentity.requestedDimensions === null) {
