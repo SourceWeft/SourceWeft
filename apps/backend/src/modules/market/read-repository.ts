@@ -9,6 +9,8 @@ import {
   type McpTransport,
 } from "@sourceweft/market-contracts";
 import { and, desc, eq, exists, ilike, inArray, or, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
+import { alias, type AnyPgColumn } from "drizzle-orm/pg-core";
 import {
   db,
   mcpCategories,
@@ -20,6 +22,7 @@ import {
   readMcpOverviewLocales,
   readMcpOverviews,
 } from "./overview/repository";
+import { latestPublishedVersionOf } from "./latest-version";
 import { readMcpReadme } from "./readme/readme-repository";
 import { mcpReadmeView } from "./readme/readme-state";
 
@@ -30,6 +33,8 @@ type MarketMcpRecord = {
   readme: MarketMcpReadme | null;
   /** The latest version's AI overview; null when there is none to show. */
   aiOverview: MarketMcpAiOverview | null;
+  /** False when the page stays out of search: see `mcpReadmeSharedOf`. */
+  searchIndexable: boolean;
 };
 
 /**
@@ -348,11 +353,60 @@ async function overviewFieldsByVersionIds(
 }
 
 /** Shared by catalog reads and sitemap export, including desktop-only details. */
-export function publicMarketMcpCondition() {
+export function publicMarketMcpCondition(
+  servers: Record<"status" | "visibility", AnyPgColumn> = mcpServers,
+) {
   return and(
-    eq(mcpServers.status, "published"),
-    eq(mcpServers.visibility, "public"),
+    eq(servers.status, "published"),
+    eq(servers.visibility, "public"),
   )!;
+}
+
+/**
+ * How many public servers have to show one README file before their pages stay
+ * out of search. A batch publisher registers hundreds of servers from one
+ * repository whose README lists them all; each page would be that same
+ * document. A few servers sharing a monorepo README stay below this.
+ */
+export const MCP_SHARED_README_MIN_SERVERS = 10;
+
+// A raw `sql` FROM renders an alias by its name alone, so the tables are named
+// in the FROM and the aliases only supply the column references.
+const OTHER_SERVERS = "shared_readme_servers";
+const OTHER_VERSIONS = "shared_readme_versions";
+const OWN_VERSION = "shared_readme_own";
+const otherServers = alias(mcpServers, OTHER_SERVERS);
+const otherVersions = alias(mcpServerVersions, OTHER_VERSIONS);
+const ownVersion = alias(mcpServerVersions, OWN_VERSION);
+
+/**
+ * True when version `versionId` (a value or a column reference) has a README
+ * whose bytes (sha256) the shown version of at least
+ * `MCP_SHARED_README_MIN_SERVERS` public servers also has, its own server
+ * included. Such a page is `noindex` and not in the sitemap. The detail API
+ * and the sitemap both read this, so they cannot disagree. Counting stops at
+ * the threshold, and the README hash index finds the candidates, so a server
+ * with a README of its own costs one index lookup.
+ */
+export function mcpReadmeSharedOf(versionId: unknown): SQL<boolean> {
+  return sql<boolean>`((
+    select count(*) from (
+      select 1
+      from ${mcpServerVersions} as ${sql.identifier(OTHER_VERSIONS)}
+      inner join ${mcpServers} as ${sql.identifier(OTHER_SERVERS)}
+        on ${otherServers.id} = ${otherVersions.serverId}
+      where ${otherVersions.readmeStatus} = 'ok'
+        and ${otherVersions.readmeSha256} = (
+          select ${ownVersion.readmeSha256}
+          from ${mcpServerVersions} as ${sql.identifier(OWN_VERSION)}
+          where ${ownVersion.id} = ${versionId}
+            and ${ownVersion.readmeStatus} = 'ok'
+        )
+        and ${publicMarketMcpCondition(otherServers)}
+        and ${otherVersions.id} = ${latestPublishedVersionOf(otherServers.id)}
+      limit ${MCP_SHARED_README_MIN_SERVERS}
+    ) as shared
+  ) >= ${MCP_SHARED_README_MIN_SERVERS})`;
 }
 
 // Keyset cursor over the (publishedAt desc, id desc) ordering. Opaque to
@@ -582,13 +636,18 @@ export async function findMcp(
     const categoryMap = await categoriesByItemIds([row.id]);
     const latest = versions[0];
     const locale = options.locale ?? "en";
-    const [readme, overviews, overviewLocales] = latest
+    const [readme, overviews, overviewLocales, readmeShared] = latest
       ? await Promise.all([
           readMcpReadme(latest.id),
           readMcpOverviews({ versionIds: [latest.id], locale }),
           readMcpOverviewLocales([latest.id]),
+          db
+            .execute<{
+              shared: boolean;
+            }>(sql`select ${mcpReadmeSharedOf(latest.id)} as shared`)
+            .then((result) => result.rows[0]?.shared === true),
         ])
-      : [null, null, null];
+      : [null, null, null, false];
     const aiOverview = latest ? (overviews?.get(latest.id) ?? null) : null;
     return {
       item: {
@@ -618,6 +677,7 @@ export async function findMcp(
             generatedAt: aiOverview.generatedAt.toISOString(),
           }
         : null,
+      searchIndexable: !readmeShared,
     };
   }
   return null;

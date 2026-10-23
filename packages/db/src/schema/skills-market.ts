@@ -564,6 +564,11 @@ export const skillVersions = pgTable(
       .on(table.skillId)
       .where(sql`${table.isCurrent} = true`),
     index("skill_versions_skill_status_idx").on(table.skillId, table.status),
+    // Public skills with identical files share one canonical page
+    // (modules/skills/market/duplicates.ts).
+    index("skill_versions_current_content_hash_idx")
+      .on(table.contentHash)
+      .where(sql`${table.isCurrent} = true`),
   ],
 );
 

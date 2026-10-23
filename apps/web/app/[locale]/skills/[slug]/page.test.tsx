@@ -552,6 +552,54 @@ describe("generateMetadata", () => {
     expect(files.robots).toMatchObject({ index: false });
   });
 
+  it("points a skill with another public skill's files at that skill's pages", async () => {
+    const overview = (locale: string) => ({
+      summary: "s",
+      whatItDoes: "w",
+      whenToUse: "u",
+      requirements: "r",
+      locale,
+      generatedAt: "2026-09-20T00:00:00.000Z",
+    });
+    const duplicate = "pdf-forms-providers-claude-plugin-0123456789abcdef";
+    market.getPublicSkill.mockImplementation(async (slug, locale) =>
+      slug === duplicate
+        ? {
+            ...response({}, { slug: duplicate }),
+            canonicalSlug: "pdf-forms",
+            // The copy has no translation of its own; the primary has zh-CN.
+            aiOverview: overview("en"),
+          }
+        : {
+            ...response(),
+            aiOverview: overview(locale === "zh-CN" ? "zh-CN" : "en"),
+          },
+    );
+
+    const zhCN = await generateMetadata({
+      params: Promise.resolve({ locale: "zh-CN", slug: duplicate }),
+      searchParams: Promise.resolve({}),
+    });
+    expect(String(zhCN.alternates?.canonical)).toMatch(
+      /\/zh-CN\/skills\/pdf-forms$/,
+    );
+    expect(Object.values(zhCN.alternates?.languages ?? {}).map(String)).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/\/skills\/pdf-forms$/),
+        expect.stringMatching(/\/zh-CN\/skills\/pdf-forms$/),
+      ]),
+    );
+    expect(JSON.stringify(zhCN.alternates?.languages)).not.toContain(duplicate);
+    // Canonicalised, not noindexed: search engines merge it into the primary.
+    expect(zhCN.robots).toBeUndefined();
+
+    const en = await generateMetadata({
+      params: Promise.resolve({ locale: "en", slug: duplicate }),
+      searchParams: Promise.resolve({}),
+    });
+    expect(String(en.alternates?.canonical)).toMatch(/\/skills\/pdf-forms$/);
+  });
+
   it("links the skill's install guide for agents", async () => {
     const metadata = await generateMetadata({
       params: Promise.resolve({ locale: "zh-CN", slug: "pdf-forms" }),

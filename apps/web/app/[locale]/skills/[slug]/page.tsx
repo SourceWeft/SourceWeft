@@ -158,7 +158,9 @@ export async function generateMetadata({
   }
   const t = await getTranslations({ locale, namespace: "publicSkills.detail" });
   try {
-    const { skill, source } = await loadSkill(decodeURIComponent(slug));
+    const { skill, source, canonicalSlug } = await loadSkill(
+      decodeURIComponent(slug),
+    );
     const title = t("metaTitle", {
       name: source.repoSubpath
         ? `${skill.displayName} · ${source.repoSubpath}`
@@ -183,11 +185,13 @@ export async function generateMetadata({
             name: skill.displayName,
           }),
     );
-    const alternates = buildTranslatedAlternates(
-      skillPath(skill.slug),
-      locale,
-      translated,
-    );
+    // A skill with the same files as another public skill defers to that
+    // skill's page, in each language that page has (not in the sitemap).
+    const alternates = canonicalSlug
+      ? buildTranslatedAlternates(skillPath(canonicalSlug), locale, [
+          ...(await translatedOverviews(canonicalSlug)).keys(),
+        ])
+      : buildTranslatedAlternates(skillPath(skill.slug), locale, translated);
     const url = alternates.canonical;
     return {
       alternates: {

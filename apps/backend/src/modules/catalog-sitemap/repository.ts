@@ -15,8 +15,14 @@ import {
   type CatalogSitemapShard,
 } from "@sourceweft/market-contracts";
 import { latestPublishedVersionOf } from "../market/latest-version";
-import { publicMarketMcpCondition } from "../market/read-repository";
-import { publicMarketSkillCondition } from "../skills/market/read-repository";
+import {
+  mcpReadmeSharedOf,
+  publicMarketMcpCondition,
+} from "../market/read-repository";
+import {
+  primarySkillSlugOf,
+  publicMarketSkillCondition,
+} from "../skills/market/read-repository";
 import { readMcpOverviewLocales } from "../market/overview/repository";
 import { readSkillOverviewLocales } from "../skills/market/overview-repository";
 import { planSitemapShards } from "./planner";
@@ -30,6 +36,11 @@ import { planSitemapShards } from "./planner";
  * README or manifest change reaches it through the overview it regenerates;
  * columns every sync or README recheck restamps (`last_indexed_at`,
  * `readme_fetched_at`) are deliberately not part of it.
+ *
+ * `where` leaves out the pages that stay out of search, through the same
+ * predicates the detail API reports them with: a server whose README is one
+ * file many servers show (`noindex`), and a skill whose files another public
+ * skill's page carries (canonical to that page).
  */
 function source(kind: CatalogSitemapKind) {
   if (kind === "mcp")
@@ -38,7 +49,9 @@ function source(kind: CatalogSitemapKind) {
       shardFrom: sql`${mcpServers} left join lateral (
         select ${latestPublishedVersionOf(mcpServers.id)} as id
       ) shown on true`,
-      where: publicMarketMcpCondition(),
+      where: sql`${publicMarketMcpCondition()} and not ${mcpReadmeSharedOf(
+        latestPublishedVersionOf(mcpServers.id),
+      )}`,
       id: sql`${mcpServers.id}`,
       key: sql`${mcpServers.identifier}`,
       modified: sql`greatest(${mcpServers.updatedAt}, (
@@ -50,7 +63,9 @@ function source(kind: CatalogSitemapKind) {
   return {
     from,
     shardFrom: from,
-    where: publicMarketSkillCondition(),
+    where: sql`${publicMarketSkillCondition()} and ${primarySkillSlugOf(
+      skillVersions.contentHash,
+    )} = ${skillDefinitions.slug}`,
     id: sql`${skillDefinitions.id}`,
     key: sql`${skillDefinitions.slug}`,
     modified: sql`greatest(coalesce(${skillVersions.publishedAt}, ${skillDefinitions.listedAt}, ${skillDefinitions.createdAt}), (
