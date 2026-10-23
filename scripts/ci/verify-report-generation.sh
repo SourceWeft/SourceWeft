@@ -102,6 +102,46 @@ for name in ['long-table', 'long-table-revised']:
 print('Custom frozen presentation restored; all four revised formats pass, real PDF page fields and repeated table headers checked, original bytes unchanged.')
 PYPRESERVE
 
+# A long table can start anywhere on a page. Sweep its start toward the page
+# bottom: LibreOffice can strand the heading row there and repeat it blank on
+# every continuation page. Each generated PDF must keep actual headings on all
+# table pages and every row, whether or not the fresh-page retry was needed.
+python3 -B - "$report_root" "$report_long_fixture" <<'PYSWEEPSOURCES'
+import copy, json, sys
+from pathlib import Path
+root, fixture = Path(sys.argv[1]), Path(sys.argv[2])
+base = json.loads(fixture.read_text())
+filler = '本段为排版探针，用于把后续长表的起点推向页面底部；它不包含事实陈述，也不引用任何来源，只用于观察分页时表头与首行数据是否保持在同一页。'
+(root/'heading-sweep').mkdir()
+for count in range(15):
+    report = copy.deepcopy(base)
+    report['sections'].insert(0, {'id': 'probe', 'heading': '版面探针', 'blocks': [{'type': 'paragraph', 'kind': 'analysis', 'text': filler, 'citations': []} for _ in range(max(count, 1))]})
+    (root/'heading-sweep'/f'v{count:02d}.source.json').write_text(json.dumps(report, ensure_ascii=False, indent=2))
+PYSWEEPSOURCES
+for sweep_source in "$report_root"/heading-sweep/v*.source.json; do
+  python3 -B "$report_skill/scripts/generate_report.py" --source "$sweep_source" --output-dir "${sweep_source%.source.json}" --formats html,docx,pdf > /dev/null
+done
+python3 -B - "$report_root" "$report_skill" <<'PYSWEEPCHECK'
+import json, re, subprocess, sys, zipfile
+from pathlib import Path
+root, skill = Path(sys.argv[1]), Path(sys.argv[2])
+sys.path.insert(0, str(skill/'scripts'))
+from report_schema import read_report, table_header_gaps
+results = []
+for source in sorted((root/'heading-sweep').glob('v*.source.json')):
+    output = Path(str(source).removesuffix('.source.json'))
+    report = read_report(source)
+    pages = subprocess.run(['pdftotext', '-raw', str(output/'report.pdf'), '-'], capture_output=True, text=True, check=True, timeout=30).stdout.split('\f')
+    gaps = table_header_gaps(report, pages)
+    assert gaps == [], f'{source.name}: table headings missing on actual pages {gaps}'
+    expected = [row[0]['text'] for row in report['sections'][1]['blocks'][0]['rows']]
+    assert re.findall(r'ROW\d{3}', '\f'.join(pages)) == expected, f'{source.name}: rows changed, missing or reordered'
+    retried = b'pageBreakBefore' in zipfile.ZipFile(output/'report.docx').read('word/document.xml')
+    results.append({'variant': source.stem.removesuffix('.source'), 'pages': len([page for page in pages if page.strip()]), 'freshPageRetry': retried})
+(root/'heading-sweep'/'summary.json').write_text(json.dumps(results, indent=2) + '\n')
+print(f'Long-table start sweep: {len(results)} PDFs keep actual headings on every table page and all rows; fresh-page retries: {sum(r["freshPageRetry"] for r in results)}.')
+PYSWEEPCHECK
+
 # A clickable PDF TOC is a real export requirement. Preserve every visible run,
 # bookmark and footer but remove the actual internal hyperlink wrappers from a
 # copy of the generated DOCX; the same LibreOffice must produce a PDF whose

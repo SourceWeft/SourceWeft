@@ -449,6 +449,7 @@ export interface ModelRouteTarget {
   priority?: number;
   enabled?: boolean;
   providerRouting?: ProviderRoutingConfig;
+  imageGeneration?: ImageGenerationTargetConfig;
 }
 
 export interface ModelRouteConfig {
@@ -766,6 +767,29 @@ export type ImageAspectRatio =
   | "1:8"
   | "8:1";
 export type ImageQuality = "auto" | "low" | "standard" | "higher" | "highest";
+
+/** Which provider endpoint an image profile talks to. */
+export type ImageGenerationEndpoint = "openai" | "native";
+/** How the requested aspect ratio is expressed on the wire. */
+export type ImageGenerationSizing = "size" | "dimensions" | "aspect_ratio";
+
+/**
+ * Request conventions for one image profile target. Declared in the profile
+ * configuration (`imageGeneration.request`), so a provider whose native
+ * endpoint ignores the OpenAI `size` field can be routed there without the
+ * transport knowing any model name.
+ */
+export interface ImageGenerationRequestConfig {
+  endpoint: ImageGenerationEndpoint;
+  sizing: ImageGenerationSizing;
+}
+
+export const DEFAULT_IMAGE_GENERATION_REQUEST: Readonly<ImageGenerationRequestConfig> =
+  Object.freeze({ endpoint: "openai", sizing: "size" });
+
+export interface ImageGenerationTargetConfig {
+  request?: ImageGenerationRequestConfig;
+}
 export type ImageStyle = "auto" | "ghibli" | "pixar" | "cartoon" | "pixel";
 export type ImageResponseFormat = "url" | "b64_json";
 
@@ -946,6 +970,7 @@ export interface ResolvedModelRouteTarget {
   priority: number;
   enabled: boolean;
   providerRouting?: ProviderRoutingConfig;
+  imageGeneration?: ImageGenerationTargetConfig;
 }
 
 export interface ResolvedModelRouteConfig {
@@ -997,6 +1022,8 @@ export interface ResolvedRequestTarget {
   defaultHeaders: Record<string, string>;
   supports: readonly string[];
   providerRouting?: ProviderRoutingConfig;
+  /** Image profile conventions declared in configuration, never inferred from the model name. */
+  imageGeneration?: ImageGenerationTargetConfig;
   routeDecision: RouteDecision;
   requestMetadata: Record<string, unknown>;
   /** Provider-specific overrides; unset means use the gateway-wide value. */

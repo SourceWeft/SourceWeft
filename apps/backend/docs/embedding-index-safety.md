@@ -4,12 +4,23 @@ Changing an embedding model can make stored vectors incompatible even when the
 new model has the same output dimension. Configuration sync now refuses such
 changes while indexed vectors exist, before changing the active version.
 
-Protected identity includes the profile, actual target model, Provider kind,
-normalized endpoint, requested dimensions and Provider routing. Opaque header
-changes are compared in memory and cause a new definition revision; their values
-are never placed in the identity or hashed into it. API keys, prices, timeouts
-and retry counts are not vector identity. Provider activation and key removal or
-rotation continue to take effect independently.
+Protected identity is the profile, the canonical model name (the last `/`
+segment of the target model, ignoring case) and the requested dimensions. The
+same model served by two Providers is one vector space, so an embedding profile
+may list several same-model `targets` for failover: which Provider, endpoint,
+routing constraint or header produced a vector is not part of the identity, and
+adding, removing or reordering same-model targets keeps the recorded definition
+and its revision. Two different models behind one alias are refused when the
+configuration loads. API keys, prices, timeouts and retry counts are not vector
+identity. Provider activation and key removal or rotation continue to take
+effect independently.
+
+Definitions recorded by earlier releases (`version: 1`, pinned to one Provider
+and endpoint) are read as the current shape with the same revision, both on the
+profile row and in `documentMetadata.embeddingIdentity`; a sync neither assigns
+a new revision nor relabels documents for that upgrade, and vector retrieval
+compares the identity fields rather than the recorded JSON, so documents stamped
+with the earlier shape remain searchable.
 
 With indexed vectors, sync rejects incompatible definitions, removing or disabling
 an indexed profile, disabling its vectors, and switching the default profile.
@@ -21,8 +32,9 @@ vector deletion, model substitution or full-index rebuild in this change.
 
 Indexing and retrieval prepare their embedding profile and gateway configuration
 in the same short database transaction. The model call uses that configuration
-snapshot and the explicit profile alias. It verifies the actual Provider/model
-and dimensions returned by the gateway.
+snapshot and the explicit profile alias. It verifies that the model the gateway
+actually used is the alias's model (any of its same-model targets) and that the
+dimensions match.
 
 Before committing vectors or running vector-distance SQL, the database checks
 that the identity is still current. Config sync uses the existing exclusive

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, sql, type SQL } from "drizzle-orm";
 import {
   chunkEmbeddings,
   db,
@@ -7,7 +7,10 @@ import {
   modelGatewayRoutes,
   type ModelGatewayProviderKind,
 } from "@sourceweft/db";
-import type { ProviderRoutingConfig } from "@sourceweft/model-gateway";
+import {
+  canonicalProviderModel,
+  type ProviderRoutingConfig,
+} from "@sourceweft/model-gateway";
 import type {
   GlobalGatewayEntry,
   GlobalModelProfileEntry,
@@ -16,7 +19,6 @@ import { mapModelGatewayProfile } from "./profiles";
 import {
   loadRoutedGatewayConfig,
   normalizeRouteProviderRouting,
-  withOpenRouterAttributionHeaders,
 } from "./runtime";
 import type { RoutedGatewayConfig, RuntimeModelGatewayProfile } from "./types";
 
@@ -25,8 +27,30 @@ export type EmbeddingTransaction = Parameters<
   Parameters<typeof db.transaction>[0]
 >[0];
 
-/** No credentials or credential hashes. Revision also fences opaque header changes. */
+/**
+ * What makes stored vectors comparable: the profile, the model and the
+ * dimensions. Which Provider or endpoint produced a vector is deliberately not
+ * part of it — the same model served by two Providers is one vector space, and
+ * that is what lets an embedding alias fail over between Providers without a
+ * second index or a rebuild. No credentials or credential hashes.
+ */
 export type EmbeddingIndexIdentity = {
+  version: 2;
+  revision: string;
+  profileId: string;
+  profileAlias: string;
+  /** `canonicalProviderModel` of every target's model, e.g. `bge-m3`. */
+  canonicalModel: string;
+  requestedDimensions: number | null;
+};
+
+/**
+ * The definition recorded before same-model fallback existed: it pinned one
+ * Provider, endpoint and routing. Still read from profile rows and document
+ * metadata so an upgrade neither re-embeds nor fences existing vectors; never
+ * written again.
+ */
+export type LegacyEmbeddingIndexIdentity = {
   version: 1;
   revision: string;
   profileId: string;
@@ -38,6 +62,23 @@ export type EmbeddingIndexIdentity = {
   requestedDimensions: number | null;
   providerRouting: ProviderRoutingConfig | null;
 };
+
+/** Reads either recorded shape as the current one; the revision is kept. */
+export function upgradeEmbeddingIdentity(
+  stored: EmbeddingIndexIdentity | LegacyEmbeddingIndexIdentity,
+): EmbeddingIndexIdentity {
+  if (stored.version === 2) {
+    return stored;
+  }
+  return {
+    version: 2,
+    revision: stored.revision,
+    profileId: stored.profileId,
+    profileAlias: stored.profileAlias,
+    canonicalModel: canonicalProviderModel(stored.providerModel),
+    requestedDimensions: stored.requestedDimensions ?? null,
+  };
+}
 
 export class EmbeddingIdentityError extends Error {
   readonly code = "EMBEDDING_IDENTITY_CONFLICT";
@@ -69,6 +110,31 @@ function stableJson(value: unknown): string {
   return JSON.stringify(value) ?? "null";
 }
 
+/**
+ * SQL predicate: the identity recorded on a document (a jsonb expression, null
+ * when the document predates recording) names a different index than the
+ * current one. Compares the fields that define the identity rather than the
+ * whole JSON, so a document stamped with the legacy single-target shape under
+ * the same profile, revision, model and dimensions still reads as current.
+ */
+export function storedEmbeddingIdentityDiffers(
+  stored: SQL,
+  identity: EmbeddingIndexIdentity,
+): SQL {
+  return sql`(
+    ${stored} is not null and (
+      ${stored} ->> 'profileId' is distinct from ${identity.profileId}
+      or ${stored} ->> 'revision' is distinct from ${identity.revision}
+      or lower(btrim(regexp_replace(
+        coalesce(${stored} ->> 'canonicalModel', ${stored} ->> 'providerModel', ''),
+        '^.*/', ''
+      ))) is distinct from ${identity.canonicalModel}
+      or coalesce(${stored} -> 'requestedDimensions', 'null'::jsonb)
+        is distinct from ${JSON.stringify(identity.requestedDimensions)}::jsonb
+    )
+  )`;
+}
+
 export function embeddingIdentitiesEqual(
   left: EmbeddingIndexIdentity,
   right: EmbeddingIndexIdentity,
@@ -85,14 +151,31 @@ function sameDefinition(
   return stableJson(leftDefinition) === stableJson(rightDefinition);
 }
 
-function normalizeBaseUrl(baseUrl: string) {
-  const url = new URL(baseUrl);
-  if (url.username || url.password || url.hash || url.search) {
+/**
+ * The one model an embedding alias serves. Every target must resolve to the
+ * same canonical model; the global config parser enforces this for file
+ * profiles, and this check holds it for routes and dynamic profiles too.
+ */
+export function sharedCanonicalEmbeddingModel(
+  profileAlias: string,
+  models: readonly string[],
+): string {
+  const [first, ...rest] = models;
+  if (first === undefined) {
     throw new EmbeddingIdentityError(
-      "Embedding base URL must not contain credentials, query parameters, or a fragment",
+      `Embedding profile '${profileAlias}' requires at least one target`,
     );
   }
-  return url.href.replace(/\/+$/, "");
+  const canonicalModel = canonicalProviderModel(first);
+  const mixed = rest.find(
+    (model) => canonicalProviderModel(model) !== canonicalModel,
+  );
+  if (mixed !== undefined) {
+    throw new EmbeddingIdentityError(
+      `Embedding profile '${profileAlias}' mixes models '${first}' and '${mixed}'; every target behind one alias must serve the same model`,
+    );
+  }
+  return canonicalModel;
 }
 
 function storedDefinition(profile: RuntimeModelGatewayProfile) {
@@ -100,9 +183,11 @@ function storedDefinition(profile: RuntimeModelGatewayProfile) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
   }
-  const definition = value as EmbeddingIndexIdentity;
-  return definition.version === 1 && typeof definition.revision === "string"
-    ? definition
+  const definition = value as
+    EmbeddingIndexIdentity | LegacyEmbeddingIndexIdentity;
+  return (definition.version === 1 || definition.version === 2) &&
+    typeof definition.revision === "string"
+    ? upgradeEmbeddingIdentity(definition)
     : null;
 }
 
@@ -111,30 +196,25 @@ function definitionForRuntime(
   routedConfig: RoutedGatewayConfig,
   revision: string,
 ): EmbeddingIndexIdentity {
-  const targets = routedConfig.modelRoutes[profile.profileAlias]?.targets;
-  if (targets?.length !== 1 || !targets[0]) {
-    throw new EmbeddingIdentityError(
-      `Embedding profile '${profile.profileAlias}' requires exactly one configured target`,
-    );
-  }
-  const target = targets[0];
-  const provider = routedConfig.providers[target.provider];
-  if (!provider) {
-    throw new EmbeddingIdentityError(
-      `Embedding profile '${profile.profileAlias}' has no configured Provider`,
-    );
+  const targets = routedConfig.modelRoutes[profile.profileAlias]?.targets ?? [];
+  const canonicalModel = sharedCanonicalEmbeddingModel(
+    profile.profileAlias,
+    targets.map((target) => target.model),
+  );
+  for (const target of targets) {
+    if (!routedConfig.providers[target.provider]) {
+      throw new EmbeddingIdentityError(
+        `Embedding profile '${profile.profileAlias}' has no configured Provider '${target.provider}'`,
+      );
+    }
   }
   return {
-    version: 1,
+    version: 2,
     revision,
     profileId: profile.id,
     profileAlias: profile.profileAlias,
-    provider: target.provider,
-    providerKind: provider.kind,
-    baseUrl: normalizeBaseUrl(provider.baseUrl),
-    providerModel: target.model,
+    canonicalModel,
     requestedDimensions: profile.requestedDimensions,
-    providerRouting: target.providerRouting ?? null,
   };
 }
 
@@ -203,19 +283,28 @@ export async function assertEmbeddingIdentityCurrent(
   return current;
 }
 
+/**
+ * A result may come from any of the alias's targets — that is what failover
+ * is for — but it must be the alias's model.
+ */
 export function validateEmbeddingResult(
   identity: EmbeddingIndexIdentity,
-  result: { provider?: string; providerModel?: string },
+  result: { providerModel?: string },
   vectors: readonly (readonly number[])[],
 ) {
   if (
-    result.provider !== identity.provider ||
-    result.providerModel !== identity.providerModel
+    typeof result.providerModel !== "string" ||
+    canonicalProviderModel(result.providerModel) !== identity.canonicalModel
   ) {
-    throw new EmbeddingIdentityError(
-      "Embedding result used a different Provider or model",
-    );
+    throw new EmbeddingIdentityError("Embedding result used a different model");
   }
+  return validateEmbeddingDimensions(identity, vectors);
+}
+
+export function validateEmbeddingDimensions(
+  identity: EmbeddingIndexIdentity,
+  vectors: readonly (readonly number[])[],
+) {
   const dimensions = vectors[0]?.length;
   if (
     !dimensions ||
@@ -306,58 +395,50 @@ export async function prepareEmbeddingDefinitionsForSync(
         ? profile.id === entry.profileId
         : profile.profileAlias === entry.profileAlias,
     );
-    const [target] = entry.targets;
-    if (entry.targets.length !== 1 || !target) {
-      throw new EmbeddingIdentityError(
-        `Embedding profile '${entry.profileAlias}' requires exactly one target`,
-      );
-    }
-    const gateway = input.gateways.find(
-      (candidate) =>
-        candidate.slug === target.gatewaySlug &&
-        candidate.providerName === target.providerName,
+    const canonicalModel = sharedCanonicalEmbeddingModel(
+      entry.profileAlias,
+      entry.targets.map((target) => target.targetModel),
     );
-    if (!gateway) {
-      throw new EmbeddingIdentityError(
-        `Embedding profile '${entry.profileAlias}' has no configured Provider`,
+    for (const target of entry.targets) {
+      const gateway = input.gateways.find(
+        (candidate) =>
+          candidate.slug === target.gatewaySlug &&
+          candidate.providerName === target.providerName,
       );
+      if (!gateway) {
+        throw new EmbeddingIdentityError(
+          `Embedding profile '${entry.profileAlias}' has no configured Provider for target '${target.gatewaySlug}/${target.targetModel}'`,
+        );
+      }
     }
     const previous = existing ? storedDefinition(existing) : null;
     const revision = previous?.revision ?? randomUUID();
     const identity: EmbeddingIndexIdentity = {
-      version: 1,
+      version: 2,
       revision,
       profileId: existing?.id ?? entry.profileId ?? randomUUID(),
       profileAlias: entry.profileAlias,
-      provider: target.providerName,
-      providerKind: gateway.providerKind,
-      baseUrl: normalizeBaseUrl(gateway.baseUrl),
-      providerModel: target.targetModel,
+      canonicalModel,
       requestedDimensions: entry.requestedDimensions ?? null,
-      providerRouting: target.providerRouting ?? entry.providerRouting ?? null,
     };
+    // Adding, removing or reordering same-model targets, moving a Provider to
+    // another endpoint, or changing its headers keeps the definition: none of
+    // those changes the vector space. Only the model or the dimensions do.
     let unchanged = false;
-    if (
-      existing &&
-      routedConfig?.modelRoutes[existing.profileAlias]?.targets.length === 1
-    ) {
-      const oldDefinition = definitionForRuntime(
-        existing,
-        routedConfig,
-        revision,
-      );
-      const oldHeaders =
-        routedConfig.providers[oldDefinition.provider]?.defaultHeaders;
-      const newHeaders = withOpenRouterAttributionHeaders({
-        providerKind: gateway.providerKind,
-        defaultHeaders: gateway.defaultHeaders,
-      });
+    if (existing) {
+      // The recorded definition is the baseline. A profile synced before
+      // definitions were recorded has only its routes, so derive it from them.
+      const fromRoutes =
+        routedConfig && routedConfig.modelRoutes[existing.profileAlias]
+          ? definitionForRuntime(existing, routedConfig, revision)
+          : null;
+      const baseline = previous ?? fromRoutes;
       unchanged =
-        sameDefinition(oldDefinition, identity) &&
-        stableJson(oldHeaders) === stableJson(newHeaders) &&
+        baseline !== null &&
+        sameDefinition(baseline, identity) &&
+        (!previous || !fromRoutes || sameDefinition(previous, fromRoutes)) &&
         (existing.vectorStrategy === "disabled") ===
-          (entry.vectorStrategy === "disabled") &&
-        (!previous || embeddingIdentitiesEqual(previous, oldDefinition));
+          (entry.vectorStrategy === "disabled");
     }
     if (!unchanged) {
       identity.revision = randomUUID();

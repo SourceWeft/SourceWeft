@@ -362,6 +362,31 @@ def cell_parts(cell, report):
     return citation_parts(cell_body(cell, report), cell['citations'], report)
 
 
+def table_header_gaps(report, pages):
+    """Actual PDF pages that show a table's rows without its column headings first.
+
+    `pages` holds per-page `pdftotext -raw` text. Rows never split (cantSplit), so
+    a row's whitespace-free text locates its page. LibreOffice can strand the
+    heading row at a page bottom and then repeat it blank or not at all, which
+    the DOCX repeat flag and whole-document text checks cannot reveal.
+    """
+    def squash(value):
+        return re.sub(r'\s+', '', value)
+    flat = [squash(page) for page in pages]
+    gaps = []
+    for section_index, section in enumerate(report['sections']):
+        for block_index, block in enumerate(section['blocks']):
+            if block['type'] != 'table':
+                continue
+            heading = squash(''.join(block['columns']))
+            rows = [squash(''.join(body + (note or '') for body, note in (cell_parts(cell, report) for cell in row))) for row in block['rows']]
+            for number, page in enumerate(flat, 1):
+                first = min((page.find(row) for row in rows if row in page), default=-1)
+                if first >= 0 and page.rfind(heading, 0, first) < 0:
+                    gaps.append({'page': number, 'table': (section_index, block_index), 'section': section['heading']})
+    return gaps
+
+
 def public_texts(report):
     """Expected public reading order, shared by format renderers and verification."""
     def visible(parts):

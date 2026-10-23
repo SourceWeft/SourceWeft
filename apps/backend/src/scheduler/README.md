@@ -53,6 +53,31 @@ the previous version's README and is read again at once. Refresh intervals,
 backoff and the attempt cap are constants in
 `modules/market/readme/readme-state.ts`; there is no env variable.
 
+## MCP stdio package validation
+
+Every 15 minutes (`MCP_STDIO_SCHEDULE_INTERVAL_MS`), while the deployment has
+a sandbox runtime (`SOURCEWEFT_SANDBOX_ENABLED=true`), the scheduler queues one
+`mcp-stdio-validate` batch of up to 6 MCP server versions whose registry entry
+lists `packages[]`: the latest published version of each published, public
+server, never-tried ones first, then the newest. It only queues. The worker
+(`worker/processors/mcp-stdio-validate.ts`) starts each package once in a
+fresh provider sandbox — no credentials, the registry's required inputs filled
+with placeholders, two at a time — performs the MCP handshake over stdio and
+stores the server's self-description and tools on the version, or why it could
+not be validated (`install`, `start`, `protocol`, `timeout`,
+`unsupported-package`). The sandbox is deleted afterwards; each sandbox is
+also recorded in a Redis ledger until deleted, and every batch first deletes
+the sandboxes a dead worker left there. While a batch is queued or running,
+no second one is queued. A version is due again 30 days after its last
+outcome; a claimed version is held for 30 minutes so a worker that died
+mid-batch only delays it. A sandbox that could not be used at all is tried
+three times, then the version is set aside until its refresh with no public
+record: a sandbox outage is not the package's failure. Batch size, concurrency, timeouts and the
+refresh interval are constants in `modules/market/validation/`; there is no env
+variable. Six per batch, two at a time, paces the first pass over the
+catalog's ~1,500 packages across about three days on purpose: each one is
+third-party code in a paid sandbox.
+
 ## MCP AI overviews
 
 Every `MCP_OVERVIEW_INTERVAL_MS` (5 minutes by default), while the system

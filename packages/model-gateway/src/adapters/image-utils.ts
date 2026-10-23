@@ -1,14 +1,18 @@
 import { createHttpGatewayError, ModelGatewayError } from "../errors";
 import { normalizeModelCallObservation } from "../observation/normalize";
-import type {
-  GeneratedImage,
-  ImageAspectRatio,
-  ImageGenerateInput,
-  ImageGenerateResult,
-  ImageQuality,
-  ImageStyle,
-  ResolvedRequestTarget,
-  UsageInfo,
+import {
+  DEFAULT_IMAGE_GENERATION_REQUEST,
+  type GeneratedImage,
+  type ImageAspectRatio,
+  type ImageGenerateInput,
+  type ImageGenerateResult,
+  type ImageGenerationEndpoint,
+  type ImageGenerationRequestConfig,
+  type ImageGenerationSizing,
+  type ImageQuality,
+  type ImageStyle,
+  type ResolvedRequestTarget,
+  type UsageInfo,
 } from "../types";
 
 const STYLE_PROMPTS: Record<Exclude<ImageStyle, "auto">, string> = {
@@ -57,6 +61,120 @@ export function mapAspectRatioToOpenAIImageSize(
     default:
       return "1024x1024";
   }
+}
+
+export function isImageGenerationEndpoint(
+  value: unknown,
+): value is ImageGenerationEndpoint {
+  return value === "openai" || value === "native";
+}
+
+export function isImageGenerationSizing(
+  value: unknown,
+): value is ImageGenerationSizing {
+  return value === "size" || value === "dimensions" || value === "aspect_ratio";
+}
+
+/**
+ * The request conventions a target was configured with. Anything missing
+ * falls back to the OpenAI `images/generations` + `size` path, so a profile
+ * without the block keeps today's wire format.
+ */
+export function resolveImageGenerationRequestConfig(
+  target: Pick<ResolvedRequestTarget, "imageGeneration">,
+): ImageGenerationRequestConfig {
+  const request = target.imageGeneration?.request;
+  return {
+    endpoint: isImageGenerationEndpoint(request?.endpoint)
+      ? request.endpoint
+      : DEFAULT_IMAGE_GENERATION_REQUEST.endpoint,
+    sizing: isImageGenerationSizing(request?.sizing)
+      ? request.sizing
+      : DEFAULT_IMAGE_GENERATION_REQUEST.sizing,
+  };
+}
+
+export function mapAspectRatioToImageDimensions(
+  aspectRatio: ImageAspectRatio | undefined,
+): { width: number; height: number } {
+  const [width, height] = mapAspectRatioToOpenAIImageSize(aspectRatio)
+    .split("x")
+    .map((value) => Number.parseInt(value, 10));
+  return { width: width!, height: height! };
+}
+
+/**
+ * Pixel envelope accepted by provider-native inference endpoints that take
+ * explicit `width`/`height` (DeepInfra's schemas: 256–1440, multiples of 16).
+ * Both edges are scaled together before rounding so the ratio survives.
+ */
+export const NATIVE_IMAGE_DIMENSION_MIN = 256;
+export const NATIVE_IMAGE_DIMENSION_MAX = 1440;
+export const NATIVE_IMAGE_DIMENSION_STEP = 16;
+
+function snapDimension(value: number) {
+  const snapped =
+    Math.round(value / NATIVE_IMAGE_DIMENSION_STEP) * NATIVE_IMAGE_DIMENSION_STEP;
+  return Math.min(
+    NATIVE_IMAGE_DIMENSION_MAX,
+    Math.max(NATIVE_IMAGE_DIMENSION_MIN, snapped),
+  );
+}
+
+export function fitImageDimensionsToNativeEnvelope(input: {
+  width: number;
+  height: number;
+}): { width: number; height: number } {
+  const longest = Math.max(input.width, input.height);
+  // Never scale up: an edge below the minimum is raised by the clamp alone.
+  const scale = Math.min(1, NATIVE_IMAGE_DIMENSION_MAX / longest);
+  return {
+    width: snapDimension(input.width * scale),
+    height: snapDimension(input.height * scale),
+  };
+}
+
+/**
+ * Aspect ratios provider-native endpoints accept by name. Everything else is
+ * sent as `custom` with explicit dimensions. This list mirrors the enum shared
+ * by DeepInfra's native image schemas, not any one model.
+ */
+export const NATIVE_IMAGE_ASPECT_RATIOS: readonly ImageAspectRatio[] = [
+  "1:1",
+  "16:9",
+  "9:16",
+  "4:3",
+  "3:4",
+  "3:2",
+  "2:3",
+];
+
+/**
+ * The size-related fields for one request, by configured sizing convention.
+ * `auto` (or no ratio) sends nothing so the provider applies its own default
+ * instead of a 1:1 square the caller never asked for; the OpenAI `size` path
+ * keeps sending the square because that is what it always sent.
+ */
+export function buildImageSizingFields(
+  sizing: ImageGenerationSizing,
+  aspectRatio: ImageAspectRatio | undefined,
+): Record<string, unknown> {
+  if (sizing === "size") {
+    return { size: mapAspectRatioToOpenAIImageSize(aspectRatio) };
+  }
+  if (!aspectRatio || aspectRatio === "auto") {
+    return {};
+  }
+  const dimensions = fitImageDimensionsToNativeEnvelope(
+    mapAspectRatioToImageDimensions(aspectRatio),
+  );
+  if (sizing === "dimensions") {
+    return dimensions;
+  }
+  if (NATIVE_IMAGE_ASPECT_RATIOS.includes(aspectRatio)) {
+    return { aspect_ratio: aspectRatio };
+  }
+  return { aspect_ratio: "custom", ...dimensions };
 }
 
 export function mapQualityToOpenAIQuality(quality: ImageQuality | undefined) {
@@ -148,6 +266,134 @@ function normalizeDimension(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) && value > 0
     ? value
     : undefined;
+}
+
+function readUint32BE(bytes: Uint8Array, offset: number) {
+  return (
+    ((bytes[offset]! << 24) >>> 0) +
+    (bytes[offset + 1]! << 16) +
+    (bytes[offset + 2]! << 8) +
+    bytes[offset + 3]!
+  );
+}
+
+function readUint16BE(bytes: Uint8Array, offset: number) {
+  return (bytes[offset]! << 8) + bytes[offset + 1]!;
+}
+
+function readUint16LE(bytes: Uint8Array, offset: number) {
+  return bytes[offset]! + (bytes[offset + 1]! << 8);
+}
+
+function readUint24LE(bytes: Uint8Array, offset: number) {
+  return (
+    bytes[offset]! + (bytes[offset + 1]! << 8) + (bytes[offset + 2]! << 16)
+  );
+}
+
+function asciiAt(bytes: Uint8Array, offset: number, length: number) {
+  return String.fromCharCode(...bytes.subarray(offset, offset + length));
+}
+
+/**
+ * Pixel dimensions from the container header of a PNG, JPEG, WebP or GIF.
+ * Providers that return a bare data URL say nothing about the size, and the
+ * caller records width/height on the stored artifact.
+ */
+export function readImageDimensions(
+  bytes: Uint8Array,
+): { width: number; height: number } | undefined {
+  if (
+    bytes.length >= 24 &&
+    bytes[0] === 0x89 &&
+    asciiAt(bytes, 1, 3) === "PNG" &&
+    asciiAt(bytes, 12, 4) === "IHDR"
+  ) {
+    return { width: readUint32BE(bytes, 16), height: readUint32BE(bytes, 20) };
+  }
+  if (bytes.length >= 10 && asciiAt(bytes, 0, 6).startsWith("GIF8")) {
+    return { width: readUint16LE(bytes, 6), height: readUint16LE(bytes, 8) };
+  }
+  if (
+    bytes.length >= 30 &&
+    asciiAt(bytes, 0, 4) === "RIFF" &&
+    asciiAt(bytes, 8, 4) === "WEBP"
+  ) {
+    const chunk = asciiAt(bytes, 12, 4);
+    if (chunk === "VP8X") {
+      return {
+        width: readUint24LE(bytes, 24) + 1,
+        height: readUint24LE(bytes, 27) + 1,
+      };
+    }
+    if (chunk === "VP8L") {
+      const bits = readUint24LE(bytes, 21) + bytes[24]! * 0x1000000;
+      return {
+        width: (bits & 0x3fff) + 1,
+        height: (Math.floor(bits / 0x4000) & 0x3fff) + 1,
+      };
+    }
+    if (chunk === "VP8 ") {
+      return {
+        width: readUint16LE(bytes, 26) & 0x3fff,
+        height: readUint16LE(bytes, 28) & 0x3fff,
+      };
+    }
+    return undefined;
+  }
+  if (bytes.length >= 4 && bytes[0] === 0xff && bytes[1] === 0xd8) {
+    let offset = 2;
+    while (offset + 9 < bytes.length) {
+      if (bytes[offset] !== 0xff) {
+        offset += 1;
+        continue;
+      }
+      const marker = bytes[offset + 1]!;
+      if (marker === 0xff) {
+        offset += 1;
+        continue;
+      }
+      // Start-of-frame markers carry the frame size; skip other segments.
+      const isStartOfFrame =
+        marker >= 0xc0 &&
+        marker <= 0xcf &&
+        marker !== 0xc4 &&
+        marker !== 0xc8 &&
+        marker !== 0xcc;
+      if (isStartOfFrame) {
+        return {
+          height: readUint16BE(bytes, offset + 5),
+          width: readUint16BE(bytes, offset + 7),
+        };
+      }
+      if (marker === 0xd9 || marker === 0xda) {
+        return undefined;
+      }
+      offset += 2 + readUint16BE(bytes, offset + 2);
+    }
+  }
+  return undefined;
+}
+
+function imageFromString(value: string): GeneratedImage | null {
+  const dataUrlMatch = value.match(/^data:([^;,]+);base64,(.+)$/s);
+  if (dataUrlMatch) {
+    const b64Json = dataUrlMatch[2]!.replace(/\s+/g, "");
+    let dimensions: { width: number; height: number } | undefined;
+    try {
+      dimensions = readImageDimensions(Buffer.from(b64Json, "base64"));
+    } catch {
+      dimensions = undefined;
+    }
+    return compactImage({
+      b64Json,
+      mimeType: dataUrlMatch[1],
+      width: dimensions?.width,
+      height: dimensions?.height,
+    });
+  }
+  const url = normalizeUrl(value);
+  return url ? compactImage({ url }) : null;
 }
 
 function imageFromRecord(
@@ -277,9 +523,36 @@ export function normalizeGeneratedImages(raw: Record<string, unknown>) {
     .map((candidate) =>
       candidate && typeof candidate === "object"
         ? imageFromRecord(candidate as Record<string, unknown>)
-        : null,
+        : typeof candidate === "string"
+          ? imageFromString(candidate)
+          : null,
     )
     .filter((image): image is GeneratedImage => image !== null);
+}
+
+/**
+ * Provider-reported cost from a native inference reply
+ * (`inference_status.cost`). Returned as the inline-cost patch the result
+ * builder applies when the provider adapter did not already surface it.
+ */
+export function readInferenceStatusCost(
+  raw: Record<string, unknown>,
+  provider: string,
+): { usd: number; provenance: string } | undefined {
+  const status =
+    raw.inference_status &&
+    typeof raw.inference_status === "object" &&
+    !Array.isArray(raw.inference_status)
+      ? (raw.inference_status as Record<string, unknown>)
+      : undefined;
+  const cost = status?.cost;
+  if (typeof cost !== "number" || !Number.isFinite(cost) || cost < 0) {
+    return undefined;
+  }
+  return {
+    usd: cost,
+    provenance: `provider:${provider.trim().toLowerCase()}.inference_status.cost`,
+  };
 }
 
 export function assertGeneratedImages(images: GeneratedImage[]) {
@@ -302,6 +575,8 @@ export function buildImageGenerateResult(input: {
   /** Resolved provider request size (`WxH`) + quality, for per-image pricing. */
   imageSize?: string;
   imageQuality?: string;
+  /** Actual provider charge read by the transport; used when no adapter set one. */
+  providerCost?: { usd: number; provenance: string };
   traceId?: string;
 }): ImageGenerateResult {
   const observation = normalizeModelCallObservation({
@@ -312,6 +587,19 @@ export function buildImageGenerateResult(input: {
       rawResponse: input.raw,
     },
   });
+  if (input.providerCost && observation.cost?.effectiveUsd === undefined) {
+    observation.cost = {
+      currency: "USD",
+      inlineUsd: input.providerCost.usd,
+      effectiveUsd: input.providerCost.usd,
+      source: "provider_inline",
+      status: "inline",
+    };
+    observation.provenance = {
+      ...observation.provenance,
+      inlineCost: input.providerCost.provenance,
+    };
+  }
   const usage = input.usage ?? observation.usage;
   const imageUsage =
     usage || input.images.length > 0
