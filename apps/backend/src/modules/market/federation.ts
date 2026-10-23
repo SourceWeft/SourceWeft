@@ -398,42 +398,67 @@ export function mapRegistryServerToManifest(
   return parsed.success ? parsed.data : null;
 }
 
-async function fetchRegistryPage(
+// A registry page request that hangs would stall the whole walk: bound it.
+const REGISTRY_PAGE_TIMEOUT_MS = 30_000;
+// The full registry is thousands of servers across some two hundred pages; a
+// single transient network blip late in the walk shouldn't throw away all the
+// pages we already ingested, and three quick retries half a second apart did
+// not outlast one in production (2026-10-23). Retry a page with exponential
+// backoff — 1 s, 2 s, 4 s, 8 s, 16 s — before giving up on it.
+const REGISTRY_PAGE_ATTEMPTS = 6;
+const REGISTRY_PAGE_RETRY_MAX_DELAY_MS = 30_000;
+
+/** How a failed registry page request is retried. */
+export type RegistryPageRetry = {
+  attempts: number;
+  /** Milliseconds to wait before attempt number `attempt` (2, 3, …). */
+  delayMs: (attempt: number) => number;
+};
+
+export const DEFAULT_REGISTRY_PAGE_RETRY: RegistryPageRetry = {
+  attempts: REGISTRY_PAGE_ATTEMPTS,
+  delayMs: (attempt) =>
+    Math.min(1000 * 2 ** (attempt - 2), REGISTRY_PAGE_RETRY_MAX_DELAY_MS),
+};
+
+function registryPageUrl(
   baseUrl: string,
   cursor: string | undefined,
   limit: number,
-): Promise<RegistryPage> {
+) {
   const url = new URL("/v0/servers", baseUrl);
   url.searchParams.set("limit", String(limit));
   if (cursor) {
     url.searchParams.set("cursor", cursor);
   }
+  return url;
+}
+
+async function fetchRegistryPage(url: URL): Promise<RegistryPage> {
   const response = await fetch(url.toString(), {
     headers: { accept: "application/json" },
+    signal: AbortSignal.timeout(REGISTRY_PAGE_TIMEOUT_MS),
   });
   if (!response.ok) {
-    throw new Error(`Registry ${baseUrl} responded ${response.status}`);
+    throw new Error(`Registry ${url.origin} responded ${response.status}`);
   }
   return (await response.json()) as RegistryPage;
 }
 
-// The full registry is thousands of servers across dozens of pages; a single
-// transient network blip late in the walk shouldn't throw away all the pages we
-// already ingested. Retry a page a few times before giving up on it.
 async function fetchRegistryPageWithRetry(
-  baseUrl: string,
-  cursor: string | undefined,
-  limit: number,
-  attempts = 3,
+  url: URL,
+  retry: RegistryPageRetry = DEFAULT_REGISTRY_PAGE_RETRY,
 ): Promise<RegistryPage> {
   let lastError: unknown;
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+  for (let attempt = 1; attempt <= retry.attempts; attempt += 1) {
     try {
-      return await fetchRegistryPage(baseUrl, cursor, limit);
+      return await fetchRegistryPage(url);
     } catch (error) {
       lastError = error;
-      if (attempt < attempts) {
-        await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
+      if (attempt < retry.attempts) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, retry.delayMs(attempt + 1)),
+        );
       }
     }
   }
@@ -773,9 +798,137 @@ async function registryToolListings(
   return { listings, listed: pending.length - failed, failed };
 }
 
+type IngestCounters = {
+  ingested: number;
+  skipped: number;
+  authProbed: number;
+  authProbeFailed: number;
+  toolsListed: number;
+  toolsListFailed: number;
+};
+
+/**
+ * Probe, list, map and upsert one page of registry entries — at most `limit` of
+ * them; the non-latest versions among them count as skipped, as does an entry
+ * that cannot be mapped or whose upsert fails.
+ */
+async function ingestRegistryEntries(
+  entries: RegistryEntry[],
+  input: { source: string; verified: boolean },
+  limit: number,
+): Promise<IngestCounters> {
+  const counters: IngestCounters = {
+    ingested: 0,
+    skipped: 0,
+    authProbed: 0,
+    authProbeFailed: 0,
+    toolsListed: 0,
+    toolsListFailed: 0,
+  };
+  const now = new Date();
+  const targets = endpointTargets(
+    entries.filter(isLatestEntry).slice(0, limit),
+  );
+  const stored = await findStoredEndpointProbes(
+    targets.map((target) => target.versionId),
+  );
+  const authProbes = await registryAuthProbes(targets, stored, now);
+  counters.authProbed = authProbes.probed;
+  counters.authProbeFailed = authProbes.failed;
+  const toolListings = await registryToolListings(
+    targets,
+    authProbes.probes,
+    stored,
+    now,
+  );
+  counters.toolsListed = toolListings.listed;
+  counters.toolsListFailed = toolListings.failed;
+  for (const entry of entries) {
+    if (counters.ingested >= limit) {
+      break;
+    }
+    if (!isLatestEntry(entry)) {
+      counters.skipped += 1;
+      continue;
+    }
+    const authProbe = authProbes.probes.get(entry);
+    const toolsListing = toolListings.listings.get(entry);
+    const manifest = mapRegistryServerToManifest(entry, {
+      verified: input.verified,
+      authProbe: authProbe?.result,
+      tools: toolsListing?.tools,
+    });
+    if (!manifest) {
+      counters.skipped += 1;
+      continue;
+    }
+    try {
+      await upsertMarketMcp({
+        manifest,
+        status: "published",
+        visibility: "public",
+        origin: "upstream",
+        source: input.source,
+        owner: manifest.providerName ?? null,
+        provenanceJson: {
+          source: input.source,
+          meta: entry._meta ?? {},
+          repository: registryRepositoryProvenance(entry),
+          // Packages and remotes, names and flags only: what the AI
+          // overview says the server needs to run.
+          registryServer: registryServerProvenance(entry.server ?? entry),
+          // The endpoint's answer to an unauthenticated initialize and when
+          // it was given, kept so syncs within 30 days reuse it instead of
+          // probing the version again.
+          authProbe:
+            authProbe && manifest.endpointUrl
+              ? authProbeRecord(
+                  manifest.endpointUrl,
+                  authProbe.result,
+                  authProbe.probedAt,
+                )
+              : undefined,
+          // When the endpoint last listed the manifest's tools to an
+          // anonymous client, kept so syncs within 30 days reuse them.
+          toolsListing:
+            toolsListing && manifest.endpointUrl
+              ? toolsListingRecord(
+                  manifest.endpointUrl,
+                  manifest.tools.length,
+                  toolsListing.listedAt,
+                )
+              : undefined,
+        },
+      });
+      counters.ingested += 1;
+    } catch (error) {
+      counters.skipped += 1;
+      logger.warn("Registry federation upsert failed", {
+        identifier: manifest.identifier,
+        source: input.source,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return counters;
+}
+
+export type RegistryIngestResult = IngestCounters & {
+  source: string;
+  /** The walk stopped before the registry's last page. */
+  partial: boolean;
+  error?: string;
+  /**
+   * Where a partial walk stopped: the cursor of the page that could not be
+   * read, to resume from (`cursor`); undefined when it was the first page.
+   */
+  nextCursor?: string;
+};
+
 /**
  * Pull every server from an upstream registry and upsert it into the catalog as
- * origin=upstream. Returns counts for observability. `maxServers` bounds a run.
+ * origin=upstream. Returns counts for observability. `maxServers` bounds a run;
+ * `cursor` resumes a partial one from where it stopped.
  */
 export async function ingestFromRegistry(input: {
   source: string;
@@ -783,10 +936,13 @@ export async function ingestFromRegistry(input: {
   verified: boolean;
   maxServers?: number;
   pageSize?: number;
-}) {
+  cursor?: string;
+  retry?: RegistryPageRetry;
+}): Promise<RegistryIngestResult> {
   const pageSize = Math.min(input.pageSize ?? 100, 100);
   const maxServers = input.maxServers ?? Number.POSITIVE_INFINITY;
-  let cursor: string | undefined;
+  let cursor = input.cursor;
+  let nextCursor: string | undefined;
   let ingested = 0;
   let skipped = 0;
   let authProbed = 0;
@@ -799,12 +955,17 @@ export async function ingestFromRegistry(input: {
   while (ingested < maxServers) {
     let page: RegistryPage;
     try {
-      page = await fetchRegistryPageWithRetry(input.baseUrl, cursor, pageSize);
+      page = await fetchRegistryPageWithRetry(
+        registryPageUrl(input.baseUrl, cursor, pageSize),
+        input.retry,
+      );
     } catch (pageError) {
       // A page fetch failed even after retries. The rows upserted on earlier
       // pages are already committed, so record what we have and stop rather than
-      // throwing away the whole run — the next scheduled sync resumes the walk.
+      // throwing away the whole run — the caller resumes the walk from this
+      // cursor (`runMarketFederation`), or the next scheduled sync does.
       partial = true;
+      nextCursor = cursor;
       error =
         pageError instanceof Error ? pageError.message : String(pageError);
       logger.warn(
@@ -822,91 +983,17 @@ export async function ingestFromRegistry(input: {
     if (entries.length === 0) {
       break;
     }
-    const now = new Date();
-    const targets = endpointTargets(
-      entries.filter(isLatestEntry).slice(0, maxServers - ingested),
+    const counters = await ingestRegistryEntries(
+      entries,
+      input,
+      maxServers - ingested,
     );
-    const stored = await findStoredEndpointProbes(
-      targets.map((target) => target.versionId),
-    );
-    const authProbes = await registryAuthProbes(targets, stored, now);
-    authProbed += authProbes.probed;
-    authProbeFailed += authProbes.failed;
-    const toolListings = await registryToolListings(
-      targets,
-      authProbes.probes,
-      stored,
-      now,
-    );
-    toolsListed += toolListings.listed;
-    toolsListFailed += toolListings.failed;
-    for (const entry of entries) {
-      if (ingested >= maxServers) {
-        break;
-      }
-      if (!isLatestEntry(entry)) {
-        skipped += 1;
-        continue;
-      }
-      const authProbe = authProbes.probes.get(entry);
-      const toolsListing = toolListings.listings.get(entry);
-      const manifest = mapRegistryServerToManifest(entry, {
-        verified: input.verified,
-        authProbe: authProbe?.result,
-        tools: toolsListing?.tools,
-      });
-      if (!manifest) {
-        skipped += 1;
-        continue;
-      }
-      try {
-        await upsertMarketMcp({
-          manifest,
-          status: "published",
-          visibility: "public",
-          origin: "upstream",
-          source: input.source,
-          owner: manifest.providerName ?? null,
-          provenanceJson: {
-            source: input.source,
-            meta: entry._meta ?? {},
-            repository: registryRepositoryProvenance(entry),
-            // Packages and remotes, names and flags only: what the AI
-            // overview says the server needs to run.
-            registryServer: registryServerProvenance(entry.server ?? entry),
-            // The endpoint's answer to an unauthenticated initialize and when
-            // it was given, kept so syncs within 30 days reuse it instead of
-            // probing the version again.
-            authProbe:
-              authProbe && manifest.endpointUrl
-                ? authProbeRecord(
-                    manifest.endpointUrl,
-                    authProbe.result,
-                    authProbe.probedAt,
-                  )
-                : undefined,
-            // When the endpoint last listed the manifest's tools to an
-            // anonymous client, kept so syncs within 30 days reuse them.
-            toolsListing:
-              toolsListing && manifest.endpointUrl
-                ? toolsListingRecord(
-                    manifest.endpointUrl,
-                    manifest.tools.length,
-                    toolsListing.listedAt,
-                  )
-                : undefined,
-          },
-        });
-        ingested += 1;
-      } catch (error) {
-        skipped += 1;
-        logger.warn("Registry federation upsert failed", {
-          identifier: manifest.identifier,
-          source: input.source,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
+    ingested += counters.ingested;
+    skipped += counters.skipped;
+    authProbed += counters.authProbed;
+    authProbeFailed += counters.authProbeFailed;
+    toolsListed += counters.toolsListed;
+    toolsListFailed += counters.toolsListFailed;
     cursor = page.metadata?.nextCursor ?? undefined;
     if (!cursor) {
       break;
@@ -915,6 +1002,7 @@ export async function ingestFromRegistry(input: {
 
   logger.info("Registry federation run complete", {
     source: input.source,
+    resumed: input.cursor !== undefined,
     ingested,
     skipped,
     authProbed,
@@ -933,24 +1021,134 @@ export async function ingestFromRegistry(input: {
     toolsListFailed,
     partial,
     error,
+    nextCursor,
   };
+}
+
+/**
+ * Federate one registry entry now, outside the scheduled walk: the latest
+ * version of `identifier`, read through the registry's search, then probed,
+ * mapped and upserted exactly as the walk would. For operators
+ * (`dist/market-federate-entry.js`), when a correction must not wait for the
+ * walk to reach the entry.
+ */
+export async function federateRegistryEntry(input: {
+  identifier: string;
+  source?: RegistrySource;
+  retry?: RegistryPageRetry;
+}): Promise<IngestCounters & { identifier: string; found: boolean }> {
+  const source = input.source ?? DEFAULT_REGISTRY_SOURCES[0]!;
+  const identifier = input.identifier.trim();
+  const url = new URL("/v0/servers", source.baseUrl);
+  url.searchParams.set("search", identifier);
+  url.searchParams.set("version", "latest");
+  const page = await fetchRegistryPageWithRetry(url, input.retry);
+  // The search is a text match: keep the entry with exactly this name.
+  const entries = (page.servers ?? []).filter(
+    (entry) =>
+      (entry.server ?? entry).name?.trim() === identifier &&
+      isLatestEntry(entry),
+  );
+  if (entries.length === 0) {
+    return {
+      identifier,
+      found: false,
+      ingested: 0,
+      skipped: 0,
+      authProbed: 0,
+      authProbeFailed: 0,
+      toolsListed: 0,
+      toolsListFailed: 0,
+    };
+  }
+  const counters = await ingestRegistryEntries(entries.slice(0, 1), source, 1);
+  return { identifier, found: true, ...counters };
+}
+
+// A partial walk resumes from its last cursor after a pause instead of waiting
+// for the next interval and starting over: the registry is some two hundred
+// pages, and one failed page used to cost the rest of the walk (six hours).
+export const FEDERATION_RESUME_DELAY_MS = 60_000;
+export const FEDERATION_MAX_RESUMES = 20;
+
+export type FederationResume = { maxResumes: number; delayMs: number };
+
+export type MarketFederationResult = RegistryIngestResult & {
+  /** How many times the walk resumed after a failed page. */
+  resumes: number;
+};
+
+async function ingestSourceWithResume(
+  source: RegistrySource,
+  options: { maxServers?: number; retry?: RegistryPageRetry },
+  resume: FederationResume,
+): Promise<MarketFederationResult> {
+  const total: IngestCounters = {
+    ingested: 0,
+    skipped: 0,
+    authProbed: 0,
+    authProbeFailed: 0,
+    toolsListed: 0,
+    toolsListFailed: 0,
+  };
+  let cursor: string | undefined;
+  let resumes = 0;
+  for (;;) {
+    const run = await ingestFromRegistry({
+      source: source.source,
+      baseUrl: source.baseUrl,
+      verified: source.verified,
+      maxServers:
+        options.maxServers === undefined
+          ? undefined
+          : options.maxServers - total.ingested,
+      cursor,
+      retry: options.retry,
+    });
+    total.ingested += run.ingested;
+    total.skipped += run.skipped;
+    total.authProbed += run.authProbed;
+    total.authProbeFailed += run.authProbeFailed;
+    total.toolsListed += run.toolsListed;
+    total.toolsListFailed += run.toolsListFailed;
+    if (!run.partial || resumes >= resume.maxResumes) {
+      return {
+        ...total,
+        source: source.source,
+        partial: run.partial,
+        error: run.error,
+        nextCursor: run.nextCursor,
+        resumes,
+      };
+    }
+    resumes += 1;
+    logger.warn("Registry federation resuming after a failed page", {
+      source: source.source,
+      resumes,
+      delayMs: resume.delayMs,
+      fromStart: run.nextCursor === undefined,
+    });
+    await new Promise((resolve) => setTimeout(resolve, resume.delayMs));
+    cursor = run.nextCursor;
+  }
 }
 
 export async function runMarketFederation(
   sources: RegistrySource[] = DEFAULT_REGISTRY_SOURCES,
-  options: { maxServers?: number } = {},
-) {
-  const results = [];
+  options: {
+    maxServers?: number;
+    retry?: RegistryPageRetry;
+    resume?: FederationResume;
+  } = {},
+): Promise<MarketFederationResult[]> {
+  const resume = options.resume ?? {
+    maxResumes: FEDERATION_MAX_RESUMES,
+    delayMs: FEDERATION_RESUME_DELAY_MS,
+  };
+  const results: MarketFederationResult[] = [];
   for (const source of sources) {
     try {
-      results.push(
-        await ingestFromRegistry({
-          source: source.source,
-          baseUrl: source.baseUrl,
-          verified: source.verified,
-          maxServers: options.maxServers,
-        }),
-      );
+      results.push(await ingestSourceWithResume(source, options, resume));
     } catch (error) {
       logger.warn("Registry federation source failed", {
         source: source.source,
