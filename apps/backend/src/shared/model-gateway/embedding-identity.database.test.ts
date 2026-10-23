@@ -298,26 +298,6 @@ describe.sequential("embedding identity in PostgreSQL", () => {
       },
     },
     {
-      name: "Provider endpoint change",
-      apply: (value) => {
-        value.gateways[0]!.baseUrl = "https://different.example.test/v1";
-      },
-    },
-    {
-      name: "Provider routing change",
-      apply: (value) => {
-        value.embeddingProfiles[0]!.providerRouting = { only: ["different"] };
-      },
-    },
-    {
-      name: "opaque Provider header change",
-      apply: (value) => {
-        value.gateways[0]!.defaultHeaders = {
-          "X-Embedding-Version": "different",
-        };
-      },
-    },
-    {
       name: "default switch to a newly added profile",
       apply: (value) => {
         value.embeddingProfiles[0]!.isDefault = false;
@@ -343,12 +323,240 @@ describe.sequential("embedding identity in PostgreSQL", () => {
     },
   );
 
+  function backupGateway() {
+    return {
+      slug: `${gatewaySlug}-backup`,
+      providerName: "identity-test-backup",
+      providerKind: "openai-compatible",
+      baseUrl: "https://embedding-backup.example.test/v1",
+      apiKeyEnv: keyEnv,
+      activation: { env: enabledEnv, default: true },
+      defaultHeaders: { "X-Embedding-Version": "backup" },
+      supports: ["embeddings"],
+      modelCatalog: { enabled: false },
+      isDefault: false,
+    };
+  }
+
+  /** The same model on a second Provider, declared as a lower-priority target. */
+  function withSameModelFallback(value: ReturnType<typeof initialConfig>) {
+    const profile = value.embeddingProfiles[0]!;
+    const {
+      gatewaySlug: primarySlug,
+      providerName,
+      targetModel,
+      priority,
+      weight,
+      providerRouting,
+      ...rest
+    } = profile;
+    value.gateways.push(backupGateway());
+    value.embeddingProfiles[0] = {
+      ...rest,
+      pricing: { inputCostPerToken: 0.00000001 },
+      targets: [
+        {
+          gatewaySlug: primarySlug,
+          providerName,
+          targetModel,
+          priority,
+          weight,
+          providerRouting,
+        },
+        {
+          gatewaySlug: `${gatewaySlug}-backup`,
+          providerName: "identity-test-backup",
+          targetModel: `Pro/${targetModel}`,
+          priority: 2,
+          weight: 100,
+        },
+      ],
+    } as unknown as ReturnType<
+      typeof initialConfig
+    >["embeddingProfiles"][number];
+  }
+
+  const compatibleChanges: Array<{
+    name: string;
+    apply: (value: ReturnType<typeof initialConfig>) => void;
+  }> = [
+    {
+      name: "Provider endpoint change",
+      apply: (value) => {
+        value.gateways[0]!.baseUrl = "https://different.example.test/v1";
+      },
+    },
+    {
+      name: "Provider routing change",
+      apply: (value) => {
+        value.embeddingProfiles[0]!.providerRouting = { only: ["different"] };
+      },
+    },
+    {
+      name: "opaque Provider header change",
+      apply: (value) => {
+        value.gateways[0]!.defaultHeaders = {
+          "X-Embedding-Version": "different",
+        };
+      },
+    },
+    {
+      name: "same-model fallback target on a second Provider",
+      apply: withSameModelFallback,
+    },
+  ];
+
+  test.each(compatibleChanges)(
+    "keeps the index identity, vectors and retrieval across a $name",
+    async ({ apply }) => {
+      assert.ok(await createSourceDocumentChunksAndEmbeddings(indexInput()));
+      const before = await snapshot();
+      apply(raw);
+      await sync();
+      const current = await prepareEmbeddingProfile();
+      // Same model, same dimensions: one vector space, so the definition and
+      // its revision survive and nothing asks for a rebuild.
+      assert.deepEqual(current.identity, identity);
+      const after = await snapshot();
+      assert.deepEqual(after.vectors, before.vectors);
+      assert.deepEqual(after.documents, before.documents);
+      assert.equal((await searchChunksByVectorExact(queryInput())).length, 1);
+      assert.equal(
+        (await searchChunksByVectorAnn({ ...queryInput(), dim: 2 })).length,
+        1,
+      );
+    },
+  );
+
+  test("a same-model fallback target persists one route per target and one identity", async () => {
+    const singleTarget = identity;
+    withSameModelFallback(raw);
+    await sync();
+    const current = await prepareEmbeddingProfile();
+    assert.deepEqual(current.identity, singleTarget);
+    assert.equal(current.identity.version, 2);
+    assert.equal(current.identity.canonicalModel, "embedding-original");
+    const routes = (await snapshot()).routes.filter(
+      (row) =>
+        row.alias === `embedding-${profileId}` && row.routeKind === "embedding",
+    );
+    assert.deepEqual(
+      routes
+        .map((row) => [row.targetProviderName, row.targetModel, row.priority])
+        .sort((left, right) => Number(left[2]) - Number(right[2])),
+      [
+        ["identity-test", "embedding-original", 1],
+        ["identity-test-backup", "Pro/embedding-original", 2],
+      ],
+    );
+    // The runtime route set behind the alias is what the gateway fails over
+    // across; both targets are present and the identity names neither.
+    assert.equal(
+      current.routedConfig.modelRoutes[`embedding-${profileId}`]?.targets
+        .length,
+      2,
+    );
+    assert.equal(JSON.stringify(current.identity).includes("backup"), false);
+  });
+
+  test("a result from either same-model target is accepted; another model is not", async () => {
+    withSameModelFallback(raw);
+    await sync();
+    const current = await prepareEmbeddingProfile();
+    const { validateEmbeddingResult } = await import("./embedding-identity");
+    for (const providerModel of [
+      "embedding-original",
+      "Pro/embedding-original",
+      "PRO/Embedding-Original",
+    ]) {
+      assert.equal(
+        validateEmbeddingResult(current.identity, { providerModel }, [
+          [0.25, 0.75],
+        ]),
+        2,
+      );
+    }
+    assert.throws(
+      () =>
+        validateEmbeddingResult(
+          current.identity,
+          { providerModel: "different-model-same-dimensions" },
+          [[0.25, 0.75]],
+        ),
+      EmbeddingIdentityError,
+    );
+  });
+
+  test("a definition and documents recorded in the legacy single-target shape upgrade in place", async () => {
+    const indexed = await createSourceDocumentChunksAndEmbeddings(indexInput());
+    assert.ok(indexed);
+    // Rewrite the recorded definition and the document stamp the way the
+    // previous release wrote them: version 1, pinned to one Provider.
+    const legacy = {
+      version: 1,
+      revision: identity.revision,
+      profileId: identity.profileId,
+      profileAlias: identity.profileAlias,
+      provider: "identity-test",
+      providerKind: "openai-compatible",
+      baseUrl: "https://embedding.example.test/v1",
+      providerModel: "embedding-original",
+      requestedDimensions: 2,
+      providerRouting: { only: ["original"] },
+    };
+    await db
+      .update(modelGatewayProfiles)
+      .set({
+        configJson: sql`${modelGatewayProfiles.configJson} || ${JSON.stringify({ embeddingDefinition: legacy })}::jsonb`,
+      })
+      .where(eq(modelGatewayProfiles.id, profileId));
+    await db
+      .update(documents)
+      .set({ documentMetadata: { embeddingIdentity: legacy } })
+      .where(eq(documents.id, indexed.documentId));
+    // Before any sync, the runtime reads the legacy definition as current.
+    assert.deepEqual((await prepareEmbeddingProfile()).identity, identity);
+    assert.equal((await searchChunksByVectorExact(queryInput())).length, 1);
+    // A sync (here, one that also adds the fallback) keeps the revision and
+    // leaves the legacy-stamped document searchable.
+    withSameModelFallback(raw);
+    await sync();
+    const current = await prepareEmbeddingProfile();
+    assert.deepEqual(current.identity, identity);
+    const [profile] = (await snapshot()).profiles.filter(
+      (row) => row.id === profileId,
+    );
+    assert.deepEqual(
+      (profile?.configJson as { embeddingDefinition: unknown })
+        .embeddingDefinition,
+      identity,
+    );
+    assert.equal((await searchChunksByVectorExact(queryInput())).length, 1);
+    assert.equal(
+      (await searchChunksByVectorAnn({ ...queryInput(), dim: 2 })).length,
+      1,
+    );
+    // A legacy stamp that names another model is still a mismatch.
+    await db
+      .update(documents)
+      .set({
+        documentMetadata: {
+          embeddingIdentity: { ...legacy, providerModel: "other-model" },
+        },
+      })
+      .where(eq(documents.id, indexed.documentId));
+    await assert.rejects(
+      searchChunksByVectorExact(queryInput()),
+      EmbeddingIdentityError,
+    );
+  });
+
   test("allows an initial model change before any vector exists and fences the old query", async () => {
     const oldIdentity = identity;
     raw.embeddingProfiles[0]!.targetModel = "replacement-before-first-index";
     await sync();
     identity = (await prepareEmbeddingProfile()).identity;
-    assert.equal(identity.providerModel, "replacement-before-first-index");
+    assert.equal(identity.canonicalModel, "replacement-before-first-index");
     assert.notEqual(identity.revision, oldIdentity.revision);
     const before = await snapshot();
     await assert.rejects(
@@ -448,7 +656,7 @@ describe.sequential("embedding identity in PostgreSQL", () => {
         documentMetadata: {
           embeddingIdentity: {
             ...identity,
-            providerModel: "different-recorded-model",
+            canonicalModel: "different-recorded-model",
           },
         },
       })

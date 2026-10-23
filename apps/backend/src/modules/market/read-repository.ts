@@ -1,5 +1,6 @@
 import {
   marketMcpIconSourceSchema,
+  marketMcpToolsValidationSchema,
   mcpTransportSchema,
   type MarketItemSummary,
   type MarketItemVersion,
@@ -7,6 +8,7 @@ import {
   type MarketMcpIconSource,
   type MarketMcpLocale,
   type MarketMcpReadme,
+  type MarketMcpToolsValidation,
   type McpRuntime,
   type McpTransport,
 } from "@sourceweft/market-contracts";
@@ -127,7 +129,12 @@ function toManifestMeta(value: Record<string, unknown> | null | undefined) {
   const desktopOnly = value?.desktopOnly;
   const webExecutable = value?.webExecutable;
   const requiresAuth = value?.requiresAuth;
-  const toolsCount = value?.toolsCount;
+  // The latest manifest's tools are the count's source of truth: a job that
+  // fills them after the sync (the stdio validation) writes the manifest and
+  // the server's `toolsCount`, but a re-sync restamps the latter from the
+  // registry entry, which lists no tools.
+  const tools = value?.tools;
+  const toolsCount = Array.isArray(tools) ? tools.length : value?.toolsCount;
   return {
     official: typeof official === "boolean" ? official : false,
     verified: typeof verified === "boolean" ? verified : false,
@@ -139,6 +146,22 @@ function toManifestMeta(value: Record<string, unknown> | null | undefined) {
         ? Math.max(0, Math.trunc(toolsCount))
         : 0,
   };
+}
+
+/**
+ * The latest version's failed stdio validation, shown in place of "0 tools"
+ * (Issue #367, W1b): only while the version has no tools, and only the
+ * fields a card needs — the detail stays in the version's provenance.
+ */
+function toolsValidationOf(
+  provenanceJson: Record<string, unknown> | null | undefined,
+  toolsCount: number,
+): MarketMcpToolsValidation | null {
+  if (toolsCount > 0) return null;
+  const parsed = marketMcpToolsValidationSchema.safeParse(
+    provenanceJson?.validation,
+  );
+  return parsed.success ? parsed.data : null;
 }
 
 function mergeMetaSources(
@@ -206,6 +229,7 @@ function mapItemRow(input: {
   categories: string[];
   latestVersion?: string | null;
   latestManifestJson?: Record<string, unknown> | null;
+  latestProvenanceJson?: Record<string, unknown> | null;
 }): MarketItemSummary {
   const mergedMeta = mergeMetaSources(
     input.row.metadataJson,
@@ -241,6 +265,10 @@ function mapItemRow(input: {
     runtime: runtimeFor(meta),
     requiresAuth: meta.requiresAuth,
     toolsCount: meta.toolsCount,
+    toolsValidation: toolsValidationOf(
+      input.latestProvenanceJson,
+      meta.toolsCount,
+    ),
     lastIndexedAt: stringMeta(mergedMeta, "lastIndexedAt"),
     createdAt: input.row.createdAt.toISOString(),
     updatedAt: input.row.updatedAt.toISOString(),
@@ -286,6 +314,7 @@ async function categoriesByItemIds(itemIds: string[]) {
 type LatestVersion = {
   id: string;
   manifestJson: Record<string, unknown>;
+  provenanceJson: Record<string, unknown>;
   version: string;
 };
 
@@ -299,6 +328,7 @@ async function latestVersionsByItemIds(itemIds: string[]) {
       serverId: mcpServerVersions.serverId,
       version: mcpServerVersions.version,
       manifestJson: mcpServerVersions.manifestJson,
+      provenanceJson: mcpServerVersions.provenanceJson,
     })
     .from(mcpServerVersions)
     .where(
@@ -320,6 +350,7 @@ async function latestVersionsByItemIds(itemIds: string[]) {
       map.set(row.serverId, {
         id: row.id,
         manifestJson: row.manifestJson,
+        provenanceJson: row.provenanceJson,
         version: row.version,
       });
     }
@@ -568,6 +599,7 @@ export async function listMcp(input: {
         row,
         categories: categoryMap.get(row.id) ?? [],
         latestManifestJson: latest?.manifestJson,
+        latestProvenanceJson: latest?.provenanceJson,
         latestVersion: latest?.version ?? null,
       }),
       ...overviewFields(latest?.id),
@@ -686,6 +718,7 @@ export async function findMcp(
           row,
           categories: categoryMap.get(row.id) ?? [],
           latestManifestJson: latest?.manifestJson,
+          latestProvenanceJson: latest?.provenanceJson,
           latestVersion: latest?.version ?? null,
         }),
         aiSummary: aiOverview?.overview.summary ?? null,

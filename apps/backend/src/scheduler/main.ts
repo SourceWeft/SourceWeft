@@ -18,6 +18,10 @@ import {
   scheduleMcpReadmeFetches,
 } from "./schedules/mcp-readme";
 import {
+  MCP_STDIO_SCHEDULE_INTERVAL_MS,
+  scheduleMcpStdioValidations,
+} from "./schedules/mcp-stdio-validation";
+import {
   scheduleSkillMarketUpkeep,
   SKILL_MARKET_INTERVAL_MS,
 } from "./schedules/skill-market";
@@ -155,6 +159,20 @@ async function mcpOverviewTick() {
   }
 }
 
+// Stdio package validation: a small batch per run, paced over days, only
+// where a sandbox runtime is enabled; the worker starts the packages.
+async function mcpStdioValidationTick() {
+  if (!config.market.enabled) {
+    return;
+  }
+  try {
+    await scheduleMcpStdioValidations();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error("Failed to queue MCP stdio validations", { message });
+  }
+}
+
 async function skillMarketTick() {
   if (!config.market.enabled) {
     return;
@@ -191,6 +209,11 @@ const mcpOverviewTimer = setInterval(() => {
   void mcpOverviewTick();
 }, config.market.overviewIntervalMs);
 
+void mcpStdioValidationTick();
+const mcpStdioValidationTimer = setInterval(() => {
+  void mcpStdioValidationTick();
+}, MCP_STDIO_SCHEDULE_INTERVAL_MS);
+
 void skillMarketTick();
 const skillMarketTimer = setInterval(() => {
   void skillMarketTick();
@@ -218,6 +241,7 @@ async function shutdown() {
   clearInterval(marketFederationTimer);
   clearInterval(mcpReadmeTimer);
   clearInterval(mcpOverviewTimer);
+  clearInterval(mcpStdioValidationTimer);
   clearInterval(skillMarketTimer);
   logger.info("Scheduler shutting down");
   await closeQueue();

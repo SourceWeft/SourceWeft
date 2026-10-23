@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
 import {
   marketMcpManifestSchema,
+  marketMcpToolManifestSchema,
   type MarketMcpAuthMethod,
   type MarketMcpAuthRequirement,
   type MarketMcpManifest,
+  type MarketMcpToolManifest,
   type McpTransport,
 } from "@sourceweft/market-contracts";
 import { config } from "../../shared/config";
@@ -12,14 +14,19 @@ import {
   probeMcpEndpointAuth,
   type McpEndpointAuthProbe,
 } from "../../shared/mcp-auth-probe";
+import {
+  boundedMcpListedTools,
+  listMcpEndpointTools,
+} from "../../shared/mcp-tool-listing";
 import { createControlledFetch } from "../../shared/security/controlled-fetch";
 import { firstHttpsIconSrc, type ResolvedIcon } from "./icons/chain";
 import { registryIcons, type IconTarget } from "./icons/registry-icons";
 import { mcpServerVersionId } from "./ingest/plan";
 import {
-  findStoredAuthProbes,
+  findStoredEndpointProbes,
   findStoredIconProvenance,
   upsertMarketMcp,
+  type StoredEndpointProbes,
 } from "./ingest/repository";
 import { classifyByText } from "./parser/categories";
 import { registryServerProvenance } from "./registry-server";
@@ -322,6 +329,8 @@ export function mapRegistryServerToManifest(
     // The logo chain's answer for this entry (`icons/`); without it the
     // manifest keeps the registry icon alone and no source.
     icon?: ResolvedIcon;
+    /** What the endpoint listed to an anonymous client; none when unlisted. */
+    tools?: MarketMcpToolManifest[];
   } = {
     verified: false,
   },
@@ -375,7 +384,7 @@ export function mapRegistryServerToManifest(
       hasRemote ? options.authProbe : undefined,
     ),
     categories,
-    tools: [],
+    tools: hasRemote ? (options.tools ?? []) : [],
     sourceUrl: server.repository?.url ?? undefined,
     repoUrl: server.repository?.url ?? undefined,
   };
@@ -532,37 +541,71 @@ async function probeRegistryEndpoint(
   }
 }
 
-/**
- * The endpoint auth probe of each entry with a remote: the one stored for
- * that version when it probed the same endpoint within 30 days of `now`,
- * else a fresh one. A probe that fails is left out (the entry is mapped from
- * its declared headers alone) and retried on the next sync.
- */
-async function registryAuthProbes(entries: RegistryEntry[], now: Date) {
-  const targets = entries.flatMap((entry) => {
+type EndpointTarget = {
+  entry: RegistryEntry;
+  identifier: string;
+  endpointUrl: string;
+  transport: McpTransport;
+  versionId: string;
+};
+
+/** Each entry with a remote, with its endpoint and its version's id. */
+function endpointTargets(entries: RegistryEntry[]): EndpointTarget[] {
+  return entries.flatMap((entry) => {
     const server: RegistryServer = entry.server ?? entry;
     const identifier = server.name?.trim();
     const version = server.version?.trim();
-    const endpointUrl = primaryRemote(server)?.url;
+    const remote = primaryRemote(server);
+    const endpointUrl = remote?.url;
     return identifier && version && endpointUrl
       ? [
           {
             entry,
             identifier,
             endpointUrl,
+            transport: transportFromRemote(remote),
             versionId: mcpServerVersionId(identifier, version),
           },
         ]
       : [];
   });
-  const stored = await findStoredAuthProbes(
-    targets.map((target) => target.versionId),
+}
+
+/** Runs `task` over `targets`, `AUTH_PROBE_CONCURRENCY` at a time. */
+async function eachConcurrently<T>(
+  targets: T[],
+  task: (target: T) => Promise<void>,
+) {
+  let next = 0;
+  const worker = async () => {
+    while (next < targets.length) {
+      await task(targets[next++]!);
+    }
+  };
+  await Promise.all(
+    Array.from(
+      { length: Math.min(AUTH_PROBE_CONCURRENCY, targets.length) },
+      worker,
+    ),
   );
+}
+
+/**
+ * The endpoint auth probe of each target: the one stored for that version
+ * when it probed the same endpoint within 30 days of `now`, else a fresh one.
+ * A probe that fails is left out (the entry is mapped from its declared
+ * headers alone) and retried on the next sync.
+ */
+async function registryAuthProbes(
+  targets: EndpointTarget[],
+  stored: Map<string, StoredEndpointProbes>,
+  now: Date,
+) {
   const probes = new Map<RegistryEntry, AuthProbe>();
-  const pending: typeof targets = [];
+  const pending: EndpointTarget[] = [];
   for (const target of targets) {
     const reused = storedAuthProbe(
-      stored.get(target.versionId),
+      stored.get(target.versionId)?.authProbe,
       target.endpointUrl,
       now,
     );
@@ -570,31 +613,184 @@ async function registryAuthProbes(entries: RegistryEntry[], now: Date) {
     else pending.push(target);
   }
   let failed = 0;
-  let next = 0;
-  const worker = async () => {
-    while (next < pending.length) {
-      const target = pending[next++]!;
-      try {
-        probes.set(target.entry, {
-          result: await probeRegistryEndpoint(target.endpointUrl),
-          probedAt: now,
-        });
-      } catch (error) {
-        failed += 1;
-        logger.warn("Registry federation auth probe failed", {
-          identifier: target.identifier,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
+  await eachConcurrently(pending, async (target) => {
+    try {
+      probes.set(target.entry, {
+        result: await probeRegistryEndpoint(target.endpointUrl),
+        probedAt: now,
+      });
+    } catch (error) {
+      failed += 1;
+      logger.warn("Registry federation auth probe failed", {
+        identifier: target.identifier,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
-  };
-  await Promise.all(
-    Array.from(
-      { length: Math.min(AUTH_PROBE_CONCURRENCY, pending.length) },
-      worker,
-    ),
-  );
+  });
   return { probes, probed: pending.length - failed, failed };
+}
+
+type ToolsListing = { tools: MarketMcpToolManifest[]; listedAt: Date };
+
+/**
+ * The tool listing as kept in the version's provenance; the tools themselves
+ * are the manifest's. The endpoint is kept by hash only, as for the probe.
+ */
+export function toolsListingRecord(
+  endpointUrl: string,
+  toolsCount: number,
+  listedAt: Date,
+) {
+  return {
+    endpointSha256: endpointSha256(endpointUrl),
+    toolsCount,
+    listedAt: listedAt.toISOString(),
+  };
+}
+
+/**
+ * The version's stored tool listing of this same endpoint, and whether it is
+ * under 30 days old at `now`; undefined when there is none or its record or
+ * tools are malformed. The stored tools are bounded again on the way back.
+ */
+export function storedToolsListing(
+  stored: StoredEndpointProbes | undefined,
+  endpointUrl: string,
+  now: Date,
+): (ToolsListing & { fresh: boolean }) | undefined {
+  const record = stored?.toolsListing;
+  if (!record || typeof record !== "object") return undefined;
+  const { endpointSha256: hash, listedAt: listedAtValue } = record as {
+    endpointSha256?: unknown;
+    listedAt?: unknown;
+  };
+  if (hash !== endpointSha256(endpointUrl)) return undefined;
+  const listedAt = new Date(
+    typeof listedAtValue === "string" ? listedAtValue : Number.NaN,
+  );
+  if (Number.isNaN(listedAt.getTime())) return undefined;
+  const tools = registryTools(Array.isArray(stored.tools) ? stored.tools : []);
+  const age = now.getTime() - listedAt.getTime();
+  return {
+    tools,
+    listedAt,
+    fresh: age >= 0 && age < AUTH_PROBE_MAX_AGE_MS,
+  };
+}
+
+/**
+ * Listed tools as manifest tools. The risk is always "unknown": a verified
+ * catalog risk is trusted by the approval gate of an install, and these
+ * hints are the server's own claims about itself.
+ */
+function registryTools(raw: readonly unknown[]): MarketMcpToolManifest[] {
+  return boundedMcpListedTools(raw).flatMap((tool) => {
+    const parsed = marketMcpToolManifestSchema.safeParse({
+      ...tool,
+      risk: "unknown",
+    });
+    return parsed.success ? [parsed.data] : [];
+  });
+}
+
+/**
+ * Whether federation may list this endpoint's tools anonymously. A query or
+ * user info can carry the publisher's credential, so what such a URL lists
+ * may be one account's tools; a `{variable}` URL is a template, not an
+ * endpoint.
+ */
+function isListableEndpoint(endpointUrl: string) {
+  try {
+    const url = new URL(endpointUrl);
+    return (
+      url.protocol === "https:" &&
+      !url.search &&
+      !url.username &&
+      !url.password &&
+      !/[{}]|%7b|%7d/i.test(url.href)
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function listRegistryEndpointTools(target: EndpointTarget) {
+  // The same endpoint policy as the probe and as an install's requests.
+  const requests = createControlledFetch({
+    enforceAddressChecks: config.endpointAddressChecksEnabled,
+    allowedInternalOrigins: config.mcpAllowedInternalOrigins ?? [],
+  });
+  try {
+    return registryTools(
+      await listMcpEndpointTools(
+        target.endpointUrl,
+        target.transport === "sse" ? "sse" : "streamable_http",
+        requests.fetch,
+      ),
+    );
+  } catch (error) {
+    requests.throwIfDenied();
+    throw error;
+  } finally {
+    await requests.close();
+  }
+}
+
+/**
+ * The tools of each target whose endpoint answered the probe without asking
+ * for a credential, as listed to an anonymous client: the version's stored
+ * listing of the same endpoint when under 30 days old, else a fresh one. A
+ * listing that fails keeps the stored one, at any age, and is retried on the
+ * next sync. Endpoints that ask for a credential, or whose probe failed, are
+ * not listed; a failed probe keeps the stored listing too.
+ */
+async function registryToolListings(
+  targets: EndpointTarget[],
+  probes: Map<RegistryEntry, AuthProbe>,
+  stored: Map<string, StoredEndpointProbes>,
+  now: Date,
+) {
+  const listings = new Map<RegistryEntry, ToolsListing>();
+  const pending: EndpointTarget[] = [];
+  for (const target of targets) {
+    const previous = storedToolsListing(
+      stored.get(target.versionId),
+      target.endpointUrl,
+      now,
+    );
+    const probe = probes.get(target.entry);
+    if (!probe) {
+      if (previous) listings.set(target.entry, previous);
+    } else if (
+      probe.result === "open" &&
+      isListableEndpoint(target.endpointUrl)
+    ) {
+      if (previous?.fresh) listings.set(target.entry, previous);
+      else pending.push(target);
+    }
+  }
+  let failed = 0;
+  await eachConcurrently(pending, async (target) => {
+    try {
+      listings.set(target.entry, {
+        tools: await listRegistryEndpointTools(target),
+        listedAt: now,
+      });
+    } catch (error) {
+      failed += 1;
+      const previous = storedToolsListing(
+        stored.get(target.versionId),
+        target.endpointUrl,
+        now,
+      );
+      if (previous) listings.set(target.entry, previous);
+      logger.warn("Registry federation tool listing failed", {
+        identifier: target.identifier,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+  return { listings, listed: pending.length - failed, failed };
 }
 
 type IngestCounters = {
@@ -602,6 +798,8 @@ type IngestCounters = {
   skipped: number;
   authProbed: number;
   authProbeFailed: number;
+  toolsListed: number;
+  toolsListFailed: number;
   /** Favicon domains fetched, hits among them, fetches that failed. */
   faviconFetched: number;
   faviconHits: number;
@@ -611,7 +809,7 @@ type IngestCounters = {
 };
 
 /**
- * Probe, map and upsert one page of registry entries — at most `limit` of
+ * Probe, list, map and upsert one page of registry entries — at most `limit` of
  * them; the non-latest versions among them count as skipped, as does an entry
  * that cannot be mapped or whose upsert fails.
  */
@@ -625,17 +823,35 @@ async function ingestRegistryEntries(
     skipped: 0,
     authProbed: 0,
     authProbeFailed: 0,
+    toolsListed: 0,
+    toolsListFailed: 0,
     faviconFetched: 0,
     faviconHits: 0,
     faviconFailed: 0,
     faviconSkipped: 0,
   };
   const now = new Date();
-  const latestEntries = entries.filter(isLatestEntry).slice(0, limit);
-  const authProbes = await registryAuthProbes(latestEntries, now);
+  const targets = endpointTargets(
+    entries.filter(isLatestEntry).slice(0, limit),
+  );
+  const stored = await findStoredEndpointProbes(
+    targets.map((target) => target.versionId),
+  );
+  const authProbes = await registryAuthProbes(targets, stored, now);
   counters.authProbed = authProbes.probed;
   counters.authProbeFailed = authProbes.failed;
-  const icons = await registryEntryIcons(latestEntries, now);
+  const toolListings = await registryToolListings(
+    targets,
+    authProbes.probes,
+    stored,
+    now,
+  );
+  counters.toolsListed = toolListings.listed;
+  counters.toolsListFailed = toolListings.failed;
+  const icons = await registryEntryIcons(
+    entries.filter(isLatestEntry).slice(0, limit),
+    now,
+  );
   counters.faviconFetched = icons.faviconFetched;
   counters.faviconHits = icons.faviconHits;
   counters.faviconFailed = icons.faviconFailed;
@@ -656,9 +872,11 @@ async function ingestRegistryEntries(
         server.version?.trim() ?? "",
       ),
     );
+    const toolsListing = toolListings.listings.get(entry);
     const manifest = mapRegistryServerToManifest(entry, {
       verified: input.verified,
       authProbe: authProbe?.result,
+      tools: toolsListing?.tools,
       icon,
     });
     if (!manifest) {
@@ -689,6 +907,16 @@ async function ingestRegistryEntries(
                   manifest.endpointUrl,
                   authProbe.result,
                   authProbe.probedAt,
+                )
+              : undefined,
+          // When the endpoint last listed the manifest's tools to an
+          // anonymous client, kept so syncs within 30 days reuse them.
+          toolsListing:
+            toolsListing && manifest.endpointUrl
+              ? toolsListingRecord(
+                  manifest.endpointUrl,
+                  manifest.tools.length,
+                  toolsListing.listedAt,
                 )
               : undefined,
           // The namespace domain's favicon fetch and when it was made, kept
@@ -771,6 +999,8 @@ export async function ingestFromRegistry(input: {
   let skipped = 0;
   let authProbed = 0;
   let authProbeFailed = 0;
+  let toolsListed = 0;
+  let toolsListFailed = 0;
   let faviconFetched = 0;
   let faviconHits = 0;
   let faviconFailed = 0;
@@ -818,6 +1048,8 @@ export async function ingestFromRegistry(input: {
     skipped += counters.skipped;
     authProbed += counters.authProbed;
     authProbeFailed += counters.authProbeFailed;
+    toolsListed += counters.toolsListed;
+    toolsListFailed += counters.toolsListFailed;
     faviconFetched += counters.faviconFetched;
     faviconHits += counters.faviconHits;
     faviconFailed += counters.faviconFailed;
@@ -835,6 +1067,8 @@ export async function ingestFromRegistry(input: {
     skipped,
     authProbed,
     authProbeFailed,
+    toolsListed,
+    toolsListFailed,
     faviconFetched,
     faviconHits,
     faviconFailed,
@@ -847,6 +1081,8 @@ export async function ingestFromRegistry(input: {
     skipped,
     authProbed,
     authProbeFailed,
+    toolsListed,
+    toolsListFailed,
     faviconFetched,
     faviconHits,
     faviconFailed,
@@ -889,6 +1125,8 @@ export async function federateRegistryEntry(input: {
       skipped: 0,
       authProbed: 0,
       authProbeFailed: 0,
+      toolsListed: 0,
+      toolsListFailed: 0,
       faviconFetched: 0,
       faviconHits: 0,
       faviconFailed: 0,
@@ -922,6 +1160,8 @@ async function ingestSourceWithResume(
     skipped: 0,
     authProbed: 0,
     authProbeFailed: 0,
+    toolsListed: 0,
+    toolsListFailed: 0,
     faviconFetched: 0,
     faviconHits: 0,
     faviconFailed: 0,
@@ -945,6 +1185,8 @@ async function ingestSourceWithResume(
     total.skipped += run.skipped;
     total.authProbed += run.authProbed;
     total.authProbeFailed += run.authProbeFailed;
+    total.toolsListed += run.toolsListed;
+    total.toolsListFailed += run.toolsListFailed;
     total.faviconFetched += run.faviconFetched;
     total.faviconHits += run.faviconHits;
     total.faviconFailed += run.faviconFailed;

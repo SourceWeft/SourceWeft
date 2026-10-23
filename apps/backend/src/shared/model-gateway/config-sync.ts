@@ -616,6 +616,7 @@ async function syncProfileKind(input: {
         weight: target.weight,
         constraintsJson: buildRouteConstraintsJson({
           providerRouting: target.providerRouting ?? entry.providerRouting,
+          imageGeneration: entry.imageGeneration,
         }),
         isDefault: entry.isDefault,
         isActive: entry.isActive,
@@ -626,12 +627,28 @@ async function syncProfileKind(input: {
   }
 }
 
+/**
+ * Per-target route constraints. The runtime builds gateway routes from route
+ * rows alone, so anything a transport must know per target (provider routing,
+ * the image request convention) is copied here from the profile entry.
+ */
 export function buildRouteConstraintsJson(input: {
   providerRouting?: GlobalModelProfileEntry["providerRouting"];
+  imageGeneration?: GlobalModelProfileEntry["imageGeneration"];
 }): Record<string, unknown> {
-  return input.providerRouting
-    ? { providerRouting: input.providerRouting }
-    : {};
+  const request = input.imageGeneration?.request;
+  return {
+    ...(input.providerRouting
+      ? { providerRouting: input.providerRouting }
+      : {}),
+    ...(request
+      ? {
+          imageGeneration: {
+            request: { endpoint: request.endpoint, sizing: request.sizing },
+          },
+        }
+      : {}),
+  };
 }
 
 export async function syncGlobalModelGatewayConfigFromFile(
