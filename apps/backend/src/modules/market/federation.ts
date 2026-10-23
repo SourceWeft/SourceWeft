@@ -13,6 +13,8 @@ import {
   type McpEndpointAuthProbe,
 } from "../../shared/mcp-auth-probe";
 import { createControlledFetch } from "../../shared/security/controlled-fetch";
+import { applyGithubRegistryToManifest } from "./github-registry/manifest";
+import { findStoredGithubRegistryRecords } from "./github-registry/repository";
 import { mcpServerVersionId } from "./ingest/plan";
 import { findStoredAuthProbes, upsertMarketMcp } from "./ingest/repository";
 import { classifyByText } from "./parser/categories";
@@ -123,20 +125,29 @@ function namespaceBrand(namespace: string) {
 }
 
 /**
+ * The name an untitled entry gets when its server name is generic
+ * (`com.notion/mcp` would read "Mcp"): the namespace's brand, humanized —
+ * "Notion". Undefined when the name is specific. Exported so the GitHub MCP
+ * Registry enrichment can tell this fallback from a registry title.
+ */
+export function genericFallbackName(identifier: string): string | undefined {
+  const [namespace = identifier] = identifier.split("/");
+  const tail = identifier.split("/").pop() ?? identifier;
+  return GENERIC_SERVER_NAMES.has(tail.toLowerCase())
+    ? humanize(namespaceBrand(namespace))
+    : undefined;
+}
+
+/**
  * The registry title, else the server name humanized — or, when that name is
- * generic (`com.notion/mcp` would read "Mcp"), the namespace's brand.
+ * generic, the namespace's brand (`genericFallbackName`).
  */
 function displayName(server: RegistryServer, identifier: string) {
   if (server.title && server.title.trim()) {
     return server.title.trim();
   }
-  const [namespace = identifier] = identifier.split("/");
   const tail = identifier.split("/").pop() ?? identifier;
-  return humanize(
-    GENERIC_SERVER_NAMES.has(tail.toLowerCase())
-      ? namespaceBrand(namespace)
-      : tail,
-  );
+  return genericFallbackName(identifier) ?? humanize(tail);
 }
 
 function registryIconUrl(server: RegistryServer) {
@@ -618,12 +629,26 @@ export async function ingestFromRegistry(input: {
     if (entries.length === 0) {
       break;
     }
-    const authProbes = await registryAuthProbes(
-      entries.filter(isLatestEntry).slice(0, maxServers - ingested),
-      new Date(),
-    );
+    const latestEntries = entries
+      .filter(isLatestEntry)
+      .slice(0, maxServers - ingested);
+    const authProbes = await registryAuthProbes(latestEntries, new Date());
     authProbed += authProbes.probed;
     authProbeFailed += authProbes.failed;
+    // The GitHub MCP Registry enrichment (`github-registry/`) runs apart from
+    // this sync and writes on the version's provenance, which the upsert
+    // below replaces whole: its record is carried over, and the manifest
+    // changes it earned are applied again.
+    const githubRegistryRecords = await findStoredGithubRegistryRecords(
+      latestEntries.flatMap((entry) => {
+        const server: RegistryServer = entry.server ?? entry;
+        const identifier = server.name?.trim();
+        const version = server.version?.trim();
+        return identifier && version
+          ? [mcpServerVersionId(identifier, version)]
+          : [];
+      }),
+    );
     for (const entry of entries) {
       if (ingested >= maxServers) {
         break;
@@ -633,14 +658,22 @@ export async function ingestFromRegistry(input: {
         continue;
       }
       const authProbe = authProbes.probes.get(entry);
-      const manifest = mapRegistryServerToManifest(entry, {
+      const mapped = mapRegistryServerToManifest(entry, {
         verified: input.verified,
         authProbe: authProbe?.result,
       });
-      if (!manifest) {
+      if (!mapped) {
         skipped += 1;
         continue;
       }
+      const { manifest, record: githubRegistry } =
+        applyGithubRegistryToManifest(
+          mapped,
+          githubRegistryRecords.get(
+            mcpServerVersionId(mapped.identifier, mapped.version),
+          ),
+          { fallbackName: genericFallbackName(mapped.identifier) },
+        );
       try {
         await upsertMarketMcp({
           manifest,
@@ -667,6 +700,7 @@ export async function ingestFromRegistry(input: {
                     authProbe.probedAt,
                   )
                 : undefined,
+            githubRegistry,
           },
         });
         ingested += 1;

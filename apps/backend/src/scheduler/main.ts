@@ -11,6 +11,10 @@ import { durableChatRunService } from "../modules/threads";
 import { agentSandboxService } from "../modules/threads";
 import { contentSourceService } from "../modules/sources";
 import { scheduleConnectorSyncs } from "./schedules/connectors";
+import {
+  GITHUB_REGISTRY_TICK_INTERVAL_MS,
+  scheduleGithubRegistryEnrichment,
+} from "./schedules/github-registry";
 import { scheduleMarketFederation } from "./schedules/market-federation";
 import { scheduleMcpOverviews } from "./schedules/mcp-overview";
 import {
@@ -155,6 +159,21 @@ async function mcpOverviewTick() {
   }
 }
 
+// The GitHub MCP Registry enrichment: once a day, a handful of anonymous
+// requests that annotate federated entries with what GitHub knows about
+// their repositories. Checked hourly so the daily pace survives restarts.
+async function githubRegistryTick() {
+  if (!config.market.enabled) {
+    return;
+  }
+  try {
+    await scheduleGithubRegistryEnrichment();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error("Failed to run GitHub MCP Registry enrichment", { message });
+  }
+}
+
 async function skillMarketTick() {
   if (!config.market.enabled) {
     return;
@@ -196,6 +215,11 @@ const skillMarketTimer = setInterval(() => {
   void skillMarketTick();
 }, SKILL_MARKET_INTERVAL_MS);
 
+void githubRegistryTick();
+const githubRegistryTimer = setInterval(() => {
+  void githubRegistryTick();
+}, GITHUB_REGISTRY_TICK_INTERVAL_MS);
+
 // Liveness for `launch.js health scheduler`: the event loop runs this timer
 // and no tick is stuck. A tick that is slow because a dependency is down still
 // ends within STUCK_TICK_MS through its own timeouts.
@@ -219,6 +243,7 @@ async function shutdown() {
   clearInterval(mcpReadmeTimer);
   clearInterval(mcpOverviewTimer);
   clearInterval(skillMarketTimer);
+  clearInterval(githubRegistryTimer);
   logger.info("Scheduler shutting down");
   await closeQueue();
   process.exit(0);
