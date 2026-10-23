@@ -550,7 +550,9 @@ export default async function PublicSkillDetailPage({
   const updated = formatSkillDate(skill.updatedAt, uiLocale);
   const scanFlagLabels = t.raw("scanFlags") as Record<string, string>;
   const primaryCategory = skill.categories[0];
-  const pageUrl = `${SITE_URL}${skillPath(skill.slug)}`;
+  // Structured data names the page the canonical names: the shared one, for a
+  // skill with another public skill's files.
+  const pageUrl = `${SITE_URL}${skillPath(result.canonicalSlug ?? skill.slug)}`;
   // Works in any agent: it reads the install guide and runs the CLI, or — in
   // SourceWeft chat — hands the link to `install_skill`.
   const agentPrompt = t("detail.install.agent.prompt", {

@@ -16,7 +16,7 @@ import {
 } from "@sourceweft/market-contracts";
 import { latestPublishedVersionOf } from "../market/latest-version";
 import {
-  mcpReadmeSharedOf,
+  mcpSharedReadmeServerIds,
   publicMarketMcpCondition,
 } from "../market/read-repository";
 import {
@@ -37,10 +37,10 @@ import { planSitemapShards } from "./planner";
  * columns every sync or README recheck restamps (`last_indexed_at`,
  * `readme_fetched_at`) are deliberately not part of it.
  *
- * `where` leaves out the pages that stay out of search, through the same
- * predicates the detail API reports them with: a server whose README is one
- * file many servers show (`noindex`), and a skill whose files another public
- * skill's page carries (canonical to that page).
+ * `where` leaves out the pages that stay out of search, by the same rules the
+ * detail API reports them with: a server whose README is one file many servers
+ * show (`noindex`; the set form of `mcpReadmeSharedOf`), and a skill whose
+ * files another public skill's page carries (canonical to that page).
  */
 function source(kind: CatalogSitemapKind) {
   if (kind === "mcp")
@@ -49,9 +49,7 @@ function source(kind: CatalogSitemapKind) {
       shardFrom: sql`${mcpServers} left join lateral (
         select ${latestPublishedVersionOf(mcpServers.id)} as id
       ) shown on true`,
-      where: sql`${publicMarketMcpCondition()} and not ${mcpReadmeSharedOf(
-        latestPublishedVersionOf(mcpServers.id),
-      )}`,
+      where: sql`${publicMarketMcpCondition()} and ${mcpServers.id} not in ${mcpSharedReadmeServerIds()}`,
       id: sql`${mcpServers.id}`,
       key: sql`${mcpServers.identifier}`,
       modified: sql`greatest(${mcpServers.updatedAt}, (

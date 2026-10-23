@@ -368,7 +368,7 @@ export function publicMarketMcpCondition(
  * repository whose README lists them all; each page would be that same
  * document. A few servers sharing a monorepo README stay below this.
  */
-export const MCP_SHARED_README_MIN_SERVERS = 10;
+const MCP_SHARED_README_MIN_SERVERS = 10;
 
 // A raw `sql` FROM renders an alias by its name alone, so the tables are named
 // in the FROM and the aliases only supply the column references.
@@ -383,10 +383,10 @@ const ownVersion = alias(mcpServerVersions, OWN_VERSION);
  * True when version `versionId` (a value or a column reference) has a README
  * whose bytes (sha256) the shown version of at least
  * `MCP_SHARED_README_MIN_SERVERS` public servers also has, its own server
- * included. Such a page is `noindex` and not in the sitemap. The detail API
- * and the sitemap both read this, so they cannot disagree. Counting stops at
- * the threshold, and the README hash index finds the candidates, so a server
- * with a README of its own costs one index lookup.
+ * included. Such a page is `noindex`. For one server: counting stops at the
+ * threshold and the README hash index finds the candidates. A whole-catalog
+ * read uses `mcpSharedReadmeServerIds` instead, the same rule as a set —
+ * evaluated per row, this walks every older version of every batch server.
  */
 export function mcpReadmeSharedOf(versionId: unknown): SQL<boolean> {
   return sql<boolean>`((
@@ -407,6 +407,42 @@ export function mcpReadmeSharedOf(versionId: unknown): SQL<boolean> {
       limit ${MCP_SHARED_README_MIN_SERVERS}
     ) as shared
   ) >= ${MCP_SHARED_README_MIN_SERVERS})`;
+}
+
+const SHOWN_VERSIONS = "shared_readme_shown";
+
+/**
+ * The ids of the public servers `mcpReadmeSharedOf` is true for, as one
+ * uncorrelated subquery the database computes once per statement: each public
+ * server's shown version (its newest published one, ordered as
+ * `latestPublishedVersionOf` orders), grouped by README hash. The sitemap
+ * leaves these servers out.
+ */
+export function mcpSharedReadmeServerIds(): SQL {
+  return sql`(
+    with ${sql.identifier(SHOWN_VERSIONS)} as (
+      select distinct on (${otherVersions.serverId})
+        ${otherVersions.serverId} as server_id,
+        ${otherVersions.readmeStatus} as readme_status,
+        ${otherVersions.readmeSha256} as readme_sha256
+      from ${mcpServerVersions} as ${sql.identifier(OTHER_VERSIONS)}
+      inner join ${mcpServers} as ${sql.identifier(OTHER_SERVERS)}
+        on ${otherServers.id} = ${otherVersions.serverId}
+      where ${otherVersions.status} = 'published'
+        and ${publicMarketMcpCondition(otherServers)}
+      order by ${otherVersions.serverId},
+        ${otherVersions.publishedAt} desc,
+        ${otherVersions.createdAt} desc
+    )
+    select server_id from ${sql.identifier(SHOWN_VERSIONS)}
+    where readme_status = 'ok'
+      and readme_sha256 in (
+        select readme_sha256 from ${sql.identifier(SHOWN_VERSIONS)}
+        where readme_status = 'ok'
+        group by readme_sha256
+        having count(*) >= ${MCP_SHARED_README_MIN_SERVERS}
+      )
+  )`;
 }
 
 // Keyset cursor over the (publishedAt desc, id desc) ordering. Opaque to

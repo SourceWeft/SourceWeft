@@ -493,6 +493,24 @@ describe("public skill detail page", () => {
     expect(code).not.toHaveProperty("aggregateRating");
   });
 
+  it("names the shared page in the JSON-LD of a skill with another skill's files", async () => {
+    market.getPublicSkill.mockResolvedValue({
+      ...response({}, { slug: "pdf-forms-vendored-copy" }),
+      canonicalSlug: "pdf-forms",
+    });
+    const html = await render();
+    const blocks = [
+      ...html.matchAll(/<script type="application\/ld\+json">(.*?)<\/script>/g),
+    ].map((match) => JSON.parse(match[1]!) as Record<string, unknown>);
+    const code = blocks.find(
+      (block) => block["@type"] === "SoftwareSourceCode",
+    );
+    expect(String(code?.url)).toMatch(/\/skills\/pdf-forms$/);
+    expect(JSON.stringify(blocks)).not.toContain(
+      "/skills/pdf-forms-vendored-copy",
+    );
+  });
+
   it("adds the rating to the JSON-LD once someone rated it", async () => {
     reviews.getPublicSkillReviews.mockResolvedValue({
       items: [],
