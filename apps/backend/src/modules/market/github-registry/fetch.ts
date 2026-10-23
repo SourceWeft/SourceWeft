@@ -88,12 +88,23 @@ function text(value: unknown, max: number): string | undefined {
   return trimmed || undefined;
 }
 
-/** An https URL, or undefined. Credentials are never kept. */
-function httpsUrl(value: unknown): string | undefined {
+/** Where GitHub serves its avatars; pages render the URL as an `<img>`. */
+export const GITHUB_AVATAR_HOST = "avatars.githubusercontent.com";
+
+/**
+ * An https URL on GitHub's avatar host, or undefined: the only place an
+ * owner avatar may point to, since the catalog shows it as an image.
+ */
+function githubAvatarUrl(value: unknown): string | undefined {
   if (typeof value !== "string" || value.length > LIMITS.url) return undefined;
   try {
     const url = new URL(value.trim());
-    if (url.protocol !== "https:" || url.username || url.password) {
+    if (
+      url.protocol !== "https:" ||
+      url.hostname !== GITHUB_AVATAR_HOST ||
+      url.username ||
+      url.password
+    ) {
       return undefined;
     }
     return url.toString();
@@ -142,7 +153,7 @@ export function parseGithubRegistryEntry(
     remoteUrl: text(firstRemote?.url, LIMITS.url),
     github: {
       displayName: text(github.displayName, LIMITS.name),
-      ownerAvatarUrl: httpsUrl(github.ownerAvatarUrl),
+      ownerAvatarUrl: githubAvatarUrl(github.ownerAvatarUrl),
       isInOrganization: github.isInOrganization === true,
       stars: count(github.stargazerCount),
       license: text(github.license, LIMITS.license),
@@ -265,6 +276,8 @@ export async function fetchGithubRegistryServers(
           accept: "application/json",
           "user-agent": "sourceweft-market-catalog",
         },
+        // A fixed, known host: a redirect would be a change of source.
+        redirect: "error",
         signal: AbortSignal.timeout(timeoutMs),
       });
       if (response.status === 429) {

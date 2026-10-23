@@ -670,7 +670,10 @@ async function ingestRegistryEntries(
       githubRegistryRecords.get(
         mcpServerVersionId(mapped.identifier, mapped.version),
       ),
-      { fallbackName: genericFallbackName(mapped.identifier) },
+      {
+        fallbackName: genericFallbackName(mapped.identifier),
+        untitled: !(entry.server ?? entry).title?.trim(),
+      },
     );
     try {
       await upsertMarketMcp({

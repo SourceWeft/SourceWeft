@@ -4,6 +4,7 @@ import { genericFallbackName } from "../federation";
 import {
   fetchGithubRegistryServers,
   type GithubRegistryFetchResult,
+  type GithubRegistryFetchStop,
   type GithubRegistryRow,
 } from "./fetch";
 import {
@@ -17,10 +18,6 @@ import {
   writeGithubRegistryMatch,
   type GithubRegistryTarget,
 } from "./repository";
-import {
-  recordGithubRegistryPass,
-  type GithubRegistryPassSummary,
-} from "./state";
 
 /**
  * One pass of the GitHub MCP Registry enrichment: read the registry, match
@@ -32,6 +29,25 @@ import {
  * from the registry leaves its record in place with its `fetchedAt`.
  */
 
+export type GithubRegistryPassSummary = {
+  startedAt: string;
+  finishedAt: string;
+  /** Pages requested, and rows read from them. */
+  pages: number;
+  rows: number;
+  /** Null when the walk reached the registry's last page. */
+  stoppedBy: GithubRegistryFetchStop | null;
+  error?: string;
+  /** Catalog entries a row could annotate. */
+  targets: number;
+  matched: { name: number; endpointDomainOrg: number };
+  /** Records written, and how many of them changed the manifest too. */
+  written: number;
+  manifestPatched: number;
+  /** Matches whose write failed; the next pass tries them again. */
+  failed: number;
+};
+
 export type GithubRegistryEnrichmentDeps = {
   fetchServers: () => Promise<GithubRegistryFetchResult>;
   listTargets: () => Promise<GithubRegistryTarget[]>;
@@ -42,7 +58,6 @@ export type GithubRegistryEnrichmentDeps = {
     patch: GithubRegistryManifestPatch;
     now: Date;
   }) => Promise<void>;
-  record: (summary: GithubRegistryPassSummary) => Promise<void>;
   now: () => Date;
 };
 
@@ -50,7 +65,6 @@ const defaultDeps: GithubRegistryEnrichmentDeps = {
   fetchServers: () => fetchGithubRegistryServers(),
   listTargets: listGithubRegistryTargets,
   write: writeGithubRegistryMatch,
-  record: recordGithubRegistryPass,
   now: () => new Date(),
 };
 
@@ -153,6 +167,7 @@ export async function runGithubRegistryEnrichment(
       const record = githubRegistryRecord(row, matchedBy, now);
       const patch = githubRegistryManifestPatch(target, record, {
         fallbackName: genericFallbackName(target.identifier),
+        untitled: target.untitled,
       });
       try {
         await deps.write({
@@ -176,7 +191,6 @@ export async function runGithubRegistryEnrichment(
   }
 
   summary.finishedAt = deps.now().toISOString();
-  await deps.record(summary);
   logger.info("GitHub MCP Registry pass complete", { ...summary });
   return summary;
 }

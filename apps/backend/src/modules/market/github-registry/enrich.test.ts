@@ -41,6 +41,7 @@ function target(
     summary: `MCP server ${identifier} from the MCP registry.`,
     description: null,
     endpointUrl: null,
+    untitled: true,
     ...overrides,
   };
 }
@@ -55,6 +56,7 @@ const notion = target("com.notion/mcp", {
 });
 const netdata = target("io.github.netdata/mcp-server", {
   name: "Netdata",
+  untitled: false,
   summary:
     "Real-time infrastructure monitoring with metrics, logs, alerts, and ML-based anomaly detection.",
   description:
@@ -75,18 +77,14 @@ function deps(
   const write = vi.fn<GithubRegistryEnrichmentDeps["write"]>(
     async () => undefined,
   );
-  const record = vi.fn<GithubRegistryEnrichmentDeps["record"]>(
-    async () => undefined,
-  );
   const listTargets = vi.fn(async () => targets);
   const d: GithubRegistryEnrichmentDeps = {
     fetchServers: async () => fetched,
     listTargets,
     write,
-    record,
     now: () => NOW,
   };
-  return { deps: d, write, record, listTargets };
+  return { deps: d, write, listTargets };
 }
 
 beforeEach(() => {
@@ -141,16 +139,10 @@ test("a name match wins over an endpoint match for the same entry", () => {
 });
 
 test("a pass writes a record per match, patches the manifest where the rules say, and creates nothing", async () => {
-  const {
-    deps: d,
-    write,
-    record,
-  } = deps({ rows: FIXTURE_ROWS, pages: 1, stoppedBy: null }, [
-    notion,
-    netdata,
-    lookalike,
-    unrelated,
-  ]);
+  const { deps: d, write } = deps(
+    { rows: FIXTURE_ROWS, pages: 1, stoppedBy: null },
+    [notion, netdata, lookalike, unrelated],
+  );
   const summary = await runGithubRegistryEnrichment(d);
 
   assert.equal(summary.rows, 9);
@@ -160,7 +152,6 @@ test("a pass writes a record per match, patches the manifest where the rules say
   assert.equal(summary.manifestPatched, 1);
   assert.equal(summary.failed, 0);
   assert.equal(summary.stoppedBy, null);
-  assert.equal(record.mock.calls.length, 1);
 
   const writes = new Map(
     write.mock.calls.map(([input]) => [input.versionId, input]),
@@ -242,7 +233,6 @@ test("a walk that read nothing touches neither the catalog nor its targets", asy
     deps: d,
     write,
     listTargets,
-    record,
   } = deps({ rows: [], pages: 1, stoppedBy: "error", error: "fetch failed" }, [
     notion,
   ]);
@@ -251,7 +241,6 @@ test("a walk that read nothing touches neither the catalog nor its targets", asy
   assert.equal(summary.targets, 0);
   assert.equal(listTargets.mock.calls.length, 0);
   assert.equal(write.mock.calls.length, 0);
-  assert.equal(record.mock.calls.length, 1);
 });
 
 test("a write that fails is counted and does not stop the others", async () => {

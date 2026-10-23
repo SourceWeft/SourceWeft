@@ -101,6 +101,35 @@ test("the real page parses to rows with the GitHub facts and no README", () => {
   );
 });
 
+test("only https avatars on GitHub's avatar host are kept", () => {
+  const avatar = (ownerAvatarUrl: unknown) =>
+    parseGithubRegistryEntry({
+      server: {
+        name: "io.github.acme/thing",
+        _meta: {
+          "io.modelcontextprotocol.registry/publisher-provided": {
+            github: { ownerAvatarUrl },
+          },
+        },
+      },
+    })?.github.ownerAvatarUrl;
+  assert.equal(
+    avatar("https://avatars.githubusercontent.com/u/4792552?v=4"),
+    "https://avatars.githubusercontent.com/u/4792552?v=4",
+  );
+  assert.equal(avatar("http://avatars.githubusercontent.com/u/1"), undefined);
+  assert.equal(avatar("https://github.com/acme.png"), undefined);
+  assert.equal(
+    avatar("https://avatars.githubusercontent.com.evil.net/u/1"),
+    undefined,
+  );
+  assert.equal(
+    avatar("https://user:pw@avatars.githubusercontent.com/u/1"),
+    undefined,
+  );
+  assert.equal(avatar(42), undefined);
+});
+
 test("entries without a name are dropped; strings are trimmed and bounded; only https avatars are kept", () => {
   assert.equal(
     parseGithubRegistryEntry({ server: { version: "1" } }),
@@ -184,6 +213,7 @@ test("walks every page by cursor, anonymously, with the page size and a timeout"
     const headers = init?.headers as Record<string, string>;
     assert.equal(headers.accept, "application/json");
     assert.equal("authorization" in headers, false);
+    assert.equal(init?.redirect, "error");
     assert.ok(init?.signal instanceof AbortSignal);
   }
   assert.deepEqual(

@@ -100,6 +100,8 @@ describe("GitHub MCP Registry enrichment storage", () => {
       provenanceJson: {
         source: "registry.test",
         authProbe: { result: "oauth" },
+        // An untitled entry: what federation keeps of the registry server.
+        registryServer: { remotes: [{ url: `https://mcp.${tag}.com/mcp` }] },
       },
     });
     // A submitted server and a private one are not targets.
@@ -128,6 +130,7 @@ describe("GitHub MCP Registry enrichment storage", () => {
         summary: `MCP server ${identifier} from the MCP registry.`,
         description: null,
         endpointUrl: `https://mcp.${tag}.com/mcp`,
+        untitled: true,
       },
     ]);
   });
@@ -145,6 +148,7 @@ describe("GitHub MCP Registry enrichment storage", () => {
     expect(version.provenanceJson).toEqual({
       source: "registry.test",
       authProbe: { result: "oauth" },
+      registryServer: { remotes: [{ url: `https://mcp.${tag}.com/mcp` }] },
       githubRegistry: record,
     });
     expect(version.manifestJson).toEqual({

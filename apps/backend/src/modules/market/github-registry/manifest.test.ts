@@ -45,8 +45,9 @@ function manifest(
   });
 }
 
-const options = (identifier: string) => ({
+const options = (identifier: string, untitled = true) => ({
   fallbackName: genericFallbackName(identifier),
+  untitled,
 });
 
 test("the record keeps the row's facts, bounded, and the match and fetch time", () => {
@@ -66,6 +67,21 @@ test("the record keeps the row's facts, bounded, and the match and fetch time", 
   assert.ok(!("readme" in record));
 });
 
+test("an optional field the schema refuses is dropped on its own", () => {
+  const record = githubRegistryRecord(
+    {
+      ...notionRow,
+      // Past what the parser lets through, as a stored row might be.
+      github: { ...notionRow.github, license: "x".repeat(500) },
+    },
+    "name",
+    NOW,
+  );
+  assert.equal(record.license, undefined);
+  assert.equal(record.stars, 4676);
+  assert.equal(record.displayName, "Notion");
+});
+
 test("a record with no GitHub facts is still a record of the match", () => {
   const record = githubRegistryRecord(
     { name: "io.github.acme/thing", github: { isInOrganization: false } },
@@ -79,7 +95,7 @@ test("a record with no GitHub facts is still a record of the match", () => {
   });
 });
 
-test("name rule: displayName replaces a generic-name fallback, never a title or a specific name", () => {
+test("name rule: displayName replaces a generic-name fallback of an untitled entry, never a title or a specific name", () => {
   const record = githubRegistryRecord(
     {
       ...notionRow,
@@ -122,6 +138,19 @@ test("name rule: displayName replaces a generic-name fallback, never a title or 
       }),
       record,
       options("io.github.netdata/netdata-monitoring"),
+    ).name,
+    undefined,
+  );
+  // A title that happens to equal the fallback is the publisher's choice;
+  // so is an entry whose title is not known to be absent.
+  assert.equal(
+    githubRegistryManifestPatch(
+      manifest({
+        name: "Notion",
+        description: "Official MCP server for Notion API",
+      }),
+      record,
+      options("com.notion/mcp", false),
     ).name,
     undefined,
   );

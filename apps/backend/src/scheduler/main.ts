@@ -12,7 +12,7 @@ import { agentSandboxService } from "../modules/threads";
 import { contentSourceService } from "../modules/sources";
 import { scheduleConnectorSyncs } from "./schedules/connectors";
 import {
-  GITHUB_REGISTRY_TICK_INTERVAL_MS,
+  GITHUB_REGISTRY_INTERVAL_MS,
   scheduleGithubRegistryEnrichment,
 } from "./schedules/github-registry";
 import { scheduleMarketFederation } from "./schedules/market-federation";
@@ -159,9 +159,9 @@ async function mcpOverviewTick() {
   }
 }
 
-// The GitHub MCP Registry enrichment: once a day, a handful of anonymous
-// requests that annotate federated entries with what GitHub knows about
-// their repositories. Checked hourly so the daily pace survives restarts.
+// The GitHub MCP Registry enrichment: once a day (and at start), a handful
+// of anonymous requests that annotate federated entries with what GitHub
+// knows about their repositories.
 async function githubRegistryTick() {
   if (!config.market.enabled) {
     return;
@@ -218,7 +218,7 @@ const skillMarketTimer = setInterval(() => {
 void githubRegistryTick();
 const githubRegistryTimer = setInterval(() => {
   void githubRegistryTick();
-}, GITHUB_REGISTRY_TICK_INTERVAL_MS);
+}, GITHUB_REGISTRY_INTERVAL_MS);
 
 // Liveness for `launch.js health scheduler`: the event loop runs this timer
 // and no tick is stuck. A tick that is slow because a dependency is down still

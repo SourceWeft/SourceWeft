@@ -600,7 +600,12 @@ export const marketMcpGithubRegistryProvenanceSchema = z.object({
   // The row's name on GitHub (`com.notion/mcp` or `makenotion/notion-mcp-server`).
   name: z.string().min(1).max(200),
   matchedBy: marketMcpGithubRegistryMatchSchema,
-  ownerAvatarUrl: z.string().url().startsWith("https://").optional(),
+  // Shown as an image on public pages: GitHub's avatar host only.
+  ownerAvatarUrl: z
+    .string()
+    .url()
+    .startsWith("https://avatars.githubusercontent.com/")
+    .optional(),
   stars: z.number().int().min(0).optional(),
   license: z.string().min(1).max(120).optional(),
   displayName: z.string().min(1).max(200).optional(),

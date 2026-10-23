@@ -23,6 +23,12 @@ export type GithubRegistryTarget = {
   summary: string;
   description: string | null;
   endpointUrl: string | null;
+  /**
+   * Whether the registry entry is known to have no title: its stored
+   * `registryServer` (see `registry-server.ts`) has none. False when the
+   * stored provenance predates the title being kept.
+   */
+  untitled: boolean;
 };
 
 /** Every entry a GitHub row may annotate, with the fields the rules read. */
@@ -37,6 +43,7 @@ export async function listGithubRegistryTargets(): Promise<
     summary: string | null;
     description: string | null;
     endpointUrl: string | null;
+    untitled: boolean | null;
   }>(sql`
     select
       s.id as "serverId",
@@ -45,7 +52,11 @@ export async function listGithubRegistryTargets(): Promise<
       v.manifest_json ->> 'name' as "name",
       v.manifest_json ->> 'summary' as "summary",
       v.manifest_json ->> 'description' as "description",
-      v.manifest_json ->> 'endpointUrl' as "endpointUrl"
+      v.manifest_json ->> 'endpointUrl' as "endpointUrl",
+      (
+        jsonb_typeof(v.provenance_json -> 'registryServer') = 'object'
+        and v.provenance_json -> 'registryServer' ->> 'title' is null
+      ) as "untitled"
     from ${mcpServerVersions} v
     join ${mcpServers} s on s.id = v.server_id
     where v.status = 'published'
@@ -62,6 +73,7 @@ export async function listGithubRegistryTargets(): Promise<
     summary: row.summary ?? "",
     description: row.description,
     endpointUrl: row.endpointUrl,
+    untitled: row.untitled === true,
   }));
 }
 

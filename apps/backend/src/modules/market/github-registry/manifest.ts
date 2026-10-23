@@ -30,16 +30,19 @@ export function githubRegistryRecord(
     fetchedAt: fetchedAt.toISOString(),
   };
   // The parser already bounded every field; the schema is the contract the
-  // readers hold us to. An optional field the schema refuses is dropped, and
-  // an absent one is left out rather than stored as null.
+  // readers hold us to. An optional field the schema refuses is dropped (the
+  // others stay), and an absent one is left out rather than stored as null.
   const parsed = marketMcpGithubRegistryProvenanceSchema.safeParse(candidate);
   const record = parsed.success
     ? parsed.data
-    : marketMcpGithubRegistryProvenanceSchema.parse({
-        name: candidate.name,
-        matchedBy,
-        fetchedAt: candidate.fetchedAt,
-      });
+    : marketMcpGithubRegistryProvenanceSchema.parse(
+        Object.fromEntries(
+          Object.entries(candidate).filter(
+            ([key]) =>
+              !parsed.error.issues.some((issue) => issue.path[0] === key),
+          ),
+        ),
+      );
   return Object.fromEntries(
     Object.entries(record).filter(([, value]) => value !== undefined),
   ) as MarketMcpGithubRegistryProvenance;
@@ -66,14 +69,21 @@ export type GithubRegistryManifestOptions = {
    * imported so this module does not import federation, which imports it.
    */
   fallbackName: string | undefined;
+  /**
+   * Whether the registry entry has no `title`: known from the entry itself
+   * in a federation sync, and from the stored `registryServer.title` in the
+   * daily pass. False when unknown (a version synced before the title was
+   * kept), so a publisher's title is never replaced on a guess.
+   */
+  untitled: boolean;
 };
 
 /**
  * The manifest changes a record earns, as a patch; empty when it earns none:
- * - `name` ← the row's `displayName` only when our name is the generic-name
- *   fallback for its identifier ("Notion" for the untitled `com.notion/mcp`),
- *   which is also the sign the registry gave no title (a title would be the
- *   name instead);
+ * - `name` ← the row's `displayName` only when the registry entry has no
+ *   title AND our name is the generic-name fallback for its identifier
+ *   ("Notion" for `com.notion/mcp`); a title that happens to equal the
+ *   fallback is the publisher's choice and stays;
  * - `description` ← the row's description only when it is longer than ours;
  *   `summary` follows it when it was the description's own first 500
  *   characters, or when there was no description to derive it from (it was
@@ -88,6 +98,7 @@ export function githubRegistryManifestPatch(
   const patch: GithubRegistryManifestPatch = {};
   const fallback = options.fallbackName;
   if (
+    options.untitled &&
     record.displayName &&
     fallback !== undefined &&
     manifest.name === fallback &&
