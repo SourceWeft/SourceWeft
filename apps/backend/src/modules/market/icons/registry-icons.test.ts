@@ -6,6 +6,8 @@ vi.mock("../../../shared/logger", () => ({
 }));
 
 import {
+  FAVICON_MAX_CONSECUTIVE_FAILURES,
+  ICON_PROBE_ERROR_MAX_AGE_MS,
   ICON_PROBE_MISS_MAX_AGE_MS,
   registryIcons,
   storedIconProbe,
@@ -186,7 +188,7 @@ test("a domain entry without a static source gets its favicon fetched once, stor
   assert.equal(result.faviconFailed, 0);
 });
 
-test("a miss is cached as a miss; a failure is not cached and leaves a placeholder", async () => {
+test("a miss is cached as a miss; a failure is cached as an error for a day and leaves a placeholder", async () => {
   const miss = faviconFetch(() => png(404));
   const missed = await run([target("com.unknown/mcp")], {
     fetchImpl: miss.fetch,
@@ -207,11 +209,90 @@ test("a miss is cached as a miss; a failure is not cached and leaves a placehold
   const failed = await run([target("com.flaky/mcp")], {
     fetchImpl: failing.fetch,
   });
+  const errorProbe = {
+    domain: "flaky.com",
+    result: "error",
+    probedAt: NOW.toISOString(),
+  };
   assert.deepEqual(failed.icons.get("com.flaky/mcp@1"), {
+    iconSource: "placeholder",
+    iconProbe: errorProbe,
+  });
+  assert.equal(failed.faviconFailed, 1);
+
+  // Within a day the error is reused without a fetch; after it, retried.
+  const soon = await run([target("com.flaky/mcp")], {
+    stored: new Map([["com.flaky/mcp@1", { iconProbe: errorProbe }]]),
+  });
+  assert.deepEqual(soon.icons.get("com.flaky/mcp@1"), {
+    iconSource: "placeholder",
+    iconProbe: errorProbe,
+  });
+  assert.equal(soon.faviconFetched, 0);
+  const later = faviconFetch(() => png());
+  const retried = await run([target("com.flaky/mcp")], {
+    stored: new Map([
+      [
+        "com.flaky/mcp@1",
+        {
+          iconProbe: {
+            ...errorProbe,
+            probedAt: new Date(
+              NOW.getTime() - ICON_PROBE_ERROR_MAX_AGE_MS,
+            ).toISOString(),
+          },
+        },
+      ],
+    ]),
+    fetchImpl: later.fetch,
+  });
+  assert.equal(retried.icons.get("com.flaky/mcp@1")?.iconSource, "favicon");
+  assert.equal(later.urls.length, 1);
+});
+
+test("after repeated consecutive failures the rest of the page is left for the next sync", async () => {
+  const { fetch, urls } = faviconFetch(() => {
+    throw new Error("429");
+  });
+  const targets = Array.from({ length: 12 }, (_, i) =>
+    target(`com.site${i}/mcp`),
+  );
+  const result = await registryIcons(targets, {
+    now: NOW,
+    stored: new Map(),
+    fetchImpl: fetch,
+    store: memoryStore().store,
+    storeConfigured: true,
+    concurrency: 1,
+  });
+  assert.equal(result.faviconFetched, FAVICON_MAX_CONSECUTIVE_FAILURES);
+  assert.equal(result.faviconFailed, FAVICON_MAX_CONSECUTIVE_FAILURES);
+  assert.equal(result.faviconSkipped, 12 - FAVICON_MAX_CONSECUTIVE_FAILURES);
+  // Each attempted domain tried Google only (the throw ends the attempt).
+  assert.equal(urls.length, FAVICON_MAX_CONSECUTIVE_FAILURES);
+  assert.equal(result.icons.get("com.site0/mcp@1")?.iconProbe?.result, "error");
+  // The unfetched ones carry no probe, so the next sync tries them.
+  assert.deepEqual(result.icons.get("com.site11/mcp@1"), {
     iconSource: "placeholder",
     iconProbe: undefined,
   });
-  assert.equal(failed.faviconFailed, 1);
+});
+
+test("a stored URL that is not https is an error, not a manifest the ingest would reject", async () => {
+  const { fetch } = faviconFetch(() => png());
+  const result = await run([target("com.notion/mcp")], {
+    fetchImpl: fetch,
+    store: async () => ({ url: "/market/mcp-icons/notion.com/x.png" }),
+  });
+  assert.deepEqual(result.icons.get("com.notion/mcp@1"), {
+    iconSource: "placeholder",
+    iconProbe: {
+      domain: "notion.com",
+      result: "error",
+      probedAt: NOW.toISOString(),
+    },
+  });
+  assert.equal(result.faviconFailed, 1);
 });
 
 test("a stored hit is reused without a fetch; a stored miss is reused for 30 days, then retried", async () => {

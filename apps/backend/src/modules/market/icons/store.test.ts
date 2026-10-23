@@ -56,3 +56,25 @@ test("storing writes the bytes immutably to the public bucket and answers its se
   assert.equal(input.contentType, "image/png");
   assert.match(input.cacheControl ?? "", /immutable/);
 });
+
+test("only a DNS-shaped domain becomes part of a storage key", () => {
+  for (const domain of [
+    "",
+    "notion",
+    "Notion.com",
+    "no tion.com",
+    "a/b.com",
+    "../x.com",
+    "-x.com",
+  ]) {
+    assert.throws(
+      () =>
+        mcpIconStorageKey({
+          domain,
+          bytes: Buffer.alloc(1),
+          contentType: "image/png",
+        }),
+      /Not a storable icon domain/,
+    );
+  }
+});

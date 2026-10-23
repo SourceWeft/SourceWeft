@@ -14,11 +14,20 @@ import { imageExtension } from "./favicon";
  */
 export const MCP_ICON_KEY_PREFIX = "market/mcp-icons";
 
+// A lowercase DNS name: labels of alphanumerics and hyphens joined by dots.
+// The domain comes from `namespaceDomain`, which only produces these; the
+// check keeps anything else out of an object key.
+const STORAGE_DOMAIN_RE =
+  /^[a-z\d](?:[a-z\d-]{0,61}[a-z\d])?(?:\.[a-z\d](?:[a-z\d-]{0,61}[a-z\d])?)+$/;
+
 export function mcpIconStorageKey(input: {
   domain: string;
   bytes: Buffer;
   contentType: string;
 }) {
+  if (!STORAGE_DOMAIN_RE.test(input.domain)) {
+    throw new Error(`Not a storable icon domain: ${input.domain}`);
+  }
   const sha256 = createHash("sha256").update(input.bytes).digest("hex");
   return `${MCP_ICON_KEY_PREFIX}/${input.domain}/${sha256.slice(0, 32)}.${imageExtension(input.contentType)}`;
 }

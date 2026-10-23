@@ -35,12 +35,14 @@ export type StoredIconProvenance = {
 
 /**
  * The favicon fetch as kept in provenance. A hit keeps our stored URL and
- * which service answered; a miss is retried after 30 days; both are dropped
- * when the namespace domain changes.
+ * which service answered; a miss is retried after 30 days; an error (a
+ * service outage, a 429, a storage failure) after a day, so a rate-limited
+ * first wave is not replayed at full concurrency on every sync. All are
+ * dropped when the namespace domain changes.
  */
 export type IconProbeRecord = {
   domain: string;
-  result: "hit" | "miss";
+  result: "hit" | "miss" | "error";
   probedAt: string;
   url?: string;
   service?: FaviconService;
@@ -54,12 +56,22 @@ export type RegistryIconsResult = {
   faviconFetched: number;
   faviconHits: number;
   faviconFailed: number;
-  /** Entries that needed a favicon while no public storage was configured. */
+  /**
+   * Entries whose favicon step did not run: no public storage configured, or
+   * the run stopped fetching after repeated service failures.
+   */
   faviconSkipped: number;
 };
 
 export const ICON_PROBE_MISS_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+export const ICON_PROBE_ERROR_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const FAVICON_CONCURRENCY = 8;
+/**
+ * Consecutive thrown fetches after which the rest of the page is left
+ * unfetched: that many in a row is the service refusing us, not single
+ * domains failing.
+ */
+export const FAVICON_MAX_CONSECUTIVE_FAILURES = 5;
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -70,7 +82,8 @@ function record(value: unknown): Record<string, unknown> | undefined {
 /**
  * The version's stored favicon outcome for `domain`, when it is well-formed
  * and still current at `now`: a hit with a stored URL is kept indefinitely
- * (the object is content-addressed and never changes), a miss for 30 days.
+ * (the object is content-addressed and never changes), a miss for 30 days,
+ * an error for a day.
  */
 export function storedIconProbe(
   value: unknown,
@@ -100,13 +113,26 @@ export function storedIconProbe(
         : {}),
     };
   }
-  if (stored.result === "miss") {
+  if (stored.result === "miss" || stored.result === "error") {
     const age = now.getTime() - probedAt.getTime();
-    return age >= 0 && age < ICON_PROBE_MISS_MAX_AGE_MS
-      ? { domain, result: "miss", probedAt: probedAt.toISOString() }
+    const maxAge =
+      stored.result === "miss"
+        ? ICON_PROBE_MISS_MAX_AGE_MS
+        : ICON_PROBE_ERROR_MAX_AGE_MS;
+    return age >= 0 && age < maxAge
+      ? { domain, result: stored.result, probedAt: probedAt.toISOString() }
       : undefined;
   }
   return undefined;
+}
+
+/** A freshly stored icon URL the manifest will accept: absolute https. */
+function storedIconUrl(url: string) {
+  const parsed = new URL(url);
+  if (parsed.protocol !== "https:") {
+    throw new Error(`Stored icon URL is not https: ${url}`);
+  }
+  return parsed.toString();
 }
 
 /** `serverInfo.icons` out of a W1 `selfDescription` provenance, if any. */
@@ -195,39 +221,50 @@ export async function registryIcons(
   }
 
   const domains = [...pendingByDomain.keys()];
+  let faviconFetched = 0;
   let faviconHits = 0;
   let faviconFailed = 0;
+  let consecutiveFailures = 0;
   let next = 0;
   const worker = async () => {
     while (next < domains.length) {
       const domain = domains[next++]!;
       const group = pendingByDomain.get(domain)!;
       let probe: IconProbeRecord | undefined;
-      try {
-        const fetched = await fetchFavicon(domain, options.fetchImpl);
-        if (fetched.status === "hit") {
-          const { url } = await store({
+      if (consecutiveFailures >= FAVICON_MAX_CONSECUTIVE_FAILURES) {
+        // Left for the next sync, without a probe record.
+        faviconSkipped += group.length;
+      } else {
+        faviconFetched += 1;
+        try {
+          const fetched = await fetchFavicon(domain, options.fetchImpl);
+          if (fetched.status === "hit") {
+            const { url } = await store({
+              domain,
+              bytes: fetched.bytes,
+              contentType: fetched.contentType,
+            });
+            probe = {
+              domain,
+              result: "hit",
+              probedAt: now.toISOString(),
+              url: storedIconUrl(url),
+              service: fetched.service,
+            };
+            faviconHits += 1;
+          } else {
+            probe = { domain, result: "miss", probedAt: now.toISOString() };
+          }
+          consecutiveFailures = 0;
+        } catch (error) {
+          faviconFailed += 1;
+          consecutiveFailures += 1;
+          probe = { domain, result: "error", probedAt: now.toISOString() };
+          logger.warn("Registry federation favicon fetch failed", {
             domain,
-            bytes: fetched.bytes,
-            contentType: fetched.contentType,
+            error: error instanceof Error ? error.message : String(error),
           });
-          probe = {
-            domain,
-            result: "hit",
-            probedAt: now.toISOString(),
-            url,
-            service: fetched.service,
-          };
-          faviconHits += 1;
-        } else {
-          probe = { domain, result: "miss", probedAt: now.toISOString() };
         }
-      } catch (error) {
-        faviconFailed += 1;
-        logger.warn("Registry federation favicon fetch failed", {
-          domain,
-          error: error instanceof Error ? error.message : String(error),
-        });
       }
       for (const { target, input } of group) {
         icons.set(target.key, {
@@ -252,17 +289,16 @@ export async function registryIcons(
     ),
   );
 
-  if (faviconSkipped > 0) {
+  if (consecutiveFailures >= FAVICON_MAX_CONSECUTIVE_FAILURES) {
+    logger.warn(
+      "Registry federation: favicon service failing; rest of the page left for the next sync",
+      { consecutiveFailures, unfetched: domains.length - faviconFetched },
+    );
+  } else if (faviconSkipped > 0) {
     logger.warn(
       "Registry federation: no public storage configured; favicons not fetched",
       { entries: faviconSkipped },
     );
   }
-  return {
-    icons,
-    faviconFetched: domains.length,
-    faviconHits,
-    faviconFailed,
-    faviconSkipped,
-  };
+  return { icons, faviconFetched, faviconHits, faviconFailed, faviconSkipped };
 }

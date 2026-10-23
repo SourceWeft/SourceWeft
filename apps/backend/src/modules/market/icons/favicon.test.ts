@@ -160,3 +160,57 @@ test("media types and extensions", () => {
   assert.equal(imageExtension("image/vnd.microsoft.icon"), "ico");
   assert.equal(imageExtension("image/jpeg"), "jpg");
 });
+
+test("a redirect is followed only to the service's own hosts, over https, for at most three hops", async () => {
+  const gstatic =
+    "https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&url=http://notion.com&size=128";
+  const redirect = (location: string) =>
+    new Response(null, { status: 301, headers: { location } });
+  // Google's real behaviour: a 301 to *.gstatic.com, then the image.
+  const followed = services({
+    google: () => redirect(gstatic),
+  });
+  const base = followed.fetch;
+  const fetch = vi.fn(
+    async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input instanceof Request ? input.url : input);
+      assert.equal(init?.redirect, "manual");
+      return url === gstatic ? image(PNG) : base(input, init);
+    },
+  ) as unknown as typeof globalThis.fetch;
+  const result = await fetchFavicon("notion.com", fetch);
+  assert.equal(result.status, "hit");
+
+  // Off the service's hosts, or to plain http: refused, nothing fetched there.
+  for (const location of [
+    "https://evil.test/icon.png",
+    "http://t2.gstatic.com/icon.png",
+    "https://gstatic.com.evil.test/icon.png",
+  ]) {
+    const off = services({ google: () => redirect(location) });
+    await assert.rejects(
+      fetchFavicon("notion.com", off.fetch),
+      /redirected off/,
+    );
+    assert.equal(off.calls.length, 1);
+  }
+
+  // A redirect loop ends after three hops.
+  const loop = services({
+    google: () => redirect("https://www.google.com/s2/favicons?again=1"),
+  });
+  await assert.rejects(
+    fetchFavicon("notion.com", loop.fetch),
+    /too many times/,
+  );
+  assert.equal(loop.calls.length, 4);
+
+  // A 3xx without a location is a failure too.
+  const blank = services({
+    google: () => new Response(null, { status: 302 }),
+  });
+  await assert.rejects(
+    fetchFavicon("notion.com", blank.fetch),
+    /too many times/,
+  );
+});

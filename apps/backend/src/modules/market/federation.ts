@@ -13,7 +13,7 @@ import {
   type McpEndpointAuthProbe,
 } from "../../shared/mcp-auth-probe";
 import { createControlledFetch } from "../../shared/security/controlled-fetch";
-import type { ResolvedIcon } from "./icons/chain";
+import { firstHttpsIconSrc, type ResolvedIcon } from "./icons/chain";
 import { registryIcons, type IconTarget } from "./icons/registry-icons";
 import { mcpServerVersionId } from "./ingest/plan";
 import {
@@ -145,21 +145,9 @@ function displayName(server: RegistryServer, identifier: string) {
   );
 }
 
+/** The registry's first usable icon: the same rule as the logo chain's step 1. */
 function registryIconUrl(server: RegistryServer) {
-  for (const icon of server.icons ?? []) {
-    if (!icon || typeof icon !== "object") continue;
-    const src = (icon as { src?: unknown }).src;
-    if (typeof src !== "string") continue;
-    try {
-      const url = new URL(src);
-      if (url.protocol === "https:") {
-        return url.toString();
-      }
-    } catch {
-      // Ignore malformed upstream icon entries and try the next candidate.
-    }
-  }
-  return undefined;
+  return firstHttpsIconSrc(server.icons);
 }
 
 /**
@@ -631,6 +619,7 @@ export async function ingestFromRegistry(input: {
   let authProbed = 0;
   let authProbeFailed = 0;
   let faviconFetched = 0;
+  let faviconHits = 0;
   let faviconFailed = 0;
   let faviconSkipped = 0;
   let partial = false;
@@ -671,6 +660,7 @@ export async function ingestFromRegistry(input: {
     authProbeFailed += authProbes.failed;
     const icons = await registryEntryIcons(latestEntries, now);
     faviconFetched += icons.faviconFetched;
+    faviconHits += icons.faviconHits;
     faviconFailed += icons.faviconFailed;
     faviconSkipped += icons.faviconSkipped;
     for (const entry of entries) {
@@ -752,6 +742,7 @@ export async function ingestFromRegistry(input: {
     authProbed,
     authProbeFailed,
     faviconFetched,
+    faviconHits,
     faviconFailed,
     faviconSkipped,
     partial,
@@ -763,6 +754,7 @@ export async function ingestFromRegistry(input: {
     authProbed,
     authProbeFailed,
     faviconFetched,
+    faviconHits,
     faviconFailed,
     faviconSkipped,
     partial,

@@ -17,8 +17,20 @@ const mocks = vi.hoisted(() => ({
         }
       >(),
   ),
+  // The favicon step's storage, injected so no test depends on the ambient
+  // PUBLIC_S3_* environment (the test setup loads dotenv).
+  storeConfigured: false,
+  storeIcon: vi.fn(
+    async (input: { domain: string; bytes: Buffer; contentType: string }) => ({
+      url: `https://assets.test/market/mcp-icons/${input.domain}/stored.png`,
+    }),
+  ),
 }));
 
+vi.mock("./icons/store", () => ({
+  canStoreMcpIcons: () => mocks.storeConfigured,
+  storeMcpIcon: mocks.storeIcon,
+}));
 vi.mock("./ingest/repository", () => ({
   upsertMarketMcp: mocks.upsert,
   findStoredAuthProbes: mocks.storedProbes,
@@ -52,6 +64,7 @@ function serverEntry(id: number) {
 afterEach(() => {
   vi.restoreAllMocks();
   vi.clearAllMocks();
+  mocks.storeConfigured = false;
 });
 
 test("a mid-pagination fetch failure keeps the partial run instead of discarding it", async () => {
@@ -1013,8 +1026,9 @@ test("issue #367: the logo chain labels an io.github entry github-avatar and kee
 
 test("issue #367: without public storage a domain entry stays a placeholder and no favicon service is called", async () => {
   mocks.upsert.mockResolvedValue("item-id");
-  // The test process has no PUBLIC_S3_* configuration, so the favicon step is
-  // skipped and counted rather than fetched.
+  // No public storage (the mocked store says so): the favicon step is skipped
+  // and counted rather than fetched.
+  mocks.storeConfigured = false;
   const fetch = stubRegistryAndEndpoints(
     [
       {
@@ -1088,4 +1102,77 @@ test("issue #367: a cached favicon hit in provenance is reused, served from our 
   assert.equal(input.manifest.iconUrl, hit.url);
   assert.equal(input.manifest.iconSource, "favicon");
   assert.deepEqual(input.provenanceJson.iconProbe, hit);
+});
+
+test("issue #367: with public storage a domain entry's favicon is fetched, stored and served from our URL", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  mocks.storeConfigured = true;
+  const png = () =>
+    new Response(new Uint8Array(Buffer.alloc(2048, 1)), {
+      status: 200,
+      headers: { "content-type": "image/png" },
+    });
+  const fetch = stubRegistryAndEndpoints(
+    [
+      {
+        server: {
+          name: "com.notion/mcp",
+          version: "1.0.1",
+          remotes: [
+            { type: "streamable-http", url: "https://mcp.notion.com/mcp" },
+          ],
+        },
+      },
+    ],
+    (url) =>
+      url.startsWith("https://www.google.com/s2/favicons")
+        ? png()
+        : new Response("{}", { status: 200 }),
+  );
+
+  const result = await ingestFromRegistry({
+    source: "registry.test",
+    baseUrl: "https://registry.test",
+    verified: true,
+  });
+
+  assert.equal(result.ingested, 1);
+  assert.equal(result.faviconFetched, 1);
+  assert.equal(result.faviconHits, 1);
+  assert.equal(result.faviconSkipped, 0);
+  const faviconCalls = fetch.mock.calls
+    .map((call) => requestUrl(call[0]))
+    .filter((url) => /google|duckduckgo/.test(url));
+  assert.deepEqual(faviconCalls, [
+    "https://www.google.com/s2/favicons?domain=notion.com&sz=128",
+  ]);
+  assert.equal(mocks.storeIcon.mock.calls.length, 1);
+  assert.equal(mocks.storeIcon.mock.calls[0]?.[0].domain, "notion.com");
+  const input = mocks.upsert.mock.calls[0]?.[0];
+  assert.equal(
+    input.manifest.iconUrl,
+    "https://assets.test/market/mcp-icons/notion.com/stored.png",
+  );
+  assert.equal(input.manifest.iconSource, "favicon");
+  assert.equal(input.provenanceJson.iconProbe.result, "hit");
+  assert.equal(input.provenanceJson.iconProbe.domain, "notion.com");
+  assert.equal(input.provenanceJson.iconProbe.service, "google");
+});
+
+test("issue #367: the registry icon the chain keeps is the first https one without credentials", () => {
+  const manifest = mapRegistryServerToManifest(
+    {
+      server: {
+        name: "com.acme/mcp",
+        version: "1.0.0",
+        icons: [
+          { src: "https://user:pw@cdn.acme.test/secret.png" },
+          { src: "https://cdn.acme.test/icon.png" },
+        ],
+        remotes: [{ type: "streamable-http", url: "https://acme.test/mcp" }],
+      },
+    },
+    { verified: true },
+  );
+  assert.equal(manifest?.iconUrl, "https://cdn.acme.test/icon.png");
 });

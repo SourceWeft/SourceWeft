@@ -8,8 +8,14 @@
  *
  * A 404 from both, a body under 1 KiB (the services' generic globe defaults)
  * or over the cap, and a non-image content type are a `miss`, cached by the
- * sync for 30 days. A network error, timeout or non-404 error status is
- * thrown: the sync counts it as failed and tries again next run.
+ * sync for 30 days. A network error, timeout, non-404 error status or a
+ * redirect off the service's own hosts is thrown: the sync records an
+ * `error` outcome and tries again after a day.
+ *
+ * Redirects are followed by hand: Google's s2 endpoint answers with a 301 to
+ * `*.gstatic.com`, and only that family (and DuckDuckGo's own hosts for the
+ * other service) is followed, over https, for at most three hops, so a
+ * redirect can never send the fetch to an arbitrary address.
  */
 
 export type FaviconService = "google" | "duckduckgo";
@@ -29,6 +35,14 @@ export type FaviconFetch = FaviconHit | FaviconMiss;
 export const FAVICON_MIN_BYTES = 1024;
 export const FAVICON_MAX_BYTES = 512 * 1024;
 const FAVICON_TIMEOUT_MS = 8000;
+const MAX_REDIRECTS = 3;
+
+/** The hosts each service may redirect to, besides its own. */
+const REDIRECT_HOSTS: Record<FaviconService, RegExp> = {
+  google:
+    /^(?:www\.google\.com|[a-z0-9-]+\.gstatic\.com|[a-z0-9-]+\.googleusercontent\.com)$/i,
+  duckduckgo: /^(?:[a-z0-9-]+\.)?duckduckgo\.com$/i,
+};
 
 /** Raster image types a favicon service serves; SVG is deliberately not one. */
 const IMAGE_TYPES: Record<string, string> = {
@@ -83,10 +97,31 @@ async function fetchFromService(
   fetchImpl: typeof globalThis.fetch,
   signal: AbortSignal,
 ): Promise<FaviconFetch | "not-found"> {
-  const response = await fetchImpl(faviconServiceUrl(service, domain), {
-    headers: { accept: "image/*" },
-    signal,
-  });
+  let url = faviconServiceUrl(service, domain);
+  let response: Response;
+  for (let hop = 0; ; hop += 1) {
+    response = await fetchImpl(url, {
+      headers: { accept: "image/*" },
+      redirect: "manual",
+      signal,
+    });
+    if (response.status < 300 || response.status >= 400) break;
+    await response.body?.cancel();
+    const location = response.headers.get("location");
+    if (!location || hop >= MAX_REDIRECTS) {
+      throw new Error(`Favicon service ${service} redirected too many times`);
+    }
+    const next = new URL(location, url);
+    if (
+      next.protocol !== "https:" ||
+      !REDIRECT_HOSTS[service].test(next.hostname)
+    ) {
+      throw new Error(
+        `Favicon service ${service} redirected off its hosts (${next.hostname})`,
+      );
+    }
+    url = next.toString();
+  }
   if (response.status === 404) {
     await response.body?.cancel();
     return "not-found";
