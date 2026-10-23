@@ -719,7 +719,8 @@ test("a tool whose schemas are too large is dropped, and the list marked truncat
       }),
     ),
   );
-  assert.deepEqual(probe.tools, [TOOLS[0]]);
+  // The oversize entry is dropped; the ones after it are kept.
+  assert.deepEqual(probe.tools, TOOLS);
   assert.equal(probe.toolsTruncated, true);
   // Annotations count toward the same bound.
   const annotated = await probeMcpEndpointAuth(

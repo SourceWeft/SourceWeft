@@ -523,7 +523,8 @@ async function describeOpenEndpoint(
 
 /**
  * The pages of `tools/list`, up to the tool, size and page caps; `truncated`
- * says the caps (or an oversize entry) kept some of the server's tools out.
+ * says the caps kept some of the server's tools out, or an oversize entry
+ * was dropped (the entries after it are still kept).
  * A page that fails fails the listing (thrown to the caller), so a partial
  * read is never stored as a list.
  */
@@ -542,10 +543,15 @@ async function listTools(
     if (!result || !Array.isArray(result.tools)) {
       throw new Error("tools/list did not answer with a tool list");
     }
+    let truncated = false;
     for (const entry of result.tools) {
       const tool = boundedTool(entry);
       if (tool === "skipped") continue;
-      if (tool === "oversize") return { tools, truncated: true };
+      if (tool === "oversize") {
+        // Dropped; the ones after it are still worth keeping.
+        truncated = true;
+        continue;
+      }
       bytes += Buffer.byteLength(JSON.stringify(tool), "utf8");
       if (
         tools.length >= MCP_PROBE_LIMITS.tools ||
@@ -559,7 +565,7 @@ async function listTools(
       typeof result.nextCursor === "string" && result.nextCursor
         ? result.nextCursor
         : undefined;
-    if (!cursor) return { tools, truncated: false };
+    if (!cursor) return { tools, truncated };
   }
   // Pages remain after the last one followed.
   return { tools, truncated: true };
