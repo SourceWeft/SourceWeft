@@ -92,7 +92,9 @@ class GeneratorFreshPageRetry(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         out = Path(temporary.name) / 'fresh'
-        with patch('generate_report.preflight'), patch('generate_report.write_docx', side_effect=fake_docx), patch('generate_report.subprocess.run', side_effect=fake_run):
+        # Converters are stubbed above; the fixture's contents only make generate
+        # look up pdftohtml, which host test runners need not have.
+        with patch('generate_report.preflight'), patch('generate_report.shutil.which', return_value='/usr/bin/pdftohtml'), patch('generate_report.write_docx', side_effect=fake_docx), patch('generate_report.subprocess.run', side_effect=fake_run):
             try:
                 generate(FIXTURE, out, list(formats))
             finally:
