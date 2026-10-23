@@ -2,7 +2,11 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { logger } from "../logger";
 import {
+  DEFAULT_IMAGE_GENERATION_REQUEST,
   STRICT_JSON_SCHEMA_SUPPORT,
+  isImageGenerationEndpoint,
+  isImageGenerationSizing,
+  type ImageGenerationRequestConfig,
   type ModelCapabilityRule,
   type ProviderRoutingConfig,
   type ProviderRoutingSort,
@@ -107,7 +111,16 @@ export type GlobalModelProfileEntry = {
   supportedParameters?: string[];
   supportedEfforts?: Array<"minimal" | "low" | "medium" | "high" | "xhigh">;
   providerRouting?: ProviderRoutingConfig;
-  imageGeneration?: Record<string, unknown>;
+  imageGeneration?: GlobalImageGenerationConfig;
+};
+
+/**
+ * The profile's `imageGeneration` block. `controls` stays the single source of
+ * truth for what the UI offers and is carried through untouched; `request`
+ * declares how the gateway talks to the provider for this profile.
+ */
+export type GlobalImageGenerationConfig = Record<string, unknown> & {
+  request?: ImageGenerationRequestConfig;
 };
 
 export type GlobalEmbeddingProfileEntry = {
@@ -656,6 +669,58 @@ function asOptionalProviderRouting(
   return {
     ...(only !== undefined ? { only } : {}),
     ...(sort !== undefined ? { sort } : {}),
+  };
+}
+
+const IMAGE_GENERATION_REQUEST_FIELDS = ["endpoint", "sizing"] as const;
+
+function asOptionalImageGenerationConfig(
+  value: unknown,
+  fieldName: string,
+): GlobalImageGenerationConfig | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid global model gateway config field: ${fieldName}`);
+  }
+  const record = value as Record<string, unknown>;
+  if (record.request === undefined || record.request === null) {
+    return record;
+  }
+  const requestField = `${fieldName}.request`;
+  if (typeof record.request !== "object" || Array.isArray(record.request)) {
+    throw new Error(
+      `Invalid global model gateway config field: ${requestField} (expected an object with 'endpoint' and 'sizing')`,
+    );
+  }
+  const request = record.request as Record<string, unknown>;
+  for (const key of Object.keys(request)) {
+    if (!(IMAGE_GENERATION_REQUEST_FIELDS as readonly string[]).includes(key)) {
+      throw new Error(
+        `Invalid global model gateway config field: ${requestField}.${key} (unknown field; accepted: ${IMAGE_GENERATION_REQUEST_FIELDS.join(", ")})`,
+      );
+    }
+  }
+  if (
+    request.endpoint !== undefined &&
+    !isImageGenerationEndpoint(request.endpoint)
+  ) {
+    throw new Error(
+      `Invalid global model gateway config field: ${requestField}.endpoint (expected "openai" or "native", received ${JSON.stringify(request.endpoint)})`,
+    );
+  }
+  if (request.sizing !== undefined && !isImageGenerationSizing(request.sizing)) {
+    throw new Error(
+      `Invalid global model gateway config field: ${requestField}.sizing (expected "size", "dimensions" or "aspect_ratio", received ${JSON.stringify(request.sizing)})`,
+    );
+  }
+  return {
+    ...record,
+    request: {
+      endpoint: request.endpoint ?? DEFAULT_IMAGE_GENERATION_REQUEST.endpoint,
+      sizing: request.sizing ?? DEFAULT_IMAGE_GENERATION_REQUEST.sizing,
+    },
   };
 }
 
@@ -1229,6 +1294,10 @@ function parseModelProfileEntry(
     entry.providerRouting,
     `${field}[${index}].providerRouting`,
   );
+  const imageGeneration = asOptionalImageGenerationConfig(
+    entry.imageGeneration,
+    `${field}[${index}].imageGeneration`,
+  );
   const targets = parseProfileTargets({
     entry: entry as Record<string, unknown>,
     field: `${field}[${index}]`,
@@ -1271,12 +1340,7 @@ function parseModelProfileEntry(
     ...(supportedParameters !== undefined ? { supportedParameters } : {}),
     ...(supportedEfforts !== undefined ? { supportedEfforts } : {}),
     ...(providerRouting !== undefined ? { providerRouting } : {}),
-    imageGeneration:
-      entry.imageGeneration &&
-      typeof entry.imageGeneration === "object" &&
-      !Array.isArray(entry.imageGeneration)
-        ? (entry.imageGeneration as Record<string, unknown>)
-        : undefined,
+    ...(imageGeneration !== undefined ? { imageGeneration } : {}),
   };
 }
 

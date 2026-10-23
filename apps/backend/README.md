@@ -155,6 +155,43 @@ Model gateway catalog sync:
 - Hand-written profiles in the JSON remain available when catalog sync is
   disabled. Global dynamic catalog import skips models that cannot be matched
   to LiteLLM pricing/capabilities; BYOK still allows manual unknown models.
+- An image profile's `imageGeneration` block declares two things. `controls`
+  (`aspectRatio`, `quality`, `style`, each with `values`) is the single source
+  of truth for what the picker offers. `request` declares how the gateway talks
+  to the Provider for that profile, so a model whose OpenAI-compatible endpoint
+  ignores `size` can be routed to the Provider's native endpoint without any
+  model name in code:
+
+  ```json
+  {
+    "imageGeneration": {
+      "request": { "endpoint": "native", "sizing": "aspect_ratio" },
+      "controls": {
+        "aspectRatio": {
+          "values": ["auto", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"]
+        }
+      }
+    }
+  }
+  ```
+
+  `endpoint` is `openai` (`POST {baseUrl}/images/generations`, with
+  `/openai` inserted for DeepInfra gateways) or `native`
+  (`POST {baseUrl}/inference/{targetModel}` with `prompt` plus the sizing
+  fields; `n`, `response_format` and `quality` are not sent). `sizing` is
+  `size` (`"1344x768"`), `dimensions` (`width`/`height`) or `aspect_ratio`
+  (`aspect_ratio: "16:9"`; ratios outside the native enum `1:1, 16:9, 9:16,
+  4:3, 3:4, 3:2, 2:3` are sent as `custom` with `width`/`height`). Pixel
+  values for `dimensions` and `custom` are scaled into 256–1440 in multiples
+  of 16. `auto` sends no sizing field on the `dimensions` and `aspect_ratio`
+  conventions. Omitting `request` means `{ "endpoint": "openai", "sizing":
+  "size" }`, today's wire format; any other value fails configuration loading.
+  A native reply's `images[]` data URLs are decoded like OpenAI `b64_json`
+  (MIME type and pixel size recorded on the artifact), and a reported
+  `inference_status.cost` becomes the actual Provider cost, as OpenRouter's
+  `usage.cost` does. `openai-compatible` and `deepinfra` gateways honour the
+  block; OpenRouter and SiliconFlow transports have their own request shapes
+  and ignore it.
 
 System model:
 
