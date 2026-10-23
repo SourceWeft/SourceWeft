@@ -84,6 +84,8 @@ function metadataFromManifest(manifest: MarketMcpManifest) {
     language: manifest.language,
     toolsCount: manifest.tools.length,
     lastIndexedAt: manifest.lastIndexedAt ?? new Date().toISOString(),
+    // Promoted so the listing can rank by `publisher.endpointMatch` in SQL.
+    publisher: manifest.publisher,
   };
 }
 

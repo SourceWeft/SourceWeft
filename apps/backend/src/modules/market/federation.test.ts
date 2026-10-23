@@ -962,3 +962,68 @@ test("a registry endpoint on a private address is never probed", async () => {
   assert.equal(result.authProbeFailed, 1);
   assert.equal(mocks.upsert.mock.calls[0]?.[0].manifest.auth.type, "none");
 });
+
+// The official registry's own entry for Notion, as read on 2026-10-24: no
+// title, no repository, two remotes on mcp.notion.com.
+const NOTION_REGISTRY_ENTRY = {
+  server: {
+    name: "com.notion/mcp",
+    description: "Official Notion MCP server",
+    repository: {},
+    version: "1.0.1",
+    remotes: [
+      { type: "streamable-http", url: "https://mcp.notion.com/mcp" },
+      { type: "sse", url: "https://mcp.notion.com/sse" },
+    ],
+  },
+  _meta: {
+    "io.modelcontextprotocol.registry/official": {
+      status: "active",
+      isLatest: true,
+    },
+  },
+};
+
+test("issue #367: a domain namespace is mapped to its publisher, matched against the endpoint", () => {
+  const notion = mapRegistryServerToManifest(NOTION_REGISTRY_ENTRY, {
+    verified: true,
+  });
+  assert.ok(notion);
+  assert.deepEqual(notion.publisher, {
+    domain: "notion.com",
+    source: "registry-namespace",
+    endpointMatch: true,
+  });
+  // The publisher is a new field beside the existing ones, which keep their
+  // meaning: the namespace stays the provider name, the registry's
+  // verification stays `verified`, and `official` stays the manual flag.
+  assert.equal(notion.providerName, "com.notion");
+  assert.equal(notion.verified, true);
+  assert.equal(notion.official, false);
+
+  const elsewhere = mapRegistryServerToManifest(
+    {
+      server: {
+        name: "com.notion/community",
+        version: "1.0.0",
+        remotes: [{ type: "streamable-http", url: "https://notion-mcp.fly.dev/mcp" }],
+      },
+    },
+    { verified: true },
+  );
+  assert.deepEqual(elsewhere?.publisher, {
+    domain: "notion.com",
+    source: "registry-namespace",
+    endpointMatch: false,
+  });
+});
+
+test("issue #367: GitHub-namespace entries carry no publisher", () => {
+  const manifest = mapRegistryServerToManifest(serverEntry(1), {
+    verified: true,
+  });
+  assert.ok(manifest);
+  assert.equal(manifest.publisher, undefined);
+  // Stored as JSON, where an undefined field is no field at all.
+  assert.equal("publisher" in JSON.parse(JSON.stringify(manifest)), false);
+});

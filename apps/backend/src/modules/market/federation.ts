@@ -16,6 +16,7 @@ import { createControlledFetch } from "../../shared/security/controlled-fetch";
 import { mcpServerVersionId } from "./ingest/plan";
 import { findStoredAuthProbes, upsertMarketMcp } from "./ingest/repository";
 import { classifyByText } from "./parser/categories";
+import { publisherFromRegistryName } from "./publisher";
 import { registryServerProvenance } from "./registry-server";
 
 /**
@@ -377,6 +378,10 @@ export function mapRegistryServerToManifest(
     tools: [],
     sourceUrl: server.repository?.url ?? undefined,
     repoUrl: server.repository?.url ?? undefined,
+    publisher: publisherFromRegistryName(
+      identifier,
+      hasRemote ? remote?.url : undefined,
+    ),
   };
 
   const parsed = marketMcpManifestSchema.safeParse(candidate);

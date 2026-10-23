@@ -4,6 +4,8 @@ import { db } from "@sourceweft/db";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { sql, type SQL } from "drizzle-orm";
 import {
+  decodeListCursor,
+  encodeListCursor,
   identifierForSearch,
   findMcp,
   findMcpVersion,
@@ -115,4 +117,67 @@ test("multiple categories use an EXISTS union before database pagination", async
   } finally {
     select.mockRestore();
   }
+});
+
+test("issue #367: a search ranks servers whose publisher runs the endpoint first; a browse does not", async () => {
+  for (const query of ["notion", undefined]) {
+    const limit = vi.fn().mockResolvedValue([]);
+    const orderBy = vi.fn().mockReturnValue({ limit });
+    const where = vi.fn().mockReturnValue({ orderBy });
+    const select = vi.spyOn(db, "select").mockReturnValue({
+      from: () => ({ where }),
+    } as unknown as ReturnType<typeof db.select>);
+    try {
+      await listMcp({ query });
+      const keys = (orderBy.mock.calls[0] as SQL[]).map(
+        (key) => new PgDialect().sqlToQuery(key).sql,
+      );
+      if (query) {
+        assert.equal(keys.length, 3);
+        assert.match(
+          keys[0]!,
+          /^\(case when \("mcp_servers"\."metadata_json" #>> '\{publisher,endpointMatch\}'\)::boolean then 1 else 0 end\) desc$/,
+        );
+      } else {
+        assert.equal(keys.length, 2);
+      }
+      assert.match(keys.at(-2)!, /"published_at" desc$/);
+      assert.match(keys.at(-1)!, /"mcp_servers"\."id" desc$/);
+    } finally {
+      select.mockRestore();
+    }
+  }
+});
+
+test("issue #367: the list cursor carries the rank key and still reads the older two-part form", () => {
+  const publishedAt = new Date("2026-10-24T00:00:00.000Z");
+  const ranked = encodeListCursor(1, publishedAt, "mcp-1");
+  assert.deepEqual(decodeListCursor(ranked), {
+    endpointMatch: 1,
+    publishedAt,
+    id: "mcp-1",
+  });
+  assert.deepEqual(decodeListCursor(encodeListCursor(0, null, "mcp-2")), {
+    endpointMatch: 0,
+    publishedAt: new Date(0),
+    id: "mcp-2",
+  });
+  const legacy = Buffer.from(`${publishedAt.getTime()}|mcp-3`).toString(
+    "base64url",
+  );
+  assert.deepEqual(decodeListCursor(legacy), {
+    endpointMatch: 0,
+    publishedAt,
+    id: "mcp-3",
+  });
+  for (const bad of [
+    Buffer.from("2|1|mcp").toString("base64url"),
+    Buffer.from("1|1|").toString("base64url"),
+    Buffer.from("1|x|mcp").toString("base64url"),
+    Buffer.from("1|1|mcp|extra").toString("base64url"),
+    Buffer.from("mcp").toString("base64url"),
+  ]) {
+    assert.equal(decodeListCursor(bad), null);
+  }
+  assert.equal(decodeListCursor(undefined), null);
 });

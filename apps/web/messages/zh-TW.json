@@ -404,6 +404,8 @@
     },
     "card": {
       "auth": "驗證方式",
+      "officialPublisher": "官方發布者",
+      "officialPublisherTitle": "由 {domain} 發布，該網域同時執行此服務的端點。",
       "tools": "{count, plural, other {# 個工具}}",
       "viewAll": "檢視全部"
     },
@@ -463,6 +465,7 @@
       "metaDescriptionOverview": "{name}：{summary}",
       "breadcrumbHome": "首頁",
       "breadcrumbServers": "MCP 服務",
+      "publishedBy": "由 {domain} 發布",
       "updated": "更新於 {date}",
       "tools": "工具",
       "auth": "驗證方式",

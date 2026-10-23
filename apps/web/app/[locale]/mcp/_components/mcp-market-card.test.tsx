@@ -98,4 +98,42 @@ describe("public MCP card", () => {
       expect(html).not.toContain("data-ai-summary");
     }
   });
+
+  // Issue #367: the publisher's own server, next to the provider name.
+  it("marks a server its publisher runs as from the official publisher", async () => {
+    const html = await card(
+      item({
+        identifier: "com.notion/mcp",
+        providerName: "com.notion",
+        publisher: {
+          domain: "notion.com",
+          source: "registry-namespace",
+          endpointMatch: true,
+        },
+      }),
+    );
+    expect(html).toContain('data-official-publisher="notion.com"');
+    expect(html).toContain(enMessages.mcp.card.officialPublisher);
+    expect(html).toContain(
+      `title="Published by notion.com, which also runs this server&#x27;s endpoint."`,
+    );
+    // Not the manual "Official" verification badge.
+    expect(html).not.toContain(`>${enMessages.mcp.badges.verification.official}<`);
+  });
+
+  it("shows no publisher mark when the endpoint is elsewhere or there is no publisher", async () => {
+    for (const publisher of [
+      undefined,
+      null,
+      {
+        domain: "notion.com",
+        source: "registry-namespace",
+        endpointMatch: false,
+      },
+    ]) {
+      const html = await card(item({ publisher }));
+      expect(html).not.toContain("data-official-publisher");
+      expect(html).not.toContain(enMessages.mcp.card.officialPublisher);
+    }
+  });
 });
