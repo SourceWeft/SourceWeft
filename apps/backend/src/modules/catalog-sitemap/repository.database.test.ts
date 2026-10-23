@@ -381,7 +381,8 @@ describe("catalog sitemap public boundary on PostgreSQL", () => {
           skillId: id,
           storageType: "db_text",
           storagePointer: "fixture:" + slug,
-          contentHash: "b".repeat(64),
+          // Each skill its own files: skills with the same files share a page.
+          contentHash: createHash("sha256").update(slug).digest("hex"),
           publishedAt: new Date("2026-03-01"),
         });
         await data.db.insert(data.skillVersionOverviews).values({
@@ -411,6 +412,138 @@ describe("catalog sitemap public boundary on PostgreSQL", () => {
       expect(await lastmodOf("skills", superseded, "lastmod-superseded")).toBe(
         "2026-03-01T00:00:00.000Z",
       );
+    });
+  });
+  describe("pages that stay out of search", () => {
+    /** Every key the sitemap lists for `kind`, across all shards. */
+    async function listedKeys(kind: "mcp" | "skills") {
+      const index = await repository.readCatalogSitemapIndex();
+      const shards = await Promise.all(
+        index.shards
+          .filter((shard) => shard.kind === kind)
+          .map((shard) =>
+            repository.readCatalogSitemapShard(kind, shard.prefix),
+          ),
+      );
+      return shards.flatMap((shard) => shard.items.map((item) => item.key));
+    }
+
+    test("skills with the same files share the page of the most-starred, shortest-slug one", async () => {
+      const files = createHash("sha256").update("shared files").digest("hex");
+      const seed = async (
+        slug: string,
+        repoStars: number,
+        visibility: "public" | "restricted" = "public",
+      ) => {
+        const id = await seedSkillDefinition(data, {
+          slug,
+          repoStars,
+          visibility,
+        });
+        await seedSkillVersion(data, {
+          skillId: id,
+          storageType: "db_text",
+          storagePointer: "fixture:" + slug,
+          contentHash: files,
+          publishedAt: new Date("2026-01-01"),
+        });
+      };
+      await seed("dup-stripe", 5);
+      await seed("dup-stripe-providers-grok-plugin-skills-0123456789abcdef", 5);
+      await seed("dup-fork", 1);
+      // Not public, so not a page another can defer to, however starred.
+      await seed("dup-restricted", 100, "restricted");
+      const reads = await import("../skills/market/read-repository");
+
+      const keys = await listedKeys("skills");
+      expect(keys).toContain("dup-stripe");
+      expect(keys).not.toContain(
+        "dup-stripe-providers-grok-plugin-skills-0123456789abcdef",
+      );
+      expect(keys).not.toContain("dup-fork");
+      expect((await reads.findMarketSkill("dup-stripe"))?.canonicalSlug).toBe(
+        null,
+      );
+      expect(
+        (
+          await reads.findMarketSkill(
+            "dup-stripe-providers-grok-plugin-skills-0123456789abcdef",
+          )
+        )?.canonicalSlug,
+      ).toBe("dup-stripe");
+      expect((await reads.findMarketSkill("dup-fork"))?.canonicalSlug).toBe(
+        "dup-stripe",
+      );
+    });
+
+    test("servers whose shown README is one file at least ten public servers show are noindex and unlisted", async () => {
+      const shared = createHash("sha256").update("batch readme").digest("hex");
+      const nearlyShared = createHash("sha256")
+        .update("monorepo readme")
+        .digest("hex");
+      /** A server whose newest published version has README `sha`. */
+      const seed = async (
+        name: string,
+        sha: string,
+        options: { visibility?: "public" | "private"; olderSha?: string } = {},
+      ) => {
+        const id = randomUUID();
+        const identifier = "io.github.readme/" + name;
+        await data.db.insert(data.mcpServers).values({
+          id,
+          identifier,
+          name,
+          status: "published",
+          visibility: options.visibility ?? "public",
+        });
+        const readme = (readmeSha256: string) => ({
+          readmeStatus: "ok" as const,
+          readmeMd: "# README",
+          readmePath: "README.md",
+          readmeSha256,
+        });
+        if (options.olderSha)
+          await data.db.insert(data.mcpServerVersions).values({
+            id: randomUUID(),
+            serverId: id,
+            version: "0",
+            status: "published",
+            publishedAt: new Date("2025-01-01"),
+            ...readme(options.olderSha),
+          });
+        await data.db.insert(data.mcpServerVersions).values({
+          id: randomUUID(),
+          serverId: id,
+          version: "1",
+          status: "published",
+          publishedAt: new Date("2026-01-01"),
+          ...readme(sha),
+        });
+        return identifier;
+      };
+      const batch: string[] = [];
+      for (let i = 0; i < 10; i += 1)
+        batch.push(await seed("batch-" + i, shared));
+      const monorepo: string[] = [];
+      for (let i = 0; i < 9; i += 1)
+        monorepo.push(await seed("monorepo-" + i, nearlyShared));
+      // Neither counts towards the monorepo's README: one is not public, the
+      // other shows a README of its own now.
+      await seed("private", nearlyShared, { visibility: "private" });
+      const moved = await seed("moved-on", "e".repeat(64), {
+        olderSha: nearlyShared,
+      });
+      const reads = await import("../market/read-repository");
+
+      const keys = await listedKeys("mcp");
+      for (const identifier of batch) {
+        expect(keys).not.toContain(identifier);
+        expect((await reads.findMcp(identifier))?.searchIndexable).toBe(false);
+      }
+      for (const identifier of [...monorepo, moved]) {
+        expect(keys).toContain(identifier);
+        expect((await reads.findMcp(identifier))?.searchIndexable).toBe(true);
+      }
     });
   });
 });
