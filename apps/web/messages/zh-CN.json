@@ -1788,6 +1788,15 @@
         "ms": "ms"
       }
     },
+    "taskPlan": {
+      "title": "任务计划",
+      "progress": "已完成 {completed}/{total}",
+      "status": {
+        "pending": "待处理",
+        "in_progress": "进行中",
+        "completed": "已完成"
+      }
+    },
     "delegate": {
       "status": {
         "running": "运行中",
