@@ -20,11 +20,16 @@ import type {
   MarketMcpToolManifest,
   McpRiskLevel,
   McpRuntime,
+  McpStdioValidationReason,
   McpTransport,
 } from "@sourceweft/market-sdk";
 
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { mcpCardText } from "../../../../lib/mcp-ai-overview";
+import {
+  mcpToolsValidation,
+  mcpToolsValidationReasonKey,
+} from "../../../../lib/mcp-tools-validation";
 import {
   mcpRuntimeKind,
   runtimeLabel,
@@ -233,12 +238,18 @@ export async function McpMarketCard({
 }) {
   const t = await getTranslations("mcp.card");
   const tOverview = await getTranslations("mcp.aiOverview");
+  const tValidation = await getTranslations("mcp.toolsValidation");
   const trusted = Boolean(item.official || item.verified);
   const primaryCategory =
     highlightCategory && item.categories.includes(highlightCategory)
       ? highlightCategory
       : item.categories[0];
   const cardText = mcpCardText(item);
+  // A package the sandbox could not list tools for says so, not "0 tools".
+  const validation = mcpToolsValidation(item);
+  const validationReason = validation
+    ? tValidation(`reason.${mcpToolsValidationReasonKey(validation.reason)}`)
+    : null;
   return (
     <LocaleLink
       className="group flex h-full flex-col rounded-xl border border-zinc-300 bg-white/62 p-5 transition-all hover:-translate-y-0.5 hover:border-zinc-950/40 hover:bg-white hover:shadow-[0_18px_70px_rgba(39,39,42,0.1)] dark:border-white/10 dark:bg-white/[0.035] dark:hover:border-white/35 dark:hover:bg-white/[0.055]"
@@ -288,10 +299,23 @@ export async function McpMarketCard({
             {mcpCategoryLabel(primaryCategory, categoryNames)}
           </span>
         ) : null}
-        <span className="inline-flex shrink-0 items-center gap-1.5">
-          <Code2 className="size-3.5" />
-          {t("tools", { count: item.toolsCount })}
-        </span>
+        {validationReason ? (
+          <span
+            className="inline-flex min-w-0 items-center gap-1.5"
+            data-tools-validation={validation?.reason}
+            title={tValidation("explain", { reason: validationReason })}
+          >
+            <AlertTriangle className="size-3.5 shrink-0" />
+            <span className="truncate">
+              {tValidation("withReason", { reason: validationReason })}
+            </span>
+          </span>
+        ) : (
+          <span className="inline-flex shrink-0 items-center gap-1.5">
+            <Code2 className="size-3.5" />
+            {t("tools", { count: item.toolsCount })}
+          </span>
+        )}
         <span className="ml-auto shrink-0">{formatDate(item.updatedAt)}</span>
       </div>
     </LocaleLink>
@@ -377,14 +401,26 @@ export async function McpDirectorySection({
 
 export async function McpToolRows({
   tools,
+  validation,
 }: {
   tools: MarketMcpToolManifest[];
+  /** The failed sandbox validation to explain an empty list with, if any. */
+  validation?: { reason: McpStdioValidationReason } | null;
 }) {
   const t = await getTranslations("mcp");
   if (tools.length === 0) {
     return (
-      <div className="rounded-lg border border-zinc-300 bg-white/52 p-5 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-400">
-        {t("tools.empty")}
+      <div
+        className="rounded-lg border border-zinc-300 bg-white/52 p-5 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-400"
+        data-tools-validation={validation?.reason}
+      >
+        {validation
+          ? t("toolsValidation.explain", {
+              reason: t(
+                `toolsValidation.reason.${mcpToolsValidationReasonKey(validation.reason)}`,
+              ),
+            })
+          : t("tools.empty")}
       </div>
     );
   }
