@@ -30,7 +30,10 @@ export type McpProbeSelfDescription = {
   capabilities?: Record<string, unknown>;
 };
 
-/** One entry of `tools/list`, bounded; `risk` is the catalog's to derive. */
+/**
+ * One entry of `tools/list`, bounded. The server's annotations are kept as
+ * it sent them; what they mean for risk is the catalog's to decide.
+ */
 export type McpProbeTool = {
   name: string;
   title?: string;
@@ -52,6 +55,9 @@ export type McpProbeAuthMetadata = {
  * - `selfDescription`: present when `initialize` answered with a result;
  * - `tools`: present when `tools/list` succeeded after it — `[]` is a server
  *   that lists none; absent means it was not tried or failed;
+ * - `toolsTruncated`: the list is not the whole of what the server offers —
+ *   it hit the tool, size or page cap, or an entry too large to keep was
+ *   dropped;
  * - `authMetadata`: present when a 401's protected-resource metadata carried
  *   a `resource_name` or an https `resource_documentation`;
  * - `serverCard`: the origin's `/.well-known/mcp/server-card.json` (SEP-1649)
@@ -61,6 +67,7 @@ export type McpEndpointProbe = {
   result: McpEndpointAuthProbe;
   selfDescription?: McpProbeSelfDescription;
   tools?: McpProbeTool[];
+  toolsTruncated?: true;
   authMetadata?: McpProbeAuthMetadata;
   serverCard?: Record<string, unknown>;
 };
@@ -74,29 +81,35 @@ const RESPONSE_MAX_BYTES = 1024 * 1024;
 const PROTOCOL_VERSION = "2025-06-18";
 const INITIALIZE_ID = 1;
 
-/** The bounds self-description is kept within (the W1 data contract). */
+/**
+ * The bounds self-description is kept within (the W1 data contract, plus
+ * what keeps a hostile server from filling the catalog): everything stored
+ * from one server is third-party JSON served on every public read of it.
+ */
 export const MCP_PROBE_LIMITS = {
   instructionsBytes: 8 * 1024,
   stringChars: 500,
+  urlChars: 2048,
   icons: 5,
+  // `capabilities` as serialized JSON; larger is dropped.
+  capabilitiesBytes: 4 * 1024,
   tools: 200,
   toolDescriptionChars: 2000,
+  // One tool's schemas and annotations as serialized JSON; a larger tool is
+  // dropped (and the list marked truncated).
+  toolSchemaBytes: 32 * 1024,
+  // The whole kept tool list as serialized JSON.
+  toolsBytes: 512 * 1024,
   // `tools/list` pages followed for one server, the first included.
   toolPages: 5,
 } as const;
 
 class TooLargeError extends Error {}
 
-/**
- * The body as text, or a throw once it passes `maxBytes`. For an SSE stream
- * `stopAt` is consulted after every chunk: a Streamable HTTP server may keep
- * the stream open after its answer, so the read stops as soon as the text
- * holds what the caller wanted.
- */
+/** The body as text, or a throw once it passes `maxBytes`. */
 async function readCappedText(
   response: Response,
   maxBytes: number,
-  stopAt?: (text: string) => boolean,
 ): Promise<string> {
   const reader = response.body?.getReader();
   if (!reader) return "";
@@ -112,10 +125,6 @@ async function readCappedText(
       throw new TooLargeError("Response body is too large");
     }
     text += decoder.decode(value, { stream: true });
-    if (stopAt?.(text)) {
-      await reader.cancel();
-      return text;
-    }
   }
   return text + decoder.decode();
 }
@@ -158,6 +167,52 @@ function findResponse(messages: JsonRpcMessage[], id: number) {
   );
 }
 
+/** Where the last complete SSE event in `text` ends; -1 when none does. */
+function lastEventBoundary(text: string) {
+  const lf = text.lastIndexOf("\n\n");
+  const crlf = text.lastIndexOf("\r\n\r\n");
+  return Math.max(lf < 0 ? -1 : lf + 2, crlf < 0 ? -1 : crlf + 4);
+}
+
+/**
+ * The response to request `id` on an SSE stream. A Streamable HTTP server may
+ * keep the stream open after its answer, so the read stops as soon as the
+ * answer is in; only the events completed since the last chunk are parsed.
+ */
+async function readSseResult(
+  response: Response,
+  id: number,
+): Promise<Record<string, unknown> | undefined> {
+  const reader = response.body?.getReader();
+  if (!reader) return undefined;
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let size = 0;
+  const resultOf = (found: JsonRpcMessage | undefined) =>
+    isRecord(found?.result) ? found.result : undefined;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) {
+      buffer += decoder.decode();
+      return resultOf(findResponse(sseMessages(buffer), id));
+    }
+    size += value.byteLength;
+    if (size > RESPONSE_MAX_BYTES) {
+      await reader.cancel();
+      throw new TooLargeError("Response body is too large");
+    }
+    buffer += decoder.decode(value, { stream: true });
+    const boundary = lastEventBoundary(buffer);
+    if (boundary < 0) continue;
+    const found = findResponse(sseMessages(buffer.slice(0, boundary)), id);
+    buffer = buffer.slice(boundary);
+    if (found) {
+      await reader.cancel();
+      return resultOf(found);
+    }
+  }
+}
+
 /**
  * The JSON-RPC response to request `id` in `response`, read as plain JSON or
  * as an SSE stream (Streamable HTTP answers either way). Undefined when the
@@ -174,13 +229,7 @@ async function readJsonRpcResult(
   }
   const contentType = response.headers.get("content-type") ?? "";
   if (/text\/event-stream/i.test(contentType)) {
-    const text = await readCappedText(
-      response,
-      RESPONSE_MAX_BYTES,
-      (sofar) => findResponse(sseMessages(sofar), id) !== undefined,
-    );
-    const found = findResponse(sseMessages(text), id);
-    return isRecord(found?.result) ? found.result : undefined;
+    return readSseResult(response, id);
   }
   const text = await readCappedText(response, RESPONSE_MAX_BYTES);
   const parsed = JSON.parse(text) as unknown;
@@ -209,11 +258,31 @@ function boundedBytes(value: unknown, maxBytes: number) {
   return text;
 }
 
+/** A JSON object no larger than `maxBytes` once serialized, else undefined. */
+function boundedObject(value: unknown, maxBytes: number) {
+  if (!isRecord(value)) return undefined;
+  return Buffer.byteLength(JSON.stringify(value), "utf8") <= maxBytes
+    ? value
+    : undefined;
+}
+
+/**
+ * An https URL of ordinary length and without credentials in it, normalized;
+ * anything else is dropped. A URL is shown or linked, never fetched here.
+ */
 function httpsUrl(value: unknown) {
   if (typeof value !== "string") return undefined;
+  const text = value.trim();
+  if (text.length > MCP_PROBE_LIMITS.urlChars) return undefined;
   try {
-    const url = new URL(value.trim());
-    return url.protocol === "https:" ? url.toString() : undefined;
+    const url = new URL(text);
+    if (url.protocol !== "https:" || url.username || url.password) {
+      return undefined;
+    }
+    const normalized = url.toString();
+    return normalized.length <= MCP_PROBE_LIMITS.urlChars
+      ? normalized
+      : undefined;
   } catch {
     return undefined;
   }
@@ -266,16 +335,33 @@ function selfDescriptionOf(
       result.instructions,
       MCP_PROBE_LIMITS.instructionsBytes,
     ),
-    capabilities: isRecord(result.capabilities)
-      ? result.capabilities
-      : undefined,
+    capabilities: boundedObject(
+      result.capabilities,
+      MCP_PROBE_LIMITS.capabilitiesBytes,
+    ),
   });
 }
 
-function boundedTool(value: unknown): McpProbeTool | undefined {
-  if (!isRecord(value)) return undefined;
+/**
+ * A `tools/list` entry within bounds: "skipped" for one that is not a tool
+ * (no name), "oversize" for one whose schemas and annotations are too large
+ * to keep.
+ */
+function boundedTool(value: unknown): McpProbeTool | "skipped" | "oversize" {
+  if (!isRecord(value)) return "skipped";
   const name = boundedString(value.name, MCP_PROBE_LIMITS.stringChars);
-  if (!name) return undefined;
+  if (!name) return "skipped";
+  const schemas = withoutUndefined({
+    inputSchema: isRecord(value.inputSchema) ? value.inputSchema : undefined,
+    outputSchema: isRecord(value.outputSchema) ? value.outputSchema : undefined,
+    annotations: isRecord(value.annotations) ? value.annotations : undefined,
+  });
+  if (
+    Buffer.byteLength(JSON.stringify(schemas), "utf8") >
+    MCP_PROBE_LIMITS.toolSchemaBytes
+  ) {
+    return "oversize";
+  }
   return withoutUndefined({
     name,
     title: boundedString(value.title, MCP_PROBE_LIMITS.stringChars),
@@ -283,9 +369,7 @@ function boundedTool(value: unknown): McpProbeTool | undefined {
       value.description,
       MCP_PROBE_LIMITS.toolDescriptionChars,
     ),
-    inputSchema: isRecord(value.inputSchema) ? value.inputSchema : undefined,
-    outputSchema: isRecord(value.outputSchema) ? value.outputSchema : undefined,
-    annotations: isRecord(value.annotations) ? value.annotations : undefined,
+    ...schemas,
   });
 }
 
@@ -305,7 +389,8 @@ function jsonRpcBody(method: string, params: unknown, id?: number) {
  * address; a same-origin redirect is simply "not a 401". Network and policy
  * failures of the `initialize` are thrown for the caller to handle; those of
  * everything after it (the well-known lookups, `tools/list`, the server card)
- * only mean that part was not found. One time budget covers all of it.
+ * only mean that part was not found — a caller with a request scope checks
+ * it for denials afterwards. One time budget covers all of it.
  *
  * Nothing sent carries a credential, and `resource_documentation` is never
  * fetched.
@@ -400,15 +485,15 @@ async function describeOpenEndpoint(
       body,
       signal,
     });
-  let tools: McpProbeTool[] | undefined;
+  let listed: { tools: McpProbeTool[]; truncated: boolean } | undefined;
   try {
     const initialized = await post(
       jsonRpcBody("notifications/initialized", {}),
     );
     await initialized.body?.cancel();
-    tools = await listTools(post);
+    listed = await listTools(post);
   } catch {
-    tools = undefined;
+    listed = undefined;
   }
   if (sessionId && !signal.aborted) {
     // The session was opened for this probe only; a server that does not
@@ -428,18 +513,25 @@ async function describeOpenEndpoint(
       // Best effort.
     }
   }
-  return withoutUndefined({ result: "open" as const, selfDescription, tools });
+  return withoutUndefined({
+    result: "open" as const,
+    selfDescription,
+    tools: listed?.tools,
+    toolsTruncated: listed?.truncated ? (true as const) : undefined,
+  });
 }
 
 /**
- * Every page of `tools/list` up to the tool cap; a page that fails fails the
- * listing (thrown to the caller), so a partial list is never stored as the
- * whole.
+ * The pages of `tools/list`, up to the tool, size and page caps; `truncated`
+ * says the caps (or an oversize entry) kept some of the server's tools out.
+ * A page that fails fails the listing (thrown to the caller), so a partial
+ * read is never stored as a list.
  */
 async function listTools(
   post: (body: string) => Promise<Response>,
-): Promise<McpProbeTool[]> {
+): Promise<{ tools: McpProbeTool[]; truncated: boolean }> {
   const tools: McpProbeTool[] = [];
+  let bytes = 0;
   let cursor: string | undefined;
   for (let page = 0; page < MCP_PROBE_LIMITS.toolPages; page += 1) {
     const id = INITIALIZE_ID + 1 + page;
@@ -451,17 +543,26 @@ async function listTools(
       throw new Error("tools/list did not answer with a tool list");
     }
     for (const entry of result.tools) {
-      if (tools.length >= MCP_PROBE_LIMITS.tools) return tools;
       const tool = boundedTool(entry);
-      if (tool) tools.push(tool);
+      if (tool === "skipped") continue;
+      if (tool === "oversize") return { tools, truncated: true };
+      bytes += Buffer.byteLength(JSON.stringify(tool), "utf8");
+      if (
+        tools.length >= MCP_PROBE_LIMITS.tools ||
+        bytes > MCP_PROBE_LIMITS.toolsBytes
+      ) {
+        return { tools, truncated: true };
+      }
+      tools.push(tool);
     }
     cursor =
       typeof result.nextCursor === "string" && result.nextCursor
         ? result.nextCursor
         : undefined;
-    if (!cursor) break;
+    if (!cursor) return { tools, truncated: false };
   }
-  return tools;
+  // Pages remain after the last one followed.
+  return { tools, truncated: true };
 }
 
 /**

@@ -663,6 +663,159 @@ test("self-description and tools are kept within the contract's bounds", async (
     probe.tools?.[0]?.description?.length,
     MCP_PROBE_LIMITS.toolDescriptionChars,
   );
+  // 250 offered, 200 kept: not the whole list.
+  assert.equal(probe.toolsTruncated, true);
+});
+
+test("a complete tool list is not marked truncated; the caps mark it so", async () => {
+  const complete = await probeMcpEndpointAuth(
+    ENDPOINT,
+    routing(openServer({})),
+  );
+  assert.equal("toolsTruncated" in complete, false);
+
+  // Pages remain after the last one followed.
+  const endless = await probeMcpEndpointAuth(
+    ENDPOINT,
+    routing(
+      openServer({
+        tools: (cursor) => ({
+          tools: [{ name: `tool-${cursor ?? "first"}` }],
+          nextCursor: `${cursor ?? "first"}+`,
+        }),
+      }),
+    ),
+  );
+  assert.equal(endless.tools?.length, MCP_PROBE_LIMITS.toolPages);
+  assert.equal(endless.toolsTruncated, true);
+
+  // The kept list as a whole is bounded in bytes.
+  const heavy = Array.from({ length: 40 }, (_, index) => ({
+    name: `heavy-${index}`,
+    inputSchema: { pad: "x".repeat(20 * 1024) },
+  }));
+  const bulky = await probeMcpEndpointAuth(
+    ENDPOINT,
+    routing(openServer({ tools: heavy })),
+  );
+  assert.ok(bulky.tools && bulky.tools.length < heavy.length);
+  assert.ok(
+    Buffer.byteLength(JSON.stringify(bulky.tools), "utf8") <=
+      MCP_PROBE_LIMITS.toolsBytes,
+  );
+  assert.equal(bulky.toolsTruncated, true);
+});
+
+test("a tool whose schemas are too large is dropped, and the list marked truncated", async () => {
+  const probe = await probeMcpEndpointAuth(
+    ENDPOINT,
+    routing(
+      openServer({
+        tools: [
+          TOOLS[0],
+          { name: "huge", inputSchema: { pad: "x".repeat(40 * 1024) } },
+          TOOLS[1],
+        ],
+      }),
+    ),
+  );
+  assert.deepEqual(probe.tools, [TOOLS[0]]);
+  assert.equal(probe.toolsTruncated, true);
+  // Annotations count toward the same bound.
+  const annotated = await probeMcpEndpointAuth(
+    ENDPOINT,
+    routing(
+      openServer({
+        tools: [{ name: "a", annotations: { pad: "x".repeat(40 * 1024) } }],
+      }),
+    ),
+  );
+  assert.deepEqual(annotated.tools, []);
+  assert.equal(annotated.toolsTruncated, true);
+});
+
+test("oversized capabilities are dropped; the rest of the description is kept", async () => {
+  const probe = await probeMcpEndpointAuth(
+    ENDPOINT,
+    routing(
+      openServer({
+        initialize: {
+          ...INITIALIZE_RESULT,
+          capabilities: { experimental: { pad: "x".repeat(5 * 1024) } },
+        },
+      }),
+    ),
+  );
+  assert.equal(probe.selfDescription?.serverInfo?.name, "example-mcp");
+  assert.equal("capabilities" in (probe.selfDescription ?? {}), false);
+});
+
+test("URLs with credentials in them, or too long, are dropped", async () => {
+  const long = `https://example.com/${"p".repeat(2100)}`;
+  const probe = await probeMcpEndpointAuth(
+    ENDPOINT,
+    routing(
+      openServer({
+        initialize: {
+          ...INITIALIZE_RESULT,
+          serverInfo: {
+            name: "x",
+            websiteUrl: "https://user:secret@example.com/",
+            icons: [
+              { src: "https://user:secret@example.com/icon.png" },
+              { src: long },
+              { src: "https://example.com/ok.png" },
+            ],
+          },
+        },
+      }),
+    ),
+  );
+  assert.deepEqual(probe.selfDescription?.serverInfo, {
+    name: "x",
+    icons: [{ src: "https://example.com/ok.png" }],
+  });
+  const challenged = await probeMcpEndpointAuth(
+    ENDPOINT,
+    routing(new Response(null, { status: 401 }), {
+      [PATH_METADATA]: metadata({
+        authorization_servers: ["https://auth.example.com"],
+        resource_documentation: "https://user:secret@docs.example.com/mcp",
+      }),
+    }),
+  );
+  assert.deepEqual(challenged, { result: "oauth" });
+});
+
+test("an SSE answer split across chunks, with events before it, is read once complete", async () => {
+  const frame = (body: unknown) => {
+    const encoder = new TextEncoder();
+    const text = `event: message\ndata: ${JSON.stringify(body)}\n\n`;
+    const chunks = [
+      ": hello\n\n",
+      'event: message\ndata: {"jsonrpc":"2.0","method":"notifications/message","params":{}}\n\n',
+      text.slice(0, 20),
+      text.slice(20, 60),
+      text.slice(60),
+    ];
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
+        // Left open.
+      },
+    });
+    return new Response(stream, {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    });
+  };
+  const probe = await probeMcpEndpointAuth(
+    ENDPOINT,
+    routing(openServer({ frame })),
+  );
+  assert.equal(probe.selfDescription?.serverInfo?.name, "example-mcp");
+  assert.deepEqual(probe.tools, TOOLS);
+  assert.equal("toolsTruncated" in probe, false);
 });
 
 test("an oversized initialize answer or tool list is dropped, not stored in part", async () => {

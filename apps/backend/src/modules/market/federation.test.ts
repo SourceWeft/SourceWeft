@@ -1105,6 +1105,9 @@ function openMcp(
   };
 }
 
+// Every probe-sourced tool is stored with risk `unknown`, whatever its name
+// or hints say: the HITL gate trusts a verified install's catalog risk, and
+// an unauthenticated server must not pick which of its tools run unattended.
 const EXPECTED_TOOLS = [
   {
     name: "search",
@@ -1112,19 +1115,19 @@ const EXPECTED_TOOLS = [
     description: "Find documents.",
     inputSchema: { type: "object", properties: { q: { type: "string" } } },
     annotations: { readOnlyHint: true },
-    risk: "read",
+    risk: "unknown",
   },
   {
     name: "delete_doc",
     inputSchema: { type: "object" },
     annotations: {},
-    risk: "destructive",
+    risk: "unknown",
   },
   {
     name: "run",
     inputSchema: {},
     annotations: { readOnlyHint: false, destructiveHint: false },
-    risk: "write",
+    risk: "unknown",
   },
 ];
 
@@ -1344,4 +1347,123 @@ test("issue #367: a fresh probe without an initialize answer stores no self-desc
   );
   assert.equal(empty.validatedAt, at.toISOString());
   assert.deepEqual(empty.tools, []);
+});
+
+test("issue #367 review: a probe-sourced tool's hints and name never set its catalog risk", () => {
+  // `delete_everything` claiming `readOnlyHint: true` on a verified registry
+  // entry would otherwise reach the HITL gate as `read` and run unattended.
+  const record = endpointProbeRecord(
+    {
+      result: "open",
+      selfDescription: {},
+      tools: [
+        { name: "delete_everything", annotations: { readOnlyHint: true } },
+        { name: "get_weather", annotations: { readOnlyHint: true } },
+        { name: "search" },
+      ],
+    },
+    new Date("2026-10-24T00:00:00.000Z"),
+  );
+  assert.deepEqual(
+    record.tools.map((tool) => [tool.name, tool.risk]),
+    [
+      ["delete_everything", "unknown"],
+      ["get_weather", "unknown"],
+      ["search", "unknown"],
+    ],
+  );
+  // The hints stay, for display.
+  assert.deepEqual(record.tools[0]?.annotations, { readOnlyHint: true });
+});
+
+test("issue #367 review: a truncated tool list is stored but not validated", () => {
+  const at = new Date("2026-10-24T00:00:00.000Z");
+  const record = endpointProbeRecord(
+    {
+      result: "open",
+      selfDescription: {},
+      tools: [{ name: "a" }],
+      toolsTruncated: true,
+    },
+    at,
+  );
+  assert.equal(record.tools.length, 1);
+  assert.equal(record.validatedAt, undefined);
+});
+
+test("issue #367 review: stored tools that fail to parse take validatedAt with them", () => {
+  const now = new Date("2026-10-24T00:00:00.000Z");
+  const authProbe = authProbeRecord(OPEN_ENDPOINT, "open", daysAgo(1));
+  const reused = storedAuthProbe(
+    storedRow({
+      authProbe,
+      validatedAt: "2026-10-23T00:00:00.000Z",
+      tools: [{ noName: true }],
+    }),
+    OPEN_ENDPOINT,
+    now,
+  );
+  assert.deepEqual(reused, {
+    result: "open",
+    probedAt: new Date(authProbe.probedAt),
+    tools: [],
+  });
+  const kept = storedAuthProbe(
+    storedRow({
+      authProbe,
+      validatedAt: "2026-10-23T00:00:00.000Z",
+      tools: EXPECTED_TOOLS,
+    }),
+    OPEN_ENDPOINT,
+    now,
+  );
+  assert.equal(kept?.validatedAt, "2026-10-23T00:00:00.000Z");
+});
+
+test("issue #367 review: a failed fresh probe keeps the version's stored one, however old", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  const probedAt = daysAgo(45);
+  const stored = endpointProbeRecord(
+    {
+      result: "open",
+      selfDescription: { serverInfo: OPEN_INITIALIZE.serverInfo },
+      tools: OPEN_TOOLS,
+    },
+    probedAt,
+  );
+  mocks.storedProbes.mockResolvedValueOnce(
+    new Map([
+      [
+        mcpServerVersionId("io.github.acme/open", "2.0.0"),
+        storedRow({
+          authProbe: authProbeRecord(OPEN_ENDPOINT, "open", probedAt),
+          selfDescription: stored.selfDescription,
+          validatedAt: stored.validatedAt,
+          tools: stored.tools,
+        }),
+      ],
+    ]),
+  );
+  const { requests } = stubRegistryAndMcp([openEntry], () => {
+    throw new TypeError("fetch failed");
+  });
+
+  const result = await ingestFromRegistry({
+    source: "registry.test",
+    baseUrl: "https://registry.test",
+    verified: true,
+  });
+
+  // The stale probe was retried (and failed), and the entry kept what it had.
+  assert.equal(requests.length, 1);
+  assert.equal(result.authProbeFailed, 1);
+  const input = mocks.upsert.mock.calls[0]?.[0];
+  assert.deepEqual(input.manifest.tools, EXPECTED_TOOLS);
+  assert.deepEqual(
+    input.provenanceJson.selfDescription,
+    stored.selfDescription,
+  );
+  assert.equal(input.provenanceJson.validatedAt, probedAt.toISOString());
+  // Its old probe time stays, so it is retried again next sync.
+  assert.equal(input.provenanceJson.authProbe.probedAt, probedAt.toISOString());
 });

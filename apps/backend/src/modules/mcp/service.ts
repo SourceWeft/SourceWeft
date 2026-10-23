@@ -108,6 +108,10 @@ export async function mcpEndpointRequiresAuth(
   const requests = createMcpRequestScope();
   try {
     const probe = await probeMcpEndpointAuth(endpointUrl, requests.fetch);
+    // The probe swallows failures of its follow-up requests (tools/list, the
+    // well-known lookups); a policy denial among them still blocks the
+    // endpoint.
+    requests.throwIfDenied();
     return probe.result !== "open";
   } catch (error) {
     requests.throwIfDenied();

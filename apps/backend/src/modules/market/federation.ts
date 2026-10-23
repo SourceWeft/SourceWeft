@@ -28,7 +28,6 @@ import {
   type StoredEndpointProbe,
 } from "./ingest/repository";
 import { classifyByText } from "./parser/categories";
-import { classifyToolRisk } from "./parser/tool-risk";
 import { registryServerProvenance } from "./registry-server";
 
 /**
@@ -85,11 +84,9 @@ type RegistryPage = {
 // share a publishedAt). Entries without the marker are kept (default include).
 function isLatestEntry(entry: RegistryEntry) {
   const meta = (entry._meta ?? entry.server?._meta) as
-    | Record<string, unknown>
-    | undefined;
+    Record<string, unknown> | undefined;
   const official = meta?.["io.modelcontextprotocol.registry/official"] as
-    | { isLatest?: boolean }
-    | undefined;
+    { isLatest?: boolean } | undefined;
   return official?.isLatest !== false;
 }
 
@@ -482,7 +479,12 @@ function definedEntries<T extends Record<string, unknown>>(value: T): T {
 
 /**
  * A fresh probe as the catalog keeps it. Tools take the manifest's tool
- * shape, their risk from the server's annotations or their name.
+ * shape with their risk `unknown`: the HITL gate trusts a verified
+ * install's catalog risk, and registry entries are verified, so a risk
+ * derived from an unauthenticated server's own hints or names would let
+ * that server choose which of its tools run without approval. The server's
+ * annotations are kept as it sent them, for display only. `validatedAt` is
+ * set only for a tool list that is complete.
  */
 export function endpointProbeRecord(
   probe: McpEndpointProbe,
@@ -491,7 +493,7 @@ export function endpointProbeRecord(
   const tools = (probe.tools ?? []).flatMap((tool) => {
     const parsed = marketMcpToolManifestSchema.safeParse({
       ...tool,
-      risk: classifyToolRisk(tool.name, tool.annotations),
+      risk: "unknown",
     });
     return parsed.success ? [parsed.data] : [];
   });
@@ -507,7 +509,9 @@ export function endpointProbeRecord(
         }
       : undefined,
     validatedAt:
-      probe.selfDescription && probe.tools ? probedAt.toISOString() : undefined,
+      probe.selfDescription && probe.tools && !probe.toolsTruncated
+        ? probedAt.toISOString()
+        : undefined,
     authMetadata: probe.authMetadata,
     serverCard: probe.serverCard,
   });
@@ -536,15 +540,17 @@ export function authProbeRecord(
 
 /**
  * The version's stored probe, when it was of this same endpoint and is under
- * 30 days old at `now`, with what the probe stored alongside it (the
- * self-description it recorded itself, the tools, the auth metadata and the
- * server card; each piece only when well-formed). A record without a probe
- * time is probed again.
+ * `maxAgeMs` (30 days) old at `now`, with what the probe stored alongside it
+ * (the self-description it recorded itself, the tools, the auth metadata and
+ * the server card; each piece only when well-formed — a tool list that is
+ * not takes `validatedAt` with it). A record without a probe time is probed
+ * again.
  */
 export function storedAuthProbe(
   value: StoredEndpointProbe | undefined,
   endpointUrl: string,
   now: Date,
+  maxAgeMs = AUTH_PROBE_MAX_AGE_MS,
 ): EndpointProbe | undefined {
   if (!value?.authProbe || typeof value.authProbe !== "object") {
     return undefined;
@@ -564,7 +570,7 @@ export function storedAuthProbe(
   const age = now.getTime() - probedAt.getTime();
   if (
     stored.endpointSha256 !== endpointSha256(endpointUrl) ||
-    !(age >= 0 && age < AUTH_PROBE_MAX_AGE_MS)
+    !(age >= 0 && age < maxAgeMs)
   ) {
     return undefined;
   }
@@ -585,7 +591,9 @@ export function storedAuthProbe(
         ? selfDescription.data
         : undefined,
     validatedAt:
-      typeof value.validatedAt === "string" ? value.validatedAt : undefined,
+      tools.success && typeof value.validatedAt === "string"
+        ? value.validatedAt
+        : undefined,
     authMetadata: authMetadata.success ? authMetadata.data : undefined,
     serverCard:
       value.serverCard &&
@@ -606,7 +614,11 @@ async function probeRegistryEndpoint(
     allowedInternalOrigins: config.mcpAllowedInternalOrigins ?? [],
   });
   try {
-    return await probeMcpEndpointAuth(endpointUrl, requests.fetch);
+    const probe = await probeMcpEndpointAuth(endpointUrl, requests.fetch);
+    // The probe swallows failures of its follow-up requests; a policy denial
+    // among them fails the probe as a whole.
+    requests.throwIfDenied();
+    return probe;
   } catch (error) {
     requests.throwIfDenied();
     throw error;
@@ -619,9 +631,11 @@ async function probeRegistryEndpoint(
  * The endpoint probe of each entry with a remote: the one stored for that
  * version when it probed the same endpoint within 30 days of `now`, else a
  * fresh one — so the server's self-description and tools refresh with its
- * auth classification. A probe that fails is left out (the entry is mapped
- * from its declared headers alone, with no tools) and retried on the next
- * sync.
+ * auth classification. A probe that fails keeps the version's stored one
+ * whatever its age (so a transient failure does not empty the entry's
+ * tools and flip its overview), or, without one, is left out (the entry is
+ * mapped from its declared headers alone, with no tools); either way it is
+ * retried on the next sync.
  */
 async function registryAuthProbes(entries: RegistryEntry[], now: Date) {
   const targets = entries.flatMap((entry) => {
@@ -669,8 +683,16 @@ async function registryAuthProbes(entries: RegistryEntry[], now: Date) {
         );
       } catch (error) {
         failed += 1;
+        const previous = storedAuthProbe(
+          stored.get(target.versionId),
+          target.endpointUrl,
+          now,
+          Number.POSITIVE_INFINITY,
+        );
+        if (previous) probes.set(target.entry, previous);
         logger.warn("Registry federation auth probe failed", {
           identifier: target.identifier,
+          keptStoredProbe: Boolean(previous),
           error: error instanceof Error ? error.message : String(error),
         });
       }

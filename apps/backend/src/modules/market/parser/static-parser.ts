@@ -13,7 +13,6 @@ import type {
   RegistryServerJson,
   StaticParseResult,
 } from "../types";
-import { classifyToolRiskByName } from "./tool-risk";
 
 const ignoredDirectories = new Set([
   ".git",
@@ -62,6 +61,24 @@ function walkFiles(repo: RepoContext, limit = 2_000): string[] {
   });
 }
 
+function classifyRisk(name: string) {
+  const lower = name.toLowerCase();
+  if (/(delete|destroy|remove|drop|purge|reset|revoke)/.test(lower)) {
+    return "destructive" as const;
+  }
+  if (
+    /(create|update|write|edit|merge|close|open|send|post|put|patch)/.test(
+      lower,
+    )
+  ) {
+    return "write" as const;
+  }
+  if (/(get|list|read|search|fetch|find|query|lookup)/.test(lower)) {
+    return "read" as const;
+  }
+  return "unknown" as const;
+}
+
 function humanize(value: string) {
   return value
     .replace(/[_-]+/g, " ")
@@ -84,7 +101,7 @@ function toolFrom(input: {
     description: input.description?.trim(),
     inputSchema: input.inputSchema ?? {},
     annotations: {},
-    risk: classifyToolRiskByName(input.name),
+    risk: classifyRisk(input.name),
     confidence: input.confidence,
     source: input.source,
     sourcePath: input.sourcePath,

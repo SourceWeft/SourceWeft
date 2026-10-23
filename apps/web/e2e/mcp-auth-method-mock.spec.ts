@@ -202,14 +202,16 @@ test("issue #367: the open mock's tools and self-description come from the probe
   );
   const { manifest, version } = await response.json();
   expect(manifest.auth).toMatchObject({ type: "none", required: false });
+  // Probe-sourced tools are stored with risk `unknown`, whatever the server's
+  // hints say: a verified install's catalog risk is what the HITL gate trusts.
   expect(
     manifest.tools.map((tool: { name: string; risk: string }) => [
       tool.name,
       tool.risk,
     ]),
   ).toEqual([
-    ["search_notes", "read"],
-    ["delete_note", "destructive"],
+    ["search_notes", "unknown"],
+    ["delete_note", "unknown"],
   ]);
   expect(version.provenanceJson.selfDescription).toMatchObject({
     source: "remote-probe",
