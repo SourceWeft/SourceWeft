@@ -56,6 +56,8 @@ const MAX_TOOL_PAGES = 5;
 const MAX_TOOLS = 200;
 /** Grace between SIGTERM and SIGKILL when stopping the server. */
 const KILL_GRACE_MS = 2000;
+/** How long after the SIGKILL the driver still waits for the exit. */
+const KILL_WAIT_MS = 1000;
 
 const [planPath, resultPath] = process.argv.slice(2);
 if (!planPath || !resultPath) {
@@ -103,24 +105,60 @@ function shellCommand(command) {
   return ["sh", ["-c", `ulimit -t ${cpu} 2>/dev/null; ${command}`]];
 }
 
-/** SIGTERM the child's process group, SIGKILL it after the grace period. */
+/**
+ * SIGTERM the child's process group, SIGKILL it after the grace period, and
+ * resolve once it has exited — or shortly after the SIGKILL, so a process the
+ * kernel will not reap cannot hold the driver (and the sandbox) open.
+ */
 function stop(child) {
-  if (child.exitCode !== null || child.signalCode !== null) return;
-  const signalGroup = (signal) => {
-    try {
-      process.kill(-child.pid, signal);
-    } catch {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    const signalGroup = (signal) => {
       try {
-        child.kill(signal);
+        process.kill(-child.pid, signal);
       } catch {
-        // Already gone.
+        try {
+          child.kill(signal);
+        } catch {
+          // Already gone.
+        }
       }
-    }
-  };
-  signalGroup("SIGTERM");
-  const timer = setTimeout(() => signalGroup("SIGKILL"), KILL_GRACE_MS);
-  timer.unref();
-  child.once("exit", () => clearTimeout(timer));
+    };
+    const groupAlive = () => {
+      try {
+        process.kill(-child.pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const done = () => {
+      clearTimeout(killTimer);
+      clearTimeout(giveUp);
+      resolve();
+    };
+    child.once("exit", () => {
+      // The shell (or npx) is gone; a grandchild that ignored the SIGTERM
+      // may not be. Give the group the same grace, then SIGKILL what is left.
+      const until = Date.now() + KILL_GRACE_MS;
+      const poll = () => {
+        if (!groupAlive()) {
+          done();
+        } else if (Date.now() >= until) {
+          signalGroup("SIGKILL");
+          setTimeout(done, 100);
+        } else {
+          setTimeout(poll, 100);
+        }
+      };
+      poll();
+    });
+    signalGroup("SIGTERM");
+    const killTimer = setTimeout(() => signalGroup("SIGKILL"), KILL_GRACE_MS);
+    const giveUp = setTimeout(done, 2 * KILL_GRACE_MS + KILL_WAIT_MS);
+  });
 }
 
 function runInstall() {
@@ -217,12 +255,14 @@ function runServer() {
       if (settled) return;
       settled = true;
       clearTimeout(deadline);
-      stop(child);
-      resolve({
-        ...result,
-        startMs: Date.now() - begun,
-        stderrTail: stderr.toString(),
-      });
+      // The server is gone (or SIGKILLed) by the time the result is written.
+      void stop(child).then(() =>
+        resolve({
+          ...result,
+          startMs: Date.now() - begun,
+          stderrTail: stderr.toString(),
+        }),
+      );
     };
     const fail = (reason, detail, extra = {}) =>
       finish({ ok: false, reason, detail, ...extra });
@@ -252,7 +292,20 @@ function runServer() {
     const onMessage = (message) => {
       if (!message || typeof message !== "object" || Array.isArray(message))
         return;
-      if (message.id === undefined || message.id === null) return; // a notification
+      if (typeof message.method === "string") {
+        // A notification, or a request the server makes of its client
+        // (roots/list, sampling, elicitation) whose id may collide with one
+        // of ours: never a response. This client offers none of them.
+        if (message.id !== undefined && message.id !== null) {
+          send({
+            jsonrpc: "2.0",
+            id: message.id,
+            error: { code: -32601, message: "Method not found" },
+          });
+        }
+        return;
+      }
+      if (message.id === undefined || message.id === null) return;
       const handler = waiting.get(Number(message.id));
       if (!handler) return;
       waiting.delete(Number(message.id));
@@ -406,6 +459,7 @@ main()
         ? `ok tools=${result.tools.length} install=${result.timings.installMs}ms start=${result.timings.startMs}ms`
         : `failed reason=${result.reason} install=${result.timings.installMs}ms start=${result.timings.startMs}ms`,
     );
-    // The server's process group was signalled; do not wait on its pipes.
+    // The server's process group has exited (or was SIGKILLed and given a
+    // moment); do not wait on any pipe a grandchild may still hold.
     process.exit(0);
   });

@@ -11,6 +11,7 @@ import {
 import {
   mcpStdioSandboxReadiness,
   runMcpStdioValidationInSandbox,
+  sweepMcpStdioSandboxes,
 } from "./mcp-stdio-sandbox";
 
 /**
@@ -32,6 +33,11 @@ export async function processMcpStdioValidateJob(
     throw new Error("mcp-stdio-validate job has no versionIds");
   }
   const reason = payload.reason === "admin" ? "admin" : "scheduled";
+  if (!deps) {
+    // Orphans of an earlier batch first: a worker that died mid-run left
+    // sandboxes nothing else in the stack deletes.
+    await sweepMcpStdioSandboxes();
+  }
   return validateMcpStdioBatch(
     { versionIds, reason },
     deps ??

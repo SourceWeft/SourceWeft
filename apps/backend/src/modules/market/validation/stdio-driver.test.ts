@@ -270,3 +270,48 @@ test("tools are capped at 200 across pages", async () => {
   if (!result.ok) return;
   assert.equal(result.tools.length, 200);
 });
+
+test("a request from the server is answered with -32601 and never mistaken for a response, even with a colliding id", async () => {
+  const { result } = await runDriver({
+    server: fakeServer(`
+      if (m.method === "initialize") {
+        // Ask the client for roots first, reusing its own request id.
+        out({ jsonrpc: "2.0", id: m.id, method: "roots/list", params: {} });
+        out({ jsonrpc: "2.0", id: m.id, result: { serverInfo: { name: "asker" } } });
+      } else if (m.method === undefined && m.error && m.error.code === -32601) {
+        globalThis.refused = m.id;
+      } else if (m.method === "tools/list") {
+        out({ jsonrpc: "2.0", id: m.id, result: { tools: [{ name: "refused-" + globalThis.refused }] } });
+      }
+    `),
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.deepEqual(result.serverInfo, { name: "asker" });
+  assert.deepEqual(
+    result.tools.map((tool) => (tool as { name: string }).name),
+    ["refused-1"],
+  );
+});
+
+test("a server that ignores SIGTERM is SIGKILLed before the driver writes its result", async () => {
+  const { result, dir } = await runDriver({
+    runTimeoutMs: 2000,
+    server: `
+      process.on("SIGTERM", () => {});
+      require("node:fs").writeFileSync("pid.txt", String(process.pid));
+      setInterval(() => {}, 1000);
+    `,
+  });
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.equal(result.reason, "timeout");
+  const pid = Number(readFileSync(path.join(dir, "pid.txt"), "utf8"));
+  let alive = true;
+  try {
+    process.kill(pid, 0);
+  } catch {
+    alive = false;
+  }
+  assert.equal(alive, false, "the SIGTERM-ignoring server outlived the driver");
+});

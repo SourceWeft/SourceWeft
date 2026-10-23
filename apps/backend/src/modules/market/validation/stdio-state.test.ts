@@ -168,3 +168,46 @@ test("an unsupported package is recorded as such", () => {
     detail: "No stdio package to run",
   });
 });
+
+test("exit 127 before the handshake is an unsupported package, not a server that did not start", () => {
+  const result = parseStdioDriverResult(
+    JSON.stringify({
+      ok: false,
+      reason: "start",
+      exitCode: 127,
+      detail:
+        "server exited with 127 before answering initialize: no console script named acme",
+      timings: { installMs: 3000, startMs: 20 },
+      stderrTail: "",
+    }),
+  );
+  assert.ok(result);
+  const outcome = stdioValidationOutcome(result, NOW);
+  assert.deepEqual(outcome, {
+    kind: "failure",
+    validation: {
+      status: "unsupported",
+      reason: "unsupported-package",
+      at: NOW.toISOString(),
+      detail:
+        "server exited with 127 before answering initialize: no console script named acme",
+    },
+  });
+  // Exit 127 after the handshake began is the server's own exit code.
+  const later = parseStdioDriverResult(
+    JSON.stringify({
+      ok: false,
+      reason: "protocol",
+      exitCode: 127,
+      detail: "x",
+      timings: {},
+      stderrTail: "",
+    }),
+  );
+  assert.ok(later);
+  const laterOutcome = stdioValidationOutcome(later, NOW);
+  assert.equal(laterOutcome.kind, "failure");
+  if (laterOutcome.kind === "failure") {
+    assert.equal(laterOutcome.validation.status, "failed");
+  }
+});

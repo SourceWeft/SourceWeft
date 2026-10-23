@@ -65,10 +65,13 @@ fresh provider sandbox — no credentials, the registry's required inputs filled
 with placeholders, two at a time — performs the MCP handshake over stdio and
 stores the server's self-description and tools on the version, or why it could
 not be validated (`install`, `start`, `protocol`, `timeout`,
-`unsupported-package`). The sandbox is deleted afterwards. While a batch is
-queued or running, no second one is queued. A version is due again 30 days
-after its last outcome; a claimed version is held for 30 minutes so a worker
-that died mid-batch only delays it. Batch size, concurrency, timeouts and the
+`unsupported-package`). The sandbox is deleted afterwards; each sandbox is
+also recorded in a Redis ledger until deleted, and every batch first deletes
+the sandboxes a dead worker left there. While a batch is queued or running,
+no second one is queued. A version is due again 30 days after its last
+outcome; a claimed version is held for 30 minutes so a worker that died
+mid-batch only delays it. A sandbox that could not be used at all is tried
+three times, then stored as a failure. Batch size, concurrency, timeouts and the
 refresh interval are constants in `modules/market/validation/`; there is no env
 variable. Six per batch, two at a time, paces the first pass over the
 catalog's ~1,500 packages across about three days on purpose: each one is

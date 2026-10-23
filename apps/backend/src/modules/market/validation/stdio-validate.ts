@@ -129,6 +129,25 @@ export function defaultValidateMcpStdioDeps(input: {
   };
 }
 
+/**
+ * Tries a version gets when the sandbox itself fails (the create, a
+ * transfer, a driver that leaves no result) before the failure is stored and
+ * the version waits for its 30-day refresh like any other.
+ */
+export const MCP_STDIO_MAX_ATTEMPTS = 3;
+
+/** The claim's attempt count (`stdioValidation.attempts`), this try included. */
+function attemptsOf(provenance: Record<string, unknown>): number {
+  const claim = provenance.stdioValidation;
+  const attempts =
+    claim && typeof claim === "object"
+      ? (claim as { attempts?: unknown }).attempts
+      : undefined;
+  return typeof attempts === "number" && Number.isFinite(attempts)
+    ? Math.max(1, Math.trunc(attempts))
+    : 1;
+}
+
 function packagesOf(provenance: Record<string, unknown>): unknown {
   const registryServer = provenance.registryServer;
   return registryServer && typeof registryServer === "object"
@@ -197,6 +216,29 @@ export async function validateMcpStdioBatch(
       count("unsupported-package");
       return;
     }
+    const attempts = attemptsOf(row.provenanceJson);
+    // The sandbox, not the package, failed: nothing is stored and the claim
+    // lapses — up to a point. A version that cannot be run after
+    // MCP_STDIO_MAX_ATTEMPTS tries is stored as failed rather than started
+    // again, in a fresh sandbox, every half hour for ever.
+    const giveUp = async (
+      reason: "start" | "protocol",
+      detail: string,
+    ): Promise<boolean> => {
+      summary.errors += 1;
+      if (attempts < MCP_STDIO_MAX_ATTEMPTS) return false;
+      await deps.writeFailure({
+        versionId: row.versionId,
+        validation: {
+          status: "failed",
+          reason,
+          at: deps.now().toISOString(),
+          detail: `${detail} (${attempts} tries)`,
+        },
+      });
+      count(reason);
+      return true;
+    };
     let result: McpStdioDriverResult | null;
     try {
       result = await deps.run(choice.plan, {
@@ -204,20 +246,23 @@ export async function validateMcpStdioBatch(
         version: row.version,
       });
     } catch (error) {
-      summary.errors += 1;
+      const message = error instanceof Error ? error.message : String(error);
       logger.warn("MCP stdio validation could not use a sandbox", {
         identifier: row.identifier,
         version: row.version,
-        error: error instanceof Error ? error.message : String(error),
+        attempts,
+        error: message,
       });
+      await giveUp("start", `the sandbox could not be used: ${message}`);
       return;
     }
     if (!result) {
-      summary.errors += 1;
       logger.warn("MCP stdio validation driver left no result", {
         identifier: row.identifier,
         version: row.version,
+        attempts,
       });
+      await giveUp("protocol", "the sandbox run left no readable result");
       return;
     }
     const outcome = stdioValidationOutcome(result, deps.now());

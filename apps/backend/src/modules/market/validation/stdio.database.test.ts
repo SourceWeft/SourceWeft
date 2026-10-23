@@ -139,6 +139,7 @@ describe("MCP stdio validation storage", () => {
     });
     expect(claimed[0]!.provenanceJson.stdioValidation).toEqual({
       attemptedAt: now.toISOString(),
+      attempts: 1,
     });
 
     // Claimed: not due again until the lease lapses, then due again (no
@@ -154,6 +155,15 @@ describe("MCP stdio validation storage", () => {
       now.getTime() + repository.MCP_STDIO_CLAIM_LEASE_MS + 1000,
     );
     expect(await dueIds(afterLease)).toEqual([withPackages.identifier]);
+    // The second claim counts the second try.
+    const again = await repository.claimMcpStdioValidations({
+      versionIds: [claimed[0]!.versionId],
+      now: afterLease,
+    });
+    expect(again[0]!.provenanceJson.stdioValidation).toEqual({
+      attemptedAt: afterLease.toISOString(),
+      attempts: 2,
+    });
   });
 
   test("a success writes the self-description, validatedAt, the tools and the count; a re-sync keeps them", async () => {

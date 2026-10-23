@@ -1,4 +1,7 @@
-import type { SandboxProvider } from "@sourceweft/builtin-tool-sandbox";
+import {
+  isSandboxInstanceMissingError,
+  type SandboxProvider,
+} from "@sourceweft/builtin-tool-sandbox";
 import type { McpStdioLaunchPlan } from "../../modules/market/validation/stdio-package";
 import {
   MCP_STDIO_DRIVER_FILE,
@@ -8,6 +11,12 @@ import {
   parseStdioDriverResult,
   type McpStdioDriverResult,
 } from "../../modules/market/validation/stdio-state";
+import {
+  forgetMcpStdioSandbox,
+  listMcpStdioSandboxes,
+  recordMcpStdioSandbox,
+  type McpStdioInFlightSandbox,
+} from "../../modules/market/validation/stdio-queue";
 import type { McpStdioSandboxReadiness } from "../../modules/market/validation/stdio-validate";
 import {
   getSandboxProviderFactory,
@@ -110,6 +119,13 @@ export async function runMcpStdioValidationInSandbox(
     providerSandboxId,
   };
   try {
+    // In the ledger before anything else, so a death from here on leaves a
+    // sandbox the next batch's sweep can find; see sweepOrphanedMcpStdioSandboxes.
+    await recordMcpStdioSandbox({
+      provider: factory.id,
+      providerSandboxId,
+      createdAt: new Date().toISOString(),
+    });
     await provider.ensureDirectory({ providerSandboxId, directory });
     const encoder = new TextEncoder();
     await provider.uploadFile({
@@ -146,11 +162,19 @@ export async function runMcpStdioValidationInSandbox(
         timeoutMs: RESULT_DOWNLOAD_TIMEOUT_MS,
       });
       if (bytes.byteLength > RESULT_MAX_BYTES) {
+        // The package's doing (a tool list that large is not a tool list):
+        // a verdict, not something to try again.
         logger.warn("MCP stdio validation result is too large", {
           ...log,
           bytes: bytes.byteLength,
         });
-        return null;
+        return {
+          ok: false,
+          reason: "protocol",
+          detail: `the server's answer was larger than ${Math.round(RESULT_MAX_BYTES / (1024 * 1024))} MB`,
+          timings: { installMs: 0, startMs: 0 },
+          stderrTail: "",
+        };
       }
       text = bytes.toString("utf8");
     } catch (error) {
@@ -172,12 +196,85 @@ export async function runMcpStdioValidationInSandbox(
   } finally {
     try {
       await provider.deleteSandbox(providerSandboxId);
+      await forgetMcpStdioSandbox(providerSandboxId);
     } catch (error) {
-      // The provider's TTL reaps it; say so where an operator can see.
+      // Still in the ledger: the next batch's sweep tries again.
       logger.warn("MCP stdio validation sandbox could not be deleted", {
         ...log,
         error: error instanceof Error ? error.message : String(error),
       });
     }
   }
+}
+
+/** A sandbox still in the ledger this long after its creation is an orphan. */
+export const MCP_STDIO_ORPHAN_AGE_MS = 2 * MCP_STDIO_SANDBOX_TTL_SECONDS * 1000;
+
+export type SweepMcpStdioSandboxesDeps = {
+  list: () => Promise<McpStdioInFlightSandbox[]>;
+  forget: (providerSandboxId: string) => Promise<void>;
+  /** Delete `providerSandboxId` at the provider; resolve too when it is already gone. */
+  deleteSandbox: (entry: McpStdioInFlightSandbox) => Promise<void>;
+  now: () => Date;
+};
+
+/**
+ * Delete the sandboxes an earlier run recorded and never deleted: a worker
+ * that died between create and delete, or a delete the provider refused.
+ * Run before each batch. One that is younger than
+ * {@link MCP_STDIO_ORPHAN_AGE_MS} may still be in use by another worker and
+ * is left alone; one the provider no longer knows is simply forgotten.
+ */
+export async function sweepOrphanedMcpStdioSandboxes(
+  deps: SweepMcpStdioSandboxesDeps,
+): Promise<{ swept: number; failed: number }> {
+  const cutoff = deps.now().getTime() - MCP_STDIO_ORPHAN_AGE_MS;
+  let swept = 0;
+  let failed = 0;
+  for (const entry of await deps.list()) {
+    if (new Date(entry.createdAt).getTime() > cutoff) continue;
+    try {
+      await deps.deleteSandbox(entry);
+      await deps.forget(entry.providerSandboxId);
+      swept += 1;
+      logger.warn("MCP stdio validation deleted an orphaned sandbox", entry);
+    } catch (error) {
+      failed += 1;
+      logger.warn("MCP stdio validation could not delete an orphaned sandbox", {
+        ...entry,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return { swept, failed };
+}
+
+/** The sweep with the real ledger and the configured provider. */
+export async function sweepMcpStdioSandboxes(): Promise<{
+  swept: number;
+  failed: number;
+}> {
+  await initializeSandboxProviderRegistry();
+  const factory = getSandboxProviderFactory(config.sandbox.provider);
+  if (!factory || !factory.getConfigurationStatus().configured) {
+    return { swept: 0, failed: 0 };
+  }
+  const provider = factory.createProvider();
+  return sweepOrphanedMcpStdioSandboxes({
+    list: listMcpStdioSandboxes,
+    forget: forgetMcpStdioSandbox,
+    deleteSandbox: async (entry) => {
+      if (entry.provider !== factory.id) {
+        throw new Error(
+          `recorded for provider '${entry.provider}', not '${factory.id}'`,
+        );
+      }
+      try {
+        await provider.deleteSandbox(entry.providerSandboxId);
+      } catch (error) {
+        if (!isSandboxInstanceMissingError(error)) throw error;
+      }
+    },
+    now: () => new Date(),
+  });
 }

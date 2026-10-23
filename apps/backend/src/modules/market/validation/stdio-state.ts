@@ -248,11 +248,16 @@ export function stdioValidationOutcome(
 ): McpStdioOutcome {
   const at = now.toISOString();
   if (!result.ok) {
+    // Exit 127 before the handshake is the shell's "command not found": the
+    // package installed but has no program to start (a PyPI package whose
+    // console script is not named after it, say). Not a server that did not
+    // start — a package of a shape the sandbox cannot run.
+    const unsupported = result.reason === "start" && result.exitCode === 127;
     return {
       kind: "failure",
       validation: {
-        status: "failed",
-        reason: result.reason,
+        status: unsupported ? "unsupported" : "failed",
+        reason: unsupported ? "unsupported-package" : result.reason,
         at,
         ...(result.detail ? { detail: result.detail } : {}),
       },

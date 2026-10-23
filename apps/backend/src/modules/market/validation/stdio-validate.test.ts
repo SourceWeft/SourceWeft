@@ -14,6 +14,7 @@ import {
 import type { ClaimedMcpStdioValidation } from "./stdio-repository";
 import type { McpStdioDriverResult } from "./stdio-state";
 import {
+  MCP_STDIO_MAX_ATTEMPTS,
   scheduleDueMcpStdioValidations,
   validateMcpStdioBatch,
   type ValidateMcpStdioBatchDeps,
@@ -341,5 +342,73 @@ describe("validating a batch", () => {
       "provider daytona is missing DAYTONA_API_KEY",
     );
     assert.equal(d.record.mock.calls.length, 1);
+  });
+});
+
+describe("sandbox failures are capped", () => {
+  const withAttempts = (
+    row: ClaimedMcpStdioValidation,
+    attempts: number,
+  ): ClaimedMcpStdioValidation => ({
+    ...row,
+    provenanceJson: {
+      ...row.provenanceJson,
+      stdioValidation: { attemptedAt: NOW.toISOString(), attempts },
+    },
+  });
+
+  test("below the cap nothing is stored; at the cap the failure is", async () => {
+    const d = deps({
+      claim: async () => [
+        withAttempts(claimed("v-early", NPM), MCP_STDIO_MAX_ATTEMPTS - 1),
+        withAttempts(claimed("v-last", NPM), MCP_STDIO_MAX_ATTEMPTS),
+        withAttempts(claimed("v-null", NPM), MCP_STDIO_MAX_ATTEMPTS + 2),
+      ],
+      run: async (_plan, context) => {
+        if (context.identifier.endsWith("v-null")) return null;
+        throw new Error("SANDBOX_PROVIDER_UNAVAILABLE");
+      },
+    });
+    const summary = await validateMcpStdioBatch(
+      { versionIds: ["v-early", "v-last", "v-null"], reason: "scheduled" },
+      d,
+    );
+    assert.equal(summary.errors, 3);
+    const writes = d.writeFailure.mock.calls
+      .map((call) => call[0])
+      .sort((a, b) => a.versionId.localeCompare(b.versionId));
+    assert.deepEqual(writes, [
+      {
+        versionId: "v-last",
+        validation: {
+          status: "failed",
+          reason: "start",
+          at: NOW.toISOString(),
+          detail: `the sandbox could not be used: SANDBOX_PROVIDER_UNAVAILABLE (${MCP_STDIO_MAX_ATTEMPTS} tries)`,
+        },
+      },
+      {
+        versionId: "v-null",
+        validation: {
+          status: "failed",
+          reason: "protocol",
+          at: NOW.toISOString(),
+          detail: `the sandbox run left no readable result (${MCP_STDIO_MAX_ATTEMPTS + 2} tries)`,
+        },
+      },
+    ]);
+    assert.deepEqual(summary.outcomes, { start: 1, protocol: 1 });
+  });
+
+  test("a claim without a count is the first try", async () => {
+    const d = deps({
+      claim: async () => [claimed("v1", NPM)],
+      run: async () => null,
+    });
+    await validateMcpStdioBatch({ versionIds: ["v1"], reason: "scheduled" }, d);
+    assert.equal(
+      d.writeFailure.mock.calls.length,
+      MCP_STDIO_MAX_ATTEMPTS <= 1 ? 1 : 0,
+    );
   });
 });

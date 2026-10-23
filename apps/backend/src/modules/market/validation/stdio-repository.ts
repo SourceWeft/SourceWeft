@@ -96,8 +96,10 @@ export type ClaimedMcpStdioValidation = {
 /**
  * Take the due versions among `versionIds` in one statement: stamp their
  * claim (`stdioValidation.attemptedAt`) so another batch passes them over
- * until the lease lapses, and read what the start needs. A version no longer
- * due is left out. The rows come back in no particular order.
+ * until the lease lapses, count the attempt (`stdioValidation.attempts`,
+ * which an outcome clears, so it counts the tries since the last outcome),
+ * and read what the start needs. A version no longer due is left out. The
+ * rows come back in no particular order.
  */
 export async function claimMcpStdioValidations(input: {
   versionIds: string[];
@@ -110,7 +112,10 @@ export async function claimMcpStdioValidations(input: {
   const result = await db.execute<ClaimedMcpStdioValidation>(sql`
     update ${mcpServerVersions} v
     set provenance_json = v.provenance_json || jsonb_build_object(
-      'stdioValidation', jsonb_build_object('attemptedAt', ${now.toISOString()}::text)
+      'stdioValidation', jsonb_build_object(
+        'attemptedAt', ${now.toISOString()}::text,
+        'attempts', coalesce((v.provenance_json #>> '{stdioValidation,attempts}')::int, 0) + 1
+      )
     )
     from ${mcpServers} s
     where v.id = any(${sql.param(input.versionIds)}::text[])
@@ -144,7 +149,7 @@ export async function writeMcpStdioValidationSuccess(input: {
   });
   await db.execute(sql`
     update ${mcpServerVersions}
-    set provenance_json = (provenance_json - 'validation') || ${patch}::jsonb,
+    set provenance_json = ((provenance_json - 'validation') #- '{stdioValidation,attempts}') || ${patch}::jsonb,
       manifest_json = jsonb_set(manifest_json, '{tools}', ${JSON.stringify(input.tools)}::jsonb, true)
     where id = ${input.versionId}
   `);
@@ -163,7 +168,7 @@ export async function writeMcpStdioValidationFailure(input: {
 }): Promise<void> {
   await db.execute(sql`
     update ${mcpServerVersions}
-    set provenance_json = provenance_json || jsonb_build_object(
+    set provenance_json = (provenance_json #- '{stdioValidation,attempts}') || jsonb_build_object(
       'validation', ${JSON.stringify(input.validation)}::jsonb
     )
     where id = ${input.versionId}

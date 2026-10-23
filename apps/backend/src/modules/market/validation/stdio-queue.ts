@@ -116,3 +116,71 @@ export async function readLastMcpStdioBatch(): Promise<McpStdioBatchSummary | nu
     return null;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Sandboxes in flight, so an orphan can be found
+// ---------------------------------------------------------------------------
+
+/**
+ * The validation creates its sandboxes outside the agent sandbox manager (it
+ * has no thread or workspace to record them under), so nothing in the
+ * database knows them. This ledger does: a sandbox is recorded before it is
+ * used and removed once deleted. A worker that dies in between leaves its
+ * entry, and the next batch deletes the sandbox it names
+ * (`worker/processors/mcp-stdio-sandbox.ts`). Cloudflare enforces no TTL of
+ * its own, so without this an orphan would live until someone noticed.
+ */
+const IN_FLIGHT_SANDBOXES_KEY = "sourceweft:mcp-stdio-validate:sandboxes";
+
+export type McpStdioInFlightSandbox = {
+  provider: string;
+  providerSandboxId: string;
+  createdAt: string;
+};
+
+export async function recordMcpStdioSandbox(
+  entry: McpStdioInFlightSandbox,
+): Promise<void> {
+  const redis = await jobsRedisClient();
+  await redis.hset(
+    IN_FLIGHT_SANDBOXES_KEY,
+    entry.providerSandboxId,
+    JSON.stringify(entry),
+  );
+}
+
+export async function forgetMcpStdioSandbox(
+  providerSandboxId: string,
+): Promise<void> {
+  const redis = await jobsRedisClient();
+  await redis.hdel(IN_FLIGHT_SANDBOXES_KEY, providerSandboxId);
+}
+
+/** Every sandbox recorded and not yet forgotten, whatever its age. */
+export async function listMcpStdioSandboxes(): Promise<
+  McpStdioInFlightSandbox[]
+> {
+  const redis = await jobsRedisClient();
+  const entries = await redis.hgetall(IN_FLIGHT_SANDBOXES_KEY);
+  const sandboxes: McpStdioInFlightSandbox[] = [];
+  for (const [providerSandboxId, value] of Object.entries(entries)) {
+    try {
+      const parsed = JSON.parse(value) as Partial<McpStdioInFlightSandbox>;
+      sandboxes.push({
+        providerSandboxId,
+        provider: typeof parsed.provider === "string" ? parsed.provider : "",
+        createdAt:
+          typeof parsed.createdAt === "string"
+            ? parsed.createdAt
+            : new Date(0).toISOString(),
+      });
+    } catch {
+      sandboxes.push({
+        providerSandboxId,
+        provider: "",
+        createdAt: new Date(0).toISOString(),
+      });
+    }
+  }
+  return sandboxes;
+}

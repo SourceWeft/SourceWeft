@@ -201,12 +201,30 @@ export function launchCommands(
     };
   }
   // The console script a PyPI package installs under its own name is what
-  // `uvx <package>` runs; `uv` is not in the sandbox image, `pip` is.
-  const script = shellQuote(`./venv/bin/${pkg.identifier}`);
+  // `uvx <package>` runs; `uv` is not in the sandbox image, `pip` is. The
+  // name as given, then its PEP 503 form; neither present is exit 127
+  // ("command not found"), which the outcome records as unsupported rather
+  // than as a server that did not start.
+  const scripts = [...new Set([pkg.identifier, pep503Name(pkg.identifier)])]
+    .map((name) => `./venv/bin/${name}`)
+    .map(shellQuote);
+  const missing = shellQuote(
+    `no console script named ${scripts.map((s) => s.slice(12, -1)).join(" or ")}`,
+  );
   return {
     install: `python3 -m venv venv && ./venv/bin/pip install --quiet ${spec}`,
-    start: [script, ...runtime, ...args].join(" "),
+    start: [
+      `s=${scripts[0]}`,
+      ...scripts.slice(1).map((script) => `[ -x "$s" ] || s=${script}`),
+      `[ -x "$s" ] || { echo ${missing} >&2; exit 127; }`,
+      ['exec "$s"', ...runtime, ...args].join(" "),
+    ].join("; "),
   };
+}
+
+/** A PyPI name as PEP 503 normalizes it: lowercase, runs of `-_.` as `-`. */
+export function pep503Name(name: string) {
+  return name.replace(/[-_.]+/g, "-").toLowerCase();
 }
 
 /**

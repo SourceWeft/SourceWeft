@@ -7,6 +7,7 @@ import {
   MCP_STDIO_INSTALL_TIMEOUT_MS,
   MCP_STDIO_PLACEHOLDER,
   MCP_STDIO_RUN_TIMEOUT_MS,
+  pep503Name,
   placeholderEnvironment,
   shellQuote,
 } from "./stdio-package";
@@ -63,7 +64,28 @@ test("a PyPI package installs into a venv and runs its console script", () => {
     choice.plan.install,
     "python3 -m venv venv && ./venv/bin/pip install --quiet 'mcp-server-fetch==2025.4.7'",
   );
-  assert.equal(choice.plan.start, "'./venv/bin/mcp-server-fetch'");
+  assert.equal(
+    choice.plan.start,
+    `s='./venv/bin/mcp-server-fetch'; [ -x "$s" ] || { echo 'no console script named mcp-server-fetch' >&2; exit 127; }; exec "$s"`,
+  );
+});
+
+test("a PyPI name is tried as given and in its PEP 503 form; no script is exit 127", () => {
+  assert.equal(pep503Name("Weather_MCP.Server"), "weather-mcp-server");
+  const choice = chooseStdioPackage([
+    {
+      registryType: "pypi",
+      identifier: "Weather_MCP",
+      version: "1.0",
+      packageArguments: [{ type: "positional", value: "--stdio" }],
+    },
+  ]);
+  assert.equal(choice.kind, "plan");
+  if (choice.kind !== "plan") return;
+  assert.equal(
+    choice.plan.start,
+    `s='./venv/bin/Weather_MCP'; [ -x "$s" ] || s='./venv/bin/weather-mcp'; [ -x "$s" ] || { echo 'no console script named Weather_MCP or weather-mcp' >&2; exit 127; }; exec "$s" '--stdio'`,
+  );
 });
 
 test("runtime and package arguments follow the registry's order; required inputs get placeholders", () => {
