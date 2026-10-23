@@ -107,7 +107,8 @@ export async function mcpEndpointRequiresAuth(
   // (MCP_ENDPOINT_BLOCKED), as every later request to this endpoint would be.
   const requests = createMcpRequestScope();
   try {
-    return (await probeMcpEndpointAuth(endpointUrl, requests.fetch)) !== "open";
+    const probe = await probeMcpEndpointAuth(endpointUrl, requests.fetch);
+    return probe.result !== "open";
   } catch (error) {
     requests.throwIfDenied();
     throw new McpError(
