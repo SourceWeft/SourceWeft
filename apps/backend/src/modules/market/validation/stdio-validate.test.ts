@@ -138,6 +138,7 @@ function deps(
 ): ValidateMcpStdioBatchDeps & {
   writeSuccess: Mock<ValidateMcpStdioBatchDeps["writeSuccess"]>;
   writeFailure: Mock<ValidateMcpStdioBatchDeps["writeFailure"]>;
+  writeExhausted: Mock<ValidateMcpStdioBatchDeps["writeExhausted"]>;
   record: Mock<ValidateMcpStdioBatchDeps["record"]>;
 } {
   return {
@@ -146,6 +147,7 @@ function deps(
     run: async () => ok([]),
     writeSuccess: vi.fn(async () => undefined),
     writeFailure: vi.fn(async () => undefined),
+    writeExhausted: vi.fn(async () => undefined),
     record: vi.fn(async () => undefined),
     now: () => NOW,
     ...overrides,
@@ -357,7 +359,7 @@ describe("sandbox failures are capped", () => {
     },
   });
 
-  test("below the cap nothing is stored; at the cap the failure is", async () => {
+  test("below the cap nothing is stored; at the cap the version is set aside, with no public record", async () => {
     const d = deps({
       claim: async () => [
         withAttempts(claimed("v-early", NPM), MCP_STDIO_MAX_ATTEMPTS - 1),
@@ -374,30 +376,16 @@ describe("sandbox failures are capped", () => {
       d,
     );
     assert.equal(summary.errors, 3);
-    const writes = d.writeFailure.mock.calls
+    assert.equal(d.writeFailure.mock.calls.length, 0);
+    assert.equal(d.writeSuccess.mock.calls.length, 0);
+    const setAside = d.writeExhausted.mock.calls
       .map((call) => call[0])
       .sort((a, b) => a.versionId.localeCompare(b.versionId));
-    assert.deepEqual(writes, [
-      {
-        versionId: "v-last",
-        validation: {
-          status: "failed",
-          reason: "start",
-          at: NOW.toISOString(),
-          detail: `the sandbox could not be used: SANDBOX_PROVIDER_UNAVAILABLE (${MCP_STDIO_MAX_ATTEMPTS} tries)`,
-        },
-      },
-      {
-        versionId: "v-null",
-        validation: {
-          status: "failed",
-          reason: "protocol",
-          at: NOW.toISOString(),
-          detail: `the sandbox run left no readable result (${MCP_STDIO_MAX_ATTEMPTS + 2} tries)`,
-        },
-      },
+    assert.deepEqual(setAside, [
+      { versionId: "v-last", at: NOW.toISOString() },
+      { versionId: "v-null", at: NOW.toISOString() },
     ]);
-    assert.deepEqual(summary.outcomes, { start: 1, protocol: 1 });
+    assert.deepEqual(summary.outcomes, { exhausted: 2 });
   });
 
   test("a claim without a count is the first try", async () => {

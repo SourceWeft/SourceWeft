@@ -31,7 +31,8 @@ const ATTEMPTED_AT = sql`v.provenance_json #>> '{stdioValidation,attemptedAt}'`;
 
 /**
  * A version is due when it lists packages, its last claim is older than the
- * lease, and it was neither validated nor found failing within
+ * lease, and it was neither validated, found failing nor set aside
+ * (`stdioValidation.exhaustedAt`, a sandbox that could not be used) within
  * {@link MCP_STDIO_REVALIDATE_MS}. The timestamps are ones this module (or
  * W1's probe, for `validatedAt`) wrote, so the casts are safe.
  */
@@ -48,6 +49,7 @@ function dueCondition(now: Date) {
     and coalesce((${ATTEMPTED_AT})::timestamptz, '-infinity'::timestamptz) <= ${leaseFloor}
     and coalesce((v.provenance_json ->> 'validatedAt')::timestamptz, '-infinity'::timestamptz) <= ${staleFloor}
     and coalesce((v.provenance_json #>> '{validation,at}')::timestamptz, '-infinity'::timestamptz) <= ${staleFloor}
+    and coalesce((v.provenance_json #>> '{stdioValidation,exhaustedAt}')::timestamptz, '-infinity'::timestamptz) <= ${staleFloor}
   `;
 }
 
@@ -170,6 +172,29 @@ export async function writeMcpStdioValidationFailure(input: {
     update ${mcpServerVersions}
     set provenance_json = (provenance_json #- '{stdioValidation,attempts}') || jsonb_build_object(
       'validation', ${JSON.stringify(input.validation)}::jsonb
+    )
+    where id = ${input.versionId}
+  `);
+}
+
+/**
+ * The sandbox, not the package, failed {@link MCP_STDIO_MAX_ATTEMPTS} times:
+ * the version is set aside until its refresh, with no public record — its
+ * page keeps saying nothing rather than blaming the server. The try count
+ * goes, so the next cycle starts afresh.
+ */
+export async function writeMcpStdioValidationExhausted(input: {
+  versionId: string;
+  at: string;
+}): Promise<void> {
+  await db.execute(sql`
+    update ${mcpServerVersions}
+    set provenance_json = jsonb_set(
+      provenance_json,
+      '{stdioValidation}',
+      (coalesce(provenance_json -> 'stdioValidation', '{}'::jsonb) - 'attempts')
+        || jsonb_build_object('exhaustedAt', ${input.at}::text),
+      true
     )
     where id = ${input.versionId}
   `);

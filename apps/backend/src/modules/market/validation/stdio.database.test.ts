@@ -326,4 +326,42 @@ describe("MCP stdio validation storage", () => {
     const later = new Date(now.getTime() + 31 * DAY);
     expect(await dueIds(later)).toContain(broken.identifier);
   });
+
+  test("a version set aside after a sandbox failure is not due, has no public record, and is due again after 30 days", async () => {
+    const aside = manifest("aside");
+    await ingest.upsertMarketMcp({
+      ...federated,
+      manifest: aside,
+      provenanceJson: provenance(NPM_PACKAGES),
+    });
+    const versionId = plan.mcpServerVersionId(aside.identifier, "1.0.0");
+    const now = new Date();
+    await repository.claimMcpStdioValidations({ versionIds: [versionId], now });
+    await repository.writeMcpStdioValidationExhausted({
+      versionId,
+      at: now.toISOString(),
+    });
+    const row = await versionRow(aside.identifier);
+    expect(row.provenanceJson.stdioValidation).toEqual({
+      attemptedAt: now.toISOString(),
+      exhaustedAt: now.toISOString(),
+    });
+    expect(row.provenanceJson.validation).toBeUndefined();
+    const record = await reads.findMcp(aside.identifier);
+    expect(record?.item.toolsValidation).toBeNull();
+    const afterLease = new Date(
+      now.getTime() + repository.MCP_STDIO_CLAIM_LEASE_MS + 1000,
+    );
+    expect(await dueIds(afterLease)).not.toContain(aside.identifier);
+    const later = new Date(now.getTime() + 31 * DAY);
+    expect(await dueIds(later)).toContain(aside.identifier);
+    // The next claim starts counting afresh.
+    const again = await repository.claimMcpStdioValidations({
+      versionIds: [versionId],
+      now: later,
+    });
+    expect(again[0]!.provenanceJson.stdioValidation).toMatchObject({
+      attempts: 1,
+    });
+  });
 });

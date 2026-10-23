@@ -13,6 +13,7 @@ import {
 import {
   claimMcpStdioValidations,
   findDueMcpStdioValidations,
+  writeMcpStdioValidationExhausted,
   writeMcpStdioValidationFailure,
   writeMcpStdioValidationSuccess,
   type ClaimedMcpStdioValidation,
@@ -109,6 +110,7 @@ export type ValidateMcpStdioBatchDeps = {
   ) => Promise<McpStdioDriverResult | null>;
   writeSuccess: typeof writeMcpStdioValidationSuccess;
   writeFailure: typeof writeMcpStdioValidationFailure;
+  writeExhausted: typeof writeMcpStdioValidationExhausted;
   record: (summary: McpStdioBatchSummary) => Promise<void>;
   now: () => Date;
 };
@@ -124,6 +126,7 @@ export function defaultValidateMcpStdioDeps(input: {
     claim: claimMcpStdioValidations,
     writeSuccess: writeMcpStdioValidationSuccess,
     writeFailure: writeMcpStdioValidationFailure,
+    writeExhausted: writeMcpStdioValidationExhausted,
     record: recordMcpStdioBatch,
     now: () => new Date(),
   };
@@ -131,8 +134,8 @@ export function defaultValidateMcpStdioDeps(input: {
 
 /**
  * Tries a version gets when the sandbox itself fails (the create, a
- * transfer, a driver that leaves no result) before the failure is stored and
- * the version waits for its 30-day refresh like any other.
+ * transfer, a driver that leaves no result) before it is set aside
+ * (`stdioValidation.exhaustedAt`, nothing public) until its 30-day refresh.
  */
 export const MCP_STDIO_MAX_ATTEMPTS = 3;
 
@@ -221,22 +224,23 @@ export async function validateMcpStdioBatch(
     // lapses — up to a point. A version that cannot be run after
     // MCP_STDIO_MAX_ATTEMPTS tries is stored as failed rather than started
     // again, in a fresh sandbox, every half hour for ever.
-    const giveUp = async (
-      reason: "start" | "protocol",
-      detail: string,
-    ): Promise<boolean> => {
+    const giveUp = async (detail: string): Promise<boolean> => {
       summary.errors += 1;
       if (attempts < MCP_STDIO_MAX_ATTEMPTS) return false;
-      await deps.writeFailure({
+      // Not a verdict on the package, so no public `validation` record:
+      // the version is set aside until its refresh, where the page keeps
+      // saying nothing rather than blaming the server for a sandbox outage.
+      await deps.writeExhausted({
         versionId: row.versionId,
-        validation: {
-          status: "failed",
-          reason,
-          at: deps.now().toISOString(),
-          detail: `${detail} (${attempts} tries)`,
-        },
+        at: deps.now().toISOString(),
       });
-      count(reason);
+      logger.warn("MCP stdio validation set a version aside", {
+        identifier: row.identifier,
+        version: row.version,
+        attempts,
+        detail,
+      });
+      count("exhausted");
       return true;
     };
     let result: McpStdioDriverResult | null;
@@ -253,7 +257,7 @@ export async function validateMcpStdioBatch(
         attempts,
         error: message,
       });
-      await giveUp("start", `the sandbox could not be used: ${message}`);
+      await giveUp(`the sandbox could not be used: ${message}`);
       return;
     }
     if (!result) {
@@ -262,7 +266,7 @@ export async function validateMcpStdioBatch(
         version: row.version,
         attempts,
       });
-      await giveUp("protocol", "the sandbox run left no readable result");
+      await giveUp("the sandbox run left no readable result");
       return;
     }
     const outcome = stdioValidationOutcome(result, deps.now());
