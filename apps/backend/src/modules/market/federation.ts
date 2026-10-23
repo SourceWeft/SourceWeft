@@ -378,10 +378,11 @@ export function mapRegistryServerToManifest(
     tools: [],
     sourceUrl: server.repository?.url ?? undefined,
     repoUrl: server.repository?.url ?? undefined,
-    publisher: publisherFromRegistryName(
-      identifier,
-      hasRemote ? remote?.url : undefined,
-    ),
+    // The publisher's domain is only as trustworthy as the registry that
+    // verified the namespace: a source we do not trust mints none.
+    publisher: options.verified
+      ? publisherFromRegistryName(identifier, hasRemote ? remote?.url : undefined)
+      : undefined,
   };
 
   const parsed = marketMcpManifestSchema.safeParse(candidate);

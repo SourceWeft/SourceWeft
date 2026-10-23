@@ -58,8 +58,7 @@ export function publisherFromRegistryName(
   identifier: string,
   endpointUrl: string | undefined,
 ): MarketMcpPublisher | undefined {
-  const namespace = identifier.split("/")[0] ?? identifier;
-  const domain = publisherDomainFromNamespace(namespace);
+  const domain = publisherDomainFromNamespace(identifier.split("/")[0]!);
   if (!domain) {
     return undefined;
   }

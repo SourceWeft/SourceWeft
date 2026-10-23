@@ -1018,6 +1018,15 @@ test("issue #367: a domain namespace is mapped to its publisher, matched against
   });
 });
 
+test("issue #367: a source that is not namespace-verified mints no publisher", () => {
+  const manifest = mapRegistryServerToManifest(NOTION_REGISTRY_ENTRY, {
+    verified: false,
+  });
+  assert.ok(manifest);
+  assert.equal(manifest.publisher, undefined);
+  assert.equal(manifest.verified, false);
+});
+
 test("issue #367: GitHub-namespace entries carry no publisher", () => {
   const manifest = mapRegistryServerToManifest(serverEntry(1), {
     verified: true,
