@@ -224,10 +224,31 @@ describe("public MCP detail page AI overview", () => {
     expect(section).not.toContain(enMessages.market.overview.cautions);
   });
 
-  it("falls back to the description when there is no overview", async () => {
+  it("falls back to the facts panel and the description when there is no overview", async () => {
     const section = overviewSection(await render())!;
     expect(section).not.toContain('data-testid="mcp-ai-overview"');
+    expect(section).toContain('data-testid="mcp-facts-panel"');
     expect(section).toContain(DESCRIPTION);
+    // The facts panel comes first, the author's description after it.
+    expect(section.indexOf("mcp-facts-panel")).toBeLessThan(
+      section.indexOf(DESCRIPTION),
+    );
+  });
+
+  // #367 W4: whatItDoes is one "what you can do" line per group of tools.
+  it("shows the overview's what-you-can-do lines as bullets", async () => {
+    withDetail({
+      aiOverview: overview({
+        whatItDoes:
+          "Look up forecasts by city\nGet severe-weather alerts\nCheck air quality",
+      }),
+    });
+    const section = overviewSection(await render())!;
+    expect(section).toContain(enMessages.mcp.aiOverview.whatItDoes);
+    expect(section).toMatch(
+      /<ul[^>]*><li>Look up forecasts by city<\/li><li>Get severe-weather alerts<\/li><li>Check air quality<\/li><\/ul>/,
+    );
+    expect(section).not.toContain('data-testid="mcp-facts-panel"');
   });
 
   it("asks in the visitor's language, for the overview and the related cards, and notes an English fallback", async () => {
@@ -255,19 +276,23 @@ describe("public MCP detail page AI overview", () => {
     expect(section).not.toContain(zhCNMessages.mcp.aiOverview.englishFallback);
   });
 
-  it("gives the overview its own section when the manifest has nothing else to say", async () => {
+  it("keeps the section when the manifest has nothing else to say: the facts panel, or the overview alone", async () => {
     market.getPublicMcpManifest.mockResolvedValue({
       ...manifestResponse,
       manifest: { ...manifestResponse.manifest, description: undefined },
     });
     let html = await render();
-    expect(navLabels(html, "Sections")).not.toContain("overview");
+    expect(navLabels(html, "Sections")[0]).toBe("overview");
+    let section = overviewSection(html)!;
+    expect(section).toContain('data-testid="mcp-facts-panel"');
+    expect(section).not.toContain("divide-y");
 
     withDetail({ aiOverview: overview() });
     html = await render();
     expect(navLabels(html, "Sections")[0]).toBe("overview");
-    const section = overviewSection(html)!;
+    section = overviewSection(html)!;
     expect(section).toContain('data-testid="mcp-ai-overview"');
+    expect(section).not.toContain('data-testid="mcp-facts-panel"');
     // No empty description panel under it.
     expect(section).not.toContain("divide-y");
   });
@@ -331,6 +356,32 @@ describe("public MCP detail page hreflang", () => {
     expect(translated.description).toBe("Weather：为出行规划查询天气。");
     expect(translated.openGraph?.description).toBe(translated.description);
     expect(translated.twitter?.description).toBe(translated.description);
+  });
+
+  // #367 W4: without an overview, the template sentence (or a longer
+  // registry summary) describes the page in its own language.
+  it("describes a page without an overview with the template sentence", async () => {
+    withDetail();
+    const english = await metadata("en");
+    expect(english.description).toBe(
+      "Weather's hosted MCP server (weather.example); no sign-in required; Streamable HTTP; 1 tool.",
+    );
+    expect(english.openGraph?.description).toBe(english.description);
+    expect((await metadata("zh-CN")).description).toBe(
+      "Weather 的托管 MCP 服务（weather.example）；无需登录；Streamable HTTP；1 个工具。",
+    );
+    // A registry summary longer than the template is kept, with the name.
+    market.getPublicMcpManifest.mockResolvedValue({
+      ...manifestResponse,
+      item: {
+        ...manifestResponse.item,
+        summary:
+          "Hourly forecasts, severe-weather alerts, pollen counts and air quality for any city in the world, from the national weather services.",
+      },
+    });
+    expect((await metadata("en")).description).toBe(
+      "Weather: Hourly forecasts, severe-weather alerts, pollen counts and air quality for any city in the world, from the national weather services.",
+    );
   });
 
   it("keeps the English description where the overview is not in the page's language", async () => {

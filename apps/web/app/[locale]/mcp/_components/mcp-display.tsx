@@ -25,11 +25,14 @@ import type {
 
 import { cn } from "@sourceweft/ui-web/lib/utils";
 import { mcpCardText } from "../../../../lib/mcp-ai-overview";
+import { mcpAuthMethod } from "../../../../lib/mcp-auth-method";
+import { mcpPublisherDomain } from "../../../../lib/mcp-facts";
 import {
   mcpRuntimeKind,
   runtimeLabel,
   transportLabel,
 } from "../../../../lib/mcp-labels";
+import { mcpTemplateDescription } from "../../../../lib/mcp-template-description";
 import { slugify } from "../../../../lib/slug";
 
 import { McpIcon } from "./mcp-client";
@@ -157,7 +160,11 @@ export async function McpRuntimeBadge({
     item.runtime === "desktop" || item.desktopOnly || !item.webExecutable;
   return (
     <Badge>
-      {desktop ? <Laptop className="size-3.5" /> : <Globe2 className="size-3.5" />}
+      {desktop ? (
+        <Laptop className="size-3.5" />
+      ) : (
+        <Globe2 className="size-3.5" />
+      )}
       {t(key)}
     </Badge>
   );
@@ -232,12 +239,29 @@ export async function McpMarketCard({
 }) {
   const t = await getTranslations("mcp.card");
   const tOverview = await getTranslations("mcp.aiOverview");
+  const tTemplate = await getTranslations("mcp.template");
   const trusted = Boolean(item.official || item.verified);
   const primaryCategory =
     highlightCategory && item.categories.includes(highlightCategory)
       ? highlightCategory
       : item.categories[0];
-  const cardText = mcpCardText(item);
+  // Without an AI summary, the template sentence (#367 W4) stands in for a
+  // registry summary no longer than it. A list item has no endpoint.
+  const cardText = mcpCardText(
+    item,
+    mcpTemplateDescription(
+      {
+        name: item.name,
+        publisherDomain: mcpPublisherDomain(
+          item as unknown as Record<string, unknown>,
+        ),
+        transport: item.transport,
+        authMethod: mcpAuthMethod(null, item.requiresAuth),
+        toolCount: item.toolsCount,
+      },
+      tTemplate,
+    ),
+  );
   return (
     <LocaleLink
       className="group flex h-full flex-col rounded-xl border border-zinc-300 bg-white/62 p-5 transition-all hover:-translate-y-0.5 hover:border-zinc-950/40 hover:bg-white hover:shadow-[0_18px_70px_rgba(39,39,42,0.1)] dark:border-white/10 dark:bg-white/[0.035] dark:hover:border-white/35 dark:hover:bg-white/[0.055]"
@@ -250,8 +274,6 @@ export async function McpMarketCard({
             {item.name}
           </h3>
           <p className="mt-0.5 truncate text-xs text-zinc-500">
-
-
             {item.providerName ?? item.identifier}
           </p>
         </div>
@@ -391,7 +413,11 @@ export async function McpToolRows({
   return (
     <div className="divide-y divide-zinc-200 overflow-hidden rounded-lg border border-zinc-300 bg-white/58 dark:divide-white/10 dark:border-white/10 dark:bg-white/[0.03]">
       {tools.map((tool) => (
-        <article className="scroll-mt-24 p-4" id={`tool-${slugifyAnchor(tool.name)}`} key={tool.name}>
+        <article
+          className="scroll-mt-24 p-4"
+          id={`tool-${slugifyAnchor(tool.name)}`}
+          key={tool.name}
+        >
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
               <h3 className="font-mono text-sm font-semibold text-zinc-950 dark:text-white">
@@ -431,8 +457,9 @@ export async function McpToolRows({
           <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-500">
             {t("tools.inputFields", {
               fields:
-                Object.keys(tool.inputSchema ?? {}).slice(0, 8).join(", ") ||
-                t("tools.schemaObject"),
+                Object.keys(tool.inputSchema ?? {})
+                  .slice(0, 8)
+                  .join(", ") || t("tools.schemaObject"),
             })}
           </p>
         </article>

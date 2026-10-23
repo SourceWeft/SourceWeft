@@ -28,7 +28,7 @@ const sources = (
 
 /** Rendered text with every inserted `[ID] ` taken out again. */
 const withoutIds = (text: string) =>
-  text.replace(/\[(?:D|R|T\d+\.|V\d+\.)\d+\] /g, "");
+  text.replace(/\[(?:D|I|R|T\d+\.|V\d+\.)\d+\] /g, "");
 
 describe("segmentation", () => {
   test("paragraphs split on blank lines", () => {
@@ -282,6 +282,54 @@ describe("numbering", () => {
     assert.ok(
       numbered.passages.every((passage) => !passage.text.includes("[…]")),
     );
+  });
+
+  test("the server's instructions are numbered with I, after the description (#367)", () => {
+    const numbered = numberMcpOverviewPassages(
+      sources({
+        description: "Search the web for agents.",
+        instructions:
+          "Call search first.\n- Then fetch a page by ID.\n\nNever guess IDs!",
+        readme: "Runs locally only.",
+        tools: ["Searches the web."],
+        variables: ["The API key to use."],
+      }),
+    );
+    assert.equal(
+      numbered.instructions,
+      "[I1] Call search first.\n- [I2] Then fetch a page by ID.\n\n[I3] Never guess IDs!",
+    );
+    assert.deepEqual(
+      numbered.passages.map((passage) => passage.id),
+      ["D1", "I1", "I2", "I3", "R1", "T1.1", "V1.1"],
+    );
+    assert.equal(numbered.passages[2]!.text, "Then fetch a page by ID.");
+    // Absent, null or empty: nothing numbered, and the field is null.
+    for (const instructions of [undefined, null]) {
+      const without = numberMcpOverviewPassages(
+        sources({ description: "Search the web for agents.", instructions }),
+      );
+      assert.equal(without.instructions, null);
+      assert.deepEqual(
+        without.passages.map((passage) => passage.id),
+        ["D1"],
+      );
+    }
+    // Under the budget they come right after the description, before tools.
+    const capped = numberMcpOverviewPassages(
+      sources({
+        description: "The first sentence.",
+        instructions: "An instruction. Another instruction.",
+        readme: "A readme sentence.",
+        tools: ["Tool sentence one."],
+      }),
+      3,
+    );
+    assert.deepEqual(
+      capped.passages.map((passage) => passage.id),
+      ["D1", "I1", "I2"],
+    );
+    assert.equal(capped.tools[0], "Tool sentence one.");
   });
 
   test("no citable text, no passages", () => {
