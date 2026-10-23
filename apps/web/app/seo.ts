@@ -29,3 +29,12 @@ export const NO_INDEX_METADATA = {
     index: false,
   },
 } as const;
+
+// A public page kept out of search whose links are still worth following:
+// it renders and is linked to, but another page carries what it says.
+export const NO_INDEX_FOLLOW_METADATA = {
+  robots: {
+    follow: true,
+    index: false,
+  },
+} as const;

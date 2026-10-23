@@ -42,10 +42,13 @@ vi.mock("../../shared/logger", () => ({
 
 import {
   authProbeRecord,
+  DEFAULT_REGISTRY_PAGE_RETRY,
+  federateRegistryEntry,
   ingestFromRegistry,
   mapRegistryServerToManifest,
   registryRemoteAuth,
   registryRepositoryProvenance,
+  runMarketFederation,
   storedAuthProbe,
 } from "./federation";
 import { mcpServerVersionId } from "./ingest/plan";
@@ -91,6 +94,7 @@ test("a mid-pagination fetch failure keeps the partial run instead of discarding
     source: "registry.test",
     baseUrl: "https://registry.test",
     verified: true,
+    retry: noWaitRetry(3),
   });
 
   // The two page-1 servers were upserted and must be reported, not lost.
@@ -98,6 +102,236 @@ test("a mid-pagination fetch failure keeps the partial run instead of discarding
   assert.equal(result.partial, true);
   assert.ok(result.error?.includes("fetch failed"));
   assert.equal(mocks.upsert.mock.calls.length, 2);
+  // Where to resume from: the page that could not be read.
+  assert.equal(result.nextCursor, "page-2");
+  const pageRequests = (fetch as ReturnType<typeof vi.fn>).mock.calls.filter(
+    ([input]) => String(input).includes("/v0/servers"),
+  );
+  // One request for page 1, then every attempt at page 2.
+  assert.equal(pageRequests.length, 1 + 3);
+});
+
+/** A page retry policy that does not wait between attempts. */
+function noWaitRetry(attempts: number) {
+  return { attempts, delayMs: () => 0 };
+}
+
+test("the default page retry backs off exponentially and is bounded", () => {
+  assert.equal(DEFAULT_REGISTRY_PAGE_RETRY.attempts, 6);
+  assert.deepEqual(
+    [2, 3, 4, 5, 6].map((attempt) =>
+      DEFAULT_REGISTRY_PAGE_RETRY.delayMs(attempt),
+    ),
+    [1000, 2000, 4000, 8000, 16000],
+  );
+  assert.equal(DEFAULT_REGISTRY_PAGE_RETRY.delayMs(10), 30_000);
+});
+
+test("a page that fails once is retried and the walk completes", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  let page2Attempts = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: string) => {
+      const url = new URL(input);
+      const cursor = url.searchParams.get("cursor");
+      if (cursor === "page-2" && page2Attempts++ === 0) {
+        throw new TypeError("fetch failed");
+      }
+      const body = cursor
+        ? { servers: [serverEntry(3)], metadata: { nextCursor: null } }
+        : {
+            servers: [serverEntry(1), serverEntry(2)],
+            metadata: { nextCursor: "page-2" },
+          };
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }),
+  );
+
+  const result = await ingestFromRegistry({
+    source: "registry.test",
+    baseUrl: "https://registry.test",
+    verified: true,
+    retry: noWaitRetry(3),
+  });
+
+  assert.equal(result.ingested, 3);
+  assert.equal(result.partial, false);
+  assert.equal(result.nextCursor, undefined);
+  assert.equal(page2Attempts, 2);
+});
+
+test("a run resumes from the cursor of a partial run", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  const fetch = vi.fn(async (input: string) => {
+    const url = new URL(input);
+    assert.equal(url.searchParams.get("cursor"), "page-2");
+    return new Response(
+      JSON.stringify({
+        servers: [serverEntry(3)],
+        metadata: { nextCursor: null },
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  const result = await ingestFromRegistry({
+    source: "registry.test",
+    baseUrl: "https://registry.test",
+    verified: true,
+    cursor: "page-2",
+  });
+
+  assert.equal(result.ingested, 1);
+  assert.equal(result.partial, false);
+  assert.equal(
+    fetch.mock.calls.filter(([input]) => String(input).includes("/v0/servers"))
+      .length,
+    1,
+  );
+});
+
+test("runMarketFederation resumes a partial walk from its cursor instead of starting over", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  let page2Requests = 0;
+  const fetch = vi.fn(async (input: string) => {
+    const url = new URL(input);
+    const cursor = url.searchParams.get("cursor");
+    // Page 2 fails every attempt the first time it is asked for, then works.
+    if (cursor === "page-2" && page2Requests++ < 2) {
+      throw new TypeError("fetch failed");
+    }
+    const body = cursor
+      ? { servers: [serverEntry(3)], metadata: { nextCursor: null } }
+      : {
+          servers: [serverEntry(1), serverEntry(2)],
+          metadata: { nextCursor: "page-2" },
+        };
+    return new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  const [result] = await runMarketFederation(
+    [{ source: "registry.test", baseUrl: "https://registry.test", verified: true }],
+    { retry: noWaitRetry(2), resume: { maxResumes: 3, delayMs: 0 } },
+  );
+
+  assert.equal(result?.ingested, 3);
+  assert.equal(result?.partial, false);
+  assert.equal(result?.resumes, 1);
+  // Page 1 was read once: the resume started at page 2.
+  const pageOneRequests = fetch.mock.calls.filter(
+    ([input]) =>
+      String(input).includes("/v0/servers") &&
+      !new URL(String(input)).searchParams.get("cursor"),
+  );
+  assert.equal(pageOneRequests.length, 1);
+  assert.equal(mocks.upsert.mock.calls.length, 3);
+});
+
+test("runMarketFederation gives up after the resume budget and reports the partial walk", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: string) => {
+      const url = new URL(input);
+      if (url.searchParams.get("cursor")) throw new TypeError("fetch failed");
+      return new Response(
+        JSON.stringify({
+          servers: [serverEntry(1)],
+          metadata: { nextCursor: "page-2" },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }),
+  );
+
+  const [result] = await runMarketFederation(
+    [{ source: "registry.test", baseUrl: "https://registry.test", verified: true }],
+    { retry: noWaitRetry(1), resume: { maxResumes: 2, delayMs: 0 } },
+  );
+
+  assert.equal(result?.partial, true);
+  assert.equal(result?.resumes, 2);
+  assert.equal(result?.nextCursor, "page-2");
+  // Page 1 was ingested once; the resumes never re-read it.
+  assert.equal(result?.ingested, 1);
+});
+
+test("federateRegistryEntry federates the latest version of one identifier, now", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  const fetch = vi.fn(async (input: string, init?: RequestInit) => {
+    const url = new URL(input);
+    if (url.pathname === "/v0/servers") {
+      assert.equal(url.searchParams.get("search"), "io.github.acme/server-7");
+      assert.equal(url.searchParams.get("version"), "latest");
+      return new Response(
+        JSON.stringify({
+          servers: [
+            // The search is a text match: a neighbour, an old version, the one.
+            serverEntry(70),
+            {
+              ...serverEntry(7),
+              _meta: {
+                "io.modelcontextprotocol.registry/official": {
+                  isLatest: false,
+                },
+              },
+            },
+            serverEntry(7),
+          ],
+          metadata: { count: 3 },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
+    // The endpoint probe: an open server.
+    assert.equal(init?.method, "POST");
+    return new Response("{}", { status: 200 });
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  const result = await federateRegistryEntry({
+    identifier: "io.github.acme/server-7",
+    source: { source: "registry.test", baseUrl: "https://registry.test", verified: true },
+  });
+
+  assert.equal(result.found, true);
+  assert.equal(result.ingested, 1);
+  assert.equal(mocks.upsert.mock.calls.length, 1);
+  const [{ manifest, provenanceJson }] = mocks.upsert.mock.calls[0]!;
+  assert.equal(manifest.identifier, "io.github.acme/server-7");
+  assert.equal(manifest.verified, true);
+  assert.equal(provenanceJson.source, "registry.test");
+});
+
+test("federateRegistryEntry reports an identifier the registry does not have", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      async () =>
+        new Response(JSON.stringify({ servers: [serverEntry(70)] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    ),
+  );
+
+  const result = await federateRegistryEntry({
+    identifier: "io.github.acme/server-7",
+    source: { source: "registry.test", baseUrl: "https://registry.test", verified: true },
+  });
+
+  assert.equal(result.found, false);
+  assert.equal(result.ingested, 0);
+  assert.equal(mocks.upsert.mock.calls.length, 0);
 });
 
 test("registry entries are categorized from their text, not left empty", async () => {
