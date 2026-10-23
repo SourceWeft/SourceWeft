@@ -117,7 +117,7 @@ assert.equal(uri.equal("//%41.com", "//a.com"), true);
 const { Address4, Address6 } = patchedDependency(
   rateLimit,
   "ip-address",
-  "10.7.2",
+  "10.7.4",
 );
 // GHSA-rpw4-54j3-4h4q: link-local is the whole fe80::/10.
 for (const value of ["fe80::1", "fe81::1", "febf::1"]) {
@@ -157,6 +157,19 @@ assert.throws(
     !error.parseMessage,
 );
 assert.equal(Address6.isValid("1".repeat(1 << 20)), false);
+// GHSA-rxp7-6hxx-x8q5: a zone identifier is matched before the length limit,
+// and `%` repeated ahead of a line terminator made that match quadratic. The
+// vulnerable releases take over 20 seconds on this input and patched ones
+// take milliseconds, so the bound leaves room for a slow runner.
+const zoneStarted = Date.now();
+assert.throws(
+  () => new Address6("%".repeat(200000) + "\n"),
+  (error) => error.name === "AddressError",
+);
+assert.equal(Address6.isValid("%".repeat(200000) + "\n"), false);
+const zoneElapsed = Date.now() - zoneStarted;
+assert.ok(zoneElapsed < 2000, "zone identifier took " + zoneElapsed + "ms");
+assert.equal(new Address6("fe80::1%eth0").zone, "%eth0");
 assert.equal(
   new Address6("0000:0000:0000:0000:0000:ffff:255.255.255.255/56").subnetMask,
   56,
@@ -251,6 +264,23 @@ assert.throws(
   () => document.createEntityReference("safe; <injected/> &x"),
   /Invalid character/,
 );
+
+// GHSA-cg2g-xh64-v4q7, GHSA-mrv2-3pqr-j5jr and their low-severity siblings
+// need a DOM, which neither consumer brings to Node, so both DOMPurify
+// consumers are held to the reviewed release.
+const preview = createRequire(path.join(root, "packages/preview/package.json"));
+const fileViewer = createRequire(
+  preview.resolve("@file-viewer/core/package.json"),
+);
+patchedDependency(fileViewer, "dompurify", "3.4.17");
+// @streamdown/mermaid is ESM-only and exports no package.json.
+const streamdownMermaid = createRequire(
+  fs.realpathSync(
+    path.join(root, "apps/web/node_modules/@streamdown/mermaid/package.json"),
+  ),
+);
+const mermaid = createRequire(streamdownMermaid.resolve("mermaid"));
+patchedDependency(mermaid, "dompurify", "3.4.17");
 
 console.log(
   "Patched npm dependency versions and their advisory regressions passed.",

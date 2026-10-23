@@ -37,7 +37,7 @@ function verifyVersion(parent, name, version, entry = name) {
   throw new Error(`Cannot identify installed package ${name}`);
 }
 
-for (const app of [web, docs]) verifyVersion(app, "next", "16.3.8");
+for (const app of [web, docs]) verifyVersion(app, "next", "16.4.2");
 for (const app of [backend, web]) {
   verifyVersion(app, "sharp", "0.35.5");
   verifyVersion(app, "vitest", "4.1.12");
@@ -79,6 +79,8 @@ assert.deepEqual(
 );
 
 // Check the native library actually loaded by both Next and the upload backend.
+// GHSA-2464-fhr4-w9xw (SVG through the Image Optimization API) is fixed by
+// sharp 0.35.5 under Next; the SVG decode below exercises that binary.
 const next = createRequire(web.resolve("next/package.json"));
 verifyVersion(next, "sharp", "0.35.5");
 for (const parent of [backend, next]) {
@@ -110,8 +112,8 @@ for (const parent of [backend, next]) {
   assert.equal(metadata.height, 6);
 }
 
-// Next 16.3.3 bypassed AVIF decoding as its security mitigation; 16.3.8
-// decodes it again, through the sharp whose native decoder is pinned above.
+// Next 16.3.3 bypassed AVIF decoding as its security mitigation; 16.3.8 and
+// later decode it again, through the sharp whose native decoder is pinned above.
 // Both AVIF and ordinary images must resize through the patched optimizer.
 const sharp = next("sharp");
 const { imageOptimizer } = web("next/dist/server/image-optimizer");
