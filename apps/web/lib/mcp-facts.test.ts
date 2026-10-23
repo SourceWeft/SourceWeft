@@ -55,7 +55,7 @@ describe("mcpPublisherDomain", () => {
       { publisher: { domain: "not a domain" } },
       { publisher: { domain: "https://notion.com" } },
     ]) {
-      expect(mcpPublisherDomain(value as never)).toBeNull();
+      expect(mcpPublisherDomain(value)).toBeNull();
     }
   });
 });

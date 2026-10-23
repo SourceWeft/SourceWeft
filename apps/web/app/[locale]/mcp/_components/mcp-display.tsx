@@ -252,9 +252,7 @@ export async function McpMarketCard({
     mcpTemplateDescription(
       {
         name: item.name,
-        publisherDomain: mcpPublisherDomain(
-          item as unknown as Record<string, unknown>,
-        ),
+        publisherDomain: mcpPublisherDomain(item),
         transport: item.transport,
         authMethod: mcpAuthMethod(null, item.requiresAuth),
         toolCount: item.toolsCount,

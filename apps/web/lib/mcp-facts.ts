@@ -42,13 +42,7 @@ export function mcpEndpointHost(url: string | null | undefined): string | null {
  * the catalog item. Null without one (an `io.github.*` namespace, or an
  * entry synced before publishers existed).
  */
-export function mcpPublisherDomain(
-  source:
-    | Pick<MarketMcpManifest, "name">
-    | Record<string, unknown>
-    | null
-    | undefined,
-): string | null {
+export function mcpPublisherDomain(source: unknown): string | null {
   if (!isRecord(source)) return null;
   const publisher = source.publisher;
   if (!isRecord(publisher)) return null;
@@ -104,9 +98,7 @@ export function publicMcpFacts({
 }): McpPublicFacts {
   return {
     name: item.name || manifest.name,
-    publisherDomain:
-      mcpPublisherDomain(manifest) ??
-      mcpPublisherDomain(item as unknown as Record<string, unknown>),
+    publisherDomain: mcpPublisherDomain(manifest) ?? mcpPublisherDomain(item),
     endpointHost: mcpEndpointHost(manifest.endpointUrl),
     transport: manifest.transport,
     authMethod: mcpAuthMethod(manifest.auth, item.requiresAuth),
