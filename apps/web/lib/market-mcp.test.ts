@@ -94,6 +94,7 @@ describe("getPublicMcpDetail", () => {
         aiOverview,
         overviewLocales: ["en", "zh-CN"],
         readme: { markdown: "# Weather", source, status: "ok" },
+        searchIndexable: true,
         versions,
       },
     );
@@ -108,7 +109,19 @@ describe("getPublicMcpDetail", () => {
       aiOverview: null,
       overviewLocales: [],
       readme: null,
+      searchIndexable: true,
       versions,
+    });
+  });
+
+  it("passes on that the page stays out of search", async () => {
+    client.getMcp.mockResolvedValue({
+      item: {},
+      versions,
+      searchIndexable: false,
+    });
+    await expect(getPublicMcpDetail("x", "en")).resolves.toMatchObject({
+      searchIndexable: false,
     });
   });
 
@@ -118,6 +131,8 @@ describe("getPublicMcpDetail", () => {
       aiOverview: null,
       overviewLocales: [],
       readme: null,
+      // An outage never deindexes a page.
+      searchIndexable: true,
       versions: [],
     });
   });

@@ -31,7 +31,12 @@ import {
   McpReadmeSourceLine,
 } from "../../../_components/market/mcp-readme-section";
 import { JsonLd } from "../../../_components/seo/json-ld";
-import { OG_IMAGE, SITE_NAME, SITE_URL } from "../../../seo";
+import {
+  NO_INDEX_FOLLOW_METADATA,
+  OG_IMAGE,
+  SITE_NAME,
+  SITE_URL,
+} from "../../../seo";
 import {
   getPublicMcpDetail,
   getPublicMcpManifest,
@@ -191,6 +196,8 @@ export async function generateMetadata({
         type: "article",
         url,
       },
+      // The README is one file many servers show (left out of the sitemap too).
+      ...(detail.searchIndexable === false ? NO_INDEX_FOLLOW_METADATA : {}),
       title,
       twitter: {
         card: "summary_large_image",
