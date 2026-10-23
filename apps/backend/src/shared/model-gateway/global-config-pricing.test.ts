@@ -331,23 +331,118 @@ test("loadGlobalModelGatewayConfig rejects a repeated target within one alias", 
   await assert.rejects(loadConfig(config), /repeats target 'test\/test-chat'/);
 });
 
-test("loadGlobalModelGatewayConfig rejects multi-target embedding profiles", async () => {
+function embeddingBackupGateway() {
+  return {
+    slug: "backup",
+    baseUrl: "https://backup.test/v1",
+    providerName: "Backup",
+    providerKind: "openai-compatible",
+    supports: ["embeddings"],
+    isDefault: false,
+    activation: {
+      env: "SOURCEWEFT_TEST_BACKUP_ENABLED",
+      default: true,
+    },
+  };
+}
+
+test("loadGlobalModelGatewayConfig accepts embedding targets that serve the same model on two Providers", async () => {
   const config = baseConfig();
+  config.gateways.push(embeddingBackupGateway());
+  config.embeddingProfiles[0] = {
+    profileAlias: "embedding",
+    modelAlias: "test-embedding",
+    isDefault: true,
+    isActive: true,
+    requestedDimensions: 1024,
+    pricing: { inputCostPerToken: 0.00000001 },
+    targets: [
+      {
+        gatewaySlug: "backup",
+        providerName: "Backup",
+        targetModel: "Pro/BAAI/bge-m3",
+        priority: 2,
+      },
+      {
+        gatewaySlug: "test",
+        providerName: "Test",
+        targetModel: "BAAI/bge-m3",
+        priority: 1,
+      },
+    ],
+  };
+
+  const loaded = await loadConfig(config);
+
+  assert.deepEqual(
+    loaded?.embeddingProfiles[0]?.targets.map((target) => [
+      target.gatewaySlug,
+      target.targetModel,
+      target.priority,
+    ]),
+    [
+      ["test", "BAAI/bge-m3", 1],
+      ["backup", "Pro/BAAI/bge-m3", 2],
+    ],
+  );
+  assert.equal(loaded?.embeddingProfiles[0]?.requestedDimensions, 1024);
+  assert.equal(loaded?.embeddingProfiles[0]?.pricing?.inputCostPerToken, 1e-8);
+});
+
+test("loadGlobalModelGatewayConfig rejects embedding targets that serve different models", async () => {
+  const config = baseConfig();
+  config.gateways.push(embeddingBackupGateway());
+  config.embeddingProfiles[0] = {
+    profileAlias: "embedding",
+    modelAlias: "test-embedding",
+    isDefault: true,
+    isActive: true,
+    pricing: { inputCostPerToken: 0.00000001 },
+    targets: [
+      { gatewaySlug: "test", providerName: "Test", targetModel: "BAAI/bge-m3" },
+      {
+        gatewaySlug: "backup",
+        providerName: "Backup",
+        targetModel: "openai/text-embedding-3-small",
+      },
+    ],
+  };
+
+  await assert.rejects(
+    loadConfig(config),
+    /cannot mix embedding models behind one alias: 'test\/BAAI\/bge-m3' and 'backup\/openai\/text-embedding-3-small' are different models/,
+  );
+});
+
+test("loadGlobalModelGatewayConfig rejects multi-target embedding profiles without explicit pricing", async () => {
+  const config = baseConfig();
+  config.gateways.push(embeddingBackupGateway());
   config.embeddingProfiles[0] = {
     profileAlias: "embedding",
     modelAlias: "test-embedding",
     isDefault: true,
     isActive: true,
     targets: [
+      { gatewaySlug: "test", providerName: "Test", targetModel: "BAAI/bge-m3" },
       {
-        gatewaySlug: "test",
-        providerName: "Test",
-        targetModel: "test-embedding",
+        gatewaySlug: "backup",
+        providerName: "Backup",
+        targetModel: "Pro/BAAI/bge-m3",
       },
     ],
   };
 
-  await assert.rejects(loadConfig(config), /must stay on a single model/);
+  await assert.rejects(
+    loadConfig(config),
+    /embeddingProfiles\[0\]' declares multiple targets and must set an explicit 'pricing' block/,
+  );
+});
+
+test("loadGlobalModelGatewayConfig keeps a single-target embedding profile without pricing", async () => {
+  const loaded = await loadConfig(baseConfig());
+
+  assert.equal(loaded?.embeddingProfiles[0]?.targets.length, 1);
+  assert.equal(loaded?.embeddingProfiles[0]?.pricing, undefined);
 });
 
 test("loadGlobalModelGatewayConfig preserves omitted pricing as undefined", async () => {
