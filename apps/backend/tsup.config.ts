@@ -7,6 +7,7 @@ export default defineConfig({
   entry: {
     api: "src/api/main.ts",
     launch: "src/launch/main.ts",
+    "market-federate-entry": "src/market-federate-entry/main.ts",
     scheduler: "src/scheduler/main.ts",
     "skills-submit": "src/skills-submit/main.ts",
     worker: "src/worker/main.ts",
