@@ -120,6 +120,54 @@ export const marketMcpManifestSchema = z.object({
   lastIndexedAt: z.string().optional(),
 });
 
+// ---------------------------------------------------------------------------
+// What a remote MCP server said about itself (Issue #367, W1). Kept in the
+// version's provenance, never in the manifest; `tools/list` goes to
+// `manifest.tools`. Third-party text: render it as untrusted.
+// ---------------------------------------------------------------------------
+
+// An icon the server offers in its `serverInfo`: the MCP `Icon` shape, `src`
+// an https URL.
+export const marketMcpServerIconSchema = z.object({
+  src: z.string().url(),
+  mimeType: z.string().optional(),
+  sizes: z.array(z.string()).optional(),
+});
+
+export const marketMcpServerInfoSchema = z.object({
+  name: z.string(),
+  title: z.string().optional(),
+  version: z.string().optional(),
+  description: z.string().optional(),
+  websiteUrl: z.string().url().optional(),
+  icons: z.array(marketMcpServerIconSchema).optional(),
+});
+
+// `source` says who asked: "remote-probe" is federation's unauthenticated
+// `initialize` of the remote endpoint; a sandboxed stdio start writes its own.
+export const marketMcpSelfDescriptionSchema = z.object({
+  source: z.string(),
+  recordedAt: z.string(),
+  serverInfo: marketMcpServerInfoSchema.optional(),
+  instructions: z.string().optional(),
+  capabilities: z.record(z.string(), z.unknown()).optional(),
+});
+
+// The human fields of the RFC 9728 protected-resource metadata an endpoint
+// answering 401 points at. `resourceDocumentation` is shown as a link and
+// never fetched.
+export const marketMcpAuthMetadataSchema = z.object({
+  resourceName: z.string().optional(),
+  resourceDocumentation: z.string().url().optional(),
+});
+
+export type MarketMcpServerIcon = z.infer<typeof marketMcpServerIconSchema>;
+export type MarketMcpServerInfo = z.infer<typeof marketMcpServerInfoSchema>;
+export type MarketMcpSelfDescription = z.infer<
+  typeof marketMcpSelfDescriptionSchema
+>;
+export type MarketMcpAuthMetadata = z.infer<typeof marketMcpAuthMetadataSchema>;
+
 // Languages MCP servers' AI overviews are written in.
 export const marketMcpLocaleSchema = z.enum(["en", "zh-CN", "zh-TW"]);
 

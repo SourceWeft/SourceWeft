@@ -4,13 +4,13 @@ import { afterEach, test, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   upsert: vi.fn(),
   storedProbes: vi.fn(
-    async (_versionIds: string[]) => new Map<string, unknown>(),
+    async (_versionIds: string[]) => new Map<string, Record<string, unknown>>(),
   ),
 }));
 
 vi.mock("./ingest/repository", () => ({
   upsertMarketMcp: mocks.upsert,
-  findStoredAuthProbes: mocks.storedProbes,
+  findStoredEndpointProbes: mocks.storedProbes,
 }));
 vi.mock("../../shared/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn() },
@@ -18,6 +18,7 @@ vi.mock("../../shared/logger", () => ({
 
 import {
   authProbeRecord,
+  endpointProbeRecord,
   ingestFromRegistry,
   mapRegistryServerToManifest,
   registryRemoteAuth,
@@ -199,16 +200,8 @@ test("the registry's repository, subfolder included, is kept in provenance", asy
       },
     },
   ];
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(
-      async () =>
-        new Response(
-          JSON.stringify({ servers: entries, metadata: { nextCursor: null } }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        ),
-    ),
-  );
+  // The registry page; the endpoints answer nothing.
+  stubRegistryAndEndpoints(entries, () => new Response(null, { status: 404 }));
 
   await ingestFromRegistry({
     source: "registry.test",
@@ -284,16 +277,8 @@ test("the registry's packages and remotes are kept in provenance by name and fla
       server: { name: "io.github.acme/bare", version: "1.0.0" },
     },
   ];
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(
-      async () =>
-        new Response(
-          JSON.stringify({ servers: entries, metadata: { nextCursor: null } }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        ),
-    ),
-  );
+  // The registry page; the endpoints answer nothing.
+  stubRegistryAndEndpoints(entries, () => new Response(null, { status: 404 }));
 
   await ingestFromRegistry({
     source: "registry.test",
@@ -423,6 +408,13 @@ function oauthChallenge() {
 function endpointCalls(fetch: ReturnType<typeof vi.fn>) {
   return fetch.mock.calls.filter(
     ([input]) => !requestUrl(input).startsWith("https://registry.test/"),
+  );
+}
+
+/** The `initialize` probes of Arcmira's endpoint itself. */
+function initializeCalls(fetch: ReturnType<typeof vi.fn>) {
+  return fetch.mock.calls.filter(
+    ([input]) => requestUrl(input) === ARCMIRA_ENDPOINT,
   );
 }
 
@@ -763,7 +755,10 @@ test("a version's recent stored probe of the same endpoint is reused, not repeat
   const stored = authProbeRecord(ARCMIRA_ENDPOINT, "oauth", daysAgo(29));
   mocks.storedProbes.mockResolvedValueOnce(
     new Map([
-      [mcpServerVersionId("io.github.arcmira/arcmira", "0.10.7"), stored],
+      [
+        mcpServerVersionId("io.github.arcmira/arcmira", "0.10.7"),
+        { authProbe: stored },
+      ],
     ]),
   );
   const fetch = stubRegistryAndEndpoints([arcmiraEntry], () => {
@@ -801,7 +796,9 @@ test("a stored probe 30 days old, or without a probe time, is probed again", asy
   ]) {
     vi.clearAllMocks();
     mocks.upsert.mockResolvedValue("item-id");
-    mocks.storedProbes.mockResolvedValueOnce(new Map([[versionId, record]]));
+    mocks.storedProbes.mockResolvedValueOnce(
+      new Map([[versionId, { authProbe: record }]]),
+    );
     const fetch = stubRegistryAndEndpoints([arcmiraEntry], () =>
       oauthChallenge(),
     );
@@ -812,7 +809,7 @@ test("a stored probe 30 days old, or without a probe time, is probed again", asy
       verified: true,
     });
 
-    assert.equal(endpointCalls(fetch).length, 1, JSON.stringify(record));
+    assert.equal(initializeCalls(fetch).length, 1, JSON.stringify(record));
     assert.equal(result.authProbed, 1);
     const input = mocks.upsert.mock.calls[0]?.[0];
     assert.equal(input.manifest.auth.type, "oauth");
@@ -827,17 +824,23 @@ test("a stored probe is reused only when well-formed, same-endpoint and under 30
   const now = new Date("2026-10-22T00:00:00.000Z");
   const at = (days: number) => new Date(now.getTime() - days * DAY_MS);
   const record = authProbeRecord(ARCMIRA_ENDPOINT, "credential", at(1));
-  assert.deepEqual(storedAuthProbe(record, ARCMIRA_ENDPOINT, now), {
-    result: "credential",
-    probedAt: at(1),
-  });
+  assert.deepEqual(
+    storedAuthProbe(storedRow({ authProbe: record }), ARCMIRA_ENDPOINT, now),
+    {
+      result: "credential",
+      probedAt: at(1),
+      tools: [],
+    },
+  );
   assert.ok(
     storedAuthProbe(
-      authProbeRecord(
-        ARCMIRA_ENDPOINT,
-        "open",
-        new Date(now.getTime() - DAY_MS * 30 + 1),
-      ),
+      storedRow({
+        authProbe: authProbeRecord(
+          ARCMIRA_ENDPOINT,
+          "open",
+          new Date(now.getTime() - DAY_MS * 30 + 1),
+        ),
+      }),
       ARCMIRA_ENDPOINT,
       now,
     ),
@@ -853,12 +856,26 @@ test("a stored probe is reused only when well-formed, same-endpoint and under 30
     "oauth",
   ]) {
     assert.equal(
-      storedAuthProbe(stale, ARCMIRA_ENDPOINT, now),
+      storedAuthProbe(storedRow({ authProbe: stale }), ARCMIRA_ENDPOINT, now),
       undefined,
       JSON.stringify(stale),
     );
   }
+  assert.equal(storedAuthProbe(undefined, ARCMIRA_ENDPOINT, now), undefined);
 });
+
+/** A `findStoredEndpointProbes` row with the given pieces. */
+function storedRow(pieces: Record<string, unknown>) {
+  return {
+    authProbe: undefined,
+    selfDescription: undefined,
+    validatedAt: undefined,
+    authMetadata: undefined,
+    serverCard: undefined,
+    tools: undefined,
+    ...pieces,
+  };
+}
 
 test("a stored probe of another endpoint is probed again", async () => {
   mocks.upsert.mockResolvedValue("item-id");
@@ -866,7 +883,13 @@ test("a stored probe of another endpoint is probed again", async () => {
     new Map([
       [
         mcpServerVersionId("io.github.arcmira/arcmira", "0.10.7"),
-        authProbeRecord("https://old.arcmira.com/mcp", "open", daysAgo(1)),
+        {
+          authProbe: authProbeRecord(
+            "https://old.arcmira.com/mcp",
+            "open",
+            daysAgo(1),
+          ),
+        },
       ],
     ]),
   );
@@ -880,7 +903,7 @@ test("a stored probe of another endpoint is probed again", async () => {
     verified: true,
   });
 
-  assert.equal(endpointCalls(fetch).length, 1);
+  assert.equal(initializeCalls(fetch).length, 1);
   assert.equal(mocks.upsert.mock.calls[0]?.[0].manifest.auth.type, "oauth");
 });
 
@@ -907,7 +930,8 @@ test("a bare 401 with well-known protected-resource metadata is federated as OAu
     verified: true,
   });
 
-  assert.equal(endpointCalls(fetch).length, 2);
+  // initialize, the path-specific metadata, the origin's server card.
+  assert.equal(endpointCalls(fetch).length, 3);
   const input = mocks.upsert.mock.calls[0]?.[0];
   assert.equal(input.manifest.auth.type, "oauth");
   assert.equal(input.provenanceJson.authProbe.result, "oauth");
@@ -961,4 +985,363 @@ test("a registry endpoint on a private address is never probed", async () => {
   assert.equal(endpointCalls(fetch).length, 0);
   assert.equal(result.authProbeFailed, 1);
   assert.equal(mocks.upsert.mock.calls[0]?.[0].manifest.auth.type, "none");
+});
+
+// ---------------------------------------------------------------------------
+// Issue #367 W1: what the endpoint says about itself.
+// ---------------------------------------------------------------------------
+
+const OPEN_ENDPOINT = "https://open.acme.test/mcp";
+const openEntry = {
+  server: {
+    name: "io.github.acme/open",
+    version: "2.0.0",
+    description: "Answers anyone.",
+    remotes: [{ type: "streamable-http", url: OPEN_ENDPOINT }],
+  },
+  _meta: {
+    "io.modelcontextprotocol.registry/official": { isLatest: true },
+  },
+};
+const OPEN_INITIALIZE = {
+  protocolVersion: "2025-06-18",
+  capabilities: { tools: { listChanged: false } },
+  serverInfo: {
+    name: "acme-open",
+    title: "Acme Open",
+    version: "2.0.0",
+    websiteUrl: "https://acme.test/",
+    icons: [{ src: "https://acme.test/icon.svg", mimeType: "image/svg+xml" }],
+  },
+  instructions: "Search first.",
+};
+const OPEN_TOOLS = [
+  {
+    name: "search",
+    title: "Search",
+    description: "Find documents.",
+    inputSchema: { type: "object", properties: { q: { type: "string" } } },
+    annotations: { readOnlyHint: true },
+  },
+  { name: "delete_doc", inputSchema: { type: "object" } },
+  { name: "run", annotations: { readOnlyHint: false, destructiveHint: false } },
+];
+const SERVER_CARD = {
+  serverInfo: { name: "acme-open", version: "2.0.0" },
+  protocolVersion: "2025-06-18",
+};
+
+function jsonResponse(body: unknown, headers: Record<string, string> = {}) {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { "content-type": "application/json", ...headers },
+  });
+}
+
+/**
+ * The registry page with `entries`, and `mcp` for every other request, given
+ * the request itself (the probe's method, headers and body). `requests` keeps
+ * a readable copy of each request the endpoints saw.
+ */
+function stubRegistryAndMcp(
+  entries: unknown[],
+  mcp: (request: Request) => Response | Promise<Response>,
+) {
+  const requests: Request[] = [];
+  const fetch = vi.fn(async (input: unknown, init?: RequestInit) => {
+    const request =
+      input instanceof Request ? input : new Request(String(input), init);
+    if (request.url.startsWith("https://registry.test/")) {
+      return jsonResponse({ servers: entries, metadata: { nextCursor: null } });
+    }
+    requests.push(request.clone());
+    return mcp(request);
+  });
+  vi.stubGlobal("fetch", fetch);
+  return { fetch, requests };
+}
+
+/** An open MCP server at `OPEN_ENDPOINT`; `tools` answers `tools/list`. */
+function openMcp(
+  options: {
+    tools?: () => Response;
+    card?: boolean;
+  } = {},
+) {
+  return async (request: Request) => {
+    if (
+      request.url === `https://open.acme.test/.well-known/mcp/server-card.json`
+    ) {
+      return options.card
+        ? jsonResponse(SERVER_CARD)
+        : new Response(null, { status: 404 });
+    }
+    if (request.url !== OPEN_ENDPOINT)
+      return new Response(null, { status: 404 });
+    if (request.method === "DELETE") return new Response(null, { status: 200 });
+    assert.equal(request.headers.get("authorization"), null);
+    const message = (await request.json()) as { id?: number; method?: string };
+    if (message.id === undefined) return new Response(null, { status: 202 });
+    if (message.method === "initialize") {
+      return jsonResponse(
+        { jsonrpc: "2.0", id: message.id, result: OPEN_INITIALIZE },
+        { "mcp-session-id": "open-1" },
+      );
+    }
+    if (message.method === "tools/list") {
+      return options.tools
+        ? options.tools()
+        : jsonResponse({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: { tools: OPEN_TOOLS },
+          });
+    }
+    return jsonResponse({
+      jsonrpc: "2.0",
+      id: message.id,
+      error: { code: -32601, message: "Method not found" },
+    });
+  };
+}
+
+const EXPECTED_TOOLS = [
+  {
+    name: "search",
+    title: "Search",
+    description: "Find documents.",
+    inputSchema: { type: "object", properties: { q: { type: "string" } } },
+    annotations: { readOnlyHint: true },
+    risk: "read",
+  },
+  {
+    name: "delete_doc",
+    inputSchema: { type: "object" },
+    annotations: {},
+    risk: "destructive",
+  },
+  {
+    name: "run",
+    inputSchema: {},
+    annotations: { readOnlyHint: false, destructiveHint: false },
+    risk: "write",
+  },
+];
+
+test("issue #367: an open endpoint's tools and self-description are federated with the probe", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  const startedAt = Date.now();
+  const { requests } = stubRegistryAndMcp([openEntry], openMcp({ card: true }));
+
+  const result = await ingestFromRegistry({
+    source: "registry.test",
+    baseUrl: "https://registry.test",
+    verified: true,
+  });
+
+  assert.equal(result.ingested, 1);
+  assert.equal(result.authProbed, 1);
+  const input = mocks.upsert.mock.calls[0]?.[0];
+  assert.ok(input);
+  assert.equal(input.manifest.auth.type, "none");
+  assert.deepEqual(input.manifest.tools, EXPECTED_TOOLS);
+  const probedAt = new Date(input.provenanceJson.authProbe.probedAt);
+  assert.ok(
+    probedAt.getTime() >= startedAt && probedAt.getTime() <= Date.now(),
+  );
+  assert.equal(input.provenanceJson.authProbe.result, "open");
+  assert.deepEqual(input.provenanceJson.selfDescription, {
+    source: "remote-probe",
+    recordedAt: probedAt.toISOString(),
+    serverInfo: OPEN_INITIALIZE.serverInfo,
+    instructions: OPEN_INITIALIZE.instructions,
+    capabilities: OPEN_INITIALIZE.capabilities,
+  });
+  assert.equal(input.provenanceJson.validatedAt, probedAt.toISOString());
+  assert.deepEqual(input.provenanceJson.serverCard, SERVER_CARD);
+  assert.equal(input.provenanceJson.authMetadata, undefined);
+  // The handshake a client makes, the probe's session carried through.
+  const methods = await Promise.all(
+    requests.map(async (request) =>
+      request.method === "POST"
+        ? ((await request.json()) as { method: string }).method
+        : `${request.method} ${new URL(request.url).pathname}`,
+    ),
+  );
+  assert.deepEqual(methods, [
+    "initialize",
+    "notifications/initialized",
+    "tools/list",
+    "DELETE /mcp",
+    "GET /.well-known/mcp/server-card.json",
+  ]);
+});
+
+test("issue #367: a failed tools/list leaves the entry's tools empty and unvalidated", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  stubRegistryAndMcp(
+    [openEntry],
+    openMcp({ tools: () => new Response("oops", { status: 500 }) }),
+  );
+
+  await ingestFromRegistry({
+    source: "registry.test",
+    baseUrl: "https://registry.test",
+    verified: true,
+  });
+
+  const input = mocks.upsert.mock.calls[0]?.[0];
+  assert.deepEqual(input.manifest.tools, []);
+  assert.equal(input.provenanceJson.validatedAt, undefined);
+  assert.equal(
+    input.provenanceJson.selfDescription.serverInfo.name,
+    "acme-open",
+  );
+  assert.equal(input.provenanceJson.authProbe.result, "open");
+});
+
+test("issue #367: a 401's protected-resource metadata keeps its documentation link, never fetched", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  const fetch = stubRegistryAndEndpoints([arcmiraEntry], (url) =>
+    url === ARCMIRA_ENDPOINT
+      ? oauthChallenge()
+      : url === "https://mcp.arcmira.com/.well-known/oauth-protected-resource"
+        ? jsonResponse({
+            resource: ARCMIRA_ENDPOINT,
+            authorization_servers: ["https://auth.arcmira.com"],
+            resource_name: "Arcmira MCP",
+            resource_documentation: "https://docs.arcmira.com/mcp",
+          })
+        : new Response(null, { status: 404 }),
+  );
+
+  await ingestFromRegistry({
+    source: "registry.test",
+    baseUrl: "https://registry.test",
+    verified: true,
+  });
+
+  const input = mocks.upsert.mock.calls[0]?.[0];
+  assert.equal(input.manifest.auth.type, "oauth");
+  assert.deepEqual(input.manifest.tools, []);
+  assert.deepEqual(input.provenanceJson.authMetadata, {
+    resourceName: "Arcmira MCP",
+    resourceDocumentation: "https://docs.arcmira.com/mcp",
+  });
+  assert.equal(input.provenanceJson.selfDescription, undefined);
+  assert.equal(input.provenanceJson.validatedAt, undefined);
+  assert.equal(
+    fetch.mock.calls.some(([input]) =>
+      requestUrl(input).startsWith("https://docs.arcmira.com/"),
+    ),
+    false,
+  );
+});
+
+test("issue #367: a reused stored probe brings its tools, self-description, metadata and card along", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  const probedAt = daysAgo(10);
+  const stored = endpointProbeRecord(
+    {
+      result: "open",
+      selfDescription: {
+        serverInfo: OPEN_INITIALIZE.serverInfo,
+        instructions: OPEN_INITIALIZE.instructions,
+      },
+      tools: OPEN_TOOLS,
+      authMetadata: { resourceName: "Acme" },
+      serverCard: SERVER_CARD,
+    },
+    probedAt,
+  );
+  mocks.storedProbes.mockResolvedValueOnce(
+    new Map([
+      [
+        mcpServerVersionId("io.github.acme/open", "2.0.0"),
+        storedRow({
+          authProbe: authProbeRecord(OPEN_ENDPOINT, "open", probedAt),
+          selfDescription: stored.selfDescription,
+          validatedAt: stored.validatedAt,
+          authMetadata: stored.authMetadata,
+          serverCard: stored.serverCard,
+          tools: stored.tools,
+        }),
+      ],
+    ]),
+  );
+  const { requests } = stubRegistryAndMcp([openEntry], () => {
+    throw new Error("the endpoint must not be probed again");
+  });
+
+  const result = await ingestFromRegistry({
+    source: "registry.test",
+    baseUrl: "https://registry.test",
+    verified: true,
+  });
+
+  assert.equal(requests.length, 0);
+  assert.equal(result.authProbed, 0);
+  const input = mocks.upsert.mock.calls[0]?.[0];
+  assert.deepEqual(input.manifest.tools, EXPECTED_TOOLS);
+  assert.deepEqual(
+    input.provenanceJson.selfDescription,
+    stored.selfDescription,
+  );
+  assert.equal(input.provenanceJson.validatedAt, probedAt.toISOString());
+  assert.deepEqual(input.provenanceJson.authMetadata, { resourceName: "Acme" });
+  assert.deepEqual(input.provenanceJson.serverCard, SERVER_CARD);
+});
+
+test("issue #367: stored pieces are reused only when well-formed and the probe's own", () => {
+  const now = new Date("2026-10-24T00:00:00.000Z");
+  const authProbe = authProbeRecord(OPEN_ENDPOINT, "open", daysAgo(1));
+  const reused = storedAuthProbe(
+    storedRow({
+      authProbe,
+      // Another workstream's self-description is not the remote probe's.
+      selfDescription: {
+        source: "sandbox-stdio",
+        recordedAt: now.toISOString(),
+        serverInfo: { name: "x" },
+      },
+      validatedAt: 12345,
+      authMetadata: { resourceDocumentation: "not a url" },
+      serverCard: ["not", "an", "object"],
+      tools: [{ noName: true }],
+    }),
+    OPEN_ENDPOINT,
+    now,
+  );
+  assert.deepEqual(reused, {
+    result: "open",
+    probedAt: new Date(authProbe.probedAt),
+    tools: [],
+  });
+});
+
+test("issue #367: a fresh probe without an initialize answer stores no self-description and no validation", () => {
+  const at = new Date("2026-10-24T00:00:00.000Z");
+  assert.deepEqual(endpointProbeRecord({ result: "credential" }, at), {
+    result: "credential",
+    probedAt: at,
+    tools: [],
+  });
+  // Described but not listed: no validation time.
+  const described = endpointProbeRecord(
+    { result: "open", selfDescription: { instructions: "hi" } },
+    at,
+  );
+  assert.equal(described.validatedAt, undefined);
+  assert.deepEqual(described.selfDescription, {
+    source: "remote-probe",
+    recordedAt: at.toISOString(),
+    instructions: "hi",
+  });
+  // Listed none: validated, with an empty list.
+  const empty = endpointProbeRecord(
+    { result: "open", selfDescription: {}, tools: [] },
+    at,
+  );
+  assert.equal(empty.validatedAt, at.toISOString());
+  assert.deepEqual(empty.tools, []);
 });

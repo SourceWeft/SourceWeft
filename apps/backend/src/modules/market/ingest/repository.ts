@@ -148,27 +148,57 @@ export async function getMarketItemForSubmission(identifier: string): Promise<{
 }
 
 /**
- * The endpoint auth probes federation stored for these versions
- * (`provenanceJson.authProbe`), by version id. Versions without one are
- * absent.
+ * What federation stored from an endpoint probe of a version: the probe
+ * record (`provenanceJson.authProbe`) and what came with it — the server's
+ * self-description, validation time, auth metadata and server card from the
+ * provenance, and the tools from the manifest — so a sync within the probe's
+ * lifetime reuses all of it. Unvalidated: the caller checks each piece.
  */
-export async function findStoredAuthProbes(
+export type StoredEndpointProbe = {
+  authProbe: unknown;
+  selfDescription: unknown;
+  validatedAt: unknown;
+  authMetadata: unknown;
+  serverCard: unknown;
+  tools: unknown;
+};
+
+/**
+ * The endpoint probes federation stored for these versions, by version id.
+ * Versions without one are absent.
+ */
+export async function findStoredEndpointProbes(
   versionIds: string[],
-): Promise<Map<string, unknown>> {
+): Promise<Map<string, StoredEndpointProbe>> {
   if (versionIds.length === 0) {
     return new Map();
   }
   const rows = await db
     .select({
       id: mcpServerVersions.id,
-      authProbe: sql<unknown>`${mcpServerVersions.provenanceJson} -> 'authProbe'`,
+      provenanceJson: mcpServerVersions.provenanceJson,
+      tools: sql<unknown>`${mcpServerVersions.manifestJson} -> 'tools'`,
     })
     .from(mcpServerVersions)
     .where(inArray(mcpServerVersions.id, versionIds));
   return new Map(
-    rows.flatMap((row) =>
-      row.authProbe == null ? [] : [[row.id, row.authProbe] as const],
-    ),
+    rows.flatMap((row) => {
+      const provenance = (row.provenanceJson ?? {}) as Record<string, unknown>;
+      if (provenance.authProbe == null) return [];
+      return [
+        [
+          row.id,
+          {
+            authProbe: provenance.authProbe,
+            selfDescription: provenance.selfDescription,
+            validatedAt: provenance.validatedAt,
+            authMetadata: provenance.authMetadata,
+            serverCard: provenance.serverCard,
+            tools: row.tools,
+          },
+        ] as const,
+      ];
+    }),
   );
 }
 

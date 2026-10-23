@@ -18,6 +18,7 @@ import type { MarketItemSummary } from "@sourceweft/market-sdk";
 
 import { buildTranslatedAlternates } from "../../../../lib/i18n/metadata";
 import { mcpOverviewLocale } from "../../../../lib/mcp-ai-overview";
+import { mcpDocumentationUrl } from "../../../../lib/mcp-provenance";
 import { resolveInitialLandingAuthState } from "../../../_landing/auth-state-server";
 import { SourceWeftFooter } from "../../../_landing/components/sourceweft-footer";
 import { SourceWeftHeader } from "../../../_landing/components/sourceweft-header";
@@ -253,6 +254,9 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
   const sourceUrl = manifest.sourceUrl ?? item.sourceUrl;
   const repoUrl = manifest.repoUrl ?? item.repoUrl;
   const homepageUrl = manifest.homepageUrl ?? item.homepageUrl;
+  // The endpoint's own documentation link, from its protected-resource
+  // metadata; shown, never fetched.
+  const documentationUrl = mcpDocumentationUrl(version);
   const clientConfig = remoteMcpClientConfig(manifest);
   // The hero already shows the summary; only a longer description adds
   // anything. An AI overview, when there is one, takes the description's
@@ -297,7 +301,7 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
       "@type": "Organization",
       name: providerName ?? "SourceWeft MCP Market",
     },
-    sameAs: [homepageUrl, repoUrl, sourceUrl].filter(Boolean),
+    sameAs: [homepageUrl, repoUrl, sourceUrl, documentationUrl].filter(Boolean),
     softwareVersion: version.version,
     url: `${SITE_URL}${mcpPath(item.identifier)}`,
   };
@@ -460,6 +464,9 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
               <div className="mt-4 flex flex-wrap gap-x-4 gap-y-2">
                 <ExternalTextLink href={homepageUrl}>
                   {t("homepage")}
+                </ExternalTextLink>
+                <ExternalTextLink href={documentationUrl}>
+                  {t("documentation")}
                 </ExternalTextLink>
                 <ExternalTextLink href={repoUrl}>
                   {t("repository")}

@@ -1,21 +1,34 @@
 import { createHash } from "node:crypto";
 import {
+  marketMcpAuthMetadataSchema,
   marketMcpManifestSchema,
+  marketMcpSelfDescriptionSchema,
+  marketMcpToolManifestSchema,
+  type MarketMcpAuthMetadata,
   type MarketMcpAuthMethod,
   type MarketMcpAuthRequirement,
   type MarketMcpManifest,
+  type MarketMcpSelfDescription,
+  type MarketMcpToolManifest,
   type McpTransport,
 } from "@sourceweft/market-contracts";
+import { z } from "zod";
 import { config } from "../../shared/config";
 import { logger } from "../../shared/logger";
 import {
   probeMcpEndpointAuth,
   type McpEndpointAuthProbe,
+  type McpEndpointProbe,
 } from "../../shared/mcp-auth-probe";
 import { createControlledFetch } from "../../shared/security/controlled-fetch";
 import { mcpServerVersionId } from "./ingest/plan";
-import { findStoredAuthProbes, upsertMarketMcp } from "./ingest/repository";
+import {
+  findStoredEndpointProbes,
+  upsertMarketMcp,
+  type StoredEndpointProbe,
+} from "./ingest/repository";
 import { classifyByText } from "./parser/categories";
+import { classifyToolRisk } from "./parser/tool-risk";
 import { registryServerProvenance } from "./registry-server";
 
 /**
@@ -318,11 +331,17 @@ export function registryRemoteAuth(
  * Map an upstream registry entry to our market manifest. Returns null for
  * entries we can't represent (missing name/version). Registry entries are
  * treated as verified (namespace-checked upstream) but not "official" (that
- * badge is reserved for first-party curation).
+ * badge is reserved for first-party curation). `tools` are what the
+ * endpoint's own `tools/list` answered the probe (Issue #367); the registry
+ * itself lists none.
  */
 export function mapRegistryServerToManifest(
   entry: RegistryEntry,
-  options: { verified: boolean; authProbe?: McpEndpointAuthProbe } = {
+  options: {
+    verified: boolean;
+    authProbe?: McpEndpointAuthProbe;
+    tools?: MarketMcpToolManifest[];
+  } = {
     verified: false,
   },
 ): MarketMcpManifest | null {
@@ -374,7 +393,7 @@ export function mapRegistryServerToManifest(
       hasRemote ? options.authProbe : undefined,
     ),
     categories,
-    tools: [],
+    tools: options.tools ?? [],
     sourceUrl: server.repository?.url ?? undefined,
     repoUrl: server.repository?.url ?? undefined,
   };
@@ -434,7 +453,65 @@ const AUTH_PROBE_CONCURRENCY = 8;
 // An endpoint's auth can change without a new registry version.
 const AUTH_PROBE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
-type AuthProbe = { result: McpEndpointAuthProbe; probedAt: Date };
+/**
+ * What one probe of an endpoint gives the catalog, fresh or reused from the
+ * version's stored one: the auth classification, the manifest's tools (what
+ * `tools/list` answered; `[]` when it failed, was not tried or listed none)
+ * and the provenance's self-description fields of the W1 data contract.
+ * `validatedAt` is set only when `initialize` and `tools/list` both
+ * succeeded.
+ */
+type EndpointProbe = {
+  result: McpEndpointAuthProbe;
+  probedAt: Date;
+  tools: MarketMcpToolManifest[];
+  selfDescription?: MarketMcpSelfDescription;
+  validatedAt?: string;
+  authMetadata?: MarketMcpAuthMetadata;
+  serverCard?: Record<string, unknown>;
+};
+
+const SELF_DESCRIPTION_SOURCE = "remote-probe";
+const storedToolsSchema = z.array(marketMcpToolManifestSchema);
+
+function definedEntries<T extends Record<string, unknown>>(value: T): T {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, entry]) => entry !== undefined),
+  ) as T;
+}
+
+/**
+ * A fresh probe as the catalog keeps it. Tools take the manifest's tool
+ * shape, their risk from the server's annotations or their name.
+ */
+export function endpointProbeRecord(
+  probe: McpEndpointProbe,
+  probedAt: Date,
+): EndpointProbe {
+  const tools = (probe.tools ?? []).flatMap((tool) => {
+    const parsed = marketMcpToolManifestSchema.safeParse({
+      ...tool,
+      risk: classifyToolRisk(tool.name, tool.annotations),
+    });
+    return parsed.success ? [parsed.data] : [];
+  });
+  return definedEntries({
+    result: probe.result,
+    probedAt,
+    tools,
+    selfDescription: probe.selfDescription
+      ? {
+          source: SELF_DESCRIPTION_SOURCE,
+          recordedAt: probedAt.toISOString(),
+          ...probe.selfDescription,
+        }
+      : undefined,
+    validatedAt:
+      probe.selfDescription && probe.tools ? probedAt.toISOString() : undefined,
+    authMetadata: probe.authMetadata,
+    serverCard: probe.serverCard,
+  });
+}
 
 function endpointSha256(endpointUrl: string) {
   return createHash("sha256").update(endpointUrl).digest("hex");
@@ -459,15 +536,20 @@ export function authProbeRecord(
 
 /**
  * The version's stored probe, when it was of this same endpoint and is under
- * 30 days old at `now`. A record without a probe time is probed again.
+ * 30 days old at `now`, with what the probe stored alongside it (the
+ * self-description it recorded itself, the tools, the auth metadata and the
+ * server card; each piece only when well-formed). A record without a probe
+ * time is probed again.
  */
 export function storedAuthProbe(
-  value: unknown,
+  value: StoredEndpointProbe | undefined,
   endpointUrl: string,
   now: Date,
-): AuthProbe | undefined {
-  if (!value || typeof value !== "object") return undefined;
-  const stored = value as {
+): EndpointProbe | undefined {
+  if (!value?.authProbe || typeof value.authProbe !== "object") {
+    return undefined;
+  }
+  const stored = value.authProbe as {
     endpointSha256?: unknown;
     result?: unknown;
     probedAt?: unknown;
@@ -480,16 +562,43 @@ export function storedAuthProbe(
     typeof stored.probedAt === "string" ? stored.probedAt : Number.NaN,
   );
   const age = now.getTime() - probedAt.getTime();
-  return stored.endpointSha256 === endpointSha256(endpointUrl) &&
-    age >= 0 &&
-    age < AUTH_PROBE_MAX_AGE_MS
-    ? { result, probedAt }
-    : undefined;
+  if (
+    stored.endpointSha256 !== endpointSha256(endpointUrl) ||
+    !(age >= 0 && age < AUTH_PROBE_MAX_AGE_MS)
+  ) {
+    return undefined;
+  }
+  const selfDescription = marketMcpSelfDescriptionSchema.safeParse(
+    value.selfDescription,
+  );
+  const tools = storedToolsSchema.safeParse(value.tools);
+  const authMetadata = marketMcpAuthMetadataSchema.safeParse(
+    value.authMetadata,
+  );
+  return definedEntries({
+    result,
+    probedAt,
+    tools: tools.success ? tools.data : [],
+    selfDescription:
+      selfDescription.success &&
+      selfDescription.data.source === SELF_DESCRIPTION_SOURCE
+        ? selfDescription.data
+        : undefined,
+    validatedAt:
+      typeof value.validatedAt === "string" ? value.validatedAt : undefined,
+    authMetadata: authMetadata.success ? authMetadata.data : undefined,
+    serverCard:
+      value.serverCard &&
+      typeof value.serverCard === "object" &&
+      !Array.isArray(value.serverCard)
+        ? (value.serverCard as Record<string, unknown>)
+        : undefined,
+  });
 }
 
 async function probeRegistryEndpoint(
   endpointUrl: string,
-): Promise<McpEndpointAuthProbe> {
+): Promise<McpEndpointProbe> {
   // Registry endpoints are third-party input: the same endpoint policy as an
   // install's requests, checked on every connection.
   const requests = createControlledFetch({
@@ -507,10 +616,12 @@ async function probeRegistryEndpoint(
 }
 
 /**
- * The endpoint auth probe of each entry with a remote: the one stored for
- * that version when it probed the same endpoint within 30 days of `now`,
- * else a fresh one. A probe that fails is left out (the entry is mapped from
- * its declared headers alone) and retried on the next sync.
+ * The endpoint probe of each entry with a remote: the one stored for that
+ * version when it probed the same endpoint within 30 days of `now`, else a
+ * fresh one — so the server's self-description and tools refresh with its
+ * auth classification. A probe that fails is left out (the entry is mapped
+ * from its declared headers alone, with no tools) and retried on the next
+ * sync.
  */
 async function registryAuthProbes(entries: RegistryEntry[], now: Date) {
   const targets = entries.flatMap((entry) => {
@@ -529,10 +640,10 @@ async function registryAuthProbes(entries: RegistryEntry[], now: Date) {
         ]
       : [];
   });
-  const stored = await findStoredAuthProbes(
+  const stored = await findStoredEndpointProbes(
     targets.map((target) => target.versionId),
   );
-  const probes = new Map<RegistryEntry, AuthProbe>();
+  const probes = new Map<RegistryEntry, EndpointProbe>();
   const pending: typeof targets = [];
   for (const target of targets) {
     const reused = storedAuthProbe(
@@ -549,10 +660,13 @@ async function registryAuthProbes(entries: RegistryEntry[], now: Date) {
     while (next < pending.length) {
       const target = pending[next++]!;
       try {
-        probes.set(target.entry, {
-          result: await probeRegistryEndpoint(target.endpointUrl),
-          probedAt: now,
-        });
+        probes.set(
+          target.entry,
+          endpointProbeRecord(
+            await probeRegistryEndpoint(target.endpointUrl),
+            now,
+          ),
+        );
       } catch (error) {
         failed += 1;
         logger.warn("Registry federation auth probe failed", {
@@ -636,6 +750,7 @@ export async function ingestFromRegistry(input: {
       const manifest = mapRegistryServerToManifest(entry, {
         verified: input.verified,
         authProbe: authProbe?.result,
+        tools: authProbe?.tools,
       });
       if (!manifest) {
         skipped += 1;
@@ -667,6 +782,12 @@ export async function ingestFromRegistry(input: {
                     authProbe.probedAt,
                   )
                 : undefined,
+            // What the endpoint said about itself while being probed (Issue
+            // #367 W1): kept with the probe, so it refreshes with it.
+            selfDescription: authProbe?.selfDescription,
+            validatedAt: authProbe?.validatedAt,
+            authMetadata: authProbe?.authMetadata,
+            serverCard: authProbe?.serverCard,
           },
         });
         ingested += 1;
