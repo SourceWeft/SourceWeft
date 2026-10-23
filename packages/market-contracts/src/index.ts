@@ -274,6 +274,10 @@ export const getMarketMcpResponseSchema = z.object({
   // null when there is none or a market admin hid it. Optional for answers
   // from before it existed.
   aiOverview: marketMcpAiOverviewSchema.nullable().optional(),
+  // False when the page should stay out of search (`noindex`, not in the
+  // sitemap): its README is one file that many servers show. Absent means
+  // true, for answers from before it existed.
+  searchIndexable: z.boolean().optional(),
 });
 
 export const getMarketMcpManifestResponseSchema = z.object({
@@ -526,6 +530,10 @@ export const getMarketSkillResponseSchema = z.object({
   }),
   // Advisory scan flags the current version carries (e.g. `binary:executable`).
   scanFlags: z.array(z.string()),
+  // The slug of the public skill with the same files whose page this one
+  // defers to in search (canonical, not in the sitemap); null when this skill
+  // is that page. Optional for answers from before it existed.
+  canonicalSlug: z.string().nullable().optional(),
   // The current version's AI-written overview (`?locale=`, English fallback);
   // null when there is none. Optional for answers from before it existed.
   aiOverview: marketSkillAiOverviewSchema.nullable().optional(),
