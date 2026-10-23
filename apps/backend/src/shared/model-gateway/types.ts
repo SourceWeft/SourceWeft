@@ -1,4 +1,5 @@
 import type {
+  ImageGenerationTargetConfig,
   ModelCapabilityRule,
   ProviderRoutingConfig,
 } from "@sourceweft/model-gateway";
@@ -73,6 +74,7 @@ export type RoutedGatewayConfig = {
         priority?: number;
         weight?: number;
         providerRouting?: ProviderRoutingConfig;
+        imageGeneration?: ImageGenerationTargetConfig;
       }>;
     }
   >;

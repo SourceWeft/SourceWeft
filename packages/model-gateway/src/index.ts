@@ -11,6 +11,14 @@ export {
   toGatewayErrorData,
 } from "./errors";
 
+export { DEFAULT_IMAGE_GENERATION_REQUEST } from "./types";
+export {
+  isImageGenerationEndpoint,
+  isImageGenerationSizing,
+  mapAspectRatioToImageDimensions,
+  resolveImageGenerationRequestConfig,
+} from "./adapters/image-utils";
+
 export {
   DEFAULT_ALLOWED_MODEL_ALIASES,
   DEFAULT_MAX_RETRIES,
@@ -100,6 +108,10 @@ export type {
   GeneratedImage,
   ImageAspectRatio,
   ImageGenerateInput,
+  ImageGenerationEndpoint,
+  ImageGenerationRequestConfig,
+  ImageGenerationSizing,
+  ImageGenerationTargetConfig,
   ImageGenerateResult,
   ImageQuality,
   ImageResponseFormat,
