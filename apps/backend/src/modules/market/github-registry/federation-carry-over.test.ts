@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../ingest/repository", () => ({
   upsertMarketMcp: mocks.upsert,
-  findStoredAuthProbes: mocks.storedProbes,
+  findStoredEndpointProbes: mocks.storedProbes,
 }));
 vi.mock("./repository", () => ({
   findStoredGithubRegistryRecords: mocks.storedRecords,
