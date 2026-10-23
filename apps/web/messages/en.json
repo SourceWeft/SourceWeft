@@ -464,6 +464,8 @@
       "remoteNoHostByPublisher": "{name}'s hosted MCP server, published by {publisher}",
       "local": "{name}'s local MCP server",
       "localByPublisher": "{name}'s local MCP server, published by {publisher}",
+      "unknown": "{name}'s MCP server",
+      "unknownByPublisher": "{name}'s MCP server, published by {publisher}",
       "auth": {
         "notRequired": "no sign-in required",
         "optionalApiKey": "optional API key",

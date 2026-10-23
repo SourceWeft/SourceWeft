@@ -80,7 +80,35 @@ describe("mcpTemplateDescription", () => {
         },
         t,
       ),
-    ).toBe("Exa's hosted MCP server, published by exa.ai; API key required.");
+    ).toBe("Exa's MCP server, published by exa.ai; API key required.");
+  });
+
+  it("says nothing about where a server runs when its transport is unknown", () => {
+    const t = translator("en");
+    expect(
+      mcpTemplateDescription(
+        { name: "Exa", transport: null, authMethod: "apiKey", toolCount: 3 },
+        t,
+      ),
+    ).toBe("Exa's MCP server; API key required; 3 tools.");
+    expect(
+      mcpTemplateDescription(
+        { name: "Exa", endpointHost: "mcp.exa.ai", authMethod: "notRequired" },
+        t,
+      ),
+    ).toBe("Exa's MCP server; no sign-in required.");
+    expect(
+      mcpTemplateDescription(
+        { name: "Exa", authMethod: "notRequired" },
+        translator("zh-CN"),
+      ),
+    ).toBe("Exa 的 MCP 服务；无需登录。");
+    expect(
+      mcpTemplateDescription(
+        { name: "Exa", publisherDomain: "exa.ai", authMethod: "notRequired" },
+        translator("zh-TW"),
+      ),
+    ).toBe("Exa 的 MCP 服務，由 exa.ai 發布；無需登入。");
   });
 
   it("says a stdio server runs locally", () => {

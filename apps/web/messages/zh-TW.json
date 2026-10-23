@@ -464,6 +464,8 @@
       "remoteNoHostByPublisher": "{name} 的託管 MCP 服務，由 {publisher} 發布",
       "local": "{name} 的本機 MCP 服務",
       "localByPublisher": "{name} 的本機 MCP 服務，由 {publisher} 發布",
+      "unknown": "{name} 的 MCP 服務",
+      "unknownByPublisher": "{name} 的 MCP 服務，由 {publisher} 發布",
       "auth": {
         "notRequired": "無需登入",
         "optionalApiKey": "可選 API 金鑰",
@@ -479,7 +481,7 @@
     },
     "facts": {
       "title": "服務資訊",
-      "lead": "暫無 AI 概覽：以下資訊來自注冊中心條目和服務本身。",
+      "lead": "暫無 AI 概覽：以下資訊來自註冊中心條目和服務本身。",
       "publisher": "發布者",
       "endpoint": "端點",
       "transport": "傳輸",

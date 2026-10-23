@@ -455,6 +455,8 @@
       "remoteNoHostByPublisher": "{name} 的托管 MCP 服务，由 {publisher} 发布",
       "local": "{name} 的本地 MCP 服务",
       "localByPublisher": "{name} 的本地 MCP 服务，由 {publisher} 发布",
+      "unknown": "{name} 的 MCP 服务",
+      "unknownByPublisher": "{name} 的 MCP 服务，由 {publisher} 发布",
       "auth": {
         "notRequired": "无需登录",
         "optionalApiKey": "可选 API 密钥",

@@ -8,7 +8,9 @@ import { transportLabel } from "./mcp-labels";
  * (#367 W4): one localized sentence built only from facts, for example
  * "Notion's hosted MCP server (mcp.notion.com), published by notion.com;
  * OAuth sign-in required; Streamable HTTP; 24 tools." Nothing in it is
- * inferred, so it can stand where an overview would without inventing text.
+ * inferred — an unknown transport gets "{name}'s MCP server", not a guess
+ * at where it runs — so it can stand where an overview would without
+ * inventing text.
  */
 
 export type McpTemplateFacts = {
@@ -37,18 +39,17 @@ export function mcpTemplateDescription(
   const name = facts.name.trim();
   const publisher = facts.publisherDomain?.trim() || null;
   const host = facts.endpointHost?.trim() || null;
-  const local = facts.transport === "stdio";
-  const leadKey = local
-    ? publisher
-      ? "localByPublisher"
-      : "local"
-    : host
-      ? publisher
-        ? "remoteByPublisher"
-        : "remote"
-      : publisher
-        ? "remoteNoHostByPublisher"
+  // Where it runs is said only when the transport says so: stdio runs
+  // locally, any other transport is hosted, and no transport (a list item
+  // from before it was recorded) gets a neutral lead rather than a guess.
+  const runs = !facts.transport
+    ? "unknown"
+    : facts.transport === "stdio"
+      ? "local"
+      : host
+        ? "remote"
         : "remoteNoHost";
+  const leadKey = publisher ? `${runs}ByPublisher` : runs;
   const parts = [
     t(leadKey, { name, publisher: publisher ?? "", host: host ?? "" }),
     t(`auth.${facts.authMethod}`),
