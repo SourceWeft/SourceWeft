@@ -544,3 +544,44 @@ describe("Lupa English search description experiment", () => {
     );
   });
 });
+
+describe("public MCP detail page structured data", () => {
+  function softwareApplication(html: string) {
+    return [
+      ...html.matchAll(
+        /<script type="application\/ld\+json">([\s\S]*?)<\/script>/g,
+      ),
+    ]
+      .map((match) => JSON.parse(match[1]!) as Record<string, unknown>)
+      .find((data) => data["@type"] === "SoftwareApplication")!;
+  }
+
+  it("lists the server's tools as the application's features", async () => {
+    const html = await render();
+    expect(softwareApplication(html).featureList).toEqual(["forecast"]);
+  });
+
+  it("caps the features at 50 tools and leaves them out without tools", async () => {
+    market.getPublicMcpManifest.mockResolvedValue({
+      ...manifestResponse,
+      manifest: {
+        ...manifestResponse.manifest,
+        tools: Array.from({ length: 60 }, (_, index) => ({
+          ...manifestResponse.manifest.tools[0]!,
+          name: `tool_${index}`,
+        })),
+      },
+    });
+    const many = softwareApplication(await render()).featureList as string[];
+    expect(many).toHaveLength(50);
+    expect(many[49]).toBe("tool_49");
+
+    market.getPublicMcpManifest.mockResolvedValue({
+      ...manifestResponse,
+      manifest: { ...manifestResponse.manifest, tools: [] },
+    });
+    expect(softwareApplication(await render())).not.toHaveProperty(
+      "featureList",
+    );
+  });
+});

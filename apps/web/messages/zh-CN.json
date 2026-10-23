@@ -400,8 +400,10 @@
     },
     "tools": {
       "empty": "工具元数据尚未被收录。",
-      "inputFields": "输入字段：{fields}",
-      "schemaObject": "schema 对象"
+      "parameters": "输入参数",
+      "required": "必填",
+      "moreParameters": "另有 {count} 个",
+      "noParameters": "无需输入参数。"
     },
     "faq": {
       "eyebrow": "MCP 常见问答",

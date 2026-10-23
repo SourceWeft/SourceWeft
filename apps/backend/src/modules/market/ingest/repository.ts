@@ -147,14 +147,23 @@ export async function getMarketItemForSubmission(identifier: string): Promise<{
   return { hasUpstream, status: item.status, submittedBy };
 }
 
+/** What federation stored for one version about its endpoint. */
+export type StoredEndpointProbes = {
+  /** `provenanceJson.authProbe`. */
+  authProbe?: unknown;
+  /** `provenanceJson.toolsListing`. */
+  toolsListing?: unknown;
+  /** `manifestJson.tools`, the listing's tools. */
+  tools?: unknown;
+};
+
 /**
- * The endpoint auth probes federation stored for these versions
- * (`provenanceJson.authProbe`), by version id. Versions without one are
- * absent.
+ * The endpoint auth probes and tool listings federation stored for these
+ * versions, by version id. Versions with neither are absent.
  */
-export async function findStoredAuthProbes(
+export async function findStoredEndpointProbes(
   versionIds: string[],
-): Promise<Map<string, unknown>> {
+): Promise<Map<string, StoredEndpointProbes>> {
   if (versionIds.length === 0) {
     return new Map();
   }
@@ -162,12 +171,26 @@ export async function findStoredAuthProbes(
     .select({
       id: mcpServerVersions.id,
       authProbe: sql<unknown>`${mcpServerVersions.provenanceJson} -> 'authProbe'`,
+      toolsListing: sql<unknown>`${mcpServerVersions.provenanceJson} -> 'toolsListing'`,
+      // Only versions with a listing carry tools worth reading back.
+      tools: sql<unknown>`case when ${mcpServerVersions.provenanceJson} ? 'toolsListing' then ${mcpServerVersions.manifestJson} -> 'tools' end`,
     })
     .from(mcpServerVersions)
     .where(inArray(mcpServerVersions.id, versionIds));
   return new Map(
     rows.flatMap((row) =>
-      row.authProbe == null ? [] : [[row.id, row.authProbe] as const],
+      row.authProbe == null && row.toolsListing == null
+        ? []
+        : [
+            [
+              row.id,
+              {
+                authProbe: row.authProbe ?? undefined,
+                toolsListing: row.toolsListing ?? undefined,
+                tools: row.tools ?? undefined,
+              },
+            ] as const,
+          ],
     ),
   );
 }
