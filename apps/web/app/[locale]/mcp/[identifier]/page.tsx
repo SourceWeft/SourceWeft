@@ -46,6 +46,10 @@ import {
   mcpAuthExplanation,
   mcpAuthMethod,
 } from "../../../../lib/mcp-auth-method";
+import {
+  mcpToolsValidation,
+  mcpToolsValidationReasonKey,
+} from "../../../../lib/mcp-tools-validation";
 import { CopyButton, McpIcon } from "../_components/mcp-client";
 import {
   ExternalTextLink,
@@ -214,6 +218,7 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
   setRequestLocale(locale);
   const t = await getTranslations("mcp.detail");
   const tAuth = await getTranslations("mcp.authMethod");
+  const tValidation = await getTranslations("mcp.toolsValidation");
   const decodedIdentifier = decodeURIComponent(identifier);
   // AI text in the visitor's language, English when there is none in it.
   const overviewLocale = mcpOverviewLocale(locale);
@@ -230,6 +235,14 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
   ]);
   const { item, manifest, version } = result;
   const authExplanation = mcpAuthExplanation(manifest.auth);
+  // A stdio package the sandbox could not list tools for says so in place
+  // of "0 tools": in the facts, the section nav and the empty tool list.
+  const toolsValidation = mcpToolsValidation(item, versions);
+  const toolsValidationReason = toolsValidation
+    ? tValidation(
+        `reason.${mcpToolsValidationReasonKey(toolsValidation.reason)}`,
+      )
+    : null;
   const categoryNames = mcpCategoryNames(categoriesResponse.items);
   const relatedMarket =
     item.categories.length > 0
@@ -273,7 +286,12 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
     ...(hasOverview ? [["overview", t("nav.overview")]] : []),
     ["installation", t("nav.installation")],
     ...(shownReadme ? [["readme", t("nav.readme")]] : []),
-    ["tools", t("nav.tools", { count: manifest.tools.length })],
+    [
+      "tools",
+      toolsValidation
+        ? t("nav.toolsNotValidated")
+        : t("nav.tools", { count: manifest.tools.length }),
+    ],
     ...(versions.length > 0
       ? [["versions", t("nav.versions", { count: versions.length })]]
       : []),
@@ -410,7 +428,18 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
             <aside className="order-2 rounded-xl border border-zinc-300 bg-white/70 p-5 lg:order-none dark:border-white/10 dark:bg-white/[0.04]">
               <dl className="grid grid-cols-2 gap-4 text-sm">
                 {[
-                  { label: t("tools"), value: String(manifest.tools.length) },
+                  toolsValidationReason
+                    ? {
+                        label: t("tools"),
+                        value: tValidation("notValidated"),
+                        explanation: tValidation("explain", {
+                          reason: toolsValidationReason,
+                        }),
+                      }
+                    : {
+                        label: t("tools"),
+                        value: String(manifest.tools.length),
+                      },
                   {
                     label: t("auth"),
                     value: tAuth(mcpAuthMethod(manifest.auth)),
@@ -689,7 +718,10 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
                 <SectionHeading count={manifest.tools.length} icon={Code2}>
                   {t("toolsHeading")}
                 </SectionHeading>
-                <McpToolRows tools={manifest.tools} />
+                <McpToolRows
+                  tools={manifest.tools}
+                  validation={toolsValidation}
+                />
               </section>
 
               {versions.length > 0 ? (

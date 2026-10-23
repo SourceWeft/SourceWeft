@@ -36,10 +36,13 @@ export type RegistryInput = {
   default?: string;
   description?: string;
   format?: string;
+  isRepeated?: boolean;
   isRequired?: boolean;
   isSecret?: boolean;
   name?: string;
   placeholder?: string;
+  // Arguments only: "positional" or "named".
+  type?: string;
   value?: string;
   valueHint?: string;
   variables?: Record<string, RegistryInput>;

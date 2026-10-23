@@ -318,6 +318,9 @@ test("the registry's packages and remotes are kept in provenance by name and fla
             isSecret: true,
           },
         ],
+        // The argument is kept by name for the stdio validation's command;
+        // its value is an input and is not.
+        runtimeArguments: [{ name: "--token" }],
       },
     ],
   });

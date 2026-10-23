@@ -412,6 +412,18 @@
       "inputFields": "Input fields: {fields}",
       "schemaObject": "schema object"
     },
+    "toolsValidation": {
+      "notValidated": "Not validated",
+      "withReason": "Not validated · {reason}",
+      "explain": "SourceWeft started this package once in an isolated sandbox, without credentials, to list its tools. It could not be validated: {reason}.",
+      "reason": {
+        "install": "the package did not install",
+        "start": "the server did not start",
+        "protocol": "the server did not complete the MCP handshake",
+        "timeout": "the server did not answer in time",
+        "unsupportedPackage": "the package type cannot run in the sandbox"
+      }
+    },
     "faq": {
       "eyebrow": "MCP FAQ",
       "heading": "MCP server basics",
@@ -479,6 +491,7 @@
         "installation": "Installation",
         "readme": "README",
         "tools": "Tools ({count})",
+        "toolsNotValidated": "Tools (not validated)",
         "versions": "Versions ({count})",
         "related": "Related"
       },

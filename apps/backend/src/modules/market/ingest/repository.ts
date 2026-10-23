@@ -300,8 +300,25 @@ export async function upsertMarketMcp(input: {
         status: input.status,
         origin: input.origin,
         source: input.source ?? null,
-        manifestJson: manifest,
-        provenanceJson,
+        // What the sandboxed stdio validation wrote after the last sync
+        // (Issue #367, W1b) survives this one: a registry entry lists no
+        // tools, so a manifest that arrives with none keeps the tools a
+        // stdio start listed; and the provenance keys the validation owns
+        // are carried over unless this sync supplies them itself (a remote
+        // probe's `selfDescription` and `validatedAt` win).
+        manifestJson: sql`case
+          when jsonb_array_length(coalesce(excluded.manifest_json -> 'tools', '[]'::jsonb)) = 0
+            and ${mcpServerVersions.provenanceJson} #>> '{selfDescription,source}' = 'stdio-sandbox'
+            and jsonb_typeof(${mcpServerVersions.manifestJson} -> 'tools') = 'array'
+          then excluded.manifest_json || jsonb_build_object('tools', ${mcpServerVersions.manifestJson} -> 'tools')
+          else excluded.manifest_json
+        end`,
+        provenanceJson: sql`jsonb_strip_nulls(jsonb_build_object(
+          'selfDescription', ${mcpServerVersions.provenanceJson} -> 'selfDescription',
+          'validatedAt', ${mcpServerVersions.provenanceJson} -> 'validatedAt',
+          'validation', ${mcpServerVersions.provenanceJson} -> 'validation',
+          'stdioValidation', ${mcpServerVersions.provenanceJson} -> 'stdioValidation'
+        )) || excluded.provenance_json`,
         // Same first-publish preservation as the item row.
         publishedAt: sql`coalesce(${mcpServerVersions.publishedAt}, excluded.published_at)`,
       },
