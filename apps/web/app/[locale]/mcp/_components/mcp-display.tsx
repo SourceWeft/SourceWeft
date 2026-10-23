@@ -20,6 +20,7 @@ import type {
   MarketMcpToolManifest,
   McpRiskLevel,
   McpRuntime,
+  McpStdioValidationReason,
   McpTransport,
 } from "@sourceweft/market-sdk";
 
@@ -28,12 +29,17 @@ import { mcpCardText } from "../../../../lib/mcp-ai-overview";
 import { mcpAuthMethod } from "../../../../lib/mcp-auth-method";
 import { mcpPublisherDomain } from "../../../../lib/mcp-facts";
 import {
+  mcpToolsValidation,
+  mcpToolsValidationReasonKey,
+} from "../../../../lib/mcp-tools-validation";
+import {
   mcpRuntimeKind,
   runtimeLabel,
   transportLabel,
 } from "../../../../lib/mcp-labels";
 import { mcpTemplateDescription } from "../../../../lib/mcp-template-description";
 import { slugify } from "../../../../lib/slug";
+import { mcpToolParameters } from "../../../../lib/mcp-tool-parameters";
 
 import { McpIcon } from "./mcp-client";
 import { mcpPath } from "./mcp-paths";
@@ -240,6 +246,7 @@ export async function McpMarketCard({
   const t = await getTranslations("mcp.card");
   const tOverview = await getTranslations("mcp.aiOverview");
   const tTemplate = await getTranslations("mcp.template");
+  const tValidation = await getTranslations("mcp.toolsValidation");
   const trusted = Boolean(item.official || item.verified);
   const primaryCategory =
     highlightCategory && item.categories.includes(highlightCategory)
@@ -260,6 +267,11 @@ export async function McpMarketCard({
       tTemplate,
     ),
   );
+  // A package the sandbox could not list tools for says so, not "0 tools".
+  const validation = mcpToolsValidation(item);
+  const validationReason = validation
+    ? tValidation(`reason.${mcpToolsValidationReasonKey(validation.reason)}`)
+    : null;
   return (
     <LocaleLink
       className="group flex h-full flex-col rounded-xl border border-zinc-300 bg-white/62 p-5 transition-all hover:-translate-y-0.5 hover:border-zinc-950/40 hover:bg-white hover:shadow-[0_18px_70px_rgba(39,39,42,0.1)] dark:border-white/10 dark:bg-white/[0.035] dark:hover:border-white/35 dark:hover:bg-white/[0.055]"
@@ -307,10 +319,23 @@ export async function McpMarketCard({
             {mcpCategoryLabel(primaryCategory, categoryNames)}
           </span>
         ) : null}
-        <span className="inline-flex shrink-0 items-center gap-1.5">
-          <Code2 className="size-3.5" />
-          {t("tools", { count: item.toolsCount })}
-        </span>
+        {validationReason ? (
+          <span
+            className="inline-flex min-w-0 items-center gap-1.5"
+            data-tools-validation={validation?.reason}
+            title={tValidation("explain", { reason: validationReason })}
+          >
+            <AlertTriangle className="size-3.5 shrink-0" />
+            <span className="truncate">
+              {tValidation("withReason", { reason: validationReason })}
+            </span>
+          </span>
+        ) : (
+          <span className="inline-flex shrink-0 items-center gap-1.5">
+            <Code2 className="size-3.5" />
+            {t("tools", { count: item.toolsCount })}
+          </span>
+        )}
         <span className="ml-auto shrink-0">{formatDate(item.updatedAt)}</span>
       </div>
     </LocaleLink>
@@ -396,14 +421,26 @@ export async function McpDirectorySection({
 
 export async function McpToolRows({
   tools,
+  validation,
 }: {
   tools: MarketMcpToolManifest[];
+  /** The failed sandbox validation to explain an empty list with, if any. */
+  validation?: { reason: McpStdioValidationReason } | null;
 }) {
   const t = await getTranslations("mcp");
   if (tools.length === 0) {
     return (
-      <div className="rounded-lg border border-zinc-300 bg-white/52 p-5 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-400">
-        {t("tools.empty")}
+      <div
+        className="rounded-lg border border-zinc-300 bg-white/52 p-5 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-400"
+        data-tools-validation={validation?.reason}
+      >
+        {validation
+          ? t("toolsValidation.explain", {
+              reason: t(
+                `toolsValidation.reason.${mcpToolsValidationReasonKey(validation.reason)}`,
+              ),
+            })
+          : t("tools.empty")}
       </div>
     );
   }
@@ -421,47 +458,77 @@ export async function McpToolRows({
               <h3 className="font-mono text-sm font-semibold text-zinc-950 dark:text-white">
                 {tool.name}
               </h3>
-              {tool.title ? (
+              {toolTitle(tool) ? (
                 <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-                  {tool.title}
+                  {toolTitle(tool)}
                 </p>
               ) : null}
             </div>
-            <Badge
-              tone={
-                tool.risk === "read"
-                  ? "good"
-                  : tool.risk === "unknown"
-                    ? "neutral"
-                    : "warn"
-              }
-            >
-              {t(
-                `badges.risk.${
-                  tool.risk === "read" ||
-                  tool.risk === "write" ||
-                  tool.risk === "destructive"
-                    ? tool.risk
-                    : "unknown"
-                }`,
-              )}
-            </Badge>
+            {/* Listed tools carry no risk of their own: an "Unknown" badge on
+                every one of them would say nothing. */}
+            {tool.risk === "read" ||
+            tool.risk === "write" ||
+            tool.risk === "destructive" ? (
+              <Badge tone={tool.risk === "read" ? "good" : "warn"}>
+                {t(`badges.risk.${tool.risk}`)}
+              </Badge>
+            ) : null}
           </div>
           {tool.description ? (
-            <p className="mt-3 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+            <p className="mt-3 whitespace-pre-line break-words text-sm leading-6 text-zinc-600 dark:text-zinc-400">
               {tool.description}
             </p>
           ) : null}
-          <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-500">
-            {t("tools.inputFields", {
-              fields:
-                Object.keys(tool.inputSchema ?? {})
-                  .slice(0, 8)
-                  .join(", ") || t("tools.schemaObject"),
-            })}
-          </p>
+          <McpToolParameterList inputSchema={tool.inputSchema} />
         </article>
       ))}
+    </div>
+  );
+}
+
+function toolTitle(tool: MarketMcpToolManifest) {
+  const annotated = tool.annotations?.title;
+  const title =
+    tool.title ?? (typeof annotated === "string" ? annotated : undefined);
+  return title && title !== tool.name ? title : null;
+}
+
+const SHOWN_TOOL_PARAMETERS = 12;
+
+async function McpToolParameterList({
+  inputSchema,
+}: {
+  inputSchema: Record<string, unknown> | undefined;
+}) {
+  const t = await getTranslations("mcp");
+  const parameters = mcpToolParameters(inputSchema);
+  if (parameters.length === 0) {
+    return (
+      <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-500">
+        {t("tools.noParameters")}
+      </p>
+    );
+  }
+  const hidden = parameters.length - SHOWN_TOOL_PARAMETERS;
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-500">
+      <span>{t("tools.parameters")}</span>
+      {parameters.slice(0, SHOWN_TOOL_PARAMETERS).map((parameter) => (
+        <code
+          className="rounded border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 font-mono text-zinc-700 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-300"
+          key={parameter.name}
+        >
+          {parameter.name}
+          {parameter.required ? (
+            <span className="ml-1 font-sans text-zinc-500">
+              {t("tools.required")}
+            </span>
+          ) : null}
+        </code>
+      ))}
+      {hidden > 0 ? (
+        <span>{t("tools.moreParameters", { count: hidden })}</span>
+      ) : null}
     </div>
   );
 }

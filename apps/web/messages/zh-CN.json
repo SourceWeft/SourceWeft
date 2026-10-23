@@ -400,8 +400,22 @@
     },
     "tools": {
       "empty": "工具元数据尚未被收录。",
-      "inputFields": "输入字段：{fields}",
-      "schemaObject": "schema 对象"
+      "parameters": "输入参数",
+      "required": "必填",
+      "moreParameters": "另有 {count} 个",
+      "noParameters": "无需输入参数。"
+    },
+    "toolsValidation": {
+      "notValidated": "未验证",
+      "withReason": "未验证 · {reason}",
+      "explain": "SourceWeft 曾在隔离沙箱中以无凭据方式启动该软件包一次，以列出其工具。验证未能完成：{reason}。",
+      "reason": {
+        "install": "软件包安装失败",
+        "start": "服务器未能启动",
+        "protocol": "服务器未完成 MCP 握手",
+        "timeout": "服务器未在限时内响应",
+        "unsupportedPackage": "该软件包类型无法在沙箱中运行"
+      }
     },
     "faq": {
       "eyebrow": "MCP 常见问答",
@@ -505,6 +519,7 @@
         "installation": "安装",
         "readme": "README",
         "tools": "工具（{count}）",
+        "toolsNotValidated": "工具（未验证）",
         "versions": "版本（{count}）",
         "related": "相关"
       },

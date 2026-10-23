@@ -60,10 +60,51 @@ test("inputs keep name, description, format and flags; values, defaults and hint
           },
           { name: "OPTIONAL" },
         ],
+        packageArguments: [{ name: "--key" }],
       },
     ],
   });
   assert.equal(JSON.stringify(kept).includes("secret"), false);
+});
+
+test("arguments keep type, name, hint and flags; only a positional literal keeps its value", () => {
+  const kept = registryServerProvenance({
+    packages: [
+      {
+        registryType: "npm",
+        identifier: "@acme/server",
+        version: "1.2.3",
+        runtimeArguments: [
+          { type: "positional", value: "-y", valueHint: "flag" },
+          { type: "named", name: "--port", value: "8080", isRequired: true },
+          { type: "positional", value: "{token}", isRequired: true },
+          { type: "positional", value: "ssh-rsa AAAA", isSecret: true },
+          { type: "positional", isRepeated: true },
+        ],
+        packageArguments: [
+          { type: "positional", name: "root", valueHint: "<dir>" },
+        ],
+      },
+    ],
+  });
+  assert.deepEqual(kept, {
+    packages: [
+      {
+        registryType: "npm",
+        identifier: "@acme/server",
+        version: "1.2.3",
+        runtimeArguments: [
+          { type: "positional", value: "-y", valueHint: "flag" },
+          { type: "named", name: "--port", isRequired: true },
+        ],
+        packageArguments: [
+          { type: "positional", name: "root", valueHint: "<dir>" },
+        ],
+      },
+    ],
+  });
+  assert.equal(JSON.stringify(kept).includes("AAAA"), false);
+  assert.equal(JSON.stringify(kept).includes("8080"), false);
 });
 
 test("a remote keeps its endpoint without credentials, query or fragment", () => {

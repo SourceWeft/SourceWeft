@@ -7,7 +7,7 @@ import shutil
 import subprocess
 import tempfile
 import unicodedata
-from report_schema import read_report, parse_formats, labels, source_text, effective_presentation, contents_entries, statement_parts, cell_parts, statement_body, cell_body
+from report_schema import read_report, parse_formats, labels, source_text, effective_presentation, contents_entries, statement_parts, cell_parts, statement_body, cell_body, table_header_gaps
 
 
 def h(value):
@@ -151,7 +151,8 @@ def strip_paragraph_borders(element):
             properties.remove(border)
 
 
-def write_docx(report, destination):
+def write_docx(report, destination, fresh_page_tables=frozenset()):
+    """Write the Word deliverable; tables keyed (section, block) in fresh_page_tables start a new page."""
     from docx import Document
     from docx.shared import Mm, Pt, RGBColor
     from docx.oxml import OxmlElement, parse_xml
@@ -246,7 +247,7 @@ def write_docx(report, destination):
             run.append(value)
             link.append(run)
             paragraph._p.append(link)
-    for section_data in report['sections']:
+    for section_index, section_data in enumerate(report['sections']):
         section_heading = doc.add_heading(section_data['heading'], 1)
         if entries:
             bookmark_id = str(list(bookmarks).index(section_data['id']) + 1)
@@ -257,7 +258,7 @@ def write_docx(report, destination):
             end.set(qn('w:id'), bookmark_id)
             section_heading._p.insert(1 if section_heading._p.pPr is not None else 0, start)
             section_heading._p.append(end)
-        for block in section_data['blocks']:
+        for block_index, block in enumerate(section_data['blocks']):
             if block['type'] == 'paragraph':
                 append_parts(statement_parts(block, report), doc.add_paragraph())
             elif block['type'] == 'bullets':
@@ -285,6 +286,11 @@ def write_docx(report, destination):
                 header._tr.get_or_add_trPr().append(repeat)
                 for cell, value in zip(header.cells, block['columns']):
                     cell.text = value
+                if (section_index, block_index) in fresh_page_tables:
+                    # Break at the start of the keep-with-next chain so the
+                    # section heading never stays behind without its table.
+                    start = section_heading if block_index == 0 else header.cells[0].paragraphs[0]
+                    start.paragraph_format.page_break_before = True
                 for row in block['rows']:
                     cells = table.add_row().cells
                     for target, cell in zip(cells, row):
@@ -340,6 +346,21 @@ def preflight(formats):
                 raise RuntimeError(f'{command} is required for the requested PDF path')
 
 
+def convert_pdf(docx, temp, name):
+    pdf_dir = temp / name
+    pdf_dir.mkdir()
+    result = subprocess.run(['soffice', f'-env:UserInstallation={(temp / "profile").as_uri()}', '--headless', '--convert-to', 'pdf', '--outdir', str(pdf_dir), str(docx.resolve())], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=90, check=False)
+    converted = pdf_dir / 'report.pdf'
+    if result.returncode != 0 or not converted.is_file() or converted.stat().st_size == 0:
+        raise RuntimeError('LibreOffice PDF conversion failed; no alternate converter or stale PDF is accepted')
+    return converted
+
+
+def pdf_page_texts(pdf):
+    """Actual per-page text in content-stream order (Poppler raw mode)."""
+    return subprocess.run(['pdftotext', '-raw', str(pdf), '-'], capture_output=True, text=True, timeout=30, check=True).stdout.split('\f')
+
+
 def generate(source, output, formats):
     report = read_report(source)
     preflight(formats)
@@ -360,12 +381,16 @@ def generate(source, output, formats):
             docx = output / 'report.docx' if 'docx' in formats else temp / 'report.docx'
             if 'docx' not in formats:
                 write_docx(report, docx)
-            pdf_dir = temp / 'converted'
-            pdf_dir.mkdir()
-            result = subprocess.run(['soffice', f'-env:UserInstallation={(temp / "profile").as_uri()}', '--headless', '--convert-to', 'pdf', '--outdir', str(pdf_dir), str(docx.resolve())], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=90, check=False)
-            converted = pdf_dir / 'report.pdf'
-            if result.returncode != 0 or not converted.is_file() or converted.stat().st_size == 0:
-                raise RuntimeError('LibreOffice PDF conversion failed; no alternate converter or stale PDF is accepted')
+            converted = convert_pdf(docx, temp, 'converted')
+            gaps = table_header_gaps(report, pdf_page_texts(converted))
+            if gaps:
+                # LibreOffice can strand a heading row at a page bottom and then
+                # repeat it blank. Start each affected table on a fresh page once.
+                write_docx(report, docx, frozenset(gap['table'] for gap in gaps))
+                converted = convert_pdf(docx, temp, 'converted-fresh-page')
+                gaps = table_header_gaps(report, pdf_page_texts(converted))
+                if gaps:
+                    raise RuntimeError('LibreOffice did not repeat table headings on PDF pages ' + ', '.join(str(gap['page']) for gap in gaps) + '; no PDF without repeated headings is accepted')
             shutil.move(str(converted), output / 'report.pdf')
     # Generation is not QA. Never emit a passed result here.
     return {'status': 'generated_pending_qa', 'outputDirectory': str(output.resolve()), 'formats': formats, 'htmlDraft': str((output / 'draft.html').resolve()), 'privateSource': str((output / 'report.source.json').resolve())}
