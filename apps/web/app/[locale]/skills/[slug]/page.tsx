@@ -158,7 +158,9 @@ export async function generateMetadata({
   }
   const t = await getTranslations({ locale, namespace: "publicSkills.detail" });
   try {
-    const { skill, source } = await loadSkill(decodeURIComponent(slug));
+    const { skill, source, canonicalSlug } = await loadSkill(
+      decodeURIComponent(slug),
+    );
     const title = t("metaTitle", {
       name: source.repoSubpath
         ? `${skill.displayName} · ${source.repoSubpath}`
@@ -183,11 +185,13 @@ export async function generateMetadata({
             name: skill.displayName,
           }),
     );
-    const alternates = buildTranslatedAlternates(
-      skillPath(skill.slug),
-      locale,
-      translated,
-    );
+    // A skill with the same files as another public skill defers to that
+    // skill's page, in each language that page has (not in the sitemap).
+    const alternates = canonicalSlug
+      ? buildTranslatedAlternates(skillPath(canonicalSlug), locale, [
+          ...(await translatedOverviews(canonicalSlug)).keys(),
+        ])
+      : buildTranslatedAlternates(skillPath(skill.slug), locale, translated);
     const url = alternates.canonical;
     return {
       alternates: {
@@ -546,7 +550,9 @@ export default async function PublicSkillDetailPage({
   const updated = formatSkillDate(skill.updatedAt, uiLocale);
   const scanFlagLabels = t.raw("scanFlags") as Record<string, string>;
   const primaryCategory = skill.categories[0];
-  const pageUrl = `${SITE_URL}${skillPath(skill.slug)}`;
+  // Structured data names the page the canonical names: the shared one, for a
+  // skill with another public skill's files.
+  const pageUrl = `${SITE_URL}${skillPath(result.canonicalSlug ?? skill.slug)}`;
   // Works in any agent: it reads the install guide and runs the CLI, or — in
   // SourceWeft chat — hands the link to `install_skill`.
   const agentPrompt = t("detail.install.agent.prompt", {
