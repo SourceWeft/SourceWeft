@@ -1,5 +1,6 @@
 import { and, count, desc, eq, inArray, notInArray, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
+import { alias, type AnyPgColumn } from "drizzle-orm/pg-core";
 import type {
   GetMarketSkillResponse,
   ListMarketSkillCategoriesResponse,
@@ -80,15 +81,58 @@ const MARKET_RELATED_SKILLS_LIMIT = 6;
  * source types to keep in step. Builtins are the product's own and appear in
  * the dashboard only.
  */
-export function publicMarketSkillCondition(): SQL {
+export function publicMarketSkillCondition(
+  definitions: Record<
+    "visibility" | "sourceType" | "status",
+    AnyPgColumn
+  > = skillDefinitions,
+  versions: Record<
+    "status" | "isCurrent" | "manifestJson",
+    AnyPgColumn
+  > = skillVersions,
+): SQL {
   return and(
-    eq(skillDefinitions.visibility, "public"),
-    sql`${skillDefinitions.sourceType} <> 'builtin'`,
-    eq(skillDefinitions.status, "active"),
-    eq(skillVersions.status, "published"),
-    eq(skillVersions.isCurrent, true),
-    sql`${skillVersions.manifestJson}->>'listing' is distinct from 'hidden'`,
+    eq(definitions.visibility, "public"),
+    sql`${definitions.sourceType} <> 'builtin'`,
+    eq(definitions.status, "active"),
+    eq(versions.status, "published"),
+    // A literal, not a parameter, so the partial index on current versions
+    // applies to every plan of a query that uses this.
+    sql`${versions.isCurrent} = true`,
+    sql`${versions.manifestJson}->>'listing' is distinct from 'hidden'`,
   )!;
+}
+
+// A raw `sql` FROM renders an alias by its name alone, so the tables are
+// named in the FROM and the aliases only supply the column references.
+const DUPLICATE_DEFINITIONS = "duplicate_definitions";
+const DUPLICATE_VERSIONS = "duplicate_versions";
+const duplicateDefinitions = alias(skillDefinitions, DUPLICATE_DEFINITIONS);
+const duplicateVersions = alias(skillVersions, DUPLICATE_VERSIONS);
+
+/**
+ * The slug of the page that public skills with these files share: skills
+ * whose current versions have the same content hash (every file, path and
+ * bytes) are one page to search engines. The primary is the one from the
+ * most-starred repository, then the shortest slug (a vendored copy gets a
+ * longer, path-qualified one), then the oldest, then the id, so it only
+ * changes when the set does. `contentHash` is a value or a column reference;
+ * a skill that is not public itself still names the public primary, if any.
+ */
+export function primarySkillSlugOf(contentHash: unknown): SQL<string | null> {
+  return sql<string | null>`(
+    select ${duplicateDefinitions.slug}
+    from ${skillDefinitions} as ${sql.identifier(DUPLICATE_DEFINITIONS)}
+    inner join ${skillVersions} as ${sql.identifier(DUPLICATE_VERSIONS)}
+      on ${duplicateVersions.skillId} = ${duplicateDefinitions.id}
+    where ${publicMarketSkillCondition(duplicateDefinitions, duplicateVersions)}
+      and ${duplicateVersions.contentHash} = ${contentHash}
+    order by ${duplicateDefinitions.repoStars} desc,
+      length(${duplicateDefinitions.slug}),
+      ${duplicateDefinitions.createdAt},
+      ${duplicateDefinitions.id}
+    limit 1
+  )`;
 }
 
 const onSkillVersion = eq(skillVersions.skillId, skillDefinitions.id);
@@ -612,7 +656,11 @@ export async function findMarketSkill(
 ): Promise<GetMarketSkillResponse | null> {
   const locale = options.locale ?? "en";
   const [row] = await db
-    .select({ ...summaryColumns, skillMd: skillVersions.skillMd })
+    .select({
+      ...summaryColumns,
+      skillMd: skillVersions.skillMd,
+      primarySlug: primarySkillSlugOf(skillVersions.contentHash),
+    })
     .from(skillDefinitions)
     .innerJoin(skillVersions, onSkillVersion)
     .leftJoin(skillRepositories, onSkillRepository)
@@ -736,6 +784,10 @@ export async function findMarketSkill(
         null,
     },
     scanFlags: registry?.scan?.flags ?? [],
+    canonicalSlug:
+      row.primarySlug && row.primarySlug !== row.definition.slug
+        ? row.primarySlug
+        : null,
     aiOverview: aiOverview
       ? {
           summary: aiOverview.overview.summary,

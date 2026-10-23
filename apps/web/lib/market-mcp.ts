@@ -120,6 +120,9 @@ export type PublicMcpDetail = {
   aiOverview: MarketMcpAiOverview | null;
   // The languages the server has a visible overview in, without fallback.
   overviewLocales: MarketMcpLocale[];
+  // False when the page stays out of search (`noindex, follow`); true when
+  // the market says nothing or cannot be read, so an outage never deindexes.
+  searchIndexable: boolean;
 };
 
 // A hidden or regenerated overview shows within about two minutes: this
@@ -137,6 +140,7 @@ const cachedMcpDetail = unstable_cache(
       aiOverview: detail.aiOverview ?? null,
       overviewLocales: detail.item.overviewLocales ?? [],
       readme: readMcpReadme(detail),
+      searchIndexable: detail.searchIndexable ?? true,
       versions: detail.versions,
     };
   },
@@ -160,6 +164,7 @@ export async function getPublicMcpDetail(
       aiOverview: null,
       overviewLocales: [],
       readme: null,
+      searchIndexable: true,
       versions: [],
     };
   }

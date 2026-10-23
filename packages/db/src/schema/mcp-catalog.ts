@@ -176,6 +176,11 @@ export const mcpServerVersions = pgTable(
     ),
     // The README fetch scheduler's scan for versions that are due.
     index("mcp_server_versions_readme_due_idx").on(table.readmeNextFetchAt),
+    // Servers showing one shared README file are kept out of search
+    // (modules/market/shared-readme.ts).
+    index("mcp_server_versions_readme_sha256_idx")
+      .on(table.readmeSha256)
+      .where(sql`${table.readmeStatus} = 'ok'`),
     check(
       "mcp_server_versions_status_check",
       sql`${table.status} in ('draft', 'reviewing', 'published', 'unlisted', 'archived')`,
