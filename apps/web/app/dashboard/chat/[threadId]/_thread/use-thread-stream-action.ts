@@ -483,9 +483,20 @@ export function useThreadStreamAction({
           attachOnlyAssistantMessage.metadata,
           { content: latestAssistantMessageContent },
         );
+        // A resume attach streams only the resumed run, so it continues from
+        // the persisted blocks. Any other attach is a reload: the server
+        // replays the run's event log from offset 0 (`attachRunEvents`), which
+        // rebuilds every text, reasoning and tool block, so seeding those too
+        // renders each one twice (Issue #357). Committed artifact outputs are
+        // not stream events and carry over.
+        const seededRenderBlocks = shouldSeedAttachContent
+          ? existingRenderBlocks
+          : existingRenderBlocks.filter(
+              (block) => block.type === "artifact_output",
+            );
         streamRenderBuffer.replaceRenderBlocks(
-          existingRenderBlocks.length > 0
-            ? existingRenderBlocks
+          seededRenderBlocks.length > 0
+            ? seededRenderBlocks
             : shouldSeedAttachContent && seededAttachContent.length > 0
               ? [
                   {
