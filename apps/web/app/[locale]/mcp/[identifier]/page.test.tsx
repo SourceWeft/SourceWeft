@@ -423,6 +423,48 @@ describe("public MCP detail page README badge", () => {
   });
 });
 
+describe("a server whose README many servers show", () => {
+  it.each(["en", "zh-CN", "zh-TW"])(
+    "stays out of search but keeps its links followed and its own canonical (%s)",
+    async (locale) => {
+      market.getPublicMcpManifest.mockResolvedValue(manifestResponse);
+      market.getPublicMcpDetail.mockResolvedValue({
+        readme: null,
+        versions: [],
+        overviewLocales: ["en", "zh-CN", "zh-TW"],
+        searchIndexable: false,
+      });
+      const actual = await generateMetadata({
+        params: Promise.resolve({
+          identifier: encodeURIComponent(IDENTIFIER),
+          locale,
+        }),
+      });
+      expect(actual.robots).toEqual({ follow: true, index: false });
+      expect(actual.alternates?.canonical).toBe(
+        `${SITE_URL}${locale === "en" ? "" : `/${locale}`}/mcp/${encodeURIComponent(IDENTIFIER)}`,
+      );
+    },
+  );
+
+  it("is indexed when the market says it may be", async () => {
+    market.getPublicMcpManifest.mockResolvedValue(manifestResponse);
+    market.getPublicMcpDetail.mockResolvedValue({
+      readme: null,
+      versions: [],
+      overviewLocales: [],
+      searchIndexable: true,
+    });
+    const actual = await generateMetadata({
+      params: Promise.resolve({
+        identifier: encodeURIComponent(IDENTIFIER),
+        locale: "en",
+      }),
+    });
+    expect(actual.robots).toBeUndefined();
+  });
+});
+
 describe("Lupa English search description experiment", () => {
   const lupaIdentifier = "io.github.paeyoungpark-web/lupa-mcp";
   const searchDescription =
