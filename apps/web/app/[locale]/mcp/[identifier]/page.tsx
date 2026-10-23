@@ -73,6 +73,8 @@ import { McpReadmeCollapse } from "../_components/mcp-readme-collapse";
 // wrong origin. Freshness now comes from the cached market reads instead.
 export const dynamic = "force-dynamic";
 
+const MAX_JSON_LD_FEATURES = 50;
+
 type PageProps = {
   params: Promise<{ locale: string; identifier: string }>;
 };
@@ -284,6 +286,15 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
     "@type": "SoftwareApplication",
     applicationCategory: "DeveloperApplication",
     description,
+    // The tools are the application's features; schema.org has no list of
+    // them other than this, and an ItemList would need a page per tool.
+    ...(manifest.tools.length > 0
+      ? {
+          featureList: manifest.tools
+            .slice(0, MAX_JSON_LD_FEATURES)
+            .map((tool) => tool.name),
+        }
+      : {}),
     isAccessibleForFree: true,
     name: `${item.name} MCP Server`,
     offers: {
