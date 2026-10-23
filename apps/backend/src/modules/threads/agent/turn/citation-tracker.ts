@@ -1,6 +1,7 @@
 import { AgentCitationRegistry, type AgentCitation } from "../citation-registry";
-import type { ThinkingStepTrace } from "../..";
+import type { PreparedThreadTurn, ThinkingStepTrace } from "../..";
 import { normalizeAssistantCitations } from "./citations";
+import type { DeepAgentTurnEvent } from "./events";
 
 export function createCitationSnapshotTracker(input: {
   citationRegistry: AgentCitationRegistry;
@@ -14,6 +15,29 @@ export function createCitationSnapshotTracker(input: {
 
     lastEmittedCitationCount = citations.length;
     return citations;
+  };
+}
+
+/**
+ * A resumed turn's first event: the registry it continues, with the ids its
+ * message already cites. It reaches the run's snapshot before any progress
+ * write, so no writer projects an empty registry onto the message.
+ */
+export function continuedCitationsEvent(input: {
+  prepared: Pick<PreparedThreadTurn, "traceContinuation">;
+  getNewCitationSnapshot: () => AgentCitation[] | null;
+}): Extract<DeepAgentTurnEvent, { type: "citations" }> | null {
+  const availableCitations = input.getNewCitationSnapshot();
+  if (!availableCitations) {
+    return null;
+  }
+  const cited = new Set(input.prepared.traceContinuation?.citedCitationKeys);
+  return {
+    type: "citations",
+    citations: availableCitations.filter((citation) =>
+      cited.has(citation.citation),
+    ),
+    availableCitations,
   };
 }
 

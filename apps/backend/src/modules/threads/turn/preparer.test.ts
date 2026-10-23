@@ -267,3 +267,49 @@ test("step-summary failure resumes its saved checkpoint while error text stays e
       error.code === "AGENT_STEP_CONTINUATION_UNAVAILABLE",
   );
 });
+
+test("a continued message carries its citation registry and the ids its text cites", () => {
+  const citation = (key: string, chunkId: string) => ({
+    citation: key,
+    sourceId: null,
+    sourceTitle: key,
+    documentId: null,
+    chunkId,
+    score: 1,
+    excerpt: key,
+    quoteText: key,
+    origin: "web_fetch",
+    externalUri: `https://example.com/${chunkId}`,
+  });
+  const continuation = testExports.resolveTraceContinuationMetadata({
+    id: "assistant",
+    role: "assistant",
+    content: "Revenue grew [citation:c2], led by exports [citation:c3].",
+    metadata: {
+      retrieval: {
+        // A paused turn finalizes with no used citations.
+        citations: [],
+        availableCitations: [
+          citation("c1", "a"),
+          citation("c2", "b"),
+          citation("c3", "c"),
+          { citation: "c4" },
+        ],
+      },
+    },
+  } as never);
+  assert.deepEqual(
+    continuation?.citations?.map((item) => item.citation),
+    ["c1", "c2", "c3"],
+  );
+  assert.deepEqual(continuation?.citedCitationKeys, ["c2", "c3"]);
+  assert.equal(
+    testExports.resolveTraceContinuationMetadata({
+      id: "assistant",
+      role: "assistant",
+      content: "",
+      metadata: {},
+    } as never),
+    null,
+  );
+});

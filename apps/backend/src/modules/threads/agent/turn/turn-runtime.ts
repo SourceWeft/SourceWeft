@@ -93,6 +93,9 @@ export function createTurnRuntime(input: { prepared: PreparedThreadTurn }) {
     workspaceId: input.prepared.workspace.id,
     threadId: input.prepared.thread.id,
   });
+  // A resumed turn continues its message's registry, so ids cited before the
+  // pause keep resolving and new evidence is numbered after them.
+  citationRegistry.restore(input.prepared.traceContinuation?.citations ?? []);
   const traceSequenceAllocator = createTraceSequenceAllocator({
     traceContinuation: input.prepared.traceContinuation,
   });
