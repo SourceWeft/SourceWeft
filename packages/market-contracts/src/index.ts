@@ -158,6 +158,44 @@ export const marketMcpAiOverviewSchema = z.object({
   generatedAt: z.string(),
 });
 
+// ---------------------------------------------------------------------------
+// Sandboxed stdio package validation (Issue #367, W1b). A version that lists
+// `packages[]` is started once in the sandbox runtime with placeholder
+// credentials and asked for its tools. A success writes `selfDescription`
+// (`source: "stdio-sandbox"`) and `validatedAt` to the version's provenance
+// and the tools to its manifest; a failure writes `validation` below and
+// leaves the tools alone.
+// ---------------------------------------------------------------------------
+
+// Why the package could not be validated: it did not install, did not start,
+// started but did not speak MCP, took too long, or is of a kind the sandbox
+// cannot run (a container image, say).
+export const mcpStdioValidationReasonSchema = z.enum([
+  "install",
+  "start",
+  "protocol",
+  "timeout",
+  "unsupported-package",
+]);
+
+export const marketMcpValidationSchema = z.object({
+  // `unsupported` is reserved for `unsupported-package`.
+  status: z.enum(["failed", "unsupported"]),
+  reason: mcpStdioValidationReasonSchema,
+  at: z.string(),
+  // A bounded excerpt of what the sandbox saw (an install error, an exit
+  // code); third-party text, rendered as untrusted.
+  detail: z.string().optional(),
+});
+
+// What a card says instead of "0 tools": the latest version's failed
+// validation, when it has one and no tools.
+export const marketMcpToolsValidationSchema = marketMcpValidationSchema.pick({
+  status: true,
+  reason: true,
+  at: true,
+});
+
 export const marketItemSummarySchema = z.object({
   id: z.string(),
   identifier: z.string(),
@@ -198,6 +236,10 @@ export const marketItemSummarySchema = z.object({
   // The latest version's domain publisher; null when it has none. Optional
   // for answers from before it existed.
   publisher: marketMcpPublisherSchema.nullable().optional(),
+  // The latest version's failed stdio validation while it has no tools (see
+  // `marketMcpValidationSchema`); null when it has tools or was never tried.
+  // Optional for answers from before it existed.
+  toolsValidation: marketMcpToolsValidationSchema.nullable().optional(),
 });
 
 export const marketItemVersionSchema = z.object({
@@ -327,6 +369,13 @@ export type ListMarketMcpResponse = z.infer<typeof listMarketMcpResponseSchema>;
 export type McpReadmeStatus = z.infer<typeof mcpReadmeStatusSchema>;
 export type MarketMcpReadmeSource = z.infer<typeof marketMcpReadmeSourceSchema>;
 export type MarketMcpReadme = z.infer<typeof marketMcpReadmeSchema>;
+export type McpStdioValidationReason = z.infer<
+  typeof mcpStdioValidationReasonSchema
+>;
+export type MarketMcpValidation = z.infer<typeof marketMcpValidationSchema>;
+export type MarketMcpToolsValidation = z.infer<
+  typeof marketMcpToolsValidationSchema
+>;
 export type MarketMcpLocale = z.infer<typeof marketMcpLocaleSchema>;
 export type MarketMcpAiOverview = z.infer<typeof marketMcpAiOverviewSchema>;
 export type GetMarketMcpResponse = z.infer<typeof getMarketMcpResponseSchema>;

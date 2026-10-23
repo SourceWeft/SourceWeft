@@ -9,6 +9,11 @@ const backendRoot = path.resolve(
 
 const assetPairs = [
   ["src/modules/mail/templates", "dist/modules/mail/templates"],
+  // The in-sandbox half of the MCP stdio validation (a plain Node script).
+  [
+    "src/modules/market/validation/stdio-driver.mjs",
+    "dist/modules/market/validation/stdio-driver.mjs",
+  ],
 ];
 
 for (const [source, destination] of assetPairs) {

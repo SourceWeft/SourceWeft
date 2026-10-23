@@ -4,13 +4,17 @@ import { afterEach, test, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   upsert: vi.fn(),
   storedProbes: vi.fn(
-    async (_versionIds: string[]) => new Map<string, unknown>(),
+    async (_versionIds: string[]) =>
+      new Map<
+        string,
+        { authProbe?: unknown; toolsListing?: unknown; tools?: unknown }
+      >(),
   ),
 }));
 
 vi.mock("./ingest/repository", () => ({
   upsertMarketMcp: mocks.upsert,
-  findStoredAuthProbes: mocks.storedProbes,
+  findStoredEndpointProbes: mocks.storedProbes,
 }));
 vi.mock("../../shared/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn() },
@@ -26,6 +30,8 @@ import {
   registryRepositoryProvenance,
   runMarketFederation,
   storedAuthProbe,
+  storedToolsListing,
+  toolsListingRecord,
 } from "./federation";
 import { mcpServerVersionId } from "./ingest/plan";
 
@@ -552,6 +558,9 @@ test("the registry's packages and remotes are kept in provenance by name and fla
             isSecret: true,
           },
         ],
+        // The argument is kept by name for the stdio validation's command;
+        // its value is an input and is not.
+        runtimeArguments: [{ name: "--token" }],
       },
     ],
   });
@@ -997,7 +1006,10 @@ test("a version's recent stored probe of the same endpoint is reused, not repeat
   const stored = authProbeRecord(ARCMIRA_ENDPOINT, "oauth", daysAgo(29));
   mocks.storedProbes.mockResolvedValueOnce(
     new Map([
-      [mcpServerVersionId("io.github.arcmira/arcmira", "0.10.7"), stored],
+      [
+        mcpServerVersionId("io.github.arcmira/arcmira", "0.10.7"),
+        { authProbe: stored },
+      ],
     ]),
   );
   const fetch = stubRegistryAndEndpoints([arcmiraEntry], () => {
@@ -1035,7 +1047,9 @@ test("a stored probe 30 days old, or without a probe time, is probed again", asy
   ]) {
     vi.clearAllMocks();
     mocks.upsert.mockResolvedValue("item-id");
-    mocks.storedProbes.mockResolvedValueOnce(new Map([[versionId, record]]));
+    mocks.storedProbes.mockResolvedValueOnce(
+      new Map([[versionId, { authProbe: record }]]),
+    );
     const fetch = stubRegistryAndEndpoints([arcmiraEntry], () =>
       oauthChallenge(),
     );
@@ -1100,7 +1114,13 @@ test("a stored probe of another endpoint is probed again", async () => {
     new Map([
       [
         mcpServerVersionId("io.github.arcmira/arcmira", "0.10.7"),
-        authProbeRecord("https://old.arcmira.com/mcp", "open", daysAgo(1)),
+        {
+          authProbe: authProbeRecord(
+            "https://old.arcmira.com/mcp",
+            "open",
+            daysAgo(1),
+          ),
+        },
       ],
     ]),
   );
@@ -1269,4 +1289,286 @@ test("issue #367: GitHub-namespace entries carry no publisher", () => {
   assert.equal(manifest.publisher, undefined);
   // Stored as JSON, where an undefined field is no field at all.
   assert.equal("publisher" in JSON.parse(JSON.stringify(manifest)), false);
+});
+
+const OPEN_ENDPOINT = "https://mcp.open.test/mcp";
+const openEntry = {
+  server: {
+    name: "io.github.acme/open",
+    version: "2.0.0",
+    description: "An open server.",
+    remotes: [{ type: "streamable-http", url: OPEN_ENDPOINT }],
+  },
+};
+const openVersionId = mcpServerVersionId("io.github.acme/open", "2.0.0");
+const listedTools = [
+  {
+    name: "search",
+    description: "Search the index.",
+    inputSchema: {
+      type: "object",
+      properties: { query: { type: "string" } },
+      required: ["query"],
+    },
+    // The server's own claim; never the catalog risk.
+    annotations: { readOnlyHint: true },
+  },
+  { name: "delete_all", inputSchema: { type: "object" } },
+];
+
+/**
+ * A registry page with `entries`; every endpoint is an MCP server that answers
+ * without credentials and lists `tools`. Returns the JSON-RPC methods each
+ * endpoint received.
+ */
+function stubOpenMcpEndpoints(entries: unknown[], tools: unknown[]) {
+  const methods: Array<{ url: string; method: string }> = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: unknown, init?: RequestInit) => {
+      const url = requestUrl(input);
+      if (url.startsWith("https://registry.test/")) {
+        return Response.json({
+          servers: entries,
+          metadata: { nextCursor: null },
+        });
+      }
+      const request = new Request(input as RequestInfo, init);
+      if (request.method !== "POST") return new Response(null, { status: 405 });
+      const message = (await request.json()) as { id?: number; method: string };
+      methods.push({ url, method: message.method });
+      if (message.id === undefined) return new Response(null, { status: 202 });
+      return Response.json({
+        jsonrpc: "2.0",
+        id: message.id,
+        result:
+          message.method === "initialize"
+            ? {
+                protocolVersion: "2025-06-18",
+                capabilities: { tools: {} },
+                serverInfo: { name: "open", version: "1" },
+              }
+            : { tools },
+      });
+    }),
+  );
+  return methods;
+}
+
+function ingestTestRegistry() {
+  return ingestFromRegistry({
+    source: "registry.test",
+    baseUrl: "https://registry.test",
+    verified: true,
+  });
+}
+
+test("an open endpoint's tools are listed into the manifest with an unknown risk", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  const methods = stubOpenMcpEndpoints([openEntry], listedTools);
+
+  const result = await ingestTestRegistry();
+
+  assert.equal(result.toolsListed, 1);
+  assert.equal(result.toolsListFailed, 0);
+  // The auth probe's initialize, then the listing's own handshake.
+  assert.deepEqual(
+    methods.map((call) => call.method),
+    ["initialize", "initialize", "notifications/initialized", "tools/list"],
+  );
+  const input = mocks.upsert.mock.calls[0]?.[0];
+  assert.deepEqual(input.manifest.tools, [
+    {
+      name: "search",
+      description: "Search the index.",
+      inputSchema: listedTools[0]!.inputSchema,
+      annotations: { readOnlyHint: true },
+      risk: "unknown",
+    },
+    {
+      name: "delete_all",
+      inputSchema: { type: "object" },
+      annotations: {},
+      risk: "unknown",
+    },
+  ]);
+  const listedAt = new Date(input.provenanceJson.toolsListing.listedAt);
+  assert.deepEqual(
+    input.provenanceJson.toolsListing,
+    toolsListingRecord(OPEN_ENDPOINT, 2, listedAt),
+  );
+  assert.equal(
+    JSON.stringify(input.provenanceJson.toolsListing).includes("open.test"),
+    false,
+  );
+});
+
+test("an endpoint that asks for a credential is not listed", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  const fetch = stubRegistryAndEndpoints([arcmiraEntry], () =>
+    oauthChallenge(),
+  );
+
+  const result = await ingestTestRegistry();
+
+  assert.equal(endpointCalls(fetch).length, 1);
+  assert.equal(result.toolsListed, 0);
+  const input = mocks.upsert.mock.calls[0]?.[0];
+  assert.deepEqual(input.manifest.tools, []);
+  assert.equal(input.provenanceJson.toolsListing, undefined);
+});
+
+test("an endpoint URL with a query, user info or a template is not listed", async () => {
+  for (const url of [
+    "https://mcp.open.test/mcp?api_key=publisher-key",
+    "https://user:pass@mcp.open.test/mcp",
+    "https://{tenant}.open.test/mcp",
+  ]) {
+    vi.clearAllMocks();
+    mocks.upsert.mockResolvedValue("item-id");
+    const methods = stubOpenMcpEndpoints(
+      [
+        {
+          server: {
+            ...openEntry.server,
+            remotes: [{ type: "streamable-http", url }],
+          },
+        },
+      ],
+      listedTools,
+    );
+
+    const result = await ingestTestRegistry();
+
+    assert.equal(result.toolsListed, 0, url);
+    assert.equal(
+      methods.some((call) => call.method === "tools/list"),
+      false,
+      url,
+    );
+    assert.deepEqual(mocks.upsert.mock.calls[0]?.[0].manifest.tools, [], url);
+  }
+});
+
+test("a version's recent stored listing is reused, not repeated", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  const record = toolsListingRecord(OPEN_ENDPOINT, 1, daysAgo(29));
+  mocks.storedProbes.mockResolvedValueOnce(
+    new Map([
+      [
+        openVersionId,
+        {
+          authProbe: authProbeRecord(OPEN_ENDPOINT, "open", daysAgo(1)),
+          toolsListing: record,
+          tools: [{ ...listedTools[0], risk: "read" }],
+        },
+      ],
+    ]),
+  );
+  const methods = stubOpenMcpEndpoints([openEntry], []);
+
+  const result = await ingestTestRegistry();
+
+  assert.deepEqual(methods, []);
+  assert.equal(result.toolsListed, 0);
+  const input = mocks.upsert.mock.calls[0]?.[0];
+  assert.deepEqual(
+    input.manifest.tools.map((tool: { name: string; risk: string }) => [
+      tool.name,
+      tool.risk,
+    ]),
+    // Stored tools are bounded again, risk included.
+    [["search", "unknown"]],
+  );
+  assert.deepEqual(input.provenanceJson.toolsListing, record);
+});
+
+test("a failed listing keeps the stored tools and the run going", async () => {
+  mocks.upsert.mockResolvedValue("item-id");
+  const record = toolsListingRecord(OPEN_ENDPOINT, 1, daysAgo(40));
+  mocks.storedProbes.mockResolvedValueOnce(
+    new Map([
+      [openVersionId, { toolsListing: record, tools: [listedTools[0]] }],
+    ]),
+  );
+  stubRegistryAndEndpoints([openEntry, serverEntry(1)], (url) =>
+    url === OPEN_ENDPOINT
+      ? // The probe's initialize is answered; the listing's is not JSON-RPC.
+        new Response("{}", { status: 200 })
+      : new Response(null, { status: 401 }),
+  );
+
+  const result = await ingestTestRegistry();
+
+  assert.equal(result.ingested, 2);
+  assert.equal(result.toolsListed, 0);
+  assert.equal(result.toolsListFailed, 1);
+  const open = mocks.upsert.mock.calls.find(
+    ([input]) => input.manifest.identifier === "io.github.acme/open",
+  )?.[0];
+  assert.deepEqual(
+    open.manifest.tools.map((tool: { name: string }) => tool.name),
+    ["search"],
+  );
+  // Still stale, so the next sync lists it again.
+  assert.deepEqual(open.provenanceJson.toolsListing, record);
+});
+
+test("a stored listing is read back only for the same endpoint and with a valid time", () => {
+  const now = new Date("2026-10-24T00:00:00.000Z");
+  const at = (days: number) => new Date(now.getTime() - days * DAY_MS);
+  const tools = [listedTools[0]];
+  assert.equal(
+    storedToolsListing(
+      { toolsListing: toolsListingRecord(OPEN_ENDPOINT, 1, at(1)), tools },
+      OPEN_ENDPOINT,
+      now,
+    )?.fresh,
+    true,
+  );
+  assert.equal(
+    storedToolsListing(
+      { toolsListing: toolsListingRecord(OPEN_ENDPOINT, 1, at(30)), tools },
+      OPEN_ENDPOINT,
+      now,
+    )?.fresh,
+    false,
+  );
+  for (const stored of [
+    {
+      toolsListing: toolsListingRecord("https://old.test/mcp", 1, at(1)),
+      tools,
+    },
+    {
+      toolsListing: {
+        ...toolsListingRecord(OPEN_ENDPOINT, 1, at(1)),
+        listedAt: "soon",
+      },
+    },
+    { tools },
+    undefined,
+  ]) {
+    assert.equal(
+      storedToolsListing(stored, OPEN_ENDPOINT, now),
+      undefined,
+      JSON.stringify(stored),
+    );
+  }
+});
+
+test("a stdio-only entry gets no tools even when some are passed", () => {
+  const manifest = mapRegistryServerToManifest(
+    {
+      server: {
+        name: "io.github.acme/local",
+        version: "1.0.0",
+        packages: [{ registryType: "npm", identifier: "acme-local" }],
+      },
+    },
+    {
+      verified: true,
+      tools: [{ name: "x", inputSchema: {}, annotations: {}, risk: "unknown" }],
+    },
+  );
+  assert.deepEqual(manifest?.tools, []);
 });

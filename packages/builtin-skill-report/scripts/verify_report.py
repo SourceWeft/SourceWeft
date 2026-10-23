@@ -12,7 +12,7 @@ import zipfile
 from urllib.parse import urlsplit
 import xml.etree.ElementTree as ET
 from generate_report import markdown_document, page_number_footer_xml
-from report_schema import read_report, parse_formats, public_texts, effective_presentation, contents_entries, provenance_counts
+from report_schema import read_report, parse_formats, public_texts, effective_presentation, contents_entries, provenance_counts, table_header_gaps
 
 MAX_FILE_BYTES = 32 * 1024 * 1024
 
@@ -370,6 +370,9 @@ def verify(source, directory, formats):
                 # wrapped table cells. Keep the same strict whole-fragment,
                 # number and citation checks; visual layout is reviewed separately.
                 public = bounded_read(extracted).decode('utf-8')
+                gaps = table_header_gaps(report, public.split('\f'))
+                if gaps:
+                    raise ValueError('PDF table headings are missing on actual pages: ' + ', '.join(f"{gap['section']} p{gap['page']}" for gap in gaps))
                 if effective_presentation(report)['pageNumbers']:
                     bbox_path = Path(temporary) / 'spatial.html'
                     subprocess.run(['pdftotext', '-bbox', str(path.resolve()), str(bbox_path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30, check=True)
@@ -383,6 +386,7 @@ def verify(source, directory, formats):
                         subprocess.run(['pdftohtml', '-xml', '-stdout', '-i', '-zoom', '1', str(path.resolve())], stdout=stream, stderr=subprocess.DEVNULL, timeout=30, check=True)
                     assert_pdf_navigation(report, bounded_read(navigation), path.name)
                     checks.append('PDF clickable internal contents links and actual target headings')
+            checks.append('PDF table headings on every actual page holding table rows')
             checks.append('PDF extraction and all public text/numbers; visual review remains required')
         files.append({'fileName': path.name, 'byteLength': len(data), 'contentDigest': 'sha256:' + hashlib.sha256(data).hexdigest()})
     unexpected = [f'report.{fmt}' for fmt in ('md', 'docx', 'pdf') if fmt not in formats and (directory / f'report.{fmt}').exists()]

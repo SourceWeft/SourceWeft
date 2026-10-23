@@ -2,6 +2,9 @@ import {
   createModelGateway,
   DEFAULT_MAX_RETRIES,
   DEFAULT_TIMEOUT_MS,
+  isImageGenerationEndpoint,
+  isImageGenerationSizing,
+  type ImageGenerationTargetConfig,
   type ModelCapabilityRule,
   type ModelGateway,
   type ModelGatewayConfig,
@@ -96,6 +99,36 @@ export function normalizeRouteProviderRouting(
   }
 
   return providerRouting as ProviderRoutingConfig;
+}
+
+/**
+ * The image request convention stored on a route row. Only well-formed values
+ * reach the gateway; a stale or hand-edited row degrades to the default
+ * OpenAI `size` path rather than a malformed request.
+ */
+export function normalizeRouteImageGeneration(
+  value: unknown,
+): ImageGenerationTargetConfig | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const imageGeneration = (value as Record<string, unknown>).imageGeneration;
+  if (
+    !imageGeneration ||
+    typeof imageGeneration !== "object" ||
+    Array.isArray(imageGeneration)
+  ) {
+    return undefined;
+  }
+  const request = (imageGeneration as Record<string, unknown>).request;
+  if (!request || typeof request !== "object" || Array.isArray(request)) {
+    return undefined;
+  }
+  const { endpoint, sizing } = request as Record<string, unknown>;
+  if (!isImageGenerationEndpoint(endpoint) || !isImageGenerationSizing(sizing)) {
+    return undefined;
+  }
+  return { request: { endpoint, sizing } };
 }
 
 function normalizeOptionalHeaderValue(value: unknown): string | undefined {
@@ -326,12 +359,14 @@ export async function loadRoutedGatewayConfig(
       targets: [],
     };
     const providerRouting = normalizeRouteProviderRouting(row.constraintsJson);
+    const imageGeneration = normalizeRouteImageGeneration(row.constraintsJson);
     existing.targets.push({
       provider: row.targetProviderName,
       model: row.targetModel,
       priority: row.priority,
       weight: row.weight,
       ...(providerRouting ? { providerRouting } : {}),
+      ...(imageGeneration ? { imageGeneration } : {}),
     });
     modelRoutes[row.alias] = existing;
   }

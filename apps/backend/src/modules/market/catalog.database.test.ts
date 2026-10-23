@@ -7,6 +7,7 @@ import {
   type MarketMcpManifest,
 } from "@sourceweft/market-contracts";
 import { createRouteTestApp } from "../../test/hono";
+import { mcpServerVersionId } from "./ingest/plan";
 import { createIsolatedTestDatabase } from "../../test/isolated-database";
 
 const state = vi.hoisted(() => ({
@@ -183,6 +184,97 @@ describe("MCP catalog on the mcp_* tables", () => {
         (item) => item.slug,
       ),
     ).toContain("databases");
+  });
+
+  test("listed tools are counted on the list, returned by the detail and read back for reuse", async () => {
+    const tools = [
+      {
+        name: "search",
+        description: "Search the index.",
+        inputSchema: {
+          type: "object",
+          properties: { query: { type: "string" } },
+          required: ["query"],
+        },
+        annotations: { readOnlyHint: true },
+        risk: "unknown" as const,
+      },
+      {
+        name: "fetch",
+        inputSchema: { type: "object" },
+        annotations: {},
+        risk: "unknown" as const,
+      },
+    ];
+    const listed = manifest("listed", { tools });
+    const unlisted = manifest("unlisted");
+    const toolsListing = {
+      endpointSha256: "a".repeat(64),
+      toolsCount: 2,
+      listedAt: "2026-10-24T00:00:00.000Z",
+    };
+    const federated = {
+      status: "published" as const,
+      visibility: "public" as const,
+      origin: "upstream" as const,
+      source: "registry.test",
+    };
+    await ingest.upsertMarketMcp({
+      ...federated,
+      manifest: listed,
+      provenanceJson: { toolsListing },
+    });
+    await ingest.upsertMarketMcp({ ...federated, manifest: unlisted });
+
+    const list = await app.request(`/v1/mcp?query=${tag}&limit=100`);
+    const items = ((await list.json()) as { items: Record<string, unknown>[] })
+      .items;
+    expect(
+      Object.fromEntries(
+        items.map((item) => [item.identifier, item.toolsCount]),
+      ),
+    ).toMatchObject({
+      [listed.identifier]: 2,
+      [unlisted.identifier]: 0,
+    });
+
+    const detail = await app.request(
+      `/v1/mcp/${encodeURIComponent(listed.identifier)}`,
+    );
+    const detailed = (await detail.json()) as {
+      item: { toolsCount: number };
+      versions: { manifestJson: { tools: unknown[] } }[];
+    };
+    expect(detailed.item.toolsCount).toBe(2);
+    expect(detailed.versions[0]!.manifestJson.tools).toEqual(tools);
+
+    const stored = await ingest.findStoredEndpointProbes([
+      "missing-version",
+      ...[listed, unlisted].map((entry) =>
+        mcpServerVersionId(entry.identifier, entry.version),
+      ),
+    ]);
+    // Only the version with a listing (or a probe) is returned.
+    expect([...stored.keys()]).toEqual([
+      mcpServerVersionId(listed.identifier, listed.version),
+    ]);
+    expect(
+      stored.get(mcpServerVersionId(listed.identifier, listed.version)),
+    ).toEqual({ authProbe: undefined, toolsListing, tools });
+
+    // A re-sync whose listing now has no tools brings the count back to 0.
+    await ingest.upsertMarketMcp({
+      ...federated,
+      manifest: { ...listed, tools: [] },
+      provenanceJson: { toolsListing: { ...toolsListing, toolsCount: 0 } },
+    });
+    const relisted = await app.request(
+      `/v1/mcp/${encodeURIComponent(listed.identifier)}`,
+    );
+    expect(
+      ((await relisted.json()) as { item: { toolsCount: number } }).item
+        .toolsCount,
+    ).toBe(0);
   });
 
   test("a re-sync rewrites categories only while categories_set_by is auto", async () => {
