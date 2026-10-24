@@ -6,6 +6,8 @@ mod files;
 #[cfg(unix)]
 pub(crate) mod process;
 mod proxy;
+#[cfg(unix)]
+mod sidecar;
 pub mod sandbox;
 mod workspace;
 
