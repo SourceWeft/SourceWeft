@@ -21,7 +21,7 @@ export const planQuotaByFamily: Record<PlanFamily, PlanQuota> = {
   team_standard: {
     active: true,
     monthlyPagesLimit: 6000,
-    monthlyCreditsGrant: 20000,
+    monthlyCreditsGrant: 8000,
   },
   team_premium: {
     active: false,

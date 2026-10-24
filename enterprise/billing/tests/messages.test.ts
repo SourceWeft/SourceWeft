@@ -195,7 +195,7 @@ test("formatCopy replaces placeholders and keeps unknown ones", () => {
   );
 });
 
-test("pro copy shows 8,000 credits while team copy keeps 20,000 per seat", () => {
+test("pro and team copy show 8,000 credits", () => {
   for (const catalogue of [en, zhCN, zhTW]) {
     const { plans } = catalogue;
     expect(plans.pro.features.some((line) => line.includes("8,000"))).toBe(
@@ -204,8 +204,11 @@ test("pro copy shows 8,000 credits while team copy keeps 20,000 per seat", () =>
     expect(plans.pro.features.some((line) => line.includes("20,000"))).toBe(
       false,
     );
-    expect(plans.team.features.some((line) => line.includes("20,000"))).toBe(
+    expect(plans.team.features.some((line) => line.includes("8,000"))).toBe(
       true,
+    );
+    expect(plans.team.features.some((line) => line.includes("20,000"))).toBe(
+      false,
     );
   }
 });

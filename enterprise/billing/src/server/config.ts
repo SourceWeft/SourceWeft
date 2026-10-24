@@ -225,11 +225,11 @@ export function readBillingConfig(
       ),
       teamStandardMonthlyAmountCents: parsePositiveNumber(
         env.BILLING_PRICE_TEAM_STANDARD_MONTHLY_CENTS,
-        4900,
+        990,
       ),
       teamStandardYearlyAmountCents: parsePositiveNumber(
         env.BILLING_PRICE_TEAM_STANDARD_YEARLY_CENTS,
-        39200,
+        9900,
       ),
       creditTopupUnitAmount: parsePositiveNumber(
         env.BILLING_CREDIT_TOPUP_UNIT_AMOUNT,

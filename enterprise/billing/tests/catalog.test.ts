@@ -38,31 +38,40 @@ test("pro grants 8,000 credits and 6,000 pages per month", () => {
   });
 });
 
-test("team seat quota does not follow pro", () => {
+test("a team seat grants 8,000 credits and 6,000 pages", () => {
   assert.deepEqual(getPerSeatQuota("team_standard"), {
     active: true,
     monthlyPagesLimit: 6000,
-    monthlyCreditsGrant: 20000,
+    monthlyCreditsGrant: 8000,
   });
-  assert.equal(getPlanQuota("team_standard", 3).monthlyCreditsGrant, 60000);
+  assert.equal(getPlanQuota("team_standard", 3).monthlyCreditsGrant, 24000);
   assert.equal(getPlanQuota("team_standard", 1).monthlyPagesLimit, 12000);
 });
 
-test("pro defaults to $9.90 monthly and $99 yearly on display and charge", () => {
-  const pro = getPricingConfig({}).find((plan) => plan.id === "pro");
+test("pro and team seat default to $9.90 monthly and $99 yearly on display and charge", () => {
+  const plans = getPricingConfig({});
+  const pro = plans.find((plan) => plan.id === "pro");
+  const team = plans.find((plan) => plan.id === "team");
   assert.equal(pro?.monthlyPrice, 990);
   assert.equal(pro?.yearlyPrice, 9900);
+  assert.equal(team?.monthlyPrice, 990);
+  assert.equal(team?.yearlyPrice, 9900);
   assert.ok(pro?.features.includes("8,000 credits / month"));
+  assert.ok(team?.features.includes("8,000 credits × seats / month"));
 
   const config = readBillingConfig({}, "https://sourceweft.test");
   assert.equal(config.catalog.individualProMonthlyAmountCents, 990);
   assert.equal(config.catalog.individualProYearlyAmountCents, 9900);
+  assert.equal(config.catalog.teamStandardMonthlyAmountCents, 990);
+  assert.equal(config.catalog.teamStandardYearlyAmountCents, 9900);
 
   assert.doesNotThrow(() =>
     validateBillingCatalog({
       runtimeConfig: config,
-      pricingDisplay: getPricingConfig({}).filter((plan) => plan.id === "pro"),
-      subscriptionPlanFamilies: ["individual_pro"],
+      pricingDisplay: plans.filter(
+        (plan) => plan.id === "pro" || plan.id === "team",
+      ),
+      subscriptionPlanFamilies: ["individual_pro", "team_standard"],
     }),
   );
 });

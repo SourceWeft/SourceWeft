@@ -89,12 +89,12 @@ export function getPricingConfig(
     {
       id: "team",
       name: "Team",
-      monthlyPrice: cents(env.NEXT_PUBLIC_PRICING_TEAM_MONTHLY, 2000),
-      yearlyPrice: cents(env.NEXT_PUBLIC_PRICING_TEAM_YEARLY, 20000),
+      monthlyPrice: cents(env.NEXT_PUBLIC_PRICING_TEAM_MONTHLY, 990),
+      yearlyPrice: cents(env.NEXT_PUBLIC_PRICING_TEAM_YEARLY, 9900),
       description: "For teams building shared knowledge",
       features: [
         "6,000 pages × seats / month",
-        "20,000 credits × seats / month",
+        "8,000 credits × seats / month",
         "Agent observability",
         "Shared workspaces & RBAC",
         "Team analytics",
