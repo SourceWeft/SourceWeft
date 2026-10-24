@@ -45,7 +45,9 @@ machine with your own credentials, so the platform never handles them.
 
 ```
 sourceweft mcp inspect --url https://mcp.example.com/mcp --header "Authorization: Bearer <token>"
+sourceweft mcp inspect --url https://mcp.example.com/mcp --oauth
 sourceweft mcp inspect --stdio "npx -y @example/mcp-server"
+sourceweft mcp oauth-logout --url https://mcp.example.com/mcp
 sourceweft mcp submit-tools com.example/mcp mcp-tools.json --api-key <key>
 ```
 
@@ -56,6 +58,17 @@ overwrite, `--json` to also print it). `--header` can be repeated and is sent to
 the server only: the file records the tools, the endpoint without its query
 string (or the command), and the server's name and version. No header, token or
 environment variable is written.
+
+`--oauth` signs in with the server's own OAuth instead of a header: the CLI
+registers itself with the server (dynamic client registration; servers without
+it are refused with a message), opens your browser, and receives the result on a
+loopback port on this computer, so the browser must run on the same machine
+(`--client-name <name>` sets the name the consent page shows). The token is kept
+under `~/.config/sourceweft` (`%APPDATA%\sourceweft` on Windows, owner-only),
+used again on the next run, refreshed when it expires, and sent only to the
+endpoint you passed and the authorization server it declares. `oauth-logout
+--url <endpoint>` deletes it. If no browser can be started the CLI prints the
+sign-in address instead; that works only when you open it on the same machine.
 
 `submit-tools` uploads that file for a catalog entry you hold a verified claim
 on. It needs a user API key from SourceWeft → Settings → API keys belonging to

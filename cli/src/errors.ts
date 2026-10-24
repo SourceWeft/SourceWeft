@@ -59,6 +59,14 @@ export class McpInspectError extends Error {
   }
 }
 
+/** The MCP server answered 401 or 403 to the credentials the CLI sent. */
+export class McpUnauthorizedError extends McpInspectError {
+  constructor(message: string) {
+    super(message);
+    this.name = "McpUnauthorizedError";
+  }
+}
+
 export type Failure = { exitCode: number; message: string; details?: string[] };
 
 /** Turns anything thrown into what to print and which code to exit with. */
