@@ -261,6 +261,17 @@ jobs:
         run: |
           node cli/dist/main.js --version
           node cli/dist/main.js skills agents
+      - name: Smoke-test the packed tarball
+        # The published CLI has no dependencies: everything, including the MCP
+        # SDK, is inside dist/main.js. Run the packed artifact from a directory
+        # that has no node_modules to prove it.
+        run: |
+          pack_dir="$(mktemp -d)"
+          run_dir="$(mktemp -d)"
+          pnpm --filter @sourceweft/cli pack --pack-destination "$pack_dir"
+          tar -xzf "$pack_dir"/*.tgz -C "$run_dir"
+          node "$run_dir/package/dist/main.js" --version
+          node "$run_dir/package/dist/main.js" mcp oauth-logout --url https://mcp.example.com/mcp
 
   docker-build:
     name: Docker Build

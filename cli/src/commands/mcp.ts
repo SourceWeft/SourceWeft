@@ -5,7 +5,7 @@ import type {
   MarketMcpInspectFile,
   SubmitMarketMcpOwnerToolsRequest,
 } from "@sourceweft/market-contracts";
-import { McpInspectError, UsageError } from "../errors";
+import { McpInspectError, McpUnauthorizedError, UsageError } from "../errors";
 import {
   boundInspectedTools,
   boundServerInfo,
@@ -13,7 +13,20 @@ import {
 } from "../mcp/bound";
 import { inspectFileSchema, submitToolsRequestSchema } from "../mcp/contract";
 import { createHttpTransport } from "../mcp/http";
-import { inspectServer } from "../mcp/inspect";
+import { inspectServer, type InspectResult } from "../mcp/inspect";
+import { createCredentialedFetch } from "../mcp/oauth/guard";
+import {
+  authorize,
+  type Authorization,
+  type AuthorizeMode,
+} from "../mcp/oauth/flow";
+import { redactSecrets } from "../mcp/oauth/redact";
+import {
+  createFileStore,
+  defaultConfigDirectory,
+  resourceKey,
+  type McpOAuthStore,
+} from "../mcp/oauth/store";
 import { createStdioTransport } from "../mcp/stdio";
 import { RegistryError, type RegistryClient } from "../registry/client";
 import { truncate } from "../ui";
@@ -39,17 +52,35 @@ export type McpInspectContext = {
   cwd?: string;
   /** Replaceable in tests. */
   fetchImpl?: typeof fetch;
+  /** Progress for the person at the terminal; stderr, so `--json` stays clean. */
+  notice?: (line: string) => void;
+  /** Where `--oauth` keeps its sign-in; the CLI's config directory otherwise. */
+  oauthStore?: McpOAuthStore;
+  /** Replaceable in tests; true when a browser was started. */
+  launchBrowser?: (url: string) => Promise<boolean>;
+  /** How long `--oauth` waits for the browser; five minutes otherwise. */
+  oauthTimeoutMs?: number;
 };
+
+/** The name a server's consent page shows for this CLI. */
+export const DEFAULT_OAUTH_CLIENT_NAME = "SourceWeft CLI";
 
 export type McpInspectInput = {
   url?: string;
   /** `Name: value` lines, sent on every HTTP request. */
   headers?: string[];
   stdio?: string;
+  /** Sign in with the MCP OAuth flow instead of sending `--header`. */
+  oauth?: boolean;
+  clientName?: string;
   out?: string;
   force: boolean;
   json: boolean;
 };
+
+function oauthStoreOf(ctx: McpInspectContext): McpOAuthStore {
+  return ctx.oauthStore ?? createFileStore(defaultConfigDirectory());
+}
 
 /** `Name: value` → `[name, value]`; a line without both is a usage error. */
 export function parseHeaderOption(line: string): [string, string] {
@@ -98,6 +129,20 @@ export async function mcpInspectCommand(
   if (input.stdio !== undefined && !input.stdio.trim()) {
     throw new UsageError("--stdio needs the command that starts the server.");
   }
+  if (input.oauth && input.url === undefined) {
+    throw new UsageError("--oauth applies to --url only.");
+  }
+  if (input.oauth && input.headers?.length) {
+    throw new UsageError(
+      "--oauth and --header are two ways to authenticate; pass one of them.",
+    );
+  }
+  if (input.clientName !== undefined && !input.oauth) {
+    throw new UsageError("--client-name applies to --oauth only.");
+  }
+  if (input.clientName !== undefined && !input.clientName.trim()) {
+    throw new UsageError("--client-name needs a name.");
+  }
 
   const outPath = resolve(ctx.cwd ?? process.cwd(), input.out ?? DEFAULT_INSPECT_OUT);
   if (!input.force && existsSync(outPath)) {
@@ -107,28 +152,32 @@ export async function mcpInspectCommand(
   }
 
   let target: MarketMcpInspectFile["target"];
-  let transport;
+  let listed: InspectResult;
+  const client = { name: "sourceweft-cli", version: ctx.version };
   if (input.url !== undefined) {
     const url = validateInspectUrl(input.url);
-    const headers = Object.fromEntries(
-      (input.headers ?? []).map(parseHeaderOption),
-    );
     target = { kind: "url", url: reduceTargetUrl(url) };
-    transport = createHttpTransport(url, headers, {
-      ...(ctx.fetchImpl ? { fetchImpl: ctx.fetchImpl } : {}),
-    });
+    if (input.oauth) {
+      listed = await inspectWithOAuth(ctx, url, client, input.clientName);
+    } else {
+      const headers = Object.fromEntries(
+        (input.headers ?? []).map(parseHeaderOption),
+      );
+      listed = await inspectServer(
+        createHttpTransport(url, headers, {
+          ...(ctx.fetchImpl ? { fetchImpl: ctx.fetchImpl } : {}),
+        }),
+        client,
+      );
+    }
   } else {
     const command = (input.stdio ?? "").trim();
     target = { kind: "stdio", command };
-    transport = createStdioTransport(command, {
-      ...(ctx.cwd ? { cwd: ctx.cwd } : {}),
-    });
+    listed = await inspectServer(
+      createStdioTransport(command, { ...(ctx.cwd ? { cwd: ctx.cwd } : {}) }),
+      client,
+    );
   }
-
-  const listed = await inspectServer(transport, {
-    name: "sourceweft-cli",
-    version: ctx.version,
-  });
   const bounded = boundInspectedTools(listed.tools);
   const truncated = listed.truncated || bounded.truncated;
   const serverInfo = boundServerInfo(listed.serverInfo);
@@ -173,6 +222,107 @@ export async function mcpInspectCommand(
     } --api-key <key>`,
   );
   return file;
+}
+
+/**
+ * `--oauth`: the sign-in a server's own OAuth supports, run here. A stored
+ * token is used while it is valid and refreshed when it is not; when the
+ * server refuses what is stored, one step further up is tried (refresh, then
+ * the browser). The token goes to the endpoint's origin only.
+ */
+async function inspectWithOAuth(
+  ctx: McpInspectContext,
+  url: string,
+  client: { name: string; version: string },
+  clientName: string | undefined,
+): Promise<InspectResult> {
+  const notice = ctx.notice ?? (() => {});
+  const store = oauthStoreOf(ctx);
+  const abort = new AbortController();
+  const onInterrupt = () => abort.abort();
+  process.once("SIGINT", onInterrupt);
+  try {
+    let mode: AuthorizeMode = "reuse";
+    for (;;) {
+      const authorization: Authorization = await authorize({
+        url,
+        clientName: clientName?.trim() || DEFAULT_OAUTH_CLIENT_NAME,
+        store,
+        mode,
+        notice,
+        signal: abort.signal,
+        ...(ctx.fetchImpl ? { fetchImpl: ctx.fetchImpl } : {}),
+        ...(ctx.launchBrowser ? { launchBrowser: ctx.launchBrowser } : {}),
+        ...(ctx.oauthTimeoutMs !== undefined
+          ? { callbackTimeoutMs: ctx.oauthTimeoutMs }
+          : {}),
+      });
+      const transport = createHttpTransport(
+        url,
+        { authorization: `Bearer ${authorization.accessToken}` },
+        {
+          fetchImpl: createCredentialedFetch(
+            [new URL(url).origin],
+            ctx.fetchImpl,
+          ),
+          unauthorizedMessage: (status, method) =>
+            `The server refused the signed-in token (HTTP ${status}) on ${method}.`,
+        },
+      );
+      try {
+        return await inspectServer(transport, client);
+      } catch (error) {
+        const next: AuthorizeMode | undefined =
+          error instanceof McpUnauthorizedError
+            ? authorization.source === "stored"
+              ? "renew"
+              : authorization.source === "refreshed"
+                ? "login"
+                : undefined
+            : undefined;
+        if (next === undefined) {
+          if (error instanceof McpInspectError) {
+            throw new McpInspectError(
+              redactSecrets(error.message, authorization.secrets),
+              error.details.map((line) =>
+                redactSecrets(line, authorization.secrets),
+              ),
+            );
+          }
+          throw error;
+        }
+        mode = next;
+        notice(
+          next === "renew"
+            ? "The server refused the stored token; renewing it."
+            : "The server refused the renewed token; signing in again.",
+        );
+      }
+    }
+  } finally {
+    process.off("SIGINT", onInterrupt);
+  }
+}
+
+export type McpOAuthLogoutContext = {
+  out: (line: string) => void;
+  oauthStore?: McpOAuthStore;
+};
+
+/** `sourceweft mcp oauth-logout --url`: forgets what `--oauth` stored for an endpoint. */
+export async function mcpOAuthLogoutCommand(
+  ctx: McpOAuthLogoutContext,
+  input: { url: string },
+): Promise<number> {
+  const url = validateInspectUrl(input.url);
+  const store = ctx.oauthStore ?? createFileStore(defaultConfigDirectory());
+  const removed = await store.deleteResource(resourceKey(url));
+  ctx.out(
+    removed > 0
+      ? `Removed the stored sign-in for ${new URL(url).origin}. The token itself stays valid at the server until it expires or you revoke it there.`
+      : `No stored sign-in for ${new URL(url).origin}.`,
+  );
+  return removed;
 }
 
 export type McpSubmitContext = {
