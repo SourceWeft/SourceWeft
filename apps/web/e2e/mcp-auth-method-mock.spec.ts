@@ -193,7 +193,7 @@ test("the catalog probes the mock and declares both methods", async ({
   });
 });
 
-test("issue #367: the open mock's tools and self-description come from the probe", async ({
+test("issue #367: the open mock's self-description comes from the probe", async ({
   page,
   request,
 }) => {
@@ -202,41 +202,31 @@ test("issue #367: the open mock's tools and self-description come from the probe
   );
   const { manifest, version } = await response.json();
   expect(manifest.auth).toMatchObject({ type: "none", required: false });
-  // Probe-sourced tools are stored with risk `unknown`, whatever the server's
-  // hints say: a verified install's catalog risk is what the HITL gate trusts.
-  expect(
-    manifest.tools.map((tool: { name: string; risk: string }) => [
-      tool.name,
-      tool.risk,
-    ]),
-  ).toEqual([
-    ["search_notes", "unknown"],
-    ["delete_note", "unknown"],
-  ]);
+  expect(version.provenanceJson.authProbe.result).toBe("open");
   expect(version.provenanceJson.selfDescription).toMatchObject({
     source: "remote-probe",
     serverInfo: { name: "mock-open", title: "Mock open MCP" },
     instructions: "Search before you delete.",
   });
-  expect(typeof version.provenanceJson.validatedAt).toBe("string");
   expect(version.provenanceJson.serverCard).toMatchObject({
     serverInfo: { name: "mock-open" },
   });
+  // The catalog lists tools anonymously from https endpoints only (an http
+  // or query-carrying URL may be one account's), so the mock's plain-http
+  // open server is described but not listed, and so not validated.
+  expect(manifest.tools).toEqual([]);
+  expect(version.provenanceJson.toolsListing).toBeUndefined();
+  expect(version.provenanceJson.validatedAt).toBeUndefined();
 
-  // The public page lists them.
   await page.goto(`/mcp/${encodeURIComponent(openIdentifier)}`, {
     timeout: 180_000,
   });
-  const tools = page.locator("#tools");
-  await expect(tools.getByText("search_notes")).toBeVisible({
-    timeout: 60_000,
-  });
-  await expect(tools.getByText("delete_note")).toBeVisible();
+  await expect(page.locator("#tools")).toBeVisible({ timeout: 60_000 });
   await expect(page.getByRole("link", { name: /^Documentation/ })).toHaveCount(
     0,
   );
   await page.screenshot({
-    path: `${evidenceDir}/0-open-tools.png`,
+    path: `${evidenceDir}/0-open-described.png`,
     fullPage: true,
   });
 });

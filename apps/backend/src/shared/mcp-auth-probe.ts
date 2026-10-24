@@ -30,19 +30,6 @@ export type McpProbeSelfDescription = {
   capabilities?: Record<string, unknown>;
 };
 
-/**
- * One entry of `tools/list`, bounded. The server's annotations are kept as
- * it sent them; what they mean for risk is the catalog's to decide.
- */
-export type McpProbeTool = {
-  name: string;
-  title?: string;
-  description?: string;
-  inputSchema?: Record<string, unknown>;
-  outputSchema?: Record<string, unknown>;
-  annotations?: Record<string, unknown>;
-};
-
 /** The human fields of the protected-resource metadata a 401 points at. */
 export type McpProbeAuthMetadata = {
   resourceName?: string;
@@ -53,21 +40,16 @@ export type McpProbeAuthMetadata = {
  * One unauthenticated probe of an endpoint (Issue #367, W1): its auth
  * classification, and what it gave away while being classified.
  * - `selfDescription`: present when `initialize` answered with a result;
- * - `tools`: present when `tools/list` succeeded after it — `[]` is a server
- *   that lists none; absent means it was not tried or failed;
- * - `toolsTruncated`: the list is not the whole of what the server offers —
- *   it hit the tool, size or page cap, or an entry too large to keep was
- *   dropped;
  * - `authMetadata`: present when a 401's protected-resource metadata carried
  *   a `resource_name` or an https `resource_documentation`;
  * - `serverCard`: the origin's `/.well-known/mcp/server-card.json` (SEP-1649)
  *   when it serves one, as is.
+ * The tools an open endpoint lists are the tool listing's
+ * (`shared/mcp-tool-listing.ts`), not the probe's.
  */
 export type McpEndpointProbe = {
   result: McpEndpointAuthProbe;
   selfDescription?: McpProbeSelfDescription;
-  tools?: McpProbeTool[];
-  toolsTruncated?: true;
   authMetadata?: McpProbeAuthMetadata;
   serverCard?: Record<string, unknown>;
 };
@@ -76,8 +58,8 @@ const PROBE_TIMEOUT_MS = 5000;
 // Protected-resource metadata and a server card are small documents; the
 // endpoint is third-party, so a larger body is not read.
 const METADATA_MAX_BYTES = 64 * 1024;
-// An `initialize` answer or a page of `tools/list`.
-const RESPONSE_MAX_BYTES = 1024 * 1024;
+// An `initialize` answer.
+const RESPONSE_MAX_BYTES = 256 * 1024;
 const PROTOCOL_VERSION = "2025-06-18";
 const INITIALIZE_ID = 1;
 
@@ -93,15 +75,6 @@ export const MCP_PROBE_LIMITS = {
   icons: 5,
   // `capabilities` as serialized JSON; larger is dropped.
   capabilitiesBytes: 4 * 1024,
-  tools: 200,
-  toolDescriptionChars: 2000,
-  // One tool's schemas and annotations as serialized JSON; a larger tool is
-  // dropped (and the list marked truncated).
-  toolSchemaBytes: 32 * 1024,
-  // The whole kept tool list as serialized JSON.
-  toolsBytes: 512 * 1024,
-  // `tools/list` pages followed for one server, the first included.
-  toolPages: 5,
 } as const;
 
 class TooLargeError extends Error {}
@@ -343,54 +316,14 @@ function selfDescriptionOf(
 }
 
 /**
- * A `tools/list` entry within bounds: "skipped" for one that is not a tool
- * (no name), "oversize" for one whose schemas and annotations are too large
- * to keep.
- */
-function boundedTool(value: unknown): McpProbeTool | "skipped" | "oversize" {
-  if (!isRecord(value)) return "skipped";
-  const name = boundedString(value.name, MCP_PROBE_LIMITS.stringChars);
-  if (!name) return "skipped";
-  const schemas = withoutUndefined({
-    inputSchema: isRecord(value.inputSchema) ? value.inputSchema : undefined,
-    outputSchema: isRecord(value.outputSchema) ? value.outputSchema : undefined,
-    annotations: isRecord(value.annotations) ? value.annotations : undefined,
-  });
-  if (
-    Buffer.byteLength(JSON.stringify(schemas), "utf8") >
-    MCP_PROBE_LIMITS.toolSchemaBytes
-  ) {
-    return "oversize";
-  }
-  return withoutUndefined({
-    name,
-    title: boundedString(value.title, MCP_PROBE_LIMITS.stringChars),
-    description: boundedString(
-      value.description,
-      MCP_PROBE_LIMITS.toolDescriptionChars,
-    ),
-    ...schemas,
-  });
-}
-
-function jsonRpcBody(method: string, params: unknown, id?: number) {
-  return JSON.stringify({
-    jsonrpc: "2.0",
-    ...(id === undefined ? {} : { id }),
-    method,
-    params,
-  });
-}
-
-/**
  * Send the probe through `fetchImpl`, which the caller scopes to its endpoint
  * policy (an SSRF-checked request scope). Redirects are not followed: the
  * endpoint passed the policy, but a 3xx could bounce the probe to an internal
  * address; a same-origin redirect is simply "not a 401". Network and policy
  * failures of the `initialize` are thrown for the caller to handle; those of
- * everything after it (the well-known lookups, `tools/list`, the server card)
- * only mean that part was not found — a caller with a request scope checks
- * it for denials afterwards. One time budget covers all of it.
+ * the lookups after it (the well-known metadata, the server card) only mean
+ * that document was not found — a caller with a request scope checks it for
+ * denials afterwards. One time budget covers all of it.
  *
  * Nothing sent carries a credential, and `resource_documentation` is never
  * fetched.
@@ -410,15 +343,16 @@ export async function probeMcpEndpointAuth(
         "content-type": "application/json",
         accept: "application/json, text/event-stream",
       },
-      body: jsonRpcBody(
-        "initialize",
-        {
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: INITIALIZE_ID,
+        method: "initialize",
+        params: {
           protocolVersion: PROTOCOL_VERSION,
           capabilities: {},
           clientInfo: { name: "sourceweft-auth-probe", version: "1" },
         },
-        INITIALIZE_ID,
-      ),
+      }),
       signal,
     });
     let probe: McpEndpointProbe;
@@ -431,12 +365,7 @@ export async function probeMcpEndpointAuth(
         signal,
       );
     } else {
-      probe = await describeOpenEndpoint(
-        endpointUrl,
-        response,
-        fetchImpl,
-        signal,
-      );
+      probe = await describeOpenEndpoint(response);
     }
     const serverCard = await readServerCard(endpointUrl, fetchImpl, signal);
     return withoutUndefined({ ...probe, serverCard });
@@ -447,18 +376,11 @@ export async function probeMcpEndpointAuth(
 
 /**
  * An endpoint that did not answer 401 is "open". When its answer is an
- * `initialize` result, keep what it says about itself, then list its tools:
- * `notifications/initialized` first, as a client would, carrying the session
- * the server opened and the protocol version it chose. A `tools/list` that
- * fails leaves `tools` absent.
+ * `initialize` result, keep what it says about itself.
  */
 async function describeOpenEndpoint(
-  endpointUrl: string,
   response: Response,
-  fetchImpl: typeof globalThis.fetch,
-  signal: AbortSignal,
 ): Promise<McpEndpointProbe> {
-  const sessionId = response.headers.get("mcp-session-id") ?? undefined;
   let result: Record<string, unknown> | undefined;
   try {
     result = await readJsonRpcResult(response, INITIALIZE_ID);
@@ -467,108 +389,7 @@ async function describeOpenEndpoint(
     result = undefined;
   }
   if (!result) return { result: "open" };
-  const selfDescription = selfDescriptionOf(result);
-  const headers: Record<string, string> = {
-    "content-type": "application/json",
-    accept: "application/json, text/event-stream",
-    "mcp-protocol-version":
-      typeof result.protocolVersion === "string"
-        ? result.protocolVersion
-        : PROTOCOL_VERSION,
-    ...(sessionId ? { "mcp-session-id": sessionId } : {}),
-  };
-  const post = (body: string) =>
-    fetchImpl(endpointUrl, {
-      method: "POST",
-      redirect: "manual",
-      headers,
-      body,
-      signal,
-    });
-  let listed: { tools: McpProbeTool[]; truncated: boolean } | undefined;
-  try {
-    const initialized = await post(
-      jsonRpcBody("notifications/initialized", {}),
-    );
-    await initialized.body?.cancel();
-    listed = await listTools(post);
-  } catch {
-    listed = undefined;
-  }
-  if (sessionId && !signal.aborted) {
-    // The session was opened for this probe only; a server that does not
-    // support ending one answers 405, which is fine.
-    try {
-      const ended = await fetchImpl(endpointUrl, {
-        method: "DELETE",
-        redirect: "manual",
-        headers: {
-          "mcp-session-id": sessionId,
-          "mcp-protocol-version": headers["mcp-protocol-version"]!,
-        },
-        signal,
-      });
-      await ended.body?.cancel();
-    } catch {
-      // Best effort.
-    }
-  }
-  return withoutUndefined({
-    result: "open" as const,
-    selfDescription,
-    tools: listed?.tools,
-    toolsTruncated: listed?.truncated ? (true as const) : undefined,
-  });
-}
-
-/**
- * The pages of `tools/list`, up to the tool, size and page caps; `truncated`
- * says the caps kept some of the server's tools out, or an oversize entry
- * was dropped (the entries after it are still kept).
- * A page that fails fails the listing (thrown to the caller), so a partial
- * read is never stored as a list.
- */
-async function listTools(
-  post: (body: string) => Promise<Response>,
-): Promise<{ tools: McpProbeTool[]; truncated: boolean }> {
-  const tools: McpProbeTool[] = [];
-  let bytes = 0;
-  let cursor: string | undefined;
-  for (let page = 0; page < MCP_PROBE_LIMITS.toolPages; page += 1) {
-    const id = INITIALIZE_ID + 1 + page;
-    const response = await post(
-      jsonRpcBody("tools/list", cursor ? { cursor } : {}, id),
-    );
-    const result = await readJsonRpcResult(response, id);
-    if (!result || !Array.isArray(result.tools)) {
-      throw new Error("tools/list did not answer with a tool list");
-    }
-    let truncated = false;
-    for (const entry of result.tools) {
-      const tool = boundedTool(entry);
-      if (tool === "skipped") continue;
-      if (tool === "oversize") {
-        // Dropped; the ones after it are still worth keeping.
-        truncated = true;
-        continue;
-      }
-      bytes += Buffer.byteLength(JSON.stringify(tool), "utf8");
-      if (
-        tools.length >= MCP_PROBE_LIMITS.tools ||
-        bytes > MCP_PROBE_LIMITS.toolsBytes
-      ) {
-        return { tools, truncated: true };
-      }
-      tools.push(tool);
-    }
-    cursor =
-      typeof result.nextCursor === "string" && result.nextCursor
-        ? result.nextCursor
-        : undefined;
-    if (!cursor) return { tools, truncated };
-  }
-  // Pages remain after the last one followed.
-  return { tools, truncated: true };
+  return { result: "open", selfDescription: selfDescriptionOf(result) };
 }
 
 /**

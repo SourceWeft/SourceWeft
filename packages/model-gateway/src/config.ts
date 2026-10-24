@@ -190,6 +190,9 @@ function normalizeRoutes(
             ...(target.providerRouting
               ? { providerRouting: target.providerRouting }
               : {}),
+            ...(target.imageGeneration
+              ? { imageGeneration: target.imageGeneration }
+              : {}),
           })),
         },
       ] as const;
@@ -738,6 +741,9 @@ export async function resolveRequestCandidates(
         : {}),
       ...(selected.providerRouting
         ? { providerRouting: selected.providerRouting }
+        : {}),
+      ...(selected.imageGeneration
+        ? { imageGeneration: selected.imageGeneration }
         : {}),
       routeDecision: {
         alias: routeKey,

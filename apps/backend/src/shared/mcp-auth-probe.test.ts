@@ -358,7 +358,7 @@ test("network failures are thrown to the caller", async () => {
 });
 
 // ---------------------------------------------------------------------------
-// Issue #367 W1: an open endpoint's self-description and tools.
+// Issue #367 W1: an open endpoint's self-description.
 // ---------------------------------------------------------------------------
 
 const INITIALIZE_RESULT = {
@@ -375,57 +375,35 @@ const INITIALIZE_RESULT = {
   instructions: "Call `search` before `fetch`.",
 };
 
-const TOOLS = [
-  {
-    name: "search",
-    title: "Search",
-    description: "Find documents.",
-    inputSchema: { type: "object", properties: { q: { type: "string" } } },
-    annotations: { readOnlyHint: true },
-  },
-  { name: "fetch", inputSchema: { type: "object" } },
-];
-
-type Message = { id?: number; method?: string; params?: { cursor?: string } };
+type Message = { id?: number; method?: string };
 
 /**
- * An open MCP server: answers `initialize` with `INITIALIZE_RESULT` and
- * `tools/list` with `tools`, both as `frame`d responses; notifications get
- * a 202. `session` is the `Mcp-Session-Id` it issues.
+ * An open MCP server: answers `initialize` with `INITIALIZE_RESULT` (or
+ * `initialize`), as a `frame`d response; anything else is an error.
  */
 function openServer(options: {
-  tools?: unknown[] | ((cursor: string | undefined) => unknown);
   frame?: (body: unknown) => Response;
-  session?: string;
   initialize?: unknown;
 }) {
   const frame = options.frame ?? ((body: unknown) => json(body));
   return (init: RequestInit) => {
-    if (init.method === "DELETE") return new Response(null, { status: 200 });
     const message = JSON.parse(String(init.body)) as Message;
     if (message.id === undefined) return new Response(null, { status: 202 });
-    const result =
-      message.method === "initialize"
-        ? (options.initialize ?? INITIALIZE_RESULT)
-        : message.method === "tools/list"
-          ? typeof options.tools === "function"
-            ? options.tools(message.params?.cursor)
-            : { tools: options.tools ?? TOOLS }
-          : undefined;
-    const response = result
-      ? frame({ jsonrpc: "2.0", id: message.id, result })
+    return message.method === "initialize"
+      ? frame({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: options.initialize ?? INITIALIZE_RESULT,
+        })
       : json({
           jsonrpc: "2.0",
           id: message.id,
           error: { code: -32601, message: "Method not found" },
         });
-    if (options.session)
-      response.headers.set("mcp-session-id", options.session);
-    return response;
   };
 }
 
-test("an open endpoint's initialize answer and tool list are kept", async () => {
+test("an open endpoint's initialize answer is kept; its tools are the listing's to read", async () => {
   const fetch = routing(openServer({}));
   const probe = await probeMcpEndpointAuth(ENDPOINT, fetch);
   assert.deepEqual(probe, {
@@ -435,75 +413,20 @@ test("an open endpoint's initialize answer and tool list are kept", async () => 
       instructions: INITIALIZE_RESULT.instructions,
       capabilities: INITIALIZE_RESULT.capabilities,
     },
-    tools: TOOLS,
   });
-  // initialize, then notifications/initialized, then tools/list — a client's
-  // handshake — all without a credential, the protocol version negotiated.
+  // One unauthenticated initialize; no tools/list here (the tool listing
+  // module does that with a full client handshake).
   const requests = endpointRequests(fetch);
   assert.deepEqual(
     requests.map((request) => [request.method, request.body?.method]),
-    [
-      ["POST", "initialize"],
-      ["POST", "notifications/initialized"],
-      ["POST", "tools/list"],
-    ],
+    [["POST", "initialize"]],
   );
-  for (const request of requests) {
-    assert.equal("authorization" in request.headers, false);
-  }
+  assert.equal("authorization" in requests[0]!.headers, false);
   assert.equal(
     requests[0]!.body.params.clientInfo.name,
     "sourceweft-auth-probe",
   );
-  assert.equal(requests[1]!.headers["mcp-protocol-version"], "2025-03-26");
-  assert.equal(requests[2]!.headers["mcp-protocol-version"], "2025-03-26");
-  assert.equal("mcp-session-id" in requests[2]!.headers, false);
-  assert.equal(requests[2]!.body.id !== requests[0]!.body.id, true);
-});
-
-test("an open endpoint that lists no tools is validated with an empty list", async () => {
-  const probe = await probeMcpEndpointAuth(
-    ENDPOINT,
-    routing(openServer({ tools: [] })),
-  );
-  assert.deepEqual(probe.tools, []);
-  assert.equal(probe.selfDescription?.serverInfo?.name, "example-mcp");
-});
-
-test("a tools/list that fails leaves the tools absent, the description kept", async () => {
-  for (const tools of [
-    () => ({ notTools: true }),
-    () => {
-      throw new TypeError("fetch failed");
-    },
-  ]) {
-    const probe = await probeMcpEndpointAuth(
-      ENDPOINT,
-      routing(
-        openServer({
-          tools: tools as (cursor: string | undefined) => unknown,
-        }),
-      ),
-    );
-    assert.equal(probe.result, "open");
-    assert.equal(probe.selfDescription?.serverInfo?.name, "example-mcp");
-    assert.equal("tools" in probe, false);
-  }
-  // A JSON-RPC error (the server does not list tools) is a failure too.
-  const errorFetch = routing((init: RequestInit) => {
-    const message = JSON.parse(String(init.body)) as Message;
-    if (message.id === undefined) return new Response(null, { status: 202 });
-    return message.method === "initialize"
-      ? json({ jsonrpc: "2.0", id: message.id, result: INITIALIZE_RESULT })
-      : json({
-          jsonrpc: "2.0",
-          id: message.id,
-          error: { code: -32601, message: "Method not found" },
-        });
-  });
-  const probe = await probeMcpEndpointAuth(ENDPOINT, errorFetch);
-  assert.equal("tools" in probe, false);
-  assert.ok(probe.selfDescription);
+  assert.equal(requests[0]!.body.params.protocolVersion, "2025-06-18");
 });
 
 test("an open endpoint answering with an error, HTML or nothing keeps no description", async () => {
@@ -528,14 +451,23 @@ test("an open endpoint answering with an error, HTML or nothing keeps no descrip
   }
 });
 
+test("an oversized initialize answer is dropped, not stored in part", async () => {
+  const huge = { ...INITIALIZE_RESULT, instructions: "x".repeat(300 * 1024) };
+  assert.deepEqual(
+    await probeMcpEndpointAuth(
+      ENDPOINT,
+      routing(openServer({ initialize: huge })),
+    ),
+    { result: "open" },
+  );
+});
+
 test("SSE-framed answers are read, and the stream is not waited on", async () => {
   // A Streamable HTTP server answering over SSE, keeping the stream open after
   // its response the way one does.
   const frame = (body: unknown) => {
-    let controller: ReadableStreamDefaultController<Uint8Array>;
     const stream = new ReadableStream<Uint8Array>({
-      start(c) {
-        controller = c;
+      start(controller) {
         const encoder = new TextEncoder();
         controller.enqueue(encoder.encode(": keep-alive\n\n"));
         controller.enqueue(
@@ -556,60 +488,42 @@ test("SSE-framed answers are read, and the stream is not waited on", async () =>
     routing(openServer({ frame })),
   );
   assert.equal(probe.selfDescription?.serverInfo?.name, "example-mcp");
-  assert.deepEqual(probe.tools, TOOLS);
-});
-
-test("the session the server opens is carried through the handshake and ended", async () => {
-  const fetch = routing(openServer({ session: "sess-1" }));
-  const probe = await probeMcpEndpointAuth(ENDPOINT, fetch);
-  assert.deepEqual(probe.tools, TOOLS);
-  const requests = endpointRequests(fetch);
   assert.deepEqual(
-    requests.map((request) => [
-      request.method,
-      request.body?.method,
-      request.headers["mcp-session-id"],
-    ]),
-    [
-      ["POST", "initialize", undefined],
-      ["POST", "notifications/initialized", "sess-1"],
-      ["POST", "tools/list", "sess-1"],
-      ["DELETE", undefined, "sess-1"],
-    ],
+    probe.selfDescription?.capabilities,
+    INITIALIZE_RESULT.capabilities,
   );
 });
 
-test("tools/list pages are followed up to the tool cap", async () => {
-  const pages: Record<string, unknown> = {
-    first: { tools: [TOOLS[0]], nextCursor: "two" },
-    two: { tools: [TOOLS[1]], nextCursor: "three" },
-    three: { tools: [{ name: "third" }] },
+test("an SSE answer split across chunks, with events before it, is read once complete", async () => {
+  const frame = (body: unknown) => {
+    const encoder = new TextEncoder();
+    const text = `event: message\ndata: ${JSON.stringify(body)}\n\n`;
+    const chunks = [
+      ": hello\n\n",
+      'event: message\ndata: {"jsonrpc":"2.0","method":"notifications/message","params":{}}\n\n',
+      text.slice(0, 20),
+      text.slice(20, 60),
+      text.slice(60),
+    ];
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
+        // Left open.
+      },
+    });
+    return new Response(stream, {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    });
   };
-  const fetch = routing(
-    openServer({ tools: (cursor) => pages[cursor ?? "first"] }),
+  const probe = await probeMcpEndpointAuth(
+    ENDPOINT,
+    routing(openServer({ frame })),
   );
-  const probe = await probeMcpEndpointAuth(ENDPOINT, fetch);
-  assert.deepEqual(
-    probe.tools?.map((tool) => tool.name),
-    ["search", "fetch", "third"],
-  );
-  const lists = endpointRequests(fetch).filter(
-    (request) => request.body?.method === "tools/list",
-  );
-  assert.deepEqual(
-    lists.map((request) => request.body.params.cursor),
-    [undefined, "two", "three"],
-  );
-  // Distinct request ids per page.
-  assert.equal(new Set(lists.map((request) => request.body.id)).size, 3);
+  assert.equal(probe.selfDescription?.serverInfo?.name, "example-mcp");
 });
 
-test("self-description and tools are kept within the contract's bounds", async () => {
-  const many = Array.from({ length: 250 }, (_, index) => ({
-    name: `tool-${index}`,
-    description: "d".repeat(3000),
-    inputSchema: { type: "object" },
-  }));
+test("self-description is kept within the contract's bounds", async () => {
   const fetch = routing(
     openServer({
       initialize: {
@@ -635,7 +549,6 @@ test("self-description and tools are kept within the contract's bounds", async (
         },
         instructions: "漢".repeat(5000),
       },
-      tools: [...many, { noName: true }, { name: "   " }],
     }),
   );
   const probe = await probeMcpEndpointAuth(ENDPOINT, fetch);
@@ -658,81 +571,6 @@ test("self-description and tools are kept within the contract's bounds", async (
       MCP_PROBE_LIMITS.instructionsBytes,
   );
   assert.ok(Buffer.byteLength(instructions, "utf8") > 8000);
-  assert.equal(probe.tools?.length, MCP_PROBE_LIMITS.tools);
-  assert.equal(
-    probe.tools?.[0]?.description?.length,
-    MCP_PROBE_LIMITS.toolDescriptionChars,
-  );
-  // 250 offered, 200 kept: not the whole list.
-  assert.equal(probe.toolsTruncated, true);
-});
-
-test("a complete tool list is not marked truncated; the caps mark it so", async () => {
-  const complete = await probeMcpEndpointAuth(
-    ENDPOINT,
-    routing(openServer({})),
-  );
-  assert.equal("toolsTruncated" in complete, false);
-
-  // Pages remain after the last one followed.
-  const endless = await probeMcpEndpointAuth(
-    ENDPOINT,
-    routing(
-      openServer({
-        tools: (cursor) => ({
-          tools: [{ name: `tool-${cursor ?? "first"}` }],
-          nextCursor: `${cursor ?? "first"}+`,
-        }),
-      }),
-    ),
-  );
-  assert.equal(endless.tools?.length, MCP_PROBE_LIMITS.toolPages);
-  assert.equal(endless.toolsTruncated, true);
-
-  // The kept list as a whole is bounded in bytes.
-  const heavy = Array.from({ length: 40 }, (_, index) => ({
-    name: `heavy-${index}`,
-    inputSchema: { pad: "x".repeat(20 * 1024) },
-  }));
-  const bulky = await probeMcpEndpointAuth(
-    ENDPOINT,
-    routing(openServer({ tools: heavy })),
-  );
-  assert.ok(bulky.tools && bulky.tools.length < heavy.length);
-  assert.ok(
-    Buffer.byteLength(JSON.stringify(bulky.tools), "utf8") <=
-      MCP_PROBE_LIMITS.toolsBytes,
-  );
-  assert.equal(bulky.toolsTruncated, true);
-});
-
-test("a tool whose schemas are too large is dropped, and the list marked truncated", async () => {
-  const probe = await probeMcpEndpointAuth(
-    ENDPOINT,
-    routing(
-      openServer({
-        tools: [
-          TOOLS[0],
-          { name: "huge", inputSchema: { pad: "x".repeat(40 * 1024) } },
-          TOOLS[1],
-        ],
-      }),
-    ),
-  );
-  // The oversize entry is dropped; the ones after it are kept.
-  assert.deepEqual(probe.tools, TOOLS);
-  assert.equal(probe.toolsTruncated, true);
-  // Annotations count toward the same bound.
-  const annotated = await probeMcpEndpointAuth(
-    ENDPOINT,
-    routing(
-      openServer({
-        tools: [{ name: "a", annotations: { pad: "x".repeat(40 * 1024) } }],
-      }),
-    ),
-  );
-  assert.deepEqual(annotated.tools, []);
-  assert.equal(annotated.toolsTruncated, true);
 });
 
 test("oversized capabilities are dropped; the rest of the description is kept", async () => {
@@ -788,58 +626,6 @@ test("URLs with credentials in them, or too long, are dropped", async () => {
   assert.deepEqual(challenged, { result: "oauth" });
 });
 
-test("an SSE answer split across chunks, with events before it, is read once complete", async () => {
-  const frame = (body: unknown) => {
-    const encoder = new TextEncoder();
-    const text = `event: message\ndata: ${JSON.stringify(body)}\n\n`;
-    const chunks = [
-      ": hello\n\n",
-      'event: message\ndata: {"jsonrpc":"2.0","method":"notifications/message","params":{}}\n\n',
-      text.slice(0, 20),
-      text.slice(20, 60),
-      text.slice(60),
-    ];
-    const stream = new ReadableStream<Uint8Array>({
-      start(controller) {
-        for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
-        // Left open.
-      },
-    });
-    return new Response(stream, {
-      status: 200,
-      headers: { "content-type": "text/event-stream" },
-    });
-  };
-  const probe = await probeMcpEndpointAuth(
-    ENDPOINT,
-    routing(openServer({ frame })),
-  );
-  assert.equal(probe.selfDescription?.serverInfo?.name, "example-mcp");
-  assert.deepEqual(probe.tools, TOOLS);
-  assert.equal("toolsTruncated" in probe, false);
-});
-
-test("an oversized initialize answer or tool list is dropped, not stored in part", async () => {
-  const huge = { ...INITIALIZE_RESULT, instructions: "x".repeat(1100 * 1024) };
-  assert.deepEqual(
-    await probeMcpEndpointAuth(
-      ENDPOINT,
-      routing(openServer({ initialize: huge })),
-    ),
-    { result: "open" },
-  );
-  const probe = await probeMcpEndpointAuth(
-    ENDPOINT,
-    routing(
-      openServer({
-        tools: [{ name: "big", inputSchema: { pad: "x".repeat(1100 * 1024) } }],
-      }),
-    ),
-  );
-  assert.ok(probe.selfDescription);
-  assert.equal("tools" in probe, false);
-});
-
 test("the origin's server card is kept as published when it serves one", async () => {
   const card = {
     serverInfo: { name: "example-mcp", version: "2.1.0" },
@@ -888,6 +674,6 @@ test("no server card, a non-JSON one, an empty one or one too large is left out"
       routing(openServer({}), route ? { [SERVER_CARD]: route } : {}),
     );
     assert.equal("serverCard" in probe, false);
-    assert.deepEqual(probe.tools, TOOLS);
+    assert.ok(probe.selfDescription);
   }
 });

@@ -147,58 +147,63 @@ export async function getMarketItemForSubmission(identifier: string): Promise<{
   return { hasUpstream, status: item.status, submittedBy };
 }
 
-/**
- * What federation stored from an endpoint probe of a version: the probe
- * record (`provenanceJson.authProbe`) and what came with it — the server's
- * self-description, validation time, auth metadata and server card from the
- * provenance, and the tools from the manifest — so a sync within the probe's
- * lifetime reuses all of it. Unvalidated: the caller checks each piece.
- */
-export type StoredEndpointProbe = {
-  authProbe: unknown;
-  selfDescription: unknown;
-  validatedAt: unknown;
-  authMetadata: unknown;
-  serverCard: unknown;
-  tools: unknown;
+/** What federation stored for one version about its endpoint. */
+export type StoredEndpointProbes = {
+  /** `provenanceJson.authProbe`. */
+  authProbe?: unknown;
+  /** `provenanceJson.toolsListing`. */
+  toolsListing?: unknown;
+  /** `manifestJson.tools`, the listing's tools. */
+  tools?: unknown;
+  /** What the probe kept of the endpoint's own `initialize` answer (W1). */
+  selfDescription?: unknown;
+  /** The 401 path's protected-resource metadata human fields (W1). */
+  authMetadata?: unknown;
+  /** The origin's server card (W1). */
+  serverCard?: unknown;
 };
 
 /**
- * The endpoint probes federation stored for these versions, by version id.
- * Versions without one are absent.
+ * The endpoint auth probes and tool listings federation stored for these
+ * versions, by version id. Versions with neither are absent.
  */
 export async function findStoredEndpointProbes(
   versionIds: string[],
-): Promise<Map<string, StoredEndpointProbe>> {
+): Promise<Map<string, StoredEndpointProbes>> {
   if (versionIds.length === 0) {
     return new Map();
   }
   const rows = await db
     .select({
       id: mcpServerVersions.id,
-      provenanceJson: mcpServerVersions.provenanceJson,
-      tools: sql<unknown>`${mcpServerVersions.manifestJson} -> 'tools'`,
+      authProbe: sql<unknown>`${mcpServerVersions.provenanceJson} -> 'authProbe'`,
+      toolsListing: sql<unknown>`${mcpServerVersions.provenanceJson} -> 'toolsListing'`,
+      // Only versions with a listing carry tools worth reading back.
+      tools: sql<unknown>`case when ${mcpServerVersions.provenanceJson} ? 'toolsListing' then ${mcpServerVersions.manifestJson} -> 'tools' end`,
+      selfDescription: sql<unknown>`${mcpServerVersions.provenanceJson} -> 'selfDescription'`,
+      authMetadata: sql<unknown>`${mcpServerVersions.provenanceJson} -> 'authMetadata'`,
+      serverCard: sql<unknown>`${mcpServerVersions.provenanceJson} -> 'serverCard'`,
     })
     .from(mcpServerVersions)
     .where(inArray(mcpServerVersions.id, versionIds));
   return new Map(
-    rows.flatMap((row) => {
-      const provenance = (row.provenanceJson ?? {}) as Record<string, unknown>;
-      if (provenance.authProbe == null) return [];
-      return [
-        [
-          row.id,
-          {
-            authProbe: provenance.authProbe,
-            selfDescription: provenance.selfDescription,
-            validatedAt: provenance.validatedAt,
-            authMetadata: provenance.authMetadata,
-            serverCard: provenance.serverCard,
-            tools: row.tools,
-          },
-        ] as const,
-      ];
-    }),
+    rows.flatMap((row) =>
+      row.authProbe == null && row.toolsListing == null
+        ? []
+        : [
+            [
+              row.id,
+              {
+                authProbe: row.authProbe ?? undefined,
+                toolsListing: row.toolsListing ?? undefined,
+                tools: row.tools ?? undefined,
+                selfDescription: row.selfDescription ?? undefined,
+                authMetadata: row.authMetadata ?? undefined,
+                serverCard: row.serverCard ?? undefined,
+              },
+            ] as const,
+          ],
+    ),
   );
 }
 
@@ -330,8 +335,25 @@ export async function upsertMarketMcp(input: {
         status: input.status,
         origin: input.origin,
         source: input.source ?? null,
-        manifestJson: manifest,
-        provenanceJson,
+        // What the sandboxed stdio validation wrote after the last sync
+        // (Issue #367, W1b) survives this one: a registry entry lists no
+        // tools, so a manifest that arrives with none keeps the tools a
+        // stdio start listed; and the provenance keys the validation owns
+        // are carried over unless this sync supplies them itself (a remote
+        // probe's `selfDescription` and `validatedAt` win).
+        manifestJson: sql`case
+          when jsonb_array_length(coalesce(excluded.manifest_json -> 'tools', '[]'::jsonb)) = 0
+            and ${mcpServerVersions.provenanceJson} #>> '{selfDescription,source}' = 'stdio-sandbox'
+            and jsonb_typeof(${mcpServerVersions.manifestJson} -> 'tools') = 'array'
+          then excluded.manifest_json || jsonb_build_object('tools', ${mcpServerVersions.manifestJson} -> 'tools')
+          else excluded.manifest_json
+        end`,
+        provenanceJson: sql`jsonb_strip_nulls(jsonb_build_object(
+          'selfDescription', ${mcpServerVersions.provenanceJson} -> 'selfDescription',
+          'validatedAt', ${mcpServerVersions.provenanceJson} -> 'validatedAt',
+          'validation', ${mcpServerVersions.provenanceJson} -> 'validation',
+          'stdioValidation', ${mcpServerVersions.provenanceJson} -> 'stdioValidation'
+        )) || excluded.provenance_json`,
         // Same first-publish preservation as the item row.
         publishedAt: sql`coalesce(${mcpServerVersions.publishedAt}, excluded.published_at)`,
       },

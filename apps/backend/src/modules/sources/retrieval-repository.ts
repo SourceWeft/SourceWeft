@@ -22,7 +22,8 @@ import { buildSearchQuery } from "./search-tokenizer";
 import {
   assertEmbeddingIdentityCurrent,
   EmbeddingIdentityError,
-  validateEmbeddingResult,
+  storedEmbeddingIdentityDiffers,
+  validateEmbeddingDimensions,
   type EmbeddingIndexIdentity,
   type EmbeddingTransaction,
 } from "../../shared/model-gateway/embedding-identity";
@@ -324,14 +325,9 @@ async function assertVectorQueryCompatible(
       .where(eq(modelGatewayProfiles.id, input.embeddingProfileId))
       .for("share");
   }
-  const dim = validateEmbeddingResult(
-    input.embeddingIdentity,
-    {
-      provider: input.embeddingIdentity.provider,
-      providerModel: input.embeddingIdentity.providerModel,
-    },
-    [input.queryEmbedding],
-  );
+  const dim = validateEmbeddingDimensions(input.embeddingIdentity, [
+    input.queryEmbedding,
+  ]);
   const mismatch = await tx.execute(sql`
     select 1 from ${chunkEmbeddings} ce
     inner join ${chunks} c on c.id = ce.chunk_id
@@ -342,10 +338,10 @@ async function assertVectorQueryCompatible(
       and c.source_id = any(${toPostgresTextArray(input.sourceIds)}::text[])
       and s.status = 'indexed' and ${currentDocumentConditionForAlias("d")}
       and ${gmailIndexedSourceVisible}
-      and (ce.dim <> ${dim} or (
-        d.document_metadata -> 'embeddingIdentity' is not null
-        and d.document_metadata -> 'embeddingIdentity' <> ${JSON.stringify(input.embeddingIdentity)}::jsonb
-      ))
+      and (ce.dim <> ${dim} or ${storedEmbeddingIdentityDiffers(
+        sql`d.document_metadata -> 'embeddingIdentity'`,
+        input.embeddingIdentity,
+      )})
     limit 1
   `);
   if (mismatch.rows.length)

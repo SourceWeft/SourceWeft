@@ -113,5 +113,6 @@ jobs:
             output/reports/${{ matrix.provider }}/long-table-revised/qa/qa.json
             output/reports/${{ matrix.provider }}/long-table-revised/qa/*.jpg
             output/reports/${{ matrix.provider }}/long-table-revised/pdf-pages/*.png
+            output/reports/${{ matrix.provider }}/heading-sweep/summary.json
             output/reports/${{ matrix.provider }}/oversize/qa/qa.json
             output/reports/${{ matrix.provider }}/navigation-negative/content-verification.json

@@ -17,8 +17,15 @@ import type {
  * and for every environment variable and header its NAME, description and
  * required/secret flags. A registry input can carry `value` or `default` — a
  * placeholder, or a real value pasted by mistake — so those, `placeholder`,
- * `valueHint`, `choices`, nested `variables` and the argument lists are never
- * copied. Strings are trimmed and capped, lists bounded.
+ * `valueHint`, `choices` and nested `variables` are never copied. Strings are
+ * trimmed and capped, lists bounded.
+ *
+ * A package's argument lists are kept by the same rule, plus each argument's
+ * `type` and `isRepeated`, so the sandboxed validation (`validation/`) can
+ * build the command the registry describes: a positional argument's `value`
+ * is the literal token it IS (`--stdio`), so it is kept — unless the argument
+ * is marked secret or templated — while a named argument's value is an input
+ * and is not.
  */
 export type RegistryServerProvenance = Pick<
   RegistryServerJson,
@@ -78,8 +85,42 @@ function keptPackage(entry: unknown): RegistryPackage | undefined {
         })
       : undefined,
     environmentVariables,
+    runtimeArguments: keptArguments(entry.runtimeArguments),
+    packageArguments: keptArguments(entry.packageArguments),
   });
   return Object.keys(kept).length > 0 ? kept : undefined;
+}
+
+/** A positional argument's literal token: not secret, not a `{template}`. */
+function literalArgumentValue(entry: Record<string, unknown>) {
+  if (entry.type !== "positional" || entry.isSecret === true) return undefined;
+  const value = text(entry.value, LIMITS.identifierChars);
+  return value && !/[{}]/.test(value) ? value : undefined;
+}
+
+/**
+ * The arguments of a package, each with its type, name, value hint and
+ * flags; a positional argument also keeps its literal value. An argument
+ * with neither a name nor a literal value says nothing and is dropped.
+ */
+function keptArguments(value: unknown): RegistryInput[] | undefined {
+  const inputs = arrayOf(value)
+    .flatMap((entry): RegistryInput[] => {
+      if (!isRecord(entry)) return [];
+      const kept = withoutEmpty({
+        type: text(entry.type, LIMITS.tokenChars),
+        name: text(entry.name, LIMITS.nameChars),
+        value: literalArgumentValue(entry),
+        valueHint: text(entry.valueHint, LIMITS.nameChars),
+        description: text(entry.description, LIMITS.descriptionChars),
+        isRequired: entry.isRequired === true ? true : undefined,
+        isRepeated: entry.isRepeated === true ? true : undefined,
+        isSecret: entry.isSecret === true ? true : undefined,
+      });
+      return kept.name || kept.value ? [kept] : [];
+    })
+    .slice(0, LIMITS.inputs);
+  return inputs.length > 0 ? inputs : undefined;
 }
 
 function keptRemote(entry: unknown): RegistryRemote | undefined {

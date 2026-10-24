@@ -31,6 +31,8 @@ import { processMcpReadmeFetchJob } from "./processors/mcp-readme-fetch";
 import { MCP_README_FETCH_JOB } from "../modules/market/readme/readme-queue";
 import { processMcpOverviewGenerateJob } from "./processors/mcp-overview-generate";
 import { MCP_OVERVIEW_GENERATE_JOB } from "../modules/market/overview/queue";
+import { processMcpStdioValidateJob } from "./processors/mcp-stdio-validate";
+import { MCP_STDIO_VALIDATE_JOB } from "../modules/market/validation/stdio-queue";
 import {
   handleSkillIngestJobFailure,
   processSkillRegistryIngestJob,
@@ -74,6 +76,7 @@ const primaryProcessors: Record<string, JobProcessor> = {
   [SKILL_OVERVIEW_GENERATE_JOB]: processSkillOverviewGenerateJob,
   [MCP_README_FETCH_JOB]: (job) => processMcpReadmeFetchJob(job),
   [MCP_OVERVIEW_GENERATE_JOB]: processMcpOverviewGenerateJob,
+  [MCP_STDIO_VALIDATE_JOB]: (job) => processMcpStdioValidateJob(job),
 };
 
 const skillIngestProcessors: Record<string, JobProcessor> = {
