@@ -32,17 +32,20 @@ pub struct LocalHost {
     // only platform that currently reads it) so the struct's shape does not depend on target
     // OS.
     pub(super) sandbox_readiness_cache: Mutex<ReadinessCache>,
+    // The Linux sandbox sidecar, started lazily on the first command; see `srt_exec.rs`.
+    #[cfg(target_os = "linux")]
+    pub(super) sandbox: super::srt_exec::SandboxSlot,
 }
 
 impl LocalHost {
     pub fn open(app_data: &Path) -> Result<Self> {
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
         return Err(HostError::new(
             "UNSUPPORTED_PLATFORM",
-            "Local execution currently requires macOS.",
+            "Local execution currently requires macOS or Linux.",
         ));
 
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         {
             fs::create_dir_all(app_data)?;
             let base = app_data.canonicalize()?;
@@ -141,6 +144,8 @@ impl LocalHost {
                 binary_reads: Mutex::new(std::collections::HashMap::new()),
                 base,
                 sandbox_readiness_cache: Mutex::new(ReadinessCache::default()),
+                #[cfg(target_os = "linux")]
+                sandbox: Default::default(),
             })
         }
     }
@@ -206,6 +211,29 @@ impl LocalHost {
 
     pub fn workspace_base(&self) -> PathBuf {
         self.base.join("task-workspaces")
+    }
+
+    /// The sandbox sidecar's `init.workspaceRoots`: the automatic workspace base plus every
+    /// currently granted directory that still exists (a missing one cannot be a workspace).
+    #[cfg(target_os = "linux")]
+    pub(super) fn sandbox_workspace_roots(&self) -> Result<Vec<PathBuf>> {
+        let mut roots = vec![self.workspace_base()];
+        let db = self
+            .db
+            .lock()
+            .map_err(|_| HostError::new("HOST_UNAVAILABLE", "Directory database lock failed."))?;
+        let mut statement =
+            db.prepare("SELECT DISTINCT path FROM directory_grants ORDER BY path")?;
+        let paths = statement
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        for path in paths {
+            let path = PathBuf::from(path);
+            if path.is_dir() && !roots.contains(&path) {
+                roots.push(path);
+            }
+        }
+        Ok(roots)
     }
 
     /// Call on the first committed message, not when opening an empty chat view.

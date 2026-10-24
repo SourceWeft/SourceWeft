@@ -8,6 +8,8 @@ pub(crate) mod process;
 mod proxy;
 #[cfg(unix)]
 mod sidecar;
+#[cfg(target_os = "linux")]
+mod srt_exec;
 pub mod readiness;
 pub mod sandbox;
 mod workspace;

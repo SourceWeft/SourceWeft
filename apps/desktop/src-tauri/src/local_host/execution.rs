@@ -1,6 +1,6 @@
 use super::{HostError, LocalHost, Result};
 use rusqlite::{params, OptionalExtension};
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use serde_json::json;
 use serde_json::Value;
 use std::{
@@ -11,7 +11,7 @@ use std::{
     },
 };
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::{io::Read, path::Path};
 
 #[derive(Default)]
@@ -134,7 +134,7 @@ impl LocalHost {
         outcome
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     fn perform(
         &self,
         _calls: &Executions,
@@ -146,11 +146,11 @@ impl LocalHost {
     ) -> Result<Value> {
         Err(HostError::new(
             "UNSUPPORTED_PLATFORM",
-            "Local execution currently requires macOS.",
+            "Local execution currently requires macOS or Linux.",
         ))
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     fn perform(
         &self,
         calls: &Executions,
@@ -284,8 +284,19 @@ impl LocalHost {
                 .lock()
                 .map_err(|_| HostError::new("HOST_UNAVAILABLE", "Execution lock failed"))?
                 .insert(id.into(), cancel.clone());
+            #[cfg(target_os = "macos")]
             let result =
                 execute_command(&workspace.path, &cwd, command, timeout, max_output, cancel);
+            #[cfg(target_os = "linux")]
+            let result = super::srt_exec::execute_command(
+                self,
+                &workspace.path,
+                &cwd,
+                command,
+                timeout,
+                max_output,
+                cancel,
+            );
             if let Ok(mut active) = calls.active.lock() {
                 active.remove(id);
             }
@@ -471,7 +482,7 @@ impl LocalHost {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn text<'a>(payload: &'a Value, key: &str) -> Result<&'a str> {
     payload
         .get(key)
@@ -479,7 +490,7 @@ fn text<'a>(payload: &'a Value, key: &str) -> Result<&'a str> {
         .ok_or_else(|| HostError::new("INVALID_CALL", format!("Missing {key}")))
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn checked_path(root: &Path, relative: &str, must_exist: bool) -> Result<std::path::PathBuf> {
     use std::path::Component;
     let mut result = root.to_owned();

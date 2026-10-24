@@ -24,10 +24,9 @@ use std::{
 
 /// `InitConfig`, `Platform`, and `Helpers` are defined in `sidecar.rs` (a private module) and
 /// widened from `pub(crate)` to `pub` there, then re-exported here, only so the ignored Linux
-/// integration test in `tests/linux_sandbox.rs` can build one directly: that test cannot go
-/// through `LocalHost::sandbox_readiness` because `LocalHost::open` does not yet support Linux
-/// (a later task wires that up). Production code never needs this path; it always goes through
-/// `LocalHost::sandbox_readiness` below.
+/// integration test in `tests/linux_sandbox.rs` can build one directly, to probe a bundle
+/// against an explicit `bwrap` path rather than the production one. Production code never
+/// needs this path; it always goes through `LocalHost::sandbox_readiness` below.
 #[cfg(unix)]
 pub use super::sidecar::{Helpers, InitConfig, Platform};
 
@@ -292,26 +291,13 @@ impl LocalHost {
             &self.sandbox_readiness_cache,
             SANDBOX_READINESS_RECHECK_INTERVAL,
             || {
+                // The same helpers, bwrap and read roots that command execution uses (see
+                // `srt_exec::init_config`), probed against the automatic workspace base.
                 let bundle = bundle_dir(&self.base);
-                let init = InitConfig {
-                    platform: Platform::Linux,
-                    home: std::env::var("HOME").unwrap_or_default(),
-                    workspace_roots: vec![self.workspace_base().to_string_lossy().into_owned()],
-                    read_roots: Vec::new(),
-                    helpers: Helpers {
-                        ripgrep: bundle.join("rg").to_string_lossy().into_owned(),
-                        apply_seccomp: Some(
-                            bundle.join("apply-seccomp").to_string_lossy().into_owned(),
-                        ),
-                        java_agent_jar: Some(
-                            bundle
-                                .join("srt-proxy-agent.jar")
-                                .to_string_lossy()
-                                .into_owned(),
-                        ),
-                    },
-                    bwrap_path: Some("/opt/sourceweft/libexec/bwrap".to_string()),
-                };
+                let init = super::srt_exec::init_config(
+                    &bundle,
+                    vec![self.workspace_base().to_string_lossy().into_owned()],
+                );
                 probe_bundle(&bundle, &init)
             },
         );
