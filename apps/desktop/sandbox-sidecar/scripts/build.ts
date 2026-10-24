@@ -30,6 +30,28 @@ function parseRgPath(argv: readonly string[]): string {
   return value;
 }
 
+/**
+ * The Bun release the bundle is built and tested with (CI pins the same one). Older Bun
+ * releases break srt's proxy (the design's Global Constraints), so any other version is refused
+ * rather than producing a bundle nobody tested (final review M4).
+ */
+const REQUIRED_BUN_VERSION = "1.4.2";
+
+function requireBunVersion(): void {
+  const version = process.versions.bun;
+  if (version !== REQUIRED_BUN_VERSION) {
+    throw new Error(
+      `the sidecar bundle must be built with Bun ${REQUIRED_BUN_VERSION}, got ${version ?? "no Bun (run with bun)"}`,
+    );
+  }
+}
+
+/** srt's vendored `apply-seccomp` directory for this machine's architecture; no guessing. */
+function seccompArch(arch: string): "x64" | "arm64" {
+  if (arch === "x64" || arch === "arm64") return arch;
+  throw new Error(`no vendored apply-seccomp for architecture ${arch} (expected x64 or arm64)`);
+}
+
 function requireFile(path: string, what: string): void {
   if (!existsSync(path)) {
     throw new Error(`${what} not found at ${path}`);
@@ -43,6 +65,7 @@ function copyExecutable(source: string, destName: string): void {
 }
 
 function main(): void {
+  requireBunVersion();
   const rgPath = parseRgPath(process.argv.slice(2));
   requireFile(rgPath, "ripgrep binary (--rg)");
 
@@ -51,7 +74,7 @@ function main(): void {
   copyExecutable(rgPath, "rg");
 
   if (process.platform === "linux") {
-    const arch = process.arch === "arm64" ? "arm64" : "x64";
+    const arch = seccompArch(process.arch);
     const seccompSource = join(
       packageRoot,
       "node_modules/@anthropic-ai/sandbox-runtime/vendor/seccomp",

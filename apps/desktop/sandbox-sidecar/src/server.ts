@@ -347,7 +347,17 @@ export async function startServer(
         error instanceof Error ? error.message : String(error),
       );
     }
-    const { code, stderr } = await runProbe(argv, env, workspaceRoot);
+    // Final review M3: srt counts every successful wrap and defers its cleanup until a matching
+    // `cleanupAfterCommand`, exactly as for a `wrap` request, so release it once the probe has
+    // run — whether it succeeded, failed or could not be spawned. A failed wrap (above) has
+    // already been undone by srt itself.
+    let probed: { code: number | null; stderr: string };
+    try {
+      probed = await runProbe(argv, env, workspaceRoot);
+    } finally {
+      deps.srt.cleanupAfterCommand();
+    }
+    const { code, stderr } = probed;
     if (code !== 0) {
       throw new SidecarError(
         "SANDBOX_UNAVAILABLE",

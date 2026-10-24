@@ -478,6 +478,8 @@ test("probe reports SANDBOX_UNAVAILABLE with stderr when the wrapped true fails"
   const response = await harness.send({ op: "probe" });
   expectError(response, "SANDBOX_UNAVAILABLE");
   if (!response.ok) assert.match(response.error.message, /RTM_NEWADDR/);
+  // Final review M3: the probe's wrap is released even when the probe fails.
+  assert.equal(srt.cleanupCalls, 1);
   await harness.stop();
 });
 
@@ -488,6 +490,8 @@ test("probe succeeds when the wrapped true exits zero", async () => {
   const response = await harness.send({ op: "probe" });
   assert.equal(response.ok, true, `probe failed: ${JSON.stringify(response)}`);
   if (response.ok) assert.equal(response.result, true);
+  // Final review M3: exactly one cleanup for the probe's one wrap.
+  assert.equal(srt.cleanupCalls, 1);
   await harness.stop();
 });
 
@@ -578,8 +582,12 @@ test("a malformed JSON line is BAD_REQUEST with id \"?\"", async () => {
 
 test("an unknown op is BAD_REQUEST and echoes the request id", async () => {
   const harness = startHarness(makeFakeSrt());
-  const response = await harness.send({ op: "not-a-real-op" } as unknown as Request);
+  const response = await harness.send({
+    id: "unknown-op-request",
+    op: "not-a-real-op",
+  } as unknown as Request);
   expectError(response, "BAD_REQUEST");
+  assert.equal(response.id, "unknown-op-request");
   await harness.stop();
 });
 
