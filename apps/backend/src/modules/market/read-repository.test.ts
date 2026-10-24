@@ -137,7 +137,7 @@ test("issue #367: a search ranks servers whose publisher runs the endpoint first
         assert.equal(keys.length, 3);
         assert.match(
           keys[0]!,
-          /^\(case when \("mcp_servers"\."metadata_json" #>> '\{publisher,endpointMatch\}'\)::boolean then 1 else 0 end\) desc$/,
+          /^\(case when "mcp_servers"\."metadata_json" #>> '\{publisher,endpointMatch\}' = 'true' then 1 else 0 end\) desc$/,
         );
       } else {
         assert.equal(keys.length, 2);

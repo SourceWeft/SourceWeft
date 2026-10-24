@@ -1,10 +1,10 @@
 import { and, desc, eq, or, sql } from "drizzle-orm";
 import { db, mcpServers } from "@sourceweft/db";
+import { publisherMeta } from "../publisher";
 import {
   compareProductGroupMembers,
   isProductGroupMember,
   productGroupFor,
-  publisherOf,
   type ProductGroupEntry,
   type ProductGroupKey,
 } from "./product-group";
@@ -16,9 +16,9 @@ import {
  * is a property of the whole catalog (the official server that anchors it
  * may be federated after its integrations), so a stored key would have to be
  * recomputed catalog-wide on every sync. Two scans of the server table serve
- * a read instead: one for the official servers, which every detail needs,
- * and one for the candidates of the one group the server belongs to. The
- * second runs only on grouped pages. The SQL filters are supersets of the
+ * a read instead: one for the official servers, which every grouped detail
+ * needs and which is remembered for a minute, and one for the candidates of
+ * the one group the server belongs to. The SQL filters are supersets of the
  * pure rules in `product-group.ts`, which confirm each candidate.
  */
 
@@ -29,6 +29,12 @@ export const PRODUCT_GROUP_CANDIDATE_LIMIT = 200;
 
 /** How many members a group exposes at most, the official server always among them. */
 export const PRODUCT_GROUP_MEMBER_LIMIT = 50;
+
+/**
+ * How long the official-server list is reused. It changes only when a sync
+ * writes a publisher, and the public detail is cached for as long again.
+ */
+export const OFFICIAL_ENTRIES_TTL_MS = 60_000;
 
 // The same public condition as `publicMarketMcpCondition` in the read
 // repository, written here so that this module does not import the module
@@ -53,16 +59,20 @@ export function productGroupEntryOf(
     name: row.name,
     repoUrl: row.repoUrl,
     publishedAt: row.publishedAt,
-    publisher: publisherOf(row.metadataJson),
+    publisher: publisherMeta(row.metadataJson),
   };
 }
+
+// The flag as text, not a cast: a stray value in the path must not turn
+// every grouped read into a 500.
+const endpointMatchStored = sql`${mcpServers.metadataJson} #>> '{publisher,endpointMatch}' = 'true'`;
 
 /**
  * Every public server whose publisher runs its endpoint — the servers that can
  * anchor a group. A short list (one per product), read without an index: the
  * flag lives in the promoted metadata.
  */
-export async function findOfficialProductEntries(): Promise<
+export async function readOfficialProductEntries(): Promise<
   ProductGroupEntry[]
 > {
   const rows = await db
@@ -75,13 +85,40 @@ export async function findOfficialProductEntries(): Promise<
       metadataJson: mcpServers.metadataJson,
     })
     .from(mcpServers)
-    .where(
-      and(
-        publicCondition(),
-        sql`(${mcpServers.metadataJson} #>> '{publisher,endpointMatch}')::boolean`,
-      ),
-    );
+    .where(and(publicCondition(), endpointMatchStored));
   return rows.map(productGroupEntryOf);
+}
+
+let officialEntries: {
+  readAt: number;
+  entries: Promise<ProductGroupEntry[]>;
+} | null = null;
+
+/**
+ * The official servers, remembered for `OFFICIAL_ENTRIES_TTL_MS` across
+ * reads in this process. A failed read is not remembered.
+ */
+export function findOfficialProductEntries(
+  now = Date.now(),
+): Promise<ProductGroupEntry[]> {
+  if (
+    !officialEntries ||
+    now - officialEntries.readAt >= OFFICIAL_ENTRIES_TTL_MS
+  ) {
+    const entries = readOfficialProductEntries();
+    officialEntries = { readAt: now, entries };
+    entries.catch(() => {
+      if (officialEntries?.entries === entries) {
+        officialEntries = null;
+      }
+    });
+  }
+  return officialEntries.entries;
+}
+
+/** Forget the remembered official servers (tests that write publishers). */
+export function forgetOfficialProductEntries() {
+  officialEntries = null;
 }
 
 function escapeLike(value: string) {
@@ -129,22 +166,21 @@ export async function findProductGroupCandidateRows(
 /**
  * The product group `row` belongs to and its member rows in display order,
  * capped at `PRODUCT_GROUP_MEMBER_LIMIT`; null when no official server exists
- * for the server's brand.
+ * for the server's brand. Each member is a server whose own page names this
+ * group, so the list and the pages agree.
  */
 export async function findProductGroupMembers(
   row: ServerRow,
 ): Promise<{ group: ProductGroupKey; rows: ServerRow[] } | null> {
-  const group = productGroupFor(
-    productGroupEntryOf(row),
-    await findOfficialProductEntries(),
-  );
+  const officials = await findOfficialProductEntries();
+  const group = productGroupFor(productGroupEntryOf(row), officials);
   if (!group) {
     return null;
   }
   const candidates = await findProductGroupCandidateRows(group);
   const rows = candidates
     .filter((candidate) =>
-      isProductGroupMember(group, productGroupEntryOf(candidate)),
+      isProductGroupMember(group, productGroupEntryOf(candidate), officials),
     )
     .sort((left, right) =>
       compareProductGroupMembers(group)(

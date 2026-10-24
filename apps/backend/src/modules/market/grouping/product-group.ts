@@ -7,9 +7,12 @@
  * of that product join the group when their display name or identifier tail
  * carries the product's brand token as a whole token, when they share the
  * official server's repository owner, or when they are published under the
- * same domain. Everything here is deterministic and pure: no model, no
- * network, no clock.
+ * same domain. Every server belongs to at most one group, chosen by
+ * `productGroupFor`; a group's members are exactly the servers that choose
+ * it. Everything here is deterministic and pure: no model, no network, no
+ * clock.
  */
+import type { MarketMcpPublisher } from "@sourceweft/market-contracts";
 
 /** What grouping needs to know about one catalog server. */
 export type ProductGroupEntry = {
@@ -18,13 +21,7 @@ export type ProductGroupEntry = {
   name: string;
   repoUrl: string | null;
   publishedAt: Date | null;
-  publisher: ProductPublisher | null;
-};
-
-/** The publisher fields grouping reads (W2's `publisher`, read tolerantly). */
-export type ProductPublisher = {
-  domain: string;
-  endpointMatch: boolean;
+  publisher: MarketMcpPublisher | null;
 };
 
 /** A product group: the brand and the official server that anchors it. */
@@ -79,11 +76,21 @@ export const BRAND_STOP_LIST: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Second-level labels under which the registrable name sits one label deeper:
- * `example.co.uk`, `acme.com.au`. Short public suffixes only; a product's own
- * label is rarely this short.
+ * Second-level labels under which the registrable name sits one label deeper
+ * (`example.co.uk`, `acme.com.au`, `uni.ac.jp`). A short, explicit list: a
+ * length rule would read `docs.ibm.com` as the brand "docs".
  */
-const SECOND_LEVEL_SUFFIX_MAX_LENGTH = 3;
+const SECOND_LEVEL_PUBLIC_SUFFIXES: ReadonlySet<string> = new Set([
+  "co",
+  "com",
+  "net",
+  "org",
+  "gov",
+  "edu",
+  "ac",
+  "or",
+  "ne",
+]);
 
 /**
  * The slug tokens of a name or identifier tail: lowercase runs of letters and
@@ -107,7 +114,7 @@ export function identifierTail(identifier: string): string {
 }
 
 /**
- * The tokens a server is matched on: its display name and its identifier
+ * The tokens a server is matched on: its display name, then its identifier
  * tail. The summary is left out on purpose: a server that merely mentions a
  * product ("syncs with Notion, Slack and Jira") is not an integration of it.
  */
@@ -138,7 +145,7 @@ export function brandOfDomain(domain: string): string | null {
   }
   const secondLevel = labels[labels.length - 2]!;
   const label =
-    labels.length >= 3 && secondLevel.length <= SECOND_LEVEL_SUFFIX_MAX_LENGTH
+    labels.length >= 3 && SECOND_LEVEL_PUBLIC_SUFFIXES.has(secondLevel)
       ? labels[labels.length - 3]!
       : secondLevel;
   if (!/^[a-z\d](?:[a-z\d-]*[a-z\d])?$/.test(label)) {
@@ -180,32 +187,6 @@ export function namespaceGithubOwner(identifier: string): string | null {
   return match ? match[1]!.toLowerCase() : null;
 }
 
-/**
- * W2's `publisher` as stored on a server's metadata or a manifest, read
- * without the contract so that rows from before the field existed, and rows
- * written before W2 ships, read as "no publisher".
- */
-export function publisherOf(source: unknown): ProductPublisher | null {
-  if (!source || typeof source !== "object") {
-    return null;
-  }
-  const publisher = (source as { publisher?: unknown }).publisher;
-  if (!publisher || typeof publisher !== "object") {
-    return null;
-  }
-  const { domain, endpointMatch } = publisher as {
-    domain?: unknown;
-    endpointMatch?: unknown;
-  };
-  if (typeof domain !== "string" || !/^[a-z\d.-]+\.[a-z]{2,}$/i.test(domain)) {
-    return null;
-  }
-  return {
-    domain: domain.toLowerCase(),
-    endpointMatch: endpointMatch === true,
-  };
-}
-
 /** Whether a server is a product's official one: its publisher runs the endpoint. */
 export function isOfficialEntry(entry: Pick<ProductGroupEntry, "publisher">) {
   return entry.publisher?.endpointMatch === true;
@@ -234,26 +215,49 @@ export function productGroupOf(
   };
 }
 
-function containsSequence(
+/** The index at which `needle` last occurs in `haystack` as a run; -1 when never. */
+function lastSequenceIndex(
   haystack: readonly string[],
   needle: readonly string[],
-) {
+): number {
   if (needle.length === 0 || needle.length > haystack.length) {
-    return false;
+    return -1;
   }
   outer: for (
-    let start = 0;
-    start + needle.length <= haystack.length;
-    start++
+    let start = haystack.length - needle.length;
+    start >= 0;
+    start--
   ) {
     for (let offset = 0; offset < needle.length; offset++) {
       if (haystack[start + offset] !== needle[offset]) {
         continue outer;
       }
     }
-    return true;
+    return start;
   }
-  return false;
+  return -1;
+}
+
+/**
+ * Where a server's name and identifier tail last carry the brand as whole
+ * tokens, as an index into `entryTokens`; -1 when they do not. The name and
+ * the tail are searched on their own, so a run never straddles the two. The
+ * last mention is the head of a compound slug ("smithery-notion",
+ * "better-notion" name Notion), which is what `productGroupFor` prefers.
+ */
+export function brandPosition(
+  group: Pick<ProductGroupKey, "brandTokens">,
+  entry: { name: string; identifier: string },
+): number {
+  const nameTokens = slugTokens(entry.name);
+  const inTail = lastSequenceIndex(
+    slugTokens(identifierTail(entry.identifier)),
+    group.brandTokens,
+  );
+  if (inTail >= 0) {
+    return nameTokens.length + inTail;
+  }
+  return lastSequenceIndex(nameTokens, group.brandTokens);
 }
 
 /** Whether a server's name or identifier tail carries the brand as whole tokens. */
@@ -261,13 +265,7 @@ export function entryCarriesBrand(
   group: Pick<ProductGroupKey, "brandTokens">,
   entry: { name: string; identifier: string },
 ): boolean {
-  return (
-    containsSequence(slugTokens(entry.name), group.brandTokens) ||
-    containsSequence(
-      slugTokens(identifierTail(entry.identifier)),
-      group.brandTokens,
-    )
-  );
+  return brandPosition(group, entry) >= 0;
 }
 
 /**
@@ -284,11 +282,12 @@ export function entryGithubOwners(
 }
 
 /**
- * Whether a server belongs to a group: it is the official server, is published
+ * Whether a group admits a server: it is the official server, is published
  * under the group's domain, carries the brand in its name or slug, or shares
- * the official server's repository owner.
+ * the official server's repository owner. A server several groups admit
+ * belongs to the one `productGroupFor` picks.
  */
-export function isProductGroupMember(
+export function groupAdmits(
   group: ProductGroupKey,
   entry: Pick<
     ProductGroupEntry,
@@ -330,49 +329,76 @@ export function productGroupsOf(
 }
 
 /**
- * The group a server belongs to, given the catalog's official servers. An
- * official server's own group comes first; otherwise the most specific group
- * that admits the server: one published under the same domain, then the
- * longest brand, then the first domain alphabetically — so a slug that names
- * two products lands in one group, the same one every time.
+ * How closely a group fits a server, lower is closer: the official server's
+ * own group or one on its publisher domain (0); a brand the server's name or
+ * slug carries (1), later mentions first — the head of a compound slug names
+ * the product, so "smithery-notion" is a Notion integration hosted on
+ * Smithery, not a Smithery one; a server published under the group's domain
+ * (2); a shared repository owner (3). Ties go to the longer brand, then the
+ * first domain alphabetically.
+ */
+function fitOf(
+  group: ProductGroupKey,
+  entry: ProductGroupEntry,
+): readonly [tier: number, position: number] {
+  if (
+    entry.identifier === group.officialIdentifier ||
+    (isOfficialEntry(entry) && entry.publisher?.domain === group.domain)
+  ) {
+    return [0, 0];
+  }
+  const position = brandPosition(group, entry);
+  if (position >= 0) {
+    return [1, -position];
+  }
+  if (entry.publisher?.domain === group.domain) {
+    return [2, 0];
+  }
+  return [3, 0];
+}
+
+/**
+ * The one group a server belongs to, given the catalog's official servers:
+ * the closest fit among the groups that admit it (see `fitOf`), the same one
+ * every time. Null when no group admits it.
  */
 export function productGroupFor(
   entry: ProductGroupEntry,
   officials: readonly ProductGroupEntry[],
 ): ProductGroupKey | null {
-  const groups = productGroupsOf(officials);
-  const own = groups.find(
-    (group) => group.officialIdentifier === entry.identifier,
-  );
-  if (own) {
-    return own;
-  }
-  if (isOfficialEntry(entry) && entry.publisher) {
-    const sameDomain = groups.find(
-      (group) => group.domain === entry.publisher!.domain,
-    );
-    if (sameDomain) {
-      return sameDomain;
-    }
-  }
-  const candidates = groups
-    .filter((group) => isProductGroupMember(group, entry))
+  const candidates = productGroupsOf(officials)
+    .filter((group) => groupAdmits(group, entry))
+    .map((group) => ({ group, fit: fitOf(group, entry) }))
     .sort((left, right) => {
-      const leftDomain = entry.publisher?.domain === left.domain ? 0 : 1;
-      const rightDomain = entry.publisher?.domain === right.domain ? 0 : 1;
-      if (leftDomain !== rightDomain) {
-        return leftDomain - rightDomain;
+      if (left.fit[0] !== right.fit[0]) {
+        return left.fit[0] - right.fit[0];
       }
-      if (left.brand.length !== right.brand.length) {
-        return right.brand.length - left.brand.length;
+      if (left.fit[1] !== right.fit[1]) {
+        return left.fit[1] - right.fit[1];
       }
-      return left.domain < right.domain
+      if (left.group.brand.length !== right.group.brand.length) {
+        return right.group.brand.length - left.group.brand.length;
+      }
+      return left.group.domain < right.group.domain
         ? -1
-        : left.domain > right.domain
+        : left.group.domain > right.group.domain
           ? 1
           : 0;
     });
-  return candidates[0] ?? null;
+  return candidates[0]?.group ?? null;
+}
+
+/**
+ * Whether a server is a member of `group`: the group is the one it belongs
+ * to. The list a detail page shows and the group each member's own page
+ * names are the same relation.
+ */
+export function isProductGroupMember(
+  group: Pick<ProductGroupKey, "domain">,
+  entry: ProductGroupEntry,
+  officials: readonly ProductGroupEntry[],
+): boolean {
+  return productGroupFor(entry, officials)?.domain === group.domain;
 }
 
 /** Oldest publication first; unpublished last; identifier breaks ties. */

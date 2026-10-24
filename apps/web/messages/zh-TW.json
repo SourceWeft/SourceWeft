@@ -565,7 +565,7 @@
       "securityBody": "MCP 服務會從對話中接收工具引數，並可能執行外部操作。允許列出未驗證的服務，但 SourceWeft 會對其加以標記，以便你在啟用前先審查該服務。",
       "relatedHeading": "更多類似 {name} 的服務",
       "integrationsHeading": "其他 {brand} 整合",
-      "officialPointer": "發布方自己的伺服器：<link>{name}</link>",
+      "officialPointer": "發布方自己的服務：<link>{name}</link>",
       "breadcrumb": "麵包屑導覽",
       "sections": "章節導覽",
       "copy": "複製",

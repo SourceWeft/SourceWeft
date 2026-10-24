@@ -330,12 +330,15 @@ test("the detail answer carries the AI overview in the asked-for locale", async 
   assert.deepEqual(body.item.overviewLocales, ["en", "zh-TW"]);
   assert.deepEqual(mocks.findMcp.mock.calls[0], [
     "io.github.acme/weather",
-    { locale: "zh-TW" },
+    { locale: "zh-TW", relatedProduct: true },
   ]);
 
   // English when not asked; a language the market does not write is refused.
   await createTestApp().request("/v1/mcp/io.github.acme%2Fweather");
-  assert.deepEqual(mocks.findMcp.mock.calls[1]?.[1], { locale: undefined });
+  assert.deepEqual(mocks.findMcp.mock.calls[1]?.[1], {
+    locale: undefined,
+    relatedProduct: true,
+  });
   const invalid = await createTestApp().request(
     "/v1/mcp/io.github.acme%2Fweather?locale=fr",
   );

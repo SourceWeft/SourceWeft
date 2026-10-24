@@ -3,15 +3,16 @@ import { test } from "vitest";
 import {
   BRAND_STOP_LIST,
   brandOfDomain,
+  brandPosition,
   compareProductGroupMembers,
   entryCarriesBrand,
   githubRepoOwner,
+  groupAdmits,
   isProductGroupMember,
   namespaceGithubOwner,
   productGroupFor,
   productGroupOf,
   productGroupsOf,
-  publisherOf,
   slugTokens,
   type ProductGroupEntry,
 } from "./product-group";
@@ -34,6 +35,10 @@ function entry(
   };
 }
 
+function publisher(domain: string, endpointMatch: boolean) {
+  return { domain, source: "registry-namespace" as const, endpointMatch };
+}
+
 function official(
   identifier: string,
   name: string,
@@ -41,7 +46,7 @@ function official(
   patch: Partial<ProductGroupEntry> = {},
 ) {
   return entry(identifier, name, {
-    publisher: { domain, endpointMatch: true },
+    publisher: publisher(domain, true),
     ...patch,
   });
 }
@@ -55,11 +60,11 @@ const NOTION_OFFICIAL = official("com.notion/mcp", "Mcp", "notion.com", {
 const NOTION_INTEGRATIONS = [
   entry("ai.smithery/smithery-notion", "Smithery Notion", {
     repoUrl: "https://github.com/smithery-ai/mcp-servers",
-    publisher: { domain: "smithery.ai", endpointMatch: false },
+    publisher: publisher("smithery.ai", false),
   }),
   entry("com.mcparmory/notion", "Notion", {
     repoUrl: "https://github.com/mcparmory/registry",
-    publisher: { domain: "mcparmory.com", endpointMatch: false },
+    publisher: publisher("mcparmory.com", false),
   }),
   entry("io.github.ai-aviate/better-notion", "Better Notion", {
     repoUrl: "https://github.com/ai-aviate/better-mcp-notion",
@@ -93,16 +98,16 @@ const NOTION_INTEGRATIONS = [
   entry("io.github.danhilse/notion_mcp", "Tasks for agents"),
   // Published under the product's own domain without running on it.
   entry("com.notion/sdk-bridge", "SDK bridge", {
-    publisher: { domain: "notion.com", endpointMatch: false },
+    publisher: publisher("notion.com", false),
   }),
 ];
 const SUMMARY_ONLY_MENTIONS = [
   entry("ai.context-link/context-link", "Context Link", {
-    publisher: { domain: "context-link.ai", endpointMatch: false },
+    publisher: publisher("context-link.ai", false),
   }),
   entry("dev.claw-link/clawlink", "ClawLink", {
     repoUrl: "https://github.com/hith3sh/clawlink",
-    publisher: { domain: "claw-link.dev", endpointMatch: false },
+    publisher: publisher("claw-link.dev", false),
   }),
   entry("io.github.havilandsoftware/mcp-server-innoday", "InnoDay"),
   entry("io.github.kfuras/notipo", "Notipo", {
@@ -154,6 +159,9 @@ test("the brand is the domain's registrable label", () => {
   assert.equal(brandOfDomain("acme.co.uk"), "acme");
   assert.equal(brandOfDomain("acme.com.au"), "acme");
   assert.equal(brandOfDomain("docs.acme.co.uk"), "acme");
+  // A short second-level label that is a brand, not a public suffix.
+  assert.equal(brandOfDomain("docs.ibm.com"), null);
+  assert.equal(brandOfDomain("docs.asana.com"), "asana");
 });
 
 test("short and generic labels key no group", () => {
@@ -254,36 +262,6 @@ test("repository owners come from github.com URLs and io.github namespaces", () 
   assert.equal(namespaceGithubOwner("io.github.acme"), null);
 });
 
-test("the publisher is read tolerantly from metadata or a manifest", () => {
-  assert.deepEqual(
-    publisherOf({
-      publisher: {
-        domain: "Notion.com",
-        source: "registry-namespace",
-        endpointMatch: true,
-      },
-    }),
-    { domain: "notion.com", endpointMatch: true },
-  );
-  assert.deepEqual(publisherOf({ publisher: { domain: "notion.com" } }), {
-    domain: "notion.com",
-    endpointMatch: false,
-  });
-  assert.equal(
-    publisherOf({ publisher: { domain: "notion.com", endpointMatch: "true" } })
-      ?.endpointMatch,
-    false,
-  );
-  assert.equal(
-    publisherOf({ publisher: { domain: "localhost", endpointMatch: true } }),
-    null,
-  );
-  assert.equal(publisherOf({ publisher: "notion.com" }), null);
-  assert.equal(publisherOf({}), null);
-  assert.equal(publisherOf(null), null);
-  assert.equal(publisherOf("x"), null);
-});
-
 test("only an official server with a usable brand defines a group", () => {
   assert.deepEqual(productGroupOf(NOTION_OFFICIAL), {
     domain: "notion.com",
@@ -295,7 +273,7 @@ test("only an official server with a usable brand defines a group", () => {
   assert.equal(
     productGroupOf(
       entry("com.notion/other", "Other", {
-        publisher: { domain: "notion.com", endpointMatch: false },
+        publisher: publisher("notion.com", false),
       }),
     ),
     null,
@@ -317,24 +295,30 @@ test("only an official server with a usable brand defines a group", () => {
 });
 
 test("the Notion fixture: official plus 13 integrations, summary mentions excluded", () => {
+  const officials = [NOTION_OFFICIAL];
   const group = productGroupOf(NOTION_OFFICIAL)!;
   assert.equal(NOTION_INTEGRATIONS.length, 13);
-  assert.ok(isProductGroupMember(group, NOTION_OFFICIAL));
+  assert.ok(isProductGroupMember(group, NOTION_OFFICIAL, officials));
   for (const member of NOTION_INTEGRATIONS) {
-    assert.ok(isProductGroupMember(group, member), member.identifier);
+    assert.ok(groupAdmits(group, member), member.identifier);
+    assert.ok(
+      isProductGroupMember(group, member, officials),
+      member.identifier,
+    );
     assert.equal(
-      productGroupFor(member, [NOTION_OFFICIAL])?.domain,
+      productGroupFor(member, officials)?.domain,
       "notion.com",
       member.identifier,
     );
   }
   for (const other of SUMMARY_ONLY_MENTIONS) {
-    assert.equal(isProductGroupMember(group, other), false, other.identifier);
+    assert.equal(groupAdmits(group, other), false, other.identifier);
     assert.equal(
-      productGroupFor(other, [NOTION_OFFICIAL]),
-      null,
+      isProductGroupMember(group, other, officials),
+      false,
       other.identifier,
     );
+    assert.equal(productGroupFor(other, officials), null, other.identifier);
   }
 });
 
@@ -344,13 +328,13 @@ test("servers sharing the official server's repository owner join", () => {
   });
   const group = productGroupOf(acme)!;
   assert.ok(
-    isProductGroupMember(
+    groupAdmits(
       group,
       entry("io.github.acme-inc/internal-tools", "Internal tools"),
     ),
   );
   assert.ok(
-    isProductGroupMember(
+    groupAdmits(
       group,
       entry("io.github.someone/fork", "Fork", {
         repoUrl: "https://github.com/acme-inc/fork",
@@ -359,7 +343,7 @@ test("servers sharing the official server's repository owner join", () => {
   );
   // Either the namespace account or the declared repository's owner counts.
   assert.ok(
-    isProductGroupMember(
+    groupAdmits(
       group,
       entry("io.github.other/x", "x", {
         repoUrl: "https://github.com/acme-inc/x",
@@ -367,7 +351,7 @@ test("servers sharing the official server's repository owner join", () => {
     ),
   );
   assert.equal(
-    isProductGroupMember(
+    groupAdmits(
       group,
       entry("io.github.other/x", "x", {
         repoUrl: "https://github.com/other/acme-inc",
@@ -377,7 +361,7 @@ test("servers sharing the official server's repository owner join", () => {
   );
   // A repository elsewhere, or none: no owner to share.
   assert.equal(
-    isProductGroupMember(
+    groupAdmits(
       group,
       entry("com.other/tools", "Tools", {
         repoUrl: "https://gitlab.com/acme-inc/tools",
@@ -388,35 +372,109 @@ test("servers sharing the official server's repository owner join", () => {
   // Without a declared repository the official server joins nobody by owner.
   const notion = productGroupOf(NOTION_OFFICIAL)!;
   assert.equal(
-    isProductGroupMember(notion, entry("io.github.makenotion/tools", "Tools")),
+    groupAdmits(notion, entry("io.github.makenotion/tools", "Tools")),
     false,
   );
 });
 
-test("a server that names two products lands in one group, deterministically", () => {
+test("a server two groups admit belongs to one, and both pages agree on it", () => {
   const notion = NOTION_OFFICIAL;
+  const smithery = official("ai.smithery/mcp", "Smithery", "smithery.ai", {
+    repoUrl: "https://github.com/smithery-ai/mcp-servers",
+  });
   const slack = official("com.slack/mcp", "Slack", "slack.com");
-  const smithery = official("ai.smithery/mcp", "Smithery", "smithery.ai");
+  const officials = [smithery, notion, slack];
+  const notionGroup = productGroupOf(notion)!;
+  const smitheryGroup = productGroupOf(smithery)!;
+
+  // Hosted on Smithery (publisher domain, repository owner and the brand all
+  // say so), but a Notion integration: the slug's head names the product.
+  const smitheryNotion = NOTION_INTEGRATIONS[0]!;
+  assert.ok(groupAdmits(smitheryGroup, smitheryNotion));
+  assert.ok(groupAdmits(notionGroup, smitheryNotion));
+  assert.equal(
+    productGroupFor(smitheryNotion, officials)?.domain,
+    "notion.com",
+  );
+  assert.ok(isProductGroupMember(notionGroup, smitheryNotion, officials));
+  assert.equal(
+    isProductGroupMember(smitheryGroup, smitheryNotion, officials),
+    false,
+  );
+  // The same whatever order the officials come in.
+  assert.equal(
+    productGroupFor(smitheryNotion, [notion, slack, smithery])?.domain,
+    "notion.com",
+  );
+
+  // A compound slug: the last brand named is the product.
   const bridge = entry(
     "io.github.o/notion-slack-bridge",
     "Notion Slack Bridge",
   );
-  // Equal-length brands: the first domain alphabetically, whatever the order given.
-  assert.equal(productGroupFor(bridge, [slack, notion])?.domain, "notion.com");
-  assert.equal(productGroupFor(bridge, [notion, slack])?.domain, "notion.com");
-  // The longer brand is the more specific one.
-  const smitheryNotion = NOTION_INTEGRATIONS[0]!;
+  assert.equal(productGroupFor(bridge, officials)?.domain, "slack.com");
+  assert.equal(isProductGroupMember(notionGroup, bridge, officials), false);
+  const reverse = entry("io.github.o/slack-notion-sync", "Slack Notion Sync");
+  assert.equal(productGroupFor(reverse, officials)?.domain, "notion.com");
+
+  // Only the hosting platform's brand, or only its repository owner: Smithery's.
   assert.equal(
-    productGroupFor(smitheryNotion, [notion, smithery])?.domain,
+    productGroupFor(
+      entry("ai.smithery/smithery-cli", "Smithery CLI"),
+      officials,
+    )?.domain,
     "smithery.ai",
   );
-  // Being published under a group's domain outranks any brand match.
-  const underNotion = entry("com.notion/slack-sync", "Slack sync", {
-    publisher: { domain: "notion.com", endpointMatch: false },
-  });
   assert.equal(
-    productGroupFor(underNotion, [slack, notion])?.domain,
+    productGroupFor(
+      entry("io.github.smithery-ai/helper", "Helper", {
+        publisher: null,
+      }),
+      officials,
+    )?.domain,
+    "smithery.ai",
+  );
+  // Published under a domain without naming any brand: that domain's group.
+  assert.equal(
+    productGroupFor(
+      entry("com.notion/sdk-bridge", "SDK bridge", {
+        publisher: publisher("notion.com", false),
+      }),
+      officials,
+    )?.domain,
     "notion.com",
+  );
+  // Published under one domain, naming another product: the product's group.
+  assert.equal(
+    productGroupFor(
+      entry("com.notion/slack-sync", "Slack sync", {
+        publisher: publisher("notion.com", false),
+      }),
+      officials,
+    )?.domain,
+    "slack.com",
+  );
+});
+
+test("brand position is the last whole-token mention across name and tail", () => {
+  const notion = productGroupOf(NOTION_OFFICIAL)!;
+  assert.equal(
+    brandPosition(notion, {
+      identifier: "io.github.o/x",
+      name: "Smithery Notion",
+    }),
+    1,
+  );
+  assert.equal(
+    brandPosition(notion, {
+      identifier: "io.github.o/notion-sync",
+      name: "Sync",
+    }),
+    1,
+  );
+  assert.equal(
+    brandPosition(notion, { identifier: "io.github.o/x", name: "Other" }),
+    -1,
   );
 });
 

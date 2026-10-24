@@ -57,6 +57,7 @@ describe("MCP catalog on the mcp_* tables", () => {
   let isolated: Awaited<ReturnType<typeof createIsolatedTestDatabase>>;
   let data: typeof import("@sourceweft/db");
   let ingest: typeof import("./ingest/repository");
+  let grouping: typeof import("./grouping/query");
   let app: Hono;
   const originalUrl = process.env.DATABASE_URL;
 
@@ -65,6 +66,7 @@ describe("MCP catalog on the mcp_* tables", () => {
     process.env.DATABASE_URL = isolated.url;
     data = await import("@sourceweft/db");
     ingest = await import("./ingest/repository");
+    grouping = await import("./grouping/query");
     const routes = await import("../../api/routes/market");
     app = createRouteTestApp(routes.registerMarketRoutes);
   }, 120_000);
@@ -573,8 +575,10 @@ describe("MCP catalog on the mcp_* tables", () => {
   });
 
   // Issue #367 W8: the servers integrating one product, grouped behind the
-  // product's own server. The brand is a token of its own (`${tag}x`), so the
-  // other rows of this file, whose names carry `${tag}`, stay out.
+  // product's own server. The brand is a token of its own (`${tag}x`), and the
+  // rows live under their own GitHub owners, so the other rows of this file
+  // (names carrying `${tag}`, repositories under `${tag}`, the publisher test's
+  // own official server) stay out.
   test("a detail carries its product group, the publisher's own server first", async () => {
     const brand = `${tag}x`;
     const domain = `${brand}.com`;
@@ -603,29 +607,39 @@ describe("MCP catalog on the mcp_* tables", () => {
         identifier: `io.github.aviate/better-${brand}`,
         name: `Better ${brand}`,
         summary: "Markdown-first integration.",
+        repoUrl: "https://github.com/aviate/better",
+        sourceUrl: "https://github.com/aviate/better",
       }),
       manifest("smithery", {
         identifier: `ai.smithery/smithery-${brand}`,
         name: `Smithery ${brand}`,
         summary: "Hosted integration.",
+        repoUrl: "https://github.com/smithery-ai/servers",
+        sourceUrl: "https://github.com/smithery-ai/servers",
       }),
       manifest("camel", {
         identifier: "io.github.suekou/server",
         name: `${brand.charAt(0).toUpperCase()}${brand.slice(1)}MCP`,
         summary: "A camelCase name, a slug that says nothing.",
+        repoUrl: "https://github.com/suekou/server",
+        sourceUrl: "https://github.com/suekou/server",
       }),
     ];
     // Mentions the product only in its summary: not an integration of it.
     const mention = manifest("mention", {
-      identifier: `io.github.${tag}/notes`,
-      name: `${tag} notes`,
+      identifier: "io.github.someone/notes",
+      name: "Someone's notes",
       summary: `Notes that sync to ${brand} and Slack.`,
+      repoUrl: "https://github.com/someone/notes",
+      sourceUrl: "https://github.com/someone/notes",
     });
     // Carries the brand inside a longer word.
     const longer = manifest("longer", {
-      identifier: `io.github.${tag}/${brand}ally`,
+      identifier: `io.github.someone/${brand}ally`,
       name: `${brand}ally`,
       summary: "Unrelated.",
+      repoUrl: "https://github.com/someone/longer",
+      sourceUrl: "https://github.com/someone/longer",
     });
     for (const entry of [official, ...integrations, mention, longer]) {
       await ingest.upsertMarketMcp({ ...federated, manifest: entry });
@@ -643,6 +657,8 @@ describe("MCP catalog on the mcp_* tables", () => {
         })}::jsonb`,
       })
       .where(eq(data.mcpServers.identifier, official.identifier));
+    // The official-server list is remembered for a minute across reads.
+    grouping.forgetOfficialProductEntries();
 
     const detail = async (identifier: string) => {
       const response = await app.request(
@@ -701,11 +717,24 @@ describe("MCP catalog on the mcp_* tables", () => {
     expect((await detail(mention.identifier)).relatedProduct).toBeNull();
     expect((await detail(longer.identifier)).relatedProduct).toBeNull();
 
+    // The brand as a search: the publisher's own server ranks first (W2's
+    // endpointMatch rank, #376), the integrations after it.
+    const search = await app.request(`/v1/mcp?query=${brand}`);
+    expect(search.status).toBe(200);
+    const ranked = (
+      (await search.json()) as { items: { identifier: string }[] }
+    ).items;
+    expect(ranked[0]!.identifier).toBe(official.identifier);
+    expect(ranked.map((item) => item.identifier)).toEqual(
+      expect.arrayContaining(integrations.map((entry) => entry.identifier)),
+    );
+
     // Without an official server the brand has no group at all.
     await data.db
       .update(data.mcpServers)
       .set({ metadataJson: sql`${data.mcpServers.metadataJson} - 'publisher'` })
       .where(eq(data.mcpServers.identifier, official.identifier));
+    grouping.forgetOfficialProductEntries();
     expect((await detail(official.identifier)).relatedProduct).toBeNull();
     expect(
       (await detail(integrations[0]!.identifier)).relatedProduct,

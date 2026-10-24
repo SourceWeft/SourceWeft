@@ -1,4 +1,7 @@
-import type { MarketMcpPublisher } from "@sourceweft/market-contracts";
+import {
+  marketMcpPublisherSchema,
+  type MarketMcpPublisher,
+} from "@sourceweft/market-contracts";
 
 /**
  * A registry namespace that names a GitHub account rather than a domain:
@@ -21,7 +24,9 @@ export function publisherDomainFromNamespace(
   if (labels.length < 2 || isGitHubNamespace(labels)) {
     return undefined;
   }
-  if (!labels.every((label) => /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label))) {
+  if (
+    !labels.every((label) => /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label))
+  ) {
     return undefined;
   }
   return labels.reverse().join(".");
@@ -67,4 +72,17 @@ export function publisherFromRegistryName(
     source: "registry-namespace",
     endpointMatch: endpointMatchesDomain(endpointUrl, domain),
   };
+}
+
+/**
+ * The publisher stored on a server's metadata (`metadata_json.publisher`,
+ * copied from the latest manifest) or on a manifest, when it is well-formed;
+ * null for a server without one or from before it was derived. The one
+ * parser for the field: listing, detail and grouping all read it here.
+ */
+export function publisherMeta(
+  value: Record<string, unknown> | null | undefined,
+): MarketMcpPublisher | null {
+  const parsed = marketMcpPublisherSchema.safeParse(value?.publisher);
+  return parsed.success ? parsed.data : null;
 }

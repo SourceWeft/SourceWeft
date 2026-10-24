@@ -1,6 +1,5 @@
 import {
   marketMcpIconSourceSchema,
-  marketMcpPublisherSchema,
   marketMcpToolsValidationSchema,
   mcpTransportSchema,
   type MarketItemSummary,
@@ -31,6 +30,7 @@ import {
 } from "./overview/repository";
 import { findProductGroupMembers, productGroupEntryOf } from "./grouping/query";
 import { isOfficialEntry } from "./grouping/product-group";
+import { publisherMeta } from "./publisher";
 import { latestPublishedVersionOf } from "./latest-version";
 import { readMcpReadme } from "./readme/readme-repository";
 import { mcpReadmeView } from "./readme/readme-state";
@@ -46,7 +46,8 @@ type MarketMcpRecord = {
   searchIndexable: boolean;
   /**
    * The servers integrating the same product, the product's own server first
-   * (Issue #367, W8); null when no official server exists for the brand.
+   * (Issue #367, W8); null when not asked for (`relatedProduct` option) or
+   * when no official server exists for the brand.
    */
   relatedProduct: MarketMcpProductGroup | null;
 };
@@ -129,16 +130,6 @@ function transportMeta(
   // Validate against the contract enum rather than casting a stray string
   // straight into the transport type.
   const parsed = mcpTransportSchema.safeParse(transport);
-  return parsed.success ? parsed.data : null;
-}
-
-/**
- * The item's domain publisher (`metadata_json.publisher`, from the latest
- * manifest), when it is well-formed; null for a server without one or from
- * before it was derived.
- */
-function publisherMeta(value: Record<string, unknown> | null | undefined) {
-  const parsed = marketMcpPublisherSchema.safeParse(value?.publisher);
   return parsed.success ? parsed.data : null;
 }
 
@@ -500,7 +491,7 @@ export function mcpSharedReadmeServerIds(): SQL {
  * matched, which is never the whole catalog.
  */
 export function publisherEndpointMatchRank() {
-  return sql<number>`(case when (${mcpServers.metadataJson} #>> '{publisher,endpointMatch}')::boolean then 1 else 0 end)`;
+  return sql<number>`(case when ${mcpServers.metadataJson} #>> '{publisher,endpointMatch}' = 'true' then 1 else 0 end)`;
 }
 
 type ListCursor = { endpointMatch: 0 | 1; publishedAt: Date; id: string };
@@ -778,10 +769,13 @@ async function relatedProductOf(
  * A published, public server with its published versions (newest first),
  * the latest one's README, and its AI overview in `locale` (English when not
  * given, and the fallback when that language has none or it is hidden).
+ * With `relatedProduct`, also its product group: two more catalog scans,
+ * which only the public detail asks for — the manifest reads that share this
+ * function would discard them.
  */
 export async function findMcp(
   identifier: string,
-  options: { locale?: MarketMcpLocale } = {},
+  options: { locale?: MarketMcpLocale; relatedProduct?: boolean } = {},
 ): Promise<MarketMcpRecord | null> {
   // Preserve database errors: returning null here would turn an outage into 404.
   const [row] = await db
@@ -825,7 +819,7 @@ export async function findMcp(
                 .then((result) => result.rows[0]?.shared === true),
             ])
           : ([null, null, null, false] as const),
-        relatedProductOf(row, locale),
+        options.relatedProduct ? relatedProductOf(row, locale) : null,
       ]);
     const aiOverview = latest ? (overviews?.get(latest.id) ?? null) : null;
     return {

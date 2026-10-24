@@ -556,7 +556,7 @@
       "securityBody": "MCP 服务会从对话中接收工具参数，并可能执行外部操作。允许列出未验证的服务，但 SourceWeft 会对其加以标记，以便你在启用前先审查该服务。",
       "relatedHeading": "更多类似 {name} 的服务",
       "integrationsHeading": "其他 {brand} 集成",
-      "officialPointer": "发布方自己的服务器：<link>{name}</link>",
+      "officialPointer": "发布方自己的服务：<link>{name}</link>",
       "breadcrumb": "面包屑导航",
       "sections": "章节导航",
       "copy": "复制",
