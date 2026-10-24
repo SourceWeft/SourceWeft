@@ -18,7 +18,7 @@ import type { MarketItemSummary } from "@sourceweft/market-sdk";
 
 import { buildTranslatedAlternates } from "../../../../lib/i18n/metadata";
 import { mcpOverviewLocale } from "../../../../lib/mcp-ai-overview";
-import { publicMcpFacts } from "../../../../lib/mcp-facts";
+import { mcpDocumentationUrl, publicMcpFacts } from "../../../../lib/mcp-facts";
 import { mcpTemplateDescription } from "../../../../lib/mcp-template-description";
 import { resolveInitialLandingAuthState } from "../../../_landing/auth-state-server";
 import { SourceWeftFooter } from "../../../_landing/components/sourceweft-footer";
@@ -303,6 +303,10 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
   const sourceUrl = manifest.sourceUrl ?? item.sourceUrl;
   const repoUrl = manifest.repoUrl ?? item.repoUrl;
   const homepageUrl = manifest.homepageUrl ?? item.homepageUrl;
+  // The endpoint's own documentation link, from its protected-resource
+  // metadata (W1); the facts panel shows it, and it is one of the server's
+  // addresses. Never fetched.
+  const documentationUrl = mcpDocumentationUrl(version.provenanceJson);
   const clientConfig = remoteMcpClientConfig(manifest);
   // The hero already shows the summary; only a longer description adds
   // anything. An AI overview, when there is one, takes the description's
@@ -359,7 +363,7 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
       "@type": "Organization",
       name: providerName ?? "SourceWeft MCP Market",
     },
-    sameAs: [homepageUrl, repoUrl, sourceUrl].filter(Boolean),
+    sameAs: [homepageUrl, repoUrl, sourceUrl, documentationUrl].filter(Boolean),
     softwareVersion: version.version,
     url: `${SITE_URL}${mcpPath(item.identifier)}`,
   };

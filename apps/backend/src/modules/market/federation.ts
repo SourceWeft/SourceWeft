@@ -1,10 +1,14 @@
 import { createHash } from "node:crypto";
 import {
+  marketMcpAuthMetadataSchema,
   marketMcpManifestSchema,
+  marketMcpSelfDescriptionSchema,
   marketMcpToolManifestSchema,
+  type MarketMcpAuthMetadata,
   type MarketMcpAuthMethod,
   type MarketMcpAuthRequirement,
   type MarketMcpManifest,
+  type MarketMcpSelfDescription,
   type MarketMcpToolManifest,
   type McpTransport,
 } from "@sourceweft/market-contracts";
@@ -13,6 +17,7 @@ import { logger } from "../../shared/logger";
 import {
   probeMcpEndpointAuth,
   type McpEndpointAuthProbe,
+  type McpEndpointProbe,
 } from "../../shared/mcp-auth-probe";
 import {
   boundedMcpListedTools,
@@ -475,7 +480,48 @@ const AUTH_PROBE_CONCURRENCY = 8;
 // An endpoint's auth can change without a new registry version.
 const AUTH_PROBE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
-type AuthProbe = { result: McpEndpointAuthProbe; probedAt: Date };
+/**
+ * One probe of an endpoint as the catalog keeps it, fresh or reused from the
+ * version's stored one: the auth classification and, with it, what the
+ * endpoint gave away while being classified (Issue #367 W1) — the
+ * `selfDescription` its `initialize` answered, the 401 path's `authMetadata`
+ * and the origin's `serverCard`. The tools it lists are the tool listing's.
+ */
+type AuthProbe = {
+  result: McpEndpointAuthProbe;
+  probedAt: Date;
+  selfDescription?: MarketMcpSelfDescription;
+  authMetadata?: MarketMcpAuthMetadata;
+  serverCard?: Record<string, unknown>;
+};
+
+const SELF_DESCRIPTION_SOURCE = "remote-probe";
+
+function definedEntries<T extends Record<string, unknown>>(value: T): T {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, entry]) => entry !== undefined),
+  ) as T;
+}
+
+/** A fresh probe as the catalog keeps it. */
+export function endpointProbeRecord(
+  probe: McpEndpointProbe,
+  probedAt: Date,
+): AuthProbe {
+  return definedEntries({
+    result: probe.result,
+    probedAt,
+    selfDescription: probe.selfDescription
+      ? {
+          source: SELF_DESCRIPTION_SOURCE,
+          recordedAt: probedAt.toISOString(),
+          ...probe.selfDescription,
+        }
+      : undefined,
+    authMetadata: probe.authMetadata,
+    serverCard: probe.serverCard,
+  });
+}
 
 function endpointSha256(endpointUrl: string) {
   return createHash("sha256").update(endpointUrl).digest("hex");
@@ -506,6 +552,7 @@ export function storedAuthProbe(
   value: unknown,
   endpointUrl: string,
   now: Date,
+  maxAgeMs = AUTH_PROBE_MAX_AGE_MS,
 ): AuthProbe | undefined {
   if (!value || typeof value !== "object") return undefined;
   const stored = value as {
@@ -523,14 +570,43 @@ export function storedAuthProbe(
   const age = now.getTime() - probedAt.getTime();
   return stored.endpointSha256 === endpointSha256(endpointUrl) &&
     age >= 0 &&
-    age < AUTH_PROBE_MAX_AGE_MS
+    age < maxAgeMs
     ? { result, probedAt }
     : undefined;
 }
 
+/**
+ * What the version's stored probe kept besides its classification, each
+ * piece only when well-formed and the remote probe's own (a
+ * `selfDescription` another source wrote is not reused here).
+ */
+export function storedProbePieces(
+  stored: StoredEndpointProbes | undefined,
+): Pick<AuthProbe, "selfDescription" | "authMetadata" | "serverCard"> {
+  const selfDescription = marketMcpSelfDescriptionSchema.safeParse(
+    stored?.selfDescription,
+  );
+  const authMetadata = marketMcpAuthMetadataSchema.safeParse(
+    stored?.authMetadata,
+  );
+  const card = stored?.serverCard;
+  return definedEntries({
+    selfDescription:
+      selfDescription.success &&
+      selfDescription.data.source === SELF_DESCRIPTION_SOURCE
+        ? selfDescription.data
+        : undefined,
+    authMetadata: authMetadata.success ? authMetadata.data : undefined,
+    serverCard:
+      card && typeof card === "object" && !Array.isArray(card)
+        ? (card as Record<string, unknown>)
+        : undefined,
+  });
+}
+
 async function probeRegistryEndpoint(
   endpointUrl: string,
-): Promise<McpEndpointAuthProbe> {
+): Promise<McpEndpointProbe> {
   // Registry endpoints are third-party input: the same endpoint policy as an
   // install's requests, checked on every connection.
   const requests = createControlledFetch({
@@ -538,7 +614,11 @@ async function probeRegistryEndpoint(
     allowedInternalOrigins: config.mcpAllowedInternalOrigins ?? [],
   });
   try {
-    return await probeMcpEndpointAuth(endpointUrl, requests.fetch);
+    const probe = await probeMcpEndpointAuth(endpointUrl, requests.fetch);
+    // The probe swallows failures of its follow-up requests (the well-known
+    // lookups, the server card); a policy denial among them fails the probe.
+    requests.throwIfDenied();
+    return probe;
   } catch (error) {
     requests.throwIfDenied();
     throw error;
@@ -598,9 +678,12 @@ async function eachConcurrently<T>(
 
 /**
  * The endpoint auth probe of each target: the one stored for that version
- * when it probed the same endpoint within 30 days of `now`, else a fresh one.
- * A probe that fails is left out (the entry is mapped from its declared
- * headers alone) and retried on the next sync.
+ * when it probed the same endpoint within 30 days of `now`, else a fresh one
+ * — so what the endpoint says about itself refreshes with its auth
+ * classification. A probe that fails keeps the version's stored one whatever
+ * its age (a transient failure does not empty the entry), or, without one,
+ * is left out (the entry is mapped from its declared headers alone); either
+ * way it is retried on the next sync.
  */
 async function registryAuthProbes(
   targets: EndpointTarget[],
@@ -609,26 +692,38 @@ async function registryAuthProbes(
 ) {
   const probes = new Map<RegistryEntry, AuthProbe>();
   const pending: EndpointTarget[] = [];
-  for (const target of targets) {
-    const reused = storedAuthProbe(
-      stored.get(target.versionId)?.authProbe,
+  const previous = (target: EndpointTarget, maxAgeMs?: number) => {
+    const row = stored.get(target.versionId);
+    const probe = storedAuthProbe(
+      row?.authProbe,
       target.endpointUrl,
       now,
+      maxAgeMs,
     );
+    return probe ? { ...probe, ...storedProbePieces(row) } : undefined;
+  };
+  for (const target of targets) {
+    const reused = previous(target);
     if (reused) probes.set(target.entry, reused);
     else pending.push(target);
   }
   let failed = 0;
   await eachConcurrently(pending, async (target) => {
     try {
-      probes.set(target.entry, {
-        result: await probeRegistryEndpoint(target.endpointUrl),
-        probedAt: now,
-      });
+      probes.set(
+        target.entry,
+        endpointProbeRecord(
+          await probeRegistryEndpoint(target.endpointUrl),
+          now,
+        ),
+      );
     } catch (error) {
       failed += 1;
+      const kept = previous(target, Number.POSITIVE_INFINITY);
+      if (kept) probes.set(target.entry, kept);
       logger.warn("Registry federation auth probe failed", {
         identifier: target.identifier,
+        keptStoredProbe: Boolean(kept),
         error: error instanceof Error ? error.message : String(error),
       });
     }
@@ -928,6 +1023,16 @@ async function ingestRegistryEntries(
           // The namespace domain's favicon fetch and when it was made, kept
           // so syncs reuse a hit and retry a miss only after 30 days.
           iconProbe: icon?.iconProbe,
+          // What the endpoint said about itself while being probed (Issue
+          // #367 W1), kept with the probe so it refreshes with it; validated
+          // when it both described itself and listed its tools.
+          selfDescription: authProbe?.selfDescription,
+          authMetadata: authProbe?.authMetadata,
+          serverCard: authProbe?.serverCard,
+          validatedAt:
+            authProbe?.selfDescription && toolsListing
+              ? toolsListing.listedAt.toISOString()
+              : undefined,
         },
       });
       counters.ingested += 1;

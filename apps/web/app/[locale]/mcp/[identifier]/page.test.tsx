@@ -591,6 +591,58 @@ describe("Lupa English search description experiment", () => {
   });
 });
 
+// Issue #367 W1: the endpoint's own documentation link, from the RFC 9728
+// protected-resource metadata federation kept in the version's provenance.
+// The facts panel (W4) shows it; the page lists it as one of the server's
+// addresses.
+describe("public MCP detail page documentation link", () => {
+  function withProvenance(provenanceJson: Record<string, unknown>) {
+    market.getPublicMcpManifest.mockResolvedValue(
+      getMarketMcpManifestResponseSchema.parse({
+        ...manifestResponse,
+        version: { ...manifestResponse.version, provenanceJson },
+      }),
+    );
+  }
+
+  it("links the documentation the server's auth metadata names, once", async () => {
+    withProvenance({
+      authProbe: { result: "oauth" },
+      authMetadata: {
+        resourceName: "Weather MCP",
+        resourceDocumentation: "https://docs.weather.example/mcp",
+      },
+    });
+    const html = await render();
+    const links = html.match(
+      /<a [^>]*href="https:\/\/docs\.weather\.example\/mcp"[^>]*>/g,
+    );
+    expect(links).toHaveLength(1);
+    expect(links![0]).toMatch(/rel="nofollow noopener noreferrer"/);
+    expect(links![0]).toMatch(/target="_blank"/);
+    expect(html).toMatch(/<dt[^>]*>Documentation<\/dt>/);
+    expect(html).toContain(
+      '"sameAs":["https://github.com/o/r","https://docs.weather.example/mcp"]',
+    );
+  });
+
+  it("shows no documentation link without one, or with one that is not a URL", async () => {
+    for (const provenanceJson of [
+      {},
+      { authMetadata: { resourceName: "Weather MCP" } },
+      { authMetadata: { resourceDocumentation: "not a url" } },
+      { authMetadata: { resourceDocumentation: "javascript:alert(1)" } },
+      { authMetadata: "https://docs.weather.example/mcp" },
+    ]) {
+      withProvenance(provenanceJson);
+      const html = await render();
+      expect(html).not.toMatch(/<dt[^>]*>Documentation<\/dt>/);
+      expect(html).not.toContain("docs.weather.example");
+      expect(html).not.toContain("alert(1)");
+    }
+  });
+});
+
 describe("public MCP detail page structured data", () => {
   function softwareApplication(html: string) {
     return [
