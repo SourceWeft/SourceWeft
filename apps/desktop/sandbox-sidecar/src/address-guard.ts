@@ -109,6 +109,34 @@ function stripZone(address: string): string {
 }
 
 /**
+ * Builds a `BlockList` from `own` (the host's own interface addresses) that matches not just
+ * each literal entry but also, for an IPv4 entry, its IPv4-mapped/compatible IPv6 forms (so a
+ * server bound to `0.0.0.0` on a host whose own address is `203.0.113.7` is still caught when
+ * reached as `::ffff:203.0.113.7` or its hex-group/compatible equivalents), and, for an IPv6
+ * entry, with any zone id stripped (an own address never carries one, but the host string
+ * being checked against it might, e.g. `fe80::1234%en0`). Built fresh per call: `own` is
+ * expected to hold at most a handful of interface addresses, so this is cheap, and it keeps
+ * this guard a pure function of its two arguments rather than caching across calls with
+ * mutable interface state.
+ */
+function buildOwnBlockList(own: ReadonlySet<string>): BlockList {
+  const blockList = new BlockList();
+  for (const raw of own) {
+    const normalized = normalizeHost(raw);
+    const family = isIP(normalized);
+    if (family === 4) {
+      addV4WithEmbedded(blockList, normalized, 32);
+    } else if (family === 6) {
+      addV6(blockList, stripZone(normalized), 128);
+    }
+    // An `own` entry that is not a literal IP is not expected (interface addresses always
+    // are); silently skip it rather than throw, since this guard must never itself crash the
+    // caller over a malformed entry it does not control.
+  }
+  return blockList;
+}
+
+/**
  * Normalizes `host` the same way for every check below: strip one pair of enclosing
  * brackets, lowercase, then strip trailing dot(s) (the absolute-DNS-name form — a resolver
  * treats `localhost.` and `127.0.0.1.` exactly like `localhost` and `127.0.0.1`). Case and
@@ -143,13 +171,8 @@ export function deniedReason(
   }
   const familyName = family === 4 ? "ipv4" : "ipv6";
 
-  // `own` holds plain addresses (no zone id); strip one from `host` before comparing so
-  // `fe80::1%en0` still matches an own address of `fe80::1`.
-  const compareAddress = family === 6 ? stripZone(normalized) : normalized;
-  for (const addr of own) {
-    if (addr.toLowerCase() === compareAddress) {
-      return `'${host}' is an address of the sandbox host's own network interfaces`;
-    }
+  if (buildOwnBlockList(own).check(normalized, familyName)) {
+    return `'${host}' is an address of the sandbox host's own network interfaces`;
   }
 
   for (const [blockList, reason] of DENIED_RANGES) {
