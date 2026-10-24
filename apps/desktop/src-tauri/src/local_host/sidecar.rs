@@ -13,7 +13,7 @@ use std::{
     path::Path,
     process::{Child, ChildStdin, Command, Stdio},
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc::{self, Receiver, RecvTimeoutError},
         Mutex,
     },
@@ -141,11 +141,25 @@ struct Connection {
 /// returns `Err(HostError { code: "SANDBOX_UNAVAILABLE", .. })` on I/O failure or on not
 /// hearing back within the configured timeout, and otherwise propagates the sidecar's own
 /// error code verbatim (mapped through `map_error_code`).
+///
+/// **Any `Err` with code `"SANDBOX_UNAVAILABLE"` means this `Sidecar` must be discarded.**
+/// A timed-out, disconnected, unparseable, or mismatched-id reply means the next line read
+/// from the sidecar's stdout is no longer guaranteed to be the reply to the next request —
+/// the request/reply pairing has desynchronized, possibly permanently (a late reply can still
+/// be sitting in the channel, waiting to be wrongly consumed by a future call). Rather than
+/// try to resynchronize, every such failure latches `poisoned`, and every later call on the
+/// same instance fails fast with `SANDBOX_UNAVAILABLE` without touching stdin/stdout at all.
+/// Callers (Task 6) must start a fresh `Sidecar` instead of reusing one that has failed this
+/// way.
 pub(crate) struct Sidecar {
     conn: Mutex<Connection>,
     child: Mutex<Child>,
     next_id: AtomicU64,
     timeout: Duration,
+    /// Set once any call desynchronizes the stdin/stdout framing (or otherwise proves the
+    /// sidecar unusable); see the type-level doc above. Checked, lock-free, at the top of
+    /// every `call()`.
+    poisoned: AtomicBool,
 }
 
 impl Sidecar {
@@ -214,6 +228,7 @@ impl Sidecar {
             child: Mutex::new(child),
             next_id: AtomicU64::new(0),
             timeout,
+            poisoned: AtomicBool::new(false),
         };
         let id = sidecar.allocate_id();
         sidecar.call(&id, &Request::Init { id: id.clone(), config: init })?;
@@ -290,60 +305,82 @@ impl Sidecar {
         self.next_id.fetch_add(1, Ordering::SeqCst).to_string()
     }
 
-    /// Sends one request and waits for its reply, holding the connection lock for the whole
-    /// round trip so at most one request is ever in flight per `Sidecar`.
-    fn call(&self, id: &str, request: &Request) -> Result<serde_json::Value> {
-        let mut conn = self.conn.lock().map_err(|_| {
-            HostError::new("SANDBOX_UNAVAILABLE", "sidecar connection lock was poisoned")
-        })?;
+    /// Marks this `Sidecar` permanently unusable and returns the `SANDBOX_UNAVAILABLE` error
+    /// to report for the call that discovered it. See the type-level doc comment.
+    fn poison(&self, message: impl Into<String>) -> HostError {
+        self.poisoned.store(true, Ordering::SeqCst);
+        HostError::new("SANDBOX_UNAVAILABLE", message)
+    }
 
-        let mut line = serde_json::to_string(request).map_err(|error| {
-            HostError::new(
+    /// Sends one request and waits for its reply, holding the connection lock for the whole
+    /// round trip so at most one request is ever in flight per `Sidecar`. Every failure that
+    /// could leave the stdin/stdout framing desynchronized poisons the instance (see the
+    /// type-level doc comment) before returning; a call made after that returns immediately,
+    /// without touching stdin/stdout.
+    fn call(&self, id: &str, request: &Request) -> Result<serde_json::Value> {
+        if self.poisoned.load(Ordering::SeqCst) {
+            return Err(HostError::new(
                 "SANDBOX_UNAVAILABLE",
-                format!("failed to encode sidecar request: {error}"),
-            )
-        })?;
+                "sidecar connection is desynchronized from a previous failure; this Sidecar must be discarded and a new one started",
+            ));
+        }
+
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|_| self.poison("sidecar connection lock was poisoned"))?;
+
+        let mut line = serde_json::to_string(request)
+            .map_err(|error| self.poison(format!("failed to encode sidecar request: {error}")))?;
         line.push('\n');
         conn.stdin
             .write_all(line.as_bytes())
             .and_then(|()| conn.stdin.flush())
-            .map_err(|error| {
-                HostError::new(
-                    "SANDBOX_UNAVAILABLE",
-                    format!("failed to write to sidecar: {error}"),
-                )
-            })?;
+            .map_err(|error| self.poison(format!("failed to write to sidecar: {error}")))?;
 
         let raw = conn.replies.recv_timeout(self.timeout).map_err(|error| {
             let reason = match error {
                 RecvTimeoutError::Timeout => "sidecar did not reply in time",
                 RecvTimeoutError::Disconnected => "sidecar exited without replying",
             };
-            HostError::new("SANDBOX_UNAVAILABLE", reason)
+            self.poison(reason)
         })?;
         drop(conn);
 
-        let response: Response = serde_json::from_str(&raw).map_err(|error| {
-            HostError::new(
-                "SANDBOX_UNAVAILABLE",
-                format!("invalid sidecar reply: {error}"),
-            )
-        })?;
+        let response: Response = serde_json::from_str(&raw)
+            .map_err(|error| self.poison(format!("invalid sidecar reply: {error}")))?;
         if response.id != id {
-            return Err(HostError::new(
-                "SANDBOX_UNAVAILABLE",
-                "sidecar reply id did not match the request",
-            ));
+            return Err(self.poison("sidecar reply id did not match the request"));
         }
         if response.ok {
             return Ok(response.result);
         }
         match response.error {
-            Some(error) => Err(HostError::new(map_error_code(&error.code), error.message)),
-            None => Err(HostError::new(
-                "SANDBOX_UNAVAILABLE",
-                "sidecar reported failure without an error body",
-            )),
+            Some(error) => {
+                let code = map_error_code(&error.code);
+                if code == "SANDBOX_UNAVAILABLE" {
+                    self.poisoned.store(true, Ordering::SeqCst);
+                }
+                Err(HostError::new(code, error.message))
+            }
+            None => Err(self.poison("sidecar reported failure without an error body")),
+        }
+    }
+}
+
+/// Polls `child` with `try_wait()` until it exits or `bound` elapses, sleeping briefly between
+/// polls. Returns `true` if the child was observed to exit, `false` if the bound ran out (or
+/// `try_wait()` itself errored) without that happening. Never calls the blocking `wait()`, so
+/// it can never hang past `bound`.
+fn wait_up_to(child: &mut Child, bound: Duration) -> bool {
+    let deadline = Instant::now() + bound;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return true,
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            _ => return false,
         }
     }
 }
@@ -361,18 +398,20 @@ impl Drop for Sidecar {
             }
         }
         if let Ok(mut child) = self.child.lock() {
-            let deadline = Instant::now() + Duration::from_secs(2);
-            loop {
-                match child.try_wait() {
-                    Ok(Some(_)) => return,
-                    Ok(None) if Instant::now() < deadline => {
-                        std::thread::sleep(Duration::from_millis(25));
-                    }
-                    _ => break,
-                }
+            // Give the sidecar up to 2s to exit on its own after `shutdown`.
+            if wait_up_to(&mut child, Duration::from_secs(2)) {
+                return;
             }
             let _ = child.kill();
-            let _ = child.wait();
+            // And up to 2 more seconds to actually die after SIGKILL. `wait()` itself can
+            // block forever on a process stuck in an uninterruptible kernel state, so this
+            // never escalates to a blocking wait — Drop must stay bounded no matter what.
+            if !wait_up_to(&mut child, Duration::from_secs(2)) {
+                eprintln!(
+                    "sourceweft-desktop: sandbox sidecar (pid {}) did not exit after SIGKILL; abandoning it",
+                    child.id()
+                );
+            }
         }
     }
 }
@@ -391,6 +430,12 @@ mod tests {
         let mut permissions = fs::metadata(&target).unwrap().permissions();
         permissions.set_mode(0o755);
         fs::set_permissions(&target, permissions).unwrap();
+        // Force the copy to disk before any test execs it. Under heavy parallel test load on
+        // an overlayfs-backed container filesystem, exec-ing a just-written file can transiently
+        // fail with ETXTBSY ("Text file busy") if the copy-up hasn't settled yet; an explicit
+        // fsync here (observed to close the race in practice) is cheap insurance against that,
+        // confined to this test helper rather than touching `Sidecar::start` itself.
+        fs::File::open(&target).unwrap().sync_all().unwrap();
         dir
     }
 
@@ -470,6 +515,34 @@ mod tests {
         assert!(
             started.elapsed() < Duration::from_secs(10),
             "expected the 3s sidecar timeout to fire well before the stub's 10s sleep ends"
+        );
+    }
+
+    #[test]
+    fn desynced_sidecar_fails_fast_on_second_call() {
+        let bundle = bundle_with_stub();
+        let sidecar =
+            Sidecar::start_with_timeout(bundle.path(), &test_init(), Duration::from_secs(3))
+                .unwrap();
+        let first = sidecar
+            .wrap(
+                "cmd-5",
+                "HANG",
+                Path::new("/tmp"),
+                Path::new("/tmp/sourceweft-sidecar-test-workspace"),
+            )
+            .unwrap_err();
+        assert_eq!(first.code, "SANDBOX_UNAVAILABLE");
+
+        // The stub never replied to "cmd-5"; any later call must not wait around for that
+        // stale reply (or any real reply at all) to decide this connection is unusable.
+        let started = Instant::now();
+        let second = sidecar.probe().unwrap_err();
+        assert_eq!(second.code, "SANDBOX_UNAVAILABLE");
+        assert!(
+            started.elapsed() < Duration::from_millis(500),
+            "expected a poisoned Sidecar to fail fast, not wait out another timeout: {:?}",
+            started.elapsed()
         );
     }
 
