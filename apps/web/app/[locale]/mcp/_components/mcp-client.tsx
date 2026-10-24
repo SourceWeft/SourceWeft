@@ -3,8 +3,12 @@
 import { useState } from "react";
 import { Check, Copy, CopyX } from "lucide-react";
 
+import type { MarketMcpIconSource } from "@sourceweft/market-sdk";
+
+import { useLogoImage } from "@/lib/use-logo-image";
 import { McpIcon as McpBrandIcon } from "../../../_components/site-icons";
 import { cn } from "@sourceweft/ui-web/lib/utils";
+import { mcpIconMonogram, safeMcpIconUrl } from "./mcp-icon-url";
 
 const iconSizeClassName = {
   sm: "size-9",
@@ -12,44 +16,74 @@ const iconSizeClassName = {
   lg: "size-16",
 } as const;
 
+const monogramClassName = {
+  sm: "text-base",
+  md: "text-lg",
+  lg: "text-2xl",
+} as const;
+
+/**
+ * A server's logo, or its placeholder: the first letter of `name` (a
+ * monogram), else the generic MCP glyph. The placeholder stays underneath
+ * until the image has loaded and takes over when there is no icon, when the
+ * URL is not one this page renders (see `safeMcpIconUrl`) or when the image
+ * fails to load, so a broken image is never shown, before hydration included.
+ */
 export function McpIcon({
+  iconSource,
   iconUrl,
+  name,
   size = "md",
   trusted,
 }: {
+  iconSource?: MarketMcpIconSource | null;
   iconUrl?: string | null;
+  name?: string | null;
   size?: keyof typeof iconSizeClassName;
   trusted: boolean;
 }) {
-  const [failed, setFailed] = useState(false);
-  const showImage = Boolean(iconUrl) && !failed;
+  const src = safeMcpIconUrl(iconUrl, iconSource);
+  const image = useLogoImage(src);
+  const loaded = image.status === "loaded";
+  const monogram = mcpIconMonogram(name);
   return (
     <span
       className={cn(
-        "flex shrink-0 items-center justify-center overflow-hidden rounded-xl",
+        "relative flex shrink-0 items-center justify-center overflow-hidden rounded-xl",
         iconSizeClassName[size],
-        showImage
-          ? "border border-zinc-200 bg-white p-1.5 dark:border-white/10"
+        loaded
+          ? "border border-zinc-200 bg-white dark:border-white/10"
           : trusted
             ? "bg-zinc-950 text-white dark:bg-white dark:text-zinc-950"
             : "bg-amber-600 text-white",
       )}
     >
-      {showImage ? (
+      {loaded ? null : monogram ? (
+        <span
+          aria-hidden="true"
+          className={cn("font-semibold leading-none", monogramClassName[size])}
+          data-mcp-icon-monogram=""
+        >
+          {monogram}
+        </span>
+      ) : (
+        <McpBrandIcon className={size === "lg" ? "size-7" : "size-5"} />
+      )}
+      {src && image.status !== "failed" ? (
         // Registry icons come from arbitrary https hosts, so Next Image's
         // static remote-host allowlist does not apply.
         // eslint-disable-next-line @next/next/no-img-element
         <img
+          key={src}
           alt=""
-          className="size-full object-contain"
+          className="absolute inset-1.5 size-auto max-h-full object-contain"
+          decoding="async"
           loading="lazy"
-          onError={() => setFailed(true)}
           referrerPolicy="no-referrer"
-          src={iconUrl!}
+          src={src}
+          {...image.imageProps}
         />
-      ) : (
-        <McpBrandIcon className={size === "lg" ? "size-7" : "size-5"} />
-      )}
+      ) : null}
     </span>
   );
 }
