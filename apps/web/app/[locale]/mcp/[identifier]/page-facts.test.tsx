@@ -180,23 +180,41 @@ describe("public MCP detail page facts panel (com.notion/mcp)", () => {
     expect(panel).toContain(enMessages.mcp.facts.lead);
     expect(fact(panel!, "publisher")).toContain("notion.com");
     expect(fact(panel!, "endpoint")).toContain("mcp.notion.com");
-    expect(fact(panel!, "transport")).toContain("Streamable HTTP");
-    expect(fact(panel!, "auth")).toContain(">OAuth<");
-    expect(fact(panel!, "auth")).toContain(
-      enMessages.mcp.authMethod.explain.oauth,
-    );
-    // No tools listed: no tool count row rather than "0 tools".
-    expect(fact(panel!, "tools")).toBeUndefined();
+    // Transport, auth and the tool count are in the top card and the badges:
+    // the panel does not say them twice.
+    for (const key of ["transport", "auth", "tools"]) {
+      expect(fact(panel!, key)).toBeUndefined();
+    }
     expect(fact(panel!, "documentation")).toMatch(
       /<a [^>]*href="https:\/\/developers\.notion\.com\/docs\/mcp"[^>]*rel="nofollow noopener noreferrer"[^>]*target="_blank"[^>]*>developers\.notion\.com/,
     );
-    expect(fact(panel!, "homepage")).toContain('href="https://www.notion.com"');
+    // The homepage and repository links are in the top card too.
+    expect(fact(panel!, "homepage")).toBeUndefined();
     expect(fact(panel!, "repository")).toBeUndefined();
+    // No probe in the fixture, so no probe date.
+    expect(fact(panel!, "probed")).toBeUndefined();
     // The 26-character description adds nothing beside the hero summary.
     expect(html).not.toContain("divide-y");
   });
 
-  it("counts the tools once the server lists them, and leaves out links it does not declare", async () => {
+  it("shows when the endpoint was last probed", async () => {
+    market.getPublicMcpManifest.mockResolvedValue({
+      ...notion,
+      version: {
+        ...notion.version,
+        provenanceJson: {
+          ...notion.version.provenanceJson,
+          authProbe: { result: "oauth", probedAt: "2026-10-20T08:00:00.000Z" },
+        },
+      },
+    });
+    const panel = factsPanel(await render())!;
+    expect(fact(panel, "probed")).toMatch(
+      /<time datetime="2026-10-20T08:00:00\.000Z">Oct 20, 2026<\/time>/i,
+    );
+  });
+
+  it("names the tool count in the sentence once the server lists them, and leaves out links it does not declare", async () => {
     market.getPublicMcpManifest.mockResolvedValue({
       ...notion,
       manifest: {
@@ -213,9 +231,8 @@ describe("public MCP detail page facts panel (com.notion/mcp)", () => {
     });
     const panel = factsPanel(await render())!;
     expect(panel).toContain("Streamable HTTP; 24 tools.");
-    expect(fact(panel, "tools")).toContain("24 tools");
+    expect(fact(panel, "tools")).toBeUndefined();
     expect(fact(panel, "documentation")).toBeUndefined();
-    expect(fact(panel, "homepage")).toBeUndefined();
   });
 
   it("does without the publisher until the entry has one", async () => {

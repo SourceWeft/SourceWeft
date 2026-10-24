@@ -73,6 +73,41 @@ test("classifyByText keyword-classifies plain text and pins explicit slugs", () 
   assert.deepEqual(classifyByText("zzz qqq"), ["other"]);
 });
 
+test("classifyByText files nothing from a text too thin to place a server", () => {
+  // A name and a word or two: the Notion-like registry entry.
+  assert.deepEqual(classifyByText("Notion MCP Server (Hosted)"), ["other"]);
+  assert.deepEqual(classifyByText("Postgres"), ["other"]);
+  assert.deepEqual(classifyByText(""), ["other"]);
+  // Explicit categories survive however thin the text.
+  assert.deepEqual(classifyByText("Postgres", ["databases"]), ["databases"]);
+});
+
+test("classifyByText needs a specific keyword or two different generic ones", () => {
+  // One generic word ("server", "search", "file") is not evidence.
+  assert.deepEqual(classifyByText("A friendly server for our team to use"), [
+    "other",
+  ]);
+  assert.deepEqual(classifyByText("Search for things that you might want"), [
+    "other",
+  ]);
+  assert.deepEqual(classifyByText("Search search search and search again"), [
+    "other",
+  ]);
+  // Two different generic words are.
+  const documents = classifyByText("Read and write a file in a folder on disk");
+  assert.equal(documents[0], "files-storage");
+  // A specific name is enough on its own.
+  assert.equal(
+    classifyByText("Query your Postgres instance from the assistant")[0],
+    "databases",
+  );
+  assert.ok(
+    classifyByText("Control Playwright from the assistant with ease").includes(
+      "browser-automation",
+    ),
+  );
+});
+
 test("filters source market slugs out of canonical categories", () => {
   assert.equal(normalizeMcpCategorySlug("mcp-so"), undefined);
   assert.equal(normalizeMcpCategorySlug("mcpservers"), undefined);

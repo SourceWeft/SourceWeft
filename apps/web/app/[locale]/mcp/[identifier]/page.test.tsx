@@ -353,20 +353,26 @@ describe("public MCP detail page product group", () => {
       "tools",
       "integrations",
     ]);
-    expect(html).toMatch(
-      /href="#integrations"[^>]*>Notion integrations \(3\)</,
-    );
+    // No count: the market loaded part of the group, not a known total.
+    expect(html).toMatch(/href="#integrations"[^>]*>Notion integrations</);
     const section = integrationsSection(html)!;
     expect(section).toMatch(/<h2[^>]*>Other Notion integrations<\/h2>/);
-    expect(section).toMatch(/<span[^>]*>3<\/span>/);
+    expect(section).not.toMatch(/<span[^>]*>\d+<\/span>/);
     // The cards are the shared card grid (mocked here), fed every member but
-    // this page's own server, in the order the market gave them.
+    // this page's own server, the product's own first. Five show at first,
+    // the rest behind "Show more", and no card repeats the verification badge.
     const grid = vi.mocked(
       (await import("../_components/mcp-display")).McpCardGrid,
     );
     const call = grid.mock.calls.at(-1)![0] as {
+      hideVerification?: boolean;
+      initialCount?: number;
       items: { identifier: string }[];
+      showMoreLabel?: string;
     };
+    expect(call.initialCount).toBe(5);
+    expect(call.showMoreLabel).toBe("Show more");
+    expect(call.hideVerification).toBe(true);
     expect(call.items.map((entry) => entry.identifier)).toEqual([
       OFFICIAL,
       "io.github.a/better-notion",
@@ -383,7 +389,31 @@ describe("public MCP detail page product group", () => {
     );
   });
 
-  it("shows no pointer on the publisher's own page, and the section counts the rest", async () => {
+  it("puts the product's own server first whatever the market's order", async () => {
+    withDetail({
+      ...group,
+      members: [
+        member("io.github.a/better-notion", "Better Notion"),
+        member(IDENTIFIER, "Weather"),
+        member(OFFICIAL, "Notion", { publisherMatch: true }),
+        member("io.github.b/notion-mcp", "Notion Mcp"),
+      ],
+    });
+    await render();
+    const grid = vi.mocked(
+      (await import("../_components/mcp-display")).McpCardGrid,
+    );
+    const call = grid.mock.calls.at(-1)![0] as {
+      items: { identifier: string }[];
+    };
+    expect(call.items.map((entry) => entry.identifier)).toEqual([
+      OFFICIAL,
+      "io.github.a/better-notion",
+      "io.github.b/notion-mcp",
+    ]);
+  });
+
+  it("shows no pointer on the publisher's own page, and the section does not count the rest", async () => {
     market.getPublicMcpManifest.mockResolvedValue(
       getMarketMcpManifestResponseSchema.parse({
         ...manifestResponse,
@@ -408,10 +438,8 @@ describe("public MCP detail page product group", () => {
     });
     const html = renderToStaticMarkup(element);
     expect(html).not.toContain("data-official-pointer");
-    expect(html).toMatch(
-      /href="#integrations"[^>]*>Notion integrations \(3\)</,
-    );
-    expect(integrationsSection(html)).toMatch(/<span[^>]*>3<\/span>/);
+    expect(html).toMatch(/href="#integrations"[^>]*>Notion integrations</);
+    expect(integrationsSection(html)).not.toMatch(/<span[^>]*>\d+<\/span>/);
   });
 
   it("shows nothing of a group with no other member, or without a group", async () => {
@@ -437,9 +465,7 @@ describe("public MCP detail page product group", () => {
     });
     const html = await render();
     expect(html).toContain(`data-official-pointer="${OFFICIAL}"`);
-    expect(html).toMatch(
-      /href="#integrations"[^>]*>Notion integrations \(1\)</,
-    );
+    expect(html).toMatch(/href="#integrations"[^>]*>Notion integrations</);
   });
 
   it("writes the brand as a heading word", () => {
@@ -481,10 +507,54 @@ describe("public MCP detail page publisher", () => {
     );
   });
 
-  it("says nothing about a publisher for a GitHub-namespace server", async () => {
+  // An io.github.* namespace names a GitHub account the registry checked,
+  // not the product's maker: a neutral label, never "Official publisher".
+  it("labels a GitHub-namespace server with its GitHub account, neutrally", async () => {
     const html = await render();
-    expect(html).not.toContain("Published by");
+    expect(html).toContain(
+      '<span data-github-account="o">Published by GitHub account o</span>',
+    );
     expect(html).not.toContain("data-publisher-domain");
+    expect(html).not.toContain("Official publisher");
+  });
+
+  it("marks only a domain publisher that also runs the endpoint as official", async () => {
+    const publisherPage = (endpointMatch: boolean, patch = {}) => {
+      market.getPublicMcpManifest.mockResolvedValue(
+        getMarketMcpManifestResponseSchema.parse({
+          ...manifestResponse,
+          item: {
+            ...manifestResponse.item,
+            identifier: "com.notion/mcp",
+            publisher: {
+              domain: "notion.com",
+              source: "registry-namespace",
+              endpointMatch,
+            },
+            ...patch,
+          },
+        }),
+      );
+      return render();
+    };
+    expect(await publisherPage(true)).toContain("data-official-publisher");
+    expect(await publisherPage(false)).not.toContain(
+      "data-official-publisher",
+    );
+  });
+
+  it("does not make a claimed third-party GitHub listing official", async () => {
+    market.getPublicMcpManifest.mockResolvedValue(
+      getMarketMcpManifestResponseSchema.parse({
+        ...manifestResponse,
+        item: { ...manifestResponse.item, claimed: true },
+      }),
+    );
+    const html = await render();
+    expect(html).toContain("Claimed by owner");
+    expect(html).toContain("Published by GitHub account o");
+    expect(html).not.toContain("Official publisher");
+    expect(html).not.toContain("data-official-publisher");
   });
 });
 
@@ -586,8 +656,60 @@ describe("public MCP detail page security note", () => {
   it("keeps its heading on its own line above its text", async () => {
     const html = await render();
     expect(html).toMatch(
-      /<div class="(?:[^"]* )?flex(?: [^"]*)?"><svg[\s\S]*?<\/svg>Security note<\/div><p>MCP servers receive tool arguments/,
+      /<div class="(?:[^"]* )?flex(?: [^"]*)?"><svg[\s\S]*?<\/svg>Security note<\/div><div class="space-y-2"><p>MCP servers receive tool/,
     );
+  });
+
+  function securityNote(html: string) {
+    return /Security note<\/div>([\s\S]*?)<\/section>/
+      .exec(html)![1]!
+      .replaceAll("&#x27;", "'");
+  }
+
+  it("says where the publisher claim comes from and never calls a listing safe", async () => {
+    // A GitHub-namespace listing: a checked account, not a verified maker.
+    const github = securityNote(await render());
+    expect(github).toContain("verified the GitHub account o for this listing");
+    expect(github).toContain("does not show the account is the product");
+    // A domain publisher that runs the endpoint.
+    const withPublisher = (endpointMatch: boolean) => {
+      market.getPublicMcpManifest.mockResolvedValue(
+        getMarketMcpManifestResponseSchema.parse({
+          ...manifestResponse,
+          item: {
+            ...manifestResponse.item,
+            identifier: "com.notion/mcp",
+            publisher: {
+              domain: "notion.com",
+              source: "registry-namespace",
+              endpointMatch,
+            },
+            verified: true,
+          },
+        }),
+      );
+      return render();
+    };
+    const matched = securityNote(await withPublisher(true));
+    expect(matched).toContain("namespace belongs to notion.com");
+    expect(matched).toContain("does not make the server's tools safe");
+    const mismatched = securityNote(await withPublisher(false));
+    expect(mismatched).toContain("endpoint is not on that domain");
+    // No domain, no GitHub namespace: nothing was verified.
+    market.getPublicMcpManifest.mockResolvedValue(
+      getMarketMcpManifestResponseSchema.parse({
+        ...manifestResponse,
+        item: { ...manifestResponse.item, identifier: "someone/else" },
+      }),
+    );
+    expect(securityNote(await render())).toContain(
+      "has not verified who publishes this server",
+    );
+    for (const note of [github, matched, mismatched]) {
+      expect(note).not.toContain("is safe");
+      expect(note).not.toContain("Unverified listings are allowed");
+      expect(note).toContain("do not review the server's code");
+    }
   });
 });
 
@@ -839,21 +961,24 @@ describe("public MCP detail page Score section", () => {
   type ScoreItem = {
     key: string;
     weight: number;
+    applicable: boolean;
     required: boolean;
     met: boolean;
   };
   const ITEMS: Array<[string, number, boolean]> = [
-    ["reachable", 20, true],
+    ["reachable", 25, true],
     ["authDeclared", 10, true],
     ["hasTools", 15, false],
-    ["hasDescription", 10, true],
-    ["hasLogo", 8, false],
-    ["hasDocs", 10, false],
-    ["hasLicense", 7, false],
-    ["officialPublisher", 10, false],
-    ["claimed", 10, false],
+    ["hasDescription", 15, true],
+    ["hasLogo", 10, false],
+    ["hasDocs", 15, false],
+    ["hasLicense", 10, false],
   ];
-  function score(grade: "A" | "B" | "F", met: string[]): {
+  function score(
+    grade: "A" | "B" | "F",
+    met: string[],
+    notApplicable: string[] = [],
+  ): {
     grade: "A" | "B" | "F";
     percentage: number;
     items: ScoreItem[];
@@ -861,16 +986,22 @@ describe("public MCP detail page Score section", () => {
     const items = ITEMS.map(([key, weight, required]) => ({
       key,
       weight,
+      applicable: !notApplicable.includes(key),
       required,
       met: met.includes(key),
     }));
+    const applicable = items.reduce(
+      (sum, item) => sum + (item.applicable ? item.weight : 0),
+      0,
+    );
+    const earned = items.reduce(
+      (sum, item) => sum + (item.met ? item.weight : 0),
+      0,
+    );
     return {
       grade,
       items,
-      percentage: items.reduce(
-        (sum, item) => sum + (item.met ? item.weight : 0),
-        0,
-      ),
+      percentage: Math.round((earned / applicable) * 100),
     };
   }
   function scoreSection(html: string) {
@@ -882,7 +1013,7 @@ describe("public MCP detail page Score section", () => {
     ).exec(section)?.[0];
   }
 
-  it("shows an A grade with every item met and no hints, after the versions", async () => {
+  it("shows the percentage and a checklist with every item met and no hints, after the versions", async () => {
     market.getPublicMcpDetail.mockResolvedValue({
       readme: null,
       score: score("A", [
@@ -918,25 +1049,37 @@ describe("public MCP detail page Score section", () => {
     );
     const section = scoreSection(html)!;
     expect(section).toMatch(/<h2[^>]*>Score<\/h2>/);
-    expect(section).toContain('data-score-grade="A"');
-    expect(section).toMatch(/aria-label="Grade A"[^>]*>A</);
-    expect(section).toContain("80% of the listing checks met");
-    expect(section).toContain("Complete listing");
-    // Nine rows; the two unmet ones carry their hint, the met ones none.
-    expect([...section.matchAll(/data-score-item="/g)]).toHaveLength(9);
+    expect(section).toContain("100% of the applicable checks met");
+    // Seven rows, all met, so none carries a hint.
+    expect([...section.matchAll(/data-score-item="/g)]).toHaveLength(7);
     expect([...section.matchAll(/data-score-met="true"/g)]).toHaveLength(7);
-    expect(itemRow(section, "reachable")).toContain("Reachable");
+    expect(itemRow(section, "reachable")).toContain("Reached in the last 30 days");
     expect(itemRow(section, "reachable")).toContain("Required");
-    expect(itemRow(section, "reachable")).toContain("20 pts");
+    expect(itemRow(section, "reachable")).toContain("25 pts");
     expect(itemRow(section, "reachable")).not.toContain("SourceWeft probes");
-    expect(itemRow(section, "officialPublisher")).toContain(
-      "Publish under a domain namespace",
-    );
-    expect(itemRow(section, "claimed")).toContain("Met once a verified owner claims the server");
     expect(itemRow(section, "hasLogo")).not.toContain("Required");
+    // Identity is a badge, not a point.
+    expect(section).not.toContain("Official publisher");
+    expect(section).not.toContain("Claimed by owner");
   });
 
-  it("shows a B grade with the unmet items' hints", async () => {
+  it("shows no letter grade and no text derived from one", async () => {
+    for (const grade of ["A", "B", "F"] as const) {
+      market.getPublicMcpDetail.mockResolvedValue({
+        readme: null,
+        score: score(grade, ["reachable", "authDeclared", "hasDescription"]),
+        versions: [],
+      });
+      const section = scoreSection(await render())!;
+      expect(section).not.toContain("data-score-grade");
+      expect(section).not.toMatch(/aria-label="Grade/);
+      expect(section).not.toMatch(
+        /Complete listing|Good listing|Incomplete listing/,
+      );
+    }
+  });
+
+  it("shows the unmet items' hints", async () => {
     market.getPublicMcpDetail.mockResolvedValue({
       readme: null,
       score: score("B", [
@@ -944,14 +1087,11 @@ describe("public MCP detail page Score section", () => {
         "authDeclared",
         "hasDescription",
         "hasDocs",
-        "officialPublisher",
       ]),
       versions: [],
     });
     const section = scoreSection(await render())!;
-    expect(section).toContain('data-score-grade="B"');
-    expect(section).toContain("60% of the listing checks met");
-    expect(section).toContain("Good listing");
+    expect(section).toContain("65% of the applicable checks met");
     expect(itemRow(section, "hasTools")).toContain(
       "Answer tools/list without a credential",
     );
@@ -960,25 +1100,247 @@ describe("public MCP detail page Score section", () => {
     expect(itemRow(section, "hasDocs")).not.toContain("README");
   });
 
-  it("shows an F grade with the failed required item marked", async () => {
+  it("marks the failed required item", async () => {
     market.getPublicMcpDetail.mockResolvedValue({
       readme: null,
-      score: score("F", ["reachable", "authDeclared", "hasLogo", "officialPublisher"]),
+      score: score("F", ["reachable", "authDeclared", "hasLogo"]),
       versions: [],
     });
     const section = scoreSection(await render())!;
-    expect(section).toContain('data-score-grade="F"');
-    expect(section).toContain("48% of the listing checks met");
-    expect(section).toContain("Incomplete listing");
+    expect(section).toContain("45% of the applicable checks met");
     const description = itemRow(section, "hasDescription")!;
     expect(description).toContain('data-score-met="false"');
     expect(description).toContain("Required");
     expect(description).toContain("at least 40 characters");
   });
 
+  it("leaves an item that does not apply out of the percentage and says so", async () => {
+    market.getPublicMcpDetail.mockResolvedValue({
+      readme: null,
+      score: score(
+        "B",
+        ["reachable", "authDeclared", "hasDescription", "hasLogo"],
+        ["hasLicense"],
+      ),
+      versions: [],
+    });
+    const section = scoreSection(await render())!;
+    // 60 of the 90 that apply.
+    expect(section).toContain("67% of the applicable checks met");
+    const license = itemRow(section, "hasLicense")!;
+    expect(license).toContain('data-score-applicable="false"');
+    expect(license).toContain("Not applicable");
+    expect(license).toContain("no license is expected here");
+    expect(license).not.toContain("10 pts");
+    expect(license).not.toContain("Declare a license");
+  });
+
   it("shows no Score section when the market has no score", async () => {
     const html = await render();
     expect(scoreSection(html)).toBeUndefined();
     expect(navLabels(html)).not.toContain("score");
+  });
+});
+
+// Issue #367 A1: what the top card says about tools, license and language.
+describe("public MCP detail page top card", () => {
+  function topCard(html: string) {
+    return /<dl class="grid grid-cols-2[\s\S]*?<\/dl>/.exec(html)![0];
+  }
+  function use(patch: {
+    item?: Record<string, unknown>;
+    manifest?: Record<string, unknown>;
+    provenanceJson?: Record<string, unknown>;
+    score?: unknown;
+  }) {
+    market.getPublicMcpManifest.mockResolvedValue(
+      getMarketMcpManifestResponseSchema.parse({
+        ...manifestResponse,
+        item: { ...manifestResponse.item, ...patch.item },
+        manifest: { ...manifestResponse.manifest, ...patch.manifest },
+        version: {
+          ...manifestResponse.version,
+          provenanceJson: patch.provenanceJson ?? {},
+        },
+      }),
+    );
+    market.getPublicMcpDetail.mockResolvedValue({
+      readme: null,
+      score: patch.score,
+      versions: [],
+    });
+  }
+
+  it("never says 0 tools for a server that asks for credentials", async () => {
+    use({
+      manifest: { tools: [] },
+      provenanceJson: { authProbe: { result: "oauth" } },
+    });
+    const card = topCard(await render());
+    expect(card).toContain("Sign-in required");
+    expect(card).toContain("could not read its tools anonymously");
+    // Signing in is not promised to reveal them.
+    expect(card).toContain("may show tools");
+    expect(card).not.toMatch(/<dd[^>]*>0<\/dd>/);
+  });
+
+  it("separates tools not indexed, read and empty, not validated and failed", async () => {
+    use({ manifest: { tools: [] }, provenanceJson: { authProbe: { result: "open" } } });
+    expect(topCard(await render())).toContain("Not indexed yet");
+    use({
+      manifest: { tools: [] },
+      provenanceJson: {
+        authProbe: { result: "open" },
+        toolsListing: { listedAt: "2026-10-20T00:00:00.000Z", toolsCount: 0 },
+      },
+    });
+    expect(topCard(await render())).toContain("No tools");
+    use({ manifest: { tools: [], transport: "stdio" } });
+    expect(topCard(await render())).toContain("Not validated yet");
+    use({
+      manifest: { tools: [], transport: "stdio" },
+      item: {
+        toolsValidation: {
+          at: "2026-10-20T00:00:00.000Z",
+          reason: "start",
+          status: "failed",
+        },
+      },
+    });
+    const failed = topCard(await render());
+    expect(failed).toContain("Not validated · the server did not start");
+    expect(failed).toContain("the server did not start");
+  });
+
+  it("shows the tool count when there are tools", async () => {
+    use({});
+    expect(topCard(await render())).toMatch(/<dt[^>]*>Tools<\/dt><dd[^>]*>1<\/dd>/);
+  });
+
+  it("hides an unknown license and language instead of printing Unknown", async () => {
+    use({});
+    const card = topCard(await render());
+    expect(card).not.toContain("License");
+    expect(card).not.toContain("Language");
+    expect(card).not.toContain("Unknown");
+    use({ item: { language: "TypeScript", license: "MIT" } });
+    const known = topCard(await render());
+    expect(known).toMatch(/<dt[^>]*>License<\/dt><dd[^>]*>MIT<\/dd>/);
+    expect(known).toMatch(/<dt[^>]*>Language<\/dt><dd[^>]*>TypeScript<\/dd>/);
+  });
+
+  it("calls a hosted-only service a hosted service, without license or language rows", async () => {
+    use({
+      item: { language: "TypeScript", license: "MIT" },
+      score: {
+        grade: "B",
+        percentage: 67,
+        items: [
+          { key: "hasLicense", weight: 10, applicable: false, required: false, met: false },
+        ],
+      },
+    });
+    const card = topCard(await render());
+    expect(card).toMatch(/<dt[^>]*>Delivery<\/dt><dd[^>]*>Hosted service<\/dd>/);
+    expect(card).not.toContain("License");
+    expect(card).not.toContain("Language");
+  });
+});
+
+// Issue #367 A1: "More servers like X".
+describe("public MCP detail page related servers", () => {
+  function candidate(identifier: string, name: string, summary: string) {
+    return {
+      ...manifestResponse.item,
+      categories: ["x"],
+      identifier,
+      name,
+      summary,
+    };
+  }
+  const withCategory = () =>
+    market.getPublicMcpManifest.mockResolvedValue(
+      getMarketMcpManifestResponseSchema.parse({
+        ...manifestResponse,
+        item: {
+          ...manifestResponse.item,
+          categories: ["x"],
+          summary: "Forecasts for any city, with hourly weather detail.",
+        },
+      }),
+    );
+
+  it("keeps servers that share meaningful words, and drops those sharing only generic ones", async () => {
+    withCategory();
+    market.listPublicMcp.mockResolvedValue({
+      items: [
+        candidate("a/storm", "Storm", "Hourly weather detail for every city"),
+        candidate("a/db", "Postgres MCP Server", "Cloud API tools for databases"),
+      ],
+    });
+    const html = await render();
+    const grid = vi.mocked(
+      (await import("../_components/mcp-display")).McpCardGrid,
+    );
+    const call = grid.mock.calls.at(-1)![0] as {
+      items: { identifier: string }[];
+    };
+    expect(call.items.map((entry) => entry.identifier)).toEqual(["a/storm"]);
+    expect(html).toContain("More servers like Weather");
+  });
+
+  it("has no related section when nothing shares meaningful words", async () => {
+    withCategory();
+    market.listPublicMcp.mockResolvedValue({
+      items: [candidate("a/db", "Postgres MCP Server", "Cloud API tools")],
+    });
+    const html = await render();
+    expect(html).not.toContain("More servers like");
+    expect(navLabels(html)).not.toContain("related");
+  });
+
+  it("drops the section, and the query, when the integrations section is shown", async () => {
+    withCategory();
+    market.getPublicMcpDetail.mockResolvedValue({
+      readme: null,
+      relatedProduct: {
+        domain: "weather.example",
+        brand: "weather",
+        officialIdentifier: "com.weather/mcp",
+        members: [
+          { ...manifestResponse.item, identifier: "com.weather/mcp", name: "Weather" },
+          { ...manifestResponse.item, identifier: IDENTIFIER, name: "Weather" },
+          { ...manifestResponse.item, identifier: "io.github.b/weather-two", name: "Weather Two" },
+        ],
+      },
+      versions: [],
+    });
+    market.listPublicMcp.mockResolvedValue({
+      items: [
+        candidate("a/storm", "Storm", "Hourly weather detail for every city"),
+      ],
+    });
+    const html = await render();
+    expect(html).toContain('id="integrations"');
+    expect(html).not.toContain("More servers like");
+    expect(market.listPublicMcp).not.toHaveBeenCalled();
+  });
+});
+
+// Issue #367 A1: no primary category is guessed.
+describe("public MCP detail page primary category", () => {
+  it("leads the breadcrumb with a real category and not with 'other'", async () => {
+    const withCategories = (categories: string[]) =>
+      market.getPublicMcpManifest.mockResolvedValue(
+        getMarketMcpManifestResponseSchema.parse({
+          ...manifestResponse,
+          item: { ...manifestResponse.item, categories },
+        }),
+      );
+    withCategories(["databases"]);
+    expect(await render()).toContain("/mcp?category=databases");
+    withCategories(["other"]);
+    const html = await render();
+    expect(html).not.toContain("category=other");
   });
 });

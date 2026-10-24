@@ -115,4 +115,36 @@ describe("McpToolRows", () => {
     for (const label of labels) expect(html).toContain(label);
     expect(html).not.toContain("Parameters");
   });
+
+  async function empty(status: Parameters<typeof McpToolRows>[0]["status"]) {
+    state.locale = "en";
+    return renderToStaticMarkup(
+      (await resolveServerTree(
+        await McpToolRows({ status, tools: [] }),
+      )) as ReactElement,
+    );
+  }
+
+  // An empty list is never "no tools" unless the server was read and listed none.
+  it("explains an empty list by why it is empty", async () => {
+    const authRequired = await empty({ kind: "authRequired" });
+    expect(authRequired).toContain('data-tools-status="authRequired"');
+    expect(authRequired).toContain("could not read its tools anonymously");
+    expect(authRequired).toContain("may show tools");
+    expect(authRequired).not.toMatch(/\bno tools\b/i);
+    expect(await empty({ kind: "unindexed" })).toContain(
+      "has not read this server&#x27;s tools yet",
+    );
+    expect(await empty({ kind: "notValidated" })).toContain(
+      "has not started this package",
+    );
+    expect(await empty({ kind: "empty" })).toContain("lists no tools");
+    const failed = await empty({ kind: "failed", reason: "timeout" });
+    expect(failed).toContain('data-tools-validation="timeout"');
+    expect(failed).toContain("the server did not answer in time");
+  });
+
+  it("falls back to 'not read yet' without a status", async () => {
+    expect(await empty(undefined)).toContain('data-tools-status="unindexed"');
+  });
 });
