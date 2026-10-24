@@ -3,6 +3,7 @@ import { test, vi } from "vitest";
 import { db } from "@sourceweft/db";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { sql, type SQL } from "drizzle-orm";
+import { findBrandPublisherDomains } from "./grouping/query";
 import {
   decodeListCursor,
   encodeListCursor,
@@ -13,7 +14,16 @@ import {
   itemIcon,
   listMcp,
   parseMcpCategoryFilter,
+  publisherEndpointMatchRank,
+  publisherRankOf,
 } from "./read-repository";
+
+// A search asks the grouping module which publisher domains are the queried
+// brand's; the tests of the ranking SQL name them.
+vi.mock("./grouping/query", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./grouping/query")>()),
+  findBrandPublisherDomains: vi.fn().mockResolvedValue([]),
+}));
 
 for (const code of ["ECONNREFUSED", "ETIMEDOUT", "08006", "57P01", "XX000"]) {
   test(`public catalog reads propagate database errors (${code})`, async () => {
@@ -150,6 +160,72 @@ test("issue #367: a search ranks servers whose publisher runs the endpoint first
   }
 });
 
+test("issue #367: among endpoint-matched servers, the queried brand's own domain ranks first", async () => {
+  vi.mocked(findBrandPublisherDomains).mockResolvedValueOnce([
+    "notion.com",
+    "notion.so",
+  ]);
+  const limit = vi.fn().mockResolvedValue([]);
+  const orderBy = vi.fn().mockReturnValue({ limit });
+  const where = vi.fn().mockReturnValue({ orderBy });
+  const select = vi.spyOn(db, "select").mockReturnValue({
+    from: () => ({ where }),
+  } as unknown as ReturnType<typeof db.select>);
+  try {
+    await listMcp({ query: " Notion " });
+    assert.equal(
+      vi.mocked(findBrandPublisherDomains).mock.calls.at(-1)?.[0],
+      "notion",
+    );
+    const [rankKey] = orderBy.mock.calls[0] as SQL[];
+    const ranked = new PgDialect().sqlToQuery(rankKey!);
+    assert.match(
+      ranked.sql,
+      /^\(case when "mcp_servers"\."metadata_json" #>> '\{publisher,endpointMatch\}' = 'true' then \(case when "mcp_servers"\."metadata_json" #>> '\{publisher,domain\}' in \(\$1, \$2\) then 2 else 1 end\) else 0 end\) desc$/,
+    );
+    // The domains are parameters, never part of the SQL text.
+    assert.deepEqual(ranked.params, ["notion.com", "notion.so"]);
+    assert.ok(!ranked.sql.includes("notion"));
+  } finally {
+    select.mockRestore();
+  }
+  const plain = new PgDialect().sqlToQuery(publisherEndpointMatchRank());
+  assert.match(plain.sql, /then 1 else 0 end\)$/);
+  assert.deepEqual(plain.params, []);
+});
+
+test("issue #367: the cursor's rank is the one the SQL gives the row", () => {
+  const official = {
+    publisher: {
+      domain: "notion.com",
+      source: "registry-namespace",
+      endpointMatch: true,
+    },
+  };
+  const hosted = {
+    publisher: {
+      domain: "notion.com",
+      source: "registry-namespace",
+      endpointMatch: false,
+    },
+  };
+  assert.equal(publisherRankOf(official, ["notion.com"]), 2);
+  assert.equal(publisherRankOf(official, []), 1);
+  assert.equal(publisherRankOf(official, ["notion.so"]), 1);
+  assert.equal(publisherRankOf(hosted, ["notion.com"]), 0);
+  assert.equal(publisherRankOf({}, ["notion.com"]), 0);
+  assert.equal(publisherRankOf(null, []), 0);
+  const publishedAt = new Date("2026-10-24T00:00:00.000Z");
+  assert.deepEqual(
+    decodeListCursor(encodeListCursor(2, publishedAt, "mcp-1")),
+    {
+      endpointMatch: 2,
+      publishedAt,
+      id: "mcp-1",
+    },
+  );
+});
+
 test("issue #367: the list cursor carries the rank key and still reads the older two-part form", () => {
   const publishedAt = new Date("2026-10-24T00:00:00.000Z");
   const ranked = encodeListCursor(1, publishedAt, "mcp-1");
@@ -172,7 +248,7 @@ test("issue #367: the list cursor carries the rank key and still reads the older
     id: "mcp-3",
   });
   for (const bad of [
-    Buffer.from("2|1|mcp").toString("base64url"),
+    Buffer.from("3|1|mcp").toString("base64url"),
     Buffer.from("1|1|").toString("base64url"),
     Buffer.from("1|x|mcp").toString("base64url"),
     Buffer.from("1|1|mcp|extra").toString("base64url"),

@@ -77,9 +77,7 @@ export function visibleOwnerOverrides<T extends McpOwnerOverridesSource>(
 }
 
 /** A stored row as the SQL joins it in: with who holds a verified claim. */
-export type RawOwnerOverrides = McpOwnerOverridesSource & {
-  verifiedUsers?: readonly string[] | null;
-};
+export type RawOwnerOverrides = McpOwnerOverridesSource;
 
 /**
  * A raw row filtered to what shows. Fails closed: with no verified members

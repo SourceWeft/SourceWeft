@@ -60,6 +60,44 @@ describe("mcpTemplateDescription", () => {
     );
   });
 
+  it("drops a trailing MCP / MCP Server from the name in the lead sentence", () => {
+    const github: McpTemplateFacts = {
+      ...notion,
+      name: "GitHub MCP Server",
+      publisherDomain: "github.com",
+      endpointHost: "api.githubcopilot.com",
+    };
+    expect(mcpTemplateDescription(github, translator("en"))).toBe(
+      "GitHub's hosted MCP server (api.githubcopilot.com), published by github.com; OAuth sign-in required; Streamable HTTP.",
+    );
+    expect(mcpTemplateDescription(github, translator("zh-CN"))).toContain(
+      "GitHub 的托管 MCP 服务",
+    );
+    expect(mcpTemplateDescription(github, translator("zh-TW"))).toContain(
+      "GitHub 的託管 MCP 服務",
+    );
+    const en = translator("en");
+    for (const name of [
+      "Linear MCP",
+      "Linear mcp server",
+      "Linear - MCP Server",
+    ]) {
+      expect(mcpTemplateDescription({ ...notion, name }, en)).toMatch(
+        /^Linear's hosted MCP server /,
+      );
+    }
+    // Only a trailing suffix: a name that merely contains it is kept.
+    for (const name of ["MCP Hub", "Notion MCP Tools", "NotionMCP"]) {
+      expect(mcpTemplateDescription({ ...notion, name }, en)).toMatch(
+        new RegExp(`^${name}'s hosted MCP server `),
+      );
+    }
+    // A name that is only the suffix stays as it is.
+    expect(
+      mcpTemplateDescription({ ...notion, name: "MCP Server" }, en),
+    ).toMatch(/^MCP Server's hosted MCP server /);
+  });
+
   it("leaves out what is not known: publisher, host, transport, tools", () => {
     const t = translator("en");
     expect(

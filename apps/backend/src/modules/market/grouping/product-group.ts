@@ -43,11 +43,22 @@ export const MIN_BRAND_LENGTH = 4;
 /**
  * Registrable labels that name no product. A namespace like `ai.mcp` or
  * `cloud.tools` would otherwise group every server whose slug says "mcp".
+ *
+ * Policy: a word belongs here when it is an ordinary English word, a
+ * category of software, or a platform name that no single company owns, and
+ * is at least `MIN_BRAND_LENGTH` long (shorter labels never key a group
+ * anyway, so "pro" and "hub" below only guard against a later change of that
+ * rule). A real brand that is also a dictionary word ("linear", "notion",
+ * "slack") stays off the list: its group is keyed by the publisher running
+ * its endpoint, which these generic labels do not prove. Add words when a
+ * group forms around a generic label; never remove a word to make one form.
  */
 export const BRAND_STOP_LIST: ReadonlySet<string> = new Set([
   "mcp",
   "server",
   "servers",
+  "client",
+  "clients",
   "api",
   "apis",
   "tool",
@@ -59,12 +70,14 @@ export const BRAND_STOP_LIST: ReadonlySet<string> = new Set([
   "agents",
   "labs",
   "data",
+  "database",
   "open",
   "code",
   "web",
   "service",
   "services",
   "platform",
+  "platforms",
   "connect",
   "online",
   "github",
@@ -72,7 +85,36 @@ export const BRAND_STOP_LIST: ReadonlySet<string> = new Set([
   "remote",
   "local",
   "test",
+  "tests",
   "example",
+  "examples",
+  "docs",
+  "notes",
+  "office",
+  "time",
+  "file",
+  "files",
+  "sync",
+  "search",
+  "chat",
+  "mail",
+  "email",
+  "task",
+  "tasks",
+  "link",
+  "links",
+  "page",
+  "pages",
+  "base",
+  "bots",
+  "studio",
+  "hub",
+  "pro",
+  "hosting",
+  "image",
+  "images",
+  "video",
+  "audio",
 ]);
 
 /**

@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { afterEach, test, vi } from "vitest";
 import { db } from "@sourceweft/db";
 import {
+  brandTokenPattern,
+  findBrandPublisherDomains,
   findOfficialProductEntries,
   forgetOfficialProductEntries,
   OFFICIAL_ENTRIES_TTL_MS,
@@ -78,4 +80,54 @@ test("a failed read is not remembered", async () => {
   const entries = await findOfficialProductEntries(2);
   assert.equal(entries.length, 1);
   assert.equal(select.mock.calls.length, 1);
+});
+
+test("the brand's pattern is built from letters and digits, either case, with token boundaries", () => {
+  assert.equal(brandTokenPattern(["note"]).includes("[nN][oO][tT][eE]"), true);
+  assert.equal(
+    brandTokenPattern(["claw", "link"]).includes(
+      "[cC][lL][aA][wW][^[:alnum:]]*[lL][iI][nN][kK]",
+    ),
+    true,
+  );
+  // Digits are kept; anything else is escaped, never live regex syntax.
+  assert.equal(brandTokenPattern(["web3"]).includes("[wW][eE][bB]3"), true);
+  assert.equal(brandTokenPattern(["a.b"]).includes("[aA]\\.[bB]"), true);
+});
+
+test("brand search domains are the official servers' domains whose brand is the query", async () => {
+  stubSelect([
+    officialRow,
+    {
+      ...officialRow,
+      id: "id-2",
+      identifier: "so.notion/other",
+      metadataJson: {
+        publisher: {
+          domain: "mcp.notion.so",
+          source: "registry-namespace",
+          endpointMatch: true,
+        },
+      },
+    },
+    {
+      ...officialRow,
+      id: "id-3",
+      identifier: "com.slack/mcp",
+      metadataJson: {
+        publisher: {
+          domain: "slack.com",
+          source: "registry-namespace",
+          endpointMatch: true,
+        },
+      },
+    },
+  ]);
+  assert.deepEqual(await findBrandPublisherDomains(" Notion "), [
+    "notion.com",
+    "mcp.notion.so",
+  ]);
+  assert.deepEqual(await findBrandPublisherDomains("slack"), ["slack.com"]);
+  assert.deepEqual(await findBrandPublisherDomains("notio"), []);
+  assert.deepEqual(await findBrandPublisherDomains("  "), []);
 });

@@ -763,6 +763,204 @@ describe("MCP catalog on the mcp_* tables", () => {
     ).toBeNull();
   });
 
+  // A brand that is a common substring (`note`): the candidate scan must find
+  // its members by whole token, however many newer servers merely contain the
+  // letters, and must not let those push a second official server or older
+  // members out of the group.
+  test("issue #367: a group is found by whole token, not by the newest 200 substring matches", async () => {
+    const federated = {
+      status: "published" as const,
+      visibility: "public" as const,
+      origin: "upstream" as const,
+      source: "registry.test",
+    };
+    const publisher = (endpointMatch: boolean) => ({
+      domain: "note.com",
+      source: "registry-namespace" as const,
+      endpointMatch,
+    });
+    const official = manifest("note-official", {
+      identifier: "com.note/mcp",
+      name: "Note",
+      summary: "Official Note MCP server",
+      endpointUrl: "https://mcp.note.com/mcp",
+      repoUrl: undefined,
+      sourceUrl: undefined,
+      publisher: publisher(true),
+    });
+    const secondOfficial = manifest("note-second", {
+      identifier: "com.note/hosted",
+      name: "Note Hosted",
+      endpointUrl: "https://hosted.note.com/mcp",
+      repoUrl: undefined,
+      sourceUrl: undefined,
+      publisher: publisher(true),
+    });
+    const members = [
+      ["io.github.a/note-taker", "Note Taker"],
+      ["io.github.b/better-note", "Better Note"],
+      ["io.github.c/x", "NoteMCP"],
+      ["io.github.d/x", "My Note-Sync"],
+    ].map(([identifier, name]) =>
+      manifest(identifier!.split("/")[0]!.slice(10), {
+        identifier: identifier!,
+        name: name!,
+        repoUrl: `https://github.com/${identifier!.split("/")[0]!.slice(10)}/x`,
+        sourceUrl: `https://github.com/${identifier!.split("/")[0]!.slice(10)}/x`,
+      }),
+    );
+    for (const entry of [official, secondOfficial, ...members]) {
+      await ingest.upsertMarketMcp({ ...federated, manifest: entry });
+    }
+    // The real members are the oldest rows; the decoys carry the letters
+    // inside longer words and are all newer, twice the candidate cap.
+    const old = [official, secondOfficial, ...members];
+    for (const [index, entry] of old.entries()) {
+      await data.db
+        .update(data.mcpServers)
+        .set({ publishedAt: new Date(Date.UTC(2020, 0, 1 + index)) })
+        .where(eq(data.mcpServers.identifier, entry.identifier));
+    }
+    const decoyNames = ["Footnote", "Notebook", "Denote", "Notepad", "Notes"];
+    await data.db.insert(data.mcpServers).values(
+      Array.from(
+        { length: grouping.PRODUCT_GROUP_CANDIDATE_LIMIT * 2 },
+        (_, index) => ({
+          id: randomUUID(),
+          identifier: `io.github.decoy${index}/${decoyNames[index % 5]!.toLowerCase()}-${index}`,
+          name: `${decoyNames[index % 5]} ${index}`,
+          status: "published" as const,
+          visibility: "public" as const,
+          publishedAt: new Date(Date.UTC(2026, 0, 1, 0, 0, index)),
+        }),
+      ),
+    );
+    grouping.forgetOfficialProductEntries();
+
+    const expected = [
+      official.identifier,
+      secondOfficial.identifier,
+      // Newest first among the integrations.
+      members[3]!.identifier,
+      members[2]!.identifier,
+      members[1]!.identifier,
+      members[0]!.identifier,
+    ];
+    const detail = async (identifier: string) => {
+      const response = await app.request(
+        `/v1/mcp/${encodeURIComponent(identifier)}`,
+      );
+      expect(response.status).toBe(200);
+      return (await response.json()) as {
+        relatedProduct: { members: { identifier: string }[] } | null;
+      };
+    };
+    // The oldest member's page shows every member, the official ones first.
+    const page = await detail(members[0]!.identifier);
+    expect(
+      page.relatedProduct?.members.map((member) => member.identifier),
+    ).toEqual(expected);
+    expect(
+      (await detail(official.identifier)).relatedProduct?.members.map(
+        (member) => member.identifier,
+      ),
+    ).toEqual(expected);
+    // Decoys belong to no group.
+    expect((await detail("io.github.decoy0/footnote-0")).relatedProduct).toBe(
+      null,
+    );
+
+    // The scan pages through candidates in display order: small pages give
+    // the same members as one big page.
+    const [row] = await data.db
+      .select()
+      .from(data.mcpServers)
+      .where(eq(data.mcpServers.identifier, members[0]!.identifier));
+    const paged = await grouping.findProductGroupMembers(row!, { pageSize: 2 });
+    expect(paged?.rows.map((member) => member.identifier)).toEqual(expected);
+    const candidates = await grouping.findProductGroupCandidateRows(
+      paged!.group,
+    );
+    // Only the whole-token matches and the group's own servers are candidates.
+    expect(candidates.map((candidate) => candidate.identifier)).toEqual(
+      expected,
+    );
+  });
+
+  // Issue #367: two servers whose publishers run their endpoints both match
+  // a brand search; the one under the brand's own domain comes first, however
+  // the publication dates fall.
+  test("issue #367: a brand search ranks the brand's own server above other endpoint-matched servers", async () => {
+    const federated = {
+      status: "published" as const,
+      visibility: "public" as const,
+      origin: "upstream" as const,
+      source: "registry.test",
+    };
+    const brand = `${tag}ranky`;
+    const own = manifest(`${brand}-own`, {
+      identifier: `com.${brand}/mcp`,
+      name: `${brand} Official`,
+      endpointUrl: `https://mcp.${brand}.com/mcp`,
+      publisher: {
+        domain: `${brand}.com`,
+        source: "registry-namespace",
+        endpointMatch: true,
+      },
+    });
+    const rival = manifest(`${brand}-rival`, {
+      identifier: `com.rival${tag}/${brand}-bridge`,
+      name: `${brand} Bridge`,
+      endpointUrl: `https://mcp.rival${tag}.com/mcp`,
+      publisher: {
+        domain: `rival${tag}.com`,
+        source: "registry-namespace",
+        endpointMatch: true,
+      },
+    });
+    const community = manifest(`${brand}-community`, {
+      identifier: `io.github.${tag}/${brand}-community`,
+    });
+    for (const entry of [own, rival, community]) {
+      await ingest.upsertMarketMcp({ ...federated, manifest: entry });
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    grouping.forgetOfficialProductEntries();
+
+    const identifiers = async (query: string) => {
+      const response = await app.request(`/v1/mcp?${query}`);
+      expect(response.status).toBe(200);
+      return (await response.json()) as {
+        items: { identifier: string }[];
+        nextCursor: string | null;
+      };
+    };
+    const list = await identifiers(`query=${brand}`);
+    // Published later, the rival would lead on publication order alone.
+    expect(list.items.map((item) => item.identifier)).toEqual([
+      own.identifier,
+      rival.identifier,
+      community.identifier,
+    ]);
+    // The cursor continues through the same ranks.
+    const first = await identifiers(`query=${brand}&limit=1`);
+    expect(first.items.map((item) => item.identifier)).toEqual([
+      own.identifier,
+    ]);
+    const second = await identifiers(
+      `query=${brand}&limit=1&cursor=${encodeURIComponent(first.nextCursor!)}`,
+    );
+    expect(second.items.map((item) => item.identifier)).toEqual([
+      rival.identifier,
+    ]);
+    const third = await identifiers(
+      `query=${brand}&limit=1&cursor=${encodeURIComponent(second.nextCursor!)}`,
+    );
+    expect(third.items.map((item) => item.identifier)).toEqual([
+      community.identifier,
+    ]);
+  });
+
   test("a flagged submission waits for review, then publishes", async () => {
     const risky = manifest("risky");
     state.parse.mockResolvedValue({
