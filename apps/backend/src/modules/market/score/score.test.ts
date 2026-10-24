@@ -376,6 +376,24 @@ test("officialPublisher: the publisher's endpoint match, strictly true", () => {
       .met,
     false,
   );
+  assert.equal(
+    item(
+      remote({}, {}, {
+        publisher: { domain: "example.com", source: "registry-namespace", endpointMatch: true },
+      }),
+      "officialPublisher",
+    ).met,
+    true,
+    "the publisher the catalog resolved",
+  );
+  assert.equal(
+    item(
+      remote({ publisher: { domain: "example.com", endpointMatch: true } }, {}, { publisher: null }),
+      "officialPublisher",
+    ).met,
+    true,
+    "a null resolved publisher falls back to the manifest's",
+  );
   assert.equal(item(remote(), "officialPublisher").met, false);
   assert.equal(item(remote(), "officialPublisher").required, false);
 });

@@ -818,6 +818,7 @@ export async function findMcp(
             hasAiOverview: aiOverview !== null,
             iconUrl: item.iconUrl,
             iconSource: item.iconSource,
+            publisher: item.publisher,
           })
         : null,
     };

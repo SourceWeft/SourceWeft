@@ -474,7 +474,7 @@
         },
         "officialPublisher": {
           "label": "官方發布者",
-          "hint": "請使用與端點主機名符合的域名名稱空間（例如 com.example）發布。"
+          "hint": "請使用與端點主機名符合的網域名稱空間（例如 com.example）發布。"
         },
         "claimed": {
           "label": "擁有者已認領",

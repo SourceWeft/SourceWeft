@@ -45,6 +45,8 @@ export type McpScoreSource = {
   iconUrl?: string | null;
   /** Where that icon came from (the summary's `iconSource`, W3). */
   iconSource?: string | null;
+  /** The entry's domain publisher as the catalog resolved it (the summary's `publisher`, W2). */
+  publisher?: unknown;
   /** The owner claimed the entry and the claim was verified (W7). */
   claimed?: boolean;
   /** When the score is computed; freshness is measured from here. */
@@ -198,7 +200,7 @@ export function mcpScoreFacts(source: McpScoreSource): McpScoreFacts {
   const provenance = record(source.provenanceJson) ?? {};
   const auth = record(manifest.auth);
   const authProbe = record(provenance.authProbe);
-  const publisher = record(manifest.publisher);
+  const publisher = record(source.publisher) ?? record(manifest.publisher);
   const authMetadata = record(provenance.authMetadata);
   const githubRegistry = record(provenance.githubRegistry);
   const tools = Array.isArray(manifest.tools) ? manifest.tools : [];
