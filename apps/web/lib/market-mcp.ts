@@ -10,6 +10,7 @@ import {
   type MarketMcpAiOverview,
   type MarketMcpLocale,
   type MarketMcpReadme,
+  type MarketMcpScore,
   type MarketCategoryCountsResponse,
   type ListMarketCategoriesResponse,
   type ListMarketMcpRequest,
@@ -123,6 +124,9 @@ export type PublicMcpDetail = {
   // False when the page stays out of search (`noindex, follow`); true when
   // the market says nothing or cannot be read, so an outage never deindexes.
   searchIndexable: boolean;
+  // The latest version's quality scorecard (Issue #367, W6); null when the
+  // market has none or cannot be read, and the page shows no Score section.
+  score: MarketMcpScore | null;
 };
 
 // A hidden or regenerated overview shows within about two minutes: this
@@ -140,6 +144,7 @@ const cachedMcpDetail = unstable_cache(
       aiOverview: detail.aiOverview ?? null,
       overviewLocales: detail.item.overviewLocales ?? [],
       readme: readMcpReadme(detail),
+      score: detail.score ?? null,
       searchIndexable: detail.searchIndexable ?? true,
       versions: detail.versions,
     };
@@ -164,6 +169,7 @@ export async function getPublicMcpDetail(
       aiOverview: null,
       overviewLocales: [],
       readme: null,
+      score: null,
       searchIndexable: true,
       versions: [],
     };

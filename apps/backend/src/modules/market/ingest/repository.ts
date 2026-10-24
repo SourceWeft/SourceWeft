@@ -158,6 +158,12 @@ export type StoredEndpointProbes = {
   toolsListing?: unknown;
   /** `manifestJson.tools`, the listing's tools. */
   tools?: unknown;
+  /** What the probe kept of the endpoint's own `initialize` answer (W1). */
+  selfDescription?: unknown;
+  /** The 401 path's protected-resource metadata human fields (W1). */
+  authMetadata?: unknown;
+  /** The origin's server card (W1). */
+  serverCard?: unknown;
 };
 
 /**
@@ -177,6 +183,9 @@ export async function findStoredEndpointProbes(
       toolsListing: sql<unknown>`${mcpServerVersions.provenanceJson} -> 'toolsListing'`,
       // Only versions with a listing carry tools worth reading back.
       tools: sql<unknown>`case when ${mcpServerVersions.provenanceJson} ? 'toolsListing' then ${mcpServerVersions.manifestJson} -> 'tools' end`,
+      selfDescription: sql<unknown>`${mcpServerVersions.provenanceJson} -> 'selfDescription'`,
+      authMetadata: sql<unknown>`${mcpServerVersions.provenanceJson} -> 'authMetadata'`,
+      serverCard: sql<unknown>`${mcpServerVersions.provenanceJson} -> 'serverCard'`,
     })
     .from(mcpServerVersions)
     .where(inArray(mcpServerVersions.id, versionIds));
@@ -191,6 +200,9 @@ export async function findStoredEndpointProbes(
                 authProbe: row.authProbe ?? undefined,
                 toolsListing: row.toolsListing ?? undefined,
                 tools: row.tools ?? undefined,
+                selfDescription: row.selfDescription ?? undefined,
+                authMetadata: row.authMetadata ?? undefined,
+                serverCard: row.serverCard ?? undefined,
               },
             ] as const,
           ],

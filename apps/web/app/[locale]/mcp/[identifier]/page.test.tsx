@@ -591,6 +591,58 @@ describe("Lupa English search description experiment", () => {
   });
 });
 
+// Issue #367 W1: the endpoint's own documentation link, from the RFC 9728
+// protected-resource metadata federation kept in the version's provenance.
+// The facts panel (W4) shows it; the page lists it as one of the server's
+// addresses.
+describe("public MCP detail page documentation link", () => {
+  function withProvenance(provenanceJson: Record<string, unknown>) {
+    market.getPublicMcpManifest.mockResolvedValue(
+      getMarketMcpManifestResponseSchema.parse({
+        ...manifestResponse,
+        version: { ...manifestResponse.version, provenanceJson },
+      }),
+    );
+  }
+
+  it("links the documentation the server's auth metadata names, once", async () => {
+    withProvenance({
+      authProbe: { result: "oauth" },
+      authMetadata: {
+        resourceName: "Weather MCP",
+        resourceDocumentation: "https://docs.weather.example/mcp",
+      },
+    });
+    const html = await render();
+    const links = html.match(
+      /<a [^>]*href="https:\/\/docs\.weather\.example\/mcp"[^>]*>/g,
+    );
+    expect(links).toHaveLength(1);
+    expect(links![0]).toMatch(/rel="nofollow noopener noreferrer"/);
+    expect(links![0]).toMatch(/target="_blank"/);
+    expect(html).toMatch(/<dt[^>]*>Documentation<\/dt>/);
+    expect(html).toContain(
+      '"sameAs":["https://github.com/o/r","https://docs.weather.example/mcp"]',
+    );
+  });
+
+  it("shows no documentation link without one, or with one that is not a URL", async () => {
+    for (const provenanceJson of [
+      {},
+      { authMetadata: { resourceName: "Weather MCP" } },
+      { authMetadata: { resourceDocumentation: "not a url" } },
+      { authMetadata: { resourceDocumentation: "javascript:alert(1)" } },
+      { authMetadata: "https://docs.weather.example/mcp" },
+    ]) {
+      withProvenance(provenanceJson);
+      const html = await render();
+      expect(html).not.toMatch(/<dt[^>]*>Documentation<\/dt>/);
+      expect(html).not.toContain("docs.weather.example");
+      expect(html).not.toContain("alert(1)");
+    }
+  });
+});
+
 describe("public MCP detail page structured data", () => {
   function softwareApplication(html: string) {
     return [
@@ -629,5 +681,153 @@ describe("public MCP detail page structured data", () => {
     expect(softwareApplication(await render())).not.toHaveProperty(
       "featureList",
     );
+  });
+});
+
+describe("public MCP detail page Score section", () => {
+  type ScoreItem = {
+    key: string;
+    weight: number;
+    required: boolean;
+    met: boolean;
+  };
+  const ITEMS: Array<[string, number, boolean]> = [
+    ["reachable", 20, true],
+    ["authDeclared", 10, true],
+    ["hasTools", 15, false],
+    ["hasDescription", 10, true],
+    ["hasLogo", 8, false],
+    ["hasDocs", 10, false],
+    ["hasLicense", 7, false],
+    ["officialPublisher", 10, false],
+    ["claimed", 10, false],
+  ];
+  function score(grade: "A" | "B" | "F", met: string[]): {
+    grade: "A" | "B" | "F";
+    percentage: number;
+    items: ScoreItem[];
+  } {
+    const items = ITEMS.map(([key, weight, required]) => ({
+      key,
+      weight,
+      required,
+      met: met.includes(key),
+    }));
+    return {
+      grade,
+      items,
+      percentage: items.reduce(
+        (sum, item) => sum + (item.met ? item.weight : 0),
+        0,
+      ),
+    };
+  }
+  function scoreSection(html: string) {
+    return /<section[^>]*id="score"[^>]*>([\s\S]*?)<\/section>/.exec(html)?.[1];
+  }
+  function itemRow(section: string, key: string) {
+    return new RegExp(
+      `<li[^>]*data-score-item="${key}"[^>]*>[\\s\\S]*?</li>`,
+    ).exec(section)?.[0];
+  }
+
+  it("shows an A grade with every item met and no hints, after the versions", async () => {
+    market.getPublicMcpDetail.mockResolvedValue({
+      readme: null,
+      score: score("A", [
+        "reachable",
+        "authDeclared",
+        "hasTools",
+        "hasDescription",
+        "hasLogo",
+        "hasDocs",
+        "hasLicense",
+      ]),
+      versions: [
+        {
+          manifestJson: {},
+          provenanceJson: {},
+          publishedAt: null,
+          status: "published",
+          version: "1.0.0",
+        },
+      ],
+    });
+    const html = await render();
+    expect(navLabels(html)).toEqual([
+      "overview",
+      "installation",
+      "tools",
+      "versions",
+      "score",
+    ]);
+    expect(html).toMatch(/href="#score"[^>]*>Score</);
+    expect(html.indexOf('id="versions"')).toBeLessThan(
+      html.indexOf('id="score"'),
+    );
+    const section = scoreSection(html)!;
+    expect(section).toMatch(/<h2[^>]*>Score<\/h2>/);
+    expect(section).toContain('data-score-grade="A"');
+    expect(section).toMatch(/aria-label="Grade A"[^>]*>A</);
+    expect(section).toContain("80% of the listing checks met");
+    expect(section).toContain("Complete listing");
+    // Nine rows; the two unmet ones carry their hint, the met ones none.
+    expect([...section.matchAll(/data-score-item="/g)]).toHaveLength(9);
+    expect([...section.matchAll(/data-score-met="true"/g)]).toHaveLength(7);
+    expect(itemRow(section, "reachable")).toContain("Reachable");
+    expect(itemRow(section, "reachable")).toContain("Required");
+    expect(itemRow(section, "reachable")).toContain("20 pts");
+    expect(itemRow(section, "reachable")).not.toContain("SourceWeft probes");
+    expect(itemRow(section, "officialPublisher")).toContain(
+      "Publish under a domain namespace",
+    );
+    expect(itemRow(section, "claimed")).toContain("Owner claims are not open yet");
+    expect(itemRow(section, "hasLogo")).not.toContain("Required");
+  });
+
+  it("shows a B grade with the unmet items' hints", async () => {
+    market.getPublicMcpDetail.mockResolvedValue({
+      readme: null,
+      score: score("B", [
+        "reachable",
+        "authDeclared",
+        "hasDescription",
+        "hasDocs",
+        "officialPublisher",
+      ]),
+      versions: [],
+    });
+    const section = scoreSection(await render())!;
+    expect(section).toContain('data-score-grade="B"');
+    expect(section).toContain("60% of the listing checks met");
+    expect(section).toContain("Good listing");
+    expect(itemRow(section, "hasTools")).toContain(
+      "Answer tools/list without a credential",
+    );
+    expect(itemRow(section, "hasLogo")).toContain("Publish an icon");
+    expect(itemRow(section, "hasLicense")).toContain("Declare a license");
+    expect(itemRow(section, "hasDocs")).not.toContain("README");
+  });
+
+  it("shows an F grade with the failed required item marked", async () => {
+    market.getPublicMcpDetail.mockResolvedValue({
+      readme: null,
+      score: score("F", ["reachable", "authDeclared", "hasLogo", "officialPublisher"]),
+      versions: [],
+    });
+    const section = scoreSection(await render())!;
+    expect(section).toContain('data-score-grade="F"');
+    expect(section).toContain("48% of the listing checks met");
+    expect(section).toContain("Incomplete listing");
+    const description = itemRow(section, "hasDescription")!;
+    expect(description).toContain('data-score-met="false"');
+    expect(description).toContain("Required");
+    expect(description).toContain("at least 40 characters");
+  });
+
+  it("shows no Score section when the market has no score", async () => {
+    const html = await render();
+    expect(scoreSection(html)).toBeUndefined();
+    expect(navLabels(html)).not.toContain("score");
   });
 });

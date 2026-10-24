@@ -13,14 +13,47 @@ import type { AddressInfo } from "node:net";
  * OAuth side has protected-resource and authorization-server metadata, dynamic
  * client registration and an authorization-code + PKCE (S256) grant whose
  * "sign-in" is one Allow button; a `Bearer <API_KEY>` is accepted as well.
- * It also serves a one-entry registry (`/v0/servers`) for federation, and
- * `/_e2e/requests` lists which credential each MCP request carried.
+ * Its protected-resource metadata names a `resource_documentation` page, so
+ * the catalog's documentation link can be checked (Issue #367 W1).
+ *
+ * A second, open MCP server at `/open/mcp` answers anyone's `initialize` and
+ * `tools/list` (with a session id and over SSE, as the TypeScript SDK's
+ * Streamable HTTP transport does), so the catalog's tool list and
+ * self-description from the federation probe can be checked too.
+ *
+ * It also serves a two-entry registry (`/v0/servers`) for federation, a server
+ * card at `/.well-known/mcp/server-card.json`, and `/_e2e/requests` lists
+ * which credential each request to the OAuth-or-key server carried.
  *
  * Run from `apps/backend`: `pnpm exec tsx scripts/mock-oauth-mcp-server-e2e.ts`.
  * Prints `{"origin": ...}` once listening. Never use outside a test.
  */
 export const MOCK_REGISTRY_NAME = "io.github.sourceweft-e2e/mock-oauth-or-key";
+export const MOCK_OPEN_REGISTRY_NAME = "io.github.sourceweft-e2e/mock-open";
 export const MOCK_API_KEY = "mock_sk_live_e2e";
+export const MOCK_DOCUMENTATION_URL = "https://docs.example.com/mock-mcp";
+export const MOCK_OPEN_TOOLS = [
+  {
+    name: "search_notes",
+    title: "Search notes",
+    description: "Finds notes whose text matches a query.",
+    inputSchema: {
+      type: "object",
+      properties: { query: { type: "string" } },
+      required: ["query"],
+    },
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: "delete_note",
+    description: "Deletes a note by id.",
+    inputSchema: {
+      type: "object",
+      properties: { id: { type: "string" } },
+      required: ["id"],
+    },
+  },
+];
 
 type Credential = "none" | "api_key" | "oauth" | "invalid";
 const requests: Array<{ method: string; credential: Credential }> = [];
@@ -41,8 +74,15 @@ const server = createServer((request, reply) => {
 await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
 const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 const endpoint = `${origin}/mcp`;
+const openEndpoint = `${origin}/open/mcp`;
 const metadataUrl = `${origin}/.well-known/oauth-protected-resource/mcp`;
 console.log(JSON.stringify({ origin }));
+
+/** A JSON-RPC message framed as one SSE event, the stream then closed. */
+function sse(reply: ServerResponse, body: unknown, headers = {}) {
+  reply.writeHead(200, { "content-type": "text/event-stream", ...headers });
+  reply.end(`event: message\ndata: ${JSON.stringify(body)}\n\n`);
+}
 
 function json(
   reply: ServerResponse,
@@ -112,8 +152,20 @@ async function handle(request: IncomingMessage, reply: ServerResponse) {
             "io.modelcontextprotocol.registry/official": { isLatest: true },
           },
         },
+        {
+          server: {
+            name: MOCK_OPEN_REGISTRY_NAME,
+            title: "Mock open MCP (e2e)",
+            description: "Answers anyone, no credential needed.",
+            version: "1.0.0",
+            remotes: [{ type: "streamable-http", url: openEndpoint }],
+          },
+          _meta: {
+            "io.modelcontextprotocol.registry/official": { isLatest: true },
+          },
+        },
       ],
-      metadata: { count: 1 },
+      metadata: { count: 2 },
     });
   }
 
@@ -123,7 +175,73 @@ async function handle(request: IncomingMessage, reply: ServerResponse) {
     return json(reply, 200, {
       resource: endpoint,
       authorization_servers: [origin],
+      resource_name: "Mock OAuth-or-key MCP",
+      resource_documentation: MOCK_DOCUMENTATION_URL,
     });
+  }
+  if (url.pathname === "/.well-known/mcp/server-card.json") {
+    return json(reply, 200, {
+      serverInfo: { name: "mock-open", version: "1.0.0" },
+      protocolVersion: "2025-06-18",
+      capabilities: { tools: {} },
+    });
+  }
+
+  if (url.pathname === "/open/mcp") {
+    if (request.method === "DELETE") {
+      reply.writeHead(200).end();
+      return;
+    }
+    if (request.method !== "POST") {
+      reply.writeHead(405).end();
+      return;
+    }
+    const message = JSON.parse(await readBody(request)) as {
+      id?: number | string;
+      method?: string;
+    };
+    if (message.id === undefined) {
+      reply.writeHead(202).end();
+      return;
+    }
+    const session = { "mcp-session-id": "mock-open-session" };
+    if (message.method === "initialize") {
+      return sse(
+        reply,
+        {
+          jsonrpc: "2.0",
+          id: message.id,
+          result: {
+            protocolVersion: "2025-06-18",
+            capabilities: { tools: { listChanged: false } },
+            serverInfo: {
+              name: "mock-open",
+              title: "Mock open MCP",
+              version: "1.0.0",
+              websiteUrl: "https://example.com/mock-open",
+            },
+            instructions: "Search before you delete.",
+          },
+        },
+        session,
+      );
+    }
+    if (message.method === "tools/list") {
+      return sse(
+        reply,
+        { jsonrpc: "2.0", id: message.id, result: { tools: MOCK_OPEN_TOOLS } },
+        session,
+      );
+    }
+    return sse(
+      reply,
+      {
+        jsonrpc: "2.0",
+        id: message.id,
+        error: { code: -32601, message: "Method not found" },
+      },
+      session,
+    );
   }
   if (url.pathname === "/.well-known/oauth-authorization-server") {
     return json(reply, 200, {
