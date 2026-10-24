@@ -1,3 +1,4 @@
+use super::readiness::ReadinessCache;
 use super::{HostError, Result};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::Serialize;
@@ -26,6 +27,11 @@ pub struct LocalHost {
     // Widened from private so `readiness.rs` can locate the sandbox bundle directly under the
     // app-data base, without a single-purpose accessor method.
     pub(super) base: PathBuf,
+    // Caches `sandbox_readiness()`'s result; see `ReadinessCache`'s own doc comment in
+    // readiness.rs for the policy. Present on every platform (not just Linux, which is the
+    // only platform that currently reads it) so the struct's shape does not depend on target
+    // OS.
+    pub(super) sandbox_readiness_cache: Mutex<ReadinessCache>,
 }
 
 impl LocalHost {
@@ -134,6 +140,7 @@ impl LocalHost {
                 db: Mutex::new(connection),
                 binary_reads: Mutex::new(std::collections::HashMap::new()),
                 base,
+                sandbox_readiness_cache: Mutex::new(ReadinessCache::default()),
             })
         }
     }
