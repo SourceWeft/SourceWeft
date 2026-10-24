@@ -12,12 +12,7 @@ use std::{
 };
 
 #[cfg(target_os = "macos")]
-use std::{
-    io::Read,
-    path::Path,
-    process::{Command, Stdio},
-    time::{Duration, Instant},
-};
+use std::{io::Read, path::Path};
 
 #[derive(Default)]
 pub struct Executions {
@@ -517,24 +512,6 @@ fn checked_path(root: &Path, relative: &str, must_exist: bool) -> Result<std::pa
 }
 
 #[cfg(target_os = "macos")]
-fn bounded_read(mut stream: impl Read, max: usize) -> (Vec<u8>, bool) {
-    let mut stored = Vec::new();
-    let mut buffer = [0u8; 8192];
-    let mut truncated = false;
-    loop {
-        match stream.read(&mut buffer) {
-            Ok(0) | Err(_) => break,
-            Ok(n) => {
-                let room = max.saturating_sub(stored.len());
-                stored.extend_from_slice(&buffer[..n.min(room)]);
-                truncated |= n > room;
-            }
-        }
-    }
-    (stored, truncated)
-}
-
-#[cfg(target_os = "macos")]
 fn execute_command(
     root: &Path,
     cwd: &Path,
@@ -543,68 +520,39 @@ fn execute_command(
     max: usize,
     cancel: Arc<AtomicBool>,
 ) -> Result<Value> {
-    use std::os::unix::process::CommandExt;
     let proxy = super::proxy::PublicProxy::start()?;
     let policy = super::sandbox::command_profile(root, proxy.port)?;
     let proxy_url = format!("http://127.0.0.1:{}", proxy.port);
-    let mut child = Command::new("/usr/bin/sandbox-exec")
-        .args(["-p", &policy, "/bin/sh", "-c", script])
-        .current_dir(cwd)
-        .env_clear()
-        .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
-        .env("HOME", root)
-        .env("TMPDIR", root)
-        .env("HTTP_PROXY", &proxy_url)
-        .env("HTTPS_PROXY", &proxy_url)
-        .env("http_proxy", &proxy_url)
-        .env("https_proxy", &proxy_url)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .process_group(0)
-        .spawn()?;
-    let group = child.id() as i32;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| HostError::new("PIPE_FAILED", "Missing stdout"))?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| HostError::new("PIPE_FAILED", "Missing stderr"))?;
-    let out = std::thread::spawn(move || bounded_read(stdout, max));
-    let err = std::thread::spawn(move || bounded_read(stderr, max));
-    let start = Instant::now();
-    let mut cancelled = false;
-    let status = loop {
-        if cancel.load(Ordering::SeqCst) || start.elapsed() > Duration::from_millis(timeout) {
-            cancelled = true;
-            unsafe {
-                libc::kill(-group, libc::SIGKILL);
-            };
-            break child.wait()?;
-        }
-        if let Some(status) = child.try_wait()? {
-            break status;
-        }
-        std::thread::sleep(Duration::from_millis(25));
-    };
-    // No background descendants may outlive this execution or keep output pipes open.
-    unsafe {
-        libc::kill(-group, libc::SIGKILL);
-    }
-    let (out, ot) = out
-        .join()
-        .map_err(|_| HostError::new("PIPE_FAILED", "stdout failed"))?;
-    let (err, et) = err
-        .join()
-        .map_err(|_| HostError::new("PIPE_FAILED", "stderr failed"))?;
+    let argv = vec![
+        "/usr/bin/sandbox-exec".to_string(),
+        "-p".to_string(),
+        policy,
+        "/bin/sh".to_string(),
+        "-c".to_string(),
+        script.to_string(),
+    ];
+    let env = vec![
+        (
+            "PATH".to_string(),
+            "/usr/bin:/bin:/usr/sbin:/sbin".to_string(),
+        ),
+        ("HOME".to_string(), root.to_string_lossy().into_owned()),
+        ("TMPDIR".to_string(), root.to_string_lossy().into_owned()),
+        ("HTTP_PROXY".to_string(), proxy_url.clone()),
+        ("HTTPS_PROXY".to_string(), proxy_url.clone()),
+        ("http_proxy".to_string(), proxy_url.clone()),
+        ("https_proxy".to_string(), proxy_url),
+    ];
+    let run = super::process::run_wrapped(&argv, &env, cwd, timeout, max, cancel)?;
     let output = format!(
         "{}{}",
-        String::from_utf8_lossy(&out),
-        String::from_utf8_lossy(&err)
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
     );
-    Ok(
-        json!({"output":output.chars().take(max).collect::<String>(),"exitCode":status.code().unwrap_or(if cancelled{124}else{1}),"truncated":ot||et||output.chars().count()>max,"cancelled":cancelled}),
-    )
+    Ok(json!({
+        "output": output.chars().take(max).collect::<String>(),
+        "exitCode": run.exit_code,
+        "truncated": run.truncated || output.chars().count() > max,
+        "cancelled": run.cancelled,
+    }))
 }

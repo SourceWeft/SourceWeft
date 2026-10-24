@@ -3,6 +3,8 @@
 pub mod execution;
 pub mod maintenance;
 mod files;
+#[cfg(unix)]
+pub(crate) mod process;
 mod proxy;
 pub mod sandbox;
 mod workspace;
