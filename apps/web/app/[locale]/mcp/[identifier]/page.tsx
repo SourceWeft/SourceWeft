@@ -18,7 +18,8 @@ import type { MarketItemSummary } from "@sourceweft/market-sdk";
 
 import { buildTranslatedAlternates } from "../../../../lib/i18n/metadata";
 import { mcpOverviewLocale } from "../../../../lib/mcp-ai-overview";
-import { mcpDocumentationUrl } from "../../../../lib/mcp-provenance";
+import { mcpDocumentationUrl, publicMcpFacts } from "../../../../lib/mcp-facts";
+import { mcpTemplateDescription } from "../../../../lib/mcp-template-description";
 import { resolveInitialLandingAuthState } from "../../../_landing/auth-state-server";
 import { SourceWeftFooter } from "../../../_landing/components/sourceweft-footer";
 import { SourceWeftHeader } from "../../../_landing/components/sourceweft-header";
@@ -57,6 +58,7 @@ import {
   mcpToolsValidationReasonKey,
 } from "../../../../lib/mcp-tools-validation";
 import { CopyButton, McpIcon } from "../_components/mcp-client";
+import { McpFactsPanel } from "../_components/mcp-facts-panel";
 import {
   ExternalTextLink,
   formatDate,
@@ -150,6 +152,23 @@ function SectionHeading({
 const panelClassName =
   "rounded-xl border border-zinc-300 bg-white/58 p-5 dark:border-white/10 dark:bg-white/[0.03]";
 
+/**
+ * The search description of a page without an AI overview: the template
+ * sentence built from the server's facts, unless the registry summary is
+ * longer, in which case "{name}: {summary}".
+ */
+function mcpNoOverviewDescription(
+  result: Awaited<ReturnType<typeof loadMcp>>,
+  tTemplate: Parameters<typeof mcpTemplateDescription>[1],
+  withName: (summary: string) => string,
+) {
+  const template = mcpTemplateDescription(publicMcpFacts(result), tTemplate);
+  const summary = result.item.summary.trim();
+  return shortSeoText(
+    summary.length > template.length ? withName(summary) : template,
+  );
+}
+
 export async function generateMetadata({
   params,
 }: PageProps): Promise<Metadata> {
@@ -159,19 +178,27 @@ export async function generateMetadata({
     const pageLocale = hasLocale(routing.locales, locale)
       ? locale
       : routing.defaultLocale;
-    const [result, detail, t] = await Promise.all([
+    const [result, detail, t, tTemplate] = await Promise.all([
       loadMcp(decodedIdentifier),
       // The same cached read as the page body's.
       getPublicMcpDetail(decodedIdentifier, mcpOverviewLocale(pageLocale)),
       getTranslations({ locale: pageLocale, namespace: "mcp.detail" }),
+      getTranslations({ locale: pageLocale, namespace: "mcp.template" }),
     ]);
     const name = result.item.name;
     const title = t("metaTitle", { name });
     // A translated page describes itself with its own overview; any other
-    // page is, or canonicalizes to, the English one and keeps its template.
+    // page with an overview is, or canonicalizes to, the English one and
+    // keeps its template. Without an AI overview (#367 W4), the description
+    // is the deterministic template sentence — or the registry summary where
+    // that is longer — so a page the overview rule skipped still says what
+    // the server is instead of a generic phrase.
     const overview = detail.aiOverview;
-    const description =
-      pageLocale !== routing.defaultLocale && overview?.locale === pageLocale
+    const description = !overview
+      ? mcpNoOverviewDescription(result, tTemplate, (summary) =>
+          t("metaDescriptionOverview", { name, summary }),
+        )
+      : pageLocale !== routing.defaultLocale && overview.locale === pageLocale
         ? shortSeoText(
             t("metaDescriptionOverview", { name, summary: overview.summary }),
           )
@@ -277,26 +304,25 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
   const repoUrl = manifest.repoUrl ?? item.repoUrl;
   const homepageUrl = manifest.homepageUrl ?? item.homepageUrl;
   // The endpoint's own documentation link, from its protected-resource
-  // metadata; shown, never fetched.
-  const documentationUrl = mcpDocumentationUrl(version);
+  // metadata (W1); the facts panel shows it, and it is one of the server's
+  // addresses. Never fetched.
+  const documentationUrl = mcpDocumentationUrl(version.provenanceJson);
   const clientConfig = remoteMcpClientConfig(manifest);
   // The hero already shows the summary; only a longer description adds
   // anything. An AI overview, when there is one, takes the description's
-  // place; the description itself is never changed.
+  // place; the description itself is never changed. Without an overview the
+  // section holds the facts panel (#367 W4), so it is always there.
   const overviewText =
     !aiOverview && manifest.description && manifest.description !== item.summary
       ? manifest.description
       : null;
-  const hasOverview = Boolean(
-    aiOverview || overviewText || manifest.riskSummary,
-  );
   const shownReadme = hasMcpReadmeToShow(readme) ? readme : null;
   const primaryCategory = item.categories[0];
   const installHref = authState.isSignedIn
     ? `/dashboard/mcp?mcp=${encodeURIComponent(item.identifier)}`
     : "/auth/sign-in";
   const sectionLinks = [
-    ...(hasOverview ? [["overview", t("nav.overview")]] : []),
+    ["overview", t("nav.overview")],
     ["installation", t("nav.installation")],
     ...(shownReadme ? [["readme", t("nav.readme")]] : []),
     [
@@ -512,9 +538,6 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
                 <ExternalTextLink href={homepageUrl}>
                   {t("homepage")}
                 </ExternalTextLink>
-                <ExternalTextLink href={documentationUrl}>
-                  {t("documentation")}
-                </ExternalTextLink>
                 <ExternalTextLink href={repoUrl}>
                   {t("repository")}
                 </ExternalTextLink>
@@ -595,39 +618,46 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
             </nav>
 
             <div className="min-w-0 space-y-12 pt-8">
-              {hasOverview ? (
-                <section className="scroll-mt-32" id="overview">
-                  <SectionHeading icon={McpBrandIcon}>
-                    {t("overviewHeading")}
-                  </SectionHeading>
-                  {aiOverview ? (
-                    <McpAiOverviewView
-                      className="last:mb-0"
-                      overview={aiOverview}
-                      requestedLocale={overviewLocale}
-                    />
-                  ) : null}
-                  {overviewText || manifest.riskSummary ? (
-                    <div
-                      className={`${panelClassName} space-y-4 divide-y divide-zinc-200 dark:divide-white/10 [&>*:not(:first-child)]:pt-4`}
-                    >
-                      {overviewText ? (
-                        <p className="whitespace-pre-line text-sm leading-7 text-zinc-600 dark:text-zinc-300">
-                          {overviewText}
-                        </p>
-                      ) : null}
-                      {manifest.riskSummary ? (
-                        <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-                          <span className="font-medium text-zinc-950 dark:text-white">
-                            {t("riskSummary")}
-                          </span>
-                          {manifest.riskSummary}
-                        </p>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </section>
-              ) : null}
+              <section className="scroll-mt-32" id="overview">
+                <SectionHeading icon={McpBrandIcon}>
+                  {t("overviewHeading")}
+                </SectionHeading>
+                {aiOverview ? (
+                  <McpAiOverviewView
+                    className="last:mb-0"
+                    overview={aiOverview}
+                    requestedLocale={overviewLocale}
+                  />
+                ) : (
+                  <McpFactsPanel
+                    className={`${panelClassName} mb-4 last:mb-0`}
+                    facts={publicMcpFacts({
+                      item,
+                      manifest,
+                      provenanceJson: version.provenanceJson,
+                    })}
+                  />
+                )}
+                {overviewText || manifest.riskSummary ? (
+                  <div
+                    className={`${panelClassName} space-y-4 divide-y divide-zinc-200 dark:divide-white/10 [&>*:not(:first-child)]:pt-4`}
+                  >
+                    {overviewText ? (
+                      <p className="whitespace-pre-line text-sm leading-7 text-zinc-600 dark:text-zinc-300">
+                        {overviewText}
+                      </p>
+                    ) : null}
+                    {manifest.riskSummary ? (
+                      <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+                        <span className="font-medium text-zinc-950 dark:text-white">
+                          {t("riskSummary")}
+                        </span>
+                        {manifest.riskSummary}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+              </section>
 
               <section className="scroll-mt-32" id="installation">
                 <SectionHeading icon={KeyRound}>

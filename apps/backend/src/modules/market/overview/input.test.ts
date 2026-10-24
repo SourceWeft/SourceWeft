@@ -11,12 +11,13 @@ import {
   MCP_OVERVIEW_README_MAX_CHARS,
   MCP_OVERVIEW_README_OMISSION_MARKER,
   MCP_OVERVIEW_README_SECTION_MAX_CHARS,
-  MCP_OVERVIEW_SKIP_MIN_DESCRIPTION_CHARS,
+  MCP_OVERVIEW_SKIP_MIN_TEXT_CHARS,
   buildMcpOverviewInput,
   canonicalJson,
   computeMcpOverviewInputSha256,
   extractMcpManifestFacts,
   extractMcpReadmeExcerpt,
+  mcpOverviewTextChars,
   shouldSkipMcpOverview,
   type McpOverviewSource,
 } from "./input";
@@ -617,6 +618,7 @@ describe("input fingerprint", () => {
     readmeSha256: sha("readme"),
     manifestFacts: facts,
     registryDescription: "Pay-per-call APIs.",
+    instructions: null,
   };
 
   test("is the documented hash of the documented fields", () => {
@@ -629,6 +631,7 @@ describe("input fingerprint", () => {
         readmeSha256: genesis402Source().readme!.sha256,
         manifestFacts: input.facts,
         registryDescription: genesis402RegistryServer.description!,
+        instructions: null,
       }),
     );
     assert.match(input.inputSha256, /^[0-9a-f]{64}$/);
@@ -673,6 +676,8 @@ describe("input fingerprint", () => {
       { ...base, readmeSha256: null },
       { ...base, registryDescription: "Pay-per-call APIs!" },
       { ...base, registryDescription: null },
+      { ...base, instructions: "Call the catalog tool first." },
+      { ...base, instructions: "Call the catalog tool first!" },
       { ...base, manifestFacts: { ...facts, transport: "sse" as const } },
       { ...base, manifestFacts: { ...facts, envVars: facts.envVars.slice(1) } },
       {
@@ -707,6 +712,7 @@ describe("input fingerprint", () => {
           packages: [{ registryType: "npm", identifier: "widgets" }],
         },
       }),
+      source({ instructions: "List widgets before editing one." }),
     ].map((changedSource) => buildMcpOverviewInput(changedSource).inputSha256);
     assert.ok(!changed.includes(base));
     assert.equal(new Set(changed).size, changed.length);
@@ -735,6 +741,13 @@ describe("input fingerprint", () => {
       ).inputSha256,
       base,
     );
+    // Absent, null and blank instructions are the same input.
+    for (const instructions of [undefined, null, "", " \n\t "]) {
+      assert.equal(
+        buildMcpOverviewInput(source({ instructions })).inputSha256,
+        base,
+      );
+    }
   });
 
   test("rejects a README hash that is not sha256", () => {
@@ -749,20 +762,32 @@ describe("input fingerprint", () => {
 });
 
 describe("skip rule", () => {
-  const skip = (registryDescription: string | null, markdown?: string) =>
+  const skip = (
+    registryDescription: string | null,
+    markdown?: string,
+    rest: Partial<McpOverviewSource> = {},
+  ) =>
     shouldSkipMcpOverview(
       buildMcpOverviewInput(
         source({
           registryDescription,
           readme:
             markdown === undefined ? null : { markdown, sha256: sha(markdown) },
+          ...rest,
         }),
       ),
     );
   const exactly = (length: number) => "d".repeat(length);
+  const withTools = (...descriptions: string[]) =>
+    manifest({
+      tools: descriptions.map((description, index) => ({
+        name: `tool_${index}`,
+        description,
+      })),
+    });
 
-  test("skips only when there is no README and too short a description", () => {
-    assert.equal(MCP_OVERVIEW_SKIP_MIN_DESCRIPTION_CHARS, 40);
+  test("skips when the description alone is too short and there is nothing else", () => {
+    assert.equal(MCP_OVERVIEW_SKIP_MIN_TEXT_CHARS, 40);
     assert.equal(skip(null), true);
     assert.equal(skip(""), true);
     assert.equal(skip(exactly(39)), true);
@@ -771,14 +796,105 @@ describe("skip rule", () => {
     // Counted in characters, not UTF-16 units or bytes.
     assert.equal(skip("数".repeat(39)), true);
     assert.equal(skip("数".repeat(40)), false);
-    assert.equal(skip(null, "# Widgets\n\nManage widgets."), false);
-    assert.equal(skip("", "Just a line."), false);
+  });
+
+  // #367 W4: the description, the server's instructions, the tool
+  // descriptions and the usable README count together, so a short
+  // description is no reason to skip a server that says more elsewhere.
+  test("counts the description, instructions, tool descriptions and README together", () => {
+    // A README with little text no longer carries a short description alone.
+    assert.equal(skip(null, "# Widgets\n\nManage widgets."), true);
+    assert.equal(skip("", "Just a line."), true);
+    assert.equal(
+      skip(null, "# Widgets\n\nManage widgets in the Acme inventory."),
+      false,
+    );
+    // Twenty characters of description and a page of tool descriptions.
+    const twenty = "Notion MCP server...";
+    assert.equal(Array.from(twenty).length, 20);
+    assert.equal(skip(twenty), true);
+    assert.equal(
+      skip(twenty, undefined, {
+        manifest: withTools(
+          "Search pages and databases in the workspace by title or content.",
+          "Create a page under a parent page or database with the given properties.",
+          "Append blocks of content to an existing page.",
+          `Read every property of a database row. ${"Lists the rows that match a filter. ".repeat(20)}`,
+        ),
+      }),
+      false,
+    );
+    // The server's own instructions count too.
+    assert.equal(
+      skip(twenty, undefined, {
+        instructions: "Call search first; then read a page by its ID.",
+      }),
+      false,
+    );
+    // The boundary is the sum: 39 characters in all is skipped, 40 is not.
+    assert.equal(
+      skip(exactly(10), undefined, {
+        instructions: exactly(10),
+        manifest: withTools(exactly(10), exactly(9)),
+      }),
+      true,
+    );
+    assert.equal(
+      skip(exactly(10), undefined, {
+        instructions: exactly(10),
+        manifest: withTools(exactly(10), exactly(10)),
+      }),
+      false,
+    );
+    // Variable descriptions are not text about the server.
+    assert.equal(
+      skip(exactly(39), undefined, {
+        registryServer: {
+          packages: [
+            {
+              registryType: "npm",
+              identifier: "widgets",
+              environmentVariables: [
+                { name: "WIDGETS_KEY", description: exactly(40) },
+              ],
+            },
+          ],
+        },
+      }),
+      true,
+    );
+  });
+
+  test("the text count collapses whitespace and reads every source", () => {
+    const input = buildMcpOverviewInput(
+      source({
+        registryDescription: "  Ten   chars ",
+        instructions: "Line one.\n\nLine   two.",
+        readme: { markdown: "# Title\n\nBody   text.", sha256: sha("r") },
+        manifest: withTools("A tool.", ""),
+      }),
+    );
+    assert.equal(
+      mcpOverviewTextChars(input),
+      ["Ten chars", "Line one.\nLine two.", "# Title\nBody text.", "A tool."]
+        .map((text) => text.length)
+        .reduce((a, b) => a + b),
+    );
+    assert.equal(
+      mcpOverviewTextChars(
+        buildMcpOverviewInput(
+          source({ registryDescription: null, readme: null }),
+        ),
+      ),
+      0,
+    );
   });
 
   test("a README with nothing usable counts as none", () => {
     const badgesOnly =
       "[![npm](https://img.shields.io/npm/v/x.svg)](https://npmjs.com/x)\n<!-- todo -->\n\n## License\nMIT";
     assert.equal(skip("Short.", badgesOnly), true);
+    assert.equal(skip(exactly(39), badgesOnly), true);
     assert.equal(skip(exactly(40), badgesOnly), false);
   });
 
@@ -813,6 +929,55 @@ describe("skip rule", () => {
         },
       }),
       false,
+    );
+  });
+});
+
+describe("server instructions", () => {
+  const instructionsOf = (instructions: string | null | undefined) =>
+    buildMcpOverviewInput(source({ instructions })).instructions;
+
+  test("are kept as a block of plain lines, bounded", () => {
+    assert.equal(instructionsOf(undefined), null);
+    assert.equal(instructionsOf(null), null);
+    assert.equal(instructionsOf("  \n\n "), null);
+    assert.equal(
+      instructionsOf(
+        "\ufeffUse search first.\r\n\r\n\r\n- Then  read\tthe page.\u0000\u200b \n  Done.  ",
+      ),
+      "Use search first.\n\n- Then read the page.\nDone.",
+    );
+    const long = "x".repeat(MCP_OVERVIEW_FACT_LIMITS.instructionsChars + 50);
+    const kept = instructionsOf(long)!;
+    assert.equal(
+      Array.from(kept).length,
+      MCP_OVERVIEW_FACT_LIMITS.instructionsChars,
+    );
+    assert.ok(kept.endsWith("…"));
+  });
+
+  test("are a numbered, citable source of the prompt", () => {
+    const input = buildMcpOverviewInput(
+      source({
+        registryDescription: null,
+        readme: null,
+        instructions:
+          "Search the workspace before creating pages. Page IDs come from search results.",
+      }),
+    );
+    assert.equal(shouldSkipMcpOverview(input), false);
+    const { user, passages } = buildMcpOverviewPrompt(input);
+    assert.match(
+      user,
+      /^Server instructions \(what the server itself sends to connecting assistants\):$/m,
+    );
+    assert.match(
+      user,
+      /<mcp_instructions>\n\[I1\] Search the workspace before creating pages\. \[I2\] Page IDs come from search results\.\n<\/mcp_instructions>/,
+    );
+    assert.deepEqual(
+      passages.map((passage) => passage.id),
+      ["I1", "I2"],
     );
   });
 });

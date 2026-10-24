@@ -190,6 +190,37 @@ describe("CatalogAiOverview", () => {
     ).toContain("whitespace-pre-line");
   });
 
+  // #367 W4: an MCP overview's "what you can do" is one item per line.
+  test("shows a flagged section's lines as a list, and one line as text", async () => {
+    const block = await render({
+      overview: {
+        summary: "Notion for assistants.",
+        whatItDoes: "Search pages\n- Create pages\n\nRead databases  ",
+        whenToUse: "Line one\nLine two",
+        requirements: "",
+      },
+      lists: { whatItDoes: true },
+    });
+    const items = [...container.querySelectorAll("dd ul li")].map(
+      (item) => item.textContent,
+    );
+    expect(items).toEqual(["Search pages", "- Create pages", "Read databases"]);
+    // Only the flagged section; the rest stay paragraphs.
+    expect(container.querySelectorAll("ul")).toHaveLength(1);
+    expect(block?.textContent).toContain("Line one\nLine two");
+    const single = await render({
+      overview: {
+        summary: "Weather.",
+        whatItDoes: "Looks up forecasts. Sends alerts.",
+        whenToUse: "",
+        requirements: "",
+      },
+      lists: { whatItDoes: true },
+    });
+    expect(single?.querySelector("ul")).toBeNull();
+    expect(single?.textContent).toContain("Looks up forecasts. Sends alerts.");
+  });
+
   test("leaves out empty sections", async () => {
     const block = await render({
       overview: {
