@@ -13,9 +13,13 @@ import {
   Gauge,
   History,
   KeyRound,
+  Layers,
   LockKeyhole,
 } from "lucide-react";
-import type { MarketItemSummary } from "@sourceweft/market-sdk";
+import type {
+  MarketItemSummary,
+  MarketMcpProductGroup,
+} from "@sourceweft/market-sdk";
 
 import { buildTranslatedAlternates } from "../../../../lib/i18n/metadata";
 import { mcpOverviewLocale } from "../../../../lib/mcp-ai-overview";
@@ -130,6 +134,41 @@ function relatedMcpItems(input: {
     .sort((left, right) => right.score - left.score)
     .slice(0, 3)
     .map((entry) => entry.item);
+}
+
+/**
+ * The brand of a product group as a heading word: the slug label with each
+ * hyphenated part capitalised, "notion" → "Notion", "claw-link" → "Claw-Link".
+ * Deterministic, so every member page names the group the same way.
+ */
+export function productBrandLabel(brand: string) {
+  return brand
+    .split("-")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join("-");
+}
+
+/**
+ * What a page shows of its product group (#367 W8): the other members, the
+ * product's own server when this page is not it, and the heading brand.
+ */
+export function productGroupView(
+  group: MarketMcpProductGroup | null,
+  currentIdentifier: string,
+) {
+  if (!group) {
+    return null;
+  }
+  const others = group.members.filter(
+    (member) => member.identifier !== currentIdentifier,
+  );
+  const official =
+    group.officialIdentifier === currentIdentifier
+      ? null
+      : (group.members.find(
+          (member) => member.identifier === group.officialIdentifier,
+        ) ?? null);
+  return { brand: productBrandLabel(group.brand), official, others };
 }
 
 function SectionHeading({
@@ -268,7 +307,7 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
   const [
     authState,
     result,
-    { aiOverview, readme, score, versions },
+    { aiOverview, readme, relatedProduct, score, versions },
     categoriesResponse,
   ] = await Promise.all([
     resolveInitialLandingAuthState(),
@@ -303,6 +342,7 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
     runtime: item.runtime,
     transport: manifest.transport,
   });
+  const productGroup = productGroupView(relatedProduct, item.identifier);
   const trusted = Boolean(item.official || item.verified);
   const description = publicMcpDescription({ item, manifest });
   const providerName = item.providerName ?? manifest.providerName;
@@ -341,6 +381,17 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
       ? [["versions", t("nav.versions", { count: versions.length })]]
       : []),
     ...(score ? [["score", tScore("nav")]] : []),
+    ...(productGroup && productGroup.others.length > 0
+      ? [
+          [
+            "integrations",
+            t("nav.integrations", {
+              brand: productGroup.brand,
+              count: productGroup.others.length,
+            }),
+          ],
+        ]
+      : []),
     ...(relatedItems.length > 0 ? [["related", t("nav.related")]] : []),
   ];
   const softwareJsonLd = {
@@ -473,6 +524,24 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
             <p className="mt-6 max-w-3xl text-lg leading-8 text-zinc-600 dark:text-zinc-300">
               {item.summary || description}
             </p>
+            {productGroup?.official ? (
+              <p
+                className="mt-3 text-sm text-zinc-500 dark:text-zinc-400"
+                data-official-pointer={productGroup.official.identifier}
+              >
+                {t.rich("officialPointer", {
+                  name: productGroup.official.name,
+                  link: (chunks) => (
+                    <LocaleLink
+                      className="font-medium text-zinc-950 underline underline-offset-4 dark:text-white"
+                      href={mcpPath(productGroup.official!.identifier)}
+                    >
+                      {chunks}
+                    </LocaleLink>
+                  ),
+                })}
+              </p>
+            ) : null}
             <div className="mt-6 flex flex-wrap gap-2">
               <McpVerificationBadge item={item} />
               {item.claimed ? <McpClaimedBadge /> : null}
@@ -853,6 +922,22 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
                     {tScore("heading")}
                   </SectionHeading>
                   <McpScoreCard score={score} />
+                </section>
+              ) : null}
+
+              {productGroup && productGroup.others.length > 0 ? (
+                <section className="scroll-mt-32" id="integrations">
+                  <SectionHeading
+                    count={productGroup.others.length}
+                    icon={Layers}
+                  >
+                    {t("integrationsHeading", { brand: productGroup.brand })}
+                  </SectionHeading>
+                  <McpCardGrid
+                    categoryNames={categoryNames}
+                    className="md:grid-cols-2 xl:grid-cols-2"
+                    items={productGroup.others}
+                  />
                 </section>
               ) : null}
             </div>

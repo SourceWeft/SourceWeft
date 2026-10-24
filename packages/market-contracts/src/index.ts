@@ -427,6 +427,32 @@ export const marketMcpReadmeSchema = z.object({
   source: marketMcpReadmeSourceSchema.nullable(),
 });
 
+/**
+ * A catalog server seen as a member of a product group (Issue #367, W8): the
+ * listing fields a card needs, plus whether this member's publisher runs its
+ * endpoint (the product's own server).
+ */
+export const marketMcpProductGroupMemberSchema = marketItemSummarySchema.extend(
+  {
+    publisherMatch: z.boolean(),
+  },
+);
+
+/**
+ * The servers that integrate one product, anchored by the product's own
+ * server: the one whose publisher domain (`domain`) also runs its endpoint.
+ * `brand` is the domain's registrable label as it appears in slugs (`notion`
+ * for notion.com). `members` holds every member in display order — the
+ * official server first, then the catalog's browse order — including the
+ * server the detail was read for.
+ */
+export const marketMcpProductGroupSchema = z.object({
+  domain: z.string(),
+  brand: z.string(),
+  officialIdentifier: z.string(),
+  members: z.array(marketMcpProductGroupMemberSchema),
+});
+
 // ---------------------------------------------------------------------------
 // Quality scorecard (Issue #367, W6). A deterministic reading of how complete
 // a catalog entry is, computed from the stored manifest, provenance and
@@ -484,6 +510,9 @@ export const getMarketMcpResponseSchema = z.object({
   // sitemap): its README is one file that many servers show. Absent means
   // true, for answers from before it existed.
   searchIndexable: z.boolean().optional(),
+  // The product group the server belongs to; null when no official server
+  // exists for its brand. Optional for answers from before it existed.
+  relatedProduct: marketMcpProductGroupSchema.nullable().optional(),
   // The latest version's quality scorecard (see `marketMcpScoreSchema`); null
   // when the server has no published version to score. Optional for answers
   // from before it existed.
@@ -534,6 +563,10 @@ export type MarketMcpOwnerField = z.infer<typeof marketMcpOwnerFieldSchema>;
 export type MarketMcpOwnerLayer = z.infer<typeof marketMcpOwnerLayerSchema>;
 export type MarketMcpManifest = z.infer<typeof marketMcpManifestSchema>;
 export type MarketItemSummary = z.infer<typeof marketItemSummarySchema>;
+export type MarketMcpProductGroupMember = z.infer<
+  typeof marketMcpProductGroupMemberSchema
+>;
+export type MarketMcpProductGroup = z.infer<typeof marketMcpProductGroupSchema>;
 export type MarketItemVersion = z.infer<typeof marketItemVersionSchema>;
 export type ListMarketMcpRequest = z.infer<typeof listMarketMcpRequestSchema>;
 export type ListMarketMcpResponse = z.infer<typeof listMarketMcpResponseSchema>;

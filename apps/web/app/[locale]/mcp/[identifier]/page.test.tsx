@@ -35,7 +35,7 @@ vi.mock("../../../_landing/components/sourceweft-footer", () => ({
 // suite is about the README around them.
 vi.mock("../_components/mcp-display", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../_components/mcp-display")>()),
-  McpCardGrid: () => null,
+  McpCardGrid: vi.fn(() => null),
   McpRuntimeBadge: () => null,
   McpToolRows: () => null,
   McpVerificationBadge: () => null,
@@ -74,7 +74,10 @@ vi.mock("next-intl", async (importOriginal) => {
   };
 });
 
-import PublicMcpDetailPage, { generateMetadata } from "./page";
+import PublicMcpDetailPage, {
+  generateMetadata,
+  productBrandLabel,
+} from "./page";
 import { SITE_URL } from "../../../seo";
 
 const SHA = "0123456789abcdef0123456789abcdef01234567";
@@ -295,6 +298,154 @@ describe("public MCP detail page README", () => {
       expect(html).not.toContain('id="readme"');
       expect(navLabels(html)).toEqual(["overview", "installation", "tools"]);
     }
+  });
+});
+
+// Issue #367 W8: the servers integrating the same product.
+describe("public MCP detail page product group", () => {
+  const OFFICIAL = "com.notion/mcp";
+  function member(
+    identifier: string,
+    name: string,
+    patch: Record<string, unknown> = {},
+  ) {
+    return {
+      ...manifestResponse.item,
+      categories: [],
+      id: `id-${identifier}`,
+      identifier,
+      name,
+      publisherMatch: false,
+      toolsCount: 3,
+      ...patch,
+    };
+  }
+  const group = {
+    domain: "notion.com",
+    brand: "notion",
+    officialIdentifier: OFFICIAL,
+    members: [
+      member(OFFICIAL, "Notion", { publisherMatch: true, toolsCount: 19 }),
+      member(IDENTIFIER, "Weather"),
+      member("io.github.a/better-notion", "Better Notion"),
+      member("io.github.b/notion-mcp", "Notion Mcp"),
+    ],
+  };
+  function withDetail(relatedProduct: unknown) {
+    market.getPublicMcpDetail.mockResolvedValue({
+      readme: null,
+      relatedProduct,
+      versions: [],
+    });
+  }
+  function integrationsSection(html: string) {
+    return /<section[^>]*id="integrations"[^>]*>([\s\S]*?)<\/section>/.exec(
+      html,
+    )?.[1];
+  }
+
+  it("lists the other members on a member's page and points to the publisher's own server", async () => {
+    withDetail(group);
+    const html = await render();
+    expect(navLabels(html)).toEqual([
+      "overview",
+      "installation",
+      "tools",
+      "integrations",
+    ]);
+    expect(html).toMatch(
+      /href="#integrations"[^>]*>Notion integrations \(3\)</,
+    );
+    const section = integrationsSection(html)!;
+    expect(section).toMatch(/<h2[^>]*>Other Notion integrations<\/h2>/);
+    expect(section).toMatch(/<span[^>]*>3<\/span>/);
+    // The cards are the shared card grid (mocked here), fed every member but
+    // this page's own server, in the order the market gave them.
+    const grid = vi.mocked(
+      (await import("../_components/mcp-display")).McpCardGrid,
+    );
+    const call = grid.mock.calls.at(-1)![0] as {
+      items: { identifier: string }[];
+    };
+    expect(call.items.map((entry) => entry.identifier)).toEqual([
+      OFFICIAL,
+      "io.github.a/better-notion",
+      "io.github.b/notion-mcp",
+    ]);
+    // One line under the summary names the official server and links its page.
+    expect(html).toMatch(
+      new RegExp(
+        `<p [^>]*data-official-pointer="${OFFICIAL}"[^>]*>The publisher(?:'|’|&#x27;)s own server: <a [^>]*href="/mcp/${encodeURIComponent(OFFICIAL)}"[^>]*>Notion</a></p>`,
+      ),
+    );
+    expect(html.indexOf('id="tools"')).toBeLessThan(
+      html.indexOf('id="integrations"'),
+    );
+  });
+
+  it("shows no pointer on the publisher's own page, and the section counts the rest", async () => {
+    market.getPublicMcpManifest.mockResolvedValue(
+      getMarketMcpManifestResponseSchema.parse({
+        ...manifestResponse,
+        item: {
+          ...manifestResponse.item,
+          identifier: OFFICIAL,
+          name: "Notion",
+        },
+        manifest: {
+          ...manifestResponse.manifest,
+          identifier: OFFICIAL,
+          name: "Notion",
+        },
+      }),
+    );
+    withDetail(group);
+    const element = await PublicMcpDetailPage({
+      params: Promise.resolve({
+        identifier: encodeURIComponent(OFFICIAL),
+        locale: "en",
+      }),
+    });
+    const html = renderToStaticMarkup(element);
+    expect(html).not.toContain("data-official-pointer");
+    expect(html).toMatch(
+      /href="#integrations"[^>]*>Notion integrations \(3\)</,
+    );
+    expect(integrationsSection(html)).toMatch(/<span[^>]*>3<\/span>/);
+  });
+
+  it("shows nothing of a group with no other member, or without a group", async () => {
+    for (const relatedProduct of [
+      null,
+      undefined,
+      { ...group, members: [member(IDENTIFIER, "Weather")] },
+    ]) {
+      withDetail(relatedProduct);
+      const html = await render();
+      expect(html).not.toContain('id="integrations"');
+      expect(html).not.toContain("data-official-pointer");
+      expect(navLabels(html)).toEqual(["overview", "installation", "tools"]);
+    }
+    // The only other member being the publisher's own server: it is listed,
+    // and the pointer names it too.
+    withDetail({
+      ...group,
+      members: [
+        member(OFFICIAL, "Notion", { publisherMatch: true }),
+        member(IDENTIFIER, "Weather"),
+      ],
+    });
+    const html = await render();
+    expect(html).toContain(`data-official-pointer="${OFFICIAL}"`);
+    expect(html).toMatch(
+      /href="#integrations"[^>]*>Notion integrations \(1\)</,
+    );
+  });
+
+  it("writes the brand as a heading word", () => {
+    expect(productBrandLabel("notion")).toBe("Notion");
+    expect(productBrandLabel("claw-link")).toBe("Claw-Link");
+    expect(productBrandLabel("")).toBe("");
   });
 });
 
