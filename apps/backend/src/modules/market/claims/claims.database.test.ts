@@ -895,6 +895,116 @@ describe("MCP owner claims", () => {
     });
   });
 
+  describe("a block that lands while a claim is being decided", () => {
+    test("during the GitHub lookup: no verified claim is written", async () => {
+      state.linked.set("race-g", { accountId: "1001", accessToken: null, scope: null });
+      const blockingDeps = {
+        ...deps(),
+        github: {
+          ...service.defaultMcpClaimDeps.github,
+          fetchAccount: async (login: string) => {
+            // The admin's block commits while GitHub is being asked.
+            await service.adminBlockMcpMember(
+              { adminUserId: "market-admin", identifier: USER_ID, userId: "race-g" },
+              deps(),
+            );
+            return state.accounts.get(login.toLowerCase()) ?? null;
+          },
+        },
+      };
+      await expect(
+        service.startMcpClaim(
+          { userId: "race-g", identifier: USER_ID, method: "github" },
+          blockingDeps,
+        ),
+      ).rejects.toMatchObject({ code: "MCP_CLAIM_BLOCKED", statusCode: 403 });
+      const claims = await data.db
+        .select()
+        .from(data.marketMcpClaims)
+        .where(eq(data.marketMcpClaims.userId, "race-g"));
+      expect(claims.filter((claim) => claim.status === "verified")).toEqual([]);
+    });
+
+    test("during the publisher lookup: the pending claim is not verified", async () => {
+      const identifier = `com.${tag}racing/mcp`;
+      const host = `${tag}racing.com`;
+      await ingest.upsertMarketMcp({ ...federated, manifest: manifest(identifier) });
+      const started = await service.startMcpClaim(
+        { userId: "race-d", identifier, method: "well_known" },
+        deps(),
+      );
+      advance(31);
+      const blockingDeps = {
+        ...deps(),
+        domain: {
+          ...service.defaultMcpClaimDeps.domain,
+          openFetch: () => ({
+            fetch: (async () => {
+              // The token is there, and the block commits during the fetch.
+              await service.adminBlockMcpMember(
+                { adminUserId: "market-admin", identifier, userId: "race-d" },
+                deps(),
+              );
+              return new Response(started.instructions!.token, { status: 200 });
+            }) as typeof globalThis.fetch,
+            close: async () => undefined,
+          }),
+        },
+      };
+      await expect(
+        service.verifyMcpClaim({ userId: "race-d", claimId: started.claim.id }, blockingDeps),
+      ).rejects.toMatchObject({ code: "MCP_CLAIM_BLOCKED", statusCode: 403 });
+      const claims = await data.db
+        .select()
+        .from(data.marketMcpClaims)
+        .where(eq(data.marketMcpClaims.userId, "race-d"));
+      expect(claims.filter((claim) => claim.status === "verified")).toEqual([]);
+      void host;
+    });
+
+    test("a save racing a block leaves nothing of the blocked member's behind", async () => {
+      const identifier = `com.${tag}race/mcp`;
+      const host = `${tag}race.com`;
+      await ingest.upsertMarketMcp({ ...federated, manifest: manifest(identifier) });
+      for (let round = 0; round < 6; round += 1) {
+        const user = `save-${round}`;
+        await becomeOwner(user, identifier, host);
+        const outcomes = await Promise.allSettled([
+          service.setMcpOwnerOverrides(
+            { userId: user, identifier, values: { summary: `from ${user}` } },
+            deps(),
+          ),
+          service.setMcpOwnerTools(
+            {
+              userId: user,
+              identifier,
+              submission: { tools: [{ name: `tool_${round}`, inputSchema: {}, annotations: {} }] },
+            },
+            deps(),
+          ),
+          service.adminBlockMcpMember(
+            { adminUserId: "market-admin", identifier, userId: user },
+            deps(),
+          ),
+        ]);
+        // The block always succeeds; a save either ran first (and was
+        // cleared) or lost to the block (and was refused).
+        expect(outcomes[2]?.status).toBe("fulfilled");
+        for (const save of outcomes.slice(0, 2)) {
+          if (save.status === "rejected") {
+            expect(["MCP_CLAIM_BLOCKED", "MCP_CLAIM_REQUIRED"]).toContain(
+              (save.reason as { code: string }).code,
+            );
+          }
+        }
+        const stored = await authorsOf(identifier);
+        expect(Object.values(stored?.authorsJson ?? {})).not.toContain(user);
+        expect(JSON.stringify(stored?.overridesJson ?? {})).not.toContain(`from ${user}`);
+        expect(JSON.stringify(stored?.toolsJson ?? null)).not.toContain(`tool_${round}`);
+      }
+    });
+  });
+
   describe("throttle", () => {
     test("verify: one attempt per member and server every 30 seconds, with a stable 429", async () => {
       const identifier = `com.${tag}thr/mcp`;
@@ -947,6 +1057,40 @@ describe("MCP owner claims", () => {
         .from(data.marketMcpClaimAttempts)
         .where(eq(data.marketMcpClaimAttempts.userId, "vera"));
       expect(rows).toHaveLength(1);
+    });
+
+    test("a burst of parallel verifies gets one through, whatever order their clocks and locks fall in", async () => {
+      const identifier = `com.${tag}burst/mcp`;
+      await ingest.upsertMarketMcp({ ...federated, manifest: manifest(identifier) });
+      const started = await service.startMcpClaim(
+        { userId: "burst", identifier, method: "dns_txt" },
+        deps(),
+      );
+      advance(31);
+      // Each request took its timestamp before queueing for the member's
+      // lock, some earlier and some later than the others.
+      const offsets = [0, -3, 2, -1, 4, 1, -2];
+      const outcomes = await Promise.allSettled(
+        offsets.map((offset) =>
+          service.verifyMcpClaim(
+            { userId: "burst", claimId: started.claim.id },
+            { ...deps(), now: () => new Date(state.now.getTime() + offset * 1000) },
+          ),
+        ),
+      );
+      const codes = outcomes.map((outcome) =>
+        outcome.status === "rejected" ? (outcome.reason as { code: string }).code : "ok",
+      );
+      // The one that got through looked the token up (and did not find it).
+      expect(codes.filter((code) => code === "MCP_CLAIM_TOKEN_NOT_FOUND")).toHaveLength(1);
+      expect(codes.filter((code) => code === "MCP_CLAIM_RATE_LIMITED")).toHaveLength(
+        offsets.length - 1,
+      );
+      const rows = await data.db
+        .select()
+        .from(data.marketMcpClaimAttempts)
+        .where(eq(data.marketMcpClaimAttempts.userId, "burst"));
+      expect(rows.filter((row) => row.kind === "verify")).toHaveLength(1);
     });
 
     test("a method that cannot work spends no attempt", async () => {

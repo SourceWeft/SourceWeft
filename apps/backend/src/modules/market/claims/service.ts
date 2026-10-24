@@ -11,7 +11,7 @@ import type {
   VerifyMcpClaimResponse,
 } from "@sourceweft/contracts";
 import type { SubmitMarketMcpOwnerToolsRequest } from "@sourceweft/market-contracts";
-import { McpClaimError } from "./errors";
+import { McpClaimError, claimBlockedError, claimRequiredError } from "./errors";
 import {
   DomainLookupError,
   defaultDomainLookup,
@@ -30,8 +30,6 @@ import {
   type OrgMembershipAnswer,
 } from "./github";
 import {
-  TOOLS_AUTHOR_KEY,
-  mergeAuthoredFields,
   ownerOverrideValues,
   ownerSubmittedTools,
   visibleOwnerOverrides,
@@ -57,8 +55,8 @@ import {
   replacePendingClaim,
   reserveClaimAttempt,
   unblockMember,
-  upsertOwnerOverrideValues,
-  upsertOwnerTools,
+  saveOwnerFields,
+  saveOwnerTools,
   type ClaimableServer,
   type McpClaimBlockRow,
   type McpClaimRow,
@@ -128,14 +126,6 @@ function entryNotFound(): McpClaimError {
 
 function claimNotFound(): McpClaimError {
   return new McpClaimError(404, "MCP_CLAIM_NOT_FOUND", "No such claim");
-}
-
-function claimRequired(): McpClaimError {
-  return new McpClaimError(
-    403,
-    "MCP_CLAIM_REQUIRED",
-    "Only a verified owner of this server may change its listing",
-  );
 }
 
 function githubUnavailable(): McpClaimError {
@@ -319,7 +309,7 @@ export async function startMcpClaim(
 ): Promise<StartMcpClaimResponse> {
   const server = await requireServer(input.identifier);
   // A block outlives every claim row: it is checked before anything else.
-  if (await isMemberBlocked(server.id, input.userId)) throw claimBlocked();
+  if (await isMemberBlocked(server.id, input.userId)) throw claimBlockedError();
   const existing = await findVerifiedClaim(server.id, input.userId);
   if (existing) {
     return { claim: toClaim(existing, server.identifier), instructions: null };
@@ -394,14 +384,6 @@ export async function startMcpClaim(
   };
 }
 
-function claimBlocked(): McpClaimError {
-  return new McpClaimError(
-    403,
-    "MCP_CLAIM_BLOCKED",
-    "A market admin revoked your claim on this server; write to support if you believe that was wrong",
-  );
-}
-
 function isUniqueViolation(error: unknown): boolean {
   const seen = new Set<unknown>();
   let current: unknown = error;
@@ -446,7 +428,7 @@ export async function verifyMcpClaim(
   // A block applies to the member on this server, whichever claim they try
   // to finish with and whatever state it is in: a blocked member is told so
   // (403), not that their claim is "not pending" (409).
-  if (await isMemberBlocked(row.serverId, input.userId)) throw claimBlocked();
+  if (await isMemberBlocked(row.serverId, input.userId)) throw claimBlockedError();
   if (row.status === "verified") return { claim: toClaim(row, identifier) };
   if (row.status !== "pending" || !row.tokenHash) {
     throw new McpClaimError(
@@ -500,7 +482,13 @@ export async function verifyMcpClaim(
       `The token was not found: ${where}`,
     );
   }
-  const verified = await markClaimVerified(row.id, now);
+  // Honours a block that landed during the lookup above (inside the write).
+  const verified = await markClaimVerified({
+    claimId: row.id,
+    serverId: row.serverId,
+    userId: input.userId,
+    now,
+  });
   if (!verified) {
     // Raced with itself: read back whatever the row is now.
     const current = await findClaimById(row.id);
@@ -645,7 +633,7 @@ async function requireVerifiedOwner(input: {
 }): Promise<ClaimableServer> {
   const server = await requireServer(input.identifier);
   const claim = await findVerifiedClaim(server.id, input.userId);
-  if (!claim) throw claimRequired();
+  if (!claim) throw claimRequiredError();
   return server;
 }
 
@@ -675,22 +663,10 @@ export async function setMcpOwnerOverrides(
     if (typeof value === "string" && !value.trim()) continue;
     next[key] = value;
   }
-  const [previous, verified] = await Promise.all([
-    findOwnerOverridesRow(server.id),
-    listVerifiedUserIds(server.id),
-  ]);
-  const merged = mergeAuthoredFields({
-    previousValues: previous?.overridesJson ?? {},
-    previousAuthors: previous?.authorsJson ?? {},
-    next,
-    userId: input.userId,
-    verified: new Set(verified),
-  });
-  const row = await upsertOwnerOverrideValues({
+  const { row, verified } = await saveOwnerFields({
     serverId: server.id,
     userId: input.userId,
-    values: merged.values,
-    authors: merged.authors,
+    next,
     now: deps.now(),
   });
   return toOverrides(server, visibleOwnerOverrides(row, new Set(verified)));
@@ -741,19 +717,11 @@ async function writeTools(
   meta: Record<string, unknown>,
   deps: McpClaimDeps,
 ): Promise<McpOwnerOverrides> {
-  const [previous, verified] = await Promise.all([
-    findOwnerOverridesRow(server.id),
-    listVerifiedUserIds(server.id),
-  ]);
-  const authors = { ...(previous?.authorsJson ?? {}) };
-  if (tools.length > 0) authors[TOOLS_AUTHOR_KEY] = userId;
-  else delete authors[TOOLS_AUTHOR_KEY];
-  const row = await upsertOwnerTools({
+  const { row, verified } = await saveOwnerTools({
     serverId: server.id,
     userId,
     tools: tools.length > 0 ? tools : null,
     meta: tools.length > 0 ? meta : null,
-    authors,
     now: deps.now(),
   });
   return toOverrides(server, visibleOwnerOverrides(row, new Set(verified)));

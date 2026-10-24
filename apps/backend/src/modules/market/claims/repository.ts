@@ -8,9 +8,15 @@ import {
   marketMcpOwnerOverrides,
   mcpServers,
 } from "@sourceweft/db";
-import { McpClaimError } from "./errors";
 import {
+  McpClaimError,
+  claimBlockedError,
+  claimRequiredError,
+} from "./errors";
+import {
+  TOOLS_AUTHOR_KEY,
   clearAuthoredBy,
+  mergeAuthoredFields,
   visibleOwnerOverrides,
   type AuthorMap,
   type McpOwnerOverridesRow,
@@ -24,6 +30,43 @@ import { CLAIM_THROTTLE, throttleVerdict } from "./throttle";
  */
 
 export type McpClaimRow = typeof marketMcpClaims.$inferSelect;
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * Two transaction-scoped advisory locks keep the writes that depend on a
+ * member's standing from interleaving with an admin's block. Always taken in
+ * this order — the member's, then the listing's — so they cannot deadlock:
+ *
+ * - the member's on one server: verifying a claim, saving corrections and
+ *   blocking all serialize on it, so a block cannot land between a check of
+ *   the member's standing and the write that relies on it;
+ * - the server's listing: corrections from different owners (and a block's
+ *   clearing) take turns, which also covers a listing with no row yet.
+ */
+async function lockMember(tx: Tx, serverId: string, userId: string) {
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtext(${`mcp-claim-member:${serverId}:${userId}`}))`,
+  );
+}
+async function lockListing(tx: Tx, serverId: string) {
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtext(${`mcp-claim-listing:${serverId}`}))`,
+  );
+}
+async function assertNotBlocked(tx: Tx, serverId: string, userId: string) {
+  const [blocked] = await tx
+    .select({ one: sql`1` })
+    .from(marketMcpClaimBlocks)
+    .where(
+      and(
+        eq(marketMcpClaimBlocks.serverId, serverId),
+        eq(marketMcpClaimBlocks.userId, userId),
+      ),
+    )
+    .limit(1);
+  if (blocked) throw claimBlockedError();
+}
 
 /** What the public read layer needs per server, in one pass over a page. */
 export type McpOwnerLayerRow = {
@@ -226,25 +269,44 @@ export async function replacePendingClaim(
   });
 }
 
+/**
+ * Records a verified claim. A block that landed while the slow lookup behind
+ * it (GitHub, DNS, the publisher's domain) was running is honoured: the check
+ * runs inside the member's lock, in the transaction that writes the claim.
+ */
 export async function insertVerifiedClaim(
   values: typeof marketMcpClaims.$inferInsert,
 ): Promise<McpClaimRow> {
-  const [row] = await db.insert(marketMcpClaims).values(values).returning();
-  return row!;
+  return db.transaction(async (tx) => {
+    await lockMember(tx, values.serverId, values.userId);
+    await assertNotBlocked(tx, values.serverId, values.userId);
+    const [row] = await tx.insert(marketMcpClaims).values(values).returning();
+    return row!;
+  });
 }
 
-export async function markClaimVerified(
-  claimId: string,
-  now: Date,
-): Promise<McpClaimRow | null> {
-  const [row] = await db
-    .update(marketMcpClaims)
-    .set({ status: "verified", verifiedAt: now, lastError: null })
-    .where(
-      and(eq(marketMcpClaims.id, claimId), eq(marketMcpClaims.status, "pending")),
-    )
-    .returning();
-  return row ?? null;
+/** Pending → verified, with the same block check as `insertVerifiedClaim`. */
+export async function markClaimVerified(input: {
+  claimId: string;
+  serverId: string;
+  userId: string;
+  now: Date;
+}): Promise<McpClaimRow | null> {
+  return db.transaction(async (tx) => {
+    await lockMember(tx, input.serverId, input.userId);
+    await assertNotBlocked(tx, input.serverId, input.userId);
+    const [row] = await tx
+      .update(marketMcpClaims)
+      .set({ status: "verified", verifiedAt: input.now, lastError: null })
+      .where(
+        and(
+          eq(marketMcpClaims.id, input.claimId),
+          eq(marketMcpClaims.status, "pending"),
+        ),
+      )
+      .returning();
+    return row ?? null;
+  });
 }
 
 export async function recordClaimError(
@@ -328,6 +390,8 @@ export async function blockMember(input: {
   now: Date;
 }): Promise<McpClaimBlockRow> {
   return db.transaction(async (tx) => {
+    await lockMember(tx, input.serverId, input.userId);
+    await lockListing(tx, input.serverId);
     const [block] = await tx
       .insert(marketMcpClaimBlocks)
       .values({
@@ -507,70 +571,130 @@ export async function findOwnerOverridesRow(
   return row ?? null;
 }
 
-export async function upsertOwnerOverrideValues(input: {
+/**
+ * Saves a verified owner's corrections: the whole read-merge-write is one
+ * transaction under the member's and the listing's locks, with the owner's
+ * claim checked inside it — so a block cannot slip between the check and the
+ * write and leave the blocked member's values behind under their name.
+ * Returns the stored row and who holds a verified claim.
+ */
+export async function saveOwnerFields(input: {
   serverId: string;
   userId: string;
-  values: Record<string, unknown>;
-  authors: AuthorMap;
+  next: Record<string, unknown>;
   now: Date;
-}): Promise<McpOwnerOverridesRow> {
-  const [row] = await db
-    .insert(marketMcpOwnerOverrides)
-    .values({
-      serverId: input.serverId,
-      updatedBy: input.userId,
-      overridesJson: input.values,
-      authorsJson: input.authors,
-      createdAt: input.now,
-      updatedAt: input.now,
-    })
-    .onConflictDoUpdate({
-      target: marketMcpOwnerOverrides.serverId,
-      set: {
+}): Promise<{ row: McpOwnerOverridesRow; verified: string[] }> {
+  return db.transaction(async (tx) => {
+    const { verified } = await lockedOwner(tx, input);
+    const [previous] = await tx
+      .select()
+      .from(marketMcpOwnerOverrides)
+      .where(eq(marketMcpOwnerOverrides.serverId, input.serverId))
+      .for("update");
+    const merged = mergeAuthoredFields({
+      previousValues: previous?.overridesJson ?? {},
+      previousAuthors: previous?.authorsJson ?? {},
+      next: input.next,
+      userId: input.userId,
+      verified: new Set(verified),
+    });
+    const [row] = await tx
+      .insert(marketMcpOwnerOverrides)
+      .values({
+        serverId: input.serverId,
         updatedBy: input.userId,
-        overridesJson: input.values,
-        authorsJson: input.authors,
+        overridesJson: merged.values,
+        authorsJson: merged.authors,
+        createdAt: input.now,
         updatedAt: input.now,
-      },
-    })
-    .returning();
-  return row!;
+      })
+      .onConflictDoUpdate({
+        target: marketMcpOwnerOverrides.serverId,
+        set: {
+          updatedBy: input.userId,
+          overridesJson: merged.values,
+          authorsJson: merged.authors,
+          updatedAt: input.now,
+        },
+      })
+      .returning();
+    return { row: row!, verified };
+  });
 }
 
-export async function upsertOwnerTools(input: {
+/**
+ * Saves (or, with no tools, removes) the owner's tool list, under the same
+ * locks and claim check as `saveOwnerFields`. The saver becomes the list's
+ * author.
+ */
+export async function saveOwnerTools(input: {
   serverId: string;
   userId: string;
   tools: unknown[] | null;
   meta: Record<string, unknown> | null;
-  /** The authors map with the tool list's author set or removed. */
-  authors: AuthorMap;
   now: Date;
-}): Promise<McpOwnerOverridesRow> {
-  const submittedAt = input.tools ? input.now : null;
-  const [row] = await db
-    .insert(marketMcpOwnerOverrides)
-    .values({
-      serverId: input.serverId,
-      updatedBy: input.userId,
-      overridesJson: {},
-      authorsJson: input.authors,
-      toolsJson: input.tools,
-      toolsMetaJson: input.meta,
-      toolsSubmittedAt: submittedAt,
-      createdAt: input.now,
-      updatedAt: input.now,
-    })
-    .onConflictDoUpdate({
-      target: marketMcpOwnerOverrides.serverId,
-      set: {
+}): Promise<{ row: McpOwnerOverridesRow; verified: string[] }> {
+  return db.transaction(async (tx) => {
+    const { verified } = await lockedOwner(tx, input);
+    const [previous] = await tx
+      .select()
+      .from(marketMcpOwnerOverrides)
+      .where(eq(marketMcpOwnerOverrides.serverId, input.serverId))
+      .for("update");
+    const authors: AuthorMap = { ...(previous?.authorsJson ?? {}) };
+    if (input.tools) authors[TOOLS_AUTHOR_KEY] = input.userId;
+    else delete authors[TOOLS_AUTHOR_KEY];
+    const submittedAt = input.tools ? input.now : null;
+    const [row] = await tx
+      .insert(marketMcpOwnerOverrides)
+      .values({
+        serverId: input.serverId,
         updatedBy: input.userId,
-        authorsJson: input.authors,
+        overridesJson: {},
+        authorsJson: authors,
         toolsJson: input.tools,
         toolsMetaJson: input.meta,
         toolsSubmittedAt: submittedAt,
+        createdAt: input.now,
         updatedAt: input.now,
-      },
-    })
-    .returning();
-  return row!;
+      })
+      .onConflictDoUpdate({
+        target: marketMcpOwnerOverrides.serverId,
+        set: {
+          updatedBy: input.userId,
+          authorsJson: authors,
+          toolsJson: input.tools,
+          toolsMetaJson: input.meta,
+          toolsSubmittedAt: submittedAt,
+          updatedAt: input.now,
+        },
+      })
+      .returning();
+    return { row: row!, verified };
+  });
+}
+
+/**
+ * Takes the member's and the listing's locks, then confirms — inside them —
+ * that the member still holds a verified claim and is not blocked.
+ */
+async function lockedOwner(
+  tx: Tx,
+  input: { serverId: string; userId: string },
+): Promise<{ verified: string[] }> {
+  await lockMember(tx, input.serverId, input.userId);
+  await lockListing(tx, input.serverId);
+  await assertNotBlocked(tx, input.serverId, input.userId);
+  const holders = await tx
+    .selectDistinct({ userId: marketMcpClaims.userId })
+    .from(marketMcpClaims)
+    .where(
+      and(
+        eq(marketMcpClaims.serverId, input.serverId),
+        eq(marketMcpClaims.status, "verified"),
+      ),
+    );
+  const verified = holders.map((holder) => holder.userId);
+  if (!verified.includes(input.userId)) throw claimRequiredError();
+  return { verified };
 }

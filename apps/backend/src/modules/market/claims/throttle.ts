@@ -33,12 +33,19 @@ export function throttleVerdict(input: {
   const now = input.now.getTime();
   if (input.kind === "verify" && input.lastVerifyAt) {
     const elapsed = now - input.lastVerifyAt.getTime();
-    if (elapsed >= 0 && elapsed < CLAIM_THROTTLE.verifyIntervalMs) {
+    // A negative elapsed is "too soon" as well: a request that took its
+    // timestamp before waiting for the member's lock can be served after one
+    // stamped later, and must not slip through for being "before" it.
+    if (elapsed < CLAIM_THROTTLE.verifyIntervalMs) {
       return {
         ok: false,
         reason: "interval",
-        retryAfterSeconds: Math.ceil(
-          (CLAIM_THROTTLE.verifyIntervalMs - elapsed) / 1000,
+        retryAfterSeconds: Math.min(
+          Math.ceil(CLAIM_THROTTLE.verifyIntervalMs / 1000),
+          Math.max(
+            1,
+            Math.ceil((CLAIM_THROTTLE.verifyIntervalMs - elapsed) / 1000),
+          ),
         ),
       };
     }

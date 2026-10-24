@@ -25,3 +25,21 @@ export class McpClaimError extends Error {
 export function isMcpClaimError(error: unknown): error is McpClaimError {
   return error instanceof McpClaimError;
 }
+
+/** A market admin blocked the member on this server. */
+export function claimBlockedError(): McpClaimError {
+  return new McpClaimError(
+    403,
+    "MCP_CLAIM_BLOCKED",
+    "A market admin revoked your claim on this server; write to support if you believe that was wrong",
+  );
+}
+
+/** Corrections are a verified owner's to make. */
+export function claimRequiredError(): McpClaimError {
+  return new McpClaimError(
+    403,
+    "MCP_CLAIM_REQUIRED",
+    "Only a verified owner of this server may change its listing",
+  );
+}

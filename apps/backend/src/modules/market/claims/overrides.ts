@@ -76,13 +76,20 @@ export function visibleOwnerOverrides<T extends McpOwnerOverridesSource>(
   } as unknown as T;
 }
 
-/** A row that may still carry its verified members: filtered to what shows. */
+/** A stored row as the SQL joins it in: with who holds a verified claim. */
+export type RawOwnerOverrides = McpOwnerOverridesSource & {
+  verifiedUsers?: readonly string[] | null;
+};
+
+/**
+ * A raw row filtered to what shows. Fails closed: with no verified members
+ * supplied, nothing is visible.
+ */
 export function effectiveOwnerOverrides(
-  row: McpOwnerOverridesSource | null | undefined,
+  row: RawOwnerOverrides | null | undefined,
 ): McpOwnerOverridesSource | null {
   if (!row) return null;
-  if (!row.verifiedUsers) return row;
-  return visibleOwnerOverrides(row, new Set(row.verifiedUsers));
+  return visibleOwnerOverrides(row, new Set(row.verifiedUsers ?? []));
 }
 
 /**

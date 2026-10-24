@@ -229,10 +229,13 @@ describe("field authorship", () => {
       iconUrl: "https://a.example/a.png",
     });
     expect(effectiveOwnerOverrides(stored({ verifiedUsers: [] }))).toBeNull();
-    // Already filtered rows pass through.
-    const filtered = stored();
-    expect(effectiveOwnerOverrides(filtered)).toBe(filtered);
     expect(effectiveOwnerOverrides(null)).toBeNull();
+  });
+
+  test("fails closed: without the verified members nothing is visible", () => {
+    // A row that did not come with who holds a claim is never shown whole.
+    expect(effectiveOwnerOverrides(stored())).toBeNull();
+    expect(effectiveOwnerOverrides(stored({ verifiedUsers: null }))).toBeNull();
   });
 
   test("a save keeps the author of what it left alone and takes what it changed", () => {

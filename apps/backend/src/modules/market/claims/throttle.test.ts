@@ -40,6 +40,19 @@ describe("claim throttle", () => {
     ).toEqual({ ok: true });
   });
 
+  test("a last verify stamped after this request's own time is too soon, not a pass", () => {
+    // Taken before waiting for the member's lock, served after a later stamp.
+    expect(
+      throttleVerdict({
+        kind: "verify",
+        now: NOW,
+        lastVerifyAt: ago(-3),
+        attemptsInWindow: 1,
+        oldestInWindow: ago(-3),
+      }),
+    ).toEqual({ ok: false, reason: "interval", retryAfterSeconds: 30 });
+  });
+
   test("the spacing is for verifies; a start is not held by it", () => {
     expect(
       throttleVerdict({
