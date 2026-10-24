@@ -1,4 +1,4 @@
-#![cfg(target_os = "macos")]
+#![cfg(unix)]
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use sourceweft_desktop::local_host::LocalHost;
 use std::fs;

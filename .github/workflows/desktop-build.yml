@@ -145,6 +145,13 @@ jobs:
           value=$(sysctl -n kernel.apparmor_restrict_unprivileged_userns)
           echo "kernel.apparmor_restrict_unprivileged_userns=${value}"
           test "${value}" = "1"
+      - name: Add the /etc/hosts entries the proxy hostname tests require
+        # hostnames_resolving_to_private_addresses_are_refused asserts these exist: names that
+        # resolve to host loopback and to a private address, without depending on live DNS.
+        run: |
+          set -eu
+          printf '127.0.0.1 sw-loop.test\n10.0.0.1 sw-private.test\n' | sudo tee -a /etc/hosts > /dev/null
+          getent hosts sw-loop.test sw-private.test
       - name: Pre-build the real-sandbox test binary
         # Compiles (but does not run) before the next step sets a poisoned proxy: cargo
         # itself honours HTTP_PROXY/HTTPS_PROXY for its own crates.io/registry access, and a

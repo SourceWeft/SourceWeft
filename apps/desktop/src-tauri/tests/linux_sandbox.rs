@@ -9,6 +9,11 @@
 //! starts the sidecar from `<app data>/sandbox/current` and uses the production bwrap at
 //! `/opt/sourceweft/libexec/bwrap`.
 //!
+//! The proxy hostname test needs two `/etc/hosts` entries, `127.0.0.1 sw-loop.test` and
+//! `10.0.0.1 sw-private.test` (the linux-sandbox CI job adds them; for Docker pass
+//! `--add-host sw-loop.test:127.0.0.1 --add-host sw-private.test:10.0.0.1`), and fails with
+//! that instruction when they are missing.
+//!
 //! No new environment variables may be added to the product, and that restriction extends to
 //! how this test locates its fixtures: the bundle is located relative to
 //! `CARGO_MANIFEST_DIR`, at `apps/desktop/sandbox-sidecar/dist/bundle` (git-ignored). The
@@ -79,6 +84,7 @@ fn readiness_needs_setup_without_profile() {
     // point of pinning bwrap to /opt/sourceweft/libexec/bwrap with a scoped profile instead of
     // ever loosening /usr/bin/bwrap or the sysctl; this test proves the unscoped path really
     // does fail closed rather than silently running unsandboxed.
+    ensure_tmp_claude();
     let temp = tempfile::tempdir().unwrap();
     let bundle = bundle_dir(temp.path());
     copy_bundle_into(&bundle);
@@ -114,6 +120,7 @@ fn readiness_ready_with_working_bwrap() {
     // restricted sysctl no longer blocks it. Probing /usr/bin/bwrap here would fail on that
     // restricted runner (see readiness_needs_setup_without_profile, which deliberately keeps
     // probing /usr/bin/bwrap to prove the unscoped path still fails closed).
+    ensure_tmp_claude();
     let temp = tempfile::tempdir().unwrap();
     let bundle = bundle_dir(temp.path());
     copy_bundle_into(&bundle);
@@ -134,15 +141,22 @@ fn readiness_ready_with_working_bwrap() {
 // Execution through the production `LocalHost` path.
 // ---------------------------------------------------------------------------------------------
 
-/// Creates `/tmp/claude` on the host once, before any test in this binary starts a sidecar, and
-/// never removes it: srt treats an existing `/tmp/claude` as its own writable TMPDIR (the state on
-/// any machine that also runs Claude Code), so every execution test runs in that configuration,
-/// and `cannot_write_srt_tmp_claude` proves the sidecar's write deny covers it. Creating or
-/// removing it while another test's command is between wrap and exec would race srt's bind.
+/// Host fixtures every test needs before any test in this binary starts a sidecar or reads the
+/// login-shell `PATH` (which the host captures once per process):
+///
+/// - `/tmp/claude`, never removed: srt treats an existing `/tmp/claude` as its own writable
+///   TMPDIR (the state on any machine that also runs Claude Code), so every execution test runs
+///   in that configuration, and `cannot_write_srt_tmp_claude` proves the sidecar's write deny
+///   covers it. Creating or removing it while another test's command is between wrap and exec
+///   would race srt's bind.
+/// - `~/.local/bin`: Ubuntu's `~/.profile` puts it on the login `PATH` only when it exists at
+///   login, and `cannot_read_host_database_under_local_share` needs it there. Creating it inside
+///   that test raced whichever test captured the `PATH` first.
 fn ensure_tmp_claude() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
         fs::create_dir_all("/tmp/claude").expect("create /tmp/claude");
+        fs::create_dir_all(home_dir().join(".local/bin")).expect("create ~/.local/bin");
     });
     assert!(
         Path::new("/tmp/claude").is_dir(),
@@ -525,4 +539,319 @@ fn cannot_read_host_database_under_local_share() {
         "host database readable: {result}"
     );
     assert_ne!(result["exitCode"], 0, "{result}");
+}
+
+// ---------------------------------------------------------------------------------------------
+// Network: what the sandbox proxy actually dials (final review C1, I6). Each probe speaks the
+// proxy protocol by hand from inside the sandbox, so the client never normalises the host the
+// way curl would: the proxy sees exactly the spelling under test.
+// ---------------------------------------------------------------------------------------------
+
+/// A listener bound only to the host's 127.0.0.1 that answers every connection with a unique
+/// marker. A sandboxed command that ever sees the marker reached host loopback.
+fn host_only_listener() -> (u16, String) {
+    use std::io::Write;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let marker = format!("HOST-LOOPBACK-REACHED-{}", uuid::Uuid::new_v4().simple());
+    let reply = format!(
+        "HTTP/1.0 200 OK\r\nContent-Length: {}\r\n\r\n{marker}",
+        marker.len()
+    );
+    std::thread::spawn(move || {
+        for mut stream in listener.incoming().flatten() {
+            let _ = stream.write_all(reply.as_bytes());
+        }
+    });
+    (port, marker)
+}
+
+/// `CONNECT <host>:<port>` to the sandbox's HTTP proxy, authenticated with the credentials srt
+/// put in the sandboxed command's own `HTTPS_PROXY`, then whatever the tunnel returns.
+const CONNECT_PROBE: &str = r#"p="$HTTPS_PROXY"; rest="${p#http://}"; cred="${rest%@*}"; hp="${rest##*@}"
+auth=$(printf %s "$cred" | base64 -w0)
+exec 3<>"/dev/tcp/${hp%:*}/${hp##*:}"
+printf 'CONNECT %s HTTP/1.1\r\nHost: %s\r\nProxy-Authorization: Basic %s\r\n\r\n' '@TARGET@' '@TARGET@' "$auth" >&3
+sleep 0.5
+printf 'GET / HTTP/1.0\r\n\r\n' >&3 2>/dev/null
+timeout 5 cat <&3 | tr -d '\r'
+true"#;
+
+/// A SOCKS5 CONNECT with a DOMAINNAME (address type 3) destination to the sandbox's SOCKS
+/// proxy (`FTP_PROXY` names it), using the username/password from that URL. Prints each reply
+/// as hex (`greeting=0502`, `auth=0100`, `reply=05..`), then whatever the tunnel returns.
+const SOCKS_PROBE: &str = r#"p="$FTP_PROXY"; rest="${p#socks5h://}"; cred="${rest%@*}"; hp="${rest##*@}"
+user="${cred%%:*}"; pass="${cred#*:}"; host='@HOST@'; port=@PORT@
+hex() { od -An -tx1 | tr -d ' \n'; }
+byte() { printf "\\$(printf %03o "$1")"; }
+exec 3<>"/dev/tcp/${hp%:*}/${hp##*:}"
+printf '\005\001\002' >&3
+printf 'greeting=%s\n' "$(head -c 2 <&3 | hex)"
+{ printf '\001'; byte ${#user}; printf %s "$user"; byte ${#pass}; printf %s "$pass"; } >&3
+printf 'auth=%s\n' "$(head -c 2 <&3 | hex)"
+{ printf '\005\001\000\003'; byte ${#host}; printf %s "$host"; byte $((port >> 8)); byte $((port & 255)); } >&3
+printf 'reply=%s\n' "$(timeout 10 head -c 2 <&3 | hex)"
+printf 'GET / HTTP/1.0\r\n\r\n' >&3 2>/dev/null
+timeout 5 cat <&3 | tr -d '\r'
+true"#;
+
+fn connect_probe(host: &LocalHost, workspace: &Workspace, target: &str) -> Value {
+    execute(
+        host,
+        &format!("connect-{target}"),
+        workspace,
+        &CONNECT_PROBE.replace("@TARGET@", target),
+    )
+}
+
+fn socks_probe(host: &LocalHost, workspace: &Workspace, dest: &str, port: u16) -> Value {
+    execute(
+        host,
+        &format!("socks-{dest}-{port}"),
+        workspace,
+        &SOCKS_PROBE
+            .replace("@HOST@", dest)
+            .replace("@PORT@", &port.to_string()),
+    )
+}
+
+/// The proxy answered the CONNECT, and refused it with a 403.
+fn assert_connect_refused(result: &Value, target: &str, marker: Option<&str>) {
+    let text = output(result);
+    let status = text.lines().next().unwrap_or_default();
+    assert!(
+        status.starts_with("HTTP/1.1 403"),
+        "CONNECT {target} must be refused with 403 by the sandbox proxy: {result}"
+    );
+    if let Some(marker) = marker {
+        assert!(
+            !text.contains(marker),
+            "CONNECT {target} reached the host-only listener: {result}"
+        );
+    }
+}
+
+/// The SOCKS handshake and authentication succeeded (so the probe really talked to the proxy),
+/// and the CONNECT itself was refused (reply code other than 00 succeeded).
+fn assert_socks_refused(result: &Value, dest: &str, marker: Option<&str>) {
+    let text = output(result);
+    assert!(
+        text.contains("greeting=0502") && text.contains("auth=0100"),
+        "the SOCKS probe never authenticated with the sandbox proxy for {dest}: {result}"
+    );
+    let reply = text
+        .lines()
+        .find_map(|line| line.strip_prefix("reply="))
+        .unwrap_or_default();
+    assert!(
+        reply.len() == 4 && reply.starts_with("05") && reply != "0500",
+        "SOCKS CONNECT to {dest} must be refused (got reply {reply:?}): {result}"
+    );
+    if let Some(marker) = marker {
+        assert!(
+            !text.contains(marker),
+            "SOCKS CONNECT to {dest} reached the host-only listener: {result}"
+        );
+    }
+}
+
+/// Spellings of host loopback that an inet_aton-style parser (and the WHATWG URL parser srt
+/// dials through) turns into 127.0.0.1.
+const LOOPBACK_SPELLINGS: [&str; 4] = ["127.0.0.1", "127.1", "2130706433", "0x7f.0.0.1"];
+
+#[test]
+#[ignore = "requires bubblewrap and the sandbox bundle"]
+fn connect_to_loopback_spellings_is_refused() {
+    let (port, marker) = host_only_listener();
+    let (_app, host) = host_with_bundle();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    for spelling in LOOPBACK_SPELLINGS {
+        let target = format!("{spelling}:{port}");
+        let result = connect_probe(&host, &workspace, &target);
+        assert_connect_refused(&result, &target, Some(&marker));
+        assert!(
+            output(&result).contains("public internet only"),
+            "CONNECT {target} must be refused by the sidecar's address guard: {result}"
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires bubblewrap and the sandbox bundle"]
+fn socks_to_loopback_spellings_is_refused() {
+    let (port, marker) = host_only_listener();
+    let (_app, host) = host_with_bundle();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    for spelling in LOOPBACK_SPELLINGS {
+        let result = socks_probe(&host, &workspace, spelling, port);
+        assert_socks_refused(&result, spelling, Some(&marker));
+    }
+}
+
+#[test]
+#[ignore = "requires bubblewrap and the sandbox bundle"]
+fn metadata_and_private_shorthand_literals_are_refused() {
+    // 2852039166 is 169.254.169.254 (cloud metadata); 10.1 is 10.0.0.1.
+    let (_app, host) = host_with_bundle();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    for (spelling, port) in [("2852039166", 80u16), ("10.1", 80u16)] {
+        let target = format!("{spelling}:{port}");
+        let result = connect_probe(&host, &workspace, &target);
+        assert_connect_refused(&result, &target, None);
+        assert!(
+            output(&result).contains("public internet only"),
+            "CONNECT {target} must be refused by the sidecar's address guard: {result}"
+        );
+        let result = socks_probe(&host, &workspace, spelling, port);
+        assert_socks_refused(&result, spelling, None);
+    }
+}
+
+/// Asserts `/etc/hosts` maps `name` to `address`. The linux-sandbox CI job and the Docker
+/// recipe add these entries; without them a hostname test would prove nothing.
+fn require_hosts_entry(name: &str, address: &str) {
+    let hosts = fs::read_to_string("/etc/hosts").expect("read /etc/hosts");
+    let present = hosts.lines().any(|line| {
+        let mut fields = line.split('#').next().unwrap_or_default().split_whitespace();
+        fields.next() == Some(address) && fields.any(|field| field == name)
+    });
+    assert!(
+        present,
+        "/etc/hosts must map {name} to {address} for this test: add the line \
+         `{address} {name}` (the linux-sandbox CI job does; for Docker pass \
+         `--add-host {name}:{address}`)"
+    );
+}
+
+#[test]
+#[ignore = "requires bubblewrap, the sandbox bundle and /etc/hosts test entries"]
+fn hostnames_resolving_to_private_addresses_are_refused() {
+    require_hosts_entry("sw-loop.test", "127.0.0.1");
+    require_hosts_entry("sw-private.test", "10.0.0.1");
+    let (port, marker) = host_only_listener();
+    let (_app, host) = host_with_bundle();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    for (name, port) in [("sw-loop.test", port), ("sw-private.test", 80)] {
+        let target = format!("{name}:{port}");
+        let result = connect_probe(&host, &workspace, &target);
+        assert_connect_refused(&result, &target, Some(&marker));
+        let result = socks_probe(&host, &workspace, name, port);
+        assert_socks_refused(&result, name, Some(&marker));
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Reads outside the home directory (final review I1, I2).
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+#[ignore = "requires bubblewrap and the sandbox bundle"]
+fn cannot_read_tmp_outside_workspace() {
+    let secret_path = std::env::temp_dir().join(format!(
+        "sw-tmp-secret-{}",
+        uuid::Uuid::new_v4().simple()
+    ));
+    let secret = format!("sw-tmp-secret-{}", uuid::Uuid::new_v4().simple());
+    fs::write(&secret_path, &secret).unwrap();
+    let _cleanup = RemoveOnDrop(secret_path.clone());
+
+    let (_app, host) = host_with_bundle();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    assert!(
+        !secret_path.starts_with(&workspace.path),
+        "precondition: the planted file must lie outside the workspace"
+    );
+    let result = execute_denied(
+        &host,
+        "tmp-read",
+        &workspace,
+        &format!("cat {}", quoted(&secret_path)),
+    );
+    assert!(
+        !output(&result).contains(&secret),
+        "a file in /tmp outside the workspace was readable: {result}"
+    );
+    assert_ne!(result["exitCode"], 0, "{result}");
+}
+
+#[test]
+#[ignore = "requires bubblewrap and the sandbox bundle"]
+fn cannot_read_another_granted_workspace_outside_home() {
+    // Ruling R24: granted folders outside $HOME are isolated per wrap exactly like those inside.
+    let (_app, host) = host_with_bundle();
+    let other = tempfile::tempdir().unwrap();
+    assert!(
+        !other.path().starts_with(home_dir()),
+        "precondition: the granted folder must lie outside $HOME"
+    );
+    let secret = format!("sw-outside-home-{}", uuid::Uuid::new_v4().simple());
+    fs::write(other.path().join("secret.txt"), &secret).unwrap();
+    let (grant, other_root) = host.grant_directory("owner", other.path()).unwrap();
+    let granted = host
+        .ensure_workspace_with_grant("owner", "granted-thread", Some(&grant))
+        .unwrap();
+    let own = execute(&host, "own-read", &granted, "cat secret.txt");
+    assert_eq!(output(&own), secret, "positive control: {own}");
+
+    let automatic = host.ensure_workspace("owner", "thread").unwrap();
+    let result = execute_denied(
+        &host,
+        "cross-read",
+        &automatic,
+        &format!("cat {}", quoted(&other_root.join("secret.txt"))),
+    );
+    assert!(
+        !output(&result).contains(&secret),
+        "read another workspace outside home: {result}"
+    );
+    assert_ne!(result["exitCode"], 0, "{result}");
+}
+
+#[test]
+#[ignore = "requires bubblewrap and the sandbox bundle"]
+fn cannot_read_cargo_credentials_under_a_toolchain_read_root() {
+    // Ruling R25: `~/.cargo/bin` on PATH re-allows `~/.cargo` (R13), but the registry token
+    // file inside it stays denied. An existing credentials file is never overwritten, printed
+    // or removed: the probe only reports whether it could be opened.
+    let cargo = home_dir().join(".cargo");
+    let credentials = cargo.join("credentials.toml");
+    let planted = if credentials.exists() {
+        None
+    } else {
+        fs::create_dir_all(&cargo).unwrap();
+        fs::write(&credentials, "[registry]\ntoken = \"sw-test-not-a-token\"\n").unwrap();
+        Some(RemoveOnDrop(credentials.clone()))
+    };
+    let (_app, host) = host_with_bundle();
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    let cargo_bin = cargo.join("bin");
+    let result = execute_denied(
+        &host,
+        "cargo-credentials",
+        &workspace,
+        &format!(
+            "printf '%s\\n' \"$PATH\"; ls {} >/dev/null && echo TOOLCHAIN-READABLE; \
+             if cat {} >/dev/null 2>&1; then echo CREDENTIALS-READABLE; else echo CREDENTIALS-DENIED; fi",
+            quoted(&cargo_bin),
+            quoted(&credentials)
+        ),
+    );
+    let text = output(&result);
+    assert!(
+        text.lines()
+            .next()
+            .unwrap_or_default()
+            .split(':')
+            .any(|entry| Path::new(entry) == cargo_bin),
+        "precondition: ~/.cargo/bin must be on the sandboxed PATH: {result}"
+    );
+    assert!(
+        text.contains("TOOLCHAIN-READABLE"),
+        "positive control: ~/.cargo must stay readable as a toolchain read root: {result}"
+    );
+    assert!(
+        text.contains("CREDENTIALS-DENIED") && !text.contains("CREDENTIALS-READABLE"),
+        "~/.cargo/credentials.toml was readable inside the sandbox: {result}"
+    );
+    drop(planted);
 }

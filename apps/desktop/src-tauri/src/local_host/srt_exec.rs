@@ -5,7 +5,9 @@
 //! One sidecar is kept per `LocalHost`, started lazily from `readiness::bundle_dir`. Its `init`
 //! lists `<base>/task-workspaces` plus every currently granted directory as the workspace roots
 //! a wrap may name; each `wrap` grants read and write access to exactly that command's workspace
-//! root (plus read access to the toolchain read roots and the in-sandbox helper files). Nothing here ever runs
+//! root (plus read access to the toolchain read roots and the in-sandbox helper files). The
+//! sidecar's Linux policy denies reading `/` and re-allows only its system read set on top of
+//! those (`sandbox-sidecar/src/policy.ts`, Ruling R24). Nothing here ever runs
 //! a command without an argv the sidecar wrapped: a missing bundle, a failed start, or a wrap
 //! that still fails after one restart is returned as an error.
 use super::{
@@ -99,6 +101,9 @@ pub(crate) fn init_config(bundle: &Path, base: &Path, workspace_roots: Vec<Strin
 /// rule falls back to the entry itself for `~/bin` and `~/.local/bin`, since `~/.local` holds
 /// `~/.local/share`, where app data (including this host's) lives — and any directory that
 /// equals, contains, or lies inside the app data directory `base`.
+///
+/// A read root can contain credential files (`~/.cargo/credentials.toml` under `~/.cargo`); the
+/// sidecar's policy keeps the known ones literally read-denied inside it (Ruling R25).
 pub(crate) fn read_roots(home: &Path, base: &Path, path_var: &str) -> Vec<String> {
     if !home.is_absolute() {
         return Vec::new();
