@@ -258,6 +258,33 @@ export async function markClaimEnded(input: {
   return row ?? null;
 }
 
+/**
+ * Ends the member's other open claims on the server when an admin blocks
+ * one: a pending domain claim left beside the blocked one must not become
+ * the way back in.
+ */
+export async function revokeOtherOpenClaims(input: {
+  serverId: string;
+  userId: string;
+  exceptClaimId: string;
+  revokedBy: string;
+  now: Date;
+}): Promise<number> {
+  const rows = await db
+    .update(marketMcpClaims)
+    .set({ status: "revoked", revokedAt: input.now, revokedBy: input.revokedBy })
+    .where(
+      and(
+        eq(marketMcpClaims.serverId, input.serverId),
+        eq(marketMcpClaims.userId, input.userId),
+        ne(marketMcpClaims.id, input.exceptClaimId),
+        inArray(marketMcpClaims.status, ["pending", "verified"]),
+      ),
+    )
+    .returning({ id: marketMcpClaims.id });
+  return rows.length;
+}
+
 /** Lifts an admin's block: the claim becomes an ordinary revoked one. */
 export async function markClaimUnblocked(
   claimId: string,

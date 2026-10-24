@@ -45,6 +45,7 @@ import {
   markClaimVerified,
   recordClaimError,
   replacePendingClaim,
+  revokeOtherOpenClaims,
   upsertOwnerOverrideValues,
   upsertOwnerTools,
   type ClaimableServer,
@@ -293,13 +294,7 @@ export async function startMcpClaim(
   if (existing) {
     return { claim: toClaim(existing, server.identifier), instructions: null };
   }
-  if (await findBlockedClaim(server.id, input.userId)) {
-    throw new McpClaimError(
-      403,
-      "MCP_CLAIM_BLOCKED",
-      "A market admin revoked your claim on this server; write to support if you believe that was wrong",
-    );
-  }
+  if (await findBlockedClaim(server.id, input.userId)) throw claimBlocked();
   const targets = claimTargetsFor(server);
   const now = deps.now();
 
@@ -361,6 +356,14 @@ export async function startMcpClaim(
   };
 }
 
+function claimBlocked(): McpClaimError {
+  return new McpClaimError(
+    403,
+    "MCP_CLAIM_BLOCKED",
+    "A market admin revoked your claim on this server; write to support if you believe that was wrong",
+  );
+}
+
 function isUniqueViolation(error: unknown): boolean {
   const seen = new Set<unknown>();
   let current: unknown = error;
@@ -410,6 +413,9 @@ export async function verifyMcpClaim(
       "This claim is not waiting for verification",
     );
   }
+  // A block applies to the member on this server, whichever claim they
+  // try to finish with.
+  if (await findBlockedClaim(row.serverId, input.userId)) throw claimBlocked();
   const now = deps.now();
   if (row.expiresAt && row.expiresAt.getTime() <= now.getTime()) {
     await recordClaimError(row.id, "expired");
@@ -489,13 +495,23 @@ export async function adminRevokeMcpClaim(
   const row = await findClaimById(input.claimId);
   if (!row) throw claimNotFound();
   const identifier = await identifierOf(row.serverId);
+  const now = deps.now();
   const blocked =
     (await markClaimEnded({
       claimId: row.id,
       status: "blocked",
       revokedBy: input.adminUserId,
-      now: deps.now(),
+      now,
     })) ?? row;
+  // The member's other open claims on this server end with it: a pending
+  // domain claim beside the blocked one is not a way back in.
+  await revokeOtherOpenClaims({
+    serverId: row.serverId,
+    userId: row.userId,
+    exceptClaimId: row.id,
+    revokedBy: input.adminUserId,
+    now,
+  });
   return { claim: toClaim(blocked, identifier) };
 }
 

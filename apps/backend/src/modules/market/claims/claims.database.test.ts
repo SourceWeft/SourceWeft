@@ -635,6 +635,60 @@ describe("MCP owner claims", () => {
       expect(again.status).toBe(201);
     });
 
+    test("a block also ends a pending claim left beside the blocked one", async () => {
+      const identifier = `com.${tag}pend/mcp`;
+      await ingest.upsertMarketMcp({ ...federated, manifest: manifest(identifier) });
+      // Frank verifies through the well-known file, then starts a second,
+      // pending DNS claim on the same server and keeps its token.
+      const first = await service.startMcpClaim(
+        { userId: "frank", identifier, method: "well_known" },
+        deps(),
+      );
+      state.wellKnown.set(
+        `https://${tag}pend.com/.well-known/sourceweft-claim`,
+        first.instructions!.token,
+      );
+      await service.verifyMcpClaim({ userId: "frank", claimId: first.claim.id }, deps());
+      // (startMcpClaim answers with the verified claim once one exists, so
+      // the pending sibling is seeded the way a race would leave it.)
+      const pending = await (await import("./repository")).replacePendingClaim({
+        id: randomUUID(),
+        serverId: (await (await import("./repository")).findClaimableServer(identifier))!.id,
+        userId: "frank",
+        method: "dns_txt",
+        status: "pending",
+        target: `${tag}pend.com`,
+        tokenHash: (await import("./targets")).hashClaimToken("sourceweft-claim-" + "a".repeat(32)),
+        expiresAt: new Date(state.now.getTime() + 86_400_000),
+        createdAt: state.now,
+      });
+      state.txt.set(`_sourceweft-claim.${tag}pend.com`, [["sourceweft-claim-" + "a".repeat(32)]]);
+
+      const rows = await service.listMcpClaimsForAdmin({ identifier });
+      const verified = rows.find((row) => row.userId === "frank" && row.status === "verified")!;
+      await service.adminRevokeMcpClaim({ adminUserId: "market-admin", claimId: verified.id }, deps());
+
+      // The pending claim was ended with the block, and verifying it — or any
+      // pending claim of frank's on this server — is refused.
+      const after = await service.listMcpClaimsForAdmin({ identifier });
+      expect(after.find((row) => row.id === pending.id)?.status).toBe("revoked");
+      await expect(
+        service.verifyMcpClaim({ userId: "frank", claimId: pending.id }, deps()),
+      ).rejects.toMatchObject({ code: "MCP_CLAIM_NOT_PENDING" });
+      // Even a pending row that somehow survived cannot be verified while blocked.
+      await data.db
+        .update(data.marketMcpClaims)
+        .set({ status: "pending", revokedAt: null, revokedBy: null })
+        .where(eq(data.marketMcpClaims.id, pending.id));
+      await expect(
+        service.verifyMcpClaim({ userId: "frank", claimId: pending.id }, deps()),
+      ).rejects.toMatchObject({ code: "MCP_CLAIM_BLOCKED", statusCode: 403 });
+      const detail = (await json(await app.request(`/v1/mcp/${enc(identifier)}`))) as {
+        item: { claimed: boolean };
+      };
+      expect(detail.item.claimed).toBe(false);
+    });
+
     test("a correction shows only while its author holds a verified claim", async () => {
       const identifier = `com.${tag}two/mcp`;
       await ingest.upsertMarketMcp({ ...federated, manifest: manifest(identifier) });

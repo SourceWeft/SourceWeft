@@ -746,8 +746,10 @@ export const MARKET_MCP_INSPECT_LIMITS = Object.freeze({
   serverInfoBytes: 4 * 1024,
 });
 
+// UTF-8 size of a value's JSON; this package runs in browsers too, so no
+// Node `Buffer`.
 function jsonBytes(value: unknown): number {
-  return Buffer.byteLength(JSON.stringify(value ?? null), "utf8");
+  return new TextEncoder().encode(JSON.stringify(value ?? null)).byteLength;
 }
 
 export const marketMcpInspectedToolSchema = z
