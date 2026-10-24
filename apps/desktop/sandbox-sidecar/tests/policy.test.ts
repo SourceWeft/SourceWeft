@@ -7,6 +7,22 @@ import {
   PolicyInvalidError,
 } from "../src/policy.js";
 
+const SYSTEM = ["/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/libx32", "/etc", "/opt"];
+const CREDENTIALS = [
+  ".cargo/credentials",
+  ".cargo/credentials.toml",
+  ".docker/config.json",
+  ".npmrc",
+  ".pypirc",
+  ".netrc",
+  ".git-credentials",
+  ".config/gh/hosts.yml",
+].map((relative) => ({ path: `/home/u/${relative}`, literal: true }));
+const literals = (paths: readonly string[]) => paths.map((path) => ({ path, literal: true }));
+/** The paths of a filesystem entry list (srt also accepts bare strings there). */
+const pathsOf = (entries: ReadonlyArray<string | { path: string }> | undefined): string[] =>
+  (entries ?? []).map((entry) => (typeof entry === "string" ? entry : entry.path));
+
 function validInit(overrides: Partial<Parameters<typeof buildConfig>[0]> = {}) {
   return {
     platform: "linux" as const,
@@ -18,7 +34,7 @@ function validInit(overrides: Partial<Parameters<typeof buildConfig>[0]> = {}) {
   };
 }
 
-test("denies home, re-allows workspace and read roots as literals", () => {
+test("linux denies / and home, re-allows the system set, workspace and read roots as literals", () => {
   const c = buildConfig({
     platform: "linux",
     home: "/home/u",
@@ -27,18 +43,21 @@ test("denies home, re-allows workspace and read roots as literals", () => {
     helpers: { ripgrep: "/opt/sw/rg", applySeccomp: "/opt/sw/apply-seccomp" },
     bwrapPath: "/opt/sourceweft/libexec/bwrap",
   });
-  assert.deepEqual(c.filesystem.denyRead, [{ path: "/home/u", literal: true }]);
+  // Ruling R24: the whole filesystem, then home, then (R25) the home credential files.
+  assert.deepEqual(c.filesystem.denyRead, [
+    { path: "/", literal: true },
+    { path: "/home/u", literal: true },
+    ...CREDENTIALS,
+  ]);
   assert.deepEqual(c.filesystem.allowRead, [
     { path: "/home/u/ws [1]", literal: true },
+    ...literals(SYSTEM),
     { path: "/home/u/.nvm/versions/node/v22.1.0", literal: true },
     { path: "/opt/sw/apply-seccomp", literal: true },
   ]);
   assert.deepEqual(c.filesystem.allowWrite, []);
-  // Ruling R15: srt's own always-writable TMPDIR is denied.
-  assert.deepEqual(c.filesystem.denyWrite, [
-    { path: "/tmp/claude", literal: true },
-    { path: "/private/tmp/claude", literal: true },
-  ]);
+  // Ruling R15: srt's own always-writable TMPDIR is denied; M1: only its Linux spelling.
+  assert.deepEqual(c.filesystem.denyWrite, [{ path: "/tmp/claude", literal: true }]);
   assert.equal(c.filesystem.allowGitConfig, true);
   assert.deepEqual(c.network.allowedDomains, []);
   assert.deepEqual(c.network.deniedResolvedAddresses, [
@@ -59,6 +78,40 @@ test("denies home, re-allows workspace and read roots as literals", () => {
   ])
     assert.ok(!(k in c) && !(k in c.network), `${k} must not be set`);
 });
+test("darwin keeps the home deny only, and both spellings of /tmp/claude", () => {
+  const c = buildConfig(validInit({ platform: "darwin", home: "/home/u" }));
+  assert.deepEqual(c.filesystem.denyRead, [{ path: "/home/u", literal: true }, ...CREDENTIALS]);
+  assert.deepEqual(c.filesystem.allowRead, [
+    { path: "/home/u/ws", literal: true },
+    { path: "/home/u/.nvm/versions/node/v22.1.0", literal: true },
+  ]);
+  assert.deepEqual(c.filesystem.denyWrite, [
+    { path: "/tmp/claude", literal: true },
+    { path: "/private/tmp/claude", literal: true },
+  ]);
+});
+
+// Ruling R25: the credential files stay denied however home is spelled.
+test("credential denies are absolute paths under home", () => {
+  const c = buildConfig(validInit({ home: "/home/u/" }));
+  const denied = pathsOf(c.filesystem.denyRead);
+  assert.ok(denied.includes("/home/u/.cargo/credentials.toml"));
+  assert.ok(denied.every((path) => !path.includes("//")));
+});
+
+// srt binds its bridge sockets from the sidecar's runtime directory before its filesystem
+// mounts; on Linux exactly that directory is re-allowed so the "/" deny does not hide them.
+test("linux re-allows the sidecar runtime directory, darwin does not", () => {
+  const linux = buildConfig(validInit(), "/tmp/sourceweft-srt-abc");
+  assert.ok(pathsOf(linux.filesystem.allowRead).includes("/tmp/sourceweft-srt-abc"));
+  assert.ok(perWrapReadRoots(validInit(), "/tmp/sourceweft-srt-abc").includes("/tmp/sourceweft-srt-abc"));
+  assert.ok(!pathsOf(linux.filesystem.allowRead).includes("/tmp"));
+  assert.ok(
+    !perWrapReadRoots(validInit({ platform: "darwin" }), "/tmp/x").includes("/tmp/x"),
+  );
+  assert.throws(() => buildConfig(validInit(), "relative"), PolicyInvalidError);
+});
+
 test("per-command write root is the workspace only", () =>
   assert.deepEqual(perCommandConfig("/home/u/ws [1]", []).filesystem?.allowWrite, [
     { path: "/home/u/ws [1]", literal: true },
@@ -86,11 +139,18 @@ test("per-wrap read roots carve out exactly the in-sandbox helper files", () => 
     },
   });
   assert.deepEqual(perWrapReadRoots(init), [
+    ...SYSTEM,
     "/home/u/.nvm/versions/node/v22.1.0",
     "/home/u/app/sandbox/current/apply-seccomp",
     "/home/u/app/sandbox/current/srt-proxy-agent.jar",
   ]);
-  assert.deepEqual(perWrapReadRoots(validInit()), ["/home/u/.nvm/versions/node/v22.1.0"]);
+  assert.deepEqual(perWrapReadRoots(validInit()), [
+    ...SYSTEM,
+    "/home/u/.nvm/versions/node/v22.1.0",
+  ]);
+  assert.deepEqual(perWrapReadRoots(validInit({ platform: "darwin" })), [
+    "/home/u/.nvm/versions/node/v22.1.0",
+  ]);
 });
 
 // Ruling R16(c): extra read denies come after `home`, as literals; omitted means none.
@@ -99,12 +159,16 @@ test("denyRoots are added to denyRead as literals", () => {
     validInit({ denyRoots: ["/home/u/.local/share/app/local-host", "/home/u/.local/share/app/sandbox"] }),
   );
   assert.deepEqual(c.filesystem.denyRead, [
+    { path: "/", literal: true },
     { path: "/home/u", literal: true },
     { path: "/home/u/.local/share/app/local-host", literal: true },
     { path: "/home/u/.local/share/app/sandbox", literal: true },
+    ...CREDENTIALS,
   ]);
   assert.deepEqual(buildConfig(validInit()).filesystem.denyRead, [
+    { path: "/", literal: true },
     { path: "/home/u", literal: true },
+    ...CREDENTIALS,
   ]);
 });
 test("rejects a relative denyRoots entry", () => {

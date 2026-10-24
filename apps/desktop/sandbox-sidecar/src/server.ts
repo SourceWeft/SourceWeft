@@ -58,6 +58,11 @@ export type SrtLike = {
 export type ServerDeps = {
   srt: SrtLike;
   ownAddresses: () => Set<string>;
+  /**
+   * The private directory `main.ts` made srt's `os.tmpdir()` (Linux only), which the policy
+   * re-allows for reading so srt's bridge sockets stay reachable; see `buildConfig`.
+   */
+  runtimeDir?: string;
 };
 
 const KNOWN_ERROR_CODES: readonly SidecarErrorCode[] = [
@@ -124,6 +129,8 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 type InitializedState = {
   config: InitConfig;
   runtimeConfig: SandboxRuntimeConfig;
+  /** `perWrapReadRoots(config, deps.runtimeDir)`, computed once at `init`. */
+  wrapReadRoots: string[];
 };
 
 /**
@@ -245,7 +252,7 @@ export async function startServer(
 
   async function handleInit(config: InitConfig): Promise<null> {
     checkHelpersExist(config);
-    const runtimeConfig = buildConfig(config);
+    const runtimeConfig = buildConfig(config, deps.runtimeDir);
     ownAddressesCache = deps.ownAddresses();
     ownAddressesCachedAt = Date.now();
     try {
@@ -256,7 +263,7 @@ export async function startServer(
         error instanceof Error ? error.message : String(error),
       );
     }
-    state = { config, runtimeConfig };
+    state = { config, runtimeConfig, wrapReadRoots: perWrapReadRoots(config, deps.runtimeDir) };
     return null;
   }
 
@@ -278,7 +285,7 @@ export async function startServer(
     const cwd = assertCwdWithinWorkspace(request.cwd, workspaceRoot);
     const customConfig = mergedConfigFor(
       state.runtimeConfig,
-      perWrapReadRoots(state.config),
+      state.wrapReadRoots,
       workspaceRoot,
     );
     try {
@@ -318,7 +325,7 @@ export async function startServer(
     }
     const customConfig = mergedConfigFor(
       state.runtimeConfig,
-      perWrapReadRoots(state.config),
+      state.wrapReadRoots,
       workspaceRoot,
     );
     let argv: string[];

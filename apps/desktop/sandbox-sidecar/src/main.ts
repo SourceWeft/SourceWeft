@@ -25,7 +25,9 @@
  * `flushStdout` (below) is called, and awaited, before every `process.exit(0)` in this file
  * for exactly this reason.
  */
+import { mkdtempSync, rmSync } from "node:fs";
 import * as os from "node:os";
+import { join } from "node:path";
 
 /** Bounds how long `flushStdout` waits for `process.stdout` to drain before giving up on it. */
 const STDOUT_FLUSH_GRACE_MS = 2_000;
@@ -82,6 +84,19 @@ function ownAddresses(): Set<string> {
   return addresses;
 }
 
+/**
+ * Linux only: a fresh 0700 directory that becomes this process's `TMPDIR` (so srt's
+ * `os.tmpdir()`) before srt is imported. srt puts its bridge sockets there, and the policy
+ * re-allows reading exactly this directory under the Linux `/` read deny (see `buildConfig`),
+ * which keeps the shared `/tmp` itself unreadable inside the sandbox. Removed on exit.
+ */
+function createRuntimeDir(): string | undefined {
+  if (process.platform !== "linux") return undefined;
+  const dir = mkdtempSync(join(os.tmpdir(), "sourceweft-srt-"));
+  process.env.TMPDIR = dir;
+  return dir;
+}
+
 async function main(): Promise<void> {
   // Strip proxy variables before anything else touches `process.env` — in particular, before
   // srt is imported below. A static top-level `import` of srt would run its module-level code
@@ -96,6 +111,8 @@ async function main(): Promise<void> {
     return;
   }
 
+  const runtimeDir = createRuntimeDir();
+
   const [{ SandboxManager }, { startServer }] = await Promise.all([
     import("@anthropic-ai/sandbox-runtime"),
     import("./server.js"),
@@ -104,7 +121,9 @@ async function main(): Promise<void> {
   await startServer(process.stdin, process.stdout, {
     srt: SandboxManager,
     ownAddresses,
+    runtimeDir,
   });
+  if (runtimeDir !== undefined) rmSync(runtimeDir, { recursive: true, force: true });
 
   // See the module doc comment: flush the last queued write (the `shutdown` ack, or whatever
   // was written right before EOF) before forcing the exit — forcing it is still necessary,

@@ -39,18 +39,83 @@ function assertAbsolute(field: string, path: string): void {
   }
 }
 
-// Resolved-address ranges srt itself re-checks after DNS resolution, as a second layer
-// behind `address-guard.ts`'s pre-resolution checks on the literal host string. Loopback,
-// link-local, multicast and the specific cloud-metadata addresses are not repeated here:
-// srt's own defaults, together with this sidecar's `address-guard.ts`, already cover them.
 /**
  * srt always makes its own `/tmp/claude` TMPDIR writable (`SANDBOX_OWN_WRITE_PATHS`) when it
  * exists on the host, which would be a write location shared by every command outside its
  * workspace (Ruling R15). `denyWrite` takes precedence over srt's own write paths; commands get
- * a workspace-local `TMPDIR` from the host instead.
+ * a workspace-local `TMPDIR` from the host instead. `/private/tmp/claude` is the same directory
+ * spelled through macOS's `/tmp` symlink; it means nothing on Linux, so only darwin lists it
+ * (final review M1).
  */
-const DENIED_WRITE_PATHS: readonly string[] = ["/tmp/claude", "/private/tmp/claude"];
+function deniedWritePaths(platform: InitConfig["platform"]): string[] {
+  return platform === "darwin" ? ["/tmp/claude", "/private/tmp/claude"] : ["/tmp/claude"];
+}
 
+/**
+ * Ruling R24 (final review I1): on Linux the whole filesystem is read-denied (`/`, which srt
+ * expands into a deny for each top-level directory not covered by an `allowRead` entry, always
+ * leaving the `/proc`, `/dev` and `/sys` it mounts itself), and only this system set, the
+ * command's own workspace root, the toolchain read roots and the two in-sandbox helper files
+ * are re-allowed. Everything else stays unreadable: `/tmp` and `/var/tmp` (other programs'
+ * temporary files; a command's `TMPDIR` lives in its workspace), `/run` (including
+ * `/run/user/<uid>` with its gvfs mounts and portal), `/home` and `/root` (other users, and the
+ * home directory itself, also denied by `home`), `/media`, `/mnt`, `/srv`, `/var`, `/boot`,
+ * `/snap`, and every granted folder outside the home directory that is not this command's own.
+ *
+ * - `/usr`: programs, shared libraries, interpreters and their standard libraries, CA bundles
+ *   (`/usr/share/ca-certificates`), zoneinfo; `/usr/local` toolchains.
+ * - `/bin`, `/sbin`, `/lib`, `/lib32`, `/lib64`, `/libx32`: on a merged-`/usr` system these are
+ *   symlinks into `/usr` (srt then skips denying them: their target is covered); on an older
+ *   layout they are the real directories holding the shell, `ld.so` and libc. Absent entries
+ *   are skipped by srt.
+ * - `/etc`: the dynamic loader cache (`ld.so.cache`), `passwd`/`group`/`nsswitch.conf` (user
+ *   and group lookups), `hosts` (resolving `localhost`, the name in the sandbox's proxy URLs),
+ *   `ssl/certs`, `alternatives`, and tool configuration. World-readable system configuration;
+ *   its secrets (`shadow`, private keys) are root-only and unreadable to the user anyway.
+ * - `/opt`: system-wide third-party software (vendor JDKs, Node or Go tarball installs),
+ *   root-managed and non-secret; includes `/opt/sourceweft/libexec/bwrap`, a public binary.
+ */
+const LINUX_SYSTEM_READ_ROOTS: readonly string[] = [
+  "/usr",
+  "/bin",
+  "/sbin",
+  "/lib",
+  "/lib32",
+  "/lib64",
+  "/libx32",
+  "/etc",
+  "/opt",
+];
+
+/**
+ * Ruling R25 (final review I2): credential files under the home directory that a toolchain read
+ * root (Ruling R13: `~/.cargo/bin` on `PATH` re-allows `~/.cargo`), or a granted folder that
+ * contains them, could otherwise expose. Each is a literal `denyRead` entry, which srt keeps
+ * denied inside an `allowRead` directory. They are listed unconditionally rather than only when
+ * their parent happens to be readable: an entry whose parent is denied or absent mounts nothing
+ * (srt skips it), so the unconditional list is the same policy with no case to get wrong.
+ */
+const HOME_CREDENTIAL_FILES: readonly string[] = [
+  ".cargo/credentials",
+  ".cargo/credentials.toml",
+  ".docker/config.json",
+  ".npmrc",
+  ".pypirc",
+  ".netrc",
+  ".git-credentials",
+  ".config/gh/hosts.yml",
+];
+
+/** `HOME_CREDENTIAL_FILES` as absolute paths under `home`. */
+function credentialDenies(home: string): string[] {
+  const base = home.endsWith("/") ? home.slice(0, -1) : home;
+  return HOME_CREDENTIAL_FILES.map((relative) => `${base}/${relative}`);
+}
+
+// Resolved-address ranges srt itself re-checks after DNS resolution, as a second layer
+// behind `address-guard.ts`'s pre-resolution checks on the literal host string. Loopback,
+// link-local, multicast and the specific cloud-metadata addresses are not repeated here:
+// srt's own defaults, together with this sidecar's `address-guard.ts`, already cover them.
 const DENIED_RESOLVED_ADDRESSES: readonly string[] = [
   "10.0.0.0/8",
   "172.16.0.0/12",
@@ -60,34 +125,48 @@ const DENIED_RESOLVED_ADDRESSES: readonly string[] = [
 ];
 
 /**
- * The read roots every wrapped command gets on top of its own workspace root: the init
- * `readRoots` plus the two helper *files* srt runs or loads inside the sandbox from their host
- * paths — `apply-seccomp` (executed by the wrapped shell) and the Java proxy agent jar (loaded by
- * a JVM). Those live in the host's sandbox bundle, under the app data directory, which `home`
- * and `denyRoots` deny; srt honours an exact file `allowRead` inside a denied directory, so only
- * these two files are carved out. `ripgrep` runs host-side and is not included.
+ * The read roots every wrapped command gets on top of its own workspace root: on Linux the
+ * system read set (`LINUX_SYSTEM_READ_ROOTS`) and the sidecar's own `runtimeDir`, then the init
+ * `readRoots`, then the two helper
+ * *files* srt runs or loads inside the sandbox from their host paths — `apply-seccomp`
+ * (executed by the wrapped shell) and the Java proxy agent jar (loaded by a JVM). Those live in
+ * the host's sandbox bundle, under the app data directory, which `home` and `denyRoots` deny;
+ * srt honours an exact file `allowRead` inside a denied directory, so only these two files are
+ * carved out. `ripgrep` runs host-side and is not included.
  */
-export function perWrapReadRoots(init: InitConfig): string[] {
+export function perWrapReadRoots(init: InitConfig, runtimeDir?: string): string[] {
   const helpers = [init.helpers.applySeccomp, init.helpers.javaAgentJar].filter(
     (path): path is string => path !== undefined,
   );
-  return [...init.readRoots, ...helpers];
+  const system =
+    init.platform === "linux"
+      ? [...LINUX_SYSTEM_READ_ROOTS, ...(runtimeDir === undefined ? [] : [runtimeDir])]
+      : [];
+  return [...system, ...init.readRoots, ...helpers];
 }
 
 /**
- * The sidecar-lifetime srt config: network policy, read-only filesystem access (the whole
- * home directory denied, then the workspace roots and read roots re-allowed as literal
- * paths), and helper binary paths. Grants no filesystem write access — that is always added
+ * The sidecar-lifetime srt config: network policy, read-only filesystem access (on Linux the
+ * whole filesystem and on darwin the home directory denied, the home credential files denied,
+ * then the workspace roots and read roots re-allowed as literal paths), and helper binary
+ * paths. Grants no filesystem write access — that is always added
  * per command by `perCommandConfig`. The host's own interface addresses (what `deniedReason`
  * calls `own`) play no part here — srt's own network config has no per-host notion of "own
  * addresses" to wire it into; Task 3's server applies them only in the ask callback, via
  * `deniedReason` directly.
  *
- * @throws {PolicyInvalidError} if `init.home`, or any entry of `init.workspaceRoots` or
- * `init.readRoots`, is not an absolute path.
+ * `runtimeDir` is the private directory the sidecar points srt's `os.tmpdir()` at (see
+ * `main.ts`). srt creates the Unix sockets its in-sandbox bridge connects to there, and binds
+ * them into the sandbox *before* its filesystem mounts, so the Linux `/` read deny would hide
+ * them again; re-allowing exactly this directory keeps them reachable without re-allowing `/tmp`.
+ * It holds only srt's sockets and empty mount-source directories for this one sidecar.
+ *
+ * @throws {PolicyInvalidError} if `init.home`, `runtimeDir`, or any entry of
+ * `init.workspaceRoots` or `init.readRoots`, is not an absolute path.
  */
-export function buildConfig(init: InitConfig): SandboxRuntimeConfig {
+export function buildConfig(init: InitConfig, runtimeDir?: string): SandboxRuntimeConfig {
   assertAbsolute("home", init.home);
+  if (runtimeDir !== undefined) assertAbsolute("runtimeDir", runtimeDir);
   init.workspaceRoots.forEach((path, i) =>
     assertAbsolute(`workspaceRoots[${i}]`, path),
   );
@@ -108,13 +187,21 @@ export function buildConfig(init: InitConfig): SandboxRuntimeConfig {
       deniedResolvedAddresses: [...DENIED_RESOLVED_ADDRESSES],
     },
     filesystem: {
-      denyRead: [init.home, ...denyRoots].map((path) => ({ path, literal: true as const })),
-      allowRead: [...init.workspaceRoots, ...perWrapReadRoots(init)].map((path) => ({
+      denyRead: [
+        ...(init.platform === "linux" ? ["/"] : []),
+        init.home,
+        ...denyRoots,
+        ...credentialDenies(init.home),
+      ].map((path) => ({ path, literal: true as const })),
+      allowRead: [...init.workspaceRoots, ...perWrapReadRoots(init, runtimeDir)].map((path) => ({
         path,
         literal: true as const,
       })),
       allowWrite: [],
-      denyWrite: DENIED_WRITE_PATHS.map((path) => ({ path, literal: true as const })),
+      denyWrite: deniedWritePaths(init.platform).map((path) => ({
+        path,
+        literal: true as const,
+      })),
       allowGitConfig: true,
     },
     ripgrep: { command: init.helpers.ripgrep },
