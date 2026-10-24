@@ -147,8 +147,30 @@ describe("MCP catalog on the mcp_* tables", () => {
     const detailed = (await detail.json()) as {
       item: Record<string, unknown>;
       versions: Record<string, unknown>[];
+      score: {
+        grade: string;
+        percentage: number;
+        items: { key: string; required: boolean; met: boolean }[];
+      };
     };
     expect(detailed.item.latestVersion).toBe("1.1.0");
+    // The scorecard is computed on read (Issue #367, W6): a remote never
+    // probed is F for reachability, whatever else it has.
+    expect(detailed.score.grade).toBe("F");
+    expect(detailed.score.items.map((entry) => entry.key)).toEqual([
+      "reachable",
+      "authDeclared",
+      "hasTools",
+      "hasDescription",
+      "hasLogo",
+      "hasDocs",
+      "hasLicense",
+      "officialPublisher",
+      "claimed",
+    ]);
+    expect(
+      detailed.score.items.find((entry) => entry.key === "reachable"),
+    ).toMatchObject({ required: true, met: false });
     expect(detailed.versions.map((version) => version.version).sort()).toEqual([
       "1.0.0",
       "1.1.0",

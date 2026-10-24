@@ -10,6 +10,7 @@ import {
   ChevronRight,
   Code2,
   FileText,
+  Gauge,
   History,
   KeyRound,
   LockKeyhole,
@@ -79,6 +80,7 @@ import {
 } from "../_components/mcp-display";
 import { remoteMcpClientConfig } from "../_components/mcp-install";
 import { McpReadmeCollapse } from "../_components/mcp-readme-collapse";
+import { McpScoreCard } from "../_components/mcp-score";
 
 // Not build-time prerendered: canonical/JSON-LD embed the public site URL, which
 // is injected at container start, so a build-time render would bake in the
@@ -256,13 +258,14 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
   const t = await getTranslations("mcp.detail");
   const tAuth = await getTranslations("mcp.authMethod");
   const tValidation = await getTranslations("mcp.toolsValidation");
+  const tScore = await getTranslations("mcp.score");
   const decodedIdentifier = decodeURIComponent(identifier);
   // AI text in the visitor's language, English when there is none in it.
   const overviewLocale = mcpOverviewLocale(locale);
   const [
     authState,
     result,
-    { aiOverview, readme, versions },
+    { aiOverview, readme, score, versions },
     categoriesResponse,
   ] = await Promise.all([
     resolveInitialLandingAuthState(),
@@ -334,6 +337,7 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
     ...(versions.length > 0
       ? [["versions", t("nav.versions", { count: versions.length })]]
       : []),
+    ...(score ? [["score", tScore("nav")]] : []),
     ...(relatedItems.length > 0 ? [["related", t("nav.related")]] : []),
   ];
   const softwareJsonLd = {
@@ -817,6 +821,15 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
                       </li>
                     ))}
                   </ol>
+                </section>
+              ) : null}
+
+              {score ? (
+                <section className="scroll-mt-32" id="score">
+                  <SectionHeading icon={Gauge}>
+                    {tScore("heading")}
+                  </SectionHeading>
+                  <McpScoreCard score={score} />
                 </section>
               ) : null}
             </div>

@@ -428,6 +428,60 @@
         "unsupportedPackage": "該軟體包類型無法在沙箱中執行"
       }
     },
+    "score": {
+      "heading": "評分",
+      "nav": "評分",
+      "gradeLabel": "評級 {grade}",
+      "percentage": "已滿足 {percentage}% 的收錄檢查項",
+      "intro": "該評分衡量此收錄條目的完整程度，依據註冊中心條目、端點與公開來源計算得出。它不是對伺服器本身的評價，也不包含安裝量或使用者評價。",
+      "gradeExplain": {
+        "A": "完整的收錄：所有必需檢查項均通過，且已滿足至少 80% 的權重。",
+        "B": "良好的收錄：所有必需檢查項均通過，且已滿足至少 60% 的權重。",
+        "F": "不完整的收錄：某項必需檢查未通過，或已滿足的權重不足 60%。"
+      },
+      "required": "必需",
+      "met": "已滿足",
+      "notMet": "未滿足",
+      "weight": "{weight} 分",
+      "items": {
+        "reachable": {
+          "label": "可連通",
+          "hint": "請保持端點能夠回應 MCP 握手；SourceWeft 每 30 天探測一次。"
+        },
+        "authDeclared": {
+          "label": "已宣告認證方式",
+          "hint": "請在註冊中心條目中宣告憑證請求標頭，或保持端點能夠回應探測，以便判定其認證方式。"
+        },
+        "hasTools": {
+          "label": "已列出工具",
+          "hint": "請讓伺服器在無憑證時回應 tools/list，或發布可在沙箱中無憑證啟動的軟體包。"
+        },
+        "hasDescription": {
+          "label": "描述",
+          "hint": "請在註冊中心條目中填寫至少 40 個字元的描述。"
+        },
+        "hasLogo": {
+          "label": "圖示",
+          "hint": "請在註冊中心條目中發布圖示。"
+        },
+        "hasDocs": {
+          "label": "文件",
+          "hint": "請宣告包含 README 的 GitHub 儲存庫，或在 OAuth 受保護資源後設資料中提供 resource_documentation。"
+        },
+        "hasLicense": {
+          "label": "授權條款",
+          "hint": "請在儲存庫或註冊中心條目中宣告授權條款。"
+        },
+        "officialPublisher": {
+          "label": "官方發布者",
+          "hint": "請使用與端點主機名符合的網域名稱空間（例如 com.example）發布。"
+        },
+        "claimed": {
+          "label": "擁有者已認領",
+          "hint": "擁有者認領尚未開放；待擁有者認領此伺服器後，此項即視為滿足。"
+        }
+      }
+    },
     "faq": {
       "eyebrow": "MCP 常見問答",
       "heading": "MCP 服務基礎",

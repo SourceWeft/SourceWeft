@@ -9,6 +9,7 @@ import {
   type MarketMcpIconSource,
   type MarketMcpLocale,
   type MarketMcpReadme,
+  type MarketMcpScore,
   type MarketMcpToolsValidation,
   type McpRuntime,
   type McpTransport,
@@ -31,6 +32,7 @@ import {
 import { latestPublishedVersionOf } from "./latest-version";
 import { readMcpReadme } from "./readme/readme-repository";
 import { mcpReadmeView } from "./readme/readme-state";
+import { scoreMcp } from "./score/score";
 
 type MarketMcpRecord = {
   item: MarketItemSummary;
@@ -41,6 +43,8 @@ type MarketMcpRecord = {
   aiOverview: MarketMcpAiOverview | null;
   /** False when the page stays out of search: see `mcpReadmeSharedOf`. */
   searchIndexable: boolean;
+  /** The latest version's quality scorecard; null without a version to score. */
+  score: MarketMcpScore | null;
 };
 
 /**
@@ -772,15 +776,16 @@ export async function findMcp(
         ])
       : [null, null, null, false];
     const aiOverview = latest ? (overviews?.get(latest.id) ?? null) : null;
+    const item = mapItemRow({
+      row,
+      categories: categoryMap.get(row.id) ?? [],
+      latestManifestJson: latest?.manifestJson,
+      latestProvenanceJson: latest?.provenanceJson,
+      latestVersion: latest?.version ?? null,
+    });
     return {
       item: {
-        ...mapItemRow({
-          row,
-          categories: categoryMap.get(row.id) ?? [],
-          latestManifestJson: latest?.manifestJson,
-          latestProvenanceJson: latest?.provenanceJson,
-          latestVersion: latest?.version ?? null,
-        }),
+        ...item,
         aiSummary: aiOverview?.overview.summary ?? null,
         overviewLocales: latest ? (overviewLocales?.get(latest.id) ?? []) : [],
       },
@@ -802,6 +807,23 @@ export async function findMcp(
           }
         : null,
       searchIndexable: !readmeShared,
+      // Computed on read from the rows already loaded (Issue #367, W6): the
+      // icon is the one the catalog shows, derived or stored; owner claims
+      // (W7) are not here yet, so `claimed` stays false.
+      score: latest
+        ? scoreMcp({
+            manifestJson: latest.manifestJson,
+            provenanceJson: latest.provenanceJson,
+            readmeStatus: readme?.readmeStatus ?? null,
+            // Any visible overview language, not only the one asked for.
+            hasAiOverview:
+              (latest ? (overviewLocales?.get(latest.id)?.length ?? 0) : 0) >
+              0,
+            iconUrl: item.iconUrl,
+            iconSource: item.iconSource,
+            publisher: item.publisher,
+          })
+        : null,
     };
   }
   return null;
