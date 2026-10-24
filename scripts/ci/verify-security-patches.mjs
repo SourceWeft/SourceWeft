@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
+import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
+import { gzipSync } from "node:zlib";
 
 const root = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -53,6 +55,77 @@ verifyVersion(
   "1.32.1",
   "@modelcontextprotocol/sdk/client/index.js",
 );
+// GHSA-27r3-jxmh-p828: body-parser is reached only through the MCP SDK's
+// express transport; the backend itself serves HTTP through Hono.
+const sdk = createRequire(
+  backend.resolve("@modelcontextprotocol/sdk/client/index.js"),
+);
+const express = createRequire(sdk.resolve("express"));
+verifyVersion(express, "body-parser", "2.4.0");
+// A compressed body followed by trailing bytes used to reach the finished
+// decoder after the parser had handed over, and the late error escaped as an
+// uncaught exception. The patched parser reports it to the route instead.
+{
+  const bodyParser = express("body-parser");
+  const parseJson = bodyParser.json();
+  const request = (buffer, encoding) => {
+    const stream = Readable.from([buffer]);
+    stream.headers = {
+      "content-type": "application/json",
+      "content-length": String(buffer.length),
+      "content-encoding": encoding,
+    };
+    stream.method = "POST";
+    stream.url = "/";
+    return stream;
+  };
+  const frame = gzipSync(Buffer.from(JSON.stringify({ hello: "world" })));
+  let escaped;
+  const onUncaught = (error) => {
+    escaped = error;
+  };
+  process.on("uncaughtException", onUncaught);
+  try {
+    const trailing = request(
+      Buffer.concat([frame, Buffer.from("trailing-bytes")]),
+      "gzip",
+    );
+    const reported = await new Promise((resolve) =>
+      parseJson(trailing, {}, resolve),
+    );
+    assert.equal(reported?.status, 400, "trailing bytes must become a 400");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(escaped, undefined, "the decoder error must not escape");
+  } finally {
+    process.off("uncaughtException", onUncaught);
+  }
+  const clean = request(frame, "gzip");
+  assert.equal(
+    await new Promise((resolve) => parseJson(clean, {}, resolve)),
+    undefined,
+  );
+  assert.deepEqual(clean.body, { hello: "world" });
+}
+// GHSA-mrhx-c7xc-m3w5 covers every zod release before 4.6.6, so the 3.x line
+// that shadcn 3 used to bring is gone as well; both remaining consumers are
+// held to the reviewed release.
+verifyVersion(backend, "zod", "4.6.7");
+const ui = createRequire(path.join(root, "packages/ui/package.json"));
+const shadcn = createRequire(ui.resolve("shadcn"));
+verifyVersion(shadcn, "zod", "4.6.7");
+// An oversized collection must fail on its size check alone instead of
+// collecting one issue per element; the vulnerable releases return 200001.
+{
+  const { z } = backend("zod");
+  const bounded = z.array(z.number()).max(10);
+  const oversized = bounded.safeParse(new Array(200000).fill("x"));
+  assert.equal(oversized.success, false);
+  assert.deepEqual(
+    oversized.error.issues.map((issue) => issue.code),
+    ["too_big"],
+  );
+  assert.deepEqual(bounded.safeParse([1, 2]).data, [1, 2]);
+}
 // follow-redirects is reached only through axios (via @anycrawl/js-sdk).
 const anycrawl = createRequire(backend.resolve("@anycrawl/js-sdk"));
 const axios = createRequire(anycrawl.resolve("axios"));
