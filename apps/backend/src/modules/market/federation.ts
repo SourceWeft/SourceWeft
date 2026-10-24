@@ -24,6 +24,8 @@ import {
   listMcpEndpointTools,
 } from "../../shared/mcp-tool-listing";
 import { createControlledFetch } from "../../shared/security/controlled-fetch";
+import { applyGithubRegistryToManifest } from "./github-registry/manifest";
+import { findStoredGithubRegistryRecords } from "./github-registry/repository";
 import { firstHttpsIconSrc, type ResolvedIcon } from "./icons/chain";
 import { registryIcons, type IconTarget } from "./icons/registry-icons";
 import { mcpServerVersionId } from "./ingest/plan";
@@ -142,20 +144,29 @@ function namespaceBrand(namespace: string) {
 }
 
 /**
+ * The name an untitled entry gets when its server name is generic
+ * (`com.notion/mcp` would read "Mcp"): the namespace's brand, humanized —
+ * "Notion". Undefined when the name is specific. Exported so the GitHub MCP
+ * Registry enrichment can tell this fallback from a registry title.
+ */
+export function genericFallbackName(identifier: string): string | undefined {
+  const [namespace = identifier] = identifier.split("/");
+  const tail = identifier.split("/").pop() ?? identifier;
+  return GENERIC_SERVER_NAMES.has(tail.toLowerCase())
+    ? humanize(namespaceBrand(namespace))
+    : undefined;
+}
+
+/**
  * The registry title, else the server name humanized — or, when that name is
- * generic (`com.notion/mcp` would read "Mcp"), the namespace's brand.
+ * generic, the namespace's brand (`genericFallbackName`).
  */
 function displayName(server: RegistryServer, identifier: string) {
   if (server.title && server.title.trim()) {
     return server.title.trim();
   }
-  const [namespace = identifier] = identifier.split("/");
   const tail = identifier.split("/").pop() ?? identifier;
-  return humanize(
-    GENERIC_SERVER_NAMES.has(tail.toLowerCase())
-      ? namespaceBrand(namespace)
-      : tail,
-  );
+  return genericFallbackName(identifier) ?? humanize(tail);
 }
 
 /** The registry's first usable icon: the same rule as the logo chain's step 1. */
@@ -932,9 +943,8 @@ async function ingestRegistryEntries(
     faviconSkipped: 0,
   };
   const now = new Date();
-  const targets = endpointTargets(
-    entries.filter(isLatestEntry).slice(0, limit),
-  );
+  const latestEntries = entries.filter(isLatestEntry).slice(0, limit);
+  const targets = endpointTargets(latestEntries);
   const stored = await findStoredEndpointProbes(
     targets.map((target) => target.versionId),
   );
@@ -949,14 +959,25 @@ async function ingestRegistryEntries(
   );
   counters.toolsListed = toolListings.listed;
   counters.toolsListFailed = toolListings.failed;
-  const icons = await registryEntryIcons(
-    entries.filter(isLatestEntry).slice(0, limit),
-    now,
-  );
+  const icons = await registryEntryIcons(latestEntries, now);
   counters.faviconFetched = icons.faviconFetched;
   counters.faviconHits = icons.faviconHits;
   counters.faviconFailed = icons.faviconFailed;
   counters.faviconSkipped = icons.faviconSkipped;
+  // The GitHub MCP Registry enrichment (`github-registry/`) runs apart from
+  // this sync and writes on the version's provenance, which the upsert below
+  // replaces whole: its record is carried over, and the manifest changes it
+  // earned are applied again.
+  const githubRegistryRecords = await findStoredGithubRegistryRecords(
+    latestEntries.flatMap((entry) => {
+      const server: RegistryServer = entry.server ?? entry;
+      const identifier = server.name?.trim();
+      const version = server.version?.trim();
+      return identifier && version
+        ? [mcpServerVersionId(identifier, version)]
+        : [];
+    }),
+  );
   for (const entry of entries) {
     if (counters.ingested >= limit) {
       break;
@@ -974,16 +995,26 @@ async function ingestRegistryEntries(
       ),
     );
     const toolsListing = toolListings.listings.get(entry);
-    const manifest = mapRegistryServerToManifest(entry, {
+    const mapped = mapRegistryServerToManifest(entry, {
       verified: input.verified,
       authProbe: authProbe?.result,
       tools: toolsListing?.tools,
       icon,
     });
-    if (!manifest) {
+    if (!mapped) {
       counters.skipped += 1;
       continue;
     }
+    const { manifest, record: githubRegistry } = applyGithubRegistryToManifest(
+      mapped,
+      githubRegistryRecords.get(
+        mcpServerVersionId(mapped.identifier, mapped.version),
+      ),
+      {
+        fallbackName: genericFallbackName(mapped.identifier),
+        untitled: !(entry.server ?? entry).title?.trim(),
+      },
+    );
     try {
       await upsertMarketMcp({
         manifest,
@@ -1033,6 +1064,10 @@ async function ingestRegistryEntries(
             authProbe?.selfDescription && toolsListing
               ? toolsListing.listedAt.toISOString()
               : undefined,
+          // What the GitHub MCP Registry's daily pass (W5) stored for the
+          // version, carried over as it was found: the pass, not the sync,
+          // refreshes it.
+          githubRegistry,
         },
       });
       counters.ingested += 1;

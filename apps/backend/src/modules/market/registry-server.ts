@@ -8,9 +8,12 @@ import type {
 /**
  * The part of an upstream `server.json` (a registry entry, or the file a
  * submitted repository ships) that is kept in the version's provenance as
- * `registryServer`: its packages and remotes. The manifest has neither, and
- * they are the only record of the settings a server asks for — which is what
- * its AI overview (`overview/input.ts`) needs to say what it requires.
+ * `registryServer`: its title, packages and remotes. The manifest has none
+ * of them as such: the packages and remotes are the only record of the
+ * settings a server asks for — which is what its AI overview
+ * (`overview/input.ts`) needs to say what it requires — and the title tells
+ * a manifest name the publisher chose from one the catalog derived (which
+ * the GitHub MCP Registry enrichment may replace).
  *
  * Only what those entries ARE is kept: registry type, package identifier and
  * version, runtime hint, transport type, a remote's endpoint without its query,
@@ -29,7 +32,7 @@ import type {
  */
 export type RegistryServerProvenance = Pick<
   RegistryServerJson,
-  "packages" | "remotes"
+  "title" | "packages" | "remotes"
 >;
 
 export const REGISTRY_SERVER_PROVENANCE_LIMITS = {
@@ -44,11 +47,12 @@ export const REGISTRY_SERVER_PROVENANCE_LIMITS = {
 
 const LIMITS = REGISTRY_SERVER_PROVENANCE_LIMITS;
 
-/** The packages and remotes of `server`, or undefined when it has neither. */
+/** The title, packages and remotes of `server`, or undefined when it has none. */
 export function registryServerProvenance(
   server: unknown,
 ): RegistryServerProvenance | undefined {
   if (!isRecord(server)) return undefined;
+  const title = text(server.title, LIMITS.nameChars);
   const packages = arrayOf(server.packages)
     .flatMap((entry) => {
       const kept = keptPackage(entry);
@@ -61,8 +65,9 @@ export function registryServerProvenance(
       return kept ? [kept] : [];
     })
     .slice(0, LIMITS.remotes);
-  if (packages.length === 0 && remotes.length === 0) return undefined;
+  if (!title && packages.length === 0 && remotes.length === 0) return undefined;
   return {
+    ...(title ? { title } : {}),
     ...(packages.length > 0 ? { packages } : {}),
     ...(remotes.length > 0 ? { remotes } : {}),
   };

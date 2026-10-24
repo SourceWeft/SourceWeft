@@ -821,6 +821,51 @@ export type GetMarketSkillResponse = z.infer<
   typeof getMarketSkillResponseSchema
 >;
 
+// ---------------------------------------------------------------------------
+// GitHub MCP Registry enrichment (Issue #367, W5)
+// ---------------------------------------------------------------------------
+
+// How a GitHub MCP Registry row was matched to a catalog entry: the same
+// reverse-DNS name, or — for the brand servers GitHub lists under
+// `owner/repo` — the same remote endpoint host, under the namespace's own
+// domain, in a repository an organization owns.
+export const marketMcpGithubRegistryMatchSchema = z.enum([
+  "name",
+  "endpoint-domain-org",
+]);
+
+// Where the daily pass keeps its record: `provenanceJson.githubRegistry` on
+// the matched (latest published) version.
+export const MARKET_MCP_GITHUB_REGISTRY_PROVENANCE_KEY = "githubRegistry";
+
+// What the daily GitHub MCP Registry pass keeps on a matched version's
+// provenance. Read by the logo chain (`ownerAvatarUrl`) and the scorecard
+// (`license`, `stars`); the row's README is never taken. A row that disappears
+// from GitHub leaves the record in place with its `fetchedAt`.
+export const marketMcpGithubRegistryProvenanceSchema = z.object({
+  // The row's name on GitHub (`com.notion/mcp` or `makenotion/notion-mcp-server`).
+  name: z.string().min(1).max(200),
+  matchedBy: marketMcpGithubRegistryMatchSchema,
+  // Shown as an image on public pages: GitHub's avatar host only.
+  ownerAvatarUrl: z
+    .string()
+    .url()
+    .startsWith("https://avatars.githubusercontent.com/")
+    .optional(),
+  stars: z.number().int().min(0).optional(),
+  license: z.string().min(1).max(120).optional(),
+  displayName: z.string().min(1).max(200).optional(),
+  description: z.string().min(1).max(1000).optional(),
+  fetchedAt: z.string(),
+});
+
+export type MarketMcpGithubRegistryMatch = z.infer<
+  typeof marketMcpGithubRegistryMatchSchema
+>;
+export type MarketMcpGithubRegistryProvenance = z.infer<
+  typeof marketMcpGithubRegistryProvenanceSchema
+>;
+
 export * from "./sitemaps";
 
 // ---------------------------------------------------------------------------

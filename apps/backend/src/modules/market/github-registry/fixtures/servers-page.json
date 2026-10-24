@@ -1,0 +1,430 @@
+{
+  "servers": [
+    {
+      "server": {
+        "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+        "_meta": {
+          "io.modelcontextprotocol.registry/publisher-provided": {
+            "github": {
+              "displayName": "Markitdown",
+              "isInOrganization": true,
+              "license": "MIT License",
+              "name": "markitdown",
+              "nameWithOwner": "microsoft/markitdown",
+              "ownerAvatarUrl": "https://avatars.githubusercontent.com/u/6154722?v=4",
+              "stargazerCount": 191786,
+              "primaryLanguage": "Python"
+            }
+          }
+        },
+        "description": "Convert various file formats (PDF, Word, Excel, images, audio) to Markdown.",
+        "name": "microsoft/markitdown",
+        "packages": [
+          {
+            "identifier": "markitdown-mcp",
+            "registryType": "pypi",
+            "runtimeHint": "uvx",
+            "transport": {
+              "type": "stdio"
+            },
+            "version": "0.0.1a4"
+          }
+        ],
+        "repository": {
+          "id": "888092115",
+          "source": "github",
+          "url": "https://github.com/microsoft/markitdown"
+        },
+        "version": "1.0.0"
+      },
+      "_meta": {
+        "io.modelcontextprotocol.registry/official": {
+          "isLatest": true,
+          "publishedAt": "2025-09-09T17:55:23Z",
+          "status": "active",
+          "updatedAt": "2026-01-21T09:35:10Z"
+        }
+      }
+    },
+    {
+      "server": {
+        "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+        "_meta": {
+          "io.modelcontextprotocol.registry/publisher-provided": {
+            "github": {
+              "displayName": "Netdata",
+              "isInOrganization": true,
+              "license": "GNU General Public License v3.0",
+              "name": "netdata",
+              "nameWithOwner": "netdata/netdata",
+              "ownerAvatarUrl": "https://avatars.githubusercontent.com/u/43390781?v=4",
+              "stargazerCount": 81104,
+              "homepageUrl": "https://www.netdata.cloud",
+              "primaryLanguage": "Go"
+            }
+          }
+        },
+        "description": "Real-time infrastructure monitoring with metrics, logs, alerts, and ML-based anomaly detection.",
+        "name": "io.github.netdata/mcp-server",
+        "remotes": [
+          {
+            "type": "streamable-http",
+            "url": "https://app.netdata.cloud/api/v1/mcp"
+          }
+        ],
+        "repository": {
+          "source": "github",
+          "subfolder": "docs/netdata-ai/mcp",
+          "url": "https://github.com/netdata/netdata"
+        },
+        "title": "Netdata",
+        "version": "2.12.1",
+        "websiteUrl": "https://www.netdata.cloud"
+      },
+      "_meta": {
+        "io.modelcontextprotocol.registry/official": {
+          "isLatest": true,
+          "publishedAt": "2026-10-08T16:52:54Z",
+          "status": "active",
+          "updatedAt": "2026-10-23T13:08:29Z"
+        }
+      }
+    },
+    {
+      "server": {
+        "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+        "_meta": {
+          "io.modelcontextprotocol.registry/publisher-provided": {
+            "github": {
+              "displayName": "Context7",
+              "isInOrganization": true,
+              "license": "MIT License",
+              "name": "context7",
+              "nameWithOwner": "upstash/context7",
+              "ownerAvatarUrl": "https://avatars.githubusercontent.com/u/74989412?v=4",
+              "stargazerCount": 63541,
+              "homepageUrl": "https://context7.com",
+              "primaryLanguage": "TypeScript"
+            }
+          }
+        },
+        "description": "Up-to-date docs for AI agents",
+        "icons": [
+          {
+            "mimeType": "image/png",
+            "src": "https://raw.githubusercontent.com/upstash/context7/master/public/icon.png"
+          }
+        ],
+        "name": "io.github.upstash/context7",
+        "packages": [
+          {
+            "identifier": "@upstash/context7-mcp",
+            "registryType": "npm",
+            "transport": {
+              "type": "stdio"
+            },
+            "version": "4.4.4"
+          }
+        ],
+        "remotes": [
+          {
+            "type": "streamable-http",
+            "url": "https://mcp.context7.com/mcp"
+          }
+        ],
+        "repository": {
+          "source": "github",
+          "url": "https://github.com/upstash/context7"
+        },
+        "title": "Context7",
+        "version": "4.4.4",
+        "websiteUrl": "https://context7.com"
+      },
+      "_meta": {
+        "io.modelcontextprotocol.registry/official": {
+          "isLatest": true,
+          "publishedAt": "2026-10-19T13:48:33Z",
+          "status": "active",
+          "updatedAt": "2026-10-23T13:09:45Z"
+        }
+      }
+    },
+    {
+      "server": {
+        "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+        "_meta": {
+          "io.modelcontextprotocol.registry/publisher-provided": {
+            "github": {
+              "displayName": "Chrome DevTools MCP",
+              "isInOrganization": true,
+              "license": "Apache License 2.0",
+              "name": "chrome-devtools-mcp",
+              "nameWithOwner": "ChromeDevTools/chrome-devtools-mcp",
+              "ownerAvatarUrl": "https://avatars.githubusercontent.com/u/11260967?v=4",
+              "stargazerCount": 54033,
+              "homepageUrl": "https://developer.chrome.com/docs/devtools/agents",
+              "primaryLanguage": "TypeScript"
+            }
+          }
+        },
+        "description": "MCP server for Chrome DevTools",
+        "name": "io.github.ChromeDevTools/chrome-devtools-mcp",
+        "packages": [
+          {
+            "identifier": "chrome-devtools-mcp",
+            "registryBaseUrl": "https://registry.npmjs.org",
+            "registryType": "npm",
+            "transport": {
+              "type": "stdio"
+            },
+            "version": "1.12.0"
+          }
+        ],
+        "repository": {
+          "source": "github",
+          "url": "https://github.com/ChromeDevTools/chrome-devtools-mcp"
+        },
+        "title": "Chrome DevTools MCP",
+        "version": "1.12.0"
+      },
+      "_meta": {
+        "io.modelcontextprotocol.registry/official": {
+          "isLatest": true,
+          "publishedAt": "2026-10-22T13:50:57Z",
+          "status": "active",
+          "updatedAt": "2026-10-23T14:58:06Z"
+        }
+      }
+    },
+    {
+      "server": {
+        "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+        "_meta": {
+          "io.modelcontextprotocol.registry/publisher-provided": {
+            "github": {
+              "displayName": "GitHub",
+              "isInOrganization": true,
+              "license": "MIT License",
+              "name": "github-mcp-server",
+              "nameWithOwner": "github/github-mcp-server",
+              "ownerAvatarUrl": "https://avatars.githubusercontent.com/u/9919?v=4",
+              "stargazerCount": 33887,
+              "primaryLanguage": "Go"
+            }
+          }
+        },
+        "description": "Connect AI assistants to GitHub - manage repos, issues, PRs, and workflows through natural language.",
+        "name": "io.github.github/github-mcp-server",
+        "packages": [
+          {
+            "identifier": "ghcr.io/github/github-mcp-server:2.0.3",
+            "registryType": "oci",
+            "transport": {
+              "type": "stdio"
+            }
+          }
+        ],
+        "remotes": [
+          {
+            "type": "streamable-http",
+            "url": "https://api.githubcopilot.com/mcp/"
+          }
+        ],
+        "repository": {
+          "source": "github",
+          "url": "https://github.com/github/github-mcp-server"
+        },
+        "title": "GitHub",
+        "version": "2.0.3"
+      },
+      "_meta": {
+        "io.modelcontextprotocol.registry/official": {
+          "isLatest": true,
+          "publishedAt": "2026-10-21T09:53:51Z",
+          "status": "active",
+          "updatedAt": "2026-10-23T13:07:11Z"
+        }
+      }
+    },
+    {
+      "server": {
+        "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+        "_meta": {
+          "io.modelcontextprotocol.registry/publisher-provided": {
+            "github": {
+              "displayName": "Notion",
+              "isInOrganization": true,
+              "license": "MIT License",
+              "name": "notion-mcp-server",
+              "nameWithOwner": "makenotion/notion-mcp-server",
+              "ownerAvatarUrl": "https://avatars.githubusercontent.com/u/4792552?v=4",
+              "stargazerCount": 4676,
+              "primaryLanguage": "TypeScript"
+            }
+          }
+        },
+        "description": "Official MCP server for Notion API",
+        "name": "makenotion/notion-mcp-server",
+        "remotes": [
+          {
+            "type": "sse",
+            "url": "https://mcp.notion.com/sse"
+          }
+        ],
+        "repository": {
+          "id": "946169991",
+          "source": "github",
+          "url": "https://github.com/makenotion/notion-mcp-server"
+        },
+        "version": "1.0.0"
+      },
+      "_meta": {
+        "io.modelcontextprotocol.registry/official": {
+          "isLatest": true,
+          "publishedAt": "2025-09-09T17:55:23Z",
+          "status": "active",
+          "updatedAt": "2026-01-20T21:06:33Z"
+        }
+      }
+    },
+    {
+      "server": {
+        "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+        "_meta": {
+          "io.modelcontextprotocol.registry/publisher-provided": {
+            "github": {
+              "displayName": "Nuxt",
+              "isInOrganization": false,
+              "license": "MIT License",
+              "name": "nuxt-mcp-dev",
+              "nameWithOwner": "antfu/nuxt-mcp-dev",
+              "ownerAvatarUrl": "https://avatars.githubusercontent.com/u/11247099?u=5c092d3773a443e480a294f2b67aa39395982f46&v=4",
+              "stargazerCount": 912,
+              "primaryLanguage": "TypeScript"
+            }
+          }
+        },
+        "description": "MCP server helping models understand your Vite/Nuxt app.",
+        "name": "antfu/nuxt-mcp",
+        "remotes": [
+          {
+            "type": "sse",
+            "url": "https://mcp.nuxt.com/sse"
+          }
+        ],
+        "repository": {
+          "id": "946411030",
+          "source": "github",
+          "url": "https://github.com/antfu/nuxt-mcp"
+        },
+        "version": "1.0.0"
+      },
+      "_meta": {
+        "io.modelcontextprotocol.registry/official": {
+          "isLatest": true,
+          "publishedAt": "2025-09-09T17:55:23Z",
+          "status": "active",
+          "updatedAt": "2026-01-21T16:42:08Z"
+        }
+      }
+    },
+    {
+      "server": {
+        "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+        "_meta": {
+          "io.modelcontextprotocol.registry/publisher-provided": {
+            "github": {
+              "displayName": "Zapier",
+              "isInOrganization": true,
+              "license": "MIT License",
+              "name": "zapier-mcp",
+              "nameWithOwner": "zapier/zapier-mcp",
+              "ownerAvatarUrl": "https://avatars.githubusercontent.com/u/1261889?v=4",
+              "stargazerCount": 445,
+              "homepageUrl": "https://docs.zapier.com/mcp",
+              "primaryLanguage": "Shell"
+            }
+          }
+        },
+        "description": "Zapier MCP is a remote MCP server that gives your AI direct access to 8,000+ apps and 30,000+ actions—no complex API integrations required.",
+        "name": "zapier/zapier-mcp",
+        "remotes": [
+          {
+            "type": "sse",
+            "url": "{zapier_mcp_url}",
+            "variables": {
+              "zapier_mcp_url": {
+                "description": "Paste the Zapier MCP server URL you generated at https://mcp.zapier.com (server-specific or OAuth URL).",
+                "isRequired": true,
+                "isSecret": true
+              }
+            }
+          }
+        ],
+        "repository": {
+          "id": "1054982602",
+          "source": "github",
+          "url": "https://github.com/zapier/zapier-mcp"
+        },
+        "version": "1.0.0"
+      },
+      "_meta": {
+        "io.modelcontextprotocol.registry/official": {
+          "isLatest": true,
+          "publishedAt": "2025-09-09T17:55:23Z",
+          "status": "active",
+          "updatedAt": "2026-01-21T13:35:03Z"
+        }
+      }
+    },
+    {
+      "server": {
+        "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+        "_meta": {
+          "io.modelcontextprotocol.registry/publisher-provided": {
+            "github": {
+              "displayName": "Hugging Face",
+              "isInOrganization": true,
+              "license": "MIT License",
+              "name": "hf-mcp-server",
+              "nameWithOwner": "huggingface/hf-mcp-server",
+              "ownerAvatarUrl": "https://avatars.githubusercontent.com/u/25720743?v=4",
+              "stargazerCount": 308,
+              "homepageUrl": "https://huggingface.co/mcp",
+              "primaryLanguage": "TypeScript"
+            }
+          }
+        },
+        "description": "Access Hugging Face models, datasets, Spaces, papers, collections via MCP.",
+        "name": "huggingface/hf-mcp-server",
+        "remotes": [
+          {
+            "type": "sse",
+            "url": "https://huggingface.co/mcp?login"
+          }
+        ],
+        "repository": {
+          "id": "978636614",
+          "source": "github",
+          "url": "https://github.com/huggingface/hf-mcp-server"
+        },
+        "version": "1.0.0"
+      },
+      "_meta": {
+        "io.modelcontextprotocol.registry/official": {
+          "isLatest": true,
+          "publishedAt": "2025-08-20T07:00:00Z",
+          "status": "active",
+          "updatedAt": "2026-01-21T01:35:25Z"
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "count": 9,
+    "nextCursor": "mcp.cursor.eyJ2IjoxLCJraW5kIjoic2VydmVyIiwic2VydmVyIjp7InN0YXJzIjoyMDY1LCJuYW1lIjoibWljcm9zb2Z0L2F6dXJlLWRldm9wcy1tY3AiLCJ1dWlkIjoiMDM0OGEzYjM2ZjUyNDY2NDllYjdiZjczMmY3MWMxNDQiLCJ2aXNpYmlsaXR5IjoicHVibGljIn19",
+    "per_page": 30,
+    "total": 604,
+    "total_pages": 21
+  }
+}
