@@ -298,7 +298,12 @@ export async function McpMarketCard({
       href={mcpPath(item.identifier)}
     >
       <div className="flex items-start gap-3">
-        <McpIcon iconUrl={item.iconUrl} trusted={trusted} />
+        <McpIcon
+          iconSource={item.iconSource}
+          iconUrl={item.iconUrl}
+          name={item.name}
+          trusted={trusted}
+        />
         <div className="min-w-0 flex-1">
           <h3 className="truncate text-base font-semibold leading-6 text-zinc-950 dark:text-white">
             {item.name}

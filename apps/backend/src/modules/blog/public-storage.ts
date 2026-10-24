@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { config } from "../../shared/config";
+import { putPublicObject } from "../../shared/public-storage";
 import type { BlogLocale } from "./locales";
 
 export type UploadedBlogAsset = {
@@ -12,27 +12,6 @@ export type UploadedBlogAsset = {
   sha256: string;
   sourceUrlHash: string;
 };
-
-let publicS3Client: S3Client | null = null;
-
-function getPublicS3Client() {
-  if (!publicS3Client) {
-    publicS3Client = new S3Client({
-      region: config.publicS3.region,
-      credentials:
-        config.publicS3.accessKeyId && config.publicS3.secretAccessKey
-          ? {
-              accessKeyId: config.publicS3.accessKeyId,
-              secretAccessKey: config.publicS3.secretAccessKey,
-            }
-          : undefined,
-      endpoint: config.publicS3.endpoint || undefined,
-      forcePathStyle: config.publicS3.forcePathStyle,
-    });
-  }
-
-  return publicS3Client;
-}
 
 export function validatePublicS3Config() {
   const missing = [
@@ -144,23 +123,19 @@ export async function downloadAndUploadBlogAsset(input: {
     fileName,
   });
 
-  await getPublicS3Client().send(
-    new PutObjectCommand({
-      Bucket: config.publicS3.bucket,
-      Key: storageKey,
-      Body: body,
-      ContentType: contentType ?? undefined,
-    }),
-  );
+  const stored = await putPublicObject({
+    key: storageKey,
+    body,
+    contentType: contentType ?? undefined,
+  });
 
   return {
-    storageBucket: config.publicS3.bucket,
-    storageKey,
-    publicUrl: `${config.publicS3.baseUrl}/${storageKey}`,
+    storageBucket: stored.bucket,
+    storageKey: stored.key,
+    publicUrl: stored.publicUrl,
     contentType,
     sizeBytes: body.byteLength,
     sha256,
     sourceUrlHash,
   } satisfies UploadedBlogAsset;
 }
-

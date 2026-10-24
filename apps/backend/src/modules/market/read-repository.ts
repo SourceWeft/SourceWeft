@@ -1,10 +1,12 @@
 import {
+  marketMcpIconSourceSchema,
   marketMcpPublisherSchema,
   marketMcpToolsValidationSchema,
   mcpTransportSchema,
   type MarketItemSummary,
   type MarketItemVersion,
   type MarketMcpAiOverview,
+  type MarketMcpIconSource,
   type MarketMcpLocale,
   type MarketMcpReadme,
   type MarketMcpToolsValidation,
@@ -21,6 +23,7 @@ import {
   mcpServers,
   mcpServerVersions,
 } from "@sourceweft/db";
+import { githubAvatarUrl, githubOwner } from "./icons/chain";
 import {
   readMcpOverviewLocales,
   readMcpOverviews,
@@ -199,44 +202,37 @@ function verificationStatusFor(input: {
   return input.verified ? "verified" : "unverified";
 }
 
-// The upstream registry ships an icon for only a small fraction of entries, so
-// most cards fall back to the generic glyph. Nearly every entry is GitHub-hosted
-// (io.github.<owner>/<repo>), so derive the owner's avatar as a real logo when no
-// upstream icon exists. The <img> follows github.com's redirect to the avatar CDN
-// and the client falls back to the glyph on load error, so a wrong guess is safe.
-function githubOwner(
-  repoUrl: string | null,
-  identifier: string,
-): string | null {
-  if (repoUrl) {
-    try {
-      const url = new URL(repoUrl);
-      if (
-        url.hostname === "github.com" ||
-        url.hostname.endsWith(".github.com")
-      ) {
-        const owner = url.pathname.split("/").filter(Boolean)[0];
-        if (owner) {
-          return owner;
-        }
-      }
-    } catch {
-      // Fall through to the identifier-based derivation below.
-    }
-  }
-  const namespace = identifier.split("/")[0] ?? "";
-  const match = namespace.match(/^io\.github\.(.+)$/i);
-  return match?.[1] ?? null;
-}
-
-function deriveIconUrl(input: {
+/**
+ * The item's logo and where it came from. A manifest the icon chain wrote
+ * (`icons/chain.ts`, federation since #367) carries both. Older manifests
+ * carry at most a registry icon, so a missing logo is derived the way the
+ * chain's third step would: the GitHub avatar of the `io.github.<owner>`
+ * namespace or of the declared repository's owner. The <img> follows
+ * github.com's redirect to the avatar CDN and the client falls back to the
+ * placeholder on load error, so a wrong guess is safe.
+ */
+export function itemIcon(input: {
+  meta: Record<string, unknown>;
   repoUrl: string | null;
   identifier: string;
-}): string | null {
-  const owner = githubOwner(input.repoUrl, input.identifier);
+}): { iconUrl: string | null; iconSource: MarketMcpIconSource } {
+  const iconUrl = stringMeta(input.meta, "iconUrl");
+  const stored = marketMcpIconSourceSchema.safeParse(input.meta.iconSource);
+  if (stored.success) {
+    return iconUrl
+      ? { iconUrl, iconSource: stored.data }
+      : { iconUrl: null, iconSource: "placeholder" };
+  }
+  if (iconUrl) {
+    return { iconUrl, iconSource: "registry" };
+  }
+  const owner = githubOwner({
+    namespace: input.identifier.split("/")[0] ?? input.identifier,
+    repositoryUrl: input.repoUrl,
+  });
   return owner
-    ? `https://github.com/${encodeURIComponent(owner)}.png?size=80`
-    : null;
+    ? { iconUrl: githubAvatarUrl(owner), iconSource: "github-avatar" }
+    : { iconUrl: null, iconSource: "placeholder" };
 }
 
 function mapItemRow(input: {
@@ -258,12 +254,11 @@ function mapItemRow(input: {
     summary: input.row.summary,
     providerName: stringMeta(mergedMeta, "providerName") ?? input.row.owner,
     homepageUrl: stringMeta(mergedMeta, "homepageUrl"),
-    iconUrl:
-      stringMeta(mergedMeta, "iconUrl") ??
-      deriveIconUrl({
-        repoUrl: input.row.repoUrl,
-        identifier: input.row.identifier,
-      }),
+    ...itemIcon({
+      meta: mergedMeta,
+      repoUrl: input.row.repoUrl,
+      identifier: input.row.identifier,
+    }),
     sourceUrl: input.row.sourceUrl,
     repoUrl: input.row.repoUrl,
     license: stringMeta(mergedMeta, "license"),
