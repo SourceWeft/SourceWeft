@@ -65,6 +65,7 @@ describe("owner layer", () => {
   test("owner values take precedence over the federated item", () => {
     const item = applyOwnerOverridesToItem(federatedItem, { row, claimed: true });
     expect(item.iconUrl).toBe("https://notion.com/logo.png");
+    expect(item.iconSource).toBe("owner");
     expect(item.summary).toBe("Owner summary");
     expect(item.homepageUrl).toBe("https://notion.com");
     expect(item.repoUrl).toBe("https://github.com/makenotion/notion-mcp-server");

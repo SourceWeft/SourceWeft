@@ -142,9 +142,10 @@ export function applyOwnerOverridesToItem(
   const values = ownerOverrideValues(input.row.overridesJson);
   const tools = ownerSubmittedTools(input.row.toolsJson);
   const layer = ownerLayerOf(input.row);
+  const iconUrl = setValue(values, "iconUrl");
   return {
     ...item,
-    iconUrl: setValue(values, "iconUrl") ?? item.iconUrl,
+    ...(iconUrl ? { iconUrl, iconSource: "owner" as const } : {}),
     summary: setValue(values, "summary") ?? item.summary,
     homepageUrl: setValue(values, "homepageUrl") ?? item.homepageUrl,
     repoUrl: setValue(values, "repoUrl") ?? item.repoUrl,

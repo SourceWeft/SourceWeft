@@ -130,6 +130,8 @@ export const marketMcpIconSourceSchema = z.enum([
   "github-registry",
   "favicon",
   "placeholder",
+  // A verified owner set the logo (Issue #367, W7); applied on read.
+  "owner",
 ]);
 
 export const marketMcpToolManifestSchema = z.object({
