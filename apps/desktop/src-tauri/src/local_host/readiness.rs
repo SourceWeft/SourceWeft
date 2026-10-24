@@ -38,8 +38,15 @@ pub enum SandboxReadiness {
     // `rename_all` on the enum itself only renames variant names (`state` values), not the
     // fields of a struct variant, so `toolchain_path` needs its own `rename_all` to come out
     // as `toolchainPath` on the wire.
+    //
+    // `toolchain_path` is `None` on macOS, whose Seatbelt execution never uses the login-shell
+    // `PATH`, so reporting readiness there never spawns a login shell (and the field is
+    // omitted on the wire).
     #[serde(rename_all = "camelCase")]
-    Ready { toolchain_path: ToolchainPath },
+    Ready {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        toolchain_path: Option<ToolchainPath>,
+    },
     NeedsSetup { reason: String },
     Unsupported,
 }
@@ -58,6 +65,7 @@ pub fn bundle_dir(app_data: &Path) -> PathBuf {
     app_data.join("sandbox").join("current")
 }
 
+#[cfg(unix)]
 const FALLBACK_PATH: &str = "/usr/local/bin:/usr/bin:/bin";
 
 /// The production login-shell timeout: long enough for a normal shell profile, short enough
@@ -186,7 +194,7 @@ pub fn probe_bundle(bundle: &Path, init: &InitConfig) -> SandboxReadiness {
         return SandboxReadiness::NeedsSetup { reason: error.message };
     }
     SandboxReadiness::Ready {
-        toolchain_path: user_path().1,
+        toolchain_path: Some(user_path().1),
     }
 }
 
@@ -276,14 +284,14 @@ const SANDBOX_READINESS_RECHECK_INTERVAL: Duration = Duration::from_secs(60);
 impl LocalHost {
     /// Whether local sandboxed execution can run right now, and why not if it cannot. macOS
     /// keeps its Seatbelt path (migrated by a later plan) and is always `Ready`, without ever
-    /// touching a sandbox bundle (and `user_path()` is itself cached, so this is cheap even
-    /// though it isn't additionally cached here). Linux probes the bundle under this host's own
+    /// touching a sandbox bundle or spawning a login shell (`toolchain_path` is `None`: Seatbelt
+    /// execution does not use the login-shell `PATH`). Linux probes the bundle under this host's own
     /// app-data directory, through `ReadinessCache` so repeated polling doesn't repeatedly
     /// spawn a sidecar. Every other platform is `Unsupported`.
     pub fn sandbox_readiness(&self) -> SandboxReadiness {
         #[cfg(target_os = "macos")]
         return SandboxReadiness::Ready {
-            toolchain_path: user_path().1,
+            toolchain_path: None,
         };
 
         #[cfg(target_os = "linux")]
@@ -470,7 +478,7 @@ mod tests {
         let probe = || {
             calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             SandboxReadiness::Ready {
-                toolchain_path: ToolchainPath::System,
+                toolchain_path: Some(ToolchainPath::System),
             }
         };
         let first = ReadinessCache::get_or_probe(&cache, Duration::from_millis(1), probe);
@@ -557,7 +565,7 @@ mod tests {
         let probe = || {
             calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             SandboxReadiness::Ready {
-                toolchain_path: ToolchainPath::System,
+                toolchain_path: Some(ToolchainPath::System),
             }
         };
         ReadinessCache::get_or_probe(&cache, Duration::from_secs(60), probe);
@@ -573,9 +581,31 @@ mod tests {
         let host = LocalHost::open(app_data.path()).unwrap();
         // No bundle was ever placed under `app_data`; macOS must still report Ready.
         assert!(!bundle_dir(app_data.path()).exists());
-        assert!(
-            matches!(host.sandbox_readiness(), SandboxReadiness::Ready { .. }),
+        // Ruling R26: no login shell on macOS, so no toolchain path either.
+        assert_eq!(
+            host.sandbox_readiness(),
+            SandboxReadiness::Ready {
+                toolchain_path: None
+            },
             "expected Ready without a bundle on macOS"
+        );
+    }
+
+    #[test]
+    fn ready_without_a_toolchain_path_omits_the_field() {
+        assert_eq!(
+            serde_json::to_value(SandboxReadiness::Ready {
+                toolchain_path: None
+            })
+            .unwrap(),
+            serde_json::json!({"state": "ready"})
+        );
+        assert_eq!(
+            serde_json::to_value(SandboxReadiness::Ready {
+                toolchain_path: Some(ToolchainPath::LoginShell)
+            })
+            .unwrap(),
+            serde_json::json!({"state": "ready", "toolchainPath": "loginShell"})
         );
     }
 }
