@@ -19,6 +19,7 @@ import type {
   SandboxOperationStore,
   SandboxProvider,
   SandboxProviderPathPolicy,
+  SandboxRef,
   SandboxRuntimeContext,
   SandboxRuntimeLimits,
   SandboxStore,
@@ -1203,7 +1204,18 @@ import { SANDBOX_RESTARTED_NOTICE } from "../src/runtime/errors";
  * transfers refuse a replaced generation the way the Cloudflare adapter does
  * (identity stamp missing behind a mkdir/download).
  */
-function replaceableSandboxHarness() {
+function replaceableSandboxHarness(
+  options: {
+    /**
+     * Default (true): prepare's upload runs as a pinned operation in the real
+     * trusted host, which reports the loss itself and throws the manager's
+     * verdict. `false` throws the raw provider error instead, which is what
+     * collect's direct download does.
+     */
+    pinnedPrepare?: boolean;
+  } = {},
+) {
+  const pinnedPrepare = options.pinnedPrepare ?? true;
   const rows: Array<{ id: string; providerSandboxId: string; status: string }> =
     [];
   let created = 0;
@@ -1211,7 +1223,7 @@ function replaceableSandboxHarness() {
   const uploads: string[] = [];
   const writes: Array<{ path: string; content: string }> = [];
   const operationStore = createOperationStore();
-  let current: { providerSandboxId: string } | null = null;
+  let current: SandboxRef | null = null;
   const sandboxStore: SandboxStore = {
     async findLatestActiveThreadSandbox() {
       const row = [...rows]
@@ -1323,7 +1335,14 @@ function replaceableSandboxHarness() {
     trustedHost: {
       async uploadCurrentFiles(files) {
         if (current && lostIds.has(current.providerSandboxId)) {
-          throw lostError("mkdir");
+          const raw = lostError("mkdir");
+          if (!pinnedPrepare) throw raw;
+          // What runPinnedSandboxOperation throws: the verdict, after the
+          // loss has been reported (and the row expired) by the pinned path.
+          throw (
+            (await manager.reportLostGeneration(current, TEST_CONTEXT, raw)) ??
+            raw
+          );
         }
         uploads.push(...files.map((file) => file.path));
       },
@@ -1498,4 +1517,25 @@ test("prepare_sandbox_workspace past the per-turn replacement limit fails closed
   );
   assert.equal(h.created(), 3);
   assert.equal(h.rows[2]?.status, "expired");
+});
+
+test("prepare_sandbox_workspace handles the raw provider error the same way as the pinned verdict", async () => {
+  const h = replaceableSandboxHarness({ pinnedPrepare: false });
+  assert.equal((await h.prepare("raw-1")).ok, true);
+  h.lostIds.add("provider-sandbox-1");
+  const detecting = await h.prepare("raw-2");
+  assert.equal(detecting.code, "SANDBOX_REPLACED");
+  assert.equal(detecting.recoverable, true);
+  assert.deepEqual(h.operationStore.completed.at(-1), {
+    status: "succeeded",
+    result: detecting,
+  });
+  assert.equal(h.rows[0]?.status, "expired");
+  const next = await h.prepare("raw-3");
+  assert.equal(next.ok, true);
+  assert.equal(
+    next.diagnostics,
+    `sandbox replaced. ${SANDBOX_RESTARTED_NOTICE}`,
+  );
+  assert.equal(h.created(), 2);
 });

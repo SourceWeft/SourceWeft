@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import {
   isSandboxInstanceMissingError,
   SandboxInstanceChangedError,
+  SandboxReplacedError,
   SANDBOX_REPLACED_NOTICE,
 } from "./errors";
 import { tool, type ToolRuntime } from "langchain";
@@ -166,11 +167,29 @@ function withReplacementDiagnostics<T extends Record<string, unknown>>(
 }
 
 /**
+ * The errors that mean "this generation is gone for the rest of the call":
+ * the raw provider verdict (a transfer the trusted host runs directly, as
+ * collect's download does), or the manager's verdict when the trusted host
+ * ran the transfer as a pinned operation that already reported the loss
+ * (prepare's upload), or a generation fence. Completing such an operation
+ * with its sandbox id would try to renew an expired lease.
+ */
+function isLostGenerationError(error: unknown): boolean {
+  return (
+    isSandboxInstanceMissingError(error) ||
+    error instanceof SandboxReplacedError ||
+    error instanceof SandboxInstanceChangedError
+  );
+}
+
+/**
  * A provider operation found the sandbox instance gone underneath the run.
  * The manager fences and expires that generation once and says whether the
  * run continues on a replacement (SANDBOX_REPLACED, rendered as the
  * recoverable error below) or fails closed; when the generation was already
- * fenced for another reason the original error stands.
+ * fenced for another reason the original error stands. A verdict the pinned
+ * operation already obtained passes through unchanged — the manager is not
+ * asked twice.
  */
 async function lostGenerationError(input: {
   manager: SandboxManager;
@@ -602,7 +621,7 @@ export function createSandboxTools(input: {
           }),
           replaced,
         );
-        if (sandbox && isSandboxInstanceMissingError(caught)) {
+        if (sandbox && isLostGenerationError(caught)) {
           return JSON.stringify(
             await completeLostGenerationOperation({
               manager: input.manager,
@@ -796,7 +815,7 @@ export function createSandboxTools(input: {
           }),
           replaced,
         );
-        if (sandbox && isSandboxInstanceMissingError(caught)) {
+        if (sandbox && isLostGenerationError(caught)) {
           return JSON.stringify(
             await completeLostGenerationOperation({
               manager: input.manager,
