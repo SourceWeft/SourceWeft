@@ -33,6 +33,40 @@ describe("locales and cards", () => {
       });
     }
   });
+
+  // #367 W4: a template sentence stands in for a registry summary that is
+  // not longer than it; an AI summary still wins.
+  it("prefers a given template over a registry summary no longer than it", () => {
+    const template = "Notion's hosted MCP server; OAuth sign-in required.";
+    expect(
+      mcpCardText({ summary: "Notion MCP Server", aiSummary: null }, template),
+    ).toEqual({
+      text: template,
+      ai: false,
+    });
+    expect(mcpCardText({ summary: "  ", aiSummary: null }, template)).toEqual({
+      text: template,
+      ai: false,
+    });
+    const longer = `${template} And more about it, from the registry.`;
+    expect(mcpCardText({ summary: longer, aiSummary: null }, template)).toEqual(
+      {
+        text: longer,
+        ai: false,
+      },
+    );
+    expect(
+      mcpCardText({ summary: "Notion MCP Server", aiSummary: "AI." }, template),
+    ).toEqual({ text: "AI.", ai: true });
+    for (const none of [undefined, null, "", " "]) {
+      expect(mcpCardText({ summary: "Short.", aiSummary: null }, none)).toEqual(
+        {
+          text: "Short.",
+          ai: false,
+        },
+      );
+    }
+  });
 });
 
 describe("market admin API", () => {

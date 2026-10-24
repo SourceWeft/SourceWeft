@@ -75,7 +75,6 @@ vi.mock("next-intl", async (importOriginal) => {
 });
 
 import PublicMcpDetailPage, { generateMetadata } from "./page";
-import { mcpDetailSeoDescription } from "../_components/mcp-display";
 import { SITE_URL } from "../../../seo";
 
 const SHA = "0123456789abcdef0123456789abcdef01234567";
@@ -170,7 +169,12 @@ describe("public MCP detail page README", () => {
       versions: [],
     });
     const html = await render();
-    expect(navLabels(html)).toEqual(["installation", "readme", "tools"]);
+    expect(navLabels(html)).toEqual([
+      "overview",
+      "installation",
+      "readme",
+      "tools",
+    ]);
     expect(html).toMatch(/href="#readme"[^>]*>README</);
     expect(html.indexOf('id="installation"')).toBeLessThan(
       html.indexOf('id="readme"'),
@@ -289,7 +293,7 @@ describe("public MCP detail page README", () => {
       });
       const html = await render();
       expect(html).not.toContain('id="readme"');
-      expect(navLabels(html)).toEqual(["installation", "tools"]);
+      expect(navLabels(html)).toEqual(["overview", "installation", "tools"]);
     }
   });
 });
@@ -508,6 +512,10 @@ describe("Lupa English search description experiment", () => {
   const lupaIdentifier = "io.github.paeyoungpark-web/lupa-mcp";
   const searchDescription =
     "Lupa MCP lets AI assistants search local Mac files and read indexed document text. Supports PDF, Office and HWP/HWPX files. Requires the Lupa macOS app.";
+  // Without an AI overview the description is the template sentence (#367
+  // W4); the fixture's registry summary is shorter than it.
+  const templateDescription =
+    "Weather's hosted MCP server (weather.example); no sign-in required; Streamable HTTP; 1 tool.";
 
   function useManifest(identifier: string) {
     const result = {
@@ -534,8 +542,8 @@ describe("Lupa English search description experiment", () => {
   }
 
   it("changes only the search description for the exact English page", async () => {
-    const result = useManifest(lupaIdentifier);
-    const originalDescription = mcpDetailSeoDescription(result);
+    useManifest(lupaIdentifier);
+    const originalDescription = templateDescription;
     const actual = await metadata(lupaIdentifier, "en");
     expect(actual.description).toBe(searchDescription);
     // The invalid-locale metadata path resolves to English but is outside the
@@ -555,10 +563,10 @@ describe("Lupa English search description experiment", () => {
   it.each(["zh-CN", "zh-TW", "ja", "invalid-locale"])(
     "keeps the original description for locale %s",
     async (locale) => {
-      const result = useManifest(lupaIdentifier);
-      expect((await metadata(lupaIdentifier, locale)).description).toBe(
-        mcpDetailSeoDescription(result),
-      );
+      useManifest(lupaIdentifier);
+      const description = (await metadata(lupaIdentifier, locale)).description;
+      expect(description).not.toBe(searchDescription);
+      expect(description).toMatch(/^Weather/);
     },
   );
 
@@ -568,18 +576,17 @@ describe("Lupa English search description experiment", () => {
     "io.github.paeyoungpark-web/lupa-mcp-extra",
     "io.github.someone-else/lupa-mcp",
   ])("keeps the original description for %s", async (identifier) => {
-    const result = useManifest(identifier);
+    useManifest(identifier);
     const actual = await metadata(identifier, "en");
-    const originalDescription = mcpDetailSeoDescription(result);
-    expect(actual.description).toBe(originalDescription);
-    expect(actual.openGraph?.description).toBe(originalDescription);
-    expect(actual.twitter?.description).toBe(originalDescription);
+    expect(actual.description).toBe(templateDescription);
+    expect(actual.openGraph?.description).toBe(templateDescription);
+    expect(actual.twitter?.description).toBe(templateDescription);
   });
 
   it("does not override a different manifest returned for the Lupa request", async () => {
-    const result = useManifest(IDENTIFIER);
+    useManifest(IDENTIFIER);
     expect((await metadata(lupaIdentifier, "en")).description).toBe(
-      mcpDetailSeoDescription(result),
+      templateDescription,
     );
   });
 });

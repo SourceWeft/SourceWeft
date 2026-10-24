@@ -6,6 +6,7 @@ import {
   mcpOverviewInputOf,
   mcpOverviewSource,
   needsMcpOverviewRetry,
+  storedServerInstructions,
   type McpOverviewAttempt,
 } from "./source";
 import {
@@ -53,6 +54,46 @@ describe("the overview source of a stored version", () => {
         ["GENESIS402_PAYER_KEY", true],
       ],
     );
+  });
+
+  // #367 W1 keeps what the server said on `initialize` in the provenance.
+  test("reads the server's own instructions from the version's provenance", () => {
+    const provenanceJson = {
+      ...(storedRow().provenanceJson as Record<string, unknown>),
+      selfDescription: {
+        source: "endpoint-initialize",
+        recordedAt: "2026-10-24T00:00:00.000Z",
+        serverInfo: { name: "genesis402", version: "0.2.0" },
+        instructions: "Quote first; pay only with GENESIS402_LIVE=1.",
+      },
+    };
+    const source = mcpOverviewSource(storedRow({ provenanceJson }));
+    assert.equal(
+      source?.instructions,
+      "Quote first; pay only with GENESIS402_LIVE=1.",
+    );
+    assert.equal(
+      mcpOverviewInputOf(storedRow({ provenanceJson }))!.instructions,
+      "Quote first; pay only with GENESIS402_LIVE=1.",
+    );
+    // Tolerant of versions synced before the field existed, and of junk.
+    assert.equal(mcpOverviewSource(storedRow())?.instructions, null);
+    for (const value of [
+      null,
+      "text",
+      {},
+      { selfDescription: null },
+      { selfDescription: "x" },
+      { selfDescription: {} },
+      { selfDescription: { instructions: 7 } },
+      { selfDescription: { instructions: "   " } },
+    ]) {
+      assert.equal(
+        storedServerInstructions(value),
+        null,
+        JSON.stringify(value),
+      );
+    }
   });
 
   test("uses no README unless it was fetched with a hash", () => {
@@ -107,7 +148,7 @@ describe("the input fingerprint without README text", () => {
     }
   });
 
-  test("changes with the README hash, the packages and the description", () => {
+  test("changes with the README hash, the packages, the description and the instructions", () => {
     const base = mcpOverviewFingerprint({
       ...storedRow(),
       hasReadmeText: true,
@@ -121,9 +162,16 @@ describe("the input fingerprint without README text", () => {
           description: "A different description of what it does.",
         },
       },
+      {
+        provenanceJson: {
+          ...(storedRow().provenanceJson as Record<string, unknown>),
+          selfDescription: { instructions: "Quote before paying." },
+        },
+      },
     ].map((overrides) =>
       mcpOverviewFingerprint({ ...storedRow(overrides), hasReadmeText: true }),
     );
+    assert.equal(new Set(changed).size, changed.length);
     for (const fingerprint of changed) assert.notEqual(fingerprint, base);
     // Key order in stored JSON does not matter.
     const reordered = Object.fromEntries(

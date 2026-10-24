@@ -51,6 +51,9 @@ export type CatalogAiOverviewProps = {
   notice?: ReactNode;
   // Its provenance, e.g. the model and when it was generated.
   meta?: ReactNode;
+  // Sections whose text is one item per line (an MCP overview's "what you
+  // can do"): shown as a bulleted list when it has more than one line.
+  lists?: { whatItDoes?: boolean };
   className?: string;
   "data-testid"?: string;
 };
@@ -70,13 +73,18 @@ export function CatalogAiOverview({
   explainer,
   notice,
   meta,
+  lists,
   className,
   "data-testid": testId = "catalog-ai-overview",
 }: CatalogAiOverviewProps) {
   const sections = [
-    { label: labels.whatItDoes, text: overview.whatItDoes },
-    { label: labels.whenToUse, text: overview.whenToUse },
-    { label: labels.requirements, text: overview.requirements },
+    {
+      label: labels.whatItDoes,
+      text: overview.whatItDoes,
+      items: lists?.whatItDoes ? listItems(overview.whatItDoes) : null,
+    },
+    { label: labels.whenToUse, text: overview.whenToUse, items: null },
+    { label: labels.requirements, text: overview.requirements, items: null },
   ].filter((section) => section.text.trim());
   const cautions = overview.cautions?.trim() ? overview.cautions : null;
 
@@ -120,7 +128,15 @@ export function CatalogAiOverview({
                 {section.label}
               </dt>
               <dd className="whitespace-pre-line text-foreground/90">
-                {section.text}
+                {section.items ? (
+                  <ul className="list-disc space-y-0.5 pl-5">
+                    {section.items.map((item, index) => (
+                      <li key={`${index}-${item}`}>{item}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  section.text
+                )}
               </dd>
             </div>
           ))}
@@ -135,6 +151,18 @@ export function CatalogAiOverview({
       ) : null}
     </section>
   );
+}
+
+/**
+ * A section's lines as list items, when there are at least two; null leaves
+ * the text as a paragraph. Text children only, like everything else here.
+ */
+function listItems(text: string): string[] | null {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return lines.length > 1 ? lines : null;
 }
 
 /**
