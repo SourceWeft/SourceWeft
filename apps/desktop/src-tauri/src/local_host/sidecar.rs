@@ -21,9 +21,13 @@ use std::{
 };
 
 /// `InitConfig` as sent on `init`, mirroring the TypeScript type (camelCase on the wire).
+///
+/// `pub`, not `pub(crate)`: this module is private, but `readiness.rs` re-exports this type
+/// (along with `Platform` and `Helpers`) so the ignored Linux integration test in
+/// `tests/linux_sandbox.rs` can build one directly; see that re-export's doc comment.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct InitConfig {
+pub struct InitConfig {
     pub platform: Platform,
     pub home: String,
     pub workspace_roots: Vec<String>,
@@ -35,14 +39,14 @@ pub(crate) struct InitConfig {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum Platform {
+pub enum Platform {
     Linux,
     Darwin,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct Helpers {
+pub struct Helpers {
     pub ripgrep: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub apply_seccomp: Option<String>,

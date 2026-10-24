@@ -23,7 +23,9 @@ pub struct LocalHost {
     pub(crate) db: Mutex<Connection>,
     pub(crate) binary_reads:
         Mutex<std::collections::HashMap<String, super::files::BinaryReadSession>>,
-    base: PathBuf,
+    // Widened from private so `readiness.rs` can locate the sandbox bundle directly under the
+    // app-data base, without a single-purpose accessor method.
+    pub(super) base: PathBuf,
 }
 
 impl LocalHost {

@@ -8,6 +8,7 @@ pub(crate) mod process;
 mod proxy;
 #[cfg(unix)]
 mod sidecar;
+pub mod readiness;
 pub mod sandbox;
 mod workspace;
 

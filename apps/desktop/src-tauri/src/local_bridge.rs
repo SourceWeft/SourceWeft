@@ -1,6 +1,7 @@
 //! Narrow discovery bridge for the existing Web UI. No separate native pages.
 //! Workspace/file operations stay internal until authenticated dispatch is wired.
 use serde::Serialize;
+use sourceweft_desktop::local_host::readiness::SandboxReadiness;
 use tauri::{AppHandle, Manager, WebviewWindow};
 
 #[derive(Serialize)]
@@ -13,6 +14,8 @@ pub struct LocalHostStatus {
     device_id: Option<String>,
     connected: bool,
     connection_error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    readiness: Option<SandboxReadiness>,
 }
 
 #[tauri::command]
@@ -37,16 +40,27 @@ pub fn local_host_status(app: AppHandle, window: WebviewWindow) -> Result<LocalH
         .try_state::<crate::remote_host::RemoteHost>()
         .map(|host| host.status())
         .unwrap_or_default();
+    let host = app.try_state::<std::sync::Arc<sourceweft_desktop::local_host::LocalHost>>();
+    let readiness = host.as_deref().map(|host| host.sandbox_readiness());
+    // macOS keeps its Seatbelt path and is always supported. Linux is supported only once a
+    // readiness probe (built on the managed LocalHost, not managed there until a later task)
+    // actually reports something other than Unsupported; every other platform is unsupported.
+    let platform_supported = if cfg!(target_os = "macos") {
+        true
+    } else if cfg!(target_os = "linux") {
+        matches!(readiness, Some(ref r) if !matches!(r, SandboxReadiness::Unsupported))
+    } else {
+        false
+    };
     Ok(LocalHostStatus {
         protocol_version: 2,
-        platform_supported: cfg!(target_os = "macos"),
-        storage_initialized: app
-            .try_state::<std::sync::Arc<sourceweft_desktop::local_host::LocalHost>>()
-            .is_some(),
+        platform_supported,
+        storage_initialized: host.is_some(),
         authenticated_dispatch_available: remote.connected,
         device_id: remote.device_id,
         connected: remote.connected,
         connection_error: remote.error,
+        readiness,
     })
 }
 

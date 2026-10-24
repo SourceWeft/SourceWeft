@@ -45,6 +45,12 @@ export type AutostartState = {
   reason?: string | null;
 };
 
+/** Readiness of local sandboxed execution; absent when no LocalHost is managed yet. */
+export type SandboxReadiness =
+  | { state: "ready"; toolchainPath: "loginShell" | "system" }
+  | { state: "needsSetup"; reason: string }
+  | { state: "unsupported" };
+
 /** Native capability discovery only; does not authorize local execution. */
 export type LocalHostStatus = {
   protocolVersion: number;
@@ -54,6 +60,7 @@ export type LocalHostStatus = {
   deviceId: string | null;
   connected: boolean;
   connectionError: string | null;
+  readiness?: SandboxReadiness;
 };
 
 type DesktopListener<TPayload> = (payload: TPayload) => void;
