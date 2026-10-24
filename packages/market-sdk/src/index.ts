@@ -9,10 +9,12 @@ import {
   listMarketSkillCollectionsResponseSchema,
   listMarketCategoriesResponseSchema,
   listMarketMcpResponseSchema,
+  listMarketMcpToolRevisionsResponseSchema,
   listMarketSkillCategoriesResponseSchema,
   listMarketSkillsResponseSchema,
   marketCategoryCountsResponseSchema,
   type ListMarketMcpRequest,
+  type ListMarketMcpToolRevisionsRequest,
   type ListMarketSkillsRequest,
   type MarketMcpLocale,
   type MarketSkillLocale,
@@ -285,6 +287,25 @@ export class MarketClient {
       appendQuery(`/v1/mcp/${encode(identifier)}/manifest`, params),
       { method: "GET" },
       getMarketMcpManifestResponseSchema,
+    );
+  }
+
+  /**
+   * The change log of the tool list the page shows (or of `source`), newest
+   * first; `before` continues after the previous answer's `nextBefore`.
+   */
+  listMcpToolRevisions(
+    identifier: string,
+    input: Partial<ListMarketMcpToolRevisionsRequest> = {},
+  ) {
+    const params = new URLSearchParams();
+    if (input.source) params.set("source", input.source);
+    if (input.limit) params.set("limit", String(input.limit));
+    if (input.before) params.set("before", String(input.before));
+    return this.request(
+      appendQuery(`/v1/mcp/${encode(identifier)}/tools/revisions`, params),
+      { method: "GET" },
+      listMarketMcpToolRevisionsResponseSchema,
     );
   }
 

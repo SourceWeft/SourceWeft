@@ -759,6 +759,107 @@ describe("MCP owner claims", () => {
       expect(detail.item.claimed).toBe(false);
     });
 
+    test("tool lists make revisions: a new one per difference, a withdrawal for clearing or a block", async () => {
+      const identifier = `com.${tag}rev/mcp`;
+      const host = `${tag}rev.com`;
+      await ingest.upsertMarketMcp({ ...federated, manifest: manifest(identifier) });
+      await becomeOwner("rev-a", identifier, host);
+      const tool = (name: string, description = "") => ({
+        name,
+        description,
+        inputSchema: {},
+        annotations: {},
+      });
+      const submit = (tools: ReturnType<typeof tool>[], serverInfo?: Record<string, unknown>) =>
+        service.setMcpOwnerTools(
+          { userId: "rev-a", identifier, submission: { tools, ...(serverInfo ? { serverInfo } : {}) } },
+          deps(),
+        );
+      const history = async () => {
+        const response = await app.request(`/v1/mcp/${enc(identifier)}/tools/revisions`);
+        expect(response.status).toBe(200);
+        return (await json(response)) as unknown as {
+          source: string | null;
+          items: Array<{
+            revision: number;
+            current: boolean;
+            withdrawn: boolean;
+            serverVersion: string | null;
+            added: string[];
+            removed: string[];
+            changed: Array<{ name: string; fields: string[] }>;
+          }>;
+        };
+      };
+      const detailRevision = async () =>
+        ((await json(await app.request(`/v1/mcp/${enc(identifier)}`))) as unknown as {
+          toolsRevision: { source: string; revision: number } | null;
+        }).toolsRevision;
+
+      expect(await detailRevision()).toBeNull();
+      await submit([tool("a"), tool("b")], { name: "srv", version: "1.4.0" });
+      expect(await detailRevision()).toMatchObject({ source: "owner", revision: 1 });
+      // The same list again (reordered, whitespace changed) is not a revision.
+      advance(60);
+      await submit([tool("b"), tool("a")], { name: "srv", version: "1.4.1" });
+      expect(await detailRevision()).toMatchObject({ source: "owner", revision: 1 });
+      await submit([tool("a", "now described"), tool("c")]);
+      expect(await detailRevision()).toMatchObject({ source: "owner", revision: 2 });
+
+      let page = await history();
+      expect(page.source).toBe("owner");
+      expect(page.items.map((item) => [item.revision, item.current])).toEqual([
+        [2, true],
+        [1, false],
+      ]);
+      expect(page.items[0]).toMatchObject({
+        added: ["c"],
+        removed: ["b"],
+        changed: [{ name: "a", fields: ["description"] }],
+      });
+      expect(page.items[1]).toMatchObject({ added: ["a", "b"], serverVersion: "1.4.0" });
+
+      // Clearing is a withdrawal, not an empty list; the detail has no revision to show.
+      state.userId = "rev-a";
+      const cleared = await app.request(`/v1/market/mcp/${enc(identifier)}/owner-overrides/tools`, {
+        method: "DELETE",
+      });
+      expect(cleared.status).toBe(200);
+      expect(await detailRevision()).toBeNull();
+      // Nothing is public once the owner's list is no longer shown.
+      expect((await history()).items).toEqual([]);
+      // Publishing again continues the numbering against the empty list.
+      await submit([tool("a", "now described"), tool("c")]);
+      page = await history();
+      expect(page.items.map((item) => [item.revision, item.withdrawn])).toEqual([
+        [4, false],
+        [3, true],
+        [2, false],
+        [1, false],
+      ]);
+      expect(page.items[0]).toMatchObject({ added: ["a", "c"], removed: [] });
+
+      // A block clears the blocked member's list in the same step.
+      await service.adminBlockMcpMember(
+        { adminUserId: "market-admin", identifier, userId: "rev-a" },
+        deps(),
+      );
+      const rows = await data.db
+        .select({ revision: data.marketMcpToolRevisions.revision, withdrawn: data.marketMcpToolRevisions.withdrawn })
+        .from(data.marketMcpToolRevisions)
+        .innerJoin(data.mcpServers, eq(data.mcpServers.id, data.marketMcpToolRevisions.itemId))
+        .where(eq(data.mcpServers.identifier, identifier));
+      expect(rows.sort((x, y) => x.revision - y.revision).map((row) => row.withdrawn)).toEqual([
+        false,
+        false,
+        true,
+        false,
+        true,
+      ]);
+      // No member or team identifier anywhere in the table.
+      expect(Object.keys(data.marketMcpToolRevisions).join(" ")).not.toMatch(/user|member|team/i);
+    });
+
     test("fields keep their authors: blocking one owner clears theirs and keeps the other's", async () => {
       const identifier = `com.${tag}auth/mcp`;
       const host = `${tag}auth.com`;

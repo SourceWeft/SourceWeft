@@ -1,6 +1,8 @@
 import type { Hono } from "hono";
 import {
   listMarketMcpRequestSchema,
+  listMarketMcpToolRevisionsRequestSchema,
+  listMarketMcpToolRevisionsResponseSchema,
   marketMcpLocaleSchema,
   marketMcpManifestSchema,
 } from "@sourceweft/market-contracts";
@@ -24,6 +26,7 @@ import {
   findMcp,
   findMcpVersion,
   listMcp,
+  listMcpToolRevisions,
 } from "../../modules/market/read-repository";
 import {
   readMcpReadmeAdminStatus,
@@ -126,9 +129,30 @@ export function registerMarketRoutes(app: Hono) {
         searchIndexable: record.searchIndexable,
         relatedProduct: record.relatedProduct,
         score: record.score,
+        toolsRevision: record.toolsRevision,
       },
       { maxAge: 60 },
     );
+  });
+
+  // The change log of the tool list the page shows, newest first. One page
+  // per request, at most MARKET_MCP_TOOL_REVISIONS_MAX_LIMIT entries.
+  app.get("/v1/mcp/:identifier/tools/revisions", async (c) => {
+    const query = listMarketMcpToolRevisionsRequestSchema.safeParse({
+      source: c.req.query("source") || undefined,
+      limit: c.req.query("limit") || undefined,
+      before: c.req.query("before") || undefined,
+    });
+    if (!query.success) {
+      throw ApiError.validation(query.error.flatten() as Record<string, unknown>);
+    }
+    const page = await listMcpToolRevisions(c.req.param("identifier"), query.data);
+    if (!page) {
+      throw ApiError.notFound("MCP item not found");
+    }
+    return cachedJson(c, listMarketMcpToolRevisionsResponseSchema.parse(page), {
+      maxAge: 60,
+    });
   });
 
   app.get("/v1/mcp/:identifier/manifest", async (c) => {
