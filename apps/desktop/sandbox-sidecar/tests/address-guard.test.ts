@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { deniedReason } from "../src/address-guard.js";
+import { canonicalHost, deniedReason } from "../src/address-guard.js";
 
 const own = new Set(["192.168.1.57"]);
 for (const h of [
@@ -71,3 +71,100 @@ for (const h of [
     assert.notEqual(deniedReason(h, ownRound2), null));
 test("allows 203.0.113.8 (not an own address)", () =>
   assert.equal(deniedReason("203.0.113.8", ownRound2), null));
+
+// Final review C1: srt's proxy dials the WHATWG-canonical spelling of a host, so every
+// inet_aton spelling of a denied address must be denied too — including the host's own
+// address written in shorthand.
+for (const h of [
+  "127.1", // shorthand → 127.0.0.1
+  "127.1.", // shorthand + trailing dot
+  "2130706433", // integer → 127.0.0.1
+  "0x7f000001", // hex integer → 127.0.0.1
+  "0x7f.0.0.1", // hex octet → 127.0.0.1
+  "0177.0.0.1", // octal octet → 127.0.0.1
+  "10.1", // shorthand → 10.0.0.1
+  "169.254.43518", // shorthand → 169.254.169.254
+  "2852039166", // integer → 169.254.169.254
+  "0xa9fea9fe", // hex integer → 169.254.169.254
+  "192.168.313", // own address 192.168.1.57 in shorthand
+  "3232235833", // own address 192.168.1.57 as an integer
+  "[127.1]", // bracketed shorthand (not an IPv6 literal, still canonicalised)
+])
+  test(`denies ${h} (C1: canonical IPv4 spelling)`, () =>
+    assert.notEqual(deniedReason(h, own), null));
+
+test("canonicalHost matches what srt dials for every spelling", () => {
+  for (const [raw, dialed] of [
+    ["127.1", "127.0.0.1"],
+    ["2130706433", "127.0.0.1"],
+    ["0x7f.0.0.1", "127.0.0.1"],
+    ["0177.0.0.1", "127.0.0.1"],
+    ["10.1", "10.0.0.1"],
+    ["2852039166", "169.254.169.254"],
+    ["Api.Example.COM.", "api.example.com"],
+    ["[::1]", "::1"],
+    ["0:0:0:0:0:0:0:1", "::1"],
+    ["例え.jp", "xn--r8jz45g.jp"],
+  ] as const)
+    assert.equal(canonicalHost(raw), dialed, raw);
+});
+
+// Hosts srt itself cannot canonicalise fall back to the raw spelling there; this guard cannot
+// judge what that dials, so it denies them.
+for (const h of ["foo.123", "1.2.3.4.5", "fe80::1%en0", "bad host", ""])
+  test(`denies ${JSON.stringify(h)} (C1: not canonicalisable)`, () =>
+    assert.notEqual(deniedReason(h, own), null));
+
+for (const h of ["134744072", "8.8.8.8.", "a_b.example.com", "64:ff9b::808:808"])
+  test(`allows ${h} (canonical form is public)`, () =>
+    assert.equal(deniedReason(h, own), null));
+
+// M2: parity with srt's own address classes.
+for (const h of [
+  "0.1.2.3", // 0.0.0.0/8
+  "255.255.255.255", // limited broadcast
+  "64:ff9b::a00:1", // NAT64 of 10.0.0.1
+  "64:ff9b::7f00:1", // NAT64 of 127.0.0.1
+  "2002:7f00:1::", // 6to4 of 127.0.0.1
+  "2002:a9fe:a9fe::1", // 6to4 of 169.254.169.254
+  "::ffff:0:7f00:1", // IPv4-translated 127.0.0.1
+])
+  test(`denies ${h} (M2: srt address-class parity)`, () =>
+    assert.notEqual(deniedReason(h, own), null));
+
+// The guard must judge exactly the spelling srt dials: compare against srt's own
+// canonicalisation (an internal module of the pinned srt release, imported only here).
+test("canonicalHost agrees with srt's canonicalizeHost", async () => {
+  const { canonicalizeHost } = await import(
+    "@anthropic-ai/sandbox-runtime/dist/sandbox/parent-proxy.js"
+  );
+  for (const raw of [
+    "127.1",
+    "127.1.",
+    "2130706433",
+    "0x7f000001",
+    "0x7f.0.0.1",
+    "0177.0.0.1",
+    "10.1",
+    "169.254.43518",
+    "2852039166",
+    "192.168.313",
+    "[127.1]",
+    "Api.Example.COM.",
+    "[::1]",
+    "::7f00:1",
+    "0:0:0:0:0:0:7f00:1",
+    "64:ff9b::a00:1",
+    "例え.jp",
+    "10.0.0.1.nip.io",
+    "foo.123",
+    "fe80::1%en0",
+  ]) {
+    const srt: string | undefined = canonicalizeHost(raw);
+    const ours = canonicalHost(raw);
+    if (srt === undefined) assert.equal(ours, null, raw);
+    // srt spells an IPv4-mapped literal as its IPv4 address; this guard keeps the IPv6 form
+    // and matches it through the embedded entries, so only compare the other forms.
+    else if (!/ffff/i.test(raw)) assert.equal(ours, srt, raw);
+  }
+});
