@@ -10,11 +10,21 @@ const mocks = vi.hoisted(() => ({
   storedRecords: vi.fn(
     async (_versionIds: string[]) => new Map<string, unknown>(),
   ),
+  storedIconProvenance: vi.fn(
+    async (_versionIds: string[]) => new Map<string, unknown>(),
+  ),
 }));
 
 vi.mock("../ingest/repository", () => ({
   upsertMarketMcp: mocks.upsert,
   findStoredEndpointProbes: mocks.storedProbes,
+  findStoredIconProvenance: mocks.storedIconProvenance,
+}));
+// No public storage: the favicon step (W3) is skipped, so nothing here
+// depends on the ambient PUBLIC_S3_* environment or calls a favicon service.
+vi.mock("../icons/store", () => ({
+  canStoreMcpIcons: () => false,
+  storeMcpIcon: vi.fn(),
 }));
 vi.mock("./repository", () => ({
   findStoredGithubRegistryRecords: mocks.storedRecords,
