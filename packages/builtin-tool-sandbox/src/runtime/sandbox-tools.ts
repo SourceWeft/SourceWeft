@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   isSandboxInstanceMissingError,
+  SandboxInstanceChangedError,
   SANDBOX_REPLACED_NOTICE,
 } from "./errors";
 import { tool, type ToolRuntime } from "langchain";
@@ -187,6 +188,47 @@ async function lostGenerationError(input: {
       input.error,
     )) ?? input.error
   );
+}
+
+/**
+ * Complete a prepare/collect operation whose provider error was a lost
+ * instance. The manager has already expired the row, so there is no lease
+ * to renew: completing with the sandbox id would make the renewal refuse
+ * the expired row as SANDBOX_INSTANCE_CHANGED, throw past the rendered
+ * result and leave the operation row `running` (live acceptance of #323,
+ * 2026-10-24). The fail-closed verdict (replaced too often) is recorded as
+ * a failed operation and thrown, like execute's; the replacement verdict is
+ * recorded as the recoverable result the model sees, like every other
+ * recoverable prepare/collect error.
+ */
+async function completeLostGenerationOperation(input: {
+  manager: SandboxManager;
+  operationId: string;
+  error: unknown;
+  result: Record<string, unknown>;
+  startedAt: number;
+}): Promise<Record<string, unknown>> {
+  if (input.error instanceof SandboxInstanceChangedError) {
+    await input.manager.completeToolOperation({
+      operationId: input.operationId,
+      sandboxId: null,
+      status: "failed",
+      result: {
+        error: compactRecoverableToolError(input.error),
+        errorCode: input.error.code,
+      },
+      durationMs: Date.now() - input.startedAt,
+    });
+    throw input.error;
+  }
+  await input.manager.completeToolOperation({
+    operationId: input.operationId,
+    sandboxId: null,
+    status: "succeeded",
+    result: input.result,
+    durationMs: Date.now() - input.startedAt,
+  });
+  return input.result;
 }
 
 function requireSandboxToolCallId(input: {
@@ -560,6 +602,17 @@ export function createSandboxTools(input: {
           }),
           replaced,
         );
+        if (sandbox && isSandboxInstanceMissingError(caught)) {
+          return JSON.stringify(
+            await completeLostGenerationOperation({
+              manager: input.manager,
+              operationId: claim.operationId,
+              error,
+              result,
+              startedAt,
+            }),
+          );
+        }
         await input.manager.completeToolOperation({
           operationId: claim.operationId,
           sandboxId,
@@ -743,6 +796,17 @@ export function createSandboxTools(input: {
           }),
           replaced,
         );
+        if (sandbox && isSandboxInstanceMissingError(caught)) {
+          return JSON.stringify(
+            await completeLostGenerationOperation({
+              manager: input.manager,
+              operationId: claim.operationId,
+              error,
+              result,
+              startedAt,
+            }),
+          );
+        }
         await input.manager.completeToolOperation({
           operationId: claim.operationId,
           sandboxId,
