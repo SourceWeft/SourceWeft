@@ -16,7 +16,7 @@
     "@sourceweft/capability-contracts": "workspace:*",
     "@sourceweft/contracts": "workspace:*",
     "langchain": "^1.5.10",
-    "zod": "^4.4.3"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",
