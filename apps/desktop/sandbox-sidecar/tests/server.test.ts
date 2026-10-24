@@ -7,7 +7,7 @@ import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { deniedReason } from "../src/address-guard.js";
-import { buildConfig } from "../src/policy.js";
+import { buildConfig, perWrapReadRoots } from "../src/policy.js";
 import type { InitConfig, Request, Response } from "../src/protocol.js";
 import { startServer } from "../src/server.js";
 import type { SrtLike } from "../src/server.js";
@@ -226,36 +226,70 @@ test("init surfaces an srt.initialize throw as SANDBOX_UNAVAILABLE", async () =>
   await harness.stop();
 });
 
-/** The merged config srt should see for any command wrapped under `workspaceRoot` against
- * `linuxInit()`: everything `buildConfig` itself produces, untouched, plus exactly
- * `workspaceRoot` added to `allowWrite`. Used by the review-round-1 merge-invariant tests for
- * both `wrap` and `probe` below, so a future change can't silently widen (or narrow) anything
- * beyond that one field. */
-function expectedMergedConfig(root: string) {
-  const base = buildConfig(linuxInit());
+/** The merged config srt should see for any command wrapped under `root` against `init`:
+ * everything `buildConfig` itself produces, untouched — except that `allowRead` is exactly
+ * `root` plus `init.readRoots` (Ruling R14; never the other init workspace roots) and exactly
+ * `root` is added to `allowWrite`. Used by the merge-invariant tests for both `wrap` and `probe`
+ * below, so a future change can't silently widen (or narrow) anything beyond those fields. */
+function expectedMergedConfig(root: string, init: InitConfig = linuxInit()) {
+  const base = buildConfig(init);
   return {
     denyRead: base.filesystem.denyRead,
-    allowRead: base.filesystem.allowRead,
+    denyWrite: base.filesystem.denyWrite,
+    allowRead: [root, ...perWrapReadRoots(init)].map((path) => ({ path, literal: true })),
     network: base.network,
     allowWrite: [{ path: root, literal: true }],
   };
 }
 
-function assertMergeInvariant(customConfig: unknown, root: string): void {
+function assertMergeInvariant(
+  customConfig: unknown,
+  root: string,
+  init: InitConfig = linuxInit(),
+): void {
   const config = customConfig as {
     filesystem: {
       denyRead: unknown;
+      denyWrite: unknown;
       allowRead: unknown;
       allowWrite: Array<{ path: string; literal: true }>;
     };
     network: unknown;
   };
-  const expected = expectedMergedConfig(root);
+  const expected = expectedMergedConfig(root, init);
   assert.deepEqual(config.filesystem.denyRead, expected.denyRead);
+  assert.deepEqual(config.filesystem.denyWrite, expected.denyWrite);
   assert.deepEqual(config.filesystem.allowRead, expected.allowRead);
   assert.deepEqual(config.network, expected.network);
   assert.deepEqual(config.filesystem.allowWrite, expected.allowWrite);
 }
+
+// Ruling R14: with several init workspace roots, a command wrapped in one of them is given
+// read access to that root and the read roots only, not to its sibling workspaces.
+test("wrap re-allows only its own workspace root and the read roots", async () => {
+  const otherRoot = join(tmpRoot, "other-ws");
+  mkdirSync(otherRoot, { recursive: true });
+  const init = linuxInit({
+    workspaceRoots: [workspaceRoot, otherRoot],
+    readRoots: [join(tmpRoot, "toolchain")],
+    denyRoots: [join(tmpRoot, "home", "app", "local-host")],
+  });
+  const srt = makeFakeSrt();
+  const harness = await initHarness(srt, undefined, init);
+  const response = await harness.send({
+    op: "wrap",
+    commandId: "c".repeat(22),
+    command: "echo hi",
+    cwd: otherRoot,
+    workspaceRoot: otherRoot,
+  });
+  assert.equal(response.ok, true, `wrap failed: ${JSON.stringify(response)}`);
+  assertMergeInvariant(srt.lastCustomConfig, otherRoot, init);
+  const allowRead = (srt.lastCustomConfig as { filesystem: { allowRead: Array<{ path: string }> } })
+    .filesystem.allowRead.map((entry) => entry.path);
+  assert.ok(!allowRead.includes(workspaceRoot), `sibling workspace re-allowed: ${allowRead}`);
+  await harness.stop();
+});
 
 test("wrap passes the workspace as the only write root", async () => {
   const srt = makeFakeSrt();
@@ -278,7 +312,7 @@ test("wrap passes the workspace as the only write root", async () => {
 // Fix round 1 review: pin the whole merge invariant, not just `allowWrite` — `wrap` and
 // `probe` must each hand srt a config whose `denyRead`/`allowRead`/`network` are untouched
 // from `buildConfig(init)`, with `allowWrite` widened to exactly the one workspace root.
-test("wrap's merged config keeps denyRead/allowRead/network from buildConfig untouched", async () => {
+test("wrap's merged config keeps denyRead/denyWrite/network from buildConfig untouched", async () => {
   const srt = makeFakeSrt();
   const harness = await initHarness(srt);
   const response = await harness.send({
@@ -293,7 +327,7 @@ test("wrap's merged config keeps denyRead/allowRead/network from buildConfig unt
   await harness.stop();
 });
 
-test("probe's merged config keeps denyRead/allowRead/network from buildConfig untouched", async () => {
+test("probe's merged config keeps denyRead/denyWrite/network from buildConfig untouched", async () => {
   const srt = makeFakeSrt();
   const harness = await initHarness(srt);
   const response = await harness.send({ op: "probe" });

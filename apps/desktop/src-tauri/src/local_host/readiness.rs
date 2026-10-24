@@ -296,6 +296,7 @@ impl LocalHost {
                 let bundle = bundle_dir(&self.base);
                 let init = super::srt_exec::init_config(
                     &bundle,
+                    &self.base,
                     vec![self.workspace_base().to_string_lossy().into_owned()],
                 );
                 probe_bundle(&bundle, &init)
@@ -350,6 +351,7 @@ mod tests {
             home: "/tmp/sourceweft-readiness-test-home".to_string(),
             workspace_roots: vec!["/tmp/sourceweft-readiness-test-workspace".to_string()],
             read_roots: vec![],
+            deny_roots: vec![],
             helpers: Helpers {
                 ripgrep: "/usr/bin/rg".to_string(),
                 apply_seccomp: None,

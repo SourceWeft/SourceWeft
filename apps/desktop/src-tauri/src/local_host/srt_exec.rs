@@ -3,8 +3,9 @@
 //! `execute_command` result shape: `{"output","exitCode","truncated","cancelled"}`.
 //!
 //! One sidecar is kept per `LocalHost`, started lazily from `readiness::bundle_dir`. Its `init`
-//! grants read access to `<base>/task-workspaces` plus every currently granted directory; each
-//! `wrap` grants write access to exactly that command's workspace root. Nothing here ever runs
+//! lists `<base>/task-workspaces` plus every currently granted directory as the workspace roots
+//! a wrap may name; each `wrap` grants read and write access to exactly that command's workspace
+//! root (plus read access to the toolchain read roots and the in-sandbox helper files). Nothing here ever runs
 //! a command without an argv the sidecar wrapped: a missing bundle, a failed start, or a wrap
 //! that still fails after one restart is returned as an error.
 use super::{
@@ -27,11 +28,6 @@ pub(crate) const BWRAP_PATH: &str = "/opt/sourceweft/libexec/bwrap";
 pub(crate) struct SandboxInstance {
     sidecar: Sidecar,
     workspace_roots: Vec<PathBuf>,
-    /// Commands wrapped by this sidecar that have not finished yet. srt's `cleanupAfterCommand`
-    /// removes every bwrap mount-point placeholder it created, not just one command's, so it
-    /// only runs once the last in-flight command has finished; `begin` waits on the same lock,
-    /// so no new wrap can start while that cleanup is running.
-    in_flight: Mutex<usize>,
 }
 
 /// `LocalHost::sandbox`: the current sidecar, if one has been started. An instance that failed
@@ -44,7 +40,6 @@ impl SandboxInstance {
         Self {
             sidecar,
             workspace_roots,
-            in_flight: Mutex::new(0),
         }
     }
 
@@ -54,29 +49,31 @@ impl SandboxInstance {
             .any(|allowed| root.starts_with(allowed))
     }
 
-    fn begin(&self) {
-        *self.in_flight.lock().unwrap_or_else(|e| e.into_inner()) += 1;
-    }
-
+    /// Exactly once per successful `wrap` on this instance, after its command exited (or
+    /// failed to spawn). srt counts every wrap and defers deleting its bwrap mount-point
+    /// placeholders until the matching number of cleanups has arrived, so one call per wrap —
+    /// never one for a failed wrap — keeps that count right with overlapping commands.
     fn finish(&self, command_id: &str) {
-        let mut in_flight = self.in_flight.lock().unwrap_or_else(|e| e.into_inner());
-        *in_flight = in_flight.saturating_sub(1);
-        if *in_flight == 0 {
-            if let Err(error) = self.sidecar.cleanup(command_id) {
-                // A failed cleanup poisons the sidecar, so the next wrap replaces it; srt also
-                // removes its placeholders on reset and on exit.
-                eprintln!("sourceweft-desktop: sandbox cleanup failed: {error}");
-            }
+        if let Err(error) = self.sidecar.cleanup(command_id) {
+            // A failed cleanup poisons the sidecar, so the next wrap replaces it; srt also
+            // removes its placeholders on reset and on exit.
+            eprintln!("sourceweft-desktop: sandbox cleanup failed: {error}");
         }
     }
 }
 
-/// The `InitConfig` for a Linux sidecar whose helpers live in `bundle`.
-pub(crate) fn init_config(bundle: &Path, workspace_roots: Vec<String>) -> InitConfig {
+/// The `InitConfig` for a Linux sidecar whose helpers live in `bundle`, for a host whose app
+/// data is `base`. `<base>/local-host` (the host database) and `<base>/sandbox` (the runtime
+/// bundles) are denied explicitly, independent of whether `base` lies under `$HOME`.
+pub(crate) fn init_config(bundle: &Path, base: &Path, workspace_roots: Vec<String>) -> InitConfig {
     let home = std::env::var("HOME").unwrap_or_default();
     InitConfig {
         platform: Platform::Linux,
-        read_roots: read_roots(Path::new(&home), &user_path().0),
+        read_roots: read_roots(Path::new(&home), base, &user_path().0),
+        deny_roots: [base.join("local-host"), base.join("sandbox")]
+            .iter()
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect(),
         home,
         workspace_roots,
         helpers: Helpers {
@@ -96,14 +93,20 @@ pub(crate) fn init_config(bundle: &Path, workspace_roots: Vec<String>) -> InitCo
 /// Toolchain directories under `$HOME` that the sandbox must still be able to read, although
 /// `home` itself is denied: for each `PATH` entry under `home`, its parent if it ends in `/bin`
 /// (so `~/.cargo/bin` re-allows `~/.cargo`, where the toolchain keeps its libraries), else the
-/// entry itself. Canonicalised, existing directories only, de-duplicated. A candidate that is
-/// `home` itself or one of its ancestors is never returned (`~/bin`'s parent is `home`; it falls
-/// back to `~/bin` itself), since that would re-allow the whole home directory.
-pub(crate) fn read_roots(home: &Path, path_var: &str) -> Vec<String> {
+/// entry itself. Canonicalised, existing directories only, de-duplicated.
+///
+/// Never returned (Ruling R16): `home` itself, `~/.local`, or any ancestor of `home` — the parent
+/// rule falls back to the entry itself for `~/bin` and `~/.local/bin`, since `~/.local` holds
+/// `~/.local/share`, where app data (including this host's) lives — and any directory that
+/// equals, contains, or lies inside the app data directory `base`.
+pub(crate) fn read_roots(home: &Path, base: &Path, path_var: &str) -> Vec<String> {
     if !home.is_absolute() {
         return Vec::new();
     }
     let canonical_home = home.canonicalize().unwrap_or_else(|_| home.to_path_buf());
+    let canonical_base = base.canonicalize().unwrap_or_else(|_| base.to_path_buf());
+    let local = home.join(".local");
+    let canonical_local = canonical_home.join(".local");
     let mut roots: Vec<String> = Vec::new();
     for entry in path_var.split(':') {
         let entry = Path::new(entry);
@@ -112,7 +115,9 @@ pub(crate) fn read_roots(home: &Path, path_var: &str) -> Vec<String> {
         }
         let candidate = match entry.parent() {
             Some(parent)
-                if entry.file_name().is_some_and(|name| name == "bin") && parent != home =>
+                if entry.file_name().is_some_and(|name| name == "bin")
+                    && parent != home
+                    && parent != local =>
             {
                 parent
             }
@@ -121,7 +126,12 @@ pub(crate) fn read_roots(home: &Path, path_var: &str) -> Vec<String> {
         let Ok(canonical) = candidate.canonicalize() else {
             continue;
         };
-        if !canonical.is_dir() || canonical_home.starts_with(&canonical) {
+        if !canonical.is_dir()
+            || canonical_home.starts_with(&canonical)
+            || canonical == canonical_local
+            || canonical.starts_with(&canonical_base)
+            || canonical_base.starts_with(&canonical)
+        {
             continue;
         }
         let Some(text) = canonical.to_str() else {
@@ -150,7 +160,8 @@ fn lock_slot(slot: &SandboxSlot) -> std::sync::MutexGuard<'_, Option<Arc<Sandbox
     slot.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Wraps one attempt on `instance`, counting it in flight only while it might still run.
+/// Wraps one attempt on `instance`. A failed wrap is never followed by a cleanup: srt has
+/// already undone its own count for it.
 fn try_wrap(
     instance: &SandboxInstance,
     command_id: &str,
@@ -158,24 +169,16 @@ fn try_wrap(
     cwd: &Path,
     root: &Path,
 ) -> Result<WrappedCommand> {
-    instance.begin();
-    let wrapped = instance
-        .sidecar
-        .wrap(command_id, script, cwd, root)
-        .and_then(|wrapped| {
-            if wrapped.argv.is_empty() {
-                Err(HostError::new(
-                    "SANDBOX_UNAVAILABLE",
-                    "The sandbox returned an empty command.",
-                ))
-            } else {
-                Ok(wrapped)
-            }
-        });
-    if wrapped.is_err() {
+    let wrapped = instance.sidecar.wrap(command_id, script, cwd, root)?;
+    if wrapped.argv.is_empty() {
+        // srt counted this wrap; balance it before reporting the sidecar unusable.
         instance.finish(command_id);
+        return Err(HostError::new(
+            "SANDBOX_UNAVAILABLE",
+            "The sandbox returned an empty command.",
+        ));
     }
-    wrapped
+    Ok(wrapped)
 }
 
 /// Returns the sidecar to use for `root` and the wrapped command, enforcing the restart policy:
@@ -188,8 +191,8 @@ fn try_wrap(
 ///
 /// `start` builds a fresh instance from the current workspace roots. The slot lock is held
 /// while starting, so concurrent callers never start duplicate sidecars; wraps run outside it.
-/// On success the returned instance has the command counted in flight; the caller must call
-/// `finish` on it.
+/// On success the caller must call `finish` on the returned instance exactly once, after the
+/// command exits.
 fn wrap_in_sandbox(
     slot: &SandboxSlot,
     root: &Path,
@@ -254,7 +257,7 @@ fn start_instance(host: &LocalHost) -> Result<SandboxInstance> {
             })
         })
         .collect::<Result<Vec<_>>>()?;
-    let sidecar = Sidecar::start(&bundle, &init_config(&bundle, names))?;
+    let sidecar = Sidecar::start(&bundle, &init_config(&bundle, &host.base, names))?;
     Ok(SandboxInstance::new(sidecar, roots))
 }
 
@@ -374,11 +377,18 @@ mod tests {
     }
 
     fn stub_instance(bundle: &Path, roots: &[&str]) -> Result<SandboxInstance> {
+        stub_instance_at(bundle, roots, "/tmp/sourceweft-srt-exec-test-home")
+    }
+
+    /// A stub whose `init.home` is `home`; a `home` ending in `/record-ops` makes the stub log
+    /// every later request as `<op> <commandId>` to `<home>.log`.
+    fn stub_instance_at(bundle: &Path, roots: &[&str], home: &str) -> Result<SandboxInstance> {
         let init = InitConfig {
             platform: Platform::Linux,
-            home: "/tmp/sourceweft-srt-exec-test-home".to_string(),
+            home: home.to_string(),
             workspace_roots: roots.iter().map(|r| r.to_string()).collect(),
             read_roots: vec![],
+            deny_roots: vec![],
             helpers: Helpers {
                 ripgrep: "/usr/bin/rg".to_string(),
                 apply_seccomp: None,
@@ -462,9 +472,47 @@ mod tests {
         assert!(after.covers(Path::new("/granted")));
     }
 
+    /// Requests the recording stub saw with op `op`, as their command ids, in order.
+    fn recorded(log: &Path, op: &str) -> Vec<String> {
+        fs::read_to_string(log)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| line.strip_prefix(&format!("{op} ")))
+            .map(str::to_string)
+            .collect()
+    }
+
+    #[test]
+    fn cleanup_runs_once_per_successful_wrap_and_never_after_a_failed_one() {
+        let bundle = bundle_with_stub();
+        let record = tempfile::tempdir().unwrap();
+        let home = record.path().join("record-ops");
+        let home = home.to_str().unwrap();
+        let log = record.path().join("record-ops.log");
+        let slot = SandboxSlot::default();
+        let start = || stub_instance_at(bundle.path(), &["/w"], home);
+        let w = Path::new("/w");
+        // Two overlapping commands: the second is wrapped before the first has finished.
+        let (first, _) = wrap_in_sandbox(&slot, w, w, "echo a", "cmd-a", start).unwrap();
+        let (second, _) = wrap_in_sandbox(&slot, w, w, "echo b", "cmd-b", start).unwrap();
+        assert!(Arc::ptr_eq(&first, &second));
+        let failed = wrap_in_sandbox(&slot, w, w, "ERROR:POLICY_INVALID", "cmd-c", start)
+            .err()
+            .expect("a policy error must be returned");
+        assert_eq!(failed.code, "POLICY_INVALID");
+        first.finish("cmd-a");
+        second.finish("cmd-b");
+        assert_eq!(recorded(&log, "wrap"), ["cmd-a", "cmd-b", "cmd-c"]);
+        assert_eq!(recorded(&log, "cleanup"), ["cmd-a", "cmd-b"]);
+    }
+
     #[test]
     fn unavailable_wrap_restarts_once_then_fails() {
         let bundle = bundle_with_stub();
+        let record = tempfile::tempdir().unwrap();
+        let home = record.path().join("record-ops");
+        let home = home.to_str().unwrap();
+        let log = record.path().join("record-ops.log");
         let slot = SandboxSlot::default();
         let mut starts = 0;
         let error = wrap_in_sandbox(
@@ -475,14 +523,16 @@ mod tests {
             "id",
             || {
                 starts += 1;
-                stub_instance(bundle.path(), &["/w"])
+                stub_instance_at(bundle.path(), &["/w"], home)
             },
         )
         .err()
         .expect("a wrap that keeps failing must not succeed");
         assert_eq!(error.code, "SANDBOX_UNAVAILABLE");
-        // The first start plus exactly one restart.
+        // The first start plus exactly one restart, and no cleanup for either failed wrap.
         assert_eq!(starts, 2);
+        assert_eq!(recorded(&log, "wrap"), ["id", "id"]);
+        assert!(recorded(&log, "cleanup").is_empty());
     }
 
     #[test]
@@ -531,6 +581,8 @@ mod tests {
         for dir in [
             ".cargo/bin",
             ".local/bin",
+            ".local/node/bin",
+            ".local/share/app/sandbox/current",
             "bin",
             "tools/node",
             "missing-parent",
@@ -538,19 +590,56 @@ mod tests {
             fs::create_dir_all(home.join(dir)).unwrap();
         }
         fs::remove_dir(home.join("missing-parent")).unwrap();
+        let base = home.join(".local/share/app");
         let h = home.to_str().unwrap();
         let path = format!(
-            "{h}/.cargo/bin:/usr/bin:{h}/.local/bin:{h}/bin:{h}/tools/node:{h}/missing-parent:{h}:relative/bin:{h}/.cargo/bin:{h}/tools/../.."
+            "{h}/.cargo/bin:/usr/bin:{h}/.local/bin:{h}/.local/node/bin:{h}/bin:{h}/tools/node:\
+             {h}/missing-parent:{h}:relative/bin:{h}/.cargo/bin:{h}/tools/../..:{h}/.local/node/..:\
+             {h}/.local/share:{h}/.local/share/app/sandbox/current:{h}/.local/share/app"
         );
         assert_eq!(
-            read_roots(&home, &path),
+            read_roots(&home, &base, &path),
             [
                 format!("{h}/.cargo"),
-                format!("{h}/.local"),
+                // R16(a): `~/.local/bin` is kept as-is, never widened to `~/.local`.
+                format!("{h}/.local/bin"),
+                format!("{h}/.local/node"),
                 format!("{h}/bin"),
                 format!("{h}/tools/node"),
             ]
         );
-        assert!(read_roots(Path::new(""), &path).is_empty());
+        assert!(read_roots(Path::new(""), &base, &path).is_empty());
+    }
+
+    #[test]
+    fn read_roots_never_touch_the_app_data_directory() {
+        // R16(b): a root that contains, equals, or lies inside `base` is dropped even when it is
+        // a legitimate-looking toolchain directory.
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        let base = home.join("apps/sw");
+        fs::create_dir_all(base.join("tools/bin")).unwrap();
+        let h = home.to_str().unwrap();
+        let path = format!("{h}/apps/bin:{h}/apps/sw/bin:{h}/apps/sw/tools/bin");
+        fs::create_dir_all(home.join("apps/bin")).unwrap();
+        assert!(
+            read_roots(&home, &base, &path).is_empty(),
+            "{:?}",
+            read_roots(&home, &base, &path)
+        );
+    }
+
+    #[test]
+    fn init_config_denies_the_host_database_and_bundles() {
+        let base = Path::new("/home/u/.local/share/app");
+        let init = init_config(&base.join("sandbox/current"), base, vec![]);
+        assert_eq!(
+            init.deny_roots,
+            [
+                "/home/u/.local/share/app/local-host",
+                "/home/u/.local/share/app/sandbox"
+            ]
+        );
+        assert_eq!(init.bwrap_path.as_deref(), Some(BWRAP_PATH));
     }
 }

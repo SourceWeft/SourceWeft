@@ -32,6 +32,9 @@ pub struct InitConfig {
     pub home: String,
     pub workspace_roots: Vec<String>,
     pub read_roots: Vec<String>,
+    /// Extra literal read denies (absolute paths), on top of `home`. Omitted when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deny_roots: Vec<String>,
     pub helpers: Helpers,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bwrap_path: Option<String>,
@@ -449,6 +452,7 @@ mod tests {
             home: "/tmp/sourceweft-sidecar-test-home".to_string(),
             workspace_roots: vec!["/tmp/sourceweft-sidecar-test-workspace".to_string()],
             read_roots: vec![],
+            deny_roots: vec![],
             helpers: Helpers {
                 ripgrep: "/usr/bin/rg".to_string(),
                 apply_seccomp: None,

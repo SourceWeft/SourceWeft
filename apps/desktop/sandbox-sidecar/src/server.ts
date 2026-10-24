@@ -17,6 +17,7 @@ import {
   assertWorkspaceRootAllowed,
   buildConfig,
   perCommandConfig,
+  perWrapReadRoots,
 } from "./policy.js";
 import type { InitConfig, Request, Response, SidecarErrorCode, WrapResult } from "./protocol.js";
 
@@ -144,20 +145,27 @@ function checkHelpersExist(config: InitConfig): void {
 }
 
 /**
- * Merges `perCommandConfig(workspaceRoot)` onto `base` by concatenating `filesystem.allowWrite`
- * — the one field a per-command overlay is allowed to widen — and passing every other field
- * (network, the rest of filesystem, ripgrep, bwrapPath, seccomp, the java agent jar) straight
- * through from `base` unchanged. The result is a *complete* `SandboxRuntimeConfig`, suitable as
+ * Merges `perCommandConfig(workspaceRoot, readRoots)` onto `base`: `filesystem.allowWrite` is
+ * concatenated (the one field a per-command overlay is allowed to widen), `filesystem.allowRead`
+ * is *replaced* by the overlay's (this command's own workspace root plus `perWrapReadRoots`,
+ * Ruling R14 — never the other init workspace roots), and every other field (network, denyRead,
+ * denyWrite, ripgrep, bwrapPath, seccomp, the java agent jar) passes straight through from
+ * `base` unchanged. The result is a *complete* `SandboxRuntimeConfig`, suitable as
  * `wrapWithSandboxArgv`'s `customConfig`: srt reads each `customConfig` field in preference to
  * the one `initialize` was given only when the former is defined, so handing it a complete
  * config (rather than just the overlay) guarantees nothing from `base` is lost to that.
  */
-function mergedConfigFor(base: SandboxRuntimeConfig, workspaceRoot: string): SandboxRuntimeConfig {
-  const overlay = perCommandConfig(workspaceRoot);
+function mergedConfigFor(
+  base: SandboxRuntimeConfig,
+  readRoots: readonly string[],
+  workspaceRoot: string,
+): SandboxRuntimeConfig {
+  const overlay = perCommandConfig(workspaceRoot, readRoots);
   return {
     ...base,
     filesystem: {
       ...base.filesystem,
+      allowRead: overlay.filesystem?.allowRead ?? [],
       allowWrite: [...base.filesystem.allowWrite, ...(overlay.filesystem?.allowWrite ?? [])],
     },
   };
@@ -268,7 +276,11 @@ export async function startServer(
       state.config.workspaceRoots,
     );
     const cwd = assertCwdWithinWorkspace(request.cwd, workspaceRoot);
-    const customConfig = mergedConfigFor(state.runtimeConfig, workspaceRoot);
+    const customConfig = mergedConfigFor(
+      state.runtimeConfig,
+      perWrapReadRoots(state.config),
+      workspaceRoot,
+    );
     try {
       const { argv, env } = await deps.srt.wrapWithSandboxArgv(
         request.command,
@@ -304,7 +316,11 @@ export async function startServer(
     if (workspaceRoot === undefined) {
       throw new SidecarError("SANDBOX_UNAVAILABLE", "init had no workspaceRoots to probe with");
     }
-    const customConfig = mergedConfigFor(state.runtimeConfig, workspaceRoot);
+    const customConfig = mergedConfigFor(
+      state.runtimeConfig,
+      perWrapReadRoots(state.config),
+      workspaceRoot,
+    );
     let argv: string[];
     let env: Record<string, string>;
     try {

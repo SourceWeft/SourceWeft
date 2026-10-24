@@ -14,6 +14,8 @@
 #   - wrap.command "HANG"          -> never reply (simulates a stuck sidecar)
 #   - violations.stderr "DUMP_ENV" -> reply with the sidecar's own env var
 #     names, so the test can assert no `*_PROXY` variable reached it
+#   - init.config.home ending in "/record-ops" -> append "<op> <commandId>"
+#     for every later request to "<home>.log" (srt_exec.rs cleanup tests)
 # Anything else gets a generic canned success reply.
 
 extract() {
@@ -25,6 +27,9 @@ extract() {
 while IFS= read -r line; do
     id=$(extract id "$line")
     op=$(extract op "$line")
+    if [ -n "$record" ]; then
+        printf '%s %s\n' "$op" "$(extract commandId "$line")" >> "$record"
+    fi
 
     case "$op" in
         init)
@@ -32,6 +37,7 @@ while IFS= read -r line; do
             printf '{"id":"%s","ok":true,"result":null}\n' "$id"
             case "$home" in
                 */exit-after-init) exit 0 ;;
+                */record-ops) record="$home.log" ;;
             esac
             ;;
         wrap)

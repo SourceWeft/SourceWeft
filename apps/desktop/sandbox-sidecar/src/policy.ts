@@ -43,6 +43,14 @@ function assertAbsolute(field: string, path: string): void {
 // behind `address-guard.ts`'s pre-resolution checks on the literal host string. Loopback,
 // link-local, multicast and the specific cloud-metadata addresses are not repeated here:
 // srt's own defaults, together with this sidecar's `address-guard.ts`, already cover them.
+/**
+ * srt always makes its own `/tmp/claude` TMPDIR writable (`SANDBOX_OWN_WRITE_PATHS`) when it
+ * exists on the host, which would be a write location shared by every command outside its
+ * workspace (Ruling R15). `denyWrite` takes precedence over srt's own write paths; commands get
+ * a workspace-local `TMPDIR` from the host instead.
+ */
+const DENIED_WRITE_PATHS: readonly string[] = ["/tmp/claude", "/private/tmp/claude"];
+
 const DENIED_RESOLVED_ADDRESSES: readonly string[] = [
   "10.0.0.0/8",
   "172.16.0.0/12",
@@ -50,6 +58,21 @@ const DENIED_RESOLVED_ADDRESSES: readonly string[] = [
   "100.64.0.0/10",
   "fc00::/7",
 ];
+
+/**
+ * The read roots every wrapped command gets on top of its own workspace root: the init
+ * `readRoots` plus the two helper *files* srt runs or loads inside the sandbox from their host
+ * paths — `apply-seccomp` (executed by the wrapped shell) and the Java proxy agent jar (loaded by
+ * a JVM). Those live in the host's sandbox bundle, under the app data directory, which `home`
+ * and `denyRoots` deny; srt honours an exact file `allowRead` inside a denied directory, so only
+ * these two files are carved out. `ripgrep` runs host-side and is not included.
+ */
+export function perWrapReadRoots(init: InitConfig): string[] {
+  const helpers = [init.helpers.applySeccomp, init.helpers.javaAgentJar].filter(
+    (path): path is string => path !== undefined,
+  );
+  return [...init.readRoots, ...helpers];
+}
 
 /**
  * The sidecar-lifetime srt config: network policy, read-only filesystem access (the whole
@@ -69,6 +92,14 @@ export function buildConfig(init: InitConfig): SandboxRuntimeConfig {
     assertAbsolute(`workspaceRoots[${i}]`, path),
   );
   init.readRoots.forEach((path, i) => assertAbsolute(`readRoots[${i}]`, path));
+  if (init.helpers.applySeccomp !== undefined) {
+    assertAbsolute("helpers.applySeccomp", init.helpers.applySeccomp);
+  }
+  if (init.helpers.javaAgentJar !== undefined) {
+    assertAbsolute("helpers.javaAgentJar", init.helpers.javaAgentJar);
+  }
+  const denyRoots = init.denyRoots ?? [];
+  denyRoots.forEach((path, i) => assertAbsolute(`denyRoots[${i}]`, path));
 
   const config: SandboxRuntimeConfig = {
     network: {
@@ -77,13 +108,13 @@ export function buildConfig(init: InitConfig): SandboxRuntimeConfig {
       deniedResolvedAddresses: [...DENIED_RESOLVED_ADDRESSES],
     },
     filesystem: {
-      denyRead: [{ path: init.home, literal: true }],
-      allowRead: [...init.workspaceRoots, ...init.readRoots].map((path) => ({
+      denyRead: [init.home, ...denyRoots].map((path) => ({ path, literal: true as const })),
+      allowRead: [...init.workspaceRoots, ...perWrapReadRoots(init)].map((path) => ({
         path,
         literal: true as const,
       })),
       allowWrite: [],
-      denyWrite: [],
+      denyWrite: DENIED_WRITE_PATHS.map((path) => ({ path, literal: true as const })),
       allowGitConfig: true,
     },
     ripgrep: { command: init.helpers.ripgrep },
@@ -101,18 +132,23 @@ export function buildConfig(init: InitConfig): SandboxRuntimeConfig {
 }
 
 /**
- * The per-command overlay: write access to exactly `workspaceRoot`, nothing else. Merge this
- * on top of `buildConfig`'s result (e.g. by concatenating `filesystem.allowWrite`) for each
- * wrapped command — never widen `buildConfig`'s own `allowWrite`, which stays empty for the
- * sidecar's whole lifetime. `workspaceRoot` is expected to already have been through
- * `assertWorkspaceRootAllowed` (fix round 1 review: this function itself does not validate it).
+ * The per-command overlay: write access to exactly `workspaceRoot`, and read access (inside the
+ * denied home) to exactly `workspaceRoot` plus the init `readRoots` (Ruling R14) — the other
+ * init `workspaceRoots` are *not* re-allowed for this command. `buildConfig`'s `allowRead` (the
+ * union) is only what `initialize` and `wrap` validation see; the merged config srt receives per
+ * wrap replaces it with this overlay's `allowRead`, and concatenates this `allowWrite` onto
+ * `buildConfig`'s own (always empty) one. `workspaceRoot` is expected to already have been
+ * through `assertWorkspaceRootAllowed` (fix round 1 review: this function itself does not
+ * validate it).
  */
 export function perCommandConfig(
   workspaceRoot: string,
+  readRoots: readonly string[],
 ): Partial<SandboxRuntimeConfig> {
   return {
     filesystem: {
       denyRead: [],
+      allowRead: [workspaceRoot, ...readRoots].map((path) => ({ path, literal: true as const })),
       allowWrite: [{ path: workspaceRoot, literal: true }],
       denyWrite: [],
     },

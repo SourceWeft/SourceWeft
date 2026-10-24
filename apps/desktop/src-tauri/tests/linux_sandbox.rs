@@ -60,6 +60,7 @@ fn harness_init(bwrap_path: &str, workspace_root: &std::path::Path) -> InitConfi
         home: std::env::var("HOME").unwrap_or_default(),
         workspace_roots: vec![workspace_root.to_string_lossy().into_owned()],
         read_roots: vec![],
+        deny_roots: vec![],
         helpers: Helpers {
             ripgrep: "/usr/bin/rg".to_string(),
             apply_seccomp: None,
@@ -125,9 +126,26 @@ fn readiness_ready_with_working_bwrap() {
 // Execution through the production `LocalHost` path.
 // ---------------------------------------------------------------------------------------------
 
+/// Creates `/tmp/claude` on the host once, before any test in this binary starts a sidecar, and
+/// never removes it: srt treats an existing `/tmp/claude` as its own writable TMPDIR (the state on
+/// any machine that also runs Claude Code), so every execution test runs in that configuration,
+/// and `cannot_write_srt_tmp_claude` proves the sidecar's write deny covers it. Creating or
+/// removing it while another test's command is between wrap and exec would race srt's bind.
+fn ensure_tmp_claude() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        fs::create_dir_all("/tmp/claude").expect("create /tmp/claude");
+    });
+    assert!(
+        Path::new("/tmp/claude").is_dir(),
+        "/tmp/claude must be a directory"
+    );
+}
+
 /// A `LocalHost` over a fresh temporary app-data directory with the built bundle installed at
 /// `<app data>/sandbox/current`, exactly where production looks for it.
 fn host_with_bundle() -> (tempfile::TempDir, LocalHost) {
+    ensure_tmp_claude();
     let app = tempfile::tempdir().unwrap();
     copy_bundle_into(&bundle_dir(app.path()));
     let host = LocalHost::open(app.path()).unwrap();
@@ -149,6 +167,26 @@ fn execute(host: &LocalHost, call: &str, workspace: &Workspace, command: &str) -
 
 fn output(result: &Value) -> &str {
     result["output"].as_str().unwrap()
+}
+
+/// Runs `command` after a positive control that must succeed inside the sandbox, and asserts
+/// the control ran, so a denial test cannot pass merely because the sandbox failed to start the
+/// command at all (e.g. exit 127 from a missing helper).
+fn execute_denied(host: &LocalHost, call: &str, workspace: &Workspace, command: &str) -> Value {
+    let control = workspace.path.join(".sw-control");
+    let _ = fs::remove_file(&control);
+    let result = execute(
+        host,
+        call,
+        workspace,
+        &format!("printf ran > .sw-control && {command}"),
+    );
+    assert_eq!(
+        fs::read_to_string(&control).ok().as_deref(),
+        Some("ran"),
+        "the sandboxed command never ran: {result}"
+    );
+    result
 }
 
 /// Single-quotes `path` for `/bin/sh`.
@@ -228,7 +266,7 @@ fn cannot_read_home_secret() {
 
     let (_app, host) = host_with_bundle();
     let workspace = host.ensure_workspace("owner", "thread").unwrap();
-    let result = execute(
+    let result = execute_denied(
         &host,
         "read-secret",
         &workspace,
@@ -248,7 +286,7 @@ fn cannot_write_outside() {
     let target = outside.path().join("escape.txt");
     let (_app, host) = host_with_bundle();
     let workspace = host.ensure_workspace("owner", "thread").unwrap();
-    let result = execute(
+    let result = execute_denied(
         &host,
         "escape",
         &workspace,
@@ -374,4 +412,109 @@ fn workspace_with_brackets_and_cjk() {
         fs::read_to_string(root.join("a [b] 测试.txt")).unwrap(),
         "ok"
     );
+}
+
+fn home_dir() -> PathBuf {
+    PathBuf::from(std::env::var("HOME").expect("HOME must be set for this test"))
+}
+
+#[test]
+#[ignore = "requires bubblewrap and the sandbox bundle"]
+fn cannot_read_another_granted_workspace() {
+    // Ruling R14: every granted directory is in the sidecar's init roots, but a command is only
+    // re-allowed its own workspace root (plus toolchain read roots) inside the denied home.
+    let (_app, host) = host_with_bundle();
+    let other = tempfile::tempdir_in(home_dir()).unwrap();
+    let secret = format!("sw-other-workspace-{}", uuid::Uuid::new_v4().simple());
+    fs::write(other.path().join("secret.txt"), &secret).unwrap();
+    let (grant, other_root) = host.grant_directory("owner", other.path()).unwrap();
+    let granted = host
+        .ensure_workspace_with_grant("owner", "granted-thread", Some(&grant))
+        .unwrap();
+    let own = execute(&host, "own-read", &granted, "cat secret.txt");
+    assert_eq!(output(&own), secret, "positive control: {own}");
+
+    let automatic = host.ensure_workspace("owner", "thread").unwrap();
+    let result = execute_denied(
+        &host,
+        "cross-read",
+        &automatic,
+        &format!("cat {}", quoted(&other_root.join("secret.txt"))),
+    );
+    assert!(
+        !output(&result).contains(&secret),
+        "read another workspace: {result}"
+    );
+    assert_ne!(result["exitCode"], 0, "{result}");
+}
+
+#[test]
+#[ignore = "requires bubblewrap and the sandbox bundle"]
+fn cannot_write_srt_tmp_claude() {
+    // Ruling R15: srt makes an existing /tmp/claude writable by default; the sidecar denies it.
+    let (_app, host) = host_with_bundle();
+    let shared = Path::new("/tmp/claude");
+    assert!(
+        shared.is_dir(),
+        "/tmp/claude must exist on the host for this test"
+    );
+    let target = shared.join(format!("sw-escape-{}", uuid::Uuid::new_v4().simple()));
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    let result = execute_denied(
+        &host,
+        "tmp-claude",
+        &workspace,
+        &format!("printf x > {}", quoted(&target)),
+    );
+    let escaped = target.exists();
+    let _ = fs::remove_file(&target);
+    assert!(
+        !escaped,
+        "a sandboxed command wrote to /tmp/claude: {result}"
+    );
+    assert_ne!(result["exitCode"], 0, "{result}");
+}
+
+#[test]
+#[ignore = "requires bubblewrap and the sandbox bundle"]
+fn cannot_read_host_database_under_local_share() {
+    // Ruling R16: with the app data under ~/.local/share (the production layout) and
+    // ~/.local/bin on the login PATH, no read root may expose `<base>/local-host`.
+    let home = home_dir();
+    fs::create_dir_all(home.join(".local/bin")).unwrap();
+    let share = home.join(".local/share");
+    fs::create_dir_all(&share).unwrap();
+    ensure_tmp_claude();
+    let app = tempfile::tempdir_in(&share).unwrap();
+    copy_bundle_into(&bundle_dir(app.path()));
+    let host = LocalHost::open(app.path()).unwrap();
+    host.initialize_invocation_journal().unwrap();
+    let database = app
+        .path()
+        .canonicalize()
+        .unwrap()
+        .join("local-host/state.sqlite3");
+    assert!(database.is_file());
+    let workspace = host.ensure_workspace("owner", "thread").unwrap();
+    let result = execute_denied(
+        &host,
+        "database",
+        &workspace,
+        &format!("printf '%s\\n' \"$PATH\"; head -c 15 {}", quoted(&database)),
+    );
+    let text = output(&result);
+    let local_bin = home.join(".local/bin");
+    assert!(
+        text.lines()
+            .next()
+            .unwrap_or_default()
+            .split(':')
+            .any(|entry| Path::new(entry) == local_bin),
+        "precondition: ~/.local/bin must be on the sandboxed PATH: {result}"
+    );
+    assert!(
+        !text.contains("SQLite format 3"),
+        "host database readable: {result}"
+    );
+    assert_ne!(result["exitCode"], 0, "{result}");
 }

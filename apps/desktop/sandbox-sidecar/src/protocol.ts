@@ -11,6 +11,8 @@ export type InitConfig = {
   home: string;
   workspaceRoots: string[];
   readRoots: string[];
+  /** Extra literal read denies on top of `home` (e.g. the host's own database); optional. */
+  denyRoots?: string[];
   helpers: {
     ripgrep: string;
     applySeccomp?: string;
