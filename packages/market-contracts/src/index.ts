@@ -79,6 +79,43 @@ export const marketMcpAuthRequirementSchema = z.object({
   methods: z.array(marketMcpAuthMethodSchema).optional(),
 });
 
+
+// ---------------------------------------------------------------------------
+// Owner layer (Issue #367, W7). A verified claimant's corrections are kept
+// apart from the federated data and applied on read as the top layer of the
+// public item and manifest. Every field it set is named in `fields`, so a
+// reader can tell the publisher's own word from the registry's.
+// ---------------------------------------------------------------------------
+
+export const marketMcpOwnerFieldSchema = z.enum([
+  "iconUrl",
+  "summary",
+  "description",
+  "documentationUrl",
+  "homepageUrl",
+  "repoUrl",
+  "deprecated",
+  "tools",
+]);
+
+export const marketMcpOwnerLayerSchema = z.object({
+  source: z.literal("owner"),
+  fields: z.array(marketMcpOwnerFieldSchema).default([]),
+  // The publisher's documentation, as they declared it. A link, never read.
+  documentationUrl: z.string().url().nullable().default(null),
+  // The publisher says this server is no longer maintained.
+  deprecated: z.boolean().default(false),
+  // When the owner last submitted a tool list (`sourceweft mcp inspect`).
+  toolsSubmittedAt: z.string().nullable().default(null),
+  updatedAt: z.string(),
+});
+
+// Where a manifest tool came from. Absent on tools the registry, a remote
+// probe or the sandbox listed; `owner-submitted` tools were listed by the
+// server's owner with their own credentials and are shown but never trusted
+// for unattended execution (their risk is always `unknown`).
+export const MARKET_MCP_TOOL_SOURCE_OWNER_SUBMITTED = "owner-submitted";
+
 /**
  * Where an MCP server's logo came from, first hit of the chain: the registry's
  * own `icons`, the server's `initialize` answer (`serverInfo.icons`), the
@@ -93,6 +130,8 @@ export const marketMcpIconSourceSchema = z.enum([
   "github-registry",
   "favicon",
   "placeholder",
+  // A verified owner set the logo (Issue #367, W7); applied on read.
+  "owner",
 ]);
 
 export const marketMcpToolManifestSchema = z.object({
@@ -103,6 +142,7 @@ export const marketMcpToolManifestSchema = z.object({
   outputSchema: z.record(z.string(), z.unknown()).optional(),
   annotations: z.record(z.string(), z.unknown()).default({}),
   risk: mcpRiskLevelSchema.default("unknown"),
+  source: z.string().optional(),
 });
 
 /**
@@ -151,6 +191,11 @@ export const marketMcpManifestSchema = z.object({
   sourceUrl: z.string().url().optional(),
   repoUrl: z.string().url().optional(),
   lastIndexedAt: z.string().optional(),
+  // The publisher's documentation (set by a verified owner); a link only.
+  documentationUrl: z.string().url().optional(),
+  // Present when a verified owner's corrections were applied over the
+  // federated data (Issue #367, W7).
+  owner: marketMcpOwnerLayerSchema.optional(),
   // Absent on manifests written before it existed and on servers without a
   // domain publisher.
   publisher: marketMcpPublisherSchema.optional(),
@@ -309,6 +354,13 @@ export const marketItemSummarySchema = z.object({
   // `marketMcpValidationSchema`); null when it has tools or was never tried.
   // Optional for answers from before it existed.
   toolsValidation: marketMcpToolsValidationSchema.nullable().optional(),
+  // A verified owner claimed this server (Issue #367, W7). Optional for
+  // answers from before it existed.
+  claimed: z.boolean().optional(),
+  // The owner marked it deprecated.
+  deprecated: z.boolean().optional(),
+  // The owner's corrections applied over the federated data; null when none.
+  owner: marketMcpOwnerLayerSchema.nullable().optional(),
 });
 
 export const marketItemVersionSchema = z.object({
@@ -507,6 +559,8 @@ export type MarketMcpAuthRequirement = z.infer<
 >;
 export type MarketMcpPublisher = z.infer<typeof marketMcpPublisherSchema>;
 export type MarketMcpToolManifest = z.infer<typeof marketMcpToolManifestSchema>;
+export type MarketMcpOwnerField = z.infer<typeof marketMcpOwnerFieldSchema>;
+export type MarketMcpOwnerLayer = z.infer<typeof marketMcpOwnerLayerSchema>;
 export type MarketMcpManifest = z.infer<typeof marketMcpManifestSchema>;
 export type MarketItemSummary = z.infer<typeof marketItemSummarySchema>;
 export type MarketMcpProductGroupMember = z.infer<
@@ -846,3 +900,100 @@ export type MarketMcpGithubRegistryProvenance = z.infer<
 >;
 
 export * from "./sitemaps";
+
+// ---------------------------------------------------------------------------
+// Owner-submitted tool lists (Issue #367, W7). `sourceweft mcp inspect` runs
+// on the owner's machine, connects with their own credentials and writes this
+// file; `sourceweft mcp submit-tools` uploads it. Credentials never leave the
+// machine: the file carries the endpoint without its query string and no
+// header, and the request below carries nothing else.
+// ---------------------------------------------------------------------------
+
+export const MARKET_MCP_INSPECT_LIMITS = Object.freeze({
+  tools: 200,
+  nameChars: 128,
+  titleChars: 200,
+  descriptionChars: 2_000,
+  // One schema, as the CLI bounds it before writing the file.
+  schemaBytes: 16 * 1024,
+  // A tool's schemas and annotations together, as the platform accepts them
+  // (the same figure the remote probe allows per tool).
+  toolBytes: 32 * 1024,
+  // The server's `initialize` self-description.
+  serverInfoBytes: 4 * 1024,
+});
+
+// UTF-8 size of a value's JSON; this package runs in browsers too, so no
+// Node `Buffer`.
+function jsonBytes(value: unknown): number {
+  return new TextEncoder().encode(JSON.stringify(value ?? null)).byteLength;
+}
+
+export const marketMcpInspectedToolSchema = z
+  .object({
+    name: z.string().min(1).max(MARKET_MCP_INSPECT_LIMITS.nameChars),
+    title: z.string().max(MARKET_MCP_INSPECT_LIMITS.titleChars).optional(),
+    description: z
+      .string()
+      .max(MARKET_MCP_INSPECT_LIMITS.descriptionChars)
+      .optional(),
+    inputSchema: z.record(z.string(), z.unknown()).default({}),
+    outputSchema: z.record(z.string(), z.unknown()).optional(),
+    annotations: z.record(z.string(), z.unknown()).default({}),
+  })
+  .refine(
+    (tool) =>
+      jsonBytes(tool.inputSchema) +
+        jsonBytes(tool.outputSchema) +
+        jsonBytes(tool.annotations) <=
+      MARKET_MCP_INSPECT_LIMITS.toolBytes,
+    {
+      message: `A tool's schemas and annotations may take at most ${MARKET_MCP_INSPECT_LIMITS.toolBytes} bytes together`,
+    },
+  );
+
+const marketMcpInspectServerInfoSchema = z
+  .record(z.string(), z.unknown())
+  .refine(
+    (value) => jsonBytes(value) <= MARKET_MCP_INSPECT_LIMITS.serverInfoBytes,
+    { message: `serverInfo may take at most ${MARKET_MCP_INSPECT_LIMITS.serverInfoBytes} bytes` },
+  );
+export type MarketMcpInspectedTool = z.infer<typeof marketMcpInspectedToolSchema>;
+
+// What the file says it inspected, for the owner's own reference. The URL is
+// the ORIGIN only: hosted MCP servers put per-user secrets in the path
+// (`/api/mcp/s/<secret>/mcp`), and the query string and userinfo may carry a
+// key. The command may carry a token too. Neither is ever uploaded.
+export const marketMcpInspectTargetSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("url"), url: z.string().url() }),
+  z.object({ kind: z.literal("stdio"), command: z.string().min(1) }),
+]);
+
+export const marketMcpInspectFileSchema = z.object({
+  schemaVersion: z.literal(1),
+  generatedBy: z.string(),
+  generatedAt: z.string(),
+  target: marketMcpInspectTargetSchema,
+  protocolVersion: z.string().optional(),
+  serverInfo: marketMcpInspectServerInfoSchema.optional(),
+  tools: z.array(marketMcpInspectedToolSchema).max(MARKET_MCP_INSPECT_LIMITS.tools),
+});
+export type MarketMcpInspectFile = z.infer<typeof marketMcpInspectFileSchema>;
+
+// PUT /v1/market/mcp/:identifier/owner-overrides/tools — the owner's tool
+// list from `sourceweft mcp inspect`: the tools, when they were listed and
+// what the server called itself. The file's `target` stays on the owner's
+// machine. The platform stores the tools with `risk: "unknown"` and
+// `source: "owner-submitted"`.
+export const submitMarketMcpOwnerToolsRequestSchema = z
+  .object({
+    tools: z
+      .array(marketMcpInspectedToolSchema)
+      .max(MARKET_MCP_INSPECT_LIMITS.tools),
+    generatedAt: z.string().optional(),
+    serverInfo: marketMcpInspectServerInfoSchema.optional(),
+  })
+  .strict();
+export type SubmitMarketMcpOwnerToolsRequest = z.infer<
+  typeof submitMarketMcpOwnerToolsRequestSchema
+>;

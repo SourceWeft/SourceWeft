@@ -177,7 +177,11 @@
         "request": "起草一份项目简报",
         "context": "研究笔记 + 项目目标",
         "result": "包含建议的简报草稿",
-        "agents": ["研究来源资料", "整理关键发现", "起草项目简报"],
+        "agents": [
+          "研究来源资料",
+          "整理关键发现",
+          "起草项目简报"
+        ],
         "review": "请进一步补充建议部分的细节。",
         "reply": "简报已修订。你可以对照来源笔记，检查建议部分。",
         "artifact": "项目简报 · 修订稿"
@@ -204,7 +208,12 @@
       "card": {
         "title": "为连接知识而生",
         "subtitle": "来源进，带引用的成果出",
-        "items": ["连接的来源", "行内引用", "学习指南与常见问答", "音频概览"],
+        "items": [
+          "连接的来源",
+          "行内引用",
+          "学习指南与常见问答",
+          "音频概览"
+        ],
         "footnote": "每一项成果都力求紧贴塑造它的文档、笔记与连接来源。"
       }
     },
@@ -376,6 +385,10 @@
       "resultsIn": "在 {category} 中“{query}”的搜索结果"
     },
     "badges": {
+      "claimed": "所有者已认领",
+      "claimedTitle": "此服务的已验证所有者在 SourceWeft 上管理其列表信息",
+      "deprecated": "已弃用",
+      "deprecatedTitle": "所有者表示此服务已不再维护",
       "verification": {
         "official": "官方",
         "verified": "已验证",
@@ -469,7 +482,7 @@
         },
         "claimed": {
           "label": "所有者已认领",
-          "hint": "所有者认领尚未开放；待所有者认领此服务器后，此项即视为满足。"
+          "hint": "待已验证的所有者认领此服务器后即视为满足：在服务器页面上，通过 GitHub 账号或域名认领。"
         }
       }
     },
@@ -554,6 +567,9 @@
       "homepage": "主页"
     },
     "detail": {
+      "documentation": "文档",
+      "claimLink": "这个服务是你发布的吗？认领它",
+      "manageListingLink": "管理此列表信息",
       "metaFallback": "MCP 服务",
       "metaTitle": "{name} MCP 服务",
       "metaDescriptionOverview": "{name}：{summary}",
@@ -598,6 +614,8 @@
       "followRepo": "参照 <link>仓库</link> 中的启动说明。",
       "readmeHeading": "README",
       "toolsHeading": "工具",
+      "toolsListedByOwner": "工具列表由所有者提供",
+      "toolsListedByOwnerHint": "此列表由该服务已验证的所有者在其自己的会话中提交。SourceWeft 按其提供的内容原样展示，并将每个工具的风险视为未知。",
       "versionsHeading": "版本历史",
       "latest": "最新",
       "serverDetails": "服务详情",
@@ -3903,6 +3921,145 @@
       "report": {
         "description": "向 SourceWeft 市场管理员反馈此技能的问题：抄袭他人作品、存在不安全行为、垃圾内容或无法正常使用。"
       }
+    }
+  },
+  "dashboardMcpClaim": {
+    "page": {
+      "title": "认领 MCP 服务",
+      "back": "返回 MCP 服务",
+      "intro": "如果这个服务是你发布的，认领它即可管理它在 SourceWeft 上的呈现方式：图标、描述、链接、弃用提示和工具列表。",
+      "missingIdentifier": "请从服务的公开页面打开此页：它需要服务的标识符。",
+      "signedOut": "请登录后再认领服务。",
+      "notFound": "SourceWeft 上没有使用此标识符的服务。",
+      "loadFailed": "无法加载认领信息。",
+      "retry": "重试",
+      "claimedByYou": "你是此服务的已验证所有者。",
+      "claimedBySomeone": "另一位所有者已认领此服务。如果认领看起来有误，市场管理员可以进行复核。",
+      "blocked": {
+        "title": "你已无法认领此服务",
+        "body": "SourceWeft 管理员已禁止你的账号认领此服务。如果你认为有误，请写信至 support@sourceweft.com。"
+      },
+      "methodsTitle": "证明你是此服务的发布者",
+      "noMethods": "此条目既不是以 GitHub 账号发布，也不是以域名发布，因此暂时无法在此认领。",
+      "github": {
+        "title": "使用你的 GitHub 账号",
+        "body": "适用于以 GitHub 账号或组织发布的服务：我们会检查你关联的 GitHub 账号是否就是该账号，或者是该组织的管理员或所有者。不会向 GitHub 写入任何内容。",
+        "owner": "以 GitHub 账号 {owner} 发布。",
+        "action": "使用 GitHub 账号认领",
+        "notLinked": "请先关联发布此服务的 GitHub 账号。",
+        "link": "关联 GitHub 账号",
+        "orgScope": "要检查你在组织中的角色，SourceWeft 需要读取你的组织成员身份的权限（read:org）。授予后再重新认领。",
+        "grantOrg": "授予组织读取权限"
+      },
+      "domain": {
+        "title": "使用你的域名",
+        "body": "适用于以域名发布的服务：将我们签发的令牌发布到 DNS TXT 记录中，或该域名下的 well-known 地址。令牌与你和此服务绑定，有效期七天。",
+        "domain": "域名：{domain}",
+        "dns": "DNS TXT 记录",
+        "wellKnown": "Well-known 文件"
+      },
+      "instructions": {
+        "title": "发布此令牌",
+        "onceNote": "请立即复制令牌。它只显示这一次，之后无法再次获取；如果丢失，请重新发起认领。",
+        "dnsTitle": "添加 DNS TXT 记录",
+        "wellKnownTitle": "提供 well-known 文件",
+        "recordName": "记录名称",
+        "recordValue": "记录值",
+        "url": "URL",
+        "body": "文件内容（需完全一致）",
+        "expires": "有效期至 {date}。",
+        "dnsHint": "DNS 变更可能需要一段时间才会生效；待记录可见后再验证。",
+        "verify": "立即验证",
+        "copy": "复制",
+        "copied": "已复制",
+        "copyFailed": "复制失败"
+      },
+      "claims": {
+        "title": "你的认领",
+        "none": "你还没有对此服务发起认领。",
+        "tokenHidden": "令牌在发起认领时已显示过，无法再次显示。如果丢失，请重新发起认领。",
+        "expires": "{date} 到期",
+        "expired": "已于 {date} 过期",
+        "lastError": "上次尝试：{error}",
+        "verify": "验证",
+        "method": {
+          "github": "GitHub 账号",
+          "dns_txt": "DNS TXT 记录",
+          "well_known": "Well-known 文件"
+        },
+        "status": {
+          "pending": "待验证",
+          "verified": "已验证",
+          "revoked": "已撤销"
+        }
+      },
+      "toasts": {
+        "verified": "服务已认领，现在由你管理它的列表信息。",
+        "started": "认领已发起。请发布令牌，然后进行验证。",
+        "stillPending": "还没有找到令牌。请检查记录或文件后重试。"
+      }
+    },
+    "owner": {
+      "title": "管理列表信息",
+      "intro": "你在此设置的内容会覆盖注册中心的数据，显示在服务的公开页面上。清空某个字段即可恢复显示注册中心的值。",
+      "form": {
+        "iconUrl": "图标 URL",
+        "summary": "简短描述",
+        "summaryHint": "最多 300 个字符；显示在卡片和页面标题处。",
+        "description": "详细描述",
+        "descriptionHint": "最多 5000 个字符；显示在概览中。",
+        "documentationUrl": "文档 URL",
+        "homepageUrl": "主页 URL",
+        "repoUrl": "仓库 URL",
+        "deprecated": "标记为已弃用",
+        "deprecatedHint": "告知访客此服务已不再维护。它仍会保留在列表中。",
+        "urlInvalid": "请输入以 https:// 开头的完整网址。",
+        "tooLong": "最多 {max} 个字符。",
+        "save": "保存",
+        "saved": "列表信息已保存。",
+        "saveFailed": "无法保存列表信息。"
+      },
+      "tools": {
+        "title": "工具列表",
+        "none": "没有所有者提交的工具列表。页面显示的是注册中心或探测发现的工具。",
+        "count": "{count, plural, other {# 个工具}}，提交于 {date}。",
+        "cliHint": "请在你自己的机器上使用 SourceWeft CLI 提交列表。下面的命令会在本机用你的凭据连接到你的服务；凭据不会发送到 SourceWeft，只有工具列表会。",
+        "remove": "移除工具列表",
+        "confirmTitle": "移除已提交的工具列表？",
+        "confirmBody": "页面将恢复显示注册中心或探测发现的工具。你可以随后通过 CLI 重新提交。",
+        "confirm": "移除",
+        "cancel": "取消",
+        "removed": "工具列表已移除。",
+        "removeFailed": "无法移除工具列表。"
+      },
+      "revoke": {
+        "action": "放弃认领",
+        "hint": "你的修改会继续保存，但在服务再次被认领之前不会显示。",
+        "confirmTitle": "放弃对此服务的认领？",
+        "confirmBody": "{name} 的「所有者已认领」标记将被移除，你的修改也不再显示。之后你可以再次认领。",
+        "confirm": "放弃认领",
+        "cancel": "取消",
+        "revoked": "已放弃认领。",
+        "revokeFailed": "无法放弃认领。"
+      }
+    },
+    "errors": {
+      "MCP_CLAIM_ENTRY_NOT_FOUND": "SourceWeft 上没有使用此标识符的服务。",
+      "MCP_CLAIM_METHOD_UNAVAILABLE": "此服务不能以这种方式认领。",
+      "MCP_CLAIM_GITHUB_NOT_LINKED": "请先关联发布此服务的 GitHub 账号。",
+      "MCP_CLAIM_GITHUB_ACCOUNT_MISMATCH": "你关联的 GitHub 账号不是发布此服务的账号。",
+      "MCP_CLAIM_GITHUB_ORG_ROLE": "你关联的 GitHub 账号是该组织的成员，但不是管理员或所有者。",
+      "MCP_CLAIM_GITHUB_ORG_SCOPE": "SourceWeft 还无法读取你在组织中的角色。请授予组织读取权限后重试。",
+      "MCP_CLAIM_GITHUB_UNAVAILABLE": "无法连接到 GitHub，请稍后重试。",
+      "MCP_CLAIM_NOT_FOUND": "未找到此认领。",
+      "MCP_CLAIM_NOT_PENDING": "此认领已不在待验证状态。",
+      "MCP_CLAIM_EXPIRED": "此认领的令牌已过期，请重新发起认领。",
+      "MCP_CLAIM_TOKEN_NOT_FOUND": "在记录或 URL 处未找到令牌，或令牌不匹配。DNS 变更可能需要一段时间才会生效，请稍后重试。",
+      "MCP_CLAIM_LOOKUP_FAILED": "无法访问 DNS 记录或站点，请稍后重试。",
+      "MCP_CLAIM_REQUIRED": "只有此服务的已验证所有者才能执行此操作。",
+      "fallback": "出了点问题，请重试。",
+      "MCP_CLAIM_BLOCKED": "SourceWeft 管理员撤销了你对此服务的认领。如果你认为有误，请写信至 support@sourceweft.com。",
+      "MCP_CLAIM_RATE_LIMITED": "尝试次数过多，请稍等片刻后重试。"
     }
   },
   "dashboardSkillsClaim": {

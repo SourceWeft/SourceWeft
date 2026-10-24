@@ -1,7 +1,9 @@
 import { LocaleLink } from "../../_components/locale-link";
+import { useTranslations } from "next-intl";
 import { getTranslations } from "next-intl/server";
 import {
   AlertTriangle,
+  Archive,
   ArrowRight,
   BadgeCheck,
   CheckCircle2,
@@ -149,6 +151,35 @@ export async function McpVerificationBadge({
       <AlertTriangle className="size-3.5" />
       {t("unverified")}
     </Badge>
+  );
+}
+
+/**
+ * A verified owner claimed this server and manages its listing (Issue #367,
+ * W7). Synchronous so it renders inside both server and client trees.
+ */
+export function McpClaimedBadge() {
+  const t = useTranslations("mcp.badges");
+  return (
+    <span title={t("claimedTitle")}>
+      <Badge tone="good">
+        <BadgeCheck className="size-3.5" />
+        {t("claimed")}
+      </Badge>
+    </span>
+  );
+}
+
+/** The owner says this server is no longer maintained. */
+export function McpDeprecatedBadge() {
+  const t = useTranslations("mcp.badges");
+  return (
+    <span title={t("deprecatedTitle")}>
+      <Badge tone="warn">
+        <Archive className="size-3.5" />
+        {t("deprecated")}
+      </Badge>
+    </span>
   );
 }
 
@@ -341,6 +372,8 @@ export async function McpMarketCard({
             {t("auth")}
           </Badge>
         ) : null}
+        {item.claimed ? <McpClaimedBadge /> : null}
+        {item.deprecated ? <McpDeprecatedBadge /> : null}
       </div>
 
       <div className="mt-auto flex items-center gap-x-4 gap-y-2 border-t border-zinc-200 pt-4 text-xs text-zinc-500 dark:border-white/10">
@@ -563,13 +596,27 @@ async function McpToolParameterList({
   );
 }
 
+/** Only http(s) links are ever rendered; anything else is not a link. */
+export function safeExternalHref(href: string | null | undefined) {
+  if (!href) return null;
+  try {
+    const url = new URL(href);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+    if (url.username || url.password) return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
 export function ExternalTextLink({
   children,
-  href,
+  href: rawHref,
 }: {
   children: React.ReactNode;
   href?: string | null;
 }) {
+  const href = safeExternalHref(rawHref);
   if (!href) return null;
   return (
     <a

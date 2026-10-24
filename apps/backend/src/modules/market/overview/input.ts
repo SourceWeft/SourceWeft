@@ -114,6 +114,8 @@ export type McpManifestFacts = {
   name: string;
   provider?: string;
   homepage?: string;
+  /** The publisher's documentation link, as a verified owner declared it. */
+  documentation?: string;
   transport: McpTransport;
   /** Reachable as a hosted endpoint. */
   remote: boolean;
@@ -321,6 +323,7 @@ export function extractMcpManifestFacts(
       cleanLine(manifest.providerName, MCP_OVERVIEW_FACT_LIMITS.nameChars) ||
       undefined,
     homepage: urlWithoutQuery(manifest.homepageUrl),
+    documentation: urlWithoutQuery(manifest.documentationUrl),
     transport: manifest.transport,
     remote: Boolean(endpointOrigin) || hasRemote,
     local: manifest.transport === "stdio" || packages.length > 0,

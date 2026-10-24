@@ -45,6 +45,20 @@ export class UnsupportedRegistryError extends Error {
   }
 }
 
+/**
+ * `sourceweft mcp inspect` or `submit-tools` could not do what was asked: the
+ * server, the file or the registry said no. Details are printed one per line.
+ */
+export class McpInspectError extends Error {
+  readonly details: string[];
+
+  constructor(message: string, details: string[] = []) {
+    super(message);
+    this.name = "McpInspectError";
+    this.details = details;
+  }
+}
+
 export type Failure = { exitCode: number; message: string; details?: string[] };
 
 /** Turns anything thrown into what to print and which code to exit with. */
@@ -57,6 +71,13 @@ export function toFailure(error: unknown): Failure {
   }
   if (error instanceof ConfirmationRequiredError) {
     return { exitCode: EXIT.needsConfirmation, message: error.message };
+  }
+  if (error instanceof McpInspectError) {
+    return {
+      exitCode: EXIT.error,
+      message: error.message,
+      ...(error.details.length > 0 ? { details: error.details } : {}),
+    };
   }
   if (error instanceof VerificationError) {
     return {
