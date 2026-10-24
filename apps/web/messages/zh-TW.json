@@ -471,6 +471,41 @@
         "customHeaders": "傳送此伺服器要求的請求標頭。"
       }
     },
+    "template": {
+      "remote": "{name} 的託管 MCP 服務（{host}）",
+      "remoteByPublisher": "{name} 的託管 MCP 服務（{host}），由 {publisher} 發布",
+      "remoteNoHost": "{name} 的託管 MCP 服務",
+      "remoteNoHostByPublisher": "{name} 的託管 MCP 服務，由 {publisher} 發布",
+      "local": "{name} 的本機 MCP 服務",
+      "localByPublisher": "{name} 的本機 MCP 服務，由 {publisher} 發布",
+      "unknown": "{name} 的 MCP 服務",
+      "unknownByPublisher": "{name} 的 MCP 服務，由 {publisher} 發布",
+      "auth": {
+        "notRequired": "無需登入",
+        "optionalApiKey": "可選 API 金鑰",
+        "required": "需要憑證",
+        "oauth": "需要 OAuth 登入",
+        "oauthOrApiKey": "需要 OAuth 登入或 API 金鑰",
+        "apiKey": "需要 API 金鑰",
+        "customHeaders": "需要自訂請求標頭"
+      },
+      "tools": "{count, plural, other {# 個工具}}",
+      "separator": "；",
+      "end": "。"
+    },
+    "facts": {
+      "title": "服務資訊",
+      "lead": "暫無 AI 概覽：以下資訊來自註冊中心條目和服務本身。",
+      "publisher": "發布者",
+      "endpoint": "端點",
+      "transport": "傳輸",
+      "auth": "驗證方式",
+      "tools": "工具",
+      "toolsCount": "{count, plural, other {# 個工具}}",
+      "documentation": "文件",
+      "repository": "儲存庫",
+      "homepage": "首頁"
+    },
     "detail": {
       "metaFallback": "MCP 服務",
       "metaTitle": "{name} MCP 服務",
@@ -544,8 +579,8 @@
     "aiOverview": {
       "title": "AI 產生的概覽",
       "explainerLabel": "關於此概覽",
-      "explainer": "由 AI 模型根據該服務在註冊中心的描述、清單和 README 撰寫，可能有誤或不完整。使用前請以服務自身的文件為準。",
-      "whatItDoes": "功能",
+      "explainer": "由 AI 模型根據該服務在註冊中心的描述、清單、工具列表、服務自述和 README 撰寫，可能有誤或不完整。使用前請以服務自身的文件為準。",
+      "whatItDoes": "可以做什麼",
       "whenToUse": "適用情境",
       "requirements": "執行需求",
       "englishFallback": "暫無中文概覽，以下為英文版本。",
@@ -580,7 +615,7 @@
           "not-eligible": "未為此服務產生：只有公開服務的最新發布版本才會產生概覽。",
           "readme-pending": "正在等待讀取 README，讀取完成後再產生概覽。",
           "invalid-manifest": "未產生：已儲存的清單無法解析。",
-          "no-content": "未產生：沒有 README，描述也太短，無法說明此服務的用途。",
+          "no-content": "未產生：README、描述、服務自述和工具描述加起來仍太短，無法說明此服務的用途。",
           "missing-version": "未產生：找不到最新版本。"
         },
         "none": "最新版本暫無概覽。",

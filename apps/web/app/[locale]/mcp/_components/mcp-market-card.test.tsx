@@ -91,11 +91,49 @@ describe("public MCP card", () => {
     );
   });
 
-  it("falls back to the registry summary without one", async () => {
+  it("falls back to the registry summary without one, where it is longer than the template", async () => {
     for (const aiSummary of [undefined, null, "  "]) {
-      const html = await card(item({ aiSummary }));
-      expect(html).toContain("Forecasts for any city.");
+      const html = await card(
+        item({
+          aiSummary,
+          summary:
+            "Forecasts for any city, with severe-weather alerts and air quality.",
+        }),
+      );
+      expect(html).toContain(
+        "Forecasts for any city, with severe-weather alerts and air quality.",
+      );
       expect(html).not.toContain("data-ai-summary");
     }
+  });
+
+  // #367 W4: a registry summary no longer than the template sentence gives
+  // way to it; a card has no endpoint, so the template names none.
+  it("shows the template sentence when the registry summary says less", async () => {
+    const html = await card(
+      item({
+        name: "Notion",
+        summary: "Notion MCP Server",
+        transport: "streamable_http",
+        requiresAuth: true,
+        toolsCount: 24,
+      }),
+    );
+    expect(html).toContain(
+      "Notion&#x27;s hosted MCP server; credential required; Streamable HTTP; 24 tools.",
+    );
+    expect(html).not.toContain("Notion MCP Server</p>");
+    expect(html).not.toContain("data-ai-summary");
+    const local = await card(
+      item({
+        name: "Filesystem",
+        summary: "Files.",
+        transport: "stdio",
+        toolsCount: 0,
+      }),
+    );
+    expect(local).toContain(
+      "Filesystem&#x27;s local MCP server; no sign-in required; STDIO.",
+    );
   });
 });

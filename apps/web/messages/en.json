@@ -471,6 +471,41 @@
         "customHeaders": "Send the request headers this server asks for."
       }
     },
+    "template": {
+      "remote": "{name}'s hosted MCP server ({host})",
+      "remoteByPublisher": "{name}'s hosted MCP server ({host}), published by {publisher}",
+      "remoteNoHost": "{name}'s hosted MCP server",
+      "remoteNoHostByPublisher": "{name}'s hosted MCP server, published by {publisher}",
+      "local": "{name}'s local MCP server",
+      "localByPublisher": "{name}'s local MCP server, published by {publisher}",
+      "unknown": "{name}'s MCP server",
+      "unknownByPublisher": "{name}'s MCP server, published by {publisher}",
+      "auth": {
+        "notRequired": "no sign-in required",
+        "optionalApiKey": "optional API key",
+        "required": "credential required",
+        "oauth": "OAuth sign-in required",
+        "oauthOrApiKey": "OAuth sign-in or API key required",
+        "apiKey": "API key required",
+        "customHeaders": "custom request headers required"
+      },
+      "tools": "{count, plural, one {# tool} other {# tools}}",
+      "separator": "; ",
+      "end": "."
+    },
+    "facts": {
+      "title": "Server facts",
+      "lead": "No AI overview yet: these facts come from the registry entry and the server itself.",
+      "publisher": "Publisher",
+      "endpoint": "Endpoint",
+      "transport": "Transport",
+      "auth": "Auth",
+      "tools": "Tools",
+      "toolsCount": "{count, plural, one {# tool} other {# tools}}",
+      "documentation": "Documentation",
+      "repository": "Repository",
+      "homepage": "Homepage"
+    },
     "detail": {
       "metaFallback": "MCP Server",
       "metaTitle": "{name} MCP Server",
@@ -544,8 +579,8 @@
     "aiOverview": {
       "title": "AI-generated overview",
       "explainerLabel": "About this overview",
-      "explainer": "Written by an AI model from this server's registry description, manifest and README. It can be wrong or incomplete — check the server's own documentation before relying on it.",
-      "whatItDoes": "What it does",
+      "explainer": "Written by an AI model from this server's registry description, manifest, tool list, its own instructions and README. It can be wrong or incomplete — check the server's own documentation before relying on it.",
+      "whatItDoes": "What you can do",
       "whenToUse": "When to use it",
       "requirements": "Requirements",
       "englishFallback": "Shown in English: no overview in your language yet.",
@@ -580,7 +615,7 @@
           "not-eligible": "Not generated for this server: only the latest published version of a public server gets one.",
           "readme-pending": "Waiting for the README to be read; the overview is written once it is.",
           "invalid-manifest": "Not generated: the stored manifest no longer parses.",
-          "no-content": "Not generated: there is no README, and the description is too short to say what the server does.",
+          "no-content": "Not generated: the README, description, server instructions and tool descriptions together are too short to say what the server does.",
           "missing-version": "Not generated: the latest version could not be found."
         },
         "none": "No overview for the latest version yet.",
