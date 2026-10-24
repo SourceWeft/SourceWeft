@@ -104,21 +104,29 @@ fn readiness_needs_setup_without_profile() {
 #[test]
 #[ignore = "requires bubblewrap and the sandbox bundle"]
 fn readiness_ready_with_working_bwrap() {
-    // Local-only counterpart to the test above: this Mac's Docker Desktop Linux container has
-    // no AppArmor, so /usr/bin/bwrap is unrestricted here and the same harness should report
-    // Ready. The RTM_NEWADDR/NeedsSetup assertion above is proven only on a real Ubuntu 24.04
-    // kernel in Task 9 CI, not in this container.
+    // Counterpart to the test above, against the production bwrap path instead of the system
+    // one: on this Mac's Docker Desktop Linux container there is no AppArmor at all, so
+    // /opt/sourceweft/libexec/bwrap (copied there by the verification recipe, same as
+    // /usr/bin/bwrap) is unrestricted and the harness should report Ready. On a real Ubuntu
+    // 24.04 kernel with kernel.apparmor_restrict_unprivileged_userns=1 (CI, Task 9),
+    // /opt/sourceweft/libexec/bwrap is also Ready there, but for a different reason: the CI job
+    // loads an AppArmor profile scoped to exactly that path that grants `userns`, so the
+    // restricted sysctl no longer blocks it. Probing /usr/bin/bwrap here would fail on that
+    // restricted runner (see readiness_needs_setup_without_profile, which deliberately keeps
+    // probing /usr/bin/bwrap to prove the unscoped path still fails closed).
     let temp = tempfile::tempdir().unwrap();
     let bundle = bundle_dir(temp.path());
     copy_bundle_into(&bundle);
     let workspace = temp.path().join("workspace");
     fs::create_dir_all(&workspace).unwrap();
 
-    let readiness = probe_bundle(&bundle, &harness_init("/usr/bin/bwrap", &workspace));
+    let readiness = probe_bundle(
+        &bundle,
+        &harness_init("/opt/sourceweft/libexec/bwrap", &workspace),
+    );
     assert!(
         matches!(readiness, SandboxReadiness::Ready { .. }),
-        "expected Ready against a working /usr/bin/bwrap in this unrestricted container, got \
-         {readiness:?}"
+        "expected Ready against a working /opt/sourceweft/libexec/bwrap, got {readiness:?}"
     );
 }
 
