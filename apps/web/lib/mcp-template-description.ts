@@ -32,6 +32,15 @@ export type McpTemplateTranslator = (
   values?: Record<string, string | number>,
 ) => string;
 
+// Registry names often end in "MCP Server" ("GitHub MCP Server"), and the lead
+// sentence already says "MCP server".
+const MCP_NAME_SUFFIX = /[\s\-–—:|]*\bMCP(?:\s+server)?$/i;
+
+/** The name for the lead sentence: without a trailing "MCP"/"MCP Server". */
+function leadName(name: string): string {
+  return name.replace(MCP_NAME_SUFFIX, "").trim() || name;
+}
+
 export function mcpTemplateDescription(
   facts: McpTemplateFacts,
   t: McpTemplateTranslator,
@@ -51,7 +60,11 @@ export function mcpTemplateDescription(
         : "remoteNoHost";
   const leadKey = publisher ? `${runs}ByPublisher` : runs;
   const parts = [
-    t(leadKey, { name, publisher: publisher ?? "", host: host ?? "" }),
+    t(leadKey, {
+      name: leadName(name),
+      publisher: publisher ?? "",
+      host: host ?? "",
+    }),
     t(`auth.${facts.authMethod}`),
     ...(facts.transport ? [transportLabel(facts.transport)] : []),
     ...(facts.toolCount && facts.toolCount > 0
