@@ -22,7 +22,11 @@ import {
   assertPrepareSandboxPath,
   assertSourceWorkPath,
 } from "./paths";
-import type { SandboxRuntimeContext, SandboxRuntimeLimits } from "./types";
+import type {
+  SandboxRef,
+  SandboxRuntimeContext,
+  SandboxRuntimeLimits,
+} from "./types";
 import { SandboxManager } from "./sandbox-manager";
 import type { TrustedSandboxHostAdapter } from "./trusted-host-adapter";
 
@@ -146,15 +150,43 @@ function toRecoverableSandboxToolErrorOutput(input: {
  * The first model-visible result produced on a replacement generation
  * carries the one-shot notice: /workspace is empty again. For prepare that
  * is informational (it just refilled it); for collect it explains a missing
- * output without a misleading "file not found".
+ * output without a misleading "file not found". The manager supplies the
+ * text (why the previous generation went); a bare `true`, from a host that
+ * only tracks whether a replacement happened, selects the timeout notice.
  */
 function withReplacementDiagnostics<T extends Record<string, unknown>>(
   result: T,
-  replaced: boolean,
+  replaced: string | boolean,
 ): T {
-  return replaced
-    ? { ...result, diagnostics: `sandbox replaced. ${SANDBOX_REPLACED_NOTICE}` }
-    : result;
+  if (!replaced) return result;
+  const notice =
+    typeof replaced === "string" ? replaced : SANDBOX_REPLACED_NOTICE;
+  return { ...result, diagnostics: `sandbox replaced. ${notice}` };
+}
+
+/**
+ * A provider operation found the sandbox instance gone underneath the run.
+ * The manager fences and expires that generation once and says whether the
+ * run continues on a replacement (SANDBOX_REPLACED, rendered as the
+ * recoverable error below) or fails closed; when the generation was already
+ * fenced for another reason the original error stands.
+ */
+async function lostGenerationError(input: {
+  manager: SandboxManager;
+  context: SandboxRuntimeContext;
+  sandbox: SandboxRef | null;
+  error: unknown;
+}): Promise<unknown> {
+  if (!input.sandbox || !isSandboxInstanceMissingError(input.error)) {
+    return input.error;
+  }
+  return (
+    (await input.manager.reportLostGeneration(
+      input.sandbox,
+      input.context,
+      input.error,
+    )) ?? input.error
+  );
 }
 
 function requireSandboxToolCallId(input: {
@@ -360,8 +392,9 @@ export function createSandboxTools(input: {
           );
         }
       }
+      let sandbox: SandboxRef | null = null;
       let sandboxId: string | null = null;
-      let replaced = false;
+      let replaced: string | false = false;
       let totalBytes = 0;
       const prepared: Array<{
         content: Uint8Array;
@@ -378,10 +411,9 @@ export function createSandboxTools(input: {
       }> = [];
 
       try {
-        const sandbox = await input.manager.getOrCreateThreadSandbox(
-          input.context,
-          { ...(signal ? { signal } : {}) },
-        );
+        sandbox = await input.manager.getOrCreateThreadSandbox(input.context, {
+          ...(signal ? { signal } : {}),
+        });
         sandboxId = sandbox.id;
         replaced = input.manager.consumeReplacementNotice();
         for (const file of args.files) {
@@ -496,8 +528,11 @@ export function createSandboxTools(input: {
           durationMs: Date.now() - startedAt,
         });
         return JSON.stringify(result);
-      } catch (error) {
-        const controlError = cancellationControlError({ error, signal });
+      } catch (caught) {
+        const controlError = cancellationControlError({
+          error: caught,
+          signal,
+        });
         if (controlError) {
           await input.manager.completeToolOperation({
             operationId: claim.operationId,
@@ -512,6 +547,12 @@ export function createSandboxTools(input: {
           });
           throw controlError;
         }
+        const error = await lostGenerationError({
+          manager: input.manager,
+          context: input.context,
+          sandbox,
+          error: caught,
+        });
         const result = withReplacementDiagnostics(
           toRecoverableSandboxToolErrorOutput({
             error,
@@ -529,7 +570,7 @@ export function createSandboxTools(input: {
         // Only a confirmed-gone instance shortens the lease; a transient
         // or input error leaves a healthy sandbox on its full TTL (same
         // policy as execute).
-        if (isSandboxInstanceMissingError(error)) {
+        if (isSandboxInstanceMissingError(caught)) {
           await input.manager
             .releaseThreadSandboxLease({
               context: input.context,
@@ -537,7 +578,7 @@ export function createSandboxTools(input: {
             })
             .catch(() => undefined);
         }
-        if (sandboxId && isSandboxInstanceMissingError(error)) {
+        if (sandboxId && isSandboxInstanceMissingError(caught)) {
           await input.manager
             .expireThreadSandbox({ sandboxId })
             .catch(() => undefined);
@@ -570,8 +611,9 @@ export function createSandboxTools(input: {
       if (claim.kind === "replay") {
         return JSON.stringify(claim.result);
       }
+      let sandbox: SandboxRef | null = null;
       let sandboxId: string | null = null;
-      let replaced = false;
+      let replaced: string | false = false;
       let totalBytes = 0;
       const collected: Array<{
         sandboxPath: string;
@@ -581,10 +623,9 @@ export function createSandboxTools(input: {
         textContent: string;
       }> = [];
       try {
-        const sandbox = await input.manager.getOrCreateThreadSandbox(
-          input.context,
-          { ...(signal ? { signal } : {}) },
-        );
+        sandbox = await input.manager.getOrCreateThreadSandbox(input.context, {
+          ...(signal ? { signal } : {}),
+        });
         sandboxId = sandbox.id;
         replaced = input.manager.consumeReplacementNotice();
         for (const output of args.outputs) {
@@ -659,8 +700,11 @@ export function createSandboxTools(input: {
           durationMs: Date.now() - startedAt,
         });
         return JSON.stringify(result);
-      } catch (error) {
-        const controlError = cancellationControlError({ error, signal });
+      } catch (caught) {
+        const controlError = cancellationControlError({
+          error: caught,
+          signal,
+        });
         if (controlError) {
           await input.manager.completeToolOperation({
             operationId: claim.operationId,
@@ -675,6 +719,12 @@ export function createSandboxTools(input: {
           });
           throw controlError;
         }
+        const error = await lostGenerationError({
+          manager: input.manager,
+          context: input.context,
+          sandbox,
+          error: caught,
+        });
         if (error instanceof SandboxCollectUnsupportedOutputError) {
           const result = toRecoverableCollectErrorOutput(error);
           await input.manager.completeToolOperation({
@@ -703,7 +753,7 @@ export function createSandboxTools(input: {
         // Only a confirmed-gone instance shortens the lease; a transient
         // or input error leaves a healthy sandbox on its full TTL (same
         // policy as execute).
-        if (isSandboxInstanceMissingError(error)) {
+        if (isSandboxInstanceMissingError(caught)) {
           await input.manager
             .releaseThreadSandboxLease({
               context: input.context,
@@ -711,7 +761,7 @@ export function createSandboxTools(input: {
             })
             .catch(() => undefined);
         }
-        if (sandboxId && isSandboxInstanceMissingError(error)) {
+        if (sandboxId && isSandboxInstanceMissingError(caught)) {
           await input.manager
             .expireThreadSandbox({ sandboxId })
             .catch(() => undefined);
