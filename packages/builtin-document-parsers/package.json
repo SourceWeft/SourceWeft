@@ -21,7 +21,7 @@
     "@sourceweft/capability-contracts": "workspace:*",
     "pdfjs-dist": "^6.2.108",
     "srt-parser-2": "1.2.3",
-    "zod": "^4.4.3"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",
