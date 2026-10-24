@@ -2286,7 +2286,9 @@
       "searchVisibilityFailed": "無法更新搜尋可見性。",
       "copyLinkFailed": "無法複製連結。",
       "noCitationContent": "此網頁暫無可用的引用內容。",
-      "saveNotWired": "儲存到來源功能尚未接入。"
+      "saveNotWired": "儲存到來源功能尚未接入。",
+      "publicRecordsFailed": "無法更新公開資料集合。",
+      "publicRecordsInvalid": "集合名稱只能包含字母、數字、_ 或 -。"
     },
     "deleteDialog": {
       "title": "刪除製品？",
@@ -2311,7 +2313,10 @@
       "publicLinkLabel": "公開連結",
       "hideFromSearch": "對搜尋引擎隱藏",
       "hideFromSearchDescription": "公開連結預設會被索引以擴大觸及；如果是敏感的一次性內容，請開啟此項。",
-      "views": "瀏覽量"
+      "views": "瀏覽量",
+      "publicRecords": "公開資料集合",
+      "publicRecordsDescription": "此頁面可以向持有連結的任何人唯讀展示的共享資料。填寫集合名稱；留空則不展示任何資料。",
+      "publicRecordsPlaceholder": "例如 scores, results"
     },
     "filePreview": {
       "titleFallback": "檔案預覽",

@@ -449,6 +449,13 @@
       "when": 1792826043797,
       "tag": "0063_market_mcp_claims",
       "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1792860197099,
+      "tag": "0064_artifact_records",
+      "breakpoints": true
     }
   ]
 }

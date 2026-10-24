@@ -8,6 +8,29 @@ The writer stores an immutable `artifact_versions.files_json` snapshot of actual
 
 The HTML format registers its execution policy. Private file responses and public raw responses use sandbox CSP without same-origin, and the web proxy honors the trusted upstream policy marker. Generic `file` HTML and ordinary sub-assets remain inert. Preview/source/copy/download/fullscreen use the same registered HTML UI across app and share surfaces. Presentation controls depend on the `presentation/v1` declaration and a validated window/channel handshake, not a skill name or Reveal DOM.
 
+## Page storage and links
+
+Pages keep their sandbox: no same-origin, `connect-src 'none'`. When the host renders a file it adds `runtime=1`. The `/file` and public `/raw` routes then inject an inline runtime right after the `<html>` start tag. Downloads, the source view and the stored object keep the exact published bytes. The runtime does two things:
+
+- It sends link clicks to the host, which shows a leave-SourceWeft confirmation and opens http(s) links in a new tab with `noopener,noreferrer`. Publish validation accepts `<a href>` values that are `#anchors` or absolute http(s) URLs only.
+- It exposes `window.sourceweft.storage`, a client over a MessagePort. The page sends the first message. The host answers only its own iframe's first document from the opaque origin, and closes the port on any later `load`.
+
+The host adds the rendered version. `POST /artifacts/:id/records` re-resolves workspace access, row visibility and the version's immutable `metadata.capabilities` on every call. It derives scope ownership from the session. Records live in `artifact_records` (one `jsonb` row per scope/owner/collection/id), keyed to the artifact, so they survive new versions.
+
+- `user` rows belong to one viewer, whatever their role.
+- `shared` rows need three things:
+  - `storage.shared` in the version;
+  - a person's approval for that exact version, from an editor or admin (`artifact_capability_approvals`);
+  - the viewer's consent for that version (`artifact_record_consents`).
+
+  Writing shared rows also needs editor.
+
+- Public shares read only collections the owner lists in `share_links.public_record_collections`. They use the token and never a session, and they cannot write.
+
+Queries run through a fixed DSL translated to parameterized SQL inside the caller's partition, with a statement timeout. Writes serialize per artifact for quota checks.
+
+A page can still navigate its own frame and so send what it read to another site. No browser policy prevents that. Treat shared data as readable by whoever can get a version approved, which is why approval is per version and by a person.
+
 ## Generation runtime
 
 Rebuild the existing Daytona/Cloudflare sandbox images with `docker/sourceweft-sandbox/html-runtime`. Both images expose:

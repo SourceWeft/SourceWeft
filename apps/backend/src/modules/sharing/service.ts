@@ -62,6 +62,7 @@ function toShareLink(row: ShareLinkRow): ShareLink {
     viewCount: row.viewCount,
     expiresAt: row.expiresAt ? row.expiresAt.toISOString() : null,
     createdAt: row.createdAt.toISOString(),
+    publicRecordCollections: row.publicRecordCollections,
   };
 }
 
@@ -179,6 +180,7 @@ export class SharingService {
     userId: string;
     noindex?: boolean;
     expiresAt?: string | null;
+    publicRecordCollections?: readonly string[];
   }): Promise<ShareMutationResult<ShareLink>> {
     const resolved = await this.requireShareableArtifact(input);
     if (!resolved.ok) {
@@ -189,6 +191,7 @@ export class SharingService {
       targetType: "artifact",
       targetId: input.artifactId,
       noindex: input.noindex,
+      publicRecordCollections: input.publicRecordCollections,
       expiresAt:
         input.expiresAt === undefined
           ? undefined

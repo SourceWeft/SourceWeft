@@ -19,6 +19,7 @@ import {
   artifactVersionMediaProjectionSchema,
   type ShareLink,
 } from "@sourceweft/contracts";
+import { htmlArtifactRecordCapabilities } from "@sourceweft/contracts/html-artifact";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -399,6 +400,9 @@ export function ArtifactPreviewPanel({
           title={title}
           share={share}
           isShareLoading={isShareLoading}
+          showPublicRecords={
+            htmlArtifactRecordCapabilities(artifact.payloadJson).shared
+          }
           onShareChange={(next) => {
             // A mutation makes any briefly remembered lookup stale for other
             // mounted panels; forget it before the local state moves on.

@@ -21,6 +21,7 @@ import {
   sniffAudioMimeType,
 } from "@sourceweft/contracts/artifact-files";
 import { ARTIFACT_STORAGE_MAX_DOWNLOAD_BYTES } from "@sourceweft/contracts/artifact-storage";
+import { htmlArtifactRecordCapabilities } from "@sourceweft/contracts/html-artifact";
 import {
   buildArtifactPreviewUrl as buildArtifactPreviewPageUrl,
   buildArtifactRestUrl,
@@ -749,6 +750,7 @@ export class ContentArtifactsService {
         artifactVersionId: version.versionId,
         payloadJson: {
           ...payload,
+          versionId: version.versionId,
           versionNo: version.versionNo,
           versionFiles: projectArtifactVersionFiles({
             filesJson: version.filesJson,
@@ -999,6 +1001,7 @@ export class ContentArtifactsService {
           : null,
       executionPolicy:
         file.role === "primary" ? handler?.executionPolicy : undefined,
+      recordCapabilities: htmlArtifactRecordCapabilities(version.contentJson),
     };
   }
 
@@ -1144,6 +1147,7 @@ export class ContentArtifactsService {
       ...(await readArtifactVersionFile(file, downloadArtifactObject)),
       executionPolicy:
         file.role === "primary" ? handler?.executionPolicy : undefined,
+      recordCapabilities: htmlArtifactRecordCapabilities(version.contentJson),
     };
   }
 

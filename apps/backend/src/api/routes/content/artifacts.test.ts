@@ -315,3 +315,29 @@ test("member source-file route requires a session before touching the service", 
   assert.equal(response.status, 401);
   assert.equal(mocks.readArtifactVersionSourceFile.mock.calls.length, 0);
 });
+
+test("the file route injects the runtime only when the host renders it", async () => {
+  const html = Buffer.from(
+    '<!doctype html><html><head><meta charset="utf-8"></head><body></body></html>',
+  );
+  mocks.getArtifactFile.mockResolvedValue({
+    body: html,
+    contentType: "text/html; charset=utf-8",
+    fileName: "index.html",
+    executionPolicy: "sandboxed-html",
+    recordCapabilities: { storage: false, shared: false },
+  });
+  const read = async (query: string) =>
+    (
+      await createTestApp().request(
+        `/v1/workspaces/ws-1/artifacts/artifact-1/file${query}`,
+      )
+    ).text();
+  const rendered = await read("?runtime=1");
+  assert.match(
+    rendered,
+    /^<!doctype html><html><script data-sourceweft-runtime>/,
+  );
+  assert.match(rendered, /"storage":false/);
+  assert.equal(await read(""), html.toString());
+});

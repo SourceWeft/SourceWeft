@@ -12,6 +12,7 @@ import {
   updateArtifactShareRequestSchema,
 } from "@sourceweft/contracts";
 import { contentArtifactsService } from "../../../modules/artifacts";
+import { renderableArtifactBody } from "../../../modules/artifact-records/runtime";
 import { sharingService } from "../../../modules/sharing";
 import type { ShareMutationResult } from "../../../modules/sharing";
 import {
@@ -132,7 +133,9 @@ export function registerArtifactRoutes(app: Hono) {
     if (result.renderer) {
       c.header("X-SourceWeft-Artifact-Renderer", result.renderer);
     }
-    return c.body(result.body);
+    return c.body(
+      renderableArtifactBody(result, c.req.query("runtime") === "1"),
+    );
   });
 
   app.get("/artifacts/:id/versions/:versionId/media", async (c) => {
@@ -435,6 +438,7 @@ export function registerArtifactRoutes(app: Hono) {
       userId: getSessionUserId(session),
       noindex: parsed.data.noindex,
       expiresAt: parsed.data.expiresAt,
+      publicRecordCollections: parsed.data.publicRecordCollections,
     });
 
     return ApiResponse.success(c, { share: unwrapShareResult(result) });

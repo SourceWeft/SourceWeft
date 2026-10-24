@@ -25,6 +25,13 @@ import {
   artifactDownloadFiles,
 } from "./artifact-file-downloads";
 import { ARTIFACT_LIMITS } from "@sourceweft/contracts/artifact-files";
+import type { ArtifactRecordsTransport } from "@sourceweft/contracts/artifact-records";
+import { ArtifactBridgeHost, artifactRuntimeUrl } from "./artifact-bridge";
+import {
+  ArtifactStorageBar,
+  ExternalLinkPrompt,
+  NavigatedAwayNotice,
+} from "./artifact-storage-ui";
 
 export type HtmlPreviewFile = {
   fileName: string;
@@ -42,14 +49,24 @@ export function HtmlPreview({
   title,
   presentation,
   files = [],
+  storage,
+  records = null,
 }: {
   fileUrl: string;
   downloadUrl: string | null;
   title: string;
   presentation?: PresentationCapability;
   files?: readonly HtmlPreviewFile[];
+  /** What this exact version declares; the backend enforces it regardless. */
+  storage?: { storage: boolean; shared: boolean };
+  /** Bound to this version by the host; null where storage cannot work. */
+  records?: ArtifactRecordsTransport | null;
 }) {
   const frame = useRef<HTMLIFrameElement>(null);
+  const [frameGeneration, setFrameGeneration] = useState(0);
+  const [navigatedAway, setNavigatedAway] = useState(false);
+  const [pendingLink, setPendingLink] = useState<URL | null>(null);
+  const bridge = useRef<ArtifactBridgeHost | null>(null);
   const stage = useRef<HTMLDivElement>(null);
   const [mode, setMode] = useState<"preview" | "source">("preview");
   const [source, setSource] = useState<string | null>(null);
@@ -118,7 +135,46 @@ export function HtmlPreview({
     setState(null);
     setConnectionError(null);
     sourceCache.current = null;
+    setNavigatedAway(false);
+    setPendingLink(null);
   }, [fileUrl]);
+
+  // One bridge per iframe document; remounting the iframe makes a new one.
+  useEffect(() => {
+    const host = new ArtifactBridgeHost({
+      frameWindow: () => frame.current?.contentWindow ?? null,
+      transport: storage?.storage ? records : null,
+      onOpenLink: setPendingLink,
+    });
+    bridge.current = host;
+    const receive = (event: MessageEvent) => host.handleMessage(event);
+    window.addEventListener("message", receive);
+    return () => {
+      window.removeEventListener("message", receive);
+      host.close();
+      if (bridge.current === host) bridge.current = null;
+    };
+  }, [fileUrl, frameGeneration, records, storage?.storage]);
+
+  function frameLoaded() {
+    if (bridge.current?.frameLoaded() === "navigated") {
+      setNavigatedAway(true);
+      setPendingLink(null);
+      return;
+    }
+    connect();
+  }
+
+  function reloadFrame() {
+    setNavigatedAway(false);
+    setState(null);
+    setFrameGeneration((value) => value + 1);
+  }
+
+  function openLink(url: URL) {
+    setPendingLink(null);
+    window.open(url.href, "_blank", "noopener,noreferrer");
+  }
 
   useEffect(() => {
     const changed = () =>
@@ -322,6 +378,9 @@ export function HtmlPreview({
         </div>
       </div>
       <ArtifactFileDownloads files={files} />
+      {storage?.storage && records && (
+        <ArtifactStorageBar transport={records} shared={storage.shared} />
+      )}
       {error && (
         <p role="alert" className="border-b px-4 py-2 text-sm text-destructive">
           {error}
@@ -336,17 +395,28 @@ export function HtmlPreview({
         </p>
       )}
       <div className="relative min-h-0 flex-1">
-        <iframe
-          key={fileUrl}
-          ref={frame}
-          title={title}
-          src={fileUrl}
-          sandbox={HTML_IFRAME_SANDBOX}
-          allow="fullscreen"
-          referrerPolicy="no-referrer"
-          onLoad={connect}
-          className={`h-full min-h-80 w-full border-0 ${mode === "source" ? "hidden" : ""}`}
-        />
+        {navigatedAway && mode === "preview" ? (
+          <NavigatedAwayNotice onReload={reloadFrame} />
+        ) : (
+          <iframe
+            key={`${fileUrl}#${frameGeneration}`}
+            ref={frame}
+            title={title}
+            src={artifactRuntimeUrl(fileUrl)}
+            sandbox={HTML_IFRAME_SANDBOX}
+            allow="fullscreen"
+            referrerPolicy="no-referrer"
+            onLoad={frameLoaded}
+            className={`h-full min-h-80 w-full border-0 ${mode === "source" || navigatedAway ? "hidden" : ""}`}
+          />
+        )}
+        {pendingLink && mode === "preview" && (
+          <ExternalLinkPrompt
+            url={pendingLink}
+            onCancel={() => setPendingLink(null)}
+            onContinue={() => openLink(pendingLink)}
+          />
+        )}
         {mode === "source" && (
           <div className="h-full overflow-auto bg-muted/10 p-4">
             {source === null ? (
@@ -367,79 +437,87 @@ export function HtmlPreview({
           </div>
         )}
       </div>
-      {presentation && state && !connectionError && mode === "preview" && (
-        <div className="border-t bg-muted/20">
-          <div className="flex items-center justify-center gap-3 px-3 py-2">
-            <Button
-              size="icon-sm"
-              variant="ghost"
-              aria-label="Previous page"
-              onClick={() => command("prev")}
+      {presentation &&
+        state &&
+        !connectionError &&
+        !navigatedAway &&
+        mode === "preview" && (
+          <div className="border-t bg-muted/20">
+            <div className="flex items-center justify-center gap-3 px-3 py-2">
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                aria-label="Previous page"
+                onClick={() => command("prev")}
+              >
+                <ChevronLeft className="size-4" />
+              </Button>
+              <span
+                className="min-w-16 text-center text-xs tabular-nums"
+                aria-live="polite"
+              >
+                {state.slideIndex + 1} / {state.slideCount}
+              </span>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                aria-label="Next page"
+                onClick={() => command("next")}
+              >
+                <ChevronRight className="size-4" />
+              </Button>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                aria-label="Toggle overview"
+                onClick={() =>
+                  command("overview", { enabled: !state.overview })
+                }
+              >
+                <Grid2X2 className="size-4" />
+              </Button>
+            </div>
+            <div
+              className="flex gap-2 overflow-x-auto px-3 pb-3"
+              aria-label="Presentation pages"
             >
-              <ChevronLeft className="size-4" />
-            </Button>
-            <span
-              className="min-w-16 text-center text-xs tabular-nums"
-              aria-live="polite"
-            >
-              {state.slideIndex + 1} / {state.slideCount}
-            </span>
-            <Button
-              size="icon-sm"
-              variant="ghost"
-              aria-label="Next page"
-              onClick={() => command("next")}
-            >
-              <ChevronRight className="size-4" />
-            </Button>
-            <Button
-              size="icon-sm"
-              variant="ghost"
-              aria-label="Toggle overview"
-              onClick={() => command("overview", { enabled: !state.overview })}
-            >
-              <Grid2X2 className="size-4" />
-            </Button>
+              {presentation.pages.map((page, index) => {
+                const thumbnail = files.find(
+                  (file) => file.fileName === page.thumbnail,
+                );
+                return (
+                  <button
+                    key={page.id}
+                    type="button"
+                    onClick={() => command("goto", { slideIndex: index })}
+                    aria-label={`Go to page ${index + 1}`}
+                    aria-current={
+                      index === state.slideIndex ? "page" : undefined
+                    }
+                    className={`w-24 shrink-0 overflow-hidden rounded border text-left text-[10px] ${index === state.slideIndex ? "border-primary ring-1 ring-primary" : "border-border"}`}
+                  >
+                    {thumbnail?.url && (
+                      <img
+                        src={thumbnail.url}
+                        alt=""
+                        className="aspect-video w-full object-cover"
+                        loading="lazy"
+                        onError={() =>
+                          setConnectionError(
+                            "A published page image could not be loaded. Reload to check access and version.",
+                          )
+                        }
+                      />
+                    )}
+                    <span className="block truncate px-2 py-1.5">
+                      {index + 1}. {page.title ?? `Page ${index + 1}`}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
-          <div
-            className="flex gap-2 overflow-x-auto px-3 pb-3"
-            aria-label="Presentation pages"
-          >
-            {presentation.pages.map((page, index) => {
-              const thumbnail = files.find(
-                (file) => file.fileName === page.thumbnail,
-              );
-              return (
-                <button
-                  key={page.id}
-                  type="button"
-                  onClick={() => command("goto", { slideIndex: index })}
-                  aria-label={`Go to page ${index + 1}`}
-                  aria-current={index === state.slideIndex ? "page" : undefined}
-                  className={`w-24 shrink-0 overflow-hidden rounded border text-left text-[10px] ${index === state.slideIndex ? "border-primary ring-1 ring-primary" : "border-border"}`}
-                >
-                  {thumbnail?.url && (
-                    <img
-                      src={thumbnail.url}
-                      alt=""
-                      className="aspect-video w-full object-cover"
-                      loading="lazy"
-                      onError={() =>
-                        setConnectionError(
-                          "A published page image could not be loaded. Reload to check access and version.",
-                        )
-                      }
-                    />
-                  )}
-                  <span className="block truncate px-2 py-1.5">
-                    {index + 1}. {page.title ?? `Page ${index + 1}`}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
+        )}
     </div>
   );
 }

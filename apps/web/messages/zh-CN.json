@@ -2286,7 +2286,9 @@
       "searchVisibilityFailed": "无法更新搜索可见性。",
       "copyLinkFailed": "无法复制链接。",
       "noCitationContent": "此网页暂无可用的引用内容。",
-      "saveNotWired": "保存到来源功能尚未接入。"
+      "saveNotWired": "保存到来源功能尚未接入。",
+      "publicRecordsFailed": "无法更新公开数据集合。",
+      "publicRecordsInvalid": "集合名称只能包含字母、数字、_ 或 -。"
     },
     "deleteDialog": {
       "title": "删除制品？",
@@ -2311,7 +2313,10 @@
       "publicLinkLabel": "公开链接",
       "hideFromSearch": "对搜索引擎隐藏",
       "hideFromSearchDescription": "公开链接默认会被索引以扩大触达；如果是敏感的一次性内容，请开启此项。",
-      "views": "浏览量"
+      "views": "浏览量",
+      "publicRecords": "公开数据集合",
+      "publicRecordsDescription": "此页面可以向持有链接的任何人只读展示的共享数据。填写集合名称；留空则不展示任何数据。",
+      "publicRecordsPlaceholder": "例如 scores, results"
     },
     "filePreview": {
       "titleFallback": "文件预览",

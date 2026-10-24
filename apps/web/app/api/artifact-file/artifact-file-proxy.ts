@@ -99,6 +99,15 @@ export async function proxyArtifactFile(request: NextRequest) {
     return badRequest("assetFileName must be a flat artifact asset file name.");
   }
   const upstreamUrl = new URL(upstreamPath, internalApiBaseUrl());
+  // The host's iframe asks for the injected artifact runtime; downloads and
+  // the source view never do, so they keep the exact published bytes.
+  if (
+    request.nextUrl.searchParams.get("runtime") === "1" &&
+    !isDownload &&
+    resource.kind === "file" &&
+    !versionMedia
+  )
+    upstreamUrl.searchParams.set("runtime", "1");
   const response = await fetch(upstreamUrl, {
     cache: "no-store",
     headers: {

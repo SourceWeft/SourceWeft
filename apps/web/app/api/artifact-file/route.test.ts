@@ -340,3 +340,26 @@ test("artifact asset download preserves version, filename and attachment disposi
   assert.equal(response.headers.get("x-content-type-options"), "nosniff");
   assert.equal(await response.text(), "pdf-bytes");
 });
+
+test("artifact file proxy forwards the runtime request only for the rendered file", async () => {
+  const upstream: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: URL) => {
+      upstream.push(url.toString());
+      return new Response("<html></html>", {
+        headers: { "content-type": "text/html" },
+        status: 200,
+      });
+    }),
+  );
+  const { GET } = await import("./route");
+  const base =
+    "http://localhost:3000/api/artifact-file?workspaceId=workspace-1&artifactId=artifact-1&runtime=1";
+  await GET(new NextRequest(`${base}&artifactVersionId=v1`));
+  await GET(new NextRequest(`${base}&download=1`));
+  await GET(new NextRequest(`${base}&asset=previewImage`));
+  assert.match(upstream[0]!, /\/file\?artifactVersionId=v1&runtime=1$/);
+  assert.doesNotMatch(upstream[1]!, /runtime/);
+  assert.doesNotMatch(upstream[2]!, /runtime/);
+});

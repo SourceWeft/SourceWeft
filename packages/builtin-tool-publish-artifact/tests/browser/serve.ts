@@ -4,6 +4,10 @@ import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import { build } from "esbuild";
 import { artifactExecutionCsp } from "@sourceweft/contracts/artifact-execution";
+import {
+  buildArtifactRuntimeScript,
+  injectArtifactRuntime,
+} from "@sourceweft/contracts/artifact-runtime";
 const root = resolve(fileURLToPath(new URL("../../../../", import.meta.url)));
 const output = resolve(root, "output/playwright/html-artifact");
 await mkdir(output, { recursive: true });
@@ -30,6 +34,28 @@ if(d.channelId!==channel||d.type!=='command')return;
 if(d.command==='next')index=Math.min(1,index+1);if(d.command==='prev')index=Math.max(0,index-1);if(d.command==='goto')index=d.slideIndex;
 document.getElementById('title').textContent=index?'Details':'Overview';parent.postMessage({protocol:d.protocol,type:'ack',channelId:channel,requestId:d.requestId,state:state()},'*');});
 </script></body></html>`;
+// A page that declares storage, served the way the host serves it: the
+// runtime is injected only when the iframe asks for it with `runtime=1`.
+const storageHtml = `<!doctype html><html lang="en"><head><meta charset="utf-8"></head><body>
+<p id="value">loading</p><button id="save">Save</button>
+<a id="out" href="https://example.com/path?from=artifact">Example site</a>
+<button id="jump">Jump away</button>
+<script>
+const show = async () => {
+  try {
+    document.getElementById("value").textContent = "value:" + JSON.stringify(await sourceweft.storage.get("counter"));
+  } catch (error) {
+    document.getElementById("value").textContent = "error:" + error.code;
+  }
+};
+document.getElementById("save").onclick = async () => {
+  const current = (await sourceweft.storage.get("counter")) ?? 0;
+  await sourceweft.storage.set("counter", current + 1);
+  await show();
+};
+document.getElementById("jump").onclick = () => { location.href = "/plain.html"; };
+show();
+</script></body></html>`;
 const index =
   '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/styles.css"></head><body style="margin:0"><div id="root" style="height:100vh"></div><script src="/app.js"></script></body></html>';
 const server = createServer(async (req, res) => {
@@ -50,6 +76,23 @@ const server = createServer(async (req, res) => {
             "</script>",
           )
         : html,
+    );
+    return;
+  }
+  if (url.pathname === "/storage.html") {
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader(
+      "Content-Security-Policy",
+      artifactExecutionCsp("sandboxed-html"),
+    );
+    res.setHeader("Cache-Control", "no-store");
+    res.end(
+      url.searchParams.get("runtime") === "1"
+        ? injectArtifactRuntime(
+            storageHtml,
+            buildArtifactRuntimeScript({ storage: true }),
+          )
+        : storageHtml,
     );
     return;
   }

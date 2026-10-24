@@ -13,6 +13,7 @@
  * graph of server-side consumers that import other contract subpaths.
  */
 import type { ComponentType, ReactNode } from "react";
+import type { ArtifactRecordsTransport } from "./artifact-records";
 
 // ---------------------------------------------------------------------------
 // Shared read-only views
@@ -156,6 +157,12 @@ export type ArtifactPreviewContext = {
   readonly surface?: "app" | "share";
   readonly title: string;
   readonly workspaceId?: string | null;
+  /**
+   * Page storage for this rendering, when the host supplies it directly (the
+   * public share page passes its token-bound, read-only transport). In-app
+   * previews leave it unset and get theirs from the render host.
+   */
+  readonly records?: ArtifactRecordsTransport | null;
 };
 
 export type ArtifactPreviewResult = {
@@ -252,6 +259,15 @@ export type ArtifactRenderHost = {
   readonly useArtifactSnapshot: (
     input: ArtifactSnapshotQuery,
   ) => ArtifactSnapshotQueryResult;
+  /**
+   * Page storage bound to one rendered artifact version, using the signed-in
+   * viewer's session. Optional so hosts without storage simply omit it.
+   */
+  readonly createArtifactRecordsTransport?: (input: {
+    workspaceId: string;
+    artifactId: string;
+    artifactVersionId: string;
+  }) => ArtifactRecordsTransport;
 };
 
 let currentHost: ArtifactRenderHost | null = null;
