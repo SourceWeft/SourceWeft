@@ -29,6 +29,7 @@ import {
   type StoredEndpointProbes,
 } from "./ingest/repository";
 import { classifyByText } from "./parser/categories";
+import { publisherFromRegistryName } from "./publisher";
 import { registryServerProvenance } from "./registry-server";
 
 /**
@@ -387,6 +388,11 @@ export function mapRegistryServerToManifest(
     tools: hasRemote ? (options.tools ?? []) : [],
     sourceUrl: server.repository?.url ?? undefined,
     repoUrl: server.repository?.url ?? undefined,
+    // The publisher's domain is only as trustworthy as the registry that
+    // verified the namespace: a source we do not trust mints none.
+    publisher: options.verified
+      ? publisherFromRegistryName(identifier, hasRemote ? remote?.url : undefined)
+      : undefined,
   };
 
   const parsed = marketMcpManifestSchema.safeParse(candidate);

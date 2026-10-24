@@ -145,6 +145,21 @@ export const marketMcpToolManifestSchema = z.object({
   source: z.string().optional(),
 });
 
+/**
+ * Who publishes a server, derived from its registry namespace. The official
+ * registry verifies DNS or HTTP ownership of a reverse-DNS namespace
+ * (`com.notion` → notion.com) before accepting a publish, so the domain is a
+ * trustworthy identity; `io.github.*` namespaces are GitHub accounts and have
+ * no publisher. `endpointMatch` is true when the server's remote endpoint is
+ * on that domain or a subdomain of it (mcp.notion.com under notion.com): the
+ * publisher also runs the server.
+ */
+export const marketMcpPublisherSchema = z.object({
+  domain: z.string(),
+  source: z.literal("registry-namespace"),
+  endpointMatch: z.boolean(),
+});
+
 export const marketMcpManifestSchema = z.object({
   schemaVersion: z.literal(1),
   identifier: z.string(),
@@ -181,6 +196,9 @@ export const marketMcpManifestSchema = z.object({
   // Present when a verified owner's corrections were applied over the
   // federated data (Issue #367, W7).
   owner: marketMcpOwnerLayerSchema.optional(),
+  // Absent on manifests written before it existed and on servers without a
+  // domain publisher.
+  publisher: marketMcpPublisherSchema.optional(),
 });
 
 // Languages MCP servers' AI overviews are written in.
@@ -281,6 +299,9 @@ export const marketItemSummarySchema = z.object({
   // Languages the latest version has a visible AI overview in, without
   // fallback. Optional for answers from before it existed.
   overviewLocales: z.array(marketMcpLocaleSchema).optional(),
+  // The latest version's domain publisher; null when it has none. Optional
+  // for answers from before it existed.
+  publisher: marketMcpPublisherSchema.nullable().optional(),
   // The latest version's failed stdio validation while it has no tools (see
   // `marketMcpValidationSchema`); null when it has tools or was never tried.
   // Optional for answers from before it existed.
@@ -412,6 +433,7 @@ export type McpVerificationStatus = z.infer<typeof mcpVerificationStatusSchema>;
 export type MarketMcpAuthRequirement = z.infer<
   typeof marketMcpAuthRequirementSchema
 >;
+export type MarketMcpPublisher = z.infer<typeof marketMcpPublisherSchema>;
 export type MarketMcpToolManifest = z.infer<typeof marketMcpToolManifestSchema>;
 export type MarketMcpOwnerField = z.infer<typeof marketMcpOwnerFieldSchema>;
 export type MarketMcpOwnerLayer = z.infer<typeof marketMcpOwnerLayerSchema>;
