@@ -499,3 +499,63 @@ export const marketMcpToolRevisions = pgTable(
     ),
   ],
 );
+
+// Icon dry-run state (Issue #367). One row per fetch scope — `site:<domain>`
+// for an official site's icons, `url:<sha256 of the URL>` for a declared image
+// — shared by every worker and listing: it holds the lease that keeps two
+// workers from fetching the same domain at once, the cached outcome, and when
+// the scope may be fetched again (30 days after a success, a bounded backoff
+// after an error). `market_mcp_icon_hash_domains` records which domains served
+// a given image, so one image appearing under several unrelated domains can be
+// flagged as a template for review.
+// ---------------------------------------------------------------------------
+
+type McpIconFetchStatus = "ok" | "denied" | "deferred" | "error";
+
+export const marketMcpIconFetchState = pgTable(
+  "market_mcp_icon_fetch_state",
+  {
+    scope: text("scope").primaryKey(),
+    status: text("status").$type<McpIconFetchStatus>().notNull(),
+    resultJson: jsonb("result_json").$type<Record<string, unknown>>(),
+    errorCount: integer("error_count").notNull().default(0),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true, mode: "date" }),
+    nextAttemptAt: timestamp("next_attempt_at", {
+      withTimezone: true,
+      mode: "date",
+    })
+      .notNull()
+      .defaultNow(),
+    leaseOwner: text("lease_owner"),
+    leaseUntil: timestamp("lease_until", { withTimezone: true, mode: "date" }),
+  },
+  (table) => [
+    check(
+      "market_mcp_icon_fetch_state_status_check",
+      sql`${table.status} in ('ok', 'denied', 'deferred', 'error')`,
+    ),
+  ],
+);
+
+export const marketMcpIconHashDomains = pgTable(
+  "market_mcp_icon_hash_domains",
+  {
+    sha256: text("sha256").notNull(),
+    // The registrable domain that served the image, and its brand label
+    // (`notion` for `notion.so`): domains sharing a label count as one.
+    domain: text("domain").notNull(),
+    label: text("label").notNull(),
+    firstSeenAt: timestamp("first_seen_at", {
+      withTimezone: true,
+      mode: "date",
+    })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    primaryKey({
+      name: "market_mcp_icon_hash_domains_pk",
+      columns: [table.sha256, table.domain],
+    }),
+  ],
+);

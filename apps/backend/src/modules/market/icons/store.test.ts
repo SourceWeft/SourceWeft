@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test, vi } from "vitest";
 import type { PublicObjectWriter } from "../../../shared/public-storage";
-import { createMcpIconStore, mcpIconStorageKey } from "./store";
+import {
+  createHashedIconStore,
+  createMcpIconStore,
+  mcpIconStorageKey,
+} from "./store";
 
 test("the storage key is the domain and the content hash, with the image's extension", () => {
   const bytes = Buffer.from("icon-bytes");
@@ -77,4 +81,21 @@ test("only a DNS-shaped domain becomes part of a storage key", () => {
       /Not a storable icon domain/,
     );
   }
+});
+
+test("a dry-run candidate is stored under its content hash alone, so one image is one object", async () => {
+  const write = vi.fn<PublicObjectWriter>(async (input) => ({
+    bucket: "public",
+    key: input.key,
+    publicUrl: `https://assets.test/${input.key}`,
+  }));
+  const store = createHashedIconStore(write);
+  const bytes = Buffer.alloc(2048, 9);
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
+  const first = await store({ sha256, bytes, contentType: "image/png" });
+  const second = await store({ sha256, bytes, contentType: "image/png" });
+  assert.equal(first.url, `https://assets.test/market/mcp-icons/by-hash/${sha256}.png`);
+  assert.equal(second.url, first.url);
+  assert.equal(write.mock.calls[0]?.[0].cacheControl, "public, max-age=31536000, immutable");
+  await assert.rejects(() => store({ sha256: "../x", bytes, contentType: "image/png" }));
 });

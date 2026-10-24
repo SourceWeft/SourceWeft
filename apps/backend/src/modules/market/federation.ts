@@ -27,6 +27,12 @@ import { createControlledFetch } from "../../shared/security/controlled-fetch";
 import { applyGithubRegistryToManifest } from "./github-registry/manifest";
 import { findStoredGithubRegistryRecords } from "./github-registry/repository";
 import { firstHttpsIconSrc, type ResolvedIcon } from "./icons/chain";
+import { registryIconDryRun } from "./icons/federation-step";
+import {
+  addIconDryRunCounts,
+  emptyIconDryRunCounts,
+  type IconDryRunCounts,
+} from "./icons/icon-dry-run";
 import { registryIcons, type IconTarget } from "./icons/registry-icons";
 import { mcpServerVersionId } from "./ingest/plan";
 import {
@@ -918,6 +924,8 @@ type IngestCounters = {
   faviconFailed: number;
   /** Entries whose favicon step did not run (no public storage, or stopped). */
   faviconSkipped: number;
+  /** The icon dry-run step (Issue #367); it never changes the displayed icon. */
+  iconDryRun: IconDryRunCounts;
 };
 
 /**
@@ -941,6 +949,7 @@ async function ingestRegistryEntries(
     faviconHits: 0,
     faviconFailed: 0,
     faviconSkipped: 0,
+    iconDryRun: emptyIconDryRunCounts(),
   };
   const now = new Date();
   const latestEntries = entries.filter(isLatestEntry).slice(0, limit);
@@ -964,6 +973,37 @@ async function ingestRegistryEntries(
   counters.faviconHits = icons.faviconHits;
   counters.faviconFailed = icons.faviconFailed;
   counters.faviconSkipped = icons.faviconSkipped;
+  const iconDryRun = await registryIconDryRun(
+    latestEntries.flatMap((entry) => {
+      const server: RegistryServer = entry.server ?? entry;
+      const identifier = server.name?.trim();
+      const version = server.version?.trim();
+      if (!identifier || !version) return [];
+      const key = mcpServerVersionId(identifier, version);
+      const icon = icons.icons.get(key);
+      const probe = authProbes.probes.get(entry);
+      return [
+        {
+          key,
+          identifier,
+          endpointUrl: primaryRemote(server)?.url,
+          repositoryUrl: server.repository?.url?.trim() || undefined,
+          registryIconUrl: registryIconUrl(server),
+          registryWebsiteUrl: server.websiteUrl,
+          selfDescription: probe?.selfDescription,
+          authMetadata: probe?.authMetadata,
+          faviconUrl:
+            icon?.iconProbe?.result === "hit" ? icon.iconProbe.url : undefined,
+          current: {
+            iconSource: icon?.iconSource ?? "placeholder",
+            iconUrl: icon?.iconUrl,
+          },
+        },
+      ];
+    }),
+    now,
+  );
+  addIconDryRunCounts(counters.iconDryRun, iconDryRun.counts);
   // The GitHub MCP Registry enrichment (`github-registry/`) runs apart from
   // this sync and writes on the version's provenance, which the upsert below
   // replaces whole: its record is carried over, and the manifest changes it
@@ -995,6 +1035,12 @@ async function ingestRegistryEntries(
       ),
     );
     const toolsListing = toolListings.listings.get(entry);
+    const iconProvenance = iconDryRun.provenance.get(
+      mcpServerVersionId(
+        server.name?.trim() ?? "",
+        server.version?.trim() ?? "",
+      ),
+    );
     const mapped = mapRegistryServerToManifest(entry, {
       verified: input.verified,
       authProbe: authProbe?.result,
@@ -1054,6 +1100,10 @@ async function ingestRegistryEntries(
           // The namespace domain's favicon fetch and when it was made, kept
           // so syncs reuse a hit and retry a miss only after 30 days.
           iconProbe: icon?.iconProbe,
+          // The icon dry-run's candidates and what the new rules would pick
+          // (Issue #367); the displayed icon above is unchanged by them.
+          iconCandidates: iconProvenance?.iconCandidates,
+          iconDecision: iconProvenance?.iconDecision,
           // What the endpoint said about itself while being probed (Issue
           // #367 W1), kept with the probe so it refreshes with it; validated
           // when it both described itself and listed its tools.
@@ -1151,6 +1201,7 @@ export async function ingestFromRegistry(input: {
   let faviconHits = 0;
   let faviconFailed = 0;
   let faviconSkipped = 0;
+  const iconDryRun = emptyIconDryRunCounts();
   let partial = false;
   let error: string | undefined;
 
@@ -1200,6 +1251,7 @@ export async function ingestFromRegistry(input: {
     faviconHits += counters.faviconHits;
     faviconFailed += counters.faviconFailed;
     faviconSkipped += counters.faviconSkipped;
+    addIconDryRunCounts(iconDryRun, counters.iconDryRun);
     cursor = page.metadata?.nextCursor ?? undefined;
     if (!cursor) {
       break;
@@ -1219,6 +1271,7 @@ export async function ingestFromRegistry(input: {
     faviconHits,
     faviconFailed,
     faviconSkipped,
+    iconDryRun,
     partial,
   });
   return {
@@ -1233,6 +1286,7 @@ export async function ingestFromRegistry(input: {
     faviconHits,
     faviconFailed,
     faviconSkipped,
+    iconDryRun,
     partial,
     error,
     nextCursor,
@@ -1277,6 +1331,7 @@ export async function federateRegistryEntry(input: {
       faviconHits: 0,
       faviconFailed: 0,
       faviconSkipped: 0,
+      iconDryRun: emptyIconDryRunCounts(),
     };
   }
   const counters = await ingestRegistryEntries(entries.slice(0, 1), source, 1);
@@ -1312,6 +1367,7 @@ async function ingestSourceWithResume(
     faviconHits: 0,
     faviconFailed: 0,
     faviconSkipped: 0,
+    iconDryRun: emptyIconDryRunCounts(),
   };
   let cursor: string | undefined;
   let resumes = 0;
@@ -1337,6 +1393,7 @@ async function ingestSourceWithResume(
     total.faviconHits += run.faviconHits;
     total.faviconFailed += run.faviconFailed;
     total.faviconSkipped += run.faviconSkipped;
+    addIconDryRunCounts(total.iconDryRun, run.iconDryRun);
     if (!run.partial || resumes >= resume.maxResumes) {
       return {
         ...total,

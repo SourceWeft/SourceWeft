@@ -59,3 +59,36 @@ export function createMcpIconStore(
 }
 
 export const storeMcpIcon: McpIconStore = createMcpIconStore();
+
+/**
+ * Candidates of the icon dry-run (Issue #367) are stored by the hash of their
+ * bytes alone — `market/mcp-icons/by-hash/<sha256>.<ext>` — so the same image
+ * found under several listings or domains is one object, and a URL never
+ * changes meaning.
+ */
+export const MCP_ICON_HASH_KEY_PREFIX = `${MCP_ICON_KEY_PREFIX}/by-hash`;
+
+export type HashedIconStore = (input: {
+  sha256: string;
+  bytes: Buffer;
+  contentType: string;
+}) => Promise<{ url: string }>;
+
+export function createHashedIconStore(
+  write: PublicObjectWriter = putPublicObject,
+): HashedIconStore {
+  return async ({ sha256, bytes, contentType }) => {
+    if (!/^[a-f\d]{64}$/.test(sha256)) {
+      throw new Error("Not a sha256 digest");
+    }
+    const stored = await write({
+      key: `${MCP_ICON_HASH_KEY_PREFIX}/${sha256}.${imageExtension(contentType)}`,
+      body: bytes,
+      contentType,
+      cacheControl: "public, max-age=31536000, immutable",
+    });
+    return { url: stored.publicUrl };
+  };
+}
+
+export const storeHashedMcpIcon: HashedIconStore = createHashedIconStore();
