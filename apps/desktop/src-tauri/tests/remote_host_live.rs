@@ -15,20 +15,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// `RemoteHost` stores a real `AppHandle` (for the folder picker). Neither
-/// live test here exercises `choose_folder`, but the constructor still needs
-/// one, so build a genuine default-runtime app from a throwaway context
-/// instead of `tauri::test::mock_app()` (whose handle is `AppHandle<MockRuntime>`,
-/// a different type than the `AppHandle<Wry>` that bare `tauri::AppHandle`
-/// means, and that `RemoteHost` actually stores).
-fn live_test_app_handle() -> tauri::AppHandle {
-    tauri::Builder::default()
-        .build(tauri::test::mock_context(tauri::test::noop_assets()))
-        .expect("build a headless app handle for the live host harness")
-        .handle()
-        .clone()
-}
-
 #[test]
 #[ignore = "requires isolated live backend and real macOS Keychain/Seatbelt"]
 fn serve_real_local_host_for_browser_execution_e2e() {
@@ -48,7 +34,7 @@ fn serve_real_local_host_for_browser_execution_e2e() {
     let data = root.join("native-data");
     let host = Arc::new(LocalHost::open(&data).unwrap());
     let service = format!("nicelab.sourceweft.execution-e2e.{run_id}");
-    let remote = remote_host::RemoteHost::new(host, service, live_test_app_handle()).unwrap();
+    let remote = remote_host::RemoteHost::new(host, service).unwrap();
     tauri::async_runtime::block_on(remote.enroll(ticket))
         .expect("Real enrollment/Keychain must work; no storage fallback");
     let started = Instant::now();
@@ -111,12 +97,9 @@ fn serve_context_host_with_real_authentication() {
     assert!(uuid::Uuid::parse_str(&run).is_ok());
     let data = root.join(format!("host-{run}"));
     let host = Arc::new(LocalHost::open(&data).unwrap());
-    let remote = remote_host::RemoteHost::new(
-        host,
-        format!("nicelab.sourceweft.context-e2e.{run}"),
-        live_test_app_handle(),
-    )
-    .unwrap();
+    let remote =
+        remote_host::RemoteHost::new(host, format!("nicelab.sourceweft.context-e2e.{run}"))
+            .unwrap();
     tauri::async_runtime::block_on(async {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(15))

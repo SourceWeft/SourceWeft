@@ -149,12 +149,8 @@ fn main() {
                     &app.path().app_data_dir()?,
                 )?);
                 app.manage(
-                    remote_host::RemoteHost::new(
-                        host.clone(),
-                        app.config().identifier.clone(),
-                        app.handle().clone(),
-                    )
-                    .map_err(std::io::Error::other)?,
+                    remote_host::RemoteHost::new(host.clone(), app.config().identifier.clone())
+                        .map_err(std::io::Error::other)?,
                 );
                 app.manage(host);
             }

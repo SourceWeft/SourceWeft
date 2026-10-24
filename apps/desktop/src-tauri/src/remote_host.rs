@@ -114,7 +114,6 @@ pub struct RemoteHost {
     executions: Arc<Executions>,
     generation: Arc<AtomicU64>,
     keychain_service: String,
-    app: tauri::AppHandle,
 }
 
 #[cfg(target_os = "macos")]
@@ -142,7 +141,10 @@ async fn pick_folder(app: &tauri::AppHandle) -> Result<String, String> {
     let app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         match app.dialog().file().blocking_pick_folder() {
-            Some(FilePath::Path(path)) => Ok(path.to_string_lossy().into_owned()),
+            Some(FilePath::Path(path)) => path
+                .into_os_string()
+                .into_string()
+                .map_err(|_| "Invalid folder path".to_string()),
             // `blocking_pick_folder` runs on Linux's own GTK/XDG-portal event
             // loop, not ours, so it can only yield `None` (dialog dismissed)
             // or a `FilePath::Url` (never produced for a folder picker); both
@@ -156,9 +158,57 @@ async fn pick_folder(app: &tauri::AppHandle) -> Result<String, String> {
     .map_err(|e| e.to_string())?
 }
 
+/// The exact message `choose_folder` surfaces when the stored device
+/// credential is missing. On macOS this must byte-match what the raw
+/// Keychain lookup used to return before `secret_store` existed (see
+/// `secret_store::not_found_message`); `choose_folder` never existed on
+/// Linux before this port, so it gets a plain, friendlier message instead.
+#[cfg(target_os = "macos")]
+fn missing_device_credential_error() -> String {
+    secret_store::not_found_message()
+}
+
+#[cfg(target_os = "linux")]
+fn missing_device_credential_error() -> String {
+    "Authenticate this computer before choosing a folder".to_string()
+}
+
+/// `enroll`'s credential-store write used to be wrapped in this prefix only
+/// on macOS (there was no Linux path before this port). Linux's
+/// `secret_store::set` error is already the exact user-facing text (e.g.
+/// the no-keyring message), so it must pass through unprefixed.
+#[cfg(target_os = "macos")]
+fn enrollment_store_error(error: String) -> String {
+    format!("Keychain enrollment failed: {error}")
+}
+
+#[cfg(target_os = "linux")]
+fn enrollment_store_error(error: String) -> String {
+    error
+}
+
+/// `authenticate`'s direct/legacy credential lookup used to wrap a real
+/// (non-not-found) error in this prefix only on macOS. On Linux, the error
+/// coming out of `secret_store::get` may already be the exact required
+/// no-keyring message, so it must not be re-wrapped.
+#[cfg(target_os = "macos")]
+fn keychain_lookup_error(error: String) -> String {
+    format!("Keychain access failed: {error}")
+}
+
+#[cfg(target_os = "linux")]
+fn keychain_lookup_error(error: String) -> String {
+    error
+}
+
 impl RemoteHost {
     #[cfg(any(target_os = "macos", target_os = "linux"))]
-    pub async fn choose_folder(&self, ticket: String, user_id: String) -> Result<Value, String> {
+    pub async fn choose_folder(
+        &self,
+        app: &tauri::AppHandle,
+        ticket: String,
+        user_id: String,
+    ) -> Result<Value, String> {
         let owner = user_id.clone();
         let authenticated = self.authenticate(ticket, user_id).await?;
         if authenticated["needsProof"] == true || self.status().user_id.as_deref() != Some(&owner) {
@@ -171,14 +221,16 @@ impl RemoteHost {
                 .user_id
                 .ok_or("Authenticate this account first")?
         );
-        let bytes = secret_store::get(&self.keychain_service, &account)?
-            .ok_or("Authenticate this computer before choosing a folder")?;
+        let bytes = match secret_store::get(&self.keychain_service, &account)? {
+            Some(bytes) => bytes,
+            None => return Err(missing_device_credential_error()),
+        };
         let credential: Credentials =
             serde_json::from_slice(&bytes).map_err(|_| "Invalid device credentials")?;
         if self.status().device_id.as_deref() != Some(&credential.id) {
             return Err("Authenticate this computer before choosing a folder".into());
         }
-        let path = pick_folder(&self.app).await?;
+        let path = pick_folder(app).await?;
         if self.generation.load(Ordering::SeqCst) != folder_generation
             || self.status().user_id.as_deref() != Some(&owner)
         {
@@ -204,7 +256,12 @@ impl RemoteHost {
         response.json().await.map_err(|e| e.to_string())
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    pub async fn choose_folder(&self, _ticket: String, _user_id: String) -> Result<Value, String> {
+    pub async fn choose_folder(
+        &self,
+        _app: &tauri::AppHandle,
+        _ticket: String,
+        _user_id: String,
+    ) -> Result<Value, String> {
         Err("UNSUPPORTED_PLATFORM".into())
     }
 
@@ -215,29 +272,36 @@ impl RemoteHost {
         }
         let auth_generation = self.generation.load(Ordering::SeqCst);
         let account = format!("local-device:{user_id}");
-        let saved = secret_store::get(&self.keychain_service, &account)?;
+        let direct = secret_store::get(&self.keychain_service, &account);
         // Adopt only this account's pre-release credential; never another user's.
-        let saved = match saved {
-            Some(bytes) => Some(bytes),
-            None => match secret_store::get(&self.keychain_service, "local-device")? {
-                Some(bytes) => {
+        // Any real (non-not-found) error, from either lookup, surfaces below
+        // with the same "Keychain access failed:" wording this call site
+        // always used — bare from `secret_store` itself, since `choose_folder`
+        // needs its own `get` call to stay unprefixed.
+        let saved = match direct {
+            Ok(Some(bytes)) => Ok(Some(bytes)),
+            Ok(None) => match secret_store::get(&self.keychain_service, "local-device") {
+                Ok(Some(bytes)) => {
                     let legacy: Credentials = serde_json::from_slice(&bytes)
                         .map_err(|_| "Invalid saved legacy credentials")?;
-                    if legacy.user_id == user_id {
+                    Ok(if legacy.user_id == user_id {
                         Some(bytes)
                     } else {
                         None
-                    }
+                    })
                 }
-                None => None,
+                Ok(None) => Ok(None),
+                Err(legacy_error) => Err(legacy_error),
             },
+            Err(direct_error) => Err(direct_error),
         };
         let bytes = match saved {
-            Some(bytes) => bytes,
-            None => {
+            Ok(Some(bytes)) => bytes,
+            Ok(None) => {
                 self.enroll(ticket).await?;
                 return Ok(json!({"needsProof":true}));
             }
+            Err(error) => return Err(keychain_lookup_error(error)),
         };
         let credentials: Credentials =
             serde_json::from_slice(&bytes).map_err(|_| "Invalid saved device credentials")?;
@@ -277,11 +341,7 @@ impl RemoteHost {
     pub async fn authenticate(&self, _ticket: String, _user_id: String) -> Result<Value, String> {
         Err("UNSUPPORTED_PLATFORM: Local execution currently requires macOS or Linux.".into())
     }
-    pub fn new(
-        host: Arc<LocalHost>,
-        service: String,
-        app: tauri::AppHandle,
-    ) -> Result<Self, String> {
+    pub fn new(host: Arc<LocalHost>, service: String) -> Result<Self, String> {
         host.initialize_invocation_journal()
             .map_err(|e| e.to_string())?;
         Ok(Self {
@@ -291,7 +351,6 @@ impl RemoteHost {
             executions: Arc::new(Executions::default()),
             generation: Arc::new(AtomicU64::new(0)),
             keychain_service: service,
-            app,
         })
     }
     pub fn status(&self) -> RemoteStatus {
@@ -359,7 +418,7 @@ impl RemoteHost {
             &format!("local-device:{}", credential.user_id),
             &serde_json::to_vec(&credential).map_err(|e| e.to_string())?,
         )
-        .map_err(|e| format!("Keychain enrollment failed: {e}"))?;
+        .map_err(enrollment_store_error)?;
         if self.generation.load(Ordering::SeqCst) != enroll_generation {
             return Err("Device enrollment was cancelled".into());
         }

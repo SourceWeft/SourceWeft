@@ -49,10 +49,6 @@ keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
 tokio = { version = "1", features = ["test-util"] }
 tempfile = "3"
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
-# Only for tests/remote_host_live.rs, to build a real (default-runtime)
-# AppHandle for RemoteHost::new outside of a running app; adds no weight to
-# the shipped binary (resolver "2" keeps dev-only feature unions out of it).
-tauri = { version = "2", features = ["test"] }
 
 [features]
 default = []

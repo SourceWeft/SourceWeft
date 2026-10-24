@@ -73,7 +73,7 @@ pub async fn enable_local_host(
     crate::authorize_desktop_window(&app, &window, true)?;
     let host = app
         .try_state::<crate::remote_host::RemoteHost>()
-        .ok_or("UNSUPPORTED_PLATFORM: Local execution currently requires macOS.")?;
+        .ok_or("UNSUPPORTED_PLATFORM: Local execution currently requires macOS or Linux.")?;
     let _lease = host.host.admission.enter().map_err(str::to_owned)?;
     host.enroll(ticket).await
 }
@@ -82,7 +82,7 @@ pub async fn enable_local_host(
 pub fn disconnect_local_host(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
     crate::authorize_desktop_window(&app, &window, true)?;
     app.try_state::<crate::remote_host::RemoteHost>()
-        .ok_or("UNSUPPORTED_PLATFORM: Local execution currently requires macOS.")?
+        .ok_or("UNSUPPORTED_PLATFORM: Local execution currently requires macOS or Linux.")?
         .disconnect();
     Ok(())
 }
@@ -99,7 +99,7 @@ pub async fn choose_local_folder(
         .try_state::<crate::remote_host::RemoteHost>()
         .ok_or("UNSUPPORTED_PLATFORM")?;
     let _lease = host.host.admission.enter().map_err(str::to_owned)?;
-    host.choose_folder(ticket, user_id).await
+    host.choose_folder(&app, ticket, user_id).await
 }
 
 /// Compatibility entry point; all folder selection uses account-bound authorization.

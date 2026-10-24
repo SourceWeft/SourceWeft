@@ -14,27 +14,85 @@
 
 #[cfg(target_os = "macos")]
 mod imp {
+    use security_framework::base::Error as KeychainError;
+
     /// `errSecItemNotFound`: https://developer.apple.com/documentation/security/errsecitemnotfound
     const ERR_SEC_ITEM_NOT_FOUND: i32 = -25300;
 
-    pub(crate) fn get(service: &str, account: &str) -> Result<Option<Vec<u8>>, String> {
-        match security_framework::passwords::get_generic_password(service, account) {
+    /// Pure, so it's unit-testable without a real Keychain:
+    /// `KeychainError::from_code` only ever formats an OSStatus into text
+    /// (via `SecCopyErrorMessageString`), it never touches the Keychain.
+    /// Mirrors exactly what the pre-`secret_store` call sites did with a
+    /// `get_generic_password` result: not-found collapses to `None`, any
+    /// other error keeps its raw OS message (callers that historically
+    /// added their own prefix, e.g. `authenticate`'s "Keychain access
+    /// failed: ", still do so themselves).
+    fn map_lookup(result: Result<Vec<u8>, KeychainError>) -> Result<Option<Vec<u8>>, String> {
+        match result {
             Ok(bytes) => Ok(Some(bytes)),
             Err(error) if error.code() == ERR_SEC_ITEM_NOT_FOUND => Ok(None),
-            Err(error) => Err(format!("Keychain access failed: {error}")),
+            Err(error) => Err(error.to_string()),
         }
+    }
+
+    pub(crate) fn get(service: &str, account: &str) -> Result<Option<Vec<u8>>, String> {
+        map_lookup(security_framework::passwords::get_generic_password(
+            service, account,
+        ))
     }
 
     pub(crate) fn set(service: &str, account: &str, secret: &[u8]) -> Result<(), String> {
         security_framework::passwords::set_generic_password(service, account, secret)
-            .map_err(|error| format!("Keychain access failed: {error}"))
+            .map_err(|error| error.to_string())
     }
 
     pub(crate) fn delete(service: &str, account: &str) -> Result<(), String> {
         match security_framework::passwords::delete_generic_password(service, account) {
             Ok(()) => Ok(()),
             Err(error) if error.code() == ERR_SEC_ITEM_NOT_FOUND => Ok(()),
-            Err(error) => Err(format!("Keychain access failed: {error}")),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    /// The exact text a `get` lookup used to surface for a not-found item,
+    /// before this module existed (when every call site formatted its own
+    /// `get_generic_password` error directly). `choose_folder` needs this
+    /// one byte-identical string back, since `get`'s `Ok(None)` discards
+    /// it; everywhere else "not found" is deliberately just `None`.
+    pub(crate) fn not_found_message() -> String {
+        KeychainError::from_code(ERR_SEC_ITEM_NOT_FOUND).to_string()
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn not_found_maps_to_none() {
+            let result = map_lookup(Err(KeychainError::from_code(ERR_SEC_ITEM_NOT_FOUND)));
+            assert_eq!(result, Ok(None));
+        }
+
+        #[test]
+        fn other_error_maps_to_its_raw_message() {
+            // errSecParam: a stable, harmless code to format — this never
+            // touches a real Keychain item.
+            let error = KeychainError::from_code(-50);
+            let expected = error.to_string();
+            assert_eq!(map_lookup(Err(error)), Err(expected));
+        }
+
+        #[test]
+        fn found_item_round_trips_its_bytes() {
+            let result = map_lookup(Ok(b"secret".to_vec()));
+            assert_eq!(result, Ok(Some(b"secret".to_vec())));
+        }
+
+        #[test]
+        fn not_found_message_matches_what_a_lookup_error_would_format_to() {
+            let formatted_by_a_real_lookup_error =
+                KeychainError::from_code(ERR_SEC_ITEM_NOT_FOUND).to_string();
+            assert_eq!(not_found_message(), formatted_by_a_real_lookup_error);
         }
     }
 }
@@ -80,10 +138,14 @@ mod imp {
     /// Service at all (no bus, no provider registered on it), and
     /// `NoStorageAccess` covers a reachable-but-unusable store (e.g. a
     /// locked keyring). Either way the fix is the same, so both get the
-    /// one actionable message instead of leaking DBus plumbing details.
+    /// one actionable message instead of leaking DBus plumbing details —
+    /// but the original error is logged first (not just discarded), since
+    /// it's the only thing that lets anyone diagnose which of those two
+    /// (or something else entirely, like a DBus timeout) actually happened.
     fn describe(error: keyring::Error) -> String {
         match error {
             keyring::Error::NoStorageAccess(_) | keyring::Error::PlatformFailure(_) => {
+                eprintln!("sourceweft-desktop: Secret Service unavailable: {error}");
                 NO_KEYRING_MESSAGE.to_owned()
             }
             other => format!("Keyring access failed: {other}"),
@@ -125,6 +187,13 @@ pub(crate) fn set(service: &str, account: &str, secret: &[u8]) -> Result<(), Str
 #[allow(dead_code)]
 pub(crate) fn delete(service: &str, account: &str) -> Result<(), String> {
     imp::delete(service, account)
+}
+
+/// macOS only: the exact message a `get` lookup used to surface for a
+/// not-found item before this module existed. See `imp::not_found_message`.
+#[cfg(target_os = "macos")]
+pub(crate) fn not_found_message() -> String {
+    imp::not_found_message()
 }
 
 #[cfg(test)]
