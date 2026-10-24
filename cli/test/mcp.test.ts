@@ -24,6 +24,7 @@ import {
   submitToolsRequestSchema as submitMarketMcpOwnerToolsRequestSchema,
 } from "../src/mcp/contract";
 import { parseSseData } from "../src/mcp/http";
+import { shellInvocation } from "../src/mcp/stdio";
 import { createRegistryClient } from "../src/registry/client";
 
 const FIXTURE = fileURLToPath(
@@ -46,6 +47,43 @@ function listen(server: Server): Promise<string> {
     ),
   );
 }
+
+describe("shell invocation", () => {
+  it("runs a command through sh -c on POSIX, unchanged", () => {
+    const command = `"/opt/node dir/node" "/tmp/my server.js" --flag 'a b'`;
+    assert.deepEqual(shellInvocation(command, "linux", undefined), {
+      file: "sh",
+      args: ["-c", command],
+      windowsVerbatimArguments: false,
+    });
+    assert.deepEqual(shellInvocation(command, "darwin", undefined), {
+      file: "sh",
+      args: ["-c", command],
+      windowsVerbatimArguments: false,
+    });
+  });
+
+  it("wraps the whole line for cmd.exe's /s rule on Windows and passes it verbatim", () => {
+    // A command that starts with a quoted absolute path with spaces, and has
+    // quotes of its own further on: cmd /s strips only the OUTER pair.
+    const command = `"C:\\Program Files\\nodejs\\node.exe" "C:\\my dir\\server.js" -e "a b"`;
+    const invocation = shellInvocation(
+      command,
+      "win32",
+      "C:\\Windows\\System32\\cmd.exe",
+    );
+    assert.equal(invocation.file, "C:\\Windows\\System32\\cmd.exe");
+    assert.deepEqual(invocation.args, ["/d", "/s", "/c", `"${command}"`]);
+    assert.equal(invocation.windowsVerbatimArguments, true);
+    // After /s removes the first and last quote, cmd sees the user's line.
+    assert.equal(invocation.args[3]!.slice(1, -1), command);
+  });
+
+  it("falls back to cmd.exe when ComSpec is unset", () => {
+    assert.equal(shellInvocation("node s.js", "win32", undefined).file, "cmd.exe");
+    assert.equal(shellInvocation("node s.js", "win32", "").file, "cmd.exe");
+  });
+});
 
 describe("bounding what a server lists", () => {
   it("cuts descriptions, titles and names to the contract", () => {

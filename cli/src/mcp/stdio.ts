@@ -30,10 +30,47 @@ type Pending = {
   reject: (error: Error) => void;
 };
 
-function shellCommand(command: string): [string, string[]] {
-  return process.platform === "win32"
-    ? ["cmd", ["/c", command]]
-    : ["sh", ["-c", command]];
+/** The Windows variable naming the command interpreter (not ours to declare). */
+const COMSPEC_VARIABLE = "ComSpec";
+
+export type ShellInvocation = {
+  file: string;
+  args: string[];
+  /** Pass `args` to the process exactly as given (Windows only). */
+  windowsVerbatimArguments: boolean;
+};
+
+/**
+ * How the user's command line is handed to their shell.
+ *
+ * POSIX: `sh -c <command>`.
+ *
+ * Windows: `cmd.exe /d /s /c "<command>"`, with the arguments passed
+ * verbatim. This is what Node's own `shell: true` does, and it is the only
+ * form that keeps a command which itself starts with a quoted path
+ * (`"C:\Program Files\nodejs\node.exe" server.js`) intact: with `/s`, cmd
+ * strips exactly the outer pair of quotes and runs the rest as typed. Left
+ * to Node's default argument quoting, the inner quotes are backslash-escaped,
+ * which cmd.exe does not understand ("'\"C:\...\node.exe\"' is not
+ * recognized as an internal or external command").
+ */
+export function shellInvocation(
+  command: string,
+  platform: NodeJS.Platform = process.platform,
+  comspec: string | undefined = process.env[COMSPEC_VARIABLE],
+): ShellInvocation {
+  if (platform === "win32") {
+    return {
+      file: comspec || "cmd.exe",
+      args: ["/d", "/s", "/c", `"${command}"`],
+      windowsVerbatimArguments: true,
+    };
+  }
+  return {
+    file: "sh",
+    args: ["-c", command],
+    windowsVerbatimArguments: false,
+  };
 }
 
 /** The last non-empty lines of a log, for a one-line detail. */
@@ -90,12 +127,13 @@ export function createStdioTransport(
   command: string,
   options: { timeoutMs?: number; cwd?: string } = {},
 ): McpTransport {
-  const [file, args] = shellCommand(command);
-  const child = spawn(file, args, {
+  const shell = shellInvocation(command);
+  const child = spawn(shell.file, shell.args, {
     cwd: options.cwd,
     env: process.env,
     stdio: ["pipe", "pipe", "pipe"],
     detached: process.platform !== "win32",
+    windowsVerbatimArguments: shell.windowsVerbatimArguments,
   });
   const pending = new Map<number, Pending>();
   let nextId = 1;
