@@ -80,10 +80,13 @@ function metadataFromManifest(manifest: MarketMcpManifest) {
     providerName: manifest.providerName,
     homepageUrl: manifest.homepageUrl,
     iconUrl: manifest.iconUrl,
+    iconSource: manifest.iconSource,
     license: manifest.license,
     language: manifest.language,
     toolsCount: manifest.tools.length,
     lastIndexedAt: manifest.lastIndexedAt ?? new Date().toISOString(),
+    // Promoted so the listing can rank by `publisher.endpointMatch` in SQL.
+    publisher: manifest.publisher,
   };
 }
 
@@ -213,6 +216,44 @@ export async function findStoredEndpointProbes(
  * registry entry) call this; they differ only in origin/source/owner and the
  * provenance blob.
  */
+/**
+ * The stored provenance the icon chain reads for each version: the server's
+ * self-description (`selfDescription`, W1), the GitHub MCP Registry match
+ * (`githubRegistry`, W5) and the cached favicon outcome (`iconProbe`). Each
+ * is absent until written.
+ */
+export async function findStoredIconProvenance(
+  versionIds: string[],
+): Promise<
+  Map<
+    string,
+    { selfDescription?: unknown; githubRegistry?: unknown; iconProbe?: unknown }
+  >
+> {
+  if (versionIds.length === 0) {
+    return new Map();
+  }
+  const rows = await db
+    .select({
+      id: mcpServerVersions.id,
+      selfDescription: sql<unknown>`${mcpServerVersions.provenanceJson} -> 'selfDescription'`,
+      githubRegistry: sql<unknown>`${mcpServerVersions.provenanceJson} -> 'githubRegistry'`,
+      iconProbe: sql<unknown>`${mcpServerVersions.provenanceJson} -> 'iconProbe'`,
+    })
+    .from(mcpServerVersions)
+    .where(inArray(mcpServerVersions.id, versionIds));
+  return new Map(
+    rows.map((row) => [
+      row.id,
+      {
+        selfDescription: row.selfDescription ?? undefined,
+        githubRegistry: row.githubRegistry ?? undefined,
+        iconProbe: row.iconProbe ?? undefined,
+      },
+    ]),
+  );
+}
+
 export async function upsertMarketMcp(input: {
   manifest: MarketMcpManifest;
   status: McpServerStatus;

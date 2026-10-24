@@ -434,7 +434,13 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
         <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_320px] lg:grid-rows-[max-content_1fr] lg:items-start">
           <div className="order-1 min-w-0 lg:order-none lg:col-start-1 lg:row-start-1">
             <div className="flex items-start gap-4">
-              <McpIcon iconUrl={item.iconUrl} size="lg" trusted={trusted} />
+              <McpIcon
+                iconSource={item.iconSource}
+                iconUrl={item.iconUrl}
+                name={item.name}
+                size="lg"
+                trusted={trusted}
+              />
               <div className="min-w-0">
                 <h1 className="text-4xl font-semibold leading-tight tracking-tight sm:text-5xl">
                   {item.name}
@@ -443,6 +449,11 @@ export default async function PublicMcpDetailPage({ params }: PageProps) {
                   {providerName ? (
                     <span className="font-medium text-zinc-700 dark:text-zinc-300">
                       {providerName}
+                    </span>
+                  ) : null}
+                  {item.publisher ? (
+                    <span data-publisher-domain={item.publisher.domain}>
+                      {t("publishedBy", { domain: item.publisher.domain })}
                     </span>
                   ) : null}
                   <span>v{version.version}</span>

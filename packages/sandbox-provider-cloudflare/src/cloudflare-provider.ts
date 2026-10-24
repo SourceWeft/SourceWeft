@@ -4,6 +4,7 @@ import {
   isSandboxInstanceMissingError,
   redactSandboxText,
 } from "@sourceweft/builtin-tool-sandbox";
+import { randomUUID } from "node:crypto";
 import type { ExecuteResponse } from "deepagents";
 import type {
   SandboxProvider,
@@ -24,7 +25,10 @@ import type {
  *   `/workspace/.sourceweft-sandbox-id` (written at create). A missing or
  *   mismatched stamp — including a container that slept and woke without its
  *   filesystem — surfaces as SANDBOX_NOT_FOUND_OR_EXPIRED so the manager
- *   expires the DB row and recreates.
+ *   expires the DB row and recreates. The stamp is checked at acquisition
+ *   (get/health), inside every exec before the command runs, and behind every
+ *   download miss (see EXEC_STAMP_GUARD_EXIT_CODE), so a container the SDK
+ *   restarts between two commands cannot serve a command silently.
  * - `cwd` is wrapped into the shell line (`cd <cwd> && …`) because the stock
  *   bridge exec endpoint takes only argv + timeout.
  */
@@ -364,6 +368,26 @@ const HEARTBEAT_INTERVAL_SECONDS = 45;
 export const EXEC_HEARTBEAT_MARKER = "[sourceweft-heartbeat]";
 
 /*
+ * Mid-run identity guard (Issue #323 follow-up, observed 2026-10-23). The
+ * `@cloudflare/containers` runtime restarts a container whose status probe
+ * fails transiently (the Worker logs "Failed to check container status,
+ * assuming stopped"), and the fresh container behind the same name has an
+ * empty /workspace and /skills. The acquisition-time stamp check cannot see
+ * a swap that happens between two commands, so every exec re-reads the stamp
+ * in the same shell line BEFORE the command: on a mismatch it prints a
+ * nonce-tagged marker and exits with EXEC_STAMP_GUARD_EXIT_CODE instead of
+ * running, and the client maps exactly that outcome (that exit code and only
+ * the marker as output) to SANDBOX_NOT_FOUND_OR_EXPIRED. No extra round trip;
+ * the per-attempt nonce keeps a command that merely prints the marker from
+ * being mistaken for a replaced container, and the marker is control-character
+ * delimited like the heartbeat's. Downloads check the stamp only behind a miss
+ * (a fresh container has no files), see `downloadFile`.
+ */
+export const EXEC_STAMP_GUARD_EXIT_CODE = 203;
+export const EXEC_STAMP_MISMATCH_MARKER =
+  "\u001f[sourceweft-stamp-mismatch]\u001f";
+
+/*
  * Readiness probe run at the end of `createSandbox` (S1 of the cold-start
  * recovery plan, Issue #323). Live-measured 2026-10-18: a cold Cloudflare
  * create takes 21–70 s and the first command then sat at 56–77 s or timed out,
@@ -657,13 +681,17 @@ export class CloudflareSandboxProvider implements SandboxProvider {
       const base = input.cwd
         ? `cd ${shellQuote(input.cwd)} && ${input.command}`
         : input.command;
-      const command =
+      const guarded =
         input.timeoutMs > HEARTBEAT_THRESHOLD_MS
           ? // The loop writes the marker through fd 3 (a copy of stderr) while its `sleep` children
             // hold no exec pipes at all: once the loop is killed the orphaned sleep must not keep the
             // bridge's output stream open, which used to cost up to one heartbeat interval per command.
             `( while true; do sleep ${HEARTBEAT_INTERVAL_SECONDS} 3>&-; printf '%s\\n' ${shellQuote(EXEC_HEARTBEAT_MARKER)} >&3; done ) 3>&2 >/dev/null 2>&1 </dev/null & __sw_hb=$!; ( ${base} ); __sw_rc=$?; kill "$__sw_hb" 2>/dev/null; exit "$__sw_rc"`
           : base;
+      // Identity guard first (see EXEC_STAMP_GUARD_EXIT_CODE): a replaced
+      // container exits here, before `cd`, the heartbeat or the command.
+      const guardOutput = `${EXEC_STAMP_MISMATCH_MARKER}${randomUUID()}`;
+      const command = `[ "$(cat ${shellQuote(SOURCEWEFT_SANDBOX_STAMP_PATH)} 2>/dev/null)" = ${shellQuote(input.providerSandboxId)} ] || { printf '%s' ${shellQuote(guardOutput)}; exit ${EXEC_STAMP_GUARD_EXIT_CODE}; }; ${guarded}`;
       const controller = new AbortController();
       const forwardAbort = () => controller.abort(input.signal?.reason);
       if (input.signal?.aborted) {
@@ -723,6 +751,13 @@ export class CloudflareSandboxProvider implements SandboxProvider {
         if (streamError) {
           throw new Error(streamError);
         }
+        if (exitCode === EXEC_STAMP_GUARD_EXIT_CODE && output === guardOutput) {
+          throw new SandboxProviderError(
+            SANDBOX_PROVIDER_ERROR_CODES.instanceMissing,
+            "SANDBOX_NOT_FOUND_OR_EXPIRED: the sandbox identity stamp was missing or did not match when the command started; the container was replaced and the command did not run.",
+            "execute",
+          );
+        }
         return {
           output: truncated ? `${output}\n\n[output truncated]` : output,
           exitCode,
@@ -764,12 +799,31 @@ export class CloudflareSandboxProvider implements SandboxProvider {
   }) {
     return this.withProviderErrorMapping("download", async () => {
       const startedAt = this.clock.now();
-      const response = await this.request(
-        "download",
-        "GET",
-        this.filePath(input.providerSandboxId, input.sandboxPath),
-        { signal: input.signal },
-      );
+      let response: Response;
+      try {
+        response = await this.request(
+          "download",
+          "GET",
+          this.filePath(input.providerSandboxId, input.sandboxPath),
+          { signal: input.signal },
+        );
+      } catch (error) {
+        if (
+          error instanceof CloudflareBridgeHttpError &&
+          error.status === 404
+        ) {
+          // A container the SDK replaced has no files at all, so a miss is
+          // only a missing FILE once the stamp proves the container is still
+          // the one this id was created for. Checked only on the miss path:
+          // a hit costs nothing extra, and a fresh container cannot hit.
+          await this.verifyStamp(
+            input.providerSandboxId,
+            "unavailable",
+            input.signal,
+          );
+        }
+        throw error;
+      }
       const content = Buffer.from(await response.arrayBuffer());
       if (content.byteLength !== 0) return content;
       // The stock bridge can turn a missing-file stream into HTTP 200 + zero
@@ -986,6 +1040,7 @@ export class CloudflareSandboxProvider implements SandboxProvider {
   private async verifyStamp(
     providerSandboxId: string,
     retry: UnavailableRetryPolicy = "unavailable",
+    signal?: AbortSignal,
   ) {
     let response: Response;
     try {
@@ -993,7 +1048,7 @@ export class CloudflareSandboxProvider implements SandboxProvider {
         "get",
         "GET",
         this.filePath(providerSandboxId, SOURCEWEFT_SANDBOX_STAMP_PATH),
-        { retry },
+        { retry, signal },
       );
     } catch (error) {
       // A missing stamp proves identity loss; a generic 400 does not.

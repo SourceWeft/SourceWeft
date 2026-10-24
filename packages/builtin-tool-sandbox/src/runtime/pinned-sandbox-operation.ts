@@ -1,4 +1,7 @@
-import { SandboxInstanceChangedError } from "./errors";
+import {
+  isSandboxInstanceMissingError,
+  SandboxInstanceChangedError,
+} from "./errors";
 import { randomUUID } from "node:crypto";
 import type { SandboxManager } from "./sandbox-manager";
 import type {
@@ -151,7 +154,20 @@ export async function runPinnedSandboxOperation<T>(input: {
     ) {
       return cancelAndThrow("timed_out");
     }
-    if (outcome.kind === "error") throw outcome.error;
+    if (outcome.kind === "error") {
+      if (isSandboxInstanceMissingError(outcome.error)) {
+        // The provider replaced the container underneath the run; the
+        // manager fences and expires this generation and says whether a
+        // replacement follows (SANDBOX_REPLACED) or the run fails closed.
+        const verdict = await input.manager.reportLostGeneration(
+          input.sandbox,
+          input.context,
+          outcome.error,
+        );
+        if (verdict) throw verdict;
+      }
+      throw outcome.error;
+    }
     if (outcome.kind !== "result") {
       throw new Error(input.invalidStateMessage);
     }
