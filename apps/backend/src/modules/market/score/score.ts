@@ -58,6 +58,10 @@ type McpScoreFacts = {
   hasRemoteEndpoint: boolean;
   /** The endpoint answered an unauthenticated `initialize` at the last probe. */
   listableAnonymously: boolean;
+  /** A stored probe classified the endpoint (open, credential or OAuth), whatever its age. */
+  probeClassified: boolean;
+  /** The registry entry declares how to authenticate (a type, a method or a header). */
+  authMethodDeclared: boolean;
   /** A stdio package the sandbox started and listed (no remote owns the proof). */
   validatedStdioPackage: boolean;
   probeFresh: boolean;
@@ -98,7 +102,12 @@ export const MCP_SCORE_RULES: readonly McpScoreRule[] = [
     key: "authDeclared",
     weight: 10,
     requiredWhen: (facts) => facts.hasRemoteEndpoint,
-    met: (facts) => facts.authPostureKnown,
+    // A posture alone says little: federation writes one for every remote,
+    // "none" included, so it counts only when something backs it — a probe
+    // that classified the endpoint, or headers/OAuth the entry declares.
+    met: (facts) =>
+      facts.authPostureKnown &&
+      (facts.probeClassified || facts.authMethodDeclared),
   },
   {
     key: "hasTools",
@@ -179,11 +188,17 @@ function isHttpUrl(value: unknown): boolean {
   }
 }
 
-/** True when `value` is an ISO time no older than the freshness window at `now`. */
+/**
+ * True when `value` is an ISO time inside the freshness window at `now`: the
+ * same `0 ≤ age < 30 days` the probe writer uses to reuse a stored probe, so
+ * a probe the sync would redo no longer counts, and a time in the future (a
+ * clock gone wrong) never does.
+ */
 function fresh(value: unknown, now: Date): boolean {
   const at = typeof value === "string" ? Date.parse(value) : Number.NaN;
   if (!Number.isFinite(at)) return false;
-  return now.getTime() - at <= MCP_SCORE_FRESHNESS_MS;
+  const age = now.getTime() - at;
+  return age >= 0 && age < MCP_SCORE_FRESHNESS_MS;
 }
 
 const PROBE_RESULTS = new Set(["open", "credential", "oauth"]);
@@ -207,28 +222,36 @@ export function mcpScoreFacts(source: McpScoreSource): McpScoreFacts {
 
   const hasRemoteEndpoint = isHttpUrl(manifest.endpointUrl);
   const probeResult = text(authProbe?.result);
-  const probeFresh =
-    probeResult !== null &&
-    PROBE_RESULTS.has(probeResult) &&
-    fresh(authProbe?.probedAt, now);
+  const probeClassified =
+    probeResult !== null && PROBE_RESULTS.has(probeResult);
+  const probeFresh = probeClassified && fresh(authProbe?.probedAt, now);
   const validationFresh = fresh(provenance.validatedAt, now);
+  // The description only: federation fills `summary` with a placeholder
+  // ("MCP server <identifier> from the MCP registry.") that is long enough
+  // for nearly every identifier, so it would pass an entry that says nothing.
   const description = text(manifest.description) ?? "";
-  const summary = text(manifest.summary) ?? "";
+  const authType = text(auth?.type);
+  const authMethods = Array.isArray(auth?.methods) ? auth.methods : [];
+  const allowedHeaderNames = Array.isArray(auth?.allowedHeaderNames)
+    ? auth.allowedHeaderNames
+    : [];
   const iconSource = text(source.iconSource) ?? text(manifest.iconSource);
 
   return {
     hasRemoteEndpoint,
     listableAnonymously: hasRemoteEndpoint && probeResult === "open",
+    probeClassified,
+    authMethodDeclared:
+      (authType !== null && authType !== "none") ||
+      authMethods.length > 0 ||
+      allowedHeaderNames.length > 0,
     validatedStdioPackage:
       !hasRemoteEndpoint && text(provenance.validatedAt) !== null,
     probeFresh,
     validationFresh,
     authPostureKnown: AUTH_POSTURES.has(text(auth?.posture) ?? ""),
     toolCount: tools.length,
-    descriptionChars: Math.max(
-      visibleChars(description),
-      visibleChars(summary),
-    ),
+    descriptionChars: visibleChars(description),
     hasAiOverview: source.hasAiOverview === true,
     // An owner-written description arrives with owner claims (W7).
     hasOwnerDescription: false,

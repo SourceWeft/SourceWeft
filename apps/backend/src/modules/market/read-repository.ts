@@ -815,7 +815,10 @@ export async function findMcp(
             manifestJson: latest.manifestJson,
             provenanceJson: latest.provenanceJson,
             readmeStatus: readme?.readmeStatus ?? null,
-            hasAiOverview: aiOverview !== null,
+            // Any visible overview language, not only the one asked for.
+            hasAiOverview:
+              (latest ? (overviewLocales?.get(latest.id)?.length ?? 0) : 0) >
+              0,
             iconUrl: item.iconUrl,
             iconSource: item.iconSource,
             publisher: item.publisher,

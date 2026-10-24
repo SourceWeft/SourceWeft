@@ -111,6 +111,35 @@ test("reachable: a fresh probe with a classified answer, or a fresh validation",
     "a probe without a time",
   );
   assert.equal(
+    item(
+      remote({}, { authProbe: { result: "open", probedAt: "2026-09-24T12:00:00.001Z" } }),
+      "reachable",
+    ).met,
+    true,
+    "just under 30 days, as the probe writer reuses it",
+  );
+  assert.equal(
+    item(
+      remote({}, { authProbe: { result: "open", probedAt: "2026-09-24T12:00:00.000Z" } }),
+      "reachable",
+    ).met,
+    false,
+    "exactly 30 days: the sync would probe again",
+  );
+  assert.equal(
+    item(
+      remote({}, { authProbe: { result: "open", probedAt: "2026-10-25T00:00:00.000Z" } }),
+      "reachable",
+    ).met,
+    false,
+    "a time in the future",
+  );
+  assert.equal(
+    item(remote({}, { validatedAt: "2026-10-25T00:00:00.000Z" }), "reachable").met,
+    false,
+    "a validation in the future",
+  );
+  assert.equal(
     item(remote({}, { authProbe: { result: "down", probedAt: FRESH } }), "reachable")
       .met,
     false,
@@ -143,20 +172,56 @@ test("reachable and authDeclared are required for a remote endpoint only", () =>
 
 // --- authDeclared -------------------------------------------------------------
 
-test("authDeclared: any known posture; absent, unknown or malformed is unmet", () => {
+test("authDeclared: a known posture backed by a classified probe or a declared method", () => {
+  const classified = { authProbe: { result: "credential", probedAt: STALE } };
+  for (const posture of ["none", "optional", "required"]) {
+    assert.equal(
+      item(remote({ auth: { type: "none", posture } }, classified), "authDeclared").met,
+      true,
+      `${posture} with a probe, however old`,
+    );
+  }
+  assert.equal(
+    item(
+      remote({ auth: { type: "none", posture: "optional", methods: [{ type: "header", name: "X-Key" }] } }),
+      "authDeclared",
+    ).met,
+    true,
+    "a declared credential header",
+  );
+  assert.equal(
+    item(
+      remote({ auth: { type: "none", posture: "required", allowedHeaderNames: ["X-Key"] } }),
+      "authDeclared",
+    ).met,
+    true,
+    "declared header names",
+  );
+  assert.equal(
+    item(remote({ auth: { type: "oauth", required: true, posture: "required" } }), "authDeclared").met,
+    true,
+    "a declared auth type",
+  );
+  // Federation writes a posture for every remote, so one on its own is the
+  // default, not a declaration.
   for (const posture of ["none", "optional", "required"]) {
     assert.equal(
       item(remote({ auth: { type: "none", posture } }), "authDeclared").met,
-      true,
-      posture,
+      false,
+      `${posture} alone`,
     );
   }
-  assert.equal(item(remote({ auth: { type: "oauth" } }), "authDeclared").met, false);
   assert.equal(
-    item(remote({ auth: { type: "oauth", posture: "maybe" } }), "authDeclared").met,
+    item(remote({ auth: { type: "oauth" } }, classified), "authDeclared").met,
     false,
+    "no posture",
   );
-  assert.equal(item(remote({ auth: "oauth" }), "authDeclared").met, false);
+  assert.equal(
+    item(remote({ auth: { type: "oauth", posture: "maybe" } }, classified), "authDeclared").met,
+    false,
+    "an unknown posture",
+  );
+  assert.equal(item(remote({ auth: "oauth" }, classified), "authDeclared").met, false);
   assert.equal(item(remote(), "authDeclared").met, false);
 });
 
@@ -249,9 +314,19 @@ test("hasDescription: 40 visible characters, an AI overview, and nothing else", 
     "whitespace does not count",
   );
   assert.equal(
-    item(remote({ summary: "a".repeat(40) }), "hasDescription").met,
-    true,
-    "the summary counts when the description is absent",
+    item(
+      remote({
+        description: undefined,
+        summary: "MCP server com.example/mcp from the MCP registry.",
+      }),
+      "hasDescription",
+    ).met,
+    false,
+    "the summary never counts: federation fills it with a placeholder",
+  );
+  assert.equal(
+    item(remote({ description: undefined, summary: "a".repeat(80) }), "hasDescription").met,
+    false,
   );
   assert.equal(
     item(remote({ description: "short" }, {}, { hasAiOverview: true }), "hasDescription")

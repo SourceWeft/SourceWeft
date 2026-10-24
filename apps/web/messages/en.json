@@ -450,7 +450,7 @@
         },
         "authDeclared": {
           "label": "Auth declared",
-          "hint": "Declare in the registry entry whether the server needs a credential (headers or OAuth)."
+          "hint": "Declare the credential headers in the registry entry, or keep the endpoint answering the probe so its auth can be classified."
         },
         "hasTools": {
           "label": "Tools listed",
