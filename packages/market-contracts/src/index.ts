@@ -116,6 +116,22 @@ export const marketMcpOwnerLayerSchema = z.object({
 // for unattended execution (their risk is always `unknown`).
 export const MARKET_MCP_TOOL_SOURCE_OWNER_SUBMITTED = "owner-submitted";
 
+/**
+ * Where an MCP server's logo came from, first hit of the chain: the registry's
+ * own `icons`, the server's `initialize` answer (`serverInfo.icons`), the
+ * GitHub avatar of the namespace owner or the declared repository's owner, the
+ * GitHub MCP Registry's owner avatar, the namespace domain's favicon fetched
+ * at sync and served from our own storage, or none (a monogram placeholder).
+ */
+export const marketMcpIconSourceSchema = z.enum([
+  "registry",
+  "server-info",
+  "github-avatar",
+  "github-registry",
+  "favicon",
+  "placeholder",
+]);
+
 export const marketMcpToolManifestSchema = z.object({
   name: z.string(),
   title: z.string().optional(),
@@ -137,6 +153,8 @@ export const marketMcpManifestSchema = z.object({
   providerName: z.string().optional(),
   homepageUrl: z.string().url().optional(),
   iconUrl: z.string().url().optional(),
+  // Absent on manifests written before the icon chain existed.
+  iconSource: marketMcpIconSourceSchema.optional(),
   license: z.string().optional(),
   language: z.string().optional(),
   transport: mcpTransportSchema,
@@ -229,6 +247,9 @@ export const marketItemSummarySchema = z.object({
   providerName: z.string().nullable().default(null),
   homepageUrl: z.string().url().nullable().default(null),
   iconUrl: z.string().url().nullable().default(null),
+  // Where `iconUrl` came from; `placeholder` when it is null. Optional for
+  // answers from before it existed.
+  iconSource: marketMcpIconSourceSchema.optional(),
   sourceUrl: z.string().url().nullable().default(null),
   repoUrl: z.string().url().nullable().default(null),
   license: z.string().nullable().default(null),
@@ -381,6 +402,7 @@ export type MarketItemVisibility = z.infer<typeof marketItemVisibilitySchema>;
 export type McpTransport = z.infer<typeof mcpTransportSchema>;
 export type McpAuthType = z.infer<typeof mcpAuthTypeSchema>;
 export type McpAuthPosture = z.infer<typeof mcpAuthPostureSchema>;
+export type MarketMcpIconSource = z.infer<typeof marketMcpIconSourceSchema>;
 export type MarketMcpAuthMethod = z.infer<typeof marketMcpAuthMethodSchema>;
 export type McpRiskLevel = z.infer<typeof mcpRiskLevelSchema>;
 export type McpRuntime = z.infer<typeof mcpRuntimeSchema>;

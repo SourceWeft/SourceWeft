@@ -36,6 +36,24 @@ export type McpOverviewSourceRow = {
   ownerOverrides?: McpOwnerOverridesSource | null;
 };
 
+/**
+ * What the server said about itself when the auth probe initialized it
+ * (`provenance.selfDescription.instructions`, #367 W1): its `instructions`
+ * text, or null when the version has none. Read tolerantly: the field is
+ * absent on versions synced before it existed.
+ */
+export function storedServerInstructions(
+  provenanceJson: unknown,
+): string | null {
+  if (!isRecord(provenanceJson)) return null;
+  const selfDescription = provenanceJson.selfDescription;
+  if (!isRecord(selfDescription)) return null;
+  const instructions = selfDescription.instructions;
+  return typeof instructions === "string" && instructions.trim()
+    ? instructions
+    : null;
+}
+
 /** The stored manifest, or null when it no longer parses. */
 export function storedManifest(
   value: unknown,
@@ -76,9 +94,9 @@ export function readableReadme(row: {
 
 /**
  * The overview source of a version: its manifest, the author's description
- * (the registry's, for a federated entry), the README when it was fetched
- * (`readme_status = 'ok'`), and the kept packages and remotes. Null when the
- * stored manifest no longer parses.
+ * (the registry's, for a federated entry), the server's own instructions,
+ * the README when it was fetched (`readme_status = 'ok'`), and the kept
+ * packages and remotes. Null when the stored manifest no longer parses.
  */
 export function mcpOverviewSource(
   row: McpOverviewSourceRow & { readmeMd: string | null },
@@ -96,6 +114,7 @@ export function mcpOverviewSource(
     // made-up sentence when the registry has no description.
     registryDescription: manifest.description ?? null,
     readme,
+    instructions: storedServerInstructions(row.provenanceJson),
     registryServer: storedRegistryServer(row.provenanceJson),
   };
 }
@@ -126,6 +145,7 @@ export function mcpOverviewFingerprint(
     readme: readableReadme(row)
       ? { markdown: "", sha256: row.readmeSha256! }
       : null,
+    instructions: storedServerInstructions(row.provenanceJson),
     registryServer: storedRegistryServer(row.provenanceJson),
   }).inputSha256;
 }

@@ -19,9 +19,12 @@ import {
   listMcpEndpointTools,
 } from "../../shared/mcp-tool-listing";
 import { createControlledFetch } from "../../shared/security/controlled-fetch";
+import { firstHttpsIconSrc, type ResolvedIcon } from "./icons/chain";
+import { registryIcons, type IconTarget } from "./icons/registry-icons";
 import { mcpServerVersionId } from "./ingest/plan";
 import {
   findStoredEndpointProbes,
+  findStoredIconProvenance,
   upsertMarketMcp,
   type StoredEndpointProbes,
 } from "./ingest/repository";
@@ -149,21 +152,9 @@ function displayName(server: RegistryServer, identifier: string) {
   );
 }
 
+/** The registry's first usable icon: the same rule as the logo chain's step 1. */
 function registryIconUrl(server: RegistryServer) {
-  for (const icon of server.icons ?? []) {
-    if (!icon || typeof icon !== "object") continue;
-    const src = (icon as { src?: unknown }).src;
-    if (typeof src !== "string") continue;
-    try {
-      const url = new URL(src);
-      if (url.protocol === "https:") {
-        return url.toString();
-      }
-    } catch {
-      // Ignore malformed upstream icon entries and try the next candidate.
-    }
-  }
-  return undefined;
+  return firstHttpsIconSrc(server.icons);
 }
 
 /**
@@ -335,6 +326,9 @@ export function mapRegistryServerToManifest(
   options: {
     verified: boolean;
     authProbe?: McpEndpointAuthProbe;
+    // The logo chain's answer for this entry (`icons/`); without it the
+    // manifest keeps the registry icon alone and no source.
+    icon?: ResolvedIcon;
     /** What the endpoint listed to an anonymous client; none when unlisted. */
     tools?: MarketMcpToolManifest[];
   } = {
@@ -377,7 +371,8 @@ export function mapRegistryServerToManifest(
     description: server.description?.trim() || undefined,
     providerName: providerFromIdentifier(identifier),
     homepageUrl: server.websiteUrl,
-    iconUrl: registryIconUrl(server),
+    iconUrl: options.icon ? options.icon.iconUrl : registryIconUrl(server),
+    iconSource: options.icon?.iconSource,
     transport,
     endpointUrl: hasRemote ? remote?.url : undefined,
     desktopOnly: !hasRemote,
@@ -805,6 +800,12 @@ type IngestCounters = {
   authProbeFailed: number;
   toolsListed: number;
   toolsListFailed: number;
+  /** Favicon domains fetched, hits among them, fetches that failed. */
+  faviconFetched: number;
+  faviconHits: number;
+  faviconFailed: number;
+  /** Entries whose favicon step did not run (no public storage, or stopped). */
+  faviconSkipped: number;
 };
 
 /**
@@ -824,6 +825,10 @@ async function ingestRegistryEntries(
     authProbeFailed: 0,
     toolsListed: 0,
     toolsListFailed: 0,
+    faviconFetched: 0,
+    faviconHits: 0,
+    faviconFailed: 0,
+    faviconSkipped: 0,
   };
   const now = new Date();
   const targets = endpointTargets(
@@ -843,6 +848,14 @@ async function ingestRegistryEntries(
   );
   counters.toolsListed = toolListings.listed;
   counters.toolsListFailed = toolListings.failed;
+  const icons = await registryEntryIcons(
+    entries.filter(isLatestEntry).slice(0, limit),
+    now,
+  );
+  counters.faviconFetched = icons.faviconFetched;
+  counters.faviconHits = icons.faviconHits;
+  counters.faviconFailed = icons.faviconFailed;
+  counters.faviconSkipped = icons.faviconSkipped;
   for (const entry of entries) {
     if (counters.ingested >= limit) {
       break;
@@ -852,11 +865,19 @@ async function ingestRegistryEntries(
       continue;
     }
     const authProbe = authProbes.probes.get(entry);
+    const server: RegistryServer = entry.server ?? entry;
+    const icon = icons.icons.get(
+      mcpServerVersionId(
+        server.name?.trim() ?? "",
+        server.version?.trim() ?? "",
+      ),
+    );
     const toolsListing = toolListings.listings.get(entry);
     const manifest = mapRegistryServerToManifest(entry, {
       verified: input.verified,
       authProbe: authProbe?.result,
       tools: toolsListing?.tools,
+      icon,
     });
     if (!manifest) {
       counters.skipped += 1;
@@ -898,6 +919,9 @@ async function ingestRegistryEntries(
                   toolsListing.listedAt,
                 )
               : undefined,
+          // The namespace domain's favicon fetch and when it was made, kept
+          // so syncs reuse a hit and retry a miss only after 30 days.
+          iconProbe: icon?.iconProbe,
         },
       });
       counters.ingested += 1;
@@ -926,6 +950,34 @@ export type RegistryIngestResult = IngestCounters & {
 };
 
 /**
+ * The logo chain of each entry (`icons/registry-icons.ts`), keyed by version
+ * id: steps 1–3 from the entry and the version's stored provenance, then a
+ * favicon fetch for the namespace domain when they found nothing and no
+ * outcome is cached for it.
+ */
+async function registryEntryIcons(entries: RegistryEntry[], now: Date) {
+  const targets: IconTarget[] = entries.flatMap((entry) => {
+    const server: RegistryServer = entry.server ?? entry;
+    const identifier = server.name?.trim();
+    const version = server.version?.trim();
+    if (!identifier || !version) return [];
+    const repositoryUrl = server.repository?.url?.trim();
+    return [
+      {
+        key: mcpServerVersionId(identifier, version),
+        identifier,
+        registryIconUrl: registryIconUrl(server),
+        repositoryUrl: repositoryUrl || undefined,
+      },
+    ];
+  });
+  return registryIcons(targets, {
+    now,
+    stored: await findStoredIconProvenance(targets.map((t) => t.key)),
+  });
+}
+
+/**
  * Pull every server from an upstream registry and upsert it into the catalog as
  * origin=upstream. Returns counts for observability. `maxServers` bounds a run;
  * `cursor` resumes a partial one from where it stopped.
@@ -949,6 +1001,10 @@ export async function ingestFromRegistry(input: {
   let authProbeFailed = 0;
   let toolsListed = 0;
   let toolsListFailed = 0;
+  let faviconFetched = 0;
+  let faviconHits = 0;
+  let faviconFailed = 0;
+  let faviconSkipped = 0;
   let partial = false;
   let error: string | undefined;
 
@@ -994,6 +1050,10 @@ export async function ingestFromRegistry(input: {
     authProbeFailed += counters.authProbeFailed;
     toolsListed += counters.toolsListed;
     toolsListFailed += counters.toolsListFailed;
+    faviconFetched += counters.faviconFetched;
+    faviconHits += counters.faviconHits;
+    faviconFailed += counters.faviconFailed;
+    faviconSkipped += counters.faviconSkipped;
     cursor = page.metadata?.nextCursor ?? undefined;
     if (!cursor) {
       break;
@@ -1009,6 +1069,10 @@ export async function ingestFromRegistry(input: {
     authProbeFailed,
     toolsListed,
     toolsListFailed,
+    faviconFetched,
+    faviconHits,
+    faviconFailed,
+    faviconSkipped,
     partial,
   });
   return {
@@ -1019,6 +1083,10 @@ export async function ingestFromRegistry(input: {
     authProbeFailed,
     toolsListed,
     toolsListFailed,
+    faviconFetched,
+    faviconHits,
+    faviconFailed,
+    faviconSkipped,
     partial,
     error,
     nextCursor,
@@ -1059,6 +1127,10 @@ export async function federateRegistryEntry(input: {
       authProbeFailed: 0,
       toolsListed: 0,
       toolsListFailed: 0,
+      faviconFetched: 0,
+      faviconHits: 0,
+      faviconFailed: 0,
+      faviconSkipped: 0,
     };
   }
   const counters = await ingestRegistryEntries(entries.slice(0, 1), source, 1);
@@ -1090,6 +1162,10 @@ async function ingestSourceWithResume(
     authProbeFailed: 0,
     toolsListed: 0,
     toolsListFailed: 0,
+    faviconFetched: 0,
+    faviconHits: 0,
+    faviconFailed: 0,
+    faviconSkipped: 0,
   };
   let cursor: string | undefined;
   let resumes = 0;
@@ -1111,6 +1187,10 @@ async function ingestSourceWithResume(
     total.authProbeFailed += run.authProbeFailed;
     total.toolsListed += run.toolsListed;
     total.toolsListFailed += run.toolsListFailed;
+    total.faviconFetched += run.faviconFetched;
+    total.faviconHits += run.faviconHits;
+    total.faviconFailed += run.faviconFailed;
+    total.faviconSkipped += run.faviconSkipped;
     if (!run.partial || resumes >= resume.maxResumes) {
       return {
         ...total,

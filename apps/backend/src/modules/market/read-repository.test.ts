@@ -8,6 +8,7 @@ import {
   findMcp,
   findMcpVersion,
   countMcpByCategory,
+  itemIcon,
   listMcp,
   parseMcpCategoryFilter,
 } from "./read-repository";
@@ -115,4 +116,65 @@ test("multiple categories use an EXISTS union before database pagination", async
   } finally {
     select.mockRestore();
   }
+});
+
+test("issue #367: list items carry the manifest's icon source, or derive one for older manifests", () => {
+  // A manifest the icon chain wrote: both fields pass through.
+  assert.deepEqual(
+    itemIcon({
+      meta: {
+        iconUrl: "https://assets.test/market/mcp-icons/notion.com/a.png",
+        iconSource: "favicon",
+      },
+      repoUrl: null,
+      identifier: "com.notion/mcp",
+    }),
+    {
+      iconUrl: "https://assets.test/market/mcp-icons/notion.com/a.png",
+      iconSource: "favicon",
+    },
+  );
+  assert.deepEqual(
+    itemIcon({
+      meta: { iconSource: "placeholder" },
+      repoUrl: "https://github.com/makenotion/notion-next",
+      identifier: "com.notion/mcp",
+    }),
+    { iconUrl: null, iconSource: "placeholder" },
+  );
+  // Older manifests: a registry icon, else the GitHub avatar, else nothing.
+  assert.deepEqual(
+    itemIcon({
+      meta: { iconUrl: "https://cdn.acme.test/icon.png" },
+      repoUrl: null,
+      identifier: "com.acme/mcp",
+    }),
+    { iconUrl: "https://cdn.acme.test/icon.png", iconSource: "registry" },
+  );
+  assert.deepEqual(
+    itemIcon({ meta: {}, repoUrl: null, identifier: "io.github.acme/server" }),
+    {
+      iconUrl: "https://github.com/acme.png?size=128",
+      iconSource: "github-avatar",
+    },
+  );
+  assert.deepEqual(
+    itemIcon({
+      meta: {},
+      repoUrl: "https://github.com/makenotion/notion-next",
+      identifier: "com.notion/mcp",
+    }),
+    {
+      iconUrl: "https://github.com/makenotion.png?size=128",
+      iconSource: "github-avatar",
+    },
+  );
+  assert.deepEqual(
+    itemIcon({
+      meta: { iconSource: "bogus" },
+      repoUrl: null,
+      identifier: "com.notion/mcp",
+    }),
+    { iconUrl: null, iconSource: "placeholder" },
+  );
 });

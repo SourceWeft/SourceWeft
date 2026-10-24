@@ -14,8 +14,9 @@ import {
 /**
  * What an MCP server's AI overview is written from (design §4.3): the manifest
  * facts that matter to someone deciding whether to install it, the registry
- * description, and the usage-related parts of its README — cleaned, bounded
- * and fingerprinted.
+ * description, the server's own instructions (what it told the auth probe's
+ * `initialize` call; #367 W1), and the usage-related parts of its README —
+ * cleaned, bounded and fingerprinted.
  *
  * All of it is third-party text. ./prompt.ts quotes it to the model as data;
  * this file only selects and shapes it. No database, no model calls.
@@ -36,12 +37,16 @@ export const MCP_OVERVIEW_README_OMISSION_MARKER = "[…]";
 // A line cut to fit the budget is kept only if at least this much of it fits.
 const MIN_PARTIAL_LINE_CHARS = 80;
 
-// Entries with no README and a description shorter than this are skipped.
-export const MCP_OVERVIEW_SKIP_MIN_DESCRIPTION_CHARS = 40;
+// Entries whose text — registry description, server instructions, tool
+// descriptions and usable README together — is shorter than this are skipped.
+export const MCP_OVERVIEW_SKIP_MIN_TEXT_CHARS = 40;
 
 // Caps on the manifest facts, in items or characters.
 export const MCP_OVERVIEW_FACT_LIMITS = {
   descriptionChars: 2_000,
+  // The server's own instructions: a short usage note by design, but some
+  // servers paste a manual.
+  instructionsChars: 4_000,
   tools: 40,
   toolNameChars: 100,
   toolDescriptionChars: 300,
@@ -68,6 +73,13 @@ export type McpOverviewSource = {
   registryDescription: string | null | undefined;
   /** The stored README and the hash it was stored under; null when none. */
   readme: McpOverviewReadmeSource | null;
+  /**
+   * What the server says about itself: the `instructions` of its
+   * `initialize` answer, kept in the version's provenance
+   * (`selfDescription.instructions`, #367 W1). Absent or null when the server
+   * was never asked, or gave none.
+   */
+  instructions?: string | null;
   /**
    * The upstream `server.json` (registry entry or repository file), when the
    * caller has it. `MarketMcpManifest` has no packages or environment
@@ -134,6 +146,8 @@ export type McpReadmeExcerpt = {
 export type McpOverviewInput = {
   facts: McpManifestFacts;
   registryDescription: string | null;
+  /** The server's own instructions, cleaned and bounded; null when none. */
+  instructions: string | null;
   readme: (McpReadmeExcerpt & { sha256: string }) | null;
   inputSha256: string;
 };
@@ -151,6 +165,7 @@ export function buildMcpOverviewInput(
     source.registryServer ?? null,
   );
   const registryDescription = normalizeDescription(source.registryDescription);
+  const instructions = normalizeInstructions(source.instructions);
   const readme = source.readme
     ? {
         sha256: normalizeSha256(source.readme.sha256),
@@ -163,29 +178,46 @@ export function buildMcpOverviewInput(
     readmeSha256: readme?.sha256 ?? null,
     manifestFacts: facts,
     registryDescription,
+    instructions,
   });
-  return { facts, registryDescription, readme, inputSha256 };
+  return { facts, registryDescription, instructions, readme, inputSha256 };
 }
 
 /**
- * Nothing worth describing: no usable README (none stored, or nothing left
- * once badges, markup and boilerplate sections are removed) and a description
- * too short to say what the server does — or nothing in the input the
- * overview's categories could cite as evidence (no numbered passage; see
- * ./passages.ts).
+ * Nothing worth describing: the real text about the server — its registry
+ * description, its own instructions, its tool descriptions and the usable
+ * part of its README (nothing, once badges, markup and boilerplate sections
+ * are removed), counted together — is too short to say what it does; or
+ * nothing in the input the overview's categories could cite as evidence (no
+ * numbered passage; see ./passages.ts).
+ *
+ * Counting the sources together is what lets an open server with a 20-char
+ * description and a page of tool descriptions get an overview (#367 W4).
  */
 export function shouldSkipMcpOverview(input: McpOverviewInput): boolean {
-  const hasReadme = (input.readme?.segments.length ?? 0) > 0;
-  const descriptionChars = Array.from(
-    (input.registryDescription ?? "").trim(),
-  ).length;
-  if (
-    !hasReadme &&
-    descriptionChars < MCP_OVERVIEW_SKIP_MIN_DESCRIPTION_CHARS
-  ) {
+  if (mcpOverviewTextChars(input) < MCP_OVERVIEW_SKIP_MIN_TEXT_CHARS) {
     return true;
   }
   return mcpOverviewPassages(input).length === 0;
+}
+
+/**
+ * How much real text the input has, in characters with whitespace collapsed:
+ * the registry description, the instructions, every tool's description and
+ * the README's selected sections.
+ */
+export function mcpOverviewTextChars(input: McpOverviewInput): number {
+  const texts = [
+    input.registryDescription,
+    input.instructions,
+    ...input.facts.tools.map((tool) => tool.description),
+    ...(input.readme?.segments ?? []),
+  ];
+  return texts.reduce(
+    (total, text) =>
+      total + Array.from((text ?? "").replace(/\s+/g, " ").trim()).length,
+    0,
+  );
 }
 
 /**
@@ -199,6 +231,7 @@ export function computeMcpOverviewInputSha256(parts: {
   readmeSha256: string | null;
   manifestFacts: McpManifestFacts;
   registryDescription: string | null;
+  instructions: string | null;
 }): string {
   return createHash("sha256").update(canonicalJson(parts)).digest("hex");
 }
@@ -869,6 +902,40 @@ function cleanLine(value: unknown, max: number): string {
 
 function normalizeDescription(value: string | null | undefined): string | null {
   return cleanLine(value, MCP_OVERVIEW_FACT_LIMITS.descriptionChars) || null;
+}
+
+/**
+ * The server's instructions as a bounded block of plain text: control and
+ * format characters removed, each line's whitespace collapsed, blank runs
+ * reduced to one, cut at the cap. Line breaks stay: instructions are often a
+ * list, and ./passages.ts numbers them item by item.
+ */
+function normalizeInstructions(
+  value: string | null | undefined,
+): string | null {
+  if (typeof value !== "string") return null;
+  const lines = value
+    .replace(/\r\n?/g, "\n")
+    .replace(
+      // eslint-disable-next-line no-control-regex -- strips control characters
+      /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]/g,
+      " ",
+    )
+    .split("\n")
+    .map((line) => line.replace(/[ \t\u00a0]+/g, " ").trim());
+  const text = lines
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  if (!text) return null;
+  const chars = Array.from(text);
+  const max = MCP_OVERVIEW_FACT_LIMITS.instructionsChars;
+  return chars.length <= max
+    ? text
+    : `${chars
+        .slice(0, max - 1)
+        .join("")
+        .trimEnd()}…`;
 }
 
 function normalizeSha256(value: string): string {

@@ -19,6 +19,7 @@ import type {
   SandboxOperationStore,
   SandboxProvider,
   SandboxProviderPathPolicy,
+  SandboxRef,
   SandboxRuntimeContext,
   SandboxRuntimeLimits,
   SandboxStore,
@@ -1190,4 +1191,351 @@ test("prepare carries the one-shot replacement notice when it runs on a fresh ge
   const replay = await harness.invoke([namedSelector]);
   assert.equal(replay.ok, true);
   assert.equal(replay.diagnostics, first.diagnostics);
+});
+
+// ── Provider-side container replacement mid-run (Issue #323 follow-up) ────
+
+import { SandboxProviderError, SANDBOX_PROVIDER_ERROR_CODES } from "../src";
+import { SANDBOX_RESTARTED_NOTICE } from "../src/runtime/errors";
+
+/**
+ * A sandbox store with real rows, so expiring the lost generation and
+ * acquiring its replacement are observable, plus a trusted host whose
+ * transfers refuse a replaced generation the way the Cloudflare adapter does
+ * (identity stamp missing behind a mkdir/download).
+ */
+function replaceableSandboxHarness(
+  options: {
+    /**
+     * Default (true): prepare's upload runs as a pinned operation in the real
+     * trusted host, which reports the loss itself and throws the manager's
+     * verdict. `false` throws the raw provider error instead, which is what
+     * collect's direct download does.
+     */
+    pinnedPrepare?: boolean;
+  } = {},
+) {
+  const pinnedPrepare = options.pinnedPrepare ?? true;
+  const rows: Array<{ id: string; providerSandboxId: string; status: string }> =
+    [];
+  let created = 0;
+  const lostIds = new Set<string>();
+  const uploads: string[] = [];
+  const writes: Array<{ path: string; content: string }> = [];
+  const operationStore = createOperationStore();
+  let current: SandboxRef | null = null;
+  const sandboxStore: SandboxStore = {
+    async findLatestActiveThreadSandbox() {
+      const row = [...rows]
+        .reverse()
+        .find((r) => r.status === "ready" || r.status === "creating");
+      return row
+        ? {
+            id: row.id,
+            provider: "fake",
+            providerSandboxId: row.providerSandboxId,
+            teamId: TEST_CONTEXT.teamId,
+            workspaceId: TEST_CONTEXT.workspaceId,
+            threadId: TEST_CONTEXT.threadId,
+            userId: TEST_CONTEXT.userId,
+            status: row.status as "ready" | "creating",
+            updatedAt: new Date(),
+            expiresAt: new Date(Date.now() + 3600_000),
+          }
+        : null;
+    },
+    async markCreatingSandboxError() {
+      return true;
+    },
+    async insertCreatingSandbox(input) {
+      rows.push({
+        id: input.sandboxId,
+        providerSandboxId: input.providerSandboxId,
+        status: "creating",
+      });
+      return true;
+    },
+    async markSandboxReady(input) {
+      const row = rows.find((r) => r.id === input.sandboxId)!;
+      row.status = "ready";
+      row.providerSandboxId = input.providerSandboxId;
+      return true;
+    },
+    async markSandboxExpired(input) {
+      const row = rows.find((r) => r.id === input.sandboxId);
+      if (!row || (input.expectedStatus && row.status !== input.expectedStatus))
+        return false;
+      row.status = "expired";
+      return true;
+    },
+    async releaseReadyThreadSandboxLease() {
+      return 0;
+    },
+    // The real store refuses to renew an expired row; that refusal is what
+    // used to surface as SANDBOX_INSTANCE_CHANGED on the lost-generation path.
+    async touchSandbox(input) {
+      return rows.find((r) => r.id === input.sandboxId)?.status === "ready";
+    },
+  };
+  const provider: SandboxProvider = {
+    id: "fake",
+    pathPolicy: TEST_SANDBOX_PATH_POLICY,
+    async createSandbox() {
+      created += 1;
+      return { id: `provider-sandbox-${created}` };
+    },
+    async getSandbox() {
+      return {};
+    },
+    async deleteSandbox() {},
+    async execute() {
+      return { output: "", exitCode: 0, truncated: false };
+    },
+    async uploadFile() {},
+    async ensureDirectory() {},
+    async downloadFile() {
+      return Buffer.from("");
+    },
+  };
+  const manager = new SandboxManager({
+    provider,
+    sandboxStore,
+    operationStore,
+    ttlSeconds: TEST_LIMITS.ttlSeconds,
+    maxCommandTimeoutMs: maxSandboxCommandTimeoutMs(TEST_LIMITS),
+  });
+  const lostError = (phase: string) =>
+    new SandboxProviderError(
+      SANDBOX_PROVIDER_ERROR_CODES.instanceMissing,
+      "SANDBOX_NOT_FOUND_OR_EXPIRED: sandbox identity stamp was not found.",
+      phase,
+    );
+  // The generation the host transfers address: whatever the manager handed
+  // out last (the tools acquire before they call the trusted host).
+  const originalGet = manager.getOrCreateThreadSandbox.bind(manager);
+  manager.getOrCreateThreadSandbox = async (context, options) => {
+    const sandbox = await originalGet(context, options);
+    current = sandbox;
+    return sandbox;
+  };
+  const tools = createSandboxTools({
+    filesystem: {
+      readRaw: async (path: string) =>
+        path === "/files/input.txt"
+          ? { data: { content: "input", mimeType: "text/plain" } }
+          : { error: "not found" },
+      write: async (path: string, content: string) => {
+        writes.push({ path, content });
+        return { path };
+      },
+    } as never,
+    manager,
+    context: TEST_CONTEXT,
+    limits: TEST_LIMITS,
+    trustedHost: {
+      async uploadCurrentFiles(files) {
+        if (current && lostIds.has(current.providerSandboxId)) {
+          const raw = lostError("mkdir");
+          if (!pinnedPrepare) throw raw;
+          // What runPinnedSandboxOperation throws: the verdict, after the
+          // loss has been reported (and the row expired) by the pinned path.
+          throw (
+            (await manager.reportLostGeneration(current, TEST_CONTEXT, raw)) ??
+            raw
+          );
+        }
+        uploads.push(...files.map((file) => file.path));
+      },
+      async downloadCurrentFile() {
+        if (current && lostIds.has(current.providerSandboxId)) {
+          throw lostError("download");
+        }
+        return Buffer.from("hello");
+      },
+    },
+  });
+  const invoke = async (name: string, args: unknown, id: string) => {
+    const tool = tools.find(
+      (candidate) => candidate.name === name,
+    )! as unknown as {
+      invoke(toolArgs: unknown, config: unknown): Promise<unknown>;
+    };
+    const result = await tool.invoke(
+      args,
+      agentToolInvocationConfig({
+        toolCall: { id, type: "tool_call" as const, name, args: {} },
+      }),
+    );
+    return JSON.parse(
+      String(
+        result && typeof result === "object" && "content" in result
+          ? result.content
+          : result,
+      ),
+    );
+  };
+  return {
+    rows,
+    created: () => created,
+    lostIds,
+    uploads,
+    writes,
+    operationStore,
+    invoke,
+    prepare: (id: string) =>
+      invoke(
+        "prepare_sandbox_workspace",
+        {
+          files: [
+            {
+              sourcePath: "/files/input.txt",
+              sandboxPath: "/workspace/input/input.txt",
+            },
+          ],
+        },
+        id,
+      ),
+    collect: (id: string) =>
+      invoke(
+        "collect_sandbox_outputs",
+        {
+          outputs: [
+            {
+              sandboxPath: "/workspace/output/report.md",
+              target: {
+                kind: "workfile",
+                path: "/files/report.md",
+                overwrite: true,
+              },
+            },
+          ],
+        },
+        id,
+      ),
+  };
+}
+
+test("prepare_sandbox_workspace on a container replaced after a successful command returns SANDBOX_REPLACED, completes its row and continues on the replacement", async () => {
+  const h = replaceableSandboxHarness();
+  const first = await h.prepare("prepare-1");
+  assert.equal(first.ok, true);
+  assert.equal(h.rows[0]?.providerSandboxId, "provider-sandbox-1");
+
+  // The SDK replaced the container between two commands.
+  h.lostIds.add("provider-sandbox-1");
+  const detecting = await h.prepare("prepare-2");
+  assert.equal(detecting.ok, false);
+  assert.equal(detecting.type, "sandbox_prepare_error");
+  assert.equal(detecting.code, "SANDBOX_REPLACED");
+  assert.equal(detecting.recoverable, true);
+  assert.match(
+    String(detecting.message),
+    /^SANDBOX_REPLACED: The sandbox container was replaced by the provider/u,
+  );
+  // Not the B1 fail-closed code, and no thrown error.
+  assert.doesNotMatch(JSON.stringify(detecting), /INSTANCE_CHANGED/u);
+  // The operation row left `running` with the rendered result, the lost
+  // row is expired and nothing was uploaded to the fresh container.
+  assert.deepEqual(h.operationStore.completed.at(-1), {
+    status: "succeeded",
+    result: detecting,
+  });
+  assert.equal(h.rows[0]?.status, "expired");
+  assert.equal(h.uploads.length, 1);
+
+  const next = await h.prepare("prepare-3");
+  assert.equal(next.ok, true);
+  assert.match(
+    String(next.diagnostics),
+    /^sandbox replaced\. The previous sandbox container was replaced by the provider mid-run/u,
+  );
+  assert.equal(
+    next.diagnostics,
+    `sandbox replaced. ${SANDBOX_RESTARTED_NOTICE}`,
+  );
+  assert.equal(h.created(), 2);
+  assert.equal(h.rows[1]?.status, "ready");
+  assert.equal(h.uploads.length, 2);
+  // The notice is one-shot.
+  const later = await h.prepare("prepare-4");
+  assert.equal(later.ok, true);
+  assert.equal(later.diagnostics, undefined);
+});
+
+test("collect_sandbox_outputs on a replaced container returns SANDBOX_REPLACED instead of a missing file, completes its row and collects from the replacement", async () => {
+  const h = replaceableSandboxHarness();
+  const first = await h.collect("collect-1");
+  assert.equal(first.ok, true);
+  assert.equal(h.writes.length, 1);
+
+  h.lostIds.add("provider-sandbox-1");
+  const detecting = await h.collect("collect-2");
+  assert.equal(detecting.ok, false);
+  assert.equal(detecting.type, "sandbox_collect_error");
+  assert.equal(detecting.code, "SANDBOX_REPLACED");
+  assert.equal(detecting.recoverable, true);
+  assert.doesNotMatch(String(detecting.message), /FILE_NOT_FOUND|ENOENT/u);
+  assert.deepEqual(h.operationStore.completed.at(-1), {
+    status: "succeeded",
+    result: detecting,
+  });
+  assert.equal(h.rows[0]?.status, "expired");
+  assert.equal(h.writes.length, 1);
+
+  const next = await h.collect("collect-3");
+  assert.equal(next.ok, true);
+  assert.equal(
+    next.diagnostics,
+    `sandbox replaced. ${SANDBOX_RESTARTED_NOTICE}`,
+  );
+  assert.equal(h.created(), 2);
+  assert.equal(h.writes.length, 2);
+});
+
+test("prepare_sandbox_workspace past the per-turn replacement limit fails closed with a recorded failed operation", async () => {
+  const h = replaceableSandboxHarness();
+  assert.equal((await h.prepare("limit-0")).ok, true);
+  for (let loss = 1; loss <= 2; loss += 1) {
+    h.lostIds.add(`provider-sandbox-${loss}`);
+    assert.equal(
+      (await h.prepare(`limit-lost-${loss}`)).code,
+      "SANDBOX_REPLACED",
+    );
+    assert.equal((await h.prepare(`limit-ok-${loss}`)).ok, true);
+  }
+  h.lostIds.add("provider-sandbox-3");
+  await assert.rejects(
+    h.prepare("limit-lost-3"),
+    (error: unknown) =>
+      (error as { code?: string }).code === "SANDBOX_INSTANCE_CHANGED" &&
+      /replaced by the provider again/u.test((error as Error).message),
+  );
+  assert.deepEqual(h.operationStore.completed.at(-1)?.status, "failed");
+  assert.equal(
+    h.operationStore.completed.at(-1)?.result?.errorCode,
+    "SANDBOX_INSTANCE_CHANGED",
+  );
+  assert.equal(h.created(), 3);
+  assert.equal(h.rows[2]?.status, "expired");
+});
+
+test("prepare_sandbox_workspace handles the raw provider error the same way as the pinned verdict", async () => {
+  const h = replaceableSandboxHarness({ pinnedPrepare: false });
+  assert.equal((await h.prepare("raw-1")).ok, true);
+  h.lostIds.add("provider-sandbox-1");
+  const detecting = await h.prepare("raw-2");
+  assert.equal(detecting.code, "SANDBOX_REPLACED");
+  assert.equal(detecting.recoverable, true);
+  assert.deepEqual(h.operationStore.completed.at(-1), {
+    status: "succeeded",
+    result: detecting,
+  });
+  assert.equal(h.rows[0]?.status, "expired");
+  const next = await h.prepare("raw-3");
+  assert.equal(next.ok, true);
+  assert.equal(
+    next.diagnostics,
+    `sandbox replaced. ${SANDBOX_RESTARTED_NOTICE}`,
+  );
+  assert.equal(h.created(), 2);
 });
